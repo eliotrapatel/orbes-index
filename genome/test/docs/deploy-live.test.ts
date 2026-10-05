@@ -41,7 +41,8 @@ const START_SUBJECT = "P-BC: the context test expects the salon service among cr
 const NAMES = Object.keys(MIGRATIONS);
 const numberOf = (name: string): number => Number(name.slice(0, 4));
 const START_MIGRATIONS = NAMES.filter((n) => numberOf(n) <= 20);
-const DEPLOY_D = NAMES.filter((n) => numberOf(n) > 20);
+/** Deployment D applied 0021 alone; 0022 on belong to the next lot (LIVE RELEASE+). */
+const DEPLOY_D = NAMES.filter((n) => numberOf(n) === 21);
 /** The last version the legal pages published before D: B+C's (rule 7 of DEPLOY-POTENTIEL-2026-10.md). */
 const LAST_PUBLISHED_VERSION = '2026-10-05';
 
@@ -133,7 +134,8 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
     expect(runbook).toContain(`(previous: ${START_TAG}). This release applied the migration(s) ${DEPLOY_D.join(', ')}:`);
     expect(runbook).toContain(`deploy <TAG_D> OK (previous ${START_TAG}; migrations ${DEPLOY_D.join(', ')})`);
     expect(runbook).toContain(`orbes-genome:${START_TAG} cannot run on this schema any more`);
-    expect(runbook).toContain(`les ${NAMES.length} lignes \`applied\`, de \`${NAMES[0]}\` à \`${NAMES.at(-1)}\``);
+    const afterD = [...START_MIGRATIONS, ...DEPLOY_D];
+    expect(runbook).toContain(`les ${afterD.length} lignes \`applied\`, de \`${afterD[0]}\` à \`${afterD.at(-1)}\``);
   });
 
   it('expects from the scripts and the app only messages they print', () => {

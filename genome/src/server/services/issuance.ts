@@ -61,6 +61,8 @@ import { noopLogger, systemClock, type Actor, type Clock, type Logger } from '..
 import type { AuditService } from './audit.js';
 import type { CategoryRegistry } from './categories.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
+import { productPayload, writeJournal } from './journal.js';
+import { deriveSku, ensureSku } from './stock.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -305,19 +307,8 @@ export function normalizeAuthPolicy(policy: string | undefined): string {
   return kinds.join('+');
 }
 
-/** SKU when none is given: the model's prefix plus the variant, e.g. MNL-RG-52. */
-export function deriveSku(skuPrefix: string, variant: string | undefined): string {
-  const prefix = skuPrefix.trim().toUpperCase();
-  if (!variant) return prefix.slice(0, 64);
-  const slug = variant
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 24);
-  return (slug ? `${prefix}-${slug}` : prefix).slice(0, 64);
-}
+/** SKU when none is given: the model's prefix plus the variant, e.g. MNL-RG-52 (services/stock.ts, where the SKUs are). */
+export { deriveSku };
 
 // ── Internal errors ────────────────────────────────────────────────────────
 
@@ -746,20 +737,14 @@ export class IssuanceService {
     if (!live.category_active) throw categoryInactive();
     if (!live.model_active) throw modelInactive();
     await this.lockSigner(trx, signer);
+    // Its SKU (migration 0022): the model in the piece's variant, created on first use; before the serials' lock, which
+    // an order reserving an identity takes after its SKU (orders.ts), so neither waits for the other.
+    const skuId = await ensureSku(trx, p.modelId, p.variant);
 
     // Per (year, category) lock: max+1 is then race-free; the UNIQUE constraint remains the backstop.
-    await advisoryXactLock(trx, ADVISORY_LOCK.SERIAL_ALLOCATION, (year - 2000) * 32 + categoryIndex);
     let serial = p.serial;
-    if (serial === undefined) {
-      const row = await trx
-        .selectFrom('products')
-        .select((eb) => eb.fn.max('serial').as('max'))
-        .where('year', '=', year)
-        .where('category_id', '=', categoryIndex)
-        .executeTakeFirst();
-      serial = Number(row?.max ?? 0) + 1;
-      if (serial > SERIAL_MAX) throw conflict('SERIALS_EXHAUSTED', 'No serial numbers are left for this year and category.');
-    }
+    if (serial === undefined) serial = await allocateSerial(trx, year, categoryIndex);
+    else await advisoryXactLock(trx, ADVISORY_LOCK.SERIAL_ALLOCATION, serialLockKey(year, categoryIndex));
     const identity: ProductIdentity = { year, categoryIndex, serial };
     const packed = packIdentity(identity);
     const productId = formatProductId(identity, this.categories.resolver());
@@ -783,6 +768,7 @@ export class IssuanceService {
         ownership_state: 'UNREGISTERED',
         auth_policy: a.authPolicy,
         claim_secret_hash: a.claimHash,
+        sku_id: skuId,
         created_at: now,
         updated_at: now,
       })
@@ -831,6 +817,8 @@ export class IssuanceService {
       .insertInto('warranties')
       .values({ product_id: productRow.id, duration_months: a.warrantyMonths, created_at: now, updated_at: now })
       .execute();
+    // The event journal (plan LIVE RELEASE+, N1): every piece's change, its issue first.
+    await writeJournal(trx, [{ type: 'product.issue', entityType: 'product', entityId: productRow.id, payload: productPayload(productRow, now) }], now);
 
     await this.audit.record(
       {
@@ -1090,6 +1078,131 @@ function errorFields(e: unknown): Record<string, unknown> {
     message: typeof x?.message === 'string' ? x.message.slice(0, 500) : String(e).slice(0, 500),
     ...(typeof x?.code === 'string' ? { code: x.code } : {}),
   };
+}
+
+// ── Reserved identities (plan LIVE RELEASE+, L6) ──────────────────────────
+
+/** The advisory lock of the serials of a year and category: max+1 is race-free under it. */
+const serialLockKey = (year: number, categoryIndex: number): number => (year - 2000) * 32 + categoryIndex;
+
+/** The next serial of a year and category (max+1, never one used before), under their advisory lock. */
+async function allocateSerial(trx: Db, year: number, categoryIndex: number): Promise<number> {
+  await advisoryXactLock(trx, ADVISORY_LOCK.SERIAL_ALLOCATION, serialLockKey(year, categoryIndex));
+  const row = await trx
+    .selectFrom('products')
+    .select((eb) => eb.fn.max('serial').as('max'))
+    .where('year', '=', year)
+    .where('category_id', '=', categoryIndex)
+    .executeTakeFirst();
+  const serial = Number(row?.max ?? 0) + 1;
+  if (serial > SERIAL_MAX) throw conflict('SERIALS_EXHAUSTED', 'No serial numbers are left for this year and category.');
+  return serial;
+}
+
+/** The material a reserved identity carries when its model names none: the atelier confirms it when it issues the piece. */
+export const RESERVED_MATERIAL_PENDING = 'TO BE CONFIRMED';
+
+/**
+ * Reserve the ORBES identity of a piece to make (L6), in the caller's transaction: the next serial of the year and of
+ * the model's category, taken as an issue takes it (never reused), the product RESERVED (unregistered, no claim code)
+ * in its SKU and size, with the model's material (RESERVED_MATERIAL_PENDING when it names none), its genome and its
+ * warranty, not started. No code is signed and nothing is written in the status history: /verify answers the identity
+ * as unknown until the atelier issues the piece (its history then starts, null → ISSUED). Journaled `product.reserve`.
+ */
+export async function reserveIdentity(
+  trx: Db,
+  input: { modelId: string; skuId: string; sizeLabel: string | null },
+  now: Date,
+): Promise<{ id: string; productId: string }> {
+  if (!trx.isTransaction) throw new Error('reserveIdentity must run inside a transaction');
+  const model = await trx
+    .selectFrom('models as m')
+    .innerJoin('categories as c', 'c.id', 'm.category_id')
+    .select(['m.category_id', 'm.default_material', 'c.code', 'c.warranty_months'])
+    .where('m.id', '=', input.modelId)
+    .executeTakeFirst();
+  if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
+  const sku = await trx.selectFrom('skus').select(['code']).where('id', '=', input.skuId).where('model_id', '=', input.modelId).executeTakeFirst();
+  if (!sku) throw notFound('SKU', 'SKU_NOT_FOUND');
+  const material =
+    model.default_material?.trim() ||
+    (
+      await trx
+        .selectFrom('products')
+        .select('material')
+        .where('model_id', '=', input.modelId)
+        .where('status', '!=', 'RESERVED')
+        .orderBy('created_at', 'desc')
+        .limit(1)
+        .executeTakeFirst()
+    )?.material ||
+    RESERVED_MATERIAL_PENDING;
+  const year = now.getUTCFullYear();
+  const categoryIndex = model.category_id;
+  const serial = await allocateSerial(trx, year, categoryIndex);
+  const identity: ProductIdentity = { year, categoryIndex, serial };
+  const packed = packIdentity(identity);
+  const code = model.code.trim();
+  const productId = formatProductId(identity, { byIndex: (i) => (i === categoryIndex ? { code, index: i, name: code } : undefined), byCode: () => undefined });
+  const row = await trx
+    .insertInto('products')
+    .values({
+      product_id: productId,
+      packed_identity: packed,
+      year,
+      category_id: categoryIndex,
+      serial,
+      sku: sku.code,
+      model_id: input.modelId,
+      variant: input.sizeLabel,
+      material,
+      status: 'RESERVED',
+      ownership_state: 'UNREGISTERED',
+      sku_id: input.skuId,
+      created_at: now,
+      updated_at: now,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  const genome = computeGenome(packed, GENOME_VERSION);
+  await trx
+    .insertInto('genomes')
+    .values({
+      product_id: row.id,
+      genome_version: genome.version,
+      genome_id: productId,
+      value: genome.value,
+      glyphs: genome.glyphs,
+      pattern: genome.ids.join('·'),
+      fingerprint: genome.fingerprint,
+      created_at: now,
+    })
+    .execute();
+  await trx.insertInto('warranties').values({ product_id: row.id, duration_months: model.warranty_months, created_at: now, updated_at: now }).execute();
+  await writeJournal(trx, [{ type: 'product.reserve', entityType: 'product', entityId: row.id, payload: productPayload(row, now) }], now);
+  return { id: row.id, productId };
+}
+
+/**
+ * Retire a RESERVED identity whose piece will not be made (its order cancelled), in the caller's transaction: RETIRED
+ * for good, its serial never reused; its status history starts there (null → RETIRED, with the reason). Journaled
+ * `product.retire`. A piece no longer RESERVED (issued meanwhile) is left as it is: false.
+ */
+export async function retireReservedIdentity(trx: Db, productUuid: string, reason: string, actor: Actor, now: Date): Promise<boolean> {
+  const row = await trx
+    .updateTable('products')
+    .set({ status: 'RETIRED', updated_at: now })
+    .where('id', '=', productUuid)
+    .where('status', '=', 'RESERVED')
+    .returningAll()
+    .executeTakeFirst();
+  if (!row) return false;
+  await trx
+    .insertInto('product_status_history')
+    .values({ product_id: row.id, from_status: null, to_status: 'RETIRED', reason, actor_type: actor.type, actor_id: actor.id ?? null, created_at: now })
+    .execute();
+  await writeJournal(trx, [{ type: 'product.retire', entityType: 'product', entityId: row.id, payload: productPayload(row, now) }], now);
+  return true;
 }
 
 function sha256(b: Uint8Array): Uint8Array {

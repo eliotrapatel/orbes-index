@@ -13,7 +13,7 @@
  *    tier, size, pieces, status and deadline, the gesture's length), or every entry of one status, page by page; LET IN
  *    a QUEUED one and FREE a hold (OPERATOR), REMOVE an open one (ADMIN).
  *  - Client Services: the confirmed reservations, their reference, size, add-ons and total; CONCLUDED or CANCELLED with
- *    a note (OPERATOR); the CSV.
+ *    a note (OPERATOR), which pays or cancels the reservation's orders (plan LIVE RELEASE+); the CSV.
  *  - The intelligence (views/live-intelligence.ts), each reading with how it is read: the live alerts and the live
  *    sell-out forecast on the live board (its stream keeps them current); the readings of the release's stage under the
  *    board: the release planner and the audience forecast before the announcement, the forecast and the demand radar
@@ -461,8 +461,8 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         'p',
         { class: 'dialog__text' },
         to === 'CONCLUDED'
-          ? 'ORBES Client Services concluded the payment and the delivery with this collector: the reservation reads CONCLUDED.'
-          : 'The reservation is cancelled by ORBES Client Services: it reads CANCELLED. The piece does not return to the line (the release closed at its sell-out).',
+          ? 'ORBES Client Services received the payment of this collector: the reservation reads CONCLUDED, and its orders are paid.'
+          : 'The reservation is cancelled by ORBES Client Services: it reads CANCELLED, its orders are cancelled and what they hold is released. The piece does not return to the line (the release closed at its sell-out).',
       ),
       fields: [{ name: 'note', label: 'Note', kind: 'textarea', maxlength: LIVE_LIMITS.note, hint: 'For ORBES Client Services: kept with the reservation, never in the audit log. Optional.' }],
       confirmLabel: to === 'CONCLUDED' ? 'Concluded' : 'Cancel the reservation',

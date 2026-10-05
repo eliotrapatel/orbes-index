@@ -68,8 +68,9 @@ describe('schema', () => {
     const cases: [string, string, readonly string[]][] = [
       ['products', 'status', S.PRODUCT_STATUSES],
       ['products', 'ownership_state', S.OWNERSHIP_STATES],
-      ['product_status_history', 'from_status', S.PRODUCT_STATUSES],
-      ['product_status_history', 'to_status', S.PRODUCT_STATUSES],
+      // RESERVED (migration 0022) is never written in the history: an identity's lifecycle starts when it is issued.
+      ['product_status_history', 'from_status', S.PRODUCT_HISTORY_STATUSES],
+      ['product_status_history', 'to_status', S.PRODUCT_HISTORY_STATUSES],
       ['product_status_history', 'actor_type', ACTOR_TYPES],
       ['cryptographic_keys', 'status', S.KEY_STATUSES],
       ['codes', 'status', S.CODE_STATUSES],
@@ -103,6 +104,17 @@ describe('schema', () => {
       ['drops', 'ended_reason', S.LIVE_END_REASONS],
       ['live_entries', 'status', S.LIVE_ENTRY_STATUSES],
       ['live_entries', 'resolution', S.LIVE_RESOLUTIONS],
+      ['shop_requests', 'outcome', S.SHOP_REQUEST_OUTCOMES],
+      ['orders', 'channel', S.ORDER_CHANNELS],
+      ['orders', 'status', S.ORDER_STATUSES],
+      ['orders', 'reservation', S.ORDER_RESERVATIONS],
+      ['order_events', 'status', S.ORDER_STATUSES],
+      ['order_events', 'actor_type', ACTOR_TYPES],
+      ['stock_movements', 'reason', S.STOCK_MOVEMENT_REASONS],
+      ['stock_movements', 'actor_type', ACTOR_TYPES],
+      ['bench_items', 'status', S.BENCH_ITEM_STATUSES],
+      ['returns', 'outcome', S.RETURN_OUTCOMES],
+      ['invoices', 'kind', S.INVOICE_KINDS],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));

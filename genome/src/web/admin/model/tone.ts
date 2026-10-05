@@ -13,6 +13,7 @@
 export type Tone = 'solid' | 'outline' | 'muted' | 'alert' | 'critical';
 
 const PRODUCT: Record<string, Tone> = {
+  RESERVED: 'outline',
   ISSUED: 'outline',
   ACTIVATED: 'solid',
   REGISTERED: 'solid',

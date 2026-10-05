@@ -676,6 +676,15 @@ describe('LIVE RELEASES: the console', () => {
         { entryId: eb.id, resolution: 'CANCELLED' },
       ]);
       expect(JSON.stringify(resolves)).not.toContain('Paid by transfer');
+      // The resolution is carried by the reservations' orders (plan LIVE RELEASE+): one per piece, CONCLUDED paid,
+      // CANCELLED cancelled, each step with Client Services' note.
+      const ordersOf = (entryId: string) =>
+        h.ctx.db.selectFrom('orders as o').leftJoin('order_events as e', (j) => j.onRef('e.order_id', '=', 'o.id').on('e.action', '!=', 'order.create')).select(['o.piece', 'o.status', 'e.action', 'e.note']).where('o.live_entry_id', '=', entryId).orderBy('o.piece').execute();
+      expect(await ordersOf(ea.id)).toEqual([
+        { piece: 1, status: 'PAID', action: 'order.pay', note: 'Paid by transfer; delivered in Paris.' },
+        { piece: 2, status: 'PAID', action: 'order.pay', note: 'Paid by transfer; delivered in Paris.' },
+      ]);
+      expect(await ordersOf(eb.id)).toEqual([{ piece: 1, status: 'CANCELLED', action: 'order.cancel', note: 'Cancelled by ORBES Client Services.' }]);
       // A cancellation gives no piece back to the line.
       expect((await f.live.entry(b.id, r.id))!.status).toBe('CONFIRMED');
       const other = await customer(0);

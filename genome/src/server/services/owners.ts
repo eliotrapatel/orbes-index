@@ -31,7 +31,10 @@
  *            their tokens), its entries in the drops (P-R03), its answers to
  *            the circle's invitations and its votes in its polls (P-X01), its
  *            requests of the private salon (P-X08), its entries in the LIVE
- *            RELEASES with their add-ons and its interest in them, and every audit entry that names it, as target or as actor. Audited
+ *            RELEASES with their add-ons and its interest in them, its orders
+ *            with their steps, the buyer's name and address Client Services
+ *            entered and the engraving text (plan LIVE RELEASE+), and every
+ *            audit entry that names it, as target or as actor. Audited
  *            `account.export` with counts only.
  *
  * The one-time recovery code of the sheet is AccountRecoveryService's (C-04),
@@ -58,6 +61,7 @@ import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote }
 import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
+import { accountOrders, type ExportedOrder } from './orders.js';
 import type { OwnershipService } from './ownership.js';
 import { accountShopRequests, auditClosedShopRequests, closeAccountShopRequests, type ExportedShopRequest } from './salon.js';
 import { accountCertificates, auditWithdrawnCertificates, withdrawAccountCertificates, type AccountCertificate } from './ownership-certificates.js';
@@ -283,6 +287,12 @@ export interface AccountExport {
   liveEntries: ExportedLiveEntry[];
   /** The account's interest in the LIVE RELEASES (I'LL BE THERE), oldest first: the release, the size, since when. */
   liveInterest: ExportedLiveInterest[];
+  /**
+   * The account's orders (plan LIVE RELEASE+), oldest first: the channel and release, the model, size, price and
+   * add-ons, the engraving text, the buyer's name and address ORBES Client Services entered, each step with its time and
+   * note, the carrier and the tracking number; never who handled it, nor where the piece is kept.
+   */
+  orders: ExportedOrder[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
@@ -562,6 +572,7 @@ export class OwnerService {
       const circle = await accountCircleData(tx, a.id);
       const shopRequests = await accountShopRequests(tx, a.id);
       const live = await accountLiveData(tx, a.id);
+      const orders = await accountOrders(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -640,6 +651,7 @@ export class OwnerService {
         shopRequests,
         liveEntries: live.entries,
         liveInterest: live.interest,
+        orders,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -671,6 +683,7 @@ export class OwnerService {
             shopRequests: out.shopRequests.length,
             liveEntries: out.liveEntries.length,
             liveInterest: out.liveInterest.length,
+            orders: out.orders.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

@@ -456,7 +456,12 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     const confirmed = safeJson(await operator.post(`${adminUrl(d.id)}/entries/${first!.id}/confirm`, { note: 'Sold in the Paris boutique.' })) as AdminEntryJson;
     expect(confirmed).toMatchObject({ status: 'CONFIRMED', note: 'Sold in the Paris boutique.', handledAt: h.clock.now().toISOString() });
     expect(confirmed.handledBy?.email).toMatch(/^operator-/);
-    expect((await audits('drop.entry.confirm', d.id))[0]!.details).toEqual({ entryId: first!.id, rank: 1, noted: true });
+    // The sale committed, its order is created in the same transaction (plan LIVE RELEASE+): RESERVED at the drop's
+    // location (the default one), its size and price for Client Services to enter.
+    const [order] = await h.ctx.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', first!.id).execute();
+    expect(order).toMatchObject({ channel: 'DRAW', drop_id: d.id, account_id: first!.accountId, status: 'RESERVED', sku_id: null, price_minor: null, reservation: null });
+    expect((await audits('drop.entry.confirm', d.id))[0]!.details).toEqual({ entryId: first!.id, rank: 1, noted: true, orderId: order!.id });
+    expect((await audits('order.create', order!.id))[0]!.details).toMatchObject({ channel: 'DRAW', dropEntryId: first!.id, dropId: d.id, to: 'RESERVED' });
     const early = await operator.post(`${adminUrl(d.id)}/entries/${second!.id}/lapse`);
     expect([early.statusCode, errorOf(early).code]).toEqual([409, 'DROP_PLACE_HELD']);
     expect(errorOf(await operator.post(`${adminUrl(d.id)}/offer-next`)).code).toBe('DROP_FULL');

@@ -1,7 +1,8 @@
 /**
  * Fixtures of the LIVE RELEASES' tests (services/live.ts): accounts, the pieces they hold (their tier in the club),
  * models and collections, and a LIVE release made as the console makes one: a drop with its sealed seed
- * (DropService.create), then its LIVE settings, sizes, add-ons, per-tier windows and access rule, published.
+ * (DropService.create), then its LIVE settings, sizes, add-ons, per-tier windows and access rule, published; the stock
+ * locations of the first boot, where a confirmed entry's orders go.
  */
 import { randomUUID } from 'node:crypto';
 import { packIdentity } from '../../src/core/identity.js';
@@ -10,7 +11,8 @@ import type { Db } from '../../src/server/db/connection.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { deriveDropSeedKey, DropService } from '../../src/server/services/drops.js';
 import { deriveLiveTurnKey, LiveService } from '../../src/server/services/live.js';
-import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
+import { ensureStockSetup } from '../../src/server/services/stock.js';
+import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 
 export interface LiveFixture {
   db: Db;
@@ -41,6 +43,8 @@ export async function liveFixture(db: Db, start: string): Promise<LiveFixture> {
   const email = `live-admin-${randomUUID()}@orbes.test`;
   const adminId = (await db.insertInto('admin_users').values({ email, email_normalized: email, password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow()).id;
   const modelId = await createModel(db, 'MONOLITHE');
+  // The locations of the first boot (createContext's OrderService.prepare): a confirmed entry's orders go there.
+  await ensureStockSetup(db, audit, SYSTEM_ACTOR, clock.now());
   return { db, clock, audit, drops, live, seedKey, turnKey, admin: { type: 'admin', id: adminId }, modelId };
 }
 

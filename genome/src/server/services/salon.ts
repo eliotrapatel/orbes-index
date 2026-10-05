@@ -21,24 +21,28 @@
  *            tab, OPEN first, then the newest; emails masked for an AUDITOR by
  *            the routes (serialize.ts `clientEmail`).
  *   close    POST /api/admin/club/requests/:id/close (OPERATOR): CLOSED with a
- *            note (what was done), audited `shop.request.close` (never the
- *            note: it may name the client).
+ *            note (what was done) and its outcome: ACCEPTED, the sale
+ *            concluded, creates its order in the same transaction (services/
+ *            orders.ts orderForShopRequest, plan LIVE RELEASE+), or DECLINED.
+ *            Audited `shop.request.close` with the outcome (never the note: it
+ *            may name the client).
  *
  * The lock of an account closes its open requests in the lock's transaction
- * (OwnerService.lock: closeAccountShopRequests, then auditClosedShopRequests
- * after the audit chain's lock), and the right of access exports every one
- * (accountShopRequests). The tier is read again at each request (services/
- * club.ts tierOf): the access goes with the pieces.
+ * (OwnerService.lock: closeAccountShopRequests, DECLINED, then
+ * auditClosedShopRequests after the audit chain's lock), and the right of
+ * access exports every one (accountShopRequests). The tier is read again at
+ * each request (services/club.ts tierOf): the access goes with the pieces.
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import { SHOP_REQUEST_STATUSES, type ShopRequestStatus } from '../db/schema.js';
+import { SHOP_REQUEST_OUTCOMES, SHOP_REQUEST_STATUSES, type ShopRequestOutcome, type ShopRequestStatus } from '../db/schema.js';
 import { DomainError, conflict, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
 import { ownersOnly, type ClubService } from './club.js';
 import type { LookbookService, LookbookSheet, SalonCard, SalonFacts } from './lookbook.js';
+import { orderForShopRequest } from './orders.js';
 
 /** The account's note on a request (shop_requests.note): at most this many characters once trimmed. */
 export const SHOP_NOTE_MAX = 500;
@@ -93,6 +97,8 @@ export interface AdminShopRequest {
   handledAt: Date | null;
   /** What was done (the console's note); null while open, or closed with a lock. */
   resolutionNote: string | null;
+  /** ACCEPTED (its order created) or DECLINED once closed; null while open, or closed before the orders (migration 0022). */
+  outcome: ShopRequestOutcome | null;
 }
 
 export interface ShopRequestFilters {
@@ -109,6 +115,7 @@ export interface ExportedShopRequest {
   requestedAt: Date;
   handledAt: Date | null;
   resolutionNote: string | null;
+  outcome: ShopRequestOutcome | null;
 }
 
 /** A request a lock closed, for its audit entry. */
@@ -129,14 +136,14 @@ function adminIdOf(actor: Actor): string | null {
 
 /**
  * Close the open requests of an account in the transaction of its lock (OwnerService.lock), whose row lock on the
- * account is already held: CLOSED now, by the lock's ADMIN, without a note. Returns them for their audit entries,
- * written after the lock's row locks (auditClosedShopRequests).
+ * account is already held: CLOSED now, DECLINED (no sale follows), by the lock's ADMIN, without a note. Returns them
+ * for their audit entries, written after the lock's row locks (auditClosedShopRequests).
  */
 export async function closeAccountShopRequests(tx: Db, accountId: string, actor: Actor, now: Date): Promise<ClosedShopRequest[]> {
   assertAccount(accountId);
   const rows = await tx
     .updateTable('shop_requests')
-    .set({ status: 'CLOSED', handled_by: adminIdOf(actor), handled_at: sql<Date>`greatest(${now}::timestamptz, created_at)` })
+    .set({ status: 'CLOSED', outcome: 'DECLINED', handled_by: adminIdOf(actor), handled_at: sql<Date>`greatest(${now}::timestamptz, created_at)` })
     .where('account_id', '=', accountId.toLowerCase())
     .where('status', '=', 'OPEN')
     .returning(['id', 'model_id'])
@@ -147,7 +154,7 @@ export async function closeAccountShopRequests(tx: Db, accountId: string, actor:
 /** One `shop.request.close` entry per request a lock closed, by the lock's ADMIN, with its reason. */
 export async function auditClosedShopRequests(audit: AuditService, tx: Db, actor: Actor, closed: readonly ClosedShopRequest[], reason: 'account_locked'): Promise<void> {
   for (const r of closed) {
-    await audit.record({ actor, action: 'shop.request.close', targetType: 'shop_request', targetId: r.requestId, details: { modelId: r.modelId, reason } }, tx);
+    await audit.record({ actor, action: 'shop.request.close', targetType: 'shop_request', targetId: r.requestId, details: { modelId: r.modelId, outcome: 'DECLINED', reason } }, tx);
   }
 }
 
@@ -157,7 +164,7 @@ export async function accountShopRequests(db: Db, accountId: string): Promise<Ex
   const rows = await db
     .selectFrom('shop_requests as r')
     .innerJoin('models as m', 'm.id', 'r.model_id')
-    .select(['r.id', 'r.model_id', 'm.name', 'r.note', 'r.status', 'r.created_at', 'r.handled_at', 'r.resolution_note'])
+    .select(['r.id', 'r.model_id', 'm.name', 'r.note', 'r.status', 'r.created_at', 'r.handled_at', 'r.resolution_note', 'r.outcome'])
     .where('r.account_id', '=', accountId.toLowerCase())
     .orderBy('r.created_at')
     .orderBy('r.id')
@@ -171,6 +178,7 @@ export async function accountShopRequests(db: Db, accountId: string): Promise<Ex
     requestedAt: r.created_at,
     handledAt: r.handled_at,
     resolutionNote: r.resolution_note,
+    outcome: r.outcome,
   }));
 }
 
@@ -298,13 +306,16 @@ export class SalonService {
 
   /**
    * Close a request with a note (POST /api/admin/club/requests/:id/close, OPERATOR): what was done for the client, or
-   * why nothing was. 409 SHOP_REQUEST_CLOSED when it already is. Audited `shop.request.close` with the model.
+   * why nothing was, and its outcome: ACCEPTED, the sale concluded, creates the request's order in the same transaction
+   * (services/orders.ts orderForShopRequest: RESERVED, its size and price to be entered), or DECLINED. 409
+   * SHOP_REQUEST_CLOSED when it already is. Audited `shop.request.close` with the model and the outcome.
    */
-  async close(id: string, note: unknown, actor: Actor): Promise<AdminShopRequest> {
+  async close(id: string, input: { note: unknown; outcome: ShopRequestOutcome }, actor: Actor): Promise<AdminShopRequest> {
     const by = adminIdOf(actor);
     if (by === null) throw forbidden('Only an ORBES admin closes a request.');
-    const words = cleanText(note, SHOP_RESOLUTION_MAX, 'The note');
+    const words = cleanText(input?.note, SHOP_RESOLUTION_MAX, 'The note');
     if (words === null) throw validationError('Say in the note what was done for the client.');
+    if (!(SHOP_REQUEST_OUTCOMES as readonly string[]).includes(input.outcome)) throw validationError('Say whether the request is ACCEPTED or DECLINED.');
     if (typeof id !== 'string' || !UUID_RE.test(id)) throw shopRequestNotFound();
     const requestId = id.toLowerCase();
     await inTransaction(this.db, async (tx) => {
@@ -313,8 +324,15 @@ export class SalonService {
       if (row.status === 'CLOSED') throw conflict('SHOP_REQUEST_CLOSED', 'This request is already closed.');
       const now = this.clock();
       const at = now.getTime() < row.created_at.getTime() ? row.created_at : now;
-      await tx.updateTable('shop_requests').set({ status: 'CLOSED', handled_by: by, handled_at: at, resolution_note: words }).where('id', '=', requestId).execute();
-      await this.audit.record({ actor, action: 'shop.request.close', targetType: 'shop_request', targetId: requestId, details: { modelId: row.model_id } }, tx);
+      await tx
+        .updateTable('shop_requests')
+        .set({ status: 'CLOSED', outcome: input.outcome, handled_by: by, handled_at: at, resolution_note: words })
+        .where('id', '=', requestId)
+        .execute();
+      const order = input.outcome === 'ACCEPTED' ? await orderForShopRequest(tx, requestId, actor, at) : { order: null, notes: [] };
+      const orderId = order.order ? { orderId: order.order.id } : {};
+      await this.audit.record({ actor, action: 'shop.request.close', targetType: 'shop_request', targetId: requestId, details: { modelId: row.model_id, outcome: input.outcome, ...orderId } }, tx);
+      for (const n of order.notes) await this.audit.record(n, tx);
     });
     return this.get(requestId);
   }
@@ -333,6 +351,7 @@ export class SalonService {
         'r.note',
         'r.handled_at',
         'r.resolution_note',
+        'r.outcome',
         'a.id as account_id',
         'a.email as account_email',
         'm.id as model_id',
@@ -353,6 +372,7 @@ type AdminRequestRow = {
   note: string | null;
   handled_at: Date | null;
   resolution_note: string | null;
+  outcome: ShopRequestOutcome | null;
   account_id: string;
   account_email: string;
   model_id: string;
@@ -375,5 +395,6 @@ function toAdminRequest(r: AdminRequestRow): AdminShopRequest {
     handledBy: r.handled_by_id ? { id: r.handled_by_id, email: r.handled_by_email ?? '' } : null,
     handledAt: r.handled_at,
     resolutionNote: r.resolution_note,
+    outcome: r.outcome,
   };
 }

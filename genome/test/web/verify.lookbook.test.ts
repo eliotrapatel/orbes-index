@@ -21,7 +21,8 @@ import {
 } from '../../src/server/services/lookbook.js';
 import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../../src/server/services/salon.js';
 import { CLUB_TIER_NAMES as SERVER_TIER_NAMES } from '../../src/server/db/schema.js';
-import { canCloseRequest, closeRequestProblem, requestModelLine, SHOP_REQUEST_LIMITS, shopRequestStatusOf } from '../../src/web/admin/model/club.js';
+import { canCloseRequest, closeRequestProblem, requestModelLine, SHOP_REQUEST_LIMITS, SHOP_REQUEST_OUTCOME_OPTIONS, shopRequestStatusOf } from '../../src/web/admin/model/club.js';
+import { SHOP_REQUEST_OUTCOMES } from '../../src/web/admin/types.js';
 import { GALLERY_ALT_MAX as SERVER_GALLERY_ALT_MAX, GALLERY_MAX as SERVER_GALLERY_MAX } from '../../src/server/services/media.js';
 import { DomainError } from '../../src/server/errors.js';
 import {
@@ -236,13 +237,18 @@ describe('the private salon in the console (P-X08)', () => {
     expect(salonImpact({ lookbook: 'PUBLIC' })).toMatch(/a Public model shows no price\.$/);
   });
 
-  it('the Requests tab: its status filter, who closes a request, the note it needs, a request\'s model line', () => {
+  it('the Requests tab: its status filter, who closes a request, the note and the outcome it needs, a request\'s model line', () => {
     expect([shopRequestStatusOf({ status: 'OPEN' }), shopRequestStatusOf({ status: 'CLOSED' }), shopRequestStatusOf({ status: 'x' }), shopRequestStatusOf({})]).toEqual(['OPEN', 'CLOSED', undefined, undefined]);
     expect(['AUDITOR', 'OPERATOR', 'ADMIN'].map((role) => canCloseRequest(role as 'AUDITOR', { status: 'OPEN' }))).toEqual([false, true, true]);
     expect(canCloseRequest('ADMIN', { status: 'CLOSED' })).toBe(false);
     expect(closeRequestProblem('  ')).toBe('Say in the note what was done for the client.');
     expect(closeRequestProblem('x'.repeat(2001))).toBe('The note must be at most 2000 characters.');
     expect(closeRequestProblem('Called the client.')).toBeNull();
+    // The outcome the dialog asks: ACCEPTED (an order is created) or DECLINED, one of the two.
+    expect(closeRequestProblem('Called the client.', '')).toBe('Say whether the request is accepted or declined.');
+    expect(closeRequestProblem('Called the client.', 'MAYBE')).toBe('Say whether the request is accepted or declined.');
+    expect(['ACCEPTED', 'DECLINED'].map((o) => closeRequestProblem('Called the client.', o))).toEqual([null, null]);
+    expect(SHOP_REQUEST_OUTCOME_OPTIONS.map((o) => o.value)).toEqual(['', ...SHOP_REQUEST_OUTCOMES]);
     const model = { id: 'm', name: 'ECLIPSE', type: 'PENDANT', slug: 'eclipse', priceLabel: '€ 4 800' };
     expect(requestModelLine({ model })).toBe('PENDANT · € 4 800');
     expect(requestModelLine({ model: { ...model, priceLabel: null } })).toBe('PENDANT');

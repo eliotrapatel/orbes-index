@@ -85,6 +85,7 @@ import type {
   OwnerList,
   OwnerLock,
   ShopRequest,
+  ShopRequestOutcome,
   ShopRequestStatus,
   OwnerSheet,
   Paged,
@@ -955,9 +956,9 @@ export class AdminApi {
     return this.get('/api/admin/club/requests', q);
   }
 
-  /** OPERATOR: close a request with a note, what was done for the client. */
-  closeShopRequest(id: string, note: string): Promise<ShopRequest> {
-    return this.post(`/api/admin/club/requests/${encodeURIComponent(id)}/close`, { note });
+  /** OPERATOR: close a request with a note, what was done for the client, and its outcome (ACCEPTED creates its order). */
+  closeShopRequest(id: string, note: string, outcome: ShopRequestOutcome): Promise<ShopRequest> {
+    return this.post(`/api/admin/club/requests/${encodeURIComponent(id)}/close`, { note, outcome });
   }
 
   cases(q: { status?: string; scanId?: string; anomalyId?: string; page?: number; pageSize?: number } = {}): Promise<Paged<CaseRecord>> {

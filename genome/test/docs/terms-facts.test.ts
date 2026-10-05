@@ -514,13 +514,14 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(matches(/action:\s*'([a-z.]*vote[a-z._]*)'/g).map((m) => m.match[1])).toEqual([]);
   },
   N7: () => {
-    // The private salon (P-X08) audits a request and its closing with the model alone (and a lock's reason): never a note.
+    // The private salon (P-X08) audits a request and its closing with the model alone, its outcome and the order an
+    // ACCEPTED one created (plan LIVE RELEASE+), and a lock's reason: never a note.
     const salon = readDoc('genome/src/server/services/salon.ts');
     const records = [...salon.matchAll(/audit\.record\(\{[^\n]*\}, tx\)/g)].map((m) => m[0]);
     expect(records).toHaveLength(3);
     for (const r of records) {
       expect(r).toMatch(/action: 'shop\.request(?:\.close)?'/);
-      expect(r).toMatch(/details: \{ modelId(?:: [\w.]+)?(?:, reason)? \}/);
+      expect(r).toMatch(/details: \{ modelId(?:: [\w.]+)?(?:, outcome: (?:[\w.]+|'DECLINED'))?(?:, reason|, \.\.\.orderId)? \}/);
       expect(r).not.toMatch(/note|words|resolution/i);
     }
     // No other audit entry of the salon: every write of shop_requests is in services/salon.ts.

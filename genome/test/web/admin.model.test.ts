@@ -258,6 +258,14 @@ describe('admin enums mirror the server', () => {
       'LIVE_END_REASONS',
       'LIVE_ENTRY_STATUSES',
       'LIVE_RESOLUTIONS',
+      'SHOP_REQUEST_OUTCOMES',
+      'ORDER_CHANNELS',
+      'ORDER_STATUSES',
+      'ORDER_RESERVATIONS',
+      'STOCK_MOVEMENT_REASONS',
+      'BENCH_ITEM_STATUSES',
+      'RETURN_OUTCOMES',
+      'INVOICE_KINDS',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
@@ -621,6 +629,7 @@ describe('the Club\'s requests of the private salon (P-X08)', () => {
       handledBy: null,
       handledAt: null,
       resolutionNote: null,
+      outcome: null,
     });
     expect(r.status).toBe('OPEN');
   });
@@ -879,7 +888,7 @@ const dashboard: DashboardData = {
   generatedAt: '2026-10-01T12:00:00.000Z',
   products: {
     total: 30,
-    byStatus: { ISSUED: 10, ACTIVATED: 0, REGISTERED: 0, OWNED: 20, TRANSFERRED: 0, SERVICED: 0, RESOLD: 0, RETIRED: 0, REVOKED: 0, COUNTERFEIT_FLAGGED: 0, LOST: 0, STOLEN: 0 },
+    byStatus: { RESERVED: 0, ISSUED: 10, ACTIVATED: 0, REGISTERED: 0, OWNED: 20, TRANSFERRED: 0, SERVICED: 0, RESOLD: 0, RETIRED: 0, REVOKED: 0, COUNTERFEIT_FLAGGED: 0, LOST: 0, STOLEN: 0 },
   },
   scans: { last24h: 1520, last7d: 9001 },
   anomalies: { open: 3, openBySeverity: { LOW: 0, MEDIUM: 1, HIGH: 1, CRITICAL: 1 } },

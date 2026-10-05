@@ -2561,17 +2561,21 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await row.locator('.status__text').textContent()).toBe('OPEN');
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'club-requests', { full: true });
-    // Closed with a note: the row says who closed it and what was done.
+    // Closed with a note and its outcome: the row says the outcome, who closed it and what was done; ACCEPTED created
+    // the request's order (plan LIVE RELEASE+).
     await row.locator('[data-testid=close-request]').click();
     await p.fill('dialog textarea[name=note]', 'Called the client: a fitting on Tuesday.');
+    await p.selectOption('dialog select[name=outcome]', 'ACCEPTED');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Request closed.")');
     await expect.poll(() => row.locator('.status__text').textContent()).toBe('CLOSED');
+    expect(await row.locator('[data-testid=request-outcome]').textContent()).toMatch(/^ACCEPTED · /);
     expect(await row.locator('.cell-details').last().textContent()).toBe('Called the client: a fitting on Tuesday.');
     expect(await row.locator('[data-testid=close-request]').count()).toBe(0);
-    expect(await ctx.db.selectFrom('shop_requests').select(['status', 'resolution_note']).where('account_id', '=', a.account.id).execute()).toEqual([
-      { status: 'CLOSED', resolution_note: 'Called the client: a fitting on Tuesday.' },
+    expect(await ctx.db.selectFrom('shop_requests').select(['status', 'outcome', 'resolution_note']).where('account_id', '=', a.account.id).execute()).toEqual([
+      { status: 'CLOSED', outcome: 'ACCEPTED', resolution_note: 'Called the client: a fitting on Tuesday.' },
     ]);
+    expect(await ctx.db.selectFrom('orders').select(['channel', 'status']).where('account_id', '=', a.account.id).execute()).toEqual([{ channel: 'SALON', status: 'RESERVED' }]);
     // Narrowed to the open requests: none is left.
     await p.selectOption('#requests select[name=status]', 'OPEN');
     await expect.poll(() => p.evaluate(() => location.hash)).toBe('#/club?tab=requests&status=OPEN');

@@ -26,6 +26,7 @@ import {
   REPORT_STATUSES,
   REVOCATION_TARGET_TYPES,
   SERVICE_TYPES,
+  SHOP_REQUEST_OUTCOMES,
   SHOP_REQUEST_STATUSES,
   STAFF_ROLES,
   VERIFICATION_STATES,
@@ -705,8 +706,11 @@ export const shopRequestsQuery = z.object({ status: queryOptional(z.enum(SHOP_RE
 
 export const shopRequestParams = z.object({ id: uuid });
 
-/** POST /api/admin/club/requests/:id/close: a note is required, what was done for the client or why nothing was. */
-export const closeShopRequestBody = body({ note: text(SHOP_RESOLUTION_MAX) });
+/**
+ * POST /api/admin/club/requests/:id/close: a note is required, what was done for the client or why nothing was, and the
+ * outcome: ACCEPTED (the sale concluded: its order is created) or DECLINED.
+ */
+export const closeShopRequestBody = body({ note: text(SHOP_RESOLUTION_MAX), outcome: z.enum(SHOP_REQUEST_OUTCOMES) });
 
 // ── Admin: products ────────────────────────────────────────────────────────
 

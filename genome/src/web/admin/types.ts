@@ -7,8 +7,9 @@
  * the browser bundle; test/web/admin.model.test.ts asserts they stay equal.
  */
 
+/** RESERVED: an identity reserved for a piece to make (the atelier's work sheet), not issued yet. */
 export const PRODUCT_STATUSES = [
-  'ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'SERVICED',
+  'RESERVED', 'ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'SERVICED',
   'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN',
 ] as const;
 export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
@@ -95,6 +96,38 @@ export type ClubTierName = (typeof CLUB_TIER_NAMES)[number];
 /** A request of the private salon (P-X08, shop_requests.status): OPEN until the console closes it with a note. */
 export const SHOP_REQUEST_STATUSES = ['OPEN', 'CLOSED'] as const;
 export type ShopRequestStatus = (typeof SHOP_REQUEST_STATUSES)[number];
+
+/** How a request of the private salon was closed (shop_requests.outcome): ACCEPTED, an order follows, or DECLINED. */
+export const SHOP_REQUEST_OUTCOMES = ['ACCEPTED', 'DECLINED'] as const;
+export type ShopRequestOutcome = (typeof SHOP_REQUEST_OUTCOMES)[number];
+
+/** Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon. */
+export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON'] as const;
+export type OrderChannel = (typeof ORDER_CHANNELS)[number];
+
+/** The steps of an order (orders.status): RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
+export const ORDER_STATUSES = ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED'] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+/** What an order RESERVED or PAID holds at its location (orders.reservation): a piece in stock, or a piece to make. */
+export const ORDER_RESERVATIONS = ['STOCK', 'BENCH'] as const;
+export type OrderReservation = (typeof ORDER_RESERVATIONS)[number];
+
+/** Why the stock moved (stock_movements.reason). */
+export const STOCK_MOVEMENT_REASONS = ['PRODUCED', 'ADJUSTED', 'TRANSFER_OUT', 'TRANSFER_IN', 'SHIPPED', 'RETURNED'] as const;
+export type StockMovementReason = (typeof STOCK_MOVEMENT_REASONS)[number];
+
+/** A piece to make at the atelier (bench_items.status). */
+export const BENCH_ITEM_STATUSES = ['TO_MAKE', 'IN_PROGRESS', 'DONE', 'CANCELLED'] as const;
+export type BenchItemStatus = (typeof BENCH_ITEM_STATUSES)[number];
+
+/** Where a returned order's piece goes (returns.outcome). */
+export const RETURN_OUTCOMES = ['RESTOCKED', 'ARCHIVED'] as const;
+export type ReturnOutcome = (typeof RETURN_OUTCOMES)[number];
+
+/** An invoice, or its credit note (invoices.kind). */
+export const INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
+export type InvoiceKind = (typeof INVOICE_KINDS)[number];
 
 /** The kind of a drop (drops.mode): a DRAW (P-R03) or a LIVE RELEASE, lived in real time. */
 export const DROP_MODES = ['DRAW', 'LIVE'] as const;
@@ -1481,6 +1514,8 @@ export interface ShopRequest {
   handledAt: Iso | null;
   /** What was done; null while open, or closed with a lock of the account. */
   resolutionNote: string | null;
+  /** ACCEPTED (an order was created) or DECLINED once closed; null while open, or closed before the orders. */
+  outcome: ShopRequestOutcome | null;
 }
 
 // ── The Club: the tiers (P-X04) ────────────────────────────────────────────

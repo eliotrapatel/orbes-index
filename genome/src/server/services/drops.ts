@@ -61,7 +61,8 @@
  * rank: anyone can check the order from the seed.
  *
  * After the draw, the console (OPERATOR, under the drop's lock): CONFIRMED
- * (the sale concluded by ORBES Client Services), LAPSED (only once
+ * (the sale concluded by ORBES Client Services, its order created in the same
+ * transaction: services/orders.ts orderForDrawEntry), LAPSED (only once
  * `respond_by` has passed: 409 before), and OFFER NEXT (the first of the
  * waiting list by rank, only while SELECTED and CONFIRMED stay under
  * `quantity`). A selection obliges no one: ORBES Client Services concludes
@@ -94,6 +95,7 @@ import type { AuditService } from './audit.js';
 import { CLUB_TIER_THRESHOLDS, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
+import { orderForDrawEntry } from './orders.js';
 import { readActingAccount } from './ownership.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -1177,7 +1179,11 @@ export class DropService {
     );
   }
 
-  /** CONFIRMED: the sale concluded by ORBES Client Services, for an entry whose place is held; never on a cancelled release (409 DROP_CANCELLED). OPERATOR; audited `drop.entry.confirm`. */
+  /**
+   * CONFIRMED: the sale concluded by ORBES Client Services, for an entry whose place is held; never on a cancelled release
+   * (409 DROP_CANCELLED). Its order is created in the same transaction, RESERVED at the drop's location, its size and
+   * price to be entered (services/orders.ts orderForDrawEntry). OPERATOR; audited `drop.entry.confirm` and `order.create`.
+   */
   confirm(dropId: string, entryId: string, note: string | null, actor: Actor): Promise<AdminDropEntry> {
     return this.conclude(dropId, entryId, 'CONFIRMED', note, actor);
   }
@@ -1238,16 +1244,18 @@ export class DropService {
       if (e.status !== 'SELECTED') throw entryNotSelected();
       if (to === 'LAPSED' && e.respond_by && now.getTime() < e.respond_by.getTime()) throw placeHeld(e.respond_by);
       await tx.updateTable('drop_entries').set({ status: to, handled_by: actor.id!, handled_at: now, note: text }).where('id', '=', e.id).execute();
+      const order = to === 'CONFIRMED' ? await orderForDrawEntry(tx, e.id, actor, now) : { order: null, notes: [] };
       await this.audit.record(
         {
           actor,
           action: to === 'CONFIRMED' ? 'drop.entry.confirm' : 'drop.entry.lapse',
           targetType: 'drop',
           targetId: id,
-          details: { entryId: e.id, rank: e.rank, ...(text !== null ? { noted: true } : {}) },
+          details: { entryId: e.id, rank: e.rank, ...(text !== null ? { noted: true } : {}), ...(order.order ? { orderId: order.order.id } : {}) },
         },
         tx,
       );
+      for (const n of order.notes) await this.audit.record(n, tx);
     });
     return this.adminEntry(id, entry);
   }

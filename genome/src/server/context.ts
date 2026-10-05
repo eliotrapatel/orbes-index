@@ -13,7 +13,11 @@
  *   3. category cache load (the core identity resolver is synchronous);
  *   4. services;
  *   5. first-run admin bootstrap (BOOTSTRAP_ADMIN_*), and the signing key:
- *      created on demand in development/test, self-tested in production.
+ *      created on demand in development/test, self-tested in production;
+ *   6. the stock and the orders (plan LIVE RELEASE+): the first boot's
+ *      locations and carriers, the pieces and sizes on sale linked to their
+ *      SKUs, the orders of the sales committed without them
+ *      (OrderService.prepare, idempotent).
  */
 import { closeDb, createDb, type Db } from './db/connection.js';
 import { parseDatabaseUrl } from './db/url.js';
@@ -43,6 +47,7 @@ import { LookbookService } from './services/lookbook.js';
 import { MediaService } from './services/media.js';
 import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js';
 import { OwnershipCertificateService } from './services/ownership-certificates.js';
+import { OrderService } from './services/orders.js';
 import { OwnerService } from './services/owners.js';
 import { SalonService } from './services/salon.js';
 import { ScanReportService } from './services/scan-reports.js';
@@ -52,6 +57,7 @@ import { purgeScanHistory } from './services/scan-retention.js';
 import { aggregateScanStats } from './services/scan-stats.js';
 import { purgeScanTokens } from './services/scan-tokens.js';
 import { SessionService } from './services/sessions.js';
+import { StockService } from './services/stock.js';
 import { VerificationService } from './services/verification.js';
 import { WarrantyService } from './services/warranty.js';
 import { noopLogger, SYSTEM_ACTOR, systemClock, type Clock, type Logger } from './types.js';
@@ -101,6 +107,10 @@ export interface AppServices {
   liveConsole: LiveConsoleService;
   /** The console's intelligence on the LIVE RELEASES: the planner, the forecasts, the radars, the alerts, the report, the collectors, the comparison. */
   liveInsights: LiveInsightsService;
+  /** The stock (plan LIVE RELEASE+): per SKU and location, from the ledger; transfers between locations and counts corrected. */
+  stock: StockService;
+  /** The orders of every sales channel (plan LIVE RELEASE+), step by step: what each holds, its steps, its buyer; the boot's setup. */
+  orders: OrderService;
 }
 
 export interface AppContext {
@@ -201,6 +211,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const liveRoom = new LiveRoomService({ db, turnKey, publicOrigin: config.publicOrigin, clock });
     const liveInsights = new LiveInsightsService({ db, clock });
     const liveConsole = new LiveConsoleService({ db, audit, seedKey: deriveDropSeedKey(config), publicOrigin: config.publicOrigin, insights: liveInsights, clock });
+    const stock = new StockService({ db, audit, clock });
+    const orders = new OrderService({ db, audit, clock, log });
 
     const services: AppServices = {
       issuance,
@@ -229,6 +241,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       liveRoom,
       liveConsole,
       liveInsights,
+      stock,
+      orders,
       ...overrides.services,
     };
 
@@ -262,6 +276,11 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     } else if (!(await keys.selfTest())) {
       // Verification keeps working (it only needs public keys); issuance does not.
       log.error({}, 'signing key self-test failed or no ACTIVE key: issuance is unavailable until a key is rotated in');
+    }
+    // The stock and the orders: the first boot's locations and carriers, the SKUs, the orders of sales made without them.
+    const prepared = await services.orders.prepare();
+    if (prepared.locations.length + prepared.carriers.length + prepared.linked.products + prepared.linked.sizes + prepared.orders > 0) {
+      log.info(prepared, 'stock and orders ready');
     }
     return ctx;
   } catch (e) {

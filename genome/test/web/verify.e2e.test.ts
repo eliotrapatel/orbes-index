@@ -2322,7 +2322,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Closed in the console, the sheet offers REQUEST THIS PIECE again; requested meanwhile from another device, the
     // stale sheet's request (409 SHOP_REQUEST_OPEN) reads the sheet again: REQUESTED with the contact, no failure.
     const desk = await srv.ctx.services.auth.createAdmin({ email: 'salon.desk@orbes.test', password: 'orbes salon desk passphrase', role: 'OPERATOR' }, SYSTEM_ACTOR);
-    await srv.ctx.services.salon.close(requested[0]!.id, 'Called the client.', { type: 'admin', id: desk.id });
+    await srv.ctx.services.salon.close(requested[0]!.id, { note: 'Called the client.', outcome: 'DECLINED' }, { type: 'admin', id: desk.id });
     await page.reload();
     const again = page.getByRole('region', { name: 'THE PRIVATE SALON' });
     await visible(again.getByRole('button', { name: 'REQUEST THIS PIECE' }));

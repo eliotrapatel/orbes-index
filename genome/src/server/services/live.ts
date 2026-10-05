@@ -17,8 +17,9 @@
  *   secure     the seal pressed (PRESS: `press_started_at`, the server's clock) and held: SECURE needs the turn's secret
  *              (`liveTurnToken`, its SHA-256 stored), a press at least LIVE_GESTURE_MIN_MS (1.4 s) earlier and a turn
  *              still running; the gesture's length is kept (`gesture_ms`) for the console's bot radar. SECURED: the hold
- *              runs `pay_minutes`; the add-ons are chosen; PAY (CONFIRM) makes it a reservation ORBES Client Services
- *              concludes; RELEASE gives the piece back.
+ *              runs `pay_minutes`; the add-ons are chosen; PAY (CONFIRM) confirms it: one order per piece, RESERVED,
+ *              created in the same transaction (services/orders.ts ordersForLiveEntry), which ORBES Client Services
+ *              follows to its delivery; RELEASE gives the piece back.
  *   second     a turn that runs out (MISSED), a hold that runs out or is freed by the console (EXPIRED, its add-ons
  *   chance     dropped), a place given back (RELEASED), an entry that leaves its turn or is removed: the piece returns,
  *              and the next in line for that size gets a turn at once.
@@ -69,6 +70,7 @@ import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { CLUB_EXCLUDED_STATUSES, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
+import { ordersForLiveEntry } from './orders.js';
 import { readActingAccount } from './ownership.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -1145,8 +1147,10 @@ export class LiveService {
   }
 
   /**
-   * PAY (a placeholder for now): the held piece CONFIRMED, a reservation ORBES Client Services concludes. Its hold must
-   * be running (409 LIVE_HOLD_ENDED). The last piece confirmed ends the release, SOLD_OUT. Audited `drop.live.confirm`.
+   * PAY (a placeholder for now): the held piece CONFIRMED, and its orders created in the same transaction, one per piece,
+   * RESERVED (services/orders.ts ordersForLiveEntry: each holds a piece in stock or one to make), which ORBES Client
+   * Services follows to their delivery. Its hold must be running (409 LIVE_HOLD_ENDED). The last piece confirmed ends
+   * the release, SOLD_OUT. Audited `drop.live.confirm`, and `order.create` for each order.
    */
   async confirm(accountId: string, dropId: string, actor: Actor): Promise<LiveEntryView> {
     const account = assertAccount(accountId);
@@ -1158,6 +1162,7 @@ export class LiveService {
       await tx.updateTable('live_entries').set({ status: 'CONFIRMED', confirmed_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
       const notes: AuditRecordInput[] = [{ actor, action: 'drop.live.confirm', targetType: 'drop', targetId: id, details: { entryId: e.id, quantity: e.quantity } }];
       await this.settleEnd(tx, d, now, notes);
+      notes.push(...(await ordersForLiveEntry(tx, e.id, actor, now)).notes);
       await this.record(tx, notes);
     });
     return (await this.viewerEntry(this.db, account, id))!;

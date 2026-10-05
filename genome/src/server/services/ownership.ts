@@ -50,6 +50,7 @@ import { customerAccountLocked } from './auth.js';
 import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford, verifyClaimCode } from './claim-codes.js';
 import { findProduct, loadStatusHistory, requireProduct, returnTargetOf, TRANSITIONS, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { mediaUrl } from './media.js';
+import { deliverOnRegistration } from './orders.js';
 import { consumeScanToken, inspectScanToken, TRANSFER_TOKEN_TTL_MS, type ScanTokenFailure, type ScanTokenResult } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantySummary } from './warranty.js';
 
@@ -378,7 +379,9 @@ export class OwnershipService {
   /**
    * Register the first owner of a product, authorised by a registration
    * token from a fresh scan and, when the product has one, its claim code.
-   * Verified (claim code matched) → OWNED; otherwise REGISTERED.
+   * Verified (claim code matched) → OWNED; otherwise REGISTERED. The order
+   * that shipped this piece to this buyer, while SHIPPED, becomes DELIVERED
+   * in the same transaction (plan LIVE RELEASE+, Interconnection).
    */
   async registerFirst(accountId: string, input: RegisterFirstInput, actor: Actor): Promise<OwnershipResult> {
     assertAccountId(accountId);
@@ -424,6 +427,9 @@ export class OwnershipService {
         .insertInto('ownership')
         .values({ product_id: p.id, account_id: accountId, acquired_via: 'FIRST_REGISTRATION', verified, started_at: now })
         .execute();
+      // The piece of an order shipped to this buyer, registered by them: the order is DELIVERED (services/orders.ts),
+      // its row locked before any audit entry of this transaction.
+      const delivered = await deliverOnRegistration(tx, p.id, accountId, actor, now);
       const ownershipState = ownershipStateFor({ verified }, false);
       const statusChange = await this.lifecycle.applyForService(
         tx,
@@ -442,6 +448,7 @@ export class OwnershipService {
         },
         tx,
       );
+      for (const n of delivered) await this.audit.record(n, tx);
       return { productId: p.product_id, accountId, acquiredVia: 'FIRST_REGISTRATION', verified, ownershipState, since: now, statusChange };
     });
   }

@@ -23,7 +23,12 @@
  *                   AUDITOR.
  *   entries         every entry of the release, by status, by place then arrival.
  *   Client Services the confirmed reservations with their sizes, add-ons and totals; CONCLUDED or CANCELLED with a note
- *                   (a cancellation never returns the piece to the line: the plan's choice 26); a CSV.
+ *                   (a cancellation never returns the piece to the line: the plan's choice 26), carried by the
+ *                   reservation's orders (plan LIVE RELEASE+: CONCLUDED pays them, CANCELLED cancels them, releasing
+ *                   what they hold; services/orders.ts resolveLiveOrders); a CSV.
+ *
+ * The sizes of a release are linked to their SKUs (the release's model in each size, services/stock.ts) whenever they
+ * or the model change.
  *
  * Audited (dotted lowercase, ids only, a description or a body as its length and SHA-256): `drop.live.create`,
  * `drop.live.update` (each setting before and after), `drop.live.publish`, `drop.live.cancel`, `drop.live.resolve`
@@ -63,6 +68,8 @@ import {
 } from './live.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
+import { resolveLiveOrders } from './orders.js';
+import { linkDropSizes } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -991,7 +998,10 @@ export class LiveConsoleService {
   /**
    * CONCLUDED or CANCELLED (ORBES Client Services, OPERATOR): a CONFIRMED reservation, once (409 LIVE_ALREADY_RESOLVED),
    * with an optional note (at most LIVE_RESOLUTION_NOTE_MAX characters, kept with the entry, never in the audit log). A
-   * cancellation returns no piece to the line (the plan's choice 26). Audited `drop.live.resolve`.
+   * cancellation returns no piece to the line (the plan's choice 26). The reservation's orders carry it, in the same
+   * transaction (services/orders.ts resolveLiveOrders): CONCLUDED pays each order still RESERVED, CANCELLED cancels each
+   * one RESERVED or PAID (409 ORDER_TRANSITION_NOT_ALLOWED once one is shipped). Audited `drop.live.resolve`, and each
+   * order's step.
    */
   async resolve(dropId: string, entryId: string, input: { resolution: LiveResolution; note?: string | null }, actor: Actor): Promise<AdminLiveReservation> {
     const admin = assertStaff(actor, 'conclude a reservation');
@@ -1011,8 +1021,10 @@ export class LiveConsoleService {
       if (e.status !== 'CONFIRMED') throw notConfirmed();
       if (e.resolution) throw alreadyResolved();
       const at = e.confirmed_at && e.confirmed_at.getTime() > now.getTime() ? e.confirmed_at : now;
+      const orders = await resolveLiveOrders(tx, e.id, input.resolution, note, actor, at);
       await tx.updateTable('live_entries').set({ resolution: input.resolution, resolution_note: note, handled_by: admin, handled_at: at }).where('id', '=', e.id).execute();
       await this.audit.record({ actor, action: 'drop.live.resolve', targetType: 'drop', targetId: id, details: { entryId: e.id, resolution: input.resolution, ...(note !== null ? { noted: true } : {}) } }, tx);
+      for (const n of orders) await this.audit.record(n, tx);
     });
     const [r] = await this.reservationRows(this.db, id, { entryId: eid });
     return r!;
@@ -1093,6 +1105,8 @@ export class LiveConsoleService {
         .values(s.sizes.map((x, i) => ({ ...(x.id ? { id: x.id } : {}), drop_id: id, label: x.label, position: i + 1, stock: x.stock })))
         .execute();
     }
+    // Each size on sale is its model's SKU in that size (migration 0022): linked again when the sizes or the model change.
+    if (!before || !same(before.sizes, s.sizes) || before.modelId !== s.modelId) await linkDropSizes(tx, id, s.modelId);
     if (!before || !same(before.addons, s.addons)) {
       const known = new Set((before?.addons ?? []).map((x) => x.id));
       for (const x of s.addons) if (x.id && !known.has(x.id)) throw validationError('An add-on to keep is one of the release’s.');
