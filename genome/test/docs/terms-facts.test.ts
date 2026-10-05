@@ -435,7 +435,8 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'the room opens before T0 (choice 16)': 'if (now.getTime() < roomOpensAt(d).getTime()) throw roomNotOpen(roomOpensAt(d));',
   'the size never changes after T0 (choice 6)': 'throw sizeLocked();',
   'the line at T0 by tier, then the sealed seed (choices 2, 14)': 'const seed = openDropSeed(this.seedKey, d);',
-  'arrivals after T0 behind, in arrival order (choice 2)': "const place = late ? { status: 'QUEUED' as const, position: (await this.lastPosition(tx, id)) + 1, queued_at: now }",
+  // (an after-room's guest at its own place instead: plan LIVE RELEASE+, choice 2)
+  'arrivals after T0 behind, in arrival order (choice 2)': "? { status: 'QUEUED' as const, position: place ?? (await this.lastPosition(tx, id)) + 1, queued_at: now }",
   'the hold gesture checked on the server (choice 8)': 'if (gesture < LIVE_GESTURE_MIN_MS) throw holdTooShort();',
   'PAY confirms a reservation, nothing paid (choices 4, 33)': ".set({ status: 'CONFIRMED', confirmed_at: now })",
   'a piece returned goes to the next in line (choice 5)': ".set((eb) => ({ status: 'MISSED', ended_at: eb.ref('turn_expires_at') }))",

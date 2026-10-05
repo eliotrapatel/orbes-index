@@ -145,6 +145,10 @@ export type LiveEntryStatus = (typeof LIVE_ENTRY_STATUSES)[number];
 export const LIVE_RESOLUTIONS = ['CONCLUDED', 'CANCELLED'] as const;
 export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
 
+/** How the access rules of a LIVE RELEASE combine (drops.access_combine): every rule met, or any one of them. */
+export const ACCESS_COMBINES = ['AND', 'OR'] as const;
+export type AccessCombine = (typeof ACCESS_COMBINES)[number];
+
 /** Where a LIVE RELEASE stands (services/live.ts livePhase): HIDDEN is published, announced later. */
 export const LIVE_PHASES = ['DRAFT', 'HIDDEN', 'ANNOUNCED', 'ROOM', 'LIVE', 'ENDED', 'CANCELLED'] as const;
 export type LivePhase = (typeof LIVE_PHASES)[number];
@@ -1074,6 +1078,38 @@ export interface LiveRelease extends LiveCard {
   createdAt: Iso;
   createdBy: { id: string; email: string } | null;
   seedHash: string;
+  /** Its after-room, set or opened (plan LIVE RELEASE+, choice 2); null without one, and for an after-room. */
+  afterRoom: LiveAfterRoom | null;
+  /** An after-room's own page: the release it follows; null for a release. */
+  afterRoomOf: { id: string; title: string } | null;
+}
+
+/** Where an after-room stands: waiting for the sell-out, opening at its time, open, over, or never opened. */
+export const AFTER_ROOM_STATES = ['WAITING', 'OPENS', 'OPEN', 'OVER', 'NOT_OPENED'] as const;
+export type AfterRoomState = (typeof AFTER_ROOM_STATES)[number];
+
+/** Why an after-room never opened: nobody left in the line at the sell-out, no sell-out, its release cancelled. */
+export type AfterRoomSkip = 'NO_GUESTS' | 'NOT_SOLD_OUT' | 'CANCELLED';
+
+/** A release's after-room in the console (services/live-console.ts AdminAfterRoom). */
+export interface LiveAfterRoom {
+  id: string;
+  model: { id: string; name: string; type: string; active: boolean };
+  priceMinor: number;
+  currency: string;
+  sizes: { id: string; label: string; stock: number }[];
+  quantity: number;
+  addons: { id: string; label: string; line: string | null; priceMinor: number }[];
+  delayMinutes: number;
+  lengthMinutes: number;
+  state: AfterRoomState;
+  phase: LivePhase;
+  opensAt: Iso | null;
+  closesAt: Iso | null;
+  endedReason: LiveEndReason | null;
+  skipped: AfterRoomSkip | null;
+  guests: number;
+  entries: Record<LiveEntryStatus, number>;
 }
 
 /** POST /api/admin/live: every setting (the defaults for those left out); PATCH: any of them until the announcement. */
@@ -1101,6 +1137,18 @@ export interface LiveSettings {
   nameAt?: Iso | null;
   photoAt?: Iso | null;
   tierWindows?: { tier: number; turnSeconds?: number | null; payMinutes?: number | null }[];
+  /** The after-room: its own model, price, sizes and stock, add-ons, delay and length; null: none. */
+  afterRoom?: LiveAfterRoomSettings | null;
+}
+
+/** An after-room's own settings (the rest is its release's). */
+export interface LiveAfterRoomSettings {
+  modelId: string;
+  priceMinor: number;
+  sizes: { id?: string | null; label: string; stock: number }[];
+  addons?: { id?: string | null; label: string; line?: string | null; priceMinor: number }[];
+  delayMinutes?: number;
+  lengthMinutes?: number;
 }
 
 export type LiveSettingsChange = Partial<LiveSettings>;

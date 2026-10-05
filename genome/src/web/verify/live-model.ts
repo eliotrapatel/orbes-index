@@ -17,8 +17,9 @@
  */
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { LIVE, RELEASES } from './copy.js';
-import { isReleaseId, releasePath, tierLabel, type EntryModel, type MyEntryModel } from './releases-model.js';
+import { afterRoomPath, isReleaseId, releasePath, tierLabel, type EntryModel, type MyEntryModel } from './releases-model.js';
 import type {
+  AfterRoomDoor,
   ClientServices,
   LiveAccess,
   LiveAccountEntry,
@@ -208,6 +209,7 @@ export type LiveScreenKind =
   | 'left'
   | 'removed'
   | 'ended'
+  | 'afterRoom'
   | 'over';
 
 export interface LiveScreenInput {
@@ -217,6 +219,14 @@ export interface LiveScreenInput {
   entry: LiveEntry | null;
   /** The server's time (ms). */
   now: number;
+}
+
+/** Whether the second door stands at the server's time `now`: from the after-room's T0 until its close. */
+export function doorOpen(door: AfterRoomDoor | null | undefined, now: number): boolean {
+  if (!door) return false;
+  const opens = Date.parse(door.opensAt);
+  const closes = Date.parse(door.closesAt);
+  return Number.isFinite(opens) && Number.isFinite(closes) && now >= opens && now < closes;
 }
 
 /** Where the release stands at the server's time `now`: its own phase once it has ended (sold out, ended by ORBES). */
@@ -259,7 +269,8 @@ export function liveScreen(i: LiveScreenInput): LiveScreenKind {
       case 'REMOVED':
         return 'removed';
       case 'ENDED':
-        return 'ended';
+        // Still in the line at the sell-out: the second door, once it stands (the release's after-room).
+        return doorOpen(entry.afterRoom, i.now) ? 'afterRoom' : 'ended';
       case 'LEFT':
         return 'left';
       case 'QUEUED': {
@@ -656,6 +667,8 @@ export function myLiveEntries(list: readonly LiveAccountEntry[], opts: { clientS
       const label = LIVE.statusLabel[e.status];
       const reference = liveReference(e.id);
       const sentence = e.status === 'CONFIRMED' ? LIVE.securedInPieces(e.size.label, e.quantity) : LIVE.sentence[e.status];
+      // An after-room's entry: read through the release it follows.
+      const parent = isReleaseId(x.release.afterRoomOf) ? x.release.afterRoomOf : null;
       const entry: EntryModel = {
         label,
         sentence,
@@ -666,6 +679,8 @@ export function myLiveEntries(list: readonly LiveAccountEntry[], opts: { clientS
         canReserve: false,
         contact: e.status === 'CONFIRMED' ? releaseContactModel(opts.clientServices, title, reference, label) : null,
       };
-      return { id: e.id, dropId: x.release.id, href: releasePath(x.release.id), title, stateLabel: LIVE.kind, entry };
+      return parent
+        ? { id: e.id, dropId: x.release.id, href: afterRoomPath(parent), afterRoomOf: parent, title, stateLabel: LIVE.afterRoom.kind, entry }
+        : { id: e.id, dropId: x.release.id, href: releasePath(x.release.id), title, stateLabel: LIVE.kind, entry };
     });
 }

@@ -1,6 +1,6 @@
 /**
  * Kysely types for the ORBES database. Mirrors migrations/0001_initial.ts
- * and the later migrations (0002–0022) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
+ * and the later migrations (0002–0023) column for column (snake_case, no CamelCasePlugin) so raw SQL, types and
  * the migration read the same.
  *
  * Driver-normalised value types (configured in connection.ts, identical on
@@ -217,6 +217,13 @@ export type ReturnOutcome = (typeof RETURN_OUTCOMES)[number];
 /** An invoice, or the credit note that follows one (invoices.kind, migration 0022). */
 export const INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
 export type InvoiceKind = (typeof INVOICE_KINDS)[number];
+
+/**
+ * How the access rules of a LIVE RELEASE combine (drops.access_combine, migration 0023): every rule met (AND), or any
+ * one of them (OR). NULL on a LIVE drop: AND.
+ */
+export const ACCESS_COMBINES = ['AND', 'OR'] as const;
+export type AccessCombine = (typeof ACCESS_COMBINES)[number];
 
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
@@ -732,6 +739,27 @@ export interface DropsTable {
   board_token_issued_at: TimestampNullable;
   /** Migration 0022: the release's default location (stock_locations.id); NULL: the default location. */
   stock_location_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0023, LIVE only (NULL for a DRAW). An after-room (A3): the release it follows, one per release; a DRAFT
+   * until the parent's sell-out, then published for the guests remembered at it, or cancelled.
+   */
+  parent_drop_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** An after-room's: opens 1..60 minutes after the parent's sell-out (10 by default), open 5..120 minutes (15). */
+  after_room_delay_minutes: ColumnType<number | null, number | null | undefined, number | null>;
+  after_room_length_minutes: ColumnType<number | null, number | null | undefined, number | null>;
+  /** A4: one surprise in every box, its description internal (1..500 characters, required once enabled); false for an after-room. */
+  surprise_enabled: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
+  surprise_text: ColumnType<string | null, string | null | undefined, string | null>;
+  /** A5: the releases (1..100) a collector has taken part in to enter. */
+  min_participations: ColumnType<number | null, number | null | undefined, number | null>;
+  /** N5: the segment whose members may enter (segments.id). */
+  access_segment_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** How every access rule of the release combines; NULL: AND. */
+  access_combine: ColumnType<AccessCombine | null, AccessCombine | null | undefined, AccessCombine | null>;
+  /** G4: the question after; its text (1..120 characters) and answers (2..6) both or neither (neither: the default); false for an after-room. */
+  question_enabled: ColumnType<boolean | null, boolean | null | undefined, boolean | null>;
+  question_text: ColumnType<string | null, string | null | undefined, string | null>;
+  question_answers: ColumnType<string[] | null, string[] | null | undefined, string[] | null>;
 }
 
 /**
@@ -783,6 +811,8 @@ export interface CirclePostsTable {
   published_at: TimestampNullable;
   created_by: string | null;           // admin_users.id; null when a script created it
   created_at: TimestampDefault;
+  /** Migration 0023 (N5): shown to a segment's members only (segments.id); null: to the tier. */
+  segment_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /** The photographs of a circle post (migration 0016, P-X01): at most 4, positions 1–4; post_id, sha256, created_by and created_at never change. */
@@ -1168,6 +1198,47 @@ export interface OrderAlertSettingsTable {
   updated_at: TimestampDefault;
 }
 
+/**
+ * The guests of an after-room (migration 0023, A3): the parent's entries still WAITING or QUEUED at its sell-out, each
+ * with its place in the after-room's line (their order in the parent's), remembered once; never changed.
+ */
+export interface AfterRoomGuestsTable {
+  /** The after-room (drops.id of the child release). */
+  drop_id: string;
+  /** The parent's entry (live_entries.id), unique. */
+  entry_id: string;
+  position: number;                    // ≥ 1, unique per after-room
+  remembered_at: Timestamp;
+}
+
+/** A collector's answer to a release's question after (migration 0023, G4): one per account and release, changeable. */
+export interface ReleaseAnswersTable {
+  drop_id: string;
+  account_id: string;
+  /** The position of the answer chosen, 1..6. */
+  answer: number;
+  answered_at: TimestampDefault;
+}
+
+/** A saved group of collectors (migration 0023, N5): its name (unique whatever the case) and its rule tree. */
+export interface SegmentsTable {
+  id: Generated<string>;
+  name: string;                        // 1..60 characters
+  criteria: Jsonb<JsonObject>;
+  created_by: string | null;           // admin_users.id
+  created_at: TimestampDefault;
+  updated_at: TimestampDefault;
+}
+
+/** The sign-ins and scans per whole UTC hour, country (ZZ unknown) and tier (migration 0023, G3): aggregates, no account. */
+export interface ActivityHourlyTable {
+  hour: Timestamp;
+  country: string;
+  tier: number;                        // 0..3
+  sign_ins: WithDefault<number>;
+  scans: WithDefault<number>;
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -1281,6 +1352,10 @@ export interface Database {
   invoices: InvoicesTable;
   event_journal: EventJournalTable;
   order_alert_settings: OrderAlertSettingsTable;
+  after_room_guests: AfterRoomGuestsTable;
+  release_answers: ReleaseAnswersTable;
+  segments: SegmentsTable;
+  activity_hourly: ActivityHourlyTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -1374,6 +1449,10 @@ export type OrderUpdate = Updateable<OrdersTable>;
 export type OrderEventRow = Selectable<OrderEventsTable>;
 export type BenchItemRow = Selectable<BenchItemsTable>;
 export type EventJournalRow = Selectable<EventJournalTable>;
+export type AfterRoomGuestRow = Selectable<AfterRoomGuestsTable>;
+export type ReleaseAnswerRow = Selectable<ReleaseAnswersTable>;
+export type SegmentRow = Selectable<SegmentsTable>;
+export type ActivityHourlyRow = Selectable<ActivityHourlyTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

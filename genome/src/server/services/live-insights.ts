@@ -1408,7 +1408,7 @@ export function compareReleases(rows: readonly { summary: ReleaseSummary; curren
       addonsRevenueMinor,
     })),
     reasoning: [
-      `The release beside the others whose T0 has passed (the latest ${count(LIVE_INSIGHT_RULES.pastReleases)}, cancelled ones left out), latest first.`,
+      `The release beside the others whose T0 has passed (the latest ${count(LIVE_INSIGHT_RULES.pastReleases)}, cancelled ones and after-rooms left out), latest first.`,
       'The room counts everyone who entered; the line at T0, those placed at T0 itself. The sell-through: the pieces confirmed of the stock (the pieces added included). The missed share: the turns that ran out, of every turn.',
       'The time to sell out runs from T0 to the last piece confirmed, pauses included. A release not over yet shows its figures so far.',
       'The revenue: the pieces and add-ons of the confirmed reservations at their prices, those ORBES Client Services cancelled left out.',
@@ -1583,6 +1583,7 @@ export class LiveInsightsService {
         .distinct()
         .where('e.account_id', 'in', chunk)
         .where('x.mode', '=', 'LIVE')
+        .where('x.parent_drop_id', 'is', null)
         .where('x.id', '!=', d.id)
         .where('x.opens_at', '<', d.opens_at)
         .execute();
@@ -1591,7 +1592,7 @@ export class LiveInsightsService {
     return collectorInsights(release, entries, emails, repeat);
   }
 
-  /** The release beside the others whose T0 has passed. */
+  /** The release beside the others whose T0 has passed (after-rooms left out: each is part of its release). */
   async comparison(dropId: string): Promise<ReleaseComparison> {
     const now = this.clock();
     const { d } = await this.release(dropId);
@@ -1599,6 +1600,7 @@ export class LiveInsightsService {
       .selectFrom('drops')
       .selectAll()
       .where('mode', '=', 'LIVE')
+      .where('parent_drop_id', 'is', null)
       .where('published_at', 'is not', null)
       .where('cancelled_at', 'is', null)
       .where('opens_at', '<=', now)
@@ -1769,14 +1771,15 @@ export class LiveInsightsService {
   }
 
   /**
-   * The past releases (published, not cancelled, ended or closed by now, T0 before this one's), the latest
-   * LIVE_INSIGHT_RULES.pastReleases by T0: their summaries, their entries, and their audience under their rule.
+   * The past releases (published, not cancelled, ended or closed by now, T0 before this one's; never an after-room, a
+   * second door for a sold-out line, not a release of its own), the latest LIVE_INSIGHT_RULES.pastReleases by T0: their summaries, their entries, and their audience under their rule.
    */
   private async past(d: DropRow, now: Date) {
     const rows = await this.db
       .selectFrom('drops')
       .selectAll()
       .where('mode', '=', 'LIVE')
+      .where('parent_drop_id', 'is', null)
       .where('published_at', 'is not', null)
       .where('cancelled_at', 'is', null)
       .where('id', '!=', d.id)

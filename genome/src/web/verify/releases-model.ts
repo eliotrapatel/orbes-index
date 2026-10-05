@@ -38,22 +38,28 @@ export function releasePath(id: string): string {
   return `${RELEASES_PATH}/${id}`;
 }
 
+/** The after-room of a LIVE RELEASE (plan LIVE RELEASE+, choice 2): read through the release it follows, by its guests only. */
+export function afterRoomPath(parentId: string): string {
+  return `${RELEASES_PATH}/${parentId}/after-room`;
+}
+
 /** Whether `id` is the id of a release (a lower-case uuid). */
 export function isReleaseId(id: string | null | undefined): id is string {
   return typeof id === 'string' && UUID_RE.test(id);
 }
 
 /**
- * The route of a path under /verify/releases: the list, a release by its id, or a LIVE RELEASE's boutique board
- * (`/verify/releases/<id>/board`, its secret in the fragment); anything else is the list.
+ * The route of a path under /verify/releases: the list, a release by its id, a LIVE RELEASE's boutique board
+ * (`/verify/releases/<id>/board`, its secret in the fragment) or its after-room (`/verify/releases/<id>/after-room`, the
+ * release it follows); anything else is the list.
  */
-export function releasesRouteOf(path: string): { release: string | null; board?: true } | null {
+export function releasesRouteOf(path: string): { release: string | null; board?: true; afterRoom?: true } | null {
   const p = path.replace(/\/+$/, '').toLowerCase();
   if (p === RELEASES_PATH) return { release: null };
   if (!p.startsWith(`${RELEASES_PATH}/`)) return null;
   const rest = p.slice(RELEASES_PATH.length + 1);
-  const board = /^([^/]+)\/board$/.exec(rest);
-  if (board && isReleaseId(board[1])) return { release: board[1]!, board: true };
+  const sub = /^([^/]+)\/(board|after-room)$/.exec(rest);
+  if (sub && isReleaseId(sub[1])) return sub[2] === 'board' ? { release: sub[1]!, board: true } : { release: sub[1]!, afterRoom: true };
   return { release: isReleaseId(rest) ? rest : null };
 }
 
@@ -346,6 +352,8 @@ export interface MyEntryModel {
   id: string;
   dropId: string;
   href: string;
+  /** An after-room's entry: the release it follows (its page is read through it). */
+  afterRoomOf?: string;
   title: string;
   stateLabel: string;
   entry: EntryModel;

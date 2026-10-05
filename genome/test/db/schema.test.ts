@@ -7,13 +7,16 @@ import { isCheckViolation, isForeignKeyViolation, isGuardViolation, isUniqueViol
 import { packIdentity } from '../../src/core/identity.js';
 import type { Db } from '../../src/server/db/connection.js';
 
-/** Quoted literals of the CHECK constraint(s) on table.column. */
+/**
+ * Quoted literals of the CHECK constraint(s) on table.column alone: a constraint across columns (a LIVE-only setting
+ * NULL for a DRAW, a status with the columns it requires) quotes the other columns' values too, a subset of theirs.
+ */
 async function checkValues(db: Db, table: string, column: string): Promise<string[]> {
   const r = await sql<{ def: string }>`
     SELECT pg_get_constraintdef(c.oid) AS def
     FROM pg_constraint c
     JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY (c.conkey)
-    WHERE c.contype = 'c' AND c.conrelid = ${table}::regclass AND a.attname = ${column}`.execute(db);
+    WHERE c.contype = 'c' AND c.conrelid = ${table}::regclass AND a.attname = ${column} AND cardinality(c.conkey) = 1`.execute(db);
   const values = new Set<string>();
   for (const { def } of r.rows) for (const m of def.matchAll(/'([^']*)'::text/g)) values.add(m[1]);
   return [...values].sort();
@@ -115,6 +118,7 @@ describe('schema', () => {
       ['bench_items', 'status', S.BENCH_ITEM_STATUSES],
       ['returns', 'outcome', S.RETURN_OUTCOMES],
       ['invoices', 'kind', S.INVOICE_KINDS],
+      ['drops', 'access_combine', S.ACCESS_COMBINES],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));

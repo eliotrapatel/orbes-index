@@ -15,6 +15,8 @@
  * A signed-in account (cookie `orbes_session`; for a mutation the CSRF token and a same-origin request):
  *
  *   GET    /api/v1/live/mine                its entries, with their releases (MY PIECES)
+ *   GET    /api/v1/live/:id/after-room      the after-room of release :id, for one of its guests from its T0 (404 for
+ *                                           anyone else: nobody else ever sees it); then its own id for the routes below
  *   GET    /api/v1/live/:id/state           the room, its own entry and interest: the page's fallback when its stream is lost
  *   GET    /api/v1/live/:id/stream          the room and its own entry in real time (SSE), at most two per account
  *   PUT    /api/v1/live/:id/interest        I'LL BE THERE, with a size
@@ -123,6 +125,13 @@ export const liveRoutes: FastifyPluginAsync<LiveRouteDeps> = async (app, { ctx, 
   app.get('/api/v1/live/mine', async (request) => {
     const { account } = requireAccount(request);
     return { entries: await liveRoom.mine(account.id) };
+  });
+
+  // An after-room (plan LIVE RELEASE+, choice 2): an account's answer, never kept, never public.
+  app.get('/api/v1/live/:id/after-room', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(liveParams, request.params);
+    return liveRoom.afterRoomSheet(account.id, id);
   });
 
   app.get('/api/v1/live/:id/state', async (request) => {

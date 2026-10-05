@@ -20,6 +20,7 @@ import {
   clockOffset,
   clockText,
   countdown,
+  doorOpen,
   formatMoney,
   heldEntry,
   initialSize,
@@ -273,6 +274,24 @@ describe('which screen the page shows', () => {
     expect(phaseAt(sheet(), null, T0 - 400_000)).toBe('ANNOUNCED');
     expect(phaseAt(sheet(), room({ opensAt: iso(T0 + 60_000) }), T0 + 1_000)).toBe('ROOM');
     expect(isEndedSheet(sheet())).toBe(false);
+  });
+
+  it('shows the second door to a guest of the after-room from its T0 until it closes, read from its own entry; nothing of it otherwise', () => {
+    const now = T0 + 20 * 60_000;
+    const door = (opensIn: number, closesIn = 10 * 60_000) => ({ opensAt: iso(now + opensIn), closesAt: iso(now + closesIn) });
+    const ended = (afterRoom: ReturnType<typeof door> | null) => entry({ status: 'ENDED', position: 3, afterRoom });
+    expect(screen({ entry: ended(door(-60_000)), now })).toBe('afterRoom');
+    expect(screen({ entry: ended(door(0)), now })).toBe('afterRoom');
+    // Before its T0, after its close, or without one: how the release ended.
+    expect(screen({ entry: ended(door(1_000)), now })).toBe('ended');
+    expect(screen({ entry: ended(door(-60_000, 0)), now })).toBe('ended');
+    expect(screen({ entry: ended(null), now })).toBe('ended');
+    expect(screen({ entry: entry({ status: 'ENDED', position: 3 }), now })).toBe('ended');
+    // Only an entry the sell-out ENDED is a guest's: every other keeps its own page.
+    for (const status of ['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED'] as const) expect(screen({ entry: entry({ status, position: 2, afterRoom: door(-60_000) }), now })).not.toBe('afterRoom');
+    expect(doorOpen(door(-1), now)).toBe(true);
+    expect(doorOpen({ opensAt: 'x', closesAt: 'nonsense' }, now)).toBe(false);
+    expect(doorOpen(undefined, now)).toBe(false);
   });
 });
 
@@ -547,7 +566,7 @@ describe('the announcements: the release calendar, I\'LL BE THERE, the banner', 
 
 describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
   it('lists each with its release, its status in words, its reference once held, ORBES Client Services once confirmed', () => {
-    const release = { id: ID, phase: 'ENDED' as const, endedReason: 'SOLD_OUT' as const, title: 'Monolithe — live', name: 'Monolithe', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 3_600_000) };
+    const release = { id: ID, phase: 'ENDED' as const, endedReason: 'SOLD_OUT' as const, title: 'Monolithe — live', name: 'Monolithe', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 3_600_000), afterRoomOf: null };
     const list: LiveAccountEntry[] = [
       { release, entry: entry({ status: 'CONFIRMED' }) },
       { release: { ...release, id: ID.replace('8a1d', '8a1e'), title: null, name: null }, entry: entry({ id: ID, status: 'MISSED' }) },
@@ -564,6 +583,15 @@ describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
     expect(myLiveEntries([{ release, entry: entry({ status: 'CONFIRMED', quantity: 2 }) }], {})[0]!.entry.sentence).toBe('You secured 2 pieces in size 52. Their steps follow in YOUR ORDERS.');
     expect(missed).toMatchObject({ title: 'LIVE RELEASE', entry: { label: 'TURN PASSED', sentence: LIVE.sentence.MISSED, reference: null, contact: null } });
     expect(myLiveEntries([{ release: { ...release, id: 'x' }, entry: entry() }], {})).toEqual([]);
+  });
+
+  it('opens an after-room\'s entry through the release it follows, said as THE AFTER-ROOM', () => {
+    const child = ID.replace('8a1d', '8a1f');
+    const release = { id: child, phase: 'ENDED' as const, endedReason: 'SOLD_OUT' as const, title: 'Night · THE AFTER-ROOM', name: 'Afterglow', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 900_000), afterRoomOf: ID };
+    const [m] = myLiveEntries([{ release, entry: entry({ status: 'CONFIRMED' }) }], {});
+    expect(m).toMatchObject({ dropId: child, afterRoomOf: ID, href: `/verify/releases/${ID}/after-room`, title: 'NIGHT · THE AFTER-ROOM', stateLabel: 'THE AFTER-ROOM' });
+    // A malformed one is the release's own.
+    expect(myLiveEntries([{ release: { ...release, afterRoomOf: 'x' }, entry: entry() }], {})[0]).toMatchObject({ href: `/verify/releases/${child}`, stateLabel: 'LIVE RELEASE' });
   });
 });
 

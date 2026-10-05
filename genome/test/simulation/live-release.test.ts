@@ -23,7 +23,14 @@
  *    `closes_at`, ENDED only by the console; set once, on time, never changed; a pause ends by RESUME, END or with the
  *    release, never outlives it; after it no WAITING or QUEUED entry (nor TURN after ENDED) and no new turn; in the
  *    end every release is over, with no RESUME forced;
- *  - the engine's pass is idempotent: a second pass at the same time changes nothing.
+ *  - the engine's pass is idempotent: a second pass at the same time changes nothing;
+ *  - the after-room (plan LIVE RELEASE+, choice 2), in half the scenarios: at the release's sell-out exactly the entries
+ *    still WAITING or QUEUED are remembered, places 1..n in their order in the line, and the after-room is published
+ *    then, its T0 its delay later, its close its length after that; any other end (or nobody waiting) cancels it then.
+ *    Opened, it runs the same engine under the same invariants, but for its line: each guest enters straight into it at
+ *    its remembered place (nobody else ever enters, a guest never before its T0), the turns by those places with the
+ *    release's per-tier windows; it ends SOLD_OUT, CLOSED at its length or ENDED, and never has an after-room of its
+ *    own.
  *
  * Entry ids and sealed seeds are random (the database draws them): a failure prints the scenario's seed and its trace.
  */
@@ -33,7 +40,7 @@ import { DomainError } from '../../src/server/errors.js';
 import { openDropSeed } from '../../src/server/services/drops.js';
 import { LIVE_GESTURE_MIN_MS, lineOrder, LiveService } from '../../src/server/services/live.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { accountOfTier, createLiveRelease, liveFixture, type LiveFixture, type LiveRelease } from '../support/live.js';
+import { accountOfTier, createLiveRelease, createModel, liveFixture, type LiveFixture, type LiveRelease } from '../support/live.js';
 import { hashSeed, Prng } from '../support/prng.js';
 
 /** Scenarios run, in batches of BATCH (one test each). */
@@ -83,6 +90,14 @@ interface Person {
   entered: boolean;
 }
 
+/** An after-room's settings in a scenario. */
+interface AfterRoomPlan {
+  sizes: { label: string; stock: number }[];
+  addons: boolean;
+  delay: number;
+  length: number;
+}
+
 interface World {
   seed: number;
   rng: Prng;
@@ -104,6 +119,13 @@ interface World {
   prev: Snapshot | null;
   trace: string[];
   stats: Record<string, number>;
+  /** The after-room's settings, when the release has one. */
+  afterRoom: AfterRoomPlan | null;
+  /** The release's own phase, or its after-room's (then each guest's place in its line, by account). */
+  phase: 'release' | 'afterRoom';
+  places: Map<string, number>;
+  /** The release's end: its time, its reason, the entries it ENDED that were WAITING or QUEUED (in the line's order). */
+  end: { at: Date; reason: string; waiting: string[] } | null;
 }
 
 const iso = (ms: number) => new Date(ms).toISOString().slice(11, 23);
@@ -111,12 +133,14 @@ const iso = (ms: number) => new Date(ms).toISOString().slice(11, 23);
 describe('the LIVE RELEASE engine, simulated', () => {
   let t: TestDb;
   let f: LiveFixture;
+  let afterModel: string;
   const pool: { id: string; tier: Tier }[] = [];
   const totals: Record<string, number> = {};
 
   beforeAll(async () => {
     t = await createTestDb();
     f = await liveFixture(t.db, '2027-01-04T09:00:00.000Z');
+    afterModel = await createModel(t.db, 'AFTERGLOW');
     const tiers: Tier[] = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3];
     for (const tier of [...tiers, ...tiers]) pool.push({ id: (await accountOfTier(f, tier)).id, tier });
   });
@@ -132,6 +156,9 @@ describe('the LIVE RELEASE engine, simulated', () => {
       'end:SOLD_OUT', 'end:CLOSED', 'end:ENDED', 'pause ended:CLOSED',
       'status:QUEUED', 'status:TURN', 'status:SECURED', 'status:CONFIRMED', 'status:MISSED', 'status:EXPIRED', 'status:RELEASED', 'status:LEFT', 'status:REMOVED', 'status:ENDED',
       'refused:LIVE_HOLD_TOO_SHORT', 'refused:LIVE_TURN_PASSED', 'refused:LIVE_HOLD_ENDED', 'refused:LIVE_PAUSED', 'refused:LIVE_NO_FREE_PIECE', 'refused:LIVE_SIZE_LOCKED',
+      // The after-room: opened, and not, for each reason; refused to anyone but its guests and before its T0; run to each end.
+      'afterRoom:opened', 'afterRoom:skipped:NO_GUESTS', 'afterRoom:skipped:NOT_SOLD_OUT', 'afterRoom:refused:stranger', 'afterRoom:refused:early',
+      'afterRoom:enter:ok', 'afterRoom:status:CONFIRMED', 'afterRoom:status:MISSED', 'afterRoom:end:SOLD_OUT', 'afterRoom:end:CLOSED',
     ]) {
       expect(totals[k] ?? 0, k).toBeGreaterThan(0);
     }
@@ -166,6 +193,17 @@ describe('the LIVE RELEASE engine, simulated', () => {
     const tierPriority = rng.chance(0.8);
     const minTier = rng.chance(0.75) ? 0 : rng.int(1, 2);
     const perAccount = rng.pick([1, 1, 2, 3]);
+    // Half the releases have an after-room: few pieces, so that it sells out often; a delay and a length of its own. Drawn
+    // from a generator of its own, so the release's scenario is the one its seed has always drawn.
+    const arng = new Prng(hashSeed('live-after-room', seed));
+    const afterRoom: AfterRoomPlan | null = arng.chance(0.5)
+      ? {
+          sizes: Array.from({ length: arng.int(1, 2) }, (_, i) => ({ label: `A${i + 1}`, stock: arng.int(i === 0 ? 1 : 0, 3) })),
+          addons: arng.chance(0.5),
+          delay: arng.int(1, 15),
+          length: arng.int(5, 12),
+        }
+      : null;
     f.clock.set(T0 - 6 * MINUTE);
     const r = await createLiveRelease(f, {
       opensAt: new Date(T0),
@@ -178,6 +216,18 @@ describe('the LIVE RELEASE engine, simulated', () => {
       payMinutes,
       perAccount,
       windows,
+      ...(afterRoom
+        ? {
+            afterRoom: {
+              modelId: afterModel,
+              priceMinor: 90_000,
+              sizes: afterRoom.sizes,
+              addons: afterRoom.addons ? [{ label: 'GIFT BOX', priceMinor: 5_000 }] : [],
+              delayMinutes: afterRoom.delay,
+              lengthMinutes: afterRoom.length,
+            },
+          }
+        : {}),
     });
     const chosen = new Set<number>();
     const n = rng.int(3, 16);
@@ -207,18 +257,31 @@ describe('the LIVE RELEASE engine, simulated', () => {
       accountEntries: new Map(),
       lastPress: new Map(),
       prev: null,
-      trace: [`seed ${seed}: sizes ${JSON.stringify(sizes)}, turn ${turnSeconds}s, pay ${payMinutes}min, windows ${JSON.stringify(windows)}, priority ${tierPriority}, minTier ${minTier}, perAccount ${perAccount}`],
+      trace: [
+        `seed ${seed}: sizes ${JSON.stringify(sizes)}, turn ${turnSeconds}s, pay ${payMinutes}min, windows ${JSON.stringify(windows)}, priority ${tierPriority}, minTier ${minTier}, perAccount ${perAccount}, afterRoom ${JSON.stringify(afterRoom)}`,
+      ],
       stats: {},
+      afterRoom,
+      phase: 'release',
+      places: new Map(),
+      end: null,
     };
   }
 
   async function run(w: World): Promise<void> {
-    const { rng } = w;
     w.f.clock.set(T0 - 6 * MINUTE);
     w.prev = await snapshot(w);
     for (const p of w.people.filter((x) => x.interested)) {
       await step(w, 'interest', () => w.live.setInterest(p.id, w.dropId, w.r.sizes[p.size]!.id, { type: 'account', id: p.id }));
     }
+    await live(w);
+    count(w, `end:${w.prev!.drop.ended_reason}`);
+    if (w.afterRoom) await afterRoom(w);
+  }
+
+  /** The steps of the release (or of its after-room) until it is over, with a reason. */
+  async function live(w: World): Promise<void> {
+    const { rng } = w;
     for (let i = 0; i < MAX_STEPS; i++) {
       // Small steps while turns and holds run (most are taken), larger ones otherwise; now and then an outage.
       const jump = rng.float();
@@ -254,7 +317,83 @@ describe('the LIVE RELEASE engine, simulated', () => {
     await tick(w);
     expect(await over(w), 'over').toBe(true);
     expect(w.prev!.drop.ended_reason, 'ended').not.toBeNull();
-    count(w, `end:${w.prev!.drop.ended_reason}`);
+  }
+
+  /**
+   * The release over, its after-room: opened at its sell-out for exactly those it ENDED in the line, in that order, or
+   * cancelled at its end; opened, run as a release of its own by its guests (strangers and early guests refused).
+   */
+  async function afterRoom(w: World): Promise<void> {
+    const { rng } = w;
+    const plan = w.afterRoom!;
+    const parent = w.prev!.drop;
+    const end = w.end!;
+    const child = await w.f.db.selectFrom('drops').selectAll().where('parent_drop_id', '=', w.dropId).executeTakeFirstOrThrow();
+    const guests = await w.f.db
+      .selectFrom('after_room_guests as g')
+      .innerJoin('live_entries as e', 'e.id', 'g.entry_id')
+      .select(['g.entry_id', 'g.position', 'g.remembered_at', 'e.account_id'])
+      .where('g.drop_id', '=', child.id)
+      .orderBy('g.position')
+      .execute();
+    expect(end.at, 'the end is the release’s').toEqual(parent.ended_at);
+    if (end.reason !== 'SOLD_OUT' || end.waiting.length === 0) {
+      // Never opened: cancelled when the release ended, nobody remembered.
+      expect(child.published_at, 'not opened').toBeNull();
+      expect(child.cancelled_at, 'cancelled at the end').toEqual(parent.ended_at);
+      expect(guests).toEqual([]);
+      count(w, `afterRoom:skipped:${end.reason === 'SOLD_OUT' ? 'NO_GUESTS' : 'NOT_SOLD_OUT'}`);
+      return;
+    }
+    // Opened at the sell-out for those it ENDED in the line, in that order; its T0 its delay later, its length after that.
+    expect(guests.map((g) => g.entry_id), 'the guests: the line at the sell-out, in order').toEqual(end.waiting);
+    expect(guests.map((g) => g.position)).toEqual(guests.map((_, i) => i + 1));
+    for (const g of guests) expect(g.remembered_at).toEqual(parent.ended_at);
+    const opens = parent.ended_at!.getTime() + plan.delay * MINUTE;
+    expect(child).toMatchObject({ published_at: parent.ended_at, cancelled_at: null, opens_at: new Date(opens), closes_at: new Date(opens + plan.length * MINUTE) });
+    count(w, 'afterRoom:opened');
+
+    // Its own phase: its id, sizes, add-ons; its guests and their places; its own pauses and presses.
+    const sizes = await w.f.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', child.id).orderBy('position').execute();
+    const addons = await w.f.db.selectFrom('live_addons').select(['id', 'label', 'price_minor']).where('drop_id', '=', child.id).orderBy('position').execute();
+    const tiers = new Map(w.people.map((p) => [p.id, p.tier]));
+    const strangers = w.people.filter((p) => !guests.some((g) => g.account_id === p.id));
+    w.phase = 'afterRoom';
+    w.dropId = child.id;
+    w.r = { id: child.id, sizes, addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })), afterRoom: null };
+    w.places = new Map(guests.map((g) => [g.account_id, g.position]));
+    w.pauses = [];
+    w.freed = new Set();
+    w.accountEntries = new Map();
+    w.lastPress = new Map();
+    w.end = null;
+    // Most guests come, at a moment of its opening; some never do.
+    w.people = guests
+      .filter(() => rng.chance(0.85))
+      .map((g) => ({ id: g.account_id, tier: tiers.get(g.account_id)!, arriveAt: opens + rng.int(0, Math.floor(plan.length * MINUTE * 0.6)), size: rng.int(0, sizes.length - 1), quantity: rng.int(1, 2), interested: false, entered: false }));
+    // Its phase starts at a moment between the sell-out and its T0 (the release's own phase ran its clock on to make sure
+    // it was over: nothing of the after-room happened meanwhile, the engine never touching it before its T0).
+    w.f.clock.set(new Date(parent.ended_at!.getTime() + rng.int(0, plan.delay * MINUTE)));
+    w.prev = await snapshot(w);
+    w.trace.push(`after-room ${child.id.slice(0, 8)}: guests ${guests.length}, opens ${iso(opens)}`);
+    // Before its T0, a guest reads an unknown release; at any time, anyone else does.
+    if (w.f.clock.now().getTime() < opens - SECOND) {
+      const g = guests[0]!;
+      const outcome = await step(w, 'enter early', () => w.live.enter(g.account_id, child.id, { sizeId: sizes[0]!.id }, { type: 'account', id: g.account_id }));
+      expect(outcome, 'a guest before its T0').toBe('DROP_NOT_FOUND');
+      count(w, 'afterRoom:refused:early');
+    }
+    w.f.clock.set(new Date(Math.max(w.f.clock.now().getTime(), opens)));
+    for (const p of strangers.slice(0, 2)) {
+      const outcome = await step(w, 'enter stranger', () => w.live.enter(p.id, child.id, { sizeId: sizes[0]!.id }, { type: 'account', id: p.id }));
+      expect(outcome, 'anyone but a guest').toBe('DROP_NOT_FOUND');
+      count(w, 'afterRoom:refused:stranger');
+    }
+    await live(w);
+    count(w, `afterRoom:end:${w.prev!.drop.ended_reason}`);
+    for (const e of w.prev!.entries.values()) count(w, `afterRoom:status:${e.status}`);
+    // It never has an after-room of its own.
+    expect(await w.f.db.selectFrom('drops').select('id').where('parent_drop_id', '=', child.id).execute()).toEqual([]);
   }
 
   async function over(w: World): Promise<boolean> {
@@ -375,7 +514,16 @@ describe('the LIVE RELEASE engine, simulated', () => {
     const after = await snapshot(w);
     w.trace.push(`${iso(after.now)} ${name}${ctx.person ? ` ${ctx.person.id.slice(0, 8)}` : ''}${ctx.hold !== undefined ? ` hold ${ctx.hold}` : ''} → ${outcome}`);
     count(w, `${name}:${outcome}`);
+    if (w.phase === 'afterRoom') count(w, `afterRoom:${name}:${outcome}`);
     if (outcome !== 'ok') count(w, `refused:${outcome}`);
+    // The end begins: the entries it ENDS that were waiting in the room or the line, in the line's order (the after-room's
+    // guests, at a sell-out).
+    if (!before.drop.ended_at && after.drop.ended_at) {
+      const waiting = [...after.entries.values()]
+        .filter((e) => e.status === 'ENDED' && ['WAITING', 'QUEUED'].includes(before.entries.get(e.id)?.status ?? ''))
+        .sort((a, b) => (a.position ?? Infinity) - (b.position ?? Infinity) || a.joined_at.getTime() - b.joined_at.getTime() || (a.id < b.id ? -1 : 1));
+      w.end = { at: after.drop.ended_at, reason: after.drop.ended_reason!, waiting: waiting.map((e) => e.id) };
+    }
     for (const e of after.entries.values()) if (before.entries.get(e.id)?.status !== e.status) count(w, `status:${e.status}`);
     // The console's controls change the pauses' record only when they succeed.
     if (outcome === 'ok' && name === 'pause') w.pauses.push({ from: after.now, to: null });
@@ -404,20 +552,30 @@ describe('the LIVE RELEASE engine, simulated', () => {
     // Per size: TURN + SECURED + CONFIRMED ≤ stock.
     for (const [size, stock] of stockOf) expect(sum(size, ['TURN', 'SECURED', 'CONFIRMED']), `held in size ${size}`).toBeLessThanOrEqual(stock);
 
-    // Unique places; the cohort of T0 in 1..n by the rule; the late ones after it by arrival.
+    // Unique places; the cohort of T0 in 1..n by the rule; the late ones after it by arrival. In an after-room, every
+    // place is the one its guest was given at the sell-out (its order in the release's line), and only a guest has one.
     const placed = entries.filter((e) => e.position !== null).sort((a, b) => a.position! - b.position!);
     expect(new Set(placed.map((e) => e.position)).size).toBe(placed.length);
-    const cohort = placed.filter((e) => e.joined_at.getTime() < opens);
-    const late = placed.filter((e) => e.joined_at.getTime() >= opens);
-    expect(cohort.map((e) => e.position), 'the cohort holds the first places').toEqual(cohort.map((_, i) => i + 1));
-    if (cohort.length > 1) {
-      const seed = openDropSeed(w.f.seedKey, d);
-      expect(cohort.map((e) => e.id), 'the cohort by tier then seed').toEqual(lineOrder(cohort, seed, w.tierPriority).map((e) => e.id));
-      seed.fill(0);
+    if (w.phase === 'afterRoom') {
+      for (const e of entries) {
+        expect(w.places.has(e.account_id), 'only a guest enters the after-room').toBe(true);
+        expect(e.position, 'the guest at its place').toBe(w.places.get(e.account_id));
+        expect(e.joined_at.getTime(), 'never before its T0').toBeGreaterThanOrEqual(opens);
+      }
     }
-    for (const e of cohort) expect(e.tier, 'the tier at T0').toBe(w.people.find((p) => p.id === e.account_id)!.tier);
-    expect(late.map((e) => e.id), 'the late ones by arrival').toEqual([...late].sort((a, b) => a.joined_at.getTime() - b.joined_at.getTime() || (a.id < b.id ? -1 : 1)).map((e) => e.id));
-    if (cohort.length && late.length) expect(late[0]!.position).toBeGreaterThan(cohort.length);
+    if (w.phase === 'release') {
+      const cohort = placed.filter((e) => e.joined_at.getTime() < opens);
+      const late = placed.filter((e) => e.joined_at.getTime() >= opens);
+      expect(cohort.map((e) => e.position), 'the cohort holds the first places').toEqual(cohort.map((_, i) => i + 1));
+      if (cohort.length > 1) {
+        const seed = openDropSeed(w.f.seedKey, d);
+        expect(cohort.map((e) => e.id), 'the cohort by tier then seed').toEqual(lineOrder(cohort, seed, w.tierPriority).map((e) => e.id));
+        seed.fill(0);
+      }
+      for (const e of cohort) expect(e.tier, 'the tier at T0').toBe(w.people.find((p) => p.id === e.account_id)!.tier);
+      expect(late.map((e) => e.id), 'the late ones by arrival').toEqual([...late].sort((a, b) => a.joined_at.getTime() - b.joined_at.getTime() || (a.id < b.id ? -1 : 1)).map((e) => e.id));
+      if (cohort.length && late.length) expect(late[0]!.position).toBeGreaterThan(cohort.length);
+    }
     if (now < opens) expect(placed, 'no place before T0').toEqual([]);
 
     // Add-ons only on a held or confirmed piece.
@@ -450,7 +608,7 @@ describe('the LIVE RELEASE engine, simulated', () => {
     for (const e of entries) {
       const was = before.entries.get(e.id);
       // Legal transitions only.
-      if (!was) expect(['WAITING', 'QUEUED'], `a new entry ${e.status}`).toContain(e.status);
+      if (!was) expect(w.phase === 'afterRoom' ? ['QUEUED'] : ['WAITING', 'QUEUED'], `a new entry ${e.status}`).toContain(e.status);
       else {
         expect(LEGAL[was.status], `${was.status} → ${e.status} by ${name}`).toContain(e.status);
         if (was.status === 'LEFT' && e.status !== 'LEFT') expect(was.position, 'back in the line').toBeNull();

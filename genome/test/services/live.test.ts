@@ -929,7 +929,7 @@ describe('LiveService', () => {
       expect(xa.liveInterest).toEqual([{ dropId: past.id, title: 'LIVE', size: '52', since: new Date('2026-11-01T12:00:00Z') }]);
       // Never the network's hash, nor who let it in, removed it or concluded it.
       expect(Object.keys(xa.liveEntries[0]!).sort()).toEqual([
-        'addons', 'confirmedAt', 'country', 'currency', 'dropId', 'endedAt', 'entryId', 'gestureMs', 'handledAt', 'holdExpiresAt', 'joinedAt', 'letIn', 'position',
+        'addons', 'afterRoomPlace', 'confirmedAt', 'country', 'currency', 'dropId', 'endedAt', 'entryId', 'gestureMs', 'handledAt', 'holdExpiresAt', 'joinedAt', 'letIn', 'position',
         'pressStartedAt', 'priceMinor', 'quantity', 'queuedAt', 'resolution', 'resolutionNote', 'securedAt', 'size', 'status', 'tier', 'title', 'turnAt', 'turnExpiresAt',
       ]);
       expect(xa.notIncluded).toContain('The network behind each entry of a LIVE RELEASE: only a keyed one-way hash of its prefix is kept, and erased 30 days after the release.');

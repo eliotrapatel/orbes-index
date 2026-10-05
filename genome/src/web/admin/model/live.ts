@@ -5,7 +5,7 @@
  *  - Where a release stands, said as the console says it (DRAFT, SCHEDULED, ANNOUNCED, ROOM OPEN, LIVE, SOLD OUT,
  *    CLOSED, ENDED, CANCELLED), its tone, and one line under the page's title.
  *  - The dialogs of its settings, one per part (the release, its sizes, its access, its times, its turns and holds, its
- *    add-ons): their values as the form holds them (times as `datetime-local` values read in UTC, prices in units, the
+ *    add-ons, its after-room): their values as the form holds them (times as `datetime-local` values read in UTC, prices in units, the
  *    sizes one per line `52 = 3`, the add-ons one per line `ENGRAVING | 150 | Your initials, by hand`), what the server
  *    would refuse before anything is sent, and the change to send (the lists with the ids they keep).
  *  - What each role may do now: edit until the announcement, publish, cancel before the room opens, the silhouette and
@@ -13,11 +13,27 @@
  *    host message; ADMIN: end now with a typed phrase, remove from the line). Client Services follows each confirmed
  *    reservation on the Orders board (plan LIVE RELEASE+: model/orders.ts).
  *  - The live board's figures, and a reservation's reference.
+ *  - The after-room (plan LIVE RELEASE+, choice 2): where it stands and why it never opened, said; its own page has the
+ *    live board and controls, never a setting, a publication, a cancellation or a board link of its own.
  */
 import { formatCount, formatDateTime } from '../format.js';
 import { can } from './permissions.js';
 import { localUtc, tierName, utcInstant } from './club.js';
-import { LIVE_CURRENCIES, type AdminRole, type LiveBoard, type LiveCard, type LiveCurrency, type LiveEntry, type LivePhase, type LiveRelease, type LiveSettings, type LiveSettingsChange } from '../types.js';
+import {
+  LIVE_CURRENCIES,
+  type AdminRole,
+  type AfterRoomSkip,
+  type LiveAfterRoom,
+  type LiveAfterRoomSettings,
+  type LiveBoard,
+  type LiveCard,
+  type LiveCurrency,
+  type LiveEntry,
+  type LivePhase,
+  type LiveRelease,
+  type LiveSettings,
+  type LiveSettingsChange,
+} from '../types.js';
 
 /** The bounds of services/live.ts and services/live-console.ts (test/web/admin.model.test.ts compares them). */
 export const LIVE_LIMITS = Object.freeze({
@@ -42,18 +58,24 @@ export const LIVE_LIMITS = Object.freeze({
   accessModels: 20,
   /** The open entries the live board carries. */
   line: 200,
+  /** The after-room (services/after-room.ts): it opens this long after the sell-out, open this long, in minutes. */
+  afterRoomDelay: Object.freeze({ min: 1, max: 60, default: 10 }),
+  afterRoomLength: Object.freeze({ min: 5, max: 120, default: 15 }),
 });
 
 // ── Where a release stands ─────────────────────────────────────────────────
 
-/** A release's state as the console says it: its phase, an ended one by its reason. */
-export function liveStateLabel(r: Pick<LiveCard, 'phase' | 'endedReason'>): string {
+/** A release's state as the console says it: its phase, an ended one by its reason (an after-room's, its own words). */
+export function liveStateLabel(r: Pick<LiveCard, 'phase' | 'endedReason'>, afterRoom = false): string {
+  // An after-room is never announced: a DRAFT waits for its release's sell-out, then it opens at its time, or never.
+  if (afterRoom && r.phase !== 'ENDED' && r.phase !== 'LIVE') return r.phase === 'DRAFT' ? 'AFTER A SELL-OUT' : r.phase === 'CANCELLED' ? 'NOT OPENED' : 'OPENS SOON';
   if (r.phase === 'ENDED') return r.endedReason === 'SOLD_OUT' ? 'SOLD OUT' : r.endedReason === 'ENDED' ? 'ENDED' : 'CLOSED';
   return { DRAFT: 'DRAFT', HIDDEN: 'SCHEDULED', ANNOUNCED: 'ANNOUNCED', ROOM: 'ROOM OPEN', LIVE: 'LIVE', CANCELLED: 'CANCELLED' }[r.phase];
 }
 
 /** One line under the page's title: what the release's phase asks of the staff now. */
-export function liveLead(r: Pick<LiveRelease, 'phase' | 'over' | 'endedReason'>): string {
+export function liveLead(r: Pick<LiveRelease, 'phase' | 'over' | 'endedReason'> & { afterRoomOf?: LiveRelease['afterRoomOf'] }): string {
+  if (r.afterRoomOf) return afterRoomLead(r);
   switch (r.phase) {
     case 'DRAFT':
       return 'A draft: nothing of it is public. Set every part of it, then publish it: it is announced at its time, each stage revealed at its own.';
@@ -72,6 +94,52 @@ export function liveLead(r: Pick<LiveRelease, 'phase' | 'over' | 'endedReason'>)
     default:
       return 'Cancelled before its room opened: its page answers that it is not known.';
   }
+}
+
+/** The after-room's own page: what it is now. Its settings are its release's. */
+function afterRoomLead(r: Pick<LiveRelease, 'phase' | 'over'>): string {
+  switch (r.phase) {
+    case 'DRAFT':
+      return 'The after-room of the release above: it opens only if that release sells out, for those still in its line, in their order. It is set with that release.';
+    case 'CANCELLED':
+      return 'Never opened: the release did not sell out with anyone left in its line, or was cancelled.';
+    case 'LIVE':
+      return 'Open: its guests enter with their size and take their turns in the order of the release’s line. Nobody else sees it.';
+    case 'ENDED':
+      return r.over
+        ? 'Over: each confirmed reservation is an order, on the Orders board.'
+        : 'Ending: no new turn; the turns and holds still running finish at their deadlines.';
+    default:
+      return 'Opened by the release’s sell-out for those still in its line: they see its door at its opening, below. Nobody else sees it.';
+  }
+}
+
+/** Where an after-room stands, as the release's page says it. */
+export function afterRoomStateLabel(a: Pick<LiveAfterRoom, 'state' | 'endedReason'>): string {
+  switch (a.state) {
+    case 'WAITING':
+      return 'AFTER A SELL-OUT';
+    case 'OPENS':
+      return 'OPENS SOON';
+    case 'OPEN':
+      return 'OPEN';
+    case 'OVER':
+      return a.endedReason === 'SOLD_OUT' ? 'SOLD OUT' : a.endedReason === 'ENDED' ? 'ENDED' : 'CLOSED';
+    default:
+      return 'NOT OPENED';
+  }
+}
+
+/** Why an after-room never opened, in words. */
+export const AFTER_ROOM_SKIPS: Readonly<Record<AfterRoomSkip, string>> = Object.freeze({
+  NO_GUESTS: 'Nobody was left in the line at the sell-out.',
+  NOT_SOLD_OUT: 'The release ended without selling out.',
+  CANCELLED: 'The release was cancelled.',
+});
+
+/** When an after-room opens and for how long: `10 min after the sell-out, open 15 min`. */
+export function afterRoomTiming(a: Pick<LiveAfterRoom, 'delayMinutes' | 'lengthMinutes'>): string {
+  return `${a.delayMinutes} min after the sell-out, open ${a.lengthMinutes} min`;
 }
 
 // ── Money and lines ────────────────────────────────────────────────────────
@@ -251,7 +319,7 @@ export function newLiveInput(v: Record<string, string>): LiveSettings {
 }
 
 /** The parts of a release's settings, each its own dialog. */
-export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'addons';
+export type LivePart = 'release' | 'sizes' | 'access' | 'times' | 'turns' | 'addons' | 'afterRoom';
 
 /** A part's values, as its dialog's form holds them. */
 export function livePartValues(r: LiveRelease, part: LivePart): Record<string, string> {
@@ -293,6 +361,18 @@ export function livePartValues(r: LiveRelease, part: LivePart): Record<string, s
       };
     case 'addons':
       return { addons: addonsText(r.addons) };
+    case 'afterRoom': {
+      const a = r.afterRoom;
+      return {
+        enabled: a ? 'true' : '',
+        modelId: a?.model.id ?? '',
+        price: a ? moneyField(a.priceMinor) : '',
+        sizes: a ? sizesText(a.sizes) : 'ONE SIZE = 5',
+        addons: a ? addonsText(a.addons) : '',
+        delay: String(a?.delayMinutes ?? LIVE_LIMITS.afterRoomDelay.default),
+        length: String(a?.lengthMinutes ?? LIVE_LIMITS.afterRoomLength.default),
+      };
+    }
   }
 }
 
@@ -347,6 +427,21 @@ export function livePartProblem(r: LiveRelease, part: LivePart, v: Record<string
     case 'addons': {
       const addons = parseAddons(v.addons, r.addons);
       return 'problem' in addons ? addons.problem : null;
+    }
+    case 'afterRoom': {
+      if (v.enabled !== 'true') return null;
+      if (!v.modelId) return 'Choose the after-room’s model.';
+      const price = parseMoney(v.price);
+      if (price === null || price > LIVE_LIMITS.priceMaxMinor) return 'The after-room’s price of a piece, in units (4800, or 4800.50).';
+      const sizes = parseSizes(v.sizes, r.afterRoom?.sizes ?? []);
+      if ('problem' in sizes) return `The after-room: ${sizes.problem.charAt(0).toLowerCase()}${sizes.problem.slice(1)}`;
+      const addons = parseAddons(v.addons, r.afterRoom?.addons ?? []);
+      if ('problem' in addons) return `The after-room: ${addons.problem.charAt(0).toLowerCase()}${addons.problem.slice(1)}`;
+      const d = LIVE_LIMITS.afterRoomDelay;
+      if (inRange(v.delay, d) === null) return `The after-room opens ${d.min} to ${d.max} minutes after the sell-out.`;
+      const l = LIVE_LIMITS.afterRoomLength;
+      if (inRange(v.length, l) === null) return `The after-room is open ${l.min} to ${l.max} minutes.`;
+      return null;
     }
   }
 }
@@ -422,6 +517,33 @@ export function livePartChange(r: LiveRelease, part: LivePart, v: Record<string,
       if (JSON.stringify(addons.map((a) => [a.id ?? null, a.label, a.line, a.priceMinor])) !== JSON.stringify(r.addons.map((a) => [a.id, a.label, a.line, a.priceMinor]))) out.addons = addons;
       return out;
     }
+    case 'afterRoom': {
+      const a = r.afterRoom;
+      if (v.enabled !== 'true') {
+        if (a) out.afterRoom = null;
+        return out;
+      }
+      const next: LiveAfterRoomSettings = {
+        modelId: v.modelId,
+        priceMinor: parseMoney(v.price)!,
+        sizes: (parseSizes(v.sizes, a?.sizes ?? []) as { sizes: { id?: string; label: string; stock: number }[] }).sizes,
+        addons: (parseAddons(v.addons, a?.addons ?? []) as { addons: { id?: string; label: string; line: string | null; priceMinor: number }[] }).addons,
+        delayMinutes: Number(v.delay),
+        lengthMinutes: Number(v.length),
+      };
+      const shape = (x: LiveAfterRoomSettings) =>
+        JSON.stringify([
+          x.modelId,
+          x.priceMinor,
+          x.sizes.map((s) => [s.id ?? null, s.label, s.stock]),
+          (x.addons ?? []).map((y) => [y.id ?? null, y.label, y.line ?? null, y.priceMinor]),
+          x.delayMinutes,
+          x.lengthMinutes,
+        ]);
+      const now: LiveAfterRoomSettings | null = a ? { modelId: a.model.id, priceMinor: a.priceMinor, sizes: a.sizes, addons: a.addons, delayMinutes: a.delayMinutes, lengthMinutes: a.lengthMinutes } : null;
+      if (!now || shape(now) !== shape(next)) out.afterRoom = next;
+      return out;
+    }
   }
 }
 
@@ -452,18 +574,20 @@ export interface LiveActions {
  * What `role` may do to the release in its phase (the server checks again; this hides only what would be refused). The
  * phase is the server's, on its clock: the page is read again when its board's stream brings another (`livePageKey`).
  */
-export function liveActions(r: Pick<LiveRelease, 'phase' | 'editable' | 'publishedAt' | 'pausedAt'>, role: AdminRole | null | undefined): LiveActions {
+export function liveActions(r: Pick<LiveRelease, 'phase' | 'editable' | 'publishedAt' | 'pausedAt'> & { afterRoomOf?: LiveRelease['afterRoomOf'] }, role: AdminRole | null | undefined): LiveActions {
   const manage = can(role, 'manageDrops');
+  // An after-room is set, published and cancelled with its release; it has no board link: its live controls only.
+  const own = !r.afterRoomOf;
   const published = r.publishedAt !== null && hasBoard(r.phase);
   // Published and not ended: HIDDEN, ANNOUNCED, ROOM or LIVE.
   const running = published && r.phase !== 'ENDED';
   const announced = running && r.phase !== 'HIDDEN';
   return {
-    edit: manage && r.editable,
-    publish: manage && r.phase === 'DRAFT',
-    cancel: manage && (r.phase === 'DRAFT' || r.phase === 'HIDDEN' || r.phase === 'ANNOUNCED'),
-    circlePost: manage && r.phase === 'HIDDEN' && r.editable,
-    boardLink: manage && r.phase !== 'CANCELLED',
+    edit: manage && r.editable && own,
+    publish: manage && r.phase === 'DRAFT' && own,
+    cancel: manage && (r.phase === 'DRAFT' || r.phase === 'HIDDEN' || r.phase === 'ANNOUNCED') && own,
+    circlePost: manage && r.phase === 'HIDDEN' && r.editable && own,
+    boardLink: manage && r.phase !== 'CANCELLED' && own,
     pause: manage && r.phase === 'LIVE' && r.pausedAt === null,
     resume: manage && r.pausedAt !== null && published,
     extend: manage && running,

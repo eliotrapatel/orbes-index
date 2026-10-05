@@ -548,6 +548,8 @@ export interface LiveSheet extends Omit<LiveCard, 'phase'> {
   turnSeconds: number;
   payMinutes: number;
   tierPriority: boolean;
+  /** An after-room's page (GET /api/v1/live/:id/after-room): the release it follows; absent on a release's own. */
+  afterRoom?: AfterRoomOf;
 }
 
 /** A LIVE RELEASE's page once it has ended: only that it has. */
@@ -555,6 +557,21 @@ export interface LiveEndedSheet {
   id: string;
   kind: 'LIVE';
   phase: 'ENDED';
+  afterRoom?: AfterRoomOf;
+}
+
+/** The release an after-room follows (plan LIVE RELEASE+, choice 2): its page is read through that release's. */
+export interface AfterRoomOf {
+  parentId: string;
+}
+
+/**
+ * The second door (an entry's `afterRoom`): on an entry the release's sell-out ENDED while in its line, from the sell-out
+ * until the after-room ends, when the door appears and when it closes; the entry's own, nobody else's.
+ */
+export interface AfterRoomDoor {
+  opensAt: string;
+  closesAt: string;
 }
 
 /** The banner of /verify and MY PIECES (GET /api/v1/live/next): the release live now, else the room open, else the next. */
@@ -641,6 +658,8 @@ export interface LiveEntry {
   currency: string;
   priceMinor: number;
   totalMinor: number;
+  /** ENDED by the sell-out while in the line: the after-room's door; null otherwise. */
+  afterRoom?: AfterRoomDoor | null;
 }
 
 /** The account against the release's rule now. */
@@ -677,6 +696,8 @@ export interface LiveAccountEntry {
     imageUrl: string | null;
     opensAt: string;
     closesAt: string;
+    /** An after-room's: the release it follows; null otherwise. */
+    afterRoomOf: string | null;
   };
   entry: LiveEntry;
 }

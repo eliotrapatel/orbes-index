@@ -355,6 +355,25 @@ describe('ApiClient', () => {
     for (const c of acts) expect(c.headers['x-csrf-token']).toBe('tok');
   });
 
+  it('LIVE RELEASE: the after-room read through the release it follows, a session\'s answer; anything else is a bad response', async () => {
+    const PARENT = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
+    const CHILD = '8a1e0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
+    const f = fakeFetch([
+      () => json(200, { id: CHILD, kind: 'LIVE', phase: 'ENDED', afterRoom: { parentId: PARENT } }),
+      () => json(404, { error: { code: 'DROP_NOT_FOUND', message: 'This release is not known to ORBES.' } }),
+      () => json(200, { id: CHILD, kind: 'LIVE', phase: 'ENDED' }),
+      () => json(200, { id: CHILD, kind: 'LIVE', phase: 'ENDED', afterRoom: { parentId: CHILD } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.liveAfterRoom(PARENT)).toEqual({ id: CHILD, kind: 'LIVE', phase: 'ENDED', afterRoom: { parentId: PARENT } });
+    expect(f.calls[0]).toMatchObject({ method: 'GET', url: `/api/v1/live/${PARENT}/after-room` });
+    expect(f.calls[0].headers['x-csrf-token']).toBeUndefined();
+    await expect(api.liveAfterRoom(PARENT)).rejects.toMatchObject({ status: 404, code: 'DROP_NOT_FOUND' });
+    // A release's own page, or another release's after-room: never taken for this one's.
+    await expect(api.liveAfterRoom(PARENT)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.liveAfterRoom(PARENT)).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+  });
+
   it('LIVE RELEASE: the banner; I’LL BE THERE said, changed and withdrawn with the CSRF header; the board by its secret in a POST body', async () => {
     const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
     const SECRET = 'A'.repeat(43);

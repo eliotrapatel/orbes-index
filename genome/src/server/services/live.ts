@@ -33,6 +33,12 @@
  *              confirmed. `ended_at` and `ended_reason` say when it began; the release is over once no turn and no hold
  *              is left. EXTEND moves `closes_at`, ADD PIECES raises a size's stock, before the end only.
  *
+ * The after-room (after-room.ts, plan LIVE RELEASE+): a child LIVE RELEASE (`parent_drop_id`) that a release's sell-out
+ * opens for the entries it ENDS, remembered then (`endRelease`, before they are ENDED). It is seen from its T0 by its
+ * guests only (`lockAnnouncedLive`: anyone else, and a guest before it, reads an unknown release); a guest ENTERS with
+ * a size straight into its line, at the place it was given (its order in the parent's line); then the turns, the hold,
+ * the add-ons and PAY as above, with the parent's per-tier windows. It has no boutique board.
+ *
  * Access (`accessOf`), read at INTEREST, ENTER and SECURE: an ACTIVE account whose tier (club.ts `tierOf`, the pieces
  * held now) reaches `live_min_tier`, and, when the release names models (`live_access_models`) or a collection
  * (`access_collection_id`), holding now a piece of one of them (a piece's own collection first, its model's otherwise).
@@ -67,6 +73,7 @@ import { isUniqueViolation } from '../db/pg-errors.js';
 import type { DropRow, LiveEndReason, LiveEntryStatus, LiveResolution } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
+import { afterRoomDoors, afterRoomPlace, isAfterRoom, settleAfterRoom, type AfterRoomDoor } from './after-room.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { CLUB_EXCLUDED_STATUSES, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
@@ -298,6 +305,7 @@ const entryNotQueued = () => conflict('LIVE_ENTRY_NOT_QUEUED', 'Only an entry wa
 const entryNotSecured = () => conflict('LIVE_ENTRY_NOT_SECURED', 'Only a held piece can be freed.');
 const entryClosed = () => conflict('LIVE_ENTRY_CLOSED', 'This entry is no longer in the release.');
 const noBoardLink = () => conflict('LIVE_NO_BOARD_LINK', 'This release has no board link.');
+const afterRoomBoard = () => conflict('LIVE_AFTER_ROOM', 'An after-room has no board: nobody but its guests ever sees it.');
 
 /** 403 LIVE_NOT_ELIGIBLE: the rule of the release, in words. */
 export const liveNotEligible = (rule: LiveAccessRule) => new DomainError('LIVE_NOT_ELIGIBLE', 403, `This release is for ${liveRuleText(rule)}.`);
@@ -455,6 +463,11 @@ export interface LiveEntryView {
   priceMinor: number;
   /** quantity × (price + the add-ons). */
   totalMinor: number;
+  /**
+   * ENDED by the release's sell-out while in its line: its after-room's door (when it appears, when it closes), from the
+   * sell-out until the after-room ends; null otherwise (and for anyone else: an entry's own).
+   */
+  afterRoom: AfterRoomDoor | null;
 }
 
 /** An account's interest (I'LL BE THERE). */
@@ -643,6 +656,8 @@ export interface ExportedLiveEntry {
   resolution: LiveResolution | null;
   handledAt: Date | null;
   resolutionNote: string | null;
+  /** Still in the line at the release's sell-out: its place in the release's after-room (after-room.ts), else null. */
+  afterRoomPlace: number | null;
 }
 
 export interface ExportedLiveInterest {
@@ -675,6 +690,9 @@ export async function accountLiveData(db: Db, accountId: string): Promise<{ entr
         .where('x.entry_id', 'in', rows.map((r) => r.id))
         .orderBy('a.position')
         .execute()
+    : [];
+  const guests = rows.length
+    ? await db.selectFrom('after_room_guests').select(['entry_id', 'position']).where('entry_id', 'in', rows.map((r) => r.id)).execute()
     : [];
   const interest = await db
     .selectFrom('live_interest as i')
@@ -713,6 +731,7 @@ export async function accountLiveData(db: Db, accountId: string): Promise<{ entr
       resolution: r.resolution,
       handledAt: r.handled_at,
       resolutionNote: r.resolution_note,
+      afterRoomPlace: guests.find((g) => g.entry_id === r.id)?.position ?? null,
     })),
     interest: interest.map((i) => ({ dropId: i.drop_id, title: i.title, size: i.label, since: i.created_at })),
   };
@@ -782,6 +801,7 @@ export async function liveEntryViews(
       ),
     )
   ).flat();
+  const doors = await afterRoomDoors(db, rows.filter((r) => r.status === 'ENDED').map((r) => r.id));
   const queued = rows.filter((r) => r.status === 'QUEUED');
   const ahead = new Map<string, number>();
   for (const ids of chunks(queued.map((r) => r.id))) {
@@ -827,6 +847,7 @@ export async function liveEntryViews(
       currency: r.currency ?? 'EUR',
       priceMinor: price,
       totalMinor: r.quantity * unit,
+      afterRoom: doors.get(r.id) ?? null,
     });
   }
   return out;
@@ -908,6 +929,7 @@ export class LiveService {
     const now = this.clock();
     const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').where('published_at', 'is not', null).executeTakeFirst();
     if (!d || !isAnnounced(d, now)) throw dropNotFound();
+    if (isAfterRoom(d) && (await afterRoomPlace(this.db, d, account, now)) === null) throw dropNotFound();
     return { rule: await liveAccessRule(this.db, d, now), access: await accessOf(this.db, d, account, now) };
   }
 
@@ -949,7 +971,7 @@ export class LiveService {
     const country = typeof client.country === 'string' && /^[A-Z]{2}$/.test(client.country) ? client.country : null;
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update');
+      const { d, now, place } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const notes: AuditRecordInput[] = [];
       if (d.cancelled_at) throw liveCancelled();
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveOver();
@@ -965,8 +987,12 @@ export class LiveService {
         const total = (await this.sizeTotals(tx, d.id)).find((s) => s.id === size.id)!;
         if (quantity > servableOf(total)) throw sizeSoldOut();
       }
-      const place = late ? { status: 'QUEUED' as const, position: (await this.lastPosition(tx, id)) + 1, queued_at: now } : { status: 'WAITING' as const, position: null, queued_at: null };
-      const values = { size_id: size.id, quantity, tier: access.tier, joined_at: now, ended_at: null, network_hash: networkHash, country, ...place };
+      // An after-room's guest takes the place it was given at the sell-out (its order in the parent's line); anyone after
+      // T0 the next place behind the line.
+      const slot = late
+        ? { status: 'QUEUED' as const, position: place ?? (await this.lastPosition(tx, id)) + 1, queued_at: now }
+        : { status: 'WAITING' as const, position: null, queued_at: null };
+      const values = { size_id: size.id, quantity, tier: access.tier, joined_at: now, ended_at: null, network_hash: networkHash, country, ...slot };
       let entryId: string;
       if (existing) {
         await tx.updateTable('live_entries').set(values).where('id', '=', existing.id).where('status', '=', 'LEFT').execute();
@@ -984,7 +1010,7 @@ export class LiveService {
         action: 'drop.live.enter',
         targetType: 'drop',
         targetId: id,
-        details: { entryId, sizeId: size.id, quantity, ...(late ? { position: place.position } : {}), ...(existing ? { again: true } : {}) },
+        details: { entryId, sizeId: size.id, quantity, ...(late ? { position: slot.position } : {}), ...(existing ? { again: true } : {}) },
       });
       await this.record(tx, notes);
     });
@@ -1000,7 +1026,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update');
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       if (d.cancelled_at) throw liveCancelled();
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveOver();
       const e = await this.lockEntry(tx, id, account);
@@ -1025,7 +1051,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update');
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const e = await this.lockEntry(tx, id, account);
       if (!e) throw notEntered();
       if (e.status !== 'WAITING' && e.status !== 'QUEUED' && e.status !== 'TURN') throw notInLine();
@@ -1047,7 +1073,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share');
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share', account);
       if (d.cancelled_at) throw liveCancelled();
       if (d.ended_at || now.getTime() >= d.opens_at.getTime()) throw interestClosed();
       const access = await accessOf(tx, d, account, now);
@@ -1071,7 +1097,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share');
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share', account);
       if (now.getTime() >= d.opens_at.getTime()) throw interestClosed();
       const r = await tx.deleteFrom('live_interest').where('drop_id', '=', id).where('account_id', '=', account).returning('size_id').executeTakeFirst();
       if (!r) throw notInterested();
@@ -1088,7 +1114,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share');
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share', account);
       const e = await this.runningTurn(tx, d, account, token, now);
       await tx.updateTable('live_entries').set({ press_started_at: now }).where('id', '=', e.id).where('status', '=', 'TURN').execute();
     });
@@ -1106,13 +1132,13 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share');
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share', account);
       const e = await this.runningTurn(tx, d, account, token, now);
       const gesture = e.press_started_at ? now.getTime() - e.press_started_at.getTime() : -1;
       if (gesture < LIVE_GESTURE_MIN_MS) throw holdTooShort();
       const access = await accessOf(tx, d, account, now);
       if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now));
-      const { payMinutes } = windowsFor(d, await this.tierWindows(tx, d.id), e.tier);
+      const { payMinutes } = windowsFor(d, await this.tierWindows(tx, d), e.tier);
       await tx
         .updateTable('live_entries')
         .set({ status: 'SECURED', secured_at: now, hold_expires_at: new Date(now.getTime() + payMinutes * MINUTE_MS), gesture_ms: gesture })
@@ -1135,7 +1161,7 @@ export class LiveService {
     const wanted = [...new Set(addonIds.map((a) => knownId(a, addonUnknown)))].sort();
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share');
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'share', account);
       const e = await this.runningHold(tx, d, account, now);
       const addons = wanted.length ? await tx.selectFrom('live_addons').select(['id', 'price_minor']).where('drop_id', '=', id).where('id', 'in', wanted).execute() : [];
       if (addons.length !== wanted.length) throw addonUnknown();
@@ -1157,7 +1183,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update');
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const e = await this.runningHold(tx, d, account, now);
       await tx.updateTable('live_entries').set({ status: 'CONFIRMED', confirmed_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
       const notes: AuditRecordInput[] = [{ actor, action: 'drop.live.confirm', targetType: 'drop', targetId: id, details: { entryId: e.id, quantity: e.quantity } }];
@@ -1174,7 +1200,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
-      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update');
+      const { d, now } = await this.lockAnnouncedLive(tx, id, 'update', account);
       const e = await this.runningHold(tx, d, account, now);
       await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
       await tx.updateTable('live_entries').set({ status: 'RELEASED', ended_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
@@ -1364,6 +1390,7 @@ export class LiveService {
       const d = await this.lockAnyLive(tx, id);
       const now = this.clock();
       if (d.cancelled_at) throw liveCancelled();
+      if (isAfterRoom(d)) throw afterRoomBoard();
       await tx.updateTable('drops').set({ board_token_hash: liveBoardTokenHash(token), board_token_issued_at: now }).where('id', '=', id).execute();
       await this.audit.record({ actor, action: 'drop.live.board.issue', targetType: 'drop', targetId: id, details: d.board_token_hash ? { replaced: true } : {} }, tx);
       return now;
@@ -1422,28 +1449,11 @@ export class LiveService {
       if (now.getTime() < d.opens_at.getTime()) return out;
       const notes: AuditRecordInput[] = [];
       out.queued = await this.formLine(tx, d, now, notes);
-      if (!d.paused_at) {
-        const missed = await tx
-          .updateTable('live_entries')
-          .set((eb) => ({ status: 'MISSED', ended_at: eb.ref('turn_expires_at') }))
-          .where('drop_id', '=', id)
-          .where('status', '=', 'TURN')
-          .where('turn_expires_at', '<=', now)
-          .returning('id')
-          .execute();
-        const expired = await tx
-          .updateTable('live_entries')
-          .set((eb) => ({ status: 'EXPIRED', ended_at: eb.ref('hold_expires_at') }))
-          .where('drop_id', '=', id)
-          .where('status', '=', 'SECURED')
-          .where('hold_expires_at', '<=', now)
-          .returning('id')
-          .execute();
-        if (expired.length) await tx.deleteFrom('live_entry_addons').where('entry_id', 'in', expired.map((e) => e.id)).execute();
-        out.missed = missed.length;
-        out.expired = expired.length;
-      }
+      if (!d.paused_at) await this.runOut(tx, d, now, out);
+      const paused = d.paused_at !== null;
       out.ended = await this.settleEnd(tx, d, now, notes);
+      // A pause the end has just ended (settleEnd): what ran out before it began is marked now, as a pass after it would.
+      if (paused && !d.paused_at) await this.runOut(tx, d, now, out);
       out.turns = await this.giveTurnsNow(tx, d, now);
       await this.record(tx, notes);
       return out;
@@ -1451,6 +1461,29 @@ export class LiveService {
   }
 
   // ── internals ────────────────────────────────────────────────────────────
+
+  /** The turns and holds that ran out by `now`, marked at their deadlines (MISSED; EXPIRED, add-ons dropped), counted on `out`. */
+  private async runOut(tx: Db, d: LiveDrop, now: Date, out: LiveAdvance): Promise<void> {
+    const missed = await tx
+      .updateTable('live_entries')
+      .set((eb) => ({ status: 'MISSED', ended_at: eb.ref('turn_expires_at') }))
+      .where('drop_id', '=', d.id)
+      .where('status', '=', 'TURN')
+      .where('turn_expires_at', '<=', now)
+      .returning('id')
+      .execute();
+    const expired = await tx
+      .updateTable('live_entries')
+      .set((eb) => ({ status: 'EXPIRED', ended_at: eb.ref('hold_expires_at') }))
+      .where('drop_id', '=', d.id)
+      .where('status', '=', 'SECURED')
+      .where('hold_expires_at', '<=', now)
+      .returning('id')
+      .execute();
+    if (expired.length) await tx.deleteFrom('live_entry_addons').where('entry_id', 'in', expired.map((e) => e.id)).execute();
+    out.missed += missed.length;
+    out.expired += expired.length;
+  }
 
   /** The audit entries of a transaction, written last: no row is locked after the audit chain's lock. */
   private async record(tx: Db, notes: readonly AuditRecordInput[]): Promise<void> {
@@ -1474,12 +1507,17 @@ export class LiveService {
   /**
    * A customer's action: the release's row (lockLive), then the clock; before its announcement the same 404 as an
    * unknown release, whatever else is true of it (a cancellation included), so an id says nothing of a release to come.
+   * An after-room answers so to everyone but its guests, and to them before its T0 (after-room.ts afterRoomPlace);
+   * `place` is then the guest's place in its line.
    */
-  private async lockAnnouncedLive(tx: Db, id: string, lock: Lock): Promise<{ d: LiveDrop; now: Date }> {
+  private async lockAnnouncedLive(tx: Db, id: string, lock: Lock, accountId: string): Promise<{ d: LiveDrop; now: Date; place: number | null }> {
     const d = await this.lockLive(tx, id, lock);
     const now = this.clock();
     if (!isAnnounced(d, now)) throw dropNotFound();
-    return { d, now };
+    if (!isAfterRoom(d)) return { d, now, place: null };
+    const place = await afterRoomPlace(tx, d, accountId, now);
+    if (place === null) throw dropNotFound();
+    return { d, now, place };
   }
 
   /** A LIVE RELEASE's row FOR UPDATE, published or not; anything else is the same 404 as an unknown release. */
@@ -1537,8 +1575,9 @@ export class LiveService {
     return Number(r.top ?? 0);
   }
 
-  private async tierWindows(tx: Db, dropId: string): Promise<LiveTierWindow[]> {
-    return tx.selectFrom('live_tier_windows').select(['tier', 'turn_seconds', 'pay_minutes']).where('drop_id', '=', dropId).execute();
+  /** The per-tier windows of a release; an after-room's are its parent's (it inherits the turn and pay windows). */
+  private async tierWindows(tx: Db, d: Pick<LiveDrop, 'id' | 'parent_drop_id'>): Promise<LiveTierWindow[]> {
+    return tx.selectFrom('live_tier_windows').select(['tier', 'turn_seconds', 'pay_minutes']).where('drop_id', '=', d.parent_drop_id ?? d.id).execute();
   }
 
   /** Each size of the release with the quantities of its entries in TURN, SECURED and CONFIRMED. */
@@ -1626,6 +1665,9 @@ export class LiveService {
    */
   private async endRelease(tx: Db, d: LiveDrop, reason: LiveEndReason, at: Date, actor: Actor, extra: Record<string, unknown>, notes: AuditRecordInput[]): Promise<void> {
     const statuses: LiveEntryStatus[] = reason === 'ENDED' ? ['WAITING', 'QUEUED', 'TURN'] : ['WAITING', 'QUEUED'];
+    // Its after-room first, while the line still says who waits in it: opened for them at a sell-out, never otherwise.
+    const afterRoom: AuditRecordInput[] = [];
+    await settleAfterRoom(tx, d, reason, at, actor, afterRoom);
     await tx.updateTable('drops').set({ ended_at: at, ended_reason: reason }).where('id', '=', d.id).execute();
     d.ended_at = at;
     d.ended_reason = reason;
@@ -1636,7 +1678,7 @@ export class LiveService {
       .where('status', 'in', statuses)
       .returning('id')
       .execute();
-    notes.push({ actor, action: 'drop.live.end', targetType: 'drop', targetId: d.id, details: { reason, at: at.toISOString(), ended: ended.length, ...extra } });
+    notes.push({ actor, action: 'drop.live.end', targetType: 'drop', targetId: d.id, details: { reason, at: at.toISOString(), ended: ended.length, ...extra } }, ...afterRoom);
   }
 
   /**
@@ -1704,7 +1746,7 @@ export class LiveService {
 
   /** Turns for `entries` (QUEUED), each with its tier's turn window and its secret's hash; `letInBy` for a LET IN. */
   private async grant(tx: Db, d: LiveDrop, entries: readonly EntryRow[], now: Date, letInBy: string | null): Promise<void> {
-    const overrides = await this.tierWindows(tx, d.id);
+    const overrides = await this.tierWindows(tx, d);
     for (let i = 0; i < entries.length; i += 500) {
       const values = sql.join(
         entries.slice(i, i + 500).map((e) => {

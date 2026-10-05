@@ -1096,4 +1096,21 @@ export const LIVE = Object.freeze({
     ENDED: 'The release ended before your piece was secured.',
   }),
   reference: (ref: string) => `REFERENCE ${ref}`,
+  /**
+   * The after-room (plan LIVE RELEASE+, choice 2): a second door in the same vault, after a sell-out, for those who were
+   * still in the line, in the same order; announced nowhere else.
+   */
+  afterRoom: Object.freeze({
+    kind: 'THE AFTER-ROOM',
+    title: 'A SECOND DOOR',
+    text: 'You were still in the line when the last piece was secured. Behind this door, another piece is offered to those who were waiting, in the same order, for a short time.',
+    enter: 'ENTER THE AFTER-ROOM',
+    openUntil: (time: string) => `OPEN UNTIL ${time}`,
+    /** In the after-room, before entering its line. */
+    joinLine: 'You keep your place from the line. Choose your size to take it.',
+    confirmedOf: (name: string) => `THE AFTER-ROOM · ${name}`,
+    over: Object.freeze({ title: 'THE AFTER-ROOM IS CLOSED', text: 'Your entry, if you had one, stays in MY PIECES.' }),
+    /** Said aloud when the door appears. */
+    announce: 'A second door has opened.',
+  }),
 });

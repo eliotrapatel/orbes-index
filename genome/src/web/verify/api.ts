@@ -264,6 +264,16 @@ export class ApiClient {
     return this.request<LiveSheet | LiveEndedSheet>('GET', `/api/v1/live/${encodeURIComponent(id)}`);
   }
 
+  /**
+   * The after-room of release `parentId` (plan LIVE RELEASE+, choice 2), for one of its guests from its T0: its page,
+   * whose own id the room's routes then take (401 signed out; 404 for anyone else, before its T0, and without one).
+   */
+  async liveAfterRoom(parentId: string): Promise<LiveSheet | LiveEndedSheet> {
+    const r = await this.request<LiveSheet | LiveEndedSheet>('GET', `/api/v1/live/${encodeURIComponent(parentId)}/after-room`);
+    if (!r || typeof r.id !== 'string' || r.afterRoom?.parentId !== parentId) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
   /** The server's time, for the page's clock sync (one of its three round trips). */
   async liveClock(): Promise<string> {
     const r = await this.request<{ now?: unknown }>('GET', '/api/v1/live/clock', undefined, { timeoutMs: LIVE_CLOCK_TIMEOUT_MS });

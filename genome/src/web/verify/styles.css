@@ -4224,6 +4224,40 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   padding-top: 80px;
 }
 
+/* The second door (plan LIVE RELEASE+): the after-room's, in the same vault, for those still in the line at the
+   sell-out. It appears once, slowly; its lock the seal, its leaves closed until its own page. */
+.live__after {
+  padding-top: 40px;
+}
+
+.live__after .live__title {
+  margin-top: 14px;
+  font-size: var(--fs-heading-lg);
+  line-height: 1.6;
+}
+
+.live-door--after {
+  animation: live-after-in 1.2s var(--ease) both;
+}
+
+@keyframes live-after-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+.live__after-text {
+  max-width: 326px;
+  margin-top: 22px;
+}
+
+.live__after-until {
+  margin-top: 14px;
+}
+
+.btn.live__after-enter {
+  margin-top: 26px;
+}
+
 /* After T0, an account not in the line yet. */
 .live__plate--join {
   margin-top: 22px;
@@ -4947,4 +4981,13 @@ body[data-screen="board"] .corners {
     opacity: 0;
     transform: none;
   }
+  /* The second door fades in where it stands. */
+  .live-door--after {
+    animation-name: live-fade-in;
+  }
+}
+
+@keyframes live-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }

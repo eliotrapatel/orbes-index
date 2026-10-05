@@ -22,6 +22,7 @@ import {
   RELEASES_PATH,
   releaseSheet,
   releasesRouteOf,
+  afterRoomPath,
   tierLabel,
   twoClocks,
 } from '../../src/web/verify/releases-model.js';
@@ -100,6 +101,12 @@ describe('the releases\' addresses (P-R03)', () => {
     expect(releasesRouteOf(`/verify/releases/${ID.toUpperCase()}/BOARD/`)).toEqual({ release: ID, board: true });
     expect(releasesRouteOf('/verify/releases/not-a-release/board')).toEqual({ release: null });
     expect(releasesRouteOf(`/verify/releases/${ID}/boards`)).toEqual({ release: null });
+    // An after-room (plan LIVE RELEASE+): its own route, by the release it follows.
+    expect(releasesRouteOf(`/verify/releases/${ID}/after-room`)).toEqual({ release: ID, afterRoom: true });
+    expect(releasesRouteOf(`/verify/releases/${ID.toUpperCase()}/AFTER-ROOM/`)).toEqual({ release: ID, afterRoom: true });
+    expect(releasesRouteOf('/verify/releases/not-a-release/after-room')).toEqual({ release: null });
+    expect(releasesRouteOf(`/verify/releases/${ID}/after-room/x`)).toEqual({ release: null });
+    expect(afterRoomPath(ID)).toBe(`/verify/releases/${ID}/after-room`);
     expect(releasesRouteOf('/verify/lookbook')).toBeNull();
     expect(releasesRouteOf('/verify/releasesx')).toBeNull();
     expect(isReleaseId(ID)).toBe(true);

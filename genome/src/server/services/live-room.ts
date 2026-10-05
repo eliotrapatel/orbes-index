@@ -25,12 +25,18 @@
  * share of it (the countdown, the door, the pieces left overall: no personal data). `viewer` says who may read it: a
  * signed-in account allowed to enter the release now, or holding an entry in it (a REMOVED one reads its state but
  * follows no stream); never anyone else (spectator mode was declined).
+ *
+ * An after-room (services/after-room.ts, plan LIVE RELEASE+ decision 28) is on no public surface: not in the list, the
+ * banner, the .ics, the boutique board, nor its own public page (each the 404 of an unknown release). Its guests alone
+ * read it, from its T0: its page by its parent's (`afterRoomSheet`, an account's answer, never kept), its room and their
+ * own entry (`viewer`); their own entry in the parent says when the second door appears (live.ts LiveEntryView.afterRoom).
  */
 import { sql } from 'kysely';
 import type { Db } from '../db/connection.js';
 import type { DropRow, LiveEndReason } from '../db/schema.js';
 import { DomainError } from '../errors.js';
 import { systemClock, type Clock } from '../types.js';
+import { afterRoomPlace, isAfterRoom } from './after-room.js';
 import { dropNotFound } from './drops.js';
 import {
   accessOf,
@@ -141,6 +147,9 @@ export interface LiveEndedSheet {
   phase: 'ENDED';
 }
 
+/** An after-room's page, as its guest reads it (`afterRoomSheet`): its own page, and the release it follows. */
+export type LiveAfterRoomSheet = (LiveSheet | LiveEndedSheet) & { afterRoom: { parentId: string } };
+
 /** The banner (GET /api/v1/live/next): LIVE RELEASE · <name once revealed> · OPENS IN … / THE ROOM IS OPEN / LIVE NOW. */
 export interface LiveBanner {
   id: string;
@@ -244,6 +253,8 @@ export interface LiveAccountEntry {
     imageUrl: string | null;
     opensAt: Date;
     closesAt: Date;
+    /** An after-room's: the release it follows (its page is read through that release's); null otherwise. */
+    afterRoomOf: string | null;
   };
   entry: LiveEntryView;
 }
@@ -369,7 +380,24 @@ export class LiveRoomService {
   async sheet(dropId: string): Promise<LiveSheet | LiveEndedSheet> {
     const id = releaseId(dropId);
     const now = this.clock();
-    const r = await this.publicRow(id, now);
+    return this.sheetOf(await this.publicRow(id, now), now);
+  }
+
+  /**
+   * An after-room's page for one of its guests (GET /api/v1/live/:id/after-room, :id the release it follows), from its
+   * T0, as `sheet` writes a release's (only that it is over, once it is), with the release it follows; the same 404 as
+   * an unknown release for anyone else, before its T0, and for a release without one opened.
+   */
+  async afterRoomSheet(accountId: string, parentId: string): Promise<LiveAfterRoomSheet> {
+    const id = releaseId(parentId);
+    const now = this.clock();
+    const r = await this.reads().where('d.parent_drop_id', '=', id).where('d.mode', '=', 'LIVE').where('d.published_at', 'is not', null).executeTakeFirst();
+    if (!r || (await afterRoomPlace(this.db, r, accountId, now)) === null) throw dropNotFound();
+    return { ...(await this.sheetOf(r, now)), afterRoom: { parentId: id } };
+  }
+
+  private async sheetOf(r: ReadRow, now: Date): Promise<LiveSheet | LiveEndedSheet> {
+    const id = r.id;
     if (livePhase(r, now) === 'ENDED' && r.ended_at !== null) {
       const open = await this.db.selectFrom('live_entries').select('id').where('drop_id', '=', id).where('status', 'in', ['TURN', 'SECURED']).limit(1).executeTakeFirst();
       if (!open) return { id, kind: 'LIVE', phase: 'ENDED' };
@@ -431,15 +459,17 @@ export class LiveRoomService {
   // ── The room ─────────────────────────────────────────────────────────────
 
   /**
-   * Who may read a release's room: an announced LIVE RELEASE (404 otherwise), and a signed-in account allowed to enter it
-   * now or holding an entry in it (403 LIVE_NOT_ELIGIBLE, with the rule in words, otherwise). For a stream, not a
-   * REMOVED entry (403 LIVE_REMOVED).
+   * Who may read a release's room: an announced LIVE RELEASE (404 otherwise; an after-room, its guests from its T0), and
+   * a signed-in account allowed to enter it now or holding an entry in it (403 LIVE_NOT_ELIGIBLE, with the rule in words,
+   * otherwise). For a stream, not a REMOVED entry (403 LIVE_REMOVED).
    */
   async viewer(accountId: string, dropId: string, purpose: 'state' | 'stream'): Promise<LiveViewer> {
     const id = releaseId(dropId);
     const now = this.clock();
     const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').where('published_at', 'is not', null).executeTakeFirst();
     if (!d || d.cancelled_at || !isAnnounced(d, now)) throw dropNotFound();
+    // An after-room: its guests, from its T0; anyone else reads an unknown release.
+    if (isAfterRoom(d) && (await afterRoomPlace(this.db, d, accountId, now)) === null) throw dropNotFound();
     const [entry, access] = await Promise.all([
       this.db.selectFrom('live_entries').select('status').where('drop_id', '=', id).where('account_id', '=', accountId).executeTakeFirst(),
       accessOf(this.db, d, accountId, now),
@@ -561,6 +591,7 @@ export class LiveRoomService {
       .where('id', '=', id)
       .where('board_token_hash', '=', hash)
       .where('mode', '=', 'LIVE')
+      .where('parent_drop_id', 'is', null)
       .where('published_at', 'is not', null)
       .executeTakeFirst();
     if (!d || d.cancelled_at || !isAnnounced(d, now)) throw dropNotFound();
@@ -616,6 +647,7 @@ export class LiveRoomService {
           imageUrl: stages?.photo ? mediaUrl(r.model_image) : null,
           opensAt: r.opens_at,
           closesAt: r.closes_at,
+          afterRoomOf: r.parent_drop_id,
         },
         entry: views.get(r.id)!,
       };
@@ -633,10 +665,11 @@ export class LiveRoomService {
       .select(['m.name as model_name', 'm.type as model_type', 'm.image_sha256 as model_image', 'm.slug as model_slug', 'm.lookbook as model_lookbook', 'c.name as collection']);
   }
 
-  /** The LIVE RELEASES announced and not ended at `now`, the next opening first. */
+  /** The LIVE RELEASES announced and not ended at `now`, the next opening first; never an after-room. */
   private async current(now: Date): Promise<ReadRow[]> {
     return this.reads()
       .where('d.mode', '=', 'LIVE')
+      .where('d.parent_drop_id', 'is', null)
       .where('d.published_at', 'is not', null)
       .where('d.cancelled_at', 'is', null)
       .where('d.ended_at', 'is', null)
@@ -648,9 +681,9 @@ export class LiveRoomService {
       .execute();
   }
 
-  /** An announced LIVE RELEASE, not cancelled: its row with its model; 404 otherwise. */
+  /** An announced LIVE RELEASE, not cancelled: its row with its model; 404 otherwise, and for an after-room. */
   private async publicRow(id: string, now: Date): Promise<ReadRow> {
-    const r = await this.reads().where('d.id', '=', id).where('d.mode', '=', 'LIVE').where('d.published_at', 'is not', null).executeTakeFirst();
+    const r = await this.reads().where('d.id', '=', id).where('d.mode', '=', 'LIVE').where('d.parent_drop_id', 'is', null).where('d.published_at', 'is not', null).executeTakeFirst();
     if (!r || r.cancelled_at || !isAnnounced(r, now)) throw dropNotFound();
     return r;
   }

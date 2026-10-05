@@ -33,6 +33,9 @@
  *   /verify/releases/<id>     a release's page, its entry and its draw, or a LIVE RELEASE's (an address that is none: the list);
  *   /verify/releases/<id>/board#…  a LIVE RELEASE's boutique board, its secret the fragment: a screen of its own, with no
  *                             entry under it (a boutique's screen has nowhere to go back to);
+ *   /verify/releases/<id>/after-room  the after-room of LIVE RELEASE <id>, for one of its guests (plan LIVE RELEASE+): its
+ *                             page over the release's, read through it; anyone else (or signed out, or before its T0)
+ *                             is shown the release's page instead, its address put back;
  *   /verify/circle            THE CIRCLE, the owners' feed (P-X01);
  *   /verify/circle/<id>       a post, its answer or its vote (an address that is none: the feed);
  *   anything else    the landing, its address put back to /verify.
@@ -67,7 +70,7 @@ import { certificateTokenOf } from './certificate-model.js';
 import { CIRCLE_PATH, circlePostPath, circleRouteOf } from './circle-model.js';
 import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
 import { boardTokenOf } from './board-model.js';
-import { releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
+import { afterRoomPath, releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
 import { resultViewModel } from './view-model.js';
 import { boardView } from './views/board.js';
 import { certificateView } from './views/certificate.js';
@@ -118,6 +121,9 @@ const sheetSlugOf = (pathname: string): string | null => lookbookRouteOf(pathnam
 
 /** The id of the release a path names, or null. */
 const releaseIdOf = (pathname: string): string | null => releasesRouteOf(pathname)?.release ?? null;
+
+/** Whether a path names the after-room of its release. */
+const afterRoomOf = (pathname: string): boolean => releasesRouteOf(pathname)?.afterRoom === true;
 
 /** The id of the post a path names, or null. */
 const postIdOf = (pathname: string): string | null => circleRouteOf(pathname)?.post ?? null;
@@ -179,6 +185,8 @@ class App {
   private sheetSlug: string | null = null;
   /** The id of the release on show (P-R03), to tell another release from the same one. */
   private releaseId: string | null = null;
+  /** The page shown is the after-room of `releaseId`. */
+  private releaseAfterRoom = false;
   /** The id of the post on show (P-X01), to tell another post from the same one. */
   private postId: string | null = null;
   /** The banner of the LIVE RELEASES, over the landing and MY PIECES (and nowhere else). */
@@ -207,7 +215,8 @@ class App {
         if (this.screen !== 'lookbook') void this.showLookbook();
       } else if (entry === 'release' || route === 'release') {
         const id = releaseIdOf(location.pathname);
-        if (!((this.screen === 'release' || this.screen === 'live') && this.releaseId === id)) void this.showRelease(id);
+        const after = afterRoomOf(location.pathname);
+        if (!((this.screen === 'release' || this.screen === 'live') && this.releaseId === id && this.releaseAfterRoom === after)) void this.showRelease(id, true, after);
       } else if (entry === 'releases' || route === 'releases') {
         if (this.screen !== 'releases') void this.showReleases();
       } else if (entry === 'circlePost' || route === 'circlePost') {
@@ -264,12 +273,15 @@ class App {
       // The releases (P-R03) over the landing; a release's page over both, so back from it returns to the list. An
       // address under /verify/releases that is none shows the list, its own address put back.
       const id = releaseIdOf(location.pathname);
+      const after = id !== null && afterRoomOf(location.pathname);
       if (entryOf(history.state) !== (id ? 'release' : 'releases')) {
         history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
         history.pushState({ screen: 'releases' }, '', RELEASES_PATH);
+        // An after-room over its release's page: back from it returns to the second door.
         if (id) history.pushState({ screen: 'release' }, '', releasePath(id));
+        if (after) history.pushState({ screen: 'release' }, '', afterRoomPath(id));
       } else if (!id && location.pathname !== RELEASES_PATH) history.replaceState({ screen: 'releases' }, '', RELEASES_PATH);
-      if (id) void this.showRelease(id, false);
+      if (id) void this.showRelease(id, false, after);
       else void this.showReleases(false);
     } else if (route === 'circle' || route === 'circlePost') {
       // The circle (P-X01) over the landing; a post over both, so back from it returns to the feed. An address under
@@ -395,6 +407,16 @@ class App {
   }
 
   /**
+   * The after-room of a release (plan LIVE RELEASE+): from its release's page (the second door), over it, so back returns
+   * to it; from MY PIECES (an after-room's entry), over the list and the release's page.
+   */
+  private openAfterRoom(parentId: string): void {
+    if (entryOf(history.state) !== 'release' || releaseIdOf(location.pathname) !== parentId) this.openRelease(parentId);
+    history.pushState({ screen: 'release' }, '', afterRoomPath(parentId));
+    void this.showRelease(parentId, true, true);
+  }
+
+  /**
    * A model's sheet, over the lookbook's entry: from the lookbook (a card's SEE THE MODEL), or from a result (SEE THE
    * MODEL: the scan's entry becomes the lookbook's). Back from it returns to the lookbook, never straight to the landing.
    */
@@ -458,6 +480,7 @@ class App {
       onCollection: () => this.openLookbook(),
       onReleases: () => this.openReleases(),
       onRelease: (id) => this.openRelease(id),
+      onAfterRoom: (parentId) => this.openAfterRoom(parentId),
       onCircle: () => this.openCircle(),
     });
     if (await this.swap(view.root, 'pieces', focus)) this.live = view;
@@ -535,10 +558,29 @@ class App {
    * A release's page: a LIVE RELEASE's (its room, the vault) when the id is one, read first; else a draw's (P-R03), its
    * entry for a signed-in account, its draw. `id` null: an address that is none.
    */
-  private async showRelease(id: string | null, focus = true): Promise<void> {
+  private async showRelease(id: string | null, focus = true, afterRoom = false): Promise<void> {
     const gen = ++this.generation;
     this.stopCamera();
     this.releaseId = id;
+    this.releaseAfterRoom = afterRoom && id !== null;
+    if (id !== null && afterRoom) {
+      // The after-room, through its release: its guest only, from its T0. Signed out, anyone else, before its T0 or
+      // without one: the release's own page (its sign-in, its second door when there is one), its address put back.
+      let sheet: LiveSheet | LiveEndedSheet | null = null;
+      let failure: string | null = null;
+      try {
+        sheet = await this.api.liveAfterRoom(id);
+      } catch (e) {
+        if (gen !== this.generation) return;
+        if (e instanceof ApiError && (e.status === 401 || e.status === 404)) {
+          history.replaceState({ screen: 'release' }, '', releasePath(id));
+          return this.showRelease(id, focus);
+        }
+        failure = messageOf(e);
+      }
+      if (gen !== this.generation) return;
+      return this.showLive(id, sheet, failure, focus, true);
+    }
     if (id !== null) {
       // The LIVE page answers 404 for any other id, a draw's included. When it cannot be read now (a refusal of its own
       // rate group, an error), the draw's page is read: a draw's address shows its draw; when neither can be read, the
@@ -557,25 +599,7 @@ class App {
         }
       }
       if (gen !== this.generation) return;
-      if (sheet || failure !== null) {
-        const view = liveView({
-          api: this.api,
-          session: this.session,
-          sound: this.sound,
-          sheet,
-          failure: failure ?? undefined,
-          onRetry: () => void this.showRelease(id),
-          onReleases: () => this.openReleases(),
-          onPieces: () => this.openPieces(),
-          onScan: () => void this.startScan(),
-          onModel: (slug) => this.openSheet(slug),
-          clientServices: () => this.contactDetails(),
-          localZone: localZone(),
-        });
-        if (await this.swap(view.root, 'live', focus)) this.live = view;
-        else view.dispose();
-        return;
-      }
+      if (sheet || failure !== null) return this.showLive(id, sheet, failure, focus, false);
     }
     const view = releaseView({
       api: this.api,
@@ -588,6 +612,27 @@ class App {
       offsetMinutes: -new Date().getTimezoneOffset(),
     });
     if (await this.swap(view.root, 'release', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** A LIVE RELEASE's page (or its after-room's), as read; `failure` when it could not be. */
+  private async showLive(id: string, sheet: LiveSheet | LiveEndedSheet | null, failure: string | null, focus: boolean, afterRoom: boolean): Promise<void> {
+    const view = liveView({
+      api: this.api,
+      session: this.session,
+      sound: this.sound,
+      sheet,
+      failure: failure ?? undefined,
+      onRetry: () => void this.showRelease(id, true, afterRoom),
+      onReleases: () => this.openReleases(),
+      onPieces: () => this.openPieces(),
+      onScan: () => void this.startScan(),
+      onModel: (slug) => this.openSheet(slug),
+      onAfterRoom: (parentId) => this.openAfterRoom(parentId),
+      clientServices: () => this.contactDetails(),
+      localZone: localZone(),
+    });
+    if (await this.swap(view.root, 'live', focus)) this.live = view;
     else view.dispose();
   }
 

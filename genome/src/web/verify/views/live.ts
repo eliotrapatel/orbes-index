@@ -27,6 +27,12 @@
  *               Services
  *   edge pages  not signed in (the sign-in), not eligible, turn passed, hold ended, place released, left, removed,
  *               the release ended, over: a vault page with one action each
+ *   after-room  plan LIVE RELEASE+ (choice 2): still in the line when the release sold out, its delay later, the
+ *               second door in the same vault (THE AFTER-ROOM · A SECOND DOOR, the door and its lock, when it closes,
+ *               ENTER THE AFTER-ROOM); the account's own entry says when it appears (`afterRoom`, its stream's last
+ *               event), the page's pulse shows it then. The after-room's own page is this page with its sheet
+ *               (`afterRoom`, read through the release it follows): THE AFTER-ROOM over its screens, your place from
+ *               the line, then the turn, the hold, the add-ons and PAY as in the main room
  *
  * Real time: the stream (EventSource, `room` and `you` events) while it is open; its state polled every 2 s while it
  * is not (LIVE_POLL_MS), the stream tried again later. Every countdown counts on the server's clock, synced by three
@@ -125,6 +131,8 @@ export interface LiveDeps {
   onScan(): void;
   /** SEE THE MODEL: the model's sheet in the lookbook (`/verify/lookbook/<slug>`), from the photograph's stage. */
   onModel(slug: string): void;
+  /** ENTER THE AFTER-ROOM: the after-room of release `parentId` (the second door). */
+  onAfterRoom(parentId: string): void;
   clientServices(): Promise<ClientServices>;
   /** This phone's time zone (Intl), the second clock of the release's times. */
   localZone: string;
@@ -372,6 +380,11 @@ class LivePage {
     this.settle();
   }
 
+  /** The release is an after-room: its page is read through the release it follows. */
+  private afterRoomOf(): string | null {
+    return this.sheet?.afterRoom?.parentId ?? null;
+  }
+
   /**
    * `streamed`: the room of a stream, whose chunks bring the account's own entry before the room, so the entry held is
    * at least as recent as this room; a state read brings the room before its entry is applied.
@@ -527,7 +540,8 @@ class LivePage {
   private async refreshSheet(): Promise<void> {
     if (!this.sheet) return;
     try {
-      const sheet = await this.deps.api.liveRelease(this.sheet.id);
+      const parent = this.afterRoomOf();
+      const sheet = parent ? await this.deps.api.liveAfterRoom(parent) : await this.deps.api.liveRelease(this.sheet.id);
       if (this.disposed) return;
       this.sheet = sheet;
       if (this.screen && this.screen.kind !== 'turn') this.rebuild();
@@ -583,6 +597,7 @@ class LivePage {
     if (previous !== undefined && hadFocus) (screen.focus ?? screen.el.querySelector<HTMLElement>('h1'))?.focus({ preventScroll: kind !== 'turn' });
     if (kind !== previous && kind === 'turn') this.say(this.returned ? LIVE.announce.returned : LIVE.announce.turn, true);
     if (kind !== previous && revealing) this.say(LIVE.announce.secured(this.name()));
+    if (kind !== previous && kind === 'afterRoom') this.say(LIVE.afterRoom.announce);
   }
 
   private say(text: string, urgent = false): void {
@@ -642,12 +657,19 @@ class LivePage {
         return this.securedScreen(revealing);
       case 'confirmed':
         return this.confirmedScreen();
+      case 'afterRoom':
+        return this.afterRoomScreen();
       default:
         return this.edgeScreen(kind);
     }
   }
 
   // ── Parts ────────────────────────────────────────────────────────────────
+
+  /** Over the screens of a release that is live: LIVE NOW, or THE AFTER-ROOM. */
+  private liveLine(): string {
+    return this.afterRoomOf() ? LIVE.afterRoom.kind : LIVE.phase.LIVE;
+  }
 
   private live(): LiveSheet | null {
     return this.sheet && !isEndedSheet(this.sheet) ? this.sheet : null;
@@ -1144,12 +1166,12 @@ class LivePage {
     const el = h(
       'section',
       { class: 'live__join' },
-      this.overline(LIVE.phase.LIVE),
+      this.overline(this.liveLine()),
       this.title(m.name),
       this.piece(m.picture, 'live__plate--join', true),
       presence,
       left,
-      this.note(LIVE.joinLine, 'live__join-line'),
+      this.note(this.afterRoomOf() ? LIVE.afterRoom.joinLine : LIVE.joinLine, 'live__join-line'),
       picker.el,
       errorLine,
       enter,
@@ -1235,7 +1257,7 @@ class LivePage {
     const el = h(
       'section',
       { class: 'live__line' },
-      this.overline(LIVE.phase.LIVE),
+      this.overline(this.liveLine()),
       this.title(this.name()),
       h('p', { class: 'live__overline live__place-label', attrs: { 'aria-hidden': 'true' }, text: LIVE.yourPlace }),
       place,
@@ -1598,7 +1620,7 @@ class LivePage {
       { class: 'live__confirmed' },
       h('div', { class: 'live__mark' }, toneMark('authentic')),
       this.title(LIVE.confirmed),
-      this.fact(LIVE.confirmedOf(this.name()), 'live__confirmed-of'),
+      this.fact(this.afterRoomOf() ? LIVE.afterRoom.confirmedOf(this.name()) : LIVE.confirmedOf(this.name()), 'live__confirmed-of'),
       h('p', { class: 'prose live__confirmed-text', text: LIVE.reservedIn(e.size.label, e.quantity) }),
       bracket(h('div', { class: 'live__receipt-plate' }, rows)),
       contact ? h('p', { class: 'live__overline live__cs-title', text: LIVE.clientServices }) : null,
@@ -1606,6 +1628,42 @@ class LivePage {
       piecesLink(() => this.deps.onPieces(), 'live__pieces'),
     );
     return { kind: 'confirmed', el, update: () => undefined };
+  }
+
+  /**
+   * The second door (plan LIVE RELEASE+, choice 2), in the same vault: still in the line when the last piece was secured,
+   * the after-room's delay later; its one action ENTER THE AFTER-ROOM. Until it closes (then the page says how the release
+   * ended).
+   */
+  private afterRoomScreen(): Screen {
+    const door = h(
+      'div',
+      { class: 'live-door live-door--after', attrs: { 'aria-hidden': 'true' } },
+      h('div', { class: 'live-door__leaf live-door__leaf--left' }),
+      h('div', { class: 'live-door__leaf live-door__leaf--right' }),
+      h('div', { class: 'live-door__lock' }, sealSvg('live-door__seal')),
+    );
+    const until = this.fact('', 'live__until live__after-until');
+    const enter = h('button', { class: 'btn live__primary live__after-enter', attrs: { type: 'button' }, on: { click: () => this.deps.onAfterRoom(this.sheet!.id) }, text: LIVE.afterRoom.enter });
+    const el = h(
+      'section',
+      { class: 'live__after' },
+      this.overline(LIVE.afterRoom.kind),
+      this.title(LIVE.afterRoom.title),
+      door,
+      this.note(LIVE.afterRoom.text, 'live__after-text'),
+      until,
+      enter,
+    );
+    return {
+      kind: 'afterRoom',
+      el,
+      update: () => {
+        const door = this.entry?.afterRoom;
+        const closes = door ? zonedTime(door.closesAt, this.deps.localZone) : null;
+        setFact(until, closes ? LIVE.afterRoom.openUntil(closes.time) : '');
+      },
+    };
   }
 
   /** An edge page: its title, its sentence, its one action. */
@@ -1647,7 +1705,7 @@ class LivePage {
       case 'ended':
         return e.ended[this.room?.endedReason ?? 'ENDED'];
       default:
-        return e.over;
+        return this.afterRoomOf() ? LIVE.afterRoom.over : e.over;
     }
   }
 }

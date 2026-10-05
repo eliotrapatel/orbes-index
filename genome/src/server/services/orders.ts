@@ -616,8 +616,9 @@ async function releaseLocation(tx: Db, stockLocationId: string | null): Promise<
 
 /**
  * The orders of an entry of a LIVE RELEASE CONFIRMED, in the transaction that confirms it (the release's row and the
- * entry's held): one per piece of its quantity, each with the release's price and currency and the entry's add-ons as
- * sold, RESERVED at the release's location and holding what it can (`hold` false: nothing, for a reservation cancelled
+ * entry's held): one per piece of its quantity, each with the release's price and currency, the entry's add-ons as sold
+ * and the release's surprise when it has one (an after-room's: its parent's, as its location), RESERVED at the
+ * release's location and holding what it can (`hold` false: nothing, for a reservation cancelled
  * before its orders existed; `reservedAt`: the time of the sale, for one confirmed before its orders existed). Idempotent:
  * only the pieces without an order get one. Returns the orders created and the audit entries to write last.
  */
@@ -625,8 +626,15 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
   const e = await tx
     .selectFrom('live_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
+    // An after-room inherits its parent's location and surprise (services/after-room.ts).
+    .leftJoin('drops as p', 'p.id', 'd.parent_drop_id')
     .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
-    .select(['e.id', 'e.account_id', 'e.quantity', 'e.status', 'd.id as drop_id', 'd.model_id', 'd.price_minor', 'd.currency', 'd.stock_location_id', 's.id as size_id', 's.label', 's.sku_id'])
+    .select((eb) => [
+      'e.id', 'e.account_id', 'e.quantity', 'e.status', 'd.id as drop_id', 'd.model_id', 'd.price_minor', 'd.currency', 's.id as size_id', 's.label', 's.sku_id',
+      eb.fn.coalesce('p.stock_location_id', 'd.stock_location_id').as('stock_location_id'),
+      eb.fn.coalesce('p.surprise_enabled', 'd.surprise_enabled').as('surprise_enabled'),
+      eb.fn.coalesce('p.surprise_text', 'd.surprise_text').as('surprise_text'),
+    ])
     .where('e.id', '=', entryId)
     .executeTakeFirst();
   if (!e || e.status !== 'CONFIRMED') throw new Error(`ordersForLiveEntry: entry ${entryId} is not CONFIRMED`);
@@ -664,7 +672,7 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
           priceMinor: e.price_minor,
           currency: e.currency,
           addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
-          surprise: null,
+          surprise: e.surprise_enabled === true ? e.surprise_text : null,
           locationId,
           reservedAt: opts.reservedAt,
         },

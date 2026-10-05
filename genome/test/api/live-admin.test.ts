@@ -299,6 +299,44 @@ describe('LIVE RELEASES: the console', () => {
       expect(errorOf(await op.post(`/api/admin/live/${r.id}/stock`, { sizeId: r.sizes[0].id, pieces: -1 })).code).toBe('VALIDATION_FAILED');
       expect(errorOf(await op.post(`/api/admin/live/${r.id}/stock`, { sizeId: r.sizes[0].id, pieces: 0 })).code).toBe('VALIDATION_FAILED');
     });
+
+    it('sets the after-room with the release (plan LIVE RELEASE+, choice 2): its own page never set, published, cancelled nor listed on its own', async () => {
+      const afterRoom = { modelId: f.modelId, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 2 }], addons: [{ label: 'GIFT BOX', priceMinor: 5_000 }], delayMinutes: 5 };
+      const r = await create({ afterRoom });
+      expect(r.afterRoom).toMatchObject({ state: 'WAITING', priceMinor: 90_000, delayMinutes: 5, lengthMinutes: 15, quantity: 2, sizes: [{ label: 'ONE SIZE', stock: 2 }], guests: 0 });
+      expect(r.afterRoomOf).toBeNull();
+      const child = r.afterRoom.id as string;
+      // The schema's bounds and shape; the service's rules behind them.
+      for (const bad of [{ ...afterRoom, delayMinutes: 0 }, { ...afterRoom, lengthMinutes: 121 }, { ...afterRoom, sizes: [] }, { ...afterRoom, colour: 'ivory' }, { ...afterRoom, priceMinor: -1 }]) {
+        const res = await op.patch(`/api/admin/live/${r.id}`, { afterRoom: bad });
+        expect([res.statusCode, errorOf(res).code]).toEqual([400, 'VALIDATION_FAILED']);
+      }
+      const longer = await op.patch(`/api/admin/live/${r.id}`, { afterRoom: { ...afterRoom, lengthMinutes: 30 } });
+      expect(longer.statusCode, longer.body).toBe(200);
+      expect((safeJson(longer) as Json).afterRoom).toMatchObject({ id: child, lengthMinutes: 30 });
+      expect((await audits('drop.live.update', r.id)).at(-1)!.details).toMatchObject({ before: { afterRoom: { lengthMinutes: 15 } }, after: { afterRoom: { lengthMinutes: 30 } } });
+      // Its own page: read by an AUDITOR, never set, published, cancelled, posted or given a board.
+      expect(safeJson(await auditor.get(`/api/admin/live/${child}`))).toMatchObject({ id: child, afterRoomOf: { id: r.id }, editable: false, phase: 'DRAFT', afterRoom: null });
+      for (const [method, url, body] of [
+        ['PATCH', `/api/admin/live/${child}`, { priceMinor: 1 }],
+        ['POST', `/api/admin/live/${child}/publish`, {}],
+        ['POST', `/api/admin/live/${child}/cancel`, {}],
+        ['POST', `/api/admin/live/${child}/circle-post`, {}],
+        ['POST', `/api/admin/live/${child}/board-link`, {}],
+      ] as const) {
+        const res = await op.request(method, url, { body });
+        expect([url, res.statusCode, errorOf(res).code]).toEqual([url, 409, 'LIVE_AFTER_ROOM']);
+      }
+      const silhouette = await op.request('POST', `/api/admin/live/${child}/silhouette`, { body: Buffer.from(jpegPhoto(12, 16)), headers: { 'content-type': 'image/jpeg' } });
+      expect([silhouette.statusCode, errorOf(silhouette).code]).toEqual([404, 'DROP_NOT_FOUND']);
+      const list = safeJson(await auditor.get('/api/admin/live?pageSize=100')) as { items: { id: string }[] };
+      expect(list.items.map((x) => x.id)).toContain(r.id);
+      expect(list.items.map((x) => x.id)).not.toContain(child);
+      // Off: removed.
+      const off = await op.patch(`/api/admin/live/${r.id}`, { afterRoom: null });
+      expect((safeJson(off) as Json).afterRoom).toBeNull();
+      expect((await auditor.get(`/api/admin/live/${child}`)).statusCode).toBe(404);
+    });
   });
 
   describe('publish and cancel', () => {

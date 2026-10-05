@@ -32,7 +32,7 @@ import { foldIcsLine, liveStages } from '../../src/server/services/live-room.js'
 import { jpegPhoto } from '../support/images.js';
 import { createCollection, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { openSse } from '../support/sse.js';
-import { accountClient, createHarness, errorOf, ORIGIN, safeJson, type Client, type Harness } from './support.js';
+import { accountClient, adminClient, createHarness, errorOf, ORIGIN, safeJson, type Client, type Harness } from './support.js';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -903,6 +903,82 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect((await s.next((e) => e.event === 'board' && e.data.over === true)).data).toMatchObject({ phase: 'ENDED' });
       await until(() => s.ended);
       expect(errorOf(await h.client().post(`/api/v1/live/${r.id}/board`, { token })).code).toBe('DROP_NOT_FOUND');
+    });
+  });
+
+  describe('the after-room (plan LIVE RELEASE+, choice 2 and decision 28)', () => {
+    it('is its guests\' alone, from its T0: read through its release, on no public surface, unknown to anyone else', async () => {
+      await clearReleases(h);
+      const afterModel = await createModel(h.ctx.db, 'AFTERGLOW');
+      const r = await release(h, f, {
+        inMinutes: 10,
+        sizes: [{ label: '52', stock: 1 }],
+        afterRoom: { modelId: afterModel, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 1 }], delayMinutes: 2, lengthMinutes: 5 },
+      });
+      const child = r.afterRoom!.id;
+      const buyer = await member(h, f, 1);
+      const guest = await member(h, f, 0);
+      const other = await member(h, f, 5);
+      const t0 = (await h.ctx.db.selectFrom('drops').select('opens_at').where('id', '=', r.id).executeTakeFirstOrThrow()).opens_at.getTime();
+      h.clock.set(new Date(t0 - MINUTE));
+      for (const m of [buyer, guest]) expect((await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+      h.clock.set(new Date(t0));
+      await advance(h, r.id);
+      // TITANE before an account without a tier: the buyer's turn; then the seal held and PAY: SOLD OUT.
+      const token = (safeJson(await buyer.client.get(`/api/v1/live/${r.id}/state`)) as { entry: { turn: { token: string } } }).entry.turn.token;
+      expect((await buyer.client.post(`/api/v1/live/${r.id}/press`, { token })).statusCode).toBe(200);
+      h.clock.advance(LIVE_GESTURE_MIN_MS + 100);
+      expect((await buyer.client.post(`/api/v1/live/${r.id}/secure`, { token })).statusCode).toBe(200);
+      expect((await buyer.client.post(`/api/v1/live/${r.id}/confirm`, {})).statusCode).toBe(200);
+      const soldOut = h.clock.now().getTime();
+      const opensAt = new Date(soldOut + 2 * MINUTE).toISOString();
+      const closesAt = new Date(soldOut + 7 * MINUTE).toISOString();
+
+      // The guest's own entry in the release says when the second door appears; nobody else's.
+      const state = (m: Member) => m.client.get(`/api/v1/live/${r.id}/state`).then((res) => safeJson(res) as { entry: { status: string; afterRoom: unknown } | null });
+      expect(await state(guest)).toMatchObject({ entry: { status: 'ENDED', afterRoom: { opensAt, closesAt } } });
+      expect((await state(buyer)).entry!.afterRoom).toBeNull();
+      expect((await state(other)).entry).toBeNull();
+      // Before its T0, its page is unknown to its guest too; signed out, 401.
+      const page = (m: Member) => m.client.get(`/api/v1/live/${r.id}/after-room`);
+      expect(errorOf(await page(guest)).code).toBe('DROP_NOT_FOUND');
+      expect((await h.client().get(`/api/v1/live/${r.id}/after-room`)).statusCode).toBe(401);
+
+      // From its T0: its guest reads it, never kept; anyone else, the same 404 as an unknown release.
+      h.clock.set(opensAt);
+      const res = await page(guest);
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(safeJson(res)).toMatchObject({ id: child, kind: 'LIVE', phase: 'LIVE', name: 'AFTERGLOW', priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 1 }], afterRoom: { parentId: r.id } });
+      for (const m of [buyer, other]) {
+        expect(errorOf(await page(m)).code).toBe('DROP_NOT_FOUND');
+        for (const [method, url, body] of [
+          ['GET', `/api/v1/live/${child}/state`, undefined],
+          ['GET', `/api/v1/live/${child}/stream`, undefined],
+          ['POST', `/api/v1/live/${child}/enter`, { sizeId: r.afterRoom!.sizes[0]!.id }],
+          ['PUT', `/api/v1/live/${child}/interest`, { sizeId: r.afterRoom!.sizes[0]!.id }],
+        ] as const) {
+          const x = await m.client.request(method, url, { body });
+          expect([url, x.statusCode, errorOf(x).code]).toEqual([url, 404, 'DROP_NOT_FOUND']);
+        }
+      }
+      // On no public surface: its page, its .ics, the list, the banner, a board.
+      const c = h.client();
+      for (const url of [`/api/v1/live/${child}`, `/api/v1/live/${child}/calendar.ics`]) expect([url, errorOf(await c.get(url)).code]).toEqual([url, 'DROP_NOT_FOUND']);
+      expect((safeJson(await c.get('/api/v1/live')) as { releases: { id: string }[] }).releases.map((x) => x.id)).not.toContain(child);
+      expect((safeJson(await c.get('/api/v1/live/next')) as { release: { id: string } | null }).release?.id).not.toBe(child);
+      expect(errorOf(await c.post(`/api/v1/live/${child}/board`, { token: 'A'.repeat(43) })).code).toBe('DROP_NOT_FOUND');
+      // Nor in the circle: a post never links it.
+      const admin = await adminClient(h, 'OPERATOR');
+      expect(errorOf(await admin.post('/api/admin/circle/posts', { kind: 'NOTE', title: 'A SECOND DOOR', dropId: child })).code).toBe('DROP_NOT_FOUND');
+
+      // Its guest enters at its place, follows it, and finds it in MY PIECES through the release it follows.
+      const entered = await guest.client.post(`/api/v1/live/${child}/enter`, { sizeId: r.afterRoom!.sizes[0]!.id });
+      expect(safeJson(entered)).toMatchObject({ entry: { status: 'QUEUED', position: 1 } });
+      expect(safeJson(await guest.client.get(`/api/v1/live/${child}/state`))).toMatchObject({ entry: { status: 'QUEUED', afterRoom: null } });
+      const mine = (safeJson(await guest.client.get('/api/v1/live/mine')) as { entries: { release: { id: string; afterRoomOf: string | null } }[] }).entries;
+      expect(mine.find((x) => x.release.id === child)?.release.afterRoomOf).toBe(r.id);
+      expect(mine.find((x) => x.release.id === r.id)?.release.afterRoomOf).toBeNull();
     });
   });
 

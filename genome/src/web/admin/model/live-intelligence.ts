@@ -17,9 +17,12 @@ import { formatMoney } from './live.js';
 export type LiveReading = 'plan' | 'forecast' | 'radar' | 'bots' | 'report' | 'collectors' | 'comparison';
 
 /** The readings of a release at its stage, in the order the page shows them. */
-export function liveReadings(r: Pick<LiveRelease, 'phase' | 'editable'>): LiveReading[] {
+export function liveReadings(r: Pick<LiveRelease, 'phase' | 'editable'> & { afterRoomOf?: LiveRelease['afterRoomOf'] }): LiveReading[] {
   const p: LivePhase = r.phase;
   if (p === 'CANCELLED') return [];
+  // An after-room: no planner, forecast, radar or comparison (its audience is its guests, it is part of its release);
+  // the bot radar while it runs, then its report and its collectors.
+  if (r.afterRoomOf) return p === 'ENDED' ? ['report', 'collectors', 'bots'] : p === 'LIVE' ? ['bots'] : [];
   const out: LiveReading[] = [];
   if (r.editable) out.push('plan');
   if (p === 'DRAFT' || p === 'HIDDEN' || p === 'ANNOUNCED' || p === 'ROOM') out.push('forecast');

@@ -113,6 +113,8 @@ export interface PiecesDeps {
   /** THE RELEASES (P-R03): the drops, in the app; and one release's page, from an entry. */
   onReleases?(): void;
   onRelease?(id: string): void;
+  /** An after-room's entry: its page, through the release it follows. */
+  onAfterRoom?(parentId: string): void;
   /** THE CIRCLE (P-X01): the owners' circle, in the app. */
   onCircle?(): void;
 }
@@ -479,9 +481,10 @@ class PiecesPage {
         attrs: { href: m.href },
         on: {
           click: (ev) => {
-            if (!this.deps.onRelease || ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+            const open = m.afterRoomOf ? this.deps.onAfterRoom : this.deps.onRelease;
+            if (!open || ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
             ev.preventDefault();
-            this.deps.onRelease(m.dropId);
+            open(m.afterRoomOf ?? m.dropId);
           },
         },
       },

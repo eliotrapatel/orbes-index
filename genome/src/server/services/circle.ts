@@ -409,7 +409,8 @@ const CARD_COLUMNS = [
   'p.created_at',
 ] as const;
 
-type CardRow = Omit<CirclePostRow, 'body'>;
+/** A post's card (its audience by segment, migration 0023, is the segments' step: not read here). */
+type CardRow = Omit<CirclePostRow, 'body' | 'segment_id'>;
 
 // ── Service ────────────────────────────────────────────────────────────────
 
@@ -779,9 +780,12 @@ export class CircleService {
     return p;
   }
 
-  /** The drop and the model a post links, when they change: each must exist (404 DROP_NOT_FOUND, MODEL_NOT_FOUND). */
+  /**
+   * The drop and the model a post links, when they change: each must exist (404 DROP_NOT_FOUND, MODEL_NOT_FOUND); an
+   * after-room is never linked (services/after-room.ts: nobody but its guests sees it), the same 404.
+   */
   private async checkLinks(tx: Db, dropId: string | null, modelId: string | null): Promise<void> {
-    if (dropId && !(await tx.selectFrom('drops').select('id').where('id', '=', dropId).executeTakeFirst())) throw dropNotFound();
+    if (dropId && !(await tx.selectFrom('drops').select('id').where('id', '=', dropId).where('parent_drop_id', 'is', null).executeTakeFirst())) throw dropNotFound();
     if (modelId && !(await tx.selectFrom('models').select('id').where('id', '=', modelId).executeTakeFirst())) throw notFound('Model', 'MODEL_NOT_FOUND');
   }
 
@@ -991,14 +995,16 @@ function shownAt(publishedAt: Date | null, now: Date): boolean {
 
 /** What a member's view of a post reads of the drop it links. */
 const LINKED_DROP_COLUMNS = [
-  'id', 'title', 'mode', 'published_at', 'cancelled_at', 'drawn_at', 'opens_at', 'closes_at', 'announce_at', 'silhouette_at', 'name_at', 'photo_at', 'room_opens_minutes',
+  'id', 'title', 'mode', 'parent_drop_id', 'published_at', 'cancelled_at', 'drawn_at', 'opens_at', 'closes_at', 'announce_at', 'silhouette_at', 'name_at', 'photo_at', 'room_opens_minutes',
 ] as const;
 
 /**
  * The drop a post links, as a member reads it: a draw once published; a LIVE RELEASE once announced and while not
- * cancelled, its title once its name is revealed (« LIVE RELEASE » before: the staged reveals hold in the circle too).
+ * cancelled (an after-room never), its title once its name is revealed (« LIVE RELEASE » before: the staged reveals hold in the circle too).
  */
 function linkedDrop(d: Pick<DropRow, (typeof LINKED_DROP_COLUMNS)[number]>, now: Date): { id: string; title: string } | null {
+  // An after-room is never linked (checkLinks): should one be, the circle still says nothing of it.
+  if (d.parent_drop_id !== null) return null;
   if (d.mode !== 'LIVE') return dropState(d, now) !== 'DRAFT' ? { id: d.id, title: d.title } : null;
   if (d.cancelled_at || !isAnnounced(d, now)) return null;
   return { id: d.id, title: liveStages(d, now)?.name ? d.title : 'LIVE RELEASE' };

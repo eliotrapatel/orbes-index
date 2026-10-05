@@ -30,9 +30,13 @@ import {
   LIVE_SIZES,
   liveReference as serverReference,
 } from '../../src/server/services/live-console.js';
+import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../../src/server/services/after-room.js';
 import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
 import {
   addonsText,
+  AFTER_ROOM_SKIPS,
+  afterRoomStateLabel,
+  afterRoomTiming,
   defaultQuantityLine,
   formatMoney,
   LIVE_LIMITS,
@@ -40,6 +44,7 @@ import {
   liveBoardFigures,
   liveEntryActions,
   liveEntryDeadline,
+  liveLead,
   livePageKey,
   livePartChange,
   livePartProblem,
@@ -115,6 +120,8 @@ function release(o: Partial<LiveRelease> = {}): LiveRelease {
     createdAt: '2026-11-01T09:00:00.000Z',
     createdBy: null,
     seedHash: 'ab'.repeat(32),
+    afterRoom: null,
+    afterRoomOf: null,
     ...o,
   };
 }
@@ -142,6 +149,8 @@ describe('the console of the LIVE RELEASES mirrors the server', () => {
       message: LIVE_MESSAGE_MAX,
       accessModels: LIVE_ACCESS_MODELS_MAX,
       line: LIVE_CONSOLE_LINE_MAX,
+      afterRoomDelay: { ...AFTER_ROOM_DELAY_MINUTES },
+      afterRoomLength: { ...AFTER_ROOM_LENGTH_MINUTES },
     });
     expect([...LIVE_PHASES]).toEqual([...SERVER_LIVE_PHASES]);
     expect([...LIVE_CURRENCIES]).toEqual([...SERVER_CURRENCIES]);
@@ -339,6 +348,73 @@ describe('the console of the LIVE RELEASES', () => {
     expect(liveEntryActions({ status: 'CONFIRMED' }, board, 'ADMIN')).toEqual({ letIn: false, free: false, remove: false });
     expect(liveEntryActions({ status: 'SECURED' }, board, 'AUDITOR')).toEqual({ letIn: false, free: false, remove: false });
     expect([livePhrase('end', draft), livePhrase('cancel', draft)]).toEqual(['END 0F8E7D6C', 'CANCEL 0F8E7D6C']);
+  });
+
+  it('sets the after-room with the release: on or off, its model, price, sizes, add-ons, delay and length, its ids kept', () => {
+    const none = release();
+    expect(livePartValues(none, 'afterRoom')).toEqual({ enabled: '', modelId: '', price: '', sizes: 'ONE SIZE = 5', addons: '', delay: '10', length: '15' });
+    // Off and staying off: nothing to send, nothing to check.
+    expect(livePartProblem(none, 'afterRoom', livePartValues(none, 'afterRoom'))).toBeNull();
+    expect(livePartChange(none, 'afterRoom', livePartValues(none, 'afterRoom'))).toEqual({});
+    const on = { ...livePartValues(none, 'afterRoom'), enabled: 'true', modelId: 'm2', price: '900', sizes: '52 = 2\n54 = 1', addons: 'GIFT BOX | 50' };
+    expect(livePartProblem(none, 'afterRoom', on)).toBeNull();
+    expect(livePartChange(none, 'afterRoom', on)).toEqual({
+      afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 1 }], addons: [{ label: 'GIFT BOX', line: null, priceMinor: 5_000 }], delayMinutes: 10, lengthMinutes: 15 },
+    });
+    expect(livePartProblem(none, 'afterRoom', { ...on, modelId: '' })).toMatch(/model/);
+    expect(livePartProblem(none, 'afterRoom', { ...on, price: 'x' })).toMatch(/price/);
+    expect(livePartProblem(none, 'afterRoom', { ...on, sizes: '' })).toMatch(/^The after-room: list the sizes/);
+    expect(livePartProblem(none, 'afterRoom', { ...on, addons: 'X | nope' })).toMatch(/^The after-room: line 1/);
+    expect(livePartProblem(none, 'afterRoom', { ...on, delay: '0' })).toBe('The after-room opens 1 to 60 minutes after the sell-out.');
+    expect(livePartProblem(none, 'afterRoom', { ...on, length: '121' })).toBe('The after-room is open 5 to 120 minutes.');
+    // Set: its values, its sizes and add-ons keeping their ids; the same again changes nothing; off removes it.
+    const afterRoom = {
+      id: 'c1',
+      model: { id: 'm2', name: 'AFTERGLOW', type: 'RING', active: true },
+      priceMinor: 90_000,
+      currency: 'EUR',
+      sizes: [{ id: 'z52', label: '52', stock: 2 }],
+      quantity: 2,
+      addons: [{ id: 'g1', label: 'GIFT BOX', line: null, priceMinor: 5_000 }],
+      delayMinutes: 5,
+      lengthMinutes: 20,
+      state: 'WAITING' as const,
+      phase: 'DRAFT' as const,
+      opensAt: null,
+      closesAt: null,
+      endedReason: null,
+      skipped: null,
+      guests: 0,
+      entries: Object.fromEntries(LIVE_ENTRY_STATUSES.map((x) => [x, 0])) as LiveRelease['entries'],
+    };
+    const set = release({ afterRoom });
+    const values = livePartValues(set, 'afterRoom');
+    expect(values).toEqual({ enabled: 'true', modelId: 'm2', price: '900', sizes: '52 = 2', addons: 'GIFT BOX | 50', delay: '5', length: '20' });
+    expect(livePartChange(set, 'afterRoom', values)).toEqual({});
+    expect(livePartChange(set, 'afterRoom', { ...values, sizes: '52 = 3', length: '30' })).toEqual({
+      afterRoom: { modelId: 'm2', priceMinor: 90_000, sizes: [{ id: 'z52', label: '52', stock: 3 }], addons: [{ id: 'g1', label: 'GIFT BOX', line: null, priceMinor: 5_000 }], delayMinutes: 5, lengthMinutes: 30 },
+    });
+    expect(livePartChange(set, 'afterRoom', { ...values, enabled: '' })).toEqual({ afterRoom: null });
+    // Where it stands, said.
+    expect(afterRoomTiming(afterRoom)).toBe('5 min after the sell-out, open 20 min');
+    expect(afterRoomStateLabel(afterRoom)).toBe('AFTER A SELL-OUT');
+    expect([afterRoomStateLabel({ state: 'OPENS', endedReason: null }), afterRoomStateLabel({ state: 'OPEN', endedReason: null }), afterRoomStateLabel({ state: 'NOT_OPENED', endedReason: null })]).toEqual(['OPENS SOON', 'OPEN', 'NOT OPENED']);
+    expect([afterRoomStateLabel({ state: 'OVER', endedReason: 'SOLD_OUT' }), afterRoomStateLabel({ state: 'OVER', endedReason: 'CLOSED' })]).toEqual(['SOLD OUT', 'CLOSED']);
+    expect(Object.keys(AFTER_ROOM_SKIPS).sort()).toEqual(['CANCELLED', 'NOT_SOLD_OUT', 'NO_GUESTS']);
+  });
+
+  it('gives an after-room\'s own page its live controls only, and its own lead', () => {
+    const child = release({ phase: 'DRAFT', editable: false, afterRoomOf: { id: ID, title: 'THE MONOLITHE RING' } });
+    expect(liveActions(child, 'ADMIN')).toMatchObject({ edit: false, publish: false, cancel: false, circlePost: false, boardLink: false });
+    const live = { ...child, phase: 'LIVE' as const, publishedAt: '2026-11-10T19:00:00.000Z' };
+    expect(liveActions(live, 'ADMIN')).toMatchObject({ edit: false, publish: false, cancel: false, boardLink: false, pause: true, extend: true, addPieces: true, message: true, end: true });
+    expect(liveLead(child)).toMatch(/^The after-room of the release above: it opens only if that release sells out/);
+    expect(liveLead(live)).toMatch(/^Open: its guests/);
+    expect(liveLead({ ...child, phase: 'CANCELLED' })).toMatch(/^Never opened/);
+    expect(liveLead({ ...child, phase: 'ENDED', over: true })).toMatch(/^Over/);
+    expect(liveLead(release())).toMatch(/^A draft/);
+    expect(['DRAFT', 'ANNOUNCED', 'ROOM', 'LIVE', 'CANCELLED'].map((phase) => liveStateLabel({ phase: phase as LiveRelease['phase'], endedReason: null }, true))).toEqual(['AFTER A SELL-OUT', 'OPENS SOON', 'OPENS SOON', 'LIVE', 'NOT OPENED']);
+    expect(liveStateLabel({ phase: 'ENDED', endedReason: 'SOLD_OUT' }, true)).toBe('SOLD OUT');
   });
 
   it('shows the board’s figures, a deadline, the windows and the line’s rule', () => {
