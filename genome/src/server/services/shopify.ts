@@ -27,7 +27,7 @@
  * Only the columns ORBES fills are written, in the published order: Shopify leaves the others to their defaults on an
  * import, and its header names are its own (test/services/shopify.test.ts holds them against the published lists).
  */
-import { inTransaction, type Db } from '../db/connection.js';
+import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import type { OrderChannel, OrderStatus } from '../db/schema.js';
 import { conflict, notFound, validationError } from '../errors.js';
@@ -252,13 +252,10 @@ export class ShopifyExportService {
     const ids = models.map((m) => m.id);
     const skus = ids.length ? await this.db.selectFrom('skus').select(['model_id', 'size_label', 'code', 'shopify_variant_id']).where('model_id', 'in', ids).execute() : [];
     const gallery = ids.length ? await this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt']).where('model_id', 'in', ids).orderBy('model_id').orderBy('position').execute() : [];
-    const handles = new Set<string>();
+    const handles = await handlesOf(this.db);
     const rows: string[][] = [];
     for (const m of models) {
-      let handle = shopifyHandle({ name: m.name, slug: m.slug, skuPrefix: m.sku_prefix });
-      // Two models never share a product: a handle already given takes the model's SKU prefix.
-      if (handles.has(handle)) handle = `${handle}-${shopifyHandle({ name: m.sku_prefix, slug: null, skuPrefix: m.sku_prefix })}`;
-      handles.add(handle);
+      const handle = handles.get(m.id)!;
       const variants = variantsOf(m.sku_prefix, skus.filter((k) => k.model_id === m.id));
       const single = variants.length === 1 && variants[0].size === null;
       const alt = `The ${m.name} ${m.type} model, photographed by ORBES`;
@@ -296,12 +293,13 @@ export class ShopifyExportService {
   /** A model's Shopify product: its handle, its product id, its sizes as the export gives them with their variant ids. */
   async product(modelId: string): Promise<ShopifyProduct> {
     const id = modelKey(modelId);
-    const m = await this.db.selectFrom('models').select(['id', 'name', 'slug', 'sku_prefix']).where('id', '=', id).executeTakeFirst();
+    const m = await this.db.selectFrom('models').select(['id', 'name', 'sku_prefix']).where('id', '=', id).executeTakeFirst();
     if (!m) throw modelNotFound();
     const skus = await this.db.selectFrom('skus').select(['size_label', 'code', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', id).execute();
     return {
       model: { id: m.id, name: m.name, skuPrefix: m.sku_prefix },
-      handle: shopifyHandle({ name: m.name, slug: m.slug, skuPrefix: m.sku_prefix }),
+      // The handle the product export writes for this model, so the console names the product Shopify imported.
+      handle: (await handlesOf(this.db)).get(m.id)!,
       productId: skus.find((k) => k.shopify_product_id !== null)?.shopify_product_id ?? null,
       variants: variantsOf(m.sku_prefix, skus),
     };
@@ -311,8 +309,9 @@ export class ShopifyExportService {
    * The ids pasted back from Shopify (see the header): the product's on every SKU of the model, each size's variant on
    * its SKU. Every size given is one of the export's (400 otherwise), once; a variant needs the product (400). 409
    * SHOPIFY_PRODUCT_TAKEN when another model's SKUs carry that product, SHOPIFY_VARIANT_TAKEN when another SKU carries
-   * that variant. The model's row first (FOR NO KEY UPDATE: pieces and SKUs of it may still be written), then its SKUs
-   * by id, the audit last.
+   * that variant. The model's row first (FOR NO KEY UPDATE: pieces and SKUs of it may still be written), then the
+   * product's advisory lock (ADVISORY_LOCK.SHOPIFY_PRODUCT: no unique index keeps one product to one model), then its
+   * SKUs by id, the audit last.
    */
   async link(modelId: string, input: ShopifyLinkInput, actor: Actor): Promise<ShopifyProduct> {
     const id = modelKey(modelId);
@@ -334,14 +333,20 @@ export class ShopifyExportService {
           if (!known.some((k) => k.size === v.size)) throw validationError(`${v.size ?? ONE_SIZE_LABEL} is not a size of this model in the export.`);
         }
         if (productId !== null) {
+          // Two links of one product run one after the other, so the check below sees the other's SKUs.
+          await advisoryXactLock(tx, ADVISORY_LOCK.SHOPIFY_PRODUCT, lockKeyOf(productId));
           const other = await tx.selectFrom('skus').select('id').where('shopify_product_id', '=', productId).where('model_id', '<>', id).executeTakeFirst();
           if (other) throw shopifyProductTaken();
         }
-        // A size of the export without its SKU yet (a model in one size never issued nor sold) has it now.
-        for (const v of given) if (!known.find((k) => k.size === v.size)!.known && (v.variantId !== null || productId !== null)) await ensureSku(tx, id, v.size);
+        // A size of the export without its SKU yet (a model in one size never issued nor sold) has it now, given or not:
+        // the product's id is kept on the model's SKUs, so a linked model has at least one.
+        if (productId !== null) for (const k of known) if (!k.known) await ensureSku(tx, id, k.size);
         const skus = await tx.selectFrom('skus').select(['id', 'size_label', 'code', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', id).orderBy('id').execute();
         const changes: { sku: string; from: string | null; to: string | null }[] = [];
-        const products: { from: string | null; to: string | null } = { from: before.find((k) => k.shopify_product_id !== null)?.shopify_product_id ?? null, to: productId };
+        const products: { from: string | null; to: string | null } = {
+          from: before.find((k) => k.shopify_product_id !== null)?.shopify_product_id ?? null,
+          to: skus.length > 0 ? productId : null,
+        };
         for (const k of skus) {
           const v = given.find((g) => g.size === k.size_label);
           // Without the product, no variant stands; a size not given keeps its variant of the same product.
@@ -460,11 +465,45 @@ export class ShopifyExportService {
 }
 
 /** A model's sizes as the export gives them, sorted: its SKUs, or one size when it has none yet. */
+/**
+ * Every model's product handle, as the product export writes it: unique across the catalogue (Shopify keys a product by
+ * its handle), whatever the currency exported. The lookbook addresses first (unique already), then each other model by
+ * name and id with its own handle (shopifyHandle); one already given takes the model's SKU prefix, then a number, until
+ * it is free. The same models in the same order give the same handles, in the export and in the console's dialog.
+ */
+async function handlesOf(db: Db): Promise<Map<string, string>> {
+  const models = await db.selectFrom('models').select(['id', 'name', 'slug', 'sku_prefix']).orderBy('name').orderBy('id').execute();
+  const taken = new Set<string>();
+  const out = new Map<string, string>();
+  for (const m of models) {
+    if (m.slug === null) continue;
+    taken.add(m.slug);
+    out.set(m.id, m.slug);
+  }
+  for (const m of models) {
+    if (m.slug !== null) continue;
+    const base = shopifyHandle({ name: m.name, slug: null, skuPrefix: m.sku_prefix });
+    let handle = base;
+    if (taken.has(handle)) handle = `${base}-${shopifyHandle({ name: m.sku_prefix, slug: null, skuPrefix: m.sku_prefix })}`;
+    for (let n = 2; taken.has(handle); n++) handle = `${base}-${shopifyHandle({ name: m.sku_prefix, slug: null, skuPrefix: m.sku_prefix })}-${n}`;
+    taken.add(handle);
+    out.set(m.id, handle);
+  }
+  return out;
+}
+
 function variantsOf(prefix: string, skus: readonly { size_label: string | null; code: string; shopify_variant_id: string | null }[]): ShopifyVariant[] {
   if (skus.length === 0) return [{ size: null, sku: oneSizeCode(prefix), known: false, variantId: null }];
   return [...skus]
     .sort((a, b) => compareSizes(a.size_label, b.size_label))
     .map((k) => ({ size: k.size_label, sku: k.code, known: true, variantId: k.shopify_variant_id }));
+}
+
+/** A Shopify product id as the second part of its advisory lock: an int4 (FNV-1a over its digits). */
+function lockKeyOf(productId: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < productId.length; i++) h = Math.imul(h ^ productId.charCodeAt(i), 0x01000193);
+  return h | 0;
 }
 
 function modelKey(modelId: string): string {

@@ -270,12 +270,32 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     expect(handles).toHaveLength(2);
     expect(handles[0]).toBe('twin');
     expect(handles[1]).toMatch(/^twin-twi-[0-9a-f]{8}$/);
+    // The console's dialog names the handle the export writes.
+    expect(new Set([(await shopify().product(a)).handle, (await shopify().product(b)).handle])).toEqual(new Set(handles));
     const first = rows.filter((r) => r['URL handle'] === handles[0]);
     const withSizes = first.length === 2 ? first : rows.filter((r) => r['URL handle'] === handles[1]);
     expect(withSizes.map((r) => [r['Option1 name'], r['Option1 value']])).toEqual([
       ['Size', 'ONE SIZE'],
       ['', '52'],
     ]);
+  });
+
+  it('keeps a lookbook address as its handle, and gives a name that meets one a free handle, the same in the export and the dialog', async () => {
+    const named = await createModel(t.db, 'NOVA');
+    const addressed = await createModel(t.db, 'ASTRE');
+    await t.db.updateTable('models').set({ slug: 'nova' }).where('id', '=', addressed).execute();
+    const prefix = (await t.db.selectFrom('models').select('sku_prefix').where('id', '=', named).executeTakeFirstOrThrow()).sku_prefix;
+    const suffixed = `nova-${shopifyHandle({ name: prefix, slug: null, skuPrefix: prefix })}`;
+    // A third model's lookbook address is the handle the name would take next: the name takes a number.
+    const third = await createModel(t.db, 'ZENITH');
+    await t.db.updateTable('models').set({ slug: suffixed }).where('id', '=', third).execute();
+    for (const m of [named, addressed, third]) await price(m, 50_00);
+    const rows = records((await shopify().productCsv('EUR')).body);
+    const handleOf = (title: string) => rows.find((r) => r.Title === title)!['URL handle'];
+    expect([handleOf('ASTRE'), handleOf('ZENITH'), handleOf('NOVA')]).toEqual(['nova', suffixed, `${suffixed}-2`]);
+    expect((await shopify().product(addressed)).handle).toBe('nova');
+    expect((await shopify().product(third)).handle).toBe(suffixed);
+    expect((await shopify().product(named)).handle).toBe(`${suffixed}-2`);
   });
 
   it('keeps the ids pasted back on the model\'s SKUs, audited; refuses what would link two sides wrongly', async () => {
@@ -340,6 +360,25 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     const linked = await shopify().link(model, { productId: '7001', variants: [{ size: null, variantId: '7101' }] }, f.admin);
     expect(linked.variants).toEqual([{ size: null, sku: p.variants[0]!.sku, known: true, variantId: '7101' }]);
     expect(await t.db.selectFrom('skus').select(['size_label', 'code', 'shopify_variant_id']).where('model_id', '=', model).execute()).toEqual([{ size_label: null, code: p.variants[0]!.sku, shopify_variant_id: '7101' }]);
+  });
+
+  it('keeps the product id of a model never issued nor sold on its one-size SKU when no variant is given, audited as stored', async () => {
+    const model = await createModel(t.db, 'PROBE');
+    const linked = await shopify().link(model, { productId: '8001', variants: [] }, f.admin);
+    expect(linked.productId).toBe('8001');
+    expect(linked.variants.map((v) => [v.size, v.known, v.variantId])).toEqual([[null, true, null]]);
+    expect(await t.db.selectFrom('skus').select(['size_label', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', model).execute()).toEqual([
+      { size_label: null, shopify_product_id: '8001', shopify_variant_id: null },
+    ]);
+    const audit = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'model.shopify').where('target_id', '=', model).execute();
+    expect(audit.map((a) => a.details)).toEqual([{ product: { from: null, to: '8001' }, variants: [] }]);
+    // Cleared again: the product leaves the SKU, audited; a model never linked, cleared, writes nothing.
+    await shopify().link(model, { productId: null, variants: [] }, f.admin);
+    expect((await shopify().product(model)).productId).toBeNull();
+    const untouched = await createModel(t.db, 'UNTOUCHED');
+    await shopify().link(untouched, { productId: null, variants: [] }, f.admin);
+    expect(await t.db.selectFrom('skus').select('id').where('model_id', '=', untouched).execute()).toEqual([]);
+    expect(await t.db.selectFrom('audit_logs').select('id').where('action', '=', 'model.shopify').where('target_id', 'in', [model, untouched]).execute()).toHaveLength(2);
   });
 
   it('exports the priced orders of a period in Shopify\'s order format: line items, statuses, dates, the buyer, the email', async () => {
