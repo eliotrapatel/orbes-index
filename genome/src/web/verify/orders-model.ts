@@ -9,7 +9,7 @@
  *                  current one marked, those to come without one; a CANCELLED or RETURNED order shows the steps it
  *                  reached, then that end with its date;
  *   the terms      SIZE, PRICE, each add-on at its price, and the TOTAL when there are add-ons; a draw's or a salon's size
- *                  and price read TO BE CONFIRMED until ORBES Client Services enters them;
+ *                  and price read TO BE CONFIRMED until ORBES Client Services enters them (left out once cancelled);
  *   the shipment   once shipped: the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT, the carrier's page (https only);
  *   the reference  ORDER OR-…, what ORBES Client Services finds it by.
  * An order the app cannot read (an unknown step or channel, a reference that is not one) is left out, never guessed.
@@ -26,7 +26,7 @@ export const ORDER_PATH: readonly OrderStatus[] = Object.freeze(['RESERVED', 'PA
 export interface OrderStepModel {
   status: OrderStatus;
   label: string;
-  /** `5 OCT 2026`, on this phone's calendar; '' for a step to come. */
+  /** `5 OCT 2026`, on this phone's calendar on that date; '' for a step to come. */
   date: string;
   state: 'done' | 'current' | 'next';
 }
@@ -51,10 +51,15 @@ export interface OrderModel {
 
 const REFERENCE = /^OR-[0-9A-F]{8}$/;
 
-/** An ISO time → its date on a calendar `offsetMinutes` east of UTC (this phone's): `5 OCT 2026`; '' when unreadable. */
-export function orderDate(iso: string | null | undefined, offsetMinutes: number): string {
+/**
+ * An ISO time → its date on a calendar `offsetMinutes` east of UTC: `5 OCT 2026`; '' when unreadable. Without an
+ * offset, this phone's on that date (its summer or winter time, not today's), as ownership.ts dates a piece's events.
+ */
+export function orderDate(iso: string | null | undefined, offsetMinutes?: number): string {
   const t = typeof iso === 'string' ? Date.parse(iso) : Number.NaN;
-  return Number.isNaN(t) ? '' : formatDate(new Date(t + offsetMinutes * 60_000).toISOString());
+  if (Number.isNaN(t)) return '';
+  const offset = offsetMinutes ?? -new Date(t).getTimezoneOffset();
+  return formatDate(new Date(t + offset * 60_000).toISOString());
 }
 
 /** When the order reached each step (null: not reached). */
@@ -66,7 +71,7 @@ function reachedAt(o: AccountOrder): Record<OrderStatus, string | null> {
  * The steps of an order: on its way, the four steps, those reached with their dates; CANCELLED or RETURNED, the steps
  * it reached, then that end.
  */
-export function orderSteps(o: AccountOrder, offsetMinutes: number): OrderStepModel[] {
+export function orderSteps(o: AccountOrder, offsetMinutes?: number): OrderStepModel[] {
   const at = reachedAt(o);
   const step = (status: OrderStatus, state: OrderStepModel['state']): OrderStepModel => ({
     status,
@@ -79,22 +84,26 @@ export function orderSteps(o: AccountOrder, offsetMinutes: number): OrderStepMod
   return [...ORDER_PATH.filter((s) => s === 'RESERVED' || at[s] !== null).map((s) => step(s, 'done')), step(o.status, 'current')];
 }
 
-/** SIZE, PRICE, each add-on at its price (per piece), and the TOTAL when there are add-ons and a price. */
+/**
+ * SIZE, PRICE, each add-on at its price (per piece), and the TOTAL when there are add-ons and a price. A cancelled
+ * order never promises a confirmation: the size and the price never entered are left out (possibly every row).
+ */
 export function orderRows(o: AccountOrder): Row[] {
   const money = (minor: number) => (o.currency ? formatMoney(minor, o.currency) : ORDERS.toConfirm);
   const priced = o.priceMinor !== null && o.currency !== null;
+  const cancelled = o.status === 'CANCELLED';
   const size = o.size === null ? ORDERS.toConfirm : o.size.label ? upper(o.size.label) : ORDERS.oneSize;
   const rows: Row[] = [
-    [ORDERS.rows.size, size],
-    [ORDERS.rows.price, priced ? money(o.priceMinor!) : ORDERS.toConfirm],
-    ...o.addons.map((a): Row => [upper(a.label), money(a.priceMinor)]),
+    ...(cancelled && o.size === null ? [] : [[ORDERS.rows.size, size] as Row]),
+    ...(cancelled && !priced ? [] : [[ORDERS.rows.price, priced ? money(o.priceMinor!) : ORDERS.toConfirm] as Row]),
+    ...(cancelled && o.currency === null ? [] : o.addons).map((a): Row => [upper(a.label), money(a.priceMinor)]),
   ];
   if (priced && o.addons.length > 0) rows.push([ORDERS.rows.total, money(o.addons.reduce((n, a) => n + a.priceMinor, o.priceMinor!))]);
   return rows;
 }
 
 /** One order → its card; null when the app cannot read it. */
-export function orderModel(o: AccountOrder, offsetMinutes: number): OrderModel | null {
+export function orderModel(o: AccountOrder, offsetMinutes?: number): OrderModel | null {
   if (!o || typeof o.reference !== 'string' || !REFERENCE.test(o.reference)) return null;
   if (!ORDER_STATUSES.includes(o.status) || !ORDER_CHANNELS.includes(o.channel) || typeof o.reservedAt !== 'string') return null;
   const shipped = o.status === 'SHIPPED' || o.status === 'DELIVERED' || o.status === 'RETURNED';
@@ -121,7 +130,7 @@ export function orderModel(o: AccountOrder, offsetMinutes: number): OrderModel |
   };
 }
 
-/** The account's orders → the cards of YOUR ORDERS, in the server's order (the latest first). */
-export function orderModels(list: readonly AccountOrder[], offsetMinutes: number): OrderModel[] {
+/** The account's orders → the cards of YOUR ORDERS, in the server's order (the latest first); dated on this phone's calendar unless `offsetMinutes` is given. */
+export function orderModels(list: readonly AccountOrder[], offsetMinutes?: number): OrderModel[] {
   return list.map((o) => orderModel(o, offsetMinutes)).filter((m): m is OrderModel => m !== null);
 }

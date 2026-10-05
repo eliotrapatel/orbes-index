@@ -82,6 +82,24 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
     expect(steps(order({ reservedAt: '2026-10-05T23:30:00.000Z' }), 120)[0]).toEqual(['RESERVED', '6 OCT 2026', 'current']);
   });
 
+  it('without an offset, dates each step with this phone\'s offset on that date, not today\'s', () => {
+    const tz = process.env.TZ;
+    process.env.TZ = 'Europe/Paris';
+    try {
+      // 00:30 in Paris on 15 July (summer time, UTC+2) is 22:30 UTC the day before: still 15 JUL, seen in winter or summer.
+      expect(orderDate('2026-07-14T22:30:00.000Z')).toBe('15 JUL 2026');
+      // 00:30 in Paris on 15 December (winter time, UTC+1).
+      expect(orderDate('2026-12-14T23:30:00.000Z')).toBe('15 DEC 2026');
+      expect(orderDate('not a date')).toBe('');
+      const reserved = order({ status: 'PAID', reservedAt: '2026-07-14T22:30:00.000Z', paidAt: '2026-12-14T23:30:00.000Z' });
+      expect(orderSteps(reserved).map((s) => s.date)).toEqual(['15 JUL 2026', '15 DEC 2026', '', '']);
+      expect(orderModels([reserved])[0]!.steps.map((s) => s.date)).toEqual(['15 JUL 2026', '15 DEC 2026', '', '']);
+    } finally {
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
+    }
+  });
+
   it('says the size, the price, each add-on at its price and the TOTAL; TO BE CONFIRMED until Client Services enters them', () => {
     expect(orderRows(order())).toEqual([
       ['SIZE', '52'],
@@ -100,6 +118,21 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
       ['PRICE', 'TO BE CONFIRMED'],
     ]);
     expect(orderRows(order({ currency: 'CHF', priceMinor: 480_050, addons: [] }))[1]).toEqual(['PRICE', `CHF${NBSP}4${NBSP}800.50`]);
+  });
+
+  it('a CANCELLED order never promises a confirmation: the size and the price never entered are left out', () => {
+    const salon = { channel: 'SALON' as const, release: null, size: null, priceMinor: null, currency: null, addons: [], status: 'CANCELLED' as const, cancelledAt: '2026-10-06T08:00:00.000Z' };
+    expect(orderRows(order(salon))).toEqual([]);
+    expect(orderModel(order(salon), 0)!.rows).toEqual([]);
+    expect(orderRows(order({ ...salon, size: { label: '54' } }))).toEqual([['SIZE', '54']]);
+    expect(orderRows(order({ ...salon, priceMinor: 300_000, currency: 'EUR' }))).toEqual([['PRICE', `€${NBSP}3${NBSP}000`]]);
+    // Its terms entered: kept as they were sold.
+    expect(orderRows(order({ status: 'CANCELLED', cancelledAt: '2026-10-06T08:00:00.000Z' }))).toEqual(orderRows(order()));
+    // Still on its way, an order keeps TO BE CONFIRMED.
+    expect(orderRows(order({ ...salon, status: 'RESERVED', cancelledAt: null }))).toEqual([
+      ['SIZE', 'TO BE CONFIRMED'],
+      ['PRICE', 'TO BE CONFIRMED'],
+    ]);
   });
 
   it('names the model, where it was sold and what its step means; its reference', () => {

@@ -424,7 +424,7 @@ class PiecesPage {
       this.ordersBlock.replaceChildren(heading, h('p', { class: 'form__error', attrs: { role: 'alert' }, text: ORDERS.loadFailed }));
       return;
     }
-    const cards = orderModels(this.orders, -new Date().getTimezoneOffset());
+    const cards = orderModels(this.orders);
     this.ordersBlock.replaceChildren(heading, h('ul', { class: 'pieces__order-list' }, ...cards.map((m) => h('li', { class: 'pieces__order-item' }, orderCard(m)))));
   }
 
@@ -654,7 +654,7 @@ function orderCard(m: OrderModel): HTMLElement {
     h('p', { class: 'ownership__meta micro soft pieces__order-line' }, ...withNumerals(m.line)),
     h('p', { class: 'prose pieces__order-sentence', text: m.sentence }),
     steps,
-    rows(m.rows, 'pieces__order-rows'),
+    m.rows.length > 0 ? rows(m.rows, 'pieces__order-rows') : null,
     ...shipment,
     h('p', { class: 'ownership__meta micro soft pieces__order-reference', text: m.reference }),
   );

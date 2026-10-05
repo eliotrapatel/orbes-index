@@ -8,8 +8,9 @@
  *  - YOUR ORDERS under the pieces, the latest first: each card names the model, where it was sold and what its step
  *    means; RESERVED · PAID · SHIPPED · DELIVERED with their dates on this phone's calendar, the current one marked for a
  *    screen reader (aria-current), those to come without one; or the steps reached, then CANCELLED; SIZE, PRICE, the
- *    add-on and the TOTAL, or TO BE CONFIRMED; once shipped the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT, the
- *    carrier's page in a new tab; the order's reference.
+ *    add-on and the TOTAL, or TO BE CONFIRMED (left out once cancelled); once shipped the CARRIER, the TRACKING NUMBER
+ *    and TRACK THE SHIPMENT, the carrier's page in a new tab; the order's reference. YOUR RELEASES sends the LIVE
+ *    RELEASE's piece to its order's steps, never a payment still to settle.
  *  - Delivered by ORBES Client Services, read again: every step reached, DELIVERED current.
  *  - Its orders unreadable (a server error): said, the pieces still shown; signed out: no orders at all.
  *
@@ -130,12 +131,13 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     return { page, problems };
   }
 
-  /** When the order reached each step, on the phone's calendar. */
+  /** When the order reached each step, on the phone's calendar: its offset on that date (summer or winter time). */
   async function datesOf(page: Page, id: string) {
     const o = await srv.ctx.db.selectFrom('orders').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
-    const offset = await page.evaluate(() => -new Date().getTimezoneOffset());
-    const d = (x: Date | null) => orderDate(x ? x.toISOString() : null, offset);
-    return { reserved: d(o.reserved_at), paid: d(o.paid_at), shipped: d(o.shipped_at), delivered: d(o.delivered_at), cancelled: d(o.cancelled_at) };
+    const times = [o.reserved_at, o.paid_at, o.shipped_at, o.delivered_at, o.cancelled_at].map((x) => (x ? x.toISOString() : null));
+    const offsets = await page.evaluate((ts) => ts.map((t) => (t === null ? 0 : -new Date(t).getTimezoneOffset())), times);
+    const [reserved, paid, shipped, delivered, cancelled] = times.map((t, i) => orderDate(t, offsets[i]));
+    return { reserved: reserved!, paid: paid!, shipped: shipped!, delivered: delivered!, cancelled: cancelled! };
   }
 
   it('YOUR ORDERS: each order with its steps and their dates, the model, the size, the add-on and the price; shipped, the carrier and the tracking link; delivered, read again', async () => {
@@ -199,6 +201,15 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await textOf(cancelled.locator('.pieces__order-sentence'), ORDERS.sentence.CANCELLED);
     await textsOf(cancelled.locator('.pieces__order-step'), [`RESERVED ${cancelledDates.reserved}`, `CANCELLED ${cancelledDates.cancelled}`]);
     expect(await cancelled.locator('[aria-current="step"]').innerText()).toMatch(/^CANCELLED/);
+    // Its size and price were never entered: no row promises a confirmation that cannot come.
+    expect(await cancelled.locator('.pieces__order-rows').count()).toBe(0);
+    expect(norm(await cancelled.innerText())).not.toContain(ORDERS.toConfirm);
+
+    // YOUR RELEASES agrees with YOUR ORDERS: the LIVE RELEASE's piece reserved, its steps in the orders, never a
+    // payment still to settle once it is shipped.
+    const release = page.locator('.pieces__entry-card', { hasText: 'LIVE RELEASE' });
+    await textOf(release.locator('.pieces__entry-sentence'), 'Your piece is reserved in size 52. Its steps follow in YOUR ORDERS.');
+    expect(norm(await release.innerText())).not.toContain('settle payment');
 
     // The screen: contrast, figures in the reading face, one hairline button, the floors of §3.8, nothing sideways.
     const checks = await screenChecks(page);

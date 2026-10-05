@@ -1905,7 +1905,7 @@ MY PIECES' orders (plan LIVE RELEASE+ of 2026-10-04, choice 6; `routes/account.t
 
 Never in it: where the order is served from, what it holds (a piece in stock or to make, the piece linked), the surprise, the buyer's name and address and the engraving's words (entered by Client Services; in the right-of-access export, §16.13), the value declared for the insurance, the notes of its history, nor who handled it.
 
-In the verify app: **YOUR ORDERS** in MY PIECES, under the pieces: per order the model, where it was sold, what its step means, RESERVED · PAID · SHIPPED · DELIVERED with their dates on the phone's calendar (or the steps reached, then CANCELLED or RETURNED), SIZE, PRICE, each add-on and the TOTAL (TO BE CONFIRMED until entered), and once shipped the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT, the carrier's page in a new tab (an `https` link only); its reference.
+In the verify app: **YOUR ORDERS** in MY PIECES, under the pieces: per order the model, where it was sold, what its step means, RESERVED · PAID · SHIPPED · DELIVERED with their dates on the phone's calendar (or the steps reached, then CANCELLED or RETURNED), SIZE, PRICE, each add-on and the TOTAL (TO BE CONFIRMED until entered, left out once cancelled), and once shipped the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT, the carrier's page in a new tab (an `https` link only); its reference.
 
 Errors: `401 UNAUTHORIZED`, `429 RATE_LIMITED`.
 
