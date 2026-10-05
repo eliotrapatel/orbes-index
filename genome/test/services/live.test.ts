@@ -498,6 +498,9 @@ describe('LiveService', () => {
       expect(await advance(r, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 1 });
       expect(await entry(r.id, a.id)).toMatchObject({ status: 'MISSED', ended_at: at(30 * SECOND) });
       expect(await entry(r.id, b.id)).toMatchObject({ status: 'TURN', turn_at: at(31 * SECOND), turn_expires_at: at(61 * SECOND) });
+      // Once the engine has marked it MISSED, a late PRESS or SECURE still says the turn has passed, not "not your turn".
+      await rejects(f.live.press(a.id, r.id, token), 'LIVE_TURN_PASSED', 409);
+      await rejects(f.live.secure(a.id, r.id, token, a.actor), 'LIVE_TURN_PASSED', 409);
     });
 
     it('serves each size by quantity: the head waits for its pieces, one that can never be served is passed over', async () => {

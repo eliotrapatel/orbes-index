@@ -1496,6 +1496,8 @@ export class LiveService {
   private async runningTurn(tx: Db, d: LiveDrop, accountId: string, token: string, now: Date): Promise<EntryRow> {
     const e = await this.lockEntry(tx, d.id, accountId);
     if (!e) throw notEntered();
+    // The engine may have marked the turn MISSED at its deadline a moment before this call took the entry's lock.
+    if (e.status === 'MISSED') throw turnPassed();
     if (e.status !== 'TURN') throw notYourTurn();
     if (typeof token !== 'string' || token.length < 1 || token.length > 128 || !sameHash(e.turn_token_hash, turnTokenHash(token))) throw turnChanged();
     if (d.paused_at) throw livePaused();
