@@ -1217,6 +1217,9 @@ class LivePage {
       { class: 'live__join' },
       this.overline(this.liveLine()),
       this.title(m.name),
+      // The price and the quantity, as the room says them: an after-room's guest reads its piece here first (choice 2).
+      this.fact(m.offer, 'live__offer'),
+      this.surprise(m.surprise),
       this.piece(m.picture, 'live__plate--join', true),
       presence,
       left,

@@ -12,6 +12,7 @@
  *    launch guarded by `pgrep -a pg_dump`, restore.sh only ever run to watch it refuse, no prune, the fast-forward to
  *    the final commit after its check, and nothing of the host changed (no file of deploy/vps since D, no variable);
  *  - the legal pages' one version, the one the code publishes, after D's;
+ *  - the capacity measured again with LIVE RELEASE+ (docs/reports/live-load.md) is the console's (LIVE_ROOM_CAPACITY);
  *  - the first boot it describes is the code's: the two locations and the four carriers, and the orders of the sales
  *    made before E, each as prepare() maps it (a concluded reservation PAID with its invoice issued at boot, without a
  *    buyer), with what the owner does before (the open reservations) and after (the `orders` figure, the Orders page);
@@ -25,6 +26,7 @@ import { describe, expect, it } from 'vitest';
 import { DB_USAGE } from '../../scripts/db.js';
 import { MIGRATIONS } from '../../src/server/db/migrate.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../../src/server/services/after-room.js';
+import { LIVE_ROOM_CAPACITY } from '../../src/server/services/live-insights.js';
 import { dateInWords, LEGAL_VERSION } from '../../src/web/legal/content/index.js';
 import { REPO, readDoc, section } from './lexicon.js';
 import { anchors, fenced } from './runbook.js';
@@ -256,6 +258,15 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
     expect(section(runbook, '### 1.3')).toContain('Rien de la pile du serveur n\'a changé');
     expect(commands.filter((c) => />> \.env$/.test(c))).toEqual([]);
     expect(section(runbook, '### 1.0')).toContain('**Caddy, les variables** : rien ne change.');
+  });
+
+  it('states the capacity the load test measured again with LIVE RELEASE+, the one the console warns against', () => {
+    const capacity = String(LIVE_ROOM_CAPACITY.inRoom).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    expect(section(runbook, '### 1.0')).toContain(`**${capacity} personnes dans la salle**`);
+    expect(section(runbook, '### 1.0')).toContain('[le rapport de charge](../reports/live-load.md)');
+    const report = readDoc('docs/reports/live-load.md');
+    expect(report).toContain(`**Measured capacity: ${capacity} people in the room.**`);
+    expect(report).toContain('Owner: LIVE RELEASE+');
   });
 
   it('gives the legal pages the one version the code publishes, after D’s', () => {

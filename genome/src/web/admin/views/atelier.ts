@@ -346,7 +346,7 @@ function stockSection(ctx: ViewContext, stock: AtelierStock, manage: boolean, do
         : null,
       table<AtelierStockRow>(
         [
-          { label: 'Model and size', cell: (r) => h('span', null, skuLabel(r.sku), h('span', { class: 'cell-sub mono' }, r.sku.code)), kind: ['wide'] },
+          { label: 'Model and size', cell: (r) => h('span', null, skuLabel(r.sku), h('span', { class: 'cell-sub mono' }, r.sku.code)) },
           { label: 'Location', cell: (r) => r.location.name, kind: ['nowrap'] },
           { label: 'On hand', cell: (r) => formatCount(r.onHand), kind: ['num'] },
           { label: 'Reserved', cell: (r) => formatCount(r.reserved), kind: ['num'] },
@@ -374,7 +374,7 @@ function stockSection(ctx: ViewContext, stock: AtelierStock, manage: boolean, do
                     button('Minimum', { kind: 'ghost', onClick: () => minimum(r.sku.id, r.location.id, r.minimum, `${skuLabel(r.sku)} · ${r.location.name}`) }),
                   )
                 : null,
-            kind: ['actions'],
+            kind: ['actions', 'wrap'],
           },
         ],
         stock.rows,

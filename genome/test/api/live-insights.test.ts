@@ -8,6 +8,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { liveNetworkHash } from '../../src/server/services/live.js';
+import { LIVE_ROOM_CAPACITY } from '../../src/server/services/live-insights.js';
 import { createAccount, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { openSse } from '../support/sse.js';
 import { adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
@@ -63,7 +64,7 @@ describe('LIVE RELEASES: the console’s intelligence over HTTP', () => {
     expect(plan).toMatchObject({ modelType: 'RING', sizes: [{ label: '52' }, { label: '54' }] });
     expect(plan.reasoning.length).toBeGreaterThan(1);
     const forecast = await read(auditor, `/api/admin/live/${r.id}/forecast`);
-    expect(forecast).toMatchObject({ capacity: 1000, aboveCapacity: false });
+    expect(forecast).toMatchObject({ capacity: LIVE_ROOM_CAPACITY.inRoom, aboveCapacity: false });
     expect(forecast).not.toHaveProperty('capacityProvisional');
     expect(forecast.reasoning.join(' ')).toContain('in the room the load test measured the server to hold');
 

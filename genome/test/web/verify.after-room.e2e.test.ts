@@ -6,9 +6,9 @@
  *  - A collector still in the line when the last piece is secured reads SOLD OUT; the after-room's delay later, in the
  *    same vault, the second door: THE AFTER-ROOM · A SECOND DOOR, the door and its lock, when it closes, ENTER THE
  *    AFTER-ROOM (said aloud as it appears).
- *  - Its page, read through the release: THE AFTER-ROOM over it, its own model, its size, the place kept from the line;
- *    the turn and the seal held, the add-on, PAY · total; CONFIRMED in ivory, THE AFTER-ROOM · its model; its order at the
- *    after-room's price; MY PIECES lists it as THE AFTER-ROOM, its link through the release.
+ *  - Its page, read through the release: THE AFTER-ROOM over it, its own model and price, its size, the place kept from
+ *    the line; the turn and the seal held, the add-on, PAY · total; CONFIRMED in ivory, THE AFTER-ROOM · its model; its
+ *    order at the after-room's price; MY PIECES lists it as THE AFTER-ROOM, its link through the release.
  *  - Nobody else: another collector, and a visitor, at its address are shown the release's own page instead, its address
  *    put back; the door never shows to the collector who secured the release's last piece.
  *
@@ -164,6 +164,8 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
     await expect.poll(() => new URL(page.url()).pathname).toBe(`/verify/releases/${r.id}/after-room`);
     await textOf(page.locator('.live__join > .live__overline'), 'THE AFTER-ROOM');
     await textOf(page.locator('.live__join > h1'), 'AFTERGLOW');
+    // Its price, read here first (the door says neither the model nor the price).
+    await textOf(page.locator('.live__join > .live__offer'), '€ 900 · 1 PIECE');
     await textOf(page.locator('.live__join-line'), LIVE.afterRoom.joinLine);
     expect(await page.locator('.live__size').getAttribute('aria-pressed')).toBe('true');
     await keepsVault(page, 'ENTER THE LINE', ['ONE SIZE', 'ENTER THE LINE']);

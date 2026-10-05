@@ -65,10 +65,13 @@ import { defaultLocationId, knownLocation, stockBalances } from './stock.js';
 
 /**
  * The room the server holds, the limit the audience forecast warns against: measured by the load test of the VPS
- * profile (scripts/live-load.ts, 2026-10-04; docs/reports/live-load.md), the largest level that met every target in
- * every run (500 and 1 000 did in all three; 1 500 in two of three; 2 000 in none).
+ * profile (scripts/live-load.ts; docs/reports/live-load.md), the largest level that met every target in every run.
+ * Measured again on 2026-10-05 with LIVE RELEASE+ (the rules read at each check, the orders made at PAY, an after-room
+ * whose second door opens for all its guests at once): 500 did in all three runs; 750 in two of three, the after-room's
+ * door in the third; 1 000 in none, the after-room's door every time (the room itself met them in two of three). It was
+ * 1 000 for the LIVE RELEASE alone (2026-10-04).
  */
-export const LIVE_ROOM_CAPACITY = Object.freeze({ inRoom: 1000 });
+export const LIVE_ROOM_CAPACITY = Object.freeze({ inRoom: 500 });
 
 /** Every number the intelligence's rules use (each one is in the reasoning it gives). */
 export const LIVE_INSIGHT_RULES = Object.freeze({

@@ -123,6 +123,12 @@ function column(c: OrderBoardColumn, board: OrderBoard, now: Date): HTMLElement 
   return h('section', { class: ['board__col', `board__col--${c.status.toLowerCase()}`], attrs: { 'aria-label': humanize(c.status) }, data: { testid: `column-${c.status}` } }, head, body, more);
 }
 
+/** What the order holds now, or its shipment; nothing on a card that holds nothing (cancelled, returned, delivered without its piece). */
+function holdsOf(x: OrderCard): HTMLElement | null {
+  const line = x.shipment ? `${x.shipment.carrier} · ${x.shipment.trackingNumber}` : cardHolds(x);
+  return line === '—' ? null : h('span', { class: 'ocard__holds' }, line);
+}
+
 function card(x: OrderCard, board: OrderBoard, now: Date): HTMLElement {
   const origin = x.release?.title ?? CHANNEL_LABELS[x.channel];
   const size = x.sizeLabel ?? (x.skuCode ? 'ONE SIZE' : 'Size to enter');
@@ -147,7 +153,7 @@ function card(x: OrderCard, board: OrderBoard, now: Date): HTMLElement {
     x.addons.length ? h('span', { class: 'ocard__line' }, x.addons.map((a) => a.label).join(' · ')) : null,
     x.engraving ? h('span', { class: 'ocard__line' }, 'Engraving entered') : null,
     x.surprise ? h('span', { class: 'ocard__line' }, `Surprise: ${x.surprise}`) : null,
-    h('span', { class: 'ocard__holds' }, x.shipment ? `${x.shipment.carrier} · ${x.shipment.trackingNumber}` : cardHolds(x)),
+    holdsOf(x),
     h(
       'span',
       { class: 'ocard__time', attrs: { title: `Since ${formatDateTime(x.timing.since)}` } },

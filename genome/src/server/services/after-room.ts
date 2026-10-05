@@ -128,15 +128,18 @@ export type AfterRoomRow = Pick<DropRow, 'id' | 'parent_drop_id' | 'published_at
 /**
  * The place an account keeps in an after-room it may see at `now`: the after-room published at its parent's sell-out,
  * not cancelled, its T0 passed, and the account one of its guests. Null otherwise: it is then an unknown release.
+ * Read on every action of a guest: from the account's entry in the parent (`live_entries_drop_account_key`) to its
+ * guest row (`after_room_guests_entry_key`), two lookups whatever the number of guests (docs/reports/live-load.md).
  */
 export async function afterRoomPlace(db: Db, d: AfterRoomRow, accountId: string, now: Date): Promise<number | null> {
   if (!isAfterRoom(d) || !d.published_at || d.cancelled_at || now.getTime() < new Date(d.opens_at).getTime()) return null;
   const g = await db
-    .selectFrom('after_room_guests as g')
-    .innerJoin('live_entries as e', 'e.id', 'g.entry_id')
+    .selectFrom('live_entries as e')
+    .innerJoin('after_room_guests as g', 'g.entry_id', 'e.id')
     .select('g.position')
-    .where('g.drop_id', '=', d.id)
+    .where('e.drop_id', '=', d.parent_drop_id!)
     .where('e.account_id', '=', accountId)
+    .where('g.drop_id', '=', d.id)
     .executeTakeFirst();
   return g?.position ?? null;
 }

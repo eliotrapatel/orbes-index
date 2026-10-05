@@ -39,8 +39,9 @@
  * a size straight into its line, at the place it was given (its order in the parent's line); then the turns, the hold,
  * the add-ons and PAY as above, with the parent's per-tier windows. It has no boutique board.
  *
- * Access (`accessOf`), read at INTEREST, ENTER and SECURE, and when the room is read: an ACTIVE account against each
- * rule the release has, combined as `access_combine` says (AND, the default: every rule; OR: any one of them):
+ * Access (`accessOf`), read at INTEREST, ENTER and SECURE (just before the action takes the release's row: its rules no
+ * longer change once it is announced), and when the room is read: an ACTIVE account against each rule the release has,
+ * combined as `access_combine` says (AND, the default: every rule; OR: any one of them):
  *  - the tier: its tier (club.ts `tierOf`, the pieces held now) reaches `live_min_tier` (a rule from TITANE up);
  *  - the pieces: when the release names models (`live_access_models`) or a collection (`access_collection_id`), it
  *    holds now a piece of one of them (a piece's own collection first, its model's otherwise);
@@ -948,14 +949,18 @@ export async function liveEntryViews(
   const doors = await afterRoomDoors(db, rows.filter((r) => r.status === 'ENDED').map((r) => r.id));
   const queued = rows.filter((r) => r.status === 'QUEUED');
   const ahead = new Map<string, number>();
-  for (const ids of chunks(queued.map((r) => r.id))) {
-    const drops = [...new Set(queued.map((r) => r.drop_id))];
+  // Only the line before them counts: their releases and sizes, up to the last of their places (one entry's own read, at
+  // each of its actions, never sorts the whole line: docs/reports/live-load.md).
+  for (const part of chunks(queued)) {
+    const drops = [...new Set(part.map((r) => r.drop_id))];
+    const sizes = [...new Set(part.map((r) => r.size_id))];
+    const last = Math.max(...part.map((r) => r.position ?? 0));
     const r = await sql<{ id: string; ahead: number }>`
       SELECT q.id, q.ahead
         FROM (SELECT id, (row_number() OVER (PARTITION BY drop_id, size_id ORDER BY position) - 1)::int AS ahead
                 FROM live_entries
-               WHERE drop_id IN (${sql.join(drops)}) AND status = 'QUEUED') AS q
-       WHERE q.id IN (${sql.join(ids)})`.execute(db);
+               WHERE drop_id IN (${sql.join(drops)}) AND size_id IN (${sql.join(sizes)}) AND status = 'QUEUED' AND position <= ${last}) AS q
+       WHERE q.id IN (${sql.join(part.map((x) => x.id))})`.execute(db);
     for (const a of r.rows) ahead.set(a.id, Number(a.ahead));
   }
   for (const r of rows) {
@@ -1113,6 +1118,7 @@ export class LiveService {
     const id = knownId(dropId, dropNotFound);
     const networkHash = client.networkHash instanceof Uint8Array && client.networkHash.length === 32 ? client.networkHash : null;
     const country = typeof client.country === 'string' && /^[A-Z]{2}$/.test(client.country) ? client.country : null;
+    const early = await this.accessAhead(id, account);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
       const { d, now, place } = await this.lockAnnouncedLive(tx, id, 'update', account);
@@ -1120,7 +1126,7 @@ export class LiveService {
       if (d.cancelled_at) throw liveCancelled();
       if (d.ended_at || now.getTime() >= d.closes_at.getTime()) throw liveOver();
       if (now.getTime() < roomOpensAt(d).getTime()) throw roomNotOpen(roomOpensAt(d));
-      const access = await accessOf(tx, d, account, now);
+      const access = early ?? (await accessOf(tx, d, account, now));
       if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now), access);
       const existing = await tx.selectFrom('live_entries').select(['id', 'status', 'position']).where('drop_id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
       if (existing && !(existing.status === 'LEFT' && existing.position === null)) throw alreadyEntered();
@@ -1215,12 +1221,13 @@ export class LiveService {
   async setInterest(accountId: string, dropId: string, sizeId: string, actor: Actor): Promise<LiveInterestView> {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
+    const early = await this.accessAhead(id, account);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'share', account);
       if (d.cancelled_at) throw liveCancelled();
       if (d.ended_at || now.getTime() >= d.opens_at.getTime()) throw interestClosed();
-      const access = await accessOf(tx, d, account, now);
+      const access = early ?? (await accessOf(tx, d, account, now));
       if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now), access);
       const { size } = await this.choice(tx, d, sizeId, 1);
       const before = await tx.selectFrom('live_interest').select('size_id').where('drop_id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
@@ -1274,13 +1281,14 @@ export class LiveService {
   async secure(accountId: string, dropId: string, token: string, actor: Actor): Promise<LiveEntryView> {
     const account = assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
+    const early = await this.accessAhead(id, account);
     await inTransaction(this.db, async (tx) => {
       await this.actingAccount(tx, account);
       const { d, now } = await this.lockAnnouncedLive(tx, id, 'share', account);
       const e = await this.runningTurn(tx, d, account, token, now);
       const gesture = e.press_started_at ? now.getTime() - e.press_started_at.getTime() : -1;
       if (gesture < LIVE_GESTURE_MIN_MS) throw holdTooShort();
-      const access = await accessOf(tx, d, account, now);
+      const access = early ?? (await accessOf(tx, d, account, now));
       if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now), access);
       const { payMinutes } = windowsFor(d, await this.tierWindows(tx, d), e.tier);
       await tx
@@ -1666,6 +1674,19 @@ export class LiveService {
     const place = await afterRoomPlace(tx, d, accountId, now);
     if (place === null) throw dropNotFound();
     return { d, now, place };
+  }
+
+  /**
+   * The account against the release's rules (accessOf), read before an action's transaction takes the release's row:
+   * the rules of an announced release no longer change (the console sets them until the announcement), and a segment
+   * or the releases taken part in are read live at each check either way; so INTEREST, ENTER and SECURE hold the row
+   * only for what must be read under it (docs/reports/live-load.md). Null when the release is not an announced LIVE
+   * RELEASE yet: the transaction then reads the access itself, after its own checks.
+   */
+  private async accessAhead(id: string, accountId: string): Promise<LiveAccess | null> {
+    const d = await this.db.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').where('published_at', 'is not', null).executeTakeFirst();
+    const now = this.clock();
+    return d && isAnnounced(d, now) ? accessOf(this.db, d, accountId, now) : null;
   }
 
   /** A LIVE RELEASE's row FOR NO KEY UPDATE (as lockLive), published or not; anything else is the same 404 as an unknown release. */

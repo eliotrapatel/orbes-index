@@ -758,6 +758,16 @@ a.bar__label:hover {
   white-space: nowrap;
 }
 
+/* A row's actions that may not all fit (the Atelier's stock): to a second line rather than past the page's width. */
+.table .col--wrap {
+  white-space: normal;
+}
+
+.table .col--wrap .row-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .table tbody tr {
   transition: background-color var(--t-fast) var(--ease);
 }

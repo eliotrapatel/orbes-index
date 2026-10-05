@@ -12,7 +12,7 @@
  *  - the edge it describes is the Caddyfile's (the stream routes kept out of compression and flushed at once, the
  *    silhouette's upload), checked on the server as the only file of deploy/vps changed since B+C;
  *  - the legal pages' one version, after B+C's, its placeholder named (2026-10-06, published with D on 2026-10-05);
- *  - the measured capacity it states is the console's (LIVE_ROOM_CAPACITY);
+ *  - the capacity it states is the one measured for D (2026-10-04), which the load report keeps;
  *  - one real check per feature, each quoting only labels the verification app or the console shows;
  *  - one command per shell block, the console's shell commands as scripts/db.ts knows them, relative links that resolve.
  */
@@ -22,7 +22,6 @@ import { describe, expect, it } from 'vitest';
 import { DB_USAGE } from '../../scripts/db.js';
 import { MIGRATIONS } from '../../src/server/db/migrate.js';
 import { LIVE_STREAM_ROUTES } from '../../src/server/http/live-stream.js';
-import { LIVE_ROOM_CAPACITY } from '../../src/server/services/live-insights.js';
 import { LIVE_PAY_MINUTES, LIVE_ROOM_OPENS_MINUTES, LIVE_TURN_SECONDS } from '../../src/server/services/live.js';
 import { dateInWords, LEGAL_VERSION } from '../../src/web/legal/content/index.js';
 import { REPO, readDoc, section } from './lexicon.js';
@@ -222,12 +221,12 @@ describe('the LIVE RELEASE runbook (docs/launch/DEPLOY-LIVE-RELEASE.md)', () => 
     expect(section(runbook, '### 1.3')).toContain("Sortie attendue : `export const LEGAL_VERSION = '<AAAA-MM-JJ>';`, le jour de `date -u`");
   });
 
-  it('states the measured capacity and the defaults as the code has them', () => {
-    expect(LIVE_ROOM_CAPACITY.inRoom).toBe(1000);
+  it('states the capacity measured for D and the defaults as the code has them', () => {
+    // The LIVE RELEASE alone, measured on 2026-10-04; LIVE RELEASE+ measured it again (deployment E's runbook states it).
     const capacity = '1 000';
     expect(section(runbook, '## 0.')).toContain(`**${capacity} personnes dans la salle**`);
     expect(runbook).toContain('(../reports/live-load.md)');
-    expect(readDoc('docs/reports/live-load.md')).toContain(`**Measured capacity: ${capacity} people in the room.**`);
+    expect(readDoc('docs/reports/live-load.md')).toContain(`**${capacity} people in the room** for the LIVE RELEASE alone`);
     expect(LIVE_ROOM_OPENS_MINUTES.default).toBe(5);
     expect(runbook).toContain(`À l'ouverture de la salle (${LIVE_ROOM_OPENS_MINUTES.default} minutes avant)`);
     expect([LIVE_TURN_SECONDS.default, LIVE_PAY_MINUTES.default]).toEqual([30, 5]);

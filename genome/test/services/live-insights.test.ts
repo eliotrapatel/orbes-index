@@ -146,7 +146,7 @@ describe('the audience forecast', () => {
   it('assumes half to all of the interest without a past release, and says when it passes the room the server holds', () => {
     const f = audienceForecast({ interest: 1500, eligibleByTier: [3000, 0, 0, 0], past: [], inRoom: 12 });
     expect(f).toMatchObject({ basis: 'INTEREST', low: 750, high: 1500, expected: 1125, aboveCapacity: true, inRoom: 12 });
-    expect(f.reasoning.join(' ')).toContain('The upper end, 1\u2009500, is above the 1\u2009000 in the room the load test measured the server to hold.');
+    expect(f.reasoning.join(' ')).toContain(`The upper end, 1\u2009500, is above the ${count(LIVE_ROOM_CAPACITY.inRoom)} in the room the load test measured the server to hold.`);
     expect(f.reasoning.at(-1)).toBe('In the room now: 12 people.');
   });
 

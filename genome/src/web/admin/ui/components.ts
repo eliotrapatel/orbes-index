@@ -104,8 +104,11 @@ export function defList(rows: DefRow[], extra?: string): HTMLElement {
 export interface Column<T> {
   label: string;
   cell: (row: T) => Child;
-  /** 'num' right-aligns, 'mono' for id columns, 'wide' takes remaining width, 'nowrap'. */
-  kind?: ('num' | 'mono' | 'wide' | 'nowrap' | 'actions')[];
+  /**
+   * 'num' right-aligns, 'mono' for id columns, 'wide' takes remaining width, 'nowrap'; 'wrap', with 'actions': the
+   * row's buttons go to a second line rather than past the page's width.
+   */
+  kind?: ('num' | 'mono' | 'wide' | 'nowrap' | 'actions' | 'wrap')[];
 }
 
 /** The empty state of a list or a chart: the mark and one line saying what is missing. */
