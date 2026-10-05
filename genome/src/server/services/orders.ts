@@ -85,7 +85,7 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock, type Logger, noopLogger } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
-import { issueCreditNote, issueInvoice, orderInvoices } from './invoices.js';
+import { issueCreditNote, issueInvoice, orderInvoices, type InvoiceBuyer } from './invoices.js';
 import { reserveIdentity, retireReservedIdentity } from './issuance.js';
 import { writeJournal } from './journal.js';
 import { isTransitionAllowed, LifecycleService, returnTargetOf } from './lifecycle.js';
@@ -309,8 +309,20 @@ export interface ExportedOrder {
   returnedAt: Date | null;
   carrier: string | null;
   trackingNumber: string | null;
-  /** Its invoice and credit note: their numbers, dates and totals (their buyer is the order's). */
-  invoices: { number: string; kind: InvoiceKind; issuedAt: Date; currency: string; totalMinor: number }[];
+  /**
+   * Its invoice and credit note as issued: their numbers, dates and totals, the buyer each was issued to (a snapshot,
+   * which may differ from the order's buyer entered since: its name, address and the account's email at issue) and
+   * their lines.
+   */
+  invoices: {
+    number: string;
+    kind: InvoiceKind;
+    issuedAt: Date;
+    currency: string;
+    totalMinor: number;
+    buyer: InvoiceBuyer;
+    lines: { label: string; detail: string | null; amountMinor: number }[];
+  }[];
   /** Each step with its time and the note Client Services added. */
   history: { status: OrderStatus; at: Date; note: string | null }[];
 }
@@ -529,9 +541,10 @@ async function hold(tx: Db, o: OrderRow, actor: Actor, now: Date, notes: AuditRe
 
 /**
  * Give back what an order holds: a piece in stock is released (under the SKU's lock); its open piece to make is
- * cancelled and the identity reserved for it retired (its serial never reused).
+ * cancelled and the identity reserved for it retired (its serial never reused). Also the atelier's, when an order
+ * holding a piece to make takes a finished piece instead (AtelierService.linkFromStock).
  */
-async function release(tx: Db, o: OrderRow, reason: string, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+export async function release(tx: Db, o: OrderRow, reason: string, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
   if (o.reservation === null) return o;
   if (o.reservation === 'STOCK') {
     await lockSku(tx, o.sku_id!);
@@ -926,7 +939,17 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
     returnedAt: r.returned_at,
     carrier: r.carrier_name ?? null,
     trackingNumber: r.tracking_number,
-    invoices: invoices.filter((i) => i.order.id === r.id).map((i) => ({ number: i.number, kind: i.kind, issuedAt: i.issuedAt, currency: i.currency, totalMinor: i.totalMinor })),
+    invoices: invoices
+      .filter((i) => i.order.id === r.id)
+      .map((i) => ({
+        number: i.number,
+        kind: i.kind,
+        issuedAt: i.issuedAt,
+        currency: i.currency,
+        totalMinor: i.totalMinor,
+        buyer: { name: i.buyer.name, address: i.buyer.address, email: i.buyer.email },
+        lines: i.lines.map((l) => ({ label: l.label, detail: l.detail, amountMinor: l.amountMinor })),
+      })),
     history: events.filter((e) => e.order_id === r.id).map((e) => ({ status: e.status, at: e.created_at, note: e.note })),
   }));
 }
@@ -1304,7 +1327,8 @@ export class OrderService {
     const id = knownOrderId(orderId);
     if (!input || typeof input !== 'object') throw validationError('Nothing to change.');
     const has = (k: keyof OrderTermsInput) => Object.prototype.hasOwnProperty.call(input, k) && input[k] !== undefined;
-    const size = has('sizeLabel') ? cleanText(input.sizeLabel, ORDER_TEXT_LIMITS.size, 'The size') : undefined;
+    // Read as its SKU reads it (stock.ts sizeLabelOf): ONE SIZE, whatever its case, is the model in one size (null).
+    const size = has('sizeLabel') ? sizeLabelOf(cleanText(input.sizeLabel, ORDER_TEXT_LIMITS.size, 'The size')) : undefined;
     const price = has('priceMinor') ? (input.priceMinor === null ? null : cleanAmount(input.priceMinor, 'The price')) : undefined;
     const currency = has('currency') ? (input.currency === null ? null : String(input.currency)) : undefined;
     if (currency !== undefined && currency !== null && !(ORDER_CURRENCIES as readonly string[]).includes(currency)) throw validationError(`A price is in ${ORDER_CURRENCIES.join(', ')}.`);
@@ -1316,8 +1340,10 @@ export class OrderService {
       const fields: string[] = [];
       const extra: AuditRecordInput[] = [];
       let after = o;
-      // A size is entered once its SKU is known: null is one size, as soon as it is said.
-      const sizeChange = size !== undefined && (o.sku_id === null || size !== o.size_label);
+      // A size is entered once its SKU is known: null is one size, as soon as it is said. The same SKU named again
+      // (its size in another case: 52, or Small for SMALL) is no change: what the order holds stays.
+      const skuId = size !== undefined ? await ensureSku(tx, o.model_id, size) : null;
+      const sizeChange = size !== undefined && o.sku_id !== skuId;
       const priceChange = price !== undefined && (price !== o.price_minor || currency !== o.currency);
       if ((sizeChange || priceChange) && o.channel === 'LIVE') throw termsFixed();
       if (priceChange) {
@@ -1340,10 +1366,11 @@ export class OrderService {
       if (sizeChange) {
         if (o.product_id !== null) throw pieceLinked();
         // Both SKUs locked first, in one order (two orders swapping sizes never wait for each other).
-        const skuId = await ensureSku(tx, o.model_id, size ?? null);
         for (const id of [...new Set([o.sku_id, skuId].filter((x): x is string => x !== null))].sort()) await lockSku(tx, id);
         const released = await release(tx, after, 'Reserved identity retired: its order changed size', actor, now, extra);
-        after = await hold(tx, await updateOrder(tx, released.id, { size_label: size ?? null, sku_id: skuId }), actor, now, extra);
+        // Named as its SKU names it (Small typed for a SKU created SMALL reads SMALL, on the invoice too).
+        const label = skuId === null ? null : (await tx.selectFrom('skus').select('size_label').where('id', '=', skuId).executeTakeFirstOrThrow()).size_label;
+        after = await hold(tx, await updateOrder(tx, released.id, { size_label: label, sku_id: skuId }), actor, now, extra);
         fields.push('size');
       }
       if (fields.length === 0) throw validationError('Nothing to change.');
@@ -1392,7 +1419,7 @@ export class OrderService {
       .execute();
     for (const e of live) {
       orders += await this.backfill(`live entry ${e.id}`, async (tx, now, notes) => {
-        await tx.selectFrom('drops').select('id').where('id', '=', e.drop_id).forUpdate().executeTakeFirstOrThrow();
+        await tx.selectFrom('drops').select('id').where('id', '=', e.drop_id).forNoKeyUpdate().executeTakeFirstOrThrow();
         const entry = await tx.selectFrom('live_entries').select(['resolution', 'resolution_note']).where('id', '=', e.id).forUpdate().executeTakeFirstOrThrow();
         const created = await ordersForLiveEntry(tx, e.id, SYSTEM_ACTOR, now, { hold: entry.resolution !== 'CANCELLED', reservedAt: e.confirmed_at ?? now });
         notes.push(...created.notes);
@@ -1412,7 +1439,7 @@ export class OrderService {
       .execute();
     for (const e of draws) {
       orders += await this.backfill(`draw entry ${e.id}`, async (tx, now, notes) => {
-        await tx.selectFrom('drops').select('id').where('id', '=', e.drop_id).forUpdate().executeTakeFirstOrThrow();
+        await tx.selectFrom('drops').select('id').where('id', '=', e.drop_id).forNoKeyUpdate().executeTakeFirstOrThrow();
         await tx.selectFrom('drop_entries').select('id').where('id', '=', e.id).forUpdate().executeTakeFirstOrThrow();
         const created = await orderForDrawEntry(tx, e.id, SYSTEM_ACTOR, now, { reservedAt: e.handled_at ?? now });
         notes.push(...created.notes);

@@ -66,7 +66,7 @@ describe('the arithmetic (pure)', () => {
       '56: 1 piece on sale; 0 from the stock at FRANCE WAREHOUSE and 0 being made for it: 1 piece more to make to order.',
       'THE AFTER-ROOM · 52: 3 pieces on sale; 1 from the stock at FRANCE WAREHOUSE and 1 being made for it: 1 piece more to make to order.',
     ]);
-    expect(r.reasoning.at(-1)).toBe('5 pieces of the 12 pieces on sale would be made to order once sold, at the atelier. This is a warning: the release can be published as it is.');
+    expect(r.reasoning.at(-1)).toBe('5 pieces of the 12 pieces on sale would be made to order once sold, at the atelier. It does not hold the release back: it can be published as it is.');
     // Everything covered: no warning.
     const covered = feasibilityCheck({ location: loc, sizes: [{ sizeId: 's52', label: '52', skuId: 'k52', onSale: 5 }], afterRoom: null, supply });
     expect(covered).toMatchObject({ short: 0, warnings: [], afterRoom: null });
@@ -103,6 +103,26 @@ describe('the arithmetic (pure)', () => {
     const order = sizeMix({ ...base, stock: [{ label: '104', available: 1 }, { label: '9', available: 1 }, { label: 'TOO LONG LABEL', available: 2 }], planned: null, demand: [] });
     expect(order.sizes.map((s) => s.label)).toEqual(['9', '104']);
     expect(order.reasoning).toContain('Left out, their labels longer than a release\'s 12 characters: TOO LONG LABEL.');
+  });
+
+  it('size mix: a size whatever its case is one, named as the stock names it', () => {
+    // The stock's SKU says Small; the planner's demand says SMALL and medium: one size Small, its own label kept.
+    const r = sizeMix({
+      model: { id: 'm', name: 'MONOLITHE' },
+      location: loc,
+      stock: [{ label: 'Small', available: 2 }],
+      planned: 6,
+      demand: [{ label: 'SMALL', pieces: 4 }, { label: 'medium', pieces: 2 }],
+    });
+    expect(r.sizes).toEqual([
+      { label: 'medium', fromStock: 0, fromDemand: 2, stock: 2 },
+      { label: 'Small', fromStock: 2, fromDemand: 2, stock: 4 },
+    ]);
+    expect(r.reasoning.slice(0, 3)).toEqual([
+      'In stock at FRANCE WAREHOUSE: Small: 2, offered first.',
+      'The planner expects 6 pieces, 4 more than the stock: shared by how far its demand exceeds the stock in each size (medium: 2, Small: 2), the largest remainders rounded up; made to order once sold.',
+      'Proposed: medium = 2, Small = 4 (6 pieces). You keep the last word.',
+    ]);
   });
 
   it('reads ONE SIZE, whatever its case, as the model in one size', () => {
@@ -219,6 +239,22 @@ describe('the release and the stock', () => {
     expect(published.publishedAt).not.toBeNull();
     const publish = await t.db.selectFrom('audit_logs').select('details').where('target_id', '=', r.id).where('action', '=', 'drop.live.publish').executeTakeFirstOrThrow();
     expect(publish.details).toMatchObject({ locationId: logistics, toMakeToOrder: 4, shortSizes: ['54:1', '56:2', 'AFTER-ROOM 54:1'] });
+  });
+
+  it('finds a model’s SKU in a size whatever the case the size is typed in', async () => {
+    const vest = await createModel(t.db, 'VEST', null, 'VEST');
+    const small = await skuOf('Small', vest);
+    expect(await skuOf('SMALL', vest)).toBe(small);
+    expect(await skuOf(' small ', vest)).toBe(small);
+    expect(await t.db.selectFrom('skus').select('size_label').where('model_id', '=', vest).execute()).toEqual([{ size_label: 'Small' }]);
+    // A release in SMALL sells that SKU: the mix names it Small, the release's size draws on its stock.
+    await receive(small, france, 2);
+    const mix = await ctx.services.liveInsights.sizeMix(vest, france);
+    expect(mix.sizes.map((s) => [s.label, s.fromStock])).toEqual([['Small', 2]]);
+    clock.set('2026-11-01T12:00:00Z');
+    const r = await ctx.services.liveConsole.create(settings({ modelId: vest, sizes: [{ label: 'SMALL', stock: 2 }] }), f.admin);
+    expect((await t.db.selectFrom('drop_sizes').select('sku_id').where('drop_id', '=', r.id).executeTakeFirstOrThrow()).sku_id).toBe(small);
+    expect((await ctx.services.liveConsole.feasibility(r.id)).sizes.map((l) => [l.label, l.available, l.short])).toEqual([['SMALL', 2, 0]]);
   });
 
   it('sells a one-size model’s pieces without a variant under ONE SIZE', async () => {

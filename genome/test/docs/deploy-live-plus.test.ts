@@ -103,7 +103,7 @@ const VERIFY_LABELS = [
 const SERVER_LABELS = ['selected collectors', 'This release is for selected collectors.', 'WHAT WOULD YOU HAVE WANTED?', 'ANOTHER SIZE', 'ANOTHER FINISH', 'You have taken part in '] as const;
 /** The labels §1.7 quotes, as the console (`web/admin`) shows them. */
 const CONSOLE_LABELS = [
-  'Orders', 'Settings', 'DEFAULT', 'OFFERED', 'Tracking link', 'Order alerts', 'Catalogue', 'Edit', 'Base price', 'Care guide', 'Price · Shopify',
+  'Orders', 'Settings', 'DEFAULT', 'OFFERED', 'Tracking link', 'Late orders', 'Catalogue', 'Edit', 'Base price', 'Care guide', 'Price · Shopify',
   'NOT LINKED', 'Shopify export', 'Segments', 'New segment', 'Models', 'Create segment', 'Collectors now', 'Club', 'Drops', 'New live release',
   'Opening (UTC)', 'End of the sales (UTC)', 'Price of a piece', 'Currency', 'Stock location', 'Sizes', 'Access', 'Segment', 'Surprise',
   'A surprise in every box', 'What it is (internal)', 'After-room', 'An after-room after a sell-out', 'Opens (minutes after the sell-out)',
@@ -175,7 +175,7 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
     for (const [column, days] of [['reserved_days', 2], ['ready_days', 3], ['shipped_days', 10], ['unregistered_days', 30]] as const) {
       expect(migration).toMatch(new RegExp(`${column} +smallint +NOT NULL DEFAULT ${days} `));
     }
-    expect(section(runbook, '### 1.7')).toContain('`Order alerts` : 2, 3, 10 et 30 jours');
+    expect(section(runbook, '### 1.7')).toContain('`Late orders` : 2, 3, 10 et 30 jours');
   });
 
   it('says what each sale made before E becomes at the first boot, and what the owner does before and after', () => {

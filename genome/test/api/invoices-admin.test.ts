@@ -75,6 +75,9 @@ describe('returns and invoices: the console\'s routes', () => {
     expect(errorOf(await op.post(`/api/admin/orders/${order}/return`, { outcome: 'ARCHIVED' })).code).toBe('VALIDATION_FAILED');
     expect(errorOf(await op.post(`/api/admin/orders/${order}/return`, { outcome: 'ARCHIVED', note: 'x', extra: true })).code).toBe('VALIDATION_FAILED');
     expect((await auditor.post(`/api/admin/orders/${order}/return`, { outcome: 'ARCHIVED', note: 'x' })).statusCode).toBe(403);
+    // The archive retires the piece: an ADMIN's alone.
+    const archived = await op.post(`/api/admin/orders/${order}/return`, { outcome: 'ARCHIVED', note: 'Returned damaged.' });
+    expect([archived.statusCode, errorOf(archived).code]).toEqual([403, 'FORBIDDEN']);
     h.clock.advance(MINUTE);
     const res = await op.post(`/api/admin/orders/${order}/return`, { outcome: 'RESTOCKED', locationId: france, note: 'Returned within the delay.' });
     expect(res.statusCode).toBe(200);
@@ -91,7 +94,7 @@ describe('returns and invoices: the console\'s routes', () => {
     const again = safeJson(await auditor.get(`/api/admin/orders/${order}`)) as Json;
     expect(again.claimCode).toBeUndefined();
     expect(again.order.return.ownershipReclaimed).toBe(true);
-    expect(errorOf(await op.post(`/api/admin/orders/${order}/return`, { outcome: 'ARCHIVED', note: 'Again.' })).code).toBe('ORDER_TRANSITION_NOT_ALLOWED');
+    expect(errorOf(await op.post(`/api/admin/orders/${order}/return`, { outcome: 'RESTOCKED', locationId: france, note: 'Again.' })).code).toBe('ORDER_TRANSITION_NOT_ALLOWED');
   });
 
   it('lists a month\'s invoices and credit notes with their totals: the buyer in clear for an OPERATOR, masked for an AUDITOR', async () => {

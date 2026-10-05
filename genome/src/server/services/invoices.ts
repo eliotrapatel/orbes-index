@@ -166,11 +166,22 @@ export function invoicePayload(r: InvoiceRow, credits: string | null): JsonObjec
 
 // ── Issue (inside the order's transaction) ────────────────────────────────
 
-/** The next number of a kind in a year, under its lock (held to the commit). */
-async function nextSequence(tx: Db, kind: InvoiceKind, year: number): Promise<number> {
+/**
+ * The next number of a kind in a year and its time of issue, under its lock (held to the commit). The time is the
+ * order's clock (read when its transaction began), or the last document's of that kind and year when that is later: a
+ * transaction that took the lock after another dated a moment earlier still issues after it, so the numbers and the
+ * dates rise together (the accountant's monthly CSV, selected by date, reads them in order).
+ */
+async function nextSequence(tx: Db, kind: InvoiceKind, year: number, now: Date): Promise<{ sequence: number; issuedAt: Date }> {
   await advisoryXactLock(tx, ADVISORY_LOCK.INVOICE_NUMBER, year * 2 + INVOICE_KINDS.indexOf(kind));
-  const r = await tx.selectFrom('invoices').select((eb) => eb.fn.max('sequence').as('n')).where('kind', '=', kind).where('year', '=', year).executeTakeFirst();
-  return Number(r?.n ?? 0) + 1;
+  const r = await tx
+    .selectFrom('invoices')
+    .select((eb) => [eb.fn.max('sequence').as('n'), eb.fn.max('issued_at').as('last')])
+    .where('kind', '=', kind)
+    .where('year', '=', year)
+    .executeTakeFirst();
+  const last = r?.last ? new Date(r.last as Date | string) : null;
+  return { sequence: Number(r?.n ?? 0) + 1, issuedAt: last && last.getTime() > now.getTime() ? last : now };
 }
 
 /**
@@ -197,7 +208,7 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
   const total = lines.reduce((n, l) => n + l.amountMinor, 0);
   const buyer: InvoiceBuyer = { name: o.buyer_name, address: o.buyer_address, email: facts.email };
   const year = now.getUTCFullYear();
-  const sequence = await nextSequence(tx, 'INVOICE', year);
+  const { sequence, issuedAt } = await nextSequence(tx, 'INVOICE', year, now);
   const row = await tx
     .insertInto('invoices')
     .values({
@@ -211,7 +222,7 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
       currency: o.currency,
       subtotal_minor: total,
       total_minor: total,
-      issued_at: now,
+      issued_at: issuedAt,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -230,7 +241,7 @@ export async function issueCreditNote(tx: Db, o: OrderRow, reason: 'cancel' | 'r
   if (!invoice) return null;
   if (await tx.selectFrom('invoices').select('id').where('credits_invoice_id', '=', invoice.id).executeTakeFirst()) return null;
   const year = now.getUTCFullYear();
-  const sequence = await nextSequence(tx, 'CREDIT_NOTE', year);
+  const { sequence, issuedAt } = await nextSequence(tx, 'CREDIT_NOTE', year, now);
   const row = await tx
     .insertInto('invoices')
     .values({
@@ -247,7 +258,7 @@ export async function issueCreditNote(tx: Db, o: OrderRow, reason: 'cancel' | 'r
       vat_rate_bp: invoice.vat_rate_bp,
       vat_minor: invoice.vat_minor,
       total_minor: invoice.total_minor,
-      issued_at: now,
+      issued_at: issuedAt,
     })
     .returningAll()
     .executeTakeFirstOrThrow();

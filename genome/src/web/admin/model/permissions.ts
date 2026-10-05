@@ -4,8 +4,8 @@
  * reinstatement, categories (created, activated, deactivated), console users,
  * points of sale, a customer's recovery code, lock and export, the draw
  * of a drop, a model discontinued or reinstated, a LIVE RELEASE ended now or
- * an entry removed from it, the settings of the orders: their alerts'
- * delays, the locations and the carriers). Every role
+ * an entry removed from it, a returned piece archived, the settings of the
+ * orders: their delays, the locations and the carriers). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
@@ -64,11 +64,13 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
    * the piece picked from the stock; the buyer's details in clear (an AUDITOR reads them masked).
    */
   manageOrders: 'OPERATOR',
+  /** A return to the archive: its piece RETIRED, which verifies as REVOKED (revocation-class, as revokeProduct). */
+  archiveReturn: 'ADMIN',
   /** The atelier: transfers, counts, minimums, pieces to make confirmed, started, finished (issued) or cancelled. */
   manageAtelier: 'OPERATOR',
   /** The work sheets: each carries its piece's ORBES code at print size (signed for it), as a code's download. */
   printWorkSheets: 'OPERATOR',
-  /** The settings of the orders: the delays of their alerts, the locations, the carriers and their tracking links. */
+  /** The settings of the orders: the delays after which an order is late, the locations, the carriers and their tracking links. */
   manageLogistics: 'ADMIN',
   /** The segments (plan LIVE RELEASE+, choice 27): built, renamed, changed and deleted; an AUDITOR reads them and their CSV, masked. */
   manageSegments: 'OPERATOR',

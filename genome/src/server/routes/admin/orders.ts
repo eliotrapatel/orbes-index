@@ -14,15 +14,18 @@
  *   PATCH  /api/admin/orders/:id/terms          OPERATOR  a draw's or a salon's size, price and currency; any engraving
  *   PUT    /api/admin/orders/:id/buyer          OPERATOR  the buyer's name and address (decision 31)
  *   POST   /api/admin/orders/:id/piece          OPERATOR  the piece that fulfils it, picked from the stock
- *   POST   /api/admin/orders/:id/return         OPERATOR  RETURNED (choice 20): back to stock at a location, or to the
- *                                                         archive, with a note; the claim code of the piece's new card
- *                                                         when ORBES took its buyer's ownership back (shown once, no-store)
+ *   POST   /api/admin/orders/:id/return         OPERATOR  RETURNED (choice 20): back to stock at a location, with a
+ *                                                         note; the claim code of the piece's new card when ORBES took
+ *                                                         its buyer's ownership back (shown once, no-store)
+ *                                               ADMIN     to the archive (its piece RETIRED: revocation-class, as on the
+ *                                                         products' routes; 403 for an OPERATOR)
  *
  * An AUDITOR reads the collectors' emails masked (`j***@example.com`) and the buyer's name and address masked
  * (`J*** D***`, the address withheld: serialize.ts), on the board, the order and the CSV; OPERATOR and ADMIN in clear.
  * Every mutation is audited by its service.
  */
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import { forbidden } from '../../errors.js';
 import {
   orderAlertsBody,
   orderBoardQuery,
@@ -35,7 +38,7 @@ import {
   orderTransitionBody,
   parse,
 } from '../../http/schemas.js';
-import { adminActor } from '../../http/sessions.js';
+import { adminActor, hasRole, requireAdmin } from '../../http/sessions.js';
 import type { OrderBoard, OrderBoardFilter, OrderDetail } from '../../services/fulfilment.js';
 import type { OrderTransitionInput, OrderView } from '../../services/orders.js';
 import type { AdminRouteDeps } from './index.js';
@@ -132,6 +135,9 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   app.post('/api/admin/orders/:id/return', async (request, reply) => {
     const { id } = parse(orderParams, request.params);
     const b = parse(orderReturnBody, request.body);
+    const { admin } = requireAdmin(request);
+    // The archive retires the piece: revocation-class, ADMIN's alone (routes/admin/products.ts ADMIN_ONLY_TARGETS).
+    if (b.outcome === 'ARCHIVED' && !hasRole(admin.role, 'ADMIN')) throw forbidden('Only an ADMIN can archive a returned piece.');
     const r = await orders.returnOrder(id, { outcome: b.outcome, locationId: b.locationId ?? null, note: b.note }, adminActor(request));
     reply.header('cache-control', 'no-store');
     return { ...(await detail(request, id)), productId: r.productId, ...(r.claimCode ? { claimCode: r.claimCode } : {}) };

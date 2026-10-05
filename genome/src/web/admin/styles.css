@@ -4065,6 +4065,11 @@ a.bar__label:hover {
   .worksheet__code svg {
     width: 30mm !important;
   }
+  /* Black on white on paper, as the invoice: the soft labels of the screen's preview print in ink. */
+  .printdoc__label,
+  .printdoc__foot {
+    color: var(--ink);
+  }
 }
 
 /* ── Narrow screens ────────────────────────────────────────────────────── */

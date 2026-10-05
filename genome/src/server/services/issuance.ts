@@ -793,8 +793,9 @@ export class IssuanceService {
     if (!live.category_active) throw categoryInactive();
     if (!live.model_active) throw modelInactive();
     await this.lockSigner(trx, signer);
-    // Its SKU (migration 0022): the model in the piece's variant, created on first use; before the serials' lock, which
-    // an order reserving an identity takes after its SKU (orders.ts), so neither waits for the other.
+    // Its SKU (migration 0022): the model in the piece's variant, created on first use, before the serials' lock. An
+    // order reserving an identity takes its SKU's row and then this lock (orders.ts); the piece's row below checks its
+    // sku_id with a FOR KEY SHARE lock, which lockSku's FOR NO KEY UPDATE does not block, so the two never wait in a cycle.
     const skuId = await ensureSku(trx, p.modelId, p.variant);
 
     // Per (year, category) lock: max+1 is then race-free; the UNIQUE constraint remains the backstop.

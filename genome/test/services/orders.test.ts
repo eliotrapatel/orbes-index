@@ -670,6 +670,21 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       // One size, said as such: the model's one-size SKU.
       const one = await salonOrder({ size: null });
       expect((await t.db.selectFrom('skus').select('size_label').where('id', '=', one.sku_id!).executeTakeFirstOrThrow()).size_label).toBeNull();
+      // Typed ONE SIZE: the same, stored as one size. Its SKU named again in another spelling is no change: the piece
+      // to make it holds stays, its reserved identity too.
+      const typed = await salonOrder({ size: 'ONE SIZE', modelId: (await t.db.insertInto('models').values({ category_id: 1, name: 'CHAIN', type: 'PENDANT', sku_prefix: 'CHN-PD' }).returning('id').executeTakeFirstOrThrow()).id });
+      expect([typed.size_label, typed.reservation]).toEqual([null, 'BENCH']);
+      const typedBench = await t.db.selectFrom('bench_items').select(['id', 'status', 'product_id']).where('order_id', '=', typed.id).executeTakeFirstOrThrow();
+      await rejects(orders().setTerms(typed.id, { sizeLabel: 'one size' }, admin), 'VALIDATION_FAILED', 400);
+      expect(await t.db.selectFrom('bench_items').select(['id', 'status', 'product_id']).where('order_id', '=', typed.id).execute()).toEqual([typedBench]);
+      // A size in another case is its SKU's: Small names the SKU of SMALL, and the order says it as the SKU does.
+      const small = await salonOrder({ size: 'SMALL' });
+      const smaller = await salonOrder({ size: 'small' });
+      expect([smaller.sku_id, smaller.size_label]).toEqual([small.sku_id, 'SMALL']);
+      const smallBench = await t.db.selectFrom('bench_items').select('id').where('order_id', '=', small.id).executeTakeFirst();
+      await rejects(orders().setTerms(small.id, { sizeLabel: 'Small' }, admin), 'VALIDATION_FAILED', 400);
+      expect(await orderRow(small.id)).toMatchObject({ size_label: 'SMALL', sku_id: small.sku_id });
+      expect(await t.db.selectFrom('bench_items').select('id').where('order_id', '=', small.id).executeTakeFirst()).toEqual(smallBench);
     });
   });
 
@@ -722,6 +737,30 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
         'release', 'reservedAt', 'returnedAt', 'shippedAt', 'size', 'status', 'trackingNumber',
       ]);
       expect((await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'account.export').where('target_id', '=', sale.account.id).executeTakeFirstOrThrow()).details).toMatchObject({ orders: 1 });
+      expect(exported.orders[0]!.invoices).toEqual([]);
+      // Paid: its invoice issued to the buyer then. The buyer changed since: the export gives the order's buyer as it is
+      // now and each document as issued, its buyer (the account's email at issue too) and its lines.
+      clock.advance(MINUTE);
+      await orders().transition(o.id, { to: 'PAID' }, admin);
+      clock.advance(MINUTE);
+      const moved = { name: 'Ada Quill', address: '3 rue Neuve\n75004 Paris\nFrance' };
+      await orders().setBuyer(o.id, moved, admin);
+      const later = (await ctx.services.owners.exportData(sale.account.id, admin)).orders[0]!;
+      expect(later.buyer).toEqual(moved);
+      expect(later.invoices).toEqual([
+        {
+          number: expect.stringMatching(/^INV-\d{4}-\d{6}$/),
+          kind: 'INVOICE',
+          issuedAt: expect.any(Date),
+          currency: 'EUR',
+          totalMinor: 505_000,
+          buyer: { name, address, email: sale.account.email },
+          lines: expect.any(Array),
+        },
+      ]);
+      expect(later.invoices[0]!.lines.length).toBeGreaterThan(0);
+      for (const l of later.invoices[0]!.lines) expect(Object.keys(l).sort()).toEqual(['amountMinor', 'detail', 'label']);
+      expect(later.invoices[0]!.lines.reduce((n, l) => n + l.amountMinor, 0)).toBe(505_000);
       // Cleared: both gone from the order.
       clock.advance(MINUTE);
       expect((await orders().setBuyer(o.id, { name: null, address: null }, admin)).buyer).toEqual({ name: null, address: null });

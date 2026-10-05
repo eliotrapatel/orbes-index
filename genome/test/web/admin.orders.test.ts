@@ -204,21 +204,28 @@ describe('the board', () => {
 describe('what a role may do with an order', () => {
   it('offers each step only where the server takes it, to an OPERATOR', () => {
     const reserved = view();
-    expect(orderActions(reserved, 'AUDITOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: false, return: false, location: false, terms: { size: false, price: false, engraving: false }, buyer: false, linkPiece: false });
+    expect(orderActions(reserved, 'AUDITOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: false, return: false, archive: false, location: false, terms: { size: false, price: false, engraving: false }, buyer: false, linkPiece: false });
     // Not priced yet: not paid (its invoice needs its price, step S4).
-    expect(orderActions(reserved, 'OPERATOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: true, return: false, location: true, terms: { size: true, price: true, engraving: true }, buyer: true, linkPiece: false });
+    expect(orderActions(reserved, 'OPERATOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: true, return: false, archive: false, location: true, terms: { size: true, price: true, engraving: true }, buyer: true, linkPiece: false });
     expect(orderActions(view({ priceMinor: 480_000, currency: 'EUR' }), 'OPERATOR').pay).toBe(true);
     const paidStock = view({ status: 'PAID', paidAt: 'x', skuId: 's', reservation: 'STOCK' });
     expect(orderActions(paidStock, 'OPERATOR')).toMatchObject({ pay: false, ship: false, cancel: true, terms: { size: true, price: false, engraving: true }, linkPiece: true });
     const live = view({ channel: 'LIVE', skuId: 's', reservation: 'BENCH', sizeLabel: '52', priceMinor: 1, currency: 'EUR' });
     expect(orderActions(live, 'ADMIN').terms).toEqual({ size: false, price: false, engraving: true });
     expect(orderActions(live, 'ADMIN').linkPiece).toBe(false);
+    // A finished piece in place of a piece to make still being made (choice 8); not once it is finished or cancelled.
+    for (const [status, linkable] of [['TO_MAKE', true], ['IN_PROGRESS', true], ['DONE', false], ['CANCELLED', false]] as const) {
+      expect(orderActions(view({ ...live, bench: { id: 'b', status, productId: 'O26-J-00190' } }), 'OPERATOR').linkPiece, status).toBe(linkable);
+    }
     const linked = view({ status: 'PAID', paidAt: 'x', skuId: 's', reservation: 'STOCK', productId: 'O26-J-00184' });
     expect(orderActions(linked, 'OPERATOR')).toMatchObject({ location: false, linkPiece: false, ship: true, terms: { size: false } });
     expect(orderActions(view({ status: 'SHIPPED', productId: 'O26-J-00184' }), 'OPERATOR')).toMatchObject({ deliver: true, cancel: false, return: true, location: false, buyer: true });
     expect(orderActions(view({ status: 'DELIVERED', productId: 'O26-J-00184' }), 'OPERATOR')).toMatchObject({ deliver: false, cancel: false, return: true });
     // A return (choice 20): shipped or delivered, by an OPERATOR; never twice, never before shipping.
     expect(orderActions(view({ status: 'DELIVERED', productId: 'O26-J-00184' }), 'AUDITOR').return).toBe(false);
+    // To the archive (the piece retired): an ADMIN's alone.
+    const delivered = view({ status: 'DELIVERED', productId: 'O26-J-00184' });
+    expect([orderActions(delivered, 'OPERATOR').archive, orderActions(delivered, 'ADMIN').archive, orderActions(reserved, 'ADMIN').archive]).toEqual([false, true, false]);
     expect([orderActions(view({ status: 'RETURNED', productId: 'O26-J-00184' }), 'ADMIN').return, orderActions(linked, 'OPERATOR').return]).toEqual([false, false]);
     expect([can('OPERATOR', 'manageOrders'), can('AUDITOR', 'manageOrders'), can('OPERATOR', 'manageLogistics'), can('ADMIN', 'manageLogistics'), can('OPERATOR', 'printWorkSheets'), can('AUDITOR', 'printWorkSheets')]).toEqual([
       true,

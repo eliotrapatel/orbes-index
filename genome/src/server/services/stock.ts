@@ -21,9 +21,9 @@
  * name or tracking link changed, set aside (`active` false: never offered for a shipment again, the orders shipped with
  * it keep it). Audited `stock.location.create`, `stock.location.update`, `carrier.create`, `carrier.update`.
  *
- * Every change of a SKU's stock or of its reservations takes the SKU's row FOR UPDATE first (`lockSku`), after the rows
- * of the order or the release it serves: two orders never take the same last piece, and a transfer never moves a piece
- * an order has just reserved. Each movement is journaled (`stock.move`, services/journal.ts) in its transaction; the
+ * Every change of a SKU's stock or of its reservations takes the SKU's row FOR NO KEY UPDATE first (`lockSku`), after
+ * the rows of the order or the release it serves: two orders never take the same last piece, and a transfer never moves
+ * a piece an order has just reserved. Each movement is journaled (`stock.move`, services/journal.ts) in its transaction; the
  * console's are audited (`stock.transfer`, `stock.adjust`, ids and counts only), as are the first boot's presets
  * (`stock.setup`).
  */
@@ -210,7 +210,8 @@ export async function knownLocation(db: Db, locationId: string): Promise<string>
 // ── SKUs ───────────────────────────────────────────────────────────────────
 
 /**
- * The SKU of a model in a size (null: one size), created when it does not exist yet. Its code is `deriveSku` of the
+ * The SKU of a model in a size (null: one size), created when it does not exist yet; a size matches whatever its case
+ * (`Small` finds the SKU created as `SMALL`, as skus_model_size_key holds one). Its code is `deriveSku` of the
  * model's prefix and the size; when another SKU has that code (two sizes whose labels read the same once simplified),
  * `-2`, `-3`… is added. Safe under concurrency: a SKU created meanwhile by another transaction is the one returned.
  */
@@ -221,7 +222,7 @@ export async function ensureSku(tx: Db, modelId: string, sizeLabel: string | nul
       .selectFrom('skus')
       .select('id')
       .where('model_id', '=', modelId)
-      .where((eb) => (label === null ? eb('size_label', 'is', null) : eb('size_label', '=', label)))
+      .where((eb) => (label === null ? eb('size_label', 'is', null) : eb(eb.fn('upper', ['size_label']), '=', eb.fn('upper', [eb.val(label)]))))
       .executeTakeFirst();
   const found = await find();
   if (found) return found.id;
@@ -291,10 +292,15 @@ export async function linkDropSizes(tx: Db, dropId: string, modelId: string): Pr
 
 // ── The ledger ─────────────────────────────────────────────────────────────
 
-/** A SKU's row FOR UPDATE: every change of its stock or of its reservations takes it first (404 SKU_NOT_FOUND). */
+/**
+ * A SKU's row FOR NO KEY UPDATE: every change of its stock or of its reservations takes it first (404 SKU_NOT_FOUND).
+ * It serialises those changes but, unlike FOR UPDATE, does not conflict with the FOR KEY SHARE lock that a foreign-key
+ * check on skus takes (an order, a piece, a bench item or a movement inserted with its SKU), so a transaction that
+ * wrote such a row before taking the SKU waits for nobody holding that SKU's key share.
+ */
 export async function lockSku(tx: Db, skuId: string): Promise<void> {
   if (!tx.isTransaction) throw new Error('lockSku must run inside a transaction');
-  const row = await tx.selectFrom('skus').select('id').where('id', '=', skuId).forUpdate().executeTakeFirst();
+  const row = await tx.selectFrom('skus').select('id').where('id', '=', skuId).forNoKeyUpdate().executeTakeFirst();
   if (!row) throw skuNotFound();
 }
 

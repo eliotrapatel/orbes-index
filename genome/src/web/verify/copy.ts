@@ -935,6 +935,15 @@ export const SOUND = Object.freeze({
   off: 'OFF',
 });
 
+/** A release's label for a model in one size (services/release-stock.ts releaseSizeLabel), whatever its case. */
+const isOneSize = (size: string) => typeof size === 'string' && size.trim().toUpperCase() === 'ONE SIZE';
+/** A size in reading text: `in size 52`, or `in ONE SIZE` (never `in size ONE SIZE`). */
+const inSizeWords = (size: string) => (isOneSize(size) ? 'in ONE SIZE' : `in size ${size}`);
+/** Its twin for the display face: `IN SIZE 52`, or `IN ONE SIZE`. */
+const inSizeLabel = (size: string) => (isOneSize(size) ? 'IN ONE SIZE' : `IN SIZE ${size}`);
+/** A size named alone: `SIZE 52`, or `ONE SIZE`. */
+const sizeName = (size: string) => (isOneSize(size) ? 'ONE SIZE' : `SIZE ${size}`);
+
 /**
  * The LIVE RELEASE (plan of 2026-10-04, The experience): its card in THE RELEASES, its page at /verify/releases/<id>
  * as it becomes the room, the line, the turn, the piece secured and the reservation confirmed, and its edge pages, each
@@ -972,7 +981,7 @@ export const LIVE = Object.freeze({
   there: Object.freeze({
     action: 'I’LL BE THERE',
     lead: 'Say you will be there, with your size: the room preselects it when it opens.',
-    said: (size: string) => `YOU’LL BE THERE · SIZE ${size}`,
+    said: (size: string) => `YOU’LL BE THERE · ${sizeName(size)}`,
     change: 'Another size changes it. You may withdraw until the opening.',
     withdraw: 'WITHDRAW',
     /** Said aloud once withdrawn. */
@@ -1020,9 +1029,9 @@ export const LIVE = Object.freeze({
     pending: 'not ready yet',
   }),
   yourSize: 'YOUR SIZE',
-  size: (label: string) => `SIZE ${label}`,
+  size: (label: string) => sizeName(label),
   /** A size that has no piece left to give. */
-  soldOutSize: (size: string) => `Size ${size}, no piece left`,
+  soldOutSize: (size: string) => (isOneSize(size) ? 'One size, no piece left' : `Size ${size}, no piece left`),
   quantity: 'PIECES',
   fewer: 'One piece fewer',
   more: 'One piece more',
@@ -1043,9 +1052,9 @@ export const LIVE = Object.freeze({
   yourPlace: 'YOUR PLACE',
   /** The place's label as a screen reader says it, before the figure. */
   yourPlaceSaid: 'Your place',
-  ahead: (n: number, size: string) => (n === 0 ? `YOU ARE NEXT IN SIZE ${size}` : `${n} AHEAD OF YOU IN SIZE ${size}`),
+  ahead: (n: number, size: string) => (n === 0 ? `YOU ARE NEXT ${inSizeLabel(size)}` : `${n} AHEAD OF YOU ${inSizeLabel(size)}`),
   left: (left: number, quantity: number) => `${left} OF ${quantity} LEFT`,
-  inSize: (n: number, size: string) => `${n} IN SIZE ${size}`,
+  inSize: (n: number, size: string) => `${n} ${inSizeLabel(size)}`,
   held: (n: number) => (n === 1 ? '1 HELD PIECE MAY RETURN' : `${n} HELD PIECES MAY RETURN`),
   lineNote: 'When your turn comes, the seal appears here: press and hold it to secure your piece. Keep this page open.',
   // The turn
@@ -1074,11 +1083,11 @@ export const LIVE = Object.freeze({
   confirmed: 'CONFIRMED',
   confirmedOf: (name: string) => `LIVE RELEASE · ${name}`,
   reservedIn: (size: string, quantity: number) =>
-    `${quantity > 1 ? `Your ${quantity} pieces are reserved in size ${size}.` : `Your piece is reserved in size ${size}.`} ORBES Client Services will contact you to settle payment and delivery.`,
+    `${quantity > 1 ? `Your ${quantity} pieces are reserved ${inSizeWords(size)}.` : isOneSize(size) ? 'Your piece is reserved in ONE SIZE.' : `Your piece is reserved in size ${size}.`} ORBES Client Services will contact you to settle payment and delivery.`,
   /** MY PIECES' YOUR RELEASES (plan LIVE RELEASE+, Interconnection): the piece secured, a past fact true at every step of
    *  its order (paid, shipped, delivered, cancelled or returned); its steps are its order's. */
   securedInPieces: (size: string, quantity: number) =>
-    quantity > 1 ? `You secured ${quantity} pieces in size ${size}. Their steps follow in YOUR ORDERS.` : `You secured your piece in size ${size}. Its steps follow in YOUR ORDERS.`,
+    quantity > 1 ? `You secured ${quantity} pieces ${inSizeWords(size)}. Their steps follow in YOUR ORDERS.` : `You secured your piece ${inSizeWords(size)}. Its steps follow in YOUR ORDERS.`,
   rows: Object.freeze({ reserved: 'RESERVED', size: 'SIZE', pieces: 'PIECES', total: 'TOTAL', reference: 'REFERENCE' }),
   clientServices: 'CLIENT SERVICES',
   // The edge pages: a title, a sentence, one action
@@ -1091,7 +1100,7 @@ export const LIVE = Object.freeze({
     left: Object.freeze({ title: 'YOU LEFT THE LINE', text: 'Your place has gone to the collectors behind you.' }),
     removed: Object.freeze({ title: 'YOUR ENTRY IS REMOVED', text: 'ORBES has removed your entry from this release. ORBES Client Services can assist you.' }),
     soldOut: Object.freeze({
-      title: (size: string) => `SOLD OUT IN SIZE ${size}`,
+      title: (size: string) => (isOneSize(size) ? 'SOLD OUT' : `SOLD OUT IN SIZE ${size}`),
       stay: 'Every piece in your size is taken. You keep your place in case one returns, or you may leave.',
       none: 'Every piece in your size is reserved. You keep your place should ORBES add one, or you may leave.',
       leave: 'LEAVE THE LINE',
@@ -1111,7 +1120,7 @@ export const LIVE = Object.freeze({
   retry: 'TRY AGAIN',
   /** What the page says aloud as it changes (aria-live). */
   announce: Object.freeze({
-    place: (place: number, ahead: number, size: string) => `Your place: ${place}. ${ahead === 0 ? `You are next in size ${size}` : `${ahead} ahead of you in size ${size}`}.`,
+    place: (place: number, ahead: number, size: string) => `Your place: ${place}. ${ahead === 0 ? `You are next ${inSizeWords(size)}` : `${ahead} ahead of you ${inSizeWords(size)}`}.`,
     turn: 'Your turn. Press and hold the seal until the ring is full.',
     returned: 'A piece has returned: your turn. Press and hold the seal until the ring is full.',
     secured: (name: string) => `Secured: ${name} is held for you.`,
@@ -1159,6 +1168,12 @@ export const LIVE = Object.freeze({
     joinLine: 'You keep your place from the line. Choose your size to take it.',
     confirmedOf: (name: string) => `THE AFTER-ROOM · ${name}`,
     over: Object.freeze({ title: 'THE AFTER-ROOM IS CLOSED', text: 'Your entry, if you had one, stays in MY PIECES.' }),
+    /** An entry of the after-room that ends with it (its edge pages are overlined THE AFTER-ROOM): never "the release". */
+    ended: Object.freeze({
+      SOLD_OUT: Object.freeze({ title: 'SOLD OUT', text: 'Every piece of the after-room is reserved.' }),
+      CLOSED: Object.freeze({ title: 'THE AFTER-ROOM IS CLOSED', text: 'Its time has run out before your turn came.' }),
+      ENDED: Object.freeze({ title: 'THE AFTER-ROOM HAS ENDED', text: 'ORBES has ended the after-room before your piece was secured.' }),
+    }),
     /** Said aloud when the door appears. */
     announce: 'A second door has opened.',
   }),

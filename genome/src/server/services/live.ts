@@ -55,7 +55,7 @@
  * collectors. ».
  *
  * The engine (live-engine.ts) runs `advance` for each release in its live window every 250 ms: one transaction, the
- * release's row FOR UPDATE: the line at T0, the turns and holds run out (not while paused), the end, the turns. Every
+ * release's row FOR NO KEY UPDATE: the line at T0, the turns and holds run out (not while paused), the end, the turns. Every
  * customer and console action takes the release's row first, then the entry's (FOR SHARE when it changes no count:
  * PRESS, SECURE, add-ons, interest; FOR UPDATE otherwise), and reads the clock once it holds them; every transaction
  * writes its audit entries last, so no row is locked after the audit chain's lock. Deadlines are compared with the
@@ -1579,14 +1579,14 @@ export class LiveService {
   }
 
   /**
-   * One pass of the engine on one release, in one transaction, its row FOR UPDATE: the line at T0, the turns and holds
+   * One pass of the engine on one release, in one transaction, its row FOR NO KEY UPDATE (as lockLive): the line at T0, the turns and holds
    * that ran out (not while paused), the end (SOLD_OUT, CLOSED), then the turns. Null when it is not a live LIVE
    * RELEASE (any more).
    */
   async advance(dropId: string, db: Db = this.db): Promise<LiveAdvance | null> {
     const id = knownId(dropId, dropNotFound);
     return inTransaction(db, async (tx) => {
-      const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).forUpdate().executeTakeFirst();
+      const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).forNoKeyUpdate().executeTakeFirst();
       if (!d || d.mode !== 'LIVE' || !d.published_at || d.cancelled_at) return null;
       const now = this.clock();
       const out: LiveAdvance = { dropId: id, queued: 0, missed: 0, expired: 0, turns: 0, ended: null };
@@ -1640,10 +1640,14 @@ export class LiveService {
     if (!account || account.status !== 'ACTIVE') throw forbidden('This account cannot perform this action.');
   }
 
-  /** A published LIVE RELEASE's row, FOR UPDATE or FOR SHARE; anything else is the same 404 as an unknown release. */
+  /**
+   * A published LIVE RELEASE's row, FOR NO KEY UPDATE or FOR SHARE (drops.id never changes, so the exclusive mode leaves
+   * the FOR KEY SHARE of a foreign-key check on drops free: a bench item inserted for the release does not wait for it);
+   * anything else is the same 404 as an unknown release.
+   */
   private async lockLive(tx: Db, id: string, lock: Lock): Promise<LiveDrop> {
     const q = tx.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').where('published_at', 'is not', null);
-    const d = await (lock === 'update' ? q.forUpdate() : q.forShare()).executeTakeFirst();
+    const d = await (lock === 'update' ? q.forNoKeyUpdate() : q.forShare()).executeTakeFirst();
     if (!d) throw dropNotFound();
     return d;
   }
@@ -1664,9 +1668,9 @@ export class LiveService {
     return { d, now, place };
   }
 
-  /** A LIVE RELEASE's row FOR UPDATE, published or not; anything else is the same 404 as an unknown release. */
+  /** A LIVE RELEASE's row FOR NO KEY UPDATE (as lockLive), published or not; anything else is the same 404 as an unknown release. */
   private async lockAnyLive(tx: Db, id: string): Promise<LiveDrop> {
-    const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').forUpdate().executeTakeFirst();
+    const d = await tx.selectFrom('drops').selectAll().where('id', '=', id).where('mode', '=', 'LIVE').forNoKeyUpdate().executeTakeFirst();
     if (!d) throw dropNotFound();
     return d;
   }

@@ -129,7 +129,7 @@ export function feasibilityCheck(input: {
     ...(afterRoom ? ['The release’s sizes first, then its after-room’s from what they leave: the same model in the same size draws on one stock.'] : []),
     short === 0
       ? `Every one of the ${pieces(onSale)} on sale is covered: nothing to make to order.`
-      : `${pieces(short)} of the ${pieces(onSale)} on sale would be made to order once sold, at the atelier. This is a warning: the release can be published as it is.`,
+      : `${pieces(short)} of the ${pieces(onSale)} on sale would be made to order once sold, at the atelier. It does not hold the release back: it can be published as it is.`,
   ];
   return { location: input.location, sizes, afterRoom, short, warnings, reasoning };
 }
@@ -181,15 +181,17 @@ export function sizeMix(input: {
   const labels = new Map<string, string>();
   const available = new Map<string, number>();
   const demand = new Map<string, number>();
-  const tooLong = new Set<string>();
+  const tooLong = new Map<string, string>();
+  const name = (k: string) => labels.get(k) ?? k;
   const add = (label: string) => {
     const k = key(label);
     if (k.length === 0) return null;
     if (k.length > SIZE_LABEL_MAX) {
-      tooLong.add(k);
+      if (!tooLong.has(k)) tooLong.set(k, label.trim());
       return null;
     }
-    if (!labels.has(k)) labels.set(k, k);
+    // The first label seen names the size: the stock's own (its SKU's), so a release on this proposal draws on it.
+    if (!labels.has(k)) labels.set(k, label.trim());
     return k;
   };
   for (const s of input.stock) {
@@ -203,7 +205,7 @@ export function sizeMix(input: {
   const inStock = [...available.values()].reduce((a, b) => a + b, 0);
   why.push(
     inStock > 0
-      ? `In stock at ${input.location.name}: ${[...available.entries()].sort((a, b) => natural(a[0], b[0])).map(([l, n]) => `${l}: ${count(n)}`).join(', ')}, offered first.`
+      ? `In stock at ${input.location.name}: ${[...available.entries()].map(([k, n]) => [name(k), n] as const).sort((a, b) => natural(a[0], b[0])).map(([l, n]) => `${l}: ${count(n)}`).join(', ')}, offered first.`
       : `Nothing of ${input.model.name} is available at ${input.location.name}: the sizes come from the planner alone.`,
   );
   const proposed = new Map<string, { fromStock: number; fromDemand: number }>();
@@ -226,15 +228,16 @@ export function sizeMix(input: {
       });
       why.push(
         `The planner expects ${pieces(input.planned)}, ${count(extra)} more than the stock: shared by how far its demand exceeds the stock in each size (${over
-          .sort((a, b) => natural(a.k, b.k))
-          .map((x) => `${x.k}: ${count(x.excess)}`)
+          .map((x) => ({ l: name(x.k), excess: x.excess }))
+          .sort((a, b) => natural(a.l, b.l))
+          .map((x) => `${x.l}: ${count(x.excess)}`)
           .join(', ')}), the largest remainders rounded up; made to order once sold.`,
       );
     }
   }
-  if (tooLong.size) why.push(`Left out, their labels longer than a release's ${SIZE_LABEL_MAX} characters: ${[...tooLong].sort(natural).join(', ')}.`);
+  if (tooLong.size) why.push(`Left out, their labels longer than a release's ${SIZE_LABEL_MAX} characters: ${[...tooLong.values()].sort(natural).join(', ')}.`);
   let sizes = [...proposed.entries()]
-    .map(([label, p]) => ({ label, fromStock: p.fromStock, fromDemand: p.fromDemand, stock: Math.min(SIZE_STOCK_MAX, p.fromStock + p.fromDemand) }))
+    .map(([k, p]) => ({ label: name(k), fromStock: p.fromStock, fromDemand: p.fromDemand, stock: Math.min(SIZE_STOCK_MAX, p.fromStock + p.fromDemand) }))
     .filter((s) => s.stock > 0);
   if (sizes.length > SIZES_MAX) {
     // The sizes with the most pieces stay, a release offering 24 at most.

@@ -9,7 +9,8 @@
  * `shopify_location_id` the Shopify location it will be, once the store exists (decimal, unique).
  *
  * `skus`: a model in one size (`size_label`, the label a release's size or a piece's `variant` says, 1 to 100
- * characters; NULL for a model in one size), one row per model and size (`skus_model_size_key`, NULLS NOT DISTINCT),
+ * characters; NULL for a model in one size), one row per model and size whatever its case (`skus_model_size_key`, a
+ * unique index on the model and the upper-cased label, NULLS NOT DISTINCT),
  * its `code` (the model's SKU prefix and the size, unique) and its future Shopify ids (`shopify_product_id`,
  * `shopify_variant_id`, the latter unique). No stock column: the stock is the ledger's. id, model and size never change.
  * `products.sku_id` (with the piece's model: `products_sku_fkey`, composite) and `drop_sizes.sku_id` link the pieces
@@ -138,11 +139,12 @@ export const UP: readonly string[] = [
      shopify_product_id text        NULL CHECK (shopify_product_id ~ ${SHOPIFY_ID}),
      shopify_variant_id text        NULL CHECK (shopify_variant_id ~ ${SHOPIFY_ID}),
      created_at         timestamptz NOT NULL DEFAULT now(),
-     CONSTRAINT skus_model_size_key UNIQUE NULLS NOT DISTINCT (model_id, size_label),
      CONSTRAINT skus_model_sku_key UNIQUE (model_id, id),
      CONSTRAINT skus_code_key UNIQUE (code),
      CONSTRAINT skus_shopify_variant_key UNIQUE (shopify_variant_id)
    )`,
+  // One SKU per model and size, whatever the case a size is typed in (Small, SMALL); one size (NULL) once too.
+  `CREATE UNIQUE INDEX skus_model_size_key ON skus (model_id, upper(size_label)) NULLS NOT DISTINCT`,
   `CREATE TRIGGER skus_immutable_identity BEFORE UPDATE ON skus
      FOR EACH ROW EXECUTE FUNCTION orbes_guard_immutable_columns('id', 'model_id', 'size_label', 'created_at')`,
 

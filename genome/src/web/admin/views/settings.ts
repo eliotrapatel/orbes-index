@@ -3,8 +3,9 @@
  * carriers), reached from the Orders board and the Atelier: everyone who reads the console sees them; an ADMIN
  * changes them, each change audited.
  *
- *  - Order alerts (M3): the delays after which an order stands out on the board (RESERVED 2 days, paid and ready 3,
- *    shipped 10, delivered and not registered 30 by default), and who set them.
+ *  - Late orders (M3; the order alerts of the API and the audit, a word the console never shows): the delays after
+ *    which an order stands out on the board (RESERVED 2 days, paid and ready 3, shipped 10, delivered and not
+ *    registered 30 by default), and who set them.
  *  - Locations: FRANCE WAREHOUSE and LOGISTICS WAREHOUSE from the first boot, more added; renamed; one is the default,
  *    where the orders of draws and of the private salon go.
  *  - Carriers: Colissimo, Chronopost, DHL Express and UPS from the first boot, more added; each with its tracking link,
@@ -53,7 +54,7 @@ export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
 function alertsSection(ctx: ViewContext, a: OrderAlertSettings, admin: boolean, done: (msg: string) => (v: unknown) => void): HTMLElement {
   const edit = () =>
     void openDialog({
-      title: 'Order alerts',
+      title: 'Late orders',
       eyebrow: 'Settings',
       body: h('p', { class: 'dialog__text' }, 'An order stands out on the board once it has spent longer than this in its step.'),
       fields: [
@@ -74,9 +75,9 @@ function alertsSection(ctx: ViewContext, a: OrderAlertSettings, admin: boolean, 
       submit: async (v) => {
         await ctx.api.setOrderAlerts(alertsInput(v));
       },
-    }).then(done('Alerts saved.'));
+    }).then(done('Delays saved.'));
   return section(
-    'Order alerts',
+    'Late orders',
     defList([
       { label: 'Reserved, not paid', value: h('span', { data: { testid: 'alert-reserved' } }, `Over ${days(a.reservedDays)}`) },
       { label: 'Paid, ready, not shipped', value: h('span', { data: { testid: 'alert-ready' } }, `Over ${days(a.readyDays)}`), note: 'From when it was both paid and ready.' },

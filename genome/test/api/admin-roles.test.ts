@@ -192,7 +192,7 @@ const PROBES: Probe[] = [
   { group: 'orders', method: 'PATCH', url: `/api/admin/orders/${UUID}/terms`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'PUT', url: `/api/admin/orders/${UUID}/buyer`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/piece`, body: INVALID, min: 'OPERATOR' },
-  // Step S4: a return opened by an OPERATOR; the invoices and credit notes read by an AUDITOR (the buyer masked).
+  // Step S4: a return opened by an OPERATOR (to the archive by an ADMIN only: the case below); the invoices and credit notes read by an AUDITOR (the buyer masked).
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/return`, body: INVALID, min: 'OPERATOR' },
   { group: 'invoices', method: 'GET', url: '/api/admin/invoices', min: 'AUDITOR' },
   { group: 'invoices', method: 'GET', url: '/api/admin/invoices?month=2026-11&kind=CREDIT_NOTE&q=INV-2026', min: 'AUDITOR' },
@@ -429,5 +429,15 @@ describe('admin role enforcement', () => {
     expect(errorOf(res).code).toBe('FORBIDDEN');
     // ADMIN gets past the role check (the product does not exist here).
     expect((await clients.ADMIN.post(`/api/admin/products/${PID}/transitions`, { to: 'REVOKED', reason: 'x' })).statusCode).toBe(404);
+  });
+
+  it('OPERATOR may take a return back to stock but not archive it: the archive retires the piece', async () => {
+    const url = `/api/admin/orders/${UUID}/return`;
+    const res = await clients.OPERATOR.post(url, { outcome: 'ARCHIVED', note: 'Returned damaged.' });
+    expect(res.statusCode).toBe(403);
+    expect(errorOf(res).code).toBe('FORBIDDEN');
+    // Back to stock, the OPERATOR gets past the role check; so does an ADMIN archiving (the order does not exist here).
+    expect((await clients.OPERATOR.post(url, { outcome: 'RESTOCKED', locationId: UUID, note: 'Returned unworn.' })).statusCode).toBe(404);
+    expect((await clients.ADMIN.post(url, { outcome: 'ARCHIVED', note: 'Returned damaged.' })).statusCode).toBe(404);
   });
 });

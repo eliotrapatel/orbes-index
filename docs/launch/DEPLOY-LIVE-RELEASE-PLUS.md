@@ -42,7 +42,7 @@ Le point de départ : la production tourne le commit `86bd579e4aa96b74b86f74c0b8
 - **Au premier démarrage**, l'application crée les lieux `FRANCE WAREHOUSE` (le lieu par défaut) et `LOGISTICS WAREHOUSE`, et les transporteurs Colissimo, Chronopost, DHL Express et UPS ; elle relie les pièces et les tailles existantes à leurs références, et crée une commande pour chaque vente déjà confirmée, datée du moment de la vente :
   - une réservation d'une LIVE RELEASE **conclue** (`Concluded` dans `Client Services`) devient PAID : sa facture `INV-…` est émise au démarrage, sans le nom ni l'adresse de l'acheteur (D ne les connaissait pas ; seulement l'e-mail du compte), et elle le reste, car une facture ne se modifie plus ;
   - une réservation **annulée** devient CANCELLED et ne tient rien ;
-  - une réservation **encore ouverte** devient RESERVED ; comme une conclue, elle tient une pièce du stock ou, les lieux étant vides au premier démarrage, une pièce à fabriquer dans `Atelier`, qui réserve son numéro de série ;
+  - une réservation **encore ouverte** devient RESERVED ; comme une conclue, elle tient une pièce du stock ou, les lieux étant vides au premier démarrage, une pièce à fabriquer dans `Atelier`, qui réserve son numéro de série (si la pièce de cette vente est déjà faite et émise dans le Generator, voir §1.8) ;
   - une place d'une sortie tirée **confirmée** (depuis le déploiement A) devient RESERVED, sans taille ni prix (dans MY PIECES, les deux se lisent `TO BE CONFIRMED`) et ne tient rien tant qu'ils manquent.
 
   Une commande RESERVED dont la vente date de plus de 2 jours paraît aussitôt en retard dans `Orders` : `LATE · NOT PAID`.
@@ -459,7 +459,7 @@ Un **essai complet**, avant toute vraie commande. Il te faut : l'ordinateur pour
 
 | Élément | Où | Geste | Ce que tu dois voir |
 |---|---|---|---|
-| Les lieux, les transporteurs, les retards (choix 16, 17, 19) | Console | `Orders` → `Settings` | `FRANCE WAREHOUSE` (`DEFAULT`) et `LOGISTICS WAREHOUSE` ; Colissimo, Chronopost, DHL Express et UPS, chacun `OFFERED` avec son `Tracking link` ; `Order alerts` : 2, 3, 10 et 30 jours |
+| Les lieux, les transporteurs, les retards (choix 16, 17, 19) | Console | `Orders` → `Settings` | `FRANCE WAREHOUSE` (`DEFAULT`) et `LOGISTICS WAREHOUSE` ; Colissimo, Chronopost, DHL Express et UPS, chacun `OFFERED` avec son `Tracking link` ; `Late orders` : 2, 3, 10 et 30 jours |
 | Le prix de base, le guide d'entretien, l'export des modèles (choix 21, 24) | Console | `Catalogue` ; puis `Shopify export`, en `EUR` | La colonne `Price · Shopify` : `€ 1` et `NOT LINKED` pour le modèle d'essai ; un fichier CSV où il est un brouillon (`draft`), ses tailles en variantes, au prix `1.00` |
 | Les segments (choix 27) | Console | `Segments` → `TEST LIVE+` ; puis son CSV | `Collectors now` : les comptes qui détiennent une pièce du modèle d'essai, ceux de A et B compris ; le fichier de leurs adresses e-mail |
 | La proposition des tailles (choix 13) | Console | Le dialogue `New live release` (préparation, point 3) | `Sizes` est rempli d'avance, depuis le stock, puis la demande du planificateur |
@@ -493,6 +493,7 @@ Restent hors de l'essai, couverts par les tests : l'annulation d'une commande (l
 ### 1.8 Ensuite
 
 - **Les vraies commandes** : chaque vente confirmée paraît dans `Orders`, les ventes d'avant E comprises (§1.0) ; ORBES Client Services saisit l'acheteur, marque PAID au paiement reçu hors du service (la facture part alors), l'atelier fabrique et émet la pièce, puis l'expédition. Avant d'expédier, active la garantie de la pièce (`Warranties`), comme pour toute vente ([SALES-PLAYBOOK](SALES-PLAYBOOK.md)) : sans elle, son acheteur ne peut pas l'enregistrer, et la commande ne passe pas DELIVERED d'elle-même. Les retards ressortent dans `Orders` selon les délais des `Settings`.
+- **Les pièces déjà émises dans le Generator.** Le stock part de zéro à E : une pièce émise avant (ou plus tard dans le Generator) n'y est pas comptée. Pour la mettre en stock, `Atelier` → `Correct a count` : le modèle et la taille, le lieu où elle se trouve, `+1` et une note (par exemple « Pièces émises dans le Generator, comptées »). Seule exception : la pièce d'une vente d'avant E dont la commande tient une pièce à fabriquer. Ne la compte pas : ouvre la commande dans `Orders`, `Link a piece`, saisis sa référence (O26-J-00184). Sa pièce à fabriquer est annulée et le numéro réservé pour elle retiré ; la pièce est prise sur le stock disponible du lieu de la commande, ou, s'il n'y en a pas, comptée avec la commande.
 - **Les anciennes images (facultatif).** Une fois le déploiement E stable, les images antérieures à `86bd579e4aa9` ne peuvent plus servir. Retire-les une par une, par leur tag exact (jamais `<TAG_E>` ni `86bd579e4aa9`) ; la liste d'abord :
 
   ```bash

@@ -1032,7 +1032,8 @@ class LivePage {
     const el = h(
       'section',
       { class: 'live__edge' },
-      this.overline(this.name()),
+      // In an after-room, its edge pages say so: the release itself had sold out before.
+      this.overline(this.afterRoomOf() ? LIVE.afterRoom.kind : this.name()),
       this.title(s ? LIVE.forWhom(s.access.text) : LIVE.kind),
       this.note([this.refusal, LIVE.edge.notEligible.text].filter(Boolean).join(' ')),
       this.action(LIVE.back, () => this.deps.onReleases()),
@@ -1841,7 +1842,8 @@ class LivePage {
     const el = h(
       'section',
       { class: 'live__edge' },
-      this.overline(this.name()),
+      // In an after-room, its edge pages say so: the release itself had sold out before.
+      this.overline(this.afterRoomOf() ? LIVE.afterRoom.kind : this.name()),
       title,
       note,
       ask?.el ?? null,
@@ -1871,7 +1873,7 @@ class LivePage {
       case 'removed':
         return e.removed;
       case 'ended':
-        return e.ended[this.room?.endedReason ?? 'ENDED'];
+        return (this.afterRoomOf() ? LIVE.afterRoom.ended : e.ended)[this.room?.endedReason ?? 'ENDED'];
       default:
         return this.afterRoomOf() ? LIVE.afterRoom.over : e.over;
     }

@@ -163,7 +163,7 @@ describe('migrations', () => {
     // once each; one invoice per order; an entity's events in the journal; every foreign key at the head of an index.
     expect(has(/UNIQUE INDEX stock_locations_name_key ON public\.stock_locations USING btree \(lower\(name\)\)$/)).toBe(true);
     expect(has(/UNIQUE INDEX stock_locations_one_default ON public\.stock_locations USING btree \(is_default\) WHERE is_default$/)).toBe(true);
-    expect(has(/UNIQUE INDEX skus_model_size_key ON public\.skus USING btree \(model_id, size_label\) NULLS NOT DISTINCT$/)).toBe(true);
+    expect(has(/UNIQUE INDEX skus_model_size_key ON public\.skus USING btree \(model_id, upper\(size_label\)\) NULLS NOT DISTINCT$/)).toBe(true);
     expect(has(/INDEX products_sku_id_idx ON public\.products USING btree \(sku_id\)$/)).toBe(true);
     expect(has(/INDEX drop_sizes_sku_id_idx ON public\.drop_sizes USING btree \(sku_id\)$/)).toBe(true);
     expect(has(/INDEX drops_stock_location_id_idx ON public\.drops USING btree \(stock_location_id\)$/)).toBe(true);
@@ -1401,7 +1401,6 @@ describe('migrations', () => {
       /^constraint shop_requests shop_requests_outcome_check CHECK \(\(outcome = ANY \(ARRAY\['ACCEPTED'::text, 'DECLINED'::text\]\)\)\)$/,
       /^constraint accounts accounts_shopify_customer_id_check CHECK \(\(shopify_customer_id ~ '\^\[1-9\]\[0-9\]\{0,19\}\$'::text\)\)$/,
       /^constraint accounts accounts_shopify_customer_key UNIQUE \(shopify_customer_id\)$/,
-      /^constraint skus skus_model_size_key UNIQUE NULLS NOT DISTINCT \(model_id, size_label\)$/,
       /^constraint orders orders_sku_fkey FOREIGN KEY \(model_id, sku_id\) REFERENCES skus\(model_id, id\) ON DELETE RESTRICT$/,
       /^constraint orders orders_status_check CHECK \(\(status = ANY \(ARRAY\['RESERVED'::text, 'PAID'::text, 'SHIPPED'::text, 'DELIVERED'::text, 'CANCELLED'::text, 'RETURNED'::text\]\)\)\)$/,
       /^constraint orders orders_channel_check CHECK \(\(channel = ANY \(ARRAY\['LIVE'::text, 'DRAW'::text, 'SALON'::text\]\)\)\)$/,
@@ -1454,12 +1453,15 @@ describe('migrations', () => {
     await run(`UPDATE stock_locations SET name = 'LONDON VAULT' WHERE id = '${london}'`);
     await expect(run(`UPDATE stock_locations SET created_at = now() + interval '1 day' WHERE id = '${london}'`)).rejects.toSatisfy(isGuardViolation);
 
-    // SKUs: one per model and size, one size (NULL) once too; a code of the SKU grammar, unique; its model and size fixed.
+    // SKUs: one per model and size whatever its case, one size (NULL) once too; a code of the SKU grammar, unique; its model and size fixed.
     const skuOf = (modelId: string, size: string | null, code: string) =>
       sql<{ id: string }>`INSERT INTO skus (model_id, size_label, code) VALUES (${modelId}, ${size}, ${code}) RETURNING id`.execute(t.db);
     const s52 = (await skuOf(model, '52', 'ORDCHK-52')).rows[0].id;
     const one = (await skuOf(model, null, 'ORDCHK')).rows[0].id;
     await expect(skuOf(model, '52', 'ORDCHK-52B')).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_model_size_key'));
+    const small = (await skuOf(model, 'Small', 'ORDCHK-S')).rows[0].id;
+    await expect(skuOf(model, 'SMALL', 'ORDCHK-S2')).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_model_size_key'));
+    await run(`DELETE FROM skus WHERE id = '${small}'`);
     await expect(skuOf(model, null, 'ORDCHK-ONE')).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_model_size_key'));
     await expect(skuOf(model, '54', 'ORDCHK-52')).rejects.toSatisfy((e) => isUniqueViolation(e, 'skus_code_key'));
     for (const [size, code] of [[' 54', 'ORDCHK-54'], ['54', '-ORDCHK-54'], ['54', 'ORDCHK<54>']] as const) {

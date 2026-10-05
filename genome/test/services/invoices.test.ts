@@ -63,6 +63,7 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
   const orders = () => ctx.services.orders;
   const invoices = () => ctx.services.invoices;
   const invoiceRows = (orderId: string) => t.db.selectFrom('invoices').selectAll().where('order_id', '=', orderId).orderBy('issued_at').orderBy('kind', 'desc').execute();
+  const orderRowOf = (id: string) => t.db.selectFrom('orders').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
   const auditsOf = (targetId: string) => t.db.selectFrom('audit_logs').select(['action', 'details']).where('target_id', '=', targetId).orderBy('id').execute();
 
   /** A private salon's order closed as ACCEPTED, priced when `priceMinor` is given, its buyer entered when `buyer` is. */
@@ -168,6 +169,20 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     await orders().transition(many[0]!.id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
     const [credit] = (await invoiceRows(many[0]!.id)).filter((i) => i.kind === 'CREDIT_NOTE');
     expect([credit!.year, credit!.sequence]).toEqual([2027, 1]);
+    // An order whose clock reads earlier than the last invoice's (its transaction took the number after it) is dated
+    // with that invoice: the numbers and the dates rise together.
+    const early = await salonOrder({ priceMinor: 300_000 });
+    clock.advance(60 * MINUTE);
+    const later = await salonOrder({ priceMinor: 300_000 });
+    await orders().transition(later.id, { to: 'PAID' }, admin);
+    const ahead = clock.now();
+    clock.set(new Date(ahead.getTime() - 30 * MINUTE));
+    await orders().transition(early.id, { to: 'PAID' }, admin);
+    const [laterInvoice] = await invoiceRows(later.id);
+    const [earlyInvoice] = await invoiceRows(early.id);
+    expect([earlyInvoice!.sequence, earlyInvoice!.issued_at]).toEqual([laterInvoice!.sequence + 1, ahead]);
+    expect((await orderRowOf(early.id)).paid_at).toEqual(new Date(ahead.getTime() - 30 * MINUTE));
+    clock.set(new Date(ahead.getTime() + MINUTE));
   });
 
   it('a credit note cancels the invoice in full when an order paid is cancelled; none before PAID; once', async () => {

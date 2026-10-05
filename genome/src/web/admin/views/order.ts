@@ -5,14 +5,15 @@
  *    time in its step, and whether it is late (M3) and why; the next steps (OPERATOR): MARK PAID (once priced: its
  *    invoice is issued), SHIP (a carrier of the settings, the tracking number, the value declared for the insurance),
  *    MARK DELIVERED, CANCEL (with a note; a credit note once paid), OPEN A RETURN (choice 20: back to stock at a
- *    location, or to the archive, with a note; ORBES takes back its buyer's ownership if they registered it; back to
- *    stock, the claim code of the piece's new card is shown once, with its card to download).
+ *    location, or, by an ADMIN, to the archive, with a note; ORBES takes back its buyer's ownership if they registered
+ *    it; back to stock, the claim code of the piece's new card is shown once, with its card to download).
  *  - The order: its channel, release, the collector (the email masked for an AUDITOR) and the reference they hold, the
  *    model, size, price, add-ons, surprise and engraving text; EDIT (OPERATOR): a draw's or a salon's size, price and
  *    currency, any order's engraving text (decision 31).
  *  - Its buyer: the name and address entered by Client Services (masked for an AUDITOR); EDIT (OPERATOR).
  *  - Its piece: the location it is served from (CHANGE: what it holds moves), what it holds (a piece in stock, a piece
- *    being made at the atelier), the piece that fulfils it (LINK A PIECE picked from the stock).
+ *    being made at the atelier), the piece that fulfils it (LINK A PIECE picked from the stock, also in place of a
+ *    piece to make still being made: that piece to make is then cancelled).
  *  - Its shipment: the carrier, the tracking number and its link, the declared value.
  *  - Its return: where the piece went, the note, whether ORBES took the ownership back.
  *  - Its documents (M7): the invoice and the credit note, each with its PDF.
@@ -156,7 +157,8 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
           label: 'The piece goes',
           kind: 'select',
           required: true,
-          options: [{ value: '', label: 'Choose' }, { value: 'RESTOCKED', label: RETURN_LABELS.RESTOCKED }, { value: 'ARCHIVED', label: RETURN_LABELS.ARCHIVED }],
+          // The archive retires the piece: ADMIN's alone (an OPERATOR takes it back to stock).
+          options: [{ value: '', label: 'Choose' }, { value: 'RESTOCKED', label: RETURN_LABELS.RESTOCKED }, ...(acts.archive ? [{ value: 'ARCHIVED', label: RETURN_LABELS.ARCHIVED }] : [])],
           value: '',
         },
         {
@@ -367,7 +369,16 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     void openDialog({
       title: 'Link a piece from stock',
       eyebrow,
-      body: h('p', { class: 'dialog__text' }, `A piece issued of ${o.model.name} in ${sizeText({ sizeLabel: o.sizeLabel, skuKnown: true })}, at ${o.location.name}, never registered: it fulfils this order, which then holds it until it ships.`),
+      body: [
+        h('p', { class: 'dialog__text' }, `A piece issued of ${o.model.name} in ${sizeText({ sizeLabel: o.sizeLabel, skuKnown: true })}, at ${o.location.name}, never registered: it fulfils this order, which then holds it until it ships.`),
+        o.reservation === 'BENCH' && o.bench
+          ? h(
+              'p',
+              { class: 'dialog__text', data: { testid: 'link-replaces-bench' } },
+              `Its piece to make, ${o.bench.productId}, is then cancelled at the atelier, and the ORBES identity reserved for it retired: its serial is never used again. A finished piece never counted in the stock is counted in with this order.`,
+            )
+          : null,
+      ],
       fields: [{ name: 'productId', label: 'Piece reference', required: true, maxlength: 20, hint: 'As engraved and printed: O26-J-00184.' }],
       validate: (v) => (/^O\d{2}-[A-Z]-\d{5,6}$/i.test(v.productId.trim()) ? null : 'A piece reference reads O26-J-00184.'),
       confirmLabel: 'Link the piece',

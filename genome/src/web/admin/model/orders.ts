@@ -194,11 +194,13 @@ export interface OrderActions {
   cancel: boolean;
   /** RETURNED (choice 20): shipped or delivered. */
   return: boolean;
+  /** A return to the archive (its piece RETIRED): ADMIN only, as the server. */
+  archive: boolean;
   location: boolean;
   /** The size, the price and the currency (a draw's or a salon's), and the engraving text (any order). */
   terms: { size: boolean; price: boolean; engraving: boolean };
   buyer: boolean;
-  /** A piece picked from the stock: an order holding one, none linked yet. */
+  /** A piece picked from the stock: an order holding one, or a piece to make still being made; none linked yet. */
   linkPiece: boolean;
 }
 
@@ -213,10 +215,11 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
     deliver: ok && o.status === 'SHIPPED',
     cancel: ok && holding,
     return: ok && (o.status === 'SHIPPED' || o.status === 'DELIVERED') && o.productId !== null,
+    archive: can(role, 'archiveReturn') && (o.status === 'SHIPPED' || o.status === 'DELIVERED') && o.productId !== null,
     location: ok && holding && o.productId === null,
     terms: { size: ok && holding && sale && o.productId === null, price: ok && o.status === 'RESERVED' && sale, engraving: ok && holding },
     buyer: ok,
-    linkPiece: ok && holding && o.reservation === 'STOCK' && o.productId === null,
+    linkPiece: ok && holding && o.productId === null && (o.reservation === 'STOCK' || (o.reservation === 'BENCH' && o.bench !== null && (o.bench.status === 'TO_MAKE' || o.bench.status === 'IN_PROGRESS'))),
   };
 }
 

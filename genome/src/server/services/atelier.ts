@@ -22,7 +22,11 @@
  *                  ledger at the location it was made for (PRODUCED, +1), and, made for an order, linked to it (the
  *                  order then holds it in stock: `attachPiece`, `order.link`). A piece of an order held in stock is
  *                  linked by picking one piece of its SKU from the stock (`linkFromStock`): issued and never sold, or
- *                  back from a return.
+ *                  back from a return. An order holding a piece to make may take a finished piece the same way (one
+ *                  made in advance, choice 8): its piece to make is cancelled and its reserved identity retired, and
+ *                  the piece is taken from what is available at the order's location or, nothing being available
+ *                  there and the piece never having entered the ledger (issued in the Generator), counted in with
+ *                  the order (PRODUCED, +1).
  *
  * Lock order (as services/orders.ts): the order, the SKU, the piece to make, the piece; the serials, the journal; the
  * audit log last. Journaled: `bench.create`, `.start`, `.done`, `.cancel`, `product.issue`, `product.retire`,
@@ -40,8 +44,8 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
 import { confirmReservedIdentity, RESERVED_MATERIAL_PENDING, reserveIdentity, retireReservedIdentity, type IssuanceService } from './issuance.js';
 import { writeJournal } from './journal.js';
-import { attachPiece, benchPayload, ORDER_HOLDING_STATUSES, orderReference, type OrderService, type OrderView } from './orders.js';
-import { knownLocation, lockSku, recordMovement, STOCK_MOVE_MAX } from './stock.js';
+import { attachPiece, benchPayload, ORDER_HOLDING_STATUSES, orderReference, release, type OrderService, type OrderView } from './orders.js';
+import { knownLocation, lockSku, recordMovement, STOCK_MOVE_MAX, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -612,9 +616,14 @@ export class AtelierService {
   }
 
   /**
-   * The piece that fulfils an order holding one in stock, picked from the stock (Interconnection): a piece of the
-   * order's SKU issued and never sold, or back in stock from a return (STOCK_PIECE_STATUSES), not registered, linked to
-   * no other open order. The order then holds that piece. Audited `order.link`.
+   * The piece that fulfils an order, picked from the stock (Interconnection): a piece of the order's SKU issued and
+   * never sold, or back in stock from a return (STOCK_PIECE_STATUSES), not registered, linked to no other open order.
+   * The order then holds that piece. An order holding one in stock takes it as it is. An order holding a piece to make
+   * (TO_MAKE or IN_PROGRESS) takes it instead (choice 8: a piece made in advance counts): one piece available at the
+   * order's location is taken for it; with none available there, a piece that never entered the ledger (issued in the
+   * Generator) is counted in with the order (PRODUCED, +1), and one already counted elsewhere answers 409
+   * STOCK_NOT_AVAILABLE (transfer it first). Its piece to make is then cancelled and its reserved identity retired (the
+   * code of its work sheet revoked). Audited `order.link` (and `bench.cancel`; the movement journaled `stock.move`).
    */
   async linkFromStock(orderId: string, productRef: string, actor: Actor): Promise<OrderView> {
     assertStaff(actor);
@@ -628,9 +637,14 @@ export class AtelierService {
       if (!o) throw notFound('Order', 'ORDER_NOT_FOUND');
       if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw conflict('ORDER_CLOSED', 'This order can no longer change.');
       if (o.product_id !== null) throw conflict('ORDER_PIECE_LINKED', 'A piece is already linked to this order.');
-      if (o.reservation === 'BENCH') throw conflict('ORDER_PIECE_TO_MAKE', 'Its piece is being made: the atelier links it when it is finished.');
-      if (o.reservation !== 'STOCK') throw conflict('ORDER_NOT_READY', 'The piece is not in stock at the order’s location yet.');
+      if (o.reservation !== 'STOCK' && o.reservation !== 'BENCH') throw conflict('ORDER_NOT_READY', 'The piece is not in stock at the order’s location yet.');
       await lockSku(tx, o.sku_id!);
+      // Its piece to make, while it is made: a piece made for it once finished is linked by `done`, not here.
+      const bench =
+        o.reservation === 'BENCH'
+          ? await tx.selectFrom('bench_items').select(['id', 'status']).where('order_id', '=', o.id).where('status', 'in', [...BENCH_OPEN]).forUpdate().executeTakeFirst()
+          : null;
+      if (o.reservation === 'BENCH' && !bench) throw conflict('ORDER_PIECE_TO_MAKE', 'Its piece is being made: the atelier links it when it is finished.');
       const p = await tx
         .selectFrom('products')
         .selectAll()
@@ -646,8 +660,25 @@ export class AtelierService {
       }
       const taken = await tx.selectFrom('orders').select('id').where('product_id', '=', p.id).where('status', 'in', ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED']).executeTakeFirst();
       if (taken) throw conflict('PIECE_TAKEN', `${p.product_id} fulfils another order.`);
-      const { note } = await attachPiece(tx, o, p.id, 'stock', actor, now);
-      await this.audit.record(note, tx);
+      const notes: AuditRecordInput[] = [];
+      if (bench) {
+        const level = await stockLevel(tx, o.sku_id!, o.location_id);
+        const counted = await tx.selectFrom('stock_movements').select('id').where('product_id', '=', p.id).executeTakeFirst();
+        if (level.available < 1 && counted) {
+          throw conflict('STOCK_NOT_AVAILABLE', `${p.product_id} is counted in the stock, but no piece of this size is available at the order’s location: transfer it there first.`);
+        }
+        await release(tx, o, 'Reserved identity retired: its order took a finished piece from the stock', actor, now, notes);
+        if (level.available < 1) {
+          await recordMovement(
+            tx,
+            { skuId: o.sku_id!, locationId: o.location_id, delta: 1, reason: 'PRODUCED', orderId: o.id, productId: p.id, note: 'A finished piece never counted in the stock, counted in with the order it fulfils.' },
+            actor,
+            now,
+          );
+        }
+      }
+      notes.push((await attachPiece(tx, o, p.id, 'stock', actor, now)).note);
+      for (const n of notes) await this.audit.record(n, tx);
     });
     return this.orders.get(id);
   }

@@ -445,6 +445,32 @@ describe('the line, the turn and the piece held', () => {
     expect(LIVE.ahead(3, '52')).toBe('3 AHEAD OF YOU IN SIZE 52');
   });
 
+  it('ends an after-room\'s entry in the after-room\'s words, never the release\'s', () => {
+    expect(LIVE.afterRoom.ended).toEqual({
+      SOLD_OUT: { title: 'SOLD OUT', text: 'Every piece of the after-room is reserved.' },
+      CLOSED: { title: 'THE AFTER-ROOM IS CLOSED', text: 'Its time has run out before your turn came.' },
+      ENDED: { title: 'THE AFTER-ROOM HAS ENDED', text: 'ORBES has ended the after-room before your piece was secured.' },
+    });
+    for (const c of Object.values(LIVE.afterRoom.ended)) expect(`${c.title} ${c.text}`.toLowerCase()).not.toContain('release');
+    // The view: overlined THE AFTER-ROOM, its ended words, in an after-room.
+    const view = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/views/live.ts'), 'utf8');
+    expect(view).toContain('this.overline(this.afterRoomOf() ? LIVE.afterRoom.kind : this.name())');
+    expect(view).toContain('(this.afterRoomOf() ? LIVE.afterRoom.ended : e.ended)[this.room?.endedReason ?? \'ENDED\']');
+  });
+
+  it('says a one-size release ONE SIZE, never SIZE ONE SIZE', () => {
+    const one = { id: S52, label: 'ONE SIZE' };
+    expect(placeAnnouncement(entry({ status: 'QUEUED', position: 2, ahead: 0, size: one }))).toBe('Your place: 2. You are next in ONE SIZE.');
+    expect(placeAnnouncement(entry({ status: 'QUEUED', position: 5, ahead: 3, size: one }))).toBe('Your place: 5. 3 ahead of you in ONE SIZE.');
+    expect([LIVE.ahead(0, 'ONE SIZE'), LIVE.ahead(2, 'One size'), LIVE.inSize(4, 'ONE SIZE')]).toEqual(['YOU ARE NEXT IN ONE SIZE', '2 AHEAD OF YOU IN ONE SIZE', '4 IN ONE SIZE']);
+    expect(LIVE.reservedIn('ONE SIZE', 1)).toBe('Your piece is reserved in ONE SIZE. ORBES Client Services will contact you to settle payment and delivery.');
+    expect(LIVE.securedInPieces('ONE SIZE', 2)).toBe('You secured 2 pieces in ONE SIZE. Their steps follow in YOUR ORDERS.');
+    expect([LIVE.edge.soldOut.title('ONE SIZE'), LIVE.edge.soldOut.title('52')]).toEqual(['SOLD OUT', 'SOLD OUT IN SIZE 52']);
+    expect([LIVE.size('ONE SIZE'), LIVE.size('52'), LIVE.there.said('ONE SIZE'), LIVE.soldOutSize('ONE SIZE')]).toEqual(['ONE SIZE', 'SIZE 52', 'YOU’LL BE THERE · ONE SIZE', 'One size, no piece left']);
+    const r = room({ phase: 'LIVE', quantity: 3, left: 2, held: 0, sizes: [{ id: S52, label: 'ONE SIZE', stock: 3, left: 2, held: 0 }] });
+    expect(lineFacts(r, S52, 'ONE SIZE').left).toBe('2 OF 3 LEFT · 2 IN ONE SIZE');
+  });
+
   it('measures a window at the server\'s time: what is left, and its share', () => {
     expect(windowLeft(iso(T0), iso(T0 + 30_000), T0 + 6_000)).toEqual({ remainingMs: 24_000, fraction: 0.8 });
     expect(windowLeft(iso(T0), iso(T0 + 30_000), T0 + 40_000)).toEqual({ remainingMs: 0, fraction: 0 });

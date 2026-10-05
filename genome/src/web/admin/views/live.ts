@@ -1030,7 +1030,7 @@ function feasibilityBlock(check: LiveFeasibility | 'failed'): HTMLElement {
     h('p', { class: 'live__feasibility-title' }, 'Stock'),
     h('p', { class: 'dialog__text', data: { testid: 'live-feasibility-line' } }, feasibilityLine(check)),
     check.warnings.length ? h('ul', { class: 'live__feasibility-list' }, ...check.warnings.map((w) => h('li', { data: { testid: 'live-feasibility-warning' } }, w))) : null,
-    check.short > 0 ? h('p', { class: 'dialog__text soft' }, 'A warning only: what the stock does not cover is made to order once sold, at the atelier.') : null,
+    check.short > 0 ? h('p', { class: 'dialog__text soft' }, 'It does not block publishing: what the stock does not cover is made to order once sold, at the atelier.') : null,
   );
 }
 

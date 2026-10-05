@@ -388,10 +388,64 @@ describe('the atelier (plan LIVE RELEASE+, S2)', () => {
       // The same piece for another order: taken.
       const second = await salonOrder('70', model);
       await rejects(atelier().linkFromStock(second.id, a.product.productId, admin), 'PIECE_TAKEN', 409);
-      // An order whose piece is being made waits for it.
+      // An order whose piece is being made may take a finished piece too, never one fulfilling another order.
       const third = await salonOrder('70', model);
       expect(third.reservation).toBe('BENCH');
-      await rejects(atelier().linkFromStock(third.id, a.product.productId, admin), 'ORDER_PIECE_TO_MAKE', 409);
+      await rejects(atelier().linkFromStock(third.id, a.product.productId, admin), 'PIECE_TAKEN', 409);
+      expect((await orderRow(third.id)).reservation).toBe('BENCH');
+    });
+
+    it('takes a finished piece for an order whose piece is being made: its piece to make cancelled, the piece counted once', async () => {
+      const model = await createModel(t.db, 'ORBIT');
+      const sku = await skuOf('74', model);
+      const issue = () => ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: model, variant: '74', material: '925 STERLING SILVER' }, admin);
+      const movementsOf = (productUuid: string) => t.db.selectFrom('stock_movements').select(['reason', 'delta', 'order_id', 'location_id', 'note']).where('product_id', '=', productUuid).execute();
+
+      // Nothing in stock: the order holds a piece to make, started, its work sheet printed (its code signed).
+      const first = await salonOrder('74', model);
+      expect(first.reservation).toBe('BENCH');
+      const firstBench = await benchOfOrder(first.id);
+      await atelier().start(firstBench.id, admin);
+      const [sheet] = await atelier().sheets({ benchItemIds: [firstBench.id] }, admin);
+      // A piece issued in the Generator, never counted in the stock: counted in with the order.
+      const g = await issue();
+      expect(await movementsOf(g.product.id)).toEqual([]);
+      clock.advance(MINUTE);
+      const linked = await atelier().linkFromStock(first.id, g.product.productId, admin);
+      expect([linked.productId, linked.reservation, linked.bench]).toEqual([g.product.productId, 'STOCK', null]);
+      expect((await benchRow(firstBench.id)).status).toBe('CANCELLED');
+      expect((await productRow(firstBench.product_id)).status).toBe('RETIRED');
+      expect((await t.db.selectFrom('codes').select('status').where('id', '=', sheet!.code.codeId).executeTakeFirstOrThrow()).status).toBe('REVOKED');
+      expect(await movementsOf(g.product.id)).toEqual([
+        { reason: 'PRODUCED', delta: 1, order_id: first.id, location_id: first.location_id, note: 'A finished piece never counted in the stock, counted in with the order it fulfils.' },
+      ]);
+      expect(await stockLevel(t.db, sku, first.location_id)).toEqual({ onHand: 1, reserved: 1, available: 0 });
+      expect((await auditsOf(firstBench.id, 'bench.cancel')).map((a) => a.details)).toEqual([{ orderId: first.id, productId: firstBench.product_id, retired: true }]);
+      const event = await t.db.selectFrom('order_events').select(['action', 'details']).where('order_id', '=', first.id).orderBy('id', 'desc').executeTakeFirstOrThrow();
+      expect(event).toEqual({ action: 'order.link', details: { productId: g.product.id, via: 'stock', reservation: 'STOCK' } });
+
+      // A piece counted in by a correction after the order took its piece to make: taken from what is available, once.
+      const second = await salonOrder('74', model);
+      expect(second.reservation).toBe('BENCH');
+      const k = await issue();
+      await receive(sku, france, 1);
+      await atelier().linkFromStock(second.id, k.product.productId, admin);
+      expect(await movementsOf(k.product.id)).toEqual([]);
+      expect(await stockLevel(t.db, sku, france)).toEqual({ onHand: 2, reserved: 2, available: 0 });
+      expect((await benchRow((await benchOfOrder(second.id)).id)).status).toBe('CANCELLED');
+
+      // A piece the ledger counts, none available at the order's location: refused, nothing changes.
+      clock.advance(MINUTE);
+      await ctx.services.orders.transition(first.id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
+      const holder = await salonOrder('74', model);
+      expect(holder.reservation).toBe('STOCK');
+      const waiting = await salonOrder('74', model);
+      expect(waiting.reservation).toBe('BENCH');
+      await rejects(atelier().linkFromStock(waiting.id, g.product.productId, admin), 'STOCK_NOT_AVAILABLE', 409);
+      expect((await orderRow(waiting.id)).reservation).toBe('BENCH');
+      expect((await benchRow((await benchOfOrder(waiting.id)).id)).status).toBe('TO_MAKE');
+      // The order holding it in stock takes it.
+      expect((await atelier().linkFromStock(holder.id, g.product.productId, admin)).productId).toBe(g.product.productId);
     });
   });
 });
