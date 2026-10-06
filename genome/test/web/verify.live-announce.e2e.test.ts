@@ -411,15 +411,15 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
       return Math.abs(hh! * 3600 + mm! * 60 + ss! - (t + 2 * 3_600_000 - Date.now()) / 1000);
     }, POLL).toBeLessThan(2);
     expect(await banner.getAttribute('href')).toBe(`/verify/releases/${announced.id}`);
-    // NOCTURNE: a strip of the plate under the header and the rail (56 + 40 px), its live dot and its chevron, one line,
-    // its tap zone and type above the floors, its ivory text at AA on the plate.
+    // NOCTURNE: a strip of the plate under the header and the rail (56 + 40 px), its live dot and its chevron, its type the
+    // rulebook's banner (9.5 px), its tap zone above the floor, its ivory text at AA on the plate.
     const look = await banner.evaluate((el) => {
       const s = getComputedStyle(el);
       const r = el.getBoundingClientRect();
       return { bg: s.backgroundColor, color: s.color, height: r.height, width: r.width, top: r.top, font: s.fontSize, family: s.fontFamily };
     });
-    expect(look).toMatchObject({ bg: 'rgb(20, 19, 18)', color: 'rgb(246, 242, 234)', top: 96, width: 390, font: '10px' });
-    expect(look.height).toBeGreaterThanOrEqual(56);
+    expect(look).toMatchObject({ bg: 'rgb(20, 19, 18)', color: 'rgb(246, 242, 234)', top: 96, width: 390, font: '9.5px' });
+    expect(look.height).toBeGreaterThanOrEqual(44);
     expect(look.family).toMatch(/^"?Gravesend Sans/);
     await expect.poll(() => banner.locator('i.n-live').count(), POLL).toBe(1);
     await expect.poll(() => banner.locator('svg.n-ic').count(), POLL).toBe(1);
@@ -427,7 +427,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     expect(await page.evaluate(() => getComputedStyle(document.querySelector('.corners')!).display)).toBe('none');
     expect(await page.evaluate(() => document.querySelector('.live-banner-host')!.previousElementSibling?.classList.contains('n-rail'))).toBe(true);
     expect(await banner.locator('.live-banner__clock').evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/Gravesend/);
-    // One line on one baseline: the countdown's figures on the labels' own, the line centred in the strip.
+    // Before the name, one line on one baseline: the countdown's figures on the labels' own, the line centred in the strip.
     const line = await banner.evaluate((el) => {
       const baseline = (node: Element) => {
         const probe = document.createElement('span');
@@ -455,6 +455,36 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await holdsUntil(t + 6 * SECOND, async () => expect(await page.content()).not.toContain('MONOLITHE'));
     await textOf(banner, /^LIVE RELEASE · MONOLITHE · OPENS IN 01:59:\d{2}$/);
     expect(Date.now()).toBeGreaterThanOrEqual(t + 6 * SECOND);
+    // With its name, the line wraps as C3's: the name whole on the first line, OPENS IN and its countdown together on the
+    // second, on one baseline; the strip grows to its two lines (C3: 54 px), nothing cut.
+    const wrapped = await banner.evaluate((el) => {
+      const baseline = (node: Element) => {
+        const probe = document.createElement('span');
+        probe.style.display = 'inline-block';
+        probe.style.height = '0';
+        node.append(probe);
+        const y = probe.getBoundingClientRect().bottom;
+        probe.remove();
+        return y;
+      };
+      const lead = el.querySelector('.live-banner__lead')!;
+      const line = el.querySelector('.live-banner__line')!.getBoundingClientRect();
+      const box = lead.getBoundingClientRect();
+      return {
+        height: el.getBoundingClientRect().height,
+        leadLines: lead.getClientRects().length,
+        leadInside: box.left >= line.left - 0.5 && box.right <= line.right + 0.5,
+        ellipsis: getComputedStyle(lead).textOverflow,
+        lineGap: baseline(el.querySelector('.live-banner__state')!) - baseline(lead),
+        clockOnState: Math.abs(baseline(el.querySelector('.live-banner__clock')!) - baseline(el.querySelector('.live-banner__state')!)),
+      };
+    });
+    expect(wrapped).toMatchObject({ leadLines: 1, leadInside: true, ellipsis: 'clip' });
+    expect(wrapped.lineGap).toBeGreaterThan(10);
+    expect(wrapped.clockOnState).toBeLessThanOrEqual(0.5);
+    expect(wrapped.height).toBeGreaterThanOrEqual(53);
+    expect(wrapped.height).toBeLessThanOrEqual(55);
+    expect((await tapZoneFloors(page)).problems).toEqual([]);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-banner.png') });
     // It opens the release's page (and is gone from it); back, the landing and the banner again.
     await banner.click();

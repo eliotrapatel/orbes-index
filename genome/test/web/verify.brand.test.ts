@@ -199,11 +199,14 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     '.n-vsel__option',
   ];
   /**
-   * The rulebook sets three controls at 9.5 px (build.py: `.acct`, `.rail a`, `.dbip`): the account button, the rail's
-   * chapters and DB-IP's attribution, validated by the owner on the canvas (who declined larger labels). Their 44 px
-   * zones are measured in the page (test/support/tap-zones.ts, test/web/nocturne.styles.e2e.test.ts).
+   * The rulebook sets four controls at 9.5 px (build.py: `.acct`, `.rail a`, `.dbip`, `.banner`): the account button, the
+   * rail's chapters, DB-IP's attribution and the banner of the LIVE RELEASES, validated by the owner on the canvas (who
+   * declined larger labels). Their 44 px zones are measured in the page (test/support/tap-zones.ts,
+   * test/web/nocturne.styles.e2e.test.ts, test/web/verify.live-announce.e2e.test.ts). The banner keeps the house's rule
+   * for a screen out of NOCTURNE; NOCTURNE's size is its `body.nocturne` rule's (RULEBOOK_RULE).
    */
-  const RULEBOOK_TYPE: Readonly<Record<string, number>> = { '.n-acct': 9.5, '.n-rail__link': 9.5, '.n-dbip': 9.5 };
+  const RULEBOOK_TYPE: Readonly<Record<string, number>> = { '.n-acct': 9.5, '.n-rail__link': 9.5, '.n-dbip': 9.5, '.live-banner': 9.5 };
+  const RULEBOOK_RULE: Readonly<Record<string, string>> = { '.live-banner': 'body.nocturne .live-banner' };
   const legacy = interactive.filter((sel) => !sel.startsWith('.n-'));
 
   it('finds every control of the app by its pointer', () => {
@@ -211,14 +214,14 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     expect(interactive.filter((sel) => sel.startsWith('.n-'))).toEqual(NOCTURNE_CONTROLS);
   });
 
-  it('sets NOCTURNE\'s controls at 10 px at least, but the three the rulebook sets at 9.5 px; their zones are measured in the page', () => {
+  it('sets NOCTURNE\'s controls at 10 px at least, but the four the rulebook sets at 9.5 px; their zones are measured in the page', () => {
     for (const sel of NOCTURNE_CONTROLS) {
       for (const r of about(sel)) {
         const where = `${sel} (${r.selectors.join(', ')})`;
         if (r.decls['font-size']) expect(px(r.decls['font-size']), where).toBeGreaterThanOrEqual(RULEBOOK_TYPE[sel] ?? 10);
       }
     }
-    for (const [sel, size] of Object.entries(RULEBOOK_TYPE)) expect(px(all.find((r) => r.selectors.includes(sel))!.decls['font-size']!), sel).toBe(size);
+    for (const [sel, size] of Object.entries(RULEBOOK_TYPE)) expect(px(all.find((r) => r.selectors.includes(RULEBOOK_RULE[sel] ?? sel))!.decls['font-size']!), sel).toBe(size);
   });
 
   it('sets no interactive selector under 10 px of type nor under a 44 px minimum height', () => {

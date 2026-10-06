@@ -19,19 +19,6 @@ const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
 
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
-  // The account sheet's stress state lies over NOW's (the page under the sheet, inert): NOW's own known cuts.
-  ...['now-stress', 'pieces-stress', 'account-sheet-stress'].flatMap((state) => [
-    {
-      state,
-      starts: 'span.live-banner__lead «LIVE RELEASE · MONOLITHE ARCHITECTURALE» is wider than its box',
-      reason: 'The banner of the LIVE RELEASES is one line: a long name ends in an ellipsis there, whole on its page (live-banner.ts).',
-    },
-    {
-      state,
-      starts: 'span.live-banner__lead «LIVE RELEASE · MONOLITHE ARCHITECTURALE» is cut',
-      reason: 'The same ellipsis of the one-line banner.',
-    },
-  ]),
   // The resting orbit round the wordmark of today's landing: a drawing (aria-hidden, absolutely placed, inset -15 %) that
   // reaches past the emblem on purpose. NOW replaces the landing (N3).
   ...['now-empty', 'now-stress', 'account-sheet-stress'].flatMap((state) =>

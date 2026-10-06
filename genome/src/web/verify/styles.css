@@ -6871,18 +6871,46 @@ body.nocturne .live-banner-host {
   animation: none;
 }
 
-/* Its plate, its dot, its chevron; its type and its height stay the house's until MY PIECES is drawn (N5): 10 px, 56 px. */
+/* Its plate, its dot, its chevron and its type as the rulebook's .banner: 9.5 px, its padding, its height its lines' (C3's
+   two: 54 px), never under the 44 px tap zone (one line). Its line wraps as C3's (a long name whole, never an ellipsis);
+   the state and the countdown stay together on one line (.n-nw). */
 body.nocturne .live-banner {
   justify-content: flex-start;
   gap: 12px;
-  padding: 0 22px;
+  min-height: 44px;
+  padding: 12px 22px;
   border-bottom: 1px solid var(--vault-hairline);
   background: var(--vault-plate);
   color: var(--vault-ink);
+  font-size: var(--n-fs-lb);
+  letter-spacing: var(--n-track-micro);
+  line-height: var(--n-lh-base);
+  white-space: normal;
 }
 
 body.nocturne .live-banner__line {
+  display: block;
   flex: 1;
+  min-width: 0;
+}
+
+body.nocturne .live-banner__lead {
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* The separator breaks as C3's (after its dot), its spaces the line's own in a block line. */
+body.nocturne .live-banner__dot {
+  white-space: normal;
+}
+
+/* The countdown in the line's size and tracking, as C3's; its figures in the reading face after the line's own word
+   space; its line height 1, so the reading face's taller box never deepens the line (C3's 54 px banner). */
+body.nocturne .live-banner__clock {
+  margin-left: 0;
+  font-size: inherit;
+  line-height: 1;
+  letter-spacing: inherit;
 }
 
 body.nocturne[data-banner] .view--pieces {

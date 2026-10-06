@@ -76,8 +76,9 @@ class Banner implements LiveBannerView {
         },
       },
       h('i', { class: 'n-live live-banner__live', attrs: { 'aria-hidden': 'true' } }),
-      // One line on one baseline: the countdown's figures in the reading face, on the labels' own.
-      h('span', { class: 'live-banner__line' }, this.lead, h('span', { class: 'live-banner__dot', attrs: { 'aria-hidden': 'true' }, text: ' · ' }), this.state, this.clock),
+      // Its line wraps as C3's, the name whole; the state and the countdown together (C3's .nw), a word space between
+      // them (read aloud and copied as one sentence), the figures in the reading face.
+      h('span', { class: 'live-banner__line' }, this.lead, h('span', { class: 'live-banner__dot', attrs: { 'aria-hidden': 'true' }, text: ' · ' }), h('span', { class: 'n-nw' }, this.state, ' ', this.clock)),
       icon('chev', { small: true }),
     );
     this.el = h('div', { class: 'live-banner-host', attrs: { hidden: true } }, this.link);

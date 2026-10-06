@@ -53,8 +53,14 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   - The rail's links, the footer's links, DB-IP's and a text link carry a 44 px tap zone in padding given back by a
     negative margin (the type and its place are the boards').
   - The rail clips sideways only (`overflow-x: clip`), so a link's tap zone may reach above it.
+  - The banner of the LIVE RELEASES is never under the 44 px tap zone: on one line (its name not yet revealed, or a
+    short one) it is 44 px high, its line centred; on two lines it is C3's 54 px.
   - Every button's label is in Gravesend capitals, as the plan's Type rule says, where the boards' markup leaves `.btn`
     in Helvetica Neue (SIGN OUT on C2, TRY AGAIN on C40: the same width, its glyphs 1.5 px lower at scale 2).
+  - The shared certificate (`/verify/c#…`, kept as it is, choice 3) opens on the black ground with Safari's bars in ink
+    for the moment before the scripts run, then takes its paper and its white bars: the static page cannot know its route
+    under the CSP, and its ground before the scripts is the html's (`--vault-ground`) whatever the body's class. The
+    static body keeps `class="nocturne"` so the page shown without JavaScript (JAVASCRIPT REQUIRED) reads ivory on black.
 
 ## Boards without a screen of their own today
 
@@ -105,7 +111,7 @@ of the LIVE RELEASES.
 | `now-room-open` | the banner … · THE ROOM IS OPEN | a room open | live-01 |
 | `now-live` | the banner … · LIVE NOW | a LIVE RELEASE live | live-01 |
 | `now-empty` | the landing, no banner | no model, no release, an account without a piece | C43, C40 |
-| `now-stress` | the banner with a 24-character name (one line, its lead ending in an ellipsis) | the stress demo | same pieces |
+| `now-stress` | the banner with a 24-character name (since N2: on two lines as C3, the name whole) | the stress demo | same pieces |
 
 ## The scan (`/verify`, one address)
 
