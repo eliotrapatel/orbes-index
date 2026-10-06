@@ -19,6 +19,12 @@
  *       those states (`all`: every state; a variant's name: its states), into <out>/<state>.png
  *   npx tsx scripts/parity.ts --stress [--out DIR]
  *       every extreme case (fidelity rule 5) into <out>/stress/<state>.png, and what overflows in each
+ *   npx tsx scripts/parity.ts --board [--out DIR] [--ref DIR]
+ *       the board for the owner's OK before deployment (fidelity rule 8): <out>/board.html, every pair already captured
+ *       in <out> (the runs above) in the boards' order, C1 to C43, each with its C-id and its title (the board's own,
+ *       read from <ref>/../preview/<C-id>-*.html) and its further sections; then the stress cases (<out>/stress, with
+ *       what overflows in each), then the LIVE screens beside their before-captures (<out>/live). The images are
+ *       linked, not embedded: the page stays beside them. A pair not captured is named as missing
  *   npx tsx scripts/parity.ts --baseline [--states a,b] [--baseline-file FILE]
  *       every state the stage reaches, each visible text value recorded (ids and references written by the server
  *       masked: maskVolatile), into test/fixtures/nocturne-baseline.json (the content test's baseline); with --states,
@@ -73,7 +79,7 @@ async function capture(browser: Browser, stage: UiStage, demo: NocturneDemo, sta
  * (fullScreenshot), so the fixed elements (the corner brackets, the SCAN ring) sit at the page's foot as in the
  * before-captures, the page settled again at that size; its motion finished, as the boards were shot.
  */
-async function shoot(page: Page, state: UiState): Promise<Buffer> {
+export async function shoot(page: Page, state: UiState): Promise<Buffer> {
   if (state.viewport) return page.screenshot({ type: 'png', animations: 'disabled' });
   const height = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
   if (height > TALL_PAGE) return tallScreenshot(page, height);
@@ -264,6 +270,108 @@ async function captureStress(out: string): Promise<void> {
   log(report.join('\n'));
 }
 
+// ── The board ──────────────────────────────────────────────────────────────
+
+/** The board `id`'s title, as the canvas wrote it (`C1 NOW: a LIVE RELEASE leads, a draw under it`), without its C-id. */
+function boardTitle(refDir: string, id: string): string {
+  const preview = join(refDir, '..', 'preview');
+  const file = existsSync(preview) ? readdirSync(preview).find((n) => n.startsWith(`${id}-`) && n.endsWith('.html')) : undefined;
+  const title = file ? /<title>([^<]*)<\/title>/.exec(readFileSync(join(preview, file), 'utf8'))?.[1] : undefined;
+  return title ? decodeEntities(title).replace(new RegExp(`^${id}\\s+`), '') : id;
+}
+
+function decodeEntities(s: string): string {
+  return s.replace(/&(amp|lt|gt|quot|#39|#x27|rsquo|lsquo|hellip|middot|times|rsaquo);/g, (_, e: string) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", '#x27': "'", rsquo: '’', lsquo: '‘', hellip: '…', middot: '·', times: '×', rsaquo: '›' })[e] ?? _);
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+}
+
+/** The stress report of --stress (<out>/stress/overflow.txt): what overflows in each state, by its id. */
+function stressReport(dir: string): Map<string, string> {
+  const file = join(dir, 'overflow.txt');
+  const report = new Map<string, string>();
+  if (!existsSync(file)) return report;
+  let current: string | null = null;
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    const m = /^([a-z0-9-]+): ?(.*)$/.exec(line);
+    if (m) {
+      current = m[1]!;
+      report.set(current, m[2]!);
+    } else if (current && line.trim()) report.set(current, `${report.get(current)}\n${line.trim()}`.trim());
+  }
+  return report;
+}
+
+/** <out>/board.html: every pair captured in `out`, in the boards' order, then the stress cases and the LIVE screens. */
+function writeBoard(out: string, refDir: string): void {
+  const ids = Object.keys(BOARD_STATES);
+  const missing: string[] = [];
+  const figure = (file: string, caption: string, alt: string): string => {
+    if (!existsSync(join(out, file))) {
+      missing.push(file);
+      return `<figure class="missing"><figcaption>${escapeHtml(caption)}</figcaption><p>NOT CAPTURED: ${escapeHtml(file)}</p></figure>`;
+    }
+    return `<figure><figcaption>${escapeHtml(caption)}</figcaption><a href="${encodeURI(file)}"><img src="${encodeURI(file)}" alt="${escapeHtml(alt)}" loading="lazy"></a></figure>`;
+  };
+  const boards = ids.map((id) => {
+    const title = boardTitle(refDir, id);
+    const state = stateById(BOARD_STATES[id]!);
+    const stand = STAND_IN_BOARDS.includes(id) ? ` · a stand-in of the room: beside its before-capture (${beforeRef(state) ?? 'none'}), fidelity rule 6` : '';
+    const sections = (BOARD_SECTIONS[id] ?? []).map((s) => figure(`${id}.${s}.pair.png`, `${id} · ${s} · ${stateById(s).title} (its section of the board)`, `${id}, ${s}: the board at the left, the real screen at the right`));
+    return `<section id="${id}"><h2><span class="id">${id}</span> ${escapeHtml(title)}</h2><p class="meta">Real state: ${escapeHtml(state.id)} · ${escapeHtml(state.title)}${escapeHtml(stand)}</p>${figure(`${id}.pair.png`, `${id} · the board at the left, the real screen at the right`, `${id}, ${title}: the board at the left, the real screen at the right`)}${sections.join('')}</section>`;
+  });
+  const stressDir = join(out, 'stress');
+  const report = stressReport(stressDir);
+  const stress = UI_STATES.filter((s) => s.stress).map((s) => {
+    const found = report.get(s.id);
+    const line = found === undefined ? 'not measured' : found;
+    return `<section class="half" id="stress-${s.id}"><h3>${escapeHtml(s.id)}</h3><p class="meta">${escapeHtml(s.title)}</p><p class="${found === 'nothing overflows' ? 'ok' : 'warn'}">${escapeHtml(line)}</p>${figure(`stress/${s.id}.png`, s.id, `${s.title}, an extreme case`)}</section>`;
+  });
+  const live = UI_STATES.filter((s) => beforeRef(s) !== null).map(
+    (s) => `<section id="live-${s.id}"><h3>${escapeHtml(s.id)} <span class="meta">beside ${escapeHtml(beforeRef(s)!)}</span></h3><p class="meta">${escapeHtml(s.title)}</p>${figure(`live/${s.id}.pair.png`, `${s.id} · before NOCTURNE at the left, now at the right`, `${s.title}: before NOCTURNE at the left, now at the right`)}</section>`,
+  );
+  const toc = ids.map((id) => `<a href="#${id}">${id}</a>`).join(' ');
+  const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NOCTURNE board</title>
+<style>
+:root{color-scheme:dark}
+body{margin:0;background:#1d1d1d;color:#f6f2ea;font:15px/1.5 "Helvetica Neue",Helvetica,Arial,sans-serif}
+header,main{max-width:1700px;margin:0 auto;padding:0 24px}
+header{padding-top:32px;padding-bottom:16px;border-bottom:1px solid #444}
+h1{font-size:22px;letter-spacing:.08em;margin:0 0 8px}
+h2{font-size:18px;letter-spacing:.04em;margin:0 0 4px}
+h3{font-size:15px;margin:0 0 4px}
+.id{display:inline-block;min-width:48px;color:#a7a29a}
+.meta{color:#a7a29a;font-size:13px;margin:0 0 12px}
+nav{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:13px}
+nav a,a{color:#f6f2ea}
+section{padding:36px 0;border-bottom:1px solid #333}
+figure{margin:16px 0 0}
+figcaption{font-size:12px;color:#a7a29a;margin-bottom:6px}
+img{display:block;max-width:100%;height:auto;background:#2b2b2b}
+.missing p,.warn{color:#e0b36a;white-space:pre-wrap;font-size:13px}
+.ok{color:#9fc79f;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:0 32px}
+.half img{max-width:420px}
+</style></head><body>
+<header><h1>NOCTURNE · the 43 boards beside the real screens</h1>
+<p class="meta">At the left of each pair, the board the owner validated (nocturne-ref/shots, 390 px at 2×); at the right, the real screen at the same size, on the NOCTURNE demo (scripts/parity.ts). Live data differs by design: the time, ids and references, a countdown's digits, each piece's own GENOME glyphs. C21 and C26 are stand-ins of the room: each is set beside its capture from before NOCTURNE. Then the extreme cases (fidelity rule 5) and the LIVE screens before and after (fidelity rule 6).</p>
+<nav>${toc} <a href="#stress">STRESS</a> <a href="#live">LIVE</a></nav>
+${missing.length ? `<p class="warn">Not captured (${missing.length}): ${escapeHtml(missing.join(', '))}</p>` : ''}</header>
+<main>
+${boards.join('\n')}
+<section id="stress"><h2>The extreme cases (fidelity rule 5)</h2><p class="meta">Each captured whole, with what overflows its column or its box (nothing, when all holds).</p><div class="grid">${stress.join('\n')}</div></section>
+<section id="live"><h2>The LIVE screens, before NOCTURNE and now (fidelity rule 6)</h2><p class="meta">At the left the capture taken before the change (docs/assets/ui/nocturne-before), at the right the screen now: inside the room, no rail and no ring; the pages that end a visit gain the header, the rail and the ring.</p>${live.join('\n')}</section>
+</main></body></html>
+`;
+  writeFileSync(join(out, 'board.html'), html);
+  log(`${ids.length} boards, ${stress.length} stress cases, ${live.length} LIVE pairs in ${join(out, 'board.html')}`);
+  if (missing.length) log(`not captured (${missing.length}):\n  ${missing.join('\n  ')}`);
+}
+
 // ── The content baseline ───────────────────────────────────────────────────
 
 /**
@@ -305,7 +413,7 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   let out = DEFAULT_OUT;
   let ref = DEFAULT_REF;
-  let mode: 'boards' | 'states' | 'stress' | 'baseline' | 'live' = 'boards';
+  let mode: 'boards' | 'states' | 'stress' | 'baseline' | 'live' | 'board' = 'boards';
   let list: string[] = [];
   let baselineFile = BASELINE_FILE;
   for (let i = 0; i < argv.length; i++) {
@@ -314,6 +422,7 @@ async function main(): Promise<void> {
     else if (a === '--ref') ref = resolve(argv[++i] ?? '');
     else if (a === '--stress') mode = 'stress';
     else if (a === '--baseline') mode = 'baseline';
+    else if (a === '--board') mode = 'board';
     else if (a === '--live') {
       mode = 'live';
       if (argv[i + 1] && !argv[i + 1]!.startsWith('--')) list = argv[++i]!.split(',').filter(Boolean);
@@ -323,9 +432,10 @@ async function main(): Promise<void> {
       if (mode !== 'baseline') mode = 'states';
       list = (argv[++i] ?? '').split(',').filter(Boolean);
     } else if (/^C\d+(,C\d+)*$/.test(a)) list.push(...a.split(','));
-    else throw new Error(`unknown argument ${a} (C1,C2,…; --states a,b; --live [a,b]; --stress; --baseline [--states a,b]; --out DIR; --ref DIR)`);
+    else throw new Error(`unknown argument ${a} (C1,C2,…; --states a,b; --live [a,b]; --stress; --board; --baseline [--states a,b]; --out DIR; --ref DIR)`);
   }
-  if (mode === 'boards') await captureBoards(list.length ? list : Object.keys(BOARD_STATES), out, ref);
+  if (mode === 'board') writeBoard(out, ref);
+  else if (mode === 'boards') await captureBoards(list.length ? list : Object.keys(BOARD_STATES), out, ref);
   else if (mode === 'live') await captureLive(list, out);
   else if (mode === 'states') await captureStates(list.flatMap((x) => (x === 'all' ? UI_STATES.map((s) => s.id) : UI_STATES.some((s) => s.variant === x) ? UI_STATES.filter((s) => s.variant === x).map((s) => s.id) : [x])), out);
   else if (mode === 'stress') await captureStress(out);

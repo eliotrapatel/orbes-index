@@ -15,8 +15,8 @@
  * PNGs instead of the quantised ones.
  *
  * Captures
- *   verify (390 × 844 CSS px at 2×, iPhone user agent, Europe/Paris)
- *     landing · scanner (searching) · scanner (locked on the code) · result
+ *   verify (390 × 844 CSS px at 2×, iPhone user agent, Europe/Paris), in NOCTURNE since its step N9
+ *     NOW (the screen /verify opens on; verify-01-landing.png) · scanner (searching) · scanner (locked on the code) · result
  *     O26-J-00184 AUTHENTIC — FIRST REGISTRATION · its four tabs ·
  *     VERIFYING… (photo path) · UNUSUAL ACTIVITY (O26-J-00193, reported
  *     stolen) · INVALID SIGNATURE (a demo code with one signature bit flipped)
@@ -71,6 +71,11 @@
  *   --only live   the LIVE RELEASE's captures alone (live-*.png), the others
  *                 left as they are
  *   --only plus   LIVE RELEASE+'s alone (plus-*.png)
+ *   --only nocturne
+ *                 NOCTURNE's alone (nocturne-*.png; plan NOCTURNE, N9): one or two screens per chapter of the app
+ *                 (NOCTURNE_SHOTS), each a state of the parity tool on the NOCTURNE demo (the canvas's content, the
+ *                 owner's photographs, a fixed clock), captured as scripts/parity.ts captures it; each variant of the
+ *                 demo on a stage of its own. Run last by default, after the demo dataset's stage is left
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -116,7 +121,10 @@ import { defaultLocationId, ensureSku, linkDropSizes } from '../src/server/servi
 import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor, type ManualClock } from '../src/server/types.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
 import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, fullScreenshot, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, watchPage as watchPageInto, webpOf } from '../test/support/ui-stage.js';
+import { eachState } from '../test/support/nocturne-stage.js';
+import { openState, stateById } from '../test/support/nocturne-states.js';
 import { buildWeb } from './build-web.js';
+import { shoot as shootState } from './parity.js';
 
 const GENOME_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_OUT = resolve(GENOME_DIR, '..', 'docs', 'assets', 'ui');
@@ -141,15 +149,17 @@ const DESKTOP = { width: 1440, height: 900 } as const;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-function parseArgs(argv: string[]): { out: string; raw: boolean; only: 'live' | 'plus' | null } {
+type Only = 'live' | 'plus' | 'nocturne';
+
+function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | null } {
   let out = DEFAULT_OUT;
   let raw = false;
-  let only: 'live' | 'plus' | null = null;
+  let only: Only | null = null;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus')) only = argv[++i] as 'live' | 'plus';
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne')) only = argv[++i] as Only;
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne)`);
   }
   return { out, raw, only };
 }
@@ -343,7 +353,7 @@ async function captureVerify(stage: Stage, shots: Shots, workDir: string): Promi
     for (const [id, name] of tabs) {
       await page.click(`#tab-${id}`);
       await sleep(900); // panel fade (0.7 s), underline draw
-      await shots.region(page, '.tabs', name);
+      await shots.region(page, '.n-result__tabs', name);
     }
     await context.close();
   } finally {
@@ -432,7 +442,7 @@ async function captureVerifyCard(stage: Stage, shots: Shots): Promise<void> {
   }
 }
 
-/** MY PIECES (F-01): a demo owner's pieces, each on its ivory plate, signed in through the account API. */
+/** MY PIECES (F-01): a demo owner's pieces, each on its model's photograph (NOCTURNE, C3), signed in through the account API. */
 async function captureVerifyPieces(stage: Stage, shots: Shots): Promise<void> {
   const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
   try {
@@ -916,12 +926,12 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     await shots.full(page, 'live-02-releases');
     // B1: announced, at the silhouette's stage (the name and the photograph still to come).
     await page.goto(`${origin}/verify/releases/${veiled.id}`);
-    await page.waitForSelector('.live__plate--announce .live__img--silhouette');
+    await page.waitForSelector('.n-live__photo--silhouette img');
     await settle(page);
     await shots.full(page, 'live-03-announced-silhouette');
     // B1: announced, the name and the photograph revealed, a size chosen for I'LL BE THERE.
     await page.goto(`${origin}/verify/releases/${later.id}`);
-    await page.waitForSelector('.live__plate--announce .live__img--photo');
+    await page.waitForSelector('.n-live__photo:not(.n-live__photo--silhouette) img');
     await page.waitForSelector('.n-live__there');
     await page.locator('.n-live__there').locator('button.live__size', { hasText: /^52$/ }).click();
     await page.mouse.move(0, 0);
@@ -1748,10 +1758,74 @@ export function quantizePng(input: Buffer, maxColors = 256): Buffer {
   ]);
 }
 
+// ── NOCTURNE ──────────────────────────────────────────────────────────────
+
+/**
+ * NOCTURNE's screens (plan NOCTURNE, step N9), one or two per chapter, in the order of BRAND-DESIGN-SYSTEM §5: each a
+ * state of the parity tool (test/support/nocturne-states.ts) on the NOCTURNE demo, the canvas's content on a fixed clock
+ * (Monday 5 October 2026, 18:49 in Paris), captured as scripts/parity.ts captures it (the whole page, its motion
+ * finished; the camera's viewport alone), with the board it was drawn from.
+ */
+export const NOCTURNE_SHOTS: readonly { state: string; name: string; board: string }[] = Object.freeze([
+  { state: 'now-signed-in', name: 'nocturne-01-now', board: 'C1' },
+  { state: 'now-signed-out', name: 'nocturne-02-now-signed-out', board: 'C10' },
+  { state: 'now-draw-leads', name: 'nocturne-03-now-draw-leads', board: 'C42' },
+  { state: 'now-collection-leads', name: 'nocturne-04-now-collection-leads', board: 'C43' },
+  { state: 'account-sheet', name: 'nocturne-05-account', board: 'C2' },
+  { state: 'scan-camera', name: 'nocturne-06-camera', board: 'C11' },
+  { state: 'scan-verifying', name: 'nocturne-07-verifying', board: 'C12' },
+  { state: 'result-first-registration', name: 'nocturne-08-result-first-registration', board: 'C9' },
+  { state: 'result-ownership-verified', name: 'nocturne-09-result-yours', board: 'C14' },
+  { state: 'result-unusual-card', name: 'nocturne-10-result-unusual', board: 'C15' },
+  { state: 'problem-camera-denied', name: 'nocturne-11-problem', board: 'C17' },
+  { state: 'pieces', name: 'nocturne-12-my-pieces', board: 'C3' },
+  { state: 'piece', name: 'nocturne-13-piece', board: 'C4' },
+  { state: 'pieces-orders', name: 'nocturne-14-orders', board: 'C24' },
+  { state: 'collection', name: 'nocturne-15-collection', board: 'C5' },
+  { state: 'model', name: 'nocturne-16-model', board: 'C6' },
+  { state: 'releases', name: 'nocturne-17-releases', board: 'C7' },
+  { state: 'releases-past', name: 'nocturne-18-releases-past', board: 'C25' },
+  { state: 'draw', name: 'nocturne-19-draw', board: 'C19' },
+  { state: 'live-announced', name: 'nocturne-20-live-announced', board: 'C20' },
+  { state: 'live-past-secured', name: 'nocturne-21-live-over', board: 'C29' },
+  { state: 'circle', name: 'nocturne-22-circle', board: 'C8' },
+  { state: 'post-invitation', name: 'nocturne-23-post', board: 'C22' },
+  { state: 'pieces-sign-in-refused', name: 'nocturne-24-sign-in', board: 'C18' },
+  { state: 'pieces-loading', name: 'nocturne-25-loading', board: 'C40' },
+  { state: 'legal-index', name: 'nocturne-26-legal', board: 'C23' },
+]);
+
+async function captureNocturne(shots: Shots): Promise<void> {
+  const names = new Map(NOCTURNE_SHOTS.map((s) => [s.state, s.name]));
+  const failures: string[] = [];
+  await eachState(
+    NOCTURNE_SHOTS.map((s) => stateById(s.state)),
+    async (state, { stage, demo, browser }) => {
+      const opened = await openState(browser, stage, demo, state);
+      try {
+        shots.png(names.get(state.id)!, await shootState(opened.page, state));
+      } catch (e) {
+        failures.push(`${state.id}: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        await opened.close();
+      }
+    },
+    log,
+  );
+  if (failures.length) throw new Error(`${failures.length} NOCTURNE capture(s) failed:\n${failures.join('\n')}`);
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const { out, raw, only } = parseArgs(process.argv.slice(2));
+  if (only === 'nocturne') {
+    const shots = new Shots(out, raw);
+    log('NOCTURNE:');
+    await captureNocturne(shots);
+    log(`${shots.written.length} screenshots in ${relative(process.cwd(), out) || '.'}`);
+    return;
+  }
   const workDir = mkdtempSync(join(tmpdir(), 'orbes-capture-ui-'));
   let stage: Stage | undefined;
   try {
@@ -1781,6 +1855,13 @@ async function main(): Promise<void> {
     if (only !== 'live') {
       log('LIVE RELEASE+:');
       await capturePlus(stage, shots, workDir);
+    }
+    if (only === null) {
+      // On stages of their own (the NOCTURNE demo, a fresh database for each of its variants): this stage is left first.
+      await stage.close();
+      stage = undefined;
+      log('NOCTURNE:');
+      await captureNocturne(shots);
     }
     const total = readdirSync(out)
       .filter((f) => f.endsWith('.png'))

@@ -55,7 +55,10 @@ genome/
                          part (participation.ts), the segments (segments.ts), THE RELEASES' PAST
                          (past-releases.ts), the question after (question.ts), the best time to open
                          (activity.ts), the feasibility check and the size mix (release-stock.ts), and the
-                         Shopify exports (shopify.ts: files only)
+                         Shopify exports (shopify.ts: files only, a model and its variants one product); plan
+                         NOCTURNE (migration 0024): a model's variants (catalog.ts createVariant, POST
+                         /api/admin/models/:id/variants), the lookbook grouping a model with its variants
+                         (lookbook.ts), a draw's price, a piece's origin (ownership.ts) and an order's photograph
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     demo.ts              demo mode (npm run demo)
@@ -73,20 +76,28 @@ genome/
     http/ geo/ render/   (http/live-stream.ts: the LIVE RELEASES' streams, LiveHub; render/invoice.ts: the
                          invoices' and credit notes' PDFs)
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
-    verify/              mobile scanner: camera capture, decoder worker, result views; MY PIECES
-                         (/verify/pieces, its tabs OWNERSHIP · WARRANTY · SERVICE · CARE), an ownership
+    verify/              the customer app in NOCTURNE (plan NOCTURNE: BRAND-DESIGN-SYSTEM §3.11; the canvas's
+                         pieces in views/nocturne.ts, the chrome in views/shell.ts: the header, the rail NOW ·
+                         RELEASES · COLLECTION · CIRCLE · PIECES, the footer, the SCAN ring; the account sheet,
+                         views/account.ts, with YOUR TIER); NOW, the screen /verify opens on (views/now.ts,
+                         now-model.ts: a LIVE RELEASE, a draw or the newest model leads); mobile scanner: camera
+                         capture, decoder worker, result views; MY PIECES (/verify/pieces, its tabs PIECES ·
+                         ORDERS · RELEASES) and a piece (/verify/pieces/<id>, views/piece.ts, its tabs
+                         OWNERSHIP · WARRANTY · SERVICE · CARE), an ownership
                          certificate's page (/verify/c#token), THE COLLECTION, the lookbook of the models
                          (/verify/lookbook) and THE PRIVATE SALON for an owner,
                          THE RELEASES, the drops, their early access and their draw (/verify/releases),
-                         THE CIRCLE, the owners' posts (/verify/circle, circle-model.ts, views/circle.ts),
-                         YOUR TIER at the head of MY PIECES (tier-model.ts); the ceremony of a first
+                         THE CIRCLE, the owners' posts (/verify/circle, circle-model.ts, views/circle.ts; an
+                         invitation answered from its card, views/invitation.ts), a model's variant dots and its
+                         next release (next-release-model.ts), YOUR TIER in the account sheet (tier-model.ts); the ceremony of a first
                          registration and SHARE THE GENOME (share-image.ts), the sound signature (sound.ts),
                          the scan as a ritual (the seal signal: capture.ts, scanner.ts); a LIVE RELEASE's vault
                          (/verify/releases/<id>: live-model.ts, live-seal.ts, views/live.ts), its banner
                          (views/live-banner.ts) and its boutique board (/verify/releases/<id>/board#secret:
                          board-model.ts, views/board.ts); THE RELEASES' LIVE and PAST tabs (views/tabs.ts),
                          the after-room (/verify/releases/<id>/after-room), the question after
-                         (views/question.ts), YOUR ORDERS and their documents in MY PIECES (orders-model.ts)
+                         (views/question.ts), the orders and their documents in MY PIECES (orders-model.ts);
+                         house.css, the house look the shared certificate page keeps
     admin/               admin console: catalogue (Discontinue, Reinstate), generator, keys, anomalies, analytics
                          (and its panel The Circle), audit, the Club (Drops, Circle with a post's page
                          #/club/circle/:postId, Tiers, Requests; a LIVE RELEASE's page #/club/live/:dropId, its live
@@ -95,8 +106,9 @@ genome/
                          order's page, its packing slip), Atelier (#/atelier, the work sheets), Invoices,
                          Segments, Settings (locations, carriers, the orders' alerts), the client sheet,
                          the Catalogue's base price, care guide and Shopify exports
-    legal/               the legal pages (J-06): privacy policy, terms of use, legal notice and FAQ, in French and English, at /legal/*
-    shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share;
+    legal/               the legal pages (J-06): privacy policy, terms of use, legal notice and FAQ, in French and English, at /legal/*, in NOCTURNE
+    shared/              brand CSS (with NOCTURNE's tokens), NOCTURNE's foundation (nocturne.css), the rail's
+                         chapters (chapters.ts), display font, monogram, DOM helpers; what verify/ and legal/ share;
                          prefs.ts, the preferences kept on the device (the sound, orbes.sound)
   scripts/             CLIs and studies (db, keys, POC, benchmarks, scan matrix, test sheets, …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)
@@ -212,6 +224,7 @@ This runs the core end to end without a server or database: key pair → identit
 
 - `UPDATE_BASELINES=1 npx vitest run test/visual/renderer.test.ts` regenerates the visual baselines after an intended rendering change. Review the diff.
 - `test/render/artifact.test.ts` rasterises the PDF artifacts with `pdftoppm` when it is installed.
+- Plan NOCTURNE added `test/web/nocturne.styles.e2e.test.ts` (the rulebook's computed styles on the real screens), `test/web/nocturne.content*.e2e.test.ts` (every value the app showed before NOCTURNE still shown, or listed as moved, against `test/fixtures/nocturne-baseline.json`), `test/web/nocturne.overflow.e2e.test.ts` (extreme content at 390, 375, 360 and 320 px) and `test/web/nocturne.model.test.ts`; their stage is `test/support/nocturne-demo.ts`, `nocturne-states.ts` and `nocturne-stage.ts`, shared with `scripts/parity.ts`.
 - Stage BC of the « Potentiel » plan added `test/web/verify.share-image.test.ts` (the share image of the ceremony, drawn on a recording context, and the tap that shares or saves it), `test/web/verify.sound.test.ts` (the sound signature and its preference), `test/api/salon.test.ts` (THE PRIVATE SALON) and `test/web/verify.capture.test.ts` cases for the seal signal (P-D10).
 
 CI (`.github/workflows/genome-ci.yml`) runs typecheck, the full suite with a `postgres:16` service and Chromium, the web build, a production `npm audit` report, and a Docker image build on every change under `genome/` or `docs/`.
@@ -230,6 +243,8 @@ CI (`.github/workflows/genome-ci.yml`) runs typecheck, the full suite with a `po
 | `npx tsx scripts/spec-vectors.ts` / `npx tsx scripts/render-samples.ts` | Normative test vectors (`docs/vectors/code01-sample.json`) and reference samples (`docs/assets/orbes-code-sample*.svg`). |
 | `npx tsx scripts/certificate-specimen.ts` | Certificate card specimen of BRAND §7 (`docs/assets/certificate-card-specimen*.svg` and the production PDF). Re-run after any change to the card; `test/render/certificate.test.ts` fails on stale files. |
 | `npx tsx scripts/live-load.ts` | The LIVE RELEASES' load test: for each level (`--levels 500,1000,1500,2000`), the app, PGlite and N phones in three processes, N streams in the room, a burst of entries, then every turn taken to the sell-out; the actions' and the fan-out's p95, memory and CPU on the VPS profile (`--vps-factor 2`). Writes `out/live-load/results.json`; the figures and the method are in `docs/reports/live-load.md` (1 000 in the room measured, `LIVE_ROOM_CAPACITY`). |
+| `npx tsx scripts/capture-ui.ts` | The screenshots of BRAND-DESIGN-SYSTEM in `docs/assets/ui/` from the real system (§9 there): `--only live`, `--only plus`, `--only nocturne` (the NOCTURNE screens on its demo), `--out DIR`, `--raw`. Needs Chromium (`ORBES_CHROMIUM`). |
+| `npx tsx scripts/parity.ts` | NOCTURNE's parity tool (plan NOCTURNE, fidelity rules 2, 4, 5 and 6): each real screen beside its validated board (`C1 C2 …`, all 43 by default; `--ref` the boards' images, `--out` where the pairs go), `--live` the LIVE screens beside their captures from before NOCTURNE, `--stress` the extreme cases with what overflows, `--states` any states, `--baseline` the content baseline (`test/fixtures/nocturne-baseline.json`), and `--board`, the HTML board of every pair for the owner's OK before a deployment. Needs Chromium but for `--board`. |
 | `npx tsx scripts/favicons.ts` | The tab icons of the apps (`src/web/verify/favicon.svg`, the same for the legal pages, `src/web/legal/favicon.svg`, and `src/web/admin/favicon.svg`), drawn from the brand monogram (BRAND §3.9). Re-run after any change to them; `test/web/monogram.test.ts` fails on stale files. |
 
 All of them are deterministic for the same arguments (seeded PRNGs, fixed sample key). Only timings vary from machine to machine.
@@ -276,7 +291,7 @@ The full procedure (TLS edge, secrets, first admin with TOTP, backups, rotation 
 | [THREAT-MODEL](../docs/THREAT-MODEL.md) | Threats, protections, residual risks |
 | [API](../docs/API.md) | HTTP API reference |
 | [DATABASE](../docs/DATABASE.md) | Schema, migrations, retention, backups |
-| [BRAND-DESIGN-SYSTEM](../docs/BRAND-DESIGN-SYSTEM.md) | Visual language of the scanner, console and code |
+| [BRAND-DESIGN-SYSTEM](../docs/BRAND-DESIGN-SYSTEM.md) | Visual language of the customer app (NOCTURNE), the console, the print and the code |
 | [FUTURE-HARDWARE](../docs/FUTURE-HARDWARE.md) | Secure NFC / secure element roadmap |
 | [DEPLOYMENT](../docs/DEPLOYMENT.md) | Production deployment and operations runbook |
 
