@@ -1553,6 +1553,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(buyer.locator('.certificate__plate .genome__id'), productId);
     expect(await buyer.locator('.certificate__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
     await countOf(buyer.locator('.certificate__plate .genome-svg--orbit g[data-layer="genome"]'), 8);
+    // The shared certificate keeps the SEAL at the GENOME's centre (decision 12): never a collector's monogram.
+    await countOf(buyer.locator('.certificate__plate g[data-layer="seal"]'), 1);
+    await countOf(buyer.locator('.certificate__plate g[data-layer="monogram"]'), 0);
     await textOf(buyer.locator('.certificate__plate .genome__meta'), `${piece.genome.fingerprint} · GENOME-01`);
     await textsOf(buyer.locator('.certificate__lines .lines__line'), ['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
     await textOf(buyer.locator('.certificate__section').first(), /^THE RECORD OWNERSHIP VERIFIED SINCE \d{1,2} [A-Z]{3} \d{4} WARRANTY ACTIVE FROM 20 SEP 2026 UNTIL 20 SEP 2028 LOSS OR THEFT NONE REPORTED$/);

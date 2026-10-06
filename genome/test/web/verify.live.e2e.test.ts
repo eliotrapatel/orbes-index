@@ -615,7 +615,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(await loading.locator('svg.n-breath').count()).toBe(1);
     expect(await loading.locator('svg.n-breath').getAttribute('aria-hidden')).toBe('true');
     await textOf(loading.locator('.n-loading__text'), LIVE.loading);
-    expect(await loading.locator('.n-loading__text').getAttribute('aria-busy')).toBe('true');
+    expect(await loading.locator('.n-loading__text').getAttribute('role')).toBe('status');
+    expect(await loading.locator('[aria-busy]').count()).toBe(0);
     expect(await page.locator('#live-title').innerText()).toBe(LIVE.kind);
     // The same piece as every page's loading: 40 px, ivory, ONE MOMENT… 16 px under it.
     const box = await loading.locator('svg.n-breath').boundingBox();

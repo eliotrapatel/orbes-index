@@ -173,6 +173,11 @@ async function chrome(page: Page): Promise<void> {
     width: 62,
     height: 62,
     'border-radius': '50%',
+    // The rulebook's 1 px inset hairline only: no browser button border drawn over it.
+    'border-top-width': 0,
+    'border-right-width': 0,
+    'border-bottom-width': 0,
+    'border-left-width': 0,
     'background-color': GROUND,
     color: IV,
     'box-shadow': 'rgba(246, 242, 234, 0.62) 0px 0px 0px 1px inset, rgba(246, 242, 234, 0.14) 0px 0px 34px 0px',
@@ -290,7 +295,9 @@ async function loading(page: Page): Promise<void> {
   const text = await check(page, '.n-loading__text', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: IV, 'text-align': 'center', 'margin-top': 16 });
   expect(Number(text._top) - Number(mono._bottom)).toBeCloseTo(16, 1);
   expect(await page.locator('.n-loading__text').innerText()).toBe('ONE MOMENT…');
-  expect(await page.locator('.n-loading__text').getAttribute('aria-busy')).toBe('true');
+  // The status read aloud: a live region that is never marked busy (a busy live region holds its announcements).
+  expect(await page.locator('.n-loading__text').getAttribute('role')).toBe('status');
+  expect(await page.locator('.n-loading [aria-busy]').count()).toBe(0);
   // Its keyframes: 1 → 0.4 → 1.
   const frames = await page.evaluate(() => document.querySelector('.n-breath')!.getAnimations().map((a) => (a.effect as KeyframeEffect).getKeyframes().map((k) => [k.offset, k.opacity])));
   expect(frames).toEqual([[[0, '1'], [0.5, '0.4'], [1, '1']]]);

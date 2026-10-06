@@ -460,7 +460,7 @@ export const UI_STATES: readonly UiState[] = [
     as: you,
     path: at('/verify/pieces'),
     routes: async (page, hold) => hold.hold('**/api/v1/account/products'),
-    ready: '.view--pieces [aria-busy="true"]',
+    ready: '.view--pieces .n-loading [role=status]',
   },
   {
     id: 'pieces-failed',

@@ -384,7 +384,7 @@ export function loadingState(text: string, opts: { extraClass?: string } = {}): 
     'div',
     { class: ['n-loading', opts.extraClass] },
     monogram(40, { extraClass: 'n-breath' }),
-    h('p', { class: 'n-g n-lb n-ivc n-ctr n-loading__text', attrs: { 'aria-busy': 'true', role: 'status' }, text }),
+    h('p', { class: 'n-g n-lb n-ivc n-ctr n-loading__text', attrs: { role: 'status' }, text }),
   );
 }
 
