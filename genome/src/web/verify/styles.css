@@ -3125,6 +3125,13 @@ body.nocturne .n-column > * {
   white-space: nowrap;
 }
 
+/* Held whole on its line while the column can hold it (as .n-nw); on a phone too narrow for it, it breaks only where
+   its own pieces allow (a date of THE REVEALS: after its weekday). */
+.n-keep {
+  display: inline-block;
+  max-width: 100%;
+}
+
 /* ── Buttons and links (C .btn, .btn.ol, .duo, .tl) ── */
 
 .n-btn {

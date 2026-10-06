@@ -3,7 +3,7 @@
  * rules of each in verify/styles.css (NOCTURNE), its values the rulebook's (nocturne-ref/build.py, COMMON_CSS and
  * C_CSS), its classes the rulebook's own names under `n-` (`.btn` → `.n-btn`, `.rail` → `.n-rail`).
  *
- *   type          n-g (Gravesend capitals) · n-t1 n-t2 n-t3 · n-lb · n-lead n-tx n-sm · n-ivc · n-num · n-nw
+ *   type          n-g (Gravesend capitals) · n-t1 n-t2 n-t3 · n-lb · n-lead n-tx n-sm · n-ivc · n-num · n-nw · n-keep
  *   icon()        the canvas's line icons (22 px, 1.25 stroke; `small`: 16 px)
  *   monogram()    the ORBES monogram on its master artboard, in ivory (28 px in the header, 38 px at the foot…)
  *   button()      an ivory filled button (54 px), the one primary action; `outline`: the hairline button

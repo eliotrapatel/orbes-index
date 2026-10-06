@@ -108,7 +108,7 @@ import type { SessionStore } from '../session.js';
 import type { SoundSignature } from '../sound.js';
 import type { AccountQuestion, ClientServices, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
 import { formatMoney as money, releaseContactModel, upper } from '../view-model.js';
-import { contactBlock, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
+import { contactBlock, dayAndHour, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 import { appAnchor, button, contactLines, countdown as countdownView, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, sizeButtons, textLink } from './nocturne.js';
 import { OwnershipPanel } from './ownership.js';
@@ -951,7 +951,7 @@ class LivePage {
             h(
               'div',
               { class: 'n-lines n-live__reveals-lines' },
-              ...dates.map((d) => h('span', { class: 'n-g n-lines__line n-live__reveal' }, h('span', { class: 'n-live__reveal-stage', text: d.label }), ' · ', h('span', { class: 'n-nw n-live__reveal-when' }, ...withNumerals(d.when)))),
+              ...dates.map((d) => h('span', { class: 'n-g n-lines__line n-live__reveal' }, h('span', { class: 'n-live__reveal-stage', text: d.label }), ' · ', dayAndHour(d.when, 'n-live__reveal-when'))),
             ),
           )
         : null,

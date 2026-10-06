@@ -65,7 +65,7 @@ import {
 import type { SessionStore } from '../session.js';
 import type { ClientServices, ClubEntry, DrawEntry } from '../types.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
-import { RELEASES_PATH, viewRoot, withNumerals } from './common.js';
+import { dayAndHour, RELEASES_PATH, viewRoot, withNumerals } from './common.js';
 import { appAnchor, button, contactLines, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, quietLine, textLink } from './nocturne.js';
 import { messageOf } from './forms.js';
 import { BANNER_REFRESH_MS } from './live-banner.js';
@@ -443,7 +443,7 @@ class ListPage {
             h(
               'div',
               { class: 'n-lines n-releases__reveals-lines' },
-              ...c.reveals.map((d) => h('span', { class: 'n-g n-lines__line live-card__reveal' }, h('span', { class: 'live-card__reveal-stage', text: d.label }), ' · ', h('span', { class: 'n-nw live-card__reveal-when' }, ...withNumerals(d.when)))),
+              ...c.reveals.map((d) => h('span', { class: 'n-g n-lines__line live-card__reveal' }, h('span', { class: 'live-card__reveal-stage', text: d.label }), ' · ', dayAndHour(d.when, 'live-card__reveal-when'))),
             ),
           )
         : null,

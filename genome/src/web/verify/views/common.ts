@@ -143,6 +143,17 @@ export function withNumerals(text: string): (string | HTMLSpanElement)[] {
 }
 
 /**
+ * A day and its hour (`TUESDAY 20 OCTOBER · 12:00 PARIS`, a date of THE REVEALS) held on one line as the canvas's .nw
+ * holds it, so it never starts beside the words before it once it has to leave them; on a phone too narrow to hold it
+ * whole (320 px, fidelity rule 5) it breaks after its weekday only, the date, the hour and PARIS kept together.
+ */
+export function dayAndHour(when: string, cls: string): HTMLSpanElement {
+  const at = when.indexOf(' ');
+  if (at < 0) return h('span', { class: ['n-nw', cls] }, ...withNumerals(when));
+  return h('span', { class: ['n-keep', cls] }, when.slice(0, at + 1), h('span', { class: 'n-nw' }, ...withNumerals(when.slice(at + 1))));
+}
+
+/**
  * MY PIECES (F-01): a text link to /verify/pieces. A plain click stays in the app (`onOpen`: no reload, the
  * history entry is the router's); a click that opens a new tab or window is left to the browser.
  */

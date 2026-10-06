@@ -39,6 +39,11 @@ export interface QuestionBlockDeps {
 
 let ids = 0;
 
+/** A sentence whose dates (`12 OCT 2026`) are each held on one line (.n-nw), the rest free to break. */
+function keepDates(text: string): (string | HTMLElement)[] {
+  return text.split(/(\d{1,2} [A-Z]{3,4} \d{4})/).flatMap((part, i): (string | HTMLElement)[] => (part === '' ? [] : i % 2 === 1 ? [h('span', { class: 'n-nw' }, ...withNumerals(part))] : withNumerals(part)));
+}
+
 export class QuestionBlock {
   readonly el: HTMLElement;
   private question: AccountQuestion | null = null;
@@ -109,7 +114,10 @@ export class QuestionBlock {
       else b.removeAttribute('aria-disabled');
     });
     const note = this.busy ? QUESTION.saving : m.note;
-    if (this.note.textContent !== note) this.note.textContent = note;
+    if (this.note.textContent === note) return;
+    // On NOCTURNE's plate card a date is kept whole (the canvas's .nw): `12 OCT 2026` never breaks across two lines.
+    if (this.deps.tone === 'nocturne') this.note.replaceChildren(...keepDates(note));
+    else this.note.textContent = note;
   }
 
   private async choose(answer: number): Promise<void> {

@@ -122,6 +122,15 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
     states, not eligible included.
   - C29 (N7): BRACELET · ORBITAL under the title, and the release's description under the receipt; the year after the
     day (LIVE RELEASE · MONDAY 6 OCTOBER 2025) for a release opened in an earlier year (C29 and C30 draw this year's).
+  - C7, C20 (N7): a second time line, *on this phone*, under the hour in Paris when the phone is not on Paris time (the
+    card's and the announced page's).
+  - C28 (N7): state 5 (selection) adds *Your ORBES account does not meet the rule of this release.* under *This release
+    is for selected collectors.*; a release with several rules an account does not meet reads lot E's joined refusal
+    under WHO MAY ENTER (*This release is for owners from PLATINE or collectors who … You have taken part in 0
+    releases.*), a state no board draws (C27, C28).
+  - C30 (N7): the contact of ORBES Client Services on the end page of an entry REMOVED; the end of a visit while the
+    release still runs (YOUR TURN HAS PASSED) shows no ONE QUESTION, which by lot E's rule opens only at the release's
+    final end (the board draws the question on that page).
 
 ## Boards without a screen of their own today
 

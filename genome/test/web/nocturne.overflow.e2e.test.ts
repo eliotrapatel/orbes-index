@@ -20,10 +20,13 @@ const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
 
 /**
  * The narrower phones a screen's extreme cases are opened at too, after the stage's 390 px (fidelity rule 5 holds from
- * 320 px): THE COLLECTION and a model's sheet since N6 (a model's next release a draw, ENTRIES CLOSE … UTC).
+ * 320 px): THE COLLECTION and a model's sheet since N6 (a model's next release a draw, ENTRIES CLOSE … UTC); THE
+ * RELEASES, a draw's page and a LIVE RELEASE's pages since N7 (a date of THE REVEALS held whole while it fits).
  */
 const NARROW = [375, 360, 320] as const;
-const NARROW_STATES = /^(collection|model)(-|$)/;
+const NARROW_STATES = /^(collection|model|releases|live-|draw)(-|$)/;
+/** Screens that are not extreme cases but hold N7's longest lines (THE REVEALS of a release not yet revealed, C7, C28). */
+const NARROW_TOO = ['releases', 'live-veiled'];
 
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
@@ -38,8 +41,10 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE overflow: nothing overflows its column 
       const found: string[] = [];
       const stress = UI_STATES.filter((s) => s.stress);
       expect(stress.length).toBeGreaterThan(10);
+      const narrowToo = UI_STATES.filter((s) => !s.stress && NARROW_TOO.includes(s.id));
+      expect(narrowToo.map((s) => s.id).sort()).toEqual([...NARROW_TOO].sort());
       await eachState(
-        stress,
+        [...stress, ...narrowToo],
         async (state, { stage, demo, browser }) => {
           const opened = await openState(browser, stage, demo, state);
           try {

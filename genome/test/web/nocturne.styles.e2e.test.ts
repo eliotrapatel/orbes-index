@@ -1057,6 +1057,13 @@ async function theReleases(page: Page): Promise<void> {
   expect((await sealed.locator('.n-cd__unit').allInnerTexts()).map((t) => t.trim())).toEqual(['DAYS', 'HOURS', 'MINUTES']);
   await check(page, '.n-releases__reveals-title', { 'margin-top': 22, color: IV });
   await check(page, '.n-releases__reveals-lines', { 'margin-top': 10 });
+  // Each date of THE REVEALS whole on one line while the column holds it (the canvas's .nw); past it (320 px), it breaks
+  // after its weekday only, the date, the hour and PARIS kept together (the overflow test holds it there).
+  await check(page, '.live-card__reveal-when', { display: 'inline-block' });
+  await check(page, '.live-card__reveal-when .n-nw', { 'white-space': 'nowrap' });
+  const oneLine = await page.locator('.live-card__reveal-when').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height < 2 * parseFloat(getComputedStyle(el).fontSize)));
+  expect(oneLine.length).toBeGreaterThan(0);
+  expect(oneLine.every(Boolean)).toBe(true);
   // A draw: DRAW · its state, its title 24 px, its model, its price (addition 5) at 16 px, its pieces and close in UTC.
   const draw = '.release-card.n-releases__release';
   await check(page, draw, { 'padding-top': 76 });
@@ -1193,6 +1200,9 @@ async function questionAfter(page: Page): Promise<void> {
   await check(page, '.n-question__answers', { 'margin-top': 20, 'row-gap': 8 });
   await check(page, '.n-question .n-opt2__option', { height: 48, 'font-size': 10.5, 'letter-spacing': em(10.5, 0.22), 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
   await check(page, '.n-question__note', { 'margin-top': 14, 'font-size': 13, color: ASH });
+  // Its date kept whole (the canvas's .nw): `12 OCT 2026` never breaks across two lines.
+  await check(page, '.n-question__note .n-nw', { 'white-space': 'nowrap' });
+  expect(await page.locator('.n-question__note .n-nw').innerText()).toMatch(/^\d{1,2} [A-Z]{3,4} \d{4}$/);
 }
 
 /** C30: the end of a visit: the chrome back, the release's title, its outcome 30 px under, THE RELEASES 76 px below. */
