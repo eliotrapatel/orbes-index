@@ -1090,8 +1090,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
   }, 120_000);
 
   /** A piece sold (warranty started) and registered to `accountId` with its claim code, as the owner's scan would. */
-  async function ownedPiece(accountId: string): Promise<IssueResult> {
-    const issued = await srv.issue({ withClaimSecret: true });
+  async function ownedPiece(accountId: string, modelId?: string): Promise<IssueResult> {
+    const issued = await srv.issue({ withClaimSecret: true, ...(modelId ? { modelId } : {}) });
     await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
     const scan = await srv.ctx.services.verification.verify({ code: issued.code.data }, {});
     await srv.ctx.services.ownership.registerFirst(accountId, { registrationToken: scan.registration!.token, claimCode: issued.claimCode! }, { type: 'account', id: accountId });
@@ -1101,13 +1101,22 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
   it('MY PIECES: signs in without a scan, lists the pieces, reports one stolen, which a stranger then scans as UNUSUAL ACTIVITY', async () => {
     const email = 'claire.bernard@example.com';
     const owner = await srv.ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
-    const older = await ownedPiece(owner.account.id);
+    // The older piece on a MONOLITHE RING of its own (a copy of the suite's, under another SKU prefix), so that its
+    // model's photograph shows on no other piece of this suite; the newer piece keeps the suite's model, without one.
+    const shared = await srv.ctx.db
+      .selectFrom('models')
+      .select(['category_id', 'collection_id', 'name', 'type', 'default_material', 'care_instructions'])
+      .where('id', '=', srv.modelId)
+      .executeTakeFirstOrThrow();
+    const photographed = await srv.ctx.db.insertInto('models').values({ ...shared, sku_prefix: 'MNL-PH' }).returning('id').executeTakeFirstOrThrow();
+    const older = await ownedPiece(owner.account.id, photographed.id);
     const polish = await srv.ctx.services.warranty.openService(older.product.id, { type: 'POLISH', location: 'Paris atelier', notes: 'staff note' }, SYSTEM_ACTOR);
     await srv.ctx.services.warranty.completeService(polish.id, {}, SYSTEM_ACTOR);
     const newer = await ownedPiece(owner.account.id);
-    // ORBES photographed the older piece at issuance (F-04), before NOCTURNE; its model, shared with other tests, has no
-    // photograph. Decision 9: the piece's own photograph is shown to no collector, so neither piece shows one.
-    await srv.ctx.services.media.setProductPhoto(older.product.productId, { mime: 'image/jpeg', bytes: jpegPhoto(480, 480) }, SYSTEM_ACTOR);
+    // ORBES photographed the older piece at issuance (F-04), before NOCTURNE, and its model: decision 9 shows the
+    // model's photograph alone, never the piece's own.
+    const ownPhoto = await srv.ctx.services.media.setProductPhoto(older.product.productId, { mime: 'image/jpeg', bytes: jpegPhoto(480, 480) }, SYSTEM_ACTOR);
+    const modelPhoto = await srv.ctx.services.media.setModelImage(photographed.id, { mime: 'image/jpeg', bytes: jpegPhoto(640, 480) }, SYSTEM_ACTOR);
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
 
     // The landing offers MY PIECES once the session is known, signed out too: the owner of a piece that is gone cannot scan it.
@@ -1154,10 +1163,27 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const card = page.getByRole('article', { name: older.product.productId });
     const other = page.getByRole('article', { name: newer.product.productId });
     expect(await card.locator('.piece__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
-    // No photograph of the piece itself (NOCTURNE, decision 9): the one ORBES took of the older piece at issuance is never
-    // shown; a piece shows its model's photograph alone, and neither model here has one.
-    await countOf(card.getByRole('region', { name: `Photographs of ${older.product.productId}` }), 0);
-    await countOf(card.locator('.result__photos, img'), 0);
+    // Under the écrin that carries its heading, the photograph ORBES took of the piece's model (F-04), never the one of
+    // the piece itself (NOCTURNE, decision 9), on the ivory plate of an authentic result, with its alternative text, the
+    // plate named after the piece; the other piece, whose model has none, shows none.
+    const photos = card.getByRole('region', { name: `Photographs of ${older.product.productId}` });
+    await visible(photos);
+    const photo = photos.locator('img.photo__img');
+    await countOf(photo, 1);
+    await countOf(card.locator('img'), 1);
+    await attrOf(photo, 'alt', 'The MONOLITHE RING model, photographed by ORBES');
+    // The model's file, never the piece's (`/api/v1/media/<the piece photo's sha256>`).
+    const src = new URL((await photo.getAttribute('src'))!, srv.origin).pathname;
+    expect(src).toBe(new URL(modelPhoto.url, srv.origin).pathname);
+    expect(ownPhoto.photoUrl).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
+    expect(src).not.toBe(ownPhoto.photoUrl);
+    await textsOf(photos.locator('.photo__caption'), ['THE MODEL']);
+    await textOf(photos.locator('.photos__note'), 'Photographed by ORBES. Compare it with the piece in your hands.');
+    await expect.poll(() => photo.evaluate((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth]), POLL).toEqual([true, 640]);
+    expect(await photos.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    const [ecrin, photosBox, linesBox] = [(await card.locator('.piece__plate').boundingBox())!, (await photos.boundingBox())!, (await card.locator('.piece__lines').boundingBox())!];
+    expect(photosBox.y).toBeGreaterThan(ecrin.y + ecrin.height);
+    expect(photosBox.y + photosBox.height).toBeLessThan(linesBox.y);
     await countOf(other.locator('.result__photos, img'), 0);
     await countOf(card.locator('.genome__glyphs .genome-svg--orbit g[data-layer="genome"]'), 8);
     await attrOf(card.locator('.genome-svg'), 'aria-label', new RegExp(older.genome.fingerprint));
