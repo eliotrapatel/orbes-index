@@ -637,6 +637,9 @@ describe('the announcements: the release calendar, I\'LL BE THERE, the banner', 
     expect(bannerModel(b, T0 - (2 * 3600 + 14 * 60 + 9) * 1000)).toMatchObject({ state: 'OPENS IN', clock: '02:14:09' });
     expect(bannerModel(b, T0 - 300_001)!.clock).toBe('00:05:01');
     expect(bannerModel({ ...b, name: 'Monolithe' }, T0 - 300_000)).toMatchObject({ phase: 'ROOM', lead: 'LIVE RELEASE · MONOLITHE', state: 'THE ROOM IS OPEN', clock: null });
+    // The model with its variant, as the plan names a release (C3: LIVE RELEASE · MONOLITHE IN BLUE).
+    expect(bannerModel({ ...b, name: 'Monolithe', variant: 'Blue' }, T0 - 600_000)).toMatchObject({ phase: 'ANNOUNCED', lead: 'LIVE RELEASE · MONOLITHE IN BLUE', state: 'OPENS IN', clock: '00:10:00' });
+    expect(bannerModel({ ...b, name: 'Monolithe', variant: '  ' }, T0)!.lead).toBe('LIVE RELEASE · MONOLITHE');
     expect(bannerModel(b, T0)).toMatchObject({ phase: 'LIVE', state: 'LIVE NOW', clock: null });
     expect(bannerModel(b, T0 + 3_600_000 - 1)!.phase).toBe('LIVE');
     expect(bannerModel(b, T0 + 3_600_000)).toBeNull();

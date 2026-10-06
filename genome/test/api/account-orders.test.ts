@@ -7,6 +7,7 @@
  *    cancelled after it was paid; the latest first, the pieces of one sale in their order;
  *  - each with its steps and their times, the model, the size, the add-ons and the price; once shipped the carrier and
  *    the tracking number with its link;
+ *  - a piece's origin is the order that fulfils it, never one CANCELLED or RETURNED that keeps its link;
  *  - never another account's order, and never the house's side of one: its location, what it holds, the surprise, the
  *    buyer's details, the engraving's words, the value declared, the notes, who handled it.
  */
@@ -256,5 +257,31 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     expect(await originOf(livePiece!)).toEqual({ release: { id: live.id, mode: 'LIVE', at: live.opens_at }, order: { reference: orderReference(ids.live2), channel: 'LIVE', status: 'RESERVED', at: live.reserved_at } });
     // A boutique sale: no order, nothing said.
     expect(await originOf(boutique!)).toBeNull();
+  });
+
+  it('never takes as a piece\'s origin an order CANCELLED or RETURNED, which keeps its link but no longer fulfils it (addition 2)', async () => {
+    const productIdOf = async (uuid: string) => (await h.ctx.db.selectFrom('products').select('product_id').where('id', '=', uuid).executeTakeFirstOrThrow()).product_id;
+    // CANCELLED: the order keeps its piece (lot E); the same piece reaches the account another way (a boutique).
+    const [kept] = await holdPieces(h.ctx.db, mineId, 1, f.modelId);
+    await h.ctx.db.updateTable('orders').set({ product_id: kept! }).where('id', '=', ids.cancelled).execute();
+    // RETURNED once delivered: ORBES takes the piece back (its link kept), then it is registered to the account again.
+    const returned = (await h.ctx.db.selectFrom('orders').select('product_id').where('id', '=', ids.delivered).executeTakeFirstOrThrow()).product_id!;
+    await orders().returnOrder(ids.delivered, { outcome: 'ARCHIVED', note: 'Returned to the house.' }, f.admin);
+    h.clock.advance(MINUTE);
+    await h.ctx.db.insertInto('ownership').values({ product_id: returned, account_id: mineId, acquired_via: 'FIRST_REGISTRATION', verified: true, started_at: h.clock.now() }).execute();
+    const linked = await h.ctx.db.selectFrom('orders').select(['id', 'status', 'product_id']).where('id', 'in', [ids.cancelled, ids.delivered]).orderBy('status').execute();
+    expect(linked).toEqual([
+      { id: ids.cancelled, status: 'CANCELLED', product_id: kept },
+      { id: ids.delivered, status: 'RETURNED', product_id: returned },
+    ]);
+    const products = (safeJson(await mine.get('/api/v1/account/products')) as { products: Json[] }).products;
+    for (const uuid of [kept!, returned]) {
+      const pid = await productIdOf(uuid);
+      const p = products.find((x) => x.productId === pid);
+      expect(p, pid).toBeDefined();
+      expect(p!.origin, pid).toBeNull();
+    }
+    expect(JSON.stringify(products)).not.toContain(orderReference(ids.cancelled));
+    expect(JSON.stringify(products)).not.toContain(orderReference(ids.delivered));
   });
 });

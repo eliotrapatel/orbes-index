@@ -921,7 +921,8 @@ export class OwnershipService {
         .where('status', '=', 'PENDING')
         .where('expires_at', '>', now)
         .execute(),
-      // Addition 2: the orders of this account that its pieces fulfil (never another account's), the latest first.
+      // Addition 2: the orders of this account that its pieces fulfil (never another account's), the latest first. A
+      // CANCELLED or RETURNED order keeps its piece's link (lot E) but no longer fulfils it: never its origin.
       this.db
         .selectFrom('orders as o')
         .leftJoin('drops as d', 'd.id', 'o.drop_id')
@@ -931,6 +932,7 @@ export class OwnershipService {
         ])
         .where('o.account_id', '=', accountId)
         .where('o.product_id', 'in', ids)
+        .where('o.status', 'not in', ['CANCELLED', 'RETURNED'])
         .orderBy('o.reserved_at', 'desc')
         .orderBy('o.id')
         .execute(),

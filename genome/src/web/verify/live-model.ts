@@ -32,7 +32,7 @@ import type {
   LiveRoomSize,
   LiveSheet,
 } from './types.js';
-import { releaseContactModel, upper } from './view-model.js';
+import { modelWithVariant, releaseContactModel, upper } from './view-model.js';
 
 const MEDIA_SRC = /^\/api\/v1\/media\/[0-9a-f]{64}$/;
 const SECOND = 1000;
@@ -677,7 +677,7 @@ export interface BannerModel {
   id: string;
   href: string;
   phase: 'ANNOUNCED' | 'ROOM' | 'LIVE';
-  /** `LIVE RELEASE · MONOLITHE`, or `LIVE RELEASE` before the name. */
+  /** `LIVE RELEASE · MONOLITHE IN BLUE` (the model with its variant), or `LIVE RELEASE` before the name. */
   lead: string;
   /** `OPENS IN`, `THE ROOM IS OPEN`, `LIVE NOW`. */
   state: string;
@@ -692,7 +692,7 @@ export function bannerModel(b: LiveBanner | null, now: number): BannerModel | nu
   const opens = Date.parse(b.opensAt);
   const closes = Date.parse(b.closesAt);
   if (![room, opens, closes].every(Number.isFinite) || now >= closes) return null;
-  const lead = b.name ? `${LIVE.kind} · ${upper(b.name)}` : LIVE.kind;
+  const lead = b.name ? `${LIVE.kind} · ${modelWithVariant(upper(b.name), b.variant).toUpperCase()}` : LIVE.kind;
   const base = { id: b.id, href: releasePath(b.id), lead };
   if (now >= opens) return { ...base, phase: 'LIVE', state: LIVE.phase.LIVE, clock: null };
   if (now >= room) return { ...base, phase: 'ROOM', state: LIVE.phase.ROOM, clock: null };

@@ -87,15 +87,15 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   - C36 (5): the NOT YET DELIVERED label above its sentence.
   - C37 (4): *If this piece is registered to you, verify it again to see it as its owner.* under the sentence that no
     transfer is pending.
-  - C3: the banner's name is the release's as the banner reads it (*MONOLITHE*, the name's stage), its countdown the
-    banner's; AFTER THE RELEASES and EARLY ACCESS on PIECES when they apply (N5).
+  - C3: the banner's countdown is the banner's; AFTER THE RELEASES and EARLY ACCESS on PIECES when they apply (N5).
   - C4, C35: the warranty's sentence under its rows; a service's kind under its dates and place; CREATE LINK · CANCEL
     under the validity's choice; the open links' list when there are several; *A loss or a theft of this piece cannot be
     reported here…* for a piece revoked; the sentences of a transfer pending, of a piece in service and of an ownership
     not yet verified; the contact under every state (N5).
   - C24, C32: the SIZE and PRICE rows of an order cancelled whose terms were entered (ZENITH: 17, € 4 800); the care
     guide's line names the model with its variant (*The care guide of MONOLITHE in steel*, N1); the steps' dates of an
-    order of one step reached keep their year (5 OCT 2026), as C24 draws them (N5).
+    order of one step reached keep their year (5 OCT 2026), as C24 draws them (N5); TRACK THE SHIPMENT under the
+    tracking number of an order RETURNED once shipped (C32 draws CARRIER and TRACKING NUMBER only) (N5).
   - C31: the contact of ORBES Client Services under an entry CONFIRMED; the entry's id whole, in lower case, as the draw
     publishes it (the board shows eight characters in capitals) (N5).
 
