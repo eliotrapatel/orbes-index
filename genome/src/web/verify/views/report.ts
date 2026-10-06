@@ -60,7 +60,8 @@ export function reportSection(model: ReportModel, deps: ReportDeps, opts: { fold
   const place = h('input', { attrs: { type: 'text', name: 'place', autocomplete: 'off', maxlength: PLACE_MAX } });
   const note = h('textarea', { class: 'n-fld__input n-report__note', attrs: { id: 'report-note', name: 'note', rows: 1, maxlength: NOTE_MAX, 'aria-describedby': 'report-note-hint' } });
   const error = h('p', { class: 'n-err n-report__error', attrs: { role: 'alert', hidden: true } });
-  const send = button(REPORT.send, { outline: true, type: 'submit', extraClass: 'n-report__send', attrs: { 'aria-busy': 'false' } });
+  // Unusable until an answer is chosen, and said so (aria-disabled), never silent; its look stays C15's.
+  const send = button(REPORT.send, { outline: true, type: 'submit', extraClass: 'n-report__send', attrs: { 'aria-busy': 'false', 'aria-disabled': 'true' } });
   const form = h(
     'form',
     { class: 'n-report__form', attrs: { novalidate: true, 'aria-labelledby': 'report-title' } },
@@ -79,12 +80,14 @@ export function reportSection(model: ReportModel, deps: ReportDeps, opts: { fold
   function choose(c: ReportChannel): void {
     channel = c;
     for (const o of options) o.setAttribute('aria-pressed', o.dataset.channel === c ? 'true' : 'false');
+    send.setAttribute('aria-disabled', 'false');
   }
 
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
     if (send.disabled) return;
-    // Where comes first: without a choice, the keyboard is taken to the four answers.
+    // Where comes first: without a choice (SEND ANSWER then says it is not usable yet), the keyboard is taken to the
+    // four answers.
     if (!channel) {
       options[0]?.focus();
       return;

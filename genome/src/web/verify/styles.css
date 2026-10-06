@@ -6830,6 +6830,12 @@ body.nocturne .circle-post__missing {
   margin-top: 22px;
 }
 
+/* Before an answer is chosen, SEND ANSWER is said unusable (aria-disabled) and keeps the look C15 draws for that very
+   state (no answer pressed, the hairline button at full strength); only the pointer stops promising a click. */
+.n-report__send[aria-disabled="true"] {
+  cursor: default;
+}
+
 .n-report__status {
   margin-top: 16px;
 }
@@ -7071,4 +7077,10 @@ body.nocturne .circle-post__missing {
 .n-acc__sign {
   display: flex;
   flex: none;
+}
+
+/* The rulebook's `.C .acc .sm{margin-top:4px}` also reaches a row's 16 px icon (`ic sm`): the + / − and the › sit 2 px
+   below the row's centre, as on C4, C16, C22, C24 and C32. */
+.n-acc .n-ic--sm {
+  margin-top: 4px;
 }

@@ -388,10 +388,12 @@ export class OwnershipPanel {
       { class: 'n-g n-lb n-own__account' },
       'SIGNED IN AS ',
       h('span', { class: 'n-own__email', text: email }),
-      // Each dot stays with the words before it: a short line wraps after it, never before.
+      // Each dot stays with the words before it: a short line wraps after it, never before. The email is text (the
+      // no-break space holds its dot); MY PIECES is an inline-block (its 44 px zone), a break on either side, so it is
+      // held with its dot in one unbroken span.
       '\u00a0· ',
-      appAnchor(PIECES_PATH, ['n-ivc', 'n-u', 'n-own__link'], this.deps.onPieces, PIECES.link),
-      '\u00a0· ',
+      h('span', { class: 'n-nw' }, appAnchor(PIECES_PATH, ['n-ivc', 'n-u', 'n-own__link'], this.deps.onPieces, PIECES.link), '\u00a0·'),
+      ' ',
       h('button', { class: 'n-g n-ivc n-u n-own__link', attrs: { type: 'button', disabled: this.state.busy }, on: { click: () => this.signOut() }, text: 'SIGN OUT' }),
     );
   }

@@ -61,6 +61,18 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
     for the moment before the scripts run, then takes its paper and its white bars: the static page cannot know its route
     under the CSP, and its ground before the scripts is the html's (`--vault-ground`) whatever the body's class. The
     static body keeps `class="nocturne"` so the page shown without JavaScript (JAVASCRIPT REQUIRED) reads ivory on black.
+  - C15, C16 (UNREADABLE CODE): the caution mark. The board's moon path (n.py's `TONE.caution`) closes on itself and
+    draws nothing, so the board shows the empty ring; the build draws the plan's ring and moon as a crescent.
+  - C15: SEND ANSWER is `aria-disabled` until an answer is pressed (said to a screen reader, never silent), with the
+    look C15 draws for that very state.
+- **Omissions of the drawings** (since N4: the app has these and keeps them, built with the same pieces; the final board
+  review expects them):
+  - C13: RECEIVING's lead, *If its owner has given you a transfer code, enter it…*, above the sign-in.
+  - C14: *This piece is registered to your ORBES account.* under REGISTERED TO YOU.
+  - C15: the certificate card's sentence, *If this piece was delivered to you with its ORBES certificate card…*.
+  - C17 (40 s): *Hold the camera 10 to 20 cm from the code…*.
+  - C36 (1): *Register this piece in your name…*, and the account line after VIEW AS OWNER.
+  - C36 (3): the GENOME's label, id and fingerprint above the ceremony's name.
 
 ## Boards without a screen of their own today
 

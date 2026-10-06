@@ -2003,14 +2003,21 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
 
-    // SEND ANSWER before an answer is chosen: the keyboard is taken to the answers, nothing is sent.
-    await section.getByRole('button', { name: 'SEND ANSWER' }).click();
+    // SEND ANSWER before an answer is chosen says it cannot be used yet (aria-disabled, C15's look kept); pressed from the
+    // keyboard all the same, it takes the keyboard to the answers and sends nothing.
+    const early = section.getByRole('button', { name: 'SEND ANSWER' });
+    await attrOf(early, 'aria-disabled', 'true');
+    expect(await early.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+    await early.focus();
+    await page.keyboard.press('Enter');
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('BOUTIQUE');
+    await attrOf(early, 'aria-disabled', 'true');
     // ONLINE: pressed, then the place, the note and SEND ANSWER (a hairline button, as C15 draws it).
     const online = section.getByRole('button', { name: 'ONLINE' });
     await online.click();
     await attrOf(online, 'aria-pressed', 'true');
     await attrOf(section.getByRole('button', { name: 'BOUTIQUE' }), 'aria-pressed', 'false');
+    await attrOf(early, 'aria-disabled', 'false');
     await visible(section.getByLabel('PLACE (OPTIONAL)'));
     await section.getByLabel('PLACE (OPTIONAL)').fill('a marketplace listing');
     await section.getByLabel('NOTE (OPTIONAL)').fill('Offered at a third of the boutique price.');

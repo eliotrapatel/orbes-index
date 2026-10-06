@@ -121,9 +121,9 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
   );
 
   it(
-    'sets the scan and its results as C9, C11, C12, C14, C16 and C17 draw them: the camera, the lock, a problem, a result, its GENOME, THE MODEL, its lines, its tabs, the OWNERSHIP panel, the report row, the foot (N4)',
+    'sets the scan and its results as C9, C11, C12, C14, C16 and C17 draw them: the camera, the lock, a problem, a result, its GENOME, THE MODEL, its lines, its tabs, the OWNERSHIP panel, its account line with a long email, the report row, the foot (N4)',
     async () => {
-      const states = ['scan-camera', 'scan-verifying', 'problem-camera-denied', 'result-first-registration', 'result-ownership-verified', 'result-invalid'];
+      const states = ['scan-camera', 'scan-verifying', 'problem-camera-denied', 'result-first-registration', 'result-ownership-verified', 'result-receiving', 'result-invalid'];
       const seen = new Set<string>();
       await eachState(
         states.map(stateById),
@@ -137,6 +137,7 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
             if (state.id === 'problem-camera-denied') await problem(page);
             if (state.id === 'result-first-registration') await firstRegistration(page);
             if (state.id === 'result-ownership-verified') await yours(page);
+            if (state.id === 'result-receiving') await accountLineWraps(page);
             if (state.id === 'result-invalid') await invalid(page);
           } finally {
             await opened.close();
@@ -276,6 +277,49 @@ async function yours(page: Page): Promise<void> {
   await check(page, '.n-own__link', { color: IV, 'text-decoration-line': 'underline', 'text-underline-offset': '3px' });
 }
 
+/**
+ * C14: the account line with a long email (t.nguyen@example.com) wraps after a dot, never before one (`MY PIECES ·` /
+ * `SIGN OUT`): MY PIECES and SIGN OUT are inline-blocks (their 44 px zones), a break on either side but for its span.
+ */
+async function accountLineWraps(page: Page): Promise<void> {
+  await page.getByRole('tab', { name: 'OWNERSHIP', exact: true }).click();
+  const line = page.locator('.n-own__account');
+  await line.waitFor();
+  expect(await line.locator('.n-own__email').textContent()).toBe('t.nguyen@example.com');
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const { lines, leading } = await line.evaluate((el) => {
+      // A dot starts a line when the last visible character before it sits on the line above.
+      const centre = (n: Node, i: number): number | null => {
+        const r = document.createRange();
+        r.setStart(n, i);
+        r.setEnd(n, i + 1);
+        const rect = r.getClientRects()[0];
+        return rect ? rect.top + rect.height / 2 : null;
+      };
+      const leading: string[] = [];
+      let before: number | null = null;
+      let seen = '';
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const text = n.textContent ?? '';
+        for (let i = 0; i < text.length; i++) {
+          const ch = text[i]!;
+          seen += ch;
+          if (/\s/.test(ch)) continue;
+          const y = centre(n, i);
+          if (y === null) continue;
+          if (ch === '·' && before !== null && y - before > 8) leading.push(seen);
+          before = y;
+        }
+      }
+      return { lines: Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)), leading };
+    });
+    expect(lines, `${width} px`).toBeGreaterThan(1);
+    expect(leading, `${width} px`).toEqual([]);
+  }
+}
+
 /** C16: INVALID SIGNATURE: the void mark, the help line 36 px under the message, the contact, the report's row. */
 async function invalid(page: Page): Promise<void> {
   await check(page, '.n-result .n-tone__ring', { 'stroke-width': '1.5px', stroke: IV });
@@ -288,6 +332,8 @@ async function invalid(page: Page): Promise<void> {
   await check(page, '.n-report__toggle', { 'padding-top': 20, 'padding-bottom': 20, 'border-top-color': LINE, 'border-bottom-color': LINE });
   await check(page, '.n-report__toggle .n-report__title', { 'font-size': 11, 'letter-spacing': em(11, 0.26), 'line-height': 16.5, color: IV });
   await check(page, '.n-report__toggle .n-report__lead', { 'margin-top': 4, 'font-size': 13, color: ASH });
+  // `.C .acc .sm{margin-top:4px}` reaches the row's 16 px + too: 2 px below the row's centre, as C16 draws it.
+  await check(page, '.n-report__toggle .n-ic--sm', { 'margin-top': 4, _w: 16, _h: 16 });
 }
 
 /** The header, the rail, the footer, the SCAN ring (C .hd .wm .acct .rail .foot .fl .snd .dbip .cr .scan), Safari's bars. */
