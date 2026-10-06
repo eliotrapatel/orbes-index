@@ -548,7 +548,8 @@ class App {
     void this.showSheet(slug);
   }
 
-  private async swap(next: HTMLElement, screen: Screen, focus = true): Promise<boolean> {
+  /** `beforeShow`: told once the page left is gone and before the new one's screen is shown (a LIVE RELEASE's chrome). */
+  private async swap(next: HTMLElement, screen: Screen, focus = true, beforeShow?: () => void): Promise<boolean> {
     const gen = this.generation;
     const old = this.host.firstElementChild as HTMLElement | null;
     if (old && !prefersReducedMotion()) {
@@ -559,6 +560,7 @@ class App {
     this.live?.dispose();
     this.live = null;
     document.body.dataset.screen = screen;
+    beforeShow?.();
     this.shell?.show(screen);
     this.host.replaceChildren(next);
     this.screen = screen;
@@ -818,6 +820,8 @@ class App {
 
   /** A LIVE RELEASE's page (or its after-room's), as read; `failure` when it could not be. */
   private async showLive(id: string, sheet: LiveSheet | LiveEndedSheet | null, failure: string | null, focus: boolean, afterRoom: boolean): Promise<void> {
+    let chrome: boolean | null = null;
+    let mounted = false;
     const view = liveView({
       api: this.api,
       session: this.session,
@@ -832,9 +836,18 @@ class App {
       onAfterRoom: (parentId) => this.openAfterRoom(parentId),
       clientServices: () => this.contactDetails(),
       localZone: localZone(),
-      onChrome: (shown) => this.shell?.liveChrome(shown),
+      // The chrome is the page's on screen: the one this page asks for is kept until it is mounted (the page left keeps
+      // its own while it fades out, and keeps it should this one be given up), then followed while it is shown.
+      onChrome: (shown) => {
+        chrome = shown;
+        if (mounted && view.root.isConnected) this.shell?.liveChrome(shown);
+      },
     });
-    if (await this.swap(view.root, 'live', focus)) this.live = view;
+    const beforeShow = (): void => {
+      mounted = true;
+      if (chrome !== null) this.shell?.liveChrome(chrome);
+    };
+    if (await this.swap(view.root, 'live', focus, beforeShow)) this.live = view;
     else view.dispose();
   }
 

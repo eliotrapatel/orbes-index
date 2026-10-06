@@ -41,6 +41,7 @@ import type { LiveEngine } from '../../src/server/services/live-engine.js';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { createManualClock, SYSTEM_ACTOR } from '../../src/server/types.js';
 import { LIVE, RELEASES } from '../../src/web/verify/copy.js';
+import { countdown } from '../../src/web/verify/live-model.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -161,7 +162,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
   it('announced → the room → the door at T0 → the line → the turn (a pointer hold) → the reveal and the add-ons → PAY → CONFIRMED in ivory', async () => {
     const t0 = new Date(Date.now() + 45_000);
     const r = await release({ opensAt: t0, minTier: 1, sizes: [{ label: '50', stock: 2 }, { label: '52', stock: 1 }], addons: [{ label: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000 }, { label: 'GIFT BOX', priceMinor: 9_000 }] });
-    const later = await release({ opensAt: new Date(Date.now() + 3 * 86_400_000), roomOpensMinutes: 5, minTier: 2 });
+    const laterAt = new Date(Date.now() + 3 * 86_400_000);
+    const later = await release({ opensAt: laterAt, roomOpensMinutes: 5, minTier: 2 });
     const [s50, s52] = r.sizes;
     // A PALLADIUM collector in size 52 is ahead at T0; the collector said I'LL BE THERE in size 52.
     const rival = await account(5);
@@ -184,6 +186,11 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     // OPENS IN and its countdown on the card (addition 4), on the server's clock.
     await textOf(card.locator('.n-releases__opens'), 'OPENS IN');
     await expect.poll(async () => (await card.locator('.n-cd__unit').allInnerTexts()).map(norm)).toEqual(['DAYS', 'HOURS', 'MINUTES']);
+    // Its figures are the server's time to T0 (this test's clock, the server's), not this phone's 37 minutes less: within a minute.
+    const minutesOf = (groups: { value: string }[]) => groups.reduce((n, g, i) => n + Number(g.value) * [1440, 60, 1][i]!, 0);
+    const shown = minutesOf((await card.locator('.n-cd__value').allInnerTexts()).map((value) => ({ value: norm(value) })));
+    const expected = minutesOf(countdown(laterAt.getTime() - Date.now()));
+    expect(Math.abs(shown - expected)).toBeLessThanOrEqual(1);
     expect(await card.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
     await textOf(page.locator('article.live-card').filter({ has: page.locator(`#release-${r.id}-title`) }).locator('.live-card__kind'), 'LIVE RELEASE · THE ROOM IS OPEN');
     await keepsVault(page, 'SEE THE RELEASE', ['SEE THE RELEASE']);

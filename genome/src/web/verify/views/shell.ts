@@ -171,7 +171,7 @@ export class Shell {
 
   /**
    * A LIVE RELEASE's page changed screen: before or after the room (`shown`), NOCTURNE's ground and chrome; inside it,
-   * the room's own look (choice 4). Told before the page is shown too, so its first screen opens as it should.
+   * the room's own look (choice 4). Told for the page on screen only: a page arriving tells it once mounted, right before its screen is shown, so its first screen opens as it should.
    */
   liveChrome(shown: boolean): void {
     if (this.liveOn === shown) return;

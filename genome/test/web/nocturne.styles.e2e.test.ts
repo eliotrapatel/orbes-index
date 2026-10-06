@@ -1050,6 +1050,11 @@ async function theReleases(page: Page): Promise<void> {
   await check(page, '.n-releases__seal-line .n-mono--54', { width: 54, height: 54 });
   await check(page, '.n-releases__sealed', { 'margin-top': 26 });
   await check(page, '.n-releases__sealed .n-releases__lines', { 'margin-top': 16 });
+  // …OPENS IN and its countdown on it too (addition 4): many days ahead, DAYS HOURS MINUTES.
+  const sealed = page.locator('#releases-panel-live article.n-releases__release').filter({ has: page.locator('.n-releases__seal-line') });
+  expect(await sealed.count()).toBe(1);
+  expect((await sealed.locator('.n-releases__opens').innerText()).trim()).toBe('OPENS IN');
+  expect((await sealed.locator('.n-cd__unit').allInnerTexts()).map((t) => t.trim())).toEqual(['DAYS', 'HOURS', 'MINUTES']);
   await check(page, '.n-releases__reveals-title', { 'margin-top': 22, color: IV });
   await check(page, '.n-releases__reveals-lines', { 'margin-top': 10 });
   // A draw: DRAW · its state, its title 24 px, its model, its price (addition 5) at 16 px, its pieces and close in UTC.

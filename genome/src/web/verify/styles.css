@@ -6803,15 +6803,16 @@ body.nocturne[data-screen="live"] {
   margin-top: 18px;
 }
 
-/* MY PIECES on the ivory: 10.5 px, 0.24 em, ruled 4 px under; its 44 px tap zone in padding, given back. */
+/* MY PIECES on the ivory: 10.5 px on the board's 12 px glyph box, 0.24 em, ruled 4 px under; its 44 px tap zone in
+   padding (27 + 12 + 4 + 1), given back above. */
 .n-live__pieces {
   display: inline-block;
-  margin-top: -23.25px;
-  padding: 23.25px 0 4px;
+  margin-top: -27px;
+  padding: 27px 0 4px;
   border-bottom: 1px solid var(--vault-ground);
   color: var(--vault-ground);
   font-size: var(--n-fs-tl);
-  line-height: var(--n-lh-base);
+  line-height: 12px;
   letter-spacing: 0.24em;
   text-decoration: none;
 }

@@ -211,6 +211,8 @@ class ListPage {
   private disposed = false;
   /** The server's clock against this phone's, once measured (the moments of the LIVE RELEASES are the server's). */
   private offset: number | null = null;
+  /** A moment of a LIVE RELEASE is near: the next read measures the server's clock again, the cards drawn meanwhile on the last offset known. */
+  private remeasure = false;
   private changeTimer: ReturnType<typeof setTimeout> | null = null;
   /** What the list on show was drawn from: a quiet read bringing the same leaves it as it is, its nodes and its reader. */
   private drawn: string | null = null;
@@ -288,7 +290,13 @@ class ListPage {
       // them; the draws failing is the failure of the page.
       const [drops, live] = await Promise.all([this.deps.api.drops(), this.deps.api.liveReleases().catch(() => null)]);
       if (this.disposed) return;
-      if (live && live.length > 0 && this.offset === null) this.offset = (await measureClock(() => this.deps.api.liveClock(), 1))?.offset ?? null;
+      if (live && live.length > 0 && (this.offset === null || this.remeasure)) {
+        const measured = await measureClock(() => this.deps.api.liveClock(), 1);
+        if (measured) {
+          this.offset = measured.offset;
+          this.remeasure = false;
+        }
+      }
       if (this.disposed) return;
       this.load = { kind: 'ready', live: live ? liveCards(live, this.deps.localZone) : [], liveFailed: live === null, cards: releaseCards(drops) };
       if (live) this.schedule(live);
@@ -314,7 +322,7 @@ class ListPage {
     const now = this.now();
     const next = nextChange(live, now, BANNER_REFRESH_MS);
     if (next === null) return;
-    if (next - now <= CHANGE_RETRY_MS) this.offset = null;
+    if (next - now <= CHANGE_RETRY_MS) this.remeasure = true;
     this.changeTimer = setTimeout(() => void this.fetch(true), Math.min(CHANGE_MAX_MS, next - now + CHANGE_MARGIN_MS));
   }
 
@@ -930,7 +938,7 @@ class ReleasePage {
         { class: 'n-px n-sec n-release__section release__section', attrs: { 'aria-labelledby': 'release-facts' } },
         h('h2', { class: 'n-g n-t3', id: 'release-facts', text: RELEASES.section.release }),
         description,
-        h('p', { class: 'n-g n-lb n-release__model release__model' }, ...withNumerals(s.model), see ? '  ' : null, see),
+        h('p', { class: 'n-g n-lb n-release__model release__model' }, ...withNumerals(s.model), see ? '   ' : null, see),
         releaseRows(s.rows),
         s.earlyNote ? h('p', { class: 'n-sm n-release__early release__early', text: s.earlyNote }) : null,
       ),
