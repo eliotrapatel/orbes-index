@@ -544,7 +544,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
     it('RELEASE MY PLACE gives the piece to the next at once; an entrant reads its state whatever its tier now; a REMOVED one too', async () => {
       const r = await release(h, f, { inMinutes: 4, minTier: 1 });
       await h.ctx.db.updateTable('drop_sizes').set({ stock: 1 }).where('drop_id', '=', r.id).execute();
-      const a = await member(h, f, 3);
+      const a = await member(h, f, 5);
       const b = await member(h, f, 1);
       for (const m of [a, b]) await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id });
       h.clock.advance(4 * MINUTE);

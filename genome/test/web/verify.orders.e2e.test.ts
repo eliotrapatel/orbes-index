@@ -65,6 +65,18 @@ async function openTab(page: Page, name: 'PIECES' | 'ORDERS' | 'RELEASES'): Prom
 }
 /** A date of an order's step among several of one year: its day and month (C24, C32). */
 const dayMonth = (date: string) => date.replace(/ \d{4}$/, '');
+/**
+ * ORDERS' buttons: none but each order's WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01, site 5), exactly one
+ * under each order and no other anywhere in MY PIECES; the documents are rows.
+ */
+async function onlyWriteButtons(page: Page): Promise<void> {
+  expect(await page.locator('.view--pieces .n-btn:not(.n-write__open)').count()).toBe(0);
+  const orders = page.locator('.view--pieces article.n-pieces__order');
+  const n = await orders.count();
+  expect(n).toBeGreaterThan(0);
+  for (let i = 0; i < n; i++) expect(await orders.nth(i).locator('.n-write__open').count()).toBe(1);
+  expect(await page.locator('.view--pieces .n-write__open').count()).toBe(n);
+}
 
 describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, phone)', () => {
   let srv: VerifyServer;
@@ -224,7 +236,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     expect(checks.contrast).toEqual([]);
     expect(checks.figures).toEqual([]);
     // No button but each order's WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01, site 5): the documents are rows.
-    expect(await page.locator('.view--pieces .n-btn:not(.n-write__open)').count()).toBe(0);
+    await onlyWriteButtons(page);
     const floors = await tapZoneFloors(page);
     expect(floors.problems).toEqual([]);
     expect(floors.checked).toEqual(expect.arrayContaining([ORDERS.track]));
@@ -304,7 +316,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     expect(checks.contrast).toEqual([]);
     expect(checks.figures).toEqual([]);
     // No button but each order's WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01, site 5): the documents are rows.
-    expect(await page.locator('.view--pieces .n-btn:not(.n-write__open)').count()).toBe(0);
+    await onlyWriteButtons(page);
     const floors = await tapZoneFloors(page);
     expect(floors.problems).toEqual([]);
     // The rows, by their words (the label, the number, then the line under them).

@@ -988,7 +988,7 @@ async function seedDraws(w: World): Promise<void> {
 
 /**
  * The stress case: a 24-character model name without a photograph, a 14-character free-text field, two pieces to scan
- * of it with a Size of 14 characters, an account of 6 pieces and 4 orders (a price in USD, a long amount, a long tracking
+ * of it with a Size of 14 characters, an account of 10 pieces and 4 orders (a price in USD, a long amount, a long tracking
  * number), 8 posts, a LIVE RELEASE under an hour away with its room open and a long host message, another more than 9
  * days away.
  */
@@ -1006,13 +1006,17 @@ async function seedStress(w: World): Promise<void> {
   w.models.cobalt = cobalt.id;
   w.demo.slugs.cobalt = 'monolithe-architecturale-brushed-cobalt';
   const you = await account(w, 'you', 'you@example.com');
-  // Six pieces, the first of the long model with a 14-character field.
+  // Six pieces registered, the first of the long model with a 14-character field.
   clock.set(at('2026-09-02T10:00:00Z'));
   const roles = ['long', 'steel', 'gold', 'blue', 'steel', 'gold'];
   for (const [i, model] of roles.entries()) {
     const p = await issue(w, `piece${i + 1}`, model, { serial: 300 + i, sold: '2026-09-02', ...(i === 0 ? { variant: 'BRUSHED COBALT', material: '925 STERLING SILVER, BRUSHED AND POLISHED' } : {}) });
     await register(w, you, p);
   }
+  // Four more, so that the account holds ten: PALLADIUM, the highest tier (plan NEXT-NINE, BP-19 T1). They carry serials of
+  // 2025 and are held from the account's first day, before the six: the serials of 2026 the boards show, the long model
+  // first, stay as they were.
+  await holdPieces(ctx.db, you.id, 4, w.models.steel!, { variant: '17', year: 2025, startedAt: at('2026-09-01T09:00:00Z') });
   // Two pieces to scan of the 24-character model in its 14-character variant, each with a Size of 14 characters (fidelity
   // rule 5 on a result, C9, and on the ceremony of a first registration, C36): unregistered, the second one registered
   // by a capture.

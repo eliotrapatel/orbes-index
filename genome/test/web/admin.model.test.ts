@@ -579,7 +579,7 @@ describe('the Club\'s tiers (P-X04)', () => {
     clubTierFits({
       tier: 'PLATINE',
       level: 2,
-      pieces: 3,
+      pieces: 5,
       benefits: CLUB_TIER_DEFAULT_BENEFITS.PLATINE,
       defaultBenefits: CLUB_TIER_DEFAULT_BENEFITS.PLATINE,
       edited: false,

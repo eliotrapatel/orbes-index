@@ -562,7 +562,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -589,7 +589,7 @@
         "O26-J-00300",
         "MONOLITHE",
         "O26-J-00301",
-        "PLATINE 6 pieces held. 4 more pieces registered to your account open PALLADIUM, from 10 pieces held.",
+        "PALLADIUM 10 pieces held. PALLADIUM is the highest tier of the club.",
         "THE CIRCLE",
         "INVITATION",
         "POST 3 OF THE CIRCLE",
@@ -3366,7 +3366,7 @@
       ]
     },
     "pieces-stress": {
-      "title": "MY PIECES with six pieces, the first of a 24-character model without a photograph, its Size of 14 characters",
+      "title": "MY PIECES with ten pieces, the first of a 24-character model without a photograph, its Size of 14 characters",
       "refs": [
         "same pieces"
       ],
@@ -3374,7 +3374,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -3383,7 +3383,7 @@
         "LIVE RELEASE · MONOLITHE ARCHITECTURALE IN POLISHED · THE ROOM IS OPEN",
         "MY PIECES",
         "The pieces registered to your ORBES account.",
-        "PIECES6",
+        "PIECES10",
         "ORDERS4",
         "MONOLITHE ARCHITECTURALE",
         "O26-J-00300",
@@ -3398,6 +3398,11 @@
         "O26-J-00303",
         "O26-J-00304",
         "O26-J-00305",
+        "O25-J-00001",
+        "SINCE 1 SEP 2026",
+        "O25-J-00002",
+        "O25-J-00003",
+        "O25-J-00004",
         "ADD A PIECE",
         "Scan a piece, then register it from the OWNERSHIP tab of its result.",
         "SCAN ORBES CODE",
@@ -3420,14 +3425,14 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
         "CIRCLE",
         "PIECES",
         "MY PIECES",
-        "PIECES6",
+        "PIECES10",
         "ORDERS4",
         "THE PRIVATE SALON · ZENITH",
         "ZENITH",
@@ -3484,7 +3489,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -3664,7 +3669,7 @@
       ]
     },
     "account-sheet-stress": {
-      "title": "The account sheet with the extreme content: PLATINE, six pieces",
+      "title": "The account sheet with the extreme content: PALLADIUM, ten pieces",
       "refs": [
         "same pieces"
       ],
@@ -3672,7 +3677,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -3699,7 +3704,7 @@
         "O26-J-00300",
         "MONOLITHE",
         "O26-J-00301",
-        "PLATINE 6 pieces held. 4 more pieces registered to your account open PALLADIUM, from 10 pieces held.",
+        "PALLADIUM 10 pieces held. PALLADIUM is the highest tier of the club.",
         "THE CIRCLE",
         "INVITATION",
         "POST 3 OF THE CIRCLE",
@@ -3726,15 +3731,14 @@
         "SIGNED IN AS",
         "you@example.com",
         "YOUR TIER",
-        "6 pieces held",
+        "10 pieces held",
         "The owners’ circle: its notes, its invitations and its polls.",
         "Priority in the draw of each release, before the accounts that hold no piece.",
         "Priority care for your pieces with ORBES Client Services.",
         "Early access to each release: a place reserved directly before it opens to everyone, 48 hours ahead unless its page says otherwise.",
-        "NEXT: PALLADIUM",
-        "4 more pieces registered to your account open PALLADIUM, from 10 pieces held. It adds:",
         "Special commissions, made for you by the ORBES atelier.",
         "A yearly visit to the ORBES atelier.",
+        "PALLADIUM is the highest tier of the club.",
         "MESSAGES",
         "SOUND",
         "CHANGE PASSWORD",
@@ -4535,7 +4539,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -4544,7 +4548,7 @@
         "THE COLLECTION",
         "The models of ORBES, as the maison presents them.",
         "ORBITAL",
-        "You own five: steel, gold and blue",
+        "You own nine: steel, gold and blue",
         "MONOLITHE",
         "BRACELET",
         "Steel",
@@ -4580,7 +4584,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -4862,7 +4866,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -7271,7 +7275,7 @@
         "READY CHECK",
         "SIGNED IN",
         "ACCESS",
-        "PLATINE",
+        "PALLADIUM",
         "SIZE",
         "TO CHOOSE",
         "CONNECTION",
@@ -7307,7 +7311,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -7878,7 +7882,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -7927,7 +7931,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -7957,7 +7961,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",
@@ -9115,7 +9119,7 @@
       "as": "you",
       "values": [
         "ORBES",
-        "PLATINE",
+        "PALLADIUM",
         "NOW",
         "RELEASES",
         "COLLECTION",

@@ -289,7 +289,7 @@ describe('NOW: the collection\'s pieces it shares (reused by THE COLLECTION)', (
   });
 
   it('writes no word of the brand\'s forbidden lexicon, and no exclamation mark', () => {
-    const lines = [...Object.values(NOW.sections), NOW.label, NOW.draw, NOW.pieces, NOW.scan, NOW.upload, LOOKBOOK.sizes('16'), LOOKBOOK.variants, LOOKBOOK.youOwn(2, 'steel', 'gold'), TIER.way('PLATINE', 1, 3), TIER.firstWay('TITANE')];
+    const lines = [...Object.values(NOW.sections), NOW.label, NOW.draw, NOW.pieces, NOW.scan, NOW.upload, LOOKBOOK.sizes('16'), LOOKBOOK.variants, LOOKBOOK.youOwn(2, 'steel', 'gold'), TIER.way('PLATINE', 3, 5), TIER.firstWay('TITANE')];
     expect(findForbidden(lines.join('\n'), [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
     expect(lines.join('\n')).not.toMatch(/!/);
   });

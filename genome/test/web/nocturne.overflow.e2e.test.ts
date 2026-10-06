@@ -1,7 +1,7 @@
 /**
  * NOCTURNE's overflow test (plan NOCTURNE, fidelity rule 5: extreme content). Every extreme case the stage reaches
  * (test/support/nocturne-states.ts, the states marked `stress`: a 24-character model name without a photograph, a
- * 14-character free-text field, six pieces and four orders, eight posts, every empty state, a price in USD and
+ * 14-character free-text field, ten pieces and four orders, eight posts, every empty state, a price in USD and
  * € 125 400, a countdown under an hour and one over 9 days, a long tracking number and the longest host message) is
  * opened on the phone, and nothing may overflow: no sideways scroll, no element with words or a control past the
  * column or past its parent's box, no box whose content spills out of it, no words wider than their box, no words cut

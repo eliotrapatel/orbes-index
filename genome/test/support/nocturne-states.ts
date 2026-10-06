@@ -693,7 +693,7 @@ export const UI_STATES: readonly UiState[] = [
     routes: async (page) => page.route('**/api/v1/account/products', (r) => r.abort('internetdisconnected')),
     ready: '.view--piece .n-failed',
   },
-  { id: 'pieces-stress', title: 'MY PIECES with six pieces, the first of a 24-character model without a photograph, its Size of 14 characters', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/pieces'), ready: '.view--pieces article.n-pieces__piece', stress: true },
+  { id: 'pieces-stress', title: 'MY PIECES with ten pieces, the first of a 24-character model without a photograph, its Size of 14 characters', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/pieces'), ready: '.view--pieces article.n-pieces__piece', stress: true },
   {
     id: 'pieces-orders-stress',
     title: 'MY PIECES, ORDERS: four orders (a price in USD, € 125 400, a long tracking number)',
@@ -733,7 +733,7 @@ export const UI_STATES: readonly UiState[] = [
   },
   {
     id: 'account-sheet-stress',
-    title: 'The account sheet with the extreme content: PLATINE, six pieces',
+    title: 'The account sheet with the extreme content: PALLADIUM, ten pieces',
     refs: ['same pieces'],
     variant: 'stress',
     as: you,
