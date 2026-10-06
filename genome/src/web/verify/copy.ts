@@ -752,13 +752,17 @@ export const LOOKBOOK = Object.freeze({
   /**
    * NOCTURNE N6 (C6): a model's next release, a plate row under its dots: its kind (LIVE RELEASE, DRAW · ENTRIES OPEN),
    * then its variant and its day and hour, without a countdown (`IN BLUE, THURSDAY 21:00 PARIS`): a LIVE RELEASE in
-   * Paris (its weekday within the coming six days, else its date), a draw in UTC as THE RELEASES say it.
+   * Paris (its weekday within the coming six days, else its weekday then its date: THURSDAY 22 OCTOBER · 21:00 PARIS),
+   * a draw in UTC as THE RELEASES say it (ENTRIES CLOSE 11 OCT 2026 · 18:00 UTC). The words before the date may wrap;
+   * a date never parts from its hour (`week`, `dated`, `utc`: each kept on one line).
    */
   next: Object.freeze({
     variant: (label: string) => `IN ${label.toUpperCase()},`,
     week: (weekday: string, time: string) => `${weekday} ${time} PARIS`,
-    opens: (time: string) => `ENTRIES OPEN ${time} UTC`,
-    closes: (time: string) => `ENTRIES CLOSE ${time} UTC`,
+    dated: (date: string, time: string) => `${date} · ${time} PARIS`,
+    opens: 'ENTRIES OPEN',
+    closes: 'ENTRIES CLOSE',
+    utc: (time: string) => `${time} UTC`,
   }),
   /** The accessible names of a sheet's photographs and of a card's. */
   photosLabel: (model: string) => `Photographs of the ${model} model`,

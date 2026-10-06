@@ -25,8 +25,12 @@ export interface NextReleaseModel {
   kind: string;
   /** `IN BLUE,` when the release names its variant; null otherwise. */
   variant: string | null;
-  /** `THURSDAY 21:00 PARIS`, `ENTRIES CLOSE 11 OCT 2026 · 18:00 UTC`: never parted. */
-  when: string;
+  /**
+   * When, in two parts: the words that may wrap before the date (`ENTRIES CLOSE`, a weekday six days ahead or more;
+   * null within the week), then the date with its hour, never parted (`THURSDAY 21:00 PARIS`, `22 OCTOBER · 21:00
+   * PARIS`, `11 OCT 2026 · 18:00 UTC`): the row reads `IN BLUE, THURSDAY 21:00 PARIS`, `ENTRIES CLOSE 11 OCT 2026 · …`.
+   */
+  when: { lead: string | null; at: string };
 }
 
 /** Within this, a LIVE RELEASE says its weekday alone (no weekday comes twice). */
@@ -39,7 +43,8 @@ function liveRow(c: LiveCard, now: number): NextReleaseModel | null {
   const weekday = paris.day.split(' ')[0] ?? paris.day;
   const kind = c.phase === 'ROOM' ? `${LIVE.kind} · ${LIVE.phase.ROOM}` : c.phase === 'LIVE' ? `${LIVE.kind} · ${LIVE.phase.LIVE}` : LIVE.kind;
   const variant = typeof c.variant === 'string' && c.variant.trim() ? LOOKBOOK.next.variant(c.variant.trim()) : null;
-  return { id: c.id, href: releasePath(c.id), kind, variant, when: Math.abs(at - now) < WEEK_MS ? LOOKBOOK.next.week(weekday, paris.time) : LIVE.paris(paris.day, paris.time) };
+  const when = Math.abs(at - now) < WEEK_MS ? { lead: null, at: LOOKBOOK.next.week(weekday, paris.time) } : { lead: weekday, at: LOOKBOOK.next.dated(paris.date, paris.time) };
+  return { id: c.id, href: releasePath(c.id), kind, variant, when };
 }
 
 function drawRow(d: DropCard): NextReleaseModel | null {
@@ -53,7 +58,7 @@ function drawRow(d: DropCard): NextReleaseModel | null {
     href: card.href,
     kind: `${NOW.draw} · ${card.stateLabel}`,
     variant: typeof label === 'string' && label.trim() ? LOOKBOOK.next.variant(label.trim()) : null,
-    when: soon ? LOOKBOOK.next.opens(time) : LOOKBOOK.next.closes(time),
+    when: { lead: soon ? LOOKBOOK.next.opens : LOOKBOOK.next.closes, at: LOOKBOOK.next.utc(time) },
   };
 }
 

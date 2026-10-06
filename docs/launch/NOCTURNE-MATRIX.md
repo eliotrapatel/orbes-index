@@ -110,7 +110,8 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
     teaser for an account signed in that holds no piece shows SCAN ORBES CODE alone (SIGN IN is for a visitor signed
     out); a model's next release when it is a draw (DRAW · ENTRIES OPEN, IN STEEL, ENTRIES CLOSE *date · time* UTC), its
     room open or live (LIVE RELEASE · THE ROOM IS OPEN, · LIVE NOW), or more than six days ahead (its date with its
-    weekday); a model of the salon among a public model's dots switches the sheet to its price, tier and request.
+    weekday); a model of the salon among a public model's dots switches the sheet to its price, tier and request (an
+    owner's sheet is the club's, which serves a public model with the variants of the salon its tier reaches).
 
 ## Boards without a screen of their own today
 
@@ -345,6 +346,7 @@ ORBES; the sheet's foot link THE COLLECTION to its crumb.
 | `collection` | the same, You own N under the dots, then THE PRIVATE SALON, its lead, *collection*, ZENITH, BRACELET, € 4 800, SEE THE MODEL | an owner signed in | C5 |
 | `collection-no-piece` | as signed out, the teaser with SCAN ORBES CODE alone | signed in without a piece | C5 (2) |
 | `model`, `model-blue`, `model-gold` | ‹ THE COLLECTION, the photograph, *collection*, *name*, *type*, SIZES 16 · 17 · 18, the dots (the address's selected), You own N (signed in), the next release (LIVE RELEASE, IN BLUE, THURSDAY 21:00 PARIS), THE STORY, the gallery, SPECIFICATIONS (*label · value*), CARE | a public model | C6 |
+| `model-draw-leads`, `model-draw-soon` | the same, its next release a draw: DRAW · ENTRIES OPEN, IN STEEL, ENTRIES CLOSE *11 OCT 2026 · 18:00 UTC*; DRAW · ENTRIES OPEN SOON, ENTRIES OPEN *date · time* UTC (the date never parted from its hour; the words before it wrap); in the overflow test | no LIVE RELEASE leads (the `draw-leads`, `draw-soon` demos) | C6, C42 |
 | `model-salon` | ‹ THE COLLECTION, *collection*, ZENITH, BRACELET · THE PRIVATE SALON, SIZE 17, THE PRIVATE SALON, PRICE, OFFERED FROM, its sentence, A NOTE FOR ORBES CLIENT SERVICES and its hint, REQUEST THIS PIECE, THE STORY, SPECIFICATIONS, CARE | a model of the salon, its tier reached | C33 (1) |
 | `model-salon-requested` | REQUESTED, *ORBES Client Services will contact you.*, the contact | requested | C33 (2) |
 | `model-salon-signed-out`, `model-not-found` | ‹ THE COLLECTION, *This model is not in the ORBES collection.* | a reserved model signed out; an address that leads nowhere | C40 (4) |

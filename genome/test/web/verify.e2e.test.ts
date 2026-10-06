@@ -2450,6 +2450,37 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // A model above the owner's tier: the same sentence as a model not in the collection.
     await page.goto(`${srv.origin}/verify/lookbook/nadir`);
     await textOf(page.locator('.sheet__missing'), 'This model is not in the ORBES collection.');
+
+    // NOCTURNE N6: AURORE's variants, NOON in the collection and NIGHT in THE PRIVATE SALON. Signed in, the sheet is the
+    // club's: the dot of the salon is among the public model's dots, and switches the sheet to its price, its tier and
+    // REQUEST THIS PIECE.
+    const noon = await catalog.createVariant(aurore.id, { label: 'Noon', swatch: '#B88A3A', skuPrefix: 'AUR-NN', mainLabel: 'Dawn', mainSwatch: '#9D9B96' }, SYSTEM_ACTOR);
+    const night = await catalog.createVariant(aurore.id, { label: 'Night', swatch: '#16224A', skuPrefix: 'AUR-NT' }, SYSTEM_ACTOR);
+    await media.setModelImage(noon.id, { mime: 'image/jpeg', bytes: jpegPhoto(500, 500) }, SYSTEM_ACTOR);
+    await catalog.updateModel(noon.id, { slug: 'aurore-noon', lookbook: 'PUBLIC' }, SYSTEM_ACTOR);
+    await catalog.updateModel(night.id, { slug: 'aurore-night', lookbook: 'RESERVED', priceLabel: '€ 6 200' }, SYSTEM_ACTOR);
+    await page.goto(`${srv.origin}/verify/lookbook/aurore`);
+    await textOf(page.locator('h1'), 'AURORE');
+    const dots = page.locator('.n-model__dots');
+    const dawnSrc = await page.locator('.n-model__photo img').getAttribute('src');
+    await dots.getByRole('button', { name: 'Night' }).click();
+    await page.waitForURL(/\/verify\/lookbook\/aurore-night$/);
+    const nightSalon = page.getByRole('region', { name: 'THE PRIVATE SALON' });
+    await textsOf(nightSalon.locator('.n-kv__label'), ['PRICE', 'OFFERED FROM']);
+    await textsOf(nightSalon.locator('.n-kv__value'), ['€ 6 200', 'TITANE']);
+    await visible(nightSalon.getByRole('button', { name: 'REQUEST THIS PIECE' }));
+    // A dot chosen, then signed out from the account sheet: the sheet read again is the chosen dot's, as its address
+    // says (NOON pressed, NOON's photograph), without the salon's dot.
+    await dots.getByRole('button', { name: 'Noon' }).click();
+    await page.waitForURL(/\/verify\/lookbook\/aurore-noon$/);
+    const noonSrc = await page.locator('.n-model__photo img').getAttribute('src');
+    expect(noonSrc).not.toBe(dawnSrc);
+    await openAccount(page);
+    await page.locator('.n-account').getByRole('button', { name: 'SIGN OUT', exact: true }).click();
+    await countOf(dots.getByRole('button', { name: 'Night' }), 0);
+    expect(await dots.getByRole('button', { name: 'Noon' }).getAttribute('aria-pressed')).toBe('true');
+    expect(await page.locator('.n-model__photo img').getAttribute('src')).toBe(noonSrc);
+    expect(new URL(page.url()).pathname).toBe('/verify/lookbook/aurore-noon');
     expect(problems).toEqual([]);
   }, 180_000);
 

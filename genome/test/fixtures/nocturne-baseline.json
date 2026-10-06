@@ -4150,6 +4150,68 @@
         "IP GEOLOCATION BY DB-IP"
       ]
     },
+    "model-draw-leads": {
+      "title": "A model’s sheet whose next release is a draw: MONOLITHE in steel, DRAW · ENTRIES OPEN, ENTRIES CLOSE …",
+      "refs": [
+        "C6",
+        "C42"
+      ],
+      "variant": "draw-leads",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "ORBITAL",
+        "MONOLITHE",
+        "BRACELET",
+        "THE STORY",
+        "Two rails of metal held apart, then closed by one angled link: a form built like architecture, cut to lie flat on the wrist.",
+        "SPECIFICATIONS",
+        "METAL",
+        "925 STERLING SILVER",
+        "CLOSURE",
+        "HINGED",
+        "CARE",
+        "Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.",
+        "THE COLLECTION",
+        "PRIVACY",
+        "·",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "model-draw-soon": {
+      "title": "A model’s sheet whose next release is a draw before its entries open: DRAW · ENTRIES OPEN SOON, ENTRIES OPEN …",
+      "refs": [
+        "C6",
+        "C42"
+      ],
+      "variant": "draw-soon",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "ORBITAL",
+        "MONOLITHE",
+        "BRACELET",
+        "THE STORY",
+        "Two rails of metal held apart, then closed by one angled link: a form built like architecture, cut to lie flat on the wrist.",
+        "SPECIFICATIONS",
+        "METAL",
+        "925 STERLING SILVER",
+        "CLOSURE",
+        "HINGED",
+        "CARE",
+        "Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.",
+        "THE COLLECTION",
+        "PRIVACY",
+        "·",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
     "model-salon": {
       "title": "A model of THE PRIVATE SALON: ZENITH, REQUEST THIS PIECE",
       "refs": [

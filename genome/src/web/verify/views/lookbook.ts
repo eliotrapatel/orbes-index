@@ -25,9 +25,10 @@
  * requested REQUESTED with the contact of ORBES Client Services; THE STORY, the gallery full width, SPECIFICATIONS, CARE.
  *
  * The grid reads GET /api/v1/lookbook (the same for everyone) and, for a signed-in account, the club's reserved models
- * (a 403 for an account that holds no piece: the teaser) and its pieces (You own N). A sheet reads the public sheet,
- * then, when that answers 404 to a signed-in account, the club's (404 too below the model's tier); and THE RELEASES'
- * lists for its next release. Both read again when the account signs in or out. REQUEST THIS PIECE is a same-origin
+ * (a 403 for an account that holds no piece: the teaser) and its pieces (You own N). A sheet reads, signed in, the
+ * club's (a public model with the variants of the salon its tier reaches, or a model of the salon; 404 below the model's
+ * tier), the public sheet for an account that holds no piece (403) or signed out; and THE RELEASES' lists for its next
+ * release. Both read again when the account signs in or out. REQUEST THIS PIECE is a same-origin
  * JSON call through ApiClient (the session cookie, the CSRF token); server messages are shown as they come. CSP-safe:
  * h() only, NOCTURNE's pieces (views/nocturne.ts), their places by class (verify/styles.css, THE COLLECTION).
  */
@@ -239,7 +240,7 @@ class GridPage {
     // SEE THE MODEL, of which model: its name and type, for a screen reader moving from link to link.
     see.setAttribute('aria-describedby', `${id}-name`);
     const price = face.price ? h('p', { class: 'n-num n-lookbook__price lookbook-card__price', text: face.price }) : null;
-    const owned = opts.salon ? null : ownedLine(c.slug, c.dots, pieces);
+    const owned = ownedLine(c.slug, c.dots, pieces);
     const article = h(
       'article',
       { class: ['lookbook-card', 'n-lookbook__model', opts.following ? 'n-sec' : null, photo ? null : 'n-lookbook__model--bare'], attrs: { 'aria-labelledby': `${id}-name` } },
@@ -333,9 +334,12 @@ class SheetPage {
   });
   private contacts: ClientServices = {};
   private focusPending: boolean;
+  /** The address the sheet reads: the one it was opened with, then the dot chosen (the address follows it). */
+  private slug: string | null;
 
   constructor(private readonly deps: SheetDeps) {
     this.focusPending = deps.focus === true;
+    this.slug = deps.slug;
     this.root = viewRoot('sheet', 'sheet-title');
     this.root.classList.add('n-model');
     this.root.append(appAnchor(LOOKBOOK_PATH, ['n-g', 'n-crumb', 'n-model__crumb'], () => deps.onCollection(), icon('back', { small: true }), LOOKBOOK.link), this.body);
@@ -351,23 +355,35 @@ class SheetPage {
     this.unsubscribe();
   }
 
-  /** The public sheet; a 404 to a signed-in account is asked again of the club (a RESERVED model, for an owner). */
+  /**
+   * Signed out, the public sheet. Signed in, the club's first: it serves a public model too, with the variants of the
+   * salon the account's tier reaches among its dots, and their requests; an account that holds no piece (401, 403) reads
+   * the public sheet. A 404 says the model is not in the collection for this reader.
+   */
   private async fetch(): Promise<void> {
     this.load = { kind: 'loading' };
     this.render();
-    const slug = this.deps.slug;
+    const slug = this.slug;
     const signedIn = await signedInNow(this.deps.session);
     const extras = Promise.all([
       ownPieces(this.deps.api, this.deps.session, signedIn === true),
       this.deps.api.liveReleases().catch((): LiveCard[] => []),
       this.deps.api.drops().catch((): DropCard[] => []),
     ]);
-    let load: SheetLoad;
-    try {
-      load = slug === null ? { kind: 'missing' } : { kind: 'ready', sheet: sheetModel(await this.deps.api.lookbookSheet(slug)) };
-    } catch (e) {
+    let load: SheetLoad | null = null;
+    if (slug !== null && signedIn === true) {
+      const club = await this.fromClub(slug, { owner: true });
       if (this.disposed) return;
-      load = e instanceof ApiError && e.status === 404 ? await this.fromClub(slug!) : { kind: 'failed', message: messageOf(e) };
+      // Not an owner: the public sheet, as a visitor reads it.
+      if (club !== 'not-owner') load = club;
+    }
+    if (load === null) {
+      try {
+        load = slug === null ? { kind: 'missing' } : { kind: 'ready', sheet: sheetModel(await this.deps.api.lookbookSheet(slug)) };
+      } catch (e) {
+        if (this.disposed) return;
+        load = e instanceof ApiError && e.status === 404 ? { kind: 'missing' } : { kind: 'failed', message: messageOf(e) };
+      }
     }
     const [pieces, live, drops] = await extras;
     if (this.disposed) return;
@@ -378,16 +394,22 @@ class SheetPage {
     this.render();
   }
 
-  private async fromClub(slug: string): Promise<SheetLoad> {
+  /**
+   * The club's sheet (a PUBLIC model or one of the salon, with the variants of the salon the account's tier reaches and
+   * its requests). With `owner`, an account that holds no piece (403) or signed out meanwhile (401) answers
+   * 'not-owner': the public sheet is read instead.
+   */
+  private async fromClub(slug: string, opts: { owner?: boolean } = {}): Promise<SheetLoad | 'not-owner'> {
     try {
       const s = await this.deps.session.ensure();
-      if (s.status !== 'signed-in') return { kind: 'missing' };
+      if (s.status !== 'signed-in') return opts.owner ? 'not-owner' : { kind: 'missing' };
       const sheet = sheetModel(await this.deps.api.clubLookbookSheet(slug));
       // A model of the salon among its dots: the contact shown once it is requested (none configured: {}).
       if (sheet.salon || sheet.dots.some((d) => d.face.salon)) this.contacts = await this.deps.clientServices().catch(() => ({}));
       return { kind: 'ready', sheet };
     } catch (e) {
       this.deps.session.noteError(e);
+      if (opts.owner && e instanceof ApiError && !e.isNetwork && (e.status === 401 || e.status === 403)) return 'not-owner';
       // Not an owner (403), not shown (404), signed out meanwhile (401): the model is not in the collection for this reader.
       return e instanceof ApiError && !e.isNetwork && e.status < 500 && e.status !== 429 ? { kind: 'missing' } : { kind: 'failed', message: messageOf(e) };
     }
@@ -493,6 +515,8 @@ class SheetPage {
           if (this.load.kind !== 'ready' || slug === this.load.sheet.slug) return;
           this.requestError = null;
           this.load = { kind: 'ready', sheet: selectDot(this.load.sheet, slug) };
+          // A sign-in or sign-out meanwhile reads the sheet again: of the dot chosen, the address's.
+          this.slug = slug;
           this.deps.onVariant(slug);
           this.render();
           this.body.querySelector<HTMLElement>('.n-model__dots [aria-pressed="true"]')?.focus();
@@ -514,7 +538,14 @@ class SheetPage {
         'div',
         { class: 'n-nx__grow' },
         h('p', { class: 'n-g n-lb' }, n.kind),
-        h('p', { class: 'n-g n-t3 n-ivc n-num n-model__next-when' }, ...(n.variant ? [n.variant, ' '] : []), h('span', { class: 'n-nw' }, ...withNumerals(n.when))),
+        // Only the date and its hour are kept together (a date never parts from its hour): the words before them wrap.
+        h(
+          'p',
+          { class: 'n-g n-t3 n-ivc n-num n-model__next-when' },
+          ...(n.variant ? [n.variant, ' '] : []),
+          ...(n.when.lead ? [n.when.lead, ' '] : []),
+          h('span', { class: 'n-nw' }, ...withNumerals(n.when.at)),
+        ),
       ),
       icon('chev', { small: true }),
     );
@@ -583,7 +614,8 @@ class SheetPage {
       if (e instanceof ApiError && e.code === 'SHOP_REQUEST_OPEN') {
         // Already requested (from another tab or device, or the sheet was stale): the sheet read again says REQUESTED,
         // with the contact of ORBES Client Services, rather than a failure.
-        this.load = await this.fromClub(sheet.slug);
+        const again = await this.fromClub(sheet.slug);
+        this.load = again === 'not-owner' ? { kind: 'missing' } : again;
       } else {
         this.requestError = messageOf(e);
       }

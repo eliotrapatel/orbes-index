@@ -69,13 +69,14 @@ describe('a model\'s next release (NOCTURNE N6, C6)', () => {
       href: `/verify/releases/${ID(1)}`,
       kind: 'LIVE RELEASE',
       variant: 'IN BLUE,',
-      when: 'THURSDAY 21:00 PARIS',
+      when: { lead: null, at: 'THURSDAY 21:00 PARIS' },
     });
     // Its room open, then live: its kind says so (no countdown on the row).
     expect(nextRelease(SLUGS, [live({ phase: 'ROOM' })], [], NOW)!.kind).toBe('LIVE RELEASE · THE ROOM IS OPEN');
     expect(nextRelease(SLUGS, [live({ phase: 'LIVE' })], [], NOW)!.kind).toBe('LIVE RELEASE · LIVE NOW');
-    // Six days ahead or more: its date too, never a weekday that could be this one's or next week's.
-    expect(nextRelease(SLUGS, [live({ opensAt: '2026-10-22T19:00:00Z' })], [], NOW)!.when).toBe('THURSDAY 22 OCTOBER · 21:00 PARIS');
+    // Six days ahead or more: its date too, never a weekday that could be this one's or next week's. The weekday may
+    // wrap; the date never parts from its hour.
+    expect(nextRelease(SLUGS, [live({ opensAt: '2026-10-22T19:00:00Z' })], [], NOW)!.when).toEqual({ lead: 'THURSDAY', at: '22 OCTOBER · 21:00 PARIS' });
     // A model without variants: no variant named.
     expect(nextRelease(['orbe'], [live({ lookbook: 'orbe', variant: null })], [], NOW)!.variant).toBeNull();
   });
@@ -88,9 +89,12 @@ describe('a model\'s next release (NOCTURNE N6, C6)', () => {
       href: `/verify/releases/${ID(2)}`,
       kind: 'DRAW · ENTRIES OPEN',
       variant: 'IN STEEL,',
-      when: 'ENTRIES CLOSE 11 OCT 2026 · 18:00 UTC',
+      when: { lead: 'ENTRIES CLOSE', at: '11 OCT 2026 · 18:00 UTC' },
     });
-    expect(nextRelease(SLUGS, [], [draw({ state: 'UPCOMING', opensAt: '2026-10-09T10:00:00Z' })], NOW)).toMatchObject({ kind: 'DRAW · ENTRIES OPEN SOON', when: 'ENTRIES OPEN 9 OCT 2026 · 10:00 UTC' });
+    expect(nextRelease(SLUGS, [], [draw({ state: 'UPCOMING', opensAt: '2026-10-09T10:00:00Z' })], NOW)).toMatchObject({
+      kind: 'DRAW · ENTRIES OPEN SOON',
+      when: { lead: 'ENTRIES OPEN', at: '9 OCT 2026 · 10:00 UTC' },
+    });
     expect(nextRelease(SLUGS, [], [draw({ state: 'UPCOMING', opensAt: '2026-10-09T10:00:00Z', earlyAccessHours: 48, earlyAccessOpensAt: '2026-10-07T10:00:00Z', earlyAccessOpen: true })], NOW)!.kind).toBe(
       'DRAW · EARLY ACCESS',
     );
@@ -105,7 +109,14 @@ describe('a model\'s next release (NOCTURNE N6, C6)', () => {
   });
 
   it('writes in the lexicon', () => {
-    const words = [LOOKBOOK.next.variant('Blue'), LOOKBOOK.next.week('THURSDAY', '21:00'), LOOKBOOK.next.opens('9 OCT 2026 · 10:00'), LOOKBOOK.next.closes('11 OCT 2026 · 18:00')].join('\n');
+    const words = [
+      LOOKBOOK.next.variant('Blue'),
+      LOOKBOOK.next.week('THURSDAY', '21:00'),
+      LOOKBOOK.next.dated('22 OCTOBER', '21:00'),
+      LOOKBOOK.next.opens,
+      LOOKBOOK.next.closes,
+      LOOKBOOK.next.utc('9 OCT 2026 · 10:00'),
+    ].join('\n');
     expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
     expect(words).not.toContain('!');
   });

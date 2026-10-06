@@ -307,6 +307,40 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
     expect([1, 2, 3].map((t) => salon({ minTier: t })!.tier)).toEqual([...SERVER_TIER_NAMES]);
   });
 
+  it('gives a PUBLIC sheet read through the club the dot of its variant in the salon: its price, its tier and the account\'s open request (N6)', () => {
+    const base = sheet();
+    const variant = (slug: string, label: string, extra: Partial<NonNullable<LookbookSheet['variants']>[number]> = {}) => ({
+      slug,
+      label,
+      swatch: '#16224A',
+      selected: false,
+      lookbook: 'PUBLIC' as const,
+      name: base.name,
+      type: base.type,
+      collection: base.collection,
+      coverUrl: null,
+      gallery: [],
+      specs: [],
+      care: null,
+      discontinuedYear: null,
+      ...extra,
+    });
+    const s = sheetModel(
+      sheet({
+        variant: { label: 'Dawn', swatch: '#9D9B96' },
+        variants: [
+          variant('monolithe', 'Dawn', { selected: true }),
+          variant('monolithe-night', 'Night', { lookbook: 'RESERVED', salon: { priceLabel: '€ 6 200', minTier: 1, request: { id: 'r-2', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z' } } }),
+        ],
+      }),
+    );
+    // The public model itself: no salon on its face; its dot of the salon carries its own.
+    expect(s.salon).toBeNull();
+    expect(s.dots.map((d) => d.slug)).toEqual(['monolithe', 'monolithe-night']);
+    expect(selectDot(s, 'monolithe-night')).toMatchObject({ slug: 'monolithe-night', reserved: true, salon: { price: '€ 6 200', tier: 'TITANE', request: { id: 'r-2' } } });
+    expect(selectDot(selectDot(s, 'monolithe-night'), 'monolithe').salon).toBeNull();
+  });
+
   it('writes to ORBES Client Services about a request: the model in the subject, the model and the request in the body', () => {
     const c = salonContactModel({ email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Friday' }, 'ECLIPSE', 'r-1');
     expect(c).toMatchObject({ placement: 'salon', phone: { label: '+33 1 23 45 67 89', href: 'tel:+33123456789' }, hours: 'Monday to Friday' });
