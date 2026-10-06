@@ -57,7 +57,9 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
   it('grounds the scanner in the ink token #0A0A0A, never pure black', () => {
     expect(tokens['--ink']).toBe('#0a0a0a');
     expect(rule(styles, 'body[data-screen="scan"]').background).toBe('var(--ink)');
-    expect(rule(styles, '.view--scan').background).toBe('var(--ink)');
+    // The scanner (NOCTURNE, C11) stands on the canvas's camera ground, #050505: near the ink, never pure black.
+    expect(rule(styles, '.n-cam').background).toBe('var(--n-camera)');
+    expect(tokens['--n-camera']).toBe('#050505');
     expect(styles).not.toMatch(/#000(000)?\b|\bblack\b|rgba?\(\s*0\s*,\s*0\s*,\s*0\b/i);
   });
 
@@ -68,7 +70,8 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
       const inks = new Set([...markup!.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]).filter((v) => v !== 'none'));
       expect([...inks], layout).toEqual([ORBES_CODE_STYLES.ivory.ink]);
     }
-    expect(rule(styles, '.result__genome').background).toBe('var(--ivory)');
+    // The shared certificate's écrin (MY PIECES' plate) keeps the ivory paper the code is printed on.
+    expect(rule(styles, '.piece__plate').background).toBe('var(--ivory)');
     expect(tokens['--ivory']?.toLowerCase()).toBe(ORBES_CODE_STYLES.ivory.paper.toLowerCase());
     // On a collector's screen (a result, a piece, the ceremony): the ink of the ground's text, --vault-ink.
     expect(GENOME_SCREEN_INK).toBe(tokens['--vault-ink']);
@@ -76,17 +79,16 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect([...new Set([...screen.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]).filter((v) => v !== 'none'))]).toEqual([GENOME_SCREEN_INK]);
   });
 
-  it('sets each piece of MY PIECES in its écrin: the GENOME plate of a result (ivory, the same margins), the same orbit (F-01)', () => {
-    const plate = rule(styles, '.piece__plate');
-    const genome = rule(styles, '.result__genome');
-    for (const k of ['background', 'color', 'padding', 'text-align']) expect(plate[k], k).toBe(genome[k]);
-    expect(rule(styles, '.piece__plate .bracket').color).toBe(rule(styles, '.result__genome .bracket').color);
+  it('sets each piece of MY PIECES in its écrin: the GENOME plate a result had before NOCTURNE (ivory, the same margins), the same orbit (F-01)', () => {
+    // A result draws its GENOME on the ground (NOCTURNE, C9); MY PIECES keeps the plate until its own step (N5).
+    expect(rule(styles, '.piece__plate')).toMatchObject({ background: 'var(--ivory)', color: 'var(--ink)', padding: '34px 22px 28px', 'text-align': 'center' });
+    expect(rule(styles, '.piece__plate .bracket').color).toBe('var(--hairline-strong)');
     const pieces = readFileSync(join(WEB, 'verify/views/pieces.ts'), 'utf8');
     expect(pieces).toContain("bracket(\n");
     expect(pieces).toContain("genomeBlock(this.model.genome, { titleId })");
-    // The column of a result.
-    expect(rule(styles, '.view--pieces')['max-width']).toBe(rule(styles, '.view--result')['max-width']);
-    expect(rule(styles, '.view--pieces').padding).toBe(rule(styles, '.view--result').padding);
+    // The column of the shared certificate.
+    expect(rule(styles, '.view--pieces')['max-width']).toBe(rule(styles, '.view--certificate')['max-width']);
+    expect(rule(styles, '.view--pieces').padding).toBe(rule(styles, '.view--certificate').padding);
   });
 
   it('sets the piece of an ownership certificate in the same écrin, in the column of a result, titled like MY PIECES (F-06)', () => {
@@ -97,24 +99,23 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect(view).toContain('bracket(\n');
     // No rule of its own restyles the plate: it is the écrin of MY PIECES as it is.
     expect(rules(styles).filter((r) => r.selectors.some((s) => s.includes('certificate__plate')))).toEqual([]);
-    expect(rule(styles, '.view--certificate')['max-width']).toBe(rule(styles, '.view--result')['max-width']);
-    expect(rule(styles, '.view--certificate').padding).toBe(rule(styles, '.view--result').padding);
+    expect(rule(styles, '.view--certificate')['max-width']).toBe('560px');
+    expect(rule(styles, '.view--certificate').padding).toBe('calc(60px + var(--safe-top)) 32px calc(64px + var(--safe-bottom))');
     for (const k of ['font-size', 'font-weight', 'letter-spacing', 'text-indent']) expect(rule(styles, '.certificate__title')[k], k).toBe(rule(styles, '.pieces__title')[k]);
     // One hairline button per screen (§3.8): DOWNLOAD PDF on a valid certificate, SCAN ORBES CODE otherwise.
     expect(view).toContain("class: 'btn certificate__pdf'");
     expect(view).toContain("this.scanButton('textlink')");
-    // The link just created in MY PIECES sits on ivory, like a transfer code.
-    expect(rule(styles, '.certificate-link').background).toBe(rule(styles, '.transfer-code').background);
+    // The link just created in MY PIECES sits on ivory.
+    expect(rule(styles, '.certificate-link').background).toBe('var(--ivory)');
   });
 
-  it('sets the customer-quotable reference (VERIFIED · REF) at ≥ 10 px in a readable tone', () => {
-    const meta = rule(styles, '.result__meta');
-    const px = Number.parseFloat(resolve(meta['font-size']));
-    expect(px).toBeGreaterThanOrEqual(10);
-    // Not the 8 px .nano utility class, and in --ink-soft (6.7 : 1), not --metal.
-    const cls = /class: 'result__meta([^']*)'/.exec(resultView)?.[1] ?? '';
-    expect(cls).not.toMatch(/\bnano\b/);
-    expect(meta.color ?? 'var(--ink-soft)').toMatch(/--ink-soft|--ink\b/);
+  it('sets the customer-quotable reference (VERIFIED · REF) as the canvas does: its label in ash, its value in ivory in the reading face', () => {
+    // C9: VERIFIED and REF are labels (.lb, 9.5 px, ash: 7.8 : 1), each value in ivory (17.7 : 1), never the 8 px .nano.
+    expect(resultView).toContain("h('span', { class: 'n-g n-lb n-result__meta-item' }, `${label} `, h('span', { class: 'n-num n-ivc n-result__meta-value', text: value }))");
+    expect(resultView).not.toMatch(/\bnano\b/);
+    expect(rule(styles, '.n-result__meta-value')).toMatchObject({ 'font-family': 'var(--font)', 'letter-spacing': '0.04em' });
+    expect(rule(styles, '.n-lb').color).toBe('var(--vault-soft)');
+    expect(rule(styles, '.n-ivc').color).toBe('var(--vault-ink)');
   });
 
   it('draws the tab icon from the monogram, in ink on a white disc (BRAND §3.5, §3.9)', () => {
@@ -181,11 +182,14 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     '.n-account__close',
     '.n-acct',
     '.n-btn',
+    '.n-cam__control',
     '.n-chips__option',
     '.n-crumb',
     '.n-dbip',
     '.n-fl__link',
     '.n-opt2__option',
+    '.n-own__link',
+    '.n-own__terms-link',
     '.n-rail__link',
     '.n-row',
     '.n-scan__ring',
@@ -199,18 +203,20 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     '.n-vsel__option',
   ];
   /**
-   * The rulebook sets four controls at 9.5 px (build.py: `.acct`, `.rail a`, `.dbip`, `.banner`): the account button, the
-   * rail's chapters, DB-IP's attribution and the banner of the LIVE RELEASES, validated by the owner on the canvas (who
+   * The rulebook sets five controls at 9.5 px (build.py: `.acct`, `.rail a`, `.dbip`, `.banner`, and n.py's account line):
+   * the account button, the rail's chapters, DB-IP's attribution, the banner of the LIVE RELEASES and the OWNERSHIP
+   * panel's MY PIECES and SIGN OUT, validated by the owner on the canvas (who
    * declined larger labels). Their 44 px zones are measured in the page (test/support/tap-zones.ts,
    * test/web/nocturne.styles.e2e.test.ts, test/web/verify.live-announce.e2e.test.ts). The banner keeps the house's rule
    * for a screen out of NOCTURNE; NOCTURNE's size is its `body.nocturne` rule's (RULEBOOK_RULE).
    */
-  const RULEBOOK_TYPE: Readonly<Record<string, number>> = { '.n-acct': 9.5, '.n-rail__link': 9.5, '.n-dbip': 9.5, '.live-banner': 9.5 };
-  const RULEBOOK_RULE: Readonly<Record<string, string>> = { '.live-banner': 'body.nocturne .live-banner' };
+  const RULEBOOK_TYPE: Readonly<Record<string, number>> = { '.n-acct': 9.5, '.n-rail__link': 9.5, '.n-dbip': 9.5, '.live-banner': 9.5, '.n-own__link': 9.5 };
+  // MY PIECES and SIGN OUT take the account line's label size (.lb, n.py account_line(): C14).
+  const RULEBOOK_RULE: Readonly<Record<string, string>> = { '.live-banner': 'body.nocturne .live-banner', '.n-own__link': '.n-lb' };
   const legacy = interactive.filter((sel) => !sel.startsWith('.n-'));
 
   it('finds every control of the app by its pointer', () => {
-    expect(legacy).toEqual(['.auth__option', '.btn', '.scan__control', '.tabs__tab', '.textlink']);
+    expect(legacy).toEqual(['.auth__option', '.btn', '.tabs__tab', '.textlink']);
     expect(interactive.filter((sel) => sel.startsWith('.n-'))).toEqual(NOCTURNE_CONTROLS);
   });
 
@@ -236,8 +242,9 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
         for (const p of ['min-height', 'height', 'max-height']) if (r.decls[p]) expect(px(r.decls[p]), where).toBeGreaterThanOrEqual(44);
       }
     }
-    // The zoom shows two characters: its zone is at least as wide as it is high.
-    expect(px(rule(styles, '.scan__control')['min-width'])).toBeGreaterThanOrEqual(44);
+    // The scanner's LIGHT and zoom (C11): 44 px high; the zoom shows two characters, its zone at least as wide.
+    expect(px(rule(styles, '.n-cam__control').height)).toBe(44);
+    expect(px(rule(styles, '.n-cam__zoom')['min-width'])).toBeGreaterThanOrEqual(44);
   });
 
   it('lets no class the views put on a button or a link take it under either floor', () => {
@@ -249,7 +256,7 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
       ...new Set(sources.flatMap((src) => [...src.matchAll(/h\(\s*'(?:button|a)',\s*\{\s*class:\s*'([^']+)'/g)].flatMap((m) => m[1].split(/\s+/)))),
     ].sort();
     expect(classes).toEqual(
-      expect.arrayContaining(['auth__option', 'btn', 'btn--block', 'contact__email', 'contact__phone', 'landing__scan', 'landing__upload', 'scan__close', 'scan__control', 'scan__zoom', 'tabs__tab', 'textlink']),
+      expect.arrayContaining(['auth__option', 'btn', 'btn--block', 'contact__email', 'contact__phone', 'landing__scan', 'landing__upload', 'n-cam__close', 'n-cam__light', 'n-cam__zoom', 'textlink']),
     );
     for (const cls of classes) {
       for (const r of about(`.${cls}`)) {
@@ -266,8 +273,6 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     // switch beside a sign-in option.
     const RINGS: Record<string, string> = {
       '.textlink': '0 -4px',
-      '.scan__control': '0 -4px',
-      '.scan__control.scan__zoom': '0 7px',
       '.tabs__tab': '1px calc(var(--tab-pad) - 2px) -2px',
       '.auth__option': '4px -4px',
     };
@@ -275,7 +280,7 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
       const ring = all.filter((r) => r.selectors.includes(`${sel}:focus-visible::before`));
       expect(ring.at(-1)?.decls.inset, sel).toBe(inset);
     }
-    for (const sel of ['.textlink', '.scan__control', '.tabs__tab', '.auth__option']) {
+    for (const sel of ['.textlink', '.tabs__tab', '.auth__option']) {
       expect(all.some((r) => r.selectors.includes(`${sel}:focus-visible`) && r.decls.outline === 'none'), sel).toBe(true);
       const ring = all.find((r) => r.selectors.includes(`${sel}:focus-visible::before`))!;
       expect(ring.decls, sel).toMatchObject({ content: '""', position: 'absolute', outline: '1px solid currentColor', 'pointer-events': 'none' });
@@ -284,21 +289,23 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     }
   });
 
-  it('keeps the hairline button for the primary action: the contact of ORBES Client Services is a text link', () => {
-    // A result draws one .btn of its own, the foot's SCAN AGAIN or SCAN ANOTHER; the contact, under
-    // the help line or in the WARRANTY tab, is a secondary action beside it (§3.8, §4.2).
-    const btns = (f: string) => [...readFileSync(join(WEB, 'verify', f), 'utf8').matchAll(/class: '([^']*)'/g)].filter((m) => m[1].split(' ').includes('btn')).length;
-    expect(['views/result.ts', 'views/common.ts', 'views/panels.ts', 'views/tabs.ts'].map(btns)).toEqual([1, 0, 0, 0]);
-    expect(readFileSync(join(WEB, 'verify/views/common.ts'), 'utf8')).toContain("class: 'textlink contact__email'");
-    // No rule restyles it: it takes the text link's 10 px, tracking and 44 px zone as they are.
-    expect(about('.contact__email')).toEqual([]);
-    // WHERE DID YOU SEE OR BUY THIS PIECE? (under the contact) has no hairline button either: its answers are
-    // pressed like the sign-in switch, and SEND is a text link.
+  it('keeps the hairline button for the foot of a result: the contact of ORBES Client Services is a link', () => {
+    // A result draws one button of its own, the foot's SCAN AGAIN or SCAN ANOTHER, a hairline button (C9, C15, C16);
+    // the contact, under the help line or in the WARRANTY tab, is a link beside it (§3.8, §4.2), as the canvas draws it.
+    const buttons = (f: string) => (readFileSync(join(WEB, 'verify', f), 'utf8').match(/\bbutton\(/g) ?? []).length;
+    expect(['views/result.ts', 'views/panels.ts', 'views/tabs.ts'].map(buttons)).toEqual([1, 0, 0]);
+    expect(resultView).toContain("button(vm.tone === 'authentic' ? 'SCAN ANOTHER' : 'SCAN AGAIN', { outline: true,");
+    const pieces = readFileSync(join(WEB, 'verify/views/nocturne.ts'), 'utf8');
+    expect(pieces).toContain("h('a', { class: 'n-g n-contact__email', attrs: { href: c.mailto }, text: labels.action })");
+    // Its 44 px zone is padding given back (the email's upward, the phone's downward): the lines stand where the canvas sets them.
+    expect(rule(styles, '.n-contact__email')).toMatchObject({ 'margin-top': '-28.25px', 'padding-top': '28.25px' });
+    expect(rule(styles, '.n-contact__phone')).toMatchObject({ 'margin-bottom': '-24.5px', 'padding-bottom': '24.5px' });
+    // WHERE DID YOU SEE OR BUY THIS PIECE? (under the contact): its answers pressed two by two (.opt2), SEND ANSWER a
+    // hairline button (C15), never the ivory one.
     const report = readFileSync(join(WEB, 'verify/views/report.ts'), 'utf8');
-    expect(btns('views/report.ts')).toBe(0);
-    expect(report).toContain("class: 'auth__option report__channel'");
-    expect(report).toContain("class: 'textlink report__send'");
-    expect(about('.report__send')).toEqual([]);
+    expect(buttons('views/report.ts')).toBe(1);
+    expect(report).toContain("class: 'n-g n-opt2__option n-report__channel'");
+    expect(report).toContain('button(REPORT.send, { outline: true, type: \'submit\'');
   });
 
   it('draws text links at 80 % ink at rest (11 : 1 on white), no longer 62 %', () => {
@@ -312,11 +319,16 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     // transfer code's labels and validity, the signed-in account, the GENOME fingerprint.
     const views = ['views/ownership.ts', 'views/pieces.ts', 'views/certificate.ts', 'views/now.ts', 'views/scanning.ts', 'views/result.ts', 'views/message.ts', 'views/panels.ts', 'views/tabs.ts', 'genome-view.ts', 'main.ts'];
     const classes = views.flatMap((f) => [...readFileSync(join(WEB, 'verify', f), 'utf8').matchAll(/class: '([^']+)'/g)].map((m) => m[1]));
-    for (const line of ['ownership__meta', 'transfer-code__label', 'certificate-link__label', 'certificate__footnote', 'ownership__who', 'genome__meta']) {
+    for (const line of ['ownership__meta', 'certificate-link__label', 'certificate__footnote', 'ownership__who', 'genome__meta']) {
       const set = classes.filter((c) => c.split(' ').includes(line) && !c.split(' ').includes('prose'));
       expect(set.length, line).toBeGreaterThan(0);
       for (const c of set) expect(c.split(' '), c).toContain('micro');
     }
+    // The OWNERSHIP panel of a result (NOCTURNE, C9, C14, C37) sets these lines as the canvas does: labels (.lb).
+    const ownership = readFileSync(join(WEB, 'verify/views/ownership.ts'), 'utf8');
+    expect(ownership).toContain("class: ['n-g', 'n-lb', 'n-num', ivory ? 'n-ivc' : null, 'n-own__until']");
+    expect(ownership).toContain("class: 'n-g n-lb n-own__code-label', text: 'TRANSFER CODE'");
+    expect(ownership).toContain("class: 'n-g n-lb n-own__account'");
     // The 8 px .nano class is left to decoration: no view sets it now (the landing's © ORBES · GENOME CODE · PARIS
     // gave way to NOCTURNE's footer, whose © ORBES · PARIS is 9 px, in ash).
     expect(classes.filter((c) => c.split(' ').includes('nano'))).toEqual([]);
@@ -386,11 +398,11 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.n-g', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.pieces__order-title', '.pieces__order-step-label', '.pieces__order-documents-title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option', '.ceremony__name', '.ceremony__collection', '.live__surprise', '.question__label', '.question__release', '.question__text'];
+  const VERIFY_DISPLAY = ['.n-g', '.pieces__title', '.pieces__order-title', '.pieces__order-step-label', '.pieces__order-documents-title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.auth__option', '.live__surprise', '.question__label', '.question__release', '.question__text'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
-  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.photos__note', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.certificate__lead', '.certificate__note', '.certificate-link__value', '.certificate-link__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours', '.pieces__benefit', '.n-tx', '.n-sm', '.n-lead', '.n-art', '.n-cd__value', '.n-fld__input', '.pieces__order-step-date', '.pieces__order-care-text', '.question__note'];
+  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.photos__note', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.certificate__lead', '.certificate__note', '.certificate-link__value', '.certificate-link__label', '.n-cam__zoom', '.n-own__code', '.n-own__email', '.n-gen__fp', '.n-result__meta-value', '.n-contact__phone', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours', '.pieces__benefit', '.n-tx', '.n-sm', '.n-lead', '.n-art', '.n-cd__value', '.n-fld__input', '.pieces__order-step-date', '.pieces__order-care-text', '.question__note'];
   const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__eyebrow', '.dialog__title', '.cfield__phrase', '.page-head__title--id', '.side__who', '.side__role'];
 
   it('sets the wordmark, titles and tracked-capital labels of both apps in the display face', () => {
@@ -415,14 +427,14 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
 
   it('sets a figure in the reading face where a display role may show one (Gravesend\'s one is its capital I)', () => {
     // The overrides come after the display rule of their stylesheet, so they win at equal specificity.
-    for (const [css, selector] of [[styles, '.scan__zoom'], [styles, '.contact__phone'], [adminStyles, '.page-head__title--id'], [adminStyles, '.cfield__phrase']] as const) {
+    for (const [css, selector] of [[styles, '.n-cam__zoom'], [styles, '.contact__phone'], [adminStyles, '.page-head__title--id'], [adminStyles, '.cfield__phrase']] as const) {
       const all = rules(css);
       const at = all.findIndex((r) => r.selectors.includes(selector));
       expect(all[at]?.decls['font-family'], selector).toBe('var(--font)');
       expect(at, selector).toBeGreaterThan(all.findIndex((r) => r.decls['font-family'] === 'var(--font-display)'));
     }
     // The zoom control (1×, 2×), the phone of ORBES Client Services and every console page titled with a product id use them.
-    expect(readFileSync(join(WEB, 'verify/views/scanning.ts'), 'utf8')).toContain("class: 'scan__control scan__zoom'");
+    expect(readFileSync(join(WEB, 'verify/views/scanning.ts'), 'utf8')).toContain("class: 'n-num n-cam__control n-cam__zoom'");
     expect(readFileSync(join(WEB, 'verify/views/common.ts'), 'utf8')).toContain("class: 'textlink contact__phone'");
     for (const view of ['product', 'generator']) {
       const src = readFileSync(join(WEB, `admin/views/${view}.ts`), 'utf8');
@@ -477,14 +489,14 @@ describe('verify app: the monogram beside the word ORBES (BRAND-DESIGN-SYSTEM §
   });
 
   it('keeps the word ORBES typed, in the display face, wherever it was: the emblem never replaces it', () => {
-    const views = { 'views/result.ts': 'wordmark wordmark--small result__wordmark', 'views/scanning.ts': 'wordmark wordmark--small scan__wordmark' };
-    for (const [file, cls] of Object.entries(views)) {
-      expect(readFileSync(join(WEB, 'verify', file), 'utf8'), file).toMatch(new RegExp(`class: '${cls}'[^)]*text: 'ORBES'`));
-    }
+    // The scanner, VERIFYING… and a problem of the scan type it in their own header (cameraHeader, C11, C17); a result
+    // has NOCTURNE's header (views/shell.ts), its ORBES typed.
+    expect(readFileSync(join(WEB, 'verify/views/scanning.ts'), 'utf8')).toMatch(/class: 'n-g n-wm n-cam__wordmark'[^)]*text: 'ORBES'/);
+    for (const file of ['views/verifying.ts', 'views/message.ts']) expect(readFileSync(join(WEB, 'verify', file), 'utf8'), file).toContain('cameraHeader()');
     expect(displaySelectors(brand)).toContain('.wordmark');
     // The result and the scanner keep the word alone: they draw no emblem of their own (NOCTURNE's header sets the
     // monogram beside its typed ORBES, decision 11, and the GENOME's orbit holds it at its centre, decision 12).
-    for (const file of ['views/result.ts', 'views/scanning.ts']) expect(readFileSync(join(WEB, 'verify', file), 'utf8'), file).not.toMatch(/monogramSvg|monogram\(/);
+    for (const file of ['views/result.ts', 'views/scanning.ts', 'views/verifying.ts', 'views/message.ts']) expect(readFileSync(join(WEB, 'verify', file), 'utf8'), file).not.toMatch(/monogramSvg|monogram\(/);
     expect(shell).toContain("h('span', { class: 'n-g n-wm', text: 'ORBES' })");
   });
 });
@@ -512,7 +524,10 @@ describe('verify app: the GENOME in its orbit, as on the piece (BRAND-DESIGN-SYS
     expect(screen.match(/data-layer="genome"/g)).toHaveLength(CODE01.genome.count);
     expect(screen.slice(screen.indexOf('data-layer="monogram"')).match(/<path /g)!.length).toBeGreaterThanOrEqual(MONOGRAM_PATHS.length);
     // Every screen that draws a piece's GENOME uses the block: a result and its ceremony, MY PIECES; the certificate keeps the seal.
-    expect(resultView).toContain('genomeBlock(vm.genome)');
+    expect(resultView).toContain('nocturneGenome(vm.genome, { size: ceremony ? 220 : 200, extraClass: \'n-result__genome\' })');
+    const nocturneBlock = view.slice(view.indexOf('export function nocturneGenome'));
+    expect(nocturneBlock).toContain("genomeRow(m, { layout: 'orbit', centre: 'monogram', ink: GENOME_SCREEN_INK })");
+    expect(nocturneBlock).toContain("figure.classList.add('n-glow')");
     expect(readFileSync(join(WEB, 'verify/views/pieces.ts'), 'utf8')).toContain('genomeBlock(this.model.genome, { titleId })');
   });
 
@@ -528,24 +543,31 @@ describe('verify app: the GENOME in its orbit, as on the piece (BRAND-DESIGN-SYS
     // 390 px phone: 64vw = 249.6 px; the smallest phone in use (320 px) still draws 34 px glyphs.
     expect(glyphPx(0.64 * 390)).toBeGreaterThan(41);
     expect(glyphPx(0.64 * 320)).toBeGreaterThan(12);
-    // The ivory plate keeps its margins (§2.5: 34 / 22 / 28 px).
-    expect(rule(styles, '.result__genome').padding).toBe('34px 22px 28px');
-    expect(rule(styles, '.result__genome')['margin-top']).toBe('52px');
+    // A result's (NOCTURNE, C9): a 200 px square (220 px in the ceremony, C36), glyphs of about 33 px; 48 px under the
+    // message, as the canvas sets it.
+    expect(rule(styles, '.n-gen__figure')).toMatchObject({ width: '200px', height: '200px' });
+    expect(rule(styles, '.n-gen__figure--220')).toMatchObject({ width: '220px', height: '220px' });
+    expect(rule(styles, '.n-gen__figure .genome-svg')).toMatchObject({ width: '100%', height: '100%' });
+    expect(glyphPx(200)).toBeGreaterThan(12);
+    expect(rule(styles, '.n-result__genome')['margin-top']).toBe('48px');
   });
 });
 
 describe('verify app: the photographs of an authentic piece (F-04)', () => {
   const photosView = readFileSync(join(WEB, 'verify/views/photos.ts'), 'utf8');
 
-  it('sets them at the head of the result, above the GENOME, on an ivory plate framed like it', () => {
+  it('sets THE MODEL\'s photograph under the GENOME of a result, full width, whole, without the fade, captioned (C9, decision 9)', () => {
     const at = (needle: string) => resultView.indexOf(needle);
-    expect(at('sections.push(photoPlate(vm.photos), plate);')).toBeGreaterThan(at("class: 'result__genome'"));
-    // Only the ceremony of a first registration (P-D01) opens on the GENOME, the photographs under it.
-    expect(at('if (ceremony && plate) {')).toBeLessThan(at('sections.push(plate, photoPlate(vm.photos));'));
-    expect(at('sections.push(plate, photoPlate(vm.photos));')).toBeLessThan(at('} else {\n    // At the head of an authentic result, above the GENOME'));
-    expect(at('} else {\n    // At the head of an authentic result, above the GENOME')).toBeLessThan(at('sections.push(photoPlate(vm.photos), plate);'));
+    // The GENOME first, then the photograph (C9), the ceremony's GENOME too (C36).
+    expect(at('sections.push(genome, modelPhoto(vm.photos));')).toBeGreaterThan(at('nocturneGenome(vm.genome'));
+    expect(resultView).toContain("fadedPhoto(photo.src, photo.alt, { fade: false, eager: true, extraClass: 'n-result__photo' })");
+    expect(resultView).toContain("h('span', { class: 'n-g n-lb n-result__caption', text: photo.caption })");
+    expect(resultView).toContain("h('p', { class: 'n-px n-sm n-result__photo-note', text: PHOTOS.note(1) })");
+    // Shown whole (contain), never cropped; 48 px under the GENOME, as the GENOME under the message.
+    expect(rule(styles, '.n-ph--contain > img')['object-fit']).toBe('contain');
+    expect(rule(styles, '.n-result__model')['margin-top']).toBe(rule(styles, '.n-result__genome')['margin-top']);
+    // MY PIECES keeps the ivory plate until its own step (N5).
     expect(rule(styles, '.photos__plate').background).toBe('var(--ivory)');
-    expect(rule(styles, '.result__photos')['margin-top']).toBe(rule(styles, '.result__genome')['margin-top']);
     expect(photosView).toContain("bracket(h('div', { class: ['photos__plate'");
   });
 
@@ -555,7 +577,7 @@ describe('verify app: the photographs of an authentic piece (F-04)', () => {
     expect(at("photoPlate(this.model.photos, { extraClass: 'piece__photos'")).toBeGreaterThan(0);
     expect(at("{ class: 'piece', attrs: { 'aria-labelledby': titleId } }, plate, photos, lines, tabs.root)")).toBeGreaterThan(0);
     expect(rule(styles, '.piece__photos')['margin-top']).toBe(rule(styles, '.piece__lines')['margin-top']);
-    // The result's rule sets the plate's distance first; MY PIECES' own one comes later in the sheet, so it wins.
+    // The plate's own rule sets its distance first; MY PIECES' own one comes later in the sheet, so it wins.
     expect(styles.indexOf('.piece__photos {')).toBeGreaterThan(styles.indexOf('.result__photos {'));
   });
 
@@ -622,15 +644,16 @@ describe('verify app: the lexicon of BRAND-DESIGN-SYSTEM §4.5, and the second-h
 
   it('puts the sentence in the result\'s notice and its link under it, a text link (the hairline button stays the foot\'s)', () => {
     const at = (needle: string) => resultView.indexOf(needle);
-    expect(at("class: 'result__notice'")).toBeGreaterThan(0);
-    expect(at("class: 'textlink result__notice-link'")).toBeGreaterThan(at("class: 'result__notice'"));
-    // It takes the text link's 10 px, tracking and 44 px zone as they are: only its distance to the notice is set.
-    expect(Object.keys(rule(styles, '.result__notice-link'))).toEqual(['margin-top']);
+    // C13: the sentence in ivory, then I HAVE A TRANSFER CODE, a text link (.tl) 16 px under it.
+    expect(at("class: 'n-tx n-ivc n-result__notice'")).toBeGreaterThan(0);
+    expect(at("textLink(vm.noticeLink.label, { onOpen: () => openNoticeLink(vm.noticeLink!.tab), extraClass: 'n-result__notice-link' })")).toBeGreaterThan(at("class: 'n-tx n-ivc n-result__notice'"));
+    expect(rule(styles, '.n-result__notice-line')['margin-top']).toBe('16px');
+    expect(rules(styles).filter((r) => r.selectors.includes('.n-result__notice-link'))).toEqual([]);
     // RECEIVING THIS PIECE, where it leads, is a heading focused on purpose: no ring (§3.8).
     const ownershipView = readFileSync(join(WEB, 'verify/views/ownership.ts'), 'utf8');
-    expect(ownershipView).toContain('sectionLabel(RECEIVING.title, RECEIVING_ID)');
+    expect(ownershipView).toContain('this.heading(RECEIVING.title, RECEIVING_ID)');
     expect(verifyCopy.RECEIVING.title).toBe('RECEIVING THIS PIECE');
-    expect(styles).toMatch(/\.section-label\[tabindex="-1"\]:focus/);
+    expect(styles).toMatch(/\.n-own__heading\[tabindex="-1"\]:focus/);
   });
 });
 
@@ -642,7 +665,7 @@ describe('verify app: the ceremony of a first registration (P-D01)', () => {
   it('is asked for by VIEW AS OWNER after a first registration only, through retryVerify to the result', () => {
     const block = ownershipView.slice(ownershipView.indexOf('private confirmationBlock'), ownershipView.indexOf('private accountLine'));
     expect(block).toContain("const ceremony = c.via === 'register';");
-    expect(block).toContain('on: { click: () => refresh({ ceremony }) }, text: \'VIEW AS OWNER\'');
+    expect(block).toContain("this.action('VIEW AS OWNER', () => refresh({ ceremony }),");
     expect(mainSrc).toContain('onRefresh: (opts) => void this.retryVerify(input, opts?.ceremony === true)');
     expect(mainSrc).toContain('await this.verify(input, gen, ceremony);');
     expect(mainSrc).toContain('resultViewModel(outcome, { offsetMinutes: -new Date().getTimezoneOffset(), clientServices, receivedAt, ceremony })');
@@ -654,17 +677,17 @@ describe('verify app: the ceremony of a first registration (P-D01)', () => {
   it('reveals the glyphs group by group (layer genome, --i set through the CSSOM), then the names, unless motion is reduced', () => {
     expect(resultView).toContain(".genome-svg g[data-layer=\"genome\"]').forEach((g, i) => g.style.setProperty('--i', String(i)))");
     expect(resultView).toMatch(/if \(!prefersReducedMotion\(\)\) \{\n\s*\/\/[^\n]*\n\s*root\.classList\.add\('is-ceremony'\);/);
-    const glyph = rule(styles, '.is-ceremony .genome-svg g[data-layer="genome"]');
+    const glyph = rule(styles, '.is-ceremony .n-gen .genome-svg g[data-layer="genome"]');
     expect(glyph).toMatchObject({ 'transform-box': 'fill-box', 'transform-origin': 'center', animation: 'ceremony-glyph 0.7s var(--ease) both' });
     expect(glyph['animation-delay']).toContain('var(--i, 0)');
     expect(styles).toMatch(/@keyframes ceremony-glyph \{\s*from \{ opacity: 0; transform: scale\(0\.55\); \}/);
     // The names rise after the eighth glyph has appeared (0.9 s + 7 × 0.16 s, then its 0.7 s).
-    const names = rules(styles).find((r) => r.selectors.includes('.is-ceremony .ceremony__name'))!.decls;
+    const names = rules(styles).find((r) => r.selectors.includes('.is-ceremony .n-ceremony__name'))!.decls;
     expect(names.animation).toBe('brand-rise 1.2s var(--ease) both');
     expect(Number.parseFloat(names['animation-delay'])).toBeGreaterThanOrEqual(0.9 + 7 * 0.16);
     // With reduced motion the class is never set, and the stylesheet stops the animations as well.
     const reduced = styles.slice(styles.lastIndexOf('@media (prefers-reduced-motion: reduce)'));
-    expect(reduced).toMatch(/\.is-ceremony \.genome-svg g\[data-layer="genome"\],[\s\S]*?\{\s*animation: none;/);
+    expect(reduced).toMatch(/\.is-ceremony \.n-gen \.genome-svg g\[data-layer="genome"\],[\s\S]*?\{\s*animation: none;/);
     // A vibration where the device has one, as the names rise (or at once without motion).
     expect(resultView).toContain('navigator.vibrate?.([...CEREMONY_VIBRATION])');
     expect(resultView).toContain("names.addEventListener('animationstart', vibration, { once: true })");
@@ -672,15 +695,14 @@ describe('verify app: the ceremony of a first registration (P-D01)', () => {
 
   it('offers SHARE THE GENOME as a text link, its image prepared before the tap by a module imported statically', () => {
     expect(verifyCopy.CEREMONY.share).toBe('SHARE THE GENOME');
-    expect(resultView).toContain("class: 'textlink ceremony__share'");
+    expect(resultView).toContain("textLink(CEREMONY.share, { onOpen: () => void (image && shareGenomeImage(image)), extraClass: 'n-ceremony__share' })");
     expect(resultView).toContain("import { prepareShareImage, shareGenomeImage } from '../share-image.js';");
     // One bundle (verify.build.test.ts): no dynamic import anywhere in the app.
     for (const src of [resultView, mainSrc, shareSrc]) expect(src).not.toMatch(/\bimport\(/);
     // Drawn when the result is built; the tap only hands the ready file over.
     const block = resultView.slice(resultView.indexOf('function ceremonyBlock'), resultView.indexOf('export function resultView'));
     expect(block.indexOf('void prepareShareImage(')).toBeGreaterThan(0);
-    expect(block).toContain('on: { click: () => void (image && shareGenomeImage(image)) }');
-    expect(rule(styles, '.ceremony__share[hidden]').display).toBe('none');
+    expect(rule(styles, '.n-ceremony__share-line[hidden]').display).toBe('none');
     // navigator.share({ files }) when navigator.canShare accepts it, else saveDownload; Path2D from genomeLayout.
     expect(shareSrc).toContain("nav.canShare(data)");
     expect(shareSrc).toContain("import { saveDownload } from '../shared/download.js';");
@@ -689,7 +711,7 @@ describe('verify app: the ceremony of a first registration (P-D01)', () => {
     expect(shareSrc).toContain("genomeLayout(genome, 'orbit', { centre: 'monogram' })");
     expect(shareSrc).toContain('for (const d of monogram ?? []) ctx.fill(new Path2D(d));');
     // The names in the display face, their figures in the reading face.
-    expect(resultView).toContain("h('p', { class: 'ceremony__name' }, ...withNumerals(c.name))");
+    expect(resultView).toContain("h('p', { class: 'n-g n-t1 n-ceremony__name' }, ...withNumerals(c.name))");
   });
 });
 
@@ -718,56 +740,63 @@ describe('verify app: the scan as a ritual (P-D10)', () => {
     expect(mainSrc).toContain('onSeal: (confidence) => gen === this.generation && view.setSeal(confidence),');
   });
 
-  it('draws three states of the reticle: the sweep, the ring tightened around the centre, the lock', () => {
-    // Searching: the sweep, as before.
-    expect(decls('.view--scan.is-ready .reticle--live .reticle__sweep').opacity).toBe('1');
-    // Seal seen: the ring scaled about the orbit's centre (the view-box origin), its focus breathing; the sweep gone.
-    expect(decls('.reticle--live .reticle__ring')).toMatchObject({ 'transform-box': 'view-box', 'transform-origin': '0 0' });
-    expect(decls('.reticle--live .reticle__ring').transition).toContain('transform');
-    expect(decls('.view--scan.is-sealed .reticle--live .reticle__ring')).toMatchObject({
-      opacity: '1',
+  it('draws three states of the orbit: the sweep, the ring tightened around the centre, the lock (C11, C12, C38)', () => {
+    // Searching: the sweep, once the camera streams; the ring 1 px at 80 % (C11), half lit before (C38, PREPARING).
+    expect(decls('.n-cam.is-ready .n-cam__sweep').opacity).toBe('1');
+    expect(decls('.n-cam__ring')['box-shadow']).toBe('0 0 0 1px rgba(246, 242, 234, 0.5)');
+    expect(decls('.n-cam.is-ready .n-cam__ring')['box-shadow']).toBe('0 0 0 1px rgba(246, 242, 234, 0.8)');
+    // The orbit as C11 sets it: 272 px, its veil 50 %.
+    expect(decls('.n-cam')['--orbit']).toBe('min(272px, 32.23svh)');
+    expect(decls('.n-cam__aperture')['box-shadow']).toBe('0 0 0 200vmax rgba(5, 5, 5, 0.5)');
+    // Seal seen: the ring scaled about the orbit's centre, heavier with its light (C38), breathing; the sweep gone.
+    expect(decls('.n-cam__ring').transition).toContain('transform');
+    expect(decls('.n-cam.is-sealed .n-cam__ring')).toMatchObject({
       transform: 'scale(var(--seal-scale, 0.92))',
-      animation: 'reticle-focus 0.8s var(--ease) infinite alternate',
+      'box-shadow': '0 0 0 1.5px rgba(246, 242, 234, 0.9), 0 0 30px rgba(246, 242, 234, 0.2)',
+      animation: 'n-cam-breathe 0.8s var(--ease) infinite alternate',
     });
-    expect(decls('.view--scan.is-sealed .reticle--live .reticle__sweep').opacity).toBe('0');
-    expect(styles).toMatch(/@keyframes reticle-focus \{\s*from \{ stroke-width: 1; opacity: 0\.7; \}\s*to \{ stroke-width: 1\.8; opacity: 1; \}/);
+    expect(decls('.n-cam.is-sealed .n-cam__sweep').opacity).toBe('0');
+    expect(decls('.n-cam.is-locked .n-cam__sweep').opacity).toBe('0');
     // Its scale set through the CSSOM (no inline style attribute is written), held SEAL_HOLD_MS, then the search.
     expect(scanningSrc).toContain("root.style.setProperty('--seal-scale', String(scale));");
     expect(scanningSrc).toContain("root.classList.add('is-sealed');");
     expect(scanningSrc).toContain('sealTimer = setTimeout(loosen, SEAL_HOLD_MS);');
     expect(scanningSrc).toContain("import { SEAL_HOLD_MS, sealScale } from '../capture.js';");
-    // Locked: the existing .is-locked, untouched, set in place of the seal seen.
-    expect(decls('.view--scan.is-locked .reticle__ring')).toEqual({ opacity: '1', 'stroke-width': '2' });
-    expect(decls('.view--scan.is-locked .reticle__moon')).toEqual({ transform: 'scale(1.35)' });
-    expect(decls('.view--scan.is-locked .reticle__sweep')).toEqual({ opacity: '0' });
+    // Locked (C12): the veil darker (78 %), the ring 2 px, the moons heavier, the frame frozen and darker, the controls fainter.
+    expect(decls('.n-cam.is-locked .n-cam__aperture')['box-shadow']).toBe('0 0 0 200vmax rgba(5, 5, 5, 0.78)');
+    expect(decls('.n-cam.is-locked .n-cam__ring')).toMatchObject({ transform: 'none', 'box-shadow': '0 0 0 2px rgba(246, 242, 234, 0.95)', animation: 'none' });
+    expect(decls('.n-cam.is-locked .n-cam__moon')).toMatchObject({ width: '12px', height: '12px' });
+    expect(decls('.n-cam.is-locked .n-cam__video').filter).toBe('brightness(0.55)');
+    expect(decls('.n-cam.is-locked .n-cam__controls').opacity).toBe('0.6');
     expect(scanningSrc).toMatch(/if \(locked\) loosen\(\);\n\s*root\.classList\.toggle\('is-locked', locked\);/);
+    expect(scanningSrc).toContain("still.getContext('2d')?.drawImage(video, 0, 0);");
     // The scan's controls and screen stay as they were (test/e2e/fallbacks.test.ts measures them).
-    expect(scanningSrc).toContain("text: 'UPLOAD A PHOTO'");
+    expect(scanningSrc).toContain('textLink(ACTION_LABELS.upload,');
     expect(scanningSrc).toContain("text: 'LIGHT'");
     expect(scanningSrc).toContain("text: 'CLOSE'");
     expect(mainSrc).toContain("if (!(await this.swap(view.root, 'scan'))) return;");
   });
 
-  it('takes the ring up on VERIFYING…, then opens the GENOME plate from the centre, with no transition between screens', () => {
-    expect(verifyingSrc).toContain("orbitReticle('reticle--verifying')");
+  it('takes the orbit up on VERIFYING…, with no transition between screens', () => {
+    // The photo path's VERIFYING… is the scanner's orbit, locked, its arc travelling (C12's look, without the camera).
+    expect(verifyingSrc).toContain("root.classList.add('n-cam', 'n-cam--still', 'is-ready', 'is-locked', 'is-verifying');");
+    expect(verifyingSrc).toContain('cameraOrbit().orbit');
     expect(verifyingSrc).not.toMatch(/loader|getBoundingClientRect|animate\(/);
-    // The scanner's geometry: the same --reticle, the same 1.3 box, centred; closed as the lock leaves it.
-    expect(decls('.view--verifying')['--reticle']).toBe(decls('.view--scan')['--reticle']);
-    expect(decls('.verifying__orbit')).toMatchObject({ width: decls('.scan__reticle').width, height: decls('.scan__reticle').height, top: '50%', left: '50%', transform: 'translate(-50%, -50%)' });
-    expect(decls('.reticle--verifying .reticle__ring')['stroke-width']).toBe(decls('.view--scan.is-locked .reticle__ring')['stroke-width']);
-    expect(decls('.reticle--verifying .reticle__moon').transform).toBe(decls('.view--scan.is-locked .reticle__moon').transform);
+    expect(decls('.n-cam--still.is-locked .n-cam__sweep')).toMatchObject({ opacity: '1', 'animation-duration': '2.4s' });
+    // One status line, 8 px under the scanner's, a title (C12).
+    expect(decls('.n-cam.is-verifying .n-cam__status').top).toBe('calc(67.77% + 8px)');
     expect(styles).not.toMatch(/\.loader/);
-    // The plate: a circle widening from its centre, in step with the sections' delays (only the name and duration set).
-    expect(decls('.view--result:not(.is-leaving) > .result__genome')).toEqual({ 'animation-name': 'genome-open', 'animation-duration': '1.4s' });
+    // The GENOME then opens from its centre on the result (P-D10): a circle widening over it, the name and duration only.
+    expect(decls('.n-result:not(.is-leaving) .n-result__genome')).toEqual({ animation: 'genome-open 1.4s var(--ease) both' });
     expect(styles).toMatch(/@keyframes genome-open \{\s*from \{ opacity: 0; clip-path: circle\(0% at 50% 50%\); \}\s*to \{ opacity: 1; clip-path: circle\(75% at 50% 50%\); \}/);
     // No FLIP: nothing measures one screen to animate the next.
     expect(mainSrc).not.toMatch(/\bFLIP\b|\.animate\(/);
   });
 
-  it('respects reduced motion: the seal seen only steadies the ring, the plate is simply there', () => {
-    expect(reduced).toMatch(/\.view--scan\.is-sealed \.reticle--live \.reticle__ring \{\s*transform: none;\s*animation: none;\s*\}/);
-    expect(reduced).toMatch(/\.view--result:not\(\.is-leaving\) > \.result__genome \{\s*animation: none;\s*\}/);
-    expect(reduced).toMatch(/\.reticle__sweep \{\s*animation: none;/);
+  it('respects reduced motion: the seal seen only steadies the ring, the arc stands still', () => {
+    expect(reduced).toMatch(/\.n-cam\.is-sealed \.n-cam__ring \{\s*transform: none;\s*animation: none;\s*\}/);
+    expect(reduced).toMatch(/\.n-cam__sweep \{\s*animation: none;/);
+    expect(reduced).toMatch(/\.n-result:not\(\.is-leaving\) \.n-result__genome \{\s*animation: none;\s*\}/);
   });
 });
 

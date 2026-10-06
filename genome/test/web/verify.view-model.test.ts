@@ -35,6 +35,7 @@ import {
   modelWithVariant,
   normalizeCodeInput,
   photoModels,
+  pieceLines,
   recoveryContactModel,
   registrationOpen,
   resultViewModel,
@@ -187,6 +188,29 @@ describe('verify view-model: AUTHENTIC', () => {
     expect(v.productRows).toContainEqual(['SIZE', 'SIZE 52']);
     expect(v.productRows.map((r) => r[0])).not.toContain('VARIANT');
     expect(v.care).toBe(DEFAULT_CARE);
+  });
+});
+
+describe('verify view-model: the model\'s name and the piece\'s lines of a result (NOCTURNE N4, C9; addition 1)', () => {
+  it('sets the model\'s name over TYPE / CATEGORY / MATERIAL / SIZE / CREATED, the size as written at issuance', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, variant: '17' } }));
+    expect(vm.modelName).toBe('MONOLITHE');
+    expect(vm.pieceLines).toEqual(['RING', 'JEWELRY', '925 STERLING SILVER', 'SIZE 17', 'CREATED 2026']);
+    // The brand lines of MY PIECES (contract §4) are as they were.
+    expect(vm.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+  });
+
+  it('names a value written with its word once, leaves out a size never written, and ends with DISCONTINUED', () => {
+    expect(pieceLines({ ...PRODUCT, variant: 'Size 52' })).toEqual(['RING', 'JEWELRY', '925 STERLING SILVER', 'SIZE 52', 'CREATED 2026']);
+    expect(pieceLines({ ...PRODUCT, variant: '  ' })).toEqual(['RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    expect(pieceLines({ ...PRODUCT, variant: null })).toEqual(['RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    expect(pieceLines({ ...PRODUCT, variant: '16', discontinuedYear: 2027 }).slice(-2)).toEqual(['CREATED 2026', 'DISCONTINUED · 2027']);
+  });
+
+  it('has neither on a result that is not authentic', () => {
+    const vm = resultViewModel(outcome('INVALID_SIGNATURE'));
+    expect(vm.modelName).toBeUndefined();
+    expect(vm.pieceLines).toEqual([]);
   });
 });
 

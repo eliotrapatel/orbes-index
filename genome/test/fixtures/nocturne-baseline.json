@@ -191,7 +191,7 @@
       ]
     },
     "now-room-open": {
-      "title": "NOW while a room is open: the banner THE ROOM IS OPEN",
+      "title": "NOW while a room is open: the LIVE RELEASE leads, THE ROOM IS OPEN",
       "refs": [
         "live-01"
       ],
@@ -219,7 +219,7 @@
       ]
     },
     "now-live": {
-      "title": "NOW while a LIVE RELEASE is live: the banner LIVE NOW",
+      "title": "NOW while a LIVE RELEASE is live: it leads, LIVE NOW",
       "refs": [
         "live-01"
       ],
@@ -346,6 +346,40 @@
         "Align the ORBES CODE within the orbit",
         "LIGHT",
         "2×",
+        "UPLOAD A PHOTO"
+      ]
+    },
+    "scan-hint": {
+      "title": "The scan: after 6 seconds without a read, a hint in place of the guide (Hold steady — in even light)",
+      "refs": [
+        "C38"
+      ],
+      "variant": "full",
+      "as": null,
+      "values": [
+        "ORBES",
+        "CLOSE",
+        "SCANNING…",
+        "Hold steady — in even light",
+        "LIGHT",
+        "0.5×",
+        "UPLOAD A PHOTO"
+      ]
+    },
+    "scan-seal": {
+      "title": "The scan: the seal seen, the ring tightened round the centre",
+      "refs": [
+        "C38"
+      ],
+      "variant": "full",
+      "as": null,
+      "values": [
+        "ORBES",
+        "CLOSE",
+        "SCANNING…",
+        "Align the ORBES CODE within the orbit",
+        "LIGHT",
+        "0.5×",
         "UPLOAD A PHOTO"
       ]
     },
@@ -779,6 +813,58 @@
         "LEGAL",
         "HELP",
         "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "result-registration-closed": {
+      "title": "AUTHENTIC — FIRST REGISTRATION, signed in, the window of the scan closed: SCAN AGAIN",
+      "refs": [
+        "C36"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "AUTHENTIC",
+        "FIRST REGISTRATION",
+        "This ORBES identity was issued and signed by ORBES and has not yet been registered. You may register it to your ORBES account.",
+        "GENOME",
+        "O26-J-00224",
+        "«genome» · GENOME-01",
+        "THE MODEL",
+        "Photographed by ORBES. Compare it with the piece in your hands.",
+        "MONOLITHE",
+        "BRACELET",
+        "JEWELRY",
+        "925 STERLING SILVER",
+        "SIZE 17",
+        "CREATED 2026",
+        "SEE THE MODEL",
+        "PRODUCT",
+        "WARRANTY",
+        "CARE",
+        "OWNERSHIP",
+        "REGISTRATION CLOSED",
+        "The registration window of this scan has closed. Scan the code again to register this piece.",
+        "SCAN AGAIN",
+        "SIGNED IN AS you@example.com · MY PIECES · SIGN OUT",
+        "This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.",
+        "VERIFIED 5 OCT 2026 · 18:49",
+        "REF «ref»",
+        "SCAN ANOTHER",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
       ]
     },
     "result-not-delivered": {
@@ -1464,6 +1550,21 @@
         "The verification could not be completed just now. Please try again in a moment.",
         "TRY AGAIN",
         "RETURN"
+      ]
+    },
+    "problem-scan-timeout": {
+      "title": "NO ORBES CODE FOUND, after 40 seconds of the camera without a read",
+      "refs": [
+        "C17"
+      ],
+      "variant": "full",
+      "as": null,
+      "values": [
+        "ORBES",
+        "NO ORBES CODE FOUND",
+        "Hold the camera 10 to 20 cm from the code, in soft even light, with the whole code inside the orbit.",
+        "SCAN AGAIN",
+        "UPLOAD A PHOTO"
       ]
     },
     "problem-photo-unreadable": {
@@ -7536,6 +7637,59 @@
         "LEGAL",
         "HELP",
         "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "result-received": {
+      "title": "The new owner, the transfer code entered: REGISTERED TO YOU, VIEW AS OWNER",
+      "refs": [
+        "C37"
+      ],
+      "variant": "full",
+      "as": "newcomer",
+      "values": [
+        "ORBES",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "AUTHENTIC",
+        "REGISTERED",
+        "This ORBES identity was issued and signed by ORBES and is registered to its owner.",
+        "Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one.",
+        "I HAVE A TRANSFER CODE",
+        "GENOME",
+        "O26-J-00228",
+        "«genome» · GENOME-01",
+        "THE MODEL",
+        "Photographed by ORBES. Compare it with the piece in your hands.",
+        "MONOLITHE",
+        "BRACELET",
+        "JEWELRY",
+        "18K YELLOW GOLD",
+        "SIZE 17",
+        "CREATED 2026",
+        "SEE THE MODEL",
+        "PRODUCT",
+        "WARRANTY",
+        "CARE",
+        "OWNERSHIP",
+        "REGISTERED TO YOU",
+        "The ownership of O26-J-00228 has been transferred to your ORBES account.",
+        "VIEW AS OWNER",
+        "SIGNED IN AS t.nguyen@example.com · MY PIECES · SIGN OUT",
+        "This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.",
+        "VERIFIED 5 OCT 2026 · 18:49",
+        "REF «ref»",
+        "SCAN ANOTHER",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
       ]
     },
     "pieces-certificate-link": {

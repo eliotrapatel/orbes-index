@@ -133,8 +133,8 @@ shown the link THE COLLECTION (the rail).
 | `scan-light-zoom` | LIGHT pressed (aria-pressed), the zoom toggle reading *2×* | after LIGHT and the toggle | C38 (5) |
 | `scan-verifying` | the code locked (veil, moons heavier), ORBES CODE FOUND then VERIFYING… | a code read | C12, verify-03 |
 | `photo-verifying` | the ring taken up, READING PHOTO… then VERIFYING… | a photo uploaded | C12, verify-09 |
-| *(not reached)* the hint | *Place the whole code inside the orbit*, *Hold steady — in even light*, *Hold about 20 cm away*, *Zoom in* | 6 s without a read (the browser's clock is fixed: the hint's timer never runs) | C38 (2) |
-| *(not reached)* the seal seen | the ring tightening round the centre, breathing | a confident seal in a frame | C38 (3) |
+| `scan-hint` | *Hold steady — in even light* in place of the guide (the others, *Place the whole code inside the orbit*, *Hold about 20 cm away*, *Zoom in*, by the same line) | 6 s without a read: a stand-in decoder answers each frame FORMAT (N4) | C38 (2) |
+| `scan-seal` | the ring tightened round the centre, heavier, its light breathing | a stand-in decoder sees a certain seal, frame after frame (N4) | C38 (3) |
 
 **Controls shown only on some devices or states:**
 - **LIGHT**: when the camera's track reports a torch (`getCapabilities().torch`, an iPhone's rear camera, most Android
@@ -169,14 +169,14 @@ WARRANTY · CARE · OWNERSHIP and the assurance note.
 | `result-first-registration-signed-in` | REGISTRATION OPEN UNTIL *time*, CLAIM CODE (XXXX-XXXX-XXXX, its hint), REGISTER THIS PIECE, SIGNED IN AS *email* · MY PIECES · SIGN OUT | signed in | C36 (1) |
 | `result-registered-now` | REGISTERED TO YOU, *ownership verified with its claim code*, VIEW AS OWNER | after REGISTER THIS PIECE | C36 (2) |
 | `result-ceremony` | the GENOME first, its glyphs appearing, *model*, *collection*, SHARE THE GENOME | VIEW AS OWNER right after a first registration | C36 (3) |
-| *(not reached)* registration closed | REGISTRATION CLOSED, its sentence, SCAN AGAIN | the scan's window (15 min) passed (the browser's clock is fixed) | C36 (4) |
+| `result-registration-closed` | REGISTRATION CLOSED, its sentence, SCAN AGAIN | the scan's window ends as the result arrives (its answer routed, N4) | C36 (4) |
 | `result-not-delivered` | AUTHENTIC (no subtitle), NOT YET DELIVERED, *This piece has not yet been delivered …* | a piece in stock, never sold | C36 (5) |
 | *(not reached)* staff scan | the staff-test sentence instead of the form | a browser signed in to the console | C36 (5) |
 | `result-registered-signed-out` | AUTHENTIC, REGISTERED, the resale guidance (*Buying this piece? …*), I HAVE A TRANSFER CODE; OWNERSHIP: REGISTERED TO ITS OWNER, RECEIVING THIS PIECE, the sign-in, *If this piece is already registered to you …* | a piece registered to someone, signed out | C13 |
 | `result-registered-transfer-link` | the same, RECEIVING THIS PIECE brought into view | I HAVE A TRANSFER CODE | C13 |
 | `result-registered-other` | AUTHENTIC, REGISTERED, the resale guidance, I HAVE A TRANSFER CODE; OWNERSHIP: REGISTERED TO ITS OWNER, *This piece is registered to an ORBES account.*, RECEIVING THIS PIECE, *No transfer of this piece is pending. Once its owner has created a transfer code …*, *If this piece is registered to you …*, VERIFY AGAIN, the account line | signed in, not the owner, no transfer pending | C37 (4) |
 | `result-receiving` | REGISTERED TO ITS OWNER, *A transfer of its ownership is in progress.*, RECEIVING THIS PIECE, RECEIVING OPEN UNTIL *time*, TRANSFER CODE (XXXX-XXXX-XXXX), RECEIVE THIS PIECE, the account line | a transfer pending, signed in | C37 (2) |
-| *(not reached)* received | REGISTERED TO YOU, *The ownership of … has been transferred …*, VIEW AS OWNER | a transfer code accepted (the owner's code is shown once and not kept by the demo) | C37 (3) |
+| `result-received` | REGISTERED TO YOU, *The ownership of … has been transferred …*, VIEW AS OWNER | the demo keeps the owner's code of the piece passed on (N4): the new owner enters it | C37 (3) |
 | `result-ownership-verified` | AUTHENTIC, OWNERSHIP VERIFIED; OWNERSHIP: REGISTERED TO YOU, TRANSFER OF OWNERSHIP, its sentence, CREATE TRANSFER CODE, the account line | the account's own piece | C14 |
 | `result-ownership-verified-product` | the PRODUCT tab it opens on (the rows above) | the same | C14 |
 | `result-transfer-code` | TRANSFER CODE *XXXX-XXXX-XXXX*, VALID UNTIL *date · time*, its sentence, CANCEL TRANSFER | CREATE TRANSFER CODE | C37 (1) |
@@ -206,7 +206,8 @@ Each: the empty orbit, the title, one sentence, the primary action as a button a
 | `problem-server` | VERIFICATION UNAVAILABLE — TRY AGAIN, RETURN | C17 (3) |
 | `problem-photo-unreadable` | NO ORBES CODE FOUND (a photo) — UPLOAD A PHOTO, SCAN AGAIN | C17 (2) |
 | `problem-photo-invalid` | PHOTO NOT READABLE — UPLOAD A PHOTO, RETURN | C17 |
-| *(not reached)* | NO ORBES CODE FOUND after 40 s (SCAN AGAIN, UPLOAD A PHOTO); CAMERA UNAVAILABLE (failed); SECURE CONNECTION REQUIRED; SCANNER UNAVAILABLE (RETURN) — the 40 s timer runs on the fixed clock, the stage is a secure context, the decoder always starts | C17 (2) |
+| `problem-scan-timeout` | NO ORBES CODE FOUND after 40 s, SCAN AGAIN, UPLOAD A PHOTO | a stand-in decoder never finds a code (N4) | C17 (2) |
+| *(not reached)* | CAMERA UNAVAILABLE (failed); SECURE CONNECTION REQUIRED; SCANNER UNAVAILABLE (RETURN) — the stage is a secure context, the decoder always starts | C17 (2) |
 
 ## MY PIECES (`/verify/pieces`)
 

@@ -114,6 +114,13 @@
   --n-fs-copy: 9px;
   --n-fs-gen-id: 15px;
   --n-fs-gen-fp: 11.5px;
+  /* The scan and its results (N4): the zoom's figures (C11), a result's model name and a transfer code (C9, C37),
+     the ceremony's name (C36). */
+  --n-fs-zoom: 14px;
+  --n-fs-name: 26px;
+  --n-fs-ceremony: 24px;
+  /* The scanner's ground under the camera (C11: `.C.cam`). */
+  --n-camera: #050505;
   --n-track-wm: 0.46em;
   --n-track-t1: 0.08em;
   --n-track-t2: 0.14em;
@@ -159,7 +166,6 @@
   --fs-input: 16px;
   --fs-heading: 17px;
   --fs-heading-lg: 18px;
-  --fs-code: 19px;
   --fs-display-sm: 22px;
   --fs-display: 26px;
   --fs-figure: 46px;

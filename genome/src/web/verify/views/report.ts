@@ -1,25 +1,27 @@
 /**
- * WHERE DID YOU SEE OR BUY THIS PIECE? Under the contact of ORBES Client
- * Services on every result that was not authentic (C-02, API §8.5).
+ * WHERE DID YOU SEE OR BUY THIS PIECE? Under the contact of ORBES Client Services on every result that was not
+ * authentic (C-02, API §8.5), in NOCTURNE's pieces (C15, C16).
  *
- *   ──────────────────────────────
- *   WHERE DID YOU SEE OR BUY THIS PIECE?      the question (a status line)
+ *   WHERE DID YOU SEE OR BUY THIS PIECE?      the question (a title)
  *   Optional. Your answer stays with …        one sentence
- *     BOUTIQUE   ONLINE                       where: one choice, pressed
- *     PRIVATE SALE   OTHER
- *   PLACE (OPTIONAL) ________                 once a choice is made
+ *   [ BOUTIQUE ]      [ ONLINE ]              where: one choice, pressed (`.opt2`, two by two)
+ *   [ PRIVATE SALE ]  [ OTHER ]
+ *   PLACE (OPTIONAL) ________                 the place and the note, underlined fields, each with its hint
  *   NOTE (OPTIONAL)  ________
- *          SEND ANSWER                        a text link (the hairline button stays SCAN AGAIN)
+ *   [ SEND ANSWER ]                           a hairline button (sent with the choice made; without one, the
+ *                                             keyboard is taken to the choices)
  *
- * The answer is attached to the scan (one per scan, within 24 hours) and
- * opens a case in the console's Cases queue. Server messages are shown as
- * they come (written for customers); nothing typed is kept beyond the form.
+ * Open under UNUSUAL ACTIVITY (C15); under the other results (`folded`, C16) the question and its sentence are a row
+ * with a hairline that opens (+ / −) onto the rest. The answer is attached to the scan (one per scan, within 24
+ * hours) and opens a case in the console's Cases queue. Server messages are shown as they come (written for
+ * customers); nothing typed is kept beyond the form.
  */
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { REPORT, REQUEST_ERRORS } from '../copy.js';
 import { REPORT_CHANNELS, type ReportChannel } from '../types.js';
 import type { ReportModel } from '../view-model.js';
+import { button, field, icon } from './nocturne.js';
 
 export interface ReportDeps {
   api: Pick<ApiClient, 'report'>;
@@ -38,45 +40,55 @@ function messageOf(e: unknown): string {
   return 'Your answer could not be sent. Please try again.';
 }
 
-export function reportSection(model: ReportModel, deps: ReportDeps): HTMLElement {
+export function reportSection(model: ReportModel, deps: ReportDeps, opts: { folded?: boolean } = {}): HTMLElement {
   let channel: ReportChannel | null = null;
-  const root = h('section', { class: 'report', attrs: { 'aria-labelledby': 'report-title' } });
-  const title = h('h2', { class: 'report__title', id: 'report-title', text: REPORT.title });
-  const lead = h('p', { class: 'prose report__lead', text: REPORT.lead });
+  const root = h('section', { class: ['n-px', 'n-sec', 'n-report', opts.folded ? 'n-report--folded' : null], attrs: { 'aria-labelledby': 'report-title' } });
+  // Folded, the sentence is the row's second line, inside its button: a span.
+  const lead: HTMLElement = opts.folded ? h('span', { class: 'n-sm n-acc__line n-report__lead', text: REPORT.lead }) : h('p', { class: 'n-sm n-report__lead', text: REPORT.lead });
 
   const options = REPORT_CHANNELS.map((c) =>
     h('button', {
-      class: 'auth__option report__channel',
+      class: 'n-g n-opt2__option n-report__channel',
       attrs: { type: 'button', 'aria-pressed': 'false' },
       data: { channel: c },
       on: { click: () => choose(c) },
       text: REPORT.channels[c],
     }),
   );
-  const channels = h('div', { class: 'report__channels', attrs: { role: 'group', 'aria-labelledby': 'report-title' } }, ...options);
+  const channels = h('div', { class: 'n-opt2 n-report__channels', attrs: { role: 'group', 'aria-labelledby': 'report-title' } }, ...options);
 
-  const place = h('input', { class: 'field__input', attrs: { id: 'report-place', type: 'text', name: 'place', autocomplete: 'off', maxlength: PLACE_MAX, 'aria-describedby': 'report-place-hint' } });
-  const note = h('textarea', { class: 'field__input report__note', attrs: { id: 'report-note', name: 'note', rows: 3, maxlength: NOTE_MAX, 'aria-describedby': 'report-note-hint' } });
-  const error = h('p', { class: 'form__error', attrs: { role: 'alert', hidden: true } });
-  const send = h('button', { class: 'textlink report__send', attrs: { type: 'submit', 'aria-busy': 'false' }, text: REPORT.send });
+  const place = h('input', { attrs: { type: 'text', name: 'place', autocomplete: 'off', maxlength: PLACE_MAX } });
+  const note = h('textarea', { class: 'n-fld__input n-report__note', attrs: { id: 'report-note', name: 'note', rows: 1, maxlength: NOTE_MAX, 'aria-describedby': 'report-note-hint' } });
+  const error = h('p', { class: 'n-err n-report__error', attrs: { role: 'alert', hidden: true } });
+  const send = button(REPORT.send, { outline: true, type: 'submit', extraClass: 'n-report__send', attrs: { 'aria-busy': 'false' } });
   const form = h(
     'form',
-    { class: 'form report__form', attrs: { novalidate: true, hidden: true, 'aria-labelledby': 'report-title' } },
-    h('div', { class: 'field' }, h('label', { class: 'field__label', attrs: { for: 'report-place' }, text: REPORT.place }), place, h('span', { class: 'field__hint', id: 'report-place-hint', text: REPORT.placeHint })),
-    h('div', { class: 'field' }, h('label', { class: 'field__label', attrs: { for: 'report-note' }, text: REPORT.note }), note, h('span', { class: 'field__hint', id: 'report-note-hint', text: REPORT.noteHint })),
+    { class: 'n-report__form', attrs: { novalidate: true, 'aria-labelledby': 'report-title' } },
+    field('report-place', REPORT.place, place, REPORT.placeHint),
+    h(
+      'div',
+      { class: 'n-fld-group' },
+      h('label', { class: 'n-fld', attrs: { for: 'report-note' } }, h('span', { class: 'n-g n-lab', text: REPORT.note })),
+      note,
+      h('p', { class: 'n-sm n-fld__hint', id: 'report-note-hint', text: REPORT.noteHint }),
+    ),
     error,
-    h('div', { class: 'report__actions' }, send),
+    send,
   );
 
   function choose(c: ReportChannel): void {
     channel = c;
     for (const o of options) o.setAttribute('aria-pressed', o.dataset.channel === c ? 'true' : 'false');
-    form.hidden = false;
   }
 
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
-    if (send.disabled || !channel) return;
+    if (send.disabled) return;
+    // Where comes first: without a choice, the keyboard is taken to the four answers.
+    if (!channel) {
+      options[0]?.focus();
+      return;
+    }
     const chosen = channel;
     void (async () => {
       error.hidden = true;
@@ -87,8 +99,10 @@ export function reportSection(model: ReportModel, deps: ReportDeps): HTMLElement
       try {
         await deps.api.report({ scanId: model.scanId, channel: chosen, where: place.value, note: note.value });
         // Sent: the form gives way to the thanks, read out once; keyboard focus follows it.
-        const status = h('p', { class: 'report__status', attrs: { role: 'status', tabindex: '-1' }, text: REPORT.sent });
-        root.replaceChildren(title, status, h('p', { class: 'prose report__lead', text: REPORT.kept(model.reference) }));
+        const status = h('p', { class: 'n-g n-lb n-ivc n-report__status', attrs: { role: 'status', tabindex: '-1' }, text: REPORT.sent });
+        const kept = h('p', { class: 'n-sm n-report__kept', text: REPORT.kept(model.reference) });
+        // The question stays as its title; nothing is left to open or to send.
+        root.replaceChildren(h('h2', { class: 'n-g n-t3 n-report__title', id: 'report-title', text: REPORT.title }), status, kept);
         status.focus({ preventScroll: true });
       } catch (e) {
         error.textContent = messageOf(e);
@@ -102,6 +116,28 @@ export function reportSection(model: ReportModel, deps: ReportDeps): HTMLElement
     })();
   });
 
-  root.append(title, lead, channels, form);
+  const body = h('div', { class: 'n-report__body' }, channels, form);
+  if (!opts.folded) {
+    root.append(h('h2', { class: 'n-g n-t3 n-report__title', id: 'report-title', text: REPORT.title }), lead, body);
+    return root;
+  }
+  // C16: the question and its sentence, a row that opens onto the answers.
+  body.id = 'report-panel';
+  body.hidden = true;
+  const sign = h('span', { class: 'n-acc__sign' });
+  const toggle = h(
+    'button',
+    { class: 'n-acc n-report__toggle', attrs: { type: 'button', 'aria-expanded': 'false', 'aria-controls': 'report-panel' } },
+    h('span', { class: 'n-acc__text' }, h('span', { class: 'n-g n-t3 n-acc__title n-report__title', id: 'report-title', text: REPORT.title }), lead),
+    sign,
+  );
+  const draw = (open: boolean): void => {
+    toggle.setAttribute('aria-expanded', String(open));
+    body.hidden = !open;
+    sign.replaceChildren(icon(open ? 'minus' : 'plus', { small: true }));
+  };
+  toggle.addEventListener('click', () => draw(toggle.getAttribute('aria-expanded') !== 'true'));
+  draw(false);
+  root.append(h('h2', { class: 'n-report__head' }, toggle), body);
   return root;
 }

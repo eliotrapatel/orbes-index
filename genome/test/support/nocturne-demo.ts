@@ -615,7 +615,8 @@ async function seedScanCases(w: World): Promise<void> {
   await ctx.services.ownership.reportIncident(owner.id, stolen.productId, 'STOLEN', owner.actor);
   await ctx.services.ownership.reportIncident(owner.id, lost.productId, 'LOST', owner.actor);
   await ctx.services.warranty.openService(service.productId, { type: 'POLISH', location: 'PARIS', notes: 'Polished at the atelier.', performedBy: 'PARIS' }, admin);
-  await ctx.services.ownership.initiateTransfer(owner.id, passing.productId, owner.actor);
+  // Its code, for the new owner who receives the piece (C37).
+  demo.links.transfer = (await ctx.services.ownership.initiateTransfer(owner.id, passing.productId, owner.actor)).transferCode;
   await ctx.services.issuance.revokeCode(revoked.codeId, 'The card was reported destroyed.', admin);
   demo.links.certificate = (await ctx.services.ownershipCertificates.create(owner.id, certified.productId, { validDays: 30 }, owner.actor)).token;
   // The burst: copies of the code scanned from 22 places within the minute, just now.

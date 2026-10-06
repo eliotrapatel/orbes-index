@@ -291,7 +291,6 @@ Component sizes between those steps are tokens too, so no stylesheet sets a lite
 | `--fs-sub` | 14px | console plain values, toast close |
 | `--fs-input` | 16px | a field a phone focuses (iOS Safari zooms into one under 16 px): the verification app's fields, the sale shell's fields and the console's sign-in at phone width |
 | `--fs-heading` / `--fs-heading-lg` | 17 / 18px | GENOME id, dialog title / caution and void result titles, TOTP code |
-| `--fs-code` | 19px | transfer code |
 | `--fs-display-sm` / `--fs-display` | 22 / 26px | console product id / generator identity |
 | `--fs-figure` | 46px | KPI value |
 

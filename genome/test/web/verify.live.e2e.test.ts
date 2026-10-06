@@ -546,8 +546,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       if (c.text) await textOf(page.locator('.live__edge .live__note').first(), c.text);
       expect(await page.locator('.view--live').evaluate((el) => el.classList.contains('vault')), c.name).toBe(true);
       await keepsVault(page, c.action, c.controls);
-      // One action: a hairline button (or the sign-in's form), never two.
-      expect(await page.locator('.live__edge .btn:visible, .live__past .btn:visible').count(), c.name).toBe(1);
+      // One action: a hairline button (or the sign-in's form, its button NOCTURNE's, hairline in the vault), never two.
+      expect(await page.locator('.live__edge .btn:visible, .live__past .btn:visible, .live__edge .n-btn:visible').count(), c.name).toBe(1);
       if (c.name === 'past') await textOf(page.locator('.live__past-status'), RELEASES.over);
       await page.screenshot({ path: join(OUT_DIR, `verify-live-edge-${c.name}.png`), fullPage: true });
       expect(problems, c.name).toEqual([]);

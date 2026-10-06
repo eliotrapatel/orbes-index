@@ -136,12 +136,13 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
       expect(await screenTitle(page)).toBe('CAMERA ACCESS DECLINED');
       const timeline = await readTimeline(page);
       expect(timeline.gum.map((g) => g.error)).toEqual(['NotAllowedError']);
-      await textOf(page.locator('.message__text'), 'To scan, allow camera access for this page in your browser settings. You may also upload a photo of the ORBES CODE.');
+      await textOf(page.locator('.n-message__text'), 'To scan, allow camera access for this page in your browser settings. You may also upload a photo of the ORBES CODE.');
       // Calm, two actions only: the photo first (primary button), scanning again as a text link.
-      const actions = page.locator('.message__actions button');
+      const actions = page.locator('.n-message__actions button');
       expect((await actions.allInnerTexts()).map(norm)).toEqual(['UPLOAD A PHOTO', 'SCAN AGAIN']);
-      expect(await actions.nth(0).getAttribute('class')).toMatch(/\bbtn\b/);
-      expect(await actions.nth(1).getAttribute('class')).toMatch(/\btextlink\b/);
+      expect(await actions.nth(0).getAttribute('class')).toMatch(/\bn-btn\b/);
+      expect(await actions.nth(0).getAttribute('class')).not.toMatch(/\bn-btn--ol\b/);
+      expect(await actions.nth(1).getAttribute('class')).toMatch(/\bn-tl\b/);
       // Focus moved to the heading (screen readers announce the problem); no camera left running.
       expect(await page.evaluate(() => document.activeElement?.id)).toBe('message-title');
       expect(await page.locator('video').count()).toBe(0);
@@ -154,7 +155,7 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
       await choosePhoto(page, actions.nth(0), photos.genuine);
       await page.locator('.view--result').waitFor({ timeout: 30_000 });
       expect(await screenTitle(page)).toBe('AUTHENTIC');
-      await textOf(page.locator('.genome__id'), 'O26-J-00184');
+      await textOf(page.locator('.n-gen__id'), 'O26-J-00184');
       const event = await latestScanEvent(srv);
       expect(event.result_state).toBe('AUTHENTIC');
       expect(JSON.stringify(event.client_metrics)).toMatch(/"source":"upload"/);
@@ -191,8 +192,8 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
       expect(await screenTitle(page)).toBe('AUTHENTIC');
       const result = page.locator('.view--result');
       expect(await result.getAttribute('data-state')).toBe('AUTHENTIC');
-      await textOf(page.locator('.genome__id'), 'O26-J-00184');
-      expect((await page.locator('.lines__line').allInnerTexts()).map(norm)).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+      await textOf(page.locator('.n-gen__id'), 'O26-J-00184');
+      expect((await page.locator('.n-result__name, .n-result__lines .n-lines__line').allInnerTexts()).map(norm)).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
       const timing = uploadTiming(await readTimeline(page));
       metrics.upload = timing;
       expect(timing.chosenToDecoded).not.toBeNull();
@@ -212,10 +213,10 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
       const result = page.locator('.view--result');
       expect(await result.getAttribute('data-state')).toBe('INVALID_SIGNATURE');
       expect(await result.getAttribute('data-tone')).toBe('void');
-      expect(await page.locator('.genome__id').count()).toBe(0);
+      expect(await page.locator('.n-gen__id').count()).toBe(0);
       expect(await page.getByRole('tab').count()).toBe(0);
       expect(norm(await page.locator('body').innerText())).not.toContain('O26-J-00184');
-      await textOf(page.locator('.result__help'), /ORBES Client Services/);
+      await textOf(page.locator('.n-result__help'), /ORBES Client Services/);
       const event = await latestScanEvent(srv);
       expect(event.result_state).toBe('INVALID_SIGNATURE');
       metrics.invalidUpload = uploadTiming(await readTimeline(page));
@@ -243,17 +244,17 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
       // HINT_AFTER_MS (6 s) without a read: the guide line turns into advice. Nothing code-like is in
       // view (look-alike seals in the clutter carry no data orbits), so it asks for the code, never
       // for a distance or the zoom.
-      await textOf(page.locator('.scan__hint'), 'Place the whole code inside the orbit');
+      await textOf(page.locator('.n-cam__hint'), 'Place the whole code inside the orbit');
       await page.screenshot({ path: join(E2E_OUT_DIR, 'camera-searching.png') });
 
       // 10 px type and 44 × 44 px tap zones that never overlap (BRAND-DESIGN-SYSTEM §3.8), with LIGHT
       // and the zoom shown as a camera that offers them shows them (zoomed in: 1×, pressed), then put
       // back as they were.
       const controlStates = await page.evaluate(() =>
-        [...document.querySelectorAll<HTMLButtonElement>('.scan__control')].map((b) => {
+        [...document.querySelectorAll<HTMLButtonElement>('.n-cam__control')].map((b) => {
           const was = { hidden: b.hidden, text: b.textContent ?? '', pressed: b.getAttribute('aria-pressed') };
           b.hidden = false;
-          if (b.classList.contains('scan__zoom') && was.hidden) {
+          if (b.classList.contains('n-cam__zoom') && was.hidden) {
             b.textContent = '1×';
             b.setAttribute('aria-pressed', 'true');
           }
@@ -264,7 +265,7 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
       expect(floors.problems).toEqual([]);
       expect(floors.checked).toEqual(['CLOSE', 'LIGHT', expect.stringMatching(/^\d(\.\d)?×$/), 'UPLOAD A PHOTO']);
       await page.evaluate((states) => {
-        document.querySelectorAll<HTMLButtonElement>('.scan__control').forEach((b, i) => {
+        document.querySelectorAll<HTMLButtonElement>('.n-cam__control').forEach((b, i) => {
           b.hidden = states[i].hidden;
           b.textContent = states[i].text;
           if (states[i].pressed === null) b.removeAttribute('aria-pressed');
@@ -278,7 +279,7 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera fallbacks, photo upload and invalid c
       expect(timeline.replies.every((r) => !r.ok)).toBe(true);
       // The hint stays the same while scanning goes on (it follows the prevailing failure, not one odd frame).
       await page.waitForTimeout(1_500);
-      expect(norm(await page.locator('.scan__hint').innerText())).toBe('Place the whole code inside the orbit');
+      expect(norm(await page.locator('.n-cam__hint').innerText())).toBe('Place the whole code inside the orbit');
       expect(timeline.locked).toBeNull();
       expect(await page.evaluate(() => (window as unknown as { __sealed: boolean }).__sealed)).toBe(false);
       const reasons: Record<string, number> = {};

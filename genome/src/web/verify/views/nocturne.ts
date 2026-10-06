@@ -376,6 +376,47 @@ export function orderSteps(steps: readonly OrderStep[], opts: { label: string })
   return list;
 }
 
+// ── A result's marks and its contact (C9, C13–C17) ─────────────────────────
+
+/**
+ * The tone mark above a result's word and a problem's title (n.py TONE), 44 px, in ivory: authentic, the ring and its
+ * core; caution, the ring and a moon; void, the empty ring. Decorative: the word says it.
+ */
+export function toneMark(tone: 'authentic' | 'caution' | 'void'): SVGSVGElement {
+  const svg = s(
+    'svg',
+    { class: `n-tone n-tone--${tone}`, viewBox: '0 0 44 44', 'aria-hidden': 'true', focusable: 'false' },
+    s('circle', { class: 'n-tone__ring', cx: 22, cy: 22, r: 20 }),
+  );
+  if (tone === 'authentic') svg.append(s('circle', { class: 'n-tone__core', cx: 22, cy: 22, r: 7.5 }));
+  // The canvas's moon (n.py TONE.caution) closes on itself and draws nothing; the plan's caution mark is the ring and
+  // a moon: the same 8 px circle at the centre, a crescent of it.
+  if (tone === 'caution') svg.append(s('path', { class: 'n-tone__core', d: 'M22 14A8 8 0 0 0 22 30A3 8 0 0 1 22 14z' }));
+  return svg;
+}
+
+/** How ORBES Client Services is reached, each line when configured. */
+export interface ContactLines {
+  mailto?: string;
+  phone?: { label: string; href: string };
+  hours?: string;
+  placement?: string;
+}
+
+/**
+ * ORBES Client Services (n.py contact()): CONTACT ORBES CLIENT SERVICES (the prefilled email, in Gravesend), the phone
+ * (its accessible name says the call) and the hours, one under the other on the margin.
+ */
+export function contactLines(c: ContactLines, labels: { action: string; call: string }): HTMLElement {
+  return h(
+    'div',
+    { class: 'n-contact', data: c.placement ? { placement: c.placement } : undefined },
+    c.mailto ? h('a', { class: 'n-g n-contact__email', attrs: { href: c.mailto }, text: labels.action }) : null,
+    c.phone ? h('a', { class: 'n-num n-contact__phone', attrs: { href: c.phone.href, 'aria-label': `${labels.call} ${c.phone.label}` }, text: c.phone.label }) : null,
+    c.hours ? h('span', { class: 'n-contact__hours', text: c.hours }) : null,
+  );
+}
+
 // ── States of a page (C40) ─────────────────────────────────────────────────
 
 /** A page while it reads: the monogram breathing (decorative; still when the phone asks for less motion) above ONE MOMENT…, the status read aloud. */

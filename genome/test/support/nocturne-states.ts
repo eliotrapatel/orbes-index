@@ -90,7 +90,7 @@ function result(role: string, then?: (run: StateRun) => Promise<void>): Pick<UiS
     act: async (run) => {
       await run.page.locator('.view--now[data-ready]').waitFor();
       await upload(run, role);
-      await run.page.locator('.view--result .result__title').waitFor({ timeout: 30_000 });
+      await run.page.locator('.view--result .n-result__title').waitFor({ timeout: 30_000 });
       await settle(run.page);
       await then?.(run);
     },
@@ -112,6 +112,21 @@ async function registerPiece(run: StateRun, role: string): Promise<void> {
 async function openScanner(run: StateRun): Promise<void> {
   await run.page.locator('.view--now[data-ready]').waitFor();
   await button(run, 'SCAN ORBES CODE').click();
+}
+
+/**
+ * The decoder's worker replaced by one that answers every frame with `reply` (a failure the scan's guidance reads: a
+ * hint, the seal seen), so a state of the scanner the hand-held clip never shows can be captured.
+ */
+async function stubDecoder(page: Page, reply: Record<string, unknown>): Promise<void> {
+  const body = `const reply = ${JSON.stringify(reply)};
+self.addEventListener('message', (ev) => {
+  const m = ev.data;
+  const out = { type: 'result', id: m && m.id, timing: { grayMs: 0, decodeMs: 1, totalMs: 1 }, ...reply, buffer: m && m.buffer };
+  self.postMessage(out, m && m.buffer ? [m.buffer] : []);
+});
+self.postMessage({ type: 'ready' });`;
+  await page.route('**/assets/verify-worker-*.js', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body }));
 }
 
 /** A problem of the scan, read from the result of `routeTo` on /api/v1/verify (a photo of the first piece's code). */
@@ -205,10 +220,43 @@ export const UI_STATES: readonly UiState[] = [
       await openScanner(run);
       await run.page.locator('.view--scan.is-ready').waitFor({ timeout: 20_000 });
       await button(run, 'LIGHT').click();
-      await run.page.locator('.view--scan .scan__zoom').click();
+      await run.page.locator('.view--scan .n-cam__zoom').click();
       await sleep(600);
     },
     ready: '.view--scan.is-ready',
+    viewport: true,
+  },
+  {
+    id: 'scan-hint',
+    title: 'The scan: after 6 seconds without a read, a hint in place of the guide (Hold steady — in even light)',
+    refs: ['C38'],
+    variant: 'full',
+    path: at('/verify'),
+    // A decoder that finds the code's format but never reads it: the hint of a code seen but not held still.
+    routes: async (page) => stubDecoder(page, { ok: false, reason: 'FORMAT', moduleSizePx: 12 }),
+    act: async (run) => {
+      await openScanner(run);
+      await run.page.locator('.view--scan.is-ready').waitFor({ timeout: 20_000 });
+      await run.page.waitForFunction(() => document.querySelector('.view--scan .n-cam__hint')?.textContent === 'Hold steady — in even light', null, { timeout: 20_000 });
+      await sleep(900);
+    },
+    ready: '.view--scan.is-ready',
+    viewport: true,
+  },
+  {
+    id: 'scan-seal',
+    title: 'The scan: the seal seen, the ring tightened round the centre',
+    refs: ['C38'],
+    variant: 'full',
+    path: at('/verify'),
+    // A decoder that sees a certain seal and no moons, frame after frame: the ring holds tight.
+    routes: async (page) => stubDecoder(page, { ok: false, reason: 'NO_MOONS', seal: { confidence: 1, unitPx: 6 } }),
+    act: async (run) => {
+      await openScanner(run);
+      await run.page.locator('.view--scan.is-sealed').waitFor({ timeout: 20_000 });
+      await sleep(900);
+    },
+    ready: '.view--scan.is-sealed',
     viewport: true,
   },
   {
@@ -237,7 +285,7 @@ export const UI_STATES: readonly UiState[] = [
     act: async (run) => {
       await run.page.locator('.view--now[data-ready]').waitFor();
       await upload(run, 'first');
-      await run.page.waitForFunction(() => document.querySelector('.verifying__status')?.textContent === 'VERIFYING…', null, { timeout: 20_000 });
+      await run.page.waitForFunction(() => document.querySelector('.view--verifying .n-cam__line')?.textContent === 'VERIFYING…', null, { timeout: 20_000 });
       await sleep(1_300);
     },
     ready: '.view--verifying',
@@ -281,6 +329,22 @@ export const UI_STATES: readonly UiState[] = [
     }),
   },
   { id: 'result-first-registration-signed-in', title: 'AUTHENTIC — FIRST REGISTRATION, signed in: the claim code', refs: ['C36'], variant: 'full', as: you, ...result('first', (run) => tab(run, 'OWNERSHIP').click()) },
+  {
+    id: 'result-registration-closed',
+    title: 'AUTHENTIC — FIRST REGISTRATION, signed in, the window of the scan closed: SCAN AGAIN',
+    refs: ['C36'],
+    variant: 'full',
+    as: you,
+    // The scan's window closed as the result arrives: its registration ends when it was verified.
+    routes: async (page) =>
+      page.route('**/api/v1/verify', async (route) => {
+        const response = await route.fetch();
+        const body = (await response.json()) as { verifiedAt?: string; registration?: { expiresAt: string } };
+        if (body.registration && body.verifiedAt) body.registration.expiresAt = body.verifiedAt;
+        await route.fulfill({ response, json: body });
+      }),
+    ...result('first', (run) => tab(run, 'OWNERSHIP').click()),
+  },
   { id: 'result-not-delivered', title: 'AUTHENTIC, a piece not delivered yet: registration opens once it has been', refs: ['C36'], variant: 'full', ...result('stock', (run) => tab(run, 'OWNERSHIP').click()) },
   { id: 'result-registered-signed-out', title: 'AUTHENTIC — REGISTERED, signed out: the resale guidance and RECEIVING THIS PIECE', refs: ['C13'], variant: 'full', ...result('yours', (run) => tab(run, 'OWNERSHIP').click()) },
   { id: 'result-registered-transfer-link', title: 'AUTHENTIC — REGISTERED: I HAVE A TRANSFER CODE', refs: ['C13'], variant: 'full', ...result('yours', (run) => link(run, 'I HAVE A TRANSFER CODE').or(button(run, 'I HAVE A TRANSFER CODE')).first().click()) },
@@ -317,6 +381,20 @@ export const UI_STATES: readonly UiState[] = [
   verifyProblem('problem-network', 'CONNECTION INTERRUPTED', (r) => r.abort('internetdisconnected')),
   verifyProblem('problem-rate-limited', 'A MOMENT, PLEASE', (r) => r.fulfill({ status: 429, contentType: 'application/json', body: JSON.stringify({ error: { code: 'RATE_LIMITED', message: 'Too many requests.' } }) })),
   verifyProblem('problem-server', 'VERIFICATION UNAVAILABLE', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: 'Unavailable.' } }) })),
+  {
+    id: 'problem-scan-timeout',
+    title: 'NO ORBES CODE FOUND, after 40 seconds of the camera without a read',
+    refs: ['C17'],
+    variant: 'full',
+    path: at('/verify'),
+    // A decoder that never finds a code: after 40 seconds, the scan gives up.
+    routes: async (page) => stubDecoder(page, { ok: false, reason: 'NO_SEAL' }),
+    act: async (run) => {
+      await openScanner(run);
+      await run.page.locator('.view--message').waitFor({ timeout: 60_000 });
+    },
+    ready: '.view--message',
+  },
   {
     id: 'problem-photo-unreadable',
     title: 'NO ORBES CODE FOUND in a photo',
@@ -732,6 +810,21 @@ export const UI_STATES: readonly UiState[] = [
     }),
   },
   {
+    id: 'result-received',
+    title: 'The new owner, the transfer code entered: REGISTERED TO YOU, VIEW AS OWNER',
+    refs: ['C37'],
+    variant: 'full',
+    as: 'newcomer',
+    mutates: true,
+    ...result('passing', async (run) => {
+      const code = run.demo.links.transfer;
+      if (!code) throw new Error('no transfer code in the demo');
+      await run.page.getByLabel('TRANSFER CODE').first().fill(code);
+      await button(run, 'RECEIVE THIS PIECE').click();
+      await button(run, 'VIEW AS OWNER').waitFor({ timeout: 20_000 });
+    }),
+  },
+  {
     id: 'pieces-certificate-link',
     title: 'MY PIECES: the certificate link, shown once, COPY LINK, OPEN LINK, WITHDRAW',
     refs: ['C35'],
@@ -889,10 +982,15 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
 });
 
 /**
- * The boards of several states (C40: every page's loading, could not be shown, empty, owners only and not found):
+ * The boards of several states (C17: the problems of the scan; C36: registering; C37: passing a piece on; C38: the
+ * scanner; C40: every page's loading, could not be shown, empty, owners only and not found):
  * beside BOARD_STATES' first, each further state is set beside the board too, to be compared with its section.
  */
 export const BOARD_SECTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  C17: ['problem-scan-timeout', 'problem-network'],
+  C36: ['result-registered-now', 'result-ceremony', 'result-registration-closed', 'result-not-delivered'],
+  C37: ['result-transfer-code', 'result-received', 'result-registered-other'],
+  C38: ['scan-preparing', 'scan-hint', 'scan-seal', 'scan-verifying'],
   C40: ['pieces-failed', 'pieces-empty', 'collection-empty', 'releases-empty', 'circle-empty', 'circle-no-piece', 'model-not-found', 'draw-not-found', 'post-not-found'],
 });
 

@@ -92,3 +92,28 @@ export function genomeBlock(m: GenomeModel, opts: { titleId?: string; seal?: boo
     h('p', { class: 'genome__meta micro soft' }, h('span', { text: m.fingerprint }), h('span', { class: 'sep', attrs: { 'aria-hidden': 'true' }, text: '·' }), h('span', { text: m.version })),
   );
 }
+
+/**
+ * The GENOME as NOCTURNE draws it on a result (n.py genome(), C9 and C13–C16; the ceremony's, C36): its label, the
+ * orbit in ivory with its glow and the ORBES monogram at its centre (decision 12), 200 px (220 px in the ceremony of a
+ * first registration), then the product id and the fingerprint with its version, centred. Its figures in the reading
+ * face (the plan's Type rule). The figure is left out when it cannot be drawn faithfully; the words stay.
+ */
+export function nocturneGenome(m: GenomeModel, opts: { size?: 200 | 220; extraClass?: string } = {}): HTMLElement {
+  const figure = genomeRow(m, { layout: 'orbit', centre: 'monogram', ink: GENOME_SCREEN_INK });
+  if (figure) figure.classList.add('n-glow');
+  const box = figure ? h('div', { class: ['n-gen__figure', opts.size === 220 ? 'n-gen__figure--220' : null] }, figure) : null;
+  return h(
+    'section',
+    { class: ['n-gen', opts.extraClass], attrs: { 'aria-labelledby': 'genome-label' } },
+    h('h2', { class: 'n-g n-lb n-gen__label', id: 'genome-label', text: 'GENOME' }),
+    box,
+    h('p', { class: 'n-g n-gen__id n-num' }, ...digitsApart(m.id)),
+    h('p', { class: 'n-gen__fp n-num', text: `${m.fingerprint} · ${m.version}` }),
+  );
+}
+
+/** A label's figures in the reading face (`.numeral`), its letters in Gravesend. */
+function digitsApart(text: string): (string | HTMLSpanElement)[] {
+  return text.split(/(\d+)/).flatMap((part, i): (string | HTMLSpanElement)[] => (part === '' ? [] : i % 2 === 1 ? [h('span', { class: 'numeral', text: part })] : [part]));
+}

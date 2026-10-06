@@ -371,34 +371,36 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('AUTHENTIC');
     const result = page.locator('.view--result');
     await attrOf(result, 'data-state', 'AUTHENTIC');
-    await textOf(page.locator('.genome__id'), plain.product.productId);
+    await textOf(page.locator('.n-result__genome .n-gen__id'), plain.product.productId);
     expect(plain.product.productId).toBe('O26-J-00184');
-    await textsOf(page.locator('.lines__line'), ['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    // The model's name over the piece's lines (C9).
+    await textOf(page.locator('.n-result__name'), 'MONOLITHE');
+    await textsOf(page.locator('.n-result__lines .n-lines__line'), ['RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
     // The GENOME is drawn from the core renderer, in its orbit as on the piece, the ORBES monogram at its centre on a
     // collector's screen (NOCTURNE, decision 12): the monogram's layer in place of the seal's, one group per glyph, in ivory.
-    const genome = page.locator('.genome__glyphs .genome-svg');
+    const genome = page.locator('.n-result__genome .n-gen__figure .genome-svg');
     await attrOf(genome, 'aria-label', new RegExp(plain.genome.fingerprint));
     await attrOf(genome, 'class', /\bgenome-svg--orbit\b/);
     await countOf(genome.locator('g[data-layer="seal"]'), 0);
     await countOf(genome.locator('g[data-layer="monogram"] path'), 5);
     await countOf(genome.locator('g[data-layer="genome"]'), 8);
     await attrOf(genome.locator('g[fill]').first(), 'fill', '#f6f2ea');
-    // A square of min(64vw, 260px): glyphs of about 42 px on this 390 px phone (43 px from 407 px).
+    // A square of 200 px, as the canvas draws it (C9): glyphs of about 33 px.
     const box = await genome.boundingBox();
     expect(box).not.toBeNull();
-    expect(box!.width).toBeCloseTo(Math.min(0.64 * MOBILE_VIEWPORT.width, 260), 0);
+    expect(box!.width).toBeCloseTo(200, 0);
     expect(box!.height).toBeCloseTo(box!.width, 0);
     expect(box!.x + box!.width / 2).toBeCloseTo(MOBILE_VIEWPORT.width / 2, 0);
-    // The fingerprint beneath, a fact the customer may compare: 10 px, not the 8 px of decoration.
-    expect(await page.locator('.genome__meta').evaluate((el) => getComputedStyle(el).fontSize)).toBe('10px');
+    // The fingerprint beneath, a fact the customer may compare: 11.5 px (C9's .gen .fp), not the 8 px of decoration.
+    expect(await page.locator('.n-result__genome .n-gen__fp').evaluate((el) => getComputedStyle(el).fontSize)).toBe('11.5px');
     const orbit = genomeLayout(plain.genome, 'orbit');
-    expect((box!.width * 2 * orbit.glyphRadius) / orbit.viewBox.w).toBeGreaterThan(41);
+    expect((box!.width * 2 * orbit.glyphRadius) / orbit.viewBox.w).toBeGreaterThan(32);
     await textsOf(page.getByRole('tab'), ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP']);
     await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
     // The id, the fingerprint, the product lines, the rows and the reference read in Helvetica Neue.
     expect(await figuresInDisplayFace(page)).toEqual([]);
     // Honest limits are stated on every positive result.
-    await textOf(page.locator('.result__footnote'), /cannot prove that an object is genuine/);
+    await textOf(page.locator('.n-result__footnote'), /cannot prove that an object is genuine/);
     // Focus moved to the new screen's heading for screen readers.
     expect(await page.evaluate(() => document.activeElement?.id)).toBe('result-title');
 
@@ -416,17 +418,24 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.keyboard.press('ArrowRight');
     await attrOf(page.getByRole('tab', { name: 'WARRANTY' }), 'aria-selected', 'true');
     await textOf(page.getByRole('tabpanel'), /NOT YET STARTED/);
-    // Its focus ring keeps to the word, as before the tap zones grew: clear of the dots on either side.
-    const ring = (await focusRingOf(page.getByRole('tab', { name: 'WARRANTY' })))!;
-    expect(ring.focusVisible).toBe(true);
-    const dots = await page.locator('.tabs__dot').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().toJSON() as DOMRect));
-    expect(ring.left).toBeGreaterThan(dots[0].right + 1);
-    expect(ring.right).toBeLessThan(dots[1].left - 1);
+    // Its focus ring shows, clear of the tabs on either side (C9's tabs spread across the column, no dots between them).
+    // NOCTURNE's ring: an ivory outline, 2 px, 2 px off (plan, Accessibility), round the word.
+    const ring = await page.getByRole('tab', { name: 'WARRANTY' }).evaluate((el) => {
+      const cs = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      const off = Number.parseFloat(cs.outlineWidth) + Number.parseFloat(cs.outlineOffset);
+      return { focusVisible: el.matches(':focus-visible'), style: cs.outlineStyle, width: cs.outlineWidth, left: r.left - off, right: r.right + off };
+    });
+    expect(ring).toMatchObject({ focusVisible: true, style: 'solid', width: '2px' });
+    const product = (await page.getByRole('tab', { name: 'PRODUCT' }).boundingBox())!;
+    const care = (await page.getByRole('tab', { name: 'CARE' }).boundingBox())!;
+    expect(ring.left).toBeGreaterThan(product.x + product.width);
+    expect(ring.right).toBeLessThan(care.x);
     await page.keyboard.press('End');
     await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
     // A piece ORBES has not sold yet says so (S-07): not yet delivered by ORBES or an authorised retailer.
-    await textOf(page.locator('.ownership__status'), 'NOT YET DELIVERED');
-    await textOf(page.locator('.ownership__text'), 'This piece has not yet been delivered by ORBES or an authorised retailer. Registration opens once it has been.');
+    await textOf(page.locator('.n-own__status'), 'NOT YET DELIVERED');
+    await textOf(page.locator('.n-own__small'), 'This piece has not yet been delivered by ORBES or an authorised retailer. Registration opens once it has been.');
 
     // Back returns to the landing screen.
     await page.goBack();
@@ -484,7 +493,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('AUTHENTIC');
     expect(await legalLinksOf(footer)).toEqual(FOOT);
     // Under the reference, the result's last line.
-    const ref = (await page.locator('.result__meta').boundingBox())!;
+    const ref = (await page.locator('.n-result__meta').boundingBox())!;
     expect((await footer.boundingBox())!.y).toBeGreaterThan(ref.y + ref.height);
     const [tab] = await Promise.all([page.context().waitForEvent('page'), footer.getByRole('link', { name: 'HELP' }).click()]);
     await tab.waitForLoadState();
@@ -569,28 +578,28 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await uploadPhoto(page, writeCodePng(srv.workDir, 'claim.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC FIRST REGISTRATION');
     // No owner yet, so no transfer code can exist: no second-hand guidance (J-02).
-    await countOf(page.locator('.result__notice'), 0);
+    await countOf(page.locator('.n-result__notice'), 0);
     // Registration opens straight on the OWNERSHIP tab.
     await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
-    await textOf(page.locator('.ownership__status'), 'REGISTRATION OPEN');
-    // The closing time of the window is a fact to read: 10 px, as the field labels.
-    await textOf(page.locator('.ownership__meta'), /^REGISTRATION OPEN UNTIL \d\d:\d\d$/);
-    expect(await page.locator('.ownership__meta').evaluate((el) => getComputedStyle(el).fontSize)).toBe('10px');
+    await textOf(page.locator('.n-own__status'), 'REGISTRATION OPEN');
+    // The closing time of the window is a fact to read: a label, 9.5 px as the canvas sets it (C9's .lb).
+    await textOf(page.locator('.n-own__until'), /^REGISTRATION OPEN UNTIL \d\d:\d\d$/);
+    expect(await page.locator('.n-own__until').evaluate((el) => getComputedStyle(el).fontSize)).toBe('9.5px');
     await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT']);
 
     await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
     // Under CREATE ACCOUNT, the terms it accepts and the privacy policy (J-06), each in a new tab: the form and the
     // scan's window stay. The privacy policy is the information due where the account's data is collected.
-    await textOf(page.locator('.terms-note__text'), 'Creating an ORBES account means accepting the ORBES terms of use.');
+    await textOf(page.locator('.n-own__terms > span'), 'Creating an ORBES account means accepting the ORBES terms of use.');
     const terms = page.getByRole('link', { name: 'TERMS OF USE' });
     await attrOf(terms, 'href', '/legal/terms');
     await attrOf(terms, 'target', '_blank');
     await attrOf(terms, 'rel', 'noopener');
-    const privacyPolicy = page.locator('.terms-note').getByRole('link', { name: 'PRIVACY POLICY' });
+    const privacyPolicy = page.locator('.n-own__terms').getByRole('link', { name: 'PRIVACY POLICY' });
     await attrOf(privacyPolicy, 'href', '/legal/privacy');
     await attrOf(privacyPolicy, 'target', '_blank');
     await attrOf(privacyPolicy, 'rel', 'noopener');
-    expect(await page.locator('.terms-note').evaluate((el) => el.previousElementSibling?.matches('form.form--create'))).toBe(true);
+    expect(await page.locator('.n-own__terms').evaluate((el) => el.previousElementSibling?.matches('form.form--create'))).toBe(true);
     await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'TERMS OF USE', 'PRIVACY POLICY']);
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
@@ -610,7 +619,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     // Signed in (session cookie + CSRF token): the claim form appears.
     await visible(page.getByLabel('CLAIM CODE'));
-    await textOf(page.locator('.ownership__email'), email);
+    await textOf(page.locator('.n-own__email'), email);
     await keepsFloors(page, ['REGISTER THIS PIECE', 'SIGN OUT']);
     // At every phone width SIGN OUT keeps its one line (the floors check each label's lines): the account line wraps instead.
     for (const width of PHONE_WIDTHS) {
@@ -624,26 +633,26 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByLabel('CLAIM CODE').fill(issued.claimCode!.replace(/-/g, '').toLowerCase());
     await valueOf(page.getByLabel('CLAIM CODE'), issued.claimCode!);
     await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
-    await textOf(page.locator('.ownership__status'), 'REGISTERED TO YOU');
-    await textOf(page.locator('.ownership'), /Ownership verified with its claim code/);
+    await textOf(page.locator('.n-own__status'), 'REGISTERED TO YOU');
+    await textOf(page.locator('.n-own'), /Ownership verified with its claim code/);
 
     // Re-verify as the owner: the server now reports the ownership.
     await standInsForCeremony(page, 'save');
     await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
-    await countOf(page.locator('.result__notice'), 0);
+    await countOf(page.locator('.n-result__notice'), 0);
     // The ceremony of a first registration (P-D01), motion reduced: the GENOME plate first, the model and its
     // collection under the glyphs, all at once, and the vibration with them.
-    await textOf(page.locator('.ceremony__name'), 'MONOLITHE');
-    await textOf(page.locator('.ceremony__collection'), 'ORBIT');
+    await textOf(page.locator('.n-ceremony__name'), 'MONOLITHE');
+    await textOf(page.locator('.n-ceremony__collection'), 'ORBIT');
     expect(await page.locator('.view--result').evaluate((el) => el.classList.contains('is-ceremony'))).toBe(false);
-    expect(await page.locator('.view--result > :nth-child(2)').evaluate((el) => el.classList.contains('result__genome'))).toBe(true);
-    expect(await page.locator('.result__genome g[data-layer="genome"]').evaluateAll((els) => els.map((el) => getComputedStyle(el).animationName))).toEqual(Array(8).fill('none'));
+    expect(await page.locator('.view--result > :nth-child(2)').evaluate((el) => el.classList.contains('n-result__ceremony'))).toBe(true);
+    expect(await page.locator('.n-result__genome g[data-layer="genome"]').evaluateAll((els) => els.map((el) => getComputedStyle(el).animationName))).toEqual(Array(8).fill('none'));
     expect(await vibrationsOf(page)).toEqual([[18, 90, 18]]);
     // SHARE THE GENOME, a text link held to the floors; where the browser cannot share a file, the image is saved.
     const shareGenome = page.getByRole('button', { name: CEREMONY.share });
     await visible(shareGenome);
-    expect(await shareGenome.evaluate((el) => el.classList.contains('textlink'))).toBe(true);
+    expect(await shareGenome.evaluate((el) => el.classList.contains('n-tl'))).toBe(true);
     await keepsFloors(page, [CEREMONY.share, 'SCAN ANOTHER']);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     const [image] = await Promise.all([page.waitForEvent('download'), shareGenome.click()]);
@@ -661,8 +670,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await page.evaluate(() => (window as unknown as { shared: unknown[] }).shared)).toEqual([]);
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
     await page.getByRole('button', { name: 'CREATE TRANSFER CODE' }).click();
-    await textOf(page.locator('.transfer-code__value'), /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
-    expect(await page.locator('.transfer-code__label').evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize))).toEqual(['10px', '10px']);
+    await textOf(page.locator('.n-own__code'), /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    // Its label and validity are labels (C37's .lb, 9.5 px); the validity names the day and the hour.
+    expect(await page.locator('.n-own__code-label, .n-own__code + .n-own__until').evaluateAll((els) => els.map((el) => getComputedStyle(el).fontSize))).toEqual(['9.5px', '9.5px']);
+    await textOf(page.locator('.n-own__code + .n-own__until'), /^VALID UNTIL \d{1,2} [A-Z]{3} \d{4} · \d\d:\d\d$/);
     await keepsFloors(page, ['CANCEL TRANSFER', 'SIGN OUT']);
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: 640 });
@@ -670,7 +681,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
     await page.getByRole('button', { name: 'CANCEL TRANSFER' }).click();
-    await textOf(page.locator('.form__notice'), 'The transfer has been cancelled.');
+    await textOf(page.locator('.n-own__notice'), 'The transfer has been cancelled.');
 
     const owner = await srv.ctx.services.ownership.currentOwner(issued.product.id);
     expect(owner).toBeTruthy();
@@ -684,13 +695,13 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await uploadPhoto(page, writeCodePng(srv.workDir, 'ceremony.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC FIRST REGISTRATION');
     // The scan itself is no ceremony.
-    await countOf(page.locator('.ceremony'), 0);
+    await countOf(page.locator('.n-ceremony'), 0);
     await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
     await page.getByLabel('EMAIL').fill('ceremony.p-d01@example.com');
     await page.getByLabel('PASSWORD').fill(PASSWORD);
     await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
     await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
-    await textOf(page.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(page.locator('.n-own__status'), 'REGISTERED TO YOU');
     await standInsForCeremony(page, 'share');
 
     // The connection drops under VIEW AS OWNER: TRY AGAIN keeps the ceremony.
@@ -704,7 +715,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     // With motion: each of the eight glyphs (one group of the layer genome) appears in turn, from its --i.
     await attrOf(page.locator('.view--result'), 'class', /\bis-ceremony\b/);
-    const glyphs = page.locator('.result__genome .genome-svg g[data-layer="genome"]');
+    const glyphs = page.locator('.n-result__genome .genome-svg g[data-layer="genome"]');
     await countOf(glyphs, 8);
     const motion = await glyphs.evaluateAll((els) =>
       els.map((el) => ({ i: (el as SVGGElement).style.getPropertyValue('--i'), name: getComputedStyle(el).animationName, delay: Number.parseFloat(getComputedStyle(el).animationDelay) })),
@@ -712,10 +723,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(motion.map((m) => [m.i, m.name])).toEqual(Array.from({ length: 8 }, (_, i) => [String(i), 'ceremony-glyph']));
     for (let i = 1; i < 8; i++) expect(motion[i].delay).toBeGreaterThan(motion[i - 1].delay);
     // Then the model and its collection rise under them, with the vibration.
-    const names = page.locator('.ceremony__name');
+    const names = page.locator('.n-ceremony__name');
     expect(await names.evaluate((el) => Number.parseFloat(getComputedStyle(el).animationDelay))).toBeGreaterThan(motion[7].delay);
     await textOf(names, 'MONOLITHE');
-    await textOf(page.locator('.ceremony__collection'), 'ORBIT');
+    await textOf(page.locator('.n-ceremony__collection'), 'ORBIT');
     await expect.poll(() => vibrationsOf(page), POLL).toEqual([[18, 90, 18]]);
 
     // SHARE THE GENOME: the PNG, ready before the tap, goes to the share sheet while the tap is still active.
@@ -751,10 +762,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
     await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
-    const panel = page.locator('.ownership');
-    await textOf(panel.locator('.ownership__status'), 'REGISTERED TO ITS OWNER');
-    await textOf(panel.locator('.section-label'), 'RECEIVING THIS PIECE');
-    await textOf(panel.locator('.ownership__text').first(), 'This piece is registered to an ORBES account. A transfer of its ownership is in progress.');
+    const panel = page.locator('.n-own');
+    await textOf(panel.locator('.n-own__status'), 'REGISTERED TO ITS OWNER');
+    await textOf(panel.locator('.n-own__heading'), 'RECEIVING THIS PIECE');
+    await textOf(panel.locator('.n-own__text').first(), 'This piece is registered to an ORBES account. A transfer of its ownership is in progress.');
     await countOf(page.getByLabel('TRANSFER CODE'), 0);
 
     // Signed in after the scan: this scan carries no transfer window, so the panel asks to verify the piece again.
@@ -762,8 +773,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await panel.getByLabel('EMAIL').fill('buyer.f03@example.com');
     await panel.getByLabel('PASSWORD').fill(PASSWORD);
     await panel.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
-    await textOf(panel.locator('.ownership__email'), 'buyer.f03@example.com');
-    await textOf(panel.locator('.ownership__text').last(), 'To receive this piece, verify it again now that you are signed in.');
+    await textOf(panel.locator('.n-own__email'), 'buyer.f03@example.com');
+    await textOf(panel.locator('.n-own__text').last(), 'To receive this piece, verify it again now that you are signed in.');
     await countOf(page.getByLabel('TRANSFER CODE'), 0);
     await keepsFloors(page, ['VERIFY AGAIN', 'MY PIECES', 'SIGN OUT']);
     await page.getByRole('button', { name: 'VERIFY AGAIN' }).click();
@@ -771,8 +782,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // The scan of a signed-in reader who is not the owner: the result opens straight on OWNERSHIP, with this scan's window.
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC REGISTERED');
     await attrOf(page.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
-    await textOf(panel.locator('.ownership__meta'), /^RECEIVING OPEN UNTIL \d\d:\d\d$/);
-    expect(await panel.locator('.ownership__meta').evaluate((el) => getComputedStyle(el).fontSize)).toBe('10px');
+    await textOf(panel.locator('.n-own__until'), /^RECEIVING OPEN UNTIL \d\d:\d\d$/);
+    expect(await panel.locator('.n-own__until').evaluate((el) => getComputedStyle(el).fontSize)).toBe('9.5px');
     await textOf(page.locator('#transfer-code-hint'), 'Created by its owner in their ORBES account.');
     await keepsFloors(page, ['RECEIVE THIS PIECE', 'MY PIECES', 'SIGN OUT']);
     for (const width of PHONE_WIDTHS) {
@@ -792,7 +803,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByLabel('TRANSFER CODE').fill(soldCode.replace(/-/g, '').toLowerCase());
     await valueOf(page.getByLabel('TRANSFER CODE'), soldCode);
     await page.getByRole('button', { name: 'RECEIVE THIS PIECE' }).click();
-    await textOf(panel.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(panel.locator('.n-own__status'), 'REGISTERED TO YOU');
     await textOf(panel, new RegExp(`The ownership of ${sold.product.productId} has been transferred to your ORBES account\\.`));
     const buyer = (await srv.ctx.services.ownership.currentOwner(sold.product.id))!;
     expect(buyer.accountId).not.toBe(seller.account.id);
@@ -802,7 +813,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // VIEW AS OWNER verifies again: the buyer's own piece. A piece received is no first registration: no ceremony (P-D01).
     await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
-    await countOf(page.locator('.ceremony'), 0);
+    await countOf(page.locator('.n-ceremony'), 0);
     expect(await page.locator('.view--result').evaluate((el) => el.classList.contains('is-ceremony'))).toBe(false);
 
     // The new owner scans the piece signed out, then signs in on the result: no transfer is pending, and VERIFY AGAIN
@@ -814,13 +825,13 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await uploadPhoto(page, writeCodePng(srv.workDir, 'receive-owner.png', sold));
     expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
-    await textOf(panel.locator('.ownership__meta'), 'If this piece is already registered to you, sign in and scan it again to see it as its owner.');
+    await textOf(panel.locator('.n-own__small--hint'), 'If this piece is already registered to you, sign in and scan it again to see it as its owner.');
     await panel.getByLabel('EMAIL', { exact: true }).fill('buyer.f03@example.com');
     await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    await textOf(panel.locator('.ownership__email'), 'buyer.f03@example.com');
-    await textOf(panel.locator('.ownership__text').last(), 'No transfer of this piece is pending. Once its owner has created a transfer code, scan this piece again to receive it.');
-    await textOf(panel.locator('.ownership__meta'), 'If this piece is registered to you, verify it again to see it as its owner.');
+    await textOf(panel.locator('.n-own__email'), 'buyer.f03@example.com');
+    await textOf(panel.locator('.n-own__small--first'), 'No transfer of this piece is pending. Once its owner has created a transfer code, scan this piece again to receive it.');
+    await textOf(panel.locator('.n-own__small').last(), 'If this piece is registered to you, verify it again to see it as its owner.');
     await keepsFloors(page, ['VERIFY AGAIN', 'MY PIECES', 'SIGN OUT']);
     await page.getByRole('button', { name: 'VERIFY AGAIN' }).click();
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
@@ -853,16 +864,16 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // The window is the scan's account's: another account signed in on the same result is asked to verify the piece
     // again (the server would refuse the window to it), and the scan's account finds the form again.
     await srv.ctx.services.auth.registerAccount({ email: 'other.late@example.com', password: PASSWORD }, {});
-    const panel = page.locator('.ownership');
+    const panel = page.locator('.n-own');
     const signInAs = async (email: string) => {
       await panel.getByRole('button', { name: 'SIGN OUT' }).click();
       await panel.getByLabel('EMAIL', { exact: true }).fill(email);
       await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
       await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-      await textOf(panel.locator('.ownership__email'), email);
+      await textOf(panel.locator('.n-own__email'), email);
     };
     await signInAs('other.late@example.com');
-    await textOf(panel.locator('.ownership__text').last(), 'To receive this piece, verify it again now that you are signed in.');
+    await textOf(panel.locator('.n-own__text').last(), 'To receive this piece, verify it again now that you are signed in.');
     await countOf(page.getByLabel('TRANSFER CODE'), 0);
     await visible(page.getByRole('button', { name: 'VERIFY AGAIN' }));
     await signInAs('buyer.late@example.com');
@@ -876,7 +887,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.clock.setFixedTime(Date.now() + 16 * 60_000);
     await page.getByLabel('TRANSFER CODE').fill(transferCode);
     await page.getByRole('button', { name: 'RECEIVE THIS PIECE' }).click();
-    await textOf(page.locator('.ownership__text').last(), 'The window to receive this piece from this scan has closed. Scan the code again to receive it.');
+    await textOf(page.locator('.n-own__text').last(), 'The window to receive this piece from this scan has closed. Scan the code again to receive it.');
     await countOf(page.getByLabel('TRANSFER CODE'), 0);
     await keepsFloors(page, ['SCAN AGAIN']);
     expect(sent).toBe(0);
@@ -897,15 +908,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
 
     // Under the server's message, between the notice's hairlines, the sentence of the packaging kit, read in Helvetica Neue.
-    const notice = page.locator('.result__head .result__notice');
+    const notice = page.locator('.n-result__notice-block .n-result__notice');
     await textOf(notice, RESALE_GUIDANCE);
     await attrOf(notice, 'role', 'note');
     expect(await notice.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
     // Then its link, a text link: the page keeps one hairline button, SCAN ANOTHER. The tabs open on PRODUCT.
     const link = page.getByRole('button', { name: RESALE_ACTION });
     await visible(link);
-    await attrOf(link, 'class', /\btextlink\b/);
-    await countOf(page.locator('.btn'), 1);
+    await attrOf(link, 'class', /\bn-tl\b/);
+    await countOf(page.locator('.n-btn'), 1);
     await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
     const controls = [RESALE_ACTION, 'PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER'];
     await keepsFloors(page, controls);
@@ -933,10 +944,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await expect.poll(inView, POLL).toBe(true);
     expect(await page.evaluate(() => document.activeElement?.id)).toBe('receiving-title');
     expect(await heading.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('none');
-    await textOf(page.locator('.ownership__status'), 'REGISTERED TO ITS OWNER');
-    await textOf(page.locator('.ownership__text').first(), 'This piece is registered to an ORBES account.');
+    await textOf(page.locator('.n-own__status'), 'REGISTERED TO ITS OWNER');
+    await textOf(page.locator('.n-own__text').first(), 'This piece is registered to an ORBES account.');
     // Below it, sign-in to receive the piece; the focus stays on the heading while the panel learns the session.
-    const panel = page.locator('.ownership');
+    const panel = page.locator('.n-own');
     await visible(panel.getByLabel('PASSWORD', { exact: true }));
     expect(await page.evaluate(() => document.activeElement?.id)).toBe('receiving-title');
     await page.screenshot({ path: join(OUT_DIR, 'verify-resale-receiving.png') });
@@ -954,12 +965,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await panel.getByLabel('EMAIL', { exact: true }).fill(email);
     await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    await textOf(page.locator('.ownership__email'), email);
+    await textOf(page.locator('.n-own__email'), email);
     await page.goBack();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
     await uploadPhoto(page, writeCodePng(srv.workDir, 'resale-owner.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC OWNERSHIP VERIFIED');
-    await countOf(page.locator('.result__notice'), 0);
+    await countOf(page.locator('.n-result__notice'), 0);
     await countOf(page.getByRole('button', { name: RESALE_ACTION }), 0);
     expect(problems).toEqual([]);
     await page.context().close();
@@ -977,7 +988,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await uploadPhoto(page, writeCodePng(srv.workDir, 'recover.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
-    const panel = page.locator('.ownership');
+    const panel = page.locator('.n-own');
 
     // Under SIGN IN: FORGOTTEN PASSWORD?, a text link, which leads to ORBES Client Services.
     await visible(panel.getByLabel('PASSWORD', { exact: true }));
@@ -988,18 +999,18 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(panel.locator('#recover-title'), 'FORGOTTEN PASSWORD');
     // A section under the status of the piece, where the sign-in form was; keyboard focus moves to it, without a
     // ring: a heading focused on a screen change shows none (BRAND §3.8).
-    await textOf(panel.locator('.ownership__status'), 'REGISTERED TO ITS OWNER');
+    await textOf(panel.locator('.n-own__status'), 'REGISTERED TO ITS OWNER');
     expect(await page.evaluate(() => document.activeElement?.id)).toBe('recover-title');
     expect(await panel.locator('#recover-title').evaluate((el) => getComputedStyle(el).outlineStyle)).toBe('none');
     await textOf(panel, /After checking your identity, they give you a one-time recovery code, valid for 30 minutes\./);
     const contact = panel.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
     await visible(contact);
-    const ref = (await page.locator('.result__meta').innerText()).match(/REF ([0-9A-F]{8})/)![1];
+    const ref = (await page.locator('.n-result__meta').innerText()).match(/REF ([0-9A-F]{8})/)![1];
     const href = new URL((await contact.getAttribute('href'))!);
     expect(href.pathname).toBe(CLIENT_SERVICES.email);
     expect(href.searchParams.get('subject')).toBe('ORBES — FORGOTTEN PASSWORD');
     expect(href.searchParams.get('body')).toBe(`\r\n\r\nREFERENCE: ${ref}`);
-    await attrOf(panel.locator('.contact'), 'data-placement', 'recovery');
+    await attrOf(panel.locator('.n-contact'), 'data-placement', 'recovery');
     await visible(panel.getByRole('link', { name: `Call ORBES Client Services, ${CLIENT_SERVICES.phone}` }));
     const recoverControls = ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'I HAVE A RECOVERY CODE', 'BACK TO SIGN IN'];
     await keepsFloors(page, recoverControls);
@@ -1030,11 +1041,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('button', { name: 'SET NEW PASSWORD' }).click();
 
     // Back to SIGN IN, the email filled in, with what the recovery did.
-    await textOf(page.locator('.form__notice'), /^Your password has been changed: sign in with it\. For your security, every session of your account has ended, its pending transfers were cancelled, its certificate links were withdrawn and new transfers are paused until \d{1,2} [A-Z][a-z]+ \d{4}, \d\d:\d\d\.$/);
+    await textOf(page.locator('.n-own__notice'), /^Your password has been changed: sign in with it\. For your security, every session of your account has ended, its pending transfers were cancelled, its certificate links were withdrawn and new transfers are paused until \d{1,2} [A-Z][a-z]+ \d{4}, \d\d:\d\d\.$/);
     await valueOf(panel.getByLabel('EMAIL', { exact: true }), email);
     await panel.getByLabel('PASSWORD', { exact: true }).fill('a brand new passphrase');
     await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    await textOf(page.locator('.ownership__email'), email);
+    await textOf(page.locator('.n-own__email'), email);
 
     // Signed in: MY PIECES beside SIGN OUT (F-01: CHANGE PASSWORD has moved there), both on one line at every phone width.
     await countOf(panel.getByRole('button', { name: 'CHANGE PASSWORD' }), 0);
@@ -1133,7 +1144,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     // Signed out: the OWNERSHIP panel's sign-in alone, FORGOTTEN PASSWORD? under it.
     const signIn = page.locator('.pieces__signin');
-    await textOf(signIn.locator('.ownership__text').first(), /^Sign in to see the pieces registered to your ORBES account\. A piece lost or stolen can be reported here, without scanning it\.$/);
+    await textOf(signIn.locator('.n-own__lead'), /^Sign in to see the pieces registered to your ORBES account\. A piece lost or stolen can be reported here, without scanning it\.$/);
     await visible(signIn.getByRole('button', { name: 'FORGOTTEN PASSWORD?' }));
     await countOf(page.locator('article.piece'), 0);
     await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'FORGOTTEN PASSWORD?', 'SCAN ORBES CODE', ...LEGAL_LINKS]);
@@ -1151,8 +1162,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect((await footer.locator('.n-fl').boundingBox())!.y).toBeGreaterThan(scanButton.y + scanButton.height);
     // CREATE ACCOUNT, signed out in MY PIECES: the same note, both links.
     await signIn.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
-    await attrOf(signIn.locator('.terms-note').getByRole('link', { name: 'PRIVACY POLICY' }), 'href', '/legal/privacy');
-    await attrOf(signIn.locator('.terms-note').getByRole('link', { name: 'TERMS OF USE' }), 'href', '/legal/terms');
+    await attrOf(signIn.locator('.n-own__terms').getByRole('link', { name: 'PRIVACY POLICY' }), 'href', '/legal/privacy');
+    await attrOf(signIn.locator('.n-own__terms').getByRole('link', { name: 'TERMS OF USE' }), 'href', '/legal/terms');
     await keepsFloors(page, ['TERMS OF USE', 'PRIVACY POLICY', ...LEGAL_LINKS]);
     await signIn.getByRole('button', { name: 'SIGN IN' }).first().click();
     await signIn.getByLabel('EMAIL').fill(email);
@@ -1674,9 +1685,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('AUTHENTIC FIRST REGISTRATION');
     await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
-    await textOf(page.locator('.ownership__status'), 'STAFF SCAN');
-    await textOf(page.locator('.ownership__text'), STAFF_SCAN_NOTE);
-    await countOf(page.locator('.ownership form, .ownership button'), 0);
+    await textOf(page.locator('.n-own__status'), 'STAFF SCAN');
+    await textOf(page.locator('.n-own__small'), STAFF_SCAN_NOTE);
+    await countOf(page.locator('.n-own form, .n-own button'), 0);
 
     const scan = await srv.ctx.db.selectFrom('scan_events').select(['event_type', 'admin_id', 'device_hash']).where('product_id', '=', issued.product.id).executeTakeFirstOrThrow();
     expect(scan).toEqual({ event_type: 'ADMIN_TEST', admin_id: seller.id, device_hash: null });
@@ -1697,11 +1708,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
     await attrOf(page.getByRole('tab', { name: 'PRODUCT' }), 'aria-selected', 'true');
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
-    await textOf(page.locator('.ownership__status'), 'STAFF SCAN');
-    await textOf(page.locator('.ownership .section-label'), 'RECEIVING THIS PIECE');
-    await textOf(page.locator('.ownership__text').last(), RECEIVING.staffScan);
+    await textOf(page.locator('.n-own__status'), 'STAFF SCAN');
+    await textOf(page.locator('.n-own .n-own__heading'), 'RECEIVING THIS PIECE');
+    await textOf(page.locator('.n-own__text').last(), RECEIVING.staffScan);
     await countOf(page.getByRole('button', { name: 'VERIFY AGAIN' }), 0);
-    await countOf(page.locator('.ownership form'), 0);
+    await countOf(page.locator('.n-own form'), 0);
     expect(await srv.ctx.db.selectFrom('scan_tokens').select('id_hash').where('product_id', '=', listed.product.id).where('purpose', '=', 'TRANSFER_ACCEPT').execute()).toEqual([]);
     await page.goBack();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
@@ -1713,9 +1724,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const forged: IssueResult = { ...issued, code: { ...issued.code, data: toBase64Url(frameCodeData(payloadBytes, signature)) } };
     await uploadPhoto(page, writeCodePng(srv.workDir, 'staff-forged.png', forged));
     expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
-    await visible(page.locator('.result__help'));
+    await visible(page.locator('.n-result__help'));
     await countOf(page.getByRole('region', { name: 'WHERE DID YOU SEE OR BUY THIS PIECE?' }), 0);
-    await countOf(page.locator('.report'), 0);
+    await countOf(page.locator('.n-report'), 0);
     const forgedScans = await srv.ctx.db.selectFrom('scan_events').select(['event_type', 'result_state']).where('admin_id', '=', seller.id).orderBy('result_state').execute();
     expect(forgedScans).toEqual([
       { event_type: 'ADMIN_TEST', result_state: 'AUTHENTIC_FIRST_REGISTRATION' },
@@ -1739,13 +1750,14 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await attrOf(page.locator('.view--result'), 'data-tone', 'caution');
     // No tabs and no product data: the GENOME, the help line, then the certificate-card section beneath it.
     await countOf(page.getByRole('tab'), 0);
-    await countOf(page.locator('.lines__line, .rows'), 0);
+    await countOf(page.locator('.n-lines__line, .n-kv'), 0);
     const card = page.getByRole('region', { name: 'DO YOU HOLD THE CERTIFICATE CARD?' });
     await visible(card);
-    expect(await page.locator('.result__help + .result__card').count()).toBe(1);
-    await textOf(card.locator('.result__card-text'), /certificate card, you may register it in your name with the claim code/);
-    await textOf(card.locator('.ownership__status'), 'REGISTRATION OPEN');
-    await textOf(card.locator('.ownership__text').first(), 'While its activity is reviewed, this piece can be registered only with the claim code of its certificate card.');
+    expect(await page.locator('.n-result__help + .n-result__card').count()).toBe(1);
+    await textOf(card.locator('.n-result__card-text'), /certificate card, you may register it in your name with the claim code/);
+    // The window's closing time says it is open (C15: in ivory, in place of the state line).
+    await textOf(card.locator('.n-own__until'), /^REGISTRATION OPEN UNTIL \d\d:\d\d$/);
+    await textOf(card.locator('.n-own__text').first(), 'While its activity is reviewed, this piece can be registered only with the claim code of its certificate card.');
     // The question is a status line in the display face, 11 px: read, not decoration.
     const title = card.getByRole('heading', { level: 2 });
     expect(await title.evaluate((el) => getComputedStyle(el).fontSize)).toBe('11px');
@@ -1786,7 +1798,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // The code of the card: REGISTERED TO YOU.
     await page.getByLabel('CLAIM CODE').fill(issued.claimCode!);
     await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
-    await textOf(card.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(card.locator('.n-own__status'), 'REGISTERED TO YOU');
     await textOf(card, /Ownership verified with its claim code/);
     expect(await srv.ctx.services.ownership.currentOwner(issued.product.id)).toBeTruthy();
 
@@ -1794,12 +1806,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // made it a first registration: the ceremony (P-D01).
     await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
     await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toBe('AUTHENTIC OWNERSHIP VERIFIED');
-    await textOf(page.locator('.ceremony__name'), 'MONOLITHE');
+    await textOf(page.locator('.n-ceremony__name'), 'MONOLITHE');
     await attrOf(page.locator('.view--result'), 'data-tone', 'authentic');
-    await textOf(page.locator('.result__message'), /Unusual activity has been recorded for it/);
-    await countOf(page.locator('.result__card'), 0);
+    await textOf(page.locator('.n-result__message'), /Unusual activity has been recorded for it/);
+    await countOf(page.locator('.n-result__card'), 0);
     await page.getByRole('tab', { name: 'OWNERSHIP' }).click();
-    await textOf(page.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(page.locator('.n-own__status'), 'REGISTERED TO YOU');
     expect(problems).toEqual([]);
   }, 120_000);
 
@@ -1828,19 +1840,19 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await uploadPhoto(page, writeCodePng(srv.workDir, 'listed.png', issued));
     expect(await resultTitle(page)).toBe('UNUSUAL ACTIVITY DETECTED');
     await countOf(page.getByRole('tab'), 0);
-    await countOf(page.locator('.lines__line, .rows'), 0);
+    await countOf(page.locator('.n-lines__line, .n-kv'), 0);
     await countOf(page.getByRole('region', { name: 'DO YOU HOLD THE CERTIFICATE CARD?' }), 0);
     const section = page.getByRole('region', { name: 'DO YOU HOLD A TRANSFER CODE?' });
     await visible(section);
-    expect(await page.locator('.result__help + .result__card').count()).toBe(1);
-    await textOf(section.locator('.result__card-text'), 'If the owner of this piece has given you a transfer code, you may receive it in your ORBES account with that code.');
-    await textOf(section.locator('.ownership__status'), 'REGISTERED TO ITS OWNER');
+    expect(await page.locator('.n-result__help + .n-result__card').count()).toBe(1);
+    await textOf(section.locator('.n-result__card-text'), 'If the owner of this piece has given you a transfer code, you may receive it in your ORBES account with that code.');
+    await textOf(section.locator('.n-own__status'), 'REGISTERED TO ITS OWNER');
     await textOf(section, /While its activity is reviewed, this piece can be received only with the transfer code its owner gave you\./);
-    await textOf(section.locator('.section-label'), 'RECEIVING THIS PIECE');
+    await textOf(section.locator('.n-own__heading'), 'RECEIVING THIS PIECE');
     await keepsFloors(page, ['RECEIVE THIS PIECE', 'SIGN OUT', 'SCAN AGAIN']);
     await page.getByRole('textbox', { name: 'TRANSFER CODE' }).fill(transferCode);
     await page.getByRole('button', { name: 'RECEIVE THIS PIECE' }).click();
-    await textOf(section.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(section.locator('.n-own__status'), 'REGISTERED TO YOU');
     await textOf(section, new RegExp(`The ownership of ${issued.product.productId} has been transferred to your ORBES account\\.`));
     const buyer = await srv.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', 'buyer.listed@example.com').executeTakeFirstOrThrow();
     expect((await srv.ctx.services.ownership.currentOwner(issued.product.id))?.accountId).toBe(buyer.id);
@@ -1862,12 +1874,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // The visitor takes longer than the 15 minutes of the scan's registration window, then acts in the section.
     await page.clock.setFixedTime(Date.now() + 16 * 60_000);
     await card.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
-    await textOf(card.locator('.ownership__text'), /registration window of this scan has closed\. Scan the code again, then register this piece with the claim code of its certificate card\./);
+    await textOf(card.locator('.n-own__small'), /registration window of this scan has closed\. Scan the code again, then register this piece with the claim code of its certificate card\./);
     await countOf(card.getByRole('button'), 0);
     await countOf(page.getByLabel('CLAIM CODE'), 0);
     // One SCAN AGAIN: the foot's.
     await countOf(page.getByRole('button', { name: 'SCAN AGAIN' }), 1);
-    await countOf(page.locator('.result__foot').getByRole('button', { name: 'SCAN AGAIN' }), 1);
+    await countOf(page.locator('.n-result__foot').getByRole('button', { name: 'SCAN AGAIN' }), 1);
     expect(problems).toEqual([]);
   }, 120_000);
 
@@ -1889,12 +1901,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
       await uploadPhoto(page, writeCodePng(srv.workDir, name, piece));
       expect(await resultTitle(page), name).toBe('UNUSUAL ACTIVITY DETECTED');
       await attrOf(page.locator('.view--result'), 'data-tone', 'caution');
-      await visible(page.locator('.result__help'));
-      await countOf(page.locator('.result__card'), 0);
+      await visible(page.locator('.n-result__help'));
+      await countOf(page.locator('.n-result__card'), 0);
       await countOf(page.getByRole('region', { name: 'DO YOU HOLD THE CERTIFICATE CARD?' }), 0);
       await countOf(page.getByLabel('CLAIM CODE'), 0);
       await countOf(page.getByRole('tab'), 0);
-      await visible(page.locator('.result__help').getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+      await visible(page.locator('.n-result__help').getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
       await countOf(page.getByRole('button', { name: 'SCAN AGAIN' }), 1);
       await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'SCAN AGAIN']);
       expect(problems, name).toEqual([]);
@@ -1913,22 +1925,22 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
     await attrOf(page.locator('.view--result'), 'data-tone', 'void');
 
-    // Under the help line: a text link (the hairline button stays SCAN AGAIN), an email to Client
+    // Under the help line: a link (the hairline button stays SCAN AGAIN), an email to Client
     // Services that quotes this scan's reference.
-    const help = page.locator('.result__help');
+    const help = page.locator('.n-result__help');
     const email = help.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
     await visible(email);
     const scan = await srv.ctx.db.selectFrom('scan_events').select(['id', 'result_state']).orderBy('occurred_at', 'desc').executeTakeFirstOrThrow();
     expect(scan.result_state).toBe('INVALID_SIGNATURE');
     const ref = scan.id.split('-')[0].toUpperCase();
-    await textOf(page.locator('.result__meta'), new RegExp(`REF ${ref}$`));
+    await textOf(page.locator('.n-result__meta'), new RegExp(`REF ${ref}$`));
     const href = new URL((await email.getAttribute('href'))!);
     expect(href.protocol).toBe('mailto:');
     expect(href.pathname).toBe(CLIENT_SERVICES.email);
     expect(href.searchParams.get('subject')).toBe(`ORBES — REF ${ref} — INVALID SIGNATURE`);
     expect(href.searchParams.get('body')).toMatch(new RegExp(`^\\r\\n\\r\\nREFERENCE: ${ref}\\r\\nRESULT: INVALID SIGNATURE\\r\\nVERIFIED: \\d{1,2} [A-Z]{3} \\d{4} · \\d\\d:\\d\\d \\(UTC[+-]\\d\\d:\\d\\d\\)$`));
-    await attrOf(email, 'class', 'textlink contact__email');
-    await countOf(page.locator('.btn:visible'), 1);
+    await attrOf(email, 'class', 'n-g n-contact__email');
+    await countOf(page.locator('.n-btn:visible'), 1);
     // One line, inside the column (never wider than the page), in a text link's 44 px tap zone.
     expect((await email.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(await linesOf(email)).toBe(1);
@@ -1937,7 +1949,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await attrOf(phone, 'href', 'tel:+33123456789');
     await textOf(phone, CLIENT_SERVICES.phone);
     expect(await phone.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
-    await textOf(help.locator('.contact__hours'), CLIENT_SERVICES.hours.toUpperCase());
+    await textOf(help.locator('.n-contact__hours'), CLIENT_SERVICES.hours);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN AGAIN']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-invalid-signature-contact.png'), fullPage: true });
@@ -1967,15 +1979,23 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Under the help line and its contact; the question a status line in the display face, 11 px.
     const section = page.getByRole('region', { name: 'WHERE DID YOU SEE OR BUY THIS PIECE?' });
     await visible(section);
-    expect(await page.locator('.result__help + .report').count()).toBe(1);
-    const title = section.getByRole('heading', { level: 2 });
+    expect(await page.locator('.n-result__help + .n-report').count()).toBe(1);
+    const title = section.locator('.n-report__title');
+    await textOf(section.getByRole('heading', { level: 2 }), /^WHERE DID YOU SEE OR BUY THIS PIECE\?/);
     expect(await title.evaluate((el) => getComputedStyle(el).fontSize)).toBe('11px');
     expect(await title.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
-    await textOf(section.locator('.report__lead'), 'Optional. Your answer stays with this reference, for ORBES Client Services.');
-    // Four answers and nothing to type until one is chosen; SCAN AGAIN stays the one hairline button.
-    await textsOf(section.getByRole('button'), ['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER']);
+    await textOf(section.locator('.n-report__lead'), 'Optional. Your answer stays with this reference, for ORBES Client Services.');
+    // C16: a row that opens (+), the question and its sentence; nothing to choose nor to type until it is opened.
+    const question = section.getByRole('button', { name: /^WHERE DID YOU SEE OR BUY THIS PIECE\?/ });
+    await attrOf(question, 'aria-expanded', 'false');
     expect(await section.locator('form').isHidden()).toBe(true);
-    await countOf(page.locator('.btn:visible'), 1);
+    await countOf(page.locator('.n-btn:visible'), 1);
+    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'SCAN AGAIN']);
+    await question.click();
+    await attrOf(question, 'aria-expanded', 'true');
+    // Opened: the four answers, two by two (C15's .opt2), the place, the note and SEND ANSWER.
+    await textsOf(section.locator('.n-report__channel'), ['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER']);
+    await visible(section.locator('form'));
     await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER', 'SCAN AGAIN']);
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: 640 });
@@ -1983,7 +2003,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
 
-    // ONLINE: pressed, then the place, the note and SEND ANSWER (a text link).
+    // SEND ANSWER before an answer is chosen: the keyboard is taken to the answers, nothing is sent.
+    await section.getByRole('button', { name: 'SEND ANSWER' }).click();
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('BOUTIQUE');
+    // ONLINE: pressed, then the place, the note and SEND ANSWER (a hairline button, as C15 draws it).
     const online = section.getByRole('button', { name: 'ONLINE' });
     await online.click();
     await attrOf(online, 'aria-pressed', 'true');
@@ -1993,8 +2016,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await section.getByLabel('NOTE (OPTIONAL)').fill('Offered at a third of the boutique price.');
     await textOf(section.locator('#report-note-hint'), 'Please leave out your name and contact details.');
     const send = section.getByRole('button', { name: 'SEND ANSWER' });
-    await attrOf(send, 'class', 'textlink report__send');
-    await countOf(page.locator('.btn:visible'), 1);
+    await attrOf(send, 'class', /\bn-btn--ol\b/);
+    await countOf(page.locator('.n-btn:visible'), 2);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await keepsFloors(page, ['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER', 'SEND ANSWER', 'SCAN AGAIN']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-invalid-signature-report.png'), fullPage: true });
@@ -2015,9 +2038,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Sent: the thanks, with the reference of the result's foot; the case waits in the console's queue.
     await send.click();
     await textOf(section.getByRole('status'), 'THANK YOU');
-    await textOf(section.locator('.report__lead'), `Your answer is kept with reference ${ref}.`);
+    await textOf(section.locator('.n-report__kept'), `Your answer is kept with reference ${ref}.`);
     await countOf(section.getByRole('button'), 0);
-    await textOf(page.locator('.result__meta'), new RegExp(`REF ${ref}$`));
+    await textOf(page.locator('.n-result__meta'), new RegExp(`REF ${ref}$`));
     const row = await srv.ctx.db.selectFrom('scan_reports').selectAll().where('scan_event_id', '=', scan.id).executeTakeFirstOrThrow();
     expect(row).toMatchObject({ channel: 'ONLINE', place: 'a marketplace listing', note: 'Offered at a third of the boutique price.', status: 'OPEN' });
     await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'SCAN AGAIN']);
@@ -2044,15 +2067,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Not the 15 s of a request timeout: about the 1 s the result may wait for the contact, at most.
     expect(Date.now() - answeredAt).toBeLessThan(3_000);
     expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
-    await countOf(page.locator('.contact'), 0);
-    await visible(page.locator('.result__help'));
+    await countOf(page.locator('.n-contact'), 0);
+    await visible(page.locator('.n-result__help'));
     // The held read gives up on its own (a few seconds); the next result reads the contact again and shows it.
     await page.waitForTimeout(4_500);
     await page.goBack();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
     await uploadPhoto(page, writeCodePng(srv.workDir, 'stalled-contact-2.png', forged));
     expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
-    await visible(page.locator('.result__help').getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+    await visible(page.locator('.n-result__help').getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
     expect(held).toBe(2);
     expect(problems.filter((p) => !/client-services/.test(p))).toEqual([]);
     await page.context().close();
@@ -2064,10 +2087,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
     await uploadPhoto(page, writeCodePng(srv.workDir, 'void-warranty.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC');
-    await countOf(page.locator('.contact'), 0);
+    await countOf(page.locator('.n-contact'), 0);
     await page.getByRole('tab', { name: 'WARRANTY' }).click();
     const panel = page.getByRole('tabpanel');
-    await textOf(panel.locator('.rows'), /NO LONGER VALID/);
+    await textOf(panel.locator('.n-kv'), /NO LONGER VALID/);
     const email = panel.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
     await visible(email);
     const href = new URL((await email.getAttribute('href'))!);
@@ -2075,10 +2098,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(href.searchParams.get('body')).toMatch(/\r\nRESULT: AUTHENTIC\r\nWARRANTY: NO LONGER VALID\r\n/);
     await visible(panel.getByRole('link', { name: `Call ORBES Client Services, ${CLIENT_SERVICES.phone}` }));
     await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN ANOTHER']);
-    await countOf(page.locator('.contact'), 1);
-    // A text link at the width of a tab panel: one line on this phone and on the narrower ones in use.
-    await attrOf(email, 'class', 'textlink contact__email');
-    await countOf(page.locator('.btn:visible'), 1);
+    await countOf(page.locator('.n-contact'), 1);
+    // A link at the width of a tab panel: one line on this phone and on the narrower ones in use.
+    await attrOf(email, 'class', 'n-g n-contact__email');
+    await countOf(page.locator('.n-btn:visible'), 1);
     expect((await email.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(await linesOf(email)).toBe(1);
     for (const width of PHONE_WIDTHS) {
@@ -2099,11 +2122,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('REVOKED');
     await attrOf(page.locator('.view--result'), 'data-tone', 'void');
     await countOf(page.getByRole('tab'), 0);
-    await countOf(page.locator('.result__footnote'), 0);
+    await countOf(page.locator('.n-result__footnote'), 0);
     expect(problems).toEqual([]);
   }, 120_000);
 
-  it('shows the photograph of an authentic piece\'s model above its GENOME (F-04), never the piece\'s own (NOCTURNE, decision 9), with its alternative text; none on an invalid signature', async () => {
+  it('shows the photograph of an authentic piece\'s model under its GENOME (F-04, C9), never the piece\'s own (NOCTURNE, decision 9), with its alternative text; none on an invalid signature', async () => {
     // A model of its own, so that no other result of this suite shows a photograph.
     const category = (await srv.ctx.categories.getByCode('J'))!;
     const model = await srv.ctx.db
@@ -2119,24 +2142,29 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
     await uploadPhoto(page, writeCodePng(srv.workDir, 'photographed.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC');
-    const plate = page.getByRole('region', { name: 'Photographs of this piece' });
+    const plate = page.getByRole('region', { name: 'Photograph of the model' });
     await visible(plate);
     // The model's photograph alone, though the piece has one of its own (taken before NOCTURNE): never shown.
-    const images = plate.locator('img.photo__img');
+    const images = plate.locator('img');
     await countOf(images, 1);
     expect(await images.evaluateAll((els) => els.map((el) => el.getAttribute('alt')))).toEqual(['The ECLIPSE PENDANT model, photographed by ORBES']);
-    await textsOf(plate.locator('.photo__caption'), ['THE MODEL']);
-    await textOf(plate.locator('.photos__note'), 'Photographed by ORBES. Compare it with the piece in your hands.');
-    // Decoded by the browser from the stripped file, in its frame on the ivory plate.
+    await textsOf(plate.locator('.n-result__caption'), ['THE MODEL']);
+    await textOf(plate.locator('.n-result__photo-note'), 'Photographed by ORBES. Compare it with the piece in your hands.');
+    // Decoded by the browser from the stripped file, shown whole (contain) at the column's full width, without the fade.
     await expect.poll(() => images.evaluateAll((els) => els.map((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth])), POLL).toEqual([[true, 640]]);
-    expect(await plate.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(PLATE);
-    // At the head of the result: under the title and its sentence, above the GENOME.
+    expect(await images.first().evaluate((el) => getComputedStyle(el).objectFit)).toBe('contain');
+    const frame = (await plate.locator('.n-ph').boundingBox())!;
+    expect(frame.width).toBeCloseTo(MOBILE_VIEWPORT.width, 0);
+    expect(frame.height).toBeCloseTo(390, 0);
+    await countOf(plate.locator('.n-fade'), 0);
+    // Under the GENOME (C9), above the model's name and lines.
     const plateBox = (await plate.boundingBox())!;
-    expect(plateBox.y).toBeGreaterThan((await page.locator('.result__message').boundingBox())!.y);
-    expect(plateBox.y + plateBox.height).toBeLessThan((await page.locator('.result__genome').boundingBox())!.y);
-    expect(await plate.locator('.photo__caption').first().evaluate((el) => [getComputedStyle(el).fontFamily, getComputedStyle(el).fontSize])).toEqual([
+    const genomeBox = (await page.locator('.n-result__genome').boundingBox())!;
+    expect(plateBox.y).toBeGreaterThan(genomeBox.y + genomeBox.height);
+    expect(plateBox.y + plateBox.height).toBeLessThan((await page.locator('.n-result__name').boundingBox())!.y);
+    expect(await plate.locator('.n-result__caption').first().evaluate((el) => [getComputedStyle(el).fontFamily, getComputedStyle(el).fontSize])).toEqual([
       expect.stringMatching(/^"?Gravesend Sans"?,/),
-      '10px',
+      '9.5px',
     ]);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'SCAN ANOTHER']);
@@ -2154,7 +2182,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
     await uploadPhoto(page, writeCodePng(srv.workDir, 'photographed-forged.png', forged));
     expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
-    await countOf(page.locator('.result__photos, img'), 0);
+    await countOf(page.locator('.view--result img'), 0);
     expect(problems).toEqual([]);
   }, 120_000);
 
@@ -2269,7 +2297,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
     await uploadPhoto(page, writeCodePng(srv.workDir, 'lookbook.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC');
-    const seeModel = page.locator('.result__lines').getByRole('link', { name: 'SEE THE MODEL' });
+    const seeModel = page.locator('.n-result__lines').getByRole('link', { name: 'SEE THE MODEL' });
     await attrOf(seeModel, 'href', '/verify/lookbook/aurore');
     await keepsFloors(page, ['SEE THE MODEL', 'SCAN ANOTHER']);
     await seeModel.click();
@@ -2284,7 +2312,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
     await uploadPhoto(page, writeCodePng(srv.workDir, 'lookbook-discontinued.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC');
-    await textsOf(page.locator('.result__lines .lines__line'), ['AURORE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026', `DISCONTINUED · ${auroreYear}`]);
+    await textOf(page.locator('.n-result__name'), 'AURORE');
+    await textsOf(page.locator('.n-result__lines .n-lines__line'), ['RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026', `DISCONTINUED · ${auroreYear}`]);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await catalog.reinstateModel(aurore.id, SYSTEM_ACTOR);
 
@@ -2430,7 +2459,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.release__seed .release__hex'), groupHex(drop.seedHash));
     // Signed out: the sign-in of an account, any account; then ENTER THE DRAW, the page's hairline button.
     const panel = page.locator('.release__signin');
-    await textOf(panel.locator('.ownership__text').first(), RELEASES.signIn);
+    await textOf(panel.locator('.n-own__lead'), RELEASES.signIn);
     await panel.getByLabel('EMAIL').fill(email);
     await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
@@ -2779,7 +2808,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.goto(`${srv.origin}/verify/circle`);
     await textOf(page.locator('h1'), 'THE CIRCLE');
     const panel = page.locator('.circle__signin');
-    await textOf(panel.locator('.ownership__text').first(), CIRCLE.signIn);
+    await textOf(panel.locator('.n-own__lead'), CIRCLE.signIn);
     await panel.getByLabel('EMAIL').fill(email);
     await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
@@ -2997,7 +3026,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app: camera scan (Chromium fake captu
     await textOf(page.getByRole('status'), /ORBES CODE FOUND|VERIFYING…/);
     await page.screenshot({ path: join(OUT_DIR, 'verify-scan-locked.png') });
     expect(await resultTitle(page)).toBe('AUTHENTIC');
-    await textOf(page.locator('.genome__id'), issued.product.productId);
+    await textOf(page.locator('.n-result__genome .n-gen__id'), issued.product.productId);
     // The sound signature (P-D07): its AudioContext created in the tap SCAN ORBES CODE, the chord as the result appeared.
     await expect.poll(() => soundOf(page), POLL).toEqual({ contexts: [{ activeTap: true, session: 'ambient' }], notes: CHORD });
     // The camera was opened once (rear camera requested) and released once the code was read.
@@ -3073,21 +3102,21 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app: the scan as a ritual (P-D10)', (
   it('tightens the ring around the centre while a seal is seen, at most 4 times a second, then loosens back to the search', async () => {
     const { page, problems, writes } = await scanWithSeal('no-preference');
     // Searching: the sweep turns, the ring at rest.
-    const ring = page.locator('.view--scan .reticle--live .reticle__ring');
+    const ring = page.locator('.view--scan .n-cam__ring');
     // Seal seen: .is-sealed, the sweep gone, the ring scaled about the orbit's centre (0.95 − 0.07 × 0.8 = 0.894).
     await page.locator('.view--scan.is-sealed').waitFor({ timeout: 10_000 });
     await expect.poll(() => ring.evaluate((el) => getComputedStyle(el).transform), POLL).toBe('matrix(0.894, 0, 0, 0.894, 0, 0)');
-    expect(await ring.evaluate((el) => getComputedStyle(el).animationName)).toBe('reticle-focus');
-    expect(await page.locator('.view--scan .reticle__sweep').evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
-    // The ring keeps its centre: the centre of the screen, where the reticle stands.
+    expect(await ring.evaluate((el) => getComputedStyle(el).animationName)).toBe('n-cam-breathe');
+    expect(await page.locator('.view--scan .n-cam__sweep').evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+    // The ring keeps its centre: the orbit's, where C11 sets it (46.445 % of the screen's height, 392 px of 844).
     const box = (await ring.boundingBox())!;
     expect(Math.abs(box.x + box.width / 2 - MOBILE_VIEWPORT.width / 2)).toBeLessThan(1.5);
-    expect(Math.abs(box.y + box.height / 2 - MOBILE_VIEWPORT.height / 2)).toBeLessThan(1.5);
+    expect(Math.abs(box.y + box.height / 2 - MOBILE_VIEWPORT.height * 0.46445)).toBeLessThan(1.5);
     await page.screenshot({ path: join(OUT_DIR, 'verify-scan-sealed.png') });
     // The decoder stops seeing it: the ring loosens back to the search within SEAL_HOLD_MS, the sweep turning again.
     await expect.poll(() => page.locator('.view--scan.is-sealed').count(), { timeout: 10_000, interval: 50 }).toBe(0);
     await expect.poll(() => ring.evaluate((el) => getComputedStyle(el).transform), POLL).toBe('none');
-    await expect.poll(() => page.locator('.view--scan .reticle__sweep').evaluate((el) => getComputedStyle(el).opacity), POLL).toBe('1');
+    await expect.poll(() => page.locator('.view--scan .n-cam__sweep').evaluate((el) => getComputedStyle(el).opacity), POLL).toBe('1');
     // The signal reached the view at most 4 times a second (each one writes the scale), and the scan's screen and
     // controls are as they were: no lock, the status, CLOSE and UPLOAD A PHOTO.
     const seen = await writes();
@@ -3105,7 +3134,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app: the scan as a ritual (P-D10)', (
   it('only steadies the ring when motion is reduced: no tightening, no breathing', async () => {
     const { page, problems } = await scanWithSeal('reduce');
     await page.locator('.view--scan.is-sealed').waitFor({ timeout: 10_000 });
-    const ring = page.locator('.view--scan .reticle--live .reticle__ring');
+    const ring = page.locator('.view--scan .n-cam__ring');
     expect(await ring.evaluate((el) => getComputedStyle(el).transform)).toBe('none');
     expect(await ring.evaluate((el) => getComputedStyle(el).animationName)).toBe('none');
     expect(await ring.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
@@ -3127,29 +3156,29 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app: the scan as a ritual (P-D10)', (
       await textOf(page.getByRole('status'), 'VERIFYING…');
       // Once the screen has come in (its own fade and rise, not a transition from the screen before).
       await expect.poll(() => page.locator('.view--verifying').evaluate((el) => el.getAnimations().every((a) => a.playState === 'finished')), POLL).toBe(true);
-      // The scanner's ring, at the scanner's size (min(66vw, 40vh, 340px) = 257.4 px here) and in its centre, closed
-      // on its four moons, the arc travelling (with motion).
-      const orbit = page.locator('.view--verifying .verifying__orbit .reticle--verifying');
-      await countOf(orbit.locator('.reticle__moon'), 4);
-      const ring = (await orbit.locator('.reticle__ring').boundingBox())!;
-      expect(Math.abs(ring.width - Math.min(0.66 * MOBILE_VIEWPORT.width, 0.4 * MOBILE_VIEWPORT.height, 340))).toBeLessThan(2.5);
+      // The scanner's orbit, at the scanner's size (272 px, C11) and in its place, closed on its four moons, its ring
+      // 2 px (C12), the arc travelling (with motion).
+      const orbit = page.locator('.view--verifying .n-cam__orbit');
+      await countOf(orbit.locator('.n-cam__moon'), 4);
+      const ring = (await orbit.locator('.n-cam__ring').boundingBox())!;
+      expect(Math.abs(ring.width - 272)).toBeLessThan(1);
       expect(Math.abs(ring.x + ring.width / 2 - MOBILE_VIEWPORT.width / 2)).toBeLessThan(1.5);
-      expect(Math.abs(ring.y + ring.height / 2 - MOBILE_VIEWPORT.height / 2)).toBeLessThan(1.5);
-      expect(await orbit.locator('.reticle__ring').evaluate((el) => getComputedStyle(el).strokeWidth)).toBe('2px');
-      expect(await orbit.locator('.reticle__sweep').evaluate((el) => getComputedStyle(el).animationName)).toBe(reducedMotion === 'reduce' ? 'none' : 'orbit');
+      expect(Math.abs(ring.y + ring.height / 2 - MOBILE_VIEWPORT.height * 0.46445)).toBeLessThan(1.5);
+      expect(await orbit.locator('.n-cam__ring').evaluate((el) => getComputedStyle(el).boxShadow)).toBe('rgba(246, 242, 234, 0.95) 0px 0px 0px 2px');
+      expect(await orbit.locator('.n-cam__sweep').evaluate((el) => getComputedStyle(el).animationName)).toBe(reducedMotion === 'reduce' ? 'none' : 'n-cam-orbit');
       if (reducedMotion === 'no-preference') await page.screenshot({ path: join(OUT_DIR, 'verify-verifying-ring.png') });
       expect(await resultTitle(page)).toBe('AUTHENTIC');
-      // The plate opens from its centre (a widening circle) with motion; without, it is simply there.
-      const plate = page.locator('.view--result > .result__genome');
+      // The GENOME opens from its centre (a widening circle) with motion; without, it is simply there.
+      const plate = page.locator('.view--result .n-result__genome');
       expect(await plate.evaluate((el) => getComputedStyle(el).animationName)).toBe(reducedMotion === 'reduce' ? 'none' : 'genome-open');
       if (reducedMotion === 'no-preference') {
         await expect.poll(() => plate.evaluate((el) => el.getAnimations().every((a) => a.playState === 'finished')), POLL).toBe(true);
         expect(await plate.evaluate((el) => getComputedStyle(el).clipPath)).toBe('circle(75% at 50% 50%)');
       }
-      // Nothing of the plate is left hidden: its four brackets and the GENOME's id are seen whole.
+      // Nothing of it is left hidden: its label, its figure and the GENOME's id are seen whole.
       await expect.poll(() => plate.evaluate((el) => getComputedStyle(el).opacity), POLL).toBe('1');
-      for (const corner of ['tl', 'tr', 'bl', 'br']) await visible(plate.locator(`.bracket--${corner}`));
-      await textOf(page.locator('.genome__id'), issued.product.productId);
+      for (const part of ['.n-gen__label', '.n-gen__figure', '.n-gen__fp']) await visible(plate.locator(part));
+      await textOf(page.locator('.n-result__genome .n-gen__id'), issued.product.productId);
       expect(problems).toEqual([]);
       await page.context().close();
     }
@@ -3174,7 +3203,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app: camera permission declined', () 
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).click();
     expect(await resultTitle(page)).toBe('CAMERA ACCESS DECLINED');
-    await textOf(page.locator('.message__text'), /allow camera access/);
+    await textOf(page.locator('.n-message__text'), /allow camera access/);
     await visible(page.getByRole('button', { name: 'UPLOAD A PHOTO' }));
     await visible(page.getByRole('button', { name: 'SCAN AGAIN' }));
     expect(problems).toEqual([]);

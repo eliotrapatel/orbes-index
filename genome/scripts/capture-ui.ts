@@ -326,9 +326,9 @@ async function captureVerify(stage: Stage, shots: Shots, workDir: string): Promi
     await shots.viewport(page, 'verify-03-locked');
 
     verify.open();
-    await page.waitForSelector('.view--result .result__title', { timeout: 20_000 });
+    await page.waitForSelector('.view--result .n-result__title', { timeout: 20_000 });
     await sleep(2600); // staggered rise of the result blocks
-    await page.waitForSelector('.ownership .auth__switch, .ownership form', { timeout: 10_000 });
+    await page.waitForSelector('.n-own .n-own__switch, .n-own form', { timeout: 10_000 });
     await sleep(300);
     const state = await page.getAttribute('.view--result', 'data-state');
     if (state !== 'AUTHENTIC_FIRST_REGISTRATION') throw new Error(`${FIRST_REGISTRATION} verified as ${state}`);
@@ -371,11 +371,11 @@ async function captureVerify(stage: Stage, shots: Shots, workDir: string): Promi
       await route.continue();
     });
     await upload(codePhoto(await codeOf(stage.db, UNUSUAL_ACTIVITY)), 'orbes-code.png');
-    await page.waitForFunction(() => document.querySelector('.verifying__status')?.textContent === 'VERIFYING…', null, { timeout: 20_000 });
+    await page.waitForFunction(() => document.querySelector('.view--verifying .n-cam__line')?.textContent === 'VERIFYING…', null, { timeout: 20_000 });
     await sleep(1300); // view rise (1.1 s)
     await shots.viewport(page, 'verify-09-verifying');
     hold.open();
-    await page.waitForSelector('.view--result .result__title', { timeout: 20_000 });
+    await page.waitForSelector('.view--result .n-result__title', { timeout: 20_000 });
     await sleep(2600);
     const unusual = await page.getAttribute('.view--result', 'data-state');
     if (unusual !== 'SUSPICIOUS_ACTIVITY') throw new Error(`${UNUSUAL_ACTIVITY} verified as ${unusual}`);
@@ -388,7 +388,7 @@ async function captureVerify(stage: Stage, shots: Shots, workDir: string): Promi
     forged[13 + 17] ^= 0x04; // payload (13 bytes) ‖ signature (64) ‖ CRC: flip a signature bit…
     const reframed = frameCodeData(forged.subarray(0, 13), forged.subarray(13, 77)); // …and recompute the CRC
     await upload(codePhoto({ data: reframed, glyphs: base.glyphs }), 'orbes-code.png');
-    await page.waitForSelector('.view--result .result__title', { timeout: 20_000 });
+    await page.waitForSelector('.view--result .n-result__title', { timeout: 20_000 });
     await sleep(2600);
     const invalid = await page.getAttribute('.view--result', 'data-state');
     if (invalid !== 'INVALID_SIGNATURE') throw new Error(`forged code verified as ${invalid}`);
@@ -420,8 +420,8 @@ async function captureVerifyCard(stage: Stage, shots: Shots): Promise<void> {
     await page.waitForSelector('.landing__scan');
     await hideGrain(page);
     await page.setInputFiles('#photo-input', { name: 'orbes-code.png', mimeType: 'image/png', buffer: codePhoto(code) });
-    await page.waitForSelector('.view--result .result__title', { timeout: 20_000 });
-    await page.waitForSelector('.result__card .ownership .auth__switch', { timeout: 10_000 });
+    await page.waitForSelector('.view--result .n-result__title', { timeout: 20_000 });
+    await page.waitForSelector('.n-result__card .n-own .n-own__switch', { timeout: 10_000 });
     await sleep(2600);
     const state = await page.getAttribute('.view--result', 'data-state');
     if (state !== 'SUSPICIOUS_ACTIVITY') throw new Error(`${CARD_SECTION} verified as ${state}`);

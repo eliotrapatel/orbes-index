@@ -199,6 +199,22 @@ export const MOVED: readonly Moved[] = [
   })),
   ...tierMoves(),
   ...nowMoves(),
+  // N4 (C16): on a result that is neither authentic nor UNUSUAL ACTIVITY, WHERE DID YOU SEE OR BUY THIS PIECE? is a row
+  // that opens (+): its four answers are inside it.
+  ...['result-invalid', 'result-unknown', 'result-revoked'].flatMap((state) =>
+    ['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER'].map((value) => ({
+      state,
+      value,
+      reason: 'N4 (C16): the question is a row that opens (+), its answers inside it, as the canvas draws it under INVALID SIGNATURE, UNKNOWN and REVOKED.',
+      now: 'The same answers, two by two, once the row WHERE DID YOU SEE OR BUY THIS PIECE? is opened (open as it was under UNUSUAL ACTIVITY, C15).',
+    })),
+  ),
+  {
+    state: 'scan-preparing',
+    value: 'Align the ORBES CODE within the orbit',
+    reason: 'N4 (C38): PREPARING CAMERA… stands alone, before the stream.',
+    now: 'The guide shows under SCANNING… once the camera streams (scan-camera).',
+  },
   {
     state: 'pieces-failed',
     value: 'Your pieces could not be shown just now. The ORBES service could not be reached. Check your connection, then try again.',

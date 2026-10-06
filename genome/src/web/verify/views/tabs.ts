@@ -32,13 +32,19 @@ export interface TabsOptions<T extends string> {
   regionLabel?: string;
   /** Told each tab selected by the reader (a click or a key), not the first. */
   onSelect?: (id: T) => void;
+  /**
+   * NOCTURNE's underlined tabs (views/nocturne.ts, C_CSS `.tabsx`: a result's four, spread across the column, no dot
+   * between them), in place of the house tabs.
+   */
+  kind?: 'tabsx';
 }
 
 export function tabsView<T extends string = TabId>(ids: readonly T[], build: (id: T) => HTMLElement, initial: T = ids[0], opts: TabsOptions<T> = {}): TabsView<T> {
   const labels = (opts.labels ?? TAB_LABELS) as Readonly<Record<string, string>>;
   const prefix = opts.idPrefix ?? '';
-  const list = h('div', { class: 'tabs__list', attrs: { role: 'tablist', 'aria-label': opts.label ?? 'Product information' } });
-  const panels = h('div', { class: 'tabs__panels' });
+  const nocturne = opts.kind === 'tabsx';
+  const list = h('div', { class: nocturne ? 'n-tabsx' : 'tabs__list', attrs: { role: 'tablist', 'aria-label': opts.label ?? 'Product information' } });
+  const panels = h('div', { class: nocturne ? 'n-tabs__panels' : 'tabs__panels' });
   const tabs = new Map<T, HTMLButtonElement>();
   const built = new Map<T, HTMLElement>();
   let current: T | undefined;
@@ -54,7 +60,7 @@ export function tabsView<T extends string = TabId>(ids: readonly T[], build: (id
       if (panel) panel.hidden = !on;
     }
     if (!built.has(id)) {
-      const panel = h('div', { class: 'tabs__panel', id: `${prefix}panel-${id}`, attrs: { role: 'tabpanel', 'aria-labelledby': `${prefix}tab-${id}`, tabindex: 0 } }, build(id));
+      const panel = h('div', { class: nocturne ? 'n-tabs__panel' : 'tabs__panel', id: `${prefix}panel-${id}`, attrs: { role: 'tabpanel', 'aria-labelledby': `${prefix}tab-${id}`, tabindex: 0 } }, build(id));
       built.set(id, panel);
       panels.appendChild(panel);
     }
@@ -62,9 +68,9 @@ export function tabsView<T extends string = TabId>(ids: readonly T[], build: (id
   };
 
   ids.forEach((id, i) => {
-    if (i > 0) list.appendChild(h('span', { class: 'tabs__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }));
+    if (i > 0 && !nocturne) list.appendChild(h('span', { class: 'tabs__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }));
     const tab = h('button', {
-      class: 'tabs__tab',
+      class: nocturne ? 'n-g n-tabsx__tab' : 'tabs__tab',
       id: `${prefix}tab-${id}`,
       attrs: { type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-controls': `${prefix}panel-${id}`, tabindex: -1 },
       on: {
@@ -94,5 +100,5 @@ export function tabsView<T extends string = TabId>(ids: readonly T[], build: (id
   });
 
   select(initial);
-  return { root: h('section', { class: 'tabs', attrs: { 'aria-label': opts.regionLabel ?? 'Details' } }, list, panels), select };
+  return { root: h('section', { class: nocturne ? 'n-tabs-region' : 'tabs', attrs: { 'aria-label': opts.regionLabel ?? 'Details' } }, list, panels), select };
 }

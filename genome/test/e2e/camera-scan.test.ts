@@ -206,11 +206,11 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
         expect(await result.getAttribute('data-state')).toBe('AUTHENTIC');
         expect(await result.getAttribute('data-tone')).toBe('authentic');
         await textOf(page.locator('#result-title'), 'AUTHENTIC');
-        await textOf(page.locator('.genome__id'), 'O26-J-00184');
-        expect((await page.locator('.lines__line').allInnerTexts()).map(norm)).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+        await textOf(page.locator('.n-gen__id'), 'O26-J-00184');
+        expect((await page.locator('.n-result__name, .n-result__lines .n-lines__line').allInnerTexts()).map(norm)).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
         // The GENOME in its orbit, as on the piece, the ORBES monogram at its centre on a collector's screen (NOCTURNE,
         // decision 12): the monogram's layer in place of the seal's, and one group per glyph.
-        const genome = page.locator('.genome__glyphs .genome-svg');
+        const genome = page.locator('.n-gen__figure .genome-svg');
         expect(await genome.getAttribute('aria-label')).toContain(issued.genome.fingerprint);
         expect(await genome.locator('g[data-layer="seal"]').count()).toBe(0);
         expect(await genome.locator('g[data-layer="monogram"]').count()).toBe(1);
@@ -268,7 +268,7 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
           const { title, timing } = await scan(page);
           warmups.push(warmupDecodeMs);
           expect(title).toBe('AUTHENTIC');
-          await textOf(page.locator('.genome__id'), 'O26-J-00184');
+          await textOf(page.locator('.n-gen__id'), 'O26-J-00184');
           const event = await latestScanEvent(srv);
           expect(event.result_state).toBe('AUTHENTIC');
           timings.push({ ...timing, serverLatencyMs: event.latency_ms });
@@ -325,7 +325,7 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
       try {
         const { title, timing } = await scan(page);
         expect(title).toBe('AUTHENTIC');
-        await textOf(page.locator('.genome__id'), 'O26-J-00184');
+        await textOf(page.locator('.n-gen__id'), 'O26-J-00184');
         const timeline = await readTimeline(page);
         const failures = timeline.replies.filter((r) => !r.ok).map((r) => r.reason);
         metrics.settling = { ...timing, failedReasons: failures, movingMs: Math.round((settlingMoving / FPS) * 1000) };
@@ -351,7 +351,7 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
       try {
         const { title, timing } = await scan(page);
         expect(title).toBe('AUTHENTIC');
-        await textOf(page.locator('.genome__id'), 'O26-J-00184');
+        await textOf(page.locator('.n-gen__id'), 'O26-J-00184');
         metrics.fullRange = timing;
         expect(timing.recognition!).toBeLessThan(CEILING_MS);
         expect(problems).toEqual([]);
@@ -378,12 +378,12 @@ describe.skipIf(!HAS_CHROMIUM)('E2E camera scan: real browser, fake camera, real
         const result = page.locator('.view--result');
         expect(await result.getAttribute('data-state')).toBe('INVALID_SIGNATURE');
         expect(await result.getAttribute('data-tone')).toBe('void');
-        await textOf(page.locator('.result__message'), /signature of this code could not be verified/);
+        await textOf(page.locator('.n-result__message'), /signature of this code could not be verified/);
         // Nothing of the claimed (or the genuine) product is disclosed, and no positive affordances are offered.
-        expect(await page.locator('.genome__id').count()).toBe(0);
-        expect(await page.locator('.lines__line').count()).toBe(0);
+        expect(await page.locator('.n-gen__id').count()).toBe(0);
+        expect(await page.locator('.n-result__name, .n-result__lines .n-lines__line').count()).toBe(0);
         expect(await page.getByRole('tab').count()).toBe(0);
-        expect(await page.locator('.result__footnote').count()).toBe(0);
+        expect(await page.locator('.n-result__footnote').count()).toBe(0);
         expect(norm(await page.locator('body').innerText())).not.toMatch(/O26-J-0018[45]/);
         await page.getByRole('button', { name: 'SCAN AGAIN' }).waitFor();
 

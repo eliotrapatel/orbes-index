@@ -119,7 +119,176 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
     },
     12 * 60_000,
   );
+
+  it(
+    'sets the scan and its results as C9, C11, C12, C14, C16 and C17 draw them: the camera, the lock, a problem, a result, its GENOME, THE MODEL, its lines, its tabs, the OWNERSHIP panel, the report row, the foot (N4)',
+    async () => {
+      const states = ['scan-camera', 'scan-verifying', 'problem-camera-denied', 'result-first-registration', 'result-ownership-verified', 'result-invalid'];
+      const seen = new Set<string>();
+      await eachState(
+        states.map(stateById),
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          const page = opened.page;
+          try {
+            seen.add(state.id);
+            if (state.id === 'scan-camera') await camera(page);
+            if (state.id === 'scan-verifying') await locked(page);
+            if (state.id === 'problem-camera-denied') await problem(page);
+            if (state.id === 'result-first-registration') await firstRegistration(page);
+            if (state.id === 'result-ownership-verified') await yours(page);
+            if (state.id === 'result-invalid') await invalid(page);
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect([...seen].sort()).toEqual([...states].sort());
+    },
+    12 * 60_000,
+  );
 });
+
+/** C11: the camera on its ground, the orbit (272 px, its centre at 392 px), its moons, the status, LIGHT and the zoom. */
+async function camera(page: Page): Promise<void> {
+  await check(page, '.view--scan', { 'background-color': 'rgb(5, 5, 5)' });
+  const orbit = await check(page, '.n-cam__orbit', { _w: 272, _h: 272 });
+  expect(Number(orbit._top) + 136).toBeCloseTo(392, 0);
+  await check(page, '.n-cam__ring', { 'box-shadow': 'rgba(246, 242, 234, 0.8) 0px 0px 0px 1px' });
+  await check(page, '.n-cam__aperture', { 'box-shadow': `rgba(5, 5, 5, 0.5) 0px 0px 0px ${Math.max(844, 390) * 2}px` });
+  await check(page, '.n-cam__moon--polaris', { _w: 18, _h: 18, 'box-shadow': `${IV} 0px 0px 0px 1.5px inset` });
+  await check(page, '.n-cam__polaris-core', { _w: 8, _h: 8, 'background-color': IV });
+  await check(page, '.n-cam__moon--ne', { _w: 9, _h: 9, 'background-color': IV });
+  // The header: ORBES centred, CLOSE at the right (the account button's type).
+  await check(page, '.n-cam__hd', { _h: 56, 'justify-content': 'center' });
+  await check(page, '.n-cam__close', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.26), color: ASH, _h: 44, right: 12 });
+  // SCANNING… at 572 px, the guide 10 px under it, both ivory.
+  const line = await check(page, '.n-cam__line', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: IV });
+  expect(Number(line._top)).toBeCloseTo(572, 0);
+  await check(page, '.n-cam__hint', { 'font-size': 15, 'line-height': 23.25, color: IV, 'margin-top': 10 });
+  // LIGHT and the zoom (0.5×): 44 px high, a hairline round each, 10 px apart, at 664 px.
+  const light = await check(page, '.n-cam__light', { _h: 44, 'padding-left': 20, 'font-size': 10.5, 'letter-spacing': em(10.5, 0.24), color: IV, 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
+  expect(isGravesend((await read(page, '.n-cam__light', ['font-family']))['font-family']!)).toBe(true);
+  expect(Number(light._top)).toBeCloseTo(664, 0);
+  const zoom = await check(page, '.n-cam__zoom', { _h: 44, 'min-width': 64, 'font-size': 14, color: IV });
+  expect(isHelvetica((await read(page, '.n-cam__zoom', ['font-family']))['font-family']!)).toBe(true);
+  expect(Number(zoom._left) - Number(light._right)).toBeCloseTo(10, 0);
+  // UPLOAD A PHOTO, a text link 44 px above the foot.
+  await check(page, '.n-cam__upload', { bottom: 44 });
+  await check(page, '.n-cam__upload .n-tl', { 'font-size': 10.5, 'letter-spacing': em(10.5, 0.26), color: IV });
+}
+
+/** C12: locked, then VERIFYING…: the veil darker, the ring and the moons heavier, one status line, the controls fainter. */
+async function locked(page: Page): Promise<void> {
+  await check(page, '.n-cam__aperture', { 'box-shadow': `rgba(5, 5, 5, 0.78) 0px 0px 0px ${Math.max(844, 390) * 2}px` });
+  await check(page, '.n-cam__ring', { 'box-shadow': 'rgba(246, 242, 234, 0.95) 0px 0px 0px 2px' });
+  await check(page, '.n-cam__moon--polaris', { _w: 24, _h: 24, 'box-shadow': `${IV} 0px 0px 0px 2px inset` });
+  await check(page, '.n-cam__polaris-core', { _w: 10, _h: 10 });
+  await check(page, '.n-cam__moon--se', { _w: 12, _h: 12 });
+  const line = await check(page, '.n-cam__line', { 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  expect(Number(line._top)).toBeCloseTo(580, 0);
+  await check(page, '.n-cam__controls', { opacity: '0.6' });
+  await check(page, '.n-cam__upload', { opacity: '0.6' });
+}
+
+/** C17: ORBES centred, the empty ring, the title, its sentence, the ivory button, the text link. */
+async function problem(page: Page): Promise<void> {
+  await check(page, '.n-message__body', { 'padding-top': 60, 'text-align': 'center' });
+  await check(page, '.n-message .n-tone', { _w: 44, _h: 44 });
+  await check(page, '.n-message .n-tone__ring', { 'stroke-width': '1.5px', stroke: IV });
+  await check(page, '.n-message__title', { 'margin-top': 28, 'font-size': 16, 'letter-spacing': em(16, 0.14), 'line-height': 20.8, color: IV });
+  await check(page, '.n-message__text', { 'margin-top': 14, 'font-size': 15, color: ASH });
+  await check(page, '.n-message__actions', { 'margin-top': 32 });
+  await check(page, '.n-message__actions .n-btn', { _h: 54, 'background-color': IV, color: GROUND });
+  await check(page, '.n-message__second', { 'margin-top': 20 });
+}
+
+/** C9: the result's head, its GENOME, THE MODEL, its lines, its tabs, the OWNERSHIP panel signed out, the foot. */
+async function firstRegistration(page: Page): Promise<void> {
+  await check(page, '.n-result__head', { 'padding-top': 44, 'text-align': 'center' });
+  await check(page, '.n-result .n-tone', { _w: 44, _h: 44 });
+  await check(page, '.n-result .n-tone__core', { fill: IV });
+  await check(page, '.n-result__title', { 'margin-top': 22, 'font-size': 30, 'line-height': 34.5, 'letter-spacing': em(30, 0.14), 'padding-left': em(30, 0.14), color: IV });
+  await check(page, '.n-result__sub', { 'margin-top': 12, 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
+  await check(page, '.n-result__message', { 'margin-top': 16, 'padding-left': 24, 'font-size': 15, 'line-height': 23.25, color: ASH });
+  // The GENOME (decision 12): 48 px under, its label, the 200 px figure with its glow, the id and the fingerprint.
+  await check(page, '.n-result__genome', { 'margin-top': 48 });
+  await check(page, '.n-gen__label', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
+  await check(page, '.n-gen__figure', { _w: 200, _h: 200, 'margin-top': 18 });
+  await check(page, '.n-gen__figure .genome-svg', { filter: 'drop-shadow(rgba(246, 242, 234, 0.22) 0px 0px 18px)' });
+  await check(page, '.n-gen__id', { 'margin-top': 18, 'font-size': 15, 'letter-spacing': em(15, 0.24), color: IV });
+  const fp = await check(page, '.n-gen__fp', { 'margin-top': 8, 'font-size': 11.5, 'letter-spacing': em(11.5, 0.06), color: ASH });
+  expect(fp._w).toBeDefined();
+  // THE MODEL's photograph (decision 9): 48 px under, full width, 390 px, whole, no fade; its caption and sentence.
+  await check(page, '.n-result__model', { 'margin-top': 48 });
+  await check(page, '.n-result__photo', { _w: 390, _h: 390, 'background-color': 'rgb(21, 20, 19)' });
+  await check(page, '.n-result__photo img', { 'object-fit': 'contain' });
+  await check(page, '.n-result__photo', { content: 'none' }, '::after');
+  await check(page, '.n-result .n-cap2', { 'padding-top': 12, 'padding-left': 24 });
+  await check(page, '.n-result__photo-note', { 'margin-top': 14, 'font-size': 13, 'line-height': 18.85, color: ASH });
+  // The model's name and the lines (SIZE among them), SEE THE MODEL 22 px under.
+  await check(page, '.n-result__lines', { 'margin-top': 40 });
+  await check(page, '.n-result__name', { 'font-size': 26, 'letter-spacing': em(26, 0.08), 'line-height': 29.12, color: IV });
+  await check(page, '.n-result__line-list', { 'margin-top': 16, 'row-gap': 7 });
+  await check(page, '.n-result__line-list .n-lines__line', { 'font-size': 11, 'letter-spacing': em(11, 0.24), color: ASH });
+  await check(page, '.n-result__model-line', { 'margin-top': 22 });
+  // The tabs spread across the column, OWNERSHIP open.
+  await check(page, '.n-result__tabs', { 'margin-top': 48, 'padding-left': 24 });
+  await check(page, '.n-tabsx', { 'justify-content': 'space-between', 'border-bottom-color': LINE });
+  await check(page, '.n-tabsx__tab[aria-selected="false"]', { 'font-size': 10, 'letter-spacing': em(10, 0.22), color: ASH, 'padding-bottom': 14 });
+  await check(page, '.n-tabsx__tab[aria-selected="true"]', { color: IV });
+  await check(page, '.n-tabsx__tab[aria-selected="true"]', { height: 1, 'background-color': IV }, '::after');
+  await check(page, '.n-result__tabs .n-tabs__panel:not([hidden])', { 'padding-top': 24 });
+  // OWNERSHIP, signed out: REGISTRATION OPEN, its sentence, UNTIL, the sign-in.
+  await check(page, '.n-own__status', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: IV });
+  await check(page, '.n-own__text', { 'margin-top': 10, 'font-size': 15, color: ASH });
+  await check(page, '.n-own__until', { 'margin-top': 14, 'font-size': 9.5, color: ASH });
+  await check(page, '.n-own__lead', { 'margin-top': 18, 'font-size': 15, color: ASH });
+  await check(page, '.n-own__switch', { 'margin-top': 20, 'column-gap': 22, 'border-bottom-color': LINE });
+  await check(page, '.n-own__option[aria-pressed="true"]', { color: IV, 'font-size': 10, 'letter-spacing': em(10, 0.22) });
+  await check(page, '.n-own__option[aria-pressed="true"]', { height: 1, 'background-color': IV }, '::after');
+  await check(page, '.n-own .n-fld-group', { 'margin-top': 20 });
+  await check(page, '.n-own .n-fld .n-lab', { 'font-size': 13, 'letter-spacing': em(13, 0.24), color: ASH });
+  await check(page, '.n-own .n-fld__input', { _h: 44, 'border-bottom-color': LINE2, 'font-size': 16 });
+  await check(page, '.n-own .form--signin .n-form__actions', { 'margin-top': 28 });
+  await check(page, '.n-own .form--signin .n-btn', { _h: 54, 'background-color': IV, color: GROUND, 'font-size': 11, 'letter-spacing': em(11, 0.28) });
+  await check(page, '.n-own__forgotten', { 'margin-top': 18, 'text-align': 'center' });
+  // The foot: the assurance note, VERIFIED and REF, SCAN ANOTHER (the hairline button).
+  await check(page, '.n-result__footnote', { 'margin-top': 36, 'font-size': 13, color: ASH });
+  await check(page, '.n-result__meta', { 'margin-top': 22, 'justify-content': 'space-between' });
+  await check(page, '.n-result__meta-item', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
+  const value = await check(page, '.n-result__meta-value', { 'letter-spacing': em(9.5, 0.04), color: IV });
+  expect(value._w).toBeDefined();
+  expect(isHelvetica((await read(page, '.n-result__meta-value', ['font-family']))['font-family']!)).toBe(true);
+  await check(page, '.n-result__again', { 'margin-top': 26 });
+  await check(page, '.n-result__again .n-btn', { _h: 54, 'background-color': NONE, color: IV, 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
+}
+
+/** C14: OWNERSHIP of one's own piece: REGISTERED TO YOU, TRANSFER OF OWNERSHIP, CREATE TRANSFER CODE, the account line. */
+async function yours(page: Page): Promise<void> {
+  await page.getByRole('tab', { name: 'OWNERSHIP', exact: true }).click();
+  await page.locator('.n-own__account').waitFor();
+  await check(page, '.n-own__heading', { 'margin-top': 28, 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  await check(page, '.n-own__action', { 'margin-top': 18, _h: 54, 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
+  await check(page, '.n-own__account', { 'margin-top': 22, 'line-height': 19, 'font-size': 9.5, color: ASH });
+  await check(page, '.n-own__email', { 'font-size': 13, 'letter-spacing': 'normal', 'text-transform': 'none', color: IV });
+  await check(page, '.n-own__link', { color: IV, 'text-decoration-line': 'underline', 'text-underline-offset': '3px' });
+}
+
+/** C16: INVALID SIGNATURE: the void mark, the help line 36 px under the message, the contact, the report's row. */
+async function invalid(page: Page): Promise<void> {
+  await check(page, '.n-result .n-tone__ring', { 'stroke-width': '1.5px', stroke: IV });
+  expect(await page.locator('.n-result .n-tone__core').count()).toBe(0);
+  await check(page, '.n-result__help', { 'margin-top': 36, 'padding-left': 24 });
+  await check(page, '.n-result__help .n-tx', { 'font-size': 15, 'line-height': 23.25, color: ASH });
+  await check(page, '.n-contact', { 'margin-top': 14, 'row-gap': 8, 'font-size': 13, color: ASH });
+  await check(page, '.n-contact .n-contact__email', { 'font-size': 10.5, 'letter-spacing': em(10.5, 0.22), color: IV, 'text-decoration-line': 'underline' });
+  await check(page, '.n-report', { 'padding-top': 76 });
+  await check(page, '.n-report__toggle', { 'padding-top': 20, 'padding-bottom': 20, 'border-top-color': LINE, 'border-bottom-color': LINE });
+  await check(page, '.n-report__toggle .n-report__title', { 'font-size': 11, 'letter-spacing': em(11, 0.26), 'line-height': 16.5, color: IV });
+  await check(page, '.n-report__toggle .n-report__lead', { 'margin-top': 4, 'font-size': 13, color: ASH });
+}
 
 /** The header, the rail, the footer, the SCAN ring (C .hd .wm .acct .rail .foot .fl .snd .dbip .cr .scan), Safari's bars. */
 async function chrome(page: Page): Promise<void> {

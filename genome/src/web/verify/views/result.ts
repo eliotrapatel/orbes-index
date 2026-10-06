@@ -1,64 +1,56 @@
 /**
- * Result: the state, then the photographs (authentic results, F-04), the
- * GENOME, the product lines and the four tabs.
+ * Result (plan NOCTURNE, screen 2; C9, C13–C16, C36, C37): the state, the GENOME, THE MODEL's photograph, the piece's
+ * lines and the four tabs, on the ground, centred, in NOCTURNE's pieces (views/nocturne.ts).
  *
- *          ◯                    tone mark (seal / moon / empty orbit)
- *      A U T H E N T I C        state title, tracked
- *      FIRST REGISTRATION       sub-title when the server title has one
+ *               ◉                    tone mark (authentic: ring and core; caution: ring and moon; void: the ring)
+ *          A U T H E N T I C         the word, 30 px
+ *         FIRST REGISTRATION         its sub-title, when the server's title has one
  *   one sentence from the server
- *   ─ Buying this piece? … ─    AUTHENTIC — REGISTERED only (J-02), then
- *    I HAVE A TRANSFER CODE     a link to OWNERSHIP, RECEIVING THIS PIECE
- *   ┌                      ┐
- *     [ this piece ] [ model ]  photographs on ivory, when ORBES has them
- *   └                      ┘
- *   ┌                      ┐
- *     GENOME  O26-J-00184
- *     ◔ · ◯ · ◕ · …            core renderGenomeSvg orbit, the ORBES monogram at its centre (decision 12)
- *     G1-E1DC-BE52 · GENOME-01
- *        MONOLITHE              the ceremony of a first registration (P-D01):
- *          ORBIT                the glyphs appear one by one, then the model
- *      SHARE THE GENOME         and its collection, and the image to share
- *   └                      ┘
- *   MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026
- *   DISCONTINUED · 2027              once an ADMIN discontinued its model (P-R06)
- *            SEE THE MODEL           its model's sheet in THE COLLECTION
- *                                    (P-R02), a text link, when it is PUBLIC
- *   PRODUCT · WARRANTY · CARE · OWNERSHIP
- *   SCAN ANOTHER · footnote · VERIFIED · REF
- *   (the legal pages, J-06, and DB-IP's attribution: NOCTURNE's footer, views/shell.ts, in a new tab)
+ *   Buying this piece? …             AUTHENTIC — REGISTERED only (J-02), in ivory, then I HAVE A TRANSFER CODE, a
+ *     I HAVE A TRANSFER CODE         text link to OWNERSHIP, RECEIVING THIS PIECE
+ *            GENOME
+ *       ◔ · ◯ · ◕ · …               core renderGenomeSvg orbit, in ivory, the ORBES monogram at its centre (decision 12)
+ *          O26-J-00184
+ *   G1-E1DC-BE52 · GENOME-01
+ *   [ THE MODEL's photograph ]       full width, shown whole, never the piece's own (decision 9)
+ *   THE MODEL
+ *   Photographed by ORBES. Compare it with the piece in your hands.
+ *           MONOLITHE                the model's name, then its lines: BRACELET / JEWELRY / 925 STERLING SILVER /
+ *           BRACELET …               SIZE 17 / CREATED 2026 / DISCONTINUED · 2027 (P-R06)
+ *         SEE THE MODEL              its model's sheet in THE COLLECTION (P-R02), when it is PUBLIC
+ *   PRODUCT  WARRANTY  CARE  OWNERSHIP   underlined tabs (`.tabsx`), registration opening on OWNERSHIP
+ *   This verification confirms …     the assurance note (positive results)
+ *   VERIFIED 5 OCT 2026 · 18:49    REF 54ADC7BD
+ *   [ SCAN ANOTHER ]                 the hairline button
+ *   (the header, the rail and the SCAN ring above and below: views/shell.ts; the footer with the legal pages and DB-IP)
  *
- * Other results show no product lines and no tabs, only a line for ORBES
- * Client Services and, when it is configured, CONTACT ORBES CLIENT SERVICES
- * (an email prefilled with the reference and the result), its phone and
- * hours; UNUSUAL ACTIVITY adds, when the server offers it, the section DO
- * YOU HOLD THE CERTIFICATE CARD? (registration with the claim code) or DO
- * YOU HOLD A TRANSFER CODE? (F-03: receiving the piece with it); then
- * WHERE DID YOU SEE OR BUY THIS PIECE?, an optional answer attached to the
- * scan. A warranty that no longer applies offers the same contact in its
- * tab, and FORGOTTEN PASSWORD? in the OWNERSHIP panel offers it to a
- * customer who needs a recovery code (C-04).
+ * Other results show no product lines and no tabs: the GENOME when the server sends it, a line for ORBES Client
+ * Services and, when it is configured, CONTACT ORBES CLIENT SERVICES (an email prefilled with the reference and the
+ * result), its phone and hours (C15, C16); UNUSUAL ACTIVITY adds, when the server offers it, the section DO YOU HOLD
+ * THE CERTIFICATE CARD? (registration with the claim code) or DO YOU HOLD A TRANSFER CODE? (F-03: receiving the piece
+ * with it); then WHERE DID YOU SEE OR BUY THIS PIECE?, an optional answer attached to the scan: open under UNUSUAL
+ * ACTIVITY (C15), a row that opens (+) under the others (C16). A warranty that no longer applies offers the same contact
+ * in its tab, and FORGOTTEN PASSWORD? in the OWNERSHIP panel offers it to a customer who needs a recovery code (C-04).
  *
- * The ceremony (P-D01) is the result VIEW AS OWNER opens right after a first
- * registration: the GENOME plate comes first, above the photographs; its
- * eight glyphs appear one by one (opacity and scale of each `data-layer=genome`
- * group, delayed by its `--i`, set through the CSSOM), then the name of the
- * model and its collection, with a short vibration where the device has one.
- * SHARE THE GENOME is a text link (the hairline button stays the foot's): its
- * PNG is drawn when the result is built (share-image.ts), so the tap shares a
- * ready file. With reduced motion, all of it is shown at once, without motion.
+ * The ceremony (P-D01) is the result VIEW AS OWNER opens right after a first registration: the GENOME comes first,
+ * at 220 px (C36), above the photograph; its eight glyphs appear one by one (opacity and scale of each
+ * `data-layer=genome` group, delayed by its `--i`, set through the CSSOM), then the name of the model and its
+ * collection, with a short vibration where the device has one. SHARE THE GENOME is a text link: its PNG is drawn
+ * when the result is built (share-image.ts), so the tap shares a ready file. With reduced motion, all of it is shown
+ * at once, without motion.
  *
  * Everything shown comes from the server outcome through resultViewModel().
  */
-import { bracket } from '../../shared/corners.js';
 import { h, prefersReducedMotion } from '../../shared/dom.js';
-import { CEREMONY, RECEIVING } from '../copy.js';
-import { genomeBlock, genomeFromModel } from '../genome-view.js';
+import { CEREMONY, CONTACT, LOOKBOOK, PHOTOS, RECEIVING } from '../copy.js';
+import { genomeFromModel, nocturneGenome } from '../genome-view.js';
+import { lookbookSheetPath } from '../lookbook-model.js';
 import { prepareShareImage, shareGenomeImage } from '../share-image.js';
-import { initialTab, type CeremonyModel, type ResultViewModel, type TabId } from '../view-model.js';
-import { contactBlock, lookbookLink, toneMark, viewRoot, withNumerals } from './common.js';
+import { initialTab, type CeremonyModel, type PhotoModel, type ResultViewModel, type TabId } from '../view-model.js';
+import { viewRoot, withNumerals } from './common.js';
+import { button, contactLines, fadedPhoto, textLink, toneMark } from './nocturne.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
-import { photoPlate } from './photos.js';
 import { reportSection, type ReportDeps } from './report.js';
 import { tabsView, type TabsView } from './tabs.js';
 
@@ -84,38 +76,52 @@ export interface ResultView {
 export const CEREMONY_VIBRATION: readonly number[] = [18, 90, 18];
 
 /**
- * The ceremony under the GENOME (P-D01): the name of the model and its collection, then SHARE THE GENOME, shown once
- * its image is ready (a browser that cannot draw it offers no link). The PNG is drawn now, before any tap.
+ * The ceremony under the GENOME (P-D01, C36): the name of the model and its collection, then SHARE THE GENOME, shown
+ * once its image is ready (a browser that cannot draw it offers no link). The PNG is drawn now, before any tap.
  */
 function ceremonyBlock(c: CeremonyModel, glyphs: Parameters<typeof prepareShareImage>[0], alive: () => boolean): HTMLElement {
   let image: Blob | null = null;
-  const share = h('button', {
-    class: 'textlink ceremony__share',
-    attrs: { type: 'button', hidden: true },
-    // Within the tap: the file is ready, so the share sheet opens before anything is awaited.
-    on: { click: () => void (image && shareGenomeImage(image)) },
-    text: CEREMONY.share,
-  });
+  const share = textLink(CEREMONY.share, { onOpen: () => void (image && shareGenomeImage(image)), extraClass: 'n-ceremony__share' }) as HTMLButtonElement;
+  const line = h('p', { class: 'n-ceremony__share-line', attrs: { hidden: true } }, share);
   void prepareShareImage(glyphs, c).then((blob) => {
     if (!blob || !alive()) return;
     image = blob;
-    share.hidden = false;
+    line.hidden = false;
   });
   return h(
     'section',
-    { class: 'ceremony', attrs: { 'aria-label': CEREMONY.label } },
-    h('p', { class: 'ceremony__name' }, ...withNumerals(c.name)),
-    c.collection ? h('p', { class: 'ceremony__collection' }, ...withNumerals(c.collection)) : null,
-    share,
+    { class: 'n-ctr n-px n-ceremony', attrs: { 'aria-label': CEREMONY.label } },
+    h('p', { class: 'n-g n-t1 n-ceremony__name' }, ...withNumerals(c.name)),
+    c.collection ? h('p', { class: 'n-g n-lb n-ceremony__collection' }, ...withNumerals(c.collection)) : null,
+    line,
   );
+}
+
+/**
+ * THE MODEL's photograph (decision 9), full width and whole, without the fade (as drawn), its caption, then the app's
+ * sentence for it. A photograph that cannot be loaded (removed meanwhile) takes its section with it: never a broken
+ * image.
+ */
+function modelPhoto(photos: readonly PhotoModel[]): HTMLElement | null {
+  const photo = photos[0];
+  if (!photo) return null;
+  const frame = fadedPhoto(photo.src, photo.alt, { fade: false, eager: true, extraClass: 'n-result__photo' });
+  const section = h(
+    'section',
+    { class: 'n-result__model', attrs: { 'aria-label': 'Photograph of the model' } },
+    frame,
+    h('div', { class: 'n-cap2' }, h('span', { class: 'n-g n-lb n-result__caption', text: photo.caption })),
+    h('p', { class: 'n-px n-sm n-result__photo-note', text: PHOTOS.note(1) }),
+  );
+  frame.querySelector('img')?.addEventListener('error', () => (section.hidden = true), { once: true });
+  return section;
 }
 
 export function resultView(vm: ResultViewModel, handlers: ResultHandlers): ResultView {
   const root = viewRoot('result', 'result-title');
+  root.classList.add('n-result');
   root.dataset.state = vm.state;
   root.dataset.tone = vm.tone;
-  // Short results (no genome, no tabs) sit in the optical centre instead of hanging from the top.
-  if (!vm.genome && vm.tabs.length === 0) root.classList.add('is-compact');
   let ownership: OwnershipPanel | null = null;
   let tabs: TabsView | null = null;
   let disposed = false;
@@ -124,6 +130,8 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
   const ceremony = vm.ceremony && ceremonyGenome ? vm.ceremony : null;
   let ceremonyNames: HTMLElement | null = null;
   let vibration: (() => void) | null = null;
+  const panelOf = (): OwnershipPanel =>
+    new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh, contact: vm.recoveryContact });
 
   // The link under the second-hand guidance (J-02): the OWNERSHIP tab, on RECEIVING THIS PIECE (or on the tab itself
   // when the panel no longer shows that section, once the piece has been received).
@@ -135,60 +143,58 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
   };
 
   const head = h(
-    'header',
-    { class: 'result__head' },
-    h('span', { class: 'wordmark wordmark--small result__wordmark', attrs: { 'aria-hidden': 'true' }, text: 'ORBES' }),
-    h('div', { class: 'result__mark' }, toneMark(vm.tone)),
+    'section',
+    { class: 'n-ctr n-result__head', attrs: { 'aria-label': 'Result' } },
+    toneMark(vm.tone),
     h(
       'h1',
-      { class: 'result__title', id: 'result-title' },
-      h('span', { class: 'result__title-main', text: vm.titleMain }),
-      vm.titleSub ? h('span', { class: 'result__title-sub micro indent-micro', text: vm.titleSub }) : null,
+      { class: 'n-g n-result__title', id: 'result-title' },
+      h('span', { class: 'n-result__word', text: vm.titleMain }),
+      vm.titleSub ? h('span', { class: 'n-g n-lb n-result__sub', text: vm.titleSub }) : null,
     ),
-    vm.message ? h('p', { class: 'result__message prose', text: vm.message }) : null,
-    vm.notice ? h('p', { class: 'result__notice', attrs: { role: 'note' }, text: vm.notice }) : null,
-    vm.notice && vm.noticeLink
-      ? h('button', {
-          class: 'textlink result__notice-link',
-          attrs: { type: 'button' },
-          on: { click: () => openNoticeLink(vm.noticeLink!.tab) },
-          text: vm.noticeLink.label,
-        })
-      : null,
+    vm.message ? h('p', { class: 'n-px n-tx n-result__message', text: vm.message }) : null,
   );
 
-  const sections: (HTMLElement | null)[] = [];
-  let plate: HTMLElement | null = null;
+  // Under the message (C13): the second-hand guidance in ivory, then I HAVE A TRANSFER CODE; or the owner's notice.
+  const notice = vm.notice
+    ? h(
+        'div',
+        { class: 'n-px n-ctr n-result__notice-block' },
+        h('p', { class: 'n-tx n-ivc n-result__notice', attrs: { role: 'note' }, text: vm.notice }),
+        vm.noticeLink ? h('p', { class: 'n-result__notice-line' }, textLink(vm.noticeLink.label, { onOpen: () => openNoticeLink(vm.noticeLink!.tab), extraClass: 'n-result__notice-link' })) : null,
+      )
+    : null;
+
+  const sections: (HTMLElement | null)[] = [head, notice];
+  let genome: HTMLElement | null = null;
   if (vm.genome) {
-    plate = h('div', { class: 'result__genome' }, genomeBlock(vm.genome));
+    genome = nocturneGenome(vm.genome, { size: ceremony ? 220 : 200, extraClass: 'n-result__genome' });
     if (ceremony && ceremonyGenome) {
       const block = ceremonyBlock(ceremony, ceremonyGenome, () => !disposed);
-      ceremonyNames = block.querySelector<HTMLElement>('.ceremony__name');
-      plate.append(block);
+      ceremonyNames = block.querySelector<HTMLElement>('.n-ceremony__name');
+      genome = h('div', { class: 'n-result__ceremony' }, genome, block);
       if (!prefersReducedMotion()) {
         // Each glyph of the orbit is one group of the layer genome, in order (glyph 0 at north, then clockwise).
         root.classList.add('is-ceremony');
-        plate.querySelectorAll<SVGGElement>('.genome-svg g[data-layer="genome"]').forEach((g, i) => g.style.setProperty('--i', String(i)));
+        genome.querySelectorAll<SVGGElement>('.genome-svg g[data-layer="genome"]').forEach((g, i) => g.style.setProperty('--i', String(i)));
       }
     }
-    plate = bracket(plate);
   }
-  if (ceremony && plate) {
-    // The ceremony opens on the GENOME, above the photographs.
-    sections.push(plate, photoPlate(vm.photos));
-  } else {
-    // At the head of an authentic result, above the GENOME: what the customer compares with the piece in hand.
-    sections.push(photoPlate(vm.photos), plate);
-  }
-  if (vm.productLines.length > 0) {
+  // The GENOME first, then THE MODEL's photograph (C9); the ceremony opens on the GENOME too.
+  sections.push(genome, modelPhoto(vm.photos));
+
+  if (vm.modelName || vm.pieceLines.length > 0) {
     const slug = vm.lookbook;
     sections.push(
       h(
         'section',
-        { class: 'result__lines', attrs: { 'aria-label': 'Product' } },
-        h('ul', { class: 'lines' }, ...vm.productLines.map((line) => h('li', { class: 'lines__line', text: line }))),
+        { class: 'n-ctr n-result__lines', attrs: { 'aria-label': 'The piece' } },
+        vm.modelName ? h('h2', { class: 'n-g n-t1 n-result__name' }, ...withNumerals(vm.modelName)) : null,
+        h('ul', { class: 'n-lines n-result__line-list' }, ...vm.pieceLines.map((line) => h('li', { class: 'n-g n-lines__line' }, ...withNumerals(line)))),
         // Under the lines that name the model: its sheet in THE COLLECTION, a text link (the hairline button stays the foot's).
-        slug ? lookbookLink(handlers.onModel ? () => handlers.onModel!(slug) : undefined, { slug, extraClass: 'result__model-link' }) : null,
+        slug
+          ? h('p', { class: 'n-result__model-line' }, textLink(LOOKBOOK.seeModel, { href: lookbookSheetPath(slug), onOpen: handlers.onModel ? () => handlers.onModel!(slug) : undefined, extraClass: 'n-result__model-link' }))
+          : null,
       ),
     );
   }
@@ -203,34 +209,35 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
         case 'care':
           return carePanel(vm);
         case 'ownership':
-          ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh, contact: vm.recoveryContact });
-          return h('div', { class: 'panel' }, ownership.root);
+          ownership = panelOf();
+          return h('div', { class: 'n-result__panel' }, ownership.root);
       }
     };
     // Registration, and the transfer of a piece to its recipient (F-03), open straight on OWNERSHIP.
-    tabs = tabsView(vm.tabs, build, initialTab(vm));
+    tabs = tabsView(vm.tabs, build, initialTab(vm), { kind: 'tabsx' });
+    tabs.root.classList.add('n-px', 'n-result__tabs');
     sections.push(tabs.root);
   } else if (vm.tone !== 'authentic') {
     // The help line, then (when Client Services is configured) the prefilled email, the phone and the hours.
     sections.push(
       h(
         'section',
-        { class: 'result__help' },
-        h('p', { class: 'prose', text: 'ORBES Client Services can help with any question about this piece. Please quote the reference below.' }),
-        vm.contact?.placement === 'help' ? contactBlock(vm.contact) : null,
+        { class: ['n-px', 'n-result__help', vm.genome ? null : 'n-result__help--first'], attrs: { 'aria-label': 'ORBES Client Services' } },
+        h('p', { class: 'n-tx', text: 'ORBES Client Services can help with any question about this piece. Please quote the reference below.' }),
+        vm.contact?.placement === 'help' ? contactLines(vm.contact, CONTACT) : null,
       ),
     );
     // UNUSUAL ACTIVITY with a registration token (the server's step 10 exception): the buyer holding
     // the certificate card may still register, with its claim code. Sign-in, then the claim code; no product data.
     if (vm.ownership.kind === 'register') {
-      ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh, contact: vm.recoveryContact });
+      ownership = panelOf();
       sections.push(
         h(
           'section',
-          { class: 'result__card', attrs: { 'aria-labelledby': 'card-title' } },
-          h('h2', { class: 'result__card-title', id: 'card-title', text: 'DO YOU HOLD THE CERTIFICATE CARD?' }),
+          { class: 'n-px n-sec n-result__card', attrs: { 'aria-labelledby': 'card-title' } },
+          h('h2', { class: 'n-g n-t3 n-result__card-title', id: 'card-title', text: 'DO YOU HOLD THE CERTIFICATE CARD?' }),
           h('p', {
-            class: 'prose result__card-text',
+            class: 'n-tx n-result__card-text',
             text: 'If this piece was delivered to you with its ORBES certificate card, you may register it in your name with the claim code printed under the scratch-off panel.',
           }),
           ownership.root,
@@ -240,36 +247,34 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
     // UNUSUAL ACTIVITY with a transfer window (F-03, the same exception for a transfer): the reader signed in when the
     // scan was made may still receive the piece with the transfer code its owner gave. No product data.
     if (vm.ownership.kind === 'registered' && vm.ownership.underReview === true) {
-      ownership = new OwnershipPanel(vm.ownership, { ...handlers.ownership, onRescan: handlers.onScanAgain, onRefresh: handlers.onRefresh, contact: vm.recoveryContact });
+      ownership = panelOf();
       sections.push(
         h(
           'section',
-          { class: 'result__card', attrs: { 'aria-labelledby': 'transfer-card-title' } },
-          h('h2', { class: 'result__card-title', id: 'transfer-card-title', text: RECEIVING.cardTitle }),
-          h('p', { class: 'prose result__card-text', text: RECEIVING.cardText }),
+          { class: 'n-px n-sec n-result__card', attrs: { 'aria-labelledby': 'transfer-card-title' } },
+          h('h2', { class: 'n-g n-t3 n-result__card-title', id: 'transfer-card-title', text: RECEIVING.cardTitle }),
+          h('p', { class: 'n-tx n-result__card-text', text: RECEIVING.cardText }),
           ownership.root,
         ),
       );
     }
     // Under the contact (and under the certificate-card or transfer-code section when there is one, which follows the
-    // help line): where the piece was seen or bought, attached to this scan. Optional.
-    if (vm.report && handlers.report) sections.push(reportSection(vm.report, handlers.report));
+    // help line): where the piece was seen or bought, attached to this scan. Optional: open under UNUSUAL ACTIVITY
+    // (C15), a row that opens under the other results (C16).
+    if (vm.report && handlers.report) sections.push(reportSection(vm.report, handlers.report, { folded: vm.state !== 'SUSPICIOUS_ACTIVITY' }));
   }
 
+  const meta = (label: string, value: string): HTMLElement =>
+    h('span', { class: 'n-g n-lb n-result__meta-item' }, `${label} `, h('span', { class: 'n-num n-ivc n-result__meta-value', text: value }));
   const foot = h(
     'footer',
-    { class: 'result__foot' },
-    h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => handlers.onScanAgain() }, text: vm.tone === 'authentic' ? 'SCAN ANOTHER' : 'SCAN AGAIN' }),
-    vm.footnote ? h('p', { class: 'result__footnote', text: vm.footnote }) : null,
-    h(
-      'p',
-      { class: 'result__meta' },
-      vm.verifiedAt ? h('span', { text: `VERIFIED ${vm.verifiedAt}` }) : null,
-      vm.reference ? h('span', { text: `REF ${vm.reference}` }) : null,
-    ),
+    { class: 'n-result__foot' },
+    vm.footnote ? h('p', { class: 'n-px n-sm n-result__footnote', text: vm.footnote }) : null,
+    h('p', { class: 'n-px n-sb n-result__meta' }, vm.verifiedAt ? meta('VERIFIED', vm.verifiedAt) : null, vm.reference ? meta('REF', vm.reference) : null),
+    h('div', { class: 'n-px n-result__again' }, button(vm.tone === 'authentic' ? 'SCAN ANOTHER' : 'SCAN AGAIN', { outline: true, onClick: () => handlers.onScanAgain() })),
   );
 
-  root.append(head, ...sections.filter((x): x is HTMLElement => x !== null), foot);
+  root.append(...sections.filter((x): x is HTMLElement => x !== null), foot);
 
   const shown = (): void => {
     if (!ceremony || disposed) return;

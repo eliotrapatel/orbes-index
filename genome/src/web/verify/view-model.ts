@@ -150,6 +150,12 @@ export interface ResultViewModel {
   genome?: GenomeModel;
   /** Brand lines: MODEL / TYPE / CATEGORY / MATERIAL / CREATED YYYY, then DISCONTINUED · YYYY when its model was (P-R06). */
   productLines: string[];
+  /**
+   * NOCTURNE (C9, C13, C14): the model's name over the lines, then TYPE / CATEGORY / MATERIAL / SIZE 17 / CREATED YYYY
+   * (addition 1: the piece's size, from the issuance field Size), then DISCONTINUED · YYYY. Empty with no product.
+   */
+  modelName?: string;
+  pieceLines: string[];
   tabs: TabId[];
   productRows: Row[];
   verificationRows: Row[];
@@ -316,6 +322,31 @@ export function productLines(p: {
   ].filter((x) => x.length > 0);
 }
 
+/**
+ * The lines under a result's model name (NOCTURNE, C9 and addition 1): TYPE / CATEGORY / MATERIAL, the piece's size
+ * as written at issuance (SIZE 17), CREATED YYYY, then DISCONTINUED · YYYY when its model was (P-R06).
+ */
+export function pieceLines(p: {
+  type: string;
+  category?: { name: string } | null;
+  material: string;
+  variant?: string | null;
+  createdYear?: number | null;
+  discontinuedYear?: number | null;
+}): string[] {
+  const discontinued = discontinuedYearOf(p.discontinuedYear);
+  const size = upper(p.variant);
+  return [
+    upper(p.type),
+    upper(p.category?.name),
+    upper(p.material),
+    // A value written with its word already (« Size 17 ») is not named twice.
+    size ? (/^SIZE\b/.test(size) ? size : `SIZE ${size}`) : '',
+    p.createdYear ? `CREATED ${p.createdYear}` : '',
+    discontinued !== null ? DISCONTINUED.line(discontinued) : '',
+  ].filter((x) => x.length > 0);
+}
+
 /** The year a model was discontinued (P-R06), when the server sent one that is a year; else null (nothing is said). */
 export function discontinuedYearOf(year: unknown): number | null {
   return typeof year === 'number' && Number.isInteger(year) && year >= 1000 && year <= 9999 ? year : null;
@@ -362,6 +393,7 @@ export function resultViewModel(
     message: outcome.message || '',
     photos: [],
     productLines: [],
+    pieceLines: [],
     tabs: [],
     productRows: [],
     verificationRows: [],
@@ -392,6 +424,8 @@ export function resultViewModel(
   const p = outcome.product;
   if (authentic && p) {
     vm.productLines = productLines(p);
+    vm.pieceLines = pieceLines(p);
+    if (upper(p.model)) vm.modelName = upper(p.model);
     const rows: Row[] = [['PRODUCT ID', p.productId]];
     if (p.collection) rows.push(['COLLECTION', upper(p.collection)]);
     rows.push(['MODEL', upper(p.model)], ['TYPE', upper(p.type)]);

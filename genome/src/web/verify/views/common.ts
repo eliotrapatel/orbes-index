@@ -37,30 +37,6 @@ export function toneMark(tone: Tone): SVGSVGElement {
   return svg;
 }
 
-/**
- * The orbit reticle: a hairline circle, a travelling arc while searching, and
- * four small moons on the diagonals as in CODE-01 (polaris, top left, with
- * its halo). Coordinates: the circle has radius 100.
- */
-export function orbitReticle(extraClass = ''): SVGSVGElement {
-  const moon = (x: number, y: number, polaris = false) =>
-    s('g', { class: polaris ? 'reticle__moon reticle__moon--polaris' : 'reticle__moon' },
-      s('circle', { cx: x, cy: y, r: 2.6 }),
-      polaris ? s('circle', { class: 'reticle__halo', cx: x, cy: y, r: 6.5 }) : null,
-    );
-  const d = 88; // moons sit just outside the circle's corners, as on the printed code
-  return s(
-    'svg',
-    { class: `reticle ${extraClass}`.trim(), viewBox: '-130 -130 260 260', 'aria-hidden': 'true', focusable: 'false' },
-    s('circle', { class: 'reticle__ring', cx: 0, cy: 0, r: 100 }),
-    s('g', { class: 'reticle__sweep' }, s('path', { class: 'reticle__arc', d: arcPath(100, -14, 14) })),
-    moon(-d, -d, true),
-    moon(d, -d),
-    moon(-d, d),
-    moon(d, d),
-  );
-}
-
 /** SVG arc on a circle of radius r centred on the origin, angles in degrees clockwise from north. */
 export function arcPath(r: number, fromDeg: number, toDeg: number): string {
   const p = (deg: number) => {
@@ -208,22 +184,19 @@ export function legalLinks(opts: { newTab?: boolean; extraClass?: string } = {})
 }
 
 /**
- * Under CREATE ACCOUNT: creating an account means accepting the terms of use (their article 1), then TERMS OF USE ·
- * PRIVACY POLICY, both in a new tab (the form and the scan's window stay): the privacy policy says what the account
- * records, where the account data is collected. Text links held to the floors of §3.8, as legalLinks.
+ * Under CREATE ACCOUNT (C39): creating an account means accepting the terms of use (their article 1), then TERMS OF
+ * USE · PRIVACY POLICY, both in a new tab (the form and the scan's window stay): the privacy policy says what the
+ * account records, where the account data is collected. One sentence in ash, its links underlined in ivory.
  */
 export function termsNote(): HTMLElement {
   return h(
-    'div',
-    { class: 'terms-note' },
-    h('p', { class: 'terms-note__text', text: LEGAL.accept }),
-    h(
-      'div',
-      { class: 'terms-note__links' },
-      h('a', { class: 'textlink terms-note__link', attrs: { href: legalPath('terms'), ...NEW_TAB }, text: LEGAL.terms }),
-      h('span', { class: 'terms-note__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }),
-      h('a', { class: 'textlink terms-note__link', attrs: { href: legalPath('privacy'), ...NEW_TAB }, text: LEGAL.privacy }),
-    ),
+    'p',
+    { class: 'n-sm n-own__terms' },
+    h('span', { text: LEGAL.accept }),
+    ' ',
+    h('a', { class: 'n-ivc n-u n-own__terms-link', attrs: { href: legalPath('terms'), ...NEW_TAB }, text: LEGAL.terms }),
+    '\u00a0· ',
+    h('a', { class: 'n-ivc n-u n-own__terms-link', attrs: { href: legalPath('privacy'), ...NEW_TAB }, text: LEGAL.privacy }),
   );
 }
 

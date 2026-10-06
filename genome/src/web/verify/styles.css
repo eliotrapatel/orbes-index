@@ -64,7 +64,8 @@ body[data-screen="scan"] .corners {
 h1[tabindex="-1"]:focus,
 .section-label[tabindex="-1"]:focus,
 .ownership__status[tabindex="-1"]:focus,
-.report__status[tabindex="-1"]:focus {
+.n-own__heading[tabindex="-1"]:focus,
+.n-report__status[tabindex="-1"]:focus {
   outline: none;
 }
 
@@ -72,399 +73,6 @@ h1[tabindex="-1"]:focus,
   position: fixed;
   inset: 45% 0 auto;
   text-align: center;
-}
-
-/* ── Orbit reticle (shared by landing and scanner) ─────────────────────── */
-
-.reticle {
-  display: block;
-  width: 100%;
-  height: 100%;
-  overflow: visible;
-}
-
-.reticle__ring,
-.reticle__halo {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
-}
-
-.reticle__arc {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  vector-effect: non-scaling-stroke;
-}
-
-.reticle__moon circle:first-child {
-  fill: currentColor;
-}
-
-/* view-box: the reference box starts at the viewBox's user-space origin, i.e. the orbit centre. */
-.reticle__sweep {
-  transform-box: view-box;
-  transform-origin: 0 0;
-  animation: orbit 3.6s linear infinite;
-}
-
-@keyframes orbit {
-  to { transform: rotate(360deg); }
-}
-
-/* ── Scanner ───────────────────────────────────────────────────────────── */
-
-.view--scan {
-  --reticle: min(66vw, 40vh, 340px);
-  position: fixed;
-  inset: 0;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--ink);
-  color: var(--white);
-  animation: brand-fade 0.6s ease both;
-}
-
-.scan__video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  max-width: none;
-  object-fit: cover;
-  opacity: 0;
-  transition: opacity 1.2s var(--ease);
-}
-
-.view--scan.is-ready .scan__video {
-  opacity: 1;
-}
-
-/* The veil outside the orbit: a flat 50 % ink, cut by the aperture (not a shadow effect). */
-.scan__aperture {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: var(--reticle);
-  height: var(--reticle);
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  box-shadow: 0 0 0 200vmax rgba(10, 10, 10, 0.5);
-  transition: box-shadow var(--t-slow) var(--ease);
-  pointer-events: none;
-}
-
-.scan__reticle {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: calc(var(--reticle) * 1.3);
-  height: calc(var(--reticle) * 1.3);
-  transform: translate(-50%, -50%);
-  color: var(--white);
-  pointer-events: none;
-}
-
-.reticle--live .reticle__ring {
-  opacity: 0.85;
-  transform-box: view-box;
-  transform-origin: 0 0;
-  transition: opacity var(--t-med) var(--ease), transform 0.45s var(--ease);
-}
-
-.reticle--live .reticle__sweep {
-  opacity: 0;
-  transition: opacity var(--t-med) var(--ease);
-}
-
-.view--scan.is-ready .reticle--live .reticle__sweep {
-  opacity: 1;
-}
-
-.reticle--live .reticle__moon {
-  transform-box: fill-box;
-  transform-origin: center;
-  transition: transform var(--t-slow) var(--ease);
-}
-
-/* The scan as a ritual (P-D10). Searching: the sweep above. Seal seen: a decoder
-   reply carried a confident seal, but no position for it, so the ring tightens
-   around the centre (--seal-scale, set by the view through the CSSOM) and its
-   focus breathes; the sweep gives way. Locked: .is-locked below, which the view
-   sets in place of .is-sealed. */
-.view--scan.is-sealed .reticle--live .reticle__ring {
-  opacity: 1;
-  transform: scale(var(--seal-scale, 0.92));
-  animation: reticle-focus 0.8s var(--ease) infinite alternate;
-}
-
-.view--scan.is-sealed .reticle--live .reticle__sweep {
-  opacity: 0;
-}
-
-@keyframes reticle-focus {
-  from { stroke-width: 1; opacity: 0.7; }
-  to { stroke-width: 1.8; opacity: 1; }
-}
-
-.view--scan.is-locked .scan__aperture {
-  box-shadow: 0 0 0 200vmax rgba(10, 10, 10, 0.78);
-}
-
-.view--scan.is-locked .reticle__sweep {
-  opacity: 0;
-}
-
-.view--scan.is-locked .reticle__ring {
-  opacity: 1;
-  stroke-width: 2;
-}
-
-.view--scan.is-locked .reticle__moon {
-  transform: scale(1.35);
-}
-
-.scan__top {
-  position: absolute;
-  top: calc(24px + var(--safe-top));
-  left: 0;
-  right: 0;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 34px;
-}
-
-.scan__wordmark {
-  font-size: var(--fs-label);
-}
-
-/* Centred on the header by its own box: no margin, so the 44 px tap zone of
-   the text link stays centred on the word. */
-.scan__close {
-  position: absolute;
-  right: calc(46px + var(--safe-right));
-  top: 50%;
-  margin: 0;
-  transform: translateY(-50%);
-  color: var(--white);
-}
-
-.scan__bottom {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(48px + var(--safe-bottom));
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  padding: 0 40px;
-  text-align: center;
-}
-
-.scan__status {
-  font-size: var(--fs-micro);
-  letter-spacing: 0.34em;
-  text-indent: 0.34em;
-}
-
-.scan__hint {
-  min-height: 1.6em;
-  font-size: var(--fs-label);
-  letter-spacing: 0.06em;
-  line-height: 1.6;
-  color: rgba(255, 255, 255, 0.74);
-}
-
-.scan__hint.is-changing {
-  animation: brand-fade var(--t-med) var(--ease) both;
-}
-
-/* Wraps only should LIGHT, the zoom and the photo ever not fit on one line;
-   the 8 px between lines keeps two rows of tap zones apart. */
-.scan__controls {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px 26px;
-  margin-top: 18px;
-}
-
-/* LIGHT, the zoom and UPLOAD A PHOTO: 10 px, and a tap zone of at least
-   44 × 44 px (BRAND-DESIGN-SYSTEM §3.8). The zone is transparent padding,
-   given back by an equal negative margin, so the row takes the 36 px it took
-   before; the pressed rule (::after) sits 4 px inside the zone, where the
-   border of the 36 px control was. */
-.scan__control {
-  appearance: none;
-  -webkit-appearance: none;
-  position: relative;
-  min-width: 44px;
-  min-height: 44px;
-  margin-block: -4px;
-  padding: 0 4px;
-  border: 0;
-  background: none;
-  color: var(--white);
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-micro);
-  text-indent: var(--track-micro);
-  text-transform: uppercase;
-  opacity: 0.72;
-  cursor: pointer;
-  transition: opacity var(--t-med) var(--ease);
-}
-
-.scan__control::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 4px;
-  height: 1px;
-  background: currentColor;
-  opacity: 0;
-  transition: opacity var(--t-med) var(--ease);
-}
-
-.scan__control[aria-pressed="true"] {
-  opacity: 1;
-}
-
-.scan__control[aria-pressed="true"]::after {
-  opacity: 1;
-}
-
-/* Focus ring (brand.css, the text link): 4 px outside the former 36 px box,
-   which is the zone's height and the control's width plus 4 px. */
-.scan__control:focus-visible {
-  outline: none;
-}
-
-.scan__control:focus-visible::before {
-  content: "";
-  position: absolute;
-  inset: 0 -4px;
-  outline: 1px solid currentColor;
-  pointer-events: none;
-}
-
-/* The zoom reads two characters (1×, 2×): 11 px more of transparent padding
-   on each side, given back by the margin, widen its tap zone past 44 px while
-   the label and its rule keep their width. */
-.scan__control.scan__zoom {
-  margin-inline: -11px;
-  padding-inline: 15px;
-}
-
-.scan__control.scan__zoom::after {
-  left: 11px;
-  right: 11px;
-}
-
-.scan__control.scan__zoom:focus-visible::before {
-  inset: 0 7px;
-}
-
-.scan__control[hidden] {
-  display: none;
-}
-
-@media (hover: hover) {
-  .scan__control:hover {
-    opacity: 1;
-  }
-}
-
-/* ── Verifying ─────────────────────────────────────────────────────────── */
-
-/* VERIFYING… takes the scanner's ring up (P-D10): the same reticle, at the
-   scanner's size and in its centre, its ring and moons at the weight the lock
-   leaves them, the ring faint under the arc travelling while the server
-   answers. No transition between screens. */
-.view--verifying {
-  --reticle: min(66vw, 40vh, 340px);
-  overflow: hidden;
-}
-
-.verifying__orbit {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: calc(var(--reticle) * 1.3);
-  height: calc(var(--reticle) * 1.3);
-  transform: translate(-50%, -50%);
-  color: var(--ink);
-}
-
-.reticle--verifying .reticle__ring {
-  stroke-width: 2;
-  opacity: 0.3;
-}
-
-.reticle--verifying .reticle__arc {
-  stroke-width: 2.4;
-}
-
-.reticle--verifying .reticle__moon {
-  transform-box: fill-box;
-  transform-origin: center;
-  transform: scale(1.35);
-}
-
-.reticle--verifying .reticle__sweep {
-  animation-duration: 2.4s;
-}
-
-.verifying__status {
-  position: absolute;
-  top: calc(50% + var(--reticle) * 0.65 + 20px);
-  left: 0;
-  right: 0;
-  padding: 0 32px;
-  text-align: center;
-  letter-spacing: 0.34em;
-  text-indent: 0.34em;
-}
-
-/* ── Message ───────────────────────────────────────────────────────────── */
-
-.view--message {
-  display: grid;
-  place-items: center;
-  padding: calc(88px + var(--safe-top)) 36px calc(88px + var(--safe-bottom));
-}
-
-.message__body {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  max-width: 340px;
-  text-align: center;
-}
-
-.message__title {
-  margin-top: 28px;
-  font-size: var(--fs-lead);
-  font-weight: 400;
-  line-height: 1.7;
-  letter-spacing: 0.3em;
-  text-indent: 0.3em;
-}
-
-.message__text {
-  margin-top: 18px;
-}
-
-.message__actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  margin-top: 44px;
 }
 
 /* ── Marks ─────────────────────────────────────────────────────────────── */
@@ -483,112 +91,6 @@ h1[tabindex="-1"]:focus,
 
 .mark__core {
   fill: currentColor;
-}
-
-/* ── Result ────────────────────────────────────────────────────────────── */
-
-.view--result {
-  width: 100%;
-  max-width: 560px;
-  margin: 0 auto;
-  padding: calc(60px + var(--safe-top)) 32px calc(64px + var(--safe-bottom));
-  animation: none;
-}
-
-.view--result.is-compact {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding-bottom: calc(96px + var(--safe-bottom));
-}
-
-.view--result > * {
-  opacity: 0;
-  animation: brand-rise 1.4s var(--ease) both;
-}
-
-.view--result > :nth-child(1) { animation-delay: 0.05s; }
-.view--result > :nth-child(2) { animation-delay: 0.3s; }
-.view--result > :nth-child(3) { animation-delay: 0.45s; }
-.view--result > :nth-child(4) { animation-delay: 0.6s; }
-.view--result > :nth-child(5) { animation-delay: 0.75s; }
-.view--result > :nth-child(6) { animation-delay: 0.9s; }
-
-.view--result.is-leaving > * {
-  animation: none;
-  opacity: 1;
-}
-
-.result__head {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-
-.result__wordmark {
-  margin-bottom: 52px;
-}
-
-.result__mark {
-  margin-bottom: 26px;
-}
-
-.result__title {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  font-size: var(--fs-title);
-  font-weight: 300;
-  line-height: 1.3;
-  letter-spacing: 0.3em;
-  text-indent: 0.3em;
-}
-
-.view--result[data-tone="caution"] .result__title,
-.view--result[data-tone="void"] .result__title {
-  font-size: var(--fs-heading-lg);
-  line-height: 1.55;
-}
-
-.result__title-sub {
-  color: var(--ink-soft);
-  letter-spacing: 0.3em;
-  text-indent: 0.3em;
-  line-height: 1.6;
-}
-
-.result__message,
-.message__text,
-.result__footnote,
-.result__help .prose {
-  text-wrap: balance;
-}
-
-.result__message {
-  max-width: 31ch;
-  margin-top: 22px;
-  text-align: center;
-}
-
-.result__notice {
-  max-width: 34ch;
-  margin-top: 20px;
-  padding: 14px 18px;
-  border-top: 1px solid var(--hairline-strong);
-  border-bottom: 1px solid var(--hairline-strong);
-  font-size: var(--fs-line);
-  line-height: 1.7;
-  letter-spacing: 0.02em;
-}
-
-/* Under the second-hand guidance of AUTHENTIC — REGISTERED (J-02): I HAVE A
-   TRANSFER CODE, a text link (§3.8: the hairline button stays the foot's
-   SCAN ANOTHER) to the OWNERSHIP tab, on RECEIVING THIS PIECE, centred under
-   the notice's lower hairline. */
-.result__notice-link {
-  margin-top: 6px;
 }
 
 /* Photographs (F-04) — the piece's own, then its model's, on an ivory plate
@@ -664,24 +166,6 @@ h1[tabindex="-1"]:focus,
   color: var(--ink-soft);
 }
 
-/* GENOME — a specimen on ivory, framed by brackets. */
-.result__genome {
-  margin-top: 52px;
-  padding: 34px 22px 28px;
-  background: var(--ivory);
-  color: var(--ink);
-  text-align: center;
-}
-
-.result__genome .bracket {
-  color: var(--hairline-strong);
-}
-
-.result__genome .bracket--tl { top: 10px; left: 10px; }
-.result__genome .bracket--tr { top: 10px; right: 10px; }
-.result__genome .bracket--bl { bottom: 10px; left: 10px; }
-.result__genome .bracket--br { bottom: 10px; right: 10px; }
-
 .genome__label {
   font-size: var(--fs-nano);
   letter-spacing: 0.36em;
@@ -719,19 +203,6 @@ h1[tabindex="-1"]:focus,
   margin: 0 auto;
 }
 
-/* The plate opens from the centre (P-D10), where the ring closed on the code:
-   a circle widening over it, in step with the other sections' delays. Not on
-   the way out (.is-leaving), and not with reduced motion. */
-.view--result:not(.is-leaving) > .result__genome {
-  animation-name: genome-open;
-  animation-duration: 1.4s;
-}
-
-@keyframes genome-open {
-  from { opacity: 0; clip-path: circle(0% at 50% 50%); }
-  to { opacity: 1; clip-path: circle(75% at 50% 50%); }
-}
-
 /* The fingerprint the customer may compare or quote: 10 px, never the 8 px of decoration. */
 .genome__meta {
   display: flex;
@@ -739,75 +210,6 @@ h1[tabindex="-1"]:focus,
   gap: 10px;
   margin-top: 20px;
   font-size: var(--fs-micro);
-}
-
-/* The ceremony of a first registration (P-D01): under the GENOME, the name of
-   the model and its collection, then SHARE THE GENOME (a text link). */
-.ceremony {
-  margin-top: 26px;
-  padding-top: 22px;
-  border-top: 1px solid var(--hairline);
-}
-
-.ceremony__name {
-  font-size: var(--fs-heading);
-  font-weight: 400;
-  line-height: 1.4;
-  letter-spacing: 0.3em;
-  text-indent: 0.3em;
-  overflow-wrap: anywhere;
-}
-
-.ceremony__collection {
-  margin-top: 6px;
-  font-size: var(--fs-micro);
-  line-height: 1.6;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  color: var(--ink-soft);
-}
-
-.ceremony__share {
-  margin-top: 10px;
-}
-
-.ceremony__share[hidden] {
-  display: none;
-}
-
-/* With motion: the eight glyphs appear one by one around the SEAL (each group
-   of the layer genome, its --i set by the view), then the names rise under
-   them. Without, they are simply there (.is-ceremony is never set). */
-.is-ceremony .genome-svg g[data-layer="genome"] {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: ceremony-glyph 0.7s var(--ease) both;
-  animation-delay: calc(0.9s + var(--i, 0) * 0.16s);
-}
-
-.is-ceremony .ceremony__name,
-.is-ceremony .ceremony__collection,
-.is-ceremony .ceremony__share {
-  animation: brand-rise 1.2s var(--ease) both;
-  animation-delay: 2.3s;
-}
-
-.is-ceremony .ceremony__collection {
-  animation-delay: 2.5s;
-}
-
-.is-ceremony .ceremony__share {
-  animation-delay: 2.8s;
-}
-
-@keyframes ceremony-glyph {
-  from { opacity: 0; transform: scale(0.55); }
-  to { opacity: 1; transform: scale(1); }
-}
-
-.result__lines {
-  margin-top: 46px;
-  text-align: center;
 }
 
 .lines {
@@ -819,21 +221,6 @@ h1[tabindex="-1"]:focus,
   letter-spacing: 0.3em;
   text-indent: 0.3em;
   line-height: 2.55;
-}
-
-/* SEE THE MODEL (P-R02), under the lines that name the model: a text link, centred like them. */
-.result__model-link {
-  margin-top: 6px;
-}
-
-.result__help {
-  margin-top: 40px;
-  text-align: center;
-}
-
-.result__help .prose {
-  max-width: 32ch;
-  margin: 0 auto;
 }
 
 /* ORBES Client Services (BRAND-DESIGN-SYSTEM §4.2), under the help line of a
@@ -855,107 +242,6 @@ h1[tabindex="-1"]:focus,
   max-width: 34ch;
   color: var(--ink-soft);
   text-wrap: balance;
-}
-
-/* DO YOU HOLD THE CERTIFICATE CARD? Under the help line of an UNUSUAL
-   ACTIVITY result that carries a registration token: a hairline, the
-   question (a status line: 11 px, label tracking, not the 8.5 px of a
-   section label, since it asks the reader something) and its sentence
-   centred as the help line, then the OWNERSHIP panel (sign-in, then the
-   claim code) at the width of a tab panel. */
-.result__card {
-  margin-top: 50px;
-  border-top: 1px solid var(--hairline);
-}
-
-.result__card-title {
-  margin-top: 36px;
-  font-size: var(--fs-label);
-  font-weight: 400;
-  line-height: 1.7;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  text-align: center;
-  text-transform: uppercase;
-  text-wrap: balance;
-}
-
-.result__card-text {
-  max-width: 32ch;
-  margin: 12px auto 0;
-  text-align: center;
-  text-wrap: balance;
-}
-
-/* WHERE DID YOU SEE OR BUY THIS PIECE? Under the contact of every result
-   that was not authentic (C-02, API §8.5): a hairline, the question (a
-   status line, as DO YOU HOLD THE CERTIFICATE CARD?) and one sentence,
-   centred, then the four answers two by two, pressed like the sign-in
-   switch (18 px between the rows, so their 44 px zones never meet). Once one
-   is chosen, the place, the note and SEND ANSWER, a text link: the hairline
-   button stays the foot's SCAN AGAIN (BRAND-DESIGN-SYSTEM §3.8). It comes
-   after the certificate-card section when there is one. */
-.report {
-  margin-top: 50px;
-  border-top: 1px solid var(--hairline);
-  text-align: center;
-}
-
-.report__title {
-  margin-top: 36px;
-  font-size: var(--fs-label);
-  font-weight: 400;
-  line-height: 1.7;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  text-transform: uppercase;
-  text-wrap: balance;
-}
-
-.report__lead {
-  max-width: 32ch;
-  margin: 12px auto 0;
-  text-wrap: balance;
-}
-
-.report__channels {
-  display: grid;
-  grid-template-columns: repeat(2, max-content);
-  justify-content: center;
-  gap: 18px 28px;
-  margin-top: 26px;
-}
-
-/* OTHER is barely 44 px wide in 10 px type: its zone keeps the floor. */
-.report__channel {
-  min-width: 44px;
-}
-
-.report__form {
-  margin-top: 30px;
-  text-align: left;
-}
-
-.report__form[hidden] {
-  display: none;
-}
-
-.report__note {
-  line-height: 1.5;
-  resize: vertical;
-}
-
-.report__actions {
-  display: flex;
-  justify-content: center;
-}
-
-.report__status {
-  margin-top: 26px;
-  font-size: var(--fs-label);
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  text-transform: uppercase;
 }
 
 /* Tabs */
@@ -1226,23 +512,6 @@ h1[tabindex="-1"]:focus,
   color: var(--ink-soft);
 }
 
-.transfer-code {
-  margin-top: 18px;
-  padding: 22px 16px;
-  background: var(--ivory);
-  text-align: center;
-}
-
-.transfer-code__value {
-  margin: 10px 0 8px;
-  font-size: var(--fs-code);
-  letter-spacing: 0.26em;
-  text-indent: 0.26em;
-  font-variant-numeric: tabular-nums;
-  user-select: all;
-  -webkit-user-select: all;
-}
-
 /* SIGNED IN AS …, then two links: MY PIECES and SIGN OUT in the OWNERSHIP
    tab, CHANGE PASSWORD (C-04) and SIGN OUT at the foot of MY PIECES (F-01).
    When the line is too short for the three, the two links wrap under the
@@ -1329,74 +598,10 @@ h1[tabindex="-1"]:focus,
   white-space: nowrap;
 }
 
-/* Under CREATE ACCOUNT (J-06): the sentence, then TERMS OF USE · PRIVACY
-   POLICY, centred; a row that wraps keeps 12 px between its lines, so the
-   44 px zones stay apart, as .legal-links__pages. */
-.terms-note {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  margin-top: 22px;
-  text-align: center;
-}
 
-.terms-note__text {
-  max-width: 34ch;
-  font-size: var(--fs-micro);
-  line-height: 1.75;
-  letter-spacing: 0.02em;
-  color: var(--ink-soft);
-  text-wrap: balance;
-}
 
-.terms-note__links {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 12px 6px;
-}
 
-.terms-note__link {
-  white-space: nowrap;
-}
 
-.terms-note__dot {
-  color: var(--ink-soft);
-  font-size: var(--fs-caption);
-}
-
-.result__foot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 26px;
-  margin-top: 60px;
-  text-align: center;
-}
-
-.result__footnote {
-  max-width: 38ch;
-  font-size: var(--fs-micro);
-  line-height: 1.75;
-  letter-spacing: 0.02em;
-  color: var(--ink-soft);
-}
-
-/* The reference customers are asked to quote: legible (10 px, --ink-soft), tabular. */
-.result__meta {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 6px 18px;
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-micro);
-  line-height: 2;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-soft);
-}
 
 /* ── My pieces (F-01) ──────────────────────────────────────────────────── */
 
@@ -4803,11 +4008,6 @@ body[data-screen="board"] .corners {
    product lines, row values, the reference, codes, inputs and any figure
    (Gravesend's one is its capital I, and its figures do not align). */
 .boot-error,
-.scan__status,
-.scan__control,
-.verifying__status,
-.message__title,
-.result__title,
 .pieces__title,
 .pieces__order-title,
 .pieces__order-step-label,
@@ -4820,13 +4020,9 @@ body[data-screen="board"] .corners {
 .tabs__tab,
 .tabs__dot,
 .legal-links__dot,
-.terms-note__dot,
 .rows__label,
 .section-label,
 .ownership__status,
-.result__card-title,
-.report__title,
-.report__status,
 .auth__option,
 .question__label,
 .question__release,
@@ -4857,8 +4053,6 @@ body[data-screen="board"] .corners {
 .circle-post__result-label,
 .circle-post__result-mine,
 .circle-post__link-title,
-.ceremony__name,
-.ceremony__collection,
 .live__overline,
 .live__title,
 .live__fact,
@@ -4891,11 +4085,6 @@ body[data-screen="board"] .corners {
   font-family: var(--font);
 }
 
-/* The zoom control shows a figure (1×, 2×): Gravesend's one is its capital I. */
-.scan__zoom {
-  font-family: var(--font);
-}
-
 /* The banner's countdown: figures, in the reading face. */
 .live-banner__clock {
   font-family: var(--font);
@@ -4919,7 +4108,6 @@ body[data-screen="board"] .corners {
 }
 
 @media (max-width: 350px) {
-  .view--result,
   .view--pieces,
   .view--certificate,
   .view--lookbook,
@@ -4943,9 +4131,6 @@ body[data-screen="board"] .corners {
     --tab-pad: 6px;
     --tab-track: 0.12em;
   }
-  .scan__bottom {
-    padding: 0 24px;
-  }
   .btn {
     min-width: 0;
     width: 100%;
@@ -4953,26 +4138,6 @@ body[data-screen="board"] .corners {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .reticle__sweep {
-    animation: none;
-  }
-  .view--result > * {
-    opacity: 1;
-  }
-  /* P-D10: the seal seen only steadies the ring (no tightening, no breathing); the plate is simply there. */
-  .view--scan.is-sealed .reticle--live .reticle__ring {
-    transform: none;
-    animation: none;
-  }
-  .view--result:not(.is-leaving) > .result__genome {
-    animation: none;
-  }
-  .is-ceremony .genome-svg g[data-layer="genome"],
-  .is-ceremony .ceremony__name,
-  .is-ceremony .ceremony__collection,
-  .is-ceremony .ceremony__share {
-    animation: none;
-  }
   /* The LIVE RELEASE: cross-fades only. The lock's orbits stay still (the view turns none), the door's leaves fade
      rather than part, the reveal and the sweep are not played (the view sets no .is-revealing). */
   .live-seal__ring,
@@ -7001,7 +6166,6 @@ body.nocturne[data-banner] .view--pieces {
 
 /* ── The screens not yet drawn in NOCTURNE, on its ground: its 24 px margin, and their states as C40 draws them ── */
 
-body.nocturne .view--result,
 body.nocturne .view--pieces,
 body.nocturne .view--lookbook,
 body.nocturne .view--sheet,
@@ -7028,3 +6192,883 @@ body.nocturne .circle-post__missing {
   text-wrap: wrap;
 }
 
+
+/* ══ The scan and its results (plan NOCTURNE, screen 2, step N4; C9, C11–C17, C36–C38) ══════════════════════════════
+   The scanner, VERIFYING… and the problems of the scan keep the whole screen (no rail, no SCAN ring); a result has the
+   chrome. Every value is the rulebook's (build.py C_CSS) or the boards' own (c.py, c2.py, c4.py: their markup's
+   margins), set on the pieces of views/nocturne.ts. */
+
+/* ── The tone marks (n.py TONE): a ring 1.5 px in ivory, its core or its moon ── */
+
+.n-tone__ring {
+  fill: none;
+  stroke: var(--vault-ink);
+  stroke-width: 1.5;
+}
+
+.n-tone__core {
+  fill: var(--vault-ink);
+}
+
+/* ── The scanner (C11, C12; C38's states): the camera, the orbit and its moons, the status, the controls ──
+   The orbit is 272 px, its centre at 392 px of an 844 px screen (46.445 %); the status at 572 px (67.77 %), the
+   controls at 664 px (78.67 %), UPLOAD A PHOTO 44 px above the foot. A shorter screen keeps the proportions, the
+   orbit no more than 32.23 % of its height. */
+
+.n-cam {
+  --orbit: min(272px, 32.23svh);
+  /* The moons, round the orbit's centre: polaris 119 px of 272 along each axis, the three others 119.5 px. */
+  --moon: calc(var(--orbit) * 0.4393);
+  --polaris: calc(var(--orbit) * 0.4375);
+  position: fixed;
+  inset: 0;
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--n-camera);
+  color: var(--vault-ink);
+}
+
+.n-cam__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 1.2s var(--ease);
+}
+
+.n-cam.is-ready .n-cam__video {
+  opacity: 1;
+}
+
+/* Locked (C12): the frame frozen, darker. */
+.n-cam.is-locked .n-cam__video {
+  filter: brightness(0.55);
+}
+
+.n-cam__orbit {
+  position: absolute;
+  top: 46.445%;
+  left: 50%;
+  width: var(--orbit);
+  height: var(--orbit);
+  margin: calc(var(--orbit) / -2) 0 0 calc(var(--orbit) / -2);
+  pointer-events: none;
+}
+
+/* The veil outside the orbit (C11: 50 %; locked, C12: 78 %), cut by the aperture. */
+.n-cam__aperture {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 200vmax rgba(5, 5, 5, 0.5);
+  transition: box-shadow var(--t-slow) var(--ease);
+}
+
+.n-cam.is-locked .n-cam__aperture {
+  box-shadow: 0 0 0 200vmax rgba(5, 5, 5, 0.78);
+}
+
+/* The ring: before the stream, half lit (C38, PREPARING CAMERA…); searching, 1 px at 80 % (C11); the seal seen, it
+   tightens round the centre, 1.5 px at 90 % with its light, breathing (C38); locked, 2 px at 95 % (C12). */
+.n-cam__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(246, 242, 234, 0.5);
+  transition: transform 0.45s var(--ease), box-shadow var(--t-med) var(--ease);
+}
+
+.n-cam.is-ready .n-cam__ring {
+  box-shadow: 0 0 0 1px rgba(246, 242, 234, 0.8);
+}
+
+.n-cam.is-sealed .n-cam__ring {
+  transform: scale(var(--seal-scale, 0.92));
+  box-shadow: 0 0 0 1.5px rgba(246, 242, 234, 0.9), 0 0 30px rgba(246, 242, 234, 0.2);
+  animation: n-cam-breathe 0.8s var(--ease) infinite alternate;
+}
+
+.n-cam.is-locked .n-cam__ring {
+  transform: none;
+  box-shadow: 0 0 0 2px rgba(246, 242, 234, 0.95);
+  animation: none;
+}
+
+@keyframes n-cam-breathe {
+  from { opacity: 0.7; }
+  to { opacity: 1; }
+}
+
+/* The search (P-D10): an arc travelling on the ring; it gives way to the seal seen and to the lock. On VERIFYING…
+   of the photo path (.n-cam--still) it travels while the server answers. */
+.n-cam__sweep {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  opacity: 0;
+  transition: opacity var(--t-med) var(--ease);
+  animation: n-cam-orbit 3.6s linear infinite;
+}
+
+.n-cam.is-ready .n-cam__sweep {
+  opacity: 1;
+}
+
+.n-cam.is-sealed .n-cam__sweep,
+.n-cam.is-locked .n-cam__sweep {
+  opacity: 0;
+}
+
+.n-cam--still.is-locked .n-cam__sweep {
+  opacity: 1;
+  animation-duration: 2.4s;
+}
+
+.n-cam__arc {
+  fill: none;
+  stroke: var(--vault-ink);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+@keyframes n-cam-orbit {
+  to { transform: rotate(360deg); }
+}
+
+/* The four moons of the printed code (C11: 9 px, polaris an 18 px ring round an 8 px dot; locked, C12: 12 px, polaris
+   24 px, its ring 2 px, its dot 10 px), shown once the camera streams. */
+.n-cam__moon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: var(--vault-ink);
+  opacity: 0;
+  transition: opacity var(--t-med) var(--ease);
+}
+
+.n-cam.is-ready .n-cam__moon {
+  opacity: 1;
+}
+
+.n-cam__moon--ne {
+  transform: translate(var(--moon), calc(var(--moon) * -1));
+}
+
+.n-cam__moon--sw {
+  transform: translate(calc(var(--moon) * -1), var(--moon));
+}
+
+.n-cam__moon--se {
+  transform: translate(var(--moon), var(--moon));
+}
+
+.n-cam__moon--polaris {
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--vault-ink);
+  transform: translate(calc(var(--polaris) * -1), calc(var(--polaris) * -1));
+}
+
+.n-cam__polaris-core {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--vault-ink);
+}
+
+.n-cam.is-locked .n-cam__moon {
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+}
+
+.n-cam.is-locked .n-cam__moon--polaris {
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  box-shadow: inset 0 0 0 2px var(--vault-ink);
+}
+
+.n-cam.is-locked .n-cam__polaris-core {
+  top: 7px;
+  left: 7px;
+  width: 10px;
+  height: 10px;
+}
+
+/* ORBES centred over the camera, CLOSE at the right (C11). */
+.n-cam__hd {
+  position: relative;
+  z-index: 2;
+  justify-content: center;
+}
+
+.n-cam__close {
+  position: absolute;
+  top: calc(6px + var(--safe-top));
+  right: 12px;
+}
+
+.n-cam__status {
+  position: absolute;
+  top: 67.77%;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  padding: 0 var(--n-margin);
+}
+
+/* VERIFYING…, one status line, a title (C12), 8 px lower. */
+.n-cam.is-verifying .n-cam__status {
+  top: calc(67.77% + 8px);
+}
+
+.n-cam__hint {
+  margin-top: 10px;
+}
+
+.n-cam__hint:empty {
+  display: none;
+}
+
+/* PREPARING CAMERA… stands alone (C38); the guide comes with the stream. */
+.n-cam:not(.is-ready) .n-cam__hint {
+  visibility: hidden;
+}
+
+.n-cam__hint.is-changing {
+  animation: brand-fade var(--t-med) var(--ease) both;
+}
+
+/* LIGHT and the zoom (C11): 44 px high, a hairline round each, 10 px apart; LIGHT pressed is underlined (C38). */
+.n-cam__controls {
+  position: absolute;
+  top: 78.67%;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.n-cam__control {
+  height: 44px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+  color: var(--vault-ink);
+  font-size: var(--n-fs-tl);
+  letter-spacing: 0.24em;
+  text-align: center;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.n-cam__zoom {
+  min-width: 64px;
+  padding: 0;
+  font-family: var(--font);
+  font-size: var(--n-fs-zoom);
+  letter-spacing: 0;
+}
+
+.n-cam__light[aria-pressed="true"] {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 5px;
+}
+
+.n-cam__control[hidden] {
+  display: none;
+}
+
+.n-cam__upload {
+  position: absolute;
+  right: 0;
+  bottom: calc(44px + var(--safe-bottom));
+  left: 0;
+  z-index: 1;
+}
+
+/* Locked (C12): the controls stay, fainter. */
+.n-cam.is-locked .n-cam__controls,
+.n-cam.is-locked .n-cam__upload {
+  opacity: 0.6;
+}
+
+.n-cam__control:focus-visible,
+.n-tabs__panel:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+/* ── A problem of the scan (C17): ORBES centred, the empty ring, the title, its sentence, two actions ── */
+
+.n-message__body {
+  padding-top: 60px;
+  padding-bottom: 60px;
+}
+
+.n-message__title {
+  margin-top: 28px;
+  overflow-wrap: anywhere;
+}
+
+.n-message__text {
+  margin-top: 14px;
+}
+
+.n-message__actions {
+  margin-top: 32px;
+}
+
+.n-message__second {
+  margin-top: 20px;
+}
+
+/* ── A result (C9, C13–C16) ── */
+
+.n-result__head {
+  padding-top: 44px;
+}
+
+/* The word: 30 px, 0.14 em, across the column (C9, C16: INVALID SIGNATURE). */
+.n-result__title {
+  margin-top: 22px;
+  padding-left: 0.14em;
+  color: var(--vault-ink);
+  font-size: var(--n-fs-t1);
+  line-height: 1.15;
+  letter-spacing: 0.14em;
+  overflow-wrap: anywhere;
+}
+
+.n-result__word {
+  display: block;
+}
+
+/* Its sub-title, 12 px under it, centred on the column (the word's 0.14 em indent given back). */
+.n-result__sub {
+  display: block;
+  margin-top: 12px;
+  margin-left: calc(var(--n-fs-t1) * -0.14);
+  line-height: var(--n-lh-base);
+}
+
+.n-result__message {
+  margin-top: 16px;
+}
+
+.n-result__notice-block {
+  margin-top: 22px;
+}
+
+.n-result__notice-line {
+  margin-top: 16px;
+}
+
+.n-result__genome {
+  margin-top: 48px;
+}
+
+/* The GENOME opens from its centre (P-D10), where the orbit closed on the code: a circle widening over it. Not on the
+   way out (.is-leaving), and not with reduced motion. */
+.n-result:not(.is-leaving) .n-result__genome {
+  animation: genome-open 1.4s var(--ease) both;
+}
+
+@keyframes genome-open {
+  from { opacity: 0; clip-path: circle(0% at 50% 50%); }
+  to { opacity: 1; clip-path: circle(75% at 50% 50%); }
+}
+
+.n-gen__figure {
+  margin-top: 18px;
+}
+
+.n-gen__figure--220 {
+  width: 220px;
+  height: 220px;
+}
+
+.n-gen__figure .genome-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+.n-gen__id {
+  color: var(--vault-ink);
+}
+
+/* THE MODEL's photograph (decision 9): full width, whole, without the fade; its caption; its sentence. */
+.n-result__model {
+  margin-top: 48px;
+}
+
+.n-result__model[hidden] {
+  display: none;
+}
+
+.n-result__photo-note {
+  margin-top: 14px;
+}
+
+.n-result__lines {
+  margin-top: 40px;
+}
+
+.n-result__name {
+  padding: 0 var(--n-margin);
+  font-size: var(--n-fs-name);
+  overflow-wrap: anywhere;
+}
+
+.n-result__line-list {
+  margin: 16px 0 0;
+  padding: 0 var(--n-margin);
+  list-style: none;
+}
+
+.n-result__model-line {
+  margin-top: 22px;
+}
+
+.n-result__tabs {
+  margin-top: 48px;
+}
+
+.n-result__tabs .n-tabs__panel {
+  padding-top: 24px;
+}
+
+.n-result__tabs .n-tabs__panel[hidden] {
+  display: none;
+}
+
+.n-result__panel-label {
+  margin-top: 28px;
+}
+
+.n-result__panel-note {
+  margin-top: 16px;
+}
+
+/* ORBES Client Services (C15, C16): the help line, then the contact. */
+.n-result__help {
+  margin-top: 40px;
+}
+
+.n-result__help--first {
+  margin-top: 36px;
+}
+
+/* A 44 px zone each, given back: the lines stand as drawn, 8 px apart. The email's reaches up into the help line, the
+   phone's down into the hours, so the two never meet. */
+.n-contact__email {
+  align-self: flex-start;
+  margin-top: -28.25px;
+  padding-top: 28.25px;
+}
+
+.n-contact__phone {
+  align-self: flex-start;
+  margin-bottom: -24.5px;
+  padding-bottom: 24.5px;
+}
+
+.n-contact .n-contact__email {
+  font-size: var(--n-fs-tl);
+  letter-spacing: var(--n-track-micro);
+}
+
+/* DO YOU HOLD THE CERTIFICATE CARD? or DO YOU HOLD A TRANSFER CODE? (C15). */
+.n-result__card-text {
+  margin-top: 14px;
+}
+
+.n-result__card .n-own {
+  margin-top: 14px;
+}
+
+/* The foot: the assurance note, VERIFIED and REF, then SCAN ANOTHER or SCAN AGAIN, the hairline button. */
+.n-result__footnote {
+  margin-top: 36px;
+}
+
+.n-result__meta {
+  flex-wrap: wrap;
+  margin-top: 22px;
+}
+
+.n-result__meta-item {
+  white-space: nowrap;
+}
+
+.n-result__meta-value {
+  font-family: var(--font);
+  letter-spacing: 0.04em;
+}
+
+.n-result__again {
+  margin-top: 26px;
+}
+
+/* The ceremony of a first registration (P-D01, C36): the GENOME at 220 px, then the model and its collection, then
+   SHARE THE GENOME. With motion, the eight glyphs appear one by one round the monogram (each group of the layer
+   genome, its --i set by the view), then the names rise under them. */
+.n-ceremony {
+  margin-top: 22px;
+}
+
+.n-ceremony__name {
+  font-size: var(--n-fs-ceremony);
+  overflow-wrap: anywhere;
+}
+
+.n-ceremony__collection {
+  margin-top: 8px;
+}
+
+.n-ceremony__share-line {
+  margin-top: 20px;
+}
+
+.n-ceremony__share-line[hidden] {
+  display: none;
+}
+
+.is-ceremony .n-gen .genome-svg g[data-layer="genome"] {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ceremony-glyph 0.7s var(--ease) both;
+  animation-delay: calc(0.9s + var(--i, 0) * 0.16s);
+}
+
+.is-ceremony .n-ceremony__name,
+.is-ceremony .n-ceremony__collection,
+.is-ceremony .n-ceremony__share-line {
+  animation: brand-rise 1.2s var(--ease) both;
+  animation-delay: 2.3s;
+}
+
+.is-ceremony .n-ceremony__collection {
+  animation-delay: 2.5s;
+}
+
+.is-ceremony .n-ceremony__share-line {
+  animation-delay: 2.8s;
+}
+
+@keyframes ceremony-glyph {
+  from { opacity: 0; transform: scale(0.55); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* ── WHERE DID YOU SEE OR BUY THIS PIECE? (C15 open; C16 a row that opens) ── */
+
+.n-report__lead {
+  margin-top: 8px;
+}
+
+.n-report__head {
+  margin: 0;
+  font: inherit;
+}
+
+.n-report__toggle {
+  border-top: 1px solid var(--vault-hairline);
+  font: inherit;
+}
+
+.n-report__toggle .n-acc__title {
+  color: var(--vault-ink);
+}
+
+.n-report__body[hidden] {
+  display: none;
+}
+
+.n-report__channels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* The note: one line underlined, as the place (C15), growing with what is written where the browser can. */
+.n-report__note {
+  min-height: 44px;
+  padding-top: 10px;
+  line-height: var(--n-lh-base);
+  resize: none;
+  field-sizing: content;
+}
+
+.n-report__send {
+  margin-top: 22px;
+}
+
+.n-report__status {
+  margin-top: 16px;
+}
+
+.n-report__kept {
+  margin-top: 8px;
+}
+
+.n-opt2__option:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+/* ── The OWNERSHIP panel (C9, C13, C14, C36, C37, C39): its state, its sentences, the sign-in, the codes ── */
+
+.n-own > :first-child {
+  margin-top: 0;
+}
+
+.n-own__text {
+  margin-top: 10px;
+}
+
+.n-own__small {
+  margin-top: 8px;
+}
+
+.n-own__small--first {
+  margin-top: 12px;
+}
+
+.n-own__small--hint {
+  margin-top: 18px;
+}
+
+.n-own__small--code {
+  margin-top: 10px;
+}
+
+.n-own__until {
+  margin-top: 14px;
+}
+
+.n-own__heading--receiving ~ .n-own__until {
+  margin-top: 12px;
+}
+
+.n-own__code + .n-own__until {
+  margin-top: 10px;
+}
+
+.n-own__heading {
+  margin-top: 28px;
+}
+
+.n-own__heading--receiving {
+  margin-top: 30px;
+}
+
+.n-own__heading--first {
+  margin-top: 18px;
+}
+
+.n-own__lead {
+  margin-top: 12px;
+}
+
+.n-own__until + .n-own__lead {
+  margin-top: 18px;
+}
+
+.n-own__switch {
+  margin-top: 20px;
+}
+
+/* SIGN IN · CREATE ACCOUNT, a group of two pressed buttons drawn as the canvas's `.switch2`. */
+.n-switch2__tab[aria-pressed="true"] {
+  color: var(--vault-ink);
+}
+
+.n-switch2__tab[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  background: var(--vault-ink);
+}
+
+.n-own__action {
+  margin-top: 18px;
+}
+
+.n-own__action--after-small {
+  margin-top: 16px;
+}
+
+.n-own .form--signin .n-form__actions {
+  margin-top: 28px;
+}
+
+.n-own .form--create .n-form__actions {
+  margin-top: 24px;
+}
+
+.n-own .form--transfer .n-form__actions {
+  margin-top: 20px;
+}
+
+/* The line of a text link of the panel: the column's own type, so its zone (which reaches above the word) clears the
+   button above it wherever the panel stands (a result, MY PIECES, a release's page in the vault). */
+.n-own__tl-line {
+  margin-top: 18px;
+  font-size: var(--n-fs-base);
+  line-height: var(--n-lh-base);
+}
+
+/* 18 px under the hairline button (the canvas's 16, C39): the text link's 44 px zone, which reaches above its word,
+   clears the button. */
+.n-own__back {
+  margin-top: 18px;
+}
+
+.n-own__terms {
+  margin-top: 14px;
+}
+
+.n-own__code-label {
+  margin-top: 14px;
+}
+
+/* A transfer code (C37): 26 px in the reading face, light, tracked. */
+.n-own__code {
+  margin-top: 12px;
+  color: var(--vault-ink);
+  font-family: var(--font);
+  font-size: var(--n-fs-name);
+  font-weight: 300;
+  line-height: var(--n-lh-t1);
+  letter-spacing: 0.08em;
+  overflow-wrap: anywhere;
+}
+
+/* SIGNED IN AS you@example.com · MY PIECES · SIGN OUT (C14, C36): one line of labels, the email in the reading face. */
+.n-own__account {
+  margin-top: 22px;
+  line-height: 2;
+}
+
+.n-own__email {
+  color: var(--vault-ink);
+  font-family: var(--font);
+  font-size: var(--n-fs-sm);
+  letter-spacing: 0;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+
+/* MY PIECES and SIGN OUT, and the terms' links: underlined in ivory, each with a 44 px zone that leaves the line be. */
+/* A 44 px zone each, padding above and below given back by the margins, so the line keeps its height. */
+.n-own__link,
+.n-own__terms-link {
+  display: inline-block;
+  margin: -15px 0;
+  padding: 15px 0;
+  border: 0;
+  background: none;
+  color: var(--vault-ink);
+  font: inherit;
+  letter-spacing: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.n-own__link:focus-visible,
+.n-own__terms-link:focus-visible,
+.n-contact a:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+.n-own__waiting {
+  margin-top: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .n-cam__sweep {
+    animation: none;
+  }
+  /* P-D10: the seal seen only steadies the ring (no tightening, no breathing). */
+  .n-cam.is-sealed .n-cam__ring {
+    transform: none;
+    animation: none;
+  }
+  .n-result:not(.is-leaving) .n-result__genome {
+    animation: none;
+  }
+  .is-ceremony .n-gen .genome-svg g[data-layer="genome"],
+  .is-ceremony .n-ceremony__name,
+  .is-ceremony .n-ceremony__collection,
+  .is-ceremony .n-ceremony__share-line {
+    animation: none;
+  }
+}
+
+/* Folded (C16), the sentence is the row's second line: 4 px under the question, as `.acc .sm`. */
+.n-report--folded .n-report__lead {
+  margin-top: 4px;
+}
+
+/* A result's tabs (C9): CARE, the one word under 44 px, has its zone 4 px wider each side, given back, so it reaches
+   44 px; its underline keeps to the word. */
+.n-tabsx__tab[aria-controls$="panel-care"] {
+  margin-right: -4px;
+  margin-left: -4px;
+  padding-right: 4px;
+  padding-left: 4px;
+}
+
+.n-tabsx__tab[aria-controls$="panel-care"][aria-selected="true"]::after {
+  right: 4px;
+  left: 4px;
+}
+
+/* The OWNERSHIP panel's sign-in on a LIVE RELEASE's page (I'LL BE THERE, an edge page): the vault keeps its one primary
+   action filled, the release's own (fidelity rule 6, until its pages are drawn in NOCTURNE, N7): the form's button is
+   the hairline one there. */
+.vault .n-own .n-btn:not(.n-btn--ol) {
+  background: none;
+  color: var(--vault-ink);
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+}
+
+/* The + / − of a row that opens: a 16 px icon at the row's right, never squeezed by its text (C16's `.acc` svg). */
+.n-acc__sign {
+  display: flex;
+  flex: none;
+}

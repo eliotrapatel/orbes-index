@@ -13,8 +13,9 @@
  *                     SCAN
  *
  * The column is phone width on a computer (choice 5). The chrome is hidden on the screens that keep their own look:
- * the scan, the room and every LIVE RELEASE page (choice 4: its pages before and after the room get it with N7), the
- * boutique board, the shared certificate (choice 3); VERIFYING… and a problem of the scan show the ground without it.
+ * the room and every LIVE RELEASE page (choice 4: its pages before and after the room get it with N7), the boutique
+ * board, the shared certificate (choice 3); the scanner, VERIFYING… and a problem of the scan (C11, C12, C17) are
+ * NOCTURNE's without it.
  * The shared certificate also sets Safari's bars back to its light (addition 13): every other screen's are the ink.
  */
 import { h } from '../../shared/dom.js';
@@ -40,9 +41,12 @@ export interface ShellDeps {
   onScan(): void;
 }
 
-/** The screens drawn in NOCTURNE with its chrome; the others of NOCTURNE (VERIFYING…, a problem) show the ground alone. */
+/**
+ * The screens drawn in NOCTURNE with its chrome; the others of NOCTURNE (the scanner, VERIFYING…, a problem of the
+ * scan: C11, C12, C17) keep the whole screen, without the rail and the ring.
+ */
 const CHROME_SCREENS: readonly string[] = ['landing', 'result', 'pieces', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost'];
-const NOCTURNE_SCREENS: readonly string[] = [...CHROME_SCREENS, 'verifying', 'message'];
+const NOCTURNE_SCREENS: readonly string[] = [...CHROME_SCREENS, 'scan', 'verifying', 'message'];
 
 /** Safari's bars (addition 13): the ink of NOCTURNE, and the light of the shared certificate, kept as it is. */
 export const THEME_COLOURS = Object.freeze({ nocturne: '#0a0a0a', certificate: '#ffffff' });

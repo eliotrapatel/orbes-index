@@ -30,6 +30,11 @@
  * /legal/terms, and the privacy policy says what the account records, at
  * /legal/privacy (J-06).
  *
+ * Drawn in NOCTURNE's pieces wherever it stands (plan NOCTURNE, step N4: C9, C13, C14, C15, C36, C37, C39): its state
+ * a label (ivory when it says what the piece is), its sentences in ash, the times of the scan's windows as labels,
+ * SIGN IN · CREATE ACCOUNT underlined, the fields underlined on the dark, the form's ivory button, the hairline ones for
+ * a second action (CREATE TRANSFER CODE, CANCEL TRANSFER, VERIFY AGAIN, SCAN AGAIN), the text links centred.
+ *
  * Every action is a same-origin JSON call through ApiClient (session cookie
  * + CSRF token). Server messages are shown as they come: they are written for
  * customers and never carry internal detail. The panel re-renders itself on
@@ -40,10 +45,11 @@ import { h, prefersReducedMotion } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
-import { formatDate, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
-import { ACCOUNT_PASSWORD, CLAIM_HELD, NOT_DELIVERED_NOTE, PIECES, RECEIVING, STAFF_SCAN_NOTE } from '../copy.js';
-import { contactBlock, piecesLink, sectionLabel, termsNote } from './common.js';
-import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
+import { formatDate, formatDateTime, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
+import { ACCOUNT_PASSWORD, CLAIM_HELD, CONTACT, NOT_DELIVERED_NOTE, PIECES, RECEIVING, STAFF_SCAN_NOTE } from '../copy.js';
+import { PIECES_PATH, termsNote, withNumerals } from './common.js';
+import { FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
+import { appAnchor, button, contactLines, field, textLink } from './nocturne.js';
 
 export { MIN_PASSWORD } from './forms.js';
 
@@ -113,7 +119,7 @@ export class OwnershipPanel {
     this.now = deps.now ?? (() => Date.now());
     this.state = { mode, authTab: 'signin', recover: null, signInEmail: '', offer: null, confirmation: null, error: null, notice: null, busy: false };
     // No live region on the whole panel (a re-render would read it all out); status and alert lines carry their own roles.
-    this.root = h('div', { class: 'ownership' });
+    this.root = h('div', { class: 'n-own' });
     this.unsubscribe = deps.session.subscribe(() => this.render());
     this.render();
     if (deps.session.state.status === 'unknown') {
@@ -151,7 +157,7 @@ export class OwnershipPanel {
     if (s.status === 'signed-in') this.state.recover = null;
     const hadFocus = typeof document !== 'undefined' && this.root.contains(document.activeElement);
     // A heading focused on purpose (RECEIVING THIS PIECE, FORGOTTEN PASSWORD) keeps the focus if the re-render shows it again.
-    const focusedHeading = hadFocus && document.activeElement instanceof HTMLElement && document.activeElement.classList.contains('section-label') ? document.activeElement.id : '';
+    const focusedHeading = hadFocus && document.activeElement instanceof HTMLElement && document.activeElement.classList.contains('n-own__heading') ? document.activeElement.id : '';
     const children: (HTMLElement | null)[] = [];
     if (this.state.confirmation) children.push(...this.confirmationBlock());
     else {
@@ -167,17 +173,18 @@ export class OwnershipPanel {
           children.push(...this.registeredBlock(m, s));
           break;
         case 'staff':
-          children.push(this.status('STAFF SCAN'), this.text(STAFF_SCAN_NOTE));
+          children.push(this.status('STAFF SCAN'), this.small(STAFF_SCAN_NOTE));
           break;
         case 'account':
           // MY PIECES signed out (or a release's page, P-R03): the sign-in alone. Signed in, the page has its own account line.
           if (s.status !== 'signed-in') children.push(...this.authBlock(m.lead ?? PIECES.signInLead));
           break;
         default:
-          children.push(this.status('NOT YET DELIVERED'), this.text(NOT_DELIVERED_NOTE));
+          // C36: a piece not delivered yet says so in its sentence, instead of the form.
+          children.push(this.status('NOT YET DELIVERED'), this.small(NOT_DELIVERED_NOTE));
       }
     }
-    if (this.state.notice) children.push(h('p', { class: 'form__notice', attrs: { role: 'status' }, text: this.state.notice }));
+    if (this.state.notice) children.push(h('p', { class: 'n-err n-own__notice', attrs: { role: 'status' }, text: this.state.notice }));
     if (s.status === 'signed-in' && this.state.mode.kind !== 'account') children.push(this.accountLine(s.account.email));
     this.root.replaceChildren(...children.filter((c): c is HTMLElement => c !== null));
     // A re-render replaces the focused control; keep keyboard and screen-reader users in the panel.
@@ -187,42 +194,75 @@ export class OwnershipPanel {
     }
   }
 
-  private status(text: string): HTMLElement {
-    return h('p', { class: 'ownership__status', text });
+  /** The panel's state line (C9, C13, C14): a label in Gravesend capitals, in ivory where it says what the piece is. */
+  private status(text: string, ivory = false): HTMLElement {
+    return h('p', { class: ['n-g', 'n-lb', ivory ? 'n-ivc' : null, 'n-own__status'], text });
+  }
+
+  /** What has just happened (REGISTERED TO YOU, C36 and C37): a title in ivory. */
+  private outcome(text: string): HTMLElement {
+    return h('p', { class: 'n-g n-t3 n-ivc n-own__status n-own__status--done', text });
   }
 
   private text(text: string): HTMLElement {
-    return h('p', { class: 'prose ownership__text', text });
+    return h('p', { class: 'n-tx n-own__text', text });
+  }
+
+  /** A shorter sentence (`.sm`): a note under a state, a hint. */
+  private small(text: string, extraClass?: string): HTMLElement {
+    return h('p', { class: ['n-sm', 'n-own__small', extraClass], text });
+  }
+
+  /** A time a window of this scan closes at (REGISTRATION OPEN UNTIL 19:04): a label, its figures in the reading face. */
+  private until(text: string, ivory = false): HTMLElement {
+    return h('p', { class: ['n-g', 'n-lb', 'n-num', ivory ? 'n-ivc' : null, 'n-own__until'] }, ...withNumerals(text));
+  }
+
+  /** A heading of the panel (TRANSFER OF OWNERSHIP, RECEIVING THIS PIECE, FORGOTTEN PASSWORD): an ivory title. */
+  private heading(text: string, id?: string): HTMLHeadingElement {
+    return h('h3', { class: 'n-g n-t3 n-ivc n-own__heading', id, text });
+  }
+
+  /** A button of the panel: the ivory one (its one primary action) or `outline`, the hairline one. */
+  private action(label: string, onClick: () => void, opts: { outline?: boolean; busy?: boolean; extraClass?: string } = {}): HTMLButtonElement {
+    return button(label, {
+      outline: opts.outline,
+      onClick: () => onClick(),
+      extraClass: ['n-own__action', opts.extraClass].filter(Boolean).join(' '),
+      attrs: { disabled: this.state.busy, 'aria-busy': opts.busy ? (this.state.busy ? 'true' : 'false') : undefined },
+    });
   }
 
   private errorLine(): HTMLElement | null {
-    return this.state.error ? h('p', { class: 'form__error', attrs: { role: 'alert' }, text: this.state.error }) : null;
+    return this.state.error ? h('p', { class: 'n-err n-own__error', attrs: { role: 'alert' }, text: this.state.error }) : null;
   }
 
   private registerBlock(m: Extract<OwnershipMode, { kind: 'register' }>, s: SessionState): (HTMLElement | null)[] {
     const now = this.now();
-    const out: (HTMLElement | null)[] = [this.status(registrationStatus(m.expiresAt, now))];
+    const until = timeOf(m.expiresAt);
     if (!registrationOpen(m.expiresAt, now)) {
+      const out: (HTMLElement | null)[] = [this.status(registrationStatus(m.expiresAt, now))];
       // On an UNUSUAL ACTIVITY result the foot already offers SCAN AGAIN: the sentence points to it, no second button.
       if (m.underReview) {
-        out.push(this.text('The registration window of this scan has closed. Scan the code again, then register this piece with the claim code of its certificate card.'));
+        out.push(this.small('The registration window of this scan has closed. Scan the code again, then register this piece with the claim code of its certificate card.'));
         return out;
       }
       out.push(
-        this.text('The registration window of this scan has closed. Scan the code again to register this piece.'),
-        h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => this.deps.onRescan() }, text: 'SCAN AGAIN' })),
+        this.small('The registration window of this scan has closed. Scan the code again to register this piece.'),
+        this.action('SCAN AGAIN', () => this.deps.onRescan(), { outline: true, extraClass: 'n-own__action--after-small' }),
       );
       return out;
     }
-    out.push(
-      this.text(
-        m.underReview
-          ? 'While its activity is reviewed, this piece can be registered only with the claim code of its certificate card.'
-          : 'Register this piece in your name to keep its warranty, service history and ownership together.',
-      ),
-    );
-    const until = timeOf(m.expiresAt);
-    if (until) out.push(h('p', { class: 'ownership__meta micro soft', text: `REGISTRATION OPEN UNTIL ${until}` }));
+    const out: (HTMLElement | null)[] = [];
+    if (m.underReview) {
+      // C15: under DO YOU HOLD THE CERTIFICATE CARD?, the time the window closes says it is open, in ivory, then why.
+      if (until) out.push(this.until(`REGISTRATION OPEN UNTIL ${until}`, true));
+      else out.push(this.status(registrationStatus(m.expiresAt, now), true));
+      out.push(this.text('While its activity is reviewed, this piece can be registered only with the claim code of its certificate card.'));
+    } else {
+      out.push(this.status(registrationStatus(m.expiresAt, now), true), this.text('Register this piece in your name to keep its warranty, service history and ownership together.'));
+      if (until) out.push(this.until(`REGISTRATION OPEN UNTIL ${until}`));
+    }
     if (s.status !== 'signed-in') {
       out.push(...this.authBlock('Sign in or create an ORBES account to continue.'));
       return out;
@@ -232,25 +272,22 @@ export class OwnershipPanel {
   }
 
   private yoursBlock(m: Extract<OwnershipMode, { kind: 'yours' }>, s: SessionState): (HTMLElement | null)[] {
-    const out: (HTMLElement | null)[] = [this.status('REGISTERED TO YOU'), this.text('This piece is registered to your ORBES account.')];
+    const out: (HTMLElement | null)[] = [this.status('REGISTERED TO YOU', true), this.text('This piece is registered to your ORBES account.')];
     if (s.status !== 'signed-in') {
       out.push(...this.authBlock('Sign in again to manage the ownership of this piece.'));
       return out;
     }
-    out.push(sectionLabel('TRANSFER OF OWNERSHIP'));
+    out.push(this.heading('TRANSFER OF OWNERSHIP'));
     const offer = this.state.offer;
     if (offer) {
+      // C37: the code created, shown in the reading face, until when it holds, then CANCEL TRANSFER.
       out.push(
-        h(
-          'div',
-          { class: 'transfer-code' },
-          h('p', { class: 'transfer-code__label micro soft', text: 'TRANSFER CODE' }),
-          h('p', { class: 'transfer-code__value', text: offer.transferCode }),
-          h('p', { class: 'transfer-code__label micro soft', text: `VALID UNTIL ${formatDate(offer.expiresAt)}` }),
-        ),
-        this.text('Give this code only to the new owner. The transfer completes when they enter it in their ORBES account.'),
+        h('p', { class: 'n-g n-lb n-own__code-label', text: 'TRANSFER CODE' }),
+        h('p', { class: 'n-num n-own__code', text: offer.transferCode }),
+        this.until(`VALID UNTIL ${formatDateTime(offer.expiresAt, -new Date(offer.expiresAt).getTimezoneOffset()) || formatDate(offer.expiresAt)}`),
+        this.small('Give this code only to the new owner. The transfer completes when they enter it in their ORBES account.', 'n-own__small--code'),
         this.errorLine(),
-        h('div', { class: 'ownership__actions' }, this.textButton('CANCEL TRANSFER', () => this.cancelTransfer(m.productId))),
+        this.action('CANCEL TRANSFER', () => this.cancelTransfer(m.productId), { outline: true, extraClass: 'n-own__action--after-small' }),
       );
       return out;
     }
@@ -258,18 +295,14 @@ export class OwnershipPanel {
       out.push(
         this.text('A transfer of this piece is pending. You may cancel it at any time before it is accepted.'),
         this.errorLine(),
-        h('div', { class: 'ownership__actions' }, this.textButton('CANCEL TRANSFER', () => this.cancelTransfer(m.productId))),
+        this.action('CANCEL TRANSFER', () => this.cancelTransfer(m.productId), { outline: true }),
       );
       return out;
     }
     out.push(
       this.text('When this piece changes hands, create a transfer code and give it to its new owner. It remains valid for 7 days.'),
       this.errorLine(),
-      h(
-        'div',
-        { class: 'ownership__actions' },
-        h('button', { class: 'btn btn--block', attrs: { type: 'button', 'aria-busy': this.state.busy ? 'true' : 'false', disabled: this.state.busy }, on: { click: () => this.createTransfer(m.productId) }, text: 'CREATE TRANSFER CODE' }),
-      ),
+      this.action('CREATE TRANSFER CODE', () => this.createTransfer(m.productId), { outline: true, busy: true }),
     );
     return out;
   }
@@ -285,10 +318,11 @@ export class OwnershipPanel {
    */
   private registeredBlock(m: Extract<OwnershipMode, { kind: 'registered' }>, s: SessionState): (HTMLElement | null)[] {
     // A heading the second-hand guidance's link moves to (J-02, showReceiving).
-    const receiving = sectionLabel(RECEIVING.title, RECEIVING_ID);
+    const receiving = this.heading(RECEIVING.title, RECEIVING_ID);
     receiving.tabIndex = -1;
+    receiving.classList.add('n-own__heading--receiving');
     const out: (HTMLElement | null)[] = [
-      this.status(m.staff ? 'STAFF SCAN' : 'REGISTERED TO ITS OWNER'),
+      this.status(m.staff ? 'STAFF SCAN' : 'REGISTERED TO ITS OWNER', !m.staff),
       this.text(m.transferPending ? 'This piece is registered to an ORBES account. A transfer of its ownership is in progress.' : 'This piece is registered to an ORBES account.'),
       receiving,
     ];
@@ -300,76 +334,73 @@ export class OwnershipPanel {
     if (m.underReview) out.push(this.text(RECEIVING.underReview));
     if (s.status !== 'signed-in') {
       out.push(this.text(RECEIVING.lead), ...this.authBlock(RECEIVING.signIn));
-      out.push(h('p', { class: 'ownership__meta prose', text: RECEIVING.ownerHint }));
+      out.push(this.small(RECEIVING.ownerHint, 'n-own__small--hint'));
       return out;
     }
     // The same code, verified again with the session: the owner's view, or this account's own transfer window.
     const again = this.deps.onRefresh ?? this.deps.onRescan;
     if (!m.transferPending) {
-      out.push(
-        this.text(RECEIVING.noTransfer),
-        h('p', { class: 'ownership__meta prose', text: RECEIVING.ownerAgain }),
-        h('div', { class: 'ownership__actions' }, this.textButton(RECEIVING.verifyAgain, () => again())),
-      );
+      // C37: no transfer pending, the sentence, then VERIFY AGAIN (a hairline button).
+      out.push(this.small(RECEIVING.noTransfer, 'n-own__small--first'), this.small(RECEIVING.ownerAgain), this.action(RECEIVING.verifyAgain, () => again(), { outline: true, extraClass: 'n-own__action--after-small' }));
       return out;
     }
     if (m.transfer) this.windowAccount ??= s.account.email;
     const t = this.windowAccount === s.account.email ? m.transfer : undefined;
     if (!t) {
       // Signed in after the scan, or as another account than the scan's: no window for this account yet.
-      out.push(
-        this.text(RECEIVING.verifyAgainLead),
-        h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => again() }, text: RECEIVING.verifyAgain })),
-      );
+      out.push(this.text(RECEIVING.verifyAgainLead), this.action(RECEIVING.verifyAgain, () => again(), { outline: true }));
       return out;
     }
     if (!registrationOpen(t.expiresAt, this.now())) {
       // On an UNUSUAL ACTIVITY result the foot already offers SCAN AGAIN: the sentence points to it, no second button.
-      out.push(
-        this.text(RECEIVING.closed),
-        m.underReview ? null : h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => this.deps.onRescan() }, text: 'SCAN AGAIN' })),
-      );
+      out.push(this.text(RECEIVING.closed), m.underReview ? null : this.action('SCAN AGAIN', () => this.deps.onRescan(), { outline: true }));
       return out;
     }
     out.push(this.text(RECEIVING.lead));
     const until = timeOf(t.expiresAt);
-    if (until) out.push(h('p', { class: 'ownership__meta micro soft', text: RECEIVING.until(until) }));
+    if (until) out.push(this.until(RECEIVING.until(until)));
     out.push(this.transferForm(m.productId, t));
     return out;
   }
 
   private confirmationBlock(): HTMLElement[] {
     const c = this.state.confirmation!;
-    const out = [this.status('REGISTERED TO YOU')];
-    if (c.via === 'transfer') out.push(this.text(`The ownership of ${c.productId} has been transferred to your ORBES account.`));
-    else if (c.verified) out.push(this.text('This piece is now registered to your ORBES account. Ownership verified with its claim code.'));
-    else out.push(this.text('This piece is now registered to your ORBES account. ORBES Client Services may ask for a proof of purchase to confirm it.'));
+    const out = [this.outcome('REGISTERED TO YOU')];
+    if (c.via === 'transfer') out.push(this.small(`The ownership of ${c.productId} has been transferred to your ORBES account.`));
+    else if (c.verified) out.push(this.small('This piece is now registered to your ORBES account. Ownership verified with its claim code.'));
+    else out.push(this.small('This piece is now registered to your ORBES account. ORBES Client Services may ask for a proof of purchase to confirm it.'));
     const refresh = this.deps.onRefresh;
     if (refresh) {
       // A first registration (not a piece received with a transfer code) opens the ceremony (P-D01).
       const ceremony = c.via === 'register';
-      out.push(
-        h('div', { class: 'ownership__actions' }, h('button', { class: 'btn btn--block', attrs: { type: 'button' }, on: { click: () => refresh({ ceremony }) }, text: 'VIEW AS OWNER' })),
-      );
+      out.push(this.action('VIEW AS OWNER', () => refresh({ ceremony }), { extraClass: ceremony ? 'n-own__action--view' : 'n-own__action--after-small' }));
     }
     return out;
   }
 
   /**
-   * SIGNED IN AS …, then MY PIECES (F-01: the owner's pieces, where CHANGE PASSWORD now is) and SIGN OUT, which wrap
-   * under it when the line is short.
+   * SIGNED IN AS …, then MY PIECES (F-01: the owner's pieces) and SIGN OUT, on one line of labels (C14, C36), the
+   * links underlined in ivory; the line wraps between its words when it is short.
    */
   private accountLine(email: string): HTMLElement {
     return h(
-      'div',
-      { class: 'ownership__account' },
-      h('p', { class: 'ownership__who micro soft' }, 'SIGNED IN AS ', h('span', { class: 'ownership__email', text: email })),
-      h('div', { class: 'ownership__links' }, piecesLink(this.deps.onPieces), this.textButton('SIGN OUT', () => this.signOut())),
+      'p',
+      { class: 'n-g n-lb n-own__account' },
+      'SIGNED IN AS ',
+      h('span', { class: 'n-own__email', text: email }),
+      // Each dot stays with the words before it: a short line wraps after it, never before.
+      '\u00a0· ',
+      appAnchor(PIECES_PATH, ['n-ivc', 'n-u', 'n-own__link'], this.deps.onPieces, PIECES.link),
+      '\u00a0· ',
+      h('button', { class: 'n-g n-ivc n-u n-own__link', attrs: { type: 'button', disabled: this.state.busy }, on: { click: () => this.signOut() }, text: 'SIGN OUT' }),
     );
   }
 
-  private textButton(label: string, onClick: () => void): HTMLButtonElement {
-    return h('button', { class: 'textlink', attrs: { type: 'button', disabled: this.state.busy }, on: { click: onClick }, text: label });
+  /** A text link of the panel (`.tl`), centred on its own line: FORGOTTEN PASSWORD?, BACK TO SIGN IN. */
+  private textButton(label: string, onClick: () => void, extraClass?: string): HTMLElement {
+    const link = textLink(label, { onOpen: onClick, extraClass: 'n-own__tl' }) as HTMLButtonElement;
+    link.disabled = this.state.busy;
+    return h('p', { class: ['n-ctr', 'n-own__tl-line', extraClass] }, link);
   }
 
   // ── Forms ────────────────────────────────────────────────────────────────
@@ -377,26 +408,19 @@ export class OwnershipPanel {
   private authBlock(lead: string): HTMLElement[] {
     if (this.deps.session.state.status === 'unknown' && !this.sessionUnavailable) {
       // Still asking the server who is signed in: no flash of sign-in forms for an owner.
-      return [h('p', { class: 'ownership__meta micro soft', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
+      return [h('p', { class: 'n-g n-lb n-own__waiting', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
     }
     if (this.state.recover) return this.recoverBlock(this.state.recover);
     const tab = this.state.authTab;
-    const switcher = h(
-      'div',
-      { class: 'auth__switch', attrs: { role: 'group', 'aria-label': 'Account' } },
-      h('button', { class: 'auth__option', attrs: { type: 'button', 'aria-pressed': tab === 'signin' ? 'true' : 'false' }, on: { click: () => this.setAuthTab('signin') }, text: 'SIGN IN' }),
-      h('span', { class: 'tabs__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }),
-      h('button', { class: 'auth__option', attrs: { type: 'button', 'aria-pressed': tab === 'create' ? 'true' : 'false' }, on: { click: () => this.setAuthTab('create') }, text: 'CREATE ACCOUNT' }),
-    );
+    // C9: SIGN IN · CREATE ACCOUNT, underlined (`.switch2`), the chosen one pressed.
+    const option = (t: AuthTab, label: string) =>
+      h('button', { class: 'n-g n-switch2__tab n-own__option', attrs: { type: 'button', 'aria-pressed': tab === t ? 'true' : 'false' }, on: { click: () => this.setAuthTab(t) }, text: label });
+    const switcher = h('div', { class: 'n-switch2 n-own__switch', attrs: { role: 'group', 'aria-label': 'Account' } }, option('signin', 'SIGN IN'), option('create', 'CREATE ACCOUNT'));
+    const leadLine = h('p', { class: 'n-tx n-own__lead', text: lead });
     // Under CREATE ACCOUNT, the terms of use it accepts (J-06), in a new tab so the form and the scan's window stay.
-    if (tab === 'create') return [this.text(lead), switcher, this.createForm(), termsNote()];
+    if (tab === 'create') return [leadLine, switcher, this.createForm(), termsNote()];
     // Under the sign-in form: a forgotten password goes through ORBES Client Services (C-04).
-    return [
-      this.text(lead),
-      switcher,
-      this.signInForm(),
-      h('div', { class: 'ownership__actions' }, this.textButton(ACCOUNT_PASSWORD.forgotten, () => this.setRecover('contact'))),
-    ];
+    return [leadLine, switcher, this.signInForm(), this.textButton(ACCOUNT_PASSWORD.forgotten, () => this.setRecover('contact'), 'n-own__forgotten')];
   }
 
   private setAuthTab(t: AuthTab): void {
@@ -417,28 +441,25 @@ export class OwnershipPanel {
   }
 
   /**
-   * FORGOTTEN PASSWORD: how to reach ORBES Client Services (their identity check comes first), then the form
+   * FORGOTTEN PASSWORD (C39): how to reach ORBES Client Services (their identity check comes first), then the form
    * with the code they give, as a section under the status of the piece, where the sign-in form was. The
    * contact is the one of the result (C-02); without one, the sentence still names who helps.
    */
   private recoverBlock(step: RecoverStep): HTMLElement[] {
-    const back = this.textButton(ACCOUNT_PASSWORD.backToSignIn, () => this.setRecover(null));
-    const title = sectionLabel(step === 'contact' ? ACCOUNT_PASSWORD.forgottenTitle : ACCOUNT_PASSWORD.recoverTitle, 'recover-title');
+    const back = this.textButton(ACCOUNT_PASSWORD.backToSignIn, () => this.setRecover(null), 'n-own__back');
+    const title = this.heading(step === 'contact' ? ACCOUNT_PASSWORD.forgottenTitle : ACCOUNT_PASSWORD.recoverTitle, 'recover-title');
     title.tabIndex = -1;
+    title.classList.add('n-own__heading--first');
     if (step === 'contact') {
       return [
         title,
         this.text(ACCOUNT_PASSWORD.forgottenLead),
-        this.deps.contact ? contactBlock(this.deps.contact) : null,
-        h('div', { class: 'ownership__actions ownership__actions--stack' }, this.textButton(ACCOUNT_PASSWORD.haveCode, () => this.setRecover('code')), back),
+        this.deps.contact ? contactLines(this.deps.contact, CONTACT) : null,
+        this.action(ACCOUNT_PASSWORD.haveCode, () => this.setRecover('code'), { outline: true, extraClass: 'n-own__action--recover' }),
+        back,
       ].filter((x): x is HTMLElement => x !== null);
     }
-    return [
-      title,
-      this.text(ACCOUNT_PASSWORD.recoverLead),
-      this.recoverForm(),
-      h('div', { class: 'ownership__actions' }, back),
-    ];
+    return [title, this.text(ACCOUNT_PASSWORD.recoverLead), this.recoverForm(), back];
   }
 
   private field(id: string, label: string, input: HTMLInputElement, hint?: string): HTMLElement {
@@ -446,7 +467,7 @@ export class OwnershipPanel {
   }
 
   private form(name: string, fields: HTMLElement[], submitLabel: string, onSubmit: () => Promise<void>): HTMLFormElement {
-    return accountForm(this.deps.session, name, fields, submitLabel, onSubmit);
+    return nocturneForm(this.deps.session, name, fields, submitLabel, onSubmit);
   }
 
   private signInForm(): HTMLFormElement {
@@ -529,7 +550,7 @@ export class OwnershipPanel {
 
   private codeInput(name: string): HTMLInputElement {
     const input = h('input', {
-      class: 'field__input--code',
+      class: 'n-num n-own__code-input',
       attrs: { type: 'text', name, autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', inputmode: 'text', maxlength: 14, placeholder: 'XXXX-XXXX-XXXX' },
     });
     input.addEventListener('input', () => {
