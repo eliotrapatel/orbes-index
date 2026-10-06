@@ -173,12 +173,16 @@ describe('MessageService (CS-01)', () => {
     expect((await write(a, 'Once more.', { kind: 'PIECE', id: piece! })).message.concerning?.label).toBe(`ZENITH · ${serial}`);
   });
 
-  it('refuses what the account may not attach: another account\'s piece or order, a draft, an unreachable model, an unknown, staff or old scan', async () => {
+  it('refuses what the account may not attach: another account\'s piece or order, a draft, a LIVE RELEASE not named yet, an unreachable model, an unknown, staff or old scan', async () => {
     const a = await accountOfTier(f, 1);
     const other = await createAccount(t.db);
     const [theirs] = await holdPieces(t.db, other.id, 1, f.modelId);
     const theirSale = await liveSale(other);
     const draft = await f.drops.create({ modelId: f.modelId, title: 'Draft', quantity: 3, opensAt: new Date(clock.now().getTime() + HOUR), closesAt: new Date(clock.now().getTime() + 2 * HOUR), earlyAccessHours: 0 }, f.admin);
+    // A LIVE RELEASE announced yesterday whose name is revealed in 5 days, and one published but announced tomorrow.
+    const unnamed = await createLiveRelease(f, { opensAt: new Date(clock.now().getTime() + 7 * 24 * HOUR), announceAt: new Date(clock.now().getTime() - 24 * HOUR) });
+    await t.db.updateTable('drops').set({ title: 'SECRET MODEL IN BLUE', name_at: new Date(clock.now().getTime() + 5 * 24 * HOUR), photo_at: new Date(clock.now().getTime() + 6 * 24 * HOUR) }).where('id', '=', unnamed.id).execute();
+    const unannounced = await createLiveRelease(f, { opensAt: new Date(clock.now().getTime() + 7 * 24 * HOUR), announceAt: new Date(clock.now().getTime() + 24 * HOUR) });
     const hidden = await lookbookModel('HIDDEN', 'HIDDEN');
     const palladium = await lookbookModel('SOLSTICE', 'RESERVED', 3);
     const staffScan = await scan({ type: 'ADMIN_TEST' });
@@ -188,6 +192,8 @@ describe('MessageService (CS-01)', () => {
       [{ kind: 'PIECE', id: 'O26-J-99999' }, 'an unknown piece'],
       [{ kind: 'ORDER', id: theirSale.order.id }, 'another account\'s order'],
       [{ kind: 'RELEASE', id: draft.id }, 'a draft'],
+      [{ kind: 'RELEASE', id: unnamed.id }, 'a LIVE RELEASE announced, before its name\'s stage'],
+      [{ kind: 'RELEASE', id: unannounced.id }, 'a LIVE RELEASE published, not announced yet'],
       [{ kind: 'RELEASE', id: randomUUID() }, 'an unknown release'],
       [{ kind: 'MODEL', id: hidden }, 'a hidden model'],
       [{ kind: 'MODEL', id: palladium }, 'a model reserved above the account\'s tier'],

@@ -7,8 +7,8 @@
  *
  * One conversation per collector (`client_conversations`). Each collector message may concern one place of the app,
  * which the server checks and labels (`resolveContext`): a PIECE the account owns now, an ORDER of the account, a
- * RELEASE published (with the account's own entry: PLACE HELD, PLACE RESERVED, CONCLUDED, CONFIRMED · REFERENCE LR-…,
- * REMOVED), a
+ * RELEASE published (a LIVE one only once announced and its name revealed; with the account's own entry: PLACE HELD,
+ * PLACE RESERVED, CONCLUDED, CONFIRMED · REFERENCE LR-…, REMOVED), a
  * SCAN at most 24 hours old (REPORT_WINDOW_MS; with WARRANTY on the warranty tab), a MODEL the account's lookbook
  * reaches (with its open or latest salon request). The label is a snapshot; the console links the row it names.
  *
@@ -47,6 +47,7 @@ import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { clubStandings, tierName, type ClubTier, type ClubTierName } from './club.js';
 import { liveReference } from './live-console.js';
+import { isAnnounced, liveStages, stagesAt } from './live.js';
 import type { LookbookService } from './lookbook.js';
 import { orderReference } from './orders.js';
 import { REPORT_WINDOW_MS } from './scan-reports.js';
@@ -525,8 +526,14 @@ export class MessageService {
       case 'RELEASE': {
         if (!UUID_RE.test(id)) throw messageContextInvalid();
         const dropId = id.toLowerCase();
-        const d = await tx.selectFrom('drops').select(['id', 'title', 'mode', 'published_at']).where('id', '=', dropId).executeTakeFirst();
+        const d = await tx
+          .selectFrom('drops')
+          .select(['id', 'title', 'mode', 'published_at', 'announce_at', 'silhouette_at', 'name_at', 'photo_at', 'opens_at', 'room_opens_minutes', 'ended_at'])
+          .where('id', '=', dropId)
+          .executeTakeFirst();
         if (!d || d.published_at === null) throw messageContextInvalid();
+        // A LIVE RELEASE is named nowhere before its announcement and its name's stage (liveAccessRule): no label says it.
+        if (d.mode === 'LIVE' && (!isAnnounced(d, now) || !liveStages(d, stagesAt(d, now))?.name)) throw messageContextInvalid();
         return { ...none, kind: 'RELEASE', label: labelOf([d.title, ...(await this.entryWords(tx, account, d.id, d.mode))]), drop_id: d.id };
       }
       case 'SCAN': {
