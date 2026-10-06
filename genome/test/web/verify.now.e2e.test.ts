@@ -52,6 +52,15 @@ async function follows(page: Page, click: () => Promise<void>, path: string | Re
   await page.locator(READY).waitFor({ timeout: 10_000 });
 }
 
+/** SCAN ORBES CODE, then the scanner's CLOSE: NOW again, the focus on `target` (its title, or the scan without one). */
+async function closesScanTo(page: Page, target: string): Promise<void> {
+  await page.getByRole('button', { name: 'SCAN ORBES CODE' }).click();
+  await page.locator('.view--scan').waitFor({ timeout: 10_000 });
+  await page.getByRole('button', { name: 'CLOSE' }).click();
+  await page.locator(READY).waitFor({ timeout: 10_000 });
+  await expect.poll(() => page.evaluate((sel) => document.activeElement === document.querySelector(`.view--now ${sel}`), target), { timeout: 10_000 }).toBe(true);
+}
+
 type Check = (page: Page, demo: NocturneDemo, stage: UiStage) => Promise<void>;
 
 const CASES: { state: UiState; check: Check }[] = [
@@ -101,8 +110,8 @@ const CASES: { state: UiState; check: Check }[] = [
       await follows(page, () => page.locator('section[aria-label="The circle"]').getByRole('link', { name: 'THE CIRCLE' }).click(), '/verify/circle', '.view--circle');
       await follows(page, () => page.locator('.now__invitation').getByRole('link', { name: 'SEE THE INVITATION' }).click(), `/verify/circle/${demo.posts.invitation}`, '.view--circle-post');
       await follows(page, () => page.locator('section[aria-label="The collection"]').getByRole('link', { name: 'THE COLLECTION' }).click(), '/verify/lookbook', '.view--lookbook');
-      await page.getByRole('button', { name: 'SCAN ORBES CODE' }).click();
-      await page.locator('.view--scan').waitFor({ timeout: 10_000 });
+      // The scanner's CLOSE back to NOW: the focus comes to its title, not left on <body>.
+      await closesScanTo(page, '#now-title');
     },
   },
   {
@@ -210,6 +219,8 @@ const CASES: { state: UiState; check: Check }[] = [
     check: async (page) => {
       expect(await hero(page)).toBeNull();
       expect(await sections(page)).toEqual(['Scan']);
+      // Without a title, the focus comes back to SCAN ORBES CODE, as on the landing NOW replaces.
+      await closesScanTo(page, '.landing__scan');
     },
   },
   // ── A LIVE RELEASE in its room, then live: it leads, its state said ──
@@ -252,12 +263,54 @@ const ANSWER: { state: UiState; check: Check } = {
   },
 };
 
+/**
+ * YES held back when every place is taken, and refused (409 CIRCLE_FULL) when the last one went between the read and the
+ * click: the message said (role=alert), the card read again from the feed.
+ */
+const FULL: { state: UiState; check: Check } = {
+  state: { ...as('now-signed-in', 'now-answer-full', 'you'), mutates: true },
+  check: async (page, demo, stage) => {
+    const post = demo.posts.invitation!;
+    const rsvp = (who: string, answer: 'YES' | 'NO') => {
+      const a = demo.accounts[who]!;
+      return stage.ctx.services.circle.rsvp(a.id, post, answer, a.actor);
+    };
+    const inv = page.locator('.now__invitation');
+    const reread = async () => {
+      await page.reload();
+      await page.locator(READY).waitFor({ timeout: 30_000 });
+    };
+    // You give your place back; four other owners take the four left: NONE LEFT OF 12, YES held back, NO still yours.
+    await rsvp('you', 'NO');
+    for (const who of ['guest', 'absent', 'platine', 'voter1']) await rsvp(who, 'YES');
+    await reread();
+    expect(await inv.locator('.now__invitation-places').innerText()).toBe('NONE LEFT OF 12');
+    expect(await inv.getByRole('button', { name: 'YES' }).isDisabled()).toBe(true);
+    expect(await inv.getByRole('button', { name: 'NO' }).isEnabled()).toBe(true);
+    expect(await inv.getByRole('button', { name: 'NO' }).getAttribute('aria-pressed')).toBe('true');
+    // One place given back, read; then taken again before the click: the answer is refused, the card read again.
+    await rsvp('voter1', 'NO');
+    await reread();
+    expect(await inv.locator('.now__invitation-places').innerText()).toBe('1 LEFT OF 12');
+    expect(await inv.getByRole('button', { name: 'YES' }).isEnabled()).toBe(true);
+    await rsvp('voter2', 'YES');
+    await inv.getByRole('button', { name: 'YES' }).click();
+    const alert = inv.getByRole('alert');
+    await alert.waitFor({ timeout: 10_000 });
+    expect(await alert.innerText()).toBe('Every place of this invitation is taken.');
+    expect(await inv.locator('.now__invitation-places').innerText()).toBe('NONE LEFT OF 12');
+    expect(await inv.getByRole('button', { name: 'YES' }).isDisabled()).toBe(true);
+    expect(await inv.getByRole('button', { name: 'YES' }).getAttribute('aria-pressed')).toBe('false');
+    expect(await inv.getByRole('button', { name: 'NO' }).getAttribute('aria-pressed')).toBe('true');
+  },
+};
+
 describe.skipIf(!HAS_CHROMIUM)('NOW: what leads, its sections and its links, signed in and signed out (Chromium)', () => {
   it(
     'leads with a LIVE RELEASE and its draw, a draw, the newest model or nothing, each section and link as the canvas sets it',
     async () => {
       const failures: string[] = [];
-      const all = [...CASES, ANSWER];
+      const all = [...CASES, ANSWER, FULL];
       await eachState(
         all.map((c) => c.state),
         async (state, { stage, demo, browser }) => {

@@ -516,6 +516,7 @@ class App {
       onModel: (slug) => this.openSheet(slug),
       onCircle: () => this.openCircle(),
       onPost: (id) => this.openCirclePost(id),
+      focus,
     });
     if (await this.swap(view.root, 'landing', focus)) this.live = view;
     else view.dispose();

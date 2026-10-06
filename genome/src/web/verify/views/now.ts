@@ -65,6 +65,11 @@ export interface NowDeps {
   onModel(slug: string): void;
   onCircle(): void;
   onPost(id: string): void;
+  /**
+   * NOW opens as a screen change (not the page's first load): focus, left on <body> by the screen that went, comes to
+   * its title, or to SCAN ORBES CODE without one, the way the landing's did.
+   */
+  focus: boolean;
 }
 
 export interface NowView {
@@ -104,8 +109,11 @@ class Now implements NowView {
   private invitation: { card: CircleCardModel; reply: InvitationReply; busy: boolean; error: string | null; el: HTMLElement } | null = null;
   private readonly unsubscribe: () => void;
   private signedIn: boolean | null = null;
+  /** The first page drawn takes the focus the screen change left on <body> (deps.focus). */
+  private focusPending: boolean;
 
   constructor(private readonly deps: NowDeps) {
+    this.focusPending = deps.focus;
     this.root = viewRoot('now');
     this.root.setAttribute('aria-label', NOW.label);
     this.root.append(loadingState(PIECES.loading));
@@ -176,7 +184,10 @@ class Now implements NowView {
     this.stop();
     this.hero = null;
     this.invitation = null;
-    const hadFocus = this.root.contains(document.activeElement);
+    const pending = this.focusPending;
+    this.focusPending = false;
+    const active = document.activeElement;
+    const hadFocus = this.root.contains(active) || (pending && (active === null || active === document.body));
     const sections: (HTMLElement | null)[] = [];
     const top = d.top;
     let heroSlug: string | null = null;
@@ -220,9 +231,13 @@ class Now implements NowView {
       this.drawPhase();
       this.pulse = setInterval(() => this.drawPhase(), PULSE_MS);
     }
-    if (hadFocus && h1 && !this.root.contains(document.activeElement)) {
-      h1.tabIndex = -1;
-      h1.focus({ preventScroll: true });
+    const scanButton = this.root.querySelector<HTMLElement>('.landing__scan');
+    // Read before the screen change shows it: the change's focusFirst() then finds the title, or SCAN ORBES CODE.
+    if (!h1) scanButton?.setAttribute('data-autofocus', '');
+    const target = h1 ?? scanButton;
+    if (hadFocus && target && !this.root.contains(document.activeElement)) {
+      if (h1) h1.tabIndex = -1;
+      target.focus({ preventScroll: true });
     }
   }
 
