@@ -50,6 +50,9 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   - C33 (N6): ZENITH has a story and specifications in the demo (the content baseline holds them), and a SKU in size 17
     (its order from the salon): its sheet shows SIZE 17 under its line and THE STORY and SPECIFICATIONS before CARE,
     which the board draws without.
+  - C1, C8, C42, C43 (N3, N8): the invitation's event line prints its place whole, as C22's WHERE draws it
+    (12 OCT 2026 · 17:00 UTC · THE ATELIER, PARIS, on two lines on the plate card of C1, C42 and C43, which stands
+    14 px taller, with what follows it; on one line on C8's photograph), where those boards shorten it to PARIS.
 - **Where the build differs from the boards on purpose** (since N2; the final board review does not count these as
   regressions):
   - The © line takes ash, not the boards' smoke (contrast).
