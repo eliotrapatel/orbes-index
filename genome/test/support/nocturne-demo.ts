@@ -432,7 +432,7 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   clock.set(at('2026-10-03T11:30:00Z'));
   await register(w, you, boutique);
 
-  // ── The circle: the note of 1 Oct, the invitation and the poll of 3 Oct ──
+  // ── The circle: the note of 1 Oct, the poll and the invitation of 3 Oct ──
   const circle = ctx.services.circle;
   clock.set(at('2026-10-01T09:00:00Z'));
   const note = await circle.create({ kind: 'NOTE', title: 'THE ANGLED LINK', body: 'One angled link closes MONOLITHE: cut at the bench, then polished by hand until the two rails meet without a seam.' }, admin);
@@ -455,6 +455,11 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   await titled(w, morning.id, 'MONOLITHE IN STEEL', 'The steel of MONOLITHE, released live: twenty-five pieces, in the sizes of the house.');
   w.demo.releases.morning = morning.id;
 
+  // The poll an hour before the invitation (both of 3 Oct): the newest-first feed draws invitation, poll, note, as C8 does.
+  clock.set(at('2026-10-03T07:00:00Z'));
+  const poll = await circle.create({ kind: 'POLL', title: 'WHICH FINISH SHOULD FOLLOW BLUE?', body: 'After the blue, one more finish of MONOLITHE: tell the atelier which.', minTier: 2, pollOptions: ['BLACK', 'WHITE GOLD', 'BRONZE'] }, admin);
+  await circle.publish(poll.id, admin);
+  w.demo.posts.poll = poll.id;
   clock.set(at('2026-10-03T08:00:00Z'));
   const invitation = await circle.create(
     {
@@ -472,12 +477,11 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   for (const kind of ['gold', 'steel', 'blue'] as const) await ctx.services.media.addCirclePostPhoto(invitation.id, { mime: 'image/webp', bytes: nocturnePhoto(kind) }, admin);
   await circle.publish(invitation.id, admin);
   w.demo.posts.invitation = invitation.id;
-  const poll = await circle.create({ kind: 'POLL', title: 'WHICH FINISH SHOULD FOLLOW BLUE?', body: 'After the blue, one more finish of MONOLITHE: tell the atelier which.', minTier: 2, pollOptions: ['BLACK', 'WHITE GOLD', 'BRONZE'] }, admin);
-  await circle.publish(poll.id, admin);
-  w.demo.posts.poll = poll.id;
   clock.set(at('2026-10-03T12:00:00Z'));
   await circle.rsvp(you.id, invitation.id, 'YES', you.actor);
-  for (const c of crowd) await circle.rsvp(c.id, invitation.id, 'YES', c.actor);
+  // PLATINE answered YES too, as C8 draws the invitation: in place of the crowd's first, so 3 places stay of 12.
+  for (const c of crowd.slice(1)) await circle.rsvp(c.id, invitation.id, 'YES', c.actor);
+  await circle.rsvp(platine.id, invitation.id, 'YES', platine.actor);
   for (const [i, v] of voters.entries()) await circle.vote(v.id, poll.id, i === 2 ? 1 : 0);
 
   // A collector said I'LL BE THERE for the morning and never came: the question after waits in MY PIECES.

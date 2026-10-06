@@ -282,7 +282,7 @@ const FULL: { state: UiState; check: Check } = {
     };
     // You give your place back; four other owners take the four left: NONE LEFT OF 12, YES held back, NO still yours.
     await rsvp('you', 'NO');
-    for (const who of ['guest', 'absent', 'platine', 'voter1']) await rsvp(who, 'YES');
+    for (const who of ['guest', 'absent', 'crowd1', 'voter1']) await rsvp(who, 'YES');
     await reread();
     expect(await inv.locator('.n-circle-card__places').innerText()).toBe('NONE LEFT OF 12');
     expect(await inv.getByRole('button', { name: 'YES' }).isDisabled()).toBe(true);
