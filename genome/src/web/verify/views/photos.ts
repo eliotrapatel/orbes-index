@@ -1,14 +1,14 @@
 /**
- * The photographs of an authentic piece (F-04), on an ivory plate above the
- * GENOME: the piece's own (taken by ORBES at issuance), then its model's
- * reference photograph, each in a square frame with its caption, and one
- * sentence asking the customer to compare them with the piece in hand.
+ * The photograph of an authentic piece (F-04), on an ivory plate above the
+ * GENOME: its model's reference photograph (or its variant's), never the
+ * piece's own (plan NOCTURNE, decision 9), in a square frame with its caption,
+ * and one sentence asking the customer to compare it with the piece in hand.
  *
- *   ┌                      ┐
- *     [ photo ]  [ photo ]       object-fit: contain, never cropped
- *     THIS PIECE  THE MODEL
- *   └                      ┘
- *   Photographed by ORBES. Compare them with the piece in your hands.
+ *   ┌            ┐
+ *     [ photo ]        object-fit: contain, never cropped
+ *     THE MODEL
+ *   └            ┘
+ *   Photographed by ORBES. Compare it with the piece in your hands.
  *
  * Every image has its alternative text (view-model.ts). A photograph that
  * cannot be loaded (removed meanwhile) takes its frame with it, and the

@@ -35,7 +35,6 @@ function piece(extra: Partial<OwnedPiece> = {}): OwnedPiece {
     genome: { id: 'O26-J-00184', version: 1, fingerprint: G.fingerprint, glyphs: [...G.glyphs], pattern: G.ids.join('·') },
     warranty: { status: 'ACTIVE', startDate: '2026-09-20', endDate: '2028-09-20' },
     imageUrl: null,
-    photoUrl: null,
     care: 'Store on its own in the ORBES pouch.',
     ...extra,
   };
@@ -58,28 +57,26 @@ describe('MY PIECES: a piece on its plate', () => {
     expect(pieceModel(piece({ productId: '"><img>' })).key).toBe('');
   });
 
-  it('shows the photographs ORBES holds of the piece as an authentic result does (F-04): its own, then its model\'s, each with its alternative text', () => {
-    const own = `/api/v1/media/${'a'.repeat(64)}`;
+  it('shows the photograph of its model as an authentic result does (F-04; NOCTURNE, decision 9: never the piece\'s own), its alternative text naming the model and its variant', () => {
     const ref = `/api/v1/media/${'b'.repeat(64)}`;
     expect(pieceModel(piece()).photos).toEqual([]);
-    const both = pieceModel(piece({ photoUrl: own, imageUrl: ref }));
-    expect(both.photos).toEqual([
-      { kind: 'piece', src: own, alt: 'This piece, O26-J-00184, photographed by ORBES at issuance', caption: 'THIS PIECE' },
-      { kind: 'model', src: ref, alt: 'The MONOLITHE RING model, photographed by ORBES', caption: 'THE MODEL' },
-    ]);
-    // The same models as the result's for the same piece, so both screens say the same.
+    const shown = pieceModel(piece({ imageUrl: ref }));
+    expect(shown.photos).toEqual([{ kind: 'model', src: ref, alt: 'The MONOLITHE RING model, photographed by ORBES', caption: 'THE MODEL' }]);
+    // The same model as the result's for the same piece, so both screens say the same.
     const outcome = resultViewModel({
       state: 'AUTHENTIC_OWNERSHIP_VERIFIED',
       scanId: '0b7f3a52-6c1e-4d2a-9f3b-2c4d5e6f7a8b',
       verifiedAt: '2026-10-03T09:00:00.000Z',
       title: 'AUTHENTIC — OWNERSHIP VERIFIED',
       message: '',
-      product: { productId: 'O26-J-00184', category: { code: 'J', name: 'Jewelry' }, model: 'Monolithe', type: 'Ring', material: '925 Sterling Silver', createdYear: 2026, photoUrl: own, imageUrl: ref },
+      product: { productId: 'O26-J-00184', category: { code: 'J', name: 'Jewelry' }, model: 'Monolithe', type: 'Ring', material: '925 Sterling Silver', createdYear: 2026, imageUrl: ref },
     });
-    expect(both.photos).toEqual(outcome.photos);
-    expect(pieceModel(piece({ imageUrl: ref })).photos.map((p) => p.kind)).toEqual(['model']);
-    // Only this origin's media route, named by a SHA-256: anything else is dropped, never shown.
-    expect(pieceModel(piece({ photoUrl: 'https://example.com/a.jpg', imageUrl: `${ref}?x` })).photos).toEqual([]);
+    expect(shown.photos).toEqual(outcome.photos);
+    // A variant (N1) is named in it: « The MONOLITHE RING model in gold ».
+    expect(pieceModel(piece({ imageUrl: ref, modelVariant: 'Gold' })).photos[0]?.alt).toBe('The MONOLITHE RING model in gold, photographed by ORBES');
+    // An older server's photograph of the piece is not read; only this origin's media route, named by a SHA-256.
+    expect(pieceModel(piece({ photoUrl: ref } as unknown as Partial<OwnedPiece>)).photos).toEqual([]);
+    expect(pieceModel(piece({ imageUrl: `${ref}?x` })).photos).toEqual([]);
   });
 
   it('opens on OWNERSHIP, then WARRANTY, SERVICE and CARE (P-M02): four labels, the width of the result\'s four', () => {

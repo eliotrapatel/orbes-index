@@ -275,9 +275,10 @@ describe('admin products, codes and records', () => {
       expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{}, { variant: '52', size: 'L' }] })).message).toMatch(/unknown fields in items\.1: size/);
       expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{}, {}, { sku: '-bad' }] })).message).toMatch(/^items\.2\.sku: /);
       // The service checks each line with the issue rules too (a tab is a control character there).
-      expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{}, { variant: 'a\tb' }] })).message).toBe('items.1: Variant contains invalid characters.');
+      // NOCTURNE N1: the piece's field set at issuance is its size, named Size.
+      expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{}, { variant: 'a\tb' }] })).message).toBe('items.1: Size contains invalid characters.');
       // A letter lost by a wrong decoding (U+FFFD) is never signed.
-      expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{ variant: 'Pi\uFFFDce' }] })).message).toBe('items.0: Variant contains invalid characters.');
+      expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{ variant: 'Pi\uFFFDce' }] })).message).toBe('items.0: Size contains invalid characters.');
       expect(errorOf(await operator.post('/api/admin/products/batch', { template: template(), items: [{ serial: 4242 }, { serial: 4242 }] })).message).toBe('items.1.serial: the same serial as items.0.');
       const unknownModel = await operator.post('/api/admin/products/batch', { template: template({ modelId: '00000000-0000-4000-8000-000000000000' }), items: [{}] });
       expect(unknownModel.statusCode).toBe(404);

@@ -19,6 +19,14 @@
  *             the same 404 as any model not in the collection. An owner
  *             requests it from its sheet (services/salon.ts).
  *
+ * VARIANTS (plan NOCTURNE, N1, migration 0024): a model and its variants are one entry of a list, led by the main
+ * model (or, when it is not shown there, by its first variant shown), whose `variants` are the dots: each model of the
+ * group shown in that list, the main model first, then its variants in the order they were added, each with its
+ * address, label, colour and photograph (and, in THE PRIVATE SALON, its price and tier). A sheet is the sheet of the
+ * model its address names, whose `variants` hold each model of its group the reader may see, with its photographs and
+ * facts (its specifications, care, discontinuation and salon), the one asked `selected`: a variant's own address opens
+ * the sheet with that variant selected. A model shown alone has no dots (`variants` empty).
+ *
  * This module holds the rules both sides share: the address (`slug`), the
  * story (plain paragraphs, no Markdown: what is typed is what is shown), the
  * specifications (one `Label: value` line each; no figure in a label, since
@@ -159,6 +167,24 @@ export function storyFingerprint(story: string | null): { length: number; sha256
 
 // ── Reads ──────────────────────────────────────────────────────────────────
 
+/** A model's dot among its variants (N1): its label (« Steel ») and colour (`#RRGGBB`). */
+export interface VariantDot {
+  label: string;
+  swatch: string;
+}
+
+/** One dot of a list's entry (N1): a model of the group, by the address of its sheet, with its photograph. */
+export interface LookbookCardVariant extends VariantDot {
+  slug: string;
+  name: string;
+  type: string;
+  /** Its reference photograph, else the first of its gallery; null without either. */
+  imageUrl: string | null;
+  /** THE PRIVATE SALON's cards only: its price shown (null: none) and the lowest tier it is shown to. */
+  priceLabel?: string | null;
+  minTier?: 1 | 2 | 3;
+}
+
 /** One model of a list (GET /api/v1/lookbook, the club's reserved models): no story, no gallery. */
 export interface LookbookCard {
   slug: string;
@@ -168,6 +194,10 @@ export interface LookbookCard {
   collection: string | null;
   /** The model's reference photograph, else the first photograph of its gallery (`/api/v1/media/<sha256>`); null without either. */
   imageUrl: string | null;
+  /** N1: this model's own dot, or null for a model without a label. */
+  variant: VariantDot | null;
+  /** N1: the dots, this model's and its variants' shown in this list (the main model first); empty for a model alone. */
+  variants: LookbookCardVariant[];
 }
 
 /** What THE PRIVATE SALON adds to a RESERVED model (P-X08): its price shown, and the lowest tier it is shown to. */
@@ -185,6 +215,27 @@ export interface LookbookImage {
   url: string;
   /** null: the sheet says what it shows (the model's name and type). */
   alt: string | null;
+}
+
+/**
+ * A model of a sheet's group (N1), as the sheet switches to it with its dot: its address, photographs and facts, and
+ * its place in THE PRIVATE SALON.
+ */
+export interface LookbookSheetVariant extends VariantDot {
+  slug: string;
+  /** The model whose address the sheet was asked for. */
+  selected: boolean;
+  lookbook: 'PUBLIC' | 'RESERVED';
+  name: string;
+  type: string;
+  collection: string | null;
+  coverUrl: string | null;
+  gallery: LookbookImage[];
+  specs: SpecLine[];
+  care: string | null;
+  discontinuedYear: number | null;
+  /** A RESERVED one's price and tier (THE PRIVATE SALON); absent on a PUBLIC one. */
+  salon?: SalonFacts;
 }
 
 /** A model's sheet (GET /api/v1/lookbook/:slug, the club's sheet). */
@@ -207,6 +258,10 @@ export interface LookbookSheet {
   discontinuedYear: number | null;
   /** P-X08: a RESERVED model's price and tier (THE PRIVATE SALON); absent on a PUBLIC sheet. */
   salon?: SalonFacts;
+  /** N1: this model's own dot, or null for a model without a label. */
+  variant: VariantDot | null;
+  /** N1: the dots of its group the reader may see, the main model first, this one `selected`; empty for a model alone. */
+  variants: LookbookSheetVariant[];
 }
 
 export interface LookbookServiceDeps {
@@ -243,13 +298,74 @@ export class LookbookService {
     return (await this.sheetOf(slug, opts)).sheet;
   }
 
-  /** The sheet (`sheet`) and its model's id, for the club's request (services/salon.ts). */
-  async sheetOf(slug: string, opts: { tier?: number } = {}): Promise<{ modelId: string; sheet: LookbookSheet }> {
+  /**
+   * The sheet (`sheet`) and its model's id, for the club's request (services/salon.ts), with the ids of the models of
+   * its dots by their address (`variantIds`, N1: each RESERVED one is requested on its own).
+   */
+  async sheetOf(slug: string, opts: { tier?: number } = {}): Promise<{ modelId: string; sheet: LookbookSheet; variantIds: Record<string, string> }> {
     const key = typeof slug === 'string' ? slug.trim().toLowerCase() : '';
     if (key.length > SLUG_MAX || !SLUG_RE.test(key)) throw lookbookNotFound();
     const tier = opts.tier ?? 0;
+    const m = await this.sheetRows(tier).where('m.slug', '=', key).executeTakeFirst();
+    if (!m || !m.slug || m.lookbook === 'HIDDEN') throw lookbookNotFound();
+    // P-X08: below the model's tier, the salon has no such model.
+    if (m.lookbook === 'RESERVED' && m.private_min_tier > tier) throw lookbookNotFound();
+    // N1: the models of its group the reader may see, with their galleries.
+    const root = m.variant_of ?? m.id;
+    const group = sortGroup(await this.sheetRows(tier).where((eb) => eb.or([eb('m.id', '=', root), eb('m.variant_of', '=', root)])).execute(), root);
+    const ids = group.length > 1 ? group.map((g) => g.id) : [m.id];
+    const galleries = await this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt']).where('model_id', 'in', ids).orderBy('model_id').orderBy('position').execute();
+    const galleryOf = (r: SheetRow): LookbookImage[] =>
+      // The cover is shown once: a gallery photograph made the reference photograph since is left out here.
+      galleries
+        .filter((g) => g.model_id === r.id)
+        .flatMap((g) => {
+          const url = g.sha256 === r.image_sha256 ? null : mediaUrl(g.sha256);
+          return url ? [{ url, alt: g.alt }] : [];
+        });
+    const lookbookOf = (r: SheetRow) => r.lookbook as 'PUBLIC' | 'RESERVED';
+    const sheet: LookbookSheet = {
+      slug: m.slug,
+      lookbook: lookbookOf(m),
+      name: m.name,
+      type: m.type,
+      category: { code: m.category_code.trim(), name: m.category_name },
+      collection: m.collection,
+      coverUrl: mediaUrl(m.image_sha256),
+      gallery: galleryOf(m),
+      story: m.story,
+      specs: parseSpecs(m.specs),
+      care: m.care_instructions,
+      discontinuedYear: m.discontinued_at ? m.discontinued_at.getUTCFullYear() : null,
+      ...(m.lookbook === 'RESERVED' ? { salon: salonFacts(m) } : {}),
+      variant: dotOf(m),
+      variants: dotted(group).map((g) => ({
+        slug: g.slug!,
+        label: g.variant_label!,
+        swatch: g.variant_swatch!,
+        selected: g.id === m.id,
+        lookbook: lookbookOf(g),
+        name: g.name,
+        type: g.type,
+        collection: g.collection,
+        coverUrl: mediaUrl(g.image_sha256),
+        gallery: galleryOf(g),
+        specs: parseSpecs(g.specs),
+        care: g.care_instructions,
+        discontinuedYear: g.discontinued_at ? g.discontinued_at.getUTCFullYear() : null,
+        ...(g.lookbook === 'RESERVED' ? { salon: salonFacts(g) } : {}),
+      })),
+    };
+    return { modelId: m.id, sheet, variantIds: Object.fromEntries(dotted(group).map((g) => [g.slug!, g.id])) };
+  }
+
+  /**
+   * The models a sheet may show to `tier`: shown with their address, PUBLIC, or for an owner (`tier` ≥ 1) RESERVED from a
+   * tier it reaches (P-X08: below it, the salon has no such model). Anything else is not found.
+   */
+  private sheetRows(tier: number) {
     const shown: LookbookState[] = tier >= 1 ? ['PUBLIC', 'RESERVED'] : ['PUBLIC'];
-    const m = await this.db
+    return this.db
       .selectFrom('models as m')
       .innerJoin('categories as c', 'c.id', 'm.category_id')
       .leftJoin('collections as col', 'col.id', 'm.collection_id')
@@ -266,37 +382,17 @@ export class LookbookService {
         'm.discontinued_at',
         'm.price_label',
         'm.private_min_tier',
+        'm.variant_of',
+        'm.variant_label',
+        'm.variant_swatch',
+        'm.created_at',
         'c.code as category_code',
         'c.name as category_name',
         'col.name as collection',
       ])
-      .where('m.slug', '=', key)
+      .where('m.slug', 'is not', null)
       .where('m.lookbook', 'in', shown)
-      .executeTakeFirst();
-    if (!m || !m.slug || m.lookbook === 'HIDDEN') throw lookbookNotFound();
-    // P-X08: below the model's tier, the salon has no such model.
-    if (m.lookbook === 'RESERVED' && m.private_min_tier > tier) throw lookbookNotFound();
-    const gallery = await this.db.selectFrom('model_images').select(['sha256', 'alt']).where('model_id', '=', m.id).orderBy('position').execute();
-    const sheet: LookbookSheet = {
-      slug: m.slug,
-      lookbook: m.lookbook,
-      name: m.name,
-      type: m.type,
-      category: { code: m.category_code.trim(), name: m.category_name },
-      collection: m.collection,
-      coverUrl: mediaUrl(m.image_sha256),
-      // The cover is shown once: a gallery photograph made the reference photograph since is left out here.
-      gallery: gallery.flatMap((g) => {
-        const url = g.sha256 === m.image_sha256 ? null : mediaUrl(g.sha256);
-        return url ? [{ url, alt: g.alt }] : [];
-      }),
-      story: m.story,
-      specs: parseSpecs(m.specs),
-      care: m.care_instructions,
-      discontinuedYear: m.discontinued_at ? m.discontinued_at.getUTCFullYear() : null,
-      ...(m.lookbook === 'RESERVED' ? { salon: salonFacts(m) } : {}),
-    };
-    return { modelId: m.id, sheet };
+      .where((eb) => eb.or([eb('m.lookbook', '<>', 'RESERVED'), eb('m.private_min_tier', '<=', tier)]));
   }
 
   private async cards(state: 'PUBLIC' | 'RESERVED', tier = 0): Promise<(LookbookCard | SalonCard)[]> {
@@ -305,12 +401,17 @@ export class LookbookService {
       .innerJoin('categories as c', 'c.id', 'm.category_id')
       .leftJoin('collections as col', 'col.id', 'm.collection_id')
       .select((eb) => [
+        'm.id',
         'm.slug',
         'm.name',
         'm.type',
         'm.image_sha256',
         'm.price_label',
         'm.private_min_tier',
+        'm.variant_of',
+        'm.variant_label',
+        'm.variant_swatch',
+        'm.created_at',
         'c.code as category_code',
         'c.name as category_name',
         'col.name as collection',
@@ -324,18 +425,64 @@ export class LookbookService {
       .orderBy('m.name')
       .orderBy('m.slug')
       .execute();
-    return rows.map((r) => ({
-      slug: r.slug!,
-      name: r.name,
-      type: r.type,
-      category: { code: r.category_code.trim(), name: r.category_name },
-      collection: r.collection,
-      imageUrl: mediaUrl(r.image_sha256) ?? mediaUrl(r.first_image),
-      // P-X08: the salon's price and tier, on its cards only (the public list names neither).
-      ...(state === 'RESERVED' ? salonFacts(r) : {}),
-    }));
+    // N1: a model and its variants shown here are one entry, where the first of them comes, led by the main model.
+    const groups = new Map<string, typeof rows>();
+    for (const r of rows) groups.set(r.variant_of ?? r.id, [...(groups.get(r.variant_of ?? r.id) ?? []), r]);
+    const imageOf = (r: (typeof rows)[number]) => mediaUrl(r.image_sha256) ?? mediaUrl(r.first_image);
+    const out: (LookbookCard | SalonCard)[] = [];
+    const done = new Set<string>();
+    for (const r of rows) {
+      const root = r.variant_of ?? r.id;
+      if (done.has(root)) continue;
+      done.add(root);
+      const group = sortGroup(groups.get(root)!, root);
+      const lead = group[0]!;
+      out.push({
+        slug: lead.slug!,
+        name: lead.name,
+        type: lead.type,
+        category: { code: lead.category_code.trim(), name: lead.category_name },
+        collection: lead.collection,
+        imageUrl: imageOf(lead),
+        // P-X08: the salon's price and tier, on its cards only (the public list names neither).
+        ...(state === 'RESERVED' ? salonFacts(lead) : {}),
+        variant: dotOf(lead),
+        variants: dotted(group).map((g) => ({
+          slug: g.slug!,
+          name: g.name,
+          type: g.type,
+          label: g.variant_label!,
+          swatch: g.variant_swatch!,
+          imageUrl: imageOf(g),
+          ...(state === 'RESERVED' ? salonFacts(g) : {}),
+        })),
+      });
+    }
+    return out;
   }
 }
+
+/** The models of a group, the main model (`root`) first, then its variants in the order they were added. */
+function sortGroup<T extends { id: string; created_at: Date }>(rows: readonly T[], root: string): T[] {
+  return [...rows].sort((a, b) => (a.id === root ? -1 : b.id === root ? 1 : a.created_at.getTime() - b.created_at.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)));
+}
+
+/** A model's own dot: its label and colour, or null without them. */
+function dotOf(r: { variant_label: string | null; variant_swatch: string | null }): VariantDot | null {
+  return r.variant_label !== null && r.variant_swatch !== null ? { label: r.variant_label, swatch: r.variant_swatch } : null;
+}
+
+/** The dots of a group: its models with an address, a label and a colour, when there are two or more; none for a model alone. */
+function dotted<T extends { slug: string | null; variant_label: string | null; variant_swatch: string | null }>(group: readonly T[]): T[] {
+  const dots = group.filter((g) => g.slug !== null && g.variant_label !== null && g.variant_swatch !== null);
+  return dots.length > 1 ? dots : [];
+}
+
+type SheetRow = {
+  id: string;
+  image_sha256: string | null;
+  lookbook: LookbookState;
+};
 
 /** A RESERVED model's price and tier as the salon gives them; a stored tier out of 1..3 (never written) reads 3, the safest. */
 function salonFacts(r: { price_label: string | null; private_min_tier: number }): SalonFacts {

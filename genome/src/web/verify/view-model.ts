@@ -108,11 +108,11 @@ export interface ReportModel {
 }
 
 /**
- * A photograph shown above the GENOME of an authentic result (F-04), on its ivory plate: the piece's own (taken by
- * ORBES at issuance) or its model's reference photograph. `src` is always a path of this origin's media route.
+ * A photograph shown above the GENOME of an authentic result (F-04), on its ivory plate: its model's reference
+ * photograph, never the piece's own (plan NOCTURNE, decision 9). `src` is always a path of this origin's media route.
  */
 export interface PhotoModel {
-  kind: 'piece' | 'model';
+  kind: 'model';
   src: string;
   alt: string;
   caption: string;
@@ -295,7 +295,7 @@ export function upper(s: string | undefined | null): string {
   return (s ?? '').trim().toUpperCase();
 }
 
-/** Contract §4: exactly MODEL / TYPE / CATEGORY / MATERIAL / CREATED (the variant belongs to the rows), as a result and MY PIECES show them. */
+/** Contract §4: exactly MODEL / TYPE / CATEGORY / MATERIAL / CREATED (the size belongs to the rows), as a result and MY PIECES show them. */
 export function productLines(p: {
   model: string;
   type: string;
@@ -395,7 +395,8 @@ export function resultViewModel(
     const rows: Row[] = [['PRODUCT ID', p.productId]];
     if (p.collection) rows.push(['COLLECTION', upper(p.collection)]);
     rows.push(['MODEL', upper(p.model)], ['TYPE', upper(p.type)]);
-    if (p.variant) rows.push(['VARIANT', upper(p.variant)]);
+    // The piece's free-text field set at issuance, its size (NOCTURNE N1: SIZE, formerly VARIANT), as written.
+    if (p.variant) rows.push(['SIZE', upper(p.variant)]);
     rows.push(['CATEGORY', upper(p.category?.name)], ['MATERIAL', upper(p.material)], ['CREATED', String(p.createdYear)]);
     if (p.productionDate) rows.push(['PRODUCTION DATE', formatDate(p.productionDate)]);
     const discontinued = discontinuedYearOf(p.discontinuedYear);
@@ -626,20 +627,24 @@ export function initialTab(vm: Pick<ResultViewModel, 'ownership'>): TabId {
 const MEDIA_URL = /^\/api\/v1\/media\/[0-9a-f]{64}$/;
 
 /**
- * The photographs of a piece (F-04), its own first (what the customer compares with the piece in hand), then its
- * model's reference photograph; each with the alternative text a screen reader says. Shared with the owner's list of
- * pieces, whose items carry the same two URLs (null there when absent). A URL that is not this origin's media route
- * is dropped.
+ * The photograph of a piece (F-04): its model's reference photograph (or its variant's, NOCTURNE N1), what the customer
+ * compares with the piece in hand, with the alternative text a screen reader says, which names the model and its
+ * variant, never the piece (plan NOCTURNE, decision 9: no photograph of the piece itself). Shared with the owner's list
+ * of pieces, whose items carry the same URL (null there when absent). A URL that is not this origin's media route is
+ * dropped.
  */
-export function photoModels(p: { productId: string; model: string; type: string; imageUrl?: string | null; photoUrl?: string | null }): PhotoModel[] {
-  const out: PhotoModel[] = [];
-  if (typeof p.photoUrl === 'string' && MEDIA_URL.test(p.photoUrl)) {
-    out.push({ kind: 'piece', src: p.photoUrl, alt: PHOTOS.pieceAlt(p.productId), caption: PHOTOS.piece });
-  }
-  if (typeof p.imageUrl === 'string' && MEDIA_URL.test(p.imageUrl)) {
-    out.push({ kind: 'model', src: p.imageUrl, alt: PHOTOS.modelAlt(upper(p.model), upper(p.type)), caption: PHOTOS.model });
-  }
-  return out;
+export function photoModels(p: { model: string; type: string; modelVariant?: string | null; imageUrl?: string | null }): PhotoModel[] {
+  if (typeof p.imageUrl !== 'string' || !MEDIA_URL.test(p.imageUrl)) return [];
+  return [{ kind: 'model', src: p.imageUrl, alt: PHOTOS.modelAlt(upper(p.model), upper(p.type), p.modelVariant), caption: PHOTOS.model }];
+}
+
+/**
+ * A model named with its variant, as a sentence names it (NOCTURNE N1): « MONOLITHE in blue »; the model alone when it
+ * has no variant's label. `name` is given as it is to be shown (a title in capitals).
+ */
+export function modelWithVariant(name: string, variant: string | null | undefined): string {
+  const v = typeof variant === 'string' ? variant.trim().replace(/\s+/g, ' ') : '';
+  return v ? `${name} in ${v.toLowerCase()}` : name;
 }
 
 /**

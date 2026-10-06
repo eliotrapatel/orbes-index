@@ -159,11 +159,11 @@ describe("THE RELEASES' PAST (GET /api/v1/releases/past) and the account's part 
     const opensOf = async (id: string) => (await h.ctx.db.selectFrom('drops').select('opens_at').where('id', '=', id).executeTakeFirstOrThrow()).opens_at.toISOString();
     expect(body.items).toEqual([
       // Ended before its name's stage: named nowhere, its photograph not shown.
-      { id: early.id, kind: 'LIVE', title: null, model: { name: null, type: null, collection: null }, imageUrl: null, opensAt: await opensOf(early.id), quantityLine: '25 PIECES' },
-      { id: sold.id, kind: 'LIVE', title: 'MONOLITHE — LIVE II', model: { name: 'MONOLITHE', type: 'RING', collection: null }, imageUrl: image, opensAt: await opensOf(sold.id), quantityLine: '25 PIECES' },
+      { id: early.id, kind: 'LIVE', title: null, model: { name: null, type: null, collection: null, variant: null }, imageUrl: null, opensAt: await opensOf(early.id), quantityLine: '25 PIECES' },
+      { id: sold.id, kind: 'LIVE', title: 'MONOLITHE — LIVE II', model: { name: 'MONOLITHE', type: 'RING', collection: null, variant: null }, imageUrl: image, opensAt: await opensOf(sold.id), quantityLine: '25 PIECES' },
       // Three pieces added live: the line stays the one announced (decision 29).
-      { id: ended.id, kind: 'LIVE', title: 'MONOLITHE — LIVE I', model: { name: 'MONOLITHE', type: 'RING', collection: null }, imageUrl: image, opensAt: await opensOf(ended.id), quantityLine: '25 PIECES' },
-      { id: draw.id, kind: 'DRAW', title: 'ECLIPSE — release I', model: { name: 'MONOLITHE', type: 'RING', collection: null }, imageUrl: image, opensAt: await opensOf(draw.id), quantityLine: '1 PIECE' },
+      { id: ended.id, kind: 'LIVE', title: 'MONOLITHE — LIVE I', model: { name: 'MONOLITHE', type: 'RING', collection: null, variant: null }, imageUrl: image, opensAt: await opensOf(ended.id), quantityLine: '25 PIECES' },
+      { id: draw.id, kind: 'DRAW', title: 'ECLIPSE — release I', model: { name: 'MONOLITHE', type: 'RING', collection: null, variant: null }, imageUrl: image, opensAt: await opensOf(draw.id), quantityLine: '1 PIECE' },
     ]);
     // No end figure in the bytes: no count, stock, reason of the end, interest, entries, seed or price.
     for (const word of ['SOLD_OUT', 'endedReason', 'ended', 'stock', 'interest', 'entries', 'seed', 'price', 'quantity"', 'NOCTURNE']) expect(res.body, word).not.toContain(word);
@@ -241,7 +241,7 @@ describe("THE RELEASES' PAST (GET /api/v1/releases/past) and the account's part 
     expect(await pastIds()).toContain(r.id);
     const page = safeJson(await h.client().get(`/api/v1/live/${r.id}`)) as Record<string, unknown>;
     expect(page).toMatchObject({ id: r.id, kind: 'LIVE', phase: 'ENDED', title: 'MONOLITHE — LIVE VI', name: 'MONOLITHE', imageUrl: image, quantityLine: '25 PIECES' });
-    expect(Object.keys(page).sort()).toEqual(['collection', 'description', 'id', 'imageUrl', 'kind', 'lookbook', 'name', 'opensAt', 'phase', 'quantityLine', 'silhouetteUrl', 'title', 'type']);
+    expect(Object.keys(page).sort()).toEqual(['collection', 'description', 'id', 'imageUrl', 'kind', 'lookbook', 'name', 'opensAt', 'phase', 'quantityLine', 'silhouetteUrl', 'title', 'type', 'variant']);
     // Ended before its announcement: never announced, even once the time set for it has passed.
     const unseen = await release('MONOLITHE — LIVE VIII', { opensAt: new Date(h.clock.now().getTime() + 3 * HOUR), announceAt: new Date(h.clock.now().getTime() + HOUR) });
     expect(errorOf(await h.client().get(`/api/v1/live/${unseen.id}`)).code).toBe('DROP_NOT_FOUND');

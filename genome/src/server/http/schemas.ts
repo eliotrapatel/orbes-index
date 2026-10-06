@@ -35,11 +35,11 @@ import {
   VERIFICATION_STATES,
 } from '../db/schema.js';
 import { ATELIER_MAKE_MAX, BENCH_VIEWS, ISSUE_TEXT_LIMITS, THRESHOLD_MAX, WORK_SHEETS_MAX } from '../services/atelier.js';
-import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE } from '../services/catalog.js';
+import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
-import { DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
+import { DRAW_PRICE_MAX_MINOR, DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
 import { LIVE_QUESTION_LIMITS } from '../services/question.js';
 import { SEGMENT_LIMITS, SEGMENT_MATCHES } from '../services/segments.js';
@@ -425,6 +425,20 @@ export const createCategoryBody = body({
 
 export const createCollectionBody = body({ name: text(100) });
 
+/** A SKU prefix: 1 to 32 letters, digits, dots, underscores and hyphens, kept in capitals. */
+const skuPrefix = z
+  .string()
+  .trim()
+  .min(1, 'Required')
+  .max(32, 'At most 32 characters')
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Letters, digits, dot, underscore and hyphen only')
+  .transform((s) => s.toUpperCase());
+
+/** N1: a variant's label among its model's dots (« Steel »), one line. */
+const variantLabel = text(VARIANT_LABEL_MAX).refine((s) => !/[\r\n\t]/.test(s), 'One line');
+/** N1: the dot's colour, #RRGGBB (any case; the service keeps it in capitals). */
+const variantSwatch = z.string().trim().regex(/^#?[0-9A-Fa-f]{6}$/, 'A colour #RRGGBB');
+
 export const createModelBody = body({
   categoryCode: z
     .string()
@@ -434,13 +448,7 @@ export const createModelBody = body({
   collectionId: z.preprocess((v) => (v === '' || v === null ? undefined : v), uuid.optional()),
   name: text(100),
   type: text(60),
-  skuPrefix: z
-    .string()
-    .trim()
-    .min(1, 'Required')
-    .max(32, 'At most 32 characters')
-    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'Letters, digits, dot, underscore and hyphen only')
-    .transform((s) => s.toUpperCase()),
+  skuPrefix,
   defaultMaterial: optionalText(200),
   careInstructions: optionalText(2000),
 });
@@ -489,6 +497,9 @@ export const updateModelBody = body({
   baseCurrency: z.preprocess((v) => (v === '' ? null : v), z.enum(ORDER_CURRENCIES).nullable().optional()),
   // M6: the care guide MY PIECES shows with each order of the model.
   careGuide: z.preprocess((v) => (v === '' ? null : v), text(CARE_GUIDE_MAX).nullable().optional()),
+  // N1: its label among its model's dots and the dot's colour, together; null for both clears them (a model alone only).
+  variantLabel: z.preprocess((v) => (v === '' ? null : v), variantLabel.nullable().optional()),
+  variantSwatch: z.preprocess((v) => (v === '' ? null : v), variantSwatch.nullable().optional()),
   category: modelIdentity,
   categoryCode: modelIdentity,
   skuPrefix: modelIdentity,
@@ -497,7 +508,26 @@ export const updateModelBody = body({
   .refine((b) => (b.basePriceMinor === undefined) === (b.baseCurrency === undefined) && (b.basePriceMinor === null) === (b.baseCurrency === null), {
     message: 'A base price is sent with its currency, or both are cleared (null)',
     path: ['basePriceMinor'],
+  })
+  .refine((b) => (b.variantLabel === undefined) === (b.variantSwatch === undefined) && (b.variantLabel === null) === (b.variantSwatch === null), {
+    message: 'A variant’s label is sent with its colour, or both are cleared (null)',
+    path: ['variantLabel'],
   });
+
+/**
+ * POST /api/admin/models/:id/variants (N1, ADD A VARIANT): the new variant's label, colour (#RRGGBB) and SKU prefix;
+ * `mainLabel` and `mainSwatch`, the main model's own, when it has none yet (its first variant), together.
+ */
+export const createVariantBody = body({
+  label: variantLabel,
+  swatch: variantSwatch,
+  skuPrefix,
+  mainLabel: z.preprocess((v) => (v === '' || v === null ? undefined : v), variantLabel.optional()),
+  mainSwatch: z.preprocess((v) => (v === '' || v === null ? undefined : v), variantSwatch.optional()),
+}).refine((b) => (b.mainLabel === undefined) === (b.mainSwatch === undefined), {
+  message: 'The model’s own label is sent with its colour',
+  path: ['mainLabel'],
+});
 
 /** DELETE /api/admin/models/:id/gallery/:sha256 (P-R02): a photograph of the model's gallery. */
 export const galleryImageParams = z.object({ id: uuid, sha256: sha256Hex });
@@ -537,11 +567,18 @@ const earlyAccessHours = z
   .min(EARLY_ACCESS_HOURS.min, `At least ${EARLY_ACCESS_HOURS.min} hours`)
   .max(EARLY_ACCESS_HOURS.max, `At most ${EARLY_ACCESS_HOURS.max} hours`);
 
+/** NOCTURNE (addition 5): a draw's price in cents, 0 to 1 000 000.00, with its currency. */
+const drawPrice = z.number().int('Must be a whole number of cents').min(0, 'At least 0').max(DRAW_PRICE_MAX_MINOR, `At most ${DRAW_PRICE_MAX_MINOR} cents`);
+const drawCurrency = z.enum(ORDER_CURRENCIES);
+/** A price is sent with its currency, or both are cleared (null), or neither is sent. */
+const drawPriceTogether = (b: { priceMinor?: number | null; currency?: string | null }) =>
+  (b.priceMinor === undefined) === (b.currency === undefined) && (b.priceMinor === null) === (b.currency === null);
+
 /**
  * POST /api/admin/drops (§16.19): a DRAFT of a model's release, its entries' window (`closesAt` after `opensAt`), its
  * pieces, how long a place drawn is held (48 hours when omitted) and its early access (P-X02: the hours before the
- * opening when PLATINE and PALLADIUM reserve a place directly, 48 when omitted, 0 for none). The description is plain
- * text ('' and null: none).
+ * opening when PLATINE and PALLADIUM reserve a place directly, 48 when omitted, 0 for none), and its price with its
+ * currency (NOCTURNE, addition 5: optional, both or neither). The description is plain text ('' and null: none).
  */
 export const createDropBody = body({
   modelId: uuid,
@@ -552,11 +589,16 @@ export const createDropBody = body({
   closesAt: isoDateTime,
   purchaseWindowHours: purchaseWindowHours.optional(),
   earlyAccessHours: earlyAccessHours.optional(),
-}).refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'Entries close after they open', path: ['closesAt'] });
+  priceMinor: drawPrice.nullable().optional(),
+  currency: z.preprocess((v) => (v === '' ? null : v), drawCurrency.nullable().optional()),
+})
+  .refine((b) => b.closesAt.getTime() > b.opensAt.getTime(), { message: 'Entries close after they open', path: ['closesAt'] })
+  .refine(drawPriceTogether, { message: 'A price is sent with its currency, or both are cleared (null)', path: ['priceMinor'] });
 
 /**
  * PATCH /api/admin/drops/:id (§16.19): any field while the drop is a DRAFT; once published, `description` only (the
- * service's rule, 409 DROP_PUBLISHED). At least one field; '' and null clear the description.
+ * service's rule, 409 DROP_PUBLISHED). At least one field; '' and null clear the description; null for both clears the
+ * price.
  */
 export const updateDropBody = body({
   modelId: uuid.optional(),
@@ -567,7 +609,11 @@ export const updateDropBody = body({
   closesAt: isoDateTime.optional(),
   purchaseWindowHours: purchaseWindowHours.optional(),
   earlyAccessHours: earlyAccessHours.optional(),
-}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the release to change');
+  priceMinor: drawPrice.nullable().optional(),
+  currency: z.preprocess((v) => (v === '' ? null : v), drawCurrency.nullable().optional()),
+})
+  .refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the release to change')
+  .refine(drawPriceTogether, { message: 'A price is sent with its currency, or both are cleared (null)', path: ['priceMinor'] });
 
 /** GET /api/admin/drops/:id/entries: one status, or every entry. */
 export const dropEntriesQuery = z.object({ status: queryOptional(z.enum(DROP_ENTRY_STATUSES)) });

@@ -34,12 +34,54 @@ export interface Moved {
   now: string;
 }
 
+/** The states whose piece had its own photograph (the demo's boutique piece, O26-J-00184), with THE MODEL's beside it. */
+const PIECE_PHOTO_STATES = [
+  'result-registered-signed-out',
+  'result-registered-transfer-link',
+  'result-registered-other',
+  'pieces',
+  'pieces-warranty',
+  'pieces-care',
+  'pieces-service',
+  'pieces-certificate-choice',
+  'pieces-report-choice',
+  'pieces-care-guide',
+  'pieces-change-password',
+  'pieces-certificate-link',
+  'pieces-certificate-withdrawn',
+];
+
+/** The states whose PRODUCT tab named the field set at issuance VARIANT. */
+const SIZE_STATES = ['result-first-registration-product', 'result-ownership-verified-product', 'result-ceremony'];
+
 /**
- * The values NOCTURNE moves or removes on purpose (none yet: N0 records the app before any change). The later steps
- * add theirs here, e.g. YOUR TIER (decision 10: moved from MY PIECES to the account sheet) and THIS PIECE (decision 9:
- * the piece's own photograph leaves every collector's screen).
+ * The values NOCTURNE moves or removes on purpose, step by step. N1: THIS PIECE and the sentence for two photographs
+ * (decision 9: the piece's own photograph leaves every collector's screen and answer; the model's alone stays,
+ * captioned THE MODEL, with the sentence for one), and VARIANT (the field set at issuance renamed Size). Later steps
+ * add theirs, e.g. YOUR TIER (decision 10: moved from MY PIECES to the account sheet).
  */
-export const MOVED: readonly Moved[] = [];
+export const MOVED: readonly Moved[] = [
+  ...PIECE_PHOTO_STATES.flatMap((state) => [
+    {
+      state,
+      value: 'THIS PIECE',
+      reason: 'Decision 9 (N1): no photograph of the piece itself is shown to a collector; the model is the reference for a piece.',
+      now: 'Removed: the model’s photograph alone, captioned THE MODEL.',
+    },
+    {
+      state,
+      value: 'Photographed by ORBES. Compare them with the piece in your hands.',
+      reason: 'Decision 9 (N1): one photograph, the model’s, is shown, no longer two.',
+      now: 'The sentence for one photograph: Photographed by ORBES. Compare it with the piece in your hands.',
+    },
+  ]),
+  ...SIZE_STATES.map((state) => ({
+    state,
+    value: 'VARIANT',
+    reason: 'N1: the piece’s field set at issuance is its size, renamed Size in the console and on a piece.',
+    now: 'The same row and value, labelled SIZE.',
+  })),
+];
 
 const movedKey = (state: string, value: string) => `${state}\u0000${normalizeText(value)}`;
 const moved = new Set(MOVED.map((m) => movedKey(m.state, m.value)));

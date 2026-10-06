@@ -591,20 +591,20 @@ export const STAFF_SCAN_NOTE =
   'This browser is signed in to the ORBES console, so this scan was recorded as a staff test and registration is not offered. To register a piece of your own, scan it in a browser that is not signed in to the console.';
 
 /**
- * The photographs above the GENOME of an authentic result (F-04): the piece's own, taken by ORBES at issuance, then
- * its model's reference photograph. They show what ORBES registered under this identity, for the customer to compare
- * with the piece in hand: a code copied onto another object would not match them. Nothing here says the object is
- * genuine (§4.6).
+ * The photograph above the GENOME of an authentic result (F-04): its model's reference photograph, or its variant's
+ * (plan NOCTURNE, decision 9: the model is the reference for a piece; no photograph of the piece itself is shown). It
+ * shows what ORBES registered under this identity, for the customer to compare with the piece in hand. Nothing here
+ * says the object is genuine (§4.6).
  */
 export const PHOTOS = Object.freeze({
   /** The section's accessible name. */
   label: 'Photographs of this piece',
   /** Its name in MY PIECES, where each piece of the list has its own (F-01). */
   labelOf: (productId: string) => `Photographs of ${productId}`,
-  piece: 'THIS PIECE',
   model: 'THE MODEL',
-  pieceAlt: (productId: string) => `This piece, ${productId}, photographed by ORBES at issuance`,
-  modelAlt: (model: string, type: string) => `The ${[model, type].filter((x) => x.length > 0).join(' ')} model, photographed by ORBES`,
+  /** « The MONOLITHE BRACELET model in steel, photographed by ORBES »: the model, and its variant when it has one (N1). */
+  modelAlt: (model: string, type: string, variant?: string | null) =>
+    `The ${[model, type].filter((x) => x.length > 0).join(' ')} model${typeof variant === 'string' && variant.trim() ? ` in ${variant.trim().toLowerCase()}` : ''}, photographed by ORBES`,
   note: (count: number) =>
     count > 1 ? 'Photographed by ORBES. Compare them with the piece in your hands.' : 'Photographed by ORBES. Compare it with the piece in your hands.',
 });

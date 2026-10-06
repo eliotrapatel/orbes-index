@@ -46,10 +46,13 @@ describe('the Catalogue\'s base price and Shopify product (N2)', () => {
   });
 
   it('says what the product export holds in a currency, and what it leaves out', () => {
-    const models = [m({ basePriceMinor: 1, baseCurrency: 'EUR' }), m({ basePriceMinor: 1, baseCurrency: 'EUR' }), m({ basePriceMinor: 1, baseCurrency: 'USD' }), m()];
+    const models = [m({ id: 'a', basePriceMinor: 1, baseCurrency: 'EUR' }), m({ id: 'b', basePriceMinor: 1, baseCurrency: 'EUR' }), m({ id: 'c', basePriceMinor: 1, baseCurrency: 'USD' }), m({ id: 'd' })];
     expect(productExportSummary(models, 'EUR')).toBe(
       '2 models priced in EUR, each a product with its sizes as variants and its photographs. 1 model priced in another currency is left out. 1 model without a base price is left out: set it with Edit. Each product is a draft, not published: Shopify decides nothing until the store is open.',
     );
+    // NOCTURNE N1: a model and its variants are one product.
+    const grouped = [...models, m({ id: 'e', basePriceMinor: 1, baseCurrency: 'EUR', variantOf: { id: 'a', name: 'MONOLITHE', label: 'Steel' } })];
+    expect(productExportSummary(grouped, 'EUR')).toMatch(/^3 models priced in EUR, in 2 products: a model and its variants are one product, by Variant and Size, with their photographs\. /);
     expect(productExportSummary([m()], 'CHF')).toBe(
       'No model has a base price in CHF: the file holds its header only. 1 model without a base price is left out: set it with Edit. Each product is a draft, not published: Shopify decides nothing until the store is open.',
     );

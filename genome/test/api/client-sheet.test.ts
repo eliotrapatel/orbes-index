@@ -181,7 +181,8 @@ describe('the client sheet and the Shopify exports: the console\'s routes', () =
     expect(file.headers['content-type']).toMatch(/^text\/csv/);
     expect(file.headers['cache-control']).toBe('no-store');
     expect(file.headers['content-disposition']).toBe('attachment; filename="ORBES-shopify-products-EUR-2026-11-02.csv"');
-    expect(file.body.split('\r\n')[0]).toBe('"Title","URL handle","Vendor","Type","Published on online store","Status","SKU","Option1 name","Option1 value","Price","Requires shipping","Product image URL","Image position","Image alt text"');
+    // NOCTURNE N1: a model and its variants one product, by Variant (Option1) and Size (Option2), each its cover.
+    expect(file.body.split('\r\n')[0]).toBe('"Title","URL handle","Vendor","Type","Published on online store","Status","SKU","Option1 name","Option1 value","Option2 name","Option2 value","Price","Requires shipping","Product image URL","Image position","Image alt text","Variant image URL"');
     expect(file.body).toContain('"MONOLITHE"');
     const refused = await auditor.get('/api/admin/shopify/products.csv?currency=JPY');
     expect([refused.statusCode, errorOf(refused).code]).toEqual([400, 'VALIDATION_FAILED']);

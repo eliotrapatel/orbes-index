@@ -37,6 +37,7 @@ import {
 } from '../model/generator.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
+import { modelChoice } from '../model/variants.js';
 import { productHref } from '../router.js';
 import { CODE_STATUSES, type CodeFilters, type CodeIds, type CodeJson, type Model } from '../types.js';
 import { ApiError, type Download, type PrintSheetOptions } from '../api.js';
@@ -147,7 +148,7 @@ function filterForm(ctx: ViewContext, f: CodeFilters, models: readonly Model[]):
   const sorted = [...models].sort((a, b) => a.name.localeCompare(b.name) || a.skuPrefix.localeCompare(b.skuPrefix));
   const model = select(
     'modelId',
-    [{ value: '', label: 'All models' }, ...sorted.map((m) => ({ value: m.id, label: `${humanize(m.name)} · ${humanize(m.type)} · ${m.skuPrefix}` }))],
+    [{ value: '', label: 'All models' }, ...sorted.map((m) => ({ value: m.id, label: modelChoice(m, m.skuPrefix) }))],
     f.modelId ?? '',
   );
   const status = select('status', [{ value: '', label: 'All statuses' }, ...CODE_STATUSES.map((s) => ({ value: s, label: humanize(s) }))], f.status ?? '');

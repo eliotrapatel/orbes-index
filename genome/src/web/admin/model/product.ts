@@ -179,7 +179,8 @@ export function productAttributes(d: ProductDetail): { label: string; value: str
     { label: 'Collection', value: humanize(p.collection) },
     { label: 'Model', value: humanize(p.model.name) },
     { label: 'Type', value: humanize(p.model.type) },
-    { label: 'Variant', value: p.variant ? humanize(p.variant) : '—' },
+    // The piece's field set at issuance: its size (NOCTURNE N1, formerly Variant), as written.
+    { label: 'Size', value: p.variant ? humanize(p.variant) : '—' },
     { label: 'Material', value: humanize(p.material) },
     { label: 'SKU', value: p.sku, mono: true },
     { label: 'Production batch', value: p.productionBatch ?? '—', mono: !!p.productionBatch },

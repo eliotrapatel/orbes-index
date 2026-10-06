@@ -61,16 +61,17 @@ export interface VerifyOutcome {
     category: { code: string; name: string };
     collection?: string;
     model: string;
+    /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), when it has one. */
+    modelVariant?: string;
     type: string;
+    /** The piece's free-text field set at issuance: its size (SIZE), as written. */
     variant?: string;
     material: string;
     createdYear: number;
     productionDate?: string;
     care?: string;
-    /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`. Authentic results only. */
+    /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`. Authentic results only; never the piece's own (decision 9). */
     imageUrl?: string;
-    /** The photograph of this piece, taken by ORBES at issuance (F-04): `/api/v1/media/<sha256>`. Authentic results only. */
-    photoUrl?: string;
     /** Its model's sheet in the lookbook (P-R02): the `<slug>` of `/verify/lookbook/<slug>`, when the model is PUBLIC there. */
     lookbook?: string;
     /** The year its model was discontinued (P-R06): « DISCONTINUED · <year> » under the product lines. Authentic results only. */
@@ -154,7 +155,10 @@ export interface OwnedPiece {
   category: { code: string; name: string };
   collection: string | null;
   model: string;
+  /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), or null. */
+  modelVariant?: string | null;
   type: string;
+  /** The piece's free-text field set at issuance: its size (SIZE), as written. */
   variant: string | null;
   material: string;
   createdYear: number;
@@ -180,10 +184,8 @@ export interface OwnedPiece {
   /** `version` is an integer here (1), `pattern` the glyph ids joined by "·". */
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
   warranty: { status: WarrantyStatus; startDate?: string; endDate?: string };
-  /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`, or null. */
+  /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`, or null; never the piece's own (decision 9). */
   imageUrl: string | null;
-  /** The photograph of this piece, taken by ORBES at issuance (F-04): `/api/v1/media/<sha256>`, or null. */
-  photoUrl: string | null;
   /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
   care: string | null;
 }
@@ -282,6 +284,43 @@ export interface LookbookCard {
   priceLabel?: string | null;
   /** P-X08: the lowest tier the model is shown to, 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
   minTier?: number;
+  /** NOCTURNE N1: this model's own dot among its variants (its label and colour), or null. */
+  variant?: VariantDot | null;
+  /** NOCTURNE N1: the dots of its group shown in this list, the main model first; empty for a model alone. */
+  variants?: LookbookCardVariant[];
+}
+
+/** A model's dot among its variants (NOCTURNE N1): its label (« Steel ») and colour (#RRGGBB). */
+export interface VariantDot {
+  label: string;
+  swatch: string;
+}
+
+/** One dot of an entry of the lookbook's lists (NOCTURNE N1): a model of the group by the address of its sheet. */
+export interface LookbookCardVariant extends VariantDot {
+  slug: string;
+  name: string;
+  type: string;
+  imageUrl: string | null;
+  priceLabel?: string | null;
+  minTier?: number;
+}
+
+/** A model of a sheet's group (NOCTURNE N1): what the sheet switches to with its dot. */
+export interface LookbookSheetVariant extends VariantDot {
+  slug: string;
+  /** The model whose address was asked. */
+  selected: boolean;
+  lookbook: 'PUBLIC' | 'RESERVED';
+  name: string;
+  type: string;
+  collection: string | null;
+  coverUrl: string | null;
+  gallery: { url: string; alt: string | null }[];
+  specs: { label: string; value: string }[];
+  care: string | null;
+  discontinuedYear: number | null;
+  salon?: { priceLabel: string | null; minTier: number; request?: ShopRequest | null };
 }
 
 /** An account's request for a model of the private salon (P-X08), as its sheet and REQUEST THIS PIECE give it. */
@@ -316,6 +355,10 @@ export interface LookbookSheet {
    * to, and the account's open request (null: none, REQUEST THIS PIECE is offered).
    */
   salon?: { priceLabel: string | null; minTier: number; request?: ShopRequest | null };
+  /** NOCTURNE N1: this model's own dot among its variants, or null. */
+  variant?: VariantDot | null;
+  /** NOCTURNE N1: the dots of its group the reader may see, the main model first, this one `selected`; empty for a model alone. */
+  variants?: LookbookSheetVariant[];
 }
 
 /** A release's state as the public reads it (P-R03): a DRAFT is never sent. */
@@ -336,6 +379,8 @@ export interface DropModel {
   /** The model's reference photograph: `/api/v1/media/<sha256>`, or null. */
   imageUrl: string | null;
   lookbook: string | null;
+  /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), or null. */
+  variant?: string | null;
 }
 
 /** One release of GET /api/v1/drops (P-R03). */
@@ -353,6 +398,9 @@ export interface DropCard {
   earlyAccessOpensAt: string | null;
   /** Whether direct reservations are open now (the server's clock). */
   earlyAccessOpen: boolean;
+  /** NOCTURNE (addition 5): the price of a piece in minor units with its currency; null for both when ORBES gave none. */
+  priceMinor?: number | null;
+  currency?: string | null;
 }
 
 /** A release's page (GET /api/v1/drops/:id): the seed's SHA-256 from the publication, the seed itself once drawn. */
@@ -384,7 +432,8 @@ export interface PastRelease {
   kind: 'LIVE' | 'DRAW';
   /** The release's title; a LIVE RELEASE's null when it ended before its name's stage. */
   title: string | null;
-  model: { name: string | null; type: string | null; collection: string | null };
+  /** `variant` (NOCTURNE N1): the model's label among its variants, from the name's stage; null otherwise. */
+  model: { name: string | null; type: string | null; collection: string | null; variant?: string | null };
   /** `/api/v1/media/<sha256>`, or null. */
   imageUrl: string | null;
   /** The opening: a LIVE RELEASE's T0, a draw's opening of its entries. */
@@ -561,6 +610,8 @@ export interface LiveCard {
   reveals: { stage: LiveRevealStage; at: string }[];
   title: string | null;
   name: string | null;
+  /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), from the name's stage; null otherwise. */
+  variant?: string | null;
   type: string | null;
   collection: string | null;
   silhouetteUrl: string | null;
@@ -611,6 +662,8 @@ export interface LiveEndedSheet {
   phase: 'ENDED';
   title: string | null;
   name: string | null;
+  /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), from the name's stage; null otherwise. */
+  variant?: string | null;
   type: string | null;
   collection: string | null;
   description: string | null;
@@ -644,6 +697,8 @@ export interface LiveBanner {
   phase: LivePhase;
   /** The model's name from its stage; null before. */
   name: string | null;
+  /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), from the name's stage; null otherwise. */
+  variant?: string | null;
   /** When the name is (or was) revealed. */
   nameAt: string;
   roomOpensAt: string;
@@ -760,6 +815,8 @@ export interface LiveAccountEntry {
     endedReason: LiveEndReason | null;
     title: string | null;
     name: string | null;
+    /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), from the name's stage; null otherwise. */
+    variant?: string | null;
     imageUrl: string | null;
     opensAt: string;
     closesAt: string;
@@ -791,6 +848,8 @@ export interface AccountOrder {
   /** The release it was sold in; null for the private salon. */
   release: string | null;
   model: string;
+  /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), or null. */
+  modelVariant?: string | null;
   /** null while ORBES Client Services has not entered it; `{ label: null }`: one size. */
   size: { label: string | null } | null;
   /** null, with the currency, while ORBES Client Services has not entered it. */

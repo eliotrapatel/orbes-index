@@ -80,8 +80,17 @@ export interface ShopRequestView {
   createdAt: Date;
 }
 
-/** A RESERVED sheet as the salon gives it to an owner: its price, its tier and the account's open request. */
-export type SalonSheet = Omit<LookbookSheet, 'salon'> & { salon?: SalonFacts & { request: ShopRequestView | null } };
+/** What the salon adds to a RESERVED model of a sheet: its price, its tier and the account's open request. */
+export type SalonRequestFacts = SalonFacts & { request: ShopRequestView | null };
+
+/**
+ * A RESERVED sheet as the salon gives it to an owner: its price, its tier and the account's open request; and the same
+ * on each RESERVED dot of its group (plan NOCTURNE, N1: the sheet switches the price and the request with the dot).
+ */
+export type SalonSheet = Omit<LookbookSheet, 'salon' | 'variants'> & {
+  salon?: SalonRequestFacts;
+  variants: (Omit<LookbookSheet['variants'][number], 'salon'> & { salon?: SalonRequestFacts })[];
+};
 
 /** One request as the console's Requests tab reads it (GET /api/admin/club/requests). */
 export interface AdminShopRequest {
@@ -225,9 +234,14 @@ export class SalonService {
    */
   async sheet(accountId: string, slug: string): Promise<SalonSheet> {
     const tier = await this.ownerTier(accountId);
-    const { modelId, sheet } = await this.lookbook.sheetOf(slug, { tier });
-    if (!sheet.salon) return sheet as SalonSheet;
-    return { ...sheet, salon: { ...sheet.salon, request: await this.openRequest(accountId, modelId) } };
+    const { modelId, sheet, variantIds } = await this.lookbook.sheetOf(slug, { tier });
+    const variants: SalonSheet['variants'] = [];
+    for (const v of sheet.variants) {
+      const id = variantIds[v.slug];
+      variants.push(v.salon && id ? { ...v, salon: { ...v.salon, request: await this.openRequest(accountId, id) } } : (v as SalonSheet['variants'][number]));
+    }
+    if (!sheet.salon) return { ...sheet, variants } as SalonSheet;
+    return { ...sheet, salon: { ...sheet.salon, request: await this.openRequest(accountId, modelId) }, variants };
   }
 
   /** The account's open request for the model, or null. */

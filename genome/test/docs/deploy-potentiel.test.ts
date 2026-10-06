@@ -120,9 +120,9 @@ describe('the « Potentiel » runbook (docs/launch/DEPLOY-POTENTIEL-2026-10.md)'
   it('gives every migration after 0013 to a deployment of the plan, and deployment A exactly its own, in order, as the scripts print them', () => {
     // The plan's table: A 0014–0018, B+C 0019–0020; then the LIVE RELEASE's D, 0021. A later number needs a plan
     // (and a runbook) first: 0022 and 0023 are LIVE RELEASE+'s (orders, stock and operations; releases and collectors,
-    // plan of 2026-10-04).
+    // plan of 2026-10-04); 0024 is NOCTURNE's (a model's variants and a draw's price, plan of 2026-10-05).
     expect(NAMES.filter((n) => numberOf(n) > 13 && numberOf(n) <= 21)).toEqual([...DEPLOY_A, ...DEPLOY_BC, ...DEPLOY_D]);
-    expect(NAMES.filter((n) => numberOf(n) > 21)).toEqual(['0022_orders_stock', '0023_releases_collectors']);
+    expect(NAMES.filter((n) => numberOf(n) > 21)).toEqual(['0022_orders_stock', '0023_releases_collectors', '0024_model_variants']);
     expect(DEPLOY_D).toEqual(['0021_live_release']);
     // This runbook hands 0021 to deployment D, which has its own runbook and starts from B+C's production.
     expect(runbook).toContain('Après ce lot, la migration `0021` (la LIVE RELEASE, plan du 2026-10-04) part avec le déploiement D, qui a [son propre runbook](DEPLOY-LIVE-RELEASE.md) et part de la production de B+C (le commit `78959e8`, les migrations `0001` à `0020`).');

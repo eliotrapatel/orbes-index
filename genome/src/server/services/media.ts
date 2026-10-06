@@ -35,8 +35,10 @@
  * is refused, and simply skipped); a row deleted before that lock is
  * inserted again by the upload.
  *
- * The public results show these images on the AUTHENTIC states only
- * (VerificationService, `product.imageUrl` and `product.photoUrl`).
+ * The public results show the model's photograph on the AUTHENTIC states only
+ * (VerificationService, `product.imageUrl`). A piece's own photograph is the
+ * console's only (plan NOCTURNE, decision 9): no answer a collector receives
+ * names it.
  */
 import { createHash } from 'node:crypto';
 import { inTransaction, type Db } from '../db/connection.js';

@@ -74,6 +74,7 @@ import {
 } from '../model/live.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
+import { modelChoice } from '../model/variants.js';
 import { href } from '../router.js';
 import { LIVE_CURRENCIES, LIVE_ENTRY_STATUSES, type LiveBoard, type LiveEntry, type LiveEntryStatus, type LiveFeasibility, type LiveRelease, type Model } from '../types.js';
 import { barList, button, copyButton, defList, field, filterBar, kpi, linkButton, mono, pageHeader, pager, section, select, statusMark, table, type DefRow } from '../ui/components.js';
@@ -504,7 +505,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const edit = (label: string, testId: string, open: () => void) => (acts.edit ? [button(label, { kind: 'ghost', testId, onClick: open })] : []);
   const values = (part: LivePart) => livePartValues(r, part);
   const modelOptions = (selected: string) =>
-    models.items.filter((m: Model) => m.active || m.id === selected).map((m: Model) => ({ value: m.id, label: `${humanize(m.name)} · ${humanize(m.type)}` }));
+    models.items.filter((m: Model) => m.active || m.id === selected).map((m: Model) => ({ value: m.id, label: modelChoice(m) }));
 
   const releasePart = () => {
     const v = values('release');
@@ -1039,7 +1040,7 @@ function feasibilityBlock(check: LiveFeasibility | 'failed'): HTMLElement {
  * sizes are proposed from; every other setting by default, then edited on its page.
  */
 export function newLiveFields(models: readonly Model[], values: Record<string, string>, locations: readonly { id: string; name: string; isDefault: boolean }[] = []): DialogField[] {
-  const options = models.filter((m) => m.active).map((m) => ({ value: m.id, label: `${humanize(m.name)} · ${humanize(m.type)}` }));
+  const options = models.filter((m) => m.active).map((m) => ({ value: m.id, label: modelChoice(m) }));
   return [
     { name: 'modelId', label: 'Model', kind: 'select', required: true, options: [{ value: '', label: 'Choose a model' }, ...options], value: values.modelId },
     { name: 'title', label: 'Title', required: true, maxlength: LIVE_LIMITS.title, value: values.title, hint: 'Revealed with the name’s stage.' },

@@ -6,7 +6,9 @@
  *  - The grid: the models grouped by collection, in the server's order
  *    (collections by name, the models without one last, under no heading);
  *    each card names its model, its type and, when ORBES has one, its
- *    photograph; its address is a path of this app.
+ *    photograph; its address is a path of this app. A model and its variants
+ *    come as one entry (NOCTURNE N1): each of its dots is a card of its own
+ *    here, as each model was, until the grid draws the dots.
  *  - A sheet: the cover then the gallery, each with its alternative text
  *    (the operator's, else "The MONOLITHE RING model, photographed by
  *    ORBES"), the story (its paragraphs drawn by shared/lookbook.ts, as the
@@ -70,30 +72,42 @@ export interface CollectionGroup {
   cards: CardModel[];
 }
 
-/** What every photograph of a model says when the operator wrote nothing: as the result's THE MODEL does. */
-function modelAlt(name: string, type: string): string {
-  return PHOTOS.modelAlt(upper(name), upper(type));
+/**
+ * What every photograph of a model says when the operator wrote nothing: as the result's THE MODEL does, its variant
+ * named when it has one (NOCTURNE N1: « The MONOLITHE BRACELET model in blue, photographed by ORBES »).
+ */
+function modelAlt(name: string, type: string, variant?: string | null): string {
+  return PHOTOS.modelAlt(upper(name), upper(type), variant);
+}
+
+/** The models of a list's entry: its dots (NOCTURNE N1), each a model of its own, or the entry's model alone. */
+function entryModels(c: LookbookCard): { slug: string; name: string; type: string; imageUrl: string | null; priceLabel?: string | null; variant: string | null }[] {
+  const dots = Array.isArray(c.variants) ? c.variants.filter((v) => isLookbookSlug(v?.slug)) : [];
+  if (dots.length > 1) return dots.map((v) => ({ slug: v.slug, name: v.name, type: v.type, imageUrl: v.imageUrl, priceLabel: v.priceLabel, variant: v.label }));
+  return [{ slug: c.slug, name: c.name, type: c.type, imageUrl: c.imageUrl, priceLabel: c.priceLabel, variant: c.variant?.label ?? null }];
 }
 
 /** The cards, grouped by collection in the order the server sent them; a card without an address is left out. */
 export function lookbookGroups(cards: readonly LookbookCard[]): CollectionGroup[] {
   const groups: CollectionGroup[] = [];
-  for (const c of cards) {
-    if (!isLookbookSlug(c?.slug)) continue;
-    const collection = c.collection && c.collection.trim() ? upper(c.collection) : null;
+  for (const entry of cards) {
+    if (!isLookbookSlug(entry?.slug)) continue;
+    const collection = entry.collection && entry.collection.trim() ? upper(entry.collection) : null;
     let group = groups.at(-1);
     if (!group || group.collection !== collection) {
       group = { collection, cards: [] };
       groups.push(group);
     }
-    group.cards.push({
-      slug: c.slug,
-      href: lookbookSheetPath(c.slug),
-      name: upper(c.name),
-      type: upper(c.type),
-      image: typeof c.imageUrl === 'string' && MEDIA_SRC.test(c.imageUrl) ? { src: c.imageUrl, alt: modelAlt(c.name, c.type) } : null,
-      price: priceOf(c.priceLabel),
-    });
+    for (const c of entryModels(entry)) {
+      group.cards.push({
+        slug: c.slug,
+        href: lookbookSheetPath(c.slug),
+        name: upper(c.name),
+        type: upper(c.type),
+        image: typeof c.imageUrl === 'string' && MEDIA_SRC.test(c.imageUrl) ? { src: c.imageUrl, alt: modelAlt(c.name, c.type, c.variant) } : null,
+        price: priceOf(c.priceLabel),
+      });
+    }
   }
   return groups;
 }
@@ -130,7 +144,7 @@ export interface SheetModel {
 }
 
 export function sheetModel(s: LookbookSheet): SheetModel {
-  const alt = modelAlt(s.name, s.type);
+  const alt = modelAlt(s.name, s.type, s.variant?.label);
   const photos: LookbookPhoto[] = [];
   if (typeof s.coverUrl === 'string' && MEDIA_SRC.test(s.coverUrl)) photos.push({ src: s.coverUrl, alt });
   for (const g of Array.isArray(s.gallery) ? s.gallery : []) {

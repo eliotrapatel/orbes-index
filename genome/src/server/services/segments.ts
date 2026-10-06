@@ -363,7 +363,8 @@ export interface SegmentName {
 /** What the builder names: the releases (their question after for a LIVE one), models, collections, sizes and countries known. */
 export interface SegmentOptions {
   releases: { id: string; title: string; mode: 'DRAW' | 'LIVE'; opensAt: Date; answers: string[] | null }[];
-  models: { id: string; name: string; type: string }[];
+  /** `variant` (NOCTURNE N1): the model's label among its variants, or null: a model and its variants share a name. */
+  models: { id: string; name: string; type: string; variant: string | null }[];
   collections: { id: string; name: string }[];
   sizes: string[];
   countries: string[];
@@ -452,7 +453,7 @@ export class SegmentService {
         .orderBy('opens_at', 'desc')
         .orderBy('id')
         .execute(),
-      this.db.selectFrom('models').select(['id', 'name', 'type']).orderBy('name').orderBy('id').execute(),
+      this.db.selectFrom('models').select(['id', 'name', 'type', 'variant_label as variant']).orderBy('name').orderBy('id').execute(),
       this.db.selectFrom('collections').select(['id', 'name']).orderBy('name').orderBy('id').execute(),
       sql<{ size: string }>`select size from (
           select upper(btrim(variant)) as size from products where variant is not null

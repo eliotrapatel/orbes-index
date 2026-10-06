@@ -199,7 +199,7 @@ export function linkableDrops(drops: readonly Drop[], current: string | null): {
 export function linkableModels(models: readonly Model[], current: string | null): { value: string; label: string }[] {
   return models
     .filter((m) => m.lookbook !== 'HIDDEN' || m.id === current)
-    .map((m) => ({ value: m.id, label: `${m.name} · ${m.type}${m.lookbook === 'HIDDEN' ? ' (hidden: no link)' : m.lookbook === 'RESERVED' ? ' (reserved)' : ''}` }));
+    .map((m) => ({ value: m.id, label: `${[m.name, m.type, m.variantLabel].filter((x): x is string => !!x).join(' · ')}${m.lookbook === 'HIDDEN' ? ' (hidden: no link)' : m.lookbook === 'RESERVED' ? ' (reserved)' : ''}` }));
 }
 
 export interface CircleActions {

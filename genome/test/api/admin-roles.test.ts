@@ -1,7 +1,7 @@
 /**
  * Role enforcement for every admin route group: AUDITOR reads, OPERATOR
  * mutates (the catalogue's models and collections included, created or
- * edited, their lookbook and its gallery, P-R02, and the photographs of models and pieces, F-04,
+ * edited, their variants added, NOCTURNE N1, their lookbook and its gallery, P-R02, and the photographs of models and pieces, F-04,
  * and the drops of the Club page, P-R03: created, edited, published, cancelled, their entries
  * concluded and the next one offered; the posts of its circle, P-X01: created, edited, published,
  * withdrawn, their photographs; the words of its tiers' benefits, P-X04; the requests of its private salon closed,
@@ -61,6 +61,8 @@ const PROBES: Probe[] = [
   { group: 'models', method: 'POST', url: '/api/admin/models', body: INVALID, min: 'OPERATOR' },
   { group: 'models', method: 'PATCH', url: `/api/admin/models/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'models', method: 'GET', url: `/api/admin/models/${UUID}`, min: 'AUDITOR' },
+  // NOCTURNE N1: ADD A VARIANT, as editing a model.
+  { group: 'models', method: 'POST', url: `/api/admin/models/${UUID}/variants`, body: INVALID, min: 'OPERATOR' },
   // P-R06: an ADMIN discontinues a model and reinstates it.
   { group: 'models', method: 'POST', url: `/api/admin/models/${UUID}/discontinue`, body: INVALID, min: 'ADMIN' },
   { group: 'models', method: 'POST', url: `/api/admin/models/${UUID}/reinstate`, body: INVALID, min: 'ADMIN' },

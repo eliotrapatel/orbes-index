@@ -706,7 +706,8 @@ describe('IssuanceService.issueBatch', () => {
     expect(material.publicMessage).toBe('template: Material contains invalid characters.');
     // A C1 control, or the replacement character a wrong decoding leaves for a lost letter, is never signed.
     for (const variant of ['Size\u008552', 'Pi\uFFFDce']) {
-      expect((await domainError(w.issuance.issueBatch(template(w), [{}, { variant }], admin))).publicMessage, variant).toBe('items.1: Variant contains invalid characters.');
+      // NOCTURNE N1: the piece's field set at issuance is its size, named Size.
+      expect((await domainError(w.issuance.issueBatch(template(w), [{}, { variant }], admin))).publicMessage, variant).toBe('items.1: Size contains invalid characters.');
     }
     expect(await domainError(w.issuance.issueBatch(template(w, { modelId: w.leatherModelId }), [{}], admin))).toMatchObject({ code: 'VALIDATION_FAILED' });
     expect(await domainError(w.issuance.issueBatch(template(w, { modelId: '00000000-0000-4000-8000-000000000000' }), [{}], admin))).toMatchObject({ code: 'MODEL_NOT_FOUND' });

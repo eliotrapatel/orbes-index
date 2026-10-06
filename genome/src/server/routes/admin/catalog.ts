@@ -8,7 +8,8 @@
  * specifications) and its place in the private salon (P-X08: its price and
  * tier), and its base price and care guide (plan LIVE RELEASE+, N2 and M6: the
  * Shopify product export's price, MY PIECES' care guide) change through the same edit; one model is read alone by
- * the console's Lookbook page (its gallery is routes/admin/media.ts's). An
+ * the console's Lookbook page (its gallery is routes/admin/media.ts's). Its variants (plan NOCTURNE, N1): a label and
+ * its colour change through the same edit; ADD A VARIANT (POST …/variants, OPERATOR, as editing a model) creates one. An
  * ADMIN discontinues a model and reinstates it (P-R06: POST …/discontinue and
  * …/reinstate, no body; the console asks for a typed phrase first). The
  * services validate, write and audit; these routes only parse and shape.
@@ -21,6 +22,7 @@ import {
   createCategoryBody,
   createCollectionBody,
   createModelBody,
+  createVariantBody,
   emptyBody,
   parse,
   updateCollectionBody,
@@ -127,9 +129,28 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
         ...(b.privateMinTier !== undefined ? { privateMinTier: b.privateMinTier } : {}),
         ...(b.basePriceMinor !== undefined ? { basePriceMinor: b.basePriceMinor, baseCurrency: b.baseCurrency } : {}),
         ...(b.careGuide !== undefined ? { careGuide: b.careGuide } : {}),
+        ...(b.variantLabel !== undefined ? { variantLabel: b.variantLabel, variantSwatch: b.variantSwatch } : {}),
       },
       adminActor(request),
     );
+  });
+
+  // N1, ADD A VARIANT: a model copied from this one (its main model), with its own label, colour and SKU prefix.
+  app.post('/api/admin/models/:id/variants', async (request, reply) => {
+    const { id } = parse(catalogParams, request.params);
+    const b = parse(createVariantBody, request.body);
+    const created = await catalog.createVariant(
+      id,
+      {
+        label: b.label,
+        swatch: b.swatch,
+        skuPrefix: b.skuPrefix,
+        ...(b.mainLabel !== undefined ? { mainLabel: b.mainLabel, mainSwatch: b.mainSwatch } : {}),
+      },
+      adminActor(request),
+    );
+    reply.code(201);
+    return created;
   });
 
   // P-R06: ADMIN only, reversible (the console asks for a typed phrase first). Discontinuing also makes the model inactive.

@@ -2,7 +2,7 @@
  * Drops (P-R03; API §16.19): the console's Club page, its Drops tab.
  *
  *   GET   /api/admin/drops                                  AUDITOR   every drop, the latest created first
- *   POST  /api/admin/drops                                  OPERATOR  a DRAFT, its seed drawn and committed
+ *   POST  /api/admin/drops                                  OPERATOR  a DRAFT, its seed drawn and committed (its price optional)
  *   GET   /api/admin/drops/:id                              AUDITOR   one drop, its entries counted by status
  *   PATCH /api/admin/drops/:id                              OPERATOR  any field of a DRAFT; the description after
  *   POST  /api/admin/drops/:id/publish                      OPERATOR  on /verify/releases, with its seed's SHA-256
@@ -57,6 +57,7 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
         closesAt: b.closesAt,
         ...(b.purchaseWindowHours !== undefined ? { purchaseWindowHours: b.purchaseWindowHours } : {}),
         ...(b.earlyAccessHours !== undefined ? { earlyAccessHours: b.earlyAccessHours } : {}),
+        ...(b.priceMinor !== undefined ? { priceMinor: b.priceMinor, currency: b.currency } : {}),
       },
       adminActor(request),
     );
@@ -83,6 +84,7 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
         ...(b.closesAt !== undefined ? { closesAt: b.closesAt } : {}),
         ...(b.purchaseWindowHours !== undefined ? { purchaseWindowHours: b.purchaseWindowHours } : {}),
         ...(b.earlyAccessHours !== undefined ? { earlyAccessHours: b.earlyAccessHours } : {}),
+        ...(b.priceMinor !== undefined ? { priceMinor: b.priceMinor, currency: b.currency } : {}),
       },
       adminActor(request),
     );

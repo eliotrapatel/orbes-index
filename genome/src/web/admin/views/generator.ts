@@ -5,9 +5,10 @@
  *
  * Result: genome, on-screen code (rendered in the browser from the signed
  * data with the core encoder: the exact cells that will be printed),
- * SVG / PNG / PDF downloads with print options, the photograph of this
- * piece (F-04: "Add a photo of this piece", shown on its authentic
- * results), and the one-time claim code. The claim code exists only in
+ * SVG / PNG / PDF downloads with print options, and the one-time claim
+ * code (no photograph of the piece is offered: plan NOCTURNE, decision 9,
+ * the model's photograph is the reference for every piece of it; the product
+ * page keeps the ones taken before, for ORBES staff). The claim code exists only in
  * this page's memory: it is never stored client-side and disappears when
  * the operator leaves or hides it.
  * While it is shown, the certificate card that carries it (PDF, claim code
@@ -17,7 +18,7 @@
  *
  * Batch (`#/generator?mode=batch`): one template (category, model,
  * material, production batch and date, policy, claim code or not), then a
- * quantity or a CSV of one row per piece (variant, sku, serial; read as
+ * quantity or a CSV of one row per piece (size, sku, serial; read as
  * UTF-8, or as Windows-1252 when it is not, as Excel saves a plain CSV),
  * checked line by line before anything is signed; the preview and "Sign 120
  * products" (POST /api/admin/products/batch, automatically in requests of
@@ -33,7 +34,7 @@ import { focusFirst, h, mount } from '../../shared/dom.js';
 import { ApiError, type CertificateOptions } from '../api.js';
 import { formatCount, formatDate, humanize, isoDay, shortHash, versionLabel } from '../format.js';
 import {
-  BATCH_COLUMNS,
+  BATCH_HEADER,
   BATCH_OUTCOME_LABELS,
   batchCertificateItems,
   batchPlanText,
@@ -67,8 +68,8 @@ import {
   type IssueForm,
 } from '../model/generator.js';
 import { can } from '../model/permissions.js';
-import { PIECE_PHOTO_IMPACT } from '../model/photo.js';
 import type { Tone } from '../model/tone.js';
+import { modelChoice } from '../model/variants.js';
 import { href, productHref } from '../router.js';
 import type { Category, Collection, IssueResponse, Model } from '../types.js';
 import { artifactPanel } from '../ui/artifacts.js';
@@ -93,8 +94,7 @@ import {
 import { saveDownload } from '../ui/download.js';
 import { genomeFigure } from '../ui/figures.js';
 import { confirmLeave, holdPage } from '../ui/leave-guard.js';
-import { photoDialog, photoThumb } from '../ui/photo.js';
-import { notify, notifyError } from '../ui/toast.js';
+import { notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 export async function generatorView(ctx: ViewContext): Promise<HTMLElement> {
@@ -177,7 +177,7 @@ function productControls(categories: Category[], models: Model[], collections: C
   };
   const fillModels = () => {
     const list = modelsFor(models, category.value);
-    mount(model, ...list.map((m) => h('option', { attrs: { value: m.id } }, `${humanize(m.name)} · ${humanize(m.type)} · ${m.skuPrefix}`)));
+    mount(model, ...list.map((m) => h('option', { attrs: { value: m.id } }, modelChoice(m, m.skuPrefix))));
     if (list.length === 0) mount(model, h('option', { attrs: { value: '' } }, 'No model in this category'));
     applyModel();
   };
@@ -237,7 +237,7 @@ function formScreen(ctx: ViewContext, categories: Category[], models: Model[], c
       field('Model', model, { required: true }),
       field('Collection', collection),
       field('Material', material, { required: true, hint: 'Defaults to the model material.' }),
-      field('Variant', variant, { hint: 'Size, colour or finish.' }),
+      field('Size', variant, { hint: 'The size of this piece, as its SKU says it. Empty: one size.' }),
       field('SKU', sku, { hint: 'Optional override.' }),
     ),
     h('p', { class: 'form-group' }, 'Production'),
@@ -363,47 +363,7 @@ function resultScreen(ctx: ViewContext, r: IssueResponse): HTMLElement[] {
       note: 'Preview rendered from the signed data',
       id: 'artifacts',
     }),
-    can(ctx.session.admin.role, 'photograph') ? piecePhotoPanel(ctx, p.productId) : null,
   ].filter((x): x is HTMLElement => x !== null);
-}
-
-/**
- * The photograph of this piece, proposed at issuance (F-04, phase 2): taken now, while the piece is at hand, it is
- * shown above the GENOME of its authentic results, for the client to compare with the piece. Added (or replaced) in
- * place; the product page offers the same later.
- */
-function piecePhotoPanel(ctx: ViewContext, productId: string): HTMLElement {
-  let url: string | null = null;
-  const shown = h('div', { class: 'piece-photo__shown', data: { testid: 'piece-photo' } });
-  const add = button('Add a photo of this piece', { kind: 'secondary', testId: 'add-piece-photo' });
-  const draw = () => {
-    mount(shown, photoThumb(url, `${productId}: the photograph of this piece`, 'lg'));
-    add.textContent = url ? 'Replace the photo of this piece' : 'Add a photo of this piece';
-  };
-  add.addEventListener('click', () => {
-    void photoDialog({
-      title: url ? 'Replace the photo of this piece' : 'Add a photo of this piece',
-      eyebrow: productId,
-      impact: PIECE_PHOTO_IMPACT,
-      current: url,
-      currentAlt: `${productId}: the current photograph`,
-      save: async (photo) => {
-        url = (await ctx.api.setProductPhoto(productId, photo)).photoUrl;
-      },
-      remove: async () => {
-        url = (await ctx.api.removeProductPhoto(productId)).photoUrl;
-      },
-    }).then((r) => {
-      if (!r) return;
-      draw();
-      notify(r === 'removed' ? 'Photograph removed.' : 'Photograph saved.');
-    });
-  });
-  draw();
-  return section('Photograph of this piece', h('div', { class: 'piece-photo' }, shown, h('div', { class: 'piece-photo__text' }, h('p', { class: 'piece-photo__lead' }, PIECE_PHOTO_IMPACT), add)), {
-    id: 'piece-photo',
-    note: 'Shown on /verify',
-  });
 }
 
 function claimPanel(ctx: ViewContext, productId: string, code: string): HTMLElement {
@@ -497,13 +457,13 @@ function batchFormScreen(ctx: ViewContext, categories: Category[], models: Model
   const csvFields = h(
     'div',
     { class: 'batch__source' },
-    field('CSV file', file, { hint: `First line: ${BATCH_COLUMNS.join(', ')} (each optional; a serial is allocated when absent). Comma or semicolon.`, wide: true }),
+    field('CSV file', file, { hint: `First line: ${BATCH_HEADER} (each optional; a serial is allocated when absent). Comma or semicolon.`, wide: true }),
   );
   const quantityFields = h(
     'div',
     { class: ['grid', 'grid--3', 'batch__source'], attrs: { hidden: true } },
     field('Quantity', quantity, { hint: `1 to ${formatCount(ISSUE_BATCH_LIMITS.maxPieces)} pieces.` }),
-    field('Variant', variant, { hint: 'The same for every piece.' }),
+    field('Size', variant, { hint: 'The same for every piece.' }),
     field('SKU', sku, { hint: 'Optional override.' }),
   );
 
@@ -577,7 +537,7 @@ function batchFormScreen(ctx: ViewContext, categories: Category[], models: Model
     const fromFile = rows[0].line !== null;
     const columns: Column<BatchRow & { piece: number }>[] = [
       { label: fromFile ? 'Line' : 'Piece', cell: (r) => String(r.line ?? r.piece), kind: ['num'] },
-      { label: 'Variant', cell: (r) => r.variant.trim() || '—' },
+      { label: 'Size', cell: (r) => r.variant.trim() || '—' },
       { label: 'SKU', cell: (r) => (r.sku.trim() ? mono(r.sku.trim()) : h('span', { class: 'soft' }, 'From the model')), kind: ['nowrap'] },
       { label: 'Serial', cell: (r) => (r.serial.trim() ? r.serial.trim() : h('span', { class: 'soft' }, 'Next')), kind: ['num', 'wide'] },
     ];
@@ -740,7 +700,7 @@ function batchResultScreen(ctx: ViewContext, d: BatchDone): HTMLElement[] {
       { label: fromFile ? 'Line' : 'Piece', cell: (r) => String(r.line ?? r.piece), kind: ['num'] },
       { label: 'Status', cell: (r) => statusMark(BATCH_OUTCOME_LABELS[r.status], OUTCOME_TONE[r.status]), kind: ['nowrap'] },
       { label: 'Product', cell: (r) => (r.status === 'ISSUED' && r.productId ? h('a', { class: 'idlink', attrs: { href: productHref(r.productId) } }, r.productId) : '—'), kind: ['nowrap'] },
-      { label: 'Variant', cell: (r) => r.variant || '—' },
+      { label: 'Size', cell: (r) => r.variant || '—' },
       { label: 'SKU', cell: (r) => mono(r.sku), kind: ['nowrap'] },
       { label: 'Serial', cell: (r) => (r.serial === undefined ? '—' : String(r.serial)), kind: ['num'] },
       { label: 'Claim code', cell: (r) => (r.claimCode ? mono(formatClaimCode(r.claimCode)) : r.status === 'ISSUED' && hidden ? '•••• - •••• - ••••' : '—'), kind: ['nowrap'] },

@@ -151,7 +151,11 @@ export async function productView(ctx: ViewContext): Promise<HTMLElement> {
 
 // ── Photographs ────────────────────────────────────────────────────────────
 
-/** The piece's own photograph and its model's reference photograph, as /verify shows them on an authentic result. */
+/**
+ * The piece's own photograph and its model's reference photograph. /verify shows the model's alone on an authentic
+ * result (plan NOCTURNE, decision 9: the model is the reference for a piece); the piece's own stays in the records,
+ * for ORBES staff only.
+ */
 function photographsPanel(ctx: ViewContext, d: ProductDetail): HTMLElement {
   const p = d.product;
   const canPhotograph = can(ctx.session.admin.role, 'photograph');
@@ -191,7 +195,7 @@ function photographsPanel(ctx: ViewContext, d: ProductDetail): HTMLElement {
     h('figcaption', { class: 'photo-pair__caption' }, 'The model'),
     linkButton('Catalogue', href('catalogue'), 'ghost'),
   );
-  return section('Photographs', h('div', { class: 'photo-pair' }, piece, model), { id: 'photographs', note: 'Shown on its authentic results on /verify' });
+  return section('Photographs', h('div', { class: 'photo-pair' }, piece, model), { id: 'photographs', note: 'The model’s on its authentic results on /verify; the piece’s for ORBES staff only' });
 }
 
 // ── Actions ────────────────────────────────────────────────────────────────

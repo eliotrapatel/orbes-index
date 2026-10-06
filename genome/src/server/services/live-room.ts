@@ -102,6 +102,8 @@ export interface LiveCard {
   /** From the name's stage: the release's title, its model's name, type and collection; null before. */
   title: string | null;
   name: string | null;
+  /** From the name's stage (NOCTURNE N1): the model's label among its variants (« Blue »: MONOLITHE in blue); null before, or without one. */
+  variant: string | null;
   type: string | null;
   collection: string | null;
   /** From the silhouette's stage: the uploaded silhouette (`/api/v1/media/<sha256>`); null before it, or without one (the seal stands in). */
@@ -163,6 +165,8 @@ export interface LiveEndedSheet {
   phase: 'ENDED';
   title: string | null;
   name: string | null;
+  /** NOCTURNE N1: the model's label among its variants, from the name's stage as it stood at the end; null otherwise. */
+  variant: string | null;
   type: string | null;
   collection: string | null;
   description: string | null;
@@ -184,6 +188,8 @@ export interface LiveBanner {
   phase: LivePublicPhase;
   /** The model's name from its stage; null before. */
   name: string | null;
+  /** NOCTURNE N1: the model's label among its variants, from the name's stage; null before, or without one. */
+  variant: string | null;
   /** When the name is (or was) revealed: the banner reads the release again then. */
   nameAt: Date;
   roomOpensAt: Date;
@@ -278,6 +284,8 @@ export interface LiveAccountEntry {
     endedReason: LiveEndReason | null;
     title: string | null;
     name: string | null;
+    /** NOCTURNE N1: the model's label among its variants, from the name's stage; null before, or without one. */
+    variant: string | null;
     imageUrl: string | null;
     opensAt: Date;
     closesAt: Date;
@@ -293,6 +301,7 @@ type ReadRow = DropRow & {
   /** An after-room's: its parent's surprise, which it inherits; null for a release. */
   parent_surprise: boolean | null;
   model_name: string;
+  model_variant: string | null;
   model_type: string;
   model_image: string | null;
   model_slug: string | null;
@@ -440,6 +449,7 @@ export class LiveRoomService {
           phase: 'ENDED',
           title: atEnd.name ? r.title : null,
           name: atEnd.name ? r.model_name : null,
+          variant: atEnd.name ? r.model_variant : null,
           type: atEnd.name ? r.model_type : null,
           collection: atEnd.name ? r.collection : null,
           description: atEnd.name ? r.description : null,
@@ -484,6 +494,7 @@ export class LiveRoomService {
       id: pick.r.id,
       phase: pick.phase,
       name: stages.name ? pick.r.model_name : null,
+      variant: stages.name ? pick.r.model_variant : null,
       nameAt: stages.nameAt,
       roomOpensAt: roomOpensAt(pick.r),
       opensAt: pick.r.opens_at,
@@ -692,6 +703,7 @@ export class LiveRoomService {
           endedReason: r.ended_reason,
           title: stages?.name ? r.title : null,
           name: stages?.name ? r.model_name : null,
+          variant: stages?.name ? r.model_variant : null,
           imageUrl: stages?.photo ? mediaUrl(r.model_image) : null,
           opensAt: r.opens_at,
           closesAt: r.closes_at,
@@ -714,6 +726,7 @@ export class LiveRoomService {
       .select([
         'pd.surprise_enabled as parent_surprise',
         'm.name as model_name',
+        'm.variant_label as model_variant',
         'm.type as model_type',
         'm.image_sha256 as model_image',
         'm.slug as model_slug',
@@ -774,6 +787,7 @@ export class LiveRoomService {
       ],
       title: stages.name ? r.title : null,
       name: stages.name ? r.model_name : null,
+      variant: stages.name ? r.model_variant : null,
       type: stages.name ? r.model_type : null,
       collection: stages.name ? r.collection : null,
       silhouetteUrl: stages.silhouette ? mediaUrl(r.silhouette_sha256) : null,

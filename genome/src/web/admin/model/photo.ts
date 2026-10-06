@@ -41,12 +41,12 @@ export function modelPhotoImpact(issued: number): string {
     n === 0
       ? 'No piece has been issued with this model yet: its pieces will show it'
       : `Shown at once on the ${formatCount(n)} issued ${n === 1 ? 'piece' : 'pieces'} of this model`;
-  return `${reach} above the GENOME of every authentic result on /verify, beside the photograph of the piece when it has one.`;
+  return `${reach} above the GENOME of every authentic result on /verify: the reference a client compares with the piece in hand.`;
 }
 
 /** Said before the photograph of one piece is saved or removed. */
 export const PIECE_PHOTO_IMPACT =
-  'Shown above the GENOME of every authentic result of this piece on /verify, before its model’s reference photograph: the client compares it with the piece in hand. A close view of what makes this piece unique (the grain of the leather, the stone) serves best.';
+  'Kept in the records for ORBES staff, never shown to a client: /verify shows the model’s reference photograph, the reference for every piece of it.';
 
 /** How the console sends a photograph: said under the chooser. */
 export const PHOTO_SENT_AS = `Sent as a JPEG of at most ${formatCount(PHOTO_MAX_SIDE)} px, without its EXIF or location data. Any photograph this browser opens (JPEG, PNG, WebP; HEIC in Safari).`;

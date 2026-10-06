@@ -15,6 +15,9 @@
  *  - Its early access (P-X02): the hours before the opening when PLATINE
  *    and PALLADIUM reserve a place directly (0 for none, 48 by default),
  *    said with its time, and the places the draw will give.
+ *  - Its price (plan NOCTURNE, addition 5): optional, typed in units with
+ *    its currency; shown on its card and page on /verify, and taken by the
+ *    order of each entry Client Services confirms.
  *  - The tiers (P-X04): the words of each tier's benefits, one per line, as
  *    the server holds them (600 characters, 8 lines), what is sent (null to
  *    restore the default words), and an account's tier on its sheet.
@@ -23,8 +26,23 @@
  *    must be (required, 2 000 characters), and a request's model line.
  */
 import { formatDateTime } from '../format.js';
+import { formatMoney, moneyField, parseMoney } from './live.js';
 import { can } from './permissions.js';
-import { SHOP_REQUEST_OUTCOMES, SHOP_REQUEST_STATUSES, type AdminRole, type ClubTierSheet, type Drop, type DropChange, type DropEntry, type DropInput, type OwnerSheet, type ShopRequest, type ShopRequestStatus } from '../types.js';
+import {
+  ORDER_CURRENCIES,
+  SHOP_REQUEST_OUTCOMES,
+  SHOP_REQUEST_STATUSES,
+  type AdminRole,
+  type ClubTierSheet,
+  type Drop,
+  type DropChange,
+  type DropEntry,
+  type DropInput,
+  type OrderCurrency,
+  type OwnerSheet,
+  type ShopRequest,
+  type ShopRequestStatus,
+} from '../types.js';
 
 /** The tabs of the Club page, in their order. */
 export const CLUB_TABS = [
@@ -41,7 +59,7 @@ export function clubTab(query: Record<string, string>): ClubTab {
 }
 
 /** The bounds the server holds a drop to (services/drops.ts; the early access, P-X02, EARLY_ACCESS_HOURS). */
-export const DROP_LIMITS = Object.freeze({ title: 120, description: 2000, quantity: 10_000, windowMin: 1, windowMax: 336, windowDefault: 48, earlyMin: 0, earlyMax: 336, earlyDefault: 48, note: 500 });
+export const DROP_LIMITS = Object.freeze({ title: 120, description: 2000, quantity: 10_000, windowMin: 1, windowMax: 336, windowDefault: 48, earlyMin: 0, earlyMax: 336, earlyDefault: 48, note: 500, priceMax: 100_000_000 });
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -73,6 +91,8 @@ export function dropFormValues(d: Drop | null, now: Date): Record<string, string
       closesAt: localUtc(d.closesAt),
       purchaseWindowHours: String(d.purchaseWindowHours),
       earlyAccessHours: String(d.earlyAccessHours),
+      price: d.priceMinor === null ? '' : moneyField(d.priceMinor),
+      currency: d.currency ?? 'EUR',
     };
   }
   const opens = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 10));
@@ -86,6 +106,8 @@ export function dropFormValues(d: Drop | null, now: Date): Record<string, string
     closesAt: localUtc(closes.toISOString()),
     purchaseWindowHours: String(DROP_LIMITS.windowDefault),
     earlyAccessHours: String(DROP_LIMITS.earlyDefault),
+    price: '',
+    currency: 'EUR',
   };
 }
 
@@ -108,7 +130,22 @@ export function dropProblem(v: Record<string, string>): string | null {
   if (hours === null || hours < DROP_LIMITS.windowMin || hours > DROP_LIMITS.windowMax) return `A place is held ${DROP_LIMITS.windowMin} to ${DROP_LIMITS.windowMax} hours.`;
   const early = wholeNumber(v.earlyAccessHours);
   if (early === null || early < DROP_LIMITS.earlyMin || early > DROP_LIMITS.earlyMax) return `The early access lasts ${DROP_LIMITS.earlyMin} to ${DROP_LIMITS.earlyMax} hours (${DROP_LIMITS.earlyMin}: none).`;
+  return drawPriceProblem(v);
+}
+
+/** NOCTURNE (addition 5): what the server would refuse in a draw's price, or null; an empty price is none. */
+export function drawPriceProblem(v: Record<string, string>): string | null {
+  const price = (v.price ?? '').trim();
+  if (price === '') return null;
+  const minor = parseMoney(price);
+  if (minor === null || minor < 0 || minor > DROP_LIMITS.priceMax) return 'The price is an amount in units: 4200, or 4200.50.';
+  if (!(ORDER_CURRENCIES as readonly string[]).includes(v.currency ?? '')) return `A draw is priced in ${ORDER_CURRENCIES.join(', ')}.`;
   return null;
+}
+
+/** A draw's price as the console reads it: `€ 4 200`, or None. */
+export function drawPriceText(d: Pick<Drop, 'priceMinor' | 'currency'>): string {
+  return d.priceMinor === null || d.currency === null ? 'None' : formatMoney(d.priceMinor, d.currency);
 }
 
 /** The body of a new drop (POST /api/admin/drops), from values dropProblem accepted. */
@@ -123,6 +160,8 @@ export function dropInput(v: Record<string, string>): DropInput {
     closesAt: utcInstant(v.closesAt)!,
     purchaseWindowHours: Number(v.purchaseWindowHours),
     earlyAccessHours: Number(v.earlyAccessHours),
+    // NOCTURNE (addition 5): the price with its currency, or neither.
+    ...((v.price ?? '').trim() === '' ? { priceMinor: null, currency: null } : { priceMinor: parseMoney(v.price)!, currency: v.currency as OrderCurrency }),
   };
 }
 
@@ -138,6 +177,10 @@ export function dropChange(d: Drop, v: Record<string, string>): DropChange {
   if (Date.parse(next.closesAt) !== Date.parse(d.closesAt)) out.closesAt = next.closesAt;
   if (next.purchaseWindowHours !== d.purchaseWindowHours) out.purchaseWindowHours = next.purchaseWindowHours;
   if (next.earlyAccessHours !== d.earlyAccessHours) out.earlyAccessHours = next.earlyAccessHours;
+  if ((next.priceMinor ?? null) !== d.priceMinor || (next.currency ?? null) !== d.currency) {
+    out.priceMinor = next.priceMinor ?? null;
+    out.currency = next.currency ?? null;
+  }
   return out;
 }
 

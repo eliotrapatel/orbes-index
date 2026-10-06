@@ -314,7 +314,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     // The public page: the release, its model and the SHA-256 of its seed; never the seed before the draw.
     const s = await sheet(d.id);
     expect(s).toMatchObject({ id: d.id, state: 'UPCOMING', title: 'MONOLITHE — release I', quantity: 3, description: 'Three pieces.', purchaseWindowHours: 24, seedHash: d.seedHash, seed: null, drawnAt: null });
-    expect(s.model).toEqual({ name: 'MONOLITHE', type: 'RING', collection: expect.any(String), imageUrl: null, lookbook: null });
+    expect(s.model).toEqual({ name: 'MONOLITHE', type: 'RING', collection: expect.any(String), imageUrl: null, lookbook: null, variant: null });
     const listed = await h.client().get('/api/v1/drops');
     expect(listed.headers['cache-control']).toBe('public, max-age=60');
     expect((safeJson(listed) as { drops: { id: string; state: string }[] }).drops).toContainEqual(expect.objectContaining({ id: d.id, state: 'UPCOMING' }));

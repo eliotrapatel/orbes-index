@@ -3,7 +3,8 @@
  * against the scripts, the migrations, the app and the screens it quotes:
  *
  *  - its starting point is the production of deployment D (commit 86bd579, image 86bd579e4aa9, migrations 0001 to
- *    0021), and deployment E applies exactly the migrations after 0021 that exist, 0022 and 0023: the table of §1.0,
+ *    0021), and deployment E applies exactly the migrations after 0021 of its plan, 0022 and 0023 (0024 is NOCTURNE's,
+ *    its own deployment): the table of §1.0,
  *    the line `db.ts migrate` prints, those deploy.sh prints after it, the deployment log and the count `db.ts status`
  *    shows;
  *  - every message it expects from deploy.sh, backup.sh, restore.sh, lib.sh and the app is still one they print, the
@@ -45,7 +46,9 @@ const NAMES = Object.keys(MIGRATIONS);
 const numberOf = (name: string): number => Number(name.slice(0, 4));
 const START_MIGRATIONS = NAMES.filter((n) => numberOf(n) <= 21);
 /** Deployment E: every migration after D's, 0022 and 0023 (a later number needs its own plan and runbook). */
-const DEPLOY_E = NAMES.filter((n) => numberOf(n) > 21);
+const DEPLOY_E = NAMES.filter((n) => numberOf(n) > 21 && numberOf(n) <= 23);
+/** The schema deployment E leaves: every migration up to 0023. */
+const AFTER_E = NAMES.filter((n) => numberOf(n) <= 23);
 /** The version the legal pages published with deployment D: E's comes after it. */
 const D_LEGAL_VERSION = '2026-10-06';
 
@@ -142,6 +145,9 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
 
   it('applies exactly the migrations after 0021, 0022 and 0023, as the scripts print them', () => {
     expect(DEPLOY_E).toEqual(['0022_orders_stock', '0023_releases_collectors']);
+    // A later number has its own plan and runbook: 0024 is NOCTURNE's (plan of 2026-10-05: a model's variants and a
+    // draw's price), which ships as its own deployment after E.
+    expect(NAMES.filter((n) => numberOf(n) > 23)).toEqual(['0024_model_variants']);
     const rows = [...section(runbook, '### 1.0').matchAll(/^ *\| `(\d{4}_[a-z0-9_]+)` \|/gm)].map((m) => m[1]);
     expect(rows).toEqual(DEPLOY_E);
     expect(readDoc('genome/scripts/db.ts')).toContain("`Applied ${applied.length} migration(s): ${applied.join(', ')}`");
@@ -149,7 +155,7 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
     expect(runbook).toContain(`(previous: ${START_TAG}). This release applied the migration(s) ${DEPLOY_E.join(', ')}:`);
     expect(runbook).toContain(`deploy <TAG_E> OK (previous ${START_TAG}; migrations ${DEPLOY_E.join(', ')})`);
     expect(runbook).toContain(`orbes-genome:${START_TAG} cannot run on this schema any more`);
-    expect(runbook).toContain(`les ${NAMES.length} lignes \`applied\`, de \`${NAMES[0]}\` à \`${NAMES.at(-1)}\``);
+    expect(runbook).toContain(`les ${AFTER_E.length} lignes \`applied\`, de \`${AFTER_E[0]}\` à \`${AFTER_E.at(-1)}\``);
   });
 
   it('expects from the scripts and the app only messages they print', () => {

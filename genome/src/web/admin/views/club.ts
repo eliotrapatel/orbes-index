@@ -27,8 +27,9 @@ import { formatMoney, liveStateLabel, newLiveInput, newLiveProblem, newLiveValue
 import { CLUB_TABS, clubTab, DROP_LIMITS, dropFormValues, dropInput, dropProblem, placesTaken } from '../model/club.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
+import { modelChoice } from '../model/variants.js';
 import { href } from '../router.js';
-import type { Drop, LiveCard, LiveSizeMix, Model } from '../types.js';
+import { ORDER_CURRENCIES, type Drop, type LiveCard, type LiveSizeMix, type Model } from '../types.js';
 import { button, pageHeader, pager, section, statusMark, table } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
@@ -41,7 +42,7 @@ import { tiersTab } from './tiers.js';
 
 /** The fields of a drop's dialog: the active models to choose from, its values. */
 export function dropFields(models: readonly Model[], values: Record<string, string>, opts: { model: boolean }): DialogField[] {
-  const options = models.filter((m) => m.active || m.id === values.modelId).map((m) => ({ value: m.id, label: `${humanize(m.name)} · ${humanize(m.type)}` }));
+  const options = models.filter((m) => m.active || m.id === values.modelId).map((m) => ({ value: m.id, label: modelChoice(m) }));
   return [
     ...(opts.model ? [{ name: 'modelId', label: 'Model', kind: 'select' as const, required: true, options: [{ value: '', label: 'Choose a model' }, ...options], value: values.modelId }] : []),
     { name: 'title', label: 'Title', required: true, maxlength: DROP_LIMITS.title, value: values.title, hint: 'As the release’s page names it on /verify.' },
@@ -65,6 +66,9 @@ export function dropFields(models: readonly Model[], values: Record<string, stri
       value: values.earlyAccessHours,
       hint: `Before entries open, PLATINE and PALLADIUM owners reserve a place directly, first come, first served, within the pieces: ${DROP_LIMITS.earlyMin} to ${DROP_LIMITS.earlyMax} hours, ${DROP_LIMITS.earlyDefault} by default, ${DROP_LIMITS.earlyMin} for none. The draw gives the places left.`,
     },
+    // NOCTURNE (addition 5): the price shown on the draw's card and page, which its orders take.
+    { name: 'price', label: 'Price', maxlength: 14, value: values.price, hint: 'Per piece, in units: 4200, or 4200.50. Shown on the release’s card and page; each order of the draw takes it. Empty: none (the order’s price is entered by Client Services).' },
+    { name: 'currency', label: 'Currency', kind: 'select', options: ORDER_CURRENCIES.map((c) => ({ value: c, label: c })), value: values.currency },
   ];
 }
 

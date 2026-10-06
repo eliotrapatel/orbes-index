@@ -5,6 +5,8 @@
  *  - the columns against Shopify's published formats: every column written is one of the published list, spelled as
  *    Shopify spells it, in the published order; the required ones are there (a product's Title and URL handle, its
  *    Option1 name and value, without which Shopify replaces the variants; an order's Name);
+ *  - NOCTURNE N1: a model and its variants one product, the main model's (Option1 Variant, Option2 Size, each model's
+ *    SKUs, price and photographs, its cover the image of its variants), a variant linked to its main model's product;
  *  - the product CSV: the models priced in the store's currency, one product each, its sizes as variants (Option1
  *    Size, naturally sorted, ONE SIZE first; a model in one size is Shopify's single variant), each with its SKU and the
  *    base price, its photographs by their absolute address (the cover, then the gallery), a draft not published
@@ -296,6 +298,66 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     expect((await shopify().product(addressed)).handle).toBe('nova');
     expect((await shopify().product(third)).handle).toBe(suffixed);
     expect((await shopify().product(named)).handle).toBe(`${suffixed}-2`);
+  });
+
+  it('exports a model and its variants as one product (NOCTURNE N1): Option1 Variant, Option2 Size, each its SKUs, price and photographs, its cover its variants\' image', async () => {
+    const main = await createModel(t.db, 'GROUPE', null, 'BRACELET');
+    await t.db.updateTable('models').set({ slug: 'groupe-monolithe' }).where('id', '=', main).execute();
+    const gold = (await ctx.services.catalog.createVariant(main, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'GRP-GD', mainLabel: 'Steel', mainSwatch: '#9D9B96' }, f.admin)).id;
+    clock.advance(1000);
+    const blue = (await ctx.services.catalog.createVariant(main, { label: 'Blue', swatch: '#16224A', skuPrefix: 'GRP-BL' }, f.admin)).id;
+    const code = async (m: string, size: string) => (await t.db.selectFrom('skus').select('code').where('id', '=', await skuOf(m, size)).executeTakeFirstOrThrow()).code;
+    const codes = [await code(main, '17'), await code(main, '16'), await code(gold, '16'), await code(gold, '17')];
+    await price(main, 420_000);
+    await price(gold, 480_000);
+    // Blue never issued nor sold: in one size.
+    await price(blue, 450_000);
+    await photo(main, sha('a'), []);
+    await photo(gold, sha('b'), [{ sha256: sha('c'), alt: null }]);
+    const rows = records((await shopify().productCsv('EUR')).body);
+    // One product, the main model's handle; none of its variants' own.
+    const product = rows.filter((r) => r['URL handle'] === 'groupe-monolithe');
+    const variantHandles = [(await shopify().product(gold)).handle, (await shopify().product(blue)).handle];
+    expect(variantHandles).toEqual(['groupe-monolithe', 'groupe-monolithe']);
+    expect(rows.filter((r) => r.Title === 'GROUPE')).toHaveLength(1);
+    // Five variants (two sizes of Steel, two of Gold, Blue in one size), three photographs: five rows.
+    expect(product).toHaveLength(5);
+    expect(product[0]).toMatchObject({ Title: 'GROUPE', Type: 'BRACELET', Vendor: 'ORBES', Status: 'draft', 'Option1 name': 'Variant', 'Option2 name': 'Size' });
+    for (const r of product.slice(1)) expect([r.Title, r['Option1 name'], r['Option2 name']]).toEqual(['', '', '']);
+    expect(product.map((r) => [r['Option1 value'], r['Option2 value'], r.SKU, r.Price])).toEqual([
+      ['Steel', '16', codes[1], '4200.00'],
+      ['Steel', '17', codes[0], '4200.00'],
+      ['Gold', '16', codes[2], '4800.00'],
+      ['Gold', '17', codes[3], '4800.00'],
+      ['Blue', 'ONE SIZE', 'GRP-BL', '4500.00'],
+    ]);
+    const url = (c: string) => `${ORIGIN}/api/v1/media/${sha(c)}`;
+    expect(product.map((r) => r['Variant image URL'])).toEqual([url('a'), url('a'), url('b'), url('b'), '']);
+    expect(product.map((r) => r['Product image URL'])).toEqual([url('a'), url('b'), url('c'), '', '']);
+    expect(product.map((r) => r['Image alt text'])).toEqual([
+      'The GROUPE BRACELET model in steel, photographed by ORBES',
+      'The GROUPE BRACELET model in gold, photographed by ORBES',
+      'The GROUPE BRACELET model in gold, photographed by ORBES',
+      '',
+      '',
+    ]);
+    // A model alone keeps its sizes as Option1 and no Option2.
+    expect(rows.filter((r) => r['Option1 name'] === 'Size').every((r) => r['Option2 name'] === '')).toBe(true);
+    // Only a variant priced in a currency: the main model's product still, by Variant, without sizes.
+    await price(blue, 9_900, 'USD');
+    const usd = records((await shopify().productCsv('USD')).body).filter((r) => r['URL handle'] === 'groupe-monolithe');
+    expect(usd.map((r) => [r.Title, r['Option1 name'], r['Option1 value'], r['Option2 name'], r['Option2 value'], r.Price])).toEqual([['GROUPE', 'Variant', 'Blue', '', '', '99.00']]);
+    // Archived once none of its models is active.
+    await t.db.updateTable('models').set({ active: false }).where('id', 'in', [main, gold]).execute();
+    expect(records((await shopify().productCsv('EUR')).body).find((r) => r['URL handle'] === 'groupe-monolithe')!.Status).toBe('archived');
+
+    // The ids pasted back: a variant takes its main model's product; a model of another group may not.
+    await shopify().link(main, { productId: '6601', variants: [{ size: '16', variantId: '6616' }] }, f.admin);
+    const linked = await shopify().link(gold, { productId: '6601', variants: [{ size: '16', variantId: '6716' }] }, f.admin);
+    expect(linked.productId).toBe('6601');
+    const stranger = await createModel(t.db, 'STRANGER');
+    await skuOf(stranger, '52');
+    await rejects(shopify().link(stranger, { productId: '6601', variants: [] }, f.admin), 'SHOPIFY_PRODUCT_TAKEN');
   });
 
   it('keeps the ids pasted back on the model\'s SKUs, audited; refuses what would link two sides wrongly', async () => {

@@ -72,6 +72,7 @@ export interface IssueProductInput {
   modelId: string;
   collectionId?: string;
   sku?: string;
+  /** The piece's size, as its SKU names it (NOCTURNE N1: labelled Size; free text, values written before kept). */
   variant?: string;
   material: string;
   productionBatch?: string;
@@ -252,7 +253,8 @@ const issueSchema = z.strictObject({
       .max(64, 'SKU is too long.')
       .regex(/^[A-Za-z0-9][A-Za-z0-9._\-/ ]*$/, 'SKU may contain letters, digits, space, dot, underscore, hyphen and slash.'),
   ),
-  variant: optional(text(100, 'Variant')),
+  // The piece's free-text field: its size (NOCTURNE N1: labelled Size, in the console and on a piece).
+  variant: optional(text(100, 'Size')),
   material: text(200, 'Material'),
   productionBatch: optional(text(100, 'Production batch')),
   productionDate: optional(isoDate),

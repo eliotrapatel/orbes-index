@@ -27,15 +27,24 @@ export function shopifyStatus(m: Pick<Model, 'shopify'>): string {
   return `LINKED · ${formatCount(m.shopify.linked)} OF ${formatCount(m.shopify.variants)} SIZES`;
 }
 
-/** What the product export holds in a currency: the models priced in it, and those it leaves out. */
-export function productExportSummary(models: readonly Pick<Model, 'baseCurrency' | 'basePriceMinor'>[], currency: string): string {
+/**
+ * What the product export holds in a currency: the models priced in it, and those it leaves out. A model and its
+ * variants are one product (NOCTURNE N1), by Variant and Size.
+ */
+export function productExportSummary(models: readonly (Pick<Model, 'id' | 'baseCurrency' | 'basePriceMinor'> & { variantOf?: Model['variantOf'] })[], currency: string): string {
   const priced = models.filter((m) => m.basePriceMinor !== null && m.baseCurrency !== null);
-  const kept = priced.filter((m) => m.baseCurrency === currency).length;
+  const keptModels = priced.filter((m) => m.baseCurrency === currency);
+  const kept = keptModels.length;
+  const products = new Set(keptModels.map((m) => m.variantOf?.id ?? m.id)).size;
   const other = priced.length - kept;
   const none = models.length - priced.length;
   const n = (k: number, one: string, many: string) => `${formatCount(k)} ${k === 1 ? one : many}`;
   return [
-    kept === 0 ? `No model has a base price in ${currency}: the file holds its header only.` : `${n(kept, 'model', 'models')} priced in ${currency}, each a product with its sizes as variants and its photographs.`,
+    kept === 0
+      ? `No model has a base price in ${currency}: the file holds its header only.`
+      : products === kept
+        ? `${n(kept, 'model', 'models')} priced in ${currency}, each a product with its sizes as variants and its photographs.`
+        : `${n(kept, 'model', 'models')} priced in ${currency}, in ${n(products, 'product', 'products')}: a model and its variants are one product, by Variant and Size, with their photographs.`,
     other > 0 ? `${n(other, 'model priced', 'models priced')} in another currency ${other === 1 ? 'is' : 'are'} left out.` : null,
     none > 0 ? `${n(none, 'model', 'models')} without a base price ${none === 1 ? 'is' : 'are'} left out: set it with Edit.` : null,
     'Each product is a draft, not published: Shopify decides nothing until the store is open.',

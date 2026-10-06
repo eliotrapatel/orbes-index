@@ -155,6 +155,8 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       channel: 'LIVE',
       release: 'MONOLITHE — LIVE',
       model: 'MONOLITHE',
+      // NOCTURNE N1: its label among its variants; none for a model alone.
+      modelVariant: null,
       size: { label: '52' },
       priceMinor: 480_000,
       currency: 'EUR',
@@ -175,6 +177,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       channel: 'SALON',
       release: null,
       model: 'MONOLITHE',
+      modelVariant: null,
       size: { label: '54' },
       priceMinor: 490_000,
       currency: 'EUR',
@@ -199,7 +202,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     const list = (safeJson(res) as { orders: Json[] }).orders;
     for (const o of list) {
       expect(Object.keys(o).sort()).toEqual(
-        ['addons', 'cancelledAt', 'channel', 'currency', 'deliveredAt', 'documents', 'id', 'model', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'size', 'status'].sort(),
+        ['addons', 'cancelledAt', 'channel', 'currency', 'deliveredAt', 'documents', 'id', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'size', 'status'].sort(),
       );
       expect(Object.keys(o.documents).sort()).toEqual(['careGuide', 'certificate', 'creditNote', 'invoice']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);

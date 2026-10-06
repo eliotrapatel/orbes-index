@@ -72,6 +72,7 @@ import type { IssueResult } from '../../src/server/services/issuance.js';
 import { aggregateScanStats, daySpan, lastCompleteDay, utcDay } from '../../src/server/services/scan-stats.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { jpegPhoto } from '../support/images.js';
 import { svgToGray } from '../support/raster.js';
 import { writePng } from '../support/image-io.js';
 import { writeY4m } from '../support/y4m.js';
@@ -484,6 +485,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.selectOption('select[name=categoryCode]', 'J');
     await page.selectOption('select[name=modelId]', modelId);
     expect(await page.inputValue('input[name=material]')).toBe('925 STERLING SILVER'); // model default
+    // NOCTURNE N1: the piece's field set at issuance is its size.
+    expect(await page.locator('.cfield', { has: page.locator('input[name=variant]') }).locator('.cfield__label').textContent()).toMatch(/^Size/);
     await page.fill('input[name=variant]', '52');
     await page.fill('input[name=productionBatch]', 'B-2026-10-A');
     // Pin the identity year so the expected id does not depend on the date the suite runs.
@@ -553,23 +556,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(outcome.state).toMatch(/^AUTHENTIC/);
     expect(outcome.product?.productId).toBe(issuedProductId);
 
-    // The photograph of this piece, proposed at issuance (F-04): chosen, re-encoded and previewed as it will be sent, saved.
-    const photoPanel = page.locator('#piece-photo');
-    expect(await photoPanel.locator('.photo-thumb--empty').count()).toBe(1);
-    await page.click('[data-testid=add-piece-photo]');
-    await page.waitForSelector('dialog [data-testid=photo-impact]');
-    expect(await page.locator('dialog .dialog__eyebrow').textContent()).toBe(issuedProductId);
-    expect(await page.locator('dialog input[name=remove]').count()).toBe(0);
-    await page.setInputFiles('dialog [data-testid=photo-file]', writePhotoPng(join(workDir, 'piece.png'), 900, 900));
-    await expect.poll(() => page.locator('dialog [data-testid=photo-facts]').textContent()).toMatch(/^To be sent: 900 × 900 PX · \d+ KB$/);
-    expect(await page.locator('dialog [data-testid=photo-current] img').getAttribute('src')).toMatch(/^blob:/);
-    await confirmDialog(page);
-    await page.waitForSelector('.toast:has-text("Photograph saved.")');
-    await expect.poll(() => photoPanel.locator('img.photo-thumb').getAttribute('src')).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
-    expect(await page.locator('[data-testid=add-piece-photo]').textContent()).toBe('Replace the photo of this piece');
-    const photographed = await ctx.db.selectFrom('products').select('photo_sha256').where('product_id', '=', issuedProductId).executeTakeFirstOrThrow();
-    const sent = await ctx.db.selectFrom('media_objects').selectAll().where('sha256', '=', photographed.photo_sha256!).executeTakeFirstOrThrow();
-    expect([sent.mime, sent.width, sent.height]).toEqual(['image/jpeg', 900, 900]);
+    // No photograph of the piece is offered at issuance (NOCTURNE, decision 9: the model's is the reference for a piece).
+    expect(await page.locator('#piece-photo').count()).toBe(0);
+    expect(await page.locator('[data-testid=add-piece-photo]').count()).toBe(0);
+    expect(await page.getByText('Add a photo of this piece').count()).toBe(0);
+    expect((await ctx.db.selectFrom('products').select('photo_sha256').where('product_id', '=', issuedProductId).executeTakeFirstOrThrow()).photo_sha256).toBeNull();
     expect(await cspViolations(page)).toEqual([]);
   }, STEP_TIMEOUT);
 
@@ -618,7 +609,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await page.locator('#codes tbody tr').nth(1).textContent()).toContain('SUPERSEDED');
   }, STEP_TIMEOUT);
 
-  it('sets a model\'s reference photograph in the catalogue (F-04): shown, with the piece\'s own, on the product page and on /verify', async () => {
+  it('sets a model\'s reference photograph in the catalogue (F-04): shown with the piece\'s own on the product page, and alone on /verify (NOCTURNE, decision 9)', async () => {
     await go(page, '#/catalogue', 'Catalogue');
     const row = page.locator('#models tbody tr', { hasText: 'MNL-RG' });
     expect(await row.locator('.photo-thumb--empty').count()).toBe(1);
@@ -640,22 +631,28 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect([stored.mime, stored.width, stored.height]).toEqual(['image/jpeg', 2000, 1333]);
     expect(stored.bytes.length).toBeLessThanOrEqual(1024 * 1024);
 
+    // A photograph of the piece taken before NOCTURNE (decision 9): kept in the records, for ORBES staff.
+    await ctx.services.media.setProductPhoto(issuedProductId, { mime: 'image/jpeg', bytes: jpegPhoto(480, 480) }, SYSTEM_ACTOR);
     // The product page: the piece's own photograph and the model's.
     await go(page, `#/products/${issuedProductId}`, issuedProductId);
     const photos = page.locator('#photographs');
     await expect.poll(() => photos.locator('img.photo-thumb').count()).toBe(2);
+    // In view, so that both load (the thumbs load lazily).
+    await photos.scrollIntoViewIfNeeded();
     expect(await photos.locator('[data-testid=model-photo] img').getAttribute('src')).toBe(model.imageUrl);
     const pieceUrl = await photos.locator('[data-testid=product-photo] img').getAttribute('src');
     await expect.poll(() => photos.locator('img.photo-thumb').evaluateAll((els) => els.map((el) => (el as HTMLImageElement).naturalWidth > 0))).toEqual([true, true]);
     await photos.scrollIntoViewIfNeeded();
     if (SCREENSHOTS) await page.screenshot({ path: join(OUT_DIR, 'admin-product-photographs.png') });
-    // /verify shows both on the piece's authentic result (its ACTIVE code, re-issued above).
+    // /verify shows the model's alone on the piece's authentic result (its ACTIVE code, re-issued above), never the piece's own.
     const active = await ctx.db.selectFrom('codes as c').innerJoin('products as p', 'p.id', 'c.product_id').select(['c.payload', 'c.signature']).where('p.product_id', '=', issuedProductId).where('c.status', '=', 'ACTIVE').executeTakeFirstOrThrow();
     const verified = (await (
       await fetch(`${origin}/api/v1/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: toBase64Url(frameCodeData(active.payload, active.signature)) }) })
     ).json()) as { state: string; product?: { imageUrl?: string; photoUrl?: string } };
     expect(verified.state).toMatch(/^AUTHENTIC/);
-    expect(verified.product).toMatchObject({ imageUrl: model.imageUrl, photoUrl: pieceUrl });
+    expect(verified.product).toMatchObject({ imageUrl: model.imageUrl });
+    expect(verified.product).not.toHaveProperty('photoUrl');
+    expect(pieceUrl).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
 
     // Removed from the product page: the box marks the dialog destructive; the piece then shows its model's alone.
     await page.click('[data-testid=product-photo-edit]');
@@ -1497,7 +1494,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
   it('issues 120 products from a CSV in one gesture: the preview, requests of 50, the results piece by piece, the batch in Products', async () => {
     const batch = 'B-2026-10-CSV';
     // A spreadsheet's export: byte-order mark, semicolons, CRLF; a size per piece, the SKU of the first ten given.
-    const lines = ['variant;sku', ...Array.from({ length: 120 }, (_, i) => `Size ${44 + (i % 16)};${i < 10 ? `MNL-RG-${44 + i}-P` : ''}`)];
+    // NOCTURNE N1: the size's column is `size` (the files of before name it `variant`, read as it below).
+    const lines = ['size;sku', ...Array.from({ length: 120 }, (_, i) => `Size ${44 + (i % 16)};${i < 10 ? `MNL-RG-${44 + i}-P` : ''}`)];
     const csv = `\uFEFF${lines.join('\r\n')}\r\n`;
     const results = page.locator('[data-testid=batch-results] tbody tr');
     const unloadPrevented = () =>
@@ -1590,7 +1588,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(resultsFile.suggestedFilename()).toMatch(new RegExp(`^ORBES-batch-${batch}-\\d{4}-\\d{2}-\\d{2}-120-results\\.csv$`));
     const rows = readFileSync((await resultsFile.path())!, 'utf8').trimEnd().split('\r\n');
     expect(rows).toHaveLength(121);
-    expect(rows[0]).toBe('"line","piece","status","productId","sku","variant","serial","codeId","claimCode","message"');
+    expect(rows[0]).toBe('"line","piece","status","productId","sku","size","serial","codeId","claimCode","message"');
     expect(rows[1]).toBe(`"2","1","ISSUED","${first[2]}","MNL-RG-44-P","Size 44","${first[5]}","${await ctx.db.selectFrom('codes as c').innerJoin('products as p', 'p.id', 'c.product_id').select('c.id').where('p.product_id', '=', first[2]).executeTakeFirstOrThrow().then((r) => r.id)}","${first[6]}",""`);
     await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent()).toBe('Results saved, with the claim codes.');
     expect(await unloadPrevented()).toBe(false);
@@ -2601,6 +2599,73 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await ap.locator('[data-testid=salon-edit]').count()).toBe(0);
     expect(await cspViolations(ap)).toEqual([]);
     await ac.close();
+  }, STEP_TIMEOUT);
+
+  it('adds a variant to a model from its page (NOCTURNE N1): VARIANTS, ADD A VARIANT with the main model\'s own dot, its reference photograph, its page naming its main model; the Catalogue names both', async () => {
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    // A model of its own, with what ADD A VARIANT copies.
+    const main = await ctx.services.catalog.createModel({ categoryCode: 'J', name: 'CONSTELLATION', type: 'PENDANT', skuPrefix: 'CST-PD', careInstructions: 'Wipe it with a soft, dry cloth.' }, SYSTEM_ACTOR);
+    await ctx.services.catalog.updateModel(main.id, { story: 'Seven stones, as the stars of the north.', specs: 'Metal: 18k white gold' }, SYSTEM_ACTOR);
+    await go(p, `#/catalogue/${main.id}`, 'CONSTELLATION');
+    const section = p.locator('#variants');
+    await expect.poll(() => section.locator('[data-testid=variant-own]').textContent()).toBe('None');
+    expect(await section.locator('[data-testid=variant-list]').textContent()).toContain('No variant yet.');
+    // ADD A VARIANT: the main model's own dot first (it has none yet), then the variant's; refused while a label is missing.
+    await p.click('[data-testid=variant-add]');
+    expect(await p.locator('dialog [data-testid=variant-impact]').textContent()).toMatch(/^A model of its own, copied from this one: its type, collection, story, specifications and care\./);
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await p.fill('dialog input[name=mainLabel]', 'Silver');
+    await p.fill('dialog input[name=mainSwatch]', '#d7d5d0');
+    // A label of the group is another dot's: said before anything is sent.
+    await p.fill('dialog input[name=label]', 'silver');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('This model or another of its variants already has this label.');
+    await p.fill('dialog input[name=label]', 'Night blue');
+    await p.fill('dialog input[name=swatch]', '#16224a');
+    // The SKU prefix proposed from the main model's and the label, sent when the field is left empty.
+    await expect.poll(() => p.locator('dialog [data-testid=variant-prefix]').textContent()).toBe('SKU prefix: CST-NI');
+    await p.click('[data-testid=dialog-confirm]');
+    // Its photographs next: the reference photograph's dialog opens on the variant created (left for later here), then its own page.
+    await p.waitForSelector('dialog [data-testid=photo-impact]', { timeout: 15_000 });
+    await expect.poll(() => p.locator('dialog .dialog__eyebrow').textContent()).toBe('CONSTELLATION · CST-NI');
+    await p.click('[data-testid=dialog-cancel]');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), { timeout: 15_000 }).toBe('CONSTELLATION · NIGHT BLUE');
+    const variant = await ctx.db.selectFrom('models').selectAll().where('variant_of', '=', main.id).executeTakeFirstOrThrow();
+    expect([variant.sku_prefix, variant.variant_label, variant.variant_swatch, variant.story, variant.specs, variant.care_instructions, variant.lookbook]).toEqual([
+      'CST-NI',
+      'Night blue',
+      '#16224A',
+      'Seven stones, as the stars of the north.',
+      'Metal: 18k white gold',
+      'Wipe it with a soft, dry cloth.',
+      'HIDDEN',
+    ]);
+    expect(new URL(p.url()).hash).toBe(`#/catalogue/${variant.id}`);
+    // A variant's page names its main model; it adds no variant of its own.
+    await expect.poll(() => p.locator('[data-testid=variant-main]').textContent()).toBe('CONSTELLATION · SILVER');
+    expect(await p.locator('[data-testid=variant-own]').textContent()).toBe('Night blue · #16224A');
+    expect(await p.locator('[data-testid=variant-add]').count()).toBe(0);
+    // Its main model's page lists it, with its dot; the main model's own dot given.
+    await p.click('[data-testid=variant-main]');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), { timeout: 15_000 }).toBe('CONSTELLATION · SILVER');
+    expect(await p.locator('[data-testid=variant-own]').textContent()).toBe('Silver · #D7D5D0');
+    expect(await p.locator('[data-testid=variant-list] tbody tr').count()).toBe(1);
+    expect(await p.locator('[data-testid=variant-list] tbody tr').textContent()).toContain('Night blue');
+    await shot(p, 'model-variants', { full: true });
+    // The Catalogue says where each stands; a choice of a model names its label.
+    await go(p, '#/catalogue', 'Catalogue');
+    expect(await p.locator('#models tbody tr', { hasText: 'CST-NI' }).locator('[data-testid=model-variant]').textContent()).toBe('Variant of CONSTELLATION · NIGHT BLUE');
+    expect(await p.locator('#models tbody tr', { hasText: 'CST-PD' }).locator('[data-testid=model-variant]').textContent()).toBe('SILVER · 1 variant');
+    const actions = (await ctx.db.selectFrom('audit_logs').select(['action', 'target_id']).where('action', '=', 'model.variant.create').execute()).map((a) => a.target_id);
+    expect(actions).toEqual([variant.id]);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
   }, STEP_TIMEOUT);
 
   it('raised no page error or CSP violation', () => {

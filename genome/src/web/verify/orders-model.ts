@@ -20,7 +20,7 @@ import { ORDERS } from './copy.js';
 import { formatMoney } from './live-model.js';
 import type { OrderDocumentKind } from './api.js';
 import { ORDER_CHANNELS, ORDER_STATUSES, type AccountOrder, type OrderStatus } from './types.js';
-import { formatDate, upper, type Row } from './view-model.js';
+import { formatDate, modelWithVariant, upper, type Row } from './view-model.js';
 
 /** The four steps of an order that goes its way. */
 export const ORDER_PATH: readonly OrderStatus[] = Object.freeze(['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED'] as const);
@@ -76,7 +76,8 @@ export function orderDocuments(o: AccountOrder): OrderDocumentModel[] {
   const d = o.documents;
   if (!d || typeof d !== 'object') return [];
   const D = ORDERS.documents;
-  const model = upper(o.model);
+  // The model with its variant (NOCTURNE N1: « MONOLITHE in blue »), as the labels read aloud say it.
+  const model = modelWithVariant(upper(o.model), o.modelVariant);
   const out: OrderDocumentModel[] = [];
   const invoice = d.invoice?.number;
   if (typeof invoice === 'string' && DOCUMENT_NUMBER.test(invoice) && invoice.startsWith('INV-')) out.push({ kind: 'INVOICE', label: D.invoice, number: invoice, ariaLabel: D.invoiceLabel(invoice), file: 'invoice' });

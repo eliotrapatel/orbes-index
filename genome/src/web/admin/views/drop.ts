@@ -34,6 +34,7 @@ import {
   dropPhrase,
   dropProblem,
   dropWindow,
+  drawPriceText,
   earlyAccessLine,
   earlyAccessOnPublish,
   entryActions,
@@ -102,7 +103,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       body: [
         h('p', { class: 'dialog__text' }, `Its page on /verify announces it from now on, with the fingerprint of its seed. Entries: ${dropWindow(d)}.`),
         h('p', { class: 'dialog__text' }, `Direct reservations of PLATINE and PALLADIUM owners: ${earlyAccessOnPublish(d, ctx.now())}.`),
-        h('p', { class: 'dialog__text' }, 'Once published, only its description changes: its model, pieces, dates, early access and the place held are fixed.'),
+        h('p', { class: 'dialog__text' }, 'Once published, only its description changes: its model, pieces, dates, early access, price and the place held are fixed.'),
       ],
       confirmLabel: 'Publish',
       submit: async () => {
@@ -167,8 +168,10 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const published = d.publishedAt !== null;
   const rows = [
     { label: 'State', value: h('span', { data: { testid: 'drop-state' } }, statusMark(humanize(d.state), toneOf('drop', d.state))) },
-    { label: 'Model', value: `${humanize(d.model.name)} · ${humanize(d.model.type)}`, note: d.model.active ? undefined : 'No longer offered for new pieces.' },
+    { label: 'Model', value: [humanize(d.model.name), humanize(d.model.type), ...(d.model.variant ? [humanize(d.model.variant)] : [])].join(' · '), note: d.model.active ? undefined : 'No longer offered for new pieces.' },
     { label: 'Pieces', value: formatCount(d.quantity) },
+    // NOCTURNE (addition 5): shown on its card and page on /verify; each order of the draw takes it.
+    { label: 'Price', value: h('span', { data: { testid: 'drop-price' } }, drawPriceText(d)), note: d.priceMinor === null ? 'Each order’s price is entered by Client Services.' : 'Each order of the draw takes it.' },
     {
       label: 'Early access',
       value: h('span', { data: { testid: 'drop-early-access' } }, earlyAccessLine(d)),

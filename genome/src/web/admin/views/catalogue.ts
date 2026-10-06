@@ -25,9 +25,14 @@
  * care guide are set in its edit (the price of the Shopify product export,
  * releases keeping their own; the care guide MY PIECES shows with each order
  * of the model). SHOPIFY EXPORT (every role that reads) downloads the product
- * CSV of the models priced in the store's currency; Shopify on a row (OPERATOR)
+ * CSV of the models priced in the store's currency (a model and its variants
+ * one product, plan NOCTURNE N1); Shopify on a row (OPERATOR)
  * takes back the ids the store gives the product and each size, which link
  * both sides. Nothing is sent to Shopify.
+ *
+ * Variants (plan NOCTURNE, N1): a model's row says its place among them (its
+ * label, the model it is a variant of, or how many it has); they are set on
+ * its page (Lookbook on its row: VARIANTS, ADD A VARIANT).
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, humanize } from '../format.js';
@@ -51,6 +56,7 @@ import {
 import { can } from '../model/permissions.js';
 import { basePriceText, productExportSummary, SHOPIFY_CURRENCY_OPTIONS, shopifyLinkInput, shopifyLinkProblem, shopifyStatus, shopifyValues, variantField } from '../model/shopify.js';
 import { modelPhotoImpact } from '../model/photo.js';
+import { variantLine } from '../model/variants.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
 import { ORDER_CURRENCIES, type Category, type Collection, type Model } from '../types.js';
@@ -272,7 +278,11 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
     void openDialog({
       title: 'Shopify product export',
       eyebrow: 'Catalogue',
-      body: h('p', { class: 'dialog__text' }, 'A file in Shopify’s product import format: one product per model, its sizes as variants with their SKUs, its base price and its photographs. Nothing is sent to Shopify.'),
+      body: h(
+        'p',
+        { class: 'dialog__text' },
+        'A file in Shopify’s product import format: one product per model, its sizes as variants with their SKUs, its base price and its photographs; a model and its variants are one product, by Variant and Size. Nothing is sent to Shopify.',
+      ),
       fields: [{ name: 'currency', label: 'The store’s currency', kind: 'select', options: [...SHOPIFY_CURRENCY_OPTIONS], value: models.items.find((x) => x.baseCurrency)?.baseCurrency ?? 'EUR' }],
       live: (v) => h('p', { class: 'dialog__text', data: { testid: 'shopify-export-summary' } }, productExportSummary(models.items, v.currency)),
       confirmLabel: 'Download',
@@ -300,7 +310,14 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
 
   const modelColumns: Column<Model>[] = [
     { label: 'Photo', cell: (m) => photoThumb(m.imageUrl, `${humanize(m.name)} ${humanize(m.type)}: reference photograph`), kind: ['nowrap'] },
-    { label: 'Model', cell: (m) => humanize(m.name) },
+    // NOCTURNE N1: a model and its variants share a name; the row says which one it is.
+    {
+      label: 'Model',
+      cell: (m) => {
+        const line = variantLine(m);
+        return line ? h('span', null, humanize(m.name), h('span', { class: 'cell-sub', data: { testid: 'model-variant' } }, line)) : humanize(m.name);
+      },
+    },
     { label: 'Type', cell: (m) => humanize(m.type) },
     { label: 'Category', cell: (m) => `${humanize(m.category.name)} · ${m.category.code}`, kind: ['nowrap'] },
     { label: 'Collection', cell: (m) => humanize(m.collection?.name) },

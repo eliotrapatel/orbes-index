@@ -115,6 +115,31 @@ describe('the lookbook\'s grid (P-R02)', () => {
     expect(groups[2]!.cards[0]!.name).toBe('AURORE 2026');
   });
 
+  it('shows each dot of a model and its variants as a card of its own (NOCTURNE N1), as each model was, until the grid draws the dots', () => {
+    const dots = [
+      { slug: 'monolithe', name: 'Monolithe', type: 'Bracelet', label: 'Steel', swatch: '#9D9B96', imageUrl: media(1) },
+      { slug: 'monolithe-gold', name: 'Monolithe', type: 'Bracelet', label: 'Gold', swatch: '#B88A3A', imageUrl: media(2) },
+      { slug: 'Not An Address', name: 'Monolithe', type: 'Bracelet', label: 'Rose', swatch: '#E6C578', imageUrl: media(3) },
+      { slug: 'monolithe-blue', name: 'Monolithe', type: 'Bracelet', label: 'Blue', swatch: '#16224A', imageUrl: null },
+    ];
+    const groups = lookbookGroups([card({ type: 'Bracelet', variant: { label: 'Steel', swatch: '#9D9B96' }, variants: dots }), card({ slug: 'orbe', name: 'Orbe', variants: [] })]);
+    expect(groups[0]!.cards.map((c) => [c.slug, c.href, c.name, c.type])).toEqual([
+      ['monolithe', '/verify/lookbook/monolithe', 'MONOLITHE', 'BRACELET'],
+      ['monolithe-gold', '/verify/lookbook/monolithe-gold', 'MONOLITHE', 'BRACELET'],
+      ['monolithe-blue', '/verify/lookbook/monolithe-blue', 'MONOLITHE', 'BRACELET'],
+      ['orbe', '/verify/lookbook/orbe', 'ORBE', 'RING'],
+    ]);
+    // Each photograph's text names the model and its variant.
+    expect(groups[0]!.cards.map((c) => c.image)).toEqual([
+      { src: media(1), alt: 'The MONOLITHE BRACELET model in steel, photographed by ORBES' },
+      { src: media(2), alt: 'The MONOLITHE BRACELET model in gold, photographed by ORBES' },
+      null,
+      { src: media(1), alt: PHOTOS.modelAlt('ORBE', 'RING') },
+    ]);
+    // A variant's sheet names it too.
+    expect(sheetModel(sheet({ slug: 'monolithe-gold', variant: { label: 'Gold', swatch: '#B88A3A' } })).photos[0]!.alt).toBe('The MONOLITHE RING model in gold, photographed by ORBES');
+  });
+
   it('takes nothing the server did not send as it should: an address that is none, a photograph from elsewhere', () => {
     const groups = lookbookGroups([card({ slug: 'Not An Address' }), card({ slug: 'x'.repeat(81) }), card({ slug: 'ok', imageUrl: 'https://evil.example/x.jpg' }), card({ slug: 'ok2', imageUrl: '/api/v1/media/zz' })]);
     expect(groups.flatMap((g) => g.cards.map((c) => [c.slug, c.image]))).toEqual([
@@ -324,6 +349,10 @@ describe('the console\'s Lookbook page (P-R02)', () => {
     baseCurrency: null,
     careGuide: null,
     shopify: { productId: null, variants: 1, linked: 0 },
+    variantOf: null,
+    variantLabel: null,
+    variantSwatch: null,
+    variants: [],
     createdAt: '2026-10-01T08:00:00.000Z',
     ...extra,
   });

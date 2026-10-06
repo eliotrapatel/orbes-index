@@ -315,6 +315,15 @@ export interface ModelsTable {
   base_currency: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0022 (M6): the model's care guide, 1..8 000 characters. */
   care_guide: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0024 (plan NOCTURNE, N1): the main model of a variant, or NULL. Never chained (a variant's main model is
+   * never a variant; a model with variants never becomes one), never its own.
+   */
+  variant_of: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0024: its name among its model's dots (« Steel »), 1..40 characters; required on a variant and on a model with variants; unique within them. */
+  variant_label: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0024: the dot's colour, `#RRGGBB` in capitals, with its label (both or neither). */
+  variant_swatch: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: TimestampDefault;
 }
 
@@ -350,7 +359,10 @@ export interface ProductsTable {
   ownership_state: WithDefault<OwnershipState>;
   auth_policy: WithDefault<string>;
   claim_secret_hash: string | null;
-  /** Migration 0012: the photograph of this piece (media_objects.sha256), taken at issuance and shown on its authentic results. */
+  /**
+   * Migration 0012: the photograph of this piece (media_objects.sha256), taken at issuance. Since plan NOCTURNE
+   * (decision 9) the console's only: kept for staff, never shown nor sent to a collector.
+   */
   photo_sha256: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0022: its SKU (skus.id, of its model); NULL until linked. */
   sku_id: ColumnType<string | null, string | null | undefined, string | null>;
@@ -698,7 +710,7 @@ export interface DropsTable {
   drawn_at: TimestampNullable;
   created_by: string | null;           // admin_users.id; null when a script created it
   created_at: TimestampDefault;
-  /** Migration 0021: DRAW (the default) or LIVE. The columns below are required for LIVE and NULL for DRAW, but where said. */
+  /** Migration 0021: DRAW (the default) or LIVE. The columns below are required for LIVE and NULL for DRAW, but where said (a draw's price, 0024). */
   mode: WithDefault<DropMode>;
   /** Who may enter a LIVE RELEASE: 0 (any account) to 3 (PALLADIUM); narrowed by live_access_models and access_collection_id. */
   live_min_tier: ColumnType<number | null, number | null | undefined, number | null>;
@@ -712,7 +724,10 @@ export interface DropsTable {
   pay_minutes: ColumnType<number | null, number | null | undefined, number | null>;
   /** Pieces per person: 1..5. */
   per_account: ColumnType<number | null, number | null | undefined, number | null>;
-  /** The price of a piece in minor units (cents), ≥ 0. */
+  /**
+   * The price of a piece in minor units (cents), ≥ 0. Migration 0024 (plan NOCTURNE, addition 5): a DRAW may carry one
+   * too, with its currency (both or neither), which the orders of its entries take.
+   */
   price_minor: ColumnType<number | null, number | null | undefined, number | null>;
   /** ISO 4217, three capital letters. */
   currency: ColumnType<string | null, string | null | undefined, string | null>;

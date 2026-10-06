@@ -118,16 +118,20 @@ export interface VerifyOutcome {
     category: { code: string; name: string };
     collection?: string;
     model: string;
+    /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), when it has one. */
+    modelVariant?: string;
     type: string;
+    /** The piece's free-text field set at issuance, labelled Size since NOCTURNE N1 (values written before as they are). */
     variant?: string;
     material: string;
     createdYear: number;
     productionDate?: string;
     care?: string;
-    /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`, when the model has one. AUTHENTIC* states only. */
+    /**
+     * The model's reference photograph (F-04): `/api/v1/media/<sha256>`, when the model has one. AUTHENTIC* states only.
+     * Never the piece's own (plan NOCTURNE, decision 9: the model's photograph is the reference for a piece).
+     */
     imageUrl?: string;
-    /** The photograph of this piece, taken at issuance (F-04): `/api/v1/media/<sha256>`, when it has one. AUTHENTIC* states only. */
-    photoUrl?: string;
     /** Its model's lookbook sheet (P-R02): the `<slug>` of `/verify/lookbook/<slug>`, when the model is PUBLIC there. AUTHENTIC* states only. */
     lookbook?: string;
     /** The year (UTC) its model was discontinued (P-R06), said « DISCONTINUED · <year> »; absent while it is not. AUTHENTIC* states only. */
@@ -261,12 +265,13 @@ interface Registered {
   categoryCode: string;
   categoryName: string;
   modelName: string;
+  /** NOCTURNE N1: the model's label among its variants, or null. */
+  modelVariant: string | null;
   modelType: string;
   care: string | null;
   collection: string | null;
-  /** media_objects.sha256 of the model's reference photograph and of the piece's own (F-04), or null. */
+  /** media_objects.sha256 of the model's reference photograph (F-04), or null. The piece's own is never read here (decision 9). */
   modelImage: string | null;
-  piecePhoto: string | null;
   /** The slug of its model's lookbook sheet when the model is PUBLIC there (P-R02), else null. */
   lookbook: string | null;
   /** When its model was discontinued (P-R06), else null. */
@@ -685,13 +690,13 @@ export class VerificationService {
         'cat.code as categoryCode',
         'cat.name as categoryName',
         'm.name as modelName',
+        'm.variant_label as modelVariant',
         'm.type as modelType',
         'm.care_instructions as care',
         'm.image_sha256 as modelImage',
         'm.slug as modelSlug',
         'm.lookbook as modelLookbook',
         'm.discontinued_at as modelDiscontinuedAt',
-        'p.photo_sha256 as piecePhoto',
         'col.name as collection',
         'c.id as codeId',
         'c.status as codeStatus',
@@ -721,11 +726,11 @@ export class VerificationService {
       categoryCode: r.categoryCode,
       categoryName: r.categoryName,
       modelName: r.modelName,
+      modelVariant: r.modelVariant,
       modelType: r.modelType,
       care: r.care,
       collection: r.collection,
       modelImage: r.modelImage,
-      piecePhoto: r.piecePhoto,
       lookbook: r.modelLookbook === 'PUBLIC' ? r.modelSlug : null,
       modelDiscontinuedAt: r.modelDiscontinuedAt,
       code:
@@ -842,14 +847,15 @@ export class VerificationService {
     }
 
     if (reg && AUTHENTIC_STATES.includes(state)) {
-      // The photographs (F-04) are shown on authentic results only: a caution or void result says nothing of the piece.
+      // The model's photograph (F-04) is shown on authentic results only: a caution or void result says nothing of the
+      // piece. The piece's own photograph is never sent (plan NOCTURNE, decision 9).
       const imageUrl = mediaUrl(reg.modelImage);
-      const photoUrl = mediaUrl(reg.piecePhoto);
       out.product = {
         productId: reg.productId,
         category: { code: reg.categoryCode, name: reg.categoryName },
         ...(reg.collection ? { collection: reg.collection } : {}),
         model: reg.modelName,
+        ...(reg.modelVariant ? { modelVariant: reg.modelVariant } : {}),
         type: reg.modelType,
         ...(reg.variant ? { variant: reg.variant } : {}),
         material: reg.material,
@@ -857,7 +863,6 @@ export class VerificationService {
         ...(reg.productionDate ? { productionDate: reg.productionDate } : {}),
         ...(reg.care ? { care: reg.care } : {}),
         ...(imageUrl ? { imageUrl } : {}),
-        ...(photoUrl ? { photoUrl } : {}),
         // Its model's lookbook sheet (P-R02): a RESERVED one is the owners' and stays unnamed here.
         ...(reg.lookbook ? { lookbook: reg.lookbook } : {}),
         // DISCONTINUED · <year> (P-R06): the piece verifies as before; its model is no longer made.

@@ -203,7 +203,8 @@ export type SegmentName = Pick<Segment, 'id' | 'name'>;
 /** What the builder names (GET /api/admin/segments/options). */
 export interface SegmentOptions {
   releases: { id: string; title: string; mode: DropMode; opensAt: Iso; answers: string[] | null }[];
-  models: { id: string; name: string; type: string }[];
+  /** `variant` (NOCTURNE N1): the model's label among its variants, or null. */
+  models: { id: string; name: string; type: string; variant?: string | null }[];
   collections: { id: string; name: string }[];
   sizes: string[];
   countries: string[];
@@ -410,7 +411,36 @@ export interface Model {
   careGuide: string | null;
   /** N2: its Shopify product id once pasted back (null: not linked), the sizes the export gives it, those linked. */
   shopify: { productId: string | null; variants: number; linked: number };
+  /** NOCTURNE N1: the main model it is a variant of (its id, name and label), or null. */
+  variantOf: { id: string; name: string; label: string | null } | null;
+  /** N1: its label among its model's dots (« Steel ») and the dot's colour (#RRGGBB); null for both on a model alone. */
+  variantLabel: string | null;
+  variantSwatch: string | null;
+  /** N1: a main model's variants, in the order they were added; none for a variant, nor for a model alone. */
+  variants: ModelVariant[];
   createdAt: Iso;
+}
+
+/** NOCTURNE N1: a variant of a model, as its main model's page lists it (VARIANTS). */
+export interface ModelVariant {
+  id: string;
+  name: string;
+  label: string | null;
+  swatch: string | null;
+  skuPrefix: string;
+  imageUrl: string | null;
+  lookbook: LookbookState;
+  slug: string | null;
+  active: boolean;
+}
+
+/** POST /api/admin/models/:id/variants (N1, ADD A VARIANT): its label, colour and SKU prefix; the main model's own label and colour while it has none. */
+export interface VariantInput {
+  label: string;
+  swatch: string;
+  skuPrefix: string;
+  mainLabel?: string;
+  mainSwatch?: string;
 }
 
 /** One photograph of a model's lookbook gallery (P-R02). */
@@ -449,6 +479,9 @@ export interface ModelChange {
   baseCurrency?: OrderCurrency | null;
   /** M6: '' clears the care guide. */
   careGuide?: string;
+  /** NOCTURNE N1: its label and dot's colour, sent together; null for both clears them (a model alone only). */
+  variantLabel?: string | null;
+  variantSwatch?: string | null;
 }
 
 /** N2: a size of a model as the Shopify product export gives it, and its variant id once pasted back. */
@@ -1109,7 +1142,8 @@ export interface Drop {
   id: string;
   title: string;
   description: string | null;
-  model: { id: string; name: string; type: string; active: boolean };
+  /** `variant` (NOCTURNE N1): the model's label among its variants, or null. */
+  model: { id: string; name: string; type: string; active: boolean; variant: string | null };
   quantity: number;
   opensAt: Iso;
   closesAt: Iso;
@@ -1117,6 +1151,9 @@ export interface Drop {
   purchaseWindowHours: number;
   /** P-X02: the early access before the opening, in hours (0, none, to 336). */
   earlyAccessHours: number;
+  /** NOCTURNE (addition 5): its price in minor units with its currency, or null for both (none): its orders take it. */
+  priceMinor: number | null;
+  currency: string | null;
   /** When PLATINE and PALLADIUM may reserve a place directly (from the publication at the earliest); null without an early access. */
   earlyAccessOpensAt: Iso | null;
   state: DropState;
@@ -1145,6 +1182,9 @@ export interface DropInput {
   purchaseWindowHours?: number;
   /** P-X02: hours of early access (48 when omitted, 0 for none). */
   earlyAccessHours?: number;
+  /** NOCTURNE (addition 5): its price in minor units with its currency, together; null for both: none. */
+  priceMinor?: number | null;
+  currency?: OrderCurrency | null;
 }
 
 export type DropChange = Partial<DropInput>;

@@ -104,6 +104,7 @@ import type {
   LifecycleSnapshot,
   Model,
   ModelChange,
+  VariantInput,
   OwnerList,
   ShopifyLink,
   ShopifyProduct,
@@ -496,6 +497,11 @@ export class AdminApi {
 
   updateModel(id: string, change: ModelChange): Promise<Model> {
     return this.patch(`/api/admin/models/${encodeURIComponent(id)}`, change);
+  }
+
+  /** NOCTURNE N1, ADD A VARIANT: a variant of the model, copied from it, with its own label, colour and SKU prefix. */
+  createVariant(id: string, input: VariantInput): Promise<Model> {
+    return this.post(`/api/admin/models/${encodeURIComponent(id)}/variants`, input);
   }
 
   // ── Shopify readiness (plan LIVE RELEASE+, N2 and N3): files in Shopify's formats, nothing sent to it ──

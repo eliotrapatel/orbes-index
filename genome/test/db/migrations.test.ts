@@ -1427,7 +1427,7 @@ describe('migrations', () => {
       SELECT from_status, to_status, actor_type, reason FROM product_status_history WHERE product_id = ${reserved}`.execute(t.db)).rows).toEqual([
       { from_status: null, to_status: 'RETIRED', actor_type: 'system', reason: 'Reserved identity retired: migration 0022 rolled back' },
     ]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0022_orders_stock', '0023_releases_collectors']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0022_orders_stock'));
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -1782,7 +1782,7 @@ describe('migrations', () => {
     expect((await state(open)).cancelled_at).not.toBeNull();
     expect(await state(ended)).toMatchObject({ cancelled_at: null, ended_at: expect.any(Date) });
     for (const id of [parent, otherParent]) expect((await state(id)).cancelled_at).toBeNull();
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0023_releases_collectors']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0023_releases_collectors'));
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -1865,6 +1865,137 @@ describe('migrations', () => {
     await expect(activity('2026-11-01T10:00:00Z', 'ZZ', 2)).rejects.toSatisfy((e) => isUniqueViolation(e));
   });
 
+  /** What names an object of 0024 in a snapshot: the variants' columns, constraints, indexes and trigger; a draw's price. */
+  const of0024 = (o: string) =>
+    /^table models variant_(of|label|swatch) /.test(o) ||
+    /^constraint models models_variant_/.test(o) ||
+    /^index CREATE (UNIQUE )?INDEX models_variant_/.test(o) ||
+    o === 'trigger models models_variant_rules' ||
+    /^constraint drops drops_draw_(fields|price) /.test(o);
+  /** A draw's row as 0015 to 0024 hold it (`extra`: more columns and their values, SQL). */
+  const drawDrop = async (model: string, extra: Record<string, string> = {}) => {
+    const seedHash = createHash('sha256').update(new Uint8Array(32)).digest();
+    const columns = Object.keys(extra);
+    return (
+      await sql<{ id: string }>`
+        INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash ${sql.raw(columns.map((c) => `, ${c}`).join(''))})
+        VALUES (${model}, 'Draw', 12, '2026-12-01T10:00:00Z', '2026-12-02T10:00:00Z', ${`v1.${'A'.repeat(16)}.${'B'.repeat(64)}`}, ${seedHash} ${sql.raw(columns.map((c) => `, ${extra[c]}`).join(''))})
+        RETURNING id`.execute(t.db)
+    ).rows[0].id;
+  };
+
+  it('0024 adds the variants of a model (variant_of, variant_label, variant_swatch and their rules) and a draw\'s price, and nothing else; down clears the draws\' prices and restores 0023 exactly, and up again', async () => {
+    const latest = await snapshot();
+    await sql`INSERT INTO categories (id, code, name) VALUES (16, 'N', 'Variants test') ON CONFLICT DO NOTHING`.execute(t.db);
+    const main = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix, variant_label, variant_swatch) VALUES (16, 'V', 'RING', 'VARDOWN', 'Steel', '#9D9B96') RETURNING id`.execute(t.db)).rows[0].id;
+    const variant = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix, variant_of, variant_label, variant_swatch) VALUES (16, 'V', 'RING', 'VARDOWN-BL', ${main}, 'Blue', '#16224A') RETURNING id`.execute(t.db)).rows[0].id;
+    // A draw priced: the previous image's drops_draw_fields refuses its price, so the down step clears it.
+    const priced = await drawDrop(variant, { price_minor: '420000', currency: `'EUR'` });
+    const { with: withIt, without: before } = await rollBackTo('0024_model_variants');
+    const added = withIt.filter((o) => !before.includes(o));
+    const removed = before.filter((o) => !withIt.includes(o));
+    expect(added.filter((o) => !of0024(o))).toEqual([]);
+    expect(withIt.filter((o) => !of0024(o))).toEqual(before.filter((o) => !of0024(o)));
+    // drops_draw_fields of 0021, its price included; 0024's without it, and a draw's price both or neither.
+    expect(removed).toHaveLength(1);
+    expect(removed[0]).toMatch(/^constraint drops drops_draw_fields CHECK .*\(price_minor IS NULL\) AND \(currency IS NULL\)/);
+    const fields = added.find((o) => o.startsWith('constraint drops drops_draw_fields '))!;
+    expect(fields).toBeDefined();
+    expect(fields).not.toMatch(/price_minor|currency/);
+    expect(fields).toMatch(/per_account IS NULL/);
+    expect(added.some((o) => /^constraint drops drops_draw_price CHECK \(\(\(mode = 'LIVE'::text\) OR \(\(price_minor IS NULL\) = \(currency IS NULL\)\)\)\)$/.test(o))).toBe(true);
+    expect(added.filter((o) => o.startsWith('table '))).toEqual(['table models variant_label text YES ', 'table models variant_of uuid YES ', 'table models variant_swatch text YES ']);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger models models_variant_rules']);
+    for (const c of [
+      /^constraint models models_variant_of_fkey FOREIGN KEY \(variant_of\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint models models_variant_label_check CHECK \(\(\(\(length\(variant_label\) >= 1\) AND \(length\(variant_label\) <= 40\)\) AND \(variant_label = btrim\(variant_label\)\)\)\)$/,
+      /^constraint models models_variant_swatch_check CHECK \(\(variant_swatch ~ '\^#\[0-9A-F\]\{6\}\$'::text\)\)$/,
+      /^constraint models models_variant_self CHECK \(\(variant_of <> id\)\)$/,
+      /^constraint models models_variant_labelled CHECK \(\(\(variant_of IS NULL\) OR \(variant_label IS NOT NULL\)\)\)$/,
+      /^constraint models models_variant_dot CHECK \(\(\(variant_label IS NULL\) = \(variant_swatch IS NULL\)\)\)$/,
+      /^index CREATE INDEX models_variant_of_idx ON public\.models USING btree \(variant_of\)$/,
+      /^index CREATE UNIQUE INDEX models_variant_label_key ON public\.models USING btree \(COALESCE\(variant_of, id\), lower\(variant_label\)\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    // Down: the draw's price cleared; the variant a model of its own (its row kept), the rules' function gone.
+    expect((await sql<{ price_minor: number | null; currency: string | null }>`SELECT price_minor, currency FROM drops WHERE id = ${priced}`.execute(t.db)).rows[0]).toEqual({ price_minor: null, currency: null });
+    expect((await sql<{ n: number }>`SELECT count(*)::int AS n FROM models WHERE id IN (${main}, ${variant})`.execute(t.db)).rows[0].n).toBe(2);
+    expect((await sql<{ n: number }>`SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'orbes_models_variant_rules'`.execute(t.db)).rows[0].n).toBe(0);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0024_model_variants']);
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0024: a variant names its main model, never a variant nor itself; a label of 1 to 40 characters on a variant and on a model with variants, unique among them whatever the case, with its colour #RRGGBB; a draw priced both or neither, a LIVE RELEASE as before', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (15, 'M', 'Variants checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const model = async (sku: string, columns: Record<string, string> = {}) => {
+      const names = Object.keys(columns);
+      return (
+        await sql.raw<{ id: string }>(
+          `INSERT INTO models (category_id, name, type, sku_prefix${names.map((c) => `, ${c}`).join('')}) VALUES (15, 'MONOLITHE', 'BRACELET', '${sku}'${names.map((c) => `, ${columns[c]}`).join('')}) RETURNING id`,
+        ).execute(t.db)
+      ).rows[0].id;
+    };
+    const dot = (label: string, swatch: string, of?: string) => ({ variant_label: `'${label}'`, variant_swatch: `'${swatch}'`, ...(of ? { variant_of: `'${of}'` } : {}) });
+
+    const steel = await model('VCHK-ST', dot('Steel', '#9D9B96'));
+    const plain = await model('VCHK-PL');
+    // A main model carries its own label; a variant its label and colour, together, in their forms.
+    await check(model('VCHK-X1', dot('Blue', '#16224A', plain)), 'the main model without its label', 'models_variant_main_labelled');
+    await check(model('VCHK-X2', { variant_of: `'${steel}'` }), 'a variant without its label', 'models_variant_labelled');
+    await check(model('VCHK-X3', { variant_of: `'${steel}'`, variant_label: `'Blue'` }), 'a label without its colour', 'models_variant_dot');
+    await check(model('VCHK-X4', { variant_swatch: `'#16224A'` }), 'a colour without its label', 'models_variant_dot');
+    for (const [i, [label, swatch]] of [[' Blue', '#16224A'], ['', '#16224A'], ['x'.repeat(41), '#16224A'], ['Blue', '#16224a'], ['Blue', '16224A'], ['Blue', '#16224']].entries()) {
+      await check(model(`VCHK-X5-${i}`, dot(label, swatch, steel)), `${label} ${swatch}`);
+    }
+    const blue = await model('VCHK-BL', dot('Blue', '#16224A', steel));
+    await model('VCHK-GD', dot('x'.repeat(40), '#B88A3A', steel));
+    // One label per dot of a model and its variants, whatever its case; another model's variants may use it.
+    await expect(model('VCHK-B2', dot('blue', '#16224A', steel))).rejects.toSatisfy((e) => isUniqueViolation(e, 'models_variant_label_key'));
+    await expect(model('VCHK-S2', dot('STEEL', '#9D9B96', steel))).rejects.toSatisfy((e) => isUniqueViolation(e, 'models_variant_label_key'));
+    const other = await model('VCHK-O', dot('Steel', '#9D9B96'));
+    await model('VCHK-OB', dot('Blue', '#16224A', other));
+    // Never chained: a variant's main model is no variant; a model with variants never becomes one.
+    await check(model('VCHK-X6', dot('Night', '#0A0A0A', blue)), 'a variant of a variant', 'models_variant_no_chain');
+    await check(run(`UPDATE models SET variant_of = '${other}' WHERE id = '${steel}'`), 'a main model made a variant', 'models_variant_no_chain');
+    await check(run(`UPDATE models SET variant_of = '${blue}' WHERE id = '${other}'`), 'onto a variant', 'models_variant_no_chain');
+    // Never its own; an unknown main model is a foreign key's refusal.
+    const alone = await model('VCHK-AL', dot('Alone', '#A7A29A'));
+    await check(run(`UPDATE models SET variant_of = '${alone}' WHERE id = '${alone}'`), 'its own variant', 'models_variant_self');
+    await expect(run(`UPDATE models SET variant_of = '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6' WHERE id = '${alone}'`)).rejects.toSatisfy((e) => isForeignKeyViolation(e, 'models_variant_of_fkey'));
+    // A label changes; it is never cleared on a variant, nor on a model with variants; a model alone may drop its own.
+    await run(`UPDATE models SET variant_label = 'Silver', variant_swatch = '#D7D5D0' WHERE id = '${steel}'`);
+    await run(`UPDATE models SET variant_label = 'Night blue' WHERE id = '${blue}'`);
+    await check(run(`UPDATE models SET variant_label = NULL, variant_swatch = NULL WHERE id = '${blue}'`), 'a variant unlabelled', 'models_variant_labelled');
+    await check(run(`UPDATE models SET variant_label = NULL, variant_swatch = NULL WHERE id = '${steel}'`), 'a main model unlabelled', 'models_variant_main_labelled');
+    await run(`UPDATE models SET variant_label = NULL, variant_swatch = NULL WHERE id = '${alone}'`);
+    // A main model is kept while a variant names it.
+    await expect(run(`DELETE FROM models WHERE id = '${steel}'`)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+
+    // A draw's price: both or neither, a whole amount of 0 or more in three capital letters; nothing else of a LIVE RELEASE.
+    await drawDrop(steel);
+    await drawDrop(steel, { price_minor: '420000', currency: `'EUR'` });
+    await check(drawDrop(steel, { price_minor: '420000' }), 'a price without its currency', 'drops_draw_price');
+    await check(drawDrop(steel, { currency: `'EUR'` }), 'a currency without its price', 'drops_draw_price');
+    await check(drawDrop(steel, { price_minor: '-1', currency: `'EUR'` }), 'a negative price', 'drops_price_minor_check');
+    await check(drawDrop(steel, { price_minor: '420000', currency: `'eur'` }), 'a currency in small letters', 'drops_currency_check');
+    for (const [column, value] of [['per_account', '1'], ['quantity_line', `'12 PIECES'`], ['live_min_tier', '0'], ['announce_at', `'2026-11-01T10:00:00Z'`]]) {
+      await check(drawDrop(steel, { price_minor: '420000', currency: `'EUR'`, [column]: value }), `a draw with ${column}`, 'drops_draw_fields');
+    }
+    // A LIVE RELEASE keeps its price required.
+    await expect(liveDrop(steel)).resolves.toEqual(expect.any(String));
+    await check(
+      (async () => {
+        const id = await liveDrop(steel);
+        await run(`UPDATE drops SET price_minor = NULL, currency = NULL WHERE id = '${id}'`);
+      })(),
+      'a LIVE RELEASE without its price',
+      'drops_live_fields',
+    );
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -1916,6 +2047,8 @@ describe('migrations', () => {
       // LIVE RELEASE+ (plan of 2026-10-04): orders, stock and operations; releases and collectors.
       '0022_orders_stock',
       '0023_releases_collectors',
+      // NOCTURNE (plan of 2026-10-05): the variants of a model and a draw's price.
+      '0024_model_variants',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

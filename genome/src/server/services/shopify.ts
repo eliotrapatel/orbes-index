@@ -11,6 +11,12 @@
  *                        model and size, services/stock.ts), naturally sorted, ONE SIZE first; a model without a SKU
  *                        yet is in one size. Every product is imported as a draft, not published: Shopify is not decided
  *                        (choice 9), the owner publishes there. A model inactive or discontinued is `archived`.
+ *                        A model and its variants (plan NOCTURNE, N1) are ONE product, the main model's (its title, type
+ *                        and handle): Option1 « Variant » (each model's label) and Option2 « Size » (its sizes; left out
+ *                        when every model of it is in one size), each model of it priced in the store's currency in its
+ *                        order (the main model first, then its variants as they were added), each with its own SKUs,
+ *                        base price and photographs, its cover as the image of its variants (« Variant image URL »);
+ *                        archived once none of them is active.
  *   the ids pasted back  N2: once imported, the product's id and each variant's, from Shopify's admin, are kept on the
  *                        model's SKUs (`skus.shopify_product_id`, one product per model; `skus.shopify_variant_id`, unique):
  *                        both sides are linked. A size of the export without its SKU yet has it created (ensureSku).
@@ -52,11 +58,14 @@ export const SHOPIFY_PRODUCT_COLUMNS = Object.freeze([
   'SKU',
   'Option1 name',
   'Option1 value',
+  'Option2 name',
+  'Option2 value',
   'Price',
   'Requires shipping',
   'Product image URL',
   'Image position',
   'Image alt text',
+  'Variant image URL',
 ] as const);
 
 /** The order CSV's columns ORBES fills, in the order of Shopify's published order format. */
@@ -101,6 +110,8 @@ export const SHOPIFY_ORDER_COLUMNS = Object.freeze([
 export const SHOPIFY_VENDOR = 'ORBES';
 /** The option a model's sizes are, and Shopify's single variant of a model in one size. */
 export const SHOPIFY_SIZE_OPTION = 'Size';
+/** NOCTURNE N1: the option a model's variants are (each its label), before its sizes. */
+export const SHOPIFY_VARIANT_OPTION = 'Variant';
 export const SHOPIFY_SINGLE_OPTION = Object.freeze({ name: 'Title', value: 'Default Title' });
 /** The longest period one order export covers, in days. */
 export const SHOPIFY_PERIOD_MAX_DAYS = 366;
@@ -238,50 +249,71 @@ export class ShopifyExportService {
 
   // ── The product export (N2) ──────────────────────────────────────────────
 
-  /** Every model priced in `currency`, as Shopify's product CSV (see the header). */
+  /** Every model priced in `currency`, as Shopify's product CSV (see the header): a model and its variants one product. */
   async productCsv(currency: string): Promise<{ filename: string; contentType: string; body: string }> {
     if (!(ORDER_CURRENCIES as readonly string[]).includes(currency)) throw validationError(`The store's currency is one of ${ORDER_CURRENCIES.join(', ')}.`);
-    const models = await this.db
+    const priced = await this.db
       .selectFrom('models')
-      .select(['id', 'name', 'type', 'sku_prefix', 'slug', 'active', 'image_sha256', 'base_price_minor'])
+      .select(['id', 'name', 'type', 'sku_prefix', 'slug', 'active', 'image_sha256', 'base_price_minor', 'variant_of', 'variant_label', 'created_at'])
       .where('base_currency', '=', currency)
       .where('base_price_minor', 'is not', null)
       .orderBy('name')
       .orderBy('id')
       .execute();
-    const ids = models.map((m) => m.id);
+    // N1: each product is a main model's, with its variants; the main model is read even when it is not priced here.
+    const roots = [...new Set(priced.map((m) => m.variant_of ?? m.id))];
+    const mains = roots.length ? await this.db.selectFrom('models').select(['id', 'name', 'type']).where('id', 'in', roots).execute() : [];
+    const grouped = new Set(
+      roots.length ? (await this.db.selectFrom('models').select('variant_of').where('variant_of', 'in', roots).execute()).map((r) => r.variant_of!) : [],
+    );
+    const ids = priced.map((m) => m.id);
     const skus = ids.length ? await this.db.selectFrom('skus').select(['model_id', 'size_label', 'code', 'shopify_variant_id']).where('model_id', 'in', ids).execute() : [];
     const gallery = ids.length ? await this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt']).where('model_id', 'in', ids).orderBy('model_id').orderBy('position').execute() : [];
     const handles = await handlesOf(this.db);
     const rows: string[][] = [];
-    for (const m of models) {
-      const handle = handles.get(m.id)!;
-      const variants = variantsOf(m.sku_prefix, skus.filter((k) => k.model_id === m.id));
-      const single = variants.length === 1 && variants[0].size === null;
-      const alt = `The ${m.name} ${m.type} model, photographed by ORBES`;
-      const images = [
-        ...(mediaUrl(m.image_sha256) ? [{ url: mediaUrl(m.image_sha256)!, alt }] : []),
-        ...gallery.filter((g) => g.model_id === m.id && mediaUrl(g.sha256)).map((g) => ({ url: mediaUrl(g.sha256)!, alt: g.alt ?? alt })),
-      ];
+    const done = new Set<string>();
+    for (const first of priced) {
+      const root = first.variant_of ?? first.id;
+      if (done.has(root)) continue;
+      done.add(root);
+      const main = mains.find((m) => m.id === root)!;
+      const group = grouped.has(root);
+      // The models of the product in their order: the main model first, then its variants as they were added.
+      const members = priced
+        .filter((m) => (m.variant_of ?? m.id) === root)
+        .sort((a, b) => (a.id === root ? -1 : b.id === root ? 1 : a.created_at.getTime() - b.created_at.getTime() || (a.id < b.id ? -1 : 1)));
+      const variants = members.flatMap((m) => variantsOf(m.sku_prefix, skus.filter((k) => k.model_id === m.id)).map((v) => ({ model: m, ...v })));
+      const single = !group && variants.length === 1 && variants[0].size === null;
+      const sized = group && variants.some((v) => v.size !== null);
+      const altOf = (m: (typeof members)[number]) =>
+        `The ${m.name} ${m.type} model${group && m.variant_label ? ` in ${m.variant_label.toLowerCase()}` : ''}, photographed by ORBES`;
+      const images = members.flatMap((m) => [
+        ...(mediaUrl(m.image_sha256) ? [{ url: mediaUrl(m.image_sha256)!, alt: altOf(m) }] : []),
+        ...gallery.filter((g) => g.model_id === m.id && mediaUrl(g.sha256)).map((g) => ({ url: mediaUrl(g.sha256)!, alt: g.alt ?? altOf(m) })),
+      ]);
       const lines = Math.max(variants.length, images.length);
       for (let i = 0; i < lines; i++) {
         const v = variants[i];
         const img = images[i];
+        const cover = v && group ? mediaUrl(v.model.image_sha256) : null;
         const row: Record<(typeof SHOPIFY_PRODUCT_COLUMNS)[number], string> = {
-          Title: i === 0 ? m.name : '',
-          'URL handle': handle,
+          Title: i === 0 ? main.name : '',
+          'URL handle': handles.get(root)!,
           Vendor: i === 0 ? SHOPIFY_VENDOR : '',
-          Type: i === 0 ? m.type : '',
+          Type: i === 0 ? main.type : '',
           'Published on online store': i === 0 ? 'false' : '',
-          Status: i === 0 ? (m.active ? 'draft' : 'archived') : '',
+          Status: i === 0 ? (members.some((m) => m.active) ? 'draft' : 'archived') : '',
           SKU: v ? v.sku : '',
-          'Option1 name': i === 0 ? (single ? SHOPIFY_SINGLE_OPTION.name : SHOPIFY_SIZE_OPTION) : '',
-          'Option1 value': v ? (single ? SHOPIFY_SINGLE_OPTION.value : (v.size ?? ONE_SIZE_LABEL)) : '',
-          Price: v ? majorUnits(m.base_price_minor!) : '',
+          'Option1 name': i === 0 ? (group ? SHOPIFY_VARIANT_OPTION : single ? SHOPIFY_SINGLE_OPTION.name : SHOPIFY_SIZE_OPTION) : '',
+          'Option1 value': v ? (group ? (v.model.variant_label ?? v.model.name) : single ? SHOPIFY_SINGLE_OPTION.value : (v.size ?? ONE_SIZE_LABEL)) : '',
+          'Option2 name': i === 0 && sized ? SHOPIFY_SIZE_OPTION : '',
+          'Option2 value': v && sized ? (v.size ?? ONE_SIZE_LABEL) : '',
+          Price: v ? majorUnits(v.model.base_price_minor!) : '',
           'Requires shipping': v ? 'true' : '',
           'Product image URL': img ? `${this.publicOrigin}${img.url}` : '',
           'Image position': img ? String(i + 1) : '',
           'Image alt text': img ? img.alt : '',
+          'Variant image URL': cover ? `${this.publicOrigin}${cover}` : '',
         };
         rows.push(SHOPIFY_PRODUCT_COLUMNS.map((c) => row[c]));
       }
@@ -293,13 +325,14 @@ export class ShopifyExportService {
   /** A model's Shopify product: its handle, its product id, its sizes as the export gives them with their variant ids. */
   async product(modelId: string): Promise<ShopifyProduct> {
     const id = modelKey(modelId);
-    const m = await this.db.selectFrom('models').select(['id', 'name', 'sku_prefix']).where('id', '=', id).executeTakeFirst();
+    const m = await this.db.selectFrom('models').select(['id', 'name', 'sku_prefix', 'variant_of']).where('id', '=', id).executeTakeFirst();
     if (!m) throw modelNotFound();
     const skus = await this.db.selectFrom('skus').select(['size_label', 'code', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', id).execute();
     return {
       model: { id: m.id, name: m.name, skuPrefix: m.sku_prefix },
-      // The handle the product export writes for this model, so the console names the product Shopify imported.
-      handle: (await handlesOf(this.db)).get(m.id)!,
+      // The handle the product export writes for this model (a variant's: its main model's, N1), so the console names the
+      // product Shopify imported.
+      handle: (await handlesOf(this.db)).get(m.variant_of ?? m.id)!,
       productId: skus.find((k) => k.shopify_product_id !== null)?.shopify_product_id ?? null,
       variants: variantsOf(m.sku_prefix, skus),
     };
@@ -308,8 +341,8 @@ export class ShopifyExportService {
   /**
    * The ids pasted back from Shopify (see the header): the product's on every SKU of the model, each size's variant on
    * its SKU. Every size given is one of the export's (400 otherwise), once; a variant needs the product (400). 409
-   * SHOPIFY_PRODUCT_TAKEN when another model's SKUs carry that product, SHOPIFY_VARIANT_TAKEN when another SKU carries
-   * that variant. The model's row first (FOR NO KEY UPDATE: pieces and SKUs of it may still be written), then the
+   * SHOPIFY_PRODUCT_TAKEN when the SKUs of a model outside its group carry that product (N1: a model and its variants
+   * share theirs), SHOPIFY_VARIANT_TAKEN when another SKU carries that variant. The model's row first (FOR NO KEY UPDATE: pieces and SKUs of it may still be written), then the
    * product's advisory lock (ADVISORY_LOCK.SHOPIFY_PRODUCT: no unique index keeps one product to one model), then its
    * SKUs by id, the audit last.
    */
@@ -325,8 +358,11 @@ export class ShopifyExportService {
     if (productId === null && variantIds.length > 0) throw validationError('A variant id is given with its product id.');
     try {
       await inTransaction(this.db, async (tx) => {
-        const m = await tx.selectFrom('models').select(['id', 'sku_prefix']).where('id', '=', id).forNoKeyUpdate().executeTakeFirst();
+        const m = await tx.selectFrom('models').select(['id', 'sku_prefix', 'variant_of']).where('id', '=', id).forNoKeyUpdate().executeTakeFirst();
         if (!m) throw modelNotFound();
+        // N1: the models of its product, a main model and its variants.
+        const root = m.variant_of ?? m.id;
+        const group = (await tx.selectFrom('models').select('id').where((eb) => eb.or([eb('id', '=', root), eb('variant_of', '=', root)])).execute()).map((g) => g.id);
         const before = await tx.selectFrom('skus').select(['id', 'size_label', 'code', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', id).execute();
         const known = variantsOf(m.sku_prefix, before);
         for (const v of given) {
@@ -335,7 +371,7 @@ export class ShopifyExportService {
         if (productId !== null) {
           // Two links of one product run one after the other, so the check below sees the other's SKUs.
           await advisoryXactLock(tx, ADVISORY_LOCK.SHOPIFY_PRODUCT, lockKeyOf(productId));
-          const other = await tx.selectFrom('skus').select('id').where('shopify_product_id', '=', productId).where('model_id', '<>', id).executeTakeFirst();
+          const other = await tx.selectFrom('skus').select('id').where('shopify_product_id', '=', productId).where('model_id', 'not in', group).executeTakeFirst();
           if (other) throw shopifyProductTaken();
         }
         // A size of the export without its SKU yet (a model in one size never issued nor sold) has it now, given or not:

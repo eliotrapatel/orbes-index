@@ -331,6 +331,8 @@ describe('LIVE RELEASES: the customer API and real time', () => {
         phase: 'ENDED',
         title: 'MONOLITHE — LIVE',
         name: 'MONOLITHE',
+        // NOCTURNE N1: the model's label among its variants; none here.
+        variant: null,
         type: 'RING',
         collection: null,
         description: 'Cast in Paris.',
@@ -357,7 +359,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const later = await release(h, f, { inMinutes: 120, minTier: 2 });
       const soon = await release(h, f, { inMinutes: 4, sizes: [{ label: '50', stock: 1 }, { label: '52', stock: 3 }], addons: [{ label: 'ENGRAVING', line: 'Your initials', priceMinor: 15_000 }], perAccount: 2 });
       const banner = safeJson(await c.get('/api/v1/live/next')) as { release: Record<string, unknown> };
-      expect(banner.release).toEqual({ id: soon.id, phase: 'ROOM', name: 'MONOLITHE', nameAt: expect.any(String), roomOpensAt: expect.any(String), opensAt: expect.any(String), closesAt: expect.any(String) });
+      expect(banner.release).toEqual({ id: soon.id, phase: 'ROOM', name: 'MONOLITHE', variant: null, nameAt: expect.any(String), roomOpensAt: expect.any(String), opensAt: expect.any(String), closesAt: expect.any(String) });
       const list = safeJson(await c.get('/api/v1/live')) as { releases: Record<string, unknown>[] };
       expect(list.releases.map((x) => x.id)).toEqual([soon.id, later.id]);
       expect(list.releases[1]).toMatchObject({ kind: 'LIVE', phase: 'ANNOUNCED', access: { minTier: 2, text: 'owners from PLATINE' }, perAccount: 1, currency: 'EUR' });

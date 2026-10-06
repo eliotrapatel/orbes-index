@@ -4,7 +4,10 @@
  *
  * A drop is created by the console (OPERATOR) as a DRAFT, edited freely until
  * it is published; published, only its description changes, and it is
- * cancelled only before its draw. Its state is computed (`dropState`):
+ * cancelled only before its draw. Its price (plan NOCTURNE, addition 5;
+ * migration 0024) is optional, with its currency: shown on its card and page,
+ * and taken by the order of each entry Client Services confirms
+ * (orderForDrawEntry). Its state is computed (`dropState`):
  *
  *   DRAFT      not published: nowhere but the console;
  *   UPCOMING   published, before `opens_at` (its early access, P-X02, at
@@ -95,7 +98,7 @@ import type { AuditService } from './audit.js';
 import { CLUB_TIER_THRESHOLDS, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
-import { orderForDrawEntry } from './orders.js';
+import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, orderForDrawEntry } from './orders.js';
 import { readActingAccount } from './ownership.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -122,6 +125,12 @@ export const EARLY_ACCESS_HOURS = Object.freeze({ min: 0, max: 336, default: 48 
 export const EARLY_ACCESS_MIN_TIER: ClubTier = 2;
 /** The console's note on an entry it concludes (CONFIRMED, LAPSED). */
 export const DROP_NOTE_MAX = 500;
+/**
+ * A draw's price (plan NOCTURNE, addition 5; migration 0024): 0 to 1 000 000.00 in minor units (an order's bound,
+ * services/orders.ts ORDER_AMOUNT_MAX_MINOR), in one of the house's currencies (ORDER_CURRENCIES), or none. Shown on
+ * the draw's card and page; an order of the draw takes it.
+ */
+export const DRAW_PRICE_MAX_MINOR = 100_000_000;
 /** The public list of drops: the latest by their opening. */
 export const DROP_LIST_LIMIT = 50;
 /** An account's entries in the club's status: the latest drops first. */
@@ -296,6 +305,9 @@ export interface CreateDropInput {
   purchaseWindowHours?: number;
   /** P-X02: hours of early access before `opensAt` (EARLY_ACCESS_HOURS; 48 when omitted, 0 for none). */
   earlyAccessHours?: number;
+  /** NOCTURNE (addition 5): its price in minor units with its currency, both or neither (null: none, the default). */
+  priceMinor?: number | null;
+  currency?: string | null;
 }
 
 /** A change of a drop: any field while it is a DRAFT; once published, `description` only. */
@@ -308,6 +320,9 @@ export interface DropChange {
   closesAt?: Date;
   purchaseWindowHours?: number;
   earlyAccessHours?: number;
+  /** Its price and currency, given together; null for both clears it. */
+  priceMinor?: number | null;
+  currency?: string | null;
 }
 
 export function cleanTitle(v: unknown): string {
@@ -346,6 +361,22 @@ function cleanEarlyAccess(v: unknown): number {
   return v;
 }
 
+/**
+ * A draw's price as the console gives it (NOCTURNE, addition 5): a whole amount of minor units (0 to
+ * DRAW_PRICE_MAX_MINOR) with one of the house's currencies (ORDER_CURRENCIES), or null for both (no price); one without
+ * the other is refused.
+ */
+export function cleanDrawPrice(minor: unknown, currency: unknown): { minor: number; currency: string } | null {
+  const none = (v: unknown) => v === null || v === undefined || v === '';
+  if (none(minor) && none(currency)) return null;
+  if (none(minor) || none(currency)) throw validationError('A draw’s price is given with its currency, or both are cleared.');
+  if (typeof minor !== 'number' || !Number.isInteger(minor) || minor < 0 || minor > Math.min(DRAW_PRICE_MAX_MINOR, ORDER_AMOUNT_MAX_MINOR)) {
+    throw validationError('A draw’s price is 0 to 1 000 000.00, in cents.');
+  }
+  if (typeof currency !== 'string' || !(ORDER_CURRENCIES as readonly string[]).includes(currency)) throw validationError(`A draw is priced in ${ORDER_CURRENCIES.join(', ')}.`);
+  return { minor, currency };
+}
+
 export function cleanTime(v: unknown, label: string): Date {
   const d = v instanceof Date ? v : new Date(Number.NaN);
   if (Number.isNaN(d.getTime())) throw validationError(`${label} must be a date and time.`);
@@ -370,6 +401,8 @@ export interface PublicDropModel {
   imageUrl: string | null;
   /** The `<slug>` of `/verify/lookbook/<slug>` when the model is PUBLIC in the lookbook, else null. */
   lookbook: string | null;
+  /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), or null for a model without one. */
+  variant: string | null;
 }
 
 /** One drop of the public list (GET /api/v1/drops). */
@@ -387,6 +420,9 @@ export interface DropCard {
   earlyAccessOpensAt: Date | null;
   /** Whether direct reservations are open now (inEarlyAccess). */
   earlyAccessOpen: boolean;
+  /** NOCTURNE (addition 5): the price of a piece in minor units, with its currency; null for both when ORBES gave none. */
+  priceMinor: number | null;
+  currency: string | null;
 }
 
 /** A drop's page (GET /api/v1/drops/:id): its rule's commitment, then, once drawn, its seed and how many entries took part. */
@@ -445,13 +481,16 @@ export interface AdminDrop {
   id: string;
   title: string;
   description: string | null;
-  model: { id: string; name: string; type: string; active: boolean };
+  model: { id: string; name: string; type: string; active: boolean; variant: string | null };
   quantity: number;
   opensAt: Date;
   closesAt: Date;
   purchaseWindowHours: number;
   /** P-X02: hours of early access before `opensAt` (0: none). */
   earlyAccessHours: number;
+  /** NOCTURNE (addition 5): its price in minor units with its currency, or null for both (none). */
+  priceMinor: number | null;
+  currency: string | null;
   /** When direct reservations begin (earlyAccessOpensAt: a DRAFT's from its opening, a published drop's not before its publication); null without one. */
   earlyAccessOpensAt: Date | null;
   state: DropState;
@@ -676,6 +715,7 @@ type DropReadRow = DropRow & {
   model_image: string | null;
   model_slug: string | null;
   model_lookbook: string;
+  model_variant: string | null;
   collection: string | null;
 };
 
@@ -923,6 +963,7 @@ export class DropService {
     checkWindow(opensAt, closesAt);
     const hours = cleanWindow(input.purchaseWindowHours ?? PURCHASE_WINDOW_HOURS.default);
     const early = cleanEarlyAccess(input.earlyAccessHours ?? EARLY_ACCESS_HOURS.default);
+    const price = cleanDrawPrice(input.priceMinor ?? null, input.currency ?? null);
     const modelId = knownId(input.modelId, () => notFound('Model', 'MODEL_NOT_FOUND'));
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
@@ -946,6 +987,8 @@ export class DropService {
           closes_at: closesAt,
           purchase_window_hours: hours,
           early_access_hours: early,
+          price_minor: price?.minor ?? null,
+          currency: price?.currency ?? null,
           seed_enc: sealed,
           seed_hash: seedHash,
           created_by: actor.id!,
@@ -966,6 +1009,8 @@ export class DropService {
             closesAt: closesAt.toISOString(),
             purchaseWindowHours: hours,
             earlyAccessHours: early,
+            priceMinor: price?.minor ?? null,
+            currency: price?.currency ?? null,
             seedHash: toHex(seedHash),
           },
         },
@@ -996,7 +1041,7 @@ export class DropService {
         after[key] = shown(to);
       };
       if (change.description !== undefined) note('description', 'description', d.description, cleanDescription(change.description), (v) => describedAs((v as string | null) ?? null));
-      const structural = (['modelId', 'title', 'quantity', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours'] as const).filter((k) => change[k] !== undefined);
+      const structural = (['modelId', 'title', 'quantity', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'priceMinor', 'currency'] as const).filter((k) => change[k] !== undefined);
       if (structural.length > 0) {
         if (d.cancelled_at) throw dropCancelled();
         if (d.published_at) throw dropPublished();
@@ -1004,6 +1049,11 @@ export class DropService {
         if (change.quantity !== undefined) note('quantity', 'quantity', d.quantity, cleanQuantity(change.quantity));
         if (change.purchaseWindowHours !== undefined) note('purchaseWindowHours', 'purchase_window_hours', d.purchase_window_hours, cleanWindow(change.purchaseWindowHours));
         if (change.earlyAccessHours !== undefined) note('earlyAccessHours', 'early_access_hours', d.early_access_hours, cleanEarlyAccess(change.earlyAccessHours));
+        if (change.priceMinor !== undefined || change.currency !== undefined) {
+          const price = cleanDrawPrice(change.priceMinor ?? null, change.currency ?? null);
+          note('priceMinor', 'price_minor', d.price_minor, price?.minor ?? null);
+          note('currency', 'currency', d.currency, price?.currency ?? null);
+        }
         const opensAt = change.opensAt !== undefined ? cleanTime(change.opensAt, 'The opening') : d.opens_at;
         const closesAt = change.closesAt !== undefined ? cleanTime(change.closesAt, 'The close') : d.closes_at;
         checkWindow(opensAt, closesAt);
@@ -1284,7 +1334,16 @@ export class DropService {
       .innerJoin('models as m', 'm.id', 'd.model_id')
       .leftJoin('collections as c', 'c.id', 'm.collection_id')
       .selectAll('d')
-      .select(['m.name as model_name', 'm.type as model_type', 'm.active as model_active', 'm.image_sha256 as model_image', 'm.slug as model_slug', 'm.lookbook as model_lookbook', 'c.name as collection']);
+      .select([
+        'm.name as model_name',
+        'm.type as model_type',
+        'm.active as model_active',
+        'm.image_sha256 as model_image',
+        'm.slug as model_slug',
+        'm.lookbook as model_lookbook',
+        'm.variant_label as model_variant',
+        'c.name as collection',
+      ]);
   }
 
   private card(r: DropReadRow, now: Date): DropCard {
@@ -1298,6 +1357,7 @@ export class DropService {
         collection: r.collection,
         imageUrl: mediaUrl(r.model_image),
         lookbook: r.model_lookbook === 'PUBLIC' && r.model_slug ? r.model_slug : null,
+        variant: r.model_variant,
       },
       quantity: r.quantity,
       opensAt: r.opens_at,
@@ -1305,6 +1365,8 @@ export class DropService {
       earlyAccessHours: r.early_access_hours,
       earlyAccessOpensAt: earlyAccessOpensAt(r),
       earlyAccessOpen: inEarlyAccess(r, now),
+      priceMinor: r.price_minor !== null && r.currency !== null ? r.price_minor : null,
+      currency: r.price_minor !== null && r.currency !== null ? r.currency : null,
     };
   }
 
@@ -1350,12 +1412,14 @@ export class DropService {
       id: r.id,
       title: r.title,
       description: r.description,
-      model: { id: r.model_id, name: r.model_name, type: r.model_type, active: r.model_active },
+      model: { id: r.model_id, name: r.model_name, type: r.model_type, active: r.model_active, variant: r.model_variant },
       quantity: r.quantity,
       opensAt: r.opens_at,
       closesAt: r.closes_at,
       purchaseWindowHours: r.purchase_window_hours,
       earlyAccessHours: r.early_access_hours,
+      priceMinor: r.price_minor !== null && r.currency !== null ? r.price_minor : null,
+      currency: r.price_minor !== null && r.currency !== null ? r.currency : null,
       earlyAccessOpensAt: earlyAccessOpensAt(r),
       state: dropState(r, now),
       publishedAt: r.published_at,

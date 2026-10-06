@@ -40,6 +40,16 @@
  * `model.update` (the care guide as its length and SHA-256, like a story). `shopify` says how far the model is linked
  * to its Shopify product (services/shopify.ts: the ids pasted back).
  *
+ * VARIANTS (plan NOCTURNE, N1, migration 0024): a model can have variants, like a product's variants in a shop
+ * (MONOLITHE in steel, in gold, in blue). A variant IS a model, linked to its main model (`variantOf`); never chained.
+ * ADD A VARIANT (`createVariant`, audited `model.variant.create`) creates one from its main model: a model that copies
+ * its category, collection, name, type, story, specifications and care (instructions and guide), with its own label,
+ * colour (`variantLabel`, `variantSwatch`: one of the model's dots) and SKU prefix, HIDDEN from the lookbook until its
+ * photographs are set and it is published like any model; its material, prices and sizes are its own. The main model
+ * carries its own label and colour too (its first variant gives them when it has none, audited `model.update`). A label
+ * and its colour change through the same edit (`model.update`), together; a variant and a model with variants keep
+ * theirs (409 VARIANT_LABEL_REQUIRED), a label is unique within a model and its variants (409 VARIANT_LABEL_TAKEN).
+ *
  * DISCONTINUED (P-R06, migration 0019): an ADMIN closes a model's edition
  * (`discontinueModel`, audited `model.discontinue`) and may open it again
  * (`reinstateModel`, `model.reinstate`). Discontinuing sets
@@ -68,6 +78,10 @@ import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES } from './orders.js';
 export const CARE_GUIDE_MAX = 8000;
 /** A model's base price, at most, in minor units (models.base_price_minor's CHECK; an order's amount's bound). */
 export const BASE_PRICE_MAX_MINOR = ORDER_AMOUNT_MAX_MINOR;
+/** A variant's label, at most (models.variant_label's CHECK, migration 0024). */
+export const VARIANT_LABEL_MAX = 40;
+/** A variant's colour as the database keeps it: `#RRGGBB` in capitals. */
+export const VARIANT_SWATCH_RE = /^#[0-9A-F]{6}$/;
 
 export interface CatalogServiceDeps {
   db: Db;
@@ -132,7 +146,28 @@ export interface ModelRecord {
    * export gives it as variants (its SKUs, at least one) and how many of them have their variant id.
    */
   shopify: { productId: string | null; variants: number; linked: number };
+  /** N1 (migration 0024): the main model this model is a variant of (its id, name and label), or null. */
+  variantOf: { id: string; name: string; label: string | null } | null;
+  /** N1: its label among its model's dots (« Steel »), and the dot's colour (`#RRGGBB`); null for both on a model alone. */
+  variantLabel: string | null;
+  variantSwatch: string | null;
+  /** N1: a main model's variants, in the order they were added; none for a variant, nor for a model alone. */
+  variants: ModelVariantRecord[];
   createdAt: Date;
+}
+
+/** A variant of a model as its main model's page lists it (VARIANTS). */
+export interface ModelVariantRecord {
+  id: string;
+  name: string;
+  label: string | null;
+  swatch: string | null;
+  skuPrefix: string;
+  /** Its own reference photograph, or null. */
+  imageUrl: string | null;
+  lookbook: LookbookState;
+  slug: string | null;
+  active: boolean;
 }
 
 /** One photograph of a model's gallery, as the console reads it. */
@@ -165,6 +200,9 @@ export interface UpdateModelInput {
   baseCurrency?: string | null;
   /** M6: the care guide. */
   careGuide?: string | null;
+  /** N1: its label among its model's dots and the dot's colour, given together; null for both clears them (a model alone only). */
+  variantLabel?: string | null;
+  variantSwatch?: string | null;
 }
 
 /** The fields of a model a change may touch, in their API spelling. */
@@ -183,6 +221,8 @@ export const MODEL_EDITABLE_FIELDS = Object.freeze([
   'basePriceMinor',
   'baseCurrency',
   'careGuide',
+  'variantLabel',
+  'variantSwatch',
 ] as const);
 
 /** Refused by `updateModel` (and by the PATCH body): a model's identity, written in the pieces already issued. */
@@ -199,6 +239,18 @@ export interface CreateModelInput {
   skuPrefix: string;
   defaultMaterial?: string | null;
   careInstructions?: string | null;
+}
+
+/**
+ * ADD A VARIANT (N1): the new variant's label, colour and SKU prefix; and the main model's own label and colour, read
+ * only while it has none (its first variant): the main model is one of the dots too.
+ */
+export interface CreateVariantInput {
+  label: string;
+  swatch: string;
+  skuPrefix: string;
+  mainLabel?: string | null;
+  mainSwatch?: string | null;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -237,6 +289,25 @@ export function normalizeBasePrice(minor: unknown, currency: unknown): { minor: 
   if (typeof minor !== 'number' || !Number.isInteger(minor) || minor < 1 || minor > BASE_PRICE_MAX_MINOR) throw validationError('The base price is 0.01 to 1 000 000.00.');
   if (typeof currency !== 'string' || !(ORDER_CURRENCIES as readonly string[]).includes(currency)) throw validationError(`The base price is in ${ORDER_CURRENCIES.join(', ')}.`);
   return { minor, currency };
+}
+
+/** A variant's label (N1): one line, runs of spaces kept to one, 1 to VARIANT_LABEL_MAX characters; null, '' and blank text: none. */
+export function normalizeVariantLabel(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== 'string') throw validationError('A variant’s label must be text.');
+  const s = v.trim().replace(/\s+/g, ' ');
+  if (s === '') return null;
+  if (/[\u0000-\u001f\u007f]/.test(s) || s.length > VARIANT_LABEL_MAX) throw validationError(`A variant’s label is one line of 1 to ${VARIANT_LABEL_MAX} characters: Steel.`);
+  return s;
+}
+
+/** A variant's colour (N1): `#RRGGBB` (the `#` optional, any case), kept in capitals; null, '' and blank text: none. */
+export function normalizeSwatch(v: unknown): string | null {
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
+  const s = typeof v === 'string' ? v.trim().toUpperCase() : '';
+  const hex = s.startsWith('#') ? s : `#${s}`;
+  if (!VARIANT_SWATCH_RE.test(hex)) throw validationError('A variant’s colour is #RRGGBB: #16224A.');
+  return hex;
 }
 
 export class CatalogService {
@@ -316,7 +387,7 @@ export class CatalogService {
   async listModels(): Promise<ModelRecord[]> {
     const rows = await this.modelQuery().orderBy('c.code').orderBy('m.name').execute();
     const galleries = await this.galleries();
-    return rows.map((r) => toModelRecord(r, galleries.get(r.id) ?? []));
+    return rows.map((r) => toModelRecord(r, galleries.get(r.id) ?? [], rows));
   }
 
   async getModel(modelId: string): Promise<ModelRecord> {
@@ -324,7 +395,12 @@ export class CatalogService {
     const id = modelId.toLowerCase();
     const row = await this.modelQuery().where('m.id', '=', id).executeTakeFirst();
     if (!row) throw notFound('Model', 'MODEL_NOT_FOUND');
-    return toModelRecord(row, (await this.galleries(id)).get(id) ?? []);
+    // N1: its main model, or its variants.
+    const mainId = row.variant_of;
+    const related = await this.modelQuery()
+      .where((eb) => (mainId ? eb.or([eb('m.variant_of', '=', id), eb('m.id', '=', mainId)]) : eb('m.variant_of', '=', id)))
+      .execute();
+    return toModelRecord(row, (await this.galleries(id)).get(id) ?? [], related);
   }
 
   /** The galleries of every model (or of one), each in its order. */
@@ -394,6 +470,116 @@ export class CatalogService {
   }
 
   /**
+   * ADD A VARIANT (POST /api/admin/models/:id/variants, N1): a new model, a variant of `mainId`, that copies its
+   * category, collection, name, type, story, specifications and care (instructions and guide), with its own label,
+   * colour and SKU prefix; HIDDEN from the lookbook (its photographs come next, then its publication), active, without a
+   * material nor prices of its own yet. A main model without its own label and colour takes `mainLabel` and
+   * `mainSwatch` in the same transaction (400 when they are missing), audited `model.update`. Refused: a main model that
+   * is itself a variant (409 MODEL_IS_VARIANT: variants are never chained), a label its model or another of its variants
+   * has (409 VARIANT_LABEL_TAKEN), a SKU prefix another model has (409 SKU_PREFIX_TAKEN). Audited `model.variant.create`
+   * with its main model, its label and colour, and what was copied.
+   */
+  async createVariant(mainId: string, input: CreateVariantInput, actor: Actor): Promise<ModelRecord> {
+    const id = modelKey(mainId);
+    if (input === null || typeof input !== 'object') throw validationError('Send the variant’s label, colour and SKU prefix.');
+    const label = normalizeVariantLabel(input.label);
+    const swatch = normalizeSwatch(input.swatch);
+    if (label === null || swatch === null) throw validationError('A variant has its label and its colour: one of its model’s dots.');
+    const skuPrefix = requiredText(input.skuPrefix, 'SKU prefix', 32).toUpperCase();
+    if (!SKU_PREFIX_RE.test(skuPrefix)) throw validationError('SKU prefix may contain letters, digits, dot, underscore and hyphen only.');
+    try {
+      const variantId = await inTransaction(this.db, async (tx) => {
+        const main = await tx
+          .selectFrom('models as m')
+          .innerJoin('categories as c', 'c.id', 'm.category_id')
+          .select([
+            'm.id',
+            'm.category_id',
+            'm.collection_id',
+            'm.name',
+            'm.type',
+            'm.story',
+            'm.specs',
+            'm.care_instructions',
+            'm.care_guide',
+            'm.variant_of',
+            'm.variant_label',
+            'm.variant_swatch',
+            'c.code as category_code',
+          ])
+          .where('m.id', '=', id)
+          .forUpdate('m')
+          .executeTakeFirst();
+        if (!main) throw notFound('Model', 'MODEL_NOT_FOUND');
+        if (main.variant_of !== null) throw conflict('MODEL_IS_VARIANT', 'This model is a variant of another: add the variant to its main model.');
+        const now = this.clock();
+        if (main.variant_label === null) {
+          const mainLabel = normalizeVariantLabel(input.mainLabel);
+          const mainSwatch = normalizeSwatch(input.mainSwatch);
+          if (mainLabel === null || mainSwatch === null) throw validationError('Give this model its own label and colour first: it is one of the dots of its variants.');
+          await tx.updateTable('models').set({ variant_label: mainLabel, variant_swatch: mainSwatch }).where('id', '=', id).execute();
+          await this.audit.record(
+            {
+              actor,
+              action: 'model.update',
+              targetType: 'model',
+              targetId: id,
+              details: { before: { variantLabel: null, variantSwatch: null }, after: { variantLabel: mainLabel, variantSwatch: mainSwatch }, issuedPieces: await issuedWithModel(tx, id) },
+            },
+            tx,
+          );
+        }
+        const r = await tx
+          .insertInto('models')
+          .values({
+            category_id: main.category_id,
+            collection_id: main.collection_id,
+            name: main.name,
+            type: main.type,
+            sku_prefix: skuPrefix,
+            default_material: null,
+            care_instructions: main.care_instructions,
+            story: main.story,
+            specs: main.specs,
+            care_guide: main.care_guide,
+            variant_of: id,
+            variant_label: label,
+            variant_swatch: swatch,
+            created_at: now,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        await this.audit.record(
+          {
+            actor,
+            action: 'model.variant.create',
+            targetType: 'model',
+            targetId: r.id,
+            details: {
+              mainId: id,
+              name: main.name,
+              type: main.type,
+              skuPrefix,
+              category: main.category_code.trim(),
+              collectionId: main.collection_id,
+              label,
+              swatch,
+              copied: ['type', 'collection', 'story', 'specs', 'care'],
+            },
+          },
+          tx,
+        );
+        return r.id;
+      });
+      return this.getModel(variantId);
+    } catch (e) {
+      if (isUniqueViolation(e, 'models_variant_label_key')) throw variantLabelTaken();
+      if (isUniqueViolation(e)) throw conflict('SKU_PREFIX_TAKEN', 'Another model already uses this SKU prefix.');
+      throw e;
+    }
+  }
+
+  /**
    * Change what a model shows or offers (PATCH /api/admin/models/:id): its name, default material, care instructions,
    * collection and `active`, its lookbook (P-R02: `lookbook`, `slug`, `story`, `specs`) and its place in the private salon
    * (P-X08: `priceLabel`, `privateMinTier`). Never its category nor its
@@ -441,6 +627,8 @@ export class CatalogService {
       after.baseCurrency = price?.currency ?? null;
     }
     if (input.careGuide !== undefined) after.careGuide = normalizeCareGuide(input.careGuide);
+    if (input.variantLabel !== undefined) after.variantLabel = normalizeVariantLabel(input.variantLabel);
+    if (input.variantSwatch !== undefined) after.variantSwatch = normalizeSwatch(input.variantSwatch);
     if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
     const id = modelId.toLowerCase();
 
@@ -463,6 +651,9 @@ export class CatalogService {
             'base_price_minor',
             'base_currency',
             'care_guide',
+            'variant_of',
+            'variant_label',
+            'variant_swatch',
             'published_at',
             'discontinued_at',
           ])
@@ -485,9 +676,20 @@ export class CatalogService {
           basePriceMinor: row.base_price_minor,
           baseCurrency: row.base_currency,
           careGuide: row.care_guide,
+          variantLabel: row.variant_label,
+          variantSwatch: row.variant_swatch,
         };
         const changed = (Object.keys(after) as (keyof ModelChange)[]).filter((k) => after[k] !== current[k]);
         if (changed.length === 0) return;
+        // N1: a label and its colour go together; a variant and a model with variants keep theirs (one of the dots).
+        if (changed.includes('variantLabel') || changed.includes('variantSwatch')) {
+          const label = changed.includes('variantLabel') ? (after.variantLabel ?? null) : current.variantLabel;
+          const swatch = changed.includes('variantSwatch') ? (after.variantSwatch ?? null) : current.variantSwatch;
+          if ((label === null) !== (swatch === null)) throw validationError('A variant’s label and its colour go together: give both, or clear both.');
+          if (label === null && (row.variant_of !== null || (await tx.selectFrom('models').select('id').where('variant_of', '=', id).executeTakeFirst()) !== undefined)) {
+            throw conflict('VARIANT_LABEL_REQUIRED', 'A variant, and a model with variants, keep their label and colour: each is one of the model’s dots.');
+          }
+        }
         // P-R06: a discontinued model is offered again only by reinstating it (an ADMIN's, audited as such).
         if (changed.includes('active') && after.active === true && row.discontinued_at !== null) throw modelDiscontinued();
         if (changed.includes('collectionId') && after.collectionId) {
@@ -518,6 +720,8 @@ export class CatalogService {
           base_price_minor?: number | null;
           base_currency?: string | null;
           care_guide?: string | null;
+          variant_label?: string | null;
+          variant_swatch?: string | null;
           published_at?: Date;
         } = {};
         for (const k of changed) {
@@ -534,6 +738,8 @@ export class CatalogService {
           else if (k === 'basePriceMinor') set.base_price_minor = after.basePriceMinor;
           else if (k === 'baseCurrency') set.base_currency = after.baseCurrency;
           else if (k === 'careGuide') set.care_guide = after.careGuide;
+          else if (k === 'variantLabel') set.variant_label = after.variantLabel;
+          else if (k === 'variantSwatch') set.variant_swatch = after.variantSwatch;
           else set.private_min_tier = after.privateMinTier;
         }
         if (publishedAt) set.published_at = publishedAt;
@@ -558,6 +764,7 @@ export class CatalogService {
       });
     } catch (e) {
       if (isUniqueViolation(e, 'models_slug_key')) throw conflict('SLUG_TAKEN', 'Another model already has this address in the lookbook (slug).');
+      if (isUniqueViolation(e, 'models_variant_label_key')) throw variantLabelTaken();
       throw e;
     }
     return this.getModel(id);
@@ -646,6 +853,9 @@ export class CatalogService {
         'm.base_price_minor',
         'm.base_currency',
         'm.care_guide',
+        'm.variant_of',
+        'm.variant_label',
+        'm.variant_swatch',
         'm.created_at',
         'c.id as category_index',
         'c.code as category_code',
@@ -711,7 +921,12 @@ interface ModelChange {
   basePriceMinor?: number | null;
   baseCurrency?: string | null;
   careGuide?: string | null;
+  variantLabel?: string | null;
+  variantSwatch?: string | null;
 }
+
+/** 409 VARIANT_LABEL_TAKEN: the label of another dot of the same model (N1). */
+const variantLabelTaken = () => conflict('VARIANT_LABEL_TAKEN', 'This model or another of its variants already has this label.');
 
 /** 409 MODEL_DISCONTINUED: an edit that would offer a discontinued model again (P-R06). */
 export const modelDiscontinued = () =>
@@ -770,6 +985,9 @@ type ModelQueryRow = {
   base_price_minor: number | null;
   base_currency: string | null;
   care_guide: string | null;
+  variant_of: string | null;
+  variant_label: string | null;
+  variant_swatch: string | null;
   shopify_product_id: string | null;
   sku_count: number | string | null;
   variants_linked: number | string | null;
@@ -782,7 +1000,28 @@ type ModelQueryRow = {
   products: number | string | null;
 };
 
-function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[]): ModelRecord {
+/** A variant as its main model's page lists it. */
+function toVariantRecord(r: ModelQueryRow): ModelVariantRecord {
+  return {
+    id: r.id,
+    name: r.name,
+    label: r.variant_label,
+    swatch: r.variant_swatch,
+    skuPrefix: r.sku_prefix,
+    imageUrl: mediaUrl(r.image_sha256),
+    lookbook: r.lookbook,
+    slug: r.slug,
+    active: r.active,
+  };
+}
+
+/** A model's record; `others` hold its main model and its variants (N1), when it has them. */
+function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[], others: readonly ModelQueryRow[]): ModelRecord {
+  const main = r.variant_of ? others.find((o) => o.id === r.variant_of) : undefined;
+  const variants = others
+    .filter((o) => o.variant_of === r.id)
+    .sort((a, b) => a.created_at.getTime() - b.created_at.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .map(toVariantRecord);
   return {
     id: r.id,
     name: r.name,
@@ -808,6 +1047,10 @@ function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[]): ModelRe
     baseCurrency: r.base_currency,
     careGuide: r.care_guide,
     shopify: { productId: r.shopify_product_id, variants: Math.max(1, Number(r.sku_count ?? 0)), linked: Number(r.variants_linked ?? 0) },
+    variantOf: main ? { id: main.id, name: main.name, label: main.variant_label } : null,
+    variantLabel: r.variant_label,
+    variantSwatch: r.variant_swatch,
+    variants,
     createdAt: r.created_at,
   };
 }

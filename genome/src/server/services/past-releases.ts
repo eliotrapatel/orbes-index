@@ -34,8 +34,11 @@ export interface PastReleaseCard {
   kind: 'LIVE' | 'DRAW';
   /** The release's title; a LIVE RELEASE's from its name's stage (null before it). */
   title: string | null;
-  /** Its model: its name, type and collection (a LIVE RELEASE's from its name's stage, null before it). */
-  model: { name: string | null; type: string | null; collection: string | null };
+  /**
+   * Its model: its name, type and collection, and its label among its variants (NOCTURNE N1: « Blue », MONOLITHE in blue;
+   * null without one); a LIVE RELEASE's from its name's stage, null before it.
+   */
+  model: { name: string | null; type: string | null; collection: string | null; variant: string | null };
   /** The model's photograph (`/api/v1/media/<sha256>`); a LIVE RELEASE's from its photograph's stage; null without one. */
   imageUrl: string | null;
   /** The opening: a LIVE RELEASE's T0, a draw's opening of its entries. */
@@ -53,6 +56,7 @@ export interface AccountParticipation {
 
 type PastRow = DropRow & {
   model_name: string;
+  model_variant: string | null;
   model_type: string;
   model_image: string | null;
   collection: string | null;
@@ -81,7 +85,7 @@ export class PastReleaseService {
       .innerJoin('models as m', 'm.id', 'd.model_id')
       .leftJoin('collections as c', 'c.id', 'm.collection_id')
       .selectAll('d')
-      .select(['m.name as model_name', 'm.type as model_type', 'm.image_sha256 as model_image', 'c.name as collection'])
+      .select(['m.name as model_name', 'm.variant_label as model_variant', 'm.type as model_type', 'm.image_sha256 as model_image', 'c.name as collection'])
       .orderBy('d.opens_at', 'desc')
       .orderBy('d.id')
       .limit(req.pageSize)
@@ -133,7 +137,12 @@ function card(r: PastRow, now: Date): PastReleaseCard {
       id: r.id,
       kind: 'LIVE',
       title: stages.name ? r.title : null,
-      model: { name: stages.name ? r.model_name : null, type: stages.name ? r.model_type : null, collection: stages.name ? r.collection : null },
+      model: {
+        name: stages.name ? r.model_name : null,
+        type: stages.name ? r.model_type : null,
+        collection: stages.name ? r.collection : null,
+        variant: stages.name ? r.model_variant : null,
+      },
       imageUrl: stages.photo ? mediaUrl(r.model_image) : null,
       opensAt: r.opens_at,
       quantityLine: r.quantity_line ?? '',
@@ -143,7 +152,7 @@ function card(r: PastRow, now: Date): PastReleaseCard {
     id: r.id,
     kind: 'DRAW',
     title: r.title,
-    model: { name: r.model_name, type: r.model_type, collection: r.collection },
+    model: { name: r.model_name, type: r.model_type, collection: r.collection, variant: r.model_variant },
     imageUrl: mediaUrl(r.model_image),
     opensAt: r.opens_at,
     quantityLine: defaultQuantityLine(r.quantity),

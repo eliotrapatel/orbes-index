@@ -32,6 +32,7 @@ import {
   formatDateTimeLong,
   initialTab,
   isAuthenticState,
+  modelWithVariant,
   normalizeCodeInput,
   photoModels,
   recoveryContactModel,
@@ -179,11 +180,12 @@ describe('verify view-model: AUTHENTIC', () => {
     expect(vm.ownership).toEqual({ kind: 'unregistered' });
   });
 
-  it('keeps the variant out of the brand lines (contract §4) but lists it, and falls back to the default care text', () => {
+  it('keeps the size out of the brand lines (contract §4) but lists it as SIZE (NOCTURNE N1: the field set at issuance, formerly VARIANT; a value written before as it is), and falls back to the default care text', () => {
     // The demo's O26-J-00184 is a SIZE 52 MONOLITHE RING: its lines read MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026.
     const v = resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, variant: 'Size 52', care: '  ' } }));
     expect(v.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
-    expect(v.productRows).toContainEqual(['VARIANT', 'SIZE 52']);
+    expect(v.productRows).toContainEqual(['SIZE', 'SIZE 52']);
+    expect(v.productRows.map((r) => r[0])).not.toContain('VARIANT');
     expect(v.care).toBe(DEFAULT_CARE);
   });
 });
@@ -577,42 +579,49 @@ describe('verify view-model: assurance and warranty notes', () => {
   });
 });
 
-describe('verify view-model: the photographs of an authentic piece (F-04)', () => {
+describe('verify view-model: the photograph of an authentic piece (F-04; NOCTURNE, decision 9: the model\'s, never the piece\'s own)', () => {
   const MODEL_URL = `/api/v1/media/${'a1'.repeat(32)}`;
   const PIECE_URL = `/api/v1/media/${'b2'.repeat(32)}`;
-  const withPhotos = (state: VerificationState) =>
-    outcome(state, state.startsWith('AUTHENTIC') ? { product: { ...PRODUCT, imageUrl: MODEL_URL, photoUrl: PIECE_URL } } : {});
+  const withPhoto = (state: VerificationState) => outcome(state, state.startsWith('AUTHENTIC') ? { product: { ...PRODUCT, imageUrl: MODEL_URL } } : {});
 
-  it('shows the piece\'s own photograph first, then its model\'s, each with its caption and alternative text', () => {
+  it('shows its model\'s photograph, captioned THE MODEL, its alternative text naming the model and its variant, never the piece', () => {
     for (const state of ['AUTHENTIC', 'AUTHENTIC_FIRST_REGISTRATION', 'AUTHENTIC_REGISTERED', 'AUTHENTIC_OWNERSHIP_VERIFIED'] as const) {
-      expect(resultViewModel(withPhotos(state)).photos, state).toEqual([
-        { kind: 'piece', src: PIECE_URL, alt: 'This piece, O26-J-00184, photographed by ORBES at issuance', caption: 'THIS PIECE' },
-        { kind: 'model', src: MODEL_URL, alt: 'The MONOLITHE RING model, photographed by ORBES', caption: 'THE MODEL' },
-      ]);
+      expect(resultViewModel(withPhoto(state)).photos, state).toEqual([{ kind: 'model', src: MODEL_URL, alt: 'The MONOLITHE RING model, photographed by ORBES', caption: 'THE MODEL' }]);
     }
-    expect(PHOTOS.note(2)).toBe('Photographed by ORBES. Compare them with the piece in your hands.');
+    // A variant (N1): « The MONOLITHE BRACELET model in steel, photographed by ORBES ».
+    const steel = resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, type: 'Bracelet', modelVariant: 'Steel', imageUrl: MODEL_URL } }));
+    expect(steel.photos).toEqual([{ kind: 'model', src: MODEL_URL, alt: 'The MONOLITHE BRACELET model in steel, photographed by ORBES', caption: 'THE MODEL' }]);
     expect(PHOTOS.note(1)).toBe('Photographed by ORBES. Compare it with the piece in your hands.');
+    expect(Object.keys(PHOTOS)).not.toContain('piece');
   });
 
-  it('shows only what the server sent: one photograph, or none', () => {
+  it('shows only what the server sent: the model\'s photograph, or none; a piece\'s own photograph never, whatever came', () => {
     expect(resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, imageUrl: MODEL_URL } })).photos.map((p) => p.kind)).toEqual(['model']);
-    expect(resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, photoUrl: PIECE_URL } })).photos.map((p) => p.kind)).toEqual(['piece']);
+    // An older server's piece photograph is not read.
+    const old = { ...PRODUCT, photoUrl: PIECE_URL } as unknown as typeof PRODUCT;
+    expect(resultViewModel(outcome('AUTHENTIC', { product: old })).photos).toEqual([]);
     expect(resultViewModel(outcome('AUTHENTIC')).photos).toEqual([]);
   });
 
   it('never on a result that is not authentic, even if a product block came with it', () => {
     for (const state of VERIFICATION_STATES.filter((s) => !s.startsWith('AUTHENTIC'))) {
-      const vm = resultViewModel(outcome(state, { product: { ...PRODUCT, imageUrl: MODEL_URL, photoUrl: PIECE_URL } }));
+      const vm = resultViewModel(outcome(state, { product: { ...PRODUCT, imageUrl: MODEL_URL } }));
       expect(vm.photos, state).toEqual([]);
     }
   });
 
   it('takes a photograph only from this origin\'s media route', () => {
     for (const url of ['https://evil.example/x.jpg', '//evil.example/x.jpg', 'javascript:alert(1)', 'data:image/png;base64,AAAA', `/api/v1/media/${'A1'.repeat(32)}`, `/api/v1/media/${'a1'.repeat(31)}`, `/api/v1/media/${'a1'.repeat(32)}?x=1`]) {
-      expect(photoModels({ productId: 'O26-J-00184', model: 'M', type: 'T', imageUrl: url, photoUrl: url }), url).toEqual([]);
+      expect(photoModels({ model: 'M', type: 'T', imageUrl: url }), url).toEqual([]);
     }
     // The owner's list of pieces sends null for a missing photograph.
-    expect(photoModels({ productId: 'O26-J-00184', model: 'M', type: 'T', imageUrl: null, photoUrl: null })).toEqual([]);
+    expect(photoModels({ model: 'M', type: 'T', imageUrl: null })).toEqual([]);
+  });
+
+  it('names a model with its variant as a sentence does (N1): « MONOLITHE in blue »', () => {
+    expect(modelWithVariant('MONOLITHE', 'Blue')).toBe('MONOLITHE in blue');
+    expect(modelWithVariant('MONOLITHE', '  Rose   Gold ')).toBe('MONOLITHE in rose gold');
+    for (const none of [null, undefined, '', '  ']) expect(modelWithVariant('MONOLITHE', none)).toBe('MONOLITHE');
   });
 });
 

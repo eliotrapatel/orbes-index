@@ -23,9 +23,10 @@ export interface DialogField {
   label: string;
   /**
    * `checkbox`: its value is `'true'` when ticked, `''` otherwise (`value: 'true'` ticks it at first). 'password'
-   * fields are masked and take `autocomplete` ('current-password' or 'new-password').
+   * fields are masked and take `autocomplete` ('current-password' or 'new-password'). `color`: the browser's colour
+   * picker, its value `#rrggbb`.
    */
-  kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'checkbox' | 'password' | 'email';
+  kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'checkbox' | 'password' | 'email' | 'color';
   autocomplete?: string;
   options?: { value: string; label: string }[];
   required?: boolean;
@@ -89,6 +90,9 @@ function controlFor(f: DialogField): HTMLInputElement | HTMLSelectElement | HTML
       return input(f.name, { type: 'password', autocomplete: f.autocomplete ?? 'new-password', maxlength: f.maxlength ?? 1024 });
     case 'email':
       return input(f.name, { type: 'email', value: f.value, autocomplete: f.autocomplete ?? 'off', maxlength: f.maxlength ?? 254 });
+    // A colour (a variant's dot, NOCTURNE N1): the browser's picker, its value `#rrggbb`.
+    case 'color':
+      return input(f.name, { type: 'color', value: f.value });
     default:
       return input(f.name, { value: f.value, maxlength: f.maxlength ?? 500 });
   }

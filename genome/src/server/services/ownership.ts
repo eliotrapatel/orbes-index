@@ -136,7 +136,10 @@ export interface OwnedProduct {
   category: { code: string; name: string };
   collection: string | null;
   model: string;
+  /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), or null. */
+  modelVariant: string | null;
   type: string;
+  /** The piece's free-text field set at issuance, labelled Size since NOCTURNE N1 (values written before as they are). */
   variant: string | null;
   material: string;
   createdYear: number;
@@ -166,9 +169,11 @@ export interface OwnedProduct {
   certificateAllowed: boolean;
   genome: { id: string; version: number; fingerprint: string; glyphs: number[]; pattern: string } | null;
   warranty: WarrantySummary;
-  /** The model's reference photograph and the piece's own (F-04): `/api/v1/media/<sha256>`, or null. */
+  /**
+   * The model's reference photograph (F-04): `/api/v1/media/<sha256>`, or null. Never the piece's own (plan NOCTURNE,
+   * decision 9: the model's photograph is the reference; a piece's photograph taken at issuance stays the console's).
+   */
   imageUrl: string | null;
-  photoUrl: string | null;
   /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
   care: string | null;
 }
@@ -838,8 +843,8 @@ export class OwnershipService {
       .leftJoin('collections as col', (j) => j.on((eb) => eb('col.id', '=', eb.fn.coalesce('p.collection_id', 'm.collection_id'))))
       .select([
         'p.id as uuid', 'p.product_id', 'p.status', 'p.variant', 'p.material', 'p.year',
-        'c.code as category_code', 'c.name as category_name', 'm.name as model_name', 'm.type as model_type', 'col.name as collection_name',
-        'm.image_sha256', 'p.photo_sha256', 'm.care_instructions',
+        'c.code as category_code', 'c.name as category_name', 'm.name as model_name', 'm.variant_label as model_variant', 'm.type as model_type', 'col.name as collection_name',
+        'm.image_sha256', 'm.care_instructions',
         'o.acquired_via', 'o.verified', 'o.started_at',
       ])
       .where('o.account_id', '=', accountId)
@@ -877,6 +882,7 @@ export class OwnershipService {
         category: { code: r.category_code.trim(), name: r.category_name },
         collection: r.collection_name,
         model: r.model_name,
+        modelVariant: r.model_variant,
         type: r.model_type,
         variant: r.variant,
         material: r.material,
@@ -897,7 +903,6 @@ export class OwnershipService {
           ...(w?.end_date ? { endDate: w.end_date } : {}),
         },
         imageUrl: mediaUrl(r.image_sha256),
-        photoUrl: mediaUrl(r.photo_sha256),
         care: r.care_instructions,
       };
     });

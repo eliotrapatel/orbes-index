@@ -34,8 +34,11 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   an entry in each and an order PAID), `stress` (fidelity rule 5) and `empty` (every empty state; an owner of one piece
   of a model kept out of the collection sees the empty circle).
 - **Where the demo differs from the boards** (live data excepted: times, ids, a countdown's digits, the GENOME's glyphs):
-  - MONOLITHE in steel, blue and gold are three models until N1 links them as variants; THE COLLECTION shows three cards.
-  - A draw has no price before migration 0024 (N1): the October draw shows none.
+  - Since N1, MONOLITHE in steel is a model and gold and blue its variants (ADD A VARIANT; the dots Steel · Gold · Blue):
+    the lookbook's list gives them as one entry, which THE COLLECTION still shows as three cards until N6 draws the dots.
+  - Since N1 (migration 0024), the October draw has its price, € 4 200: the app shows it from N7 (addition 5).
+  - Since N1 (decision 9), the boutique piece's own photograph (taken at issuance before NOCTURNE) is shown nowhere:
+    THIS PIECE and the sentence for two photographs are recorded as removed in the content test's MOVED list.
   - The fourth order the plan lists (the draw in steel, RETURNED on 2 Oct) needs a draw of its own: the account took
     part in three releases, not two, and YOUR RELEASES holds three entries (the LIVE of 5 Oct, the two September draws;
     the account has not entered the October draw, whose page C19 shows with ENTER THE DRAW).
@@ -113,7 +116,7 @@ WARRANTY · CARE · OWNERSHIP and the assurance note.
 | State | What it shows | Shown when | Reference |
 |---|---|---|---|
 | `result-first-registration` | AUTHENTIC, FIRST REGISTRATION; OWNERSHIP: REGISTRATION OPEN, its sentence, REGISTRATION OPEN UNTIL *time*, *Sign in or create an ORBES account to continue.*, SIGN IN · CREATE ACCOUNT, EMAIL, PASSWORD, SIGN IN, FORGOTTEN PASSWORD? | an activated piece never registered, signed out | C9, verify-04 |
-| `result-first-registration-product` | PRODUCT ID, COLLECTION, MODEL, TYPE, VARIANT *(the free-text field; Size from N1)*, CATEGORY, MATERIAL, CREATED, VERIFICATION, SIGNATURE (VALID · ORBES KEY *n*), CODE (CODE-01 · ISSUE *n*), ISSUED, ASSURANCE (PRINTED CODE) | the PRODUCT tab | verify-05 |
+| `result-first-registration-product` | PRODUCT ID, COLLECTION, MODEL, TYPE, VARIANT *(the free-text field; SIZE since N1)*, CATEGORY, MATERIAL, CREATED, VERIFICATION, SIGNATURE (VALID · ORBES KEY *n*), CODE (CODE-01 · ISSUE *n*), ISSUED, ASSURANCE (PRINTED CODE) | the PRODUCT tab | verify-05 |
 | `result-first-registration-warranty` | STATUS, FROM, UNTIL (or the sentence of Client Services) | WARRANTY | C35 (1), verify-06 |
 | `result-first-registration-care` | the model's care (or the house's general care text) | CARE | C35 (3), verify-07 |
 | `result-create-account` | NAME (OPTIONAL), EMAIL, PASSWORD (*At least 12 characters.*), CREATE ACCOUNT, the terms note, TERMS OF USE · PRIVACY POLICY (a new tab) | CREATE ACCOUNT | C39 (1) |

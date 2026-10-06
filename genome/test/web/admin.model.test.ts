@@ -81,6 +81,7 @@ import {
   sheetPartFilename,
   type PrintSheetForm,
   BATCH_COLUMNS,
+  BATCH_HEADER,
   batchCertificateItems,
   batchPlanText,
   batchProblemText,
@@ -316,10 +317,11 @@ describe('photographs (F-04)', () => {
     // Thousands set with the brand's thin space (formatCount).
     expect(photoFacts(1600, 1200, 319_488)).toBe(`${formatCount(1600)} × ${formatCount(1200)} PX · 312 KB`);
     expect(photoFacts(10, 10, 900)).toBe('10 × 10 PX · 900 B');
-    expect(modelPhotoImpact(9)).toBe('Shown at once on the 9 issued pieces of this model above the GENOME of every authentic result on /verify, beside the photograph of the piece when it has one.');
+    expect(modelPhotoImpact(9)).toBe('Shown at once on the 9 issued pieces of this model above the GENOME of every authentic result on /verify: the reference a client compares with the piece in hand.');
     expect(modelPhotoImpact(1)).toMatch(/^Shown at once on the 1 issued piece of this model/);
     expect(modelPhotoImpact(0)).toMatch(/^No piece has been issued with this model yet/);
-    expect(PIECE_PHOTO_IMPACT).toMatch(/compares it with the piece in hand/);
+    // NOCTURNE, decision 9: a piece's own photograph is the console's only, never a client's.
+    expect(PIECE_PHOTO_IMPACT).toMatch(/never shown to a client/);
   });
 
   it('is an OPERATOR\'s to set or remove', () => {
@@ -444,12 +446,14 @@ describe('the Club\'s drops (P-R03)', () => {
     id: '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d',
     title: 'MONOLITHE — release I',
     description: null,
-    model: { id: 'm1', name: 'MONOLITHE', type: 'RING', active: true },
+    model: { id: 'm1', name: 'MONOLITHE', type: 'RING', active: true, variant: null },
     quantity: 2,
     opensAt: '2026-10-12T10:00:00.000Z',
     closesAt: '2026-10-14T10:00:00.000Z',
     purchaseWindowHours: 48,
     earlyAccessHours: 48,
+    priceMinor: null,
+    currency: null,
     earlyAccessOpensAt: '2026-10-10T10:00:00.000Z',
     state: 'DRAFT',
     publishedAt: null,
@@ -1488,9 +1492,13 @@ describe('batch issuance view model', () => {
     };
     expect(problems('')).toEqual(['The file is empty.']);
     expect(problems('\uFEFF\r\n\r\n')).toEqual(['The file is empty.']);
-    expect(problems('52,MNL-RG-52\n54,MNL-RG-54')).toEqual(['Line 1 · Name the columns on the first line: variant, sku, serial (each optional).']);
-    expect(problems('variant,size\n52,L')).toEqual(['Line 1 · Unknown column "size": the columns are variant, sku, serial.']);
-    expect(problems('variant,Variant\n52,54')).toEqual(['Line 1 · The column "variant" appears twice.']);
+    // NOCTURNE N1: the piece's field set at issuance is its size: `size` on the first line, `variant` (its name before) read as it.
+    expect(problems('52,MNL-RG-52\n54,MNL-RG-54')).toEqual(['Line 1 · Name the columns on the first line: size, sku, serial (each optional).']);
+    expect(problems('size,colour\n52,L')).toEqual(['Line 1 · Unknown column "colour": the columns are size, sku, serial.']);
+    expect(problems('variant,Variant\n52,54')).toEqual(['Line 1 · The column "size" appears twice.']);
+    expect(problems('size,variant\n52,54')).toEqual(['Line 1 · The column "size" appears twice.']);
+    expect(parseBatchCsv('Size;sku\n17;MNL-ST-17\n')).toEqual({ ok: true, delimiter: ';', columns: ['variant', 'sku'], rows: [{ line: 2, variant: '17', sku: 'MNL-ST-17', serial: '' }] });
+    expect(BATCH_HEADER).toBe('size, sku, serial');
     expect(problems('variant,sku\nSize 52, gold,MNL\nSize 54,MNL\nSize 56,MNL,extra')).toEqual([
       'Line 2 · 3 values for 2 named columns: quote a value that holds ",".',
       'Line 4 · 3 values for 2 named columns: quote a value that holds ",".',
@@ -1523,7 +1531,7 @@ describe('batch issuance view model', () => {
     if (!bad.ok) {
       expect(bad.templateErrors).toEqual({});
       expect(bad.problems.map(batchProblemText)).toEqual([
-        'Line 2 · Variant: At most 100 characters, no control characters.',
+        'Line 2 · Size: At most 100 characters, no control characters.',
         'Line 3 · SKU: Letters, digits, space, . _ - / only (64 max).',
         'Line 4 · Serial must be 1–999 999.',
         'Line 6 · Serial 12 is already on line 5.',
@@ -1531,7 +1539,7 @@ describe('batch issuance view model', () => {
     }
     // A C1 control is refused here as the server refuses it (\p{Cc}), before any request is signed.
     const c1 = buildIssueBatch(T, [row(2, 'Size 50'), row(3, 'Size\u008552')], NOW);
-    expect(!c1.ok && c1.problems.map(batchProblemText)).toEqual(['Line 3 · Variant: At most 100 characters, no control characters.']);
+    expect(!c1.ok && c1.problems.map(batchProblemText)).toEqual(['Line 3 · Size: At most 100 characters, no control characters.']);
     expect(buildIssueBatch({ ...T, material: '925\u009fSILVER' }, [row(2)], NOW)).toMatchObject({ ok: false, templateErrors: { material: expect.any(String) } });
     // The template's errors go on its fields, once, not on every line.
     const template = buildIssueBatch({ ...T, material: '', productionDate: '2026-02-30' }, [row(2), row(3)], NOW);
@@ -1574,7 +1582,7 @@ describe('batch issuance view model', () => {
     expect(quantityRows('1000', '', '').ok).toBe(true);
     const bad = quantityRows('120', 'a\u0007b', '');
     const refused = buildIssueBatch(T, bad.ok ? bad.rows : [], NOW);
-    expect(!refused.ok && refused.problems.map(batchProblemText)).toEqual(['Variant: At most 100 characters, no control characters.']);
+    expect(!refused.ok && refused.problems.map(batchProblemText)).toEqual(['Size: At most 100 characters, no control characters.']);
     const good = quantityRows('120', '50 ML', '');
     const fine = buildIssueBatch(T, good.ok ? good.rows : [], NOW);
     expect(fine.ok && fine.items.length).toBe(120);
@@ -1661,7 +1669,7 @@ describe('batch issuance view model', () => {
       { piece: 2, line: null, status: 'FAILED', serial: 7, message: 'This serial number is already used.' },
     ]);
     expect(csv.split('\r\n')).toEqual([
-      '"line","piece","status","productId","sku","variant","serial","codeId","claimCode","message"',
+      '"line","piece","status","productId","sku","size","serial","codeId","claimCode","message"',
       `"2","1","ISSUED","O26-J-00001","MNL-RG-52","'=SUM(A1)","1","c1","AAAA-BBBB-CCCC",""`,
       '"","2","NOT SIGNED","","","","7","","","This serial number is already used."',
       '',

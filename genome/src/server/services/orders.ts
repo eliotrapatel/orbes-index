@@ -7,7 +7,9 @@
  *                Services (`orderForDrawEntry`), a request of the private salon closed as ACCEPTED
  *                (`orderForShopRequest`). RESERVED, at the release's default location (`drops.stock_location_id`) or
  *                at the default location (FRANCE WAREHOUSE). A LIVE order carries its size, price, currency and add-ons
- *                as sold; a draw's and a salon's size, price and currency are entered by Client Services (`setTerms`).
+ *                as sold; a draw's order its draw's price and currency when the draw has one (plan NOCTURNE, addition 5);
+ *                a draw's and a salon's size, and their price and currency when none is known, are entered by Client
+ *                Services (`setTerms`).
  *   held         while RESERVED or PAID, an order whose SKU is known holds one piece of it at its location when one
  *                is available (STOCK: counted as reserved, services/stock.ts); otherwise it creates a piece to make
  *                (bench_items: BENCH) whose ORBES identity is reserved at once (issuance.ts reserveIdentity, L6).
@@ -294,6 +296,8 @@ export interface ExportedOrder {
   channel: OrderChannel;
   release: string | null;
   model: string;
+  /** NOCTURNE N1: the model's label among its variants (« Blue »: MONOLITHE in blue), or null. */
+  modelVariant: string | null;
   size: string | null;
   priceMinor: number | null;
   currency: string | null;
@@ -343,6 +347,8 @@ export interface AccountOrder {
   /** The release it was sold in (a LIVE RELEASE, a draw); null for the private salon. */
   release: string | null;
   model: string;
+  /** NOCTURNE N1: the model's label among its variants (« Blue »: the order names MONOLITHE in blue), or null. */
+  modelVariant: string | null;
   /** null while ORBES Client Services has not entered it (a draw's, a salon's order); `{ label: null }`: one size. */
   size: { label: string | null } | null;
   /** null, with the currency, while ORBES Client Services has not entered it. */
@@ -701,7 +707,8 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
 
 /**
  * The order of an entry of a draw confirmed by Client Services, in the transaction that confirms it (the drop's row and
- * the entry's held): RESERVED at the drop's location, its size, price and currency to be entered (`setTerms`)
+ * the entry's held): RESERVED at the drop's location, with the draw's price and currency when it has one (plan NOCTURNE,
+ * addition 5: instead of « to be confirmed »), its size (and a price the draw does not give) to be entered (`setTerms`)
  * (`reservedAt`: the time of the sale, for an entry confirmed before its order existed). Idempotent (null when the entry
  * has its order).
  */
@@ -709,10 +716,12 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
   const e = await tx
     .selectFrom('drop_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
-    .select(['e.id', 'e.account_id', 'e.status', 'd.id as drop_id', 'd.model_id', 'd.stock_location_id'])
+    .select(['e.id', 'e.account_id', 'e.status', 'd.id as drop_id', 'd.model_id', 'd.stock_location_id', 'd.price_minor', 'd.currency'])
     .where('e.id', '=', entryId)
     .executeTakeFirst();
   if (!e || e.status !== 'CONFIRMED') throw new Error(`orderForDrawEntry: entry ${entryId} is not CONFIRMED`);
+  // The draw's price, both or neither (drops_draw_price), within an order's bounds.
+  const priced = e.price_minor !== null && e.currency !== null && e.price_minor <= ORDER_AMOUNT_MAX_MINOR;
   if (await tx.selectFrom('orders').select('id').where('drop_entry_id', '=', e.id).executeTakeFirst()) return { order: null, notes: [] };
   const notes: AuditRecordInput[] = [];
   const order = await createOrder(
@@ -725,8 +734,8 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
       modelId: e.model_id,
       sizeLabel: null,
       skuId: null,
-      priceMinor: null,
-      currency: null,
+      priceMinor: priced ? e.price_minor : null,
+      currency: priced ? e.currency : null,
       addons: [],
       surprise: null,
       locationId: await releaseLocation(tx, e.stock_location_id),
@@ -910,7 +919,7 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
     .leftJoin('drops as d', 'd.id', 'o.drop_id')
     .leftJoin('carriers as c', 'c.id', 'o.carrier_id')
     .selectAll('o')
-    .select(['m.name as model_name', 'd.title as release_title', 'c.name as carrier_name'])
+    .select(['m.name as model_name', 'm.variant_label as model_variant', 'd.title as release_title', 'c.name as carrier_name'])
     .where('o.account_id', '=', accountId.toLowerCase())
     .orderBy('o.reserved_at')
     .orderBy('o.id')
@@ -924,6 +933,7 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
     channel: r.channel,
     release: r.release_title ?? null,
     model: r.model_name,
+    modelVariant: r.model_variant,
     size: r.size_label,
     priceMinor: r.price_minor,
     currency: r.currency,
@@ -1092,6 +1102,7 @@ export class OrderService {
         'o.returned_at',
         'o.tracking_number',
         'm.name as model_name',
+        'm.variant_label as model_variant',
         'd.title as release_title',
         'c.name as carrier_name',
         'c.tracking_url',
@@ -1115,6 +1126,7 @@ export class OrderService {
       channel: r.channel,
       release: r.release_title ?? null,
       model: r.model_name,
+      modelVariant: r.model_variant,
       // A size is known once its SKU is (null: one size); before, ORBES Client Services has still to enter it.
       size: r.sku_id === null ? null : { label: r.size_label },
       priceMinor: r.price_minor,

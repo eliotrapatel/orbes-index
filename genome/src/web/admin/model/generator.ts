@@ -410,6 +410,15 @@ export const CERTIFICATE_LIMITS = Object.freeze({ perRequest: 50 });
 export const BATCH_COLUMNS = ['variant', 'sku', 'serial'] as const;
 export type BatchColumn = (typeof BATCH_COLUMNS)[number];
 
+/**
+ * The name each column has on a file's first line, as the console says it (NOCTURNE N1: the piece's field set at
+ * issuance is its size, `size`). `variant`, the size's name before, is still read as it.
+ */
+export const BATCH_COLUMN_NAMES: Readonly<Record<BatchColumn, string>> = Object.freeze({ variant: 'size', sku: 'sku', serial: 'serial' });
+const BATCH_COLUMN_ALIASES: Readonly<Record<string, BatchColumn>> = Object.freeze({ size: 'variant', variant: 'variant', sku: 'sku', serial: 'serial' });
+/** The columns as the first line names them: size, sku, serial. */
+export const BATCH_HEADER = BATCH_COLUMNS.map((c) => BATCH_COLUMN_NAMES[c]).join(', ');
+
 /** The template of a batch: the issue form without what changes from piece to piece. */
 export type BatchTemplateForm = Omit<IssueForm, 'variant' | 'sku' | 'serial'>;
 
@@ -517,7 +526,8 @@ function csvRecords(text: string, delimiter: string | null): { ok: true; records
 
 /**
  * Read a batch CSV: one row per piece, the first line naming its columns
- * (variant, sku, serial; any of them, in any order, case-insensitive). A
+ * (size, sku, serial; any of them, in any order, case-insensitive; `variant`,
+ * the size's name before NOCTURNE N1, still read as it). A
  * byte-order mark is dropped, and the delimiter is the comma or, as
  * spreadsheets write it in France, the semicolon (the one the first line
  * that is not blank uses most). A first line that names one column holds
@@ -537,16 +547,17 @@ export function parseBatchCsv(input: string): BatchCsv {
   const header = records[0];
   if (!header) return { ok: false, problems: [{ line: null, message: 'The file is empty.' }] };
 
-  const names = header.fields.map((f) => f.trim().toLowerCase());
-  const known = new Set<string>(BATCH_COLUMNS);
-  if (!names.some((n) => known.has(n))) {
-    return { ok: false, problems: [{ line: header.line, message: `Name the columns on the first line: ${BATCH_COLUMNS.join(', ')} (each optional).` }] };
+  // Each name read as its column (`size` and its former name `variant` are one column); '' for a name unknown.
+  const written = header.fields.map((f) => f.trim().toLowerCase());
+  const names: string[] = written.map((n) => (Object.prototype.hasOwnProperty.call(BATCH_COLUMN_ALIASES, n) ? BATCH_COLUMN_ALIASES[n]! : n === '' ? '' : `?${n}`));
+  if (!names.some((n) => (BATCH_COLUMNS as readonly string[]).includes(n))) {
+    return { ok: false, problems: [{ line: header.line, message: `Name the columns on the first line: ${BATCH_HEADER} (each optional).` }] };
   }
   const problems: BatchProblem[] = [];
   names.forEach((n, i) => {
     if (n === '') return;
-    if (!known.has(n)) problems.push({ line: header.line, message: `Unknown column "${header.fields[i].trim().slice(0, 40)}": the columns are ${BATCH_COLUMNS.join(', ')}.` });
-    else if (names.indexOf(n) !== i) problems.push({ line: header.line, message: `The column "${n}" appears twice.` });
+    if (n.startsWith('?')) problems.push({ line: header.line, message: `Unknown column "${header.fields[i].trim().slice(0, 40)}": the columns are ${BATCH_HEADER}.` });
+    else if (names.indexOf(n) !== i) problems.push({ line: header.line, message: `The column "${BATCH_COLUMN_NAMES[n as BatchColumn]}" appears twice.` });
   });
   if (problems.length > 0) return { ok: false, problems };
 
@@ -577,7 +588,7 @@ export function parseBatchCsv(input: string): BatchCsv {
   return { ok: true, rows, columns: BATCH_COLUMNS.filter((c) => names.includes(c)), delimiter };
 }
 
-/** A quantity of identical pieces (the same variant and SKU, serials allocated), or why not. */
+/** A quantity of identical pieces (the same size and SKU, serials allocated), or why not. */
 export function quantityRows(quantity: string, variant: string, sku: string): { ok: true; rows: BatchRow[] } | { ok: false; error: string } {
   const q = (quantity ?? '').trim();
   const n = Number(q);
@@ -585,7 +596,7 @@ export function quantityRows(quantity: string, variant: string, sku: string): { 
   return { ok: true, rows: Array.from({ length: n }, () => ({ line: null, variant, sku, serial: '' })) };
 }
 
-const PIECE_FIELDS = { variant: 'Variant', sku: 'SKU', serial: 'Serial' } as const;
+const PIECE_FIELDS = { variant: 'Size', sku: 'SKU', serial: 'Serial' } as const;
 
 export type BatchBuild =
   | { ok: true; template: IssueBatchTemplate; items: IssueBatchItem[]; lines: (number | null)[] }
@@ -806,7 +817,7 @@ export function batchSummary(rows: readonly BatchResultRow[]): BatchSummary {
  */
 export function batchResultsCsv(rows: readonly BatchResultRow[]): string {
   return csvDocument([
-    ['line', 'piece', 'status', 'productId', 'sku', 'variant', 'serial', 'codeId', 'claimCode', 'message'],
+    ['line', 'piece', 'status', 'productId', 'sku', 'size', 'serial', 'codeId', 'claimCode', 'message'],
     ...rows.map((r) => [
       r.line === null ? '' : String(r.line),
       String(r.piece),

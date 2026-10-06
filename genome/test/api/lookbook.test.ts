@@ -46,6 +46,9 @@ interface Card {
   category: { code: string; name: string };
   collection: string | null;
   imageUrl: string | null;
+  /** NOCTURNE N1: its own dot and its group's dots. */
+  variant: unknown;
+  variants: unknown[];
 }
 
 interface Sheet {
@@ -61,6 +64,9 @@ interface Sheet {
   specs: { label: string; value: string }[];
   care: string | null;
   discontinuedYear: number | null;
+  /** NOCTURNE N1: its own dot and its group's dots. */
+  variant: unknown;
+  variants: unknown[];
 }
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -285,7 +291,9 @@ describe('the lookbook of the models (P-R02)', () => {
       [expect.stringMatching(/^ORBIT-/), 'monolithe-ring'],
       [null, 'aurore'],
     ]);
-    for (const c of models) expect(Object.keys(c).sort()).toEqual(['category', 'collection', 'imageUrl', 'name', 'slug', 'type']);
+    // NOCTURNE N1: its own dot and its group's dots (none for a model alone).
+    for (const c of models) expect(Object.keys(c).sort()).toEqual(['category', 'collection', 'imageUrl', 'name', 'slug', 'type', 'variant', 'variants']);
+    for (const c of models) expect([c.variant, c.variants]).toEqual([null, []]);
     const mono = models.find((c) => c.slug === 'monolithe-ring')!;
     expect(mono).toMatchObject({ name: 'MONOLITHE', type: 'RING', category: { code: 'J', name: 'Jewelry' } });
     expect(mono.imageUrl).toBe((await read(catalog.modelId)).imageUrl);
@@ -315,6 +323,8 @@ describe('the lookbook of the models (P-R02)', () => {
       ],
       care: 'Polish with a soft dry cloth.',
       discontinuedYear: null,
+      variant: null,
+      variants: [],
     } satisfies Sheet);
     // A RESERVED or HIDDEN model, an unknown or malformed address: one 404, never cached.
     for (const slug of ['zenith', 'nope', 'Not an address', '-x']) {

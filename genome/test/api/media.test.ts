@@ -4,9 +4,11 @@
  * itself (image/jpeg or image/webp, at most 1 MiB, on these routes only),
  * stripped of EXIF and XMP, stored once by SHA-256 (media_objects, 0012),
  * audited, and served publicly with an immutable cache by
- * GET /api/v1/media/:sha256. A verification shows them (`product.imageUrl`,
- * `product.photoUrl`) on the AUTHENTIC states only: never on UNKNOWN,
- * INVALID_SIGNATURE, SUSPICIOUS_ACTIVITY or REVOKED.
+ * GET /api/v1/media/:sha256. A verification shows the model's
+ * (`product.imageUrl`) on the AUTHENTIC states only: never on UNKNOWN,
+ * INVALID_SIGNATURE, SUSPICIOUS_ACTIVITY or REVOKED. The piece's own
+ * photograph is the console's only (plan NOCTURNE, decision 9: the model is
+ * the reference for a piece): no answer a collector receives names it.
  */
 import { createHash } from 'node:crypto';
 import type { LightMyRequestResponse } from 'fastify';
@@ -362,34 +364,80 @@ describe('photographs of models and pieces (F-04)', () => {
       await h.ctx.services.warranty.activate(sold.product.productId, { purchaseDate: '2026-09-01' }, SYSTEM_ACTOR);
     });
 
-    it('AUTHENTIC states: the model\'s reference photograph and the piece\'s own, as URLs of this origin', async () => {
+    it('AUTHENTIC states: the model\'s reference photograph, as a URL of this origin, never the piece\'s own (NOCTURNE, decision 9)', async () => {
       const out = await verify(piece.code.data);
       expect(out.state).toBe('AUTHENTIC');
-      expect(out.product).toMatchObject({ productId: piece.product.productId, imageUrl: modelUrl, photoUrl });
+      expect(out.product).toMatchObject({ productId: piece.product.productId, imageUrl: modelUrl });
+      expect(out.product).not.toHaveProperty('photoUrl');
       const first = await verify(sold.code.data);
       expect(first.state).toBe('AUTHENTIC_FIRST_REGISTRATION');
       expect(first.product?.imageUrl).toBe(modelUrl);
-      expect(first.product?.photoUrl).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
-      // Each URL serves the image.
-      for (const url of [modelUrl, photoUrl, first.product!.photoUrl!]) expect((await media(url)).statusCode, url).toBe(200);
-      // A piece without a photograph of its own shows the model's only.
+      expect(first.product).not.toHaveProperty('photoUrl');
+      // The model's URL serves the image; the piece's stays in the records, served to whoever holds its address.
+      for (const url of [modelUrl, photoUrl]) expect((await media(url)).statusCode, url).toBe(200);
+      // A piece without a photograph of its own shows the model's alike.
       const plain = await issue(h.ctx, catalog);
       const p = (await verify(plain.code.data)).product!;
       expect(p.imageUrl).toBe(modelUrl);
       expect(p).not.toHaveProperty('photoUrl');
     });
 
-    it('the owner\'s product list carries them too', async () => {
+    it('the owner\'s product list carries the model\'s photograph, never the piece\'s own', async () => {
       const { client } = await accountClient(h);
       const scan = (safeJson(await client.post('/api/v1/verify', { code: sold.code.data })) as Outcome).registration!;
       expect((await client.post('/api/v1/ownership/register', { registrationToken: scan.token })).statusCode).toBe(201);
-      const list = safeJson(await client.get('/api/v1/account/products')) as { products: { productId: string; imageUrl: string | null; photoUrl: string | null }[] };
-      expect(list.products).toEqual([expect.objectContaining({ productId: sold.product.productId, imageUrl: modelUrl, photoUrl: expect.stringMatching(/^\/api\/v1\/media\//) })]);
+      const list = safeJson(await client.get('/api/v1/account/products')) as { products: { productId: string; imageUrl: string | null }[] };
+      expect(list.products).toEqual([expect.objectContaining({ productId: sold.product.productId, imageUrl: modelUrl })]);
+      expect(list.products[0]).not.toHaveProperty('photoUrl');
+    });
+
+    it('no answer a collector receives names a piece\'s own photograph (NOCTURNE, decision 9); the console keeps it', async () => {
+      // A piece photographed at issuance before NOCTURNE, registered to its owner, who reads every answer of the app.
+      const owned = await issue(h.ctx, catalog);
+      await h.ctx.services.warranty.activate(owned.product.productId, { purchaseDate: '2026-09-01' }, SYSTEM_ACTOR);
+      const own = jpegPhoto(43, 40);
+      await h.ctx.services.media.setProductPhoto(owned.product.productId, { mime: 'image/jpeg', bytes: own }, SYSTEM_ACTOR);
+      const sha = sha256(own);
+      const { client } = await accountClient(h);
+      const scan = (safeJson(await client.post('/api/v1/verify', { code: owned.code.data })) as Outcome).registration!;
+      expect((await client.post('/api/v1/ownership/register', { registrationToken: scan.token })).statusCode).toBe(201);
+      const answers: [string, LightMyRequestResponse][] = [
+        ['POST /api/v1/verify, signed out', await h.client().post('/api/v1/verify', { code: owned.code.data })],
+        ['POST /api/v1/verify, its owner', await client.post('/api/v1/verify', { code: owned.code.data })],
+      ];
+      for (const url of [
+        '/api/v1/account/me',
+        '/api/v1/account/products',
+        '/api/v1/account/orders',
+        '/api/v1/account/participation',
+        '/api/v1/account/questions',
+        '/api/v1/ownership/certificates',
+        `/api/v1/products/${owned.product.productId}/service-history`,
+        '/api/v1/club/status',
+        '/api/v1/club/lookbook',
+        '/api/v1/club/circle',
+        '/api/v1/lookbook',
+        '/api/v1/drops',
+        '/api/v1/live',
+        '/api/v1/live/mine',
+        '/api/v1/live/next',
+        '/api/v1/releases/past',
+      ]) {
+        answers.push([`GET ${url}`, await client.get(url)]);
+      }
+      for (const [what, r] of answers) {
+        expect(r.statusCode, `${what} ${r.body.slice(0, 120)}`).toBeLessThan(400);
+        expect(r.body, what).not.toContain('photoUrl');
+        expect(r.body, what).not.toContain(sha);
+      }
+      // The console keeps it: the product page, for ORBES staff.
+      const detail = safeJson(await auditor.get(`/api/admin/products/${owned.product.productId}`)) as { product: { photoUrl: string | null } };
+      expect(detail.product.photoUrl).toBe(`/api/v1/media/${sha}`);
     });
 
     it('never on UNKNOWN, INVALID_SIGNATURE, SUSPICIOUS_ACTIVITY or REVOKED', async () => {
       const urls = (r: LightMyRequestResponse) => [...r.body.matchAll(/\/api\/v1\/media\/[0-9a-f]{64}/g)].map((m) => m[0]);
-      // INVALID_SIGNATURE: the code of a piece with both photographs, one signature bit flipped.
+      // INVALID_SIGNATURE: the code of a piece with a photograph of its own and its model's, one signature bit flipped.
       const { payloadBytes, signature } = unframeCodeData(fromBase64Url(piece.code.data));
       signature[0] ^= 1;
       const forged = await h.client().post('/api/v1/verify', { code: toBase64Url(frameCodeData(payloadBytes, signature)) });
@@ -402,7 +450,7 @@ describe('photographs of models and pieces (F-04)', () => {
       const unknown = await h.client().post('/api/v1/verify', { code: toBase64Url(frameCodeData(payload, await signer.sign(signingMessage(payload)))) });
       expect((safeJson(unknown) as Outcome).state).toBe('UNKNOWN');
       expect(urls(unknown)).toEqual([]);
-      // A piece declared lost, and a revoked one, both with photographs.
+      // A piece declared lost, and a revoked one, each with a photograph of its own.
       for (const [p, state] of [[lost, 'SUSPICIOUS_ACTIVITY'], [revoked, 'REVOKED']] as const) {
         const r = await h.client().post('/api/v1/verify', { code: p.code.data });
         expect((safeJson(r) as Outcome).state).toBe(state);

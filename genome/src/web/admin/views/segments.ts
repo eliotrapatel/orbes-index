@@ -354,7 +354,7 @@ function builder(ctx: ViewContext, segment: Segment | null, options: SegmentOpti
           ),
         ];
       case 'OWNS_MODEL':
-        return many(r.modelIds, options.models.map((m) => ({ id: m.id, label: `${m.name} · ${m.type}` })), 'Models', (ids) => (r.modelIds = ids));
+        return many(r.modelIds, options.models.map((m) => ({ id: m.id, label: [m.name, m.type, m.variant].filter((x): x is string => !!x).join(' · ') })), 'Models', (ids) => (r.modelIds = ids));
       case 'OWNS_COLLECTION':
         return many(r.collectionIds, options.collections.map((c) => ({ id: c.id, label: c.name })), 'Collections', (ids) => (r.collectionIds = ids));
       case 'SIZE':

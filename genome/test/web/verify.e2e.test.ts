@@ -1105,7 +1105,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const polish = await srv.ctx.services.warranty.openService(older.product.id, { type: 'POLISH', location: 'Paris atelier', notes: 'staff note' }, SYSTEM_ACTOR);
     await srv.ctx.services.warranty.completeService(polish.id, {}, SYSTEM_ACTOR);
     const newer = await ownedPiece(owner.account.id);
-    // ORBES photographed the older piece at issuance (F-04); its model, shared with other tests, has no photograph.
+    // ORBES photographed the older piece at issuance (F-04), before NOCTURNE; its model, shared with other tests, has no
+    // photograph. Decision 9: the piece's own photograph is shown to no collector, so neither piece shows one.
     await srv.ctx.services.media.setProductPhoto(older.product.productId, { mime: 'image/jpeg', bytes: jpegPhoto(480, 480) }, SYSTEM_ACTOR);
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
 
@@ -1153,20 +1154,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const card = page.getByRole('article', { name: older.product.productId });
     const other = page.getByRole('article', { name: newer.product.productId });
     expect(await card.locator('.piece__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
-    // Under the écrin that carries its heading, the photograph ORBES took of the piece (F-04), on the ivory plate of an
-    // authentic result, with its alternative text, the plate named after the piece; the other piece has none.
-    const photos = card.getByRole('region', { name: `Photographs of ${older.product.productId}` });
-    await visible(photos);
-    const photo = photos.locator('img.photo__img');
-    await countOf(photo, 1);
-    await attrOf(photo, 'alt', `This piece, ${older.product.productId}, photographed by ORBES at issuance`);
-    await textsOf(photos.locator('.photo__caption'), ['THIS PIECE']);
-    await textOf(photos.locator('.photos__note'), 'Photographed by ORBES. Compare it with the piece in your hands.');
-    await expect.poll(() => photo.evaluate((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth]), POLL).toEqual([true, 480]);
-    expect(await photos.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
-    const [ecrin, photosBox, linesBox] = [(await card.locator('.piece__plate').boundingBox())!, (await photos.boundingBox())!, (await card.locator('.piece__lines').boundingBox())!];
-    expect(photosBox.y).toBeGreaterThan(ecrin.y + ecrin.height);
-    expect(photosBox.y + photosBox.height).toBeLessThan(linesBox.y);
+    // No photograph of the piece itself (NOCTURNE, decision 9): the one ORBES took of the older piece at issuance is never
+    // shown; a piece shows its model's photograph alone, and neither model here has one.
+    await countOf(card.getByRole('region', { name: `Photographs of ${older.product.productId}` }), 0);
+    await countOf(card.locator('.result__photos, img'), 0);
     await countOf(other.locator('.result__photos, img'), 0);
     await countOf(card.locator('.genome__glyphs .genome-svg--orbit g[data-layer="genome"]'), 8);
     await attrOf(card.locator('.genome-svg'), 'aria-label', new RegExp(older.genome.fingerprint));
@@ -2077,7 +2068,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(problems).toEqual([]);
   }, 120_000);
 
-  it('shows the photographs of an authentic piece above its GENOME (F-04): its own, then its model\'s, with their alternative text; none on an invalid signature', async () => {
+  it('shows the photograph of an authentic piece\'s model above its GENOME (F-04), never the piece\'s own (NOCTURNE, decision 9), with its alternative text; none on an invalid signature', async () => {
     // A model of its own, so that no other result of this suite shows a photograph.
     const category = (await srv.ctx.categories.getByCode('J'))!;
     const model = await srv.ctx.db
@@ -2095,23 +2086,14 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('AUTHENTIC');
     const plate = page.getByRole('region', { name: 'Photographs of this piece' });
     await visible(plate);
+    // The model's photograph alone, though the piece has one of its own (taken before NOCTURNE): never shown.
     const images = plate.locator('img.photo__img');
-    await countOf(images, 2);
-    expect(await images.evaluateAll((els) => els.map((el) => el.getAttribute('alt')))).toEqual([
-      `This piece, ${issued.product.productId}, photographed by ORBES at issuance`,
-      'The ECLIPSE PENDANT model, photographed by ORBES',
-    ]);
-    await textsOf(plate.locator('.photo__caption'), ['THIS PIECE', 'THE MODEL']);
-    await textOf(plate.locator('.photos__note'), 'Photographed by ORBES. Compare them with the piece in your hands.');
-    // Both decoded by the browser from the stripped files, side by side in square frames on the ivory plate.
-    await expect.poll(() => images.evaluateAll((els) => els.map((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth])), POLL).toEqual([
-      [true, 480],
-      [true, 640],
-    ]);
-    const [own, ref] = [(await images.nth(0).boundingBox())!, (await images.nth(1).boundingBox())!];
-    expect(own.width).toBeCloseTo(own.height, 0);
-    expect(Math.abs(own.y - ref.y)).toBeLessThan(1);
-    expect(own.x + own.width).toBeLessThan(ref.x);
+    await countOf(images, 1);
+    expect(await images.evaluateAll((els) => els.map((el) => el.getAttribute('alt')))).toEqual(['The ECLIPSE PENDANT model, photographed by ORBES']);
+    await textsOf(plate.locator('.photo__caption'), ['THE MODEL']);
+    await textOf(plate.locator('.photos__note'), 'Photographed by ORBES. Compare it with the piece in your hands.');
+    // Decoded by the browser from the stripped file, in its frame on the ivory plate.
+    await expect.poll(() => images.evaluateAll((els) => els.map((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth])), POLL).toEqual([[true, 640]]);
     expect(await plate.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
     // At the head of the result: under the title and its sentence, above the GENOME.
     const plateBox = (await plate.boundingBox())!;

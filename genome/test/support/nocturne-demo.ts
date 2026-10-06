@@ -3,9 +3,9 @@
  * services on a fixed clock, for the parity tool (scripts/parity.ts) and the NOCTURNE browser tests (the content and the
  * overflow tests). The story the boards tell, on Monday 5 October 2026 at 18:49 in Paris (NOW):
  *
- *   the collection ORBITAL: MONOLITHE in steel, blue and gold (three models until N1 links them as variants), sizes
- *     16 · 17 · 18, the owner's three photographs (test/fixtures/nocturne/bangle-*.webp); ZENITH in THE PRIVATE SALON,
- *     € 4 800, offered from TITANE;
+ *   the collection ORBITAL: MONOLITHE in steel, gold and blue, a model and its two variants (N1: steel the main model,
+ *     gold and blue added with ADD A VARIANT, the dots Steel · Gold · Blue), sizes 16 · 17 · 18, the owner's three
+ *     photographs (test/fixtures/nocturne/bangle-*.webp); ZENITH in THE PRIVATE SALON, € 4 800, offered from TITANE;
  *   the account you@example.com, TITANE, two pieces: MONOLITHE in steel O26-J-00184, size 17, registered on 3 Oct 2026,
  *     no order (a boutique sale); MONOLITHE in gold, size 17, from the draw of 14 September, delivered and registered on
  *     22 Sep 2026;
@@ -14,7 +14,8 @@
  *   the releases: MONOLITHE IN BLUE, a LIVE RELEASE on Thursday 8 October at 21:00 Paris, 25 pieces, one per collector,
  *     for owners, 5 collectors who will be there (`rules`: with A SURPRISE IN EVERY BOX and its three access rules joined
  *     by OR, C27); the release of Thursday 22 October, not yet revealed, 12 pieces, from PLATINE, its two reveals; the
- *     steel draw MONOLITHE, THE OCTOBER DRAW, 12 pieces, entries from 5 Oct 10:00 UTC to 11 Oct 18:00 UTC; the past
+ *     steel draw MONOLITHE, THE OCTOBER DRAW, € 4 200 (N1: a draw's price), 12 pieces, entries from 5 Oct 10:00 UTC to
+ *     11 Oct 18:00 UTC; the past
  *     releases (the LIVE of 5 Oct in steel and the draw of 14 Sep in gold, a piece secured in each; the draw of
  *     September in steel, whose piece came back; the LIVE of 28 Sep in gold), the question after (a collector whose turn
  *     passed on 5 Oct);
@@ -219,17 +220,41 @@ async function account(w: World, key: string, email: string, pieces = 0, model?:
   return out;
 }
 
+/** The dots of MONOLITHE (N1): each variant's label and colour, the colour the middle of its board's gradient (build.py). */
+export const NOCTURNE_VARIANTS = Object.freeze({
+  steel: { label: 'Steel', swatch: '#9D9B96' },
+  gold: { label: 'Gold', swatch: '#B88A3A' },
+  blue: { label: 'Blue', swatch: '#16224A' },
+});
+
 async function seedCatalogue(w: World): Promise<void> {
   const { ctx, admin } = w;
   w.collection = (await ctx.services.catalog.createCollection({ name: 'ORBITAL' }, admin)).id;
   const care = 'Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.';
   const story = 'Two rails of metal held apart, then closed by one angled link: a form built like architecture, cut to lie flat on the wrist.';
-  const make = async (key: string, name: string, prefix: string, material: string, opts: { slug: string; lookbook: 'PUBLIC' | 'RESERVED'; photo: 'steel' | 'blue' | 'gold'; priceLabel?: string }) => {
-    const m = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name, type: 'BRACELET', skuPrefix: prefix, defaultMaterial: material, careInstructions: care }, admin);
-    await ctx.services.media.setModelImage(m.id, { mime: 'image/webp', bytes: nocturnePhoto(opts.photo) }, admin);
+  // N1: MONOLITHE in steel, then its variants added from it (ADD A VARIANT, which gives steel its own dot), in the
+  // order of the dots: Steel · Gold · Blue.
+  w.clock.set(at('2026-08-31T08:00:00Z'));
+  const steel = await ctx.services.catalog.createModel(
+    { categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE', type: 'BRACELET', skuPrefix: 'MNL-ST', defaultMaterial: '925 STERLING SILVER', careInstructions: care },
+    admin,
+  );
+  w.models.steel = steel.id;
+  w.clock.set(at('2026-08-31T08:01:00Z'));
+  const main = { mainLabel: NOCTURNE_VARIANTS.steel.label, mainSwatch: NOCTURNE_VARIANTS.steel.swatch };
+  w.models.gold = (await ctx.services.catalog.createVariant(steel.id, { ...NOCTURNE_VARIANTS.gold, skuPrefix: 'MNL-GD', ...main }, admin)).id;
+  w.clock.set(at('2026-08-31T08:02:00Z'));
+  w.models.blue = (await ctx.services.catalog.createVariant(steel.id, { ...NOCTURNE_VARIANTS.blue, skuPrefix: 'MNL-BL' }, admin)).id;
+  const make = async (key: string, material: string, opts: { slug: string; lookbook: 'PUBLIC' | 'RESERVED'; photo: 'steel' | 'blue' | 'gold'; priceLabel?: string; create?: { name: string; prefix: string } }) => {
+    const id = opts.create
+      ? (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: opts.create.name, type: 'BRACELET', skuPrefix: opts.create.prefix, defaultMaterial: material, careInstructions: care }, admin)).id
+      : w.models[key]!;
+    await ctx.services.media.setModelImage(id, { mime: 'image/webp', bytes: nocturnePhoto(opts.photo) }, admin);
     await ctx.services.catalog.updateModel(
-      m.id,
+      id,
       {
+        defaultMaterial: material,
+        careInstructions: care,
         lookbook: opts.lookbook,
         slug: opts.slug,
         story,
@@ -239,19 +264,19 @@ async function seedCatalogue(w: World): Promise<void> {
       },
       admin,
     );
-    w.models[key] = m.id;
+    w.models[key] = id;
     w.demo.slugs[key] = opts.slug;
-    return m.id;
+    return id;
   };
   // Published in this order: MONOLITHE in steel is the newest public model (it leads NOW when nothing is announced).
   w.clock.set(at('2026-08-31T09:00:00Z'));
-  await make('gold', 'MONOLITHE', 'MNL-GD', '18K YELLOW GOLD', { slug: 'monolithe-gold', lookbook: 'PUBLIC', photo: 'gold' });
+  await make('gold', '18K YELLOW GOLD', { slug: 'monolithe-gold', lookbook: 'PUBLIC', photo: 'gold' });
   w.clock.set(at('2026-08-31T09:10:00Z'));
-  await make('blue', 'MONOLITHE', 'MNL-BL', '925 STERLING SILVER, BLUE LACQUER', { slug: 'monolithe-blue', lookbook: 'PUBLIC', photo: 'blue' });
+  await make('blue', '925 STERLING SILVER, BLUE LACQUER', { slug: 'monolithe-blue', lookbook: 'PUBLIC', photo: 'blue' });
   w.clock.set(at('2026-08-31T09:20:00Z'));
-  await make('steel', 'MONOLITHE', 'MNL-ST', '925 STERLING SILVER', { slug: 'monolithe', lookbook: 'PUBLIC', photo: 'steel' });
+  await make('steel', '925 STERLING SILVER', { slug: 'monolithe', lookbook: 'PUBLIC', photo: 'steel' });
   w.clock.set(at('2026-08-31T09:30:00Z'));
-  await make('zenith', 'ZENITH', 'ZNT-BR', '18K YELLOW GOLD', { slug: 'zenith', lookbook: 'RESERVED', photo: 'gold', priceLabel: '€ 4 800' });
+  await make('zenith', '18K YELLOW GOLD', { slug: 'zenith', lookbook: 'RESERVED', photo: 'gold', priceLabel: '€ 4 800', create: { name: 'ZENITH', prefix: 'ZNT-BR' } });
   w.f.modelId = w.models.steel!;
   // The sizes of the house, the SKUs of each MONOLITHE.
   for (const key of ['steel', 'blue', 'gold']) for (const size of ['16', '17', '18']) await ensureSku(w.ctx.db, w.models[key]!, size);
@@ -553,6 +578,9 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
         closesAt: at('2026-10-11T18:00:00Z'),
         purchaseWindowHours: 48,
         earlyAccessHours: early,
+        // N1 (addition 5): the draw's price, shown on its card and page, taken by its orders.
+        priceMinor: 420_000,
+        currency: 'EUR',
       },
       admin,
     );
@@ -960,6 +988,11 @@ async function seedStress(w: World): Promise<void> {
   await ctx.services.catalog.updateModel(long.id, { lookbook: 'PUBLIC', slug: 'monolithe-architecturale', story: 'A model without a photograph yet.', specs: 'Metal: 925 sterling silver, brushed and polished by hand\nClosure: Hinged, with a hidden clasp' }, admin);
   w.models.long = long.id;
   w.demo.slugs.long = 'monolithe-architecturale';
+  // Fidelity rule 5: a variant's label of 14 characters (N1), shown beside the 24-character name.
+  const cobalt = await ctx.services.catalog.createVariant(long.id, { label: 'Brushed cobalt', swatch: '#2C3E78', skuPrefix: 'MNL-AR-BC', mainLabel: 'Polished', mainSwatch: '#D7D5D0' }, admin);
+  await ctx.services.catalog.updateModel(cobalt.id, { lookbook: 'PUBLIC', slug: 'monolithe-architecturale-brushed-cobalt', defaultMaterial: '925 STERLING SILVER, BRUSHED COBALT' }, admin);
+  w.models.cobalt = cobalt.id;
+  w.demo.slugs.cobalt = 'monolithe-architecturale-brushed-cobalt';
   const you = await account(w, 'you', 'you@example.com');
   // Six pieces, the first of the long model with a 14-character field.
   clock.set(at('2026-09-02T10:00:00Z'));
@@ -970,6 +1003,7 @@ async function seedStress(w: World): Promise<void> {
   }
   // Four orders from the salon, each with its terms: a price in USD, a long amount, a long tracking number.
   await ctx.services.catalog.updateModel(long.id, { lookbook: 'RESERVED', priceLabel: '€ 125 400', privateMinTier: 1 }, admin);
+  await ctx.services.catalog.updateModel(cobalt.id, { lookbook: 'RESERVED', priceLabel: '€ 125 400', privateMinTier: 1 }, admin);
   const terms = [
     { sizeLabel: '17', priceMinor: 12_540_000, currency: 'EUR' },
     { sizeLabel: '16', priceMinor: 640_000, currency: 'USD' },
