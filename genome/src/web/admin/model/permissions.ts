@@ -5,7 +5,8 @@
  * points of sale, a customer's recovery code, lock and export, the draw
  * of a drop, a model discontinued or reinstated, a LIVE RELEASE ended now or
  * an entry removed from it, a returned piece archived, the settings of the
- * orders: their delays, the locations and the carriers). Every role
+ * orders: their delays, the locations and the carriers; a conversation of the
+ * Messages board assigned). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
@@ -59,6 +60,10 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageClubTiers: 'OPERATOR',
   /** The Club's requests (P-X08): close a request of the private salon, with a note. */
   closeShopRequest: 'OPERATOR',
+  /** The Messages board (CS-01): answer a conversation, take it, close it. */
+  answerMessages: 'OPERATOR',
+  /** The Messages board (CS-01): assign a conversation to an active OPERATOR or ADMIN. */
+  assignMessages: 'ADMIN',
   /**
    * The orders (plan LIVE RELEASE+): their steps (paid, shipped, delivered, cancelled), their location, terms and buyer,
    * the piece picked from the stock; the buyer's details in clear (an AUDITOR reads them masked).

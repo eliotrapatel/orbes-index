@@ -111,6 +111,10 @@ import type {
   OwnerLock,
   ShopRequest,
   ShopRequestOutcome,
+  ClientConversationStatus,
+  Conversation,
+  ConversationPage,
+  MessagesSummary,
   ShopRequestStatus,
   OwnerSheet,
   Paged,
@@ -1218,6 +1222,42 @@ export class AdminApi {
   /** A tier's benefits, one per line; null restores the words by default. */
   updateClubTier(tier: ClubTierName, benefits: string | null): Promise<ClubTierSheet> {
     return this.patch(`/api/admin/club/tiers/${encodeURIComponent(tier)}`, { benefits });
+  }
+
+  // ── MESSAGES (plan NEXT-NINE, CS-01) ─────────────────────────────────────
+
+  /** The board: To answer by default (or ANSWERED, CLOSED, ALL); Mine or Unassigned; an email or a REF. */
+  messages(q: { status?: ClientConversationStatus | 'ALL'; who?: 'mine' | 'unassigned'; q?: string; page?: number; pageSize?: number } = {}): Promise<ConversationPage> {
+    return this.get('/api/admin/messages', q);
+  }
+
+  /** The sidebar's badge; `background` for the refresh made by a timer (a 401 never signs the admin out). */
+  messagesSummary(opts: { background?: boolean } = {}): Promise<MessagesSummary> {
+    return this.request('GET', '/api/admin/messages/summary', { background: opts.background === true });
+  }
+
+  conversation(id: string): Promise<Conversation> {
+    return this.get(`/api/admin/messages/${encodeURIComponent(id)}`);
+  }
+
+  /** OPERATOR: an answer, read by the client in their account, signed ORBES Client Services. */
+  answerConversation(id: string, body: string): Promise<Conversation> {
+    return this.post(`/api/admin/messages/${encodeURIComponent(id)}/answer`, { body });
+  }
+
+  /** OPERATOR: the reader answers this conversation from now. */
+  takeConversation(id: string): Promise<Conversation> {
+    return this.post(`/api/admin/messages/${encodeURIComponent(id)}/take`);
+  }
+
+  /** ADMIN: an active OPERATOR or ADMIN answers this conversation from now. */
+  assignConversation(id: string, adminId: string): Promise<Conversation> {
+    return this.post(`/api/admin/messages/${encodeURIComponent(id)}/assign`, { adminId });
+  }
+
+  /** OPERATOR: CLOSED; the client writing again reopens it. */
+  closeConversation(id: string): Promise<Conversation> {
+    return this.post(`/api/admin/messages/${encodeURIComponent(id)}/close`);
   }
 
   // ── The Club: the private salon's requests (P-X08) ───────────────────────

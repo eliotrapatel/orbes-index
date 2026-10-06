@@ -129,8 +129,9 @@ body {
 .side__link {
   position: relative;
   display: block;
-  /* 3 px: the sidebar of an ADMIN (Orders and Atelier included, plan LIVE RELEASE+) fits a 900 px screen with its foot. */
-  padding: 3px 0;
+  /* 2 px: the sidebar of an ADMIN (Orders and Atelier included, plan LIVE RELEASE+; Messages first under Clients, plan
+     NEXT-NINE CS-01) fits a 900 px screen with its foot. */
+  padding: 2px 0;
   font-size: var(--fs-micro);
   letter-spacing: 0.24em;
   text-transform: uppercase;
@@ -4682,4 +4683,74 @@ a.bar__label:hover {
   min-width: 220px;
   white-space: pre-line;
   overflow-wrap: break-word;
+}
+
+/* ── Messages (CS-01) ──────────────────────────────────────────────────── */
+
+/* The priority tag of a PLATINE or PALLADIUM client on the board and a conversation's head. */
+.messages__priority {
+  display: inline-block;
+  padding: 3px 8px;
+  border: 1px solid var(--ink);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* A conversation: the messages oldest first, the client's and the answers apart by a rule. */
+.thread {
+  list-style: none;
+  margin: 0 0 28px;
+  padding: 0;
+}
+
+.thread__item {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.thread__item--staff {
+  padding-left: 28px;
+  border-left: 1px solid var(--ink);
+}
+
+.thread__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 0 0 6px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.thread__author {
+  color: var(--ink);
+}
+
+.thread__concerns {
+  margin: 0 0 8px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.thread__body {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.thread__answer {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+  max-width: 720px;
+}
+
+.thread__answer .cfield {
+  width: 100%;
 }

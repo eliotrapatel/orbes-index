@@ -20,7 +20,10 @@
  * prefixed to the tab title as `(3)`: asked on every navigation and every
  * minute while the tab is visible (ui/attention.ts), only by a role that
  * sees the link; the Anomalies view gives the count it reads itself. The
- * refresh is a background request: it never signs the admin out.
+ * refresh is a background request: it never signs the admin out. The
+ * Messages link (CS-01) carries a second badge, the conversations To answer
+ * (GET /api/admin/messages/summary), refreshed the same way by a second poll;
+ * the tab title's count stays the Anomalies'.
  *
  * A view may hold its page (ui/leave-guard.ts: a batch's claim codes not yet
  * saved): navigating away or signing out then asks first. A session that
@@ -33,6 +36,7 @@ import { monogramSvg } from '../shared/monogram.js';
 import { AdminApi, ApiError } from './api.js';
 import { formatDateTime } from './format.js';
 import { badgeText, consoleTitle } from './model/anomalies.js';
+import { messagesBadge } from './model/messages.js';
 import { can, saleOnly, type Capability } from './model/permissions.js';
 import { href, parseHash, type Route, type RouteName } from './router.js';
 import type { AdminSession } from './types.js';
@@ -58,6 +62,8 @@ import { genomesView } from './views/genomes.js';
 import { keysView } from './views/keys.js';
 import { disposeLiveView, liveReleaseView } from './views/live.js';
 import { loginView } from './views/login.js';
+import { conversationView } from './views/conversation.js';
+import { messagesView } from './views/messages.js';
 import { orderView } from './views/order.js';
 import { ordersView } from './views/orders.js';
 import { invoicesView } from './views/invoices.js';
@@ -116,6 +122,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: 'Clients',
     items: [
+      { route: 'messages', label: 'Messages' },
       { route: 'owners', label: 'Owners' },
       { route: 'club', label: 'Club' },
       { route: 'segments', label: 'Segments' },
@@ -150,6 +157,8 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   analytics: { view: analyticsView, title: 'Analytics', nav: 'analytics' },
   anomalies: { view: anomaliesView, title: 'Anomalies', nav: 'anomalies' },
   cases: { view: casesView, title: 'Cases', nav: 'cases' },
+  messages: { view: messagesView, title: 'Messages', nav: 'messages' },
+  conversation: { view: conversationView, title: 'Conversation', nav: 'messages' },
   owners: { view: ownersView, title: 'Owners', nav: 'owners' },
   owner: { view: ownerView, title: 'Owner', nav: 'owners' },
   club: { view: clubView, title: 'Club', nav: 'club' },
@@ -194,6 +203,8 @@ let shell: {
   nav: HTMLElement | null;
   crumb: HTMLElement | null;
   badge: HTMLElement | null;
+  /** The count of conversations To answer on the Messages link (CS-01). */
+  messagesBadge: HTMLElement | null;
   forced: boolean;
 } | null = null;
 let clockTimer: ReturnType<typeof setInterval> | null = null;
@@ -201,6 +212,9 @@ let pageTitle = 'Orbes';
 /** OPEN HIGH + CRITICAL findings, as last read (0 when signed out). */
 let attention = 0;
 let attentionPoll: AttentionPoll | null = null;
+/** Conversations To answer, as last read (0 when signed out), and their refresh. */
+let toAnswer = 0;
+let messagesPoll: AttentionPoll | null = null;
 /** The session ended while a page was held: that page stays until it is left, then the sign-in says why. */
 let endedWhileHeld = false;
 /** The notice that said so: taken down with the page. */
@@ -231,6 +245,32 @@ function showAttention(count: number): void {
   document.title = consoleTitle(pageTitle, attention);
 }
 
+/** Show the count of conversations To answer on the Messages link (never in the tab title). */
+function showMessages(count: number): void {
+  toAnswer = count;
+  const text = messagesBadge(count);
+  if (shell?.messagesBadge) {
+    shell.messagesBadge.hidden = text === '';
+    shell.messagesBadge.querySelector('.side__badge-count')!.textContent = text;
+  }
+}
+
+/** Start the Messages badge's refresh, or ask again after a navigation (a second poll, as the Anomalies one). */
+function watchMessages(): void {
+  if (messagesPoll) {
+    void messagesPoll.refresh();
+    return;
+  }
+  const poll: AttentionPoll = startAttentionPoll({
+    load: async () => (await api.messagesSummary({ background: true })).toAnswer,
+    apply: showMessages,
+    onEnded: () => {
+      if (messagesPoll === poll) messagesPoll = null;
+    },
+  });
+  messagesPoll = poll;
+}
+
 /**
  * Start the badge's refresh once signed in (and past MFA), or ask again after a navigation. `viewReads`:
  * the view about to render reads the count itself (Anomalies), so nothing is asked twice.
@@ -257,6 +297,9 @@ function forgetAttention(): void {
   attentionPoll?.stop();
   attentionPoll = null;
   showAttention(0);
+  messagesPoll?.stop();
+  messagesPoll = null;
+  showMessages(0);
 }
 
 /** Navigate to `hash`, re-rendering even when it is already current (hashchange would not fire). */
@@ -322,7 +365,7 @@ function buildSaleShell(s: AdminSession): NonNullable<typeof shell> {
       h('div', { class: 'saleshell__links' }, h('a', { class: 'saleshell__link', attrs: { href: href('security') } }, 'Security'), passwordButton(s, 'saleshell__link'), signOut),
     ),
   );
-  return { kind: 'sale', root, view, nav: null, crumb: null, badge: null, forced: s.admin.passwordChangeRequired };
+  return { kind: 'sale', root, view, nav: null, crumb: null, badge: null, messagesBadge: null, forced: s.admin.passwordChangeRequired };
 }
 
 function buildShell(s: AdminSession): NonNullable<typeof shell> {
@@ -332,6 +375,12 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
     { class: 'side__badge', attrs: { hidden: true, 'data-testid': 'anomaly-badge' } },
     h('span', { class: 'side__badge-count' }),
     h('span', { class: 'visually-hidden' }, ' open HIGH or CRITICAL'),
+  );
+  const toAnswerBadge = h(
+    'span',
+    { class: 'side__badge', attrs: { hidden: true, 'data-testid': 'messages-badge' } },
+    h('span', { class: 'side__badge-count' }),
+    h('span', { class: 'visually-hidden' }, ' to answer'),
   );
   const nav = h(
     'nav',
@@ -346,7 +395,7 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
         h(
           'ul',
           { class: 'side__list' },
-          ...items.map((i) => h('li', null, h('a', { class: 'side__link', attrs: { href: href(i.route) }, data: { route: i.route } }, i.label, i.route === 'anomalies' ? badge : null))),
+          ...items.map((i) => h('li', null, h('a', { class: 'side__link', attrs: { href: href(i.route) }, data: { route: i.route } }, i.label, i.route === 'anomalies' ? badge : i.route === 'messages' ? toAnswerBadge : null))),
         ),
       );
     }),
@@ -389,7 +438,7 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
     ),
     h('div', { class: 'main' }, h('header', { class: 'topbar' }, crumb, h('span', { class: 'topbar__env' }, 'Internal'), clock), view),
   );
-  return { kind: 'console', root, view, nav, crumb, badge, forced };
+  return { kind: 'console', root, view, nav, crumb, badge, messagesBadge: toAnswerBadge, forced };
 }
 
 function ensureShell(s: AdminSession, kind: ShellKind = 'console'): NonNullable<typeof shell> {
@@ -397,6 +446,7 @@ function ensureShell(s: AdminSession, kind: ShellKind = 'console'): NonNullable<
     shell = kind === 'sale' ? buildSaleShell(s) : buildShell(s);
     mount(app, shell.root);
     showAttention(attention);
+    showMessages(toAnswer);
   }
   return shell;
 }
@@ -564,6 +614,7 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   // Only a role that sees the Anomalies link asks for its count (the Anomalies view reads it itself); never a seller,
   // whose sale shell has no such link.
   if (sh.nav && sh.badge && sh.nav.contains(sh.badge)) watchAttention(r.name === 'anomalies');
+  if (sh.nav && sh.messagesBadge && sh.nav.contains(sh.messagesBadge)) watchMessages();
 
   if (r.name === 'security') {
     markNav(null);

@@ -101,6 +101,18 @@ export type ShopRequestStatus = (typeof SHOP_REQUEST_STATUSES)[number];
 export const SHOP_REQUEST_OUTCOMES = ['ACCEPTED', 'DECLINED'] as const;
 export type ShopRequestOutcome = (typeof SHOP_REQUEST_OUTCOMES)[number];
 
+/** A conversation of the Messages board (CS-01, client_conversations.status): the client wrote last, answered, or closed. */
+export const CLIENT_CONVERSATION_STATUSES = ['TO_ANSWER', 'ANSWERED', 'CLOSED'] as const;
+export type ClientConversationStatus = (typeof CLIENT_CONVERSATION_STATUSES)[number];
+
+/** Who wrote a message (client_messages.author): the client, or a member of ORBES Client Services. */
+export const CLIENT_MESSAGE_AUTHORS = ['COLLECTOR', 'STAFF'] as const;
+export type ClientMessageAuthor = (typeof CLIENT_MESSAGE_AUTHORS)[number];
+
+/** What a client's message concerns (client_messages.context_kind): a piece, an order, a release, a scan, a model. */
+export const CLIENT_MESSAGE_CONTEXTS = ['PIECE', 'ORDER', 'RELEASE', 'SCAN', 'MODEL'] as const;
+export type ClientMessageContext = (typeof CLIENT_MESSAGE_CONTEXTS)[number];
+
 /** Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon. */
 export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON'] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
@@ -964,6 +976,8 @@ export interface OwnerSheet {
   segments: { id: string; name: string }[];
   /** N4: Client Services' notes on its orders, entries and requests, the latest first. */
   notes: ClientNote[];
+  /** CS-01: the client's conversation with ORBES Client Services and its status; null when the client never wrote. */
+  messages: { conversationId: string; status: ClientConversationStatus } | null;
 }
 
 /** N4: an order on the client sheet: the board's card (without the collector) and the time it reached each step. */
@@ -1847,6 +1861,68 @@ export interface ShopRequest {
   resolutionNote: string | null;
   /** ACCEPTED (an order was created) or DECLINED once closed; null while open, or closed before the orders. */
   outcome: ShopRequestOutcome | null;
+}
+
+// ── MESSAGES (plan NEXT-NINE, CS-01) ───────────────────────────────────────
+
+/** What a client's message concerns, with the ids its link needs (GET /api/admin/messages, …/:id). */
+export interface MessageConcerns {
+  kind: ClientMessageContext;
+  /** The label the server wrote when the client sent it, in capitals: `MONOLITHE · O26-J-00184`. */
+  label: string;
+  productId: string | null;
+  orderId: string | null;
+  dropId: string | null;
+  dropMode: 'DRAW' | 'LIVE' | null;
+  modelId: string | null;
+  shopRequestId: string | null;
+  /** The scan while the scan retention keeps it; null once cleared (the REF stays). */
+  scanEventId: string | null;
+  scanRef: string | null;
+}
+
+/** A row of the Messages board: the client's email masked for an AUDITOR. */
+export interface ConversationRow {
+  id: string;
+  account: { id: string; email: string };
+  tier: { level: 0 | 1 | 2 | 3; name: ClubTierName | null };
+  /** PALLADIUM or PLATINE, the tier read now; null below the priority tier. */
+  priority: ClubTierName | null;
+  concerns: MessageConcerns | null;
+  moreConcerns: number;
+  lastMessage: { author: ClientMessageAuthor; excerpt: string; at: Iso };
+  waitingSince: Iso | null;
+  status: ClientConversationStatus;
+  answeredBy: { id: string; email: string } | null;
+}
+
+/** GET /api/admin/messages: a page of the board and the count To answer. */
+export interface ConversationPage extends Paged<ConversationRow> {
+  toAnswer: number;
+}
+
+/** A message of a conversation, its author named for the console. */
+export interface ConversationMessage {
+  id: string;
+  author: ClientMessageAuthor;
+  admin: { id: string; email: string } | null;
+  body: string;
+  at: Iso;
+  concerns: MessageConcerns | null;
+}
+
+/** GET /api/admin/messages/:id. */
+export interface Conversation extends Omit<ConversationRow, 'concerns' | 'moreConcerns' | 'lastMessage'> {
+  createdAt: Iso;
+  closedAt: Iso | null;
+  closedBy: { id: string; email: string } | null;
+  messages: ConversationMessage[];
+}
+
+/** GET /api/admin/messages/summary: the sidebar's badge. */
+export interface MessagesSummary {
+  toAnswer: number;
+  priority: number;
 }
 
 // ── The Club: the tiers (P-X04) ────────────────────────────────────────────

@@ -277,6 +277,9 @@ describe('admin enums mirror the server', () => {
       'RETURN_OUTCOMES',
       'INVOICE_KINDS',
       'ACCESS_COMBINES',
+      'CLIENT_CONVERSATION_STATUSES',
+      'CLIENT_MESSAGE_AUTHORS',
+      'CLIENT_MESSAGE_CONTEXTS',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }

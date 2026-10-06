@@ -88,6 +88,8 @@ const BENCH: Record<string, Tone> = { TO_MAKE: 'outline', IN_PROGRESS: 'solid', 
 const CIRCLE: Record<string, Tone> = { PUBLISHED: 'solid', UNPUBLISHED: 'outline' };
 /** A request of the private salon (P-X08): an open one waits for ORBES Client Services, as an open case does. */
 const SHOP_REQUEST: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
+/** A conversation of the Messages board (CS-01): one to answer waits for ORBES Client Services, as an open case does. */
+const CONVERSATION: Record<string, Tone> = { TO_ANSWER: 'alert', ANSWERED: 'solid', CLOSED: 'muted' };
 /** An answer to an invitation of the circle (P-X01): a place taken, or declined. */
 const CIRCLE_ANSWER: Record<string, Tone> = { YES: 'solid', NO: 'muted' };
 const VERIFICATION: Record<string, Tone> = {
@@ -122,6 +124,7 @@ export type ToneDomain =
   | 'circle'
   | 'circleAnswer'
   | 'shopRequest'
+  | 'conversation'
   | 'livePhase'
   | 'liveEntry'
   | 'order'
@@ -146,6 +149,7 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   circle: CIRCLE,
   circleAnswer: CIRCLE_ANSWER,
   shopRequest: SHOP_REQUEST,
+  conversation: CONVERSATION,
   livePhase: LIVE_PHASE,
   liveEntry: LIVE_ENTRY,
   order: ORDER,

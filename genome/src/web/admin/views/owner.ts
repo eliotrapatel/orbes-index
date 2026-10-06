@@ -23,11 +23,14 @@
  * it took part in with the pieces it secured; its answers to the questions
  * after; its I'LL BE THERE and whether it came; the segments it belongs to
  * now; and the notes Client Services wrote on its orders, draw entries,
- * requests of the private salon and LIVE reservations.
+ * requests of the private salon and LIVE reservations. One line, Messages
+ * (CS-01), gives the status of its conversation with ORBES Client Services
+ * and opens it.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, formatDateTime, humanize, shortHash } from '../format.js';
 import { tierStanding } from '../model/club.js';
+import { STATUS_LABELS } from '../model/messages.js';
 import { formatMoney } from '../model/live.js';
 import { CHANNEL_LABELS, LATE_LABELS, sizeText } from '../model/orders.js';
 import { INTEREST_OUTCOME_LABELS, NOTE_ABOUT_LABELS, orderSteps, participationLine, RELEASE_KIND_LABELS } from '../model/owners.js';
@@ -138,6 +141,17 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
         { label: 'Name', value: o.displayName ?? '—' },
         { label: 'Country', value: o.country ?? '—' },
         { label: 'Tier', value: h('span', { data: { testid: 'owner-tier' } }, tierStanding(sheet.tier)), note: 'In the club now: from the pieces held, never a revoked, flagged or retired one' },
+        {
+          label: 'Messages',
+          value: sheet.messages
+            ? h(
+                'a',
+                { class: 'idlink', attrs: { href: href('conversation', { conversationId: sheet.messages.conversationId }), 'data-testid': 'owner-messages' } },
+                STATUS_LABELS[sheet.messages.status],
+              )
+            : '—',
+          note: sheet.messages ? 'The client’s conversation with ORBES Client Services' : 'The client has not written to ORBES Client Services',
+        },
         { label: 'Since', value: formatDate(o.createdAt) },
         { label: 'Account id', value: mono(o.id) },
       ]),

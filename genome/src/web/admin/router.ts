@@ -18,6 +18,9 @@ export const ROUTES = [
   { name: 'scans', path: '/scans' },
   { name: 'analytics', path: '/analytics' },
   { name: 'owners', path: '/owners' },
+  /** The Messages board (CS-01): one conversation per client; a conversation's page from its row. */
+  { name: 'messages', path: '/messages' },
+  { name: 'conversation', path: '/messages/:conversationId' },
   { name: 'owner', path: '/owners/:accountId' },
   /** The Club (P-R03): its tabs (Drops, Circle) by `?tab=`; a drop's page, a post's (P-X01), from its row, no link of their own in the sidebar. */
   { name: 'club', path: '/club' },
