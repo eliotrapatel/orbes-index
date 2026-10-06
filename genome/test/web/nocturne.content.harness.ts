@@ -16,6 +16,8 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
+import { TIER } from '../../src/web/verify/copy.js';
 import { BASELINE_FILE, eachState, type Baseline } from '../support/nocturne-stage.js';
 import { normalizeText, openState, pageTexts, shows, UI_STATES, type UiState } from '../support/nocturne-states.js';
 import { CHROMIUM_PATH } from '../support/ui-stage.js';
@@ -32,6 +34,8 @@ export interface Moved {
   value: string;
   reason: string;
   now: string;
+  /** The value set apart, part by part, in the same state: each part must still be shown there. */
+  shownAs?: readonly string[];
 }
 
 /** The states whose piece had its own photograph (the demo's boutique piece, O26-J-00184), with THE MODEL's beside it. */
@@ -51,14 +55,70 @@ const PIECE_PHOTO_STATES = [
   'pieces-certificate-withdrawn',
 ];
 
+/**
+ * MY PIECES in every state the stage reaches it (its own states, and those of the draws', the room's, the stress and
+ * the empty demos): YOUR TIER was at its head until N2.
+ */
+const TIER_STATES = [
+  'pieces',
+  'pieces-warranty',
+  'pieces-care',
+  'pieces-service',
+  'pieces-certificate-choice',
+  'pieces-report-choice',
+  'pieces-care-guide',
+  'pieces-change-password',
+  'pieces-certificate-link',
+  'pieces-certificate-withdrawn',
+  'pieces-incidents',
+  'pieces-piece-found',
+  'pieces-question-after',
+  'pieces-turn-passed',
+  'pieces-draws',
+  'pieces-empty',
+  'pieces-stress',
+  'live-pieces-turn',
+];
+
+/**
+ * The words of YOUR TIER (P-X04) as MY PIECES showed them (tier-model.ts, TIER): its label (THE CLUB without a tier),
+ * the pieces it counts, NEXT and the way to it, the first tier for an account without one, PALLADIUM the highest, and
+ * the benefits as ORBES words them (CLUB_TIER_DEFAULT_BENEFITS, the demo's).
+ */
+const TIER_WORDS: readonly RegExp[] = [
+  new RegExp(`^(${TIER.label}|${TIER.noneLabel})$`),
+  /^\d+ pieces? held$/,
+  /^NEXT: (TITANE|PLATINE|PALLADIUM)$/,
+  /^\d+ more pieces? registered to your account opens? (TITANE|PLATINE|PALLADIUM), from \d+ pieces held\. It adds:$/,
+  new RegExp(`^${TIER.first('TITANE').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+  new RegExp(`^${TIER.top.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+  new RegExp(`^${TIER.counted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`),
+];
+const TIER_BENEFITS = new Set(Object.values(CLUB_TIER_DEFAULT_BENEFITS).flatMap((b) => b.split('\n')));
+
+/** Each value of YOUR TIER in the baseline of each MY PIECES state: the list names only values that were there. */
+function tierMoves(): Moved[] {
+  const baseline = readBaseline();
+  return TIER_STATES.flatMap((state) =>
+    (baseline.states[state]?.values ?? [])
+      .filter((v) => TIER_BENEFITS.has(v) || TIER_WORDS.some((re) => re.test(v)))
+      .map((value) => ({
+        state,
+        value,
+        reason: 'Decision 10 (N2): YOUR TIER leaves MY PIECES, the whole block, THE CLUB and what a first piece opens included.',
+        now: 'The account sheet (C2), opened by the header\'s account button (the tier\'s name and the monogram): YOUR TIER, its five dots, its benefits, NEXT.',
+      })),
+  );
+}
+
 /** The states whose PRODUCT tab named the field set at issuance VARIANT. */
 const SIZE_STATES = ['result-first-registration-product', 'result-ownership-verified-product', 'result-ceremony'];
 
 /**
  * The values NOCTURNE moves or removes on purpose, step by step. N1: THIS PIECE and the sentence for two photographs
  * (decision 9: the piece's own photograph leaves every collector's screen and answer; the model's alone stays,
- * captioned THE MODEL, with the sentence for one), and VARIANT (the field set at issuance renamed Size). Later steps
- * add theirs, e.g. YOUR TIER (decision 10: moved from MY PIECES to the account sheet).
+ * captioned THE MODEL, with the sentence for one), and VARIANT (the field set at issuance renamed Size). N2: YOUR TIER
+ * (decision 10: moved from MY PIECES to the account sheet), and a page's failure said on two lines (C40).
  */
 export const MOVED: readonly Moved[] = [
   ...PIECE_PHOTO_STATES.flatMap((state) => [
@@ -81,10 +141,18 @@ export const MOVED: readonly Moved[] = [
     reason: 'N1: the piece’s field set at issuance is its size, renamed Size in the console and on a piece.',
     now: 'The same row and value, labelled SIZE.',
   })),
+  ...tierMoves(),
+  {
+    state: 'pieces-failed',
+    value: 'Your pieces could not be shown just now. The ORBES service could not be reached. Check your connection, then try again.',
+    reason: 'N2 (C40): a page that could not be shown says its sentence, then the reason on a line of its own, then TRY AGAIN.',
+    now: 'The same words on two lines: the sentence in ivory, the reason in ash.',
+    shownAs: ['Your pieces could not be shown just now.', 'The ORBES service could not be reached. Check your connection, then try again.'],
+  },
 ];
 
 const movedKey = (state: string, value: string) => `${state}\u0000${normalizeText(value)}`;
-const moved = new Set(MOVED.map((m) => movedKey(m.state, m.value)));
+const moved = new Map(MOVED.map((m) => [movedKey(m.state, m.value), m] as const));
 
 /** A state whose id is one of `names` or starts with one of them and a dash. */
 const named =
@@ -101,14 +169,15 @@ const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroo
 export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.freeze({
   scan: (s) => full(s) && !s.mutates && named('now', 'scan', 'photo', 'problem')(s),
   results: (s) => full(s) && !s.mutates && named('result')(s),
-  pieces: (s) => full(s) && !s.mutates && named('pieces')(s),
+  // MY PIECES, and the account sheet (C2: its own, over NOW, in the full, draw-leads and stress demos).
+  pieces: (s) => (full(s) && !s.mutates && named('pieces')(s)) || named('account')(s),
   collection: (s) => full(s) && !s.mutates && named('collection', 'model')(s),
   releases: (s) => full(s) && !s.mutates && named('releases', 'draw', 'live')(s),
   circle: (s) => full(s) && !s.mutates && named('circle', 'post', 'legal', 'certificate')(s),
   writes: (s) => full(s) && !!s.mutates,
   room: (s) => ROOM_VARIANTS.includes(s.variant),
   draws: (s) => s.variant === 'draws',
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws',
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && !named('account')(s),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */
@@ -140,7 +209,12 @@ export function contentSuite(name: string): void {
             try {
               const texts = await pageTexts(opened.page);
               for (const value of recorded.values) {
-                if (moved.has(movedKey(state.id, value))) continue;
+                const m = moved.get(movedKey(state.id, value));
+                if (m) {
+                  // Set apart on purpose: each of its parts is still shown there.
+                  for (const part of m.shownAs ?? []) if (!shows(texts, part)) missing.push(`${state.id}: ${part} (of «${value}»)`);
+                  continue;
+                }
                 if (!shows(texts, value)) missing.push(`${state.id}: ${value}`);
               }
             } finally {

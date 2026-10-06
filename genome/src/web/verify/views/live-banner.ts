@@ -1,6 +1,7 @@
 /**
- * The banner of the LIVE RELEASES (plan of 2026-10-04, The experience: the banner), on /verify and MY PIECES: an ink
- * strip in the house style across the top of the page, a link to the release's page.
+ * The banner of the LIVE RELEASES (plan of 2026-10-04, The experience: the banner), on /verify and MY PIECES: a strip
+ * under the rail of chapters, a link to the release's page. NOCTURNE draws it as the canvas does (C3): a plate, the
+ * live dot at its left, its line, the chevron at its right.
  *
  *   LIVE RELEASE · MONOLITHE · OPENS IN 02:14:09      announced (its hours past 24 a day or more ahead: 73:14:09)
  *   LIVE RELEASE · MONOLITHE · THE ROOM IS OPEN       from the room's opening
@@ -17,6 +18,7 @@ import type { ApiClient } from '../api.js';
 import { bannerModel, measureClock, type BannerModel } from '../live-model.js';
 import type { LiveBanner } from '../types.js';
 import { withNumerals } from './common.js';
+import { icon } from './nocturne.js';
 
 /** The release is read again this often while the banner is on show. */
 export const BANNER_REFRESH_MS = 60_000;
@@ -73,8 +75,10 @@ class Banner implements LiveBannerView {
           },
         },
       },
-      // One line on one baseline: the countdown's figures, larger and in the reading face, on the labels' own.
+      h('i', { class: 'n-live live-banner__live', attrs: { 'aria-hidden': 'true' } }),
+      // One line on one baseline: the countdown's figures in the reading face, on the labels' own.
       h('span', { class: 'live-banner__line' }, this.lead, h('span', { class: 'live-banner__dot', attrs: { 'aria-hidden': 'true' }, text: ' · ' }), this.state, this.clock),
+      icon('chev', { small: true }),
     );
     this.el = h('div', { class: 'live-banner-host', attrs: { hidden: true } }, this.link);
   }

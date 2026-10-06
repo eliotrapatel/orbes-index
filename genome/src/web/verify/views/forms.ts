@@ -51,6 +51,30 @@ export function accountForm(session: SessionStore, name: string, fields: HTMLEle
   const error = h('p', { class: 'form__error', attrs: { role: 'alert', hidden: true } });
   const submit = h('button', { class: 'btn btn--block', attrs: { type: 'submit', 'aria-busy': 'false' }, text: submitLabel });
   const form = h('form', { class: `form form--${name}`, attrs: { novalidate: true, 'aria-label': submitLabel.toLowerCase() } }, ...fields, error, submit);
+  return wireForm(form, submit, error, session, onSubmit);
+}
+
+/**
+ * The same form in NOCTURNE's pieces (C39): its fields underlined on the dark (views/nocturne.ts field()), the failure
+ * said under them (`.err`), then the submit, the ivory button, beside `beside` (a hairline CANCEL) when given.
+ */
+export function nocturneForm(
+  session: SessionStore,
+  name: string,
+  fields: HTMLElement[],
+  submitLabel: string,
+  onSubmit: () => Promise<void>,
+  beside?: HTMLElement,
+): HTMLFormElement {
+  const error = h('p', { class: 'n-err form__error', attrs: { role: 'alert', hidden: true } });
+  const submit = h('button', { class: 'n-g n-btn', attrs: { type: 'submit', 'aria-busy': 'false' }, text: submitLabel });
+  const actions = beside ? h('div', { class: 'n-duo n-form__actions' }, submit, beside) : h('div', { class: 'n-form__actions' }, submit);
+  const form = h('form', { class: `n-form form--${name}`, attrs: { novalidate: true, 'aria-label': submitLabel.toLowerCase() } }, ...fields, error, actions);
+  return wireForm(form, submit, error, session, onSubmit);
+}
+
+/** One submit at a time; a failure said in `error`, focus on the field to correct (or the button); a 401 ends the session. */
+function wireForm(form: HTMLFormElement, submit: HTMLButtonElement, error: HTMLElement, session: SessionStore, onSubmit: () => Promise<void>): HTMLFormElement {
   form.addEventListener('submit', (ev) => {
     ev.preventDefault();
     if (submit.disabled) return;

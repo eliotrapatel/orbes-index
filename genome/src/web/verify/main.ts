@@ -18,6 +18,9 @@
  *   a boutique board's link ──▶ the board of a LIVE RELEASE (/verify/releases/<id>/board#secret), on its own
  *   a shared link ──▶ an ownership certificate (/verify/c#token, F-06)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
+ *   NOCTURNE's chrome (views/shell.ts) round every screen but the scan, the room, the board and the certificate: the
+ *                    header (the tier and the monogram open the account sheet, views/account.ts; SIGN IN signed out),
+ *                    the rail of chapters NOW · RELEASES · COLLECTION · CIRCLE · PIECES, the footer, the SCAN ring
  *
  * The page only reads the code; the server verifies it. Nothing secret lives
  * here: no keys, no thresholds.
@@ -86,6 +89,7 @@ import { piecesView } from './views/pieces.js';
 import { releasesView, releaseView, type ReleasesTab } from './views/releases.js';
 import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
+import { Shell } from './views/shell.js';
 import { verifyingView } from './views/verifying.js';
 
 type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost';
@@ -194,6 +198,8 @@ class App {
   private postId: string | null = null;
   /** The banner of the LIVE RELEASES, over the landing and MY PIECES (and nowhere else). */
   private readonly banner = liveBannerView({ api: this.api, onRelease: (id) => this.openRelease(id) });
+  /** NOCTURNE's chrome round the screen: the header and its account sheet, the rail, the footer, the SCAN ring. */
+  private shell: Shell | null = null;
 
   start(): void {
     this.photoInput.addEventListener('change', () => {
@@ -240,7 +246,24 @@ class App {
     window.addEventListener('pagehide', () => this.stopCamera());
 
     document.body.prepend(viewportCorners());
-    this.host.before(this.banner.el);
+    this.shell = new Shell(
+      {
+        api: this.api,
+        session: this.session,
+        sound: this.sound,
+        onChapter: (c) => {
+          if (c === 'now') this.openNow();
+          else if (c === 'releases') this.openReleases();
+          else if (c === 'collection') this.openLookbook();
+          else if (c === 'circle') this.openCircle();
+          else this.openPieces();
+        },
+        onSignIn: () => this.openPieces(),
+        onScan: () => void this.startScan(),
+      },
+      this.host,
+      this.banner.el,
+    );
     const route = routeOf(location.pathname);
     if (route === 'board') {
       // The boutique board: on its own, nothing under it; its secret stays in its own address.
@@ -321,6 +344,20 @@ class App {
     // From a sheet (or a release's page), the scan takes its entry over the lookbook's (the list's): back then returns there.
     if (entry !== undefined && entry !== 'app' && REPLACEABLE.includes(entry)) history.replaceState({ screen: 'app' }, '', LANDING_PATH);
     else if (entry !== 'app') history.pushState({ screen: 'app' }, '', LANDING_PATH);
+  }
+
+  /**
+   * NOW (the rail): the landing, the base entry. From an entry above it, back to it: one entry for a screen over the
+   * landing, two for a sheet, a release's page or a post (over their list), three for an after-room (over its release).
+   */
+  private openNow(): void {
+    const entry = entryOf(history.state);
+    if (entry === undefined || entry === 'landing') {
+      if (this.screen !== 'landing') this.showLanding();
+      return;
+    }
+    const depth = entry === 'sheet' || entry === 'circlePost' ? 2 : entry === 'release' ? (afterRoomOf(location.pathname) ? 3 : 2) : 1;
+    history.go(-depth);
   }
 
   /** MY PIECES, from the landing (an entry above it) or from a result (in the scan's entry): back returns to the landing. */
@@ -448,6 +485,7 @@ class App {
     this.live?.dispose();
     this.live = null;
     document.body.dataset.screen = screen;
+    this.shell?.show(screen);
     this.host.replaceChildren(next);
     this.screen = screen;
     this.banner.show(screen === 'landing' || screen === 'pieces');
@@ -466,7 +504,6 @@ class App {
       onPieces: () => this.openPieces(),
       onCollection: () => this.openLookbook(),
       onReleases: () => this.openReleases(),
-      sound: this.sound,
     });
     void this.swap(view, 'landing', focus);
   }

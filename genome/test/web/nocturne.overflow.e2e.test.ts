@@ -19,7 +19,8 @@ const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
 
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
-  ...['now-stress', 'pieces-stress'].flatMap((state) => [
+  // The account sheet's stress state lies over NOW's (the page under the sheet, inert): NOW's own known cuts.
+  ...['now-stress', 'pieces-stress', 'account-sheet-stress'].flatMap((state) => [
     {
       state,
       starts: 'span.live-banner__lead «LIVE RELEASE · MONOLITHE ARCHITECTURALE» is wider than its box',
@@ -33,29 +34,13 @@ const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
   ]),
   // The resting orbit round the wordmark of today's landing: a drawing (aria-hidden, absolutely placed, inset -15 %) that
   // reaches past the emblem on purpose. NOW replaces the landing (N3).
-  ...['now-empty', 'now-stress'].flatMap((state) =>
+  ...['now-empty', 'now-stress', 'account-sheet-stress'].flatMap((state) =>
     ['div.landing__center spills out of its box', 'div.landing__emblem spills out of its box'].map((starts) => ({
       state,
       starts,
       reason: 'The resting orbit (.landing__orbit, inset -15 %) is a drawing round the wordmark, wider than its emblem on purpose.',
     })),
   ),
-  // A defect of the app at 5efd4c9, found by the check of a box's content and of a parent's edges: the tracking number of
-  // 27 characters is one word the row's value does not break, so it pushes the row past its plate and into the page's
-  // margin (to 388 of 390 px). The build removes it (N2's rows break a long value, N5 checks MY PIECES' orders).
-  ...[
-    'section.pieces__orders spills out of its box',
-    'ul.pieces__order-list spills out of its box',
-    'li.pieces__order-item spills out of its box',
-    'article.pieces__order spills out of its box',
-    'dl.rows.pieces__order-shipment spills out of its box',
-    'div.rows__row spills out of its box',
-    'dd.rows__value «XY48291563748201937465012FR» reaches past its parent div.rows__row',
-  ].map((starts) => ({
-    state: 'pieces-stress',
-    starts,
-    reason: 'The long tracking number is not broken in its row at 5efd4c9: it reaches into the page margin. NOCTURNE removes it.',
-  })),
 ];
 
 describe.skipIf(!HAS_CHROMIUM)('NOCTURNE overflow: nothing overflows its column in the extreme cases (Chromium)', () => {

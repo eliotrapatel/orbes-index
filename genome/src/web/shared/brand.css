@@ -58,6 +58,81 @@
   --vault-light: radial-gradient(120% 55% at 50% 0%, rgba(246, 242, 234, 0.1), rgba(10, 10, 10, 0) 62%);
   --vault-glow: drop-shadow(0 0 22px rgba(246, 242, 234, 0.28));
 
+  /* NOCTURNE (plan NOCTURNE, chosen 2026-10-05): the customer app in the vault's look, its column on the ground. The
+     canvas's rulebook (nocturne-ref/build.py, COMMON_CSS and C_CSS) made tokens, value for value: its ground, ink, ash,
+     smoke, hairlines and plate are the vault's above; what follows is the rest. verify/styles.css (NOCTURNE) sets the
+     rules. */
+  /* The column on a computer: phone width at most (choice 5). */
+  --n-column: 480px;
+  /* A photograph's ground while it loads (.ph), the inner frame of a plate card, the SCAN ring's hairline and light,
+     the GENOME's glow, a variant dot's ring, the halo of the live dot and of a sealed door. */
+  --n-photo: #151413;
+  --n-card-line: rgba(246, 242, 234, 0.16);
+  --n-scan-ring: rgba(246, 242, 234, 0.62);
+  --n-scan-light: rgba(246, 242, 234, 0.14);
+  --n-glow: drop-shadow(0 0 18px rgba(246, 242, 234, 0.22));
+  --n-dot-ring: rgba(246, 242, 234, 0.2);
+  --n-seal-light: rgba(246, 242, 234, 0.08);
+  /* The canvas's two shades of pure black: the scrim under the account sheet (C2) and the shadow of the room's door seal. */
+  --n-scrim: rgba(0, 0, 0, 0.55);
+  --n-door-shadow: rgba(0, 0, 0, 0.6);
+  /* Fades of a photograph into the ground (.fade): 22 % at its top, 46 % at its foot; the text rises 56 px onto it. */
+  --n-fade-top: 22%;
+  --n-fade-foot: 46%;
+  --n-lift: -56px;
+  /* The page's measures: the margin, the space between sections, the header, the rail, a button, the SCAN ring's foot. */
+  --n-margin: 24px;
+  --n-section: 76px;
+  --n-header: 56px;
+  --n-rail: 40px;
+  --n-button: 54px;
+  --n-foot: 132px;
+  /* The type scale: Gravesend Sans (capitals) for the wordmark, titles, labels, the rail and buttons; Helvetica Neue for
+     reading text in sentence case, every digit, and the countdowns in weight 200. Sizes, tracking and leading. */
+  --n-fs-base: 15px;
+  --n-fs-wm: 14px;
+  --n-fs-t1: 30px;
+  --n-fs-t2: 16px;
+  --n-fs-t3: 11px;
+  --n-fs-lb: 9.5px;
+  --n-fs-lead: 16px;
+  --n-fs-tx: 15px;
+  --n-fs-sm: 13px;
+  --n-fs-btn: 11px;
+  --n-fs-tl: 10.5px;
+  --n-fs-cap: 11.5px;
+  --n-fs-dl: 14px;
+  --n-fs-kv: 13.5px;
+  --n-fs-count: 46px;
+  --n-fs-count-sep: 34px;
+  --n-fs-count-unit: 8.5px;
+  --n-fs-tab-count: 10px;
+  --n-fs-micro: 10px;
+  --n-fs-step: 12px;
+  --n-fs-size: 16px;
+  --n-fs-input: 16px;
+  --n-fs-copy: 9px;
+  --n-fs-gen-id: 15px;
+  --n-fs-gen-fp: 11.5px;
+  --n-track-wm: 0.46em;
+  --n-track-t1: 0.08em;
+  --n-track-t2: 0.14em;
+  --n-track-t3: 0.26em;
+  --n-track-lb: 0.28em;
+  --n-track-btn: 0.28em;
+  --n-track-tl: 0.26em;
+  --n-track-acct: 0.26em;
+  --n-track-rail: 0.16em;
+  --n-track-tab: 0.24em;
+  --n-track-micro: 0.22em;
+  --n-lh-base: 1.5;
+  --n-lh-t1: 1.12;
+  --n-lh-t2: 1.3;
+  --n-lh-lead: 1.6;
+  --n-lh-tx: 1.55;
+  --n-lh-sm: 1.45;
+  --n-lh-art: 1.65;
+
   /* Type. --font reads: sentences, values, identifiers, codes, inputs (the
      stack of index.html). --font-display is the brand's voice: the wordmark,
      titles and tracked-capital labels, falling back to --font. Gravesend has

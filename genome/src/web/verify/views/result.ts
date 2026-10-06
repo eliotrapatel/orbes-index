@@ -13,7 +13,7 @@
  *   └                      ┘
  *   ┌                      ┐
  *     GENOME  O26-J-00184
- *     ◔ · ◯ · ◕ · …            core renderGenomeSvg row
+ *     ◔ · ◯ · ◕ · …            core renderGenomeSvg orbit, the ORBES monogram at its centre (decision 12)
  *     G1-E1DC-BE52 · GENOME-01
  *        MONOLITHE              the ceremony of a first registration (P-D01):
  *          ORBIT                the glyphs appear one by one, then the model
@@ -25,8 +25,7 @@
  *                                    (P-R02), a text link, when it is PUBLIC
  *   PRODUCT · WARRANTY · CARE · OWNERSHIP
  *   SCAN ANOTHER · footnote · VERIFIED · REF
- *   PRIVACY · TERMS · LEGAL · HELP   the legal pages (J-06), in a new tab,
- *   IP GEOLOCATION BY DB-IP          and DB-IP's attribution
+ *   (the legal pages, J-06, and DB-IP's attribution: NOCTURNE's footer, views/shell.ts, in a new tab)
  *
  * Other results show no product lines and no tabs, only a line for ORBES
  * Client Services and, when it is configured, CONTACT ORBES CLIENT SERVICES
@@ -56,7 +55,7 @@ import { CEREMONY, RECEIVING } from '../copy.js';
 import { genomeBlock, genomeFromModel } from '../genome-view.js';
 import { prepareShareImage, shareGenomeImage } from '../share-image.js';
 import { initialTab, type CeremonyModel, type ResultViewModel, type TabId } from '../view-model.js';
-import { contactBlock, legalLinks, lookbookLink, toneMark, viewRoot, withNumerals } from './common.js';
+import { contactBlock, lookbookLink, toneMark, viewRoot, withNumerals } from './common.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
 import { photoPlate } from './photos.js';
@@ -268,8 +267,6 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
       vm.verifiedAt ? h('span', { text: `VERIFIED ${vm.verifiedAt}` }) : null,
       vm.reference ? h('span', { text: `REF ${vm.reference}` }) : null,
     ),
-    // The legal pages (J-06), in a new tab: the result stays for the customer to come back to.
-    legalLinks({ newTab: true, extraClass: 'result__legal' }),
   );
 
   root.append(head, ...sections.filter((x): x is HTMLElement => x !== null), foot);

@@ -31,6 +31,11 @@ export interface SvgStyle {
   widthMm?: number;
   /** Accessible title, emitted as `<title>`. */
   title?: string;
+  /**
+   * Outlines that are not primitives (the ORBES monogram at a GENOME's centre, NOCTURNE decision 12): path data in
+   * viewBox units, each set in its own `<g data-layer>` group, painted in the ink before the primitives, nonzero rule.
+   */
+  paths?: readonly { layer: string; d: readonly string[] }[];
 }
 
 export interface ViewBox {
@@ -245,6 +250,11 @@ export function primitivesToSvg(primitives: readonly Primitive[], viewBox: ViewB
     );
   }
   lines.push(`<g fill="${escapeXml(ink)}">`);
+  for (const group of style.paths ?? []) {
+    lines.push(`<g data-layer="${escapeXml(group.layer)}">`);
+    for (const d of group.d) lines.push(`<path d="${escapeXml(d)}"/>`);
+    lines.push('</g>');
+  }
 
   let openLayer: Layer | null = null;
   for (const p of primitives) {

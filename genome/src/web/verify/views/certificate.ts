@@ -151,7 +151,7 @@ class CertificatePage {
         h(
           'div',
           { class: 'piece__plate certificate__plate' },
-          s.genome ? genomeBlock(s.genome, { titleId }) : h('h2', { class: 'genome__id', id: titleId, text: s.productId }),
+          s.genome ? genomeBlock(s.genome, { titleId, seal: true }) : h('h2', { class: 'genome__id', id: titleId, text: s.productId }),
         ),
       ),
       h('ul', { class: 'lines certificate__lines', attrs: { 'aria-label': 'Piece' } }, ...s.productLines.map((line) => h('li', { class: 'lines__line', text: line }))),

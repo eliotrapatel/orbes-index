@@ -55,11 +55,30 @@ The parity tool sets each board beside the state that holds its content today (`
 | Board | Today | State |
 |---|---|---|
 | C1, C10, C42, C43 NOW | the landing and its banner | `now-*` |
-| C2 the account sheet | MY PIECES: YOUR TIER, SIGNED IN AS, CHANGE PASSWORD, SIGN OUT; the landing's foot: SOUND, the legal links | `pieces` |
+| C2 the account sheet | its own screen since N2 (the header's account button): see *The chrome and the account sheet* | `account-sheet` |
 | C4 a piece, C35 its tabs | each piece inline in MY PIECES, its tabs OWNERSHIP · WARRANTY · SERVICE · CARE | `pieces`, `pieces-warranty` |
 | C24 ORDERS, C31 RELEASES, C32 an order returned or cancelled | the sections YOUR ORDERS and YOUR RELEASES of MY PIECES | `pieces` |
 | C21 the room, C26 the after-room | stand-in images of the room: compared with the before-captures | `room`, `after-room-door` |
-| C28, C36–C40 | boards of several states: the first is captured, the others are states of this matrix | see each section |
+| C28, C36–C40 | boards of several states: the first is captured, the others are states of this matrix (C40's are each set beside the board too, `BOARD_SECTIONS`: `<C40>.<state>.pair.png`) | see each section |
+
+## The chrome and the account sheet (since N2)
+
+Every screen but the scan, the room and every LIVE RELEASE page (N7 gives its pages before and after the room the
+chrome), the boutique board and the shared certificate has NOCTURNE's chrome (`views/shell.ts`): the header (ORBES; the
+tier's name and the monogram, the button *Your account, TITANE*, or the monogram alone without a tier; SIGN IN signed
+out), the rail NOW · RELEASES · COLLECTION · CIRCLE · PIECES (the current one `aria-current`, RELEASES' dot while a LIVE
+RELEASE is announced, its room open or live, or a draw open, soon open or in its early access), the footer (the
+monogram, PRIVACY · TERMS · LEGAL · HELP in a new tab, SOUND ON/OFF, IP GEOLOCATION BY DB-IP, © ORBES · PARIS, GENOME
+CODE in it from 560 px wide) and the SCAN ring. The landing's own foot and every screen's own legal links gave way to
+the footer; the banner of the LIVE RELEASES lies under the rail. VERIFYING… and a problem of the scan are on the ground
+without the chrome until N4.
+
+| State | What it shows | Shown when | Reference |
+|---|---|---|---|
+| `account-sheet` | YOUR ACCOUNT, SIGNED IN AS *email*, YOUR TIER (moved from MY PIECES, decision 10): TITANE, *2 pieces held*, five dots, the benefits, NEXT: PLATINE, *1 more piece …*, what it adds; SOUND (its switch), CHANGE PASSWORD, MY PIECES, PRIVACY · TERMS · LEGAL · HELP (the index, a new tab), SIGN OUT | the account button, signed in (over NOW of the `draw-leads` demo, as C2 draws its page) | C2 |
+| `account-sheet-club` | the same for an account without a piece: THE CLUB, *A piece registered … opens TITANE …*, its benefits; the header's monogram alone | newcomer | C2 |
+| `account-sheet-password` | CHANGE PASSWORD, its sentence, CURRENT PASSWORD, NEW PASSWORD, *At least 12 characters.*, CHANGE PASSWORD, CANCEL | CHANGE PASSWORD in the sheet | C2, C39 (4) |
+| `account-sheet-stress` | PALLADIUM, six pieces: five dots, its benefits, *PALLADIUM is the highest tier of the club.* | the stress demo | same pieces |
 
 ## NOW (today: the landing, `/verify`)
 
@@ -166,9 +185,10 @@ Each: the empty orbit, the title, one sentence, the primary action as a button a
 
 ## MY PIECES (`/verify/pieces`)
 
-Signed in, top to bottom today: the banner; ORBES, MY PIECES, *The pieces registered to your ORBES account.*; YOUR TIER
+Signed in, top to bottom at 5efd4c9: the banner; ORBES, MY PIECES, *The pieces registered to your ORBES account.*; YOUR TIER
 (*tier*, *n pieces held*, its benefits, NEXT: *tier*, *how many more open it, from how many*, what it adds; PALLADIUM is
-the highest; without a piece THE CLUB and what a first piece opens; *A piece revoked or retired …* when it applies); each
+the highest; without a piece THE CLUB and what a first piece opens; *A piece revoked or retired …* when it applies: in the
+account sheet since N2, decision 10); each
 piece (the GENOME plate, the photographs, the product lines, OWNERSHIP · WARRANTY · SERVICE · CARE with the status,
 SINCE, ACQUIRED, OWNERSHIP VERIFIED / NOT YET VERIFIED, TRANSFER, the declarations, the ownership certificate); AFTER THE
 RELEASES; YOUR ORDERS (each: *model*, *channel · release*, its sentence, the steps RESERVED · PAID · SHIPPED · DELIVERED
@@ -376,8 +396,9 @@ else the browser's language): the language is a state of each.
 | SHOW MORE | more than a page (THE RELEASES' PAST, the circle, a draw's entries) |
 | EARLY ACCESS (MY PIECES) | an account without a piece |
 | AFTER THE RELEASES | a question open for the account |
-| SOUND ON/OFF | the landing and the room's foot |
-| GENOME CODE in the landing's © line | a screen 560 px wide or more (© ORBES · PARIS on a phone) |
+| SOUND ON/OFF | the footer of every screen with the chrome (the account sheet repeats it as a switch) and the room's foot |
+| GENOME CODE in the footer's © line | a screen 560 px wide or more (© ORBES · PARIS on a phone) |
+| The account button | signed in: the tier's name (none without a tier) and the monogram; signed out: SIGN IN; nothing while the session is asked for |
 
 ## Using it
 

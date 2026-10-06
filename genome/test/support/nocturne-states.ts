@@ -135,6 +135,34 @@ function cameraProblem(id: string, title: string, camera: CameraFailure): UiStat
   return { id, title, refs: ['C17'], variant: 'full', path: at('/verify'), camera, act: openScanner, ready: '.view--message' };
 }
 
+/**
+ * The account sheet opened by the header's account button (the tier's name and the monogram), once the tier is read;
+ * the phone then as tall as the sheet's content below the header and the rail, so the whole sheet is in the picture.
+ */
+async function openAccountSheet(run: StateRun): Promise<void> {
+  const account = run.page.locator('.n-hd button.n-acct');
+  await account.waitFor();
+  // The tier is read for the header: wait for its name (or for an account without one, a moment).
+  await run.page.waitForFunction(() => !!document.querySelector('.n-acct__tier:not([hidden])')?.textContent || document.querySelector('.n-acct')?.getAttribute('aria-label') === 'Your account', null, { timeout: 10_000 }).catch(() => {});
+  await account.click();
+  await run.page.locator('.n-account:not([hidden]) .n-account__tier').waitFor({ timeout: 20_000 });
+  await fitSheet(run.page);
+}
+
+/** The phone grown (or shrunk) to the sheet: its top (under the header and the rail), its content and its foot's padding. */
+async function fitSheet(page: Page): Promise<void> {
+  const height = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('.n-account__panel');
+    if (!panel) return 0;
+    // The bottom of its last piece, in the page (scrolled back), then its padding.
+    const bottom = Math.max(...[...panel.children].map((c) => c.getBoundingClientRect().bottom + panel.scrollTop));
+    return Math.ceil(bottom + Number.parseFloat(getComputedStyle(panel).paddingBottom));
+  });
+  const size = page.viewportSize();
+  if (size && height > 0) await page.setViewportSize({ width: size.width, height: Math.max(height, 400) });
+  await sleep(200);
+}
+
 export const UI_STATES: readonly UiState[] = [
   // ── NOW (today: the landing, its banner of the LIVE RELEASES) ──
   { id: 'now-signed-out', title: 'NOW, signed out: a LIVE RELEASE announced, a draw open', refs: ['C10'], variant: 'full', path: at('/verify'), ready: 'a.live-banner' },
@@ -442,9 +470,61 @@ export const UI_STATES: readonly UiState[] = [
     as: you,
     path: at('/verify/pieces'),
     routes: async (page) => page.route('**/api/v1/account/products', (r) => r.abort('internetdisconnected')),
-    ready: '.view--pieces .form__error',
+    ready: '.view--pieces .n-failed',
   },
   { id: 'pieces-stress', title: 'MY PIECES with six pieces and four orders (a price in USD, € 125 400, a long tracking number)', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/pieces'), ready: '.view--pieces article.piece', stress: true },
+
+  // ── The account sheet (C2), from the header's account button ──
+  {
+    id: 'account-sheet',
+    title: 'The account sheet: SIGNED IN AS, YOUR TIER (TITANE, two pieces), SOUND, CHANGE PASSWORD, MY PIECES, the legal pages, SIGN OUT',
+    refs: ['C2'],
+    // The page under the sheet as C2 draws it: NOW, RELEASES' dot (a draw open), no banner (no LIVE RELEASE).
+    variant: 'draw-leads',
+    as: you,
+    path: at('/verify'),
+    act: (run) => openAccountSheet(run),
+    ready: '.n-account:not([hidden]) .n-account__tier',
+    viewport: true,
+  },
+  {
+    id: 'account-sheet-club',
+    title: 'The account sheet of an account without a piece: THE CLUB and what a first piece opens',
+    refs: ['C2'],
+    variant: 'full',
+    as: 'newcomer',
+    path: at('/verify'),
+    act: (run) => openAccountSheet(run),
+    ready: '.n-account:not([hidden]) .n-account__tier',
+    viewport: true,
+  },
+  {
+    id: 'account-sheet-stress',
+    title: 'The account sheet with the extreme content: PALLADIUM, six pieces',
+    refs: ['same pieces'],
+    variant: 'stress',
+    as: you,
+    path: at('/verify'),
+    act: (run) => openAccountSheet(run),
+    ready: '.n-account:not([hidden]) .n-account__tier',
+    viewport: true,
+    stress: true,
+  },
+  {
+    id: 'account-sheet-password',
+    title: 'The account sheet: CHANGE PASSWORD, its form',
+    refs: ['C2', 'C39'],
+    variant: 'full',
+    as: you,
+    path: at('/verify'),
+    act: async (run) => {
+      await openAccountSheet(run);
+      await run.page.locator('.n-account').getByRole('button', { name: 'CHANGE PASSWORD', exact: true }).click();
+      await fitSheet(run.page);
+    },
+    ready: '.n-account:not([hidden]) form',
+    viewport: true,
+  },
 
   // ── THE COLLECTION ──
   { id: 'collection-signed-out', title: 'THE COLLECTION, signed out', refs: ['C5'], variant: 'full', path: at('/verify/lookbook'), ready: '.view--lookbook .lookbook__grid' },
@@ -578,7 +658,7 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'circle', title: 'THE CIRCLE: the invitation answered YES, the note', refs: ['C8'], variant: 'full', as: you, path: at('/verify/circle'), ready: '.view--circle article' },
   { id: 'circle-platine', title: 'THE CIRCLE of a PLATINE account: the poll too', refs: ['C8'], variant: 'full', as: 'platine', path: at('/verify/circle'), ready: '.view--circle article' },
   { id: 'circle-signed-out', title: 'THE CIRCLE, signed out: the sign-in', refs: ['C40'], variant: 'full', path: at('/verify/circle'), ready: '.view--circle form' },
-  { id: 'circle-no-piece', title: 'THE CIRCLE without a piece: it opens once a piece is registered', refs: ['C40'], variant: 'full', as: 'newcomer', path: at('/verify/circle'), ready: '.view--circle p.prose' },
+  { id: 'circle-no-piece', title: 'THE CIRCLE without a piece: it opens once a piece is registered', refs: ['C40'], variant: 'full', as: 'newcomer', path: at('/verify/circle'), ready: '.view--circle .circle__closed' },
   { id: 'post-invitation', title: 'A post: the invitation, YOUR ANSWER, TO SEE', refs: ['C22'], variant: 'full', as: you, path: post('invitation'), ready: '.view--circle-post section' },
   { id: 'post-poll', title: 'A post: the poll, before a vote', refs: ['C34'], variant: 'full', as: 'platine', path: post('poll'), ready: '.view--circle-post section' },
   { id: 'post-poll-voted', title: 'A post: the poll, voted, its results', refs: ['C34'], variant: 'full', as: 'voter1', path: post('poll'), ready: '.view--circle-post section' },
@@ -764,7 +844,7 @@ export const UI_STATES: readonly UiState[] = [
 /** The state that stands for each validated board (its capture is set beside the board). */
 export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
   C1: 'now-signed-in',
-  C2: 'pieces',
+  C2: 'account-sheet',
   C3: 'pieces',
   C4: 'pieces',
   C5: 'collection',
@@ -806,6 +886,14 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
   C41: 'legal-faq',
   C42: 'now-draw-leads',
   C43: 'now-collection-leads',
+});
+
+/**
+ * The boards of several states (C40: every page's loading, could not be shown, empty, owners only and not found):
+ * beside BOARD_STATES' first, each further state is set beside the board too, to be compared with its section.
+ */
+export const BOARD_SECTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  C40: ['pieces-failed', 'pieces-empty', 'collection-empty', 'releases-empty', 'circle-empty', 'circle-no-piece', 'model-not-found', 'draw-not-found', 'post-not-found'],
 });
 
 export function stateById(id: string): UiState {

@@ -7,8 +7,11 @@
  *   │          GENOME          │   its label, ink-soft
  *   │                          │
  *   │        ◔  ◯  ◕           │   the eight glyphs in their orbit around the
- *   │      ◑    ●    ◐         │   SEAL, from genomeLayout (Path2D of each
- *   │        ◒  ◓  ◖           │   primitive), in the ivory colourway's ink
+ *   │      ◑    ⦶    ◐         │   ORBES monogram, as the result draws them
+ *   │        ◒  ◓  ◖           │   (NOCTURNE, decision 12), from genomeLayout
+ *   │                          │   (a Path2D of each primitive and of each of
+ *   │                          │   the monogram's outlines), in the ivory
+ *   │                          │   colourway's ink
  *   │                          │
  *   │        MONOLITHE         │   the model, display face (figures in the reading face)
  *   │          ORBIT           │   its collection, ink-soft
@@ -114,11 +117,13 @@ export function drawShareImage(ctx: ShareContext, genome: Pick<Genome, 'glyphs' 
   drawLine(ctx, 'ORBES', 170, 40, 0.5, fonts, ink);
   drawLine(ctx, 'GENOME', 232, 20, 0.36, fonts, inkSoft);
 
-  // The orbit, as the result draws it (glyph 0 at north, then clockwise around the SEAL), scaled into its square.
-  const { primitives, viewBox } = genomeLayout(genome, 'orbit');
+  // The orbit, as the result draws it (glyph 0 at north, then clockwise around the ORBES monogram), scaled into its square.
+  const { primitives, viewBox, monogram } = genomeLayout(genome, 'orbit', { centre: 'monogram' });
   const scale = orbit / Math.max(viewBox.w, viewBox.h);
   ctx.setTransform(scale, 0, 0, scale, width / 2 - (viewBox.x + viewBox.w / 2) * scale, orbitY - (viewBox.y + viewBox.h / 2) * scale);
   ctx.fillStyle = ink;
+  // The monogram's outlines first (as the SVG paints them), each counter running against its outline: nonzero.
+  for (const d of monogram ?? []) ctx.fill(new Path2D(d));
   for (const p of primitives) {
     const tone = p.tone ?? 1;
     if (tone <= 0) continue;

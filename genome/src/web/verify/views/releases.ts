@@ -15,7 +15,7 @@
  *   └                              ┘
  *            [ SCAN ORBES CODE ]
  *   THE COLLECTION
- *   PRIVACY · TERMS · LEGAL · HELP
+ *   (the legal pages: NOCTURNE's footer, views/shell.ts)
  *
  * A release's page: its collection (or model), its title and state (once
  * drawn THIS RELEASE IS OVER, and signed in the account's part in it: YOU
@@ -85,7 +85,8 @@ import {
 } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
 import type { ClientServices, ClubEntry, DrawEntry } from '../types.js';
-import { contactBlock, legalLinks, lookbookLink, releasesLink, sectionLabel, viewRoot, withNumerals, withPhrases } from './common.js';
+import { contactBlock, lookbookLink, releasesLink, sectionLabel, viewRoot, withNumerals, withPhrases } from './common.js';
+import { failedState, loadingState, quietLine } from './nocturne.js';
 import { messageOf } from './forms.js';
 import { BANNER_REFRESH_MS } from './live-banner.js';
 import { OwnershipPanel } from './ownership.js';
@@ -232,7 +233,6 @@ class ListPage {
         { class: 'releases__foot' },
         h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => deps.onScan() }, text: RELEASES.scan }),
         lookbookLink(() => deps.onCollection(), { extraClass: 'releases__collection' }),
-        legalLinks({ extraClass: 'releases__legal' }),
       ),
     );
     this.render();
@@ -317,14 +317,11 @@ class ListPage {
   private draw(hadFocus: boolean): void {
     const l = this.load;
     if (l.kind === 'loading') {
-      this.body.replaceChildren(h('p', { class: 'releases__waiting micro', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
+      this.body.replaceChildren(loadingState(RELEASES.loading, { extraClass: 'releases__waiting' }));
       return;
     }
     if (l.kind === 'failed') {
-      this.body.replaceChildren(
-        h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${RELEASES.loadFailed} ${l.message}` }),
-        h('button', { class: 'textlink releases__retry', attrs: { type: 'button' }, on: { click: () => void this.fetch() }, text: RELEASES.retry }),
-      );
+      this.body.replaceChildren(failedState({ sentence: RELEASES.loadFailed, reason: l.message, retry: RELEASES.retry, onRetry: () => void this.fetch(), retryClass: 'releases__retry' }));
       if (hadFocus) this.body.querySelector<HTMLElement>('.releases__retry')?.focus();
       return;
     }
@@ -338,7 +335,7 @@ class ListPage {
       : null;
     if (l.cards.length === 0 && l.live.length === 0) {
       // Nothing to show: no release announced, or none known while the LIVE half could not be read.
-      this.body.replaceChildren(partial ?? h('p', { class: 'prose releases__empty', text: RELEASES.empty }));
+      this.body.replaceChildren(partial ?? quietLine(RELEASES.empty, 'releases__empty'));
       if (hadFocus) this.body.querySelector<HTMLElement>('.releases__retry')?.focus();
       return;
     }
@@ -460,7 +457,7 @@ class PastList {
     this.busy = true;
     const page = this.pages.next;
     if (next) this.drawMore('loading');
-    else this.drawStatus(h('p', { class: 'releases__waiting micro', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
+    else this.drawStatus(loadingState(RELEASES.loading, { extraClass: 'releases__waiting' }));
     try {
       const r = await this.deps.api.pastReleases(page, PAST_PAGE_SIZE);
       if (this.disposed) return;
@@ -473,10 +470,7 @@ class PastList {
       this.busy = false;
       if (next) this.drawMore('failed', messageOf(e));
       else {
-        this.drawStatus(
-          h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${RELEASES.past.loadFailed} ${messageOf(e)}` }),
-          h('button', { class: 'textlink releases__retry', attrs: { type: 'button' }, on: { click: () => void this.load() }, text: RELEASES.retry }),
-        );
+        this.drawStatus(failedState({ sentence: RELEASES.past.loadFailed, reason: messageOf(e), retry: RELEASES.retry, onRetry: () => void this.load(), retryClass: 'releases__retry' }));
       }
     }
   }
@@ -484,7 +478,7 @@ class PastList {
   private append(fresh: PastCardModel[], next: boolean): void {
     const first = this.pages.cards.length - fresh.length;
     if (this.pages.cards.length === 0) {
-      this.drawStatus(h('p', { class: 'prose releases__empty', text: RELEASES.past.empty }));
+      this.drawStatus(quietLine(RELEASES.past.empty, 'releases__empty'));
       this.drawMore('idle');
       return;
     }
@@ -795,21 +789,18 @@ class ReleasePage {
       this.partLine.hidden = true;
       this.accessLine.hidden = true;
       this.title.textContent = RELEASES.title;
-      this.foot.replaceChildren(this.scanButton('btn'), releasesLink(() => this.deps.onReleases(), { extraClass: 'release__releases' }), legalLinks({ extraClass: 'release__legal' }));
+      this.foot.replaceChildren(this.scanButton('btn'), releasesLink(() => this.deps.onReleases(), { extraClass: 'release__releases' }));
     }
     if (l.kind === 'loading') {
-      this.body.replaceChildren(h('p', { class: 'releases__waiting micro', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
+      this.body.replaceChildren(loadingState(RELEASES.loading, { extraClass: 'releases__waiting' }));
       return;
     }
     if (l.kind === 'missing') {
-      this.body.replaceChildren(h('p', { class: 'prose release__missing', text: RELEASES.notFound }));
+      this.body.replaceChildren(quietLine(RELEASES.notFound, 'release__missing'));
       return;
     }
     if (l.kind === 'failed') {
-      this.body.replaceChildren(
-        h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${RELEASES.loadFailed} ${l.message}` }),
-        h('button', { class: 'textlink release__retry', attrs: { type: 'button' }, on: { click: () => void this.start() }, text: RELEASES.retry }),
-      );
+      this.body.replaceChildren(failedState({ sentence: RELEASES.loadFailed, reason: l.message, retry: RELEASES.retry, onRetry: () => void this.start(), retryClass: 'release__retry' }));
       if (hadFocus) this.body.querySelector<HTMLElement>('.release__retry')?.focus();
       return;
     }
@@ -896,7 +887,7 @@ class ReleasePage {
     }
     this.entrySection.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
     // One hairline button on the page: ENTER THE DRAW or RESERVE A PLACE while it is offered, SCAN ORBES CODE otherwise.
-    this.foot.replaceChildren(this.scanButton(offersAction ? 'textlink' : 'btn'), releasesLink(() => this.deps.onReleases(), { extraClass: 'release__releases' }), legalLinks({ extraClass: 'release__legal' }));
+    this.foot.replaceChildren(this.scanButton(offersAction ? 'textlink' : 'btn'), releasesLink(() => this.deps.onReleases(), { extraClass: 'release__releases' }));
     if (hadFocus && !this.entrySection.contains(document.activeElement)) (this.entrySection.querySelector<HTMLElement>('input, button:not([disabled])') ?? heading).focus({ preventScroll: true });
   }
 

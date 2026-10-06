@@ -411,18 +411,21 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
       return Math.abs(hh! * 3600 + mm! * 60 + ss! - (t + 2 * 3_600_000 - Date.now()) / 1000);
     }, POLL).toBeLessThan(2);
     expect(await banner.getAttribute('href')).toBe(`/verify/releases/${announced.id}`);
-    // The house style: an ink strip, one line, its tap zone and type above the floors, its text at AA on the ink.
+    // NOCTURNE: a strip of the plate under the header and the rail (56 + 40 px), its live dot and its chevron, one line,
+    // its tap zone and type above the floors, its ivory text at AA on the plate.
     const look = await banner.evaluate((el) => {
       const s = getComputedStyle(el);
       const r = el.getBoundingClientRect();
       return { bg: s.backgroundColor, color: s.color, height: r.height, width: r.width, top: r.top, font: s.fontSize, family: s.fontFamily };
     });
-    expect(look).toMatchObject({ bg: INK, color: 'rgb(255, 255, 255)', top: 0, width: 390, font: '10px' });
+    expect(look).toMatchObject({ bg: 'rgb(20, 19, 18)', color: 'rgb(246, 242, 234)', top: 96, width: 390, font: '10px' });
     expect(look.height).toBeGreaterThanOrEqual(56);
     expect(look.family).toMatch(/^"?Gravesend Sans/);
-    // Nothing drawn over it: the page's corner marks lie under the strip.
-    const [strip, corners] = await page.evaluate(() => [getComputedStyle(document.querySelector('.live-banner-host')!).zIndex, getComputedStyle(document.querySelector('.corners')!).zIndex].map(Number));
-    expect(strip).toBeGreaterThan(corners!);
+    await expect.poll(() => banner.locator('i.n-live').count(), POLL).toBe(1);
+    await expect.poll(() => banner.locator('svg.n-ic').count(), POLL).toBe(1);
+    // Nothing drawn over it: NOCTURNE's screens have no corner marks; the strip is in the column, under the rail.
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector('.corners')!).display)).toBe('none');
+    expect(await page.evaluate(() => document.querySelector('.live-banner-host')!.previousElementSibling?.classList.contains('n-rail'))).toBe(true);
     expect(await banner.locator('.live-banner__clock').evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/Gravesend/);
     // One line on one baseline: the countdown's figures on the labels' own, the line centred in the strip.
     const line = await banner.evaluate((el) => {

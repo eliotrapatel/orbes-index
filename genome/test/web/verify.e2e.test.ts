@@ -258,11 +258,22 @@ async function openVerify(browser: Browser, srv: VerifyServer, opts: { reducedMo
 /** The links to the legal pages (J-06) at the foot of the landing and under every result, then DB-IP's attribution. */
 const LEGAL_LINKS = ['PRIVACY', 'TERMS', 'LEGAL', 'HELP', 'IP Geolocation by DB-IP'];
 
+/** The plate of NOCTURNE (--vault-plate): the house's ivory plates turn to it on its ground (no ivory plate in /verify). */
+const PLATE = 'rgb(20, 19, 18)';
+
 /** The legal links of `scope`: their names, addresses and targets, in order. */
 async function legalLinksOf(scope: Locator): Promise<{ name: string; href: string | null; target: string | null }[]> {
   return scope.getByRole('navigation', { name: 'Legal information' }).getByRole('link').evaluateAll((els) =>
     els.map((el) => ({ name: (el.textContent ?? '').trim(), href: el.getAttribute('href'), target: el.getAttribute('target') })),
   );
+}
+
+/** The account sheet (C2), from the header's account button, once the tier is read. */
+async function openAccount(page: Page): Promise<void> {
+  const account = page.locator('.n-hd button.n-acct');
+  await account.waitFor();
+  await account.click();
+  await page.locator('.n-account:not([hidden]) .n-account__tier').waitFor();
 }
 
 async function uploadPhoto(page: Page, file: string): Promise<void> {
@@ -334,8 +345,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const monogram = page.locator('h1 svg.monogram.landing__monogram');
     await countOf(monogram.locator('path'), 5);
     await attrOf(monogram, 'aria-hidden', 'true');
-    await countOf(page.getByRole('img', { name: 'ORBES' }), 0);
-    expect(await monogram.evaluate((el) => getComputedStyle(el).fill)).toBe('rgb(10, 10, 10)');
+    // The one image named ORBES is NOCTURNE's footer's monogram (as the canvas names it); the heading's is decorative.
+    await countOf(page.getByRole('img', { name: 'ORBES' }), 1);
+    await countOf(page.locator('footer.n-foot').getByRole('img', { name: 'ORBES' }), 1);
+    // In the ink of its context: ivory on NOCTURNE's ground.
+    expect(await monogram.evaluate((el) => getComputedStyle(el).fill)).toBe('rgb(246, 242, 234)');
     const mono = (await monogram.boundingBox())!;
     const word = (await page.locator('.landing__wordmark').boundingBox())!;
     const emblem = (await page.locator('.landing__emblem').boundingBox())!;
@@ -371,13 +385,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.genome__id'), plain.product.productId);
     expect(plain.product.productId).toBe('O26-J-00184');
     await textsOf(page.locator('.lines__line'), ['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
-    // The GENOME is drawn from the core renderer, in its orbit around the SEAL as on the piece:
-    // the seal layer, then one path group per glyph.
+    // The GENOME is drawn from the core renderer, in its orbit as on the piece, the ORBES monogram at its centre on a
+    // collector's screen (NOCTURNE, decision 12): the monogram's layer in place of the seal's, one group per glyph, in ivory.
     const genome = page.locator('.genome__glyphs .genome-svg');
     await attrOf(genome, 'aria-label', new RegExp(plain.genome.fingerprint));
     await attrOf(genome, 'class', /\bgenome-svg--orbit\b/);
-    await countOf(genome.locator('g[data-layer="seal"]'), 1);
+    await countOf(genome.locator('g[data-layer="seal"]'), 0);
+    await countOf(genome.locator('g[data-layer="monogram"] path'), 5);
     await countOf(genome.locator('g[data-layer="genome"]'), 8);
+    await attrOf(genome.locator('g[fill]').first(), 'fill', '#f6f2ea');
     // A square of min(64vw, 260px): glyphs of about 42 px on this 390 px phone (43 px from 407 px).
     const box = await genome.boundingBox();
     expect(box).not.toBeNull();
@@ -429,29 +445,33 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(problems).toEqual([]);
   }, 120_000);
 
-  it('links the legal pages (J-06) at the foot of the landing and under a result, with the attribution of DB-IP', async () => {
+  it('links the legal pages (J-06) at the foot of every screen, NOCTURNE\'s footer, in a new tab, with the attribution of DB-IP', async () => {
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
-    // The landing: in the page itself; DB-IP's site apart.
-    expect(await legalLinksOf(page.locator('.view--landing'))).toEqual([
-      { name: 'PRIVACY', href: '/legal/privacy', target: null },
-      { name: 'TERMS', href: '/legal/terms', target: null },
-      { name: 'LEGAL', href: '/legal/notice', target: null },
-      { name: 'HELP', href: '/legal/faq', target: null },
-      { name: 'IP Geolocation by DB-IP', href: 'https://db-ip.com', target: '_blank' },
-    ]);
-    // Text links in the display face, under the actions and above the foot's decorative line, in the page's flow.
-    const privacy = page.getByRole('link', { name: 'PRIVACY' });
+    // The landing: the footer's links, as the canvas has them, in a new tab (the screen stays); DB-IP's site apart.
+    const footer = page.locator('footer.n-foot');
+    const FOOT = [
+      { name: 'PRIVACY', href: '/legal/privacy', target: '_blank' },
+      { name: 'TERMS', href: '/legal/terms', target: '_blank' },
+      { name: 'LEGAL', href: '/legal/notice', target: '_blank' },
+      { name: 'HELP', href: '/legal/faq', target: '_blank' },
+    ];
+    expect(await legalLinksOf(footer)).toEqual(FOOT);
+    await attrOf(footer.getByRole('link', { name: 'IP Geolocation by DB-IP' }), 'href', 'https://db-ip.com');
+    await attrOf(footer.getByRole('link', { name: 'IP Geolocation by DB-IP' }), 'target', '_blank');
+    for (const a of await footer.getByRole('link').all()) await attrOf(a, 'rel', 'noopener');
+    // Words in the display face, under the screen and its actions, in the page's flow.
+    const privacy = footer.getByRole('link', { name: 'PRIVACY' });
     expect(await privacy.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?/);
     const actions = (await page.locator('.landing__actions').boundingBox())!;
-    const links = (await page.locator('.landing__legal').boundingBox())!;
-    const meta = (await page.locator('.landing__meta').boundingBox())!;
+    const links = (await footer.locator('.n-fl').boundingBox())!;
+    const copyright = (await footer.locator('.n-cr').boundingBox())!;
     expect(links.y).toBeGreaterThan(actions.y + actions.height);
-    expect(meta.y).toBeGreaterThan(links.y + links.height);
-    expect(await page.locator('.landing__legal').evaluate((el) => getComputedStyle(el).position)).toBe('static');
+    expect(copyright.y).toBeGreaterThan(links.y + links.height);
+    expect(await footer.evaluate((el) => getComputedStyle(el).position)).toBe('relative');
     // The four pages on one line on this phone and on the smallest in use, the floors kept.
     for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
       await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
-      const rows = await page.locator('.landing__legal .legal-links__link').evaluateAll((els) => new Set(els.map((el) => Math.round(el.getBoundingClientRect().top))).size);
+      const rows = await footer.locator('.n-fl a').evaluateAll((els) => new Set(els.map((el) => Math.round(el.getBoundingClientRect().top))).size);
       expect(rows, `${width}`).toBe(1);
       await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', ...LEGAL_LINKS]);
     }
@@ -459,33 +479,25 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // A short screen scrolls down to them rather than laying them over the actions.
     await page.setViewportSize({ width: 320, height: 568 });
     const upload = (await page.getByRole('button', { name: 'UPLOAD A PHOTO' }).boundingBox())!;
-    expect((await page.locator('.landing__legal').boundingBox())!.y).toBeGreaterThan(upload.y + upload.height);
+    expect((await footer.locator('.n-fl').boundingBox())!.y).toBeGreaterThan(upload.y + upload.height);
     await page.setViewportSize(MOBILE_VIEWPORT);
 
-    // PRIVACY opens the privacy policy in English, the app's language here (en-GB).
-    await privacy.click();
-    await page.waitForURL(`${srv.origin}/legal/privacy`);
-    await textOf(page.locator('h1'), 'PRIVACY POLICY');
-    expect(await page.evaluate(() => document.documentElement.lang)).toBe('en');
-    await page.goBack();
-    await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+    // PRIVACY opens the privacy policy in English, the app's language here (en-GB), in a new tab.
+    const [privacyTab] = await Promise.all([page.context().waitForEvent('page'), privacy.click()]);
+    await privacyTab.waitForLoadState();
+    expect(privacyTab.url()).toBe(`${srv.origin}/legal/privacy`);
+    await textOf(privacyTab.locator('h1'), 'PRIVACY POLICY');
+    expect(await privacyTab.evaluate(() => document.documentElement.lang)).toBe('en');
+    await privacyTab.close();
 
-    // Under a result: the same links, in a new tab, so the result stays for the customer to come back to.
+    // Under a result: the same footer, in a new tab, so the result stays for the customer to come back to.
     await uploadPhoto(page, writeCodePng(srv.workDir, 'legal.png', plain));
     expect(await resultTitle(page)).toBe('AUTHENTIC');
-    const foot = page.locator('.result__foot');
-    expect(await legalLinksOf(foot)).toEqual([
-      { name: 'PRIVACY', href: '/legal/privacy', target: '_blank' },
-      { name: 'TERMS', href: '/legal/terms', target: '_blank' },
-      { name: 'LEGAL', href: '/legal/notice', target: '_blank' },
-      { name: 'HELP', href: '/legal/faq', target: '_blank' },
-      { name: 'IP Geolocation by DB-IP', href: 'https://db-ip.com', target: '_blank' },
-    ]);
-    // Under the reference, the foot's last line.
-    const ref = (await foot.locator('.result__meta').boundingBox())!;
-    expect((await foot.locator('.result__legal').boundingBox())!.y).toBeGreaterThan(ref.y + ref.height);
-    for (const a of await foot.getByRole('link').all()) await attrOf(a, 'rel', 'noopener');
-    const [tab] = await Promise.all([page.context().waitForEvent('page'), foot.getByRole('link', { name: 'HELP' }).click()]);
+    expect(await legalLinksOf(footer)).toEqual(FOOT);
+    // Under the reference, the result's last line.
+    const ref = (await page.locator('.result__meta').boundingBox())!;
+    expect((await footer.boundingBox())!.y).toBeGreaterThan(ref.y + ref.height);
+    const [tab] = await Promise.all([page.context().waitForEvent('page'), footer.getByRole('link', { name: 'HELP' }).click()]);
     await tab.waitForLoadState();
     expect(tab.url()).toBe(`${srv.origin}/legal/faq`);
     await textOf(tab.locator('h1'), 'FREQUENTLY ASKED QUESTIONS');
@@ -496,18 +508,19 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(problems).toEqual([]);
   }, 120_000);
 
-  it('plays the sound signature on an authentic result only, from the tap UPLOAD A PHOTO; SOUND ON / OFF at the foot of the landing, kept on the device (P-D07)', async () => {
+  it('plays the sound signature on an authentic result only, from the tap UPLOAD A PHOTO; SOUND ON / OFF at the foot of every screen, kept on the device (P-D07)', async () => {
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
-    // At the foot of the landing, above the legal pages: a text link in the display face, on by default.
+    // In NOCTURNE's footer, under the legal pages (as the canvas has it): in the display face, on by default.
     const toggle = page.getByRole('button', { name: 'SOUND', exact: true });
     await visible(toggle);
-    await countOf(page.locator('.landing__foot > .textlink.landing__sound'), 1);
+    await countOf(page.locator('footer.n-foot .n-foot__sound > button.n-snd'), 1);
     await attrOf(toggle, 'aria-pressed', 'true');
     await textOf(toggle, 'SOUND ON');
     expect(await toggle.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?/);
     const box = (await toggle.boundingBox())!;
     expect(box.y).toBeGreaterThan((await page.locator('.landing__actions').boundingBox())!.y);
-    expect((await page.locator('.landing__legal').boundingBox())!.y).toBeGreaterThanOrEqual(box.y + box.height - 8);
+    const fl = (await page.locator('footer.n-foot .n-fl').boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(fl.y + fl.height);
     await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'SOUND ON', ...LEGAL_LINKS]);
     expect(await page.evaluate(() => localStorage.length)).toBe(0);
 
@@ -1134,16 +1147,18 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await visible(signIn.getByRole('button', { name: 'FORGOTTEN PASSWORD?' }));
     await countOf(page.locator('article.piece'), 0);
     await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'FORGOTTEN PASSWORD?', 'SCAN ORBES CODE', ...LEGAL_LINKS]);
-    // Where the account's data is collected, the legal pages (J-06), in a new tab, under SCAN ORBES CODE.
-    expect(await legalLinksOf(page.locator('.view--pieces'))).toEqual([
+    // Where the account's data is collected, the legal pages (J-06), in a new tab, under SCAN ORBES CODE: NOCTURNE's
+    // footer, under the page.
+    const footer = page.locator('footer.n-foot');
+    expect(await legalLinksOf(footer)).toEqual([
       { name: 'PRIVACY', href: '/legal/privacy', target: '_blank' },
       { name: 'TERMS', href: '/legal/terms', target: '_blank' },
       { name: 'LEGAL', href: '/legal/notice', target: '_blank' },
       { name: 'HELP', href: '/legal/faq', target: '_blank' },
-      { name: 'IP Geolocation by DB-IP', href: 'https://db-ip.com', target: '_blank' },
     ]);
+    await attrOf(footer.getByRole('link', { name: 'IP Geolocation by DB-IP' }), 'target', '_blank');
     const scanButton = (await page.locator('.pieces__foot').getByRole('button', { name: 'SCAN ORBES CODE' }).boundingBox())!;
-    expect((await page.locator('.pieces__legal').boundingBox())!.y).toBeGreaterThan(scanButton.y + scanButton.height);
+    expect((await footer.locator('.n-fl').boundingBox())!.y).toBeGreaterThan(scanButton.y + scanButton.height);
     // CREATE ACCOUNT, signed out in MY PIECES: the same note, both links.
     await signIn.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
     await attrOf(signIn.locator('.terms-note').getByRole('link', { name: 'PRIVACY POLICY' }), 'href', '/legal/privacy');
@@ -1162,7 +1177,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.pieces__lead'), 'The pieces registered to your ORBES account.');
     const card = page.getByRole('article', { name: older.product.productId });
     const other = page.getByRole('article', { name: newer.product.productId });
-    expect(await card.locator('.piece__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    expect(await card.locator('.piece__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(PLATE);
     // Under the écrin that carries its heading, the photograph ORBES took of the piece's model (F-04), never the one of
     // the piece itself (NOCTURNE, decision 9), on the ivory plate of an authentic result, with its alternative text, the
     // plate named after the piece; the other piece, whose model has none, shows none.
@@ -1180,7 +1195,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textsOf(photos.locator('.photo__caption'), ['THE MODEL']);
     await textOf(photos.locator('.photos__note'), 'Photographed by ORBES. Compare it with the piece in your hands.');
     await expect.poll(() => photo.evaluate((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth]), POLL).toEqual([true, 640]);
-    expect(await photos.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    expect(await photos.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(PLATE);
     const [ecrin, photosBox, linesBox] = [(await card.locator('.piece__plate').boundingBox())!, (await photos.boundingBox())!, (await card.locator('.piece__lines').boundingBox())!];
     expect(photosBox.y).toBeGreaterThan(ecrin.y + ecrin.height);
     expect(photosBox.y + photosBox.height).toBeLessThan(linesBox.y);
@@ -2120,7 +2135,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(plate.locator('.photos__note'), 'Photographed by ORBES. Compare it with the piece in your hands.');
     // Decoded by the browser from the stripped file, in its frame on the ivory plate.
     await expect.poll(() => images.evaluateAll((els) => els.map((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth])), POLL).toEqual([[true, 640]]);
-    expect(await plate.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
+    expect(await plate.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(PLATE);
     // At the head of the result: under the title and its sentence, above the GENOME.
     const plateBox = (await plate.boundingBox())!;
     expect(plateBox.y).toBeGreaterThan((await page.locator('.result__message').boundingBox())!.y);
@@ -2190,7 +2205,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await attrOf(cover, 'loading', 'lazy');
     await attrOf(cover, 'alt', 'The AURORE RING model, photographed by ORBES');
     await expect.poll(() => cover.evaluate((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth, getComputedStyle(el).objectFit]), POLL).toEqual([true, 600, 'contain']);
-    expect(await card.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual(['rgb(246, 242, 234)', 'auto']);
+    expect(await card.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual([PLATE, 'auto']);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await keepsFloors(page, ['SEE THE MODEL', 'SCAN ORBES CODE', ...LEGAL_LINKS]);
     // One line for SEE THE MODEL, two cards to a row, on the phones in use; one to a row on the smallest.
@@ -2386,7 +2401,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(card.locator('.release-card__model'), 'ECLIPSE · PENDANT');
     await textOf(card.locator('.release-card__line'), /^2 PIECES · ENTRIES CLOSE \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
     await attrOf(card.locator('img.release-card__img'), 'loading', 'lazy');
-    expect(await card.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual(['rgb(246, 242, 234)', 'auto']);
+    expect(await card.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual([PLATE, 'auto']);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await keepsFloors(page, ['SEE THE RELEASE', 'SCAN ORBES CODE', 'THE COLLECTION', ...LEGAL_LINKS]);
     for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
@@ -2553,12 +2568,14 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(page.getByRole('button', { name: 'WITHDRAW' }), 0);
     await attrOf(page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    // MY PIECES: the privilege among the benefits of YOUR TIER, said once (no EARLY ACCESS block), and the place
-    // reserved among its releases.
+    // MY PIECES: the place reserved among its releases, no EARLY ACCESS block; the privilege among the benefits of
+    // YOUR TIER, said once, in the account sheet (decision 10).
     await page.goto(`${srv.origin}/verify/pieces`);
     await textOf(page.locator('.pieces__releases .pieces__entry-state'), 'ENTRIES OPEN SOON · PLACE RESERVED');
-    await textOf(page.locator('.pieces__badge-name'), 'PLATINE');
-    await countOf(page.locator('.pieces__benefits:not(.pieces__benefits--next) .pieces__benefit', { hasText: 'Early access to each release' }), 1);
+    await openAccount(page);
+    await textOf(page.locator('.n-account__tier-name'), 'PLATINE');
+    await countOf(page.locator('.n-account__benefits:not(.n-account__benefits--next) .n-account__benefit', { hasText: 'Early access to each release' }), 1);
+    await page.keyboard.press('Escape');
     await countOf(page.locator('.pieces__early:not([hidden])'), 0);
     await countOf(page.locator('.pieces__early-text'), 0);
     expect(await figuresInDisplayFace(page)).toEqual([]);
@@ -2577,9 +2594,13 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(other.page.getByRole('button', { name: 'ENTER THE DRAW' }), 0);
     await attrOf(other.page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
     await other.page.goto(`${srv.origin}/verify/pieces`);
-    await textOf(other.page.locator('.pieces__next .section-label'), 'NEXT: PLATINE');
-    await countOf(other.page.locator('.pieces__benefits--next .pieces__benefit', { hasText: 'Early access to each release' }), 1);
+    await countOf(other.page.locator('.pieces__waiting'), 0);
+    await visible(other.page.locator('.pieces__lead'));
     await countOf(other.page.locator('.pieces__early:not([hidden])'), 0);
+    await openAccount(other.page);
+    await textOf(other.page.locator('.n-account__next-label'), 'NEXT: PLATINE');
+    await countOf(other.page.locator('.n-account__benefits--next .n-account__benefit', { hasText: 'Early access to each release' }), 1);
+    await other.page.keyboard.press('Escape');
     await other.page.goto(`${srv.origin}/verify/circle`);
     await textOf(other.page.locator('.circle__early .section-label'), 'EARLY ACCESS');
     await textOf(other.page.locator('.circle__early-text'), RELEASES.earlyAccess.recall);
@@ -2587,7 +2608,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(other.problems).toEqual([]);
   }, 180_000);
 
-  it('MY PIECES, the tier (P-X04): at the head of the page, the badge (the name in the display face, the pieces in the reading face), the benefits, the way to the next tier as ORBES words it; THE CLUB for an account without a piece', async () => {
+  it('the account sheet (C2), from the header\'s TITANE and monogram: YOUR TIER moved from MY PIECES (P-X04, decision 10): the tier and its pieces, five dots, the benefits, the way to the next tier as ORBES words it; THE CLUB for an account without a piece; SOUND, CHANGE PASSWORD, MY PIECES, the legal pages, SIGN OUT', async () => {
     const { ctx } = srv;
     const email = 'tier.platine@example.com';
     const owner = await ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
@@ -2599,47 +2620,106 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
     await page.goto(`${srv.origin}/verify/pieces`);
     const signIn = page.locator('.pieces__signin');
-    await countOf(page.locator('.pieces__tier:not([hidden])'), 0);
+    // Signed out: SIGN IN in the header (MY PIECES and its sign-in), no account sheet.
+    await visible(page.locator('.n-hd').getByRole('link', { name: 'SIGN IN', exact: true }));
+    await countOf(page.locator('.n-hd button.n-acct:not([hidden])'), 0);
     await signIn.getByLabel('EMAIL').fill(email);
     await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
     await countOf(page.locator('article.piece'), 3);
-    const tier = page.locator('.pieces__tier');
-    await textOf(tier.locator('> .section-label'), 'YOUR TIER');
-    await attrOf(tier, 'aria-labelledby', 'pieces-tier');
-    // The badge: PLATINE in the display face, its pieces in the reading face, on the ivory plate of a GENOME.
-    await textOf(tier.locator('.pieces__badge-name'), 'PLATINE');
-    await textOf(tier.locator('.pieces__badge-pieces'), '3 pieces held');
-    expect(await tier.locator('.pieces__badge-name').evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
-    expect(await tier.locator('.pieces__badge-pieces').evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/Gravesend/);
-    expect(await tier.locator('.pieces__badge').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgb(246, 242, 234)');
-    await countOf(tier.locator('.pieces__badge .bracket'), 4);
+    // MY PIECES no longer holds YOUR TIER.
+    await countOf(page.locator('.pieces__tier'), 0);
+    await countOf(page.getByText('YOUR TIER', { exact: true }), 0);
+    // The header: PLATINE and the monogram, one button named for the account, opening its sheet.
+    const account = page.getByRole('button', { name: 'Your account, PLATINE', exact: true });
+    await textOf(account, 'PLATINE');
+    await attrOf(account, 'aria-haspopup', 'dialog');
+    await countOf(account.locator('svg.n-mono path'), 5);
+    await account.click();
+    const sheet = page.getByRole('dialog', { name: 'YOUR ACCOUNT' });
+    await visible(sheet);
+    await attrOf(sheet, 'aria-modal', 'true');
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id), POLL).toBe('account-title');
+    // The page under it is inert and holds still.
+    expect(await page.evaluate(() => (document.querySelector('.n-column') as HTMLElement).inert)).toBe(true);
+    expect(await page.evaluate(() => document.documentElement.classList.contains('n-locked'))).toBe(true);
+    await textOf(sheet.locator('.n-account__email'), email);
+    const tier = sheet.locator('.n-account__tier');
+    await textOf(tier.locator('#account-tier'), 'YOUR TIER');
+    await attrOf(tier, 'aria-labelledby', 'account-tier');
+    // PLATINE in the display face, its pieces in the reading face, then its five dots, three of them filled.
+    await textOf(tier.locator('.n-account__tier-name'), 'PLATINE');
+    await textOf(tier.locator('.n-account__tier-pieces'), '3 pieces held');
+    expect(await tier.locator('.n-account__tier-name').evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
+    expect(await tier.locator('.n-account__tier-pieces').evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/Gravesend/);
+    await countOf(tier.locator('.n-meter__dot'), 5);
+    await countOf(tier.locator('.n-meter__dot.is-on'), 3);
     // The benefits of TITANE and PLATINE, then PALLADIUM: two more pieces, and what ORBES says it adds.
-    await textsOf(tier.locator('.pieces__benefits:not(.pieces__benefits--next) .pieces__benefit'), [
+    await textsOf(tier.locator('.n-account__benefits:not(.n-account__benefits--next) .n-account__benefit'), [
       ...CLUB_TIER_DEFAULT_BENEFITS.TITANE.split('\n'),
       ...CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n'),
     ]);
-    await textOf(tier.locator('.pieces__next .section-label'), 'NEXT: PALLADIUM');
-    await textOf(tier.locator('.pieces__next-way'), '2 more pieces registered to your account open PALLADIUM, from 5 pieces held. It adds:');
-    await textsOf(tier.locator('.pieces__benefits--next .pieces__benefit'), ['A commission of your own.', 'A yearly visit to the atelier.']);
-    // At the head of the page: under the title, above the pieces.
-    const tierBox = (await tier.boundingBox())!;
-    expect(tierBox.y).toBeGreaterThan((await page.locator('#pieces-title').boundingBox())!.y);
-    expect((await page.locator('article.piece').first().boundingBox())!.y).toBeGreaterThan(tierBox.y + tierBox.height);
+    await textOf(tier.locator('.n-account__next-label'), 'NEXT: PALLADIUM');
+    await textOf(tier.locator('.n-account__next-way'), '2 more pieces registered to your account open PALLADIUM, from 5 pieces held. It adds:');
+    await textsOf(tier.locator('.n-account__benefits--next .n-account__benefit'), ['A commission of your own.', 'A yearly visit to the atelier.']);
+    // Then SOUND, CHANGE PASSWORD, MY PIECES, the legal pages (their index, a new tab), SIGN OUT.
+    await textsOf(sheet.locator('.n-row__label'), ['SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'PRIVACY · TERMS · LEGAL · HELP']);
+    await attrOf(sheet.getByRole('link', { name: 'PRIVACY · TERMS · LEGAL · HELP' }), 'href', '/legal');
+    await attrOf(sheet.getByRole('link', { name: 'PRIVACY · TERMS · LEGAL · HELP' }), 'target', '_blank');
+    await attrOf(sheet.getByRole('link', { name: 'MY PIECES' }), 'href', '/verify/pieces');
     expect(await figuresInDisplayFace(page)).toEqual([]);
     for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
       await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
+      expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth), `${width}`).toBe(true);
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
-    await page.screenshot({ path: join(OUT_DIR, 'verify-pieces-tier.png'), fullPage: true });
-    // Signed out: the tier leaves with the session.
-    await page.getByRole('button', { name: 'SIGN OUT' }).click();
+    await keepsFloors(page, ['CHANGE PASSWORD', 'MY PIECES', 'PRIVACY · TERMS · LEGAL · HELP', 'SIGN OUT']);
+    // The switch is tapped through its whole row, its label.
+    expect((await sheet.locator('label.n-account__sound').boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    // SOUND: the same switch as the footer's SOUND ON / OFF.
+    const sw = sheet.getByRole('switch', { name: 'SOUND' });
+    expect(await sw.isChecked()).toBe(true);
+    await sheet.locator('label.n-account__sound').click();
+    expect(await sw.isChecked()).toBe(false);
+    expect(await page.evaluate(() => localStorage.getItem('orbes.sound'))).toBe('off');
+    // A tap on the dimmed page closes it; focus returns to the account button; the footer says SOUND OFF.
+    await page.mouse.click(195, 60);
+    await countOf(page.locator('.n-account:not([hidden])'), 0);
+    expect(await page.evaluate(() => document.activeElement?.classList.contains('n-acct'))).toBe(true);
+    expect(await page.evaluate(() => (document.querySelector('.n-column') as HTMLElement).inert)).toBe(false);
+    await textOf(page.getByRole('button', { name: 'SOUND', exact: true }), 'SOUND OFF');
+    await page.getByRole('button', { name: 'SOUND', exact: true }).click();
+    await textOf(page.getByRole('button', { name: 'SOUND', exact: true }), 'SOUND ON');
+    // CHANGE PASSWORD in the sheet (C39): a wrong current password said on its field, then changed; this session stays.
+    await account.click();
+    await sheet.getByRole('button', { name: 'CHANGE PASSWORD', exact: true }).click();
+    await textOf(sheet.locator('.n-account__password-lead'), 'Enter your current password, then a new one. Your other sessions will end; you stay signed in here.');
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('account-current-password');
+    await sheet.getByLabel('CURRENT PASSWORD').fill('not the password at all');
+    await sheet.getByLabel('NEW PASSWORD').fill('a new passphrase of 2026');
+    await sheet.locator('form').getByRole('button', { name: 'CHANGE PASSWORD', exact: true }).click();
+    await visible(sheet.locator('.form__error'));
+    await attrOf(sheet.getByLabel('CURRENT PASSWORD'), 'aria-invalid', 'true');
+    await sheet.getByLabel('CURRENT PASSWORD').fill(PASSWORD);
+    await sheet.getByLabel('NEW PASSWORD').fill('a new passphrase of 2026');
+    await sheet.locator('form').getByRole('button', { name: 'CHANGE PASSWORD', exact: true }).click();
+    await textOf(sheet.locator('.n-account__notice'), 'Your password has been changed. Your other sessions have ended.');
+    await attrOf(sheet.locator('.n-account__notice'), 'role', 'status');
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('CHANGE PASSWORD');
+    // MY PIECES closes the sheet and opens the page.
+    await sheet.getByRole('link', { name: 'MY PIECES' }).click();
+    await countOf(page.locator('.n-account:not([hidden])'), 0);
+    await visible(page.locator('#pieces-title'));
+    // SIGN OUT: the sheet closes, the header says SIGN IN, MY PIECES offers the sign-in.
+    await account.click();
+    await sheet.getByRole('button', { name: 'SIGN OUT', exact: true }).click();
+    await countOf(page.locator('.n-account:not([hidden])'), 0);
+    await visible(page.locator('.n-hd').getByRole('link', { name: 'SIGN IN', exact: true }));
     await visible(page.locator('.pieces__signin'));
-    await countOf(page.locator('.pieces__tier:not([hidden])'), 0);
     expect(problems).toEqual([]);
 
-    // An account without a piece: THE CLUB, no badge, what a first piece opens.
+    // An account without a piece: THE CLUB, no tier's name nor dots, what a first piece opens; the header names no tier.
     const newcomer = 'tier.newcomer@example.com';
     await ctx.services.auth.registerAccount({ email: newcomer, password: PASSWORD }, {});
     const other = await openVerify(browser, srv, { reducedMotion: 'reduce' });
@@ -2648,14 +2728,18 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await otherSignIn.getByLabel('EMAIL').fill(newcomer);
     await otherSignIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await otherSignIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    const club = other.page.locator('.pieces__tier');
-    await textOf(club.locator('> .section-label'), 'THE CLUB');
-    await countOf(club.locator('.pieces__badge'), 0);
-    await textOf(club.locator('.pieces__next-way'), 'A piece registered to your ORBES account opens TITANE, the first tier of the club:');
-    await textsOf(club.locator('.pieces__benefits--next .pieces__benefit'), CLUB_TIER_DEFAULT_BENEFITS.TITANE.split('\n'));
     // Without a tier, YOUR TIER does not say the early access of PLATINE and PALLADIUM: EARLY ACCESS recalls it.
     await textOf(other.page.locator('.pieces__early .section-label'), 'EARLY ACCESS');
     await textOf(other.page.locator('.pieces__early-text'), RELEASES.earlyAccess.recall);
+    const bare = other.page.getByRole('button', { name: 'Your account', exact: true });
+    await textOf(bare, '');
+    await bare.click();
+    const club = other.page.locator('.n-account__tier');
+    await textOf(club.locator('#account-tier'), 'THE CLUB');
+    await countOf(club.locator('.n-account__tier-name'), 0);
+    await countOf(club.locator('.n-meter'), 0);
+    await textOf(club.locator('.n-account__next-way'), 'A piece registered to your ORBES account opens TITANE, the first tier of the club:');
+    await textsOf(club.locator('.n-account__benefits--next .n-account__benefit'), CLUB_TIER_DEFAULT_BENEFITS.TITANE.split('\n'));
     expect(await figuresInDisplayFace(other.page)).toEqual([]);
     expect(other.problems).toEqual([]);
   }, 180_000);
@@ -2704,7 +2788,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(cards.nth(1).locator('.circle-card__event'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC · PARIS$/);
     await attrOf(cards.first().locator('img.circle-card__img'), 'loading', 'lazy');
     await attrOf(cards.first().locator('.circle-card__link'), 'href', `/verify/circle/${note.id}`);
-    expect(await cards.first().evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual(['rgb(246, 242, 234)', 'auto']);
+    expect(await cards.first().evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual([PLATE, 'auto']);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await keepsFloors(page, ['READ THE NOTE', 'SEE THE INVITATION', 'SEE THE POLL', 'SCAN ORBES CODE', 'THE RELEASES', 'THE COLLECTION', 'MY PIECES', ...LEGAL_LINKS]);
     for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {

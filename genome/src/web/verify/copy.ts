@@ -926,6 +926,34 @@ export const CEREMONY = Object.freeze({
 });
 
 /**
+ * NOCTURNE's chrome (plan NOCTURNE, Navigation): the header's account button (the tier's name and the monogram,
+ * decision 11; SIGN IN signed out), the rail of chapters, the SCAN ring at the foot of every screen.
+ */
+export const CHROME = Object.freeze({
+  /** The rail's landmark, the canvas's. */
+  rail: 'Main',
+  chapters: Object.freeze({ now: 'NOW', releases: 'RELEASES', collection: 'COLLECTION', circle: 'CIRCLE', pieces: 'PIECES' }),
+  signIn: 'SIGN IN',
+  /** The SCAN ring: its word under it, and its name (the word first, as it reads). */
+  scan: 'SCAN',
+  scanLabel: 'Scan an ORBES code',
+});
+
+/**
+ * The account sheet (C2), from the header's account button: who is signed in, YOUR TIER (moved from MY PIECES,
+ * decision 10: TIER's words), SOUND, CHANGE PASSWORD (ACCOUNT_PASSWORD's), MY PIECES, the legal pages, SIGN OUT.
+ */
+export const ACCOUNT = Object.freeze({
+  /** The sheet's label, and its dialog's name. */
+  title: 'YOUR ACCOUNT',
+  signedInAs: 'SIGNED IN AS',
+  close: 'Close',
+  /** The legal pages' row: the index of the four, in a new tab. */
+  legal: 'PRIVACY · TERMS · LEGAL · HELP',
+  signOut: 'SIGN OUT',
+});
+
+/**
  * The sound signature (P-D07): SOUND ON / OFF, a text link at the foot of the landing. Its accessible name is SOUND,
  * its state is said by aria-pressed (ON or OFF beside the word is for the eye). On by default; kept on this device.
  */

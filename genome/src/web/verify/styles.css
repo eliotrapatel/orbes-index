@@ -215,37 +215,6 @@ h1[tabindex="-1"]:focus,
   visibility: hidden;
 }
 
-/* The foot: the legal pages and DB-IP's attribution (J-06), then the
-   decorative line, 56 px from the edges as before (the view's 32 px, then 24). */
-.landing__foot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 22px;
-  width: 100%;
-  animation: brand-fade 1s ease 1.2s both;
-}
-
-.landing__meta {
-  display: flex;
-  justify-content: space-between;
-  align-self: stretch;
-  padding: 0 calc(24px + var(--safe-right)) 0 calc(24px + var(--safe-left));
-  font-size: var(--fs-hint);
-  letter-spacing: var(--track-display);
-  opacity: 0.4;
-}
-
-.landing__meta span:nth-child(2) {
-  display: none;
-}
-
-@media (min-width: 560px) {
-  .landing__meta span:nth-child(2) {
-    display: inline;
-  }
-}
-
 /* ── Scanner ───────────────────────────────────────────────────────────── */
 
 .view--scan {
@@ -1210,12 +1179,15 @@ h1[tabindex="-1"]:focus,
 }
 
 .rows__value {
+  min-width: 0;
   margin: 0;
   font-size: var(--fs-label);
   letter-spacing: 0.14em;
   text-align: right;
   text-transform: uppercase;
   font-variant-numeric: tabular-nums;
+  /* A long value (a tracking number of 27 characters) breaks within its row rather than past it (fidelity rule 5). */
+  overflow-wrap: anywhere;
 }
 
 .section-label {
@@ -1456,10 +1428,6 @@ h1[tabindex="-1"]:focus,
 
 .legal-links__credit {
   white-space: nowrap;
-}
-
-.result__legal {
-  margin-top: 6px;
 }
 
 /* Under CREATE ACCOUNT (J-06): the sentence, then TERMS OF USE · PRIVACY
@@ -2495,58 +2463,6 @@ h1[tabindex="-1"]:focus,
   margin-top: 14px;
 }
 
-/* MY PIECES (P-X04): the club's tier at the head of the page. The badge sits
-   on an ivory plate framed like a GENOME's: the tier's name in the display
-   face, the pieces it counts in the reading face; then the benefits, one per
-   line, and the way to the next tier. */
-.pieces__tier {
-  margin-top: 44px;
-}
-
-.pieces__tier[hidden] {
-  display: none;
-}
-
-.pieces__tier > .section-label {
-  margin-top: 0;
-  text-align: center;
-}
-
-.pieces__badge {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-top: 14px;
-  padding: 26px 18px 22px;
-  background: var(--ivory);
-  color: var(--ink);
-  text-align: center;
-}
-
-.pieces__badge .bracket {
-  color: var(--hairline-strong);
-}
-
-.pieces__badge .bracket--tl { top: 8px; left: 8px; }
-.pieces__badge .bracket--tr { top: 8px; right: 8px; }
-.pieces__badge .bracket--bl { bottom: 8px; left: 8px; }
-.pieces__badge .bracket--br { bottom: 8px; right: 8px; }
-
-.pieces__badge-name {
-  font-size: var(--fs-display-sm);
-  font-weight: 400;
-  line-height: 1.3;
-  letter-spacing: var(--track-display);
-  text-indent: var(--track-display);
-}
-
-.pieces__badge-pieces {
-  margin-top: 8px;
-  font-size: var(--fs-line);
-  letter-spacing: 0.06em;
-  color: var(--ink-soft);
-}
-
 .pieces__benefits {
   margin-top: 16px;
   padding-left: 14px;
@@ -2558,10 +2474,6 @@ h1[tabindex="-1"]:focus,
   margin-top: 8px;
 }
 
-.pieces__benefits--next {
-  color: var(--ink-soft);
-}
-
 /* The CARE tab of a piece (P-M02): the model's care under its label, then
    ORBES CARE, its benefits as the tier's (the hairline list), and SUBSCRIBE
    (a text link) or the sentence that says subscriptions open soon. */
@@ -2571,23 +2483,6 @@ h1[tabindex="-1"]:focus,
 }
 
 .piece__care-benefits {
-  margin-top: 14px;
-}
-
-.pieces__next {
-  margin-top: 28px;
-}
-
-.pieces__next > .section-label {
-  margin-top: 0;
-}
-
-.pieces__next-way,
-.pieces__top {
-  margin-top: 10px;
-}
-
-.pieces__tier-note {
   margin-top: 14px;
 }
 
@@ -5010,14 +4905,12 @@ body[data-screen="board"] .corners {
    (Gravesend's one is its capital I, and its figures do not align). */
 .boot-error,
 .landing__sub,
-.landing__meta,
 .scan__status,
 .scan__control,
 .verifying__status,
 .message__title,
 .result__title,
 .pieces__title,
-.pieces__badge-name,
 .pieces__order-title,
 .pieces__order-step-label,
 .pieces__order-documents-title,
@@ -5209,3 +5102,1817 @@ body[data-screen="board"] .corners {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+/* ══ NOCTURNE (plan NOCTURNE, step N2) ═══════════════════════════════════════════════════════════════════════════════
+   The customer app in the vault's look, its column on the ground. The canvas's rulebook (nocturne-ref/build.py,
+   COMMON_CSS and C_CSS) is normative: each of its rules is a rule here, value for value, under the rulebook's own name
+   with `n-` before it (`.C .btn` → `.n-btn`, `.rail a.on` → `.n-rail__link[aria-current="page"]`); its tokens are in
+   brand.css (--vault-*, --n-*). Its pieces are built by views/nocturne.ts, the header, the rail, the footer and the
+   SCAN ring held by views/shell.ts on every screen but the scan, the room, the board and the shared certificate,
+   which keep their own look (choices 3 and 4; fidelity rule 6).
+   Left out, being the canvas's and not the app's: the board's frame (`.s`, 390 px: here the column), its
+   annotations (`.st`), its stand-ins of the camera (`.feed`, `.card-print`, `.cam`) and of the room (`.door`, `.shot`),
+   and the crops `.ph.zoom` and `.zoom2` (a photograph is shown whole, never cropped).
+   Three values differ on purpose: the © line takes ash (the canvas's smoke is under 4.5 : 1); the rail's links, the
+   footer's links, DB-IP's and a text link carry their 44 px tap zone in padding given back by a negative margin (the
+   type and its place are the canvas's), the rail clipping sideways only (`overflow-x: clip`) so a zone may reach
+   above it; the keyboard focus is an ivory ring, 2 px, 2 px off. */
+
+/* ── The ground, the column, the type (COMMON .s, C .C) ── */
+
+html {
+  background: var(--vault-ground);
+}
+
+/* The shared certificate keeps its look (choice 3): its paper, to the edges of the screen. */
+html:has(> body[data-screen="certificate"]) {
+  background: var(--paper);
+}
+
+body.nocturne {
+  /* The house tokens turned to the vault's, as .vault does: a screen not yet drawn in NOCTURNE reads on the ground. */
+  --ink: var(--vault-ink);
+  --ink-soft: var(--vault-soft);
+  --metal: var(--vault-faint);
+  --hairline: var(--vault-hairline);
+  --hairline-strong: var(--vault-hairline-strong);
+  --paper: var(--vault-ground);
+  --white: var(--vault-ground);
+  --ivory: var(--vault-plate);
+  color-scheme: dark;
+  background: var(--vault-ground);
+  color: var(--vault-ink);
+  font-family: var(--font);
+  font-size: var(--n-fs-base);
+  line-height: var(--n-lh-base);
+  transition: none;
+}
+
+body.nocturne .corners,
+body.nocturne .grain {
+  display: none;
+}
+
+/* The screens in the column end where their content does (the footer follows); VERIFYING… and a problem keep the
+   screen's height (their pieces stand in its middle). */
+body.nocturne .app,
+body.nocturne .view:not(.view--verifying):not(.view--message) {
+  min-height: 0;
+}
+
+/* No entrance animations (plan, Motion). */
+body.nocturne .view {
+  animation: none;
+}
+
+body.nocturne ::selection {
+  background: var(--vault-ink);
+  color: var(--vault-ground);
+}
+
+/* The keyboard focus of NOCTURNE's controls: an ivory ring, 2 px, 2 px off (plan, Accessibility). */
+.n-acct:focus-visible,
+.n-rail__link:focus-visible,
+.n-btn:focus-visible,
+.n-tl:focus-visible,
+.n-acc:focus-visible,
+.n-row:focus-visible,
+.n-tabs__tab:focus-visible,
+.n-tabsx__tab:focus-visible,
+.n-switch2__tab:focus-visible,
+.n-vsel__option:focus-visible,
+.n-sizes__option:focus-visible,
+.n-chips__option:focus-visible,
+.n-opt2__option:focus-visible,
+.n-crumb:focus-visible,
+.n-fl__link:focus-visible,
+.n-snd:focus-visible,
+.n-dbip:focus-visible,
+.n-scan__ring:focus-visible,
+.n-account__close:focus-visible,
+.live-banner:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+/* The column: phone width on a computer (choice 5), the overhead light at its top, room at its foot for the SCAN ring. */
+body.nocturne .n-column {
+  position: relative;
+  max-width: var(--n-column);
+  min-height: 100vh;
+  min-height: 100svh;
+  margin: 0 auto;
+  padding-bottom: calc(var(--n-foot) + var(--safe-bottom));
+}
+
+body.nocturne .n-column::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 480px;
+  background: var(--vault-light);
+  pointer-events: none;
+}
+
+body.nocturne .n-column > * {
+  position: relative;
+}
+
+.n-g {
+  font-family: var(--font-display);
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.n-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A figure inside a label set in Gravesend: the reading face (Gravesend's one is its capital I). */
+.n-g .numeral,
+.n-g .n-figure {
+  font-family: var(--font);
+}
+
+.n-ph {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: var(--n-photo);
+}
+
+.n-ph > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 55%;
+}
+
+.n-ph--contain > img {
+  object-fit: contain;
+}
+
+.n-sb {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.n-ic {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.n-ic--sm {
+  width: 16px;
+  height: 16px;
+  stroke-width: 1.4;
+}
+
+.n-u {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.n-vf {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto;
+}
+
+.n-vf > i {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 0 solid currentColor;
+}
+
+.n-vf > i:nth-of-type(1) {
+  top: 0;
+  left: 0;
+  border-top-width: 1px;
+  border-left-width: 1px;
+}
+
+.n-vf > i:nth-of-type(2) {
+  top: 0;
+  right: 0;
+  border-top-width: 1px;
+  border-right-width: 1px;
+}
+
+.n-vf > i:nth-of-type(3) {
+  bottom: 0;
+  left: 0;
+  border-bottom-width: 1px;
+  border-left-width: 1px;
+}
+
+.n-vf > i:nth-of-type(4) {
+  right: 0;
+  bottom: 0;
+  border-right-width: 1px;
+  border-bottom-width: 1px;
+}
+
+.n-fin {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.n-fin__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--n-fs-sm);
+}
+
+.n-fin__dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+/* The monogram on its master artboard (views/nocturne.ts monogram()): a square, sized by the canvas. */
+.n-mono {
+  display: block;
+  flex: none;
+  aspect-ratio: 1;
+  color: var(--vault-ink);
+}
+
+.n-mono--28 {
+  width: 28px;
+  height: 28px;
+}
+
+.n-mono--38 {
+  width: 38px;
+  height: 38px;
+}
+
+.n-mono--40 {
+  width: 40px;
+  height: 40px;
+}
+
+.n-mono--52 {
+  width: 52px;
+  height: 52px;
+}
+
+/* ── The header (C .hd, .wm, .acct): ORBES at the left; the tier and the monogram, or SIGN IN, at the right ── */
+
+.n-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: calc(var(--n-header) + var(--safe-top));
+  padding: var(--safe-top) 12px 0 22px;
+}
+
+.n-wm {
+  font-size: var(--n-fs-wm);
+  letter-spacing: var(--n-track-wm);
+}
+
+.n-acct {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-lb);
+  letter-spacing: var(--n-track-acct);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.n-acct[hidden],
+.n-acct__tier[hidden],
+.n-hd[hidden],
+.n-rail[hidden],
+.n-foot[hidden],
+.n-scan[hidden] {
+  display: none;
+}
+
+/* ── The rail of chapters (C .rail): NOW · RELEASES · COLLECTION · CIRCLE · PIECES ── */
+
+.n-rail {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  height: var(--n-rail);
+  padding: 0 22px;
+  border-bottom: 1px solid var(--vault-hairline);
+  white-space: nowrap;
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+/* The canvas's link: 9.5 px, 0.16 em, its word 13 px above the rail's hairline (its line 1.5 high). Its tap zone is
+   44 px high, reaching above the rail, and a pixel wider each side (three apart on the smallest phone, 320 px); NOW
+   reaches 17 px into the rail's margin, PIECES 9 px: each given back by a negative margin, the words stand where they
+   were, at every width. */
+.n-rail__link {
+  position: relative;
+  flex: none;
+  display: block;
+  margin: 0 -1px;
+  padding: 16.75px 1px 13px;
+  line-height: var(--n-lh-base);
+  color: var(--vault-soft);
+  font-size: var(--n-fs-lb);
+  letter-spacing: var(--n-track-rail);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.n-rail__link[aria-current="page"] {
+  color: var(--vault-ink);
+}
+
+.n-rail__link:first-child {
+  margin-left: -17px;
+  padding-left: 17px;
+}
+
+.n-rail__link:last-child {
+  margin-right: -9px;
+  padding-right: 9px;
+}
+
+.n-rail__link[aria-current="page"]::after {
+  content: "";
+  position: absolute;
+  left: 1px;
+  right: calc(1px + 0.16em);
+  bottom: -1px;
+  height: 1px;
+  background: var(--vault-ink);
+}
+
+.n-rail__link:first-child[aria-current="page"]::after {
+  left: 17px;
+}
+
+.n-rail__link:last-child[aria-current="page"]::after {
+  right: calc(9px + 0.16em);
+}
+
+.n-rail__live {
+  position: relative;
+  top: -1px;
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 7px;
+  border-radius: 50%;
+  background: var(--vault-ink);
+  vertical-align: middle;
+}
+
+.n-rail__live[hidden] {
+  display: none;
+}
+
+/* ── The type scale (C .px … .ctr) ── */
+
+.n-px {
+  padding-left: var(--n-margin);
+  padding-right: var(--n-margin);
+}
+
+.n-t1 {
+  font-size: var(--n-fs-t1);
+  line-height: var(--n-lh-t1);
+  letter-spacing: var(--n-track-t1);
+}
+
+.n-t2 {
+  font-size: var(--n-fs-t2);
+  line-height: var(--n-lh-t2);
+  letter-spacing: var(--n-track-t2);
+}
+
+.n-t3 {
+  font-size: var(--n-fs-t3);
+  letter-spacing: var(--n-track-t3);
+}
+
+.n-lb {
+  color: var(--vault-soft);
+  font-size: var(--n-fs-lb);
+  letter-spacing: var(--n-track-lb);
+}
+
+.n-lead {
+  color: var(--vault-soft);
+  font-size: var(--n-fs-lead);
+  line-height: var(--n-lh-lead);
+}
+
+.n-tx {
+  color: var(--vault-soft);
+  font-size: var(--n-fs-tx);
+  line-height: var(--n-lh-tx);
+}
+
+.n-sm {
+  color: var(--vault-soft);
+  font-size: var(--n-fs-sm);
+  line-height: var(--n-lh-sm);
+}
+
+.n-ivc {
+  color: var(--vault-ink);
+}
+
+.n-sec {
+  padding-top: var(--n-section);
+}
+
+.n-ctr {
+  text-align: center;
+}
+
+.n-nw {
+  white-space: nowrap;
+}
+
+/* ── Buttons and links (C .btn, .btn.ol, .duo, .tl) ── */
+
+.n-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  height: var(--n-button);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--vault-ink);
+  color: var(--vault-ground);
+  font-size: var(--n-fs-btn);
+  letter-spacing: var(--n-track-btn);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.n-btn--ol {
+  background: none;
+  color: var(--vault-ink);
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+}
+
+.n-btn:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+
+.n-duo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+/* The canvas's text link: 10.5 px, underlined at 5 px. Its 44 px tap zone is padding above the word, given back. */
+.n-tl {
+  display: inline-block;
+  margin-top: -22.25px;
+  padding: 22.25px 0 5px;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: none;
+  color: var(--vault-ink);
+  font-size: var(--n-fs-tl);
+  line-height: var(--n-lh-base);
+  letter-spacing: var(--n-track-tl);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* ── Photographs (C .fade, .lift, .two, .cap) ── */
+
+.n-fade::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: var(--n-fade-foot);
+  background: linear-gradient(rgba(10, 10, 10, 0), var(--vault-ground));
+}
+
+.n-fade::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 1;
+  height: var(--n-fade-top);
+  background: linear-gradient(var(--vault-ground), rgba(10, 10, 10, 0));
+}
+
+.n-lift {
+  position: relative;
+  margin-top: var(--n-lift);
+}
+
+.n-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+
+.n-two__caption {
+  padding: 14px 10px 0 24px;
+}
+
+.n-two > * + * .n-two__caption {
+  padding-left: 14px;
+}
+
+.n-cap {
+  font-size: var(--n-fs-cap);
+  letter-spacing: 0.2em;
+}
+
+/* ── Countdown (C .cd) ── */
+
+.n-cd {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.n-cd__group {
+  min-width: 58px;
+}
+
+.n-cd__value {
+  display: block;
+  font-size: var(--n-fs-count);
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: 0.01em;
+}
+
+.n-cd__unit {
+  display: block;
+  margin-top: 10px;
+  padding-left: 0.24em;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-count-unit);
+  letter-spacing: 0.24em;
+}
+
+.n-cd__sep {
+  color: var(--vault-faint);
+  font-size: var(--n-fs-count-sep);
+  font-style: normal;
+  font-weight: 200;
+  line-height: 1.1;
+}
+
+/* ── Plates (C .plate, .card, .nx, .host, .rc, .rec) ── */
+
+.n-plate {
+  background: var(--vault-plate);
+}
+
+.n-card {
+  position: relative;
+  padding: 44px 24px 40px;
+  background: var(--vault-plate);
+  text-align: center;
+}
+
+.n-card::before {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  box-shadow: inset 0 0 0 1px var(--n-card-line);
+  pointer-events: none;
+}
+
+.n-card--left {
+  text-align: left;
+}
+
+.n-card > .n-mono {
+  margin: 0 auto;
+}
+
+.n-nx {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 24px;
+  background: var(--vault-plate);
+}
+
+.n-nx__grow {
+  flex: 1;
+}
+
+.n-host {
+  padding: 16px 20px;
+  background: var(--vault-plate);
+}
+
+.n-host__label {
+  color: var(--vault-soft);
+  font-size: var(--n-fs-lb);
+  letter-spacing: var(--n-track-lb);
+}
+
+.n-host__text {
+  margin-top: 6px;
+  color: var(--vault-ink);
+  font-size: var(--n-fs-dl);
+}
+
+.n-rc {
+  padding: 4px 20px;
+  background: var(--vault-plate);
+}
+
+.n-rc__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--vault-hairline);
+  font-size: var(--n-fs-tl);
+  letter-spacing: var(--n-track-micro);
+}
+
+.n-rc__row:last-child {
+  border-bottom: 0;
+}
+
+.n-rc__value {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--vault-soft);
+}
+
+.n-rc__value .n-ic {
+  color: var(--vault-ink);
+}
+
+/* The one ivory plate of /verify, kept from today's room: CONFIRMED and its receipt on a past release's page (C29). */
+.n-rec {
+  padding: 28px 24px;
+  background: var(--vault-ink);
+  color: var(--vault-ground);
+}
+
+.n-rec .n-kv__row {
+  border-bottom-color: rgba(10, 10, 10, 0.12);
+}
+
+.n-rec .n-kv__label,
+.n-rec .n-lab {
+  color: #5c5c5c;
+}
+
+/* ── Facts (C .dl, .kv, .facts, .lines) ── */
+
+.n-dl__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--vault-hairline);
+  font-size: var(--n-fs-dl);
+}
+
+.n-dl__row:first-child {
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-dl__label {
+  color: var(--vault-soft);
+}
+
+/* A long value (a tracking number) breaks within its row rather than past it (fidelity rule 5). */
+.n-dl__value,
+.n-kv__value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.n-kv__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--vault-hairline);
+  font-size: var(--n-fs-kv);
+}
+
+.n-kv__label {
+  flex: none;
+  padding-top: 2px;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-lb);
+  letter-spacing: 0.24em;
+}
+
+.n-kv__value {
+  text-align: right;
+}
+
+.n-facts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: 18px 0;
+  border-top: 1px solid var(--vault-hairline);
+  border-bottom: 1px solid var(--vault-hairline);
+}
+
+.n-facts__label {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.n-facts__value {
+  font-size: var(--n-fs-dl);
+}
+
+.n-lines {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.n-lines__line {
+  color: var(--vault-soft);
+  font-size: var(--n-fs-t3);
+  letter-spacing: 0.24em;
+}
+
+/* ── Rows (C .acc, .row, .opt, .opt2, .crumb, .state, .banner) ── */
+
+.n-acc {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 20px 0;
+  border: 0;
+  border-bottom: 1px solid var(--vault-hairline);
+  background: none;
+  color: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.n-acc__text {
+  display: block;
+}
+
+.n-acc__title {
+  display: block;
+}
+
+.n-acc__line {
+  display: block;
+  margin-top: 4px;
+}
+
+.n-acc__line--lb {
+  margin-top: 6px;
+}
+
+.n-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 24px;
+  border: 0;
+  border-bottom: 1px solid var(--vault-hairline);
+  background: none;
+  color: inherit;
+  font-size: var(--n-fs-tx);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* A row's word (the account sheet's, C2): 10.5 px, 0.22 em. */
+.n-row__label {
+  font-size: var(--n-fs-tl);
+  letter-spacing: var(--n-track-micro);
+}
+
+.n-opt {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--vault-hairline);
+  font-size: var(--n-fs-tx);
+}
+
+.n-opt:first-child {
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-opt__mark {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+}
+
+.n-opt2 {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.n-opt2__option {
+  height: 48px;
+  border: 0;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+  color: var(--vault-ink);
+  font-size: var(--n-fs-tl);
+  letter-spacing: var(--n-track-micro);
+  text-align: center;
+  cursor: pointer;
+}
+
+.n-opt2__option[aria-pressed="true"] {
+  background: var(--vault-ink);
+  color: var(--vault-ground);
+}
+
+.n-crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 48px;
+  padding: 0 18px;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-micro);
+  letter-spacing: 0.26em;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.n-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--vault-ink);
+  font-size: var(--n-fs-dl);
+}
+
+.n-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--vault-hairline);
+  background: var(--vault-plate);
+  font-size: var(--n-fs-lb);
+  letter-spacing: var(--n-track-micro);
+}
+
+.n-banner__grow {
+  flex: 1;
+}
+
+/* ── Tabs (C .tabs, .tabsx, .switch2): underlined, a tablist. Each tab's 44 px zone is padding above its word, given back. */
+
+.n-tabs,
+.n-tabsx,
+.n-switch2 {
+  display: flex;
+  border-bottom: 1px solid var(--vault-hairline);
+}
+
+.n-tabs {
+  gap: 30px;
+}
+
+.n-tabsx {
+  justify-content: space-between;
+}
+
+.n-switch2 {
+  gap: 22px;
+}
+
+.n-tabs__tab,
+.n-tabsx__tab,
+.n-switch2__tab {
+  position: relative;
+  border: 0;
+  background: none;
+  color: var(--vault-soft);
+  line-height: var(--n-lh-base);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.n-tabs__tab {
+  margin-top: -14.25px;
+  padding: 14.25px 0 14px;
+  font-size: var(--n-fs-tl);
+  letter-spacing: var(--n-track-tab);
+}
+
+.n-tabsx__tab {
+  margin-top: -15px;
+  padding: 15px 0 14px;
+  font-size: var(--n-fs-micro);
+  letter-spacing: var(--n-track-micro);
+}
+
+.n-switch2__tab {
+  margin-top: -17px;
+  padding: 17px 0 12px;
+  font-size: var(--n-fs-micro);
+  letter-spacing: var(--n-track-micro);
+}
+
+.n-tabs__tab[aria-selected="true"],
+.n-tabs__tab[aria-current],
+.n-tabsx__tab[aria-selected="true"],
+.n-tabsx__tab[aria-current],
+.n-switch2__tab[aria-selected="true"],
+.n-switch2__tab[aria-current] {
+  color: var(--vault-ink);
+}
+
+.n-tabs__tab[aria-selected="true"]::after,
+.n-tabs__tab[aria-current]::after,
+.n-tabsx__tab[aria-selected="true"]::after,
+.n-tabsx__tab[aria-current]::after,
+.n-switch2__tab[aria-selected="true"]::after,
+.n-switch2__tab[aria-current]::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  background: var(--vault-ink);
+}
+
+.n-tabs__count {
+  position: relative;
+  top: -3px;
+  margin-left: 6px;
+  font-family: var(--font);
+  font-size: var(--n-fs-tab-count);
+  letter-spacing: 0;
+  vertical-align: top;
+}
+
+/* ── The tier as five dots (C .meter) ── */
+
+.n-meter {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.n-meter--start {
+  justify-content: flex-start;
+}
+
+.n-meter__dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+}
+
+.n-meter__dot.is-on {
+  background: var(--vault-ink);
+  box-shadow: none;
+}
+
+/* ── Fields (C .fld, .lab, .fieldline, .err): a label in Gravesend, a line under the input ── */
+
+.n-fld-group {
+  display: block;
+  margin-top: 20px;
+}
+
+/* The canvas's label: its `.lab` inside `.fld`, where `.fld span` (13 px, ash) takes its size and colour. */
+.n-fld {
+  display: block;
+}
+
+.n-lab {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-lb);
+  letter-spacing: 0.24em;
+}
+
+.n-fld .n-lab {
+  font-size: var(--n-fs-sm);
+}
+
+.n-fld__input {
+  display: block;
+  width: 100%;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--vault-hairline-strong);
+  border-radius: 0;
+  background: none;
+  color: var(--vault-ink);
+  font: inherit;
+  font-size: var(--n-fs-input);
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.n-fld__input:focus,
+.n-fld__input[aria-invalid="true"] {
+  border-bottom-color: var(--vault-ink);
+}
+
+.n-fld__hint {
+  margin-top: 6px;
+}
+
+.n-fieldline {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.n-fieldline .n-fld-group {
+  flex: 1;
+  margin-top: 0;
+}
+
+.n-fieldline .n-btn {
+  width: auto;
+  height: 44px;
+  padding: 0 20px;
+}
+
+.n-err {
+  margin-top: 14px;
+  color: var(--vault-ink);
+  font-size: var(--n-fs-sm);
+}
+
+.n-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-sm);
+}
+
+.n-contact a {
+  color: var(--vault-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.n-art {
+  max-width: 34em;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-lead);
+  line-height: var(--n-lh-art);
+}
+
+.n-art strong {
+  color: var(--vault-ink);
+  font-weight: 500;
+}
+
+/* ── Controls (C .sw, .vsel, .sizes, .chips) ── */
+
+.n-sw {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 26px;
+}
+
+.n-sw__input {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.n-sw__track {
+  position: absolute;
+  inset: 0;
+  border-radius: 13px;
+  background: var(--vault-hairline-strong);
+}
+
+.n-sw__track::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--vault-ground);
+}
+
+.n-sw__input:checked + .n-sw__track {
+  background: var(--vault-ink);
+}
+
+.n-sw__input:checked + .n-sw__track::after {
+  left: 21px;
+}
+
+.n-sw__input:focus-visible + .n-sw__track {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+.n-live {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--vault-ink);
+  box-shadow: 0 0 0 4px var(--vault-hairline);
+}
+
+.n-vsel {
+  display: flex;
+  justify-content: center;
+  gap: 26px;
+}
+
+.n-vsel__option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  background: none;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-step);
+  cursor: pointer;
+}
+
+.n-vsel__dot {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--n-dot-ring);
+}
+
+.n-vsel__option[aria-pressed="true"] {
+  color: var(--vault-ink);
+}
+
+.n-vsel__option[aria-pressed="true"] .n-vsel__dot {
+  box-shadow: 0 0 0 3px var(--vault-ground), 0 0 0 4px var(--vault-ink);
+}
+
+.n-sizes {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.n-sizes__option {
+  width: 78px;
+  height: 54px;
+  border: 0;
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+  color: var(--vault-ink);
+  font-size: var(--n-fs-size);
+  text-align: center;
+  cursor: pointer;
+}
+
+.n-sizes__option[aria-pressed="true"] {
+  box-shadow: inset 0 0 0 1px var(--vault-ink), inset 0 0 0 4px var(--vault-ground), inset 0 0 0 5px var(--vault-ink);
+}
+
+.n-chips {
+  display: inline-flex;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+}
+
+.n-chips__option {
+  width: 56px;
+  height: 40px;
+  border: 0;
+  background: none;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-sm);
+  text-align: center;
+  cursor: pointer;
+}
+
+.n-chips__option[aria-pressed="true"] {
+  background: var(--vault-ink);
+  color: var(--vault-ground);
+}
+
+/* ── The steps of an order (C .steps) ── */
+
+.n-steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.n-steps::before {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: var(--n-steps-last, 25%);
+  left: 5px;
+  height: 1px;
+  background: var(--vault-hairline-strong);
+}
+
+.n-steps__bar {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  height: 1px;
+  background: var(--vault-ink);
+}
+
+.n-steps__bar[hidden] {
+  display: none;
+}
+
+.n-steps__step {
+  position: relative;
+}
+
+.n-steps__dot {
+  display: block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--vault-ground);
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+}
+
+.n-steps__step.is-done .n-steps__dot {
+  background: var(--vault-ink);
+  box-shadow: none;
+}
+
+.n-steps__label {
+  display: block;
+  margin-top: 12px;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-count-unit);
+  letter-spacing: 0.2em;
+}
+
+.n-steps__step.is-done .n-steps__label {
+  color: var(--vault-ink);
+}
+
+.n-steps__date {
+  margin-top: 4px;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-step);
+}
+
+/* ── The GENOME, the tone marks, the seal (C .tone, .gen, .glow, .seal, .cap2, .bar2) ── */
+
+.n-tone {
+  display: block;
+  width: 44px;
+  height: 44px;
+  margin: 0 auto;
+}
+
+.n-gen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.n-gen__figure {
+  width: 200px;
+  height: 200px;
+}
+
+.n-gen__id {
+  margin-top: 18px;
+  font-size: var(--n-fs-gen-id);
+  letter-spacing: 0.24em;
+}
+
+.n-gen__fp {
+  margin-top: 8px;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-gen-fp);
+  letter-spacing: 0.06em;
+}
+
+.n-glow {
+  filter: var(--n-glow);
+}
+
+.n-seal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 150px;
+  height: 150px;
+  margin: 0 auto;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong), 0 0 40px var(--n-seal-light);
+}
+
+.n-cap2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 12px 24px 0;
+}
+
+.n-bar2 {
+  height: 2px;
+  margin-top: 8px;
+  background: var(--vault-hairline);
+}
+
+.n-bar2__fill {
+  display: block;
+  height: 2px;
+  background: var(--vault-ink);
+}
+
+/* The scanner's ring and the shade round it (C11, C12). */
+.n-orbit {
+  position: absolute;
+  top: 392px;
+  left: 50%;
+  width: 272px;
+  height: 272px;
+  margin: -136px 0 0 -136px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(246, 242, 234, 0.8), 0 0 0 2000px rgba(5, 5, 5, 0.5);
+}
+
+/* ── The account sheet (C .sheet, .handle; C2) ── */
+
+.n-sheet {
+  position: absolute;
+  top: 150px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 16px 16px 0 0;
+  background: var(--vault-plate);
+  box-shadow: 0 -1px 0 var(--vault-hairline);
+}
+
+.n-handle {
+  width: 40px;
+  height: 4px;
+  margin: 10px auto 0;
+  border-radius: 2px;
+  background: var(--vault-hairline-strong);
+}
+
+/* C2: the sheet over the page, under the header and the rail (56 + 40 + 24 px), the page dimmed above it. */
+.n-account {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.n-account[hidden] {
+  display: none;
+}
+
+.n-account__scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--n-scrim);
+}
+
+.n-account__panel {
+  position: absolute;
+  top: calc(var(--n-header) + var(--n-rail) + 24px + var(--safe-top));
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-width: var(--n-column);
+  margin: 0 auto;
+  padding-bottom: calc(40px + var(--safe-bottom));
+  border-radius: 16px 16px 0 0;
+  background: var(--vault-plate);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* C2 sets its plate in the page's flow, where the handle's 10 px margin joins the plate's own (the two collapse): the
+   handle sits on the plate's top edge. The panel scrolls, so its margins never collapse: the handle's is set to 0. */
+.n-account__panel > .n-handle {
+  margin-top: 0;
+}
+
+.n-account__head {
+  align-items: center;
+  margin-top: 14px;
+}
+
+.n-form__actions {
+  margin-top: 22px;
+}
+
+.n-account__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: none;
+  color: var(--vault-ink);
+  cursor: pointer;
+}
+
+.n-account__email {
+  margin-top: 6px;
+  color: var(--vault-ink);
+  font-size: var(--n-fs-tx);
+  overflow-wrap: anywhere;
+}
+
+.n-account__tier {
+  margin-top: 30px;
+}
+
+.n-account__badge {
+  align-items: center;
+  margin-top: 10px;
+}
+
+.n-account__dots {
+  margin-top: 12px;
+}
+
+.n-account__benefits {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  list-style: none;
+}
+
+.n-account__benefit {
+  position: relative;
+  padding-left: 14px;
+}
+
+.n-account__benefit::before {
+  content: "–";
+  position: absolute;
+  left: 0;
+}
+
+.n-account__next-label {
+  margin-top: 20px;
+  color: var(--vault-ink);
+}
+
+.n-account__next-way {
+  margin-top: 8px;
+}
+
+.n-account__club .n-account__next-way {
+  margin-top: 10px;
+}
+
+.n-account__top,
+.n-account__note {
+  margin-top: 14px;
+}
+
+.n-account__rows {
+  margin-top: 30px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-account__notice {
+  padding: 0 var(--n-margin);
+}
+
+.n-account__out {
+  margin-top: 26px;
+}
+
+.n-account__password {
+  margin-top: 20px;
+}
+
+.n-account__password-lead {
+  margin-top: 10px;
+}
+
+.n-account__password .n-duo {
+  margin-top: 22px;
+}
+
+/* While the sheet is open, the page under it holds still. */
+html.n-locked,
+html.n-locked body {
+  overflow: hidden;
+}
+
+/* ── The footer (C .foot, .fl, .snd, .dbip, .cr) ── */
+
+.n-foot {
+  margin-top: 96px;
+  padding: 40px var(--n-margin) 0;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-fl {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  justify-content: start;
+  row-gap: 12px;
+  column-gap: 22px;
+  margin-top: 30px;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-micro);
+  letter-spacing: var(--n-track-micro);
+}
+
+/* Each link's 44 px zone: padding above and below its word and after it (into the 22 px between two), given back. */
+.n-fl__link {
+  margin: -14.5px -9px -14.5px 0;
+  padding: 14.5px 9px 14.5px 0;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.n-foot__sound {
+  margin-top: 22px;
+}
+
+.n-snd {
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-micro);
+  letter-spacing: var(--n-track-micro);
+  cursor: pointer;
+}
+
+.n-snd__state {
+  color: var(--vault-ink);
+  font-weight: 500;
+}
+
+.n-foot__credit {
+  margin-top: 18px;
+}
+
+.n-dbip {
+  display: inline-block;
+  margin: -15px 0;
+  padding: 15px 0;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-lb);
+  letter-spacing: 0.2em;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  cursor: pointer;
+}
+
+/* © ORBES · PARIS, in ash: the canvas's smoke reads under 4.5 : 1. */
+.n-cr {
+  margin-top: 18px;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-copy);
+  letter-spacing: 0.24em;
+}
+
+.n-cr__wide {
+  display: none;
+}
+
+@media (min-width: 560px) {
+  .n-cr__wide {
+    display: inline;
+  }
+}
+
+/* ── The SCAN ring (C .scan): at the foot of every screen, over a fade, in the column ── */
+
+.n-scan {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: var(--n-column);
+  height: calc(var(--n-foot) + var(--safe-bottom));
+  margin: 0 auto;
+  padding-bottom: calc(22px + var(--safe-bottom));
+  background: linear-gradient(rgba(10, 10, 10, 0), var(--vault-ground) 58%);
+  pointer-events: none;
+}
+
+.n-scan__ring {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  background: var(--vault-ground);
+  box-shadow: inset 0 0 0 1px var(--n-scan-ring), 0 0 34px var(--n-scan-light);
+  color: var(--vault-ink);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.n-scan .n-ic {
+  width: 26px;
+  height: 26px;
+}
+
+.n-scan__label {
+  margin-top: 9px;
+  padding-left: 0.3em;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-count-unit);
+  letter-spacing: 0.3em;
+}
+
+/* ── A page's states (C40): the monogram breathing above ONE MOMENT…, could not be shown, an empty page's words ── */
+
+.n-loading__text {
+  margin-top: 16px;
+}
+
+.n-breath {
+  display: block;
+  margin: 0 auto;
+}
+
+/* It breathes (1 → 0.4 → 1 over 2.4 s, ease-in-out) unless the phone asks for less motion: then it is still. */
+@media (prefers-reduced-motion: no-preference) {
+  .n-breath {
+    animation: n-breath 2.4s ease-in-out infinite;
+  }
+}
+
+@keyframes n-breath {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.n-failed__reason {
+  margin-top: 8px;
+}
+
+.n-failed .n-btn {
+  margin-top: 18px;
+}
+
+.n-quiet + .n-quiet {
+  margin-top: 12px;
+}
+
+/* ── The banner of the LIVE RELEASES under the rail, as C3 draws it: a plate, the live dot, its line, the chevron ── */
+
+body.nocturne .live-banner-host {
+  position: relative;
+  top: auto;
+  right: auto;
+  left: auto;
+  z-index: auto;
+  animation: none;
+}
+
+/* Its plate, its dot, its chevron; its type and its height stay the house's until MY PIECES is drawn (N5): 10 px, 56 px. */
+body.nocturne .live-banner {
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--vault-hairline);
+  background: var(--vault-plate);
+  color: var(--vault-ink);
+}
+
+body.nocturne .live-banner__line {
+  flex: 1;
+}
+
+body.nocturne[data-banner] .view--pieces {
+  padding-top: calc(60px + var(--safe-top));
+}
+
+/* ── The screens not yet drawn in NOCTURNE, on its ground: its 24 px margin, and their states as C40 draws them ── */
+
+body.nocturne .view--landing,
+body.nocturne .view--result,
+body.nocturne .view--pieces,
+body.nocturne .view--lookbook,
+body.nocturne .view--sheet,
+body.nocturne .view--releases,
+body.nocturne .view--release,
+body.nocturne .view--circle,
+body.nocturne .view--circle-post {
+  max-width: none;
+  padding-right: var(--n-margin);
+  padding-left: var(--n-margin);
+}
+
+body.nocturne .pieces__empty,
+body.nocturne .lookbook__empty,
+body.nocturne .sheet__missing,
+body.nocturne .releases__empty,
+body.nocturne .release__missing,
+body.nocturne .circle__empty,
+body.nocturne .circle__closed,
+body.nocturne .circle-post__missing {
+  max-width: none;
+  margin: 0;
+  text-align: left;
+  text-wrap: wrap;
+}
+

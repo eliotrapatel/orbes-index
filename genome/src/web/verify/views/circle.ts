@@ -19,7 +19,7 @@
  *               SHOW MORE                    the next page of the feed
  *            [ SCAN ORBES CODE ]
  *   THE RELEASES · THE COLLECTION · MY PIECES
- *   PRIVACY · TERMS · LEGAL · HELP
+ *   (the legal pages: NOCTURNE's footer, views/shell.ts)
  *
  * Signed out, the OWNERSHIP panel's sign-in (its account mode) under one
  * sentence; signed in without a piece, the sentence that the circle opens
@@ -48,7 +48,8 @@ import { circleCards, circlePostModel, type CircleCardModel, type CirclePhotoMod
 import { CIRCLE, RELEASES } from '../copy.js';
 import type { SessionStore } from '../session.js';
 import type { CircleAnswer, CircleCard } from '../types.js';
-import { circleLink, legalLinks, lookbookLink, piecesLink, releasesLink, sectionLabel, viewRoot, withNumerals } from './common.js';
+import { circleLink, lookbookLink, piecesLink, releasesLink, sectionLabel, viewRoot, withNumerals } from './common.js';
+import { failedState, loadingState, quietLine } from './nocturne.js';
 import { messageOf } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
 
@@ -151,7 +152,6 @@ class FeedPage {
         releasesLink(() => deps.onReleases(), { extraClass: 'circle__releases' }),
         lookbookLink(() => deps.onCollection(), { extraClass: 'circle__collection' }),
         piecesLink(() => deps.onPieces(), 'circle__pieces'),
-        legalLinks({ newTab: true, extraClass: 'circle__legal' }),
       ),
     );
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
@@ -235,20 +235,17 @@ class FeedPage {
     switch (l.kind) {
       case 'waiting':
       case 'loading':
-        this.body.replaceChildren(h('p', { class: 'circle__waiting micro', attrs: { 'aria-busy': 'true' }, text: CIRCLE.loading }));
+        this.body.replaceChildren(loadingState(CIRCLE.loading, { extraClass: 'circle__waiting' }));
         return;
       case 'signed-out':
         this.signIn ??= new OwnershipPanel({ kind: 'account', lead: CIRCLE.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
         this.body.replaceChildren(h('div', { class: 'circle__signin' }, this.signIn.root));
         return;
       case 'owners-only':
-        this.body.replaceChildren(h('p', { class: 'prose circle__closed', text: CIRCLE.ownersOnly }));
+        this.body.replaceChildren(quietLine(CIRCLE.ownersOnly, 'circle__closed'));
         return;
       case 'failed':
-        this.body.replaceChildren(
-          h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${CIRCLE.loadFailed} ${l.message}` }),
-          h('button', { class: 'textlink circle__retry', attrs: { type: 'button' }, on: { click: () => void this.fetch() }, text: CIRCLE.retry }),
-        );
+        this.body.replaceChildren(failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle__retry' }));
         if (hadFocus) this.body.querySelector<HTMLElement>('.circle__retry')?.focus();
         return;
       default: {
@@ -262,7 +259,7 @@ class FeedPage {
             h('p', { class: 'prose circle__early-text', text: RELEASES.earlyAccess.recall }),
           ),
         ];
-        if (cards.length === 0) out.push(h('p', { class: 'prose circle__empty', text: CIRCLE.empty }));
+        if (cards.length === 0) out.push(quietLine(CIRCLE.empty, 'circle__empty'));
         else out.push(h('ul', { class: 'circle__list' }, ...cards.map((c) => h('li', { class: 'circle__item' }, this.card(c)))));
         if (l.more === 'failed') out.push(h('p', { class: 'form__error', attrs: { role: 'alert' }, text: CIRCLE.moreFailed }));
         if (l.more === 'loading') out.push(h('p', { class: 'circle__waiting micro', attrs: { 'aria-busy': 'true' }, text: CIRCLE.loading }));
@@ -446,23 +443,20 @@ class PostPage {
     switch (l.kind) {
       case 'waiting':
       case 'loading':
-        this.body.replaceChildren(h('p', { class: 'circle__waiting micro', attrs: { 'aria-busy': 'true' }, text: CIRCLE.loading }));
+        this.body.replaceChildren(loadingState(CIRCLE.loading, { extraClass: 'circle__waiting' }));
         break;
       case 'signed-out':
         this.signIn ??= new OwnershipPanel({ kind: 'account', lead: CIRCLE.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
         this.body.replaceChildren(h('div', { class: 'circle__signin' }, this.signIn.root));
         break;
       case 'owners-only':
-        this.body.replaceChildren(h('p', { class: 'prose circle__closed', text: CIRCLE.ownersOnly }));
+        this.body.replaceChildren(quietLine(CIRCLE.ownersOnly, 'circle__closed'));
         break;
       case 'missing':
-        this.body.replaceChildren(h('p', { class: 'prose circle-post__missing', text: CIRCLE.notFound }));
+        this.body.replaceChildren(quietLine(CIRCLE.notFound, 'circle-post__missing'));
         break;
       case 'failed':
-        this.body.replaceChildren(
-          h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${CIRCLE.loadFailed} ${l.message}` }),
-          h('button', { class: 'textlink circle-post__retry', attrs: { type: 'button' }, on: { click: () => void this.fetch() }, text: CIRCLE.retry }),
-        );
+        this.body.replaceChildren(failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle-post__retry' }));
         if (hadFocus) this.body.querySelector<HTMLElement>('.circle-post__retry')?.focus();
         break;
       default: {
@@ -504,7 +498,6 @@ class PostPage {
     this.foot.replaceChildren(
       h('button', { class: `${offersVote ? 'textlink' : 'btn'} circle-post__scan`, attrs: { type: 'button' }, on: { click: () => this.deps.onScan() }, text: CIRCLE.scan }),
       circleLink(() => this.deps.onCircle(), { extraClass: 'circle-post__back' }),
-      legalLinks({ newTab: true, extraClass: 'circle-post__legal' }),
     );
     if (hadFocus && !this.body.contains(document.activeElement)) (this.body.querySelector<HTMLElement>('button:not([disabled])') ?? this.body.querySelector<HTMLElement>('.section-label'))?.focus({ preventScroll: true });
   }

@@ -17,17 +17,14 @@
  * (P-R03), the drops ORBES announces, a fourth (entering one needs an
  * account, reading them none).
  *
- * At the foot (J-06), under the centre and in the page's flow, so a short
- * screen scrolls to them rather than covering the actions: SOUND ON / OFF
- * (P-D07), the switch of the sound signature an authentic result plays, then
- * the legal pages, PRIVACY · TERMS · LEGAL · HELP, and DB-IP's attribution,
- * then the decorative line © ORBES · GENOME CODE · PARIS.
+ * Its foot is NOCTURNE's footer (views/shell.ts, under every screen): SOUND
+ * ON / OFF (P-D07), the legal pages (J-06), DB-IP's attribution and © ORBES ·
+ * PARIS.
  */
 import { h } from '../../shared/dom.js';
 import { monogramSvg } from '../../shared/monogram.js';
 import type { SessionStore } from '../session.js';
-import type { SoundSwitch } from '../sound.js';
-import { legalLinks, lookbookLink, orbitReticle, piecesLink, releasesLink, soundToggle, viewRoot } from './common.js';
+import { lookbookLink, orbitReticle, piecesLink, releasesLink, viewRoot } from './common.js';
 
 export interface LandingHandlers {
   onScan(): void;
@@ -39,8 +36,6 @@ export interface LandingHandlers {
   onCollection?(): void;
   /** THE RELEASES (P-R03): the drops, in the app. */
   onReleases?(): void;
-  /** The sound signature (P-D07): SOUND ON / OFF at the foot. */
-  sound?: SoundSwitch;
 }
 
 export function landingView(handlers: LandingHandlers): HTMLElement {
@@ -87,13 +82,6 @@ export function landingView(handlers: LandingHandlers): HTMLElement {
         lookbookLink(handlers.onCollection, { extraClass: 'landing__collection' }),
         releasesLink(handlers.onReleases, { extraClass: 'landing__releases' }),
       ),
-    ),
-    h(
-      'footer',
-      { class: 'landing__foot' },
-      handlers.sound ? soundToggle(handlers.sound, 'landing__sound') : null,
-      legalLinks({ extraClass: 'landing__legal' }),
-      h('div', { class: 'landing__meta nano' }, h('span', { text: '© ORBES' }), h('span', { text: 'GENOME CODE' }), h('span', { text: 'PARIS' })),
     ),
   );
   return root;

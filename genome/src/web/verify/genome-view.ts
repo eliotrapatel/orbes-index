@@ -3,10 +3,15 @@
  * it is defined for print, so the screen, the PDF certificate and the printed
  * code show the same eight glyphs.
  *
- * The result page draws them in their orbit around the SEAL, as they sit on
- * the piece and in the console (glyph 0 at north, then clockwise, each glyph
- * in its absolute orientation): the customer compares the screen with the
- * object at a glance, without unrolling the orbit in their head.
+ * The result page draws them in their orbit (glyph 0 at north, then
+ * clockwise, each glyph in its absolute orientation), as they sit on the piece
+ * and in the console: the customer compares the screen with the object at a
+ * glance, without unrolling the orbit in their head. On a collector's screens
+ * (a result, a piece, the ceremony of a first registration) the GENOME is drawn
+ * in ivory on the ground, the ORBES monogram at the orbit's centre in place of
+ * the SEAL (NOCTURNE, decision 12); the shared ownership certificate keeps its
+ * ivory plate, the ivory colourway's ink and the SEAL, as the printed code, the
+ * PDF certificate and the console draw it.
  *
  * The glyphs come from the server's verification outcome. They are recomputed
  * here only to cross-check the fingerprint the server sent: a mismatch means
@@ -15,6 +20,7 @@
  */
 import { ORBES_CODE_STYLES } from '../../core/code/styles.js';
 import { computeGenome, identityFromGenomeGlyphs, renderGenomeSvg, SUPPORTED_GENOME_VERSIONS, type Genome } from '../../core/genome/index.js';
+import type { GenomeCentre } from '../../core/genome/render.js';
 import { h, parseSvg } from '../shared/dom.js';
 import type { GenomeModel } from './view-model.js';
 
@@ -31,20 +37,30 @@ export function genomeFromModel(m: GenomeModel): Genome | null {
   }
 }
 
-/**
- * SVG markup of the GENOME (glyph row by default, or the orbit), or null when
- * it cannot be drawn faithfully. The GENOME sits on an ivory plate
- * (`.result__genome`), so it is drawn in the ivory colourway's ink, exactly
- * as the ivory code prints it (BRAND-DESIGN-SYSTEM §2.4).
- */
-export function genomeRowMarkup(m: GenomeModel, opts: { layout?: 'row' | 'orbit' } = {}): string | null {
-  const genome = genomeFromModel(m);
-  if (!genome) return null;
-  return renderGenomeSvg(genome, { layout: opts.layout ?? 'row', ink: ORBES_CODE_STYLES.ivory.ink, paper: null });
+/** The ink of the GENOME on a collector's screen (NOCTURNE): the ivory of the ground's text, --vault-ink. */
+export const GENOME_SCREEN_INK = '#f6f2ea';
+
+export interface GenomeDrawing {
+  layout?: 'row' | 'orbit';
+  /** The orbit's centre: the SEAL (default, as printed) or the ORBES monogram (a collector's screen, decision 12). */
+  centre?: GenomeCentre;
+  /** The ink: the ivory colourway's (default, on an ivory plate, as the ivory code prints it) or GENOME_SCREEN_INK. */
+  ink?: string;
 }
 
-/** The GENOME as an inline SVG (ivory colourway ink), or null when it cannot be drawn faithfully. */
-export function genomeRow(m: GenomeModel, opts: { layout?: 'row' | 'orbit' } = {}): SVGSVGElement | null {
+/**
+ * SVG markup of the GENOME (glyph row by default, or the orbit), or null when it cannot be drawn faithfully. By
+ * default as the console draws it: around the SEAL, in the ivory colourway's ink, exactly as the ivory code prints it
+ * (BRAND-DESIGN-SYSTEM §2.4), for an ivory plate.
+ */
+export function genomeRowMarkup(m: GenomeModel, opts: GenomeDrawing = {}): string | null {
+  const genome = genomeFromModel(m);
+  if (!genome) return null;
+  return renderGenomeSvg(genome, { layout: opts.layout ?? 'row', ...(opts.centre ? { centre: opts.centre } : {}), ink: opts.ink ?? ORBES_CODE_STYLES.ivory.ink, paper: null });
+}
+
+/** The GENOME as an inline SVG, or null when it cannot be drawn faithfully. */
+export function genomeRow(m: GenomeModel, opts: GenomeDrawing = {}): SVGSVGElement | null {
   const markup = genomeRowMarkup(m, opts);
   if (markup === null) return null;
   const svg = parseSvg(markup);
@@ -57,12 +73,15 @@ export function genomeRow(m: GenomeModel, opts: { layout?: 'row' | 'orbit' } = {
 }
 
 /**
- * The GENOME block: label, product id, the glyphs in their orbit around the SEAL, fingerprint. On a result the
- * label GENOME is the block's heading; in MY PIECES (`titleId`), where each piece has its plate, the product id
- * is (an h2 with that id, which names the piece), and GENOME stays its label.
+ * The GENOME block: label, product id, the glyphs in their orbit, fingerprint. On a result the label GENOME is the
+ * block's heading; in MY PIECES (`titleId`), where each piece has its plate, the product id is (an h2 with that id,
+ * which names the piece), and GENOME stays its label. On a collector's screen the orbit is drawn in ivory around the
+ * ORBES monogram, with its glow (NOCTURNE, decision 12); `seal` draws it as printed, around the SEAL in the ivory
+ * colourway's ink, on the shared ownership certificate's ivory plate.
  */
-export function genomeBlock(m: GenomeModel, opts: { titleId?: string } = {}): HTMLElement {
-  const figure = genomeRow(m, { layout: 'orbit' });
+export function genomeBlock(m: GenomeModel, opts: { titleId?: string; seal?: boolean } = {}): HTMLElement {
+  const figure = opts.seal ? genomeRow(m, { layout: 'orbit' }) : genomeRow(m, { layout: 'orbit', centre: 'monogram', ink: GENOME_SCREEN_INK });
+  if (figure && !opts.seal) figure.classList.add('n-glow');
   const titled = opts.titleId !== undefined;
   return h(
     'section',

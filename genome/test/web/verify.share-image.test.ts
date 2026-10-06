@@ -69,13 +69,17 @@ describe('SHARE THE GENOME: the image (P-D01)', () => {
     ]);
   });
 
-  it('draws on ivory, in the ivory colourway, the GENOME of genomeLayout as one Path2D per primitive, in its orbit', () => {
+  it('draws on ivory, in the ivory colourway, the GENOME of genomeLayout as the result draws it: the ORBES monogram at its centre (decision 12), one Path2D per outline and per primitive', () => {
     const ctx = new Recorder();
     drawShareImage(ctx, GENOME, { name: 'MONOLITHE', collection: 'ORBIT' }, FONTS);
     expect(SHARE_IMAGE).toMatchObject({ width: 1080, height: 1350, paper: '#F6F2EA', ink: '#111111' });
     expect(ctx.rects).toEqual([{ x: 0, y: 0, w: 1080, h: 1350, fill: '#F6F2EA' }]);
-    const { primitives, viewBox } = genomeLayout(GENOME, 'orbit');
-    expect(ctx.paths.map((p) => p.d)).toEqual(primitives.map(primitiveToPathData));
+    const { primitives, viewBox, monogram } = genomeLayout(GENOME, 'orbit', { centre: 'monogram' });
+    expect(monogram).toHaveLength(5);
+    // The monogram's five outlines first, then the glyphs and their separators; no SEAL.
+    expect(ctx.paths.map((p) => p.d)).toEqual([...monogram!, ...primitives.map(primitiveToPathData)]);
+    expect(primitives.some((p) => p.layer === 'seal')).toBe(false);
+    expect(new Set(ctx.paths.map((p) => p.transform.join(' '))).size).toBe(1);
     // Scaled into the orbit's square, centred across the image.
     const [scale, , , , dx, dy] = ctx.paths[0].transform;
     expect(scale * viewBox.w).toBeCloseTo(SHARE_IMAGE.orbit);

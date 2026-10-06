@@ -15,9 +15,12 @@
  *
  * The viewBox is the ink's box (MONOGRAM_BOUNDS), not the master's 500 × 500
  * artboard, so the stylesheet that places the emblem sets its width and its
- * clear space; its height follows the ink (0.76 of the width).
+ * clear space; its height follows the ink (0.76 of the width). NOCTURNE's
+ * canvas places it on its master artboard instead (`artboard`: a square box,
+ * the ink centred in it with the master's own margins), sized by the box: the
+ * header's 28 px, the footer's 38 px, the loading state's 40 px.
  */
-import { MONOGRAM_BOUNDS, MONOGRAM_LABEL, MONOGRAM_PATHS } from '../../core/render/monogram.js';
+import { MONOGRAM_ARTBOARD, MONOGRAM_BOUNDS, MONOGRAM_LABEL, MONOGRAM_PATHS } from '../../core/render/monogram.js';
 import { parseSvg } from './dom.js';
 
 export interface MonogramOptions {
@@ -25,13 +28,15 @@ export interface MonogramOptions {
   class?: string;
   /** Beside the typed word ORBES: aria-hidden instead of an image named ORBES. */
   decorative?: boolean;
+  /** The master's 500 × 500 artboard as the viewBox, not the ink's box (NOCTURNE's square placements). */
+  artboard?: boolean;
 }
 
 /** The emblem as SVG markup: `monogram` class, the five master outlines, filled with currentColor. */
 export function monogramMarkup(opts: MonogramOptions = {}): string {
   const cls = ['monogram', opts.class].filter(Boolean).join(' ');
   if (!/^[\w -]+$/.test(cls)) throw new Error('monogram: invalid class name');
-  const b = MONOGRAM_BOUNDS;
+  const b = opts.artboard ? MONOGRAM_ARTBOARD : MONOGRAM_BOUNDS;
   const a11y = opts.decorative ? 'aria-hidden="true"' : `role="img" aria-label="${MONOGRAM_LABEL}"`;
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" class="${cls}" viewBox="${b.x} ${b.y} ${b.w} ${b.h}" fill="currentColor" focusable="false" ${a11y}>` +

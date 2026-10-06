@@ -15,7 +15,7 @@
  *   THE PRIVATE SALON                        signed in with a piece only:
  *   …                                        the models of its tier, priced
  *            [ SCAN ORBES CODE ]
- *   PRIVACY · TERMS · LEGAL · HELP
+ *   (the legal pages: NOCTURNE's footer, views/shell.ts)
  *
  * A card is no control of its own: its text link is (BRAND §3.8, the
  * pointer is the controls'). The sheet: the collection, the model's name and
@@ -45,7 +45,8 @@ import { lookbookGroups, SALON_NOTE_MAX, sheetLine, sheetModel, type CardModel, 
 import type { SessionStore } from '../session.js';
 import type { ClientServices, LookbookCard } from '../types.js';
 import { salonContactModel } from '../view-model.js';
-import { contactBlock, legalLinks, lookbookLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
+import { contactBlock, lookbookLink, rows, sectionLabel, viewRoot, withNumerals } from './common.js';
+import { failedState, loadingState, quietLine } from './nocturne.js';
 import { messageOf } from './forms.js';
 
 export interface LookbookView {
@@ -130,7 +131,6 @@ class GridPage {
         'footer',
         { class: 'lookbook__foot' },
         h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => deps.onScan() }, text: LOOKBOOK.scan }),
-        legalLinks({ extraClass: 'lookbook__legal' }),
       ),
     );
     this.render();
@@ -171,19 +171,16 @@ class GridPage {
     const hadFocus = this.body.contains(document.activeElement);
     const l = this.load;
     if (l.kind === 'loading') {
-      this.body.replaceChildren(h('p', { class: 'lookbook__waiting micro', attrs: { 'aria-busy': 'true' }, text: LOOKBOOK.loading }));
+      this.body.replaceChildren(loadingState(LOOKBOOK.loading, { extraClass: 'lookbook__waiting' }));
       return;
     }
     if (l.kind === 'failed') {
-      this.body.replaceChildren(
-        h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${LOOKBOOK.loadFailed} ${l.message}` }),
-        h('button', { class: 'textlink lookbook__retry', attrs: { type: 'button' }, on: { click: () => void this.fetch() }, text: LOOKBOOK.retry }),
-      );
+      this.body.replaceChildren(failedState({ sentence: LOOKBOOK.loadFailed, reason: l.message, retry: LOOKBOOK.retry, onRetry: () => void this.fetch(), retryClass: 'lookbook__retry' }));
       if (hadFocus) this.body.querySelector<HTMLElement>('.lookbook__retry')?.focus();
       return;
     }
     const sections: HTMLElement[] = l.groups.map((g, i) => this.group(g, `lookbook-group-${i}`));
-    if (l.groups.length === 0) sections.push(h('p', { class: 'prose lookbook__empty', text: LOOKBOOK.empty }));
+    if (l.groups.length === 0) sections.push(quietLine(LOOKBOOK.empty, 'lookbook__empty'));
     if (l.reserved.length > 0) {
       sections.push(
         h(
@@ -254,7 +251,6 @@ class SheetPage {
         'footer',
         { class: 'sheet__foot' },
         lookbookLink(() => deps.onCollection(), { extraClass: 'sheet__collection-link' }),
-        legalLinks({ extraClass: 'sheet__legal' }),
       ),
     );
     this.render();
@@ -311,18 +307,15 @@ class SheetPage {
       this.title.textContent = LOOKBOOK.title;
     }
     if (l.kind === 'loading') {
-      this.body.replaceChildren(h('p', { class: 'lookbook__waiting micro', attrs: { 'aria-busy': 'true' }, text: LOOKBOOK.loading }));
+      this.body.replaceChildren(loadingState(LOOKBOOK.loading, { extraClass: 'lookbook__waiting' }));
       return;
     }
     if (l.kind === 'missing') {
-      this.body.replaceChildren(h('p', { class: 'prose sheet__missing', text: LOOKBOOK.notFound }));
+      this.body.replaceChildren(quietLine(LOOKBOOK.notFound, 'sheet__missing'));
       return;
     }
     if (l.kind === 'failed') {
-      this.body.replaceChildren(
-        h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${LOOKBOOK.loadFailed} ${l.message}` }),
-        h('button', { class: 'textlink sheet__retry', attrs: { type: 'button' }, on: { click: () => void this.fetch() }, text: LOOKBOOK.retry }),
-      );
+      this.body.replaceChildren(failedState({ sentence: LOOKBOOK.loadFailed, reason: l.message, retry: LOOKBOOK.retry, onRetry: () => void this.fetch(), retryClass: 'sheet__retry' }));
       if (hadFocus) this.body.querySelector<HTMLElement>('.sheet__retry')?.focus();
       return;
     }

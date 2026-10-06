@@ -5,19 +5,11 @@
  *              ORBES                         small wordmark
  *          M Y   P I E C E S                 the page's title
  *   The pieces registered to your ORBES account.
- *   YOUR TIER                                the club's tier (P-X04), once its status is read:
- *   ┌                      ┐
- *          PLATINE                           the badge: the name in the display face,
- *       3 pieces held                        the pieces it counts in the reading face
- *   └                      ┘
- *     · The owners' circle: …                the benefits of the tier and of those below it
- *   NEXT: PALLADIUM                          the way to the next tier: how many more pieces,
- *     2 more pieces … open PALLADIUM …       from how many, what it adds (PALLADIUM: the
- *     · Special commissions …                highest); without a tier, THE CLUB and what a
- *                                            first piece opens
+ *                                            (YOUR TIER, the club's tier, P-X04, is in the account sheet since
+ *                                            NOCTURNE, decision 10: views/account.ts)
  *   ┌                      ┐
  *     GENOME  O26-J-00184                    the piece's title (h2)
- *     ◔ · ◯ · ◕ · …                          the glyphs in their orbit, around the SEAL
+ *     ◔ · ◯ · ◕ · …                          the glyphs in their orbit, around the ORBES monogram (decision 12)
  *     G1-E1DC-BE52 · GENOME-01
  *   └                      ┘
  *   ┌                      ┐
@@ -68,8 +60,8 @@
  *            THE RELEASES                    the drops (P-R03), a text link
  *            THE CIRCLE                      the owners' circle (P-X01), a text link
  *                                            shown once the account is read holding a piece
- *   PRIVACY · TERMS · LEGAL · HELP            the legal pages (J-06), in a new tab,
- *   IP Geolocation by DB-IP                   signed out too (the sign-in collects data)
+ *   (the legal pages, J-06, and DB-IP's attribution: NOCTURNE's footer, views/shell.ts, in a new tab, signed out too:
+ *   the sign-in collects data)
  *
  * Signed out (a direct link, a reload after the session ended, the landing's
  * MY PIECES), the OWNERSHIP panel's sign-in forms stand alone (its account
@@ -96,12 +88,12 @@ import { myLiveEntries } from '../live-model.js';
 import { orderModels, type OrderModel } from '../orders-model.js';
 import type { SessionStore } from '../session.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
-import { tierModel } from '../tier-model.js';
-import type { AccountOrder, AccountQuestion, CertificateOffer, ClientServices, ClubEntry, ClubStatus, IncidentType, LiveAccountEntry, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
+import type { AccountOrder, AccountQuestion, CertificateOffer, ClientServices, ClubEntry, IncidentType, LiveAccountEntry, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
 import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
-import { circleLink, contactBlock, legalLinks, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals, withPhrases } from './common.js';
+import { circleLink, contactBlock, lookbookLink, releasesLink, rows, sectionLabel, viewRoot, withNumerals, withPhrases } from './common.js';
 import { accountForm, field, FormError, messageOf, MIN_PASSWORD } from './forms.js';
 import { OwnershipPanel } from './ownership.js';
+import { failedState, loadingState, quietLine } from './nocturne.js';
 import { photoPlate } from './photos.js';
 import { QuestionBlock } from './question.js';
 import { tabsView } from './tabs.js';
@@ -142,8 +134,6 @@ class PiecesPage {
   readonly root: HTMLElement;
   private readonly lead = h('p', { class: 'prose pieces__lead', attrs: { hidden: true }, text: PIECES.lead });
   private readonly body = h('div', { class: 'pieces__body' });
-  /** YOUR TIER (P-X04): the badge, the benefits and the way to the next tier, at the head of the page. */
-  private readonly tierBlock = h('section', { class: 'pieces__tier', attrs: { 'aria-labelledby': 'pieces-tier', hidden: true } });
   /** YOUR ORDERS (plan LIVE RELEASE+, choice 6): the account's orders, one per piece, step by step, under its pieces. */
   private readonly ordersBlock = h('section', { class: 'pieces__orders', attrs: { 'aria-labelledby': 'pieces-orders', hidden: true } });
   /** AFTER THE RELEASES (plan LIVE RELEASE+, choice 11): the questions after the releases the account did not come to. */
@@ -175,8 +165,6 @@ class PiecesPage {
   private questionsKey = '';
   /** The account's tier in the club (P-X02, its early access); null until the club's status is read. */
   private tier: number | null = null;
-  /** The club's status as read with the pieces (P-X04, the tier block); null until read, or when it could not be. */
-  private club: ClubStatus | null = null;
   private load: Load = { kind: 'idle' };
   /** Bumped on every load; an answer to an older one is dropped. */
   private loadGen = 0;
@@ -197,7 +185,6 @@ class PiecesPage {
         h('h1', { class: 'pieces__title', id: 'pieces-title', text: PIECES.title }),
         this.lead,
       ),
-      this.tierBlock,
       this.body,
       this.questionsBlock,
       this.ordersBlock,
@@ -211,9 +198,6 @@ class PiecesPage {
         lookbookLink(deps.onCollection, { extraClass: 'pieces__collection' }),
         releasesLink(deps.onReleases, { extraClass: 'pieces__releases-link' }),
         this.circle,
-        // The legal pages (J-06), in a new tab: the account's data is collected here too (its sign-in, CREATE
-        // ACCOUNT), and a form under way stays.
-        legalLinks({ newTab: true, extraClass: 'pieces__legal' }),
       ),
     );
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
@@ -265,7 +249,6 @@ class PiecesPage {
       this.questionBlocks.clear();
       this.questionsKey = '';
       this.tier = null;
-      this.club = null;
       this.circle.hidden = true;
       this.changing = false;
       this.signIn ??= new OwnershipPanel(
@@ -324,7 +307,6 @@ class PiecesPage {
       this.orders = orders;
       this.questions = questions;
       this.tier = club ? Number(club.tier?.level) || 0 : null;
-      this.club = club;
       // The circle opens to an account that holds a piece now (the club counts them: never a revoked one).
       this.circle.hidden = !(club && club.tier.level >= 1);
       this.load = { kind: 'ready' };
@@ -350,7 +332,6 @@ class PiecesPage {
   private renderBody(): void {
     const s = this.deps.session.state;
     this.lead.hidden = !(this.ready && s.status === 'signed-in');
-    this.renderTier();
     this.renderOrders();
     this.renderQuestions();
     this.renderEarly();
@@ -366,19 +347,13 @@ class PiecesPage {
     switch (this.load.kind) {
       case 'ready':
         this.body.replaceChildren(
-          this.cards.length === 0
-            ? h('p', { class: 'prose pieces__empty', text: PIECES.empty })
-            : h('div', { class: 'pieces__list' }, ...this.cards.map((c) => c.root)),
+          this.cards.length === 0 ? quietLine(PIECES.empty, 'pieces__empty') : h('div', { class: 'pieces__list' }, ...this.cards.map((c) => c.root)),
         );
         return;
       case 'failed':
+        // Could not be shown: the sentence, the reason, TRY AGAIN (C40).
         this.body.replaceChildren(
-          h(
-            'div',
-            { class: 'pieces__state' },
-            h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${PIECES.loadFailed} ${this.load.message}` }),
-            h('div', { class: 'ownership__actions' }, h('button', { class: 'textlink', attrs: { type: 'button' }, on: { click: () => void this.loadPieces(true) }, text: PIECES.retry })),
-          ),
+          failedState({ sentence: PIECES.loadFailed, reason: this.load.message, retry: PIECES.retry, onRetry: () => void this.loadPieces(true), retryClass: 'pieces__retry', extraClass: 'pieces__state' }),
         );
         return;
       default:
@@ -386,54 +361,9 @@ class PiecesPage {
     }
   }
 
+  /** The page while it reads: the monogram breathing above ONE MOMENT… (addition 14, C40). */
   private waiting(): HTMLElement {
-    return h('p', { class: 'ownership__meta micro soft pieces__waiting', attrs: { 'aria-busy': 'true' }, text: PIECES.loading });
-  }
-
-  /**
-   * YOUR TIER (P-X04), at the head of the page once the pieces and the club's status are read, signed in: the badge
-   * (the tier's name in the display face, the pieces it counts in the reading face) on an ivory plate framed like a
-   * GENOME's, the benefits of the tier and of those below it, then the way to the next tier and what it adds
-   * (PALLADIUM: the highest). Without a tier, THE CLUB and what a first piece opens. Nothing when the status could not
-   * be read: the pieces still show.
-   */
-  private renderTier(): void {
-    const shown = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready' && this.club !== null;
-    if (!shown || !this.club) {
-      this.tierBlock.hidden = true;
-      this.tierBlock.replaceChildren();
-      return;
-    }
-    const m = tierModel(this.club, this.cards.length);
-    const list = (items: string[], extra?: string) =>
-      items.length ? h('ul', { class: ['pieces__benefits', extra] }, ...items.map((l) => h('li', { class: 'prose pieces__benefit', text: l }))) : null;
-    this.tierBlock.hidden = false;
-    const parts: (HTMLElement | null)[] = [
-      sectionLabel(m.label, 'pieces-tier'),
-      m.badge
-        ? bracket(
-            h(
-              'div',
-              { class: 'pieces__badge', data: { tier: m.badge.name } },
-              h('p', { class: 'pieces__badge-name', text: m.badge.name }),
-              h('p', { class: 'pieces__badge-pieces', text: m.badge.pieces }),
-            ),
-          )
-        : null,
-      list(m.benefits),
-      m.next
-        ? h(
-            'div',
-            { class: 'pieces__next' },
-            m.badge ? sectionLabel(m.next.label) : null,
-            h('p', { class: 'prose pieces__next-way', text: m.next.sentence }),
-            list(m.next.benefits, 'pieces__benefits--next'),
-          )
-        : null,
-      m.top ? h('p', { class: 'prose pieces__top', text: m.top }) : null,
-      m.note ? h('p', { class: 'ownership__meta micro soft pieces__tier-note', text: m.note }) : null,
-    ];
-    this.tierBlock.replaceChildren(...parts.filter((p): p is HTMLElement => p !== null));
+    return loadingState(PIECES.loading, { extraClass: 'pieces__waiting' });
   }
 
   /**
@@ -507,7 +437,7 @@ class PiecesPage {
    * account's own benefits (PLATINE, PALLADIUM) or under NEXT: PLATINE (TITANE), so it is not said twice.
    */
   private renderEarly(): void {
-    const shown = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready' && this.club !== null && this.tier === 0;
+    const shown = this.ready && this.deps.session.state.status === 'signed-in' && this.load.kind === 'ready' && this.tier === 0;
     if (!shown) {
       this.early.hidden = true;
       this.early.replaceChildren();

@@ -9,7 +9,9 @@
  *       the whole page (the viewport grown to its height, so its fixed elements sit at its foot), its motion finished (as the boards were shot), into <out>/<C-id>.real.png, and
  *       <out>/<C-id>.pair.png: the board (<ref>/<C-id>-<name>.png) at the left, the real screen at the right, the same
  *       width, a label above each. C21 and C26, stand-in images of the room (fidelity rule 6), are set beside their
- *       state's before-capture instead (docs/assets/ui/nocturne-before/<live-xx|plus-xx>-*.png)
+ *       state's before-capture instead (docs/assets/ui/nocturne-before/<live-xx|plus-xx>-*.png). A board of several
+ *       states (BOARD_SECTIONS: C40) has each further state set beside it too, <C-id>.<state>.real.png and
+ *       <C-id>.<state>.pair.png, each compared with its section. Boards may be given apart (C2 C40) or joined (C2,C40)
  *   npx tsx scripts/parity.ts --live [room,after-room-door,…] [--out DIR]
  *       the states given (by default every state whose refs name a before-capture, live-xx or plus-xx): the real
  *       screen into <out>/live/<state>.real.png, and <out>/live/<state>.pair.png: its before-capture at the left
@@ -33,7 +35,7 @@ import { fileURLToPath } from 'node:url';
 import type { Browser, Page } from 'playwright-core';
 import { NOCTURNE_NOW, type DemoVariant, type NocturneDemo } from '../test/support/nocturne-demo.js';
 import { BASELINE_FILE, eachState, type Baseline, type BaselineState } from '../test/support/nocturne-stage.js';
-import { BOARD_STATES, maskVolatile, openState, overflows, settle, stateById, UI_STATES, visibleTexts, type UiState } from '../test/support/nocturne-states.js';
+import { BOARD_SECTIONS, BOARD_STATES, maskVolatile, openState, overflows, settle, stateById, UI_STATES, visibleTexts, type UiState } from '../test/support/nocturne-states.js';
 import { fullScreenshot, type UiStage } from '../test/support/ui-stage.js';
 
 const GENOME_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -117,14 +119,17 @@ async function pair(browser: Browser, board: Buffer | null, boardLabel: string, 
 async function captureBoards(ids: string[], out: string, refDir: string): Promise<void> {
   mkdirSync(out, { recursive: true });
   const byState = new Map<string, string[]>();
+  /** The further states of a board of several (BOARD_SECTIONS), each paired with that board. */
+  const sections = new Map<string, string[]>();
   for (const id of ids) {
     const s = BOARD_STATES[id];
     if (!s) throw new Error(`unknown board ${id} (C1 to C43)`);
     byState.set(s, [...(byState.get(s) ?? []), id]);
+    for (const extra of BOARD_SECTIONS[id] ?? []) sections.set(extra, [...(sections.get(extra) ?? []), id]);
   }
   const failures: string[] = [];
   await eachState(
-    [...byState.keys()].map(stateById),
+    [...new Set([...byState.keys(), ...sections.keys()])].map(stateById),
     async (state, { stage, demo, browser }) => {
       let real: Buffer;
       try {
@@ -134,7 +139,14 @@ async function captureBoards(ids: string[], out: string, refDir: string): Promis
         log(`  ${state.id}: FAILED ${e instanceof Error ? e.message : String(e)}`);
         return;
       }
-      for (const id of byState.get(state.id)!) {
+      for (const id of sections.get(state.id) ?? []) {
+        writeFileSync(join(out, `${id}.${state.id}.real.png`), real);
+        const file = boardFile(refDir, id);
+        const name = file ? file.slice(file.lastIndexOf('/') + 1) : `${id} (not found in ${refDir})`;
+        writeFileSync(join(out, `${id}.${state.id}.pair.png`), await pair(browser, file ? readFileSync(file) : null, `BOARD ${name} (its section)`, real, `REAL ${id} · ${state.id}`));
+        log(`  ${id}: ${state.id} (a section)`);
+      }
+      for (const id of byState.get(state.id) ?? []) {
         writeFileSync(join(out, `${id}.real.png`), real);
         // A stand-in board of the room: its screen is set beside its before-capture, not the board.
         const before = STAND_IN_BOARDS.includes(id) ? beforeRef(state) : null;
@@ -270,7 +282,7 @@ async function main(): Promise<void> {
     else if (a === '--states') {
       if (mode !== 'baseline') mode = 'states';
       list = (argv[++i] ?? '').split(',').filter(Boolean);
-    } else if (/^C\d+(,C\d+)*$/.test(a)) list = a.split(',');
+    } else if (/^C\d+(,C\d+)*$/.test(a)) list.push(...a.split(','));
     else throw new Error(`unknown argument ${a} (C1,C2,…; --states a,b; --live [a,b]; --stress; --baseline [--states a,b]; --out DIR; --ref DIR)`);
   }
   if (mode === 'boards') await captureBoards(list.length ? list : Object.keys(BOARD_STATES), out, ref);

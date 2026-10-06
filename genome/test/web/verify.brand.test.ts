@@ -21,7 +21,7 @@ import { MONOGRAM_BOUNDS, MONOGRAM_PATHS } from '../../src/core/render/monogram.
 import { genomeFigureMarkup } from '../../src/web/admin/ui/figures.js';
 import * as verifyCopy from '../../src/web/verify/copy.js';
 import { RESALE_ACTION, RESALE_GUIDANCE } from '../../src/web/verify/copy.js';
-import { genomeRowMarkup } from '../../src/web/verify/genome-view.js';
+import { GENOME_SCREEN_INK, genomeRowMarkup } from '../../src/web/verify/genome-view.js';
 import { registrationStatus } from '../../src/web/verify/view-model.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden, readDoc, section } from '../docs/lexicon.js';
 import { parseUnicodeRange, readWoff2, woff2CodePoints, woff2Names, woff2WeightClass } from '../support/woff2.js';
@@ -61,7 +61,7 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect(styles).not.toMatch(/#000(000)?\b|\bblack\b|rgba?\(\s*0\s*,\s*0\s*,\s*0\b/i);
   });
 
-  it('draws the GENOME on its ivory plate in the ivory colourway ink (#111111), as it is printed', () => {
+  it('draws the GENOME as it is printed (the ivory colourway ink, #111111) by default and on the shared certificate\'s ivory plate; in ivory on a collector\'s screen (NOCTURNE)', () => {
     for (const layout of ['orbit', 'row'] as const) {
       const markup = genomeRowMarkup(GENOME_184, { layout });
       expect(markup, layout).not.toBeNull();
@@ -70,6 +70,10 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     }
     expect(rule(styles, '.result__genome').background).toBe('var(--ivory)');
     expect(tokens['--ivory']?.toLowerCase()).toBe(ORBES_CODE_STYLES.ivory.paper.toLowerCase());
+    // On a collector's screen (a result, a piece, the ceremony): the ink of the ground's text, --vault-ink.
+    expect(GENOME_SCREEN_INK).toBe(tokens['--vault-ink']);
+    const screen = genomeRowMarkup(GENOME_184, { layout: 'orbit', centre: 'monogram', ink: GENOME_SCREEN_INK })!;
+    expect([...new Set([...screen.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]).filter((v) => v !== 'none'))]).toEqual([GENOME_SCREEN_INK]);
   });
 
   it('sets each piece of MY PIECES in its écrin: the GENOME plate of a result (ivory, the same margins), the same orbit (F-01)', () => {
@@ -88,7 +92,8 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
   it('sets the piece of an ownership certificate in the same écrin, in the column of a result, titled like MY PIECES (F-06)', () => {
     const view = readFileSync(join(WEB, 'verify/views/certificate.ts'), 'utf8');
     expect(view).toContain("{ class: 'piece__plate certificate__plate' }");
-    expect(view).toContain('genomeBlock(s.genome, { titleId })');
+    // The shared certificate keeps the GENOME as printed: around the SEAL, on its ivory plate (NOCTURNE, choice 3).
+    expect(view).toContain('genomeBlock(s.genome, { titleId, seal: true })');
     expect(view).toContain('bracket(\n');
     // No rule of its own restyles the plate: it is the écrin of MY PIECES as it is.
     expect(rules(styles).filter((r) => r.selectors.some((s) => s.includes('certificate__plate')))).toEqual([]);
@@ -170,12 +175,54 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
   // Whatever the app offers to tap shows a pointer: that is how a control is found.
   const interactive = [...new Set(all.filter((r) => r.decls.cursor === 'pointer').flatMap((r) => r.selectors))].sort();
 
+  /** NOCTURNE's controls (views/nocturne.ts, the chrome, the account sheet), held to the rulebook (build.py). */
+  const NOCTURNE_CONTROLS = [
+    '.n-acc',
+    '.n-account__close',
+    '.n-acct',
+    '.n-btn',
+    '.n-chips__option',
+    '.n-crumb',
+    '.n-dbip',
+    '.n-fl__link',
+    '.n-opt2__option',
+    '.n-rail__link',
+    '.n-row',
+    '.n-scan__ring',
+    '.n-sizes__option',
+    '.n-snd',
+    '.n-sw__input',
+    '.n-switch2__tab',
+    '.n-tabs__tab',
+    '.n-tabsx__tab',
+    '.n-tl',
+    '.n-vsel__option',
+  ];
+  /**
+   * The rulebook sets three controls at 9.5 px (build.py: `.acct`, `.rail a`, `.dbip`): the account button, the rail's
+   * chapters and DB-IP's attribution, validated by the owner on the canvas (who declined larger labels). Their 44 px
+   * zones are measured in the page (test/support/tap-zones.ts, test/web/nocturne.styles.e2e.test.ts).
+   */
+  const RULEBOOK_TYPE: Readonly<Record<string, number>> = { '.n-acct': 9.5, '.n-rail__link': 9.5, '.n-dbip': 9.5 };
+  const legacy = interactive.filter((sel) => !sel.startsWith('.n-'));
+
   it('finds every control of the app by its pointer', () => {
-    expect(interactive).toEqual(['.auth__option', '.btn', '.scan__control', '.tabs__tab', '.textlink']);
+    expect(legacy).toEqual(['.auth__option', '.btn', '.scan__control', '.tabs__tab', '.textlink']);
+    expect(interactive.filter((sel) => sel.startsWith('.n-'))).toEqual(NOCTURNE_CONTROLS);
+  });
+
+  it('sets NOCTURNE\'s controls at 10 px at least, but the three the rulebook sets at 9.5 px; their zones are measured in the page', () => {
+    for (const sel of NOCTURNE_CONTROLS) {
+      for (const r of about(sel)) {
+        const where = `${sel} (${r.selectors.join(', ')})`;
+        if (r.decls['font-size']) expect(px(r.decls['font-size']), where).toBeGreaterThanOrEqual(RULEBOOK_TYPE[sel] ?? 10);
+      }
+    }
+    for (const [sel, size] of Object.entries(RULEBOOK_TYPE)) expect(px(all.find((r) => r.selectors.includes(sel))!.decls['font-size']!), sel).toBe(size);
   });
 
   it('sets no interactive selector under 10 px of type nor under a 44 px minimum height', () => {
-    for (const sel of [...interactive, '.field__input']) {
+    for (const sel of [...legacy, '.field__input']) {
       const base = all.find((r) => r.selectors.includes(sel));
       expect(base?.decls['font-size'], sel).toBeDefined();
       expect(base?.decls['min-height'], sel).toBeDefined();
@@ -204,7 +251,7 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     for (const cls of classes) {
       for (const r of about(`.${cls}`)) {
         const where = `.${cls} (${r.selectors.join(', ')})`;
-        if (r.decls['font-size']) expect(px(r.decls['font-size']), where).toBeGreaterThanOrEqual(10);
+        if (r.decls['font-size']) expect(px(r.decls['font-size']), where).toBeGreaterThanOrEqual(RULEBOOK_TYPE[`.${cls}`] ?? 10);
         for (const p of ['min-height', 'height', 'max-height']) if (r.decls[p]) expect(px(r.decls[p]), where).toBeGreaterThanOrEqual(44);
       }
     }
@@ -267,8 +314,9 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
       expect(set.length, line).toBeGreaterThan(0);
       for (const c of set) expect(c.split(' '), c).toContain('micro');
     }
-    // The 8 px .nano class is left to the landing foot (© ORBES · GENOME CODE · PARIS).
-    expect(classes.filter((c) => c.split(' ').includes('nano'))).toEqual(['landing__meta nano']);
+    // The 8 px .nano class is left to decoration: no view sets it now (the landing's © ORBES · GENOME CODE · PARIS
+    // gave way to NOCTURNE's footer, whose © ORBES · PARIS is 9 px, in ash).
+    expect(classes.filter((c) => c.split(' ').includes('nano'))).toEqual([]);
   });
 });
 
@@ -335,11 +383,11 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.landing__sub', '.landing__meta', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.pieces__badge-name', '.pieces__order-title', '.pieces__order-step-label', '.pieces__order-documents-title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option', '.ceremony__name', '.ceremony__collection', '.live__surprise', '.question__label', '.question__release', '.question__text'];
+  const VERIFY_DISPLAY = ['.landing__sub', '.n-g', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.pieces__order-title', '.pieces__order-step-label', '.pieces__order-documents-title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option', '.ceremony__name', '.ceremony__collection', '.live__surprise', '.question__label', '.question__release', '.question__text'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
-  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.photos__note', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.certificate__lead', '.certificate__note', '.certificate-link__value', '.certificate-link__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours', '.pieces__badge-pieces', '.pieces__benefit', '.pieces__order-step-date', '.pieces__order-care-text', '.question__note'];
+  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.result__message', '.result__notice', '.photos__note', '.result__footnote', '.result__meta', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.transfer-code__value', '.transfer-code__label', '.certificate__lead', '.certificate__note', '.certificate-link__value', '.certificate-link__label', '.scan__hint', '.scan__zoom', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours', '.pieces__benefit', '.n-tx', '.n-sm', '.n-lead', '.n-art', '.n-cd__value', '.n-fld__input', '.pieces__order-step-date', '.pieces__order-care-text', '.question__note'];
   const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__eyebrow', '.dialog__title', '.cfield__phrase', '.page-head__title--id', '.side__who', '.side__role'];
 
   it('sets the wordmark, titles and tracked-capital labels of both apps in the display face', () => {
@@ -425,23 +473,39 @@ describe('verify app: the monogram beside the word ORBES (BRAND-DESIGN-SYSTEM §
       expect(readFileSync(join(WEB, 'verify', file), 'utf8'), file).toMatch(new RegExp(`class: '${cls}'[^)]*text: 'ORBES'`));
     }
     expect(displaySelectors(brand)).toContain('.wordmark');
-    // The result and the scanner keep the word alone (the brand's choice: the emblem marks the landing).
-    for (const file of ['views/result.ts', 'views/scanning.ts']) expect(readFileSync(join(WEB, 'verify', file), 'utf8'), file).not.toContain('monogram');
+    // The result and the scanner keep the word alone: they draw no emblem of their own (NOCTURNE's header sets the
+    // monogram beside its typed ORBES, decision 11, and the GENOME's orbit holds it at its centre, decision 12).
+    for (const file of ['views/result.ts', 'views/scanning.ts']) expect(readFileSync(join(WEB, 'verify', file), 'utf8'), file).not.toMatch(/monogramSvg|monogram\(/);
+    const shell = readFileSync(join(WEB, 'verify/views/shell.ts'), 'utf8');
+    expect(shell).toContain("h('span', { class: 'n-g n-wm', text: 'ORBES' })");
   });
 });
 
 describe('verify app: the GENOME in its orbit, as on the piece (BRAND-DESIGN-SYSTEM §2.3, §2.6)', () => {
-  it('draws the result GENOME in the orbit layout, the figure of the console and of the code', () => {
+  it('draws the result GENOME in the orbit layout, the figure of the console and of the code, the ORBES monogram at its centre on a collector\'s screen (decision 12)', () => {
     const view = readFileSync(join(WEB, 'verify/genome-view.ts'), 'utf8');
     const block = view.slice(view.indexOf('export function genomeBlock'));
-    expect(block).toContain("genomeRow(m, { layout: 'orbit' })");
-    // The same core renderer, the same ink and the same geometry as the console's product page.
+    // A collector's screen: the monogram's centre, in ivory, with its glow; the shared certificate (`seal`): as printed.
+    expect(block).toContain("opts.seal ? genomeRow(m, { layout: 'orbit' }) : genomeRow(m, { layout: 'orbit', centre: 'monogram', ink: GENOME_SCREEN_INK })");
+    expect(block).toContain("if (figure && !opts.seal) figure.classList.add('n-glow');");
+    expect(rule(styles, '.n-glow').filter).toBe('var(--n-glow)');
+    expect(tokens['--n-glow']).toBe('drop-shadow(0 0 18px rgba(246, 242, 234, 0.22))');
+    // The same core renderer, the same ink and the same geometry as the console's product page, by default.
     const json = { id: 'g', productId: GENOME_184.id, version: 1, versionLabel: 'GENOME-01', value: G184.value, glyphs: [...G184.glyphs], ids: [...G184.ids], pattern: '', fingerprint: G184.fingerprint, createdAt: '2026-01-01T00:00:00.000Z' };
     expect(genomeRowMarkup(GENOME_184, { layout: 'orbit' })).toBe(genomeFigureMarkup(json, 'orbit'));
     // The seal at the centre, then one group per glyph (glyph 0 at north, clockwise: genomeLayout).
     const markup = genomeRowMarkup(GENOME_184, { layout: 'orbit' })!;
     expect(markup.match(/data-layer="seal"/g)).toHaveLength(1);
     expect(markup.match(/data-layer="genome"/g)).toHaveLength(CODE01.genome.count);
+    // On a collector's screen: the monogram's five master outlines in place of the seal, the same glyphs.
+    const screen = genomeRowMarkup(GENOME_184, { layout: 'orbit', centre: 'monogram', ink: GENOME_SCREEN_INK })!;
+    expect(screen).not.toContain('data-layer="seal"');
+    expect(screen.match(/data-layer="monogram"/g)).toHaveLength(1);
+    expect(screen.match(/data-layer="genome"/g)).toHaveLength(CODE01.genome.count);
+    expect(screen.slice(screen.indexOf('data-layer="monogram"')).match(/<path /g)!.length).toBeGreaterThanOrEqual(MONOGRAM_PATHS.length);
+    // Every screen that draws a piece's GENOME uses the block: a result and its ceremony, MY PIECES; the certificate keeps the seal.
+    expect(resultView).toContain('genomeBlock(vm.genome)');
+    expect(readFileSync(join(WEB, 'verify/views/pieces.ts'), 'utf8')).toContain('genomeBlock(this.model.genome, { titleId })');
   });
 
   it('sizes the orbit as a centred square of min(64vw, 260px): glyphs of about 43 px, never under the 12 px floor', () => {
@@ -613,7 +677,9 @@ describe('verify app: the ceremony of a first registration (P-D01)', () => {
     expect(shareSrc).toContain("nav.canShare(data)");
     expect(shareSrc).toContain("import { saveDownload } from '../shared/download.js';");
     expect(shareSrc).toContain('new Path2D(primitiveToPathData(p))');
-    expect(shareSrc).toContain("genomeLayout(genome, 'orbit')");
+    // As the result draws it: the ORBES monogram at the orbit's centre (NOCTURNE, decision 12).
+    expect(shareSrc).toContain("genomeLayout(genome, 'orbit', { centre: 'monogram' })");
+    expect(shareSrc).toContain('for (const d of monogram ?? []) ctx.fill(new Path2D(d));');
     // The names in the display face, their figures in the reading face.
     expect(resultView).toContain("h('p', { class: 'ceremony__name' }, ...withNumerals(c.name))");
   });
