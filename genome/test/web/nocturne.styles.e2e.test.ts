@@ -4,7 +4,7 @@
  * and C_CSS) is normative; each value below is its own, as Chromium computes it (an em of letter spacing in px).
  *
  * The screens are the NOCTURNE stage's (test/support/nocturne-states.ts): the account sheet over NOW (C2), MY PIECES
- * while it reads, could not be shown, empty (C40), the sheet's CHANGE PASSWORD (C39), the shared certificate (Safari's
+ * while it reads, could not be shown (a piece, THE CIRCLE and a post too), empty (C40), the sheet's CHANGE PASSWORD (C39), the shared certificate (Safari's
  * bars back to its light), the column on a computer. The pieces no screen holds yet (each step from N3 places them)
  * are built by their own view code into a real screen, under its stylesheet (test/support/nocturne-specimen.ts).
  */
@@ -89,7 +89,7 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
     'sets the header, the rail, the account sheet, the type scale, the buttons, the rows, the switch, the dots, the fields, the footer, the SCAN ring, the loading state and could-not-be-shown, the column, and the pieces to come',
     async () => {
       const specimen = await specimenScript();
-      const states = ['account-sheet', 'account-sheet-password', 'pieces-loading', 'pieces-failed', 'pieces-empty', 'pieces', 'certificate'];
+      const states = ['account-sheet', 'account-sheet-password', 'pieces-loading', 'pieces-failed', 'piece-failed', 'circle-failed', 'post-failed', 'pieces-empty', 'pieces', 'certificate'];
       const seen = new Set<string>();
       await eachState(
         states.map(stateById),
@@ -101,7 +101,11 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
             if (state.id === 'account-sheet') await sheet(page);
             if (state.id === 'account-sheet-password') await password(page);
             if (state.id === 'pieces-loading') await loading(page);
-            if (state.id === 'pieces-failed') await failed(page);
+            // Could not be shown on each page that says it (C40, state 2): on the margin, where the page's quiet line is.
+            if (state.id === 'pieces-failed') await failed(page, '.n-pieces__body > .n-pieces__failed', 22);
+            if (state.id === 'piece-failed') await failed(page, '.n-piece__failed', 14);
+            if (state.id === 'circle-failed') await failed(page, '.n-circle__failed', 28);
+            if (state.id === 'post-failed') await failed(page, '.n-post__failed', 14);
             if (state.id === 'pieces-empty') await empty(page);
             if (state.id === 'pieces') {
               await chrome(page);
@@ -803,8 +807,19 @@ async function loading(page: Page): Promise<void> {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 }
 
-/** C40, could not be shown: the sentence in ivory, the reason in ash, TRY AGAIN the hairline button. */
-async function failed(page: Page): Promise<void> {
+/**
+ * C40, could not be shown: in its page's wrapper (`margin` under what is above it, the 24 px margin each side), the
+ * sentence in ivory, the reason in ash, TRY AGAIN the hairline button, each inset 24 px from the column's edges.
+ */
+async function failed(page: Page, wrapper: string, margin: number): Promise<void> {
+  await check(page, wrapper, { 'margin-top': margin, 'padding-left': 24, 'padding-right': 24 });
+  expect(await page.locator(`${wrapper} > .n-failed`).count()).toBe(1);
+  const col = await read(page, '.n-column', []);
+  for (const sel of ['.n-failed__sentence', '.n-failed__reason', '.n-failed .n-btn']) {
+    const box = await read(page, sel, []);
+    expect(Number(box._left) - Number(col._left), `${wrapper} ${sel} left inset`).toBeCloseTo(24, 1);
+    expect(Number(col._right) - Number(box._right), `${wrapper} ${sel} right inset`).toBeCloseTo(24, 1);
+  }
   await check(page, '.n-failed', { 'text-align': 'center' });
   expect(await page.locator('.n-failed').getAttribute('role')).toBe('alert');
   await check(page, '.n-failed__sentence', { 'font-size': 15, 'line-height': '23.25px', color: IV });

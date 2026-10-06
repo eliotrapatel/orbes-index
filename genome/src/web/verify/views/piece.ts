@@ -196,7 +196,7 @@ class PiecePage {
     }
     if (this.load.kind === 'ready' && this.card) this.body.replaceChildren(this.card.root);
     else if (this.load.kind === 'failed')
-      this.body.replaceChildren(failedState({ sentence: PIECES.loadFailed, reason: this.load.message, retry: PIECES.retry, onRetry: () => void this.loadPiece(true), extraClass: 'n-piece__state' }));
+      this.body.replaceChildren(h('div', { class: 'n-px n-piece__failed' }, failedState({ sentence: PIECES.loadFailed, reason: this.load.message, retry: PIECES.retry, onRetry: () => void this.loadPiece(true) })));
     else this.body.replaceChildren(loadingState(PIECES.loading, { extraClass: 'n-piece__waiting' }));
   }
 }

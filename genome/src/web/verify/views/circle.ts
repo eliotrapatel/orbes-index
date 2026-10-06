@@ -239,7 +239,7 @@ class FeedPage {
         this.body.replaceChildren(h('div', { class: 'n-px n-circle__quiet' }, quietLine(CIRCLE.ownersOnly, 'circle__closed')));
         return;
       case 'failed':
-        this.body.replaceChildren(failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle__retry', extraClass: 'n-circle__state' }));
+        this.body.replaceChildren(h('div', { class: 'n-px n-circle__failed' }, failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle__retry' })));
         if (hadFocus) this.body.querySelector<HTMLElement>('.circle__retry')?.focus();
         return;
       default: {
@@ -457,7 +457,7 @@ class PostPage {
         this.body.replaceChildren(this.quiet(CIRCLE.notFound, 'circle-post__missing'));
         break;
       case 'failed':
-        this.body.replaceChildren(failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle-post__retry', extraClass: 'n-post__state' }));
+        this.body.replaceChildren(h('div', { class: 'n-px n-post__failed' }, failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle-post__retry' })));
         if (hadFocus) this.body.querySelector<HTMLElement>('.circle-post__retry')?.focus();
         break;
       default: {

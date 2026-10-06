@@ -22,16 +22,18 @@ const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
  * The narrower phones a screen's extreme cases are opened at too, after the stage's 390 px (fidelity rule 5 holds from
  * 320 px): THE COLLECTION and a model's sheet since N6 (a model's next release a draw, ENTRIES CLOSE … UTC); THE
  * RELEASES, a draw's page and a LIVE RELEASE's pages since N7 (a date of THE REVEALS held whole while it fits); THE
- * CIRCLE, a post, the sign-in and the legal pages since N8 (a post's duo, rows and results, the four tabs in French).
+ * CIRCLE, a post, the sign-in and the legal pages since N8 (a post's duo, rows and results, the four tabs in French);
+ * MY PIECES and a piece that could not be shown since N9 (C40).
  */
 const NARROW = [375, 360, 320] as const;
-const NARROW_STATES = /^(collection|model|releases|live-|draw|circle|post|legal|pieces-sign)(-|$)/;
+const NARROW_STATES = /^(collection|model|releases|live-|draw|circle|post|legal|pieces-sign|pieces-failed|piece-failed)(-|$)/;
 /**
  * Screens that are not extreme cases but hold the longest lines: N7's THE REVEALS of a release not yet revealed (C7,
  * C28); N8's feed with an invitation's YES / NO (C8), an invitation's and a poll's rows, duo and results (C22, C34),
- * MY PIECES' sign-in refused (C18) and the French legal pages, their four tabs on two lines (C23, C41).
+ * MY PIECES' sign-in refused (C18) and the French legal pages, their four tabs on two lines (C23, C41); N9's
+ * could-not-be-shown of MY PIECES, a piece, THE CIRCLE and a post, each with the reason the browser gives (C40).
  */
-const NARROW_TOO = ['releases', 'live-veiled', 'circle', 'post-invitation', 'post-poll', 'post-poll-voted', 'pieces-sign-in-refused', 'legal-terms-fr', 'legal-faq-fr'];
+const NARROW_TOO = ['releases', 'live-veiled', 'circle', 'post-invitation', 'post-poll', 'post-poll-voted', 'pieces-sign-in-refused', 'legal-terms-fr', 'legal-faq-fr', 'pieces-failed', 'piece-failed', 'circle-failed', 'post-failed'];
 
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [

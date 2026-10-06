@@ -189,6 +189,20 @@ async function fitSheet(page: Page): Promise<void> {
   await sleep(200);
 }
 
+/**
+ * A post's answer as the server sent it, its invitation changed by `change` (and the reader's answer set to `answer`
+ * when given): the states of an invitation the demo's clock does not reach (C22: answers closed, every place taken).
+ */
+async function invitationAnswer(page: Page, change: (inv: Record<string, unknown>) => Record<string, unknown>, answer?: string | null): Promise<void> {
+  await page.route('**/api/v1/club/circle/*', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const res = await route.fetch();
+    const body = (await res.json()) as { invitation: Record<string, unknown> | null; answer: string | null };
+    const json = { ...body, invitation: body.invitation ? change(body.invitation) : null, ...(answer === undefined ? {} : { answer }) };
+    await route.fulfill({ response: res, json });
+  });
+}
+
 export const UI_STATES: readonly UiState[] = [
   // ── NOW (today: the landing, its banner of the LIVE RELEASES) ──
   { id: 'now-signed-out', title: 'NOW, signed out: a LIVE RELEASE announced, a draw open', refs: ['C10'], variant: 'full', path: at('/verify'), ready: '.view--now[data-ready]' },
@@ -383,6 +397,20 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'result-invalid', title: 'INVALID SIGNATURE', refs: ['C16'], variant: 'full', ...result('forged') },
   { id: 'result-unknown', title: 'UNKNOWN ORBES CODE: a code ORBES signed for no piece', refs: ['C16'], variant: 'full', ...result('unknown') },
   { id: 'result-revoked', title: 'REVOKED', refs: ['C16'], variant: 'full', ...result('revoked') },
+  {
+    id: 'result-unreadable',
+    title: 'UNREADABLE CODE: a code read whole by the phone, its frame damaged on the way (MALFORMED_CODE)',
+    refs: ['C16'],
+    variant: 'full',
+    // The first piece's code, read by the phone as it is; on its way to the server its last characters are lost, so the
+    // server cannot unframe it and answers MALFORMED_CODE, as for a code damaged beyond its correction.
+    routes: async (page) =>
+      page.route('**/api/v1/verify', async (route) => {
+        const body = route.request().postDataJSON() as { code: string };
+        await route.continue({ postData: JSON.stringify({ ...body, code: body.code.slice(0, -6) }) });
+      }),
+    ...result('first'),
+  },
   {
     id: 'result-stress',
     title: 'AUTHENTIC — FIRST REGISTRATION of the 24-character model in its 14-character variant, a Size of 14 characters: OWNERSHIP',
@@ -602,6 +630,16 @@ export const UI_STATES: readonly UiState[] = [
     routes: async (page) => page.route('**/api/v1/account/products', (r) => r.abort('internetdisconnected')),
     ready: '.view--pieces .n-failed',
   },
+  {
+    id: 'piece-failed',
+    title: 'A piece could not be shown: the reason and TRY AGAIN',
+    refs: ['C40'],
+    variant: 'full',
+    as: you,
+    path: piece('gold'),
+    routes: async (page) => page.route('**/api/v1/account/products', (r) => r.abort('internetdisconnected')),
+    ready: '.view--piece .n-failed',
+  },
   { id: 'pieces-stress', title: 'MY PIECES with six pieces, the first of a 24-character model without a photograph, its Size of 14 characters', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/pieces'), ready: '.view--pieces article.n-pieces__piece', stress: true },
   {
     id: 'pieces-orders-stress',
@@ -719,6 +757,31 @@ export const UI_STATES: readonly UiState[] = [
       await run.page.locator('.releases__taken').waitFor({ timeout: 20_000 });
     },
     ready: '#releases-panel-past article.release-card',
+  },
+  {
+    id: 'releases-past-more',
+    title: 'THE RELEASES, PAST, with more releases than a page: SHOW MORE',
+    refs: ['C25'],
+    variant: 'full',
+    as: you,
+    path: at('/verify/releases'),
+    // The demo has fewer past releases than a page: the answer says one more is there after the pages read, as C25's
+    // SHOW MORE does (the app asks for more while fewer pages were read than the total fills).
+    routes: async (page) =>
+      page.route('**/api/v1/releases/past?*', async (route) => {
+        const asked = new URL(route.request().url()).searchParams;
+        const res = await route.fetch();
+        const body = (await res.json()) as { total: number };
+        const read = Number(asked.get('page') ?? 1) * Number(asked.get('pageSize') ?? 0);
+        await route.fulfill({ response: res, json: { ...body, total: Math.max(body.total, read) + 1 } });
+      }),
+    act: async (run) => {
+      await tab(run, 'PAST').click();
+      await run.page.locator('#releases-panel-past article.release-card').first().waitFor({ timeout: 20_000 });
+      await run.page.locator('.releases__taken').waitFor({ timeout: 20_000 });
+      await run.page.locator('.releases__more').waitFor({ timeout: 20_000 });
+    },
+    ready: '#releases-panel-past .releases__more',
   },
   { id: 'releases-empty', title: 'THE RELEASES with no release', refs: ['C40'], variant: 'empty', path: at('/verify/releases'), ready: '.view--releases .releases__body p, .view--releases p.prose', stress: true },
   { id: 'releases-stress', title: 'THE RELEASES: a countdown under an hour, one over 9 days, a price in USD', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/releases'), ready: '.view--releases article.live-card', stress: true },
@@ -841,6 +904,16 @@ export const UI_STATES: readonly UiState[] = [
   },
   { id: 'circle-signed-out', title: 'THE CIRCLE, signed out: the sign-in', refs: ['C40'], variant: 'full', path: at('/verify/circle'), ready: '.view--circle form' },
   { id: 'circle-no-piece', title: 'THE CIRCLE without a piece: it opens once a piece is registered', refs: ['C40'], variant: 'full', as: 'newcomer', path: at('/verify/circle'), ready: '.view--circle .circle__closed' },
+  {
+    id: 'circle-failed',
+    title: 'THE CIRCLE could not be shown: the reason and TRY AGAIN',
+    refs: ['C40'],
+    variant: 'full',
+    as: you,
+    path: at('/verify/circle'),
+    routes: async (page) => page.route('**/api/v1/club/circle?*', (r) => r.abort('internetdisconnected')),
+    ready: '.view--circle .n-failed',
+  },
   { id: 'post-invitation', title: 'A post: the invitation, YOUR ANSWER, TO SEE', refs: ['C22'], variant: 'full', as: you, path: post('invitation'), ready: '.view--circle-post section' },
   {
     id: 'post-poll',
@@ -857,6 +930,36 @@ export const UI_STATES: readonly UiState[] = [
   },
   { id: 'post-poll-voted', title: 'A post: the poll, voted, its results', refs: ['C34'], variant: 'full', as: 'voter1', path: post('poll'), ready: '.view--circle-post section' },
   { id: 'post-note', title: 'A post: the note', refs: ['C22'], variant: 'full', as: you, path: post('note'), ready: '.view--circle-post' },
+  {
+    id: 'post-answers-closed',
+    title: 'An invitation whose event has begun: answers are closed, no YES nor NO',
+    refs: ['C22'],
+    variant: 'full',
+    as: you,
+    path: post('invitation'),
+    routes: (page) => invitationAnswer(page, (inv) => ({ ...inv, open: false })),
+    ready: '.view--circle-post section',
+  },
+  {
+    id: 'post-full',
+    title: 'An invitation with every place taken, not answered: YES held back',
+    refs: ['C22'],
+    variant: 'full',
+    as: you,
+    path: post('invitation'),
+    routes: (page) => invitationAnswer(page, (inv) => ({ ...inv, placesLeft: 0 }), null),
+    ready: '.view--circle-post section',
+  },
+  {
+    id: 'post-failed',
+    title: 'A post could not be shown: the reason and TRY AGAIN',
+    refs: ['C40'],
+    variant: 'full',
+    as: you,
+    path: post('invitation'),
+    routes: async (page) => page.route('**/api/v1/club/circle/*', (r) => (r.request().method() === 'GET' ? r.abort('internetdisconnected') : r.continue())),
+    ready: '.view--circle-post .n-failed',
+  },
   { id: 'post-not-found', title: 'A post’s address that leads nowhere', refs: ['C40'], variant: 'full', as: you, path: at('/verify/circle/00000000-0000-4000-8000-000000000000'), ready: '.view--circle-post' },
   { id: 'circle-stress', title: 'THE CIRCLE with eight posts, a long title', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/circle'), ready: '.view--circle article', stress: true },
   { id: 'post-stress', title: 'A note with the longest title', refs: ['same pieces'], variant: 'stress', as: you, path: post('long'), ready: '.view--circle-post', stress: true },
@@ -1047,6 +1150,22 @@ export const UI_STATES: readonly UiState[] = [
     ready: '.view--circle-post',
   },
   {
+    id: 'live-past-question-answered',
+    title: 'The question after, answered: ANOTHER FINISH pressed',
+    refs: ['C30'],
+    variant: 'full',
+    as: 'guest',
+    path: release('morning'),
+    mutates: true,
+    act: async (run) => {
+      await run.page.locator('.view--live .n-question').waitFor({ timeout: 20_000 });
+      await button(run, 'ANOTHER FINISH').click();
+      await run.page.locator('.n-question [aria-pressed="true"]').waitFor({ timeout: 20_000 });
+      await settle(run.page);
+    },
+    ready: '.view--live .n-question',
+  },
+  {
     id: 'room-ready',
     title: 'The room, entered: YOU’RE READY',
     refs: ['C21', 'live-06'],
@@ -1120,27 +1239,36 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
  * end; C33: REQUESTED; C36: registering; C37: passing a piece on; C38: the scanner; C40: every page's loading, could not
  * be shown, empty, owners only and not found; N8's: C8, the feed a PLATINE account reads, its poll too; C18, the
  * sign-in before its refusal; C22, NO and a note; C23, the index and the terms in French; C34, the results once voted;
- * C39, FORGOTTEN PASSWORD, SET A NEW PASSWORD and CHANGE PASSWORD; C41, HELP in French):
- * beside BOARD_STATES' first, each further state is set beside the board too, to be compared with its section.
+ * C39, FORGOTTEN PASSWORD, SET A NEW PASSWORD and CHANGE PASSWORD; C41, HELP in French; N9's, each STATE n a board
+ * draws: C2 without a piece; C16, UNKNOWN, REVOKED and UNREADABLE; C17, A MOMENT, PLEASE and VERIFICATION UNAVAILABLE;
+ * C22, answers closed and every place taken; C25, SHOW MORE; C30, ANOTHER FINISH pressed; C31, PLACE HELD, WAITING
+ * LIST and YOUR TURN; C35, a piece in service; C40, a piece, THE CIRCLE and a post that could not be shown; C42, the
+ * draw before its entries and in its early access; C43, signed out): beside BOARD_STATES' first, each further state is set beside the board too, to be compared with its section.
  */
 export const BOARD_SECTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   C8: ['circle-platine', 'circle-show-more'],
   C18: ['pieces-signed-out'],
-  C22: ['post-answered-no', 'post-note'],
+  C22: ['post-answered-no', 'post-note', 'post-answers-closed', 'post-full'],
   C23: ['legal-index', 'legal-terms-fr'],
   C34: ['post-poll-voted'],
   C39: ['result-forgotten-password', 'result-recovery-code', 'account-sheet-password'],
   C41: ['legal-faq-fr'],
   C5: ['collection-signed-out', 'collection-no-piece'],
-  C17: ['problem-scan-timeout', 'problem-network'],
-  C35: ['pieces-service', 'pieces-care', 'pieces-certificate-choice', 'pieces-certificate-link', 'pieces-report-choice', 'pieces-piece-found', 'piece-stolen', 'piece-transfer'],
+  C17: ['problem-scan-timeout', 'problem-network', 'problem-rate-limited', 'problem-server'],
+  C35: ['pieces-service', 'pieces-care', 'pieces-certificate-choice', 'pieces-certificate-link', 'pieces-report-choice', 'pieces-piece-found', 'piece-stolen', 'piece-transfer', 'piece-in-service'],
   C36: ['result-registered-now', 'result-ceremony', 'result-registration-closed', 'result-not-delivered'],
   C37: ['result-transfer-code', 'result-received', 'result-registered-other'],
   C33: ['model-salon-requested'],
   C28: ['live-there', 'live-announced-signed-out', 'live-veiled', 'live-selected-not-eligible'],
-  C30: ['live-past-question', 'after-room-sold-out'],
+  C30: ['live-past-question', 'live-past-question-answered', 'after-room-sold-out'],
   C38: ['scan-preparing', 'scan-hint', 'scan-seal', 'scan-verifying'],
-  C40: ['pieces-failed', 'pieces-empty', 'collection-empty', 'releases-empty', 'circle-empty', 'circle-no-piece', 'model-not-found', 'draw-not-found', 'post-not-found'],
+  C2: ['account-sheet-club'],
+  C16: ['result-unknown', 'result-revoked', 'result-unreadable'],
+  C25: ['releases-past-more'],
+  C31: ['pieces-draws', 'live-pieces-turn'],
+  C42: ['now-draw-soon', 'now-draw-early'],
+  C43: ['now-collection-leads-signed-out'],
+  C40: ['pieces-failed', 'piece-failed', 'circle-failed', 'post-failed', 'pieces-empty', 'collection-empty', 'releases-empty', 'circle-empty', 'circle-no-piece', 'model-not-found', 'draw-not-found', 'post-not-found'],
 });
 
 export function stateById(id: string): UiState {

@@ -270,7 +270,7 @@ class PiecesPage {
       case 'failed':
         // Could not be shown: the sentence, the reason, TRY AGAIN (C40).
         this.body.replaceChildren(
-          failedState({ sentence: PIECES.loadFailed, reason: this.load.message, retry: PIECES.retry, onRetry: () => void this.loadPieces(true), retryClass: 'pieces__retry', extraClass: 'n-pieces__state' }),
+          h('div', { class: 'n-px n-pieces__failed' }, failedState({ sentence: PIECES.loadFailed, reason: this.load.message, retry: PIECES.retry, onRetry: () => void this.loadPieces(true), retryClass: 'pieces__retry' })),
         );
         return;
       default:

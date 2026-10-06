@@ -1183,6 +1183,11 @@ body.nocturne .view--piece {
   margin-top: 22px;
 }
 
+/* Could not be shown (C40, state 2): the sentence, the reason and TRY AGAIN on the margin, where the quiet line is. */
+.n-pieces__body > .n-pieces__failed {
+  margin-top: 22px;
+}
+
 .n-pieces__section-lead {
   margin-top: 12px;
 }
@@ -1318,6 +1323,11 @@ body.nocturne .view--piece {
 
 .n-piece__photo {
   margin-top: 0;
+}
+
+/* A piece that could not be shown (C40, state 2): on the margin, 14 px under the crumb, as a post's state is (C34). */
+.n-piece__failed {
+  margin-top: 14px;
 }
 
 .n-piece__state-line {
@@ -2427,8 +2437,9 @@ body.nocturne[data-screen="live"] {
   list-style: none;
 }
 
-/* Nothing published, or no circle for this account (C40): the sentence on the margin, under the page's words. */
-.n-circle__quiet {
+/* Nothing published, no circle for this account, or could not be shown (C40): on the margin, under the page's words. */
+.n-circle__quiet,
+.n-circle__failed {
   margin-top: 28px;
 }
 
@@ -2504,8 +2515,9 @@ body.nocturne[data-screen="live"] {
   margin-top: 30px;
 }
 
-/* No photograph: the words 14 px under the crumb (C34). */
-.n-post__head--bare {
+/* No photograph: the words 14 px under the crumb (C34); a post that could not be shown too (C40, state 2). */
+.n-post__head--bare,
+.n-post__failed {
   margin-top: 14px;
 }
 

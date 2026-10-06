@@ -158,7 +158,7 @@ The parity tool sets each board beside the state that holds its content today (`
 | C4 a piece, C35 its tabs | its own page since N5 (`/verify/pieces/<id>`, SEE THE PIECE): see *MY PIECES* | `piece`, `pieces-warranty` and C35's sections |
 | C24 ORDERS, C31 RELEASES, C32 an order returned or cancelled | the tabs ORDERS and RELEASES of MY PIECES since N5 | `pieces-orders`, `pieces-releases` |
 | C21 the room, C26 the after-room | stand-in images of the room: compared with the before-captures | `room`, `after-room-door` |
-| C28, C30, C36–C40 | boards of several states: the first is captured, the others are states of this matrix, each set beside the board too (`BOARD_SECTIONS`: `<C-id>.<state>.pair.png`, to be compared with its section): C28's I'LL BE THERE said (`live-there`), signed out (`live-announced-signed-out`), not eligible by tier (`live-veiled`) and by selection (`live-selected-not-eligible`); C30's end of a visit (`live-missed`), with the question after on a final page (`live-past-question`) and an after-room's end (`after-room-sold-out`) | see each section |
+| C28, C30, C36–C40 | boards of several states: the first is captured, the others are states of this matrix, each set beside the board too (`BOARD_SECTIONS`: `<C-id>.<state>.pair.png`, to be compared with its section): C28's I'LL BE THERE said (`live-there`), signed out (`live-announced-signed-out`), not eligible by tier (`live-veiled`) and by selection (`live-selected-not-eligible`); C30's end of a visit (`live-missed`), with the question after on a final page (`live-past-question`, and answered: `live-past-question-answered`) and an after-room's end (`after-room-sold-out`); since N9, each STATE *n* the other boards draw too, where the stage reaches it (C2, C16, C17, C22, C25, C31, C35, C40, C42, C43: see `BOARD_SECTIONS`) | see each section |
 
 ## The chrome and the account sheet (since N2)
 
@@ -274,7 +274,7 @@ WARRANTY · CARE · OWNERSHIP and the assurance note.
 | `result-invalid` | INVALID SIGNATURE (void), its sentence, the contact, WHERE DID YOU SEE OR BUY THIS PIECE? | a forged signature | C16, verify-11 |
 | `result-unknown` | UNKNOWN ORBES CODE (void), its sentence, the contact, the question | a code ORBES signed for no piece | C16 (2) |
 | `result-revoked` | REVOKED (void), its sentence, the GENOME, the contact, the question | a revoked code | C16 (3) |
-| *(not reached)* UNREADABLE CODE | caution, *This code could not be read …* | a malformed payload (the decoder refuses it before the server) | C16 (4) |
+| `result-unreadable` | (N9) UNREADABLE CODE (caution), *This code could not be read …*, the contact, the question | the first piece's code read whole, its last characters lost on the way: the server answers MALFORMED_CODE | C16 (4) |
 | *(not reached)* claim held | *Too many claim codes have been tried …* | a 429 on a claim code | C36 |
 | `result-stress` | AUTHENTIC, FIRST REGISTRATION of a piece of the 24-character model's 14-character variant (Brushed cobalt): MONOLITHE ARCHITECTURALE, its material, SIZE 17 · WIDE BAND (a Size of 14 characters); OWNERSHIP and the sign-in | the stress demo (since N4) | same pieces |
 | `result-ceremony-stress` | the ceremony of that model and Size, signed in | the stress demo (since N4) | same pieces |
@@ -359,6 +359,7 @@ THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one 
 | `pieces-empty` | THE CLUB, *A piece registered … opens TITANE …*, its benefits, *No piece is registered …*, EARLY ACCESS and its recall | an account without a piece | C40 (3) |
 | `pieces-loading` | ONE MOMENT… | the pieces being read | C40 (1) |
 | `pieces-failed` | *Your pieces could not be shown just now.* *the reason*, TRY AGAIN | the pieces could not be read | C40 (2) |
+| `piece-failed` | (N9) the crumb ‹ MY PIECES, *Your pieces could not be shown just now.* *the reason*, TRY AGAIN | a piece's page, the pieces could not be read | C40 (2) |
 | `pieces-stress` | six pieces (a 14-character free-text field), four orders (€ 125 400, $ 6 400, a 27-character tracking number) | the stress demo | same pieces |
 | `pieces-draws` | r.castel's MY PIECES: YOUR ORDERS with an order PAID (*Your payment is received. ORBES is preparing your piece for shipping.*); YOUR RELEASES with an entry in each state, each *state · status* and its sentence: ENTRIES OPEN · WITHDRAWN, ENTRIES CLOSED · ENTERED, CANCELLED · ENTERED, DRAWN · PLACE HELD (*held until …*, the contact), DRAWN · WAITING LIST (*rank n*), DRAWN · CONCLUDED, DRAWN · LAPSED | the `draws` demo | C24, C31 (2) |
 | `pieces-certificate-withdrawn` | *The link has been withdrawn: it no longer leads to the certificate.*, the open links left | WITHDRAW on a certificate link | C35 (4) |
@@ -395,6 +396,7 @@ ORBES; the sheet's foot link THE COLLECTION to its crumb.
 |---|---|---|---|
 | `releases`, `releases-signed-out` | ORBES, THE RELEASES, its lead, LIVE · PAST; each LIVE RELEASE (its picture: photograph, silhouette or the seal; LIVE RELEASE and where it stands; *name* or TO BE REVEALED; *day · time* PARIS (and ON THIS PHONE when it differs); *price · quantity · per collector*; FOR *rule*; THE REVEALS still to come; *n* COLLECTORS WILL BE THERE; SEE THE RELEASE); each draw (*photograph*, *state*, *title*, *model · type*, *pieces · ENTRIES OPEN/CLOSE date UTC*, SEE THE RELEASE); SCAN ORBES CODE, THE COLLECTION | | C7, plus-01, live-02 |
 | `releases-past` | *You have taken part in n releases.*; each past release (*photograph*, LIVE RELEASE or DRAW, *name*, *model · type*, *date · quantity*, YOU SECURED A PIECE / YOU TOOK PART, SEE THE RELEASE), SHOW MORE | PAST | C25, plus-02 |
+| `releases-past-more` | (N9) the same, the answer saying one more release after the page (SHOW MORE, as C25 draws it; the demo has fewer than a page) | PAST | C25 |
 | `releases-empty` | *No release is announced yet.* | no release | C40 (3) |
 | `releases-stress` | a release 42 minutes away (its room open), one 9 days and 3 hours away in USD, € 125 400 | the stress demo | same pieces |
 | `draw` | ORBES, *collection*, *title*, ENTRIES OPEN, *description*; THE RELEASE (*model · type*, SEE THE MODEL, PIECES, ENTRIES OPEN and ENTRIES CLOSE in UTC then on this phone, PLACE HELD *48 HOURS*); YOUR ENTRY (*Entries are open …*, ENTER THE DRAW); THE DRAW (the rule, the obligation sentence, the commitment, SEED FINGERPRINT *hex*); SCAN ORBES CODE, THE RELEASES | a draw open, signed in | C19 |
@@ -428,6 +430,7 @@ ORBES; the sheet's foot link THE COLLECTION to its crumb.
 | `live-past-secured` | LIVE RELEASE, *picture*, *name*, *type · collection*, SEE THE MODEL, THIS RELEASE IS OVER, *date · quantity*, YOU SECURED A PIECE, *description*, THE RELEASES, SOUND ON (see the note below on C29's receipt) | ended, you secured a piece | C29, plus-03 |
 | `live-past-signed-out` | the same without a mark | signed out | C29 |
 | `live-past-question` | YOU TOOK PART, ONE QUESTION, WHAT WOULD YOU HAVE WANTED?, ANOTHER SIZE · ANOTHER FINISH · ANOTHER PRICE BAND, *One tap …* | took part without a piece, within 7 days | C30, plus-11 |
+| `live-past-question-answered` | (N9) the same, ANOTHER FINISH pressed, *Thank you: your answer is recorded …* | ANOTHER FINISH (it writes the answer) | C30 |
 | `live-past-gold` | a past LIVE RELEASE nobody of the story took part in | | C25 |
 
 **C29's receipt (N7).** On a past LIVE RELEASE's final page, an account whose entry is CONFIRMED reads its reservation
@@ -495,15 +498,19 @@ SOUND ON/OFF at the room's foot (always, the preference shared with the landing)
 | `circle-signed-out` | *The circle is reserved for the owners … Sign in …*, the sign-in | signed out | C40 |
 | `circle-no-piece` | *The circle is reserved … It opens once a piece is registered …* | no piece | C40 (4) |
 | `circle-empty` | ORBES, THE CIRCLE, its lead, EARLY ACCESS and its recall, *Nothing has been published in the circle yet.* | an owner, nothing published | C40 (3) |
+| `circle-failed` | (N9) THE CIRCLE, its lead, *The circle could not be shown just now.* *the reason*, TRY AGAIN | the feed could not be read | C40 (2) |
 | `post-invitation` | *photographs*, INVITATION, *title*, *date*, *text*; THE INVITATION (WHEN in UTC then on this phone, WHERE, PLACES *n LEFT OF c*); YOUR ANSWER (*You will come …*, YES · NO); TO SEE (*release* SEE THE RELEASE, *model · type* SEE THE MODEL, OPEN THE LINK *host*); SCAN ORBES CODE, THE CIRCLE | | C22 |
 | `post-answered-no` | *You will not come …*, NO pressed | NO | C22 |
 | `post-poll` | POLL · PLATINE AND PALLADIUM, *title*, *date*, *text*, THE POLL, its lead, the options, VOTE (once one is chosen) | not voted | C34 (1) |
 | `post-poll-voted` | *Your vote is counted. The results so far:*, each option (*n VOTES · p%*, YOUR VOTE) | voted | C34 (2) |
 | `post-note` | NOTE, *title*, *date*, *photograph*, *text* | | C22 |
 | `post-not-found` | *This post is not in the circle.* | | C40 (4) |
+| `post-answers-closed` | (N9) the invitation, YOUR ANSWER, *The event has begun: answers are closed.*, no YES nor NO | the post's answer says answers are closed | C22 (2) |
+| `post-full` | (N9) the invitation, PLACES NONE LEFT OF 12, *Every place is taken …*, YES held back | the post's answer says no place is left, the reader not answered | C22 (3) |
+| `post-failed` | (N9) the crumb, *The circle could not be shown just now.* *the reason*, TRY AGAIN | the post could not be read | C40 (2) |
 | `circle-stress`, `post-stress` | eight posts, a 71-character title | | same pieces |
 | `post-poll-stress` | a poll whose first option is A FINISH IN BRUSHED BLACK RHODIUM, before a vote | | same pieces |
-| *(not reached)* | answers closed (*The event has begun …*, no buttons); every place taken (*Every place is taken …*, YES disabled); NONE LEFT OF *c*; SHOW MORE's failure; the feed could not be shown | | C22 (2, 3) |
+| *(not reached)* | SHOW MORE's failure (answers closed, every place taken, NONE LEFT OF *c* and the feed that could not be shown are reached since N9: `post-answers-closed`, `post-full`, `circle-failed`) | | C8 |
 
 Since N8 (C8, C22, C34): the feed's own foot (SCAN ORBES CODE, THE RELEASES, THE COLLECTION, MY PIECES) and a post's
 (SCAN ORBES CODE, THE CIRCLE) gave way to the chrome (the SCAN ring, the rail, the crumb ‹ THE CIRCLE), and the small

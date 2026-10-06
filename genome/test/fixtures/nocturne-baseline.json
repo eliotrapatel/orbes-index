@@ -1454,6 +1454,42 @@
         "IP GEOLOCATION BY DB-IP"
       ]
     },
+    "result-unreadable": {
+      "title": "UNREADABLE CODE: a code read whole by the phone, its frame damaged on the way (MALFORMED_CODE)",
+      "refs": [
+        "C16"
+      ],
+      "variant": "full",
+      "as": null,
+      "values": [
+        "ORBES",
+        "SIGN IN",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "UNREADABLE CODE",
+        "This code could not be read. Please scan it again in even light, holding the camera steady.",
+        "ORBES Client Services can help with any question about this piece. Please quote the reference below.",
+        "CONTACT ORBES CLIENT SERVICES",
+        "+33 1 23 45 67 89",
+        "Monday to Friday, 10:00 to 18:00 (Paris)",
+        "WHERE DID YOU SEE OR BUY THIS PIECE?",
+        "Optional. Your answer stays with this reference, for ORBES Client Services.",
+        "VERIFIED 5 OCT 2026 · 18:49",
+        "REF «ref»",
+        "SCAN AGAIN",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
     "result-stress": {
       "title": "AUTHENTIC — FIRST REGISTRATION of the 24-character model in its 14-character variant, a Size of 14 characters: OWNERSHIP",
       "refs": [
@@ -3580,6 +3616,35 @@
         "IP GEOLOCATION BY DB-IP"
       ]
     },
+    "piece-failed": {
+      "title": "A piece could not be shown: the reason and TRY AGAIN",
+      "refs": [
+        "C40"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "MY PIECES",
+        "Your pieces could not be shown just now.",
+        "The ORBES service could not be reached. Check your connection, then try again.",
+        "TRY AGAIN",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
     "pieces-stress": {
       "title": "MY PIECES with six pieces, the first of a 24-character model without a photograph, its Size of 14 characters",
       "refs": [
@@ -4499,6 +4564,48 @@
         "LEGAL",
         "HELP",
         "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "releases-past-more": {
+      "title": "THE RELEASES, PAST, with more releases than a page: SHOW MORE",
+      "refs": [
+        "C25"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "THE RELEASES",
+        "You have taken part in 3 releases.",
+        "LIVE",
+        "PAST",
+        "YOU SECURED A PIECE",
+        "LIVE RELEASE · 5 OCT 2026",
+        "MONOLITHE IN STEEL",
+        "BRACELET · ORBITAL",
+        "25 PIECES",
+        "SEE THE RELEASE",
+        "LIVE RELEASE · 28 SEP 2026",
+        "MONOLITHE IN GOLD",
+        "DRAW · 14 SEP 2026",
+        "MONOLITHE · BRACELET",
+        "12 PIECES",
+        "DRAW · 10 SEP 2026",
+        "SHOW MORE",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
       ]
     },
     "releases-empty": {
@@ -7007,6 +7114,36 @@
         "IP GEOLOCATION BY DB-IP"
       ]
     },
+    "circle-failed": {
+      "title": "THE CIRCLE could not be shown: the reason and TRY AGAIN",
+      "refs": [
+        "C40"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "THE CIRCLE",
+        "For the owners of an ORBES piece: the news of the maison, its invitations and its questions.",
+        "The circle could not be shown just now.",
+        "The ORBES service could not be reached. Check your connection, then try again.",
+        "TRY AGAIN",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
     "post-invitation": {
       "title": "A post: the invitation, YOUR ANSWER, TO SEE",
       "refs": [
@@ -7131,6 +7268,129 @@
         "LEGAL",
         "HELP",
         "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "post-answers-closed": {
+      "title": "An invitation whose event has begun: answers are closed, no YES nor NO",
+      "refs": [
+        "C22"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "THE CIRCLE",
+        "INVITATION",
+        "AN EVENING AT THE ATELIER",
+        "3 OCT 2026",
+        "The atelier opens its doors for one evening: the bench where each piece is finished, and the first pieces of the next release.",
+        "THE INVITATION",
+        "WHEN",
+        "12 OCT 2026 · 17:00 UTC 12 OCT 2026 · 19:00 on this phone (UTC+02:00)",
+        "WHERE",
+        "THE ATELIER, PARIS",
+        "PLACES",
+        "3 LEFT OF 12",
+        "YOUR ANSWER",
+        "The event has begun: answers are closed.",
+        "TO SEE",
+        "MONOLITHE IN BLUE",
+        "SEE THE RELEASE",
+        "MONOLITHE · BRACELET",
+        "SEE THE MODEL",
+        "OPEN THE LINK",
+        "youtube.com",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
+    "post-full": {
+      "title": "An invitation with every place taken, not answered: YES held back",
+      "refs": [
+        "C22"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "THE CIRCLE",
+        "INVITATION",
+        "AN EVENING AT THE ATELIER",
+        "3 OCT 2026",
+        "The atelier opens its doors for one evening: the bench where each piece is finished, and the first pieces of the next release.",
+        "THE INVITATION",
+        "WHEN",
+        "12 OCT 2026 · 17:00 UTC 12 OCT 2026 · 19:00 on this phone (UTC+02:00)",
+        "WHERE",
+        "THE ATELIER, PARIS",
+        "PLACES",
+        "NONE LEFT OF 12",
+        "YOUR ANSWER",
+        "Every place is taken. One may open if an owner answers NO.",
+        "YES",
+        "NO",
+        "TO SEE",
+        "MONOLITHE IN BLUE",
+        "SEE THE RELEASE",
+        "MONOLITHE · BRACELET",
+        "SEE THE MODEL",
+        "OPEN THE LINK",
+        "youtube.com",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
+    "post-failed": {
+      "title": "A post could not be shown: the reason and TRY AGAIN",
+      "refs": [
+        "C40"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "THE CIRCLE",
+        "The circle could not be shown just now.",
+        "The ORBES service could not be reached. Check your connection, then try again.",
+        "TRY AGAIN",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
       ]
     },
     "post-not-found": {
@@ -8892,6 +9152,46 @@
         "LEGAL",
         "HELP",
         "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "live-past-question-answered": {
+      "title": "The question after, answered: ANOTHER FINISH pressed",
+      "refs": [
+        "C30"
+      ],
+      "variant": "full",
+      "as": "guest",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "THE RELEASES",
+        "YOU TOOK PART",
+        "LIVE RELEASE · MONDAY 5 OCTOBER",
+        "MONOLITHE IN STEEL",
+        "BRACELET · ORBITAL",
+        "25 PIECES",
+        "SEE THE MODEL",
+        "THIS RELEASE IS OVER",
+        "ONE QUESTION",
+        "WHAT WOULD YOU HAVE WANTED?",
+        "ANOTHER SIZE",
+        "ANOTHER FINISH",
+        "ANOTHER PRICE BAND",
+        "Thank you: your answer is recorded. You may change it until 12 OCT 2026.",
+        "The steel of MONOLITHE, released live: twenty-five pieces, in the sizes of the house.",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
       ]
     },
     "room-ready": {
