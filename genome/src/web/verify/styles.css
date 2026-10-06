@@ -1183,6 +1183,15 @@ body.nocturne .view--piece {
   margin-top: 22px;
 }
 
+/* ONE MOMENT… (C40, state 1): the monogram 30 px under what comes before it, as C40 draws it, wherever a page sets no
+   gap of its own (THE COLLECTION, a sheet and THE RELEASES set 36 px under their tabs). */
+.view--now > .n-loading,
+.n-pieces__waiting,
+.n-piece__waiting,
+.circle__waiting {
+  margin-top: 30px;
+}
+
 /* Could not be shown (C40, state 2): the sentence, the reason and TRY AGAIN on the margin, where the quiet line is. */
 .n-pieces__body > .n-pieces__failed {
   margin-top: 22px;

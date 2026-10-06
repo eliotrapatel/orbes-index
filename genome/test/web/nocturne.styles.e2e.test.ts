@@ -814,6 +814,8 @@ async function loading(page: Page): Promise<void> {
     _h: 40,
   });
   expect(await page.locator('.n-loading .n-breath').getAttribute('aria-hidden')).toBe('true');
+  // 30 px under MY PIECES' sentence, as C40 draws the monogram under what comes before it.
+  await check(page, '.view--pieces .n-loading', { 'margin-top': 30 });
   const text = await check(page, '.n-loading__text', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: IV, 'text-align': 'center', 'margin-top': 16 });
   expect(Number(text._top) - Number(mono._bottom)).toBeCloseTo(16, 1);
   expect(await page.locator('.n-loading__text').innerText()).toBe('ONE MOMENT…');
