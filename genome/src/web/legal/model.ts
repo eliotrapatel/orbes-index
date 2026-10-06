@@ -11,6 +11,9 @@
  *  - the addresses of the pages, which keep the language;
  *  - the text: the small Markdown of content/types.ts parsed into runs the
  *    page builds with textContent (never HTML), every link checked first;
+ *    a cross-reference to an article of the same document ("(article 11)",
+ *    "l'article 15") becomes a link to its anchor (#article-11), the text
+ *    itself unchanged (C23);
  *  - French typography: a narrow no-break space before : ; ? ! » and after «.
  */
 import { LEGAL_PAGES, LEGAL_PATH, legalPath, type LegalPage } from '../shared/legal.js';
@@ -76,8 +79,36 @@ export function linkTarget(href: string, lang: Lang): { href: string; external: 
 
 const INLINE = /\*\*([^*]+)\*\*|\[([^\]]+)\]\(([^)\s]+)\)/g;
 
-/** The runs of one line: plain text, **set apart**, [links](…). A link whose target is refused reads as its words. */
-export function parseInline(src: string, lang: Lang): Run[] {
+/** A cross-reference to an article, in either language: "article 11" (also "l'article 15", "Article 4"). */
+const ARTICLE_REF = /\b(article) (\d+)\b/gi;
+
+/**
+ * The anchors of a document a cross-reference may link to: its sections' ids. A reference ("article 11") becomes a
+ * link to #article-11 only when the document has that section; any other stays plain text.
+ */
+export type Anchors = ReadonlySet<string>;
+
+/** A run of plain text, its cross-references to the document's articles made links (C23: "(article 11)"). */
+function crossReferences(text: string, anchors: Anchors): Run[] {
+  const runs: Run[] = [];
+  let at = 0;
+  for (const m of text.matchAll(ARTICLE_REF)) {
+    const id = `article-${Number(m[2])}`;
+    if (!anchors.has(id)) continue;
+    const start = m.index ?? 0;
+    if (start > at) runs.push({ kind: 'text', text: text.slice(at, start) });
+    runs.push({ kind: 'link', text: m[0], href: `#${id}`, external: false });
+    at = start + m[0].length;
+  }
+  if (at < text.length) runs.push({ kind: 'text', text: text.slice(at) });
+  return runs;
+}
+
+/**
+ * The runs of one line: plain text, **set apart**, [links](…). A link whose target is refused reads as its words.
+ * With the document's anchors, a cross-reference in plain text ("article 11") links to its section.
+ */
+export function parseInline(src: string, lang: Lang, anchors: Anchors = new Set()): Run[] {
   const runs: Run[] = [];
   const text = (t: string) => {
     if (t === '') return;
@@ -98,14 +129,14 @@ export function parseInline(src: string, lang: Lang): Run[] {
     else text(m[2]);
   }
   text(src.slice(at));
-  return runs.map((r) => ({ ...r, text: typography(r.text, lang) }));
+  return runs.flatMap((r) => (r.kind === 'text' && anchors.size > 0 ? crossReferences(r.text, anchors) : [r])).map((r) => ({ ...r, text: typography(r.text, lang) }));
 }
 
 /** A block of content: a list when every line starts with "- ", else a paragraph (its lines joined). */
-export function parseBlock(src: string, lang: Lang): ParsedBlock {
+export function parseBlock(src: string, lang: Lang, anchors: Anchors = new Set()): ParsedBlock {
   const lines = src.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
-  if (lines.length > 0 && lines.every((l) => l.startsWith('- '))) return { kind: 'list', items: lines.map((l) => parseInline(l.slice(2), lang)) };
-  return { kind: 'paragraph', runs: parseInline(lines.join(' '), lang) };
+  if (lines.length > 0 && lines.every((l) => l.startsWith('- '))) return { kind: 'list', items: lines.map((l) => parseInline(l.slice(2), lang, anchors)) };
+  return { kind: 'paragraph', runs: parseInline(lines.join(' '), lang, anchors) };
 }
 
 /** The text a block reads, links and emphasis dropped: what a search of the page, or a test, compares. */

@@ -142,10 +142,10 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
     SIGN IN; CHANGE PASSWORD (the account sheet) its title and *At least 12 characters.* (the board's sections open on
     their sentence).
   - C23, C41 (N8): every section of the page, in its own text (the boards draw article 1 and article 13, and three
-    questions, as excerpts; the board's *article 11* link is plain text in the terms); the index (/legal) as rows
-    that lead on with their sentence; the contact of ORBES Client Services (its address and number side by side, the
-    hours under them); in French, the four pages wrap on two lines at the head and at the foot. The plan's *FAQ
-    answers as accordion rows*: C41 draws every answer open with no row control, and is followed.
+    questions, as excerpts); the index (/legal) as rows that lead on with their sentence; the contact of ORBES Client
+    Services (its address and number side by side, the hours under them); in French, the four pages wrap on two lines
+    at the head and at the foot. The plan's *FAQ answers as accordion rows*: C41 draws every answer open with no row
+    control, and is followed.
 
 ## Boards without a screen of their own today
 

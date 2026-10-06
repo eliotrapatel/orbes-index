@@ -136,6 +136,28 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     await page.context().close();
   }, 120_000);
 
+  it("links the terms' cross-references to their articles, as C23 draws them, in both languages", async () => {
+    for (const lang of ['en', 'fr'] as const) {
+      const { page, problems } = await open(`/legal/terms?lang=${lang}`);
+      const article = (n: number) => page.locator(`#article-${n}`).locator('xpath=..');
+      // Article 1: "MY PIECES also presents ORBES Care (article 11)"; article 13: "the owners from a tier (article 12)".
+      const care = article(1).locator('a[href="#article-11"]');
+      await textOf(care, 'article 11');
+      expect(await care.getAttribute('class')).toMatch(/\bn-ivc\b.*\bn-u\b/);
+      // Held whole on its line: the word never ends a line without its figure.
+      expect(await care.evaluate((a) => getComputedStyle(a).whiteSpace)).toBe('nowrap');
+      expect(await care.evaluate((a) => a.getClientRects().length)).toBe(1);
+      await textOf(article(13).locator('a[href="#article-12"]').first(), 'article 12');
+      // A reference to an article the document does not have stays plain text; the text itself is unchanged.
+      expect(await page.locator('a[href^="#article-"]').evaluateAll((as) => as.every((a) => document.getElementById(a.getAttribute('href')!.slice(1)) !== null))).toBe(true);
+      await care.click();
+      await page.waitForURL(`${srv.origin}/legal/terms?lang=${lang}#article-11`);
+      await expect.poll(() => page.evaluate(() => document.getElementById('article-11')!.getBoundingClientRect().top), POLL).toBeLessThan(80);
+      expect(problems).toEqual([]);
+      await page.context().close();
+    }
+  }, 120_000);
+
   it('shows the four pages from their index, and the index for any other path, its address put back to /legal', async () => {
     const { page, problems } = await open('/legal/cookies?lang=en');
     expect(new URL(page.url()).pathname).toBe('/legal');

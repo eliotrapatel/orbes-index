@@ -147,6 +147,11 @@
   overflow-wrap: anywhere;
 }
 
+/* A cross-reference to an article (C23's "(article 11)") is held whole: the word never ends a line without its figure. */
+.legal__link[href^="#article-"] {
+  white-space: nowrap;
+}
+
 /* The figures of a heading (ARTICLE 8) in the reading face: Gravesend's one is its capital I. */
 .legal__figure {
   font-family: var(--font);

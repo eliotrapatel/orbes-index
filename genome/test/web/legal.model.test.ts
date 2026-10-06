@@ -95,6 +95,33 @@ describe('legal pages: the text of the content', () => {
     expect(parseInline('<b>x</b> & [y](/legal/faq)', 'en')[0]).toEqual({ kind: 'text', text: '<b>x</b> & ' });
   });
 
+  it("links a cross-reference to an article of the same document, its text unchanged (C23)", () => {
+    const anchors = new Set(['article-11', 'article-12', 'article-15']);
+    expect(parseInline('MY PIECES also presents ORBES Care (article 11).', 'en', anchors)).toEqual([
+      { kind: 'text', text: 'MY PIECES also presents ORBES Care (' },
+      { kind: 'link', text: 'article 11', href: '#article-11', external: false },
+      { kind: 'text', text: ').' },
+    ]);
+    // In French too, after an elision; an article the document does not have stays plain text.
+    expect(parseInline("ce que disent cet article et l'article 15 ; voir l'article 4.", 'fr', anchors)).toEqual([
+      { kind: 'text', text: "ce que disent cet article et l'" },
+      { kind: 'link', text: 'article 15', href: '#article-15', external: false },
+      { kind: 'text', text: `${NNBSP}; voir l'article 4.` },
+    ]);
+    // Inside a list item, beside **set apart** and a [link](…), which keep their own runs.
+    const list = parseBlock('- **Tier**: a rank (article 12).\n- [privacy](/legal/privacy) (article 99)', 'en', anchors);
+    expect(list).toEqual({
+      kind: 'list',
+      items: [
+        [{ kind: 'strong', text: 'Tier' }, { kind: 'text', text: ': a rank (' }, { kind: 'link', text: 'article 12', href: '#article-12', external: false }, { kind: 'text', text: ').' }],
+        [{ kind: 'link', text: 'privacy', href: '/legal/privacy?lang=en', external: false }, { kind: 'text', text: ' (article 99)' }],
+      ],
+    });
+    expect(plainText(list)).toBe('Tier: a rank (article 12).\nprivacy (article 99)');
+    // Without the document's anchors (or with none), nothing is linked.
+    expect(parseInline('ORBES Care (article 11).', 'en')).toEqual([{ kind: 'text', text: 'ORBES Care (article 11).' }]);
+  });
+
   it('sets French punctuation with a narrow no-break space, and leaves English and addresses as they are', () => {
     expect(typography('Que prouve un résultat ?', 'fr')).toBe(`Que prouve un résultat${NNBSP}?`);
     expect(typography('« Vous achetez cette pièce ? »', 'fr')).toBe(`«${NNBSP}Vous achetez cette pièce${NNBSP}?${NNBSP}»`);

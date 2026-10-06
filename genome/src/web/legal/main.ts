@@ -33,7 +33,7 @@ import { byId, h, mount, s } from '../shared/dom.js';
 import { GEOIP_ATTRIBUTION, LEGAL_PAGES } from '../shared/legal.js';
 import { railLive } from '../verify/nocturne-model.js';
 import { DOCUMENTS, LANGS, LANGUAGE_NAMES, LEGAL_VERSION, WORDS, type Block, type Lang, type LegalDocument, type LegalWords } from './content/index.js';
-import { hrefOf, parseBlock, pickLanguage, routeOf, splitFigures, typography, type LegalRoute, type Run } from './model.js';
+import { hrefOf, parseBlock, type Anchors, pickLanguage, routeOf, splitFigures, typography, type LegalRoute, type Run } from './model.js';
 
 /** How long the page waits for the contact of ORBES Client Services, or for what the rail's dot says, before going on without it. */
 const CONTACT_TIMEOUT_MS = 5_000;
@@ -57,10 +57,11 @@ function heading<K extends 'h1' | 'h2'>(tag: K, text: string, cls: string, lang:
   return h(tag, { class: cls, id }, ...parts);
 }
 
-function block(b: Block, lang: Lang): HTMLElement {
+/** A block of the text; `anchors` are the document's sections, which its cross-references ("article 11") link to. */
+function block(b: Block, lang: Lang, anchors?: Anchors): HTMLElement {
   // The contact of ORBES Client Services: filled once the server has said it (fillContacts), hidden until then.
   if (typeof b !== 'string') return h('div', { class: 'n-contact legal__contact', attrs: { hidden: true } });
-  const parsed = parseBlock(b, lang);
+  const parsed = parseBlock(b, lang, anchors);
   if (parsed.kind === 'list') return h('ul', { class: 'n-art legal__list' }, ...parsed.items.map((item) => h('li', { class: 'legal__item' }, ...inline(item))));
   return h('p', { class: 'n-art legal__text' }, ...inline(parsed.runs));
 }
@@ -153,12 +154,14 @@ function versionLine(route: LegalRoute, lang: Lang, words: LegalWords): HTMLElem
 }
 
 function documentView(doc: LegalDocument, lang: Lang): HTMLElement[] {
+  // The terms' cross-references ("(article 11)") link to their sections, as C23 draws them (ivory, underlined).
+  const anchors: Anchors = new Set(doc.sections.map((sec) => sec.id));
   return [
-    h('div', { class: 'n-px legal-titles' }, heading('h1', doc.title, 'n-g n-t1 legal__title', lang), ...doc.intro.map((b) => block(b, lang))),
+    h('div', { class: 'n-px legal-titles' }, heading('h1', doc.title, 'n-g n-t1 legal__title', lang), ...doc.intro.map((b) => block(b, lang, anchors))),
     h(
       'article',
       { class: 'n-px legal__body' },
-      ...doc.sections.map((sec) => h('section', { class: 'legal__section', attrs: { 'aria-labelledby': sec.id } }, heading('h2', sec.title, 'n-g n-t3 legal__heading', lang, sec.id), ...sec.blocks.map((b) => block(b, lang)))),
+      ...doc.sections.map((sec) => h('section', { class: 'legal__section', attrs: { 'aria-labelledby': sec.id } }, heading('h2', sec.title, 'n-g n-t3 legal__heading', lang, sec.id), ...sec.blocks.map((b) => block(b, lang, anchors)))),
     ),
   ];
 }
