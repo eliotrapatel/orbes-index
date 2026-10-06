@@ -139,6 +139,9 @@ class GridPage {
   private load: GridLoad = { kind: 'loading' };
   private disposed = false;
   private signedIn: boolean | null = null;
+  /** The status the latest read was made with (null until known), and its generation: an older read never lands. */
+  private readingAs: boolean | null = null;
+  private generation = 0;
   private readonly unsubscribe: () => void;
   /** The dot selected on each card (by the card's address), kept across a render. */
   private readonly selected = new Map<string, string>();
@@ -157,7 +160,13 @@ class GridPage {
     );
     // Signed in or out meanwhile (the account sheet, a sign-in elsewhere): THE PRIVATE SALON and You own N change.
     this.unsubscribe = deps.session.subscribe((s) => {
-      if (s.status !== 'unknown' && this.signedIn !== null && (s.status === 'signed-in') !== this.signedIn) void this.fetch();
+      // Compared with the status the read under way was made with: a sign-out during the first read starts a fresh one,
+      // which supersedes it (its generation).
+      const known = this.readingAs ?? this.signedIn;
+      const now = s.status === 'signed-in';
+      if (s.status === 'unknown' || known === null || now === known) return;
+      this.readingAs = now;
+      void this.fetch();
     });
     this.render();
     void this.fetch();
@@ -169,16 +178,20 @@ class GridPage {
   }
 
   private async fetch(): Promise<void> {
+    const gen = ++this.generation;
+    const stale = (): boolean => this.disposed || gen !== this.generation;
     this.load = { kind: 'loading' };
     this.render();
     try {
       const signedIn = await signedInNow(this.deps.session);
+      if (stale()) return;
+      this.readingAs = signedIn;
       const [cards, salon, pieces] = await Promise.all([this.deps.api.lookbook(), this.salon(signedIn), ownPieces(this.deps.api, this.deps.session, signedIn === true)]);
-      if (this.disposed) return;
+      if (stale()) return;
       this.signedIn = signedIn;
       this.load = { kind: 'ready', groups: lookbookGroups(cards), salon, pieces };
     } catch (e) {
-      if (this.disposed) return;
+      if (stale()) return;
       this.load = { kind: 'failed', message: messageOf(e) };
     }
     this.render();
@@ -331,6 +344,9 @@ class SheetPage {
   private load: SheetLoad = { kind: 'loading' };
   private disposed = false;
   private signedIn: boolean | null = null;
+  /** The status the latest read was made with (null until known), and its generation: an older read never lands. */
+  private readingAs: boolean | null = null;
+  private generation = 0;
   private readonly unsubscribe: () => void;
   /** The account's pieces (You own N) and the model's next release, read with the sheet. */
   private pieces: OwnedPiece[] = [];
@@ -354,7 +370,13 @@ class SheetPage {
     this.root.classList.add('n-model');
     this.root.append(appAnchor(LOOKBOOK_PATH, ['n-g', 'n-crumb', 'n-model__crumb'], () => deps.onCollection(), icon('back', { small: true }), LOOKBOOK.link), this.body);
     this.unsubscribe = deps.session.subscribe((s) => {
-      if (s.status !== 'unknown' && this.signedIn !== null && (s.status === 'signed-in') !== this.signedIn) void this.fetch();
+      // Compared with the status the read under way was made with: a sign-out during the first read starts a fresh one,
+      // which supersedes it (its generation).
+      const known = this.readingAs ?? this.signedIn;
+      const now = s.status === 'signed-in';
+      if (s.status === 'unknown' || known === null || now === known) return;
+      this.readingAs = now;
+      void this.fetch();
     });
     this.render();
     void this.fetch();
@@ -371,10 +393,14 @@ class SheetPage {
    * the public sheet. A 404 says the model is not in the collection for this reader.
    */
   private async fetch(): Promise<void> {
+    const gen = ++this.generation;
+    const stale = (): boolean => this.disposed || gen !== this.generation;
     this.load = { kind: 'loading' };
     this.render();
     const slug = this.slug;
     const signedIn = await signedInNow(this.deps.session);
+    if (stale()) return;
+    this.readingAs = signedIn;
     const extras = Promise.all([
       ownPieces(this.deps.api, this.deps.session, signedIn === true),
       this.deps.api.liveReleases().catch((): LiveCard[] => []),
@@ -383,7 +409,7 @@ class SheetPage {
     let load: SheetLoad | null = null;
     if (slug !== null && signedIn === true) {
       const club = await this.fromClub(slug, { owner: true });
-      if (this.disposed) return;
+      if (stale()) return;
       // Not an owner: the public sheet, as a visitor reads it.
       if (club !== 'not-owner') load = club;
     }
@@ -391,12 +417,12 @@ class SheetPage {
       try {
         load = slug === null ? { kind: 'missing' } : { kind: 'ready', sheet: sheetModel(await this.deps.api.lookbookSheet(slug)) };
       } catch (e) {
-        if (this.disposed) return;
+        if (stale()) return;
         load = e instanceof ApiError && e.status === 404 ? { kind: 'missing' } : { kind: 'failed', message: messageOf(e) };
       }
     }
     const [pieces, live, drops] = await extras;
-    if (this.disposed) return;
+    if (stale()) return;
     this.signedIn = signedIn;
     this.pieces = pieces;
     this.releases = { live, drops };
@@ -552,8 +578,8 @@ class SheetPage {
         h(
           'p',
           { class: 'n-g n-t3 n-ivc n-num n-model__next-when' },
-          ...(n.variant ? [n.variant, ' '] : []),
-          ...(n.when.lead ? [n.when.lead, ' '] : []),
+          ...(n.variant ? [...withNumerals(n.variant), ' '] : []),
+          ...(n.when.lead ? [...withNumerals(n.when.lead), ' '] : []),
           h('span', { class: 'n-nw' }, ...withNumerals(n.when.at)),
         ),
       ),

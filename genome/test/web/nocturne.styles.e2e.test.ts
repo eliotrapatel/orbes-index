@@ -940,6 +940,25 @@ async function aModel(page: Page): Promise<void> {
   await expect.poll(() => page.locator('.n-model__body').getAttribute('aria-live')).toBe('polite');
   expect(await page.locator('.n-model__owned').innerText()).toBe('You own two: steel and gold');
   expect(await page.locator('.n-model__next p').allInnerTexts()).toEqual(['LIVE RELEASE', 'IN BLUE, THURSDAY 21:00 PARIS']);
+  // A variant whose label holds figures (18K Gold): its digits in the reading face, never in Gravesend.
+  await page.route('**/api/v1/live', async (route) => {
+    const res = await route.fetch();
+    const body = (await res.json()) as { releases: { variant?: unknown }[] };
+    for (const r of body.releases) if (typeof r.variant === 'string') r.variant = '18K Gold';
+    await route.fulfill({ response: res, json: body });
+  });
+  await page.reload();
+  await page.locator('.n-model__next').waitFor();
+  expect(await page.locator('.n-model__next p').allInnerTexts()).toEqual(['LIVE RELEASE', 'IN 18K GOLD, THURSDAY 21:00 PARIS']);
+  expect(await page.locator('.n-model__next-when .numeral').allInnerTexts()).toEqual(['18', '21', '00']);
+  const gravesendDigits = await page.locator('.n-model__next').evaluate((row) =>
+    [row, ...row.querySelectorAll('*')]
+      .filter((el) => /^"?Gravesend Sans/.test(getComputedStyle(el).fontFamily))
+      .map((el) => [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join(''))
+      .filter((t) => /\d/.test(t)),
+  );
+  expect(gravesendDigits).toEqual([]);
+  await page.unroute('**/api/v1/live');
 }
 
 /** C33: a model of THE PRIVATE SALON: its facts, its sentence, the note, REQUEST THIS PIECE, the screen's one filled button. */
