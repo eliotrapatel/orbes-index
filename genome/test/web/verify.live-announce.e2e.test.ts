@@ -395,13 +395,20 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     for (const w of [page, other.page]) await w.context().close();
   }, 90_000);
 
-  it('the banner on /verify and MY PIECES: OPENS IN to T0, the name once revealed, THE ROOM IS OPEN, LIVE NOW, hidden at the end; it opens the release', async () => {
+  it('the banner on MY PIECES (NOW leads with the release itself): OPENS IN to T0, the name once revealed, THE ROOM IS OPEN, LIVE NOW, hidden at the end; it opens the release', async () => {
     await clear();
     const t = Date.now();
     const announced = await release({ opensAt: new Date(t + 2 * 3_600_000) });
     await srv.ctx.db.updateTable('drops').set({ name_at: new Date(t + 6 * SECOND) }).where('id', '=', announced.id).execute();
     const { page, problems } = await phone(null);
+    // NOW (N3, C1): the release leads the page itself, its countdown the hero's; no banner there.
     await page.goto(`${srv.origin}/verify`);
+    await page.locator('.view--now[data-ready]').waitFor();
+    await textOf(page.locator('.now__hero .n-lift > p').first(), 'LIVE RELEASE');
+    expect(await page.locator('.now__hero').getByRole('link', { name: 'SEE THE RELEASE' }).getAttribute('href')).toBe(`/verify/releases/${announced.id}`);
+    expect(await page.locator('.live-banner-host').isHidden()).toBe(true);
+    // MY PIECES (C3): the banner under the rail.
+    await page.goto(`${srv.origin}/verify/pieces`);
     const banner = page.locator('a.live-banner');
     await visible(banner);
     await textOf(banner, /^LIVE RELEASE · OPENS IN 01:59:\d{2}$/);
@@ -486,7 +493,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     expect(wrapped.height).toBeLessThanOrEqual(55);
     expect((await tapZoneFloors(page)).problems).toEqual([]);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-banner.png') });
-    // It opens the release's page (and is gone from it); back, the landing and the banner again.
+    // It opens the release's page (and is gone from it); back, the list of the releases, then NOW (no banner there:
+    // the release leads it); MY PIECES and the banner again.
     await banner.click();
     await expect.poll(() => new URL(page.url()).pathname).toBe(`/verify/releases/${announced.id}`);
     await visible(page.locator('.live__announced'));
@@ -494,6 +502,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await page.goBack();
     await page.goBack();
     await expect.poll(() => new URL(page.url()).pathname).toBe('/verify');
+    await page.locator('.view--now[data-ready]').waitFor();
+    expect(await page.locator('.live-banner-host').isHidden()).toBe(true);
+    await page.goto(`${srv.origin}/verify/pieces`);
     await visible(banner);
 
     // The room open, then live, then over: on MY PIECES, then gone.

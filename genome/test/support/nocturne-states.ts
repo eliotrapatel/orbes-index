@@ -88,7 +88,7 @@ function result(role: string, then?: (run: StateRun) => Promise<void>): Pick<UiS
   return {
     path: at('/verify'),
     act: async (run) => {
-      await run.page.locator('.view--landing').waitFor();
+      await run.page.locator('.view--now[data-ready]').waitFor();
       await upload(run, role);
       await run.page.locator('.view--result .result__title').waitFor({ timeout: 30_000 });
       await settle(run.page);
@@ -108,9 +108,9 @@ async function registerPiece(run: StateRun, role: string): Promise<void> {
   await button(run, 'VIEW AS OWNER').waitFor({ timeout: 20_000 });
 }
 
-/** The scan opened from the landing (SCAN ORBES CODE). */
+/** The scan opened from NOW (its SCAN ORBES CODE). */
 async function openScanner(run: StateRun): Promise<void> {
-  await run.page.locator('.view--landing').waitFor();
+  await run.page.locator('.view--now[data-ready]').waitFor();
   await button(run, 'SCAN ORBES CODE').click();
 }
 
@@ -124,7 +124,7 @@ function verifyProblem(id: string, title: string, fulfil: (route: Route) => Prom
     path: at('/verify'),
     routes: async (page) => page.route('**/api/v1/verify', fulfil),
     act: async (run) => {
-      await run.page.locator('.view--landing').waitFor();
+      await run.page.locator('.view--now[data-ready]').waitFor();
       await upload(run, 'first');
     },
     ready: '.view--message',
@@ -165,17 +165,17 @@ async function fitSheet(page: Page): Promise<void> {
 
 export const UI_STATES: readonly UiState[] = [
   // ── NOW (today: the landing, its banner of the LIVE RELEASES) ──
-  { id: 'now-signed-out', title: 'NOW, signed out: a LIVE RELEASE announced, a draw open', refs: ['C10'], variant: 'full', path: at('/verify'), ready: 'a.live-banner' },
-  { id: 'now-signed-in', title: 'NOW, signed in (TITANE, two pieces): a LIVE RELEASE announced, a draw open', refs: ['C1'], variant: 'full', as: you, path: at('/verify'), ready: '.view--landing .landing__pieces:not(.is-pending)' },
-  { id: 'now-draw-leads', title: 'NOW, no LIVE RELEASE announced: the draw leads', refs: ['C42'], variant: 'draw-leads', as: you, path: at('/verify'), ready: '.view--landing .landing__pieces:not(.is-pending)' },
-  { id: 'now-draw-soon', title: 'NOW, the draw before its entries open', refs: ['C42'], variant: 'draw-soon', as: you, path: at('/verify'), ready: '.view--landing .landing__pieces:not(.is-pending)' },
-  { id: 'now-draw-early', title: 'NOW, the draw in its early access', refs: ['C42'], variant: 'draw-early', as: you, path: at('/verify'), ready: '.view--landing .landing__pieces:not(.is-pending)' },
-  { id: 'now-collection-leads', title: 'NOW, nothing announced: the newest model leads', refs: ['C43'], variant: 'collection-leads', as: you, path: at('/verify'), ready: '.view--landing .landing__pieces:not(.is-pending)' },
-  { id: 'now-collection-leads-signed-out', title: 'NOW, nothing announced, signed out', refs: ['C43'], variant: 'collection-leads', path: at('/verify'), ready: '.view--landing .landing__pieces:not(.is-pending)' },
-  { id: 'now-room-open', title: 'NOW while a room is open: the banner THE ROOM IS OPEN', refs: ['live-01'], variant: 'room', path: at('/verify'), ready: 'a.live-banner' },
-  { id: 'now-live', title: 'NOW while a LIVE RELEASE is live: the banner LIVE NOW', refs: ['live-01'], variant: 'live', path: at('/verify'), ready: 'a.live-banner' },
-  { id: 'now-empty', title: 'NOW with nothing at all (no model, no release), signed in without a piece', refs: ['C43'], variant: 'empty', as: you, path: at('/verify'), ready: '.view--landing .landing__pieces:not(.is-pending)', stress: true },
-  { id: 'now-stress', title: 'NOW with the extreme content (a release in 42 minutes, its room open)', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify'), ready: 'a.live-banner', stress: true },
+  { id: 'now-signed-out', title: 'NOW, signed out: a LIVE RELEASE announced, a draw open', refs: ['C10'], variant: 'full', path: at('/verify'), ready: '.view--now[data-ready]' },
+  { id: 'now-signed-in', title: 'NOW, signed in (TITANE, two pieces): a LIVE RELEASE announced, a draw open', refs: ['C1'], variant: 'full', as: you, path: at('/verify'), ready: '.view--now[data-ready]' },
+  { id: 'now-draw-leads', title: 'NOW, no LIVE RELEASE announced: the draw leads', refs: ['C42'], variant: 'draw-leads', as: you, path: at('/verify'), ready: '.view--now[data-ready]' },
+  { id: 'now-draw-soon', title: 'NOW, the draw before its entries open', refs: ['C42'], variant: 'draw-soon', as: you, path: at('/verify'), ready: '.view--now[data-ready]' },
+  { id: 'now-draw-early', title: 'NOW, the draw in its early access', refs: ['C42'], variant: 'draw-early', as: you, path: at('/verify'), ready: '.view--now[data-ready]' },
+  { id: 'now-collection-leads', title: 'NOW, nothing announced: the newest model leads', refs: ['C43'], variant: 'collection-leads', as: you, path: at('/verify'), ready: '.view--now[data-ready]' },
+  { id: 'now-collection-leads-signed-out', title: 'NOW, nothing announced, signed out', refs: ['C43'], variant: 'collection-leads', path: at('/verify'), ready: '.view--now[data-ready]' },
+  { id: 'now-room-open', title: 'NOW while a room is open: the LIVE RELEASE leads, THE ROOM IS OPEN', refs: ['live-01'], variant: 'room', path: at('/verify'), ready: '.view--now[data-ready]' },
+  { id: 'now-live', title: 'NOW while a LIVE RELEASE is live: it leads, LIVE NOW', refs: ['live-01'], variant: 'live', path: at('/verify'), ready: '.view--now[data-ready]' },
+  { id: 'now-empty', title: 'NOW with nothing at all (no model, no release), signed in without a piece', refs: ['C43'], variant: 'empty', as: you, path: at('/verify'), ready: '.view--now[data-ready]', stress: true },
+  { id: 'now-stress', title: 'NOW with the extreme content (a release in 42 minutes, its room open)', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify'), ready: '.view--now[data-ready]', stress: true },
 
   // ── The scan ──
   { id: 'scan-preparing', title: 'The scan: PREPARING CAMERA…, before the stream', refs: ['C38'], variant: 'full', path: at('/verify'), camera: 'hold', act: openScanner, ready: '.view--scan', viewport: true },
@@ -235,7 +235,7 @@ export const UI_STATES: readonly UiState[] = [
     path: at('/verify'),
     routes: async (page, hold) => hold.hold('**/api/v1/verify'),
     act: async (run) => {
-      await run.page.locator('.view--landing').waitFor();
+      await run.page.locator('.view--now[data-ready]').waitFor();
       await upload(run, 'first');
       await run.page.waitForFunction(() => document.querySelector('.verifying__status')?.textContent === 'VERIFYING…', null, { timeout: 20_000 });
       await sleep(1_300);
@@ -324,7 +324,7 @@ export const UI_STATES: readonly UiState[] = [
     variant: 'full',
     path: at('/verify'),
     act: async (run) => {
-      await run.page.locator('.view--landing').waitFor();
+      await run.page.locator('.view--now[data-ready]').waitFor();
       await run.page.setInputFiles('#photo-input', { name: 'blank.png', mimeType: 'image/png', buffer: blankPng() });
     },
     ready: '.view--message',
@@ -336,7 +336,7 @@ export const UI_STATES: readonly UiState[] = [
     variant: 'full',
     path: at('/verify'),
     act: async (run) => {
-      await run.page.locator('.view--landing').waitFor();
+      await run.page.locator('.view--now[data-ready]').waitFor();
       await run.page.setInputFiles('#photo-input', { name: 'note.png', mimeType: 'image/png', buffer: Buffer.from('not an image') });
     },
     ready: '.view--message',

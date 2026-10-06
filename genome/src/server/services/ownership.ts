@@ -174,6 +174,11 @@ export interface OwnedProduct {
    * decision 9: the model's photograph is the reference; a piece's photograph taken at issuance stays the console's).
    */
   imageUrl: string | null;
+  /**
+   * Its model's lookbook sheet: the `<slug>` of `/verify/lookbook/<slug>` when the model is PUBLIC there, else null (as a
+   * result names it). Plan NOCTURNE, N3: NOW counts the pieces of a model and its variants by it (« You own two »).
+   */
+  lookbook: string | null;
   /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
   care: string | null;
 }
@@ -844,7 +849,7 @@ export class OwnershipService {
       .select([
         'p.id as uuid', 'p.product_id', 'p.status', 'p.variant', 'p.material', 'p.year',
         'c.code as category_code', 'c.name as category_name', 'm.name as model_name', 'm.variant_label as model_variant', 'm.type as model_type', 'col.name as collection_name',
-        'm.image_sha256', 'm.care_instructions',
+        'm.image_sha256', 'm.care_instructions', 'm.lookbook as model_lookbook', 'm.slug as model_slug',
         'o.acquired_via', 'o.verified', 'o.started_at',
       ])
       .where('o.account_id', '=', accountId)
@@ -903,6 +908,8 @@ export class OwnershipService {
           ...(w?.end_date ? { endDate: w.end_date } : {}),
         },
         imageUrl: mediaUrl(r.image_sha256),
+        // A RESERVED model is the owners' (THE PRIVATE SALON) and stays unnamed here, as on a result.
+        lookbook: r.model_lookbook === 'PUBLIC' ? r.model_slug : null,
         care: r.care_instructions,
       };
     });

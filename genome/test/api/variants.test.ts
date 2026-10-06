@@ -264,9 +264,12 @@ describe('the variants of a model (NOCTURNE N1)', () => {
     let list = await publicList();
     expect(list.map((c) => c.slug)).toEqual(['variants-monolithe']);
     expect(list[0]).toMatchObject({ slug: 'variants-monolithe', variant: { label: 'Steel', swatch: '#9D9B96' } });
+    // N3: each dot says when it was first shown (NOW's collection reads it).
+    const shown = await h.ctx.db.selectFrom('models').select(['slug', 'published_at']).where('slug', 'in', ['variants-monolithe', 'variants-monolithe-gold']).execute();
+    const at = (slug: string) => shown.find((m) => m.slug === slug)!.published_at!.toISOString();
     expect(list[0]!.variants).toEqual([
-      { slug: 'variants-monolithe', name: 'MONOLITHE', type: 'RING', label: 'Steel', swatch: '#9D9B96', imageUrl: steelUrl },
-      { slug: 'variants-monolithe-gold', name: 'MONOLITHE', type: 'RING', label: 'Gold', swatch: '#B88A3A', imageUrl: goldUrl },
+      { slug: 'variants-monolithe', name: 'MONOLITHE', type: 'RING', label: 'Steel', swatch: '#9D9B96', imageUrl: steelUrl, publishedAt: at('variants-monolithe') },
+      { slug: 'variants-monolithe-gold', name: 'MONOLITHE', type: 'RING', label: 'Gold', swatch: '#B88A3A', imageUrl: goldUrl, publishedAt: at('variants-monolithe-gold') },
     ]);
     expect((await operator.patch(url(blue!.id), { lookbook: 'PUBLIC', slug: 'variants-monolithe-blue' })).statusCode).toBe(200);
     list = await publicList();

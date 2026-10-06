@@ -1003,9 +1003,11 @@ A model is in the lookbook as the console set it (§13.4): **HIDDEN** (the defau
 { "models": [ { "slug": "monolithe", "name": "MONOLITHE", "type": "BRACELET", "category": { "code": "J", "name": "Jewelry" }, "collection": "ORBITAL", "imageUrl": "/api/v1/media/9f2c4e…",
   "variant": { "label": "Steel", "swatch": "#9D9B96" },
   "variants": [
-    { "slug": "monolithe", "name": "MONOLITHE", "type": "BRACELET", "label": "Steel", "swatch": "#9D9B96", "imageUrl": "/api/v1/media/9f2c4e…" },
-    { "slug": "monolithe-gold", "name": "MONOLITHE", "type": "BRACELET", "label": "Gold", "swatch": "#B88A3A", "imageUrl": "/api/v1/media/4b1a…" }
-  ] } ] }
+    { "slug": "monolithe", "name": "MONOLITHE", "type": "BRACELET", "label": "Steel", "swatch": "#9D9B96", "imageUrl": "/api/v1/media/9f2c4e…", "publishedAt": "2026-08-31T09:20:00.000Z" },
+    { "slug": "monolithe-gold", "name": "MONOLITHE", "type": "BRACELET", "label": "Gold", "swatch": "#B88A3A", "imageUrl": "/api/v1/media/4b1a…", "publishedAt": "2026-08-31T09:00:00.000Z" }
+  ],
+  "publishedAt": "2026-08-31T09:20:00.000Z",
+  "sizes": ["16", "17", "18"] } ] }
 ```
 
 | Field | Notes |
@@ -1014,7 +1016,9 @@ A model is in the lookbook as the console set it (§13.4): **HIDDEN** (the defau
 | `collection` | The model's collection, or `null`. |
 | `imageUrl` | The model's reference photograph (its cover), else the first photograph of its gallery, or `null`. |
 | `variant` | (N1) The model's own dot among its variants: its `label` (« Steel ») and its `swatch` (`#RRGGBB`); `null` for a model without one. |
-| `variants` | (N1) The dots: each model of its group shown in this list, the main model first, then its variants in the order they were added, each with the address of its sheet, its name, type, label, colour and photograph; empty for a model shown alone (a hidden variant is no dot). |
+| `variants` | (N1) The dots: each model of its group shown in this list, the main model first, then its variants in the order they were added, each with the address of its sheet, its name, type, label, colour and photograph, and (N3) `publishedAt`, when it first left HIDDEN; empty for a model shown alone (a hidden variant is no dot). |
+| `publishedAt` | (N3) When the entry was last added to the collection: the latest `publishedAt` (§13.4) of its models in this list. NOW (the verify app's `/verify`) leads with the newest entry when no release is announced. |
+| `sizes` | (N3, addition 8) The sizes of its models in this list, from their SKUs (§16.22): each size label once whatever its case, ordered as a client reads them (`16`, `17`, `18`; S, M, L as written); a SKU in one size names none; empty without a size. |
 
 **`GET /api/v1/lookbook/:slug`, 200**: a PUBLIC model's sheet (`:slug` read in any case).
 
@@ -1047,6 +1051,7 @@ A model is in the lookbook as the console set it (§13.4): **HIDDEN** (the defau
 | `discontinuedYear` | (P-R06) The UTC year an ADMIN discontinued the model (§13.4), said *DISCONTINUED · 2027* on the sheet's line; `null` while it is not. |
 | `variant` | (N1) The model's own dot (`label`, `swatch`), or `null`. |
 | `variants` | (N1) The dots of its group the reader may see, the main model first; the model whose address was asked `selected` (a variant's own address opens the sheet with that variant selected). Each with what the sheet switches with its dot: `slug`, `label`, `swatch`, `lookbook`, `name`, `type`, `collection`, `coverUrl`, `gallery`, `specs`, `care`, `discontinuedYear`, and a RESERVED one's `salon` (§10.9: its price and tier, and through the club the account's own request); empty for a model alone. |
+| `sizes` | (N3, addition 8) The sizes of the models of its group the reader may see, from their SKUs, as a list's `sizes`. |
 
 A PUBLIC sheet carries no `salon` (§10.9). A HIDDEN or RESERVED model, an unknown or malformed address: one **`404 LOOKBOOK_NOT_FOUND`** (*This model is not in the ORBES collection.*), `no-store`, so a model shown later is seen at once. Errors: `400 BAD_REQUEST` (an address over 128 characters, §1.2), `404 LOOKBOOK_NOT_FOUND`, `429 RATE_LIMITED`.
 
@@ -1671,6 +1676,7 @@ The caller's current products, newest acquisition first.
       },
       "warranty": { "status": "ACTIVE", "startDate": "2026-10-01", "endDate": "2028-10-01" },
       "imageUrl": "/api/v1/media/9f2c4e…",
+      "lookbook": "monolithe",
       "care": "Polish with a soft dry cloth."
     }
   ]
@@ -1683,6 +1689,7 @@ The caller's current products, newest acquisition first.
 | `modelVariant` | (plan NOCTURNE, N1) The model's label among its variants (« Blue »: the piece is a MONOLITHE in blue), or `null`. |
 | `variant` | The piece's free-text field set at issuance, its size (SIZE since NOCTURNE N1; a value written before as it is), or `null`. |
 | `imageUrl` | The model's reference photograph (F-04, §8.6), or its variant's, or `null`: MY PIECES shows it as an authentic result does, on its ivory plate under the piece's GENOME, with its alternative text (BRAND §5). Never the piece's own photograph (plan NOCTURNE, decision 9; §9.2). Not on an ownership certificate (§8.7), which attests a record, not an object. |
+| `lookbook` | (plan NOCTURNE, N3) The `<slug>` of its model's lookbook sheet (§8.8) when the model is PUBLIC there, else `null` (a RESERVED model is the owners' and stays unnamed, as on a result): NOW counts the account's pieces of a model and its variants by it (*You own two: steel and gold*). |
 | `care` | (P-M02) The model's care instructions as they are now (read live), or `null`: the CARE tab of MY PIECES then shows the general care text of /verify (`DEFAULT_CARE`). The ownership certificate (§8.7) does not show it. |
 | `acquiredVia` | `FIRST_REGISTRATION` or `TRANSFER`. |
 | `verified` | Ownership proven by claim code or confirmed by client services. |
@@ -1696,7 +1703,7 @@ The caller's current products, newest acquisition first.
 
 Errors: `401 UNAUTHORIZED`.
 
-In the verify app, this list is **MY PIECES** (`/verify/pieces`, F-01; BRAND-DESIGN-SYSTEM §5): each piece on its ivory plate with its GENOME in orbit (drawn from `glyphs`, checked against `fingerprint`; the glyph ids are `pattern` split at `·`), the product lines, then the tabs OWNERSHIP (since when, how it was acquired, whether the ownership is verified, a pending transfer, which CANCEL TRANSFER withdraws, §11.4, REPORT LOST / STOLEN or PIECE FOUND, §11.5–§11.6, and OWNERSHIP CERTIFICATE, the links of §11.7 with the open ones listed, F-06), WARRANTY, SERVICE (§10.6) and CARE (P-M02: CARING FOR THIS PIECE, the model's `care` or the general care text, then ORBES CARE, its three lines, and SUBSCRIBE when `careSubscribeUrl` is published, §8.4, else *Subscriptions open soon.*). The page reads the open certificate links with the pieces (`GET /api/v1/ownership/certificates`); when they cannot be read, the pieces still show and each says so, with TRY AGAIN, and keeps saying so after a link is created (the list is read again then; a creation never stands for the whole list, whose other links could not be withdrawn). After a report, a withdrawal or a cancelled transfer, the page reads the list again and shows the piece as the server now holds it. Signed out, the page offers the sign-in first: an owner whose piece is lost or stolen reaches it without scanning the piece. The landing links to it, and so does the signed-in account line of a result's OWNERSHIP tab.
+In the verify app, this list is **MY PIECES** (`/verify/pieces`, F-01; BRAND-DESIGN-SYSTEM §5): each piece on its ivory plate with its GENOME in orbit (drawn from `glyphs`, checked against `fingerprint`; the glyph ids are `pattern` split at `·`), the product lines, then the tabs OWNERSHIP (since when, how it was acquired, whether the ownership is verified, a pending transfer, which CANCEL TRANSFER withdraws, §11.4, REPORT LOST / STOLEN or PIECE FOUND, §11.5–§11.6, and OWNERSHIP CERTIFICATE, the links of §11.7 with the open ones listed, F-06), WARRANTY, SERVICE (§10.6) and CARE (P-M02: CARING FOR THIS PIECE, the model's `care` or the general care text, then ORBES CARE, its three lines, and SUBSCRIBE when `careSubscribeUrl` is published, §8.4, else *Subscriptions open soon.*). The page reads the open certificate links with the pieces (`GET /api/v1/ownership/certificates`); when they cannot be read, the pieces still show and each says so, with TRY AGAIN, and keeps saying so after a link is created (the list is read again then; a creation never stands for the whole list, whose other links could not be withdrawn). After a report, a withdrawal or a cancelled transfer, the page reads the list again and shows the piece as the server now holds it. Signed out, the page offers the sign-in first: an owner whose piece is lost or stolen reaches it without scanning the piece. NOW links to it (its YOUR PIECES, signed in; under the scan, signed out: plan NOCTURNE, N3), and so does the signed-in account line of a result's OWNERSHIP tab.
 
 ### 10.6 `GET /api/v1/products/:productId/service-history`
 
@@ -1903,7 +1910,7 @@ Errors: `400 VALIDATION_FAILED` (a body with fields), `401 UNAUTHORIZED`, `403 C
 
 The **owners' circle** (P-X01; `routes/club.ts`, `services/circle.ts`): what ORBES publishes for the owners of a piece, by tier. A post is a **NOTE** (text and photographs), an **INVITATION** (an event, answered YES or NO within its places) or a **POLL** (2 to 6 options, one vote per account). The club's rules hold (§10.9): an account session (`401 UNAUTHORIZED` without one), the POSTs under the CSRF rules and the same-origin check of §2.2, every answer `no-store`, rate group `api`. The reader must hold a piece **now**, counted as the club counts them (`tierOf`, read again at every request: the circle goes with the last piece): otherwise **`403 OWNERS_ONLY`**. Each post is read from its `minTier` up (1 TITANE, every owner; 2 PLATINE and PALLADIUM; 3 PALLADIUM): below it, withdrawn (unpublished), unknown or malformed, one **`404 CIRCLE_POST_NOT_FOUND`** (*This post is not in the circle.*).
 
-**`GET /api/v1/club/circle?page&pageSize`, 200**: the feed, the posts published for the reader's tier, the latest first, paginated (§6, but **20 by default and 50 at most**, `CIRCLE_FEED_PAGE`), **without their bodies** (the verify client refuses an answer over 256 000 characters).
+**`GET /api/v1/club/circle?page&pageSize&visit`, 200**: the feed, the posts published for the reader's tier, the latest first, paginated (§6, but **20 by default and 50 at most**, `CIRCLE_FEED_PAGE`), **without their bodies** (the verify client refuses an answer over 256 000 characters).
 
 ```json
 {
@@ -1918,7 +1925,8 @@ The **owners' circle** (P-X01; `routes/club.ts`, `services/circle.ts`): what ORB
       "eventAt": "2026-11-12T18:30:00.000Z",
       "eventPlace": "ORBES atelier, Paris",
       "answer": "YES",
-      "voted": false
+      "voted": false,
+      "invitation": { "capacity": 12, "placesLeft": 3, "open": true }
     }
   ],
   "page": 1,
@@ -1927,7 +1935,7 @@ The **owners' circle** (P-X01; `routes/club.ts`, `services/circle.ts`): what ORB
 }
 ```
 
-`cover`: the post's first photograph (`alt` `null`: the post's default), or `null`. `eventAt` and `eventPlace`: an invitation's event, `null` for another kind. `answer`: the reader's answer to an invitation (`YES`, `NO`, or `null`). `voted`: whether the reader voted in a poll. The **first page** adds one to the day's count of visits (`circle_daily_visits`, UTC day), which records no account, no address and no device; a count that fails is logged and the feed still answers.
+`cover`: the post's first photograph (`alt` `null`: the post's default), or `null`. `eventAt` and `eventPlace`: an invitation's event, `null` for another kind. `answer`: the reader's answer to an invitation (`YES`, `NO`, or `null`). `voted`: whether the reader voted in a poll. `invitation` (plan NOCTURNE, addition 6): an invitation's `capacity` (`null`: no limit), `placesLeft` (the places not answered YES, `null` without a limit) and `open` (answers are taken until `eventAt`), as the post gives them, so its card in the feed and on NOW answers YES / NO by `…/rsvp` and its rules; `null` for another kind. The **first page** adds one to the day's count of visits (`circle_daily_visits`, UTC day), which records no account, no address and no device; a count that fails is logged and the feed still answers. With `visit=0` it adds none: NOW reads the feed for its next invitation, which is no visit to the circle.
 
 **`GET /api/v1/club/circle/:id`, 200**: a post (`CirclePostView`): the card above, and
 

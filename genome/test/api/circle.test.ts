@@ -332,7 +332,9 @@ describe('the owners\' circle (P-X01)', () => {
     expect(seen.items.slice(0, 2).map((p) => p.id)).toEqual([forPlatine.id, forAll.id]);
     expect(seen.items.map((p) => p.id)).not.toContain(draft.id);
     // No body in the feed: a post carries it.
-    for (const p of seen.items) expect(Object.keys(p).sort()).toEqual(['answer', 'cover', 'eventAt', 'eventPlace', 'id', 'kind', 'minTier', 'publishedAt', 'title', 'voted']);
+    // NOCTURNE (addition 6): an invitation's places and whether answers are open; null for another kind.
+    for (const p of seen.items) expect(Object.keys(p).sort()).toEqual(['answer', 'cover', 'eventAt', 'eventPlace', 'id', 'invitation', 'kind', 'minTier', 'publishedAt', 'title', 'voted']);
+    for (const p of seen.items) if (p.kind !== 'INVITATION') expect((p as { invitation?: unknown }).invitation).toBeNull();
     expect((await read(titane.client, forAll.id)).body).toBe(forAll.body);
     // Below its tier, unpublished, unknown or malformed: one 404.
     for (const id of [forPlatine.id, draft.id, '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', 'nope']) {
@@ -455,6 +457,10 @@ describe('the owners\' circle (P-X01)', () => {
     expect(await yesCount()).toBe(2);
     expect(errorOf(await rsvp(first.client, 'YES')).code).toBe('CIRCLE_FULL');
     expect((await feed(first.client)).items.find((p) => p.id === invitation.id)).toMatchObject({ answer: 'NO', eventAt: invitation.eventAt, eventPlace: 'Paris' });
+    // NOCTURNE (addition 6): the feed carries each invitation's places, its capacity and whether answers are open, as
+    // the post does, so its card answers YES / NO by the same route and rules.
+    expect((await feed(first.client)).items.find((p) => p.id === invitation.id)).toMatchObject({ invitation: { capacity: 2, placesLeft: 0, open: true } });
+    expect((await feed(late.client)).items.find((p) => p.id === invitation.id)).toMatchObject({ answer: 'YES', invitation: { capacity: 2, placesLeft: 0, open: true } });
 
     // Audited for each change, the account as actor; never its email.
     const audited = await audits('circle.rsvp', invitation.id);
@@ -522,6 +528,9 @@ describe('the owners\' circle (P-X01)', () => {
     expect((await m.client.get(`/api/v1/club/circle/${post.id}`)).statusCode).toBe(404);
     await publish(post.id);
     await read(m.client, post.id);
+    expect(await visits()).toEqual([[today, 2]]);
+    // NOW's read of its next invitation (visit=0, plan NOCTURNE N3) is no visit to the circle.
+    await feed(m.client, '?page=1&pageSize=50&visit=0');
     expect(await visits()).toEqual([[today, 2]]);
     // A refused reader is no visit.
     await (await accountClient(h)).client.get('/api/v1/club/circle');

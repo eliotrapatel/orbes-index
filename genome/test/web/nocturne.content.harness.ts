@@ -114,11 +114,67 @@ function tierMoves(): Moved[] {
 /** The states whose PRODUCT tab named the field set at issuance VARIANT. */
 const SIZE_STATES = ['result-first-registration-product', 'result-ownership-verified-product', 'result-ceremony'];
 
+/** NOW's states (N3), and the account sheet's over NOW: the landing they showed until then gave way to NOW (plan NOCTURNE, screen 1). */
+const NOW_STATES = [
+  'now-signed-out',
+  'now-signed-in',
+  'now-draw-leads',
+  'now-draw-soon',
+  'now-draw-early',
+  'now-collection-leads',
+  'now-collection-leads-signed-out',
+  'now-room-open',
+  'now-live',
+  'now-empty',
+  'now-stress',
+  // The account sheet over NOW (C2): the page under it.
+  'account-sheet',
+  'account-sheet-club',
+  'account-sheet-stress',
+  'account-sheet-password',
+];
+
+/** NOW's states whose banner counted down to a LIVE RELEASE announced (its hours past 24 a day or more ahead). */
+const NOW_COUNTDOWN_STATES = ['now-signed-out', 'now-signed-in', 'account-sheet-club', 'account-sheet-password'];
+
+function nowMoves(): Moved[] {
+  const baseline = readBaseline();
+  const has = (state: string, value: string) => (baseline.states[state]?.values ?? []).includes(value);
+  return [
+    ...NOW_STATES.filter((state) => has(state, 'AUTHENTICATION')).map((state) => ({
+      state,
+      value: 'AUTHENTICATION',
+      reason: 'N3 (plan screen 1, C1, C10, C42, C43): NOW replaces the landing, whose title read ORBES AUTHENTICATION over the resting orbit.',
+      now: 'Removed with the landing: the header says ORBES on every screen, and NOW opens on what leads (a release, a draw, the newest model), YOUR PIECES or the scan.',
+    })),
+    ...NOW_STATES.filter((state) => has(state, 'THE RELEASES')).map((state) => ({
+      state,
+      value: 'THE RELEASES',
+      reason: 'N3: the landing\'s text link to THE RELEASES gave way to the rail of chapters (N2) and to NOW\'s release itself (C1, C42).',
+      now: 'The rail\'s RELEASES on every screen, with its dot while a release is announced; SEE THE RELEASE on what leads NOW.',
+    })),
+    ...NOW_STATES.filter((state) => has(state, 'THE COLLECTION') && state === 'now-empty').map((state) => ({
+      state,
+      value: 'THE COLLECTION',
+      reason: 'N3: with no model shown, NOW has no photograph of the collection to show, nor its link under it (plan: NOW then opens on YOUR PIECES or the scan).',
+      now: 'The rail\'s COLLECTION, on every screen: THE COLLECTION and its sentence for a collection with no model yet.',
+    })),
+    ...NOW_COUNTDOWN_STATES.filter((state) => has(state, '74:11:00')).map((state) => ({
+      state,
+      value: '74:11:00',
+      reason: 'N3 (C1, C10): on NOW the LIVE RELEASE announced leads the page itself, so its banner is MY PIECES\' alone (C3); its countdown is the hero\'s.',
+      now: 'The hero of NOW: OPENS IN and the same time to the opening, in days, hours and minutes (03 · 02 · 11).',
+      shownAs: ['OPENS IN', 'DAYS', 'HOURS', 'MINUTES'],
+    })),
+  ];
+}
+
 /**
  * The values NOCTURNE moves or removes on purpose, step by step. N1: THIS PIECE and the sentence for two photographs
  * (decision 9: the piece's own photograph leaves every collector's screen and answer; the model's alone stays,
  * captioned THE MODEL, with the sentence for one), and VARIANT (the field set at issuance renamed Size). N2: YOUR TIER
- * (decision 10: moved from MY PIECES to the account sheet), and a page's failure said on two lines (C40).
+ * (decision 10: moved from MY PIECES to the account sheet), and a page's failure said on two lines (C40). N3: the landing
+ * replaced by NOW (its title, its links to THE RELEASES and, with no model shown, to THE COLLECTION; the banner's countdown).
  */
 export const MOVED: readonly Moved[] = [
   ...PIECE_PHOTO_STATES.flatMap((state) => [
@@ -142,6 +198,7 @@ export const MOVED: readonly Moved[] = [
     now: 'The same row and value, labelled SIZE.',
   })),
   ...tierMoves(),
+  ...nowMoves(),
   {
     state: 'pieces-failed',
     value: 'Your pieces could not be shown just now. The ORBES service could not be reached. Check your connection, then try again.',

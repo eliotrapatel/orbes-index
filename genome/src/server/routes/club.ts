@@ -22,7 +22,8 @@
  * P-X01, the circle (services/circle.ts: an account that holds a piece now,
  * each post from its tier up):
  *
- *   GET  /api/v1/club/circle                the feed, paginated, without the posts' bodies (its first page counts a visit)
+ *   GET  /api/v1/club/circle                the feed, paginated, without the posts' bodies (its first page counts a visit,
+ *                                            but with visit=0: NOW's read of its next invitation)
  *   GET  /api/v1/club/circle/:id            a post (404 below its tier)
  *   POST /api/v1/club/circle/:id/rsvp       YES or NO to an invitation, within its capacity
  *   POST /api/v1/club/circle/:id/vote       one vote in a poll, final; its results then shown
@@ -38,7 +39,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../http/rate-limit.js';
 import { circleRsvpBody, circleVoteBody, emptyBody, lookbookParams, parse, publicCircleParams, publicDropParams, salonRequestBody } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
-import { circleFeedPage } from '../services/circle.js';
+import { circleFeedPage, circleFeedVisit } from '../services/circle.js';
 import type { RouteDeps } from './public.js';
 
 export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
@@ -104,7 +105,7 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
   // P-X01: the circle, for an account that holds a piece now; each post from its tier up.
   app.get('/api/v1/club/circle', async (request) => {
     const { account } = requireAccount(request);
-    return circle.feed(account.id, circleFeedPage(request.query));
+    return circle.feed(account.id, circleFeedPage(request.query), { visit: circleFeedVisit(request.query) });
   });
 
   app.get('/api/v1/club/circle/:id', async (request) => {

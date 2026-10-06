@@ -67,6 +67,8 @@ interface Sheet {
   /** NOCTURNE N1: its own dot and its group's dots. */
   variant: unknown;
   variants: unknown[];
+  /** NOCTURNE N3: its sizes, from the SKUs of the model and its variants. */
+  sizes: string[];
 }
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -292,7 +294,8 @@ describe('the lookbook of the models (P-R02)', () => {
       [null, 'aurore'],
     ]);
     // NOCTURNE N1: its own dot and its group's dots (none for a model alone).
-    for (const c of models) expect(Object.keys(c).sort()).toEqual(['category', 'collection', 'imageUrl', 'name', 'slug', 'type', 'variant', 'variants']);
+    // NOCTURNE N3: when it was last published (NOW leads with the newest) and its sizes from its SKUs.
+    for (const c of models) expect(Object.keys(c).sort()).toEqual(['category', 'collection', 'imageUrl', 'name', 'publishedAt', 'sizes', 'slug', 'type', 'variant', 'variants']);
     for (const c of models) expect([c.variant, c.variants]).toEqual([null, []]);
     const mono = models.find((c) => c.slug === 'monolithe-ring')!;
     expect(mono).toMatchObject({ name: 'MONOLITHE', type: 'RING', category: { code: 'J', name: 'Jewelry' } });
@@ -325,6 +328,8 @@ describe('the lookbook of the models (P-R02)', () => {
       discontinuedYear: null,
       variant: null,
       variants: [],
+      // NOCTURNE N3 (addition 8): its sizes from its SKUs; its piece issued in one size names none.
+      sizes: [],
     } satisfies Sheet);
     // A RESERVED or HIDDEN model, an unknown or malformed address: one 404, never cached.
     for (const slug of ['zenith', 'nope', 'Not an address', '-x']) {

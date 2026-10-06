@@ -324,7 +324,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.evaluate(() => document.fonts.ready);
     expect(await page.evaluate(() => [...document.fonts].filter((f) => f.family.replace(/"/g, '') === 'Gravesend Sans').map((f) => f.status))).toEqual(['loaded']);
     const family = (selector: string) => page.locator(selector).first().evaluate((el) => getComputedStyle(el).fontFamily);
-    for (const selector of ['.landing__wordmark', '.landing__sub', '.landing__scan', '.landing__upload']) {
+    // NOW (N3): the header's wordmark, the rail, SCAN ORBES CODE and UPLOAD A PHOTO.
+    await page.locator('.view--now[data-ready]').waitFor();
+    for (const selector of ['.n-wm', '.n-rail__link', '.landing__scan', '.landing__upload']) {
       expect(await family(selector), selector).toMatch(/^"?Gravesend Sans"?,\s*"?Helvetica Neue"?/);
     }
     expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
@@ -337,46 +339,33 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
   it('verifies an uploaded photo of an issued code: AUTHENTIC with its product id', async () => {
     const { page, problems } = await openVerify(browser, srv);
-    // Landing, after its entrance has settled.
-    await textOf(page.locator('h1'), /ORBES\s*AUTHENTICATION/);
-    await page.waitForTimeout(2_400);
-    // The monogram over the typed word, inside the resting orbit: the master's five outlines in ink,
-    // 76 px wide on this 390 px phone, centred, decorative (the heading says ORBES in words, once).
-    const monogram = page.locator('h1 svg.monogram.landing__monogram');
-    await countOf(monogram.locator('path'), 5);
-    await attrOf(monogram, 'aria-hidden', 'true');
-    // The one image named ORBES is NOCTURNE's footer's monogram (as the canvas names it); the heading's is decorative.
+    // NOW (N3), in place of the landing: nothing announced and no model shown here, so it opens on the scan, the page
+    // named NOW (no hero, no title of its own); the header says ORBES.
+    await page.locator('.view--now[data-ready]').waitFor();
+    await attrOf(page.locator('main.view--now'), 'aria-label', 'NOW');
+    expect(await page.locator('.view--now > section').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(['Scan']);
+    await textOf(page.locator('header.n-hd .n-wm'), 'ORBES');
+    // The one image named ORBES is NOCTURNE's footer's monogram (as the canvas names it); the header's is decorative.
     await countOf(page.getByRole('img', { name: 'ORBES' }), 1);
     await countOf(page.locator('footer.n-foot').getByRole('img', { name: 'ORBES' }), 1);
+    const footMono = page.locator('footer.n-foot svg.monogram');
     // In the ink of its context: ivory on NOCTURNE's ground.
-    expect(await monogram.evaluate((el) => getComputedStyle(el).fill)).toBe('rgb(246, 242, 234)');
-    const mono = (await monogram.boundingBox())!;
-    const word = (await page.locator('.landing__wordmark').boundingBox())!;
-    const emblem = (await page.locator('.landing__emblem').boundingBox())!;
-    expect(mono.width).toBeCloseTo(0.195 * MOBILE_VIEWPORT.width, 0);
-    expect(mono.height / mono.width).toBeCloseTo(316.54 / 414.42, 2);
-    expect(mono.x + mono.width / 2).toBeCloseTo(MOBILE_VIEWPORT.width / 2, 0);
-    expect(mono.y + mono.height + 24).toBeCloseTo(word.y, 0);
-    expect(mono.y).toBeGreaterThan(emblem.y);
+    expect(await footMono.evaluate((el) => getComputedStyle(el).fill)).toBe('rgb(246, 242, 234)');
     await page.screenshot({ path: join(OUT_DIR, 'verify-landing.png') });
     await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', ...LEGAL_LINKS]);
-    // A phone held sideways, and a short portrait phone: the heading (monogram, word, AUTHENTICATION) stays inside
-    // the emblem, whose size follows the height there, so it never reaches the resting orbit's ring.
+    // A phone held sideways, a short portrait phone and the smallest in use: the scan and its link stay whole, the page
+    // never scrolls sideways.
     for (const viewport of [
       { width: 844, height: 390 },
       { width: 667, height: 375 },
       { width: 320, height: 568 },
     ]) {
       await page.setViewportSize(viewport);
-      const box = (await page.locator('.landing__emblem').boundingBox())!;
-      const heading = (await page.locator('h1.landing__title').boundingBox())!;
       const where = `${viewport.width} × ${viewport.height}`;
-      expect(heading.y, where).toBeGreaterThanOrEqual(box.y - 0.5);
-      expect(heading.y + heading.height, where).toBeLessThanOrEqual(box.y + box.height + 0.5);
-      expect((await monogram.boundingBox())!.width, where).toBeGreaterThan(30);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), where).toBe(true);
+      await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO']);
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
-    expect((await monogram.boundingBox())!.width).toBeCloseTo(0.195 * MOBILE_VIEWPORT.width, 0);
 
     await uploadPhoto(page, writeCodePng(srv.workDir, 'plain.png', plain));
     expect(await resultTitle(page)).toBe('AUTHENTIC');
@@ -462,7 +451,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Words in the display face, under the screen and its actions, in the page's flow.
     const privacy = footer.getByRole('link', { name: 'PRIVACY' });
     expect(await privacy.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?/);
-    const actions = (await page.locator('.landing__actions').boundingBox())!;
+    const actions = (await page.locator('section[aria-label="Scan"]').boundingBox())!;
     const links = (await footer.locator('.n-fl').boundingBox())!;
     const copyright = (await footer.locator('.n-cr').boundingBox())!;
     expect(links.y).toBeGreaterThan(actions.y + actions.height);
@@ -518,7 +507,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(toggle, 'SOUND ON');
     expect(await toggle.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?/);
     const box = (await toggle.boundingBox())!;
-    expect(box.y).toBeGreaterThan((await page.locator('.landing__actions').boundingBox())!.y);
+    expect(box.y).toBeGreaterThan((await page.locator('section[aria-label="Scan"]').boundingBox())!.y);
     const fl = (await page.locator('footer.n-foot .n-fl').boundingBox())!;
     expect(box.y).toBeGreaterThanOrEqual(fl.y + fl.height);
     await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'SOUND ON', ...LEGAL_LINKS]);
@@ -1096,7 +1085,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Back leaves MY PIECES (it took the result's place in the history) for the landing.
     await page.goBack();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).first().waitFor();
-    await textOf(page.locator('h1'), /ORBES\s*AUTHENTICATION/);
+    // NOW (N3), in place of the landing.
+    await page.locator('.view--now[data-ready]').waitFor();
     expect(new URL(page.url()).pathname).toBe('/verify');
     expect(problems).toEqual([]);
     await page.context().close();
@@ -1346,7 +1336,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // Back returns to the landing (MY PIECES sat in one entry above it).
     await page.goBack();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).first().waitFor();
-    await textOf(page.locator('h1'), /ORBES\s*AUTHENTICATION/);
+    // NOW (N3), in place of the landing.
+    await page.locator('.view--now[data-ready]').waitFor();
     expect(new URL(page.url()).pathname).toBe('/verify');
     expect(problems).toEqual([]);
     await page.context().close();
@@ -1656,7 +1647,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await buyer.goto(`${srv.origin}/verify/c`);
     await textOf(buyer.locator('.certificate__state'), 'NOT FOUND');
     await buyer.goBack();
-    await textOf(buyer.locator('h1'), /ORBES\s*AUTHENTICATION/);
+    await buyer.locator('.view--now[data-ready]').waitFor();
     expect(new URL(buyer.url()).pathname).toBe('/verify');
     expect(new URL(buyer.url()).hash).toBe('');
     expect(buyerProblems).toEqual([]);
@@ -2188,11 +2179,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const issued = await srv.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: aurore.id, material: '925 STERLING SILVER', year: 2026 }, SYSTEM_ACTOR);
 
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
-    // The landing: THE COLLECTION, a text link under the actions, at once (no session needed).
-    const link = page.locator('.landing__actions').getByRole('link', { name: 'THE COLLECTION' });
+    // NOW (N3): nothing announced, the newest model of the collection leads it, SEE THE MODEL its sheet; THE COLLECTION
+    // is the rail's chapter, at once (no session needed).
+    await page.locator('.view--now[data-ready]').waitFor();
+    await textOf(page.locator('.now__hero h1'), 'AURORE');
+    await attrOf(page.locator('.now__hero').getByRole('link', { name: 'SEE THE MODEL' }), 'href', '/verify/lookbook/aurore');
+    const link = page.locator('.n-rail').getByRole('link', { name: 'COLLECTION' });
     await visible(link);
     await attrOf(link, 'href', '/verify/lookbook');
-    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'THE COLLECTION']);
+    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'SEE THE MODEL', 'COLLECTION']);
     await link.click();
     await textOf(page.locator('h1'), 'THE COLLECTION');
     expect(new URL(page.url()).pathname).toBe('/verify/lookbook');
@@ -2390,11 +2385,17 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     }
 
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
-    // The landing: THE RELEASES, a text link under THE COLLECTION.
-    const link = page.locator('.landing__actions').getByRole('link', { name: 'THE RELEASES' });
+    // NOW (N3): the draw open leads it (no LIVE RELEASE announced), SEE THE RELEASE its page; THE RELEASES is the rail's
+    // chapter, with its dot.
+    await page.locator('.view--now[data-ready]').waitFor();
+    await textOf(page.locator('.now__hero .n-lift > p').first(), 'DRAW · ENTRIES OPEN');
+    await textOf(page.locator('.now__hero h1'), 'ECLIPSE — RELEASE I');
+    await attrOf(page.locator('.now__hero').getByRole('link', { name: 'SEE THE RELEASE' }), 'href', `/verify/releases/${drop.id}`);
+    const link = page.locator('.n-rail').getByRole('link', { name: 'RELEASES' });
     await visible(link);
     await attrOf(link, 'href', '/verify/releases');
-    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'THE COLLECTION', 'THE RELEASES']);
+    await expect.poll(() => link.locator('.n-rail__live').isVisible(), POLL).toBe(true);
+    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'SEE THE RELEASE', 'RELEASES']);
     await link.click();
     await textOf(page.locator('h1'), 'THE RELEASES');
     expect(new URL(page.url()).pathname).toBe('/verify/releases');

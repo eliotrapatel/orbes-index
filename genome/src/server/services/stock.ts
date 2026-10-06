@@ -98,6 +98,35 @@ export function sizeLabelOf(label: string | null | undefined): string | null {
   return t === '' || t.toUpperCase() === ONE_SIZE_LABEL ? null : t;
 }
 
+/** Sizes in the order a client reads them: ONE SIZE (null) first, then naturally (48, 50, 52; S, M, L as written). */
+export function compareSizes(a: string | null, b: string | null): number {
+  if (a === b) return 0;
+  if (a === null) return -1;
+  if (b === null) return 1;
+  return a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' }) || a.localeCompare(b);
+}
+
+/**
+ * The sizes of models from their SKUs (plan NOCTURNE, addition 8: SIZES 16 · 17 · 18), by model id: each size label once
+ * whatever its case (the first written kept), in compareSizes' order; a SKU in one size (null) names no size. A model
+ * without a SKU has none.
+ */
+export async function skuSizes(db: Db, modelIds: readonly string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (modelIds.length === 0) return out;
+  const rows = await db.selectFrom('skus').select(['model_id', 'size_label']).where('model_id', 'in', [...modelIds]).orderBy('created_at').orderBy('id').execute();
+  for (const r of rows) if (r.size_label !== null) out.set(r.model_id, [...(out.get(r.model_id) ?? []), r.size_label]);
+  for (const [id, sizes] of out) out.set(id, sizesOnce(sizes));
+  return out;
+}
+
+/** Size labels once each whatever their case (the first kept), in compareSizes' order: the sizes of a model and its variants together. */
+export function sizesOnce(sizes: Iterable<string>): string[] {
+  const seen = new Map<string, string>();
+  for (const s of sizes) if (!seen.has(s.toUpperCase())) seen.set(s.toUpperCase(), s);
+  return [...seen.values()].sort(compareSizes);
+}
+
 /** sizeLabelOf in SQL, over a column of text (a piece's variant). */
 const sizeLabelSql = (column: string) =>
   sql<string | null>`(CASE WHEN upper(btrim(left(btrim(${sql.ref(column)}), ${SIZE_LABEL_MAX}))) = ${ONE_SIZE_LABEL} THEN NULL ELSE nullif(btrim(left(btrim(${sql.ref(column)}), ${SIZE_LABEL_MAX})), '') END)`;

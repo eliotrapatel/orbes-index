@@ -186,6 +186,8 @@ export interface OwnedPiece {
   warranty: { status: WarrantyStatus; startDate?: string; endDate?: string };
   /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`, or null; never the piece's own (decision 9). */
   imageUrl: string | null;
+  /** NOCTURNE N3: its model's lookbook sheet (`<slug>`) when the model is PUBLIC there, else null. */
+  lookbook?: string | null;
   /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
   care: string | null;
 }
@@ -288,6 +290,10 @@ export interface LookbookCard {
   variant?: VariantDot | null;
   /** NOCTURNE N1: the dots of its group shown in this list, the main model first; empty for a model alone. */
   variants?: LookbookCardVariant[];
+  /** NOCTURNE N3: the latest first shown of its models in this list (NOW leads with the newest), or null. */
+  publishedAt?: string | null;
+  /** NOCTURNE N3 (addition 8): the sizes of its models, from their SKUs (`16`, `17`, `18`); none in one size. */
+  sizes?: string[];
 }
 
 /** A model's dot among its variants (NOCTURNE N1): its label (« Steel ») and colour (#RRGGBB). */
@@ -304,6 +310,8 @@ export interface LookbookCardVariant extends VariantDot {
   imageUrl: string | null;
   priceLabel?: string | null;
   minTier?: number;
+  /** NOCTURNE N3: when it was first shown, or null. */
+  publishedAt?: string | null;
 }
 
 /** A model of a sheet's group (NOCTURNE N1): what the sheet switches to with its dot. */
@@ -359,6 +367,8 @@ export interface LookbookSheet {
   variant?: VariantDot | null;
   /** NOCTURNE N1: the dots of its group the reader may see, the main model first, this one `selected`; empty for a model alone. */
   variants?: LookbookSheetVariant[];
+  /** NOCTURNE N3 (addition 8): the sizes of the models of its group, from their SKUs; none in one size. */
+  sizes?: string[];
 }
 
 /** A release's state as the public reads it (P-R03): a DRAFT is never sent. */
@@ -557,6 +567,8 @@ export interface CircleCard {
   answer: CircleAnswer | null;
   /** Whether the reader voted in a poll. */
   voted: boolean;
+  /** NOCTURNE (addition 6): an invitation's places (`placesLeft` of `capacity`, null without a limit) and whether answers are open. */
+  invitation?: { capacity: number | null; placesLeft: number | null; open: boolean } | null;
 }
 
 /** A page of the feed. */

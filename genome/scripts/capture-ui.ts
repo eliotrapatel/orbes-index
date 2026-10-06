@@ -869,8 +869,9 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     await ctx.services.media.setLiveSilhouette(planned.id, { mime: 'image/webp', bytes: silhouette }, f.admin);
     await db.updateTable('drops').set({ silhouette_at: new Date(Date.now() + 2 * day), name_at: new Date(Date.now() + 4 * day), photo_at: new Date(Date.now() + 6 * day) }).where('id', '=', planned.id).execute();
 
+    // The banner is MY PIECES' (NOCTURNE N3: on NOW, the release leads the page itself).
     const { context: landing, page: home } = await phone(null, 'live-banner');
-    await home.goto(`${origin}/verify`);
+    await home.goto(`${origin}/verify/pieces`);
     await home.waitForSelector('a.live-banner');
     await settle(home, 3_200);
     await shots.viewport(home, 'live-01-banner');

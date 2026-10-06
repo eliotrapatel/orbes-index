@@ -310,7 +310,7 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     expect(px(rule(styles, '.genome__meta')['font-size'])).toBeGreaterThanOrEqual(10);
     // The views set these lines with the 10 px .micro class: the closing time of registration, the
     // transfer code's labels and validity, the signed-in account, the GENOME fingerprint.
-    const views = ['views/ownership.ts', 'views/pieces.ts', 'views/certificate.ts', 'views/landing.ts', 'views/scanning.ts', 'views/result.ts', 'views/message.ts', 'views/panels.ts', 'views/tabs.ts', 'genome-view.ts', 'main.ts'];
+    const views = ['views/ownership.ts', 'views/pieces.ts', 'views/certificate.ts', 'views/now.ts', 'views/scanning.ts', 'views/result.ts', 'views/message.ts', 'views/panels.ts', 'views/tabs.ts', 'genome-view.ts', 'main.ts'];
     const classes = views.flatMap((f) => [...readFileSync(join(WEB, 'verify', f), 'utf8').matchAll(/class: '([^']+)'/g)].map((m) => m[1]));
     for (const line of ['ownership__meta', 'transfer-code__label', 'certificate-link__label', 'certificate__footnote', 'ownership__who', 'genome__meta']) {
       const set = classes.filter((c) => c.split(' ').includes(line) && !c.split(' ').includes('prose'));
@@ -386,7 +386,7 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.landing__sub', '.n-g', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.pieces__order-title', '.pieces__order-step-label', '.pieces__order-documents-title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option', '.ceremony__name', '.ceremony__collection', '.live__surprise', '.question__label', '.question__release', '.question__text'];
+  const VERIFY_DISPLAY = ['.n-g', '.scan__status', '.scan__control', '.verifying__status', '.message__title', '.result__title', '.pieces__title', '.pieces__order-title', '.pieces__order-step-label', '.pieces__order-documents-title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.result__card-title', '.report__title', '.report__status', '.auth__option', '.ceremony__name', '.ceremony__collection', '.live__surprise', '.question__label', '.question__release', '.question__text'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
@@ -459,19 +459,25 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
 });
 
 describe('verify app: the monogram beside the word ORBES (BRAND-DESIGN-SYSTEM §3.9, §8 item 1)', () => {
-  const landing = readFileSync(join(WEB, 'verify/views/landing.ts'), 'utf8');
+  const shell = readFileSync(join(WEB, 'verify/views/shell.ts'), 'utf8');
 
-  it('puts the monogram over the typed wordmark of the landing, inside the heading and decorative there', () => {
-    const title = landing.slice(landing.indexOf("{ class: 'landing__title', id: 'landing-title' }"), landing.indexOf("'AUTHENTICATION'"));
-    expect(title).toMatch(/monogramSvg\(\{ class: 'landing__monogram', decorative: true \}\),\s*h\('span', \{ class: 'wordmark landing__wordmark', text: 'ORBES' \}\)/);
-    expect(landing).toContain("import { monogramSvg } from '../../shared/monogram.js';");
-    // brand.css draws it as a block that keeps the ratio of its ink box; the landing sizes it and gives it its clear space.
+  it('sets the monogram beside the typed wordmark of the header (NOW replaced the landing, N3), decorative there', () => {
+    // The header: ORBES typed at its left; the account button's monogram at its right, decorative (its name is the
+    // button's: "Your account, TITANE", decision 11); the footer's names ORBES.
+    expect(shell).toContain("h('header', { class: 'n-hd' }, h('span', { class: 'n-g n-wm', text: 'ORBES' }), this.account, this.signIn)");
+    expect(shell).toMatch(/this\.accountText,\s*monogram\(28\),/);
+    const pieces = readFileSync(join(WEB, 'verify/views/nocturne.ts'), 'utf8');
+    expect(pieces).toContain("return monogramSvg({ class: `n-mono n-mono--${px}${opts.extraClass ? ` ${opts.extraClass}` : ''}`, decorative: !opts.label, artboard: true });");
+    expect(pieces).toContain('monogram(38, { label: true })');
+    // brand.css draws it as a block that keeps the ratio of its ink box.
     expect(rule(brand, '.monogram')).toMatchObject({ display: 'block', height: 'auto', 'aspect-ratio': `${MONOGRAM_BOUNDS.w} / ${MONOGRAM_BOUNDS.h}` });
-    expect(rule(styles, '.landing__monogram').width).toBe('min(clamp(64px, 19.5vw, 84px), var(--orbit) * 0.3)');
+    // NOW draws no emblem of its own: the landing's monogram over its word left with it.
+    expect(existsSync(join(WEB, 'verify/views/landing.ts'))).toBe(false);
+    expect(readFileSync(join(WEB, 'verify/views/now.ts'), 'utf8')).not.toMatch(/monogramSvg|monogram\(/);
   });
 
   it('keeps the word ORBES typed, in the display face, wherever it was: the emblem never replaces it', () => {
-    const views = { 'views/landing.ts': 'wordmark landing__wordmark', 'views/result.ts': 'wordmark wordmark--small result__wordmark', 'views/scanning.ts': 'wordmark wordmark--small scan__wordmark' };
+    const views = { 'views/result.ts': 'wordmark wordmark--small result__wordmark', 'views/scanning.ts': 'wordmark wordmark--small scan__wordmark' };
     for (const [file, cls] of Object.entries(views)) {
       expect(readFileSync(join(WEB, 'verify', file), 'utf8'), file).toMatch(new RegExp(`class: '${cls}'[^)]*text: 'ORBES'`));
     }
@@ -479,7 +485,6 @@ describe('verify app: the monogram beside the word ORBES (BRAND-DESIGN-SYSTEM §
     // The result and the scanner keep the word alone: they draw no emblem of their own (NOCTURNE's header sets the
     // monogram beside its typed ORBES, decision 11, and the GENOME's orbit holds it at its centre, decision 12).
     for (const file of ['views/result.ts', 'views/scanning.ts']) expect(readFileSync(join(WEB, 'verify', file), 'utf8'), file).not.toMatch(/monogramSvg|monogram\(/);
-    const shell = readFileSync(join(WEB, 'verify/views/shell.ts'), 'utf8');
     expect(shell).toContain("h('span', { class: 'n-g n-wm', text: 'ORBES' })");
   });
 });

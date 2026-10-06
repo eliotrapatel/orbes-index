@@ -6,7 +6,10 @@
  *  - The feed: each post's kind, title, day of publication, the tiers it is
  *    reserved to (above the first), its first photograph, an invitation's
  *    event (UTC), what the reader did (answered, voted), and its one text
- *    link, named after its kind.
+ *    link, named after its kind; an invitation's places left and the
+ *    reader's YES or NO (addition 6 of plan NOCTURNE: answered from the
+ *    feed and from NOW by the post's own route and rules, closed once the
+ *    event has begun, YES held back once every place is taken).
  *  - A post: its photographs (the operator's alternative text, else "TITLE,
  *    photographed by ORBES"), its body (shared/lookbook.ts draws its
  *    paragraphs), an invitation's facts (the time in UTC then on the phone's
@@ -107,6 +110,32 @@ export interface CircleCardModel {
   mine: string | null;
   /** READ THE NOTE, SEE THE INVITATION, SEE THE POLL. */
   linkLabel: string;
+  /** An invitation's places and the reader's answer, YES / NO on its card (NOCTURNE, addition 6); null for another kind. */
+  reply: InvitationReply | null;
+}
+
+/** An invitation's card: its places left, the reader's answer, and whether YES and NO are offered (NOCTURNE, addition 6). */
+export interface InvitationReply {
+  /** `3 LEFT OF 12`, `NONE LEFT OF 12`; null without a limit. */
+  places: string | null;
+  answer: CircleAnswer | null;
+  /** Answers are taken: the event has not begun. */
+  open: boolean;
+  /** Every place is taken, and the reader has not one of them: YES is held back. */
+  full: boolean;
+}
+
+/**
+ * The places and the answer of an invitation, by the post's own rules (circlePostModel): answers close when its event
+ * begins, and YES is held back once every place is taken by others.
+ */
+export function invitationReply(inv: { capacity?: unknown; placesLeft?: unknown; open?: unknown } | null | undefined, answer: unknown): InvitationReply | null {
+  if (!inv || typeof inv !== 'object') return null;
+  const capacity = typeof inv.capacity === 'number' && Number.isInteger(inv.capacity) ? inv.capacity : null;
+  const left = typeof inv.placesLeft === 'number' && Number.isInteger(inv.placesLeft) ? Math.max(0, inv.placesLeft) : null;
+  const mine = answer === 'YES' || answer === 'NO' ? answer : null;
+  const open = inv.open === true;
+  return { places: capacity !== null && left !== null ? CIRCLE.places(left, capacity) : null, answer: mine, open, full: open && left === 0 && mine !== 'YES' };
 }
 
 /** The posts of the feed, in the server's order; one without an id of its own is left out. */
@@ -128,6 +157,7 @@ export function circleCards(cards: readonly CircleCard[]): CircleCardModel[] {
       event: kind === 'INVITATION' ? eventLine(c.eventAt, c.eventPlace) : null,
       mine: kind === 'INVITATION' && (c.answer === 'YES' || c.answer === 'NO') ? CIRCLE.answered(c.answer) : kind === 'POLL' && c.voted === true ? CIRCLE.voted : null,
       linkLabel: CIRCLE.see[kind],
+      reply: kind === 'INVITATION' ? invitationReply(c.invitation, c.answer) : null,
     });
   }
   return out;
@@ -187,12 +217,8 @@ export function circlePostModel(p: CirclePost, offsetMinutes: number): CirclePos
     const when = twoClocks(inv.eventAt, offsetMinutes);
     const rows: ReleaseRow[] = [{ label: CIRCLE.rows.when, value: when.utc, local: when.local }];
     if (inv.place && inv.place.trim()) rows.push({ label: CIRCLE.rows.where, value: upper(inv.place) });
-    const capacity = typeof inv.capacity === 'number' ? inv.capacity : null;
-    const left = typeof inv.placesLeft === 'number' ? Math.max(0, inv.placesLeft) : null;
-    if (capacity !== null && left !== null) rows.push({ label: CIRCLE.rows.places, value: CIRCLE.places(left, capacity) });
-    const answer = p.answer === 'YES' || p.answer === 'NO' ? p.answer : null;
-    const open = inv.open === true;
-    const full = open && left === 0 && answer !== 'YES';
+    const { places, answer, open, full } = invitationReply(inv, p.answer)!;
+    if (places !== null) rows.push({ label: CIRCLE.rows.places, value: places });
     const a = CIRCLE.answer;
     invitation = {
       rows,

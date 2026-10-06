@@ -422,7 +422,9 @@ describe('SEE THE MODEL under an authentic result (P-R02)', () => {
 
 describe('the lookbook\'s copy', () => {
   it('writes no word of BRAND §4.5 (nor "product"), no exclamation mark, and DRAW never "lottery"', () => {
-    const lines = Object.values(LOOKBOOK).flatMap((v) => (typeof v === 'function' ? [String((v as (s: string) => string)('MONOLITHE'))] : [String(v)]));
+    // Each function said with what it takes: a name, or (NOCTURNE N3) the sizes and the pieces owned of a model.
+    const ARGS: Record<string, unknown[]> = { sizes: ['16', '17', '18'], youOwn: [2, 'steel', 'gold'] };
+    const lines = Object.entries(LOOKBOOK).flatMap(([k, v]) => (typeof v === 'function' ? [String((v as (...a: unknown[]) => string)(...(ARGS[k] ?? ['MONOLITHE'])))] : [String(v)]));
     expect(lines.length).toBeGreaterThan(10);
     expect(findForbidden(lines.join('\n'), [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
     expect(lines.join('\n')).not.toMatch(/!|lottery/i);

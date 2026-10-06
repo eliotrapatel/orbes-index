@@ -113,6 +113,17 @@ of the LIVE RELEASES.
 | `now-empty` | the landing, no banner | no model, no release, an account without a piece | C43, C40 |
 | `now-stress` | the banner with a 24-character name (since N2: on two lines as C3, the name whole) | the stress demo | same pieces |
 
+Since N3, NOW (views/now.ts) replaces the landing at `/verify`. What leads: a LIVE RELEASE announced, its room open or live
+(its photograph, LIVE RELEASE and its state, its title, type line, OPENS IN and its countdown, its day and hour in Paris,
+the quantity, per-collector and access lines, N COLLECTORS WILL BE THERE, SEE THE RELEASE), the draw open, soon open or in
+its early access under it as a plate card; else that draw as the hero (its state, title, model, price, pieces and time in
+UTC, then on this phone); else the newest PUBLIC model (THE COLLECTION · its collection, name, type, SIZES, variant dots,
+You own N, SEE THE MODEL); else nothing. Signed in: YOUR PIECES (two, their model's photographs, the tier in one line),
+THE CIRCLE (the next open invitation as a plate card, YES / NO, its places), THE COLLECTION (not when it leads), the scan.
+Signed out: the scan with MY PIECES, then THE COLLECTION. The banner is MY PIECES' alone. Moved on purpose (the content
+test's MOVED): AUTHENTICATION, the link THE RELEASES (the rail), the banner's countdown (the hero's), and with no model
+shown the link THE COLLECTION (the rail).
+
 ## The scan (`/verify`, one address)
 
 | State | What it shows | Shown when | Reference |

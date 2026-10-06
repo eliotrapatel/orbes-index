@@ -43,7 +43,7 @@ import type { AuditService } from './audit.js';
 import { majorUnits } from './live-console.js';
 import { mediaUrl } from './media.js';
 import { ORDER_CURRENCIES, orderReference } from './orders.js';
-import { deriveSku, ensureSku, ONE_SIZE_LABEL } from './stock.js';
+import { compareSizes, deriveSku, ensureSku, ONE_SIZE_LABEL } from './stock.js';
 
 // ── Shopify's formats ──────────────────────────────────────────────────────
 
@@ -150,13 +150,8 @@ export function shopifyHandle(m: { name: string; slug: string | null; skuPrefix:
   return m.slug ?? (words(m.name) || words(m.skuPrefix) || 'orbes');
 }
 
-/** Sizes in the order a client reads them: ONE SIZE (null) first, then naturally (48, 50, 52; S, M, L as written). */
-export function compareSizes(a: string | null, b: string | null): number {
-  if (a === b) return 0;
-  if (a === null) return -1;
-  if (b === null) return 1;
-  return a.localeCompare(b, 'en', { numeric: true, sensitivity: 'base' }) || a.localeCompare(b);
-}
+/** Sizes in the order a client reads them (services/stock.ts, shared with the lookbook's SIZES). */
+export { compareSizes };
 
 /** An id pasted from Shopify's admin: the number itself, or the address of its page (…/products/123/variants/456). */
 export function shopifyIdOf(input: unknown, kind: 'products' | 'variants'): string | null {

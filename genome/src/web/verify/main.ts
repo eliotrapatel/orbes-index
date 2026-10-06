@@ -1,6 +1,8 @@
 /**
  * ORBES verification app (PLATFORM-CONTRACTS §4, spec §19–20).
  *
+ *   NOW (the landing, views/now.ts): what leads (a LIVE RELEASE, a draw, the newest model) ──SEE THE …──▶ its page;
+ *            an owner's pieces ──▶ MY PIECES; the next invitation (YES / NO) ──▶ its post; THE COLLECTION ──▶ the lookbook
  *   landing ──SCAN──▶ scanner ──code read──▶ VERIFYING… ──▶ result
  *      ├──UPLOAD A PHOTO──▶ READING PHOTO… ──▶ VERIFYING… ──▶ result
  *      ├──MY PIECES──▶ the owner's pieces (/verify/pieces, F-01)
@@ -14,7 +16,7 @@
  *   an AUTHENTIC_* result ──▶ the sound signature (P-D07), its AudioContext created in the tap SCAN or UPLOAD
  *   the scan as a ritual (P-D10): the ring searches, tightens around the centre on a seal seen (onSeal), locks on the
  *                    code; VERIFYING… takes the ring up, and the result's GENOME plate opens from the centre
- *   the landing, MY PIECES ──▶ the banner of the LIVE RELEASES over them (an ink strip): its release's page
+ *   MY PIECES ──▶ the banner of the LIVE RELEASES over it (a plate under the rail): its release's page
  *   a boutique board's link ──▶ the board of a LIVE RELEASE (/verify/releases/<id>/board#secret), on its own
  *   a shared link ──▶ an ownership certificate (/verify/c#token, F-06)
  *   any step ──problem──▶ message (camera declined, no code, offline…)
@@ -80,11 +82,11 @@ import { certificateView } from './views/certificate.js';
 import { circlePostView, circleView } from './views/circle.js';
 import { CERTIFICATE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH } from './views/common.js';
 import { messageOf } from './views/forms.js';
-import { landingView } from './views/landing.js';
 import { liveView } from './views/live.js';
 import { liveBannerView } from './views/live-banner.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
 import { messageView } from './views/message.js';
+import { nowView } from './views/now.js';
 import { piecesView } from './views/pieces.js';
 import { releasesView, releaseView, type ReleasesTab } from './views/releases.js';
 import { resultView } from './views/result.js';
@@ -196,7 +198,7 @@ class App {
   private releaseAfterRoom = false;
   /** The id of the post on show (P-X01), to tell another post from the same one. */
   private postId: string | null = null;
-  /** The banner of the LIVE RELEASES, over the landing and MY PIECES (and nowhere else). */
+  /** The banner of the LIVE RELEASES, over MY PIECES (and nowhere else: on NOW, the release leads the page). */
   private readonly banner = liveBannerView({ api: this.api, onRelease: (id) => this.openRelease(id) });
   /** NOCTURNE's chrome round the screen: the header and its account sheet, the rail, the footer, the SCAN ring. */
   private shell: Shell | null = null;
@@ -233,7 +235,7 @@ class App {
         if (!(this.screen === 'circlePost' && this.postId === id)) void this.showCirclePost(id);
       } else if (entry === 'circle' || route === 'circle') {
         if (this.screen !== 'circle') void this.showCircle();
-      } else if (this.screen !== 'landing') this.showLanding();
+      } else if (this.screen !== 'landing') void this.showLanding();
     });
     // A certificate's fragment changed in place (pasted, edited): the certificate of the new one.
     window.addEventListener('hashchange', () => {
@@ -322,7 +324,7 @@ class App {
       else void this.showCircle(false);
     } else {
       history.replaceState({ screen: 'landing' }, '', location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
-      this.showLanding(false);
+      void this.showLanding(false);
     }
     // Boot the decoder worker and warm the decoder (one synthetic decode) while the visitor reads the landing screen; a
     // boutique board never scans.
@@ -353,7 +355,7 @@ class App {
   private openNow(): void {
     const entry = entryOf(history.state);
     if (entry === undefined || entry === 'landing') {
-      if (this.screen !== 'landing') this.showLanding();
+      if (this.screen !== 'landing') void this.showLanding();
       return;
     }
     const depth = entry === 'sheet' || entry === 'circlePost' ? 2 : entry === 'release' ? (afterRoomOf(location.pathname) ? 3 : 2) : 1;
@@ -488,24 +490,35 @@ class App {
     this.shell?.show(screen);
     this.host.replaceChildren(next);
     this.screen = screen;
-    this.banner.show(screen === 'landing' || screen === 'pieces');
+    // On NOW, the LIVE RELEASE the banner would name leads the page itself (C1): the banner is MY PIECES' (C3).
+    this.banner.show(screen === 'pieces');
     window.scrollTo(0, 0);
     if (focus) focusFirst(next);
     return true;
   }
 
-  private showLanding(focus = true): void {
+  /**
+   * NOW (plan NOCTURNE, screen 1), the base entry at /verify: what leads (a LIVE RELEASE, a draw, the newest model), an
+   * owner's pieces and next invitation, the collection, the scan.
+   */
+  private async showLanding(focus = true): Promise<void> {
     this.generation++;
     this.stopCamera();
-    const view = landingView({
+    const view = nowView({
+      api: this.api,
+      session: this.session,
+      localZone: localZone(),
       onScan: () => void this.startScan(),
       onUpload: () => this.pickPhoto(),
-      session: this.session,
       onPieces: () => this.openPieces(),
+      onRelease: (id) => this.openRelease(id),
       onCollection: () => this.openLookbook(),
-      onReleases: () => this.openReleases(),
+      onModel: (slug) => this.openSheet(slug),
+      onCircle: () => this.openCircle(),
+      onPost: (id) => this.openCirclePost(id),
     });
-    void this.swap(view, 'landing', focus);
+    if (await this.swap(view.root, 'landing', focus)) this.live = view;
+    else view.dispose();
   }
 
   /** MY PIECES (F-01): the signed-in owner's pieces, or the sign-in when signed out. */
@@ -742,7 +755,7 @@ class App {
   private goHome(): void {
     const entry = entryOf(history.state);
     if (entry !== undefined && REPLACEABLE.includes(entry)) history.back();
-    else this.showLanding();
+    else void this.showLanding();
   }
 
   // ── Camera path ──────────────────────────────────────────────────────────

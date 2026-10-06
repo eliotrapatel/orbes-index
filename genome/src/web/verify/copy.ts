@@ -441,6 +441,10 @@ export const ORBES_CARE = Object.freeze({
  * of the tier and of those below it (the server's words, set by ORBES), and the way to the next tier. An account that
  * holds no piece reads what its first one opens.
  */
+const TIER_WAY = (tier: string, missing: number, from: number) =>
+  `${missing} more ${Number(missing) === 1 ? 'piece registered to your account opens' : 'pieces registered to your account open'} ${tier}, from ${from} pieces held.`;
+const TIER_FIRST = (tier: string) => `A piece registered to your ORBES account opens ${tier}, the first tier of the club`;
+
 export const TIER = Object.freeze({
   /** The section's label, and its accessible name. */
   label: 'YOUR TIER',
@@ -451,10 +455,13 @@ export const TIER = Object.freeze({
   /** The heading of the way to the next tier. */
   next: (tier: string) => `NEXT: ${tier}`,
   /** How many more pieces reach it, and from how many it starts. */
-  nextWay: (tier: string, missing: number, from: number) =>
-    `${missing} more ${Number(missing) === 1 ? 'piece registered to your account opens' : 'pieces registered to your account open'} ${tier}, from ${from} pieces held. It adds:`,
+  nextWay: (tier: string, missing: number, from: number) => `${TIER_WAY(tier, missing, from)} It adds:`,
+  /** The same way, said alone: NOW's line under YOUR PIECES (C1), after the tier and its pieces. */
+  way: (tier: string, missing: number, from: number) => TIER_WAY(tier, missing, from),
   /** An account without a tier: what its first piece opens. */
-  first: (tier: string) => `A piece registered to your ORBES account opens ${tier}, the first tier of the club:`,
+  first: (tier: string) => `${TIER_FIRST(tier)}:`,
+  /** The same, said alone (NOW's line under YOUR PIECES). */
+  firstWay: (tier: string) => `${TIER_FIRST(tier)}.`,
   /** PALLADIUM: no tier above. */
   top: 'PALLADIUM is the highest tier of the club.',
   /** Shown when MY PIECES lists more pieces than the tier counts: a piece revoked or retired by ORBES counts for none. */
@@ -659,6 +666,9 @@ export const DISCONTINUED = Object.freeze({
  * reaches, each with its price, requested from its sheet (REQUEST THIS PIECE) and concluded by ORBES Client Services.
  * Reached from the landing, from MY PIECES and, under an authentic result, from SEE THE MODEL.
  */
+/** A count said in words, from one to twelve (« You own two »). */
+const NUMBER_WORDS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+
 export const LOOKBOOK = Object.freeze({
   title: 'THE COLLECTION',
   /** The text link of the landing, of MY PIECES and of a sheet's foot (back to the grid). */
@@ -690,6 +700,19 @@ export const LOOKBOOK = Object.freeze({
   }),
   /** The text link of each card, and the one under an authentic result. */
   seeModel: 'SEE THE MODEL',
+  /** NOCTURNE (addition 8): a model's sizes, from its SKUs and its variants' (`SIZES 16 · 17 · 18`, `SIZE 17`). */
+  sizes: (...sizes: string[]) => (sizes.length === 1 ? `SIZE ${sizes[0]}` : `SIZES ${sizes.join(' · ')}`),
+  /** The accessible name of a model's variant dots. */
+  variants: 'Its variants',
+  /**
+   * NOCTURNE: the account's pieces of a model and its variants (« You own two: steel and gold »), counted from MY PIECES;
+   * the variants named when the model has some.
+   */
+  youOwn: (n: number, ...variants: string[]) => {
+    const count = n >= 1 && n <= 12 ? NUMBER_WORDS[n - 1] : String(n);
+    const named = variants.length > 1 ? `${variants.slice(0, -1).join(', ')} and ${variants[variants.length - 1]}` : (variants[0] ?? '');
+    return named ? `You own ${count}: ${named}` : `You own ${count}`;
+  },
   scan: 'SCAN ORBES CODE',
   /** The accessible names of a sheet's photographs and of a card's. */
   photosLabel: (model: string) => `Photographs of the ${model} model`,
@@ -937,6 +960,24 @@ export const CHROME = Object.freeze({
   /** The SCAN ring: its word under it, and its name (the word first, as it reads). */
   scan: 'SCAN',
   scanLabel: 'Scan an ORBES code',
+});
+
+/**
+ * NOW (plan NOCTURNE, screen 1; /verify, in place of the landing): the hero What leads chooses (a LIVE RELEASE, else a
+ * draw, else the newest model of the collection), the draw under a LIVE RELEASE as a plate card, YOUR PIECES and THE
+ * CIRCLE's next invitation for an owner, THE COLLECTION, then the scan. Its other words are those of the screens it
+ * leads to (RELEASES, LIVE, LOOKBOOK, CIRCLE, PIECES, TIER).
+ */
+export const NOW = Object.freeze({
+  /** The page's name when no hero leads it (the rail's chapter). */
+  label: 'NOW',
+  /** The sections' accessible names, the canvas's. */
+  sections: Object.freeze({ release: 'The next release', also: 'Also announced', collection: 'The collection', pieces: 'Your pieces', circle: 'The circle', scan: 'Scan' }),
+  /** A draw's kind, before its state: DRAW · ENTRIES OPEN. */
+  draw: 'DRAW',
+  pieces: 'YOUR PIECES',
+  scan: 'SCAN ORBES CODE',
+  upload: 'UPLOAD A PHOTO',
 });
 
 /**

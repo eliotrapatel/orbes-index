@@ -464,9 +464,12 @@ export class ApiClient {
 
   // ── The circle (P-X01) ───────────────────────────────────────────────────
 
-  /** A page of the circle's feed, the latest first, without the posts' bodies (403 OWNERS_ONLY without a piece, 401 signed out). */
-  async circle(page = 1, pageSize = 20): Promise<CircleFeed> {
-    const r = await this.request<CircleFeed>('GET', `/api/v1/club/circle?page=${page}&pageSize=${pageSize}`);
+  /**
+   * A page of the circle's feed, the latest first, without the posts' bodies (403 OWNERS_ONLY without a piece, 401 signed
+   * out). Its first page counts a visit, but `visit: false` (NOW's read of its next invitation).
+   */
+  async circle(page = 1, pageSize = 20, opts: { visit?: boolean } = {}): Promise<CircleFeed> {
+    const r = await this.request<CircleFeed>('GET', `/api/v1/club/circle?page=${page}&pageSize=${pageSize}${opts.visit === false ? '&visit=0' : ''}`);
     if (!Array.isArray(r?.items) || typeof r.total !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r;
   }

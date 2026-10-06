@@ -7,7 +7,8 @@
  * column or past its parent's box, no box whose content spills out of it, no words wider than their box, no words cut
  * (an ellipsis, a clipped box, a clamp).
  *
- * KNOWN lists what the app cut before NOCTURNE, each with its reason: the build either removes it or the owner keeps it.
+ * KNOWN lists what the app cut before NOCTURNE, each with its reason: the build either removes it or the owner keeps it
+ * (empty since N3).
  */
 import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
@@ -19,15 +20,8 @@ const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
 
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
-  // The resting orbit round the wordmark of today's landing: a drawing (aria-hidden, absolutely placed, inset -15 %) that
-  // reaches past the emblem on purpose. NOW replaces the landing (N3).
-  ...['now-empty', 'now-stress', 'account-sheet-stress'].flatMap((state) =>
-    ['div.landing__center spills out of its box', 'div.landing__emblem spills out of its box'].map((starts) => ({
-      state,
-      starts,
-      reason: 'The resting orbit (.landing__orbit, inset -15 %) is a drawing round the wordmark, wider than its emblem on purpose.',
-    })),
-  ),
+  // (N3: the resting orbit of the landing's wordmark, which reached past its emblem on purpose, left with the landing:
+  // NOW replaces it.)
 ];
 
 describe.skipIf(!HAS_CHROMIUM)('NOCTURNE overflow: nothing overflows its column in the extreme cases (Chromium)', () => {

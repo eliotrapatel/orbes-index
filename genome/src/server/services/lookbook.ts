@@ -27,6 +27,10 @@
  * facts (its specifications, care, discontinuation and salon), the one asked `selected`: a variant's own address opens
  * the sheet with that variant selected. A model shown alone has no dots (`variants` empty).
  *
+ * NOW (plan NOCTURNE, N3): each entry of a list says when it was last added to the collection (`publishedAt`, the
+ * latest first shown of its models there, each dot its own), so NOW leads with the newest; and an entry and a sheet
+ * carry the sizes of their models (`sizes`, addition 8), from lot E's SKUs of the model and its variants.
+ *
  * This module holds the rules both sides share: the address (`slug`), the
  * story (plain paragraphs, no Markdown: what is typed is what is shown), the
  * specifications (one `Label: value` line each; no figure in a label, since
@@ -42,6 +46,7 @@ import type { Db } from '../db/connection.js';
 import type { LookbookState } from '../db/schema.js';
 import { DomainError, validationError } from '../errors.js';
 import { mediaUrl } from './media.js';
+import { sizesOnce, skuSizes } from './stock.js';
 
 /** The address of a sheet: lower-case letters and digits, words joined by single hyphens. */
 export const SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -183,6 +188,8 @@ export interface LookbookCardVariant extends VariantDot {
   /** THE PRIVATE SALON's cards only: its price shown (null: none) and the lowest tier it is shown to. */
   priceLabel?: string | null;
   minTier?: 1 | 2 | 3;
+  /** When it was first shown (models.published_at; plan NOCTURNE, N3: NOW's collection reads it). */
+  publishedAt: Date | null;
 }
 
 /** One model of a list (GET /api/v1/lookbook, the club's reserved models): no story, no gallery. */
@@ -198,6 +205,13 @@ export interface LookbookCard {
   variant: VariantDot | null;
   /** N1: the dots, this model's and its variants' shown in this list (the main model first); empty for a model alone. */
   variants: LookbookCardVariant[];
+  /**
+   * N3: when the entry was last added to the collection, the latest first shown of its models in this list (NOW leads
+   * with the PUBLIC entry most recently published, plan NOCTURNE, What leads).
+   */
+  publishedAt: Date | null;
+  /** N3 (addition 8): the sizes of its models in this list, from their SKUs (`16`, `17`, `18`); none in one size. */
+  sizes: string[];
 }
 
 /** What THE PRIVATE SALON adds to a RESERVED model (P-X08): its price shown, and the lowest tier it is shown to. */
@@ -262,6 +276,8 @@ export interface LookbookSheet {
   variant: VariantDot | null;
   /** N1: the dots of its group the reader may see, the main model first, this one `selected`; empty for a model alone. */
   variants: LookbookSheetVariant[];
+  /** N3 (addition 8): the sizes of the models of its group the reader may see, from their SKUs; none in one size. */
+  sizes: string[];
 }
 
 export interface LookbookServiceDeps {
@@ -314,7 +330,10 @@ export class LookbookService {
     const root = m.variant_of ?? m.id;
     const group = sortGroup(await this.sheetRows(tier).where((eb) => eb.or([eb('m.id', '=', root), eb('m.variant_of', '=', root)])).execute(), root);
     const ids = group.length > 1 ? group.map((g) => g.id) : [m.id];
-    const galleries = await this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt']).where('model_id', 'in', ids).orderBy('model_id').orderBy('position').execute();
+    const [galleries, sizes] = await Promise.all([
+      this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt']).where('model_id', 'in', ids).orderBy('model_id').orderBy('position').execute(),
+      skuSizes(this.db, group.map((g) => g.id)),
+    ]);
     const galleryOf = (r: SheetRow): LookbookImage[] =>
       // The cover is shown once: a gallery photograph made the reference photograph since is left out here.
       galleries
@@ -355,6 +374,7 @@ export class LookbookService {
         discontinuedYear: g.discontinued_at ? g.discontinued_at.getUTCFullYear() : null,
         ...(g.lookbook === 'RESERVED' ? { salon: salonFacts(g) } : {}),
       })),
+      sizes: sizesOnce(group.flatMap((g) => sizes.get(g.id) ?? [])),
     };
     return { modelId: m.id, sheet, variantIds: Object.fromEntries(dotted(group).map((g) => [g.slug!, g.id])) };
   }
@@ -412,6 +432,7 @@ export class LookbookService {
         'm.variant_label',
         'm.variant_swatch',
         'm.created_at',
+        'm.published_at',
         'c.code as category_code',
         'c.name as category_name',
         'col.name as collection',
@@ -429,6 +450,9 @@ export class LookbookService {
     const groups = new Map<string, typeof rows>();
     for (const r of rows) groups.set(r.variant_of ?? r.id, [...(groups.get(r.variant_of ?? r.id) ?? []), r]);
     const imageOf = (r: (typeof rows)[number]) => mediaUrl(r.image_sha256) ?? mediaUrl(r.first_image);
+    const sizes = await skuSizes(this.db, rows.map((r) => r.id));
+    const latest = (group: typeof rows): Date | null =>
+      group.reduce<Date | null>((at, g) => (g.published_at && (!at || g.published_at.getTime() > at.getTime()) ? g.published_at : at), null);
     const out: (LookbookCard | SalonCard)[] = [];
     const done = new Set<string>();
     for (const r of rows) {
@@ -455,7 +479,10 @@ export class LookbookService {
           swatch: g.variant_swatch!,
           imageUrl: imageOf(g),
           ...(state === 'RESERVED' ? salonFacts(g) : {}),
+          publishedAt: g.published_at,
         })),
+        publishedAt: latest(group),
+        sizes: sizesOnce(group.flatMap((g) => sizes.get(g.id) ?? [])),
       });
     }
     return out;

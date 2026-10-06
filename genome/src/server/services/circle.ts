@@ -87,6 +87,15 @@ export function circleFeedPage(query: unknown): PageRequest {
   return { page: r.page, pageSize: Math.min(r.pageSize, CIRCLE_FEED_PAGE.max) };
 }
 
+/**
+ * Whether a read of the feed counts a visit (its first page does, `circle_daily_visits`): not when NOW reads it for its
+ * card of the next invitation (`visit=0`, plan NOCTURNE N3), which is no visit to the circle.
+ */
+export function circleFeedVisit(query: unknown): boolean {
+  const q = (query && typeof query === 'object' ? query : {}) as { visit?: unknown };
+  return q.visit !== '0';
+}
+
 /** The host of a link as /verify shows it beside the link (`youtube.com`, a leading `www.` dropped), or null. */
 export function circleLinkHost(url: string | null | undefined): string | null {
   if (typeof url !== 'string') return null;
@@ -244,6 +253,18 @@ export interface CircleCard {
   answer: CircleRsvpAnswer | null;
   /** Whether the reader voted in a poll. */
   voted: boolean;
+  /**
+   * An invitation's places and whether answers are taken (plan NOCTURNE, addition 6: YES / NO from the feed and from
+   * NOW, through the post's answer route and rules); null for another kind.
+   */
+  invitation: {
+    /** null: no limit. */
+    capacity: number | null;
+    /** The places not answered YES yet; null without a limit. */
+    placesLeft: number | null;
+    /** Answers are taken until the event begins. */
+    open: boolean;
+  } | null;
 }
 
 /** A post as a member reads it (GET /api/v1/club/circle/:id, and the answer to an RSVP or a vote). */
@@ -448,9 +469,10 @@ export class CircleService {
 
   /**
    * The feed: the posts published for the reader's tier, the latest first, without their bodies; 403 OWNERS_ONLY for
-   * an account that holds no piece now. The first page counts a visit of the day (no account recorded).
+   * an account that holds no piece now. The first page counts a visit of the day (no account recorded), unless `visit`
+   * is false (NOW's read of its next invitation). Each invitation carries its places and whether answers are open.
    */
-  async feed(accountId: string, page: PageRequest): Promise<Page<CircleCard>> {
+  async feed(accountId: string, page: PageRequest, opts: { visit?: boolean } = {}): Promise<Page<CircleCard>> {
     assertAccount(accountId);
     const now = this.clock();
     const { tier } = await tierOf(this.db, accountId, now);
@@ -473,8 +495,14 @@ export class CircleService {
     const total = await shown.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await shown.select([...CARD_COLUMNS]).orderBy('p.published_at', 'desc').orderBy('p.id').limit(page.pageSize).offset(pageOffset(page)).execute();
     const ids = rows.map((r) => r.id);
-    const [covers, answers, votes] = await Promise.all([this.covers(this.db, ids), this.myAnswers(this.db, accountId, ids), this.myVotes(this.db, accountId, ids)]);
-    if (page.page === 1) await this.countVisit(now);
+    const limited = rows.filter((r) => r.kind === 'INVITATION' && r.capacity !== null).map((r) => r.id);
+    const [covers, answers, votes, counts] = await Promise.all([
+      this.covers(this.db, ids),
+      this.myAnswers(this.db, accountId, ids),
+      this.myVotes(this.db, accountId, ids),
+      this.answerCounts(this.db, limited),
+    ]);
+    if (page.page === 1 && opts.visit !== false) await this.countVisit(now);
     return makePage(
       rows.map((r) => ({
         id: r.id,
@@ -487,6 +515,14 @@ export class CircleService {
         eventPlace: r.event_place,
         answer: answers.get(r.id) ?? null,
         voted: votes.has(r.id),
+        invitation:
+          r.kind === 'INVITATION' && r.event_at
+            ? {
+                capacity: r.capacity,
+                placesLeft: r.capacity === null ? null : Math.max(0, r.capacity - (counts.get(r.id)?.YES ?? 0)),
+                open: now.getTime() < r.event_at.getTime(),
+              }
+            : null,
       })),
       Number(total.n),
       page,

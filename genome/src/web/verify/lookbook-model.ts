@@ -19,13 +19,18 @@
  *    sheet read through the club its price, the tier it is offered from, and
  *    the account's open request (then ORBES Client Services will contact it)
  *    or REQUEST THIS PIECE, with an optional note.
+ *  - NOCTURNE (N3, reused by THE COLLECTION in N6): an entry's dots (its
+ *    variants, each with its address, label, colour and photograph), its
+ *    sizes (SIZES 16 · 17 · 18, from the SKUs of the model and its
+ *    variants), and the account's own pieces of it, counted from MY PIECES
+ *    across its variants (« You own two: steel and gold »).
  *
  * Nothing the server did not send: a photograph is taken from this origin's
  * media route only, and an address only if it is one.
  */
 import { isLookbookSlug, storyParagraphs } from '../shared/lookbook.js';
 import { DEFAULT_CARE, DISCONTINUED, LOOKBOOK, PHOTOS } from './copy.js';
-import type { LookbookCard, LookbookSheet } from './types.js';
+import type { LookbookCard, LookbookSheet, OwnedPiece } from './types.js';
 import { discontinuedYearOf, upper, type Row } from './view-model.js';
 
 /** The account's note on a request of the private salon (P-X08): as the server holds it (services/salon.ts SHOP_NOTE_MAX). */
@@ -85,6 +90,71 @@ function entryModels(c: LookbookCard): { slug: string; name: string; type: strin
   const dots = Array.isArray(c.variants) ? c.variants.filter((v) => isLookbookSlug(v?.slug)) : [];
   if (dots.length > 1) return dots.map((v) => ({ slug: v.slug, name: v.name, type: v.type, imageUrl: v.imageUrl, priceLabel: v.priceLabel, variant: v.label }));
   return [{ slug: c.slug, name: c.name, type: c.type, imageUrl: c.imageUrl, priceLabel: c.priceLabel, variant: c.variant?.label ?? null }];
+}
+
+/** A dot of an entry (NOCTURNE N1): a model of the group, its label and colour, its photograph, when it was first shown. */
+export interface EntryDot {
+  slug: string;
+  /** « Steel » */
+  label: string;
+  /** #RRGGBB */
+  swatch: string;
+  name: string;
+  type: string;
+  image: LookbookPhoto | null;
+  /** When it was first shown (ms), or null. */
+  publishedAt: number | null;
+}
+
+const SWATCH = /^#[0-9a-f]{6}$/i;
+const timeOf = (iso: unknown): number | null => {
+  const t = typeof iso === 'string' ? Date.parse(iso) : NaN;
+  return Number.isFinite(t) ? t : null;
+};
+
+/** The dots of an entry, the main model first, as the server sent them; none for a model shown alone (fewer than two). */
+export function entryDots(c: LookbookCard): EntryDot[] {
+  const dots = (Array.isArray(c?.variants) ? c.variants : []).filter((v) => isLookbookSlug(v?.slug) && typeof v.label === 'string' && v.label.trim() !== '' && SWATCH.test(v.swatch ?? ''));
+  if (dots.length < 2) return [];
+  return dots.map((v) => ({
+    slug: v.slug,
+    label: v.label.trim(),
+    swatch: v.swatch,
+    name: upper(v.name),
+    type: upper(v.type),
+    image: typeof v.imageUrl === 'string' && MEDIA_SRC.test(v.imageUrl) ? { src: v.imageUrl, alt: modelAlt(v.name, v.type, v.label) } : null,
+    publishedAt: timeOf(v.publishedAt),
+  }));
+}
+
+/** An entry's photograph, its own model's (the main model's when it has dots). */
+export function entryPhoto(c: LookbookCard): LookbookPhoto | null {
+  return typeof c?.imageUrl === 'string' && MEDIA_SRC.test(c.imageUrl) ? { src: c.imageUrl, alt: modelAlt(c.name, c.type, c.variant?.label) } : null;
+}
+
+/** When an entry was last added to the collection (ms), or null. */
+export function entryPublishedAt(c: LookbookCard): number | null {
+  return timeOf(c?.publishedAt);
+}
+
+/** A model's sizes, from the SKUs of the model and its variants (NOCTURNE, addition 8): `SIZES 16 · 17 · 18`; null without one. */
+export function sizesLine(sizes: unknown): string | null {
+  const list = Array.isArray(sizes) ? sizes.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim().toUpperCase()) : [];
+  return list.length > 0 ? LOOKBOOK.sizes(...list) : null;
+}
+
+/**
+ * « You own two: steel and gold »: the account's pieces of an entry, its variants included, counted from MY PIECES by
+ * the address of each piece's model (its sheet), each variant owned named once, in the order of the dots; null when it
+ * owns none.
+ */
+export function youOwn(c: LookbookCard, pieces: readonly Pick<OwnedPiece, 'lookbook'>[]): string | null {
+  const dots = entryDots(c);
+  const slugs = dots.length > 0 ? dots.map((d) => d.slug) : [c.slug];
+  const owned = pieces.filter((p) => typeof p?.lookbook === 'string' && slugs.includes(p.lookbook));
+  if (owned.length === 0) return null;
+  const named = dots.filter((d) => owned.some((p) => p.lookbook === d.slug)).map((d) => d.label.toLowerCase());
+  return LOOKBOOK.youOwn(owned.length, ...named);
 }
 
 /** The cards, grouped by collection in the order the server sent them; a card without an address is left out. */

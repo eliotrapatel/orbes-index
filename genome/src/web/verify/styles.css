@@ -114,107 +114,6 @@ h1[tabindex="-1"]:focus,
   to { transform: rotate(360deg); }
 }
 
-/* ── Landing ───────────────────────────────────────────────────────────── */
-
-/* Two rows: the centre, then the foot in the page's flow (J-06), so a short
-   screen scrolls down to the legal links instead of laying them over the
-   actions. */
-.view--landing {
-  display: grid;
-  grid-template-rows: 1fr auto;
-  place-items: center;
-  row-gap: 40px;
-  overflow: hidden;
-  padding: calc(88px + var(--safe-top)) 32px calc(26px + var(--safe-bottom));
-}
-
-.landing__center {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-}
-
-/* The wordmark sits inside the resting orbit, as the core sits inside the seal. */
-.landing__emblem {
-  --orbit: min(76vw, 40vh, 320px);
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: var(--orbit);
-  height: var(--orbit);
-}
-
-.landing__orbit {
-  position: absolute;
-  inset: -15%;
-  color: var(--ink);
-  pointer-events: none;
-  animation: brand-fade 2.4s var(--ease) 0.4s both;
-}
-
-.reticle--rest .reticle__ring {
-  opacity: 0.16;
-}
-
-.reticle--rest .reticle__moon {
-  opacity: 0.26;
-}
-
-.reticle--rest .reticle__arc {
-  opacity: 0.5;
-  stroke-width: 1;
-}
-
-.reticle--rest .reticle__sweep {
-  animation-duration: 48s;
-}
-
-.landing__title {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 18px;
-  font-weight: 400;
-  animation: brand-rise 1.8s var(--ease) 0.15s both;
-}
-
-/* The monogram over the word, as the core of the resting orbit: 76 px on a
-   390 px phone, 64 to 84 px elsewhere; 24 px to the word with the title's gap.
-   Never more than 0.3 of the emblem, whose size follows the height of a short
-   screen (a phone held sideways), so the heading stays inside the orbit. */
-.landing__monogram {
-  width: min(clamp(64px, 19.5vw, 84px), var(--orbit) * 0.3);
-  margin-bottom: 6px;
-}
-
-.landing__wordmark {
-  font-size: clamp(26px, 7.6vw, 34px);
-}
-
-.landing__sub {
-  color: var(--ink-soft);
-  font-size: var(--fs-caption);
-  letter-spacing: 0.4em;
-  text-indent: 0.4em;
-}
-
-.landing__actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  margin-top: clamp(40px, 8vh, 72px);
-  animation: brand-rise 1.6s var(--ease) 0.6s both;
-}
-
-/* MY PIECES (F-01): its place is kept while the session is asked for, so nothing moves when it appears. */
-.landing__pieces.is-pending {
-  visibility: hidden;
-}
-
 /* ── Scanner ───────────────────────────────────────────────────────────── */
 
 .view--scan {
@@ -4904,7 +4803,6 @@ body[data-screen="board"] .corners {
    product lines, row values, the reference, codes, inputs and any figure
    (Gravesend's one is its capital I, and its figures do not align). */
 .boot-error,
-.landing__sub,
 .scan__status,
 .scan__control,
 .verifying__status,
@@ -5021,7 +4919,6 @@ body[data-screen="board"] .corners {
 }
 
 @media (max-width: 350px) {
-  .view--landing,
   .view--result,
   .view--pieces,
   .view--certificate,
@@ -5235,6 +5132,8 @@ body.nocturne .n-column > * {
 .n-g .numeral,
 .n-g .n-figure {
   font-family: var(--font);
+  /* Its own line box no taller than the type: a label's line keeps the canvas's height (14.3 px at 9.5 px). */
+  line-height: 1;
 }
 
 .n-ph {
@@ -6917,9 +6816,191 @@ body.nocturne[data-banner] .view--pieces {
   padding-top: calc(60px + var(--safe-top));
 }
 
+/* ── NOW (plan NOCTURNE, screen 1, step N3; C1, C10, C42, C43): /verify, in place of the landing ──
+   What leads (views/now.ts) as the canvas sets it: the hero's photograph whole at the column's width, faded, its words
+   lifted onto its foot, centred; the sections 76 px apart (.n-sec); the plate cards in the margin. Each value is the
+   boards' own (c.py C1, c2.py C10, c5.py C42 and C43). */
+
+.view--now {
+  min-height: 0;
+}
+
+/* A hero without a photograph (a release not yet revealed, a model without one): its words open the page. */
+.now__bare {
+  margin-top: 0;
+  padding-top: 30px;
+}
+
+/* NOW without a hero opens on YOUR PIECES or on the scan, as a page opens on its title. */
+.now__lead {
+  padding-top: 30px;
+}
+
+.now__title {
+  margin-top: 14px;
+}
+
+.now__type {
+  margin-top: 12px;
+}
+
+.now__opens {
+  margin-top: 26px;
+}
+
+.now__when {
+  margin-top: 20px;
+}
+
+.now__local {
+  margin-top: 8px;
+}
+
+.now__lines {
+  margin-top: 18px;
+}
+
+.now__interest {
+  margin-top: 18px;
+}
+
+.now__primary {
+  margin-top: 26px;
+}
+
+/* A draw leads (C42): its price, its pieces and time in UTC, then on this phone. */
+.now__price {
+  margin-top: 14px;
+  font-size: var(--fs-heading);
+}
+
+.now__line {
+  margin-top: 14px;
+}
+
+.now__local-time {
+  margin-top: 6px;
+}
+
+/* The newest model leads (C43): its sizes, its dots, what the account owns of it. */
+.now__sizes {
+  margin-top: 10px;
+}
+
+.now__dots {
+  margin-top: 22px;
+}
+
+.now__owned {
+  margin-top: 18px;
+}
+
+/* The plate cards: the draw under a LIVE RELEASE (C1), the next invitation (C1, C42, C43). */
+.n-card.now__card {
+  padding: 30px 24px 26px;
+}
+
+.now__invitation {
+  margin: 22px var(--n-margin) 0;
+}
+
+.now__card-title {
+  margin-top: 10px;
+}
+
+.now__card-model {
+  margin-top: 8px;
+}
+
+.now__card-price {
+  margin-top: 10px;
+  font-size: var(--n-fs-tx);
+}
+
+.now__card-line {
+  margin-top: 10px;
+}
+
+.now__card-link {
+  margin-top: 18px;
+}
+
+.now__invitation-date {
+  margin-top: 8px;
+}
+
+.now__invitation-event {
+  margin-top: 12px;
+}
+
+.now__invitation-places {
+  margin-top: 10px;
+}
+
+.now__answer {
+  margin-top: 14px;
+}
+
+.now__error {
+  margin-top: 14px;
+}
+
+/* YOUR PIECES: two side by side, their model's photographs, then the tier in one line. */
+.now__pieces {
+  margin-top: 22px;
+}
+
+.now__piece {
+  display: block;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.now__piece:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+.now__piece-ground {
+  height: 195px;
+}
+
+.now__piece-id {
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.now__empty,
+.now__tier {
+  margin-top: 22px;
+}
+
+.now__tier-name {
+  font-size: var(--n-fs-tl);
+  letter-spacing: 0.24em;
+}
+
+/* THE COLLECTION under the hero. */
+.now__teaser-photo {
+  margin-top: 14px;
+}
+
+.now__teaser-type {
+  margin-top: 8px;
+}
+
+.now__teaser-link {
+  margin-top: 20px;
+}
+
+/* The scan: SCAN ORBES CODE, then its text links 20 px apart. */
+.now__scan-link {
+  margin-top: 20px;
+}
+
 /* ── The screens not yet drawn in NOCTURNE, on its ground: its 24 px margin, and their states as C40 draws them ── */
 
-body.nocturne .view--landing,
 body.nocturne .view--result,
 body.nocturne .view--pieces,
 body.nocturne .view--lookbook,
