@@ -121,9 +121,9 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
   );
 
   it(
-    'sets the scan and its results as C9, C11, C12, C14, C16 and C17 draw them: the camera, the lock, a problem (no header, rail nor SCAN ring on those, as on VERIFYING… after a photo), a result (with them, NOW underlined), its GENOME, THE MODEL, its lines, its tabs, the OWNERSHIP panel, its account line with a long email, the report row, the foot (N4)',
+    'sets the scan and its results as C9, C11, C12, C14, C16 and C17 draw them: the camera and the name of its zoom, the lock, a problem (no header, rail nor SCAN ring on those, as on VERIFYING… after a photo), a result (with them, NOW underlined), its GENOME, THE MODEL, its lines, its tabs, the OWNERSHIP panel, its account line with a long email, the report row, the foot (N4)',
     async () => {
-      const states = ['scan-camera', 'scan-verifying', 'photo-verifying', 'problem-camera-denied', 'result-first-registration', 'result-ownership-verified', 'result-receiving', 'result-invalid'];
+      const states = ['scan-camera', 'scan-light-zoom', 'scan-verifying', 'photo-verifying', 'problem-camera-denied', 'result-first-registration', 'result-ownership-verified', 'result-receiving', 'result-invalid'];
       const seen = new Set<string>();
       await eachState(
         states.map(stateById),
@@ -133,6 +133,7 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
           try {
             seen.add(state.id);
             if (state.id === 'scan-camera') await camera(page);
+            if (state.id === 'scan-light-zoom') await zoomedOut(page);
             if (state.id === 'scan-verifying') await locked(page);
             if (state.id === 'photo-verifying') await withoutChrome(page, state.id);
             if (state.id === 'problem-camera-denied') await problem(page);
@@ -197,9 +198,22 @@ async function camera(page: Page): Promise<void> {
   const zoom = await check(page, '.n-cam__zoom', { _h: 44, 'min-width': 64, 'font-size': 14, color: IV });
   expect(isHelvetica((await read(page, '.n-cam__zoom', ['font-family']))['font-family']!)).toBe(true);
   expect(Number(zoom._left) - Number(light._right)).toBeCloseTo(10, 0);
+  // Its name says what pressing it does (C11's markup): zoomed in at 2×, it offers the widest view.
+  expect(await page.locator('.n-cam__zoom').getAttribute('aria-pressed')).toBe('true');
+  expect(await page.locator('.n-cam__zoom').getAttribute('aria-label')).toBe('Zoom out to 0.5×');
   // UPLOAD A PHOTO, a text link 44 px above the foot.
   await check(page, '.n-cam__upload', { bottom: 44 });
   await check(page, '.n-cam__upload .n-tl', { 'font-size': 10.5, 'letter-spacing': em(10.5, 0.26), color: IV });
+}
+
+/** C11's toggle pressed back to the widest view: LIGHT on, the zoom offering 2× and named for it. */
+async function zoomedOut(page: Page): Promise<void> {
+  expect(await page.locator('.n-cam__light').getAttribute('aria-pressed')).toBe('true');
+  const zoom = page.locator('.n-cam__zoom');
+  expect(await zoom.textContent()).toBe('2×');
+  expect(await zoom.getAttribute('aria-pressed')).toBe('false');
+  expect(await zoom.getAttribute('aria-label')).toBe('Zoom in to 2×');
+  expect(await page.getByRole('button', { name: 'Zoom in to 2×' }).count()).toBe(1);
 }
 
 /** C12: locked, then VERIFYING…: the veil darker, the ring and the moons heavier, one status line, the controls fainter. */

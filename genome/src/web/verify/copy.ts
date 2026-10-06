@@ -28,6 +28,12 @@ export const HINTS: Readonly<Record<Exclude<ScanHint, null>, string>> = Object.f
 
 export const SCAN_GUIDE = 'Align the ORBES CODE within the orbit';
 
+/** The zoom toggle's accessible name (C11): what pressing it does, its figure named. */
+export const ZOOM = Object.freeze({
+  out: (label: string) => `Zoom out to ${label}`,
+  in: (label: string) => `Zoom in to ${label}`,
+});
+
 export type ProblemKind =
   | 'camera-denied'
   | 'camera-missing'

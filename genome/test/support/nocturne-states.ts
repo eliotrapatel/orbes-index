@@ -781,6 +781,21 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'board', title: 'The boutique board of a LIVE RELEASE, kept as it is', refs: ['kept (scope guard)', 'live-07'], variant: 'room', path: (d) => `/verify/releases/${d.releases.room}/board#${d.links.board}`, ready: '.view--board .live-door__seal' },
 
   // ── States that write (each its own piece or post) ──
+  // The owner's transfer code first: you@example.com still holds its two pieces (TITANE, as C37 draws the header); the two
+  // registrations after it give the account its third and fourth (PLATINE from three), which MY PIECES' states list.
+  {
+    id: 'result-transfer-code',
+    title: 'The owner’s transfer code, created',
+    refs: ['C37'],
+    variant: 'full',
+    as: you,
+    mutates: true,
+    ...result('gold', async (run) => {
+      await tab(run, 'OWNERSHIP').click();
+      await button(run, 'CREATE TRANSFER CODE').click();
+      await button(run, 'CANCEL TRANSFER').waitFor({ timeout: 20_000 });
+    }),
+  },
   {
     id: 'result-registered-now',
     title: 'Registered: REGISTERED TO YOU, VIEW AS OWNER',
@@ -817,19 +832,6 @@ export const UI_STATES: readonly UiState[] = [
       await button(run, 'VIEW AS OWNER').click();
       await run.page.getByText('SHARE THE GENOME').first().waitFor({ timeout: 20_000 });
       await sleep(2_500);
-    }),
-  },
-  {
-    id: 'result-transfer-code',
-    title: 'The owner’s transfer code, created',
-    refs: ['C37'],
-    variant: 'full',
-    as: you,
-    mutates: true,
-    ...result('gold', async (run) => {
-      await tab(run, 'OWNERSHIP').click();
-      await button(run, 'CREATE TRANSFER CODE').click();
-      await button(run, 'CANCEL TRANSFER').waitFor({ timeout: 20_000 });
     }),
   },
   {
@@ -1023,10 +1025,17 @@ export function stateById(id: string): UiState {
   return s;
 }
 
-/** The states in the order a run reaches them: by variant (each its own stage), those that write last. */
+/**
+ * The states in the order a run reaches them: by variant (each its own stage), those that write last, in the order
+ * UI_STATES lists them whatever order they were asked in (each finds the demo as the writes listed before it left it).
+ */
 export function runOrder(states: readonly UiState[]): UiState[] {
   const variants = [...new Set(states.map((s) => s.variant))];
-  return variants.flatMap((v) => [...states.filter((s) => s.variant === v && !s.mutates), ...states.filter((s) => s.variant === v && s.mutates)]);
+  const listed = (s: UiState) => UI_STATES.findIndex((x) => x.id === s.id);
+  return variants.flatMap((v) => [
+    ...states.filter((s) => s.variant === v && !s.mutates),
+    ...states.filter((s) => s.variant === v && s.mutates).sort((a, b) => listed(a) - listed(b)),
+  ]);
 }
 
 // ── Reaching a state ───────────────────────────────────────────────────────

@@ -25,7 +25,7 @@
  */
 import { h, s } from '../../shared/dom.js';
 import { SEAL_HOLD_MS, sealScale } from '../capture.js';
-import { ACTION_LABELS, SCAN_GUIDE, STATUS } from '../copy.js';
+import { ACTION_LABELS, SCAN_GUIDE, STATUS, ZOOM } from '../copy.js';
 import { arcPath, viewRoot } from './common.js';
 import { textLink } from './nocturne.js';
 
@@ -167,6 +167,9 @@ export function scanView(handlers: ScanHandlers): ScanView {
     setZoom: (available, label, active) => {
       zoom.hidden = !available;
       zoom.textContent = label;
+      // C11: the name says what pressing does; zoomed in, the figure is the widest view it returns to.
+      if (label) zoom.setAttribute('aria-label', active ? ZOOM.out(label) : ZOOM.in(label));
+      else zoom.removeAttribute('aria-label');
       zoom.setAttribute('aria-pressed', active ? 'true' : 'false');
     },
   };

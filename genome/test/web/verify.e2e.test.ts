@@ -2984,6 +2984,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
   it('falls back gracefully when the device has no camera', async () => {
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    // The device has no camera whatever the machine running the test has: getUserMedia answers as a browser does then.
+    await page.addInitScript(() => {
+      if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('Requested device not found', 'NotFoundError'));
+    });
+    await page.reload();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).click();
     expect(await resultTitle(page)).toBe('NO CAMERA AVAILABLE');
     await page.getByRole('button', { name: 'RETURN' }).click();
