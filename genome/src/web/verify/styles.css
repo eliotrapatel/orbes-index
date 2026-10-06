@@ -5113,10 +5113,11 @@ body[data-screen="board"] .corners {
    Left out, being the canvas's and not the app's: the board's frame (`.s`, 390 px: here the column), its
    annotations (`.st`), its stand-ins of the camera (`.feed`, `.card-print`, `.cam`) and of the room (`.door`, `.shot`),
    and the crops `.ph.zoom` and `.zoom2` (a photograph is shown whole, never cropped).
-   Three values differ on purpose: the © line takes ash (the canvas's smoke is under 4.5 : 1); the rail's links, the
+   Four values differ on purpose: the © line takes ash (the canvas's smoke is under 4.5 : 1); the rail's links, the
    footer's links, DB-IP's and a text link carry their 44 px tap zone in padding given back by a negative margin (the
    type and its place are the canvas's), the rail clipping sideways only (`overflow-x: clip`) so a zone may reach
-   above it; the keyboard focus is an ivory ring, 2 px, 2 px off. */
+   above it; a button's label is in Gravesend capitals (`n-g n-btn`, the plan's Type rule), where the canvas's markup
+   leaves `.btn` in Helvetica Neue; the keyboard focus is an ivory ring, 2 px, 2 px off. */
 
 /* ── The ground, the column, the type (COMMON .s, C .C) ── */
 

@@ -597,6 +597,38 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     }
   }, 120_000);
 
+  it('while the room reads who you are: the monogram breathing above ONE MOMENT… (addition 14, C40), then the room', async () => {
+    const r = await release({ opensAt: new Date(Date.now() + 120_000) });
+    const me = await account(1);
+    const { page, context, problems } = await phone(me.token);
+    // The account's standing held back: the page knows the room is open, not yet who is in it.
+    let answer!: () => void;
+    const held = new Promise<void>((resolve) => (answer = resolve));
+    const state = (u: URL) => u.pathname === `/api/v1/live/${r.id}/state`;
+    await page.route(state, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.goto(`${srv.origin}/verify/releases/${r.id}`);
+    const loading = page.locator('.live__waiting .n-loading');
+    await visible(loading);
+    expect(await loading.locator('svg.n-breath').count()).toBe(1);
+    expect(await loading.locator('svg.n-breath').getAttribute('aria-hidden')).toBe('true');
+    await textOf(loading.locator('.n-loading__text'), LIVE.loading);
+    expect(await loading.locator('.n-loading__text').getAttribute('aria-busy')).toBe('true');
+    expect(await page.locator('#live-title').innerText()).toBe(LIVE.kind);
+    // The same piece as every page's loading: 40 px, ivory, ONE MOMENT… 16 px under it.
+    const box = await loading.locator('svg.n-breath').boundingBox();
+    expect([box?.width, box?.height]).toEqual([40, 40]);
+    expect(await loading.locator('.n-loading__text').evaluate((el) => getComputedStyle(el).color)).toBe(IVORY);
+    // Answered (this read and the ones after it pass through).
+    answer();
+    await textOf(page.locator('.live__room > .live__overline'), 'THE ROOM IS OPEN');
+    expect(await page.locator('.n-loading').count()).toBe(0);
+    expect(problems).toEqual([]);
+    await context.close();
+  }, 120_000);
+
   it('the LIVE RELEASES refused (429): THE RELEASES keeps the draws and says the LIVE half missing; a draw\'s address shows its draw; a LIVE one its failure, then TRY AGAIN', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 2 * 86_400_000) });
     const draw = await f.drops.create({ modelId: f.modelId, title: 'MONOLITHE — release II', quantity: 2, opensAt: new Date(Date.now() - 3_600_000), closesAt: new Date(Date.now() + 86_400_000), earlyAccessHours: 0 }, f.admin);

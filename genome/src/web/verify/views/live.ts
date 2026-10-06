@@ -96,6 +96,7 @@ import type { AccountQuestion, ClientServices, LiveAccess, LiveEndedSheet, LiveE
 import { releaseContactModel, upper } from '../view-model.js';
 import { contactBlock, legalLinks, lookbookLink, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
+import { loadingState } from './nocturne.js';
 import { OwnershipPanel } from './ownership.js';
 import { QuestionBlock } from './question.js';
 import { CEREMONY_VIBRATION } from './result.js';
@@ -675,7 +676,7 @@ class LivePage {
       case 'failed':
         return this.failedScreen();
       case 'loading':
-        return { kind, el: h('section', { class: 'live__waiting' }, h('h1', { class: 'visually-hidden', id: 'live-title', text: LIVE.kind }), h('p', { class: 'micro soft', attrs: { 'aria-busy': 'true' }, text: LIVE.loading })), update: () => undefined };
+        return { kind, el: h('section', { class: 'live__waiting' }, h('h1', { class: 'visually-hidden', id: 'live-title', text: LIVE.kind }), loadingState(LIVE.loading)), update: () => undefined };
       case 'announced':
         return this.announcedScreen();
       case 'signin':

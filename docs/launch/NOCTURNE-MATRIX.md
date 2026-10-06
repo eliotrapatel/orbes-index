@@ -47,6 +47,14 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   - The question after (C30) is shown to a collector whose turn passed on 5 Oct (the guest); you secured your piece.
   - No model has a gallery (the media store refuses a gallery photograph that is the model's cover, and the demo holds
     the owner's three photographs only): the sheet's gallery is *(not reached)*.
+- **Where the build differs from the boards on purpose** (since N2; the final board review does not count these as
+  regressions):
+  - The © line takes ash, not the boards' smoke (contrast).
+  - The rail's links, the footer's links, DB-IP's and a text link carry a 44 px tap zone in padding given back by a
+    negative margin (the type and its place are the boards').
+  - The rail clips sideways only (`overflow-x: clip`), so a link's tap zone may reach above it.
+  - Every button's label is in Gravesend capitals, as the plan's Type rule says, where the boards' markup leaves `.btn`
+    in Helvetica Neue (SIGN OUT on C2, TRY AGAIN on C40: the same width, its glyphs 1.5 px lower at scale 2).
 
 ## Boards without a screen of their own today
 
