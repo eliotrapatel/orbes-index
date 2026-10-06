@@ -616,15 +616,27 @@ async function accountLineWraps(page: Page): Promise<void> {
   }
 }
 
-/** C16: INVALID SIGNATURE: the void mark, the help line 36 px under the message, the contact, the report's row. */
+/**
+ * C16: INVALID SIGNATURE: the void mark, the help line 36 px under the message, WRITE TO ORBES CLIENT SERVICES where the
+ * contact stood (plan NEXT-NINE, CS-01: the hairline button 18 px under the line, 10 px with the rail's tracking on a
+ * phone's width, so it keeps one line down to 320 px), the report's row.
+ */
 async function invalid(page: Page): Promise<void> {
   await withChrome(page, 'INVALID SIGNATURE');
   await check(page, '.n-result .n-tone__ring', { 'stroke-width': '1.5px', stroke: IV });
   expect(await page.locator('.n-result .n-tone__core').count()).toBe(0);
   await check(page, '.n-result__help', { 'margin-top': 36, 'padding-left': 24 });
   await check(page, '.n-result__help .n-tx', { 'font-size': 15, 'line-height': 23.25, color: ASH });
-  await check(page, '.n-contact', { 'margin-top': 14, 'row-gap': 8, 'font-size': 13, color: ASH });
-  await check(page, '.n-contact .n-contact__email', { 'font-size': 10.5, 'letter-spacing': em(10.5, 0.22), color: IV, 'text-decoration-line': 'underline' });
+  expect(await page.locator('.n-contact').count()).toBe(0);
+  await check(page, '.n-result__help .n-write__open', {
+    'margin-top': 18,
+    height: 54,
+    'background-color': NONE,
+    color: IV,
+    'box-shadow': 'rgba(246, 242, 234, 0.34) 0px 0px 0px 1px inset',
+    'font-size': 10,
+    'letter-spacing': em(10, 0.16),
+  });
   await check(page, '.n-report', { 'padding-top': 76 });
   await check(page, '.n-report__toggle', { 'padding-top': 20, 'padding-bottom': 20, 'border-top-color': LINE, 'border-bottom-color': LINE });
   await check(page, '.n-report__toggle .n-report__title', { 'font-size': 11, 'letter-spacing': em(11, 0.26), 'line-height': 16.5, color: IV });
@@ -728,12 +740,12 @@ async function column(page: Page): Promise<void> {
 
 /** C2: the sheet, its handle, its words, its rows, the switch, the dots, SIGN OUT (C .plate .handle .row .sw .meter .btn.ol). */
 async function sheet(page: Page): Promise<void> {
-  const panel = await check(page, '.n-account__panel', { 'background-color': PLATE, 'border-top-left-radius': '16px', 'border-top-right-radius': '16px', 'padding-bottom': 40 });
+  const panel = await check(page, '.n-account__panel:not(.n-write__panel)', { 'background-color': PLATE, 'border-top-left-radius': '16px', 'border-top-right-radius': '16px', 'padding-bottom': 40 });
   // Under the header and the rail, 24 px down (56 + 40 + 24), the page dimmed above it.
   expect(Number(panel._top)).toBeCloseTo(120, 1);
-  await check(page, '.n-account__scrim', { 'background-color': 'rgba(0, 0, 0, 0.55)' });
-  expect(await page.locator('.n-account__panel').getAttribute('role')).toBe('dialog');
-  expect(await page.locator('.n-account__panel').getAttribute('aria-modal')).toBe('true');
+  await check(page, '.n-account:not(.n-write) .n-account__scrim', { 'background-color': 'rgba(0, 0, 0, 0.55)' });
+  expect(await page.locator('.n-account__panel:not(.n-write__panel)').getAttribute('role')).toBe('dialog');
+  expect(await page.locator('.n-account__panel:not(.n-write__panel)').getAttribute('aria-modal')).toBe('true');
   // The handle, 40 × 4, on the plate's top edge and centred (as C2 draws it).
   const handle = await check(page, '.n-handle', { width: 40, height: 4, 'border-top-left-radius': '2px', 'background-color': LINE2 });
   expect(Number(handle._top)).toBeCloseTo(120, 1);
@@ -756,7 +768,7 @@ async function sheet(page: Page): Promise<void> {
   await check(page, '.n-account__benefit', { content: '"–"', position: 'absolute', left: 0 }, '::before');
   // The rows: SOUND with its switch, CHANGE PASSWORD, MY PIECES, the legal pages; their hairlines; 10.5 px, 0.22 em words.
   await check(page, '.n-account__rows', { 'margin-top': 30, 'border-top-width': 1, 'border-top-color': LINE });
-  expect(await page.locator('.n-account__rows .n-row__label').allInnerTexts()).toEqual(['SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'PRIVACY · TERMS · LEGAL · HELP']);
+  expect(await page.locator('.n-account__rows .n-row__label').allInnerTexts()).toEqual(['MESSAGES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'PRIVACY · TERMS · LEGAL · HELP']);
   await check(page, '.n-account__rows .n-row', { display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'column-gap': 14, 'padding-top': 16, 'padding-bottom': 16, 'padding-left': 24, 'padding-right': 24, 'border-bottom-width': 1, 'border-bottom-color': LINE, 'font-size': 15 });
   await check(page, '.n-account__rows .n-row__label', { 'font-size': 10.5, 'letter-spacing': em(10.5, 0.22) });
   await check(page, '.n-account__rows .n-row--lead svg', { width: 16, height: 16, 'stroke-width': '1.4px' });
@@ -774,7 +786,7 @@ async function sheet(page: Page): Promise<void> {
   await check(page, '.n-account__close svg', { width: 22, height: 22, 'stroke-width': '1.25px' });
   // The tap on the dimmed page closes it; focus returns to the account button.
   await page.keyboard.press('Escape');
-  expect(await page.locator('.n-account').isHidden()).toBe(true);
+  expect(await page.locator('.n-account:not(.n-write)').isHidden()).toBe(true);
   expect(await page.evaluate(() => document.activeElement?.classList.contains('n-acct'))).toBe(true);
 }
 

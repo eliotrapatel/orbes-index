@@ -153,12 +153,10 @@ h1[tabindex="-1"]:focus,
   line-height: 2.55;
 }
 
-/* ORBES Client Services (BRAND-DESIGN-SYSTEM §4.2), under the help line of a
-   non-authentic result and under the note of a warranty that no longer
-   applies: the prefilled email, a text link (the hairline button stays the
-   foot's), then the phone (a text link made of figures, so in the reading
-   face) and the hours, centred. The 12 px gap keeps the tap zones apart (a
-   text link's zone reaches 4 px past its box). */
+/* ORBES Client Services' email (BRAND-DESIGN-SYSTEM §4.2) under FORGOTTEN
+   PASSWORD? of the vault's sign-in, a text link, centred: the one place of
+   the collector app it remains (plan NEXT-NINE, CS-01). The 12 px gap keeps
+   the tap zones apart (a text link's zone reaches 4 px past its box). */
 .contact {
   display: flex;
   flex-direction: column;
@@ -166,12 +164,6 @@ h1[tabindex="-1"]:focus,
   gap: 12px;
   margin-top: 28px;
   text-align: center;
-}
-
-.contact__hours {
-  max-width: 34ch;
-  color: var(--ink-soft);
-  text-wrap: balance;
 }
 
 /* Tabs */
@@ -2234,12 +2226,6 @@ body[data-screen="board"] .corners {
 /* The banner's countdown: figures, in the reading face. */
 .live-banner__clock {
   font-family: var(--font);
-}
-
-/* The phone of ORBES Client Services is a text link made of figures: read and dialled, never in the display face. */
-.contact__phone {
-  font-family: var(--font);
-  font-variant-numeric: tabular-nums;
 }
 
 /* ── Small screens & reduced motion ────────────────────────────────────── */

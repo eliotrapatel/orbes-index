@@ -76,6 +76,10 @@
  *                 (NOCTURNE_SHOTS), each a state of the parity tool on the NOCTURNE demo (the canvas's content, the
  *                 owner's photographs, a fixed clock), captured as scripts/parity.ts captures it; each variant of the
  *                 demo on a stage of its own. Run last by default, after the demo dataset's stage is left
+ *   --only messages
+ *                 WRITE TO ORBES CLIENT SERVICES and MESSAGES alone (messages-*-phone.png, messages-*-desk.png; plan
+ *                 NEXT-NINE, CS-01): MESSAGES_SHOTS, states of the parity tool, each at a phone's and a desk's size.
+ *                 Not run by default (screens for the owner's review, into --out)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -149,7 +153,7 @@ const DESKTOP = { width: 1440, height: 900 } as const;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-type Only = 'live' | 'plus' | 'nocturne';
+type Only = 'live' | 'plus' | 'nocturne' | 'messages';
 
 function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | null } {
   let out = DEFAULT_OUT;
@@ -158,8 +162,8 @@ function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | nu
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne')) only = argv[++i] as Only;
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages')) only = argv[++i] as Only;
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages)`);
   }
   return { out, raw, only };
 }
@@ -1815,10 +1819,65 @@ async function captureNocturne(shots: Shots): Promise<void> {
   if (failures.length) throw new Error(`${failures.length} NOCTURNE capture(s) failed:\n${failures.join('\n')}`);
 }
 
+// ── MESSAGES (plan NEXT-NINE, CS-01) ─────────────────────────────────────
+
+/**
+ * WRITE TO ORBES CLIENT SERVICES and MESSAGES (plan NEXT-NINE, CS-01, step 1.6): the write sheet signed in, signed out
+ * and sent, MESSAGES empty and with a conversation, NOW's line, each at a phone's size (390 × 844) and a desk's
+ * (1440 × 900), as the states of the parity tool reach them on the NOCTURNE demo. `--only messages` writes them alone.
+ */
+export const MESSAGES_SHOTS: readonly { state: string; name: string }[] = Object.freeze([
+  { state: 'account-write', name: 'messages-01-write' },
+  { state: 'result-write-signed-out', name: 'messages-02-write-signed-out' },
+  { state: 'account-messages-empty', name: 'messages-03-messages-empty' },
+  { state: 'account-write-sent', name: 'messages-04-write-sent' },
+  { state: 'account-messages-thread', name: 'messages-05-messages-thread' },
+  { state: 'now-messages', name: 'messages-06-now-line' },
+]);
+
+const DESK = Object.freeze({ width: 1440, height: 900 });
+
+async function captureMessages(shots: Shots): Promise<void> {
+  // The phones, then the desks, each on a demo of its own: a state that writes (a message sent, an answer) runs once
+  // per demo, so the desk's thread is not the phone's written twice.
+  const failures: string[] = [];
+  for (const desk of [false, true]) {
+    const names = new Map<string, string>();
+    const states = MESSAGES_SHOTS.map((s) => {
+      const phone = stateById(s.state);
+      const state = desk ? { ...phone, id: `${phone.id}-desk`, size: DESK } : phone;
+      names.set(state.id, `${s.name}-${desk ? 'desk' : 'phone'}`);
+      return state;
+    });
+    await eachState(
+      states,
+      async (state, { stage, demo, browser }) => {
+        const opened = await openState(browser, stage, demo, state);
+        try {
+          shots.png(names.get(state.id)!, await shootState(opened.page, state));
+        } catch (e) {
+          failures.push(`${state.id}: ${e instanceof Error ? e.message : String(e)}`);
+        } finally {
+          await opened.close();
+        }
+      },
+      log,
+    );
+  }
+  if (failures.length) throw new Error(`${failures.length} MESSAGES capture(s) failed:\n${failures.join('\n')}`);
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const { out, raw, only } = parseArgs(process.argv.slice(2));
+  if (only === 'messages') {
+    const shots = new Shots(out, raw);
+    log('MESSAGES:');
+    await captureMessages(shots);
+    log(`${shots.written.length} screenshots in ${relative(process.cwd(), out) || '.'}`);
+    return;
+  }
   if (only === 'nocturne') {
     const shots = new Shots(out, raw);
     log('NOCTURNE:');

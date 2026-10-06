@@ -18,9 +18,14 @@
  * shared certificate (choice 3); the scanner, VERIFYING… and a problem of the scan (C11, C12, C17) are NOCTURNE's
  * without it.
  * The shared certificate also sets Safari's bars back to its light (addition 13): every other screen's are the ink.
+ *
+ * The shell also holds the write sheet (plan NEXT-NINE, CS-01: views/write.ts), which every WRITE TO ORBES CLIENT
+ * SERVICES of the app opens, on any screen, and opens the account sheet on MESSAGES for SEE MESSAGES and NOW's READ.
  */
 import { h } from '../../shared/dom.js';
 import type { ApiClient } from '../api.js';
+import type { ConcerningTarget } from '../messages-model.js';
+import type { ContactModel } from '../view-model.js';
 import { CHROME } from '../copy.js';
 import { accountButton, chapterOf, railLive, type ChapterId } from '../nocturne-model.js';
 import type { SessionStore } from '../session.js';
@@ -30,9 +35,10 @@ import { AccountSheet } from './account.js';
 import { CHAPTER_PATHS, showRailLive } from '../../shared/chapters.js';
 import { PIECES_PATH } from './common.js';
 import { appAnchor, CHAPTERS, drawSound, footer, icon, monogram } from './nocturne.js';
+import { registerMessages, registerWriteSheet, WriteSheet } from './write.js';
 
 export interface ShellDeps {
-  api: Pick<ApiClient, 'clubStatus' | 'products' | 'changePassword' | 'logout' | 'liveNext' | 'drops'>;
+  api: ApiClient;
   session: SessionStore;
   sound: SoundSwitch;
   /** A chapter of the rail, in the app (its history entry the router's). */
@@ -41,6 +47,12 @@ export interface ShellDeps {
   onSignIn(): void;
   /** The SCAN ring: the scanner (a tap: the sound signature's context is created in it). */
   onScan(): void;
+  /** MESSAGES' CONCERNING link: the place a message concerned, in the app. */
+  onConcerning(target: ConcerningTarget): void;
+  /** NOW's line follows MESSAGES once read. */
+  onMessagesRead(): void;
+  /** FORGOTTEN PASSWORD? of the write sheet's sign-in: ORBES Client Services' email. */
+  recoveryContact(): Promise<ContactModel | undefined>;
 }
 
 /**
@@ -78,6 +90,8 @@ export class Shell {
   /** The SCAN ring, fixed at the foot of the screen. */
   readonly ring: HTMLElement;
   readonly sheet: AccountSheet;
+  /** WRITE TO ORBES CLIENT SERVICES (CS-01). */
+  readonly write: WriteSheet;
   private club: ClubStatus | null = null;
   private clubFor: string | null = null;
   private railReadAt = -Infinity;
@@ -142,8 +156,25 @@ export class Shell {
         this.drawAccount();
       },
       outside: () => [this.column, this.ring],
+      onConcerning: (target) => deps.onConcerning(target),
+      onRead: () => deps.onMessagesRead(),
     });
-    document.body.append(this.ring, this.sheet.el);
+    this.write = new WriteSheet({
+      api: deps.api,
+      session: deps.session,
+      outside: () => [this.column, this.ring],
+      recoveryContact: () => deps.recoveryContact(),
+      onMessages: (trigger) => this.sheet.openMessages(trigger),
+    });
+    registerWriteSheet((context, trigger) => {
+      if (this.sheet.isOpen) this.sheet.close();
+      this.write.open(context, trigger);
+    });
+    registerMessages((trigger) => {
+      if (this.write.isOpen) this.write.close();
+      this.sheet.openMessages(trigger);
+    });
+    document.body.append(this.ring, this.sheet.el, this.write.el);
 
     deps.session.subscribe(() => this.onSession());
     this.drawAccount();
@@ -158,8 +189,9 @@ export class Shell {
     const nocturne = chrome || NOCTURNE_SCREENS.includes(screen);
     document.body.classList.toggle('nocturne', nocturne);
     for (const el of [this.header, this.rail, this.foot, this.ring]) el.hidden = !chrome;
-    // Another screen (a chapter, back, a link): the sheet gives way to it.
+    // Another screen (a chapter, back, a link): the sheets give way to it.
     if (this.sheet.isOpen) this.sheet.close();
+    if (this.write.isOpen) this.write.close();
     const chapter = chapterOf(screen);
     for (const [c, link] of this.links) {
       if (c === chapter) link.setAttribute('aria-current', 'page');

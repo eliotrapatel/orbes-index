@@ -25,12 +25,13 @@
  *   (the header, the rail and the SCAN ring above and below: views/shell.ts; the footer with the legal pages and DB-IP)
  *
  * Other results show no product lines and no tabs: the GENOME when the server sends it, a line for ORBES Client
- * Services and, when it is configured, CONTACT ORBES CLIENT SERVICES (an email prefilled with the reference and the
- * result), its phone and hours (C15, C16); UNUSUAL ACTIVITY adds, when the server offers it, the section DO YOU HOLD
+ * Services (the reference below is attached to the message) and WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01:
+ * the write sheet, the scan attached) (C15, C16); UNUSUAL ACTIVITY adds, when the server offers it, the section DO YOU HOLD
  * THE CERTIFICATE CARD? (registration with the claim code) or DO YOU HOLD A TRANSFER CODE? (F-03: receiving the piece
  * with it); then WHERE DID YOU SEE OR BUY THIS PIECE?, an optional answer attached to the scan: open under UNUSUAL
- * ACTIVITY (C15), a row that opens (+) under the others (C16). A warranty that no longer applies offers the same contact
- * in its tab, and FORGOTTEN PASSWORD? in the OWNERSHIP panel offers it to a customer who needs a recovery code (C-04).
+ * ACTIVITY (C15), a row that opens (+) under the others (C16). A warranty that no longer applies offers the same button
+ * in its tab, and FORGOTTEN PASSWORD? in the OWNERSHIP panel keeps the email of ORBES Client Services for a customer who
+ * needs a recovery code (C-04).
  *
  * The ceremony (P-D01) is the result VIEW AS OWNER opens right after a first registration: the GENOME comes first,
  * at 220 px (C36), above the photograph; its eight glyphs appear one by one (opacity and scale of each
@@ -42,17 +43,18 @@
  * Everything shown comes from the server outcome through resultViewModel().
  */
 import { h, prefersReducedMotion } from '../../shared/dom.js';
-import { CEREMONY, CONTACT, LOOKBOOK, PHOTOS, RECEIVING } from '../copy.js';
+import { CEREMONY, LOOKBOOK, MESSAGES, PHOTOS, RECEIVING } from '../copy.js';
 import { genomeFromModel, nocturneGenome } from '../genome-view.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import { prepareShareImage, shareGenomeImage } from '../share-image.js';
 import { initialTab, type CeremonyModel, type PhotoModel, type ResultViewModel, type TabId } from '../view-model.js';
 import { viewRoot, withNumerals } from './common.js';
-import { button, contactLines, fadedPhoto, textLink, toneMark } from './nocturne.js';
+import { button, fadedPhoto, textLink, toneMark } from './nocturne.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
 import { reportSection, type ReportDeps } from './report.js';
 import { tabsView, type TabsView } from './tabs.js';
+import { writeButton } from './write.js';
 
 export interface ResultHandlers {
   onScanAgain(): void;
@@ -218,13 +220,13 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
     tabs.root.classList.add('n-px', 'n-result__tabs');
     sections.push(tabs.root);
   } else if (vm.tone !== 'authentic') {
-    // The help line, then (when Client Services is configured) the prefilled email, the phone and the hours.
+    // The help line, then WRITE TO ORBES CLIENT SERVICES, the scan attached (CS-01).
     sections.push(
       h(
         'section',
         { class: ['n-px', 'n-result__help', vm.genome ? null : 'n-result__help--first'], attrs: { 'aria-label': 'ORBES Client Services' } },
-        h('p', { class: 'n-tx', text: 'ORBES Client Services can help with any question about this piece. Please quote the reference below.' }),
-        vm.contact?.placement === 'help' ? contactLines(vm.contact, CONTACT) : null,
+        h('p', { class: 'n-tx', text: MESSAGES.help }),
+        vm.write?.placement === 'help' ? writeButton(vm.write.context) : null,
       ),
     );
     // UNUSUAL ACTIVITY with a registration token (the server's step 10 exception): the buyer holding

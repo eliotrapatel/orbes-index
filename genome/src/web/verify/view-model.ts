@@ -15,16 +15,19 @@
  * ownership tab offers (or, on an UNUSUAL ACTIVITY result that carries a
  * registration token or a transfer window, the certificate-card or the
  * transfer-code section), when the scan's windows end on this device's
- * clock, where ORBES Client
- * Services is offered, with its prefilled email, and whether the customer
+ * clock, where WRITE TO ORBES CLIENT SERVICES is offered with what it
+ * attaches (plan NEXT-NINE, CS-01: the scan, and its warranty on the
+ * warranty tab), the email of ORBES Client Services under FORGOTTEN
+ * PASSWORD? (the one place it remains), and whether the customer
  * may say where the piece was seen or bought (a result that was not
  * authentic). It never infers
  * anything the server did not say (no internal statuses, no scores), and it
  * never upgrades a state.
  */
-import { contactLines, phoneHref, type ContactLines } from '../shared/client-services.js';
+import { contactLines, type ContactLines } from '../shared/client-services.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
-import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, LOOKBOOK, PHOTOS, RELEASES, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
+import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
+import { scanContext, warrantyContext, type WriteContext } from './messages-model.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
 export type Tone = 'authentic' | 'caution' | 'void';
@@ -74,26 +77,24 @@ export type OwnershipMode =
   | { kind: 'account'; lead?: string };
 
 /**
- * ORBES Client Services, offered where the result asks the customer to contact it: under the
- * help line of every caution and void result, and in the WARRANTY tab when the warranty no
- * longer applies; under FORGOTTEN PASSWORD? in the OWNERSHIP panel, where Client Services
- * gives the one-time recovery code (C-04); and in MY PIECES, under a report only Client
- * Services can withdraw (a theft, or a loss they recorded: F-01). Built from GET
- * /api/v1/client-services; absent when neither a usable email nor a usable phone is configured.
+ * ORBES Client Services' email under FORGOTTEN PASSWORD? (C-04), in the OWNERSHIP panel: the one place of the collector
+ * app where it remains (plan NEXT-NINE, CS-01), for someone who also lost their recovery code. Built from GET
+ * /api/v1/client-services; absent when no usable email is configured. Everywhere else, WRITE TO ORBES CLIENT SERVICES.
  */
 export interface ContactModel {
-  placement: 'help' | 'warranty' | 'recovery' | 'piece' | 'release' | 'salon';
-  /**
-   * mailto: with the subject "ORBES — REF {ref} — {title}" and a body prefilled with the reference, the result and
-   * the time; for a forgotten password, the subject "ORBES — FORGOTTEN PASSWORD" and the reference; for a piece of
-   * MY PIECES, the subject "ORBES — {product id} — {status}" and the piece; for a place held in a release (P-R03),
-   * the subject "ORBES — {release} — PLACE HELD", the release and the entry; for a request of the private salon (P-X08),
-   * the subject "ORBES — {model} — REQUEST", the model and the request.
-   */
+  placement: 'recovery';
+  /** mailto: with the subject "ORBES — FORGOTTEN PASSWORD" and a body prefilled with the reference of the scan on screen. */
   mailto?: string;
-  /** The number as configured, and its tel: link. */
-  phone?: { label: string; href: string };
-  hours?: string;
+}
+
+/**
+ * WRITE TO ORBES CLIENT SERVICES on a result (plan NEXT-NINE, CS-01): under the help line of every caution and void
+ * result (`help`), and in the WARRANTY tab when the warranty no longer applies (`warranty`), with the scan it attaches
+ * (null: a staff scan, which attaches nothing).
+ */
+export interface WriteModel {
+  placement: 'help' | 'warranty';
+  context: WriteContext | null;
 }
 
 /**
@@ -176,8 +177,8 @@ export interface ResultViewModel {
   verifiedAt: string;
   /** Short scan reference for Client Services. */
   reference: string;
-  /** How to reach ORBES Client Services, where the result asks for it (and Client Services is configured). */
-  contact?: ContactModel;
+  /** WRITE TO ORBES CLIENT SERVICES, where the result asks for it (CS-01), with what it attaches. */
+  write?: WriteModel;
   /** The same contact for a customer who forgot the password (OWNERSHIP panel, FORGOTTEN PASSWORD?), when configured. */
   recoveryContact?: ContactModel;
   /** Where the piece was seen or bought: results that were not authentic only. */
@@ -386,7 +387,7 @@ function genomeVersionNumber(version: string): number {
 
 /**
  * Build the result screen from a verification outcome. `clientServices` (GET /api/v1/client-services)
- * adds the contact of ORBES Client Services where the result asks for it. `receivedAt` (this device's
+ * adds the email of ORBES Client Services under FORGOTTEN PASSWORD? (CS-01: everywhere else, the button). `receivedAt` (this device's
  * clock, ms) is when the outcome arrived: the windows of the scan (registration, transfer) then end on
  * this device's clock 15 minutes after it, as they do on the server's after `verifiedAt`, whatever the
  * gap between the two clocks; without it, they end at the server's `expiresAt` as written. `ceremony` (P-D01): this
@@ -496,12 +497,15 @@ export function resultViewModel(
     vm.ownership = ownershipMode(outcome, clockShift(outcome, opts.receivedAt));
   }
 
-  // Wherever the copy sends the customer to ORBES Client Services: every caution and void result, and
-  // a warranty that no longer applies. Nothing when Client Services is not configured.
+  // Wherever the copy sends the customer to ORBES Client Services: every caution and void result, and a warranty that
+  // no longer applies. The button attaches the scan (a staff scan, which the server refuses to attach, nothing).
   const placement = !authentic ? 'help' : vm.warranty && outcome.warranty?.status === 'VOID' ? 'warranty' : null;
-  if (placement && opts.clientServices) {
-    const contact = contactModel(opts.clientServices, vm, placement, opts.offsetMinutes ?? 0);
-    if (contact) vm.contact = contact;
+  if (placement) {
+    const scanId = outcome.staffScan !== true && SCAN_ID.test(outcome.scanId ?? '') ? outcome.scanId.toLowerCase() : null;
+    vm.write = {
+      placement,
+      context: scanId ? (placement === 'warranty' ? warrantyContext(scanId, vm.reference, state) : scanContext(scanId, vm.reference, state)) : null,
+    };
   }
   // Wherever the OWNERSHIP panel may offer sign-in, FORGOTTEN PASSWORD? leads to Client Services (C-04).
   if (vm.ownership.kind !== 'unregistered') {
@@ -520,82 +524,28 @@ export function resultViewModel(
 const SCAN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * The contact: an email with `subject`, whose body leaves the customer room to write above the facts that
- * have a value (RFC 6068 wants CRLF line breaks in a mailto body), then the phone and the hours.
+ * The email of ORBES Client Services with `subject`, whose body leaves the customer room to write above the facts that
+ * have a value (RFC 6068 wants CRLF line breaks in a mailto body). The only mailto: of the collector app, for
+ * recoveryContactModel alone (CS-01).
  */
-function contactOf(lines: ContactLines, placement: ContactModel['placement'], subject: string, facts: [string, string][]): ContactModel {
-  const contact: ContactModel = { placement };
+function contactOf(lines: ContactLines, subject: string, facts: [string, string][]): ContactModel {
+  const contact: ContactModel = { placement: 'recovery' };
   if (lines.email) {
     const body = ['', '', ...facts.filter(([, value]) => value.length > 0).map(([label, value]) => `${label}: ${value}`)].join('\r\n');
     contact.mailto = `mailto:${lines.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   }
-  if (lines.phone) contact.phone = { label: lines.phone, href: phoneHref(lines.phone) };
-  if (lines.hours) contact.hours = lines.hours;
   return contact;
 }
 
-function contactModel(cs: ClientServices, vm: ResultViewModel, placement: ContactModel['placement'], offsetMinutes: number): ContactModel | null {
-  const lines = contactLines(cs);
-  if (!lines) return null;
-  const title = vm.titleSub ? `${vm.titleMain} — ${vm.titleSub}` : vm.titleMain;
-  const subject = ['ORBES', vm.reference ? `REF ${vm.reference}` : '', title].filter((x) => x.length > 0).join(' — ');
-  // The time is the one on the customer's screen, in their own zone, so the email names its offset from UTC.
-  return contactOf(lines, placement, subject, [
-    [CONTACT.reference, vm.reference],
-    [CONTACT.result, title],
-    [CONTACT.warranty, placement === 'warranty' ? (vm.warranty?.status ?? '') : ''],
-    [CONTACT.verified, vm.verifiedAt ? `${vm.verifiedAt} (${utcOffsetLabel(offsetMinutes)})` : ''],
-  ]);
-}
-
 /**
- * ORBES Client Services for a customer who forgot the password (C-04): they check the customer's identity,
- * then give a one-time recovery code. The email's subject says why; its body carries the reference of the
- * scan on screen, which helps Client Services find the piece and its owner. Null when nothing is configured.
+ * ORBES Client Services for a customer who forgot the password (C-04): they check the customer's identity, then give a
+ * one-time recovery code. The email's subject says why; its body carries the reference of the scan on screen, which
+ * helps Client Services find the piece and its owner. Null without an email: the phone and the hours are no longer shown
+ * in the collector app (CS-01).
  */
 export function recoveryContactModel(cs: ClientServices | undefined, reference: string): ContactModel | null {
   const lines = cs ? contactLines(cs) : null;
-  return lines ? contactOf(lines, 'recovery', CONTACT.recoverySubject, [[CONTACT.reference, reference]]) : null;
-}
-
-/**
- * ORBES Client Services for a piece of MY PIECES whose report only they withdraw (a theft, or a loss they recorded,
- * F-01): the email's subject names the piece and its status line, its body the piece. Null when nothing is configured.
- */
-export function pieceContactModel(cs: ClientServices | undefined, productId: string, status: string): ContactModel | null {
-  const lines = cs ? contactLines(cs) : null;
-  return lines ? contactOf(lines, 'piece', ['ORBES', productId, status].filter((x) => x.length > 0).join(' — '), [[CONTACT.piece, productId]]) : null;
-}
-
-/**
- * ORBES Client Services for a place held in a release (P-R03): they contact the account to conclude the sale, and it
- * may write first. The email's subject names the release and the place (`status`: PLACE HELD, or PLACE RESERVED for a
- * direct reservation, P-X02), its body the release and the entry's id (the one its page publishes). Null when nothing
- * is configured.
- */
-export function releaseContactModel(cs: ClientServices | undefined, title: string, entryId: string, status: string = RELEASES.statusLabel.SELECTED): ContactModel | null {
-  const lines = cs ? contactLines(cs) : null;
-  return lines
-    ? contactOf(lines, 'release', ['ORBES', title, status].filter((x) => x.length > 0).join(' — '), [
-        [RELEASES.contactRelease, title],
-        [RELEASES.contactEntry, entryId],
-      ])
-    : null;
-}
-
-/**
- * ORBES Client Services for a request of the private salon (P-X08): they contact the account to conclude the sale, and
- * it may write first. The email's subject names the model (`ORBES — ECLIPSE — REQUEST`), its body the model and the
- * request's id. Null when nothing is configured.
- */
-export function salonContactModel(cs: ClientServices | undefined, model: string, requestId: string): ContactModel | null {
-  const lines = cs ? contactLines(cs) : null;
-  return lines
-    ? contactOf(lines, 'salon', ['ORBES', model, LOOKBOOK.salon.contactSubject].filter((x) => x.length > 0).join(' — '), [
-        [LOOKBOOK.salon.contactModel, model],
-        [LOOKBOOK.salon.contactRequest, requestId],
-      ])
-    : null;
+  return lines?.email ? contactOf(lines, CONTACT.recoverySubject, [[CONTACT.reference, reference]]) : null;
 }
 
 /**

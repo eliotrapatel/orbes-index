@@ -23,7 +23,7 @@
  * facts, care, the salon's price and request; the address follows, so a variant's own address opens it selected), You
  * own N; the model's next release as a plate row (its day and hour, no countdown); for a model of the salon its price,
  * the tier it is offered from, its sentence, a note and REQUEST THIS PIECE (the sheet's one primary action), or once
- * requested REQUESTED with the contact of ORBES Client Services; THE STORY, the gallery full width, SPECIFICATIONS, CARE.
+ * requested REQUESTED with WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01); THE STORY, the gallery full width, SPECIFICATIONS, CARE.
  *
  * The grid reads GET /api/v1/lookbook (the same for everyone) and, for a signed-in account, the club's reserved models
  * (a 403 for an account that holds no piece: the teaser; none of its tier: what opens the salon, `opensAt`) and its
@@ -37,15 +37,16 @@
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { CONTACT, LOOKBOOK } from '../copy.js';
+import { LOOKBOOK } from '../copy.js';
+import { modelContext } from '../messages-model.js';
 import { cardFace, lookbookGroups, lookbookSheetPath, ownedLine, SALON_NOTE_MAX, selectDot, sheetLine, sheetModel, withRequest, type CardModel, type CollectionGroup, type SheetModel } from '../lookbook-model.js';
 import { nextRelease, type NextReleaseModel } from '../next-release-model.js';
 import type { SessionStore } from '../session.js';
-import type { ClientServices, ClubLookbook, DropCard, LiveCard, OwnedPiece, SalonOpening } from '../types.js';
-import { salonContactModel } from '../view-model.js';
+import type { ClubLookbook, DropCard, LiveCard, OwnedPiece, SalonOpening } from '../types.js';
 import { LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { appAnchor, button, contactLines, definitionList, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, textLink, variantDots } from './nocturne.js';
+import { appAnchor, button, definitionList, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, textLink, variantDots } from './nocturne.js';
+import { writeButton } from './write.js';
 
 export interface LookbookView {
   root: HTMLElement;
@@ -76,8 +77,6 @@ export interface SheetDeps {
   onVariant(slug: string): void;
   /** The model's next release: its page. */
   onRelease(id: string): void;
-  /** P-X08: the contact of ORBES Client Services, shown once a piece of the salon is requested ({} when none is configured). */
-  clientServices(): Promise<ClientServices>;
   /** Opened as a screen change: once read, focus comes to its title (the model's name), as it came to the sheet's before. */
   focus?: boolean;
 }
@@ -361,14 +360,13 @@ class SheetPage {
   /** The account's pieces (You own N) and the model's next release, read with the sheet. */
   private pieces: OwnedPiece[] = [];
   private releases: { live: LiveCard[]; drops: DropCard[] } = { live: [], drops: [] };
-  /** P-X08: REQUEST THIS PIECE under way, its refusal, the note typed (kept across a render), the contact. */
+  /** P-X08: REQUEST THIS PIECE under way, its refusal, the note typed (kept across a render). */
   private busy = false;
   private requestError: string | null = null;
   private readonly note = h('textarea', {
     class: 'n-model__note sheet__note',
     attrs: { id: 'sheet-note', name: 'note', rows: 3, maxlength: SALON_NOTE_MAX, 'aria-describedby': 'sheet-note-hint' },
   });
-  private contacts: ClientServices = {};
   private focusPending: boolean;
   /** The address the sheet reads: the one it was opened with, then the dot chosen (the address follows it). */
   private slug: string | null;
@@ -450,8 +448,6 @@ class SheetPage {
       const s = await this.deps.session.ensure();
       if (s.status !== 'signed-in') return opts.owner ? 'not-owner' : { kind: 'missing' };
       const sheet = sheetModel(await this.deps.api.clubLookbookSheet(slug));
-      // A model of the salon among its dots: the contact shown once it is requested (none configured: {}).
-      if (sheet.salon || sheet.dots.some((d) => d.face.salon)) this.contacts = await this.deps.clientServices().catch(() => ({}));
       return { kind: 'ready', sheet };
     } catch (e) {
       this.deps.session.noteError(e);
@@ -599,7 +595,7 @@ class SheetPage {
 
   /**
    * P-X08, THE PRIVATE SALON: the price and the tier it is offered from; its sentence, a note and REQUEST THIS PIECE, or,
-   * once requested, REQUESTED: ORBES Client Services will contact you, and their contact.
+   * once requested, REQUESTED: ORBES Client Services will contact you, and WRITE TO ORBES CLIENT SERVICES (CS-01).
    */
   private salonSection(s: SheetModel): HTMLElement {
     const salon = s.salon!;
@@ -610,7 +606,6 @@ class SheetPage {
     facts.push([LOOKBOOK.salon.tier, salon.tier]);
     const out: (HTMLElement | null)[] = [heading, definitionList(facts, { kind: 'kv', extraClass: 'n-model__facts sheet__salon-rows' })];
     if (salon.request) {
-      const contact = salonContactModel(this.contacts, s.name, salon.request.id);
       out.push(
         h(
           'div',
@@ -618,7 +613,8 @@ class SheetPage {
           h('p', { class: 'n-g n-t3 n-ivc n-model__requested-label', text: LOOKBOOK.salon.requestedLabel }),
           h('p', { class: 'n-tx n-model__requested-text sheet__requested-text', text: LOOKBOOK.salon.requested }),
         ),
-        contact ? contactLines(contact, CONTACT) : null,
+        // WRITE TO ORBES CLIENT SERVICES, the model and its request attached (CS-01).
+        writeButton(modelContext(salon.request.modelId, s.name)),
       );
     } else {
       out.push(
@@ -653,13 +649,13 @@ class SheetPage {
       const request = await this.deps.api.requestPiece(sheet.slug, note.length > 0 ? note : null);
       if (this.disposed) return;
       this.note.value = '';
-      this.load = { kind: 'ready', sheet: withRequest(this.load.kind === 'ready' ? this.load.sheet : sheet, sheet.slug, request.id) };
+      this.load = { kind: 'ready', sheet: withRequest(this.load.kind === 'ready' ? this.load.sheet : sheet, sheet.slug, request.id, request.modelId) };
     } catch (e) {
       if (this.disposed) return;
       this.deps.session.noteError(e);
       if (e instanceof ApiError && e.code === 'SHOP_REQUEST_OPEN') {
         // Already requested (from another tab or device, or the sheet was stale): the sheet read again says REQUESTED,
-        // with the contact of ORBES Client Services, rather than a failure.
+        // with WRITE TO ORBES CLIENT SERVICES, rather than a failure.
         const again = await this.fromClub(sheet.slug);
         this.load = again === 'not-owner' ? { kind: 'missing' } : again;
       } else {

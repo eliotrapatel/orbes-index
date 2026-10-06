@@ -14,11 +14,18 @@
  *   1 more piece … It adds:
  *   – Priority care …
  *   ─────────────────────────────────
+ *   MESSAGES                    NEW ›     the conversation with ORBES Client Services (plan NEXT-NINE, CS-01): NEW
+ *                                         while an answer is unread; its view in the sheet (below)
  *   SOUND                         (●)     the sound signature (P-D07), as the footer's SOUND ON / OFF
  *   CHANGE PASSWORD                 ›     its form in the sheet (C39): the current password, a new one; CANCEL
  *   MY PIECES                       ›
  *   PRIVACY · TERMS · LEGAL · HELP  ›     the legal pages' index, in a new tab
  *   [            SIGN OUT            ]
+ *
+ * MESSAGES (CS-01): ‹ YOUR ACCOUNT, the title, the conversation oldest first and scrolled to the latest, each message
+ * with its author line (YOU · 6 OCT 2026 · 14:02, or ORBES CLIENT SERVICES: staff are never named), on the collector's
+ * the place it concerned (a link to it; a scan has none), the body as written; then YOUR REPLY (YOUR MESSAGE before the
+ * first) and SEND. Opening it marks the conversation read. The collector never sees a status.
  *
  * A modal dialog: the page under it is inert and holds still; focus goes to its title and comes back to the account
  * button when it closes.
@@ -26,17 +33,18 @@
 import { h } from '../../shared/dom.js';
 import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { ACCOUNT, ACCOUNT_PASSWORD, PIECES, SOUND } from '../copy.js';
+import { ACCOUNT, ACCOUNT_PASSWORD, MESSAGES, PIECES, SOUND } from '../copy.js';
+import { messageProblem, threadModel, type ConcerningTarget, type ThreadModel } from '../messages-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSwitch } from '../sound.js';
 import { tierModel } from '../tier-model.js';
 import type { ClubStatus } from '../types.js';
-import { FormError, MIN_PASSWORD, nocturneForm } from './forms.js';
-import { button, field, icon, leadRow, switchControl, tierDots } from './nocturne.js';
-import { PIECES_PATH } from './common.js';
+import { FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
+import { button, field, icon, leadRow, switchControl, textLink, tierDots } from './nocturne.js';
+import { PIECES_PATH, withNumerals } from './common.js';
 
 export interface AccountSheetDeps {
-  api: Pick<ApiClient, 'clubStatus' | 'products' | 'changePassword' | 'logout'>;
+  api: Pick<ApiClient, 'clubStatus' | 'products' | 'changePassword' | 'logout' | 'messages' | 'writeMessage' | 'readMessages' | 'messagesUnread'>;
   session: SessionStore;
   sound: SoundSwitch;
   /** MY PIECES, in the app. */
@@ -47,9 +55,13 @@ export interface AccountSheetDeps {
   onClub(club: ClubStatus | null): void;
   /** What the page holds outside the sheet, made inert while it is open. */
   outside(): HTMLElement[];
+  /** A message's place in the app (MESSAGES' CONCERNING link): the sheet closes, the app opens it. */
+  onConcerning(target: ConcerningTarget): void;
+  /** NEW was read here (MESSAGES opened): NOW's line follows. */
+  onRead?(): void;
 }
 
-type View = 'account' | 'password';
+type View = 'account' | 'password' | 'messages';
 
 export class AccountSheet {
   readonly el: HTMLElement;
@@ -63,6 +75,12 @@ export class AccountSheet {
   private busy = false;
   private readGen = 0;
   private soundInput: HTMLInputElement | null = null;
+  /** An answer is unread (MESSAGES' NEW); false until read. */
+  private unread = false;
+  /** MESSAGES: the conversation as read, null while it reads (or unreadable: `threadError`). */
+  private thread: ThreadModel | null = null;
+  private threadError: string | null = null;
+  private replyDraft = '';
 
   constructor(private readonly deps: AccountSheetDeps) {
     this.panel = h('section', { class: 'n-account__panel', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'account-title' } });
@@ -86,6 +104,13 @@ export class AccountSheet {
   /** The club's status the header read (shown at once, read again as the sheet opens). */
   known(club: ClubStatus | null): void {
     this.club = club;
+  }
+
+  /** The sheet, opened on MESSAGES (SEE MESSAGES, NOW's READ); `trigger` gets the focus back when it closes. */
+  openMessages(trigger: HTMLElement | null): void {
+    if (this.deps.session.state.status !== 'signed-in') return;
+    if (!this.isOpen) this.open(trigger ?? document.body);
+    this.openThread();
   }
 
   open(trigger: HTMLElement): void {
@@ -126,15 +151,18 @@ export class AccountSheet {
   /** The club's status and the pieces, read afresh: YOUR TIER as it is now. */
   private async read(): Promise<void> {
     const gen = ++this.readGen;
-    const [club, pieces] = await Promise.all([
+    const [club, pieces, unread] = await Promise.all([
       this.deps.api.clubStatus().catch((e: unknown) => {
         this.deps.session.noteError(e);
         return null;
       }),
       this.deps.api.products().catch(() => null),
+      this.deps.api.messagesUnread().catch(() => false),
     ]);
     if (gen !== this.readGen || !this.isOpen) return;
     this.club = club;
+    // MESSAGES opened meanwhile has read it: NEW stays off.
+    this.unread = this.view === 'messages' ? false : unread;
     this.listed = pieces?.length ?? 0;
     this.deps.onClub(club);
     if (this.view === 'account') {
@@ -159,7 +187,7 @@ export class AccountSheet {
       h('h2', { class: 'n-g n-lb', id: 'account-title', attrs: { tabindex: -1 }, text: ACCOUNT.title }),
       h('button', { class: 'n-account__close', attrs: { type: 'button', 'aria-label': ACCOUNT.close }, data: { key: 'close' }, on: { click: () => this.close() } }, icon('close')),
     );
-    const body = this.view === 'password' ? this.passwordView() : this.accountView(s.account.email);
+    const body = this.view === 'password' ? this.passwordView() : this.view === 'messages' ? this.messagesView() : this.accountView(s.account.email);
     this.panel.replaceChildren(h('div', { class: 'n-handle', attrs: { 'aria-hidden': 'true' } }), head, ...body);
   }
 
@@ -180,6 +208,7 @@ export class AccountSheet {
       h(
         'div',
         { class: 'n-account__rows' },
+        this.messagesRow(),
         h('label', { class: 'n-row n-account__sound' }, h('span', { class: 'n-g n-row__label', text: SOUND.label }), sw.el),
         leadRow(ACCOUNT_PASSWORD.change, { onOpen: () => this.openPassword(), attrs: { 'data-key': 'password' } }),
         leadRow(PIECES.link, {
@@ -236,6 +265,141 @@ export class AccountSheet {
       { class: ['n-px', 'n-account__tier', m.badge ? null : 'n-account__club'], attrs: { 'aria-labelledby': 'account-tier' } },
       ...parts.filter((p): p is HTMLElement => p !== null),
     );
+  }
+
+  // ── MESSAGES (plan NEXT-NINE, CS-01) ─────────────────────────────────────
+
+  /** The first row: MESSAGES, NEW at its right while an answer is unread (no number, no badge on the header). */
+  private messagesRow(): HTMLElement {
+    const row = leadRow(MESSAGES.title, { onOpen: () => this.openThread(), attrs: { 'data-key': 'messages' }, extraClass: 'n-account__messages' });
+    if (this.unread) row.insertBefore(h('span', { class: 'n-g n-lb n-ivc n-row__new', text: MESSAGES.new }), row.lastChild);
+    return row;
+  }
+
+  private openThread(): void {
+    this.view = 'messages';
+    this.notice = null;
+    this.thread = null;
+    this.threadError = null;
+    this.render();
+    this.focusTitle();
+    void this.readThread();
+  }
+
+  private closeThread(): void {
+    this.view = 'account';
+    this.render();
+    this.panel.querySelector<HTMLElement>('[data-key="messages"]')?.focus({ preventScroll: true });
+  }
+
+  /** The conversation, read; then read up to its latest message (NEW and NOW's line go). */
+  private async readThread(focusReply = false): Promise<void> {
+    const gen = ++this.readGen;
+    try {
+      const t = await this.deps.api.messages();
+      if (gen !== this.readGen || !this.isOpen || this.view !== 'messages') return;
+      this.thread = threadModel(t, -new Date().getTimezoneOffset());
+      this.threadError = null;
+      this.unread = false;
+      if (this.thread.readUpTo && t.unread) {
+        void this.deps.api.readMessages(this.thread.readUpTo).then(
+          () => this.deps.onRead?.(),
+          () => undefined,
+        );
+      }
+    } catch (e) {
+      this.deps.session.noteError(e);
+      if (gen !== this.readGen || !this.isOpen) return;
+      this.threadError = messageOf(e);
+    }
+    this.render();
+    const list = this.panel.querySelector<HTMLElement>('.n-messages__list');
+    list?.lastElementChild?.scrollIntoView({ block: 'end' });
+    if (focusReply) this.panel.querySelector<HTMLElement>('textarea')?.focus({ preventScroll: true });
+    else this.focusTitle();
+  }
+
+  private messagesView(): HTMLElement[] {
+    const back = h(
+      'button',
+      { class: 'n-g n-tl n-messages__back', attrs: { type: 'button' }, data: { key: 'messages-back' }, on: { click: () => this.closeThread() } },
+      icon('back', { small: true }),
+      MESSAGES.back,
+    );
+    const t = this.thread;
+    const out: (HTMLElement | null)[] = [
+      h('div', { class: 'n-px n-messages__head' }, back, h('h3', { class: 'n-g n-t3 n-ivc n-messages__title', text: MESSAGES.title })),
+    ];
+    if (this.threadError) out.push(h('p', { class: 'n-px n-err n-messages__error', attrs: { role: 'alert' }, text: this.threadError }));
+    if (!t) {
+      if (!this.threadError) out.push(h('p', { class: 'n-px n-g n-lb n-messages__loading', attrs: { role: 'status' }, text: PIECES.loading }));
+      return out.filter((x): x is HTMLElement => x !== null);
+    }
+    if (t.empty) out.push(h('p', { class: 'n-px n-sm n-messages__empty', text: t.empty }));
+    if (t.items.length > 0) {
+      out.push(
+        h(
+          'ol',
+          { class: 'n-px n-messages__list', attrs: { 'aria-label': MESSAGES.title } },
+          ...t.items.map((m) =>
+            h(
+              'li',
+              { class: ['n-messages__item', m.mine ? 'n-messages__item--mine' : null], attrs: { 'data-testid': 'message' } },
+              h('p', { class: 'n-g n-lb n-messages__author' }, ...withNumerals(m.author)),
+              m.concerning
+                ? h(
+                    'p',
+                    { class: 'n-messages__concerning' },
+                    h('span', { class: 'n-g n-lb', text: `${MESSAGES.concerning} ` }),
+                    m.concerning.target
+                      ? textLink(m.concerning.label, { onOpen: () => this.toConcerning(m.concerning!.target!), extraClass: 'n-messages__link' })
+                      : h('span', { class: 'n-g n-lb n-ivc', text: m.concerning.label }),
+                  )
+                : null,
+              h('p', { class: 'n-tx n-messages__body', text: m.body }),
+            ),
+          ),
+        ),
+      );
+    }
+    out.push(this.replyForm(t.replyLabel));
+    return out.filter((x): x is HTMLElement => x !== null);
+  }
+
+  private toConcerning(target: ConcerningTarget): void {
+    this.close();
+    this.deps.onConcerning(target);
+  }
+
+  /** YOUR REPLY (YOUR MESSAGE before the first) and SEND: a message written from MESSAGES carries no context. */
+  private replyForm(label: string): HTMLElement {
+    const area = h('textarea', {
+      class: 'n-fld__input n-write__area',
+      id: 'messages-reply',
+      attrs: { name: 'message', rows: 4, maxlength: MESSAGES.max, required: true, 'aria-describedby': 'messages-reply-hint', autocomplete: 'off' },
+    });
+    area.value = this.replyDraft;
+    area.addEventListener('input', () => {
+      this.replyDraft = area.value;
+    });
+    const field = h(
+      'div',
+      { class: 'n-fld-group' },
+      h('label', { class: 'n-fld', attrs: { for: 'messages-reply' } }, h('span', { class: 'n-g n-lab', text: label })),
+      area,
+      h('p', { class: 'n-sm n-fld__hint', id: 'messages-reply-hint', text: MESSAGES.hint }),
+    );
+    const form = nocturneForm(this.deps.session, 'reply', [field], MESSAGES.send, async () => {
+      const problem = messageProblem(area.value);
+      if (problem) {
+        area.setAttribute('aria-invalid', 'true');
+        throw new FormError(problem);
+      }
+      await this.deps.api.writeMessage(area.value.replace(/\r\n?/g, '\n').trim(), null);
+      this.replyDraft = '';
+      await this.readThread(true);
+    });
+    return h('div', { class: 'n-px n-messages__reply' }, form);
   }
 
   // ── CHANGE PASSWORD (C-04, C39) ──────────────────────────────────────────

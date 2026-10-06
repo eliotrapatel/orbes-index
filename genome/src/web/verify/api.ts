@@ -21,6 +21,9 @@
  *   board's is a POST (its secret in the body), read as a stream of bytes.
  */
 import type {
+  AccountMessage,
+  AccountThread,
+  MessageContextInput,
   AccountOrder,
   AccountQuestion,
   OrderCareGuide,
@@ -669,6 +672,34 @@ export class ApiClient {
     const blob = await res.blob();
     if (!type.startsWith('application/pdf') || blob.size === 0 || blob.size > MAX_FILE_BYTES) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
     return { blob, filename: filenameOf(res.headers.get('content-disposition'), 'ORBES-ownership-certificate.pdf') };
+  }
+
+  // ── MESSAGES (plan NEXT-NINE, CS-01; API §10.17) ─────────────────────────
+
+  /** The account's conversation with ORBES Client Services, oldest first, and whether an answer is unread (401 signed out). */
+  async messages(): Promise<AccountThread> {
+    const r = await this.request<{ messages?: unknown; unread?: unknown }>('GET', '/api/v1/account/messages');
+    if (!Array.isArray(r?.messages) || typeof r.unread !== 'boolean') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return { messages: r.messages as AccountMessage[], unread: r.unread };
+  }
+
+  /** WRITE TO ORBES CLIENT SERVICES: the words, and what they concern (none from MESSAGES). */
+  async writeMessage(body: string, context: MessageContextInput | null): Promise<AccountMessage> {
+    const r = await this.request<{ message?: AccountMessage }>('POST', '/api/v1/account/messages', context ? { body, context } : { body }, { csrf: true });
+    if (!r?.message || typeof r.message.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.message;
+  }
+
+  /** The conversation read up to `upTo` (the latest message on screen). */
+  async readMessages(upTo: string): Promise<void> {
+    await this.request('POST', '/api/v1/account/messages/read', { upTo }, { csrf: true });
+  }
+
+  /** Whether an answer is unread: NOW's line and the account sheet's NEW. */
+  async messagesUnread(): Promise<boolean> {
+    const r = await this.request<{ unread?: unknown }>('GET', '/api/v1/account/messages/unread');
+    if (typeof r?.unread !== 'boolean') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.unread;
   }
 
   // ── Transport ────────────────────────────────────────────────────────────

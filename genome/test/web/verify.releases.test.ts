@@ -196,31 +196,31 @@ describe('the releases\' list and pages (P-R03)', () => {
 
 describe('an account\'s entry (P-R03)', () => {
   const release = { id: ID, title: 'MONOLITHE — RELEASE I', state: 'OPEN' as const, opensAt: '2026-10-12T10:00:00.000Z' };
-  const opts = { offsetMinutes: 120, clientServices: { email: 'support@theorbes.com', hours: 'Monday to Friday, 10:00–18:00' } };
+  const opts = { offsetMinutes: 120 };
 
   it('offers ENTER THE DRAW while entries are open, WITHDRAW until the draw, and says when entries open', () => {
     expect(entryModel(release, null, opts)).toMatchObject({ label: null, canEnter: true, canWithdraw: false, sentence: RELEASES.status.open });
     expect(entryModel({ ...release, state: 'UPCOMING' }, null, opts)).toMatchObject({ canEnter: false, sentence: 'Entries open on 12 October 2026, 12:00 (UTC+02:00).' });
     expect(entryModel({ ...release, state: 'CLOSED' }, null, opts)).toMatchObject({ canEnter: false, sentence: 'Entries are closed. The draw follows.' });
     expect(entryModel({ ...release, state: 'DRAWN' }, null, opts).sentence).toBe('The draw has taken place.');
-    expect(entryModel(release, entry(), opts)).toMatchObject({ label: 'ENTERED', entryId: ENTRY, canEnter: false, canWithdraw: true, contact: null });
+    expect(entryModel(release, entry(), opts)).toMatchObject({ label: 'ENTERED', entryId: ENTRY, canEnter: false, canWithdraw: true, write: null });
     expect(entryModel({ ...release, state: 'CLOSED' }, entry(), opts)).toMatchObject({ canWithdraw: true, sentence: 'You are entered in the draw, which follows the close of entries.' });
     expect(entryModel(release, entry({ status: 'WITHDRAWN' }), opts)).toMatchObject({ label: 'WITHDRAWN', canEnter: true, canWithdraw: false });
     expect(entryModel({ ...release, state: 'CLOSED' }, entry({ status: 'WITHDRAWN' }), opts)).toMatchObject({ canEnter: false, sentence: 'You withdrew from this draw.' });
     expect(entryModel({ ...release, state: 'CANCELLED' }, entry(), opts)).toMatchObject({ canEnter: false, canWithdraw: false, sentence: 'This release has been cancelled: there will be no draw.' });
   });
 
-  it('holds a place until its time, ORBES Client Services will contact the account, with their contact; then the waiting list, the sale, the lapse', () => {
+  it('holds a place until its time, ORBES Client Services will contact the account, with WRITE TO ORBES CLIENT SERVICES; then the waiting list, the sale, the lapse', () => {
     const held = entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'SELECTED', rank: 1, respondBy: '2026-10-16T12:00:00.000Z' }), opts);
     expect(held).toMatchObject({ label: 'PLACE HELD', canEnter: false, canWithdraw: false });
     expect(held.sentence).toBe('Your place is held until 16 October 2026, 14:00 (UTC+02:00) — ORBES Client Services will contact you.');
-    expect(held.contact).toMatchObject({ placement: 'release' });
-    const mailto = decodeURIComponent(held.contact!.mailto!);
-    expect(mailto).toContain('subject=ORBES — MONOLITHE — RELEASE I — PLACE HELD');
-    expect(mailto).toContain(`ENTRY: ${ENTRY}`);
-    expect(entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'SELECTED', respondBy: '2026-10-16T12:00:00.000Z' }), { offsetMinutes: 0 }).contact).toBeNull();
+    // CS-01: the button, the release attached with the place held (its id, never an email).
+    expect(held.write).toEqual({ kind: 'RELEASE', id: ID, label: 'MONOLITHE — RELEASE I · PLACE HELD' });
+    // Whatever the configuration of ORBES Client Services: the button needs none.
+    expect(entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'SELECTED', respondBy: '2026-10-16T12:00:00.000Z' }), { offsetMinutes: 0 }).write).toEqual(held.write);
     expect(entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'WAITLISTED', rank: 4 }), opts).sentence).toBe('You are on the waiting list, rank 4. ORBES Client Services will contact you if a place opens.');
-    expect(entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'CONFIRMED', rank: 1 }), opts)).toMatchObject({ label: 'CONCLUDED', sentence: RELEASES.status.confirmed });
+    expect(entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'CONFIRMED', rank: 1 }), opts)).toMatchObject({ label: 'CONCLUDED', sentence: RELEASES.status.confirmed, write: { kind: 'RELEASE', id: ID, label: 'MONOLITHE — RELEASE I · CONCLUDED' } });
+    expect(entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'WAITLISTED', rank: 4 }), opts).write).toBeNull();
     expect(entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'LAPSED', rank: 2 }), opts)).toMatchObject({ label: 'LAPSED', sentence: RELEASES.status.lapsed });
   });
 
@@ -274,7 +274,7 @@ describe('the early access of a release (P-X02)', () => {
 
   it('offers RESERVE A PLACE to a PLATINE or PALLADIUM account during the early access only, while a piece is left', () => {
     const release = { id: ID, title: 'MONOLITHE — RELEASE I', state: 'UPCOMING' as const, opensAt: '2026-10-12T10:00:00.000Z', earlyAccess: { opensAt: EARLY.earlyAccessOpensAt, open: true }, full: false };
-    const opts = { offsetMinutes: 120, clientServices: { email: 'support@theorbes.com' } };
+    const opts = { offsetMinutes: 120 };
     const opens = '12 October 2026, 12:00 (UTC+02:00)';
     expect(entryModel(release, null, { ...opts, tier: 2 })).toMatchObject({ canReserve: true, canEnter: false, sentence: RELEASES.status.early('PLATINE', opens) });
     expect(entryModel(release, null, { ...opts, tier: 3 })).toMatchObject({ canReserve: true, sentence: RELEASES.status.early('PALLADIUM', opens) });
@@ -293,12 +293,12 @@ describe('the early access of a release (P-X02)', () => {
     // Once entries are open, RESERVE A PLACE is gone: ENTER THE DRAW, for everyone.
     expect(entryModel({ ...soon, state: 'OPEN' }, null, { ...opts, tier: 3 })).toMatchObject({ canReserve: false, canEnter: true, sentence: RELEASES.status.open });
 
-    // The place reserved: PLACE RESERVED until its time, the contact of ORBES Client Services; no WITHDRAW.
+    // The place reserved: PLACE RESERVED until its time, WRITE TO ORBES CLIENT SERVICES (CS-01); no WITHDRAW.
     const mine = entry({ state: 'UPCOMING', status: 'SELECTED', reserved: true, respondBy: '2026-10-12T09:00:00.000Z' });
     const held = entryModel(release, mine, { ...opts, tier: 2 });
     expect(held).toMatchObject({ label: 'PLACE RESERVED', canReserve: false, canEnter: false, canWithdraw: false, entryId: ENTRY });
     expect(held.sentence).toBe('You reserved a place directly. It is held until 12 October 2026, 11:00 (UTC+02:00) — ORBES Client Services will contact you.');
-    expect(decodeURIComponent(held.contact!.mailto!)).toContain('subject=ORBES — MONOLITHE — RELEASE I — PLACE RESERVED');
+    expect(held.write).toEqual({ kind: 'RELEASE', id: ID, label: 'MONOLITHE — RELEASE I · PLACE RESERVED' });
     // Concluded or lapsed, as a place drawn; MY PIECES names it so.
     expect(entryModel(release, { ...mine, status: 'CONFIRMED' }, opts)).toMatchObject({ label: 'CONCLUDED', sentence: RELEASES.status.confirmed });
     expect(myEntries([mine], opts).map((e) => [e.stateLabel, e.entry.label])).toEqual([['ENTRIES OPEN SOON', 'PLACE RESERVED']]);

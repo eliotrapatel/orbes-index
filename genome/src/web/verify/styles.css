@@ -679,18 +679,12 @@ body.nocturne .pieces__empty {
   margin-top: 36px;
 }
 
-/* A 44 px zone each, given back: the lines stand as drawn, 8 px apart. The email's reaches up into the help line, the
-   phone's down into the hours, so the two never meet. */
+/* A 44 px zone, given back: the email (under FORGOTTEN PASSWORD?, CS-01) stands as drawn, its zone reaching up into the
+   sentence above it. */
 .n-contact__email {
   align-self: flex-start;
   margin-top: -28.25px;
   padding-top: 28.25px;
-}
-
-.n-contact__phone {
-  align-self: flex-start;
-  margin-bottom: -24.5px;
-  padding-bottom: 24.5px;
 }
 
 .n-contact .n-contact__email {
@@ -2625,4 +2619,144 @@ body.nocturne[data-screen="live"] {
 
 .n-post .circle__signin {
   margin-top: 0;
+}
+
+/* ── WRITE TO ORBES CLIENT SERVICES and MESSAGES (plan NEXT-NINE, CS-01): the button where the contact stood, the write
+   sheet (the account sheet's plate, views/write.ts), MESSAGES in the account sheet, NOW's line ── */
+
+/* The button stands where the contact stood: the margin's width, a breath above it. */
+.n-write__open {
+  margin-top: 18px;
+}
+
+.write__open {
+  margin-top: 18px;
+}
+
+/* WRITE TO ORBES CLIENT SERVICES stays on one line down to 320 px: on a phone's width its capitals close up (the rail's
+   tracking, 10 px), the hairline buttons as drawn otherwise. */
+@media (max-width: 420px) {
+  .n-write__open {
+    font-size: var(--n-fs-micro);
+    letter-spacing: var(--n-track-rail);
+  }
+
+  .btn.write__open {
+    padding: 0 12px;
+    letter-spacing: var(--n-track-rail);
+    text-indent: var(--n-track-rail);
+  }
+}
+
+.n-write__concerning {
+  margin-top: 22px;
+}
+
+.n-write__label {
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+}
+
+/* The message: an underlined textarea, its lines as written. */
+.n-write__area {
+  height: auto;
+  min-height: 132px;
+  padding: 10px 0;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.n-write__form .n-fld-group {
+  margin-top: 22px;
+}
+
+.n-write__cancel,
+.n-write__done {
+  margin-top: 14px;
+}
+
+.n-write__where {
+  margin-top: 18px;
+}
+
+.n-write__signin {
+  margin-top: 6px;
+}
+
+.n-write__sent {
+  margin-top: 26px;
+}
+
+.n-write__sent-text {
+  margin-top: 12px;
+}
+
+.n-write__see {
+  margin-top: 26px;
+}
+
+/* MESSAGES' row: NEW at its right, before the chevron. */
+.n-row__new {
+  margin-left: auto;
+}
+
+.n-messages__head {
+  margin-top: 10px;
+}
+
+.n-messages__title {
+  margin-top: 14px;
+}
+
+.n-messages__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.n-messages__empty,
+.n-messages__loading,
+.n-messages__error {
+  margin-top: 18px;
+}
+
+.n-messages__list {
+  margin-top: 18px;
+  list-style: none;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-messages__item {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--vault-hairline);
+}
+
+.n-messages__concerning {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.n-messages__body {
+  margin-top: 10px;
+  color: var(--vault-ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.n-messages__reply {
+  margin-top: 8px;
+}
+
+/* NOW's line under the hero, before YOUR PIECES, while an answer is unread. */
+.now__messages {
+  align-items: center;
+  margin-top: 40px;
+  padding-top: 18px;
+  padding-bottom: 18px;
+  border-top: 1px solid var(--vault-hairline);
+  border-bottom: 1px solid var(--vault-hairline);
+}
+
+.now__messages-sentence {
+  margin-top: 6px;
 }

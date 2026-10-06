@@ -699,33 +699,33 @@ describe('the announcements: the release calendar, I\'LL BE THERE, the banner', 
 });
 
 describe('MY PIECES: the account\'s LIVE RELEASE entries', () => {
-  it('lists each with its release, its status in words, its reference once held, ORBES Client Services once confirmed', () => {
+  it('lists each with its release, its status in words, its reference once held, WRITE TO ORBES CLIENT SERVICES once confirmed', () => {
     const release = { id: ID, phase: 'ENDED' as const, endedReason: 'SOLD_OUT' as const, title: 'Monolithe — live', name: 'Monolithe', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 3_600_000), afterRoomOf: null };
     const list: LiveAccountEntry[] = [
       { release, entry: entry({ status: 'CONFIRMED' }) },
       { release: { ...release, id: ID.replace('8a1d', '8a1e'), title: null, name: null }, entry: entry({ id: ID, status: 'MISSED' }) },
     ];
-    const contacts = { email: 'clientservices@theorbes.com' };
-    const [confirmed, missed] = myLiveEntries(list, { clientServices: contacts });
+    const [confirmed, missed] = myLiveEntries(list);
     expect(confirmed).toMatchObject({ dropId: ID, href: `/verify/releases/${ID}`, title: 'MONOLITHE — LIVE', stateLabel: 'LIVE RELEASE' });
     expect(confirmed!.entry).toMatchObject({ label: 'CONFIRMED', sentence: 'You secured your piece in size 52. Its steps follow in YOUR ORDERS.', reference: 'REFERENCE LR-01EDCB93', entryId: null, canEnter: false });
-    expect(confirmed!.entry.contact?.mailto).toContain('LR-01EDCB93');
+    // CS-01: WRITE TO ORBES CLIENT SERVICES, the release attached with its reference, no email.
+    expect(confirmed!.entry.write).toEqual({ kind: 'RELEASE', id: ID, label: 'MONOLITHE — LIVE · CONFIRMED · REFERENCE LR-01EDCB93' });
     // Its payment and delivery are its order's steps, in YOUR ORDERS (the vault's CONFIRMED screen keeps LIVE.reservedIn).
     expect(confirmed!.entry.sentence).not.toContain('settle payment');
     // A past fact, true once the order is paid, shipped, delivered, cancelled or returned: never "is reserved".
     expect(confirmed!.entry.sentence).not.toContain('reserved');
-    expect(myLiveEntries([{ release, entry: entry({ status: 'CONFIRMED', quantity: 2 }) }], {})[0]!.entry.sentence).toBe('You secured 2 pieces in size 52. Their steps follow in YOUR ORDERS.');
-    expect(missed).toMatchObject({ title: 'LIVE RELEASE', entry: { label: 'TURN PASSED', sentence: LIVE.sentence.MISSED, reference: null, contact: null } });
-    expect(myLiveEntries([{ release: { ...release, id: 'x' }, entry: entry() }], {})).toEqual([]);
+    expect(myLiveEntries([{ release, entry: entry({ status: 'CONFIRMED', quantity: 2 }) }])[0]!.entry.sentence).toBe('You secured 2 pieces in size 52. Their steps follow in YOUR ORDERS.');
+    expect(missed).toMatchObject({ title: 'LIVE RELEASE', entry: { label: 'TURN PASSED', sentence: LIVE.sentence.MISSED, reference: null, write: null } });
+    expect(myLiveEntries([{ release: { ...release, id: 'x' }, entry: entry() }])).toEqual([]);
   });
 
   it('opens an after-room\'s entry through the release it follows, said as THE AFTER-ROOM', () => {
     const child = ID.replace('8a1d', '8a1f');
     const release = { id: child, phase: 'ENDED' as const, endedReason: 'SOLD_OUT' as const, title: 'Night · THE AFTER-ROOM', name: 'Afterglow', imageUrl: null, opensAt: iso(T0), closesAt: iso(T0 + 900_000), afterRoomOf: ID };
-    const [m] = myLiveEntries([{ release, entry: entry({ status: 'CONFIRMED' }) }], {});
+    const [m] = myLiveEntries([{ release, entry: entry({ status: 'CONFIRMED' }) }]);
     expect(m).toMatchObject({ dropId: child, afterRoomOf: ID, href: `/verify/releases/${ID}/after-room`, title: 'NIGHT · THE AFTER-ROOM', stateLabel: 'THE AFTER-ROOM' });
     // A malformed one is the release's own.
-    expect(myLiveEntries([{ release: { ...release, afterRoomOf: 'x' }, entry: entry() }], {})[0]).toMatchObject({ href: `/verify/releases/${child}`, stateLabel: 'LIVE RELEASE' });
+    expect(myLiveEntries([{ release: { ...release, afterRoomOf: 'x' }, entry: entry() }])[0]).toMatchObject({ href: `/verify/releases/${child}`, stateLabel: 'LIVE RELEASE' });
   });
 });
 

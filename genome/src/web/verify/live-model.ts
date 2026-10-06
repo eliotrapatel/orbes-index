@@ -20,7 +20,6 @@ import { LIVE, RELEASES } from './copy.js';
 import { afterRoomPath, isReleaseId, releasePath, tierLabel, zonedDate, type EntryModel, type MyEntryModel } from './releases-model.js';
 import type {
   AfterRoomDoor,
-  ClientServices,
   LiveAccess,
   LiveAccountEntry,
   LiveBanner,
@@ -32,7 +31,8 @@ import type {
   LiveRoomSize,
   LiveSheet,
 } from './types.js';
-import { formatMoney, modelWithVariant, releaseContactModel, upper } from './view-model.js';
+import { formatMoney, modelWithVariant, upper } from './view-model.js';
+import { referenceWords, releaseContext } from './messages-model.js';
 
 const MEDIA_SRC = /^\/api\/v1\/media\/[0-9a-f]{64}$/;
 const SECOND = 1000;
@@ -782,7 +782,7 @@ export function bannerModel(b: LiveBanner | null, now: number): BannerModel | nu
 // ── MY PIECES ──────────────────────────────────────────────────────────────
 
 /** The account's entries in the LIVE RELEASES, as YOUR RELEASES lists them: its release, its status, what it means now. */
-export function myLiveEntries(list: readonly LiveAccountEntry[], opts: { clientServices?: ClientServices }): MyEntryModel[] {
+export function myLiveEntries(list: readonly LiveAccountEntry[]): MyEntryModel[] {
   return list
     .filter((x) => isReleaseId(x?.release?.id) && typeof x.entry?.status === 'string' && x.entry.status in LIVE.statusLabel)
     .map((x) => {
@@ -801,7 +801,8 @@ export function myLiveEntries(list: readonly LiveAccountEntry[], opts: { clientS
         canEnter: false,
         canWithdraw: false,
         canReserve: false,
-        contact: e.status === 'CONFIRMED' ? releaseContactModel(opts.clientServices, title, reference, label) : null,
+        // CONFIRMED: WRITE TO ORBES CLIENT SERVICES, the release attached with its reference (CS-01).
+        write: e.status === 'CONFIRMED' ? releaseContext(x.release.id, title, label, referenceWords(reference)) : null,
       };
       return parent
         ? { id: e.id, dropId: x.release.id, href: afterRoomPath(parent), afterRoomOf: parent, title, stateLabel: LIVE.afterRoom.kind, entry }

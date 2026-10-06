@@ -25,12 +25,14 @@
  *     Your piece is reserved. …                  what its step means
  *     SIZE · PRICE · ENGRAVING · TOTAL           its terms; once shipped CARRIER and TRACKING NUMBER, TRACK THE SHIPMENT
  *     ORDER OR-3F9A21C4                          its reference, for ORBES Client Services
+ *     [ WRITE TO ORBES CLIENT SERVICES ]         the write sheet, the order attached (plan NEXT-NINE, CS-01)
  *     DOCUMENTS                                  INVOICE, CREDIT NOTE (PDFs), CARE GUIDE (opens under it), OWNERSHIP
  *                                                CERTIFICATE (PDF, once the piece is registered to the account)
  *   RELEASES (P-R03; C31)
  *     MONOLITHE IN STEEL                         each entry of the account, a link to its release's page,
  *     LIVE RELEASE · CONFIRMED                   its state, what it means now, its id (the one the draw publishes) or its
- *     You secured your piece in size 16. …       reference, and the contact for a place held
+ *     You secured your piece in size 16. …       reference, and WRITE TO ORBES CLIENT SERVICES for a place held or
+ *                                                confirmed, the release attached (CS-01)
  *     REFERENCE LR-8K2M4Q
  *   (the header and its account sheet, the rail, the footer and the SCAN ring: views/shell.ts; SIGNED IN AS, CHANGE
  *   PASSWORD and SIGN OUT are the account sheet's, C2 and C39)
@@ -45,7 +47,8 @@
 import { h } from '../../shared/dom.js';
 import { saveDownload } from '../../shared/download.js';
 import type { ApiClient, OrderDocumentKind } from '../api.js';
-import { CONTACT, DEFAULT_CARE, ORDERS, PIECES, QUESTION, RELEASES } from '../copy.js';
+import { DEFAULT_CARE, ORDERS, PIECES, QUESTION, RELEASES } from '../copy.js';
+import { orderContext } from '../messages-model.js';
 import { myLiveEntries } from '../live-model.js';
 import { orderModels, type OrderModel } from '../orders-model.js';
 import { pieceModel, type PieceModel } from '../pieces-model.js';
@@ -55,7 +58,8 @@ import type { AccountOrder, AccountQuestion, ClientServices, ClubEntry, LiveAcco
 import { recoveryContactModel } from '../view-model.js';
 import { PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { appAnchor, contactLines, definitionList, fadedPhoto, failedState, icon, lift, loadingState, orderSteps, quietLine, tabs, textLink } from './nocturne.js';
+import { appAnchor, definitionList, fadedPhoto, failedState, icon, lift, loadingState, orderSteps, quietLine, tabs, textLink } from './nocturne.js';
+import { writeButton } from './write.js';
 import { OwnershipPanel } from './ownership.js';
 import { QuestionBlock } from './question.js';
 
@@ -281,7 +285,7 @@ class PiecesPage {
   /** The entries of RELEASES, the LIVE RELEASES' first; null when they could not be read. */
   private releaseItems(): MyEntryModel[] | null {
     if (this.entries === null || this.liveEntries === null) return null;
-    return [...myLiveEntries(this.liveEntries, { clientServices: this.contacts }), ...myEntries(this.entries, { offsetMinutes: -new Date().getTimezoneOffset(), clientServices: this.contacts })];
+    return [...myLiveEntries(this.liveEntries), ...myEntries(this.entries, { offsetMinutes: -new Date().getTimezoneOffset() })];
   }
 
   /** The tabs that have something to show (or that say they could not be read): PIECES always. */
@@ -466,7 +470,7 @@ class PiecesPage {
   private entryBlock(m: MyEntryModel): HTMLElement {
     const open = m.afterRoomOf ? this.deps.onAfterRoom : this.deps.onRelease;
     const link = appAnchor(m.href, ['n-g', 'n-t3', 'n-ivc', 'n-u', 'n-pieces__entry-title', 'pieces__entry-title'], open ? () => open(m.afterRoomOf ?? m.dropId) : undefined, ...withNumerals(m.title));
-    const contact = m.entry.contact;
+    const write = m.entry.write;
     return h(
       'article',
       { class: 'n-pieces__entry pieces__entry-card', data: { status: m.entry.label ?? '' } },
@@ -477,7 +481,7 @@ class PiecesPage {
       // by eye with the draw's list, never in the label's capitals.
       m.entry.entryId ? h('p', { class: 'n-g n-lb n-pieces__entry-line' }, RELEASES.entryId(''), h('span', { class: 'n-num n-pieces__entry-id pieces__entry-id', text: m.entry.entryId })) : null,
       m.entry.reference ? h('p', { class: 'n-g n-lb n-num n-pieces__entry-line pieces__entry-id' }, ...withNumerals(m.entry.reference)) : null,
-      contact ? contactLines(contact, CONTACT) : null,
+      write ? writeButton(write) : null,
     );
   }
 }
@@ -525,6 +529,8 @@ function orderCard(m: OrderModel, deps: OrderDeps): HTMLElement {
         )
       : null,
     h('p', { class: 'n-g n-lb n-num n-pieces__order-reference' }, ...withNumerals(m.reference)),
+    // WRITE TO ORBES CLIENT SERVICES, the order attached (CS-01), under its reference and before its documents.
+    writeButton(orderContext({ id: m.id, model: m.title })),
     m.documents.length > 0 ? orderDocumentsBlock(m, deps) : null,
   ];
   const article = h('article', { class: ['n-pieces__order', ended ? 'is-ended' : null], attrs: { 'aria-labelledby': titleId }, data: { status: m.status, order: m.reference.replace(/^ORDER /, '') } });

@@ -1028,8 +1028,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(href.searchParams.get('subject')).toBe('ORBES — FORGOTTEN PASSWORD');
     expect(href.searchParams.get('body')).toBe(`\r\n\r\nREFERENCE: ${ref}`);
     await attrOf(panel.locator('.n-contact'), 'data-placement', 'recovery');
-    await visible(panel.getByRole('link', { name: `Call ORBES Client Services, ${CLIENT_SERVICES.phone}` }));
-    const recoverControls = ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'I HAVE A RECOVERY CODE', 'BACK TO SIGN IN'];
+    // The email alone (plan NEXT-NINE, CS-01): the one place of the collector app where it remains; no phone, no hours.
+    await countOf(page.locator('a[href^="tel:"]'), 0);
+    expect(await panel.innerText()).not.toContain(CLIENT_SERVICES.hours);
+    const recoverControls = ['CONTACT ORBES CLIENT SERVICES', 'I HAVE A RECOVERY CODE', 'BACK TO SIGN IN'];
     await keepsFloors(page, recoverControls);
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: 640 });
@@ -1334,14 +1336,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(card.locator('.n-piece__state'), 'REPORTED STOLEN');
     await textOf(card.getByRole('status'), 'This piece is now reported stolen. Every scan of its code shows UNUSUAL ACTIVITY.');
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('REPORTED STOLEN');
-    // A theft is ORBES Client Services' to withdraw: nothing to press, their contact instead.
+    // A theft is ORBES Client Services' to withdraw: nothing to press, WRITE TO ORBES CLIENT SERVICES instead, the piece
+    // attached (plan NEXT-NINE, CS-01).
     await countOf(card.getByRole('button', { name: 'PIECE FOUND' }), 0);
     await countOf(card.getByRole('button', { name: 'REPORT LOST / STOLEN' }), 0);
-    const contact = card.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
-    const href = new URL((await contact.getAttribute('href'))!);
-    expect(href.searchParams.get('subject')).toBe(`ORBES — ${older.product.productId} — REPORTED STOLEN`);
-    expect(href.searchParams.get('body')).toBe(`\r\n\r\nPIECE: ${older.product.productId}`);
-    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone]);
+    const write = card.getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' });
+    await attrOf(write, 'data-context', 'PIECE');
+    await attrOf(write, 'data-context-id', older.product.productId);
+    await countOf(card.locator('a[href^="mailto:"], a[href^="tel:"]'), 0);
+    await keepsFloors(page, ['WRITE TO ORBES CLIENT SERVICES']);
     expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', older.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'STOLEN' });
 
     // ‹ MY PIECES: back to the list, the piece's new state said there.
@@ -1464,8 +1467,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(refused.getByRole('button', { name: 'REPORT LOST / STOLEN' }), 0);
     await countOf(refused.locator('.piece__certificate-title'), 0);
     await textOf(refused.locator('.piece__ownership'), /A loss or a theft of this piece cannot be reported here: tell ORBES Client Services\./);
-    await visible(refused.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
-    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES']);
+    await visible(refused.getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' }));
+    await keepsFloors(page, ['WRITE TO ORBES CLIENT SERVICES']);
 
     // The links of the last piece cannot be read: said, with TRY AGAIN. A link created meanwhile does not stand for
     // the list (the others would be hidden, and could not be withdrawn): the alert stays.
@@ -1953,15 +1956,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
       await countOf(page.getByRole('region', { name: 'DO YOU HOLD THE CERTIFICATE CARD?' }), 0);
       await countOf(page.getByLabel('CLAIM CODE'), 0);
       await countOf(page.getByRole('tab'), 0);
-      await visible(page.locator('.n-result__help').getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+      await visible(page.locator('.n-result__help').getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' }));
       await countOf(page.getByRole('button', { name: 'SCAN AGAIN' }), 1);
-      await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'SCAN AGAIN']);
+      await keepsFloors(page, ['WRITE TO ORBES CLIENT SERVICES', 'SCAN AGAIN']);
       expect(problems, name).toEqual([]);
       await page.context().close();
     }
   }, 120_000);
 
-  it('offers CONTACT ORBES CLIENT SERVICES on an INVALID SIGNATURE result: the reference in the email, then the phone and the hours', async () => {
+  it('offers WRITE TO ORBES CLIENT SERVICES on an INVALID SIGNATURE result, its scan attached; no email, phone or hours (CS-01)', async () => {
     // A code ORBES did not sign: one bit of an issued code's signature flipped, the frame still valid.
     const issued = await srv.issue();
     const { payloadBytes, signature } = unframeCodeData(fromBase64Url(issued.code.data));
@@ -1972,40 +1975,33 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
     await attrOf(page.locator('.view--result'), 'data-tone', 'void');
 
-    // Under the help line: a link (the hairline button stays SCAN AGAIN), an email to Client
-    // Services that quotes this scan's reference.
+    // Under the help line: WRITE TO ORBES CLIENT SERVICES, a hairline button beside the foot's SCAN AGAIN, attaching
+    // this scan (its id; the sheet labels it with the reference).
     const help = page.locator('.n-result__help');
-    const email = help.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
-    await visible(email);
+    await textOf(help.locator('p.n-tx'), 'ORBES Client Services can help with any question about this piece. The reference below is attached to your message.');
+    const write = help.getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' });
+    await visible(write);
     const scan = await srv.ctx.db.selectFrom('scan_events').select(['id', 'result_state']).orderBy('occurred_at', 'desc').executeTakeFirstOrThrow();
     expect(scan.result_state).toBe('INVALID_SIGNATURE');
     const ref = scan.id.split('-')[0].toUpperCase();
     await textOf(page.locator('.n-result__meta'), new RegExp(`REF ${ref}$`));
-    const href = new URL((await email.getAttribute('href'))!);
-    expect(href.protocol).toBe('mailto:');
-    expect(href.pathname).toBe(CLIENT_SERVICES.email);
-    expect(href.searchParams.get('subject')).toBe(`ORBES — REF ${ref} — INVALID SIGNATURE`);
-    expect(href.searchParams.get('body')).toMatch(new RegExp(`^\\r\\n\\r\\nREFERENCE: ${ref}\\r\\nRESULT: INVALID SIGNATURE\\r\\nVERIFIED: \\d{1,2} [A-Z]{3} \\d{4} · \\d\\d:\\d\\d \\(UTC[+-]\\d\\d:\\d\\d\\)$`));
-    await attrOf(email, 'class', 'n-g n-contact__email');
-    await countOf(page.locator('.n-btn:visible'), 1);
-    // One line, inside the column (never wider than the page), in a text link's 44 px tap zone.
-    expect((await email.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    expect(await linesOf(email)).toBe(1);
-    // Then the phone, a tel: link read in Helvetica Neue (figures), and the hours.
-    const phone = help.getByRole('link', { name: `Call ORBES Client Services, ${CLIENT_SERVICES.phone}` });
-    await attrOf(phone, 'href', 'tel:+33123456789');
-    await textOf(phone, CLIENT_SERVICES.phone);
-    expect(await phone.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Helvetica Neue"?,/);
-    await textOf(help.locator('.n-contact__hours'), CLIENT_SERVICES.hours);
+    await attrOf(write, 'data-context', 'SCAN');
+    await attrOf(write, 'data-context-id', scan.id);
+    expect((await write.getAttribute('class'))!.split(' ')).toEqual(expect.arrayContaining(['n-btn', 'n-btn--ol', 'n-write__open']));
+    // No email, no phone, no hours on a result.
+    await countOf(page.locator('a[href^="mailto:"], a[href^="tel:"]'), 0);
+    expect(await page.locator('body').innerText()).not.toContain(CLIENT_SERVICES.hours);
+    // Its one line, in its 54 px button.
+    expect((await write.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await linesOf(write)).toBe(1);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN AGAIN']);
+    await keepsFloors(page, ['WRITE TO ORBES CLIENT SERVICES', 'SCAN AGAIN']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-invalid-signature-contact.png'), fullPage: true });
-    // On the phones in use, down to the smallest, the link keeps its one line and nothing scrolls sideways.
+    // On the phones in use, down to the smallest, the button keeps its one line and nothing scrolls sideways.
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: 640 });
-      await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN AGAIN']);
-      expect((await email.boundingBox())!.height, `${width} px`).toBeGreaterThanOrEqual(44);
-      expect(await linesOf(email), `${width} px`).toBe(1);
+      await keepsFloors(page, ['WRITE TO ORBES CLIENT SERVICES', 'SCAN AGAIN']);
+      expect(await linesOf(write), `${width} px`).toBe(1);
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
     expect(problems).toEqual([]);
@@ -2036,14 +2032,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const question = section.getByRole('button', { name: /^WHERE DID YOU SEE OR BUY THIS PIECE\?/ });
     await attrOf(question, 'aria-expanded', 'false');
     expect(await section.locator('form').isHidden()).toBe(true);
-    await countOf(page.locator('.n-btn:visible'), 1);
-    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'SCAN AGAIN']);
+    // SCAN AGAIN the result's own button; WRITE TO ORBES CLIENT SERVICES the help line's (CS-01).
+    await countOf(page.locator('.n-btn:visible:not(.n-write__open)'), 1);
+    await keepsFloors(page, ['WRITE TO ORBES CLIENT SERVICES', 'SCAN AGAIN']);
     await question.click();
     await attrOf(question, 'aria-expanded', 'true');
     // Opened: the four answers, two by two (C15's .opt2), the place, the note and SEND ANSWER.
     await textsOf(section.locator('.n-report__channel'), ['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER']);
     await visible(section.locator('form'));
-    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER', 'SCAN AGAIN']);
+    await keepsFloors(page, ['WRITE TO ORBES CLIENT SERVICES', 'BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER', 'SCAN AGAIN']);
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: 640 });
       await keepsFloors(page, ['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER', 'SCAN AGAIN']);
@@ -2071,7 +2068,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(section.locator('#report-note-hint'), 'Please leave out your name and contact details.');
     const send = section.getByRole('button', { name: 'SEND ANSWER' });
     await attrOf(send, 'class', /\bn-btn--ol\b/);
-    await countOf(page.locator('.n-btn:visible'), 2);
+    // SEND ANSWER and SCAN AGAIN; WRITE TO ORBES CLIENT SERVICES the help line's (CS-01).
+    await countOf(page.locator('.n-btn:visible:not(.n-write__open)'), 2);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await keepsFloors(page, ['BOUTIQUE', 'ONLINE', 'PRIVATE SALE', 'OTHER', 'SEND ANSWER', 'SCAN AGAIN']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-invalid-signature-report.png'), fullPage: true });
@@ -2097,11 +2095,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.n-result__meta'), new RegExp(`REF ${ref}$`));
     const row = await srv.ctx.db.selectFrom('scan_reports').selectAll().where('scan_event_id', '=', scan.id).executeTakeFirstOrThrow();
     expect(row).toMatchObject({ channel: 'ONLINE', place: 'a marketplace listing', note: 'Offered at a third of the boutique price.', status: 'OPEN' });
-    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'SCAN AGAIN']);
+    await keepsFloors(page, ['WRITE TO ORBES CLIENT SERVICES', 'SCAN AGAIN']);
     expect(problems).toEqual([]);
   }, 120_000);
 
-  it('shows a result without waiting for a contact read that does not answer, and offers the contact on a later result', async () => {
+  it('shows a result without waiting for a contact read that does not answer, and reads the contact again with a later result', async () => {
     const issued = await srv.issue();
     const { payloadBytes, signature } = unframeCodeData(fromBase64Url(issued.code.data));
     signature[12] ^= 0x01;
@@ -2122,47 +2120,45 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(Date.now() - answeredAt).toBeLessThan(3_000);
     expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
     await countOf(page.locator('.n-contact'), 0);
-    await visible(page.locator('.n-result__help'));
-    // The held read gives up on its own (a few seconds); the next result reads the contact again and shows it.
+    // WRITE TO ORBES CLIENT SERVICES needs no contact read (CS-01): it is there at once.
+    await visible(page.locator('.n-result__help').getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' }));
+    // The held read gives up on its own (a few seconds); the next result reads the contact again (for FORGOTTEN PASSWORD).
     await page.waitForTimeout(4_500);
     await page.goBack();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
     await uploadPhoto(page, writeCodePng(srv.workDir, 'stalled-contact-2.png', forged));
     expect(await resultTitle(page)).toBe('INVALID SIGNATURE');
-    await visible(page.locator('.n-result__help').getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+    await visible(page.locator('.n-result__help').getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' }));
     expect(held).toBe(2);
     expect(problems.filter((p) => !/client-services/.test(p))).toEqual([]);
     await page.context().close();
   }, 120_000);
 
-  it('offers the same contact in the WARRANTY tab of an authentic piece whose warranty no longer applies, and nowhere else', async () => {
+  it('offers WRITE TO ORBES CLIENT SERVICES in the WARRANTY tab of an authentic piece whose warranty no longer applies, and nowhere else', async () => {
     const issued = await srv.issue();
     await srv.ctx.services.warranty.void(issued.product.id, 'unauthorised modification', SYSTEM_ACTOR);
     const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
     await uploadPhoto(page, writeCodePng(srv.workDir, 'void-warranty.png', issued));
     expect(await resultTitle(page)).toBe('AUTHENTIC');
-    await countOf(page.locator('.n-contact'), 0);
+    await countOf(page.locator('.n-write__open'), 0);
     await page.getByRole('tab', { name: 'WARRANTY' }).click();
     const panel = page.getByRole('tabpanel');
     await textOf(panel.locator('.n-kv'), /NO LONGER VALID/);
-    const email = panel.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' });
-    await visible(email);
-    const href = new URL((await email.getAttribute('href'))!);
-    expect(href.searchParams.get('subject')).toMatch(/^ORBES — REF [0-9A-F]{8} — AUTHENTIC$/);
-    expect(href.searchParams.get('body')).toMatch(/\r\nRESULT: AUTHENTIC\r\nWARRANTY: NO LONGER VALID\r\n/);
-    await visible(panel.getByRole('link', { name: `Call ORBES Client Services, ${CLIENT_SERVICES.phone}` }));
-    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN ANOTHER']);
-    await countOf(page.locator('.n-contact'), 1);
-    // A link at the width of a tab panel: one line on this phone and on the narrower ones in use.
-    await attrOf(email, 'class', 'n-g n-contact__email');
-    await countOf(page.locator('.n-btn:visible'), 1);
-    expect((await email.boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    expect(await linesOf(email)).toBe(1);
+    // The scan attached, about its warranty (CS-01); no email, phone or hours.
+    const write = panel.getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' });
+    await visible(write);
+    await attrOf(write, 'data-context', 'SCAN');
+    await attrOf(write, 'data-context-about', 'WARRANTY');
+    await countOf(page.locator('a[href^="mailto:"], a[href^="tel:"]'), 0);
+    await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'WRITE TO ORBES CLIENT SERVICES', 'SCAN ANOTHER']);
+    await countOf(page.locator('.n-write__open:visible'), 1);
+    // A button at the width of a tab panel: one line on this phone and on the narrower ones in use.
+    await countOf(page.locator('.n-btn:visible:not(.n-write__open)'), 1);
+    expect(await linesOf(write)).toBe(1);
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: 640 });
-      await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SCAN ANOTHER']);
-      expect((await email.boundingBox())!.height, `${width} px`).toBeGreaterThanOrEqual(44);
-      expect(await linesOf(email), `${width} px`).toBe(1);
+      await keepsFloors(page, ['PRODUCT', 'WARRANTY', 'CARE', 'OWNERSHIP', 'WRITE TO ORBES CLIENT SERVICES', 'SCAN ANOTHER']);
+      expect(await linesOf(write), `${width} px`).toBe(1);
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
     expect(problems).toEqual([]);
@@ -2418,13 +2414,14 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await salon.getByRole('button', { name: 'REQUEST THIS PIECE' }).click();
     await textOf(salon.locator('.sheet__requested-text'), 'ORBES Client Services will contact you.');
     await textOf(salon.locator('.n-model__requested-label'), 'REQUESTED');
-    // With the contact of ORBES Client Services: the email names the model and the request.
-    const mail = new URL((await salon.locator('.n-contact__email').getAttribute('href'))!);
-    expect(mail.searchParams.get('subject')).toBe('ORBES — ZENITH — REQUEST');
-    await countOf(page.locator('main .n-btn'), 0);
-    const requested = await srv.ctx.db.selectFrom('shop_requests').select(['id', 'note', 'status']).where('account_id', '=', owner.account.id).execute();
-    expect(requested).toEqual([{ id: expect.any(String), note: 'A size 54, please.', status: 'OPEN' }]);
-    expect(mail.searchParams.get('body')).toContain(`REQUEST: ${requested[0]!.id}`);
+    // With WRITE TO ORBES CLIENT SERVICES (CS-01): the model attached by its id, never an email; REQUEST THIS PIECE gone.
+    const write = salon.getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' });
+    await attrOf(write, 'data-context', 'MODEL');
+    await countOf(page.locator('main .n-btn:not(.n-write__open)'), 0);
+    await countOf(salon.locator('a[href^="mailto:"], a[href^="tel:"]'), 0);
+    const requested = await srv.ctx.db.selectFrom('shop_requests').select(['id', 'note', 'status', 'model_id']).where('account_id', '=', owner.account.id).execute();
+    expect(requested).toEqual([{ id: expect.any(String), note: 'A size 54, please.', status: 'OPEN', model_id: expect.any(String) }]);
+    await attrOf(write, 'data-context-id', requested[0]!.model_id);
     // Back: the lookbook, then the landing (MY PIECES' entry became the lookbook's).
     await page.goBack();
     await textOf(page.locator('h1'), 'THE COLLECTION');
@@ -2434,7 +2431,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.goto(`${srv.origin}/verify/lookbook/zenith`);
     await textOf(page.getByRole('region', { name: 'THE PRIVATE SALON' }).locator('.sheet__requested-text'), 'ORBES Client Services will contact you.');
     // Closed in the console, the sheet offers REQUEST THIS PIECE again; requested meanwhile from another device, the
-    // stale sheet's request (409 SHOP_REQUEST_OPEN) reads the sheet again: REQUESTED with the contact, no failure.
+    // stale sheet's request (409 SHOP_REQUEST_OPEN) reads the sheet again: REQUESTED with WRITE TO ORBES CLIENT SERVICES, no failure.
     const desk = await srv.ctx.services.auth.createAdmin({ email: 'salon.desk@orbes.test', password: 'orbes salon desk passphrase', role: 'OPERATOR' }, SYSTEM_ACTOR);
     await srv.ctx.services.salon.close(requested[0]!.id, { note: 'Called the client.', outcome: 'DECLINED' }, { type: 'admin', id: desk.id });
     await page.reload();
@@ -2444,10 +2441,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await again.getByRole('button', { name: 'REQUEST THIS PIECE' }).click();
     await textOf(again.locator('.sheet__requested-text'), 'ORBES Client Services will contact you.');
     await textOf(again.locator('.n-model__requested-label'), 'REQUESTED');
-    await visible(again.locator('.n-contact__email'));
+    await visible(again.getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' }));
     await countOf(again.locator('.form__error'), 0);
-    await countOf(page.locator('main .n-btn'), 0);
-    expect(new URL((await again.locator('.n-contact__email').getAttribute('href'))!).searchParams.get('body')).toContain(`REQUEST: ${elsewhere.request.id}`);
+    await countOf(page.locator('main .n-btn:not(.n-write__open)'), 0);
+    expect(elsewhere.request.modelId).toBe(requested[0]!.model_id);
     // A model above the owner's tier: the same sentence as a model not in the collection.
     await page.goto(`${srv.origin}/verify/lookbook/nadir`);
     await textOf(page.locator('.sheet__missing'), 'This model is not in the ORBES collection.');
@@ -2634,7 +2631,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.reload();
     await textOf(releases.locator('.pieces__entry-state'), 'DRAWN · PLACE HELD');
     await textOf(releases.locator('.pieces__entry-sentence'), /^Your place is held until \d{1,2} [A-Z][a-z]+ \d{4}, \d{2}:\d{2} \(UTC\+0[12]:00\) — ORBES Client Services will contact you\.$/);
-    await visible(releases.getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+    await attrOf(releases.getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' }), 'data-context-id', drop.id);
     await releases.getByRole('link', { name: 'ECLIPSE — RELEASE I' }).click();
     await textOf(page.locator('h1'), 'ECLIPSE — RELEASE I');
     // Drawn, the release is over (plan LIVE RELEASE+, decision 30): said so, with the account's part in it.
@@ -2653,7 +2650,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(page.getByRole('button', { name: 'ENTER THE DRAW' }), 0);
     await countOf(page.getByRole('button', { name: 'WITHDRAW' }), 0);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'THE RELEASES', ...LEGAL_LINKS]);
+    await keepsFloors(page, ['WRITE TO ORBES CLIENT SERVICES', 'THE RELEASES', ...LEGAL_LINKS]);
     // An address under /verify/releases that is none: the list.
     await page.goto(`${srv.origin}/verify/releases/nowhere`);
     await textOf(page.locator('h1'), 'THE RELEASES');
@@ -2720,10 +2717,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.setViewportSize(MOBILE_VIEWPORT);
     await page.screenshot({ path: join(OUT_DIR, 'verify-release-early.png'), fullPage: true });
     await reserve.click();
-    // The place held at once until its time, the contact of ORBES Client Services; the page read again counts it.
+    // The place held at once until its time, WRITE TO ORBES CLIENT SERVICES (CS-01); the page read again counts it.
     await textOf(page.locator('.release__entry .ownership__status'), 'PLACE RESERVED');
     await textOf(page.locator('.release__sentence'), /^You reserved a place directly\. It is held until \d{1,2} [A-Z][a-z]+ \d{4}, \d{2}:\d{2} \(UTC\+0[12]:00\) — ORBES Client Services will contact you\.$/);
-    await visible(page.locator('.release__entry').getByRole('link', { name: 'CONTACT ORBES CLIENT SERVICES' }));
+    await visible(page.locator('.release__entry').getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' }));
     await textOf(reserved, '1 OF 2 PIECES');
     const row = await ctx.db.selectFrom('drop_entries').select(['id', 'status', 'tier', 'rank']).where('drop_id', '=', drop.id).where('account_id', '=', platine.account.id).executeTakeFirstOrThrow();
     expect(row).toMatchObject({ status: 'SELECTED', tier: 2, rank: null });
@@ -2826,8 +2823,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(tier.locator('.n-account__next-label'), 'NEXT: PALLADIUM');
     await textOf(tier.locator('.n-account__next-way'), '2 more pieces registered to your account open PALLADIUM, from 5 pieces held. It adds:');
     await textsOf(tier.locator('.n-account__benefits--next .n-account__benefit'), ['A commission of your own.', 'A yearly visit to the atelier.']);
-    // Then SOUND, CHANGE PASSWORD, MY PIECES, the legal pages (their index, a new tab), SIGN OUT.
-    await textsOf(sheet.locator('.n-row__label'), ['SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'PRIVACY · TERMS · LEGAL · HELP']);
+    // Then MESSAGES (plan NEXT-NINE, CS-01), SOUND, CHANGE PASSWORD, MY PIECES, the legal pages (their index, a new tab), SIGN OUT.
+    await textsOf(sheet.locator('.n-row__label'), ['MESSAGES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'PRIVACY · TERMS · LEGAL · HELP']);
     await attrOf(sheet.getByRole('link', { name: 'PRIVACY · TERMS · LEGAL · HELP' }), 'href', '/legal');
     await attrOf(sheet.getByRole('link', { name: 'PRIVACY · TERMS · LEGAL · HELP' }), 'target', '_blank');
     await attrOf(sheet.getByRole('link', { name: 'MY PIECES' }), 'href', '/verify/pieces');

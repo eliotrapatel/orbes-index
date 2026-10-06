@@ -1,6 +1,6 @@
 # Conditions générales d'utilisation du service ORBES GENOME CODE
 
-**Brouillon pour revue juridique, non validé.** Version : 7 octobre 2026. [English version](terms.en.md).
+**Brouillon pour revue juridique, non validé.** Version : 8 octobre 2026. [English version](terms.en.md).
 
 Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du code qu'il décrit ([TERMS-FACTS](TERMS-FACTS.md)). Ces lignes servent à la revue et ne sont pas publiées. Les champs [À COMPLÉTER : …] attendent l'identité légale d'ORBES et les choix de l'avocat ([note pour l'avocat](counsel-note.fr.md)).
 
@@ -256,7 +256,7 @@ Le verrouillage ferme toutes les sessions du compte, révoque son code de récup
 
 ORBES traite les données du service (compte, enregistrements, scans, inscriptions et réservations aux sorties, entrées, options et réservations des LIVE RELEASES, réponses aux questions d'après, commandes et leurs factures, réponses et votes du cercle, demandes du salon privé) comme le décrit sa politique de confidentialité, qui dit aussi comment ORBES regroupe les collectionneurs et compte leur activité par heure. Le service ne transmet vos commandes à aucune boutique en ligne. Vous pouvez demander à ORBES Client Services une copie de tout ce que le registre ORBES garde de votre compte. Vos demandes au salon privé, avec vos notes, figurent dans cette copie. Vos entrées aux LIVE RELEASES, avec leurs options, et votre I'LL BE THERE figurent dans cette copie. Vos commandes, avec le nom et l'adresse de l'acheteur, leurs étapes et leurs factures, et vos réponses aux questions d'après figurent dans cette copie.
 
-*Code : R21, R90, R117, R133, R139, R144, N10.*
+*Code : R21, R90, R117, R133, R139, R144, R145, N10.*
 
 ## Article 18 — Responsabilité
 

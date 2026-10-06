@@ -60,7 +60,8 @@ import * as verifyCopy from '../../src/web/verify/copy.js';
 import { DEFAULT_CARE, LOOKBOOK, PHOTOS } from '../../src/web/verify/copy.js';
 import { cardFace, LOOKBOOK_PATH, lookbookGroups, lookbookRouteOf, lookbookSheetPath, ownedLine, SALON_NOTE_MAX, selectDot, sheetLine, sheetModel, withRequest } from '../../src/web/verify/lookbook-model.js';
 import type { LookbookCard, LookbookSheet, VerifyOutcome } from '../../src/web/verify/types.js';
-import { resultViewModel, salonContactModel } from '../../src/web/verify/view-model.js';
+import { resultViewModel } from '../../src/web/verify/view-model.js';
+import { contextInput, modelContext } from '../../src/web/verify/messages-model.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
 
 const media = (n: number) => `/api/v1/media/${n.toString(16).padStart(2, '0').repeat(32)}`;
@@ -262,9 +263,9 @@ describe('a model\'s sheet (P-R02)', () => {
     expect(sheetLine(selectDot(s, 'monolithe-onyx'))).toBe(`RING · ${LOOKBOOK.reserved}`);
     expect(selectDot(s, 'elsewhere')).toBe(s);
     // REQUEST THIS PIECE on a dot: REQUESTED on it and on its dot, nowhere else.
-    const requested = withRequest(selectDot(s, 'monolithe-onyx'), 'monolithe-onyx', 'r-1');
-    expect(requested.salon!.request).toEqual({ id: 'r-1' });
-    expect(selectDot(selectDot(requested, 'monolithe'), 'monolithe-onyx').salon!.request).toEqual({ id: 'r-1' });
+    const requested = withRequest(selectDot(s, 'monolithe-onyx'), 'monolithe-onyx', 'r-1', 'm-1');
+    expect(requested.salon!.request).toEqual({ id: 'r-1', modelId: 'm-1' });
+    expect(selectDot(selectDot(requested, 'monolithe'), 'monolithe-onyx').salon!.request).toEqual({ id: 'r-1', modelId: 'm-1' });
     expect(requested.dots[0]!.face.salon).toBeNull();
     // One dot alone is no choice: none.
     expect(sheetModel(sheet({ variants: [variant('monolithe', 'Steel', '#9D9B96', { selected: true })] })).dots).toEqual([]);
@@ -297,9 +298,9 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
     const salon = (extra: Partial<NonNullable<LookbookSheet['salon']>> = {}) => sheetModel(sheet({ lookbook: 'RESERVED', salon: { priceLabel: '€ 4 800', minTier: 2, request: null, ...extra } })).salon;
     expect(salon()).toEqual({ price: '€ 4 800', tier: 'PLATINE', request: null });
     expect(salon({ priceLabel: null, minTier: 1 })).toEqual({ price: null, tier: 'TITANE', request: null });
-    expect(salon({ minTier: 3, request: { id: 'r-1', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z' } })).toEqual({ price: '€ 4 800', tier: 'PALLADIUM', request: { id: 'r-1' } });
+    expect(salon({ minTier: 3, request: { id: 'r-1', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm-1' } })).toEqual({ price: '€ 4 800', tier: 'PALLADIUM', request: { id: 'r-1', modelId: 'm-1' } });
     // A closed request offers REQUEST THIS PIECE again; a tier the club does not have, nothing to request from.
-    expect(salon({ request: { id: 'r-1', status: 'CLOSED', createdAt: '2026-10-04T10:00:00.000Z' } })!.request).toBeNull();
+    expect(salon({ request: { id: 'r-1', status: 'CLOSED', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm-1' } })!.request).toBeNull();
     expect(salon({ minTier: 4 })).toBeNull();
     expect(sheetModel(sheet({ lookbook: 'RESERVED' })).salon).toBeNull();
     expect(sheetModel(sheet({ salon: { priceLabel: '€ 1', minTier: 1, request: null } })).salon).toBeNull();
@@ -330,25 +331,22 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
         variant: { label: 'Dawn', swatch: '#9D9B96' },
         variants: [
           variant('monolithe', 'Dawn', { selected: true }),
-          variant('monolithe-night', 'Night', { lookbook: 'RESERVED', salon: { priceLabel: '€ 6 200', minTier: 1, request: { id: 'r-2', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z' } } }),
+          variant('monolithe-night', 'Night', { lookbook: 'RESERVED', salon: { priceLabel: '€ 6 200', minTier: 1, request: { id: 'r-2', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm-2' } } }),
         ],
       }),
     );
     // The public model itself: no salon on its face; its dot of the salon carries its own.
     expect(s.salon).toBeNull();
     expect(s.dots.map((d) => d.slug)).toEqual(['monolithe', 'monolithe-night']);
-    expect(selectDot(s, 'monolithe-night')).toMatchObject({ slug: 'monolithe-night', reserved: true, salon: { price: '€ 6 200', tier: 'TITANE', request: { id: 'r-2' } } });
+    expect(selectDot(s, 'monolithe-night')).toMatchObject({ slug: 'monolithe-night', reserved: true, salon: { price: '€ 6 200', tier: 'TITANE', request: { id: 'r-2', modelId: 'm-2' } } });
     expect(selectDot(selectDot(s, 'monolithe-night'), 'monolithe').salon).toBeNull();
   });
 
-  it('writes to ORBES Client Services about a request: the model in the subject, the model and the request in the body', () => {
-    const c = salonContactModel({ email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89', hours: 'Monday to Friday' }, 'ECLIPSE', 'r-1');
-    expect(c).toMatchObject({ placement: 'salon', phone: { label: '+33 1 23 45 67 89', href: 'tel:+33123456789' }, hours: 'Monday to Friday' });
-    const url = new URL(c!.mailto!);
-    expect(url.searchParams.get('subject')).toBe('ORBES — ECLIPSE — REQUEST');
-    expect(url.searchParams.get('body')).toBe('\r\n\r\nMODEL: ECLIPSE\r\nREQUEST: r-1');
-    expect(salonContactModel({}, 'ECLIPSE', 'r-1')).toBeNull();
-    expect(salonContactModel(undefined, 'ECLIPSE', 'r-1')).toBeNull();
+  it('writes to ORBES Client Services about a request: the model attached by its id, the request named in its label (CS-01)', () => {
+    const c = modelContext('m-1', 'ECLIPSE');
+    expect(c).toEqual({ kind: 'MODEL', id: 'm-1', label: 'ECLIPSE · PRIVATE SALON REQUEST' });
+    // The server is sent the model's id alone (never its slug, never an email): it finds the request itself.
+    expect(contextInput(c)).toEqual({ kind: 'MODEL', id: 'm-1' });
   });
 
   it('mirrors the server\'s bounds, and says the salon in the lexicon', () => {

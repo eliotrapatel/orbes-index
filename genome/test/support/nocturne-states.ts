@@ -181,17 +181,42 @@ async function openAccountSheet(run: StateRun): Promise<void> {
 }
 
 /** The phone grown (or shrunk) to the sheet: its top (under the header and the rail), its content and its foot's padding. */
-async function fitSheet(page: Page): Promise<void> {
-  const height = await page.evaluate(() => {
-    const panel = document.querySelector<HTMLElement>('.n-account__panel');
+async function fitSheet(page: Page, selector = '.n-account__panel'): Promise<void> {
+  const height = await page.evaluate((sel) => {
+    const panel = [...document.querySelectorAll<HTMLElement>(sel)].find((p) => p.closest('[hidden]') === null);
     if (!panel) return 0;
     // The bottom of its last piece, in the page (scrolled back), then its padding.
     const bottom = Math.max(...[...panel.children].map((c) => c.getBoundingClientRect().bottom + panel.scrollTop));
     return Math.ceil(bottom + Number.parseFloat(getComputedStyle(panel).paddingBottom));
-  });
+  }, selector);
   const size = page.viewportSize();
   if (size && height > 0) await page.setViewportSize({ width: size.width, height: Math.max(height, 400) });
   await sleep(200);
+}
+
+/** WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01) under `within`: the write sheet opened, the phone grown to it. */
+async function openWrite(run: StateRun, within = 'main'): Promise<void> {
+  await run.page.locator(within).getByRole('button', { name: 'WRITE TO ORBES CLIENT SERVICES' }).first().click();
+  await run.page.locator('.n-write:not([hidden]) #write-title').waitFor({ timeout: 20_000 });
+  await fitSheet(run.page, '.n-write__panel');
+}
+
+/** The account sheet on MESSAGES (CS-01), its conversation read, the phone grown to it. */
+async function openMessages(run: StateRun, ready: string): Promise<void> {
+  await openAccountSheet(run);
+  await run.page.locator('.n-account').getByRole('button', { name: 'MESSAGES' }).first().click();
+  await run.page.locator(ready).first().waitFor({ timeout: 20_000 });
+  await fitSheet(run.page);
+}
+
+/** A message of the demo's account `you` about its piece, written as the app writes it, and ORBES Client Services' answer. */
+async function messageAndAnswer(run: StateRun): Promise<void> {
+  const you = run.demo.accounts.you!;
+  const { messages } = run.stage.ctx.services;
+  await messages.write(you.id, { body: 'The clasp of my bracelet slips a little since last week.\nCould the atelier look at it?', context: { kind: 'PIECE', id: run.demo.pieces.yours! } }, you.actor);
+  const conversation = await run.stage.ctx.db.selectFrom('client_conversations').select('id').where('account_id', '=', you.id).executeTakeFirstOrThrow();
+  const admin = await run.stage.ctx.db.selectFrom('admin_users').select('id').orderBy('created_at').executeTakeFirstOrThrow();
+  await messages.answer(conversation.id, { type: 'admin', id: admin.id }, { body: 'Thank you. Bring it to the Paris boutique, or send it with the label we prepare: the atelier will adjust the clasp.' });
 }
 
 /**
@@ -212,6 +237,20 @@ export const UI_STATES: readonly UiState[] = [
   // ── NOW (today: the landing, its banner of the LIVE RELEASES) ──
   { id: 'now-signed-out', title: 'NOW, signed out: a LIVE RELEASE announced, a draw open', refs: ['C10'], variant: 'full', path: at('/verify'), ready: '.view--now[data-ready]' },
   { id: 'now-signed-in', title: 'NOW, signed in (TITANE, two pieces): a LIVE RELEASE announced, a draw open', refs: ['C1'], variant: 'full', as: you, path: at('/verify'), ready: '.view--now[data-ready]' },
+  {
+    id: 'now-messages',
+    title: 'NOW, an answer of ORBES Client Services unread: MESSAGES, its sentence, READ, under the hero (CS-01)',
+    refs: ['CS-01'],
+    variant: 'full',
+    as: you,
+    path: at('/verify'),
+    act: async (run) => {
+      await messageAndAnswer(run);
+      await run.page.reload();
+    },
+    ready: '.view--now[data-ready] .now__messages',
+    mutates: true,
+  },
   { id: 'now-draw-leads', title: 'NOW, no LIVE RELEASE announced: the draw leads', refs: ['C42'], variant: 'draw-leads', as: you, path: at('/verify'), ready: '.view--now[data-ready]' },
   { id: 'now-draw-soon', title: 'NOW, the draw before its entries open', refs: ['C42'], variant: 'draw-soon', as: you, path: at('/verify'), ready: '.view--now[data-ready]' },
   { id: 'now-draw-early', title: 'NOW, the draw in its early access', refs: ['C42'], variant: 'draw-early', as: you, path: at('/verify'), ready: '.view--now[data-ready]' },
@@ -400,6 +439,15 @@ export const UI_STATES: readonly UiState[] = [
     ...result('stolen', (run) => button(run, 'BOUTIQUE').click()),
   },
   { id: 'result-invalid', title: 'INVALID SIGNATURE', refs: ['C16'], variant: 'full', ...result('forged') },
+  {
+    id: 'result-write-signed-out',
+    title: 'INVALID SIGNATURE, WRITE TO ORBES CLIENT SERVICES signed out: sign in or create an account first (CS-01)',
+    refs: ['CS-01'],
+    variant: 'full',
+    ...result('forged', (run) => openWrite(run, '.n-result__help')),
+    ready: '.n-write:not([hidden]) .n-own',
+    viewport: true,
+  },
   { id: 'result-unknown', title: 'UNKNOWN ORBES CODE: a code ORBES signed for no piece', refs: ['C16'], variant: 'full', ...result('unknown') },
   { id: 'result-revoked', title: 'REVOKED', refs: ['C16'], variant: 'full', ...result('revoked') },
   {
@@ -709,6 +757,65 @@ export const UI_STATES: readonly UiState[] = [
     },
     ready: '.n-account:not([hidden]) form',
     viewport: true,
+  },
+
+  // ── WRITE TO ORBES CLIENT SERVICES and MESSAGES (plan NEXT-NINE, CS-01) ──
+  {
+    id: 'account-write',
+    title: 'WRITE TO ORBES CLIENT SERVICES from a piece: CONCERNING, YOUR MESSAGE, SEND, CANCEL',
+    refs: ['CS-01'],
+    variant: 'draw-leads',
+    as: you,
+    path: piece('yours'),
+    act: (run) => openWrite(run, '.view--piece'),
+    ready: '.n-write:not([hidden]) textarea',
+    viewport: true,
+  },
+  {
+    id: 'account-messages-empty',
+    title: 'MESSAGES, empty: where to write from',
+    refs: ['CS-01'],
+    variant: 'draw-leads',
+    as: you,
+    path: at('/verify'),
+    act: (run) => openMessages(run, '.n-messages__empty'),
+    ready: '.n-account:not([hidden]) .n-messages__empty',
+    viewport: true,
+  },
+  {
+    id: 'account-write-sent',
+    title: 'WRITE TO ORBES CLIENT SERVICES, sent: MESSAGE SENT, SEE MESSAGES',
+    refs: ['CS-01'],
+    variant: 'draw-leads',
+    as: you,
+    path: piece('yours'),
+    act: async (run) => {
+      await openWrite(run, '.view--piece');
+      await run.page.locator('.n-write textarea').fill('Could the atelier adjust the clasp of this bracelet?');
+      await run.page.locator('.n-write').getByRole('button', { name: 'SEND', exact: true }).click();
+      await run.page.locator('.n-write__sent').waitFor({ timeout: 20_000 });
+      await fitSheet(run.page, '.n-write__panel');
+    },
+    ready: '.n-write:not([hidden]) .n-write__sent',
+    viewport: true,
+    mutates: true,
+  },
+  {
+    id: 'account-messages-thread',
+    title: 'MESSAGES: the conversation, the answer signed ORBES CLIENT SERVICES, YOUR REPLY',
+    refs: ['CS-01'],
+    variant: 'draw-leads',
+    as: you,
+    path: at('/verify'),
+    act: async (run) => {
+      await messageAndAnswer(run);
+      await run.page.reload();
+      await run.page.locator('.view--now[data-ready]').waitFor();
+      await openMessages(run, '.n-messages__list');
+    },
+    ready: '.n-account:not([hidden]) .n-messages__list',
+    viewport: true,
+    mutates: true,
   },
 
   // ── THE COLLECTION ──

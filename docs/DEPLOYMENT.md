@@ -258,9 +258,9 @@ Any other `RATE_LIMIT_*` name is rejected, so a typo cannot silently keep a defa
 
 | Variable | Default | Rules |
 |---|---|---|
-| `CLIENT_SERVICES_EMAIL` | unset | A plain mailbox, ≤ 254 characters: letters, digits and `. _ + -`, an `@` and a dotted domain (nothing a `mailto:` link would read as syntax: no `? & # % / :` or spaces). The verification app's **CONTACT ORBES CLIENT SERVICES** link opens an email to it, prefilled with the scan reference and the result. |
-| `CLIENT_SERVICES_PHONE` | unset | International format: `+`, then 7–15 digits with single spaces, dots or hyphens between them (e.g. `+33 1 23 45 67 89`; no `(0)`). Shown as a `tel:` link. |
-| `CLIENT_SERVICES_HOURS` | unset | One line of plain text, ≤ 120 characters (e.g. `Monday to Saturday, 10:00–19:00 (Paris)`). Refused unless an email or a phone is set. |
+| `CLIENT_SERVICES_EMAIL` | unset | A plain mailbox, ≤ 254 characters: letters, digits and `. _ + -`, an `@` and a dotted domain (nothing a `mailto:` link would read as syntax: no `? & # % / :` or spaces). In the collector app (plan NEXT-NINE, CS-01) it shows only under **FORGOTTEN PASSWORD?**: **CONTACT ORBES CLIENT SERVICES** opens an email to it, prefilled with the scan reference (ORBES Care's SUBSCRIBE keeps its own address, `CARE_SUBSCRIBE_URL`); everywhere else the app shows WRITE TO ORBES CLIENT SERVICES (a message to the console's Messages board). The legal pages show it as before. |
+| `CLIENT_SERVICES_PHONE` | unset | International format: `+`, then 7–15 digits with single spaces, dots or hyphens between them (e.g. `+33 1 23 45 67 89`; no `(0)`). Shown as a `tel:` link on the legal pages only (the legal notice, the privacy policy): no longer shown in the collector app (CS-01). |
+| `CLIENT_SERVICES_HOURS` | unset | One line of plain text, ≤ 120 characters (e.g. `Monday to Saturday, 10:00–19:00 (Paris)`). Refused unless an email or a phone is set. Shown on the legal pages only: no longer shown in the collector app (CS-01). The three variables themselves are unchanged. |
 
 Each is optional. While neither an email nor a phone is set, the verification app shows no contact at all (the help sentence asking the customer to quote the reference stays). The contact appears on every caution and void result and in the WARRANTY tab of a warranty that no longer applies. Values are public once served; `redactConfig` still logs only `[set]`. Browsers may keep the details for 5 minutes (`Cache-Control: public, max-age=300`). On the VPS (`deploy/vps/.env`), quote a value that contains ` #`.
 

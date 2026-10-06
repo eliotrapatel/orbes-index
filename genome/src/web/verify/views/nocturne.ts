@@ -418,25 +418,22 @@ export function toneMark(tone: 'authentic' | 'caution' | 'void'): SVGSVGElement 
   return svg;
 }
 
-/** How ORBES Client Services is reached, each line when configured. */
+/** ORBES Client Services' email under FORGOTTEN PASSWORD? (the one place of the collector app it remains, CS-01). */
 export interface ContactLines {
   mailto?: string;
-  phone?: { label: string; href: string };
-  hours?: string;
   placement?: string;
 }
 
 /**
- * ORBES Client Services (n.py contact()): CONTACT ORBES CLIENT SERVICES (the prefilled email, in Gravesend), the phone
- * (its accessible name says the call) and the hours, one under the other on the margin.
+ * ORBES Client Services (n.py contact()): CONTACT ORBES CLIENT SERVICES, the prefilled email in Gravesend, on the
+ * margin; under FORGOTTEN PASSWORD? only. Everywhere else the app shows WRITE TO ORBES CLIENT SERVICES (views/write.ts),
+ * and the phone and the hours are no longer shown (plan NEXT-NINE, CS-01).
  */
-export function contactLines(c: ContactLines, labels: { action: string; call: string }): HTMLElement {
+export function contactLines(c: ContactLines, labels: { action: string }): HTMLElement {
   return h(
     'div',
     { class: 'n-contact', data: c.placement ? { placement: c.placement } : undefined },
     c.mailto ? h('a', { class: 'n-g n-contact__email', attrs: { href: c.mailto }, text: labels.action }) : null,
-    c.phone ? h('a', { class: 'n-num n-contact__phone', attrs: { href: c.phone.href, 'aria-label': `${labels.call} ${c.phone.label}` }, text: c.phone.label }) : null,
-    c.hours ? h('span', { class: 'n-contact__hours', text: c.hours }) : null,
   );
 }
 

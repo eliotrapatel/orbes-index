@@ -278,10 +278,13 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
   });
 
   it('gives the legal pages the one version the code publishes, after D’s', () => {
-    expect(LEGAL_VERSION > D_LEGAL_VERSION).toBe(true);
-    expect(section(runbook, '## 0.')).toContain(`une seule nouvelle version pour le déploiement E, \`${LEGAL_VERSION}\`, la date qui suit celle de D`);
-    expect(section(runbook, '### 1.3')).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${LEGAL_VERSION}';\`.`);
-    expect(readDoc('genome/test/web/legal.content.test.ts')).toContain(`'${LEGAL_VERSION}': '`);
+    // E's version, 2026-10-07; a later lot (the next nine, deployment G) publishes its own after it.
+    const E_LEGAL_VERSION = '2026-10-07';
+    expect(E_LEGAL_VERSION > D_LEGAL_VERSION).toBe(true);
+    expect(LEGAL_VERSION >= E_LEGAL_VERSION).toBe(true);
+    expect(section(runbook, '## 0.')).toContain(`une seule nouvelle version pour le déploiement E, \`${E_LEGAL_VERSION}\`, la date qui suit celle de D`);
+    expect(section(runbook, '### 1.3')).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${E_LEGAL_VERSION}';\`.`);
+    expect(readDoc('genome/test/web/legal.content.test.ts')).toContain(`'${E_LEGAL_VERSION}': '`);
     // The drafts carry the same day as the pages.
     expect(readDoc('docs/legal/terms.en.md')).toContain(`Version: ${dateInWords(LEGAL_VERSION, 'en')}.`);
     expect(readDoc('docs/legal/terms.fr.md')).toContain(`Version : ${dateInWords(LEGAL_VERSION, 'fr')}.`);

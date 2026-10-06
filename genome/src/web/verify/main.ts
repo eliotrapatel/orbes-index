@@ -79,7 +79,8 @@ import { CIRCLE_PATH, circlePostPath, circleRouteOf } from './circle-model.js';
 import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
 import { boardTokenOf } from './board-model.js';
 import { afterRoomPath, releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
-import { resultViewModel } from './view-model.js';
+import { recoveryContactModel, resultViewModel } from './view-model.js';
+import { orderReference, type ConcerningTarget } from './messages-model.js';
 import { boardView } from './views/board.js';
 import { certificateView } from './views/certificate.js';
 import { circlePostView, circleView } from './views/circle.js';
@@ -89,7 +90,7 @@ import { liveView } from './views/live.js';
 import { liveBannerView } from './views/live-banner.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
 import { messageView } from './views/message.js';
-import { nowView } from './views/now.js';
+import { nowView, type NowView } from './views/now.js';
 import { pieceView } from './views/piece.js';
 import { piecePath, piecesView, type PiecesTab } from './views/pieces.js';
 import { releasesView, releaseView, type ReleasesTab } from './views/releases.js';
@@ -325,6 +326,11 @@ class App {
         },
         onSignIn: () => this.openPieces(),
         onScan: () => void this.startScan(),
+        onConcerning: (target) => this.openConcerning(target),
+        onMessagesRead: () => {
+          if (this.screen === 'landing') (this.live as NowView | null)?.messagesRead();
+        },
+        recoveryContact: async () => recoveryContactModel(await this.contactDetails(), '') ?? undefined,
       },
       this.host,
       this.banner.el,
@@ -453,6 +459,15 @@ class App {
     if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') replaceEntry({ screen: 'pieces', tab }, PIECES_PATH);
     else pushEntry({ screen: 'pieces', tab }, PIECES_PATH);
     void this.showPieces();
+  }
+
+  /** MESSAGES' CONCERNING link (CS-01): the piece, the order on MY PIECES' ORDERS, the release or the model it concerned. */
+  private openConcerning(target: ConcerningTarget): void {
+    if (target.to === 'piece') this.openPiece(target.id);
+    else if (target.to === 'order') this.openPieces({ order: orderReference(target.id) });
+    else if (target.to === 'pieces') this.openPieces({ tab: 'orders' });
+    else if (target.to === 'release') this.openRelease(target.id);
+    else this.openSheet(target.slug);
   }
 
   /** A piece of MY PIECES (C4), over MY PIECES' entry: back from it returns to the list. */
@@ -755,7 +770,6 @@ class App {
         replaceEntry(history.state, lookbookSheetPath(variant));
       },
       onRelease: (id) => this.openRelease(id),
-      clientServices: () => this.contactDetails(),
       focus,
     });
     if (await this.swap(view.root, 'sheet', focus)) this.live = view;
@@ -836,7 +850,6 @@ class App {
       onScan: () => void this.startScan(),
       onReleases: () => this.openReleases(),
       onModel: (slug) => this.openSheet(slug),
-      clientServices: () => this.contactDetails(),
       offsetMinutes: -new Date().getTimezoneOffset(),
     });
     if (await this.swap(view.root, 'release', focus)) this.live = view;
@@ -859,7 +872,6 @@ class App {
       onScan: () => void this.startScan(),
       onModel: (slug) => this.openSheet(slug),
       onAfterRoom: (parentId) => this.openAfterRoom(parentId),
-      clientServices: () => this.contactDetails(),
       localZone: localZone(),
       // The chrome is the page's on screen: the one this page asks for is kept until it is mounted (the page left keeps
       // its own while it fades out, and keeps it should this one be given up), then followed while it is shown.
@@ -1098,8 +1110,9 @@ class App {
   }
 
   /**
-   * How ORBES Client Services is reached; never rejects (`{}`, so no contact, when it cannot be
-   * read), and never makes a result wait more than CONTACT_WAIT_MS. A read that fails (it gives
+   * How ORBES Client Services is reached, read in the collector app only for the email under FORGOTTEN PASSWORD? and
+   * ORBES Care's SUBSCRIBE (plan NEXT-NINE, CS-01: everywhere else, WRITE TO ORBES CLIENT SERVICES); never rejects
+   * (`{}` when it cannot be read), and never makes a result wait more than CONTACT_WAIT_MS. A read that fails (it gives
    * up after CONTACT_TIMEOUT_MS) is tried again with the next result.
    */
   private contactDetails(): Promise<ClientServices> {

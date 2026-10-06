@@ -63,7 +63,7 @@ import { bracket } from '../../shared/corners.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { CONTACT, LIVE, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
+import { LIVE, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
 import {
   addonChoices,
   aheadLine,
@@ -106,11 +106,13 @@ import { participationModel, RELEASES_PATH, zonedDate } from '../releases-model.
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSignature } from '../sound.js';
-import type { AccountQuestion, ClientServices, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
-import { formatMoney as money, releaseContactModel, upper } from '../view-model.js';
-import { contactBlock, dayAndHour, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
+import type { AccountQuestion, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
+import { formatMoney as money, upper } from '../view-model.js';
+import { referenceWords, releaseContext } from '../messages-model.js';
+import { dayAndHour, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { appAnchor, button, contactLines, countdown as countdownView, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, sizeButtons, textLink } from './nocturne.js';
+import { appAnchor, button, countdown as countdownView, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, sizeButtons, textLink } from './nocturne.js';
+import { writeButton } from './write.js';
 import { OwnershipPanel } from './ownership.js';
 import { QuestionBlock } from './question.js';
 import { CEREMONY_VIBRATION } from './result.js';
@@ -172,7 +174,6 @@ export interface LiveDeps {
   onModel(slug: string): void;
   /** ENTER THE AFTER-ROOM: the after-room of release `parentId` (the second door). */
   onAfterRoom(parentId: string): void;
-  clientServices(): Promise<ClientServices>;
   /** This phone's time zone (Intl), the second clock of the release's times. */
   localZone: string;
   /**
@@ -244,7 +245,6 @@ class LivePage {
   /** The sign-in under I'LL BE THERE on the announced page, once asked for (signed out). */
   private thereSignIn: OwnershipPanel | null = null;
   private unsubscribe: (() => void) | null;
-  private contacts: ClientServices = {};
   private busy = false;
   private error: string | null = null;
   /** The size and quantity picked before entering (the entry's own once entered). */
@@ -294,10 +294,6 @@ class LivePage {
       this.assertive,
     );
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
-    void deps.clientServices().then((c) => {
-      this.contacts = c;
-      if (this.screen?.kind === 'confirmed' || this.screen?.kind === 'removed') this.rebuild();
-    });
     this.render();
     if (this.sheet) void this.start();
   }
@@ -637,7 +633,7 @@ class LivePage {
     this.renderNotice();
   }
 
-  /** Build the screen again (the release read again, the contact arrived). */
+  /** Build the screen again (the release read again). */
   private rebuild(): void {
     if (this.screen) this.mount(this.screen.kind);
   }
@@ -1811,7 +1807,9 @@ class LivePage {
       row(LIVE.rows.total, formatMoney(e.totalMinor, e.currency)),
       row(LIVE.rows.reference, reference),
     );
-    const contact = releaseContactModel(this.contacts, this.name(), reference, LIVE.confirmed);
+    // WRITE TO ORBES CLIENT SERVICES under the CLIENT SERVICES overline, the release and its reference attached (CS-01): the
+    // house's full-width hairline button on this ivory screen, where the contact stood.
+    const write = this.sheet ? releaseContext(this.sheet.id, this.name(), LIVE.statusLabel.CONFIRMED, referenceWords(reference)) : null;
     const el = h(
       'section',
       { class: 'live__confirmed' },
@@ -1820,8 +1818,8 @@ class LivePage {
       this.fact(this.afterRoomOf() ? LIVE.afterRoom.confirmedOf(this.name()) : LIVE.confirmedOf(this.name()), 'live__confirmed-of'),
       h('p', { class: 'prose live__confirmed-text', text: LIVE.reservedIn(e.size.label, e.quantity) }),
       bracket(h('div', { class: 'live__receipt-plate' }, rows)),
-      contact ? h('p', { class: 'live__overline live__cs-title', text: LIVE.clientServices }) : null,
-      contact ? contactBlock(contact) : null,
+      h('p', { class: 'live__overline live__cs-title', text: LIVE.clientServices }),
+      writeButton(write, { house: true }),
       piecesLink(() => this.deps.onPieces(), 'live__pieces'),
     );
     return { kind: 'confirmed', el, update: () => undefined };
@@ -2043,7 +2041,8 @@ class LivePage {
    */
   private edgeScreen(kind: LiveScreenKind): Screen {
     const copy = this.edgeCopy(kind);
-    const contact = kind === 'removed' && this.entry ? releaseContactModel(this.contacts, this.name(), liveReference(this.entry.id), LIVE.statusLabel.REMOVED) : null;
+    // YOUR ENTRY IS REMOVED: WRITE TO ORBES CLIENT SERVICES in place of the contact, the release attached (CS-01).
+    const write = kind === 'removed' && this.entry && this.sheet ? releaseContext(this.sheet.id, this.name(), LIVE.statusLabel.REMOVED) : null;
     const sheet = this.sheet;
     const heading = sheet ? (liveHeading(sheet) ?? (isEndedSheet(sheet) ? LIVE.kind : LIVE.unnamed)) : LIVE.kind;
     const day = sheet ? pastDay(sheet.opensAt, this.deps.localZone, this.now()) : '';
@@ -2067,7 +2066,7 @@ class LivePage {
       { class: 'n-livepage n-live__end' },
       ...this.hero(sheet ? pictureOf(sheet) : null, words),
       h('section', { class: 'n-px n-ctr n-live__outcome-block', attrs: { 'aria-live': 'polite' } }, outcome, note),
-      contact ? h('div', { class: 'n-px n-live__contact' }, contactLines(contact, { action: CONTACT.action, call: CONTACT.call })) : null,
+      write ? h('div', { class: 'n-px n-live__contact' }, writeButton(write)) : null,
       ask?.el ?? null,
       h('p', { class: 'n-sec n-ctr n-live__back' }, textLink(LIVE.back, { href: RELEASES_PATH, onOpen: () => this.deps.onReleases(), extraClass: 'n-live__back-link' })),
     );

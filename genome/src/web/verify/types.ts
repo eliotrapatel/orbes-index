@@ -368,6 +368,8 @@ export interface ShopRequest {
   id: string;
   status: 'OPEN' | 'CLOSED';
   createdAt: string;
+  /** The model requested: what WRITE TO ORBES CLIENT SERVICES attaches on its sheet (CS-01). */
+  modelId: string;
 }
 
 /** A model's sheet (P-R02: GET /api/v1/lookbook/:slug, or the club's for an owner). */
@@ -931,4 +933,31 @@ export interface AccountOrderDocuments {
 export interface OrderCareGuide {
   model: string;
   text: string | null;
+}
+
+// ── MESSAGES (plan NEXT-NINE, CS-01; API §10.17) ─────────────────────────
+
+/** What a message concerns (client_messages.context_kind). */
+export type MessageContextKind = 'PIECE' | 'ORDER' | 'RELEASE' | 'SCAN' | 'MODEL';
+
+/** What the collector attaches to a message: a kind and its id; `about` WARRANTY for the warranty tab's scan only. */
+export interface MessageContextInput {
+  kind: MessageContextKind;
+  id: string;
+  about?: 'WARRANTY';
+}
+
+/** A message of the account's conversation (GET /api/v1/account/messages): staff are never named. */
+export interface AccountMessage {
+  id: string;
+  from: 'YOU' | 'ORBES_CLIENT_SERVICES';
+  body: string;
+  at: string;
+  /** On the collector's own messages: what it concerned, and its place in the app (null for a scan). */
+  concerning: { kind: MessageContextKind; label: string; path: string | null } | null;
+}
+
+export interface AccountThread {
+  messages: AccountMessage[];
+  unread: boolean;
 }

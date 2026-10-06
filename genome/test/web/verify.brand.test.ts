@@ -265,14 +265,14 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
 
   it('lets no class the views put on a button or a link take it under either floor', () => {
     // Every class written on an h('button') or h('a') of the verify views (the control classes and those beside
-    // them: .scan__zoom, .scan__close, .landing__upload, .contact__phone…), so a rule that names the element by
+    // them: .scan__zoom, .scan__close, .landing__upload, .contact__email…), so a rule that names the element by
     // its modifier alone is held to the same floors.
     const sources = readdirSync(join(WEB, 'verify/views')).map((f) => readFileSync(join(WEB, 'verify/views', f), 'utf8'));
     const classes = [
       ...new Set(sources.flatMap((src) => [...src.matchAll(/h\(\s*'(?:button|a)',\s*\{\s*class:\s*'([^']+)'/g)].flatMap((m) => m[1].split(/\s+/)))),
     ].sort();
     expect(classes).toEqual(
-      expect.arrayContaining(['auth__option', 'btn', 'btn--block', 'contact__email', 'contact__phone', 'landing__scan', 'landing__upload', 'n-cam__close', 'n-cam__light', 'n-cam__zoom', 'textlink']),
+      expect.arrayContaining(['auth__option', 'btn', 'btn--block', 'contact__email', 'landing__scan', 'landing__upload', 'n-cam__close', 'n-cam__light', 'n-cam__zoom', 'textlink']),
     );
     for (const cls of classes) {
       for (const r of about(`.${cls}`)) {
@@ -305,17 +305,21 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     }
   });
 
-  it('keeps the hairline button for the foot of a result: the contact of ORBES Client Services is a link', () => {
+  it('keeps the hairline button for the foot of a result: ORBES Client Services is WRITE TO ORBES CLIENT SERVICES, a hairline button, and the email under FORGOTTEN PASSWORD? a link', () => {
     // A result draws one button of its own, the foot's SCAN AGAIN or SCAN ANOTHER, a hairline button (C9, C15, C16);
-    // the contact, under the help line or in the WARRANTY tab, is a link beside it (§3.8, §4.2), as the canvas draws it.
+    // under the help line or in the WARRANTY tab, WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01) is the same
+    // hairline button, never the ivory one (views/write.ts writeButton: `outline: true`).
     const buttons = (f: string) => (readFileSync(join(WEB, 'verify', f), 'utf8').match(/\bbutton\(/g) ?? []).length;
     expect(['views/result.ts', 'views/panels.ts', 'views/tabs.ts'].map(buttons)).toEqual([1, 0, 0]);
     expect(resultView).toContain("button(vm.tone === 'authentic' ? 'SCAN ANOTHER' : 'SCAN AGAIN', { outline: true,");
+    expect(resultView).toContain("vm.write?.placement === 'help' ? writeButton(vm.write.context) : null");
+    expect(readFileSync(join(WEB, 'verify/views/panels.ts'), 'utf8')).toContain("vm.write?.placement === 'warranty' ? writeButton(vm.write.context) : null");
+    const write = readFileSync(join(WEB, 'verify/views/write.ts'), 'utf8');
+    expect(write).toContain("button(MESSAGES.write, { outline: true, onClick: open,");
     const pieces = readFileSync(join(WEB, 'verify/views/nocturne.ts'), 'utf8');
     expect(pieces).toContain("h('a', { class: 'n-g n-contact__email', attrs: { href: c.mailto }, text: labels.action })");
-    // Its 44 px zone is padding given back (the email's upward, the phone's downward): the lines stand where the canvas sets them.
+    // Its 44 px zone is padding given back upward: the email stands where the canvas sets it.
     expect(rule(styles, '.n-contact__email')).toMatchObject({ 'margin-top': '-28.25px', 'padding-top': '28.25px' });
-    expect(rule(styles, '.n-contact__phone')).toMatchObject({ 'margin-bottom': '-24.5px', 'padding-bottom': '24.5px' });
     // WHERE DID YOU SEE OR BUY THIS PIECE? (under the contact): its answers pressed two by two (.opt2), SEND ANSWER a
     // hairline button (C15), never the ivory one.
     const report = readFileSync(join(WEB, 'verify/views/report.ts'), 'utf8');
@@ -419,7 +423,7 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
-  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.photos__note', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.certificate__lead', '.certificate__note', '.certificate-link__value', '.certificate-link__label', '.n-cam__zoom', '.n-own__code', '.n-own__email', '.n-gen__fp', '.n-result__meta-value', '.n-contact__phone', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.contact__phone', '.contact__hours', '.pieces__benefit', '.n-tx', '.n-sm', '.n-lead', '.n-art', '.n-cd__value', '.n-fld__input', '.pieces__order-step-date', '.pieces__order-care-text', '.question__note'];
+  const VERIFY_READ = ['.prose', '.field__input', '.field__input--code', '.field__hint', '.photos__note', '.genome__id', '.genome__meta', '.lines__line', '.rows__value', '.certificate__lead', '.certificate__note', '.certificate-link__value', '.certificate-link__label', '.n-cam__zoom', '.n-own__code', '.n-own__email', '.n-gen__fp', '.n-result__meta-value', '.form__error', '.ownership__meta', '.ownership__who', '.ownership__email', '.pieces__benefit', '.n-tx', '.n-sm', '.n-lead', '.n-art', '.n-cd__value', '.n-fld__input', '.pieces__order-step-date', '.pieces__order-care-text', '.question__note'];
   const ADMIN_READ = ['.mono', '.status', '.kpi__value', '.kpi__note', '.bar__label', '.deflist__value', '.table', '.cinput', '.sheet__id', '.sheet__plain', '.gen__identity-id', '.claim__code', '.enrol__code', '.enrol__step', '.timeline__move', '.pager__range', '.pager__page', '.topbar__clock', '.topbar__crumb', '.panel__note', '.dialog__eyebrow', '.dialog__title', '.cfield__phrase', '.page-head__title--id', '.side__who', '.side__role'];
 
   it('sets the wordmark, titles and tracked-capital labels of both apps in the display face', () => {
@@ -444,15 +448,16 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
 
   it('sets a figure in the reading face where a display role may show one (Gravesend\'s one is its capital I)', () => {
     // The overrides come after the display rule of their stylesheet, so they win at equal specificity.
-    for (const [css, selector] of [[styles, '.n-cam__zoom'], [styles, '.contact__phone'], [adminStyles, '.page-head__title--id'], [adminStyles, '.cfield__phrase']] as const) {
+    for (const [css, selector] of [[styles, '.n-cam__zoom'], [adminStyles, '.page-head__title--id'], [adminStyles, '.cfield__phrase']] as const) {
       const all = rules(css);
       const at = all.findIndex((r) => r.selectors.includes(selector));
       expect(all[at]?.decls['font-family'], selector).toBe('var(--font)');
       expect(at, selector).toBeGreaterThan(all.findIndex((r) => r.decls['font-family'] === 'var(--font-display)'));
     }
-    // The zoom control (1×, 2×), the phone of ORBES Client Services and every console page titled with a product id use them.
+    // The zoom control (1×, 2×) and every console page titled with a product id use them (the phone of ORBES Client
+    // Services, which did too, is no longer shown in the collector app: plan NEXT-NINE, CS-01).
     expect(readFileSync(join(WEB, 'verify/views/scanning.ts'), 'utf8')).toContain("class: 'n-num n-cam__control n-cam__zoom'");
-    expect(readFileSync(join(WEB, 'verify/views/common.ts'), 'utf8')).toContain("class: 'textlink contact__phone'");
+    expect(readFileSync(join(WEB, 'verify/views/common.ts'), 'utf8')).not.toContain('contact__phone');
     for (const view of ['product', 'generator']) {
       const src = readFileSync(join(WEB, `admin/views/${view}.ts`), 'utf8');
       const titled = (src.match(/title: p\.productId,/g) ?? []).length;
@@ -602,6 +607,56 @@ describe('verify app: the photographs of an authentic piece (F-04)', () => {
   it('never shows a broken image: a photograph that cannot be loaded takes its place with it', () => {
     expect(resultView).toContain("frame.querySelector('img')?.addEventListener('error', () => (section.hidden = true), { once: true });");
     expect(piecesView.match(/querySelector\('img'\)\?\.addEventListener\('error'/g)).toHaveLength(2);
+  });
+});
+
+describe('verify app: one button to ORBES Client Services, the email under FORGOTTEN PASSWORD? alone (plan NEXT-NINE, CS-01)', () => {
+  /** Every source file of the collector app (src/web/verify), with its path. */
+  const sources = (dir = join(WEB, 'verify')): { file: string; text: string }[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const path = join(dir, e.name);
+      if (e.isDirectory()) return sources(path);
+      return /\.(ts|css|html)$/.test(e.name) ? [{ file: path.slice(WEB.length + 1), text: readFileSync(path, 'utf8') }] : [];
+    });
+  const all = sources();
+  const code = all.filter((s) => s.file.endsWith('.ts'));
+
+  it('reads every file of the app', () => {
+    expect(all.map((s) => s.file)).toEqual(expect.arrayContaining(['verify/view-model.ts', 'verify/views/write.ts', 'verify/messages-model.ts', 'verify/styles.css', 'verify/house.css']));
+  });
+
+  it('has no tel: link and no phoneHref anywhere under src/web/verify', () => {
+    for (const s of all) {
+      expect(s.text, s.file).not.toMatch(/tel:/);
+      expect(s.text, s.file).not.toMatch(/phoneHref/);
+    }
+  });
+
+  it('builds a mailto: in contactOf alone, which recoveryContactModel alone calls', () => {
+    const builders = code.filter((s) => /mailto:\$\{|`mailto:|'mailto:/.test(s.text)).map((s) => s.file);
+    expect(builders).toEqual(['verify/view-model.ts']);
+    const vm = code.find((s) => s.file === 'verify/view-model.ts')!.text;
+    // The template that builds it sits in contactOf.
+    const at = vm.indexOf('`mailto:');
+    expect(vm.lastIndexOf('function contactOf(', at)).toBeGreaterThan(vm.lastIndexOf('\nfunction ', at - 1) - 1);
+    expect(vm.slice(vm.lastIndexOf('function ', at), at)).toMatch(/^function contactOf\(/);
+    // contactOf is called once, from recoveryContactModel; nothing else in the app calls it.
+    const calls = [...vm.matchAll(/contactOf\(/g)].map((m) => m.index!);
+    expect(calls).toHaveLength(2);
+    expect(vm.slice(vm.lastIndexOf('export function ', calls[1]), calls[1])).toMatch(/^export function recoveryContactModel\(/);
+    for (const s of code.filter((x) => x.file !== 'verify/view-model.ts')) expect(s.text, s.file).not.toMatch(/\bcontactOf\(/);
+  });
+
+  it('renders no opening hours in the collector app: no hours field, line or style', () => {
+    for (const s of all) {
+      expect(s.text, s.file).not.toMatch(/contact__hours|\b(?:c|cs|lines|contact|clientServices|services)\.hours\b/);
+    }
+  });
+
+  it('writes MESSAGES calmly: no exclamation mark and no word of §4.5', () => {
+    const words = JSON.stringify(verifyCopy.MESSAGES);
+    expect(words).not.toContain('!');
+    expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
   });
 });
 

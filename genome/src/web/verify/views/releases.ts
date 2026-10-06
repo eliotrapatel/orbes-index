@@ -32,7 +32,7 @@
  * access, how long a place drawn is held, the places reserved directly), the paragraph on the early access. YOUR ENTRY:
  * signed out the sign-in and CREATE ACCOUNT of the OWNERSHIP panel (any account may enter); signed in what the entry
  * means now, ENTER THE DRAW (the page's filled button) or RESERVE A PLACE (PLATINE and PALLADIUM during the early
- * access), WITHDRAW, and for a place held the contact of ORBES Client Services. THE DRAW: what a place drawn obliges to,
+ * access), WITHDRAW, and for a place held or concluded WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01). THE DRAW: what a place drawn obliges to,
  * its rule word for word, its commitment, the seed's fingerprint; once drawn the seed, checked on this phone against the
  * fingerprint, and the entries by rank, the account's own marked, a hundred at a time, never said how many. After a
  * reservation the page is read again: its places. The scan is the SCAN ring's, THE RELEASES the crumb's and the rail's.
@@ -44,7 +44,7 @@
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { CONTACT, LIVE, LOOKBOOK, RELEASES } from '../copy.js';
+import { LIVE, LOOKBOOK, RELEASES } from '../copy.js';
 import { CHANGE_RETRY_MS, countdown as countdownGroups, liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
 import {
   drawLines,
@@ -63,10 +63,11 @@ import {
   type ReleaseSheetModel,
 } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
-import type { ClientServices, ClubEntry, DrawEntry } from '../types.js';
+import type { ClubEntry, DrawEntry } from '../types.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import { dayAndHour, RELEASES_PATH, viewRoot, withNumerals } from './common.js';
-import { appAnchor, button, contactLines, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, quietLine, textLink } from './nocturne.js';
+import { appAnchor, button, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, quietLine, textLink } from './nocturne.js';
+import { writeButton } from './write.js';
 import { messageOf } from './forms.js';
 import { BANNER_REFRESH_MS } from './live-banner.js';
 import { OwnershipPanel } from './ownership.js';
@@ -105,8 +106,6 @@ export interface ReleaseDeps {
   onReleases(): void;
   /** SEE THE MODEL: its sheet in THE COLLECTION. */
   onModel(slug: string): void;
-  /** How ORBES Client Services is reached (`{}` when not configured); never rejects. */
-  clientServices(): Promise<ClientServices>;
   /** Minutes east of UTC of this phone's clock. */
   offsetMinutes: number;
 }
@@ -726,7 +725,6 @@ class ReleasePage {
   private seedMatches: boolean | null = null;
   private signIn: OwnershipPanel | null = null;
   private unsubscribe: (() => void) | null;
-  private contacts: ClientServices = {};
   private busy = false;
   private actionError: string | null = null;
   private disposed = false;
@@ -769,9 +767,8 @@ class ReleasePage {
       this.render();
     }
     try {
-      const [sheet, contacts] = await Promise.all([this.deps.api.drop(id), this.deps.clientServices()]);
+      const sheet = await this.deps.api.drop(id);
       if (this.disposed) return;
-      this.contacts = contacts;
       this.load = { kind: 'ready', sheet: releaseSheet(sheet, this.deps.offsetMinutes) };
     } catch (e) {
       if (this.disposed) return;
@@ -1023,7 +1020,8 @@ class ReleasePage {
       if (m.canEnter) out.push(action(RELEASES.enter, 'release__enter', () => void this.act('enter')));
       if (m.canReserve) out.push(action(RELEASES.reserve, 'release__reserve', () => void this.act('reserve')));
       if (m.canWithdraw) out.push(action(RELEASES.withdraw, 'release__withdraw', () => void this.act('withdraw'), true));
-      if (m.contact) out.push(contactLines(m.contact, { action: CONTACT.action, call: CONTACT.call }));
+      // WRITE TO ORBES CLIENT SERVICES, under the entry's actions, the release attached (CS-01).
+      if (m.write) out.push(writeButton(m.write));
     }
     this.entrySection.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
     if (hadFocus && !this.entrySection.contains(document.activeElement)) (this.entrySection.querySelector<HTMLElement>('input, button:not([disabled])') ?? heading).focus({ preventScroll: true });
@@ -1039,7 +1037,7 @@ class ReleasePage {
   }
 
   private entryOpts() {
-    return { offsetMinutes: this.deps.offsetMinutes, clientServices: this.contacts, tier: this.tier };
+    return { offsetMinutes: this.deps.offsetMinutes, tier: this.tier };
   }
 
   /** THE DRAW: what a place drawn obliges to, its rule and commitment, the seed's fingerprint; once drawn, the seed, the phone's check and the entries by rank. */

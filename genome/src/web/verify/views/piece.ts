@@ -21,7 +21,7 @@
  *                                               owner: PIECE FOUND, confirmed with the account's password; a theft or a
  *                                               loss ORBES Client Services recorded, or a piece the server would refuse
  *                                               to report: their sentence
- *     CONTACT ORBES CLIENT SERVICES             the contact, its phone and its hours
+ *     WRITE TO ORBES CLIENT SERVICES            the write sheet, the piece attached (plan NEXT-NINE, CS-01)
  *     WARRANTY (C35): STATUS, FROM, UNTIL and its sentence; SERVICE: SERVICE HISTORY, each service; CARE: CARING FOR
  *     THIS PIECE, then ORBES CARE and SUBSCRIBE (its page, a new tab) or « Subscriptions open soon. »
  *
@@ -34,16 +34,18 @@
 import { h } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { ownerCertificateLine } from '../certificate-model.js';
-import { CONTACT, LOOKBOOK, ORBES_CARE, PIECES, RELEASES } from '../copy.js';
+import { LOOKBOOK, ORBES_CARE, PIECES, RELEASES } from '../copy.js';
 import { nocturneGenome } from '../genome-view.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows, type PieceModel, type PieceTabId } from '../pieces-model.js';
 import type { SessionStore } from '../session.js';
 import type { CertificateOffer, ClientServices, IncidentType, OwnedPiece, OwnerCertificate, ServiceRecord } from '../types.js';
-import { formatDate, pieceContactModel, recoveryContactModel } from '../view-model.js';
+import { formatDate, recoveryContactModel } from '../view-model.js';
+import { pieceContext } from '../messages-model.js';
 import { PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { FormError, messageOf, nocturneForm } from './forms.js';
-import { accLink, appAnchor, button, contactLines, definitionList, failedState, field, icon, loadingState, textLink } from './nocturne.js';
+import { accLink, appAnchor, button, definitionList, failedState, field, icon, loadingState, textLink } from './nocturne.js';
+import { writeButton } from './write.js';
 import { OwnershipPanel } from './ownership.js';
 import { modelPhoto } from './result.js';
 import { tabsView } from './tabs.js';
@@ -413,8 +415,7 @@ class PieceCard {
     if (m.certificateOffered && this.confirm === null) out.push(...this.certificateBlock());
     out.push(...this.incidentBlock());
     if (this.notice) out.push(h('p', { class: 'n-sm n-ivc n-piece__notice', attrs: { role: 'status' }, text: this.notice }));
-    const contact = pieceContactModel(this.deps.contacts, m.productId, m.status);
-    if (contact) out.push(contactLines(contact, CONTACT));
+    out.push(writeButton(pieceContext(this.piece)));
     this.panel.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
     const q = (sel: string) => this.panel.querySelector<HTMLElement>(sel);
     let target: HTMLElement | null = null;

@@ -27,8 +27,9 @@
  */
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { RELEASES } from './copy.js';
-import type { ClientServices, ClubEntry, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease } from './types.js';
-import { formatDate, formatDateTime, formatDateTimeLong, formatMoney, modelWithVariant, releaseContactModel, upper, utcOffsetLabel, type ContactModel } from './view-model.js';
+import type { ClubEntry, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease } from './types.js';
+import { formatDate, formatDateTime, formatDateTimeLong, formatMoney, modelWithVariant, upper, utcOffsetLabel } from './view-model.js';
+import { releaseContext, type WriteContext } from './messages-model.js';
 
 /** The list of the releases, and the page of one under it. */
 export const RELEASES_PATH = '/verify/releases';
@@ -281,8 +282,11 @@ export interface EntryModel {
   canWithdraw: boolean;
   /** P-X02: RESERVE A PLACE, for a PLATINE or PALLADIUM account while the early access lasts and a piece is left. */
   canReserve: boolean;
-  /** A place held: ORBES Client Services will contact the account; their contact follows. */
-  contact: ContactModel | null;
+  /**
+   * A place held or confirmed: WRITE TO ORBES CLIENT SERVICES, the release attached with the account's place in it
+   * (`{dropId, label}`, plan NEXT-NINE CS-01); null otherwise.
+   */
+  write: WriteContext | null;
 }
 
 /** A time inside a sentence (a place held until it, entries opening on it): on the phone's clock, its offset named. */
@@ -303,10 +307,10 @@ function reservingTier(tier: number | undefined): string | null {
 export function entryModel(
   release: { id: string; title: string; state: DropState; opensAt: string; earlyAccess?: EarlyAccess | null; full?: boolean },
   entry: (Pick<ClubEntry, 'id' | 'status' | 'rank' | 'respondBy'> & { reserved?: boolean }) | null,
-  opts: { offsetMinutes: number; clientServices?: ClientServices; tier?: number },
+  opts: { offsetMinutes: number; tier?: number },
 ): EntryModel {
   const st = RELEASES.status;
-  const none = (sentence: string, canEnter = false, canReserve = false): EntryModel => ({ label: null, sentence, entryId: null, canEnter, canWithdraw: false, canReserve, contact: null });
+  const none = (sentence: string, canEnter = false, canReserve = false): EntryModel => ({ label: null, sentence, entryId: null, canEnter, canWithdraw: false, canReserve, write: null });
   const open = release.state === 'OPEN';
   const opens = inSentence(release.opensAt, opts.offsetMinutes);
   if (!entry) {
@@ -334,7 +338,7 @@ export function entryModel(
   }
   const reserved = entry.reserved === true && entry.status === 'SELECTED';
   const label = reserved ? RELEASES.reservedLabel : (RELEASES.statusLabel[entry.status as DropEntryStatus] ?? null);
-  const base = { label, entryId: isReleaseId(entry.id) ? entry.id : null, canEnter: false, canWithdraw: false, canReserve: false, contact: null };
+  const base = { label, entryId: isReleaseId(entry.id) ? entry.id : null, canEnter: false, canWithdraw: false, canReserve: false, write: null };
   if (release.state === 'CANCELLED') return { ...base, sentence: st.cancelled };
   switch (entry.status) {
     case 'ENTERED':
@@ -346,13 +350,13 @@ export function entryModel(
       return {
         ...base,
         sentence: reserved ? st.reserved(until) : st.selected(until),
-        contact: releaseContactModel(opts.clientServices, release.title, entry.id, label ?? undefined),
+        write: releaseContext(release.id, release.title, label),
       };
     }
     case 'WAITLISTED':
       return { ...base, sentence: st.waitlisted(entry.rank ?? 0) };
     case 'CONFIRMED':
-      return { ...base, sentence: st.confirmed };
+      return { ...base, sentence: st.confirmed, write: releaseContext(release.id, release.title, label) };
     default:
       return { ...base, sentence: st.lapsed };
   }
@@ -370,7 +374,7 @@ export interface MyEntryModel {
   entry: EntryModel;
 }
 
-export function myEntries(entries: readonly ClubEntry[], opts: { offsetMinutes: number; clientServices?: ClientServices }): MyEntryModel[] {
+export function myEntries(entries: readonly ClubEntry[], opts: { offsetMinutes: number }): MyEntryModel[] {
   return entries
     .filter((e) => isReleaseId(e?.dropId) && typeof e.title === 'string')
     .map((e) => {

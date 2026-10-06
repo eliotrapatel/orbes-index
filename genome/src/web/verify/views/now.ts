@@ -11,6 +11,9 @@
  *   [ SEE THE RELEASE ]                  pieces and the time that matters in UTC, then on this phone, SEE THE RELEASE;
  *                                        or the newest model (C43): THE COLLECTION · ORBITAL, its name, type, sizes,
  *                                        variant dots, You own N, SEE THE MODEL
+ *   MESSAGES                             signed in, while an answer of ORBES Client Services is unread (plan NEXT-NINE,
+ *   ORBES Client Services has answered   CS-01): one line, read once per render, and READ, which opens MESSAGES in
+ *   you.                         READ    the account sheet; it goes once they are read
  *   YOUR PIECES              MY PIECES   an owner: two pieces side by side, their model's photographs (decision 9),
  *   TITANE  2 pieces held. …             the tier in one line (decision 10)
  *   THE CIRCLE              THE CIRCLE   the next invitation as a plate card: YES / NO (addition 6), its places left
@@ -24,7 +27,8 @@
  */
 import { h } from '../../shared/dom.js';
 import type { ApiClient } from '../api.js';
-import { CIRCLE, LIVE, LOOKBOOK, NOW, PIECES, RELEASES } from '../copy.js';
+import { CIRCLE, LIVE, LOOKBOOK, MESSAGES, NOW, PIECES, RELEASES } from '../copy.js';
+import { nowMessagesLine } from '../messages-model.js';
 import { measureClock } from '../live-model.js';
 import {
   collectionHero,
@@ -48,9 +52,10 @@ import type { CircleCard, ClubStatus, DropCard, LiveCard, LookbookCard, OwnedPie
 import { CIRCLE_PATH, LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { CircleCardLines } from './invitation.js';
 import { appAnchor, countdown, fadedPhoto, icon, lift, loadingState, modelTitle, plateCard, textLink, variantDots } from './nocturne.js';
+import { openMessages } from './write.js';
 
 export interface NowDeps {
-  api: Pick<ApiClient, 'liveReleases' | 'drops' | 'lookbook' | 'products' | 'clubStatus' | 'circle' | 'circleAnswer' | 'liveClock'>;
+  api: Pick<ApiClient, 'liveReleases' | 'drops' | 'lookbook' | 'products' | 'clubStatus' | 'circle' | 'circleAnswer' | 'liveClock' | 'messagesUnread'>;
   session: SessionStore;
   /** This phone's time zone: a LIVE RELEASE says its time in Paris, then here when it differs. */
   localZone: string;
@@ -73,6 +78,8 @@ export interface NowDeps {
 export interface NowView {
   root: HTMLElement;
   dispose(): void;
+  /** MESSAGES was read (the account sheet): the line goes. */
+  messagesRead(): void;
 }
 
 export function nowView(deps: NowDeps): NowView {
@@ -91,6 +98,8 @@ interface NowData {
   club: ClubStatus | null;
   /** The feed's posts (null: no circle for this account, or unreadable). */
   circle: CircleCard[] | null;
+  /** CS-01: an answer of ORBES Client Services is unread (false signed out, or unreadable). */
+  unread: boolean;
 }
 
 /** The countdown is drawn again this often (its seconds within the last day). */
@@ -155,7 +164,7 @@ class Now implements NowView {
             return fallback;
           })
         : Promise.resolve(fallback);
-    const [live, drops, collection, pieces, club, circle, clock] = await Promise.all([
+    const [live, drops, collection, pieces, club, circle, clock, unread] = await Promise.all([
       api.liveReleases().catch((): LiveCard[] => []),
       api.drops().catch((): DropCard[] => []),
       api.lookbook().catch((): LookbookCard[] => []),
@@ -164,11 +173,12 @@ class Now implements NowView {
       // The next invitation: the feed read without counting a visit of the circle (403 without a piece: no circle).
       owner<CircleCard[] | null>(async () => (await api.circle(1, 50, { visit: false })).items, null),
       measureClock(() => api.liveClock(), 1).catch(() => null),
+      owner<boolean>(() => api.messagesUnread(), false),
     ]);
     if (this.disposed || reading !== this.reading) return;
     if (clock) this.offset = clock.offset;
     this.signedIn = signedIn;
-    this.data = { signedIn, sessionKnown, top: nowTop(live, drops, collection), collection, pieces, club, circle };
+    this.data = { signedIn, sessionKnown, top: nowTop(live, drops, collection), collection, pieces, club, circle, unread };
     this.render();
   }
 
@@ -206,6 +216,7 @@ class Now implements NowView {
     }
     const lead = sections.length === 0;
     if (d.signedIn) {
+      sections.push(this.messagesLine(d));
       sections.push(this.piecesSection(d, lead));
       sections.push(this.circleSection(d));
     }
@@ -240,6 +251,25 @@ class Now implements NowView {
       if (h1) h1.tabIndex = -1;
       target.focus({ preventScroll: true });
     }
+  }
+
+  /** MESSAGES was read in the account sheet: the line goes, the page as it is. */
+  messagesRead(): void {
+    if (!this.data || !this.data.unread) return;
+    this.data = { ...this.data, unread: false };
+    this.root.querySelector('.now__messages')?.remove();
+  }
+
+  /** CS-01: one line under the hero, before YOUR PIECES, while an answer is unread; READ opens MESSAGES. */
+  private messagesLine(d: NowData): HTMLElement | null {
+    const m = nowMessagesLine(d.unread);
+    if (!m) return null;
+    return h(
+      'section',
+      { class: 'n-px n-sb now__messages', attrs: { 'aria-label': MESSAGES.title } },
+      h('div', { class: 'now__messages-text' }, h('p', { class: 'n-g n-lb', text: m.label }), h('p', { class: 'n-sm now__messages-sentence', text: m.sentence })),
+      textLink(m.action, { onOpen: () => openMessages(this.root.querySelector<HTMLElement>('.now__messages .n-tl')), extraClass: 'now__messages-read' }),
+    );
   }
 
   /** A title whose model's name begins it: the name on a line of its own (`MONOLITHE` / `IN BLUE`), as the canvas sets it. */

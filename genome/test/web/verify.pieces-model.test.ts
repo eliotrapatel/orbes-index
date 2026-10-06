@@ -9,7 +9,8 @@ import { genomeRowMarkup } from '../../src/web/verify/genome-view.js';
 import { CONTACT, DEFAULT_CARE, ORBES_CARE, PIECES } from '../../src/web/verify/copy.js';
 import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, pieceOriginModel, releaseDay, serviceRows } from '../../src/web/verify/pieces-model.js';
 import type { OwnedPiece, ServiceRecord } from '../../src/web/verify/types.js';
-import { pieceContactModel, productLines, resultViewModel, warrantyModel } from '../../src/web/verify/view-model.js';
+import { productLines, resultViewModel, warrantyModel } from '../../src/web/verify/view-model.js';
+import { contextInput, pieceContext } from '../../src/web/verify/messages-model.js';
 
 const G = computeGenome(packIdentity({ year: 2026, categoryIndex: 1, serial: 184 }), 1);
 
@@ -256,14 +257,11 @@ describe('MY PIECES: loss and theft', () => {
     expect(pieceModel(older as OwnedPiece).certificateOffered).toBe(true);
   });
 
-  it('gives ORBES Client Services an email that names the piece and its status line', () => {
-    const c = pieceContactModel({ email: 'clientservices@theorbes.com', phone: '+33 1 23 45 67 89' }, 'O26-J-00184', 'REPORTED STOLEN')!;
-    expect(c.placement).toBe('piece');
-    const m = /^mailto:([^?]+)\?subject=([^&]*)&body=([^&]*)$/.exec(c.mailto!)!;
-    expect([m[1], decodeURIComponent(m[2]), decodeURIComponent(m[3])]).toEqual(['clientservices@theorbes.com', 'ORBES — O26-J-00184 — REPORTED STOLEN', `\r\n\r\n${CONTACT.piece}: O26-J-00184`]);
-    expect(c.phone).toEqual({ label: '+33 1 23 45 67 89', href: 'tel:+33123456789' });
-    expect(pieceContactModel({}, 'O26-J-00184', 'REPORTED STOLEN')).toBeNull();
-    expect(pieceContactModel(undefined, 'O26-J-00184', 'REPORTED STOLEN')).toBeNull();
+  it('writes to ORBES Client Services about the piece: the piece attached by its id, named in its label (CS-01)', () => {
+    const c = pieceContext(piece());
+    expect(c).toEqual({ kind: 'PIECE', id: 'O26-J-00184', label: 'MONOLITHE · O26-J-00184' });
+    expect(contextInput(c)).toEqual({ kind: 'PIECE', id: 'O26-J-00184' });
+    expect(pieceContext(piece({ modelVariant: 'Blue' })).label).toBe('MONOLITHE IN BLUE · O26-J-00184');
   });
 });
 

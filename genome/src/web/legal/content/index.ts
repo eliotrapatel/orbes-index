@@ -31,9 +31,11 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * and those after it moving by one), articles 1, 2, 3, 7, 10, 12, 13 (the after-room, the surprise, the access by
  * participation and by segment, PAST, the question after), 15, 16 and 17, and the privacy policy's orders, segments,
  * client sheet and hourly activity; the next date the rule allows after D's published 2026-10-06, set mechanically
- * (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md §0).
+ * (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md §0). 2026-10-08 is the one version of deployment G, the next nine (plan of
+ * 2026-10-06): the privacy policy's messages with ORBES Client Services (CS-01); the build's start date, 2026-10-06,
+ * not being after 2026-10-07, the day after it, as the plan's rule sets it. Its date never holds the deployment.
  */
-export const LEGAL_VERSION = '2026-10-07';
+export const LEGAL_VERSION = '2026-10-08';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

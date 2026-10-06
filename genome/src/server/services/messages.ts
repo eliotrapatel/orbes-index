@@ -7,7 +7,8 @@
  *
  * One conversation per collector (`client_conversations`). Each collector message may concern one place of the app,
  * which the server checks and labels (`resolveContext`): a PIECE the account owns now, an ORDER of the account, a
- * RELEASE published (with the account's own entry: PLACE HELD, PLACE RESERVED, CONFIRMED · REFERENCE LR-…, REMOVED), a
+ * RELEASE published (with the account's own entry: PLACE HELD, PLACE RESERVED, CONCLUDED, CONFIRMED · REFERENCE LR-…,
+ * REMOVED), a
  * SCAN at most 24 hours old (REPORT_WINDOW_MS; with WARRANTY on the warranty tab), a MODEL the account's lookbook
  * reaches (with its open or latest salon request). The label is a snapshot; the console links the row it names.
  *
@@ -578,7 +579,8 @@ export class MessageService {
     if (mode === 'DRAW') {
       const e = await tx.selectFrom('drop_entries').select(['status', 'rank']).where('drop_id', '=', dropId).where('account_id', '=', account).executeTakeFirst();
       if (e?.status === 'SELECTED') return [e.rank === null ? 'PLACE RESERVED' : 'PLACE HELD'];
-      if (e?.status === 'CONFIRMED') return ['CONFIRMED'];
+      // The sale concluded, as MY PIECES says it of a draw's entry.
+      if (e?.status === 'CONFIRMED') return ['CONCLUDED'];
       return [];
     }
     const e = await tx.selectFrom('live_entries').select(['id', 'status']).where('drop_id', '=', dropId).where('account_id', '=', account).executeTakeFirst();

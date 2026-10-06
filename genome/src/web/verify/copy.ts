@@ -204,23 +204,16 @@ export const FALLBACK_TITLES: Readonly<Record<VerificationState, string>> = Obje
 });
 
 /**
- * ORBES Client Services, where a result asks the customer to contact it (BRAND-DESIGN-SYSTEM
- * §4.2): a text link opens an email prefilled with the facts Client Services needs, the
- * scan reference first. Never "Contact support" (§4.5).
+ * ORBES Client Services' email under FORGOTTEN PASSWORD? (BRAND-DESIGN-SYSTEM §4.2), the one place of the collector app
+ * it remains (plan NEXT-NINE, CS-01: everywhere else, WRITE TO ORBES CLIENT SERVICES, MESSAGES): a text link opens an
+ * email prefilled with the scan reference. Never "Contact support" (§4.5).
  */
 export const CONTACT = Object.freeze({
   action: 'CONTACT ORBES CLIENT SERVICES',
-  /** Accessible name of the phone link, ahead of the number. */
-  call: 'Call ORBES Client Services,',
-  /** Labels of the facts under the customer's own words in the prefilled email. */
+  /** The label of the fact under the customer's own words in the prefilled email. */
   reference: 'REFERENCE',
-  result: 'RESULT',
-  warranty: 'WARRANTY',
-  verified: 'VERIFIED',
   /** Subject of the email under FORGOTTEN PASSWORD? (C-04). */
   recoverySubject: 'ORBES — FORGOTTEN PASSWORD',
-  /** The piece an email from MY PIECES is about (F-01). */
-  piece: 'PIECE',
 });
 
 /**
@@ -721,10 +714,6 @@ export const LOOKBOOK = Object.freeze({
     requestedLabel: 'REQUESTED',
     requested: 'ORBES Client Services will contact you.',
     requestFailed: 'The request could not be sent.',
-    /** The subject of the email to ORBES Client Services (`ORBES — ECLIPSE — REQUEST`) and the lines of its body. */
-    contactSubject: 'REQUEST',
-    contactModel: 'MODEL',
-    contactRequest: 'REQUEST',
   }),
   /** The text link of each card, and the one under an authentic result. */
   seeModel: 'SEE THE MODEL',
@@ -917,9 +906,6 @@ export const RELEASES = Object.freeze({
   /** MY PIECES: the account's entries. */
   yourEntries: 'YOUR RELEASES',
   entryFailed: 'Your entries could not be shown just now.',
-  /** The facts of the email to ORBES Client Services about a place held. */
-  contactRelease: 'RELEASE',
-  contactEntry: 'ENTRY',
   /** P-X02: the privilege of PLATINE and PALLADIUM, recalled in THE CIRCLE and in MY PIECES (for an account without a tier: from TITANE up, YOUR TIER says it). */
   earlyAccess: Object.freeze({
     label: 'EARLY ACCESS',
@@ -1037,6 +1023,49 @@ export const NOW = Object.freeze({
   pieces: 'YOUR PIECES',
   scan: 'SCAN ORBES CODE',
   upload: 'UPLOAD A PHOTO',
+});
+
+/**
+ * WRITE TO ORBES CLIENT SERVICES and MESSAGES (plan NEXT-NINE of 2026-10-06, §3.1 CS-01): every place that showed an
+ * email address, a phone number or opening hours shows one button, which opens the write sheet; the answers arrive in
+ * the account, under MESSAGES; NOW shows one line while an answer is unread. Nothing is emailed. Staff are never named:
+ * the answers are signed ORBES CLIENT SERVICES, and the collector never sees a status.
+ */
+export const MESSAGES = Object.freeze({
+  /** The button, at every place of the app that showed a contact. */
+  write: 'WRITE TO ORBES CLIENT SERVICES',
+  /** The write sheet's dialog name and its close. */
+  close: 'Close',
+  concerning: 'CONCERNING',
+  yourMessage: 'YOUR MESSAGE',
+  yourReply: 'YOUR REPLY',
+  hint: 'Please leave out passwords and card numbers.',
+  send: 'SEND',
+  cancel: 'CANCEL',
+  where: 'The answer will appear in your account, under MESSAGES.',
+  /** The words checked here before the server checks them, as it writes them. */
+  empty: 'Write your message.',
+  tooLong: 'Your message is limited to 2,000 characters.',
+  sent: 'MESSAGE SENT',
+  sentText: 'Your message is with ORBES Client Services. Their answer will appear in your account, under MESSAGES.',
+  seeMessages: 'SEE MESSAGES',
+  done: 'CLOSE',
+  signedOut: 'Sign in or create an ORBES account to write to ORBES Client Services. Their answer will appear in your account.',
+  /** The account sheet's row, its mark while an answer is unread, and its view. */
+  title: 'MESSAGES',
+  new: 'NEW',
+  back: 'YOUR ACCOUNT',
+  you: 'YOU',
+  house: 'ORBES CLIENT SERVICES',
+  emptyThread: 'You may write to ORBES Client Services here, or from a piece, an order or a release, which is then attached to your message.',
+  /** NOW's line while an answer is unread. */
+  now: Object.freeze({ label: 'MESSAGES', sentence: 'ORBES Client Services has answered you.', read: 'READ' }),
+  /** The help line of a scan with a problem, over the button. */
+  help: 'ORBES Client Services can help with any question about this piece. The reference below is attached to your message.',
+  /** What a message concerns, as the sheet labels it before sending (the server writes its own). */
+  label: Object.freeze({ ref: 'REF', order: 'ORDER', warranty: 'WARRANTY NO LONGER VALID', salon: 'PRIVATE SALON REQUEST', reference: 'REFERENCE', in: 'IN' }),
+  /** The longest message a collector writes (services/messages.ts MESSAGE_LIMITS.collector). */
+  max: 2000,
 });
 
 /**

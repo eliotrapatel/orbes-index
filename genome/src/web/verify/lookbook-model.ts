@@ -213,8 +213,8 @@ export interface SalonModel {
   price: string | null;
   /** The tier it is offered from (TITANE, PLATINE, PALLADIUM). */
   tier: string;
-  /** The account's open request (REQUESTED: ORBES Client Services will contact it); null: REQUEST THIS PIECE is offered. */
-  request: { id: string } | null;
+  /** The account's open request (REQUESTED: ORBES Client Services will contact it), with its model (CS-01: WRITE TO ORBES CLIENT SERVICES attaches it); null: REQUEST THIS PIECE is offered. */
+  request: { id: string; modelId: string } | null;
 }
 
 /** What a sheet shows of one model of its group (N6: what its dot switches). */
@@ -306,8 +306,8 @@ export function selectDot(m: SheetModel, slug: string): SheetModel {
 }
 
 /** The sheet once the account requested the model of the dot `slug` (REQUEST THIS PIECE): REQUESTED on it, and on its dot. */
-export function withRequest(m: SheetModel, slug: string, id: string): SheetModel {
-  const requested = (f: SheetFace): SheetFace => (f.slug === slug && f.salon ? { ...f, salon: { ...f.salon, request: { id } } } : f);
+export function withRequest(m: SheetModel, slug: string, id: string, modelId: string): SheetModel {
+  const requested = (f: SheetFace): SheetFace => (f.slug === slug && f.salon ? { ...f, salon: { ...f.salon, request: { id, modelId } } } : f);
   return { ...requested(m), sizes: m.sizes, dots: m.dots.map((d) => ({ ...d, face: requested(d.face) })) };
 }
 
@@ -317,7 +317,7 @@ function salonModel(v: LookbookSheet['salon']): SalonModel | null {
   const tier = TIER_NAMES[Number(v.minTier)];
   if (!tier) return null;
   const r = v.request;
-  return { price: priceOf(v.priceLabel), tier, request: r && typeof r.id === 'string' && r.status === 'OPEN' ? { id: r.id } : null };
+  return { price: priceOf(v.priceLabel), tier, request: r && typeof r.id === 'string' && typeof r.modelId === 'string' && r.status === 'OPEN' ? { id: r.id, modelId: r.modelId } : null };
 }
 
 function discontinuedLine(year: unknown): string | null {
