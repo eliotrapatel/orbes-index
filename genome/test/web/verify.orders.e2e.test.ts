@@ -223,7 +223,8 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     const checks = await screenChecks(page);
     expect(checks.contrast).toEqual([]);
     expect(checks.figures).toEqual([]);
-    expect(await page.locator('.view--pieces .n-btn').count()).toBe(0);
+    // No button but each order's WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01, site 5): the documents are rows.
+    expect(await page.locator('.view--pieces .n-btn:not(.n-write__open)').count()).toBe(0);
     const floors = await tapZoneFloors(page);
     expect(floors.problems).toEqual([]);
     expect(floors.checked).toEqual(expect.arrayContaining([ORDERS.track]));
@@ -302,7 +303,8 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     const checks = await screenChecks(page);
     expect(checks.contrast).toEqual([]);
     expect(checks.figures).toEqual([]);
-    expect(await page.locator('.view--pieces .n-btn').count()).toBe(0);
+    // No button but each order's WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01, site 5): the documents are rows.
+    expect(await page.locator('.view--pieces .n-btn:not(.n-write__open)').count()).toBe(0);
     const floors = await tapZoneFloors(page);
     expect(floors.problems).toEqual([]);
     // The rows, by their words (the label, the number, then the line under them).
