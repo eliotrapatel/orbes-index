@@ -47,6 +47,7 @@ import { DomainError, forbidden, notFound, tooManyRequests, validationError } fr
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
+import { tierOf } from './club.js';
 import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford, verifyClaimCode } from './claim-codes.js';
 import { findProduct, loadStatusHistory, requireProduct, returnTargetOf, TRANSITIONS, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { mediaUrl } from './media.js';
@@ -213,8 +214,10 @@ export interface OwnedProduct {
    */
   imageUrl: string | null;
   /**
-   * Its model's lookbook sheet: the `<slug>` of `/verify/lookbook/<slug>` when the model is PUBLIC there, else null (as a
-   * result names it). Plan NOCTURNE, N3: NOW counts the pieces of a model and its variants by it (« You own two »).
+   * Its model's lookbook sheet: the `<slug>` of `/verify/lookbook/<slug>` when the model is PUBLIC there, or RESERVED
+   * (THE PRIVATE SALON) and the account's tier reaches its private_min_tier, as its sheet is answered; else null. A scan
+   * result names only a PUBLIC one. Plan NOCTURNE, N3 and N6: NOW, THE COLLECTION and THE PRIVATE SALON count the pieces
+   * of a model and its variants by it (« You own two »).
    */
   lookbook: string | null;
   /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
@@ -901,7 +904,7 @@ export class OwnershipService {
       .select([
         'p.id as uuid', 'p.product_id', 'p.status', 'p.variant', 'p.material', 'p.year',
         'c.code as category_code', 'c.name as category_name', 'm.name as model_name', 'm.variant_label as model_variant', 'm.type as model_type', 'col.name as collection_name',
-        'm.image_sha256', 'm.care_instructions', 'm.lookbook as model_lookbook', 'm.slug as model_slug',
+        'm.image_sha256', 'm.care_instructions', 'm.lookbook as model_lookbook', 'm.slug as model_slug', 'm.private_min_tier as model_min_tier',
         'o.acquired_via', 'o.verified', 'o.started_at',
       ])
       .where('o.account_id', '=', accountId)
@@ -943,6 +946,9 @@ export class OwnershipService {
         (x): x is string => x !== null,
       ),
     );
+    // THE PRIVATE SALON's models are named to an owner whose tier reaches their private_min_tier (the club sheet's
+    // rule, services/lookbook.ts): read the tier only when a piece is of a RESERVED model.
+    const accountTier = rows.some((r) => r.model_lookbook === 'RESERVED') ? (await tierOf(this.db, accountId, now)).tier : 0;
     const today = utcDate(now);
     return rows.map((r) => {
       const g = genomes.find((x) => x.product_id === r.uuid);
@@ -975,8 +981,10 @@ export class OwnershipService {
           ...(w?.end_date ? { endDate: w.end_date } : {}),
         },
         imageUrl: mediaUrl(r.image_sha256),
-        // A RESERVED model is the owners' (THE PRIVATE SALON) and stays unnamed here, as on a result.
-        lookbook: r.model_lookbook === 'PUBLIC' ? r.model_slug : null,
+        // A RESERVED model (THE PRIVATE SALON) is named only to an owner whose tier reaches its private_min_tier, as
+        // its sheet is; a scan result (services/verification.ts) never names it.
+        lookbook:
+          r.model_slug && (r.model_lookbook === 'PUBLIC' || (r.model_lookbook === 'RESERVED' && r.model_min_tier <= accountTier)) ? r.model_slug : null,
         care: r.care_instructions,
         origin: pieceOrigin(orders.find((o) => o.product_id === r.uuid)),
       };

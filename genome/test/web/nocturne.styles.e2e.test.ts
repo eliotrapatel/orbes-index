@@ -876,6 +876,8 @@ async function theCollection(page: Page): Promise<void> {
   expect(await gold.locator('.n-lookbook__photo img').getAttribute('src')).not.toBe(steelSrc);
   expect(await gold.locator('.n-lookbook__photo img').getAttribute('alt')).toBe('The MONOLITHE BRACELET model in gold, photographed by ORBES');
   expect(await gold.getByRole('link', { name: 'SEE THE MODEL' }).getAttribute('href')).toBe('/verify/lookbook/monolithe-gold');
+  // The card re-drawn in silence (the pressed dot says what changed), the live region polite again for what follows.
+  await expect.poll(() => page.locator('.n-lookbook__body').getAttribute('aria-live')).toBe('polite');
   expect(await page.locator('.n-lookbook__owned').innerText()).toBe('You own two: steel and gold');
 }
 
@@ -934,6 +936,8 @@ async function aModel(page: Page): Promise<void> {
   expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('Gold');
   expect(await page.locator('.n-model__photo img').getAttribute('src')).not.toBe(steelSrc);
   expect(await page.locator('.n-model__facts .n-kv__value').first().innerText()).toBe('18K YELLOW GOLD');
+  // The sheet re-drawn in silence (never read whole on a dot's press), the live region polite again for what follows.
+  await expect.poll(() => page.locator('.n-model__body').getAttribute('aria-live')).toBe('polite');
   expect(await page.locator('.n-model__owned').innerText()).toBe('You own two: steel and gold');
   expect(await page.locator('.n-model__next p').allInnerTexts()).toEqual(['LIVE RELEASE', 'IN BLUE, THURSDAY 21:00 PARIS']);
 }

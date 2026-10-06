@@ -121,6 +121,16 @@ function hideWhenBroken(box: HTMLElement): HTMLElement {
   return box;
 }
 
+/**
+ * A dot chosen re-draws a card or the sheet inside its live region: silent while it changes (the pressed dot, which
+ * keeps the focus, says what changed), polite again on the next frame for loads, failures and REQUESTED.
+ */
+function quietly(region: HTMLElement, change: () => void): void {
+  region.setAttribute('aria-live', 'off');
+  change();
+  requestAnimationFrame(() => region.setAttribute('aria-live', 'polite'));
+}
+
 // ── The grid (C5) ──────────────────────────────────────────────────────────
 
 class GridPage {
@@ -236,7 +246,7 @@ class GridPage {
     const selected = c.dots.some((d) => d.slug === this.selected.get(c.slug)) ? this.selected.get(c.slug)! : c.slug;
     const face = cardFace(c, selected);
     const photo = face.image ? hideWhenBroken(fadedPhoto(face.image.src, face.image.alt, { extraClass: 'n-lookbook__photo lookbook-card__frame' })) : null;
-    const see = textLink(LOOKBOOK.seeModel, { href: face.href, onOpen: () => this.deps.onSheet(this.selected.get(c.slug) ?? c.slug), extraClass: 'lookbook-card__link' });
+    const see = textLink(LOOKBOOK.seeModel, { href: face.href, onOpen: () => this.deps.onSheet(face.slug), extraClass: 'lookbook-card__link' });
     // SEE THE MODEL, of which model: its name and type, for a screen reader moving from link to link.
     see.setAttribute('aria-describedby', `${id}-name`);
     const price = face.price ? h('p', { class: 'n-num n-lookbook__price lookbook-card__price', text: face.price }) : null;
@@ -258,7 +268,7 @@ class GridPage {
                   onSelect: (slug) => {
                     this.selected.set(c.slug, slug);
                     const next = this.card(c, id, pieces, opts);
-                    article.replaceWith(next);
+                    quietly(this.body, () => article.replaceWith(next));
                     next.querySelector<HTMLElement>('.n-vsel [aria-pressed="true"]')?.focus();
                   },
                 },
@@ -518,7 +528,7 @@ class SheetPage {
           // A sign-in or sign-out meanwhile reads the sheet again: of the dot chosen, the address's.
           this.slug = slug;
           this.deps.onVariant(slug);
-          this.render();
+          quietly(this.body, () => this.render());
           this.body.querySelector<HTMLElement>('.n-model__dots [aria-pressed="true"]')?.focus();
         },
       },

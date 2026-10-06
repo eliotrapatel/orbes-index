@@ -186,7 +186,7 @@ export interface OwnedPiece {
   warranty: { status: WarrantyStatus; startDate?: string; endDate?: string };
   /** The model's reference photograph (F-04): `/api/v1/media/<sha256>`, or null; never the piece's own (decision 9). */
   imageUrl: string | null;
-  /** NOCTURNE N3: its model's lookbook sheet (`<slug>`) when the model is PUBLIC there, else null. */
+  /** NOCTURNE N3, N6: its model's lookbook sheet (`<slug>`) when the model is PUBLIC there, or RESERVED and the account's tier reaches it, else null. */
   lookbook?: string | null;
   /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
   care: string | null;

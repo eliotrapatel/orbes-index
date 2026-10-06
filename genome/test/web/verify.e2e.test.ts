@@ -2257,6 +2257,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // P-X08: NADIR is in the private salon from PLATINE: a TITANE owner neither sees it nor opens it.
     const nadir = await model('NADIR', 'NAD-RG', null);
     await catalog.updateModel(nadir.id, { slug: 'nadir', lookbook: 'RESERVED', privateMinTier: 2 }, SYSTEM_ACTOR);
+    // A piece of ZENITH, made before it is discontinued (no piece is issued with a discontinued model): the owner's later.
+    const zenithPiece = await srv.issue({ withClaimSecret: true, modelId: zenith.id });
     // P-R06: ZENITH is discontinued; its sheet's line says so, with the year.
     const zenithYear = (await catalog.discontinueModel(zenith.id, SYSTEM_ACTOR)).discontinuedAt!.getUTCFullYear();
     const issued = await srv.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: aurore.id, material: '925 STERLING SILVER', year: 2026 }, SYSTEM_ACTOR);
@@ -2450,6 +2452,21 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // A model above the owner's tier: the same sentence as a model not in the collection.
     await page.goto(`${srv.origin}/verify/lookbook/nadir`);
     await textOf(page.locator('.sheet__missing'), 'This model is not in the ORBES collection.');
+
+    // NOCTURNE N6: the owner holds a piece of ZENITH. THE PRIVATE SALON's card and ZENITH's sheet both say You own one
+    // (the account's pieces name a model of the salon its tier reaches); a scan of that piece never names it.
+    await srv.ctx.services.warranty.activate(zenithPiece.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const zenithScan = await srv.ctx.services.verification.verify({ code: zenithPiece.code.data }, {});
+    await srv.ctx.services.ownership.registerFirst(owner.account.id, { registrationToken: zenithScan.registration!.token, claimCode: zenithPiece.claimCode! }, { type: 'account', id: owner.account.id });
+    const ownerScan = await srv.ctx.services.verification.verify({ code: zenithPiece.code.data }, { accountId: owner.account.id });
+    expect(ownerScan.product?.model).toBe('ZENITH');
+    expect(ownerScan.product).not.toHaveProperty('lookbook');
+    await page.goto(`${srv.origin}/verify/lookbook`);
+    const ownedZenith = page.getByRole('region', { name: 'THE PRIVATE SALON' }).locator('article.lookbook-card', { hasText: 'ZENITH' });
+    await textOf(ownedZenith.locator('.n-lookbook__owned'), 'You own one');
+    await ownedZenith.getByRole('link', { name: 'SEE THE MODEL' }).click();
+    await textOf(page.locator('h1'), 'ZENITH');
+    await textOf(page.locator('.n-model__owned'), 'You own one');
 
     // NOCTURNE N6: AURORE's variants, NOON in the collection and NIGHT in THE PRIVATE SALON. Signed in, the sheet is the
     // club's: the dot of the salon is among the public model's dots, and switches the sheet to its price, its tier and

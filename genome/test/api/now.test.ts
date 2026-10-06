@@ -5,8 +5,9 @@
  *    shown of its models in the list, each dot its own), so NOW leads with the newest; and an entry and a sheet carry
  *    the sizes of the model and its variants (addition 8), from lot E's SKUs: each size once whatever its case, in a
  *    client's order, one size naming none;
- *  - the account's pieces: each names its model's sheet (`lookbook`) when the model is PUBLIC, so « You own two: steel
- *    and gold » counts the pieces of a model and its variants; a RESERVED or HIDDEN model is named by none.
+ *  - the account's pieces: each names its model's sheet (`lookbook`) when the model is PUBLIC, or RESERVED from a tier
+ *    the account reaches (N6, THE PRIVATE SALON), so « You own two: steel and gold » counts the pieces of a model and
+ *    its variants; a HIDDEN model, or a RESERVED one above the account's tier, is named by none.
  *  (The feed's invitations, their places and NOW's read without a visit: test/api/circle.test.ts.)
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -95,7 +96,7 @@ describe('NOW\'s reads (NOCTURNE N3)', () => {
     expect(sizesOnce(['M', '52', 'l', '48', 'm', 'L'])).toEqual(['48', '52', 'l', 'M']);
   });
 
-  it('names each piece\'s model sheet when it is PUBLIC, so NOW counts a model\'s pieces across its variants', async () => {
+  it('names each piece\'s model sheet when it is PUBLIC, or RESERVED from the account\'s tier, so NOW counts a model\'s pieces across its variants', async () => {
     const { client } = await accountClient(h);
     for (const modelId of [catalog.modelId, goldId]) {
       const piece = await issue(h.ctx, { ...catalog, modelId });
@@ -108,9 +109,15 @@ describe('NOW\'s reads (NOCTURNE N3)', () => {
       ['Gold', 'now-monolithe-gold'],
       ['Steel', 'now-monolithe'],
     ]);
-    // A RESERVED model is the salon's, a HIDDEN one nobody's: named by no piece.
+    // A RESERVED model is the salon's: named to an owner whose tier reaches it (two pieces: TITANE), as its sheet is
+    // answered, never above it; a HIDDEN one is nobody's.
     await patch(goldId, { lookbook: 'RESERVED', privateMinTier: 1 });
     await patch(catalog.modelId, { lookbook: 'HIDDEN' });
+    expect((await mine()).sort()).toEqual([
+      ['Gold', 'now-monolithe-gold'],
+      ['Steel', null],
+    ]);
+    await patch(goldId, { privateMinTier: 2 });
     expect((await mine()).sort()).toEqual([
       ['Gold', null],
       ['Steel', null],

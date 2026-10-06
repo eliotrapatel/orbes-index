@@ -80,6 +80,8 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
     column, a block inside `.ctr` (a board artefact).
   - C5 (N6): the rail underlines COLLECTION (C_CSS's `.rail a.on::after`, as on every chapter since N2), where the board's
     picture shows none; the figures of SIZES 16 · 17 · 18 and of 21:00 are in Helvetica Neue (the plan's Type rule).
+  - C6 (N6) draws no VARIANTS row under SPECIFICATIONS: the variants are the dots under the title (the plan's "with
+    Variants" is met by the dots); an operator may still write one in the model's specifications.
 - **Omissions of the drawings** (since N4: the app has these and keeps them, built with the same pieces; the final board
   review expects them):
   - C13: RECEIVING's lead, *If its owner has given you a transfer code, enter it…*, above the sign-in.
