@@ -506,9 +506,12 @@ export class ShopifyExportService {
  * its handle), whatever the currency exported. The lookbook addresses first (unique already), then each other model by
  * name and id with its own handle (shopifyHandle); one already given takes the model's SKU prefix, then a number, until
  * it is free. The same models in the same order give the same handles, in the export and in the console's dialog.
+ * Only a main model takes a handle (N1): a variant is its main model's product and names its handle, so adding one
+ * never takes or shifts the handle a product was imported under.
  */
 async function handlesOf(db: Db): Promise<Map<string, string>> {
-  const models = await db.selectFrom('models').select(['id', 'name', 'slug', 'sku_prefix']).orderBy('name').orderBy('id').execute();
+  const all = await db.selectFrom('models').select(['id', 'name', 'slug', 'sku_prefix', 'variant_of']).orderBy('name').orderBy('id').execute();
+  const models = all.filter((m) => m.variant_of === null);
   const taken = new Set<string>();
   const out = new Map<string, string>();
   for (const m of models) {
@@ -525,6 +528,7 @@ async function handlesOf(db: Db): Promise<Map<string, string>> {
     taken.add(handle);
     out.set(m.id, handle);
   }
+  for (const m of all) if (m.variant_of !== null) out.set(m.id, out.get(m.variant_of)!);
   return out;
 }
 

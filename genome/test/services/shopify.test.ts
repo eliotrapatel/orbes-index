@@ -360,6 +360,35 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     await rejects(shopify().link(stranger, { productId: '6601', variants: [] }, f.admin), 'SHOPIFY_PRODUCT_TAKEN');
   });
 
+  it('keeps a main model\'s handle when variants are added (NOCTURNE N1): a variant never takes a handle nor shifts its main model\'s', async () => {
+    const main = await createModel(t.db, 'UNSLUGGED');
+    await price(main, 300_00);
+    const handleOfMain = async () => records((await shopify().productCsv('EUR')).body).find((r) => r.Title === 'UNSLUGGED')!['URL handle'];
+    expect(await handleOfMain()).toBe('unslugged');
+    expect((await shopify().product(main)).handle).toBe('unslugged');
+    const variants: string[] = [];
+    for (const [i, label] of ['Gold', 'Blue', 'Black'].entries()) {
+      variants.push((await ctx.services.catalog.createVariant(main, { label, swatch: '#16224A', skuPrefix: `UNS-V${i}`, ...(i === 0 ? { mainLabel: 'Steel', mainSwatch: '#9D9B96' } : {}) }, f.admin)).id);
+      clock.advance(1000);
+    }
+    // A variant whose id sorts before every other (its name its main model's, as ADD A VARIANT gives it): it still takes
+    // no handle of its own.
+    const m = await t.db.selectFrom('models').select(['category_id', 'type']).where('id', '=', main).executeTakeFirstOrThrow();
+    const first = '00000000-0000-4000-8000-000000000001';
+    await t.db
+      .insertInto('models')
+      .values({ id: first, category_id: m.category_id, name: 'UNSLUGGED', type: m.type, sku_prefix: 'UNS-V3', variant_of: main, variant_label: 'Silver', variant_swatch: '#C0C0C0', created_at: clock.now() })
+      .execute();
+    variants.push(first);
+    for (const v of variants) await price(v, 350_00);
+    expect(await handleOfMain()).toBe('unslugged');
+    expect((await shopify().product(main)).handle).toBe('unslugged');
+    for (const v of variants) expect((await shopify().product(v)).handle).toBe('unslugged');
+    const rows = records((await shopify().productCsv('EUR')).body);
+    expect(rows.filter((r) => r['URL handle'].startsWith('unslugged'))).toHaveLength(5);
+    expect(new Set(rows.filter((r) => r['URL handle'].startsWith('unslugged')).map((r) => r['URL handle']))).toEqual(new Set(['unslugged']));
+  });
+
   it('keeps the ids pasted back on the model\'s SKUs, audited; refuses what would link two sides wrongly', async () => {
     const model = await createModel(t.db, 'LINKED');
     await skuOf(model, '52');
