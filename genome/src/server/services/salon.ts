@@ -82,6 +82,8 @@ export interface ShopRequestView {
   id: string;
   status: ShopRequestStatus;
   createdAt: Date;
+  /** The model requested: what WRITE TO ORBES CLIENT SERVICES attaches on its sheet (plan NEXT-NINE, CS-01, MODEL). */
+  modelId: string;
 }
 
 /**
@@ -281,7 +283,7 @@ export class SalonService {
       .where('model_id', '=', modelId)
       .where('status', '=', 'OPEN')
       .executeTakeFirst();
-    return r ? { id: r.id, status: r.status, createdAt: r.created_at } : null;
+    return r ? { id: r.id, status: r.status, createdAt: r.created_at, modelId } : null;
   }
 
   /**
@@ -310,7 +312,7 @@ export class SalonService {
         await this.audit.record({ actor, action: 'shop.request', targetType: 'shop_request', targetId: r.id, details: { modelId } }, tx);
         return r;
       });
-      return { request: { id: created.id, status: created.status, createdAt: created.created_at } };
+      return { request: { id: created.id, status: created.status, createdAt: created.created_at, modelId } };
     } catch (e) {
       if (isUniqueViolation(e, 'shop_requests_one_open')) throw shopRequestOpen();
       throw e;

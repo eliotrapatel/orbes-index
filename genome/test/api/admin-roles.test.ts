@@ -14,7 +14,9 @@
  * and the atelier's stock, pieces to make and work sheets: OPERATOR; the invoices and credit notes read by an AUDITOR;
  * the segments read by an AUDITOR, their members' CSV too, built, counted live, changed and deleted by an OPERATOR; the
  * size mix proposed at creation, the feasibility check and the best time to open read by an AUDITOR; the Shopify
- * exports read by an AUDITOR, the order CSV masked, the Shopify ids pasted back by an OPERATOR);
+ * exports read by an AUDITOR, the order CSV masked, the Shopify ids pasted back by an OPERATOR; the Messages board of
+ * the next nine, CS-01, read by an AUDITOR, its conversations answered, taken and closed by an OPERATOR, assigned by an
+ * ADMIN);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -181,6 +183,15 @@ const PROBES: Probe[] = [
   { group: 'requests', method: 'GET', url: '/api/admin/club/requests', min: 'AUDITOR' },
   { group: 'requests', method: 'GET', url: '/api/admin/club/requests?status=CLOSED', min: 'AUDITOR' },
   { group: 'requests', method: 'POST', url: `/api/admin/club/requests/${UUID}/close`, body: INVALID, min: 'OPERATOR' },
+  // The next nine (CS-01): the Messages board read by an AUDITOR; answered, taken and closed by an OPERATOR; assigned by an ADMIN.
+  { group: 'messages', method: 'GET', url: '/api/admin/messages', min: 'AUDITOR' },
+  { group: 'messages', method: 'GET', url: '/api/admin/messages?status=ALL&who=mine&q=5A864AF8', min: 'AUDITOR' },
+  { group: 'messages', method: 'GET', url: '/api/admin/messages/summary', min: 'AUDITOR' },
+  { group: 'messages', method: 'GET', url: `/api/admin/messages/${UUID}`, min: 'AUDITOR' },
+  { group: 'messages', method: 'POST', url: `/api/admin/messages/${UUID}/answer`, body: INVALID, min: 'OPERATOR' },
+  { group: 'messages', method: 'POST', url: `/api/admin/messages/${UUID}/take`, body: INVALID, min: 'OPERATOR' },
+  { group: 'messages', method: 'POST', url: `/api/admin/messages/${UUID}/assign`, body: INVALID, min: 'ADMIN' },
+  { group: 'messages', method: 'POST', url: `/api/admin/messages/${UUID}/close`, body: INVALID, min: 'OPERATOR' },
   // Plan LIVE RELEASE+: the orders read by an AUDITOR, stepped by an OPERATOR, their alerts' delays set by an ADMIN; the
   // locations and carriers read by an AUDITOR, set by an ADMIN; the atelier read by an AUDITOR, worked by an OPERATOR.
   { group: 'orders', method: 'GET', url: '/api/admin/orders', min: 'AUDITOR' },
@@ -326,6 +337,7 @@ describe('admin role enforcement', () => {
       'shopify',
       'logistics',
       'atelier',
+      'messages',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

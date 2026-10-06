@@ -23,6 +23,8 @@ interface RequestJson {
   id: string;
   status: 'OPEN' | 'CLOSED';
   createdAt: string;
+  /** The model requested (WRITE TO ORBES CLIENT SERVICES attaches it, plan NEXT-NINE CS-01). */
+  modelId: string;
 }
 
 interface SheetJson {
@@ -175,7 +177,7 @@ describe('the private salon (P-X08)', () => {
     expect(res.statusCode, res.body).toBe(201);
     expect(res.headers['cache-control']).toBe('no-store');
     const { request } = safeJson(res) as { request: RequestJson };
-    expect(request).toEqual({ id: expect.any(String), status: 'OPEN', createdAt: h.clock.now().toISOString() });
+    expect(request).toEqual({ id: expect.any(String), status: 'OPEN', createdAt: h.clock.now().toISOString(), modelId: solstice });
     expect(await h.ctx.db.selectFrom('shop_requests').select(['account_id', 'model_id', 'note', 'status']).where('id', '=', request.id).executeTakeFirstOrThrow()).toEqual({
       account_id: titane.id,
       model_id: solstice,

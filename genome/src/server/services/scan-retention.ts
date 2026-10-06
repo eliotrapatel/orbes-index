@@ -7,7 +7,9 @@
  * all ON DELETE RESTRICT, so the dependants go first), in batches: each
  * batch is one short transaction over the oldest `batchSize` events, and
  * one pass stops after `maxBatches`, so a first purge of a large backlog
- * never holds long locks; the next pass continues. A customer's report on a scan (its place and note are personal
+ * never holds long locks; the next pass continues. A message to ORBES Client
+ * Services written about a deleted scan (`client_messages.scan_event_id`, no
+ * foreign key) loses the scan's id in the same transaction and keeps its REF. A customer's report on a scan (its place and note are personal
  * data) goes with the scan, open or closed: the case lives as long as the
  * scan it is attached to.
  *
@@ -17,6 +19,7 @@
  * the anomaly look-back (config.ts `scanLookbackDays`).
  */
 import type { Db } from '../db/connection.js';
+import { clearMessageScans } from './messages.js';
 
 export interface PurgeScanHistoryOptions {
   /** Scan events per transaction (default 1 000). */
@@ -39,6 +42,7 @@ export async function purgeScanHistory(db: Db, before: Date, opts: PurgeScanHist
       await trx.deleteFrom('scan_reports').where('scan_event_id', 'in', ids).execute();
       await trx.deleteFrom('scan_tokens').where('scan_event_id', 'in', ids).execute();
       await trx.deleteFrom('authentication_events').where('scan_event_id', 'in', ids).execute();
+      await clearMessageScans(trx, ids);
       const r = await trx.deleteFrom('scan_events').where('id', 'in', ids).executeTakeFirst();
       return Number(r.numDeletedRows);
     });

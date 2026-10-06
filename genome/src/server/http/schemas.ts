@@ -16,6 +16,8 @@ import {
   ANOMALY_STATUSES,
   CIRCLE_POST_KINDS,
   CIRCLE_RSVP_ANSWERS,
+  CLIENT_CONVERSATION_STATUSES,
+  CLIENT_MESSAGE_CONTEXTS,
   CLUB_TIER_NAMES,
   CODE_STATUSES,
   DROP_ENTRY_STATUSES,
@@ -1281,6 +1283,44 @@ export const invoiceParams = z.object({ id: uuid });
 
 /** GET /api/v1/account/orders/:id/…: one of the account's orders (MY PIECES, M6). */
 export const accountOrderParams = z.object({ id: uuid });
+
+// ── MESSAGES (plan NEXT-NINE, CS-01) ─────────────────────────────────────
+
+/**
+ * POST /api/v1/account/messages: the collector's words (checked by services/messages.ts, whose messages the app shows
+ * as they are: 'Write your message.', 'Your message is limited to 2,000 characters.') and what they concern: a kind and
+ * its id (PIECE its productId, ORDER its orderId, RELEASE its dropId, MODEL its modelId, SCAN its scanEventId), `about`
+ * WARRANTY for the warranty tab's scan only. Without a context, a message written from MESSAGES.
+ */
+export const accountMessageBody = body({
+  body: z.unknown(),
+  context: z
+    .strictObject({
+      kind: z.enum(CLIENT_MESSAGE_CONTEXTS),
+      id: z.string().trim().min(1, 'Required').max(64, 'At most 64 characters'),
+      about: z.literal('WARRANTY').optional(),
+    })
+    .nullable()
+    .optional(),
+});
+
+/** POST /api/v1/account/messages/read: read up to this time (the latest message on screen). */
+export const accountMessagesReadBody = body({ upTo: isoDateTime });
+
+/** GET /api/admin/messages: To answer by default, or Answered, Closed, All; Mine or Unassigned; an email or a REF. */
+export const adminMessagesQuery = z.object({
+  status: queryOptional(z.enum([...CLIENT_CONVERSATION_STATUSES, 'ALL'])),
+  who: queryOptional(z.enum(['mine', 'unassigned'])),
+  q: queryOptional(text(254)),
+});
+
+export const conversationParams = z.object({ id: uuid });
+
+/** POST /api/admin/messages/:id/answer: the answer (checked by services/messages.ts: 1 to 4 000 characters). */
+export const answerMessageBody = body({ body: z.unknown() });
+
+/** POST /api/admin/messages/:id/assign (ADMIN): an active OPERATOR or ADMIN. */
+export const assignMessageBody = body({ adminId: uuid });
 
 /** PUT /api/admin/orders/alerts: the delays of the alerts (M3), in days. */
 export const orderAlertsBody = body({

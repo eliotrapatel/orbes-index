@@ -42,9 +42,14 @@
  *            requests of the private salon (P-X08), its entries in the LIVE
  *            RELEASES with their add-ons and its interest in them, its orders
  *            with their steps, the buyer's name and address Client Services
- *            entered and the engraving text (plan LIVE RELEASE+), and every
- *            audit entry that names it, as target or as actor. Audited
- *            `account.export` with counts only.
+ *            entered and the engraving text (plan LIVE RELEASE+), its messages
+ *            with ORBES Client Services and their answers (plan NEXT-NINE,
+ *            CS-01: never who answered), and every audit entry that names it,
+ *            as target or as actor. Audited `account.export` with counts only.
+ *
+ * The sheet links the account's conversation with ORBES Client Services
+ * (`messages`, plan NEXT-NINE CS-01): its id and status, null when it never
+ * wrote. A lock leaves the conversation as it is: staff can still answer it.
  *
  * The one-time recovery code of the sheet is AccountRecoveryService's (C-04),
  * not a second mechanism. Emails are masked for an AUDITOR by the routes
@@ -60,7 +65,7 @@
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { AccountStatus, AcquiredVia, JsonObject, OwnershipState, ProductStatus, ReportChannel, TransferStatus } from '../db/schema.js';
+import type { AccountStatus, AcquiredVia, ClientConversationStatus, JsonObject, OwnershipState, ProductStatus, ReportChannel, TransferStatus } from '../db/schema.js';
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type ActorType, type Clock, type Page, type PageRequest } from '../types.js';
 import { recoveryThrottledUntil } from './account-recovery.js';
@@ -69,6 +74,7 @@ import { normalizeEmail } from './auth.js';
 import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote } from './circle.js';
 import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
+import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
 import { participatedReleases, releasesTakenPart } from './participation.js';
 import { accountReleaseAnswers, type ExportedReleaseAnswer } from './question.js';
@@ -247,6 +253,8 @@ export interface OwnerSheet {
   segments: { id: string; name: string }[];
   /** N4: Client Services' notes on its orders, entries and requests, the latest first. */
   notes: ClientNote[];
+  /** CS-01: the account's conversation with ORBES Client Services, its status; null when it never wrote. */
+  messages: { conversationId: string; status: ClientConversationStatus } | null;
 }
 
 export interface LockOutcome {
@@ -353,6 +361,11 @@ export interface AccountExport {
    */
   orders: ExportedOrder[];
   /**
+   * The account's messages with ORBES Client Services (plan NEXT-NINE, CS-01), oldest first: its words with what each
+   * concerned, and the answers, signed ORBES Client Services; never who answered.
+   */
+  messages: ExportedMessage[];
+  /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
    */
@@ -440,7 +453,7 @@ export class OwnerService {
     const owner = found.items[0];
     if (!owner) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
     const now = this.clock();
-    const [standing, pieces, transfers, scans, client] = await Promise.all([
+    const [standing, pieces, transfers, scans, client, conversation] = await Promise.all([
       tierOf(this.db, owner.id, now),
       this.pieces(this.db, owner.id),
       this.db
@@ -462,6 +475,7 @@ export class OwnerService {
         .limit(OWNER_SHEET_SCANS)
         .execute(),
       this.client(owner.id, now),
+      accountConversation(this.db, owner.id),
     ]);
     return {
       ...client,
@@ -478,6 +492,7 @@ export class OwnerService {
         productId: s.product_id ?? null,
         country: s.country?.trim() ?? null,
       })),
+      messages: conversation,
     };
   }
 
@@ -764,6 +779,7 @@ export class OwnerService {
       const live = await accountLiveData(tx, a.id);
       const releaseAnswers = await accountReleaseAnswers(tx, a.id);
       const orders = await accountOrders(tx, a.id);
+      const messages = await accountMessages(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -844,6 +860,7 @@ export class OwnerService {
         liveInterest: live.interest,
         releaseAnswers,
         orders,
+        messages,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -877,6 +894,7 @@ export class OwnerService {
             liveInterest: out.liveInterest.length,
             releaseAnswers: out.releaseAnswers.length,
             orders: out.orders.length,
+            messages: out.messages.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

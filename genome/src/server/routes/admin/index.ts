@@ -7,7 +7,8 @@
  * categories, console users, a customer's recovery code, lock and export,
  * the draw of a drop, a model discontinued or reinstated, a LIVE RELEASE
  * ended now or an entry removed from it, the delays of the order alerts,
- * a location or a carrier added or changed); every mutation needs the CSRF token and a same-origin
+ * a location or a carrier added or changed, a conversation of the Messages board
+ * assigned); every mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
  * hashed client IP as the actor. Bodies are JSON (≤ 16 KB) except on the
@@ -39,6 +40,7 @@ import { adminKeyRoutes } from './keys.js';
 import { adminLiveRoutes } from './live.js';
 import { adminLogisticsRoutes } from './logistics.js';
 import { adminMediaRoutes } from './media.js';
+import { adminMessageRoutes } from './messages.js';
 import { adminOrderRoutes } from './orders.js';
 import { adminOwnerRoutes } from './owners.js';
 import { adminProductRoutes } from './products.js';
@@ -70,6 +72,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminCertificateRoutes, deps);
   await app.register(adminRecordRoutes, deps);
   await app.register(adminOwnerRoutes, deps);
+  await app.register(adminMessageRoutes, deps);
   await app.register(adminDropRoutes, deps);
   await app.register(adminLiveRoutes, deps);
   await app.register(adminOrderRoutes, deps);
