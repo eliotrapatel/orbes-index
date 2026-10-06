@@ -131,7 +131,7 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     const { page, context, problems } = await phone(taker.token);
     await page.goto(`${srv.origin}/verify/releases/${release.id}`);
     await textOf(page.locator('.live__past-status'), RELEASES.over);
-    const block = page.locator('.live__past .question');
+    const block = page.locator('.live__past .n-question');
     await visible(block);
     await textOf(block.locator('.question__label'), QUESTION.label);
     await textOf(block.locator('.question__text'), 'WHAT WOULD YOU HAVE WANTED?');
@@ -142,8 +142,9 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     expect(await pressed(block)).toEqual(['false', 'false', 'false']);
     await textOf(block.locator('.question__note'), UNTIL);
     await textOf(page.locator('.live__past-part'), RELEASES.past.tookPart);
-    // One action still: THE RELEASES; the answers are pressed options, never a hairline button.
-    expect(await page.locator('.live__past .btn:visible').count()).toBe(1);
+    // One way out still: THE RELEASES; the answers are pressed options on a plate card (C30), never a hairline button.
+    expect(await page.getByRole('link', { name: 'THE RELEASES', exact: true }).count()).toBe(1);
+    expect(await block.locator('.n-btn').count()).toBe(0);
     await keepsVault(page, null, [...ANSWERS, 'THE RELEASES']);
     await sideways(page);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-question.png'), fullPage: true });
@@ -168,9 +169,9 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
 
     // A reload: answered.
     await page.reload();
-    await visible(page.locator('.live__past .question'));
-    await expect.poll(() => pressed(page.locator('.live__past .question')), POLL).toEqual(['true', 'false', 'false']);
-    await textOf(page.locator('.live__past .question .question__note'), THANKS);
+    await visible(page.locator('.live__past .n-question'));
+    await expect.poll(() => pressed(page.locator('.live__past .n-question')), POLL).toEqual(['true', 'false', 'false']);
+    await textOf(page.locator('.live__past .n-question .question__note'), THANKS);
     expect(problems).toEqual([]);
     await context.close();
   }, 120_000);
@@ -195,17 +196,17 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     const ended = await ctx.db.selectFrom('drops').select('ended_reason').where('id', '=', r.id).executeTakeFirstOrThrow();
     expect(ended.ended_reason).toBe('CLOSED');
     expect((await ctx.services.live.entry(waiting.id, r.id))?.status).toBe('ENDED');
-    await textOf(page.locator('h1'), LIVE.edge.ended.CLOSED.title);
-    await textOf(page.locator('.live__edge .live__note').first(), LIVE.edge.ended.CLOSED.text);
-    const block = page.locator('.live__edge .question');
+    await textOf(page.locator('.n-live__outcome'), LIVE.edge.ended.CLOSED.title);
+    await textOf(page.locator('.n-live__outcome-text').first(), LIVE.edge.ended.CLOSED.text);
+    const block = page.locator('.n-live__end .n-question');
     await visible(block);
     await textOf(block.locator('.question__label'), QUESTION.label);
     await textOf(block.locator('.question__text'), 'WHAT WOULD YOU HAVE WANTED?');
     expect(await block.locator('.question__answer').allInnerTexts()).toEqual(ANSWERS);
     expect(await pressed(block)).toEqual(['false', 'false', 'false']);
     await textOf(block.locator('.question__note'), UNTIL);
-    // Its one action still: THE RELEASES.
-    expect(await page.locator('.live__edge .btn:visible').count()).toBe(1);
+    // Its one way out still: THE RELEASES.
+    expect(await page.getByRole('link', { name: 'THE RELEASES', exact: true }).count()).toBe(1);
     await keepsVault(page, null, [...ANSWERS, 'THE RELEASES']);
     await sideways(page);
     await answer(block, 'ANOTHER FINISH').click();
@@ -225,7 +226,7 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
       await page.goto(`${srv.origin}/verify/releases/${release.id}`);
       await textOf(page.locator('.live__past-status'), RELEASES.over);
       await sleep(600);
-      expect(await page.locator('.live__past .question').isHidden(), String(token)).toBe(true);
+      expect(await page.locator('.live__past .n-question').isHidden(), String(token)).toBe(true);
       expect(problems).toEqual([]);
       await context.close();
     }

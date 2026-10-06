@@ -922,8 +922,8 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     // B1: announced, the name and the photograph revealed, a size chosen for I'LL BE THERE.
     await page.goto(`${origin}/verify/releases/${later.id}`);
     await page.waitForSelector('.live__plate--announce .live__img--photo');
-    await page.waitForSelector('.live__there');
-    await page.locator('.live__there').locator('button.live__size', { hasText: /^52$/ }).click();
+    await page.waitForSelector('.n-live__there');
+    await page.locator('.n-live__there').locator('button.live__size', { hasText: /^52$/ }).click();
     await page.mouse.move(0, 0);
     await settle(page);
     await shots.full(page, 'live-04-announced');
@@ -1060,7 +1060,7 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
     for (const [name, token, dropId] of pages) {
       const { context: c, page: p } = await phone(token, name);
       await p.goto(`${origin}/verify/releases/${dropId}`);
-      await p.waitForSelector('.live__edge h1, .live__past h1');
+      await p.waitForSelector('.live__edge h1, .n-live__end h1, .n-live__past h1');
       await settle(p);
       await shots.full(p, name);
       await c.close();
@@ -1424,7 +1424,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     await sleep(1_500);
     await ctx.services.live.secure(rival.id, live4.id, token, rival.actor);
     await ctx.services.live.confirm(rival.id, live4.id, rival.actor);
-    await untilText(page, '.live__edge > h1', 'SOLD OUT');
+    await untilText(page, '.n-live__end .n-live__outcome', 'SOLD OUT');
     // A minute later, in the same vault: the second door.
     await page.locator('.live__after').waitFor({ state: 'visible', timeout: 90_000 });
     await settle(page, 1_600);
@@ -1471,7 +1471,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
       await settle(p);
       await shots.full(p, 'plus-02-releases-past');
       await p.locator('#releases-panel-past article.release-card').filter({ has: p.locator(`#past-${live1.id}-title`) }).getByRole('link', { name: 'SEE THE RELEASE' }).click();
-      await p.locator('.live__past-part').waitFor({ state: 'visible', timeout: 30_000 });
+      await p.locator('.n-live__part').waitFor({ state: 'visible', timeout: 30_000 });
       await settle(p);
       await shots.full(p, 'plus-03-past-release');
       await context.close();
@@ -1490,16 +1490,16 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
       // Hélène chooses her size: I'LL BE THERE is hers to press.
       const { context, page: p } = await phone(me.token, 'plus-04-announced-rules');
       await p.goto(`${origin}/verify/releases/${live5.id}`);
-      await p.locator('.live__there').locator('button.live__size', { hasText: /^52$/ }).click();
+      await p.locator('.n-live__there').locator('button.live__size', { hasText: /^52$/ }).click();
       await settle(p);
       await shots.full(p, 'plus-04-announced-rules');
       await context.close();
     }
-    await shot(newcomer, `/verify/releases/${live5.id}`, '.live__there-rule', 'plus-05-not-eligible-count');
-    await shot(newcomer, `/verify/releases/${circle.id}`, '.live__edge h1', 'plus-06-not-eligible-selected');
+    await shot(newcomer, `/verify/releases/${live5.id}`, '.n-live__refusal', 'plus-05-not-eligible-count');
+    await shot(newcomer, `/verify/releases/${circle.id}`, '.live__edge h1, .n-live__refusal', 'plus-06-not-eligible-selected');
 
     // ── The question after, MY PIECES: the orders at each step, an order's documents, the question there ──
-    await shot(me, `/verify/releases/${live2.id}`, '.live__past .question .question__answer', 'plus-11-question-after');
+    await shot(me, `/verify/releases/${live2.id}`, '.n-live__past .n-question .question__answer', 'plus-11-question-after');
     {
       const { context, page: p } = await phone(me.token, 'plus-pieces');
       await p.goto(`${origin}/verify/pieces`);

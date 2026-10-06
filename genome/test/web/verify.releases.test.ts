@@ -17,6 +17,7 @@ import {
   groupHex,
   isReleaseId,
   myEntries,
+  drawPrice,
   releaseCards,
   releasePath,
   RELEASES_PATH,
@@ -136,8 +137,14 @@ describe('the releases\' list and pages (P-R03)', () => {
       stateLabel: 'ENTRIES OPEN',
       model: 'MONOLITHE · RING',
       line: '3 PIECES · ENTRIES CLOSE 14 OCT 2026 · 10:00 UTC',
+      price: null,
       image: { src: media(1), alt: 'The model of MONOLITHE — RELEASE I, photographed by ORBES' },
     });
+    // NOCTURNE (addition 5): a draw's price on its card, as the house writes it; none without both its amount and currency.
+    expect(releaseCards([card({ priceMinor: 420000, currency: 'EUR' })])[0]!.price).toBe('€\u00a04\u00a0200');
+    expect(releaseCards([card({ priceMinor: 12540000, currency: 'USD' })])[0]!.price).toBe('$\u00a0125\u00a0400');
+    expect(releaseCards([card({ priceMinor: 420000, currency: null })])[0]!.price).toBeNull();
+    expect(drawPrice({ priceMinor: null, currency: 'EUR' })).toBeNull();
     expect(upcoming).toMatchObject({ stateLabel: 'ENTRIES OPEN SOON', line: '3 PIECES · ENTRIES OPEN 12 OCT 2026 · 10:00 UTC' });
     expect(drawn).toMatchObject({ stateLabel: 'DRAWN', line: '1 PIECE', image: null });
     // A release without an id of its own is left out.
@@ -166,6 +173,8 @@ describe('the releases\' list and pages (P-R03)', () => {
     // No collection: the model's name over the title; an address that is none: no link to a sheet.
     expect(releaseSheet(sheet({ model: { ...card().model, collection: null, lookbook: 'Not One' } }), 0)).toMatchObject({ eyebrow: 'MONOLITHE', lookbookSlug: null });
     expect(releaseSheet(sheet({ purchaseWindowHours: 1 }), 0).rows[3]).toEqual({ label: 'PLACE HELD', value: '1 HOUR' });
+    // NOCTURNE (addition 5, C19): a draw's price first among its facts, when ORBES gave one.
+    expect(releaseSheet(sheet({ priceMinor: 420000, currency: 'EUR' }), 0).rows[0]).toEqual({ label: 'PRICE', value: '€\u00a04\u00a0200' });
   });
 
   it('lists the draw\'s entries by rank, tier and seniority, the account\'s own marked', () => {
@@ -314,7 +323,8 @@ describe('THE RELEASES\' PAST (plan LIVE RELEASE+, choice 5)', () => {
       [past(), past({ id: DRAW, kind: 'DRAW', title: 'Eclipse — release I', model: { name: 'Eclipse', type: 'Pendant', collection: null }, imageUrl: null, opensAt: '2026-09-01T10:00:00.000Z', quantityLine: '3 PIECES' })],
       'Europe/Paris',
     );
-    // A LIVE RELEASE named by its model, as its card and page; a draw by its title, as its card.
+    // A LIVE RELEASE named by its model (with its variant: NOCTURNE, C25), as its card and page; a draw by its title, as
+    // its card. Its date after its kind, its quantity apart (C25).
     expect(live).toEqual({
       id: ID,
       href: `/verify/releases/${ID}`,
@@ -322,9 +332,12 @@ describe('THE RELEASES\' PAST (plan LIVE RELEASE+, choice 5)', () => {
       title: 'MONOLITHE',
       model: 'RING · ORBIT 2026',
       line: '11 OCT 2026 · 25 PIECES',
+      date: '11 OCT 2026',
+      pieces: '25 PIECES',
       image: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES' },
     });
-    expect(draw).toEqual({ id: DRAW, href: `/verify/releases/${DRAW}`, kind: 'DRAW', title: 'ECLIPSE — RELEASE I', model: 'ECLIPSE · PENDANT', line: '1 SEP 2026 · 3 PIECES', image: null });
+    expect(pastCards([past({ model: { name: 'Monolithe', type: 'Ring', collection: 'Orbit 2026', variant: 'Steel' } })], 'UTC')[0]).toMatchObject({ title: 'MONOLITHE IN STEEL' });
+    expect(draw).toEqual({ id: DRAW, href: `/verify/releases/${DRAW}`, kind: 'DRAW', title: 'ECLIPSE — RELEASE I', model: 'ECLIPSE · PENDANT', line: '1 SEP 2026 · 3 PIECES', date: '1 SEP 2026', pieces: '3 PIECES', image: null });
     // Ended before its name was revealed: LIVE RELEASE, nothing more; a photograph from the media route only.
     expect(pastCards([past({ title: null, model: { name: null, type: null, collection: null }, imageUrl: 'https://elsewhere.example/x.jpg' })], 'UTC')[0]).toMatchObject({ title: 'LIVE RELEASE', model: '', image: null });
     // Not a release: left out.

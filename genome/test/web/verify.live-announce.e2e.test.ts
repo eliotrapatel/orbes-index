@@ -166,7 +166,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await textOf(card.locator('.live-card__interest'), '1 COLLECTOR WILL BE THERE');
     await visible(card.locator('.live-card__seal'));
     await textOf(other.locator('.live-card__kind'), 'LIVE RELEASE · THE ROOM IS OPEN');
-    await keepsVault(page, null, ['SEE THE RELEASE']);
+    // NOCTURNE (C7): the first release's SEE THE RELEASE is the page's one filled button.
+    await keepsVault(page, 'SEE THE RELEASE', ['SEE THE RELEASE']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-calendar.png'), fullPage: true });
 
     // Nothing of a stage before its time: not on screen, not in the page.
@@ -257,7 +258,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);
     const there = page.locator('.live__there');
     const size = (label: string) => there.locator('.live__size', { hasText: label });
-    await textOf(page.locator('.live__reveals'), /^THE REVEALS THE PHOTOGRAPH [A-Z]+DAY \d{1,2} [A-Z]+ · \d{2}:\d{2} PARIS$/);
+    await textOf(page.locator('.live__reveals'), /^THE REVEALS THE PHOTOGRAPH · [A-Z]+DAY \d{1,2} [A-Z]+ · \d{2}:\d{2} PARIS$/);
     await textOf(there.locator('.live__there-count'), '1 COLLECTOR WILL BE THERE');
     const action = there.getByRole('button', { name: 'I’LL BE THERE' });
     await visible(action);
@@ -273,7 +274,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await textOf(there.locator('.live__there-count'), '2 COLLECTORS WILL BE THERE');
     expect(await interestOf(r.id, me.id)).toBe('52');
     // Said: the size chosen is the filled one; another size changes it; WITHDRAW takes it back.
-    await keepsVault(page, '52', ['50', '52', '54', 'WITHDRAW']);
+    await keepsVault(page, null, ['50', '52', '54', 'WITHDRAW']);
+    expect(await size('52').getAttribute('aria-pressed')).toBe('true');
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-there-said.png'), fullPage: true });
     await size('54').click();
     await textOf(there.locator('.live__there-said'), 'YOU’LL BE THERE · SIZE 54');
@@ -303,7 +305,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await anonThere.getByRole('button', { name: 'I’LL BE THERE' }).click();
     const panel = anonThere.locator('.live__there-panel');
     await visible(panel.getByLabel('EMAIL'));
-    await keepsVault(anon.page, null);
+    // NOCTURNE (C28, state 2): the page's one filled action is then the sign-in's.
+    await keepsVault(anon.page, 'SIGN IN');
     await anon.page.screenshot({ path: join(OUT_DIR, 'verify-live-there-signin.png'), fullPage: true });
     await panel.getByLabel('EMAIL').fill(late.email);
     await panel.getByLabel('PASSWORD').fill(PASSWORD);
@@ -320,7 +323,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     const outsider = await account(0);
     const out = await phone(outsider.token);
     await out.page.goto(`${srv.origin}/verify/releases/${r.id}`);
-    await textOf(out.page.locator('.live__there-rule'), 'This release is for owners. Your ORBES account does not meet the rule of this release.');
+    // NOCTURNE (C28, state 3): the rule, why, and that the account does not meet it.
+    await textOf(out.page.locator('.live__there-rule'), 'FOR OWNERS This release is for owners. Your ORBES account does not meet the rule of this release.');
     await textOf(out.page.locator('.live__there-count'), '3 COLLECTORS WILL BE THERE');
     expect(await out.page.locator('.live__there .live__size').count()).toBe(0);
     expect(await out.page.getByRole('button', { name: 'I’LL BE THERE' }).count()).toBe(0);
@@ -347,22 +351,22 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     const { page, problems } = await phone(me.token);
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);
     await visible(page.locator('.live__there'));
-    await textOf(page.locator('.live__title'), 'HALO');
-    await textOf(page.locator('.live__reveals'), /^THE REVEALS THE PHOTOGRAPH [A-Z]+DAY \d{1,2} [A-Z]+ · \d{2}:\d{2} PARIS$/);
+    await textOf(page.locator('#live-title'), 'HALO');
+    await textOf(page.locator('.live__reveals'), /^THE REVEALS THE PHOTOGRAPH · [A-Z]+DAY \d{1,2} [A-Z]+ · \d{2}:\d{2} PARIS$/);
     // Before the photograph's stage: neither the link nor the sheet's address, on screen or in the page.
     await holdsUntil(photoAt, async () => {
-      expect(await page.locator('.live__see-model').count()).toBe(0);
+      expect(await page.locator('.n-live__see').count()).toBe(0);
       expect(await page.content()).not.toContain(sheetPath);
     });
     const see = page.locator('.live__announced').getByRole('link', { name: 'SEE THE MODEL' });
     await visible(see);
     expect(Date.now()).toBeGreaterThanOrEqual(photoAt);
     expect(await see.getAttribute('href')).toBe(sheetPath);
-    await visible(page.locator('.live__plate--announce .live__img--photo'));
+    await visible(page.locator('.live__announced .n-live__img--photo'));
     expect(await page.locator('.live__reveals').count()).toBe(0);
-    // A text link of the vault, in the display face, under the price; the screen's contrast, figures and floors kept.
+    // A text link in the display face, under the price (NOCTURNE, C20); the screen's contrast, figures and floors kept.
     expect(await see.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
-    expect(await see.evaluate((el) => el.previousElementSibling?.classList.contains('live__price'))).toBe(true);
+    expect(await see.evaluate((el) => el.parentElement?.previousElementSibling?.classList.contains('n-live__price'))).toBe(true);
     const checks = await screenChecks(page);
     expect(checks.contrast).toEqual([]);
     expect(checks.figures).toEqual([]);

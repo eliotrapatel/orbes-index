@@ -755,17 +755,17 @@ export const UI_STATES: readonly UiState[] = [
     act: (run) => piecesTab(run, 'RELEASES'),
     ready: '.view--pieces .pieces__releases',
   },
-  { id: 'live-announced', title: 'A LIVE RELEASE before the room, signed in: YOUR SIZE, I’LL BE THERE', refs: ['C20'], variant: 'full', as: you, path: release('blue'), act: (run) => run.page.locator('.live__there button.live__size', { hasText: /^17$/ }).click(), ready: '.view--live .live__there' },
+  { id: 'live-announced', title: 'A LIVE RELEASE before the room, signed in: YOUR SIZE, I’LL BE THERE', refs: ['C20'], variant: 'full', as: you, path: release('blue'), act: (run) => run.page.locator('.n-live__there button.live__size', { hasText: /^17$/ }).click(), ready: '.view--live .n-live__there' },
   { id: 'live-announced-signed-out', title: 'A LIVE RELEASE before the room, signed out: I’LL BE THERE opens the sign-in', refs: ['C28'], variant: 'full', path: release('blue'), ready: '.view--live' },
   { id: 'live-veiled', title: 'A LIVE RELEASE not yet revealed, for owners from PLATINE: not eligible', refs: ['C7', 'C28'], variant: 'full', as: you, path: release('veiled'), ready: '.view--live' },
-  { id: 'live-veiled-platine', title: 'A LIVE RELEASE not yet revealed, for a PLATINE account', refs: ['C7'], variant: 'full', as: 'platine', path: release('veiled'), ready: '.view--live .live__there' },
-  { id: 'live-rules', title: 'A LIVE RELEASE with its surprise and its access rules', refs: ['C27'], variant: 'rules', as: you, path: release('blue'), act: (run) => run.page.locator('.live__there button.live__size', { hasText: /^17$/ }).click(), ready: '.view--live .live__there' },
+  { id: 'live-veiled-platine', title: 'A LIVE RELEASE not yet revealed, for a PLATINE account', refs: ['C7'], variant: 'full', as: 'platine', path: release('veiled'), ready: '.view--live .n-live__there' },
+  { id: 'live-rules', title: 'A LIVE RELEASE with its surprise and its access rules', refs: ['C27'], variant: 'rules', as: you, path: release('blue'), act: (run) => run.page.locator('.n-live__there button.live__size', { hasText: /^17$/ }).click(), ready: '.view--live .n-live__there' },
   { id: 'live-rules-not-eligible', title: 'Not eligible by participation', refs: ['C28'], variant: 'rules', as: 'newcomer', path: release('blue'), ready: '.view--live' },
   { id: 'live-selected-not-eligible', title: 'Not eligible: a release for selected collectors', refs: ['C28'], variant: 'rules', as: you, path: release('selected'), ready: '.view--live' },
-  { id: 'live-past-secured', title: 'A past LIVE RELEASE’s final page: YOU SECURED A PIECE', refs: ['C29'], variant: 'full', as: you, path: release('morning'), ready: '.view--live .live__past' },
-  { id: 'live-past-signed-out', title: 'A past LIVE RELEASE’s final page, signed out', refs: ['C29'], variant: 'full', path: release('morning'), ready: '.view--live .live__past' },
-  { id: 'live-past-question', title: 'A past LIVE RELEASE, a collector whose turn passed: the question after', refs: ['C30', 'plus-11'], variant: 'full', as: 'guest', path: release('morning'), ready: '.view--live .question' },
-  { id: 'live-past-gold', title: 'A past LIVE RELEASE nobody of the story took part in', refs: ['C25'], variant: 'full', as: you, path: release('live28'), ready: '.view--live .live__past' },
+  { id: 'live-past-secured', title: 'A past LIVE RELEASE’s final page: YOU SECURED A PIECE', refs: ['C29'], variant: 'full', as: you, path: release('morning'), ready: '.view--live .n-live__past' },
+  { id: 'live-past-signed-out', title: 'A past LIVE RELEASE’s final page, signed out', refs: ['C29'], variant: 'full', path: release('morning'), ready: '.view--live .n-live__past' },
+  { id: 'live-past-question', title: 'A past LIVE RELEASE, a collector whose turn passed: the question after', refs: ['C30', 'plus-11'], variant: 'full', as: 'guest', path: release('morning'), ready: '.view--live .n-question' },
+  { id: 'live-past-gold', title: 'A past LIVE RELEASE nobody of the story took part in', refs: ['C25'], variant: 'full', as: you, path: release('live28'), ready: '.view--live .n-live__past' },
 
   // ── The room and the vault (compared with the before-captures) ──
   { id: 'room', title: 'The room: the door, READY CHECK, YOUR SIZE preselected, ENTER THE ROOM', refs: ['C21', 'live-05'], variant: 'room', as: you, path: release('room'), ready: '.view--live .live-door' },
@@ -776,11 +776,11 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'live-secured', title: 'Secured: the piece, the add-ons, PAY · total', refs: ['live-11'], variant: 'live', as: 'secured', path: release('live'), ready: '.view--live .live__pay' },
   { id: 'live-confirmed', title: 'CONFIRMED, in ivory', refs: ['live-12'], variant: 'live', as: 'confirmed', path: release('live'), ready: '.view--live h1' },
   { id: 'live-sold-out-size', title: 'SOLD OUT IN SIZE 17: stay, or LEAVE THE LINE', refs: ['live-20'], variant: 'live', as: 'soldout', path: release('live'), ready: '.view--live .live__edge' },
-  { id: 'live-missed', title: 'YOUR TURN HAS PASSED', refs: ['live-15', 'C30'], variant: 'live', as: 'missed', path: release('live'), ready: '.view--live .live__edge' },
-  { id: 'live-expired', title: 'YOUR HOLD HAS ENDED', refs: ['live-16', 'C30'], variant: 'live', as: 'expired', path: release('live'), ready: '.view--live .live__edge' },
-  { id: 'live-released', title: 'YOUR PLACE IS RELEASED', refs: ['live-17', 'C30'], variant: 'live', as: 'released', path: release('live'), ready: '.view--live .live__edge' },
-  { id: 'live-left', title: 'YOU LEFT THE LINE', refs: ['live-18', 'C30'], variant: 'live', as: 'left', path: release('live'), ready: '.view--live .live__edge' },
-  { id: 'live-removed', title: 'YOUR ENTRY IS REMOVED', refs: ['live-19', 'C30'], variant: 'live', as: 'removed', path: release('live'), ready: '.view--live .live__edge' },
+  { id: 'live-missed', title: 'YOUR TURN HAS PASSED', refs: ['live-15', 'C30'], variant: 'live', as: 'missed', path: release('live'), ready: '.view--live .n-live__end' },
+  { id: 'live-expired', title: 'YOUR HOLD HAS ENDED', refs: ['live-16', 'C30'], variant: 'live', as: 'expired', path: release('live'), ready: '.view--live .n-live__end' },
+  { id: 'live-released', title: 'YOUR PLACE IS RELEASED', refs: ['live-17', 'C30'], variant: 'live', as: 'released', path: release('live'), ready: '.view--live .n-live__end' },
+  { id: 'live-left', title: 'YOU LEFT THE LINE', refs: ['live-18', 'C30'], variant: 'live', as: 'left', path: release('live'), ready: '.view--live .n-live__end' },
+  { id: 'live-removed', title: 'YOUR ENTRY IS REMOVED', refs: ['live-19', 'C30'], variant: 'live', as: 'removed', path: release('live'), ready: '.view--live .n-live__end' },
   { id: 'live-join', title: 'Live now, an account not in the line: ENTER THE LINE', refs: ['live-09'], variant: 'live', as: you, path: release('live'), ready: '.view--live' },
   { id: 'live-pieces-turn', title: 'MY PIECES of a collector at its turn: YOUR TURN', refs: ['C31'], variant: 'live', as: 'turn', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'RELEASES'), ready: '.view--pieces .pieces__releases' },
   { id: 'after-room-door', title: 'The after-room’s second door', refs: ['C26', 'plus-07'], variant: 'afterroom', as: you, path: release('afterroom'), ready: '.view--live .live__after' },
@@ -811,10 +811,10 @@ export const UI_STATES: readonly UiState[] = [
     },
     ready: '.view--live .live-door',
   },
-  { id: 'after-room-sold-out', title: 'The after-room sold out before your turn: SOLD OUT', refs: ['C30'], variant: 'afterroom-ends', as: 'arSoldOut', path: release('arSoldOut', '/after-room'), ready: '.view--live .live__edge' },
-  { id: 'after-room-closed', title: 'The after-room’s time over before your turn: THE AFTER-ROOM IS CLOSED', refs: ['C30'], variant: 'afterroom-ends', as: 'arClosed', path: release('arClosed', '/after-room'), ready: '.view--live .live__edge' },
-  { id: 'after-room-ended', title: 'The after-room ended by ORBES before your piece: THE AFTER-ROOM HAS ENDED', refs: ['C30'], variant: 'afterroom-ends', as: 'arEnded', path: release('arEnded', '/after-room'), ready: '.view--live .live__edge' },
-  { id: 'after-room-over', title: 'The after-room over, for a guest who never entered it: THE AFTER-ROOM IS CLOSED, your entry stays in MY PIECES', refs: ['C30'], variant: 'afterroom-ends', as: 'arOver', path: release('arSoldOut', '/after-room'), ready: '.view--live .live__edge' },
+  { id: 'after-room-sold-out', title: 'The after-room sold out before your turn: SOLD OUT', refs: ['C30'], variant: 'afterroom-ends', as: 'arSoldOut', path: release('arSoldOut', '/after-room'), ready: '.view--live .n-live__end' },
+  { id: 'after-room-closed', title: 'The after-room’s time over before your turn: THE AFTER-ROOM IS CLOSED', refs: ['C30'], variant: 'afterroom-ends', as: 'arClosed', path: release('arClosed', '/after-room'), ready: '.view--live .n-live__end' },
+  { id: 'after-room-ended', title: 'The after-room ended by ORBES before your piece: THE AFTER-ROOM HAS ENDED', refs: ['C30'], variant: 'afterroom-ends', as: 'arEnded', path: release('arEnded', '/after-room'), ready: '.view--live .n-live__end' },
+  { id: 'after-room-over', title: 'The after-room over, for a guest who never entered it: THE AFTER-ROOM IS CLOSED, your entry stays in MY PIECES', refs: ['C30'], variant: 'afterroom-ends', as: 'arOver', path: release('arSoldOut', '/after-room'), ready: '.view--live .n-live__end' },
   { id: 'room-stress', title: 'A room open with the longest host message, a 24-character name, a price of € 125 400', refs: ['same pieces'], variant: 'stress', as: you, path: release('soon'), ready: '.view--live', stress: true },
   { id: 'live-far-stress', title: 'A LIVE RELEASE more than 9 days away, in USD', refs: ['same pieces'], variant: 'stress', as: you, path: release('far'), ready: '.view--live', stress: true },
 
@@ -982,11 +982,11 @@ export const UI_STATES: readonly UiState[] = [
     path: release('blue'),
     mutates: true,
     act: async (run) => {
-      await run.page.locator('.live__there button.live__size', { hasText: /^17$/ }).click();
+      await run.page.locator('.n-live__there button.live__size', { hasText: /^17$/ }).click();
       await button(run, 'I’LL BE THERE').click();
       await button(run, 'WITHDRAW').waitFor({ timeout: 20_000 });
     },
-    ready: '.view--live .live__there',
+    ready: '.view--live .n-live__there',
   },
   {
     id: 'draw-entered',
@@ -1068,7 +1068,7 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
   C27: 'live-rules',
   C28: 'live-rules-not-eligible',
   C29: 'live-past-secured',
-  C30: 'live-past-question',
+  C30: 'live-missed',
   C31: 'pieces-releases',
   C32: 'pieces-orders',
   C33: 'model-salon',
@@ -1085,9 +1085,10 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
 });
 
 /**
- * The boards of several states (C5: THE PRIVATE SALON's teaser; C17: the problems of the scan; C33: REQUESTED; C36:
- * registering; C37: passing a piece on; C38: the scanner; C40: every page's loading, could not be shown, empty, owners
- * only and not found):
+ * The boards of several states (C5: THE PRIVATE SALON's teaser; C17: the problems of the scan; C28: I'LL BE THERE said,
+ * signed out, and not eligible by tier and by selection; C30: the question after on a final page, and an after-room's
+ * end; C33: REQUESTED; C36: registering; C37: passing a piece on; C38: the scanner; C40: every page's loading, could not
+ * be shown, empty, owners only and not found):
  * beside BOARD_STATES' first, each further state is set beside the board too, to be compared with its section.
  */
 export const BOARD_SECTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
@@ -1097,6 +1098,8 @@ export const BOARD_SECTIONS: Readonly<Record<string, readonly string[]>> = Objec
   C36: ['result-registered-now', 'result-ceremony', 'result-registration-closed', 'result-not-delivered'],
   C37: ['result-transfer-code', 'result-received', 'result-registered-other'],
   C33: ['model-salon-requested'],
+  C28: ['live-there', 'live-announced-signed-out', 'live-veiled', 'live-selected-not-eligible'],
+  C30: ['live-past-question', 'after-room-sold-out'],
   C38: ['scan-preparing', 'scan-hint', 'scan-seal', 'scan-verifying'],
   C40: ['pieces-failed', 'pieces-empty', 'collection-empty', 'releases-empty', 'circle-empty', 'circle-no-piece', 'model-not-found', 'draw-not-found', 'post-not-found'],
 });

@@ -1,14 +1,21 @@
 /**
  * A LIVE RELEASE's page (plan of 2026-10-04, The experience; mockups B1–B7, the VAULT look): /verify/releases/<id>,
  * which becomes, as the release advances, its room, its line, the turn, the piece secured and the reservation confirmed.
+ * Before and after the room (announced, the end of a visit, its final page) it is drawn in NOCTURNE's pieces with its
+ * chrome (plan NOCTURNE, screen 6, step N7: C20, C27–C30); inside the room (the door, the line, the turn, the hold,
+ * CONFIRMED, the after-room) the vault as lot E built it, without the rail or the ring (choice 4, fidelity rule 6): the
+ * page tells the app which it shows (`onChrome`).
  *
- *   announced   LIVE RELEASE · the piece on its plate (photograph, else silhouette, else the seal) · its name, price ·
- *               SEE THE MODEL from the photograph's stage, when the model's sheet is public ·
- *               OPENS IN dd:hh:mm or hh:mm:ss · the time in Paris, then on this phone · the rule, the quantity line and
- *               the limit per collector, when the room opens · THE REVEALS still to come, each with its time (each stage
- *               appears at its own, the page reading the release again then) · N COLLECTORS WILL BE THERE · I'LL BE
- *               THERE with a size for an account the rule lets in (another size changes it, WITHDRAW until T0); signed
- *               out, the sign-in under it; outside the rule, the rule and why · ADD TO CALENDAR · how the places are drawn
+ *   announced   ‹ THE RELEASES · the photograph, faded (its silhouette before; the seal, the monogram, before either) ·
+ *               LIVE RELEASE · its model with its variant (MONOLITHE / IN BLUE) · its type and collection · its price ·
+ *               A SURPRISE IN EVERY BOX · SEE THE MODEL from the photograph's stage, when the model's sheet is public ·
+ *               OPENS IN dd:hh:mm or hh:mm:ss · the time in Paris, then on this phone · its pieces, the limit per
+ *               collector, when the room opens, its rule (several rules: WHO MAY ENTER, joined by OR, C27) · THE REVEALS
+ *               still to come, each with its time (each stage appears at its own, the page reading the release again then)
+ *               · N COLLECTORS WILL BE THERE · YOUR SIZE and I'LL BE THERE for an account the rule lets in (once said, YOU'LL
+ *               BE THERE · SIZE 17 over the sizes: another size changes it, WITHDRAW until T0); signed out, I'LL BE THERE
+ *               opens the sign-in; outside the rule, the rule and why (C28) · ADD TO CALENDAR · its description · how the
+ *               places are drawn
  *   room        THE ROOM IS OPEN · the model, its price and the quantity line (SEE THE MODEL, as announced, until T0) ·
  *               the closed vault door, its lock the seal ·
  *               the countdown on ORBES time · N IN THE ROOM · READY CHECK · YOUR SIZE (the size of I'LL BE THERE
@@ -25,17 +32,20 @@
  *               vibration; then the piece, its size, the add-ons, PAY · total, 5:00 to confirm, RELEASE MY PLACE
  *   confirmed   out into the light: the page turns ivory (house style), the reservation, its reference, ORBES Client
  *               Services
- *   edge pages  not signed in (the sign-in), not eligible, turn passed, hold ended, place released, left, removed,
- *               the release ended, gone: a vault page with one action each
- *   past        plan LIVE RELEASE+ (decision 30): ended, the page in its final state, as THE RELEASES' PAST opens it:
- *               LIVE RELEASE · the piece on its plate · its name and line · SEE THE MODEL · THIS RELEASE IS OVER · its
- *               opening date and quantity line as announced · signed in, YOU TOOK PART or YOU SECURED A PIECE · its
- *               description · THE RELEASES. Never an end figure, nor how the account's entry ended (a guest of the
- *               after-room keeps the second door until it closes). For a week after the end, to an account that took
- *               part without a piece, ONE QUESTION, the question after (plan LIVE RELEASE+, choice 11; views/question.ts),
- *               here and on the page of an entry ended by the release's end with no second door (CLOSED, or SOLD OUT
- *               without an after-room): it opens at the release's final end (its after-room's, when one opened), never
- *               before; on the final page, read again each minute while it may still open (an after-room running)
+ *   edge pages  inside the room: not signed in (the sign-in), not eligible, sold out in its size: a vault page with
+ *               one action each. The end of a visit (C30): turn passed, hold ended, place released, left, removed, the
+ *               release (or its after-room) ended, gone: the photograph, LIVE RELEASE and its day, its title, the outcome
+ *               and its sentence, ORBES Client Services for an entry removed, THE RELEASES
+ *   past        plan LIVE RELEASE+ (decision 30; C29): ended, the page in its final state, as THE RELEASES' PAST opens it:
+ *               ‹ THE RELEASES · the photograph · LIVE RELEASE and its day · its title and line · its pieces as announced ·
+ *               SEE THE MODEL · signed in, YOU TOOK PART or YOU SECURED A PIECE · THIS RELEASE IS OVER on a plate · a
+ *               piece secured: CONFIRMED and its receipt, in the ivory kept from the room · its description. Never an end
+ *               figure, nor how the account's entry ended (a guest of the after-room keeps the second door until it
+ *               closes). For a week after the end, to an account that took part without a piece, ONE QUESTION, the
+ *               question after (plan LIVE RELEASE+, choice 11; views/question.ts, a plate card), here and on the page of
+ *               an entry ended by the release's end with no second door (CLOSED, or SOLD OUT without an after-room): it
+ *               opens at the release's final end (its after-room's, when one opened), never before; on the final page,
+ *               read again each minute while it may still open (an after-room running)
  *   after-room  plan LIVE RELEASE+ (choice 2): still in the line when the release sold out, its delay later, the
  *               second door in the same vault (THE AFTER-ROOM · A SECOND DOOR, the door and its lock, when it closes,
  *               ENTER THE AFTER-ROOM); the account's own entry says when it appears (`afterRoom`, its stream's last
@@ -53,7 +63,7 @@ import { bracket } from '../../shared/corners.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { LIVE, RELEASES } from '../copy.js';
+import { CONTACT, LIVE, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
 import {
   addonChoices,
   aheadLine,
@@ -72,7 +82,9 @@ import {
   liveScreen,
   liveSheetModel,
   livePastModel,
+  liveHeading,
   lockAngle,
+  pictureOf,
   placeAnnouncement,
   PRESS_GAP_MS,
   readyChecks,
@@ -89,14 +101,15 @@ import {
   type LiveViewer,
 } from '../live-model.js';
 import { sealSvg, turnRings } from '../live-seal.js';
-import { participationModel } from '../releases-model.js';
+import { participationModel, RELEASES_PATH, zonedDate } from '../releases-model.js';
+import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSignature } from '../sound.js';
 import type { AccountQuestion, ClientServices, LiveAccess, LiveEndedSheet, LiveEntry, LiveInterest, LiveRoom, LiveSheet, LiveState } from '../types.js';
-import { releaseContactModel, upper } from '../view-model.js';
-import { contactBlock, legalLinks, lookbookLink, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
+import { formatMoney as money, releaseContactModel, upper } from '../view-model.js';
+import { contactBlock, legalLinks, lookbookLink, PIECES_PATH, piecesLink, releasesLink, soundToggle, toneMark, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { loadingState } from './nocturne.js';
+import { appAnchor, button, contactLines, countdown as countdownView, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, sizeButtons, textLink } from './nocturne.js';
 import { OwnershipPanel } from './ownership.js';
 import { QuestionBlock } from './question.js';
 import { CEREMONY_VIBRATION } from './result.js';
@@ -130,6 +143,11 @@ const HOLD_RING = 2 * Math.PI * 116;
 const FINAL = new Set(['CONFIRMED', 'MISSED', 'EXPIRED', 'RELEASED', 'REMOVED', 'ENDED']);
 /** The entry statuses still open while the release runs: a room over with one of them has not said its last word. */
 const OPEN = new Set(['WAITING', 'QUEUED', 'TURN', 'SECURED']);
+/**
+ * The screens drawn in NOCTURNE with its chrome (choice 4; C20, C27–C30): the release announced, its final page, and the
+ * pages that end a visit (fidelity rule 6). Every other screen is the room's, kept as lot E built it.
+ */
+const END_PAGES: ReadonlySet<string> = new Set(['missed', 'expired', 'released', 'left', 'removed', 'ended', 'over']);
 
 export interface LiveView {
   root: HTMLElement;
@@ -156,6 +174,12 @@ export interface LiveDeps {
   clientServices(): Promise<ClientServices>;
   /** This phone's time zone (Intl), the second clock of the release's times. */
   localZone: string;
+  /**
+   * NOCTURNE's chrome (the header, the rail, the SCAN ring, the footer): shown on the release's pages before and after
+   * the room (announced, its final page, the end of a visit), hidden inside it (choice 4: the door, the line, the turn,
+   * the hold, CONFIRMED, the after-room), told at each change of screen.
+   */
+  onChrome?(shown: boolean): void;
 }
 
 export function liveView(deps: LiveDeps): LiveView {
@@ -629,6 +653,10 @@ class LivePage {
     screen.el.classList.add('live__screen');
     this.stage.replaceChildren(screen.el);
     this.root.dataset.screen = kind;
+    // Before and after the room, NOCTURNE's look and chrome; inside it, the room's own (choice 4, fidelity rule 6).
+    const nocturne = this.nocturne(kind);
+    this.root.classList.toggle('is-nocturne', nocturne);
+    this.deps.onChrome?.(nocturne);
     // Out into the light: CONFIRMED in the ivory house style; every other screen in the vault.
     this.root.classList.toggle('vault', kind !== 'confirmed');
     this.root.classList.toggle('is-light', kind === 'confirmed');
@@ -638,6 +666,13 @@ class LivePage {
     if (kind !== previous && kind === 'turn') this.say(this.returned ? LIVE.announce.returned : LIVE.announce.turn, true);
     if (kind !== previous && revealing) this.say(LIVE.announce.secured(this.name()));
     if (kind !== previous && kind === 'afterRoom') this.say(LIVE.afterRoom.announce);
+  }
+
+  /** Whether screen `kind` is one of NOCTURNE's, with its chrome: announced, failed, the final page, an end page (or loading it). */
+  private nocturne(kind: LiveScreenKind | 'failed'): boolean {
+    if (kind === 'announced' || kind === 'past' || kind === 'failed') return true;
+    if (kind === 'loading') return isEndedSheet(this.sheet);
+    return END_PAGES.has(kind);
   }
 
   private say(text: string, urgent = false): void {
@@ -665,6 +700,11 @@ class LivePage {
 
   private renderFoot(screen: Screen): void {
     const kind = screen.kind;
+    // NOCTURNE's screens have the chrome's footer (SOUND, the legal pages) and THE RELEASES in their own words.
+    if (this.nocturne(kind)) {
+      this.foot.replaceChildren();
+      return;
+    }
     // A page whose one action is THE RELEASES: the foot does not say it twice.
     const back = screen.back ? null : releasesLink(() => this.deps.onReleases(), { extraClass: 'live__releases' });
     const sound = kind === 'confirmed' ? null : soundToggle(this.deps.sound, 'live__sound');
@@ -813,88 +853,149 @@ class LivePage {
   // ── Screens ──────────────────────────────────────────────────────────────
 
   private failedScreen(): Screen {
+    // Could not be shown (C40): the release's kind as the page's title, the sentence, the reason, TRY AGAIN.
     const el = h(
       'section',
-      { class: 'live__edge' },
-      this.overline(LIVE.kind),
-      this.title(LIVE.kind),
-      h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${LIVE.loadFailed} ${this.deps.failure ?? ''}`.trim() }),
-      this.action(LIVE.retry, () => this.deps.onRetry()),
+      { class: 'n-live__failed' },
+      h('div', { class: 'n-px n-live__plain' }, h('h1', { class: 'n-g n-t1', id: 'live-title', attrs: { tabindex: '-1' }, text: LIVE.kind })),
+      h('div', { class: 'n-px n-live__state' }, failedState({ sentence: LIVE.loadFailed, reason: this.deps.failure ?? '', retry: LIVE.retry, onRetry: () => this.deps.onRetry(), retryClass: 'n-live__retry' })),
     );
     return { kind: 'failed', el, update: () => undefined };
   }
 
-  /** B1: the release announced. */
+  /** ‹ THE RELEASES, over a release's pages before and after the room (C20, C27, C29). */
+  private crumb(): HTMLAnchorElement {
+    return appAnchor(RELEASES_PATH, ['n-g', 'n-crumb', 'n-live__crumb'], () => this.deps.onReleases(), icon('back', { small: true }), LIVE.back);
+  }
+
+  /**
+   * The release's photograph (its silhouette before), whole and faded, and its words lifted onto its foot; without one
+   * (or once it cannot be loaded) its seal, the words under it.
+   */
+  private hero(picture: LivePicture | null, words: HTMLElement): HTMLElement[] {
+    if (!picture) {
+      // Not revealed yet (or never): its seal, the monogram, as THE RELEASES draws it (C7); never the ORBES code.
+      words.classList.add('n-live__sealed');
+      return [this.seal(), words];
+    }
+    words.classList.add('n-lift');
+    const photo = fadedPhoto(picture.src, picture.alt, { eager: true, extraClass: ['n-live__photo', picture.kind === 'silhouette' ? 'n-live__photo--silhouette' : ''].join(' ').trim() });
+    photo.querySelector('img')?.classList.add('n-live__img', `n-live__img--${picture.kind}`);
+    photo.querySelector('img')?.addEventListener(
+      'error',
+      () => {
+        photo.replaceWith(this.seal());
+        words.classList.remove('n-lift');
+        words.classList.add('n-live__sealed');
+      },
+      { once: true },
+    );
+    return [photo, words];
+  }
+
+  /** The seal of a release whose picture is not revealed: the monogram in its ring (C7), decorative. */
+  private seal(): HTMLElement {
+    return h('div', { class: 'n-ctr n-live__seal' }, h('div', { class: 'n-seal' }, monogram(54)));
+  }
+
+  /**
+   * B1, the release announced (C20; C27 with its surprise and several rules): ‹ THE RELEASES; its photograph; LIVE
+   * RELEASE, its title (the model's name on a line of its own), its type and collection, its price, A SURPRISE IN EVERY
+   * BOX, SEE THE MODEL; OPENS IN and its countdown on the server's clock; its day and hour in Paris (then on this phone);
+   * its pieces, the limit per collector, when the room opens and its rule (several rules: WHO MAY ENTER, joined by OR);
+   * the reveals still to come; N COLLECTORS WILL BE THERE and I'LL BE THERE; ADD TO CALENDAR; its description; how the
+   * places are drawn.
+   */
   private announcedScreen(): Screen {
     const s = this.live()!;
     const m = liveSheetModel(s, this.deps.localZone);
-    const units = countdown(0).map(() => ({ value: h('span', { class: 'live__digits' }), unit: h('span', { class: 'live__unit-label' }) }));
-    const clock = h(
-      'div',
-      { class: 'live__countdown', attrs: { role: 'timer', 'aria-labelledby': 'live-opens' } },
-      ...units.flatMap((u, i) => [i > 0 ? h('span', { class: 'live__colon', attrs: { 'aria-hidden': 'true' }, text: ':' }) : null, h('span', { class: 'live__unit' }, u.value, u.unit)]),
-    );
-    const description = storyBlock(m.description, { className: 'live__description', paragraphClass: 'live__note' });
-    const calendar = h('a', { class: 'textlink live__calendar', attrs: { href: m.calendarHref, download: 'orbes-live-release.ics' }, text: LIVE.calendar });
+    const clock = countdownView(countdown(Date.parse(s.opensAt) - this.now()).map((g) => [g.value, g.unit] as const));
+    clock.removeAttribute('aria-label');
+    clock.setAttribute('aria-labelledby', 'live-opens');
+    clock.classList.add('n-live__countdown');
+    const values = [...clock.querySelectorAll<HTMLElement>('.n-cd__value')];
+    const units = [...clock.querySelectorAll<HTMLElement>('.n-cd__unit')];
+    const several = m.rules.length > 1;
+    const lines = [m.pieces, m.perAccount, m.roomOpens, ...(several ? [] : [m.access])].filter((x) => x.length > 0);
     const dates = revealCalendar(s);
-    const reveals = dates.length
+    const title = modelTitle('h1', ['n-g', 'n-t1', 'n-live__title'], m.heading, m.named ? m.name : null);
+    title.id = 'live-title';
+    title.tabIndex = -1;
+    const see = m.lookbook ? textLink(LOOKBOOK.seeModel, { href: lookbookSheetPath(m.lookbook), onOpen: () => this.deps.onModel(m.lookbook!), extraClass: 'n-live__see' }) : null;
+    const there = this.thereBlock();
+    const tail = [
+      h('p', { class: 'n-live__calendar-line' }, h('a', { class: 'n-g n-tl n-live__calendar', attrs: { href: m.calendarHref, download: 'orbes-live-release.ics' }, text: LIVE.calendar })),
+      storyBlock(m.description, { className: 'n-live__description', paragraphClass: 'n-tx' }),
+      h('p', { class: 'n-sm n-live__rule', text: m.rule }),
+    ];
+    const words = h(
+      'div',
+      { class: 'n-px n-ctr n-live__words' },
+      h('p', { class: 'n-g n-lb n-live__kind', text: LIVE.kind }),
+      title,
+      m.line ? h('p', { class: 'n-g n-lb n-live__type' }, ...withNumerals(m.line)) : null,
+      h('p', { class: 'n-num n-live__price', text: m.price }),
+      m.surprise ? h('p', { class: 'n-g n-live__surprise', text: m.surprise }) : null,
+      see ? h('p', { class: 'n-live__see-line' }, see) : null,
+      h('p', { class: 'n-g n-lb n-live__opens', id: 'live-opens', text: LIVE.opensIn }),
+      clock,
+      h('p', { class: 'n-g n-lb n-live__when' }, ...withNumerals(m.when.paris)),
+      m.when.local ? h('p', { class: 'n-g n-lb n-live__local' }, ...withNumerals(m.when.local)) : null,
+      h('div', { class: 'n-lines n-live__lines' }, ...lines.map((l, i) => h('span', { class: ['n-g', 'n-lines__line', i === 0 ? 'n-ivc' : null] }, ...withNumerals(l)))),
+      dates.length
+        ? h(
+            'div',
+            { class: 'n-live__reveals live__reveals', attrs: { role: 'group', 'aria-labelledby': 'live-reveals' } },
+            h('p', { class: 'n-g n-lb n-ivc n-live__reveals-title', id: 'live-reveals', text: LIVE.reveals }),
+            h(
+              'div',
+              { class: 'n-lines n-live__reveals-lines' },
+              ...dates.map((d) => h('span', { class: 'n-g n-lines__line n-live__reveal' }, h('span', { class: 'n-live__reveal-stage', text: d.label }), ' · ', h('span', { class: 'n-nw n-live__reveal-when' }, ...withNumerals(d.when)))),
+            ),
+          )
+        : null,
+      ...(several ? [] : [there.el, ...tail]),
+    );
+    const rules = several
       ? h(
-          'div',
-          { class: 'live__reveals' },
-          h('p', { class: 'live__overline', id: 'live-reveals', text: LIVE.reveals }),
-          h(
-            'dl',
-            { class: 'live__reveals-list', attrs: { 'aria-labelledby': 'live-reveals' } },
-            ...dates.map((d) => h('div', { class: 'live__reveal-date' }, h('dt', { class: 'live__reveal-stage', text: d.label }), h('dd', { class: 'live__reveal-when' }, ...withNumerals(d.when)))),
-          ),
+          'section',
+          { class: 'n-px n-ctr n-live__rules', attrs: { 'aria-labelledby': 'live-who' } },
+          h('h2', { class: 'n-g n-lb n-live__who', id: 'live-who', text: LIVE.whoMayEnter }),
+          h('p', { class: 'n-g n-t3 n-ivc n-live__rule-list' }, ...m.rules.flatMap((r, i) => [...(i > 0 ? [h('br'), h('span', { class: 'n-lb', text: LIVE.or }), h('br')] : []), ...withNumerals(r)])),
         )
       : null;
-    const there = this.thereBlock();
     const el = h(
       'section',
-      { class: 'live__announced' },
-      this.overline(LIVE.kind),
-      this.piece(m.picture, 'live__plate--announce'),
-      this.title(m.name),
-      m.line ? this.fact(m.line, 'live__kindline') : null,
-      h('p', { class: 'live__price', text: m.price }),
-      this.seeModel(m.lookbook),
-      this.hairline(),
-      h('p', { class: 'live__overline', id: 'live-opens', text: LIVE.opensIn }),
-      clock,
-      this.fact(m.when.paris, 'live__when'),
-      m.when.local ? this.fact(m.when.local, 'live__when live__when--local') : null,
-      h('div', { class: 'live__facts' }, this.fact(m.access), this.fact(m.quantity), this.fact(m.roomOpens)),
-      this.surprise(m.surprise),
-      reveals,
-      there.el,
-      description,
-      calendar,
-      this.note(m.rule, 'live__rule-note'),
+      { class: 'n-livepage n-live__announced live__announced' },
+      this.crumb(),
+      ...this.hero(m.picture, words),
+      rules,
+      several ? h('div', { class: 'n-px n-ctr n-live__after-rules' }, there.el, ...tail) : null,
     );
     return {
       kind: 'announced',
       el,
+      focus: title,
       update: () => {
         there.update();
         countdown(Date.parse(s.opensAt) - this.now()).forEach((p, i) => {
-          if (!units[i]) return;
-          if (units[i]!.value.textContent !== p.value) units[i]!.value.textContent = p.value;
-          if (units[i]!.unit.textContent !== p.unit) units[i]!.unit.textContent = p.unit;
+          if (values[i] && values[i]!.textContent !== p.value) values[i]!.textContent = p.value;
+          if (units[i] && units[i]!.textContent !== p.unit) units[i]!.textContent = p.unit;
         });
       },
     };
   }
 
   /**
-   * I'LL BE THERE on the announced page: the public count; for an account the rule lets in, its size and the action (once
-   * said, another size changes it, WITHDRAW takes it back, until T0); signed out, a text link opening the sign-in; outside
-   * the rule, the rule and why. Its part is built again only when what it offers changes.
+   * I'LL BE THERE on the announced page (C20, C28): the public count; for an account the rule lets in, YOUR SIZE, the
+   * sizes and the action (once said, YOU'LL BE THERE · SIZE 17 over the sizes: another size changes it, WITHDRAW takes it
+   * back, until T0); signed out, I'LL BE THERE as a text link opening the sign-in; outside the rule, the rule and why.
+   * Its part is built again only when what it offers changes.
    */
   private thereBlock(): { el: HTMLElement; update(): void } {
-    const count = this.fact('', 'live__there-count');
-    const body = h('div', { class: 'live__there-body' });
-    const el = h('section', { class: 'live__there', attrs: { 'aria-label': LIVE.there.action } }, this.hairline(), count, body);
+    const count = h('p', { class: 'n-g n-lb n-live__interest live__there-count' });
+    const body = h('div', { class: 'n-live__there-body' });
+    const el = h('section', { class: 'n-live__there live__there', attrs: { 'aria-label': LIVE.there.action } }, count, body);
     let mode = '';
     let refresh: () => void = () => undefined;
     const build = (next: string): void => {
@@ -904,38 +1005,55 @@ class LivePage {
       if (!s) return body.replaceChildren();
       switch (next) {
         case 'signed-out': {
-          const open = h('button', { class: 'textlink live__there-open', attrs: { type: 'button' }, text: LIVE.there.action });
-          const panel = h('div', { class: 'live__panel live__there-panel' });
+          const open = h('button', { class: 'n-g n-tl n-live__there-open', attrs: { type: 'button' }, text: LIVE.there.action });
+          const lead = h('p', { class: 'n-sm n-live__there-lead', text: LIVE.there.signIn });
+          const panel = h('div', { class: 'n-live__panel live__there-panel' });
           const show = (): void => {
-            this.thereSignIn ??= new OwnershipPanel({ kind: 'account', lead: LIVE.there.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan(), look: 'vault' });
+            this.thereSignIn ??= new OwnershipPanel({ kind: 'account', lead: LIVE.there.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
             panel.replaceChildren(this.thereSignIn.root);
-            open.hidden = true;
+            // The sign-in says the same sentence: it stands alone.
+            open.parentElement!.hidden = true;
+            lead.hidden = true;
           };
           open.addEventListener('click', () => {
             show();
             panel.querySelector<HTMLInputElement>('input')?.focus();
           });
-          body.replaceChildren(open, panel);
+          body.replaceChildren(h('p', { class: 'n-live__there-open-line' }, open), lead, panel);
           // Opened before (the page drawn again since): it stays open.
           if (this.thereSignIn) show();
           return;
         }
-        case 'not-eligible':
-          body.replaceChildren(this.note([this.refusal, LIVE.edge.notEligible.text].filter(Boolean).join(' '), 'live__there-rule'));
+        case 'not-eligible': {
+          // The rule (when it is one), why, and that the account does not meet it (C28, states 3 to 5).
+          const s2 = this.live();
+          const single = s2 ? liveSheetModel(s2, this.deps.localZone).rules.length <= 1 : true;
+          body.replaceChildren(
+            h(
+              'div',
+              { class: 'n-live__refusal live__there-rule' },
+              single && s2 ? h('p', { class: 'n-g n-t3 n-ivc n-live__refusal-rule' }, ...withNumerals(LIVE.forWhom(s2.access.text))) : null,
+              this.refusal ? h('p', { class: 'n-tx n-live__refusal-why' }, ...withNumerals(this.refusal)) : null,
+              h('p', { class: 'n-sm n-live__refusal-note', text: LIVE.edge.notEligible.text }),
+            ),
+          );
           return;
+        }
         case 'choose':
         case 'said': {
-          const said = this.subtitleLine('live__there-said');
-          const lead = this.note(next === 'said' ? LIVE.there.change : LIVE.there.lead, 'live__there-lead');
-          const picker = this.picker((id) => this.pickThere(id), null);
-          const errorLine = this.errorLine();
-          const action = h('button', { class: 'btn live__primary live__there-action', attrs: { type: 'button' }, on: { click: () => this.sayThere() }, text: LIVE.there.action });
-          const withdraw = h('button', { class: 'textlink live__there-withdraw', attrs: { type: 'button' }, on: { click: () => void this.setThere(null) }, text: LIVE.there.withdraw });
-          body.replaceChildren(said, picker.el, lead, errorLine, next === 'said' ? withdraw : action);
+          const said = h('p', { class: 'n-g n-t3 n-ivc n-live__said live__there-said' });
+          const label = h('p', { class: 'n-g n-lb n-live__size-label', id: 'live-size', text: LIVE.yourSize });
+          const sizes = this.sizes();
+          const lead = h('p', { class: 'n-sm n-live__there-lead', text: next === 'said' ? LIVE.there.change : LIVE.there.lead });
+          const errorLine = h('p', { class: 'n-sm n-ivc n-live__error form__error', attrs: { role: 'alert', hidden: true } });
+          const action = button(LIVE.there.action, { extraClass: 'n-live__there-action', onClick: () => this.sayThere() });
+          const withdraw = button(LIVE.there.withdraw, { outline: true, extraClass: 'n-live__withdraw', onClick: () => void this.setThere(null) });
+          // Said: the size said stands in YOUR SIZE's place over the sizes (C28, state 1); the group keeps its name.
+          body.replaceChildren(next === 'said' ? said : label, sizes.el, lead, errorLine, next === 'said' ? withdraw : action);
+          sizes.el.setAttribute('aria-label', LIVE.yourSize);
           refresh = () => {
             setFact(said, this.interest ? LIVE.there.said(this.interest.size.label) : '');
-            said.hidden = !this.interest;
-            picker.update(next === 'choose');
+            sizes.update();
             this.showError(errorLine);
             action.disabled = this.busy || this.picked.sizeId === null;
             action.setAttribute('aria-busy', String(this.busy));
@@ -960,9 +1078,34 @@ class LivePage {
     };
   }
 
-  /** A line in the display face of a fact said (`YOU'LL BE THERE · SIZE 52`), its figures in the reading face. */
-  private subtitleLine(extra: string): HTMLParagraphElement {
-    return h('p', { class: ['live__subtitle', extra] });
+  /**
+   * The sizes of I'LL BE THERE (C20, C28): each a 78 × 54 button in the reading face, the one picked (or said) doubly
+   * ringed; one with no piece left to give is said so and cannot be picked.
+   */
+  private sizes(): { el: HTMLElement; update(): void } {
+    const s = this.live()!;
+    const choices = sizeChoices(s, this.room, this.picked.sizeId);
+    const el = sizeButtons(
+      choices.map((c) => ({ id: c.id, label: c.label })),
+      { selected: this.picked.sizeId, label: LIVE.yourSize, onSelect: (id) => this.pickThere(id) },
+    );
+    el.classList.add('n-live__sizes');
+    const buttons = [...el.querySelectorAll<HTMLButtonElement>('button')];
+    buttons.forEach((b) => b.classList.add('live__size'));
+    return {
+      el,
+      update: () => {
+        sizeChoices(s, this.room, this.picked.sizeId).forEach((c, i) => {
+          const b = buttons[i];
+          if (!b) return;
+          b.setAttribute('aria-pressed', String(c.selected));
+          b.disabled = this.busy || (!c.available && !c.selected);
+          if (!c.available) b.setAttribute('aria-label', LIVE.soldOutSize(c.label));
+          else b.removeAttribute('aria-label');
+          b.classList.toggle('is-gone', !c.available);
+        });
+      },
+    };
   }
 
   /** A size picked under I'LL BE THERE: kept until it is said; once said, the interest changed to it. */
@@ -1017,7 +1160,7 @@ class LivePage {
     }
     this.render();
     // The action gone (said, or withdrawn): the keyboard's focus on the size now said, else on the action back.
-    if (from && !from.isConnected) requestAnimationFrame(() => this.root.querySelector<HTMLElement>('.live__there .live__size[aria-pressed="true"], .live__there-action')?.focus());
+    if (from && !from.isConnected) requestAnimationFrame(() => this.root.querySelector<HTMLElement>('.n-live__there .live__size[aria-pressed="true"], .n-live__there-action')?.focus());
   }
 
   private signInScreen(): Screen {
@@ -1720,51 +1863,108 @@ class LivePage {
   }
 
   /**
-   * Over (plan LIVE RELEASE+, decision 30): the release in its final state, as THE RELEASES' PAST opens it. What was
-   * announced (each part from its stage), THIS RELEASE IS OVER, and signed in the account's part in it; never an end
-   * figure. Its one action: THE RELEASES.
+   * Over (plan LIVE RELEASE+, decision 30; C29): the release in its final state, as THE RELEASES' PAST opens it.
+   * ‹ THE RELEASES; its photograph; LIVE RELEASE and its day, its title, its type and collection, its quantity as
+   * announced, SEE THE MODEL; signed in, the account's part in it (YOU SECURED A PIECE, YOU TOOK PART); THIS RELEASE IS
+   * OVER on its plate; for a piece secured, CONFIRMED and its receipt in the ivory kept from the room; the question
+   * after; its description. Never an end figure.
    */
   private pastScreen(): Screen {
     const m = livePastModel(this.sheet!, this.deps.localZone);
-    const part = this.fact('', 'live__past-part');
-    part.hidden = true;
+    const part = h('p', { class: 'n-state n-live__part live__past-part', attrs: { hidden: true } });
+    const receipt = h('div', { class: 'n-live__receipt-slot', attrs: { hidden: true } });
     const ask = this.questionBlock();
+    const title = modelTitle('h1', ['n-g', 'n-t1', 'n-live__title'], m.heading, m.model);
+    title.id = 'live-title';
+    title.tabIndex = -1;
+    const words = h(
+      'div',
+      { class: 'n-px n-ctr n-live__words' },
+      h('p', { class: 'n-g n-lb n-live__kind' }, ...withNumerals([LIVE.kind, m.day].filter(Boolean).join(' · '))),
+      title,
+      m.line ? h('p', { class: 'n-g n-lb n-live__type' }, ...withNumerals(m.line)) : null,
+      h('p', { class: 'n-g n-lb n-ivc n-live__pieces-line' }, ...withNumerals(m.pieces)),
+      m.lookbook ? h('p', { class: 'n-live__see-line' }, textLink(LOOKBOOK.seeModel, { href: lookbookSheetPath(m.lookbook), onOpen: () => this.deps.onModel(m.lookbook!), extraClass: 'n-live__see' })) : null,
+      part,
+    );
+    const description = storyBlock(m.description, { className: 'n-px n-live__description n-live__description--past', paragraphClass: 'n-tx' });
     const el = h(
       'section',
-      { class: 'live__past' },
-      this.overline(LIVE.kind),
-      this.piece(m.picture, 'live__plate--past'),
-      this.title(m.name),
-      m.line ? this.fact(m.line, 'live__kindline') : null,
-      this.seeModel(m.lookbook),
-      this.hairline(),
-      this.fact(RELEASES.over, 'live__past-status'),
-      this.fact(m.facts, 'live__past-facts'),
-      part,
+      { class: 'n-livepage n-live__past live__past' },
+      this.crumb(),
+      ...this.hero(m.picture, words),
+      h('div', { class: 'n-nx n-live__over' }, h('p', { class: 'n-g n-t3 n-ivc n-live__over-text live__past-status', text: RELEASES.over })),
+      receipt,
       ask.el,
-      storyBlock(m.description, { className: 'live__description', paragraphClass: 'live__note' }),
-      this.action(LIVE.back, () => this.deps.onReleases()),
+      description,
     );
+    let drawn = '';
     return {
       kind: 'past',
       el,
-      back: true,
+      focus: title,
       update: () => {
         if (this.partRead === 'idle' && this.deps.session.state.status === 'signed-in') void this.readPart();
-        setFact(part, this.part ?? '');
+        const said = this.part ?? '';
+        if (part.dataset.text !== said) {
+          part.dataset.text = said;
+          part.replaceChildren(...(said === RELEASES.past.secured ? [icon('check', { small: true })] : []), said);
+        }
         part.hidden = this.part === null;
+        // A piece secured: its reservation, as CONFIRMED said it in the room (C29).
+        const e = this.deps.session.state.status === 'signed-in' && this.entry?.status === 'CONFIRMED' ? this.entry : null;
+        const key = e ? JSON.stringify([e.id, e.size, e.quantity, e.addons, e.totalMinor, e.currency, e.confirmedAt]) : '';
+        if (key !== drawn) {
+          drawn = key;
+          receipt.replaceChildren(...(e ? [this.receipt(e, m.heading)] : []));
+          receipt.hidden = e === null;
+        }
         this.askQuestion(ask, true);
       },
     };
   }
 
-  /** ONE QUESTION, in the vault: the question after, shown once read, kept when answered. */
+  /**
+   * CONFIRMED and its receipt on a release's final page (C29): the one ivory plate of /verify, kept from the room. The
+   * release, CONFIRMED, the size reserved and what follows, then RESERVED, SIZE, PIECES, each add-on, TOTAL, REFERENCE,
+   * and MY PIECES.
+   */
+  private receipt(e: LiveEntry, heading: string): HTMLElement {
+    const reference = liveReference(e.id);
+    const at = e.confirmedAt ?? e.hold?.securedAt ?? null;
+    const time = at ? zonedTime(at, this.deps.localZone) : null;
+    const reserved = at && time ? `${zonedDate(at, this.deps.localZone)} · ${time.time}` : '';
+    const row = (label: string, value: string): [string, string] => [label, value];
+    const rows = [
+      row(LIVE.rows.reserved, reserved),
+      row(LIVE.rows.size, e.size.label),
+      row(LIVE.rows.pieces, String(e.quantity)),
+      ...e.addons.map((a) => row(upper(a.label), LIVE.addonPrice(money(a.priceMinor * e.quantity, e.currency)))),
+      row(LIVE.rows.total, money(e.totalMinor, e.currency)),
+      row(LIVE.rows.reference, reference),
+    ];
+    return h(
+      'section',
+      { class: 'n-rec n-live__receipt', attrs: { 'aria-labelledby': 'live-confirmed' } },
+      h('p', { class: 'n-g n-lb n-live__receipt-of' }, ...withNumerals(LIVE.confirmedOf(heading))),
+      h('h2', { class: 'n-g n-t1 n-live__receipt-title', id: 'live-confirmed', text: LIVE.confirmed }),
+      h('p', { class: 'n-live__receipt-text', text: LIVE.reservedIn(e.size.label, e.quantity) }),
+      h(
+        'dl',
+        { class: 'n-live__receipt-rows' },
+        ...rows.map(([label, value]) => h('div', { class: 'n-kv__row' }, h('dt', { class: 'n-g n-kv__label' }, ...withNumerals(label)), h('dd', { class: 'n-kv__value n-num', text: value }))),
+      ),
+      h('p', { class: 'n-live__receipt-link' }, appAnchor(PIECES_PATH, ['n-g', 'n-live__pieces'], () => this.deps.onPieces(), PIECES.link)),
+    );
+  }
+
+  /** ONE QUESTION: the question after, shown once read, kept when answered; on NOCTURNE's pages a plate card (C30). */
   private questionBlock(): QuestionBlock {
     return new QuestionBlock({
       api: this.deps.api,
       session: this.deps.session,
       localZone: this.deps.localZone,
-      tone: 'vault',
+      tone: 'nocturne',
       onAnswered: (q) => {
         this.question = q;
       },
@@ -1834,33 +2034,51 @@ class LivePage {
     this.screen?.update();
   }
 
-  /** An edge page: its title, its sentence, its one action. */
+  /**
+   * An end page (C30): the visit ended (YOUR TURN HAS PASSED, YOUR HOLD HAS ENDED, YOUR PLACE IS RELEASED, YOU LEFT THE
+   * LINE, YOUR ENTRY IS REMOVED), the release or its after-room ended before the account's piece, or the release gone.
+   * Its photograph; LIVE RELEASE (THE AFTER-ROOM) and its day, its title; the outcome and its sentence (said aloud); the
+   * question after once open; ORBES Client Services for an entry removed; THE RELEASES.
+   */
   private edgeScreen(kind: LiveScreenKind): Screen {
     const copy = this.edgeCopy(kind);
     const contact = kind === 'removed' && this.entry ? releaseContactModel(this.contacts, this.name(), liveReference(this.entry.id), LIVE.statusLabel.REMOVED) : null;
-    const title = this.title(copy.title);
-    const note = this.note(copy.text);
+    const sheet = this.sheet;
+    const heading = sheet ? (liveHeading(sheet) ?? (isEndedSheet(sheet) ? LIVE.kind : LIVE.unnamed)) : LIVE.kind;
+    const day = sheet ? (zonedTime(sheet.opensAt, this.deps.localZone)?.day ?? '') : '';
+    const title = modelTitle('h1', ['n-g', 'n-t1', 'n-live__title'], heading, sheet?.name ? upper(sheet.name) : null);
+    title.id = 'live-title';
+    title.tabIndex = -1;
+    const outcome = h('p', { class: 'n-g n-t2 n-ivc n-live__outcome', attrs: { tabindex: '-1' } }, ...withNumerals(copy.title));
+    const note = h('p', { class: 'n-tx n-live__outcome-text', text: copy.text });
     // Ended by the release's end with no second door (CLOSED, or SOLD OUT without an after-room): its final end, the
     // question after open (plan LIVE RELEASE+, choice 11). A guest of an after-room is asked on the final page once it ends.
     const ask = kind === 'ended' && !this.entry?.afterRoom ? this.questionBlock() : null;
+    const words = h(
+      'div',
+      { class: 'n-px n-ctr n-live__words' },
+      // In an after-room, its end pages say so: the release itself had sold out before.
+      h('p', { class: 'n-g n-lb n-live__kind' }, ...withNumerals([this.afterRoomOf() ? LIVE.afterRoom.kind : LIVE.kind, day].filter(Boolean).join(' · '))),
+      title,
+    );
     const el = h(
       'section',
-      { class: 'live__edge' },
-      // In an after-room, its edge pages say so: the release itself had sold out before.
-      this.overline(this.afterRoomOf() ? LIVE.afterRoom.kind : this.name()),
-      title,
-      note,
+      { class: 'n-livepage n-live__end' },
+      ...this.hero(sheet ? pictureOf(sheet) : null, words),
+      h('section', { class: 'n-px n-ctr n-live__outcome-block', attrs: { 'aria-live': 'polite' } }, outcome, note),
+      contact ? h('div', { class: 'n-px n-live__contact' }, contactLines(contact, { action: CONTACT.action, call: CONTACT.call })) : null,
       ask?.el ?? null,
-      contact ? contactBlock(contact) : this.action(LIVE.back, () => this.deps.onReleases()),
+      h('p', { class: 'n-sec n-ctr n-live__back' }, textLink(LIVE.back, { href: RELEASES_PATH, onOpen: () => this.deps.onReleases(), extraClass: 'n-live__back-link' })),
     );
     // The release's end may say its reason after the page (SOLD OUT, CLOSED): the words follow it.
     const update = (): void => {
       const now = this.edgeCopy(kind);
-      if (title.textContent !== now.title) title.replaceChildren(...withNumerals(now.title));
+      if (outcome.textContent !== now.title) outcome.replaceChildren(...withNumerals(now.title));
       if (note.textContent !== now.text) note.textContent = now.text;
       if (ask) this.askQuestion(ask);
     };
-    return { kind, el, back: contact === null, update };
+    // The keyboard and a screen reader land on what happened, under the release's title.
+    return { kind, el, focus: outcome, back: true, update };
   }
 
   private edgeCopy(kind: LiveScreenKind): { title: string; text: string } {

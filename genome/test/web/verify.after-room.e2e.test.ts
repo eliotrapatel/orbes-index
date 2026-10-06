@@ -138,7 +138,7 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
     expect(await srv.ctx.db.selectFrom('after_room_guests').select('position').where('drop_id', '=', child).execute()).toEqual([{ position: 1 }]);
 
     // SOLD OUT: the release's end, nothing of a second door yet.
-    await textOf(page.locator('.live__edge > h1'), 'SOLD OUT');
+    await textOf(page.locator('.n-live__end .n-live__outcome'), 'SOLD OUT');
     expect(await page.locator('.live__after').count()).toBe(0);
     await keepsVault(page, null, ['THE RELEASES']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-after-room-sold-out.png'), fullPage: true });

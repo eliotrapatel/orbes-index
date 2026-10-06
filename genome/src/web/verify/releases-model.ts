@@ -28,7 +28,7 @@
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { RELEASES } from './copy.js';
 import type { ClientServices, ClubEntry, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease } from './types.js';
-import { formatDate, formatDateTime, formatDateTimeLong, releaseContactModel, upper, utcOffsetLabel, type ContactModel } from './view-model.js';
+import { formatDate, formatDateTime, formatDateTimeLong, formatMoney, modelWithVariant, releaseContactModel, upper, utcOffsetLabel, type ContactModel } from './view-model.js';
 
 /** The list of the releases, and the page of one under it. */
 export const RELEASES_PATH = '/verify/releases';
@@ -117,7 +117,14 @@ export interface ReleaseCardModel {
   model: string;
   /** `3 PIECES · ENTRIES OPEN 12 OCT 2026 · 10:00 UTC`, or their close once open. */
   line: string;
+  /** `€ 4 200` (addition 5), or null when ORBES gave the draw no price. */
+  price: string | null;
   image: ReleasePhoto | null;
+}
+
+/** A draw's price (addition 5): `€ 4 200`, or null when ORBES gave none (both its amount and its currency, or neither). */
+export function drawPrice(d: Pick<DropCard, 'priceMinor' | 'currency'>): string | null {
+  return typeof d?.priceMinor === 'number' && Number.isFinite(d.priceMinor) && typeof d.currency === 'string' && d.currency ? formatMoney(d.priceMinor, d.currency) : null;
 }
 
 const modelLine = (m: { name: string; type: string }): string => [upper(m.name), upper(m.type)].filter((x) => x.length > 0).join(' · ');
@@ -138,6 +145,7 @@ export function releaseCards(cards: readonly DropCard[]): ReleaseCardModel[] {
       stateLabel: stateLabelOf(state, earlyAccessOf(c)),
       model: modelLine(c.model ?? { name: '', type: '' }),
       line,
+      price: drawPrice(c),
       image: typeof c.model?.imageUrl === 'string' && MEDIA_SRC.test(c.model.imageUrl) ? { src: c.model.imageUrl, alt: RELEASES.photosLabel(upper(c.title)) } : null,
     });
   }
@@ -195,7 +203,8 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
   const early = earlyAccessOf(s);
   const quantity = Number(s.quantity) || 0;
   const reserved = Number.isInteger(s.reserved) && s.reserved > 0 ? s.reserved : 0;
-  const rows: ReleaseRow[] = [{ label: RELEASES.rows.pieces, value: String(quantity) }];
+  const price = drawPrice(s);
+  const rows: ReleaseRow[] = [...(price ? [{ label: RELEASES.rows.price, value: price }] : []), { label: RELEASES.rows.pieces, value: String(quantity) }];
   const earlyAt = early ? twoClocks(early.opensAt, offsetMinutes) : null;
   if (earlyAt) rows.push({ label: RELEASES.rows.early, value: earlyAt.utc, local: earlyAt.local });
   rows.push(
@@ -389,12 +398,16 @@ export interface PastCardModel {
   href: string;
   /** LIVE RELEASE or DRAW. */
   kind: string;
-  /** A LIVE RELEASE's model, as its card and page name it; a draw's title, as its card does. */
+  /** A LIVE RELEASE's model with its variant (`MONOLITHE IN STEEL`), as its card and page name it; a draw's title, as its card does. */
   title: string;
   /** A LIVE RELEASE's type and collection; a draw's model and type. */
   model: string;
   /** `11 OCT 2026 · 25 PIECES`: the opening date on this phone's calendar, the quantity as announced. */
   line: string;
+  /** `11 OCT 2026`: the opening date on this phone's calendar, after the kind (C25: `LIVE RELEASE · 11 OCT 2026`). */
+  date: string;
+  /** `25 PIECES`: the quantity as announced. */
+  pieces: string;
   image: ReleasePhoto | null;
 }
 
@@ -425,7 +438,8 @@ export function pastCards(items: readonly PastRelease[], localZone: string): Pas
     const m = c.model ?? { name: null, type: null, collection: null };
     const live = c.kind === 'LIVE';
     // A LIVE RELEASE is named by its model, from its name's stage (one ended before it: LIVE RELEASE); a draw by its title.
-    const title = live ? (m.name ? upper(m.name) : RELEASES.past.kind.LIVE) : upper(c.title ?? '');
+    const named = typeof m.name === 'string' && m.name.trim() !== '';
+    const title = live ? (named ? upper(modelWithVariant(m.name!, m.variant)) : RELEASES.past.kind.LIVE) : upper(c.title ?? '');
     const model = live ? [upper(m.type), upper(m.collection)].filter((x) => x.length > 0).join(' · ') : modelLine({ name: m.name ?? '', type: m.type ?? '' });
     out.push({
       id: c.id,
@@ -434,6 +448,8 @@ export function pastCards(items: readonly PastRelease[], localZone: string): Pas
       title,
       model,
       line: RELEASES.past.line(zonedDate(c.opensAt, localZone), upper(c.quantityLine)),
+      date: zonedDate(c.opensAt, localZone),
+      pieces: upper(c.quantityLine),
       image: typeof c.imageUrl === 'string' && MEDIA_SRC.test(c.imageUrl) ? { src: c.imageUrl, alt: RELEASES.photosLabel(title) } : null,
     });
   }

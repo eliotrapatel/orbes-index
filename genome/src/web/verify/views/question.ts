@@ -11,6 +11,9 @@
  *   ANOTHER PRICE BAND                            and ruled; never a bordered button (the page keeps its own action)
  *   One tap. You may change your answer until …  until when (announced politely after an answer)
  *
+ * On a release's pages before and after the room in NOCTURNE (C30, `nocturne`): a plate card, its label, its question
+ * in the display face, its answers as pressed buttons one under the other (the chosen one filled ivory), until when.
+ *
  * The answer goes to PUT /api/v1/live/:id/answer; while it is sent the answers wait; a refusal reads as the server
  * wrote it (closed, not asked), the block staying as it was.
  */
@@ -26,8 +29,8 @@ export interface QuestionBlockDeps {
   api: ApiClient;
   session: SessionStore;
   localZone: string;
-  /** The vault (the release's end page) or the house's ivory (MY PIECES). */
-  tone: 'vault' | 'ivory';
+  /** NOCTURNE's plate card (a release's end and final pages, C30), the vault (MY PIECES) or the house's ivory. */
+  tone: 'nocturne' | 'vault' | 'ivory';
   /** MY PIECES names the release above its question. */
   named?: boolean;
   /** Told of the question once answered (the page keeps it for its next screen). */
@@ -51,9 +54,22 @@ export class QuestionBlock {
   private readonly error = h('p', { class: 'form__error question__error', attrs: { role: 'alert', hidden: true } });
 
   constructor(private readonly deps: QuestionBlockDeps) {
-    this.text = h('p', { class: 'question__text', id: this.textId });
+    const nocturne = deps.tone === 'nocturne';
+    this.text = h(nocturne ? 'h2' : 'p', { class: nocturne ? 'n-g n-t2 n-question__text question__text' : 'question__text', id: this.textId });
     this.answers.setAttribute('aria-labelledby', this.textId);
     this.release.hidden = !deps.named;
+    if (nocturne) {
+      this.answers.className = 'n-opt2 n-question__answers';
+      this.note.className = 'n-sm n-question__note question__note';
+      this.error.className = 'n-sm n-ivc n-question__error form__error question__error';
+      this.release.className = 'n-g n-lb n-question__release question__release';
+      this.el = h(
+        'section',
+        { class: 'n-px n-question question--nocturne', attrs: { 'aria-labelledby': this.textId, hidden: true } },
+        h('div', { class: 'n-card n-card--left n-question__card' }, h('p', { class: 'n-g n-lb n-question__label question__label', text: QUESTION.label }), this.release, this.text, this.answers, this.note, this.error),
+      );
+      return;
+    }
     this.el = h(
       'section',
       { class: ['question', `question--${deps.tone}`], attrs: { 'aria-labelledby': this.textId, hidden: true } },
@@ -80,7 +96,7 @@ export class QuestionBlock {
       this.buttons = m.answers.map((a) =>
         h(
           'button',
-          { class: 'auth__option question__answer', attrs: { type: 'button', 'aria-pressed': 'false' }, data: { answer: String(a.answer) }, on: { click: () => void this.choose(a.answer) } },
+          { class: this.deps.tone === 'nocturne' ? 'n-g n-opt2__option question__answer' : 'auth__option question__answer', attrs: { type: 'button', 'aria-pressed': 'false' }, data: { answer: String(a.answer) }, on: { click: () => void this.choose(a.answer) } },
           ...withNumerals(a.label),
         ),
       );

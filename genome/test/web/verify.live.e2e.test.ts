@@ -172,32 +172,37 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     // This phone's clock runs 37 minutes ahead: the countdown, the ticks and the door keep to the server's time.
     const { page, problems } = await phone(me.token, { skewMs: 37 * 60_000 });
 
-    // THE RELEASES: the LIVE RELEASES first, on vault plates.
+    // THE RELEASES: the LIVE RELEASES first, each at the column's full width (NOCTURNE, C7).
     await page.goto(`${srv.origin}/verify/releases`);
     const card = page.locator('article.live-card').filter({ has: page.locator(`#release-${later.id}-title`) });
     await visible(card);
     await textOf(card.locator('.live-card__kind'), 'LIVE RELEASE');
     await textOf(card.locator('.live-card__title'), 'MONOLITHE');
-    await textOf(card.locator('.live-card__line'), '€ 5 050 · 25 PIECES · ONE PER COLLECTOR');
-    await textOf(card.locator('.live-card__access'), 'FOR OWNERS FROM PLATINE');
+    await textOf(card.locator('.live-card__price'), '€ 5 050');
+    await textOf(card.locator('.live-card__line'), '25 PIECES ONE PER COLLECTOR FOR OWNERS FROM PLATINE');
     await textOf(card.locator('.live-card__when').first(), /^[A-Z]+DAY \d{1,2} [A-Z]+ · \d{2}:\d{2} PARIS$/);
-    expect(await card.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(GROUND);
+    // OPENS IN and its countdown on the card (addition 4), on the server's clock.
+    await textOf(card.locator('.n-releases__opens'), 'OPENS IN');
+    await expect.poll(async () => (await card.locator('.n-cd__unit').allInnerTexts()).map(norm)).toEqual(['DAYS', 'HOURS', 'MINUTES']);
+    expect(await card.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
     await textOf(page.locator('article.live-card').filter({ has: page.locator(`#release-${r.id}-title`) }).locator('.live-card__kind'), 'LIVE RELEASE · THE ROOM IS OPEN');
-    await keepsVault(page, null, ['SEE THE RELEASE']);
+    await keepsVault(page, 'SEE THE RELEASE', ['SEE THE RELEASE']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-releases.png'), fullPage: true });
 
     // B1: the release announced, three days ahead.
     await card.getByRole('link', { name: 'SEE THE RELEASE' }).click();
     expect(new URL(page.url()).pathname).toBe(`/verify/releases/${later.id}`);
     await textOf(page.locator('h1'), 'MONOLITHE');
-    await textOf(page.locator('.live__screen > .live__overline').first(), 'LIVE RELEASE');
-    await textOf(page.locator('.live__price'), '€ 5 050');
-    await expect.poll(async () => (await page.locator('.live__unit-label').allInnerTexts()).map(norm)).toEqual(['DAYS', 'HOURS', 'MINUTES']);
-    await textOf(page.locator('.live__facts'), 'FOR OWNERS FROM PLATINE 25 PIECES · ONE PER COLLECTOR THE ROOM OPENS 5 MINUTES BEFORE');
+    await textOf(page.locator('.n-live__kind'), 'LIVE RELEASE');
+    await textOf(page.locator('.n-live__price'), '€ 5 050');
+    await expect.poll(async () => (await page.locator('.n-live__countdown .n-cd__unit').allInnerTexts()).map(norm)).toEqual(['DAYS', 'HOURS', 'MINUTES']);
+    await textOf(page.locator('.n-live__lines'), '25 PIECES ONE PER COLLECTOR THE ROOM OPENS 5 MINUTES BEFORE FOR OWNERS FROM PLATINE');
     expect(await page.getByRole('link', { name: 'ADD TO CALENDAR' }).getAttribute('href')).toBe(`/api/v1/live/${later.id}/calendar.ics`);
     expect(await page.locator('.view--live').evaluate((el) => el.classList.contains('vault'))).toBe(true);
-    // The ground follows into the vault (its colour eased in 0.9 s).
+    // Before the room, NOCTURNE's ground and chrome (choice 4): the header, the rail, the SCAN ring.
     await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(GROUND);
+    expect(await page.locator('.n-rail').isVisible()).toBe(true);
+    expect(await page.locator('.n-scan').isVisible()).toBe(true);
     await keepsVault(page, null, ['ADD TO CALENDAR', 'THE RELEASES', 'SOUND ON']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-announced.png'), fullPage: true });
 
@@ -452,10 +457,12 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await visible(page.getByRole('button', { name: LIVE.releaseConfirm }));
     expect((await statusOf(r.id, me.id))?.status).toBe('SECURED');
     await page.getByRole('button', { name: LIVE.releaseConfirm }).click();
-    await textOf(page.locator('h1'), LIVE.edge.released.title);
-    await textOf(page.locator('.live__edge .live__note'), LIVE.edge.released.text);
+    // The end of the visit (C30): its outcome under the release's title, NOCTURNE's chrome back; THE RELEASES said once.
+    await textOf(page.locator('.n-live__outcome'), LIVE.edge.released.title);
+    await textOf(page.locator('.n-live__outcome-text'), LIVE.edge.released.text);
     await keepsVault(page, null, ['THE RELEASES']);
     expect(await page.locator('.live__foot .live__releases').count()).toBe(0);
+    expect(await page.locator('.n-rail').isVisible()).toBe(true);
     expect((await statusOf(r.id, me.id))?.status).toBe('RELEASED');
     expect(problems).toEqual([]);
   }, 120_000);
@@ -480,8 +487,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     // The buyer confirms the last piece: SOLD OUT, the line ENDED in the same transaction; the stream's last chunk
     // brings the entry first, then the room over.
     await secureAs(r.id, buyer, true);
-    await textOf(page.locator('h1'), LIVE.edge.ended.SOLD_OUT.title);
-    await textOf(page.locator('.live__edge .live__note').first(), LIVE.edge.ended.SOLD_OUT.text);
+    await textOf(page.locator('.n-live__outcome'), LIVE.edge.ended.SOLD_OUT.title);
+    await textOf(page.locator('.n-live__outcome-text').first(), LIVE.edge.ended.SOLD_OUT.text);
     expect(await page.getByRole('button', { name: LIVE.edge.soldOut.leave }).count()).toBe(0);
     expect((await statusOf(r.id, me.id))?.status).toBe('ENDED');
     await sleep(2_500);
@@ -531,26 +538,31 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     const outsider = await account(0);
     const nobody = await account(1);
 
-    const cases: { name: string; token: string | null; dropId: string; title: string; text?: string; action: string | null; controls?: string[] }[] = [
+    // Inside the room (signed out, not eligible, sold out in its size) a vault page of its own; the end of a visit and the
+    // final page are NOCTURNE's (C29, C30): the outcome under the release's title, THE RELEASES once.
+    const cases: { name: string; token: string | null; dropId: string; title: string; text?: string; action: string | null; controls?: string[]; end?: boolean }[] = [
       { name: 'signed-out', token: null, dropId: r.id, title: LIVE.edge.signIn.title, action: null, controls: ['SIGN IN', 'CREATE ACCOUNT'] },
       { name: 'not-eligible', token: outsider.token, dropId: r.id, title: 'FOR OWNERS', text: `This release is for owners. ${LIVE.edge.notEligible.text}`, action: null, controls: ['THE RELEASES'] },
-      { name: 'left', token: left.token, dropId: r.id, title: LIVE.edge.left.title, text: LIVE.edge.left.text, action: null, controls: ['THE RELEASES'] },
-      { name: 'removed', token: removed.token, dropId: r.id, title: LIVE.edge.removed.title, text: LIVE.edge.removed.text, action: null, controls: ['THE RELEASES'] },
-      { name: 'missed', token: missed.token, dropId: r.id, title: LIVE.edge.missed.title, text: LIVE.edge.missed.text, action: null, controls: ['THE RELEASES'] },
-      { name: 'expired', token: expired.token, dropId: r.id, title: LIVE.edge.expired.title, text: LIVE.edge.expired.text, action: null, controls: ['THE RELEASES'] },
+      { name: 'left', token: left.token, dropId: r.id, title: LIVE.edge.left.title, text: LIVE.edge.left.text, action: null, controls: ['THE RELEASES'] , end: true },
+      { name: 'removed', token: removed.token, dropId: r.id, title: LIVE.edge.removed.title, text: LIVE.edge.removed.text, action: null, controls: ['THE RELEASES'] , end: true },
+      { name: 'missed', token: missed.token, dropId: r.id, title: LIVE.edge.missed.title, text: LIVE.edge.missed.text, action: null, controls: ['THE RELEASES'] , end: true },
+      { name: 'expired', token: expired.token, dropId: r.id, title: LIVE.edge.expired.title, text: LIVE.edge.expired.text, action: null, controls: ['THE RELEASES'] , end: true },
       { name: 'sold-out', token: late.token, dropId: r.id, title: LIVE.edge.soldOut.title('52'), text: LIVE.edge.soldOut.none, action: null, controls: [LIVE.edge.soldOut.leave] },
-      { name: 'ended', token: waiting.token, dropId: ended.id, title: LIVE.edge.ended.CLOSED.title, text: LIVE.edge.ended.CLOSED.text, action: null, controls: ['THE RELEASES'] },
+      { name: 'ended', token: waiting.token, dropId: ended.id, title: LIVE.edge.ended.CLOSED.title, text: LIVE.edge.ended.CLOSED.text, action: null, controls: ['THE RELEASES'] , end: true },
       { name: 'past', token: nobody.token, dropId: ended.id, title: 'MONOLITHE', action: null, controls: ['THE RELEASES'] },
     ];
     for (const c of cases) {
       const { page, context, problems } = await phone(c.token);
       await page.goto(`${srv.origin}/verify/releases/${c.dropId}`);
-      await textOf(page.locator('h1'), c.title);
-      if (c.text) await textOf(page.locator('.live__edge .live__note').first(), c.text);
+      await textOf(page.locator(c.end ? '.n-live__outcome' : 'h1'), c.title);
+      if (c.text) await textOf(page.locator(c.end ? '.n-live__outcome-text' : '.live__edge .live__note').first(), c.text);
       expect(await page.locator('.view--live').evaluate((el) => el.classList.contains('vault')), c.name).toBe(true);
       await keepsVault(page, c.action, c.controls);
-      // One action: a hairline button (or the sign-in's form), never two.
-      expect(await page.locator('.live__edge .btn:visible, .live__past .btn:visible').count(), c.name).toBe(1);
+      // One action: a hairline button (or the sign-in's form) in the room; THE RELEASES (or the contact) after it, never two.
+      const end = c.end || c.name === 'past';
+      expect(await page.locator('.n-rail').isVisible(), c.name).toBe(end);
+      if (!end) expect(await page.locator('.live__edge .btn:visible').count(), c.name).toBe(1);
+      else expect(await page.getByRole('link', { name: 'THE RELEASES', exact: true }).count(), c.name).toBe(1);
       if (c.name === 'past') await textOf(page.locator('.live__past-status'), RELEASES.over);
       await page.screenshot({ path: join(OUT_DIR, `verify-live-edge-${c.name}.png`), fullPage: true });
       expect(problems, c.name).toEqual([]);
@@ -571,8 +583,8 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       },
     );
     await page.goto(`${srv.origin}/verify/releases/${ended.id}`);
-    await textOf(page.locator('h1'), LIVE.edge.ended.CLOSED.title);
-    await textOf(page.locator('.live__edge .live__note').first(), LIVE.edge.ended.CLOSED.text);
+    await textOf(page.locator('.n-live__outcome'), LIVE.edge.ended.CLOSED.title);
+    await textOf(page.locator('.n-live__outcome-text').first(), LIVE.edge.ended.CLOSED.text);
     expect(behind).toBeGreaterThan(0);
     expect(problems).toEqual([]);
     await context.close();
@@ -657,11 +669,11 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
 
     // A LIVE RELEASE's address: no draw by that id either, so its failure, said in the vault; TRY AGAIN reads it again.
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);
-    await textOf(page.locator('.live__edge .form__error'), /^The release could not be shown just now\. Too many attempts\./);
+    await textOf(page.locator('.n-live__failed .n-failed'), /^The release could not be shown just now\. Too many attempts\./);
     await page.unroute(refused);
     await page.getByRole('button', { name: 'TRY AGAIN' }).click();
     await textOf(page.locator('h1'), 'MONOLITHE');
-    await textOf(page.locator('.live__screen > .live__overline').first(), 'LIVE RELEASE');
+    await textOf(page.locator('.live__screen > .live__overline, .n-live__kind').first(), /^LIVE RELEASE/);
 
     // THE RELEASES again, answered: the LIVE half back, TRY AGAIN gone.
     await page.goto(`${srv.origin}/verify/releases`);

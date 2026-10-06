@@ -14,11 +14,11 @@
  * not a control, and WCAG 2.5.8 exempts it from a target size.
  *
  * NOCTURNE (its rulebook, nocturne-ref/build.py, validated by the owner, who
- * declined larger labels) sets six controls at 9.5 px: the account button
+ * declined larger labels) sets seven controls at 9.5 px: the account button
  * (`.acct`), the rail's chapters (`.rail a`), DB-IP's attribution (`.dbip`)
  * and the banner of the LIVE RELEASES (`.banner`); and MY PIECES and SIGN OUT
- * on the OWNERSHIP panel's account line (n.py account_line(), a `.lb`: C14); and WITHDRAW in a certificate link's row
- * (`.kv .g`, C35). They are held to that size
+ * on the OWNERSHIP panel's account line (n.py account_line(), a `.lb`: C14); WITHDRAW in a certificate link's row
+ * (`.kv .g`, C35); and SEE THE MODEL beside a draw's model (a `.lb`: C19). They are held to that size
  * (RULEBOOK_TYPE), and to the 44 px zone like every other. The banner is a
  * line of text that wraps as C3 draws it, a long name whole (RULEBOOK_WRAPS):
  * its label may take two lines.
@@ -28,7 +28,7 @@ import type { Page } from 'playwright-core';
 export const TAP_ZONE_PX = 44;
 export const ACTION_TYPE_PX = 10;
 /** The controls NOCTURNE's rulebook sets under 10 px, by selector, and their size. */
-export const RULEBOOK_TYPE: Readonly<Record<string, number>> = Object.freeze({ '.n-acct': 9.5, '.n-rail__link': 9.5, '.n-dbip': 9.5, '.live-banner': 9.5, '.n-own__link': 9.5, '.n-piece__withdraw': 9.5 });
+export const RULEBOOK_TYPE: Readonly<Record<string, number>> = Object.freeze({ '.n-acct': 9.5, '.n-rail__link': 9.5, '.n-dbip': 9.5, '.live-banner': 9.5, '.n-own__link': 9.5, '.n-piece__withdraw': 9.5, '.n-release__see': 9.5 });
 /**
  * The controls whose label the rulebook lets wrap: C3's banner (`LIVE RELEASE · <name> ·` over `OPENS IN <countdown>`), and
  * a row that opens or leads on (`.acc`: its title over its sentence, C16's WHERE DID YOU SEE OR BUY THIS PIECE?).

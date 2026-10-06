@@ -700,402 +700,6 @@ h1[tabindex="-1"]:focus,
   text-indent: var(--track-micro);
 }
 
-/* ── The releases (P-R03) ──────────────────────────────────────────────── */
-
-/* THE RELEASES and a release's page: the column of THE COLLECTION (560 px at
-   most, 32 px margins), the small wordmark, the title in the display face at
-   24 px. Each release sits on an ivory plate framed like the GENOME's, one to
-   a row; a plate is no control of its own: its SEE THE RELEASE is. */
-.view--releases,
-.view--release {
-  width: 100%;
-  max-width: 560px;
-  margin: 0 auto;
-  padding: calc(60px + var(--safe-top)) 32px calc(64px + var(--safe-bottom));
-}
-
-.releases__head,
-.release__head {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-
-.releases__wordmark,
-.release__wordmark {
-  margin-bottom: 52px;
-}
-
-.releases__title,
-.release__title {
-  max-width: 100%;
-  font-size: var(--fs-title);
-  font-weight: 400;
-  line-height: 1.3;
-  letter-spacing: 0.3em;
-  text-indent: 0.3em;
-  overflow-wrap: anywhere;
-}
-
-.releases__lead {
-  max-width: 34ch;
-  margin-top: 22px;
-  text-wrap: balance;
-}
-
-.releases__body,
-.release__body {
-  margin-top: 52px;
-}
-
-.releases__waiting {
-  text-align: center;
-  color: var(--ink-soft);
-}
-
-/* The LIVE half could not be read: said above the draws, with TRY AGAIN. */
-.releases__partial {
-  margin-bottom: 26px;
-  text-align: center;
-}
-
-.releases__empty,
-.release__missing {
-  max-width: 34ch;
-  margin: 0 auto;
-  text-align: center;
-  text-wrap: balance;
-}
-
-.releases__list {
-  display: grid;
-  gap: 18px;
-  list-style: none;
-}
-
-.release-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 26px 18px 8px;
-  background: var(--ivory);
-  color: var(--ink);
-  text-align: center;
-}
-
-.release-card .bracket,
-.release__plate .bracket {
-  color: var(--hairline-strong);
-}
-
-.release-card .bracket--tl { top: 8px; left: 8px; }
-.release-card .bracket--tr { top: 8px; right: 8px; }
-.release-card .bracket--bl { bottom: 8px; left: 8px; }
-.release-card .bracket--br { bottom: 8px; right: 8px; }
-
-/* The model's photograph, contained in its square, never cropped. */
-.release-card__frame {
-  width: min(100%, 220px);
-  aspect-ratio: 1;
-  margin-bottom: 18px;
-}
-
-.release-card__img,
-.release__img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: contain;
-}
-
-.release-card__state,
-.release__state {
-  font-size: var(--fs-micro);
-  line-height: 1.8;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  color: var(--ink-soft);
-}
-
-.release-card__title {
-  max-width: 100%;
-  margin-top: 8px;
-  font-size: var(--fs-label);
-  font-weight: 400;
-  line-height: 1.5;
-  letter-spacing: var(--track-micro);
-  text-indent: var(--track-micro);
-  overflow-wrap: anywhere;
-}
-
-.release-card__model {
-  margin-top: 4px;
-  font-size: var(--fs-micro);
-  line-height: 1.6;
-  letter-spacing: var(--track-micro);
-  text-indent: var(--track-micro);
-  color: var(--ink-soft);
-}
-
-.release-card__line {
-  margin-top: 10px;
-  color: var(--ink-soft);
-}
-
-/* SEE THE RELEASE at the foot of its plate, on one line: the text link's 10 px, tracking and 44 px zone as they are. */
-.release-card__link {
-  margin-top: 6px;
-  white-space: nowrap;
-}
-
-/* THE RELEASES' two tabs (plan LIVE RELEASE+, choice 5): LIVE, the releases to come and under way; PAST, those ended.
-   The tabs of a result, a little closer to the lead; each panel's list under them. */
-.releases__tabs {
-  margin-top: 40px;
-}
-
-/* Two short words: each tap zone widened to 44 px and more around LIVE, the dot between them further apart, so the
-   zones never meet. */
-.releases__tabs .tabs__list {
-  gap: 18px;
-}
-
-.releases__tabs .tabs__tab {
-  --tab-pad: 14px;
-}
-
-.releases__tabs .releases__body {
-  margin-top: 30px;
-}
-
-.releases__past {
-  margin-top: 30px;
-}
-
-/* « You have taken part in N releases. », signed in, at the top of PAST. */
-.releases__taken {
-  max-width: 34ch;
-  margin: 0 auto 26px;
-  text-align: center;
-  text-wrap: balance;
-}
-
-.releases__past-more {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-top: 22px;
-  text-align: center;
-}
-
-/* A release ended, signed in: YOU TOOK PART or YOU SECURED A PIECE, a label in the ink between its line and its link. */
-.release-card__mark,
-.release__part {
-  font-size: var(--fs-micro);
-  line-height: 1.8;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  color: var(--ink);
-}
-
-.release-card__mark {
-  margin-top: 10px;
-}
-
-.release__part {
-  margin-top: 6px;
-}
-
-.releases__foot,
-.release__foot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 26px;
-  margin-top: 60px;
-}
-
-/* A release: its collection over its title, its state under it. */
-.release__eyebrow {
-  margin-bottom: 18px;
-  font-size: var(--fs-caption);
-  line-height: 1.6;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  color: var(--ink-soft);
-}
-
-.release__state {
-  margin-top: 14px;
-}
-
-/* P-X02: the early access under the state, PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …, in the reading face (its
-   figures are times). */
-.release__access {
-  max-width: 100%;
-  margin-top: 8px;
-  line-height: 1.8;
-  color: var(--ink-soft);
-  text-wrap: balance;
-}
-
-.release__eyebrow[hidden],
-.release__state[hidden],
-.release__access[hidden],
-.release__photo[hidden] {
-  display: none;
-}
-
-.release__plate {
-  padding: 26px 22px 22px;
-  background: var(--ivory);
-  color: var(--ink);
-}
-
-.release__plate .bracket--tl { top: 10px; left: 10px; }
-.release__plate .bracket--tr { top: 10px; right: 10px; }
-.release__plate .bracket--bl { bottom: 10px; left: 10px; }
-.release__plate .bracket--br { bottom: 10px; right: 10px; }
-
-.release__description {
-  margin-top: 40px;
-}
-
-.release__paragraph + .release__paragraph {
-  margin-top: 14px;
-}
-
-.release__section .section-label {
-  margin-top: 44px;
-}
-
-/* The model, then SEE THE MODEL when its sheet is public. */
-.release__model-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px 20px;
-  margin-top: 10px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.release__model {
-  font-size: var(--fs-label);
-  line-height: 1.6;
-  letter-spacing: var(--track-micro);
-}
-
-/* A time in UTC, then on this phone's clock under it. */
-.release__utc,
-.release__local {
-  display: block;
-}
-
-.release__local {
-  margin-top: 4px;
-  font-size: var(--fs-micro);
-  letter-spacing: 0.06em;
-  text-transform: none;
-  color: var(--ink-soft);
-}
-
-/* P-X02: the paragraph on the early access, under the release's facts. */
-.release__early {
-  margin-top: 14px;
-}
-
-.release__status {
-  margin-top: 14px;
-}
-
-.release__sentence {
-  margin-top: 8px;
-}
-
-/* An entry's id as the draw publishes it and hashes it: in lower case, never the micro line's capitals. */
-.release__entry-id {
-  margin-top: 8px;
-  text-transform: none;
-  overflow-wrap: anywhere;
-}
-
-.release__entry .btn {
-  margin-top: 22px;
-}
-
-.release__signin .ownership {
-  padding-top: 14px;
-}
-
-.release__rule,
-.release__obligation,
-.release__commitment,
-.release__entries-lead {
-  margin-top: 12px;
-}
-
-/* The seed and its fingerprint: hexadecimal in groups of four, in the reading face, read and compared by eye. */
-.release__seed .rows__row {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 6px;
-}
-
-.release__hex {
-  text-align: left;
-  text-transform: none;
-  letter-spacing: 0.08em;
-  overflow-wrap: anywhere;
-}
-
-.release__check {
-  margin-top: 12px;
-}
-
-/* The draw's list: one entry per line, its rank, tier and seniority, then its id (the account's own marked). */
-.release__list {
-  margin-top: 14px;
-  list-style: none;
-  border-top: 1px solid var(--hairline);
-}
-
-.release__item {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 2px 14px;
-  padding: 12px 0 11px;
-  border-bottom: 1px solid var(--hairline);
-}
-
-.release__item-line {
-  font-size: var(--fs-label);
-  letter-spacing: 0.12em;
-  font-variant-numeric: tabular-nums;
-}
-
-.release__item-id {
-  flex: 1 1 100%;
-  font-size: var(--fs-micro);
-  letter-spacing: 0.04em;
-  color: var(--ink-soft);
-  overflow-wrap: anywhere;
-}
-
-.release__item-yours {
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-label);
-}
-
-.release__item.is-yours .release__item-line {
-  font-weight: 500;
-}
-
-.release__more {
-  margin-top: 14px;
-}
-
 /* The question after a LIVE RELEASE (plan LIVE RELEASE+, choice 11): ONE QUESTION, the release (in MY PIECES), the
    question, its answers one under the other pressed like the sign-in's switch (as a poll of the circle), until when.
    On the release's end page in the vault, centred under the account's part; in MY PIECES in the ivory: the tokens
@@ -1720,7 +1324,6 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
 
 .live__plate .bracket,
 .live__checks .bracket,
-.live-card .bracket,
 .live__receipt-plate .bracket {
   color: var(--hairline-strong);
 }
@@ -1790,29 +1393,9 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   to { opacity: 1; background-position: 0% 0; }
 }
 
-/* B1: announced. */
-.live__plate--announce {
-  margin-top: 18px;
-}
-
-.live__announced .live__title {
-  margin-top: 26px;
-  font-size: var(--fs-display-sm);
-}
-
-.live__kindline {
-  margin-top: 10px;
-}
-
 /* B2: the price and the quantity line under the model's name. */
 .live__offer {
   margin-top: 10px;
-}
-
-.live__price {
-  margin-top: 14px;
-  font-size: var(--fs-lead);
-  letter-spacing: 0.04em;
 }
 
 /* SEE THE MODEL (from the photograph's stage): a text link in the vault's ivory, under the price as announced and
@@ -1825,17 +1408,6 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   margin-top: 4px;
 }
 
-.live__announced .live__rule + .live__overline {
-  margin-top: 20px;
-}
-
-.live__countdown {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  margin-top: 10px;
-}
-
 .live__unit {
   display: flex;
   flex-direction: column;
@@ -1843,46 +1415,11 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   gap: 8px;
 }
 
-.live__digits {
-  font-size: var(--fs-figure);
-  font-weight: 200;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-}
-
 .live__unit-label {
   font-size: var(--fs-micro);
   letter-spacing: var(--track-label);
   text-indent: var(--track-label);
   color: var(--ink-soft);
-}
-
-.live__colon {
-  font-size: var(--fs-figure);
-  font-weight: 200;
-  line-height: 0.9;
-  color: var(--metal);
-}
-
-.live__when {
-  margin-top: 16px;
-}
-
-.live__when--local {
-  margin-top: 2px;
-}
-
-.live__facts {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  margin-top: 22px;
-}
-
-.live__facts .live__fact {
-  margin-top: 0;
-  color: var(--ink);
 }
 
 /* A SURPRISE IN EVERY BOX (plan LIVE RELEASE+, choice 3): a vault label held between two hairlines, in the ivory; what
@@ -1897,18 +1434,6 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   letter-spacing: var(--track-label);
   text-indent: var(--track-label);
   color: var(--ink);
-}
-
-.live__description {
-  margin-top: 18px;
-}
-
-.live__calendar {
-  margin-top: 22px;
-}
-
-.live__rule-note {
-  margin-top: 6px;
 }
 
 /* B2: the room behind its door. The two leaves meet under the lock, the seal; at T0 the lock aligns, the leaves part,
@@ -2614,30 +2139,6 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   margin-top: 18px;
 }
 
-/* A release over, in its final state (plan LIVE RELEASE+, decision 30): the piece as announced, then the neutral status,
-   its date and quantity line, and the account's part in it, in the ivory. */
-.live__plate--past {
-  margin-top: 18px;
-}
-
-.live__past .live__title {
-  margin-top: 26px;
-  font-size: var(--fs-display-sm);
-}
-
-.live__past .live__rule + .live__fact {
-  margin-top: 22px;
-}
-
-.live__past-status,
-.live__past-part {
-  color: var(--ink);
-}
-
-.live__past-part {
-  margin-top: 14px;
-}
-
 /* The edge pages: a title, a sentence, one action. */
 .live__edge {
   padding-top: 56px;
@@ -2725,210 +2226,8 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   margin-top: 60px;
 }
 
-/* A LIVE RELEASE in THE RELEASES: its vault plate among the ivory ones of the draws. */
-.live-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 26px 18px 8px;
-  background-color: var(--paper);
-  background-image: var(--vault-light);
-  text-align: center;
-}
-
-.live-card .bracket--tl { top: 8px; left: 8px; }
-.live-card .bracket--tr { top: 8px; right: 8px; }
-.live-card .bracket--bl { bottom: 8px; left: 8px; }
-.live-card .bracket--br { bottom: 8px; right: 8px; }
-
-.live-card__frame {
-  display: grid;
-  place-items: center;
-  width: min(100%, 220px);
-  aspect-ratio: 1;
-  margin-bottom: 18px;
-}
-
-.live-card__img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
-
-.live-card__seal {
-  width: 64%;
-  height: auto;
-  aspect-ratio: 1;
-}
-
-.live-card__kind {
-  font-size: var(--fs-micro);
-  line-height: 1.8;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  color: var(--ink-soft);
-}
-
-.live-card__title {
-  max-width: 100%;
-  margin-top: 8px;
-  font-size: var(--fs-label);
-  font-weight: 400;
-  line-height: 1.5;
-  letter-spacing: var(--track-display);
-  text-indent: var(--track-display);
-  overflow-wrap: anywhere;
-}
-
-.live-card__when,
-.live-card__line,
-.live-card__access {
-  margin-top: 8px;
-  font-size: var(--fs-micro);
-  line-height: 1.6;
-  letter-spacing: var(--track-micro);
-  text-indent: var(--track-micro);
-  color: var(--ink-soft);
-}
-
-.live-card__when--local {
-  margin-top: 0;
-}
-
-.live-card__line {
-  color: var(--ink);
-}
-
-/* A rule in words wraps in balanced lines, never its last word alone. */
-.live-card__access {
-  text-wrap: balance;
-}
-
-/* A fact of a line kept whole when it fits (views/common.ts withPhrases). */
-.phrase {
-  display: inline-block;
-  max-width: 100%;
-  text-indent: 0;
-}
-
-.live-card__link {
-  margin-top: 6px;
-  white-space: nowrap;
-}
-
-/* The release calendar: the reveals still to come on a LIVE RELEASE's card, and how many will be there. */
-.live-card__reveals {
-  display: grid;
-  gap: 4px;
-  width: 100%;
-  max-width: 300px;
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--hairline);
-}
-
-.live-card__reveal-stage,
-.live-card__reveal-when,
-.live-card__interest {
-  font-size: var(--fs-micro);
-  line-height: 1.6;
-  letter-spacing: var(--track-micro);
-  text-indent: var(--track-micro);
-}
-
-.live-card__reveal-stage {
-  color: var(--ink);
-}
-
-.live-card__reveal-when {
-  color: var(--ink-soft);
-}
-
-.live-card__reveal + .live-card__reveal {
-  margin-top: 4px;
-}
-
-.live-card__interest {
-  margin-top: 12px;
-  color: var(--ink);
-}
-
-/* B1: the reveals still to come, each with its time; then I'LL BE THERE. */
-.live__reveals {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-  max-width: 326px;
-  margin-top: 26px;
-}
-
-.live__reveals-list {
-  display: grid;
-  gap: 10px;
-  margin-top: 8px;
-}
-
-.live__reveal-stage,
-.live__reveal-when {
-  font-size: var(--fs-micro);
-  line-height: 1.7;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-}
-
-.live__reveal-when {
-  color: var(--ink-soft);
-}
-
-.live__there {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-  margin-top: 4px;
-}
-
-.live__there-count {
-  margin-top: 20px;
-  color: var(--ink);
-}
-
-.live__there-body {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-}
-
-.live__there-body:empty {
-  display: none;
-}
-
-.live__there-said {
-  margin-top: 18px;
-}
-
-.live__there .live__picker {
-  margin-top: 18px;
-}
-
-.live__there-lead,
-.live__there-rule {
-  margin-top: 14px;
-}
-
 .btn.live__there-action {
   margin-top: 18px;
-}
-
-.live__there-open,
-.live__there-withdraw {
-  margin-top: 12px;
-}
-
-.live__there-panel:empty {
-  display: none;
 }
 
 /* ── The banner of the LIVE RELEASES (house style): an ink strip across the top of /verify and MY PIECES ── */
@@ -3266,17 +2565,6 @@ body[data-screen="board"] .corners {
 .question__label,
 .question__release,
 .question__text,
-.releases__title,
-.release-card__state,
-.release-card__title,
-.release-card__model,
-.release-card__mark,
-.release__part,
-.release__title,
-.release__eyebrow,
-.release__state,
-.release__model,
-.release__item-yours,
 .circle__title,
 .circle-card__kind,
 .circle-card__title,
@@ -3296,16 +2584,6 @@ body[data-screen="board"] .corners {
 .live__check-label,
 .live__check-value,
 .live__deadline-label,
-.live-card__kind,
-.live-card__title,
-.live-card__when,
-.live-card__line,
-.live-card__access,
-.live-card__reveal-stage,
-.live-card__reveal-when,
-.live-card__interest,
-.live__reveal-stage,
-.live__reveal-when,
 .live-banner,
 .board__status,
 .board__title {
@@ -5401,8 +4679,6 @@ body.nocturne .view--circle-post {
 }
 
 body.nocturne .pieces__empty,
-body.nocturne .releases__empty,
-body.nocturne .release__missing,
 body.nocturne .circle__empty,
 body.nocturne .circle__closed,
 body.nocturne .circle-post__missing {
@@ -6933,4 +6209,682 @@ body.nocturne .view--sheet.n-model {
 /* The gallery: each photograph whole at the column's full width, without the fade, 2 px apart (C22's). */
 .n-model__gallery-photo + .n-model__gallery-photo {
   margin-top: 2px;
+}
+
+/* ══ THE RELEASES, a draw's page and a LIVE RELEASE's pages before and after the room (plan NOCTURNE, screen 6, step
+   N7; C7, C19, C20, C25, C27–C30) ════════════════════════════════════════════════════════════════════════════════════
+   THE RELEASES: its title and sentence, LIVE · PAST underlined, each release at the column's full width on its
+   photograph, faded, its words lifted onto its foot (one not revealed yet on its seal, the monogram), 76 px apart. A
+   draw's page and a LIVE RELEASE's before and after the room: the crumb, the photograph, the words lifted, its sections.
+   Every value is the rulebook's (build.py C_CSS) or the boards' own (c.py C7, c2.py C19, C20 and C25, c3.py C27–C30:
+   their markup's margins), set on the pieces of views/nocturne.ts. Inside the room nothing changes (fidelity rule 6). */
+
+.n-mono--54 {
+  width: 54px;
+  height: 54px;
+}
+
+body.nocturne .view--releases.n-releases,
+body.nocturne .view--release.n-release {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.n-releases__head {
+  padding-top: 30px;
+}
+
+.n-releases__lead {
+  margin-top: 12px;
+}
+
+.n-releases__tabs {
+  margin-top: 30px;
+}
+
+/* LIVE and PAST, narrower than a 44 px zone: their zone runs 11 px past the word, given back to the gap, their
+   underline under the word alone (C7, C25). */
+.n-releases__tabs .n-tabs__tab {
+  margin-right: -11px;
+  padding-right: 11px;
+}
+
+.n-releases__tabs .n-tabs__tab[aria-selected="true"]::after {
+  right: 11px;
+}
+
+.n-releases__list {
+  list-style: none;
+}
+
+/* The first release 8 px under the tabs, the next ones 76 px apart (.sec). */
+.n-releases__item:first-child > .n-releases__release {
+  margin-top: 8px;
+}
+
+.n-releases__item + .n-releases__item > .n-releases__release {
+  padding-top: var(--n-section);
+}
+
+/* A page's state under its tabs (ONE MOMENT…, could not be shown, nothing yet: C40), 36 px under them. */
+.n-releases__state,
+.n-releases__body > .n-loading,
+.releases__past-status > .n-loading {
+  margin-top: 36px;
+}
+
+.n-releases__retry-line,
+.n-release__retry-line {
+  margin-top: 14px;
+}
+
+/* A release's words: its title 26 px (a draw's 24 px), each line at the board's distance. */
+.n-releases__title {
+  margin-top: 12px;
+  font-size: var(--n-fs-release);
+  overflow-wrap: anywhere;
+}
+
+.n-releases__title--draw {
+  font-size: var(--n-fs-release-draw);
+}
+
+.n-releases__price,
+.n-releases__draw-price {
+  margin-top: 12px;
+  color: var(--vault-ink);
+  font-size: var(--n-fs-lead);
+}
+
+.n-releases__when,
+.n-releases__model,
+.n-releases__line {
+  margin-top: 12px;
+}
+
+.n-releases__local {
+  margin-top: 6px;
+}
+
+.n-releases__opens {
+  margin-top: 16px;
+}
+
+.n-releases__clock:empty {
+  display: none;
+}
+
+.n-releases__lines {
+  margin-top: 18px;
+}
+
+.n-releases__sealed .n-releases__lines {
+  margin-top: 16px;
+}
+
+.n-releases__reveals-title {
+  margin-top: 22px;
+}
+
+.n-releases__reveals-lines {
+  margin-top: 10px;
+}
+
+.n-releases__interest {
+  margin-top: 16px;
+}
+
+.n-releases__see {
+  margin-top: 24px;
+}
+
+/* A release not revealed yet (C7): its seal, then its words 26 px under it. */
+.n-releases__sealed {
+  margin-top: 26px;
+}
+
+/* A silhouette (before the photograph's stage) on the photograph's ground, its drawing kept off the edges. */
+.n-releases__photo--silhouette > img {
+  padding: 18px;
+}
+
+/* A release without a photograph: its words open where the photograph would. */
+.n-releases__bare {
+  margin-top: 0;
+}
+
+/* PAST (C25): a release's kind and date, its title 10 px under, its model and quantity 8 px, its mark 14 px, its link 16 px. */
+.n-releases__past-title {
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+
+.n-releases__past-model,
+.n-releases__past-pieces {
+  margin-top: 8px;
+}
+
+.n-releases__mark {
+  margin-top: 14px;
+}
+
+.n-releases__mark[hidden] {
+  display: none;
+}
+
+.n-releases__see-line {
+  margin-top: 16px;
+}
+
+.n-releases__more-line {
+  padding-top: var(--n-section);
+}
+
+.n-releases__more[hidden] {
+  display: none;
+}
+
+.releases__past > .form__error:not([hidden]) {
+  margin-top: 36px;
+}
+
+/* ── A draw's page (C19) ── */
+
+.n-release__plain {
+  padding-top: 30px;
+}
+
+.n-release__title {
+  margin-top: 12px;
+  font-size: var(--n-fs-release);
+  overflow-wrap: anywhere;
+}
+
+.n-release__state {
+  margin-top: 14px;
+}
+
+.n-release__access {
+  margin-top: 12px;
+}
+
+.n-release__part {
+  margin-top: 20px;
+}
+
+.n-release__bare {
+  margin-top: 0;
+  padding-top: 24px;
+}
+
+/* THIS RELEASE IS OVER on its plate, under the title (C29). */
+.n-release__over {
+  justify-content: center;
+  margin-top: 30px;
+}
+
+/* THE RELEASE, YOUR ENTRY and THE DRAW: 44 px apart (C19). */
+.n-release__section {
+  padding-top: 44px;
+}
+
+.n-release__description {
+  margin-top: 14px;
+}
+
+.n-release__description > p + p {
+  margin-top: 14px;
+}
+
+.n-release__model {
+  margin-top: 14px;
+}
+
+/* SEE THE MODEL beside the model's line (C19): in its 9.5 px capitals, ivory, underlined at 3 px; its 44 px tap zone in
+   padding, given back. */
+.n-release__see {
+  display: inline-block;
+  margin: -15px 0;
+  padding: 15px 0;
+  color: var(--vault-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
+.n-release__see:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+.n-release__rows {
+  margin-top: 16px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+/* A label that runs long (ENTRIES OPEN) wraps beside its value, as the board's: neither keeps its whole width. */
+.n-release__label {
+  flex: 0 1 auto;
+}
+
+.n-release__value {
+  flex: 0 1 auto;
+}
+
+.n-release__early {
+  margin-top: 14px;
+}
+
+.n-release__status-label,
+.n-release__sentence,
+.n-release__waiting,
+.n-release__error {
+  margin-top: 12px;
+}
+
+.n-release__entry-id {
+  margin-top: 8px;
+}
+
+.n-release__action {
+  margin-top: 22px;
+}
+
+.n-release__action + .n-release__action {
+  margin-top: 10px;
+}
+
+.n-release__signin {
+  margin-top: 12px;
+}
+
+.release__entry .n-contact {
+  margin-top: 14px;
+}
+
+.n-release__para {
+  margin-top: 12px;
+}
+
+.n-release__seed-label {
+  margin-top: 16px;
+}
+
+.n-release__hex {
+  margin-top: 6px;
+  word-break: break-all;
+}
+
+.n-release__check {
+  margin-top: 14px;
+}
+
+.n-release__entries {
+  margin-top: 30px;
+}
+
+.n-release__list {
+  margin-top: 16px;
+  border-top: 1px solid var(--vault-hairline);
+  list-style: none;
+}
+
+.n-release__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  padding: 13px 0;
+  border-bottom: 1px solid var(--vault-hairline);
+}
+
+.n-release__item-id {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.n-release__item.is-yours .n-release__item-line,
+.n-release__item.is-yours .n-release__item-id {
+  color: var(--vault-ink);
+}
+
+.n-release__more-line {
+  margin-top: 22px;
+}
+
+/* ── A LIVE RELEASE before and after the room (C20, C27–C30): NOCTURNE's ground, its chrome, its pieces; inside the
+   room (the door, the line, the turn, the hold, CONFIRMED, the after-room) the vault as lot E built it (choice 4). ── */
+
+body.nocturne[data-screen="live"] {
+  background-image: none;
+  transition: none;
+}
+
+.view--live.is-nocturne {
+  display: block;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  transition: none;
+}
+
+.view--live.is-nocturne > .live__head,
+.view--live.is-nocturne > .live__foot {
+  display: none;
+}
+
+.view--live.is-nocturne > .live__stage {
+  margin-top: 0;
+}
+
+.view--live.is-nocturne .live__screen {
+  display: block;
+  animation: none;
+}
+
+.n-live__img--silhouette,
+.n-live__photo--silhouette > img {
+  padding: 18px;
+}
+
+/* A release without a picture: its seal 30 px under the crumb, its words 26 px under it (C7's). */
+.n-live__seal {
+  margin-top: 30px;
+}
+
+.n-live__sealed {
+  margin-top: 26px;
+}
+
+.n-live__title {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+
+.n-live__title:focus,
+.n-live__outcome:focus {
+  outline: none;
+}
+
+.n-live__type {
+  margin-top: 12px;
+}
+
+/* The price in the reading face, 17 px (C20). */
+.n-live__price {
+  margin-top: 12px;
+  color: var(--vault-ink);
+  font-size: var(--n-fs-price);
+}
+
+/* A SURPRISE IN EVERY BOX between hairlines (C27): 10.5 px, 0.26 em, 10 × 16 px inside its frame. */
+.n-live__surprise {
+  display: inline-flex;
+  margin-top: 20px;
+  padding: 10px 16px;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+  font-size: var(--n-fs-tl);
+  letter-spacing: 0.26em;
+}
+
+.n-live__see-line {
+  margin-top: 14px;
+}
+
+.n-live__opens {
+  margin-top: 26px;
+}
+
+.n-live__when {
+  margin-top: 20px;
+}
+
+.n-live__local {
+  margin-top: 6px;
+}
+
+.n-live__lines {
+  margin-top: 18px;
+}
+
+.n-live__reveals-title {
+  margin-top: 22px;
+}
+
+.n-live__reveals-lines {
+  margin-top: 10px;
+}
+
+/* N COLLECTORS WILL BE THERE, then YOUR SIZE (or YOU'LL BE THERE · SIZE 17, C28), the sizes, the sentence, the action. */
+.n-live__interest {
+  margin-top: 22px;
+}
+
+.n-live__after-rules .n-live__interest {
+  margin-top: 0;
+}
+
+.n-live__size-label,
+.n-live__said,
+.n-live__there-open-line,
+.n-live__refusal {
+  margin-top: 26px;
+}
+
+.n-live__size-label + .n-sizes {
+  margin-top: 14px;
+}
+
+.n-live__said + .n-sizes {
+  margin-top: 16px;
+}
+
+.n-live__there-lead {
+  margin-top: 14px;
+}
+
+.n-live__there-lead[hidden],
+.n-live__there-open-line[hidden] {
+  display: none;
+}
+
+.n-live__error {
+  margin-top: 12px;
+}
+
+.n-live__there-action {
+  margin-top: 22px;
+}
+
+.n-live__withdraw {
+  margin-top: 20px;
+}
+
+/* Signed out, the sign-in under I'LL BE THERE once asked for, on the margin. */
+.n-live__panel {
+  text-align: left;
+}
+
+.n-live__panel:not(:empty) {
+  margin-top: 14px;
+}
+
+/* Not eligible (C28): the rule in ivory, why, then that the account does not meet it. */
+.n-live__refusal-rule + .n-live__refusal-why {
+  margin-top: 12px;
+}
+
+.n-live__refusal-note {
+  margin-top: 8px;
+}
+
+.n-live__refusal > .n-live__refusal-note:first-child {
+  margin-top: 0;
+}
+
+.n-live__calendar-line {
+  margin-top: 22px;
+}
+
+.n-live__description {
+  margin-top: 28px;
+}
+
+.n-live__description > p + p {
+  margin-top: 14px;
+}
+
+.n-live__rule {
+  margin-top: 16px;
+}
+
+/* WHO MAY ENTER (C27): its rules one under the other, OR between them, then the rest 30 px under. */
+.n-live__rules,
+.n-live__after-rules {
+  margin-top: 30px;
+}
+
+.n-live__rule-list {
+  margin-top: 14px;
+  line-height: 1.9;
+}
+
+/* The final page (C29): the pieces as announced, SEE THE MODEL, the account's part; THIS RELEASE IS OVER on its plate. */
+.n-live__pieces-line {
+  margin-top: 14px;
+}
+
+.n-live__part {
+  margin-top: 20px;
+}
+
+.n-live__part[hidden],
+.n-live__receipt-slot[hidden] {
+  display: none;
+}
+
+.n-live__over {
+  justify-content: center;
+  margin-top: 30px;
+}
+
+/* CONFIRMED and its receipt, in the ivory kept from the room (C29): the one ivory plate of /verify. */
+.n-live__receipt-of {
+  color: #5c5c5c;
+}
+
+.n-live__receipt-title {
+  margin-top: 10px;
+  color: var(--vault-ground);
+  font-size: var(--n-fs-release);
+}
+
+.n-live__receipt-text {
+  margin-top: 12px;
+  color: #3c3c3c;
+  font-size: var(--n-fs-dl);
+  line-height: 1.5;
+}
+
+.n-live__receipt-rows {
+  margin-top: 16px;
+  border-top: 1px solid rgba(10, 10, 10, 0.12);
+}
+
+.n-live__receipt-link {
+  margin-top: 18px;
+}
+
+/* MY PIECES on the ivory: 10.5 px, 0.24 em, ruled 4 px under; its 44 px tap zone in padding, given back. */
+.n-live__pieces {
+  display: inline-block;
+  margin-top: -23.25px;
+  padding: 23.25px 0 4px;
+  border-bottom: 1px solid var(--vault-ground);
+  color: var(--vault-ground);
+  font-size: var(--n-fs-tl);
+  line-height: var(--n-lh-base);
+  letter-spacing: 0.24em;
+  text-decoration: none;
+}
+
+.n-live__pieces:focus-visible {
+  outline: 2px solid var(--vault-ground);
+  outline-offset: 2px;
+}
+
+.n-live__description--past {
+  margin-top: 30px;
+}
+
+/* ONE QUESTION (C30): a plate card 36 px under the outcome, its words on the margin. */
+.n-question {
+  margin-top: 36px;
+}
+
+.n-question[hidden] {
+  display: none;
+}
+
+.n-card.n-question__card {
+  padding: 32px 24px 28px;
+}
+
+.n-question__release {
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+
+.n-question__release[hidden] {
+  display: none;
+}
+
+.n-question__text {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+
+.n-question__answers {
+  margin-top: 20px;
+}
+
+.n-question__note {
+  margin-top: 14px;
+}
+
+.n-question__error {
+  margin-top: 12px;
+}
+
+.n-question__error[hidden] {
+  display: none;
+}
+
+/* An end page (C30): the outcome 30 px under the title, its sentence 12 px under it; THE RELEASES 76 px below. */
+.n-live__outcome-block {
+  margin-top: 30px;
+}
+
+.n-live__outcome-text {
+  margin-top: 12px;
+}
+
+.n-live__contact {
+  margin-top: 22px;
+}
+
+.n-live__plain {
+  padding-top: 30px;
+}
+
+.n-live__state {
+  margin-top: 36px;
 }

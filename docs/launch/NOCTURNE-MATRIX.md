@@ -126,12 +126,13 @@ The parity tool sets each board beside the state that holds its content today (`
 | C4 a piece, C35 its tabs | its own page since N5 (`/verify/pieces/<id>`, SEE THE PIECE): see *MY PIECES* | `piece`, `pieces-warranty` and C35's sections |
 | C24 ORDERS, C31 RELEASES, C32 an order returned or cancelled | the tabs ORDERS and RELEASES of MY PIECES since N5 | `pieces-orders`, `pieces-releases` |
 | C21 the room, C26 the after-room | stand-in images of the room: compared with the before-captures | `room`, `after-room-door` |
-| C28, C36–C40 | boards of several states: the first is captured, the others are states of this matrix (C40's are each set beside the board too, `BOARD_SECTIONS`: `<C40>.<state>.pair.png`) | see each section |
+| C28, C30, C36–C40 | boards of several states: the first is captured, the others are states of this matrix, each set beside the board too (`BOARD_SECTIONS`: `<C-id>.<state>.pair.png`, to be compared with its section): C28's I'LL BE THERE said (`live-there`), signed out (`live-announced-signed-out`), not eligible by tier (`live-veiled`) and by selection (`live-selected-not-eligible`); C30's end of a visit (`live-missed`), with the question after on a final page (`live-past-question`) and an after-room's end (`after-room-sold-out`) | see each section |
 
 ## The chrome and the account sheet (since N2)
 
-Every screen but the scan, the room and every LIVE RELEASE page (N7 gives its pages before and after the room the
-chrome), the boutique board and the shared certificate has NOCTURNE's chrome (`views/shell.ts`): the header (ORBES; the
+Every screen but the scan, the room (since N7 a LIVE RELEASE's pages before and after it have the chrome: announced,
+the end of a visit, its final page; the page tells the shell, `onChrome`), the boutique board and the shared certificate
+has NOCTURNE's chrome (`views/shell.ts`): the header (ORBES; the
 tier's name and the monogram, the button *Your account, TITANE*, or the monogram alone without a tier; SIGN IN signed
 out), the rail NOW · RELEASES · COLLECTION · CIRCLE · PIECES (the current one `aria-current`, RELEASES' dot while a LIVE
 RELEASE is announced, its room open or live, or a draw open, soon open or in its early access), the footer (the
@@ -397,11 +398,21 @@ ORBES; the sheet's foot link THE COLLECTION to its crumb.
 | `live-past-question` | YOU TOOK PART, ONE QUESTION, WHAT WOULD YOU HAVE WANTED?, ANOTHER SIZE · ANOTHER FINISH · ANOTHER PRICE BAND, *One tap …* | took part without a piece, within 7 days | C30, plus-11 |
 | `live-past-gold` | a past LIVE RELEASE nobody of the story took part in | | C25 |
 
-**C29's receipt is a board element, not today's past page.** C29 draws, on a past LIVE RELEASE's final page, the account's
-CONFIRMED receipt in ivory (LIVE RELEASE · *name*, *Your piece is reserved in size 16 …*, RESERVED, SIZE, PIECES,
-ENGRAVING, TOTAL, REFERENCE *LR-…*, MY PIECES). Today's past page (`views/live.ts` pastScreen) shows none of it: only YOU
-SECURED A PIECE (or YOU TOOK PART), the question and the description. Its data exists in the room's CONFIRMED screen
-(`live-confirmed`, live-12): N7 builds the receipt from the account's live entry and its order.
+**C29's receipt (N7).** On a past LIVE RELEASE's final page, an account whose entry is CONFIRMED reads its reservation
+as C29 draws it, the one ivory plate of /verify (`.n-rec`): LIVE RELEASE · *name*, CONFIRMED, *Your piece is reserved in
+size 16 …*, RESERVED (*date · time* on this phone), SIZE, PIECES, each add-on (*+ € 150*), TOTAL, REFERENCE *LR-…*, MY
+PIECES; from the account's own live entry (the state the page reads once signed in). Under THIS RELEASE IS OVER on its
+plate; the question after under it, then the description.
+
+**N7 (C7, C19, C20, C25, C27–C30).** THE RELEASES, a draw's page and a LIVE RELEASE's pages before and after the room are
+drawn in NOCTURNE's pieces. A LIVE RELEASE is named by its model with its variant (*MONOLITHE IN BLUE*); its card says
+OPENS IN and its countdown (addition 4), one not revealed yet on its seal (the monogram, never the ORBES code); a draw
+says its price on its card and page (addition 5, PRICE first among its facts). The scan is the SCAN ring's and THE
+COLLECTION the rail's (the list's own foot went); THE RELEASES is the crumb's on a release's page, the end of a visit's
+own text link. On PAST, signed in, the head's sentence is the count (C25); on the LIVE tab, the page's sentence. The
+end of a visit (turn passed, hold ended, place released, left, removed, the release or its after-room ended, gone)
+says its outcome under the release's title (C30); inside the room (signed out, not eligible, sold out in its size, and
+every screen of the line) nothing changed.
 
 ## The room, the line and the vault (`/verify/releases/<id>`, compared with the before-captures)
 
@@ -410,8 +421,9 @@ and `plus-07` to `plus-10` there. C21 and C26 are stand-in images: those screens
 were taken at N0 on the app of `5efd4c9` by `scripts/capture-ui.ts --only live` and `--only plus` (the room lived through
 on real time: the last minute, the door opening, the turn held half way), the collector's screens kept: live-01 to
 live-22, plus-01 to plus-14.
-The sign-in a LIVE RELEASE's pages show (SIGN IN TO ENTER, and I'LL BE THERE signed out) keeps lot E's markup and look
-too (the OWNERSHIP panel's `look: 'vault'`, since N4) until N7 draws those pages.
+The room's sign-in (SIGN IN TO ENTER) keeps lot E's markup and look too (the OWNERSHIP panel's `look: 'vault'`, since
+N4); I'LL BE THERE signed out, on the page announced, has NOCTURNE's sign-in since N7 (its SIGN IN the page's one filled
+button).
 
 | State | What it shows | Reference |
 |---|---|---|

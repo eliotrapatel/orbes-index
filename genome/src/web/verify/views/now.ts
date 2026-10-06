@@ -49,7 +49,7 @@ import type { SessionStore } from '../session.js';
 import type { CircleAnswer, CircleCard, ClubStatus, DropCard, LiveCard, LookbookCard, OwnedPiece } from '../types.js';
 import { CIRCLE_PATH, LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { appAnchor, countdown, fadedPhoto, icon, lift, loadingState, plateCard, textLink, variantDots } from './nocturne.js';
+import { appAnchor, countdown, fadedPhoto, icon, lift, loadingState, modelTitle, plateCard, textLink, variantDots } from './nocturne.js';
 
 export interface NowDeps {
   api: Pick<ApiClient, 'liveReleases' | 'drops' | 'lookbook' | 'products' | 'clubStatus' | 'circle' | 'circleAnswer' | 'liveClock'>;
@@ -243,13 +243,7 @@ class Now implements NowView {
 
   /** A title whose model's name begins it: the name on a line of its own (`MONOLITHE` / `IN BLUE`), as the canvas sets it. */
   private title(tag: 'h1' | 'h2', cls: string[], text: string, model: string | null): HTMLElement {
-    const el = h(tag, { class: cls });
-    const name = model ? model.trim().toUpperCase() : '';
-    const rest = name && text.startsWith(name) ? text.slice(name.length) : null;
-    const m = rest !== null ? /^(,?)\s+(\S.*)$/.exec(rest) : null;
-    if (m) el.append(...withNumerals(`${name}${m[1]}`), h('br'), ...withNumerals(m[2]!));
-    else el.append(...withNumerals(text));
-    return el;
+    return modelTitle(tag, cls, text, model);
   }
 
   /** A LIVE RELEASE leads (C1, C10). */

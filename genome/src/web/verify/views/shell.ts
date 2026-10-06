@@ -13,9 +13,10 @@
  *                     SCAN
  *
  * The column is phone width on a computer (choice 5). The chrome is hidden on the screens that keep their own look:
- * the room and every LIVE RELEASE page (choice 4: its pages before and after the room get it with N7), the boutique
- * board, the shared certificate (choice 3); the scanner, VERIFYING… and a problem of the scan (C11, C12, C17) are
- * NOCTURNE's without it.
+ * the room (choice 4: the door, the line, the turn, the hold, CONFIRMED, the after-room; a LIVE RELEASE's pages before
+ * and after it have the chrome, C20, C27–C30: the page says which it shows, `liveChrome`), the boutique board, the
+ * shared certificate (choice 3); the scanner, VERIFYING… and a problem of the scan (C11, C12, C17) are NOCTURNE's
+ * without it.
  * The shared certificate also sets Safari's bars back to its light (addition 13): every other screen's are the ink.
  */
 import { h } from '../../shared/dom.js';
@@ -78,6 +79,8 @@ export class Shell {
   private railReadAt = -Infinity;
   private railReading = false;
   private screen = '';
+  /** A LIVE RELEASE's page shows one of its screens before or after the room (the chrome), else one of the room's. */
+  private liveOn = false;
 
   constructor(
     private readonly deps: ShellDeps,
@@ -147,8 +150,8 @@ export class Shell {
   /** The screen now shown: NOCTURNE's ground or not, the chrome or not, the rail's chapter, Safari's bars. */
   show(screen: string): void {
     this.screen = screen;
-    const nocturne = NOCTURNE_SCREENS.includes(screen);
-    const chrome = CHROME_SCREENS.includes(screen);
+    const chrome = CHROME_SCREENS.includes(screen) || (screen === 'live' && this.liveOn);
+    const nocturne = chrome || NOCTURNE_SCREENS.includes(screen);
     document.body.classList.toggle('nocturne', nocturne);
     for (const el of [this.header, this.rail, this.foot, this.ring]) el.hidden = !chrome;
     // Another screen (a chapter, back, a link): the sheet gives way to it.
@@ -164,6 +167,16 @@ export class Shell {
       this.drawSound();
       if (Date.now() - this.railReadAt >= RAIL_REFRESH_MS) void this.readRail();
     }
+  }
+
+  /**
+   * A LIVE RELEASE's page changed screen: before or after the room (`shown`), NOCTURNE's ground and chrome; inside it,
+   * the room's own look (choice 4). Told before the page is shown too, so its first screen opens as it should.
+   */
+  liveChrome(shown: boolean): void {
+    if (this.liveOn === shown) return;
+    this.liveOn = shown;
+    if (this.screen === 'live') this.show('live');
   }
 
   private onSession(): void {

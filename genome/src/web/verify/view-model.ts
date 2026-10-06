@@ -297,6 +297,19 @@ const ASSURANCE_LABEL = Object.freeze({
   CODE_AND_HARDWARE: 'PRINTED CODE AND SECURE HARDWARE',
 });
 
+const SYMBOLS: Readonly<Record<string, string>> = Object.freeze({ EUR: '€', GBP: '£', USD: '$', CHF: 'CHF' });
+const NBSP = ' ';
+
+/** A price as the house writes it: `€ 4 800`, `€ 4 800.50`; the groups never break across lines. */
+export function formatMoney(minor: number, currency: string): string {
+  const value = Number.isFinite(minor) ? Math.max(0, Math.round(minor)) : 0;
+  const units = Math.floor(value / 100);
+  const cents = value % 100;
+  const grouped = String(units).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
+  const code = /^[A-Z]{3}$/.test(currency) ? currency : 'EUR';
+  return `${SYMBOLS[code] ?? code}${NBSP}${grouped}${cents ? `.${String(cents).padStart(2, '0')}` : ''}`;
+}
+
 export function upper(s: string | undefined | null): string {
   return (s ?? '').trim().toUpperCase();
 }

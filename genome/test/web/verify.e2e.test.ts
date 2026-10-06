@@ -72,7 +72,6 @@ import { certificateLinkLettering } from '../../src/server/render/certificate.js
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { CEREMONY, CIRCLE, CLAIM_HELD, LOOKBOOK as LOOKBOOK_COPY, ORBES_CARE, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
-import { groupHex } from '../../src/web/verify/releases-model.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -2541,13 +2540,14 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(new URL(page.url()).pathname).toBe('/verify/releases');
     const card = page.locator('article.release-card', { hasText: 'ECLIPSE — RELEASE I' });
     await visible(card);
-    await textOf(card.locator('.release-card__state'), 'ENTRIES OPEN');
+    await textOf(card.locator('.release-card__state'), 'DRAW · ENTRIES OPEN');
     await textOf(card.locator('.release-card__model'), 'ECLIPSE · PENDANT');
     await textOf(card.locator('.release-card__line'), /^2 PIECES · ENTRIES CLOSE \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
     await attrOf(card.locator('img.release-card__img'), 'loading', 'lazy');
-    expect(await card.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual([PLATE, 'auto']);
+    // NOCTURNE (C7): at the column's full width on its photograph, no plate; the scan is the SCAN ring's, THE COLLECTION the rail's.
+    expect(await card.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual(['rgba(0, 0, 0, 0)', 'auto']);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    await keepsFloors(page, ['SEE THE RELEASE', 'SCAN ORBES CODE', 'THE COLLECTION', ...LEGAL_LINKS]);
+    await keepsFloors(page, ['SEE THE RELEASE', 'COLLECTION', ...LEGAL_LINKS]);
     for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
       await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
@@ -2561,14 +2561,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(new URL(page.url()).pathname).toBe(`/verify/releases/${drop.id}`);
     await textOf(page.locator('.release__state'), 'ENTRIES OPEN');
     await textOf(page.locator('.release__paragraph'), 'Two pieces, cast in Paris.');
-    await textsOf(page.locator('.release__section > .section-label'), ['THE RELEASE', 'YOUR ENTRY', 'THE DRAW']);
-    const closes = page.locator('.release__rows .rows__row', { hasText: 'ENTRIES CLOSE' });
+    await textsOf(page.locator('.release__section > h2'), ['THE RELEASE', 'YOUR ENTRY', 'THE DRAW']);
+    const closes = page.locator('.release__rows .release__row', { hasText: 'ENTRIES CLOSE' });
     await textOf(closes.locator('.release__utc'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
     await textOf(closes.locator('.release__local'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} on this phone \(UTC\+0[12]:00\)$/);
-    await attrOf(page.locator('.release__model-line').getByRole('link', { name: 'SEE THE MODEL' }), 'href', '/verify/lookbook/eclipse');
+    await attrOf(page.locator('.release__model').getByRole('link', { name: 'SEE THE MODEL' }), 'href', '/verify/lookbook/eclipse');
     await textOf(page.locator('.release__rule'), RELEASES.rule);
-    await textOf(page.locator('.release__seed .release__hex'), groupHex(drop.seedHash));
-    // Signed out: the sign-in of an account, any account; then ENTER THE DRAW, the page's hairline button.
+    // The seed's fingerprint as C19 sets it: its 64 figures, broken anywhere at the margin.
+    await textOf(page.locator('.release__seed .release__hex'), drop.seedHash);
+    // Signed out: the sign-in of an account, any account; then ENTER THE DRAW, the page's one filled button (C19).
     const panel = page.locator('.release__signin');
     await textOf(panel.locator('.n-own__lead'), RELEASES.signIn);
     await panel.getByLabel('EMAIL').fill(email);
@@ -2577,13 +2578,14 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const enter = page.getByRole('button', { name: 'ENTER THE DRAW' });
     await visible(enter);
     await textOf(page.locator('.release__sentence'), RELEASES.status.open);
-    await attrOf(page.locator('.release__foot .release__scan'), 'class', /\btextlink\b/);
-    await keepsFloors(page, ['ENTER THE DRAW', 'SCAN ORBES CODE', 'THE RELEASES', 'SEE THE MODEL', ...LEGAL_LINKS]);
+    expect(await enter.evaluate((el) => el.classList.contains('n-btn') && !el.classList.contains('n-btn--ol'))).toBe(true);
+    await countOf(page.locator('.release__foot'), 0);
+    await keepsFloors(page, ['ENTER THE DRAW', 'THE RELEASES', 'SEE THE MODEL', ...LEGAL_LINKS]);
     await enter.click();
     await textOf(page.locator('.release__sentence'), RELEASES.status.entered);
     const mine = await ctx.db.selectFrom('drop_entries').select('id').where('drop_id', '=', drop.id).where('account_id', '=', entrant.account.id).executeTakeFirstOrThrow();
     await textOf(page.locator('.release__entry-id'), `YOUR ENTRY ${mine.id}`);
-    await attrOf(page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
+    await attrOf(page.getByRole('button', { name: 'WITHDRAW' }), 'class', /\bn-btn--ol\b/);
     await page.getByRole('button', { name: 'WITHDRAW' }).click();
     await textOf(page.locator('.release__sentence'), RELEASES.status.withdrawn);
     await page.getByRole('button', { name: 'ENTER THE DRAW' }).click();
@@ -2627,7 +2629,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.release__entry .ownership__status'), 'PLACE HELD');
     // The seed, checked on this phone against the fingerprint published with the release; the entries by rank, its own marked.
     const seed = (await ctx.db.selectFrom('drops').select('seed').where('id', '=', drop.id).executeTakeFirstOrThrow()).seed!;
-    await textOf(page.locator('.release__seed .release__hex').nth(1), groupHex(Buffer.from(seed).toString('hex')));
+    await textOf(page.locator('.release__seed .release__hex').nth(1), Buffer.from(seed).toString('hex'));
     await textOf(page.locator('.release__check'), RELEASES.seedChecked);
     // Its entries by rank, never said how many (no end figure).
     await textOf(page.locator('.release__entries-lead'), RELEASES.entriesLead);
@@ -2637,7 +2639,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(page.getByRole('button', { name: 'ENTER THE DRAW' }), 0);
     await countOf(page.getByRole('button', { name: 'WITHDRAW' }), 0);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'SCAN ORBES CODE', 'THE RELEASES', ...LEGAL_LINKS]);
+    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', 'THE RELEASES', ...LEGAL_LINKS]);
     // An address under /verify/releases that is none: the list.
     await page.goto(`${srv.origin}/verify/releases/nowhere`);
     await textOf(page.locator('h1'), 'THE RELEASES');
@@ -2669,15 +2671,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // The list: EARLY ACCESS while PLATINE and PALLADIUM reserve.
     await page.goto(`${srv.origin}/verify/releases`);
     const card = page.locator('article.release-card', { hasText: 'SOLSTICE — RELEASE I' });
-    await textOf(card.locator('.release-card__state'), 'EARLY ACCESS');
+    await textOf(card.locator('.release-card__state'), 'DRAW · EARLY ACCESS');
     // Its page: both openings under its state, the early access among its facts and its paragraph, the rule.
     await card.getByRole('link', { name: 'SEE THE RELEASE' }).click();
     await textOf(page.locator('h1'), 'SOLSTICE — RELEASE I');
     await textOf(page.locator('.release__state'), 'EARLY ACCESS');
     await textOf(page.locator('.release__access'), /^PLATINE AND PALLADIUM: FROM \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC · EVERYONE: FROM \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
-    await textsOf(page.locator('.release__rows .rows__label'), ['PIECES', 'EARLY ACCESS', 'ENTRIES OPEN', 'ENTRIES CLOSE', 'PLACE HELD', 'RESERVED DIRECTLY']);
-    await textOf(page.locator('.release__rows .rows__row', { hasText: 'EARLY ACCESS' }).locator('.release__local'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} on this phone \(UTC\+0[12]:00\)$/);
-    const reserved = page.locator('.release__rows .rows__row', { hasText: 'RESERVED DIRECTLY' }).locator('.release__utc');
+    await textsOf(page.locator('.release__rows .release__label'), ['PIECES', 'EARLY ACCESS', 'ENTRIES OPEN', 'ENTRIES CLOSE', 'PLACE HELD', 'RESERVED DIRECTLY']);
+    await textOf(page.locator('.release__rows .release__row', { hasText: 'EARLY ACCESS' }).locator('.release__local'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} on this phone \(UTC\+0[12]:00\)$/);
+    const reserved = page.locator('.release__rows .release__row', { hasText: 'RESERVED DIRECTLY' }).locator('.release__utc');
     await textOf(reserved, '0 OF 2 PIECES');
     await textOf(page.locator('.release__early'), RELEASES.earlyNote);
     await textOf(page.locator('.release__rule'), RELEASES.rule);
@@ -2692,11 +2694,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
       page.locator('.release__sentence'),
       /^As a PLATINE owner, you may reserve a place now, until entries open to everyone on \d{1,2} [A-Z][a-z]+ \d{4}, \d{2}:\d{2} \(UTC\+0[12]:00\)\. First come, first served, within the pieces of the release\.$/,
     );
-    await attrOf(reserve, 'class', /\bbtn\b/);
-    await attrOf(page.locator('.release__foot .release__scan'), 'class', /\btextlink\b/);
+    await attrOf(reserve, 'class', /\bn-btn\b/);
+    expect(await reserve.evaluate((el) => el.classList.contains('n-btn--ol'))).toBe(false);
     await countOf(page.getByRole('button', { name: 'ENTER THE DRAW' }), 0);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    await keepsFloors(page, ['RESERVE A PLACE', 'SCAN ORBES CODE', 'THE RELEASES', ...LEGAL_LINKS]);
+    await keepsFloors(page, ['RESERVE A PLACE', 'THE RELEASES', ...LEGAL_LINKS]);
     for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
       await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
@@ -2714,7 +2716,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.release__entry-id'), `YOUR ENTRY ${row.id}`);
     await countOf(page.getByRole('button', { name: 'RESERVE A PLACE' }), 0);
     await countOf(page.getByRole('button', { name: 'WITHDRAW' }), 0);
-    await attrOf(page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
+    await countOf(page.locator('.release__foot'), 0);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     // MY PIECES: the place reserved among its releases, no EARLY ACCESS block; the privilege among the benefits of
     // YOUR TIER, said once, in the account sheet (decision 10).
@@ -2741,7 +2743,6 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(other.page.locator('.release__sentence'), /^PLATINE and PALLADIUM owners are reserving their places now\. Entries open to everyone on .+\.$/);
     await countOf(other.page.getByRole('button', { name: 'RESERVE A PLACE' }), 0);
     await countOf(other.page.getByRole('button', { name: 'ENTER THE DRAW' }), 0);
-    await attrOf(other.page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
     await other.page.goto(`${srv.origin}/verify/pieces`);
     await countOf(other.page.locator('.n-pieces__waiting'), 0);
     await visible(other.page.locator('.n-pieces__lead'));

@@ -124,11 +124,12 @@ describe.skipIf(!HAS_CHROMIUM)('the access rules beyond the tier, and the surpri
 
     const { page, context, problems } = await phone(regular.token);
     await page.goto(`${srv.origin}/verify/releases/${r.id}`);
-    const facts = page.locator('.live__announced .live__facts .live__fact');
+    // NOCTURNE (C20): its one rule among its lines, after its pieces, the limit and the room.
+    const facts = page.locator('.live__announced .n-live__lines .n-lines__line', { hasText: 'FOR COLLECTORS' });
     await textOf(facts.first(), 'FOR COLLECTORS WHO HAVE TAKEN PART IN 2 RELEASES');
     // Its figure in the reading face.
     expect(await facts.first().locator('.numeral').evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/Gravesend/);
-    const label = page.locator('.live__announced .live__surprise');
+    const label = page.locator('.live__announced .n-live__surprise');
     await textOf(label, LIVE.surprise);
     expect(await label.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
     expect(await page.content()).not.toContain('silk');
@@ -140,7 +141,7 @@ describe.skipIf(!HAS_CHROMIUM)('the access rules beyond the tier, and the surpri
 
     const out = await phone(newcomer.token);
     await out.page.goto(`${srv.origin}/verify/releases/${r.id}`);
-    await textOf(out.page.locator('.live__there-rule'), `This release is for collectors who have taken part in 2 releases. You have taken part in 1 release. ${LIVE.edge.notEligible.text}`);
+    await textOf(out.page.locator('.live__there-rule'), `FOR COLLECTORS WHO HAVE TAKEN PART IN 2 RELEASES This release is for collectors who have taken part in 2 releases. You have taken part in 1 release. ${LIVE.edge.notEligible.text}`);
     expect(await out.page.locator('.live__there .live__size').count()).toBe(0);
     await keepsVault(out.page, null);
     await out.page.screenshot({ path: join(OUT_DIR, 'verify-live-access-count.png'), fullPage: true });

@@ -68,7 +68,7 @@ const CASES: { state: UiState; check: Check }[] = [
   {
     state: stateById('now-signed-in'),
     check: async (page, demo) => {
-      expect(await hero(page)).toEqual({ label: 'LIVE RELEASE', title: 'MONOLITHEIN BLUE' });
+      expect(await hero(page)).toEqual({ label: 'LIVE RELEASE', title: 'MONOLITHE IN BLUE' });
       expect(await sections(page)).toEqual(['The next release', 'Also announced', 'Your pieces', 'The circle', 'The collection', 'Scan']);
       const top = page.locator('.now__hero');
       await expect.poll(() => top.locator('.n-cd').getAttribute('aria-label')).toMatch(/^OPENS IN 03 DAYS 02 HOURS 11 MINUTES$/);
@@ -118,7 +118,7 @@ const CASES: { state: UiState; check: Check }[] = [
     state: stateById('now-signed-out'),
     check: async (page, demo) => {
       // The same top as signed in, then SCAN ORBES CODE, UPLOAD A PHOTO and MY PIECES, then THE COLLECTION.
-      expect(await hero(page)).toEqual({ label: 'LIVE RELEASE', title: 'MONOLITHEIN BLUE' });
+      expect(await hero(page)).toEqual({ label: 'LIVE RELEASE', title: 'MONOLITHE IN BLUE' });
       expect(await sections(page)).toEqual(['The next release', 'Also announced', 'Scan', 'The collection']);
       const scan = page.locator('section[aria-label="Scan"]');
       expect(await scan.locator('button, a').allInnerTexts()).toEqual(['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'MY PIECES']);
@@ -134,7 +134,7 @@ const CASES: { state: UiState; check: Check }[] = [
   {
     state: stateById('now-draw-leads'),
     check: async (page, demo) => {
-      expect(await hero(page)).toEqual({ label: 'DRAW · ENTRIES OPEN', title: 'MONOLITHE,THE OCTOBER DRAW' });
+      expect(await hero(page)).toEqual({ label: 'DRAW · ENTRIES OPEN', title: 'MONOLITHE, THE OCTOBER DRAW' });
       expect(await sections(page)).toEqual(['The next release', 'Your pieces', 'The circle', 'The collection', 'Scan']);
       const top = page.locator('.now__hero');
       expect((await top.innerText()).replace(/\s+/g, ' ')).toContain('MONOLITHE · BRACELET € 4 200 12 PIECES · ENTRIES CLOSE 11 OCT 2026 · 18:00 UTC 11 OCT 2026 · 20:00 on this phone (UTC+02:00) SEE THE RELEASE');
@@ -147,21 +147,21 @@ const CASES: { state: UiState; check: Check }[] = [
   {
     state: as('now-draw-leads', 'now-draw-leads-signed-out', undefined),
     check: async (page) => {
-      expect(await hero(page)).toEqual({ label: 'DRAW · ENTRIES OPEN', title: 'MONOLITHE,THE OCTOBER DRAW' });
+      expect(await hero(page)).toEqual({ label: 'DRAW · ENTRIES OPEN', title: 'MONOLITHE, THE OCTOBER DRAW' });
       expect(await sections(page)).toEqual(['The next release', 'Scan', 'The collection']);
     },
   },
   {
     state: stateById('now-draw-soon'),
     check: async (page) => {
-      expect(await hero(page)).toEqual({ label: 'DRAW · ENTRIES OPEN SOON', title: 'MONOLITHE,THE OCTOBER DRAW' });
+      expect(await hero(page)).toEqual({ label: 'DRAW · ENTRIES OPEN SOON', title: 'MONOLITHE, THE OCTOBER DRAW' });
       expect((await page.locator('.now__line').innerText()).replace(/\s+/g, ' ')).toBe('12 PIECES · ENTRIES OPEN 7 OCT 2026 · 10:00 UTC');
     },
   },
   {
     state: stateById('now-draw-early'),
     check: async (page) => {
-      expect(await hero(page)).toEqual({ label: 'DRAW · EARLY ACCESS', title: 'MONOLITHE,THE OCTOBER DRAW' });
+      expect(await hero(page)).toEqual({ label: 'DRAW · EARLY ACCESS', title: 'MONOLITHE, THE OCTOBER DRAW' });
     },
   },
   // ── The newest model leads (C43) ──

@@ -748,9 +748,7 @@ class App {
       onTab: (tab) => {
         if (entryOf(history.state) === 'releases') history.replaceState({ ...(history.state as object), tab }, '');
       },
-      onScan: () => void this.startScan(),
       onRelease: (id) => this.openRelease(id),
-      onCollection: () => this.openLookbook(),
       localZone: localZone(),
     });
     if (await this.swap(view.root, 'releases', focus)) this.live = view;
@@ -834,6 +832,7 @@ class App {
       onAfterRoom: (parentId) => this.openAfterRoom(parentId),
       clientServices: () => this.contactDetails(),
       localZone: localZone(),
+      onChrome: (shown) => this.shell?.liveChrome(shown),
     });
     if (await this.swap(view.root, 'live', focus)) this.live = view;
     else view.dispose();

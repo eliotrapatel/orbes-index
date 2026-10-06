@@ -1,71 +1,51 @@
 /**
- * THE RELEASES (P-R03): the releases ORBES announces, /verify/releases, and
- * a release's page, /verify/releases/<id>.
+ * THE RELEASES (P-R03; plan NOCTURNE, screen 6, step N7: C7, C19, C25): the releases ORBES announces,
+ * /verify/releases, and a draw's page, /verify/releases/<id> (a LIVE RELEASE's is views/live.ts), in NOCTURNE's pieces.
  *
- *              ORBES                         small wordmark
- *          T H E   R E L E A S E S           the page's title
- *   Pieces released in a limited number. …
- *   ┌                              ┐
- *     [ photo ]                              ivory plates, one per release:
- *     ENTRIES OPEN                           its state, its title, its model,
- *     MONOLITHE — RELEASE I                  its pieces and the time that
- *     MONOLITHE · RING                       matters now (UTC), and its one
- *     3 PIECES · ENTRIES CLOSE 14 OCT …      text link
- *     SEE THE RELEASE
- *   └                              ┘
- *            [ SCAN ORBES CODE ]
- *   THE COLLECTION
- *   (the legal pages: NOCTURNE's footer, views/shell.ts)
+ *   THE RELEASES                                 the title and its sentence (on PAST, signed in: « You have taken part
+ *   Pieces released in a limited number. …       in N releases. », C25)
+ *   LIVE   PAST                                  the underlined tabs (plan LIVE RELEASE+, choice 5)
+ *   [the photograph, whole, faded]               each release at the column's full width, its words lifted onto it:
+ *   LIVE RELEASE                                 a LIVE RELEASE (C7): where it stands, its title, its day and hour in
+ *   MONOLITHE IN BLUE                            Paris (then on this phone), its price, OPENS IN and its countdown on
+ *   THURSDAY 8 OCTOBER · 21:00 PARIS             the server's clock (addition 4), its quantity, limit and rule, the
+ *   OPENS IN  02 : 06 : 12                       reveals still to come, N COLLECTORS WILL BE THERE; one not revealed
+ *   25 PIECES · ONE PER COLLECTOR · FOR OWNERS   yet on its seal (the monogram); a draw: DRAW · its state, its title,
+ *   [ SEE THE RELEASE ]                          its model, its price (addition 5), its pieces and close in UTC. The
+ *                                                first release's SEE THE RELEASE is the page's one filled button.
  *
- * A release's page: its collection (or model), its title and state (once
- * drawn THIS RELEASE IS OVER, and signed in the account's part in it: YOU
- * TOOK PART or YOU SECURED A PIECE, plan LIVE RELEASE+ decision 30), then,
- * with an early access (P-X02), the line PLATINE AND PALLADIUM: FROM … ·
- * EVERYONE: FROM … (UTC); the model's photograph on an ivory plate, its
- * description; THE RELEASE (the model, with SEE THE MODEL when its sheet is
- * public, the pieces, the times in UTC then on this phone, the early access
- * among them, how long a place drawn is held, the places reserved directly,
- * and the paragraph on the early access); YOUR ENTRY (signed out: the sign-in
- * and CREATE ACCOUNT of the OWNERSHIP panel, any account may enter; signed
- * in: what the entry means now, ENTER THE DRAW or WITHDRAW, RESERVE A PLACE
- * for a PLATINE or PALLADIUM account during the early access, and for a
- * place held the contact of ORBES Client Services); THE DRAW (its rule,
- * word for word, and the seed's fingerprint; once drawn the seed, checked
- * on this phone against the fingerprint, and the entries by rank, the
- * account's own marked, a hundred at a time, never said how many). ENTER THE DRAW, or RESERVE A
- * PLACE, is the page's hairline button while it is offered (the foot's
- * SCAN ORBES CODE is then a text link), as DOWNLOAD PDF is on a
- * certificate. After a reservation, the page is read again: its places.
+ * LIVE  the releases to come and under way: the LIVE RELEASES first, then the draws (neither drawn nor cancelled): the
+ *       release calendar. The list is read again at each moment that changes a LIVE RELEASE's card, on the server's
+ *       clock (a stage, its room, T0, its end), and every BANNER_REFRESH_MS while a room is open or a release live: each
+ *       stage shows at its time, and the release leaves LIVE for PAST at its end, within a minute when it comes early
+ *       (sold out, or ended by ORBES). Each countdown is drawn again every second, silently (never read aloud).
+ * PAST  every release ended, the newest first, LIVE RELEASES and draws together (never a cancelled one nor an
+ *       after-room), PAST_PAGE_SIZE at a time (SHOW MORE): each with its photograph, LIVE RELEASE or DRAW and its date,
+ *       its title, its model, its quantity as announced (no end figure), SEE THE RELEASE (its page in its final state,
+ *       decision 30); signed in, YOU TOOK PART or YOU SECURED A PIECE on each release concerned. Read when the tab is
+ *       first shown. The tab shown is kept with the page's place in the history (back from a release returns to it).
  *
- * THE RELEASES has two tabs (plan LIVE RELEASE+, choice 5; keyboard and screen-reader tabs, views/tabs.ts), the one
- * shown kept with the page's place in the history (back from a release returns to it):
+ * A draw's page (C19): ‹ THE RELEASES; the model's photograph, faded; its collection (or model), its title, its state
+ * (with an early access, P-X02: PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …, in UTC); once drawn, the account's
+ * part in it (YOU TOOK PART, YOU SECURED A PIECE) and THIS RELEASE IS OVER on a plate (as C29). THE RELEASE: its
+ * description, its model with SEE THE MODEL, its facts (PRICE, PIECES, the times in UTC then on this phone, the early
+ * access, how long a place drawn is held, the places reserved directly), the paragraph on the early access. YOUR ENTRY:
+ * signed out the sign-in and CREATE ACCOUNT of the OWNERSHIP panel (any account may enter); signed in what the entry
+ * means now, ENTER THE DRAW (the page's filled button) or RESERVE A PLACE (PLATINE and PALLADIUM during the early
+ * access), WITHDRAW, and for a place held the contact of ORBES Client Services. THE DRAW: what a place drawn obliges to,
+ * its rule word for word, its commitment, the seed's fingerprint; once drawn the seed, checked on this phone against the
+ * fingerprint, and the entries by rank, the account's own marked, a hundred at a time, never said how many. After a
+ * reservation the page is read again: its places. The scan is the SCAN ring's, THE RELEASES the crumb's and the rail's.
  *
- *   LIVE  the releases to come and under way: the LIVE RELEASES first (plan of 2026-10-04: LIVE RELEASE cards), each on
- *         a vault plate among the ivory ones of the draws (neither drawn nor cancelled): the release calendar. Its
- *         picture of the stage reached (the seal before any), LIVE RELEASE and where it stands, its name once revealed,
- *         its opening in Paris (then on this phone), its price and quantity line, its rule, the reveals still to come
- *         with their times, N COLLECTORS WILL BE THERE, and SEE THE RELEASE; its page is the LIVE RELEASE's
- *         (views/live.ts). The list is read again at each moment that changes a LIVE RELEASE's card, on the server's
- *         clock (a stage, its room, T0, its end), and every BANNER_REFRESH_MS while a room is open or a release live:
- *         each stage shows at its time, and the release leaves LIVE for PAST at its end, within a minute when it comes
- *         early (sold out, or ended by ORBES).
- *   PAST  every release ended, the newest first, LIVE RELEASES and draws together (never a cancelled one nor an
- *         after-room), PAST_PAGE_SIZE at a time (SHOW MORE): each an ivory plate with its photograph, LIVE RELEASE or
- *         DRAW, its name, its opening date and its quantity line as announced (no end figure), SEE THE RELEASE (its page
- *         in its final state, decision 30); signed in, « You have taken part in N releases. » at the top, and YOU TOOK
- *         PART or YOU SECURED A PIECE on each release concerned. Read when the tab is first shown.
- *
- * Every action is a same-origin JSON call through ApiClient (the session
- * cookie, the CSRF token); server messages are shown as they come. A 401
- * ends the session on the page, which then offers the sign-in again.
+ * Every action is a same-origin JSON call through ApiClient (the session cookie, the CSRF token); server messages are
+ * shown as they come. A 401 ends the session on the page, which then offers the sign-in again. CSP-safe: h() and s()
+ * only, styles by class (verify/styles.css, THE RELEASES).
  */
-import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { LIVE, RELEASES } from '../copy.js';
-import { CHANGE_RETRY_MS, liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
-import { sealSvg } from '../live-seal.js';
+import { CONTACT, LIVE, LOOKBOOK, RELEASES } from '../copy.js';
+import { CHANGE_RETRY_MS, countdown as countdownGroups, liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
 import {
   drawLines,
   entryModel,
@@ -79,14 +59,14 @@ import {
   type ParticipationModel,
   type PastCardModel,
   type ReleaseCardModel,
-  type ReleasePhoto,
   type ReleaseRow,
   type ReleaseSheetModel,
 } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
 import type { ClientServices, ClubEntry, DrawEntry } from '../types.js';
-import { contactBlock, lookbookLink, releasesLink, sectionLabel, viewRoot, withNumerals, withPhrases } from './common.js';
-import { failedState, loadingState, quietLine } from './nocturne.js';
+import { lookbookSheetPath } from '../lookbook-model.js';
+import { RELEASES_PATH, viewRoot, withNumerals } from './common.js';
+import { appAnchor, button, contactLines, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, quietLine, textLink } from './nocturne.js';
 import { messageOf } from './forms.js';
 import { BANNER_REFRESH_MS } from './live-banner.js';
 import { OwnershipPanel } from './ownership.js';
@@ -109,12 +89,8 @@ export interface ReleasesDeps {
   tab: ReleasesTab;
   /** A tab chosen: the page's place in the history keeps it. */
   onTab(tab: ReleasesTab): void;
-  /** SCAN ORBES CODE, the page's hairline button. */
-  onScan(): void;
   /** Open a release's page in the app. */
   onRelease(id: string): void;
-  /** THE COLLECTION, in the app. */
-  onCollection(): void;
   /** This phone's time zone: a LIVE RELEASE's opening is said in Paris, then here when it differs. */
   localZone: string;
 }
@@ -145,32 +121,65 @@ export function releaseView(deps: ReleaseDeps): ReleasesView {
   return { root: page.root, dispose: () => page.dispose() };
 }
 
-/** The small wordmark that opens every page of the app but the landing. */
-const wordmark = (extraClass: string) => h('span', { class: `wordmark wordmark--small ${extraClass}`, attrs: { 'aria-hidden': 'true' }, text: 'ORBES' });
+/** The first word of a model's line (`MONOLITHE` of `MONOLITHE · BRACELET`): a draw's title sets it on a line of its own. */
+function modelName(line: string): string | null {
+  const w = line.split(' · ')[0]?.trim();
+  return w ? w : null;
+}
 
-/** A photograph of a release: contained, never cropped; one that cannot be loaded takes its frame with it. */
-function photo(p: ReleasePhoto, className: string, eager = false): HTMLImageElement {
-  const img = h('img', { class: className, attrs: { src: p.src, alt: p.alt, decoding: 'async', loading: eager ? 'eager' : 'lazy' } });
-  img.addEventListener('error', () => img.closest<HTMLElement>('[data-photo]')?.setAttribute('hidden', ''), { once: true });
-  return img;
+/** `12 PIECES · ENTRIES CLOSE 11 OCT 2026 · 18:00 UTC`: its date never parted from its hour (the canvas's `.nw`). */
+function timedLine(line: string, cls: (string | null)[]): HTMLParagraphElement {
+  const m = /^(.*?)\s*(\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC)$/.exec(line);
+  if (!m) return h('p', { class: cls }, ...withNumerals(line));
+  return h('p', { class: cls }, ...withNumerals(m[1]!), m[1] ? ' ' : null, h('span', { class: 'n-nw' }, ...withNumerals(m[2]!)));
 }
 
 /**
- * The facts of a release as rows: a label in the display face, its value in the reading face; a time is said in UTC,
- * then on this phone's clock on a line of its own.
+ * A release's photograph, whole and faded, and its words lifted onto its foot; without one (or once it cannot be
+ * loaded) the words open where it would have been, never a broken image.
  */
-function releaseRows(rows: readonly ReleaseRow[]): HTMLDListElement {
-  return h(
-    'dl',
-    { class: 'rows release__rows' },
-    ...rows.map((r) =>
-      h(
-        'div',
-        { class: 'rows__row' },
-        h('dt', { class: 'rows__label', text: r.label }),
-        h('dd', { class: 'rows__value' }, h('span', { class: 'release__utc', text: r.value }), r.local ? h('span', { class: 'release__local', text: r.local }) : null),
-      ),
-    ),
+function photographed(image: { src: string; alt: string } | null, words: HTMLElement, opts: { eager?: boolean; extraClass?: string; imgClass?: string; bare: string }): HTMLElement[] {
+  if (!image) {
+    words.classList.add(opts.bare);
+    return [words];
+  }
+  const photo = fadedPhoto(image.src, image.alt, { eager: opts.eager, extraClass: opts.extraClass });
+  photo.dataset.photo = '';
+  if (opts.imgClass) photo.querySelector('img')?.classList.add(opts.imgClass);
+  photo.querySelector('img')?.addEventListener(
+    'error',
+    () => {
+      photo.remove();
+      words.classList.add(opts.bare);
+    },
+    { once: true },
+  );
+  return [photo, words];
+}
+
+/** OPENS IN and its countdown, on the server's clock, while T0 is ahead; nothing once it has come. */
+interface Clock {
+  at: number;
+  el: HTMLElement;
+  key: string;
+}
+
+function drawClock(c: Clock, now: number): void {
+  const ahead = Number.isFinite(c.at) && now < c.at;
+  const groups = ahead ? countdownGroups(c.at - now) : [];
+  const key = groups.map((g) => `${g.value}${g.unit}`).join(':');
+  if (key === c.key) return;
+  c.key = key;
+  c.el.replaceChildren(
+    ...(ahead
+      ? [
+          h('p', { class: 'n-g n-lb n-releases__opens', text: LIVE.opensIn }),
+          countdown(
+            groups.map((g) => [g.value, g.unit] as const),
+            { label: `${LIVE.opensIn} ${groups.map((g) => `${g.value} ${g.unit}`).join(' ')}` },
+          ),
+        ]
+      : []),
   );
 }
 
@@ -185,6 +194,8 @@ const CHANGE_MARGIN_MS = 600;
 const CHANGE_MAX_MS = 6 * 3_600_000;
 /** A quiet read that changed the list draws it with its live region off, turned back on this long after. */
 const QUIET_DRAW_MS = 1000;
+/** The countdowns are drawn again this often (their seconds within the last day). */
+const PULSE_MS = 1000;
 
 /** What a list on show is drawn from (its models are plain data), null while none is. */
 function keyOf(l: ListLoad): string | null {
@@ -193,7 +204,9 @@ function keyOf(l: ListLoad): string | null {
 
 class ListPage {
   readonly root: HTMLElement;
-  private readonly body = h('div', { class: 'releases__body', attrs: { 'aria-live': 'polite' } });
+  /** The page's sentence; on PAST, signed in, how many releases the account took part in (C25). */
+  private readonly lead = h('p', { class: 'n-lead n-releases__lead releases__lead', text: RELEASES.lead });
+  private readonly body = h('div', { class: 'releases__body n-releases__body', attrs: { 'aria-live': 'polite' } });
   private load: ListLoad = { kind: 'loading' };
   private disposed = false;
   /** The server's clock against this phone's, once measured (the moments of the LIVE RELEASES are the server's). */
@@ -202,39 +215,43 @@ class ListPage {
   /** What the list on show was drawn from: a quiet read bringing the same leaves it as it is, its nodes and its reader. */
   private drawn: string | null = null;
   private politeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** OPENS IN on each LIVE RELEASE's card (addition 4), drawn again every PULSE_MS. */
+  private clocks: Clock[] = [];
+  private pulse: ReturnType<typeof setInterval> | null = null;
+  private tab: ReleasesTab;
 
   /** PAST, built when its tab is first shown. */
   private past: PastList | null = null;
 
   constructor(private readonly deps: ReleasesDeps) {
     this.root = viewRoot('releases', 'releases-title');
+    this.root.classList.add('n-releases');
+    this.tab = RELEASES_TABS.includes(deps.tab) ? deps.tab : 'live';
     const tabs = tabsView<ReleasesTab>(
       RELEASES_TABS,
       (tab) => {
         if (tab === 'live') return this.body;
-        this.past = new PastList(deps);
+        this.past = new PastList(deps, () => this.drawLead());
         return this.past.root;
       },
-      RELEASES_TABS.includes(deps.tab) ? deps.tab : 'live',
-      { labels: { live: RELEASES.tabs.live, past: RELEASES.tabs.past }, idPrefix: 'releases-', label: RELEASES.tabs.label, regionLabel: RELEASES.tabs.label, onSelect: (tab) => deps.onTab(tab) },
+      this.tab,
+      {
+        labels: { live: RELEASES.tabs.live, past: RELEASES.tabs.past },
+        idPrefix: 'releases-',
+        label: RELEASES.tabs.label,
+        regionLabel: RELEASES.tabs.label,
+        kind: 'tabs',
+        onSelect: (tab) => {
+          this.tab = tab;
+          this.drawLead();
+          deps.onTab(tab);
+        },
+      },
     );
-    tabs.root.classList.add('releases__tabs');
-    this.root.append(
-      h(
-        'header',
-        { class: 'releases__head' },
-        wordmark('releases__wordmark'),
-        h('h1', { class: 'releases__title', id: 'releases-title', text: RELEASES.title }),
-        h('p', { class: 'prose releases__lead', text: RELEASES.lead }),
-      ),
-      tabs.root,
-      h(
-        'footer',
-        { class: 'releases__foot' },
-        h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => deps.onScan() }, text: RELEASES.scan }),
-        lookbookLink(() => deps.onCollection(), { extraClass: 'releases__collection' }),
-      ),
-    );
+    tabs.root.classList.add('releases__tabs', 'n-releases__tabs');
+    tabs.root.querySelector('[role="tablist"]')?.classList.add('n-px');
+    this.root.append(h('header', { class: 'n-px releases__head n-releases__head' }, h('h1', { class: 'n-g n-t1 releases__title', id: 'releases-title', text: RELEASES.title }), this.lead), tabs.root);
+    this.drawLead();
     this.render();
     void this.fetch();
   }
@@ -243,7 +260,16 @@ class ListPage {
     this.disposed = true;
     if (this.changeTimer) clearTimeout(this.changeTimer);
     if (this.politeTimer) clearTimeout(this.politeTimer);
+    if (this.pulse) clearInterval(this.pulse);
     this.past?.dispose();
+  }
+
+  /** The head's sentence: the page's, or on PAST, signed in, « You have taken part in N releases. » once read (C25). */
+  private drawLead(): void {
+    const taken = this.tab === 'past' ? (this.past?.taken ?? null) : null;
+    const text = taken ?? RELEASES.lead;
+    if (this.lead.textContent !== text) this.lead.textContent = text;
+    this.lead.classList.toggle('releases__taken', taken !== null);
   }
 
   /**
@@ -285,11 +311,15 @@ class ListPage {
    * clock may be off: it is measured again with that read.
    */
   private schedule(live: Parameters<typeof nextChange>[0]): void {
-    const now = Date.now() + (this.offset ?? 0);
+    const now = this.now();
     const next = nextChange(live, now, BANNER_REFRESH_MS);
     if (next === null) return;
     if (next - now <= CHANGE_RETRY_MS) this.offset = null;
     this.changeTimer = setTimeout(() => void this.fetch(true), Math.min(CHANGE_MAX_MS, next - now + CHANGE_MARGIN_MS));
+  }
+
+  private now(): number {
+    return Date.now() + (this.offset ?? 0);
   }
 
   /**
@@ -316,92 +346,147 @@ class ListPage {
 
   private draw(hadFocus: boolean): void {
     const l = this.load;
+    this.clocks = [];
+    if (this.pulse) clearInterval(this.pulse);
+    this.pulse = null;
     if (l.kind === 'loading') {
-      this.body.replaceChildren(loadingState(RELEASES.loading, { extraClass: 'releases__waiting' }));
+      this.body.replaceChildren(loadingState(RELEASES.loading, { extraClass: 'releases__waiting n-releases__state' }));
       return;
     }
     if (l.kind === 'failed') {
-      this.body.replaceChildren(failedState({ sentence: RELEASES.loadFailed, reason: l.message, retry: RELEASES.retry, onRetry: () => void this.fetch(), retryClass: 'releases__retry' }));
+      this.body.replaceChildren(h('div', { class: 'n-px n-releases__state' }, failedState({ sentence: RELEASES.loadFailed, reason: l.message, retry: RELEASES.retry, onRetry: () => void this.fetch(), retryClass: 'releases__retry' })));
       if (hadFocus) this.body.querySelector<HTMLElement>('.releases__retry')?.focus();
       return;
     }
     const partial = l.liveFailed
       ? h(
           'div',
-          { class: 'releases__partial' },
-          h('p', { class: 'form__error', attrs: { role: 'alert' }, text: RELEASES.liveFailed }),
-          h('button', { class: 'textlink releases__retry', attrs: { type: 'button' }, on: { click: () => void this.fetch() }, text: RELEASES.retry }),
+          { class: 'n-px n-releases__state releases__partial' },
+          h('p', { class: 'n-sm n-ivc form__error', attrs: { role: 'alert' }, text: RELEASES.liveFailed }),
+          h('p', { class: 'n-releases__retry-line' }, textLink(RELEASES.retry, { onOpen: () => void this.fetch(), extraClass: 'releases__retry' })),
         )
       : null;
     if (l.cards.length === 0 && l.live.length === 0) {
       // Nothing to show: no release announced, or none known while the LIVE half could not be read.
-      this.body.replaceChildren(partial ?? quietLine(RELEASES.empty, 'releases__empty'));
+      this.body.replaceChildren(partial ?? h('div', { class: 'n-px n-releases__state' }, quietLine(RELEASES.empty, 'releases__empty')));
       if (hadFocus) this.body.querySelector<HTMLElement>('.releases__retry')?.focus();
       return;
     }
+    // The first release's SEE THE RELEASE is the page's one filled button; the others are hairline buttons.
+    let first = true;
+    const primary = () => {
+      const was = first;
+      first = false;
+      return was;
+    };
     this.body.replaceChildren(
       ...(partial ? [partial] : []),
       h(
         'ul',
-        { class: 'releases__list' },
-        ...l.live.map((c) => h('li', { class: 'releases__item' }, this.liveCard(c))),
-        ...l.cards.map((c) => h('li', { class: 'releases__item' }, this.card(c))),
+        { class: 'releases__list n-releases__list' },
+        ...l.live.map((c) => h('li', { class: 'releases__item n-releases__item' }, this.liveCard(c, primary()))),
+        ...l.cards.map((c) => h('li', { class: 'releases__item n-releases__item' }, this.card(c, primary()))),
       ),
     );
+    if (this.clocks.length > 0) {
+      this.tick();
+      this.pulse = setInterval(() => this.tick(), PULSE_MS);
+    }
   }
 
-  /** A LIVE RELEASE: its vault plate, its picture of the stage reached (the seal before any), its opening, its rule. */
-  private liveCard(c: LiveCardModel): HTMLElement {
-    const id = `release-${c.id}`;
-    const link = releasesLink(() => this.deps.onRelease(c.id), { id: c.id, extraClass: 'live-card__link' });
-    link.setAttribute('aria-describedby', `${id}-title`);
-    const frame = h('div', { class: 'live-card__frame' });
+  private tick(): void {
+    if (this.disposed) return;
+    const now = this.now();
+    for (const c of this.clocks) drawClock(c, now);
+  }
+
+  /** SEE THE RELEASE: a link to its page, said of which release; filled for the page's first release, else a hairline. */
+  private see(id: string, href: string, titleId: string, primary: boolean, extra: string): HTMLAnchorElement {
+    const link = appAnchor(href, ['n-g', 'n-btn', primary ? null : 'n-btn--ol', 'n-releases__see', extra], () => this.deps.onRelease(id), RELEASES.see);
+    link.setAttribute('aria-describedby', titleId);
+    return link;
+  }
+
+  /**
+   * A LIVE RELEASE (C7): its photograph (its silhouette before), else its seal; where it stands, its title, its day and
+   * hour in Paris (then on this phone), its price, OPENS IN and its countdown, its lines, the reveals still to come, N
+   * COLLECTORS WILL BE THERE, SEE THE RELEASE.
+   */
+  private liveCard(c: LiveCardModel, primary: boolean): HTMLElement {
+    const titleId = `release-${c.id}-title`;
+    const clock: Clock = { at: c.opensAt, el: h('div', { class: 'n-releases__clock', attrs: { 'aria-live': 'off' } }), key: '' };
+    this.clocks.push(clock);
+    const words = h(
+      'div',
+      { class: 'n-px n-ctr n-releases__words' },
+      h('p', { class: 'n-g n-lb live-card__kind', text: c.kind }),
+      h('h2', { class: 'n-g n-t1 n-releases__title live-card__title', id: titleId }, ...withNumerals(c.title)),
+      h('p', { class: 'n-num n-releases__price live-card__price', text: c.price }),
+      h('p', { class: 'n-g n-lb n-releases__when live-card__when' }, ...withNumerals(c.when.paris)),
+      c.when.local ? h('p', { class: 'n-g n-lb n-releases__local live-card__when live-card__when--local' }, ...withNumerals(c.when.local)) : null,
+      clock.el,
+      h('div', { class: 'n-lines n-releases__lines live-card__line' }, ...c.lines.map((l, i) => h('span', { class: ['n-g', 'n-lines__line', i === 0 ? 'n-ivc' : null] }, ...withNumerals(l)))),
+      // The calendar of the reveals still to come: each stage's time, never what it shows.
+      c.reveals.length
+        ? h(
+            'div',
+            { class: 'n-releases__reveals live-card__reveals', attrs: { role: 'group', 'aria-labelledby': `${titleId}-reveals` } },
+            h('p', { class: 'n-g n-lb n-ivc n-releases__reveals-title', id: `${titleId}-reveals`, text: LIVE.reveals }),
+            h(
+              'div',
+              { class: 'n-lines n-releases__reveals-lines' },
+              ...c.reveals.map((d) => h('span', { class: 'n-g n-lines__line live-card__reveal' }, h('span', { class: 'live-card__reveal-stage', text: d.label }), ' · ', h('span', { class: 'n-nw live-card__reveal-when' }, ...withNumerals(d.when)))),
+            ),
+          )
+        : null,
+      c.interest ? h('p', { class: 'n-g n-lb n-releases__interest live-card__interest' }, ...withNumerals(c.interest)) : null,
+      this.see(c.id, c.href, titleId, primary, 'live-card__link'),
+    );
+    const article = h('article', { class: 'live-card n-releases__release', attrs: { 'aria-labelledby': titleId } });
     if (c.picture) {
-      const img = h('img', { class: ['live-card__img', `live-card__img--${c.picture.kind}`], attrs: { src: c.picture.src, alt: c.picture.alt, decoding: 'async', loading: 'lazy' } });
-      img.addEventListener('error', () => img.replaceWith(sealSvg('live-card__seal')), { once: true });
-      frame.append(img);
-    } else frame.append(sealSvg('live-card__seal'));
-    return bracket(
-      h(
-        'article',
-        { class: 'live-card vault', attrs: { 'aria-labelledby': `${id}-title` } },
-        frame,
-        h('p', { class: 'live-card__kind', text: c.kind }),
-        h('h2', { class: 'live-card__title', id: `${id}-title` }, ...withNumerals(c.title)),
-        h('p', { class: 'live-card__when' }, ...withNumerals(c.when.paris)),
-        c.when.local ? h('p', { class: 'live-card__when live-card__when--local' }, ...withNumerals(c.when.local)) : null,
-        h('p', { class: 'live-card__line' }, ...withPhrases(c.line)),
-        h('p', { class: 'live-card__access' }, ...withNumerals(c.access)),
-        // The calendar of the reveals still to come: each stage's time, never what it shows.
-        c.reveals.length
-          ? h(
-              'dl',
-              { class: 'live-card__reveals', attrs: { 'aria-label': LIVE.reveals } },
-              ...c.reveals.map((d) => h('div', { class: 'live-card__reveal' }, h('dt', { class: 'live-card__reveal-stage', text: d.label }), h('dd', { class: 'live-card__reveal-when' }, ...withNumerals(d.when)))),
-            )
-          : null,
-        c.interest ? h('p', { class: 'live-card__interest' }, ...withNumerals(c.interest)) : null,
-        link,
-      ),
-    );
+      words.classList.add('n-lift');
+      const photo = fadedPhoto(c.picture.src, c.picture.alt, { extraClass: ['n-releases__photo', c.picture.kind === 'silhouette' ? 'n-releases__photo--silhouette' : null].filter(Boolean).join(' ') });
+      photo.querySelector('img')?.classList.add('live-card__img', `live-card__img--${c.picture.kind}`);
+      // A picture that cannot be loaded gives way to the seal.
+      photo.querySelector('img')?.addEventListener('error', () => {
+        photo.replaceWith(this.seal());
+        words.classList.remove('n-lift');
+        words.classList.add('n-releases__sealed');
+      }, { once: true });
+      article.append(photo, words);
+    } else {
+      words.classList.add('n-releases__sealed');
+      article.append(this.seal(), words);
+    }
+    return article;
   }
 
-  private card(c: ReleaseCardModel): HTMLElement {
-    const id = `release-${c.id}`;
-    const link = releasesLink(() => this.deps.onRelease(c.id), { id: c.id, extraClass: 'release-card__link' });
-    // SEE THE RELEASE, of which release: its title, for a screen reader moving from link to link.
-    link.setAttribute('aria-describedby', `${id}-title`);
-    return bracket(
-      h(
-        'article',
-        { class: 'release-card', data: { state: c.state }, attrs: { 'aria-labelledby': `${id}-title` } },
-        c.image ? h('div', { class: 'release-card__frame', data: { photo: '' } }, photo(c.image, 'release-card__img')) : null,
-        h('p', { class: 'release-card__state', text: c.stateLabel }),
-        h('h2', { class: 'release-card__title', id: `${id}-title` }, ...withNumerals(c.title)),
-        h('p', { class: 'release-card__model' }, ...withNumerals(c.model)),
-        h('p', { class: 'release-card__line micro', text: c.line }),
-        link,
-      ),
+  /** A release not revealed yet: the monogram on its seal (C7), never the ORBES code (only the camera shows one). */
+  private seal(): HTMLElement {
+    return h('div', { class: 'n-ctr n-releases__seal-line' }, h('div', { class: 'n-seal live-card__seal' }, monogram(54)));
+  }
+
+  /** A draw (C7): DRAW · its state, its title, its model, its price, its pieces and the time that matters in UTC. */
+  private card(c: ReleaseCardModel, primary: boolean): HTMLElement {
+    const titleId = `release-${c.id}-title`;
+    const words = h(
+      'div',
+      { class: 'n-px n-ctr n-lift n-releases__words' },
+      h('p', { class: 'n-g n-lb release-card__state', text: `${RELEASES.past.kind.DRAW} · ${c.stateLabel}` }),
+      (() => {
+        const t = modelTitle('h2', ['n-g', 'n-t1', 'n-releases__title', 'n-releases__title--draw', 'release-card__title'], c.title, modelName(c.model));
+        t.id = titleId;
+        return t;
+      })(),
+      c.model ? h('p', { class: 'n-g n-lb n-releases__model release-card__model' }, ...withNumerals(c.model)) : null,
+      c.price ? h('p', { class: 'n-num n-releases__draw-price release-card__price', text: c.price }) : null,
+      timedLine(c.line, ['n-g', 'n-lb', 'n-ivc', 'n-num', 'n-releases__line', 'release-card__line']),
+      this.see(c.id, c.href, titleId, primary, 'release-card__link'),
+    );
+    return h(
+      'article',
+      { class: 'release-card n-releases__release', data: { state: c.state }, attrs: { 'aria-labelledby': titleId } },
+      ...photographed(c.image, words, { bare: 'n-releases__bare', extraClass: 'n-releases__photo release-card__frame', imgClass: 'release-card__img' }),
     );
   }
 }
@@ -412,18 +497,19 @@ class ListPage {
 type TakenLoad = { kind: 'none' } | { kind: 'loading' } | { kind: 'ready'; model: ParticipationModel } | { kind: 'failed' };
 
 /**
- * THE RELEASES' PAST (plan LIVE RELEASE+, choice 5): the releases ended, a page at a time. The cards already shown stay
- * as they are when more come (SHOW MORE appends them, the keyboard moved to the first of them) and when the account's
- * part in them arrives (each card's mark filled in place): nothing is read again to a screen reader that it has read.
+ * THE RELEASES' PAST (plan LIVE RELEASE+, choice 5; C25): the releases ended, a page at a time. The cards already shown
+ * stay as they are when more come (SHOW MORE appends them, the keyboard moved to the first of them) and when the
+ * account's part in them arrives (each card's mark filled in place): nothing is read again to a screen reader that it
+ * has read. « You have taken part in N releases. » is the head's sentence while PAST shows (`onTaken`).
  */
 class PastList {
   readonly root: HTMLElement;
-  /** « You have taken part in N releases. », signed in. */
-  private readonly taken = h('p', { class: 'prose releases__taken', attrs: { hidden: true } });
+  /** Why the account's part could not be read, signed in. */
+  private readonly takenError = h('p', { class: 'n-px n-sm n-ivc form__error n-releases__state', attrs: { role: 'alert', hidden: true }, text: RELEASES.past.takenFailed });
   /** ONE MOMENT…, NO RELEASE HAS ENDED YET, or why the releases could not be shown. */
   private readonly status = h('div', { class: 'releases__past-status', attrs: { 'aria-live': 'polite' } });
-  private readonly list = h('ul', { class: 'releases__list releases__past-list', attrs: { hidden: true } });
-  private readonly more = h('div', { class: 'releases__past-more' });
+  private readonly list = h('ul', { class: 'releases__list releases__past-list n-releases__list', attrs: { hidden: true } });
+  private readonly more = h('div', { class: 'releases__past-more n-releases__more' });
   /** Each card's mark (YOU TOOK PART, YOU SECURED A PIECE), by release. */
   private readonly marks = new Map<string, HTMLElement>();
   /** The releases shown and the pages read: SHOW MORE asks for the next page counted (a release ended meanwhile moves the others). */
@@ -435,14 +521,22 @@ class PastList {
   private unsubscribe: (() => void) | null;
   private disposed = false;
 
-  constructor(private readonly deps: ReleasesDeps) {
-    this.root = h('div', { class: 'releases__past' }, this.taken, this.status, this.list, this.more);
+  constructor(
+    private readonly deps: ReleasesDeps,
+    private readonly onTaken: () => void,
+  ) {
+    this.root = h('div', { class: 'releases__past' }, this.takenError, this.status, this.list, this.more);
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
     void this.load();
     void deps.session
       .ensure()
       .catch(() => undefined)
       .then(() => this.onSession());
+  }
+
+  /** « You have taken part in N releases. », once read for the account signed in; null otherwise. */
+  get taken(): string | null {
+    return this.part.kind === 'ready' ? this.part.model.taken : null;
   }
 
   dispose(): void {
@@ -457,7 +551,7 @@ class PastList {
     this.busy = true;
     const page = this.pages.next;
     if (next) this.drawMore('loading');
-    else this.drawStatus(loadingState(RELEASES.loading, { extraClass: 'releases__waiting' }));
+    else this.drawStatus(loadingState(RELEASES.loading, { extraClass: 'releases__waiting n-releases__state' }));
     try {
       const r = await this.deps.api.pastReleases(page, PAST_PAGE_SIZE);
       if (this.disposed) return;
@@ -470,7 +564,7 @@ class PastList {
       this.busy = false;
       if (next) this.drawMore('failed', messageOf(e));
       else {
-        this.drawStatus(failedState({ sentence: RELEASES.past.loadFailed, reason: messageOf(e), retry: RELEASES.retry, onRetry: () => void this.load(), retryClass: 'releases__retry' }));
+        this.drawStatus(h('div', { class: 'n-px n-releases__state' }, failedState({ sentence: RELEASES.past.loadFailed, reason: messageOf(e), retry: RELEASES.retry, onRetry: () => void this.load(), retryClass: 'releases__retry' })));
       }
     }
   }
@@ -478,13 +572,13 @@ class PastList {
   private append(fresh: PastCardModel[], next: boolean): void {
     const first = this.pages.cards.length - fresh.length;
     if (this.pages.cards.length === 0) {
-      this.drawStatus(quietLine(RELEASES.past.empty, 'releases__empty'));
+      this.drawStatus(h('div', { class: 'n-px n-releases__state' }, quietLine(RELEASES.past.empty, 'releases__empty')));
       this.drawMore('idle');
       return;
     }
     this.drawStatus();
     this.list.hidden = false;
-    this.list.append(...fresh.map((c) => h('li', { class: 'releases__item' }, this.card(c))));
+    this.list.append(...fresh.map((c) => h('li', { class: 'releases__item n-releases__item' }, this.card(c))));
     this.drawMarks();
     this.drawMore('idle');
     // SHOW MORE: the keyboard on the first release it brought.
@@ -501,35 +595,32 @@ class PastList {
   private drawMore(state: 'idle' | 'loading' | 'failed', message = ''): void {
     const hadFocus = this.more.contains(document.activeElement);
     const out: HTMLElement[] = [];
-    if (state === 'loading') out.push(h('p', { class: 'releases__waiting micro', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
-    if (state === 'failed') out.push(h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${RELEASES.past.moreFailed} ${message}` }));
-    if (state !== 'loading' && this.pages.more) {
-      out.push(h('button', { class: 'textlink releases__more', attrs: { type: 'button' }, on: { click: () => void this.load(true) }, text: RELEASES.past.more }));
-    }
+    if (state === 'loading') out.push(h('p', { class: 'n-g n-lb n-ivc n-ctr releases__waiting', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
+    if (state === 'failed') out.push(h('p', { class: 'n-px n-sm n-ivc n-ctr form__error', attrs: { role: 'alert' }, text: `${RELEASES.past.moreFailed} ${message}` }));
+    if (state !== 'loading' && this.pages.more) out.push(h('p', { class: 'n-ctr n-releases__more-line' }, textLink(RELEASES.past.more, { onOpen: () => void this.load(true), extraClass: 'releases__more' })));
     this.more.replaceChildren(...out);
+    this.more.hidden = out.length === 0;
     if (hadFocus && state === 'failed') this.more.querySelector<HTMLElement>('button')?.focus();
   }
 
-  /** A release ended: its ivory plate, what was announced, its mark once the account's part is known. */
+  /** A release ended (C25): its photograph, its kind and date, its title, its model, its quantity, its mark, SEE THE RELEASE. */
   private card(c: PastCardModel): HTMLElement {
-    const id = `past-${c.id}`;
-    const link = releasesLink(() => this.deps.onRelease(c.id), { id: c.id, extraClass: 'release-card__link' });
-    link.setAttribute('aria-describedby', `${id}-title`);
-    const mark = h('p', { class: 'release-card__mark', attrs: { hidden: true } });
+    const titleId = `past-${c.id}-title`;
+    const link = textLink(RELEASES.see, { href: c.href, onOpen: () => this.deps.onRelease(c.id), extraClass: 'release-card__link' });
+    link.setAttribute('aria-describedby', titleId);
+    const mark = h('p', { class: 'n-state n-releases__mark release-card__mark', attrs: { hidden: true } });
     this.marks.set(c.id, mark);
-    return bracket(
-      h(
-        'article',
-        { class: 'release-card release-card--past', attrs: { 'aria-labelledby': `${id}-title` } },
-        c.image ? h('div', { class: 'release-card__frame', data: { photo: '' } }, photo(c.image, 'release-card__img')) : null,
-        h('p', { class: 'release-card__state', text: c.kind }),
-        h('h2', { class: 'release-card__title', id: `${id}-title` }, ...withNumerals(c.title)),
-        c.model ? h('p', { class: 'release-card__model' }, ...withNumerals(c.model)) : null,
-        h('p', { class: 'release-card__line micro', text: c.line }),
-        mark,
-        link,
-      ),
+    const words = h(
+      'div',
+      { class: 'n-px n-lift n-releases__words' },
+      h('p', { class: 'n-g n-lb release-card__state' }, ...withNumerals([c.kind, c.date].filter(Boolean).join(' · '))),
+      h('h2', { class: 'n-g n-t2 n-releases__past-title release-card__title', id: titleId }, ...withNumerals(c.title)),
+      c.model ? h('p', { class: 'n-g n-lb n-releases__past-model release-card__model' }, ...withNumerals(c.model)) : null,
+      h('p', { class: 'n-g n-lb n-ivc n-releases__past-pieces release-card__line' }, ...withNumerals(c.pieces)),
+      mark,
+      h('p', { class: 'n-releases__see-line' }, link),
     );
+    return h('article', { class: 'release-card release-card--past n-releases__release', attrs: { 'aria-labelledby': titleId } }, ...photographed(c.image, words, { bare: 'n-releases__bare', extraClass: 'n-releases__photo release-card__frame', imgClass: 'release-card__img' }));
   }
 
   // ── The account's part ──────────────────────────────────────────────────
@@ -565,18 +656,20 @@ class PastList {
   }
 
   private drawPart(): void {
-    const p = this.part;
-    this.taken.classList.toggle('form__error', p.kind === 'failed');
-    this.taken.textContent = p.kind === 'ready' ? p.model.taken : p.kind === 'failed' ? RELEASES.past.takenFailed : '';
-    this.taken.hidden = p.kind !== 'ready' && p.kind !== 'failed';
+    this.takenError.hidden = this.part.kind !== 'failed';
+    this.onTaken();
     this.drawMarks();
   }
 
+  /** Each mark: YOU SECURED A PIECE with its check, or YOU TOOK PART; nothing signed out or for a release not taken part in. */
   private drawMarks(): void {
     const marks = this.part.kind === 'ready' ? this.part.model.marks : null;
     for (const [id, el] of this.marks) {
       const text = marks?.get(id) ?? '';
-      if (el.textContent !== text) el.textContent = text;
+      if (el.dataset.text !== text) {
+        el.dataset.text = text;
+        el.replaceChildren(...(text === RELEASES.past.secured ? [icon('check', { small: true })] : []), text);
+      }
       el.hidden = text === '';
     }
   }
@@ -592,19 +685,32 @@ type DrawList = { kind: 'idle' } | { kind: 'loading'; items: DrawEntry[] } | { k
 /** Entries of the draw's list read at a time. */
 const DRAW_PAGE = 100;
 
+/**
+ * The facts of a release as label and value rows (C19's `.kv`): a label in the display face, its value in the reading
+ * face; a time is said in UTC, then on this phone's clock under it.
+ */
+function releaseRows(rows: readonly ReleaseRow[]): HTMLDListElement {
+  return h(
+    'dl',
+    { class: 'n-release__rows release__rows' },
+    ...rows.map((r) =>
+      h(
+        'div',
+        { class: 'n-kv__row n-release__row release__row' },
+        h('dt', { class: 'n-g n-kv__label n-release__label release__label', text: r.label }),
+        h('dd', { class: 'n-kv__value n-release__value' }, h('span', { class: 'n-num release__utc', text: r.value }), r.local ? h('br') : null, r.local ? h('span', { class: 'n-sm n-num release__local', text: r.local }) : null),
+      ),
+    ),
+  );
+}
+
 class ReleasePage {
   readonly root: HTMLElement;
-  private readonly title = h('h1', { class: 'release__title', id: 'release-title', text: RELEASES.title });
-  private readonly eyebrow = h('p', { class: 'release__eyebrow', attrs: { hidden: true } });
-  private readonly stateLine = h('p', { class: 'release__state', attrs: { hidden: true } });
-  /** P-X02: PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM … (UTC), with an early access. */
-  private readonly accessLine = h('p', { class: 'release__access micro', attrs: { hidden: true } });
-  /** Drawn, the release is over: signed in, the account's part in it (YOU TOOK PART, YOU SECURED A PIECE). */
-  private readonly partLine = h('p', { class: 'release__part', attrs: { hidden: true } });
-  private readonly body = h('div', { class: 'release__body', attrs: { 'aria-live': 'polite' } });
-  private readonly entrySection = h('section', { class: 'release__section release__entry', attrs: { 'aria-labelledby': 'release-entry' } });
-  private readonly drawSection = h('section', { class: 'release__section release__draw', attrs: { 'aria-labelledby': 'release-draw' } });
-  private readonly foot = h('footer', { class: 'release__foot' });
+  /** The release's photograph and its words lifted onto it: its collection, its title, its state. */
+  private readonly hero = h('section', { class: 'release__head n-release__hero' });
+  private readonly body = h('div', { class: 'release__body n-release__body', attrs: { 'aria-live': 'polite' } });
+  private readonly entrySection = h('section', { class: 'n-px n-sec n-release__section release__section release__entry', attrs: { 'aria-labelledby': 'release-entry' } });
+  private readonly drawSection = h('section', { class: 'n-px n-sec n-release__section release__section release__draw', attrs: { 'aria-labelledby': 'release-draw' } });
   private load: ReleaseLoad = { kind: 'loading' };
   private entry: EntryLoad = { kind: 'none' };
   private draw: DrawList = { kind: 'idle' };
@@ -622,10 +728,14 @@ class ReleasePage {
   private tier = 0;
   /** Drawn: the account's part in the release, read with its entry; null when none (or when it could not be read). */
   private part: string | null = null;
+  /** What the hero was drawn from: drawn again only when it changes (the photograph is not loaded again). */
+  private heroKey = '';
 
   constructor(private readonly deps: ReleaseDeps) {
     this.root = viewRoot('release', 'release-title');
-    this.root.append(h('header', { class: 'release__head' }, wordmark('release__wordmark'), this.eyebrow, this.title, this.stateLine, this.partLine, this.accessLine), this.body, this.foot);
+    this.root.classList.add('n-release');
+    const crumb = appAnchor(RELEASES_PATH, ['n-g', 'n-crumb', 'release__crumb'], () => deps.onReleases(), icon('back', { small: true }), RELEASES.link);
+    this.root.append(crumb, this.hero, this.body);
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
     this.render();
     void this.start();
@@ -645,6 +755,10 @@ class ReleasePage {
       this.load = { kind: 'missing' };
       this.render();
       return;
+    }
+    if (this.load.kind !== 'loading') {
+      this.load = { kind: 'loading' };
+      this.render();
     }
     try {
       const [sheet, contacts] = await Promise.all([this.deps.api.drop(id), this.deps.clientServices()]);
@@ -784,53 +898,41 @@ class ReleasePage {
     const l = this.load;
     this.root.dataset.state = l.kind;
     if (l.kind !== 'ready') {
-      this.eyebrow.hidden = true;
-      this.stateLine.hidden = true;
-      this.partLine.hidden = true;
-      this.accessLine.hidden = true;
-      this.title.textContent = RELEASES.title;
-      this.foot.replaceChildren(this.scanButton('btn'), releasesLink(() => this.deps.onReleases(), { extraClass: 'release__releases' }));
+      this.heroKey = l.kind;
+      // The page's title while there is no release to name: THE RELEASES, and its state under it (C40).
+      this.hero.replaceChildren(h('div', { class: 'n-px n-release__plain' }, h('h1', { class: 'n-g n-t1 release__title', id: 'release-title', text: RELEASES.title })));
     }
     if (l.kind === 'loading') {
-      this.body.replaceChildren(loadingState(RELEASES.loading, { extraClass: 'releases__waiting' }));
+      this.body.replaceChildren(loadingState(RELEASES.loading, { extraClass: 'releases__waiting n-releases__state' }));
       return;
     }
     if (l.kind === 'missing') {
-      this.body.replaceChildren(quietLine(RELEASES.notFound, 'release__missing'));
+      this.body.replaceChildren(h('div', { class: 'n-px n-releases__state' }, quietLine(RELEASES.notFound, 'release__missing')));
       return;
     }
     if (l.kind === 'failed') {
-      this.body.replaceChildren(failedState({ sentence: RELEASES.loadFailed, reason: l.message, retry: RELEASES.retry, onRetry: () => void this.start(), retryClass: 'release__retry' }));
+      this.body.replaceChildren(h('div', { class: 'n-px n-releases__state' }, failedState({ sentence: RELEASES.loadFailed, reason: l.message, retry: RELEASES.retry, onRetry: () => void this.start(), retryClass: 'release__retry' })));
       if (hadFocus) this.body.querySelector<HTMLElement>('.release__retry')?.focus();
       return;
     }
     const s = l.sheet;
     this.root.dataset.release = s.state.toLowerCase();
-    this.eyebrow.replaceChildren(...withNumerals(s.eyebrow));
-    this.eyebrow.hidden = false;
-    this.title.replaceChildren(...withNumerals(s.title));
-    this.stateLine.textContent = s.stateLabel;
-    this.stateLine.hidden = false;
-    this.accessLine.textContent = s.access ?? '';
-    this.accessLine.hidden = s.access === null;
-    this.partLine.textContent = s.drawn ? (this.part ?? '') : '';
-    this.partLine.hidden = !s.drawn || this.part === null;
+    this.renderHero(s);
 
     const sections: (HTMLElement | null)[] = [];
-    if (s.image) {
-      sections.push(h('section', { class: 'release__photo', attrs: { 'aria-label': s.image.alt }, data: { photo: '' } }, bracket(h('div', { class: 'release__plate' }, photo(s.image, 'release__img', true)))));
-    }
-    const description = storyBlock(s.description, { className: 'release__description', paragraphClass: 'prose release__paragraph' });
-    if (description) sections.push(description);
-    const model = h('p', { class: 'release__model' }, ...withNumerals(s.model));
+    // Drawn, the release is over (decision 30): said on a plate under its title, as a LIVE RELEASE's final page (C29).
+    if (s.drawn) sections.push(h('div', { class: 'n-nx n-release__over' }, h('p', { class: 'n-g n-t3 n-ivc release__state', text: RELEASES.over })));
+    const description = storyBlock(s.description, { className: 'n-release__description release__description', paragraphClass: 'n-tx release__paragraph' });
+    const see = s.lookbookSlug ? appAnchor(lookbookSheetPath(s.lookbookSlug), ['n-release__see', 'release__see-model'], () => this.deps.onModel(s.lookbookSlug!), LOOKBOOK.seeModel) : null;
     sections.push(
       h(
         'section',
-        { class: 'release__section', attrs: { 'aria-labelledby': 'release-facts' } },
-        sectionLabel(RELEASES.section.release, 'release-facts'),
-        h('div', { class: 'release__model-line' }, model, s.lookbookSlug ? lookbookLink(() => this.deps.onModel(s.lookbookSlug!), { slug: s.lookbookSlug, extraClass: 'release__see-model' }) : null),
+        { class: 'n-px n-sec n-release__section release__section', attrs: { 'aria-labelledby': 'release-facts' } },
+        h('h2', { class: 'n-g n-t3', id: 'release-facts', text: RELEASES.section.release }),
+        description,
+        h('p', { class: 'n-g n-lb n-release__model release__model' }, ...withNumerals(s.model), see ? '  ' : null, see),
         releaseRows(s.rows),
-        s.earlyNote ? h('p', { class: 'prose release__early', text: s.earlyNote }) : null,
+        s.earlyNote ? h('p', { class: 'n-sm n-release__early release__early', text: s.earlyNote }) : null,
       ),
     );
     sections.push(this.entrySection, this.drawSection);
@@ -839,60 +941,78 @@ class ReleasePage {
     this.renderDraw();
   }
 
-  private scanButton(kind: 'btn' | 'textlink'): HTMLButtonElement {
-    return h('button', { class: `${kind} release__scan`, attrs: { type: 'button' }, on: { click: () => this.deps.onScan() }, text: RELEASES.scan });
+  /**
+   * The hero (C19): the model's photograph, faded; its collection (or model), its title (the model's name on a line of
+   * its own), its state and, with an early access, its two openings in UTC; drawn, the account's part in it (C29).
+   */
+  private renderHero(s: ReleaseSheetModel): void {
+    const key = JSON.stringify([s.id, s.image, s.eyebrow, s.title, s.stateLabel, s.access, s.drawn, this.part]);
+    if (key === this.heroKey) return;
+    this.heroKey = key;
+    const title = modelTitle('h1', ['n-g', 'n-t1', 'n-release__title', 'release__title'], s.title, modelName(s.model));
+    title.id = 'release-title';
+    const words = h(
+      'div',
+      { class: 'n-px n-ctr n-lift n-release__words' },
+      h('p', { class: 'n-g n-lb release__eyebrow' }, ...withNumerals(s.eyebrow)),
+      title,
+      s.drawn ? null : h('p', { class: 'n-g n-lb n-ivc n-release__state release__state', text: s.stateLabel }),
+      s.access ? timedAccess(s.access) : null,
+      s.drawn && this.part ? h('p', { class: 'n-state n-release__part release__part' }, ...(this.part === RELEASES.past.secured ? [icon('check', { small: true })] : []), this.part) : null,
+    );
+    this.hero.replaceChildren(...photographed(s.image, words, { eager: true, bare: 'n-release__bare', extraClass: 'n-release__photo release__photo', imgClass: 'release__img' }));
   }
 
   /** YOUR ENTRY: the sign-in when signed out, else what the entry means now and the one action it allows. */
   private renderEntry(): void {
     if (this.load.kind !== 'ready') return;
     const s = this.load.sheet;
+    if (s.drawn) this.renderHero(s);
     const hadFocus = this.entrySection.contains(document.activeElement);
     const session = this.deps.session.state;
-    const heading = sectionLabel(RELEASES.section.entry, 'release-entry');
+    const heading = h('h2', { class: 'n-g n-t3', id: 'release-entry', text: RELEASES.section.entry });
     heading.tabIndex = -1;
-    let offersAction = false;
     const out: (HTMLElement | null)[] = [heading];
     if (session.status !== 'signed-in') {
       // No account needed to read; ENTER THE DRAW needs one (any): the OWNERSHIP panel's sign-in and CREATE ACCOUNT.
       if (s.state === 'OPEN' || s.state === 'UPCOMING') {
         this.signIn ??= new OwnershipPanel({ kind: 'account', lead: RELEASES.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
-        out.push(h('div', { class: 'release__signin' }, this.signIn.root));
+        out.push(h('div', { class: 'n-release__signin release__signin' }, this.signIn.root));
       } else {
         out.push(this.sentence(entryModel(this.releaseOf(s), null, this.entryOpts())));
       }
     } else if (this.entry.kind === 'loading' || this.entry.kind === 'none') {
-      out.push(h('p', { class: 'ownership__meta micro soft', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
+      out.push(h('p', { class: 'n-g n-lb n-ivc n-release__waiting', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
     } else if (this.entry.kind === 'failed') {
       out.push(
-        h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${RELEASES.entryFailed} ${this.entry.message}` }),
-        h('button', { class: 'textlink release__retry-entry', attrs: { type: 'button' }, on: { click: () => void this.readEntry() }, text: RELEASES.retry }),
+        h('p', { class: 'n-sm n-ivc n-release__error form__error', attrs: { role: 'alert' }, text: `${RELEASES.entryFailed} ${this.entry.message}` }),
+        h('p', { class: 'n-release__retry-line' }, textLink(RELEASES.retry, { onOpen: () => void this.readEntry(), extraClass: 'release__retry-entry' })),
       );
     } else {
       const m = entryModel(this.releaseOf(s), this.entry.entry, this.entryOpts());
       out.push(this.sentence(m));
-      if (m.entryId) out.push(h('p', { class: 'release__entry-id micro soft', text: RELEASES.entryId(m.entryId) }));
-      if (this.actionError) out.push(h('p', { class: 'form__error', attrs: { role: 'alert' }, text: this.actionError }));
-      if (m.canEnter) {
-        offersAction = true;
-        out.push(h('button', { class: 'btn release__enter', attrs: { type: 'button', disabled: this.busy, 'aria-busy': this.busy ? 'true' : 'false' }, on: { click: () => void this.act('enter') }, text: RELEASES.enter }));
-      }
-      // P-X02: during the early access, a PLATINE or PALLADIUM account holds a place at once.
-      if (m.canReserve) {
-        offersAction = true;
-        out.push(h('button', { class: 'btn release__reserve', attrs: { type: 'button', disabled: this.busy, 'aria-busy': this.busy ? 'true' : 'false' }, on: { click: () => void this.act('reserve') }, text: RELEASES.reserve }));
-      }
-      if (m.canWithdraw) out.push(h('div', { class: 'ownership__actions' }, h('button', { class: 'textlink release__withdraw', attrs: { type: 'button', disabled: this.busy }, on: { click: () => void this.act('withdraw') }, text: RELEASES.withdraw })));
-      if (m.contact) out.push(contactBlock(m.contact));
+      if (m.entryId) out.push(h('p', { class: 'n-sm n-num n-release__entry-id release__entry-id', text: RELEASES.entryId(m.entryId) }));
+      if (this.actionError) out.push(h('p', { class: 'n-sm n-ivc n-release__error form__error', attrs: { role: 'alert' }, text: this.actionError }));
+      // The one filled button of the page: ENTER THE DRAW, or RESERVE A PLACE (P-X02, a PLATINE or PALLADIUM account
+      // during the early access); should both be offered, the second is a hairline button.
+      let filled = true;
+      const action = (label: string, cls: string, run: () => void, outline = false) => {
+        const b = button(label, { outline: outline || !filled, extraClass: `n-release__action ${cls}`, onClick: run, attrs: { disabled: this.busy, 'aria-busy': this.busy ? 'true' : 'false' } });
+        if (!outline) filled = false;
+        return b;
+      };
+      if (m.canEnter) out.push(action(RELEASES.enter, 'release__enter', () => void this.act('enter')));
+      if (m.canReserve) out.push(action(RELEASES.reserve, 'release__reserve', () => void this.act('reserve')));
+      if (m.canWithdraw) out.push(action(RELEASES.withdraw, 'release__withdraw', () => void this.act('withdraw'), true));
+      if (m.contact) out.push(contactLines(m.contact, { action: CONTACT.action, call: CONTACT.call }));
     }
     this.entrySection.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
-    // One hairline button on the page: ENTER THE DRAW or RESERVE A PLACE while it is offered, SCAN ORBES CODE otherwise.
-    this.foot.replaceChildren(this.scanButton(offersAction ? 'textlink' : 'btn'), releasesLink(() => this.deps.onReleases(), { extraClass: 'release__releases' }));
     if (hadFocus && !this.entrySection.contains(document.activeElement)) (this.entrySection.querySelector<HTMLElement>('input, button:not([disabled])') ?? heading).focus({ preventScroll: true });
   }
 
+  /** What the entry means now: its status (ENTERED, PLACE HELD…) in ivory capitals, then its sentence. */
   private sentence(m: EntryModel): HTMLElement {
-    return h('div', { class: 'release__status' }, m.label ? h('p', { class: 'ownership__status', text: m.label }) : null, h('p', { class: 'prose release__sentence', text: m.sentence }));
+    return h('div', { class: 'n-release__status release__status' }, m.label ? h('p', { class: 'n-g n-t3 n-ivc n-release__status-label ownership__status', text: m.label }) : null, h('p', { class: 'n-tx n-release__sentence release__sentence', text: m.sentence }));
   }
 
   private releaseOf(s: ReleaseSheetModel) {
@@ -903,65 +1023,72 @@ class ReleasePage {
     return { offsetMinutes: this.deps.offsetMinutes, clientServices: this.contacts, tier: this.tier };
   }
 
-  /** THE DRAW: its rule and commitment; once drawn, the seed, the phone's check and the entries by rank. */
+  /** THE DRAW: what a place drawn obliges to, its rule and commitment, the seed's fingerprint; once drawn, the seed, the phone's check and the entries by rank. */
   private renderDraw(): void {
     if (this.load.kind !== 'ready') return;
     const s = this.load.sheet;
     const hadFocus = this.drawSection.contains(document.activeElement);
-    const facts: ReleaseRow[] = [{ label: RELEASES.seedHash, value: s.seedHash }];
-    if (s.seed) facts.push({ label: RELEASES.seed, value: s.seed });
+    const facts: { label: string; value: string }[] = [{ label: RELEASES.seedHash, value: s.seedHashHex }];
+    if (s.seedHex) facts.push({ label: RELEASES.seed, value: s.seedHex });
     const out: (HTMLElement | null)[] = [
-      sectionLabel(RELEASES.section.draw, 'release-draw'),
-      h('p', { class: 'prose release__rule', text: RELEASES.rule }),
-      h('p', { class: 'prose release__obligation', text: RELEASES.noObligation }),
-      h('p', { class: 'prose release__commitment', text: RELEASES.commitment }),
+      h('h2', { class: 'n-g n-t3', id: 'release-draw', text: RELEASES.section.draw }),
+      h('p', { class: 'n-sm n-release__para release__obligation', text: RELEASES.noObligation }),
+      h('p', { class: 'n-sm n-release__para release__rule', text: RELEASES.rule }),
+      h('p', { class: 'n-sm n-release__para release__commitment', text: RELEASES.commitment }),
       h(
         'dl',
-        { class: 'rows release__seed' },
-        ...facts.map((f) => h('div', { class: 'rows__row' }, h('dt', { class: 'rows__label', text: f.label }), h('dd', { class: 'rows__value release__hex', text: f.value }))),
+        { class: 'n-release__seed release__seed' },
+        ...facts.map((f) => h('div', { class: 'n-release__seed-fact' }, h('dt', { class: 'n-g n-lb n-release__seed-label', text: f.label }), h('dd', { class: 'n-sm n-num n-release__hex release__hex', text: f.value }))),
       ),
     ];
     if (s.drawn && this.seedMatches !== null) {
-      out.push(h('p', { class: 'prose release__check', attrs: { role: 'status' }, text: this.seedMatches ? RELEASES.seedChecked : RELEASES.seedMismatch }));
+      out.push(h('p', { class: 'n-sm n-ivc n-release__check release__check', attrs: { role: 'status' }, text: this.seedMatches ? RELEASES.seedChecked : RELEASES.seedMismatch }));
     }
-    if (s.drawn) out.push(...this.drawList(s));
+    if (s.drawn) out.push(...this.drawList());
     this.drawSection.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
     if (hadFocus && !this.drawSection.contains(document.activeElement)) this.drawSection.querySelector<HTMLElement>('.release__more, .release__retry-draw')?.focus({ preventScroll: true });
   }
 
-  private drawList(s: ReleaseSheetModel): HTMLElement[] {
+  /** THE ENTRIES: every entry the draw ranked, in its order, the account's own marked YOURS; SHOW MORE a hundred at a time. */
+  private drawList(): HTMLElement[] {
     const d = this.draw;
     const items = d.kind === 'idle' ? [] : d.items;
     const yours = this.entry.kind === 'ready' && this.entry.entry ? this.entry.entry.id : null;
     const lines = drawLines(items, yours);
-    const out: HTMLElement[] = [sectionLabel(RELEASES.section.entries, 'release-entries'), h('p', { class: 'prose release__entries-lead', text: RELEASES.entriesLead })];
+    const out: HTMLElement[] = [h('h3', { class: 'n-g n-t3 n-release__entries', id: 'release-entries', text: RELEASES.section.entries }), h('p', { class: 'n-sm n-release__para release__entries-lead', text: RELEASES.entriesLead })];
     if (lines.length > 0) {
       out.push(
         h(
           'ol',
-          { class: 'release__list', attrs: { 'aria-labelledby': 'release-entries' } },
+          { class: 'n-release__list release__list', attrs: { 'aria-labelledby': 'release-entries' } },
           ...lines.map((l) =>
             h(
               'li',
-              { class: ['release__item', l.yours ? 'is-yours' : null], data: { rank: String(l.rank) } },
-              h('span', { class: 'release__item-line', text: l.line }),
-              h('span', { class: 'release__item-id', text: l.id }),
-              l.yours ? h('span', { class: 'release__item-yours', text: RELEASES.yours }) : null,
+              { class: ['n-release__item', 'release__item', l.yours ? 'is-yours' : null], data: { rank: String(l.rank) } },
+              h('span', { class: 'n-g n-lb n-release__item-line release__item-line' }, ...withNumerals(l.line)),
+              h('span', { class: 'n-sm n-num n-release__item-id release__item-id', text: l.id }),
+              l.yours ? h('span', { class: 'n-g n-lb n-ivc n-release__item-yours release__item-yours', text: RELEASES.yours }) : null,
             ),
           ),
         ),
       );
     }
-    if (d.kind === 'loading') out.push(h('p', { class: 'ownership__meta micro soft', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
+    if (d.kind === 'loading') out.push(h('p', { class: 'n-g n-lb n-ivc n-release__waiting', attrs: { 'aria-busy': 'true' }, text: RELEASES.loading }));
     if (d.kind === 'failed') {
       out.push(
-        h('p', { class: 'form__error', attrs: { role: 'alert' }, text: `${RELEASES.entriesFailed} ${d.message}` }),
-        h('button', { class: 'textlink release__retry-draw', attrs: { type: 'button' }, on: { click: () => void this.moreEntries() }, text: RELEASES.retry }),
+        h('p', { class: 'n-sm n-ivc n-release__error form__error', attrs: { role: 'alert' }, text: `${RELEASES.entriesFailed} ${d.message}` }),
+        h('p', { class: 'n-release__retry-line' }, textLink(RELEASES.retry, { onOpen: () => void this.moreEntries(), extraClass: 'release__retry-draw' })),
       );
     }
     if (d.kind === 'ready' && d.items.length < d.total) {
-      out.push(h('button', { class: 'textlink release__more', attrs: { type: 'button' }, on: { click: () => void this.moreEntries() }, text: RELEASES.more }));
+      out.push(h('p', { class: 'n-release__more-line' }, textLink(RELEASES.more, { onOpen: () => void this.moreEntries(), extraClass: 'release__more' })));
     }
     return out;
   }
+}
+
+/** P-X02's line under the state: its times in UTC, each kept whole on its line. */
+function timedAccess(line: string): HTMLParagraphElement {
+  const parts = line.split(/(\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2})/);
+  return h('p', { class: 'n-g n-lb n-num n-release__access release__access' }, ...parts.flatMap((p, i) => (p === '' ? [] : i % 2 === 1 ? [h('span', { class: 'n-nw' }, ...withNumerals(p))] : withNumerals(p))));
 }

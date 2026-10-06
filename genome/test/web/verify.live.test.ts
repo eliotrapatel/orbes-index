@@ -29,6 +29,8 @@ import {
   bannerModel,
   interestLine,
   liveCards,
+  liveHeading,
+  accessRules,
   liveReference,
   measureClock,
   nextChange,
@@ -330,6 +332,10 @@ describe('which screen the page shows', () => {
     const m = livePastModel(over(), 'Europe/Paris');
     expect(m).toEqual({
       name: 'MONOLITHE',
+      heading: 'MONOLITHE',
+      model: 'MONOLITHE',
+      day: 'SUNDAY 11 OCTOBER',
+      pieces: '25 PIECES',
       line: 'RING · ORBIT',
       facts: '11 OCT 2026 · 25 PIECES',
       picture: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES', kind: 'photo' },
@@ -341,6 +347,10 @@ describe('which screen the page shows', () => {
     // Ended before its name or its photograph was revealed: named nowhere, the seal on its plate.
     expect(livePastModel(over({ title: null, name: null, type: null, collection: null, description: null, imageUrl: null, silhouetteUrl: null, lookbook: null }), 'UTC')).toEqual({
       name: 'LIVE RELEASE',
+      heading: 'LIVE RELEASE',
+      model: null,
+      day: 'SUNDAY 11 OCTOBER',
+      pieces: '25 PIECES',
       line: null,
       facts: '11 OCT 2026 · 25 PIECES',
       picture: null,
@@ -515,6 +525,13 @@ describe('the release announced, and its card in THE RELEASES', () => {
     expect(access('collectors who have taken part in 3 releases')).toBe('FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES');
     expect(access('selected collectors')).toBe('FOR SELECTED COLLECTORS');
     expect(access('owners from PLATINE or collectors who have taken part in 3 releases')).toBe('FOR OWNERS FROM PLATINE OR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES');
+    // NOCTURNE (C27, WHO MAY ENTER): the rules any one of which lets a collector in, one by one; a rule's own « or » keeps it whole.
+    expect(accessRules('owners from PLATINE or collectors who have taken part in 3 releases or selected collectors')).toEqual(['FOR OWNERS FROM PLATINE', 'FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES', 'FOR SELECTED COLLECTORS']);
+    expect(accessRules('owners from PLATINE or owners of MONOLITHE or ZENITH')).toEqual(['FOR OWNERS FROM PLATINE', 'FOR OWNERS OF MONOLITHE OR ZENITH']);
+    expect(accessRules('selected owners from PLATINE who have taken part in 3 releases')).toEqual(['FOR SELECTED OWNERS FROM PLATINE WHO HAVE TAKEN PART IN 3 RELEASES']);
+    expect(accessRules('owners of this model or this model’s collection')).toEqual(['FOR OWNERS OF THIS MODEL OR THIS MODEL’S COLLECTION']);
+    expect(accessRules('')).toEqual([]);
+    expect(liveSheetModel(sheet({ access: { minTier: 2, text: 'owners from PLATINE or selected collectors' } }), 'Europe/Paris').rules).toEqual(['FOR OWNERS FROM PLATINE', 'FOR SELECTED COLLECTORS']);
   });
 
   it('shows each stage only once the server sends it: the silhouette, else the seal; no name before its time', () => {
@@ -552,6 +569,9 @@ describe('the release announced, and its card in THE RELEASES', () => {
       when: { paris: 'SUNDAY 11 OCTOBER · 19:00 PARIS', local: null },
       line: '€ 4 800 · 25 PIECES · ONE PER COLLECTOR',
       access: 'FOR OWNERS FROM PLATINE',
+      price: '€ 4 800',
+      lines: ['25 PIECES', 'ONE PER COLLECTOR', 'FOR OWNERS FROM PLATINE'],
+      opensAt: T0,
       picture: { src: media(1), alt: 'The model of MONOLITHE, photographed by ORBES', kind: 'photo' },
       reveals: [],
       interest: null,
@@ -559,6 +579,10 @@ describe('the release announced, and its card in THE RELEASES', () => {
     expect(room0!.kind).toBe('LIVE RELEASE · THE ROOM IS OPEN');
     expect(live!.kind).toBe('LIVE RELEASE · LIVE NOW');
     expect(unnamed).toMatchObject({ title: 'TO BE REVEALED', picture: null });
+    // NOCTURNE (C7): named by its model with its variant once revealed (« a release names the model with its variant »).
+    expect(liveCards([card({ variant: 'Blue' })], 'Europe/Paris')[0]!.title).toBe('MONOLITHE IN BLUE');
+    expect(liveHeading({ name: 'Monolithe', variant: '  ' })).toBe('MONOLITHE');
+    expect(liveHeading({ name: null, variant: 'Blue' })).toBeNull();
     expect(liveCards([card({ perAccount: 2 })], 'Europe/Paris')[0]!.line).toBe('€ 4 800 · 25 PIECES · UP TO 2 PER COLLECTOR');
     expect(liveCards([card()], 'Asia/Tokyo')[0]!.when.local).toBe('MONDAY 12 OCTOBER · 02:00 ON THIS PHONE');
   });

@@ -17,7 +17,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
-import { TIER } from '../../src/web/verify/copy.js';
+import { LIVE, RELEASES, TIER } from '../../src/web/verify/copy.js';
 import { BASELINE_FILE, eachState, type Baseline } from '../support/nocturne-stage.js';
 import { myPiecesTexts, normalizeText, openState, pageTexts, shows, UI_STATES, type UiState } from '../support/nocturne-states.js';
 import { CHROMIUM_PATH } from '../support/ui-stage.js';
@@ -294,6 +294,87 @@ function collectionMoves(): Moved[] {
 }
 
 /**
+ * N7 (C7, C19, C20, C25, C27–C30): THE RELEASES and a release's pages in NOCTURNE's pieces. Their own foot (SCAN ORBES
+ * CODE, THE COLLECTION) gave way to the SCAN ring and the rail, as MY PIECES' and THE COLLECTION's did; on PAST the
+ * head's sentence is the count of the releases taken part in (C25); a past release's date is its day over its title
+ * (C29, C30); a rule and why, and several rules, are each said on lines of their own (C27, C28); said, YOU'LL BE THERE ·
+ * SIZE 17 stands over the sizes in YOUR SIZE's place (C28).
+ */
+function releasesMoves(): Moved[] {
+  const baseline = readBaseline();
+  const values = (state: string) => baseline.states[state]?.values ?? [];
+  const foot: Record<string, string> = {
+    'SCAN ORBES CODE': 'The SCAN ring at the foot of every screen (SCAN).',
+    'THE COLLECTION': 'The rail\'s COLLECTION, on every screen.',
+  };
+  const footStates = Object.keys(baseline.states).filter((state) => /^(releases|draw)(-|$)/.test(state));
+  const pastDay: Record<string, string> = { '5 OCT 2026': 'MONDAY 5 OCTOBER', '28 SEP 2026': 'MONDAY 28 SEPTEMBER' };
+  return [
+    ...footStates.flatMap((state) =>
+      values(state)
+        .filter((value) => value in foot)
+        .map((value) => ({
+          state,
+          value,
+          reason: 'N7 (C7, C19, C25): THE RELEASES and a draw\'s page draw no foot of their own; the scan is the SCAN ring\'s, THE COLLECTION the rail\'s, THE RELEASES the crumb\'s.',
+          now: foot[value]!,
+        })),
+    ),
+    ...['releases-past']
+      .filter((state) => values(state).includes(RELEASES.lead))
+      .map((state) => ({
+        state,
+        value: RELEASES.lead,
+        reason: 'N7 (C25): on PAST, signed in, the head\'s sentence is the count of the releases taken part in.',
+        now: 'The head of THE RELEASES on its LIVE tab (and on PAST signed out); on PAST signed in: You have taken part in N releases.',
+      })),
+    ...['live-past-secured', 'live-past-signed-out', 'live-past-question', 'live-past-gold'].flatMap((state) =>
+      values(state)
+        .map((value) => [value, /^(\d{1,2} [A-Z]{3} \d{4}) · (.+)$/.exec(value)] as const)
+        .filter(([, m]) => m !== null && pastDay[m[1]!] !== undefined)
+        .map(([value, m]) => ({
+          state,
+          value,
+          reason: 'N7 (C29, C30): a past LIVE RELEASE\'s day is said over its title after LIVE RELEASE, its pieces under its title.',
+          now: `LIVE RELEASE · ${pastDay[m![1]!]} over the title, ${m![2]} under it.`,
+          shownAs: [pastDay[m![1]!]!, m![2]!],
+        })),
+    ),
+    ...['live-veiled', 'live-rules-not-eligible', 'live-selected-not-eligible'].flatMap((state) =>
+      values(state)
+        .filter((value) => value.startsWith('This release is for ') && value.endsWith(LIVE.edge.notEligible.text))
+        .map((value) => ({
+          state,
+          value,
+          reason: 'N7 (C28, states 3 to 5): not eligible, the rule (when it is one), why, and that the account does not meet it, each on a line of its own.',
+          now: 'In place of I\'LL BE THERE: why in the reading face, then the account\'s refusal under it.',
+          shownAs: [value.slice(0, value.length - LIVE.edge.notEligible.text.length).trim(), LIVE.edge.notEligible.text],
+        })),
+    ),
+    ...['live-rules', 'live-rules-not-eligible'].flatMap((state) =>
+      values(state)
+        .filter((value) => value === 'FOR OWNERS FROM PLATINE OR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES OR SELECTED COLLECTORS')
+        .map((value) => ({
+          state,
+          value,
+          reason: 'N7 (C27): several rules any one of which lets a collector in are listed under WHO MAY ENTER, one under the other, OR between them.',
+          now: 'WHO MAY ENTER: FOR OWNERS FROM PLATINE, OR, FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES, OR, FOR SELECTED COLLECTORS.',
+          shownAs: ['WHO MAY ENTER', 'FOR OWNERS FROM PLATINE', 'FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES', 'FOR SELECTED COLLECTORS'],
+        })),
+    ),
+    ...['live-there']
+      .filter((state) => values(state).includes(LIVE.yourSize))
+      .map((state) => ({
+        state,
+        value: LIVE.yourSize,
+        reason: 'N7 (C28, state 1): said, YOU\'LL BE THERE · SIZE 17 stands over the sizes in YOUR SIZE\'s place; the sizes keep YOUR SIZE as their name.',
+        now: 'YOU\'LL BE THERE · SIZE 17 over the sizes (their group named YOUR SIZE for assistive technologies).',
+        shownAs: ['YOU’LL BE THERE · SIZE 17'],
+      })),
+  ];
+}
+
+/**
  * The values NOCTURNE moves or removes on purpose, step by step. N1: THIS PIECE and the sentence for two photographs
  * (decision 9: the piece's own photograph leaves every collector's screen and answer; the model's alone stays,
  * captioned THE MODEL, with the sentence for one), and VARIANT (the field set at issuance renamed Size). N2: YOUR TIER
@@ -326,6 +407,7 @@ export const MOVED: readonly Moved[] = [
   ...piecesMoves(),
   ...piecesChromeMoves(),
   ...collectionMoves(),
+  ...releasesMoves(),
   // N4 (C16): on a result that is neither authentic nor UNUSUAL ACTIVITY, WHERE DID YOU SEE OR BUY THIS PIECE? is a row
   // that opens (+): its four answers are inside it.
   ...['result-invalid', 'result-unknown', 'result-revoked'].flatMap((state) =>

@@ -33,6 +33,7 @@ import { GEOIP_ATTRIBUTION, LEGAL_PAGES, legalPath } from '../../shared/legal.js
 import { monogramSvg } from '../../shared/monogram.js';
 import { LEGAL, SOUND } from '../copy.js';
 import { swatchGradient } from '../nocturne-model.js';
+import { withNumerals } from './common.js';
 import type { SoundSwitch } from '../sound.js';
 
 // ── Icons ──────────────────────────────────────────────────────────────────
@@ -70,8 +71,8 @@ export function icon(name: IconName, opts: { small?: boolean } = {}): SVGSVGElem
   );
 }
 
-/** The ORBES monogram on its master artboard, in ivory, `px` square (the header's 28, the footer's 38, a loading state's 40). */
-export function monogram(px: 28 | 38 | 40 | 52, opts: { label?: boolean; extraClass?: string } = {}): SVGSVGElement {
+/** The ORBES monogram on its master artboard, in ivory, `px` square (the header's 28, the footer's 38, a loading state's 40, a release's seal 54). */
+export function monogram(px: 28 | 38 | 40 | 52 | 54, opts: { label?: boolean; extraClass?: string } = {}): SVGSVGElement {
   return monogramSvg({ class: `n-mono n-mono--${px}${opts.extraClass ? ` ${opts.extraClass}` : ''}`, decorative: !opts.label, artboard: true });
 }
 
@@ -249,6 +250,21 @@ export function field(id: string, label: string, input: HTMLInputElement, hint?:
 /** A plate card: the plate, a hairline frame inset 14 px; centred unless `left`. */
 export function plateCard(children: (Node | null)[], opts: { left?: boolean; extraClass?: string; label?: string } = {}): HTMLElement {
   return h('article', { class: ['n-card', opts.left ? 'n-card--left' : null, opts.extraClass], attrs: { 'aria-label': opts.label } }, ...children);
+}
+
+/**
+ * A title whose model's name begins it: the name on a line of its own (`MONOLITHE` / `IN BLUE`, `MONOLITHE,` / `THE
+ * OCTOBER DRAW`), as the canvas sets a hero's title; any other title as it is. Its figures in the reading face.
+ */
+export function modelTitle(tag: 'h1' | 'h2', cls: (string | null)[], text: string, model: string | null): HTMLElement {
+  const el = h(tag, { class: cls });
+  const name = model ? model.trim().toUpperCase() : '';
+  const rest = name && text.startsWith(name) ? text.slice(name.length) : null;
+  const m = rest !== null ? /^(,?)\s+(\S.*)$/.exec(rest) : null;
+  // A space before the break, unseen at the line's end: the title reads as one phrase to whatever reads its text.
+  if (m) el.append(...withNumerals(`${name}${m[1]} `), h('br'), ...withNumerals(m[2]!));
+  else el.append(...withNumerals(text));
+  return el;
 }
 
 // ── Photographs ────────────────────────────────────────────────────────────

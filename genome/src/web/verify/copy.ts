@@ -845,7 +845,7 @@ export const RELEASES = Object.freeze({
   opensLine: (pieces: string, time: string) => `${pieces} · ENTRIES OPEN ${time} UTC`,
   closesLine: (pieces: string, time: string) => `${pieces} · ENTRIES CLOSE ${time} UTC`,
   section: Object.freeze({ release: 'THE RELEASE', entry: 'YOUR ENTRY', draw: 'THE DRAW', entries: 'THE ENTRIES' }),
-  rows: Object.freeze({ model: 'MODEL', pieces: 'PIECES', early: 'EARLY ACCESS', opens: 'ENTRIES OPEN', closes: 'ENTRIES CLOSE', held: 'PLACE HELD', reserved: 'RESERVED DIRECTLY', drawn: 'DRAWN' }),
+  rows: Object.freeze({ model: 'MODEL', price: 'PRICE', pieces: 'PIECES', early: 'EARLY ACCESS', opens: 'ENTRIES OPEN', closes: 'ENTRIES CLOSE', held: 'PLACE HELD', reserved: 'RESERVED DIRECTLY', drawn: 'DRAWN' }),
   /** P-X02: the places reserved directly, of the release's pieces (`1 OF 3 PIECES`). */
   reservedOf: (n: number, quantity: number) => `${n} OF ${quantity === 1 ? '1 PIECE' : `${quantity} PIECES`}`,
   photosLabel: (title: string) => `The model of ${title}, photographed by ORBES`,
@@ -1086,6 +1086,9 @@ export const LIVE = Object.freeze({
    * in 3 releases », « selected collectors » (a segment's name is never said), joined by « or » when any one is enough.
    */
   forWhom: (rule: string) => `FOR ${rule.toUpperCase()}`,
+  /** NOCTURNE (C27): the rules of a release any one of which lets a collector in, listed one under the other, OR between them. */
+  whoMayEnter: 'WHO MAY ENTER',
+  or: 'OR',
   /** A surprise in every box (plan LIVE RELEASE+, choice 3): a vault label on the release's page; what it is stays unsaid. */
   surprise: 'A SURPRISE IN EVERY BOX',
   perAccount: (n: number) => (n === 1 ? 'ONE PER COLLECTOR' : `UP TO ${n} PER COLLECTOR`),

@@ -206,6 +206,39 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
     },
     12 * 60_000,
   );
+
+  it(
+    'sets THE RELEASES, a draw and a LIVE RELEASE before and after the room as C7, C19, C20, C25, C27, C28, C29 and C30 draw them: the tabs, each release on its photograph or its seal, OPENS IN and its countdown, the price, the crumb, the facts, YOUR ENTRY, THE DRAW, I\'LL BE THERE and the sizes, WHO MAY ENTER, the final page and its CONFIRMED receipt, the end of a visit and ONE QUESTION; inside the room, no chrome (N7)',
+    async () => {
+      const states = ['releases', 'releases-past', 'draw', 'live-announced', 'live-rules', 'live-there', 'live-past-secured', 'live-past-question', 'live-missed', 'room'];
+      const seen = new Set<string>();
+      await eachState(
+        states.map(stateById),
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          const page = opened.page;
+          try {
+            seen.add(state.id);
+            if (state.id === 'releases') await theReleases(page);
+            if (state.id === 'releases-past') await thePast(page);
+            if (state.id === 'draw') await aDraw(page);
+            if (state.id === 'live-announced') await announced(page);
+            if (state.id === 'live-rules') await whoMayEnter(page);
+            if (state.id === 'live-there') await said(page);
+            if (state.id === 'live-past-secured') await finalPage(page);
+            if (state.id === 'live-past-question') await questionAfter(page);
+            if (state.id === 'live-missed') await endOfVisit(page);
+            if (state.id === 'room') await withoutChrome(page, 'the room');
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect([...seen].sort()).toEqual([...states].sort());
+    },
+    12 * 60_000,
+  );
 });
 
 /** How many of the elements `selector` matches the phone shows. */
@@ -974,4 +1007,196 @@ async function aSalonModel(page: Page): Promise<void> {
   await check(page, '#sheet-note-hint', { 'margin-top': 6, 'font-size': 13, color: ASH });
   await check(page, '.n-model__request', { 'margin-top': 22, height: 54, 'background-color': IV, color: GROUND });
   expect(await shown(page, 'main .n-btn')).toBe(1);
+}
+
+/** C7: THE RELEASES, LIVE: the title, the tabs, a LIVE RELEASE on its photograph with OPENS IN, one not revealed on its seal, a draw. */
+async function theReleases(page: Page): Promise<void> {
+  await withChrome(page, 'releases', 'releases');
+  await check(page, '.view--releases.n-releases', { 'padding-left': 0, 'padding-right': 0 });
+  await check(page, '.n-releases__head', { 'padding-top': 30, 'padding-left': 24 });
+  await check(page, '#releases-title', { 'font-size': 30, 'letter-spacing': em(30, 0.08), color: IV });
+  await check(page, '.n-releases__lead', { 'margin-top': 12, 'font-size': 16, 'line-height': '25.6px', color: ASH });
+  await check(page, '.n-releases__tabs', { 'margin-top': 30 });
+  await check(page, '.n-releases__tabs .n-tabs', { 'column-gap': 30, 'padding-left': 24, 'border-bottom-color': LINE });
+  await check(page, '#releases-tab-live', { 'font-size': 10.5, 'letter-spacing': em(10.5, 0.24), color: IV });
+  await check(page, '#releases-tab-past', { color: ASH });
+  // The first LIVE RELEASE: 8 px under the tabs, its photograph whole at the column's width, its words lifted 56 px.
+  const first = '#releases-panel-live .n-releases__item:first-child .n-releases__release';
+  await check(page, first, { 'margin-top': 8 });
+  const photo = await check(page, `${first} .n-releases__photo`, { height: 390 });
+  expect(Number(photo._w)).toBeCloseTo(390, 0);
+  await check(page, `${first} .n-releases__words`, { 'margin-top': -56, 'text-align': 'center', 'padding-left': 24 });
+  await check(page, `${first} .live-card__kind`, { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
+  await check(page, `${first} .n-releases__title`, { 'margin-top': 12, 'font-size': 26, 'letter-spacing': em(26, 0.08), color: IV });
+  expect(await page.locator(`${first} .n-releases__title`).innerText()).toBe('MONOLITHE IN BLUE');
+  await check(page, `${first} .n-releases__when`, { 'margin-top': 12 });
+  // OPENS IN and its countdown (addition 4): figures in weight 200, 46 px, their units under them.
+  await check(page, `${first} .n-releases__opens`, { 'margin-top': 16, 'font-size': 9.5 });
+  await check(page, `${first} .n-cd`, { 'margin-top': 28, 'column-gap': 10 });
+  await check(page, `${first} .n-cd__value`, { 'font-size': 46, 'font-weight': '200' });
+  expect(isHelvetica((await read(page, `${first} .n-cd__value`, ['font-family']))['font-family']!)).toBe(true);
+  expect(await page.locator(`${first} .n-cd__unit`).allInnerTexts()).toEqual(['DAYS', 'HOURS', 'MINUTES']);
+  expect(await page.locator(`${first} .n-releases__clock`).getAttribute('aria-live')).toBe('off');
+  await check(page, `${first} .n-releases__lines`, { 'margin-top': 18, 'row-gap': 7 });
+  // Each line in ash, the pieces' too: the board's `.lines span` outranks its `.ivc` (C7 as rendered).
+  await check(page, `${first} .n-releases__lines .n-lines__line:first-child`, { 'font-size': 11, 'letter-spacing': em(11, 0.24), color: ASH });
+  await check(page, `${first} .n-releases__lines .n-lines__line:nth-child(2)`, { color: ASH });
+  await check(page, `${first} .n-releases__interest`, { 'margin-top': 16 });
+  // The page's one filled button: the first release's SEE THE RELEASE; the others are hairline buttons.
+  await check(page, `${first} .n-releases__see`, { 'margin-top': 24, height: 54, 'background-color': IV, color: GROUND });
+  expect(await page.locator('.n-releases__see:not(.n-btn--ol)').count()).toBe(1);
+  // Not revealed yet: its seal (150 px, the monogram 54 px), its words 26 px under it, THE REVEALS 22 px under its lines.
+  await check(page, '.n-releases__seal-line .n-seal', { width: 150, height: 150, 'border-radius': '50%' });
+  await check(page, '.n-releases__seal-line .n-mono--54', { width: 54, height: 54 });
+  await check(page, '.n-releases__sealed', { 'margin-top': 26 });
+  await check(page, '.n-releases__sealed .n-releases__lines', { 'margin-top': 16 });
+  await check(page, '.n-releases__reveals-title', { 'margin-top': 22, color: IV });
+  await check(page, '.n-releases__reveals-lines', { 'margin-top': 10 });
+  // A draw: DRAW · its state, its title 24 px, its model, its price (addition 5) at 16 px, its pieces and close in UTC.
+  const draw = '.release-card.n-releases__release';
+  await check(page, draw, { 'padding-top': 76 });
+  await check(page, `${draw} .n-releases__title--draw`, { 'font-size': 24 });
+  await check(page, `${draw} .n-releases__draw-price`, { 'margin-top': 12, 'font-size': 16, color: IV });
+  expect(isHelvetica((await read(page, `${draw} .n-releases__draw-price`, ['font-family']))['font-family']!)).toBe(true);
+  expect(await page.locator(`${draw} .n-releases__draw-price`).innerText()).toMatch(/^€\s4\s200$/);
+  await check(page, `${draw} .release-card__line`, { 'margin-top': 12, color: IV });
+  await check(page, `${draw} .release-card__line .n-nw`, { 'white-space': 'nowrap' });
+  await check(page, `${draw} .n-releases__see`, { 'background-color': NONE, 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
+}
+
+/** C25: PAST: the count as the sentence, each release on its photograph, its kind and date, its title, its quantity, its mark, SHOW MORE. */
+async function thePast(page: Page): Promise<void> {
+  await withChrome(page, 'releases past', 'releases');
+  expect(await page.locator('.n-releases__lead').innerText()).toBe('You have taken part in 3 releases.');
+  await check(page, '#releases-tab-past', { color: IV });
+  const first = '#releases-panel-past .n-releases__item:first-child .n-releases__release';
+  await check(page, first, { 'margin-top': 8 });
+  await check(page, `${first} .n-releases__words`, { 'margin-top': -56, 'text-align': 'left' });
+  expect(await page.locator(`${first} .release-card__state`).innerText()).toBe('LIVE RELEASE · 5 OCT 2026');
+  await check(page, `${first} .n-releases__past-title`, { 'margin-top': 10, 'font-size': 16, 'letter-spacing': em(16, 0.14), color: IV });
+  await check(page, `${first} .n-releases__past-pieces`, { 'margin-top': 8, color: IV, 'font-size': 9.5 });
+  await check(page, `${first} .n-releases__mark`, { 'margin-top': 14, 'font-size': 14, color: IV, 'column-gap': 10 });
+  expect(isHelvetica((await read(page, `${first} .n-releases__mark`, ['font-family']))['font-family']!)).toBe(true);
+  await check(page, `${first} .n-releases__see-line`, { 'margin-top': 16 });
+  await check(page, '#releases-panel-past .n-releases__item:nth-child(2) .n-releases__release', { 'padding-top': 76 });
+}
+
+/** C19: a draw: the crumb, the photograph, its words, THE RELEASE and its facts, YOUR ENTRY, THE DRAW and its fingerprint. */
+async function aDraw(page: Page): Promise<void> {
+  await withChrome(page, 'a draw', 'releases');
+  await check(page, '.view--release.n-release', { 'padding-left': 0, 'padding-right': 0 });
+  await check(page, '.release__crumb', { height: 48, 'padding-left': 18, 'font-size': 10, 'letter-spacing': em(10, 0.26), color: ASH });
+  const photo = await check(page, '.n-release__photo', { height: 390 });
+  expect(Number(photo._w)).toBeCloseTo(390, 0);
+  await check(page, '.n-release__words', { 'margin-top': -56, 'text-align': 'center' });
+  await check(page, '#release-title', { 'margin-top': 12, 'font-size': 26, 'letter-spacing': em(26, 0.08), color: IV });
+  await check(page, '.n-release__state', { 'margin-top': 14, color: IV, 'font-size': 9.5 });
+  // THE RELEASE, YOUR ENTRY, THE DRAW: 44 px apart.
+  await check(page, '.n-release__section', { 'padding-top': 44, 'padding-left': 24 });
+  await check(page, '.n-release__description', { 'margin-top': 14 });
+  await check(page, '.n-release__description p', { 'font-size': 15, color: ASH });
+  await check(page, '.n-release__model', { 'margin-top': 14 });
+  await check(page, '.n-release__rows', { 'margin-top': 16, 'border-top-color': LINE });
+  await check(page, '.n-release__row', { 'padding-top': 13, 'padding-bottom': 13, 'font-size': 13.5, 'border-bottom-color': LINE });
+  await check(page, '.n-release__row .n-kv__label', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.24), color: ASH });
+  // PRICE first (addition 5), in the reading face; a time in UTC, then on this phone under it.
+  expect(await page.locator('.n-release__row').first().innerText()).toMatch(/^PRICE\s+€\s4\s200$/);
+  await check(page, '.n-release__row .release__local', { 'font-size': 13, color: ASH });
+  await check(page, '.n-release__sentence', { 'margin-top': 12, 'font-size': 15, color: ASH });
+  await check(page, '.release__enter', { 'margin-top': 22, height: 54, 'background-color': IV });
+  await check(page, '.release__obligation', { 'margin-top': 12, 'font-size': 13, color: ASH });
+  await check(page, '.n-release__seed-label', { 'margin-top': 16, 'font-size': 9.5 });
+  await check(page, '.n-release__hex', { 'margin-top': 6, 'font-size': 13, 'word-break': 'break-all' });
+  expect(await page.locator('.n-release__hex').innerText()).toMatch(/^[0-9a-f]{64}$/);
+}
+
+/** C20: a LIVE RELEASE announced: the chrome, the crumb, the title on two lines, the price 17 px, OPENS IN, the lines, YOUR SIZE, I'LL BE THERE. */
+async function announced(page: Page): Promise<void> {
+  await withChrome(page, 'a LIVE RELEASE announced', 'releases');
+  await check(page, '.view--live.is-nocturne', { 'padding-left': 0, 'padding-right': 0, 'text-align': 'left' });
+  expect(await shown(page, '.live__head')).toBe(0);
+  expect(await shown(page, '.live__foot')).toBe(0);
+  await check(page, '.n-live__crumb', { height: 48 });
+  await check(page, '.live__announced .n-live__photo', { height: 390 });
+  await check(page, '.live__announced .n-live__words', { 'margin-top': -56, 'text-align': 'center' });
+  await check(page, '#live-title', { 'margin-top': 12, 'font-size': 30, 'letter-spacing': em(30, 0.08), color: IV });
+  expect(await page.locator('#live-title').innerText()).toBe('MONOLITHE\nIN BLUE');
+  await check(page, '.n-live__type', { 'margin-top': 12 });
+  await check(page, '.n-live__price', { 'margin-top': 12, 'font-size': 17, color: IV });
+  await check(page, '.n-live__see-line', { 'margin-top': 14 });
+  await check(page, '.n-live__opens', { 'margin-top': 26 });
+  await check(page, '.n-live__countdown', { 'margin-top': 28 });
+  await check(page, '.n-live__when', { 'margin-top': 20 });
+  await check(page, '.n-live__lines', { 'margin-top': 18 });
+  expect(await page.locator('.n-live__lines .n-lines__line').allInnerTexts()).toEqual(['25 PIECES', 'ONE PER COLLECTOR', 'THE ROOM OPENS 5 MINUTES BEFORE', 'FOR OWNERS']);
+  await check(page, '.n-live__interest', { 'margin-top': 22 });
+  await check(page, '.n-live__size-label', { 'margin-top': 26 });
+  await check(page, '.n-live__sizes', { 'margin-top': 14, 'column-gap': 10 });
+  await check(page, '.n-live__sizes button[aria-pressed="true"]', { width: 78, height: 54, 'font-size': 16 });
+  await check(page, '.n-live__there-lead', { 'margin-top': 14, 'font-size': 13, color: ASH });
+  await check(page, '.n-live__there-action', { 'margin-top': 22, height: 54, 'background-color': IV });
+  await check(page, '.n-live__calendar-line', { 'margin-top': 22 });
+  await check(page, '.n-live__description', { 'margin-top': 28 });
+  await check(page, '.n-live__rule', { 'margin-top': 16, 'font-size': 13 });
+}
+
+/** C27: A SURPRISE IN EVERY BOX between hairlines, WHO MAY ENTER and its rules joined by OR; the rule out of the lines. */
+async function whoMayEnter(page: Page): Promise<void> {
+  await check(page, '.n-live__surprise', { 'margin-top': 20, 'padding-top': 10, 'padding-left': 16, 'font-size': 10.5, 'letter-spacing': em(10.5, 0.26), 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
+  expect(await page.locator('.n-live__lines .n-lines__line').allInnerTexts()).toEqual(['25 PIECES', 'ONE PER COLLECTOR', 'THE ROOM OPENS 5 MINUTES BEFORE']);
+  await check(page, '.n-live__rules', { 'margin-top': 30, 'text-align': 'center' });
+  await check(page, '.n-live__who', { 'font-size': 9.5, color: ASH });
+  await check(page, '.n-live__rule-list', { 'margin-top': 14, 'font-size': 11, 'line-height': '20.9px', color: IV });
+  expect((await page.locator('.n-live__rule-list').innerText()).split('\n')).toEqual(['FOR OWNERS FROM PLATINE', 'OR', 'FOR COLLECTORS WHO HAVE TAKEN PART IN 3 RELEASES', 'OR', 'FOR SELECTED COLLECTORS']);
+  await check(page, '.n-live__after-rules', { 'margin-top': 30 });
+  await check(page, '.n-live__after-rules .n-live__interest', { 'margin-top': 0 });
+}
+
+/** C28 (1): said, YOU'LL BE THERE · SIZE 17 over the sizes, WITHDRAW a hairline button. */
+async function said(page: Page): Promise<void> {
+  await check(page, '.n-live__said', { 'margin-top': 26, 'font-size': 11, color: IV });
+  expect(await page.locator('.n-live__said').innerText()).toBe('YOU’LL BE THERE · SIZE 17');
+  await check(page, '.n-live__said + .n-sizes', { 'margin-top': 16 });
+  await check(page, '.n-live__withdraw', { 'margin-top': 20, height: 54, 'background-color': NONE });
+  expect(await shown(page, '.n-live__size-label')).toBe(0);
+}
+
+/** C29: the final page: LIVE RELEASE and its day, YOU SECURED A PIECE, THIS RELEASE IS OVER on its plate, CONFIRMED in ivory. */
+async function finalPage(page: Page): Promise<void> {
+  await withChrome(page, 'a final page', 'releases');
+  expect(await page.locator('.n-live__kind').innerText()).toBe('LIVE RELEASE · MONDAY 5 OCTOBER');
+  await check(page, '.n-live__pieces-line', { 'margin-top': 14, color: IV });
+  await check(page, '.n-live__part', { 'margin-top': 20, 'font-size': 14, color: IV });
+  await check(page, '.n-live__over', { 'margin-top': 30, 'padding-top': 20, 'background-color': PLATE, 'justify-content': 'center' });
+  await check(page, '.n-live__receipt', { 'background-color': IV, color: GROUND, 'padding-top': 28, 'padding-left': 24 });
+  await check(page, '.n-live__receipt-of', { color: 'rgb(92, 92, 92)' });
+  await check(page, '.n-live__receipt-title', { 'margin-top': 10, 'font-size': 26, color: GROUND });
+  await check(page, '.n-live__receipt-text', { 'margin-top': 12, 'font-size': 14, color: 'rgb(60, 60, 60)' });
+  await check(page, '.n-live__receipt-rows', { 'margin-top': 16, 'border-top-color': 'rgba(10, 10, 10, 0.12)' });
+  await check(page, '.n-live__receipt .n-kv__row', { 'border-bottom-color': 'rgba(10, 10, 10, 0.12)' });
+  expect(await page.locator('.n-live__receipt .n-kv__row').allInnerTexts()).toEqual(expect.arrayContaining([expect.stringMatching(/^ENGRAVING\s+\+\s€\s150$/), expect.stringMatching(/^TOTAL\s+€\s5\s200$/)]));
+  await check(page, '.n-live__pieces', { 'font-size': 10.5, 'letter-spacing': em(10.5, 0.24), color: GROUND, 'padding-bottom': 4 });
+  // The one ivory plate of /verify: no other.
+  expect(await page.evaluate(() => [...document.querySelectorAll('main *')].filter((el) => getComputedStyle(el).backgroundColor === 'rgb(246, 242, 234)' && !el.closest('.n-live__receipt')).length)).toBe(0);
+}
+
+/** C30: ONE QUESTION on a plate card, its answers pressed buttons one under the other, the chosen one filled. */
+async function questionAfter(page: Page): Promise<void> {
+  await check(page, '.n-question', { 'margin-top': 36, 'padding-left': 24 });
+  await check(page, '.n-question__card', { 'background-color': PLATE, 'padding-top': 32, 'padding-left': 24, 'padding-bottom': 28, 'text-align': 'left' });
+  await check(page, '.n-question__text', { 'margin-top': 12, 'font-size': 16, 'letter-spacing': em(16, 0.14), color: IV });
+  await check(page, '.n-question__answers', { 'margin-top': 20, 'row-gap': 8 });
+  await check(page, '.n-question .n-opt2__option', { height: 48, 'font-size': 10.5, 'letter-spacing': em(10.5, 0.22), 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
+  await check(page, '.n-question__note', { 'margin-top': 14, 'font-size': 13, color: ASH });
+}
+
+/** C30: the end of a visit: the chrome back, the release's title, its outcome 30 px under, THE RELEASES 76 px below. */
+async function endOfVisit(page: Page): Promise<void> {
+  await withChrome(page, 'the end of a visit', 'releases');
+  await check(page, '.n-live__end .n-live__words', { 'margin-top': -56, 'text-align': 'center' });
+  await check(page, '.n-live__outcome-block', { 'margin-top': 30, 'text-align': 'center' });
+  await check(page, '.n-live__outcome', { 'font-size': 16, 'letter-spacing': em(16, 0.14), color: IV });
+  expect(await page.locator('.n-live__outcome').innerText()).toBe('YOUR TURN HAS PASSED');
+  await check(page, '.n-live__outcome-text', { 'margin-top': 12, 'font-size': 15, color: ASH });
+  await check(page, '.n-live__back', { 'padding-top': 76 });
 }

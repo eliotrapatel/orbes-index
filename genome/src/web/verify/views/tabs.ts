@@ -33,17 +33,17 @@ export interface TabsOptions<T extends string> {
   /** Told each tab selected by the reader (a click or a key), not the first. */
   onSelect?: (id: T) => void;
   /**
-   * NOCTURNE's underlined tabs (views/nocturne.ts, C_CSS `.tabsx`: a result's four, spread across the column, no dot
-   * between them), in place of the house tabs.
+   * NOCTURNE's underlined tabs (views/nocturne.ts) in place of the house tabs: C_CSS `.tabsx`, a result's four spread
+   * across the column; `.tabs`, THE RELEASES' LIVE and PAST 30 px apart (C7, C25); no dot between them.
    */
-  kind?: 'tabsx';
+  kind?: 'tabsx' | 'tabs';
 }
 
 export function tabsView<T extends string = TabId>(ids: readonly T[], build: (id: T) => HTMLElement, initial: T = ids[0], opts: TabsOptions<T> = {}): TabsView<T> {
   const labels = (opts.labels ?? TAB_LABELS) as Readonly<Record<string, string>>;
   const prefix = opts.idPrefix ?? '';
-  const nocturne = opts.kind === 'tabsx';
-  const list = h('div', { class: nocturne ? 'n-tabsx' : 'tabs__list', attrs: { role: 'tablist', 'aria-label': opts.label ?? 'Product information' } });
+  const nocturne = opts.kind !== undefined;
+  const list = h('div', { class: nocturne ? `n-${opts.kind}` : 'tabs__list', attrs: { role: 'tablist', 'aria-label': opts.label ?? 'Product information' } });
   const panels = h('div', { class: nocturne ? 'n-tabs__panels' : 'tabs__panels' });
   const tabs = new Map<T, HTMLButtonElement>();
   const built = new Map<T, HTMLElement>();
@@ -70,7 +70,7 @@ export function tabsView<T extends string = TabId>(ids: readonly T[], build: (id
   ids.forEach((id, i) => {
     if (i > 0 && !nocturne) list.appendChild(h('span', { class: 'tabs__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }));
     const tab = h('button', {
-      class: nocturne ? 'n-g n-tabsx__tab' : 'tabs__tab',
+      class: nocturne ? `n-g n-${opts.kind}__tab` : 'tabs__tab',
       id: `${prefix}tab-${id}`,
       attrs: { type: 'button', role: 'tab', 'aria-selected': 'false', 'aria-controls': `${prefix}panel-${id}`, tabindex: -1 },
       on: {

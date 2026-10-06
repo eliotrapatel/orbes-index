@@ -119,6 +119,11 @@
   --n-fs-zoom: 14px;
   --n-fs-name: 26px;
   --n-fs-ceremony: 24px;
+  /* THE RELEASES and a release's pages (N7): a release's title in a list and on a draw's page, a draw's in the list, the
+     CONFIRMED of a final page's receipt (C7, C19, C29); a LIVE RELEASE's price on its page (C20). */
+  --n-fs-release: 26px;
+  --n-fs-release-draw: 24px;
+  --n-fs-price: 17px;
   /* The scanner's ground under the camera (C11: `.C.cam`). */
   --n-camera: #050505;
   --n-track-wm: 0.46em;

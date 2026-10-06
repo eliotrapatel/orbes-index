@@ -213,16 +213,17 @@ describe.skipIf(!HAS_CHROMIUM)("THE RELEASES' LIVE and PAST tabs, a past release
     const ids = await cards.evaluateAll((els) => els.map((el) => el.querySelector('h2')!.id.replace(/^past-|-title$/g, '')));
     expect(ids).toEqual([live.id, draw.id, ...older.slice(0, PAST_PAGE_SIZE - 2)]);
     const first = pastCard(page, live.id);
-    await textOf(first.locator('.release-card__state'), 'LIVE RELEASE');
+    // NOCTURNE (C25): its kind and date, its title, its model, its quantity as announced.
+    await textOf(first.locator('.release-card__state'), /^LIVE RELEASE · \d{1,2} [A-Z]{3} \d{4}$/);
     await textOf(first.locator('.release-card__title'), 'NOCTURNE');
     await textOf(first.locator('.release-card__model'), 'RING');
-    await textOf(first.locator('.release-card__line'), LINE('25 PIECES'));
+    await textOf(first.locator('.release-card__line'), '25 PIECES');
     expect(await first.locator('img.release-card__img').getAttribute('src')).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
     const second = pastCard(page, draw.id);
-    await textOf(second.locator('.release-card__state'), 'DRAW');
+    await textOf(second.locator('.release-card__state'), /^DRAW · \d{1,2} [A-Z]{3} \d{4}$/);
     await textOf(second.locator('.release-card__title'), 'ECLIPSE — RELEASE I');
     await textOf(second.locator('.release-card__model'), 'MONOLITHE · RING');
-    await textOf(second.locator('.release-card__line'), LINE('1 PIECE'));
+    await textOf(second.locator('.release-card__line'), '1 PIECE');
     // Signed out: no part said.
     expect(await page.locator('.releases__taken').isHidden()).toBe(true);
     expect(await panel.locator('.release-card__mark:visible').count()).toBe(0);
@@ -256,25 +257,30 @@ describe.skipIf(!HAS_CHROMIUM)("THE RELEASES' LIVE and PAST tabs, a past release
     await keepsBrand(page, ['PAST', 'SEE THE RELEASE']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-releases-past-signed-in.png'), fullPage: true });
 
-    // The LIVE RELEASE: its final state in the vault, never the reservation's page nor how it ended.
+    // The LIVE RELEASE: its final state, never how it ended; the piece secured, its reservation in the ivory kept from
+    // the room (NOCTURNE, C29).
     await pastCard(page, live.id).getByRole('link', { name: 'SEE THE RELEASE' }).click();
     expect(new URL(page.url()).pathname).toBe(`/verify/releases/${live.id}`);
     await textOf(page.locator('.live__past h1'), 'NOCTURNE');
     expect(await page.locator('.view--live').getAttribute('data-screen')).toBe('past');
     expect(await page.locator('.view--live').evaluate((el) => el.classList.contains('vault'))).toBe(true);
-    await textOf(page.locator('.live__past > .live__overline'), 'LIVE RELEASE');
-    await textOf(page.locator('.live__kindline'), 'RING');
+    await textOf(page.locator('.n-live__kind'), /^LIVE RELEASE · [A-Z]+DAY \d{1,2} [A-Z]+$/);
+    await textOf(page.locator('.n-live__type'), 'RING');
     await textOf(page.locator('.live__past-status'), RELEASES.over);
-    await textOf(page.locator('.live__past-facts'), LINE('25 PIECES'));
+    await textOf(page.locator('.n-live__pieces-line'), '25 PIECES');
     await textOf(page.locator('.live__past-part'), RELEASES.past.secured);
-    await textOf(page.locator('.live__past .live__description'), 'Twenty-five rings, cast in Paris.');
-    expect(await page.locator('.live__past .live__plate img').getAttribute('src')).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
-    expect(await page.locator('.live__see-model').getAttribute('href')).toBe('/verify/lookbook/nocturne');
+    await textOf(page.locator('.live__past .n-live__description'), 'Twenty-five rings, cast in Paris.');
+    expect(await page.locator('.live__past .n-live__img').getAttribute('src')).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
+    expect(await page.locator('.n-live__see').getAttribute('href')).toBe('/verify/lookbook/nocturne');
+    const receipt = page.locator('.n-live__receipt');
+    await textOf(receipt.locator('h2'), 'CONFIRMED');
+    await textOf(receipt.locator('.n-kv__row', { hasText: 'SIZE' }), 'SIZE 52');
+    await textOf(receipt.locator('.n-kv__row', { hasText: 'REFERENCE' }), /^REFERENCE LR-[0-9A-Z]{8}$/);
     const words = norm(await page.locator('main').innerText());
-    for (const word of ['SOLD OUT', 'HAS ENDED', 'CONFIRMED', 'RESERVED', 'IN THE ROOM', 'LEFT', '€', 'COLLECTORS', '28 PIECES']) expect(words, word).not.toContain(word);
-    // One action: THE RELEASES, a hairline button; the foot does not say it twice.
-    expect(await page.locator('.live__past .btn:visible').count()).toBe(1);
-    await keepsVault(page, null, ['SEE THE MODEL', 'THE RELEASES']);
+    for (const word of ['SOLD OUT', 'HAS ENDED', 'IN THE ROOM', 'LEFT', 'COLLECTORS', '28 PIECES']) expect(words, word).not.toContain(word);
+    // THE RELEASES once (the crumb): the foot does not say it twice.
+    expect(await page.getByRole('link', { name: 'THE RELEASES', exact: true }).count()).toBe(1);
+    await keepsVault(page, null, ['SEE THE MODEL', 'THE RELEASES', 'MY PIECES']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-past.png'), fullPage: true });
 
     // Back: THE RELEASES on PAST, as left.
@@ -294,7 +300,7 @@ describe.skipIf(!HAS_CHROMIUM)("THE RELEASES' LIVE and PAST tabs, a past release
     await keepsBrand(page, ['THE RELEASES']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-release-past-draw.png'), fullPage: true });
     // Its THE RELEASES: back to PAST.
-    await page.locator('.release__foot').getByRole('link', { name: 'THE RELEASES' }).click();
+    await page.locator('.release__crumb').click();
     await visible(pastCard(page, draw.id));
     expect(await tab(page, 'PAST').getAttribute('aria-selected')).toBe('true');
     expect(problems).toEqual([]);
@@ -317,7 +323,8 @@ describe.skipIf(!HAS_CHROMIUM)("THE RELEASES' LIVE and PAST tabs, a past release
     await sleep(500);
     expect(await page.locator('.live__past-part').isHidden()).toBe(true);
     await keepsVault(page, null, ['THE RELEASES']);
-    await page.locator('.live__past').getByRole('button', { name: 'THE RELEASES' }).click();
+    expect(await page.locator('.n-live__receipt').count()).toBe(0);
+    await page.locator('.live__past').getByRole('link', { name: 'THE RELEASES' }).click();
     await visible(page.getByRole('tablist', { name: 'THE RELEASES' }));
     expect(new URL(page.url()).pathname).toBe('/verify/releases');
     expect(problems).toEqual([]);

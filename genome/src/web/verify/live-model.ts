@@ -32,7 +32,7 @@ import type {
   LiveRoomSize,
   LiveSheet,
 } from './types.js';
-import { modelWithVariant, releaseContactModel, upper } from './view-model.js';
+import { formatMoney, modelWithVariant, releaseContactModel, upper } from './view-model.js';
 
 const MEDIA_SRC = /^\/api\/v1\/media\/[0-9a-f]{64}$/;
 const SECOND = 1000;
@@ -59,18 +59,8 @@ export function mediaSrc(url: string | null | undefined): string | null {
 
 // ── Words and figures ──────────────────────────────────────────────────────
 
-const SYMBOLS: Readonly<Record<string, string>> = Object.freeze({ EUR: '€', GBP: '£', USD: '$', CHF: 'CHF' });
-const NBSP = ' ';
-
-/** A price as the house writes it: `€ 4 800`, `€ 4 800.50`; the groups never break across lines. */
-export function formatMoney(minor: number, currency: string): string {
-  const value = Number.isFinite(minor) ? Math.max(0, Math.round(minor)) : 0;
-  const units = Math.floor(value / 100);
-  const cents = value % 100;
-  const grouped = String(units).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
-  const code = /^[A-Z]{3}$/.test(currency) ? currency : 'EUR';
-  return `${SYMBOLS[code] ?? code}${NBSP}${grouped}${cents ? `.${String(cents).padStart(2, '0')}` : ''}`;
-}
+/** A price as the house writes it (view-model.ts, shared with THE RELEASES' draws). */
+export { formatMoney };
 
 /** A moment in a zone: `SUNDAY 11 OCTOBER`, `11 OCTOBER`, `19:00`, `19:00:00`. */
 export interface ZonedTime {
@@ -484,6 +474,32 @@ export function pictureOf(c: Pick<LiveCard, 'imageUrl' | 'silhouetteUrl' | 'name
   return silhouette ? { src: silhouette, alt: `The silhouette of ${name}`, kind: 'silhouette' } : null;
 }
 
+/**
+ * A LIVE RELEASE's title once its name is revealed (NOCTURNE, C7, C20, C25, C29): its model with its variant (`MONOLITHE
+ * IN BLUE`), as the plan names a release (Variants: « a release names the model with its variant »), its pages and
+ * cards as lot E named it by its model; null before the name's stage.
+ */
+export function liveHeading(c: Pick<LiveCard, 'name' | 'variant'>): string | null {
+  if (typeof c.name !== 'string' || !c.name.trim()) return null;
+  return upper(modelWithVariant(c.name, c.variant));
+}
+
+/**
+ * The rules of access one by one (C27, WHO MAY ENTER), from the words the server joins by « or » when any one rule is
+ * enough (services/live.ts liveRuleText): each rule begins with « owners », « collectors » or « selected collectors », so
+ * a rule's own « or » (« owners of MONOLITHE or ZENITH ») never parts it. One rule, or every rule a collector must meet
+ * together, stays whole. Each is said after « FOR », as the page states it.
+ */
+export function accessRules(text: string): string[] {
+  const t = typeof text === 'string' ? text.trim() : '';
+  if (!t) return [];
+  return t
+    .split(/ or (?=(?:owners|collectors|selected collectors)\b)/)
+    .map((r) => r.trim())
+    .filter((r) => r.length > 0)
+    .map((r) => LIVE.forWhom(r));
+}
+
 /** The price and the quantity line: `€ 5 050 · 25 PIECES`. */
 export function offerLine(r: Pick<LiveCard, 'priceMinor' | 'currency' | 'quantityLine'>): string {
   return [formatMoney(r.priceMinor, r.currency), upper(r.quantityLine)].filter((x) => x.length > 0).join(' · ');
@@ -494,6 +510,13 @@ export interface LiveSheetModel {
   /** The model's name once revealed, else TO BE REVEALED. */
   name: string;
   named: boolean;
+  /** Its title (`MONOLITHE IN BLUE`, liveHeading) once revealed, else TO BE REVEALED: the page sets the model's name on a line of its own. */
+  heading: string;
+  /** Each rule of access after « FOR », one by one (C27): more than one, and the page lists them under WHO MAY ENTER. */
+  rules: string[];
+  /** `25 PIECES`, then `ONE PER COLLECTOR` (C20's lines). */
+  pieces: string;
+  perAccount: string;
   /** `RING · ORBIT` once the name is revealed. */
   line: string | null;
   price: string;
@@ -521,6 +544,10 @@ export function liveSheetModel(s: LiveSheet, localZone: string): LiveSheetModel 
     id: s.id,
     name: name ?? LIVE.unnamed,
     named: name !== null,
+    heading: liveHeading(s) ?? LIVE.unnamed,
+    rules: accessRules(s.access.text),
+    pieces: upper(s.quantityLine),
+    perAccount: LIVE.perAccount(s.perAccount),
     line: name ? [upper(s.type), upper(s.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
     price: formatMoney(s.priceMinor, s.currency),
     offer: offerLine(s),
@@ -541,6 +568,14 @@ export function liveSheetModel(s: LiveSheet, localZone: string): LiveSheetModel 
 export interface LivePastModel {
   /** The model's name once revealed, else LIVE RELEASE. */
   name: string;
+  /** Its title once revealed (`MONOLITHE IN STEEL`, liveHeading), else LIVE RELEASE (C29, C30). */
+  heading: string;
+  /** The model's name once revealed: the title sets it on a line of its own. */
+  model: string | null;
+  /** `MONDAY 5 OCTOBER`: its opening's day on this phone's calendar, over the title after LIVE RELEASE (C29, C30). */
+  day: string;
+  /** `25 PIECES`: its quantity line as announced. */
+  pieces: string;
   /** `RING · ORBIT` once the name is revealed. */
   line: string | null;
   /** `11 OCT 2026 · 25 PIECES`: its opening date on this phone's calendar, its quantity line as announced. */
@@ -554,6 +589,10 @@ export function livePastModel(s: LiveSheet | LiveEndedSheet, localZone: string):
   const name = s.name ? upper(s.name) : null;
   return {
     name: name ?? LIVE.kind,
+    heading: liveHeading(s) ?? LIVE.kind,
+    model: name,
+    day: zonedTime(s.opensAt, localZone)?.day ?? '',
+    pieces: upper(s.quantityLine),
     line: name ? [upper(s.type), upper(s.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
     facts: RELEASES.past.line(zonedDate(s.opensAt, localZone), upper(s.quantityLine)),
     picture: pictureOf(s),
@@ -603,12 +642,19 @@ export interface LiveCardModel {
   href: string;
   /** LIVE RELEASE, LIVE RELEASE · THE ROOM IS OPEN, LIVE RELEASE · LIVE NOW */
   kind: string;
+  /** Its title once revealed (`MONOLITHE IN BLUE`, liveHeading), else TO BE REVEALED. */
   title: string;
   /** `SUNDAY 11 OCTOBER · 19:00 PARIS`, then on this phone when it differs. */
   when: { paris: string; local: string | null };
   /** `€ 4 800 · 25 PIECES · ONE PER COLLECTOR`: the price, the quantity line and the limit per collector. */
   line: string;
   access: string;
+  /** `€ 4 800` (addition 4's card keeps the price it said). */
+  price: string;
+  /** C7's lines: `25 PIECES` (in ivory), `ONE PER COLLECTOR`, `FOR OWNERS`. */
+  lines: string[];
+  /** T0 (ms): OPENS IN counts down to it on the server's clock (addition 4). */
+  opensAt: number;
   picture: LivePicture | null;
   /** The calendar of the reveals still to come. */
   reveals: RevealDate[];
@@ -623,10 +669,13 @@ export function liveCards(cards: readonly LiveCard[], localZone: string): LiveCa
       id: c.id,
       href: releasePath(c.id),
       kind: c.phase === 'ANNOUNCED' ? LIVE.kind : `${LIVE.kind} · ${LIVE.phase[c.phase]}`,
-      title: c.name ? upper(c.name) : LIVE.unnamed,
+      title: liveHeading(c) ?? LIVE.unnamed,
       when: releaseTime(c.opensAt, localZone),
       line: [offerLine(c), LIVE.perAccount(c.perAccount)].join(' · '),
       access: LIVE.forWhom(c.access.text),
+      price: formatMoney(c.priceMinor, c.currency),
+      lines: [upper(c.quantityLine), LIVE.perAccount(c.perAccount), LIVE.forWhom(c.access.text)].filter((x) => x.length > 0),
+      opensAt: Date.parse(c.opensAt),
       picture: pictureOf(c),
       reveals: revealCalendar(c),
       interest: interestLine(c.interest),
