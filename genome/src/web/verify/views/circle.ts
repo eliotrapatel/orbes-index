@@ -1,56 +1,51 @@
 /**
- * THE CIRCLE (P-X01): what ORBES publishes for the owners of a piece,
- * /verify/circle, and a post, /verify/circle/<id>.
+ * THE CIRCLE (P-X01; plan NOCTURNE, screen 7, step N8): what ORBES publishes for the owners of a piece,
+ * /verify/circle, and a post, /verify/circle/<id>, in NOCTURNE's pieces as C8, C22 and C34 draw them.
  *
- *              ORBES                         small wordmark
- *            T H E   C I R C L E             the page's title
+ *   THE CIRCLE                                   the page's title and its sentence
  *   For the owners of an ORBES piece: …
- *   EARLY ACCESS                             the privilege of PLATINE and PALLADIUM in the
- *   PLATINE and PALLADIUM owners reserve …   releases (P-X02), recalled above the feed
- *   ┌                              ┐
- *     [ photo ]                              ivory plates, one per post: its
- *     INVITATION · PLATINE AND PALLADIUM     kind (and the tiers it is kept
- *     DINNER AT THE ATELIER                  for), its title, its day, an
- *     3 OCT 2026                             invitation's event (UTC), what
- *     12 OCT 2026 · 19:00 UTC · PARIS        the reader did, and its one
- *     YOU ANSWERED YES                       text link
- *     SEE THE INVITATION
- *   └                              ┘
- *               SHOW MORE                    the next page of the feed
- *            [ SCAN ORBES CODE ]
- *   THE RELEASES · THE COLLECTION · MY PIECES
- *   (the legal pages: NOCTURNE's footer, views/shell.ts)
+ *   ──────────────────────────────────
+ *   EARLY ACCESS                                 the privilege of PLATINE and PALLADIUM in the releases (P-X02),
+ *   PLATINE and PALLADIUM owners reserve …       recalled above the feed between two hairlines
+ *   ──────────────────────────────────
+ *   [ its photograph, whole, faded ]             each post: its photograph when it has one, its words lifted onto
+ *   INVITATION                                   its foot (views/invitation.ts, N3's card on NOW): its kind (and the
+ *   AN EVENING AT THE ATELIER                    tiers it is kept for), its title, its day; an invitation's event in
+ *   3 OCT 2026                                   UTC, N LEFT OF C and YES / NO, the reader's answer pressed
+ *   12 OCT 2026 · 17:00 UTC · PARIS              (addition 6); an invitation without a photograph on a plate card,
+ *   3 LEFT OF 12                                 another post on the margin; its one text link
+ *   [ YES ]  [  NO  ]
+ *   SEE THE INVITATION
+ *                 SHOW MORE                      the next page of the feed
  *
- * Signed out, the OWNERSHIP panel's sign-in (its account mode) under one
- * sentence; signed in without a piece, the sentence that the circle opens
- * once a piece is registered (403 OWNERS_ONLY). The feed carries no body: a
- * post does.
+ * Signed out, the OWNERSHIP panel's sign-in (its account mode) under its sentence; signed in without a piece, the
+ * sentence that the circle opens once a piece is registered (403 OWNERS_ONLY). The rail's CIRCLE and the SCAN ring
+ * stand for the page's own foot of before (SCAN ORBES CODE, THE RELEASES, THE COLLECTION, MY PIECES).
  *
- * A post: its kind (and tiers), its title and day; its photographs on an
- * ivory plate (the first loaded at once, the others lazily); its text (plain
- * paragraphs, shared/lookbook.ts); THE INVITATION (WHEN in UTC then on this
- * phone, WHERE, PLACES), then YOUR ANSWER: YES · NO, pressed like the
- * sign-in's options (.auth__option), changed until the event begins; THE POLL:
- * its options, one chosen then VOTE (the page's hairline button while it is
- * offered: a vote is final), then the results; TO SEE: a release's page, a
- * model's sheet, a link to another site with its host beside it (a new tab,
- * noopener noreferrer). At the foot, THE CIRCLE, back to the feed.
+ * A post, under ‹ THE CIRCLE: its photographs whole at the column's width, unfaded (the first at once, the others
+ * lazily, two side by side under it); its kind, its title, its day and its text (plain paragraphs, shared/lookbook.ts);
+ * THE INVITATION (WHEN in UTC then on this phone, WHERE, PLACES), then YOUR ANSWER: its sentence and YES / NO, changed
+ * until the event begins; THE POLL: its options, one chosen then VOTE (final), then the results, each with its bar;
+ * TO SEE: a release's page, a model's sheet, a link to another site with its host under it (a new tab, noopener
+ * noreferrer), each a row that leads on.
  *
- * Every action is a same-origin JSON call through ApiClient (the session
- * cookie, the CSRF token); server messages are shown as they come. A 401 ends
- * the session on the page, which then offers the sign-in again.
+ * Every action is a same-origin JSON call through ApiClient (the session cookie, the CSRF token); server messages are
+ * shown as they come. A 401 ends the session on the page, which then offers the sign-in again. CSP-safe: h() only,
+ * its places by class (verify/styles.css, THE CIRCLE).
  */
-import { bracket } from '../../shared/corners.js';
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { circleCards, circlePostModel, type CircleCardModel, type CirclePhotoModel, type CirclePostModel } from '../circle-model.js';
-import { CIRCLE, RELEASES } from '../copy.js';
+import { CIRCLE_PATH, circleCards, circlePostModel, type CircleCardModel, type CirclePhotoModel, type CirclePostModel } from '../circle-model.js';
+import { CIRCLE, LOOKBOOK, RELEASES } from '../copy.js';
+import { lookbookSheetPath } from '../lookbook-model.js';
+import { releasePath } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
 import type { CircleAnswer, CircleCard } from '../types.js';
-import { circleLink, lookbookLink, piecesLink, releasesLink, sectionLabel, viewRoot, withNumerals } from './common.js';
-import { failedState, loadingState, quietLine } from './nocturne.js';
+import { viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
+import { CircleCardLines, kindLine } from './invitation.js';
+import { accLink, appAnchor, button, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine } from './nocturne.js';
 import { OwnershipPanel } from './ownership.js';
 
 export interface CircleView {
@@ -61,13 +56,10 @@ export interface CircleView {
 export interface CircleDeps {
   api: ApiClient;
   session: SessionStore;
-  /** SCAN ORBES CODE, the page's hairline button. */
+  /** The sign-in panel's way back to the scan. */
   onScan(): void;
   /** Open a post in the app. */
   onPost(id: string): void;
-  onReleases(): void;
-  onCollection(): void;
-  onPieces(): void;
 }
 
 export interface CirclePostDeps {
@@ -76,11 +68,11 @@ export interface CirclePostDeps {
   /** The post's id; null when the address names none (the page says it is not in the circle). */
   id: string | null;
   onScan(): void;
-  /** THE CIRCLE: back to the feed. */
+  /** ‹ THE CIRCLE: back to the feed. */
   onCircle(): void;
-  /** SEE THE RELEASE: a release's page. */
+  /** A release's page (TO SEE). */
   onRelease(id: string): void;
-  /** SEE THE MODEL: its sheet in THE COLLECTION. */
+  /** A model's sheet in THE COLLECTION (TO SEE). */
   onModel(slug: string): void;
   /** Minutes east of UTC of this phone's clock. */
   offsetMinutes: number;
@@ -96,26 +88,25 @@ export function circlePostView(deps: CirclePostDeps): CircleView {
   return { root: page.root, dispose: () => page.dispose() };
 }
 
-/** The small wordmark that opens every page of the app but the landing. */
-const wordmark = (extraClass: string) => h('span', { class: `wordmark wordmark--small ${extraClass}`, attrs: { 'aria-hidden': 'true' }, text: 'ORBES' });
-
-/** A photograph of a post: contained, never cropped; one that cannot be loaded takes its frame with it, and the plate when none is left. */
-function photo(p: CirclePhotoModel, className: string, eager = false): HTMLImageElement {
-  const img = h('img', { class: className, attrs: { src: p.src, alt: p.alt, decoding: 'async', loading: eager ? 'eager' : 'lazy' } });
+/**
+ * A photograph of a post, whole at the column's width (never cropped): faded in the feed, unfaded on the post. One that
+ * cannot be loaded takes its frame with it (`onGone`).
+ */
+function postPhoto(p: CirclePhotoModel, opts: { height: number; fade: boolean; eager?: boolean; extraClass: string; imgClass: string; onGone?: () => void }): HTMLElement {
+  const box = fadedPhoto(p.src, p.alt, { height: opts.height, fade: opts.fade, eager: opts.eager, extraClass: opts.extraClass });
+  box.dataset.photo = '';
+  const img = box.querySelector('img')!;
+  img.classList.add(opts.imgClass);
   img.addEventListener(
     'error',
     () => {
-      img.closest<HTMLElement>('[data-photo]')?.setAttribute('hidden', '');
-      const plate = img.closest<HTMLElement>('[data-photos]');
-      if (plate && !plate.querySelector('[data-photo]:not([hidden])')) plate.hidden = true;
+      box.hidden = true;
+      opts.onGone?.();
     },
     { once: true },
   );
-  return img;
+  return box;
 }
-
-/** The kind of a post, and the tiers it is kept for when they are not every owner's. */
-const kindLine = (m: { kindLabel: string; reach: string | null }) => [m.kindLabel, m.reach].filter(Boolean).join(' · ');
 
 // ── The feed ───────────────────────────────────────────────────────────────
 
@@ -132,27 +123,22 @@ const FEED_PAGE = 20;
 
 class FeedPage {
   readonly root: HTMLElement;
-  private readonly body = h('div', { class: 'circle__body', attrs: { 'aria-live': 'polite' } });
+  private readonly body = h('div', { class: 'n-circle__body circle__body', attrs: { 'aria-live': 'polite' } });
   private load: FeedLoad = { kind: 'waiting' };
   private signIn: OwnershipPanel | null = null;
   private unsubscribe: (() => void) | null;
   private disposed = false;
   /** Bumped on each read of the feed: an older answer is dropped. */
   private gen = 0;
+  /** Each post's card, kept while the feed is the same read (an answer given on one stays when SHOW MORE adds others). */
+  private cards = new Map<string, { el: HTMLElement; lines: CircleCardLines }>();
 
   constructor(private readonly deps: CircleDeps) {
     this.root = viewRoot('circle', 'circle-title');
+    this.root.classList.add('n-circle');
     this.root.append(
-      h('header', { class: 'circle__head' }, wordmark('circle__wordmark'), h('h1', { class: 'circle__title', id: 'circle-title', text: CIRCLE.title }), h('p', { class: 'prose circle__lead', text: CIRCLE.lead })),
+      h('header', { class: 'n-px n-circle__head' }, h('h1', { class: 'n-g n-t1 circle__title', id: 'circle-title', text: CIRCLE.title }), h('p', { class: 'n-lead n-circle__lead circle__lead', text: CIRCLE.lead })),
       this.body,
-      h(
-        'footer',
-        { class: 'circle__foot' },
-        h('button', { class: 'btn', attrs: { type: 'button' }, on: { click: () => deps.onScan() }, text: CIRCLE.scan }),
-        releasesLink(() => deps.onReleases(), { extraClass: 'circle__releases' }),
-        lookbookLink(() => deps.onCollection(), { extraClass: 'circle__collection' }),
-        piecesLink(() => deps.onPieces(), 'circle__pieces'),
-      ),
     );
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
     this.render();
@@ -165,6 +151,12 @@ class FeedPage {
     this.unsubscribe = null;
     this.signIn?.dispose();
     this.signIn = null;
+    this.forget();
+  }
+
+  private forget(): void {
+    for (const c of this.cards.values()) c.lines.dispose();
+    this.cards.clear();
   }
 
   private async start(): Promise<void> {
@@ -186,6 +178,7 @@ class FeedPage {
       return;
     }
     this.gen++;
+    this.forget();
     this.load = { kind: 'signed-out' };
     this.render();
   }
@@ -197,6 +190,7 @@ class FeedPage {
     try {
       const feed = await this.deps.api.circle(1, FEED_PAGE);
       if (gen !== this.gen || this.disposed) return;
+      this.forget();
       this.load = { kind: 'ready', items: feed.items, total: feed.total, more: 'idle' };
     } catch (e) {
       if (gen !== this.gen || this.disposed) return;
@@ -239,13 +233,13 @@ class FeedPage {
         return;
       case 'signed-out':
         this.signIn ??= new OwnershipPanel({ kind: 'account', lead: CIRCLE.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
-        this.body.replaceChildren(h('div', { class: 'circle__signin' }, this.signIn.root));
+        this.body.replaceChildren(h('div', { class: 'n-px circle__signin' }, this.signIn.root));
         return;
       case 'owners-only':
-        this.body.replaceChildren(quietLine(CIRCLE.ownersOnly, 'circle__closed'));
+        this.body.replaceChildren(h('div', { class: 'n-px n-circle__quiet' }, quietLine(CIRCLE.ownersOnly, 'circle__closed')));
         return;
       case 'failed':
-        this.body.replaceChildren(failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle__retry' }));
+        this.body.replaceChildren(failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle__retry', extraClass: 'n-circle__state' }));
         if (hadFocus) this.body.querySelector<HTMLElement>('.circle__retry')?.focus();
         return;
       default: {
@@ -254,40 +248,55 @@ class FeedPage {
         const out: HTMLElement[] = [
           h(
             'section',
-            { class: 'circle__early', attrs: { 'aria-labelledby': 'circle-early' } },
-            sectionLabel(RELEASES.earlyAccess.label, 'circle-early'),
-            h('p', { class: 'prose circle__early-text', text: RELEASES.earlyAccess.recall }),
+            { class: 'n-px n-circle__early circle__early', attrs: { 'aria-labelledby': 'circle-early' } },
+            h('p', { class: 'n-g n-lb circle__early-label', id: 'circle-early', text: RELEASES.earlyAccess.label }),
+            h('p', { class: 'n-sm n-circle__early-text circle__early-text', text: RELEASES.earlyAccess.recall }),
           ),
         ];
-        if (cards.length === 0) out.push(quietLine(CIRCLE.empty, 'circle__empty'));
-        else out.push(h('ul', { class: 'circle__list' }, ...cards.map((c) => h('li', { class: 'circle__item' }, this.card(c)))));
-        if (l.more === 'failed') out.push(h('p', { class: 'form__error', attrs: { role: 'alert' }, text: CIRCLE.moreFailed }));
-        if (l.more === 'loading') out.push(h('p', { class: 'circle__waiting micro', attrs: { 'aria-busy': 'true' }, text: CIRCLE.loading }));
-        else if (l.items.length < l.total) out.push(h('button', { class: 'textlink circle__more', attrs: { type: 'button' }, on: { click: () => void this.more() }, text: l.more === 'failed' ? CIRCLE.retry : CIRCLE.more }));
+        if (cards.length === 0) out.push(h('div', { class: 'n-px n-circle__quiet' }, quietLine(CIRCLE.empty, 'circle__empty')));
+        else out.push(h('ul', { class: 'n-circle__list circle__list', attrs: { 'aria-label': CIRCLE.postsLabel } }, ...cards.map((c, i) => h('li', { class: ['n-circle__item', 'circle__item', i > 0 ? 'n-sec' : null] }, this.card(c)))));
+        if (l.more === 'failed') out.push(h('p', { class: 'n-px n-err form__error n-circle__more-failed', attrs: { role: 'alert' }, text: CIRCLE.moreFailed }));
+        if (l.more === 'loading') out.push(h('p', { class: 'n-g n-lb n-ivc n-ctr n-sec circle__waiting', attrs: { role: 'status' }, text: CIRCLE.loading }));
+        else if (l.items.length < l.total) {
+          out.push(
+            h(
+              'p',
+              { class: 'n-sec n-ctr n-circle__more' },
+              h('button', { class: 'n-g n-tl circle__more', attrs: { type: 'button' }, on: { click: () => void this.more() }, text: l.more === 'failed' ? CIRCLE.retry : CIRCLE.more }),
+            ),
+          );
+        }
         this.body.replaceChildren(...out);
         if (hadFocus && !this.body.contains(document.activeElement)) this.body.querySelector<HTMLElement>('.circle__more, .circle__item:last-child .circle-card__link')?.focus({ preventScroll: true });
       }
     }
   }
 
+  /**
+   * A post's card: on its photograph (faded, its words lifted onto its foot) when it has one; else an invitation on a
+   * plate card (NOW's), another post on the margin. Its lines are views/invitation.ts's, an invitation answered there.
+   */
   private card(c: CircleCardModel): HTMLElement {
-    const id = `circle-${c.id}`;
-    const link = circleLink(() => this.deps.onPost(c.id), { id: c.id, label: c.linkLabel, extraClass: 'circle-card__link' });
-    // Which post a link opens: its title, for a screen reader moving from link to link.
-    link.setAttribute('aria-describedby', `${id}-title`);
-    return bracket(
-      h(
-        'article',
-        { class: 'circle-card', data: { kind: c.kind.toLowerCase() }, attrs: { 'aria-labelledby': `${id}-title` } },
-        c.image ? h('div', { class: 'circle-card__frame', data: { photo: '' } }, photo(c.image, 'circle-card__img')) : null,
-        h('p', { class: 'circle-card__kind', text: kindLine(c) }),
-        h('h2', { class: 'circle-card__title', id: `${id}-title` }, ...withNumerals(c.title)),
-        h('p', { class: 'circle-card__date micro', text: c.date }),
-        c.event ? h('p', { class: 'circle-card__event micro', text: c.event }) : null,
-        c.mine ? h('p', { class: 'circle-card__mine micro', text: c.mine }) : null,
-        link,
-      ),
-    );
+    const kept = this.cards.get(c.id);
+    if (kept) return kept.el;
+    const titleId = `circle-${c.id}-title`;
+    let host: HTMLElement;
+    const parts: HTMLElement[] = [];
+    if (c.image) {
+      host = lift([], { extraClass: 'n-circle-card__words' });
+      // A photograph that cannot be loaded: the words stand on the margin, as a post without one.
+      parts.push(postPhoto(c.image, { height: 390, fade: true, extraClass: 'n-circle-card__photo', imgClass: 'circle-card__img', onGone: () => host.classList.remove('n-lift') }), host);
+    } else if (c.kind === 'INVITATION') {
+      host = plateCard([], { left: true, extraClass: 'n-circle-card__plate' });
+      parts.push(host);
+    } else {
+      host = h('div', { class: 'n-px n-circle-card__words' });
+      parts.push(host);
+    }
+    const el = h('article', { class: 'n-circle-card circle-card', data: { kind: c.kind.toLowerCase() }, attrs: { 'aria-labelledby': titleId } }, ...parts);
+    const lines = new CircleCardLines(c, host, { api: this.deps.api, session: this.deps.session, onPost: (id) => this.deps.onPost(id) }, { heading: 'h2', titleId });
+    this.cards.set(c.id, { el, lines });
+    return el;
   }
 }
 
@@ -304,11 +313,7 @@ type PostLoad =
 
 class PostPage {
   readonly root: HTMLElement;
-  private readonly eyebrow = h('p', { class: 'circle-post__kind', attrs: { hidden: true } });
-  private readonly title = h('h1', { class: 'circle-post__title', id: 'circle-post-title', text: CIRCLE.title });
-  private readonly date = h('p', { class: 'circle-post__date micro', attrs: { hidden: true } });
-  private readonly body = h('div', { class: 'circle-post__body', attrs: { 'aria-live': 'polite' } });
-  private readonly foot = h('footer', { class: 'circle-post__foot' });
+  private readonly body = h('div', { class: 'n-post__body circle-post__body', attrs: { 'aria-live': 'polite' } });
   private load: PostLoad = { kind: 'waiting' };
   private signIn: OwnershipPanel | null = null;
   private unsubscribe: (() => void) | null;
@@ -321,7 +326,8 @@ class PostPage {
 
   constructor(private readonly deps: CirclePostDeps) {
     this.root = viewRoot('circle-post', 'circle-post-title');
-    this.root.append(h('header', { class: 'circle-post__head' }, wordmark('circle-post__wordmark'), this.eyebrow, this.title, this.date), this.body, this.foot);
+    this.root.classList.add('n-post');
+    this.root.append(appAnchor(CIRCLE_PATH, ['n-g', 'n-crumb', 'n-post__crumb', 'circle-post__back'], () => deps.onCircle(), icon('back', { small: true }), CIRCLE.link), this.body);
     this.unsubscribe = deps.session.subscribe(() => this.onSession());
     this.render();
     void this.start();
@@ -434,12 +440,7 @@ class PostPage {
     const hadFocus = this.body.contains(document.activeElement);
     const l = this.load;
     this.root.dataset.state = l.kind;
-    let offersVote = false;
-    if (l.kind !== 'ready') {
-      this.eyebrow.hidden = true;
-      this.date.hidden = true;
-      this.title.textContent = CIRCLE.title;
-    }
+    delete this.root.dataset.kind;
     switch (l.kind) {
       case 'waiting':
       case 'loading':
@@ -447,143 +448,160 @@ class PostPage {
         break;
       case 'signed-out':
         this.signIn ??= new OwnershipPanel({ kind: 'account', lead: CIRCLE.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
-        this.body.replaceChildren(h('div', { class: 'circle__signin' }, this.signIn.root));
+        this.body.replaceChildren(h('div', { class: 'n-px n-post__head n-post__head--bare' }, h('h1', { class: 'n-g n-t1 n-post__title', id: 'circle-post-title', text: CIRCLE.title }), h('div', { class: 'circle__signin' }, this.signIn.root)));
         break;
       case 'owners-only':
-        this.body.replaceChildren(quietLine(CIRCLE.ownersOnly, 'circle__closed'));
+        this.body.replaceChildren(this.quiet(CIRCLE.ownersOnly, 'circle__closed'));
         break;
       case 'missing':
-        this.body.replaceChildren(quietLine(CIRCLE.notFound, 'circle-post__missing'));
+        this.body.replaceChildren(this.quiet(CIRCLE.notFound, 'circle-post__missing'));
         break;
       case 'failed':
-        this.body.replaceChildren(failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle-post__retry' }));
+        this.body.replaceChildren(failedState({ sentence: CIRCLE.loadFailed, reason: l.message, retry: CIRCLE.retry, onRetry: () => void this.fetch(), retryClass: 'circle-post__retry', extraClass: 'n-post__state' }));
         if (hadFocus) this.body.querySelector<HTMLElement>('.circle-post__retry')?.focus();
         break;
       default: {
         const p = l.post;
         this.root.dataset.kind = p.kind.toLowerCase();
-        this.eyebrow.textContent = kindLine(p);
-        this.eyebrow.hidden = false;
-        this.title.replaceChildren(...withNumerals(p.title));
-        this.date.textContent = p.date;
-        this.date.hidden = p.date === '';
-        const sections: (HTMLElement | null)[] = [];
-        if (p.photos.length > 0) {
-          sections.push(
-            h(
-              'section',
-              { class: 'circle-post__photos', attrs: { 'aria-label': CIRCLE.photosLabel(p.title) }, data: { photos: '' } },
-              bracket(
-                h(
-                  'div',
-                  { class: ['circle-post__plate', p.photos.length > 1 ? 'circle-post__plate--many' : null] },
-                  ...p.photos.map((ph, i) => h('figure', { class: 'circle-photo', data: { photo: '' } }, photo(ph, 'circle-photo__img', i === 0))),
-                ),
-              ),
-            ),
-          );
-        }
-        sections.push(storyBlock(p.body, { className: 'circle-post__text', paragraphClass: 'prose circle-post__paragraph' }));
-        if (p.invitation) sections.push(...this.invitation(p));
-        if (p.poll) {
-          const poll = this.poll(p);
-          offersVote = poll.offersVote;
-          sections.push(poll.section);
-        }
+        const photos = this.photos(p);
+        const sections: (HTMLElement | null)[] = [
+          photos,
+          h(
+            'div',
+            { class: ['n-px', 'n-post__head', photos ? null : 'n-post__head--bare'] },
+            h('p', { class: 'n-g n-lb circle-post__kind', text: kindLine(p) }),
+            h('h1', { class: 'n-g n-t1 n-post__title circle-post__title', id: 'circle-post-title' }, ...withNumerals(p.title)),
+            p.date ? h('p', { class: 'n-sm n-num n-post__date circle-post__date', text: p.date }) : null,
+            storyBlock(p.body, { className: 'n-post__text circle-post__text', paragraphClass: 'n-art circle-post__paragraph' }),
+          ),
+        ];
+        if (p.invitation) sections.push(this.invitation(p));
+        if (p.poll) sections.push(this.poll(p));
         sections.push(this.links(p));
         this.body.replaceChildren(...sections.filter((x): x is HTMLElement => x !== null));
       }
     }
-    // One hairline button on the page: VOTE while it is offered, SCAN ORBES CODE otherwise.
-    this.foot.replaceChildren(
-      h('button', { class: `${offersVote ? 'textlink' : 'btn'} circle-post__scan`, attrs: { type: 'button' }, on: { click: () => this.deps.onScan() }, text: CIRCLE.scan }),
-      circleLink(() => this.deps.onCircle(), { extraClass: 'circle-post__back' }),
-    );
-    if (hadFocus && !this.body.contains(document.activeElement)) (this.body.querySelector<HTMLElement>('button:not([disabled])') ?? this.body.querySelector<HTMLElement>('.section-label'))?.focus({ preventScroll: true });
+    if (hadFocus && !this.body.contains(document.activeElement)) (this.body.querySelector<HTMLElement>('button:not([disabled])') ?? this.body.querySelector<HTMLElement>('h2'))?.focus({ preventScroll: true });
+  }
+
+  /** A sentence alone on the margin under ‹ THE CIRCLE (C40): it names the page. */
+  private quiet(text: string, extraClass: string): HTMLElement {
+    const line = quietLine(text, extraClass);
+    line.id = 'circle-post-title';
+    return h('div', { class: 'n-px n-post__head n-post__head--bare' }, line);
+  }
+
+  /** The post's photographs (C22): the first whole across the column, loaded at once; the others two side by side under it. */
+  private photos(p: CirclePostModel): HTMLElement | null {
+    if (p.photos.length === 0) return null;
+    const section = h('section', { class: 'n-post__photos circle-post__photos', attrs: { 'aria-label': CIRCLE.photosLabel(p.title) }, data: { photos: '' } });
+    // Every photograph that cannot be loaded gone, the section goes with them.
+    const gone = () => {
+      if (!section.querySelector('[data-photo]:not([hidden])')) section.hidden = true;
+    };
+    const one = (ph: CirclePhotoModel, i: number, height: number) => postPhoto(ph, { height, fade: false, eager: i === 0, extraClass: 'n-post__photo', imgClass: 'circle-photo__img', onGone: gone });
+    const [first, ...rest] = p.photos;
+    section.append(one(first!, 0, 390));
+    for (let i = 0; i < rest.length; i += 2) {
+      // A pair side by side (C22's `.two`, 195 px each); one left alone runs the column's width.
+      if (i + 1 < rest.length) section.append(h('div', { class: 'n-two n-post__pair' }, one(rest[i]!, i + 1, 195), one(rest[i + 1]!, i + 2, 195)));
+      else section.append(h('div', { class: 'n-post__pair' }, one(rest[i]!, i + 1, 390)));
+    }
+    return section;
   }
 
   private errorLine(): HTMLElement | null {
-    return this.actionError ? h('p', { class: 'form__error', attrs: { role: 'alert' }, text: this.actionError }) : null;
+    return this.actionError ? h('p', { class: 'n-err form__error circle-post__error', attrs: { role: 'alert' }, text: this.actionError }) : null;
   }
 
-  /** THE INVITATION, then YOUR ANSWER: YES · NO while answers are taken. */
-  private invitation(p: CirclePostModel): HTMLElement[] {
+  /** THE INVITATION (WHEN, WHERE, PLACES), then YOUR ANSWER: its sentence, YES / NO while answers are taken (C22). */
+  private invitation(p: CirclePostModel): HTMLElement {
     const inv = p.invitation!;
-    const facts = h(
+    const heading = h('h2', { class: 'n-g n-t3 n-post__answer-title', id: 'circle-answer', attrs: { tabindex: -1 }, text: CIRCLE.section.answer });
+    const option = (answer: CircleAnswer, label: string) =>
+      button(label, {
+        outline: inv.answer !== answer,
+        onClick: () => void this.act('answer', answer),
+        extraClass: 'circle-post__answer',
+        attrs: { 'aria-pressed': inv.answer === answer ? 'true' : 'false', disabled: this.busy || (answer === 'YES' && inv.full), 'data-answer': answer },
+      });
+    return h(
       'section',
-      { class: 'circle-post__section', attrs: { 'aria-labelledby': 'circle-invitation' } },
-      sectionLabel(CIRCLE.section.invitation, 'circle-invitation'),
+      { class: 'n-px n-post__section circle-post__section', attrs: { 'aria-labelledby': 'circle-invitation' } },
+      h('h2', { class: 'n-g n-t3', id: 'circle-invitation', text: CIRCLE.section.invitation }),
       h(
         'dl',
-        { class: 'rows circle-post__rows' },
+        { class: 'n-post__rows circle-post__rows' },
         ...inv.rows.map((r) =>
-          h('div', { class: 'rows__row' }, h('dt', { class: 'rows__label', text: r.label }), h('dd', { class: 'rows__value' }, h('span', { class: 'circle-post__utc', text: r.value }), r.local ? h('span', { class: 'circle-post__local', text: r.local }) : null)),
-        ),
-      ),
-    );
-    const heading = sectionLabel(CIRCLE.section.answer, 'circle-answer');
-    heading.tabIndex = -1;
-    const option = (answer: CircleAnswer, label: string) =>
-      h('button', {
-        class: 'auth__option circle-post__answer',
-        attrs: { type: 'button', 'aria-pressed': inv.answer === answer ? 'true' : 'false', disabled: this.busy || (answer === 'YES' && inv.full) },
-        data: { answer },
-        on: { click: () => void this.act('answer', answer) },
-        text: label,
-      });
-    const answer = h(
-      'section',
-      { class: 'circle-post__section circle-post__reply', attrs: { 'aria-labelledby': 'circle-answer' } },
-      heading,
-      h('p', { class: 'prose circle-post__sentence', text: inv.sentence }),
-      inv.open
-        ? h(
+          h(
             'div',
-            { class: 'auth__switch circle-post__choice', attrs: { role: 'group', 'aria-label': CIRCLE.answerChoice } },
-            option('YES', CIRCLE.yes),
-            h('span', { class: 'tabs__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }),
-            option('NO', CIRCLE.no),
-          )
-        : null,
-      this.errorLine(),
-    );
-    return [facts, answer];
-  }
-
-  /** THE POLL: one option chosen, then VOTE (final); once voted, the results, the reader's own marked. */
-  private poll(p: CirclePostModel): { section: HTMLElement; offersVote: boolean } {
-    const poll = p.poll!;
-    const heading = sectionLabel(CIRCLE.section.poll, 'circle-poll');
-    heading.tabIndex = -1;
-    const out: (HTMLElement | null)[] = [heading, h('p', { class: 'prose circle-post__sentence', text: poll.sentence })];
-    let offersVote = false;
-    if (poll.results) {
-      out.push(
-        h(
-          'ul',
-          { class: 'circle-post__results', attrs: { 'aria-label': CIRCLE.section.poll } },
-          ...poll.results.map((r) =>
+            { class: 'n-kv__row n-post__row' },
+            h('dt', { class: 'n-g n-kv__label n-post__label', text: r.label }),
             h(
-              'li',
-              { class: ['circle-post__result', r.mine ? 'is-mine' : null] },
-              h('span', { class: 'circle-post__result-label' }, ...withNumerals(r.label)),
-              h('span', { class: 'circle-post__result-votes', text: `${r.votes} · ${r.share}` }),
-              r.mine ? h('span', { class: 'circle-post__result-mine', text: CIRCLE.yourVote }) : null,
+              'dd',
+              { class: 'n-kv__value n-post__value' },
+              h('span', { class: 'n-num circle-post__utc' }, ...withNumerals(r.value)),
+              r.local ? h('br') : null,
+              r.local ? h('span', { class: 'n-sm n-num circle-post__local', text: r.local }) : null,
             ),
           ),
         ),
+      ),
+      h(
+        'div',
+        { class: 'n-post__reply circle-post__reply', attrs: { role: 'group', 'aria-labelledby': 'circle-answer' } },
+        heading,
+        h('p', { class: 'n-sm n-post__sentence circle-post__sentence', text: inv.sentence }),
+        inv.open ? h('div', { class: 'n-duo n-post__choice circle-post__choice', attrs: { role: 'group', 'aria-label': CIRCLE.answerChoice } }, option('YES', CIRCLE.yes), option('NO', CIRCLE.no)) : null,
+        this.errorLine(),
+      ),
+    );
+  }
+
+  /** THE POLL (C34): one option chosen, then VOTE (final); once voted, the results, the reader's own marked. */
+  private poll(p: CirclePostModel): HTMLElement {
+    const poll = p.poll!;
+    const out: (HTMLElement | null)[] = [h('h2', { class: 'n-g n-t3', id: 'circle-poll', attrs: { tabindex: -1 }, text: CIRCLE.section.poll })];
+    if (poll.results) {
+      out.push(
+        h('p', { class: 'n-tx n-post__sentence circle-post__sentence', text: poll.sentence }),
+        h(
+          'ul',
+          { class: 'n-post__results circle-post__results', attrs: { 'aria-label': CIRCLE.section.poll } },
+          ...poll.results.map((r) => {
+            const fill = h('i', { class: 'n-bar2__fill' });
+            fill.style.width = r.share;
+            return h(
+              'li',
+              { class: ['n-post__result', 'circle-post__result', r.mine ? 'is-mine' : null] },
+              h(
+                'div',
+                { class: 'n-sb' },
+                h(
+                  'span',
+                  { class: 'n-g n-t3 n-ivc n-post__result-label' },
+                  h('span', { class: 'circle-post__result-label' }, ...withNumerals(r.label)),
+                  // A word space, then 8 px, before YOUR VOTE (C34).
+                  ...(r.mine ? [' ', h('span', { class: 'n-lb n-post__mine circle-post__result-mine', text: CIRCLE.yourVote })] : []),
+                ),
+                h('span', { class: 'n-sm n-num n-post__votes circle-post__result-votes', text: `${r.votes} · ${r.share}` }),
+              ),
+              h('div', { class: 'n-bar2', attrs: { 'aria-hidden': 'true' } }, fill),
+            );
+          }),
+        ),
       );
     } else {
-      offersVote = true;
       out.push(
+        h('p', { class: 'n-sm n-post__sentence circle-post__sentence', text: poll.sentence }),
         h(
           'div',
-          { class: 'circle-post__options', attrs: { role: 'group', 'aria-label': CIRCLE.pollChoice } },
+          { class: 'n-opt2 n-post__options circle-post__options', attrs: { role: 'group', 'aria-label': CIRCLE.pollChoice } },
           ...poll.options.map((o) =>
             h(
               'button',
               {
-                class: 'auth__option circle-post__option',
+                class: 'n-g n-opt2__option circle-post__option',
                 attrs: { type: 'button', 'aria-pressed': this.choice === o.index ? 'true' : 'false', disabled: this.busy },
                 data: { option: String(o.index) },
                 on: { click: () => this.choose(o.index) },
@@ -593,38 +611,36 @@ class PostPage {
           ),
         ),
         this.errorLine(),
-        h('button', {
-          class: 'btn circle-post__vote',
-          attrs: { type: 'button', disabled: this.busy || this.choice === null, 'aria-busy': this.busy ? 'true' : 'false' },
-          on: {
-            click: () => {
-              if (this.choice !== null) void this.act('vote', this.choice);
-            },
+        button(CIRCLE.vote, {
+          extraClass: 'n-post__vote circle-post__vote',
+          attrs: { disabled: this.busy || this.choice === null, 'aria-busy': this.busy ? 'true' : 'false' },
+          onClick: () => {
+            if (this.choice !== null) void this.act('vote', this.choice);
           },
-          text: CIRCLE.vote,
         }),
       );
     }
-    return { section: h('section', { class: 'circle-post__section circle-post__poll', attrs: { 'aria-labelledby': 'circle-poll' } }, ...out.filter((x): x is HTMLElement => x !== null)), offersVote };
+    return h('section', { class: 'n-px n-post__section n-post__section--poll circle-post__section circle-post__poll', attrs: { 'aria-labelledby': 'circle-poll' } }, ...out.filter((x): x is HTMLElement => x !== null));
   }
 
-  /** TO SEE: a release's page, a model's sheet, a link to another site with its host. */
+  /** TO SEE (C22): a release's page, a model's sheet, a link to another site with its host; each a row that leads on. */
   private links(p: CirclePostModel): HTMLElement | null {
     const { release, model, external } = p.links;
     if (!release && !model && !external) return null;
-    const items: HTMLElement[] = [];
-    if (release) items.push(h('li', { class: 'circle-post__link' }, h('span', { class: 'circle-post__link-title' }, ...withNumerals(release.title)), releasesLink(() => this.deps.onRelease(release.id), { id: release.id })));
-    if (model) items.push(h('li', { class: 'circle-post__link' }, h('span', { class: 'circle-post__link-title' }, ...withNumerals(model.title)), lookbookLink(() => this.deps.onModel(model.slug), { slug: model.slug })));
+    const rows: HTMLElement[] = [];
+    if (release) rows.push(accLink(h('span', { class: 'circle-post__link-title' }, ...withNumerals(release.title)), { line: RELEASES.see, lineKind: 'lb', href: releasePath(release.id), onOpen: () => this.deps.onRelease(release.id), extraClass: 'circle-post__link' }));
+    if (model) rows.push(accLink(h('span', { class: 'circle-post__link-title' }, ...withNumerals(model.title)), { line: LOOKBOOK.seeModel, lineKind: 'lb', href: lookbookSheetPath(model.slug), onOpen: () => this.deps.onModel(model.slug), extraClass: 'circle-post__link' }));
     if (external) {
-      items.push(
-        h(
-          'li',
-          { class: 'circle-post__link' },
-          h('a', { class: 'textlink circle-post__external', attrs: { href: external.href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': CIRCLE.externalLabel(external.host) }, text: CIRCLE.openLink }),
-          h('span', { class: 'circle-post__host', text: external.host }),
-        ),
-      );
+      const a = accLink(CIRCLE.openLink, { line: external.host, lineKind: 'sm', href: external.href, newTab: true, label: CIRCLE.externalLabel(external.host), extraClass: 'circle-post__link circle-post__external' });
+      a.setAttribute('rel', 'noopener noreferrer');
+      a.querySelector('.n-acc__line')?.classList.add('circle-post__host');
+      rows.push(a);
     }
-    return h('section', { class: 'circle-post__section', attrs: { 'aria-labelledby': 'circle-links' } }, sectionLabel(CIRCLE.section.links, 'circle-links'), h('ul', { class: 'circle-post__links' }, ...items));
+    return h(
+      'section',
+      { class: 'n-px n-post__section circle-post__section', attrs: { 'aria-labelledby': 'circle-links' } },
+      h('h2', { class: 'n-g n-t3', id: 'circle-links', text: CIRCLE.section.links }),
+      h('div', { class: 'n-post__links circle-post__links' }, ...rows),
+    );
   }
 }

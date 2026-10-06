@@ -96,7 +96,7 @@ const CASES: { state: UiState; check: Check }[] = [
       // THE CIRCLE: the invitation as a plate card, its answer pressed.
       const inv = page.locator('.now__invitation');
       expect(await inv.locator('h3').innerText()).toBe('AN EVENING AT THE ATELIER');
-      expect(await inv.locator('.now__invitation-places').innerText()).toBe('3 LEFT OF 12');
+      expect(await inv.locator('.n-circle-card__places').innerText()).toBe('3 LEFT OF 12');
       expect(await inv.getByRole('button', { name: 'YES' }).getAttribute('aria-pressed')).toBe('true');
       expect(await inv.getByRole('button', { name: 'NO' }).getAttribute('aria-pressed')).toBe('false');
       // THE COLLECTION: a model's photograph the hero does not show (here gold, the hero being blue).
@@ -252,10 +252,10 @@ const ANSWER: { state: UiState; check: Check } = {
     await inv.getByRole('button', { name: 'NO' }).click();
     await expect.poll(() => page.locator('.now__invitation').getByRole('button', { name: 'NO' }).getAttribute('aria-pressed')).toBe('true');
     expect(await page.locator('.now__invitation').getByRole('button', { name: 'YES' }).getAttribute('aria-pressed')).toBe('false');
-    expect(await page.locator('.now__invitation-places').innerText()).toBe('4 LEFT OF 12');
+    expect(await page.locator('.now__invitation .n-circle-card__places').innerText()).toBe('4 LEFT OF 12');
     await page.locator('.now__invitation').getByRole('button', { name: 'YES' }).click();
     await expect.poll(() => page.locator('.now__invitation').getByRole('button', { name: 'YES' }).getAttribute('aria-pressed')).toBe('true');
-    expect(await page.locator('.now__invitation-places').innerText()).toBe('3 LEFT OF 12');
+    expect(await page.locator('.now__invitation .n-circle-card__places').innerText()).toBe('3 LEFT OF 12');
     // NOW's read of the feed is no visit to the circle.
     await page.reload();
     await page.locator(READY).waitFor();
@@ -284,21 +284,21 @@ const FULL: { state: UiState; check: Check } = {
     await rsvp('you', 'NO');
     for (const who of ['guest', 'absent', 'platine', 'voter1']) await rsvp(who, 'YES');
     await reread();
-    expect(await inv.locator('.now__invitation-places').innerText()).toBe('NONE LEFT OF 12');
+    expect(await inv.locator('.n-circle-card__places').innerText()).toBe('NONE LEFT OF 12');
     expect(await inv.getByRole('button', { name: 'YES' }).isDisabled()).toBe(true);
     expect(await inv.getByRole('button', { name: 'NO' }).isEnabled()).toBe(true);
     expect(await inv.getByRole('button', { name: 'NO' }).getAttribute('aria-pressed')).toBe('true');
     // One place given back, read; then taken again before the click: the answer is refused, the card read again.
     await rsvp('voter1', 'NO');
     await reread();
-    expect(await inv.locator('.now__invitation-places').innerText()).toBe('1 LEFT OF 12');
+    expect(await inv.locator('.n-circle-card__places').innerText()).toBe('1 LEFT OF 12');
     expect(await inv.getByRole('button', { name: 'YES' }).isEnabled()).toBe(true);
     await rsvp('voter2', 'YES');
     await inv.getByRole('button', { name: 'YES' }).click();
     const alert = inv.getByRole('alert');
     await alert.waitFor({ timeout: 10_000 });
     expect(await alert.innerText()).toBe('Every place of this invitation is taken.');
-    expect(await inv.locator('.now__invitation-places').innerText()).toBe('NONE LEFT OF 12');
+    expect(await inv.locator('.n-circle-card__places').innerText()).toBe('NONE LEFT OF 12');
     expect(await inv.getByRole('button', { name: 'YES' }).isDisabled()).toBe(true);
     expect(await inv.getByRole('button', { name: 'YES' }).getAttribute('aria-pressed')).toBe('false');
     expect(await inv.getByRole('button', { name: 'NO' }).getAttribute('aria-pressed')).toBe('true');

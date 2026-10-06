@@ -131,6 +131,21 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   - C30 (N7): the contact of ORBES Client Services on the end page of an entry REMOVED; the end of a visit while the
     release still runs (YOUR TURN HAS PASSED) shows no ONE QUESTION, which by lot E's rule opens only at the release's
     final end (the board draws the question on that page).
+  - C8 (N8): an invitation's card without a photograph sits on NOW's plate card (C1's), no board drawing one in the
+    feed; YOU VOTED on a voted poll's card, YOU ANSWERED *YES* / *NO* on an invitation's once its answers close, and an
+    answer refused (its sentence under YES / NO), none of which C8 draws.
+  - C18 (N8): the banner of the LIVE RELEASES under the rail, as on MY PIECES signed in (the board draws the page
+    without it); the refusal stays under FORGOTTEN PASSWORD?, as drawn.
+  - C22, C34 (N8): the post's title wraps where its words fall (C22 breaks AN EVENING / AT THE ATELIER by hand; C34's
+    breaks where the words fall); a lone last photograph runs the column's width (C22 draws three: one, then two).
+  - C39 (N8, built in N4): SET A NEW PASSWORD has its title, *At least 12 characters.* under NEW PASSWORD and BACK TO
+    SIGN IN; CHANGE PASSWORD (the account sheet) its title and *At least 12 characters.* (the board's sections open on
+    their sentence).
+  - C23, C41 (N8): every section of the page, in its own text (the boards draw article 1 and article 13, and three
+    questions, as excerpts; the board's *article 11* link is plain text in the terms); the index (/legal) as rows
+    that lead on with their sentence; the contact of ORBES Client Services (its address and number side by side, the
+    hours under them); in French, the four pages wrap on two lines at the head and at the foot. The plan's *FAQ
+    answers as accordion rows*: C41 draws every answer open with no row control, and is followed.
 
 ## Boards without a screen of their own today
 
@@ -476,6 +491,7 @@ SOUND ON/OFF at the room's foot (always, the preference shared with the landing)
 |---|---|---|---|
 | `circle` | ORBES, THE CIRCLE, its lead, EARLY ACCESS and its recall; each post (*photograph*, *kind* (· *tiers*), *title*, *date*, an invitation's *event date · time UTC · place*, YOU ANSWERED *YES* / YOU VOTED, SEE THE INVITATION / SEE THE POLL / READ THE NOTE), SHOW MORE (more than a page), SCAN ORBES CODE, THE RELEASES · THE COLLECTION · MY PIECES | a TITANE owner | C8 |
 | `circle-platine` | the same with the poll (POLL · PLATINE AND PALLADIUM) | a PLATINE owner | C8 |
+| `circle-show-more` | the same, the feed's answer saying one more post (SHOW MORE, as C8 draws it; the demo publishes fewer than a page) | a PLATINE owner | C8 |
 | `circle-signed-out` | *The circle is reserved for the owners … Sign in …*, the sign-in | signed out | C40 |
 | `circle-no-piece` | *The circle is reserved … It opens once a piece is registered …* | no piece | C40 (4) |
 | `circle-empty` | ORBES, THE CIRCLE, its lead, EARLY ACCESS and its recall, *Nothing has been published in the circle yet.* | an owner, nothing published | C40 (3) |
@@ -488,6 +504,11 @@ SOUND ON/OFF at the room's foot (always, the preference shared with the landing)
 | `circle-stress`, `post-stress` | eight posts, a 71-character title | | same pieces |
 | `post-poll-stress` | a poll whose first option is A FINISH IN BRUSHED BLACK RHODIUM, before a vote | | same pieces |
 | *(not reached)* | answers closed (*The event has begun …*, no buttons); every place taken (*Every place is taken …*, YES disabled); NONE LEFT OF *c*; SHOW MORE's failure; the feed could not be shown | | C22 (2, 3) |
+
+Since N8 (C8, C22, C34): the feed's own foot (SCAN ORBES CODE, THE RELEASES, THE COLLECTION, MY PIECES) and a post's
+(SCAN ORBES CODE, THE CIRCLE) gave way to the chrome (the SCAN ring, the rail, the crumb ‹ THE CIRCLE), and the small
+wordmark to the header; on an invitation's card, while answers are taken, YOU ANSWERED is the YES or NO pressed
+(addition 6, views/invitation.ts, N3's card on NOW). The content test lists both (`circleMoves`).
 
 ## Kept as they are (out of NOCTURNE's look)
 
@@ -517,6 +538,12 @@ else the browser's language): the language is a state of each.
 | `legal-terms-fr` | CONDITIONS | C23 (in French) |
 | `legal-notice-fr` | MENTIONS LÉGALES | C23 (in French) |
 | `legal-faq-fr` | AIDE | C41 (in French) |
+
+Since N8 (C23, C41): ORBES and VERIFY A PIECE in the header, the app's rail (no chapter current, RELEASES' dot read from
+GET /api/v1/live/next and /api/v1/drops), the four pages as `.switch2` tabs, *Version of …* (sentence case) with
+ENGLISH · FRANÇAIS above the title, every section open, the footer's PRIVACY · TERMS · LEGAL · HELP, VERIFY A PIECE,
+DB-IP and © ORBES · GENOME CODE · PARIS. Their stylesheet imports NOCTURNE's foundation (shared/nocturne.css), the
+verification app's own.
 
 ## Controls shown only on some devices or states (summary)
 

@@ -2752,7 +2752,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(other.page.locator('.n-account__benefits--next .n-account__benefit', { hasText: 'Early access to each release' }), 1);
     await other.page.keyboard.press('Escape');
     await other.page.goto(`${srv.origin}/verify/circle`);
-    await textOf(other.page.locator('.circle__early .section-label'), 'EARLY ACCESS');
+    await textOf(other.page.locator('.circle__early .circle__early-label'), 'EARLY ACCESS');
     await textOf(other.page.locator('.circle__early-text'), RELEASES.earlyAccess.recall);
     expect(await figuresInDisplayFace(other.page)).toEqual([]);
     expect(other.problems).toEqual([]);
@@ -2930,7 +2930,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await panel.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await panel.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
 
-    // The feed: the latest published first, nothing kept for PLATINE; each on its ivory plate with its one text link.
+    // The feed: the latest published first, nothing kept for PLATINE; each with its one text link, a post with a
+    // photograph on it (faded, its words lifted onto its foot), an invitation without one on a plate card (N8, C8).
     const cards = page.locator('article.circle-card');
     await textsOf(cards.locator('.circle-card__title'), ['THE ATELIER AT NIGHT', 'DINNER AT THE ATELIER', 'THE NEXT STONE']);
     await textsOf(cards.locator('.circle-card__kind'), ['NOTE', 'INVITATION', 'POLL']);
@@ -2938,9 +2939,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(cards.nth(1).locator('.circle-card__event'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC · PARIS$/);
     await attrOf(cards.first().locator('img.circle-card__img'), 'loading', 'lazy');
     await attrOf(cards.first().locator('.circle-card__link'), 'href', `/verify/circle/${note.id}`);
-    expect(await cards.first().evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual([PLATE, 'auto']);
+    await visible(cards.first().locator('.n-ph.n-fade + .n-lift'));
+    expect(await cards.nth(1).locator('.n-card').evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual([PLATE, 'auto']);
+    await countOf(cards.nth(2).locator('.n-card, .n-ph'), 0);
+    // Addition 6: the invitation's places and YES / NO on its card, nothing answered yet.
+    await textOf(cards.nth(1).locator('.n-circle-card__places'), '12 LEFT OF 12');
+    await attrOf(cards.nth(1).getByRole('button', { name: 'YES', exact: true }), 'aria-pressed', 'false');
+    await attrOf(cards.nth(1).getByRole('button', { name: 'NO', exact: true }), 'aria-pressed', 'false');
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    await keepsFloors(page, ['READ THE NOTE', 'SEE THE INVITATION', 'SEE THE POLL', 'SCAN ORBES CODE', 'THE RELEASES', 'THE COLLECTION', 'MY PIECES', ...LEGAL_LINKS]);
+    await keepsFloors(page, ['READ THE NOTE', 'SEE THE INVITATION', 'SEE THE POLL', 'YES', 'NO', ...LEGAL_LINKS]);
     for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
       await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
@@ -2954,16 +2961,16 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('h1'), 'DINNER AT THE ATELIER');
     expect(new URL(page.url()).pathname).toBe(`/verify/circle/${dinner.id}`);
     await textOf(page.locator('.circle-post__kind'), 'INVITATION');
-    await textsOf(page.locator('.circle-post__section > .section-label'), ['THE INVITATION', 'YOUR ANSWER']);
-    await textsOf(page.locator('.circle-post__rows .rows__label'), ['WHEN', 'WHERE', 'PLACES']);
-    const when = page.locator('.circle-post__rows .rows__row', { hasText: 'WHEN' });
+    await textsOf(page.locator('.circle-post__section h2').filter({ hasText: /^(THE INVITATION|YOUR ANSWER)$/ }), ['THE INVITATION', 'YOUR ANSWER']);
+    await textsOf(page.locator('.circle-post__rows .n-post__label'), ['WHEN', 'WHERE', 'PLACES']);
+    const when = page.locator('.circle-post__rows .n-post__row', { hasText: 'WHEN' });
     await textOf(when.locator('.circle-post__utc'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
     await textOf(when.locator('.circle-post__local'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} on this phone \(UTC\+0[12]:00\)$/);
-    const places = page.locator('.circle-post__rows .rows__row', { hasText: 'PLACES' }).locator('.rows__value');
+    const places = page.locator('.circle-post__rows .n-post__row', { hasText: 'PLACES' }).locator('.n-post__value');
     await textOf(places, '12 LEFT OF 12');
     const sentence = page.locator('.circle-post__reply .circle-post__sentence');
     await textOf(sentence, CIRCLE.answer.none);
-    await keepsFloors(page, ['YES', 'NO', 'SCAN ORBES CODE', 'THE CIRCLE', ...LEGAL_LINKS]);
+    await keepsFloors(page, ['YES', 'NO', 'THE CIRCLE', ...LEGAL_LINKS]);
     await page.locator('.circle-post__choice').getByRole('button', { name: 'YES' }).click();
     await textOf(sentence, CIRCLE.answer.yes);
     await attrOf(page.locator('.circle-post__choice [data-answer=YES]'), 'aria-pressed', 'true');
@@ -2975,19 +2982,27 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await ctx.db.selectFrom('circle_rsvps').select('answer').where('post_id', '=', dinner.id).where('account_id', '=', owner.account.id).execute()).toEqual([{ answer: 'NO' }]);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await page.screenshot({ path: join(OUT_DIR, 'verify-circle-invitation.png'), fullPage: true });
-    // Back: the feed, which says the answer.
+    // Back: the feed, whose card has the answer pressed (addition 6), answered there too by the post's own route.
     await page.goBack();
     await textOf(page.locator('h1'), 'THE CIRCLE');
-    await textOf(cards.nth(1).locator('.circle-card__mine'), 'YOU ANSWERED NO');
+    await attrOf(cards.nth(1).getByRole('button', { name: 'NO', exact: true }), 'aria-pressed', 'true');
+    await cards.nth(1).getByRole('button', { name: 'YES', exact: true }).click();
+    await attrOf(cards.nth(1).getByRole('button', { name: 'YES', exact: true }), 'aria-pressed', 'true');
+    await textOf(cards.nth(1).locator('.n-circle-card__places'), '11 LEFT OF 12');
+    expect(await ctx.db.selectFrom('circle_rsvps').select('answer').where('post_id', '=', dinner.id).where('account_id', '=', owner.account.id).execute()).toEqual([{ answer: 'YES' }]);
+    await cards.nth(1).getByRole('button', { name: 'NO', exact: true }).click();
+    await attrOf(cards.nth(1).getByRole('button', { name: 'NO', exact: true }), 'aria-pressed', 'true');
+    await textOf(cards.nth(1).locator('.n-circle-card__places'), '12 LEFT OF 12');
 
-    // The poll: an option chosen, then VOTE, the page's hairline button while it is offered; once voted, the results.
+    // The poll: an option chosen, then VOTE, the page's one filled button; once voted, the results.
     await cards.nth(2).getByRole('link', { name: 'SEE THE POLL' }).click();
     await textOf(page.locator('h1'), 'THE NEXT STONE');
     await textOf(page.locator('.circle-post__poll .circle-post__sentence'), CIRCLE.pollLead);
     const vote = page.getByRole('button', { name: 'VOTE', exact: true });
     await expect.poll(() => vote.isDisabled(), POLL).toBe(true);
-    await attrOf(page.locator('.circle-post__foot .circle-post__scan'), 'class', /\btextlink\b/);
-    await keepsFloors(page, ['ONYX', 'OPAL', 'JADE', 'VOTE', 'SCAN ORBES CODE', 'THE CIRCLE']);
+    await attrOf(vote, 'class', /\bn-btn\b(?!--)/);
+    expect(await vote.getAttribute('class')).not.toMatch(/n-btn--ol/);
+    await keepsFloors(page, ['ONYX', 'OPAL', 'JADE', 'VOTE', 'THE CIRCLE']);
     await page.locator('.circle-post__options').getByRole('button', { name: 'OPAL' }).click();
     await attrOf(page.locator('.circle-post__options [data-option="1"]'), 'aria-pressed', 'true');
     await vote.click();
@@ -2996,7 +3011,6 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textsOf(page.locator('.circle-post__result-votes'), ['0 VOTES · 0%', '1 VOTE · 100%', '0 VOTES · 0%']);
     await textOf(page.locator('.circle-post__result.is-mine .circle-post__result-mine'), 'YOUR VOTE');
     await countOf(page.getByRole('button', { name: 'VOTE', exact: true }), 0);
-    await attrOf(page.locator('.circle-post__foot .circle-post__scan'), 'class', /\bbtn\b/);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await page.goBack();
     await textOf(cards.nth(2).locator('.circle-card__mine'), 'YOU VOTED');
@@ -3020,7 +3034,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await attrOf(film, 'aria-label', 'Open the link on youtube.com, in a new tab');
     await textOf(page.locator('.circle-post__host'), 'youtube.com');
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    await keepsFloors(page, ['SEE THE RELEASE', 'OPEN THE LINK', 'SCAN ORBES CODE', 'THE CIRCLE', ...LEGAL_LINKS]);
+    // TO SEE's rows lead on, each measured as its title and its line (their text joined).
+    await keepsFloors(page, ['HALO — RELEASE ISEE THE RELEASE', 'OPEN THE LINKyoutube.com', 'THE CIRCLE', ...LEGAL_LINKS]);
+    await countOf(page.locator('.circle-post__links .n-acc'), 2);
     await page.screenshot({ path: join(OUT_DIR, 'verify-circle-note.png'), fullPage: true });
     // SEE THE RELEASE: its page over the releases' list; back through the list to the note.
     await page.locator('.circle-post__links').getByRole('link', { name: 'SEE THE RELEASE' }).click();
@@ -3029,8 +3045,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('h1'), 'THE RELEASES');
     await page.goBack();
     await textOf(page.locator('h1'), 'THE ATELIER AT NIGHT');
-    // The foot's THE CIRCLE: back to the feed, then the landing.
-    await page.locator('.circle-post__foot').getByRole('link', { name: 'THE CIRCLE' }).click();
+    // ‹ THE CIRCLE, the crumb: back to the feed, then the landing.
+    await page.locator('.circle-post__back').click();
     await textOf(page.locator('h1'), 'THE CIRCLE');
     expect(new URL(page.url()).pathname).toBe('/verify/circle');
     await page.goBack();
@@ -3057,7 +3073,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(cards, 20);
     const more = page.getByRole('button', { name: 'SHOW MORE' });
     await visible(more);
-    await keepsFloors(page, ['SHOW MORE', 'SCAN ORBES CODE']);
+    await keepsFloors(page, ['SHOW MORE']);
     await more.click();
     await countOf(cards, 21);
     await textOf(cards.last().locator('.circle-card__title'), 'THE NEXT STONE');

@@ -669,9 +669,6 @@ class App {
       session: this.session,
       onScan: () => void this.startScan(),
       onPost: (id) => this.openCirclePost(id),
-      onReleases: () => this.openReleases(),
-      onCollection: () => this.openLookbook(),
-      onPieces: () => this.openPieces(),
     });
     if (await this.swap(view.root, 'circle', focus)) this.live = view;
     else view.dispose();

@@ -1,0 +1,2299 @@
+/*
+ * ORBES verification app — the house look before NOCTURNE, kept where it still shows: the shared certificate (choice 3),
+ * the room and the after-room of a LIVE RELEASE (choice 4, fidelity rule 6), the boutique board, and the pieces the
+ * NOCTURNE screens still carry (their state classes). Imported by styles.css right after brand.css, before NOCTURNE.
+ */
+
+/* ── Page ──────────────────────────────────────────────────────────────── */
+
+html {
+  background: var(--paper);
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100svh;
+  transition: background-color var(--t-med) var(--ease);
+}
+
+body[data-screen="scan"] {
+  background: var(--ink);
+  overscroll-behavior: none;
+}
+
+body[data-screen="scan"] .grain {
+  display: none;
+}
+
+.corners {
+  color: var(--ink);
+}
+
+body[data-screen="scan"] .corners {
+  color: var(--white);
+}
+
+.app {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  min-height: 100svh;
+}
+
+.view {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100svh;
+  animation: view-in 1.1s var(--ease) both;
+}
+
+.view.is-leaving {
+  opacity: 0;
+  transition: opacity 0.28s ease;
+}
+
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Headings receive focus programmatically on screen changes (for screen readers), as does the thanks
+   that replaces a sent report; no ring for that (BRAND §3.8). The section labels a panel opens with
+   (FORGOTTEN PASSWORD, C-04; REPORT LOST / STOLEN and PIECE FOUND, F-01) are such headings too, and
+   so is the status line of a piece in MY PIECES once a report is made or withdrawn. */
+h1[tabindex="-1"]:focus,
+.section-label[tabindex="-1"]:focus,
+.ownership__status[tabindex="-1"]:focus,
+.n-own__heading[tabindex="-1"]:focus,
+.n-report__status[tabindex="-1"]:focus,
+.n-model__heading[tabindex="-1"]:focus,
+.n-model__title[tabindex="-1"]:focus,
+.sheet__missing[tabindex="-1"]:focus {
+  outline: none;
+}
+
+.boot-error {
+  position: fixed;
+  inset: 45% 0 auto;
+  text-align: center;
+}
+
+/* ── Marks ─────────────────────────────────────────────────────────────── */
+
+.mark {
+  color: var(--ink);
+  overflow: visible;
+}
+
+.mark__ring {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.mark__core {
+  fill: currentColor;
+}
+
+.genome__label {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.36em;
+  text-indent: 0.36em;
+  color: var(--ink-soft);
+  line-height: 1;
+}
+
+.genome__id {
+  margin-top: 16px;
+  font-size: var(--fs-heading);
+  letter-spacing: var(--track-micro);
+  text-indent: var(--track-micro);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.genome__glyphs {
+  width: 100%;
+  max-width: 300px;
+  margin: 24px auto 0;
+}
+
+.genome-svg--row {
+  width: 100%;
+  height: auto;
+}
+
+/* The orbit, as on the piece: a centred square. A glyph is 3.5 u of the 21 u
+   figure, so 260 px draws it at about 43 px (42 px on a 390 px phone). */
+.genome-svg--orbit {
+  width: min(64vw, 260px);
+  height: auto;
+  aspect-ratio: 1;
+  margin: 0 auto;
+}
+
+/* The fingerprint the customer may compare or quote: 10 px, never the 8 px of decoration. */
+.genome__meta {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+  font-size: var(--fs-micro);
+}
+
+.lines {
+  list-style: none;
+}
+
+.lines__line {
+  font-size: var(--fs-label);
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+  line-height: 2.55;
+}
+
+/* ORBES Client Services (BRAND-DESIGN-SYSTEM §4.2), under the help line of a
+   non-authentic result and under the note of a warranty that no longer
+   applies: the prefilled email, a text link (the hairline button stays the
+   foot's), then the phone (a text link made of figures, so in the reading
+   face) and the hours, centred. The 12 px gap keeps the tap zones apart (a
+   text link's zone reaches 4 px past its box). */
+.contact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+  text-align: center;
+}
+
+.contact__hours {
+  max-width: 34ch;
+  color: var(--ink-soft);
+  text-wrap: balance;
+}
+
+/* Tabs */
+
+.tabs {
+  margin-top: 50px;
+}
+
+.tabs__list {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 7px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+/* 10 px. The tracking (--tab-track, 0.16 em) and the gap around the dots
+   (7 px) tighten so the four tabs keep the width they had at 9 px and fit a
+   360 px phone. The tap zone is 44 px high, and widened by --tab-pad of
+   transparent padding on each side, given back by an equal negative margin:
+   CARE reaches 44 px, the zones stop at the dots, and the underline (::after)
+   still spans the word alone, 15 px under it as before. */
+.tabs__tab {
+  --tab-pad: 7px;
+  --tab-track: 0.16em;
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  min-height: 44px;
+  margin-inline: calc(-1 * var(--tab-pad));
+  padding: 17px var(--tab-pad) 15px;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--tab-track);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--t-med) var(--ease);
+}
+
+.tabs__tab::after {
+  content: "";
+  position: absolute;
+  left: var(--tab-pad);
+  right: calc(var(--tab-pad) + var(--tab-track));
+  bottom: -1px;
+  height: 1px;
+  background: var(--ink);
+  transform: scaleX(0);
+  transition: transform var(--t-med) var(--ease);
+}
+
+.tabs__tab[aria-selected="true"] {
+  color: var(--ink);
+}
+
+.tabs__tab[aria-selected="true"]::after {
+  transform: scaleX(1);
+}
+
+/* Focus ring: 2 px around the former box (14 px above the word, 15 px under
+   it, nothing at the sides), so it stays clear of the dots, as before the
+   zone grew. */
+.tabs__tab:focus-visible {
+  outline: none;
+}
+
+.tabs__tab:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset: 1px calc(var(--tab-pad) - 2px) -2px;
+  outline: 1px solid currentColor;
+  pointer-events: none;
+}
+
+.tabs__dot {
+  color: var(--metal);
+  font-size: var(--fs-caption);
+  line-height: 1;
+}
+
+.tabs__panel {
+  padding-top: 8px;
+  animation: brand-fade var(--t-med) var(--ease) both;
+}
+
+.tabs__panel:focus-visible {
+  outline: none;
+}
+
+.panel__note,
+.panel__care {
+  margin-top: 22px;
+}
+
+.panel__care {
+  margin-top: 26px;
+}
+
+.rows {
+  margin: 0;
+}
+
+.rows__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 20px;
+  padding: 14px 0 13px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.rows__label {
+  flex: none;
+  font-size: var(--fs-caption);
+  letter-spacing: var(--track-label);
+  color: var(--ink-soft);
+  text-transform: uppercase;
+}
+
+.rows__value {
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-label);
+  letter-spacing: 0.14em;
+  text-align: right;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  /* A long value (a tracking number of 27 characters) breaks within its row rather than past it (fidelity rule 5). */
+  overflow-wrap: anywhere;
+}
+
+.section-label {
+  margin-top: 36px;
+  font-size: var(--fs-overline);
+  font-weight: 400;
+  letter-spacing: 0.34em;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+}
+
+.section-label + .rows {
+  margin-top: 4px;
+}
+
+/* Ownership */
+
+.ownership {
+  padding-top: 26px;
+}
+
+.ownership__status {
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+}
+
+.ownership__text {
+  margin-top: 12px;
+}
+
+.ownership__meta {
+  margin-top: 14px;
+}
+
+.ownership .section-label {
+  margin-top: 34px;
+}
+
+.ownership__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 26px;
+}
+
+.auth__switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 26px;
+}
+
+/* SIGN IN · CREATE ACCOUNT: 10 px (the gap between letters stays 2.2 px) and
+   a 44 px tap zone of transparent padding, given back by an equal negative
+   margin so the switch keeps its height. The rule under the chosen option
+   (::after) stays 8 px under the word, where the border of the 27 px option
+   was. */
+.auth__option {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  min-height: 44px;
+  margin-block: -8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-soft);
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color var(--t-med) var(--ease);
+}
+
+.auth__option::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 7px;
+  height: 1px;
+  background: var(--ink);
+  opacity: 0;
+  transition: opacity var(--t-med) var(--ease);
+}
+
+.auth__option[aria-pressed="true"] {
+  color: var(--ink);
+}
+
+.auth__option[aria-pressed="true"]::after {
+  opacity: 1;
+}
+
+/* Focus ring: 4 px outside the former 28 px option, not around the zone. */
+.auth__option:focus-visible {
+  outline: none;
+}
+
+.auth__option:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset: 4px -4px;
+  outline: 1px solid currentColor;
+  pointer-events: none;
+}
+
+.form {
+  display: grid;
+  gap: 22px;
+  margin-top: 22px;
+}
+
+.form .btn {
+  margin-top: 8px;
+}
+
+.form__error {
+  font-size: var(--fs-line);
+  line-height: 1.6;
+  letter-spacing: 0.02em;
+}
+
+.form__error::before {
+  content: "— ";
+}
+
+.form__error[hidden] {
+  display: none;
+}
+
+.form__notice {
+  margin-top: 18px;
+  font-size: var(--fs-line);
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+/* SIGNED IN AS …, then two links: MY PIECES and SIGN OUT in the OWNERSHIP
+   tab, CHANGE PASSWORD (C-04) and SIGN OUT at the foot of MY PIECES (F-01).
+   When the line is too short for the three, the two links wrap under the
+   account, kept to the right; a long email wraps inside its line rather than
+   squeezing them. */
+.ownership__account {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px 16px;
+  margin-top: 36px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.ownership__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 20px;
+  margin-left: auto;
+}
+
+/* Each link keeps its one line at any width: the line gives way instead. */
+.ownership__links .textlink {
+  flex: none;
+  white-space: nowrap;
+}
+
+.ownership__who {
+  flex: 1 1 14em;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* FORGOTTEN PASSWORD (C-04): I HAVE A RECOVERY CODE over BACK TO SIGN IN,
+   centred under the contact of ORBES Client Services; the 12 px gap keeps
+   their tap zones apart (a text link's zone reaches 4 px past its box). */
+.ownership__actions--stack {
+  gap: 12px;
+}
+
+.ownership__email {
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+/* Foot */
+
+/* The legal pages (J-06): PRIVACY · TERMS · LEGAL · HELP, then DB-IP's
+   attribution, at the foot of the landing and under every result. Text links
+   as they are (10 px, 44 px zones); a row that wraps keeps 12 px between its
+   lines, so the zones (4 px beyond each line) stay apart, and HELP, the
+   shortest word, is widened to the 44 px floor. */
+.legal-links {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+}
+
+.legal-links__pages {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px 6px;
+}
+
+.legal-links__link {
+  min-width: 44px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.legal-links__dot {
+  color: var(--ink-soft);
+  font-size: var(--fs-caption);
+}
+
+.legal-links__credit {
+  white-space: nowrap;
+}
+
+/* Under CREATE ACCOUNT on a LIVE RELEASE's page, in the vault's look (J-06;
+   fidelity rule 6): the sentence, then TERMS OF USE · PRIVACY POLICY,
+   centred; a row that wraps keeps 12 px between its lines, so the 44 px
+   zones stay apart, as .legal-links__pages. */
+.terms-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 22px;
+  text-align: center;
+}
+
+.terms-note__text {
+  max-width: 34ch;
+  font-size: var(--fs-micro);
+  line-height: 1.75;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  text-wrap: balance;
+}
+
+.terms-note__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px 6px;
+}
+
+.terms-note__link {
+  white-space: nowrap;
+}
+
+.terms-note__dot {
+  color: var(--ink-soft);
+  font-size: var(--fs-caption);
+}
+
+/* ── My pieces (F-01) ──────────────────────────────────────────────────── */
+
+/* The column of MY PIECES before NOCTURNE (its own look since N5: the NOCTURNE section, `.n-pieces`); the écrin
+   (`.piece__plate`) stays the shared certificate's. */
+.view--pieces {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: calc(60px + var(--safe-top)) 32px calc(64px + var(--safe-bottom));
+}
+
+.pieces__empty {
+  max-width: 34ch;
+  margin: 0 auto;
+  text-align: center;
+  text-wrap: balance;
+}
+
+/* Signed out: the OWNERSHIP panel's sign-in, at the width of a tab panel. */
+.pieces__signin .ownership {
+  padding-top: 0;
+}
+
+.piece__plate {
+  padding: 34px 22px 28px;
+  background: var(--ivory);
+  color: var(--ink);
+  text-align: center;
+}
+
+.piece__plate .bracket {
+  color: var(--hairline-strong);
+}
+
+.piece__plate .bracket--tl { top: 10px; left: 10px; }
+.piece__plate .bracket--tr { top: 10px; right: 10px; }
+.piece__plate .bracket--bl { bottom: 10px; left: 10px; }
+.piece__plate .bracket--br { bottom: 10px; right: 10px; }
+
+/* ── Ownership certificate (F-06) ──────────────────────────────────────── */
+
+/* The page of a shared link (/verify/c#…): the column of a result and of MY
+   PIECES, the title tracked like theirs, its state under it (VALID, NO LONGER
+   VALID, NOT FOUND), then the piece in its écrin (.piece__plate, the GENOME
+   plate of a result), its lines and the rows of the record. */
+.view--certificate {
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+  padding: calc(60px + var(--safe-top)) 32px calc(64px + var(--safe-bottom));
+}
+
+.certificate__head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.certificate__wordmark {
+  margin-bottom: 52px;
+}
+
+.certificate__title {
+  font-size: var(--fs-title);
+  font-weight: 400;
+  line-height: 1.3;
+  letter-spacing: 0.3em;
+  text-indent: 0.3em;
+}
+
+.certificate__state {
+  margin-top: 18px;
+  font-size: var(--fs-label);
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink-soft);
+}
+
+.certificate__state:empty {
+  display: none;
+}
+
+.certificate__lead {
+  max-width: 34ch;
+  margin-top: 22px;
+  text-wrap: balance;
+}
+
+.certificate__lead[hidden] {
+  display: none;
+}
+
+.certificate__body {
+  margin-top: 52px;
+}
+
+.certificate__body:empty {
+  display: none;
+}
+
+.certificate__waiting {
+  text-align: center;
+}
+
+.certificate__lines {
+  margin-top: 40px;
+  text-align: center;
+}
+
+.certificate__section {
+  margin-top: 40px;
+}
+
+.certificate__note {
+  margin-top: 32px;
+  color: var(--ink-soft);
+}
+
+.certificate__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+  margin-top: 60px;
+  text-align: center;
+}
+
+.certificate__footnote {
+  letter-spacing: var(--track-micro);
+  text-indent: var(--track-micro);
+}
+
+/* The question after a LIVE RELEASE (plan LIVE RELEASE+, choice 11): ONE QUESTION, the release (in MY PIECES), the
+   question, its answers one under the other pressed like the sign-in's switch (as a poll of the circle), until when.
+   On the release's end page in the vault, centred under the account's part; in MY PIECES in the ivory: the tokens
+   follow the ground. */
+.question {
+  width: 100%;
+  margin-top: 34px;
+  padding-top: 22px;
+  border-top: 1px solid var(--hairline);
+}
+
+.question--vault {
+  max-width: 340px;
+  text-align: center;
+}
+
+.question__label {
+  font-size: var(--fs-overline);
+  letter-spacing: var(--track-display);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.question__release {
+  margin-top: 10px;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.question__text {
+  margin-top: 14px;
+  font-size: var(--fs-line);
+  line-height: 1.6;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.question__answers {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
+  margin-top: 28px;
+}
+
+.question--vault .question__answers {
+  align-items: center;
+}
+
+/* An answer narrower than a 44 px zone gains its width, as a poll's option does. */
+.question__answer {
+  min-width: 44px;
+  max-width: 100%;
+  text-align: left;
+}
+
+.question--vault .question__answer {
+  text-align: center;
+}
+
+.question__note {
+  margin-top: 24px;
+  font-size: var(--fs-line);
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.question__error {
+  margin-top: 12px;
+}
+
+/* ── The LIVE RELEASE: the vault (plan of 2026-10-04, mockups B1–B7) ───── */
+
+/* The VAULT: the house tokens (brand.css) turned to the vault's, so every primitive under it (buttons, text links,
+   fields, brackets, rows) takes its look. The LIVE RELEASE's screens and cards carry it; its CONFIRMED does not. */
+.vault {
+  --ink: var(--vault-ink);
+  --ink-soft: var(--vault-soft);
+  --metal: var(--vault-faint);
+  --hairline: var(--vault-hairline);
+  --hairline-strong: var(--vault-hairline-strong);
+  --paper: var(--vault-ground);
+  --white: var(--vault-ground);
+  --ivory: var(--vault-plate);
+  color: var(--ink);
+}
+
+/* Its page is the vault: ivory on the ink ground (.vault, above), an
+   overhead light at the top; CONFIRMED comes out into the light, the ivory of
+   the house, the ground following in 0.9 s. */
+body[data-screen="live"] {
+  background-color: var(--vault-ground);
+  background-image: var(--vault-light);
+  background-repeat: no-repeat;
+  background-size: 100% 100vh;
+  transition: background-color 0.9s var(--ease);
+}
+
+body[data-screen="live"] .corners {
+  color: var(--vault-ink);
+}
+
+body[data-screen="live"]:has(.view--live.is-light) {
+  background-color: var(--ivory);
+  background-image: none;
+}
+
+body[data-screen="live"]:has(.view--live.is-light) .corners {
+  color: var(--ink);
+}
+
+.view--live {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 440px;
+  margin: 0 auto;
+  padding: calc(44px + var(--safe-top)) 32px calc(52px + var(--safe-bottom));
+  color: var(--ink);
+  text-align: center;
+  transition: color 0.9s var(--ease);
+}
+
+.view--live [hidden] {
+  display: none !important;
+}
+
+.live__head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+/* The latest host message and the pause, under the header. */
+.live__notice {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 326px;
+  margin-top: 20px;
+}
+
+.live__notice:empty {
+  display: none;
+}
+
+.live__paused,
+.live__message {
+  padding: 10px 0 11px;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--fs-line);
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.live__notice-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink);
+}
+
+.live__stage {
+  width: 100%;
+  margin-top: 36px;
+}
+
+.live__screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  animation: live-in 0.7s var(--ease) both;
+}
+
+@keyframes live-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.live__overline {
+  font-size: var(--fs-micro);
+  line-height: 1.8;
+  letter-spacing: var(--track-display);
+  text-indent: var(--track-display);
+  color: var(--ink-soft);
+}
+
+.live__title {
+  max-width: 100%;
+  margin-top: 12px;
+  font-size: var(--fs-heading);
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: var(--track-display);
+  text-indent: var(--track-display);
+  overflow-wrap: anywhere;
+}
+
+.live__title:focus {
+  outline: none;
+}
+
+/* A line of tracked capitals that carries a fact: 10 px, the floor of what is read. */
+.live__fact {
+  margin-top: 8px;
+  font-size: var(--fs-micro);
+  line-height: 1.8;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink-soft);
+}
+
+.live__note {
+  max-width: 300px;
+  margin-top: 10px;
+  font-size: var(--fs-line);
+  line-height: 1.65;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+}
+
+.live__subtitle {
+  margin-top: 22px;
+  font-size: var(--fs-line);
+  letter-spacing: var(--track-display);
+  text-indent: var(--track-display);
+}
+
+.live__rule {
+  width: 100%;
+  max-width: 326px;
+  height: 0;
+  margin-top: 22px;
+  border: 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.live__error {
+  max-width: 300px;
+  margin-top: 16px;
+}
+
+/* The piece on its plate: the photograph, the silhouette or the seal, framed by hairline brackets. */
+.live__plate {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 326px;
+  aspect-ratio: 326 / 206;
+  overflow: hidden;
+  background: var(--ivory);
+  color: var(--ink);
+}
+
+.live__plate .bracket,
+.live__checks .bracket,
+.live__receipt-plate .bracket {
+  color: var(--hairline-strong);
+}
+
+.live__plate .bracket--tl,
+.live__checks .bracket--tl { top: 10px; left: 10px; }
+.live__plate .bracket--tr,
+.live__checks .bracket--tr { top: 10px; right: 10px; }
+.live__plate .bracket--bl,
+.live__checks .bracket--bl { bottom: 10px; left: 10px; }
+.live__plate .bracket--br,
+.live__checks .bracket--br { bottom: 10px; right: 10px; }
+
+.live__img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.live__img--silhouette {
+  padding: 18px;
+}
+
+/* The seal: the ORBES CODE drawn in the ink of its context, with the vault's faint glow. */
+.live-seal {
+  display: block;
+  overflow: visible;
+  filter: var(--vault-glow);
+}
+
+.live__plate-seal {
+  width: 46%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+/* The light sweep: a band of light across the piece, masked to the piece itself (its picture, set by the view). */
+.live__sweep {
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(105deg, rgba(246, 242, 234, 0) 38%, rgba(246, 242, 234, 0.55) 50%, rgba(246, 242, 234, 0) 62%);
+  background-size: 260% 100%;
+  background-position: 100% 0;
+  background-repeat: no-repeat;
+  -webkit-mask-image: var(--piece);
+  mask-image: var(--piece);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.live-door.is-open .live__sweep {
+  animation: live-sweep 1.7s var(--ease) 0.7s both;
+}
+
+.live__plate--join .live__sweep {
+  animation: live-sweep 1.7s var(--ease) 0.3s both;
+}
+
+@keyframes live-sweep {
+  from { opacity: 1; background-position: 100% 0; }
+  to { opacity: 1; background-position: 0% 0; }
+}
+
+/* B2: the price and the quantity line under the model's name. */
+.live__offer {
+  margin-top: 10px;
+}
+
+/* SEE THE MODEL (from the photograph's stage): a text link in the vault's ivory, under the price as announced and
+   under the model's line in the room; its 44 px tap zone is the text link's own. */
+.live__see-model {
+  margin-top: 8px;
+}
+
+.live__offer + .live__see-model {
+  margin-top: 4px;
+}
+
+.live__unit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.live__unit-label {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink-soft);
+}
+
+/* A SURPRISE IN EVERY BOX (plan LIVE RELEASE+, choice 3): a vault label held between two hairlines, in the ivory; what
+   the surprise is stays unsaid. */
+.live__surprise {
+  margin-top: 18px;
+  padding: 9px 0 10px;
+  border-top: 1px solid var(--hairline-strong);
+  border-bottom: 1px solid var(--hairline-strong);
+  font-size: var(--fs-micro);
+  line-height: 1.8;
+  letter-spacing: var(--track-label);
+  text-indent: var(--track-label);
+  color: var(--ink);
+}
+
+/* B2: the room behind its door. The two leaves meet under the lock, the seal; at T0 the lock aligns, the leaves part,
+   the piece is lit. */
+.live-door {
+  position: relative;
+  width: 100%;
+  max-width: 326px;
+  aspect-ratio: 326 / 230;
+  margin-top: 22px;
+  overflow: hidden;
+}
+
+.live-door__inside {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.9s var(--ease) 0.35s;
+}
+
+.live-door__inside .live__plate {
+  max-width: none;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.live-door.is-open .live-door__inside {
+  opacity: 1;
+}
+
+.live-door__leaf {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  background: var(--vault-plate);
+  transition: transform 1.2s var(--ease);
+}
+
+/* Each leaf: a hairline panel inside it; the seam where they meet. */
+.live-door__leaf::before {
+  content: "";
+  position: absolute;
+  inset: 14px;
+  border: 1px solid var(--hairline);
+}
+
+.live-door__leaf--left {
+  left: 0;
+  border-right: 1px solid var(--hairline-strong);
+}
+
+.live-door__leaf--right {
+  right: 0;
+  border-left: 1px solid var(--hairline-strong);
+}
+
+.live-door.is-open .live-door__leaf--left {
+  transform: translateX(-101%);
+}
+
+.live-door.is-open .live-door__leaf--right {
+  transform: translateX(101%);
+}
+
+.live-door__lock {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 42%;
+  aspect-ratio: 1;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 50%;
+  background: var(--vault-ground);
+  transform: translate(-50%, -50%);
+  transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+}
+
+.live-door__seal {
+  width: 84%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+/* The lock's orbits turn on the seal's centre (the view-box origin), each settling with a slight click. */
+.live-seal__ring {
+  transform-box: view-box;
+  transform-origin: 0 0;
+  transition: transform 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.live-door.is-aligned .live-door__lock {
+  animation: live-click 0.36s var(--ease) both;
+}
+
+@keyframes live-click {
+  0% { transform: translate(-50%, -50%) scale(1); }
+  40% { transform: translate(-50%, -50%) scale(0.95); }
+  100% { transform: translate(-50%, -50%) scale(1); }
+}
+
+.live-door.is-open .live-door__lock {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(1.12);
+}
+
+.live__count-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 22px;
+}
+
+.live__count {
+  font-size: var(--fs-count);
+  font-weight: 200;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.live__room.is-opening .live__count-block {
+  display: none;
+}
+
+.live__presence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+}
+
+.live__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink);
+  animation: live-breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes live-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.live__drawing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 30px;
+}
+
+.live__drawing .live__subtitle {
+  margin-top: 0;
+}
+
+.live__prep {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+/* READY CHECK: five rows on a plate, each ticked once ready. */
+.live__checks {
+  position: relative;
+  width: 100%;
+  max-width: 326px;
+  margin-top: 24px;
+  padding: 16px 20px 8px;
+  background: var(--ivory);
+  text-align: left;
+}
+
+.live__checks-title {
+  margin-bottom: 6px;
+  text-indent: 0;
+}
+
+.live__checks-list {
+  margin: 0;
+}
+
+.live__check {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+  border-top: 1px solid var(--hairline);
+}
+
+.live__check-label {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+}
+
+.live__check-value {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  color: var(--ink-soft);
+}
+
+.live__check-mark {
+  flex: none;
+}
+
+.live__check-mark path {
+  fill: none;
+  stroke: var(--metal);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.live__check.is-ok .live__check-mark path {
+  stroke: var(--ink);
+}
+
+/* YOUR SIZE: the sizes four to a row; the one chosen filled ivory (the primary action once entered). */
+.live__picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 326px;
+  margin-top: 22px;
+}
+
+/* Four to a row, centred; a longer label (ONE SIZE) widens its own button. */
+.live__sizes {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.btn.live__size {
+  flex: 0 0 calc((100% - 24px) / 4);
+  min-width: max-content;
+  min-height: 44px;
+  height: 44px;
+  padding: 0 12px;
+  border-color: var(--hairline-strong);
+  font-family: var(--font);
+  font-size: var(--fs-sub);
+  letter-spacing: 0.04em;
+  text-indent: 0;
+}
+
+.btn.live__size[aria-pressed="true"] {
+  border-color: var(--ink);
+}
+
+/* Before ENTER, the size picked is outlined twice (ENTER is the screen's one filled action). */
+.live__picker.is-choosing .btn.live__size[aria-pressed="true"] {
+  outline: 1px solid var(--ink);
+  outline-offset: -5px;
+  background: transparent;
+  color: var(--ink);
+}
+
+/* Its inner outline is the choice: the keyboard's focus rings it apart, outside, in ivory. */
+.live__picker.is-choosing .btn.live__size[aria-pressed="true"]:focus-visible {
+  box-shadow:
+    0 0 0 5px var(--paper),
+    0 0 0 6px var(--ink);
+}
+
+.live__size.is-gone .live__size-label {
+  text-decoration: line-through;
+}
+
+.live__qty {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.btn.live__step {
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  height: 44px;
+  padding: 0;
+  border-color: var(--hairline-strong);
+  font-family: var(--font);
+  font-size: var(--fs-lead);
+  letter-spacing: 0;
+  text-indent: 0;
+}
+
+.live__qty-value {
+  min-width: 2ch;
+  font-size: var(--fs-lead);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The keyboard's focus in the vault: ivory, outside the button, also around a
+   filled one (whose words, the ring's currentColor elsewhere, are the ground's). */
+.vault .btn:focus-visible {
+  outline: 1px solid var(--ink);
+  outline-offset: 4px;
+}
+
+/* The one primary action of a screen: filled ivory, its words in the ground's ink. */
+.btn.live__primary {
+  width: 100%;
+  min-width: 0;
+  max-width: 282px;
+  margin-top: 22px;
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.live__money {
+  font-family: var(--font);
+  letter-spacing: 0.06em;
+  text-indent: 0;
+}
+
+.live__choose,
+.live__ready-line {
+  margin-top: 18px;
+}
+
+.live__ready + .live__ready-line {
+  margin-top: 8px;
+}
+
+.live__leave {
+  margin-top: 10px;
+}
+
+/* B3: the line. */
+.live__place-label {
+  margin-top: 40px;
+}
+
+.live__place {
+  margin-top: 6px;
+  font-size: var(--fs-place);
+  font-weight: 200;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.live__ahead {
+  color: var(--ink);
+}
+
+.live__meter {
+  display: grid;
+  grid-template-columns: repeat(var(--cells, 25), minmax(0, 1fr));
+  gap: clamp(1px, calc(100px / var(--cells, 25)), 4px);
+  width: 100%;
+  max-width: 326px;
+  margin-top: 44px;
+}
+
+.live__cell {
+  height: 22px;
+  border: 1px solid var(--hairline-strong);
+}
+
+.live__cell--gone {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.live__cell--held {
+  border-color: var(--metal);
+  background: var(--metal);
+}
+
+.live__meter--bar {
+  display: block;
+  height: 2px;
+  background: var(--hairline-strong);
+}
+
+.live__bar {
+  display: block;
+  height: 100%;
+  background: var(--ink);
+  transform-origin: left center;
+  transition: transform 0.7s var(--ease);
+}
+
+.live__left {
+  margin-top: 12px;
+}
+
+.live__line .live__rule {
+  margin-top: 36px;
+}
+
+.live__line-note {
+  margin-top: 20px;
+}
+
+/* B4: the turn. The seal is the button: the turn's ring runs out around it, the hold's ring fills inside. */
+.btn.live-hold {
+  position: relative;
+  width: min(268px, 74vw);
+  min-width: 0;
+  aspect-ratio: 1;
+  margin-top: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink);
+  touch-action: none;
+  -webkit-touch-callout: none;
+}
+
+.btn.live-hold:active,
+.btn.live-hold[aria-pressed="true"] {
+  background: transparent;
+  color: var(--ink);
+}
+
+@media (hover: hover) {
+  .btn.live-hold:hover {
+    background: transparent;
+    color: var(--ink);
+  }
+}
+
+.live-hold__rings {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.live-hold__track {
+  fill: none;
+  stroke: var(--hairline);
+  stroke-width: 1;
+}
+
+.live-hold__turn {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.5;
+  transition: stroke-dashoffset 0.25s linear;
+}
+
+.live-hold__fill {
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 5;
+  stroke-linecap: round;
+  opacity: 0;
+  transition: opacity 0.2s var(--ease);
+}
+
+.live__turn.is-holding .live-hold__fill {
+  opacity: 1;
+}
+
+.live-hold__seal {
+  position: absolute;
+  top: 16.4%;
+  left: 16.4%;
+  width: 67.2%;
+  height: 67.2%;
+  pointer-events: none;
+  transition: transform 0.2s var(--ease);
+}
+
+.live__turn.is-holding .live-hold__seal {
+  transform: scale(0.96);
+}
+
+.live__turn.is-paused .live-hold {
+  opacity: 0.45;
+}
+
+.live__turn .live__title {
+  font-size: var(--fs-body);
+}
+
+.live__turn-left {
+  margin-top: 28px;
+  font-size: var(--fs-figure);
+  font-weight: 200;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.live__turn-piece {
+  margin-top: 26px;
+  color: var(--ink);
+}
+
+/* B5: secured. The reveal: the plate rises, the seal's glyphs appear one by one (P-D01's motion), the seal glows. */
+.live__reveal {
+  margin-top: 18px;
+  aspect-ratio: 326 / 296;
+}
+
+.live__piece-seal {
+  width: 46%;
+  height: auto;
+  aspect-ratio: 1;
+  margin-top: 16px;
+}
+
+.live__secured.is-revealing .live__reveal {
+  animation: live-reveal 0.9s var(--ease) both;
+}
+
+@keyframes live-reveal {
+  from { opacity: 0; transform: scale(0.92); }
+  to { opacity: 1; transform: none; }
+}
+
+.live__secured.is-revealing .live-seal g[data-layer="genome"] {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ceremony-glyph 0.7s var(--ease) both;
+  animation-delay: calc(0.35s + var(--i, 0) * 0.16s);
+}
+
+.live__secured.is-revealing .live__piece-seal {
+  animation: live-glow 2.6s var(--ease) both;
+}
+
+@keyframes live-glow {
+  0% { filter: drop-shadow(0 0 0 rgba(246, 242, 234, 0)); }
+  45% { filter: drop-shadow(0 0 34px rgba(246, 242, 234, 0.5)); }
+  100% { filter: var(--vault-glow); }
+}
+
+.live__secured .live__title {
+  margin-top: 22px;
+}
+
+.live__addons-title {
+  margin-top: 24px;
+}
+
+.live__addons {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 326px;
+  margin-top: 10px;
+}
+
+/* An add-on: a hairline row, pressed or not, its line of words under its button; never filled (the filled ivory is
+   PAY's). */
+.live__addon-item {
+  border: 1px solid var(--hairline-strong);
+  transition: border-color var(--t-med) var(--ease);
+}
+
+.live__addon-item:has(.live__addon[aria-pressed="true"]) {
+  border-color: var(--ink);
+}
+
+.btn.live__addon {
+  justify-content: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 0;
+  letter-spacing: var(--track-micro);
+  text-align: left;
+  text-indent: 0;
+}
+
+.btn.live__addon:active,
+.btn.live__addon[aria-pressed="true"] {
+  background: transparent;
+  color: var(--ink);
+}
+
+@media (hover: hover) {
+  .btn.live__addon:hover {
+    background: transparent;
+    color: var(--ink);
+  }
+}
+
+.live__addon-mark {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--hairline-strong);
+}
+
+.live__addon[aria-pressed="true"] .live__addon-mark {
+  border-color: var(--ink);
+  background: var(--ink);
+}
+
+.live__addon-label {
+  flex: 1;
+}
+
+.live__addon-price {
+  flex: none;
+  font-family: var(--font);
+  font-size: var(--fs-line);
+  letter-spacing: 0.04em;
+}
+
+.live__addon-line {
+  margin: -12px 14px 0 40px;
+  padding-bottom: 12px;
+  font-size: var(--fs-micro);
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+  text-align: left;
+  color: var(--ink-soft);
+}
+
+.live__deadline {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.live__deadline-time {
+  font-size: var(--fs-body);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.live__deadline-label {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-label);
+}
+
+.live__release {
+  margin-top: 6px;
+}
+
+/* B6: CONFIRMED, out into the light (the ivory house style). */
+.live__confirmed {
+  padding-top: 28px;
+}
+
+.live__confirmed .live__title {
+  margin-top: 22px;
+  font-size: var(--fs-title);
+}
+
+.live__confirmed-text {
+  max-width: 300px;
+  margin-top: 22px;
+}
+
+.live__receipt-plate {
+  position: relative;
+  width: 100%;
+  max-width: 326px;
+  margin-top: 28px;
+  padding: 6px 20px;
+  background: var(--white);
+  text-align: left;
+}
+
+.live__receipt-plate .bracket--tl { top: 8px; left: 8px; }
+.live__receipt-plate .bracket--tr { top: 8px; right: 8px; }
+.live__receipt-plate .bracket--bl { bottom: 8px; left: 8px; }
+.live__receipt-plate .bracket--br { bottom: 8px; right: 8px; }
+
+.live__receipt .rows__row:last-child {
+  border-bottom: 0;
+}
+
+.live__cs-title {
+  margin-top: 30px;
+}
+
+.live__confirmed .contact {
+  margin-top: 10px;
+}
+
+.live__pieces {
+  margin-top: 18px;
+}
+
+/* The edge pages: a title, a sentence, one action. */
+.live__edge {
+  padding-top: 56px;
+}
+
+.live__edge .live__title {
+  margin-top: 14px;
+  font-size: var(--fs-heading-lg);
+  line-height: 1.6;
+}
+
+.live__edge .live__note {
+  margin-top: 16px;
+  font-size: var(--fs-body);
+  line-height: 1.7;
+}
+
+.btn.live__action {
+  width: 100%;
+  min-width: 0;
+  max-width: 282px;
+  margin-top: 34px;
+}
+
+.live__panel {
+  width: 100%;
+  max-width: 326px;
+  margin-top: 8px;
+  text-align: left;
+}
+
+.live__waiting {
+  padding-top: 80px;
+}
+
+/* The second door (plan LIVE RELEASE+): the after-room's, in the same vault, for those still in the line at the
+   sell-out. It appears once, slowly; its lock the seal, its leaves closed until its own page. */
+.live__after {
+  padding-top: 40px;
+}
+
+.live__after .live__title {
+  margin-top: 14px;
+  font-size: var(--fs-heading-lg);
+  line-height: 1.6;
+}
+
+.live-door--after {
+  animation: live-after-in 1.2s var(--ease) both;
+}
+
+@keyframes live-after-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+.live__after-text {
+  max-width: 326px;
+  margin-top: 22px;
+}
+
+.live__after-until {
+  margin-top: 14px;
+}
+
+.btn.live__after-enter {
+  margin-top: 26px;
+}
+
+/* After T0, an account not in the line yet. */
+.live__plate--join {
+  margin-top: 22px;
+}
+
+.live__join-line {
+  margin-top: 14px;
+}
+
+.live__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  margin-top: 60px;
+}
+
+.btn.live__there-action {
+  margin-top: 18px;
+}
+
+/* ── The banner of the LIVE RELEASES (house style): an ink strip across the top of /verify and MY PIECES ── */
+
+.live-banner-host {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  /* Over the page's corner marks (brand.css .corners, 30): the strip is the top edge itself. */
+  z-index: 31;
+  animation: brand-fade 0.7s ease both;
+}
+
+.live-banner-host[hidden] {
+  display: none;
+}
+
+/* One line, as every control's label: a long name gives way (an ellipsis), never the state nor the countdown. The strip
+   centres its line; the line sets the labels and the countdown's larger figures on one baseline. */
+.live-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  padding: var(--safe-top) calc(16px + var(--safe-right)) 0 calc(16px + var(--safe-left));
+  background: var(--ink);
+  color: var(--white);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  letter-spacing: var(--track-micro);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.live-banner__line {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.live-banner__lead {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.live-banner__dot,
+.live-banner__state,
+.live-banner__clock {
+  flex: none;
+}
+
+.live-banner:focus-visible {
+  outline: 1px solid var(--white);
+  outline-offset: -6px;
+}
+
+/* The separator set as the lead's own (` · `, spaces kept), so both dots of the line sit alike. */
+.live-banner__dot {
+  white-space: pre;
+}
+
+.live-banner__clock {
+  margin-left: 8px;
+  font-size: var(--fs-label);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-banner__clock[hidden] {
+  display: none;
+}
+
+/* MY PIECES makes room for the strip; the landing's own space above its emblem holds it. */
+body[data-banner] .view--pieces {
+  padding-top: calc(60px + 56px + var(--safe-top));
+}
+
+/* ── The boutique board: landscape, full screen, the vault ── */
+
+body[data-screen="board"] {
+  background-color: var(--vault-ground);
+  background-image: var(--vault-light);
+  background-repeat: no-repeat;
+  background-size: 100% 100vh;
+}
+
+body[data-screen="board"] .corners {
+  color: var(--vault-ink);
+}
+
+.view--board {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100svh;
+  padding: calc(4vh + var(--safe-top)) calc(5vw + var(--safe-right)) calc(3vh + var(--safe-bottom)) calc(5vw + var(--safe-left));
+  color: var(--ink);
+}
+
+.view--board [hidden] {
+  display: none !important;
+}
+
+.board__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.board__status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: max(var(--fs-micro), 1.6vh);
+  letter-spacing: var(--track-label);
+  color: var(--ink-soft);
+}
+
+.board__status .live__dot {
+  animation: none;
+  background: var(--metal);
+}
+
+.board__status.is-live {
+  color: var(--ink);
+}
+
+.board__status.is-live .live__dot {
+  background: var(--ink);
+  animation: live-breathe 2.4s ease-in-out infinite;
+}
+
+.board__body {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+}
+
+.board__stage {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 6vw;
+  width: 100%;
+  max-width: 1600px;
+}
+
+.board__door-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.live-door.board__door {
+  max-width: none;
+  max-height: 72vh;
+  margin: 0 auto;
+}
+
+.board__plate {
+  max-width: none;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+/* A door already open when the board was drawn: open at once, unmoving. */
+.live-door.is-still .live-door__leaf,
+.live-door.is-still .live-door__lock,
+.live-door.is-still .live-door__inside,
+.live-door.is-still .live__sweep {
+  animation: none;
+  transition: none;
+}
+
+.board__info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+.board__info .live__overline,
+.board__info .live__fact {
+  font-size: max(var(--fs-micro), 1.7vh);
+  text-indent: 0;
+}
+
+.board__title {
+  margin-top: 1.6vh;
+  font-size: max(var(--fs-display), 5vh);
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: var(--track-display);
+  overflow-wrap: anywhere;
+}
+
+.board__title:focus {
+  outline: none;
+}
+
+.board__quantity {
+  margin-top: 1.4vh;
+}
+
+.board__rule {
+  max-width: none;
+  margin-top: 3.4vh;
+}
+
+.board__count {
+  margin-top: 3.4vh;
+}
+
+.board__countdown {
+  display: flex;
+  align-items: flex-start;
+  gap: 2vw;
+  margin-top: 1.4vh;
+}
+
+.board__countdown .live__unit {
+  align-items: flex-start;
+}
+
+.board__digits {
+  font-size: max(var(--fs-count), 12vh);
+  font-weight: 200;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.board__colon {
+  font-size: max(var(--fs-count), 10vh);
+  font-weight: 200;
+  line-height: 0.95;
+  color: var(--metal);
+}
+
+.board__countdown .live__unit-label {
+  font-size: max(var(--fs-micro), 1.5vh);
+  text-indent: 0;
+}
+
+.board__left {
+  width: 100%;
+  margin-top: 4vh;
+}
+
+.board__left-line {
+  display: flex;
+  align-items: baseline;
+  gap: 1.4vw;
+}
+
+.board__left-value {
+  font-size: max(var(--fs-place), 16vh);
+  font-weight: 200;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.board__left .board__left-of {
+  margin-top: 0;
+  color: var(--ink);
+}
+
+.live__meter.board__meter {
+  max-width: none;
+  margin-top: 2.4vh;
+}
+
+.board__meter .live__cell {
+  height: 2.6vh;
+}
+
+.board__when {
+  margin-top: 3vh;
+}
+
+.board__foot {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.board__edge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.board__edge .board__title {
+  font-size: var(--fs-display);
+}
+
+.board__note {
+  max-width: 420px;
+  margin-top: 16px;
+}
+
+/* A screen held upright: the door over the release. */
+@media (max-aspect-ratio: 1/1) {
+  .board__stage {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4vh;
+  }
+  .live-door.board__door {
+    max-height: 40vh;
+  }
+}
+
+/* ── Display type ──────────────────────────────────────────────────────── */
+
+/* Titles, status lines and tracked-capital labels in the display face
+   (brand.css --font-display, BRAND-DESIGN-SYSTEM §3.1), with the wordmark,
+   buttons, text links and field labels of brand.css. What the customer reads
+   or quotes stays in --font: sentences, the GENOME id and fingerprint, the
+   product lines, row values, the reference, codes, inputs and any figure
+   (Gravesend's one is its capital I, and its figures do not align). */
+.boot-error,
+.certificate__title,
+.certificate__state,
+.certificate__footnote,
+.genome__label,
+.tabs__tab,
+.tabs__dot,
+.legal-links__dot,
+.terms-note__dot,
+.rows__label,
+.section-label,
+.ownership__status,
+.auth__option,
+.question__label,
+.question__release,
+.question__text,
+.live__overline,
+.live__title,
+.live__fact,
+.live__surprise,
+.live__subtitle,
+.live__notice-label,
+.live__unit-label,
+.live__presence,
+.live__check-label,
+.live__check-value,
+.live__deadline-label,
+.live-banner,
+.board__status,
+.board__title {
+  font-family: var(--font-display);
+}
+
+/* A figure inside a title or a label set in the display face (a model's or a collection's name, P-R02): the reading face. */
+.numeral {
+  font-family: var(--font);
+}
+
+/* The banner's countdown: figures, in the reading face. */
+.live-banner__clock {
+  font-family: var(--font);
+}
+
+/* The phone of ORBES Client Services is a text link made of figures: read and dialled, never in the display face. */
+.contact__phone {
+  font-family: var(--font);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Small screens & reduced motion ────────────────────────────────────── */
+
+@media (max-width: 350px) {
+  .view--pieces,
+  .view--certificate,
+  .view--releases,
+  .view--release,
+  .view--live {
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+  .live-banner {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .tabs__list {
+    gap: 6px;
+  }
+  .tabs__tab {
+    --tab-pad: 6px;
+    --tab-track: 0.12em;
+  }
+  .btn {
+    min-width: 0;
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The LIVE RELEASE: cross-fades only. The lock's orbits stay still (the view turns none), the door's leaves fade
+     rather than part, the reveal and the sweep are not played (the view sets no .is-revealing). */
+  .live-seal__ring,
+  .live__dot,
+  .board__status.is-live .live__dot,
+  .live__sweep,
+  .live-banner-host {
+    animation: none;
+    transition: none;
+  }
+  .live-door.is-open .live-door__leaf--left,
+  .live-door.is-open .live-door__leaf--right,
+  .live-door.is-open .live-door__lock {
+    opacity: 0;
+    transform: none;
+  }
+  /* The second door fades in where it stands. */
+  .live-door--after {
+    animation-name: live-fade-in;
+  }
+}
+
+@keyframes live-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

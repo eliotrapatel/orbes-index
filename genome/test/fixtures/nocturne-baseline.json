@@ -6916,6 +6916,51 @@
         "IP GEOLOCATION BY DB-IP"
       ]
     },
+    "circle-show-more": {
+      "title": "THE CIRCLE of a PLATINE account with more posts than a page: SHOW MORE",
+      "refs": [
+        "C8"
+      ],
+      "variant": "full",
+      "as": "platine",
+      "values": [
+        "ORBES",
+        "PLATINE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "THE CIRCLE",
+        "For the owners of an ORBES piece: the news of the maison, its invitations and its questions.",
+        "EARLY ACCESS",
+        "PLATINE and PALLADIUM owners reserve a place in each release directly, before it opens to everyone: first come, first served, within its pieces. Each release’s page gives the times.",
+        "POLL · PLATINE AND PALLADIUM",
+        "WHICH FINISH SHOULD FOLLOW BLUE?",
+        "3 OCT 2026",
+        "SEE THE POLL",
+        "INVITATION",
+        "AN EVENING AT THE ATELIER",
+        "12 OCT 2026 · 17:00 UTC · THE ATELIER, PARIS",
+        "3 LEFT OF 12",
+        "YES",
+        "NO",
+        "SEE THE INVITATION",
+        "NOTE",
+        "THE ANGLED LINK",
+        "1 OCT 2026",
+        "READ THE NOTE",
+        "SHOW MORE",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
     "circle-signed-out": {
       "title": "THE CIRCLE, signed out: the sign-in",
       "refs": [
@@ -7012,7 +7057,7 @@
       ]
     },
     "post-poll": {
-      "title": "A post: the poll, before a vote",
+      "title": "A post: the poll, an option chosen before VOTE",
       "refs": [
         "C34"
       ],

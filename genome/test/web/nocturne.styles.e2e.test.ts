@@ -239,7 +239,161 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
     },
     12 * 60_000,
   );
+
+  it(
+    'sets THE CIRCLE, a post, the sign-in and the legal pages as C8, C18, C22, C23, C34 and C41 draw them: the feed\'s cards on their photograph with YES / NO, the post\'s photographs, facts, answer, poll and rows, the sign-in\'s refusal under its link, the legal pages on the ground at the reading measure (N8)',
+    async () => {
+      const states = ['circle', 'circle-show-more', 'post-invitation', 'post-poll', 'post-poll-voted', 'pieces-sign-in-refused', 'legal-terms', 'legal-faq'];
+      const seen = new Set<string>();
+      await eachState(
+        states.map(stateById),
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          const page = opened.page;
+          try {
+            seen.add(state.id);
+            if (state.id === 'circle') await theCircle(page);
+            if (state.id === 'circle-show-more') await check(page, '.n-circle__more', { 'padding-top': 76, 'text-align': 'center' });
+            if (state.id === 'post-invitation') await anInvitation(page);
+            if (state.id === 'post-poll') await aPoll(page);
+            if (state.id === 'post-poll-voted') await itsResults(page);
+            if (state.id === 'pieces-sign-in-refused') await theSignIn(page);
+            if (state.id === 'legal-terms' || state.id === 'legal-faq') await theLegalPages(page);
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect([...seen].sort()).toEqual([...states].sort());
+    },
+    12 * 60_000,
+  );
 });
+
+/** C8: the head, EARLY ACCESS between its hairlines, the invitation on its photograph with YES / NO, the note (N8). */
+async function theCircle(page: Page): Promise<void> {
+  await withChrome(page, 'circle', 'circle');
+  await check(page, '.n-circle__head', { 'padding-top': 30, 'padding-left': 24 });
+  await check(page, '#circle-title', { 'font-size': 30, 'letter-spacing': em(30, 0.08), color: IV });
+  await check(page, '.n-circle__lead', { 'margin-top': 12, 'font-size': 16, 'line-height': '25.6px', color: ASH });
+  await check(page, '.n-circle__early', { 'margin-top': 28, 'padding-top': 18, 'padding-bottom': 18, 'border-top-color': LINE, 'border-bottom-color': LINE });
+  await check(page, '.circle__early-label', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
+  await check(page, '.n-circle__early-text', { 'margin-top': 8, 'font-size': 13, color: ASH });
+  await check(page, '.n-circle__list', { 'margin-top': 34 });
+  const inv = '.n-circle-card[data-kind="invitation"]';
+  const photo = await check(page, `${inv} .n-circle-card__photo`, { height: 390 });
+  expect(Number(photo._w)).toBeCloseTo(390, 0);
+  await check(page, `${inv} .n-circle-card__photo`, { height: 390 * 0.46 }, '::after');
+  await check(page, `${inv} .n-circle-card__words`, { 'margin-top': -56, 'text-align': 'start', 'padding-left': 24 });
+  await check(page, `${inv} .n-circle-card__kind`, { 'font-size': 9.5, color: ASH });
+  await check(page, `${inv} .n-circle-card__title`, { 'margin-top': 10, 'font-size': 16, 'letter-spacing': em(16, 0.14), color: IV });
+  await check(page, `${inv} .n-circle-card__date`, { 'margin-top': 6, 'font-size': 13, color: ASH });
+  await check(page, `${inv} .n-circle-card__event`, { 'margin-top': 12, 'font-size': 9.5, color: IV });
+  await check(page, `${inv} .n-circle-card__places`, { 'margin-top': 10, 'font-size': 9.5, color: ASH });
+  await check(page, `${inv} .n-circle-card__answer`, { 'margin-top': 14, 'column-gap': 10 });
+  await check(page, `${inv} [data-answer="YES"]`, { height: 54, 'background-color': IV, color: GROUND });
+  await check(page, `${inv} [data-answer="NO"]`, { height: 54, 'background-color': 'rgba(0, 0, 0, 0)', 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
+  expect(await page.locator(`${inv} [data-answer="YES"]`).getAttribute('aria-pressed')).toBe('true');
+  await check(page, `${inv} .n-circle-card__link`, { 'margin-top': 18 });
+  await check(page, `${inv} .n-circle-card__see`, { 'font-size': 10.5, 'padding-bottom': 5, color: IV });
+  const note = '.n-circle-card[data-kind="note"]';
+  await check(page, `.n-circle__item:has(${note})`, { 'padding-top': 76 });
+  await check(page, `${note} .n-circle-card__link`, { 'margin-top': 16 });
+}
+
+/** C22: the crumb, the photographs (unfaded, two side by side), the words, THE INVITATION, YOUR ANSWER, TO SEE (N8). */
+async function anInvitation(page: Page): Promise<void> {
+  await withChrome(page, 'a post', 'circle');
+  await check(page, '.n-post__crumb', { height: 48, 'padding-left': 18, 'font-size': 10, color: ASH });
+  const first = await check(page, '.n-post__photos > .n-post__photo', { height: 390 });
+  expect(Number(first._w)).toBeCloseTo(390, 0);
+  expect(await page.locator('.n-post__photos .n-fade').count()).toBe(0);
+  await check(page, '.n-post__pair', { 'margin-top': 2, 'column-gap': 2 });
+  await check(page, '.n-post__pair .n-post__photo', { height: 195 });
+  await check(page, '.n-post__head', { 'margin-top': 30, 'padding-left': 24 });
+  await check(page, '.circle-post__kind', { 'font-size': 9.5, color: ASH });
+  await check(page, '.n-post__title', { 'margin-top': 12, 'font-size': 26, 'letter-spacing': em(26, 0.08), color: IV });
+  await check(page, '.n-post__date', { 'margin-top': 10, 'font-size': 13, color: ASH });
+  await check(page, '.n-post__text', { 'margin-top': 22 });
+  await check(page, '.circle-post__paragraph', { 'font-size': 16, 'line-height': '26.4px', 'max-width': '544px', color: ASH });
+  await check(page, '.n-post__section', { 'padding-top': 44, 'padding-left': 24 });
+  await check(page, '#circle-invitation', { 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  await check(page, '.n-post__rows', { 'margin-top': 14, 'border-top-color': LINE });
+  await check(page, '.n-post__row', { 'padding-top': 13, 'font-size': 13.5, 'border-bottom-color': LINE });
+  await check(page, '.n-post__label', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.24), color: ASH });
+  await check(page, '.circle-post__utc', { color: IV });
+  await check(page, '.circle-post__local', { 'font-size': 13, color: ASH });
+  await check(page, '#circle-answer', { 'margin-top': 36, 'font-size': 11 });
+  await check(page, '.n-post__reply .n-post__sentence', { 'margin-top': 10, 'font-size': 13, color: ASH });
+  await check(page, '.n-post__choice', { 'margin-top': 14, 'column-gap': 10 });
+  await check(page, '.n-post__choice [data-answer="YES"]', { height: 54, 'background-color': IV });
+  await check(page, '.n-post__links > :first-child', { 'margin-top': 12, 'border-top-color': LINE, 'padding-top': 20 });
+  await check(page, '.n-post__links .n-acc__line--lb', { 'margin-top': 6, 'font-size': 9.5, color: ASH });
+  await check(page, '.n-post__links .circle-post__host', { 'margin-top': 6, 'font-size': 13, color: ASH });
+  // The page's own foot of before gave way to the chrome: no SCAN ORBES CODE, no THE CIRCLE at its foot.
+  expect(await shown(page, '.view--circle-post .n-btn--ol')).toBe(1);
+}
+
+/** C34, state 1: the poll's sentence, its options (one pressed), VOTE the filled button (N8). */
+async function aPoll(page: Page): Promise<void> {
+  await check(page, '.n-post__head--bare', { 'margin-top': 14 });
+  await check(page, '.n-post__section--poll', { 'padding-top': 40 });
+  await check(page, '.n-post__section--poll .n-post__sentence', { 'margin-top': 10, 'font-size': 13 });
+  await check(page, '.n-post__options', { 'margin-top': 16, 'row-gap': 8 });
+  await check(page, '.n-post__options [aria-pressed="true"]', { height: 48, 'background-color': IV, color: GROUND, 'font-size': 10.5, 'letter-spacing': em(10.5, 0.22) });
+  await check(page, '.n-post__options [aria-pressed="false"]', { 'box-shadow': `${LINE2} 0px 0px 0px 1px inset`, color: IV });
+  await check(page, '.n-post__vote', { 'margin-top': 18, height: 54, 'background-color': IV });
+}
+
+/** C34, state 2: the results, each with its votes and its bar, YOUR VOTE beside the reader's (N8). */
+async function itsResults(page: Page): Promise<void> {
+  await check(page, '.n-post__section--poll .n-post__sentence', { 'margin-top': 10, 'font-size': 15, color: ASH });
+  await check(page, '.n-post__results', { 'margin-top': 16 });
+  await check(page, '.n-post__result + .n-post__result', { 'margin-top': 16 });
+  await check(page, '.n-post__result-label', { 'font-size': 11, color: IV });
+  await check(page, '.n-post__mine', { 'margin-left': 8, 'font-size': 9.5, color: ASH });
+  await check(page, '.n-post__votes', { 'font-size': 13, color: ASH });
+  await check(page, '.n-bar2', { height: 2, 'margin-top': 8, 'background-color': LINE });
+  await check(page, '.n-bar2__fill', { height: 2, 'background-color': IV });
+}
+
+/** C18: MY PIECES signed out: its title, the sign-in's sentence 12 px under it, the refusal under FORGOTTEN PASSWORD? (N8). */
+async function theSignIn(page: Page): Promise<void> {
+  await withChrome(page, 'MY PIECES signed out', 'pieces');
+  await check(page, '.pieces__signin', { 'padding-left': 24, 'padding-right': 24 });
+  await check(page, '.pieces__signin .n-own__lead', { 'margin-top': 12, 'font-size': 15, color: ASH });
+  const link = await read(page, '.pieces__signin .n-own__forgotten', []);
+  const refusal = await check(page, '.pieces__signin .n-err', { 'margin-top': 14, 'font-size': 13, 'line-height': '19.5px', 'letter-spacing': 'normal', color: IV });
+  expect(Number(refusal._top)).toBeGreaterThan(Number(link._bottom));
+}
+
+/** C23, C41: the legal pages on the ground, the app's header and rail (none current), the tabs, the reading measure, the footer (N8). */
+async function theLegalPages(page: Page): Promise<void> {
+  await check(page, 'body', { 'background-color': GROUND });
+  await check(page, '.legal-head', { height: 56, 'padding-left': 22 });
+  await check(page, '.legal-head__verify', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.26), color: ASH });
+  await check(page, '.legal-rail', { height: 40, 'border-bottom-color': LINE });
+  expect(await page.locator('.legal-rail [aria-current]').count()).toBe(0);
+  await check(page, '.legal-pages', { 'margin-top': 22, 'padding-left': 24 });
+  await check(page, '.legal-nav', { 'column-gap': 22, 'border-bottom-color': LINE });
+  await check(page, '.legal-nav__link[aria-current="page"]', { 'font-size': 10, 'letter-spacing': em(10, 0.22), color: IV });
+  await check(page, '.legal-meta', { 'margin-top': 18 });
+  await check(page, '.legal__version', { 'font-size': 13, color: ASH });
+  await check(page, '.legal-lang__link[aria-current]', { 'font-size': 9.5, color: IV, 'text-decoration-line': 'underline' });
+  await check(page, '.legal-titles', { 'margin-top': 26 });
+  await check(page, '.legal__title', { 'font-size': 30, 'line-height': '33.6px', 'letter-spacing': em(30, 0.08), color: IV });
+  await check(page, '.legal__body', { 'margin-top': 30 });
+  await check(page, '.legal__heading', { 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  await check(page, '.legal__section + .legal__section', { 'margin-top': 34 });
+  await check(page, '.legal__heading + .legal__text', { 'margin-top': 12 });
+  await check(page, '.legal__text', { 'font-size': 16, 'line-height': '26.4px', 'max-width': '544px', color: ASH });
+  await check(page, '.legal-foot', { 'margin-top': 96, 'padding-top': 40, 'border-top-color': LINE });
+  await check(page, '.legal-foot__pages', { 'margin-top': 30, 'column-gap': 22, 'font-size': 10 });
+  await check(page, '.legal-foot__verify', { 'margin-top': 22 });
+  await check(page, '.legal-foot__meta', { 'margin-top': 18, 'font-size': 9, color: ASH });
+  expect(await page.locator('.n-scan').count()).toBe(0);
+}
 
 /** How many of the elements `selector` matches the phone shows. */
 async function shown(page: Page, selector: string): Promise<number> {

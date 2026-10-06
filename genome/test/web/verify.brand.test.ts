@@ -27,7 +27,17 @@ import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden, readDoc, sectio
 import { parseUnicodeRange, readWoff2, woff2CodePoints, woff2Names, woff2WeightClass } from '../support/woff2.js';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '../../src/web');
-const styles = readFileSync(join(WEB, 'verify/styles.css'), 'utf8');
+/**
+ * A stylesheet with the sheets it imports from this app or shared/ written in its place (brand.css aside, read on its
+ * own): verify/styles.css is the house look (verify/house.css), NOCTURNE's foundation (shared/nocturne.css, which the
+ * legal pages import too) and NOCTURNE's screens, in that order of the cascade.
+ */
+function withImports(file: string): string {
+  return readFileSync(join(WEB, file), 'utf8').replace(/^@import "([^"]+)";$/gm, (line, rel: string) =>
+    rel.endsWith('/brand.css') ? line : withImports(join(dirname(file), rel)),
+  );
+}
+const styles = withImports('verify/styles.css');
 const brand = readFileSync(join(WEB, 'shared/brand.css'), 'utf8');
 const adminStyles = readFileSync(join(WEB, 'admin/styles.css'), 'utf8');
 const resultView = readFileSync(join(WEB, 'verify/views/result.ts'), 'utf8');

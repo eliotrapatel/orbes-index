@@ -1,179 +1,151 @@
 /*
  * ORBES legal pages (J-06) — layout, reading and print.
- * Foundation (tokens, type, text links, grain, motion) in ../shared/brand.css.
+ * Foundation (tokens, type, motion) in ../shared/brand.css; NOCTURNE's foundation (plan NOCTURNE, screen 9, step N8:
+ * the ground, the column, the header, the rail, the type scale, `.switch2`, `.art`, the contact, the footer) in
+ * ../shared/nocturne.css, the verification app's own. What follows is the legal pages' place for each of its pieces,
+ * as C23 and C41 draw them (nocturne-ref/c2.py, c4.py: their markup's margins).
  *
- * One column of reading, 640 px at most, in the house style: white paper,
- * ink, hairlines, tracked capitals in the display face for the wordmark,
- * the titles and the links, in French as in English (its subset carries
- * the accented capitals, BRAND-DESIGN-SYSTEM §3.1); the text itself in
- * --font (Helvetica Neue). Every text link keeps the floors of §3.8
- * (10 px, 44 px zones); links inside a sentence are underlined words.
+ * Reading text is the canvas's `.art`: 16 px, line height 1.65, 34 em at most (about 68 characters a line); headings
+ * and labels in Gravesend capitals, in French as in English (its subset carries the accented capitals,
+ * BRAND-DESIGN-SYSTEM §3.1); the text itself in --font (Helvetica Neue). Every link keeps a 44 px zone.
  */
 @import "../shared/brand.css";
+@import "../shared/nocturne.css";
 
-/* ── Page ──────────────────────────────────────────────────────────────── */
+/* ── The head: the four pages, the version and the language ───────────── */
 
-html {
-  background: var(--paper);
+.legal-pages {
+  margin-top: 22px;
 }
 
-body {
-  min-height: 100vh;
-  min-height: 100svh;
-}
-
-.app {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-height: 100vh;
-  min-height: 100svh;
-  padding: calc(56px + var(--safe-top)) 32px calc(40px + var(--safe-bottom));
-}
-
-/* ── Head: the wordmark, the four pages, the language ──────────────────── */
-
-.legal-head {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 18px;
-  width: 100%;
-  max-width: 640px;
-  text-align: center;
-}
-
-.legal-head__wordmark {
-  margin-bottom: 18px;
-}
-
-/* A row that wraps keeps 12 px between its lines, so the 44 px zones (4 px
-   beyond each line) stay apart; the shortest word is widened to 44 px. */
-.legal-nav,
-.legal-lang {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 12px 8px;
-}
-
+/* In French the four pages wrap on a phone: 18 px between their lines, so each 44 px zone (17 px above its word)
+   stays clear of the line above; the hairline runs under the last. */
 .legal-nav {
-  column-gap: 22px;
+  flex-wrap: wrap;
+  row-gap: 18px;
 }
 
-.legal-nav__link,
-.legal-lang__link {
-  min-width: 44px;
-  text-align: center;
+.legal-nav__link {
   white-space: nowrap;
 }
 
-.legal-nav__link.is-current,
-.legal-lang__link.is-current {
-  opacity: 1;
+/* A short page's name (AIDE) keeps a 44 px zone: 6 px each side of its word, given back; its line under the word alone. */
+.legal-nav .legal-nav__link {
+  margin-right: -6px;
+  margin-left: -6px;
+  padding-right: 6px;
+  padding-left: 6px;
 }
 
-.legal-nav__link.is-current::after,
-.legal-lang__link.is-current::after {
-  transform: scaleX(1);
+.legal-nav .legal-nav__link[aria-current]::after {
+  right: 6px;
+  left: 6px;
 }
 
-.legal-lang__dot {
-  color: var(--ink-soft);
-  font-size: var(--fs-caption);
+.legal-meta {
+  flex-wrap: wrap;
+  margin-top: 18px;
+  row-gap: 8px;
+}
+
+.legal-lang {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* Each language's 44 px zone: padding above and below its word, given back (its line 1.5 high at 9.5 px). */
+.legal-lang__link {
+  display: inline-block;
+  margin: -14.875px 0;
+  padding: 14.875px 0;
+  line-height: var(--n-lh-base);
+  text-decoration-color: currentColor;
+}
+
+.legal-lang__link:not(.n-u) {
+  text-decoration: none;
+}
+
+.legal-lang__link:focus-visible,
+.legal-nav__link:focus-visible,
+.legal-index__link:focus-visible,
+.legal__link:focus-visible,
+.legal__contact-link:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
 }
 
 /* ── The document ──────────────────────────────────────────────────────── */
 
-.legal {
-  width: 100%;
-  max-width: 640px;
-  margin-top: 56px;
-  animation: brand-rise var(--t-slow) var(--ease) both;
+.legal-titles {
+  margin-top: 26px;
 }
 
-.legal__title {
-  font-size: var(--fs-heading-lg);
-  font-weight: 400;
-  line-height: 1.55;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  text-transform: uppercase;
-  text-align: center;
-  text-wrap: balance;
-}
-
-.legal__version {
+/* The introduction under the title (C41's 14 px), its paragraphs 16 px apart. */
+.legal-titles > .legal__text,
+.legal-titles > .legal__list,
+.legal-titles > .legal__contact {
   margin-top: 14px;
-  margin-bottom: 44px;
-  font-size: var(--fs-micro);
-  letter-spacing: var(--track-micro);
-  text-indent: var(--track-micro);
-  text-transform: uppercase;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  color: var(--ink-soft);
 }
 
-.legal__section {
-  margin-top: 44px;
-  padding-top: 26px;
-  border-top: 1px solid var(--hairline);
+.legal-titles > .legal__text + .legal__text,
+.legal-titles > .legal__text + .legal__list,
+.legal-titles > .legal__list + .legal__text {
+  margin-top: 16px;
+}
+
+.legal__body {
+  margin-top: 30px;
+}
+
+/* Every section open, one after the other: its heading 34 px under the text before it, its text 12 px under it. */
+.legal__section + .legal__section {
+  margin-top: 34px;
 }
 
 .legal__heading {
-  font-size: var(--fs-label);
-  font-weight: 400;
-  line-height: 1.8;
-  letter-spacing: var(--track-label);
-  text-transform: uppercase;
   scroll-margin-top: 24px;
 }
 
-.legal__text,
-.legal__list {
+.legal__section > .legal__text,
+.legal__section > .legal__list,
+.legal__section > .legal__contact {
   margin-top: 16px;
-  font-size: var(--fs-sub);
-  line-height: 1.75;
-  letter-spacing: 0.01em;
-  color: var(--ink-soft);
+}
+
+.legal__heading + .legal__text,
+.legal__heading + .legal__list,
+.legal__heading + .legal__contact {
+  margin-top: 12px;
 }
 
 .legal__list {
   list-style: none;
 }
 
+/* A list's items as the canvas's (n.py benefits()): a dash before each, 14 px in, 6 px apart. */
 .legal__item {
   position: relative;
-  padding-left: 22px;
+  padding-left: 14px;
 }
 
 .legal__item + .legal__item {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .legal__item::before {
   content: "–";
   position: absolute;
   left: 0;
-  color: var(--ink-soft);
 }
 
-/* Set apart: the lead of a clause, a cookie's name. In ink, never a bold the
-   reading face would not have in the brand (§3.1, weights). */
+/* Set apart: the lead of a clause, a cookie's name (the canvas's `.art strong`: ivory, 500). */
 .legal__strong {
-  font-weight: 400;
-  color: var(--ink);
+  color: var(--vault-ink);
+  font-weight: 500;
 }
 
 .legal__link {
-  color: var(--ink);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
   overflow-wrap: anywhere;
 }
 
@@ -182,128 +154,88 @@ body {
   font-family: var(--font);
 }
 
-/* The contact of ORBES Client Services, as the server publishes it: an
-   address and a number are read, so they stay in --font, and each link is a
-   44 px zone. */
+/* The contact of ORBES Client Services, as the server publishes it (the canvas's `.contact`: 13 px, ash, its links
+   ivory, underlined): an address and a number are read, so they stay in --font. */
+.legal__contact[hidden] {
+  display: none;
+}
+
+/* The address and the number side by side (each its 44 px zone, 24 px apart), the hours on a line of their own. */
 .legal__contact {
-  display: flex;
+  flex-direction: row;
   flex-wrap: wrap;
   align-items: center;
   gap: 0 24px;
-  margin-top: 8px;
-}
-
-.legal__contact[hidden] {
-  display: none;
 }
 
 .legal__contact-link {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
-  font-size: var(--fs-sub);
-  letter-spacing: 0.02em;
-  color: var(--ink);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
   font-variant-numeric: tabular-nums;
 }
 
 .legal__contact-hours {
   flex-basis: 100%;
-  font-size: var(--fs-micro);
-  letter-spacing: 0.04em;
-  line-height: 1.6;
-  color: var(--ink-soft);
+  color: var(--vault-soft);
 }
 
-/* ── The index (/legal) ────────────────────────────────────────────────── */
+/* ── The index (/legal): the four pages, each a row that leads on ──────── */
 
 .legal-index {
-  margin-top: 36px;
+  margin-top: 30px;
   list-style: none;
 }
 
-.legal-index__item {
-  padding: 22px 0;
-  border-top: 1px solid var(--hairline);
-  text-align: center;
+.legal-index__item:first-child .legal-index__link {
+  border-top: 1px solid var(--vault-hairline);
 }
 
-.legal-index__item:last-child {
-  border-bottom: 1px solid var(--hairline);
-}
+/* ── The footer (C23's): the four pages, VERIFY A PIECE, DB-IP, © ─────── */
 
-.legal-index__summary {
-  max-width: 44ch;
-  margin: 6px auto 0;
-  font-size: var(--fs-body);
-  line-height: 1.75;
-  letter-spacing: 0.02em;
-  color: var(--ink-soft);
-  text-wrap: balance;
-}
-
-/* ── Foot ──────────────────────────────────────────────────────────────── */
-
-.legal-foot {
+/* In French the four pages wrap: a flex row, the canvas's 22 px between them; 30 px between two lines, so the 44 px
+   zones of one line stay clear of the next's. Each zone reaches 26 px above its word and 3 px under it (the app's
+   footer: 14.5 and 14.5), so it stays clear of VERIFY A PIECE's, 22 px under the line, whose zone reaches above its
+   word; AIDE's reaches 3 px before its word too. Each given back: the words stand where C23 draws them. */
+.legal-foot__pages {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  max-width: 640px;
-  margin-top: 64px;
-  padding-top: 26px;
-  border-top: 1px solid var(--hairline);
+  flex-wrap: wrap;
+  row-gap: 30px;
 }
 
-.legal-foot__link {
-  white-space: nowrap;
+.legal-foot__pages .n-fl__link {
+  margin: -26px -9px -3px -3px;
+  padding: 26px 9px 3px 3px;
 }
 
-.legal-foot__meta {
-  margin-top: 14px;
-  font-size: var(--fs-nano);
-  letter-spacing: var(--track-display);
-  text-indent: var(--track-display);
-  text-transform: uppercase;
-  color: var(--ink-soft);
+.legal-foot__verify {
+  margin-top: 22px;
+  font-size: var(--n-fs-base);
+  line-height: var(--n-lh-base);
 }
 
-/* ── Display type ──────────────────────────────────────────────────────── */
+/* ── Print ─────────────────────────────────────────────────────────────── */
 
-/* Titles, section headings and tracked-capital labels in the display face
-   (brand.css --font-display, BRAND-DESIGN-SYSTEM §3.1), with the wordmark
-   and the text links of brand.css, in both languages: the subset carries
-   É, Ç, È, À… (CONFIDENTIALITÉ, FRANÇAIS). What is read stays in --font. */
-.legal__title,
-.legal__heading,
-.legal-lang__dot,
-.legal-foot__meta {
-  font-family: var(--font-display);
-}
-
-/* ── Small screens & print ─────────────────────────────────────────────── */
-
-@media (max-width: 350px) {
-  .app {
-    padding-left: 22px;
-    padding-right: 22px;
-  }
-}
-
-/* Printed as a document: the text alone, black on white, the addresses of
-   the links outside this site written after them. */
+/* Printed as a document: the text alone, ink on white, the addresses of the links outside this site written after
+   them; the vault's colours turned to the paper's. */
 @media print {
   @page {
     margin: 18mm 16mm;
   }
 
-  .grain,
-  .legal-nav,
+  :root {
+    --vault-ground: var(--white);
+    --vault-ink: var(--ink);
+    --vault-soft: var(--ink);
+    --vault-hairline: var(--hairline);
+    --vault-light: none;
+  }
+
+  .n-hd,
+  .n-rail,
+  .legal-pages,
   .legal-lang,
+  .legal-foot__pages,
   .legal-foot__link {
     display: none;
   }
@@ -313,24 +245,26 @@ body {
     background: var(--white);
   }
 
-  .app {
-    display: block;
+  body.nocturne .n-column {
     min-height: 0;
-    padding: 0;
+    padding-bottom: 0;
   }
 
-  .legal-head,
-  .legal,
-  .legal-foot {
-    max-width: none;
+  body.nocturne .n-column::before {
+    display: none;
+  }
+
+  .legal-meta,
+  .legal-titles,
+  .legal__body,
+  .n-foot {
     margin-top: 0;
-    animation: none;
   }
 
   .legal__text,
   .legal__list,
   .legal-index__summary {
-    color: var(--ink);
+    max-width: none;
     orphans: 3;
     widows: 3;
   }

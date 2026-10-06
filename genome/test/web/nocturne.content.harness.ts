@@ -392,11 +392,51 @@ function releasesMoves(): Moved[] {
 }
 
 /**
+ * THE CIRCLE and a post in every state the stage reaches them (N8, C8, C22, C34): their own foot gives way to the
+ * chrome, and an invitation's answer, while answers are taken, is the YES or NO pressed on its card.
+ */
+function circleMoves(): Moved[] {
+  const baseline = readBaseline();
+  const values = (state: string) => baseline.states[state]?.values ?? [];
+  const foot: Record<string, string> = {
+    'SCAN ORBES CODE': 'The SCAN ring at the foot of every screen (SCAN).',
+    'THE RELEASES': 'The rail\'s RELEASES, on every screen.',
+    'THE COLLECTION': 'The rail\'s COLLECTION, on every screen.',
+    'MY PIECES': 'The rail\'s PIECES, on every screen.',
+  };
+  const states = Object.keys(baseline.states).filter((state) => /^(circle|post)(-|$)/.test(state));
+  return [
+    ...states.flatMap((state) =>
+      values(state)
+        .filter((value) => value in foot)
+        .map((value) => ({
+          state,
+          value,
+          reason: 'N8 (C8, C22, C34): THE CIRCLE and a post draw no foot of their own; the scan is the SCAN ring\'s, THE RELEASES, THE COLLECTION and MY PIECES the rail\'s, back to the feed the crumb\'s (‹ THE CIRCLE).',
+          now: foot[value]!,
+        })),
+    ),
+    ...states.flatMap((state) =>
+      values(state)
+        .filter((value) => value === 'YOU ANSWERED YES' || value === 'YOU ANSWERED NO')
+        .map((value) => ({
+          state,
+          value,
+          reason: 'N8 (C8, addition 6): while answers are taken, an invitation\'s card in the feed offers YES / NO, the reader\'s answer pressed; the words come back once answers close.',
+          now: `The ${value.slice('YOU ANSWERED '.length)} button pressed (aria-pressed) on the invitation's card.`,
+          shownAs: [value.slice('YOU ANSWERED '.length)],
+        })),
+    ),
+  ];
+}
+
+/**
  * The values NOCTURNE moves or removes on purpose, step by step. N1: THIS PIECE and the sentence for two photographs
  * (decision 9: the piece's own photograph leaves every collector's screen and answer; the model's alone stays,
  * captioned THE MODEL, with the sentence for one), and VARIANT (the field set at issuance renamed Size). N2: YOUR TIER
  * (decision 10: moved from MY PIECES to the account sheet), and a page's failure said on two lines (C40). N3: the landing
  * replaced by NOW (its title, its links to THE RELEASES and, with no model shown, to THE COLLECTION; the banner's countdown).
+ * N8: THE CIRCLE's and a post's foot, and YOU ANSWERED on an invitation's card while YES / NO are offered.
  */
 export const MOVED: readonly Moved[] = [
   ...PIECE_PHOTO_STATES.flatMap((state) => [
@@ -425,6 +465,7 @@ export const MOVED: readonly Moved[] = [
   ...piecesChromeMoves(),
   ...collectionMoves(),
   ...releasesMoves(),
+  ...circleMoves(),
   // N4 (C16): on a result that is neither authentic nor UNUSUAL ACTIVITY, WHERE DID YOU SEE OR BUY THIS PIECE? is a row
   // that opens (+): its four answers are inside it.
   ...['result-invalid', 'result-unknown', 'result-revoked'].flatMap((state) =>

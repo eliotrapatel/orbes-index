@@ -260,7 +260,7 @@ class PiecesPage {
       return;
     }
     if (!signedIn) {
-      this.body.replaceChildren(...(this.signIn ? [h('div', { class: 'pieces__signin' }, this.signIn.root)] : []));
+      this.body.replaceChildren(...(this.signIn ? [h('div', { class: 'n-px pieces__signin' }, this.signIn.root)] : []));
       return;
     }
     switch (this.load.kind) {

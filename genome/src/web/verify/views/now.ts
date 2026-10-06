@@ -23,8 +23,7 @@
  * account signs in or out, it reads it again. CSP-safe: h() only, its places by class (verify/styles.css, NOW).
  */
 import { h } from '../../shared/dom.js';
-import { ApiError, type ApiClient } from '../api.js';
-import { invitationReply, type CircleCardModel, type InvitationReply } from '../circle-model.js';
+import type { ApiClient } from '../api.js';
 import { CIRCLE, LIVE, LOOKBOOK, NOW, PIECES, RELEASES } from '../copy.js';
 import { measureClock } from '../live-model.js';
 import {
@@ -43,12 +42,11 @@ import {
   type LiveHeroModel,
   type NowTop,
 } from '../now-model.js';
-import { circlePostPath } from '../circle-model.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import type { SessionStore } from '../session.js';
-import type { CircleAnswer, CircleCard, ClubStatus, DropCard, LiveCard, LookbookCard, OwnedPiece } from '../types.js';
+import type { CircleCard, ClubStatus, DropCard, LiveCard, LookbookCard, OwnedPiece } from '../types.js';
 import { CIRCLE_PATH, LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
-import { messageOf } from './forms.js';
+import { CircleCardLines } from './invitation.js';
 import { appAnchor, countdown, fadedPhoto, icon, lift, loadingState, modelTitle, plateCard, textLink, variantDots } from './nocturne.js';
 
 export interface NowDeps {
@@ -106,7 +104,8 @@ class Now implements NowView {
   private disposed = false;
   private reading = 0;
   private hero: { model: LiveHeroModel; kind: HTMLElement; clock: HTMLElement; key: string } | null = null;
-  private invitation: { card: CircleCardModel; reply: InvitationReply; busy: boolean; error: string | null; el: HTMLElement } | null = null;
+  /** THE CIRCLE's next invitation, its YES / NO answered in place. */
+  private invitation: CircleCardLines | null = null;
   private readonly unsubscribe: () => void;
   private signedIn: boolean | null = null;
   /** The first page drawn takes the focus the screen change left on <body> (deps.focus). */
@@ -129,6 +128,7 @@ class Now implements NowView {
     this.disposed = true;
     this.unsubscribe();
     this.stop();
+    this.invitation?.dispose();
   }
 
   private stop(): void {
@@ -183,6 +183,7 @@ class Now implements NowView {
     if (!d) return;
     this.stop();
     this.hero = null;
+    this.invitation?.dispose();
     this.invitation = null;
     const pending = this.focusPending;
     this.focusPending = false;
@@ -438,84 +439,19 @@ class Now implements NowView {
     );
   }
 
-  /** THE CIRCLE (an owner's): its next invitation, answered YES or NO here (addition 6). */
+  /** THE CIRCLE (an owner's): its next invitation as a plate card, answered YES or NO here (addition 6; views/invitation.ts). */
   private circleSection(d: NowData): HTMLElement | null {
     const card = d.circle ? nextInvitation(d.circle, this.now()) : null;
     if (!card || !card.reply) return null;
-    this.invitation = { card, reply: card.reply, busy: false, error: null, el: h('div') };
-    const section = h(
+    const host = plateCard([], { left: true, extraClass: 'now__card now__invitation' });
+    this.invitation?.dispose();
+    this.invitation = new CircleCardLines(card, host, { api: this.deps.api, session: this.deps.session, onPost: (id) => this.deps.onPost(id) }, { heading: 'h3' });
+    return h(
       'section',
       { class: 'n-sec', attrs: { 'aria-label': NOW.sections.circle } },
       h('div', { class: 'n-px n-sb' }, h('h2', { class: 'n-g n-t3', text: CIRCLE.title }), textLink(CIRCLE.link, { href: CIRCLE_PATH, onOpen: () => this.deps.onCircle() })),
-      this.invitation.el,
+      host,
     );
-    this.drawInvitation();
-    return section;
-  }
-
-  private drawInvitation(): void {
-    const inv = this.invitation;
-    if (!inv) return;
-    const { card, reply } = inv;
-    const option = (answer: CircleAnswer, label: string) =>
-      h('button', {
-        class: ['n-g', 'n-btn', reply.answer === answer ? null : 'n-btn--ol'],
-        attrs: { type: 'button', 'aria-pressed': String(reply.answer === answer), disabled: inv.busy || (answer === 'YES' && reply.full) },
-        on: { click: () => void this.answer(answer) },
-        text: label,
-      });
-    const event = card.event ? splitEvent(card.event) : null;
-    const next = plateCard(
-      [
-        h('p', { class: 'n-g n-lb', text: card.kindLabel }),
-        h('h3', { class: 'n-g n-t2 now__card-title' }, ...withNumerals(card.title)),
-        card.date ? h('p', { class: 'n-sm n-num now__invitation-date', text: card.date }) : null,
-        event
-          ? h('p', { class: 'n-g n-lb n-ivc n-num now__invitation-event' }, h('span', { class: 'n-nw' }, ...withNumerals(event.time)), ...(event.place ? [' · ', ...withNumerals(event.place)] : []))
-          : null,
-        reply.places ? h('p', { class: 'n-g n-lb n-num now__invitation-places' }, ...withNumerals(reply.places)) : null,
-        reply.open ? h('div', { class: 'n-duo now__answer', attrs: { role: 'group', 'aria-label': CIRCLE.answerChoice } }, option('YES', CIRCLE.yes), option('NO', CIRCLE.no)) : null,
-        inv.error ? h('p', { class: 'n-sm n-ivc now__error', attrs: { role: 'alert' }, text: inv.error }) : null,
-        h('p', { class: 'now__card-link' }, textLink(card.linkLabel, { href: circlePostPath(card.id), onOpen: () => this.deps.onPost(card.id) })),
-      ],
-      { left: true, extraClass: 'now__card now__invitation' },
-    );
-    inv.el.replaceWith(next);
-    inv.el = next;
-  }
-
-  /** YES or NO, by the post's own route and rules: one request at a time, then the invitation as the server holds it. */
-  private async answer(answer: CircleAnswer): Promise<void> {
-    const inv = this.invitation;
-    if (!inv || inv.busy) return;
-    inv.busy = true;
-    inv.error = null;
-    this.drawInvitation();
-    try {
-      const post = await this.deps.api.circleAnswer(inv.card.id, answer);
-      if (this.disposed || this.invitation !== inv) return;
-      inv.reply = invitationReply(post.invitation, post.answer) ?? inv.reply;
-    } catch (e) {
-      if (this.disposed || this.invitation !== inv) return;
-      this.deps.session.noteError(e);
-      inv.error = messageOf(e);
-      // Refused by what changed meanwhile (the places taken, the event begun): the feed is read again.
-      if (e instanceof ApiError && e.status === 409) {
-        try {
-          const items = (await this.deps.api.circle(1, 50, { visit: false })).items;
-          const fresh = items.find((c) => c.id === inv.card.id);
-          const reply = fresh ? invitationReply(fresh.invitation, fresh.answer) : null;
-          if (reply) inv.reply = reply;
-        } catch (again) {
-          this.deps.session.noteError(again);
-        }
-      }
-    } finally {
-      inv.busy = false;
-    }
-    if (this.disposed || this.invitation !== inv) return;
-    this.drawInvitation();
-    inv.el.querySelector<HTMLElement>('[aria-pressed="true"]')?.focus({ preventScroll: true });
   }
 
   /** THE COLLECTION under the hero: a photograph of its newest entry, its name and type, and its link. */
@@ -555,15 +491,6 @@ class Now implements NowView {
 function firstWord(line: string): string | null {
   const w = line.split(' · ')[0]?.trim();
   return w ? w : null;
-}
-
-/** An invitation's event line (`12 OCT 2026 · 17:00 UTC · PARIS`): its time kept whole, then its place. */
-function splitEvent(line: string): { time: string; place: string | null } {
-  const at = line.indexOf(' UTC');
-  if (at < 0) return { time: line, place: null };
-  const time = line.slice(0, at + 4);
-  const rest = line.slice(at + 4).replace(/^ · /, '');
-  return { time, place: rest || null };
 }
 
 /** This phone's offset from UTC, in minutes east. */

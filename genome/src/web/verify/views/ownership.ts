@@ -434,7 +434,7 @@ export class OwnershipPanel {
 
   // ── Forms ────────────────────────────────────────────────────────────────
 
-  private authBlock(lead: string): HTMLElement[] {
+  private authBlock(lead: string): (HTMLElement | null)[] {
     if (this.deps.session.state.status === 'unknown' && !this.sessionUnavailable) {
       // Still asking the server who is signed in: no flash of sign-in forms for an owner.
       return [h('p', { class: this.vault ? 'ownership__meta micro soft' : 'n-g n-lb n-own__waiting', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
@@ -449,8 +449,11 @@ export class OwnershipPanel {
     const leadLine = h('p', { class: 'n-tx n-own__lead', text: lead });
     // Under CREATE ACCOUNT, the terms of use it accepts (J-06), in a new tab so the form and the scan's window stay.
     if (tab === 'create') return [leadLine, switcher, this.createForm(), termsNote()];
-    // Under the sign-in form: a forgotten password goes through ORBES Client Services (C-04).
-    return [leadLine, switcher, this.signInForm(), this.textButton(ACCOUNT_PASSWORD.forgotten, () => this.setRecover('contact'), 'n-own__forgotten')];
+    // Under the sign-in form: a forgotten password goes through ORBES Client Services (C-04); a refusal is said under
+    // it, the form's last line (C18).
+    const form = this.signInForm();
+    const refusal = form.querySelector<HTMLElement>('.n-err');
+    return [leadLine, switcher, form, this.textButton(ACCOUNT_PASSWORD.forgotten, () => this.setRecover('contact'), 'n-own__forgotten'), refusal];
   }
 
   /** The vault's sign-in (lot E's): the lead, SIGN IN · CREATE ACCOUNT, the form, then FORGOTTEN PASSWORD? or the terms. */

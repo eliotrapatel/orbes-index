@@ -821,10 +821,38 @@ export const UI_STATES: readonly UiState[] = [
   // ── THE CIRCLE ──
   { id: 'circle', title: 'THE CIRCLE: the invitation answered YES, the note', refs: ['C8'], variant: 'full', as: you, path: at('/verify/circle'), ready: '.view--circle article' },
   { id: 'circle-platine', title: 'THE CIRCLE of a PLATINE account: the poll too', refs: ['C8'], variant: 'full', as: 'platine', path: at('/verify/circle'), ready: '.view--circle article' },
+  {
+    id: 'circle-show-more',
+    title: 'THE CIRCLE of a PLATINE account with more posts than a page: SHOW MORE',
+    refs: ['C8'],
+    variant: 'full',
+    as: 'platine',
+    path: at('/verify/circle'),
+    // The demo publishes fewer posts than a page (twenty): the feed's answer says one more is there, as C8's does.
+    routes: async (page) =>
+      page.route('**/api/v1/club/circle?*', async (route) => {
+        const res = await route.fetch();
+        const body = (await res.json()) as { total: number };
+        await route.fulfill({ response: res, json: { ...body, total: body.total + 1 } });
+      }),
+    ready: '.view--circle .circle__more',
+  },
   { id: 'circle-signed-out', title: 'THE CIRCLE, signed out: the sign-in', refs: ['C40'], variant: 'full', path: at('/verify/circle'), ready: '.view--circle form' },
   { id: 'circle-no-piece', title: 'THE CIRCLE without a piece: it opens once a piece is registered', refs: ['C40'], variant: 'full', as: 'newcomer', path: at('/verify/circle'), ready: '.view--circle .circle__closed' },
   { id: 'post-invitation', title: 'A post: the invitation, YOUR ANSWER, TO SEE', refs: ['C22'], variant: 'full', as: you, path: post('invitation'), ready: '.view--circle-post section' },
-  { id: 'post-poll', title: 'A post: the poll, before a vote', refs: ['C34'], variant: 'full', as: 'platine', path: post('poll'), ready: '.view--circle-post section' },
+  {
+    id: 'post-poll',
+    title: 'A post: the poll, an option chosen before VOTE',
+    refs: ['C34'],
+    variant: 'full',
+    as: 'platine',
+    path: post('poll'),
+    act: async (run) => {
+      await button(run, 'BLACK').click();
+      await run.page.locator('.circle-post__options [aria-pressed="true"]').waitFor();
+    },
+    ready: '.view--circle-post section',
+  },
   { id: 'post-poll-voted', title: 'A post: the poll, voted, its results', refs: ['C34'], variant: 'full', as: 'voter1', path: post('poll'), ready: '.view--circle-post section' },
   { id: 'post-note', title: 'A post: the note', refs: ['C22'], variant: 'full', as: you, path: post('note'), ready: '.view--circle-post' },
   { id: 'post-not-found', title: 'A post’s address that leads nowhere', refs: ['C40'], variant: 'full', as: you, path: at('/verify/circle/00000000-0000-4000-8000-000000000000'), ready: '.view--circle-post' },
@@ -1056,7 +1084,7 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
   C15: 'result-unusual-card',
   C16: 'result-invalid',
   C17: 'problem-camera-denied',
-  C18: 'pieces-signed-out',
+  C18: 'pieces-sign-in-refused',
   C19: 'draw',
   C20: 'live-announced',
   C21: 'room',
@@ -1088,10 +1116,19 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
  * The boards of several states (C5: THE PRIVATE SALON's teaser; C17: the problems of the scan; C28: I'LL BE THERE said,
  * signed out, and not eligible by tier and by selection; C30: the question after on a final page, and an after-room's
  * end; C33: REQUESTED; C36: registering; C37: passing a piece on; C38: the scanner; C40: every page's loading, could not
- * be shown, empty, owners only and not found):
+ * be shown, empty, owners only and not found; N8's: C8, the feed a PLATINE account reads, its poll too; C18, the
+ * sign-in before its refusal; C22, NO and a note; C23, the index and the terms in French; C34, the results once voted;
+ * C39, FORGOTTEN PASSWORD, SET A NEW PASSWORD and CHANGE PASSWORD; C41, HELP in French):
  * beside BOARD_STATES' first, each further state is set beside the board too, to be compared with its section.
  */
 export const BOARD_SECTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  C8: ['circle-platine', 'circle-show-more'],
+  C18: ['pieces-signed-out'],
+  C22: ['post-answered-no', 'post-note'],
+  C23: ['legal-index', 'legal-terms-fr'],
+  C34: ['post-poll-voted'],
+  C39: ['result-forgotten-password', 'result-recovery-code', 'account-sheet-password'],
+  C41: ['legal-faq-fr'],
   C5: ['collection-signed-out', 'collection-no-piece'],
   C17: ['problem-scan-timeout', 'problem-network'],
   C35: ['pieces-service', 'pieces-care', 'pieces-certificate-choice', 'pieces-certificate-link', 'pieces-report-choice', 'pieces-piece-found', 'piece-stolen', 'piece-transfer'],

@@ -75,7 +75,47 @@ async function capture(browser: Browser, stage: UiStage, demo: NocturneDemo, sta
  */
 async function shoot(page: Page, state: UiState): Promise<Buffer> {
   if (state.viewport) return page.screenshot({ type: 'png', animations: 'disabled' });
+  const height = await page.evaluate(() => Math.ceil(document.documentElement.scrollHeight));
+  if (height > TALL_PAGE) return tallScreenshot(page, height);
   return fullScreenshot(page, { settle: (p) => settle(p), animations: 'disabled' });
+}
+
+/** The tallest page captured whole, in CSS px: Chromium captures 16 384 device px at most (8 192 CSS px at 2×). */
+const TALL_PAGE = 7_600;
+/** A taller page (the terms of use): its first 6 000 CSS px, a marked cut, then its last 1 500 (its foot). */
+const TALL_TOP = 6_000;
+const TALL_FOOT = 1_500;
+
+/** A page too tall for one capture: its top and its foot, one under the other, a hatched band of 24 CSS px between. */
+async function tallScreenshot(page: Page, height: number): Promise<Buffer> {
+  const size = page.viewportSize();
+  if (!size) throw new Error('page has no viewport');
+  const part = async (viewport: number, y: number): Promise<Buffer> => {
+    await page.setViewportSize({ width: size.width, height: viewport });
+    await page.evaluate((top) => window.scrollTo(0, top), y);
+    await settle(page);
+    return page.screenshot({ type: 'png', animations: 'disabled' });
+  };
+  let top: Buffer;
+  let foot: Buffer;
+  try {
+    top = await part(TALL_TOP, 0);
+    foot = await part(TALL_FOOT, height - TALL_FOOT);
+  } finally {
+    await page.setViewportSize(size);
+  }
+  const sheet = await page.context().newPage();
+  try {
+    await sheet.setViewportSize({ width: size.width, height: 400 });
+    const img = (png: Buffer) => `<img src="data:image/png;base64,${png.toString('base64')}" width="${size.width}">`;
+    await sheet.setContent(
+      `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{margin:0;background:#2b2b2b}img{display:block}.cut{height:24px;background:repeating-linear-gradient(45deg,#2b2b2b 0 6px,#555 6px 12px)}</style>${img(top)}<div class="cut"></div>${img(foot)}`,
+    );
+    await sheet.evaluate(async () => Promise.all([...document.images].map((i) => i.decode())));
+    return await sheet.screenshot({ type: 'png', fullPage: true });
+  } finally {
+    await sheet.close();
+  }
 }
 
 /** The board `id`'s image in `refDir` (`C1-Now.png` for C1). */

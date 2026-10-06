@@ -6,6 +6,7 @@
  * says an object is genuine: a code proves an ORBES-issued identity, not the
  * physical piece (the result copy itself comes from the server).
  */
+import { CHAPTER_LABELS, RAIL_LABEL } from '../shared/chapters.js';
 import { ApiError } from './api.js';
 import type { ScanHint } from './capture.js';
 import type { VerificationState } from './types.js';
@@ -937,6 +938,8 @@ export const CIRCLE = Object.freeze({
   empty: 'Nothing has been published in the circle yet.',
   more: 'SHOW MORE',
   moreFailed: 'More posts could not be shown just now.',
+  /** The accessible name of the feed's list (the canvas's). */
+  postsLabel: 'Posts',
   scan: 'SCAN ORBES CODE',
   /** Signed out: the sign-in follows. */
   signIn: 'The circle is reserved for the owners of an ORBES piece. Sign in with your ORBES account.',
@@ -1004,8 +1007,9 @@ export const CEREMONY = Object.freeze({
  */
 export const CHROME = Object.freeze({
   /** The rail's landmark, the canvas's. */
-  rail: 'Main',
-  chapters: Object.freeze({ now: 'NOW', releases: 'RELEASES', collection: 'COLLECTION', circle: 'CIRCLE', pieces: 'PIECES' }),
+  rail: RAIL_LABEL,
+  /** shared/chapters.ts: the legal pages carry the same rail. */
+  chapters: CHAPTER_LABELS,
   signIn: 'SIGN IN',
   /** The SCAN ring: its word under it, and its name (the word first, as it reads). */
   scan: 'SCAN',

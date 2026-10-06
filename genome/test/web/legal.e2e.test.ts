@@ -9,7 +9,8 @@
  * languages (its subset carries the accented capitals), the reading face for
  * figures and text; the contact of ORBES Client Services when
  * the server publishes one, and none otherwise; the floors of §3.8 on every
- * control (the links inside a sentence aside); the print view.
+ * control (the links inside a sentence aside); the print view; since NOCTURNE (step N8) the app's ground, header,
+ * rail and footer, every section open, the reading measure.
  *
  * Skipped (not failed) when the Chromium binary is absent.
  */
@@ -82,7 +83,7 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
       expect(await langOf(page), `${path} ${locale}`).toBe(lang);
       await textOf(page.locator('h1'), title);
       expect(await page.title()).toBe(`${DOCUMENTS.privacy[lang].title} — ORBES`);
-      await textOf(page.locator('.legal__version'), lang === 'en' ? /^VERSION OF \d{1,2} [A-Z]+ \d{4}$/ : /^VERSION DU \d{1,2}(ER)? [A-ZÉÛ]+ \d{4}$/);
+      await textOf(page.locator('.legal__version'), lang === 'en' ? /^Version of \d{1,2} [A-Z][a-z]+ \d{4}$/ : /^Version du \d{1,2}(er)? [a-zéû]+ \d{4}$/);
       expect(problems).toEqual([]);
       await page.context().close();
     }
@@ -141,7 +142,7 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     expect(new URL(page.url()).search).toBe('?lang=en');
     await textOf(page.locator('h1'), 'LEGAL INFORMATION');
     const items = page.locator('.legal-index__link');
-    await expect.poll(() => items.allInnerTexts(), POLL).toEqual(['PRIVACY POLICY', 'TERMS OF USE', 'LEGAL NOTICE', 'FREQUENTLY ASKED QUESTIONS']);
+    await expect.poll(() => items.locator('.legal-index__title').allInnerTexts(), POLL).toEqual(['PRIVACY POLICY', 'TERMS OF USE', 'LEGAL NOTICE', 'FREQUENTLY ASKED QUESTIONS']);
     expect(await items.evaluateAll((els) => els.map((el) => el.getAttribute('href')))).toEqual([
       '/legal/privacy?lang=en',
       '/legal/terms?lang=en',
@@ -167,6 +168,51 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     await page.context().close();
   }, 120_000);
 
+  it('stands on NOCTURNE\'s ground with the app\'s header, rail and footer, every section open, its text at the reading measure (C23, C41)', async () => {
+    const { page, problems } = await open('/legal/terms?lang=en');
+    // The ground and the column (choice 5), Safari's bars in ink (addition 13).
+    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(10, 10, 10)');
+    expect(await page.locator('meta[name="theme-color"]').getAttribute('content')).toBe('#0a0a0a');
+    // The header: ORBES, and VERIFY A PIECE back to the app.
+    await textOf(page.locator('.legal-head .n-wm'), 'ORBES');
+    expect(await page.locator('.legal-head').getByRole('link', { name: 'VERIFY A PIECE' }).getAttribute('href')).toBe('/verify');
+    // The rail: the app's five chapters, each into /verify, none current here; RELEASES' dot only when a release is announced.
+    const rail = page.getByRole('navigation', { name: 'Main' });
+    expect(await rail.getByRole('link').evaluateAll((els) => els.map((el) => [el.textContent, el.getAttribute('href'), el.getAttribute('aria-current')]))).toEqual([
+      ['NOW', '/verify', null],
+      ['RELEASES', '/verify/releases', null],
+      ['COLLECTION', '/verify/lookbook', null],
+      ['CIRCLE', '/verify/circle', null],
+      ['PIECES', '/verify/pieces', null],
+    ]);
+    expect(await rail.locator('.n-rail__live').isVisible()).toBe(false);
+    // The four pages as underlined tabs, TERMS current; the version, then ENGLISH (current, ivory) · FRANÇAIS.
+    await textOf(page.getByRole('navigation', { name: 'Legal pages' }).locator('[aria-current="page"]'), 'TERMS');
+    await textOf(page.locator('.legal-meta .legal__version'), /^Version of /);
+    expect(await page.getByRole('navigation', { name: 'Language' }).getByRole('link', { name: 'ENGLISH' }).evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).textDecorationLine])).toEqual(['rgb(246, 242, 234)', 'underline']);
+    // Every section open, each heading with its text under it; the text 16/1.65 at most 34 em (about 68 characters).
+    expect(await page.locator('.legal__section').count()).toBe(DOCUMENTS.terms.en.sections.length);
+    expect(await page.locator('.legal__section button, .legal__section [aria-expanded]').count()).toBe(0);
+    const text = page.locator('.legal__text').first();
+    expect(await text.evaluate((el) => { const cs = getComputedStyle(el); return [cs.fontSize, cs.lineHeight, cs.maxWidth, cs.color]; })).toEqual(['16px', '26.4px', '544px', 'rgb(167, 162, 154)']);
+    // The footer: the four pages, VERIFY A PIECE, DB-IP, © ORBES · GENOME CODE · PARIS (in ash); no SCAN ring here.
+    const foot = page.locator('.legal-foot');
+    expect(await foot.getByRole('navigation', { name: 'Legal information' }).getByRole('link').allInnerTexts()).toEqual(['PRIVACY', 'TERMS', 'LEGAL', 'HELP']);
+    expect(await foot.getByRole('link', { name: 'VERIFY A PIECE' }).getAttribute('href')).toBe('/verify');
+    await textOf(foot.locator('.legal-foot__meta'), '© ORBES · GENOME CODE · PARIS');
+    expect(await foot.locator('.legal-foot__meta').evaluate((el) => getComputedStyle(el).color)).toBe('rgb(167, 162, 154)');
+    expect(await page.locator('.n-scan').count()).toBe(0);
+    // In French, the four pages wrap on a phone and nothing scrolls sideways.
+    await page.goto(`${srv.origin}/legal/terms?lang=fr`);
+    await page.locator('main.legal h1').waitFor();
+    for (const width of [390, 320]) {
+      await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
+    }
+    expect(problems).toEqual([]);
+    await page.context().close();
+  }, 120_000);
+
   it('sets titles and labels in Gravesend Sans in both languages, every figure and what is read in Helvetica Neue', async () => {
     const { page, problems } = await open('/legal/terms?lang=en');
     const gravesend = /^"?Gravesend Sans"?/;
@@ -176,7 +222,7 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     expect(await family(page.locator('#article-8 .legal__figure'))).toMatch(helvetica);
     expect(await family(page.locator('.legal__text').first())).toMatch(helvetica);
     expect(await family(page.locator('.legal__version'))).toMatch(helvetica);
-    expect(await family(page.getByRole('link', { name: 'TERMS' }))).toMatch(gravesend);
+    expect(await family(page.getByRole('navigation', { name: 'Legal pages' }).getByRole('link', { name: 'TERMS' }))).toMatch(gravesend);
     // FRANÇAIS too, on the English page: its Ç is in the subset.
     expect(await family(page.getByRole('link', { name: 'FRANÇAIS' }))).toMatch(gravesend);
     // No visible display text holds a one or a zero (Gravesend's one is its capital I).
@@ -194,8 +240,8 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     expect(await family(page.locator('h1'))).toMatch(gravesend);
     expect(await family(page.locator('#article-8'))).toMatch(gravesend);
     expect(await family(page.locator('#article-8 .legal__figure'))).toMatch(helvetica);
-    expect(await family(page.getByRole('link', { name: 'MENTIONS LÉGALES', exact: true }))).toMatch(gravesend);
-    expect(await family(page.locator('.legal-head__wordmark'))).toMatch(gravesend);
+    expect(await family(page.getByRole('navigation', { name: 'Pages légales' }).getByRole('link', { name: 'MENTIONS LÉGALES', exact: true }))).toMatch(gravesend);
+    expect(await family(page.locator('.legal-head .n-wm'))).toMatch(gravesend);
     expect(await family(page.getByRole('link', { name: 'ENGLISH' }))).toMatch(gravesend);
     expect(await family(page.locator('.legal__text').first())).toMatch(helvetica);
     expect(await displayFigures()).toEqual([]);
@@ -253,10 +299,10 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     await page.context().close();
   }, 120_000);
 
-  it('prints the text alone: no navigation, no grain, the address of a link outside the site after it', async () => {
+  it('prints the text alone: no header, rail or navigation, the address of a link outside the site after it', async () => {
     const { page, problems } = await open('/legal/notice?lang=en');
     await page.emulateMedia({ media: 'print' });
-    for (const sel of ['.legal-nav', '.legal-lang', '.grain', '.legal-foot__link']) {
+    for (const sel of ['.legal-head', '.legal-rail', '.legal-pages', '.legal-lang', '.legal-foot__pages', '.legal-foot__link']) {
       expect(await page.locator(sel).first().evaluate((el) => getComputedStyle(el).display), sel).toBe('none');
     }
     const dbip = page.locator('#credits').locator('xpath=..').getByRole('link', { name: 'IP Geolocation by DB-IP' });

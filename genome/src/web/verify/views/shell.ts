@@ -27,7 +27,8 @@ import type { SessionStore } from '../session.js';
 import type { SoundSwitch } from '../sound.js';
 import type { ClubStatus } from '../types.js';
 import { AccountSheet } from './account.js';
-import { CIRCLE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH, RELEASES_PATH } from './common.js';
+import { CHAPTER_PATHS } from '../../shared/chapters.js';
+import { PIECES_PATH } from './common.js';
 import { appAnchor, CHAPTERS, drawSound, footer, icon, monogram } from './nocturne.js';
 
 export interface ShellDeps {
@@ -55,7 +56,8 @@ export const THEME_COLOURS = Object.freeze({ nocturne: '#0a0a0a', certificate: '
 /** The rail's dot is read again no sooner than this (the banner's own cadence). */
 const RAIL_REFRESH_MS = 60_000;
 
-const PATHS: Readonly<Record<ChapterId, string>> = Object.freeze({ now: LANDING_PATH, releases: RELEASES_PATH, collection: LOOKBOOK_PATH, circle: CIRCLE_PATH, pieces: PIECES_PATH });
+/** Each chapter's address (shared/chapters.ts: the legal pages' rail leads to the same). */
+const PATHS: Readonly<Record<ChapterId, string>> = CHAPTER_PATHS;
 
 export class Shell {
   /** The column: the header, the rail, the banner, the app's screen (`host`), the footer. */
