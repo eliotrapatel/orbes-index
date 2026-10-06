@@ -278,6 +278,22 @@ function piecesChromeMoves(): Moved[] {
 }
 
 /**
+ * N6 (C5, C6): THE COLLECTION's own SCAN ORBES CODE at its foot gave way to the SCAN ring, as MY PIECES' did (N5); a
+ * visitor's page keeps the words in THE PRIVATE SALON's teaser (addition 7), an owner's has the ring alone.
+ */
+function collectionMoves(): Moved[] {
+  const baseline = readBaseline();
+  return ['collection', 'collection-stress']
+    .filter((state) => (baseline.states[state]?.values ?? []).includes('SCAN ORBES CODE'))
+    .map((state) => ({
+      state,
+      value: 'SCAN ORBES CODE',
+      reason: 'N6 (C5): THE COLLECTION draws no button of its own at its foot; the scan is the SCAN ring\'s, at the foot of every screen.',
+      now: 'The SCAN ring at the foot of the screen (SCAN); for a visitor, THE PRIVATE SALON\'s teaser\'s SCAN ORBES CODE.',
+    }));
+}
+
+/**
  * The values NOCTURNE moves or removes on purpose, step by step. N1: THIS PIECE and the sentence for two photographs
  * (decision 9: the piece's own photograph leaves every collector's screen and answer; the model's alone stays,
  * captioned THE MODEL, with the sentence for one), and VARIANT (the field set at issuance renamed Size). N2: YOUR TIER
@@ -309,6 +325,7 @@ export const MOVED: readonly Moved[] = [
   ...nowMoves(),
   ...piecesMoves(),
   ...piecesChromeMoves(),
+  ...collectionMoves(),
   // N4 (C16): on a result that is neither authentic nor UNUSUAL ACTIVITY, WHERE DID YOU SEE OR BUY THIS PIECE? is a row
   // that opens (+): its four answers are inside it.
   ...['result-invalid', 'result-unknown', 'result-revoked'].flatMap((state) =>

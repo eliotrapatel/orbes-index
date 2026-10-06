@@ -58,7 +58,7 @@ import {
 } from '../../src/web/shared/lookbook.js';
 import * as verifyCopy from '../../src/web/verify/copy.js';
 import { DEFAULT_CARE, LOOKBOOK, PHOTOS } from '../../src/web/verify/copy.js';
-import { LOOKBOOK_PATH, lookbookGroups, lookbookRouteOf, lookbookSheetPath, SALON_NOTE_MAX, sheetLine, sheetModel } from '../../src/web/verify/lookbook-model.js';
+import { cardFace, LOOKBOOK_PATH, lookbookGroups, lookbookRouteOf, lookbookSheetPath, ownedLine, SALON_NOTE_MAX, selectDot, sheetLine, sheetModel, withRequest } from '../../src/web/verify/lookbook-model.js';
 import type { LookbookCard, LookbookSheet, VerifyOutcome } from '../../src/web/verify/types.js';
 import { resultViewModel, salonContactModel } from '../../src/web/verify/view-model.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
@@ -110,34 +110,52 @@ describe('the lookbook\'s grid (P-R02)', () => {
       type: 'RING',
       image: { src: media(1), alt: PHOTOS.modelAlt('MONOLITHE', 'RING') },
       price: null,
+      dots: [],
     });
     expect(groups[1]!.cards[1]!.image).toBeNull();
     expect(groups[2]!.cards[0]!.name).toBe('AURORE 2026');
   });
 
-  it('shows each dot of a model and its variants as a card of its own (NOCTURNE N1), as each model was, until the grid draws the dots', () => {
+  it('shows a model and its variants as one card with its dots (NOCTURNE N6, C5), each switching its photograph, its price and SEE THE MODEL', () => {
     const dots = [
-      { slug: 'monolithe', name: 'Monolithe', type: 'Bracelet', label: 'Steel', swatch: '#9D9B96', imageUrl: media(1) },
-      { slug: 'monolithe-gold', name: 'Monolithe', type: 'Bracelet', label: 'Gold', swatch: '#B88A3A', imageUrl: media(2) },
+      { slug: 'monolithe', name: 'Monolithe', type: 'Bracelet', label: 'Steel', swatch: '#9D9B96', imageUrl: media(1), priceLabel: '€ 4 800' },
+      { slug: 'monolithe-gold', name: 'Monolithe', type: 'Bracelet', label: 'Gold', swatch: '#B88A3A', imageUrl: media(2), priceLabel: '€ 5 200' },
       { slug: 'Not An Address', name: 'Monolithe', type: 'Bracelet', label: 'Rose', swatch: '#E6C578', imageUrl: media(3) },
       { slug: 'monolithe-blue', name: 'Monolithe', type: 'Bracelet', label: 'Blue', swatch: '#16224A', imageUrl: null },
     ];
-    const groups = lookbookGroups([card({ type: 'Bracelet', variant: { label: 'Steel', swatch: '#9D9B96' }, variants: dots }), card({ slug: 'orbe', name: 'Orbe', variants: [] })]);
+    const groups = lookbookGroups([card({ type: 'Bracelet', variant: { label: 'Steel', swatch: '#9D9B96' }, variants: dots, priceLabel: '€ 4 800' }), card({ slug: 'orbe', name: 'Orbe', variants: [] })]);
     expect(groups[0]!.cards.map((c) => [c.slug, c.href, c.name, c.type])).toEqual([
       ['monolithe', '/verify/lookbook/monolithe', 'MONOLITHE', 'BRACELET'],
-      ['monolithe-gold', '/verify/lookbook/monolithe-gold', 'MONOLITHE', 'BRACELET'],
-      ['monolithe-blue', '/verify/lookbook/monolithe-blue', 'MONOLITHE', 'BRACELET'],
       ['orbe', '/verify/lookbook/orbe', 'ORBE', 'RING'],
     ]);
-    // Each photograph's text names the model and its variant.
-    expect(groups[0]!.cards.map((c) => c.image)).toEqual([
-      { src: media(1), alt: 'The MONOLITHE BRACELET model in steel, photographed by ORBES' },
-      { src: media(2), alt: 'The MONOLITHE BRACELET model in gold, photographed by ORBES' },
-      null,
-      { src: media(1), alt: PHOTOS.modelAlt('ORBE', 'RING') },
+    const [monolithe, orbe] = groups[0]!.cards;
+    expect(orbe!.dots).toEqual([]);
+    // Its dots, the main model first, an address that is none left out; each photograph's text names the variant.
+    expect(monolithe!.dots.map((d) => [d.slug, d.href, d.label, d.swatch, d.image, d.price])).toEqual([
+      ['monolithe', '/verify/lookbook/monolithe', 'Steel', '#9D9B96', { src: media(1), alt: 'The MONOLITHE BRACELET model in steel, photographed by ORBES' }, '€ 4 800'],
+      ['monolithe-gold', '/verify/lookbook/monolithe-gold', 'Gold', '#B88A3A', { src: media(2), alt: 'The MONOLITHE BRACELET model in gold, photographed by ORBES' }, '€ 5 200'],
+      ['monolithe-blue', '/verify/lookbook/monolithe-blue', 'Blue', '#16224A', null, null],
     ]);
+    // A dot selected: the card's photograph, price and SEE THE MODEL are that model's; an unknown dot, the card's own.
+    expect(cardFace(monolithe!, 'monolithe-gold')).toMatchObject({ slug: 'monolithe-gold', href: '/verify/lookbook/monolithe-gold', image: { src: media(2) }, price: '€ 5 200' });
+    expect(cardFace(monolithe!, 'monolithe-blue')).toMatchObject({ image: null, price: null });
+    expect(cardFace(monolithe!, 'elsewhere')).toBe(monolithe);
     // A variant's sheet names it too.
     expect(sheetModel(sheet({ slug: 'monolithe-gold', variant: { label: 'Gold', swatch: '#B88A3A' } })).photos[0]!.alt).toBe('The MONOLITHE RING model in gold, photographed by ORBES');
+  });
+
+  it('says You own N of a card or a sheet across its variants, each variant owned named once, in the order of its dots', () => {
+    const dots = [
+      { slug: 'monolithe', label: 'Steel' },
+      { slug: 'monolithe-gold', label: 'Gold' },
+      { slug: 'monolithe-blue', label: 'Blue' },
+    ];
+    const pieces = (...slugs: (string | null)[]) => slugs.map((lookbook) => ({ lookbook }));
+    expect(ownedLine('monolithe', dots, pieces('monolithe-gold', 'monolithe', null, 'orbe'))).toBe('You own two: steel and gold');
+    expect(ownedLine('monolithe', dots, pieces('monolithe-blue', 'monolithe-blue'))).toBe('You own two: blue');
+    expect(ownedLine('monolithe', dots, pieces('orbe'))).toBeNull();
+    expect(ownedLine('orbe', [], pieces('orbe'))).toBe('You own one');
+    expect(ownedLine('orbe', [], [])).toBeNull();
   });
 
   it('takes nothing the server did not send as it should: an address that is none, a photograph from elsewhere', () => {
@@ -169,6 +187,8 @@ describe('a model\'s sheet (P-R02)', () => {
       care: DEFAULT_CARE,
       discontinued: null,
       salon: null,
+      sizes: null,
+      dots: [],
     });
     // The model's own care; a RESERVED sheet; no story, no photograph from elsewhere, none twice.
     const reserved = sheetModel(sheet({ lookbook: 'RESERVED', care: '  Polish with a soft cloth. ', story: ' \n ', coverUrl: null, gallery: [{ url: media(2), alt: '' }, { url: media(2), alt: null }, { url: 'https://evil.example/a.jpg', alt: 'x' }] }));
@@ -185,6 +205,69 @@ describe('a model\'s sheet (P-R02)', () => {
     expect(sheetLine(sheetModel(sheet({ lookbook: 'RESERVED', discontinuedYear: 2027 })))).toBe('RING · THE PRIVATE SALON · DISCONTINUED · 2027');
     // Only a year: anything else says nothing.
     for (const bad of [0, 2027.5, '2027' as unknown as number]) expect(sheetModel(sheet({ discontinuedYear: bad })).discontinued, String(bad)).toBeNull();
+  });
+
+  it('switches with its dots (NOCTURNE N6, C6, C33): each dot\'s photographs, story, facts, care, salon price and request; its sizes once for all', () => {
+    const variant = (slug: string, label: string, swatch: string, extra: Partial<NonNullable<LookbookSheet['variants']>[number]> = {}) => ({
+      slug,
+      label,
+      swatch,
+      selected: false,
+      lookbook: 'PUBLIC' as const,
+      name: 'Monolithe',
+      type: 'Ring',
+      collection: 'Orbit',
+      coverUrl: null,
+      gallery: [],
+      specs: [],
+      care: null,
+      discontinuedYear: null,
+      ...extra,
+    });
+    const s = sheetModel(
+      sheet({
+        variant: { label: 'Steel', swatch: '#9D9B96' },
+        sizes: ['16', '17', '18'],
+        variants: [
+          variant('monolithe', 'Steel', '#9D9B96', { selected: true }),
+          variant('monolithe-gold', 'Gold', '#B88A3A', { coverUrl: media(4), story: 'The gold of MONOLITHE.', specs: [{ label: 'Metal', value: '18k yellow gold' }], care: 'Polish the gold.', discontinuedYear: 2027 }),
+          variant('monolithe-onyx', 'Onyx', '#111111', { lookbook: 'RESERVED', salon: { priceLabel: '€ 9 000', minTier: 2, request: null } }),
+          variant('Not An Address', 'Rose', '#E6C578'),
+          variant('monolithe-blank', 'Blank', 'blue'),
+        ],
+      }),
+    );
+    expect(s.sizes).toBe('SIZES 16 · 17 · 18');
+    expect(s.dots.map((d) => [d.slug, d.label, d.swatch])).toEqual([
+      ['monolithe', 'Steel', '#9D9B96'],
+      ['monolithe-gold', 'Gold', '#B88A3A'],
+      ['monolithe-onyx', 'Onyx', '#111111'],
+    ]);
+    // The dot of the address asked is the sheet's own face.
+    expect(s.dots[0]!.face).toMatchObject({ slug: 'monolithe', photos: s.photos, story: s.story });
+    const gold = selectDot(s, 'monolithe-gold');
+    expect(gold).toMatchObject({
+      slug: 'monolithe-gold',
+      photos: [{ src: media(4), alt: 'The MONOLITHE RING model in gold, photographed by ORBES' }],
+      story: 'The gold of MONOLITHE.',
+      specs: [['METAL', '18K YELLOW GOLD']],
+      care: 'Polish the gold.',
+      discontinued: 'DISCONTINUED · 2027',
+      salon: null,
+      sizes: 'SIZES 16 · 17 · 18',
+    });
+    expect(gold.dots).toBe(s.dots);
+    // A dot without a story of its own sent (a server before N6): the sheet's.
+    expect(selectDot(s, 'monolithe-onyx')).toMatchObject({ reserved: true, story: s.story, salon: { price: '€ 9 000', tier: 'PLATINE', request: null } });
+    expect(sheetLine(selectDot(s, 'monolithe-onyx'))).toBe(`RING · ${LOOKBOOK.reserved}`);
+    expect(selectDot(s, 'elsewhere')).toBe(s);
+    // REQUEST THIS PIECE on a dot: REQUESTED on it and on its dot, nowhere else.
+    const requested = withRequest(selectDot(s, 'monolithe-onyx'), 'monolithe-onyx', 'r-1');
+    expect(requested.salon!.request).toEqual({ id: 'r-1' });
+    expect(selectDot(selectDot(requested, 'monolithe'), 'monolithe-onyx').salon!.request).toEqual({ id: 'r-1' });
+    expect(requested.dots[0]!.face.salon).toBeNull();
+    // One dot alone is no choice: none.
+    expect(sheetModel(sheet({ variants: [variant('monolithe', 'Steel', '#9D9B96', { selected: true })] })).dots).toEqual([]);
   });
 
   it('routes /verify/lookbook and its sheets, any case, and an address that is none to the lookbook itself', () => {
@@ -239,7 +322,9 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
     expect(LOOKBOOK.reserved).toBe('THE PRIVATE SALON');
     expect(LOOKBOOK.salon.request).toBe('REQUEST THIS PIECE');
     expect(LOOKBOOK.salon.requested).toBe('ORBES Client Services will contact you.');
-    const words = [LOOKBOOK.reserved, LOOKBOOK.reservedLead, ...Object.values(LOOKBOOK.salon)].join('\n');
+    const words = [LOOKBOOK.reserved, LOOKBOOK.reservedLead, LOOKBOOK.teaser, LOOKBOOK.signIn, LOOKBOOK.variant, ...Object.values(LOOKBOOK.salon)].join('\n');
+    // Addition 7: the teaser says the salon's sentence, then what opens it.
+    expect(LOOKBOOK.teaser.startsWith(`${LOOKBOOK.reservedLead} `)).toBe(true);
     expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
     expect(words).not.toContain('!');
   });

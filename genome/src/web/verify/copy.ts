@@ -741,6 +741,25 @@ export const LOOKBOOK = Object.freeze({
     return named ? `You own ${count}: ${named}` : `You own ${count}`;
   },
   scan: 'SCAN ORBES CODE',
+  /**
+   * NOCTURNE (addition 7, C5): THE PRIVATE SALON for a visitor (signed out, or an account that holds no piece): what it is
+   * and what opens it, never a model (terms, article 12); SIGN IN and SCAN ORBES CODE.
+   */
+  teaser: 'Pieces offered to the owners of an ORBES piece, by tier, on request. It opens once a piece is registered to your ORBES account.',
+  signIn: 'SIGN IN',
+  /** The accessible name of a sheet's dots: each switches the sheet to that variant (N6, C6). */
+  variant: 'Variant',
+  /**
+   * NOCTURNE N6 (C6): a model's next release, a plate row under its dots: its kind (LIVE RELEASE, DRAW · ENTRIES OPEN),
+   * then its variant and its day and hour, without a countdown (`IN BLUE, THURSDAY 21:00 PARIS`): a LIVE RELEASE in
+   * Paris (its weekday within the coming six days, else its date), a draw in UTC as THE RELEASES say it.
+   */
+  next: Object.freeze({
+    variant: (label: string) => `IN ${label.toUpperCase()},`,
+    week: (weekday: string, time: string) => `${weekday} ${time} PARIS`,
+    opens: (time: string) => `ENTRIES OPEN ${time} UTC`,
+    closes: (time: string) => `ENTRIES CLOSE ${time} UTC`,
+  }),
   /** The accessible names of a sheet's photographs and of a card's. */
   photosLabel: (model: string) => `Photographs of the ${model} model`,
   story: 'THE STORY',

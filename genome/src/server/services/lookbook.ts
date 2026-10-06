@@ -245,6 +245,8 @@ export interface LookbookSheetVariant extends VariantDot {
   collection: string | null;
   coverUrl: string | null;
   gallery: LookbookImage[];
+  /** N6: its own story (a variant's is copied from its main model, then may be its own). */
+  story: string | null;
   specs: SpecLine[];
   care: string | null;
   discontinuedYear: number | null;
@@ -369,6 +371,7 @@ export class LookbookService {
         collection: g.collection,
         coverUrl: mediaUrl(g.image_sha256),
         gallery: galleryOf(g),
+        story: g.story,
         specs: parseSpecs(g.specs),
         care: g.care_instructions,
         discontinuedYear: g.discontinued_at ? g.discontinued_at.getUTCFullYear() : null,

@@ -669,17 +669,17 @@ export const UI_STATES: readonly UiState[] = [
   },
 
   // ── THE COLLECTION ──
-  { id: 'collection-signed-out', title: 'THE COLLECTION, signed out', refs: ['C5'], variant: 'full', path: at('/verify/lookbook'), ready: '.view--lookbook .lookbook__grid' },
-  { id: 'collection', title: 'THE COLLECTION, signed in: THE PRIVATE SALON', refs: ['C5'], variant: 'full', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook .lookbook__reserved' },
-  { id: 'collection-no-piece', title: 'THE COLLECTION, signed in without a piece', refs: ['C5'], variant: 'full', as: 'newcomer', path: at('/verify/lookbook'), ready: '.view--lookbook .lookbook__grid' },
+  { id: 'collection-signed-out', title: 'THE COLLECTION, signed out', refs: ['C5'], variant: 'full', path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__group' },
+  { id: 'collection', title: 'THE COLLECTION, signed in: THE PRIVATE SALON', refs: ['C5'], variant: 'full', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__reserved' },
+  { id: 'collection-no-piece', title: 'THE COLLECTION, signed in without a piece', refs: ['C5'], variant: 'full', as: 'newcomer', path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__group' },
   { id: 'model', title: 'A model’s sheet: MONOLITHE in steel', refs: ['C6'], variant: 'full', as: you, path: sheet('steel'), ready: '.view--sheet .sheet__body section' },
   { id: 'model-blue', title: 'A model’s sheet: MONOLITHE in blue', refs: ['C6'], variant: 'full', path: sheet('blue'), ready: '.view--sheet .sheet__body section' },
   { id: 'model-gold', title: 'A model’s sheet: MONOLITHE in gold', refs: ['C6'], variant: 'full', path: sheet('gold'), ready: '.view--sheet .sheet__body section' },
   { id: 'model-salon', title: 'A model of THE PRIVATE SALON: ZENITH, REQUEST THIS PIECE', refs: ['C33'], variant: 'full', as: you, path: sheet('zenith'), ready: '.view--sheet .sheet__body section' },
-  { id: 'model-salon-signed-out', title: 'A model of THE PRIVATE SALON, signed out: not in the collection', refs: ['C40'], variant: 'full', path: sheet('zenith'), ready: '.view--sheet .sheet__body' },
-  { id: 'model-not-found', title: 'A model’s address that leads nowhere', refs: ['C40'], variant: 'full', path: at('/verify/lookbook/no-such-model'), ready: '.view--sheet .sheet__body' },
-  { id: 'collection-empty', title: 'THE COLLECTION with no model', refs: ['C40'], variant: 'empty', path: at('/verify/lookbook'), ready: '.view--lookbook .lookbook__body p', stress: true },
-  { id: 'collection-stress', title: 'THE COLLECTION with a 24-character name, no photograph', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook .lookbook__grid', stress: true },
+  { id: 'model-salon-signed-out', title: 'A model of THE PRIVATE SALON, signed out: not in the collection', refs: ['C40'], variant: 'full', path: sheet('zenith'), ready: '.view--sheet[data-state="missing"]' },
+  { id: 'model-not-found', title: 'A model’s address that leads nowhere', refs: ['C40'], variant: 'full', path: at('/verify/lookbook/no-such-model'), ready: '.view--sheet[data-state="missing"]' },
+  { id: 'collection-empty', title: 'THE COLLECTION with no model', refs: ['C40'], variant: 'empty', path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__empty', stress: true },
+  { id: 'collection-stress', title: 'THE COLLECTION with a 24-character name, no photograph', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__group', stress: true },
   { id: 'model-stress', title: 'A model of 24 characters without a photograph, € 125 400 in the salon', refs: ['same pieces'], variant: 'stress', as: you, path: sheet('long'), ready: '.view--sheet .sheet__body section', stress: true },
 
   // ── THE RELEASES ──
@@ -1064,15 +1064,18 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
 });
 
 /**
- * The boards of several states (C17: the problems of the scan; C36: registering; C37: passing a piece on; C38: the
- * scanner; C40: every page's loading, could not be shown, empty, owners only and not found):
+ * The boards of several states (C5: THE PRIVATE SALON's teaser; C17: the problems of the scan; C33: REQUESTED; C36:
+ * registering; C37: passing a piece on; C38: the scanner; C40: every page's loading, could not be shown, empty, owners
+ * only and not found):
  * beside BOARD_STATES' first, each further state is set beside the board too, to be compared with its section.
  */
 export const BOARD_SECTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  C5: ['collection-signed-out', 'collection-no-piece'],
   C17: ['problem-scan-timeout', 'problem-network'],
   C35: ['pieces-service', 'pieces-care', 'pieces-certificate-choice', 'pieces-certificate-link', 'pieces-report-choice', 'pieces-piece-found', 'piece-stolen', 'piece-transfer'],
   C36: ['result-registered-now', 'result-ceremony', 'result-registration-closed', 'result-not-delivered'],
   C37: ['result-transfer-code', 'result-received', 'result-registered-other'],
+  C33: ['model-salon-requested'],
   C38: ['scan-preparing', 'scan-hint', 'scan-seal', 'scan-verifying'],
   C40: ['pieces-failed', 'pieces-empty', 'collection-empty', 'releases-empty', 'circle-empty', 'circle-no-piece', 'model-not-found', 'draw-not-found', 'post-not-found'],
 });

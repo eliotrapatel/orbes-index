@@ -35,7 +35,7 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   of a model kept out of the collection sees the empty circle).
 - **Where the demo differs from the boards** (live data excepted: times, ids, a countdown's digits, the GENOME's glyphs):
   - Since N1, MONOLITHE in steel is a model and gold and blue its variants (ADD A VARIANT; the dots Steel · Gold · Blue):
-    the lookbook's list gives them as one entry, which THE COLLECTION still shows as three cards until N6 draws the dots.
+    the lookbook's list gives them as one entry, which THE COLLECTION shows as one model with its dots since N6.
   - Since N1 (migration 0024), the October draw has its price, € 4 200: the app shows it from N7 (addition 5).
   - Since N1 (decision 9), the boutique piece's own photograph (taken at issuance before NOCTURNE) is shown nowhere:
     THIS PIECE and the sentence for two photographs are recorded as removed in the content test's MOVED list.
@@ -47,6 +47,9 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   - The question after (C30) is shown to a collector whose turn passed on 5 Oct (the guest); you secured your piece.
   - No model has a gallery (the media store refuses a gallery photograph that is the model's cover, and the demo holds
     the owner's three photographs only): the sheet's gallery is *(not reached)*.
+  - C33 (N6): ZENITH has a story and specifications in the demo (the content baseline holds them), and a SKU in size 17
+    (its order from the salon): its sheet shows SIZE 17 under its line and THE STORY and SPECIFICATIONS before CARE,
+    which the board draws without.
 - **Where the build differs from the boards on purpose** (since N2; the final board review does not count these as
   regressions):
   - The © line takes ash, not the boards' smoke (contrast).
@@ -75,6 +78,8 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
     look C15 draws for that very state.
   - C36 (3): the ceremony's GENOME is centred, as on every result. The board's 220 px image falls to the left of the
     column, a block inside `.ctr` (a board artefact).
+  - C5 (N6): the rail underlines COLLECTION (C_CSS's `.rail a.on::after`, as on every chapter since N2), where the board's
+    picture shows none; the figures of SIZES 16 · 17 · 18 and of 21:00 are in Helvetica Neue (the plan's Type rule).
 - **Omissions of the drawings** (since N4: the app has these and keeps them, built with the same pieces; the final board
   review expects them):
   - C13: RECEIVING's lead, *If its owner has given you a transfer code, enter it…*, above the sign-in.
@@ -98,6 +103,14 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
     tracking number of an order RETURNED once shipped (C32 draws CARRIER and TRACKING NUMBER only) (N5).
   - C31: the contact of ORBES Client Services under an entry CONFIRMED; the entry's id whole, in lower case, as the draw
     publishes it (the board shows eight characters in capitals) (N5).
+  - C5, C6, C33 (N6): a model without a photograph (its words open where it would be); the models without a collection
+    (under no heading); several collections and several models (76 px apart, as C7's articles); the sheet's gallery,
+    each photograph whole across the column without the fade, 2 px apart (C22's); DISCONTINUED · *year* on a sheet's
+    line; the request refused (*The request could not be sent.* and the reason, C_CSS `.err`); THE PRIVATE SALON's
+    teaser for an account signed in that holds no piece shows SCAN ORBES CODE alone (SIGN IN is for a visitor signed
+    out); a model's next release when it is a draw (DRAW · ENTRIES OPEN, IN STEEL, ENTRIES CLOSE *date · time* UTC), its
+    room open or live (LIVE RELEASE · THE ROOM IS OPEN, · LIVE NOW), or more than six days ahead (its date with its
+    weekday); a model of the salon among a public model's dots switches the sheet to its price, tier and request.
 
 ## Boards without a screen of their own today
 
@@ -317,17 +330,26 @@ THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one 
 
 ## THE COLLECTION and a model (`/verify/lookbook`, `/verify/lookbook/<slug>`)
 
+Since N6 (C5, C6, C33): THE COLLECTION as a title and its sentence, each collection's name, each model (a main model and
+its variants, one entry) full width on its photograph, faded, its words lifted onto it, its dots switching the
+photograph, the price and SEE THE MODEL; THE PRIVATE SALON for an owner, its teaser for a visitor (addition 7). A sheet:
+‹ THE COLLECTION, the photograph, its collection, name, line, SIZES (addition 8), its dots (each switches the sheet and
+its address, so a variant's own address opens it selected), You own N, its next release as a plate row, the salon's
+facts, sentence, note and REQUEST THIS PIECE or REQUESTED with the contact, THE STORY, the gallery, SPECIFICATIONS, CARE.
+The page's own SCAN ORBES CODE gave way to the SCAN ring (the content test's MOVED list); the wordmark to the header's
+ORBES; the sheet's foot link THE COLLECTION to its crumb.
+
 | State | What it shows | Shown when | Reference |
 |---|---|---|---|
-| `collection-signed-out` | ORBES, THE COLLECTION, its lead, *collection*, each model on its plate (*photograph*, *name*, *type*, SEE THE MODEL), SCAN ORBES CODE, the legal links | signed out | C5 (2) |
-| `collection` | the same, then THE PRIVATE SALON, its lead, *collection*, ZENITH, BRACELET, € 4 800, SEE THE MODEL | an owner signed in | C5 |
-| `collection-no-piece` | as signed out | signed in without a piece | C5 (2) |
-| `model`, `model-blue`, `model-gold` | ORBES, *collection*, *name*, *type*, the photographs (cover, gallery), THE STORY, SPECIFICATIONS (*label · value*), CARE, THE COLLECTION | a public model | C6 |
-| `model-salon` | *collection*, ZENITH, BRACELET · THE PRIVATE SALON, REQUEST THIS PIECE, PRICE, OFFERED FROM, its sentence, A NOTE FOR ORBES CLIENT SERVICES and its hint, THE STORY, SPECIFICATIONS, CARE | a model of the salon, its tier reached | C33 (1) |
+| `collection-signed-out` | THE COLLECTION, its lead, *collection*, each model on its photograph (*name*, *type*, its dots, SEE THE MODEL), THE PRIVATE SALON's teaser (its sentence, SIGN IN, SCAN ORBES CODE; no model) | signed out | C5 (2) |
+| `collection` | the same, You own N under the dots, then THE PRIVATE SALON, its lead, *collection*, ZENITH, BRACELET, € 4 800, SEE THE MODEL | an owner signed in | C5 |
+| `collection-no-piece` | as signed out, the teaser with SCAN ORBES CODE alone | signed in without a piece | C5 (2) |
+| `model`, `model-blue`, `model-gold` | ‹ THE COLLECTION, the photograph, *collection*, *name*, *type*, SIZES 16 · 17 · 18, the dots (the address's selected), You own N (signed in), the next release (LIVE RELEASE, IN BLUE, THURSDAY 21:00 PARIS), THE STORY, the gallery, SPECIFICATIONS (*label · value*), CARE | a public model | C6 |
+| `model-salon` | ‹ THE COLLECTION, *collection*, ZENITH, BRACELET · THE PRIVATE SALON, SIZE 17, THE PRIVATE SALON, PRICE, OFFERED FROM, its sentence, A NOTE FOR ORBES CLIENT SERVICES and its hint, REQUEST THIS PIECE, THE STORY, SPECIFICATIONS, CARE | a model of the salon, its tier reached | C33 (1) |
 | `model-salon-requested` | REQUESTED, *ORBES Client Services will contact you.*, the contact | requested | C33 (2) |
-| `model-salon-signed-out`, `model-not-found` | *This model is not in the ORBES collection.*, THE COLLECTION | a reserved model signed out; an address that leads nowhere | C40 (4) |
-| `collection-empty` | *No model is shown in the collection yet.* | no model | C40 (3) |
-| `collection-stress`, `model-stress` | a 24-character name without a photograph, € 125 400 | the stress demo | same pieces |
+| `model-salon-signed-out`, `model-not-found` | ‹ THE COLLECTION, *This model is not in the ORBES collection.* | a reserved model signed out; an address that leads nowhere | C40 (4) |
+| `collection-empty` | *No model is shown in the collection yet.*, the teaser | no model | C40 (3) |
+| `collection-stress`, `model-stress` | a 24-character name without a photograph, a 14-character dot, € 125 400 | the stress demo | same pieces |
 | *(not reached)* | DISCONTINUED · *year* (a model discontinued); the gallery; the request refused (*The request could not be sent.*); the collection could not be shown (TRY AGAIN) | | C6, C40 (2) |
 
 ## THE RELEASES and a release's page (`/verify/releases`, `/verify/releases/<id>`)

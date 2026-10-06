@@ -71,7 +71,7 @@ import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import { certificateLinkLettering } from '../../src/server/render/certificate.js';
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
-import { CEREMONY, CIRCLE, CLAIM_HELD, ORBES_CARE, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
+import { CEREMONY, CIRCLE, CLAIM_HELD, LOOKBOOK as LOOKBOOK_COPY, ORBES_CARE, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { groupHex } from '../../src/web/verify/releases-model.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
@@ -2275,21 +2275,29 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('h1'), 'THE COLLECTION');
     expect(new URL(page.url()).pathname).toBe('/verify/lookbook');
 
-    // The PUBLIC models by collection, the collection's figures in the reading face; nothing reserved, signed out.
+    // The PUBLIC models by collection, the collection's figures in the reading face; signed out, THE PRIVATE SALON's
+    // teaser (NOCTURNE, addition 7): what it is and what opens it, SIGN IN and SCAN ORBES CODE, never a model.
     const card = page.locator('article.lookbook-card', { hasText: 'AURORE' });
     await visible(card);
     await textOf(page.locator('.lookbook__group', { has: card }).locator('.lookbook__collection'), 'NOCTURNE 2026');
     await countOf(page.locator('article.lookbook-card', { hasText: 'ZENITH' }), 0);
     await countOf(page.locator('.lookbook__reserved'), 0);
+    const teaser = page.getByRole('region', { name: 'THE PRIVATE SALON' });
+    await textOf(teaser.locator('.n-lookbook__teaser-text'), LOOKBOOK_COPY.teaser);
+    await attrOf(teaser.getByRole('link', { name: 'SIGN IN' }), 'href', '/verify/pieces');
+    await visible(teaser.getByRole('button', { name: 'SCAN ORBES CODE' }));
+    expect(await teaser.innerText()).not.toMatch(/ZENITH|NADIR|€/);
     await textsOf(card.locator('.lookbook-card__name, .lookbook-card__type'), ['AURORE', 'RING']);
-    const cover = card.locator('img.lookbook-card__img');
+    const cover = card.locator('.lookbook-card__frame img');
     await attrOf(cover, 'loading', 'lazy');
     await attrOf(cover, 'alt', 'The AURORE RING model, photographed by ORBES');
     await expect.poll(() => cover.evaluate((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth, getComputedStyle(el).objectFit]), POLL).toEqual([true, 600, 'contain']);
-    expect(await card.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual([PLATE, 'auto']);
+    // NOCTURNE (C5): each model on the ground, its photograph whole at the column's full width; no plate, no control of its own.
+    expect(await card.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).cursor])).toEqual(['rgba(0, 0, 0, 0)', 'auto']);
+    expect(await card.locator('.lookbook-card__frame').evaluate((el) => Math.round(el.getBoundingClientRect().width) === Math.round(el.closest('main')!.getBoundingClientRect().width))).toBe(true);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    await keepsFloors(page, ['SEE THE MODEL', 'SCAN ORBES CODE', ...LEGAL_LINKS]);
-    // One line for SEE THE MODEL, two cards to a row, on the phones in use; one to a row on the smallest.
+    await keepsFloors(page, ['SEE THE MODEL', 'SIGN IN', 'SCAN ORBES CODE', ...LEGAL_LINKS]);
+    // One line for SEE THE MODEL, the photograph across the column, on the phones in use and the smallest.
     for (const width of [...PHONE_WIDTHS, MOBILE_VIEWPORT.width]) {
       await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
       expect(await linesOf(card.getByRole('link', { name: 'SEE THE MODEL' })), `${width}`).toBe(1);
@@ -2299,29 +2307,28 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.setViewportSize(MOBILE_VIEWPORT);
     await page.screenshot({ path: join(OUT_DIR, 'verify-lookbook.png'), fullPage: true });
 
-    // SEE THE MODEL: its sheet, the cover then the gallery, THE STORY, SPECIFICATIONS, CARE.
+    // SEE THE MODEL: its sheet, the cover (whole, faded, read at once) then the gallery (full width, lazily), THE STORY,
+    // SPECIFICATIONS, CARE.
     await card.getByRole('link', { name: 'SEE THE MODEL' }).click();
     await textOf(page.locator('h1'), 'AURORE');
     expect(new URL(page.url()).pathname).toBe('/verify/lookbook/aurore');
     await textOf(page.locator('.sheet__collection'), 'NOCTURNE 2026');
     await textOf(page.locator('.sheet__line'), 'RING');
+    const coverPhoto = page.locator('.n-model__photo img');
     const photos = page.getByRole('region', { name: 'Photographs of the AURORE model' });
-    await countOf(photos.locator('img.sheet-photo__img'), 2);
-    await expect.poll(() => photos.locator('img').evaluateAll((els) => els.map((el) => [(el as HTMLImageElement).getAttribute('loading'), (el as HTMLImageElement).naturalWidth])), POLL).toEqual([
+    await countOf(photos.locator('img'), 1);
+    const loaded = (el: Element) => [(el as HTMLImageElement).getAttribute('loading'), (el as HTMLImageElement).naturalWidth];
+    await expect.poll(() => Promise.all([coverPhoto.evaluate(loaded), photos.locator('img').evaluate(loaded)]), POLL).toEqual([
       ['eager', 600],
       ['lazy', 400],
     ]);
-    // The gallery: the cover across the plate, the last photograph alone on its row centred (the plate's brackets,
-    // its last children, do not count).
-    expect(await photos.locator('figure.sheet-photo').evaluateAll((els) => els.map((el) => [getComputedStyle(el).gridColumnEnd, getComputedStyle(el).justifySelf]))).toEqual([
-      ['-1', 'auto'],
-      ['-1', 'center'],
-    ]);
-    await textsOf(page.locator('.sheet__section .section-label'), ['THE STORY', 'SPECIFICATIONS', 'CARE']);
+    // The gallery: each photograph whole across the column, without the fade.
+    expect(await photos.locator('.sheet-photo').evaluateAll((els) => els.map((el) => [el.classList.contains('n-fade'), Math.round(el.getBoundingClientRect().width) === Math.round(el.closest('main')!.getBoundingClientRect().width)]))).toEqual([[false, true]]);
+    await textsOf(page.locator('.sheet__section .n-model__heading'), ['THE STORY', 'SPECIFICATIONS', 'CARE']);
     await textsOf(page.locator('.sheet__paragraph'), ['The ring of dawn.', 'Cast in Paris. Polished by hand.']);
     expect(await page.locator('.sheet__paragraph').nth(1).evaluate((el) => el.querySelectorAll('br').length)).toBe(1);
-    await textsOf(page.locator('.sheet__section .rows__label'), ['METAL', 'WEIGHT']);
-    await textsOf(page.locator('.sheet__section .rows__value'), ['925 STERLING SILVER', '12 G']);
+    await textsOf(page.locator('.sheet__section .n-kv__label'), ['METAL', 'WEIGHT']);
+    await textsOf(page.locator('.sheet__section .n-kv__value'), ['925 STERLING SILVER', '12 G']);
     await textOf(page.locator('.sheet__care'), /^Store this piece on its own/);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await keepsFloors(page, ['THE COLLECTION', ...LEGAL_LINKS]);
@@ -2334,10 +2341,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
     expect(new URL(page.url()).pathname).toBe('/verify');
 
-    // Opened directly, a sheet puts the landing and the lookbook under it; its foot's THE COLLECTION goes back there.
+    // Opened directly, a sheet puts the landing and the lookbook under it; its crumb, ‹ THE COLLECTION, goes back there.
     await page.goto(`${srv.origin}/verify/lookbook/AURORE`);
     await textOf(page.locator('h1'), 'AURORE');
-    await page.locator('.sheet__foot').getByRole('link', { name: 'THE COLLECTION' }).click();
+    await page.locator('.n-model__crumb').click();
     await textOf(page.locator('h1'), 'THE COLLECTION');
     await page.goBack();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
@@ -2398,22 +2405,22 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.sheet__line'), `RING · THE PRIVATE SALON · DISCONTINUED · ${zenithYear}`);
     expect(await figuresInDisplayFace(page)).toEqual([]);
     await textsOf(page.locator('.sheet__paragraph'), ['Shown to the owners.']);
-    // No photograph: no plate.
+    // No photograph: none, its words open under the crumb.
     await countOf(page.locator('.sheet__photos'), 0);
     // THE PRIVATE SALON on the sheet: its price, the tier it is offered from, REQUEST THIS PIECE (the sheet's one button).
     const salon = page.getByRole('region', { name: 'THE PRIVATE SALON' });
-    await textsOf(salon.locator('.rows__label'), ['PRICE', 'OFFERED FROM']);
-    await textsOf(salon.locator('.rows__value'), ['€ 4 800', 'TITANE']);
-    await countOf(page.locator('.btn'), 1);
+    await textsOf(salon.locator('.n-kv__label'), ['PRICE', 'OFFERED FROM']);
+    await textsOf(salon.locator('.n-kv__value'), ['€ 4 800', 'TITANE']);
+    await countOf(page.locator('main .n-btn'), 1);
     await keepsFloors(page, ['REQUEST THIS PIECE']);
     await salon.getByLabel('A NOTE FOR ORBES CLIENT SERVICES').fill('A size 54, please.');
     await salon.getByRole('button', { name: 'REQUEST THIS PIECE' }).click();
     await textOf(salon.locator('.sheet__requested-text'), 'ORBES Client Services will contact you.');
-    await textOf(salon.locator('.ownership__status'), 'REQUESTED');
+    await textOf(salon.locator('.n-model__requested-label'), 'REQUESTED');
     // With the contact of ORBES Client Services: the email names the model and the request.
-    const mail = new URL((await salon.locator('.contact__email').getAttribute('href'))!);
+    const mail = new URL((await salon.locator('.n-contact__email').getAttribute('href'))!);
     expect(mail.searchParams.get('subject')).toBe('ORBES — ZENITH — REQUEST');
-    await countOf(page.locator('.btn'), 0);
+    await countOf(page.locator('main .n-btn'), 0);
     const requested = await srv.ctx.db.selectFrom('shop_requests').select(['id', 'note', 'status']).where('account_id', '=', owner.account.id).execute();
     expect(requested).toEqual([{ id: expect.any(String), note: 'A size 54, please.', status: 'OPEN' }]);
     expect(mail.searchParams.get('body')).toContain(`REQUEST: ${requested[0]!.id}`);
@@ -2435,11 +2442,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const elsewhere = await srv.ctx.services.salon.request(owner.account.id, 'zenith', null, { type: 'account', id: owner.account.id });
     await again.getByRole('button', { name: 'REQUEST THIS PIECE' }).click();
     await textOf(again.locator('.sheet__requested-text'), 'ORBES Client Services will contact you.');
-    await textOf(again.locator('.ownership__status'), 'REQUESTED');
-    await visible(again.locator('.contact__email'));
+    await textOf(again.locator('.n-model__requested-label'), 'REQUESTED');
+    await visible(again.locator('.n-contact__email'));
     await countOf(again.locator('.form__error'), 0);
-    await countOf(page.locator('.btn'), 0);
-    expect(new URL((await again.locator('.contact__email').getAttribute('href'))!).searchParams.get('body')).toContain(`REQUEST: ${elsewhere.request.id}`);
+    await countOf(page.locator('main .n-btn'), 0);
+    expect(new URL((await again.locator('.n-contact__email').getAttribute('href'))!).searchParams.get('body')).toContain(`REQUEST: ${elsewhere.request.id}`);
     // A model above the owner's tier: the same sentence as a model not in the collection.
     await page.goto(`${srv.origin}/verify/lookbook/nadir`);
     await textOf(page.locator('.sheet__missing'), 'This model is not in the ORBES collection.');

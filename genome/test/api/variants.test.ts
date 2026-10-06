@@ -291,6 +291,9 @@ describe('the variants of a model (NOCTURNE N1)', () => {
     expect(sheet.variants[0]).toMatchObject({ coverUrl: steelUrl, gallery: [], care: 'Polish with a soft dry cloth.', discontinuedYear: null, lookbook: 'PUBLIC' });
     expect(sheet.variants[0]!.specs[0]).toEqual({ label: 'Metal', value: '925 sterling silver' });
     expect(sheet.variants[0]).not.toHaveProperty('salon');
+    // N6: each dot carries its own story, so the sheet switches it with the dot.
+    const stories = await h.ctx.db.selectFrom('models').select(['slug', 'story']).where('slug', 'in', sheet.variants.map((v) => v.slug)).execute();
+    expect(sheet.variants.map((v) => (v as { story?: string | null }).story)).toEqual(sheet.variants.map((v) => stories.find((m) => m.slug === v.slug)!.story));
     // The main model's address: the same dots, the main model selected.
     const first = safeJson(await h.client().get('/api/v1/lookbook/variants-monolithe')) as SheetJson;
     expect(first.variants.filter((v) => v.selected).map((v) => v.slug)).toEqual(['variants-monolithe']);

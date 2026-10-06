@@ -7,9 +7,13 @@
  *    (collections by name, the models without one last, under no heading);
  *    each card names its model, its type and, when ORBES has one, its
  *    photograph; its address is a path of this app. A model and its variants
- *    come as one entry (NOCTURNE N1): each of its dots is a card of its own
- *    here, as each model was, until the grid draws the dots.
- *  - A sheet: the cover then the gallery, each with its alternative text
+ *    are one entry (NOCTURNE N1), one card with its dots (N6, C5): each dot
+ *    switches the card's photograph, its price in THE PRIVATE SALON and the
+ *    address of SEE THE MODEL.
+ *  - A sheet (N6, C6, C33): its dots, each the face of a model of its group
+ *    (its photographs, story, facts, care, salon price and request), the one
+ *    whose address was asked selected; then the cover then the gallery, each
+ *    with its alternative text
  *    (the operator's, else "The MONOLITHE RING model, photographed by
  *    ORBES"), the story (its paragraphs drawn by shared/lookbook.ts, as the
  *    console's preview draws them), the specifications as rows and the care
@@ -30,7 +34,7 @@
  */
 import { isLookbookSlug, storyParagraphs } from '../shared/lookbook.js';
 import { DEFAULT_CARE, DISCONTINUED, LOOKBOOK, PHOTOS } from './copy.js';
-import type { LookbookCard, LookbookSheet, OwnedPiece } from './types.js';
+import type { LookbookCard, LookbookSheet, LookbookSheetVariant, OwnedPiece } from './types.js';
 import { discontinuedYearOf, upper, type Row } from './view-model.js';
 
 /** The account's note on a request of the private salon (P-X08): as the server holds it (services/salon.ts SHOP_NOTE_MAX). */
@@ -69,6 +73,18 @@ export interface CardModel {
   image: LookbookPhoto | null;
   /** P-X08: the price THE PRIVATE SALON shows on its card; null elsewhere, or without one. */
   price: string | null;
+  /**
+   * NOCTURNE N6 (C5): the dots of its entry, the main model first, each with the address of its sheet, its photograph
+   * and (THE PRIVATE SALON) its price; none for a model shown alone.
+   */
+  dots: CardDot[];
+}
+
+/** A dot of a card of THE COLLECTION (N6): a model of the entry, what the card switches to with it. */
+export interface CardDot extends EntryDot {
+  href: string;
+  /** THE PRIVATE SALON's price of that model, or null. */
+  price: string | null;
 }
 
 export interface CollectionGroup {
@@ -83,13 +99,6 @@ export interface CollectionGroup {
  */
 function modelAlt(name: string, type: string, variant?: string | null): string {
   return PHOTOS.modelAlt(upper(name), upper(type), variant);
-}
-
-/** The models of a list's entry: its dots (NOCTURNE N1), each a model of its own, or the entry's model alone. */
-function entryModels(c: LookbookCard): { slug: string; name: string; type: string; imageUrl: string | null; priceLabel?: string | null; variant: string | null }[] {
-  const dots = Array.isArray(c.variants) ? c.variants.filter((v) => isLookbookSlug(v?.slug)) : [];
-  if (dots.length > 1) return dots.map((v) => ({ slug: v.slug, name: v.name, type: v.type, imageUrl: v.imageUrl, priceLabel: v.priceLabel, variant: v.label }));
-  return [{ slug: c.slug, name: c.name, type: c.type, imageUrl: c.imageUrl, priceLabel: c.priceLabel, variant: c.variant?.label ?? null }];
 }
 
 /** A dot of an entry (NOCTURNE N1): a model of the group, its label and colour, its photograph, when it was first shown. */
@@ -149,15 +158,25 @@ export function sizesLine(sizes: unknown): string | null {
  * owns none.
  */
 export function youOwn(c: LookbookCard, pieces: readonly Pick<OwnedPiece, 'lookbook'>[]): string | null {
-  const dots = entryDots(c);
-  const slugs = dots.length > 0 ? dots.map((d) => d.slug) : [c.slug];
+  return ownedLine(c.slug, entryDots(c), pieces);
+}
+
+/**
+ * « You own two: steel and gold » for a model (its address, `slug`) and its dots (THE COLLECTION's card, a sheet: N6):
+ * the account's pieces of any of them, each dot owned named once in their order; null when it owns none.
+ */
+export function ownedLine(slug: string, dots: readonly Pick<EntryDot, 'slug' | 'label'>[], pieces: readonly Pick<OwnedPiece, 'lookbook'>[]): string | null {
+  const slugs = dots.length > 0 ? dots.map((d) => d.slug) : [slug];
   const owned = pieces.filter((p) => typeof p?.lookbook === 'string' && slugs.includes(p.lookbook));
   if (owned.length === 0) return null;
   const named = dots.filter((d) => owned.some((p) => p.lookbook === d.slug)).map((d) => d.label.toLowerCase());
   return LOOKBOOK.youOwn(owned.length, ...named);
 }
 
-/** The cards, grouped by collection in the order the server sent them; a card without an address is left out. */
+/**
+ * The cards, grouped by collection in the order the server sent them, one card for a model and its variants (its dots,
+ * N6); a card without an address is left out.
+ */
 export function lookbookGroups(cards: readonly LookbookCard[]): CollectionGroup[] {
   const groups: CollectionGroup[] = [];
   for (const entry of cards) {
@@ -168,18 +187,24 @@ export function lookbookGroups(cards: readonly LookbookCard[]): CollectionGroup[
       group = { collection, cards: [] };
       groups.push(group);
     }
-    for (const c of entryModels(entry)) {
-      group.cards.push({
-        slug: c.slug,
-        href: lookbookSheetPath(c.slug),
-        name: upper(c.name),
-        type: upper(c.type),
-        image: typeof c.imageUrl === 'string' && MEDIA_SRC.test(c.imageUrl) ? { src: c.imageUrl, alt: modelAlt(c.name, c.type, c.variant) } : null,
-        price: priceOf(c.priceLabel),
-      });
-    }
+    const prices = new Map((Array.isArray(entry.variants) ? entry.variants : []).map((v) => [v?.slug, priceOf(v?.priceLabel)] as const));
+    group.cards.push({
+      slug: entry.slug,
+      href: lookbookSheetPath(entry.slug),
+      name: upper(entry.name),
+      type: upper(entry.type),
+      image: entryPhoto(entry),
+      price: priceOf(entry.priceLabel),
+      dots: entryDots(entry).map((d) => ({ ...d, href: lookbookSheetPath(d.slug), price: prices.get(d.slug) ?? null })),
+    });
   }
   return groups;
+}
+
+/** What a card shows with a dot selected (`slug`): that model's address, name, type, photograph and price; the card itself for its own. */
+export function cardFace(c: CardModel, slug: string): Pick<CardModel, 'slug' | 'href' | 'name' | 'type' | 'image' | 'price'> {
+  const d = c.dots.find((x) => x.slug === slug);
+  return d ? { slug: d.slug, href: d.href, name: d.name || c.name, type: d.type || c.type, image: d.image, price: d.price } : c;
 }
 
 /** P-X08: what THE PRIVATE SALON adds to a reserved sheet read through the club. */
@@ -192,7 +217,8 @@ export interface SalonModel {
   request: { id: string } | null;
 }
 
-export interface SheetModel {
+/** What a sheet shows of one model of its group (N6: what its dot switches). */
+export interface SheetFace {
   slug: string;
   /** THE PRIVATE SALON: a reserved sheet the club opened. */
   reserved: boolean;
@@ -213,28 +239,76 @@ export interface SheetModel {
   salon: SalonModel | null;
 }
 
-export function sheetModel(s: LookbookSheet): SheetModel {
-  const alt = modelAlt(s.name, s.type, s.variant?.label);
+/** A dot of a sheet (N6, C6): a model of its group, its label and colour, and its face. */
+export interface SheetDot {
+  slug: string;
+  /** « Steel » */
+  label: string;
+  /** #RRGGBB */
+  swatch: string;
+  face: SheetFace;
+}
+
+/** A model's sheet: the face of the dot selected (the model whose address was asked, or another dot once chosen). */
+export interface SheetModel extends SheetFace {
+  /** SIZES 16 · 17 · 18, from the SKUs of the models of its group (addition 8); null without one. */
+  sizes: string | null;
+  /** Its dots, the main model first; none for a model alone. */
+  dots: SheetDot[];
+}
+
+function photosOf(cover: unknown, gallery: unknown, alt: string): LookbookPhoto[] {
   const photos: LookbookPhoto[] = [];
-  if (typeof s.coverUrl === 'string' && MEDIA_SRC.test(s.coverUrl)) photos.push({ src: s.coverUrl, alt });
-  for (const g of Array.isArray(s.gallery) ? s.gallery : []) {
+  if (typeof cover === 'string' && MEDIA_SRC.test(cover)) photos.push({ src: cover, alt });
+  for (const g of Array.isArray(gallery) ? (gallery as LookbookSheet['gallery']) : []) {
     if (typeof g?.url !== 'string' || !MEDIA_SRC.test(g.url) || photos.some((p) => p.src === g.url)) continue;
     photos.push({ src: g.url, alt: typeof g.alt === 'string' && g.alt.trim() ? g.alt.trim() : alt });
   }
+  return photos;
+}
+
+function faceOf(
+  m: Pick<LookbookSheetVariant, 'slug' | 'lookbook' | 'name' | 'type' | 'collection' | 'coverUrl' | 'gallery' | 'specs' | 'care' | 'discontinuedYear' | 'salon'> & { story?: string | null },
+  category: string,
+  label: string | null | undefined,
+  fallbackStory: string | null,
+): SheetFace {
+  const story = m.story === undefined ? fallbackStory : m.story;
   return {
-    slug: s.slug,
-    reserved: s.lookbook === 'RESERVED',
-    name: upper(s.name),
-    type: upper(s.type),
-    collection: s.collection && s.collection.trim() ? upper(s.collection) : null,
-    category: upper(s.category?.name),
-    photos,
-    story: storyParagraphs(s.story).length > 0 ? s.story : null,
-    specs: (Array.isArray(s.specs) ? s.specs : []).filter((r) => r?.label && r?.value).map((r): Row => [upper(r.label), upper(r.value)]),
-    care: s.care && s.care.trim() ? s.care.trim() : DEFAULT_CARE,
-    discontinued: discontinuedLine(s.discontinuedYear),
-    salon: s.lookbook === 'RESERVED' ? salonModel(s.salon) : null,
+    slug: m.slug,
+    reserved: m.lookbook === 'RESERVED',
+    name: upper(m.name),
+    type: upper(m.type),
+    collection: m.collection && m.collection.trim() ? upper(m.collection) : null,
+    category,
+    photos: photosOf(m.coverUrl, m.gallery, modelAlt(m.name, m.type, label)),
+    story: storyParagraphs(story).length > 0 ? story : null,
+    specs: (Array.isArray(m.specs) ? m.specs : []).filter((r) => r?.label && r?.value).map((r): Row => [upper(r.label), upper(r.value)]),
+    care: m.care && m.care.trim() ? m.care.trim() : DEFAULT_CARE,
+    discontinued: discontinuedLine(m.discontinuedYear),
+    salon: m.lookbook === 'RESERVED' ? salonModel(m.salon) : null,
   };
+}
+
+export function sheetModel(s: LookbookSheet): SheetModel {
+  const category = upper(s.category?.name);
+  const face = faceOf(s, category, s.variant?.label, s.story);
+  const dots: SheetDot[] = (Array.isArray(s.variants) ? s.variants : [])
+    .filter((v) => isLookbookSlug(v?.slug) && typeof v.label === 'string' && v.label.trim() !== '' && SWATCH.test(v.swatch ?? ''))
+    .map((v) => ({ slug: v.slug, label: v.label.trim(), swatch: v.swatch, face: v.slug === s.slug ? face : faceOf(v, category, v.label, s.story) }));
+  return { ...face, sizes: sizesLine(s.sizes), dots: dots.length > 1 ? dots : [] };
+}
+
+/** The sheet with another of its dots selected (N6): that model's face; the sheet as it is for a slug it has no dot of. */
+export function selectDot(m: SheetModel, slug: string): SheetModel {
+  const d = m.dots.find((x) => x.slug === slug);
+  return d ? { ...d.face, sizes: m.sizes, dots: m.dots } : m;
+}
+
+/** The sheet once the account requested the model of the dot `slug` (REQUEST THIS PIECE): REQUESTED on it, and on its dot. */
+export function withRequest(m: SheetModel, slug: string, id: string): SheetModel {
+  const requested = (f: SheetFace): SheetFace => (f.slug === slug && f.salon ? { ...f, salon: { ...f.salon, request: { id } } } : f);
+  return { ...requested(m), sizes: m.sizes, dots: m.dots.map((d) => ({ ...d, face: requested(d.face) })) };
 }
 
 /** The salon of a reserved sheet; null when the server sent none (a tier it does not name: nothing to request from). */

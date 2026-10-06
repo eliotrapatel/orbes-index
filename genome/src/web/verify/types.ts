@@ -338,6 +338,8 @@ export interface LookbookSheetVariant extends VariantDot {
   collection: string | null;
   coverUrl: string | null;
   gallery: { url: string; alt: string | null }[];
+  /** NOCTURNE N6: its own story (each variant may have its own); absent from a server before N6: the sheet's. */
+  story?: string | null;
   specs: { label: string; value: string }[];
   care: string | null;
   discontinuedYear: number | null;

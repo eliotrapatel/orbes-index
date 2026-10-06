@@ -65,7 +65,10 @@ h1[tabindex="-1"]:focus,
 .section-label[tabindex="-1"]:focus,
 .ownership__status[tabindex="-1"]:focus,
 .n-own__heading[tabindex="-1"]:focus,
-.n-report__status[tabindex="-1"]:focus {
+.n-report__status[tabindex="-1"]:focus,
+.n-model__heading[tabindex="-1"]:focus,
+.n-model__title[tabindex="-1"]:focus,
+.sheet__missing[tabindex="-1"]:focus {
   outline: none;
 }
 
@@ -695,288 +698,6 @@ h1[tabindex="-1"]:focus,
 .certificate__footnote {
   letter-spacing: var(--track-micro);
   text-indent: var(--track-micro);
-}
-
-/* ── The collection (P-R02) ────────────────────────────────────────────── */
-
-/* THE COLLECTION, the lookbook of the models, and a model's sheet: the
-   column of a result and of MY PIECES (560 px at most, 32 px margins), the
-   small wordmark, the title in the display face at 24 px. The models sit on
-   ivory plates framed like the GENOME's, two to a row (one under 360 px);
-   a card is no control of its own: its SEE THE MODEL is. */
-.view--lookbook,
-.view--sheet {
-  width: 100%;
-  max-width: 560px;
-  margin: 0 auto;
-  padding: calc(60px + var(--safe-top)) 32px calc(64px + var(--safe-bottom));
-}
-
-.lookbook__head,
-.sheet__head {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-}
-
-.lookbook__wordmark,
-.sheet__wordmark {
-  margin-bottom: 52px;
-}
-
-.lookbook__title,
-.sheet__title {
-  max-width: 100%;
-  font-size: var(--fs-title);
-  font-weight: 400;
-  line-height: 1.3;
-  letter-spacing: 0.3em;
-  text-indent: 0.3em;
-  overflow-wrap: anywhere;
-}
-
-.lookbook__lead {
-  max-width: 32ch;
-  margin-top: 22px;
-  text-wrap: balance;
-}
-
-.lookbook__body,
-.sheet__body {
-  margin-top: 52px;
-}
-
-.lookbook__waiting {
-  text-align: center;
-  color: var(--ink-soft);
-}
-
-.lookbook__empty,
-.sheet__missing {
-  max-width: 34ch;
-  margin: 0 auto;
-  text-align: center;
-  text-wrap: balance;
-}
-
-.lookbook__group + .lookbook__group {
-  margin-top: 52px;
-}
-
-/* A collection's name over its models: 11 px, tracked, the display face (its figures in the reading face). */
-.lookbook__collection {
-  margin-bottom: 20px;
-  font-size: var(--fs-label);
-  font-weight: 400;
-  line-height: 1.6;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  text-align: center;
-  color: var(--ink-soft);
-}
-
-.lookbook__grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-  list-style: none;
-}
-
-.lookbook__item {
-  min-width: 0;
-}
-
-/* A collection of one model: its card centred, at the width of a column. */
-.lookbook__item:only-child {
-  grid-column: 1 / -1;
-  justify-self: center;
-  width: calc(50% - 9px);
-}
-
-.lookbook-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  height: 100%;
-  padding: 22px 8px 6px;
-  background: var(--ivory);
-  color: var(--ink);
-  text-align: center;
-}
-
-.lookbook-card .bracket,
-.sheet__plate .bracket {
-  color: var(--hairline-strong);
-}
-
-.lookbook-card .bracket--tl { top: 8px; left: 8px; }
-.lookbook-card .bracket--tr { top: 8px; right: 8px; }
-.lookbook-card .bracket--bl { bottom: 8px; left: 8px; }
-.lookbook-card .bracket--br { bottom: 8px; right: 8px; }
-
-/* The photograph, contained in its square, never cropped; the square stays without one. */
-.lookbook-card__frame {
-  width: calc(100% - 12px);
-  aspect-ratio: 1;
-}
-
-.lookbook-card__img,
-.sheet-photo__img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: contain;
-}
-
-.lookbook-card__name {
-  max-width: 100%;
-  margin-top: 16px;
-  font-size: var(--fs-label);
-  font-weight: 400;
-  line-height: 1.5;
-  letter-spacing: var(--track-micro);
-  text-indent: var(--track-micro);
-  overflow-wrap: anywhere;
-}
-
-.lookbook-card__type {
-  margin-top: 2px;
-  font-size: var(--fs-micro);
-  line-height: 1.6;
-  letter-spacing: var(--track-micro);
-  text-indent: var(--track-micro);
-  color: var(--ink-soft);
-}
-
-/* SEE THE MODEL at the foot of its card, on one line: the text link's 10 px, tracking and 44 px zone as they are. */
-.lookbook-card__link {
-  margin-top: auto;
-  white-space: nowrap;
-}
-
-.lookbook__reserved {
-  margin-top: 64px;
-  padding-top: 4px;
-  border-top: 1px solid var(--hairline);
-  text-align: center;
-}
-
-.lookbook__reserved-lead {
-  max-width: 34ch;
-  margin: 12px auto 28px;
-  text-wrap: balance;
-}
-
-.lookbook__foot,
-.sheet__foot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 26px;
-  margin-top: 60px;
-}
-
-/* A sheet: its collection over its name, its type (and THE PRIVATE SALON) under it. */
-.sheet__collection {
-  margin-bottom: 18px;
-  font-size: var(--fs-caption);
-  line-height: 1.6;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  color: var(--ink-soft);
-}
-
-.sheet__line {
-  margin-top: 14px;
-  font-size: var(--fs-micro);
-  line-height: 1.8;
-  letter-spacing: var(--track-label);
-  text-indent: var(--track-label);
-  color: var(--ink-soft);
-}
-
-.sheet__collection[hidden],
-.sheet__line[hidden],
-.sheet__photos[hidden],
-.sheet-photo[hidden],
-.lookbook-card__frame[hidden] {
-  display: none;
-}
-
-/* The photographs on ivory: the cover across the plate, the gallery two by two. */
-.sheet__plate {
-  display: grid;
-  gap: 18px;
-  padding: 26px 22px 22px;
-  background: var(--ivory);
-  color: var(--ink);
-}
-
-.sheet__plate--gallery {
-  grid-template-columns: 1fr 1fr;
-}
-
-/* By type: the plate's last children are its four brackets (absolutely placed, never grid items). */
-.sheet__plate--gallery .sheet-photo:first-of-type {
-  grid-column: 1 / -1;
-}
-
-/* The last photograph alone on its row: centred, at the width of a column. */
-.sheet__plate--gallery .sheet-photo:last-of-type:nth-of-type(even) {
-  grid-column: 1 / -1;
-  justify-self: center;
-  width: calc(50% - 9px);
-}
-
-.sheet__plate .bracket--tl { top: 10px; left: 10px; }
-.sheet__plate .bracket--tr { top: 10px; right: 10px; }
-.sheet__plate .bracket--bl { bottom: 10px; left: 10px; }
-.sheet__plate .bracket--br { bottom: 10px; right: 10px; }
-
-.sheet-photo {
-  min-width: 0;
-}
-
-.sheet__story,
-.sheet__care {
-  margin-top: 12px;
-}
-
-.sheet__paragraph + .sheet__paragraph {
-  margin-top: 14px;
-}
-
-/* P-X08, THE PRIVATE SALON: a reserved card's price, in the reading face (its figures), under the type. */
-.lookbook-card__price {
-  margin-top: 6px;
-  font-size: var(--fs-micro);
-  line-height: 1.6;
-  letter-spacing: 0.06em;
-  color: var(--ink);
-}
-
-/* A reserved sheet's salon: its price and tier, then REQUEST THIS PIECE with its note, or the request recorded. */
-.sheet__salon-lead,
-.sheet__requested {
-  margin-top: 14px;
-}
-
-.sheet__requested-text {
-  margin-top: 8px;
-}
-
-.sheet__note-field {
-  margin-top: 22px;
-  text-align: left;
-}
-
-.sheet__note {
-  line-height: 1.5;
-  resize: vertical;
-}
-
-.sheet__salon .btn {
-  margin-top: 22px;
 }
 
 /* ── The releases (P-R03) ──────────────────────────────────────────────── */
@@ -3545,13 +3266,6 @@ body[data-screen="board"] .corners {
 .question__label,
 .question__release,
 .question__text,
-.lookbook__title,
-.lookbook__collection,
-.lookbook-card__name,
-.lookbook-card__type,
-.sheet__title,
-.sheet__collection,
-.sheet__line,
 .releases__title,
 .release-card__state,
 .release-card__title,
@@ -3616,20 +3330,9 @@ body[data-screen="board"] .corners {
 
 /* ── Small screens & reduced motion ────────────────────────────────────── */
 
-@media (max-width: 359px) {
-  .lookbook__grid {
-    grid-template-columns: 1fr;
-  }
-  .lookbook__item:only-child {
-    width: 100%;
-  }
-}
-
 @media (max-width: 350px) {
   .view--pieces,
   .view--certificate,
-  .view--lookbook,
-  .view--sheet,
   .view--releases,
   .view--release,
   .view--circle,
@@ -5687,8 +5390,6 @@ body.nocturne[data-banner] .view--pieces {
 /* ── The screens not yet drawn in NOCTURNE, on its ground: its 24 px margin, and their states as C40 draws them ── */
 
 body.nocturne .view--pieces,
-body.nocturne .view--lookbook,
-body.nocturne .view--sheet,
 body.nocturne .view--releases,
 body.nocturne .view--release,
 body.nocturne .view--circle,
@@ -5699,8 +5400,6 @@ body.nocturne .view--circle-post {
 }
 
 body.nocturne .pieces__empty,
-body.nocturne .lookbook__empty,
-body.nocturne .sheet__missing,
 body.nocturne .releases__empty,
 body.nocturne .release__missing,
 body.nocturne .circle__empty,
@@ -7019,4 +6718,218 @@ body.nocturne .view--piece {
 .n-piece__ownership > .n-piece__duo + .n-contact,
 .n-piece__ownership > .n-piece__form + .n-contact {
   margin-top: 28.25px;
+}
+
+/* ══ THE COLLECTION, a model's sheet and THE PRIVATE SALON (plan NOCTURNE, screen 5, step N6; C5, C6, C33) ═══════════════
+   THE COLLECTION: its title and sentence, each collection's name, each model full width on its photograph, faded, its
+   words lifted onto its foot (its dots, You own N, SEE THE MODEL); THE PRIVATE SALON for an owner, its teaser as a plate
+   card for a visitor. A sheet: the crumb, the photograph, its words lifted, its next release as a plate row, the salon's
+   facts and request, THE STORY, the gallery, SPECIFICATIONS, CARE, 76 px apart. Every value is the rulebook's (build.py
+   C_CSS) or the boards' own (c.py C5 and C6, c4.py C33: their markup's margins), set on the pieces of views/nocturne.ts. */
+
+body.nocturne .view--lookbook.n-lookbook,
+body.nocturne .view--sheet.n-model {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+.n-lookbook__head {
+  padding-top: 30px;
+}
+
+.n-lookbook__lead {
+  margin-top: 12px;
+}
+
+/* The first collection 36 px under the sentence; THE PRIVATE SALON's first 30 px under its own; the next ones 76 px apart (.n-sec). */
+.n-lookbook__group--first,
+.n-lookbook__body > .n-loading,
+.n-lookbook__empty-line {
+  margin-top: 36px;
+}
+
+.n-lookbook__group--salon-first {
+  margin-top: 30px;
+}
+
+/* A collection's name, then its first model's photograph 10 px under it. */
+.lookbook__collection + .n-lookbook__model > .n-lookbook__photo {
+  margin-top: 10px;
+}
+
+.lookbook-card__name {
+  overflow-wrap: anywhere;
+}
+
+.n-lookbook__type {
+  margin-top: 8px;
+}
+
+.n-lookbook__dots {
+  margin-top: 18px;
+}
+
+.n-lookbook__owned {
+  margin-top: 16px;
+}
+
+/* THE PRIVATE SALON's price, in the reading face (its figures), 16 px. */
+.n-lookbook__price {
+  margin-top: 12px;
+  color: var(--vault-ink);
+  font-size: var(--n-fs-lead);
+}
+
+.n-lookbook__see {
+  margin-top: 20px;
+}
+
+.n-lookbook__see--salon {
+  margin-top: 18px;
+}
+
+/* A model without a photograph: its words open where the photograph would. */
+.n-lookbook__bare {
+  margin-top: 0;
+  padding-top: 24px;
+}
+
+/* THE PRIVATE SALON's title: C5 sets it at 24 px (the brand's title size). */
+.n-lookbook__salon-title {
+  font-size: var(--fs-title);
+}
+
+.n-lookbook__salon-lead {
+  margin-top: 12px;
+}
+
+/* The teaser (addition 7): a plate card on the margin, left-aligned (C5, state 2). */
+.n-card.n-lookbook__teaser-card {
+  padding: 32px 24px 28px;
+}
+
+.n-lookbook__teaser-text {
+  margin-top: 12px;
+}
+
+.n-lookbook__teaser-links {
+  margin-top: 20px;
+}
+
+.n-lookbook__failed,
+.n-model__failed,
+.n-model__missing {
+  margin-top: 22px;
+}
+
+/* ── A model's sheet (C6, C33) ── */
+
+.n-model__body > .n-loading {
+  margin-top: 30px;
+}
+
+/* A model without a photograph: its words open under the crumb. */
+.n-model__bare {
+  margin-top: 0;
+  padding-top: 14px;
+}
+
+.n-model__title {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+
+.n-model__line,
+.n-model__sizes {
+  margin-top: 10px;
+}
+
+.n-model__dots {
+  margin-top: 22px;
+}
+
+.n-model__owned {
+  margin-top: 18px;
+}
+
+/* Its next release (C6): a plate row 34 px under the words, a link to the release's page. */
+.n-model__next {
+  margin-top: 34px;
+  color: var(--vault-ink);
+  text-decoration: none;
+}
+
+.n-model__next:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: -2px;
+}
+
+.n-model__next-when {
+  margin-top: 6px;
+}
+
+/* THE PRIVATE SALON on a sheet (C33): 44 px under the words, its facts under a hairline, its sentence, its note. */
+.n-model__salon {
+  padding-top: 44px;
+}
+
+.n-model__facts {
+  margin-top: 14px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-model__salon-lead {
+  margin-top: 16px;
+}
+
+.n-model__note {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid var(--vault-hairline-strong);
+  border-radius: 0;
+  background: none;
+  color: var(--vault-ink);
+  font: inherit;
+  font-size: var(--n-fs-tx);
+  line-height: var(--n-lh-base);
+  resize: vertical;
+  outline: none;
+}
+
+.n-model__note:focus {
+  border-color: var(--vault-ink);
+}
+
+.n-model__request {
+  margin-top: 22px;
+}
+
+/* REQUESTED (C33, state 2): its word in ivory, its sentence, then the contact of ORBES Client Services. */
+.n-model__requested {
+  margin-top: 22px;
+}
+
+.n-model__requested-text {
+  margin-top: 10px;
+}
+
+.n-model__story {
+  margin-top: 16px;
+}
+
+.n-model__story > p + p {
+  margin-top: 14px;
+}
+
+.n-model__care {
+  margin-top: 14px;
+}
+
+/* The gallery: each photograph whole at the column's full width, without the fade, 2 px apart (C22's). */
+.n-model__gallery-photo + .n-model__gallery-photo {
+  margin-top: 2px;
 }

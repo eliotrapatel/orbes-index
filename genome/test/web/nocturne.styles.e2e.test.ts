@@ -179,6 +179,33 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
     },
     12 * 60_000,
   );
+
+  it(
+    'sets THE COLLECTION, a model and THE PRIVATE SALON as C5, C6 and C33 draw them: the title, each model on its photograph with its dots (each switching it), You own N, the salon and its teaser, the crumb, SIZES, the next release as a plate row, the salon\'s facts, note and REQUEST THIS PIECE, the sections (N6)',
+    async () => {
+      const states = ['collection', 'collection-signed-out', 'model', 'model-salon'];
+      const seen = new Set<string>();
+      await eachState(
+        states.map(stateById),
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          const page = opened.page;
+          try {
+            seen.add(state.id);
+            if (state.id === 'collection') await theCollection(page);
+            if (state.id === 'collection-signed-out') await theTeaser(page);
+            if (state.id === 'model') await aModel(page);
+            if (state.id === 'model-salon') await aSalonModel(page);
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect([...seen].sort()).toEqual([...states].sort());
+    },
+    12 * 60_000,
+  );
 });
 
 /** How many of the elements `selector` matches the phone shows. */
@@ -809,4 +836,119 @@ async function aReport(page: Page): Promise<void> {
   await check(page, '.n-piece__choice [aria-pressed="false"]', { 'background-color': NONE, color: IV });
   await check(page, '.n-piece__choice + .n-piece__text', { 'margin-top': 12 });
   await check(page, '.n-piece__duo', { 'margin-top': 14, display: 'grid', 'column-gap': 10 });
+}
+
+/** C5: THE COLLECTION, an owner: its title, ORBITAL, MONOLITHE on its photograph with its dots and You own N, THE PRIVATE SALON. */
+async function theCollection(page: Page): Promise<void> {
+  await withChrome(page, 'collection', 'collection');
+  await check(page, '.view--lookbook.n-lookbook', { 'padding-left': 0, 'padding-right': 0 });
+  await check(page, '.n-lookbook__head', { 'padding-top': 30, 'padding-left': 24 });
+  await check(page, '#lookbook-title', { 'font-size': 30, 'letter-spacing': em(30, 0.08), color: IV });
+  await check(page, '.n-lookbook__lead', { 'margin-top': 12, 'font-size': 16, 'line-height': '25.6px', color: ASH });
+  await check(page, '.n-lookbook__group--first', { 'margin-top': 36 });
+  await check(page, '.n-lookbook__group--first .lookbook__collection', { 'padding-left': 24, 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  const photo = await check(page, '.n-lookbook__group--first .n-lookbook__photo', { 'margin-top': 10, height: 390 });
+  expect(Number(photo._w)).toBeCloseTo(390, 0);
+  await check(page, '.n-lookbook__group--first .n-lift', { 'margin-top': -56, 'text-align': 'center' });
+  await check(page, '.n-lookbook__group--first .lookbook-card__name', { 'font-size': 16, 'letter-spacing': em(16, 0.14), color: IV });
+  await check(page, '.n-lookbook__group--first .n-lookbook__type', { 'margin-top': 8, 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
+  await check(page, '.n-lookbook__group--first .n-lookbook__dots', { 'margin-top': 18, 'column-gap': 26 });
+  await check(page, '.n-lookbook__owned', { 'margin-top': 16, 'font-size': 14, color: IV, 'column-gap': 10 });
+  expect(await page.locator('.n-lookbook__owned').innerText()).toBe('You own two: steel and gold');
+  await check(page, '.n-lookbook__group--first .n-lookbook__see', { 'margin-top': 20 });
+  // THE PRIVATE SALON: 76 px under, its title at 24 px, its sentence, ORBITAL 30 px under it; ZENITH, its price at 16 px.
+  await check(page, '.n-lookbook__salon', { 'padding-top': 76 });
+  await check(page, '.n-lookbook__salon-title', { 'font-size': 24, 'letter-spacing': em(24, 0.08) });
+  await check(page, '.n-lookbook__salon-lead', { 'margin-top': 12, 'font-size': 15, color: ASH });
+  await check(page, '.n-lookbook__group--salon-first', { 'margin-top': 30 });
+  await check(page, '.n-lookbook__price', { 'margin-top': 12, 'font-size': 16, color: IV });
+  expect(isHelvetica((await read(page, '.n-lookbook__price', ['font-family']))['font-family']!)).toBe(true);
+  await check(page, '.n-lookbook__see--salon', { 'margin-top': 18 });
+  expect(await shown(page, '.n-lookbook__teaser')).toBe(0);
+  // Its dots switch the photograph and SEE THE MODEL to the variant, the pressed dot keeping the focus.
+  const card = page.locator('.n-lookbook__group--first .lookbook-card').first();
+  const steelSrc = await card.locator('.n-lookbook__photo img').getAttribute('src');
+  expect(await card.getByRole('link', { name: 'SEE THE MODEL' }).getAttribute('href')).toBe('/verify/lookbook/monolithe');
+  await card.getByRole('button', { name: 'Gold' }).click();
+  const gold = page.locator('.n-lookbook__group--first .lookbook-card').first();
+  expect(await gold.getByRole('button', { name: 'Gold' }).getAttribute('aria-pressed')).toBe('true');
+  expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('Gold');
+  expect(await gold.locator('.n-lookbook__photo img').getAttribute('src')).not.toBe(steelSrc);
+  expect(await gold.locator('.n-lookbook__photo img').getAttribute('alt')).toBe('The MONOLITHE BRACELET model in gold, photographed by ORBES');
+  expect(await gold.getByRole('link', { name: 'SEE THE MODEL' }).getAttribute('href')).toBe('/verify/lookbook/monolithe-gold');
+  expect(await page.locator('.n-lookbook__owned').innerText()).toBe('You own two: steel and gold');
+}
+
+/** C5 (2): THE PRIVATE SALON for a visitor: a plate card, its sentence, SIGN IN and SCAN ORBES CODE, no model shown. */
+async function theTeaser(page: Page): Promise<void> {
+  expect(await shown(page, '.n-lookbook__salon')).toBe(0);
+  expect(await page.locator('.view--lookbook').innerText()).not.toContain('ZENITH');
+  expect(await shown(page, '.n-lookbook__owned')).toBe(0);
+  await check(page, '.n-lookbook__teaser', { 'padding-top': 76, 'padding-left': 24, 'padding-right': 24 });
+  await check(page, '.n-lookbook__teaser-card', { 'background-color': PLATE, 'padding-top': 32, 'padding-left': 24, 'padding-right': 24, 'padding-bottom': 28, 'text-align': 'left' });
+  await check(page, '.n-lookbook__teaser-card', { top: 14, left: 14, 'box-shadow': 'rgba(246, 242, 234, 0.16) 0px 0px 0px 1px inset' }, '::before');
+  await check(page, '#lookbook-teaser', { 'font-size': 16, 'letter-spacing': em(16, 0.14), color: IV });
+  await check(page, '.n-lookbook__teaser-text', { 'margin-top': 12, 'font-size': 15, color: ASH });
+  expect(await page.locator('.n-lookbook__teaser-text').innerText()).toBe('Pieces offered to the owners of an ORBES piece, by tier, on request. It opens once a piece is registered to your ORBES account.');
+  await check(page, '.n-lookbook__teaser-links', { 'margin-top': 20 });
+  const teaser = page.getByRole('region', { name: 'THE PRIVATE SALON' });
+  expect(await teaser.getByRole('link', { name: 'SIGN IN' }).getAttribute('href')).toBe('/verify/pieces');
+  await teaser.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
+}
+
+/** C6: a model: the crumb, the photograph, ORBITAL, its name, BRACELET, SIZES, its dots, You own N, its next release, the sections. */
+async function aModel(page: Page): Promise<void> {
+  await withChrome(page, 'model', 'collection');
+  await check(page, '.n-model__crumb', { height: 48, 'padding-left': 18, 'font-size': 10, 'letter-spacing': em(10, 0.26), color: ASH, 'column-gap': 6 });
+  const photo = await check(page, '.n-model__photo', { 'margin-top': 0, height: 390 });
+  expect(Number(photo._w)).toBeCloseTo(390, 0);
+  await check(page, '.n-model__words', { 'margin-top': -56, 'text-align': 'center' });
+  await check(page, '.n-model__words .sheet__collection', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
+  await check(page, '#sheet-title', { 'margin-top': 12, 'font-size': 30, 'letter-spacing': em(30, 0.08), color: IV });
+  await check(page, '.n-model__line', { 'margin-top': 10, 'font-size': 9.5, color: ASH });
+  await check(page, '.n-model__sizes', { 'margin-top': 10, 'font-size': 9.5, color: IV });
+  expect(await page.locator('.n-model__sizes').innerText()).toBe('SIZES 16 · 17 · 18');
+  await check(page, '.n-model__dots', { 'margin-top': 22 });
+  await check(page, '.n-model__owned', { 'margin-top': 18, 'font-size': 14, color: IV });
+  expect(await page.locator('.n-model__owned').innerText()).toBe('You own two: steel and gold');
+  // Its next release: a plate row 34 px under, the live dot, LIVE RELEASE, IN BLUE, THURSDAY 21:00 PARIS, its page.
+  await check(page, '.n-model__next', { 'margin-top': 34, display: 'flex', 'column-gap': 16, 'padding-top': 20, 'padding-left': 24, 'background-color': PLATE });
+  await check(page, '.n-model__next .n-live', { width: 7, height: 7, 'background-color': IV });
+  await check(page, '.n-model__next-when', { 'margin-top': 6, 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  expect(await page.locator('.n-model__next p').allInnerTexts()).toEqual(['LIVE RELEASE', 'IN BLUE, THURSDAY 21:00 PARIS']);
+  expect(await page.locator('.n-model__next').getAttribute('href')).toMatch(/^\/verify\/releases\/[0-9a-f-]{36}$/);
+  await check(page, '.n-model__next .n-ic--sm', { width: 16, height: 16, color: ASH });
+  // THE STORY, SPECIFICATIONS, CARE: 76 px apart, their words as C6 sets them.
+  await check(page, '#sheet-story', { 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  await check(page, '.n-model__story', { 'margin-top': 16 });
+  await check(page, '.sheet__paragraph', { 'font-size': 16, 'line-height': '25.6px', color: IV });
+  await check(page, '.n-model__facts', { 'margin-top': 14, 'border-top-width': 1, 'border-top-color': LINE });
+  await check(page, '.n-model__facts .n-kv__row', { 'padding-top': 13, 'font-size': 13.5 });
+  await check(page, '.n-model__care', { 'margin-top': 14, 'font-size': 15, color: ASH });
+  for (const id of ['#sheet-story', '#sheet-specs', '#sheet-care']) expect((await read(page, `section:has(> ${id})`, ['padding-top']))['padding-top']).toBe('76px');
+  // A dot chosen: the sheet is that variant's, its address too, the pressed dot keeping the focus; You own N the same.
+  const steelSrc = await page.locator('.n-model__photo img').getAttribute('src');
+  await page.locator('.n-model__dots').getByRole('button', { name: 'Gold' }).click();
+  await page.waitForURL(/\/verify\/lookbook\/monolithe-gold$/);
+  expect(await page.locator('.n-model__dots').getByRole('button', { name: 'Gold' }).getAttribute('aria-pressed')).toBe('true');
+  expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('Gold');
+  expect(await page.locator('.n-model__photo img').getAttribute('src')).not.toBe(steelSrc);
+  expect(await page.locator('.n-model__facts .n-kv__value').first().innerText()).toBe('18K YELLOW GOLD');
+  expect(await page.locator('.n-model__owned').innerText()).toBe('You own two: steel and gold');
+  expect(await page.locator('.n-model__next p').allInnerTexts()).toEqual(['LIVE RELEASE', 'IN BLUE, THURSDAY 21:00 PARIS']);
+}
+
+/** C33: a model of THE PRIVATE SALON: its facts, its sentence, the note, REQUEST THIS PIECE, the screen's one filled button. */
+async function aSalonModel(page: Page): Promise<void> {
+  expect(await page.locator('.n-model__line').innerText()).toBe('BRACELET · THE PRIVATE SALON');
+  await check(page, '.n-model__salon', { 'padding-top': 44, 'padding-left': 24 });
+  await check(page, '#sheet-salon', { 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  await check(page, '.n-model__salon .n-model__facts', { 'margin-top': 14, 'border-top-color': LINE });
+  await check(page, '.n-model__salon-lead', { 'margin-top': 16, 'font-size': 15, color: ASH });
+  await check(page, '.n-model__note-field', { 'margin-top': 20 });
+  await check(page, '.n-model__note-field .n-lab', { 'font-size': 13, 'letter-spacing': em(13, 0.24), color: ASH, 'margin-bottom': 6 });
+  await check(page, '.n-model__note', { 'margin-top': 6, height: 89.5, 'padding-top': 10, 'padding-left': 10, 'border-top-color': LINE2, 'font-size': 15, color: IV, resize: 'vertical', 'background-color': NONE });
+  await check(page, '#sheet-note-hint', { 'margin-top': 6, 'font-size': 13, color: ASH });
+  await check(page, '.n-model__request', { 'margin-top': 22, height: 54, 'background-color': IV, color: GROUND });
+  expect(await shown(page, 'main .n-btn')).toBe(1);
 }

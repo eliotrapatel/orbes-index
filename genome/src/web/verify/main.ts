@@ -699,7 +699,14 @@ class App {
     this.generation++;
     this.stopCamera();
     this.sheetSlug = null;
-    const view = lookbookView({ api: this.api, session: this.session, onScan: () => void this.startScan(), onSheet: (slug) => this.openSheet(slug) });
+    const view = lookbookView({
+      api: this.api,
+      session: this.session,
+      onScan: () => void this.startScan(),
+      // THE PRIVATE SALON's teaser: SIGN IN, MY PIECES' sign-in (as the header's SIGN IN).
+      onSignIn: () => this.openPieces(),
+      onSheet: (slug) => this.openSheet(slug),
+    });
     if (await this.swap(view.root, 'lookbook', focus)) this.live = view;
     else view.dispose();
   }
@@ -709,7 +716,21 @@ class App {
     this.generation++;
     this.stopCamera();
     this.sheetSlug = slug;
-    const view = sheetView({ api: this.api, session: this.session, slug, onCollection: () => this.openLookbook(), clientServices: () => this.contactDetails() });
+    const view = sheetView({
+      api: this.api,
+      session: this.session,
+      slug,
+      onCollection: () => this.openLookbook(),
+      // A dot chosen (N6): the sheet's address becomes that variant's, in the same history entry.
+      onVariant: (variant) => {
+        if (this.screen !== 'sheet' || entryOf(history.state) !== 'sheet') return;
+        this.sheetSlug = variant;
+        history.replaceState(history.state, '', lookbookSheetPath(variant));
+      },
+      onRelease: (id) => this.openRelease(id),
+      clientServices: () => this.contactDetails(),
+      focus,
+    });
     if (await this.swap(view.root, 'sheet', focus)) this.live = view;
     else view.dispose();
   }
