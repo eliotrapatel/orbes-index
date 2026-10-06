@@ -1069,7 +1069,7 @@ async function theReleases(page: Page): Promise<void> {
   await check(page, `${draw} .n-releases__see`, { 'background-color': NONE, 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
 }
 
-/** C25: PAST: the count as the sentence, each release on its photograph, its kind and date, its title, its quantity, its mark, SHOW MORE. */
+/** C25: PAST: the count as the sentence, each release on its photograph, its kind and date, its title, its quantity, its mark (SHOW MORE, absent from the demo's one page, is checked in verify.past.e2e). */
 async function thePast(page: Page): Promise<void> {
   await withChrome(page, 'releases past', 'releases');
   expect(await page.locator('.n-releases__lead').innerText()).toBe('You have taken part in 3 releases.');

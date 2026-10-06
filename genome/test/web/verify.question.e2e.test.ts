@@ -142,6 +142,10 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     expect(await pressed(block)).toEqual(['false', 'false', 'false']);
     await textOf(block.locator('.question__note'), UNTIL);
     await textOf(page.locator('.live__past-part'), RELEASES.past.tookPart);
+    // Took part without a piece (C29, state 2): no receipt, no ivory plate, nothing CONFIRMED, no price.
+    expect(await page.locator('.n-live__receipt').count()).toBe(0);
+    const words = await page.locator('main').innerText();
+    for (const word of ['CONFIRMED', '€']) expect(words, word).not.toContain(word);
     // One way out still: THE RELEASES; the answers are pressed options on a plate card (C30), never a hairline button.
     expect(await page.getByRole('link', { name: 'THE RELEASES', exact: true }).count()).toBe(1);
     expect(await block.locator('.n-btn').count()).toBe(0);

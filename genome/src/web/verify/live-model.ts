@@ -93,6 +93,33 @@ export function zonedTime(at: string | number, timeZone: string): ZonedTime | nu
   return { day: `${parts.weekday} ${parts.day} ${parts.month}`.toUpperCase(), date: `${parts.day} ${parts.month}`.toUpperCase(), time: `${parts.hour}:${parts.minute}`, clock: `${parts.hour}:${parts.minute}:${parts.second}` };
 }
 
+const years = new Map<string, Intl.DateTimeFormat>();
+
+/** A year on this phone's calendar (`2026`), in its zone (UTC when the zone is not one Intl knows). */
+function yearOf(t: number, timeZone: string): string {
+  let f = years.get(timeZone);
+  if (!f) {
+    try {
+      f = new Intl.DateTimeFormat('en-GB', { timeZone, year: 'numeric' });
+    } catch {
+      f = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', year: 'numeric' });
+    }
+    years.set(timeZone, f);
+  }
+  return f.format(new Date(t));
+}
+
+/**
+ * A past release's day on this phone's calendar (`MONDAY 5 OCTOBER`, C29, C30), its year after it when it is not this
+ * year's (`MONDAY 6 OCTOBER 2025`): past releases stay listed, and one from an earlier year never reads as this year's.
+ */
+export function pastDay(at: string, localZone: string, now: number = Date.now()): string {
+  const z = zonedTime(at, localZone);
+  if (!z) return '';
+  const year = yearOf(Date.parse(at), localZone);
+  return year === yearOf(now, localZone) ? z.day : `${z.day} ${year}`;
+}
+
 /** A time of the release: in Paris, then on this phone when its zone says it otherwise (null when it says the same). */
 export function releaseTime(at: string, localZone: string): { paris: string; local: string | null } {
   const paris = zonedTime(at, PARIS);
@@ -572,7 +599,7 @@ export interface LivePastModel {
   heading: string;
   /** The model's name once revealed: the title sets it on a line of its own. */
   model: string | null;
-  /** `MONDAY 5 OCTOBER`: its opening's day on this phone's calendar, over the title after LIVE RELEASE (C29, C30). */
+  /** `MONDAY 5 OCTOBER`: its opening's day on this phone's calendar, over the title after LIVE RELEASE (C29, C30); its year after it when not this year's. */
   day: string;
   /** `25 PIECES`: its quantity line as announced. */
   pieces: string;
@@ -585,13 +612,13 @@ export interface LivePastModel {
   description: string | null;
 }
 
-export function livePastModel(s: LiveSheet | LiveEndedSheet, localZone: string): LivePastModel {
+export function livePastModel(s: LiveSheet | LiveEndedSheet, localZone: string, now: number = Date.now()): LivePastModel {
   const name = s.name ? upper(s.name) : null;
   return {
     name: name ?? LIVE.kind,
     heading: liveHeading(s) ?? LIVE.kind,
     model: name,
-    day: zonedTime(s.opensAt, localZone)?.day ?? '',
+    day: pastDay(s.opensAt, localZone, now),
     pieces: upper(s.quantityLine),
     line: name ? [upper(s.type), upper(s.collection)].filter((x) => x.length > 0).join(' · ') || null : null,
     facts: RELEASES.past.line(zonedDate(s.opensAt, localZone), upper(s.quantityLine)),

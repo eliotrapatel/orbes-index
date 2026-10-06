@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import { LIVE, RELEASES, TIER } from '../../src/web/verify/copy.js';
+import { NOCTURNE_NOW } from '../support/nocturne-demo.js';
 import { BASELINE_FILE, eachState, type Baseline } from '../support/nocturne-stage.js';
 import { myPiecesTexts, normalizeText, openState, pageTexts, shows, UI_STATES, type UiState } from '../support/nocturne-states.js';
 import { CHROMIUM_PATH } from '../support/ui-stage.js';
@@ -308,7 +309,20 @@ function releasesMoves(): Moved[] {
     'THE COLLECTION': 'The rail\'s COLLECTION, on every screen.',
   };
   const footStates = Object.keys(baseline.states).filter((state) => /^(releases|draw)(-|$)/.test(state));
-  const pastDay: Record<string, string> = { '5 OCT 2026': 'MONDAY 5 OCTOBER', '28 SEP 2026': 'MONDAY 28 SEPTEMBER' };
+  // The baseline's `5 OCT 2026` read as the page says it now: its weekday, day and month, its year after them when it is
+  // not the stage's (livePastModel's pastDay), any date of the baseline, never a table of known ones.
+  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  const pastDay = (date: string): string | null => {
+    const d = /^(\d{1,2}) ([A-Z]{3}) (\d{4})$/.exec(date);
+    const month = d ? months.indexOf(d[2]!) : -1;
+    if (!d || month < 0) return null;
+    const at = new Date(Date.UTC(Number(d[3]), month, Number(d[1])));
+    const day = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' })
+      .formatToParts(at)
+      .reduce<Record<string, string>>((parts, p) => ({ ...parts, [p.type]: p.value }), {});
+    const said = `${day.weekday} ${day.day} ${day.month}`.toUpperCase();
+    return d[3] === String(NOCTURNE_NOW.getUTCFullYear()) ? said : `${said} ${d[3]}`;
+  };
   return [
     ...footStates.flatMap((state) =>
       values(state)
@@ -330,14 +344,17 @@ function releasesMoves(): Moved[] {
       })),
     ...['live-past-secured', 'live-past-signed-out', 'live-past-question', 'live-past-gold'].flatMap((state) =>
       values(state)
-        .map((value) => [value, /^(\d{1,2} [A-Z]{3} \d{4}) · (.+)$/.exec(value)] as const)
-        .filter(([, m]) => m !== null && pastDay[m[1]!] !== undefined)
-        .map(([value, m]) => ({
+        .map((value) => {
+          const m = /^(\d{1,2} [A-Z]{3} \d{4}) · (.+)$/.exec(value);
+          return { value, day: m ? pastDay(m[1]!) : null, pieces: m?.[2] ?? '' };
+        })
+        .filter((v): v is { value: string; day: string; pieces: string } => v.day !== null)
+        .map(({ value, day, pieces }) => ({
           state,
           value,
-          reason: 'N7 (C29, C30): a past LIVE RELEASE\'s day is said over its title after LIVE RELEASE, its pieces under its title.',
-          now: `LIVE RELEASE · ${pastDay[m![1]!]} over the title, ${m![2]} under it.`,
-          shownAs: [pastDay[m![1]!]!, m![2]!],
+          reason: 'N7 (C29, C30): a past LIVE RELEASE\'s day is said over its title after LIVE RELEASE (its year with it when not this year\'s), its pieces under its title.',
+          now: `LIVE RELEASE · ${day} over the title, ${pieces} under it.`,
+          shownAs: [day, pieces],
         })),
     ),
     ...['live-veiled', 'live-rules-not-eligible', 'live-selected-not-eligible'].flatMap((state) =>

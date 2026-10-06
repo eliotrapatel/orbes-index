@@ -38,6 +38,7 @@ import {
   liveScreen,
   liveSheetModel,
   livePastModel,
+  pastDay,
   lockAngle,
   LOCK_MS,
   mediaSrc,
@@ -329,7 +330,7 @@ describe('which screen the page shows', () => {
   });
 
   it('opens a release over in its final state: what was announced, its date and quantity line as announced, never an end figure', () => {
-    const m = livePastModel(over(), 'Europe/Paris');
+    const m = livePastModel(over(), 'Europe/Paris', T0);
     expect(m).toEqual({
       name: 'MONOLITHE',
       heading: 'MONOLITHE',
@@ -343,9 +344,9 @@ describe('which screen the page shows', () => {
       description: 'A ring cut from one block of silver.',
     });
     // The date on this phone's calendar: T0 at 17:00 UTC is the 12th in Tokyo.
-    expect(livePastModel(over(), 'Asia/Tokyo').facts).toBe('12 OCT 2026 · 25 PIECES');
+    expect(livePastModel(over(), 'Asia/Tokyo', T0).facts).toBe('12 OCT 2026 · 25 PIECES');
     // Ended before its name or its photograph was revealed: named nowhere, the seal on its plate.
-    expect(livePastModel(over({ title: null, name: null, type: null, collection: null, description: null, imageUrl: null, silhouetteUrl: null, lookbook: null }), 'UTC')).toEqual({
+    expect(livePastModel(over({ title: null, name: null, type: null, collection: null, description: null, imageUrl: null, silhouetteUrl: null, lookbook: null }), 'UTC', T0)).toEqual({
       name: 'LIVE RELEASE',
       heading: 'LIVE RELEASE',
       model: null,
@@ -361,6 +362,17 @@ describe('which screen the page shows', () => {
     expect(livePastModel(sheet({ phase: 'ENDED', lookbook: 'monolithe' }), 'Europe/Paris')).toMatchObject({ name: 'MONOLITHE', facts: '11 OCT 2026 · 25 PIECES' });
     expect(JSON.stringify(livePastModel(sheet({ phase: 'ENDED' }), 'UTC'))).not.toMatch(/48|52|56|4 800|stock/);
     expect(isEndedSheet(over())).toBe(true);
+  });
+
+  it('keeps the year of a past release from an earlier year on its final page, never read as this year\'s', () => {
+    const lastYear = over({ opensAt: '2025-10-06T17:00:00.000Z' });
+    expect(livePastModel(lastYear, 'Europe/Paris', T0)).toMatchObject({ day: 'MONDAY 6 OCTOBER 2025', facts: '6 OCT 2025 · 25 PIECES' });
+    // This year's says its day alone, as C29 and C30 draw it.
+    expect(livePastModel(over(), 'Europe/Paris', T0).day).toBe('SUNDAY 11 OCTOBER');
+    // The year on this phone's calendar, the opening's and today's: New Year's Eve in UTC is already this year in Tokyo.
+    expect(pastDay('2025-12-31T20:00:00.000Z', 'Asia/Tokyo', T0)).toBe('THURSDAY 1 JANUARY');
+    expect(pastDay('2025-12-31T20:00:00.000Z', 'UTC', T0)).toBe('WEDNESDAY 31 DECEMBER 2025');
+    expect(pastDay('nonsense', 'UTC', T0)).toBe('');
   });
 });
 

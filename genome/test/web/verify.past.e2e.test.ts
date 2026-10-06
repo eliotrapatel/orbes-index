@@ -233,8 +233,22 @@ describe.skipIf(!HAS_CHROMIUM)("THE RELEASES' LIVE and PAST tabs, a past release
     await keepsBrand(page, ['LIVE', 'PAST', 'SEE THE RELEASE', RELEASES.past.more]);
     await page.screenshot({ path: join(OUT_DIR, 'verify-releases-past.png'), fullPage: true });
 
+    // SHOW MORE as C25 draws it (`.sec .ctr`, `.g .tl`): a text link centred 76 px under the last release, 10.5 px,
+    // underlined at 5 px, no fill.
+    const more = panel.getByRole('button', { name: RELEASES.past.more });
+    const moreLine = await panel.locator('.n-releases__more-line').evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { paddingTop: s.paddingTop, textAlign: s.textAlign };
+    });
+    expect(moreLine).toEqual({ paddingTop: '76px', textAlign: 'center' });
+    expect(await more.evaluate((el) => ['n-g', 'n-tl', 'releases__more'].every((c) => el.classList.contains(c)))).toBe(true);
+    const moreLook = await more.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { fontSize: s.fontSize, paddingBottom: s.paddingBottom, borderBottom: `${s.borderBottomWidth} ${s.borderBottomStyle}`, background: s.backgroundColor, color: s.color === s.borderBottomColor };
+    });
+    expect(moreLook).toEqual({ fontSize: '10.5px', paddingBottom: '5px', borderBottom: '1px solid', background: 'rgba(0, 0, 0, 0)', color: true });
     // SHOW MORE: the rest, the keyboard on the first release it brought; no SHOW MORE once all are shown.
-    await panel.getByRole('button', { name: RELEASES.past.more }).click();
+    await more.click();
     await expect.poll(() => cards.count(), POLL).toBe(PAST_PAGE_SIZE + 2);
     expect(await pastCard(page, older[PAST_PAGE_SIZE - 2]!).getByRole('link', { name: 'SEE THE RELEASE' }).evaluate((el) => el === document.activeElement)).toBe(true);
     expect(await panel.getByRole('button', { name: RELEASES.past.more }).count()).toBe(0);

@@ -114,6 +114,14 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
     room open or live (LIVE RELEASE · THE ROOM IS OPEN, · LIVE NOW), or more than six days ahead (its date with its
     weekday); a model of the salon among a public model's dots switches the sheet to its price, tier and request (an
     owner's sheet is the club's, which serves a public model with the variants of the salon its tier reaches).
+  - C7 (N7): the LIVE RELEASE's price (€ 5 050) under its title on each LIVE RELEASE card, the one TO BE REVEALED
+    included (C7 draws a price on the draw's card only).
+  - C25 (N7): the model's line (BRACELET · ORBITAL, MONOLITHE · BRACELET) under each past release's title.
+  - C27, C28 (N7): SEE THE MODEL under A SURPRISE IN EVERY BOX, the release's description and the drawing rule (*Places
+    are drawn at random among the collectors present at the opening…*), on the announced page and in each of its
+    states, not eligible included.
+  - C29 (N7): BRACELET · ORBITAL under the title, and the release's description under the receipt; the year after the
+    day (LIVE RELEASE · MONDAY 6 OCTOBER 2025) for a release opened in an earlier year (C29 and C30 draw this year's).
 
 ## Boards without a screen of their own today
 

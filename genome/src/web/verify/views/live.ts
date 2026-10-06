@@ -84,6 +84,7 @@ import {
   livePastModel,
   liveHeading,
   lockAngle,
+  pastDay,
   pictureOf,
   placeAnnouncement,
   PRESS_GAP_MS,
@@ -1870,7 +1871,7 @@ class LivePage {
    * after; its description. Never an end figure.
    */
   private pastScreen(): Screen {
-    const m = livePastModel(this.sheet!, this.deps.localZone);
+    const m = livePastModel(this.sheet!, this.deps.localZone, this.now());
     const part = h('p', { class: 'n-state n-live__part live__past-part', attrs: { hidden: true } });
     const receipt = h('div', { class: 'n-live__receipt-slot', attrs: { hidden: true } });
     const ask = this.questionBlock();
@@ -2045,7 +2046,7 @@ class LivePage {
     const contact = kind === 'removed' && this.entry ? releaseContactModel(this.contacts, this.name(), liveReference(this.entry.id), LIVE.statusLabel.REMOVED) : null;
     const sheet = this.sheet;
     const heading = sheet ? (liveHeading(sheet) ?? (isEndedSheet(sheet) ? LIVE.kind : LIVE.unnamed)) : LIVE.kind;
-    const day = sheet ? (zonedTime(sheet.opensAt, this.deps.localZone)?.day ?? '') : '';
+    const day = sheet ? pastDay(sheet.opensAt, this.deps.localZone, this.now()) : '';
     const title = modelTitle('h1', ['n-g', 'n-t1', 'n-live__title'], heading, sheet?.name ? upper(sheet.name) : null);
     title.id = 'live-title';
     title.tabIndex = -1;
