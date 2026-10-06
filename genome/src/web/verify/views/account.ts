@@ -141,8 +141,10 @@ export class AccountSheet {
       const focused = this.panel.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
       const key = focused?.dataset.key;
       this.render();
-      if (key) this.panel.querySelector<HTMLElement>(`[data-key="${key}"]`)?.focus({ preventScroll: true });
-      else if (focused?.id === 'account-title') this.focusTitle();
+      // The control that had the focus has it again, by its key; one without a key (or gone), the sheet's title.
+      const again = key ? this.panel.querySelector<HTMLElement>(`[data-key="${key}"]`) : null;
+      if (again) again.focus({ preventScroll: true });
+      else if (focused) this.focusTitle();
     }
   }
 
@@ -186,8 +188,9 @@ export class AccountSheet {
             this.close();
             this.deps.onPieces();
           },
+          attrs: { 'data-key': 'pieces' },
         }),
-        leadRow(ACCOUNT.legal, { href: LEGAL_PATH, newTab: true }),
+        leadRow(ACCOUNT.legal, { href: LEGAL_PATH, newTab: true, attrs: { 'data-key': 'legal' } }),
       ),
       this.notice ? h('p', { class: 'n-err n-account__notice', attrs: { role: 'status' }, text: this.notice }) : null,
       h('div', { class: 'n-px n-account__out' }, button(ACCOUNT.signOut, { outline: true, onClick: () => this.signOut(), attrs: { disabled: this.busy, 'data-key': 'sign-out' } })),

@@ -70,11 +70,18 @@ export function chapterOf(screen: string): ChapterId | null {
 /**
  * The canvas draws each finish's dot as a soft diagonal highlight around its colour (build.py: `.steel` #e9e8e4 →
  * #9d9b96 at 55 % → #d7d5d0, and likewise `.gold` and `.blue`). The app has one colour per variant (its swatch,
- * #RRGGBB): the dot takes it at 55 %, and the two highlights are the same colour made lighter in OKLab, by the mean of
- * the canvas's three (its lightness raised by 0.21 at the top left, by 0.16 at the bottom right; its hue and chroma
- * kept).
+ * #RRGGBB): the dot takes it at 55 %. The canvas's own three colours take the canvas's own highlights, exactly
+ * (CANVAS_SWATCHES); any other colour takes two highlights of itself made lighter in OKLab, by the mean of the canvas's
+ * three (its lightness raised by 0.21 at the top left, by 0.16 at the bottom right; its hue and chroma kept).
  */
 export const SWATCH_HIGHLIGHT = Object.freeze({ start: 0.21, end: 0.16 });
+
+/** The canvas's three finishes (build.py `.steel`, `.gold`, `.blue`): their colour, then their two highlights. */
+export const CANVAS_SWATCHES: Readonly<Record<string, readonly [string, string]>> = Object.freeze({
+  '#9d9b96': ['#e9e8e4', '#d7d5d0'],
+  '#b88a3a': ['#f0d692', '#e6c578'],
+  '#16224a': ['#3a4f8f', '#2c3e78'],
+});
 
 const HEX = /^#([0-9a-f]{6})$/i;
 
@@ -103,9 +110,13 @@ export function lighten(hex: string, dL: number): string {
   return fromOklab([Math.min(1, L + dL), A, B]);
 }
 
-/** The background of a variant's dot: its swatch at 55 % between its two highlights; `none` for a colour that is not #RRGGBB. */
+/**
+ * The background of a variant's dot: its swatch at 55 % between its two highlights (the canvas's own for its three
+ * finishes); `none` for a colour that is not #RRGGBB.
+ */
 export function swatchGradient(swatch: string): string {
   if (!HEX.test(swatch)) return 'none';
   const hex = swatch.toLowerCase();
-  return `linear-gradient(135deg, ${lighten(hex, SWATCH_HIGHLIGHT.start)}, ${hex} 55%, ${lighten(hex, SWATCH_HIGHLIGHT.end)})`;
+  const [start, end] = CANVAS_SWATCHES[hex] ?? [lighten(hex, SWATCH_HIGHLIGHT.start), lighten(hex, SWATCH_HIGHLIGHT.end)];
+  return `linear-gradient(135deg, ${start}, ${hex} 55%, ${end})`;
 }

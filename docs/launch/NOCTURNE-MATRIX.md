@@ -170,11 +170,12 @@ the end of a visit, its final page; the page tells the shell, `onChrome`), the b
 has NOCTURNE's chrome (`views/shell.ts`): the header (ORBES; the
 tier's name and the monogram, the button *Your account, TITANE*, or the monogram alone without a tier; SIGN IN signed
 out), the rail NOW · RELEASES · COLLECTION · CIRCLE · PIECES (the current one `aria-current`, RELEASES' dot while a LIVE
-RELEASE is announced, its room open or live, or a draw open, soon open or in its early access), the footer (the
+RELEASE is announced, its room open or live, or a draw open, soon open or in its early access; a screen reader hears
+RELEASES LIVE then, the word LIVE visually hidden beside the dot), the footer (the
 monogram, PRIVACY · TERMS · LEGAL · HELP in a new tab, SOUND ON/OFF, IP GEOLOCATION BY DB-IP, © ORBES · PARIS, GENOME
 CODE in it from 560 px wide) and the SCAN ring. The landing's own foot and every screen's own legal links gave way to
-the footer; the banner of the LIVE RELEASES lies under the rail. VERIFYING… and a problem of the scan are on the ground
-without the chrome until N4.
+the footer; the banner of the LIVE RELEASES lies under the rail. VERIFYING… and the scan's problems show the centred
+ORBES header alone (no rail, no account button, no SCAN ring), as C12 and C17 draw them.
 
 | State | What it shows | Shown when | Reference |
 |---|---|---|---|
@@ -469,7 +470,7 @@ button).
 | `room-ready` | YOU'RE READY, *Your place is drawn at … Keep this page open.*, LEAVE THE ROOM | C21, live-06 |
 | `room-sign-in` | SIGN IN TO ENTER, *The room is open to …*, the sign-in | live-13 |
 | `room-not-eligible` | the rule and why | live-14 |
-| `live-join` | LIVE NOW, *price · quantity*, *n* IN THE ROOM, *left OF quantity* LEFT, its sentence, YOUR SIZE, ENTER THE LINE | live-09 |
+| `live-join` | LIVE NOW, *price · quantity*, *n* IN THE ROOM, *left OF quantity* LEFT, its sentence, YOUR SIZE, ENTER THE LINE | same pieces (no before-capture shows it) |
 | `live-line` | YOUR PLACE *n*, YOU ARE NEXT IN SIZE *s* / *n* AHEAD OF YOU, *left OF quantity LEFT · n IN SIZE s*, *n* HELD PIECES MAY RETURN, its note | live-09 |
 | `live-turn` | YOUR TURN, PRESS AND HOLD THE SEAL, the turn's ring and *mm:ss*, TO SECURE YOUR PIECE, *name · size · price*, *Let go too early …* | live-10 |
 | `live-secured` | SECURED, YOUR PIECE, SECURED AT *time*, *name*, *collection · size*, ADD-ONS (*label*, + *price*, *line*), PAY · *total*, *mm:ss* TO CONFIRM, its note, RELEASE MY PLACE | live-11 |

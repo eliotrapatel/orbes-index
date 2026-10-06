@@ -161,6 +161,33 @@ const postIdOf = (pathname: string): string | null => circleRouteOf(pathname)?.p
 
 const entryOf = (state: unknown): Entry | undefined => (state as { screen?: Entry } | null)?.screen;
 
+/**
+ * How many entries of the app an entry lies above the landing (0: the landing). Every entry the app writes carries it
+ * (push, replace), so NOW (the rail) goes back to the landing in one step whatever the way taken. An entry written
+ * without it (an address edited in place) is read from its kind: one over the landing, two for a sheet, a piece, a
+ * release's page or a post (over their list), three for an after-room (over its release).
+ */
+function depthOf(state: unknown): number {
+  const depth = (state as { depth?: unknown } | null)?.depth;
+  if (typeof depth === 'number' && Number.isInteger(depth) && depth >= 0) return depth;
+  const entry = entryOf(state);
+  if (entry === undefined || entry === 'landing') return 0;
+  if (entry === 'sheet' || entry === 'circlePost' || entry === 'piece') return 2;
+  if (entry === 'release') return afterRoomOf(location.pathname) ? 3 : 2;
+  return 1;
+}
+
+/** A new entry of the app over the current one, one step further from the landing. */
+function pushEntry(state: object, url: string): void {
+  history.pushState({ ...state, depth: depthOf(history.state) + 1 }, '', url);
+}
+
+/** The current entry rewritten in place, at its depth (the landing's is 0). */
+function replaceEntry(state: unknown, url?: string): void {
+  const depth = entryOf(state) === 'landing' ? 0 : depthOf(history.state);
+  history.replaceState({ ...(state as object | null), depth }, '', url);
+}
+
 /** THE RELEASES' tab its place in the history keeps (plan LIVE RELEASE+, choice 5): PAST, or LIVE by default. */
 const releasesTabOf = (state: unknown): ReleasesTab => ((state as { tab?: unknown } | null)?.tab === 'past' ? 'past' : 'live');
 
@@ -252,7 +279,7 @@ class App {
         if (!(this.screen === 'piece' && this.pieceId === id)) void this.showPiece(id);
       } else if (entry === 'pieces' || route === 'pieces') {
         // Back onto MY PIECES (from a piece, or ORDER OR-… on a piece's page: ORDERS, the order in view).
-        if (this.pendingOrder !== null) history.replaceState({ ...(history.state as object), screen: 'pieces', tab: 'orders' }, '');
+        if (this.pendingOrder !== null) replaceEntry({ ...(history.state as object), screen: 'pieces', tab: 'orders' });
         if (this.screen !== 'pieces' || this.pendingOrder !== null) void this.showPieces();
       } else if (entry === 'certificate' || route === 'certificate') this.onCertificateAddress();
       else if (entry === 'sheet' || route === 'sheet') {
@@ -305,31 +332,31 @@ class App {
     const route = routeOf(location.pathname);
     if (route === 'board') {
       // The boutique board: on its own, nothing under it; its secret stays in its own address.
-      history.replaceState({ screen: 'board' }, '');
+      replaceEntry({ screen: 'board' });
       void this.showBoard(false);
     } else if (route === 'pieces') {
       // A reload keeps its entry; a direct visit (a link, a bookmark) puts the landing under MY PIECES. An address under
       // /verify/pieces that is none shows MY PIECES, its own address put back.
       if (entryOf(history.state) !== 'pieces') {
-        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
-        history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
-      } else if (location.pathname !== PIECES_PATH) history.replaceState(history.state, '', PIECES_PATH);
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'pieces' }, PIECES_PATH);
+      } else if (location.pathname !== PIECES_PATH) replaceEntry(history.state, PIECES_PATH);
       void this.showPieces(false);
     } else if (route === 'piece') {
       // A piece over MY PIECES, over the landing: back from it returns to the list.
       const id = pieceIdOf(location.pathname)!;
       if (entryOf(history.state) !== 'piece') {
-        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
-        history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
-        history.pushState({ screen: 'piece' }, '', piecePath(id));
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'pieces' }, PIECES_PATH);
+        pushEntry({ screen: 'piece' }, piecePath(id));
       }
       void this.showPiece(id, false);
     } else if (route === 'certificate') {
       // The same for a certificate, its fragment kept in its own address (the landing's has none).
       if (entryOf(history.state) !== 'certificate') {
         const address = `${CERTIFICATE_PATH}${location.hash}`;
-        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
-        history.pushState({ screen: 'certificate' }, '', address);
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'certificate' }, address);
       }
       void this.showCertificate(false);
     } else if (route === 'lookbook' || route === 'sheet') {
@@ -337,10 +364,10 @@ class App {
       // under /verify/lookbook that is none shows the lookbook, its own address put back.
       const slug = sheetSlugOf(location.pathname);
       if (entryOf(history.state) !== (slug ? 'sheet' : 'lookbook')) {
-        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
-        history.pushState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
-        if (slug) history.pushState({ screen: 'sheet' }, '', lookbookSheetPath(slug));
-      } else if (!slug && location.pathname !== LOOKBOOK_PATH) history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'lookbook' }, LOOKBOOK_PATH);
+        if (slug) pushEntry({ screen: 'sheet' }, lookbookSheetPath(slug));
+      } else if (!slug && location.pathname !== LOOKBOOK_PATH) replaceEntry({ screen: 'lookbook' }, LOOKBOOK_PATH);
       if (slug) void this.showSheet(slug, false);
       else void this.showLookbook(false);
     } else if (route === 'releases' || route === 'release') {
@@ -349,12 +376,12 @@ class App {
       const id = releaseIdOf(location.pathname);
       const after = id !== null && afterRoomOf(location.pathname);
       if (entryOf(history.state) !== (id ? 'release' : 'releases')) {
-        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
-        history.pushState({ screen: 'releases' }, '', RELEASES_PATH);
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'releases' }, RELEASES_PATH);
         // An after-room over its release's page: back from it returns to the second door.
-        if (id) history.pushState({ screen: 'release' }, '', releasePath(id));
-        if (after) history.pushState({ screen: 'release' }, '', afterRoomPath(id));
-      } else if (!id && location.pathname !== RELEASES_PATH) history.replaceState({ screen: 'releases' }, '', RELEASES_PATH);
+        if (id) pushEntry({ screen: 'release' }, releasePath(id));
+        if (after) pushEntry({ screen: 'release' }, afterRoomPath(id));
+      } else if (!id && location.pathname !== RELEASES_PATH) replaceEntry({ screen: 'releases' }, RELEASES_PATH);
       if (id) void this.showRelease(id, false, after);
       else void this.showReleases(false);
     } else if (route === 'circle' || route === 'circlePost') {
@@ -362,14 +389,14 @@ class App {
       // /verify/circle that is none shows the feed, its own address put back.
       const id = postIdOf(location.pathname);
       if (entryOf(history.state) !== (id ? 'circlePost' : 'circle')) {
-        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
-        history.pushState({ screen: 'circle' }, '', CIRCLE_PATH);
-        if (id) history.pushState({ screen: 'circlePost' }, '', circlePostPath(id));
-      } else if (!id && location.pathname !== CIRCLE_PATH) history.replaceState({ screen: 'circle' }, '', CIRCLE_PATH);
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'circle' }, CIRCLE_PATH);
+        if (id) pushEntry({ screen: 'circlePost' }, circlePostPath(id));
+      } else if (!id && location.pathname !== CIRCLE_PATH) replaceEntry({ screen: 'circle' }, CIRCLE_PATH);
       if (id) void this.showCirclePost(id, false);
       else void this.showCircle(false);
     } else {
-      history.replaceState({ screen: 'landing' }, '', location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
+      replaceEntry({ screen: 'landing' }, location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
       void this.showLanding(false);
     }
     // Boot the decoder worker and warm the decoder (one synthetic decode) while the visitor reads the landing screen; a
@@ -390,26 +417,26 @@ class App {
   private enter(): void {
     const entry = entryOf(history.state);
     // From a sheet (or a release's page), the scan takes its entry over the lookbook's (the list's): back then returns there.
-    if (entry !== undefined && entry !== 'app' && REPLACEABLE.includes(entry)) history.replaceState({ screen: 'app' }, '', LANDING_PATH);
-    else if (entry !== 'app') history.pushState({ screen: 'app' }, '', LANDING_PATH);
+    if (entry !== undefined && entry !== 'app' && REPLACEABLE.includes(entry)) replaceEntry({ screen: 'app' }, LANDING_PATH);
+    else if (entry !== 'app') pushEntry({ screen: 'app' }, LANDING_PATH);
   }
 
   /**
-   * NOW (the rail): the landing, the base entry. From an entry above it, back to it: one entry for a screen over the
-   * landing, two for a sheet, a release's page or a post (over their list), three for an after-room (over its release).
+   * NOW (the rail): the landing, the base entry. From an entry above it, back to it by as many entries as it lies above
+   * the landing (its depth, whatever the way taken to it).
    */
   private openNow(): void {
-    const entry = entryOf(history.state);
-    if (entry === undefined || entry === 'landing') {
+    const depth = depthOf(history.state);
+    if (depth <= 0) {
       if (this.screen !== 'landing') void this.showLanding();
       return;
     }
-    const depth = entry === 'sheet' || entry === 'circlePost' || entry === 'piece' ? 2 : entry === 'release' ? (afterRoomOf(location.pathname) ? 3 : 2) : 1;
     history.go(-depth);
   }
 
   /**
-   * MY PIECES, from the landing (an entry above it) or from a result (in the scan's entry): back returns to the landing.
+   * MY PIECES, from the landing (an entry above it), from a result (in the scan's entry) or from another chapter of the
+   * rail (in its entry): back returns to the landing.
    * From a piece (its crumb, the rail), back to the list under it; `order`, ORDER OR-… of a piece's page: ORDERS with that
    * order in view. `tab` opens on that tab (the rail's PIECES: PIECES); by default the one its entry kept.
    */
@@ -422,8 +449,9 @@ class App {
     }
     const tab = opts.order ? 'orders' : (opts.tab ?? (entry === 'pieces' ? piecesTabOf(history.state) : 'pieces'));
     this.pendingOrder = opts.order ?? null;
-    if (entry === 'app' || entry === 'pieces') history.replaceState({ screen: 'pieces', tab }, '', PIECES_PATH);
-    else history.pushState({ screen: 'pieces', tab }, '', PIECES_PATH);
+    // The rail's chapters take each other's entry (as THE COLLECTION, THE RELEASES and THE CIRCLE do).
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') replaceEntry({ screen: 'pieces', tab }, PIECES_PATH);
+    else pushEntry({ screen: 'pieces', tab }, PIECES_PATH);
     void this.showPieces();
   }
 
@@ -431,13 +459,13 @@ class App {
   private openPiece(id: string): void {
     const entry = entryOf(history.state);
     const address = piecePath(id);
-    if (entry === 'piece') history.replaceState({ screen: 'piece' }, '', address);
+    if (entry === 'piece') replaceEntry({ screen: 'piece' }, address);
     else {
       if (entry !== 'pieces') {
-        if (entry === 'app' || entry === 'certificate') history.replaceState({ screen: 'pieces' }, '', PIECES_PATH);
-        else history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
+        if (entry === 'app' || entry === 'certificate') replaceEntry({ screen: 'pieces' }, PIECES_PATH);
+        else pushEntry({ screen: 'pieces' }, PIECES_PATH);
       }
-      history.pushState({ screen: 'piece' }, '', address);
+      pushEntry({ screen: 'piece' }, address);
     }
     void this.showPiece(id);
   }
@@ -452,8 +480,8 @@ class App {
       history.back();
       return;
     }
-    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
-    else history.pushState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') replaceEntry({ screen: 'lookbook' }, LOOKBOOK_PATH);
+    else pushEntry({ screen: 'lookbook' }, LOOKBOOK_PATH);
     void this.showLookbook();
   }
 
@@ -467,8 +495,8 @@ class App {
       history.back();
       return;
     }
-    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') history.replaceState({ screen: 'releases' }, '', RELEASES_PATH);
-    else history.pushState({ screen: 'releases' }, '', RELEASES_PATH);
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') replaceEntry({ screen: 'releases' }, RELEASES_PATH);
+    else pushEntry({ screen: 'releases' }, RELEASES_PATH);
     void this.showReleases();
   }
 
@@ -482,8 +510,8 @@ class App {
       history.back();
       return;
     }
-    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') history.replaceState({ screen: 'circle' }, '', CIRCLE_PATH);
-    else history.pushState({ screen: 'circle' }, '', CIRCLE_PATH);
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') replaceEntry({ screen: 'circle' }, CIRCLE_PATH);
+    else pushEntry({ screen: 'circle' }, CIRCLE_PATH);
     void this.showCircle();
   }
 
@@ -491,13 +519,13 @@ class App {
   private openCirclePost(id: string): void {
     const entry = entryOf(history.state);
     const address = circlePostPath(id);
-    if (entry === 'circlePost') history.replaceState({ screen: 'circlePost' }, '', address);
+    if (entry === 'circlePost') replaceEntry({ screen: 'circlePost' }, address);
     else {
       if (entry !== 'circle') {
-        if (entry === 'app' || entry === 'pieces' || entry === 'certificate') history.replaceState({ screen: 'circle' }, '', CIRCLE_PATH);
-        else history.pushState({ screen: 'circle' }, '', CIRCLE_PATH);
+        if (entry === 'app' || entry === 'pieces' || entry === 'certificate') replaceEntry({ screen: 'circle' }, CIRCLE_PATH);
+        else pushEntry({ screen: 'circle' }, CIRCLE_PATH);
       }
-      history.pushState({ screen: 'circlePost' }, '', address);
+      pushEntry({ screen: 'circlePost' }, address);
     }
     void this.showCirclePost(id);
   }
@@ -509,13 +537,13 @@ class App {
   private openRelease(id: string): void {
     const entry = entryOf(history.state);
     const address = releasePath(id);
-    if (entry === 'release') history.replaceState({ screen: 'release' }, '', address);
+    if (entry === 'release') replaceEntry({ screen: 'release' }, address);
     else {
       if (entry !== 'releases') {
-        if (entry === 'app' || entry === 'pieces' || entry === 'certificate') history.replaceState({ screen: 'releases' }, '', RELEASES_PATH);
-        else history.pushState({ screen: 'releases' }, '', RELEASES_PATH);
+        if (entry === 'app' || entry === 'pieces' || entry === 'certificate') replaceEntry({ screen: 'releases' }, RELEASES_PATH);
+        else pushEntry({ screen: 'releases' }, RELEASES_PATH);
       }
-      history.pushState({ screen: 'release' }, '', address);
+      pushEntry({ screen: 'release' }, address);
     }
     void this.showRelease(id);
   }
@@ -526,7 +554,7 @@ class App {
    */
   private openAfterRoom(parentId: string): void {
     if (entryOf(history.state) !== 'release' || releaseIdOf(location.pathname) !== parentId) this.openRelease(parentId);
-    history.pushState({ screen: 'release' }, '', afterRoomPath(parentId));
+    pushEntry({ screen: 'release' }, afterRoomPath(parentId));
     void this.showRelease(parentId, true, true);
   }
 
@@ -537,13 +565,13 @@ class App {
   private openSheet(slug: string): void {
     const entry = entryOf(history.state);
     const address = lookbookSheetPath(slug);
-    if (entry === 'sheet') history.replaceState({ screen: 'sheet' }, '', address);
+    if (entry === 'sheet') replaceEntry({ screen: 'sheet' }, address);
     else {
       if (entry !== 'lookbook') {
-        if (entry === 'app' || entry === 'pieces' || entry === 'certificate') history.replaceState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
-        else history.pushState({ screen: 'lookbook' }, '', LOOKBOOK_PATH);
+        if (entry === 'app' || entry === 'pieces' || entry === 'certificate') replaceEntry({ screen: 'lookbook' }, LOOKBOOK_PATH);
+        else pushEntry({ screen: 'lookbook' }, LOOKBOOK_PATH);
       }
-      history.pushState({ screen: 'sheet' }, '', address);
+      pushEntry({ screen: 'sheet' }, address);
     }
     void this.showSheet(slug);
   }
@@ -617,7 +645,7 @@ class App {
       order,
       onTab: (tab) => {
         this.piecesTab = tab;
-        if (entryOf(history.state) === 'pieces') history.replaceState({ ...(history.state as object), tab }, '');
+        if (entryOf(history.state) === 'pieces') replaceEntry({ ...(history.state as object), tab });
         if (this.screen === 'pieces') this.banner.show(tab === 'pieces');
       },
       localZone: localZone(),
@@ -631,7 +659,7 @@ class App {
   /** A piece of MY PIECES (C4, C35); `id` null: an address that is none, MY PIECES in its place. */
   private async showPiece(id: string | null, focus = true): Promise<void> {
     if (id === null) {
-      history.replaceState({ screen: 'pieces' }, '', PIECES_PATH);
+      replaceEntry({ screen: 'pieces' }, PIECES_PATH);
       return this.showPieces(focus);
     }
     this.generation++;
@@ -647,7 +675,7 @@ class App {
       // Not the account's (passed on, or never its): MY PIECES in its place, at its address.
       onMissing: () => {
         if (gen !== this.generation) return;
-        if (entryOf(history.state) === 'piece') history.replaceState({ screen: 'pieces' }, '', PIECES_PATH);
+        if (entryOf(history.state) === 'piece') replaceEntry({ screen: 'pieces' }, PIECES_PATH);
         void this.showPieces();
       },
       onRelease: (releaseId) => this.openRelease(releaseId),
@@ -724,7 +752,7 @@ class App {
       onVariant: (variant) => {
         if (this.screen !== 'sheet' || entryOf(history.state) !== 'sheet') return;
         this.sheetSlug = variant;
-        history.replaceState(history.state, '', lookbookSheetPath(variant));
+        replaceEntry(history.state, lookbookSheetPath(variant));
       },
       onRelease: (id) => this.openRelease(id),
       clientServices: () => this.contactDetails(),
@@ -745,7 +773,7 @@ class App {
       // The tab its place in the history kept: back from a release opened from PAST returns to PAST.
       tab: entryOf(history.state) === 'releases' ? releasesTabOf(history.state) : 'live',
       onTab: (tab) => {
-        if (entryOf(history.state) === 'releases') history.replaceState({ ...(history.state as object), tab }, '');
+        if (entryOf(history.state) === 'releases') replaceEntry({ ...(history.state as object), tab });
       },
       onRelease: (id) => this.openRelease(id),
       localZone: localZone(),
@@ -773,7 +801,7 @@ class App {
       } catch (e) {
         if (gen !== this.generation) return;
         if (e instanceof ApiError && (e.status === 401 || e.status === 404)) {
-          history.replaceState({ screen: 'release' }, '', releasePath(id));
+          replaceEntry({ screen: 'release' }, releasePath(id));
           return this.showRelease(id, focus);
         }
         failure = messageOf(e);
@@ -879,7 +907,7 @@ class App {
   /** The address names a certificate (back, forward, an edited fragment): show it, unless it is the one on show. */
   private onCertificateAddress(): void {
     if (this.screen === 'certificate' && certificateTokenOf(location.hash) === this.certificateToken) return;
-    if (entryOf(history.state) !== 'certificate') history.replaceState({ screen: 'certificate' }, '', `${CERTIFICATE_PATH}${location.hash}`);
+    if (entryOf(history.state) !== 'certificate') replaceEntry({ screen: 'certificate' }, `${CERTIFICATE_PATH}${location.hash}`);
     void this.showCertificate();
   }
 

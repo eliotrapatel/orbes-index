@@ -907,15 +907,26 @@ class ReleasePage {
     this.root.dataset.state = l.kind;
     if (l.kind !== 'ready') {
       this.heroKey = l.kind;
-      // The page's title while there is no release to name: THE RELEASES, and its state under it (C40).
-      this.hero.replaceChildren(h('div', { class: 'n-px n-release__plain' }, h('h1', { class: 'n-g n-t1 release__title', id: 'release-title', text: RELEASES.title })));
+      // The page's title while there is no release to name yet: THE RELEASES, and its state under it (C40). An address that
+      // leads nowhere has none: its sentence alone names the page, as a model's and a post's do (C40, state 4).
+      if (l.kind === 'missing') this.hero.replaceChildren();
+      else this.hero.replaceChildren(h('div', { class: 'n-px n-release__plain' }, h('h1', { class: 'n-g n-t1 release__title', id: 'release-title', text: RELEASES.title })));
     }
     if (l.kind === 'loading') {
       this.body.replaceChildren(loadingState(RELEASES.loading, { extraClass: 'releases__waiting n-releases__state' }));
       return;
     }
     if (l.kind === 'missing') {
-      this.body.replaceChildren(h('div', { class: 'n-px n-releases__state' }, quietLine(RELEASES.notFound, 'release__missing')));
+      // C40: the sentence alone on the margin, 22 px under ‹ THE RELEASES.
+      const line = quietLine(RELEASES.notFound, 'release__missing');
+      line.id = 'release-title';
+      this.body.replaceChildren(h('div', { class: 'n-px n-release__missing' }, line));
+      // The focus the page's title had (gone with it) comes to the sentence, never taken from the chrome.
+      const active = document.activeElement;
+      if (active === null || active === document.body || this.root.contains(active)) {
+        line.tabIndex = -1;
+        line.focus({ preventScroll: true });
+      }
       return;
     }
     if (l.kind === 'failed') {

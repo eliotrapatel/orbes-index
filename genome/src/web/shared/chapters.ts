@@ -23,3 +23,16 @@ export const CHAPTER_PATHS: Readonly<Record<ChapterId, string>> = Object.freeze(
 
 /** The rail's landmark, the canvas's. */
 export const RAIL_LABEL = 'Main';
+
+/**
+ * RELEASES' dot said to a screen reader (the dot itself is decorative): the app's word LIVE, visually hidden beside it
+ * while it shows, so the link reads RELEASES LIVE.
+ */
+export const RAIL_LIVE_WORD = 'LIVE';
+
+/** RELEASES' dot and its word, shown or hidden together (the word empty while hidden). */
+export function showRailLive(dot: HTMLElement, word: HTMLElement, on: boolean): void {
+  dot.hidden = !on;
+  word.hidden = !on;
+  word.textContent = on ? ` ${RAIL_LIVE_WORD}` : '';
+}

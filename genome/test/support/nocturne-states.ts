@@ -56,6 +56,11 @@ export interface UiState {
   stress?: boolean;
   /** The capture of the state is the viewport alone (the camera, a full-screen moment), not the whole page. */
   viewport?: boolean;
+  /**
+   * A screen of this size (CSS px, at 1×) in place of the phone, for a state its before-capture shows on one (the
+   * boutique board's landscape screen, live-07: capture-ui's 1280 × 720).
+   */
+  size?: { width: number; height: number };
 }
 
 /** Requests a state holds open while it is captured, released when the run ends. */
@@ -844,7 +849,8 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'live-released', title: 'YOUR PLACE IS RELEASED', refs: ['live-17', 'C30'], variant: 'live', as: 'released', path: release('live'), ready: '.view--live .n-live__end' },
   { id: 'live-left', title: 'YOU LEFT THE LINE', refs: ['live-18', 'C30'], variant: 'live', as: 'left', path: release('live'), ready: '.view--live .n-live__end' },
   { id: 'live-removed', title: 'YOUR ENTRY IS REMOVED', refs: ['live-19', 'C30'], variant: 'live', as: 'removed', path: release('live'), ready: '.view--live .n-live__end' },
-  { id: 'live-join', title: 'Live now, an account not in the line: ENTER THE LINE', refs: ['live-09'], variant: 'live', as: you, path: release('live'), ready: '.view--live' },
+  // No before-capture shows ENTER THE LINE (live-09 is the line itself): the room's own pieces.
+  { id: 'live-join', title: 'Live now, an account not in the line: ENTER THE LINE', refs: ['same pieces'], variant: 'live', as: you, path: release('live'), ready: '.view--live' },
   { id: 'live-pieces-turn', title: 'MY PIECES of a collector at its turn: YOUR TURN', refs: ['C31'], variant: 'live', as: 'turn', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'RELEASES'), ready: '.view--pieces .pieces__releases' },
   { id: 'after-room-door', title: 'The after-room’s second door', refs: ['C26', 'plus-07'], variant: 'afterroom', as: you, path: release('afterroom'), ready: '.view--live .live__after' },
   {
@@ -989,7 +995,17 @@ export const UI_STATES: readonly UiState[] = [
 
   // ── Kept as they are (plan NOCTURNE, choice 3 and the scope guard) ──
   { id: 'certificate', title: 'The shared ownership certificate (/verify/c#…), kept as it is', refs: ['kept (choice 3)', 'verify-13'], variant: 'full', path: (d) => `/verify/c#${d.links.certificate}`, ready: '.view--certificate .genome-svg' },
-  { id: 'board', title: 'The boutique board of a LIVE RELEASE, kept as it is', refs: ['kept (scope guard)', 'live-07'], variant: 'room', path: (d) => `/verify/releases/${d.releases.room}/board#${d.links.board}`, ready: '.view--board .live-door__seal' },
+  // On the landscape screen its before-capture was taken on (live-07, capture-ui: 1280 × 720 at 1×), its viewport alone.
+  {
+    id: 'board',
+    title: 'The boutique board of a LIVE RELEASE, kept as it is',
+    refs: ['kept (scope guard)', 'live-07'],
+    variant: 'room',
+    path: (d) => `/verify/releases/${d.releases.room}/board#${d.links.board}`,
+    ready: '.view--board .live-door__seal',
+    viewport: true,
+    size: { width: 1280, height: 720 },
+  },
 
   // ── States that write (each its own piece or post) ──
   // The owner's transfer code first: you@example.com still holds its two pieces (TITANE, as C37 draws the header); the two
@@ -1349,7 +1365,9 @@ export interface OpenedState extends StateRun {
 
 /** Open `state` on a new phone of `browser` against `stage`: its session, its camera, its routes, its address, its steps. */
 export async function openState(browser: Browser, stage: UiStage, demo: NocturneDemo, state: UiState): Promise<OpenedState> {
-  const context = await mobileContext(browser);
+  const context = state.size
+    ? await browser.newContext({ viewport: { ...state.size }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'no-preference' })
+    : await mobileContext(browser);
   const page = await context.newPage();
   const gates: { open(): void }[] = [];
   const holds: Holds = {

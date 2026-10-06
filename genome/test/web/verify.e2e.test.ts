@@ -2534,7 +2534,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await visible(link);
     await attrOf(link, 'href', '/verify/releases');
     await expect.poll(() => link.locator('.n-rail__live').isVisible(), POLL).toBe(true);
-    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'SEE THE RELEASE', 'RELEASES']);
+    // The dot is said to a screen reader: RELEASES LIVE.
+    await countOf(page.locator('.n-rail').getByRole('link', { name: 'RELEASES LIVE', exact: true }), 1);
+    await keepsFloors(page, ['SCAN ORBES CODE', 'UPLOAD A PHOTO', 'SEE THE RELEASE', 'RELEASES LIVE']);
     await link.click();
     await textOf(page.locator('h1'), 'THE RELEASES');
     expect(new URL(page.url()).pathname).toBe('/verify/releases');
@@ -2841,6 +2843,27 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.getByRole('button', { name: 'SOUND', exact: true }), 'SOUND OFF');
     await page.getByRole('button', { name: 'SOUND', exact: true }).click();
     await textOf(page.getByRole('button', { name: 'SOUND', exact: true }), 'SOUND ON');
+    // The sheet's read of the club and the pieces ends while a row without a control of its own has the focus (MY PIECES,
+    // the legal pages): the sheet drawn again, that row has it again, never <body>.
+    for (const name of ['MY PIECES', 'PRIVACY · TERMS · LEGAL · HELP']) {
+      let releaseRead!: () => void;
+      const held = new Promise<void>((r) => (releaseRead = r));
+      await page.route('**/api/v1/club/status', async (route) => {
+        await held;
+        await route.continue();
+      });
+      await account.click();
+      await visible(sheet);
+      const row = sheet.getByRole('link', { name, exact: true });
+      await row.evaluate((el) => el.setAttribute('data-drawn-before', ''));
+      await row.focus();
+      releaseRead();
+      await expect.poll(() => sheet.locator('[data-drawn-before]').count(), POLL).toBe(0);
+      expect(await page.evaluate(() => document.activeElement?.textContent), name).toBe(name);
+      await page.unroute('**/api/v1/club/status');
+      await page.keyboard.press('Escape');
+      await countOf(page.locator('.n-account:not([hidden])'), 0);
+    }
     // CHANGE PASSWORD in the sheet (C39): a wrong current password said on its field, then changed; this session stays.
     await account.click();
     await sheet.getByRole('button', { name: 'CHANGE PASSWORD', exact: true }).click();

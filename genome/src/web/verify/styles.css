@@ -1613,7 +1613,8 @@ body.nocturne .view--sheet.n-model {
 
 .n-lookbook__failed,
 .n-model__failed,
-.n-model__missing {
+.n-model__missing,
+.n-release__missing {
   margin-top: 22px;
 }
 

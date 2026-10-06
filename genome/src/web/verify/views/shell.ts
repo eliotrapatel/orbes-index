@@ -27,7 +27,7 @@ import type { SessionStore } from '../session.js';
 import type { SoundSwitch } from '../sound.js';
 import type { ClubStatus } from '../types.js';
 import { AccountSheet } from './account.js';
-import { CHAPTER_PATHS } from '../../shared/chapters.js';
+import { CHAPTER_PATHS, showRailLive } from '../../shared/chapters.js';
 import { PIECES_PATH } from './common.js';
 import { appAnchor, CHAPTERS, drawSound, footer, icon, monogram } from './nocturne.js';
 
@@ -71,6 +71,8 @@ export class Shell {
   private readonly rail: HTMLElement;
   private readonly links: Map<ChapterId, HTMLAnchorElement>;
   private readonly live = h('i', { class: 'n-rail__live', attrs: { 'aria-hidden': 'true', hidden: true } });
+  /** The dot's word for a screen reader (shared/chapters.ts RAIL_LIVE_WORD): RELEASES LIVE while it shows. */
+  private readonly liveWord = h('span', { class: 'visually-hidden n-rail__live-word', attrs: { hidden: true } });
   private readonly foot: HTMLElement;
   private readonly soundButton: HTMLButtonElement | null;
   /** The SCAN ring, fixed at the foot of the screen. */
@@ -106,7 +108,7 @@ export class Shell {
         return [c, link] as const;
       }),
     );
-    this.links.get('releases')!.append(this.live);
+    this.links.get('releases')!.append(this.live, this.liveWord);
     this.rail = h('nav', { class: 'n-rail', attrs: { 'aria-label': CHROME.rail } }, ...this.links.values());
 
     const foot = footer(deps.sound, () => {
@@ -231,7 +233,7 @@ export class Shell {
     this.railReadAt = Date.now();
     try {
       const [live, drops] = await Promise.all([this.deps.api.liveNext().catch(() => null), this.deps.api.drops().catch(() => [])]);
-      this.live.hidden = !railLive(live, drops);
+      showRailLive(this.live, this.liveWord, railLive(live, drops));
     } finally {
       this.railReading = false;
     }

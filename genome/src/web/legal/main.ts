@@ -27,7 +27,7 @@
  * server publishes (GET /api/v1/client-services), and nothing when there is
  * none. The pages print as documents (styles.css, @media print).
  */
-import { CHAPTER_IDS, CHAPTER_LABELS, CHAPTER_PATHS, RAIL_LABEL } from '../shared/chapters.js';
+import { CHAPTER_IDS, CHAPTER_LABELS, CHAPTER_PATHS, RAIL_LABEL, showRailLive } from '../shared/chapters.js';
 import { contactLines, phoneHref } from '../shared/client-services.js';
 import { byId, h, mount, s } from '../shared/dom.js';
 import { GEOIP_ATTRIBUTION, LEGAL_PAGES } from '../shared/legal.js';
@@ -82,14 +82,16 @@ function header(words: LegalWords): HTMLElement {
  * app's own rail says it (verify/nocturne-model.ts railLive); nothing is said when that cannot be read. Its words are
  * the app's, in English: on a French page the rail says so (lang="en"), as DB-IP's attribution does.
  */
-function rail(lang: Lang): { el: HTMLElement; live: HTMLElement } {
+function rail(lang: Lang): { el: HTMLElement; live: HTMLElement; liveWord: HTMLElement } {
   const live = h('i', { class: 'n-rail__live', attrs: { 'aria-hidden': 'true', hidden: true } });
-  const links = CHAPTER_IDS.map((c) => h('a', { class: 'n-g n-rail__link', attrs: { href: CHAPTER_PATHS[c] }, data: { chapter: c } }, CHAPTER_LABELS[c], c === 'releases' ? live : null));
-  return { el: h('nav', { class: 'n-rail legal-rail', attrs: { 'aria-label': RAIL_LABEL, lang: lang === 'en' ? null : 'en' } }, ...links), live };
+  // The dot said to a screen reader: RELEASES LIVE while it shows (shared/chapters.ts).
+  const liveWord = h('span', { class: 'visually-hidden n-rail__live-word', attrs: { hidden: true } });
+  const links = CHAPTER_IDS.map((c) => h('a', { class: 'n-g n-rail__link', attrs: { href: CHAPTER_PATHS[c] }, data: { chapter: c } }, CHAPTER_LABELS[c], c === 'releases' ? live : null, c === 'releases' ? liveWord : null));
+  return { el: h('nav', { class: 'n-rail legal-rail', attrs: { 'aria-label': RAIL_LABEL, lang: lang === 'en' ? null : 'en' } }, ...links), live, liveWord };
 }
 
 /** RELEASES' dot: what is announced, read from the app's public routes (GET /api/v1/live/next, /api/v1/drops). */
-async function readRail(live: HTMLElement): Promise<void> {
+async function readRail(live: HTMLElement, liveWord: HTMLElement): Promise<void> {
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), CONTACT_TIMEOUT_MS);
   const get = async (path: string): Promise<unknown> => {
@@ -102,7 +104,7 @@ async function readRail(live: HTMLElement): Promise<void> {
     const [next, drops] = await Promise.all([get('/api/v1/live/next').catch(() => null), get('/api/v1/drops').catch(() => null)]);
     const release = (next as { release?: unknown } | null)?.release ?? null;
     const list = (drops as { drops?: unknown } | null)?.drops;
-    live.hidden = !railLive(release as Parameters<typeof railLive>[0], Array.isArray(list) ? list : []);
+    showRailLive(live, liveWord, railLive(release as Parameters<typeof railLive>[0], Array.isArray(list) ? list : []));
   } catch {
     // Offline or refused: the rail without its dot.
   } finally {
@@ -261,7 +263,7 @@ function start(): void {
   const target = section ? document.getElementById(section.slice(1)) : null;
   target?.scrollIntoView();
   void fillContacts(root, words);
-  void readRail(chapters.live);
+  void readRail(chapters.live, chapters.liveWord);
 }
 
 start();

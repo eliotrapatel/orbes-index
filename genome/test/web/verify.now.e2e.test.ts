@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import type { NocturneDemo } from '../support/nocturne-demo.js';
 import { eachState } from '../support/nocturne-stage.js';
 import { openState, stateById, type UiState } from '../support/nocturne-states.js';
-import { CHROMIUM_PATH, type UiStage } from '../support/ui-stage.js';
+import { CHROMIUM_PATH, codePhoto, type UiStage } from '../support/ui-stage.js';
 
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
 
@@ -305,12 +305,71 @@ const FULL: { state: UiState; check: Check } = {
   },
 };
 
+/**
+ * The rail's NOW from ways deeper than one link (review of NOCTURNE): each comes back to NOW, the landing's own entry
+ * (its depth 0), whatever entries the way pushed or replaced — a chapter over a sheet, two chapters in turn, a chapter over
+ * a release's page, a sheet's next release, a scan from a sheet.
+ */
+const DEPTH: { state: UiState; check: Check } = {
+  // A scan is a verification read and counted: the state runs after the others of its variant.
+  state: { ...as('now-signed-in', 'now-rail-depth', 'you'), mutates: true },
+  check: async (page, demo) => {
+    const at = () => new URL(page.url()).pathname;
+    // A chapter by its word (RELEASES reads RELEASES LIVE while its dot shows).
+    const rail = (name: string) => page.locator(`.n-rail a[data-chapter="${name.toLowerCase()}"]`);
+    const reach = async (click: () => Promise<void>, path: string | RegExp, screen: string) => {
+      await click();
+      if (typeof path === 'string') await expect.poll(at, { timeout: 10_000 }).toBe(path);
+      else await expect.poll(at, { timeout: 10_000 }).toMatch(path);
+      await page.locator(screen).first().waitFor({ timeout: 10_000 });
+    };
+    const now = async (way: string) => {
+      await rail('NOW').click();
+      await expect.poll(at, { timeout: 10_000, message: way }).toBe('/verify');
+      await page.locator(READY).waitFor({ timeout: 10_000 });
+      expect(await page.evaluate(() => (history.state as { depth?: unknown } | null)?.depth), way).toBe(0);
+    };
+    const collection = () => reach(() => rail('COLLECTION').click(), '/verify/lookbook', '.view--lookbook[data-state="ready"]');
+    const aSheet = () => reach(() => page.locator('.view--lookbook a[href^="/verify/lookbook/"]').first().click(), /^\/verify\/lookbook\/.+/, '.view--sheet .sheet__body section');
+    const releases = () => reach(() => rail('RELEASES').click(), '/verify/releases', '.view--releases');
+    const pieces = () => reach(() => rail('PIECES').click(), '/verify/pieces', '.view--pieces');
+
+    // COLLECTION > a sheet > RELEASES (pushed over the sheet) > NOW.
+    await collection();
+    await aSheet();
+    await releases();
+    await now('COLLECTION > a sheet > RELEASES');
+    // RELEASES > PIECES (the chapters take each other's entry) > NOW.
+    await releases();
+    await pieces();
+    await now('RELEASES > PIECES');
+    // RELEASES > a release > PIECES (pushed over the release's page) > NOW.
+    await releases();
+    await reach(() => page.locator('.view--releases a[href^="/verify/releases/"]').first().click(), /^\/verify\/releases\/.+/, '.view--live, .view--release');
+    await pieces();
+    await now('RELEASES > a release > PIECES');
+    // A sheet > its next release (the list and the release's page pushed over the sheet) > NOW.
+    await collection();
+    await aSheet();
+    await reach(() => page.locator('.view--sheet .n-model__next').click(), `/verify/releases/${demo.releases.blue}`, '.view--live, .view--release');
+    await now('a sheet > its next release');
+    // A sheet > a scan by photo (its entry in the sheet's place) > the result > NOW.
+    await collection();
+    await aSheet();
+    const code = demo.codes.first;
+    if (!code) throw new Error('no demo code first');
+    await page.setInputFiles('#photo-input', { name: 'orbes-code.png', mimeType: 'image/png', buffer: codePhoto(code) });
+    await page.locator('.view--result .n-result__title').waitFor({ timeout: 30_000 });
+    await now('a sheet > a scan > its result');
+  },
+};
+
 describe.skipIf(!HAS_CHROMIUM)('NOW: what leads, its sections and its links, signed in and signed out (Chromium)', () => {
   it(
     'leads with a LIVE RELEASE and its draw, a draw, the newest model or nothing, each section and link as the canvas sets it',
     async () => {
       const failures: string[] = [];
-      const all = [...CASES, ANSWER, FULL];
+      const all = [...CASES, ANSWER, FULL, DEPTH];
       await eachState(
         all.map((c) => c.state),
         async (state, { stage, demo, browser }) => {

@@ -240,6 +240,8 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
     await page.route('**/api/v1/drops', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{}' }));
     await page.reload();
     await page.getByRole('navigation', { name: 'Main' }).locator('.n-rail__live').waitFor({ state: 'visible' });
+    // The dot is said to a screen reader: RELEASES LIVE (its word visually hidden).
+    expect(await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'RELEASES LIVE', exact: true }).count()).toBe(1);
     // The one problem is the draws' refusal itself, as the browser reports it.
     for (const p of problems) expect(p).toMatch(/status of 503/);
     await page.context().close();

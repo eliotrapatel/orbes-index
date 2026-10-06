@@ -438,3 +438,28 @@ Le 2026-10-04, après deux pages d'idées et leurs tours de questions (27 choix,
 - **Les écrans** (Quality bar 7) : `docs/assets/ui/plus-01-releases-live.png` à `plus-30-certificate.png` (les écrans du collectionneur, dont le tour de la salle d'après et les commandes à chaque étape, les pages de la console, dont les avertissements de faisabilité, les quatre documents imprimés), produits par `scripts/capture-ui.ts --only plus`, et les `live-*.png` produits à nouveau, `live-22-edge-over.png` dans l'état final d'une sortie (décision 30) ; montrés dans BRAND-DESIGN-SYSTEM.
 - **Ce qui attend, dans l'ordre du plan** : la suite complète verte dans le worktree ; puis la fusion d'`orbes-plus` avec la branche, sa suite complète, le push et la CI ; enfin le déploiement E avec le propriétaire, hors 03:00–05:30 UTC, l'accord du responsable de l'hôte pour l'heure, et ses vérifications réelles (runbook §1.7).
 
+
+## 12. NOCTURNE du 2026-10-05
+
+Le 2026-10-05, le propriétaire a choisi la direction C, NOCTURNE, pour toute l'application des collectionneurs (/verify) et les pages légales, et approuvé son plan le même jour : le noir du coffre, NOW à la place de l'accueil, un menu de chapitres, la feuille du compte, les variantes d'un modèle et le prix d'une sortie tirée. Les 43 planches validées (C1 à C43) sont la référence. Il est construit en dix étapes, N0 à N9, sur la branche locale `orbes-nocturne`, depuis la tête du lot E ; il part en production en un seul déploiement, F (migration `0024`, aucun changement de l'hôte : [son runbook](launch/DEPLOY-NOCTURNE.md)). La page partagée d'un certificat, la console (hors des variantes, du prix d'une sortie tirée et de l'émission), les PDF et l'écran de la boutique gardent leur allure. Aucune donnée personnelle nouvelle n'est collectée ; une réponse au collectionneur ne porte plus la photographie de la pièce elle-même (décision 9). Les statuts sont ceux du §8.
+
+### 12.1 Statut par étape
+
+| Étape | Objet | Statut | En production | Commits principaux | Ce qui reste ou attend |
+|---|---|---|---|---|---|
+| N0 | L'inventaire de chaque écran et état (`docs/launch/NOCTURNE-MATRIX.md`), l'outil de parité, la base de contenu, les captures d'avant des écrans LIVE | fait | déploiement F (à faire) | `e4ca904` | — |
+| N1 | Les variantes et le prix d'une sortie tirée (migration `0024`), `Variants` et `Add a variant` dans la console, le champ `Size` à l'émission sans photo de la pièce | fait | déploiement F (à faire) | `38597d5` | — |
+| N2 | Le thème du rulebook, la colonne sur le noir, les pièces partagées, le test des styles calculés, les barres de Safari dans le noir, le monogramme pendant un chargement | fait | déploiement F (à faire) | `1f0a4b7` | — |
+| N3 | NOW et ses trois têtes (une LIVE RELEASE, une sortie tirée, la collection), la carte d'invitation avec YES / NO | fait | déploiement F (à faire) | `ef0ce3a` | Le premier point de contrôle du propriétaire (NOW à côté de C1, C10, C42 et C43). |
+| N4 | Le scan et chaque résultat, l'inscription et la connexion, chaque message | fait | déploiement F (à faire) | `a0c38ce` | — |
+| N5 | MY PIECES en trois onglets, la page d'une pièce, d'où elle vient, la photo de chaque commande | fait | déploiement F (à faire) | `d54d1e0` | — |
+| N6 | THE COLLECTION, la fiche d'un modèle et ses variantes, THE PRIVATE SALON et son aperçu | fait | déploiement F (à faire) | `afe1b57` | — |
+| N7 | THE RELEASES (LIVE et PAST), la page d'une sortie tirée et son prix, les pages d'une LIVE RELEASE avant et après la salle | fait | déploiement F (à faire) | `4260833` | — |
+| N8 | THE CIRCLE et une publication, la connexion, les pages légales | fait | déploiement F (à faire) | `787b2ae` | — |
+| N9 | La documentation, les captures, le tableau de chaque vrai écran à côté de sa planche | fait | déploiement F (à faire) | `8f2f1b3` | Le second point de contrôle : l'accord du propriétaire sur le tableau des 43 écrans. |
+
+### 12.2 Écarts déclarés et ce qui attend
+
+- **Les écarts permis aux planches** sont listés dans la matrice (`docs/launch/NOCTURNE-MATRIX.md`, « Where the build differs from the boards on purpose ») et attendent le regard du propriétaire sur le tableau : la ligne © en cendre et non en fumée (contraste), chaque libellé de bouton en Gravesend, la lune du signe de prudence dessinée, l'absence d'une ligne VARIANTS sous les spécifications (les variantes sont les points), et les autres.
+- **Les omissions des planches** (ce que l'application a et garde, bâti avec les mêmes pièces : jamais une régression) sont listées dans la même matrice (« Omissions of the drawings »), pour la revue du tableau.
+- **Le déploiement F** : après l'accord du propriétaire sur le tableau, la CI verte, l'accord du responsable de l'hôte pour une heure précise hors 03:00–05:30 UTC, puis les vérifications réelles du runbook (§1.7). Les pages légales ne changent pas de texte : leur version reste celle de E.

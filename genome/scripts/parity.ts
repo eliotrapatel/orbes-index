@@ -30,7 +30,7 @@
  *       masked: maskVolatile), into test/fixtures/nocturne-baseline.json (the content test's baseline); with --states,
  *       those states only (a new state, or one whose way there changed), every other entry's values left as they are
  *
- * Default out: $ORBES_PARITY_OUT, else the scratchpad of the NOCTURNE workflow. Default ref: $ORBES_PARITY_REF, else the
+ * Default out: $ORBES_PARITY_OUT, else genome/out/parity (out/ is ignored by git). Default ref: $ORBES_PARITY_REF, else the
  * canvas's shots (.claude/orbes-run/nocturne-ref/shots of the main checkout). Chromium: $ORBES_CHROMIUM.
  * Each variant of the demo is its own stage (a fresh database, seeded in a few seconds); the browser plays a hand-held
  * clip of that stage's piece to register (its codes are signed by that stage's key).
@@ -45,7 +45,7 @@ import { BOARD_SECTIONS, BOARD_STATES, maskVolatile, openState, overflows, settl
 import { fullScreenshot, type UiStage } from '../test/support/ui-stage.js';
 
 const GENOME_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_OUT = process.env.ORBES_PARITY_OUT ?? '/private/tmp/claude-501/-Users-eliotrapatel-orbes-index/aae31500-d9d4-4f0f-8fd8-de1e75946007/scratchpad/parity';
+const DEFAULT_OUT = process.env.ORBES_PARITY_OUT ?? join(GENOME_DIR, 'out', 'parity');
 const DEFAULT_REF = process.env.ORBES_PARITY_REF ?? canvasShots(GENOME_DIR);
 /** The captures of the LIVE screens taken at N0 on the app before NOCTURNE (fidelity rule 6). */
 const BEFORE_DIR = join(GENOME_DIR, '..', 'docs', 'assets', 'ui', 'nocturne-before');

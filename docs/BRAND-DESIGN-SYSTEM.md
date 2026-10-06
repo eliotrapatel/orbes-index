@@ -584,7 +584,7 @@ It never shows the product id, the fingerprint or the account: only what the cer
 | Countdown (`.n-cd`) | Groups of two digits at 46 px weight 200, their colon in smoke, the unit under each |
 | Tier dots (`.n-meter`) | Five 9 px dots, filled ivory up to the tier |
 | Switch (`.n-sw`) | 44 × 26 px, ivory with an ink knob when on |
-| Variant dots (`.n-vsel`) | 16 px dots 26 px apart, each over its label (12 px); the selected one ringed (3 px of ground, then 1 px of ivory), `aria-pressed`. The colour is the model's `variant_swatch` (§6, DATABASE §5.3), drawn as a 135° gradient with the soft highlight the boards give steel, gold and blue: its OKLab lightness raised by 0.21 at the start and by 0.16 at the end, hue and chroma kept (`swatchGradient`) |
+| Variant dots (`.n-vsel`) | 16 px dots 26 px apart, each over its label (12 px); the selected one ringed (3 px of ground, then 1 px of ivory), `aria-pressed`. The colour is the model's `variant_swatch` (§6, DATABASE §5.3), drawn as a 135° gradient, the swatch at 55 %: the boards' own steel (#9D9B96), gold (#B88A3A) and blue (#16224A) take the boards' exact highlights (#E9E8E4 / #D7D5D0, #F0D692 / #E6C578, #3A4F8F / #2C3E78); any other colour takes its OKLab lightness raised by 0.21 at the start and by 0.16 at the end, hue and chroma kept (`swatchGradient`, `CANVAS_SWATCHES`) |
 | Size buttons (`.n-sizes`) | 78 × 54 px hairline boxes, 16 px figures; the chosen one ringed inside (1 px ivory, 3 px ground, 1 px ivory) |
 | Order steps (`.n-steps`) | Four columns at least (five with RETURNED): 11 px dots on a hairline, the reached ones ivory with the bar, their label 8.5 px and their date 12 px |
 | Tone marks | 44 px: authentic (ring and core), caution (ring and moon), void (the empty ring) |

@@ -52,25 +52,19 @@ describe('NOCTURNE: a variant\'s dot, drawn from its swatch', () => {
     return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
   };
 
-  it('sets the swatch at 55 % between two highlights of itself, as the canvas draws steel, gold and blue', () => {
-    const g = swatchGradient('#9D9B96');
-    const m = /^linear-gradient\(135deg, (#[0-9a-f]{6}), #9d9b96 55%, (#[0-9a-f]{6})\)$/.exec(g);
+  it('sets any other swatch at 55 % between two highlights of itself, made lighter in OKLab', () => {
+    const g = swatchGradient('#7A5C3E');
+    const m = /^linear-gradient\(135deg, (#[0-9a-f]{6}), #7a5c3e 55%, (#[0-9a-f]{6})\)$/.exec(g);
     expect(m, g).not.toBeNull();
-    expect(lightness(m![1]!) - lightness('#9d9b96')).toBeCloseTo(SWATCH_HIGHLIGHT.start, 2);
-    expect(lightness(m![2]!) - lightness('#9d9b96')).toBeCloseTo(SWATCH_HIGHLIGHT.end, 2);
+    expect(lightness(m![1]!) - lightness('#7a5c3e')).toBeCloseTo(SWATCH_HIGHLIGHT.start, 2);
+    expect(lightness(m![2]!) - lightness('#7a5c3e')).toBeCloseTo(SWATCH_HIGHLIGHT.end, 2);
   });
 
-  it('comes within a few steps of the canvas\'s own highlights for its three finishes', () => {
+  it('draws the canvas\'s three finishes with the canvas\'s own gradients, exactly', () => {
     // build.py: .steel #e9e8e4 → #9d9b96 → #d7d5d0; .gold #f0d692 → #b88a3a → #e6c578; .blue #3a4f8f → #16224a → #2c3e78.
-    const canvas: [string, string, string][] = [
-      ['#9d9b96', '#e9e8e4', '#d7d5d0'],
-      ['#b88a3a', '#f0d692', '#e6c578'],
-      ['#16224a', '#3a4f8f', '#2c3e78'],
-    ];
-    for (const [mid, start, end] of canvas) {
-      expect(Math.abs(lightness(lighten(mid, SWATCH_HIGHLIGHT.start)) - lightness(start)), mid).toBeLessThan(0.04);
-      expect(Math.abs(lightness(lighten(mid, SWATCH_HIGHLIGHT.end)) - lightness(end)), mid).toBeLessThan(0.05);
-    }
+    expect(swatchGradient('#9D9B96')).toBe('linear-gradient(135deg, #e9e8e4, #9d9b96 55%, #d7d5d0)');
+    expect(swatchGradient('#B88A3A')).toBe('linear-gradient(135deg, #f0d692, #b88a3a 55%, #e6c578)');
+    expect(swatchGradient('#16224a')).toBe('linear-gradient(135deg, #3a4f8f, #16224a 55%, #2c3e78)');
   });
 
   it('keeps a highlight within sRGB, and draws nothing from a colour that is not #RRGGBB', () => {

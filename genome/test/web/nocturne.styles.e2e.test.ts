@@ -78,6 +78,17 @@ async function check(page: Page, selector: string, want: Record<string, string |
 const isGravesend = (family: string) => /^"?Gravesend Sans"?/.test(family);
 const isHelvetica = (family: string) => /^"?Helvetica Neue"?/.test(family);
 
+/** The keyboard focus of NOCTURNE (plan, Accessibility): an ivory ring, 2 px, 2 px off. */
+const FOCUS_RING = { 'outline-style': 'solid', 'outline-width': 2, 'outline-offset': 2, 'outline-color': IV } as const;
+
+/** `selector` given the keyboard's focus (a key pressed first, so the browser shows it as the keyboard's): its ring. */
+async function focusRing(page: Page, selector: string): Promise<void> {
+  await page.keyboard.press('Shift');
+  await page.locator(selector).first().focus();
+  expect(await page.locator(selector).first().evaluate((el) => el.matches(':focus-visible')), selector).toBe(true);
+  await check(page, `${selector}:focus`, FOCUS_RING);
+}
+
 /** The specimen of the pieces no screen holds yet, bundled for the page. */
 async function specimenScript(): Promise<string> {
   const out = await build({ entryPoints: [join(HERE, '../support/nocturne-specimen.ts')], bundle: true, write: false, format: 'iife', target: 'es2022', logLevel: 'silent' });
@@ -639,7 +650,8 @@ async function chrome(page: Page): Promise<void> {
   expect(await page.locator('.n-hd button.n-acct svg.n-mono').getAttribute('viewBox')).toBe('0 0 500 500');
   // The rail: 40 px, its hairline, the five chapters at 9.5 px, 0.16 em; the current one ivory and underlined, at its word.
   await check(page, '.n-rail', { display: 'flex', 'justify-content': 'space-between', 'align-items': 'flex-end', height: 40, 'padding-left': 22, 'padding-right': 22, 'border-bottom-width': 1, 'border-bottom-color': LINE, 'white-space': 'nowrap', 'overflow-x': 'clip' });
-  expect(await page.locator('.n-rail a').allInnerTexts()).toEqual(['NOW', 'RELEASES', 'COLLECTION', 'CIRCLE', 'PIECES']);
+  // The words as seen (RELEASES' dot has a word for a screen reader alone, visually hidden: below).
+  expect(await page.locator('.n-rail a').evaluateAll((els) => els.map((e) => [...e.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join('')))).toEqual(['NOW', 'RELEASES', 'COLLECTION', 'CIRCLE', 'PIECES']);
   expect(await page.locator('.n-rail').getAttribute('aria-label')).toBe('Main');
   await check(page, '.n-rail__link:not([aria-current])', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.16), color: ASH, 'padding-bottom': 13 });
   await check(page, '.n-rail__link[aria-current="page"]', { color: IV });
@@ -652,6 +664,9 @@ async function chrome(page: Page): Promise<void> {
   expect(Number(link._h)).toBeGreaterThanOrEqual(44 - 0.05);
   // RELEASES' dot: a LIVE RELEASE is announced (the demo's blue one).
   await check(page, '.n-rail__live', { width: 5, height: 5, 'border-radius': '50%', 'background-color': IV, 'margin-left': 7, display: 'inline-block' });
+  // The dot is decorative: a screen reader hears RELEASES LIVE, its word visually hidden (1 px, clipped).
+  expect(await page.locator('.n-rail').getByRole('link', { name: 'RELEASES LIVE', exact: true }).count()).toBe(1);
+  await check(page, '.n-rail__live-word', { position: 'absolute', width: 1, height: 1, overflow: 'hidden' });
   // The footer: the monogram 38 px, the legal links at 10 px, SOUND, DB-IP's attribution, © ORBES · PARIS in ash.
   await check(page, '.n-foot', { 'margin-top': 96, 'padding-top': 40, 'padding-left': 24, 'padding-right': 24, 'border-top-width': 1, 'border-top-color': LINE });
   await check(page, '.n-foot > svg.n-mono', { _w: 38, _h: 38, color: IV });
@@ -770,6 +785,12 @@ async function password(page: Page): Promise<void> {
   await check(page, '.n-fld .n-lab', { display: 'block', 'font-size': 13, 'letter-spacing': em(13, 0.24), color: ASH, 'margin-bottom': 6, 'text-transform': 'uppercase' });
   // The first field has the focus (its line then turns ivory); the other at rest.
   await check(page, '.n-fld__input:focus', { 'border-bottom-color': IV });
+  // Its keyboard focus is the ivory ring too, the line a further cue; on a field said invalid (its line ivory at rest),
+  // the ring alone tells the focus.
+  await focusRing(page, '.n-fld__input');
+  await page.locator('.n-fld__input').first().evaluate((el) => el.setAttribute('aria-invalid', 'true'));
+  await check(page, '.n-fld__input[aria-invalid="true"]:focus', FOCUS_RING);
+  await page.locator('.n-fld__input').first().evaluate((el) => el.removeAttribute('aria-invalid'));
   await check(page, '.n-fld__input:not(:focus)', { height: 44, 'border-bottom-width': 1, 'border-bottom-color': LINE2, 'border-top-width': 0, 'font-size': 16, color: IV, 'background-color': NONE, 'padding-left': 0 });
   await check(page, '.n-form__actions', { display: 'grid', 'column-gap': 10, 'margin-top': 22 });
   const cols = (await read(page, '.n-form__actions', ['grid-template-columns']))['grid-template-columns']!.split(' ');
@@ -999,6 +1020,7 @@ async function myReleases(page: Page): Promise<void> {
   await check(page, '.n-pieces__entry-title', { 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV, 'text-decoration-line': 'underline', 'text-underline-offset': '3px' });
   await check(page, '.n-pieces__entry-line.n-lb', { 'margin-top': 8, 'font-size': 9.5, color: ASH });
   await check(page, '.n-pieces__entry-line.n-sm', { 'margin-top': 8, 'font-size': 13 });
+  await focusRing(page, '.n-pieces__entry-title');
 }
 
 /** C4: a piece: the crumb, THE MODEL, the lines, the state, WHERE IT COMES FROM, the GENOME, the tabs, OWNERSHIP. */
@@ -1174,6 +1196,7 @@ async function aSalonModel(page: Page): Promise<void> {
   await check(page, '.n-model__note-field .n-lab', { 'font-size': 13, 'letter-spacing': em(13, 0.24), color: ASH, 'margin-bottom': 6 });
   await check(page, '.n-model__note', { 'margin-top': 6, height: 89.5, 'padding-top': 10, 'padding-left': 10, 'border-top-color': LINE2, 'font-size': 15, color: IV, resize: 'vertical', 'background-color': NONE });
   await check(page, '#sheet-note-hint', { 'margin-top': 6, 'font-size': 13, color: ASH });
+  await focusRing(page, '.n-model__note');
   await check(page, '.n-model__request', { 'margin-top': 22, height: 54, 'background-color': IV, color: GROUND });
   expect(await shown(page, 'main .n-btn')).toBe(1);
 }

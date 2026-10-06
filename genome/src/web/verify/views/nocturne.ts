@@ -223,7 +223,9 @@ export function leadRow(label: string, opts: { href?: string; onOpen?: () => voi
   const cls = ['n-row', 'n-row--lead', opts.extraClass];
   if (opts.href === undefined) return h('button', { class: cls, attrs: { type: 'button', ...opts.attrs }, on: opts.onOpen ? { click: () => opts.onOpen?.() } : undefined }, ...children);
   if (opts.newTab) return h('a', { class: cls, attrs: { href: opts.href, target: '_blank', rel: 'noopener', ...opts.attrs } }, ...children);
-  return appAnchor(opts.href, cls, opts.onOpen, ...children);
+  const a = appAnchor(opts.href, cls, opts.onOpen, ...children);
+  for (const [name, value] of Object.entries(opts.attrs ?? {})) a.setAttribute(name, value);
+  return a;
 }
 
 /** Facts: `.dl` (a label in ash, its value at the right, 14 px rows) or `.kv` (a Gravesend label, 13.5 px rows). */

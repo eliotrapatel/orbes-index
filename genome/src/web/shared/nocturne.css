@@ -73,7 +73,10 @@ body.nocturne ::selection {
   color: var(--vault-ground);
 }
 
-/* The keyboard focus of NOCTURNE's controls: an ivory ring, 2 px, 2 px off (plan, Accessibility). */
+/*
+ * The keyboard focus of NOCTURNE's controls: an ivory ring, 2 px, 2 px off (plan, Accessibility). The fields keep their
+ * line turning ivory as a further cue (a field said invalid has it at rest: the ring tells its focus).
+ */
 .n-acct:focus-visible,
 .n-rail__link:focus-visible,
 .n-btn:focus-visible,
@@ -93,6 +96,9 @@ body.nocturne ::selection {
 .n-dbip:focus-visible,
 .n-scan__ring:focus-visible,
 .n-account__close:focus-visible,
+.n-fld__input:focus-visible,
+.n-model__note:focus-visible,
+.n-pieces__entry-title:focus-visible,
 .live-banner:focus-visible {
   outline: 2px solid var(--vault-ink);
   outline-offset: 2px;
