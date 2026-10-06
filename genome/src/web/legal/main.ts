@@ -78,12 +78,13 @@ function header(words: LegalWords): HTMLElement {
 /**
  * The app's rail (C23, C41): its five chapters, none current here, each a link into /verify. RELEASES carries its dot
  * while a LIVE RELEASE is announced, its room open or live, or a draw open, soon open or in its early access, as the
- * app's own rail says it (verify/nocturne-model.ts railLive); nothing is said when that cannot be read.
+ * app's own rail says it (verify/nocturne-model.ts railLive); nothing is said when that cannot be read. Its words are
+ * the app's, in English: on a French page the rail says so (lang="en"), as DB-IP's attribution does.
  */
-function rail(): { el: HTMLElement; live: HTMLElement } {
+function rail(lang: Lang): { el: HTMLElement; live: HTMLElement } {
   const live = h('i', { class: 'n-rail__live', attrs: { 'aria-hidden': 'true', hidden: true } });
   const links = CHAPTER_IDS.map((c) => h('a', { class: 'n-g n-rail__link', attrs: { href: CHAPTER_PATHS[c] }, data: { chapter: c } }, CHAPTER_LABELS[c], c === 'releases' ? live : null));
-  return { el: h('nav', { class: 'n-rail legal-rail', attrs: { 'aria-label': RAIL_LABEL } }, ...links), live };
+  return { el: h('nav', { class: 'n-rail legal-rail', attrs: { 'aria-label': RAIL_LABEL, lang: lang === 'en' ? null : 'en' } }, ...links), live };
 }
 
 /** RELEASES' dot: what is announced, read from the app's public routes (GET /api/v1/live/next, /api/v1/drops). */
@@ -96,7 +97,8 @@ async function readRail(live: HTMLElement): Promise<void> {
     return res.json();
   };
   try {
-    const [next, drops] = await Promise.all([get('/api/v1/live/next'), get('/api/v1/drops')]);
+    // Each read on its own, as the app's rail reads them (views/shell.ts): one that fails leaves the other's say.
+    const [next, drops] = await Promise.all([get('/api/v1/live/next').catch(() => null), get('/api/v1/drops').catch(() => null)]);
     const release = (next as { release?: unknown } | null)?.release ?? null;
     const list = (drops as { drops?: unknown } | null)?.drops;
     live.hidden = !railLive(release as Parameters<typeof railLive>[0], Array.isArray(list) ? list : []);
@@ -243,7 +245,7 @@ function start(): void {
   const doc = route === 'index' ? null : DOCUMENTS[route][lang];
   document.title = `${doc ? doc.title : words.indexTitle} — ORBES`;
   const root = byId('app');
-  const chapters = rail();
+  const chapters = rail(lang);
   mount(
     root,
     header(words),

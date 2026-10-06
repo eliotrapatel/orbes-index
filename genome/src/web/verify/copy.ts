@@ -940,7 +940,6 @@ export const CIRCLE = Object.freeze({
   moreFailed: 'More posts could not be shown just now.',
   /** The accessible name of the feed's list (the canvas's). */
   postsLabel: 'Posts',
-  scan: 'SCAN ORBES CODE',
   /** Signed out: the sign-in follows. */
   signIn: 'The circle is reserved for the owners of an ORBES piece. Sign in with your ORBES account.',
   /** Signed in, no piece held now. */

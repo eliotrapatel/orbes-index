@@ -829,6 +829,8 @@ export const UI_STATES: readonly UiState[] = [
     as: 'platine',
     path: at('/verify/circle'),
     // The demo publishes fewer posts than a page (twenty): the feed's answer says one more is there, as C8's does.
+    // Its content baseline is what 5efd4c9's feed showed under the same answer: circle-platine's, SHOW MORE after the
+    // last post (views/circle.ts there: SHOW MORE while fewer posts are shown than the total).
     routes: async (page) =>
       page.route('**/api/v1/club/circle?*', async (route) => {
         const res = await route.fetch();

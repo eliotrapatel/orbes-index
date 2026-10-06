@@ -29,17 +29,15 @@
   white-space: nowrap;
 }
 
-/* A short page's name (AIDE) keeps a 44 px zone: 6 px each side of its word, given back; its line under the word alone. */
+/* A short page's name (AIDE) keeps a 44 px zone: 12 px after its word (into the 22 px between two), given back, so the
+   first of each line stays inside the column, as the app's foot links do; its line under the word alone. */
 .legal-nav .legal-nav__link {
-  margin-right: -6px;
-  margin-left: -6px;
-  padding-right: 6px;
-  padding-left: 6px;
+  margin-right: -12px;
+  padding-right: 12px;
 }
 
 .legal-nav .legal-nav__link[aria-current]::after {
-  right: 6px;
-  left: 6px;
+  right: 12px;
 }
 
 .legal-meta {
@@ -203,9 +201,11 @@
   row-gap: 30px;
 }
 
+/* Each link's 44 px zone, given back: its word's line and 26 px above it, 12 px after it (none before it, so the first
+   of each line stays inside the column). */
 .legal-foot__pages .n-fl__link {
-  margin: -26px -9px -3px -3px;
-  padding: 26px 9px 3px 3px;
+  margin: -26px -12px -3px 0;
+  padding: 26px 12px 3px 0;
 }
 
 .legal-foot__verify {

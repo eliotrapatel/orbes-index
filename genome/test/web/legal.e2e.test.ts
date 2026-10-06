@@ -186,6 +186,7 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
       ['PIECES', '/verify/pieces', null],
     ]);
     expect(await rail.locator('.n-rail__live').isVisible()).toBe(false);
+    expect(await rail.getAttribute('lang')).toBeNull();
     // The four pages as underlined tabs, TERMS current; the version, then ENGLISH (current, ivory) · FRANÇAIS.
     await textOf(page.getByRole('navigation', { name: 'Legal pages' }).locator('[aria-current="page"]'), 'TERMS');
     await textOf(page.locator('.legal-meta .legal__version'), /^Version of /);
@@ -209,7 +210,16 @@ describe.skipIf(!HAS_CHROMIUM)('legal pages (Chromium, mobile)', () => {
       await page.setViewportSize({ width, height: MOBILE_VIEWPORT.height });
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `${width}`).toBe(true);
     }
+    // The rail's words are the app's, in English, and a French page says so.
+    expect(await page.getByRole('navigation', { name: 'Main' }).getAttribute('lang')).toBe('en');
     expect(problems).toEqual([]);
+    // RELEASES' dot is read from each public route on its own: a release announced shows it though the draws fail.
+    await page.route('**/api/v1/live/next', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ release: { id: 'announced' } }) }));
+    await page.route('**/api/v1/drops', (route) => route.fulfill({ status: 503, contentType: 'application/json', body: '{}' }));
+    await page.reload();
+    await page.getByRole('navigation', { name: 'Main' }).locator('.n-rail__live').waitFor({ state: 'visible' });
+    // The one problem is the draws' refusal itself, as the browser reports it.
+    for (const p of problems) expect(p).toMatch(/status of 503/);
     await page.context().close();
   }, 120_000);
 
