@@ -747,6 +747,12 @@ export const LOOKBOOK = Object.freeze({
    * and what opens it, never a model (terms, article 12); SIGN IN and SCAN ORBES CODE.
    */
   teaser: 'Pieces offered to the owners of an ORBES piece, by tier, on request. It opens once a piece is registered to your ORBES account.',
+  /**
+   * NOCTURNE (screen 5): THE PRIVATE SALON locked below an owner's tier, in the teaser's pieces: what it is, then the
+   * tier that opens it and the pieces that tier starts from (the club's), never a model (terms, article 12).
+   */
+  locked: (tier: string, pieces: number) =>
+    `Pieces offered to the owners of an ORBES piece, by tier, on request. It opens at ${tier}, from ${pieces} pieces registered to your ORBES account.`,
   signIn: 'SIGN IN',
   /** The accessible name of a sheet's dots: each switches the sheet to that variant (N6, C6). */
   variant: 'Variant',

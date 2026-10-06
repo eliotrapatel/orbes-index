@@ -31,6 +31,7 @@ import type {
   CirclePost,
   ClientServices,
   ClubEntry,
+  ClubLookbook,
   ClubStatus,
   DrawEntriesPage,
   DropCard,
@@ -57,6 +58,7 @@ import type {
   PastReleasesPage,
   RecoveryResult,
   ReportInput,
+  SalonOpening,
   ServiceRecord,
   SessionInfo,
   ShopRequest,
@@ -195,11 +197,19 @@ export class ApiClient {
     return this.request<LookbookSheet>('GET', `/api/v1/lookbook/${encodeURIComponent(slug)}`, undefined, { cache: 'default' });
   }
 
-  /** The RESERVED models, for an account that holds a piece (the club; 403 OWNERS_ONLY otherwise, 401 signed out). */
-  async clubLookbook(): Promise<LookbookCard[]> {
-    const r = await this.request<{ models?: unknown }>('GET', '/api/v1/club/lookbook');
+  /**
+   * The RESERVED models, for an account that holds a piece (the club; 403 OWNERS_ONLY otherwise, 401 signed out); when its
+   * tier reaches none, the tier that opens THE PRIVATE SALON (NOCTURNE), null when none does or the answer names none.
+   */
+  async clubLookbook(): Promise<ClubLookbook> {
+    const r = await this.request<{ models?: unknown; opensAt?: unknown }>('GET', '/api/v1/club/lookbook');
     if (!Array.isArray(r?.models)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
-    return r.models as LookbookCard[];
+    const o = r.opensAt as Partial<SalonOpening> | null | undefined;
+    const opensAt =
+      o && typeof o === 'object' && (o.level === 2 || o.level === 3) && (o.name === 'PLATINE' || o.name === 'PALLADIUM') && Number.isSafeInteger(o.pieces) && o.pieces! > 0
+        ? { level: o.level, name: o.name, pieces: o.pieces! }
+        : null;
+    return { models: r.models as LookbookCard[], opensAt };
   }
 
   /** A sheet, PUBLIC or RESERVED, for an account that holds a piece (the club). */

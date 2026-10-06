@@ -84,7 +84,35 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   - C5 (N6): the rail underlines COLLECTION (C_CSS's `.rail a.on::after`, as on every chapter since N2), where the board's
     picture shows none; the figures of SIZES 16 · 17 · 18 and of 21:00 are in Helvetica Neue (the plan's Type rule).
   - C6 (N6) draws no VARIANTS row under SPECIFICATIONS: the variants are the dots under the title (the plan's "with
-    Variants" is met by the dots); an operator may still write one in the model's specifications.
+    Variants" is met by the dots); an operator may still write one in the model's specifications. **The owner confirms
+    it at the board checkpoint** (below).
+  - C23, C41 (N8): every FAQ answer is open, with no row control, as C41 draws it (its title: *every answer open*),
+    where the plan's screen 9 says *FAQ answers as accordion rows*. **The owner settles it at the board checkpoint**
+    (below).
+- **Beyond the plan's words, kept because a planned element needs it** (the completeness audit; none is a new feature):
+  - `GET /api/v1/club/circle?visit=0`: NOW's read of its next invitation counts no circle visit, so the console's
+    visits by day keep counting the circle opened, as before NOCTURNE.
+  - The rail's NOW goes back to the landing entry by its depth (`history.go`), the app's own way back to the landing
+    (as its crumbs' `history.back()`), never a new entry; this is not scroll restoration.
+  - The console names a model with its variant's label in every model picker and the Catalogue's row, and a segment's
+    option carries it: variants share their name, and could not be told apart otherwise.
+  - The console's *Edit label* on a model's VARIANTS sets a model's own label and colour (the main model's included,
+    which the plan requires on a model that has variants), with the dialog's colour field for the dot.
+  - The console's photographs panel and `PIECE_PHOTO_IMPACT` say the piece's photograph is for ORBES staff only: their
+    former words (*Shown above the GENOME of every authentic result…*) became untrue with decision 9.
+  - The legal pages' rail with the RELEASES dot: C23 draws it.
+  - COMPLIANCE §12 (each lot has its section there, and the runbook's docs test reads its link) and TERMS-FACTS' line
+    references (its docs test checks each one against the code).
+  - The LIVE RELEASE price on each LIVE card of THE RELEASES: kept from the app (listed with the omissions, C7).
+- **For the owner at the board checkpoint** (the plan and a validated board disagree; the build follows the board until
+  the owner chooses, and the plan's line is amended to match the choice):
+  - **A model's VARIANTS (C6).** The plan's screen 5 lists *the specifications (with Variants)*; C6 draws SPECIFICATIONS
+    with METAL and CLOSURE only, the variants being the dots under the title. Either the dots meet it (kept as built), or
+    SPECIFICATIONS gains a VARIANTS row for a model with dots (its labels joined by ` · `: STEEL · GOLD · BLUE), with
+    C6's pair and the content baseline recorded again.
+  - **The FAQ (C41).** The plan's screen 9 says *FAQ answers as accordion rows*; C41 draws every answer open with no
+    row control. Either every answer stays open (kept as built), or each answer becomes a row of NOCTURNE's pieces that
+    opens as an accordion (+ / −, `aria-expanded`, opened by its `#anchor`), with C41's pair recorded again.
 - **Omissions of the drawings** (since N4: the app has these and keeps them, built with the same pieces; the final board
   review expects them):
   - C13: RECEIVING's lead, *If its owner has given you a transfer code, enter it…*, above the sign-in.
@@ -147,8 +175,12 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   - C23, C41 (N8): every section of the page, in its own text (the boards draw article 1 and article 13, and three
     questions, as excerpts); the index (/legal) as rows that lead on with their sentence; the contact of ORBES Client
     Services (its address and number side by side, the hours under them); in French, the four pages wrap on two lines
-    at the head and at the foot. The plan's *FAQ answers as accordion rows*: C41 draws every answer open with no row
-    control, and is followed.
+    at the head and at the foot. (The FAQ's answers, open as C41 draws them where the plan says accordion rows, are
+    among the items that differ on purpose, for the owner at the board checkpoint.)
+  - C5 (NOCTURNE, screen 5): THE PRIVATE SALON locked for an owner whose tier reaches none of its models, a state no
+    board draws: the teaser's plate (C5, state 2) with the salon's sentence, then the tier that opens it and its pieces
+    (*It opens at PLATINE, from 3 pieces registered to your ORBES account.*, from the club's `opensAt`), and SCAN ORBES
+    CODE; never a model (terms, article 12). No model offered above the owner's tier: nothing is said, as before.
 
 ## Boards without a screen of their own today
 
@@ -373,7 +405,8 @@ THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one 
 
 Since N6 (C5, C6, C33): THE COLLECTION as a title and its sentence, each collection's name, each model (a main model and
 its variants, one entry) full width on its photograph, faded, its words lifted onto it, its dots switching the
-photograph, the price and SEE THE MODEL; THE PRIVATE SALON for an owner, its teaser for a visitor (addition 7). A sheet:
+photograph, the price and SEE THE MODEL; THE PRIVATE SALON for an owner (locked, with the tier that opens it, when its
+tier reaches none of its models), its teaser for a visitor (addition 7). A sheet:
 ‹ THE COLLECTION, the photograph, its collection, name, line, SIZES (addition 8), its dots (each switches the sheet and
 its address, so a variant's own address opens it selected), You own N, its next release as a plate row, the salon's
 facts, sentence, note and REQUEST THIS PIECE or REQUESTED with the contact, THE STORY, the gallery, SPECIFICATIONS, CARE.
@@ -385,6 +418,7 @@ ORBES; the sheet's foot link THE COLLECTION to its crumb.
 | `collection-signed-out` | THE COLLECTION, its lead, *collection*, each model on its photograph (*name*, *type*, its dots, SEE THE MODEL), THE PRIVATE SALON's teaser (its sentence, SIGN IN, SCAN ORBES CODE; no model) | signed out | C5 (2) |
 | `collection` | the same, You own N under the dots, then THE PRIVATE SALON, its lead, *collection*, ZENITH, BRACELET, € 4 800, SEE THE MODEL | an owner signed in | C5 |
 | `collection-no-piece` | as signed out, the teaser with SCAN ORBES CODE alone | signed in without a piece | C5 (2) |
+| `collection-salon-locked` *(not reached by the stage: its owner's tier reaches ZENITH)* | as signed in, THE PRIVATE SALON locked in the teaser's plate: *Pieces offered to the owners of an ORBES piece, by tier, on request. It opens at PLATINE, from 3 pieces registered to your ORBES account.*, SCAN ORBES CODE; no model | an owner whose tier reaches no model of the salon, one offered above it (`opensAt`; test/web/verify.e2e.test.ts) | C5 (2), the same pieces |
 | `model`, `model-blue`, `model-gold` | ‹ THE COLLECTION, the photograph, *collection*, *name*, *type*, SIZES 16 · 17 · 18, the dots (the address's selected), You own N (signed in), the next release (LIVE RELEASE, IN BLUE, THURSDAY 21:00 PARIS), THE STORY, the gallery, SPECIFICATIONS (*label · value*), CARE | a public model | C6 |
 | `model-draw-leads`, `model-draw-soon` | the same, its next release a draw: DRAW · ENTRIES OPEN, IN STEEL, ENTRIES CLOSE *11 OCT 2026 · 18:00 UTC*; DRAW · ENTRIES OPEN SOON, ENTRIES OPEN *date · time* UTC (the date never parted from its hour; the words before it wrap); in the overflow test | no LIVE RELEASE leads (the `draw-leads`, `draw-soon` demos) | C6, C42 |
 | `model-salon` | ‹ THE COLLECTION, *collection*, ZENITH, BRACELET · THE PRIVATE SALON, SIZE 17, THE PRIVATE SALON, PRICE, OFFERED FROM, its sentence, A NOTE FOR ORBES CLIENT SERVICES and its hint, REQUEST THIS PIECE, THE STORY, SPECIFICATIONS, CARE | a model of the salon, its tier reached | C33 (1) |

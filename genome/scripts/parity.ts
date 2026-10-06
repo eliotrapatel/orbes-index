@@ -359,6 +359,7 @@ img{display:block;max-width:100%;height:auto;background:#2b2b2b}
 </style></head><body>
 <header><h1>NOCTURNE · the 43 boards beside the real screens</h1>
 <p class="meta">At the left of each pair, the board the owner validated (nocturne-ref/shots, 390 px at 2×); at the right, the real screen at the same size, on the NOCTURNE demo (scripts/parity.ts). Live data differs by design: the time, ids and references, a countdown's digits, each piece's own GENOME glyphs. C21 and C26 are stand-ins of the room: each is set beside its capture from before NOCTURNE. Then the extreme cases (fidelity rule 5) and the LIVE screens before and after (fidelity rule 6).</p>
+<p class="warn">For the owner, where the plan and a validated board disagree (the build follows the board until you choose; docs/launch/NOCTURNE-MATRIX.md, <em>For the owner at the board checkpoint</em>): C6, the plan's <em>specifications (with Variants)</em>: are the dots under the title enough, or does SPECIFICATIONS gain a VARIANTS row (STEEL · GOLD · BLUE)? C41, the plan's <em>FAQ answers as accordion rows</em>: do the answers stay open as drawn, or open as accordion rows (+ / −)?</p>
 <nav>${toc} <a href="#stress">STRESS</a> <a href="#live">LIVE</a></nav>
 ${missing.length ? `<p class="warn">Not captured (${missing.length}): ${escapeHtml(missing.join(', '))}</p>` : ''}</header>
 <main>

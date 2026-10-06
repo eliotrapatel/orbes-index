@@ -6,7 +6,11 @@
  *
  *   cards    GET  /api/v1/club/lookbook (an owner): the RESERVED models whose
  *            tier (`private_min_tier`, 1 TITANE by default) the account
- *            reaches now, each with its price and tier; no story.
+ *            reaches now, each with its price and tier; no story. When its
+ *            tier reaches none, `opensAt`: the lowest tier above it from
+ *            which one is shown, and the pieces it starts from (plan
+ *            NOCTURNE, screen 5: locked below its tier, with what opens it),
+ *            never the model.
  *   sheet    GET  /api/v1/club/lookbook/:slug (an owner): a sheet, PUBLIC or
  *            RESERVED; a RESERVED one carries its price, its tier and the
  *            account's open request (`salon.request`). Below the model's tier
@@ -40,7 +44,7 @@ import { SHOP_REQUEST_OUTCOMES, SHOP_REQUEST_STATUSES, type ShopRequestOutcome, 
 import { DomainError, conflict, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
-import { ownersOnly, type ClubService } from './club.js';
+import { CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, ownersOnly, type ClubService, type ClubTierName } from './club.js';
 import type { LookbookService, LookbookSheet, SalonCard, SalonFacts } from './lookbook.js';
 import { orderForShopRequest } from './orders.js';
 
@@ -78,6 +82,22 @@ export interface ShopRequestView {
   id: string;
   status: ShopRequestStatus;
   createdAt: Date;
+}
+
+/**
+ * THE PRIVATE SALON locked below the account's tier (plan NOCTURNE, screen 5): the lowest tier above it from which a model
+ * is shown, and the pieces held it starts from (CLUB_TIER_THRESHOLDS). Never a model (terms, article 12).
+ */
+export interface SalonOpening {
+  level: 2 | 3;
+  name: ClubTierName;
+  pieces: number;
+}
+
+/** GET /api/v1/club/lookbook: the models the account's tier reaches; when it reaches none, what opens the salon (else null). */
+export interface SalonGrid {
+  models: SalonCard[];
+  opensAt: SalonOpening | null;
 }
 
 /** What the salon adds to a RESERVED model of a sheet: its price, its tier and the account's open request. */
@@ -223,9 +243,17 @@ export class SalonService {
     return tier;
   }
 
-  /** THE PRIVATE SALON's models for an owner (GET /api/v1/club/lookbook): those its tier reaches, with their prices; no story. */
-  async cards(accountId: string): Promise<SalonCard[]> {
-    return this.lookbook.listReserved(await this.ownerTier(accountId));
+  /**
+   * THE PRIVATE SALON for an owner (GET /api/v1/club/lookbook): the models its tier reaches, with their prices, no story;
+   * when it reaches none, the lowest tier above it from which one is shown (`opensAt`), null when none is (the salon
+   * then says nothing).
+   */
+  async grid(accountId: string): Promise<SalonGrid> {
+    const tier = await this.ownerTier(accountId);
+    const models = await this.lookbook.listReserved(tier);
+    if (models.length > 0) return { models, opensAt: null };
+    const from = await this.lookbook.reservedFromAbove(tier);
+    return { models, opensAt: from === null ? null : { level: from, name: CLUB_TIER_NAMES[from - 1]!, pieces: CLUB_TIER_THRESHOLDS[from - 1]! } };
   }
 
   /**

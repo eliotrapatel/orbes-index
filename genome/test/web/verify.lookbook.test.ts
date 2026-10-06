@@ -356,9 +356,11 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
     expect(LOOKBOOK.reserved).toBe('THE PRIVATE SALON');
     expect(LOOKBOOK.salon.request).toBe('REQUEST THIS PIECE');
     expect(LOOKBOOK.salon.requested).toBe('ORBES Client Services will contact you.');
-    const words = [LOOKBOOK.reserved, LOOKBOOK.reservedLead, LOOKBOOK.teaser, LOOKBOOK.signIn, LOOKBOOK.variant, ...Object.values(LOOKBOOK.salon)].join('\n');
-    // Addition 7: the teaser says the salon's sentence, then what opens it.
+    const words = [LOOKBOOK.reserved, LOOKBOOK.reservedLead, LOOKBOOK.teaser, LOOKBOOK.locked('PLATINE', 3), LOOKBOOK.signIn, LOOKBOOK.variant, ...Object.values(LOOKBOOK.salon)].join('\n');
+    // Addition 7: the teaser says the salon's sentence, then what opens it; locked below an owner's tier (NOCTURNE, screen
+    // 5), the same sentence, then the tier that opens it and its pieces.
     expect(LOOKBOOK.teaser.startsWith(`${LOOKBOOK.reservedLead} `)).toBe(true);
+    expect(LOOKBOOK.locked('PLATINE', 3)).toBe(`${LOOKBOOK.reservedLead} It opens at PLATINE, from 3 pieces registered to your ORBES account.`);
     expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
     expect(words).not.toContain('!');
   });
@@ -542,7 +544,7 @@ describe('SEE THE MODEL under an authentic result (P-R02)', () => {
 describe('the lookbook\'s copy', () => {
   it('writes no word of BRAND §4.5 (nor "product"), no exclamation mark, and DRAW never "lottery"', () => {
     // Each function said with what it takes: a name, or (NOCTURNE N3) the sizes and the pieces owned of a model.
-    const ARGS: Record<string, unknown[]> = { sizes: ['16', '17', '18'], youOwn: [2, 'steel', 'gold'] };
+    const ARGS: Record<string, unknown[]> = { sizes: ['16', '17', '18'], youOwn: [2, 'steel', 'gold'], locked: ['PALLADIUM', 5] };
     const lines = Object.entries(LOOKBOOK).flatMap(([k, v]) => (typeof v === 'function' ? [String((v as (...a: unknown[]) => string)(...(ARGS[k] ?? ['MONOLITHE'])))] : [String(v)]));
     expect(lines.length).toBeGreaterThan(10);
     expect(findForbidden(lines.join('\n'), [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);

@@ -286,6 +286,23 @@ export interface DownloadedFile {
   filename: string;
 }
 
+/** THE PRIVATE SALON locked below the account's tier (plan NOCTURNE, screen 5): the lowest tier that opens it, and its pieces. */
+export interface SalonOpening {
+  level: 2 | 3;
+  name: ClubTierName;
+  /** The pieces held it starts from. */
+  pieces: number;
+}
+
+/**
+ * GET /api/v1/club/lookbook (P-X08): THE PRIVATE SALON's models the account's tier reaches; when it reaches none, what
+ * opens the salon (`opensAt`, never a model), null when nothing above the account's tier is offered.
+ */
+export interface ClubLookbook {
+  models: LookbookCard[];
+  opensAt: SalonOpening | null;
+}
+
 /** One model of the lookbook's lists (P-R02: GET /api/v1/lookbook, GET /api/v1/club/lookbook): no story. */
 export interface LookbookCard {
   slug: string;

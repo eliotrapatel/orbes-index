@@ -52,10 +52,10 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
   });
   const { club, drops, circle, salon } = ctx.services;
 
-  // P-X08: THE PRIVATE SALON, the RESERVED models from the tier of each.
+  // P-X08: THE PRIVATE SALON, the RESERVED models from the tier of each; none at the account's tier, what opens it (NOCTURNE).
   app.get('/api/v1/club/lookbook', async (request) => {
     const { account } = requireAccount(request);
-    return { models: await salon.cards(account.id) };
+    return salon.grid(account.id);
   });
 
   app.get('/api/v1/club/lookbook/:slug', async (request) => {

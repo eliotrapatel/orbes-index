@@ -282,4 +282,31 @@ describe('the private salon (P-X08)', () => {
     expect(((safeJson(await platine.client.get('/api/v1/club/lookbook')) as { models: SalonCardJson[] }).models).map((c) => c.slug)).toEqual(['solstice']);
     expect(errorOf(await requestOf(platine.client, 'eclipse')).code).toBe('LOOKBOOK_NOT_FOUND');
   });
+
+  it('locked below its tier (plan NOCTURNE, screen 5): no model, and the lowest tier above that opens it with its pieces; nothing when none lies above', async () => {
+    const grid = async (c: Client) => {
+      const res = await c.get('/api/v1/club/lookbook');
+      expect(res.statusCode, res.body).toBe(200);
+      const body = safeJson(res) as { models: SalonCardJson[]; opensAt: unknown };
+      expect(Object.keys(body).sort()).toEqual(['models', 'opensAt']);
+      return [body.models.map((m) => m.slug), body.opensAt];
+    };
+    const owner = await member(1);
+    // A model at the account's tier: the salon is open, nothing to say about what opens it.
+    expect(await grid(owner.client)).toEqual([['solstice'], null]);
+    // SOLSTICE from PLATINE, ECLIPSE from PALLADIUM: a TITANE owner reads no model, and that PLATINE opens it from 3 pieces.
+    expect((await operator.patch(model(solstice), { privateMinTier: 2 })).statusCode).toBe(200);
+    expect(await grid(owner.client)).toEqual([[], { level: 2, name: 'PLATINE', pieces: 3 }]);
+    // Both from PALLADIUM: a PLATINE owner reads that PALLADIUM opens it, from 5 pieces.
+    expect((await operator.patch(model(solstice), { privateMinTier: 3 })).statusCode).toBe(200);
+    expect(await grid(platine.client)).toEqual([[], { level: 3, name: 'PALLADIUM', pieces: 5 }]);
+    // No RESERVED model shown above the account's tier (HIDDEN, or no address): nothing.
+    for (const id of [solstice, eclipse]) expect((await operator.patch(model(id), { lookbook: 'HIDDEN' })).statusCode).toBe(200);
+    expect(await grid(owner.client)).toEqual([[], null]);
+    expect(await grid(platine.client)).toEqual([[], null]);
+    // Restored for what follows.
+    expect((await operator.patch(model(solstice), { lookbook: 'RESERVED', privateMinTier: 1 })).statusCode).toBe(200);
+    expect((await operator.patch(model(eclipse), { lookbook: 'RESERVED' })).statusCode).toBe(200);
+    expect(await grid(owner.client)).toEqual([['solstice'], null]);
+  });
 });

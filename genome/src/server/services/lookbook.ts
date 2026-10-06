@@ -308,6 +308,22 @@ export class LookbookService {
   }
 
   /**
+   * THE PRIVATE SALON locked below its tier (plan NOCTURNE, screen 5): the lowest tier above `tier` from which a RESERVED
+   * model is shown (one with an address), 2 PLATINE or 3 PALLADIUM; null when none lies above it. Never a model.
+   */
+  async reservedFromAbove(tier: number): Promise<2 | 3 | null> {
+    const row = await this.db
+      .selectFrom('models')
+      .select((eb) => eb.fn.min('private_min_tier').as('from'))
+      .where('lookbook', '=', 'RESERVED')
+      .where('slug', 'is not', null)
+      .where('private_min_tier', '>', Math.max(1, Math.floor(tier)))
+      .executeTakeFirst();
+    const from = row?.from === null || row?.from === undefined ? null : Number(row.from);
+    return from === 2 || from === 3 ? from : null;
+  }
+
+  /**
    * A model's sheet by its address: a PUBLIC model, or for `tier` ≥ 1 (an owner, ClubService) a RESERVED one whose
    * `private_min_tier` it reaches, with its price and tier (`salon`). Anything else (HIDDEN, unknown, malformed, a RESERVED
    * model above the reader's tier) is the same 404 LOOKBOOK_NOT_FOUND.

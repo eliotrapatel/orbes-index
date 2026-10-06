@@ -2451,6 +2451,18 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // A model above the owner's tier: the same sentence as a model not in the collection.
     await page.goto(`${srv.origin}/verify/lookbook/nadir`);
     await textOf(page.locator('.sheet__missing'), 'This model is not in the ORBES collection.');
+    // NOCTURNE (screen 5): ZENITH from PLATINE too, the TITANE owner's tier reaches no model of the salon: it is locked,
+    // in the teaser's plate, with the tier that opens it and its pieces, and SCAN ORBES CODE; never a model.
+    await catalog.updateModel(zenith.id, { privateMinTier: 2 }, SYSTEM_ACTOR);
+    await page.goto(`${srv.origin}/verify/lookbook`);
+    const locked = page.getByRole('region', { name: 'THE PRIVATE SALON' });
+    await textOf(locked.locator('.n-lookbook__teaser-text'), 'Pieces offered to the owners of an ORBES piece, by tier, on request. It opens at PLATINE, from 3 pieces registered to your ORBES account.');
+    await countOf(locked.getByRole('link', { name: 'SIGN IN' }), 0);
+    await visible(locked.getByRole('button', { name: 'SCAN ORBES CODE' }));
+    await countOf(page.locator('.lookbook__reserved'), 0);
+    expect(await locked.innerText()).not.toMatch(/ZENITH|NADIR|€/);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    await catalog.updateModel(zenith.id, { privateMinTier: 1 }, SYSTEM_ACTOR);
 
     // NOCTURNE N6: the owner holds a piece of ZENITH. THE PRIVATE SALON's card and ZENITH's sheet both say You own one
     // (the account's pieces name a model of the salon its tier reaches); a scan of that piece never names it.

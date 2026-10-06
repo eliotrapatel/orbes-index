@@ -14,8 +14,9 @@
  *   THE PRIVATE SALON                        an owner signed in (P-X08): the models of its tier, priced;
  *   Pieces offered to the owners…            a visitor (signed out, or an account that holds no piece; addition 7): a
  *   ┌───────────────────────────┐            plate card that says what it is and what opens it, SIGN IN and SCAN ORBES
- *   │ THE PRIVATE SALON  …      │            CODE, never a model (terms, article 12)
- *   └───────────────────────────┘
+ *   │ THE PRIVATE SALON  …      │            CODE, never a model (terms, article 12); an owner whose tier reaches no
+ *   └───────────────────────────┘            model of it: the same plate, locked, with the tier that opens it and its
+ *                                            pieces (It opens at PLATINE, from 3 pieces…) and SCAN ORBES CODE
  *
  * The sheet: ‹ THE COLLECTION; the photograph whole, faded; its collection, name, line (type, THE PRIVATE SALON,
  * DISCONTINUED · <year>), SIZES 16 · 17 · 18 (addition 8), the dots (each switches the sheet: its photographs, story,
@@ -25,7 +26,8 @@
  * requested REQUESTED with the contact of ORBES Client Services; THE STORY, the gallery full width, SPECIFICATIONS, CARE.
  *
  * The grid reads GET /api/v1/lookbook (the same for everyone) and, for a signed-in account, the club's reserved models
- * (a 403 for an account that holds no piece: the teaser) and its pieces (You own N). A sheet reads, signed in, the
+ * (a 403 for an account that holds no piece: the teaser; none of its tier: what opens the salon, `opensAt`) and its
+ * pieces (You own N). A sheet reads, signed in, the
  * club's (a public model with the variants of the salon its tier reaches, or a model of the salon; 404 below the model's
  * tier), the public sheet for an account that holds no piece (403) or signed out; and THE RELEASES' lists for its next
  * release. Both read again when the account signs in or out. REQUEST THIS PIECE is a same-origin
@@ -39,7 +41,7 @@ import { CONTACT, LOOKBOOK } from '../copy.js';
 import { cardFace, lookbookGroups, lookbookSheetPath, ownedLine, SALON_NOTE_MAX, selectDot, sheetLine, sheetModel, withRequest, type CardModel, type CollectionGroup, type SheetModel } from '../lookbook-model.js';
 import { nextRelease, type NextReleaseModel } from '../next-release-model.js';
 import type { SessionStore } from '../session.js';
-import type { ClientServices, DropCard, LiveCard, LookbookCard, OwnedPiece } from '../types.js';
+import type { ClientServices, ClubLookbook, DropCard, LiveCard, OwnedPiece, SalonOpening } from '../types.js';
 import { salonContactModel } from '../view-model.js';
 import { LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
@@ -80,8 +82,11 @@ export interface SheetDeps {
   focus?: boolean;
 }
 
-/** THE PRIVATE SALON on the grid: its models (an owner), the teaser (a visitor), or nothing (unknown, or none of its tier). */
-type Salon = { kind: 'open'; groups: CollectionGroup[] } | { kind: 'teaser'; signedIn: boolean } | { kind: 'none' };
+/**
+ * THE PRIVATE SALON on the grid: its models (an owner), locked below the owner's tier with what opens it, the teaser (a
+ * visitor), or nothing (unknown, or no model offered above the owner's tier).
+ */
+type Salon = { kind: 'open'; groups: CollectionGroup[] } | { kind: 'locked'; opensAt: SalonOpening } | { kind: 'teaser'; signedIn: boolean } | { kind: 'none' };
 type GridLoad = { kind: 'loading' } | { kind: 'ready'; groups: CollectionGroup[]; salon: Salon; pieces: OwnedPiece[] } | { kind: 'failed'; message: string };
 type SheetLoad = { kind: 'loading' } | { kind: 'ready'; sheet: SheetModel } | { kind: 'missing' } | { kind: 'failed'; message: string };
 
@@ -198,22 +203,24 @@ class GridPage {
   }
 
   /**
-   * THE PRIVATE SALON: an owner signed in, the club's reserved models of its tier (none: nothing said); signed out, or an
-   * account that holds no piece (403), the teaser; nothing while the session or the club cannot be read.
+   * THE PRIVATE SALON: an owner signed in, the club's reserved models of its tier; none of its tier, locked with the tier
+   * that opens it (none above it either: nothing said); signed out, or an account that holds no piece (403), the teaser;
+   * nothing while the session or the club cannot be read.
    */
   private async salon(signedIn: boolean | null): Promise<Salon> {
     if (signedIn === null) return { kind: 'none' };
     if (!signedIn) return { kind: 'teaser', signedIn: false };
-    let cards: LookbookCard[];
+    let club: ClubLookbook;
     try {
-      cards = await this.deps.api.clubLookbook();
+      club = await this.deps.api.clubLookbook();
     } catch (e) {
       this.deps.session.noteError(e);
       if (e instanceof ApiError && !e.isNetwork && (e.status === 403 || e.status === 401)) return { kind: 'teaser', signedIn: e.status === 403 };
       return { kind: 'none' };
     }
-    const groups = lookbookGroups(cards);
-    return groups.length > 0 ? { kind: 'open', groups } : { kind: 'none' };
+    const groups = lookbookGroups(club.models);
+    if (groups.length > 0) return { kind: 'open', groups };
+    return club.opensAt ? { kind: 'locked', opensAt: club.opensAt } : { kind: 'none' };
   }
 
   private render(): void {
@@ -232,7 +239,8 @@ class GridPage {
     const sections: HTMLElement[] = l.groups.map((g, i) => this.group(g, `lookbook-group-${i}`, l.pieces, { first: i === 0 }));
     if (l.groups.length === 0) sections.push(h('div', { class: 'n-px n-lookbook__empty-line' }, quietLine(LOOKBOOK.empty, 'lookbook__empty')));
     if (l.salon.kind === 'open') sections.push(this.salonSection(l.salon.groups, l.pieces));
-    else if (l.salon.kind === 'teaser') sections.push(this.teaser(l.salon.signedIn));
+    else if (l.salon.kind === 'teaser') sections.push(this.teaser({ signedIn: l.salon.signedIn, text: LOOKBOOK.teaser }));
+    else if (l.salon.kind === 'locked') sections.push(this.teaser({ signedIn: true, text: LOOKBOOK.locked(l.salon.opensAt.name, l.salon.opensAt.pieces) }));
     this.body.replaceChildren(...sections);
   }
 
@@ -315,9 +323,11 @@ class GridPage {
 
   /**
    * THE PRIVATE SALON for a visitor (addition 7): what it is and what opens it, SIGN IN (signed out) and SCAN ORBES CODE;
-   * no model is shown (terms, article 12).
+   * for an owner below its tier (NOCTURNE, screen 5), the same plate with the tier that opens it and SCAN ORBES CODE (a
+   * piece registered raises the tier). No model is shown (terms, article 12).
    */
-  private teaser(signedIn: boolean): HTMLElement {
+  private teaser(opts: { signedIn: boolean; text: string }): HTMLElement {
+    const { signedIn } = opts;
     const links: (Node | string)[] = [];
     if (!signedIn) links.push(textLink(LOOKBOOK.signIn, { href: PIECES_PATH, onOpen: () => this.deps.onSignIn(), extraClass: 'n-lookbook__sign-in' }), '     ');
     links.push(textLink(LOOKBOOK.scan, { onOpen: () => this.deps.onScan(), extraClass: 'n-lookbook__scan' }));
@@ -327,7 +337,7 @@ class GridPage {
       plateCard(
         [
           h('h2', { class: 'n-g n-t2', id: 'lookbook-teaser', text: LOOKBOOK.reserved }),
-          h('p', { class: 'n-tx n-lookbook__teaser-text', text: LOOKBOOK.teaser }),
+          h('p', { class: 'n-tx n-lookbook__teaser-text', text: opts.text }),
           h('p', { class: 'n-lookbook__teaser-links' }, ...links),
         ],
         { left: true, extraClass: 'n-lookbook__teaser-card' },
