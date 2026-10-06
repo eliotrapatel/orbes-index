@@ -13,14 +13,16 @@
  *   the shipment   once shipped: the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT, the carrier's page (https only);
  *   the documents  (M6) its INVOICE and CREDIT NOTE with their numbers (PDFs; the number in the reading face), the CARE GUIDE of its model while the
  *                  piece is on its way or kept, its OWNERSHIP CERTIFICATE once the piece is registered to the account;
- *   the reference  ORDER OR-…, what ORBES Client Services finds it by.
+ *   the reference  ORDER OR-…, what ORBES Client Services finds it by;
+ *   the photograph the cover photograph of its model (or of its variant), shown whole above it (plan NOCTURNE,
+ *                  addition 3), never a piece's own (decision 9); none when the model has none.
  * An order the app cannot read (an unknown step or channel, a reference that is not one) is left out, never guessed.
  */
 import { ORDERS } from './copy.js';
 import { formatMoney } from './live-model.js';
 import type { OrderDocumentKind } from './api.js';
 import { ORDER_CHANNELS, ORDER_STATUSES, type AccountOrder, type OrderStatus } from './types.js';
-import { formatDate, modelWithVariant, upper, type Row } from './view-model.js';
+import { formatDate, modelWithVariant, photoModels, upper, type PhotoModel, type Row } from './view-model.js';
 
 /** The four steps of an order that goes its way. */
 export const ORDER_PATH: readonly OrderStatus[] = Object.freeze(['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED'] as const);
@@ -29,7 +31,7 @@ export const ORDER_PATH: readonly OrderStatus[] = Object.freeze(['RESERVED', 'PA
 export interface OrderStepModel {
   status: OrderStatus;
   label: string;
-  /** `5 OCT 2026`, on this phone's calendar on that date; '' for a step to come. */
+  /** `5 OCT 2026`, on this phone's calendar on that date (`15 SEP` among several of one year); '' for a step to come. */
   date: string;
   state: 'done' | 'current' | 'next';
 }
@@ -42,7 +44,7 @@ export interface OrderModel {
   status: OrderStatus;
   /** The model, as the card's title. */
   title: string;
-  /** Where it was sold: `LIVE RELEASE · MONOLITHE — LIVE`, `THE PRIVATE SALON`. */
+  /** Where it was sold: `LIVE RELEASE · MONOLITHE IN STEEL`, `THE PRIVATE SALON · ZENITH` (the salon names its model, C32). */
   line: string;
   sentence: string;
   steps: OrderStepModel[];
@@ -54,6 +56,8 @@ export interface OrderModel {
   documents: OrderDocumentModel[];
   /** `ORDER OR-1A2B3C4D`. */
   reference: string;
+  /** The model's cover photograph (addition 3), with its alternative text; null when it has none. */
+  photo: PhotoModel | null;
 }
 
 /** One document of an order: a PDF to save (`file`), or its model's care guide, shown under the documents. */
@@ -94,11 +98,12 @@ const REFERENCE = /^OR-[0-9A-F]{8}$/;
  * An ISO time → its date on a calendar `offsetMinutes` east of UTC: `5 OCT 2026`; '' when unreadable. Without an
  * offset, this phone's on that date (its summer or winter time, not today's), as ownership.ts dates a piece's events.
  */
-export function orderDate(iso: string | null | undefined, offsetMinutes?: number): string {
+export function orderDate(iso: string | null | undefined, offsetMinutes?: number, opts: { year?: boolean } = {}): string {
   const t = typeof iso === 'string' ? Date.parse(iso) : Number.NaN;
   if (Number.isNaN(t)) return '';
   const offset = offsetMinutes ?? -new Date(t).getTimezoneOffset();
-  return formatDate(new Date(t + offset * 60_000).toISOString());
+  const date = formatDate(new Date(t + offset * 60_000).toISOString());
+  return opts.year === false ? date.replace(/ \d{4}$/, '') : date;
 }
 
 /** When the order reached each step (null: not reached). */
@@ -112,10 +117,18 @@ function reachedAt(o: AccountOrder): Record<OrderStatus, string | null> {
  */
 export function orderSteps(o: AccountOrder, offsetMinutes?: number): OrderStepModel[] {
   const at = reachedAt(o);
+  // One step reached is dated in full (5 OCT 2026, C24); several, each by its day and month in the same year as the
+  // first (15 SEP · 16 SEP …, C24 and C32: five columns hold no year), a step of another year with its own.
+  const reached = (Object.keys(at) as OrderStatus[]).filter((s) => at[s] !== null && orderDate(at[s], offsetMinutes) !== '');
+  const first = orderDate(o.reservedAt, offsetMinutes).slice(-4);
+  const date = (status: OrderStatus) => {
+    const full = orderDate(at[status], offsetMinutes);
+    return reached.length > 1 && full.slice(-4) === first ? orderDate(at[status], offsetMinutes, { year: false }) : full;
+  };
   const step = (status: OrderStatus, state: OrderStepModel['state']): OrderStepModel => ({
     status,
     label: ORDERS.step[status],
-    date: state === 'next' ? '' : orderDate(at[status], offsetMinutes),
+    date: state === 'next' ? '' : date(status),
     state,
   });
   const now = ORDER_PATH.indexOf(o.status);
@@ -135,7 +148,8 @@ export function orderRows(o: AccountOrder): Row[] {
   const rows: Row[] = [
     ...(cancelled && o.size === null ? [] : [[ORDERS.rows.size, size] as Row]),
     ...(cancelled && !priced ? [] : [[ORDERS.rows.price, priced ? money(o.priceMinor!) : ORDERS.toConfirm] as Row]),
-    ...(cancelled && o.currency === null ? [] : o.addons).map((a): Row => [upper(a.label), money(a.priceMinor)]),
+    // An add-on adds to the price: « + € 150 » (C24), its words the app's.
+    ...(cancelled && o.currency === null ? [] : o.addons).map((a): Row => [upper(a.label), o.currency ? `+ ${money(a.priceMinor)}` : money(a.priceMinor)]),
   ];
   if (priced && o.addons.length > 0) rows.push([ORDERS.rows.total, money(o.addons.reduce((n, a) => n + a.priceMinor, o.priceMinor!))]);
   return rows;
@@ -152,7 +166,8 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number): OrderModel 
     key: `order-${o.reference.toLowerCase()}`,
     status: o.status,
     title: upper(o.model),
-    line: [ORDERS.channel[o.channel], upper(o.release)].filter((x) => x.length > 0).join(' · '),
+    // A release names itself; the private salon has none: the model with its variant follows it (C32).
+    line: [ORDERS.channel[o.channel], o.release ? upper(o.release) : o.channel === 'SALON' ? modelWithVariant(upper(o.model), o.modelVariant).toUpperCase() : ''].filter((x) => x.length > 0).join(' · '),
     sentence: ORDERS.sentence[o.status],
     steps: orderSteps(o, offsetMinutes),
     rows: orderRows(o),
@@ -168,6 +183,7 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number): OrderModel 
       : null,
     documents: orderDocuments(o),
     reference: ORDERS.reference(o.reference),
+    photo: photoModels({ model: o.model, type: '', modelVariant: o.modelVariant, imageUrl: o.imageUrl })[0] ?? null,
   };
 }
 

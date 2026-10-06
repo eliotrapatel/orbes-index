@@ -29,7 +29,10 @@
  *
  * Paths (a small router; static.ts serves the shell at /verify and /verify/*):
  *   /verify          the landing, and every screen of a scan (one URL);
- *   /verify/pieces   MY PIECES, which a link, a reload or a bookmark opens directly;
+ *   /verify/pieces   MY PIECES, which a link, a reload or a bookmark opens directly (its tab, PIECES, ORDERS or
+ *                    RELEASES, kept by its entry);
+ *   /verify/pieces/<id>  a piece of MY PIECES (plan NOCTURNE, C4), over MY PIECES' entry (an address that is none: MY
+ *                    PIECES, its address put back);
  *   /verify/c#…      the ownership certificate of a link an owner shared: its token
  *                    is the fragment, which no request line or proxy log holds;
  *   /verify/lookbook          THE COLLECTION, the lookbook of the models (P-R02);
@@ -87,32 +90,35 @@ import { liveBannerView } from './views/live-banner.js';
 import { lookbookView, sheetView } from './views/lookbook.js';
 import { messageView } from './views/message.js';
 import { nowView } from './views/now.js';
-import { piecesView } from './views/pieces.js';
+import { pieceView } from './views/piece.js';
+import { piecePath, piecesView, type PiecesTab } from './views/pieces.js';
 import { releasesView, releaseView, type ReleasesTab } from './views/releases.js';
 import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { Shell } from './views/shell.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost';
 
 /**
  * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
  * sheet, the releases or a release's page, the circle or a post.
  */
-type Entry = 'landing' | 'app' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost';
+type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost';
 
 /** The entries above the landing that a scan, MY PIECES or a list takes the place of (their own address goes with them). */
-const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost'];
+const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost'];
 
 /**
  * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, the releases, a
  * release's page, the circle, a post, or the landing (also for a path the app does not know). In any case: the
  * certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' {
+function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === PIECES_PATH) return 'pieces';
+  // A piece of MY PIECES; under /verify/pieces, an address that is none is MY PIECES.
+  if (path.startsWith(`${PIECES_PATH}/`)) return pieceIdOf(pathname) ? 'piece' : 'pieces';
   const lookbook = lookbookRouteOf(path);
   if (lookbook) return lookbook.sheet ? 'sheet' : 'lookbook';
   const releases = releasesRouteOf(path);
@@ -121,6 +127,25 @@ function routeOf(pathname: string): 'landing' | 'pieces' | 'certificate' | 'look
   if (circle) return circle.post ? 'circlePost' : 'circle';
   return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
 }
+
+/** The piece a path names (/verify/pieces/O26-J-00184), in capitals, or null. */
+function pieceIdOf(pathname: string): string | null {
+  const m = /^\/verify\/pieces\/([^/]+)\/?$/i.exec(pathname);
+  if (!m) return null;
+  let id: string;
+  try {
+    id = decodeURIComponent(m[1]!).toUpperCase();
+  } catch {
+    return null;
+  }
+  return /^O[0-9]{2}-[A-Z]-[0-9]{5,6}$/.test(id) ? id : null;
+}
+
+/** MY PIECES' tab its place in the history keeps (PIECES, ORDERS or RELEASES; PIECES by default). */
+const piecesTabOf = (state: unknown): PiecesTab => {
+  const tab = (state as { tab?: unknown } | null)?.tab;
+  return tab === 'orders' || tab === 'releases' ? tab : 'pieces';
+};
 
 /** The address of the sheet a path names, or null. */
 const sheetSlugOf = (pathname: string): string | null => lookbookRouteOf(pathname)?.sheet ?? null;
@@ -198,6 +223,12 @@ class App {
   private releaseAfterRoom = false;
   /** The id of the post on show (P-X01), to tell another post from the same one. */
   private postId: string | null = null;
+  /** The id of the piece on show (C4), to tell another piece from the same one. */
+  private pieceId: string | null = null;
+  /** MY PIECES' tab on show: the banner is the PIECES tab's (C3; C24 and C31 go without it). */
+  private piecesTab: PiecesTab = 'pieces';
+  /** ORDER OR-… from a piece's page: MY PIECES opens on ORDERS with it in view once back on its entry. */
+  private pendingOrder: string | null = null;
   /** The banner of the LIVE RELEASES, over MY PIECES (and nowhere else: on NOW, the release leads the page). */
   private readonly banner = liveBannerView({ api: this.api, onRelease: (id) => this.openRelease(id) });
   /** NOCTURNE's chrome round the screen: the header and its account sheet, the rail, the footer, the SCAN ring. */
@@ -216,8 +247,13 @@ class App {
       const route = routeOf(location.pathname);
       if (route === 'board') {
         if (this.screen !== 'board') void this.showBoard();
+      } else if (entry === 'piece' || route === 'piece') {
+        const id = pieceIdOf(location.pathname);
+        if (!(this.screen === 'piece' && this.pieceId === id)) void this.showPiece(id);
       } else if (entry === 'pieces' || route === 'pieces') {
-        if (this.screen !== 'pieces') void this.showPieces();
+        // Back onto MY PIECES (from a piece, or ORDER OR-… on a piece's page: ORDERS, the order in view).
+        if (this.pendingOrder !== null) history.replaceState({ ...(history.state as object), screen: 'pieces', tab: 'orders' }, '');
+        if (this.screen !== 'pieces' || this.pendingOrder !== null) void this.showPieces();
       } else if (entry === 'certificate' || route === 'certificate') this.onCertificateAddress();
       else if (entry === 'sheet' || route === 'sheet') {
         const slug = sheetSlugOf(location.pathname);
@@ -258,7 +294,7 @@ class App {
           else if (c === 'releases') this.openReleases();
           else if (c === 'collection') this.openLookbook();
           else if (c === 'circle') this.openCircle();
-          else this.openPieces();
+          else this.openPieces({ tab: 'pieces' });
         },
         onSignIn: () => this.openPieces(),
         onScan: () => void this.startScan(),
@@ -272,12 +308,22 @@ class App {
       history.replaceState({ screen: 'board' }, '');
       void this.showBoard(false);
     } else if (route === 'pieces') {
-      // A reload keeps its entry; a direct visit (a link, a bookmark) puts the landing under MY PIECES.
+      // A reload keeps its entry; a direct visit (a link, a bookmark) puts the landing under MY PIECES. An address under
+      // /verify/pieces that is none shows MY PIECES, its own address put back.
       if (entryOf(history.state) !== 'pieces') {
         history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
         history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
-      }
+      } else if (location.pathname !== PIECES_PATH) history.replaceState(history.state, '', PIECES_PATH);
       void this.showPieces(false);
+    } else if (route === 'piece') {
+      // A piece over MY PIECES, over the landing: back from it returns to the list.
+      const id = pieceIdOf(location.pathname)!;
+      if (entryOf(history.state) !== 'piece') {
+        history.replaceState({ screen: 'landing' }, '', LANDING_PATH);
+        history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
+        history.pushState({ screen: 'piece' }, '', piecePath(id));
+      }
+      void this.showPiece(id, false);
     } else if (route === 'certificate') {
       // The same for a certificate, its fragment kept in its own address (the landing's has none).
       if (entryOf(history.state) !== 'certificate') {
@@ -358,16 +404,42 @@ class App {
       if (this.screen !== 'landing') void this.showLanding();
       return;
     }
-    const depth = entry === 'sheet' || entry === 'circlePost' ? 2 : entry === 'release' ? (afterRoomOf(location.pathname) ? 3 : 2) : 1;
+    const depth = entry === 'sheet' || entry === 'circlePost' || entry === 'piece' ? 2 : entry === 'release' ? (afterRoomOf(location.pathname) ? 3 : 2) : 1;
     history.go(-depth);
   }
 
-  /** MY PIECES, from the landing (an entry above it) or from a result (in the scan's entry): back returns to the landing. */
-  private openPieces(): void {
+  /**
+   * MY PIECES, from the landing (an entry above it) or from a result (in the scan's entry): back returns to the landing.
+   * From a piece (its crumb, the rail), back to the list under it; `order`, ORDER OR-… of a piece's page: ORDERS with that
+   * order in view. `tab` opens on that tab (the rail's PIECES: PIECES); by default the one its entry kept.
+   */
+  private openPieces(opts: { tab?: PiecesTab; order?: string } = {}): void {
     const entry = entryOf(history.state);
-    if (entry === 'app' || entry === 'pieces') history.replaceState({ screen: 'pieces' }, '', PIECES_PATH);
-    else history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
+    if (entry === 'piece') {
+      this.pendingOrder = opts.order ?? null;
+      history.back();
+      return;
+    }
+    const tab = opts.order ? 'orders' : (opts.tab ?? (entry === 'pieces' ? piecesTabOf(history.state) : 'pieces'));
+    this.pendingOrder = opts.order ?? null;
+    if (entry === 'app' || entry === 'pieces') history.replaceState({ screen: 'pieces', tab }, '', PIECES_PATH);
+    else history.pushState({ screen: 'pieces', tab }, '', PIECES_PATH);
     void this.showPieces();
+  }
+
+  /** A piece of MY PIECES (C4), over MY PIECES' entry: back from it returns to the list. */
+  private openPiece(id: string): void {
+    const entry = entryOf(history.state);
+    const address = piecePath(id);
+    if (entry === 'piece') history.replaceState({ screen: 'piece' }, '', address);
+    else {
+      if (entry !== 'pieces') {
+        if (entry === 'app' || entry === 'certificate') history.replaceState({ screen: 'pieces' }, '', PIECES_PATH);
+        else history.pushState({ screen: 'pieces' }, '', PIECES_PATH);
+      }
+      history.pushState({ screen: 'piece' }, '', address);
+    }
+    void this.showPiece(id);
   }
 
   /**
@@ -490,8 +562,8 @@ class App {
     this.shell?.show(screen);
     this.host.replaceChildren(next);
     this.screen = screen;
-    // On NOW, the LIVE RELEASE the banner would name leads the page itself (C1): the banner is MY PIECES' (C3).
-    this.banner.show(screen === 'pieces');
+    // On NOW, the LIVE RELEASE the banner would name leads the page itself (C1): the banner is MY PIECES' PIECES tab's (C3).
+    this.banner.show(screen === 'pieces' && this.piecesTab === 'pieces');
     window.scrollTo(0, 0);
     if (focus) focusFirst(next);
     return true;
@@ -522,23 +594,66 @@ class App {
     else view.dispose();
   }
 
-  /** MY PIECES (F-01): the signed-in owner's pieces, or the sign-in when signed out. */
+  /** MY PIECES (F-01): the signed-in owner's pieces, its orders and its releases, or the sign-in when signed out. */
   private async showPieces(focus = true): Promise<void> {
     this.generation++;
     this.stopCamera();
+    this.pieceId = null;
+    const order = this.pendingOrder;
+    this.pendingOrder = null;
+    // The tab its place in the history kept: back from a piece, or from a release opened from RELEASES, returns to it.
+    this.piecesTab = order ? 'orders' : entryOf(history.state) === 'pieces' ? piecesTabOf(history.state) : 'pieces';
     const view = piecesView({
       api: this.api,
       session: this.session,
       onScan: () => void this.startScan(),
       clientServices: () => this.contactDetails(),
-      onCollection: () => this.openLookbook(),
-      onReleases: () => this.openReleases(),
       onRelease: (id) => this.openRelease(id),
       onAfterRoom: (parentId) => this.openAfterRoom(parentId),
-      onCircle: () => this.openCircle(),
+      onPiece: (id) => this.openPiece(id),
+      tab: this.piecesTab,
+      order,
+      onTab: (tab) => {
+        this.piecesTab = tab;
+        if (entryOf(history.state) === 'pieces') history.replaceState({ ...(history.state as object), tab }, '');
+        if (this.screen === 'pieces') this.banner.show(tab === 'pieces');
+      },
       localZone: localZone(),
     });
-    if (await this.swap(view.root, 'pieces', focus)) this.live = view;
+    if (await this.swap(view.root, 'pieces', focus)) {
+      this.live = view;
+      view.shown();
+    } else view.dispose();
+  }
+
+  /** A piece of MY PIECES (C4, C35); `id` null: an address that is none, MY PIECES in its place. */
+  private async showPiece(id: string | null, focus = true): Promise<void> {
+    if (id === null) {
+      history.replaceState({ screen: 'pieces' }, '', PIECES_PATH);
+      return this.showPieces(focus);
+    }
+    this.generation++;
+    this.stopCamera();
+    this.pieceId = id;
+    const gen = this.generation;
+    const view = pieceView({
+      api: this.api,
+      session: this.session,
+      productId: id,
+      clientServices: () => this.contactDetails(),
+      onPieces: () => this.openPieces(),
+      // Not the account's (passed on, or never its): MY PIECES in its place, at its address.
+      onMissing: () => {
+        if (gen !== this.generation) return;
+        if (entryOf(history.state) === 'piece') history.replaceState({ screen: 'pieces' }, '', PIECES_PATH);
+        void this.showPieces();
+      },
+      onRelease: (releaseId) => this.openRelease(releaseId),
+      onOrder: (reference) => this.openPieces({ order: reference }),
+      onModel: (slug) => this.openSheet(slug),
+      onScan: () => void this.startScan(),
+    });
+    if (await this.swap(view.root, 'piece', focus)) this.live = view;
     else view.dispose();
   }
 

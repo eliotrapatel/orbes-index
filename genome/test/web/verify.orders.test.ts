@@ -45,12 +45,18 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
       ['SHIPPED', '', 'next'],
       ['DELIVERED', '', 'next'],
     ]);
+    // Several steps reached in the year of the first: each by its day and month (C24, C32: five columns hold no year).
     const shipped = order({ status: 'SHIPPED', paidAt: '2026-10-06T09:00:00.000Z', shippedAt: '2026-10-08T15:30:00.000Z', shipment: SHIPMENT });
     expect(steps(shipped)).toEqual([
-      ['RESERVED', '5 OCT 2026', 'done'],
-      ['PAID', '6 OCT 2026', 'done'],
-      ['SHIPPED', '8 OCT 2026', 'current'],
+      ['RESERVED', '5 OCT', 'done'],
+      ['PAID', '6 OCT', 'done'],
+      ['SHIPPED', '8 OCT', 'current'],
       ['DELIVERED', '', 'next'],
+    ]);
+    // A step of another year says its own.
+    expect(steps(order({ status: 'PAID', reservedAt: '2026-12-30T10:00:00.000Z', paidAt: '2027-01-04T10:00:00.000Z' })).slice(0, 2)).toEqual([
+      ['RESERVED', '30 DEC', 'done'],
+      ['PAID', '4 JAN 2027', 'current'],
     ]);
     const delivered = order({ status: 'DELIVERED', paidAt: '2026-10-06T09:00:00.000Z', shippedAt: '2026-10-08T15:30:00.000Z', deliveredAt: '2026-10-10T10:00:00.000Z', shipment: SHIPMENT });
     expect(steps(delivered).map((s) => s[2])).toEqual(['done', 'done', 'done', 'current']);
@@ -58,17 +64,17 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
 
   it('a CANCELLED or RETURNED order: the steps it reached, then that end with its date', () => {
     expect(steps(order({ status: 'CANCELLED', cancelledAt: '2026-10-06T08:00:00.000Z' }))).toEqual([
-      ['RESERVED', '5 OCT 2026', 'done'],
-      ['CANCELLED', '6 OCT 2026', 'current'],
+      ['RESERVED', '5 OCT', 'done'],
+      ['CANCELLED', '6 OCT', 'current'],
     ]);
     expect(steps(order({ status: 'CANCELLED', paidAt: '2026-10-06T08:00:00.000Z', cancelledAt: '2026-10-07T08:00:00.000Z' })).map((s) => s[0])).toEqual(['RESERVED', 'PAID', 'CANCELLED']);
     // Returned on its way (SHIPPED → RETURNED), or once delivered.
     const onItsWay = order({ status: 'RETURNED', paidAt: '2026-10-06T08:00:00.000Z', shippedAt: '2026-10-07T08:00:00.000Z', returnedAt: '2026-10-12T08:00:00.000Z', shipment: SHIPMENT });
     expect(steps(onItsWay)).toEqual([
-      ['RESERVED', '5 OCT 2026', 'done'],
-      ['PAID', '6 OCT 2026', 'done'],
-      ['SHIPPED', '7 OCT 2026', 'done'],
-      ['RETURNED', '12 OCT 2026', 'current'],
+      ['RESERVED', '5 OCT', 'done'],
+      ['PAID', '6 OCT', 'done'],
+      ['SHIPPED', '7 OCT', 'done'],
+      ['RETURNED', '12 OCT', 'current'],
     ]);
     expect(steps(order({ ...onItsWay, deliveredAt: '2026-10-09T08:00:00.000Z' })).map((s) => s[0])).toEqual(['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED', 'RETURNED']);
   });
@@ -79,6 +85,7 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
     expect(orderDate('2026-10-05T23:30:00.000Z', -240)).toBe('5 OCT 2026');
     expect(orderDate('not a date', 0)).toBe('');
     expect(orderDate(null, 0)).toBe('');
+    expect(orderDate('2026-10-05T23:30:00.000Z', 120, { year: false })).toBe('6 OCT');
     expect(steps(order({ reservedAt: '2026-10-05T23:30:00.000Z' }), 120)[0]).toEqual(['RESERVED', '6 OCT 2026', 'current']);
   });
 
@@ -92,8 +99,8 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
       expect(orderDate('2026-12-14T23:30:00.000Z')).toBe('15 DEC 2026');
       expect(orderDate('not a date')).toBe('');
       const reserved = order({ status: 'PAID', reservedAt: '2026-07-14T22:30:00.000Z', paidAt: '2026-12-14T23:30:00.000Z' });
-      expect(orderSteps(reserved).map((s) => s.date)).toEqual(['15 JUL 2026', '15 DEC 2026', '', '']);
-      expect(orderModels([reserved])[0]!.steps.map((s) => s.date)).toEqual(['15 JUL 2026', '15 DEC 2026', '', '']);
+      expect(orderSteps(reserved).map((s) => s.date)).toEqual(['15 JUL', '15 DEC', '', '']);
+      expect(orderModels([reserved])[0]!.steps.map((s) => s.date)).toEqual(['15 JUL', '15 DEC', '', '']);
     } finally {
       if (tz === undefined) delete process.env.TZ;
       else process.env.TZ = tz;
@@ -104,7 +111,8 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
     expect(orderRows(order())).toEqual([
       ['SIZE', '52'],
       ['PRICE', `€${NBSP}4${NBSP}800`],
-      ['ENGRAVING', `€${NBSP}250`],
+      // An add-on adds to the price (C24).
+      ['ENGRAVING', `+ €${NBSP}250`],
       ['TOTAL', `€${NBSP}5${NBSP}050`],
     ]);
     // No add-on: no total. One size.
@@ -139,7 +147,9 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
     const m = orderModel(order(), 0)!;
     expect(m).toMatchObject({ key: 'order-or-1a2b3c4d', status: 'RESERVED', title: 'MONOLITHE', line: 'LIVE RELEASE · MONOLITHE — LIVE', sentence: ORDERS.sentence.RESERVED, reference: 'ORDER OR-1A2B3C4D', shipment: null });
     expect(orderModel(order({ channel: 'DRAW', release: 'Monolithe — Release I' }), 0)!.line).toBe('DRAW · MONOLITHE — RELEASE I');
-    expect(orderModel(order({ channel: 'SALON', release: null }), 0)!.line).toBe('THE PRIVATE SALON');
+    // The private salon has no release: its model follows it, with its variant (C32).
+    expect(orderModel(order({ channel: 'SALON', release: null }), 0)!.line).toBe('THE PRIVATE SALON · MONOLITHE');
+    expect(orderModel(order({ channel: 'SALON', release: null, model: 'Zenith', modelVariant: 'Gold' }), 0)!.line).toBe('THE PRIVATE SALON · ZENITH IN GOLD');
     for (const s of ['PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED'] as const) expect(orderModel(order({ status: s }), 0)!.sentence).toBe(ORDERS.sentence[s]);
   });
 
@@ -216,5 +226,15 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
     ].join('\n');
     expect(words).not.toContain('!');
     expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+  });
+});
+
+describe('ORDERS: the model\'s photograph above each order (plan NOCTURNE, addition 3)', () => {
+  it('carries its model\'s cover photograph, named after the model and its variant; none without one, nor a link it cannot trust', () => {
+    const ref = `/api/v1/media/${'c'.repeat(64)}`;
+    expect(orderModel(order(), 0)!.photo).toBeNull();
+    expect(orderModel(order({ imageUrl: null }), 0)!.photo).toBeNull();
+    expect(orderModel(order({ imageUrl: ref, modelVariant: 'Steel' }), 0)!.photo).toEqual({ kind: 'model', src: ref, alt: 'The MONOLITHE model in steel, photographed by ORBES', caption: 'THE MODEL' });
+    for (const imageUrl of [`${ref}?x`, 'https://example.com/a.webp', 'javascript:alert(1)']) expect(orderModel(order({ imageUrl }), 0)!.photo, imageUrl).toBeNull();
   });
 });

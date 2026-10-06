@@ -209,6 +209,8 @@ describe.skipIf(!HAS_CHROMIUM)('the after-room of a LIVE RELEASE in /verify (Chr
 
     // MY PIECES: the after-room's entry, its link through the release it follows; the release's own, ended.
     await page.getByRole('link', { name: 'MY PIECES' }).click();
+    // Its tab RELEASES (C31).
+    await page.getByRole('tab', { name: /^RELEASES/ }).click();
     const entry = page.locator('.pieces__entry-card', { hasText: 'THE AFTER-ROOM · CONFIRMED' });
     await visible(entry);
     expect(await entry.getByRole('link', { name: 'MONOLITHE — LIVE · THE AFTER-ROOM' }).getAttribute('href')).toBe(`/verify/releases/${r.id}/after-room`);

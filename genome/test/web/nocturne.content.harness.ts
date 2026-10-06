@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import { TIER } from '../../src/web/verify/copy.js';
 import { BASELINE_FILE, eachState, type Baseline } from '../support/nocturne-stage.js';
-import { normalizeText, openState, pageTexts, shows, UI_STATES, type UiState } from '../support/nocturne-states.js';
+import { myPiecesTexts, normalizeText, openState, pageTexts, shows, UI_STATES, type UiState } from '../support/nocturne-states.js';
 import { CHROMIUM_PATH } from '../support/ui-stage.js';
 
 export const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
@@ -170,6 +170,114 @@ function nowMoves(): Moved[] {
 }
 
 /**
+ * N5 (plan NOCTURNE, screens 3 and 4; C3, C4, C24, C31): MY PIECES was one page, each piece with its GENOME, its tabs
+ * and its declarations, then its orders, its releases and the account line. It is now split: the tabs PIECES, ORDERS
+ * and RELEASES, the page of each piece (SEE THE PIECE), and the account sheet (C2) for SIGNED IN AS, CHANGE PASSWORD
+ * and SIGN OUT. Each of these states showed that one page: a value not shown in the state itself is looked for in
+ * every part of the account's MY PIECES (myPiecesTexts), in the same phone, right after.
+ */
+export const SPLIT: Readonly<{ states: readonly string[]; reason: string; now: string }> = Object.freeze({
+  states: [
+    'pieces',
+    'pieces-warranty',
+    'pieces-care',
+    'pieces-service',
+    'pieces-certificate-choice',
+    'pieces-report-choice',
+    'pieces-care-guide',
+    'pieces-change-password',
+    'pieces-incidents',
+    'pieces-piece-found',
+    'pieces-question-after',
+    'pieces-turn-passed',
+    'pieces-draws',
+    'pieces-stress',
+    'pieces-certificate-link',
+    'pieces-certificate-withdrawn',
+    'live-pieces-turn',
+    'pieces-empty',
+  ],
+  reason: 'N5 (C3, C4, C24, C31): the one page of MY PIECES split into its tabs, the page of each piece and the account sheet.',
+  now: 'MY PIECES: PIECES, ORDERS and RELEASES; each piece\'s page (its GENOME, its tabs, its declarations); the account sheet (SIGNED IN AS, CHANGE PASSWORD, SIGN OUT).',
+});
+
+/**
+ * N5: MY PIECES' own links and headings that gave way to NOCTURNE's navigation: THE COLLECTION, THE RELEASES and THE
+ * CIRCLE at its foot (the rail's chapters, N2 and N3 alike), YOUR ORDERS and YOUR RELEASES (its tabs ORDERS and RELEASES).
+ */
+function piecesMoves(): Moved[] {
+  const baseline = readBaseline();
+  const has = (state: string, value: string) => (baseline.states[state]?.values ?? []).includes(value);
+  const rail = ['THE COLLECTION', 'THE RELEASES', 'THE CIRCLE'];
+  const tabs: Record<string, string> = { 'YOUR ORDERS': 'ORDERS', 'YOUR RELEASES': 'RELEASES' };
+  return SPLIT.states.flatMap((state) => [
+    ...rail
+      .filter((value) => has(state, value))
+      .map((value) => ({
+        state,
+        value,
+        reason: 'N5 (C3): MY PIECES\' text links to the other chapters gave way to the rail of chapters (N2), as NOW\'s did (N3).',
+        now: `The rail's ${value.replace(/^THE /, '')}, on every screen.`,
+      })),
+    ...Object.entries(tabs)
+      .filter(([value]) => has(state, value))
+      .map(([value, tab]) => ({
+        state,
+        value,
+        reason: 'N5 (C3, C24, C31): the section of MY PIECES became its tab.',
+        now: `The tab ${tab} of MY PIECES, with its count.`,
+      })),
+    // The steps of an order of several steps are dated by day and month (C24, C32: five columns hold no year).
+    ...ORDER_STEP_DATES.filter((value) => has(state, value)).map((value) => ({
+      state,
+      value,
+      reason: 'N5 (C24, C32): the steps of an order reached on several days are dated by their day and month, the year of the first said by none of them.',
+      now: 'The ORDERS tab of MY PIECES: the same day and month under its step.',
+      shownAs: [value.replace(/ \d{4}$/, '')],
+    })),
+    // SIGNED IN AS you@example.com is the account sheet's (C2): its label, then the email.
+    ...(baseline.states[state]?.values ?? [])
+      .filter((value) => /^SIGNED IN AS \S+@\S+$/.test(value))
+      .map((value) => ({
+        state,
+        value,
+        reason: 'N5 (C2, C3): MY PIECES\' account line gave way to the account sheet, which says the same.',
+        now: 'The account sheet (C2): SIGNED IN AS and the email, CHANGE PASSWORD, SIGN OUT.',
+        shownAs: ['SIGNED IN AS', value.replace(/^SIGNED IN AS /, '')],
+      })),
+  ]);
+}
+
+/** The dates of the demo's orders (the full demo's, the stress demo's, the draws demo's), as their steps showed them before N5 (with the year). */
+const ORDER_STEP_DATES = ['14 SEP 2026', '15 SEP 2026', '16 SEP 2026', '18 SEP 2026', '20 SEP 2026', '22 SEP 2026', '24 SEP 2026', '2 OCT 2026', '11 SEP 2026', '25 SEP 2026'];
+
+/**
+ * N5: MY PIECES before its pieces are read (ONE MOMENT…, could not be shown) and signed out (C18): its foot (SCAN ORBES
+ * CODE, THE COLLECTION, THE RELEASES) and, signed in, its account line gave way to the chrome and the account sheet.
+ */
+function piecesChromeMoves(): Moved[] {
+  const baseline = readBaseline();
+  const where: Record<string, string> = {
+    'SCAN ORBES CODE': 'The SCAN ring at the foot of every screen; once the pieces are read, ADD A PIECE and its SCAN ORBES CODE (C3).',
+    'THE COLLECTION': 'The rail\'s COLLECTION, on every screen.',
+    'THE RELEASES': 'The rail\'s RELEASES, on every screen.',
+    'THE CIRCLE': 'The rail\'s CIRCLE, on every screen.',
+    'CHANGE PASSWORD': 'The account sheet (C2, C39), from the header\'s account button.',
+    'SIGN OUT': 'The account sheet (C2), from the header\'s account button.',
+  };
+  return ['pieces-signed-out', 'pieces-sign-in-refused', 'pieces-loading', 'pieces-failed'].flatMap((state) =>
+    (baseline.states[state]?.values ?? [])
+      .filter((value) => value in where || /^SIGNED IN AS \S+@\S+$/.test(value))
+      .map((value) => ({
+        state,
+        value,
+        reason: 'N5 (C3, C18, C40): MY PIECES keeps to its title, its sentence and its state while its pieces are read or the sign-in is asked; its foot and its account line were the chrome\'s and the account sheet\'s to say.',
+        now: where[value] ?? 'The account sheet (C2): SIGNED IN AS and the email.',
+      })),
+  );
+}
+
+/**
  * The values NOCTURNE moves or removes on purpose, step by step. N1: THIS PIECE and the sentence for two photographs
  * (decision 9: the piece's own photograph leaves every collector's screen and answer; the model's alone stays,
  * captioned THE MODEL, with the sentence for one), and VARIANT (the field set at issuance renamed Size). N2: YOUR TIER
@@ -199,6 +307,8 @@ export const MOVED: readonly Moved[] = [
   })),
   ...tierMoves(),
   ...nowMoves(),
+  ...piecesMoves(),
+  ...piecesChromeMoves(),
   // N4 (C16): on a result that is neither authentic nor UNUSUAL ACTIVITY, WHERE DID YOU SEE OR BUY THIS PIECE? is a row
   // that opens (+): its four answers are inside it.
   ...['result-invalid', 'result-unknown', 'result-revoked'].flatMap((state) =>
@@ -244,7 +354,7 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   scan: (s) => full(s) && !s.mutates && named('now', 'scan', 'photo', 'problem')(s),
   results: (s) => full(s) && !s.mutates && named('result')(s),
   // MY PIECES, and the account sheet (C2: its own, over NOW, in the full, draw-leads and stress demos).
-  pieces: (s) => (full(s) && !s.mutates && named('pieces')(s)) || named('account')(s),
+  pieces: (s) => (full(s) && !s.mutates && named('pieces', 'piece')(s)) || named('account')(s),
   collection: (s) => full(s) && !s.mutates && named('collection', 'model')(s),
   releases: (s) => full(s) && !s.mutates && named('releases', 'draw', 'live')(s),
   circle: (s) => full(s) && !s.mutates && named('circle', 'post', 'legal', 'certificate')(s),
@@ -283,15 +393,20 @@ export function contentSuite(name: string): void {
             const opened = await openState(browser, stage, demo, state);
             try {
               const texts = await pageTexts(opened.page);
+              /** What is not shown in the state itself: the text looked for, and how it is reported. */
+              const unseen: { text: string; label: string }[] = [];
               for (const value of recorded.values) {
                 const m = moved.get(movedKey(state.id, value));
                 if (m) {
                   // Set apart on purpose: each of its parts is still shown there.
-                  for (const part of m.shownAs ?? []) if (!shows(texts, part)) missing.push(`${state.id}: ${part} (of «${value}»)`);
+                  for (const part of m.shownAs ?? []) if (!shows(texts, part)) unseen.push({ text: part, label: `${part} (of «${value}»)` });
                   continue;
                 }
-                if (!shows(texts, value)) missing.push(`${state.id}: ${value}`);
+                if (!shows(texts, value)) unseen.push({ text: value, label: value });
               }
+              // MY PIECES split (N5): what its one page showed is shown in one of its parts.
+              const parts = unseen.length > 0 && SPLIT.states.includes(state.id) ? await myPiecesTexts(opened) : null;
+              for (const u of unseen) if (!parts || !shows(parts, u.text)) missing.push(`${state.id}: ${u.label}`);
             } finally {
               await opened.close();
             }

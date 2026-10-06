@@ -12,7 +12,9 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { orderReference, type OrderTransitionInput } from '../../src/server/services/orders.js';
-import { createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { SYSTEM_ACTOR } from '../../src/server/types.js';
+import { jpegPhoto } from '../support/images.js';
+import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 
 type Json = Record<string, any>;
@@ -166,6 +168,8 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       shipment: null,
       // Not paid yet: no invoice; its care guide (step S4, M6).
       documents: { invoice: null, creditNote: null, careGuide: true, certificate: false },
+      // NOCTURNE, addition 3: its model's photograph; none taken yet.
+      imageUrl: null,
     });
     // A draw's: its size and price still to be entered.
     expect(byId.get(ids.draw)).toMatchObject({ channel: 'DRAW', release: 'MONOLITHE — RELEASE I', model: 'MONOLITHE', size: null, priceMinor: null, currency: null, addons: [], status: 'RESERVED', paidAt: null, shipment: null });
@@ -187,6 +191,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       shipment: { carrier: 'Colissimo', trackingNumber: '6A 1234 5678 901', trackingUrl: 'https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901' },
       // Paid: its invoice (step S4, M6); its piece not registered by the account: no certificate yet.
       documents: { invoice: { number: expect.stringMatching(/^INV-2026-\d{6}$/), issuedAt: delivered.paidAt }, creditNote: null, careGuide: true, certificate: false },
+      imageUrl: null,
     });
     for (const k of ['reservedAt', 'paidAt', 'shippedAt', 'deliveredAt']) expect(delivered[k], k).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Date.parse(delivered.reservedAt)).toBeLessThan(Date.parse(delivered.paidAt));
@@ -202,7 +207,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     const list = (safeJson(res) as { orders: Json[] }).orders;
     for (const o of list) {
       expect(Object.keys(o).sort()).toEqual(
-        ['addons', 'cancelledAt', 'channel', 'currency', 'deliveredAt', 'documents', 'id', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'size', 'status'].sort(),
+        ['addons', 'cancelledAt', 'channel', 'currency', 'deliveredAt', 'documents', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'size', 'status'].sort(),
       );
       expect(Object.keys(o.documents).sort()).toEqual(['careGuide', 'certificate', 'creditNote', 'invoice']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);
@@ -210,5 +215,46 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     for (const secret of ['A silk pouch', 'Jane', 'Paix', 'A. & L.', '470123', 'WAREHOUSE', 'transfer', 'withdrew', 'Sold by phone', f.admin.id, 'BENCH', 'STOCK', 'O26-J-']) {
       expect(res.body, secret).not.toContain(secret);
     }
+  });
+
+  it('carries the cover photograph of each order\'s model, never a piece\'s own (plan NOCTURNE, addition 3)', async () => {
+    const image = (await h.ctx.services.media.setModelImage(f.modelId, { mime: 'image/jpeg', bytes: jpegPhoto(400, 400) }, SYSTEM_ACTOR)).url;
+    const list = (safeJson(await mine.get('/api/v1/account/orders')) as { orders: Json[] }).orders;
+    expect(list.length).toBeGreaterThan(0);
+    for (const o of list) expect(o.imageUrl).toBe(image);
+    expect(image).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
+  });
+
+  it('says where a piece of the account comes from: its order, its step and its release; nothing for another account, nor for a piece without one (addition 2)', async () => {
+    const piece = (await h.ctx.db.selectFrom('orders').select('product_id').where('id', '=', ids.delivered).executeTakeFirstOrThrow()).product_id!;
+    const order = await h.ctx.db.selectFrom('orders').selectAll().where('id', '=', ids.delivered).executeTakeFirstOrThrow();
+    await h.ctx.db.insertInto('ownership').values({ product_id: piece, account_id: mineId, acquired_via: 'FIRST_REGISTRATION', verified: true, started_at: h.clock.now() }).execute();
+    const products = (safeJson(await mine.get('/api/v1/account/products')) as { products: Json[] }).products;
+    const held = products.find((p) => p.origin);
+    // The private salon's order: no release; its reference, its step and when it reached it.
+    expect(held?.origin).toEqual({ release: null, order: { reference: orderReference(ids.delivered), channel: 'SALON', status: 'DELIVERED', at: order.delivered_at!.toISOString() } });
+    // Passed on to another account: that account sees no order of the first one.
+    await h.ctx.db.updateTable('ownership').set({ ended_at: h.clock.now(), ended_reason: 'TRANSFER' }).where('product_id', '=', piece).where('account_id', '=', mineId).execute();
+    await h.ctx.db.insertInto('ownership').values({ product_id: piece, account_id: otherId, acquired_via: 'TRANSFER', verified: true, started_at: h.clock.now() }).execute();
+    const theirs = (safeJson(await other.get('/api/v1/account/products')) as { products: Json[] }).products;
+    expect(theirs.map((p) => p.origin)).toEqual([null]);
+    expect(JSON.stringify(theirs)).not.toContain(orderReference(ids.delivered));
+  });
+
+  it('names a draw\'s release by when it was drawn, a LIVE RELEASE\'s by its T0, each with its id (addition 2)', async () => {
+    const [drawPiece, livePiece, boutique] = await holdPieces(h.ctx.db, mineId, 3, f.modelId);
+    await h.ctx.db.updateTable('orders').set({ product_id: drawPiece! }).where('id', '=', ids.draw).execute();
+    await h.ctx.db.updateTable('orders').set({ product_id: livePiece! }).where('id', '=', ids.live2).execute();
+    const draw = await h.ctx.db.selectFrom('orders as o').innerJoin('drops as d', 'd.id', 'o.drop_id').select(['d.id', 'd.drawn_at']).where('o.id', '=', ids.draw).executeTakeFirstOrThrow();
+    const live = await h.ctx.db.selectFrom('orders as o').innerJoin('drops as d', 'd.id', 'o.drop_id').select(['d.id', 'd.opens_at', 'o.reserved_at']).where('o.id', '=', ids.live2).executeTakeFirstOrThrow();
+    const owned = await h.ctx.services.ownership.listForAccount(mineId);
+    const originOf = async (uuid: string) => {
+      const pid = (await h.ctx.db.selectFrom('products').select('product_id').where('id', '=', uuid).executeTakeFirstOrThrow()).product_id;
+      return owned.find((p) => p.productId === pid)!.origin;
+    };
+    expect(await originOf(drawPiece!)).toEqual({ release: { id: draw.id, mode: 'DRAW', at: draw.drawn_at }, order: { reference: orderReference(ids.draw), channel: 'DRAW', status: 'RESERVED', at: expect.any(Date) } });
+    expect(await originOf(livePiece!)).toEqual({ release: { id: live.id, mode: 'LIVE', at: live.opens_at }, order: { reference: orderReference(ids.live2), channel: 'LIVE', status: 'RESERVED', at: live.reserved_at } });
+    // A boutique sale: no order, nothing said.
+    expect(await originOf(boutique!)).toBeNull();
   });
 });

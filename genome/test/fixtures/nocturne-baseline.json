@@ -1710,12 +1710,9 @@
       ]
     },
     "pieces": {
-      "title": "MY PIECES: the tier, the pieces, the orders, the releases, the account line",
+      "title": "MY PIECES, PIECES: each piece on its model’s photograph, its size, its state, SEE THE PIECE; ADD A PIECE",
       "refs": [
-        "C3",
-        "C24",
-        "C31",
-        "C32"
+        "C3"
       ],
       "variant": "full",
       "as": "you",
@@ -1840,8 +1837,247 @@
         "IP GEOLOCATION BY DB-IP"
       ]
     },
+    "pieces-orders": {
+      "title": "MY PIECES, ORDERS: each order on its model’s photograph, its steps, its terms, its documents (reserved, delivered, returned, cancelled)",
+      "refs": [
+        "C24",
+        "C32"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "MY PIECES",
+        "PIECES2",
+        "ORDERS4",
+        "RELEASES3",
+        "LIVE RELEASE · MONOLITHE IN STEEL",
+        "MONOLITHE",
+        "RESERVED",
+        "5 OCT 2026",
+        "PAID",
+        "SHIPPED",
+        "DELIVERED",
+        "Your piece is reserved. ORBES Client Services will contact you to settle payment and delivery.",
+        "SIZE",
+        "16",
+        "PRICE",
+        "€ 5 050",
+        "ENGRAVING",
+        "+ € 150",
+        "TOTAL",
+        "€ 5 200",
+        "ORDER OR-«ref»",
+        "DOCUMENTS",
+        "CARE GUIDE",
+        "The care guide of MONOLITHE in steel",
+        "THE PRIVATE SALON · ZENITH",
+        "ZENITH",
+        "20 SEP",
+        "CANCELLED",
+        "24 SEP",
+        "This order has been cancelled.",
+        "17",
+        "€ 4 800",
+        "DRAW · MONOLITHE IN GOLD",
+        "15 SEP",
+        "16 SEP",
+        "18 SEP",
+        "22 SEP",
+        "Your piece has been delivered.",
+        "€ 4 200",
+        "CARRIER",
+        "COLISSIMO",
+        "TRACKING NUMBER",
+        "6A12345678901",
+        "TRACK THE SHIPMENT",
+        "INVOICE INV-«ref»",
+        "PDF",
+        "The care guide of MONOLITHE in gold",
+        "OWNERSHIP CERTIFICATE",
+        "DRAW · MONOLITHE IN STEEL",
+        "14 SEP",
+        "RETURNED",
+        "2 OCT",
+        "This order has been returned to ORBES.",
+        "18",
+        "6A10987654321",
+        "CREDIT NOTE CN-«ref»",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
+    "pieces-releases": {
+      "title": "MY PIECES, RELEASES: the account’s entries, their state, sentence and id",
+      "refs": [
+        "C31"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "MY PIECES",
+        "PIECES2",
+        "ORDERS4",
+        "RELEASES3",
+        "MONOLITHE IN STEEL",
+        "LIVE RELEASE · CONFIRMED",
+        "You secured your piece in size 16. Its steps follow in YOUR ORDERS.",
+        "REFERENCE LR-«ref»",
+        "CONTACT ORBES CLIENT SERVICES",
+        "+33 1 23 45 67 89",
+        "Monday to Friday, 10:00 to 18:00 (Paris)",
+        "MONOLITHE IN GOLD",
+        "DRAWN · CONCLUDED",
+        "Your purchase is concluded with ORBES Client Services.",
+        "YOUR ENTRY «id»",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
+    "piece": {
+      "title": "A piece (from the draw of 14 September): THE MODEL, SIZE, WHERE IT COMES FROM, its GENOME, OWNERSHIP",
+      "refs": [
+        "C4"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "MY PIECES",
+        "THE MODEL",
+        "Photographed by ORBES. Compare it with the piece in your hands.",
+        "MONOLITHE",
+        "BRACELET",
+        "JEWELRY",
+        "18K YELLOW GOLD",
+        "SIZE 17",
+        "CREATED 2026",
+        "SEE THE MODEL",
+        "REGISTERED TO YOU",
+        "WHERE IT COMES FROM",
+        "THE DRAW OF 14 SEPTEMBER",
+        "SEE THE RELEASE",
+        "ORDER OR-«ref»",
+        "DELIVERED ON 22 SEP 2026",
+        "GENOME",
+        "O26-J-00199",
+        "«genome» · GENOME-01",
+        "OWNERSHIP",
+        "WARRANTY",
+        "SERVICE",
+        "CARE",
+        "ACQUIRED",
+        "FIRST REGISTRATION",
+        "VERIFIED",
+        "SINCE",
+        "22 SEP 2026",
+        "OWNERSHIP CERTIFICATE",
+        "Share a link to a certificate of this piece with a buyer or an insurer: its GENOME, your ownership and its date, the warranty, and that no loss or theft is reported. It never shows your name or your email, and it stops being valid if the piece changes hands or is reported lost or stolen.",
+        "CREATE CERTIFICATE",
+        "REPORT LOST / STOLEN",
+        "If this piece is lost or stolen, report it here: every scan of its code will then show UNUSUAL ACTIVITY to whoever checks it, and it can no longer be transferred.",
+        "CONTACT ORBES CLIENT SERVICES",
+        "+33 1 23 45 67 89",
+        "Monday to Friday, 10:00 to 18:00 (Paris)",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
+    "piece-boutique": {
+      "title": "A piece sold at a boutique (no order): nothing of where it comes from",
+      "refs": [
+        "C4"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "TITANE",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "MY PIECES",
+        "THE MODEL",
+        "Photographed by ORBES. Compare it with the piece in your hands.",
+        "MONOLITHE",
+        "BRACELET",
+        "JEWELRY",
+        "925 STERLING SILVER",
+        "SIZE 17",
+        "CREATED 2026",
+        "SEE THE MODEL",
+        "REGISTERED TO YOU",
+        "GENOME",
+        "O26-J-00184",
+        "«genome» · GENOME-01",
+        "OWNERSHIP",
+        "WARRANTY",
+        "SERVICE",
+        "CARE",
+        "ACQUIRED",
+        "FIRST REGISTRATION",
+        "VERIFIED",
+        "SINCE",
+        "3 OCT 2026",
+        "OWNERSHIP CERTIFICATE",
+        "Share a link to a certificate of this piece with a buyer or an insurer: its GENOME, your ownership and its date, the warranty, and that no loss or theft is reported. It never shows your name or your email, and it stops being valid if the piece changes hands or is reported lost or stolen.",
+        "CREATE CERTIFICATE",
+        "REPORT LOST / STOLEN",
+        "If this piece is lost or stolen, report it here: every scan of its code will then show UNUSUAL ACTIVITY to whoever checks it, and it can no longer be transferred.",
+        "CONTACT ORBES CLIENT SERVICES",
+        "+33 1 23 45 67 89",
+        "Monday to Friday, 10:00 to 18:00 (Paris)",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
     "pieces-warranty": {
-      "title": "MY PIECES, a piece: WARRANTY",
+      "title": "A piece: WARRANTY",
       "refs": [
         "C35"
       ],
@@ -1975,7 +2211,7 @@
       ]
     },
     "pieces-care": {
-      "title": "MY PIECES, a piece: CARE, then ORBES CARE",
+      "title": "A piece: CARE, then ORBES CARE",
       "refs": [
         "C35"
       ],
@@ -2110,7 +2346,7 @@
       ]
     },
     "pieces-service": {
-      "title": "MY PIECES, a piece: SERVICE HISTORY",
+      "title": "A piece: SERVICE HISTORY",
       "refs": [
         "C35"
       ],
@@ -2239,7 +2475,7 @@
       ]
     },
     "pieces-certificate-choice": {
-      "title": "MY PIECES, a piece: CREATE CERTIFICATE, its validity",
+      "title": "A piece: CREATE CERTIFICATE, its validity",
       "refs": [
         "C35"
       ],
@@ -2373,7 +2609,7 @@
       ]
     },
     "pieces-report-choice": {
-      "title": "MY PIECES, a piece: REPORT LOST / STOLEN, LOST chosen",
+      "title": "A piece: REPORT LOST / STOLEN, LOST chosen",
       "refs": [
         "C35"
       ],
@@ -2507,10 +2743,9 @@
       ]
     },
     "pieces-care-guide": {
-      "title": "MY PIECES, an order: its documents, the CARE GUIDE open",
+      "title": "MY PIECES, ORDERS: an order’s documents, the CARE GUIDE open",
       "refs": [
-        "C24",
-        "C31"
+        "C24"
       ],
       "variant": "full",
       "as": "you",
@@ -2637,7 +2872,7 @@
       ]
     },
     "pieces-change-password": {
-      "title": "MY PIECES: CHANGE PASSWORD",
+      "title": "MY PIECES: the account sheet’s CHANGE PASSWORD over it",
       "refs": [
         "C39"
       ],
@@ -2770,8 +3005,9 @@
       ]
     },
     "pieces-incidents": {
-      "title": "MY PIECES of an owner: reported stolen, transfer pending, reported lost (PIECE FOUND), in service",
+      "title": "MY PIECES of an owner: reported stolen, transfer pending, reported lost, in service",
       "refs": [
+        "C3",
         "C35"
       ],
       "variant": "full",
@@ -2857,7 +3093,7 @@
       ]
     },
     "pieces-piece-found": {
-      "title": "MY PIECES: PIECE FOUND, confirmed with the password",
+      "title": "A piece reported lost by its owner: PIECE FOUND, confirmed with the password",
       "refs": [
         "C35"
       ],
@@ -2946,6 +3182,175 @@
         "IP GEOLOCATION BY DB-IP"
       ]
     },
+    "piece-stolen": {
+      "title": "A piece reported stolen: its sentence and the contact",
+      "refs": [
+        "C35"
+      ],
+      "variant": "full",
+      "as": "owner",
+      "values": [
+        "ORBES",
+        "PALLADIUM",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "MY PIECES",
+        "THE MODEL",
+        "Photographed by ORBES. Compare it with the piece in your hands.",
+        "MONOLITHE",
+        "BRACELET",
+        "JEWELRY",
+        "925 STERLING SILVER",
+        "SIZE 17",
+        "CREATED 2026",
+        "SEE THE MODEL",
+        "REPORTED STOLEN",
+        "GENOME",
+        "O26-J-00227",
+        "«genome» · GENOME-01",
+        "OWNERSHIP",
+        "WARRANTY",
+        "SERVICE",
+        "CARE",
+        "ACQUIRED",
+        "FIRST REGISTRATION",
+        "VERIFIED",
+        "SINCE",
+        "4 OCT 2026",
+        "Every scan of its code shows UNUSUAL ACTIVITY. Once the piece is recovered, ORBES Client Services check it and withdraw the report.",
+        "CONTACT ORBES CLIENT SERVICES",
+        "+33 1 23 45 67 89",
+        "Monday to Friday, 10:00 to 18:00 (Paris)",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
+    "piece-transfer": {
+      "title": "A piece with a transfer pending: its date and CANCEL TRANSFER",
+      "refs": [
+        "C35"
+      ],
+      "variant": "full",
+      "as": "owner",
+      "values": [
+        "ORBES",
+        "PALLADIUM",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "MY PIECES",
+        "THE MODEL",
+        "Photographed by ORBES. Compare it with the piece in your hands.",
+        "MONOLITHE",
+        "BRACELET",
+        "JEWELRY",
+        "18K YELLOW GOLD",
+        "SIZE 17",
+        "CREATED 2026",
+        "SEE THE MODEL",
+        "TRANSFER PENDING",
+        "GENOME",
+        "O26-J-00228",
+        "«genome» · GENOME-01",
+        "OWNERSHIP",
+        "WARRANTY",
+        "SERVICE",
+        "CARE",
+        "ACQUIRED",
+        "FIRST REGISTRATION",
+        "VERIFIED",
+        "SINCE",
+        "4 OCT 2026",
+        "TRANSFER",
+        "PENDING UNTIL 11 OCT 2026",
+        "A transfer of this piece is pending until 11 October 2026. You may cancel it at any time before it is accepted.",
+        "CANCEL TRANSFER",
+        "OWNERSHIP CERTIFICATE",
+        "Share a link to a certificate of this piece with a buyer or an insurer: its GENOME, your ownership and its date, the warranty, and that no loss or theft is reported. It never shows your name or your email, and it stops being valid if the piece changes hands or is reported lost or stolen.",
+        "CREATE CERTIFICATE",
+        "REPORT LOST / STOLEN",
+        "If this piece is lost or stolen, report it here: every scan of its code will then show UNUSUAL ACTIVITY to whoever checks it, and it can no longer be transferred.",
+        "CONTACT ORBES CLIENT SERVICES",
+        "+33 1 23 45 67 89",
+        "Monday to Friday, 10:00 to 18:00 (Paris)",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
+    "piece-in-service": {
+      "title": "A piece in service: its sentence, then SERVICE HISTORY",
+      "refs": [
+        "C35"
+      ],
+      "variant": "full",
+      "as": "owner",
+      "values": [
+        "ORBES",
+        "PALLADIUM",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "MY PIECES",
+        "THE MODEL",
+        "Photographed by ORBES. Compare it with the piece in your hands.",
+        "MONOLITHE",
+        "BRACELET",
+        "JEWELRY",
+        "925 STERLING SILVER",
+        "SIZE 17",
+        "CREATED 2026",
+        "SEE THE MODEL",
+        "IN SERVICE",
+        "GENOME",
+        "O26-J-00230",
+        "«genome» · GENOME-01",
+        "OWNERSHIP",
+        "WARRANTY",
+        "SERVICE",
+        "CARE",
+        "ACQUIRED",
+        "FIRST REGISTRATION",
+        "VERIFIED",
+        "SINCE",
+        "4 OCT 2026",
+        "This piece is with ORBES for a service. Its history is under SERVICE.",
+        "OWNERSHIP CERTIFICATE",
+        "Share a link to a certificate of this piece with a buyer or an insurer: its GENOME, your ownership and its date, the warranty, and that no loss or theft is reported. It never shows your name or your email, and it stops being valid if the piece changes hands or is reported lost or stolen.",
+        "CREATE CERTIFICATE",
+        "REPORT LOST / STOLEN",
+        "If this piece is lost or stolen, report it here: every scan of its code will then show UNUSUAL ACTIVITY to whoever checks it, and it can no longer be transferred.",
+        "CONTACT ORBES CLIENT SERVICES",
+        "+33 1 23 45 67 89",
+        "Monday to Friday, 10:00 to 18:00 (Paris)",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
     "pieces-question-after": {
       "title": "MY PIECES of a collector who said I’LL BE THERE and did not come: AFTER THE RELEASES",
       "refs": [
@@ -3019,7 +3424,7 @@
       ]
     },
     "pieces-turn-passed": {
-      "title": "MY PIECES of a collector whose turn passed: YOUR RELEASES · TURN PASSED",
+      "title": "MY PIECES of a collector whose turn passed: RELEASES · TURN PASSED",
       "refs": [
         "C31"
       ],
@@ -3176,7 +3581,7 @@
       ]
     },
     "pieces-stress": {
-      "title": "MY PIECES with six pieces and four orders (a price in USD, € 125 400, a long tracking number)",
+      "title": "MY PIECES with six pieces, the first of a 24-character model without a photograph, its Size of 14 characters",
       "refs": [
         "same pieces"
       ],
@@ -3277,6 +3682,122 @@
         "LEGAL",
         "HELP",
         "IP GEOLOCATION BY DB-IP"
+      ]
+    },
+    "pieces-orders-stress": {
+      "title": "MY PIECES, ORDERS: four orders (a price in USD, € 125 400, a long tracking number)",
+      "refs": [
+        "same pieces"
+      ],
+      "variant": "stress",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "PALLADIUM",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "MY PIECES",
+        "PIECES6",
+        "ORDERS4",
+        "THE PRIVATE SALON · ZENITH",
+        "ZENITH",
+        "RESERVED",
+        "13 SEP 2026",
+        "PAID",
+        "SHIPPED",
+        "DELIVERED",
+        "Your piece is reserved. ORBES Client Services will contact you to settle payment and delivery.",
+        "SIZE",
+        "17",
+        "PRICE",
+        "€ 4 800",
+        "ORDER OR-«ref»",
+        "DOCUMENTS",
+        "CARE GUIDE",
+        "The care guide of ZENITH",
+        "12 SEP 2026",
+        "18",
+        "€ 5 050",
+        "11 SEP",
+        "Your piece is on its way. Once it has arrived, scan its ORBES CODE to register it to your account.",
+        "16",
+        "$ 6 400",
+        "CARRIER",
+        "CHRONOPOST",
+        "TRACKING NUMBER",
+        "XY48291563748201937465012FR",
+        "TRACK THE SHIPMENT",
+        "INVOICE INV-«ref»",
+        "PDF",
+        "THE PRIVATE SALON · MONOLITHE ARCHITECTURALE IN POLISHED",
+        "MONOLITHE ARCHITECTURALE",
+        "10 SEP 2026",
+        "€ 125 400",
+        "The care guide of MONOLITHE ARCHITECTURALE in polished",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
+      ]
+    },
+    "piece-stress": {
+      "title": "A piece of a 24-character model without a photograph, its Size of 14 characters",
+      "refs": [
+        "same pieces"
+      ],
+      "variant": "stress",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "PALLADIUM",
+        "NOW",
+        "RELEASES",
+        "COLLECTION",
+        "CIRCLE",
+        "PIECES",
+        "MY PIECES",
+        "MONOLITHE ARCHITECTURALE",
+        "ARTICULATED BRACELET",
+        "JEWELRY",
+        "925 STERLING SILVER, BRUSHED AND POLISHED",
+        "SIZE BRUSHED COBALT",
+        "CREATED 2026",
+        "REGISTERED TO YOU",
+        "GENOME",
+        "O26-J-00300",
+        "«genome» · GENOME-01",
+        "OWNERSHIP",
+        "WARRANTY",
+        "SERVICE",
+        "CARE",
+        "ACQUIRED",
+        "FIRST REGISTRATION",
+        "VERIFIED",
+        "SINCE",
+        "2 SEP 2026",
+        "OWNERSHIP CERTIFICATE",
+        "Share a link to a certificate of this piece with a buyer or an insurer: its GENOME, your ownership and its date, the warranty, and that no loss or theft is reported. It never shows your name or your email, and it stops being valid if the piece changes hands or is reported lost or stolen.",
+        "CREATE CERTIFICATE",
+        "REPORT LOST / STOLEN",
+        "If this piece is lost or stolen, report it here: every scan of its code will then show UNUSUAL ACTIVITY to whoever checks it, and it can no longer be transferred.",
+        "CONTACT ORBES CLIENT SERVICES",
+        "+33 1 23 45 67 89",
+        "Monday to Friday, 10:00 to 18:00 (Paris)",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "SOUND ON",
+        "IP GEOLOCATION BY DB-IP",
+        "© ORBES · PARIS",
+        "SCAN"
       ]
     },
     "account-sheet": {
@@ -7532,6 +8053,57 @@
         "FULL SCREEN"
       ]
     },
+    "result-transfer-code": {
+      "title": "The owner’s transfer code, created",
+      "refs": [
+        "C37"
+      ],
+      "variant": "full",
+      "as": "you",
+      "values": [
+        "ORBES",
+        "AUTHENTIC",
+        "OWNERSHIP VERIFIED",
+        "This ORBES identity was issued and signed by ORBES and is registered to your account.",
+        "THE MODEL",
+        "Photographed by ORBES. Compare it with the piece in your hands.",
+        "GENOME",
+        "O26-J-00199",
+        "«genome»",
+        "·",
+        "GENOME-01",
+        "SEE THE MODEL",
+        "MONOLITHE",
+        "BRACELET",
+        "JEWELRY",
+        "18K YELLOW GOLD",
+        "CREATED 2026",
+        "PRODUCT",
+        "WARRANTY",
+        "CARE",
+        "OWNERSHIP",
+        "REGISTERED TO YOU",
+        "This piece is registered to your ORBES account.",
+        "TRANSFER OF OWNERSHIP",
+        "TRANSFER CODE",
+        "«code»",
+        "VALID UNTIL 12 OCT 2026",
+        "Give this code only to the new owner. The transfer completes when they enter it in their ORBES account.",
+        "CANCEL TRANSFER",
+        "SIGNED IN AS you@example.com",
+        "MY PIECES",
+        "SIGN OUT",
+        "SCAN ANOTHER",
+        "This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.",
+        "VERIFIED 5 OCT 2026 · 18:49",
+        "REF «ref»",
+        "PRIVACY",
+        "TERMS",
+        "LEGAL",
+        "HELP",
+        "IP GEOLOCATION BY DB-IP"
+      ]
+    },
     "result-registered-now": {
       "title": "Registered: REGISTERED TO YOU, VIEW AS OWNER",
       "refs": [
@@ -7709,57 +8281,6 @@
         "SCAN"
       ]
     },
-    "result-transfer-code": {
-      "title": "The owner’s transfer code, created",
-      "refs": [
-        "C37"
-      ],
-      "variant": "full",
-      "as": "you",
-      "values": [
-        "ORBES",
-        "AUTHENTIC",
-        "OWNERSHIP VERIFIED",
-        "This ORBES identity was issued and signed by ORBES and is registered to your account.",
-        "THE MODEL",
-        "Photographed by ORBES. Compare it with the piece in your hands.",
-        "GENOME",
-        "O26-J-00199",
-        "«genome»",
-        "·",
-        "GENOME-01",
-        "SEE THE MODEL",
-        "MONOLITHE",
-        "BRACELET",
-        "JEWELRY",
-        "18K YELLOW GOLD",
-        "CREATED 2026",
-        "PRODUCT",
-        "WARRANTY",
-        "CARE",
-        "OWNERSHIP",
-        "REGISTERED TO YOU",
-        "This piece is registered to your ORBES account.",
-        "TRANSFER OF OWNERSHIP",
-        "TRANSFER CODE",
-        "«code»",
-        "VALID UNTIL 12 OCT 2026",
-        "Give this code only to the new owner. The transfer completes when they enter it in their ORBES account.",
-        "CANCEL TRANSFER",
-        "SIGNED IN AS you@example.com",
-        "MY PIECES",
-        "SIGN OUT",
-        "SCAN ANOTHER",
-        "This verification confirms an identity issued and signed by ORBES and its registry record. A printed code alone cannot prove that an object is genuine; ORBES Client Services can inspect a piece on request.",
-        "VERIFIED 5 OCT 2026 · 18:49",
-        "REF «ref»",
-        "PRIVACY",
-        "TERMS",
-        "LEGAL",
-        "HELP",
-        "IP GEOLOCATION BY DB-IP"
-      ]
-    },
     "result-received": {
       "title": "The new owner, the transfer code entered: REGISTERED TO YOU, VIEW AS OWNER",
       "refs": [
@@ -7814,7 +8335,7 @@
       ]
     },
     "pieces-certificate-link": {
-      "title": "MY PIECES: the certificate link, shown once, COPY LINK, OPEN LINK, WITHDRAW",
+      "title": "A piece: the certificate link, shown once, COPY LINK, OPEN LINK, WITHDRAW",
       "refs": [
         "C35"
       ],
@@ -7959,7 +8480,7 @@
       ]
     },
     "pieces-certificate-withdrawn": {
-      "title": "MY PIECES: a certificate link withdrawn, The link has been withdrawn",
+      "title": "A piece: a certificate link withdrawn, The link has been withdrawn",
       "refs": [
         "C35"
       ],

@@ -344,6 +344,25 @@ export const PIECES = Object.freeze({
   withdraw: 'WITHDRAW',
   withdrawn: 'The link has been withdrawn: it no longer leads to the certificate.',
   certificatesFailed: 'Your certificate links could not be shown just now.',
+  // NOCTURNE (C3, C4): the tabs of MY PIECES, a piece's link and its page, ADD A PIECE, where a piece comes from.
+  /** The tabs of MY PIECES (C3, C24, C31), and their accessible name. */
+  pageTabs: Object.freeze({ pieces: 'PIECES', orders: 'ORDERS', releases: 'RELEASES' }),
+  pageTabsLabel: 'My pieces',
+  /** Under each piece of the list, the link to its page; the crumb of a piece's page back to the list. */
+  seePiece: 'SEE THE PIECE',
+  back: 'MY PIECES',
+  /** « REGISTERED TO YOU · SINCE 3 OCT 2026 » under a piece of the list. */
+  since: (date: string) => `SINCE ${date}`,
+  add: 'ADD A PIECE',
+  addLead: 'Scan a piece, then register it from the OWNERSHIP tab of its result.',
+  /** Addition 2 (C4): its release and its order. */
+  origin: Object.freeze({
+    label: 'WHERE IT COMES FROM',
+    draw: (day: string) => `THE DRAW OF ${day}`,
+    live: (day: string) => `THE LIVE RELEASE OF ${day}`,
+    /** The order's step now and when it reached it: « DELIVERED ON 22 SEP 2026 ». */
+    step: (step: string, date: string) => (date ? `${step} ON ${date}` : step),
+  }),
 });
 
 /**
@@ -390,6 +409,8 @@ export const ORDERS = Object.freeze({
     creditNote: 'CREDIT NOTE',
     careGuide: 'CARE GUIDE',
     certificate: 'OWNERSHIP CERTIFICATE',
+    /** Under a document that saves a file (C24). */
+    pdf: 'PDF',
     /** Accessible names: what each link does. */
     invoiceLabel: (number: string) => `Download the invoice ${number} (PDF)`,
     creditNoteLabel: (number: string) => `Download the credit note ${number} (PDF)`,

@@ -55,6 +55,14 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   - The rail clips sideways only (`overflow-x: clip`), so a link's tap zone may reach above it.
   - The banner of the LIVE RELEASES is never under the 44 px tap zone: on one line (its name not yet revealed, or a
     short one) it is 44 px high, its line centred; on two lines it is C3's 54 px.
+  - C4 (N5): the contact of ORBES Client Services under REPORT LOST / STOLEN stands 28.25 px under the button, not 14:
+    its email's 44 px tap zone reaches 28.25 px above its word and never lies over the button.
+  - C4 (N5): CARE, the last of a piece's tabs, grows its tap zone 8 px to the right into the margin (SERVICE stands
+    right beside it on a 320 px phone); the tablist's hairline stays the column's.
+  - Since N5, every 16 px icon (the boards' `ic sm`: ›, + / −, ✓, ‹) is drawn in ash, as the rulebook's `.C .sm` reaches
+    it on C2–C5, C16, C24 and C32; it was ivory before.
+  - C24, C32 (N5): the number of an invoice or a credit note is in the reading face at the label's weight, as drawn;
+    every figure of a label is in Helvetica Neue (the plan's Type rule), the board's SIZE I7 reads SIZE 17.
   - Every button's label is in Gravesend capitals, as the plan's Type rule says, where the boards' markup leaves `.btn`
     in Helvetica Neue (SIGN OUT on C2, TRY AGAIN on C40: the same width, its glyphs 1.5 px lower at scale 2).
   - The shared certificate (`/verify/c#…`, kept as it is, choice 3) opens on the black ground with Safari's bars in ink
@@ -79,6 +87,17 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   - C36 (5): the NOT YET DELIVERED label above its sentence.
   - C37 (4): *If this piece is registered to you, verify it again to see it as its owner.* under the sentence that no
     transfer is pending.
+  - C3: the banner's name is the release's as the banner reads it (*MONOLITHE*, the name's stage), its countdown the
+    banner's; AFTER THE RELEASES and EARLY ACCESS on PIECES when they apply (N5).
+  - C4, C35: the warranty's sentence under its rows; a service's kind under its dates and place; CREATE LINK · CANCEL
+    under the validity's choice; the open links' list when there are several; *A loss or a theft of this piece cannot be
+    reported here…* for a piece revoked; the sentences of a transfer pending, of a piece in service and of an ownership
+    not yet verified; the contact under every state (N5).
+  - C24, C32: the SIZE and PRICE rows of an order cancelled whose terms were entered (ZENITH: 17, € 4 800); the care
+    guide's line names the model with its variant (*The care guide of MONOLITHE in steel*, N1); the steps' dates of an
+    order of one step reached keep their year (5 OCT 2026), as C24 draws them (N5).
+  - C31: the contact of ORBES Client Services under an entry CONFIRMED; the entry's id whole, in lower case, as the draw
+    publishes it (the board shows eight characters in capitals) (N5).
 
 ## Boards without a screen of their own today
 
@@ -88,8 +107,8 @@ The parity tool sets each board beside the state that holds its content today (`
 |---|---|---|
 | C1, C10, C42, C43 NOW | the landing and its banner | `now-*` |
 | C2 the account sheet | its own screen since N2 (the header's account button): see *The chrome and the account sheet* | `account-sheet` |
-| C4 a piece, C35 its tabs | each piece inline in MY PIECES, its tabs OWNERSHIP · WARRANTY · SERVICE · CARE | `pieces`, `pieces-warranty` |
-| C24 ORDERS, C31 RELEASES, C32 an order returned or cancelled | the sections YOUR ORDERS and YOUR RELEASES of MY PIECES | `pieces` |
+| C4 a piece, C35 its tabs | its own page since N5 (`/verify/pieces/<id>`, SEE THE PIECE): see *MY PIECES* | `piece`, `pieces-warranty` and C35's sections |
+| C24 ORDERS, C31 RELEASES, C32 an order returned or cancelled | the tabs ORDERS and RELEASES of MY PIECES since N5 | `pieces-orders`, `pieces-releases` |
 | C21 the room, C26 the after-room | stand-in images of the room: compared with the before-captures | `room`, `after-room-door` |
 | C28, C36–C40 | boards of several states: the first is captured, the others are states of this matrix (C40's are each set beside the board too, `BOARD_SECTIONS`: `<C40>.<state>.pair.png`) | see each section |
 
@@ -244,12 +263,38 @@ a piece only); YOUR RELEASES (each: *release*, *state · status*, its sentence, 
 contact for a place held); SIGNED IN AS *email*, CHANGE PASSWORD, SIGN OUT; SCAN ORBES CODE, THE COLLECTION, THE
 RELEASES, THE CIRCLE (an owner), the legal links.
 
+Since N5 (C3, C4, C24, C31, C32, C35), the page is split. **MY PIECES**: the banner (on PIECES only, as C3 draws it; C24
+and C31 go without it), MY PIECES and, on PIECES, its sentence; the tabs PIECES · ORDERS · RELEASES with their counts (a
+tab with nothing in it is left out; their place in the history keeps the one shown). PIECES: each piece on its model's
+photograph, faded (never the piece's own, decision 9), *name* and *id*, *type · material · SIZE n* (addition 1), ✓
+REGISTERED TO YOU · SINCE *date* (or its state alone), SEE THE PIECE; AFTER THE RELEASES; EARLY ACCESS (an account without
+a piece); ADD A PIECE, *Scan a piece, then register it from the OWNERSHIP tab of its result.*, SCAN ORBES CODE. ORDERS:
+each order on its model's photograph (addition 3), *channel · release* (THE PRIVATE SALON · *model*), *model*, the steps
+(one reached dated in full, several by day and month: C24, C32), its sentence, SIZE, PRICE, *add-on* + *price*, TOTAL,
+CARRIER, TRACKING NUMBER, TRACK THE SHIPMENT, ORDER *OR-…*, DOCUMENTS as rows (INVOICE *n* · PDF ›, CREDIT NOTE *n* · PDF ›,
+CARE GUIDE · *The care guide of model* +, OWNERSHIP CERTIFICATE · PDF ›). RELEASES: each entry a row, its title a link,
+*state · status*, its sentence, YOUR ENTRY *id* (in the reading face, lower case, as the draw publishes it) or REFERENCE
+*LR-…*, the contact. **A piece** (`/verify/pieces/<id>`): ‹ MY PIECES; THE MODEL's photograph, captioned, its sentence; the
+name, its lines with SIZE, SEE THE MODEL; its state; WHERE IT COMES FROM (addition 2: THE DRAW OF *day* or THE LIVE
+RELEASE OF *day*, SEE THE RELEASE ›; ORDER *OR-…*, *STEP* ON *date* ›, which opens ORDERS with it in view; nothing for a
+piece without an order); its GENOME; OWNERSHIP · WARRANTY · SERVICE · CARE: ACQUIRED, OWNERSHIP, SINCE (TRANSFER), the
+sentences, CANCEL TRANSFER, OWNERSHIP CERTIFICATE, REPORT LOST / STOLEN or REPORTED LOST / STOLEN and its sentences,
+PIECE FOUND, the contact. SIGNED IN AS, CHANGE PASSWORD and SIGN OUT are the account sheet's (C2, C39); THE COLLECTION,
+THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one page showed in all of its parts
+(`SPLIT`, test/web/nocturne.content.harness.ts).
+
 | State | What it shows | Shown when | Reference |
 |---|---|---|---|
 | `pieces-signed-out` | MY PIECES, *Sign in to see the pieces …*, the sign-in | signed out | C18 |
 | `pieces-sign-in-refused` | the same, the refusal under the fields | a wrong password | C18 |
-| `pieces` | everything above for you: TITANE, two pieces (O26-J-00184 in steel with THIS PIECE and THE MODEL; O26-J-00199 in gold), four orders (LIVE RESERVED; DRAW DELIVERED, its invoice; DRAW RETURNED, its invoice and credit note; THE PRIVATE SALON CANCELLED), three releases | signed in | C3, C4, C24, C31, C32, verify-12, plus-12 |
-| `pieces-warranty` | STATUS, FROM, UNTIL, the warranty's note | WARRANTY | C35 (1) |
+| `pieces` | everything above for you: TITANE, two pieces (O26-J-00184 in steel with THIS PIECE and THE MODEL; O26-J-00199 in gold), four orders (LIVE RESERVED; DRAW DELIVERED, its invoice; DRAW RETURNED, its invoice and credit note; THE PRIVATE SALON CANCELLED), three releases; since N5 the tab PIECES | signed in | C3, verify-12 |
+| `pieces-orders` | (N5) the tab ORDERS: the four orders above | ORDERS | C24, C32, plus-12 |
+| `pieces-releases` | (N5) the tab RELEASES: the account's entries | RELEASES | C31 |
+| `piece` | (N5) O26-J-00199 in gold: THE MODEL, SIZE 17, WHERE IT COMES FROM (THE DRAW OF 14 SEPTEMBER, ORDER *OR-…* DELIVERED ON 22 SEP 2026), its GENOME, OWNERSHIP | SEE THE PIECE | C4 |
+| `piece-boutique` | (N5) O26-J-00184 in steel, sold at a boutique: no WHERE IT COMES FROM | SEE THE PIECE | C4 |
+| `piece-stolen`, `piece-transfer`, `piece-in-service` | (N5) the owner's pieces reported stolen (its sentence, the contact), with a transfer pending (TRANSFER PENDING UNTIL *date*, its sentence, CANCEL TRANSFER), in service | the owner (m.okafor) | C35 (7) |
+| `pieces-orders-stress`, `piece-stress` | (N5) four orders (€ 125 400, USD, a 27-character tracking number); a piece of the 24-character model without a photograph, its 14-character Size | the stress demo | same pieces |
+| `pieces-warranty` | STATUS, FROM, UNTIL, the warranty's note (since N5 on O26-J-00184's page, as it was its tab before) | WARRANTY | C35 (1) |
 | `pieces-service` | SERVICE HISTORY, *No service has been recorded for this piece.* (or each service: *status since date · place*) | SERVICE | C35 (2) |
 | `pieces-care` | CARING FOR THIS PIECE, the care; ORBES CARE, its lead, its three benefits, SUBSCRIBE (a new tab) or *Subscriptions open soon.* | CARE | C35 (3) |
 | `pieces-certificate-choice` | 7 DAYS · 30 DAYS · 90 DAYS, its sentence, CREATE LINK, CANCEL | CREATE CERTIFICATE | C35 (4) |
@@ -258,7 +303,7 @@ RELEASES, THE CIRCLE (an owner), the legal links.
 | `pieces-incidents` | an owner's pieces: REPORTED STOLEN (Client Services' sentence and contact), TRANSFER PENDING (PENDING UNTIL *date*, CANCEL TRANSFER), REPORTED LOST (PIECE FOUND), IN SERVICE (*This piece is with ORBES for a service.*); PLATINE, NEXT: PALLADIUM | the owner (m.okafor) | C35 (6, 7) |
 | `pieces-piece-found` | PIECE FOUND, its sentence, PASSWORD, CONFIRM, CANCEL | PIECE FOUND | C35 (6) |
 | `pieces-care-guide` | CARE GUIDE open under an order's documents (the model's care guide) | CARE GUIDE | C24, C31, plus-13 |
-| `pieces-change-password` | CHANGE PASSWORD, its sentence, CURRENT PASSWORD, NEW PASSWORD, CHANGE PASSWORD, CANCEL | CHANGE PASSWORD | C39 (4) |
+| `pieces-change-password` | CHANGE PASSWORD, its sentence, CURRENT PASSWORD, NEW PASSWORD, CHANGE PASSWORD, CANCEL (since N5 in the account sheet over MY PIECES) | CHANGE PASSWORD | C39 (4) |
 | `pieces-question-after` | AFTER THE RELEASES, *You said you would be there …*, ONE QUESTION, *release · date*, WHAT WOULD YOU HAVE WANTED?, the three answers, *One tap. You may change your answer until …* | said I'LL BE THERE, did not come | C30, plus-14 |
 | `pieces-turn-passed` | YOUR RELEASES: *release*, LIVE RELEASE · TURN PASSED, *Your turn passed before the seal was held.* | a turn passed | C31 (2) |
 | `live-pieces-turn` | YOUR RELEASES: LIVE NOW · YOUR TURN, *It is your turn. Open the release to secure your piece.* | a turn now | C31 (2) |

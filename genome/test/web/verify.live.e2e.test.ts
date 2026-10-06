@@ -360,18 +360,21 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
 
     // MY PIECES keeps it.
     await page.getByRole('link', { name: 'MY PIECES' }).click();
+    // Its tab RELEASES (C31).
+    await page.getByRole('tab', { name: /^RELEASES/ }).click();
     const entry = page.locator('.pieces__entry-card', { hasText: 'LIVE RELEASE' });
     await visible(entry);
     await textOf(entry.locator('.pieces__entry-state'), 'LIVE RELEASE · CONFIRMED');
     // Its payment and delivery are its order's steps, below (the vault's CONFIRMED screen said it at that moment).
     await textOf(entry.locator('.pieces__entry-sentence'), 'You secured your piece in size 52. Its steps follow in YOUR ORDERS.');
-    await textOf(entry.locator('.pieces__entry-id'), `REFERENCE ${reference}`);
+    await textOf(entry.locator('.n-pieces__entry-line').last(), `REFERENCE ${reference}`);
     expect(await entry.getByRole('link', { name: 'MONOLITHE — LIVE' }).getAttribute('href')).toBe(`/verify/releases/${r.id}`);
-    // …and its order (plan LIVE RELEASE+, choice 6): RESERVED, with its size and its add-on as sold.
-    const order = page.locator('.pieces__order', { hasText: 'LIVE RELEASE · MONOLITHE — LIVE' });
+    // …and its order (plan LIVE RELEASE+, choice 6), in the tab ORDERS (C24): RESERVED, with its size and its add-on as sold.
+    await page.getByRole('tab', { name: /^ORDERS/ }).click();
+    const order = page.locator('.n-pieces__order', { hasText: 'LIVE RELEASE · MONOLITHE — LIVE' });
     await visible(order);
-    await textOf(order.locator('.pieces__order-step[aria-current="step"]'), /^RESERVED \d{1,2} [A-Z]{3} \d{4}$/);
-    await textOf(order.locator('.pieces__order-rows .rows__row', { hasText: 'ENGRAVING' }), 'ENGRAVING € 150');
+    await textOf(order.locator('[aria-current="step"]'), /^RESERVED \d{1,2} [A-Z]{3} \d{4}$/);
+    await textOf(order.locator('.n-kv__row', { hasText: 'ENGRAVING' }), 'ENGRAVING + € 150');
     expect(problems).toEqual([]);
   }, 240_000);
 

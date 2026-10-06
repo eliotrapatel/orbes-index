@@ -71,6 +71,11 @@ const at = (path: string) => () => path;
 const release = (key: string, tail = '') => (d: NocturneDemo) => `/verify/releases/${d.releases[key]}${tail}`;
 const post = (key: string) => (d: NocturneDemo) => `/verify/circle/${d.posts[key]}`;
 const sheet = (key: string) => (d: NocturneDemo) => `/verify/lookbook/${d.slugs[key]}`;
+const piece = (role: string) => (d: NocturneDemo) => {
+  const id = d.pieces[role];
+  if (!id) throw new Error(`no demo piece ${role}`);
+  return `/verify/pieces/${id}`;
+};
 
 /** Upload a photo of the demo code `role` through the page's own photo input (UPLOAD A PHOTO). */
 async function upload(run: StateRun, role: string): Promise<void> {
@@ -82,6 +87,12 @@ async function upload(run: StateRun, role: string): Promise<void> {
 const button = (run: StateRun, name: string | RegExp) => run.page.getByRole('button', { name, exact: typeof name === 'string' }).first();
 const link = (run: StateRun, name: string | RegExp) => run.page.getByRole('link', { name, exact: typeof name === 'string' }).first();
 const tab = (run: StateRun, name: string) => run.page.getByRole('tab', { name, exact: true }).first();
+/** A tab of MY PIECES (PIECES, ORDERS, RELEASES: its name with its count), selected, its panel drawn. */
+async function piecesTab(run: StateRun, name: 'PIECES' | 'ORDERS' | 'RELEASES'): Promise<void> {
+  await run.page.locator('.view--pieces .n-pieces__tabs').waitFor();
+  await run.page.getByRole('tab', { name: new RegExp(`^${name}\\s*\\d*$`) }).first().click();
+  await run.page.locator(`.view--pieces[data-tab="${name.toLowerCase()}"]`).waitFor();
+}
 
 /** A result read from a photo of `role`'s code, then `then` on it. */
 function result(role: string, then?: (run: StateRun) => Promise<void>): Pick<UiState, 'path' | 'act' | 'ready'> {
@@ -444,99 +455,132 @@ export const UI_STATES: readonly UiState[] = [
     },
     ready: '.view--pieces .form__error',
   },
-  { id: 'pieces', title: 'MY PIECES: the tier, the pieces, the orders, the releases, the account line', refs: ['C3', 'C24', 'C31', 'C32'], variant: 'full', as: you, path: at('/verify/pieces'), ready: '.view--pieces article.piece' },
+  { id: 'pieces', title: 'MY PIECES, PIECES: each piece on its model\u2019s photograph, its size, its state, SEE THE PIECE; ADD A PIECE', refs: ['C3'], variant: 'full', as: you, path: at('/verify/pieces'), ready: '.view--pieces article.n-pieces__piece' },
   {
-    id: 'pieces-warranty',
-    title: 'MY PIECES, a piece: WARRANTY',
-    refs: ['C35'],
+    id: 'pieces-orders',
+    title: 'MY PIECES, ORDERS: each order on its model\u2019s photograph, its steps, its terms, its documents (reserved, delivered, returned, cancelled)',
+    refs: ['C24', 'C32'],
     variant: 'full',
     as: you,
     path: at('/verify/pieces'),
+    act: (run) => piecesTab(run, 'ORDERS'),
+    ready: '.view--pieces article.n-pieces__order',
+  },
+  {
+    id: 'pieces-releases',
+    title: 'MY PIECES, RELEASES: the account\u2019s entries, their state, sentence and id',
+    refs: ['C31'],
+    variant: 'full',
+    as: you,
+    path: at('/verify/pieces'),
+    act: (run) => piecesTab(run, 'RELEASES'),
+    ready: '.view--pieces .n-pieces__entry',
+  },
+  { id: 'piece', title: 'A piece (from the draw of 14 September): THE MODEL, SIZE, WHERE IT COMES FROM, its GENOME, OWNERSHIP', refs: ['C4'], variant: 'full', as: you, path: piece('gold'), ready: '.view--piece .n-piece__origin' },
+  { id: 'piece-boutique', title: 'A piece sold at a boutique (no order): nothing of where it comes from', refs: ['C4'], variant: 'full', as: you, path: piece('yours'), ready: '.view--piece .n-piece__article' },
+  {
+    id: 'pieces-warranty',
+    title: 'A piece: WARRANTY',
+    refs: ['C35'],
+    variant: 'full',
+    as: you,
+    path: piece('yours'),
     act: async (run) => tab(run, 'WARRANTY').click(),
-    ready: '.view--pieces article.piece',
+    ready: '.view--piece .n-piece__article',
   },
   {
     id: 'pieces-care',
-    title: 'MY PIECES, a piece: CARE, then ORBES CARE',
+    title: 'A piece: CARE, then ORBES CARE',
     refs: ['C35'],
     variant: 'full',
     as: you,
-    path: at('/verify/pieces'),
+    path: piece('yours'),
     act: async (run) => tab(run, 'CARE').click(),
-    ready: '.view--pieces article.piece',
+    ready: '.view--piece .n-piece__article',
   },
   {
     id: 'pieces-service',
-    title: 'MY PIECES, a piece: SERVICE HISTORY',
+    title: 'A piece: SERVICE HISTORY',
     refs: ['C35'],
     variant: 'full',
     as: you,
-    path: at('/verify/pieces'),
+    path: piece('yours'),
     act: async (run) => {
       await tab(run, 'SERVICE').click();
       await run.page.getByText('No service has been recorded for this piece.').first().waitFor();
     },
-    ready: '.view--pieces article.piece',
+    ready: '.view--piece .n-piece__article',
   },
   {
     id: 'pieces-certificate-choice',
-    title: 'MY PIECES, a piece: CREATE CERTIFICATE, its validity',
+    title: 'A piece: CREATE CERTIFICATE, its validity',
     refs: ['C35'],
     variant: 'full',
     as: you,
-    path: at('/verify/pieces'),
+    path: piece('yours'),
     act: async (run) => button(run, 'CREATE CERTIFICATE').click(),
-    ready: '.view--pieces .piece__validity',
+    ready: '.view--piece .n-piece__validity',
   },
   {
     id: 'pieces-report-choice',
-    title: 'MY PIECES, a piece: REPORT LOST / STOLEN, LOST chosen',
+    title: 'A piece: REPORT LOST / STOLEN, LOST chosen',
     refs: ['C35'],
     variant: 'full',
     as: you,
-    path: at('/verify/pieces'),
+    path: piece('yours'),
     act: async (run) => {
       await button(run, 'REPORT LOST / STOLEN').click();
       await button(run, 'LOST').click();
     },
-    ready: '.view--pieces .piece__choice',
+    ready: '.view--piece .n-piece__choice',
   },
   {
     id: 'pieces-care-guide',
-    title: 'MY PIECES, an order: its documents, the CARE GUIDE open',
-    refs: ['C24', 'C31'],
+    title: 'MY PIECES, ORDERS: an order\u2019s documents, the CARE GUIDE open',
+    refs: ['C24'],
     variant: 'full',
     as: you,
     path: at('/verify/pieces'),
     act: async (run) => {
-      await run.page.locator('article.pieces__order[data-status="DELIVERED"] [data-document="CARE_GUIDE"]').click();
-      await run.page.locator('.pieces__order-care-text').first().waitFor();
+      await piecesTab(run, 'ORDERS');
+      await run.page.locator('article.n-pieces__order[data-status="DELIVERED"] [data-document="CARE_GUIDE"]').click();
+      await run.page.locator('.n-pieces__care-text').first().waitFor();
     },
-    ready: '.pieces__order-care-text',
+    ready: '.n-pieces__care-text',
   },
   {
     id: 'pieces-change-password',
-    title: 'MY PIECES: CHANGE PASSWORD',
+    title: 'MY PIECES: the account sheet\u2019s CHANGE PASSWORD over it',
     refs: ['C39'],
     variant: 'full',
     as: you,
     path: at('/verify/pieces'),
-    act: async (run) => button(run, 'CHANGE PASSWORD').click(),
-    ready: '.view--pieces .pieces__password',
+    act: async (run) => {
+      await run.page.locator('.view--pieces article.n-pieces__piece').first().waitFor();
+      await openAccountSheet(run);
+      await run.page.locator('.n-account').getByRole('button', { name: 'CHANGE PASSWORD' }).first().click();
+      await run.page.locator('.n-account__password').waitFor();
+      await fitSheet(run.page);
+    },
+    ready: '.n-account__password',
+    viewport: true,
   },
-  { id: 'pieces-incidents', title: 'MY PIECES of an owner: reported stolen, transfer pending, reported lost (PIECE FOUND), in service', refs: ['C35'], variant: 'full', as: 'owner', path: at('/verify/pieces'), ready: '.view--pieces article.piece' },
+  { id: 'pieces-incidents', title: 'MY PIECES of an owner: reported stolen, transfer pending, reported lost, in service', refs: ['C3', 'C35'], variant: 'full', as: 'owner', path: at('/verify/pieces'), ready: '.view--pieces article.n-pieces__piece' },
   {
     id: 'pieces-piece-found',
-    title: 'MY PIECES: PIECE FOUND, confirmed with the password',
+    title: 'A piece reported lost by its owner: PIECE FOUND, confirmed with the password',
     refs: ['C35'],
     variant: 'full',
     as: 'owner',
-    path: at('/verify/pieces'),
+    path: piece('lost'),
     act: async (run) => button(run, 'PIECE FOUND').click(),
-    ready: '.view--pieces input[type=password]',
+    ready: '.view--piece input[type=password]',
   },
+  { id: 'piece-stolen', title: 'A piece reported stolen: its sentence and the contact', refs: ['C35'], variant: 'full', as: 'owner', path: piece('stolen'), ready: '.view--piece .n-piece__incident-title' },
+  { id: 'piece-transfer', title: 'A piece with a transfer pending: its date and CANCEL TRANSFER', refs: ['C35'], variant: 'full', as: 'owner', path: piece('passing'), ready: '.view--piece .piece__transfer-action' },
+  { id: 'piece-in-service', title: 'A piece in service: its sentence, then SERVICE HISTORY', refs: ['C35'], variant: 'full', as: 'owner', path: piece('service'), ready: '.view--piece .n-piece__article' },
   { id: 'pieces-question-after', title: 'MY PIECES of a collector who said I’LL BE THERE and did not come: AFTER THE RELEASES', refs: ['C30', 'plus-14'], variant: 'full', as: 'absent', path: at('/verify/pieces'), ready: '.view--pieces .pieces__questions' },
-  { id: 'pieces-turn-passed', title: 'MY PIECES of a collector whose turn passed: YOUR RELEASES · TURN PASSED', refs: ['C31'], variant: 'full', as: 'guest', path: at('/verify/pieces'), ready: '.view--pieces .pieces__releases' },
+  { id: 'pieces-turn-passed', title: 'MY PIECES of a collector whose turn passed: RELEASES · TURN PASSED', refs: ['C31'], variant: 'full', as: 'guest', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'RELEASES'), ready: '.view--pieces .pieces__releases' },
   { id: 'pieces-empty', title: 'MY PIECES of an account without a piece: THE CLUB, EARLY ACCESS', refs: ['C40'], variant: 'empty', as: you, path: at('/verify/pieces'), ready: '.view--pieces .pieces__empty', stress: true },
   {
     id: 'pieces-loading',
@@ -558,7 +602,19 @@ export const UI_STATES: readonly UiState[] = [
     routes: async (page) => page.route('**/api/v1/account/products', (r) => r.abort('internetdisconnected')),
     ready: '.view--pieces .n-failed',
   },
-  { id: 'pieces-stress', title: 'MY PIECES with six pieces and four orders (a price in USD, € 125 400, a long tracking number)', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/pieces'), ready: '.view--pieces article.piece', stress: true },
+  { id: 'pieces-stress', title: 'MY PIECES with six pieces, the first of a 24-character model without a photograph, its Size of 14 characters', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/pieces'), ready: '.view--pieces article.n-pieces__piece', stress: true },
+  {
+    id: 'pieces-orders-stress',
+    title: 'MY PIECES, ORDERS: four orders (a price in USD, € 125 400, a long tracking number)',
+    refs: ['same pieces'],
+    variant: 'stress',
+    as: you,
+    path: at('/verify/pieces'),
+    act: (run) => piecesTab(run, 'ORDERS'),
+    ready: '.view--pieces article.n-pieces__order',
+    stress: true,
+  },
+  { id: 'piece-stress', title: 'A piece of a 24-character model without a photograph, its Size of 14 characters', refs: ['same pieces'], variant: 'stress', as: you, path: piece('piece1'), ready: '.view--piece .n-piece__article', stress: true },
 
   // ── The account sheet (C2), from the header's account button ──
   {
@@ -675,6 +731,7 @@ export const UI_STATES: readonly UiState[] = [
     variant: 'draws',
     as: 'entrant',
     path: at('/verify/pieces'),
+    act: (run) => piecesTab(run, 'RELEASES'),
     ready: '.view--pieces .pieces__releases',
   },
   { id: 'live-announced', title: 'A LIVE RELEASE before the room, signed in: YOUR SIZE, I’LL BE THERE', refs: ['C20'], variant: 'full', as: you, path: release('blue'), act: (run) => run.page.locator('.live__there button.live__size', { hasText: /^17$/ }).click(), ready: '.view--live .live__there' },
@@ -704,7 +761,7 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'live-left', title: 'YOU LEFT THE LINE', refs: ['live-18', 'C30'], variant: 'live', as: 'left', path: release('live'), ready: '.view--live .live__edge' },
   { id: 'live-removed', title: 'YOUR ENTRY IS REMOVED', refs: ['live-19', 'C30'], variant: 'live', as: 'removed', path: release('live'), ready: '.view--live .live__edge' },
   { id: 'live-join', title: 'Live now, an account not in the line: ENTER THE LINE', refs: ['live-09'], variant: 'live', as: you, path: release('live'), ready: '.view--live' },
-  { id: 'live-pieces-turn', title: 'MY PIECES of a collector at its turn: YOUR TURN', refs: ['C31'], variant: 'live', as: 'turn', path: at('/verify/pieces'), ready: '.view--pieces .pieces__releases' },
+  { id: 'live-pieces-turn', title: 'MY PIECES of a collector at its turn: YOUR TURN', refs: ['C31'], variant: 'live', as: 'turn', path: at('/verify/pieces'), act: (run) => piecesTab(run, 'RELEASES'), ready: '.view--pieces .pieces__releases' },
   { id: 'after-room-door', title: 'The after-room’s second door', refs: ['C26', 'plus-07'], variant: 'afterroom', as: you, path: release('afterroom'), ready: '.view--live .live__after' },
   {
     id: 'after-room-join',
@@ -851,11 +908,11 @@ export const UI_STATES: readonly UiState[] = [
   },
   {
     id: 'pieces-certificate-link',
-    title: 'MY PIECES: the certificate link, shown once, COPY LINK, OPEN LINK, WITHDRAW',
+    title: 'A piece: the certificate link, shown once, COPY LINK, OPEN LINK, WITHDRAW',
     refs: ['C35'],
     variant: 'full',
     as: you,
-    path: at('/verify/pieces'),
+    path: piece('yours'),
     mutates: true,
     act: async (run) => {
       await button(run, 'CREATE CERTIFICATE').click();
@@ -866,11 +923,11 @@ export const UI_STATES: readonly UiState[] = [
   },
   {
     id: 'pieces-certificate-withdrawn',
-    title: 'MY PIECES: a certificate link withdrawn, The link has been withdrawn',
+    title: 'A piece: a certificate link withdrawn, The link has been withdrawn',
     refs: ['C35'],
     variant: 'full',
     as: you,
-    path: at('/verify/pieces'),
+    path: piece('yours'),
     mutates: true,
     act: async (run) => {
       await button(run, 'CREATE CERTIFICATE').click();
@@ -879,7 +936,7 @@ export const UI_STATES: readonly UiState[] = [
       await run.page.locator('.piece__certificate-withdraw').first().click();
       await run.page.getByText('The link has been withdrawn', { exact: false }).first().waitFor({ timeout: 20_000 });
     },
-    ready: '.view--pieces article.piece',
+    ready: '.view--piece .n-piece__article',
   },
   {
     id: 'model-salon-requested',
@@ -964,7 +1021,7 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
   C1: 'now-signed-in',
   C2: 'account-sheet',
   C3: 'pieces',
-  C4: 'pieces',
+  C4: 'piece',
   C5: 'collection',
   C6: 'model',
   C7: 'releases',
@@ -984,15 +1041,15 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
   C21: 'room',
   C22: 'post-invitation',
   C23: 'legal-terms',
-  C24: 'pieces',
+  C24: 'pieces-orders',
   C25: 'releases-past',
   C26: 'after-room-door',
   C27: 'live-rules',
   C28: 'live-rules-not-eligible',
   C29: 'live-past-secured',
   C30: 'live-past-question',
-  C31: 'pieces',
-  C32: 'pieces',
+  C31: 'pieces-releases',
+  C32: 'pieces-orders',
   C33: 'model-salon',
   C34: 'post-poll',
   C35: 'pieces-warranty',
@@ -1013,6 +1070,7 @@ export const BOARD_STATES: Readonly<Record<string, string>> = Object.freeze({
  */
 export const BOARD_SECTIONS: Readonly<Record<string, readonly string[]>> = Object.freeze({
   C17: ['problem-scan-timeout', 'problem-network'],
+  C35: ['pieces-service', 'pieces-care', 'pieces-certificate-choice', 'pieces-certificate-link', 'pieces-report-choice', 'pieces-piece-found', 'piece-stolen', 'piece-transfer'],
   C36: ['result-registered-now', 'result-ceremony', 'result-registration-closed', 'result-not-delivered'],
   C37: ['result-transfer-code', 'result-received', 'result-registered-other'],
   C38: ['scan-preparing', 'scan-hint', 'scan-seal', 'scan-verifying'],
@@ -1144,6 +1202,52 @@ export async function openState(browser: Browser, stage: UiStage, demo: Nocturne
 }
 
 // ── What a state shows ─────────────────────────────────────────────────────
+
+/**
+ * Every text of MY PIECES as the account of `opened` has it, in the same phone: its PIECES tab, its other tabs (ORDERS,
+ * RELEASES), the page of each of its pieces (SEE THE PIECE), then the account sheet (SIGNED IN AS, CHANGE PASSWORD,
+ * SIGN OUT). Plan NOCTURNE, N5: the one page MY PIECES was split into these (C3, C4, C24, C31; C2); what the page showed
+ * before is looked for in them (test/web/nocturne.content.harness.ts, SPLIT).
+ */
+export async function myPiecesTexts(opened: { page: Page; stage: UiStage }): Promise<string[]> {
+  const page = opened.page;
+  const out: string[] = [];
+  await page.goto(`${opened.stage.origin}/verify/pieces`);
+  await page.locator('.view--pieces .n-pieces__panel, .view--pieces .pieces__signin, .view--pieces .n-failed').first().waitFor({ timeout: 30_000 });
+  await settle(page, 300);
+  out.push(...(await pageTexts(page)));
+  // The PIECES tab (the address opened again keeps the tab its entry held), then each piece's page from it.
+  const piecesTab = page.getByRole('tab', { name: /^PIECES\s*\d*$/ });
+  if ((await piecesTab.count()) > 0) {
+    await piecesTab.first().click();
+    await page.locator('.view--pieces[data-tab="pieces"]').waitFor();
+    await settle(page, 200);
+    out.push(...(await pageTexts(page)));
+  }
+  const hrefs = await page.evaluate(() => [...document.querySelectorAll<HTMLAnchorElement>('.view--pieces a.n-pieces__see')].map((a) => a.getAttribute('href') ?? ''));
+  for (const name of ['ORDERS', 'RELEASES']) {
+    const t = page.getByRole('tab', { name: new RegExp(`^${name}\\s*\\d*$`) });
+    if ((await t.count()) === 0) continue;
+    await t.first().click();
+    await page.locator(`.view--pieces[data-tab="${name.toLowerCase()}"]`).waitFor();
+    await settle(page, 200);
+    out.push(...(await pageTexts(page)));
+  }
+  for (const href of hrefs.filter((x) => x.length > 0)) {
+    await page.goto(`${opened.stage.origin}${href}`);
+    await page.locator('.view--piece .n-piece__article').waitFor({ timeout: 30_000 });
+    await settle(page, 200);
+    out.push(...(await pageTexts(page)));
+  }
+  const account = page.locator('.n-hd button.n-acct');
+  if ((await account.count()) > 0) {
+    await account.first().click();
+    await page.locator('.n-account:not([hidden]) .n-account__panel').waitFor({ timeout: 20_000 });
+    await settle(page, 200);
+    out.push(...(await pageTexts(page)));
+  }
+  return out;
+}
 
 /**
  * Every text the page shows, as it reads: each block of words (an element laid out as a block whose descendants are all

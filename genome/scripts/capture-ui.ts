@@ -447,7 +447,7 @@ async function captureVerifyPieces(stage: Stage, shots: Shots): Promise<void> {
     );
     if (status !== 200) throw new Error(`${OWNER.email} could not sign in (${status})`);
     await page.goto(`${stage.origin}/verify/pieces`);
-    await page.waitForSelector('article.piece .genome-svg', { timeout: 20_000 });
+    await page.waitForSelector('.view--pieces article.n-pieces__piece', { timeout: 20_000 });
     await page.evaluate(() => document.fonts.ready);
     await hideGrain(page);
     await sleep(1400); // view rise (1.1 s)
@@ -1503,15 +1503,18 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     {
       const { context, page: p } = await phone(me.token, 'plus-pieces');
       await p.goto(`${origin}/verify/pieces`);
-      const section = p.locator('section.pieces__orders');
-      await section.locator('article.pieces__order').nth(3).waitFor({ state: 'visible', timeout: 30_000 });
+      // MY PIECES' tab ORDERS (NOCTURNE, N5: C24), then PIECES for the question after.
+      await p.getByRole('tab', { name: /^ORDERS/ }).click({ timeout: 30_000 });
+      const section = p.locator('.n-pieces__orders');
+      await section.locator('article.n-pieces__order').nth(3).waitFor({ state: 'visible', timeout: 30_000 });
       await settle(p);
-      await shots.region(p, 'section.pieces__orders', 'plus-12-your-orders');
-      const delivered = section.locator('article.pieces__order[data-status="DELIVERED"]');
+      await shots.region(p, '.n-pieces__orders', 'plus-12-your-orders');
+      const delivered = section.locator('article.n-pieces__order[data-status="DELIVERED"]');
       await delivered.getByRole('button', { name: /CARE GUIDE/i }).click();
-      await delivered.locator('.pieces__order-care-text').waitFor({ state: 'visible' });
+      await delivered.locator('.n-pieces__care-text').waitFor({ state: 'visible' });
       await settle(p, 600);
-      await shots.region(p, 'article.pieces__order[data-status="DELIVERED"] .pieces__order-documents', 'plus-13-order-documents');
+      await shots.region(p, 'article.n-pieces__order[data-status="DELIVERED"] .n-pieces__documents', 'plus-13-order-documents');
+      await p.getByRole('tab', { name: /^PIECES/ }).click();
       const questions = p.locator('section.pieces__questions');
       await questions.locator('.question__answer').first().waitFor({ state: 'visible' });
       await shots.region(p, 'section.pieces__questions', 'plus-14-after-the-releases');

@@ -42,7 +42,7 @@ import { utf8 } from '../../core/bytes.js';
 import type { AppConfig } from '../config.js';
 import { deriveSubkey } from '../crypto/secretbox.js';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { AccountStatus, AcquiredVia, OwnershipRow, OwnershipState, OwnershipTransferRow, ProductRow, ProductStatus, TransferStatus } from '../db/schema.js';
+import type { AccountStatus, AcquiredVia, DropMode, OrderChannel, OrderStatus, OwnershipRow, OwnershipState, OwnershipTransferRow, ProductRow, ProductStatus, TransferStatus } from '../db/schema.js';
 import { DomainError, forbidden, notFound, tooManyRequests, validationError } from '../errors.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -50,7 +50,7 @@ import { customerAccountLocked } from './auth.js';
 import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford, verifyClaimCode } from './claim-codes.js';
 import { findProduct, loadStatusHistory, requireProduct, returnTargetOf, TRANSITIONS, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { mediaUrl } from './media.js';
-import { deliverOnRegistration } from './orders.js';
+import { deliverOnRegistration, orderReference } from './orders.js';
 import { consumeScanToken, inspectScanToken, TRANSFER_TOKEN_TTL_MS, type ScanTokenFailure, type ScanTokenResult } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantySummary } from './warranty.js';
 
@@ -83,6 +83,44 @@ export type IncidentType = (typeof INCIDENT_TYPES)[number];
  */
 export function incidentReportable(status: ProductStatus): boolean {
   return status !== 'REVOKED' && INCIDENT_TYPES.every((t) => TRANSITIONS[status].includes(t));
+}
+
+/** The order a piece fulfils, read with its release (listForAccount), as OwnedProduct.origin says it; null without one. */
+function pieceOrigin(
+  o:
+    | {
+        id: string;
+        channel: OrderChannel;
+        status: OrderStatus;
+        reserved_at: Date;
+        paid_at: Date | null;
+        shipped_at: Date | null;
+        delivered_at: Date | null;
+        cancelled_at: Date | null;
+        returned_at: Date | null;
+        drop_id: string | null;
+        drop_mode: DropMode | null;
+        drop_opens_at: Date | null;
+        drop_closes_at: Date | null;
+        drop_drawn_at: Date | null;
+      }
+    | undefined,
+): PieceOrigin | null {
+  if (!o) return null;
+  const reached: Record<OrderStatus, Date | null> = {
+    RESERVED: o.reserved_at,
+    PAID: o.paid_at,
+    SHIPPED: o.shipped_at,
+    DELIVERED: o.delivered_at,
+    CANCELLED: o.cancelled_at,
+    RETURNED: o.returned_at,
+  };
+  // A draw took place when it was drawn (its close until then); a LIVE RELEASE at its T0.
+  const releaseAt = o.drop_mode === 'LIVE' ? o.drop_opens_at : (o.drop_drawn_at ?? o.drop_closes_at);
+  return {
+    release: o.drop_id && o.drop_mode && releaseAt ? { id: o.drop_id, mode: o.drop_mode, at: releaseAt } : null,
+    order: { reference: orderReference(o.id), channel: o.channel, status: o.status, at: reached[o.status] ?? o.reserved_at },
+  };
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -181,6 +219,20 @@ export interface OwnedProduct {
   lookbook: string | null;
   /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
   care: string | null;
+  /**
+   * Where the piece comes from (plan NOCTURNE, addition 2): the latest order of this account that the piece fulfils
+   * (lot E's `orders.product_id`), with the release it was sold in; null for a piece without one (a boutique sale, a
+   * piece received from another owner). Only ever an order of the account that holds the piece now.
+   */
+  origin: PieceOrigin | null;
+}
+
+/** Where a piece of an account comes from (OwnedProduct.origin): its order, and the release it was sold in. */
+export interface PieceOrigin {
+  /** The release (a LIVE RELEASE or a draw) and when it took place (a draw: when it was drawn; a LIVE: its T0); null for the private salon. */
+  release: { id: string; mode: DropMode; at: Date } | null;
+  /** ORDER OR-…, where it was sold, its step now and when it reached it. */
+  order: { reference: string; channel: OrderChannel; status: OrderStatus; at: Date };
 }
 
 export interface OwnershipHistoryEntry {
@@ -859,7 +911,7 @@ export class OwnershipService {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.uuid);
 
-    const [genomes, warranties, transfers] = await Promise.all([
+    const [genomes, warranties, transfers, orders] = await Promise.all([
       this.db.selectFrom('genomes').selectAll().where('product_id', 'in', ids).orderBy('genome_version', 'desc').execute(),
       this.db.selectFrom('warranties').selectAll().where('product_id', 'in', ids).execute(),
       this.db
@@ -868,6 +920,19 @@ export class OwnershipService {
         .where('product_id', 'in', ids)
         .where('status', '=', 'PENDING')
         .where('expires_at', '>', now)
+        .execute(),
+      // Addition 2: the orders of this account that its pieces fulfil (never another account's), the latest first.
+      this.db
+        .selectFrom('orders as o')
+        .leftJoin('drops as d', 'd.id', 'o.drop_id')
+        .select([
+          'o.id', 'o.product_id', 'o.channel', 'o.status', 'o.reserved_at', 'o.paid_at', 'o.shipped_at', 'o.delivered_at', 'o.cancelled_at', 'o.returned_at',
+          'd.id as drop_id', 'd.mode as drop_mode', 'd.opens_at as drop_opens_at', 'd.closes_at as drop_closes_at', 'd.drawn_at as drop_drawn_at',
+        ])
+        .where('o.account_id', '=', accountId)
+        .where('o.product_id', 'in', ids)
+        .orderBy('o.reserved_at', 'desc')
+        .orderBy('o.id')
         .execute(),
     ]);
     // A loss the owner declared themselves is theirs to withdraw (PIECE FOUND): read from the status history.
@@ -911,6 +976,7 @@ export class OwnershipService {
         // A RESERVED model is the owners' (THE PRIVATE SALON) and stays unnamed here, as on a result.
         lookbook: r.model_lookbook === 'PUBLIC' ? r.model_slug : null,
         care: r.care_instructions,
+        origin: pieceOrigin(orders.find((o) => o.product_id === r.uuid)),
       };
     });
   }

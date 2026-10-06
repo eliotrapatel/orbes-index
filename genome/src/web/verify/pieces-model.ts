@@ -9,9 +9,11 @@
  * authentic result shows them, and the care of its model with ORBES Care (P-M02). It never names an internal status.
  */
 import { careSubscribeHref } from '../shared/client-services.js';
-import { DEFAULT_CARE, ORBES_CARE, PIECES } from './copy.js';
-import type { ClientServices, IncidentType, OwnedPiece, ServiceRecord } from './types.js';
-import { formatDate, formatDateLong, photoModels, productLines, upper, validGlyphs, warrantyModel, type GenomeModel, type PhotoModel, type Row } from './view-model.js';
+import { DEFAULT_CARE, ORBES_CARE, ORDERS, PIECES } from './copy.js';
+import { orderDate } from './orders-model.js';
+import { releasePath } from './releases-model.js';
+import type { ClientServices, IncidentType, OwnedPiece, PieceOrigin, ServiceRecord } from './types.js';
+import { formatDate, formatDateLong, photoModels, pieceLines, productLines, upper, validGlyphs, warrantyModel, type GenomeModel, type PhotoModel, type Row } from './view-model.js';
 
 export type PieceTabId = 'ownership' | 'warranty' | 'service' | 'care';
 
@@ -34,6 +36,20 @@ export interface PieceModel {
   productId: string;
   /** For element ids: the product id in lower case (`o26-j-00184`). */
   key: string;
+  /** The model's name, as the list and the piece's page title it (C3, C4): `MONOLITHE`. */
+  name: string;
+  /** Under the name on the piece's page (C4; addition 1): TYPE / CATEGORY / MATERIAL / SIZE 17 / CREATED YYYY. */
+  pieceLines: string[];
+  /** Under the name in the list (C3; addition 1): `BRACELET · 925 STERLING SILVER · SIZE 17`. */
+  listLine: string;
+  /** The state line of the list: `REGISTERED TO YOU · SINCE 3 OCT 2026`, or the status alone (REPORTED LOST…). */
+  stateLine: string;
+  /** Registered to the account, nothing reported nor pending: its state line takes the check (C3, C4). */
+  registered: boolean;
+  /** Its model's sheet in THE COLLECTION (SEE THE MODEL), when the model is PUBLIC there; else null. */
+  lookbook: string | null;
+  /** Where it comes from (addition 2): its release and its order; null without an order (a boutique sale). */
+  origin: PieceOriginModel | null;
   /** The GENOME on the plate; absent when the server sent none, or one the app cannot draw faithfully. */
   genome?: GenomeModel;
   /** MODEL / TYPE / CATEGORY / MATERIAL / CREATED YYYY. */
@@ -59,6 +75,44 @@ export interface PieceModel {
   warranty?: { status: string; rows: Row[]; note: string };
   /** The CARE tab (P-M02): the model's care instructions, else the general care text of a result's CARE tab. */
   care: string;
+}
+
+/** WHERE IT COMES FROM (addition 2, C4): two rows that lead on, its release (a link to its page) and its order. */
+export interface PieceOriginModel {
+  /** `THE DRAW OF 14 SEPTEMBER`, `THE LIVE RELEASE OF 5 OCTOBER`, with its page; null for the private salon. */
+  release: { id: string; title: string; href: string } | null;
+  /** `ORDER OR-7C21A9F0`, then its step now and its date: `DELIVERED ON 22 SEP 2026`. */
+  order: { reference: string; title: string; line: string };
+}
+
+const MONTHS_LONG = ['JANUARY', 'FEBRUARY', 'MARCH', 'APRIL', 'MAY', 'JUNE', 'JULY', 'AUGUST', 'SEPTEMBER', 'OCTOBER', 'NOVEMBER', 'DECEMBER'];
+
+/**
+ * The day a release took place, as its title says it: `14 SEPTEMBER` on this phone's calendar (`offsetMinutes` east of
+ * UTC: on that date's own offset by default), its year added when it is not the year of `now`; '' when unreadable.
+ */
+export function releaseDay(iso: string, now: Date, offsetMinutes?: number): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const at = new Date(t + (offsetMinutes ?? -new Date(t).getTimezoneOffset()) * 60_000);
+  const today = new Date(now.getTime() + (offsetMinutes ?? -now.getTimezoneOffset()) * 60_000);
+  const day = `${at.getUTCDate()} ${MONTHS_LONG[at.getUTCMonth()]}`;
+  return at.getUTCFullYear() === today.getUTCFullYear() ? day : `${day} ${at.getUTCFullYear()}`;
+}
+
+const ORIGIN_REFERENCE = /^OR-[0-9A-F]{8}$/;
+
+/** Where a piece comes from, as its page says it; null without an order, or with one the app cannot read. */
+export function pieceOriginModel(o: PieceOrigin | null | undefined, now: Date, offsetMinutes?: number): PieceOriginModel | null {
+  if (!o || !o.order || typeof o.order.reference !== 'string' || !ORIGIN_REFERENCE.test(o.order.reference)) return null;
+  const step = ORDERS.step[o.order.status];
+  if (!step) return null;
+  const r = o.release;
+  const day = r ? releaseDay(r.at, now, offsetMinutes) : '';
+  return {
+    release: r && day && (r.mode === 'DRAW' || r.mode === 'LIVE') ? { id: r.id, title: r.mode === 'DRAW' ? PIECES.origin.draw(day) : PIECES.origin.live(day), href: releasePath(r.id) } : null,
+    order: { reference: o.order.reference, title: ORDERS.reference(o.order.reference), line: PIECES.origin.step(step, orderDate(o.order.at, offsetMinutes)) },
+  };
 }
 
 /**
@@ -107,7 +161,8 @@ export function pieceGenomeModel(g: OwnedPiece['genome'] | undefined): GenomeMod
   };
 }
 
-export function pieceModel(p: OwnedPiece): PieceModel {
+/** `now` and `offsetMinutes` date where the piece comes from (this phone's clock and calendar by default). */
+export function pieceModel(p: OwnedPiece, opts: { now?: Date; offsetMinutes?: number } = {}): PieceModel {
   const productId = typeof p.productId === 'string' && PRODUCT_ID.test(p.productId) ? p.productId : '';
   const incident: IncidentMode =
     p.incident === 'LOST' && p.incidentResolvable === true
@@ -128,11 +183,12 @@ export function pieceModel(p: OwnedPiece): PieceModel {
   else if (transferPending) status = PIECES.status.transfer;
   else if (p.inService) status = PIECES.status.service;
 
+  // ACQUIRED, OWNERSHIP, SINCE (C4), then a transfer under way.
   const rows: Row[] = [];
-  if (p.since) rows.push(['SINCE', formatDate(p.since)]);
   const via = PIECES.acquired[p.acquiredVia as keyof typeof PIECES.acquired];
   if (via) rows.push(['ACQUIRED', via]);
   rows.push(['OWNERSHIP', p.verified ? PIECES.verified : PIECES.unverified]);
+  if (p.since) rows.push(['SINCE', formatDate(p.since)]);
   if (transferPending) rows.push(['TRANSFER', p.transfer.expiresAt ? `PENDING UNTIL ${formatDate(p.transfer.expiresAt)}` : 'PENDING']);
 
   const notes: string[] = [];
@@ -140,9 +196,19 @@ export function pieceModel(p: OwnedPiece): PieceModel {
   if (p.inService && notReported) notes.push(PIECES.inService);
   if (!p.verified) notes.push(PIECES.unverifiedNote);
 
+  const lines = pieceLines(p);
+  const size = lines.find((l) => /^SIZE\b/.test(l));
+  const registered = status === PIECES.status.yours;
   const model: PieceModel = {
     productId,
     key: productId.toLowerCase(),
+    name: upper(p.model),
+    pieceLines: lines,
+    listLine: [upper(p.type), upper(p.material), size ?? ''].filter((x) => x.length > 0).join(' · '),
+    stateLine: registered && p.since ? `${status} · ${PIECES.since(formatDate(p.since))}` : status,
+    registered,
+    lookbook: typeof p.lookbook === 'string' && p.lookbook ? p.lookbook : null,
+    origin: pieceOriginModel(p.origin, opts.now ?? new Date(), opts.offsetMinutes),
     productLines: productLines(p),
     photos: photoModels(p),
     status,

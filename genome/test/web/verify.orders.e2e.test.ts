@@ -5,22 +5,25 @@
  *  - A collector who holds no piece yet, with three orders: a LIVE RELEASE's piece with its engraving, paid, made at the
  *    atelier and shipped by Colissimo; a private salon's whose size and price ORBES Client Services has still to enter;
  *    one cancelled. Another account's order never shows.
- *  - YOUR ORDERS under the pieces, the latest first: each card names the model, where it was sold and what its step
- *    means; RESERVED · PAID · SHIPPED · DELIVERED with their dates on this phone's calendar, the current one marked for a
- *    screen reader (aria-current), those to come without one; or the steps reached, then CANCELLED; SIZE, PRICE, the
- *    add-on and the TOTAL, or TO BE CONFIRMED (left out once cancelled); once shipped the CARRIER, the TRACKING NUMBER
- *    and TRACK THE SHIPMENT, the carrier's page in a new tab; the order's reference. YOUR RELEASES sends the LIVE
- *    RELEASE's piece to its order's steps, never a payment still to settle.
+ *  - MY PIECES' tab ORDERS (plan NOCTURNE, C24, C32), the latest first: each order on its model's photograph names
+ *    where it was sold and its model; RESERVED · PAID · SHIPPED · DELIVERED with their dates on this phone's calendar
+ *    (one step reached in full, several by their day and month), the current one marked for a screen reader
+ *    (aria-current), those to come without one; or the steps reached, then CANCELLED; what its step means; SIZE, PRICE,
+ *    the add-on and the TOTAL, or TO BE CONFIRMED (left out once cancelled); once shipped the CARRIER, the TRACKING
+ *    NUMBER and TRACK THE SHIPMENT, the carrier's page in a new tab; the order's reference. The tab RELEASES sends the
+ *    LIVE RELEASE's piece to its order's steps, never a payment still to settle.
  *  - Delivered by ORBES Client Services, read again: every step reached, DELIVERED current.
  *  - Its documents (step S4, M6): the LIVE RELEASE's piece registered by the collector, its card offers its INVOICE
- *    (its number in the reading face) and its OWNERSHIP CERTIFICATE, each saved as a PDF, and its CARE GUIDE, opened
- *    under them (the house's general care text, its model having none) and closed again; the salon's order still to
+ *    (its number in the reading face) and its OWNERSHIP CERTIFICATE, rows that save their PDF, and its CARE GUIDE, a row
+ *    that opens under it (the house's general care text, its model having none) and closes again; the salon's order still to
  *    pay, its care guide only; the one cancelled before it was paid, none. A document that cannot be read says so.
- *  - Its orders unreadable (a server error): said, the pieces still shown; signed out: no orders at all.
+ *  - Where its piece comes from (plan NOCTURNE, addition 2; C4): on the registered piece's page, WHERE IT COMES FROM, THE
+ *    LIVE RELEASE OF its day (its page) and ORDER OR-…, DELIVERED ON its date, which opens ORDERS with the order in view.
+ *  - Its orders unreadable (a server error): said in their tab, the pieces still shown; signed out: no orders at all.
  *
  * On the screen: the text's contrast on its ground computed from the page's own colours (at least 4.5 : 1), no figure in
- * the display face, one hairline button (SCAN ORBES CODE), the floors of BRAND-DESIGN-SYSTEM §3.8, nothing scrolling
- * sideways; no console error nor CSP report.
+ * the display face, no button on ORDERS (its documents are rows; the one hairline button, SCAN ORBES CODE, is the
+ * PIECES tab's), the floors of BRAND-DESIGN-SYSTEM §3.8, nothing scrolling sideways; no console error nor CSP report.
  *
  * Skipped (not failed) when the Chromium binary is absent.
  */
@@ -55,6 +58,13 @@ async function textsOf(loc: Locator, expected: string[]): Promise<void> {
   await expect.poll(async () => (await loc.allInnerTexts()).map(norm), POLL).toEqual(expected);
 }
 const visible = (loc: Locator) => loc.waitFor({ state: 'visible', timeout: POLL.timeout });
+/** A tab of MY PIECES, by its name (its count after it), selected. */
+async function openTab(page: Page, name: 'PIECES' | 'ORDERS' | 'RELEASES'): Promise<void> {
+  await page.getByRole('tab', { name: new RegExp(`^${name}\\s*\\d*$`) }).click();
+  await visible(page.locator(`.view--pieces[data-tab="${name.toLowerCase()}"]`));
+}
+/** A date of an order's step among several of one year: its day and month (C24, C32). */
+const dayMonth = (date: string) => date.replace(/ \d{4}$/, '');
 
 describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, phone)', () => {
   let srv: VerifyServer;
@@ -63,7 +73,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
   let colissimo: string;
   let me: { id: string; token: string };
   /** The orders of the collector: the LIVE RELEASE's (shipped), the salon's to enter, the one cancelled. */
-  const ids = { live: '', salon: '', cancelled: '', other: '' };
+  const ids = { live: '', salon: '', cancelled: '', other: '', release: '' };
   /** The LIVE RELEASE's piece as the atelier issued it: its code's data and its claim code, for its buyer to register it. */
   const livePiece = { productId: '', codeData: '', claimCode: '' };
 
@@ -91,6 +101,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     const opensAt = new Date(f.clock.now().getTime() + HOUR);
     const r = await createLiveRelease(f, { opensAt, sizes: [{ label: '52', stock: 3 }], priceMinor: 480_000, addons: [{ label: 'Engraving', priceMinor: 25_000 }] });
     await srv.ctx.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE' }).where('id', '=', r.id).execute();
+    ids.release = r.id;
     const actor = { type: 'account' as const, id: me.id };
     f.clock.set(new Date(opensAt.getTime() - MINUTE));
     await f.live.enter(me.id, r.id, { sizeId: r.sizes[0]!.id }, actor);
@@ -150,95 +161,93 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
   it('YOUR ORDERS: each order with its steps and their dates, the model, the size, the add-on and the price; shipped, the carrier and the tracking link; delivered, read again', async () => {
     const { page, problems } = await phone(me.token);
     await page.goto(`${srv.origin}/verify/pieces`);
-    const section = page.locator('section.pieces__orders');
-    await visible(section);
-    await textOf(section.getByRole('heading', { name: ORDERS.title }), ORDERS.title);
-    // No piece is registered yet: the page says so, and the orders follow.
+    // No piece is registered yet: the PIECES tab says so; ORDERS holds the orders, with their count.
     await visible(page.locator('.pieces__empty'));
-    expect(await page.evaluate(() => {
-      const empty = document.querySelector('.pieces__empty')!;
-      const orders = document.querySelector('.pieces__orders')!;
-      return Boolean(empty.compareDocumentPosition(orders) & Node.DOCUMENT_POSITION_FOLLOWING);
-    })).toBe(true);
+    await visible(page.getByRole('tab', { name: 'ORDERS 3', exact: true }));
+    await openTab(page, 'ORDERS');
+    const section = page.locator('.n-pieces__orders');
+    await visible(section);
 
     // The latest first; never another account's.
-    const cards = section.locator('article.pieces__order');
+    const cards = section.locator('article.n-pieces__order');
     await expect.poll(() => cards.count(), POLL).toBe(3);
     expect(await cards.evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.status))).toEqual(['RESERVED', 'CANCELLED', 'SHIPPED']);
-    const refs = await section.locator('.pieces__order-reference').allInnerTexts();
+    const refs = await section.locator('.n-pieces__order-reference').allInnerTexts();
     const ref = (id: string) => `ORDER OR-${id.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
     expect(refs.map(norm)).toEqual([ref(ids.salon), ref(ids.cancelled), ref(ids.live)]);
     expect(refs.join(' ')).not.toContain(ref(ids.other).slice(6));
 
-    // The LIVE RELEASE's piece, shipped.
+    // The LIVE RELEASE's piece, shipped: its steps reached on several days, each by its day and month.
     const live = cards.nth(2);
     const liveDates = await datesOf(page, ids.live);
-    await textOf(live.getByRole('heading'), 'MONOLITHE');
-    expect(await live.getAttribute('aria-labelledby')).toBe(await live.getByRole('heading').getAttribute('id'));
-    await textOf(live.locator('.pieces__order-line'), 'LIVE RELEASE · MONOLITHE — LIVE');
-    await textOf(live.locator('.pieces__order-sentence'), ORDERS.sentence.SHIPPED);
+    await textOf(live.getByRole('heading', { level: 2 }), 'MONOLITHE');
+    expect(await live.getAttribute('aria-labelledby')).toBe(await live.getByRole('heading', { level: 2 }).getAttribute('id'));
+    await textOf(live.locator('.n-pieces__order-line'), 'LIVE RELEASE · MONOLITHE — LIVE');
+    await textOf(live.locator('.n-pieces__order-sentence'), ORDERS.sentence.SHIPPED);
     const steps = live.getByRole('list', { name: ORDERS.stepsLabel }).getByRole('listitem');
-    await textsOf(steps, [`RESERVED ${liveDates.reserved}`, `PAID ${liveDates.paid}`, `SHIPPED ${liveDates.shipped}`, 'DELIVERED']);
+    await textsOf(steps, [`RESERVED ${dayMonth(liveDates.reserved)}`, `PAID ${dayMonth(liveDates.paid)}`, `SHIPPED ${dayMonth(liveDates.shipped)}`, 'DELIVERED']);
     expect(liveDates.reserved).not.toBe(liveDates.paid);
-    expect(await steps.evaluateAll((els) => els.map((e) => [(e as HTMLElement).dataset.state, e.getAttribute('aria-current')]))).toEqual([
-      ['done', null],
-      ['done', null],
-      ['current', 'step'],
-      ['next', null],
+    expect(await steps.evaluateAll((els) => els.map((e) => [e.classList.contains('is-done'), e.getAttribute('aria-current')]))).toEqual([
+      [true, null],
+      [true, null],
+      [true, 'step'],
+      [false, null],
     ]);
-    await textsOf(live.locator('.pieces__order-rows .rows__row'), ['SIZE 52', 'PRICE € 4 800', 'ENGRAVING € 250', 'TOTAL € 5 050']);
-    await textsOf(live.locator('.pieces__order-shipment .rows__row'), ['CARRIER COLISSIMO', 'TRACKING NUMBER 6A12345678901']);
+    await textsOf(live.locator('.n-pieces__order-rows .n-kv__row'), ['SIZE 52', 'PRICE € 4 800', 'ENGRAVING + € 250', 'TOTAL € 5 050', 'CARRIER COLISSIMO', 'TRACKING NUMBER 6A12345678901']);
     const track = live.getByRole('link', { name: 'Track the shipment 6A12345678901 on the site of Colissimo (opens in a new tab)' });
     await textOf(track, ORDERS.track);
     expect(await track.getAttribute('href')).toBe('https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901');
     expect(await track.getAttribute('target')).toBe('_blank');
     expect(await track.getAttribute('rel')).toBe('noopener noreferrer');
 
-    // The salon's, its size and price to be entered by ORBES Client Services.
+    // The salon's, its size and price to be entered by ORBES Client Services: one step reached, dated in full.
     const salon = cards.nth(0);
-    await textOf(salon.locator('.pieces__order-line'), 'THE PRIVATE SALON');
-    await textOf(salon.locator('.pieces__order-sentence'), ORDERS.sentence.RESERVED);
-    await textsOf(salon.locator('.pieces__order-step'), [`RESERVED ${(await datesOf(page, ids.salon)).reserved}`, 'PAID', 'SHIPPED', 'DELIVERED']);
-    await textsOf(salon.locator('.pieces__order-rows .rows__row'), ['SIZE TO BE CONFIRMED', 'PRICE TO BE CONFIRMED']);
-    expect(await salon.locator('.pieces__order-shipment, .pieces__order-track').count()).toBe(0);
+    await textOf(salon.locator('.n-pieces__order-line'), 'THE PRIVATE SALON · MONOLITHE');
+    await textOf(salon.locator('.n-pieces__order-sentence'), ORDERS.sentence.RESERVED);
+    await textsOf(salon.getByRole('listitem'), [`RESERVED ${(await datesOf(page, ids.salon)).reserved}`, 'PAID', 'SHIPPED', 'DELIVERED']);
+    await textsOf(salon.locator('.n-pieces__order-rows .n-kv__row'), ['SIZE TO BE CONFIRMED', 'PRICE TO BE CONFIRMED']);
+    expect(await salon.locator('.n-pieces__order-track').count()).toBe(0);
 
     // The one cancelled: the step it reached, then CANCELLED.
     const cancelled = cards.nth(1);
     const cancelledDates = await datesOf(page, ids.cancelled);
-    await textOf(cancelled.locator('.pieces__order-sentence'), ORDERS.sentence.CANCELLED);
-    await textsOf(cancelled.locator('.pieces__order-step'), [`RESERVED ${cancelledDates.reserved}`, `CANCELLED ${cancelledDates.cancelled}`]);
+    await textOf(cancelled.locator('.n-pieces__order-sentence'), ORDERS.sentence.CANCELLED);
+    const dated = (d: string) => (d.slice(-4) === cancelledDates.reserved.slice(-4) ? dayMonth(d) : d);
+    await textsOf(cancelled.getByRole('listitem'), [`RESERVED ${dayMonth(cancelledDates.reserved)}`, `CANCELLED ${dated(cancelledDates.cancelled)}`]);
     expect(await cancelled.locator('[aria-current="step"]').innerText()).toMatch(/^CANCELLED/);
     // Its size and price were never entered: no row promises a confirmation that cannot come.
-    expect(await cancelled.locator('.pieces__order-rows').count()).toBe(0);
+    expect(await cancelled.locator('.n-pieces__order-rows').count()).toBe(0);
     expect(norm(await cancelled.innerText())).not.toContain(ORDERS.toConfirm);
 
-    // YOUR RELEASES agrees with YOUR ORDERS: the LIVE RELEASE's piece secured, its steps in the orders, never a
-    // payment still to settle nor a piece still "reserved" once it is shipped.
-    const release = page.locator('.pieces__entry-card', { hasText: 'LIVE RELEASE' });
-    await textOf(release.locator('.pieces__entry-sentence'), 'You secured your piece in size 52. Its steps follow in YOUR ORDERS.');
-    expect(norm(await release.innerText())).not.toContain('settle payment');
-    expect(norm(await release.innerText())).not.toContain('is reserved');
-
-    // The screen: contrast, figures in the reading face, one hairline button, the floors of §3.8, nothing sideways.
+    // The screen: contrast, figures in the reading face, no button (the documents are rows), the floors of §3.8.
     const checks = await screenChecks(page);
     expect(checks.contrast).toEqual([]);
     expect(checks.figures).toEqual([]);
-    expect(await page.locator('.view--pieces .btn').count()).toBe(1);
+    expect(await page.locator('.view--pieces .n-btn').count()).toBe(0);
     const floors = await tapZoneFloors(page);
     expect(floors.problems).toEqual([]);
     expect(floors.checked).toEqual(expect.arrayContaining([ORDERS.track]));
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
     await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces-orders.png'), fullPage: true });
 
-    // ORBES Client Services marks it delivered: read again, every step reached.
+    // RELEASES agrees with ORDERS: the LIVE RELEASE's piece secured, its steps in the orders, never a payment still to
+    // settle nor a piece still "reserved" once it is shipped.
+    await openTab(page, 'RELEASES');
+    const release = page.locator('.n-pieces__entry', { hasText: 'LIVE RELEASE' });
+    await textOf(release.locator('.pieces__entry-sentence'), 'You secured your piece in size 52. Its steps follow in YOUR ORDERS.');
+    expect(norm(await release.innerText())).not.toContain('settle payment');
+    expect(norm(await release.innerText())).not.toContain('is reserved');
+
+    // ORBES Client Services marks it delivered: read again (the tab kept by the page's entry), every step reached.
+    await openTab(page, 'ORDERS');
     await srv.ctx.services.orders.transition(ids.live, { to: 'DELIVERED' }, f.admin);
     await page.reload();
-    const again = page.locator('article.pieces__order[data-status="DELIVERED"]');
+    const again = page.locator('article.n-pieces__order[data-status="DELIVERED"]');
     await visible(again);
     const delivered = await datesOf(page, ids.live);
-    await textsOf(again.locator('.pieces__order-step'), [`RESERVED ${delivered.reserved}`, `PAID ${delivered.paid}`, `SHIPPED ${delivered.shipped}`, `DELIVERED ${delivered.delivered}`]);
+    await textsOf(again.getByRole('listitem'), [`RESERVED ${dayMonth(delivered.reserved)}`, `PAID ${dayMonth(delivered.paid)}`, `SHIPPED ${dayMonth(delivered.shipped)}`, `DELIVERED ${dayMonth(delivered.delivered)}`]);
     expect(await again.locator('[aria-current="step"]').innerText()).toMatch(/^DELIVERED/);
-    await textOf(again.locator('.pieces__order-sentence'), ORDERS.sentence.DELIVERED);
+    await textOf(again.locator('.n-pieces__order-sentence'), ORDERS.sentence.DELIVERED);
     await visible(again.getByRole('link', { name: /^Track the shipment 6A12345678901/ }));
     expect(problems).toEqual([]);
     await page.context().close();
@@ -255,17 +264,21 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
 
     const { page, problems } = await phone(me.token);
     await page.goto(`${srv.origin}/verify/pieces`);
-    const live = page.locator('article.pieces__order[data-status="DELIVERED"]');
+    await openTab(page, 'ORDERS');
+    const live = page.locator('article.n-pieces__order[data-status="DELIVERED"]');
     await visible(live);
     const group = live.getByRole('group', { name: D.title });
     await visible(group);
-    const links = group.locator('.pieces__order-document');
-    await textsOf(links, [`${D.invoice} ${invoice}`, D.careGuide, D.certificate]);
+    // Each a row: its label and number, then PDF or what the guide is (C24).
+    const links = group.locator('.n-pieces__document');
+    await textsOf(links, [`${D.invoice} ${invoice} ${D.pdf}`, `${D.careGuide} ${D.careGuideLabel('MONOLITHE')}`, `${D.certificate} ${D.pdf}`]);
     // The number in the reading face, the label in the display face.
-    expect(await links.first().locator('.numeral').innerText()).toBe(invoice);
+    expect(await links.first().locator('.n-pieces__document-number').innerText()).toBe(invoice);
+    // The model's photograph above the order (addition 3): the model has none here, so none is shown.
+    expect(await live.locator('img').count()).toBe(0);
     // The salon's order, not paid yet: its care guide only; the one cancelled before it was paid: no document.
-    await textsOf(page.locator('article.pieces__order[data-status="RESERVED"] .pieces__order-document'), [D.careGuide]);
-    expect(await page.locator('article.pieces__order[data-status="CANCELLED"] .pieces__order-documents').count()).toBe(0);
+    await textsOf(page.locator('article.n-pieces__order[data-status="RESERVED"] .n-pieces__document'), [`${D.careGuide} ${D.careGuideLabel('MONOLITHE')}`]);
+    expect(await page.locator('article.n-pieces__order[data-status="CANCELLED"] .n-pieces__documents').count()).toBe(0);
 
     // INVOICE: its PDF saved.
     const [pdf] = await Promise.all([page.waitForEvent('download'), group.getByRole('button', { name: D.invoiceLabel(invoice) }).click()]);
@@ -289,10 +302,11 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     const checks = await screenChecks(page);
     expect(checks.contrast).toEqual([]);
     expect(checks.figures).toEqual([]);
-    expect(await page.locator('.view--pieces .btn').count()).toBe(1);
+    expect(await page.locator('.view--pieces .n-btn').count()).toBe(0);
     const floors = await tapZoneFloors(page);
     expect(floors.problems).toEqual([]);
-    expect(floors.checked).toEqual(expect.arrayContaining([`${D.invoice} ${invoice}`, D.careGuide, D.certificate]));
+    // The rows, by their words (the label, the number, then the line under them).
+    expect(floors.checked).toEqual(expect.arrayContaining([`${D.invoice} ${invoice}${D.pdf}`, `${D.careGuide}${D.careGuideLabel('MONOLITHE')}`, `${D.certificate}${D.pdf}`]));
     // At rest for the picture: the pointer off the links, the page at its top (its fixed frame drawn there).
     await page.mouse.move(0, 0);
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -312,14 +326,48 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await page.context().close();
   }, 120_000);
 
+  it('says where the registered piece comes from: its release, a link to its page, and its order, ORDERS with it in view (addition 2)', async () => {
+    const { page, problems } = await phone(me.token);
+    await page.goto(`${srv.origin}/verify/pieces`);
+    const item = page.locator('article.n-pieces__piece', { hasText: livePiece.productId });
+    await visible(item);
+    await item.getByRole('link', { name: 'SEE THE PIECE' }).click();
+    const origin = page.locator('.view--piece .n-piece__origin');
+    await visible(origin);
+    await textOf(origin.locator('h2'), 'WHERE IT COMES FROM');
+    const release = origin.locator('.n-piece__origin-release');
+    const order = origin.locator('.n-piece__origin-order');
+    await textOf(release, /^THE LIVE RELEASE OF \d{1,2} [A-Z]+ SEE THE RELEASE$/);
+    expect(await release.getAttribute('href')).toBe(`/verify/releases/${ids.release}`);
+    const ref = `OR-${ids.live.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+    const delivered = await datesOf(page, ids.live);
+    await textOf(order, `ORDER ${ref} DELIVERED ON ${delivered.delivered}`);
+    // Its figures in the reading face; the rows tap as wide as the column.
+    expect((await screenChecks(page)).figures).toEqual([]);
+    const floors = await tapZoneFloors(page);
+    expect(floors.problems).toEqual([]);
+    // ORDER OR-…: MY PIECES' tab ORDERS, the order in view, its heading taking the keyboard focus.
+    await order.click();
+    await visible(page.locator('.view--pieces[data-tab="orders"]'));
+    expect(new URL(page.url()).pathname).toBe('/verify/pieces');
+    await expect.poll(() => page.evaluate(() => document.activeElement?.closest('article')?.getAttribute('data-order')), POLL).toBe(ref);
+    expect(await page.getByRole('tab', { name: /^ORDERS/ }).getAttribute('aria-selected')).toBe('true');
+    // Back: the landing (the piece's page gave its entry back to MY PIECES).
+    await page.goBack();
+    await expect.poll(() => new URL(page.url()).pathname, POLL).toBe('/verify');
+    expect(problems).toEqual([]);
+    await page.context().close();
+  }, 120_000);
+
   it('says when the orders could not be read, the pieces still shown; signed out, no orders', async () => {
     const { page, problems } = await phone(me.token);
     await page.route('**/api/v1/account/orders', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: { code: 'INTERNAL', message: 'Something went wrong.' } }) }));
     await page.goto(`${srv.origin}/verify/pieces`);
-    const section = page.locator('section.pieces__orders');
+    // The piece the collector registered with its documents (above) still shows; ORDERS says it could not be read.
+    await visible(page.locator('.n-pieces__list article.n-pieces__piece'));
+    await openTab(page, 'ORDERS');
+    const section = page.locator('#pieces-orders-panel');
     await textOf(section.getByRole('alert'), ORDERS.loadFailed);
-    // The piece the collector registered with its documents (above) still shows.
-    await visible(page.locator('.pieces__list article.piece'));
     expect(await section.locator('article').count()).toBe(0);
     expect(problems).toEqual([]);
     await page.context().close();
@@ -327,8 +375,8 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     const visitor = await phone(null);
     await visitor.page.goto(`${srv.origin}/verify/pieces`);
     await visible(visitor.page.locator('.pieces__signin'));
-    expect(await visitor.page.locator('section.pieces__orders').isHidden()).toBe(true);
-    expect(await visitor.page.locator('.pieces__order').count()).toBe(0);
+    expect(await visitor.page.getByRole('tab').count()).toBe(0);
+    expect(await visitor.page.locator('.n-pieces__order').count()).toBe(0);
     expect(visitor.problems).toEqual([]);
     await visitor.page.context().close();
   }, 60_000);

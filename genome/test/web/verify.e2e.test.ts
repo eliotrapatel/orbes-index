@@ -106,6 +106,23 @@ async function valueOf(loc: Locator, expected: string): Promise<void> {
 }
 const visible = (loc: Locator) => loc.waitFor({ state: 'visible', timeout: POLL.timeout });
 
+/** On MY PIECES, the page of the piece `productId` (its SEE THE PIECE, C3), then its article (C4). */
+async function seePiece(page: Page, productId: string): Promise<Locator> {
+  const item = page.locator('article.n-pieces__piece', { hasText: productId });
+  await visible(item);
+  await item.getByRole('link', { name: 'SEE THE PIECE' }).click();
+  const card = page.locator('.view--piece article.n-piece__article');
+  await visible(card);
+  await expect.poll(async () => norm(await card.locator('.n-gen__id').innerText()), POLL).toBe(productId);
+  return card;
+}
+
+/** From a piece's page, its crumb ‹ MY PIECES: back to the list. */
+async function backToPieces(page: Page): Promise<void> {
+  await page.locator('.view--piece .n-piece__crumb').click();
+  await visible(page.locator('.view--pieces .n-pieces__panel'));
+}
+
 /** Visible text set in Gravesend Sans that holds a one or a zero: there should be none (its one is its capital I, its zero an O). */
 async function figuresInDisplayFace(page: Page): Promise<string[]> {
   return page.evaluate(() =>
@@ -854,7 +871,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByLabel('EMAIL').fill('buyer.late@example.com');
     await page.getByLabel('PASSWORD').fill(PASSWORD);
     await page.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    await visible(page.getByRole('button', { name: 'CHANGE PASSWORD' }));
+    // Signed in: MY PIECES says the account holds no piece yet.
+    await visible(page.locator('.pieces__empty'));
     await page.goto(`${srv.origin}/verify`);
     await uploadPhoto(page, writeCodePng(srv.workDir, 'receive-late.png', piece));
     expect(await resultTitle(page)).toBe('AUTHENTIC REGISTERED');
@@ -1059,39 +1077,38 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await panel.getByRole('link', { name: 'MY PIECES' }).click();
     await textOf(page.locator('h1'), 'MY PIECES');
     expect(new URL(page.url()).pathname).toBe('/verify/pieces');
-    // The account line at the foot of MY PIECES: CHANGE PASSWORD beside SIGN OUT, both on one line at every phone width.
-    const account = page.locator('.pieces__account');
-    await textOf(account.locator('.ownership__email'), email);
-    await keepsFloors(page, ['CHANGE PASSWORD', 'SIGN OUT', 'SCAN ORBES CODE']);
-    for (const width of PHONE_WIDTHS) {
-      await page.setViewportSize({ width, height: 640 });
-      await keepsFloors(page, ['CHANGE PASSWORD', 'SIGN OUT', 'SCAN ORBES CODE']);
-    }
-    await page.setViewportSize(MOBILE_VIEWPORT);
-    await account.getByRole('button', { name: 'CHANGE PASSWORD' }).click();
-    await textOf(account.locator('.ownership__status'), 'CHANGE PASSWORD');
+    // MY PIECES (C3) keeps to its pieces: the account line is the account sheet's (C2), from the header's account button,
+    // CHANGE PASSWORD in it (C39).
+    await countOf(page.locator('.view--pieces').getByRole('button', { name: 'CHANGE PASSWORD' }), 0);
+    await textOf(page.locator('.n-pieces__id'), issued.product.productId);
+    await keepsFloors(page, ['SEE THE PIECE', 'SCAN ORBES CODE']);
+    await page.locator('.n-hd button.n-acct').click();
+    const account = page.getByRole('dialog', { name: 'YOUR ACCOUNT' });
+    await textOf(account.locator('.n-account__email'), email);
+    await account.getByRole('button', { name: 'CHANGE PASSWORD', exact: true }).click();
+    await textOf(account.locator('#account-password-title'), 'CHANGE PASSWORD');
     // Keyboard focus moves into the form, on the current password.
-    expect(await page.evaluate(() => document.activeElement?.id)).toBe('current-password');
-    await keepsFloors(page, ['CHANGE PASSWORD', 'CANCEL', 'SIGN OUT']);
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('account-current-password');
+    await keepsFloors(page, ['CHANGE PASSWORD', 'CANCEL']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-change-password.png'), fullPage: true });
     // CANCEL closes it, focus back on CHANGE PASSWORD; then open it again.
     await account.getByRole('button', { name: 'CANCEL' }).click();
     await countOf(account.locator('form'), 0);
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('CHANGE PASSWORD');
-    await account.getByRole('button', { name: 'CHANGE PASSWORD' }).click();
+    await account.getByRole('button', { name: 'CHANGE PASSWORD', exact: true }).click();
     // A wrong current password is said on its field; the page stays signed in (a 400, never a 401).
     await account.getByLabel('CURRENT PASSWORD', { exact: true }).fill('not my password at all');
     await account.getByLabel('NEW PASSWORD', { exact: true }).fill('another new passphrase');
     await account.locator('form').getByRole('button', { name: 'CHANGE PASSWORD' }).click();
     await textOf(account.getByRole('alert'), 'The current password is not correct.');
     await attrOf(account.getByLabel('CURRENT PASSWORD', { exact: true }), 'aria-invalid', 'true');
-    await textOf(account.locator('.ownership__email'), email);
     await account.getByLabel('CURRENT PASSWORD', { exact: true }).fill('a brand new passphrase');
     await account.locator('form').getByRole('button', { name: 'CHANGE PASSWORD' }).click();
-    await textOf(account.locator('.form__notice'), 'Your password has been changed. Your other sessions have ended.');
-    await textOf(account.locator('.ownership__email'), email);
+    await textOf(account.locator('.n-account__notice'), 'Your password has been changed. Your other sessions have ended.');
+    await textOf(account.locator('.n-account__email'), email);
+    await page.keyboard.press('Escape');
     // Still the owner's page: the piece is listed.
-    await textOf(page.locator('.piece .genome__id'), issued.product.productId);
+    await textOf(page.locator('.n-pieces__id'), issued.product.productId);
     expect((await srv.ctx.services.auth.login({ email, password: 'another new passphrase' }, {})).account.email).toBe(email);
     // Back leaves MY PIECES (it took the result's place in the history) for the landing.
     await page.goBack();
@@ -1146,10 +1163,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const signIn = page.locator('.pieces__signin');
     await textOf(signIn.locator('.n-own__lead'), /^Sign in to see the pieces registered to your ORBES account\. A piece lost or stolen can be reported here, without scanning it\.$/);
     await visible(signIn.getByRole('button', { name: 'FORGOTTEN PASSWORD?' }));
-    await countOf(page.locator('article.piece'), 0);
-    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'FORGOTTEN PASSWORD?', 'SCAN ORBES CODE', ...LEGAL_LINKS]);
-    // Where the account's data is collected, the legal pages (J-06), in a new tab, under SCAN ORBES CODE: NOCTURNE's
-    // footer, under the page.
+    await countOf(page.locator('article.n-pieces__piece'), 0);
+    // Signed out, MY PIECES is its sign-in (C18): the SCAN ring at the foot, no button of its own.
+    await keepsFloors(page, ['SIGN IN', 'CREATE ACCOUNT', 'FORGOTTEN PASSWORD?', ...LEGAL_LINKS]);
+    await countOf(page.locator('.view--pieces').getByRole('button', { name: 'SCAN ORBES CODE' }), 0);
+    // Where the account's data is collected, the legal pages (J-06), in a new tab: NOCTURNE's footer, under the page.
     const footer = page.locator('footer.n-foot');
     expect(await legalLinksOf(footer)).toEqual([
       { name: 'PRIVACY', href: '/legal/privacy', target: '_blank' },
@@ -1158,8 +1176,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
       { name: 'HELP', href: '/legal/faq', target: '_blank' },
     ]);
     await attrOf(footer.getByRole('link', { name: 'IP Geolocation by DB-IP' }), 'target', '_blank');
-    const scanButton = (await page.locator('.pieces__foot').getByRole('button', { name: 'SCAN ORBES CODE' }).boundingBox())!;
-    expect((await footer.locator('.n-fl').boundingBox())!.y).toBeGreaterThan(scanButton.y + scanButton.height);
+    const signInBox = (await signIn.boundingBox())!;
+    expect((await footer.locator('.n-fl').boundingBox())!.y).toBeGreaterThan(signInBox.y + signInBox.height);
     // CREATE ACCOUNT, signed out in MY PIECES: the same note, both links.
     await signIn.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
     await attrOf(signIn.locator('.n-own__terms').getByRole('link', { name: 'PRIVACY POLICY' }), 'href', '/legal/privacy');
@@ -1170,52 +1188,72 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
 
-    // The pieces, newest acquisition first, each on its ivory plate; keyboard focus on the page's title above them.
-    const pieces = page.locator('article.piece');
+    // PIECES (C3): the pieces, newest acquisition first, each on its model's photograph (never the piece's own,
+    // decision 9) or on the ground without one, its name and id, its type, material and size, its state; keyboard
+    // focus on the page's title above them.
+    const pieces = page.locator('article.n-pieces__piece');
     await countOf(pieces, 2);
-    await textsOf(page.locator('.piece .genome__id'), [newer.product.productId, older.product.productId]);
+    await textsOf(page.locator('.n-pieces__id'), [newer.product.productId, older.product.productId]);
     await expect.poll(() => page.evaluate(() => document.activeElement?.id), POLL).toBe('pieces-title');
-    await textOf(page.locator('.pieces__lead'), 'The pieces registered to your ORBES account.');
-    const card = page.getByRole('article', { name: older.product.productId });
-    const other = page.getByRole('article', { name: newer.product.productId });
-    expect(await card.locator('.piece__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(PLATE);
-    // Under the écrin that carries its heading, the photograph ORBES took of the piece's model (F-04), never the one of
-    // the piece itself (NOCTURNE, decision 9), on the ivory plate of an authentic result, with its alternative text, the
-    // plate named after the piece; the other piece, whose model has none, shows none.
-    const photos = card.getByRole('region', { name: `Photographs of ${older.product.productId}` });
-    await visible(photos);
-    const photo = photos.locator('img.photo__img');
-    await countOf(photo, 1);
-    await countOf(card.locator('img'), 1);
-    await attrOf(photo, 'alt', 'The MONOLITHE RING model, photographed by ORBES');
-    // The model's file, never the piece's (`/api/v1/media/<the piece photo's sha256>`).
-    const src = new URL((await photo.getAttribute('src'))!, srv.origin).pathname;
-    expect(src).toBe(new URL(modelPhoto.url, srv.origin).pathname);
-    expect(ownPhoto.photoUrl).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
-    expect(src).not.toBe(ownPhoto.photoUrl);
-    await textsOf(photos.locator('.photo__caption'), ['THE MODEL']);
-    await textOf(photos.locator('.photos__note'), 'Photographed by ORBES. Compare it with the piece in your hands.');
-    await expect.poll(() => photo.evaluate((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth]), POLL).toEqual([true, 640]);
-    expect(await photos.locator('.photos__plate').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(PLATE);
-    const [ecrin, photosBox, linesBox] = [(await card.locator('.piece__plate').boundingBox())!, (await photos.boundingBox())!, (await card.locator('.piece__lines').boundingBox())!];
-    expect(photosBox.y).toBeGreaterThan(ecrin.y + ecrin.height);
-    expect(photosBox.y + photosBox.height).toBeLessThan(linesBox.y);
-    await countOf(other.locator('.result__photos, img'), 0);
-    await countOf(card.locator('.genome__glyphs .genome-svg--orbit g[data-layer="genome"]'), 8);
-    await attrOf(card.locator('.genome-svg'), 'aria-label', new RegExp(older.genome.fingerprint));
-    await textOf(card.locator('.genome__meta'), `${older.genome.fingerprint} · GENOME-01`);
-    await textsOf(card.locator('.lines__line'), ['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
-    await textsOf(card.getByRole('tab'), ['OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE']);
-    await attrOf(card.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
-    await textOf(card.locator('.ownership__status'), 'REGISTERED TO YOU');
-    await textOf(card.locator('.piece__ownership .rows'), /^SINCE \d{1,2} [A-Z]{3} \d{4} ACQUIRED FIRST REGISTRATION OWNERSHIP VERIFIED$/);
+    await textOf(page.locator('.n-pieces__lead'), 'The pieces registered to your ORBES account.');
+    const listed = pieces.filter({ hasText: older.product.productId });
+    const listPhoto = listed.locator('img');
+    await countOf(listPhoto, 1);
+    await attrOf(listPhoto, 'alt', 'The MONOLITHE RING model, photographed by ORBES');
+    expect(new URL((await listPhoto.getAttribute('src'))!, srv.origin).pathname).toBe(new URL(modelPhoto.url, srv.origin).pathname);
+    await countOf(pieces.filter({ hasText: newer.product.productId }).locator('img'), 0);
+    await textOf(listed.locator('.n-pieces__line'), 'RING · 925 STERLING SILVER');
+    await textOf(listed.locator('.n-pieces__state'), /^REGISTERED TO YOU · SINCE \d{1,2} [A-Z]{3} \d{4}$/);
+    // No YOUR TIER here (decision 10), no GENOME: they are the account sheet's and the piece's page's.
+    await countOf(page.locator('.view--pieces .genome-svg'), 0);
     expect(await figuresInDisplayFace(page)).toEqual([]);
-    const listControls = ['OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE', 'REPORT LOST / STOLEN', 'CHANGE PASSWORD', 'SIGN OUT', 'SCAN ORBES CODE'];
+    const listControls = ['SEE THE PIECE', 'SCAN ORBES CODE'];
     await keepsFloors(page, listControls);
     await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces.png'), fullPage: true });
     for (const width of PHONE_WIDTHS) {
       await page.setViewportSize({ width, height: 640 });
       await keepsFloors(page, listControls);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+
+    // SEE THE PIECE: its page (C4), at its own address, over MY PIECES.
+    await attrOf(listed.getByRole('link', { name: 'SEE THE PIECE' }), 'href', `/verify/pieces/${older.product.productId}`);
+    await listed.getByRole('link', { name: 'SEE THE PIECE' }).click();
+    const card = page.locator('.view--piece article.n-piece__article');
+    await visible(card);
+    expect(new URL(page.url()).pathname).toBe(`/verify/pieces/${older.product.productId}`);
+    await textOf(card.locator('#piece-title'), 'MONOLITHE');
+    // THE MODEL's photograph (F-04), never the one of the piece itself (decision 9), captioned, with its sentence.
+    const photos = card.getByRole('region', { name: 'Photograph of the model' });
+    await visible(photos);
+    const photo = photos.locator('img');
+    await countOf(photo, 1);
+    await countOf(card.locator('img'), 1);
+    await attrOf(photo, 'alt', 'The MONOLITHE RING model, photographed by ORBES');
+    const src = new URL((await photo.getAttribute('src'))!, srv.origin).pathname;
+    expect(src).toBe(new URL(modelPhoto.url, srv.origin).pathname);
+    expect(ownPhoto.photoUrl).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
+    expect(src).not.toBe(ownPhoto.photoUrl);
+    await textOf(photos.locator('.n-result__caption'), 'THE MODEL');
+    await textOf(photos.locator('.n-result__photo-note'), 'Photographed by ORBES. Compare it with the piece in your hands.');
+    await expect.poll(() => photo.evaluate((el) => [(el as HTMLImageElement).complete, (el as HTMLImageElement).naturalWidth]), POLL).toEqual([true, 640]);
+    // Its lines, its state; a boutique sale: nothing of where it comes from; its GENOME in ivory, the monogram at its centre.
+    await textsOf(card.locator('.n-lines__line'), ['RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    await textOf(card.locator('.n-piece__state'), 'REGISTERED TO YOU');
+    await countOf(card.locator('.n-piece__origin'), 0);
+    await countOf(card.locator('.genome-svg g[data-layer="genome"]'), 8);
+    await attrOf(card.locator('.genome-svg'), 'aria-label', new RegExp(older.genome.fingerprint));
+    await textOf(card.locator('.n-gen__fp'), `${older.genome.fingerprint} · GENOME-01`);
+    await textsOf(card.getByRole('tab'), ['OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE']);
+    await attrOf(card.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
+    await textOf(card.locator('.n-piece__rows'), /^ACQUIRED FIRST REGISTRATION OWNERSHIP VERIFIED SINCE \d{1,2} [A-Z]{3} \d{4}$/);
+    expect(await figuresInDisplayFace(page)).toEqual([]);
+    const pieceControls = ['MY PIECES', 'OWNERSHIP', 'WARRANTY', 'SERVICE', 'CARE', 'CREATE CERTIFICATE', 'REPORT LOST / STOLEN'];
+    await keepsFloors(page, pieceControls);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-my-piece.png'), fullPage: true });
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, pieceControls);
     }
     await page.setViewportSize(MOBILE_VIEWPORT);
 
@@ -1229,19 +1267,19 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(card.getByRole('tabpanel'), /STATUS ACTIVE FROM 20 SEP 2026 UNTIL 20 SEP 2028 This piece is covered by the ORBES warranty until 20 September 2028\./);
     await page.keyboard.press('ArrowRight');
     await attrOf(tab('SERVICE'), 'aria-selected', 'true');
-    // The service history, without staff notes.
-    await textOf(card.getByRole('tabpanel').locator('.rows'), /^POLISH \d{1,2} [A-Z]{3} \d{4} · PARIS ATELIER$/);
+    // The service history, without staff notes: its dates and place, then its kind.
+    await textOf(card.getByRole('tabpanel').locator('.n-piece__service'), /^\d{1,2} [A-Z]{3} \d{4} · PARIS ATELIER POLISH$/);
     await countOf(card.getByText('staff note'), 0);
     // CARE (P-M02): the care of the piece's model, then ORBES Care; no subscription page is published on this server,
     // so a plain sentence says subscriptions open soon, with nothing to press.
     await page.keyboard.press('ArrowRight');
     await attrOf(tab('CARE'), 'aria-selected', 'true');
     const carePanel = card.getByRole('tabpanel');
-    await textsOf(carePanel.locator('.section-label'), ['CARING FOR THIS PIECE', 'ORBES CARE']);
-    await textOf(carePanel.locator('.piece__care-text'), 'Store on its own in the ORBES pouch. Wipe with a soft, dry cloth after wearing; avoid perfume, chlorine and abrasive cleaners.');
+    await textsOf(carePanel.locator('h3'), ['CARING FOR THIS PIECE', 'ORBES CARE']);
+    await textOf(carePanel.locator('.n-piece__care-text'), 'Store on its own in the ORBES pouch. Wipe with a soft, dry cloth after wearing; avoid perfume, chlorine and abrasive cleaners.');
     await visible(carePanel.getByRole('region', { name: 'ORBES CARE' }));
-    await textsOf(carePanel.locator('.pieces__benefit'), [...ORBES_CARE.benefits]);
-    await textOf(carePanel.locator('.piece__care-soon'), 'Subscriptions open soon.');
+    await textsOf(carePanel.locator('.n-piece__benefit'), [...ORBES_CARE.benefits]);
+    await textOf(carePanel.locator('.n-piece__care-soon'), 'Subscriptions open soon.');
     await countOf(carePanel.getByRole('link'), 0);
     await countOf(carePanel.getByRole('button'), 0);
     expect(await figuresInDisplayFace(page)).toEqual([]);
@@ -1253,31 +1291,26 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.keyboard.press('Home');
     await attrOf(tab('OWNERSHIP'), 'aria-selected', 'true');
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('OWNERSHIP');
-    // Each piece has its own tablist: the other one did not move.
-    await attrOf(other.getByRole('tab', { name: 'OWNERSHIP' }), 'aria-selected', 'true');
-    await countOf(other.getByRole('tabpanel'), 1);
 
-    // A reload stays on MY PIECES, signed in. This time the server publishes the subscription page of ORBES Care
-    // (CARE_SUBSCRIBE_URL, served by GET /api/v1/client-services): CARE offers SUBSCRIBE, a text link in a new tab.
+    // A reload stays on the piece, signed in. This time the server publishes the subscription page of ORBES Care
+    // (CARE_SUBSCRIBE_URL, served by GET /api/v1/client-services): CARE offers SUBSCRIBE, the hairline button (C35), in a
+    // new tab.
     const careUrl = 'https://whop.com/orbes/care';
     await page.route('**/api/v1/client-services', async (route) => {
       const response = await route.fetch();
       await route.fulfill({ response, json: { ...((await response.json()) as object), careSubscribeUrl: careUrl } });
     });
     await page.reload();
-    await textOf(page.locator('h1'), 'MY PIECES');
-    await countOf(pieces, 2);
-    expect(new URL(page.url()).pathname).toBe('/verify/pieces');
+    await visible(card);
+    expect(new URL(page.url()).pathname).toBe(`/verify/pieces/${older.product.productId}`);
     await tab('CARE').click();
     const subscribe = card.getByRole('tabpanel').getByRole('link', { name: 'Subscribe to ORBES Care, in a new tab' });
     await textOf(subscribe, 'SUBSCRIBE');
     await attrOf(subscribe, 'href', careUrl);
     await attrOf(subscribe, 'target', '_blank');
     await attrOf(subscribe, 'rel', 'noopener noreferrer');
-    expect(await subscribe.getAttribute('class')).toMatch(/\btextlink\b/);
-    await countOf(card.locator('.piece__care-soon'), 0);
-    // The page keeps its one hairline button, SCAN ORBES CODE.
-    await countOf(page.locator('.view--pieces .btn'), 1);
+    expect(await subscribe.getAttribute('class')).toMatch(/\bn-btn--ol\b/);
+    await countOf(card.locator('.n-piece__care-soon'), 0);
     await keepsFloors(page, ['SUBSCRIBE']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces-care.png'), fullPage: true });
     await page.unroute('**/api/v1/client-services');
@@ -1285,7 +1318,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     // REPORT LOST / STOLEN, confirmed: LOST or STOLEN first, then CONFIRM REPORT.
     await card.getByRole('button', { name: 'REPORT LOST / STOLEN' }).click();
-    await textOf(card.locator('.piece__ownership .section-label'), 'REPORT LOST / STOLEN');
+    await textOf(card.locator('.n-piece__incident-title'), 'REPORT LOST / STOLEN');
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('REPORT LOST / STOLEN');
     await card.getByRole('button', { name: 'CONFIRM REPORT' }).click();
     await textOf(card.getByRole('alert'), 'Choose LOST or STOLEN.');
@@ -1294,11 +1327,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await choice.getByRole('button', { name: 'STOLEN' }).click();
     await attrOf(choice.getByRole('button', { name: 'STOLEN' }), 'aria-pressed', 'true');
     await attrOf(choice.getByRole('button', { name: 'LOST' }), 'aria-pressed', 'false');
-    await textOf(card.locator('.piece__ownership'), /Once it is recovered, ORBES Client Services check the piece and withdraw the report\./);
+    await textOf(card.locator('.n-piece__ownership'), /Once it is recovered, ORBES Client Services check the piece and withdraw the report\./);
     await keepsFloors(page, ['LOST', 'STOLEN', 'CONFIRM REPORT', 'CANCEL']);
     await page.screenshot({ path: join(OUT_DIR, 'verify-my-pieces-report.png'), fullPage: true });
     await card.getByRole('button', { name: 'CONFIRM REPORT' }).click();
-    await textOf(card.locator('.ownership__status'), 'REPORTED STOLEN');
+    await textOf(card.locator('.n-piece__incident-title'), 'REPORTED STOLEN');
+    await textOf(card.locator('.n-piece__state'), 'REPORTED STOLEN');
     await textOf(card.getByRole('status'), 'This piece is now reported stolen. Every scan of its code shows UNUSUAL ACTIVITY.');
     expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('REPORTED STOLEN');
     // A theft is ORBES Client Services' to withdraw: nothing to press, their contact instead.
@@ -1308,20 +1342,28 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const href = new URL((await contact.getAttribute('href'))!);
     expect(href.searchParams.get('subject')).toBe(`ORBES — ${older.product.productId} — REPORTED STOLEN`);
     expect(href.searchParams.get('body')).toBe(`\r\n\r\nPIECE: ${older.product.productId}`);
-    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone, 'SIGN OUT']);
+    await keepsFloors(page, ['CONTACT ORBES CLIENT SERVICES', CLIENT_SERVICES.phone]);
     expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', older.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'STOLEN' });
 
+    // ‹ MY PIECES: back to the list, the piece's new state said there.
+    await page.getByRole('link', { name: 'MY PIECES', exact: true }).first().click();
+    await countOf(pieces, 2);
+    expect(new URL(page.url()).pathname).toBe('/verify/pieces');
+    await textOf(pieces.filter({ hasText: older.product.productId }).locator('.n-pieces__state'), 'REPORTED STOLEN');
+
     // The other piece: reported LOST, then found again by its owner (PIECE FOUND, confirmed).
+    await pieces.filter({ hasText: newer.product.productId }).getByRole('link', { name: 'SEE THE PIECE' }).click();
+    await visible(card);
+    const other = card;
     await other.getByRole('button', { name: 'REPORT LOST / STOLEN' }).click();
     await other.getByRole('button', { name: 'LOST', exact: true }).click();
-    await textOf(other.locator('.piece__ownership'), /Once you find it, you withdraw the report yourself, here: PIECE FOUND\./);
+    await textOf(other.locator('.n-piece__ownership'), /Once you find it, you withdraw the report yourself, here: PIECE FOUND\./);
     await other.getByRole('button', { name: 'CONFIRM REPORT' }).click();
-    await textOf(other.locator('.ownership__status'), 'REPORTED LOST');
-    await textOf(other.locator('.piece__ownership'), /Every scan of its code shows UNUSUAL ACTIVITY until you tell ORBES that it has been found\./);
+    await textOf(other.locator('.n-piece__incident-title'), 'REPORTED LOST');
+    await textOf(other.locator('.n-piece__ownership'), /Every scan of its code shows UNUSUAL ACTIVITY until you tell ORBES that it has been found\./);
     expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', newer.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'LOST' });
     await other.getByRole('button', { name: 'PIECE FOUND' }).click();
-    await textOf(other.locator('.section-label'), 'PIECE FOUND');
-    await textOf(other.locator('.piece__ownership'), /Confirm with the password of your ORBES account that this piece is back with you\./);
+    await textOf(other.locator('.n-piece__ownership'), /Confirm with the password of your ORBES account that this piece is back with you\./);
     await keepsFloors(page, ['CONFIRM', 'CANCEL']);
     // The account's password, typed again: a session alone does not withdraw the report. Missing, then wrong (a 400:
     // the session stays, the field is cleared and takes the focus), the piece stays reported.
@@ -1337,13 +1379,17 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', newer.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'LOST' });
     await foundPassword.fill(PASSWORD);
     await other.getByRole('button', { name: 'CONFIRM', exact: true }).click();
-    await textOf(other.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(other.locator('.n-piece__state'), 'REGISTERED TO YOU');
     await textOf(other.getByRole('status'), 'This piece is no longer reported lost.');
     await visible(other.getByRole('button', { name: 'REPORT LOST / STOLEN' }));
     expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', newer.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'OWNED' });
     const audit = await srv.ctx.audit.list({ action: 'ownership.incident.resolve', targetId: newer.product.productId });
     expect(audit.items.map((e) => [e.actorType, e.actorId, e.details])).toEqual([['account', owner.account.id, { type: 'LOST', to: 'OWNED' }]]);
 
+    // Back returns to MY PIECES (a piece's page sits on its entry), then to the landing.
+    await page.goBack();
+    await countOf(pieces, 2);
+    expect(new URL(page.url()).pathname).toBe('/verify/pieces');
     // Back returns to the landing (MY PIECES sat in one entry above it).
     await page.goBack();
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).first().waitFor();
@@ -1394,27 +1440,28 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await signIn.getByLabel('EMAIL').fill(email);
     await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    await countOf(page.locator('article.piece'), 3);
+    await countOf(page.locator('article.n-pieces__piece'), 3);
 
     // The piece in service: reported lost, then found with the password; it reads IN SERVICE again, as the server holds it.
-    const inService = page.getByRole('article', { name: serviced.product.productId });
-    await textOf(inService.locator('.ownership__status'), 'IN SERVICE');
+    const inService = await seePiece(page, serviced.product.productId);
+    await textOf(inService.locator('.n-piece__state'), 'IN SERVICE');
     await inService.getByRole('button', { name: 'REPORT LOST / STOLEN' }).click();
     await inService.getByRole('button', { name: 'LOST', exact: true }).click();
     await inService.getByRole('button', { name: 'CONFIRM REPORT' }).click();
-    await textOf(inService.locator('.ownership__status'), 'REPORTED LOST');
+    await textOf(inService.locator('.n-piece__state'), 'REPORTED LOST');
     await inService.getByRole('button', { name: 'PIECE FOUND' }).click();
     await inService.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await inService.getByRole('button', { name: 'CONFIRM', exact: true }).click();
-    await textOf(inService.locator('.ownership__status'), 'IN SERVICE');
+    await textOf(inService.locator('.n-piece__state'), 'IN SERVICE');
     await textOf(inService.locator('.piece__ownership'), /This piece is with ORBES for a service\. Its history is under SERVICE\./);
     await textOf(inService.getByRole('status'), 'This piece is no longer reported lost.');
     expect(await srv.ctx.db.selectFrom('products').select('status').where('id', '=', serviced.product.id).executeTakeFirstOrThrow()).toEqual({ status: 'SERVICED' });
 
     // The revoked piece: still the owner's, but no REPORT LOST / STOLEN (the server would refuse it) and no certificate:
     // ORBES Client Services, with their contact.
-    const refused = page.getByRole('article', { name: revoked.product.productId });
-    await textOf(refused.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await backToPieces(page);
+    const refused = await seePiece(page, revoked.product.productId);
+    await textOf(refused.locator('.n-piece__state'), 'REGISTERED TO YOU');
     await countOf(refused.getByRole('button', { name: 'REPORT LOST / STOLEN' }), 0);
     await countOf(refused.locator('.piece__certificate-title'), 0);
     await textOf(refused.locator('.piece__ownership'), /A loss or a theft of this piece cannot be reported here: tell ORBES Client Services\./);
@@ -1423,7 +1470,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     // The links of the last piece cannot be read: said, with TRY AGAIN. A link created meanwhile does not stand for
     // the list (the others would be hidden, and could not be withdrawn): the alert stays.
-    const sharing = page.getByRole('article', { name: shared.product.productId });
+    await backToPieces(page);
+    const sharing = await seePiece(page, shared.product.productId);
     await textOf(sharing.getByRole('alert'), 'Your certificate links could not be shown just now.');
     await visible(sharing.getByRole('button', { name: 'TRY AGAIN' }));
     const earlier = await srv.ctx.services.ownershipCertificates.create(owner.account.id, shared.product.productId, {}, { type: 'account', id: owner.account.id });
@@ -1491,8 +1539,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await signIn.getByLabel('EMAIL').fill(email);
     await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    const card = page.getByRole('article', { name: productId });
-    await visible(card);
+    const card = await seePiece(page, productId);
     await textOf(card.locator('.piece__certificate-title'), 'OWNERSHIP CERTIFICATE');
     await textOf(card.locator('.piece__ownership'), /Share a link to a certificate of this piece with a buyer or an insurer/);
 
@@ -1508,7 +1555,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await keepsFloors(page, ['7 DAYS', '30 DAYS', '90 DAYS', 'CREATE LINK', 'CANCEL']);
     await card.getByRole('button', { name: 'CREATE LINK' }).click();
 
-    // The link, shown once, on ivory; COPY LINK takes the focus and copies it.
+    // The link, shown once (C35); COPY LINK takes the focus and copies it.
     const value = card.locator('.certificate-link__value');
     await visible(value);
     const url = norm(await value.innerText());
@@ -1597,7 +1644,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await card.getByRole('button', { name: 'REPORT LOST / STOLEN' }).click();
     await card.getByRole('button', { name: 'LOST', exact: true }).click();
     await card.getByRole('button', { name: 'CONFIRM REPORT' }).click();
-    await textOf(card.locator('.ownership__status'), 'REPORTED LOST');
+    await textOf(card.locator('.n-piece__state'), 'REPORTED LOST');
     await countOf(card.locator('.piece__certificate-title'), 0);
     await buyer.reload();
     await textOf(buyer.locator('.certificate__state'), 'NO LONGER VALID');
@@ -1610,7 +1657,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await card.getByRole('button', { name: 'PIECE FOUND' }).click();
     await card.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await card.getByRole('button', { name: 'CONFIRM', exact: true }).click();
-    await textOf(card.locator('.ownership__status'), 'REGISTERED TO YOU');
+    await textOf(card.locator('.n-piece__state'), 'REGISTERED TO YOU');
     await textsOf(card.locator('.piece__certificate-line'), [expect.stringMatching(/^CREATED \d{1,2} [A-Z]{3} \d{4} · NO LONGER VALID$/) as unknown as string]);
     await card.getByRole('button', { name: /^WITHDRAW/ }).click();
     await textOf(card.getByRole('status'), 'The link has been withdrawn: it no longer leads to the certificate.');
@@ -1835,7 +1882,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByLabel('EMAIL').fill('buyer.listed@example.com');
     await page.getByLabel('PASSWORD').fill(PASSWORD);
     await page.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    await visible(page.getByRole('button', { name: 'CHANGE PASSWORD' }));
+    // Signed in: MY PIECES says the account holds no piece yet.
+    await visible(page.locator('.pieces__empty'));
     await page.goto(`${srv.origin}/verify`);
     await uploadPhoto(page, writeCodePng(srv.workDir, 'listed.png', issued));
     expect(await resultTitle(page)).toBe('UNUSUAL ACTIVITY DETECTED');
@@ -2333,8 +2381,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await signIn.getByLabel('EMAIL').fill(email);
     await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    await countOf(page.locator('article.piece'), 1);
-    await page.locator('.pieces__foot').getByRole('link', { name: 'THE COLLECTION' }).click();
+    await countOf(page.locator('article.n-pieces__piece'), 1);
+    // THE COLLECTION: the rail's chapter (MY PIECES' own link gave way to it, N5).
+    await page.locator('.n-rail').getByRole('link', { name: 'COLLECTION' }).click();
     await textOf(page.locator('h1'), 'THE COLLECTION');
     const reserved = page.getByRole('region', { name: 'THE PRIVATE SALON' });
     await visible(reserved);
@@ -2495,14 +2544,18 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
     expect(new URL(page.url()).pathname).toBe('/verify');
 
-    // MY PIECES groups the account's entries: its release, what it means now, its id.
+    // MY PIECES groups the account's entries in its tab RELEASES (C31): its release, what it means now, its id (in the
+    // reading face, as the draw publishes it).
     await page.goto(`${srv.origin}/verify/pieces`);
+    await page.getByRole('tab', { name: /^RELEASES/ }).click();
     const releases = page.locator('.pieces__releases');
-    await textOf(releases.locator('.section-label'), 'YOUR RELEASES');
+    await attrOf(releases, 'aria-label', 'YOUR RELEASES');
     await textOf(releases.locator('.pieces__entry-state'), 'ENTRIES OPEN · ENTERED');
-    await textOf(releases.locator('.pieces__entry-id'), `YOUR ENTRY ${mine.id}`);
+    await textOf(releases.locator('.pieces__entry-id').locator('..'), `YOUR ENTRY ${mine.id}`);
+    await textOf(releases.locator('.pieces__entry-id'), mine.id);
     await attrOf(releases.getByRole('link', { name: 'ECLIPSE — RELEASE I' }), 'href', `/verify/releases/${drop.id}`);
-    await attrOf(page.locator('.pieces__foot').getByRole('link', { name: 'THE RELEASES' }), 'href', '/verify/releases');
+    // THE RELEASES: the rail's chapter.
+    await attrOf(page.locator('.n-rail').getByRole('link', { name: 'RELEASES' }), 'href', '/verify/releases');
 
     // The draw, once the entries are closed (an ADMIN, in the console): the entrant, TITANE, first; a place held.
     await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - 7_200_000), closes_at: new Date(Date.now() - 1_000) }).where('id', '=', drop.id).execute();
@@ -2611,6 +2664,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // MY PIECES: the place reserved among its releases, no EARLY ACCESS block; the privilege among the benefits of
     // YOUR TIER, said once, in the account sheet (decision 10).
     await page.goto(`${srv.origin}/verify/pieces`);
+    await page.getByRole('tab', { name: /^RELEASES/ }).click();
     await textOf(page.locator('.pieces__releases .pieces__entry-state'), 'ENTRIES OPEN SOON · PLACE RESERVED');
     await openAccount(page);
     await textOf(page.locator('.n-account__tier-name'), 'PLATINE');
@@ -2634,8 +2688,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(other.page.getByRole('button', { name: 'ENTER THE DRAW' }), 0);
     await attrOf(other.page.locator('.release__foot .release__scan'), 'class', /\bbtn\b/);
     await other.page.goto(`${srv.origin}/verify/pieces`);
-    await countOf(other.page.locator('.pieces__waiting'), 0);
-    await visible(other.page.locator('.pieces__lead'));
+    await countOf(other.page.locator('.n-pieces__waiting'), 0);
+    await visible(other.page.locator('.n-pieces__lead'));
     await countOf(other.page.locator('.pieces__early:not([hidden])'), 0);
     await openAccount(other.page);
     await textOf(other.page.locator('.n-account__next-label'), 'NEXT: PLATINE');
@@ -2666,7 +2720,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await signIn.getByLabel('EMAIL').fill(email);
     await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    await countOf(page.locator('article.piece'), 3);
+    await countOf(page.locator('article.n-pieces__piece'), 3);
     // MY PIECES no longer holds YOUR TIER.
     await countOf(page.locator('.pieces__tier'), 0);
     await countOf(page.getByText('YOUR TIER', { exact: true }), 0);
@@ -2769,7 +2823,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await otherSignIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await otherSignIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
     // Without a tier, YOUR TIER does not say the early access of PLATINE and PALLADIUM: EARLY ACCESS recalls it.
-    await textOf(other.page.locator('.pieces__early .section-label'), 'EARLY ACCESS');
+    await textOf(other.page.locator('.pieces__early h2'), 'EARLY ACCESS');
     await textOf(other.page.locator('.pieces__early-text'), RELEASES.earlyAccess.recall);
     const bare = other.page.getByRole('button', { name: 'Your account', exact: true });
     await textOf(bare, '');
@@ -2927,9 +2981,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.getByRole('button', { name: 'SCAN ORBES CODE' }).waitFor();
     expect(new URL(page.url()).pathname).toBe('/verify');
 
-    // MY PIECES: THE CIRCLE, for an owner, at the foot.
+    // MY PIECES: THE CIRCLE is the rail's chapter (N5: its own link at the foot gave way to it).
     await page.goto(`${srv.origin}/verify/pieces`);
-    const link = page.locator('.pieces__foot').getByRole('link', { name: 'THE CIRCLE' });
+    await countOf(page.locator('.view--pieces').getByRole('link', { name: 'THE CIRCLE' }), 0);
+    const link = page.locator('.n-rail').getByRole('link', { name: 'CIRCLE' });
     await visible(link);
     await attrOf(link, 'href', '/verify/circle');
     await link.click();
@@ -2954,7 +3009,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await figuresInDisplayFace(page)).toEqual([]);
     expect(problems).toEqual([]);
 
-    // An account that holds no piece: the circle says it opens once a piece is registered; MY PIECES shows no link to it.
+    // An account that holds no piece: the circle says it opens once a piece is registered; MY PIECES links none.
     const stranger = 'circle.stranger@example.com';
     await ctx.services.auth.registerAccount({ email: stranger, password: PASSWORD }, {});
     const other = await openVerify(browser, srv, { reducedMotion: 'reduce' });
@@ -2966,7 +3021,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(other.page.locator('.circle__closed'), CIRCLE.ownersOnly);
     await other.page.goto(`${srv.origin}/verify/pieces`);
     await visible(other.page.locator('.pieces__empty'));
-    await countOf(other.page.locator('.pieces__foot').getByRole('link', { name: 'THE CIRCLE' }), 0);
+    await countOf(other.page.locator('.view--pieces').getByRole('link', { name: 'THE CIRCLE' }), 0);
     expect(other.problems).toEqual([]);
   }, 180_000);
 

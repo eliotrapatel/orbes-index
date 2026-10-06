@@ -152,7 +152,8 @@ export function tabs(items: readonly TabItem[], opts: { selected: string; label:
       {
         class: ['n-g', `n-${kind}__tab`],
         id: `${opts.idPrefix}-${t.id}`,
-        attrs: { type: 'button', role: 'tab', 'aria-selected': String(t.id === opts.selected), 'aria-controls': `${opts.idPrefix}-${t.id}-panel`, tabindex: t.id === opts.selected ? 0 : -1 },
+        // With its count, its name says both apart (« ORDERS 4 »), as the eye reads them.
+        attrs: { type: 'button', role: 'tab', 'aria-selected': String(t.id === opts.selected), 'aria-controls': `${opts.idPrefix}-${t.id}-panel`, 'aria-label': t.count !== undefined ? `${t.label} ${t.count}` : undefined, tabindex: t.id === opts.selected ? 0 : -1 },
         on: { click: () => opts.onSelect(t.id) },
       },
       t.label,
@@ -198,12 +199,12 @@ export function accordionRow(title: string, panel: HTMLElement, opts: { line?: s
  * A row with a hairline that leads on (›), as an accordion row is laid out (`.acc`): its title, a line under it (a
  * sentence `sm`, or a label `lb`), a link (`href`) or a button.
  */
-export function accLink(title: string | Node, opts: { line?: string; lineKind?: 'sm' | 'lb'; href?: string; onOpen?: () => void; newTab?: boolean; label?: string; extraClass?: string } = {}): HTMLAnchorElement | HTMLButtonElement {
+export function accLink(title: string | Node, opts: { line?: string | Node; lineKind?: 'sm' | 'lb'; href?: string; onOpen?: () => void; newTab?: boolean; label?: string; extraClass?: string } = {}): HTMLAnchorElement | HTMLButtonElement {
   const text = h(
     'span',
     { class: 'n-acc__text' },
     h('span', { class: 'n-g n-t3 n-ivc n-acc__title' }, title),
-    opts.line ? h('span', { class: opts.lineKind === 'lb' ? 'n-g n-lb n-acc__line n-acc__line--lb' : 'n-sm n-acc__line', text: opts.line }) : null,
+    opts.line ? h('span', { class: opts.lineKind === 'lb' ? 'n-g n-lb n-acc__line n-acc__line--lb' : 'n-sm n-acc__line' }, opts.line) : null,
   );
   const children = [text, icon('chev', { small: true })];
   const cls = ['n-acc', opts.extraClass];
@@ -350,7 +351,7 @@ export interface OrderStep {
  * The steps of an order: a dot each on a hairline, the bar drawn to the step reached, each with its label and date;
  * a list for assistive technologies, its current step marked (aria-current).
  */
-export function orderSteps(steps: readonly OrderStep[], opts: { label: string }): HTMLElement {
+export function orderSteps(steps: readonly OrderStep[], opts: { label: string; bar?: 'auto' | 'none' | 'end' }): HTMLElement {
   const at = steps.reduce((last, st, i) => (st.done ? i : last), -1);
   const bar = h('span', { class: 'n-steps__bar', attrs: { 'aria-hidden': 'true' } });
   const list = h(
@@ -367,11 +368,15 @@ export function orderSteps(steps: readonly OrderStep[], opts: { label: string })
       ),
     ),
   );
-  // One column per step; the hairline runs from the first dot to the last column, the bar to the step reached.
-  const n = Math.max(1, steps.length);
+  // A column per step, four at least (C32: a cancelled order's two steps in the four columns of the way); the hairline
+  // runs from the first dot to the last column, the bar to the step reached (`auto`). A cancelled order has no bar
+  // (`none`); a returned one's runs to the end of the line (`end`, C32: its fifth column).
+  const n = Math.max(4, steps.length);
   list.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
   list.style.setProperty('--n-steps-last', `${100 / n}%`);
-  if (at > 0) bar.style.width = `${(at / n) * 100}%`;
+  const mode = opts.bar ?? 'auto';
+  if (mode === 'end' && at > 0) bar.style.width = 'calc(100% - 10px)';
+  else if (mode === 'auto' && at > 0) bar.style.width = `${(at / n) * 100}%`;
   else bar.hidden = true;
   return list;
 }

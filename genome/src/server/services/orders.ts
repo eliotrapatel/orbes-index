@@ -89,6 +89,7 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
 import { issueCreditNote, issueInvoice, orderInvoices, type InvoiceBuyer } from './invoices.js';
 import { reserveIdentity, retireReservedIdentity } from './issuance.js';
+import { mediaUrl } from './media.js';
 import { writeJournal } from './journal.js';
 import { isTransitionAllowed, LifecycleService, returnTargetOf } from './lifecycle.js';
 import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
@@ -366,6 +367,11 @@ export interface AccountOrder {
   shipment: { carrier: string; trackingNumber: string; trackingUrl: string } | null;
   /** Its documents (M6), each read by its own route (GET /api/v1/account/orders/:id/…). */
   documents: AccountOrderDocuments;
+  /**
+   * The cover photograph of its model (or of its variant, itself a model): `/api/v1/media/<sha256>`, or null (plan
+   * NOCTURNE, addition 3). Never a piece's own photograph (decision 9).
+   */
+  imageUrl: string | null;
 }
 
 /** The documents of an order in MY PIECES (M6). */
@@ -1103,6 +1109,7 @@ export class OrderService {
         'o.tracking_number',
         'm.name as model_name',
         'm.variant_label as model_variant',
+        'm.image_sha256 as model_image',
         'd.title as release_title',
         'c.name as carrier_name',
         'c.tracking_url',
@@ -1149,6 +1156,7 @@ export class OrderService {
         careGuide: r.status !== 'CANCELLED' && r.status !== 'RETURNED',
         certificate: ORDER_CERTIFICATE_STATUSES.includes(r.status) && r.ownership_id !== null && r.piece_status !== null && !CERTIFICATE_ENDING_STATUSES.includes(r.piece_status),
       },
+      imageUrl: mediaUrl(r.model_image),
     }));
   }
 

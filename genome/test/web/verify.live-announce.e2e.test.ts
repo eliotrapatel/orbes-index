@@ -514,9 +514,9 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     await page.goto(`${srv.origin}/verify/pieces`);
     await textOf(banner, 'LIVE RELEASE · MONOLITHE · THE ROOM IS OPEN');
     expect(await banner.getAttribute('href')).toBe(`/verify/releases/${soon.id}`);
-    // MY PIECES makes room for it: its wordmark below the strip.
-    const below = await page.evaluate(() => document.querySelector('.pieces__wordmark')!.getBoundingClientRect().top - document.querySelector('.live-banner')!.getBoundingClientRect().bottom);
-    expect(below).toBeGreaterThanOrEqual(40);
+    // MY PIECES makes room for it: its title below the strip, 30 px under it (C3).
+    const below = await page.evaluate(() => document.querySelector('#pieces-title')!.getBoundingClientRect().top - document.querySelector('.live-banner')!.getBoundingClientRect().bottom);
+    expect(below).toBeGreaterThanOrEqual(30);
     await sleep(1_200);
     await page.screenshot({ path: join(OUT_DIR, 'verify-live-banner-pieces.png') });
     await textOf(banner, 'LIVE RELEASE · MONOLITHE · LIVE NOW', 10_000);
@@ -526,7 +526,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE announced: the calendar, I’LL B
     expect(await page.evaluate(() => 'banner' in document.body.dataset)).toBe(false);
     // Read again, there is none.
     await page.reload();
-    await visible(page.locator('.pieces__title'));
+    await visible(page.locator('#pieces-title'));
     await sleep(1_000);
     expect(await page.locator('.live-banner-host').isHidden()).toBe(true);
     expect(problems).toEqual([]);

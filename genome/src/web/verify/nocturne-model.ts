@@ -48,6 +48,7 @@ export function chapterOf(screen: string): ChapterId | null {
     case 'result':
       return 'now';
     case 'pieces':
+    case 'piece':
       return 'pieces';
     case 'lookbook':
     case 'sheet':

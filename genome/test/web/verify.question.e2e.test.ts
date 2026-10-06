@@ -234,8 +234,8 @@ describe.skipIf(!HAS_CHROMIUM)('the question after a LIVE RELEASE (Chromium)', (
     const own = await phone(buyer.token);
     await own.page.goto(`${srv.origin}/verify/pieces`);
     await visible(own.page.locator('#pieces-title'));
-    await visible(own.page.locator('.pieces__orders'));
-    expect(await own.page.locator('.pieces__questions').isHidden()).toBe(true);
+    await visible(own.page.getByRole('tab', { name: /^ORDERS/ }));
+    expect(await own.page.locator('.pieces__questions').count()).toBe(0);
     await own.context.close();
 
     const { page, context, problems } = await phone(absent.token);

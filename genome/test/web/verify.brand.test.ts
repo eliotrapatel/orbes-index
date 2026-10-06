@@ -70,7 +70,7 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
       const inks = new Set([...markup!.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]).filter((v) => v !== 'none'));
       expect([...inks], layout).toEqual([ORBES_CODE_STYLES.ivory.ink]);
     }
-    // The shared certificate's écrin (MY PIECES' plate) keeps the ivory paper the code is printed on.
+    // The shared certificate's écrin (MY PIECES' plate before NOCTURNE) keeps the ivory paper the code is printed on.
     expect(rule(styles, '.piece__plate').background).toBe('var(--ivory)');
     expect(tokens['--ivory']?.toLowerCase()).toBe(ORBES_CODE_STYLES.ivory.paper.toLowerCase());
     // On a collector's screen (a result, a piece, the ceremony): the ink of the ground's text, --vault-ink.
@@ -79,16 +79,20 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect([...new Set([...screen.matchAll(/(?:fill|stroke)="([^"]+)"/g)].map((m) => m[1]).filter((v) => v !== 'none'))]).toEqual([GENOME_SCREEN_INK]);
   });
 
-  it('sets each piece of MY PIECES in its écrin: the GENOME plate a result had before NOCTURNE (ivory, the same margins), the same orbit (F-01)', () => {
-    // A result draws its GENOME on the ground (NOCTURNE, C9); MY PIECES keeps the plate until its own step (N5).
+  it('draws the GENOME of a piece of MY PIECES on the ground, in ivory, as a result does (NOCTURNE, N5: C4); the écrin is the shared certificate\'s alone (F-01)', () => {
+    // The écrin keeps its ivory plate and its margins, for the shared certificate (choice 3).
     expect(rule(styles, '.piece__plate')).toMatchObject({ background: 'var(--ivory)', color: 'var(--ink)', padding: '34px 22px 28px', 'text-align': 'center' });
     expect(rule(styles, '.piece__plate .bracket').color).toBe('var(--hairline-strong)');
+    // MY PIECES lists the pieces (C3); a piece's page draws its GENOME as a result does, its monogram at the centre (C4).
     const pieces = readFileSync(join(WEB, 'verify/views/pieces.ts'), 'utf8');
-    expect(pieces).toContain("bracket(\n");
-    expect(pieces).toContain("genomeBlock(this.model.genome, { titleId })");
-    // The column of the shared certificate.
-    expect(rule(styles, '.view--pieces')['max-width']).toBe(rule(styles, '.view--certificate')['max-width']);
-    expect(rule(styles, '.view--pieces').padding).toBe(rule(styles, '.view--certificate').padding);
+    const piece = readFileSync(join(WEB, 'verify/views/piece.ts'), 'utf8');
+    expect(pieces).not.toContain('bracket(');
+    expect(pieces).not.toContain('genomeBlock(');
+    expect(piece).not.toContain('bracket(');
+    expect(piece).toContain("nocturneGenome(m.genome, { extraClass: 'n-piece__genome' })");
+    expect(rule(styles, '.n-piece__genome')['margin-top']).toBe('48px');
+    // Both run the column's width, their photographs to its edges (C3, C4).
+    expect(rule(styles, 'body.nocturne .view--pieces.n-pieces,\nbody.nocturne[data-banner] .view--pieces.n-pieces,\nbody.nocturne .view--piece')).toMatchObject({ padding: '0', 'max-width': 'none' });
   });
 
   it('sets the piece of an ownership certificate in the same écrin, in the column of a result, titled like MY PIECES (F-06)', () => {
@@ -101,12 +105,13 @@ describe('verify app: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect(rules(styles).filter((r) => r.selectors.some((s) => s.includes('certificate__plate')))).toEqual([]);
     expect(rule(styles, '.view--certificate')['max-width']).toBe('560px');
     expect(rule(styles, '.view--certificate').padding).toBe('calc(60px + var(--safe-top)) 32px calc(64px + var(--safe-bottom))');
-    for (const k of ['font-size', 'font-weight', 'letter-spacing', 'text-indent']) expect(rule(styles, '.certificate__title')[k], k).toBe(rule(styles, '.pieces__title')[k]);
+    // Its title tracked as MY PIECES' was before NOCTURNE (the page keeps its look, choice 3).
+    expect(rule(styles, '.certificate__title')).toMatchObject({ 'font-size': 'var(--fs-title)', 'font-weight': '400', 'letter-spacing': '0.3em', 'text-indent': '0.3em' });
     // One hairline button per screen (§3.8): DOWNLOAD PDF on a valid certificate, SCAN ORBES CODE otherwise.
     expect(view).toContain("class: 'btn certificate__pdf'");
     expect(view).toContain("this.scanButton('textlink')");
-    // The link just created in MY PIECES sits on ivory.
-    expect(rule(styles, '.certificate-link').background).toBe('var(--ivory)');
+    // The link just created on a piece's page sits on the ground (C35): no ivory plate in /verify but CONFIRMED's (C29).
+    expect(rules(styles).filter((r) => r.selectors.some((s) => s.includes('certificate-link')))).toEqual([]);
   });
 
   it('sets the customer-quotable reference (VERIFIED · REF) as the canvas does: its label in ash, its value in ivory in the reading face', () => {
@@ -203,14 +208,15 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     '.n-vsel__option',
   ];
   /**
-   * The rulebook sets five controls at 9.5 px (build.py: `.acct`, `.rail a`, `.dbip`, `.banner`, and n.py's account line):
-   * the account button, the rail's chapters, DB-IP's attribution, the banner of the LIVE RELEASES and the OWNERSHIP
-   * panel's MY PIECES and SIGN OUT, validated by the owner on the canvas (who
+   * The rulebook sets six controls at 9.5 px (build.py: `.acct`, `.rail a`, `.dbip`, `.banner`, n.py's account line, and
+   * `.kv .g` on C35's WITHDRAW): the account button, the rail's chapters, DB-IP's attribution, the banner of the LIVE
+   * RELEASES, the OWNERSHIP panel's MY PIECES and SIGN OUT, and WITHDRAW in a certificate link's row on a piece's page,
+   * validated by the owner on the canvas (who
    * declined larger labels). Their 44 px zones are measured in the page (test/support/tap-zones.ts,
    * test/web/nocturne.styles.e2e.test.ts, test/web/verify.live-announce.e2e.test.ts). The banner keeps the house's rule
    * for a screen out of NOCTURNE; NOCTURNE's size is its `body.nocturne` rule's (RULEBOOK_RULE).
    */
-  const RULEBOOK_TYPE: Readonly<Record<string, number>> = { '.n-acct': 9.5, '.n-rail__link': 9.5, '.n-dbip': 9.5, '.live-banner': 9.5, '.n-own__link': 9.5 };
+  const RULEBOOK_TYPE: Readonly<Record<string, number>> = { '.n-acct': 9.5, '.n-rail__link': 9.5, '.n-dbip': 9.5, '.live-banner': 9.5, '.n-own__link': 9.5, '.n-piece__withdraw': 9.5 };
   // MY PIECES and SIGN OUT take the account line's label size (.lb, n.py account_line(): C14).
   const RULEBOOK_RULE: Readonly<Record<string, string>> = { '.live-banner': 'body.nocturne .live-banner', '.n-own__link': '.n-lb' };
   const legacy = interactive.filter((sel) => !sel.startsWith('.n-'));
@@ -317,9 +323,10 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     expect(px(rule(styles, '.genome__meta')['font-size'])).toBeGreaterThanOrEqual(10);
     // The views set these lines with the 10 px .micro class: the closing time of registration, the
     // transfer code's labels and validity, the signed-in account, the GENOME fingerprint.
-    const views = ['views/ownership.ts', 'views/pieces.ts', 'views/certificate.ts', 'views/now.ts', 'views/scanning.ts', 'views/result.ts', 'views/message.ts', 'views/panels.ts', 'views/tabs.ts', 'genome-view.ts', 'main.ts'];
+    const views = ['views/ownership.ts', 'views/pieces.ts', 'views/piece.ts', 'views/certificate.ts', 'views/now.ts', 'views/scanning.ts', 'views/result.ts', 'views/message.ts', 'views/panels.ts', 'views/tabs.ts', 'genome-view.ts', 'main.ts'];
     const classes = views.flatMap((f) => [...readFileSync(join(WEB, 'verify', f), 'utf8').matchAll(/class: '([^']+)'/g)].map((m) => m[1]));
-    for (const line of ['ownership__meta', 'certificate-link__label', 'certificate__footnote', 'ownership__who', 'genome__meta']) {
+    // (A piece's page sets its certificate link's line as the canvas does, a label: C35.)
+    for (const line of ['ownership__meta', 'certificate__footnote', 'ownership__who', 'genome__meta']) {
       const set = classes.filter((c) => c.split(' ').includes(line) && !c.split(' ').includes('prose'));
       expect(set.length, line).toBeGreaterThan(0);
       for (const c of set) expect(c.split(' '), c).toContain('micro');
@@ -398,7 +405,7 @@ describe('display face: Gravesend Sans for the wordmark, titles and labels (BRAN
   });
 
   const BRAND_DISPLAY = ['.wordmark', '.btn', '.textlink', '.field__label'];
-  const VERIFY_DISPLAY = ['.n-g', '.pieces__title', '.pieces__order-title', '.pieces__order-step-label', '.pieces__order-documents-title', '.certificate__title', '.certificate__state', '.certificate__footnote', '.photo__caption', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.auth__option', '.live__surprise', '.question__label', '.question__release', '.question__text'];
+  const VERIFY_DISPLAY = ['.n-g', '.certificate__title', '.certificate__state', '.certificate__footnote', '.genome__label', '.tabs__tab', '.rows__label', '.section-label', '.ownership__status', '.auth__option', '.live__surprise', '.question__label', '.question__release', '.question__text'];
   const ADMIN_DISPLAY = ['.side__group-title', '.side__link', '.page-head__eyebrow', '.page-head__title', '.panel__title', '.kpi__label', '.deflist__label', '.table th', '.cbtn', '.cfield__label', '.login__title'];
   // What is read, quoted or compared stays in --font: sentences, values, identifiers, codes, inputs,
   // and the lines that can carry a figure (Gravesend's one is its capital I).
@@ -523,12 +530,12 @@ describe('verify app: the GENOME in its orbit, as on the piece (BRAND-DESIGN-SYS
     expect(screen.match(/data-layer="monogram"/g)).toHaveLength(1);
     expect(screen.match(/data-layer="genome"/g)).toHaveLength(CODE01.genome.count);
     expect(screen.slice(screen.indexOf('data-layer="monogram"')).match(/<path /g)!.length).toBeGreaterThanOrEqual(MONOGRAM_PATHS.length);
-    // Every screen that draws a piece's GENOME uses the block: a result and its ceremony, MY PIECES; the certificate keeps the seal.
+    // Every screen that draws a piece's GENOME uses the block: a result and its ceremony, a piece's page (C4); the certificate keeps the seal.
     expect(resultView).toContain('nocturneGenome(vm.genome, { size: ceremony ? 220 : 200, extraClass: \'n-result__genome\' })');
     const nocturneBlock = view.slice(view.indexOf('export function nocturneGenome'));
     expect(nocturneBlock).toContain("genomeRow(m, { layout: 'orbit', centre: 'monogram', ink: GENOME_SCREEN_INK })");
     expect(nocturneBlock).toContain("figure.classList.add('n-glow')");
-    expect(readFileSync(join(WEB, 'verify/views/pieces.ts'), 'utf8')).toContain('genomeBlock(this.model.genome, { titleId })');
+    expect(readFileSync(join(WEB, 'verify/views/piece.ts'), 'utf8')).toContain("nocturneGenome(m.genome, { extraClass: 'n-piece__genome' })");
   });
 
   it('sizes the orbit as a centred square of min(64vw, 260px): glyphs of about 43 px, never under the 12 px floor', () => {
@@ -554,7 +561,8 @@ describe('verify app: the GENOME in its orbit, as on the piece (BRAND-DESIGN-SYS
 });
 
 describe('verify app: the photographs of an authentic piece (F-04)', () => {
-  const photosView = readFileSync(join(WEB, 'verify/views/photos.ts'), 'utf8');
+  const pieceView = readFileSync(join(WEB, 'verify/views/piece.ts'), 'utf8');
+  const piecesView = readFileSync(join(WEB, 'verify/views/pieces.ts'), 'utf8');
 
   it('sets THE MODEL\'s photograph under the GENOME of a result, full width, whole, without the fade, captioned (C9, decision 9)', () => {
     const at = (needle: string) => resultView.indexOf(needle);
@@ -566,33 +574,24 @@ describe('verify app: the photographs of an authentic piece (F-04)', () => {
     // Shown whole (contain), never cropped; 48 px under the GENOME, as the GENOME under the message.
     expect(rule(styles, '.n-ph--contain > img')['object-fit']).toBe('contain');
     expect(rule(styles, '.n-result__model')['margin-top']).toBe(rule(styles, '.n-result__genome')['margin-top']);
-    // MY PIECES keeps the ivory plate until its own step (N5).
-    expect(rule(styles, '.photos__plate').background).toBe('var(--ivory)');
-    expect(photosView).toContain("bracket(h('div', { class: ['photos__plate'");
+    // The ivory plate of photographs is gone with MY PIECES' (N5): no ivory plate in /verify but CONFIRMED's (C29).
+    expect(rules(styles).filter((r) => r.selectors.some((s) => /\.photos?__|\.result__photos/.test(s)))).toEqual([]);
   });
 
-  it('sets them in MY PIECES too (F-01): the same plate, under the écrin that carries the piece\'s heading, at the distance of its lines', () => {
-    const piecesView = readFileSync(join(WEB, 'verify/views/pieces.ts'), 'utf8');
-    const at = (needle: string) => piecesView.indexOf(needle);
-    expect(at("photoPlate(this.model.photos, { extraClass: 'piece__photos'")).toBeGreaterThan(0);
-    expect(at("{ class: 'piece', attrs: { 'aria-labelledby': titleId } }, plate, photos, lines, tabs.root)")).toBeGreaterThan(0);
-    expect(rule(styles, '.piece__photos')['margin-top']).toBe(rule(styles, '.piece__lines')['margin-top']);
-    // The plate's own rule sets its distance first; MY PIECES' own one comes later in the sheet, so it wins.
-    expect(styles.indexOf('.piece__photos {')).toBeGreaterThan(styles.indexOf('.result__photos {'));
+  it('sets the same photograph on a piece\'s page (C4), right under its crumb, captioned THE MODEL; MY PIECES and its orders show it whole and faded (C3, C24; additions 3 and decision 9)', () => {
+    expect(pieceView).toContain("modelPhoto(m.photos, { extraClass: 'n-piece__photo' })");
+    expect(rule(styles, '.n-piece__photo')['margin-top']).toBe('0');
+    // The list and the orders: the model's photograph (never the piece's own), faded into the ground, the words lifted.
+    expect(piecesView).toContain('const photo = m.photos[0];');
+    expect(piecesView).toContain('fadedPhoto(photo.src, photo.alt, { eager: index < 2 })');
+    expect(piecesView).toContain('fadedPhoto(m.photo.src, m.photo.alt)');
+    expect(piecesView).not.toContain('photoUrl');
+    expect(pieceView).not.toContain('photoUrl');
   });
 
-  it('never crops a photograph, gives each its alternative text, and hides one that cannot be loaded', () => {
-    expect(rule(styles, '.photo__img')).toMatchObject({ width: '100%', 'aspect-ratio': '1', 'object-fit': 'contain' });
-    expect(photosView).toContain("attrs: { src: p.src, alt: p.alt, decoding: 'async' }");
-    expect(photosView).toContain("addEventListener(\n      'error',");
-    // [hidden] must win over the plate's own display.
-    expect(rule(styles, '.photo[hidden],\n.result__photos[hidden]').display).toBe('none');
-  });
-
-  it('captions them at 10 px in the display face, and says the sentence under them in the reading face', () => {
-    expect(Number.parseFloat(resolve(rule(styles, '.photo__caption')['font-size']))).toBeGreaterThanOrEqual(10);
-    expect(rule(styles, '.photo__caption').color).toBe('var(--ink-soft)');
-    expect(rule(styles, '.photos__note')).toMatchObject({ 'font-size': 'var(--fs-line)', color: 'var(--ink-soft)' });
+  it('never shows a broken image: a photograph that cannot be loaded takes its place with it', () => {
+    expect(resultView).toContain("frame.querySelector('img')?.addEventListener('error', () => (section.hidden = true), { once: true });");
+    expect(piecesView.match(/querySelector\('img'\)\?\.addEventListener\('error'/g)).toHaveLength(2);
   });
 });
 

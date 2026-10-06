@@ -190,6 +190,19 @@ export interface OwnedPiece {
   lookbook?: string | null;
   /** The model's care instructions (P-M02, the CARE tab of MY PIECES); null: the general care text of /verify. */
   care: string | null;
+  /**
+   * NOCTURNE, addition 2: where the piece comes from, its order of this account and the release it was sold in; null
+   * for a piece without one (a boutique sale). Absent from a server before it: nothing is said.
+   */
+  origin?: PieceOrigin | null;
+}
+
+/** Where a piece of the account comes from (OwnedPiece.origin). */
+export interface PieceOrigin {
+  /** The release it was sold in and when it took place (a draw: drawn; a LIVE RELEASE: its T0); null for the private salon. */
+  release: { id: string; mode: 'DRAW' | 'LIVE'; at: string } | null;
+  /** ORDER OR-…, where it was sold, its step now and when it reached it. */
+  order: { reference: string; channel: OrderChannel; status: OrderStatus; at: string };
 }
 
 /** One after-sales service of a piece (GET /api/v1/products/:productId/service-history), without staff notes. */
@@ -879,6 +892,8 @@ export interface AccountOrder {
   shipment: { carrier: string; trackingNumber: string; trackingUrl: string } | null;
   /** Its documents (M6), each read by its own route. Absent from a server before them: none. */
   documents?: AccountOrderDocuments;
+  /** NOCTURNE, addition 3: its model's cover photograph (`/api/v1/media/<sha256>`), or null; absent from a server before it. */
+  imageUrl?: string | null;
 }
 
 /** The documents of an order (plan LIVE RELEASE+, M6). */

@@ -151,6 +151,34 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
     },
     12 * 60_000,
   );
+
+  it(
+    'sets MY PIECES and a piece as C3, C4, C24, C31, C32 and C35 draw them: the title, the tabs and their counts, each piece on its photograph, ADD A PIECE, each order and its steps, rows and documents, each entry, the crumb, THE MODEL, the lines, the state, WHERE IT COMES FROM, the GENOME, the tabs and the OWNERSHIP panel (N5)',
+    async () => {
+      const states = ['pieces', 'pieces-orders', 'pieces-releases', 'piece', 'pieces-report-choice'];
+      const seen = new Set<string>();
+      await eachState(
+        states.map(stateById),
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          const page = opened.page;
+          try {
+            seen.add(state.id);
+            if (state.id === 'pieces') await myPieces(page);
+            if (state.id === 'pieces-orders') await myOrders(page);
+            if (state.id === 'pieces-releases') await myReleases(page);
+            if (state.id === 'piece') await aPiece(page);
+            if (state.id === 'pieces-report-choice') await aReport(page);
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect([...seen].sort()).toEqual([...states].sort());
+    },
+    12 * 60_000,
+  );
 });
 
 /** How many of the elements `selector` matches the phone shows. */
@@ -166,11 +194,11 @@ async function withoutChrome(page: Page, where: string): Promise<void> {
 }
 
 /** A result (C9, C16): the header, the rail with NOW underlined (a result is read from NOW), the SCAN ring. */
-async function withChrome(page: Page, where: string): Promise<void> {
+async function withChrome(page: Page, where: string, chapter = 'now'): Promise<void> {
   expect(await shown(page, '.n-hd:not(.n-cam__hd)'), `${where}: the header`).toBe(1);
   expect(await shown(page, '.n-rail'), `${where}: the rail`).toBe(1);
   expect(await shown(page, '.n-scan .n-scan__ring'), `${where}: the SCAN ring`).toBe(1);
-  expect(await page.locator('.n-rail__link[aria-current="page"]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.chapter)), where).toEqual(['now']);
+  expect(await page.locator('.n-rail__link[aria-current="page"]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.chapter)), where).toEqual([chapter]);
 }
 
 /** C11: the camera on its ground, the orbit (272 px, its centre at 392 px), its moons, the status, LIGHT and the zoom. */
@@ -665,4 +693,120 @@ async function pieces(page: Page, script: string): Promise<void> {
   await check(page, at('steps', '.n-steps__step.is-done .n-steps__label'), { color: IV });
   await check(page, at('steps', '.n-steps__date'), { 'font-size': 12, color: ASH, 'margin-top': 4 });
   expect(await page.locator(at('steps', '[aria-current="step"]')).innerText()).toContain('PAID');
+}
+
+/** C3: MY PIECES, its tab PIECES: the title and its sentence, the tabs, each piece on its photograph, ADD A PIECE. */
+async function myPieces(page: Page): Promise<void> {
+  await withChrome(page, 'pieces', 'pieces');
+  await check(page, '.view--pieces.n-pieces', { 'padding-left': 0, 'padding-right': 0 });
+  await check(page, '.n-pieces__head', { 'padding-top': 30, 'padding-left': 24 });
+  await check(page, '#pieces-title', { 'font-size': 30, 'letter-spacing': em(30, 0.08), color: IV });
+  await check(page, '.n-pieces__lead', { 'margin-top': 12, 'font-size': 15, 'line-height': '23.25px', color: ASH });
+  await check(page, '.n-pieces__tabs', { 'margin-top': 40, 'padding-left': 24, 'column-gap': 30, 'border-bottom-color': LINE });
+  const names = await page.getByRole('tab').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') ?? ''));
+  expect(names.slice(0, 2)).toEqual(['PIECES 2', 'ORDERS 4']);
+  expect(names[2]).toMatch(/^RELEASES \d+$/);
+  await check(page, '.n-pieces__list', { 'margin-top': 8 });
+  await check(page, '.n-pieces__piece + .n-pieces__piece', { 'margin-top': 40 });
+  // The model's photograph, whole across the column, faded; the words lifted 56 px onto its foot.
+  const photo = await check(page, '.n-pieces__piece .n-ph', { height: 390, 'background-color': 'rgb(21, 20, 19)' });
+  expect(Number(photo._w)).toBeCloseTo(390, 0);
+  await check(page, '.n-pieces__piece .n-ph > img', { 'object-fit': 'contain' });
+  await check(page, '.n-pieces__words', { 'margin-top': -56, 'padding-left': 24 });
+  await check(page, '.n-pieces__name', { 'font-size': 16, 'line-height': '20.8px', 'letter-spacing': em(16, 0.14), color: IV });
+  await check(page, '.n-pieces__id', { 'font-size': 13, color: ASH });
+  expect(isHelvetica((await read(page, '.n-pieces__id', ['font-family']))['font-family']!)).toBe(true);
+  await check(page, '.n-pieces__line', { 'margin-top': 8, 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
+  await check(page, '.n-pieces__state', { 'margin-top': 14, 'font-size': 14, color: IV, 'column-gap': 10 });
+  await check(page, '.n-pieces__state .n-ic--sm', { width: 16, height: 16, color: ASH });
+  await check(page, '.n-pieces__see-line', { 'margin-top': 16 });
+  await check(page, '.n-pieces__add', { 'padding-top': 76 });
+  await check(page, '.n-pieces__add h2', { 'font-size': 11, 'letter-spacing': em(11, 0.26) });
+  await check(page, '.n-pieces__add .n-pieces__section-lead', { 'margin-top': 12, 'font-size': 15 });
+  await check(page, '.n-pieces__scan', { 'margin-top': 22, height: 54, 'background-color': NONE, 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
+}
+
+/** C24, C32: the tab ORDERS: each order on its model's photograph, its steps, its rows, its reference, its documents. */
+async function myOrders(page: Page): Promise<void> {
+  await check(page, '.n-pieces__tabs', { 'margin-top': 26 });
+  expect(await shown(page, '.n-pieces__lead')).toBe(0);
+  expect(await shown(page, '.live-banner')).toBe(0);
+  await check(page, '.n-pieces__orders', { 'margin-top': 22 });
+  await check(page, '.n-pieces__order + .n-pieces__order', { 'padding-top': 76 });
+  await check(page, '.n-pieces__order .n-ph', { height: 390 });
+  await check(page, '.n-pieces__order-line', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
+  await check(page, '.n-pieces__order-title', { 'margin-top': 10, 'font-size': 16, 'letter-spacing': em(16, 0.14) });
+  const steps = await check(page, '.n-pieces__steps', { 'margin-top': 24, display: 'grid' });
+  expect((await read(page, '.n-pieces__steps', ['grid-template-columns']))['grid-template-columns']!.split(' ')).toHaveLength(4);
+  expect(steps._w).toBeDefined();
+  // The returned order: five columns, the bar to the end of its line (C32); the cancelled one: no bar.
+  const returned = '.n-pieces__order[data-status="RETURNED"] .n-pieces__steps';
+  expect((await read(page, returned, ['grid-template-columns']))['grid-template-columns']!.split(' ')).toHaveLength(5);
+  const bar = await read(page, `${returned} .n-steps__bar`, []);
+  expect(Number(bar._w)).toBeCloseTo(Number((await read(page, returned, []))._w) - 10, 0);
+  expect(await shown(page, '.n-pieces__order[data-status="CANCELLED"] .n-steps__bar')).toBe(0);
+  await check(page, '.n-steps__step.is-done .n-steps__dot', { width: 11, height: 11, 'background-color': IV });
+  await check(page, '.n-steps__label', { 'margin-top': 12, 'font-size': 8.5, 'letter-spacing': em(8.5, 0.2) });
+  await check(page, '.n-steps__date', { 'margin-top': 4, 'font-size': 12, color: ASH });
+  await check(page, '.n-pieces__order-sentence', { 'margin-top': 20, 'font-size': 15, color: ASH });
+  await check(page, '.n-pieces__order-rows', { 'margin-top': 16, 'border-top-width': 1, 'border-top-color': LINE });
+  await check(page, '.n-pieces__order-rows .n-kv__row', { 'padding-top': 13, 'padding-bottom': 13, 'font-size': 13.5, 'border-bottom-color': LINE });
+  await check(page, '.n-pieces__order-rows .n-kv__label', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.24), color: ASH, 'padding-top': 2 });
+  await check(page, '.n-pieces__order-track', { 'margin-top': 14 });
+  await check(page, '.n-pieces__order-track + .n-pieces__order-reference', { 'margin-top': 16, 'font-size': 9.5 });
+  await check(page, '.n-pieces__documents-title', { 'margin-top': 26, 'font-size': 11, 'letter-spacing': em(11, 0.26) });
+  await check(page, '.n-pieces__document-list', { 'margin-top': 10, 'border-top-width': 1 });
+  await check(page, '.n-pieces__document', { 'padding-top': 20, 'padding-bottom': 20, 'border-bottom-color': LINE });
+  await check(page, '.n-pieces__document .n-acc__title', { 'font-size': 11, color: IV });
+  await check(page, '.n-pieces__document .n-acc__line', { 'margin-top': 4, 'font-size': 13, color: ASH });
+  expect(isHelvetica((await read(page, '.n-pieces__document-number', ['font-family']))['font-family']!)).toBe(true);
+}
+
+/** C31: the tab RELEASES: each entry a row, its title a link underlined, its lines 8 px apart. */
+async function myReleases(page: Page): Promise<void> {
+  await check(page, '.n-pieces__entries', { 'margin-top': 22, 'padding-left': 24 });
+  await check(page, '.n-pieces__entry', { 'padding-top': 20, 'padding-bottom': 20, 'border-bottom-color': LINE });
+  await check(page, '.n-pieces__entry:first-child', { 'border-top-width': 1, 'border-top-color': LINE });
+  await check(page, '.n-pieces__entry-title', { 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV, 'text-decoration-line': 'underline', 'text-underline-offset': '3px' });
+  await check(page, '.n-pieces__entry-line.n-lb', { 'margin-top': 8, 'font-size': 9.5, color: ASH });
+  await check(page, '.n-pieces__entry-line.n-sm', { 'margin-top': 8, 'font-size': 13 });
+}
+
+/** C4: a piece: the crumb, THE MODEL, the lines, the state, WHERE IT COMES FROM, the GENOME, the tabs, OWNERSHIP. */
+async function aPiece(page: Page): Promise<void> {
+  await withChrome(page, 'piece', 'pieces');
+  await check(page, '.n-piece__crumb', { height: 48, 'padding-left': 18, 'font-size': 10, 'letter-spacing': em(10, 0.26), color: ASH, 'column-gap': 6 });
+  await check(page, '.n-piece__photo', { 'margin-top': 0 });
+  await check(page, '.n-piece__photo .n-ph', { height: 390 });
+  await check(page, '.n-piece__photo .n-cap2', { 'padding-top': 12, 'padding-left': 24 });
+  await check(page, '.n-piece__lines', { 'margin-top': 40, 'text-align': 'center' });
+  await check(page, '#piece-title', { 'font-size': 26, color: IV });
+  await check(page, '.n-piece__lines .n-lines__line', { 'font-size': 11, 'letter-spacing': em(11, 0.24), color: ASH });
+  await check(page, '.n-piece__state-line', { 'margin-top': 22 });
+  await check(page, '.n-piece__state', { 'font-size': 14, color: IV, 'column-gap': 10 });
+  await check(page, '.n-piece__origin', { 'margin-top': 34, 'padding-left': 24 });
+  await check(page, '.n-piece__origin h2', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
+  await check(page, '.n-piece__origin-rows', { 'margin-top': 10, 'border-top-width': 1, 'border-top-color': LINE });
+  await check(page, '.n-piece__origin .n-acc', { 'padding-top': 20, 'padding-bottom': 20 });
+  await check(page, '.n-piece__origin .n-acc__line--lb', { 'margin-top': 6, 'font-size': 9.5 });
+  await check(page, '.n-piece__origin .n-ic--sm', { color: ASH });
+  await check(page, '.n-piece__genome', { 'margin-top': 48 });
+  await check(page, '.n-piece__genome .n-gen__figure', { width: 200, height: 200 });
+  await check(page, '.n-piece__tabs', { 'margin-top': 48 });
+  await check(page, '.n-piece__tabs .n-tabs__panel', { 'padding-top': 22 });
+  await check(page, '.n-piece__rows .n-kv__row', { 'padding-top': 13, 'font-size': 13.5 });
+  await check(page, '.n-piece__heading--first', { 'margin-top': 34, 'font-size': 11 });
+  await check(page, '.n-piece__incident-title', { 'margin-top': 38 });
+  await check(page, '.n-piece__text--first', { 'margin-top': 10, 'font-size': 13, color: ASH });
+  await check(page, '.n-piece__action', { 'margin-top': 18 });
+  await check(page, '.n-piece__action .n-btn', { height: 54, 'background-color': NONE, 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
+}
+
+/** C35 (5): LOST · STOLEN, the pressed one ivory; the sentences; CONFIRM REPORT ivory beside CANCEL. */
+async function aReport(page: Page): Promise<void> {
+  await check(page, '.n-piece__choice', { 'margin-top': 18, display: 'grid', 'column-gap': 10 });
+  await check(page, '.n-piece__choice [aria-pressed="true"]', { 'background-color': IV, color: GROUND, height: 54 });
+  await check(page, '.n-piece__choice [aria-pressed="false"]', { 'background-color': NONE, color: IV });
+  await check(page, '.n-piece__choice + .n-piece__text', { 'margin-top': 12 });
+  await check(page, '.n-piece__duo', { 'margin-top': 14, display: 'grid', 'column-gap': 10 });
 }

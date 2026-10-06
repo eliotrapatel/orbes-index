@@ -7,7 +7,7 @@ import { computeGenome } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { genomeRowMarkup } from '../../src/web/verify/genome-view.js';
 import { CONTACT, DEFAULT_CARE, ORBES_CARE, PIECES } from '../../src/web/verify/copy.js';
-import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, serviceRows } from '../../src/web/verify/pieces-model.js';
+import { careOfferModel, PIECE_TAB_LABELS, PIECE_TABS, pieceModel, pieceOriginModel, releaseDay, serviceRows } from '../../src/web/verify/pieces-model.js';
 import type { OwnedPiece, ServiceRecord } from '../../src/web/verify/types.js';
 import { pieceContactModel, productLines, resultViewModel, warrantyModel } from '../../src/web/verify/view-model.js';
 
@@ -98,19 +98,20 @@ describe('MY PIECES: a piece on its plate', () => {
   it('says since when the piece is the owner\'s, how it came, whether the ownership is verified', () => {
     const m = pieceModel(piece());
     expect(m.status).toBe('REGISTERED TO YOU');
+    // ACQUIRED, OWNERSHIP, SINCE, as a piece's OWNERSHIP tab sets them (C4).
     expect(m.ownershipRows).toEqual([
-      ['SINCE', '1 OCT 2026'],
       ['ACQUIRED', 'FIRST REGISTRATION'],
       ['OWNERSHIP', 'VERIFIED'],
+      ['SINCE', '1 OCT 2026'],
     ]);
     expect(m.ownershipNotes).toEqual([]);
     const unverified = pieceModel(piece({ verified: false, acquiredVia: 'TRANSFER' }));
-    expect(unverified.ownershipRows.slice(1)).toEqual([
+    expect(unverified.ownershipRows.slice(0, 2)).toEqual([
       ['ACQUIRED', 'TRANSFER'],
       ['OWNERSHIP', 'NOT YET VERIFIED'],
     ]);
     expect(unverified.ownershipNotes).toEqual(['ORBES Client Services may ask for a proof of purchase to verify your ownership.']);
-    expect(pieceModel(piece({ acquiredVia: 'ADMIN' })).ownershipRows[1]).toEqual(['ACQUIRED', 'ORBES CLIENT SERVICES']);
+    expect(pieceModel(piece({ acquiredVia: 'ADMIN' })).ownershipRows[0]).toEqual(['ACQUIRED', 'ORBES CLIENT SERVICES']);
   });
 
   it('shows a transfer under way, and a service', () => {
@@ -312,5 +313,62 @@ describe('MY PIECES: copy (BRAND §4.5)', () => {
     for (const label of [PIECES.title, PIECES.link, PIECES.report, PIECES.found, PIECES.confirmReport, PIECES.confirmFound, PIECES.cancel, PIECES.scan, ...Object.values(PIECES.status), ...Object.values(PIECES.tabs)]) {
       expect(label).toMatch(/^[A-Z /]+$/);
     }
+  });
+});
+
+describe('MY PIECES (plan NOCTURNE, N5): a piece in the list and on its page (C3, C4)', () => {
+  it('names its model, says its type, material and size in the list, its lines with SIZE on its page (addition 1)', () => {
+    const m = pieceModel(piece({ type: 'Bracelet', variant: '17' }));
+    expect(m.name).toBe('MONOLITHE');
+    expect(m.listLine).toBe('BRACELET · 925 STERLING SILVER · SIZE 17');
+    expect(m.pieceLines).toEqual(['BRACELET', 'JEWELRY', '925 STERLING SILVER', 'SIZE 17', 'CREATED 2026']);
+    // A size written with its word is not named twice; none, no size.
+    expect(pieceModel(piece()).listLine).toBe('RING · 925 STERLING SILVER · SIZE 52');
+    expect(pieceModel(piece({ variant: null })).listLine).toBe('RING · 925 STERLING SILVER');
+  });
+
+  it('says its state in one line: REGISTERED TO YOU since its date, with the check; else its status alone', () => {
+    const m = pieceModel(piece());
+    expect(m.stateLine).toBe('REGISTERED TO YOU · SINCE 1 OCT 2026');
+    expect(m.registered).toBe(true);
+    const lost = pieceModel(piece({ incident: 'LOST', incidentResolvable: true }));
+    expect([lost.stateLine, lost.registered]).toEqual(['REPORTED LOST', false]);
+    expect(pieceModel(piece({ incident: 'STOLEN' })).stateLine).toBe('REPORTED STOLEN');
+    expect(pieceModel(piece({ transfer: { pending: true, expiresAt: '2026-10-08T08:13:21.929Z' } })).stateLine).toBe('TRANSFER PENDING');
+    expect(pieceModel(piece({ inService: true })).stateLine).toBe('IN SERVICE');
+    // Its model's sheet, when it is PUBLIC in THE COLLECTION.
+    expect(pieceModel(piece({ lookbook: 'monolithe' })).lookbook).toBe('monolithe');
+    expect(pieceModel(piece({ lookbook: null })).lookbook).toBeNull();
+  });
+
+  it('says where it comes from (addition 2): its release by the day it took place, its order and its step; nothing without an order', () => {
+    const now = new Date('2026-10-05T16:49:00.000Z');
+    const origin = {
+      release: { id: '6b2f9a52-0c1e-4d2a-9f3b-2c4d5e6f7a8b', mode: 'DRAW' as const, at: '2026-09-14T18:01:00.000Z' },
+      order: { reference: 'OR-7C21A9F0', channel: 'DRAW' as const, status: 'DELIVERED' as const, at: '2026-09-22T12:00:00.000Z' },
+    };
+    expect(pieceOriginModel(origin, now, 120)).toEqual({
+      release: { id: origin.release.id, title: 'THE DRAW OF 14 SEPTEMBER', href: `/verify/releases/${origin.release.id}` },
+      order: { reference: 'OR-7C21A9F0', title: 'ORDER OR-7C21A9F0', line: 'DELIVERED ON 22 SEP 2026' },
+    });
+    expect(pieceOriginModel({ ...origin, release: { ...origin.release, mode: 'LIVE', at: '2026-10-05T03:00:00.000Z' } }, now, 120)!.release!.title).toBe('THE LIVE RELEASE OF 5 OCTOBER');
+    // The private salon: the order alone.
+    expect(pieceOriginModel({ ...origin, release: null }, now, 120)!.release).toBeNull();
+    // A boutique sale: nothing; an order the app cannot read: nothing either.
+    expect(pieceOriginModel(null, now)).toBeNull();
+    expect(pieceOriginModel(undefined, now)).toBeNull();
+    expect(pieceOriginModel({ ...origin, order: { ...origin.order, reference: '"><b>' } }, now)).toBeNull();
+    expect(pieceOriginModel({ ...origin, order: { ...origin.order, status: 'LOST' as never } }, now)).toBeNull();
+    // On the piece: read with it, this phone's clock.
+    expect(pieceModel(piece({ origin }), { now, offsetMinutes: 120 }).origin).toEqual(pieceOriginModel(origin, now, 120));
+    expect(pieceModel(piece()).origin).toBeNull();
+  });
+
+  it('names the day of a release on this phone\'s calendar, its year only when it is not this one', () => {
+    const now = new Date('2026-10-05T16:49:00.000Z');
+    expect(releaseDay('2026-09-14T18:01:00.000Z', now, 120)).toBe('14 SEPTEMBER');
+    expect(releaseDay('2026-09-14T23:30:00.000Z', now, 120)).toBe('15 SEPTEMBER');
+    expect(releaseDay('2025-12-31T10:00:00.000Z', now, 0)).toBe('31 DECEMBER 2025');
+    expect(releaseDay('not a date', now)).toBe('');
   });
 });

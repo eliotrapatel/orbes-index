@@ -99,16 +99,16 @@ function ceremonyBlock(c: CeremonyModel, glyphs: Parameters<typeof prepareShareI
 
 /**
  * THE MODEL's photograph (decision 9), full width and whole, without the fade (as drawn), its caption, then the app's
- * sentence for it. A photograph that cannot be loaded (removed meanwhile) takes its section with it: never a broken
+ * sentence for it (a result, C9; a piece's page, C4). A photograph that cannot be loaded (removed meanwhile) takes its section with it: never a broken
  * image.
  */
-function modelPhoto(photos: readonly PhotoModel[]): HTMLElement | null {
+export function modelPhoto(photos: readonly PhotoModel[], opts: { extraClass?: string } = {}): HTMLElement | null {
   const photo = photos[0];
   if (!photo) return null;
   const frame = fadedPhoto(photo.src, photo.alt, { fade: false, eager: true, extraClass: 'n-result__photo' });
   const section = h(
     'section',
-    { class: 'n-result__model', attrs: { 'aria-label': 'Photograph of the model' } },
+    { class: ['n-result__model', opts.extraClass], attrs: { 'aria-label': 'Photograph of the model' } },
     frame,
     h('div', { class: 'n-cap2' }, h('span', { class: 'n-g n-lb n-result__caption', text: photo.caption })),
     h('p', { class: 'n-px n-sm n-result__photo-note', text: PHOTOS.note(1) }),
