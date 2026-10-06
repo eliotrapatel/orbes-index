@@ -275,10 +275,11 @@ const CONSTANTS: Record<string, ConstantSpec> = {
     holds: () => {
       // R56: the sentence under CREATE ACCOUNT, and its two links (the terms, the privacy policy), nothing recorded.
       expect(LEGAL_COPY.accept).toBe('Creating an ORBES account means accepting the ORBES terms of use.');
-      const note = /export function termsNote\(\)[\s\S]*?\n\}/.exec(readDoc('genome/src/web/verify/views/common.ts'))?.[0] ?? '';
-      expect(note).toContain('text: LEGAL.accept');
-      expect(note).toContain("href: legalPath('terms')");
-      expect(note).toContain("href: legalPath('privacy')");
+      // In both its looks (NOCTURNE's, and the vault's on a LIVE RELEASE's page).
+      const note = /export function termsNote\([^)]*\)[\s\S]*?\n\}/.exec(readDoc('genome/src/web/verify/views/common.ts'))?.[0] ?? '';
+      expect(note.split('text: LEGAL.accept').length - 1).toBe(2);
+      expect(note.split("href: legalPath('terms')").length - 1).toBe(2);
+      expect(note.split("href: legalPath('privacy')").length - 1).toBe(2);
       // The request that creates an account carries no acceptance, no version of the terms.
       expect(Object.keys(registerAccountBody.shape).filter((k) => /accept|terms|consent|version/i.test(k))).toEqual([]);
     },

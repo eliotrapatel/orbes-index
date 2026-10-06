@@ -121,9 +121,9 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
   );
 
   it(
-    'sets the scan and its results as C9, C11, C12, C14, C16 and C17 draw them: the camera, the lock, a problem, a result, its GENOME, THE MODEL, its lines, its tabs, the OWNERSHIP panel, its account line with a long email, the report row, the foot (N4)',
+    'sets the scan and its results as C9, C11, C12, C14, C16 and C17 draw them: the camera, the lock, a problem (no header, rail nor SCAN ring on those, as on VERIFYING… after a photo), a result (with them, NOW underlined), its GENOME, THE MODEL, its lines, its tabs, the OWNERSHIP panel, its account line with a long email, the report row, the foot (N4)',
     async () => {
-      const states = ['scan-camera', 'scan-verifying', 'problem-camera-denied', 'result-first-registration', 'result-ownership-verified', 'result-receiving', 'result-invalid'];
+      const states = ['scan-camera', 'scan-verifying', 'photo-verifying', 'problem-camera-denied', 'result-first-registration', 'result-ownership-verified', 'result-receiving', 'result-invalid'];
       const seen = new Set<string>();
       await eachState(
         states.map(stateById),
@@ -134,6 +134,7 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
             seen.add(state.id);
             if (state.id === 'scan-camera') await camera(page);
             if (state.id === 'scan-verifying') await locked(page);
+            if (state.id === 'photo-verifying') await withoutChrome(page, state.id);
             if (state.id === 'problem-camera-denied') await problem(page);
             if (state.id === 'result-first-registration') await firstRegistration(page);
             if (state.id === 'result-ownership-verified') await yours(page);
@@ -151,8 +152,29 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE: every piece on the real screens takes 
   );
 });
 
+/** How many of the elements `selector` matches the phone shows. */
+async function shown(page: Page, selector: string): Promise<number> {
+  return page.locator(selector).evaluateAll((els) => els.filter((el) => (el as HTMLElement).checkVisibility()).length);
+}
+
+/** The camera, the search, VERIFYING… and the problems: no header of the app, no rail, no SCAN ring (C11, C12, C17). */
+async function withoutChrome(page: Page, where: string): Promise<void> {
+  expect(await shown(page, '.n-rail'), `${where}: the rail`).toBe(0);
+  expect(await shown(page, '.n-scan'), `${where}: the SCAN ring`).toBe(0);
+  expect(await shown(page, '.n-hd:not(.n-cam__hd)'), `${where}: the header`).toBe(0);
+}
+
+/** A result (C9, C16): the header, the rail with NOW underlined (a result is read from NOW), the SCAN ring. */
+async function withChrome(page: Page, where: string): Promise<void> {
+  expect(await shown(page, '.n-hd:not(.n-cam__hd)'), `${where}: the header`).toBe(1);
+  expect(await shown(page, '.n-rail'), `${where}: the rail`).toBe(1);
+  expect(await shown(page, '.n-scan .n-scan__ring'), `${where}: the SCAN ring`).toBe(1);
+  expect(await page.locator('.n-rail__link[aria-current="page"]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.chapter)), where).toEqual(['now']);
+}
+
 /** C11: the camera on its ground, the orbit (272 px, its centre at 392 px), its moons, the status, LIGHT and the zoom. */
 async function camera(page: Page): Promise<void> {
+  await withoutChrome(page, 'the camera');
   await check(page, '.view--scan', { 'background-color': 'rgb(5, 5, 5)' });
   const orbit = await check(page, '.n-cam__orbit', { _w: 272, _h: 272 });
   expect(Number(orbit._top) + 136).toBeCloseTo(392, 0);
@@ -182,6 +204,7 @@ async function camera(page: Page): Promise<void> {
 
 /** C12: locked, then VERIFYING…: the veil darker, the ring and the moons heavier, one status line, the controls fainter. */
 async function locked(page: Page): Promise<void> {
+  await withoutChrome(page, 'VERIFYING…');
   await check(page, '.n-cam__aperture', { 'box-shadow': `rgba(5, 5, 5, 0.78) 0px 0px 0px ${Math.max(844, 390) * 2}px` });
   await check(page, '.n-cam__ring', { 'box-shadow': 'rgba(246, 242, 234, 0.95) 0px 0px 0px 2px' });
   await check(page, '.n-cam__moon--polaris', { _w: 24, _h: 24, 'box-shadow': `${IV} 0px 0px 0px 2px inset` });
@@ -195,6 +218,7 @@ async function locked(page: Page): Promise<void> {
 
 /** C17: ORBES centred, the empty ring, the title, its sentence, the ivory button, the text link. */
 async function problem(page: Page): Promise<void> {
+  await withoutChrome(page, 'a problem');
   await check(page, '.n-message__body', { 'padding-top': 60, 'text-align': 'center' });
   await check(page, '.n-message .n-tone', { _w: 44, _h: 44 });
   await check(page, '.n-message .n-tone__ring', { 'stroke-width': '1.5px', stroke: IV });
@@ -207,6 +231,7 @@ async function problem(page: Page): Promise<void> {
 
 /** C9: the result's head, its GENOME, THE MODEL, its lines, its tabs, the OWNERSHIP panel signed out, the foot. */
 async function firstRegistration(page: Page): Promise<void> {
+  await withChrome(page, 'AUTHENTIC');
   await check(page, '.n-result__head', { 'padding-top': 44, 'text-align': 'center' });
   await check(page, '.n-result .n-tone', { _w: 44, _h: 44 });
   await check(page, '.n-result .n-tone__core', { fill: IV });
@@ -322,6 +347,7 @@ async function accountLineWraps(page: Page): Promise<void> {
 
 /** C16: INVALID SIGNATURE: the void mark, the help line 36 px under the message, the contact, the report's row. */
 async function invalid(page: Page): Promise<void> {
+  await withChrome(page, 'INVALID SIGNATURE');
   await check(page, '.n-result .n-tone__ring', { 'stroke-width': '1.5px', stroke: IV });
   expect(await page.locator('.n-result .n-tone__core').count()).toBe(0);
   await check(page, '.n-result__help', { 'margin-top': 36, 'padding-left': 24 });

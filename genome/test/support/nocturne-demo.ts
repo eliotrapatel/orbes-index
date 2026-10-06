@@ -977,9 +977,10 @@ async function seedDraws(w: World): Promise<void> {
 // ── The extreme content (fidelity rule 5) and the empty states ─────────────
 
 /**
- * The stress case: a 24-character model name without a photograph, a 14-character free-text field, an account of 6 pieces
- * and 4 orders (a price in USD, a long amount, a long tracking number), 8 posts, a LIVE RELEASE under an hour away with its
- * room open and a long host message, another more than 9 days away.
+ * The stress case: a 24-character model name without a photograph, a 14-character free-text field, two pieces to scan
+ * of it with a Size of 14 characters, an account of 6 pieces and 4 orders (a price in USD, a long amount, a long tracking
+ * number), 8 posts, a LIVE RELEASE under an hour away with its room open and a long host message, another more than 9
+ * days away.
  */
 async function seedStress(w: World): Promise<void> {
   const { ctx, admin, clock } = w;
@@ -1002,6 +1003,10 @@ async function seedStress(w: World): Promise<void> {
     const p = await issue(w, `piece${i + 1}`, model, { serial: 300 + i, sold: '2026-09-02', ...(i === 0 ? { variant: 'BRUSHED COBALT', material: '925 STERLING SILVER, BRUSHED AND POLISHED' } : {}) });
     await register(w, you, p);
   }
+  // Two pieces to scan of the 24-character model in its 14-character variant, each with a Size of 14 characters (fidelity
+  // rule 5 on a result, C9, and on the ceremony of a first registration, C36): unregistered, the second one registered
+  // by a capture.
+  for (const role of ['stressFirst', 'stressCeremony']) await issue(w, role, 'cobalt', { variant: '17 · WIDE BAND', material: '925 STERLING SILVER, BRUSHED COBALT', sold: '2026-09-02' });
   // Four orders from the salon, each with its terms: a price in USD, a long amount, a long tracking number.
   await ctx.services.catalog.updateModel(long.id, { lookbook: 'RESERVED', priceLabel: '€ 125 400', privateMinTier: 1 }, admin);
   await ctx.services.catalog.updateModel(cobalt.id, { lookbook: 'RESERVED', priceLabel: '€ 125 400', privateMinTier: 1 }, admin);

@@ -34,6 +34,9 @@
  * a label (ivory when it says what the piece is), its sentences in ash, the times of the scan's windows as labels,
  * SIGN IN · CREATE ACCOUNT underlined, the fields underlined on the dark, the form's ivory button, the hairline ones for
  * a second action (CREATE TRANSFER CODE, CANCEL TRANSFER, VERIFY AGAIN, SCAN AGAIN), the text links centred.
+ * On a LIVE RELEASE's page (`look: 'vault'`: I'LL BE THERE, SIGN IN TO ENTER) the panel keeps the vault's look as lot E
+ * built it (fidelity rule 6, until N7 draws those pages): its sign-in, account creation and password recovery, the
+ * only part of the panel a release's page shows (the account mode), in the markup and classes they had before N4.
  *
  * Every action is a same-origin JSON call through ApiClient (session cookie
  * + CSRF token). Server messages are shown as they come: they are written for
@@ -47,8 +50,8 @@ import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
 import { formatDate, formatDateTime, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
 import { ACCOUNT_PASSWORD, CLAIM_HELD, CONTACT, NOT_DELIVERED_NOTE, PIECES, RECEIVING, STAFF_SCAN_NOTE } from '../copy.js';
-import { PIECES_PATH, termsNote, withNumerals } from './common.js';
-import { FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
+import { contactBlock, PIECES_PATH, piecesLink, sectionLabel, termsNote, withNumerals } from './common.js';
+import { accountForm, field as vaultField, FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
 import { appAnchor, button, contactLines, field, textLink } from './nocturne.js';
 
 export { MIN_PASSWORD } from './forms.js';
@@ -68,6 +71,11 @@ export interface OwnershipDeps {
   /** MY PIECES, from the account line (F-01); without it the link loads the page. */
   onPieces?(): void;
   now?: () => number;
+  /**
+   * `vault`: the look of a LIVE RELEASE's pages (I'LL BE THERE, SIGN IN TO ENTER), kept as lot E built it (fidelity
+   * rule 6) for the sign-in those pages show (the account mode). NOCTURNE's pieces otherwise.
+   */
+  look?: 'nocturne' | 'vault';
 }
 
 /** The id of RECEIVING THIS PIECE, the heading of a piece registered to someone else (J-02 links to it). */
@@ -111,6 +119,8 @@ export class OwnershipPanel {
    * same result is asked to verify the piece again, which earns it a window of its own.
    */
   private windowAccount: string | null = null;
+  /** The vault's look (deps.look): the panel's sign-in as lot E built it. */
+  private readonly vault: boolean;
 
   constructor(
     mode: OwnershipMode,
@@ -119,7 +129,8 @@ export class OwnershipPanel {
     this.now = deps.now ?? (() => Date.now());
     this.state = { mode, authTab: 'signin', recover: null, signInEmail: '', offer: null, confirmation: null, error: null, notice: null, busy: false };
     // No live region on the whole panel (a re-render would read it all out); status and alert lines carry their own roles.
-    this.root = h('div', { class: 'n-own' });
+    this.vault = deps.look === 'vault';
+    this.root = h('div', { class: this.vault ? 'ownership' : 'n-own' });
     this.unsubscribe = deps.session.subscribe(() => this.render());
     this.render();
     if (deps.session.state.status === 'unknown') {
@@ -157,7 +168,7 @@ export class OwnershipPanel {
     if (s.status === 'signed-in') this.state.recover = null;
     const hadFocus = typeof document !== 'undefined' && this.root.contains(document.activeElement);
     // A heading focused on purpose (RECEIVING THIS PIECE, FORGOTTEN PASSWORD) keeps the focus if the re-render shows it again.
-    const focusedHeading = hadFocus && document.activeElement instanceof HTMLElement && document.activeElement.classList.contains('n-own__heading') ? document.activeElement.id : '';
+    const focusedHeading = hadFocus && document.activeElement instanceof HTMLElement && document.activeElement.classList.contains(this.vault ? 'section-label' : 'n-own__heading') ? document.activeElement.id : '';
     const children: (HTMLElement | null)[] = [];
     if (this.state.confirmation) children.push(...this.confirmationBlock());
     else {
@@ -184,7 +195,7 @@ export class OwnershipPanel {
           children.push(this.status('NOT YET DELIVERED'), this.small(NOT_DELIVERED_NOTE));
       }
     }
-    if (this.state.notice) children.push(h('p', { class: 'n-err n-own__notice', attrs: { role: 'status' }, text: this.state.notice }));
+    if (this.state.notice) children.push(h('p', { class: this.vault ? 'form__notice' : 'n-err n-own__notice', attrs: { role: 'status' }, text: this.state.notice }));
     if (s.status === 'signed-in' && this.state.mode.kind !== 'account') children.push(this.accountLine(s.account.email));
     this.root.replaceChildren(...children.filter((c): c is HTMLElement => c !== null));
     // A re-render replaces the focused control; keep keyboard and screen-reader users in the panel.
@@ -196,6 +207,7 @@ export class OwnershipPanel {
 
   /** The panel's state line (C9, C13, C14): a label in Gravesend capitals, in ivory where it says what the piece is. */
   private status(text: string, ivory = false): HTMLElement {
+    if (this.vault) return h('p', { class: 'ownership__status', text });
     return h('p', { class: ['n-g', 'n-lb', ivory ? 'n-ivc' : null, 'n-own__status'], text });
   }
 
@@ -205,6 +217,7 @@ export class OwnershipPanel {
   }
 
   private text(text: string): HTMLElement {
+    if (this.vault) return h('p', { class: 'prose ownership__text', text });
     return h('p', { class: 'n-tx n-own__text', text });
   }
 
@@ -220,6 +233,7 @@ export class OwnershipPanel {
 
   /** A heading of the panel (TRANSFER OF OWNERSHIP, RECEIVING THIS PIECE, FORGOTTEN PASSWORD): an ivory title. */
   private heading(text: string, id?: string): HTMLHeadingElement {
+    if (this.vault) return sectionLabel(text, id);
     return h('h3', { class: 'n-g n-t3 n-ivc n-own__heading', id, text });
   }
 
@@ -234,7 +248,7 @@ export class OwnershipPanel {
   }
 
   private errorLine(): HTMLElement | null {
-    return this.state.error ? h('p', { class: 'n-err n-own__error', attrs: { role: 'alert' }, text: this.state.error }) : null;
+    return this.state.error ? h('p', { class: this.vault ? 'form__error' : 'n-err n-own__error', attrs: { role: 'alert' }, text: this.state.error }) : null;
   }
 
   private registerBlock(m: Extract<OwnershipMode, { kind: 'register' }>, s: SessionState): (HTMLElement | null)[] {
@@ -383,6 +397,14 @@ export class OwnershipPanel {
    * links underlined in ivory; the line wraps between its words when it is short.
    */
   private accountLine(email: string): HTMLElement {
+    if (this.vault) {
+      return h(
+        'div',
+        { class: 'ownership__account' },
+        h('p', { class: 'ownership__who micro soft' }, 'SIGNED IN AS ', h('span', { class: 'ownership__email', text: email })),
+        h('div', { class: 'ownership__links' }, piecesLink(this.deps.onPieces), this.vaultTextButton('SIGN OUT', () => this.signOut())),
+      );
+    }
     return h(
       'p',
       { class: 'n-g n-lb n-own__account' },
@@ -398,6 +420,11 @@ export class OwnershipPanel {
     );
   }
 
+  /** The vault's text button (`.textlink`), in its row of actions. */
+  private vaultTextButton(label: string, onClick: () => void): HTMLButtonElement {
+    return h('button', { class: 'textlink', attrs: { type: 'button', disabled: this.state.busy }, on: { click: onClick }, text: label });
+  }
+
   /** A text link of the panel (`.tl`), centred on its own line: FORGOTTEN PASSWORD?, BACK TO SIGN IN. */
   private textButton(label: string, onClick: () => void, extraClass?: string): HTMLElement {
     const link = textLink(label, { onOpen: onClick, extraClass: 'n-own__tl' }) as HTMLButtonElement;
@@ -410,9 +437,10 @@ export class OwnershipPanel {
   private authBlock(lead: string): HTMLElement[] {
     if (this.deps.session.state.status === 'unknown' && !this.sessionUnavailable) {
       // Still asking the server who is signed in: no flash of sign-in forms for an owner.
-      return [h('p', { class: 'n-g n-lb n-own__waiting', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
+      return [h('p', { class: this.vault ? 'ownership__meta micro soft' : 'n-g n-lb n-own__waiting', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
     }
     if (this.state.recover) return this.recoverBlock(this.state.recover);
+    if (this.vault) return this.vaultAuthBlock(lead);
     const tab = this.state.authTab;
     // C9: SIGN IN · CREATE ACCOUNT, underlined (`.switch2`), the chosen one pressed.
     const option = (t: AuthTab, label: string) =>
@@ -423,6 +451,25 @@ export class OwnershipPanel {
     if (tab === 'create') return [leadLine, switcher, this.createForm(), termsNote()];
     // Under the sign-in form: a forgotten password goes through ORBES Client Services (C-04).
     return [leadLine, switcher, this.signInForm(), this.textButton(ACCOUNT_PASSWORD.forgotten, () => this.setRecover('contact'), 'n-own__forgotten')];
+  }
+
+  /** The vault's sign-in (lot E's): the lead, SIGN IN · CREATE ACCOUNT, the form, then FORGOTTEN PASSWORD? or the terms. */
+  private vaultAuthBlock(lead: string): HTMLElement[] {
+    const tab = this.state.authTab;
+    const switcher = h(
+      'div',
+      { class: 'auth__switch', attrs: { role: 'group', 'aria-label': 'Account' } },
+      h('button', { class: 'auth__option', attrs: { type: 'button', 'aria-pressed': tab === 'signin' ? 'true' : 'false' }, on: { click: () => this.setAuthTab('signin') }, text: 'SIGN IN' }),
+      h('span', { class: 'tabs__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }),
+      h('button', { class: 'auth__option', attrs: { type: 'button', 'aria-pressed': tab === 'create' ? 'true' : 'false' }, on: { click: () => this.setAuthTab('create') }, text: 'CREATE ACCOUNT' }),
+    );
+    if (tab === 'create') return [this.text(lead), switcher, this.createForm(), termsNote('vault')];
+    return [
+      this.text(lead),
+      switcher,
+      this.signInForm(),
+      h('div', { class: 'ownership__actions' }, this.vaultTextButton(ACCOUNT_PASSWORD.forgotten, () => this.setRecover('contact'))),
+    ];
   }
 
   private setAuthTab(t: AuthTab): void {
@@ -448,6 +495,7 @@ export class OwnershipPanel {
    * contact is the one of the result (C-02); without one, the sentence still names who helps.
    */
   private recoverBlock(step: RecoverStep): HTMLElement[] {
+    if (this.vault) return this.vaultRecoverBlock(step);
     const back = this.textButton(ACCOUNT_PASSWORD.backToSignIn, () => this.setRecover(null), 'n-own__back');
     const title = this.heading(step === 'contact' ? ACCOUNT_PASSWORD.forgottenTitle : ACCOUNT_PASSWORD.recoverTitle, 'recover-title');
     title.tabIndex = -1;
@@ -464,12 +512,28 @@ export class OwnershipPanel {
     return [title, this.text(ACCOUNT_PASSWORD.recoverLead), this.recoverForm(), back];
   }
 
+  /** FORGOTTEN PASSWORD in the vault's look (lot E's): its title, its sentence, the contact, then its text buttons. */
+  private vaultRecoverBlock(step: RecoverStep): HTMLElement[] {
+    const back = this.vaultTextButton(ACCOUNT_PASSWORD.backToSignIn, () => this.setRecover(null));
+    const title = sectionLabel(step === 'contact' ? ACCOUNT_PASSWORD.forgottenTitle : ACCOUNT_PASSWORD.recoverTitle, 'recover-title');
+    title.tabIndex = -1;
+    if (step === 'contact') {
+      return [
+        title,
+        this.text(ACCOUNT_PASSWORD.forgottenLead),
+        this.deps.contact ? contactBlock(this.deps.contact) : null,
+        h('div', { class: 'ownership__actions ownership__actions--stack' }, this.vaultTextButton(ACCOUNT_PASSWORD.haveCode, () => this.setRecover('code')), back),
+      ].filter((x): x is HTMLElement => x !== null);
+    }
+    return [title, this.text(ACCOUNT_PASSWORD.recoverLead), this.recoverForm(), h('div', { class: 'ownership__actions' }, back)];
+  }
+
   private field(id: string, label: string, input: HTMLInputElement, hint?: string): HTMLElement {
-    return field(id, label, input, hint);
+    return this.vault ? vaultField(id, label, input, hint) : field(id, label, input, hint);
   }
 
   private form(name: string, fields: HTMLElement[], submitLabel: string, onSubmit: () => Promise<void>): HTMLFormElement {
-    return nocturneForm(this.deps.session, name, fields, submitLabel, onSubmit);
+    return this.vault ? accountForm(this.deps.session, name, fields, submitLabel, onSubmit) : nocturneForm(this.deps.session, name, fields, submitLabel, onSubmit);
   }
 
   private signInForm(): HTMLFormElement {
@@ -552,7 +616,7 @@ export class OwnershipPanel {
 
   private codeInput(name: string): HTMLInputElement {
     const input = h('input', {
-      class: 'n-num n-own__code-input',
+      class: this.vault ? 'field__input--code' : 'n-num n-own__code-input',
       attrs: { type: 'text', name, autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', inputmode: 'text', maxlength: 14, placeholder: 'XXXX-XXXX-XXXX' },
     });
     input.addEventListener('input', () => {

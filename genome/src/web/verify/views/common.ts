@@ -187,8 +187,24 @@ export function legalLinks(opts: { newTab?: boolean; extraClass?: string } = {})
  * Under CREATE ACCOUNT (C39): creating an account means accepting the terms of use (their article 1), then TERMS OF
  * USE · PRIVACY POLICY, both in a new tab (the form and the scan's window stay): the privacy policy says what the
  * account records, where the account data is collected. One sentence in ash, its links underlined in ivory.
+ * `vault`: the look of a LIVE RELEASE's pages, as lot E built it (fidelity rule 6): the sentence, then the two links on
+ * their own line, centred, held to the floors of §3.8 as legalLinks.
  */
-export function termsNote(): HTMLElement {
+export function termsNote(look: 'nocturne' | 'vault' = 'nocturne'): HTMLElement {
+  if (look === 'vault') {
+    return h(
+      'div',
+      { class: 'terms-note' },
+      h('p', { class: 'terms-note__text', text: LEGAL.accept }),
+      h(
+        'div',
+        { class: 'terms-note__links' },
+        h('a', { class: 'textlink terms-note__link', attrs: { href: legalPath('terms'), ...NEW_TAB }, text: LEGAL.terms }),
+        h('span', { class: 'terms-note__dot', attrs: { 'aria-hidden': 'true' }, text: '·' }),
+        h('a', { class: 'textlink terms-note__link', attrs: { href: legalPath('privacy'), ...NEW_TAB }, text: LEGAL.privacy }),
+      ),
+    );
+  }
   return h(
     'p',
     { class: 'n-sm n-own__terms' },

@@ -372,6 +372,14 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'result-invalid', title: 'INVALID SIGNATURE', refs: ['C16'], variant: 'full', ...result('forged') },
   { id: 'result-unknown', title: 'UNKNOWN ORBES CODE: a code ORBES signed for no piece', refs: ['C16'], variant: 'full', ...result('unknown') },
   { id: 'result-revoked', title: 'REVOKED', refs: ['C16'], variant: 'full', ...result('revoked') },
+  {
+    id: 'result-stress',
+    title: 'AUTHENTIC — FIRST REGISTRATION of the 24-character model in its 14-character variant, a Size of 14 characters: OWNERSHIP',
+    refs: ['same pieces'],
+    variant: 'stress',
+    stress: true,
+    ...result('stressFirst', (run) => tab(run, 'OWNERSHIP').click()),
+  },
 
   // ── The problems of the scan ──
   cameraProblem('problem-camera-denied', 'CAMERA ACCESS DECLINED', 'NotAllowedError'),
@@ -791,6 +799,21 @@ export const UI_STATES: readonly UiState[] = [
     mutates: true,
     ...result('ceremony', async (run) => {
       await registerPiece(run, 'ceremony');
+      await button(run, 'VIEW AS OWNER').click();
+      await run.page.getByText('SHARE THE GENOME').first().waitFor({ timeout: 20_000 });
+      await sleep(2_500);
+    }),
+  },
+  {
+    id: 'result-ceremony-stress',
+    title: 'The ceremony of a first registration: the 24-character model in its 14-character variant, a Size of 14 characters',
+    refs: ['same pieces'],
+    variant: 'stress',
+    as: you,
+    stress: true,
+    mutates: true,
+    ...result('stressCeremony', async (run) => {
+      await registerPiece(run, 'stressCeremony');
       await button(run, 'VIEW AS OWNER').click();
       await run.page.getByText('SHARE THE GENOME').first().waitFor({ timeout: 20_000 });
       await sleep(2_500);

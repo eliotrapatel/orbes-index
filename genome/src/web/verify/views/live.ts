@@ -907,7 +907,7 @@ class LivePage {
           const open = h('button', { class: 'textlink live__there-open', attrs: { type: 'button' }, text: LIVE.there.action });
           const panel = h('div', { class: 'live__panel live__there-panel' });
           const show = (): void => {
-            this.thereSignIn ??= new OwnershipPanel({ kind: 'account', lead: LIVE.there.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
+            this.thereSignIn ??= new OwnershipPanel({ kind: 'account', lead: LIVE.there.signIn }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan(), look: 'vault' });
             panel.replaceChildren(this.thereSignIn.root);
             open.hidden = true;
           };
@@ -1023,7 +1023,7 @@ class LivePage {
   private signInScreen(): Screen {
     const s = this.live();
     const rule = s ? s.access.text : '';
-    this.signIn ??= new OwnershipPanel({ kind: 'account', lead: LIVE.edge.signIn.text(rule) }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan() });
+    this.signIn ??= new OwnershipPanel({ kind: 'account', lead: LIVE.edge.signIn.text(rule) }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.deps.onScan(), look: 'vault' });
     const el = h('section', { class: 'live__edge live__signin' }, this.overline(this.name()), this.title(LIVE.edge.signIn.title), h('div', { class: 'live__panel' }, this.signIn.root));
     return { kind: 'signin', el, update: () => undefined };
   }

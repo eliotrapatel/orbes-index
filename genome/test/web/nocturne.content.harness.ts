@@ -237,7 +237,8 @@ const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroo
 
 /**
  * The shards of the content test, each a test file: the `full` demo by screen group (its states that write in one
- * shard of their own, in their order), the room's variants, the draws in every state, and the other variants. Each holds about twenty states.
+ * shard of their own, in their order), the room's variants, the draws in every state, the extreme content (the stress
+ * demo; its account sheet runs with the others) and the other variants. Each holds about twenty states.
  */
 export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.freeze({
   scan: (s) => full(s) && !s.mutates && named('now', 'scan', 'photo', 'problem')(s),
@@ -250,7 +251,8 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   writes: (s) => full(s) && !!s.mutates,
   room: (s) => ROOM_VARIANTS.includes(s.variant),
   draws: (s) => s.variant === 'draws',
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && !named('account')(s),
+  stress: (s) => s.variant === 'stress' && !named('account')(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'stress' && !named('account')(s),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */

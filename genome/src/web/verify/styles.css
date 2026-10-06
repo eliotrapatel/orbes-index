@@ -598,6 +598,45 @@ h1[tabindex="-1"]:focus,
   white-space: nowrap;
 }
 
+/* Under CREATE ACCOUNT on a LIVE RELEASE's page, in the vault's look (J-06;
+   fidelity rule 6): the sentence, then TERMS OF USE · PRIVACY POLICY,
+   centred; a row that wraps keeps 12 px between its lines, so the 44 px
+   zones stay apart, as .legal-links__pages. */
+.terms-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  margin-top: 22px;
+  text-align: center;
+}
+
+.terms-note__text {
+  max-width: 34ch;
+  font-size: var(--fs-micro);
+  line-height: 1.75;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+  text-wrap: balance;
+}
+
+.terms-note__links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 12px 6px;
+}
+
+.terms-note__link {
+  white-space: nowrap;
+}
+
+.terms-note__dot {
+  color: var(--ink-soft);
+  font-size: var(--fs-caption);
+}
+
 
 
 
@@ -4020,6 +4059,7 @@ body[data-screen="board"] .corners {
 .tabs__tab,
 .tabs__dot,
 .legal-links__dot,
+.terms-note__dot,
 .rows__label,
 .section-label,
 .ownership__status,
@@ -7062,15 +7102,6 @@ body.nocturne .circle-post__missing {
 .n-tabsx__tab[aria-controls$="panel-care"][aria-selected="true"]::after {
   right: 4px;
   left: 4px;
-}
-
-/* The OWNERSHIP panel's sign-in on a LIVE RELEASE's page (I'LL BE THERE, an edge page): the vault keeps its one primary
-   action filled, the release's own (fidelity rule 6, until its pages are drawn in NOCTURNE, N7): the form's button is
-   the hairline one there. */
-.vault .n-own .n-btn:not(.n-btn--ol) {
-  background: none;
-  color: var(--vault-ink);
-  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
 }
 
 /* The + / − of a row that opens: a 16 px icon at the row's right, never squeezed by its text (C16's `.acc` svg). */

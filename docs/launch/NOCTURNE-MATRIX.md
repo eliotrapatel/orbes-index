@@ -65,14 +65,20 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
     draws nothing, so the board shows the empty ring; the build draws the plan's ring and moon as a crescent.
   - C15: SEND ANSWER is `aria-disabled` until an answer is pressed (said to a screen reader, never silent), with the
     look C15 draws for that very state.
+  - C36 (3): the ceremony's GENOME is centred, as on every result. The board's 220 px image falls to the left of the
+    column, a block inside `.ctr` (a board artefact).
 - **Omissions of the drawings** (since N4: the app has these and keeps them, built with the same pieces; the final board
   review expects them):
   - C13: RECEIVING's lead, *If its owner has given you a transfer code, enter it…*, above the sign-in.
   - C14: *This piece is registered to your ORBES account.* under REGISTERED TO YOU.
   - C15: the certificate card's sentence, *If this piece was delivered to you with its ORBES certificate card…*.
+  - C17 (3) CONNECTION INTERRUPTED: its sentence, *The ORBES verification service could not be reached…*.
   - C17 (40 s): *Hold the camera 10 to 20 cm from the code…*.
   - C36 (1): *Register this piece in your name…*, and the account line after VIEW AS OWNER.
   - C36 (3): the GENOME's label, id and fingerprint above the ceremony's name.
+  - C36 (5): the NOT YET DELIVERED label above its sentence.
+  - C37 (4): *If this piece is registered to you, verify it again to see it as its owner.* under the sentence that no
+    transfer is pending.
 
 ## Boards without a screen of their own today
 
@@ -202,6 +208,8 @@ WARRANTY · CARE · OWNERSHIP and the assurance note.
 | `result-revoked` | REVOKED (void), its sentence, the GENOME, the contact, the question | a revoked code | C16 (3) |
 | *(not reached)* UNREADABLE CODE | caution, *This code could not be read …* | a malformed payload (the decoder refuses it before the server) | C16 (4) |
 | *(not reached)* claim held | *Too many claim codes have been tried …* | a 429 on a claim code | C36 |
+| `result-stress` | AUTHENTIC, FIRST REGISTRATION of a piece of the 24-character model's 14-character variant (Brushed cobalt): MONOLITHE ARCHITECTURALE, its material, SIZE 17 · WIDE BAND (a Size of 14 characters); OWNERSHIP and the sign-in | the stress demo (since N4) | same pieces |
+| `result-ceremony-stress` | the ceremony of that model and Size, signed in | the stress demo (since N4) | same pieces |
 
 ## The problems of the scan (`/verify`)
 
@@ -331,6 +339,8 @@ and `plus-07` to `plus-10` there. C21 and C26 are stand-in images: those screens
 were taken at N0 on the app of `5efd4c9` by `scripts/capture-ui.ts --only live` and `--only plus` (the room lived through
 on real time: the last minute, the door opening, the turn held half way), the collector's screens kept: live-01 to
 live-22, plus-01 to plus-14.
+The sign-in a LIVE RELEASE's pages show (SIGN IN TO ENTER, and I'LL BE THERE signed out) keeps lot E's markup and look
+too (the OWNERSHIP panel's `look: 'vault'`, since N4) until N7 draws those pages.
 
 | State | What it shows | Reference |
 |---|---|---|
