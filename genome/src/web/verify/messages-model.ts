@@ -26,9 +26,13 @@ function labelOf(...parts: (string | null | undefined)[]): string {
     .join(' · ');
 }
 
-/** A model's name as the app says it: MONOLITHE, or MONOLITHE IN BLUE for a variant. */
+/**
+ * A model's name as the app says it: MONOLITHE, or MONOLITHE IN BLUE for a model with a variant's label (the main model
+ * of its group included), the rule the server labels a message by (services/messages.ts modelName).
+ */
 export function modelWords(name: string, variant?: string | null): string {
-  return variant ? `${name} ${MESSAGES.label.in} ${variant}` : name;
+  const v = typeof variant === 'string' ? variant.trim().replace(/\s+/g, ' ') : '';
+  return v ? `${name} ${MESSAGES.label.in} ${v}` : name;
 }
 
 /** The reference an order is known by: `OR-` and the first eight figures of its id (services/orders.ts orderReference). */
@@ -56,9 +60,9 @@ export function pieceContext(p: { productId: string; model: string; modelVariant
   return { kind: 'PIECE', id: p.productId, label: labelOf(modelWords(p.model, p.modelVariant), p.productId) };
 }
 
-/** An order of MY PIECES' ORDERS tab (site 5): `ORDER OR-3F9A21C4 · MONOLITHE`. */
-export function orderContext(o: { id: string; model: string }): WriteContext {
-  return { kind: 'ORDER', id: o.id, label: labelOf(`${MESSAGES.label.order} ${orderReference(o.id)}`, o.model) };
+/** An order of MY PIECES' ORDERS tab (site 5): `ORDER OR-3F9A21C4 · MONOLITHE`, `… · MONOLITHE IN GOLD` for a variant. */
+export function orderContext(o: { id: string; model: string; modelVariant?: string | null }): WriteContext {
+  return { kind: 'ORDER', id: o.id, label: labelOf(`${MESSAGES.label.order} ${orderReference(o.id)}`, modelWords(o.model, o.modelVariant)) };
 }
 
 /**
@@ -74,9 +78,9 @@ export function referenceWords(reference: string): string {
   return `${MESSAGES.label.reference} ${reference}`;
 }
 
-/** A model of the private salon, requested (site 9): `ECLIPSE · PRIVATE SALON REQUEST`. */
-export function modelContext(modelId: string, name: string): WriteContext {
-  return { kind: 'MODEL', id: modelId, label: labelOf(name, MESSAGES.label.salon) };
+/** A model of the private salon, requested (site 9): `ECLIPSE · PRIVATE SALON REQUEST`, `ECLIPSE IN ONYX · …` for a variant. */
+export function modelContext(modelId: string, name: string, variant?: string | null): WriteContext {
+  return { kind: 'MODEL', id: modelId, label: labelOf(modelWords(name, variant), MESSAGES.label.salon) };
 }
 
 /** What the server is sent for a context: its kind, id and `about`, never the label. */

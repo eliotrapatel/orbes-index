@@ -175,6 +175,7 @@ describe('a model\'s sheet (P-R02)', () => {
       slug: 'monolithe',
       reserved: false,
       name: 'MONOLITHE',
+      variant: null,
       type: 'RING',
       collection: 'ORBIT',
       category: 'JEWELRY',
@@ -246,9 +247,13 @@ describe('a model\'s sheet (P-R02)', () => {
     ]);
     // The dot of the address asked is the sheet's own face.
     expect(s.dots[0]!.face).toMatchObject({ slug: 'monolithe', photos: s.photos, story: s.story });
+    // Each face carries its own label (a salon message's CONCERNING names it: MONOLITHE IN ONYX).
+    expect(s.variant).toBe('Steel');
+    expect(selectDot(s, 'monolithe-onyx').variant).toBe('Onyx');
     const gold = selectDot(s, 'monolithe-gold');
     expect(gold).toMatchObject({
       slug: 'monolithe-gold',
+      variant: 'Gold',
       photos: [{ src: media(4), alt: 'The MONOLITHE RING model in gold, photographed by ORBES' }],
       story: 'The gold of MONOLITHE.',
       specs: [['METAL', '18K YELLOW GOLD']],

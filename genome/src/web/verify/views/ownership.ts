@@ -148,6 +148,14 @@ export class OwnershipPanel {
   }
 
   /**
+   * ORBES Client Services' email arrived after the panel was drawn (a `deps.contact` read when drawn, as the write sheet
+   * gives it): FORGOTTEN PASSWORD, if it is open, is drawn again to show it. The other steps read it when they open it.
+   */
+  contactArrived(): void {
+    if (this.state.recover === 'contact') this.render();
+  }
+
+  /**
    * Bring RECEIVING THIS PIECE into view and move keyboard focus to it (the link under the second-hand guidance,
    * J-02). Centred on the screen: the selected tab and the status of the piece stay in sight above it, the sign-in
    * or the transfer code below. False when the panel does not show it (the piece was just received, or another mode).

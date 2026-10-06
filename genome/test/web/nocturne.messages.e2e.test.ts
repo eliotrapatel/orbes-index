@@ -5,15 +5,17 @@
  *  - each site shows the button, with what it attaches: a scan with a problem, the warranty tab of a warranty that no
  *    longer applies, a piece, MY PIECES' orders and releases, a draw's page, the LIVE RELEASE's CONFIRMED screen (the
  *    house's hairline `btn`) and YOUR ENTRY IS REMOVED, a salon request on its model's sheet;
- *  - signed out, the sheet leads through the sign-in to the form, its context kept; SEND, MESSAGE SENT, SEE MESSAGES
- *    shows the message;
+ *  - signed out, the sheet leads through the sign-in to the form, its context kept (its FORGOTTEN PASSWORD? shows the
+ *    email from the first open); SEND, MESSAGE SENT, SEE MESSAGES shows the message;
+ *  - every site sends once, and the label the sheet shows under CONCERNING is the one the server stores (a variant's
+ *    piece, order and release named as the server names them);
  *  - the console answers (the service, as the board does); NOW shows its line and the account sheet NEW; the collector
  *    reads (the line goes) and replies;
  *  - FORGOTTEN PASSWORD shows the email alone, no phone and no hours;
  *  - no sideways scroll at 390, 375, 360 and 320 px, the button on one line.
  */
 import { existsSync } from 'node:fs';
-import type { Page } from 'playwright-core';
+import type { Locator, Page } from 'playwright-core';
 import { describe, expect, it } from 'vitest';
 import { NOCTURNE_ADMIN, NOCTURNE_CLIENT_SERVICES, NOCTURNE_PASSWORD, type NocturneDemo } from '../support/nocturne-demo.js';
 import { eachState } from '../support/nocturne-stage.js';
@@ -55,6 +57,37 @@ async function fitsEveryWidth(page: Page, what: string): Promise<void> {
   await page.setViewportSize({ width: 390, height: 844 });
 }
 
+/**
+ * WRITE TO ORBES CLIENT SERVICES opened from `button` and sent, signed in: the label the sheet showed under CONCERNING
+ * and the one the server stored (client_messages.context_label), which must be the same. The sheet closed again.
+ */
+async function sendFrom(page: Page, stage: UiStage, button: Locator, body: string): Promise<{ sheet: string; stored: string | null }> {
+  await button.scrollIntoViewIfNeeded();
+  await button.click();
+  const sheet = page.locator('.n-write');
+  await sheet.locator('textarea').waitFor({ timeout: 15_000 });
+  const label = (await sheet.locator('[data-testid=write-concerning]').innerText()).trim();
+  await sheet.locator('textarea').fill(body);
+  await sheet.getByRole('button', { name: 'SEND' }).click();
+  await sheet.locator('.n-write__sent').waitFor({ timeout: 15_000 });
+  const row = await stage.ctx.db.selectFrom('client_messages').select('context_label').where('body', '=', body).executeTakeFirstOrThrow();
+  await page.keyboard.press('Escape');
+  await expect.poll(() => sheet.isHidden()).toBe(true);
+  return { sheet: label, stored: row.context_label };
+}
+
+/** The label the sheet shows for `button`, opened and closed without sending. */
+async function concerningOf(page: Page, button: Locator): Promise<string> {
+  await button.scrollIntoViewIfNeeded();
+  await button.click();
+  const sheet = page.locator('.n-write');
+  await sheet.locator('[data-testid=write-concerning]').waitFor({ timeout: 15_000 });
+  const label = (await sheet.locator('[data-testid=write-concerning]').innerText()).trim();
+  await page.keyboard.press('Escape');
+  await expect.poll(() => sheet.isHidden()).toBe(true);
+  return label;
+}
+
 /** The demo's console user, as the Messages board's answers are signed. */
 async function adminActor(stage: UiStage): Promise<{ type: 'admin'; id: string }> {
   const row = await stage.ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', NOCTURNE_ADMIN.email).executeTakeFirstOrThrow();
@@ -86,6 +119,12 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(await page.evaluate(() => document.activeElement?.id)).toBe('write-title');
       expect(await sheet.innerText()).toContain('Sign in or create an ORBES account to write to ORBES Client Services. Their answer will appear in your account.');
       expect(await sheet.locator('textarea').count()).toBe(0);
+      // FORGOTTEN PASSWORD? from this first open: ORBES Client Services' email alone, as on the result's own panel.
+      await sheet.getByRole('button', { name: 'FORGOTTEN PASSWORD?' }).click();
+      await sheet.locator('#recover-title').waitFor();
+      await expect.poll(() => sheet.locator('a[href^="mailto:"]').allInnerTexts()).toEqual(['CONTACT ORBES CLIENT SERVICES']);
+      expect(await sheet.locator('a[href^="tel:"]').count()).toBe(0);
+      await sheet.getByRole('button', { name: 'BACK TO SIGN IN' }).click();
       await sheet.locator('input[name=email]').fill(demo.accounts.you!.email);
       await sheet.locator('input[name=password]').fill(NOCTURNE_PASSWORD);
       await sheet.locator('form button[type=submit]').click();
@@ -100,6 +139,9 @@ const CASES: { state: UiState; check: Check }[] = [
       await sheet.locator('textarea').fill('Where was this piece made?\nI saw it online.');
       await sheet.getByRole('button', { name: 'SEND' }).click();
       await sheet.locator('.n-write__sent').waitFor();
+      // The label shown is the one stored.
+      const stored = await stage.ctx.db.selectFrom('client_messages').select('context_label').where('body', '=', 'Where was this piece made?\nI saw it online.').executeTakeFirstOrThrow();
+      expect(stored.context_label).toBe(`REF ${reference} · INVALID SIGNATURE`);
       expect((await sheet.locator('.n-write__sent').innerText()).replace(/\s+/g, ' ')).toBe(
         'MESSAGE SENT Your message is with ORBES Client Services. Their answer will appear in your account, under MESSAGES. SEE MESSAGES CLOSE',
       );
@@ -153,8 +195,8 @@ const CASES: { state: UiState; check: Check }[] = [
   },
   // ── Sites 3, 4, 5 and 6 (MY PIECES, a piece, a draw's page), and site 9 (the salon) ──
   {
-    state: stateById('pieces-orders'),
-    check: async (page) => {
+    state: writing('pieces-orders', 'messages-pieces-orders'),
+    check: async (page, _demo, stage) => {
       const orders = await page.locator('.view--pieces article.n-pieces__order').count();
       expect(orders).toBeGreaterThan(0);
       const b = await buttons(page, '.view--pieces');
@@ -167,34 +209,52 @@ const CASES: { state: UiState; check: Check }[] = [
       });
       expect(between).toBeTruthy();
       await fitsEveryWidth(page, 'ORDERS');
+      // Sent from the order of a variant (MONOLITHE IN GOLD): the sheet names its model as the server stores it.
+      const writes = page.locator('.view--pieces article.n-pieces__order').getByRole('button', { name: WRITE });
+      const labels: string[] = [];
+      for (let i = 0; i < orders; i++) labels.push(await concerningOf(page, writes.nth(i)));
+      const variant = labels.findIndex((l) => /^ORDER OR-[0-9A-F]{8} · [A-Z ]+ IN [A-Z ]+$/.test(l));
+      expect(variant, labels.join(' | ')).toBeGreaterThanOrEqual(0);
+      const sent = await sendFrom(page, stage, writes.nth(variant), 'About my order of a variant.');
+      expect(sent.sheet).toBe(labels[variant]);
+      expect(sent.stored).toBe(sent.sheet);
     },
   },
   {
-    state: stateById('pieces-releases'),
-    check: async (page, demo) => {
+    state: writing('pieces-releases', 'messages-pieces-releases'),
+    check: async (page, demo, stage) => {
       const b = await buttons(page, '.view--pieces');
       expect(b.length).toBeGreaterThan(0);
       expect(b.every((x) => x.kind === 'RELEASE' && /^[0-9a-f-]{36}$/.test(x.id ?? ''))).toBe(true);
       // The draw the account concluded: its page shows the button under the entry's actions.
       const steel = demo.releases['draw:MONOLITHE IN STEEL']!;
       expect(b.map((x) => x.id)).toContain(steel);
+      const fromList = await sendFrom(page, stage, page.locator('.view--pieces').getByRole('button', { name: WRITE }).first(), 'About a release of MY PIECES.');
+      expect(fromList.stored).toBe(fromList.sheet);
       await page.goto(`${page.url().split('/verify')[0]}/verify/releases/${steel}`);
       await page.locator('.view--release .n-release__status').waitFor();
       expect((await buttons(page, '.view--release')).map((x) => [x.kind, x.id])).toEqual([['RELEASE', steel]]);
       await fitsEveryWidth(page, "a draw's page");
+      const fromDraw = await sendFrom(page, stage, page.locator('.view--release').getByRole('button', { name: WRITE }), "About a draw's page.");
+      expect(fromDraw.sheet).toMatch(/^MONOLITHE IN STEEL · /);
+      expect(fromDraw.stored).toBe(fromDraw.sheet);
     },
   },
   {
-    state: stateById('piece-boutique'),
-    check: async (page, demo) => {
+    state: writing('piece-boutique', 'messages-piece-boutique'),
+    check: async (page, demo, stage) => {
       expect(await buttons(page, '.n-piece__ownership')).toEqual([expect.objectContaining({ kind: 'PIECE', id: demo.pieces.yours })]);
       expect(await page.locator('a[href^="mailto:"], a[href^="tel:"]').count()).toBe(0);
       await fitsEveryWidth(page, 'a piece');
+      // A main model with a variant's label (MONOLITHE IN STEEL): named so by the sheet and by the server.
+      const sent = await sendFrom(page, stage, page.locator('.n-piece__ownership').getByRole('button', { name: WRITE }), 'About my piece.');
+      expect(sent.sheet).toBe(`MONOLITHE IN STEEL · ${demo.pieces.yours}`);
+      expect(sent.stored).toBe(sent.sheet);
     },
   },
   {
     state: stateById('model-salon-requested'),
-    check: async (page) => {
+    check: async (page, _demo, stage) => {
       const b = await buttons(page, '.view--sheet');
       expect(b).toHaveLength(1);
       expect(b[0]).toMatchObject({ kind: 'MODEL' });
@@ -205,6 +265,8 @@ const CASES: { state: UiState; check: Check }[] = [
       await page.keyboard.press('Escape');
       await expect.poll(() => page.locator('.n-write').isHidden()).toBe(true);
       await fitsEveryWidth(page, 'the salon');
+      const sent = await sendFrom(page, stage, page.locator('.view--sheet').getByRole('button', { name: WRITE }), 'About my salon request.');
+      expect(sent.stored).toBe(sent.sheet);
     },
   },
   // ── FORGOTTEN PASSWORD: the email alone ──
@@ -243,8 +305,8 @@ const CASES: { state: UiState; check: Check }[] = [
   },
   // ── Sites 7 and 8: the LIVE RELEASE ──
   {
-    state: stateById('live-confirmed'),
-    check: async (page) => {
+    state: writing('live-confirmed', 'messages-live-confirmed'),
+    check: async (page, _demo, stage) => {
       const confirmed = page.locator('.live__confirmed');
       const b = await buttons(page, '.live__confirmed');
       expect(b).toHaveLength(1);
@@ -259,15 +321,22 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(await page.locator('.n-write [data-testid=write-concerning]').innerText()).toMatch(/· CONFIRMED · REFERENCE LR-[0-9A-F]{8}$/);
       await page.keyboard.press('Escape');
       await fitsEveryWidth(page, 'CONFIRMED');
+      // The release by its title (MONOLITHE IN BLUE), as the server stores it.
+      const sent = await sendFrom(page, stage, confirmed.getByRole('button', { name: WRITE }), 'About my confirmed entry.');
+      expect(sent.sheet).toMatch(/^MONOLITHE IN BLUE · CONFIRMED · REFERENCE LR-[0-9A-F]{8}$/);
+      expect(sent.stored).toBe(sent.sheet);
     },
   },
   {
-    state: stateById('live-removed'),
-    check: async (page) => {
+    state: writing('live-removed', 'messages-live-removed'),
+    check: async (page, _demo, stage) => {
       const b = await buttons(page, '.n-live__contact');
       expect(b).toEqual([expect.objectContaining({ kind: 'RELEASE' })]);
       expect(await page.locator('a[href^="mailto:"], a[href^="tel:"]').count()).toBe(0);
       await fitsEveryWidth(page, 'YOUR ENTRY IS REMOVED');
+      const sent = await sendFrom(page, stage, page.locator('.n-live__contact').getByRole('button', { name: WRITE }), 'About my entry removed.');
+      expect(sent.sheet).toBe('MONOLITHE IN BLUE · REMOVED');
+      expect(sent.stored).toBe(sent.sheet);
     },
   },
 ];

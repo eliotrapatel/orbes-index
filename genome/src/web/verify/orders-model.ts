@@ -44,6 +44,8 @@ export interface OrderModel {
   status: OrderStatus;
   /** The model, as the card's title. */
   title: string;
+  /** The model's label among its variants (« Gold »), null without one: the message's CONCERNING names it (CS-01). */
+  modelVariant: string | null;
   /** Where it was sold: `LIVE RELEASE · MONOLITHE IN STEEL`, `THE PRIVATE SALON · ZENITH` (the salon names its model, C32). */
   line: string;
   sentence: string;
@@ -166,6 +168,7 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number): OrderModel 
     key: `order-${o.reference.toLowerCase()}`,
     status: o.status,
     title: upper(o.model),
+    modelVariant: typeof o.modelVariant === 'string' && o.modelVariant.trim() !== '' ? o.modelVariant.trim() : null,
     // A release names itself; the private salon has none: the model with its variant follows it (C32).
     line: [ORDERS.channel[o.channel], o.release ? upper(o.release) : o.channel === 'SALON' ? modelWithVariant(upper(o.model), o.modelVariant).toUpperCase() : ''].filter((x) => x.length > 0).join(' · '),
     sentence: ORDERS.sentence[o.status],

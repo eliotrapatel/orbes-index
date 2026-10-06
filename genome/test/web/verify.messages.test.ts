@@ -41,6 +41,9 @@ describe('the context each button attaches', () => {
     expect(pieceContext({ productId: 'O26-J-00184', model: 'MONOLITHE', modelVariant: 'Blue' }).label).toBe('MONOLITHE IN BLUE · O26-J-00184');
     expect(orderReference(ORDER)).toBe(serverOrderReference(ORDER));
     expect(orderContext({ id: ORDER, model: 'MONOLITHE' })).toEqual({ kind: 'ORDER', id: ORDER, label: 'ORDER OR-3F9A21C4 · MONOLITHE' });
+    // A model with a variant's label is named with it, the main model of its group too (services/messages.ts modelName).
+    expect(orderContext({ id: ORDER, model: 'MONOLITHE', modelVariant: 'Gold' }).label).toBe('ORDER OR-3F9A21C4 · MONOLITHE IN GOLD');
+    expect(orderContext({ id: ORDER, model: 'MONOLITHE', modelVariant: null }).label).toBe('ORDER OR-3F9A21C4 · MONOLITHE');
     expect(releaseContext(DROP, 'Monolithe in steel', 'CONFIRMED', referenceWords('LR-8K2M4Q'))).toEqual({
       kind: 'RELEASE',
       id: DROP,
@@ -48,6 +51,7 @@ describe('the context each button attaches', () => {
     });
     expect(releaseContext(DROP, 'MONOLITHE, THE OCTOBER DRAW', null, '').label).toBe('MONOLITHE, THE OCTOBER DRAW');
     expect(modelContext(MODEL, 'Eclipse')).toEqual({ kind: 'MODEL', id: MODEL, label: 'ECLIPSE · PRIVATE SALON REQUEST' });
+    expect(modelContext(MODEL, 'ECLIPSE', 'Onyx').label).toBe('ECLIPSE IN ONYX · PRIVATE SALON REQUEST');
     expect(contextInput(modelContext(MODEL, 'Eclipse'))).toEqual({ kind: 'MODEL', id: MODEL });
     expect(contextInput(null)).toBeNull();
   });

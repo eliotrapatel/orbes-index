@@ -223,6 +223,8 @@ export interface SheetFace {
   /** THE PRIVATE SALON: a reserved sheet the club opened. */
   reserved: boolean;
   name: string;
+  /** Its label among its variants (« Steel »), null for a model without one: a salon message's CONCERNING names it (CS-01). */
+  variant: string | null;
   type: string;
   /** The collection, upper-case, or null. */
   collection: string | null;
@@ -278,6 +280,7 @@ function faceOf(
     slug: m.slug,
     reserved: m.lookbook === 'RESERVED',
     name: upper(m.name),
+    variant: typeof label === 'string' && label.trim() !== '' ? label.trim() : null,
     type: upper(m.type),
     collection: m.collection && m.collection.trim() ? upper(m.collection) : null,
     category,

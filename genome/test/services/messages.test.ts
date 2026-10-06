@@ -158,6 +158,21 @@ describe('MessageService (CS-01)', () => {
     expect(thread.messages[0]).toMatchObject({ from: 'YOU', body: 'About my ring.', concerning: { path: `/verify/pieces/${serial}` } });
   });
 
+  it("names a model with a variant's label as the app does (modelWithVariant), the main model of its group included", async () => {
+    const a = await createAccount(t.db);
+    // ZENITH, the main model of its group, carries its own dot (« Steel »): ZENITH IN STEEL, as MY PIECES says it.
+    const main = await lookbookModel('ZENITH', 'PUBLIC');
+    await t.db.updateTable('models').set({ variant_label: 'Steel', variant_swatch: '#9D9B96' }).where('id', '=', main).execute();
+    const [piece] = await holdPieces(t.db, a.id, 1, main);
+    const serial = (await t.db.selectFrom('products').select('product_id').where('id', '=', piece!).executeTakeFirstOrThrow()).product_id;
+    expect((await write(a, 'My piece.', { kind: 'PIECE', id: serial })).message.concerning?.label).toBe(`ZENITH IN STEEL · ${serial}`);
+    expect((await write(a, 'This model.', { kind: 'MODEL', id: main })).message.concerning?.label).toBe('ZENITH IN STEEL');
+    expect((await write(a, 'Again.', { kind: 'PIECE', id: piece! })).message.concerning?.label).toBe(`ZENITH IN STEEL · ${serial}`);
+    // Without a label, the name alone.
+    await t.db.updateTable('models').set({ variant_label: null, variant_swatch: null }).where('id', '=', main).execute();
+    expect((await write(a, 'Once more.', { kind: 'PIECE', id: piece! })).message.concerning?.label).toBe(`ZENITH · ${serial}`);
+  });
+
   it('refuses what the account may not attach: another account\'s piece or order, a draft, an unreachable model, an unknown, staff or old scan', async () => {
     const a = await accountOfTier(f, 1);
     const other = await createAccount(t.db);

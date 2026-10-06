@@ -614,7 +614,7 @@ class SheetPage {
           h('p', { class: 'n-tx n-model__requested-text sheet__requested-text', text: LOOKBOOK.salon.requested }),
         ),
         // WRITE TO ORBES CLIENT SERVICES, the model and its request attached (CS-01).
-        writeButton(modelContext(salon.request.modelId, s.name)),
+        writeButton(modelContext(salon.request.modelId, s.name, s.variant)),
       );
     } else {
       out.push(

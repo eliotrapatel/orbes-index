@@ -128,8 +128,11 @@ export class WriteSheet {
     this.render();
     this.title()?.focus({ preventScroll: true });
     if (this.deps.session.state.status === 'unknown') void this.deps.session.ensure().catch(() => undefined);
+    // FORGOTTEN PASSWORD? under the sign-in reads it when it opens (its deps.contact is read live, signedOutView), and is
+    // drawn again if it is already open when the email arrives: a first open shows it as a second one does.
     void this.deps.recoveryContact().then((c) => {
       this.contact = c;
+      if (c) this.signIn?.contactArrived();
     });
   }
 
@@ -177,7 +180,19 @@ export class WriteSheet {
   /** The signed-out sheet: the sentence, then the sign-in of the OWNERSHIP panel in its account mode. */
   private signedOutView(): HTMLElement[] {
     this.signIn?.dispose();
-    this.signIn = new OwnershipPanel({ kind: 'account', lead: MESSAGES.signedOut }, { api: this.deps.api, session: this.deps.session, onRescan: () => this.close(), contact: this.contact });
+    const current = (): ContactModel | undefined => this.contact;
+    this.signIn = new OwnershipPanel(
+      { kind: 'account', lead: MESSAGES.signedOut },
+      {
+        api: this.deps.api,
+        session: this.deps.session,
+        onRescan: () => this.close(),
+        // Read when FORGOTTEN PASSWORD is drawn, not now: the email may arrive after this view (deps.recoveryContact).
+        get contact() {
+          return current();
+        },
+      },
+    );
     return [h('div', { class: 'n-px n-write__signin' }, this.signIn.root)];
   }
 

@@ -231,9 +231,13 @@ function labelOf(parts: readonly (string | null | undefined)[]): string {
   return s.length > MESSAGE_LIMITS.label ? `${s.slice(0, MESSAGE_LIMITS.label - 1)}…` : s;
 }
 
-/** A model's name as the app says it: MONOLITHE, or MONOLITHE IN BLUE for a variant. */
-function modelName(name: string, variantOf: string | null, variantLabel: string | null): string {
-  return variantOf !== null && variantLabel ? `${name} IN ${variantLabel}` : name;
+/**
+ * A model's name as the app says it (view-model.ts modelWithVariant, messages-model.ts modelWords): MONOLITHE, or
+ * MONOLITHE IN BLUE for a model with a variant's label, the main model of its group included.
+ */
+function modelName(name: string, variantLabel: string | null): string {
+  const v = typeof variantLabel === 'string' ? variantLabel.trim().replace(/\s+/g, ' ') : '';
+  return v ? `${name} IN ${v}` : name;
 }
 
 /** A verification state in words: INVALID_SIGNATURE → INVALID SIGNATURE. */
@@ -498,25 +502,25 @@ export class MessageService {
           .selectFrom('ownership as o')
           .innerJoin('products as p', 'p.id', 'o.product_id')
           .innerJoin('models as m', 'm.id', 'p.model_id')
-          .select(['p.id', 'p.product_id', 'm.name', 'm.variant_of', 'm.variant_label'])
+          .select(['p.id', 'p.product_id', 'm.name', 'm.variant_label'])
           .where('o.account_id', '=', account)
           .where('o.ended_at', 'is', null)
           .where(UUID_RE.test(id) ? 'p.id' : 'p.product_id', '=', UUID_RE.test(id) ? id.toLowerCase() : id.toUpperCase())
           .executeTakeFirst();
         if (!p) throw messageContextInvalid();
-        return { ...none, kind: 'PIECE', label: labelOf([modelName(p.name, p.variant_of, p.variant_label), p.product_id]), product_id: p.id };
+        return { ...none, kind: 'PIECE', label: labelOf([modelName(p.name, p.variant_label), p.product_id]), product_id: p.id };
       }
       case 'ORDER': {
         if (!UUID_RE.test(id)) throw messageContextInvalid();
         const o = await tx
           .selectFrom('orders as o')
           .innerJoin('models as m', 'm.id', 'o.model_id')
-          .select(['o.id', 'm.name', 'm.variant_of', 'm.variant_label'])
+          .select(['o.id', 'm.name', 'm.variant_label'])
           .where('o.id', '=', id.toLowerCase())
           .where('o.account_id', '=', account)
           .executeTakeFirst();
         if (!o) throw messageContextInvalid();
-        return { ...none, kind: 'ORDER', label: labelOf([`ORDER ${orderReference(o.id)}`, modelName(o.name, o.variant_of, o.variant_label)]), order_id: o.id };
+        return { ...none, kind: 'ORDER', label: labelOf([`ORDER ${orderReference(o.id)}`, modelName(o.name, o.variant_label)]), order_id: o.id };
       }
       case 'RELEASE': {
         if (!UUID_RE.test(id)) throw messageContextInvalid();
@@ -543,7 +547,7 @@ export class MessageService {
       }
       case 'MODEL': {
         if (!UUID_RE.test(id)) throw messageContextInvalid();
-        const m = await tx.selectFrom('models').select(['id', 'slug', 'name', 'variant_of', 'variant_label']).where('id', '=', id.toLowerCase()).executeTakeFirst();
+        const m = await tx.selectFrom('models').select(['id', 'slug', 'name', 'variant_label']).where('id', '=', id.toLowerCase()).executeTakeFirst();
         if (!m || !m.slug) throw messageContextInvalid();
         // Only a model the account's lookbook reaches now: PUBLIC, or RESERVED from its tier up.
         const standing = (await clubStandings(tx, [account], now)).get(account);
@@ -564,7 +568,7 @@ export class MessageService {
         return {
           ...none,
           kind: 'MODEL',
-          label: labelOf([modelName(m.name, m.variant_of, m.variant_label), request ? 'PRIVATE SALON REQUEST' : null]),
+          label: labelOf([modelName(m.name, m.variant_label), request ? 'PRIVATE SALON REQUEST' : null]),
           model_id: m.id,
           shop_request_id: request?.id ?? null,
         };

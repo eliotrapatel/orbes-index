@@ -530,7 +530,7 @@ function orderCard(m: OrderModel, deps: OrderDeps): HTMLElement {
       : null,
     h('p', { class: 'n-g n-lb n-num n-pieces__order-reference' }, ...withNumerals(m.reference)),
     // WRITE TO ORBES CLIENT SERVICES, the order attached (CS-01), under its reference and before its documents.
-    writeButton(orderContext({ id: m.id, model: m.title })),
+    writeButton(orderContext({ id: m.id, model: m.title, modelVariant: m.modelVariant })),
     m.documents.length > 0 ? orderDocumentsBlock(m, deps) : null,
   ];
   const article = h('article', { class: ['n-pieces__order', ended ? 'is-ended' : null], attrs: { 'aria-labelledby': titleId }, data: { status: m.status, order: m.reference.replace(/^ORDER /, '') } });

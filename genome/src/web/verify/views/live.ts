@@ -759,6 +759,15 @@ class LivePage {
     return s?.name ? upper(s.name) : LIVE.kind;
   }
 
+  /**
+   * The release as a message's CONCERNING names it (CS-01): its title (MONOLITHE IN BLUE), as the server labels a
+   * RELEASE context and as MY PIECES' entries do (live-model.ts myLiveEntries), its model's name before the title is told.
+   */
+  private releaseTitle(): string {
+    const s = this.sheet;
+    return upper(s?.title ?? s?.name ?? '') || LIVE.kind;
+  }
+
   private title(text: string): HTMLHeadingElement {
     return h('h1', { class: 'live__title', id: 'live-title', attrs: { tabindex: '-1' } }, ...withNumerals(text));
   }
@@ -1809,7 +1818,7 @@ class LivePage {
     );
     // WRITE TO ORBES CLIENT SERVICES under the CLIENT SERVICES overline, the release and its reference attached (CS-01): the
     // house's full-width hairline button on this ivory screen, where the contact stood.
-    const write = this.sheet ? releaseContext(this.sheet.id, this.name(), LIVE.statusLabel.CONFIRMED, referenceWords(reference)) : null;
+    const write = this.sheet ? releaseContext(this.sheet.id, this.releaseTitle(), LIVE.statusLabel.CONFIRMED, referenceWords(reference)) : null;
     const el = h(
       'section',
       { class: 'live__confirmed' },
@@ -2042,7 +2051,7 @@ class LivePage {
   private edgeScreen(kind: LiveScreenKind): Screen {
     const copy = this.edgeCopy(kind);
     // YOUR ENTRY IS REMOVED: WRITE TO ORBES CLIENT SERVICES in place of the contact, the release attached (CS-01).
-    const write = kind === 'removed' && this.entry && this.sheet ? releaseContext(this.sheet.id, this.name(), LIVE.statusLabel.REMOVED) : null;
+    const write = kind === 'removed' && this.entry && this.sheet ? releaseContext(this.sheet.id, this.releaseTitle(), LIVE.statusLabel.REMOVED) : null;
     const sheet = this.sheet;
     const heading = sheet ? (liveHeading(sheet) ?? (isEndedSheet(sheet) ? LIVE.kind : LIVE.unnamed)) : LIVE.kind;
     const day = sheet ? pastDay(sheet.opensAt, this.deps.localZone, this.now()) : '';
