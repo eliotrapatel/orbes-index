@@ -457,7 +457,7 @@ export const ORBES_CARE = Object.freeze({
 });
 
 /**
- * THE CLUB'S TIERS (P-X04, at the head of MY PIECES): the account's tier, TITANE, PLATINE or PALLADIUM (1, 3 and 5
+ * THE CLUB'S TIERS (P-X04, at the head of MY PIECES): the account's tier, TITANE, PLATINE or PALLADIUM (1, 5 and 10
  * pieces held now, never a revoked one), its name in the display face and its pieces in the reading face, the benefits
  * of the tier and of those below it (the server's words, set by ORBES), and the way to the next tier. An account that
  * holds no piece reads what its first one opens.

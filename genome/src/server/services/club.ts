@@ -17,7 +17,7 @@
  * tier up, with its price, on request; SalonService reads `tierOf` here.
  *
  * P-R03: the tiers. `tierOf` counts the same pieces and gives the account's
- * standing in the club: its tier (CLUB_TIER_THRESHOLDS, 1 / 3 / 5 pieces:
+ * standing in the club: its tier (CLUB_TIER_THRESHOLDS, 1 / 5 / 10 pieces:
  * TITANE, PLATINE, PALLADIUM; 0 below the first) and its seniority, the full
  * years since the first `started_at` of its ownerships (any, ended or not).
  * The thresholds are a constant of the code, never a setting: a production
@@ -53,10 +53,10 @@ import type { AccountDropEntry, DropService } from './drops.js';
 export const CLUB_EXCLUDED_STATUSES: readonly ProductStatus[] = Object.freeze(['REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED'] as const);
 
 /**
- * The pieces held now that reach each tier, in order: 1 for TITANE, 3 for PLATINE, 5 for PALLADIUM (the plan's
- * choice 7). A constant of the code, so a production setting never contradicts the published rule of a draw.
+ * The pieces held now that reach each tier, in order: 1 for TITANE, 5 for PLATINE, 10 for PALLADIUM (plan NEXT-NINE, BP-19
+ * T1, for every account at once). A constant of the code, so a production setting never contradicts a draw's rule.
  */
-export const CLUB_TIER_THRESHOLDS: readonly number[] = Object.freeze([1, 3, 5]);
+export const CLUB_TIER_THRESHOLDS: readonly number[] = Object.freeze([1, 5, 10]);
 
 /** The names of the tiers 1, 2 and 3, in the order of CLUB_TIER_THRESHOLDS (db/schema.ts, club_tiers.tier). */
 export { CLUB_TIER_NAMES, type ClubTierName };
@@ -265,6 +265,8 @@ export interface ClubStatus {
   benefits: string[];
   /** P-X04: the next tier; null at PALLADIUM, the highest. */
   next: ClubNextTier | null;
+  /** The pieces held now each tier starts from, TITANE first (CLUB_TIER_THRESHOLDS): YOUR TIER's meter has a dot per piece up to the last (plan NEXT-NINE, BP-19 T1). */
+  tierThresholds: number[];
   entries: AccountDropEntry[];
 }
 
@@ -342,6 +344,7 @@ export class ClubService {
       seniority: standing.seniority,
       benefits: CLUB_TIER_NAMES.slice(0, standing.tier).flatMap((name) => benefitLines(words[name])),
       next,
+      tierThresholds: [...CLUB_TIER_THRESHOLDS],
       entries,
     };
   }

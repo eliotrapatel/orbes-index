@@ -13,13 +13,17 @@
  *    one benefit per line, blank lines and spaces dropped, at most 600
  *    characters and 8 lines; a name that is not a tier is refused; each
  *    change audited `club.tier.update`; the thresholds never change;
+ *  - the thresholds are 1, 5 and 10 pieces held now (plan NEXT-NINE, BP-19
+ *    T1), read alike by tierForPieces, tierOf, the members by tier and the
+ *    segments' TIER rule;
  *  - the owner's sheet (A-06) gains the account's tier;
  *  - /api/v1/account/me does not change.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CLUB_TIER_DEFAULT_BENEFITS, CLUB_TIER_THRESHOLDS, benefitLines, normalizeBenefits } from '../../src/server/services/club.js';
+import { CLUB_TIER_DEFAULT_BENEFITS, CLUB_TIER_THRESHOLDS, benefitLines, clubMembersByTier, normalizeBenefits, tierForPieces, tierOf } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
+import { createAccount, holdPieces } from '../support/live.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 interface NextJson {
@@ -36,6 +40,7 @@ interface StatusJson {
   seniority: number;
   benefits: string[];
   next: NextJson | null;
+  tierThresholds: number[];
   entries: unknown[];
 }
 
@@ -90,7 +95,8 @@ describe('the tiers of the club (P-X04)', () => {
   afterAll(() => h?.close());
 
   it('gives each account its tier, the benefits of its tier and of those below, and the way to the next one', async () => {
-    expect(CLUB_TIER_THRESHOLDS).toEqual([1, 3, 5]);
+    // Plan NEXT-NINE, BP-19 T1: TITANE from 1 piece held, PLATINE from 5, PALLADIUM from 10, for every account at once.
+    expect(CLUB_TIER_THRESHOLDS).toEqual([1, 5, 10]);
     const { client } = await accountClient(h);
     // No piece: no benefit yet, and what a first piece opens.
     expect(await status(client)).toMatchObject({
@@ -98,6 +104,7 @@ describe('the tiers of the club (P-X04)', () => {
       pieces: 0,
       benefits: [],
       next: { level: 1, name: 'TITANE', pieces: 1, missing: 1, benefits: lines('TITANE') },
+      tierThresholds: [1, 5, 10],
       entries: [],
     });
     const pieces: IssueResult[] = [await ownedPiece(client)];
@@ -105,22 +112,28 @@ describe('the tiers of the club (P-X04)', () => {
       tier: { level: 1, name: 'TITANE' },
       pieces: 1,
       benefits: lines('TITANE'),
-      next: { level: 2, name: 'PLATINE', pieces: 3, missing: 2, benefits: lines('PLATINE') },
+      next: { level: 2, name: 'PLATINE', pieces: 5, missing: 4, benefits: lines('PLATINE') },
     });
-    for (let i = 0; i < 2; i++) pieces.push(await ownedPiece(client));
+    // Four pieces are still TITANE: PLATINE starts from five.
+    for (let i = 0; i < 3; i++) pieces.push(await ownedPiece(client));
+    expect(await status(client)).toMatchObject({ tier: { level: 1, name: 'TITANE' }, pieces: 4, next: { level: 2, name: 'PLATINE', pieces: 5, missing: 1 } });
+    pieces.push(await ownedPiece(client));
     expect(await status(client)).toMatchObject({
       tier: { level: 2, name: 'PLATINE' },
-      pieces: 3,
+      pieces: 5,
       benefits: [...lines('TITANE'), ...lines('PLATINE')],
-      next: { level: 3, name: 'PALLADIUM', pieces: 5, missing: 2, benefits: lines('PALLADIUM') },
+      next: { level: 3, name: 'PALLADIUM', pieces: 10, missing: 5, benefits: lines('PALLADIUM') },
     });
-    for (let i = 0; i < 2; i++) pieces.push(await ownedPiece(client));
+    // Nine pieces are still PLATINE: PALLADIUM starts from ten.
+    for (let i = 0; i < 4; i++) pieces.push(await ownedPiece(client));
+    expect(await status(client)).toMatchObject({ tier: { level: 2, name: 'PLATINE' }, pieces: 9, next: { level: 3, name: 'PALLADIUM', pieces: 10, missing: 1 } });
+    pieces.push(await ownedPiece(client));
     const top = await status(client);
-    expect(top).toMatchObject({ tier: { level: 3, name: 'PALLADIUM' }, pieces: 5, benefits: [...lines('TITANE'), ...lines('PLATINE'), ...lines('PALLADIUM')] });
+    expect(top).toMatchObject({ tier: { level: 3, name: 'PALLADIUM' }, pieces: 10, benefits: [...lines('TITANE'), ...lines('PLATINE'), ...lines('PALLADIUM')], tierThresholds: [1, 5, 10] });
     expect(top.next).toBeNull();
-    // A piece revoked by ORBES counts for nothing: back to PLATINE, one piece from PALLADIUM.
+    // A piece revoked by ORBES counts for nothing: back to PLATINE at once, one piece from PALLADIUM.
     await h.ctx.services.lifecycle.transition(pieces[0]!.product.productId, 'REVOKED', { reason: 'test' }, SYSTEM_ACTOR);
-    expect(await status(client)).toMatchObject({ tier: { level: 2, name: 'PLATINE' }, pieces: 4, next: { name: 'PALLADIUM', missing: 1 } });
+    expect(await status(client)).toMatchObject({ tier: { level: 2, name: 'PLATINE' }, pieces: 9, next: { name: 'PALLADIUM', missing: 1 } });
     // /api/v1/account/me does not change: no tier there.
     const me = safeJson(await client.get('/api/v1/account/me')) as Record<string, unknown>;
     expect(JSON.stringify(me)).not.toMatch(/TITANE|PLATINE|PALLADIUM|benefits/);
@@ -133,8 +146,8 @@ describe('the tiers of the club (P-X04)', () => {
     const read = await tiers(auditor);
     expect(read.map((t) => [t.tier, t.level, t.pieces, t.edited, t.updatedAt])).toEqual([
       ['TITANE', 1, 1, false, null],
-      ['PLATINE', 2, 3, false, null],
-      ['PALLADIUM', 3, 5, false, null],
+      ['PLATINE', 2, 5, false, null],
+      ['PALLADIUM', 3, 10, false, null],
     ]);
     for (const t of read) {
       expect(t.benefits).toBe(CLUB_TIER_DEFAULT_BENEFITS[t.tier as keyof typeof CLUB_TIER_DEFAULT_BENEFITS]);
@@ -174,7 +187,7 @@ describe('the tiers of the club (P-X04)', () => {
     const res = await operator.patch('/api/admin/club/tiers/PLATINE', { benefits: '  Priority care for your pieces.  \r\n\r\n A private viewing of each release.\n' });
     expect(res.statusCode, res.body).toBe(200);
     const saved = safeJson(res) as TierJson;
-    expect(saved).toMatchObject({ tier: 'PLATINE', level: 2, pieces: 3, benefits: 'Priority care for your pieces.\nA private viewing of each release.', edited: true });
+    expect(saved).toMatchObject({ tier: 'PLATINE', level: 2, pieces: 5, benefits: 'Priority care for your pieces.\nA private viewing of each release.', edited: true });
     expect(Date.parse(saved.updatedAt!)).not.toBeNaN();
     expect((await tiers(auditor)).find((t) => t.tier === 'PLATINE')).toMatchObject({ edited: true, defaultBenefits: CLUB_TIER_DEFAULT_BENEFITS.PLATINE });
     const row = await h.ctx.db.selectFrom('club_tiers').selectAll().executeTakeFirstOrThrow();
@@ -189,7 +202,7 @@ describe('the tiers of the club (P-X04)', () => {
     const { client } = await accountClient(h);
     await ownedPiece(client);
     expect((await status(client)).next).toMatchObject({ name: 'PLATINE', benefits: ['Priority care for your pieces.', 'A private viewing of each release.'] });
-    for (let i = 0; i < 2; i++) await ownedPiece(client);
+    for (let i = 0; i < 4; i++) await ownedPiece(client);
     expect((await status(client)).benefits).toEqual([...lines('TITANE'), 'Priority care for your pieces.', 'A private viewing of each release.']);
 
     // Changed again, then restored by null: the row goes, the default words are back, each change audited.
@@ -213,13 +226,41 @@ describe('the tiers of the club (P-X04)', () => {
 
   it('shows the account\'s tier on its sheet (A-06)', async () => {
     const { client, email } = await accountClient(h);
-    for (let i = 0; i < 3; i++) await ownedPiece(client);
+    for (let i = 0; i < 5; i++) await ownedPiece(client);
     const account = await h.ctx.db.selectFrom('accounts').select('id').where('email', '=', email).executeTakeFirstOrThrow();
     const sheet = safeJson(await auditor.get(`/api/admin/owners/${account.id}`)) as { tier: unknown };
-    expect(sheet.tier).toEqual({ level: 2, name: 'PLATINE', pieces: 3, seniority: 0 });
+    expect(sheet.tier).toEqual({ level: 2, name: 'PLATINE', pieces: 5, seniority: 0 });
     const { client: other, email: otherEmail } = await accountClient(h);
     expect(other).toBeDefined();
     const none = await h.ctx.db.selectFrom('accounts').select('id').where('email', '=', otherEmail).executeTakeFirstOrThrow();
     expect((safeJson(await operator.get(`/api/admin/owners/${none.id}`)) as { tier: unknown }).tier).toEqual({ level: 0, name: null, pieces: 0, seniority: 0 });
+  });
+
+  // Last: its pieces are written straight to the database (test/support/live.ts holdPieces), after every issue above.
+  it('reads the thresholds 1, 5 and 10 the same way everywhere: tierForPieces, tierOf, the members by tier and the segments (plan NEXT-NINE, BP-19 T1)', async () => {
+    const cases: [number, number][] = [
+      [0, 0],
+      [1, 1],
+      [4, 1],
+      [5, 2],
+      [9, 2],
+      [10, 3],
+      [11, 3],
+    ];
+    expect(cases.map(([pieces]) => tierForPieces(pieces))).toEqual(cases.map(([, tier]) => tier));
+    for (const [pieces, tier] of cases) {
+      const a = await createAccount(h.ctx.db);
+      if (pieces > 0) await holdPieces(h.ctx.db, a.id, pieces, catalog.modelId);
+      expect(await tierOf(h.ctx.db, a.id, new Date())).toMatchObject({ pieces, tier });
+    }
+    // The console's members by tier and the segments' TIER rule (segments.ts tierSql, private: read through its counts)
+    // count every account of the database as tierOf does.
+    const accounts = await h.ctx.db.selectFrom('accounts').select('id').where('status', '=', 'ACTIVE').execute();
+    const byTier = [0, 0, 0, 0];
+    for (const a of accounts) byTier[(await tierOf(h.ctx.db, a.id, new Date())).tier]! += 1;
+    expect(await clubMembersByTier(h.ctx.db)).toEqual({ TITANE: byTier[1], PLATINE: byTier[2], PALLADIUM: byTier[3], total: byTier[1]! + byTier[2]! + byTier[3]! });
+    for (const tier of [1, 2, 3]) {
+      expect(await h.ctx.services.segments.count({ match: 'ALL', rules: [{ kind: 'TIER', tiers: [tier] }] })).toEqual({ count: byTier[tier] });
+    }
   });
 });

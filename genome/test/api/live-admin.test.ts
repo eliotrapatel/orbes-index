@@ -359,7 +359,7 @@ describe('LIVE RELEASES: the console', () => {
       // A PLATINE owner of the circle reads nothing of it before the announcement.
       const { client, email } = await accountClient(h);
       const { id: memberId } = await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow();
-      await holdPieces(h.ctx.db, memberId, 3, f.modelId);
+      await holdPieces(h.ctx.db, memberId, 5, f.modelId);
       const feed = async () => (safeJson(await client.get('/api/v1/club/circle')) as { items: Json[] }).items.map((x) => x.id);
       expect(await feed()).not.toContain(post.id);
       expect((await client.get(`/api/v1/club/circle/${post.id}`)).statusCode).toBe(404);

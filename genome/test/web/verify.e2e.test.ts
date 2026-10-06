@@ -2453,7 +2453,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await catalog.updateModel(zenith.id, { privateMinTier: 2 }, SYSTEM_ACTOR);
     await page.goto(`${srv.origin}/verify/lookbook`);
     const locked = page.getByRole('region', { name: 'THE PRIVATE SALON' });
-    await textOf(locked.locator('.n-lookbook__teaser-text'), 'Pieces offered to the owners of an ORBES piece, by tier, on request. It opens at PLATINE, from 3 pieces registered to your ORBES account.');
+    await textOf(locked.locator('.n-lookbook__teaser-text'), 'Pieces offered to the owners of an ORBES piece, by tier, on request. It opens at PLATINE, from 5 pieces registered to your ORBES account.');
     await countOf(locked.getByRole('link', { name: 'SIGN IN' }), 0);
     await visible(locked.getByRole('button', { name: 'SCAN ORBES CODE' }));
     await countOf(page.locator('.lookbook__reserved'), 0);
@@ -2670,10 +2670,10 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
       actor,
     );
     await ctx.services.drops.publish(drop.id, actor);
-    // A PLATINE owner (three pieces) and a TITANE one (one piece).
+    // A PLATINE owner (five pieces) and a TITANE one (one piece).
     const platineEmail = 'early.platine@example.com';
     const platine = await ctx.services.auth.registerAccount({ email: platineEmail, password: PASSWORD }, {});
-    for (let i = 0; i < 3; i++) await ownedPiece(platine.account.id);
+    for (let i = 0; i < 5; i++) await ownedPiece(platine.account.id);
     const titaneEmail = 'early.titane@example.com';
     const titane = await ctx.services.auth.registerAccount({ email: titaneEmail, password: PASSWORD }, {});
     await ownedPiece(titane.account.id);
@@ -2769,11 +2769,11 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(other.problems).toEqual([]);
   }, 180_000);
 
-  it('the account sheet (C2), from the header\'s TITANE and monogram: YOUR TIER moved from MY PIECES (P-X04, decision 10): the tier and its pieces, five dots, the benefits, the way to the next tier as ORBES words it; THE CLUB for an account without a piece; SOUND, CHANGE PASSWORD, MY PIECES, the legal pages, SIGN OUT', async () => {
+  it('the account sheet (C2), from the header\'s TITANE and monogram: YOUR TIER moved from MY PIECES (P-X04, decision 10): the tier and its pieces, ten dots (plan NEXT-NINE, BP-19 T1), the benefits, the way to the next tier as ORBES words it; THE CLUB for an account without a piece; SOUND, CHANGE PASSWORD, MY PIECES, the legal pages, SIGN OUT', async () => {
     const { ctx } = srv;
     const email = 'tier.platine@example.com';
     const owner = await ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
-    for (let i = 0; i < 3; i++) await ownedPiece(owner.account.id);
+    for (let i = 0; i < 5; i++) await ownedPiece(owner.account.id);
     // ORBES changed the words of PALLADIUM from the console: the next tier says them.
     const staff = await ctx.services.auth.createAdmin({ email: 'tier.staff@orbes.test', password: 'orbes tier passphrase 2026', role: 'OPERATOR' }, SYSTEM_ACTOR);
     await ctx.services.club.updateTier('PALLADIUM', 'A commission of your own.\nA yearly visit to the atelier.', { type: 'admin', id: staff.id });
@@ -2787,7 +2787,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await signIn.getByLabel('EMAIL').fill(email);
     await signIn.getByLabel('PASSWORD', { exact: true }).fill(PASSWORD);
     await signIn.locator('form').getByRole('button', { name: 'SIGN IN' }).click();
-    await countOf(page.locator('article.n-pieces__piece'), 3);
+    await countOf(page.locator('article.n-pieces__piece'), 5);
     // MY PIECES no longer holds YOUR TIER.
     await countOf(page.locator('.pieces__tier'), 0);
     await countOf(page.getByText('YOUR TIER', { exact: true }), 0);
@@ -2808,20 +2808,21 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const tier = sheet.locator('.n-account__tier');
     await textOf(tier.locator('#account-tier'), 'YOUR TIER');
     await attrOf(tier, 'aria-labelledby', 'account-tier');
-    // PLATINE in the display face, its pieces in the reading face, then its five dots, three of them filled.
+    // PLATINE in the display face, its pieces in the reading face, then its ten dots, one per piece up to PALLADIUM, five
+    // of them filled.
     await textOf(tier.locator('.n-account__tier-name'), 'PLATINE');
-    await textOf(tier.locator('.n-account__tier-pieces'), '3 pieces held');
+    await textOf(tier.locator('.n-account__tier-pieces'), '5 pieces held');
     expect(await tier.locator('.n-account__tier-name').evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans/);
     expect(await tier.locator('.n-account__tier-pieces').evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/Gravesend/);
-    await countOf(tier.locator('.n-meter__dot'), 5);
-    await countOf(tier.locator('.n-meter__dot.is-on'), 3);
-    // The benefits of TITANE and PLATINE, then PALLADIUM: two more pieces, and what ORBES says it adds.
+    await countOf(tier.locator('.n-meter__dot'), 10);
+    await countOf(tier.locator('.n-meter__dot.is-on'), 5);
+    // The benefits of TITANE and PLATINE, then PALLADIUM: five more pieces, and what ORBES says it adds.
     await textsOf(tier.locator('.n-account__benefits:not(.n-account__benefits--next) .n-account__benefit'), [
       ...CLUB_TIER_DEFAULT_BENEFITS.TITANE.split('\n'),
       ...CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n'),
     ]);
     await textOf(tier.locator('.n-account__next-label'), 'NEXT: PALLADIUM');
-    await textOf(tier.locator('.n-account__next-way'), '2 more pieces registered to your account open PALLADIUM, from 5 pieces held. It adds:');
+    await textOf(tier.locator('.n-account__next-way'), '5 more pieces registered to your account open PALLADIUM, from 10 pieces held. It adds:');
     await textsOf(tier.locator('.n-account__benefits--next .n-account__benefit'), ['A commission of your own.', 'A yearly visit to the atelier.']);
     // Then MESSAGES (plan NEXT-NINE, CS-01), SOUND, CHANGE PASSWORD, MY PIECES, the legal pages (their index, a new tab), SIGN OUT.
     await textsOf(sheet.locator('.n-row__label'), ['MESSAGES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'PRIVACY · TERMS · LEGAL · HELP']);

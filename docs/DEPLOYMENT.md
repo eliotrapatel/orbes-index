@@ -1042,7 +1042,7 @@ cd genome && npx tsx scripts/build-web.ts            # once, for /verify and /ad
 node --import tsx src/server/index.ts --demo          # or ORBES_DEMO=true; npm start -- --demo
 ```
 
-The server starts on `pglite:memory`, loads the demo dataset through the real services (41 products, 8 accounts, scan histories and anomalies; about 15 s), then serves it; the clock replays the catalogue's history during the seed and follows real time afterwards. It prints the console sign-in once: `BOOTSTRAP_ADMIN_*` when set, otherwise `demo-admin@example.com` with a random password, plus the demo accounts' password and a claim code. Everything is lost on exit. `--demo` is refused in production and with any `DATABASE_URL` other than `pglite:memory`. `npm run demo` (`tsx src/server/index.ts --demo`) and `npm start -- --demo` are equivalent shortcuts.
+The server starts on `pglite:memory`, loads the demo dataset through the real services (47 products, 8 accounts, scan histories and anomalies; about 15 s), then serves it; the clock replays the catalogue's history during the seed and follows real time afterwards. It prints the console sign-in once: `BOOTSTRAP_ADMIN_*` when set, otherwise `demo-admin@example.com` with a random password, plus the demo accounts' password and a claim code. Everything is lost on exit. `--demo` is refused in production and with any `DATABASE_URL` other than `pglite:memory`. `npm run demo` (`tsx src/server/index.ts --demo`) and `npm start -- --demo` are equivalent shortcuts.
 
 ---
 

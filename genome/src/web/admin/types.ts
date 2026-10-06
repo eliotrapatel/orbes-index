@@ -89,7 +89,7 @@ export type CirclePostKind = (typeof CIRCLE_POST_KINDS)[number];
 export const CIRCLE_RSVP_ANSWERS = ['YES', 'NO'] as const;
 export type CircleRsvpAnswer = (typeof CIRCLE_RSVP_ANSWERS)[number];
 
-/** The tiers of the club (P-X04, club_tiers.tier), in order: 1 TITANE, 2 PLATINE, 3 PALLADIUM (1, 3 and 5 pieces held now). */
+/** The tiers of the club (P-X04, club_tiers.tier), in order: 1 TITANE, 2 PLATINE, 3 PALLADIUM (1, 5 and 10 pieces held now). */
 export const CLUB_TIER_NAMES = ['TITANE', 'PLATINE', 'PALLADIUM'] as const;
 export type ClubTierName = (typeof CLUB_TIER_NAMES)[number];
 

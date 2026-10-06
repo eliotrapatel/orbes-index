@@ -120,8 +120,8 @@ describe.skipIf(!HAS_CHROMIUM)('the Messages board in the console (E2E, Chromium
         .returning('id')
         .executeTakeFirstOrThrow()
     ).id;
-    // Three clients write an hour apart: one without a piece, a PALLADIUM (5 pieces) about a piece, a PLATINE (3).
-    for (const pieces of [0, 5, 3]) {
+    // Three clients write an hour apart: one without a piece, a PALLADIUM (10 pieces) about a piece, a PLATINE (5).
+    for (const pieces of [0, 10, 5]) {
       const a = await createAccount(ctx.db);
       const held = pieces ? await holdPieces(ctx.db, a.id, pieces, modelId) : [];
       const serial = held[0] ? (await ctx.db.selectFrom('products').select('product_id').where('id', '=', held[0]).executeTakeFirstOrThrow()).product_id : null;

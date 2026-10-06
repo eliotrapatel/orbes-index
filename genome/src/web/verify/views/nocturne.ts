@@ -16,7 +16,7 @@
  *   fadedPhoto()  a photograph shown whole at the column's full width, fading into the ground at its top and foot
  *                 (`.ph.fade.contain`); lift() the text that rises 56 px onto it
  *   countdown()   the figures in weight 200, their units under them, colons between them
- *   tierDots()    the tier as five dots
+ *   tierDots()    the tier as a row of dots, one per piece up to PALLADIUM (TIER_DOTS, tier-model.ts: 10)
  *   switchControl() a switch (`.sw`)
  *   variantDots() a model's variant dots (the selected one ringed), each drawn from its swatch
  *   sizeButtons() the sizes, the selected one doubly ringed
@@ -300,13 +300,17 @@ export function countdown(groups: readonly (readonly [string, string])[], opts: 
   return h('div', { class: 'n-cd n-num', attrs: { role: 'timer', 'aria-label': opts.label } }, ...parts);
 }
 
-/** The tier as five dots, `on` of them filled (the pieces held, to five). Decorative: the words say it. */
-export function tierDots(on: number, opts: { start?: boolean } = {}): HTMLElement {
-  const n = Math.max(0, Math.min(5, Math.floor(on)));
+/**
+ * The tier as one row of `of` dots (TIER_DOTS, tier-model.ts: one per piece up to PALLADIUM, 10), `on` of them filled
+ * (the pieces held, to `of`). Decorative: the words say it.
+ */
+export function tierDots(on: number, of: number, opts: { start?: boolean } = {}): HTMLElement {
+  const total = Math.max(0, Math.floor(of));
+  const n = Math.max(0, Math.min(total, Math.floor(on)));
   return h(
     'div',
     { class: ['n-meter', opts.start ? 'n-meter--start' : null], attrs: { 'aria-hidden': 'true' } },
-    ...Array.from({ length: 5 }, (_, i) => h('i', { class: ['n-meter__dot', i < n ? 'is-on' : null] })),
+    ...Array.from({ length: total }, (_, i) => h('i', { class: ['n-meter__dot', i < n ? 'is-on' : null] })),
   );
 }
 

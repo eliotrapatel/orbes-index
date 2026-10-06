@@ -2,7 +2,7 @@
  * The tiers of the club (P-X04) in the console: the Club page's Tiers tab.
  *
  * One panel per tier, TITANE, PLATINE and PALLADIUM: the pieces held now it
- * starts from (1, 3 and 5, a constant of the code: never changed here, so a
+ * starts from (1, 5 and 10, a constant of the code: never changed here, so a
  * setting never contradicts the published rule of a draw), its benefits as
  * /verify lists them at the head of MY PIECES, one per line, and whether they
  * are the words by default or the console's (with the time of the change).

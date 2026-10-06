@@ -141,11 +141,11 @@ export function galleryImpact(m: Model): string {
 /** Mirrors the server's PRICE_LABEL_MAX (services/lookbook.ts): the price the salon shows, one line. */
 export const PRICE_LABEL_MAX = 60;
 
-/** The tiers a reserved model is shown from, as the Private salon dialog offers them (CLUB_TIER_THRESHOLDS: 1, 3, 5 pieces). */
+/** The tiers a reserved model is shown from, as the Private salon dialog offers them (CLUB_TIER_THRESHOLDS: 1, 5, 10 pieces). */
 export const SALON_TIER_OPTIONS: readonly { value: string; label: string }[] = Object.freeze([
   { value: '1', label: 'TITANE — every owner (1 piece held)' },
-  { value: '2', label: 'PLATINE — 3 pieces held' },
-  { value: '3', label: 'PALLADIUM — 5 pieces held' },
+  { value: '2', label: 'PLATINE — 5 pieces held' },
+  { value: '3', label: 'PALLADIUM — 10 pieces held' },
 ]);
 
 /** The name of a tier by its level, as the page says it. */

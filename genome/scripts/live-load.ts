@@ -570,12 +570,12 @@ async function serve(): Promise<void> {
     });
     accountIds.push(...(await db.insertInto('accounts').values(rows).returning('id').execute()).map((r) => r.id));
   }
-  // A fifth of the accounts own pieces of the model: 10 % PALLADIUM (5 pieces), 5 % PLATINE (3), 5 % TITANE (1).
+  // A fifth of the accounts own pieces of the model: 10 % PALLADIUM (10 pieces), 5 % PLATINE (5), 5 % TITANE (1).
   const holdings: { accountId: string; pieces: number }[] = [];
   for (const id of accountIds) {
     const r = random();
-    if (r < 0.1) holdings.push({ accountId: id, pieces: 5 });
-    else if (r < 0.15) holdings.push({ accountId: id, pieces: 3 });
+    if (r < 0.1) holdings.push({ accountId: id, pieces: 10 });
+    else if (r < 0.15) holdings.push({ accountId: id, pieces: 5 });
     else if (r < 0.2) holdings.push({ accountId: id, pieces: 1 });
   }
   // As the LIVE RELEASES' tests hold them (test/support/live.ts), each owner's pieces in one size.

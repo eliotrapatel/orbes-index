@@ -214,18 +214,23 @@ describe('NOW: an owner\'s sections', () => {
 
   it('the tier in one line (decision 10: its whole block is the account sheet\'s)', () => {
     const status = (level: 0 | 1 | 2 | 3, pieces: number, next: ClubStatus['next']) => ({ tier: { level, name: null }, pieces, next }) as unknown as ClubStatus;
-    expect(tierLine(status(1, 2, { level: 2, name: 'PLATINE', pieces: 3, missing: 1, benefits: [] } as never))).toEqual({
+    // Plan NEXT-NINE, BP-19 T1: the same form with the thresholds 1, 5 and 10.
+    expect(tierLine(status(1, 2, { level: 2, name: 'PLATINE', pieces: 5, missing: 3, benefits: [] } as never))).toEqual({
       name: 'TITANE',
-      text: '2 pieces held. 1 more piece registered to your account opens PLATINE, from 3 pieces held.',
+      text: '2 pieces held. 3 more pieces registered to your account open PLATINE, from 5 pieces held.',
     });
-    expect(tierLine(status(3, 6, null))).toEqual({ name: 'PALLADIUM', text: `6 pieces held. ${TIER.top}` });
+    expect(tierLine(status(2, 9, { level: 3, name: 'PALLADIUM', pieces: 10, missing: 1, benefits: [] } as never))).toEqual({
+      name: 'PLATINE',
+      text: '9 pieces held. 1 more piece registered to your account opens PALLADIUM, from 10 pieces held.',
+    });
+    expect(tierLine(status(3, 10, null))).toEqual({ name: 'PALLADIUM', text: `10 pieces held. ${TIER.top}` });
     expect(tierLine(status(0, 0, { level: 1, name: 'TITANE', pieces: 1, missing: 1, benefits: [] } as never))).toEqual({
       name: 'THE CLUB',
       text: 'A piece registered to your ORBES account opens TITANE, the first tier of the club.',
     });
     expect(tierLine(null)).toBeNull();
     // MY PIECES' sentence is unchanged.
-    expect(TIER.nextWay('PLATINE', 1, 3)).toBe('1 more piece registered to your account opens PLATINE, from 3 pieces held. It adds:');
+    expect(TIER.nextWay('PLATINE', 1, 5)).toBe('1 more piece registered to your account opens PLATINE, from 5 pieces held. It adds:');
     expect(TIER.first('TITANE')).toBe('A piece registered to your ORBES account opens TITANE, the first tier of the club:');
   });
 

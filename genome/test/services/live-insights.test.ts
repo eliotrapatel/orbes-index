@@ -617,21 +617,21 @@ describe('LiveInsightsService on a database', () => {
     // TITANE (two pieces): an ECLIPSE ring in 52, and a later pendant (another type: its size is not read).
     await holdPieces(t.db, titane.id, 1, otherModel, { variant: '52', startedAt: new Date('2025-02-01T00:00:00Z') });
     await holdPieces(t.db, titane.id, 1, pendant, { variant: 'M', startedAt: new Date('2025-05-01T00:00:00Z') });
-    // PLATINE: three MONOLITHE, the latest in 54. PALLADIUM: five, the latest in 52.
-    await holdPieces(t.db, platine.id, 2, f.modelId, { variant: '52', startedAt: new Date('2025-01-01T00:00:00Z') });
+    // PLATINE: five MONOLITHE, the latest in 54. PALLADIUM: ten, the latest in 52.
+    await holdPieces(t.db, platine.id, 4, f.modelId, { variant: '52', startedAt: new Date('2025-01-01T00:00:00Z') });
     await holdPieces(t.db, platine.id, 1, f.modelId, { variant: '54', startedAt: new Date('2025-03-01T00:00:00Z') });
-    await holdPieces(t.db, palladium.id, 5, f.modelId, { variant: '52' });
+    await holdPieces(t.db, palladium.id, 10, f.modelId, { variant: '52' });
     // A pendant of PALLADIUM's in size L, later: another type, left out of the rings' sizes.
     await holdPieces(t.db, palladium.id, 1, pendant, { variant: 'L', startedAt: new Date('2025-06-01T00:00:00Z') });
     // A locked account holding pieces counts nowhere.
     const locked = await createAccount(t.db);
-    await holdPieces(t.db, locked.id, 5, f.modelId, { variant: '52' });
+    await holdPieces(t.db, locked.id, 10, f.modelId, { variant: '52' });
     await t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', locked.id).execute();
   });
   afterAll(() => t?.close());
 
   it('counts the eligible accounts by tier under each rule, and the sizes they hold of the model\'s type', async () => {
-    // PALLADIUM holds 6 pieces (five rings, a pendant): still tier 3.
+    // PALLADIUM holds 11 pieces (ten rings, a pendant): still tier 3.
     const r = await createLiveRelease(f, { opensAt: later(2 * HOUR), sizes: [{ label: '52', stock: 2 }, { label: '54', stock: 1 }], published: false });
     const fc = await insights.forecast(r.id);
     expect(fc).toMatchObject({ eligibleByTier: [2, 1, 1, 1], eligible: 5, basis: 'NONE', low: 0, high: 5, interest: 0, inRoom: null });

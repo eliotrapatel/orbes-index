@@ -1032,7 +1032,7 @@ body.nocturne .n-column > * {
   vertical-align: top;
 }
 
-/* ── The tier as five dots (C .meter) ── */
+/* ── The tier as a row of dots, one per piece up to PALLADIUM (C .meter; plan NEXT-NINE, BP-19 T1: ten, in one row) ── */
 
 .n-meter {
   display: flex;
@@ -1054,6 +1054,18 @@ body.nocturne .n-column > * {
 .n-meter__dot.is-on {
   background: var(--vault-ink);
   box-shadow: none;
+}
+
+/* A 320 px phone: the ten dots at 6 px, 6 px apart, in one row. */
+@media (max-width: 359.98px) {
+  .n-meter {
+    gap: 6px;
+  }
+
+  .n-meter__dot {
+    width: 6px;
+    height: 6px;
+  }
 }
 
 /* ── Fields (C .fld, .lab, .fieldline, .err): a label in Gravesend, a line under the input ── */

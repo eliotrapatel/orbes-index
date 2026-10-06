@@ -7,6 +7,7 @@
  * Browser code: it renders into the column in place of the screen, each piece in a section named by data-piece.
  */
 import { h } from '../../src/web/shared/dom.js';
+import { TIER_DOTS } from '../../src/web/verify/tier-model.js';
 import {
   accLink,
   accordionRow,
@@ -50,7 +51,7 @@ function render(): void {
       piece('card', plateCard([h('p', { class: 'n-g n-lb', text: 'INVITATION' }), h('h3', { class: 'n-g n-t2', text: 'AN EVENING AT THE ATELIER' })], { left: true })),
       h('section', { class: 'n-specimen', data: { piece: 'photo' } }, fadedPhoto(PIXEL, 'A model, photographed by ORBES', { eager: true }), lift([h('h2', { class: 'n-g n-t1', text: 'MONOLITHE' })], { center: true })),
       piece('countdown', countdown([['02', 'DAYS'], ['06', 'HOURS'], ['12', 'MINUTES']], { label: 'Opens in 2 days, 6 hours and 12 minutes' })),
-      piece('dots', tierDots(2)),
+      piece('dots', tierDots(2, TIER_DOTS)),
       piece(
         'variants',
         variantDots(

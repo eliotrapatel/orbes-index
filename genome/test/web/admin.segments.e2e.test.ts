@@ -142,13 +142,13 @@ describe.skipIf(!HAS_CHROMIUM)('the Segments page and the access rules in the co
     await ctx.services.auth.createAdmin({ ...AUDITOR, role: 'AUDITOR' }, SYSTEM_ACTOR);
     await ctx.db.updateTable('admin_users').set({ password_change_required: false }).execute();
     admin = { type: 'admin', id: (await ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow()).id };
-    // Two collectors: one holds a piece in size 58, the other three in size 50 (PLATINE).
+    // Two collectors: one holds a piece in size 58, the other five in size 50 (PLATINE).
     const a = await createAccount(ctx.db);
     const b = await createAccount(ctx.db);
     members.in = a.email;
     members.out = b.email;
     await holdPieces(ctx.db, a.id, 1, modelId, { variant: '58' });
-    await holdPieces(ctx.db, b.id, 3, modelId, { variant: '50' });
+    await holdPieces(ctx.db, b.id, 5, modelId, { variant: '50' });
     // A LIVE RELEASE, a draft, and a post of the circle.
     const opensAt = new Date(Date.now() + 24 * HOUR);
     releaseId = (await ctx.services.liveConsole.create({ modelId, title: 'MONOLITHE — LIVE', opensAt, closesAt: new Date(opensAt.getTime() + HOUR), priceMinor: 480_000, sizes: [{ label: '52', stock: 3 }] }, admin)).id;

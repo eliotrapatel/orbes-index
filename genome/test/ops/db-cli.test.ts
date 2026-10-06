@@ -117,7 +117,7 @@ describe('db CLI: seed and reset-demo', () => {
     const r = await run(['seed'], t.db);
     expect(r.code, r.io.text()).toBe(0);
     const text = r.io.text();
-    expect(text).toMatch(/ORBES demo dataset loaded in [\d.]+ s: 41 products, 8 accounts/);
+    expect(text).toMatch(/ORBES demo dataset loaded in [\d.]+ s: 47 products, 8 accounts/);
     expect(text).toMatch(/Products by status: ISSUED \d+ · ACTIVATED \d+ · REGISTERED/);
     expect(text).toMatch(/password from DEMO_ACCOUNT_PASSWORD/);
     expect(text).not.toContain(DEV_ENV.DEMO_ACCOUNT_PASSWORD);
@@ -151,11 +151,11 @@ describe('db CLI: seed and reset-demo', () => {
     const r = await run(['reset-demo', '--yes', '--json'], t.db, { ...DEV_ENV, DEMO_ACCOUNT_PASSWORD: '' });
     expect(r.code, r.io.text()).toBe(0);
     const result = JSON.parse(r.io.stdout[r.io.stdout.length - 1]);
-    expect(result).toMatchObject({ seeded: true, ephemeral: false, products: 41 });
+    expect(result).toMatchObject({ seeded: true, ephemeral: false, products: 47 });
     // Without DEMO_ACCOUNT_PASSWORD a random password is generated and returned once.
     expect(result.generatedAccountPassword).toMatch(/^[A-Za-z0-9_-]{24}$/);
     const newIds = (await t.db.selectFrom('products').select('id').execute()).map((r) => r.id);
-    expect(newIds).toHaveLength(41);
+    expect(newIds).toHaveLength(47);
     expect(newIds.some((id) => oldIds.includes(id))).toBe(false);
     // A fresh audit chain, still intact.
     const first = await t.db.selectFrom('audit_logs').select(['id']).orderBy('id').executeTakeFirstOrThrow();

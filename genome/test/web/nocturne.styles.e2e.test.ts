@@ -755,14 +755,26 @@ async function sheet(page: Page): Promise<void> {
   await check(page, '.n-account__next-label', { color: IV, 'margin-top': 20 });
   await check(page, '.n-account__email', { 'font-size': 15, color: IV, 'margin-top': 6 });
   await check(page, '.n-account__tier', { 'margin-top': 30, 'padding-left': 24, 'padding-right': 24 });
-  // TITANE (.t2: 16 px, 1.3, 0.14 em) and its pieces (.sm: 13 px, 1.45, ash), then the five dots.
+  // TITANE (.t2: 16 px, 1.3, 0.14 em) and its pieces (.sm: 13 px, 1.45, ash), then the ten dots, one per piece up to
+  // PALLADIUM (plan NEXT-NINE, BP-19 T1), in one row.
   await check(page, '.n-account__tier-name', { 'font-size': 16, 'line-height': '20.8px', 'letter-spacing': em(16, 0.14), color: IV });
   await check(page, '.n-account__tier-pieces', { 'font-size': 13, 'line-height': '18.85px', color: ASH });
   await check(page, '.n-account__dots', { display: 'flex', 'column-gap': 10, 'justify-content': 'flex-start', 'margin-top': 12 });
-  expect(await page.locator('.n-account__dots .n-meter__dot').count()).toBe(5);
+  expect(await page.locator('.n-account__dots .n-meter__dot').count()).toBe(10);
   expect(await page.locator('.n-account__dots .n-meter__dot.is-on').count()).toBe(2);
   await check(page, '.n-account__dots .n-meter__dot.is-on', { width: 9, height: 9, 'border-radius': '50%', 'background-color': IV, 'box-shadow': 'none' });
   await check(page, '.n-account__dots .n-meter__dot:not(.is-on)', { width: 9, height: 9, 'background-color': NONE, 'box-shadow': 'rgba(246, 242, 234, 0.34) 0px 0px 0px 1px inset' });
+  // On a 320 px phone: 6 px dots, 6 px apart, the ten in one row.
+  const size = page.viewportSize()!;
+  try {
+    await page.setViewportSize({ width: 320, height: size.height });
+    await check(page, '.n-account__dots', { 'column-gap': 6 });
+    await check(page, '.n-account__dots .n-meter__dot.is-on', { width: 6, height: 6 });
+    const tops = await page.locator('.n-account__dots .n-meter__dot').evaluateAll((dots) => new Set(dots.map((d) => Math.round(d.getBoundingClientRect().top))).size);
+    expect(tops).toBe(1);
+  } finally {
+    await page.setViewportSize(size);
+  }
   await check(page, '.n-account__benefits', { 'margin-top': 10, 'row-gap': 6 });
   await check(page, '.n-account__benefit', { 'padding-left': 14, 'font-size': 13, color: ASH });
   await check(page, '.n-account__benefit', { content: '"–"', position: 'absolute', left: 0 }, '::before');
@@ -925,7 +937,7 @@ async function pieces(page: Page, script: string): Promise<void> {
   expect(isHelvetica((await read(page, at('countdown', '.n-cd__value'), ['font-family']))['font-family']!)).toBe(true);
   await check(page, at('countdown', '.n-cd__unit'), { 'margin-top': 10, 'font-size': 8.5, 'letter-spacing': em(8.5, 0.24), color: ASH, 'padding-left': em(8.5, 0.24) });
   await check(page, at('countdown', '.n-cd__sep'), { 'font-size': 34, 'font-weight': '200', 'line-height': '37.4px', color: SMOKE, 'font-style': 'normal' });
-  // The tier as five dots, centred.
+  // The tier as a row of dots (ten, one per piece up to PALLADIUM: plan NEXT-NINE, BP-19 T1), centred.
   await check(page, at('dots', '.n-meter'), { display: 'flex', 'justify-content': 'center', 'column-gap': 10 });
   // Variant dots: 26 px apart, 12 px names, the selected one ringed.
   await check(page, at('variants', '.n-vsel'), { display: 'flex', 'justify-content': 'center', 'column-gap': 26 });

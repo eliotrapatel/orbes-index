@@ -45,7 +45,7 @@ describe('segments and the access rules: the console’s and the public routes',
     member = await signedIn();
     outsider = await signedIn();
     await holdPieces(h.ctx.db, member.id, 1, f.modelId, { variant: '58' });
-    await holdPieces(h.ctx.db, outsider.id, 3, f.modelId, { variant: '50' });
+    await holdPieces(h.ctx.db, outsider.id, 5, f.modelId, { variant: '50' });
   });
   afterAll(() => h?.close());
 

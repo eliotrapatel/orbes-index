@@ -1312,7 +1312,7 @@ The visits of the circle per UTC day (migration `0016_circle`): a count, and not
 
 ### 5.36 `club_tiers`
 
-The words of the club's tiers' benefits, as the console changed them (migration `0018_club_tiers`, P-X04; [API §10.10, §16.21](API.md#1621-the-tiers-the-club-pages-benefits-extension-of-the-contract)). **No row is inserted**: the words by default are constants of the code, in English (`services/club.ts` `CLUB_TIER_DEFAULT_BENEFITS`); the table keeps only what the console changed, and a tier restored to its default loses its row. The thresholds (1, 3 and 5 pieces) are a constant of the code, never here.
+The words of the club's tiers' benefits, as the console changed them (migration `0018_club_tiers`, P-X04; [API §10.10, §16.21](API.md#1621-the-tiers-the-club-pages-benefits-extension-of-the-contract)). **No row is inserted**: the words by default are constants of the code, in English (`services/club.ts` `CLUB_TIER_DEFAULT_BENEFITS`); the table keeps only what the console changed, and a tier restored to its default loses its row. The thresholds (1, 5 and 10 pieces) are a constant of the code, never here.
 
 | Column | Type | Null | Default | Constraints / notes |
 |---|---|---|---|---|

@@ -322,12 +322,12 @@ export function tierBenefitsChange(t: Pick<ClubTierSheet, 'benefits' | 'defaultB
   return next === now ? undefined : next;
 }
 
-/** A tier's threshold: `From 1 piece`, `From 3 pieces`. */
+/** A tier's threshold: `From 1 piece held`, `From 5 pieces held`. */
 export function tierThreshold(t: Pick<ClubTierSheet, 'pieces'>): string {
   return `From ${t.pieces} ${t.pieces === 1 ? 'piece' : 'pieces'} held`;
 }
 
-/** An account's tier on its sheet (A-06): `PLATINE · 3 pieces held · 2 years`, or `None · 0 pieces held`. */
+/** An account's tier on its sheet (A-06): `PLATINE · 5 pieces held · 2 years`, or `None · 0 pieces held`. */
 export function tierStanding(t: OwnerSheet['tier'] | null | undefined): string {
   if (!t) return '—';
   const pieces = `${t.pieces} ${t.pieces === 1 ? 'piece' : 'pieces'} held`;

@@ -103,7 +103,7 @@ describe('the private salon (P-X08)', () => {
     eclipse = await newModel('ECLIPSE');
     aurore = await newModel('AURORE');
     titane = await member(1);
-    platine = await member(3);
+    platine = await member(5);
   });
   afterAll(() => h?.close());
 
@@ -296,12 +296,12 @@ describe('the private salon (P-X08)', () => {
     const owner = await member(1);
     // A model at the account's tier: the salon is open, nothing to say about what opens it.
     expect(await grid(owner.client)).toEqual([['solstice'], null]);
-    // SOLSTICE from PLATINE, ECLIPSE from PALLADIUM: a TITANE owner reads no model, and that PLATINE opens it from 3 pieces.
+    // SOLSTICE from PLATINE, ECLIPSE from PALLADIUM: a TITANE owner reads no model, and that PLATINE opens it from 5 pieces.
     expect((await operator.patch(model(solstice), { privateMinTier: 2 })).statusCode).toBe(200);
-    expect(await grid(owner.client)).toEqual([[], { level: 2, name: 'PLATINE', pieces: 3 }]);
-    // Both from PALLADIUM: a PLATINE owner reads that PALLADIUM opens it, from 5 pieces.
+    expect(await grid(owner.client)).toEqual([[], { level: 2, name: 'PLATINE', pieces: 5 }]);
+    // Both from PALLADIUM: a PLATINE owner reads that PALLADIUM opens it, from 10 pieces.
     expect((await operator.patch(model(solstice), { privateMinTier: 3 })).statusCode).toBe(200);
-    expect(await grid(platine.client)).toEqual([[], { level: 3, name: 'PALLADIUM', pieces: 5 }]);
+    expect(await grid(platine.client)).toEqual([[], { level: 3, name: 'PALLADIUM', pieces: 10 }]);
     // No RESERVED model shown above the account's tier (HIDDEN, or no address): nothing.
     for (const id of [solstice, eclipse]) expect((await operator.patch(model(id), { lookbook: 'HIDDEN' })).statusCode).toBe(200);
     expect(await grid(owner.client)).toEqual([[], null]);

@@ -1,6 +1,6 @@
 /**
  * Demo dataset: a small, believable ORBES maison: five categories, a
- * catalogue of models, 41 products across the lifecycle, eight customer
+ * catalogue of models, 47 products across the lifecycle, eight customer
  * accounts, the points of sale where the pieces were sold, warranties,
  * service records, transfers, incidents and scan histories, with anomalies
  * that came out of real anomaly scoring and two customers' reports on scans
@@ -35,6 +35,10 @@
  *   O26-L-00018  APOGEE BELT in stock in Milan (ISSUED), its code scanned in
  *                Lyon by a stranger: AUTHENTIC, and an OPEN UNSOLD PIECE
  *                SCANNED finding (S-07)
+ *
+ * The club's tiers (TITANE from 1 piece held, PLATINE from 5, PALLADIUM from
+ * 10: services/club.ts CLUB_TIER_THRESHOLDS): Camille Martin holds ten pieces
+ * (PALLADIUM), Lucas Weber five (PLATINE), every other account fewer (TITANE).
  *
  * Demo only: emails are @example.com, passwords are random unless supplied,
  * and `seedDemo` refuses a production configuration.
@@ -326,6 +330,30 @@ const PRODUCTS: readonly ProductDef[] = [
     scenario: 'In stock (ISSUED), white-gold variant.',
   },
   {
+    productId: 'O26-J-00188',
+    model: 'HORIZON',
+    batch: 'B2604-HRZ',
+    issuedAt: '2026-04-08T09:25',
+    expect: 'AUTHENTIC_REGISTERED',
+    scenario: 'Owned by Camille Martin, one of her ten pieces (PALLADIUM).',
+    story: (s) => {
+      s.activate('2026-05-23T15:00', 'PARIS');
+      s.register('2026-05-23T19:00', 'camille');
+    },
+  },
+  {
+    productId: 'O26-J-00189',
+    model: 'ECLIPSE',
+    batch: 'B2604-ECL',
+    issuedAt: '2026-04-08T09:30',
+    expect: 'AUTHENTIC_REGISTERED',
+    scenario: 'Owned by Lucas Weber, his fifth piece (PLATINE).',
+    story: (s) => {
+      s.activate('2026-05-28T10:00', 'ONLINE_DE');
+      s.register('2026-05-30T19:00', 'lucas');
+    },
+  },
+  {
     productId: 'O26-J-00190',
     model: 'ORBITE',
     variant: 'SIZE 58',
@@ -534,6 +562,19 @@ const PRODUCTS: readonly ProductDef[] = [
     story: (s) =>
       s.status('2025-11-04T09:00', 'COUNTERFEIT_FLAGGED', 'Missing from Milan stock; copies of its code reported in online marketplace listings.'),
   },
+  {
+    productId: 'O25-J-00046',
+    model: 'ORBITE',
+    variant: 'SIZE 54',
+    batch: 'B2505-ORB',
+    issuedAt: '2025-06-02T09:00',
+    expect: 'AUTHENTIC_REGISTERED',
+    scenario: 'Owned by Camille Martin since June 2025, one of her ten pieces (PALLADIUM).',
+    story: (s) => {
+      s.activate('2025-06-14T15:00', 'PARIS');
+      s.register('2025-06-14T20:30', 'camille');
+    },
+  },
 
   // ── Leather goods 2026 (MERIDIAN) ───────────────────────────────────────
   {
@@ -664,6 +705,19 @@ const PRODUCTS: readonly ProductDef[] = [
       s.voidWarranty('2025-11-12T10:00', 'Strap shortened by a third party; warranty void.');
     },
   },
+  {
+    productId: 'O25-L-00009',
+    model: 'ATLAS',
+    variant: 'BLACK',
+    batch: 'L2508-ATL',
+    issuedAt: '2025-08-25T08:00',
+    expect: 'AUTHENTIC_REGISTERED',
+    scenario: 'Owned by Camille Martin since September 2025, one of her ten pieces (PALLADIUM).',
+    story: (s) => {
+      s.activate('2025-09-20T16:00', 'PARIS');
+      s.register('2025-09-20T21:00', 'camille');
+    },
+  },
 
   // ── Watches (ZENITH) ─────────────────────────────────────────────────────
   {
@@ -698,6 +752,19 @@ const PRODUCTS: readonly ProductDef[] = [
     issuedAt: '2026-01-12T09:10',
     expect: 'AUTHENTIC',
     scenario: 'In stock (ISSUED), rose-gold variant.',
+  },
+  {
+    productId: 'O26-W-00006',
+    model: 'SOLSTICE',
+    variant: '38 MM',
+    batch: 'W2601-SLS',
+    issuedAt: '2026-01-12T09:15',
+    expect: 'AUTHENTIC_REGISTERED',
+    scenario: 'Owned by Camille Martin, one of her ten pieces (PALLADIUM).',
+    story: (s) => {
+      s.activate('2026-06-20T14:00', 'PARIS');
+      s.register('2026-06-20T20:00', 'camille');
+    },
   },
   {
     productId: 'O25-W-00011',
@@ -791,6 +858,18 @@ const PRODUCTS: readonly ProductDef[] = [
       s.activate('2026-02-28T05:00', 'TOKYO');
       s.register('2026-02-28T11:00', 'kenji');
       s.transfer('2026-06-10T09:00', 'kenji', { at: '2026-06-12T18:00', to: 'hugo' });
+    },
+  },
+  {
+    productId: 'O26-A-00011',
+    model: 'PARALLAX',
+    batch: 'A2601-PLX',
+    issuedAt: '2026-01-26T08:15',
+    expect: 'AUTHENTIC_REGISTERED',
+    scenario: 'Owned by Camille Martin, the tenth of her pieces (PALLADIUM).',
+    story: (s) => {
+      s.activate('2026-07-04T15:00', 'PARIS');
+      s.register('2026-07-04T19:30', 'camille');
     },
   },
   {

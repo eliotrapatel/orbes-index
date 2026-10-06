@@ -745,8 +745,9 @@ describe('legal pages: both languages, links, lexicon', () => {
       '2026-10-05': '5f46f78e4a3dbf4c',
       '2026-10-06': '3212223fecb82628',
       '2026-10-07': '2841f4e7fc2fbe23',
-      // The next nine (plan of 2026-10-06), deployment G: the privacy policy's messages with ORBES Client Services.
-      '2026-10-08': '607dfa79cfe21f33',
+      // The next nine (plan of 2026-10-06), deployment G: the privacy policy's messages with ORBES Client Services; terms
+      // article 12's tiers at 1, 5 and 10 pieces (BP-19 T1).
+      '2026-10-08': 'd9aa5be15ee01f25',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });

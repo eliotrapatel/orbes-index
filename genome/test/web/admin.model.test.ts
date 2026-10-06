@@ -614,8 +614,8 @@ describe('the Club\'s tiers (P-X04)', () => {
   });
 
   it('says each threshold, and an account\'s tier on its sheet (A-06)', () => {
-    expect(CLUB_TIER_THRESHOLDS.map((pieces) => tierThreshold({ pieces }))).toEqual(['From 1 piece held', 'From 3 pieces held', 'From 5 pieces held']);
-    expect(tierStanding({ level: 2, name: 'PLATINE', pieces: 3, seniority: 2 })).toBe('PLATINE · 3 pieces held · 2 years');
+    expect(CLUB_TIER_THRESHOLDS.map((pieces) => tierThreshold({ pieces }))).toEqual(['From 1 piece held', 'From 5 pieces held', 'From 10 pieces held']);
+    expect(tierStanding({ level: 2, name: 'PLATINE', pieces: 5, seniority: 2 })).toBe('PLATINE · 5 pieces held · 2 years');
     expect(tierStanding({ level: 1, name: 'TITANE', pieces: 1, seniority: 1 })).toBe('TITANE · 1 piece held · 1 year');
     expect(tierStanding({ level: 0, name: null, pieces: 0, seniority: 0 })).toBe('None · 0 pieces held');
     expect(tierStanding(undefined)).toBe('—');

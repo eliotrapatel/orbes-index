@@ -733,7 +733,7 @@ export const UI_STATES: readonly UiState[] = [
   },
   {
     id: 'account-sheet-stress',
-    title: 'The account sheet with the extreme content: PALLADIUM, six pieces',
+    title: 'The account sheet with the extreme content: PLATINE, six pieces',
     refs: ['same pieces'],
     variant: 'stress',
     as: you,
@@ -1116,7 +1116,7 @@ export const UI_STATES: readonly UiState[] = [
 
   // ── States that write (each its own piece or post) ──
   // The owner's transfer code first: you@example.com still holds its two pieces (TITANE, as C37 draws the header); the two
-  // registrations after it give the account its third and fourth (PLATINE from three), which MY PIECES' states list.
+  // registrations after it give the account its third and fourth (still TITANE: PLATINE from five), which MY PIECES' states list.
   {
     id: 'result-transfer-code',
     title: 'The owner’s transfer code, created',

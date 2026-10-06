@@ -789,7 +789,7 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
   const f: LiveFixture = await stageFixture(stage);
   const monolithe = (await db.selectFrom('models').select('id').where('sku_prefix', '=', 'MNL-RG').executeTakeFirstOrThrow()).id;
   let n = 0;
-  /** An ORBES account holding `pieces` pieces of MONOLITHE (its tier: 1 TITANE, 3 PLATINE, 5 PALLADIUM), signed in. */
+  /** An ORBES account holding `pieces` pieces of MONOLITHE (its tier: 1 TITANE, 5 PLATINE, 10 PALLADIUM), signed in. */
   const account = async (pieces: number) => {
     const { account: a, session } = await ctx.services.auth.registerAccount({ email: `collector.${++n}@example.com`, password: 'capture-ui-live-password' }, {});
     if (pieces > 0) await holdPieces(db, a.id, pieces, monolithe);
@@ -843,9 +843,9 @@ async function captureLive(stage: Stage, shots: Shots): Promise<void> {
 
     // The collectors: one who will be there (PLATINE), one ahead of her at T0 (PALLADIUM), the room and the interest
     // (the fourth of the crowd holds no piece: in neither).
-    const me = await account(3);
-    const rival = await account(5);
-    const crowd = await Promise.all([3, 3, 5, 0, 5, 3].map((p) => account(p)));
+    const me = await account(5);
+    const rival = await account(10);
+    const crowd = await Promise.all([5, 5, 10, 0, 10, 5].map((p) => account(p)));
     const day = 86_400_000;
 
     // Announced, opening in 2 h 14 min, every stage revealed: I'LL BE THERE counted. The banner counts down to it.
@@ -1117,7 +1117,7 @@ function pdfFirstPage(pdf: Uint8Array | string, workDir: string, name: string): 
  * the order of its flow: the collector's screens on the phone of verify (the ivory of THE RELEASES, the vault, then MY
  * PIECES), the console's new pages (1 440 × 900), then the four printed documents, black on white.
  *
- * One collector, Hélène Morel (PLATINE, three pieces of MONOLITHE), lived through the releases of the last days on
+ * One collector, Hélène Morel (PLATINE, five pieces of MONOLITHE), lived through the releases of the last days on
  * services of their own clock over the stage's database (test/support/live.ts liveFixture, as test/web/verify.orders.e2e
  * does), ORBES Client Services and the atelier following her orders on that clock too: the draw (her place confirmed,
  * then paid: PAID, its piece being made), LIVE I (her piece secured, paid, made at the atelier, shipped by Colissimo and
@@ -1156,8 +1156,8 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
       if (pieces > 0) await holdPieces(db, a.id, pieces, monolithe);
       return { id: a.id, token: session.token, actor: { type: 'account' as const, id: a.id } };
     };
-    const me = await account('helene.morel@example.com', 3);
-    const rival = await account('a.lindqvist@example.com', 5);
+    const me = await account('helene.morel@example.com', 5);
+    const rival = await account('a.lindqvist@example.com', 10);
     const payer = await account('m.okafor@example.com', 1);
     const canceller = await account('j.serrano@example.com', 1);
     const newcomer = await account('t.nguyen@example.com', 0);

@@ -406,7 +406,7 @@ The releases (P-R03, §8.9, §10.10, §16.19):
 | `DROP_ALREADY_RESERVED` | 409 | (§10.10, P-X02) The account already holds an entry or a direct reservation in this release (one per account and release): a reservation is not entered again, nor reserved twice. |
 | `DROP_EARLY_ACCESS_NOT_OPEN` | 409 | (§10.10, P-X02) The release's early access has not begun: *Direct reservations for this release open on YYYY-MM-DD HH:MM UTC.* |
 | `DROP_EARLY_ACCESS_CLOSED` | 409 | (§10.10, P-X02) Direct reservations are closed from `opensAt` on (the places left go to the draw), or the release offers none (`earlyAccessHours` 0, or published at or after its opening). |
-| `DROP_TIER_REQUIRED` | 403 | (§10.10, P-X02) The account's tier now is below PLATINE: *Only PLATINE and PALLADIUM owners reserve a place directly: from 3 pieces held.* |
+| `DROP_TIER_REQUIRED` | 403 | (§10.10, P-X02) The account's tier now is below PLATINE: *Only PLATINE and PALLADIUM owners reserve a place directly: from 5 pieces held.* |
 | `DROP_SEED_UNAVAILABLE` | 503 | (§16.19) The seed of the draw cannot be opened with this server's key, or does not match its commitment (`seedHash`): the draw does not run, nothing is written. The key the seeds are sealed with comes from `KEY_ENCRYPTION_KEY` (from `COOKIE_SECRET` without one): changing it leaves the seeds of the releases not drawn yet unreadable ([DEPLOYMENT](DEPLOYMENT.md)); such a release is cancelled and created again. |
 | `DROP_LIVE` | 409 | (§16.19) The release is a LIVE RELEASE (§8.10): it has no draw and no waiting list. Its own routes are §16.23; the draw's public routes (§8.9, §10.10) answer `404 DROP_NOT_FOUND` for it. |
 
@@ -1822,7 +1822,7 @@ An **owner** is an account that holds at least one piece now: an ownership still
   | `priceLabel` | The price as the salon shows it, 1 to 60 characters (« € 4 800 », « Price on request »), or `null`: no price shown. An indicative price: the sale is concluded by ORBES Client Services. |
   | `minTier` | The lowest tier the model is shown to: 1 TITANE, 2 PLATINE, 3 PALLADIUM. |
 
-  `opensAt` (plan NOCTURNE, screen 5: the salon locked below its tier, with what opens it): when the account's tier reaches no model (`models` empty), the lowest tier above it from which a RESERVED model with an address is shown, `{ "level": 2, "name": "PLATINE", "pieces": 3 }` (`pieces`: the pieces held that tier starts from, §10.10); `null` when the account's tier reaches a model, or when no model is shown above it. It never names a model (terms, article 12): /verify says *It opens at PLATINE, from 3 pieces registered to your ORBES account.* in the teaser's plate.
+  `opensAt` (plan NOCTURNE, screen 5: the salon locked below its tier, with what opens it): when the account's tier reaches no model (`models` empty), the lowest tier above it from which a RESERVED model with an address is shown, `{ "level": 2, "name": "PLATINE", "pieces": 5 }` (`pieces`: the pieces held that tier starts from, §10.10); `null` when the account's tier reaches a model, or when no model is shown above it. It never names a model (terms, article 12): /verify says *It opens at PLATINE, from 5 pieces registered to your ORBES account.* in the teaser's plate.
 
 - **`GET /api/v1/club/lookbook/:slug`, 200**: a sheet of §8.8, PUBLIC or RESERVED (`"lookbook": "RESERVED"` for a reserved one). A RESERVED sheet is answered only from its tier up: above the account's tier it is **`404 LOOKBOOK_NOT_FOUND`**, the same answer as a model not shown. A RESERVED sheet carries `salon`; a PUBLIC one has none:
 
@@ -1860,7 +1860,7 @@ P-R03, P-X02 and P-X04 (`routes/club.ts`, `services/club.ts`, `services/drops.ts
 ```json
 {
   "tier": { "level": 2, "name": "PLATINE" },
-  "pieces": 3,
+  "pieces": 6,
   "seniority": 1,
   "benefits": [
     "The owners’ circle: its notes, its invitations and its polls.",
@@ -1871,10 +1871,11 @@ P-R03, P-X02 and P-X04 (`routes/club.ts`, `services/club.ts`, `services/drops.ts
   "next": {
     "level": 3,
     "name": "PALLADIUM",
-    "pieces": 5,
-    "missing": 2,
+    "pieces": 10,
+    "missing": 4,
     "benefits": ["Special commissions, made for you by the ORBES atelier.", "A yearly visit to the ORBES atelier."]
   },
+  "tierThresholds": [1, 5, 10],
   "entries": [
     {
       "id": "7c2e90d1-…",
@@ -1896,11 +1897,12 @@ P-R03, P-X02 and P-X04 (`routes/club.ts`, `services/club.ts`, `services/drops.ts
 
 | Field | Notes |
 |---|---|
-| `tier` | `level`, 0 to 3, and its `name` (`null` for 0): TITANE from 1 piece held now, PLATINE from 3, PALLADIUM from 5 (`CLUB_TIER_THRESHOLDS`, a constant of the code, never a setting). A piece counts while its ownership is open and it is not REVOKED, COUNTERFEIT_FLAGGED or RETIRED, as for §10.9. |
+| `tier` | `level`, 0 to 3, and its `name` (`null` for 0): TITANE from 1 piece held now, PLATINE from 5, PALLADIUM from 10 (`CLUB_TIER_THRESHOLDS`, a constant of the code, never a setting; plan NEXT-NINE, BP-19 T1, for every account at once). A piece counts while its ownership is open and it is not REVOKED, COUNTERFEIT_FLAGGED or RETIRED, as for §10.9. |
 | `pieces` | The pieces counted. |
 | `seniority` | The full years (UTC) since the account's first ownership began, past or present; 0 without one. |
 | `benefits` | (P-X04) The benefits of the account's tier and of the tiers below it, one line each, the lowest tier first; `[]` without a tier. Each tier's words are ORBES's, set from the console's Club (§16.21), its words by default otherwise (`CLUB_TIER_DEFAULT_BENEFITS`). |
 | `next` | (P-X04) The next tier: its `level` and `name`, the `pieces` held it starts from (the threshold), how many more the account needs (`missing`, at least 1) and what that tier adds (`benefits`, its own lines only); `null` at PALLADIUM, the highest. An account without a tier reads TITANE here. |
+| `tierThresholds` | (plan NEXT-NINE, BP-19 T1) The pieces held now each tier starts from, TITANE first: `[1, 5, 10]` (`CLUB_TIER_THRESHOLDS`). YOUR TIER draws one dot per piece up to the last, PALLADIUM's (10 dots). |
 | `entries[].id` | The entry's id: the one the draw's list publishes (§8.9). |
 | `entries[].state` | The release's state (§8.9). |
 | `entries[].status` | `ENTERED`; `WITHDRAWN`; `SELECTED`, a place held until `respondBy`; `WAITLISTED`, on the waiting list at `rank`; `CONFIRMED`, the sale concluded by ORBES Client Services; `LAPSED`, the place held was not taken up in time. |
@@ -1922,7 +1924,7 @@ The tier and the seniority are those of now. An entry's own `tier` and `seniorit
 | `409 DROP_CANCELLED`, `409 DROP_ALREADY_DRAWN` | Cancelled, or drawn. |
 | `409 DROP_EARLY_ACCESS_NOT_OPEN` | Before its early access: *Direct reservations for this release open on YYYY-MM-DD HH:MM UTC.* |
 | `409 DROP_EARLY_ACCESS_CLOSED` | From `opensAt` on (*Direct reservations for this release are closed: the places left go to the draw.*), or a release without one (*This release offers no direct reservation: its places go to the draw.*). |
-| `403 DROP_TIER_REQUIRED` | A tier below PLATINE now: *Only PLATINE and PALLADIUM owners reserve a place directly: from 3 pieces held.* |
+| `403 DROP_TIER_REQUIRED` | A tier below PLATINE now: *Only PLATINE and PALLADIUM owners reserve a place directly: from 5 pieces held.* |
 | `409 DROP_ALREADY_RESERVED` | The account already holds an entry in this release (one entry or reservation per account and release). |
 | `409 DROP_FULL` | The places held or sold reach `quantity`: every piece is reserved. |
 
@@ -3415,7 +3417,7 @@ AUDITOR. The owner's sheet for ORBES Client Services (A-06): what they need whil
 - `pieces`: every ownership period of the account (`ownership`), the pieces owned now first (`until: null`), then those owned before; newest first within each.
 - `transfers`: the transfers the account offered that are still pending and unexpired.
 - `scans`: its **20 latest** scans made while signed in (`scan_events.account_id`), newest first, each with its REF.
-- `tier` (P-X04): the account's tier in the club now, `{ "level": 2, "name": "PLATINE", "pieces": 3, "seniority": 1 }`, computed as §10.10 computes it (`level` 0 and `name` `null` without a piece).
+- `tier` (P-X04): the account's tier in the club now, `{ "level": 2, "name": "PLATINE", "pieces": 5, "seniority": 1 }`, computed as §10.10 computes it (`level` 0 and `name` `null` without a piece).
 - The client sheet (plan LIVE RELEASE+, N4):
   - `orders`: every order of the account, the latest first, each the board's card (§16.24) without its collector, with its `priceMinor` and `currency` (`null` until entered) and `steps`, the time it reached each step (`reservedAt`, `paidAt`, `shippedAt`, `deliveredAt`, `cancelledAt`, `returnedAt`, `null` until reached), and its `timing` (late or not, by the M3 rules);
   - `releases`: `{ "count", "secured", "items": [{ "id", "kind": "LIVE" | "DRAW", "title", "opensAt", "secured" }] }`, the releases it took part in (§10.15's definition), the latest first, with the pieces it secured in each (its after-room's in its release; a draw's entry confirmed is one), `secured` their sum;
@@ -3769,7 +3771,7 @@ In the console: Club (Clients), **Circle**: the posts with their kind, tier, sta
 
 ### 16.21 The tiers: the Club page's benefits (extension of the contract)
 
-P-X04 (`routes/admin/club.ts`, `services/club.ts`): the console's **Club** page, its **Tiers** tab. The tiers are TITANE, PLATINE and PALLADIUM, reached at **1, 3 and 5 pieces held now** (`CLUB_TIER_THRESHOLDS`, a constant of the code that never changes here: a setting could contradict the published rule of a draw). Only the **words of their benefits** change, what each tier adds to the ones below it, shown in MY PIECES (§10.10). Nothing personal is read or written.
+P-X04 (`routes/admin/club.ts`, `services/club.ts`): the console's **Club** page, its **Tiers** tab. The tiers are TITANE, PLATINE and PALLADIUM, reached at **1, 5 and 10 pieces held now** (`CLUB_TIER_THRESHOLDS`, a constant of the code that never changes here: a setting could contradict the published rule of a draw). Only the **words of their benefits** change, what each tier adds to the ones below it, shown in MY PIECES (§10.10). Nothing personal is read or written.
 
 - **`GET /api/admin/club/tiers`** (AUDITOR): `{ "items": [ { "tier": "TITANE", "level": 1, "pieces": 1, "benefits": "…", "defaultBenefits": "…", "edited": false, "updatedAt": null }, … ] }`, TITANE first. `benefits`: the words now, one benefit per line; `defaultBenefits`: the words by default (`CLUB_TIER_DEFAULT_BENEFITS`, in English); `edited`: the console changed them (a row of `club_tiers`); `updatedAt`: when, `null` while they are the default ones.
 - **`PATCH /api/admin/club/tiers/:tier`** (OPERATOR; console capability `manageClubTiers`): `:tier` is `TITANE`, `PLATINE` or `PALLADIUM` exactly (any other value: `400 VALIDATION_FAILED`). Body `{ "benefits": string | null }`, strict. One benefit per line: blank lines and the spaces around each line are dropped, then at most **600 characters** and **8 lines** (`CLUB_TIER_BENEFITS_MAX`, `CLUB_TIER_BENEFIT_LINES`; `400 VALIDATION_FAILED` beyond). `null`, `""` or the default words exactly **restore the default** (the tier's row is deleted). **200** — the tier's sheet, as in the list. Audited `club.tier.update` with `{ tier, benefits, previous }` (`benefits` `null`: the default restored; `previous` the console's words before, or `null`).

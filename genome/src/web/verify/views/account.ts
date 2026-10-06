@@ -7,11 +7,12 @@
  *   SIGNED IN AS
  *   you@example.com
  *   YOUR TIER                             the club's tier (P-X04), moved here from MY PIECES (decision 10): the tier
- *   TITANE                2 pieces held   and the pieces it counts, its five dots, the benefits of the tier and of
- *   ● ● ○ ○ ○                             those below it, NEXT and what it adds (PALLADIUM: the highest); without a
+ *   TITANE                2 pieces held   and the pieces it counts, its ten dots (one per piece up to PALLADIUM,
+ *   ● ● ○ ○ ○ ○ ○ ○ ○ ○                   TIER_DOTS), the benefits of the tier and of those below it, NEXT and
+ *                                         what it adds (PALLADIUM: the highest); without a
  *   – The owners' circle: …               tier, THE CLUB and what a first piece opens; a piece revoked or retired
  *   NEXT: PLATINE                         counts for none (the note); nothing when the status cannot be read
- *   1 more piece … It adds:
+ *   3 more pieces … It adds:
  *   – Priority care …
  *   ─────────────────────────────────
  *   MESSAGES                    NEW ›     the conversation with ORBES Client Services (plan NEXT-NINE, CS-01): NEW
@@ -229,7 +230,7 @@ export class AccountSheet {
 
   /**
    * YOUR TIER (P-X04), moved from MY PIECES (decision 10), as tier-model.ts reads it: the tier and the pieces it counts,
-   * its five dots, the benefits of the tier and of those below it, NEXT and what it adds (PALLADIUM: the highest);
+   * its ten dots (TIER_DOTS), the benefits of the tier and of those below it, NEXT and what it adds (PALLADIUM: the highest);
    * without a tier, THE CLUB and what a first piece opens; the note of a piece that counts for none. Nothing when the
    * status could not be read.
    */
@@ -238,13 +239,12 @@ export class AccountSheet {
     const m = tierModel(this.club, this.listed);
     const list = (items: string[], extra?: string) =>
       items.length ? h('ul', { class: ['n-account__benefits', extra] }, ...items.map((l) => h('li', { class: 'n-sm n-account__benefit', text: l }))) : null;
-    const pieces = Math.max(0, Number(this.club.pieces) || 0);
     const parts: (HTMLElement | null)[] = [
       h('p', { class: 'n-g n-lb', id: 'account-tier', text: m.label }),
       m.badge
         ? h('div', { class: 'n-sb n-account__badge', data: { tier: m.badge.name } }, h('span', { class: 'n-g n-t2 n-account__tier-name', text: m.badge.name }), h('span', { class: 'n-sm n-account__tier-pieces', text: m.badge.pieces }))
         : null,
-      m.badge ? tierDots(pieces, { start: true }) : null,
+      m.meter ? tierDots(m.meter.on, m.meter.of, { start: true }) : null,
       list(m.benefits),
       m.next
         ? h(

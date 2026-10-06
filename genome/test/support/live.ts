@@ -10,6 +10,7 @@ import { packIdentity } from '../../src/core/identity.js';
 import { testConfig, type AppConfig } from '../../src/server/config.js';
 import type { Db } from '../../src/server/db/connection.js';
 import { AuditService } from '../../src/server/services/audit.js';
+import { CLUB_TIER_THRESHOLDS } from '../../src/server/services/club.js';
 import { deriveDropSeedKey, DropService } from '../../src/server/services/drops.js';
 import { deriveLiveTurnKey, LiveService } from '../../src/server/services/live.js';
 import { LiveConsoleService, type AfterRoomInput } from '../../src/server/services/live-console.js';
@@ -103,25 +104,27 @@ export async function createAccount(db: Db): Promise<{ id: string; email: string
 
 /**
  * `n` pieces held now by the account (open ownerships), of `modelId`; a piece's own collection when given, its size
- * (`products.variant`) and the start of its ownership (1 January 2025 by default).
+ * (`products.variant`), the start of its ownership (1 January 2025 by default) and the year of its serial (2026 by
+ * default; another year's serials leave those of 2026 as they are).
  */
 export async function holdPieces(
   db: Db,
   accountId: string,
   n: number,
   modelId: string,
-  opts: { collectionId?: string | null; variant?: string | null; startedAt?: Date } = {},
+  opts: { collectionId?: string | null; variant?: string | null; startedAt?: Date; year?: number } = {},
 ): Promise<string[]> {
   const ids: string[] = [];
+  const year = opts.year ?? 2026;
   for (let i = 0; i < n; i++) {
-    const top = await db.selectFrom('products').select((eb) => eb.fn.max('serial').as('s')).where('category_id', '=', CATEGORY).where('year', '=', 2026).executeTakeFirstOrThrow();
+    const top = await db.selectFrom('products').select((eb) => eb.fn.max('serial').as('s')).where('category_id', '=', CATEGORY).where('year', '=', year).executeTakeFirstOrThrow();
     const serial = Number(top.s ?? 0) + 1;
     const product = await db
       .insertInto('products')
       .values({
-        product_id: `O26-J-${String(serial).padStart(5, '0')}`,
-        packed_identity: packIdentity({ year: 2026, categoryIndex: CATEGORY, serial }),
-        year: 2026,
+        product_id: `O${String(year % 100).padStart(2, '0')}-J-${String(serial).padStart(5, '0')}`,
+        packed_identity: packIdentity({ year, categoryIndex: CATEGORY, serial }),
+        year,
         category_id: CATEGORY,
         serial,
         sku: `LIVE-${serial}`,
@@ -140,10 +143,10 @@ export async function holdPieces(
   return ids;
 }
 
-/** An account holding `pieces` pieces: tier 0 (none), 1 TITANE (1), 2 PLATINE (3), 3 PALLADIUM (5). */
+/** An account holding the pieces its tier starts from (CLUB_TIER_THRESHOLDS): tier 0 (none), 1 TITANE (1), 2 PLATINE (5), 3 PALLADIUM (10). */
 export async function accountOfTier(f: Pick<LiveFixture, 'db' | 'modelId'>, tier: 0 | 1 | 2 | 3) {
   const a = await createAccount(f.db);
-  const pieces = [0, 1, 3, 5][tier]!;
+  const pieces = tier === 0 ? 0 : CLUB_TIER_THRESHOLDS[tier - 1]!;
   if (pieces) await holdPieces(f.db, a.id, pieces, f.modelId);
   return a;
 }

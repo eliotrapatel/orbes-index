@@ -16,7 +16,7 @@
  *   ┌───────────────────────────┐            plate card that says what it is and what opens it, SIGN IN and SCAN ORBES
  *   │ THE PRIVATE SALON  …      │            CODE, never a model (terms, article 12); an owner whose tier reaches no
  *   └───────────────────────────┘            model of it: the same plate, locked, with the tier that opens it and its
- *                                            pieces (It opens at PLATINE, from 3 pieces…) and SCAN ORBES CODE
+ *                                            pieces (It opens at PLATINE, from 5 pieces…) and SCAN ORBES CODE
  *
  * The sheet: ‹ THE COLLECTION; the photograph whole, faded; its collection, name, line (type, THE PRIVATE SALON,
  * DISCONTINUED · <year>), SIZES 16 · 17 · 18 (addition 8), the dots (each switches the sheet: its photographs, story,

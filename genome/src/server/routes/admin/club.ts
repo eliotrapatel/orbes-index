@@ -9,7 +9,7 @@
  *   POST  /api/admin/club/requests/:id/close   OPERATOR  CLOSED, with a note (what was done for the client) and the
  *                                                        outcome: ACCEPTED (its order is created) or DECLINED
  *
- * The thresholds (1, 3 and 5 pieces held now) are a constant of the code and never change here: a setting could
+ * The thresholds (1, 5 and 10 pieces held now) are a constant of the code and never change here: a setting could
  * contradict the published rule of a draw. services/club.ts validates and audits the tiers (`club.tier.update`),
  * services/salon.ts the requests (`shop.request.close`); these routes parse and shape. An AUDITOR reads the clients'
  * emails masked (`j***@example.com`); OPERATOR and ADMIN read them in clear (serialize.ts `clientEmail`).

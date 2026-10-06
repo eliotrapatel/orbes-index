@@ -359,11 +359,11 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
     expect(LOOKBOOK.reserved).toBe('THE PRIVATE SALON');
     expect(LOOKBOOK.salon.request).toBe('REQUEST THIS PIECE');
     expect(LOOKBOOK.salon.requested).toBe('ORBES Client Services will contact you.');
-    const words = [LOOKBOOK.reserved, LOOKBOOK.reservedLead, LOOKBOOK.teaser, LOOKBOOK.locked('PLATINE', 3), LOOKBOOK.signIn, LOOKBOOK.variant, ...Object.values(LOOKBOOK.salon)].join('\n');
+    const words = [LOOKBOOK.reserved, LOOKBOOK.reservedLead, LOOKBOOK.teaser, LOOKBOOK.locked('PLATINE', 5), LOOKBOOK.signIn, LOOKBOOK.variant, ...Object.values(LOOKBOOK.salon)].join('\n');
     // Addition 7: the teaser says the salon's sentence, then what opens it; locked below an owner's tier (NOCTURNE, screen
     // 5), the same sentence, then the tier that opens it and its pieces.
     expect(LOOKBOOK.teaser.startsWith(`${LOOKBOOK.reservedLead} `)).toBe(true);
-    expect(LOOKBOOK.locked('PLATINE', 3)).toBe(`${LOOKBOOK.reservedLead} It opens at PLATINE, from 3 pieces registered to your ORBES account.`);
+    expect(LOOKBOOK.locked('PLATINE', 5)).toBe(`${LOOKBOOK.reservedLead} It opens at PLATINE, from 5 pieces registered to your ORBES account.`);
     expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
     expect(words).not.toContain('!');
   });

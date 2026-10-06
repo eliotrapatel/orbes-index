@@ -106,7 +106,7 @@ describe('taking part, and the segments', () => {
     const undrawn = await f.drops.create({ modelId: f.modelId, title: 'NOT DRAWN', quantity: 2, opensAt: U, closesAt: new Date(U.getTime() + 10 * DAY), earlyAccessHours: 48 }, f.admin);
     await f.drops.publish(undrawn.id, f.admin);
     releases.undrawn = undrawn.id;
-    await holdPieces(t.db, who.reserved.id, 3, f.modelId);
+    await holdPieces(t.db, who.reserved.id, 5, f.modelId);
     await f.drops.reserve(who.reserved.id, undrawn.id, who.reserved.actor);
     // A draw cancelled after its opening (before its draw): its entries count for nobody.
     const cancelled = await f.drops.create({ modelId: f.modelId, title: 'CANCELLED', quantity: 1, opensAt: D, closesAt: new Date(D.getTime() + 20 * DAY), earlyAccessHours: 0 }, f.admin);

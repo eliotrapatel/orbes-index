@@ -559,7 +559,8 @@ export interface ClubNextTier {
 
 /**
  * GET /api/v1/club/status (P-R03): the account's tier now (0: no piece; TITANE, PLATINE, PALLADIUM), and its entries;
- * P-X04: the benefits of its tier and of those below it (lowest first), and the next tier (null at PALLADIUM).
+ * P-X04: the benefits of its tier and of those below it (lowest first), and the next tier (null at PALLADIUM);
+ * plan NEXT-NINE (BP-19 T1): the pieces each tier starts from, TITANE first ([1, 5, 10]), whose last sets the meter.
  */
 export interface ClubStatus {
   tier: { level: 0 | 1 | 2 | 3; name: ClubTierName | null };
@@ -567,6 +568,7 @@ export interface ClubStatus {
   seniority: number;
   benefits: string[];
   next: ClubNextTier | null;
+  tierThresholds: number[];
   entries: ClubEntry[];
 }
 

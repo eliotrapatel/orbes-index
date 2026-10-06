@@ -77,7 +77,7 @@ describe.skipIf(!adminUrl)('operator CLIs on PostgreSQL', () => {
     const result = JSON.parse(seed.io.stdout[seed.io.stdout.length - 1]);
     // Open, as on PGlite (test/integration/demo-seed.test.ts): the impossible travel, the stolen pendant's scan and
     // the unsold piece a stranger scanned in Lyon (S-07); the boutique's own scan of its stock is dismissed.
-    expect(result).toMatchObject({ seeded: true, products: 41, keyId: 1, anomalies: { open: 3 } });
+    expect(result).toMatchObject({ seeded: true, products: 47, keyId: 1, anomalies: { open: 3 } });
 
     // A local key survives the CLI: it stays ACTIVE and the server can keep issuing with it.
     const keys = JSON.parse((await run(runKeysCli, ['list', '--json'])).io.stdout[0]).keys;
@@ -103,7 +103,7 @@ describe.skipIf(!adminUrl)('operator CLIs on PostgreSQL', () => {
   it('reset-demo rolls the schema back and reseeds on PostgreSQL; export reads the result', async () => {
     const reset = await run(runDbCli, ['reset-demo', '--yes', '--json']);
     expect(reset.code, reset.io.text()).toBe(0);
-    expect(JSON.parse(reset.io.stdout[reset.io.stdout.length - 1])).toMatchObject({ seeded: true, products: 41 });
+    expect(JSON.parse(reset.io.stdout[reset.io.stdout.length - 1])).toMatchObject({ seeded: true, products: 47 });
     // The registry was rebuilt: a fresh key 1 (a new file), the previous file stays unused on disk.
     expect(readdirSync(env.KEY_DIR!)).toHaveLength(2);
 

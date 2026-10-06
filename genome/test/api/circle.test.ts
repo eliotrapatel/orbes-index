@@ -22,6 +22,7 @@
 import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CIRCLE_LINK_HOSTS, circleLinkHost, normalizeCircleUrl } from '../../src/server/services/circle.js';
+import { CLUB_TIER_THRESHOLDS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto } from '../support/images.js';
@@ -304,7 +305,7 @@ describe('the owners\' circle (P-X01)', () => {
 
   it('opens the circle to an account that holds a piece now, each post from its tier up; the feed paginated, without bodies, never stored', async () => {
     const titane = await member(1);
-    const platine = await member(3);
+    const platine = await member(5);
     const none = await accountClient(h);
     const forAll = await create({ title: 'For every owner', body: 'A long text '.repeat(400).trim() });
     const forPlatine = await create({ title: 'For PLATINE and up', minTier: 2 });
@@ -554,7 +555,8 @@ describe('the owners\' circle (P-X01)', () => {
       .where('a.status', '=', 'ACTIVE')
       .groupBy('o.account_id')
       .execute();
-    const tierOf = (n: number) => (n >= 5 ? 'PALLADIUM' : n >= 3 ? 'PLATINE' : 'TITANE');
+    // The thresholds of the code (plan NEXT-NINE, BP-19 T1: 1, 5 and 10 pieces held now).
+    const tierOf = (n: number) => (n >= CLUB_TIER_THRESHOLDS[2]! ? 'PALLADIUM' : n >= CLUB_TIER_THRESHOLDS[1]! ? 'PLATINE' : 'TITANE');
     const expected = { TITANE: 0, PLATINE: 0, PALLADIUM: 0, total: owners.length };
     for (const o of owners) expected[tierOf(Number(o.n))]++;
     expect(stats.members).toEqual(expected);

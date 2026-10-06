@@ -322,10 +322,10 @@ const CONSTANTS: Record<string, ConstantSpec> = {
   EARLY_ACCESS_MIN_TIER: {
     value: '—',
     holds: () => {
-      // R72: PLATINE and PALLADIUM, from 3 pieces held (R61), reserve directly; TITANE does not.
+      // R72: PLATINE and PALLADIUM, from 5 pieces held (R61), reserve directly; TITANE does not.
       expect(EARLY_ACCESS_MIN_TIER).toBe(2);
       expect(tierName(EARLY_ACCESS_MIN_TIER)).toBe('PLATINE');
-      expect(CLUB_TIER_THRESHOLDS[EARLY_ACCESS_MIN_TIER - 1]).toBe(3);
+      expect(CLUB_TIER_THRESHOLDS[EARLY_ACCESS_MIN_TIER - 1]).toBe(5);
     },
     fr: ['PLATINE et PALLADIUM', 'au moment de sa demande'],
     en: ['PLATINE and PALLADIUM', 'at the time of the request'],

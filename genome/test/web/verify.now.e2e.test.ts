@@ -92,7 +92,7 @@ const CASES: { state: UiState; check: Check }[] = [
         return Object.fromEntries(s.variants.map((v) => [v.slug, v.coverUrl]));
       });
       expect(await pieces.locator('img').evaluateAll((els) => els.map((e) => e.getAttribute('src')))).toEqual([models.monolithe, models['monolithe-gold']]);
-      expect((await page.locator('.now__tier').innerText()).replace(/\s+/g, ' ')).toBe('TITANE 2 pieces held. 1 more piece registered to your account opens PLATINE, from 3 pieces held.');
+      expect((await page.locator('.now__tier').innerText()).replace(/\s+/g, ' ')).toBe('TITANE 2 pieces held. 3 more pieces registered to your account open PLATINE, from 5 pieces held.');
       // THE CIRCLE: the invitation as a plate card, its answer pressed.
       const inv = page.locator('.now__invitation');
       expect(await inv.locator('h3').innerText()).toBe('AN EVENING AT THE ATELIER');

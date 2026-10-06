@@ -392,11 +392,15 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   clock.set(at('2026-09-16T10:00:00Z'));
   await ctx.services.orders.transition(goldOrder, { to: 'PAID' }, admin);
   const goldPiece = await make(w, goldOrder, 'gold', '2026-09-16T11:00:00Z', '2026-09-17T16:00:00Z');
-  // The other collectors' pieces (held since June): PLATINE, the crowd of the releases and the circle (TITANE), the voters.
+  // The other collectors' pieces (held since June): PLATINE, the crowd of the releases and the circle (TITANE), the voters
+  // (PLATINE). PLATINE starts from five pieces (plan NEXT-NINE, BP-19 T1): the two more of PLATINE's and of each voter's
+  // carry serials of 2025, so the serials of 2026 the story shows stay as they were.
   const since = { startedAt: at('2026-06-01T10:00:00Z') };
   await holdPieces(ctx.db, platine.id, 3, w.models.steel!, { variant: '17', ...since });
+  await holdPieces(ctx.db, platine.id, 2, w.models.steel!, { variant: '17', year: 2025, ...since });
   for (const c of crowd) await holdPieces(ctx.db, c.id, 1, w.models.blue!, { variant: '16', ...since });
   for (const v of voters) await holdPieces(ctx.db, v.id, 3, w.models.gold!, { variant: '18', ...since });
+  for (const v of voters) await holdPieces(ctx.db, v.id, 2, w.models.gold!, { variant: '18', year: 2025, ...since });
   await holdPieces(ctx.db, guest.id, 1, w.models.gold!, { variant: '18', ...since });
   await holdPieces(ctx.db, absent.id, 1, w.models.steel!, { variant: '16', ...since });
   clock.set(at('2026-09-18T09:00:00Z'));
@@ -540,8 +544,10 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
     const interested = variant === 'rules' ? voters.concat(platine) : crowd.slice(0, 5);
     for (const [i, c] of interested.entries()) await ctx.services.live.setInterest(c.id, blue.id, blue.sizes[i % 3]!.id, c.actor);
     if (variant === 'rules') {
-      // A fifth collector who will be there: a PALLADIUM account of the selection.
+      // A fifth collector who will be there: a PALLADIUM account (10 pieces) of the selection, five of them with serials
+      // of 2025 (the serials of 2026 the story shows stay as they were).
       const selected = await account(w, 'palladium', 'selected.owner@example.com', 5, w.models.gold);
+      await holdPieces(ctx.db, selected.id, 5, w.models.gold!, { variant: '17', year: 2025, startedAt: new Date(w.clock.now().getTime() - DAY) });
       await ctx.services.live.setInterest(selected.id, blue.id, blue.sizes[1]!.id, selected.actor);
       // A release for the selected collectors alone (C28, state 5).
       const select = await createLiveRelease(w.f, { modelId: w.models.blue!, opensAt: at('2026-10-15T19:00:00Z'), sizes: [{ label: '17', stock: 6 }], quantityLine: '6 PIECES', accessSegmentId: segmentId });

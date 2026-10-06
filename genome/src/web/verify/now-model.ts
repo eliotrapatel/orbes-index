@@ -252,7 +252,7 @@ export function nowPieces(pieces: readonly OwnedPiece[]): NowPieceModel[] {
 export interface TierLineModel {
   /** TITANE, PLATINE, PALLADIUM; THE CLUB without a tier. */
   name: string;
-  /** `2 pieces held. 1 more piece registered to your account opens PLATINE, from 3 pieces held.` */
+  /** `2 pieces held. 3 more pieces registered to your account open PLATINE, from 5 pieces held.` */
   text: string;
 }
 

@@ -135,7 +135,7 @@ export type CircleRsvpAnswer = (typeof CIRCLE_RSVP_ANSWERS)[number];
 
 /**
  * The tiers of the collectors' club (club_tiers.tier, migration 0018, P-X04), in order: 1 TITANE, 2 PLATINE,
- * 3 PALLADIUM, reached at 1, 3 and 5 pieces held now (services/club.ts CLUB_TIER_THRESHOLDS).
+ * 3 PALLADIUM, reached at 1, 5 and 10 pieces held now (services/club.ts CLUB_TIER_THRESHOLDS).
  */
 export const CLUB_TIER_NAMES = ['TITANE', 'PLATINE', 'PALLADIUM'] as const;
 export type ClubTierName = (typeof CLUB_TIER_NAMES)[number];

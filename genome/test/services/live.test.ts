@@ -342,7 +342,7 @@ describe('LiveService', () => {
       expect((await f.live.enter(platine.id, r.id, { sizeId: r.sizes[0]!.id }, platine.actor)).tier).toBe(2);
       await advance(r, T0);
       expect((await entry(r.id, platine.id)).status).toBe('TURN');
-      // Two of its three pieces leave the account before it secures: TITANE now, the turn is refused.
+      // Two of its five pieces leave the account before it secures: TITANE now (PLATINE from five), the turn is refused.
       const held = await t.db.selectFrom('ownership').select('id').where('account_id', '=', platine.id).limit(2).execute();
       await t.db.updateTable('ownership').set({ ended_at: T0, ended_reason: 'TRANSFERRED_OUT' }).where('id', 'in', held.map((h) => h.id)).execute();
       await rejects(holdAndSecure(r.id, platine.id, platine.actor), 'LIVE_NOT_ELIGIBLE', 403);
@@ -387,8 +387,8 @@ describe('LiveService', () => {
       const accounts = [await accountOfTier(f, 0), await accountOfTier(f, 1), await accountOfTier(f, 2), await accountOfTier(f, 2), await accountOfTier(f, 0), await accountOfTier(f, 1)];
       f.clock.set(at(-3 * MINUTE));
       for (const a of accounts) await f.live.enter(a.id, r.id, { sizeId: r.sizes[1]!.id }, a.actor);
-      // The first one reaches PALLADIUM before T0: the line reads its tier at T0.
-      await holdPieces(t.db, accounts[0]!.id, 5, f.modelId);
+      // The first one reaches PALLADIUM (ten pieces) before T0: the line reads its tier at T0.
+      await holdPieces(t.db, accounts[0]!.id, 10, f.modelId);
       expect((await entry(r.id, accounts[0]!.id)).tier).toBe(0);
       const report = await advance(r, at(100));
       expect(report).toMatchObject({ queued: 6, turns: 3 });

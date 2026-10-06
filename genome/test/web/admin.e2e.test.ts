@@ -2247,8 +2247,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => p.locator('.tiers .panel__title').allTextContents()).toEqual(['TITANE', 'PLATINE', 'PALLADIUM']);
     expect(await p.locator('.tiers .deflist__row', { hasText: 'Reached' }).locator('.deflist__value').evaluateAll((els) => els.map((e) => e.firstChild?.textContent))).toEqual([
       'From 1 piece held',
-      'From 3 pieces held',
       'From 5 pieces held',
+      'From 10 pieces held',
     ]);
     expect(await p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents()).toEqual(CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n'));
     for (const t of ['TITANE', 'PLATINE', 'PALLADIUM']) expect(await p.locator(`[data-testid=tier-words-${t}]`).textContent(), t).toBe('Default');
@@ -2277,14 +2277,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // An owner's sheet: the tier in the club now, from the pieces held.
     const a = await ctx.services.auth.registerAccount({ email: 'tier.owner@example.com', password: 'tier owner passphrase 2026' }, {});
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       const owned = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, withClaimSecret: true }, SYSTEM_ACTOR);
       await ctx.services.warranty.activate(owned.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
       const scan = await ctx.services.verification.verify({ code: owned.code.data }, {});
       await ctx.services.ownership.registerFirst(a.account.id, { registrationToken: scan.registration!.token, claimCode: owned.claimCode! }, { type: 'account', id: a.account.id });
     }
     await go(p, `#/owners/${a.account.id}`, 'tier.owner@example.com');
-    await expect.poll(() => p.locator('[data-testid=owner-tier]').textContent()).toBe('PLATINE · 3 pieces held');
+    await expect.poll(() => p.locator('[data-testid=owner-tier]').textContent()).toBe('PLATINE · 5 pieces held');
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await c.close();
 
@@ -2540,7 +2540,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // A PLATINE owner requests it on /verify (the service, as REQUEST THIS PIECE calls it).
     const a = await ctx.services.auth.registerAccount({ email: 'vesper.owner@example.com', password: 'salon owner passphrase 2026' }, {});
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       const owned = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, material: '925 STERLING SILVER', year: 2026, withClaimSecret: true }, SYSTEM_ACTOR);
       await ctx.services.warranty.activate(owned.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
       const scan = await ctx.services.verification.verify({ code: owned.code.data }, {});

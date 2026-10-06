@@ -91,7 +91,7 @@ const CLUB_LEADS = Object.freeze({
   circle:
     'What the owners’ club of /verify offers. Circle: what ORBES publishes for the owners of a piece, by tier: notes, invitations they answer YES or NO, and polls whose results they read once they have voted.',
   tiers:
-    'What the owners’ club of /verify offers. Tiers: TITANE, PLATINE and PALLADIUM, reached with 1, 3 and 5 pieces held now. MY PIECES shows each owner the tier, its benefits and the way to the next; the words of the benefits are set here.',
+    'What the owners’ club of /verify offers. Tiers: TITANE, PLATINE and PALLADIUM, reached with 1, 5 and 10 pieces held now. MY PIECES shows each owner the tier, its benefits and the way to the next; the words of the benefits are set here.',
   requests:
     'What the owners’ club of /verify offers. Requests: the models of the private salon (the lookbook’s Reserved models, each from its tier, with its price) that owners asked for. ORBES Client Services contacts each client and concludes the sale, then closes the request with a note.',
 });

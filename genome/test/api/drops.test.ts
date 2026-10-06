@@ -4,7 +4,8 @@
  *
  *  - the tiers of the club (services/club.ts `tierOf`): the pieces held now,
  *    never a revoked, flagged or retired one, against the code's thresholds
- *    1 / 3 / 5, and the full years since the account's first ownership;
+ *    1 / 5 / 10 (plan NEXT-NINE, BP-19 T1), and the full years since the
+ *    account's first ownership;
  *  - the console (/api/admin/drops): a DRAFT with its seed drawn, sealed and
  *    committed at creation, edited freely, then only its description once
  *    published; cancelled before its draw only; the draw (ADMIN) after
@@ -113,9 +114,9 @@ interface SheetJson {
 }
 
 describe('the club tiers (P-R03): pieces held now, thresholds of the code, full years', () => {
-  it('reaches TITANE with 1 piece, PLATINE with 3, PALLADIUM with 5: a constant of the code', () => {
-    expect([...CLUB_TIER_THRESHOLDS]).toEqual([1, 3, 5]);
-    expect([0, 1, 2, 3, 4, 5, 9].map(tierForPieces)).toEqual([0, 1, 1, 2, 2, 3, 3]);
+  it('reaches TITANE with 1 piece, PLATINE with 5, PALLADIUM with 10: a constant of the code', () => {
+    expect([...CLUB_TIER_THRESHOLDS]).toEqual([1, 5, 10]);
+    expect([0, 1, 4, 5, 9, 10, 11].map(tierForPieces)).toEqual([0, 1, 1, 2, 2, 3, 3]);
   });
 
   it('counts full years in UTC, the day before an anniversary still the year before', () => {
@@ -237,17 +238,20 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     expect(await tierOf(h.ctx.db, id, h.clock.now())).toEqual({ pieces: 0, tier: 0, seniority: 0 });
     expect(await status(client)).toMatchObject({ tier: { level: 0, name: null }, pieces: 0, seniority: 0, entries: [] });
     const pieces: IssueResult[] = [];
-    for (let i = 0; i < 5; i++) pieces.push(await ownedPiece(client));
-    expect(await status(client)).toMatchObject({ tier: { level: 3, name: 'PALLADIUM' }, pieces: 5 });
+    for (let i = 0; i < 10; i++) pieces.push(await ownedPiece(client));
+    expect(await status(client)).toMatchObject({ tier: { level: 3, name: 'PALLADIUM' }, pieces: 10 });
     // Revoked, flagged or retired by ORBES: the ownership stays open, the piece no longer counts.
     await h.ctx.services.lifecycle.transition(pieces[0]!.product.productId, 'REVOKED', { reason: 'test' }, SYSTEM_ACTOR);
     await h.ctx.services.lifecycle.transition(pieces[1]!.product.productId, 'RETIRED', { reason: 'test' }, SYSTEM_ACTOR);
-    expect(await status(client)).toMatchObject({ tier: { level: 2, name: 'PLATINE' }, pieces: 3 });
-    // A piece given away by a transfer leaves the count.
+    await h.ctx.services.lifecycle.transition(pieces[3]!.product.productId, 'RETIRED', { reason: 'test' }, SYSTEM_ACTOR);
+    await h.ctx.services.lifecycle.transition(pieces[4]!.product.productId, 'RETIRED', { reason: 'test' }, SYSTEM_ACTOR);
+    await h.ctx.services.lifecycle.transition(pieces[5]!.product.productId, 'RETIRED', { reason: 'test' }, SYSTEM_ACTOR);
+    expect(await status(client)).toMatchObject({ tier: { level: 2, name: 'PLATINE' }, pieces: 5 });
+    // A piece given away by a transfer leaves the count: PLATINE starts from five, the account is TITANE again.
     const offer = safeJson(await client.post('/api/v1/ownership/transfers', { productId: pieces[2]!.product.productId })) as { transferCode: string };
     const recipient = (await accountClient(h)).client;
     expect((await recipient.post('/api/v1/ownership/transfers/accept', await scanToReceive(recipient, pieces[2]!.code.data, offer.transferCode))).statusCode).toBe(200);
-    expect(await status(client)).toMatchObject({ tier: { level: 1, name: 'TITANE' }, pieces: 2 });
+    expect(await status(client)).toMatchObject({ tier: { level: 1, name: 'TITANE' }, pieces: 4 });
     expect(await status(recipient)).toMatchObject({ tier: { level: 1, name: 'TITANE' }, pieces: 1, seniority: 0 });
     // Seniority: full years since the first ownership of the account began, ended or not.
     await h.ctx.db
@@ -372,10 +376,10 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     const d = await draft({ quantity: 2 });
     await publish(d.id);
     h.clock.advance(HOUR);
-    // Five accounts: one holding three pieces (PLATINE), one with a piece of long standing, one that receives three
+    // Five accounts: one holding five pieces (PLATINE), one with a piece of long standing, one that receives five
     // pieces after it entered, one that gives its only piece away after it entered, and one that holds none.
     const platine = await accountClient(h);
-    for (let i = 0; i < 3; i++) await ownedPiece(platine.client);
+    for (let i = 0; i < 5; i++) await ownedPiece(platine.client);
     const senior = await accountClient(h);
     const old = await ownedPiece(senior.client);
     await h.ctx.db.updateTable('ownership').set({ started_at: new Date(h.clock.now().getTime() - 3 * 366 * 24 * HOUR) }).where('product_id', '=', old.product.id).execute();
@@ -385,7 +389,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     const none = await accountClient(h);
     const clients = { platine, senior, late, giver, none };
     for (const [name, c] of Object.entries(clients)) expect((await enter(c.client, d.id)).statusCode, name).toBe(200);
-    for (let i = 0; i < 3; i++) await ownedPiece(late.client);
+    for (let i = 0; i < 5; i++) await ownedPiece(late.client);
     const offer = safeJson(await giver.client.post('/api/v1/ownership/transfers', { productId: given.product.productId })) as { transferCode: string };
     expect((await none.client.post('/api/v1/ownership/transfers/accept', await scanToReceive(none.client, given.code.data, offer.transferCode))).statusCode).toBe(200);
 
@@ -569,7 +573,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
 
   describe('the early access, with a direct reservation (P-X02)', () => {
     const reserve = (c: Client, id: string) => c.post(`/api/v1/club/drops/${id}/reserve`);
-    /** An account holding `n` pieces (3 make it PLATINE, 5 PALLADIUM), with its pieces and its id. */
+    /** An account holding `n` pieces (5 make it PLATINE, 10 PALLADIUM), with its pieces and its id. */
     async function owner(n: number): Promise<{ client: Client; email: string; id: string; pieces: IssueResult[] }> {
       const a = await accountClient(h);
       const pieces: IssueResult[] = [];
@@ -620,7 +624,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       // Two pieces, entries opening in 72 hours: the early access of 48 hours opens in 24.
       const d = await draft({ quantity: 2 }, 72 * HOUR, 2);
       await publish(d.id);
-      const platine = await owner(3);
+      const platine = await owner(5);
       const titane = await owner(1);
       const nobody = await accountClient(h);
       const before = await reserve(platine.client, d.id);
@@ -639,7 +643,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       for (const c of [titane, nobody]) {
         const res = await reserve(c.client, d.id);
         expect([res.statusCode, errorOf(res).code]).toEqual([403, 'DROP_TIER_REQUIRED']);
-        expect(errorOf(res).message).toBe('Only PLATINE and PALLADIUM owners reserve a place directly: from 3 pieces held.');
+        expect(errorOf(res).message).toBe('Only PLATINE and PALLADIUM owners reserve a place directly: from 5 pieces held.');
         expect(errorOf(await enter(c.client, d.id)).code).toBe('DROP_NOT_OPEN');
       }
       // PLATINE: the place held at once for the release's window, without a rank, the tier of the moment kept.
@@ -660,13 +664,13 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       const exported = safeJson(await admin.get(`/api/admin/owners/${platine.id}/export`)) as { dropEntries: Record<string, unknown>[] };
       expect(exported.dropEntries).toEqual([expect.objectContaining({ entryId: entry.id, dropId: d.id, status: 'SELECTED', tier: 2, rank: null })]);
       // The tier is the one of the request: PLATINE gives a piece away, and is TITANE now.
-      const giver = await owner(3);
+      const giver = await owner(5);
       const offer = safeJson(await giver.client.post('/api/v1/ownership/transfers', { productId: giver.pieces[0]!.product.productId })) as { transferCode: string };
       const recipient = (await accountClient(h)).client;
       expect((await recipient.post('/api/v1/ownership/transfers/accept', await scanToReceive(recipient, giver.pieces[0]!.code.data, offer.transferCode))).statusCode).toBe(200);
       expect(errorOf(await reserve(giver.client, d.id)).code).toBe('DROP_TIER_REQUIRED');
       // PALLADIUM: its tier kept with its place.
-      const palladium = await owner(5);
+      const palladium = await owner(10);
       const top = await entryOf(await reserve(palladium.client, d.id));
       expect((await adminEntries(operator, d.id)).items.find((e) => e.id === top.id)).toMatchObject({ tier: 3, reserved: true });
 
@@ -674,7 +678,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       h.clock.advance(48 * HOUR);
       await staff();
       expect(await sheet(d.id)).toMatchObject({ state: 'OPEN', earlyAccessOpen: false, reserved: 2 });
-      const other = await owner(3);
+      const other = await owner(5);
       const closed = await reserve(other.client, d.id);
       expect([closed.statusCode, errorOf(closed).code, errorOf(closed).message]).toEqual([409, 'DROP_EARLY_ACCESS_CLOSED', 'Direct reservations for this release are closed: the places left go to the draw.']);
       expect((await enter(titane.client, d.id)).statusCode).toBe(200);
@@ -690,7 +694,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       // Two pieces, a place held 1 hour; published inside its early access: reservations open at once.
       const d = await draft({ quantity: 2, purchaseWindowHours: 1 }, 10 * HOUR, 2);
       await publish(d.id);
-      const accounts = [await owner(3), await owner(3), await owner(5)];
+      const accounts = [await owner(5), await owner(5), await owner(10)];
       // Three at once for two places: two hold one, the third is told every piece is held.
       const three = await Promise.all(accounts.map((a) => reserve(a.client, d.id)));
       expect(three.map((r) => r.statusCode).sort()).toEqual([200, 200, 409]);
@@ -724,7 +728,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     it('confirms no sale on a cancelled release: its direct reservations stay held, then lapse after their time', async () => {
       const d = await draft({ quantity: 2, purchaseWindowHours: 1 }, 10 * HOUR, 2);
       await publish(d.id);
-      const entry = await entryOf(await reserve((await owner(3)).client, d.id));
+      const entry = await entryOf(await reserve((await owner(5)).client, d.id));
       expect(safeJson(await operator.post(`${adminUrl(d.id)}/cancel`))).toMatchObject({ state: 'CANCELLED' });
       const refused = await operator.post(`${adminUrl(d.id)}/entries/${entry.id}/confirm`, { note: 'Sold in the Paris boutique.' });
       expect([refused.statusCode, errorOf(refused).code]).toEqual([409, 'DROP_CANCELLED']);
@@ -739,7 +743,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       // Three pieces: one reserved then sold, one reserved and held, during the early access; the third goes to the draw.
       const d = await draft({ quantity: 3 }, 10 * HOUR, 2);
       await publish(d.id);
-      const [p1, p2] = [await owner(3), await owner(3)];
+      const [p1, p2] = [await owner(5), await owner(5)];
       const sold = await entryOf(await reserve(p1.client, d.id));
       const kept = await entryOf(await reserve(p2.client, d.id));
       expect((await operator.post(`${adminUrl(d.id)}/entries/${sold.id}/confirm`, { note: 'Sold in the Paris boutique.' })).statusCode).toBe(200);
