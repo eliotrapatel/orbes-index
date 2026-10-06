@@ -9,13 +9,14 @@ import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js'
 import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_accept.js';
 
 const EXPECTED_TABLES = [
-  'account_recovery_codes', 'accounts', 'activity_hourly', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs', 'authentication_events', 'bench_items',
-  'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps', 'club_tiers', 'codes',
-  'collections', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops', 'event_journal', 'genomes', 'invoices', 'live_access_models', 'live_addons',
-  'live_entries', 'live_entry_addons', 'live_interest', 'live_messages', 'live_tier_windows', 'media_objects', 'model_images', 'models', 'order_alert_settings',
-  'order_events', 'orders', 'ownership', 'ownership_certificates', 'ownership_transfers', 'product_status_history', 'products', 'release_answers', 'retailers',
-  'returns', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shop_requests',
-  'sku_thresholds', 'skus', 'stock_locations', 'stock_movements', 'warranties',
+  'account_recovery_codes', 'accounts', 'activity_hourly', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs', 'authentication_events',
+  'bench_items', 'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps',
+  'client_conversations', 'client_messages', 'club_tiers', 'codes', 'collections', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops',
+  'event_journal', 'genomes', 'invoices', 'live_access_models', 'live_addons', 'live_entries', 'live_entry_addons', 'live_interest', 'live_messages',
+  'live_tier_windows', 'media_objects', 'model_images', 'models', 'order_alert_settings', 'order_events', 'orders', 'ownership', 'ownership_certificates',
+  'ownership_transfers', 'product_status_history', 'products', 'release_answers', 'retailers', 'returns', 'revocations', 'scan_daily_stats', 'scan_events',
+  'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shop_requests', 'sku_thresholds', 'skus', 'stock_locations', 'stock_movements',
+  'warranties',
 ];
 
 describe('migrations', () => {
@@ -193,6 +194,16 @@ describe('migrations', () => {
     expect(has(/INDEX segments_created_by_idx ON public\.segments USING btree \(created_by\)$/)).toBe(true);
     expect(has(/INDEX circle_posts_segment_id_idx ON public\.circle_posts USING btree \(segment_id\)$/)).toBe(true);
     expect(has(/UNIQUE INDEX activity_hourly_pkey ON public\.activity_hourly USING btree \(hour, country, tier\)$/)).toBe(true);
+    // 0025: the messages. One conversation per account; the board by status, waiting time and latest message; a
+    // conversation's messages oldest first; the scans the retention clears; every foreign key at the head of an index.
+    expect(has(/UNIQUE INDEX client_conversations_account_key ON public\.client_conversations USING btree \(account_id\)$/)).toBe(true);
+    expect(has(/INDEX client_conversations_board_idx ON public\.client_conversations USING btree \(status, waiting_since, last_message_at\)$/)).toBe(true);
+    for (const by of ['answered_by', 'closed_by']) expect(has(new RegExp(`INDEX client_conversations_${by}_idx ON public\\.client_conversations USING btree \\(${by}\\)$`)), by).toBe(true);
+    expect(has(/INDEX client_messages_conversation_idx ON public\.client_messages USING btree \(conversation_id, created_at\)$/)).toBe(true);
+    for (const c of ['admin_id', 'product_id', 'order_id', 'drop_id', 'model_id', 'shop_request_id']) {
+      expect(has(new RegExp(`INDEX client_messages_${c}_idx ON public\\.client_messages USING btree \\(${c}\\)$`)), c).toBe(true);
+    }
+    expect(has(/INDEX client_messages_scan_event_idx ON public\.client_messages USING btree \(scan_event_id\) WHERE \(scan_event_id IS NOT NULL\)$/)).toBe(true);
   });
 
   /**
@@ -1922,7 +1933,8 @@ describe('migrations', () => {
     expect((await sql<{ price_minor: number | null; currency: string | null }>`SELECT price_minor, currency FROM drops WHERE id = ${priced}`.execute(t.db)).rows[0]).toEqual({ price_minor: null, currency: null });
     expect((await sql<{ n: number }>`SELECT count(*)::int AS n FROM models WHERE id IN (${main}, ${variant})`.execute(t.db)).rows[0].n).toBe(2);
     expect((await sql<{ n: number }>`SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'orbes_models_variant_rules'`.execute(t.db)).rows[0].n).toBe(0);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0024_model_variants']);
+    // Later migrations (0025…) were rolled back first: up again applies them after it.
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0024_model_variants'));
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -1996,6 +2008,151 @@ describe('migrations', () => {
     );
   });
 
+  /** What names an object of 0025 in a snapshot: its two tables, their constraints, indexes and triggers. */
+  const of0025 = (o: string) => /\bclient_(conversations|messages)\b/.test(o);
+
+  it('0025 adds client_conversations and client_messages, and nothing else; down drops them and restores 0024 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0025_client_messages');
+    const added = withIt.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !of0025(o))).toEqual([]);
+    expect(before.filter(of0025)).toEqual([]);
+    expect(withIt.filter((o) => !of0025(o))).toEqual(before);
+    const columns = (table: string) => added.filter((o) => o.startsWith(`table ${table} `)).map((o) => o.split(' ')[2]);
+    expect(columns('client_conversations')).toEqual([
+      'account_id', 'answered_by', 'closed_at', 'closed_by', 'collector_read_at', 'created_at', 'id', 'last_message_at', 'status', 'waiting_since',
+    ]);
+    expect(columns('client_messages')).toEqual([
+      'admin_id', 'author', 'body', 'context_kind', 'context_label', 'conversation_id', 'created_at', 'drop_id', 'id', 'model_id', 'order_id', 'product_id',
+      'scan_event_id', 'scan_ref', 'shop_request_id',
+    ]);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual([
+      'trigger client_conversations client_conversations_immutable_identity',
+      'trigger client_messages client_messages_immutable',
+      'trigger client_messages client_messages_no_delete',
+      'trigger client_messages client_messages_no_truncate',
+    ]);
+    for (const c of [
+      /^constraint client_conversations client_conversations_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint client_conversations client_conversations_answered_by_fkey FOREIGN KEY \(answered_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint client_conversations client_conversations_closed_by_fkey FOREIGN KEY \(closed_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint client_conversations client_conversations_status_check CHECK \(\(status = ANY \(ARRAY\['TO_ANSWER'::text, 'ANSWERED'::text, 'CLOSED'::text\]\)\)\)$/,
+      /^constraint client_conversations client_conversations_waiting CHECK /,
+      /^constraint client_conversations client_conversations_closed CHECK /,
+      /^constraint client_messages client_messages_conversation_id_fkey FOREIGN KEY \(conversation_id\) REFERENCES client_conversations\(id\) ON DELETE RESTRICT$/,
+      /^constraint client_messages client_messages_product_id_fkey FOREIGN KEY \(product_id\) REFERENCES products\(id\) ON DELETE RESTRICT$/,
+      /^constraint client_messages client_messages_order_id_fkey FOREIGN KEY \(order_id\) REFERENCES orders\(id\) ON DELETE RESTRICT$/,
+      /^constraint client_messages client_messages_drop_id_fkey FOREIGN KEY \(drop_id\) REFERENCES drops\(id\) ON DELETE RESTRICT$/,
+      /^constraint client_messages client_messages_model_id_fkey FOREIGN KEY \(model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint client_messages client_messages_shop_request_id_fkey FOREIGN KEY \(shop_request_id\) REFERENCES shop_requests\(id\) ON DELETE RESTRICT$/,
+      /^constraint client_messages client_messages_author_check CHECK \(\(author = ANY \(ARRAY\['COLLECTOR'::text, 'STAFF'::text\]\)\)\)$/,
+      /^constraint client_messages client_messages_context_kind_check CHECK \(\(context_kind = ANY \(ARRAY\['PIECE'::text, 'ORDER'::text, 'RELEASE'::text, 'SCAN'::text, 'MODEL'::text\]\)\)\)$/,
+      /^constraint client_messages client_messages_body_check CHECK \(\(\(length\(btrim\(body\)\) >= 1\) AND \(length\(btrim\(body\)\) <= 4000\)\)\)$/,
+      /^constraint client_messages client_messages_context_label_check CHECK \(\(\(length\(btrim\(context_label\)\) >= 1\) AND \(length\(btrim\(context_label\)\) <= 120\)\)\)$/,
+      /^constraint client_messages client_messages_scan_ref_check CHECK \(\(scan_ref ~ '\^\[0-9A-F\]\{8\}\$'::text\)\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    // No scan_event_id foreign key: the scan retention clears it.
+    expect(added.some((o) => /client_messages_scan_event_id_fkey/.test(o))).toBe(false);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0025_client_messages'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0025: one conversation per account, waiting exactly while TO_ANSWER and closed with who closed it; a message by its collector or a staff member, of 1 to 4 000 characters, its context and label together and naming exactly its row, never on a staff answer; never changed but its scan, never deleted', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (14, 'L', 'Messages checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const account = async (n: string) =>
+      (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES (${`msg${n}@example.com`}, ${`msg${n}@example.com`}, 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email_normalized, email, password_hash, role) VALUES ('answers@orbes.test', 'answers@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`.execute(t.db)).rows[0].id;
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (14, 'ECLIPSE', 'RING', 'MSGCHK') RETURNING id`.execute(t.db)).rows[0].id;
+    const drop = await drawDrop(model);
+
+    const a = await account('a');
+    const conversation = async (acc: string, columns: Record<string, string> = {}) => {
+      const names = Object.keys(columns);
+      return (
+        await sql.raw<{ id: string }>(
+          `INSERT INTO client_conversations (account_id, last_message_at${names.map((c) => `, ${c}`).join('')}) VALUES ('${acc}', now()${names.map((c) => `, ${columns[c]}`).join('')}) RETURNING id`,
+        ).execute(t.db)
+      ).rows[0].id;
+    };
+    // TO_ANSWER by default, waiting since a time; ANSWERED without; CLOSED with its time and who closed it.
+    await check(conversation(a), 'to answer without its waiting time', 'client_conversations_waiting');
+    await check(conversation(a, { status: `'ANSWERED'`, waiting_since: 'now()' }), 'answered and waiting', 'client_conversations_waiting');
+    await check(conversation(a, { status: `'CLOSED'`, closed_at: 'now()' }), 'closed without who', 'client_conversations_closed');
+    await check(conversation(a, { status: `'ANSWERED'`, closed_at: 'now()', closed_by: `'${admin}'` }), 'answered and closed', 'client_conversations_closed');
+    await check(conversation(a, { status: `'OPEN'`, waiting_since: 'now()' }), 'an unknown status');
+    const c = await conversation(a, { waiting_since: 'now()' });
+    await expect(conversation(a, { waiting_since: 'now()' })).rejects.toSatisfy((e) => isUniqueViolation(e, 'client_conversations_account_key'));
+    await run(`UPDATE client_conversations SET status = 'CLOSED', waiting_since = NULL, closed_at = now(), closed_by = '${admin}', answered_by = '${admin}' WHERE id = '${c}'`);
+    await expect(run(`UPDATE client_conversations SET account_id = '${await account('b')}' WHERE id = '${c}'`)).rejects.toSatisfy(isGuardViolation);
+    await expect(run(`UPDATE client_conversations SET created_at = now() - interval '1 day' WHERE id = '${c}'`)).rejects.toSatisfy(isGuardViolation);
+
+    const message = async (columns: Record<string, string>) => {
+      const all: Record<string, string> = { conversation_id: `'${c}'`, author: `'COLLECTOR'`, body: `'A question.'`, ...columns };
+      const names = Object.keys(all);
+      return (await sql.raw<{ id: string }>(`INSERT INTO client_messages (${names.join(', ')}) VALUES (${names.map((n) => all[n]).join(', ')}) RETURNING id`).execute(t.db)).rows[0].id;
+    };
+    // The author: a staff answer names its staff member, a collector's never does.
+    await check(message({ author: `'STAFF'` }), 'a staff answer without its author', 'client_messages_author');
+    await check(message({ admin_id: `'${admin}'` }), 'a collector with a staff member', 'client_messages_author');
+    await check(message({ author: `'CLIENT'` }), 'an unknown author');
+    // The body: 1 to 4 000 characters once trimmed.
+    await check(message({ body: `'   '` }), 'an empty body');
+    await check(message({ body: `'${'x'.repeat(4001)}'` }), 'a body too long');
+    await message({ body: `'${'x'.repeat(4000)}'` });
+    // The context: a kind and its label together, the label 1 to 120 characters, never on a staff answer.
+    await check(message({ context_kind: `'MODEL'`, model_id: `'${model}'` }), 'a kind without its label', 'client_messages_label');
+    await check(message({ context_label: `'ECLIPSE'` }), 'a label without its kind', 'client_messages_label');
+    await check(message({ context_kind: `'MODEL'`, context_label: `'${'x'.repeat(121)}'`, model_id: `'${model}'` }), 'a label too long');
+    await check(message({ context_kind: `'PLACE'`, context_label: `'X'` }), 'an unknown kind');
+    await check(
+      message({ author: `'STAFF'`, admin_id: `'${admin}'`, context_kind: `'MODEL'`, context_label: `'ECLIPSE'`, model_id: `'${model}'` }),
+      'a staff answer with a context',
+      'client_messages_staff_plain',
+    );
+    // Each kind names exactly its row: a PIECE its piece, an ORDER its order, a RELEASE its drop, a MODEL its model (and
+    // its salon request), a SCAN its REF (with its scan and piece, either cleared); no kind names nothing.
+    const label = `'X'`;
+    for (const [kind, columns, what] of [
+      ['PIECE', {}, 'a piece without its product'],
+      ['ORDER', {}, 'an order without its order'],
+      ['RELEASE', {}, 'a release without its drop'],
+      ['SCAN', {}, 'a scan without its REF'],
+      ['MODEL', {}, 'a model without its model'],
+      ['RELEASE', { drop_id: `'${drop}'`, model_id: `'${model}'` }, 'a release naming a model too'],
+      ['MODEL', { model_id: `'${model}'`, drop_id: `'${drop}'` }, 'a model naming a release too'],
+      ['SCAN', { scan_ref: `'5A864AF8'`, model_id: `'${model}'` }, 'a scan naming a model'],
+      [null, { model_id: `'${model}'` }, 'no kind naming a model'],
+      [null, { scan_ref: `'5A864AF8'` }, 'no kind naming a scan'],
+    ] as const) {
+      await check(message({ ...(kind ? { context_kind: `'${kind}'`, context_label: label } : {}), ...columns }), what, 'client_messages_context');
+    }
+    await check(message({ context_kind: `'SCAN'`, context_label: label, scan_ref: `'5a864af8'` }), 'a REF in small letters', 'client_messages_scan_ref_check');
+    await message({ context_kind: `'RELEASE'`, context_label: `'DRAW · PLACE HELD'`, drop_id: `'${drop}'` });
+    await message({ context_kind: `'MODEL'`, context_label: `'ECLIPSE · PRIVATE SALON REQUEST'`, model_id: `'${model}'` });
+    const scanned = await message({ context_kind: `'SCAN'`, context_label: `'REF 5A864AF8 · INVALID SIGNATURE'`, scan_ref: `'5A864AF8'`, scan_event_id: `'5a864af8-1b2c-4d3e-8f90-a1b2c3d4e5f6'` });
+    await message({ context_kind: `'SCAN'`, context_label: `'REF 5A864AF8 · INVALID SIGNATURE'`, scan_ref: `'5A864AF8'` });
+    const answer = await message({ author: `'STAFF'`, admin_id: `'${admin}'`, body: `'An answer.'` });
+    // A message never changes but its scan, which the retention clears; it is never deleted nor truncated.
+    await run(`UPDATE client_messages SET scan_event_id = NULL WHERE id = '${scanned}'`);
+    for (const q of [
+      `UPDATE client_messages SET body = 'Another' WHERE id = '${answer}'`,
+      `UPDATE client_messages SET scan_ref = '00000000' WHERE id = '${scanned}'`,
+      `UPDATE client_messages SET context_label = 'Y' WHERE id = '${scanned}'`,
+      `DELETE FROM client_messages WHERE id = '${answer}'`,
+      `TRUNCATE client_messages`,
+    ]) {
+      await expect(run(q), q).rejects.toSatisfy(isGuardViolation);
+    }
+    // What a message names keeps its conversation, account, staff member and model.
+    for (const q of [`DELETE FROM client_conversations WHERE id = '${c}'`, `DELETE FROM admin_users WHERE id = '${admin}'`, `DELETE FROM models WHERE id = '${model}'`, `DELETE FROM accounts WHERE id = '${a}'`]) {
+      await expect(run(q), q).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    }
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -2049,6 +2206,8 @@ describe('migrations', () => {
       '0023_releases_collectors',
       // NOCTURNE (plan of 2026-10-05): the variants of a model and a draw's price.
       '0024_model_variants',
+      // The next nine (plan of 2026-10-06), deployment G: the messages with ORBES Client Services.
+      '0025_client_messages',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

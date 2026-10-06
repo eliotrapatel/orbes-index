@@ -122,7 +122,9 @@ describe('the « Potentiel » runbook (docs/launch/DEPLOY-POTENTIEL-2026-10.md)'
     // (and a runbook) first: 0022 and 0023 are LIVE RELEASE+'s (orders, stock and operations; releases and collectors,
     // plan of 2026-10-04); 0024 is NOCTURNE's (a model's variants and a draw's price, plan of 2026-10-05).
     expect(NAMES.filter((n) => numberOf(n) > 13 && numberOf(n) <= 21)).toEqual([...DEPLOY_A, ...DEPLOY_BC, ...DEPLOY_D]);
-    expect(NAMES.filter((n) => numberOf(n) > 21)).toEqual(['0022_orders_stock', '0023_releases_collectors', '0024_model_variants']);
+    expect(NAMES.filter((n) => numberOf(n) > 21 && numberOf(n) <= 24)).toEqual(['0022_orders_stock', '0023_releases_collectors', '0024_model_variants']);
+    // 0025 on are the next nine's (plan of 2026-10-06, deployment G): 0025 the messages with ORBES Client Services.
+    expect(NAMES.filter((n) => numberOf(n) > 24)[0]).toBe('0025_client_messages');
     expect(DEPLOY_D).toEqual(['0021_live_release']);
     // This runbook hands 0021 to deployment D, which has its own runbook and starts from B+C's production.
     expect(runbook).toContain('Après ce lot, la migration `0021` (la LIVE RELEASE, plan du 2026-10-04) part avec le déploiement D, qui a [son propre runbook](DEPLOY-LIVE-RELEASE.md) et part de la production de B+C (le commit `78959e8`, les migrations `0001` à `0020`).');

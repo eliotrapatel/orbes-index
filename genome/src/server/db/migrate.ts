@@ -35,6 +35,7 @@ import * as m0021 from './migrations/0021_live_release.js';
 import * as m0022 from './migrations/0022_orders_stock.js';
 import * as m0023 from './migrations/0023_releases_collectors.js';
 import * as m0024 from './migrations/0024_model_variants.js';
+import * as m0025 from './migrations/0025_client_messages.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
@@ -62,6 +63,7 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0022_orders_stock': m0022,
   '0023_releases_collectors': m0023,
   '0024_model_variants': m0024,
+  '0025_client_messages': m0025,
 });
 
 class StaticMigrationProvider implements MigrationProvider {

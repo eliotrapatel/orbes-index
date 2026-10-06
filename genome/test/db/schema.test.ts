@@ -119,6 +119,9 @@ describe('schema', () => {
       ['returns', 'outcome', S.RETURN_OUTCOMES],
       ['invoices', 'kind', S.INVOICE_KINDS],
       ['drops', 'access_combine', S.ACCESS_COMBINES],
+      ['client_conversations', 'status', S.CLIENT_CONVERSATION_STATUSES],
+      ['client_messages', 'author', S.CLIENT_MESSAGE_AUTHORS],
+      ['client_messages', 'context_kind', S.CLIENT_MESSAGE_CONTEXTS],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));

@@ -147,7 +147,9 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
     expect(DEPLOY_E).toEqual(['0022_orders_stock', '0023_releases_collectors']);
     // A later number has its own plan and runbook: 0024 is NOCTURNE's (plan of 2026-10-05: a model's variants and a
     // draw's price), which ships as its own deployment after E.
-    expect(NAMES.filter((n) => numberOf(n) > 23)).toEqual(['0024_model_variants']);
+    expect(NAMES.filter((n) => numberOf(n) > 23 && numberOf(n) <= 24)).toEqual(['0024_model_variants']);
+    // 0025 on are the next nine's (plan of 2026-10-06), deployment G, after F.
+    expect(NAMES.filter((n) => numberOf(n) > 24)[0]).toBe('0025_client_messages');
     const rows = [...section(runbook, '### 1.0').matchAll(/^ *\| `(\d{4}_[a-z0-9_]+)` \|/gm)].map((m) => m[1]);
     expect(rows).toEqual(DEPLOY_E);
     expect(readDoc('genome/scripts/db.ts')).toContain("`Applied ${applied.length} migration(s): ${applied.join(', ')}`");

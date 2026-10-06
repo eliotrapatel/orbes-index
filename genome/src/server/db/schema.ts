@@ -225,6 +225,24 @@ export type InvoiceKind = (typeof INVOICE_KINDS)[number];
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];
 
+/**
+ * A conversation between a collector and ORBES Client Services (client_conversations.status, migration 0025): TO_ANSWER
+ * (the collector wrote last), ANSWERED, or CLOSED by staff. Writing again reopens it. The collector never sees it.
+ */
+export const CLIENT_CONVERSATION_STATUSES = ['TO_ANSWER', 'ANSWERED', 'CLOSED'] as const;
+export type ClientConversationStatus = (typeof CLIENT_CONVERSATION_STATUSES)[number];
+
+/** Who wrote a message (client_messages.author, migration 0025): the collector, or a staff member of Client Services. */
+export const CLIENT_MESSAGE_AUTHORS = ['COLLECTOR', 'STAFF'] as const;
+export type ClientMessageAuthor = (typeof CLIENT_MESSAGE_AUTHORS)[number];
+
+/**
+ * What a collector's message concerns (client_messages.context_kind, migration 0025): a piece, an order, a release, a
+ * scan or a model (with its salon request). NULL on a STAFF message and on one written from MESSAGES.
+ */
+export const CLIENT_MESSAGE_CONTEXTS = ['PIECE', 'ORDER', 'RELEASE', 'SCAN', 'MODEL'] as const;
+export type ClientMessageContext = (typeof CLIENT_MESSAGE_CONTEXTS)[number];
+
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
 export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
@@ -1254,6 +1272,51 @@ export interface ActivityHourlyTable {
   scans: WithDefault<number>;
 }
 
+/**
+ * A collector's conversation with ORBES Client Services (migration 0025, CS-01): one per account. `waiting_since` is set
+ * exactly while TO_ANSWER, `closed_at` and `closed_by` exactly while CLOSED. id, account_id and created_at never change.
+ */
+export interface ClientConversationsTable {
+  id: Generated<string>;
+  account_id: string;
+  status: WithDefault<ClientConversationStatus>;
+  /** The staff member who answers it (admin_users.id), or null. */
+  answered_by: string | null;
+  waiting_since: TimestampNullable;
+  last_message_at: Timestamp;
+  /** Up to when the collector has read the answers; null before the first reading. */
+  collector_read_at: TimestampNullable;
+  closed_at: TimestampNullable;
+  closed_by: string | null;            // admin_users.id
+  created_at: TimestampDefault;
+}
+
+/**
+ * A message of a conversation (migration 0025, CS-01): the collector's words or a staff member's answer, plain text, with
+ * what a collector's message concerns (a snapshot label and the row it names). Never changed (but `scan_event_id`,
+ * cleared by the scan retention), never deleted.
+ */
+export interface ClientMessagesTable {
+  id: Generated<string>;
+  conversation_id: string;
+  author: ClientMessageAuthor;
+  /** The staff member, exactly on a STAFF message (admin_users.id). */
+  admin_id: string | null;
+  body: string;                        // 1..4 000 characters once trimmed (a collector's: 2 000)
+  context_kind: ClientMessageContext | null;
+  context_label: string | null;        // 1..120 characters, exactly with context_kind
+  product_id: string | null;
+  order_id: string | null;
+  drop_id: string | null;
+  model_id: string | null;
+  shop_request_id: string | null;
+  /** The scan (scan_events.id, no foreign key): cleared when the scan retention deletes the scan. */
+  scan_event_id: string | null;
+  /** The scan's REF, 8 capital hex characters: kept after the scan is deleted. */
+  scan_ref: string | null;
+  created_at: TimestampDefault;
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -1371,6 +1434,8 @@ export interface Database {
   release_answers: ReleaseAnswersTable;
   segments: SegmentsTable;
   activity_hourly: ActivityHourlyTable;
+  client_conversations: ClientConversationsTable;
+  client_messages: ClientMessagesTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -1468,6 +1533,8 @@ export type AfterRoomGuestRow = Selectable<AfterRoomGuestsTable>;
 export type ReleaseAnswerRow = Selectable<ReleaseAnswersTable>;
 export type SegmentRow = Selectable<SegmentsTable>;
 export type ActivityHourlyRow = Selectable<ActivityHourlyTable>;
+export type ClientConversationRow = Selectable<ClientConversationsTable>;
+export type ClientMessageRow = Selectable<ClientMessagesTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;
