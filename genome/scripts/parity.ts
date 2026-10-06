@@ -400,7 +400,7 @@ async function recordBaseline(file: string, ids: string[]): Promise<void> {
   for (const s of UI_STATES) if (states[s.id]) ordered[s.id] = states[s.id]!;
   const baseline: Baseline = {
     about:
-      'NOCTURNE content baseline (plan NOCTURNE, fidelity rule 4): every text value the app showed at 5efd4c9, state by state, recorded by scripts/parity.ts --baseline on the NOCTURNE demo; «…» marks a part written by the server (an id, a reference, a code). test/web/nocturne.content.e2e.test.ts checks that each value is still shown in its state.',
+      'NOCTURNE content baseline (plan NOCTURNE, fidelity rule 4): every text value the app showed at 52697e3 (NOCTURNE’s final commit; at 5efd4c9 before it), state by state, recorded by scripts/parity.ts --baseline on the NOCTURNE demo, again at the end of each NEXT-NINE step that changes a collector screen (plan NEXT-NINE, §4); «…» marks a part written by the server (an id, a reference, a code). test/web/nocturne.content.e2e.test.ts checks that each value is still shown in its state.',
     now: NOCTURNE_NOW.toISOString(),
     states: ordered,
   };
