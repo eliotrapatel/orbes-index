@@ -243,7 +243,23 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.waitForSelector('dialog.dialog', { state: 'detached', timeout: 15_000 });
   }
 
-  async function shot(p: Page, name: string, opts: { full?: boolean } = {}): Promise<void> {
+  /**
+   * The phone's twin of a screen the next nine adds (plan NEXT-NINE, Phase 10: every new screen at a phone's size and a
+   * desk's): the whole page at 390 × 844, then the desk's size again.
+   */
+  async function phoneTwin(p: Page, file: string): Promise<void> {
+    const desk = p.viewportSize() ?? { width: 1440, height: 900 };
+    await p.setViewportSize({ width: 390, height: 844 });
+    try {
+      await p.evaluate(() => window.scrollTo(0, 0));
+      await p.waitForTimeout(400);
+      await p.screenshot({ path: join(OUT_DIR, file), fullPage: true });
+    } finally {
+      await p.setViewportSize(desk);
+    }
+  }
+
+  async function shot(p: Page, name: string, opts: { full?: boolean; phone?: boolean } = {}): Promise<void> {
     if (!SCREENSHOTS) return;
     mkdirSync(OUT_DIR, { recursive: true });
     // Top of the page, without transient notices.
@@ -255,6 +271,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.waitForTimeout(400); // let the entrance fade settle
     await p.screenshot({ path: join(OUT_DIR, `admin-${name}.png`) });
     if (opts.full) await p.screenshot({ path: join(OUT_DIR, `admin-${name}-full.png`), fullPage: true });
+    if (opts.phone) await phoneTwin(p, `admin-${name}-phone.png`);
   }
 
   beforeAll(async () => {
@@ -2288,7 +2305,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=tier-words-PLATINE] .cell-sub').textContent()).toMatch(/UTC$/);
     expect((await ctx.db.selectFrom('club_tiers').select(['tier', 'benefits']).execute())).toEqual([{ tier: 'PLATINE', benefits: 'Priority care for your pieces.\nA private viewing of each release.' }]);
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'club-tiers', { full: true });
+    await shot(p, 'club-tiers', { full: true, phone: true });
     // Restored: the row goes, the words by default are back.
     await p.click('[data-testid=tier-restore-PLATINE]');
     await confirmDialog(p);
@@ -2310,7 +2327,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // The Club block under the tier (plan NEXT-NINE, BP-19 T10): PLATINE's yearly care of the year, none asked for yet.
     await expect.poll(() => p.locator('[data-testid=owner-club]').allTextContents()).toContainEqual(expect.stringMatching(/^\d{4}: 0 of 1$/));
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'owner-club', { full: true });
+    await shot(p, 'owner-club', { full: true, phone: true });
     await c.close();
 
     // An AUDITOR reads the tiers, without an action.
@@ -2379,7 +2396,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const row = await ctx.db.selectFrom('club_program_settings').selectAll().executeTakeFirstOrThrow();
     expect(row).toMatchObject({ early_access_palladium_hours: 6, early_access_platine_hours: 3, shipping_free_platine: 'EXPRESS', gift_palladium_model_id: modelId, credit_platine_minor: 7500 });
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'club-program', { full: true });
+    await shot(p, 'club-program', { full: true, phone: true });
     expect(await cspViolations(p)).toEqual([]);
     await c.close();
 
@@ -2426,7 +2443,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // The board: Requested first; the request's page with the address the client gave, in clear.
     await go(p, '#/care', 'Yearly care');
     await expect.poll(() => p.locator('[data-testid=care-piece]').allTextContents()).toContain(serial);
-    await shot(p, 'yearly-care-board', { full: true });
+    await shot(p, 'yearly-care-board', { full: true, phone: true });
     await go(p, `#/care/${careId}`, serial);
     expect(await p.locator('[data-testid=care-status]').textContent()).toBe('Requested');
     expect(await p.locator('[data-testid=care-return-address]').innerText()).toBe('Ada Owner\n12 rue de la Paix\n75002 Paris');
@@ -2451,7 +2468,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // Nothing was written in the client's messages.
     expect((await ctx.db.selectFrom('client_messages').select('author').execute()).filter((m) => m.author === 'STAFF')).toEqual([]);
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'yearly-care', { full: true });
+    await shot(p, 'yearly-care', { full: true, phone: true });
     expect(await cspViolations(p)).toEqual([]);
     await c.close();
     // An AUDITOR reads the request, the address and the email masked, without an action.
@@ -2733,7 +2750,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       { size_label: '54', fit_min_mm: 53, fit_max_mm: 55 },
     ]);
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'model-sizes', { full: true });
+    await shot(p, 'model-sizes', { full: true, phone: true });
 
     // A PLATINE owner requests it on /verify (the service, as REQUEST THIS PIECE calls it).
     const a = await ctx.services.auth.registerAccount({ email: 'vesper.owner@example.com', password: 'salon owner passphrase 2026' }, {});
@@ -2759,7 +2776,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // AC-01: the size asked.
     expect(await row.locator('[data-testid=request-size]').textContent()).toBe('54');
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'club-requests', { full: true });
+    await shot(p, 'club-requests', { full: true, phone: true });
     // Closed with a note and its outcome: the row says the outcome, who closed it and what was done; ACCEPTED created
     // the request's order (plan LIVE RELEASE+).
     await row.locator('[data-testid=close-request]').click();

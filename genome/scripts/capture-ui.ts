@@ -102,6 +102,13 @@
  *                 page at 1440 × 900; admin-09-growth-phone.png at 390 px) and the client sheet of its first collector
  *                 with its Lifetime value (admin-09-growth-client.png), on the demo dataset with GROWTH's fourteen months
  *                 written over it (test/support/growth.ts). Not run by default (screens for the owner's review)
+ *   --only handover
+ *                 The next nine's hand-over (plan NEXT-NINE, Phase 10): every collector screen the lot adds, and those it
+ *                 changes, each at a phone's size and a desk's (HANDOVER_SHOTS: next-<nn>-<state>-phone.png and -desk.png),
+ *                 then SHARE TO STORIES' places and previews at a desk's size (story-place-*-desk.png,
+ *                 story-preview-*-desk.png; `--only story` writes the phone's and the cards). The console's new screens
+ *                 come from its e2e files run with ORBES_SCREENSHOTS=1 (genome/out/admin-*.png, each new one with its
+ *                 -phone twin). Not run by default (screens for the owner's review, into --out)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -176,7 +183,7 @@ const DESKTOP = { width: 1440, height: 900 } as const;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot' | 'story' | 'growth';
+type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot' | 'story' | 'growth' | 'handover';
 
 function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | null } {
   let out = DEFAULT_OUT;
@@ -185,8 +192,8 @@ function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | nu
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot' || argv[i + 1] === 'story' || argv[i + 1] === 'growth')) only = argv[++i] as Only;
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot, --only story, --only growth)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot' || argv[i + 1] === 'story' || argv[i + 1] === 'growth' || argv[i + 1] === 'handover')) only = argv[++i] as Only;
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot, --only story, --only growth, --only handover)`);
   }
   return { out, raw, only };
 }
@@ -1961,12 +1968,14 @@ export const STORY_SHOTS: readonly { state: string; card: string }[] = Object.fr
   { state: 'result-ceremony', card: 'registered' },
 ]);
 
-async function captureStory(out: string, shots: Shots): Promise<void> {
+async function captureStory(out: string, shots: Shots, desk = false): Promise<void> {
   const failures: string[] = [];
+  // At a desk's size (the hand-over), the places and the previews only: the cards are the phone's, 1080 × 1920 either way.
+  const suffix = desk ? '-desk' : '';
   await eachState(
-    STORY_SHOTS.map((s) => stateById(s.state)),
+    STORY_SHOTS.map((s) => (desk ? { ...stateById(s.state), id: `${s.state}-desk`, size: DESK } : stateById(s.state))),
     async (state, { stage, demo, browser }) => {
-      const card = STORY_SHOTS.find((s) => s.state === state.id)!.card;
+      const card = STORY_SHOTS.find((s) => s.state === state.id.replace(/-desk$/, ''))!.card;
       const opened = await openState(browser, stage, demo, state);
       try {
         const page = opened.page;
@@ -1975,7 +1984,7 @@ async function captureStory(out: string, shots: Shots): Promise<void> {
         await sleep(600);
         await open.evaluate((el) => el.scrollIntoView({ block: 'center' }));
         await sleep(300);
-        shots.png(`story-place-${card}`, await page.screenshot({ type: 'png' }));
+        shots.png(`story-place-${card}${suffix}`, await page.screenshot({ type: 'png' }));
         // A phone whose share sheet takes the file: SHARE shown, filled, over SAVE IMAGE.
         await page.evaluate(() => {
           Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
@@ -1988,7 +1997,11 @@ async function captureStory(out: string, shots: Shots): Promise<void> {
           const img = document.querySelector<HTMLImageElement>('.n-story__card');
           return !!img && img.complete && img.naturalWidth === 1080;
         });
-        shots.png(`story-preview-${card}`, await page.screenshot({ type: 'png' }));
+        // Decoded and painted before the shot: a large card loaded is not yet drawn on the next frame.
+        await page.evaluate(() => document.querySelector<HTMLImageElement>('.n-story__card')!.decode());
+        await sleep(500);
+        shots.png(`story-preview-${card}${suffix}`, await page.screenshot({ type: 'png' }));
+        if (desk) return;
         const [download] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: 'SAVE IMAGE' }).click()]);
         const path = join(out, `story-card-${card}.png`);
         await download.saveAs(path);
@@ -2003,6 +2016,85 @@ async function captureStory(out: string, shots: Shots): Promise<void> {
     log,
   );
   if (failures.length) throw new Error(`${failures.length} SHARE TO STORIES capture(s) failed:\n${failures.join('\n')}`);
+}
+
+// ── The hand-over (plan NEXT-NINE, Phase 10) ─────────────────────────────
+
+/**
+ * The next nine's hand-over (plan NEXT-NINE, Phase 10): every collector screen the lot adds (each state the NOCTURNE
+ * baseline gained since its step 0, and the room's two YOUR SIZES states kept outside it), then the screens it changes
+ * (the account sheet's ten dots and rows, NOW, a draw's early access by tier and its SHARE TO STORIES, CONFIRMED, the
+ * ceremony, THE RELEASES' link, a model's foot, an order's CREDIT, a piece's and a result's WRITE TO ORBES CLIENT
+ * SERVICES, FORGOTTEN PASSWORD keeping the email), each at a phone's size and a desk's. `--only handover`.
+ */
+export const HANDOVER_SHOTS: readonly { state: string; name: string }[] = Object.freeze(
+  [
+    // CS-01, WRITE TO ORBES CLIENT SERVICES and MESSAGES
+    'account-write',
+    'account-write-sent',
+    'result-write-signed-out',
+    'account-messages-empty',
+    'account-messages-thread',
+    'now-messages',
+    // BP-19, the tier program: THE CLUB, IN USE, YEARLY CARE
+    'club',
+    'club-platine',
+    'club-no-piece',
+    'club-stress',
+    'account-sheet-in-use',
+    'piece-care-available',
+    'piece-care-request',
+    'piece-care-requested',
+    'piece-care-label',
+    'piece-care-returning',
+    'piece-care-done',
+    'piece-care-used',
+    // IN-01, THE HOUSE'S GUARANTEE
+    'draw-guarantee-account',
+    'draw-guaranteed',
+    'draw-guaranteed-entered',
+    'draw-guaranteed-drawn',
+    'draw-guaranteed-hidden',
+    'draw-guarantee-pieces',
+    'live-announced-guaranteed',
+    'room-guaranteed',
+    'room-guarantee-hidden',
+    // AC-01, YOUR SIZES
+    'sizes-view',
+    'sizes-save',
+    'sizes-reopen',
+    'sizes-clear',
+    'model-salon-sizes',
+    'model-salon-size-requested',
+    'live-announced-from-yours',
+    'room-from-yours',
+    'room-from-yours-confirmed',
+    // FT-01, HOW RELEASES WORK
+    'releases-how',
+    // CO-01 and BP-34, a model's foot
+    'model-pairs',
+    // The screens the lot changes
+    'account-sheet',
+    'account-sheet-stress',
+    'now-signed-in',
+    'draw-early',
+    'draw-drawn',
+    'draw-place-held',
+    'live-confirmed',
+    'result-ceremony',
+    'releases',
+    'model',
+    'pieces-orders-stress',
+    'piece',
+    'result-unusual-card',
+    'result-forgotten-password',
+  ].map((state, i) => ({ state, name: `next-${String(i + 1).padStart(2, '0')}-${state}` })),
+);
+
+async function captureHandover(out: string, shots: Shots): Promise<void> {
+  await capturePhonesAndDesks(shots, HANDOVER_SHOTS, 'hand-over', (id) => ROOM_SIZE_STATES.find((s) => s.id === id) ?? stateById(id));
+  log('SHARE TO STORIES, at a desk\'s size:');
+  await captureStory(out, shots, true);
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────
@@ -2064,6 +2156,13 @@ async function main(): Promise<void> {
       await stage.close().catch(() => {});
       rmSync(workDir, { recursive: true, force: true });
     }
+    return;
+  }
+  if (only === 'handover') {
+    const shots = new Shots(out, raw);
+    log('The hand-over:');
+    await captureHandover(out, shots);
+    log(`${shots.written.length} screenshots in ${relative(process.cwd(), out) || '.'}`);
     return;
   }
   if (only === 'story') {

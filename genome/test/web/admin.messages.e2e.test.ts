@@ -88,7 +88,23 @@ describe.skipIf(!HAS_CHROMIUM)('the Messages board in the console (E2E, Chromium
     await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe(heading);
   }
 
-  async function shot(p: Page, name: string): Promise<void> {
+  /**
+   * The phone's twin of a screen the next nine adds (plan NEXT-NINE, Phase 10: every new screen at a phone's size and a
+   * desk's): the whole page at 390 × 844, then the desk's size again.
+   */
+  async function phoneTwin(p: Page, file: string): Promise<void> {
+    const desk = p.viewportSize() ?? { width: 1440, height: 900 };
+    await p.setViewportSize({ width: 390, height: 844 });
+    try {
+      await p.evaluate(() => window.scrollTo(0, 0));
+      await p.waitForTimeout(400);
+      await p.screenshot({ path: join(OUT_DIR, file), fullPage: true });
+    } finally {
+      await p.setViewportSize(desk);
+    }
+  }
+
+  async function shot(p: Page, name: string, opts: { phone?: boolean } = {}): Promise<void> {
     if (!SCREENSHOTS) return;
     mkdirSync(OUT_DIR, { recursive: true });
     await p.evaluate(async () => {
@@ -97,6 +113,7 @@ describe.skipIf(!HAS_CHROMIUM)('the Messages board in the console (E2E, Chromium
     });
     await p.waitForTimeout(300);
     await p.screenshot({ path: join(OUT_DIR, `admin-messages-${name}.png`), fullPage: true });
+    if (opts.phone) await phoneTwin(p, `admin-messages-${name}-phone.png`);
   }
 
   beforeAll(async () => {
@@ -161,7 +178,7 @@ describe.skipIf(!HAS_CHROMIUM)('the Messages board in the console (E2E, Chromium
     expect((await p.locator('[data-testid=conversation-concerns]').allTextContents())[0]).toMatch(/^Piece O26-J-\d{5}$/);
     expect((await p.locator('[data-testid=conversation-concerns]').allTextContents())[2]).toBe('General');
     expect(await p.locator('select[name=status] option').allTextContents()).toEqual(['To answer (3)', 'Answered', 'Closed', 'All']);
-    await shot(p, 'board');
+    await shot(p, 'board', { phone: true });
     // Answered: none yet; Unassigned: all three; a search by email: one.
     await p.selectOption('select[name=status]', 'ANSWERED');
     await expect.poll(() => p.locator('#messages .empty__text').textContent(), POLL).toBe('No conversation to answer.');
@@ -196,7 +213,7 @@ describe.skipIf(!HAS_CHROMIUM)('the Messages board in the console (E2E, Chromium
     expect(await p.locator('[data-testid=thread-message]').nth(1).getAttribute('data-author')).toBe('STAFF');
     expect(await p.locator('[data-testid=thread-message]').nth(1).locator('.thread__author').textContent()).toBe(OPERATOR.email);
     expect(await p.locator('[data-testid=conversation-status]').textContent()).toBe('Answered');
-    await shot(p, 'conversation');
+    await shot(p, 'conversation', { phone: true });
     const id = (await p.evaluate(() => location.hash)).split('/').at(-1)!;
     await p.context().close();
 

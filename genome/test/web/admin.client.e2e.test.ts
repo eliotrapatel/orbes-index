@@ -120,13 +120,30 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
         .filter((x) => /[01]/.test(x)),
     );
 
-  async function shot(p: Page, name: string): Promise<void> {
+  /**
+   * The phone's twin of a screen the next nine adds (plan NEXT-NINE, Phase 10: every new screen at a phone's size and a
+   * desk's): the whole page at 390 × 844, then the desk's size again.
+   */
+  async function phoneTwin(p: Page, file: string): Promise<void> {
+    const desk = p.viewportSize() ?? { width: 1440, height: 900 };
+    await p.setViewportSize({ width: 390, height: 844 });
+    try {
+      await p.evaluate(() => window.scrollTo(0, 0));
+      await p.waitForTimeout(400);
+      await p.screenshot({ path: join(OUT_DIR, file), fullPage: true });
+    } finally {
+      await p.setViewportSize(desk);
+    }
+  }
+
+  async function shot(p: Page, name: string, opts: { phone?: boolean } = {}): Promise<void> {
     mkdirSync(OUT_DIR, { recursive: true });
     await p.evaluate(async () => {
       document.querySelectorAll('.toast').forEach((x) => x.remove());
       await document.fonts.ready;
     });
     await p.screenshot({ path: join(OUT_DIR, `admin-client-${name}.png`), fullPage: true });
+    if (opts.phone && process.env.ORBES_SCREENSHOTS) await phoneTwin(p, `admin-client-${name}-phone.png`);
   }
 
   beforeAll(async () => {
@@ -236,7 +253,7 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     expect(await text(p, '[data-testid=client-segments]')).toBe('Newcomers');
     expect(await p.locator('[data-testid=client-note]').allTextContents()).toEqual(['The client withdrew.', 'The sale is concluded by phone.', 'Called the client: the place is confirmed.']);
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'sheet');
+    await shot(p, 'sheet', { phone: true });
 
     // An order opens its page.
     await p.locator('[data-testid=client-order]').nth(1).click();
@@ -378,7 +395,7 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     const row = rowsOf(p, 'guarantees').first();
     expect((await row.textContent())!.replace(/\s+/g, ' ')).toMatch(/ECLIPSE — guaranteed.*2.*Yes.*SET ASIDE.*ECLIPSE — guaranteed.*Waited at the boutique/);
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'guarantee-sheet');
+    await shot(p, 'guarantee-sheet', { phone: true });
     // Change: no longer shown to the client.
     await row.locator('[data-testid=guarantee-change]').click();
     await p.waitForSelector('dialog.dialog');
@@ -392,7 +409,7 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     expect(await rowsOf(p, 'guarantees').count()).toBe(2);
     expect(await text(p, '#entries tbody tr')).toContain('GUARANTEED');
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'guarantee-drop');
+    await shot(p, 'guarantee-drop', { phone: true });
 
     // Revoke, with a note.
     await go(p, `#/owners/${client.id}`, client.email);
@@ -417,7 +434,7 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     await a.fill('dialog [name=validDays]', '120');
     await confirmDialog(a);
     await expect.poll(async () => text(a, '[data-testid=guarantee-valid-days]'), POLL).toBe('120 days');
-    await shot(a, 'guarantee-settings');
+    await shot(a, 'guarantee-settings', { phone: true });
     expect(await csp(a)).toEqual([]);
     expect(problems).toEqual([]);
     await a.context().close();
@@ -479,7 +496,7 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     await p.keyboard.press('Escape');
     await p.waitForSelector('dialog.dialog', { state: 'detached', timeout: 15_000 });
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'model-pairs');
+    await shot(p, 'model-pairs', { phone: true });
 
     // A variant's page: set on its main model, a link to it; no Edit pairs.
     await go(p, `#/catalogue/${blue}`, 'HALO · BLUE');

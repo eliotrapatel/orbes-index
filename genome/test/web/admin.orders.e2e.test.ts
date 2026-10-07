@@ -137,7 +137,23 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
         .filter((x) => /[01]/.test(x)),
     );
 
-  async function shot(p: Page, name: string): Promise<void> {
+  /**
+   * The phone's twin of a screen the next nine adds (plan NEXT-NINE, Phase 10: every new screen at a phone's size and a
+   * desk's): the whole page at 390 × 844, then the desk's size again.
+   */
+  async function phoneTwin(p: Page, file: string): Promise<void> {
+    const desk = p.viewportSize() ?? { width: 1440, height: 900 };
+    await p.setViewportSize({ width: 390, height: 844 });
+    try {
+      await p.evaluate(() => window.scrollTo(0, 0));
+      await p.waitForTimeout(400);
+      await p.screenshot({ path: join(OUT_DIR, file), fullPage: true });
+    } finally {
+      await p.setViewportSize(desk);
+    }
+  }
+
+  async function shot(p: Page, name: string, opts: { phone?: boolean } = {}): Promise<void> {
     if (!SCREENSHOTS) return;
     mkdirSync(OUT_DIR, { recursive: true });
     await p.evaluate(async () => {
@@ -146,6 +162,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     });
     await p.waitForTimeout(300);
     await p.screenshot({ path: join(OUT_DIR, `admin-orders-${name}.png`), fullPage: true });
+    if (opts.phone) await phoneTwin(p, `admin-orders-${name}-phone.png`);
   }
 
   /** A request of the private salon closed as ACCEPTED: its order, its size entered. */
@@ -588,7 +605,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
       { currency: 'EUR', service: 'EXPRESS', fee_minor: 4000 },
     ]);
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'settings');
+    await shot(p, 'settings', { phone: true });
     await p.click('[data-testid=shipping-edit]');
     await p.fill('dialog input[name="EUR-STANDARD"]', '');
     await p.fill('dialog input[name="EUR-EXPRESS"]', '');
@@ -708,7 +725,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => p.locator('#order-step').textContent()).toContain(`It is paid with ${orderReference(parent)}.`);
     expect(await p.locator('[data-testid=order-size]').textContent()).toBe('52');
     expect(await p.locator('[data-testid=order-gift-size]').count()).toBe(0);
-    await shot(p, 'gift-order');
+    await shot(p, 'gift-order', { phone: true });
     // Back to its order: MARK PAID, the invoice less the credit.
     await go(p, `#/orders/${parent}`, orderReference(parent));
     await p.click('[data-testid=order-pay]');
@@ -716,7 +733,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('PAID');
     await expect.poll(() => p.locator('#order-documents tbody tr').first().textContent()).toMatch(/€\s2\s950/u);
     expect(await p.locator('#order-history').textContent()).toContain('Credit applied');
-    await shot(p, 'credit-paid');
+    await shot(p, 'credit-paid', { phone: true });
     // SHIP WITH ITS ORDER: the gift, paid with its order, its piece linked from the stock.
     const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: gift, variant: '52', material: '925 STERLING SILVER' }, admin);
     await ctx.services.atelier.linkFromStock(giftOrder, piece.product.productId, admin);
