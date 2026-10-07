@@ -112,6 +112,8 @@ import type {
   LifecycleSnapshot,
   Model,
   ModelChange,
+  ModelSizes,
+  ModelSizesChange,
   VariantInput,
   OwnerList,
   ShippingRate,
@@ -519,6 +521,16 @@ export class AdminApi {
   /** NOCTURNE N1, ADD A VARIANT: a variant of the model, copied from it, with its own label, colour and SKU prefix. */
   createVariant(id: string, input: VariantInput): Promise<Model> {
     return this.post(`/api/admin/models/${encodeURIComponent(id)}/variants`, input);
+  }
+
+  /** AC-01: a model's Sizes, its size kind and its sizes' fits (AUDITOR). */
+  modelSizes(id: string): Promise<ModelSizes> {
+    return this.get(`/api/admin/models/${encodeURIComponent(id)}/sizes`);
+  }
+
+  /** AC-01, OPERATOR: a model's size kind, or a size's fit (in whole millimetres). */
+  setModelSizes(id: string, change: ModelSizesChange): Promise<ModelSizes> {
+    return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/sizes`, { body: change });
   }
 
   // ── Shopify readiness (plan LIVE RELEASE+, N2 and N3): files in Shopify's formats, nothing sent to it ──

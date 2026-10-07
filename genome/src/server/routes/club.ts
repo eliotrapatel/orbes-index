@@ -8,7 +8,7 @@
  *
  *   GET  /api/v1/club/lookbook                  the RESERVED models the account's tier reaches, with their prices (no story)
  *   GET  /api/v1/club/lookbook/:slug            a sheet, PUBLIC or RESERVED (its price, its tier, the account's open request)
- *   POST /api/v1/club/lookbook/:slug/request    REQUEST THIS PIECE, with an optional note; ORBES Client Services concludes
+ *   POST /api/v1/club/lookbook/:slug/request    REQUEST THIS PIECE, with an optional note and size (AC-01); ORBES Client Services concludes
  *
  * P-R03, the drops (any ORBES account: one that holds no piece is drawn after
  * the tiers):
@@ -68,7 +68,7 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     const { account } = requireAccount(request);
     const { slug } = parse(lookbookParams, request.params);
     const b = parse(salonRequestBody, request.body);
-    const created = await salon.request(account.id, slug, b.note ?? null, accountActor(request));
+    const created = await salon.request(account.id, slug, b.note ?? null, accountActor(request), b.size ?? null);
     reply.code(201);
     return created;
   });

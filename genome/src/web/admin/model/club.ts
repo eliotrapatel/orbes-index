@@ -439,3 +439,13 @@ export const SHOP_REQUEST_OUTCOME_OPTIONS: readonly { value: string; label: stri
 export function requestModelLine(r: Pick<ShopRequest, 'model'>): string {
   return [r.model.type, r.model.priceLabel].filter((x): x is string => typeof x === 'string' && x.trim().length > 0).join(' · ');
 }
+
+/** AC-01: the Size cell of a request, the size the client asked, or 'Not given' (not sure yet, or one size). */
+export function requestSizeText(r: Pick<ShopRequest, 'size'>): string {
+  return r.size ?? 'Not given';
+}
+
+/** AC-01: what the Close dialog adds once ACCEPTED is chosen for a request with a size: 'The order takes size 52.'; else null. */
+export function acceptedSizeLine(r: Pick<ShopRequest, 'size'>, outcome: string | undefined): string | null {
+  return outcome === 'ACCEPTED' && r.size ? `The order takes size ${r.size}.` : null;
+}

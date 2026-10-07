@@ -3,7 +3,8 @@
  *
  *   viewers   GET /api/v1/live/:id/stream (routes/live.ts), a signed-in account allowed to enter the release (or holding
  *             an entry in it): `room` events, the room as LiveRoomService.frame builds it, and `you` events, the
- *             account's own entry (with its turn's secret while it is its turn), each sent when it changed;
+ *             account's own entry (with its turn's secret while it is its turn), each sent when it changed; the first
+ *             `you` event also carries `savedSize` (AC-01: the size YOUR SIZES preselects, or null);
  *   boards    POST /api/v1/live/:id/board/stream, by the board's secret link: `board` events (the countdown, the door, the
  *             pieces left overall), sent when they changed;
  *   consoles  GET /api/admin/live/:id/stream (routes/admin/live.ts), a console session (AUDITOR and up): `console` events
@@ -37,7 +38,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { DomainError } from '../errors.js';
 import type { LiveEntryView } from '../services/live.js';
 import type { AdminLiveBoard } from '../services/live-console.js';
-import type { LiveBoard, LiveFrame, LiveRoom, LiveRoomService } from '../services/live-room.js';
+import type { LiveBoard, LiveFrame, LiveRoom, LiveRoomService, LiveSavedSize } from '../services/live-room.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 
 /**
@@ -212,10 +213,12 @@ export class LiveHub {
         return;
       }
       const views = await this.room.viewerEntries(dropId, [accountId]);
+      // AC-01: the first frame says which size YOUR SIZES preselects, while the account holds no entry nor interest.
+      const savedSize = views.has(accountId) ? null : await this.room.savedSize(accountId, dropId);
       const stream: ViewerStream = { kind: 'viewer', dropId, accountId, sessionId, res: this.begin(request, reply), lastWrite: 0, sent: undefined, you: undefined, closed: false };
       this.register(stream);
       registered = true;
-      this.deliver(stream, this.outgoing(frame), views);
+      this.deliver(stream, this.outgoing(frame), views, { savedSize });
     } finally {
       if (!registered) this.release(accountId);
     }
@@ -452,7 +455,7 @@ export class LiveHub {
    * Send what changed for this stream since its last events, in one write: the viewer's own entry first, then the
    * room, so a page that stops following at a room that is over has already read its final entry.
    */
-  private deliver(s: ViewerStream | BoardStream, out: Outgoing, views: ReadonlyMap<string, LiveEntryView>): void {
+  private deliver(s: ViewerStream | BoardStream, out: Outgoing, views: ReadonlyMap<string, LiveEntryView>, first?: { savedSize: LiveSavedSize | null }): void {
     if (s.closed) return;
     const shared = this.shared(out, s.kind === 'viewer' ? 'room' : 'board');
     let chunk = '';
@@ -461,7 +464,9 @@ export class LiveHub {
       const you = JSON.stringify(entry);
       if (you !== s.you) {
         s.you = you;
-        chunk = `event: you\ndata: {"now":${out.now},"entry":${you}}\n\n`;
+        // The first frame alone carries the size YOUR SIZES preselects (AC-01).
+        const saved = first ? `,"savedSize":${JSON.stringify(first.savedSize)}` : '';
+        chunk = `event: you\ndata: {"now":${out.now},"entry":${you}${saved}}\n\n`;
       }
     }
     if (shared.json !== s.sent) {

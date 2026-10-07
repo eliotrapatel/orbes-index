@@ -11,6 +11,8 @@
  *    with it (its shipping at 0), has no price of its own (409 ORDER_TERMS_FIXED) and is never paid alone;
  *  - paid with its order, with no invoice of its own: the order's invoice carries its GIFT line at 0; an invoice at the
  *    most lines it carries (six add-ons, its shipping, a credit split over both tiers, both tiers' gifts) is drawn;
+ *  - while its size is to be chosen, the collector's saved size (YOUR SIZES, AC-01) is a hint for Client Services only:
+ *    the matching size's label or the saved measure; nothing is chosen for them;
  *  - cancelled with its order: its grant waits again, and the next order receives it, with the gift model THE PROGRAM
  *    names then; a return of its order leaves it.
  */
@@ -124,7 +126,7 @@ describe('the welcome gift (BP-19 T5)', () => {
     expect((await auditsOf(parent, 'order.gift'))[0]!.details).toMatchObject({ giftOrderId: gift!.id, grantId: grant.id, tier: 2, modelId: ring, sizeToChoose: false });
     // The parent's page says it; the gift's says its tier.
     expect((await orders().get(parent)).gifts).toEqual([{ id: gift!.id, reference: orderReference(gift!.id), model: 'ANNEAU', status: 'RESERVED', sizeToChoose: false, tier: 2 }]);
-    expect((await orders().get(gift!.id)).giftOf).toEqual({ tier: 2, sizes: [] });
+    expect((await orders().get(gift!.id)).giftOf).toEqual({ tier: 2, sizes: [], savedSize: null });
     expect((await orders().get(gift!.id)).withOrder).toEqual({ id: parent, reference: orderReference(parent), shipment: null });
     // Never twice: the order after has none.
     expect(await giftsOf(await salonOrder(a.id))).toEqual([]);
@@ -176,6 +178,32 @@ describe('the welcome gift (BP-19 T5)', () => {
     const giftLine = linesOf(invoice.lines).find((l) => l.kind === 'GIFT')!;
     expect(giftLine).toEqual({ kind: 'GIFT', label: 'WELCOME GIFT · JONC', detail: `ORDER ${orderReference(gift!.id)}`, amountMinor: 0 });
     expect(invoice.total_minor).toBe(300_000);
+  });
+
+  it('shows Client Services the collector\'s saved size as a hint only while its size is to be chosen: the matching size, or the saved measure; nothing is chosen (AC-01)', async () => {
+    const sized = await giftModel('TORQUE', ['50', '52', '54'], 1);
+    await t.db.updateTable('models').set({ size_kind: 'RING' }).where('id', '=', sized).execute();
+    await setGift(2, sized);
+    const hintOf = async (pieces: number, saved: Record<string, number> | null) => {
+      const a = await account(pieces);
+      if (saved) await ctx.services.sizes.set(a.id, saved, { type: 'account', id: a.id });
+      const [gift] = await giftsOf(await salonOrder(a.id));
+      return { gift: gift!, view: await orders().get(gift!.id) };
+    };
+    // A saved size matching one of the model's: its label, and the gift still waits for Client Services to choose.
+    const matched = await hintOf(5, { RING: 52 });
+    expect(matched.view.giftOf).toMatchObject({ tier: 2, savedSize: '52' });
+    expect(await orderRow(matched.gift.id)).toMatchObject({ sku_id: null, size_label: null, reservation: null });
+    // None matching: the saved measure itself; none saved: no hint.
+    expect((await hintOf(5, { RING: 53 })).view.giftOf!.savedSize).toBe('53');
+    expect((await hintOf(5, { BRACELET: 16.5 })).view.giftOf!.savedSize).toBeNull();
+    expect((await hintOf(5, null)).view.giftOf!.savedSize).toBeNull();
+    await t.db.updateTable('models').set({ size_kind: 'BRACELET' }).where('id', '=', sized).execute();
+    expect((await hintOf(5, { BRACELET: 16.5 })).view.giftOf!.savedSize).toBe('16.5 CM');
+    // Once chosen, the hint is gone.
+    await orders().setTerms(matched.gift.id, { sizeLabel: '52' }, admin);
+    expect((await orders().get(matched.gift.id)).giftOf!.savedSize).toBeNull();
+    await t.db.updateTable('models').set({ size_kind: null }).where('id', '=', sized).execute();
   });
 
   it('is cancelled with its order: its grant waits again, and the next order receives it, with the model THE PROGRAM names then', async () => {

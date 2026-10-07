@@ -125,6 +125,7 @@ import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { tierOf } from './club.js';
 import { giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, ensureGrants } from './tier-grants.js';
+import { savedSizeHint } from './sizes.js';
 import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockBalances, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -341,8 +342,12 @@ export interface OrderView {
    * at once), by tier, then oldest first: each its order, model, step, whether its size is to be chosen, and its tier.
    */
   gifts: { id: string; reference: string; model: string; status: OrderStatus; sizeToChoose: boolean; tier: 2 | 3 }[];
-  /** BP-19 T5, on a GIFT order: its tier, and while its size is to be chosen, its model's sizes with the pieces available. */
-  giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[] } | null;
+  /**
+   * BP-19 T5, on a GIFT order: its tier, and while its size is to be chosen, its model's sizes with the pieces available
+   * and (AC-01) the client's saved size as a hint only (`savedSize`: the matching size's label, or the saved measure;
+   * null without one). Nothing is chosen for Client Services.
+   */
+  giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[]; savedSize: string | null } | null;
   /** BP-19 T5: the client's credit usable now (balance, currency, expiry) and the credit taken off this order (released or not). */
   credit: {
     available: { grantId: string; tier: 2 | 3; balanceMinor: number; currency: string; expiresAt: Date }[];
@@ -1082,10 +1087,11 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
 
 /**
  * The order of a request of the private salon closed as ACCEPTED, in the transaction that closes it (the request's row
- * held): RESERVED at the default location, its size, price and currency to be entered (`setTerms`). Idempotent.
+ * held): RESERVED at the default location, with the size the collector asked and its SKU (AC-01; held then as any
+ * order's), its price, currency (and size, when none was asked) to be entered (`setTerms`). Idempotent.
  */
 export async function orderForShopRequest(tx: Db, requestId: string, actor: Actor, now: Date): Promise<{ order: OrderRow | null; notes: AuditRecordInput[] }> {
-  const r = await tx.selectFrom('shop_requests').select(['id', 'account_id', 'model_id', 'status', 'outcome']).where('id', '=', requestId).executeTakeFirst();
+  const r = await tx.selectFrom('shop_requests').select(['id', 'account_id', 'model_id', 'status', 'outcome', 'size_label']).where('id', '=', requestId).executeTakeFirst();
   if (!r || r.status !== 'CLOSED' || r.outcome !== 'ACCEPTED') throw new Error(`orderForShopRequest: request ${requestId} is not ACCEPTED`);
   if (await tx.selectFrom('orders').select('id').where('shop_request_id', '=', r.id).executeTakeFirst()) return { order: null, notes: [] };
   const notes: AuditRecordInput[] = [...(await ensureGrants(tx, r.account_id, now))];
@@ -1097,8 +1103,9 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
       dropId: null,
       accountId: r.account_id,
       modelId: r.model_id,
-      sizeLabel: null,
-      skuId: null,
+      // AC-01: the size the collector asked, with its SKU (held as any order's); none asked, entered later.
+      sizeLabel: r.size_label,
+      skuId: r.size_label === null ? null : await ensureSku(tx, r.model_id, r.size_label),
       priceMinor: null,
       currency: null,
       addons: [],
@@ -1402,7 +1409,7 @@ export class OrderService {
               })),
             )
           : [];
-      giftOf = { tier: grant.tier as 2 | 3, sizes };
+      giftOf = { tier: grant.tier as 2 | 3, sizes, savedSize: r.sku_id === null ? await savedSizeHint(this.db, r.account_id, r.model_id) : null };
     }
     const now = this.clock();
     const standing = await tierOf(this.db, r.account_id, now);

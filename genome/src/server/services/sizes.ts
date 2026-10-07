@@ -161,6 +161,11 @@ export function matchSavedSize<C extends SizeCandidate>(kind: SizeKind | null, s
   return matches.length === 1 ? matches[0]! : null;
 }
 
+/** A saved measure as the collector reads it: a ring size ('52'), or centimetres ('16.5 CM'). */
+export function sizeWords(kind: SizeKind, mm: number): string {
+  return SIZE_RANGES[kind].unit === 'FR' ? String(mm) : `${mm / 10} CM`;
+}
+
 // ── Reads (the room, the salon, an order) ──────────────────────────────────
 
 /** A model's size kind: its own, or, a variant without one, its main model's; null for none (or an unknown model). */
@@ -189,6 +194,18 @@ export async function savedSizeAmong<C extends SizeCandidate>(db: Db, accountId:
   const kind = await sizeKindOf(db, modelId);
   if (kind === null) return null;
   return matchSavedSize(kind, await savedMm(db, accountId, kind), candidates);
+}
+
+/**
+ * A hint for Client Services choosing a size for an account (a GIFT order's Choose size): the label of the model's size
+ * the saved size matches, or else the saved measure in words; null without a kind or a saved size. It never chooses.
+ */
+export async function savedSizeHint(db: Db, accountId: string, modelId: string): Promise<string | null> {
+  const kind = await sizeKindOf(db, modelId);
+  if (kind === null) return null;
+  const mm = await savedMm(db, accountId, kind);
+  if (mm === null) return null;
+  return matchSavedSize(kind, mm, await modelSizeCandidates(db, modelId))?.label ?? sizeWords(kind, mm);
 }
 
 /** A model's sizes from its SKUs (ONE SIZE left out), with their fit, in the order a client reads them. */

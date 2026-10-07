@@ -457,6 +457,46 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(errorOf(await outsider.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: { sizeId: r.sizes[0]!.id } })).code).toBe('LIVE_NOT_ELIGIBLE');
     });
 
+    it('preselects the size YOUR SIZES matches among the sizes with stock, only without an entry or an interest, in the state and the stream\'s first frame, writing nothing (AC-01)', async () => {
+      await h.ctx.db.updateTable('models').set({ size_kind: 'RING' }).where('id', '=', f.modelId).execute();
+      try {
+        const r = await release(h, f, { inMinutes: 4, sizes: [{ label: '50', stock: 2 }, { label: 'SIZE 52', stock: 1 }, { label: '54', stock: 0 }], minTier: 1 });
+        const m = await member(h, f, 1);
+        const state = async () => safeJson(await m.client.get(`/api/v1/live/${r.id}/state`)) as { savedSize: unknown; entry: unknown; interest: unknown };
+        expect((await state()).savedSize).toBeNull();
+        expect((await m.client.request('PUT', '/api/v1/account/sizes', { body: { sizes: { RING: 52 } } })).statusCode).toBe(200);
+        const counts = async () => ({
+          audit: Number((await h.ctx.db.selectFrom('audit_logs').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n),
+          entries: (await h.ctx.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).execute()).length,
+          interest: (await h.ctx.db.selectFrom('live_interest').select('size_id').where('drop_id', '=', r.id).execute()).length,
+        });
+        const before = await counts();
+        expect(await state()).toMatchObject({ entry: null, interest: null, savedSize: { id: r.sizes[1]!.id, label: 'SIZE 52' } });
+        const s = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: m.client.cookies });
+        expect((await s.next((e) => e.event === 'you')).data).toEqual({ now: h.clock.now().toISOString(), entry: null, savedSize: { id: r.sizes[1]!.id, label: 'SIZE 52' } });
+        s.close();
+        // Nothing written by reading it.
+        expect(await counts()).toEqual(before);
+        // A saved size whose release size has no stock preselects nothing.
+        await m.client.request('PUT', '/api/v1/account/sizes', { body: { sizes: { RING: 54 } } });
+        expect((await state()).savedSize).toBeNull();
+        await m.client.request('PUT', '/api/v1/account/sizes', { body: { sizes: { RING: 52 } } });
+        // I'LL BE THERE given: its size is the account's, nothing is preselected; withdrawn, the saved size again.
+        await m.client.request('PUT', `/api/v1/live/${r.id}/interest`, { body: { sizeId: r.sizes[0]!.id } });
+        expect(await state()).toMatchObject({ interest: { size: { label: '50' } }, savedSize: null });
+        await m.client.request('DELETE', `/api/v1/live/${r.id}/interest`);
+        expect((await state()).savedSize).toMatchObject({ label: 'SIZE 52' });
+        // An entry: its size is the account's, nothing is preselected, in the state or a stream's first frame.
+        expect((await m.client.post(`/api/v1/live/${r.id}/enter`, { sizeId: r.sizes[0]!.id })).statusCode).toBe(200);
+        expect((await state()).savedSize).toBeNull();
+        const again = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: m.client.cookies });
+        expect((await again.next((e) => e.event === 'you')).data).toMatchObject({ entry: { size: { label: '50' } }, savedSize: null });
+        again.close();
+      } finally {
+        await h.ctx.db.updateTable('models').set({ size_kind: null }).where('id', '=', f.modelId).execute();
+      }
+    });
+
     it('refuses every mutation without the session’s CSRF token or from another origin, the board’s too', async () => {
       const r = await release(h, f, { inMinutes: 4 });
       const m = await member(h, f, 1);
@@ -622,7 +662,8 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect(s.headers['content-security-policy']).toContain("default-src 'self'");
       const room = await s.next((e) => e.event === 'room');
       expect(room.data).toMatchObject({ now: h.clock.now().toISOString(), id: r.id, phase: 'ROOM', paused: false, over: false, inRoom: 0, line: 0, left: 2, held: 0, message: null });
-      expect((await s.next((e) => e.event === 'you')).data).toEqual({ now: h.clock.now().toISOString(), entry: null });
+      // The first frame also says which size YOUR SIZES preselects (AC-01): none saved here.
+      expect((await s.next((e) => e.event === 'you')).data).toEqual({ now: h.clock.now().toISOString(), entry: null, savedSize: null });
       expect(s.retry).toBeGreaterThanOrEqual(2000);
       expect(s.retry).toBeLessThan(5000);
 

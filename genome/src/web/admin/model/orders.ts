@@ -206,6 +206,14 @@ export function giftSizeOptions(o: Pick<OrderView, 'giftOf'>): { value: string; 
   }));
 }
 
+/**
+ * AC-01: the collector's saved size on a GIFT order's Choose size, a hint only (`Saved size: 52 (YOUR SIZES)`); null
+ * without one. It preselects nothing.
+ */
+export function giftSavedSizeHint(o: Pick<OrderView, 'giftOf'>): string | null {
+  return o.giftOf?.savedSize ? `Saved size: ${o.giftOf.savedSize} (YOUR SIZES)` : null;
+}
+
 /** The value of the one-size choice in the gift's sizes (the server reads ONE SIZE as the model in one size). */
 export const ONE_SIZE_VALUE = 'ONE SIZE';
 

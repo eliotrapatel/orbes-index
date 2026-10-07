@@ -42,6 +42,7 @@ import {
   DOCUMENT_LABELS,
   giftHeaderLine,
   giftRows,
+  giftSavedSizeHint,
   giftSizeOptions,
   durationText,
   EVENT_LABELS,
@@ -353,7 +354,11 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     void openDialog({
       title: 'Choose size',
       eyebrow,
-      body: h('p', { class: 'dialog__text' }, 'The welcome gift’s size, confirmed with the collector. The order then holds a piece of that size, or one is made for it.'),
+      body: [
+        h('p', { class: 'dialog__text' }, 'The welcome gift’s size, confirmed with the collector. The order then holds a piece of that size, or one is made for it.'),
+        // AC-01: the collector's saved size, a hint only: nothing is chosen for Client Services.
+        giftSavedSizeHint(o) ? h('p', { class: 'dialog__text', data: { testid: 'order-gift-saved-size' } }, giftSavedSizeHint(o)) : null,
+      ],
       fields: [
         {
           name: 'giftSize',

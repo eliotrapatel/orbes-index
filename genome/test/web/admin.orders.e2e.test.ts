@@ -642,7 +642,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
   }, STEP_TIMEOUT);
 
   // Last: its orders would change the counts of the scenes before it.
-  it('takes a tier\'s credit off an order and chooses its welcome gift\'s size before MARK PAID (BP-19 T5)', async () => {
+  it('takes a tier\'s credit off an order and chooses its welcome gift\'s size before MARK PAID (BP-19 T5), the saved size a hint only (AC-01)', async () => {
     // A gift model of two sizes, one piece of each in stock, THE PROGRAM's gift of PLATINE; a PLATINE account's salon order.
     const france = (await ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
     const gift = (
@@ -656,6 +656,9 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await ctx.services.clubProgram.update({ ...(await ctx.services.clubProgram.read()), giftPlatineModelId: gift }, admin);
     const account = await createAccount(ctx.db);
     await holdPieces(ctx.db, account.id, 5, modelId);
+    // AC-01: the gift model reads a ring size, and the collector saved 52 in YOUR SIZES: a hint on Choose size, never a choice.
+    await ctx.db.updateTable('models').set({ size_kind: 'RING' }).where('id', '=', gift).execute();
+    await ctx.services.sizes.set(account.id, { RING: 52 }, { type: 'account', id: account.id });
     const request = await ctx.db.insertInto('shop_requests').values({ account_id: account.id, model_id: modelId, created_at: ctx.clock() }).returning('id').executeTakeFirstOrThrow();
     await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
     const parent = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).where('channel', '=', 'SALON').executeTakeFirstOrThrow()).id;
@@ -698,6 +701,8 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.click('[data-testid=order-gift-size]');
     expect(await p.locator('dialog.dialog .dialog__title').textContent()).toBe('Choose size');
     expect(await p.locator('dialog select[name=giftSize] option').allTextContents()).toEqual(['Choose a size', '50 · 1 available', '52 · 1 available']);
+    expect(await p.locator('dialog [data-testid=order-gift-saved-size]').textContent()).toBe('Saved size: 52 (YOUR SIZES)');
+    expect(await p.locator('dialog select[name=giftSize]').inputValue()).toBe('');
     await p.selectOption('dialog select[name=giftSize]', '52');
     await confirmDialog(p);
     await expect.poll(() => p.locator('#order-step').textContent()).toContain(`It is paid with ${orderReference(parent)}.`);

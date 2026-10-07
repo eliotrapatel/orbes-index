@@ -64,6 +64,7 @@ import {
   type LiveInterestView,
 } from './live.js';
 import { mediaUrl } from './media.js';
+import { savedSizeAmong } from './sizes.js';
 
 /** THE RELEASES' LIVE half lists at most this many releases. */
 export const LIVE_LIST_LIMIT = 50;
@@ -279,6 +280,18 @@ export interface LiveOwnState {
    * null otherwise (one not shown leaves no mark).
    */
   guarantee: { pieces: number } | null;
+  /**
+   * AC-01: the size the account's saved size (YOUR SIZES) preselects, among this release's sizes with stock, only while it
+   * holds neither an entry nor an interest; null otherwise. The collector confirms it with its own press: nothing is
+   * written here.
+   */
+  savedSize: LiveSavedSize | null;
+}
+
+/** A size of a release preselected from YOUR SIZES (AC-01). */
+export interface LiveSavedSize {
+  id: string;
+  label: string;
 }
 
 /** An entry of the account in MY PIECES, with its release (each part of it from its stage). */
@@ -564,12 +577,46 @@ export class LiveRoomService {
         .where('visible', '=', true)
         .executeTakeFirst(),
     ]);
+    const entry = views.get(accountId) ?? null;
     return {
       access: viewer.access,
-      entry: views.get(accountId) ?? null,
+      entry,
       interest: interest ? { dropId: interest.drop_id, size: { id: interest.size_id, label: interest.label }, since: interest.created_at } : null,
       guarantee: guarantee ? { pieces: guarantee.pieces } : null,
+      savedSize: entry || interest ? null : await this.matchSavedSize(accountId, viewer.dropId),
     };
+  }
+
+  /**
+   * AC-01: the size the account's saved size preselects in a release (the stream's first frame), while it holds neither
+   * an entry nor an interest there; null otherwise. Reads only.
+   */
+  async savedSize(accountId: string, dropId: string): Promise<LiveSavedSize | null> {
+    const [entry, interest] = await Promise.all([
+      this.db.selectFrom('live_entries').select('id').where('drop_id', '=', dropId).where('account_id', '=', accountId).executeTakeFirst(),
+      this.db.selectFrom('live_interest').select('size_id').where('drop_id', '=', dropId).where('account_id', '=', accountId).executeTakeFirst(),
+    ]);
+    return entry || interest ? null : this.matchSavedSize(accountId, dropId);
+  }
+
+  /** The release's size the account's saved size matches, among its sizes with stock (services/sizes.ts matchSavedSize). */
+  private async matchSavedSize(accountId: string, dropId: string): Promise<LiveSavedSize | null> {
+    const d = await this.db.selectFrom('drops').select('model_id').where('id', '=', dropId).executeTakeFirst();
+    if (!d) return null;
+    const sizes = await this.db
+      .selectFrom('drop_sizes as s')
+      .leftJoin('skus as k', 'k.id', 's.sku_id')
+      .select(['s.id', 's.label', 's.stock', 'k.fit_min_mm', 'k.fit_max_mm'])
+      .where('s.drop_id', '=', dropId)
+      .orderBy('s.position')
+      .execute();
+    const match = await savedSizeAmong(
+      this.db,
+      accountId,
+      d.model_id,
+      sizes.map((z) => ({ id: z.id, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock })),
+    );
+    return match ? { id: match.id, label: match.label } : null;
   }
 
   /** The entries of the accounts following a release, by account id (one read for all of them). */

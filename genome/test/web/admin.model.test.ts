@@ -14,6 +14,7 @@ import { issueBatchBody } from '../../src/server/http/schemas.js';
 import { MAX_CERTIFICATE_ITEMS } from '../../src/server/render/certificate.js';
 import { MAX_ISSUE_BATCH } from '../../src/server/services/issuance.js';
 import { IMAGE_MIME_TYPES as SERVER_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES as SERVER_MAX_IMAGE_BYTES, MAX_IMAGE_SIDE as SERVER_MAX_IMAGE_SIDE } from '../../src/server/media/image.js';
+import { effectiveKind, fitChange, fitChanged, fitFormValues, fitProblem, fitsText, fitUnitLabel, kindChange, SIZE_KIND_OPTIONS, sizeKindLine, SIZES_TEXT } from '../../src/web/admin/model/sizes.js';
 import { fitWithin, modelPhotoImpact, PHOTO_MAX_BYTES, PHOTO_MAX_SIDE, PHOTO_MIME_TYPES, PHOTO_QUALITIES, photoFacts, PIECE_PHOTO_IMPACT } from '../../src/web/admin/model/photo.js';
 import {
   ANALYTICS_RANGES,
@@ -168,6 +169,8 @@ import {
   clubBlockLines,
   tierThreshold,
   utcInstant,
+  requestSizeText,
+  acceptedSizeLine,
 } from '../../src/web/admin/model/club.js';
 import {
   CLUB_TIER_BENEFIT_LINES as SERVER_TIER_LINES,
@@ -780,6 +783,7 @@ describe('the Club\'s requests of the private salon (P-X08)', () => {
       status: 'OPEN',
       createdAt: '2026-10-04T10:00:00.000Z',
       note: null,
+      size: null,
       account: { id: 'a', email: 'j***@example.com' },
       model: { id: 'm', name: 'ECLIPSE', type: 'PENDANT', slug: 'eclipse', priceLabel: null },
       handledBy: null,
@@ -2494,5 +2498,63 @@ describe('analytics view model', () => {
       ['FR', 1, 0.5, '25%', 'solid'],
       ['ZZ', 1, 0.5, '25%', 'solid'],
     ]);
+  });
+});
+
+describe('a model\'s Sizes and a salon request\'s size (plan NEXT-NINE, AC-01)', () => {
+  const ring: web.ModelSizes = {
+    modelId: 'm',
+    sizeKind: 'RING',
+    inherited: null,
+    sizes: [
+      { skuId: 'a', label: '52', code: 'MNL-52', fitMinMm: null, fitMaxMm: null },
+      { skuId: 'b', label: '54', code: 'MNL-54', fitMinMm: 53, fitMaxMm: 55 },
+    ],
+  };
+  it('names the size type, and what a variant without one reads from its main model', () => {
+    expect(SIZE_KIND_OPTIONS.map((o) => o.label)).toEqual(['None', 'Ring size', 'Bracelet size', 'Wrist (watches)', 'Necklace length']);
+    expect(SIZE_KIND_OPTIONS.map((o) => o.value)).toEqual(['', ...serverSchema.SIZE_KINDS]);
+    expect(sizeKindLine(ring)).toBe('Ring size');
+    expect(sizeKindLine({ sizeKind: null, inherited: { sizeKind: 'RING', from: 'MONOLITHE' } })).toBe('Reads Ring size from MONOLITHE');
+    expect(sizeKindLine({ sizeKind: null, inherited: null })).toBe('None');
+    expect(effectiveKind({ sizeKind: null, inherited: { sizeKind: 'WRIST', from: 'MONOLITHE' } })).toBe('WRIST');
+    expect(effectiveKind({ sizeKind: 'BRACELET', inherited: { sizeKind: 'WRIST', from: 'MONOLITHE' } })).toBe('BRACELET');
+    expect(kindChange('')).toEqual({ sizeKind: null });
+    expect(kindChange('NECKLACE')).toEqual({ sizeKind: 'NECKLACE' });
+    expect(SIZES_TEXT).toEqual({
+      lead: 'Which saved size of a collector preselects this model’s size, in I’LL BE THERE, the LIVE ready check and a salon request. The collector confirms it each time.',
+      empty: 'No sizes yet. A model’s sizes appear here once a release or a piece names them.',
+      fitHint: 'Empty: the size’s label itself is read, for example 52 or 17.5 CM.',
+      saved: 'Sizes saved.',
+    });
+  });
+
+  it('reads each size\'s fit in the type\'s unit, or by its label; the Edit dialog sends whole millimetres and says a mistake first', () => {
+    expect(fitsText('RING', ring.sizes[0]!)).toBe('By its label (52)');
+    expect(fitsText('RING', ring.sizes[1]!)).toBe('53 to 55');
+    expect(fitsText('BRACELET', { label: 'S', fitMinMm: 160, fitMaxMm: 175 })).toBe('16 to 17.5 cm');
+    expect(fitsText(null, { label: 'S', fitMinMm: 160, fitMaxMm: 175 })).toBe('By its label (S)');
+    expect(fitUnitLabel('RING')).toBe('French size');
+    expect(fitUnitLabel('WRIST')).toBe('cm');
+    expect(fitFormValues('BRACELET', { fitMinMm: 160, fitMaxMm: 175 })).toEqual({ fitFrom: '16', fitTo: '17.5' });
+    expect(fitFormValues('RING', { fitMinMm: null, fitMaxMm: null })).toEqual({ fitFrom: '', fitTo: '' });
+    expect(fitChange('BRACELET', { skuId: 's' }, { fitFrom: '16', fitTo: '17,5' })).toEqual({ fits: [{ skuId: 's', fitMinMm: 160, fitMaxMm: 175 }] });
+    expect(fitChange('RING', { skuId: 's' }, { fitFrom: '', fitTo: '' })).toEqual({ fits: [{ skuId: 's', fitMinMm: null, fitMaxMm: null }] });
+    expect(fitProblem('RING', { fitFrom: '52', fitTo: '' })).toBe('Give Fits from and Fits to, or neither.');
+    expect(fitProblem('RING', { fitFrom: '54', fitTo: '52' })).toBe('Fits from is at most Fits to.');
+    expect(fitProblem('RING', { fitFrom: '52.5', fitTo: '53' })).toBe('A fit is a whole size.');
+    expect(fitProblem('BRACELET', { fitFrom: '16.25', fitTo: '17' })).toBe('A fit is a measure in centimetres, to the millimetre.');
+    expect(fitProblem('NECKLACE', { fitFrom: '45', fitTo: '101' })).toBe('A fit is a measure in centimetres, to the millimetre.');
+    expect(fitProblem('RING', { fitFrom: '', fitTo: '' })).toBeNull();
+    expect(fitChanged('RING', ring.sizes[1]!, { fitFrom: '53', fitTo: '55' })).toBe(false);
+    expect(fitChanged('RING', ring.sizes[1]!, { fitFrom: '', fitTo: '' })).toBe(true);
+  });
+
+  it('says a request\'s size, Not given without one, and what ACCEPTED gives its order', () => {
+    expect(requestSizeText({ size: '52' })).toBe('52');
+    expect(requestSizeText({ size: null })).toBe('Not given');
+    expect(acceptedSizeLine({ size: '52' }, 'ACCEPTED')).toBe('The order takes size 52.');
+    expect(acceptedSizeLine({ size: '52' }, 'DECLINED')).toBeNull();
+    expect(acceptedSizeLine({ size: null }, 'ACCEPTED')).toBeNull();
   });
 });

@@ -17,9 +17,14 @@
  *            it is the same 404 LOOKBOOK_NOT_FOUND as a model not shown.
  *   request  POST /api/v1/club/lookbook/:slug/request (an owner who reaches
  *            the model's tier): REQUEST THIS PIECE, with an optional note
- *            (≤ 500 characters, the account's words). One OPEN request per
+ *            (≤ 500 characters, the account's words) and, for a model of two
+ *            sizes or more, the size asked (plan NEXT-NINE, AC-01: one of the
+ *            model's, 400 otherwise; null: NOT SURE YET). One OPEN request per
  *            account and model (409 SHOP_REQUEST_OPEN); audited `shop.request`
- *            with the model alone, never the note. ORBES Client Services then
+ *            with the model and whether a size was given (`sized`), never the
+ *            note nor the size. A RESERVED sheet carries the model's sizes and
+ *            the one YOUR SIZES suggests (`suggestedSize`), which the collector
+ *            confirms by its own press. ORBES Client Services then
  *            contacts the account: no email is sent, no payment taken.
  *   list     GET  /api/admin/club/requests (AUDITOR): the console's Requests
  *            tab, OPEN first, then the newest; emails masked for an AUDITOR by
@@ -47,6 +52,7 @@ import type { AuditService } from './audit.js';
 import { CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, ownersOnly, type ClubService, type ClubTierName } from './club.js';
 import type { LookbookService, LookbookSheet, SalonCard, SalonFacts } from './lookbook.js';
 import { orderForShopRequest } from './orders.js';
+import { matchSavedSize, modelSizeCandidates, savedMm, sizeKindOf } from './sizes.js';
 
 /** The account's note on a request (shop_requests.note): at most this many characters once trimmed. */
 export const SHOP_NOTE_MAX = 500;
@@ -82,6 +88,8 @@ export interface ShopRequestView {
   id: string;
   status: ShopRequestStatus;
   createdAt: Date;
+  /** AC-01: the size asked (REQUESTED · SIZE 52); null: not sure yet, or a model of one size. */
+  size: string | null;
   /** The model requested: what WRITE TO ORBES CLIENT SERVICES attaches on its sheet (plan NEXT-NINE, CS-01, MODEL). */
   modelId: string;
 }
@@ -102,8 +110,11 @@ export interface SalonGrid {
   opensAt: SalonOpening | null;
 }
 
-/** What the salon adds to a RESERVED model of a sheet: its price, its tier and the account's open request. */
-export type SalonRequestFacts = SalonFacts & { request: ShopRequestView | null };
+/**
+ * What the salon adds to a RESERVED model of a sheet: its price, its tier and the account's open request; and (AC-01) its
+ * sizes, from its SKUs (the picker shows from two), with the one the account's saved size suggests, or null.
+ */
+export type SalonRequestFacts = SalonFacts & { request: ShopRequestView | null; sizes: string[]; suggestedSize: string | null };
 
 /**
  * A RESERVED sheet as the salon gives it to an owner: its price, its tier and the account's open request; and the same
@@ -121,6 +132,8 @@ export interface AdminShopRequest {
   createdAt: Date;
   /** The account's words; null without a note. */
   note: string | null;
+  /** AC-01: the size asked; null: not given (not sure yet, or one size). */
+  size: string | null;
   account: { id: string; email: string };
   model: { id: string; name: string; type: string; slug: string | null; priceLabel: string | null };
   /** Who closed it; null while open, or closed by a script. */
@@ -142,6 +155,8 @@ export interface ExportedShopRequest {
   modelId: string;
   model: string;
   note: string | null;
+  /** AC-01: the size asked; null: not given. */
+  size: string | null;
   status: ShopRequestStatus;
   requestedAt: Date;
   handledAt: Date | null;
@@ -195,7 +210,7 @@ export async function accountShopRequests(db: Db, accountId: string): Promise<Ex
   const rows = await db
     .selectFrom('shop_requests as r')
     .innerJoin('models as m', 'm.id', 'r.model_id')
-    .select(['r.id', 'r.model_id', 'm.name', 'r.note', 'r.status', 'r.created_at', 'r.handled_at', 'r.resolution_note', 'r.outcome'])
+    .select(['r.id', 'r.model_id', 'm.name', 'r.note', 'r.size_label', 'r.status', 'r.created_at', 'r.handled_at', 'r.resolution_note', 'r.outcome'])
     .where('r.account_id', '=', accountId.toLowerCase())
     .orderBy('r.created_at')
     .orderBy('r.id')
@@ -205,6 +220,7 @@ export async function accountShopRequests(db: Db, accountId: string): Promise<Ex
     modelId: r.model_id,
     model: r.name,
     note: r.note,
+    size: r.size_label,
     status: r.status,
     requestedAt: r.created_at,
     handledAt: r.handled_at,
@@ -268,36 +284,47 @@ export class SalonService {
     const variants: SalonSheet['variants'] = [];
     for (const v of sheet.variants) {
       const id = variantIds[v.slug];
-      variants.push(v.salon && id ? { ...v, salon: { ...v.salon, request: await this.openRequest(accountId, id) } } : (v as SalonSheet['variants'][number]));
+      variants.push(v.salon && id ? { ...v, salon: await this.requestFacts(accountId, id, v.salon) } : (v as SalonSheet['variants'][number]));
     }
     if (!sheet.salon) return { ...sheet, variants } as SalonSheet;
-    return { ...sheet, salon: { ...sheet.salon, request: await this.openRequest(accountId, modelId) }, variants };
+    return { ...sheet, salon: await this.requestFacts(accountId, modelId, sheet.salon), variants };
+  }
+
+  /** A RESERVED model's facts for the account: its open request, its sizes and the one its saved size suggests (AC-01). */
+  private async requestFacts(accountId: string, modelId: string, facts: SalonFacts): Promise<SalonRequestFacts> {
+    const [request, sizes] = await Promise.all([this.openRequest(accountId, modelId), modelSizeCandidates(this.db, modelId)]);
+    const kind = sizes.length >= 2 ? await sizeKindOf(this.db, modelId) : null;
+    const suggested = kind === null ? null : matchSavedSize(kind, await savedMm(this.db, accountId.toLowerCase(), kind), sizes);
+    return { ...facts, request, sizes: sizes.map((z) => z.label), suggestedSize: suggested?.label ?? null };
   }
 
   /** The account's open request for the model, or null. */
   private async openRequest(accountId: string, modelId: string): Promise<ShopRequestView | null> {
     const r = await this.db
       .selectFrom('shop_requests')
-      .select(['id', 'status', 'created_at'])
+      .select(['id', 'status', 'created_at', 'size_label'])
       .where('account_id', '=', accountId.toLowerCase())
       .where('model_id', '=', modelId)
       .where('status', '=', 'OPEN')
       .executeTakeFirst();
-    return r ? { id: r.id, status: r.status, createdAt: r.created_at, modelId } : null;
+    return r ? { id: r.id, status: r.status, createdAt: r.created_at, size: r.size_label, modelId } : null;
   }
 
   /**
    * REQUEST THIS PIECE (POST /api/v1/club/lookbook/:slug/request): a RESERVED model whose tier the account reaches now
    * (403 OWNERS_ONLY without a piece, 404 LOOKBOOK_NOT_FOUND above it or not shown, 404 NOT_IN_SALON for a PUBLIC one),
-   * with the account's optional note. 409 SHOP_REQUEST_OPEN while one is open for the model. Audited `shop.request`
-   * with the model, never the note. The account's row is read FOR SHARE: a lock under way finishes first, and closes it.
+   * with the account's optional note, and the size asked (AC-01: one of the model's sizes, whatever its case, stored as the
+   * model's; 400 'Choose one of this model's sizes.' otherwise; null or left out: none). 409 SHOP_REQUEST_OPEN while one
+   * is open for the model. Audited `shop.request` with the model and `sized`, never the note nor the size. The account's
+   * row is read FOR SHARE: a lock under way finishes first, and closes it.
    */
-  async request(accountId: string, slug: string, note: unknown, actor: Actor): Promise<{ request: ShopRequestView }> {
+  async request(accountId: string, slug: string, note: unknown, actor: Actor, size: unknown = null): Promise<{ request: ShopRequestView }> {
     assertAccount(accountId);
     const words = normalizeShopNote(note);
     const tier = await this.ownerTier(accountId);
     const { modelId, sheet } = await this.lookbook.sheetOf(slug, { tier });
     if (!sheet.salon) throw notInSalon();
+    const sizeLabel = await this.sizeAsked(modelId, size);
     const account = accountId.toLowerCase();
     try {
       const created = await inTransaction(this.db, async (tx) => {
@@ -306,17 +333,27 @@ export class SalonService {
         if (a.status !== 'ACTIVE') throw forbidden('This account cannot request a piece.');
         const r = await tx
           .insertInto('shop_requests')
-          .values({ account_id: account, model_id: modelId, note: words, created_at: this.clock() })
+          .values({ account_id: account, model_id: modelId, note: words, size_label: sizeLabel, created_at: this.clock() })
           .returning(['id', 'status', 'created_at'])
           .executeTakeFirstOrThrow();
-        await this.audit.record({ actor, action: 'shop.request', targetType: 'shop_request', targetId: r.id, details: { modelId } }, tx);
+        await this.audit.record({ actor, action: 'shop.request', targetType: 'shop_request', targetId: r.id, details: { modelId, sized: sizeLabel !== null } }, tx);
         return r;
       });
-      return { request: { id: created.id, status: created.status, createdAt: created.created_at, modelId } };
+      return { request: { id: created.id, status: created.status, createdAt: created.created_at, size: sizeLabel, modelId } };
     } catch (e) {
       if (isUniqueViolation(e, 'shop_requests_one_open')) throw shopRequestOpen();
       throw e;
     }
+  }
+
+  /** The size asked, as the model's SKU names it (AC-01): null for none; 400 for a size the model does not have. */
+  private async sizeAsked(modelId: string, size: unknown): Promise<string | null> {
+    if (size === null || size === undefined) return null;
+    const asked = typeof size === 'string' ? size.trim().toUpperCase() : '';
+    if (asked === '') return null;
+    const found = (await modelSizeCandidates(this.db, modelId)).find((z) => z.label.toUpperCase() === asked);
+    if (!found) throw validationError('Choose one of this model\u2019s sizes.');
+    return found.label;
   }
 
   // ── The console (Club → Requests) ────────────────────────────────────────
@@ -393,6 +430,7 @@ export class SalonService {
         'r.status',
         'r.created_at',
         'r.note',
+        'r.size_label',
         'r.handled_at',
         'r.resolution_note',
         'r.outcome',
@@ -414,6 +452,7 @@ type AdminRequestRow = {
   status: ShopRequestStatus;
   created_at: Date;
   note: string | null;
+  size_label: string | null;
   handled_at: Date | null;
   resolution_note: string | null;
   outcome: ShopRequestOutcome | null;
@@ -434,6 +473,7 @@ function toAdminRequest(r: AdminRequestRow): AdminShopRequest {
     status: r.status,
     createdAt: r.created_at,
     note: r.note,
+    size: r.size_label,
     account: { id: r.account_id, email: r.account_email },
     model: { id: r.model_id, name: r.model_name, type: r.model_type, slug: r.model_slug, priceLabel: r.model_price_label },
     handledBy: r.handled_by_id ? { id: r.handled_by_id, email: r.handled_by_email ?? '' } : null,

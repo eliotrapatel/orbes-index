@@ -5,10 +5,13 @@
  * (POST /api/v1/club/lookbook/:slug/request: one open request per account and model, audited `shop.request` without
  * the note); the console's Requests tab (GET /api/admin/club/requests, AUDITOR, emails masked; POST …/:id/close,
  * OPERATOR, with a note, audited `shop.request.close`); the lock of an account closes its open requests, and the right
- * of access exports them.
+ * of access exports them. Plan NEXT-NINE, AC-01: a model of two sizes or more offers its sizes with the one YOUR SIZES
+ * suggests; a request takes one of them or none (400 for another), audited `sized`; its ACCEPTED order takes it, with
+ * its SKU.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { IssueResult } from '../../src/server/services/issuance.js';
+import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
@@ -25,12 +28,14 @@ interface RequestJson {
   createdAt: string;
   /** The model requested (WRITE TO ORBES CLIENT SERVICES attaches it, plan NEXT-NINE CS-01). */
   modelId: string;
+  /** The size asked (plan NEXT-NINE, AC-01); null: not given. */
+  size: string | null;
 }
 
 interface SheetJson {
   slug: string;
   lookbook: 'PUBLIC' | 'RESERVED';
-  salon?: { priceLabel: string | null; minTier: number; request: RequestJson | null };
+  salon?: { priceLabel: string | null; minTier: number; request: RequestJson | null; sizes: string[]; suggestedSize: string | null };
 }
 
 interface AdminRequestJson {
@@ -38,6 +43,7 @@ interface AdminRequestJson {
   status: 'OPEN' | 'CLOSED';
   createdAt: string;
   note: string | null;
+  size: string | null;
   account: { id: string; email: string };
   model: { id: string; name: string; type: string; slug: string | null; priceLabel: string | null };
   handledBy: { id: string; email: string } | null;
@@ -177,7 +183,7 @@ describe('the private salon (P-X08)', () => {
     expect(res.statusCode, res.body).toBe(201);
     expect(res.headers['cache-control']).toBe('no-store');
     const { request } = safeJson(res) as { request: RequestJson };
-    expect(request).toEqual({ id: expect.any(String), status: 'OPEN', createdAt: h.clock.now().toISOString(), modelId: solstice });
+    expect(request).toEqual({ id: expect.any(String), status: 'OPEN', createdAt: h.clock.now().toISOString(), size: null, modelId: solstice });
     expect(await h.ctx.db.selectFrom('shop_requests').select(['account_id', 'model_id', 'note', 'status']).where('id', '=', request.id).executeTakeFirstOrThrow()).toEqual({
       account_id: titane.id,
       model_id: solstice,
@@ -185,12 +191,12 @@ describe('the private salon (P-X08)', () => {
       status: 'OPEN',
     });
     const [entry] = await audits('shop.request', request.id);
-    expect(entry).toMatchObject({ actor_type: 'account', actor_id: titane.id, target_type: 'shop_request', details: { modelId: solstice } });
+    expect(entry).toMatchObject({ actor_type: 'account', actor_id: titane.id, target_type: 'shop_request', details: { modelId: solstice, sized: false } });
     expect(JSON.stringify(entry!.details)).not.toContain('size 52');
     // Once while it is open; the sheet says it is requested.
     const again = await requestOf(titane.client, 'solstice');
     expect([again.statusCode, errorOf(again)]).toEqual([409, { code: 'SHOP_REQUEST_OPEN', message: 'You have already requested this piece: ORBES Client Services will contact you.' }]);
-    expect((safeJson(await titane.client.get('/api/v1/club/lookbook/solstice')) as SheetJson).salon).toEqual({ priceLabel: '€ 4 800', minTier: 1, request });
+    expect((safeJson(await titane.client.get('/api/v1/club/lookbook/solstice')) as SheetJson).salon).toEqual({ priceLabel: '€ 4 800', minTier: 1, request, sizes: [], suggestedSize: null });
     // Another account requests another model a minute later; the body may be left out.
     h.clock.advance(60_000);
     const other = await requestOf(platine.client, 'eclipse');
@@ -273,7 +279,7 @@ describe('the private salon (P-X08)', () => {
       expect.objectContaining({ modelId: solstice, model: 'SOLSTICE', note: 'A size 52, and a call after six.', status: 'CLOSED', outcome: 'ACCEPTED', resolutionNote: 'Called the client: a fitting on Tuesday.' }),
       expect.objectContaining({ modelId: solstice, model: 'SOLSTICE', note: null, status: 'CLOSED', outcome: 'DECLINED', resolutionNote: null }),
     ]);
-    for (const r of exported.shopRequests) expect(Object.keys(r).sort()).toEqual(['handledAt', 'model', 'modelId', 'note', 'outcome', 'requestId', 'requestedAt', 'resolutionNote', 'status']);
+    for (const r of exported.shopRequests) expect(Object.keys(r).sort()).toEqual(['handledAt', 'model', 'modelId', 'note', 'outcome', 'requestId', 'requestedAt', 'resolutionNote', 'size', 'status']);
     expect((await audits('account.export', titane.id))[0]!.details).toMatchObject({ shopRequests: 2 });
   });
 
@@ -310,5 +316,60 @@ describe('the private salon (P-X08)', () => {
     expect((await operator.patch(model(solstice), { lookbook: 'RESERVED', privateMinTier: 1 })).statusCode).toBe(200);
     expect((await operator.patch(model(eclipse), { lookbook: 'RESERVED' })).statusCode).toBe(200);
     expect(await grid(owner.client)).toEqual([['solstice'], null]);
+  });
+
+  it('a model of two sizes or more: its sizes and the one YOUR SIZES suggests on the sheet; REQUEST THIS PIECE with one of them or none, never another; the size kept, shown to the console and taken by the ACCEPTED order with its SKU (AC-01)', async () => {
+    const halo = await newModel('HALO');
+    expect((await operator.patch(model(halo), { slug: 'halo', lookbook: 'RESERVED' })).statusCode).toBe(200);
+    const skus = Object.fromEntries(await Promise.all(['54', '50', '52'].map(async (l) => [l, await ensureSku(h.ctx.db, halo, l)] as const)));
+    expect((await operator.request('PUT', `${model(halo)}/sizes`, { body: { sizeKind: 'RING' } })).statusCode).toBe(200);
+    const owner = await member(1);
+    const sheet = async (c: Client) => (safeJson(await c.get('/api/v1/club/lookbook/halo')) as SheetJson).salon!;
+    // Its sizes in the order a client reads them; nothing suggested without a saved size.
+    expect(await sheet(owner.client)).toMatchObject({ sizes: ['50', '52', '54'], suggestedSize: null, request: null });
+    expect((await owner.client.request('PUT', '/api/v1/account/sizes', { body: { sizes: { RING: 52 } } })).statusCode).toBe(200);
+    expect(await sheet(owner.client)).toMatchObject({ sizes: ['50', '52', '54'], suggestedSize: '52' });
+    // A saved size no size matches suggests nothing; reading writes nothing.
+    const other = await member(1);
+    expect((await other.client.request('PUT', '/api/v1/account/sizes', { body: { sizes: { RING: 53 } } })).statusCode).toBe(200);
+    expect((await sheet(other.client)).suggestedSize).toBeNull();
+    expect(await h.ctx.db.selectFrom('shop_requests').select('id').where('model_id', '=', halo).execute()).toEqual([]);
+    // Only one of the model's sizes, whatever its case; another is refused before anything is written.
+    for (const size of ['53', 'XL', 'ONE SIZE']) {
+      const res = await requestOf(owner.client, 'halo', { size });
+      expect([res.statusCode, errorOf(res)], size).toEqual([400, { code: 'VALIDATION_FAILED', message: 'Choose one of this model’s sizes.' }]);
+    }
+    expect((await requestOf(owner.client, 'halo', { size: 'x'.repeat(101) })).statusCode).toBe(400);
+    expect(await h.ctx.db.selectFrom('shop_requests').select('id').where('model_id', '=', halo).execute()).toEqual([]);
+    const res = await requestOf(owner.client, 'halo', { size: ' 52 ', note: 'For a gift.' });
+    expect(res.statusCode, res.body).toBe(201);
+    const { request } = safeJson(res) as { request: RequestJson };
+    expect(request).toMatchObject({ status: 'OPEN', size: '52', modelId: halo });
+    expect((await sheet(owner.client)).request).toMatchObject({ id: request.id, size: '52' });
+    expect((await audits('shop.request', request.id))[0]!.details).toEqual({ modelId: halo, sized: true });
+    // NOT SURE YET: no size; audited so, never the size.
+    h.clock.advance(60_000);
+    const unsure = await requestOf(other.client, 'halo', { size: null });
+    expect(unsure.statusCode, unsure.body).toBe(201);
+    const unsureId = (safeJson(unsure) as { request: RequestJson }).request.id;
+    expect((safeJson(unsure) as { request: RequestJson }).request.size).toBeNull();
+    expect((await audits('shop.request', unsureId))[0]!.details).toEqual({ modelId: halo, sized: false });
+    // The console's Requests: the size asked, or none.
+    const listed = (await adminRequests(auditor)).items.filter((r) => r.model.id === halo);
+    expect(listed.map((r) => [r.id, r.size])).toEqual([
+      [unsureId, null],
+      [request.id, '52'],
+    ]);
+    // ACCEPTED: the order takes the size and its SKU.
+    const closed = await operator.post(`/api/admin/club/requests/${request.id}/close`, { note: 'Confirmed size 52 by phone.', outcome: 'ACCEPTED' });
+    expect(closed.statusCode, closed.body).toBe(200);
+    const order = await h.ctx.db.selectFrom('orders').selectAll().where('shop_request_id', '=', request.id).executeTakeFirstOrThrow();
+    expect(order).toMatchObject({ channel: 'SALON', size_label: '52', sku_id: skus['52'] });
+    expect(order.reservation).not.toBeNull();
+    // The export keeps the size of each request.
+    const exported = safeJson(await admin.get(`/api/admin/owners/${owner.id}/export`)) as { shopRequests: { size: string | null }[] };
+    expect(exported.shopRequests.map((r) => r.size)).toEqual(['52']);
+    // Hidden again for what follows.
+    expect((await operator.patch(model(halo), { lookbook: 'HIDDEN' })).statusCode).toBe(200);
   });
 });

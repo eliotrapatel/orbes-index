@@ -51,6 +51,7 @@ import {
   giftHeaderLine,
   giftLine,
   giftRows,
+  giftSavedSizeHint,
   giftSizeOptions,
   durationText,
   GIFT_SIZE_TERMS,
@@ -256,7 +257,7 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
     expect(giftLine(platineGift)).toBe('OR-AAAA0001 · ANNEAU · RESERVED');
     expect(giftLine({ ...platineGift, sizeToChoose: true })).toBe('OR-AAAA0001 · ANNEAU · Size to choose');
     expect(giftRows(view({ gifts: [platineGift] }))).toEqual([{ label: 'Welcome gift', id: 'x', line: 'OR-AAAA0001 · ANNEAU · RESERVED' }]);
-    const g = view({ channel: 'GIFT', withOrder: { id: 'p', reference: 'OR-12345678', shipment: null }, giftOf: { tier: 2, sizes: [] } });
+    const g = view({ channel: 'GIFT', withOrder: { id: 'p', reference: 'OR-12345678', shipment: null }, giftOf: { tier: 2, sizes: [], savedSize: null } });
     expect(giftHeaderLine(g)).toBe('Welcome gift · PLATINE · travels with OR-12345678');
     expect(giftHeaderLine(view())).toBeNull();
     expect(EVENT_LABELS['order.gift']).toBe('Welcome gift added');
@@ -264,7 +265,7 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
   });
 
   it('chooses a GIFT order\'s size among its model\'s; it is never paid alone, and its parent waits for that size', () => {
-    const g = view({ channel: 'GIFT', priceMinor: 0, currency: 'EUR', withOrder: { id: 'p', reference: 'OR-12345678', shipment: null }, giftOf: { tier: 3, sizes: [{ skuId: 's1', label: '52', available: 2 }, { skuId: 's2', label: '54', available: 0 }] } });
+    const g = view({ channel: 'GIFT', priceMinor: 0, currency: 'EUR', withOrder: { id: 'p', reference: 'OR-12345678', shipment: null }, giftOf: { tier: 3, sizes: [{ skuId: 's1', label: '52', available: 2 }, { skuId: 's2', label: '54', available: 0 }], savedSize: null } });
     expect(giftSizeOptions(g)).toEqual([{ value: '52', label: '52 · 2 available' }, { value: '54', label: '54 · none available' }]);
     const a = orderActions(g, 'OPERATOR');
     expect(a.pay).toBe(false);
@@ -275,8 +276,14 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
     expect(sizeText({ sizeLabel: '52', skuKnown: true, gift: true })).toBe('52');
     expect(canChooseGiftSize(g, a.terms)).toBe(true);
     expect(canChooseGiftSize(g, orderActions(g, 'AUDITOR').terms)).toBe(false);
-    expect(canChooseGiftSize({ ...g, skuId: 's1', giftOf: { tier: 3, sizes: [] } }, a.terms)).toBe(false);
+    expect(canChooseGiftSize({ ...g, skuId: 's1', giftOf: { tier: 3, sizes: [], savedSize: null } }, a.terms)).toBe(false);
     expect(canChooseGiftSize(view({ priceMinor: 300_000, currency: 'EUR' }), orderActions(view(), 'OPERATOR').terms)).toBe(false);
+    // AC-01: the collector's saved size is a hint only, never a choice: the dialog opens on no size.
+    expect(giftSavedSizeHint(g)).toBeNull();
+    const hinted = { ...g, giftOf: { ...g.giftOf!, savedSize: '52' } };
+    expect(giftSavedSizeHint(hinted)).toBe('Saved size: 52 (YOUR SIZES)');
+    expect(giftSavedSizeHint({ ...g, giftOf: { ...g.giftOf!, savedSize: '16.5 CM' } })).toBe('Saved size: 16.5 CM (YOUR SIZES)');
+    expect(termsValues(hinted).giftSize).toBe('');
     expect(GIFT_SIZE_TERMS).toEqual({ size: true, price: false, engraving: false, shipping: false });
     expect(termsChange(g, { ...termsValues(g), giftSize: '54' }, GIFT_SIZE_TERMS)).toEqual({ sizeLabel: '54' });
     expect(termsProblem(g, termsValues(g), GIFT_SIZE_TERMS)).toBe('Nothing has changed.');

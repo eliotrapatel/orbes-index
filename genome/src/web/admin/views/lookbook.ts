@@ -22,9 +22,13 @@
  *    and care), asked its label, colour and SKU prefix, then its reference
  *    photograph; its page opens next, for its gallery, material, prices and
  *    publication. A variant's page names its main model.
+ *  - Sizes (plan NEXT-NINE, AC-01): which saved size of a collector (YOUR
+ *    SIZES) preselects the model's size, and the measures each of its sizes
+ *    (its SKUs) fits; a variant without a size type reads its main model's.
  *
  * OPERATOR edits (editCatalog, photograph), an AUDITOR reads. Each change is
- * one request, audited by the server (model.update, model.gallery.*), then
+ * one request, audited by the server (model.update, model.gallery.*,
+ * model.sizes.update), then
  * the page is read again.
  */
 import { h } from '../../shared/dom.js';
@@ -56,10 +60,11 @@ import {
 } from '../model/lookbook.js';
 import { can } from '../model/permissions.js';
 import { modelPhotoImpact } from '../model/photo.js';
+import { effectiveKind, fitChange, fitChanged, fitFormValues, fitProblem, fitsText, fitUnitLabel, kindChange, SIZE_KIND_OPTIONS, sizeKindLine, SIZES_TEXT } from '../model/sizes.js';
 import { toneOf } from '../model/tone.js';
 import { dotChange, dotFormValues, dotProblem, keepsLabel, proposeVariantPrefix, VARIANT_LABEL_MAX, variantFormValues, variantInput, variantProblem } from '../model/variants.js';
 import { href } from '../router.js';
-import type { GalleryImage, Model, ModelVariant } from '../types.js';
+import type { GalleryImage, Model, ModelSizeRow, ModelVariant } from '../types.js';
 import { button, defList, emptyState, linkButton, mono, pageHeader, section, statusMark, table, type Column } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
@@ -67,7 +72,8 @@ import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
-  const m = await ctx.api.model(ctx.route.params.modelId ?? '');
+  const id = ctx.route.params.modelId ?? '';
+  const [m, sizing] = await Promise.all([ctx.api.model(id), ctx.api.modelSizes(id)]);
   const role = ctx.session.admin.role;
   const canEdit = can(role, 'editCatalog');
   const canPhotograph = can(role, 'photograph');
@@ -238,6 +244,68 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
           ]
         : [],
     },
+  );
+
+  // ── Sizes (AC-01) ────────────────────────────────────────────────────────
+  const kind = effectiveKind(sizing);
+  const editKind = () =>
+    void openDialog({
+      title: 'Size type',
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, SIZES_TEXT.lead),
+      fields: [
+        {
+          name: 'sizeKind',
+          label: 'Size type',
+          kind: 'select',
+          options: [...SIZE_KIND_OPTIONS],
+          value: sizing.sizeKind ?? '',
+          hint: m.variantOf ? 'None: the variant reads its main model’s.' : undefined,
+        },
+      ],
+      validate: (v) => ((v.sizeKind || null) === sizing.sizeKind ? 'Nothing has changed.' : null),
+      confirmLabel: 'Save size type',
+      submit: async (v) => {
+        await ctx.api.setModelSizes(m.id, kindChange(v.sizeKind ?? ''));
+      },
+    }).then(done(SIZES_TEXT.saved));
+  const editFit = (row: ModelSizeRow) => {
+    if (kind === null) return;
+    const unit = fitUnitLabel(kind);
+    void openDialog({
+      title: 'Size',
+      eyebrow: `${eyebrow} · ${row.label}`,
+      fields: [
+        { name: 'fitFrom', label: `Fits from (${unit})`, maxlength: 8, value: fitFormValues(kind, row).fitFrom, hint: SIZES_TEXT.fitHint },
+        { name: 'fitTo', label: `Fits to (${unit})`, maxlength: 8, value: fitFormValues(kind, row).fitTo },
+      ],
+      validate: (v) => fitProblem(kind, v) ?? (fitChanged(kind, row, v) ? null : 'Nothing has changed.'),
+      confirmLabel: 'Save size',
+      submit: async (v) => {
+        await ctx.api.setModelSizes(m.id, fitChange(kind, row, v));
+      },
+    }).then(done(SIZES_TEXT.saved));
+  };
+  const sizeColumns: Column<ModelSizeRow>[] = [
+    { label: 'Size', cell: (r) => h('span', { data: { testid: 'model-size-label' } }, r.label), kind: ['nowrap'] },
+    { label: 'SKU', cell: (r) => mono(r.code), kind: ['nowrap'] },
+    { label: 'Fits', cell: (r) => h('span', { data: { testid: 'model-size-fits' } }, fitsText(kind, r)) },
+    {
+      label: 'Edit',
+      kind: ['actions'],
+      cell: (r) => (canEdit && kind !== null ? button('Edit', { kind: 'ghost', testId: 'model-size-edit', onClick: () => editFit(r) }) : null),
+    },
+  ];
+  const sizesSection = section(
+    'Sizes',
+    [
+      h('p', { class: 'prose', data: { testid: 'model-sizes-lead' } }, SIZES_TEXT.lead),
+      defList([{ label: 'Size type', value: h('span', { data: { testid: 'model-size-kind' } }, sizeKindLine(sizing)) }]),
+      sizing.sizes.length
+        ? h('div', { data: { testid: 'model-sizes' } }, table(sizeColumns, sizing.sizes, { empty: SIZES_TEXT.empty, caption: 'Sizes' }))
+        : emptyState(SIZES_TEXT.empty),
+    ],
+    { id: 'sizes', tools: canEdit ? [button('Edit size type', { kind: 'ghost', testId: 'model-size-kind-edit', onClick: editKind })] : [] },
   );
 
   // ── Private salon (P-X08) ────────────────────────────────────────────────
@@ -433,6 +501,7 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
     }),
     publication,
     variants,
+    sizesSection,
     salon,
     story,
     specs,

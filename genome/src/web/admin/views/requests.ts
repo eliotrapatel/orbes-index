@@ -6,17 +6,19 @@
  * (REQUEST THIS PIECE), open ones first, then the newest; `?status=` narrows
  * to OPEN or CLOSED. Each row: when it was made, the client (its sheet; the
  * email masked for an AUDITOR, j***@example.com), the model (its type and the
- * price the salon shows), the client's note, and its status (its outcome, who
+ * price the salon shows), the client's note, the size asked (AC-01, or Not
+ * given), and its status (its outcome, who
  * closed it, when, and what was done). Close (OPERATOR) opens the dialog of the
  * note and the outcome, both required: ACCEPTED, the sale concluded, creates the
- * request's order (Clients › Orders), DECLINED none; then the tab is read
+ * request's order (Clients › Orders), with the size asked ('The order takes size
+ * 52.'), DECLINED none; then the tab is read
  * again; the server audits it (`shop.request.close`, never the note). ORBES
  * Client Services concludes the sale with the client: nothing is paid on
  * /verify, and no email is sent.
  */
 import { h } from '../../shared/dom.js';
 import { formatDateTime, humanize } from '../format.js';
-import { canCloseRequest, closeRequestProblem, requestModelLine, SHOP_REQUEST_LIMITS, SHOP_REQUEST_OUTCOME_OPTIONS, shopRequestStatusOf } from '../model/club.js';
+import { acceptedSizeLine, canCloseRequest, closeRequestProblem, requestModelLine, requestSizeText, SHOP_REQUEST_LIMITS, SHOP_REQUEST_OUTCOME_OPTIONS, shopRequestStatusOf } from '../model/club.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
 import { SHOP_REQUEST_STATUSES, type ShopRequest, type ShopRequestOutcome } from '../types.js';
@@ -63,6 +65,11 @@ export async function requestsTab(ctx: ViewContext): Promise<HTMLElement> {
                   hint: 'What was done for the client: the sale concluded, a fitting arranged, or why nothing was. Kept with the request.',
                 },
               ],
+              // AC-01: an accepted request's order takes the size the client asked.
+              live: (v) => {
+                const line = acceptedSizeLine(r, v.outcome);
+                return line ? h('p', { class: 'dialog__text', data: { testid: 'request-order-size' } }, line) : null;
+              },
               validate: (v) => closeRequestProblem(v.note, v.outcome),
               confirmLabel: 'Close request',
               submit: async (v) => {
@@ -100,6 +107,8 @@ export async function requestsTab(ctx: ViewContext): Promise<HTMLElement> {
               ),
             kind: ['wide'],
           },
+          // AC-01: the size asked with REQUEST THIS PIECE, or Not given.
+          { label: 'Size', cell: (r) => h('span', { data: { testid: 'request-size' } }, requestSizeText(r)), kind: ['nowrap'] },
           {
             label: 'Status',
             cell: (r) =>

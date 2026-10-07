@@ -1999,6 +1999,8 @@ export interface ShopRequest {
   createdAt: Iso;
   /** The client's words; null without a note. */
   note: string | null;
+  /** AC-01: the size the client asked; null: not given (not sure yet, or one size). */
+  size: string | null;
   account: { id: string; email: string };
   model: { id: string; name: string; type: string; slug: string | null; priceLabel: string | null };
   handledBy: { id: string; email: string } | null;
@@ -2007,6 +2009,31 @@ export interface ShopRequest {
   resolutionNote: string | null;
   /** ACCEPTED (an order was created) or DECLINED once closed; null while open, or closed before the orders. */
   outcome: ShopRequestOutcome | null;
+}
+
+// ── A model's Sizes (plan NEXT-NINE, AC-01) ────────────────────────────────
+
+/** A size of a model (its SKU) and the measures it fits, in whole millimetres of its size kind; null: its label is read. */
+export interface ModelSizeRow {
+  skuId: string;
+  label: string;
+  code: string;
+  fitMinMm: number | null;
+  fitMaxMm: number | null;
+}
+
+/** GET /api/admin/models/:id/sizes: its size kind, what a variant without one reads, its sizes. */
+export interface ModelSizes {
+  modelId: string;
+  sizeKind: SizeKind | null;
+  inherited: { sizeKind: SizeKind; from: string } | null;
+  sizes: ModelSizeRow[];
+}
+
+/** PUT /api/admin/models/:id/sizes: its kind (null: none) or its sizes' fits, or both. */
+export interface ModelSizesChange {
+  sizeKind?: SizeKind | null;
+  fits?: { skuId: string; fitMinMm: number | null; fitMaxMm: number | null }[];
 }
 
 // ── MESSAGES (plan NEXT-NINE, CS-01) ───────────────────────────────────────
@@ -2263,7 +2290,8 @@ export interface OrderView {
    */
   gifts: { id: string; reference: string; model: string; status: OrderStatus; sizeToChoose: boolean; tier: 2 | 3 }[];
   /** BP-19 T5, on a GIFT order: its tier, and while its size is to be chosen, its model's sizes with the pieces available. */
-  giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[] } | null;
+  /** …and (AC-01) the client's saved size, a hint only: the matching size's label or the saved measure; null without one. */
+  giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[]; savedSize: string | null } | null;
   /** BP-19 T5: the client's credit usable now, and the credit taken off this order (released or not). */
   credit: {
     available: { grantId: string; tier: 2 | 3; balanceMinor: number; currency: string; expiresAt: Iso }[];

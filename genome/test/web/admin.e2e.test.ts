@@ -70,6 +70,8 @@ import { ANOMALY_TYPES } from '../../src/server/services/anomaly.js';
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { aggregateScanStats, daySpan, lastCompleteDay, utcDay } from '../../src/server/services/scan-stats.js';
+import { inTransaction } from '../../src/server/db/connection.js';
+import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { jpegPhoto } from '../support/images.js';
@@ -2695,6 +2697,37 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await ctx.db.selectFrom('models').select(['price_label', 'private_min_tier']).where('id', '=', solstice.id).executeTakeFirstOrThrow()).toEqual({ price_label: '€ 4 800', private_min_tier: 2 });
     expect(await figuresInDisplayFace(p)).toEqual([]);
 
+    // AC-01, its Sizes: none until a release or a piece names them; then its size type and a size's fit, in its unit.
+    expect(await p.locator('#sizes [data-testid=model-size-kind]').textContent()).toBe('None');
+    expect(await p.locator('#sizes .empty').textContent()).toContain('No sizes yet. A model’s sizes appear here once a release or a piece names them.');
+    for (const size of ['52', '54']) await inTransaction(ctx.db, (tx) => ensureSku(tx, solstice.id, size));
+    await p.reload();
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-label]').allTextContents(), { timeout: 15_000 }).toEqual(['52', '54']);
+    expect(await p.locator('#sizes [data-testid=model-size-fits]').allTextContents()).toEqual(['By its label (52)', 'By its label (54)']);
+    // No size type yet: no unit to read a fit in, so no Edit.
+    expect(await p.locator('#sizes [data-testid=model-size-edit]').count()).toBe(0);
+    await p.click('[data-testid=model-size-kind-edit]');
+    await p.selectOption('dialog select[name=sizeKind]', 'RING');
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Sizes saved.")');
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-kind]').textContent()).toBe('Ring size');
+    await p.locator('#sizes [data-testid=model-size-edit]').nth(1).click();
+    expect(await p.locator('dialog .cfield__hint').first().textContent()).toContain('Empty: the size’s label itself is read, for example 52 or 17.5 CM.');
+    await p.fill('dialog input[name=fitFrom]', '55');
+    await p.fill('dialog input[name=fitTo]', '53');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Fits from is at most Fits to.');
+    await p.fill('dialog input[name=fitFrom]', '53');
+    await p.fill('dialog input[name=fitTo]', '55');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-fits]').allTextContents()).toEqual(['By its label (52)', '53 to 55']);
+    expect(await ctx.db.selectFrom('skus').select(['size_label', 'fit_min_mm', 'fit_max_mm']).where('model_id', '=', solstice.id).orderBy('size_label').execute()).toEqual([
+      { size_label: '52', fit_min_mm: null, fit_max_mm: null },
+      { size_label: '54', fit_min_mm: 53, fit_max_mm: 55 },
+    ]);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'model-sizes', { full: true });
+
     // A PLATINE owner requests it on /verify (the service, as REQUEST THIS PIECE calls it).
     const a = await ctx.services.auth.registerAccount({ email: 'vesper.owner@example.com', password: 'salon owner passphrase 2026' }, {});
     for (let i = 0; i < 5; i++) {
@@ -2703,7 +2736,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       const scan = await ctx.services.verification.verify({ code: owned.code.data }, {});
       await ctx.services.ownership.registerFirst(a.account.id, { registrationToken: scan.registration!.token, claimCode: owned.claimCode! }, { type: 'account', id: a.account.id });
     }
-    await ctx.services.salon.request(a.account.id, 'solstice', 'A size 54, and a call after six.', { type: 'account', id: a.account.id });
+    await ctx.services.salon.request(a.account.id, 'solstice', 'A size 54, and a call after six.', { type: 'account', id: a.account.id }, '54');
 
     // The Club's Requests tab: the open request, its client (in clear for an ADMIN), its model and price, its note.
     await go(p, '#/club', 'Club');
@@ -2716,13 +2749,18 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await row.locator('.cell-sub').first().textContent()).toBe('RING · € 4 800');
     expect(await row.locator('[data-testid=request-note]').textContent()).toBe('A size 54, and a call after six.');
     expect(await row.locator('.status__text').textContent()).toBe('OPEN');
+    // AC-01: the size asked.
+    expect(await row.locator('[data-testid=request-size]').textContent()).toBe('54');
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'club-requests', { full: true });
     // Closed with a note and its outcome: the row says the outcome, who closed it and what was done; ACCEPTED created
     // the request's order (plan LIVE RELEASE+).
     await row.locator('[data-testid=close-request]').click();
     await p.fill('dialog textarea[name=note]', 'Called the client: a fitting on Tuesday.');
+    expect(await p.locator('dialog [data-testid=request-order-size]').count()).toBe(0);
     await p.selectOption('dialog select[name=outcome]', 'ACCEPTED');
+    // AC-01: ACCEPTED, its order takes the size asked.
+    await expect.poll(() => p.locator('dialog [data-testid=request-order-size]').textContent()).toBe('The order takes size 54.');
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Request closed.")');
     await expect.poll(() => row.locator('.status__text').textContent()).toBe('CLOSED');
@@ -2732,7 +2770,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await ctx.db.selectFrom('shop_requests').select(['status', 'outcome', 'resolution_note']).where('account_id', '=', a.account.id).execute()).toEqual([
       { status: 'CLOSED', outcome: 'ACCEPTED', resolution_note: 'Called the client: a fitting on Tuesday.' },
     ]);
-    expect(await ctx.db.selectFrom('orders').select(['channel', 'status']).where('account_id', '=', a.account.id).execute()).toEqual([{ channel: 'SALON', status: 'RESERVED' }]);
+    expect(await ctx.db.selectFrom('orders').select(['channel', 'status', 'size_label']).where('account_id', '=', a.account.id).execute()).toEqual([{ channel: 'SALON', status: 'RESERVED', size_label: '54' }]);
     // Narrowed to the open requests: none is left.
     await p.selectOption('#requests select[name=status]', 'OPEN');
     await expect.poll(() => p.evaluate(() => location.hash)).toBe('#/club?tab=requests&status=OPEN');
@@ -2752,9 +2790,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await go(ap, '#/club?tab=requests&status=OPEN', 'Club');
     await expect.poll(() => ap.locator('#requests [data-testid=request-client]').allTextContents()).toEqual(['v***@example.com']);
     expect(await ap.locator('[data-testid=close-request]').count()).toBe(0);
+    expect(await ap.locator('#requests [data-testid=request-size]').allTextContents()).toEqual(['Not given']);
     await go(ap, `#/catalogue/${solstice.id}`, 'SOLSTICE');
     await expect.poll(() => ap.locator('[data-testid=salon-price]').textContent()).toBe('€ 4 800');
     expect(await ap.locator('[data-testid=salon-edit]').count()).toBe(0);
+    // Its Sizes read, without an edit.
+    expect(await ap.locator('#sizes [data-testid=model-size-fits]').allTextContents()).toEqual(['By its label (52)', '53 to 55']);
+    expect(await ap.locator('[data-testid=model-size-kind-edit], [data-testid=model-size-edit]').count()).toBe(0);
     expect(await cspViolations(ap)).toEqual([]);
     await ac.close();
   }, STEP_TIMEOUT);
