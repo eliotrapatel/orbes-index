@@ -67,6 +67,8 @@ const DAY_MS = 86_400_000;
 const LIVE_HOLDING = ['TURN', 'SECURED', 'CONFIRMED'] as const;
 /** A LIVE entry still waiting for its turn: what a guarantee binds to. */
 const LIVE_WAITING = ['WAITING', 'QUEUED'] as const;
+/** A LIVE RELEASE's pieces per collector when it sets none (live.ts LIVE_PER_ACCOUNT.default; kept here so this module reads no release service). */
+export const LIVE_PER_ACCOUNT_DEFAULT = 1;
 
 // ── Errors ─────────────────────────────────────────────────────────────────
 
@@ -1164,7 +1166,8 @@ export class GuaranteeService {
 
   /**
    * Revoke a guarantee while ACTIVE (POST /api/admin/guarantees/:id/revoke, OPERATOR; 409 GUARANTEE_USED once used): the
-   * client's entry, if any, stays as an ordinary entry (unbound: one piece). Reads the guarantee, locks its release, then
+   * client's entry, if any, stays as an ordinary entry (unbound: one piece in a draw; in a LIVE RELEASE, an entry still
+   * waiting keeps its size, its quantity brought back within the release's per collector). Reads the guarantee, locks its release, then
    * the guarantee, its release checked again. Audited `guarantee.revoke` (whether a note was given; never its words).
    */
   async revoke(guaranteeId: string, note: string | null | undefined, actor: Actor): Promise<AdminGuarantee> {
@@ -1177,7 +1180,16 @@ export class GuaranteeService {
       if (g.status === 'USED') throw used();
       if (g.status !== 'ACTIVE') throw notActive();
       await tx.updateTable('drop_entries').set({ guarantee_id: null, pieces: 1 }).where('guarantee_id', '=', g.id).execute();
-      await tx.updateTable('live_entries').set({ guarantee_id: null }).where('guarantee_id', '=', g.id).execute();
+      await tx
+        .updateTable('live_entries as e')
+        .from('drops as d')
+        .set({
+          guarantee_id: null,
+          quantity: sql<number>`CASE WHEN e.status IN ('WAITING', 'QUEUED') THEN LEAST(e.quantity, COALESCE(d.per_account, ${LIVE_PER_ACCOUNT_DEFAULT})) ELSE e.quantity END`,
+        })
+        .whereRef('d.id', '=', 'e.drop_id')
+        .where('e.guarantee_id', '=', g.id)
+        .execute();
       await tx
         .updateTable('house_guarantees')
         .set({ status: 'REVOKED', revoked_by: admin, revoke_note: text, closed_at: now, closed_reason: 'REVOKED', updated_by: admin, updated_at: now })

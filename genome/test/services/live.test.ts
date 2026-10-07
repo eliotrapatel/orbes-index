@@ -38,8 +38,9 @@ import {
   turnTokenHash,
   windowsFor,
   LIVE_GESTURE_MIN_MS,
+  LIVE_PER_ACCOUNT,
 } from '../../src/server/services/live.js';
-import { GuaranteeService } from '../../src/server/services/guarantees.js';
+import { GuaranteeService, LIVE_PER_ACCOUNT_DEFAULT } from '../../src/server/services/guarantees.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
 import { OwnershipService } from '../../src/server/services/ownership.js';
 import { OwnerService } from '../../src/server/services/owners.js';
@@ -999,6 +1000,22 @@ describe('LiveService', () => {
       unmarked(moved);
       expect((await entry(r.id, hidden.id)).guarantee_id).toBeNull();
       expect(await guaranteeOf(hidden.id)).toMatchObject({ status: 'ACTIVE', covered_drop_id: r.id });
+    });
+
+    it('revoked while its holder waits: the entry stays an ordinary one, its quantity brought back within the per collector, its turn for that', async () => {
+      expect(LIVE_PER_ACCOUNT_DEFAULT).toBe(LIVE_PER_ACCOUNT.default);
+      const r = await release({ perAccount: 1, sizes: [{ label: '52', stock: 3 }] });
+      const holder = await accountOfTier(f, 0);
+      const g = (await grant(holder.id, r.id, { pieces: 2 })).guarantee;
+      f.clock.set(at(-MINUTE));
+      expect(await f.live.enter(holder.id, r.id, { sizeId: r.sizes[0]!.id, quantity: 2 }, holder.actor)).toMatchObject({ quantity: 2, guaranteed: true });
+      await guarantees().revoke(g.id, null, f.admin);
+      expect(await entry(r.id, holder.id)).toMatchObject({ status: 'WAITING', quantity: 1, guarantee_id: null });
+      expect(await f.live.entry(holder.id, r.id)).toMatchObject({ quantity: 1, guaranteed: false });
+      expect((await guaranteeOf(holder.id)).status).toBe('REVOKED');
+      await advance(r, T0);
+      expect(await entry(r.id, holder.id)).toMatchObject({ status: 'TURN', quantity: 1, guarantee_id: null });
+      expect((await guaranteeOf(holder.id)).status).toBe('REVOKED');
     });
 
     it('LEFT or REMOVED unbinds it, ACTIVE still, and entering again uses it again; an after-room is never covered', async () => {

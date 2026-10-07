@@ -46,7 +46,7 @@ import { deriveDropSeedKey, drawKey, drawOrder, DropService } from '../../src/se
 import { testConfig } from '../../src/server/config.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { isCheckViolation } from '../../src/server/db/pg-errors.js';
-import { createLiveRelease, holdPieces, liveFixtureOn } from '../support/live.js';
+import { createLiveRelease, createModel, holdPieces, liveFixtureOn } from '../support/live.js';
 import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 const HOUR = 3_600_000;
@@ -944,7 +944,7 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
   });
   afterAll(() => h?.close());
 
-  it('selects the guaranteed places first, without a rank and for their pieces: places = quantity − reserved − guaranteed; the seed proof from the page holds and no guaranteed id is ranked; guaranteed[] is empty before the draw, then exactly {id, pieces} for everyone; a hidden guarantee says guaranteed: false to its holder; CONFIRMED gives one order per piece, the first with the shipping', async () => {
+  it('selects the guaranteed places first, without a rank and for their pieces: places = quantity − reserved − guaranteed; the seed proof from the page holds and no guaranteed id is ranked; guaranteed[] is empty before the draw, then exactly {id, pieces} for everyone; a hidden guarantee says guaranteed: false to its holder; CONFIRMED gives one order per piece, the first with the shipping and the welcome gift', async () => {
     const d = await release({ quantity: 4 }, HOUR);
     const shown = await collector(5);
     const hidden = await collector();
@@ -997,7 +997,11 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
     expect(page.items.map((e) => [e.id, e.rank])).toEqual(recomputed.map((e) => [e.id, e.rank]));
     for (const g of expected) expect(page.items.map((e) => e.id)).not.toContain(g.id);
 
-    // CONFIRMED: one order per piece; the first carries the shipping (PLATINE: free standard), the other travels with it.
+    // CONFIRMED: one order per piece; the first carries the shipping (PLATINE: free standard) and the welcome gift (a
+    // gift model in THE PROGRAM), the other travels with it.
+    const programAdmin = { type: 'admin' as const, id: (await createAdmin(h.ctx, 'ADMIN')).id };
+    const charm = await createModel(h.ctx.db, 'GUARANTEED CHARM');
+    await h.ctx.services.clubProgram.update({ ...(await h.ctx.services.clubProgram.read()), giftPlatineModelId: charm }, programAdmin);
     const confirmed = await operator.post(`${adminUrl(d.id)}/entries/${shownEntry.id}/confirm`);
     expect(confirmed.statusCode, confirmed.body).toBe(200);
     const orders = await h.ctx.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', shownEntry.id).orderBy('piece').execute();
@@ -1006,6 +1010,8 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
       [2, 'DRAW', 'STANDARD', 0, null],
     ]);
     expect([orders[0]!.with_order_id, orders[1]!.with_order_id]).toEqual([null, orders[0]!.id]);
+    const gifts = await h.ctx.db.selectFrom('orders').select(['with_order_id', 'model_id']).where('account_id', '=', shown.id).where('channel', '=', 'GIFT').execute();
+    expect(gifts).toEqual([{ with_order_id: orders[0]!.id, model_id: charm }]);
   });
 
   it('keeps the guaranteed pieces from an early access (DROP_FULL), lets a PLATINE holder reserve with the guarantee, and floors a DRAFT\'s quantity at the guaranteed pieces', async () => {
