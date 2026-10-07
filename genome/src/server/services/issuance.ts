@@ -736,6 +736,16 @@ export class IssuanceService {
     return { codeId, productId: c.productId, data: toBase64Url(c.data), glyphs: c.glyphs };
   }
 
+  /**
+   * The scannable data of an ACTIVE code, checked end to end as for a download (`loadVerifiedCode`: payload fields and
+   * hash, genome, a trusted key, the signature): what a certificate card draws (services/certificates.ts). A row that
+   * fails is refused 409 CODE_INTEGRITY, naming the issue and the piece; what failed stays in the log.
+   */
+  async verifiedActiveCode(codeId: string): Promise<{ data: Uint8Array; productId: string; issue: number }> {
+    const c = await this.loadVerifiedCode(codeId);
+    return { data: c.data, productId: c.productId, issue: c.issue };
+  }
+
   // ── Transactions ─────────────────────────────────────────────────────────
 
   /**

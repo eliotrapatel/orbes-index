@@ -20,6 +20,9 @@
  *   422 NO_CLAIM_SECRET        issued without a claim code
  *   409 PRODUCT_NOT_PRINTABLE  revoked, retired, flagged, lost or stolen
  *   409 NO_ACTIVE_CODE         no ACTIVE code to draw (revoked with no new one): re-issue it first
+ *   409 CODE_INTEGRITY         the ACTIVE code failed its end-to-end check (IssuanceService.verifiedActiveCode:
+ *                              payload fields and hash, genome, a trusted key, the signature), as every other
+ *                              print of a code; the message names the issue and the piece, what failed is logged
  *   409 ALREADY_REGISTERED     the product has an owner: its claim code is spent
  *   422 CLAIM_CODE_MISMATCH    a code does not match its product's hash (the first one)
  * Mismatches are not counted towards the customers' claim-code attempt limit
@@ -33,7 +36,6 @@
  * progress: a second one answers 429 RATE_LIMITED until the first is done.
  */
 import { computeGenome } from '../../core/genome/genome.js';
-import { frameCodeData } from '../../core/payload.js';
 import type { Db } from '../db/connection.js';
 import type { ProductRow } from '../db/schema.js';
 import { DomainError, tooManyRequests, validationError } from '../errors.js';
@@ -52,7 +54,7 @@ import {
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { formatGrouped, normalizeClaimCode, verifyClaimCode } from './claim-codes.js';
-import { NOT_PRINTABLE } from './issuance.js';
+import { NOT_PRINTABLE, type IssuanceService } from './issuance.js';
 import { requireProduct } from './lifecycle.js';
 
 export interface CertificateRequestItem {
@@ -72,6 +74,8 @@ export interface CertificateRenderOptions {
 export interface CertificateServiceDeps {
   db: Db;
   audit: AuditService;
+  /** The end-to-end check of the ACTIVE code the card draws (CODE_INTEGRITY), shared with every other print of a code. */
+  issuance: Pick<IssuanceService, 'verifiedActiveCode'>;
   clock?: Clock;
 }
 
@@ -101,6 +105,7 @@ const actorKey = (actor: Actor) => `${actor.type}:${actor.id ?? ''}`;
 export class CertificateService {
   private readonly db: Db;
   private readonly audit: AuditService;
+  private readonly issuance: Pick<IssuanceService, 'verifiedActiveCode'>;
   private readonly clock: Clock;
   /** Actors with a render in progress: a second concurrent one is refused, so one session holds at most one scrypt thread. */
   private readonly inProgress = new Set<string>();
@@ -108,6 +113,7 @@ export class CertificateService {
   constructor(deps: CertificateServiceDeps) {
     this.db = deps.db;
     this.audit = deps.audit;
+    this.issuance = deps.issuance;
     this.clock = deps.clock ?? systemClock;
   }
 
@@ -219,7 +225,7 @@ export class CertificateService {
         await this.db
           .selectFrom('codes')
           .innerJoin('genomes', 'genomes.id', 'codes.genome_id')
-          .select(['codes.product_id', 'codes.payload', 'codes.signature', 'codes.issue', 'genomes.genome_version'])
+          .select(['codes.id', 'codes.product_id', 'genomes.genome_version'])
           .where('codes.product_id', 'in', [...seen])
           .where('codes.status', '=', 'ACTIVE')
           .execute()
@@ -233,6 +239,23 @@ export class CertificateService {
         `No active code for ${listIds(codeless)}: re-issue ${codeless.length === 1 ? 'its code' : 'their codes'} on the product page first.`,
         codeless,
       );
+    }
+    // Each ACTIVE code is proven a genuine, consistent ORBES code before it goes onto a card, as for every other print
+    // of a code (a key revoked with a compromise date before the code, a tampered row): 409 CODE_INTEGRITY otherwise.
+    const verified = new Map<string, { data: Uint8Array; issue: number }>();
+    for (const r of rows) {
+      const id = r.p.product_id;
+      try {
+        const c = await this.issuance.verifiedActiveCode(codes.get(r.p.id)!.id);
+        verified.set(r.p.id, { data: c.data, issue: c.issue });
+      } catch (e) {
+        if (!(e instanceof DomainError)) throw e;
+        // The check's own message names the issue and the piece; its detail stays in the log (IssuanceService).
+        if (e.code === 'CODE_INTEGRITY' || e.code === 'PRODUCT_NOT_PRINTABLE') throw refusal(e.code, e.httpStatus, e.publicMessage, [id]);
+        // Superseded or revoked since it was read above.
+        if (e.code === 'CODE_NOT_ACTIVE') throw refusal('NO_ACTIVE_CODE', 409, `No active code for ${id}: re-issue its code on the product page first.`, [id]);
+        throw e;
+      }
     }
     const owned = new Set(
       (await this.db.selectFrom('ownership').select('product_id').where('product_id', 'in', [...seen]).where('ended_at', 'is', null).execute()).map((o) => o.product_id),
@@ -259,9 +282,10 @@ export class CertificateService {
           .execute()
       ).map((m) => [m.id, m]),
     );
-    return rows.map(({ p, code }) => {
+    return rows.map(({ p, code: claim }) => {
       const model = models.get(p.model_id);
       const active = codes.get(p.id)!; // NO_ACTIVE_CODE above
+      const code = verified.get(p.id)!; // CODE_INTEGRITY above
       return {
         productId: p.product_id,
         model: model ? `${model.name} · ${model.type}` : '',
@@ -271,8 +295,8 @@ export class CertificateService {
         year: p.year,
         // The genome is a public function of the signed identity: the one the code carries.
         genome: computeGenome(Number(p.packed_identity), active.genome_version),
-        code: { data: frameCodeData(active.payload, active.signature), issue: active.issue },
-        claimCode: formatGrouped(normalizeClaimCode(code)!),
+        code: { data: code.data, issue: code.issue },
+        claimCode: formatGrouped(normalizeClaimCode(claim)!),
       };
     });
   }

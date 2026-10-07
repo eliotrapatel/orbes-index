@@ -238,7 +238,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const warranty = new WarrantyService({ db, audit, lifecycle, clock });
     const issuance = new IssuanceService({ db, keys, audit, categories, clock, log });
     const catalog = new CatalogService({ db, audit, categories, clock });
-    const certificates = new CertificateService({ db, audit, clock });
+    const certificates = new CertificateService({ db, audit, issuance, clock });
     const anomaly = new AnomalyService({ db, config: config.anomaly, audit, clock, log });
     const reports = new ScanReportService({ db, audit, clock, log });
     const recovery = new AccountRecoveryService({ db, audit, sessions, ownership, clock });

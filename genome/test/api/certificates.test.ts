@@ -12,6 +12,7 @@
 import { inflateSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
+import { sql } from 'kysely';
 import { createForwardingLogger, loggerOptions } from '../../src/server/http/logging.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
@@ -252,6 +253,65 @@ describe('certificate cards API', () => {
     expect(rendered[0].details).toMatchObject({ productIds: [a.product.productId], codeIssues: [next.issue] });
 
     for (const r of [res, wrong, both, card]) for (const s of spellings(a.claimCode!)) expect(r.body).not.toContain(s);
+  });
+
+  it('refuses an ACTIVE code that fails its end-to-end check (409 CODE_INTEGRITY), after NO_ACTIVE_CODE and before the claim-code check, and draws nothing', async () => {
+    // As every other print of a code (API §5, §15.4): the card draws the ORBES CODE, so a code that would scan
+    // INVALID_SIGNATURE or KEY_REVOKED never goes onto one. The message names the issue and the piece; what failed is logged.
+    const refusedFor = async (productId: string) =>
+      (await h.ctx.audit.list({ action: 'certificate.render_refused' })).items.filter((e) => e.details.reason === 'CODE_INTEGRITY' && (e.details.refused as string[])[0] === productId);
+    const renderedFor = async (productId: string) => (await h.ctx.audit.list({ action: 'certificate.render', targetId: productId })).items;
+    const expectRefused = async (p: { product: { productId: string }; code: { issue: number }; claimCode?: string }, detail: string) => {
+      const res = await post(operator, { items: [{ productId: p.product.productId, claimCode: p.claimCode }] });
+      expect(res.statusCode).toBe(409);
+      expect(res.headers['content-disposition']).toBeUndefined();
+      expect(errorOf(res)).toEqual({ code: 'CODE_INTEGRITY', message: `Issue ${p.code.issue} of ${p.product.productId} failed its integrity check and cannot be rendered.` });
+      expect(res.body).not.toMatch(/mismatch|revoked before|detail/);
+      // Before the claim-code check: a wrong code gets the same answer.
+      expect(errorOf(await post(operator, { items: [{ productId: p.product.productId, claimCode: 'ZZZZ-ZZZZ-ZZZZ' }] })).code).toBe('CODE_INTEGRITY');
+      const refused = await refusedFor(p.product.productId);
+      expect(refused).toHaveLength(2);
+      expect(refused[0].details).toEqual({ reason: 'CODE_INTEGRITY', productIds: [p.product.productId], refused: [p.product.productId], format: 'pdf', layout: 'card' });
+      expect(await renderedFor(p.product.productId)).toHaveLength(0);
+      expect(lines.join('')).toContain(detail);
+      for (const s of spellings(p.claimCode!)) expect(res.body).not.toContain(s);
+    };
+
+    // 1. A code recorded after the compromise date of its key, revoked since: the code stays ACTIVE.
+    const before = await issue(h.ctx, catalog, { withClaimSecret: true });
+    h.clock.advance(120_000); // two minutes: the compromise below falls between the two codes, the sessions stay open
+    const signedLate = await issue(h.ctx, catalog, { withClaimSecret: true });
+    const oldKey = (await h.ctx.keys.activeSigner()).keyId;
+    await h.ctx.keys.rotate(SYSTEM_ACTOR);
+    await h.ctx.keys.revoke(oldKey, { reason: 'compromise', compromisedAt: new Date(h.clock.now().getTime() - 60_000) }, SYSTEM_ACTOR);
+    expect((await h.ctx.db.selectFrom('codes').select('status').where('id', '=', signedLate.code.id).executeTakeFirstOrThrow()).status).toBe('ACTIVE');
+    await expectRefused(signedLate, 'signing key revoked before this code was recorded');
+    // A code recorded before the compromise is still trusted, and prints.
+    expectAttachment(await post(operator, { items: [{ productId: before.product.productId, claimCode: before.claimCode }] }), /^application\/pdf$/, /\.pdf"$/);
+
+    // 2. A tampered row: its payload hash no longer matches its payload.
+    const tampered = await issue(h.ctx, catalog, { withClaimSecret: true });
+    const { payload_hash: hash } = await h.ctx.db.selectFrom('codes').select('payload_hash').where('id', '=', tampered.code.id).executeTakeFirstOrThrow();
+    await sql`ALTER TABLE codes DISABLE TRIGGER codes_immutable_identity`.execute(h.ctx.db);
+    try {
+      await h.ctx.db.updateTable('codes').set({ payload_hash: new Uint8Array(32).fill(7) }).where('id', '=', tampered.code.id).execute();
+      await expectRefused(tampered, 'payload hash mismatch');
+      // In a batch, the piece at fault is named and nothing is drawn for the others either.
+      const ok = await issue(h.ctx, catalog, { withClaimSecret: true });
+      const batch = await post(operator, {
+        items: [
+          { productId: ok.product.productId, claimCode: ok.claimCode },
+          { productId: tampered.product.productId, claimCode: tampered.claimCode },
+        ],
+        layout: 'sheet',
+      });
+      expect(errorOf(batch).code).toBe('CODE_INTEGRITY');
+      expect(await renderedFor(ok.product.productId)).toHaveLength(0);
+    } finally {
+      await h.ctx.db.updateTable('codes').set({ payload_hash: hash }).where('id', '=', tampered.code.id).execute();
+      await sql`ALTER TABLE codes ENABLE TRIGGER codes_immutable_identity`.execute(h.ctx.db);
+    }
+    expectAttachment(await post(operator, { items: [{ productId: tampered.product.productId, claimCode: tampered.claimCode }] }), /^application\/pdf$/, /\.pdf"$/);
   });
 
   it("prints 79t's file for a piece of a variant with its size: the variant line in the CSV, a vector PDF of one 95 × 62 mm page", async () => {
