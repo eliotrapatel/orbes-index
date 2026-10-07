@@ -133,7 +133,7 @@ describe('the yearly care (BP-19 T6)', () => {
     // No order: no hint. An order with an address: its buyer, for this account only.
     expect((safeJson(await care(p.client, p.serials[0]!)) as CareJson).addressHint).toBeNull();
     const location = (await h.t.db.selectFrom('stock_locations').select('id').executeTakeFirstOrThrow()).id;
-    const request = await h.t.db.insertInto('shop_requests').values({ account_id: p.id, model_id: catalog.modelId, status: 'CLOSED', handled_at: h.clock.now(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const request = await h.t.db.insertInto('shop_requests').values({ account_id: p.id, model_id: catalog.modelId, status: 'CLOSED', created_at: h.clock.now(), handled_at: h.clock.now(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
     await h.t.db
       .insertInto('orders')
       .values({ channel: 'SALON', account_id: p.id, model_id: catalog.modelId, location_id: location, shop_request_id: request.id, buyer_name: 'C. Martin', buyer_address: '1 avenue Montaigne\n75008 Paris' })

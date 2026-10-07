@@ -108,7 +108,7 @@ describe('the console\'s variants (NOCTURNE N1)', () => {
 
 describe('a draw\'s price in the console (NOCTURNE, addition 5)', () => {
   const NOW = new Date('2026-10-05T16:49:00.000Z');
-  const base = { id: 'd1', title: 'MONOLITHE, THE OCTOBER DRAW', description: null, model: { id: 'm1', name: 'MONOLITHE', type: 'BRACELET', active: true, variant: null }, quantity: 12, opensAt: '2026-10-05T10:00:00.000Z', closesAt: '2026-10-11T18:00:00.000Z', purchaseWindowHours: 48, earlyAccessHours: 0, priceMinor: null, currency: null } as unknown as Drop;
+  const base = { id: 'd1', title: 'MONOLITHE, THE OCTOBER DRAW', description: null, model: { id: 'm1', name: 'MONOLITHE', type: 'BRACELET', active: true, variant: null }, quantity: 12, opensAt: '2026-10-05T10:00:00.000Z', closesAt: '2026-10-11T18:00:00.000Z', purchaseWindowHours: 48, earlyAccessHours: 0, earlyAccessPlatineHours: 0, priceMinor: null, currency: null } as unknown as Drop;
   const values = (extra: Record<string, string> = {}) => ({ ...dropFormValues(base, NOW), ...extra });
 
   it('is typed in units with its currency, optional, in the server\'s bound', () => {
