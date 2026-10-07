@@ -14,7 +14,7 @@ The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is gi
 
 ## Article 2 — Definitions
 
-- **Piece**: an ORBES object that carries an ORBES CODE.
+- **Piece**: an ORBES object delivered with a certificate card that carries its ORBES CODE.
 - **ORBES CODE**: the code printed on the certificate card delivered with the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.
 - **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, eight glyphs derived from that identifier, which let you recognise it at a glance.
 - **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.

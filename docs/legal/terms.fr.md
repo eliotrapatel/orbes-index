@@ -14,7 +14,7 @@ Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité compl
 
 ## Article 2 — Définitions
 
-- **Pièce** : un objet ORBES qui porte un ORBES CODE.
+- **Pièce** : un objet ORBES remis avec une carte certificat qui porte son ORBES CODE.
 - **ORBES CODE** : le code imprimé sur la carte certificat remise avec la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.
 - **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, huit signes tirés de cet identifiant, qui permettent de la reconnaître d'un coup d'œil.
 - **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.

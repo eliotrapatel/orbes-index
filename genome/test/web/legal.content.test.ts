@@ -750,8 +750,9 @@ describe('legal pages: both languages, links, lexicon', () => {
       // saved sizes (AC-01); terms article 12's tiers at 1, 5 and 10 pieces (BP-19 T1), early access and benefits.
       '2026-10-08': '66dbfb224cdae9ad',
       // The next lot (plan of 2026-10-07), deployment H1: the card 79t prints the claim code in plain sight and carries
-      // the ORBES CODE (§3.2): the terms' article 2 and claim-code paragraph, the FAQ's three answers on the card.
-      '2026-10-09': 'cb40baadc4da404a',
+      // the ORBES CODE (§3.2): the terms' article 2 (the piece and the ORBES CODE) and claim-code paragraph, the FAQ's
+      // three answers on the card.
+      '2026-10-09': '5a47d7ed2b57b1c1',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
