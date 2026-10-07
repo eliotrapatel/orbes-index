@@ -11,13 +11,15 @@
  * (verifyClaimCode): a card printed with a mistyped code would lock the
  * buyer out of registration for good. The code is never kept: not stored,
  * not logged, not audited, never echoed in an error. Audit entries carry
- * product ids only.
+ * product ids only, and `certificate.render` the issue of the ORBES CODE
+ * printed for each (`codeIssues`, in `productIds` order).
  *
  * Refusals, in this order (each one audited as `certificate.render_refused`
  * with the product ids and the reason; nothing is rendered):
  *   404 PRODUCT_NOT_FOUND      an unknown product
  *   422 NO_CLAIM_SECRET        issued without a claim code
  *   409 PRODUCT_NOT_PRINTABLE  revoked, retired, flagged, lost or stolen
+ *   409 NO_ACTIVE_CODE         no ACTIVE code to draw (revoked with no new one): re-issue it first
  *   409 ALREADY_REGISTERED     the product has an owner: its claim code is spent
  *   422 CLAIM_CODE_MISMATCH    a code does not match its product's hash (the first one)
  * Mismatches are not counted towards the customers' claim-code attempt limit
@@ -173,7 +175,8 @@ export class CertificateService {
       action: CERTIFICATE_RENDER_ACTION,
       targetType: 'product',
       targetId: cards.length === 1 ? cards[0].productId : null,
-      details: { productIds: cards.map((c) => c.productId), count: cards.length, ...shape, layoutStatus: status },
+      // codeIssues: which ORBES CODE went into each box (plan NEXT LOT §3.2), in productIds order; never a claim code.
+      details: { productIds: cards.map((c) => c.productId), count: cards.length, ...shape, layoutStatus: status, codeIssues: cards.map((c) => c.code.issue) },
     });
     return file;
   }
@@ -208,6 +211,29 @@ export class CertificateService {
     if (blocked.length > 0) {
       throw refusal('PRODUCT_NOT_PRINTABLE', 409, `No certificate card can be printed for ${listIds(blocked)} in its current state.`, blocked);
     }
+    // The card draws the piece's ACTIVE code (plan NEXT LOT §3.2): its signed payload and signature, its issue, and
+    // the genome version it was signed with (the GENOME row printed beside it is the same). A piece whose code was
+    // revoked with no new one has nothing to print.
+    const codes = new Map(
+      (
+        await this.db
+          .selectFrom('codes')
+          .innerJoin('genomes', 'genomes.id', 'codes.genome_id')
+          .select(['codes.product_id', 'codes.payload', 'codes.signature', 'codes.issue', 'genomes.genome_version'])
+          .where('codes.product_id', 'in', [...seen])
+          .where('codes.status', '=', 'ACTIVE')
+          .execute()
+      ).map((c) => [c.product_id, c]),
+    );
+    const codeless = ids((p) => !codes.has(p.id));
+    if (codeless.length > 0) {
+      throw refusal(
+        'NO_ACTIVE_CODE',
+        409,
+        `No active code for ${listIds(codeless)}: re-issue ${codeless.length === 1 ? 'its code' : 'their codes'} on the product page first.`,
+        codeless,
+      );
+    }
     const owned = new Set(
       (await this.db.selectFrom('ownership').select('product_id').where('product_id', 'in', [...seen]).where('ended_at', 'is', null).execute()).map((o) => o.product_id),
     );
@@ -233,24 +259,9 @@ export class CertificateService {
           .execute()
       ).map((m) => [m.id, m]),
     );
-    // The card draws the piece's ACTIVE code (plan NEXT LOT §3.2): its signed payload and signature, its issue, and
-    // the genome version it was signed with (the GENOME row printed beside it is the same).
-    const codes = new Map(
-      (
-        await this.db
-          .selectFrom('codes')
-          .innerJoin('genomes', 'genomes.id', 'codes.genome_id')
-          .select(['codes.product_id', 'codes.payload', 'codes.signature', 'codes.issue', 'genomes.genome_version'])
-          .where('codes.product_id', 'in', [...seen])
-          .where('codes.status', '=', 'ACTIVE')
-          .execute()
-      ).map((c) => [c.product_id, c]),
-    );
     return rows.map(({ p, code }) => {
       const model = models.get(p.model_id);
-      const active = codes.get(p.id);
-      // A piece without an ACTIVE code has no card to draw: step 2.4 refuses it (NO_ACTIVE_CODE) with the other refusals.
-      if (!active) throw new Error(`no ACTIVE code for ${p.product_id}`);
+      const active = codes.get(p.id)!; // NO_ACTIVE_CODE above
       return {
         productId: p.product_id,
         model: model ? `${model.name} · ${model.type}` : '',

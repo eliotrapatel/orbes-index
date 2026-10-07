@@ -1,7 +1,7 @@
 /**
- * Certificate cards: the card that carries a product's claim code under a
- * scratch-off panel, as a PDF (one card per page, or A4 sheets of ten) or a
- * CSV for a print shop's variable-data run.
+ * Certificate cards: the card 79t, which carries a product's ORBES CODE and
+ * its claim code in plain sight, as a PDF (one 95 × 62 mm card per page, or
+ * A4 sheets of eight) or a CSV for a print shop's variable-data run.
  *
  * OPERATOR, never AUDITOR: the response holds claim codes. A POST, because
  * the codes travel in the body (never in a URL, which ends up in proxy

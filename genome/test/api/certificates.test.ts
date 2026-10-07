@@ -9,6 +9,7 @@
  * `trace` and the services' logger attached to it, as in src/server/index.ts,
  * and captures every line.
  */
+import { inflateSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
 import { createForwardingLogger, loggerOptions } from '../../src/server/http/logging.js';
@@ -88,7 +89,14 @@ describe('certificate cards API', () => {
     const entries = (await h.ctx.audit.list({ action: 'certificate.render' })).items;
     expect(entries).toHaveLength(3);
     const last = entries.find((e) => e.details.format === 'csv')!;
-    expect(last.details).toEqual({ productIds: [a.product.productId, b.product.productId], count: 2, format: 'csv', layoutStatus: 'VALIDATED' });
+    // codeIssues: the issue of the ORBES CODE printed for each product, in productIds order (plan NEXT LOT §3.2).
+    expect(last.details).toEqual({
+      productIds: [a.product.productId, b.product.productId],
+      count: 2,
+      format: 'csv',
+      layoutStatus: 'VALIDATED',
+      codeIssues: [a.code.issue, b.code.issue],
+    });
     expect(entries.find((e) => e.targetId === a.product.productId)?.details).toMatchObject({ format: 'pdf', layout: 'card', count: 1 });
     expect(entries.every((e) => e.actorType === 'admin' && e.ipHash)).toBe(true);
 
@@ -188,6 +196,108 @@ describe('certificate cards API', () => {
 
     const reasons = (await h.ctx.audit.list({ action: 'certificate.render_refused' })).items.map((e) => e.details.reason);
     for (const r of ['NO_CLAIM_SECRET', 'PRODUCT_NOT_FOUND', 'ALREADY_REGISTERED', 'PRODUCT_NOT_PRINTABLE']) expect(reasons).toContain(r);
+  });
+
+  it('refuses a piece with no ACTIVE code (409 NO_ACTIVE_CODE), after PRODUCT_NOT_PRINTABLE and before ALREADY_REGISTERED and the claim-code check', async () => {
+    // Its code revoked with no new one: the card draws the ORBES CODE, so there is nothing to print.
+    const a = await issue(h.ctx, catalog, { withClaimSecret: true });
+    const b = await issue(h.ctx, catalog, { withClaimSecret: true });
+    await h.ctx.services.issuance.revokeCode(a.code.id, 'label damaged', SYSTEM_ACTOR);
+    const res = await post(operator, { items: [{ productId: b.product.productId, claimCode: b.claimCode }, { productId: a.product.productId, claimCode: a.claimCode }] });
+    expect(res.statusCode).toBe(409);
+    expect(errorOf(res)).toEqual({ code: 'NO_ACTIVE_CODE', message: `No active code for ${a.product.productId}: re-issue its code on the product page first.` });
+    const refused = (await h.ctx.audit.list({ action: 'certificate.render_refused' })).items.filter((e) => e.details.reason === 'NO_ACTIVE_CODE');
+    expect(refused).toHaveLength(1);
+    expect(refused[0].details).toEqual({
+      reason: 'NO_ACTIVE_CODE',
+      productIds: [b.product.productId, a.product.productId],
+      refused: [a.product.productId],
+      format: 'pdf',
+      layout: 'card',
+    });
+
+    // Before the claim-code check: a wrong code costs no scrypt and is not the answer.
+    const wrong = await post(operator, { items: [{ productId: a.product.productId, claimCode: 'ZZZZ-ZZZZ-ZZZZ' }] });
+    expect(errorOf(wrong).code).toBe('NO_ACTIVE_CODE');
+
+    // Several pieces are named together.
+    const c = await issue(h.ctx, catalog, { withClaimSecret: true });
+    await h.ctx.services.issuance.revokeCode(c.code.id, 'label damaged', SYSTEM_ACTOR);
+    const both = await post(operator, { items: [{ productId: a.product.productId, claimCode: a.claimCode }, { productId: c.product.productId, claimCode: c.claimCode }] });
+    expect(errorOf(both)).toEqual({
+      code: 'NO_ACTIVE_CODE',
+      message: `No active code for ${a.product.productId}, ${c.product.productId}: re-issue their codes on the product page first.`,
+    });
+
+    // After PRODUCT_NOT_PRINTABLE: a revoked piece is refused as such.
+    await h.ctx.services.lifecycle.transition(c.product.productId, 'REVOKED', { reason: 'test' }, SYSTEM_ACTOR);
+    expect(errorOf(await post(operator, { items: [{ productId: c.product.productId, claimCode: c.claimCode }] })).code).toBe('PRODUCT_NOT_PRINTABLE');
+
+    // Before ALREADY_REGISTERED: a registered piece whose code was then revoked.
+    const sold = await issue(h.ctx, catalog, { withClaimSecret: true });
+    await h.ctx.services.warranty.activate(sold.product.productId, { retailer: 'ORBES RUE SAINT-HONORÉ', country: 'FR' }, SYSTEM_ACTOR);
+    const owner = (await accountClient(h)).client;
+    const reg = (safeJson(await owner.post('/api/v1/verify', { code: sold.code.data })) as { registration: { token: string } }).registration;
+    expect((await owner.post('/api/v1/ownership/register', { registrationToken: reg.token, claimCode: sold.claimCode })).statusCode).toBe(201);
+    await h.ctx.services.issuance.revokeCode(sold.code.id, 'label damaged', SYSTEM_ACTOR);
+    expect(errorOf(await post(operator, { items: [{ productId: sold.product.productId, claimCode: sold.claimCode }] })).code).toBe('NO_ACTIVE_CODE');
+
+    // Re-issued, the piece prints again, and the audit names the new code's issue.
+    const next = await h.ctx.services.issuance.reissueCode(a.product.productId, 'new label', SYSTEM_ACTOR);
+    expect(next.issue).toBe(a.code.issue + 1);
+    const card = await post(operator, { items: [{ productId: a.product.productId, claimCode: a.claimCode }] });
+    expectAttachment(card, /^application\/pdf$/, /^attachment; filename="ORBES-certificate-O\d{2}-J-\d{5,6}\.pdf"$/);
+    const rendered = (await h.ctx.audit.list({ action: 'certificate.render', targetId: a.product.productId })).items;
+    expect(rendered).toHaveLength(1);
+    expect(rendered[0].details).toMatchObject({ productIds: [a.product.productId], codeIssues: [next.issue] });
+
+    for (const r of [res, wrong, both, card]) for (const s of spellings(a.claimCode!)) expect(r.body).not.toContain(s);
+  });
+
+  it("prints 79t's file for a piece of a variant with its size: the variant line in the CSV, a vector PDF of one 95 × 62 mm page", async () => {
+    const variant = await operator.post(`/api/admin/models/${catalog.modelId}/variants`, {
+      label: 'Blue',
+      swatch: '#1F3A6B',
+      skuPrefix: `MNL-BL${Math.random().toString(36).slice(2, 5).toUpperCase()}`,
+      mainLabel: 'Steel',
+      mainSwatch: '#C9CCD1',
+    });
+    expect(variant.statusCode, variant.body).toBe(201);
+    const blue = (safeJson(variant) as { id: string }).id;
+    const p = await issue(h.ctx, { ...catalog, modelId: blue }, { withClaimSecret: true, variant: '17' });
+    const items = [{ productId: p.product.productId, claimCode: p.claimCode }];
+
+    const csv = await post(operator, { items, format: 'csv' });
+    expectAttachment(csv, /^text\/csv; charset=utf-8/, /\.csv"$/);
+    expect(csv.body.split('\r\n')[1]).toBe(`"${p.product.productId}","MONOLITHE · RING","BLUE  ·  SIZE 17","925 STERLING SILVER","20${p.product.productId.slice(1, 3)}","${p.claimCode}"`);
+
+    const card = await post(operator, { items });
+    expectAttachment(card, /^application\/pdf$/, new RegExp(`^attachment; filename="ORBES-certificate-${p.product.productId}\\.pdf"$`));
+    // The objects without their (compressed) streams, and the streams inflated.
+    const raw = card.rawPayload.toString('latin1');
+    const objects = raw.replace(/(?<!end)stream\r?\n[\s\S]*?endstream/g, 'stream endstream');
+    const streams = [...raw.matchAll(/(?<!end)stream\r?\n([\s\S]*?)endstream/g)]
+      .map((m) => {
+        try {
+          return inflateSync(Buffer.from(m[1], 'latin1')).toString('latin1');
+        } catch {
+          return m[1]; // a stream left uncompressed
+        }
+      })
+      .join('\n');
+    // One page of 95 × 62 mm (in points), drawn as outlines: no font, no image, no text, never the claim code, no PROOF.
+    expect(objects).toMatch(/\/Count 1\b/);
+    expect(objects).toMatch(/\/MediaBox \[0 0 269\.291339 175\.748031\]/);
+    expect(objects).not.toMatch(/\/Font|\/Subtype\s*\/Image|\/XObject|\/Separation|PROOF/);
+    expect(streams).toMatch(/\bf\n/); // the drawing was read: the type, the code, the GENOME as filled outlines
+    expect(streams).toMatch(/\bW n\n/); // the guilloche's clips
+    expect(streams).not.toMatch(/\bBT\b|\bTj\b|\bTJ\b|\bBI\b|\bDo\b/);
+    for (const s of spellings(p.claimCode!)) expect(raw + streams).not.toContain(s);
+    const rendered = (await h.ctx.audit.list({ action: 'certificate.render', targetId: p.product.productId })).items;
+    expect(rendered.map((e) => e.details)).toEqual([
+      { productIds: [p.product.productId], count: 1, format: 'csv', layoutStatus: 'VALIDATED', codeIssues: [1] },
+      { productIds: [p.product.productId], count: 1, format: 'pdf', layout: 'card', layoutStatus: 'VALIDATED', codeIssues: [1] },
+    ].reverse());
   });
 
   it('validates the request: bounds, duplicates, formats, unknown fields', async () => {
