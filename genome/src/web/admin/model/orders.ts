@@ -165,11 +165,26 @@ export function giftHeaderLine(o: Pick<OrderView, 'channel' | 'giftOf' | 'withOr
   return `Welcome gift · ${TIER_NAMES[o.giftOf.tier]}${o.withOrder ? ` · travels with ${o.withOrder.reference}` : ''}`;
 }
 
-/** The welcome gift travelling with an order: `OR-… · MODEL · RESERVED` (its step), or `… · Size to choose`; null without one. */
-export function giftLine(o: Pick<OrderView, 'gift'>): string | null {
-  const g = o.gift;
-  if (!g) return null;
-  return `${g.reference} · ${g.model} · ${g.sizeToChoose && g.status === 'RESERVED' ? 'Size to choose' : humanize(g.status)}`;
+/** A welcome gift travelling with an order: `OR-… · MODEL · RESERVED` (its step), or `… · Size to choose`. */
+export function giftLine(g: OrderView['gifts'][number]): string {
+  return `${g.reference} · ${g.model} · ${giftSizeToChoose(g) ? 'Size to choose' : humanize(g.status)}`;
+}
+
+/**
+ * The rows of the welcome gifts travelling with an order, one per gift: `Welcome gift`, or `Welcome gift · PLATINE` and
+ * `Welcome gift · PALLADIUM` when it carries both tiers' gifts.
+ */
+export function giftRows(o: Pick<OrderView, 'gifts'>): { label: string; id: string; line: string }[] {
+  const gifts = o.gifts ?? [];
+  return gifts.map((g) => ({ label: gifts.length > 1 ? `Welcome gift · ${TIER_NAMES[g.tier]}` : 'Welcome gift', id: g.id, line: giftLine(g) }));
+}
+
+/** A welcome gift whose size is still to be chosen, while it is reserved. */
+const giftSizeToChoose = (g: Pick<OrderView['gifts'][number], 'sizeToChoose' | 'status'>): boolean => g.sizeToChoose && g.status === 'RESERVED';
+
+/** Whether any welcome gift travelling with the order waits for its size (its order is not paid before: BP-19 T5). */
+export function giftsWaitForSize(o: Pick<OrderView, 'gifts'>): boolean {
+  return (o.gifts ?? []).some(giftSizeToChoose);
 }
 
 /**
@@ -322,7 +337,7 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
   const sale = o.channel !== 'LIVE';
   return {
     // A welcome gift is paid with its order; an order waits for its gift's size (BP-19 T5).
-    pay: ok && o.status === 'RESERVED' && o.priceMinor !== null && o.channel !== 'GIFT' && !(o.gift?.sizeToChoose ?? false),
+    pay: ok && o.status === 'RESERVED' && o.priceMinor !== null && o.channel !== 'GIFT' && !giftsWaitForSize(o),
     ship: ok && o.status === 'PAID' && o.reservation === 'STOCK' && o.productId !== null,
     deliver: ok && o.status === 'SHIPPED',
     cancel: ok && holding,
@@ -348,7 +363,7 @@ export function shipWaitsFor(o: OrderView): string | null {
     if (o.status === 'RESERVED') return o.withOrder ? `It is paid with ${o.withOrder.reference}.` : 'It is paid with its order.';
   }
   if (o.skuId === null) return 'Its size is to be entered.';
-  if (o.status === 'RESERVED' && o.priceMinor !== null && o.gift?.sizeToChoose) return 'Choose the welcome gift’s size first.';
+  if (o.status === 'RESERVED' && o.priceMinor !== null && giftsWaitForSize(o)) return 'Choose the welcome gift’s size first.';
   if (o.reservation === 'BENCH') return o.status === 'RESERVED' && o.priceMinor === null ? 'Its piece is being made at the atelier; its price is to be entered.' : 'Its piece is being made at the atelier.';
   if (o.status === 'RESERVED') return o.priceMinor === null ? 'Its price is to be entered: it is paid once priced, and its invoice issued then.' : 'It ships once paid.';
   if (o.reservation === 'STOCK' && o.productId === null) return 'Link its piece from the stock.';

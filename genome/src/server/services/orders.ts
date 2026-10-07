@@ -60,6 +60,8 @@
  *                the order's currency (Orders → Settings, SHIPPING), otherwise none, as before. An order keeps it if the
  *                tier changes later. An order travelling with another (`with_order_id`: the 2nd to 5th piece of a LIVE
  *                entry) carries its parent's service at 0 and follows it; only the parent's invoice carries the fee.
+ *                A known limit: a parent cancelled leaves the others travelling with it, at 0, the entry's fee gone
+ *                with it (handing its role to the next piece is the owner's decision, API §16.24).
  *                Client Services enters a fee by hand (`setTerms`, RESERVED; 409 ORDER_SHIPPING_FREE over a free
  *                benefit); MARK PAID is never refused for shipping. Audited `order.shipping`. Returns are unchanged.
  *   the gift     (BP-19 T5) the account's welcome gift added to its next order (`attachGifts`, at the end of the three
@@ -67,10 +69,12 @@
  *                GIFT order, while its tier has an active gift model (THE PROGRAM), a GIFT order at 0 in its order's
  *                currency (none yet: NULL, until its price is entered), travelling with it (`with_order_id`, its
  *                shipping at 0). A model of one size gets its SKU and holds stock (or a piece to make) at once; several
- *                leave its size TO BE CONFIRMED until Client Services chooses it (`setTerms`). Paid with its order, in
- *                its transaction, without an invoice of its own (its order's carries the GIFT line); its order is not
- *                paid while its size is to be chosen (409 ORDER_GIFT_SIZE_MISSING); cancelled with its order (its grant
- *                waits again); a return of its order leaves it. Audited `order.create` and `order.gift`.
+ *                leave its size TO BE CONFIRMED until Client Services chooses one of its model's SKUs (`setTerms`,
+ *                never a new SKU). Paid with its order, in its transaction, without an invoice of its own (its order's
+ *                carries the GIFT line); its order is not paid while a gift's size is to be chosen (409
+ *                ORDER_GIFT_SIZE_MISSING); cancelled with its order (its grant waits again); a return of its order
+ *                leaves it. An order reaching PLATINE and PALLADIUM at once carries both tiers' gifts. Audited
+ *                `order.create` and `order.gift`.
  *   the credit   (BP-19 T5) taken off a RESERVED order by Client Services (`applyCredit`): its channel one THE PROGRAM
  *                names, its currency the credit's, the account at the grant's tier now, the grant not expired, the
  *                amount within the balance and the piece's price; PALLADIUM's grant first, then the earliest expiry. A
@@ -331,8 +335,11 @@ export interface OrderView {
    * that order has shipped its carrier and tracking number (SHIP WITH ITS ORDER).
    */
   withOrder: { id: string; reference: string; shipment: { carrierId: string; trackingNumber: string } | null } | null;
-  /** BP-19 T5: the welcome gift travelling with it (not cancelled): its order, model and step, and whether its size is to be chosen. */
-  gift: { id: string; reference: string; model: string; status: OrderStatus; sizeToChoose: boolean } | null;
+  /**
+   * BP-19 T5: the welcome gifts travelling with it (not cancelled; PLATINE's and PALLADIUM's when both tiers are reached
+   * at once), by tier, then oldest first: each its order, model, step, whether its size is to be chosen, and its tier.
+   */
+  gifts: { id: string; reference: string; model: string; status: OrderStatus; sizeToChoose: boolean; tier: 2 | 3 }[];
   /** BP-19 T5, on a GIFT order: its tier, and while its size is to be chosen, its model's sizes with the pieces available. */
   giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[] } | null;
   /** BP-19 T5: the client's credit usable now (balance, currency, expiry) and the credit taken off this order (released or not). */
@@ -565,6 +572,21 @@ async function shippingFromRate(tx: Db, orderId: string): Promise<boolean> {
 /** The shipping of an order travelling with `parent`: its service at 0 (none when it has none), never a benefit of its own. */
 export function travellingShipping(parent: Pick<OrderRow, 'shipping_service'>): OrderShipping {
   return parent.shipping_service === null ? { ...NO_SHIPPING } : { service: parent.shipping_service, minor: 0, benefit: null };
+}
+
+/**
+ * The SKU of a welcome gift's model in `size` (null: one size), whatever its case, as `ensureSku` finds it; 400
+ * VALIDATION_FAILED when the model has no such SKU: a gift's size is chosen among its model's, never created.
+ */
+async function giftSku(tx: Db, modelId: string, size: string | null): Promise<string> {
+  const found = await tx
+    .selectFrom('skus')
+    .select('id')
+    .where('model_id', '=', modelId)
+    .where((eb) => (size === null ? eb('size_label', 'is', null) : eb(eb.fn('upper', ['size_label']), '=', eb.fn('upper', [eb.val(size)]))))
+    .executeTakeFirst();
+  if (!found) throw validationError('Choose one of the gift model’s sizes.');
+  return found.id;
 }
 
 /** An order's welcome gifts still open (not cancelled), oldest first. */
@@ -1329,18 +1351,27 @@ export class OrderService {
     // BP-19: what travels with it, what it travels with, its credit.
     const parent = r.with_order_id ? await this.db.selectFrom('orders').select(['carrier_id', 'tracking_number']).where('id', '=', r.with_order_id).executeTakeFirst() : undefined;
     const parentShipment = parent?.carrier_id && parent.tracking_number ? { carrierId: parent.carrier_id, trackingNumber: parent.tracking_number } : null;
-    const giftRow = await this.db
-      .selectFrom('orders as g')
-      .innerJoin('models as m', 'm.id', 'g.model_id')
-      .select(['g.id', 'g.status', 'g.sku_id', 'm.name', 'm.variant_label'])
-      .where('g.with_order_id', '=', id)
-      .where('g.channel', '=', 'GIFT')
-      .where('g.status', '<>', 'CANCELLED')
-      .orderBy('g.reserved_at')
-      .executeTakeFirst();
-    const gift = giftRow
-      ? { id: giftRow.id, reference: orderReference(giftRow.id), model: giftRow.variant_label ? `${giftRow.name} in ${giftRow.variant_label}` : giftRow.name, status: giftRow.status, sizeToChoose: giftRow.sku_id === null }
-      : null;
+    const gifts: OrderView['gifts'] = (
+      await this.db
+        .selectFrom('orders as g')
+        .innerJoin('models as m', 'm.id', 'g.model_id')
+        .innerJoin('tier_grants as t', 't.id', 'g.gift_grant_id')
+        .select(['g.id', 'g.status', 'g.sku_id', 'm.name', 'm.variant_label', 't.tier'])
+        .where('g.with_order_id', '=', id)
+        .where('g.channel', '=', 'GIFT')
+        .where('g.status', '<>', 'CANCELLED')
+        .orderBy('t.tier')
+        .orderBy('g.reserved_at')
+        .orderBy('g.id')
+        .execute()
+    ).map((g) => ({
+      id: g.id,
+      reference: orderReference(g.id),
+      model: g.variant_label ? `${g.name} in ${g.variant_label}` : g.name,
+      status: g.status,
+      sizeToChoose: g.sku_id === null,
+      tier: g.tier as 2 | 3,
+    }));
     let giftOf: OrderView['giftOf'] = null;
     if (r.channel === 'GIFT' && r.gift_grant_id) {
       const grant = await this.db.selectFrom('tier_grants').select('tier').where('id', '=', r.gift_grant_id).executeTakeFirstOrThrow();
@@ -1412,7 +1443,7 @@ export class OrderService {
       shopifyOrderId: r.shopify_order_id,
       shipping: shippingOf(r),
       withOrder: r.with_order_id ? { id: r.with_order_id, reference: orderReference(r.with_order_id), shipment: parentShipment } : null,
-      gift,
+      gifts,
       giftOf,
       credit,
       return: returned
@@ -1759,7 +1790,8 @@ export class OrderService {
       let after = o;
       // A size is entered once its SKU is known: null is one size, as soon as it is said. The same SKU named again
       // (its size in another case: 52, or Small for SMALL) is no change: what the order holds stays.
-      const skuId = size !== undefined ? await ensureSku(tx, o.model_id, size) : null;
+      // A welcome gift's size is one of its model's SKUs (BP-19 T5: Choose size lists them), never a new one.
+      const skuId = size === undefined ? null : o.channel === 'GIFT' ? await giftSku(tx, o.model_id, size) : await ensureSku(tx, o.model_id, size);
       const sizeChange = size !== undefined && o.sku_id !== skuId;
       const priceChange = price !== undefined && (price !== o.price_minor || currency !== o.currency);
       if ((sizeChange || priceChange) && o.channel === 'LIVE') throw termsFixed();

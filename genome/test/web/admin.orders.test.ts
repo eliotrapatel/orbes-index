@@ -50,6 +50,7 @@ import {
   delaysLine,
   giftHeaderLine,
   giftLine,
+  giftRows,
   giftSizeOptions,
   durationText,
   GIFT_SIZE_TERMS,
@@ -118,7 +119,7 @@ const view = (o: Partial<OrderView> = {}): OrderView => ({
   shopifyOrderId: null,
   shipping: { service: null, minor: null, benefit: null },
   withOrder: null,
-  gift: null,
+  gifts: [],
   giftOf: null,
   credit: { available: [], applied: [] },
   return: null,
@@ -248,10 +249,13 @@ describe('an order\'s shipping (plan NEXT-NINE, BP-19 T4)', () => {
 
 describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () => {
   const grant = { grantId: 'g3', tier: 3 as const, balanceMinor: 5_000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' };
+  const platineGift = { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED' as const, sizeToChoose: false, tier: 2 as const };
+  const palladiumGift = { id: 'y', reference: 'OR-BBBB0002', model: 'JONC', status: 'RESERVED' as const, sizeToChoose: true, tier: 3 as const };
   it('says the gift travelling with an order, and a GIFT order\'s tier and parent', () => {
-    expect(giftLine(view())).toBeNull();
-    expect(giftLine(view({ gift: { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED', sizeToChoose: false } }))).toBe('OR-AAAA0001 · ANNEAU · RESERVED');
-    expect(giftLine(view({ gift: { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED', sizeToChoose: true } }))).toBe('OR-AAAA0001 · ANNEAU · Size to choose');
+    expect(giftRows(view())).toEqual([]);
+    expect(giftLine(platineGift)).toBe('OR-AAAA0001 · ANNEAU · RESERVED');
+    expect(giftLine({ ...platineGift, sizeToChoose: true })).toBe('OR-AAAA0001 · ANNEAU · Size to choose');
+    expect(giftRows(view({ gifts: [platineGift] }))).toEqual([{ label: 'Welcome gift', id: 'x', line: 'OR-AAAA0001 · ANNEAU · RESERVED' }]);
     const g = view({ channel: 'GIFT', withOrder: { id: 'p', reference: 'OR-12345678', shipment: null }, giftOf: { tier: 2, sizes: [] } });
     expect(giftHeaderLine(g)).toBe('Welcome gift · PLATINE · travels with OR-12345678');
     expect(giftHeaderLine(view())).toBeNull();
@@ -278,10 +282,28 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
     expect(termsProblem(g, termsValues(g), GIFT_SIZE_TERMS)).toBe('Nothing has changed.');
     expect(shipWaitsFor(g)).toBe('Its size is to be chosen.');
     expect(shipWaitsFor({ ...g, skuId: 's1', sizeLabel: '52' })).toBe('It is paid with OR-12345678.');
-    const parent = view({ priceMinor: 300_000, currency: 'EUR', skuId: 's', sizeLabel: '52', reservation: 'STOCK', gift: { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED', sizeToChoose: true } });
+    const parent = view({ priceMinor: 300_000, currency: 'EUR', skuId: 's', sizeLabel: '52', reservation: 'STOCK', gifts: [{ ...platineGift, sizeToChoose: true }] });
     expect(orderActions(parent, 'OPERATOR').pay).toBe(false);
     expect(shipWaitsFor(parent)).toBe('Choose the welcome gift’s size first.');
-    expect(orderActions({ ...parent, gift: { ...parent.gift!, sizeToChoose: false } }, 'OPERATOR').pay).toBe(true);
+    expect(orderActions({ ...parent, gifts: [platineGift] }, 'OPERATOR').pay).toBe(true);
+  });
+
+  it('lists both tiers\' gifts of one order, one row each, and MARK PAID waits for every size to be chosen', () => {
+    // PLATINE and PALLADIUM reached at once: two GIFT orders travel with one order, PLATINE's first.
+    const parent = view({ priceMinor: 300_000, currency: 'EUR', skuId: 's', sizeLabel: '52', reservation: 'STOCK', gifts: [platineGift, palladiumGift] });
+    expect(giftRows(parent)).toEqual([
+      { label: 'Welcome gift · PLATINE', id: 'x', line: 'OR-AAAA0001 · ANNEAU · RESERVED' },
+      { label: 'Welcome gift · PALLADIUM', id: 'y', line: 'OR-BBBB0002 · JONC · Size to choose' },
+    ]);
+    // The second gift's size is to be chosen: no MARK PAID, and the step says why.
+    expect(orderActions(parent, 'OPERATOR').pay).toBe(false);
+    expect(shipWaitsFor(parent)).toBe('Choose the welcome gift’s size first.');
+    // Chosen: paid with both.
+    const chosen = { ...parent, gifts: [platineGift, { ...palladiumGift, sizeToChoose: false }] };
+    expect(orderActions(chosen, 'OPERATOR').pay).toBe(true);
+    expect(shipWaitsFor(chosen)).toBe('It ships once paid.');
+    // A gift past RESERVED never holds its order back.
+    expect(orderActions({ ...parent, gifts: [platineGift, { ...palladiumGift, status: 'CANCELLED' as const }] }, 'OPERATOR').pay).toBe(true);
   });
 
   it('says the credit available and applied, and offers APPLY within the balance and the price, REMOVE once applied', () => {

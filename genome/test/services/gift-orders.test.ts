@@ -5,12 +5,14 @@
  *  - added to the account's next order (a salon's, a draw's priced or not, a LIVE entry's first piece), never without a gift model or
  *    with an inactive one, never twice for one grant (one open GIFT order per grant, whatever runs at once);
  *  - a model of one size holds its piece at once (in stock here), its grant's model recorded; a model of several sizes
- *    waits for its size, and its order is not paid before it (409 ORDER_GIFT_SIZE_MISSING);
+ *    waits for its size, chosen among its model's SKUs only, and its order is not paid before it (409
+ *    ORDER_GIFT_SIZE_MISSING); an order carrying both tiers' gifts lists both and waits for each one's size;
  *  - a parent with no currency yet gives its gift no price; priced, the gift takes 0 in its currency; the gift travels
  *    with it (its shipping at 0), has no price of its own (409 ORDER_TERMS_FIXED) and is never paid alone;
  *  - paid with its order, with no invoice of its own: the order's invoice carries its GIFT line at 0; an invoice at the
  *    most lines it carries (six add-ons, its shipping, a credit split over both tiers, both tiers' gifts) is drawn;
- *  - cancelled with its order: its grant waits again, and the next order receives it; a return of its order leaves it.
+ *  - cancelled with its order: its grant waits again, and the next order receives it, with the gift model THE PROGRAM
+ *    names then; a return of its order leaves it.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { inTransaction } from '../../src/server/db/connection.js';
@@ -23,6 +25,8 @@ import { linesOf } from '../../src/server/services/invoices.js';
 import { LIVE_ADDONS_MAX } from '../../src/server/services/live.js';
 import { attachGifts, orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
+import { orderActions as adminOrderActions } from '../../src/web/admin/model/orders.js';
+import type { OrderView as AdminOrderView } from '../../src/web/admin/types.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { createAccount, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
@@ -119,7 +123,7 @@ describe('the welcome gift (BP-19 T5)', () => {
     expect(grant).toMatchObject({ account_id: a.id, tier: 2, kind: 'GIFT', model_id: ring });
     expect((await auditsOf(parent, 'order.gift'))[0]!.details).toMatchObject({ giftOrderId: gift!.id, grantId: grant.id, tier: 2, modelId: ring, sizeToChoose: false });
     // The parent's page says it; the gift's says its tier.
-    expect((await orders().get(parent)).gift).toEqual({ id: gift!.id, reference: orderReference(gift!.id), model: 'ANNEAU', status: 'RESERVED', sizeToChoose: false });
+    expect((await orders().get(parent)).gifts).toEqual([{ id: gift!.id, reference: orderReference(gift!.id), model: 'ANNEAU', status: 'RESERVED', sizeToChoose: false, tier: 2 }]);
     expect((await orders().get(gift!.id)).giftOf).toEqual({ tier: 2, sizes: [] });
     expect((await orders().get(gift!.id)).withOrder).toEqual({ id: parent, reference: orderReference(parent), shipment: null });
     // Never twice: the order after has none.
@@ -149,13 +153,18 @@ describe('the welcome gift (BP-19 T5)', () => {
       ['52', 1],
       ['54', 1],
     ]);
-    expect((await orders().get(parent)).gift!.sizeToChoose).toBe(true);
+    expect((await orders().get(parent)).gifts.map((g) => g.sizeToChoose)).toEqual([true]);
     // Priced: the gift takes 0 in its currency, travels with it (its shipping at 0).
     await orders().setTerms(parent, { sizeLabel: '58', priceMinor: 300_000, currency: 'EUR' }, admin);
     expect(await orderRow(gift!.id)).toMatchObject({ price_minor: 0, currency: 'EUR', shipping_service: 'STANDARD', shipping_minor: 0 });
     await rejects(pay(parent), 'ORDER_GIFT_SIZE_MISSING');
     // No price of its own; never paid alone.
     await rejects(orders().setTerms(gift!.id, { priceMinor: 100, currency: 'EUR' }, admin), 'ORDER_TERMS_FIXED');
+    // Its size is one of its model's: another is refused, and no SKU is made for it.
+    await rejects(orders().setTerms(gift!.id, { sizeLabel: '99' }, admin), 'VALIDATION_FAILED');
+    await rejects(orders().setTerms(gift!.id, { sizeLabel: 'ONE SIZE' }, admin), 'VALIDATION_FAILED');
+    expect((await t.db.selectFrom('skus').select('size_label').where('model_id', '=', sized).orderBy('code').execute()).map((k) => k.size_label)).toEqual(['52', '54']);
+    expect(await orderRow(gift!.id)).toMatchObject({ sku_id: null, size_label: null });
     await orders().setTerms(gift!.id, { sizeLabel: '54' }, admin);
     expect(await orderRow(gift!.id)).toMatchObject({ size_label: '54', reservation: 'STOCK' });
     await rejects(pay(gift!.id), 'ORDER_TRANSITION_NOT_ALLOWED');
@@ -169,18 +178,23 @@ describe('the welcome gift (BP-19 T5)', () => {
     expect(invoice.total_minor).toBe(300_000);
   });
 
-  it('is cancelled with its order: its grant waits again, and the next order receives it', async () => {
+  it('is cancelled with its order: its grant waits again, and the next order receives it, with the model THE PROGRAM names then', async () => {
     const ring = await giftModel('ANNEAU II', [null], 3);
     await setGift(2, ring);
     const a = await account(5);
     const first = await salonOrder(a.id, { priceMinor: 200_000 });
     const [gift] = await giftsOf(first);
+    expect(await t.db.selectFrom('tier_grants').select('model_id').where('id', '=', gift!.gift_grant_id!).executeTakeFirstOrThrow()).toEqual({ model_id: ring });
     clock.advance(MINUTE);
     await orders().transition(first, { to: 'CANCELLED', note: 'The client changed their mind.' }, admin);
     expect(await orderRow(gift!.id)).toMatchObject({ status: 'CANCELLED', reservation: null });
+    // THE PROGRAM's gift of PLATINE changes meanwhile: the next order carries the new model, and the grant records it.
+    const bangle = await giftModel('BRACELET II', [null], 3);
+    await setGift(2, bangle);
     const next = await salonOrder(a.id);
     const [again] = await giftsOf(next);
-    expect(again!.gift_grant_id).toBe(gift!.gift_grant_id);
+    expect(again).toMatchObject({ gift_grant_id: gift!.gift_grant_id, model_id: bangle, status: 'RESERVED', reservation: 'STOCK' });
+    expect(await t.db.selectFrom('tier_grants').select('model_id').where('id', '=', gift!.gift_grant_id!).executeTakeFirstOrThrow()).toEqual({ model_id: bangle });
   });
 
   it('stays as it is when its order is returned', async () => {
@@ -288,6 +302,44 @@ describe('the welcome gift (BP-19 T5)', () => {
     expect(open).toHaveLength(1);
     await setGift(2, null);
   });
+  it('lists both tiers\' gifts of one order, PLATINE\'s first, and its order waits for each gift\'s size', async () => {
+    const [platineGift, palladiumGift] = [await giftModel('JONC II', ['50', '52'], 1), await giftModel('JONC III', ['56', '58'], 1)];
+    await setGift(2, platineGift);
+    await setGift(3, palladiumGift);
+    // An account reaching PLATINE and PALLADIUM at once: its next order carries both gifts, each of several sizes.
+    const a = await account(10);
+    const parent = await salonOrder(a.id, { priceMinor: 300_000 });
+    const [first, second] = await t.db
+      .selectFrom('orders as o')
+      .innerJoin('tier_grants as g', 'g.id', 'o.gift_grant_id')
+      .select(['o.id', 'g.tier'])
+      .where('o.with_order_id', '=', parent)
+      .orderBy('g.tier')
+      .execute();
+    expect([first!.tier, second!.tier]).toEqual([2, 3]);
+    const view = async () => (await orders().get(parent)).gifts;
+    expect(await view()).toEqual([
+      { id: first!.id, reference: orderReference(first!.id), model: 'JONC II', status: 'RESERVED', sizeToChoose: true, tier: 2 },
+      { id: second!.id, reference: orderReference(second!.id), model: 'JONC III', status: 'RESERVED', sizeToChoose: true, tier: 3 },
+    ]);
+    // The console's MARK PAID, from the page the server answers: hidden while any gift's size is to be chosen.
+    const payable = async () => adminOrderActions(JSON.parse(JSON.stringify(await orders().get(parent))) as AdminOrderView, 'OPERATOR').pay;
+    expect(await payable()).toBe(false);
+    await rejects(pay(parent), 'ORDER_GIFT_SIZE_MISSING');
+    // PLATINE's size chosen: PALLADIUM's still holds it back.
+    await orders().setTerms(first!.id, { sizeLabel: '52' }, admin);
+    expect((await view()).map((g) => g.sizeToChoose)).toEqual([false, true]);
+    expect(await payable()).toBe(false);
+    await rejects(pay(parent), 'ORDER_GIFT_SIZE_MISSING');
+    // Both chosen: paid, with both gifts.
+    await orders().setTerms(second!.id, { sizeLabel: '56' }, admin);
+    expect(await payable()).toBe(true);
+    await pay(parent);
+    expect((await view()).map((g) => g.status)).toEqual(['PAID', 'PAID']);
+    await setGift(2, null);
+    await setGift(3, null);
+  });
+
   it('draws an invoice at the most lines it carries: six add-ons, its shipping, a credit split over both tiers and both tiers\' gifts', async () => {
     const [platineGift, palladiumGift] = [await giftModel('ANNEAU VII', [null], 2), await giftModel('ANNEAU VIII', [null], 2)];
     await setGift(2, platineGift);

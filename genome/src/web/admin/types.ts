@@ -2139,8 +2139,11 @@ export interface OrderView {
   shipping: { service: ShippingService | null; minor: number | null; benefit: 2 | 3 | null };
   /** BP-19: the order it travels with, and once that order has shipped its carrier and tracking number (SHIP WITH ITS ORDER). */
   withOrder: { id: string; reference: string; shipment: { carrierId: string; trackingNumber: string } | null } | null;
-  /** BP-19 T5: the welcome gift travelling with it (not cancelled): its order, model and step, and whether its size is to be chosen. */
-  gift: { id: string; reference: string; model: string; status: OrderStatus; sizeToChoose: boolean } | null;
+  /**
+   * BP-19 T5: the welcome gifts travelling with it (not cancelled; PLATINE's and PALLADIUM's when both tiers are reached
+   * at once), by tier, then oldest first: each its order, model, step, whether its size is to be chosen, and its tier.
+   */
+  gifts: { id: string; reference: string; model: string; status: OrderStatus; sizeToChoose: boolean; tier: 2 | 3 }[];
   /** BP-19 T5, on a GIFT order: its tier, and while its size is to be chosen, its model's sizes with the pieces available. */
   giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[] } | null;
   /** BP-19 T5: the client's credit usable now, and the credit taken off this order (released or not). */

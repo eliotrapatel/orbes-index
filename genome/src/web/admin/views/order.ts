@@ -10,8 +10,8 @@
  *  - The order: its channel, release, the collector (the email masked for an AUDITOR) and the reference they hold, the
  *    model, size, price, add-ons, surprise and engraving text; EDIT (OPERATOR): a draw's or a salon's size, price and
  *    currency, any order's engraving text (decision 31).
- *  - Its welcome gift and its credit (plan NEXT-NINE, BP-19 T5): the GIFT order travelling with it (its size to
- *    choose: MARK PAID waits for it), the client's credit usable now and the credit taken off it; APPLY CREDIT and
+ *  - Its welcome gifts and its credit (plan NEXT-NINE, BP-19 T5): the GIFT orders travelling with it, one row each (a
+ *    size to choose: MARK PAID waits for it), the client's credit usable now and the credit taken off it; APPLY CREDIT and
  *    REMOVE CREDIT (OPERATOR, while RESERVED). A GIFT order says its tier and the order it travels with; its size, To be
  *    confirmed, is chosen among its model's (CHOOSE SIZE). An order travelling with another ships with SHIP WITH ITS
  *    ORDER, prefilled with that order's carrier and tracking number.
@@ -41,7 +41,7 @@ import {
   creditValue,
   DOCUMENT_LABELS,
   giftHeaderLine,
-  giftLine,
+  giftRows,
   giftSizeOptions,
   durationText,
   EVENT_LABELS,
@@ -397,7 +397,6 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
         await ctx.api.removeOrderCredit(o.id);
       },
     }).then(done('Credit removed.'));
-  const gift = giftLine(o);
   const orderRows: DefRow[] = [
     { label: 'Channel', value: CHANNEL_LABELS[o.channel] },
     ...(o.channel === 'GIFT' && o.withOrder
@@ -411,7 +410,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Price', value: priceLine(o) },
     { label: 'Add-ons', value: addonsLine(o) },
     { label: 'Shipping', value: h('span', { data: { testid: 'order-shipping' } }, shippingLine(o)) },
-    ...(gift && o.gift ? [{ label: 'Welcome gift', value: h('a', { class: 'idlink', attrs: { href: href('order', { orderId: o.gift.id }) }, data: { testid: 'order-gift' } }, gift) }] : []),
+    ...giftRows(o).map((g) => ({ label: g.label, value: h('a', { class: 'idlink', attrs: { href: href('order', { orderId: g.id }) }, data: { testid: 'order-gift' } }, g.line) })),
     ...(o.channel !== 'GIFT'
       ? [
           { label: 'Credit available', value: h('span', { data: { testid: 'order-credit-available' } }, creditAvailableLine(o)) },
