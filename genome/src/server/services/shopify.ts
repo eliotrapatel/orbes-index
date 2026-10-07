@@ -19,7 +19,9 @@
  *                        archived once none of them is active.
  *   the ids pasted back  N2: once imported, the product's id and each variant's, from Shopify's admin, are kept on the
  *                        model's SKUs (`skus.shopify_product_id`, one product per model; `skus.shopify_variant_id`, unique):
- *                        both sides are linked. A size of the export without its SKU yet has it created (ensureSku).
+ *                        both sides are linked. A size of the export without its SKU yet has it created (ensureSku), on
+ *                        a model with no size type. A size set aside (plan NEXT LOT §3.3) is left out of the export, the
+ *                        model's view and the link: its ids stay as they are.
  *                        Audited `model.shopify` with the ids before and after; nothing written when nothing changes.
  *   the order export     N3: the orders reserved in a period (UTC days, at most SHOPIFY_PERIOD_MAX_DAYS), priced, in
  *                        Shopify's order CSV format (help.shopify.com, « Exporting orders », read 2026-10-05): one order
@@ -264,7 +266,8 @@ export class ShopifyExportService {
       roots.length ? (await this.db.selectFrom('models').select('variant_of').where('variant_of', 'in', roots).execute()).map((r) => r.variant_of!) : [],
     );
     const ids = priced.map((m) => m.id);
-    const skus = ids.length ? await this.db.selectFrom('skus').select(['model_id', 'size_label', 'code', 'shopify_variant_id']).where('model_id', 'in', ids).execute() : [];
+    // Plan NEXT LOT §3.3: the store offers a model's offered sizes; one set aside is left out (its ids kept).
+    const skus = ids.length ? await this.db.selectFrom('skus').select(['model_id', 'size_label', 'code', 'shopify_variant_id']).where('model_id', 'in', ids).where('set_aside_at', 'is', null).execute() : [];
     const gallery = ids.length ? await this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt']).where('model_id', 'in', ids).orderBy('model_id').orderBy('position').execute() : [];
     const handles = await handlesOf(this.db);
     const rows: string[][] = [];
@@ -324,7 +327,7 @@ export class ShopifyExportService {
     const id = modelKey(modelId);
     const m = await this.db.selectFrom('models').select(['id', 'name', 'sku_prefix', 'variant_of']).where('id', '=', id).executeTakeFirst();
     if (!m) throw modelNotFound();
-    const skus = await this.db.selectFrom('skus').select(['size_label', 'code', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', id).execute();
+    const skus = await this.db.selectFrom('skus').select(['size_label', 'code', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', id).where('set_aside_at', 'is', null).execute();
     return {
       model: { id: m.id, name: m.name, skuPrefix: m.sku_prefix },
       // The handle the product export writes for this model (a variant's: its main model's, N1), so the console names the
@@ -355,12 +358,13 @@ export class ShopifyExportService {
     if (productId === null && variantIds.length > 0) throw validationError('A variant id is given with its product id.');
     try {
       await inTransaction(this.db, async (tx) => {
-        const m = await tx.selectFrom('models').select(['id', 'sku_prefix', 'variant_of']).where('id', '=', id).forNoKeyUpdate().executeTakeFirst();
+        const m = await tx.selectFrom('models').select(['id', 'sku_prefix', 'variant_of', 'size_type']).where('id', '=', id).forNoKeyUpdate().executeTakeFirst();
         if (!m) throw modelNotFound();
         // N1: the models of its product, a main model and its variants.
         const root = m.variant_of ?? m.id;
         const group = (await tx.selectFrom('models').select('id').where((eb) => eb.or([eb('id', '=', root), eb('variant_of', '=', root)])).execute()).map((g) => g.id);
-        const before = await tx.selectFrom('skus').select(['id', 'size_label', 'code', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', id).execute();
+        // Plan NEXT LOT §3.3: the export's sizes are the offered ones; a size set aside is unknown here, its ids kept.
+        const before = await tx.selectFrom('skus').select(['id', 'size_label', 'code', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', id).where('set_aside_at', 'is', null).execute();
         const known = variantsOf(m.sku_prefix, before);
         for (const v of given) {
           if (!known.some((k) => k.size === v.size)) throw validationError(`${v.size ?? ONE_SIZE_LABEL} is not a size of this model in the export.`);
@@ -372,9 +376,10 @@ export class ShopifyExportService {
           if (other) throw shopifyProductTaken();
         }
         // A size of the export without its SKU yet (a model in one size never issued nor sold) has it now, given or not:
-        // the product's id is kept on the model's SKUs, so a linked model has at least one.
-        if (productId !== null) for (const k of known) if (!k.known) await ensureSku(tx, id, k.size);
-        const skus = await tx.selectFrom('skus').select(['id', 'size_label', 'code', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', id).orderBy('id').execute();
+        // the product's id is kept on the model's SKUs, so a linked model has at least one. A typed model's sizes are
+        // all declared (plan NEXT LOT §3.3): none is created here.
+        if (productId !== null && m.size_type === null) for (const k of known) if (!k.known) await ensureSku(tx, id, k.size);
+        const skus = await tx.selectFrom('skus').select(['id', 'size_label', 'code', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', id).where('set_aside_at', 'is', null).orderBy('id').execute();
         const changes: { sku: string; from: string | null; to: string | null }[] = [];
         const products: { from: string | null; to: string | null } = {
           from: before.find((k) => k.shopify_product_id !== null)?.shopify_product_id ?? null,

@@ -125,7 +125,7 @@ import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { tierOf } from './club.js';
 import { giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, ensureGrants } from './tier-grants.js';
-import { savedSizeHint } from './sizes.js';
+import { offeredSku, savedSizeHint } from './sizes.js';
 import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockBalances, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -582,17 +582,35 @@ export function travellingShipping(parent: Pick<OrderRow, 'shipping_service'>): 
 
 /**
  * The SKU of a welcome gift's model in `size` (null: one size), whatever its case, as `ensureSku` finds it; 400
- * VALIDATION_FAILED when the model has no such SKU: a gift's size is chosen among its model's, never created.
+ * VALIDATION_FAILED when the model has no such SKU: a gift's size is chosen among its model's offered sizes (plan NEXT
+ * LOT §3.3: never one set aside), never created.
  */
 async function giftSku(tx: Db, modelId: string, size: string | null): Promise<string> {
   const found = await tx
     .selectFrom('skus')
     .select('id')
     .where('model_id', '=', modelId)
+    .where('set_aside_at', 'is', null)
     .where((eb) => (size === null ? eb('size_label', 'is', null) : eb(eb.fn('upper', ['size_label']), '=', eb.fn('upper', [eb.val(size)]))))
     .executeTakeFirst();
   if (!found) throw validationError('Choose one of the gift model’s sizes.');
   return found.id;
+}
+
+/**
+ * The SKU an order's size names (Client Services' EDIT): `offeredSku`, so a typed model's offered sizes only (400
+ * SIZE_NOT_DECLARED, 409 SIZE_SET_ASIDE), except that the order's current SKU stays accepted though set aside since.
+ */
+async function termsSku(tx: Db, o: OrderRow, size: string | null): Promise<string> {
+  try {
+    return (await offeredSku(tx, o.model_id, size)).skuId;
+  } catch (e) {
+    if (e instanceof DomainError && e.code === 'SIZE_SET_ASIDE' && o.sku_id !== null) {
+      const again = await offeredSku(tx, o.model_id, size, { allowSetAside: true });
+      if (again.skuId === o.sku_id) return again.skuId;
+    }
+    throw e;
+  }
 }
 
 /** An order's welcome gifts still open (not cancelled), oldest first. */
@@ -665,10 +683,11 @@ export async function attachGifts(tx: Db, parent: OrderRow, actor: Actor, now: D
     if (taken.has(g.id)) continue;
     const modelId = giftModelOf(program, g.tier as 2 | 3);
     if (!modelId) continue;
-    const model = await tx.selectFrom('models').select(['id', 'active', 'discontinued_at']).where('id', '=', modelId).executeTakeFirst();
+    const model = await tx.selectFrom('models').select(['id', 'active', 'discontinued_at', 'size_type']).where('id', '=', modelId).executeTakeFirst();
     if (!model || !model.active || model.discontinued_at !== null) continue;
-    const skus = await tx.selectFrom('skus').select(['id', 'size_label']).where('model_id', '=', modelId).orderBy('code').execute();
-    const one = skus.length === 0 ? { id: await ensureSku(tx, modelId, null), size_label: null } : skus.length === 1 ? skus[0]! : null;
+    // Its offered sizes (plan NEXT LOT §3.3); a model with no type and no SKU yet has its one size created, as before.
+    const skus = await tx.selectFrom('skus').select(['id', 'size_label']).where('model_id', '=', modelId).where('set_aside_at', 'is', null).orderBy('code').execute();
+    const one = skus.length === 0 ? (model.size_type === null ? { id: await ensureSku(tx, modelId, null), size_label: null } : null) : skus.length === 1 ? skus[0]! : null;
     const gift = await createOrder(
       tx,
       {
@@ -971,7 +990,8 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
   if (existing.size >= e.quantity) return { orders, notes };
   let skuId = e.sku_id;
   if (skuId === null) {
-    skuId = await ensureSku(tx, e.model_id, e.label);
+    // The size was offered when the release was made (plan NEXT LOT §3.3): a size set aside since stays its own.
+    skuId = (await offeredSku(tx, e.model_id, e.label, { allowSetAside: true })).skuId;
     await tx.updateTable('drop_sizes').set({ sku_id: skuId }).where('id', '=', e.size_id).execute();
   }
   const addons = await tx
@@ -1103,9 +1123,10 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
       dropId: null,
       accountId: r.account_id,
       modelId: r.model_id,
-      // AC-01: the size the collector asked, with its SKU (held as any order's); none asked, entered later.
+      // AC-01: the size the collector asked, with its SKU (held as any order's); none asked, entered later. Offered when
+      // it was asked (plan NEXT LOT §3.3): a size set aside since stays its own.
       sizeLabel: r.size_label,
-      skuId: r.size_label === null ? null : await ensureSku(tx, r.model_id, r.size_label),
+      skuId: r.size_label === null ? null : (await offeredSku(tx, r.model_id, r.size_label, { allowSetAside: true })).skuId,
       priceMinor: null,
       currency: null,
       addons: [],
@@ -1402,7 +1423,7 @@ export class OrderService {
       const sizes =
         r.sku_id === null
           ? await Promise.all(
-              (await this.db.selectFrom('skus').select(['id', 'size_label']).where('model_id', '=', r.model_id).orderBy('code').execute()).map(async (k) => ({
+              (await this.db.selectFrom('skus').select(['id', 'size_label']).where('model_id', '=', r.model_id).where('set_aside_at', 'is', null).orderBy('code').execute()).map(async (k) => ({
                 skuId: k.id,
                 label: k.size_label,
                 available: (await stockBalances(this.db, { skuId: k.id })).reduce((n, b) => n + Math.max(0, b.available), 0),
@@ -1814,8 +1835,10 @@ export class OrderService {
       let after = o;
       // A size is entered once its SKU is known: null is one size, as soon as it is said. The same SKU named again
       // (its size in another case: 52, or Small for SMALL) is no change: what the order holds stays.
-      // A welcome gift's size is one of its model's SKUs (BP-19 T5: Choose size lists them), never a new one.
-      const skuId = size === undefined ? null : o.channel === 'GIFT' ? await giftSku(tx, o.model_id, size) : await ensureSku(tx, o.model_id, size);
+      // A welcome gift's size is one of its model's SKUs (BP-19 T5: Choose size lists them), never a new one. Any other
+      // order's is named through offeredSku (plan NEXT LOT §3.3): one of a typed model's offered sizes, its current one
+      // always accepted (even set aside since).
+      const skuId = size === undefined ? null : o.channel === 'GIFT' ? await giftSku(tx, o.model_id, size) : await termsSku(tx, o, size);
       const sizeChange = size !== undefined && o.sku_id !== skuId;
       const priceChange = price !== undefined && (price !== o.price_minor || currency !== o.currency);
       if ((sizeChange || priceChange) && o.channel === 'LIVE') throw termsFixed();

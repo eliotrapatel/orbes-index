@@ -9,7 +9,9 @@
  *   SKUs       a model in one size (`ensureSku`): the size a release sells, or a piece's variant; its code is the
  *              model's SKU prefix and the size (`deriveSku`), as a piece's SKU by default. The pieces and the sizes on
  *              sale are linked to theirs when written (issuance, the console's sizes), and those written before, or by
- *              the previous image, at boot (`linkSkus`).
+ *              the previous image, at boot (`linkSkus`). Since plan NEXT LOT §3.3 a model's sizes are declared in the
+ *              Catalogue (services/sizes.ts): every flow names a size through `offeredSku`, so `ensureSku` is reached
+ *              only through it for a model with no size type, through a declaration, or at boot.
  *   the ledger every movement of a SKU at a location (stock_movements), never changed: a piece finished (+1), a count
  *              corrected (± `adjust`), a transfer between locations (`transfer`: two movements, out and in, paired by
  *              their transfer id), an order shipped (−1) or returned (+1).
@@ -36,6 +38,7 @@ import { conflict, DomainError, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { writeJournal } from './journal.js';
+import { offeredSku } from './sizes.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -109,12 +112,12 @@ export function compareSizes(a: string | null, b: string | null): number {
 /**
  * The sizes of models from their SKUs (plan NOCTURNE, addition 8: SIZES 16 · 17 · 18), by model id: each size label once
  * whatever its case (the first written kept), in compareSizes' order; a SKU in one size (null) names no size. A model
- * without a SKU has none.
+ * without a SKU has none. Its offered sizes only (plan NEXT LOT §3.3): a size set aside is no longer shown as available.
  */
 export async function skuSizes(db: Db, modelIds: readonly string[]): Promise<Map<string, string[]>> {
   const out = new Map<string, string[]>();
   if (modelIds.length === 0) return out;
-  const rows = await db.selectFrom('skus').select(['model_id', 'size_label']).where('model_id', 'in', [...modelIds]).orderBy('created_at').orderBy('id').execute();
+  const rows = await db.selectFrom('skus').select(['model_id', 'size_label']).where('model_id', 'in', [...modelIds]).where('set_aside_at', 'is', null).orderBy('created_at').orderBy('id').execute();
   for (const r of rows) if (r.size_label !== null) out.set(r.model_id, [...(out.get(r.model_id) ?? []), r.size_label]);
   for (const [id, sizes] of out) out.set(id, sizesOnce(sizes));
   return out;
@@ -310,12 +313,28 @@ export async function linkSkus(db: Db): Promise<{ products: number; sizes: numbe
   return { products, sizes };
 }
 
-/** Link every size of a release to its SKU (the release's model in that size): after its sizes or its model changed. */
+/**
+ * Link every size of a release to its SKU (the release's model in that size): after its sizes or its model changed.
+ * Through `offeredSku` (plan NEXT LOT §3.3): a model with no size type as before (its SKU created when missing); a typed
+ * model's sizes must be its offered sizes (400 SIZE_NOT_DECLARED, 409 SIZE_SET_ASIDE), each label written again as the
+ * declared one ('SIZE 52' is 52; a size of none 'ONE SIZE'). Two lines of one size ('52' and 'SIZE 52') are refused
+ * before anything is written: 400 'The size 52 is listed twice.'
+ */
 export async function linkDropSizes(tx: Db, dropId: string, modelId: string): Promise<void> {
-  const rows = await tx.selectFrom('drop_sizes').select(['id', 'label', 'sku_id']).where('drop_id', '=', dropId).execute();
+  const rows = await tx.selectFrom('drop_sizes').select(['id', 'label', 'sku_id']).where('drop_id', '=', dropId).orderBy('position').execute();
+  const resolved: { id: string; label: string; sku_id: string | null; skuId: string; declared: string | null; typed: boolean }[] = [];
   for (const r of rows) {
-    const skuId = await ensureSku(tx, modelId, r.label);
-    if (r.sku_id !== skuId) await tx.updateTable('drop_sizes').set({ sku_id: skuId }).where('id', '=', r.id).execute();
+    const s = await offeredSku(tx, modelId, r.label);
+    resolved.push({ ...r, skuId: s.skuId, declared: s.label, typed: s.typed });
+  }
+  const seen = new Set<string>();
+  for (const r of resolved) {
+    if (seen.has(r.skuId)) throw validationError(`The size ${r.declared ?? ONE_SIZE_LABEL} is listed twice.`);
+    seen.add(r.skuId);
+  }
+  for (const r of resolved) {
+    const label = r.typed ? (r.declared ?? ONE_SIZE_LABEL) : r.label;
+    if (r.sku_id !== r.skuId || label !== r.label) await tx.updateTable('drop_sizes').set({ sku_id: r.skuId, label }).where('id', '=', r.id).execute();
   }
 }
 

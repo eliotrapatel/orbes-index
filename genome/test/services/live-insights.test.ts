@@ -13,6 +13,8 @@
  *    the line stalled when the engine stops and cleared once it runs, ADD PIECES in the report, the comparison.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { inTransaction } from '../../src/server/db/connection.js';
+import { defaultLocationId, ensureSku, recordMovement } from '../../src/server/services/stock.js';
 import {
   apportion,
   audienceForecast,
@@ -809,5 +811,27 @@ describe('LiveInsightsService on a database', () => {
     }
     expect(await revenue()).toEqual([0, 0, 0, 0, { reservations: 1, pieces: reserved.quantity }]);
     expect((await t.db.selectFrom('live_entries').select('resolution').where('id', '=', reserved.id).executeTakeFirstOrThrow()).resolution).toBeNull();
+  });
+
+  it('proposes a typed model\'s size mix among its offered sizes only, each named by its declared label, and says them (NEXT LOT §3.3)', async () => {
+    const ring = await createModel(t.db, 'SIZED');
+    await t.db.updateTable('models').set({ size_type: 'RING', size_kind: 'RING' }).where('id', '=', ring).execute();
+    const skus: Record<string, string> = {};
+    for (const label of ['50', '52', 'SIZE 54', '58']) skus[label] = await inTransaction(t.db, (tx) => ensureSku(tx, ring, label));
+    await t.db.updateTable('skus').set({ set_aside_at: f.clock.now() }).where('id', '=', skus['58']!).execute();
+    const location = await defaultLocationId(t.db);
+    for (const [label, n] of [['50', 2], ['58', 3]] as const) {
+      await inTransaction(t.db, (tx) => recordMovement(tx, { skuId: skus[label]!, locationId: location, delta: n, reason: 'ADJUSTED', note: 'Counted.' }, f.admin, f.clock.now()));
+    }
+    const mix = await insights.sizeMix(ring, null);
+    expect(mix.offered).toEqual(['50', '52', 'SIZE 54']);
+    // The stock of the size set aside is left out; the collectors' 52 and 54 (their rings') read as the declared sizes.
+    expect(mix.inStock).toBe(2);
+    expect(mix.sizes.every((z) => mix.offered.includes(z.label)), JSON.stringify(mix.sizes)).toBe(true);
+    expect(mix.sizes.map((z) => z.label)).toContain('50');
+    expect(mix.sizes.map((z) => z.label)).not.toContain('58');
+    expect(mix.reasoning[0]).toBe('In stock at FRANCE WAREHOUSE: 50: 2, offered first.');
+    // A model with no type: as before, nothing offered to read among.
+    expect((await insights.sizeMix(f.modelId, null)).offered).toEqual([]);
   });
 });

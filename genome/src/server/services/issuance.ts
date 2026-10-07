@@ -62,7 +62,8 @@ import type { AuditService } from './audit.js';
 import type { CategoryRegistry } from './categories.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
 import { productPayload, writeJournal } from './journal.js';
-import { deriveSku, ensureSku } from './stock.js';
+import { offeredSku } from './sizes.js';
+import { deriveSku } from './stock.js';
 
 // ── Public types ───────────────────────────────────────────────────────────
 
@@ -808,7 +809,13 @@ export class IssuanceService {
     // Its SKU (migration 0022): the model in the piece's variant, created on first use, before the serials' lock. An
     // order reserving an identity takes its SKU's row and then this lock (orders.ts); the piece's row below checks its
     // sku_id with a FOR KEY SHARE lock, which lockSku's FOR NO KEY UPDATE does not block, so the two never wait in a cycle.
-    const skuId = await ensureSku(trx, p.modelId, p.variant);
+    // Plan NEXT LOT §3.3: through offeredSku, so a typed model's piece is in one of its declared sizes (a size set aside
+    // too: the Generator issues replacements), stored with the declared label, and its SKU code is the SKU row's when
+    // none was typed; a model with no size type as before (the size typed, its code derived from it).
+    const sized = await offeredSku(trx, p.modelId, p.variant, { allowSetAside: true });
+    const skuId = sized.skuId;
+    const variant = sized.typed ? sized.label : (p.variant ?? null);
+    const sku = sized.typed && p.sku === undefined ? (await trx.selectFrom('skus').select('code').where('id', '=', skuId).executeTakeFirstOrThrow()).code : a.sku;
 
     // Per (year, category) lock: max+1 is then race-free; the UNIQUE constraint remains the backstop.
     let serial = p.serial;
@@ -826,10 +833,10 @@ export class IssuanceService {
         year,
         category_id: categoryIndex,
         serial,
-        sku: a.sku,
+        sku,
         model_id: p.modelId,
         collection_id: p.collectionId ?? null,
-        variant: p.variant ?? null,
+        variant,
         material: p.material,
         production_batch: p.productionBatch ?? null,
         production_date: p.productionDate ?? null,
@@ -903,7 +910,7 @@ export class IssuanceService {
           serial,
           serialAllocated: p.serial === undefined,
           modelId: p.modelId,
-          sku: a.sku,
+          sku,
           authPolicy: a.authPolicy,
           claimSecret: a.claimHash !== null,
           genomeFingerprint: genome.fingerprint,

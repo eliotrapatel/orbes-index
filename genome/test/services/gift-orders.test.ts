@@ -447,4 +447,16 @@ describe('the welcome gift (BP-19 T5)', () => {
     await setGift(2, null);
     await setGift(3, null);
   });
+
+  it('offers a gift\'s offered sizes only: a size set aside leaves Choose size and is refused (NEXT LOT §3.3)', async () => {
+    const sized = await giftModel('JONC II', ['50', '52', '54'], 1);
+    await t.db.updateTable('skus').set({ set_aside_at: clock.now() }).where('model_id', '=', sized).where('size_label', '=', '52').execute();
+    await setGift(2, sized);
+    const a = await account(5);
+    const [gift] = await giftsOf(await salonOrder(a.id));
+    expect((await orders().get(gift!.id)).giftOf!.sizes.map((s) => s.label)).toEqual(['50', '54']);
+    await rejects(orders().setTerms(gift!.id, { sizeLabel: '52' }, admin), 'VALIDATION_FAILED');
+    await orders().setTerms(gift!.id, { sizeLabel: '54' }, admin);
+    expect(await orderRow(gift!.id)).toMatchObject({ size_label: '54' });
+  });
 });

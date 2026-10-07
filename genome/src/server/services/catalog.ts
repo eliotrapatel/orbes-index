@@ -988,8 +988,9 @@ export class CatalogService {
       // N2: the model's Shopify product (one id on all its SKUs, services/shopify.ts) and how many sizes have their variant.
       .select((eb) => [
         eb.selectFrom('skus as k').select((k) => k.fn.max('k.shopify_product_id').as('p')).whereRef('k.model_id', '=', 'm.id').as('shopify_product_id'),
-        eb.selectFrom('skus as k').select((k) => k.fn.countAll<number>().as('n')).whereRef('k.model_id', '=', 'm.id').as('sku_count'),
-        eb.selectFrom('skus as k').select((k) => k.fn.countAll<number>().as('n')).whereRef('k.model_id', '=', 'm.id').where('k.shopify_variant_id', 'is not', null).as('variants_linked'),
+        // Plan NEXT LOT §3.3: as the export, its offered sizes only.
+        eb.selectFrom('skus as k').select((k) => k.fn.countAll<number>().as('n')).whereRef('k.model_id', '=', 'm.id').where('k.set_aside_at', 'is', null).as('sku_count'),
+        eb.selectFrom('skus as k').select((k) => k.fn.countAll<number>().as('n')).whereRef('k.model_id', '=', 'm.id').where('k.set_aside_at', 'is', null).where('k.shopify_variant_id', 'is not', null).as('variants_linked'),
         // Plan NEXT LOT §3.3: its offered sizes (the Catalogue's line).
         eb.selectFrom('skus as k').select((k) => k.fn.countAll<number>().as('n')).whereRef('k.model_id', '=', 'm.id').where('k.set_aside_at', 'is', null).as('sizes_offered'),
       ]);

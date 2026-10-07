@@ -290,9 +290,12 @@ export class SalonService {
     return { ...sheet, salon: await this.requestFacts(accountId, modelId, sheet.salon), variants };
   }
 
-  /** A RESERVED model's facts for the account: its open request, its sizes and the one its saved size suggests (AC-01). */
+  /**
+   * A RESERVED model's facts for the account: its open request, its sizes and the one its saved size suggests (AC-01);
+   * its offered sizes only (plan NEXT LOT §3.3: a size set aside is no longer offered).
+   */
   private async requestFacts(accountId: string, modelId: string, facts: SalonFacts): Promise<SalonRequestFacts> {
-    const [request, sizes] = await Promise.all([this.openRequest(accountId, modelId), modelSizeCandidates(this.db, modelId)]);
+    const [request, sizes] = await Promise.all([this.openRequest(accountId, modelId), modelSizeCandidates(this.db, modelId, { offered: true })]);
     const kind = sizes.length >= 2 ? await sizeKindOf(this.db, modelId) : null;
     const suggested = kind === null ? null : matchSavedSize(kind, await savedMm(this.db, accountId.toLowerCase(), kind), sizes);
     return { ...facts, request, sizes: sizes.map((z) => z.label), suggestedSize: suggested?.label ?? null };
@@ -346,12 +349,15 @@ export class SalonService {
     }
   }
 
-  /** The size asked, as the model's SKU names it (AC-01): null for none; 400 for a size the model does not have. */
+  /**
+   * The size asked, as the model's SKU names it (AC-01): null for none; 400 for a size the model does not offer (plan
+   * NEXT LOT §3.3: a size set aside is no longer offered).
+   */
   private async sizeAsked(modelId: string, size: unknown): Promise<string | null> {
     if (size === null || size === undefined) return null;
     const asked = typeof size === 'string' ? size.trim().toUpperCase() : '';
     if (asked === '') return null;
-    const found = (await modelSizeCandidates(this.db, modelId)).find((z) => z.label.toUpperCase() === asked);
+    const found = (await modelSizeCandidates(this.db, modelId, { offered: true })).find((z) => z.label.toUpperCase() === asked);
     if (!found) throw validationError('Choose one of this model\u2019s sizes.');
     return found.label;
   }

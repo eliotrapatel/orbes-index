@@ -378,4 +378,28 @@ describe('the private salon (P-X08)', () => {
     // Hidden again for what follows.
     expect((await operator.patch(model(halo), { lookbook: 'HIDDEN' })).statusCode).toBe(200);
   });
+
+  it('a typed model offers its offered sizes only (NEXT LOT §3.3): a size set aside leaves the sheet and is refused at the request; a request made before in that size still makes its order, on its SKU', async () => {
+    const operatorActor = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
+    const orbit = (await h.ctx.services.catalog.createModel({ categoryCode: 'J', name: 'ORBITE', type: 'RING', skuPrefix: 'SL-ORB', sizeType: 'RING' }, SYSTEM_ACTOR)).id;
+    await h.ctx.services.sizes.declare(orbit, { ticked: ['50', '52', '54'] }, operatorActor);
+    expect((await operator.patch(model(orbit), { slug: 'orbite-salon', lookbook: 'RESERVED' })).statusCode).toBe(200);
+    const early = await member(1);
+    const late = await member(1);
+    const sheet = async (c: Client) => (safeJson(await c.get('/api/v1/club/lookbook/orbite-salon')) as SheetJson).salon!;
+    expect((await sheet(early.client)).sizes).toEqual(['50', '52', '54']);
+    const asked = await requestOf(early.client, 'orbite-salon', { size: '54' });
+    expect(asked.statusCode, asked.body).toBe(201);
+    const requestId = (safeJson(asked) as { request: RequestJson }).request.id;
+    // 54 taken off: its open request uses it, so it is set aside, not removed.
+    const s54 = (await h.ctx.db.selectFrom('skus').select('id').where('model_id', '=', orbit).where('size_label', '=', '54').executeTakeFirstOrThrow()).id;
+    expect(await h.ctx.services.sizes.removeSize(orbit, s54, operatorActor)).toEqual({ outcome: 'SET_ASIDE' });
+    expect((await sheet(late.client)).sizes).toEqual(['50', '52']);
+    const res = await requestOf(late.client, 'orbite-salon', { size: '54' });
+    expect([res.statusCode, errorOf(res)]).toEqual([400, { code: 'VALIDATION_FAILED', message: 'Choose one of this model’s sizes.' }]);
+    // The request made before keeps its size: ACCEPTED, its order takes the SKU of 54.
+    const closed = await operator.post(`/api/admin/club/requests/${requestId}/close`, { note: 'Confirmed size 54.', outcome: 'ACCEPTED' });
+    expect(closed.statusCode, closed.body).toBe(200);
+    expect(await h.ctx.db.selectFrom('orders').select(['size_label', 'sku_id']).where('shop_request_id', '=', requestId).executeTakeFirstOrThrow()).toEqual({ size_label: '54', sku_id: s54 });
+  });
 });

@@ -756,4 +756,56 @@ describe('LIVE RELEASES: the console', () => {
       expect(await link()).toEqual({ id: r.id, title: 'LIVE RELEASE' });
     });
   });
+
+  describe('the sizes of a model with its size type (NEXT LOT §3.3)', () => {
+    let ring: string;
+    let one: string;
+    const sizesOf = async (dropId: string) =>
+      (await h.ctx.db.selectFrom('drop_sizes as s').leftJoin('skus as k', 'k.id', 's.sku_id').select(['s.label', 'k.code']).where('s.drop_id', '=', dropId).orderBy('s.position').execute()).map((r) => [r.label, r.code]);
+    const refused = async (sizes: Json[], title: string) => {
+      const res = await op.post('/api/admin/live', settings({ modelId: ring, title, sizes }));
+      expect(await h.ctx.db.selectFrom('drops').select('id').where('title', '=', title).execute(), title).toEqual([]);
+      return { status: res.statusCode, ...errorOf(res) };
+    };
+
+    beforeAll(async () => {
+      // A session of its own: the clock of the sections before has run past the first one's.
+      op = await adminClient(h, 'OPERATOR');
+      ring = (await h.ctx.services.catalog.createModel({ categoryCode: 'J', name: 'ORBITE', type: 'RING', skuPrefix: 'LV-ORB', sizeType: 'RING' }, f.admin)).id;
+      await h.ctx.services.sizes.declare(ring, { ticked: ['50', '52', '54', '58'] }, f.admin);
+      const s58 = (await h.ctx.db.selectFrom('skus').select('id').where('model_id', '=', ring).where('size_label', '=', '58').executeTakeFirstOrThrow()).id;
+      await h.ctx.db.updateTable('skus').set({ shopify_variant_id: '5858' }).where('id', '=', s58).execute();
+      expect(await h.ctx.services.sizes.removeSize(ring, s58, f.admin)).toEqual({ outcome: 'SET_ASIDE' });
+      one = (await h.ctx.services.catalog.createModel({ categoryCode: 'J', name: 'SOLSTICE', type: 'AUTOMATIC WATCH', skuPrefix: 'LV-SOL', sizeType: 'WATCH' }, f.admin)).id;
+    });
+
+    it('refuses a size not declared or set aside, and writes nothing', async () => {
+      expect(await refused([{ label: '53', stock: 1 }], 'UNDECLARED')).toEqual({
+        status: 400,
+        code: 'SIZE_NOT_DECLARED',
+        message: 'Size 53 is not one of ORBITE’s sizes (50, 52, 54). Add it on the model’s page, in the Catalogue.',
+      });
+      expect(await refused([{ label: '52', stock: 1 }, { label: '58', stock: 1 }], 'SET ASIDE')).toEqual({
+        status: 409,
+        code: 'SIZE_SET_ASIDE',
+        message: 'Size 58 of ORBITE is set aside. Reinstate it on the model’s page to offer it again.',
+      });
+    });
+
+    it('refuses two lines of one size before anything is written, never a database error', async () => {
+      expect(await refused([{ label: '52', stock: 1 }, { label: 'SIZE 52', stock: 2 }], 'TWICE')).toEqual({ status: 400, code: 'VALIDATION_FAILED', message: 'The size 52 is listed twice.' });
+      expect(await refused([{ label: '52 MM', stock: 1 }, { label: 'size 52', stock: 2 }], 'TWICE AGAIN')).toMatchObject({ status: 400, message: 'The size 52 is listed twice.' });
+    });
+
+    it('stores each size with its declared label and its SKU; a model of one size as ONE SIZE; a model with no type as before', async () => {
+      const r = await create({ modelId: ring, title: 'ORBITE DECLARED', sizes: [{ label: 'SIZE 52', stock: 3 }, { label: '54 mm', stock: 2 }] });
+      expect(await sizesOf(r.id)).toEqual([['52', 'LV-ORB-52'], ['54', 'LV-ORB-54']]);
+      const w = await create({ modelId: one, title: 'SOLSTICE ONE', sizes: [{ label: 'one size', stock: 2 }] });
+      expect(await sizesOf(w.id)).toEqual([['ONE SIZE', 'LV-SOL']]);
+      // A model of before H1: its sizes named as typed, their SKUs created as before.
+      const typeless = await createModel(h.ctx.db, 'ECLIPSE');
+      const t = await create({ modelId: typeless, title: 'ECLIPSE TYPELESS', sizes: [{ label: 'Size 61', stock: 1 }] });
+      expect((await sizesOf(t.id)).map(([label, code]) => [label, String(code).endsWith('-SIZE-61')])).toEqual([['Size 61', true]]);
+    });
+  });
 });

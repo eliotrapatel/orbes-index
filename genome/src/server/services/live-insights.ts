@@ -59,6 +59,7 @@ import { accessAccounts, effectiveDeadline, livePhase, LIVE_GESTURE_MIN_MS, LIVE
 import { defaultQuantityLine, liveMoney, majorUnits } from './live-console.js';
 import { notFound } from '../errors.js';
 import { releaseSizeLabel, sizeMix, type SizeMix } from './release-stock.js';
+import { listEntryOf, offeredSizes } from './sizes.js';
 import { defaultLocationId, knownLocation, stockBalances } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -1516,11 +1517,12 @@ export class LiveInsightsService {
    * The size mix a new release of a model is proposed (plan LIVE RELEASE+, choice 13, L1; services/release-stock.ts
    * sizeMix): the sizes in stock at the location (the default one when none is given) first, then the planner's demand
    * per size, read as for a release open to every ORBES account opening now (once created, its page's planner reads its
-   * own rules).
+   * own rules). A model with its size type (plan NEXT LOT §3.3): its offered sizes only, the stock of each by its SKU and
+   * the collectors' sizes read by their measure (`listEntryOf`), each named by its declared label; the rest left out.
    */
   async sizeMix(modelId: string, locationId: string | null): Promise<SizeMix> {
     if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
-    const model = await this.db.selectFrom('models').select(['id', 'name', 'type']).where('id', '=', modelId.toLowerCase()).executeTakeFirst();
+    const model = await this.db.selectFrom('models').select(['id', 'name', 'type', 'size_type']).where('id', '=', modelId.toLowerCase()).executeTakeFirst();
     if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
     const locId = locationId ? await knownLocation(this.db, locationId) : await defaultLocationId(this.db);
     const now = this.clock();
@@ -1531,11 +1533,28 @@ export class LiveInsightsService {
       this.past({ id: '00000000-0000-0000-0000-000000000000', opens_at: now }, now),
       this.variants(model.type),
     ]);
-    const stock = balances.map((b) => ({ label: releaseSizeLabel(b.sku.sizeLabel), available: Math.max(0, b.available) }));
+    const type = model.size_type;
+    const offered = type === null ? null : await offeredSizes(this.db, model.id);
+    const offeredIds = new Set((offered ?? []).map((o) => o.skuId));
+    const stock = balances.filter((b) => offered === null || offeredIds.has(b.sku.id)).map((b) => ({ label: releaseSizeLabel(b.sku.sizeLabel), available: Math.max(0, b.available) }));
+    /** A collector's size as the model declares it: the same label whatever the case, else the same measure (the list's own label first); null: none. */
+    const declaredOf = (label: string): string | null => {
+      if (offered === null) return label;
+      const same = offered.find((o) => releaseSizeLabel(o.label).toUpperCase() === label.toUpperCase());
+      if (same) return releaseSizeLabel(same.label);
+      const entry = listEntryOf(type, label);
+      if (entry === null) return null;
+      const matches = offered.filter((o) => listEntryOf(type, o.label) === entry);
+      const own = matches.find((o) => o.label === entry) ?? matches[0];
+      return own ? releaseSizeLabel(own.label) : null;
+    };
     const open: Rule = { minTier: 0, models: [], collectionId: null, accounts: null };
     const forecast = audienceForecast({ interest: 0, eligibleByTier: eligibleOf(el, open), past: past.map((p) => p.audience(el)), inRoom: null });
     const collectorsBySize = new Map<string, number>();
-    for (const v of variants) collectorsBySize.set(v.size, (collectorsBySize.get(v.size) ?? 0) + 1);
+    for (const v of variants) {
+      const size = declaredOf(v.size)?.toUpperCase();
+      if (size) collectorsBySize.set(size, (collectorsBySize.get(size) ?? 0) + 1);
+    }
     const labels = [...new Set([...stock.map((x) => x.label.trim().toUpperCase()), ...collectorsBySize.keys()])].filter((l) => l.length > 0);
     const plan = releasePlan({
       sizes: labels.map((l) => ({ id: l, label: l, stock: stock.filter((x) => x.label.trim().toUpperCase() === l).reduce((n, x) => n + x.available, 0) })),
@@ -1552,6 +1571,7 @@ export class LiveInsightsService {
       planned: plan.quantity,
       demand: plan.sizes.map((x) => ({ label: x.label, pieces: x.suggested ?? 0 })),
       plannerReasoning: ['The planner, as for a release open to every ORBES account opening now:', ...forecast.reasoning, ...plan.reasoning],
+      offered: (offered ?? []).map((o) => releaseSizeLabel(o.label)),
     });
   }
 

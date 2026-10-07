@@ -1534,6 +1534,8 @@ export interface LiveSizeMix {
   inStock: number;
   planned: number | null;
   reasoning: string[];
+  /** Plan NEXT LOT §3.3: the model's offered sizes (empty for a model with no size type). */
+  offered: string[];
 }
 
 /** An hour of the day, Paris time, in the best time to open. */

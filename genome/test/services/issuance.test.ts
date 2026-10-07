@@ -13,6 +13,7 @@ import { AuditService } from '../../src/server/services/audit.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
 import { verifyClaimCode } from '../../src/server/services/claim-codes.js';
 import { deriveSku, ISSUE_BATCH_ACTION, IssuanceService, MAX_ISSUE_BATCH, normalizeAuthPolicy, type IssueProductInput } from '../../src/server/services/issuance.js';
+import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { requireDecoder } from '../render/decoder-support.js';
@@ -816,6 +817,51 @@ describe('helpers', () => {
     expect(normalizeAuthPolicy(undefined)).toBe('PRINTED_CODE');
     expect(normalizeAuthPolicy(' printed_code + secure_element ')).toBe('PRINTED_CODE+SECURE_ELEMENT');
     expect(() => normalizeAuthPolicy('PRINTED_CODE+PRINTED_CODE')).toThrow(DomainError);
+  });
+});
+
+describe('IssuanceService: a model with its size type (plan NEXT LOT §3.3)', () => {
+  let w: World;
+  beforeAll(async () => {
+    w = await world();
+    // MONOLITHE typed a ring: 50 and 52 offered, 58 set aside (no ONE SIZE).
+    await w.t.db.updateTable('models').set({ size_type: 'RING', size_kind: 'RING' }).where('id', '=', w.modelId).execute();
+    for (const label of ['50', '52', '58']) await ensureSku(w.t.db, w.modelId, label);
+    await w.t.db.updateTable('skus').set({ set_aside_at: new Date('2026-05-01T00:00:00Z') }).where('model_id', '=', w.modelId).where('size_label', '=', '58').execute();
+  });
+  afterAll(() => w.t.close());
+
+  const stored = async (productId: string) => w.t.db.selectFrom('products as p').innerJoin('skus as k', 'k.id', 'p.sku_id').select(['p.variant', 'p.sku', 'k.code']).where('p.product_id', '=', productId).executeTakeFirstOrThrow();
+
+  it('stores the declared size: SIZE 52 is 52, its SKU the SKU row\'s code; a typed SKU code kept', async () => {
+    const r = await w.issuance.issueProduct(ring(w, { variant: 'SIZE 52' }), admin);
+    expect(r.product).toMatchObject({ variant: '52', sku: 'MNL-RG-52' });
+    expect(await stored(r.product.productId)).toEqual({ variant: '52', sku: 'MNL-RG-52', code: 'MNL-RG-52' });
+    const typed = await w.issuance.issueProduct(ring(w, { variant: '50 mm', sku: 'MNL-RG-50-POLI' }), admin);
+    expect(await stored(typed.product.productId)).toEqual({ variant: '50', sku: 'MNL-RG-50-POLI', code: 'MNL-RG-50' });
+  });
+
+  it('refuses a size not declared, ONE SIZE included, and accepts a size set aside (a replacement)', async () => {
+    for (const variant of ['53', undefined]) {
+      const e = await domainError(w.issuance.issueProduct(ring(w, variant === undefined ? {} : { variant }), admin));
+      expect(e, String(variant)).toMatchObject({
+        code: 'SIZE_NOT_DECLARED',
+        httpStatus: 400,
+        publicMessage: `${variant === undefined ? 'ONE SIZE' : 'Size 53'} is not one of MONOLITHE’s sizes (50, 52). Add it on the model’s page, in the Catalogue.`,
+      });
+    }
+    const r = await w.issuance.issueProduct(ring(w, { variant: '58' }), admin);
+    expect(await stored(r.product.productId)).toEqual({ variant: '58', sku: 'MNL-RG-58', code: 'MNL-RG-58' });
+  });
+
+  it('reports a batch line\'s undeclared size on its line, the others issued', async () => {
+    const r = await w.issuance.issueBatch({ categoryCode: 'J', modelId: w.modelId, material: '925 STERLING SILVER', productionBatch: 'B-SIZED' }, [{ variant: '50' }, { variant: '53' }, { variant: 'Size 52' }], admin);
+    expect(r).toMatchObject({ issued: 2, failed: 1, skipped: 0 });
+    expect(r.lines[1]).toEqual({ index: 1, status: 'FAILED', error: { code: 'SIZE_NOT_DECLARED', message: 'Size 53 is not one of MONOLITHE’s sizes (50, 52). Add it on the model’s page, in the Catalogue.' } });
+    expect(r.lines.flatMap((l) => (l.status === 'ISSUED' ? [[l.result.product.variant, l.result.product.sku]] : []))).toEqual([
+      ['50', 'MNL-RG-50'],
+      ['52', 'MNL-RG-52'],
+    ]);
   });
 });
 

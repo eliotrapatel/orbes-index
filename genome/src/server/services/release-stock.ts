@@ -155,6 +155,11 @@ export interface SizeMix {
   inStock: number;
   planned: number | null;
   reasoning: string[];
+  /**
+   * Plan NEXT LOT §3.3: the model's offered sizes, by their declared labels (ONE SIZE for a size of none), which the
+   * proposal is read among; empty for a model with no size type.
+   */
+  offered: string[];
 }
 
 /** Labels in their natural order: 48 before 52 before 104, then words. */
@@ -175,6 +180,8 @@ export function sizeMix(input: {
   demand: readonly { label: string; pieces: number }[];
   /** The planner's own reasoning, said after the mix's. */
   plannerReasoning?: readonly string[];
+  /** The model's offered sizes (a typed model's); none: a model with no size type. */
+  offered?: readonly string[];
 }): SizeMix {
   const why: string[] = [];
   const key = (l: string) => l.trim().toUpperCase();
@@ -259,7 +266,7 @@ export function sizeMix(input: {
   }
   if (sizes.length) why.push(`Proposed: ${sizes.map((s) => `${s.label} = ${count(s.stock)}`).join(', ')} (${pieces(quantity)}). You keep the last word.`);
   else why.push('Nothing to propose: the sizes stay as you set them.');
-  return { model: input.model, location: input.location, sizes, quantity, inStock, planned: input.planned, reasoning: [...why, ...(input.plannerReasoning ?? [])] };
+  return { model: input.model, location: input.location, sizes, quantity, inStock, planned: input.planned, reasoning: [...why, ...(input.plannerReasoning ?? [])], offered: [...(input.offered ?? [])] };
 }
 
 /** A SKU's size label as a release names it: its own, or ONE SIZE for a model in one size. */

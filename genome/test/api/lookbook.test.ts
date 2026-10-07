@@ -351,6 +351,21 @@ describe('the lookbook of the models (P-R02)', () => {
     expect(errorOf(await h.client().get(`/api/v1/lookbook/${'a'.repeat(129)}`)).code).toBe('BAD_REQUEST');
   });
 
+  it('says a typed model\'s offered sizes only on its card and its sheet: a size set aside leaves the SIZES line (NEXT LOT §3.3)', async () => {
+    const operatorActor = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
+    const halo = (await h.ctx.services.catalog.createModel({ categoryCode: 'J', name: 'HALO', type: 'RING', skuPrefix: 'LB-HALO', sizeType: 'RING' }, operatorActor)).id;
+    await h.ctx.services.sizes.declare(halo, { ticked: ['50', '52', '54'] }, operatorActor);
+    expect((await patch(halo, { slug: 'halo-sized', lookbook: 'PUBLIC' })).statusCode).toBe(200);
+    const sheetSizes = async () => (safeJson(await h.client().get('/api/v1/lookbook/halo-sized')) as { sizes: string[] }).sizes;
+    expect(await sheetSizes()).toEqual(['50', '52', '54']);
+    const s52 = (await h.ctx.db.selectFrom('skus').select('id').where('model_id', '=', halo).where('size_label', '=', '52').executeTakeFirstOrThrow()).id;
+    await h.ctx.db.updateTable('skus').set({ shopify_variant_id: '5252' }).where('id', '=', s52).execute();
+    expect(await h.ctx.services.sizes.removeSize(halo, s52, operatorActor)).toEqual({ outcome: 'SET_ASIDE' });
+    expect(await sheetSizes()).toEqual(['50', '54']);
+    expect(((await publicList()).find((c) => c.slug === 'halo-sized') as unknown as { sizes: string[] }).sizes).toEqual(['50', '54']);
+    expect((await patch(halo, { lookbook: 'HIDDEN' })).statusCode).toBe(200);
+  });
+
   it('names the sheet of a PUBLIC model on the AUTHENTIC results of its pieces, never a RESERVED one, never on another result', async () => {
     const verify = async (code: string) => safeJson(await h.client().post('/api/v1/verify', { code })) as { state: string; product?: { lookbook?: string } };
     expect((await verify(piece.code.data)).product?.lookbook).toBe('monolithe-ring');

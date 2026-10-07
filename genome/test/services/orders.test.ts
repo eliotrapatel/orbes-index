@@ -987,4 +987,25 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
     });
 
   });
+
+  describe('the size of an order on a model with its size type (NEXT LOT §3.3)', () => {
+    it('Client Services\' EDIT takes an offered size only, stored as declared; the order\'s current size stays accepted though set aside since', async () => {
+      const ring = (await ctx.services.catalog.createModel({ categoryCode: 'J', name: 'ORBITE', type: 'RING', skuPrefix: 'ORD-ORB', sizeType: 'RING' }, admin)).id;
+      await ctx.services.sizes.declare(ring, { ticked: ['50', '52', '54'] }, admin);
+      const sku = async (label: string) => (await t.db.selectFrom('skus').select('id').where('model_id', '=', ring).where('size_label', '=', label).executeTakeFirstOrThrow()).id;
+      const o = await salonOrder({ modelId: ring, size: 'SIZE 52', priceMinor: 300_000 });
+      expect(o).toMatchObject({ size_label: '52', sku_id: await sku('52') });
+      const e = await rejects(orders().setTerms(o.id, { sizeLabel: '53' }, admin), 'SIZE_NOT_DECLARED', 400);
+      expect(e.publicMessage).toBe('Size 53 is not one of ORBITE’s sizes (50, 52, 54). Add it on the model’s page, in the Catalogue.');
+      // 52 set aside (the order uses it): another order can no longer take it; this one keeps it, named again or not.
+      expect(await ctx.services.sizes.removeSize(ring, await sku('52'), admin)).toEqual({ outcome: 'SET_ASIDE' });
+      const other = await salonOrder({ modelId: ring });
+      await rejects(orders().setTerms(other.id, { sizeLabel: '52' }, admin), 'SIZE_SET_ASIDE', 409);
+      await rejects(orders().setTerms(o.id, { sizeLabel: '52' }, admin), 'VALIDATION_FAILED', 400);
+      expect(await orderRow(o.id)).toMatchObject({ size_label: '52', sku_id: await sku('52') });
+      // Another offered size: taken, as declared.
+      await orders().setTerms(o.id, { sizeLabel: '54 mm' }, admin);
+      expect(await orderRow(o.id)).toMatchObject({ size_label: '54', sku_id: await sku('54') });
+    });
+  });
 });

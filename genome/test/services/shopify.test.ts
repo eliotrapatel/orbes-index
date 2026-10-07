@@ -472,6 +472,27 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     expect(await t.db.selectFrom('audit_logs').select('id').where('action', '=', 'model.shopify').where('target_id', 'in', [model, untouched]).execute()).toHaveLength(2);
   });
 
+  it('leaves a size set aside out of the export, the model\'s view and the link, its ids kept (NEXT LOT §3.3)', async () => {
+    const model = await createModel(t.db, 'ASIDE');
+    await t.db.updateTable('models').set({ slug: 'aside-ring' }).where('id', '=', model).execute();
+    for (const label of ['50', '52', '54']) await skuOf(model, label);
+    await price(model, 300_000);
+    await shopify().link(model, { productId: '6001', variants: [{ size: '50', variantId: '6050' }, { size: '52', variantId: '6052' }, { size: '54', variantId: '6054' }] }, f.admin);
+    await t.db.updateTable('skus').set({ set_aside_at: clock.now() }).where('model_id', '=', model).where('size_label', '=', '52').execute();
+    const rows = records((await shopify().productCsv('EUR')).body).filter((r) => r['URL handle'] === 'aside-ring');
+    expect(rows.map((r) => r['Option1 value'])).toEqual(['50', '54']);
+    expect((await shopify().product(model)).variants.map((v) => [v.size, v.variantId])).toEqual([['50', '6050'], ['54', '6054']]);
+    expect((await ctx.services.catalog.getModel(model)).shopify).toEqual({ productId: '6001', variants: 2, linked: 2 });
+    // The link: a size set aside is unknown there; a link of the others leaves its ids as they are.
+    await rejects(shopify().link(model, { productId: '6001', variants: [{ size: '52', variantId: '6099' }] }, f.admin), 'VALIDATION_FAILED');
+    await shopify().link(model, { productId: '6002', variants: [{ size: '50', variantId: '6150' }] }, f.admin);
+    expect(await t.db.selectFrom('skus').select(['size_label', 'shopify_product_id', 'shopify_variant_id']).where('model_id', '=', model).orderBy('size_label').execute()).toEqual([
+      { size_label: '50', shopify_product_id: '6002', shopify_variant_id: '6150' },
+      { size_label: '52', shopify_product_id: '6001', shopify_variant_id: '6052' },
+      { size_label: '54', shopify_product_id: '6002', shopify_variant_id: null },
+    ]);
+  });
+
   it('exports the priced orders of a period in Shopify\'s order format: line items, statuses, dates, the buyer, the email', async () => {
     clock.set('2026-12-01T10:00:00.000Z');
     // A LIVE sale with an add-on: its order RESERVED.
