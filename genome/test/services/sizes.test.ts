@@ -518,6 +518,11 @@ describe('DECLARED SIZES (NEXT LOT §3.3)', () => {
     expect(res.statusCode).toBe(400);
     expect(errorOf(res).message).toBe('Give a size type or a size kind, not both.');
     expect(await refusal(sizes().change(typeless, { sizeType: 'RING', sizeKind: 'RING' }, admin))).toEqual({ code: 'VALIDATION_FAILED', status: 400, message: 'Give a size type or a size kind, not both.' });
+    // The sizes ticked with a size kind: refused alike, never the kind silently dropped.
+    res = await put({ ticked: ['52'], sizeKind: 'RING' });
+    expect(res.statusCode).toBe(400);
+    expect(errorOf(res).message).toBe('Give a size type or a size kind, not both.');
+    expect(await refusal(sizes().change(typeless, { ticked: ['52'], sizeKind: 'RING' }, admin))).toEqual({ code: 'VALIDATION_FAILED', status: 400, message: 'Give a size type or a size kind, not both.' });
     expect((await put({ sizeType: 'WRIST' })).statusCode).toBe(400);
     expect((await put({ ticked: ['x'.repeat(13)] })).statusCode).toBe(400);
     res = await put({ sizeType: 'RING', ticked: ['52', '54'] });

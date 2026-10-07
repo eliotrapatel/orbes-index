@@ -210,7 +210,8 @@ export async function giftModels(db: Db, ids: readonly (string | null)[]): Promi
     .execute();
   for (const r of rows) {
     const balances = await stockBalances(db, { modelId: r.id });
-    const skus = await db.selectFrom('skus').select('id').where('model_id', '=', r.id).execute();
+    // Plan NEXT LOT §3.3: its offered sizes, the ones a gift can take (attachGifts).
+    const skus = await db.selectFrom('skus').select('id').where('model_id', '=', r.id).where('set_aside_at', 'is', null).execute();
     out.set(r.id, {
       id: r.id,
       name: giftName(r.name, r.variant_label),

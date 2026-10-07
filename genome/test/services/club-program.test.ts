@@ -13,9 +13,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { HOUSE_CURRENCIES } from '../../src/server/db/schema.js';
-import { checkProgram, DEFAULT_PROGRAM, programLines, programMoney, type ClubProgram } from '../../src/server/services/club-program.js';
+import { checkProgram, DEFAULT_PROGRAM, giftModels, programLines, programMoney, type ClubProgram } from '../../src/server/services/club-program.js';
 import { liveMoney } from '../../src/server/services/live-console.js';
 import { ORDER_CURRENCIES } from '../../src/server/services/orders.js';
+import { ensureSku } from '../../src/server/services/stock.js';
 import { adminClient, createAdmin, createHarness, errorOf, type Client, type Harness } from '../api/support.js';
 import { createModel } from '../support/live.js';
 
@@ -177,6 +178,13 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
     expect(kept.gifts.platine).toMatchObject({ id: gift, active: false, discontinued: true });
     expect(kept.lines.PLATINE.some((l) => l.startsWith('A welcome gift'))).toBe(false);
     await h.ctx.db.updateTable('models').set({ active: true, discontinued_at: null, discontinued_by: null }).where('id', '=', gift).execute();
+  });
+
+  it('counts a gift model\'s offered sizes only, the ones a gift can take: a size set aside is left out (NEXT LOT §3.3)', async () => {
+    const sized = await createModel(h.ctx.db, 'JONC ASIDE');
+    for (const label of ['50', '52']) await ensureSku(h.ctx.db, sized, label);
+    await h.ctx.db.updateTable('skus').set({ set_aside_at: h.clock.now() }).where('model_id', '=', sized).where('size_label', '=', '52').execute();
+    expect((await giftModels(h.ctx.db, [sized])).get(sized)).toMatchObject({ id: sized, sizes: 1 });
   });
 
   it('saves THE PROGRAM whole for an ADMIN, audited before and after; read back as set', async () => {

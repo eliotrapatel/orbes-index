@@ -1694,7 +1694,7 @@ export const modelSizesBody = body({
   ticked: z.array(z.string().trim().min(1, 'Required').max(TICKED_LABEL_MAX, `At most ${TICKED_LABEL_MAX} characters`)).max(66, 'At most 66 sizes').optional(),
   fits: z.array(z.strictObject({ skuId: uuid, fitMinMm: fitMm, fitMaxMm: fitMm })).max(200, 'At most 200 sizes').optional(),
 })
-  .refine((b) => b.sizeType === undefined || b.sizeKind === undefined, { message: 'Give a size type or a size kind, not both.' })
+  .refine((b) => (b.sizeType === undefined && b.ticked === undefined) || b.sizeKind === undefined, { message: 'Give a size type or a size kind, not both.' })
   .refine((b) => b.sizeType !== undefined || b.sizeKind !== undefined || b.ticked !== undefined || (b.fits !== undefined && b.fits.length > 0), {
     message: 'Give a size type, the sizes ticked or a fit',
   });

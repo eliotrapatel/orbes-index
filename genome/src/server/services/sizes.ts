@@ -513,7 +513,7 @@ export async function savedSizeHint(db: Db, accountId: string, modelId: string):
   if (kind === null) return null;
   const mm = await savedMm(db, accountId, kind);
   if (mm === null) return null;
-  return matchSavedSize(kind, mm, await modelSizeCandidates(db, modelId))?.label ?? sizeWords(kind, mm);
+  return matchSavedSize(kind, mm, await modelSizeCandidates(db, modelId, { offered: true }))?.label ?? sizeWords(kind, mm);
 }
 
 /**
@@ -668,15 +668,15 @@ export class SizeService {
 
   /**
    * PUT /api/admin/models/:id/sizes (OPERATOR): a size type or the sizes ticked (`declare`, with the fits in the same
-   * transaction), otherwise next-nine's size kind (a model with no type only) and the fits (`setModelSizes`). A size type
-   * and a size kind at once: 400.
+   * transaction), otherwise next-nine's size kind (a model with no type only) and the fits (`setModelSizes`). A size kind
+   * with a size type or the sizes ticked: 400.
    */
   async change(
     modelId: string,
     input: { sizeType?: SizeType; sizeKind?: SizeKind | null; ticked?: readonly string[]; fits?: readonly { skuId: string; fitMinMm: number | null; fitMaxMm: number | null }[] },
     actor: Actor,
   ): Promise<ModelSizes> {
-    if (input.sizeType !== undefined && input.sizeKind !== undefined) throw validationError('Give a size type or a size kind, not both.');
+    if ((input.sizeType !== undefined || input.ticked !== undefined) && input.sizeKind !== undefined) throw validationError('Give a size type or a size kind, not both.');
     if (input.sizeType !== undefined || input.ticked !== undefined) {
       return this.declare(modelId, { ...(input.sizeType !== undefined ? { sizeType: input.sizeType } : {}), ...(input.ticked !== undefined ? { ticked: input.ticked } : {}), ...(input.fits !== undefined ? { fits: input.fits } : {}) }, actor);
     }

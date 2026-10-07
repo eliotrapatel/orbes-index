@@ -491,6 +491,10 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
       { size_label: '52', shopify_product_id: '6001', shopify_variant_id: '6052' },
       { size_label: '54', shopify_product_id: '6002', shopify_variant_id: null },
     ]);
+    // The Catalogue's product id reads the offered sizes only: a re-link to an id sorting before the set-aside size's
+    // old one is the one shown.
+    await shopify().link(model, { productId: '5990', variants: [{ size: '50', variantId: '6150' }] }, f.admin);
+    expect((await ctx.services.catalog.getModel(model)).shopify).toEqual({ productId: '5990', variants: 2, linked: 1 });
   });
 
   it('exports the priced orders of a period in Shopify\'s order format: line items, statuses, dates, the buyer, the email', async () => {

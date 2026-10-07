@@ -455,6 +455,14 @@ describe('the welcome gift (BP-19 T5)', () => {
     const a = await account(5);
     const [gift] = await giftsOf(await salonOrder(a.id));
     expect((await orders().get(gift!.id)).giftOf!.sizes.map((s) => s.label)).toEqual(['50', '54']);
+    // The saved-size hint reads offered sizes only: a measure only the set-aside size fits is given in words, never as
+    // that size's label; one the set-aside size and an offered size both fit names the offered size.
+    await t.db.updateTable('models').set({ size_kind: 'RING' }).where('id', '=', sized).execute();
+    await t.db.updateTable('skus').set({ fit_min_mm: 51, fit_max_mm: 53 }).where('model_id', '=', sized).where('size_label', '=', '52').execute();
+    await ctx.services.sizes.set(a.id, { RING: 53 }, { type: 'account', id: a.id });
+    expect((await orders().get(gift!.id)).giftOf!.savedSize).toBe('53');
+    await t.db.updateTable('skus').set({ fit_min_mm: 53, fit_max_mm: 55 }).where('model_id', '=', sized).where('size_label', '=', '54').execute();
+    expect((await orders().get(gift!.id)).giftOf!.savedSize).toBe('54');
     await rejects(orders().setTerms(gift!.id, { sizeLabel: '52' }, admin), 'VALIDATION_FAILED');
     await orders().setTerms(gift!.id, { sizeLabel: '54' }, admin);
     expect(await orderRow(gift!.id)).toMatchObject({ size_label: '54' });
