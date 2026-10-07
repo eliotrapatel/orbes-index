@@ -13,6 +13,7 @@ import {
   DEMO_ACCOUNTS,
   DEMO_CATEGORIES,
   DEMO_FIRST_REGISTRATION_PRODUCT_ID,
+  DEMO_GUARANTEE,
   DEMO_MIN_NOW,
   DEMO_TIMELINE_START,
   DemoSeedError,
@@ -250,6 +251,23 @@ describe('demo seed', () => {
       await ctx2.close();
       await t2.close();
     }
+  });
+
+  it('grants the demo PLATINE collector one guarantee shown to him, for the next release of MONOLITHE (plan NEXT-NINE, IN-01)', async () => {
+    const lucas = await ctx.db.selectFrom('accounts').select('id').where('email', '=', 'lucas.weber@example.com').executeTakeFirstOrThrow();
+    const rows = await ctx.db.selectFrom('house_guarantees').selectAll().execute();
+    expect(rows).toHaveLength(1);
+    const g = rows[0]!;
+    expect(g).toMatchObject({ account_id: lucas.id, scope: 'MODEL', pieces: DEMO_GUARANTEE.pieces, visible: true, status: 'ACTIVE', covered_drop_id: null, granted_by: null });
+    const monolithe = await ctx.db.selectFrom('models').select('id').where('name', '=', 'MONOLITHE').where('variant_of', 'is', null).executeTakeFirstOrThrow();
+    expect(g.model_id).toBe(monolithe.id);
+    expect(g.valid_until.getTime()).toBeGreaterThan(NOW.getTime() + 89 * 86_400_000);
+    // His account sheet shows it, waiting for the next release; he is the demo's PLATINE collector.
+    const status = await ctx.services.club.status(lucas.id);
+    expect(status.tier.name).toBe('PLATINE');
+    expect(status.guarantees).toEqual([expect.objectContaining({ scope: 'MODEL', target: 'MONOLITHE', pieces: 1, release: null })]);
+    const audit = await ctx.db.selectFrom('audit_logs').select(['action', 'actor_type']).where('action', '=', 'guarantee.grant').execute();
+    expect(audit).toEqual([{ action: 'guarantee.grant', actor_type: 'system' }]);
   });
 
   it('describes the products without secrets', () => {

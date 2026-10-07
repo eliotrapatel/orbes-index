@@ -40,6 +40,12 @@
  * 10: services/club.ts CLUB_TIER_THRESHOLDS): Camille Martin holds ten pieces
  * (PALLADIUM), Lucas Weber five (PLATINE), every other account fewer (TITANE).
  *
+ * THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01; services/guarantees.ts): Lucas
+ * Weber, the demo's PLATINE collector, holds one, shown to him: a guaranteed
+ * place for 1 piece at the next release of MONOLITHE, valid 90 days. The
+ * dataset has no release, so it waits; the next MONOLITHE draw published in
+ * the console sets it aside for him (its account sheet, its draw's box).
+ *
  * Demo only: emails are @example.com, passwords are random unless supplied,
  * and `seedDemo` refuses a production configuration.
  */
@@ -47,6 +53,7 @@ import { randomBytes } from 'node:crypto';
 import type { AppContext } from '../../context.js';
 import { pseudonymize } from '../../http/client.js';
 import { REGISTRABLE_STATUSES } from '../../services/ownership.js';
+import { coverNextRelease, endOfParisDay, parisDayPlus } from '../../services/guarantees.js';
 import { aggregateScanStats } from '../../services/scan-stats.js';
 import type { VerifyOutcome } from '../../services/verification.js';
 import { utcDate } from '../../services/warranty.js';
@@ -1039,11 +1046,57 @@ export async function seedDemo(ctx: AppContext, opts: SeedDemoOptions): Promise<
     }
   }
   opts.clock.set(now);
+  await grantDemoGuarantee(world, now);
   // What housekeeping would have done day after day: the complete days counted in the daily statistics.
   const statsRows = await aggregateScanStats(ctx.db, now);
   log.info({ statsRows }, 'demo seed: timeline complete');
 
   return summarise(world, key.keyId, steps.length, now, generated);
+}
+
+/** The demo's guarantee (plan NEXT-NINE, IN-01): Lucas Weber (PLATINE), the next release of MONOLITHE, 1 piece, shown. */
+export const DEMO_GUARANTEE = Object.freeze({ account: 'lucas' as const, model: 'MONOLITHE' as const, pieces: 1, validDays: 90 });
+
+/**
+ * Grant the demo's guarantee as the console would (a MODEL guarantee, audited `guarantee.grant`), by the seed: no
+ * console user grants it. Set aside at once for a MONOLITHE release already published with room, else it waits for
+ * the next one.
+ */
+async function grantDemoGuarantee(w: World, now: Date): Promise<void> {
+  const holder = accountId(w, DEMO_GUARANTEE.account);
+  const modelId = w.catalogue.models.get(DEMO_GUARANTEE.model);
+  if (!modelId) throw new DemoSeedError(`demo model ${DEMO_GUARANTEE.model} is missing`);
+  const validUntil = endOfParisDay(parisDayPlus(now, DEMO_GUARANTEE.validDays));
+  await w.ctx.db.transaction().execute(async (tx) => {
+    const g = { id: '00000000-0000-0000-0000-000000000000', account_id: holder, scope: 'MODEL' as const, model_id: modelId, collection_id: null, pieces: DEMO_GUARANTEE.pieces, valid_until: validUntil };
+    const cover = await coverNextRelease(tx, g, now);
+    const row = await tx
+      .insertInto('house_guarantees')
+      .values({
+        account_id: holder,
+        scope: 'MODEL',
+        model_id: modelId,
+        pieces: DEMO_GUARANTEE.pieces,
+        valid_until: validUntil,
+        visible: true,
+        note: 'Demo: a guaranteed place for the first MONOLITHE draw.',
+        covered_drop_id: cover?.id ?? null,
+        covered_at: cover ? now : null,
+        granted_at: now,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    await w.ctx.audit.record(
+      {
+        actor: DEMO_SEED_ACTOR,
+        action: 'guarantee.grant',
+        targetType: 'house_guarantee',
+        targetId: row.id,
+        details: { accountId: holder, scope: 'MODEL', targetId: modelId, pieces: DEMO_GUARANTEE.pieces, validUntil: validUntil.toISOString(), visible: true, noted: true, coveredDropId: cover?.id ?? null },
+      },
+      tx,
+    );
+  });
 }
 
 // ── Timeline construction ──────────────────────────────────────────────────
