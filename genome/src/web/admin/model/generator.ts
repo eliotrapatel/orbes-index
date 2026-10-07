@@ -403,8 +403,17 @@ export function formatClaimCode(code: string): string {
  */
 export const ISSUE_BATCH_LIMITS = Object.freeze({ perRequest: 50, maxBodyBytes: 15_000, maxPieces: 1000, maxFileBytes: 1_048_576 });
 
-/** Certificate cards per POST /api/admin/certificates (the server's MAX_CERTIFICATE_ITEMS). */
-export const CERTIFICATE_LIMITS = Object.freeze({ perRequest: 50 });
+/**
+ * Certificate cards per POST /api/admin/certificates (the server's MAX_CERTIFICATE_ITEMS). Sheets go by
+ * `perSheetRequest`, six full A4 sheets of eight (plan NEXT LOT §3.2), so only a batch's last file can end on a
+ * part-filled sheet.
+ */
+export const CERTIFICATE_LIMITS = Object.freeze({ perRequest: 50, perSheetRequest: 48 });
+
+/** A batch's certificate cards as the requests that print them: by 48 for sheets of eight, by 50 for cards and the CSV. */
+export function certificateRequests<T>(items: readonly T[], layout: 'card' | 'sheet'): T[][] {
+  return sheetChunks(items, layout === 'sheet' ? CERTIFICATE_LIMITS.perSheetRequest : CERTIFICATE_LIMITS.perRequest);
+}
 
 /** The columns a batch CSV may name on its first line, one row per piece: each optional, no other accepted. */
 export const BATCH_COLUMNS = ['variant', 'sku', 'serial'] as const;

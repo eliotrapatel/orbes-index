@@ -17,7 +17,7 @@ export const CLIENT_REGISTRATION = 'Register your piece with its card at theorbe
  * piece (BRAND §4.1, §4.6; registration is not a title of ownership): it lets the client register the piece in their
  * name, the words of BRAND §4.4.
  */
-export const SALE_CARD_NOTE = 'Hand over the certificate card: with the claim code under its scratch-off panel, they register the piece in their name.';
+export const SALE_CARD_NOTE = 'Hand over the certificate card: with the claim code printed on it, they register the piece in their name.';
 
 /** The browser storage key of the point of sale this phone sells from. */
 export const RETAILER_STORAGE_KEY = 'orbes.sale.retailer';

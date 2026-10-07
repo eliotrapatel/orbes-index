@@ -11,7 +11,7 @@ import { ACTIVATABLE_STATUSES } from '../../src/server/services/warranty.js';
 import { AUTH_POLICY_KINDS as SERVER_POLICY_KINDS } from '../../src/server/authenticators/index.js';
 import { BODY_LIMIT_BYTES } from '../../src/server/app.js';
 import { issueBatchBody } from '../../src/server/http/schemas.js';
-import { MAX_CERTIFICATE_ITEMS } from '../../src/server/render/certificate.js';
+import { CERTIFICATE_SHEET, MAX_CERTIFICATE_ITEMS } from '../../src/server/render/certificate.js';
 import { MAX_ISSUE_BATCH } from '../../src/server/services/issuance.js';
 import { IMAGE_MIME_TYPES as SERVER_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES as SERVER_MAX_IMAGE_BYTES, MAX_IMAGE_SIDE as SERVER_MAX_IMAGE_SIDE } from '../../src/server/media/image.js';
 import { lookbookWord, pairFormValues, pairModelLabel, pairOptions, pairsChange, pairsNote, pairsProblem, PAIRS_MAX, PAIRS_TEXT, shownLabel, shownNow } from '../../src/web/admin/model/pairs.js';
@@ -108,6 +108,7 @@ import {
   batchSummary,
   buildIssueBatch,
   CERTIFICATE_LIMITS,
+  certificateRequests,
   decodeBatchCsv,
   ISSUE_BATCH_LIMITS,
   issuedModelRows,
@@ -1019,7 +1020,8 @@ describe('sale mode view model (A-08)', () => {
     expect(CLIENT_REGISTRATION).toBe('Register your piece with its card at theorbes.com/verify.');
     // The card's claim code registers the piece in the client's name; it proves the card is in hand, never ownership
     // (BRAND §4.1, §4.6, the words of §4.4).
-    expect(SALE_CARD_NOTE).toBe('Hand over the certificate card: with the claim code under its scratch-off panel, they register the piece in their name.');
+    // 79t prints the claim code in plain sight (plan NEXT LOT §3.2): no panel to scratch.
+    expect(SALE_CARD_NOTE).toBe('Hand over the certificate card: with the claim code printed on it, they register the piece in their name.');
     expect(SALE_CARD_NOTE).not.toMatch(/prove|theirs|owner|guarantee/i);
   });
 });
@@ -1635,6 +1637,24 @@ describe('batch issuance view model', () => {
     expect(CERTIFICATE_LIMITS.perRequest).toBe(MAX_CERTIFICATE_ITEMS);
     expect(Object.keys(issueBatchBody.shape.items.element.shape)).toEqual([...BATCH_COLUMNS]);
     expect(Object.keys(issueBatchBody.shape.template.shape).sort()).toEqual(Object.keys(T).sort());
+  });
+
+  it('prints a batch of certificate cards by 48 for sheets (six full A4 sheets of eight), by 50 for cards and the CSV (plan NEXT LOT §3.2)', () => {
+    const perSheet = CERTIFICATE_SHEET.columns * CERTIFICATE_SHEET.rows;
+    expect(perSheet).toBe(8);
+    expect(CERTIFICATE_LIMITS.perSheetRequest).toBe(6 * perSheet);
+    expect(CERTIFICATE_LIMITS.perSheetRequest).toBeLessThanOrEqual(MAX_CERTIFICATE_ITEMS);
+    const ids = Array.from({ length: 120 }, (_, i) => `O26-J-${String(i + 1).padStart(5, '0')}`);
+    // Sheets: every file but the last ends on a full sheet.
+    const sheets = certificateRequests(ids, 'sheet');
+    expect(sheets.map((p) => p.length)).toEqual([48, 48, 24]);
+    expect(sheets.slice(0, -1).every((p) => p.length % perSheet === 0)).toBe(true);
+    expect(sheets.flat()).toEqual(ids);
+    // Cards and the CSV keep the server's 50.
+    expect(certificateRequests(ids, 'card').map((p) => p.length)).toEqual([50, 50, 20]);
+    expect(certificateRequests(ids.slice(0, 48), 'sheet')).toEqual([ids.slice(0, 48)]);
+    expect(certificateRequests(ids.slice(0, 49), 'sheet').map((p) => p.length)).toEqual([48, 1]);
+    expect(certificateRequests([], 'sheet')).toEqual([]);
   });
 
   it('reads a spreadsheet CSV: byte-order mark, semicolons, CRLF, quotes, blank lines, any column order', () => {

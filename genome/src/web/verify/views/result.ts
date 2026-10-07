@@ -248,7 +248,7 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
           h('h2', { class: 'n-g n-t3 n-result__card-title', id: 'card-title', text: 'DO YOU HOLD THE CERTIFICATE CARD?' }),
           h('p', {
             class: 'n-tx n-result__card-text',
-            text: 'If this piece was delivered to you with its ORBES certificate card, you may register it in your name with the claim code printed under the scratch-off panel.',
+            text: 'If this piece was delivered to you with its ORBES certificate card, you may register it in your name with the claim code printed on it.',
           }),
           ownership.root,
         ),

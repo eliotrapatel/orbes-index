@@ -3366,7 +3366,7 @@ Example:
 
 Audited: `certificate.render` with `{ productIds, count, format, layout, layoutStatus, codeIssues }` (`codeIssues`: the issue of the ORBES CODE printed for each product, in `productIds` order, so the log says which code went into which box); each refusal after validation as `certificate.render_refused` with `{ reason, productIds, refused, format, layout }` (`refused`: the product ids concerned). Both carry canonical product ids, also for a product the request named by its uuid; only a product that was not found keeps the reference given. No claim code in either.
 
-In the console, the generator's result screen offers **Download certificate card** while the one-time claim code is shown; the button goes with *Copy* when the operator hides the code. A batch's result (§14.11) offers the cards of all its pieces, sent in requests of 50, one after the other.
+In the console, the generator's result screen offers **Download certificate card** while the one-time claim code is shown; the button goes with *Copy* when the operator hides the code. A batch's result (§14.11) offers the cards of all its pieces (*Cards, one per page* · *Sheets of eight cards* · *CSV for the print shop*), sent one request after the other: by 50, or by 48 for sheets (six full sheets of eight), so only the batch's last file can end on a part-filled sheet.
 
 Errors: `400 VALIDATION_FAILED` (shape, bounds, a product listed twice), `401`, `403 FORBIDDEN` (AUDITOR), `403 CSRF_FAILED`, `404 PRODUCT_NOT_FOUND`, `409 PRODUCT_NOT_PRINTABLE`, `409 NO_ACTIVE_CODE`, `409 ALREADY_REGISTERED`, `422 NO_CLAIM_SECRET`, `422 CLAIM_CODE_MISMATCH`, `429 RATE_LIMITED` (a request of the same admin still in progress, or the `admin` group's limit).
 

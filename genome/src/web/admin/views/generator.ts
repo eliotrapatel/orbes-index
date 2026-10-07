@@ -47,7 +47,7 @@ import {
   batchSummary,
   buildIssueBatch,
   buildIssueInput,
-  CERTIFICATE_LIMITS,
+  certificateRequests,
   decodeBatchCsv,
   formatClaimCode,
   ISSUE_BATCH_LIMITS,
@@ -56,7 +56,6 @@ import {
   parseBatchCsv,
   POLICY_OPTIONS,
   quantityRows,
-  sheetChunks,
   sheetPartFilename,
   signBatchLabel,
   type BatchCsvEncoding,
@@ -737,15 +736,15 @@ function batchResultScreen(ctx: ViewContext, d: BatchDone): HTMLElement[] {
       'certificateLayout',
       [
         { value: 'card', label: 'Cards, one per page' },
-        { value: 'sheet', label: 'Sheets of ten cards' },
+        { value: 'sheet', label: 'Sheets of eight cards' },
         { value: 'csv', label: 'CSV for the print shop' },
       ],
       'card',
     );
-    const layoutField = field('Card format', layout, { hint: '85 × 55 mm cards, A4 sheets of ten, or the print shop’s file.' });
+    const layoutField = field('Card format', layout, { hint: '95 × 62 mm cards, A4 sheets of eight, or the print shop’s file.' });
     const cards = button('Download certificate cards', { kind: 'secondary', testId: 'batch-certificates' });
     cards.addEventListener('click', () => {
-      const parts = sheetChunks(batchCertificateItems(rows), CERTIFICATE_LIMITS.perRequest);
+      const parts = certificateRequests(batchCertificateItems(rows), layout.value === 'sheet' ? 'sheet' : 'card');
       const opts: CertificateOptions = layout.value === 'csv' ? { format: 'csv' } : { format: 'pdf', layout: layout.value === 'sheet' ? 'sheet' : 'card' };
       void busy(cards, async () => {
         // One request at a time: the server renders one certificate request per admin at once.

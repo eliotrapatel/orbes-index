@@ -633,6 +633,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // Re-issue: the new code is signed and previewed; the old one is superseded.
     await page.click('[data-testid=action-reissue]');
+    // The card carries the code (plan NEXT LOT §3.2): re-issuing it stops the card from verifying too.
+    expect(await page.locator('dialog .dialog__text').first().textContent()).toBe(
+      'A new code (next issue number) is signed with the active key. The current code becomes SUPERSEDED and verifies as REVOKED. Its certificate card carries the current code: that card stops verifying too.',
+    );
     await page.fill('dialog textarea[name=reason]', 'Engraving damaged during sizing');
     await confirmDialog(page);
     await page.waitForSelector('#fresh-code [data-testid=code-figure] svg');
@@ -1625,7 +1629,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent()).toBe('Results saved, with the claim codes.');
     expect(await unloadPrevented()).toBe(false);
 
-    // The certificate cards (D-01), A4 sheets in requests of 50: each claim code is checked against its hash by the server.
+    // The certificate cards (D-01), A4 sheets of eight in requests of 48, six full sheets (plan NEXT LOT §3.2): each
+    // claim code is checked against its hash by the server.
+    expect(await page.locator('select[name=certificateLayout] option').allTextContents()).toEqual(['Cards, one per page', 'Sheets of eight cards', 'CSV for the print shop']);
+    expect(await page.locator('.cfield[data-field=certificateLayout] .cfield__hint').textContent()).toBe('95 × 62 mm cards, A4 sheets of eight, or the print shop’s file.');
     await page.selectOption('select[name=certificateLayout]', 'sheet');
     const cards: string[] = [];
     const three = new Promise<void>((resolve) => {
@@ -1638,9 +1645,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await three;
     page.removeAllListeners('download');
     expect(cards).toEqual([
-      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-50-sheet-part-1-of-3\.pdf$/),
-      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-50-sheet-part-2-of-3\.pdf$/),
-      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-20-sheet-part-3-of-3\.pdf$/),
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-48-sheet-part-1-of-3\.pdf$/),
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-48-sheet-part-2-of-3\.pdf$/),
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-24-sheet-part-3-of-3\.pdf$/),
     ]);
     await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent()).toBe('Certificate cards saved, in 3 files.');
 

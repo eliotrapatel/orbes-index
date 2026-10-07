@@ -292,7 +292,7 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
             void openDialog({
               title: 'Re-issue the code',
               eyebrow: pid,
-              body: h('p', { class: 'dialog__text' }, 'A new code (next issue number) is signed with the active key. The current code becomes SUPERSEDED and verifies as REVOKED.'),
+              body: h('p', { class: 'dialog__text' }, 'A new code (next issue number) is signed with the active key. The current code becomes SUPERSEDED and verifies as REVOKED. Its certificate card carries the current code: that card stops verifying too.'),
               fields: [{ name: 'reason', label: 'Reason', kind: 'textarea', required: true, maxlength: 500, hint: 'e.g. engraving damaged, label replaced.' }],
               confirmLabel: 'Sign new code',
               submit: async (v) => {
