@@ -693,14 +693,22 @@ export function layoutOwnershipCertificate(d: OwnershipCertificateDocument): Pdf
   const R = L.rows;
   const column = (x: number, title: string, rows: readonly (readonly [string, string])[]) => {
     line(title, { cap: L.section.cap, tracking: L.section.tracking, x, baseline: L.section.baseline });
+    // Up to 8 rows keep the pitch; a ninth (the variant line, plan NEXT LOT §3.1) tightens it so the last baseline
+    // stays 3 mm above the middle rule (5.125 mm: the ninth at 199, the rule at 202).
+    const pitch = rows.length > 8 ? (L.ruleMiddle - 3 - R.first) / (rows.length - 1) : R.pitch;
     rows.forEach(([label, value], i) => {
-      const baseline = R.first + i * R.pitch;
-      line(label, { cap: R.labelCap, tracking: R.labelTracking, x, baseline });
+      const baseline = R.first + i * pitch;
+      // A line with no label (the model's variant, under the model's name) draws its value alone.
+      if (label !== '') line(label, { cap: R.labelCap, tracking: R.labelTracking, x, baseline });
       fitted(value, { cap: R.valueCap, minCap: R.minValueCap, tracking: R.valueTracking, x: x + L.valueOffset, baseline, maxWidth: L.columnWidth - L.valueOffset });
     });
   };
+  // Plan NEXT LOT §3.1: the model's variant on a line of its own, unlabelled, right under the model's name (none
+  // without a label). The row labelled VARIANT below is the piece's Size field, kept as it is (question 1).
+  const modelVariant = d.modelVariant?.trim() ? d.modelVariant.trim().replace(/\s+/g, ' ') : null;
   const piece: [string, string][] = [
     [C.rows.model, d.model],
+    ...(modelVariant ? [['', modelVariant] as [string, string]] : []),
     [C.rows.type, d.type],
     [C.rows.category, d.category],
     ...(d.collection ? [[C.rows.collection, d.collection] as [string, string]] : []),

@@ -580,6 +580,53 @@ describe('ownership certificate (F-06)', () => {
     expect(bare.placements).toEqual([]);
   });
 
+  it('draws the model variant on an unlabelled line right under MODEL\'s value (plan NEXT LOT §3.1); the Size field\'s row keeps its label VARIANT', () => {
+    const L = OWNERSHIP_CERTIFICATE_LAYOUT;
+    const R = L.rows;
+    const full = layoutOwnershipCertificate(ownershipDoc());
+    const steel = layoutOwnershipCertificate(ownershipDoc({ modelVariant: 'Steel' }));
+    // One run more (the value alone, no label); nothing for a blank label.
+    expect(steel.marks!.length - full.marks!.length).toBe(1);
+    expect(layoutOwnershipCertificate(ownershipDoc({ modelVariant: '   ' })).marks).toEqual(full.marks);
+    // Under MODEL's value: the second row's baseline, at the values' x; nothing at the labels' x on that row.
+    const second = R.first + R.pitch;
+    const onRow = (page: typeof full) =>
+      page.marks!.map((m) => bounds(m.d)).filter((b) => b.y1 <= second + 0.01 && b.y1 > second - R.valueCap - 0.01 && b.x0 < L.columns[1]);
+    const row = onRow(steel);
+    expect(row).toHaveLength(1);
+    expect(row[0]!.x0).toBeGreaterThanOrEqual(L.columns[0] + L.valueOffset - 0.01);
+    // The labels under it move down one pitch (8 rows here: the 6 mm pitch kept); MODEL's stays.
+    const labels = (page: typeof full) =>
+      page.marks!.map((m) => bounds(m.d)).filter((b) => b.y1 - b.y0 > 0.1 && Math.abs(b.x0 - L.columns[0]) < 0.5 && b.y0 > L.section.baseline + 0.5 && b.y1 < L.ruleMiddle).map((b) => b.y1).sort((a, b) => a - b);
+    const before = labels(full);
+    expect(labels(steel)).toHaveLength(before.length);
+    labels(steel).forEach((y, i) => expect(y, `label ${i}`).toBeCloseTo(i === 0 ? before[0]! : before[i]! + R.pitch, 3));
+    // The Size field's row is still labelled VARIANT (question 1 of the plan, unanswered).
+    expect(OWNERSHIP_CERTIFICATE_COPY.rows.variant).toBe('VARIANT');
+  });
+
+  it('fits a piece of 9 rows above the middle rule (pitch 5.125 mm, the last baseline at 199), and keeps the 6 mm pitch for 8', () => {
+    const L = OWNERSHIP_CERTIFICATE_LAYOUT;
+    const R = L.rows;
+    // MODEL, the variant line, TYPE, CATEGORY, COLLECTION, VARIANT (the size), MATERIAL, CREATED, DISCONTINUED.
+    const nine = layoutOwnershipCertificate(ownershipDoc({ modelVariant: 'Brushed cobalt with a polished inner rim', discontinuedYear: 2027 }));
+    const pieceMarks = (page: ReturnType<typeof layoutOwnershipCertificate>) =>
+      // The lettered runs of THE PIECE's column, between its heading and THIS CERTIFICATE (the middle rule, a flat line, aside).
+      page.marks!.map((m) => bounds(m.d)).filter((b) => b.y1 - b.y0 > 0.1 && b.x0 < L.columns[1] - 0.5 && b.y0 > L.section.baseline + 0.5 && b.y1 < L.certificate.baseline - 2);
+    const marks = pieceMarks(nine);
+    for (const b of marks) expect(b.y1).toBeLessThan(L.ruleMiddle - 1.6);
+    const last = Math.max(...marks.map((b) => b.y1));
+    expect(last).toBeCloseTo(199, 1);
+    expect((L.ruleMiddle - 3 - R.first) / 8).toBe(5.125);
+    // Eight rows (no variant line): the last baseline at 158 + 7 × 6 = 200, as before.
+    const eight = pieceMarks(layoutOwnershipCertificate(ownershipDoc({ discontinuedYear: 2027 })));
+    expect(Math.max(...eight.map((b) => b.y1))).toBeCloseTo(R.first + 7 * R.pitch, 1);
+    // THE RECORD's column keeps its 6 mm pitch.
+    const record = (page: ReturnType<typeof layoutOwnershipCertificate>) =>
+      page.marks!.map((m) => bounds(m.d)).filter((b) => b.x0 >= L.columns[1] - 0.5 && b.y0 > L.section.baseline + 0.5 && b.y1 < L.ruleMiddle);
+    expect(record(nine)).toEqual(record(layoutOwnershipCertificate(ownershipDoc({ discontinuedYear: 2027 }))));
+  });
+
   it('draws DISCONTINUED and its year under CREATED once the model was (P-R06): one row more, its label clear of its value, above the middle rule', () => {
     const L = OWNERSHIP_CERTIFICATE_LAYOUT;
     const R = L.rows;

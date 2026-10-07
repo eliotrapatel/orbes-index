@@ -10,6 +10,7 @@ import { computeGenome } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
 import type { ProductStatus } from '../../src/server/db/schema.js';
 import { DomainError } from '../../src/server/errors.js';
+import { renderOwnershipCertificatePdf } from '../../src/server/render/certificate.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
 import {
@@ -290,9 +291,36 @@ describe('OwnershipCertificateService', () => {
     const { p, owner } = await owned();
     const offer = await certificates.create(owner.id, p.productId, {}, owner.actor);
     expect(await certificates.lookup(offer.token)).toMatchObject({ status: 'VALID', piece: { model: 'MONOLITHE', modelVariant: null } });
+    const before = await certificates.renderPdf(offer.token);
     await t.db.updateTable('models').set({ variant_label: 'Steel', variant_swatch: '#C9CCD1' }).where('id', '=', modelId).execute();
     try {
       expect(await certificates.lookup(offer.token)).toMatchObject({ status: 'VALID', piece: { model: 'MONOLITHE', modelVariant: 'Steel', variant: null } });
+      // The PDF draws its line under MODEL (step 1.3): the same as the layout of the record read now.
+      const withLine = await certificates.renderPdf(offer.token);
+      expect(Buffer.from(withLine.body as Uint8Array).equals(Buffer.from(before.body as Uint8Array))).toBe(false);
+      const r = await certificates.lookup(offer.token);
+      if (r.status !== 'VALID') throw new Error(r.status);
+      const expected = await renderOwnershipCertificatePdf({
+        productId: r.piece.productId,
+        category: r.piece.category.name,
+        collection: r.piece.collection,
+        model: r.piece.model,
+        modelVariant: 'Steel',
+        type: r.piece.type,
+        variant: r.piece.variant,
+        material: r.piece.material,
+        createdYear: r.piece.createdYear,
+        genome: r.piece.genome,
+        discontinuedYear: r.piece.discontinuedYear,
+        verified: r.ownership.verified,
+        since: r.ownership.since,
+        warranty: r.warranty,
+        issuedAt: r.certificate.issuedAt,
+        expiresAt: r.certificate.expiresAt,
+        checkedAt: r.checkedAt,
+        link: offer.url,
+      });
+      expect(Buffer.from(withLine.body as Uint8Array).equals(Buffer.from(expected.body as Uint8Array))).toBe(true);
       // Renamed later, the new label shows: nothing is copied onto the piece.
       await t.db.updateTable('models').set({ variant_label: 'Brushed steel' }).where('id', '=', modelId).execute();
       expect(await certificates.lookup(offer.token)).toMatchObject({ piece: { modelVariant: 'Brushed steel' } });
