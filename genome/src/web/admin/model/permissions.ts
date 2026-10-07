@@ -5,8 +5,8 @@
  * points of sale, a customer's recovery code, lock and export, the draw
  * of a drop, a model discontinued or reinstated, a LIVE RELEASE ended now or
  * an entry removed from it, a returned piece archived, the settings of the
- * orders: their delays, the locations and the carriers; a conversation of the
- * Messages board assigned). Every role
+ * orders: their delays, the locations, the carriers and the shipping rates; a
+ * conversation of the Messages board assigned; THE PROGRAM of the club's tiers). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
@@ -58,6 +58,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageCircle: 'OPERATOR',
   /** The Club's tiers (P-X04): the words of each tier's benefits (never its threshold). */
   manageClubTiers: 'OPERATOR',
+  /** THE PROGRAM (plan NEXT-NINE, BP-19 T2): every figure of the tiers' benefits (never a threshold). */
+  manageClubProgram: 'ADMIN',
   /** The Club's requests (P-X08): close a request of the private salon, with a note. */
   closeShopRequest: 'OPERATOR',
   /** The Messages board (CS-01): answer a conversation, take it, close it. */
@@ -75,7 +77,7 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageAtelier: 'OPERATOR',
   /** The work sheets: each carries its piece's ORBES code at print size (signed for it), as a code's download. */
   printWorkSheets: 'OPERATOR',
-  /** The settings of the orders: the delays after which an order is late, the locations, the carriers and their tracking links. */
+  /** The settings of the orders: the delays after which an order is late, the locations, the carriers and their tracking links, the shipping rates. */
   manageLogistics: 'ADMIN',
   /** The segments (plan LIVE RELEASE+, choice 27): built, renamed, changed and deleted; an AUDITOR reads them and their CSV, masked. */
   manageSegments: 'OPERATOR',

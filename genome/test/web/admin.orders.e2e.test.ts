@@ -570,8 +570,31 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.fill('dialog input[name=name]', 'LOGISTICS PARTNER');
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=location-name]').allTextContents()).toEqual(['FRANCE WAREHOUSE', 'LOGISTICS PARTNER']);
+
+    // SHIPPING (BP-19 T2), optional: none preset, a rate set, refused when it is not an amount, cleared again.
+    expect(await p.locator('#settings-shipping [data-testid^=rate-]').allTextContents()).toEqual(Array(8).fill('—'));
+    await p.click('[data-testid=shipping-edit]');
+    await p.fill('dialog input[name="EUR-STANDARD"]', 'twenty');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('EUR Standard: an amount in units, 20 or 20.50, or empty for none.');
+    await p.fill('dialog input[name="EUR-STANDARD"]', '20');
+    await p.fill('dialog input[name="EUR-EXPRESS"]', '40');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid="rate-EUR-STANDARD"]').textContent()).toBe('€\u00a020');
+    expect(await p.locator('[data-testid="rate-EUR-EXPRESS"]').textContent()).toBe('€\u00a040');
+    expect(await p.locator('[data-testid="rate-GBP-STANDARD"]').textContent()).toBe('—');
+    expect(await ctx.db.selectFrom('shipping_rates').select(['currency', 'service', 'fee_minor']).orderBy('service', 'desc').execute()).toEqual([
+      { currency: 'EUR', service: 'STANDARD', fee_minor: 2000 },
+      { currency: 'EUR', service: 'EXPRESS', fee_minor: 4000 },
+    ]);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'settings');
+    await p.click('[data-testid=shipping-edit]');
+    await p.fill('dialog input[name="EUR-STANDARD"]', '');
+    await p.fill('dialog input[name="EUR-EXPRESS"]', '');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid="rate-EUR-STANDARD"]').textContent()).toBe('—');
+    expect(await ctx.db.selectFrom('shipping_rates').selectAll().execute()).toEqual([]);
 
     // The board says the new delay: the order of three days ago is no longer late.
     await go(p, '#/orders', 'Orders');
@@ -610,7 +633,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await go(a, '#/atelier/sheets?origin=STOCK', 'Work sheets');
     expect(await a.locator('.empty__text').textContent()).toBe('A work sheet carries the piece’s ORBES code: an OPERATOR prints it.');
     await go(a, '#/settings', 'Settings');
-    for (const action of ['alerts-edit', 'carrier-add', 'carrier-edit', 'location-add', 'location-rename']) {
+    for (const action of ['alerts-edit', 'carrier-add', 'carrier-edit', 'location-add', 'location-rename', 'shipping-edit']) {
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
     expect(await figuresInDisplayFace(a)).toEqual([]);

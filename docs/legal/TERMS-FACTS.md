@@ -183,7 +183,7 @@ Le cercle publie, pour les propriétaires d'une pièce, des notes, des invitatio
 
 | Id | Règle | Valeur | Constante | Code | Ligne |
 |---|---|---|---|---|---|
-| R84 | Les avantages de chaque palier, affichés dans MY PIECES, sont des textes d'information qu'ORBES Client Services (OPERATOR) modifie depuis la console ; seuls leurs mots changent, jamais les seuils (R61). L'accès anticipé de PLATINE suit celui que fixe chaque sortie (R71). | — | — | `app.patch('/api/admin/club/tiers/:tier'` | [server/routes/admin/club.ts:33](../../genome/src/server/routes/admin/club.ts#L33) |
+| R84 | Les avantages de chaque palier, affichés dans MY PIECES, sont des textes d'information qu'ORBES Client Services (OPERATOR) modifie depuis la console ; seuls leurs mots changent, jamais les seuils (R61). L'accès anticipé de PLATINE suit celui que fixe chaque sortie (R71). | — | — | `app.patch('/api/admin/club/tiers/:tier'` | [server/routes/admin/club.ts:39](../../genome/src/server/routes/admin/club.ts#L39) |
 
 ## 15. Le salon privé (P-X08)
 

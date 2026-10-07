@@ -440,8 +440,8 @@ const CARD_COLUMNS = [
   'p.segment_id',
 ] as const;
 
-/** A post's card: everything but its body. */
-type CardRow = Omit<CirclePostRow, 'body'>;
+/** A post's card: everything but its body (and an invitation's experience, migration 0026, BP-19 T7). */
+type CardRow = Omit<CirclePostRow, 'body' | 'experience'>;
 
 // ── Service ────────────────────────────────────────────────────────────────
 

@@ -8,25 +8,31 @@
  *                                                        `?status=` OPEN or CLOSED
  *   POST  /api/admin/club/requests/:id/close   OPERATOR  CLOSED, with a note (what was done for the client) and the
  *                                                        outcome: ACCEPTED (its order is created) or DECLINED
+ *   GET   /api/admin/club/program              AUDITOR   THE PROGRAM (plan NEXT-NINE, BP-19 T2): the figures of the tiers'
+ *                                                        benefits, the gift models and their options, each tier's lines
+ *   PUT   /api/admin/club/program              ADMIN     THE PROGRAM changed whole (services/club-program.ts)
  *
  * The thresholds (1, 5 and 10 pieces held now) are a constant of the code and never change here: a setting could
  * contradict the published rule of a draw. services/club.ts validates and audits the tiers (`club.tier.update`),
- * services/salon.ts the requests (`shop.request.close`); these routes parse and shape. An AUDITOR reads the clients'
+ * services/salon.ts the requests (`shop.request.close`), services/club-program.ts THE PROGRAM (`club.program.update`); these
+ * routes parse and shape. An AUDITOR reads the clients'
  * emails masked (`j***@example.com`); OPERATOR and ADMIN read them in clear (serialize.ts `clientEmail`).
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { closeShopRequestBody, clubTierParams, pageOf, parse, shopRequestParams, shopRequestsQuery, updateClubTierBody } from '../../http/schemas.js';
+import { closeShopRequestBody, clubProgramBody, clubTierParams, pageOf, parse, shopRequestParams, shopRequestsQuery, updateClubTierBody } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
 import type { AdminShopRequest } from '../../services/salon.js';
 import type { AdminRouteDeps } from './index.js';
 import { clientEmail, readsClientEmails } from './serialize.js';
+
+const ADMIN = { guard: { minRole: 'ADMIN' as const } };
 
 function requestJson(r: AdminShopRequest, inClear: boolean) {
   return { ...r, account: { ...r.account, email: clientEmail(r.account.email, inClear) } };
 }
 
 export const adminClubRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { club, salon } = ctx.services;
+  const { club, salon, clubProgram } = ctx.services;
 
   app.get('/api/admin/club/tiers', async () => ({ items: await club.tiers() }));
 
@@ -34,6 +40,14 @@ export const adminClubRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
     const { tier } = parse(clubTierParams, request.params);
     const b = parse(updateClubTierBody, request.body);
     return club.updateTier(tier, b.benefits, adminActor(request));
+  });
+
+  // BP-19 T2: THE PROGRAM, read by an AUDITOR, changed by an ADMIN.
+  app.get('/api/admin/club/program', async () => clubProgram.sheet());
+
+  app.put('/api/admin/club/program', { config: ADMIN }, async (request) => {
+    const b = parse(clubProgramBody, request.body);
+    return clubProgram.update(b, adminActor(request));
   });
 
   // P-X08: the requests of the private salon.

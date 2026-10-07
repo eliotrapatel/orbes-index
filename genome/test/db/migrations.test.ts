@@ -11,11 +11,11 @@ import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'activity_hourly', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs', 'authentication_events',
   'bench_items', 'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps',
-  'client_conversations', 'client_messages', 'club_tiers', 'codes', 'collections', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops',
+  'client_conversations', 'client_messages', 'club_program_settings', 'club_tiers', 'codes', 'collections', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops',
   'event_journal', 'genomes', 'invoices', 'live_access_models', 'live_addons', 'live_entries', 'live_entry_addons', 'live_interest', 'live_messages',
   'live_tier_windows', 'media_objects', 'model_images', 'models', 'order_alert_settings', 'order_events', 'orders', 'ownership', 'ownership_certificates',
   'ownership_transfers', 'product_status_history', 'products', 'release_answers', 'retailers', 'returns', 'revocations', 'scan_daily_stats', 'scan_events',
-  'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shop_requests', 'sku_thresholds', 'skus', 'stock_locations', 'stock_movements',
+  'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shipping_rates', 'shop_requests', 'sku_thresholds', 'skus', 'stock_locations', 'stock_movements',
   'warranties',
 ];
 
@@ -204,6 +204,14 @@ describe('migrations', () => {
       expect(has(new RegExp(`INDEX client_messages_${c}_idx ON public\\.client_messages USING btree \\(${c}\\)$`)), c).toBe(true);
     }
     expect(has(/INDEX client_messages_scan_event_idx ON public\.client_messages USING btree \(scan_event_id\) WHERE \(scan_event_id IS NOT NULL\)$/)).toBe(true);
+    // 0026: the club's program. One row of settings; the shipping rates by currency and service; every foreign key at
+    // the head of an index.
+    expect(has(/UNIQUE INDEX club_program_settings_pkey ON public\.club_program_settings USING btree \(id\)$/)).toBe(true);
+    for (const c of ['gift_platine_model_id', 'gift_palladium_model_id', 'updated_by']) {
+      expect(has(new RegExp(`INDEX club_program_settings_${c}_idx ON public\\.club_program_settings USING btree \\(${c}\\)$`)), c).toBe(true);
+    }
+    expect(has(/UNIQUE INDEX shipping_rates_pkey ON public\.shipping_rates USING btree \(currency, service\)$/)).toBe(true);
+    expect(has(/INDEX shipping_rates_updated_by_idx ON public\.shipping_rates USING btree \(updated_by\)$/)).toBe(true);
   });
 
   /**
@@ -2153,6 +2161,106 @@ describe('migrations', () => {
     }
   });
 
+  /** What names an object of 0026 in a snapshot: its two tables, the columns and constraints it adds to drops and circle_posts. */
+  const of0026 = (o: string) => /\b(club_program_settings|shipping_rates|early_access_platine_hours|drops_platine_window|drops_live_platine|circle_posts_experience\w*)\b/.test(o) || /^table circle_posts experience /.test(o);
+
+  it('0026 adds the club\'s program, the shipping rates, a draw\'s PLATINE window and an invitation\'s experience, and nothing else; down restores 0025 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0026_club_program');
+    const added = withIt.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !of0026(o))).toEqual([]);
+    expect(before.filter(of0026)).toEqual([]);
+    expect(withIt.filter((o) => !of0026(o))).toEqual(before);
+    const columns = (table: string) => added.filter((o) => o.startsWith(`table ${table} `)).map((o) => o.split(' ')[2]);
+    expect(columns('club_program_settings')).toEqual([
+      'care_pieces_palladium', 'care_pieces_platine', 'credit_channels', 'credit_currency', 'credit_palladium_minor', 'credit_platine_minor', 'credit_validity_months',
+      'early_access_palladium_hours', 'early_access_platine_hours', 'experience_launch_preview_min_tier', 'experience_members_evening_min_tier', 'experience_partner_min_tier',
+      'gift_palladium_model_id', 'gift_platine_model_id', 'id', 'messages_priority_min_tier', 'shipping_free_palladium', 'shipping_free_platine', 'updated_at', 'updated_by',
+    ]);
+    expect(columns('shipping_rates')).toEqual(['currency', 'fee_minor', 'service', 'updated_at', 'updated_by']);
+    expect(columns('drops')).toEqual(['early_access_platine_hours']);
+    expect(columns('circle_posts')).toEqual(['experience']);
+    // Nullable, without a default: a drop and a post written by the previous image carry none.
+    expect(added).toContain('table drops early_access_platine_hours smallint YES ');
+    expect(added).toContain('table circle_posts experience text YES ');
+    for (const c of [
+      /^constraint club_program_settings club_program_settings_early_access CHECK \(\(early_access_platine_hours <= early_access_palladium_hours\)\)$/,
+      /^constraint club_program_settings club_program_settings_gift_platine_model_id_fkey FOREIGN KEY \(gift_platine_model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint club_program_settings club_program_settings_gift_palladium_model_id_fkey FOREIGN KEY \(gift_palladium_model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint club_program_settings club_program_settings_updated_by_fkey FOREIGN KEY \(updated_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint club_program_settings club_program_settings_messages_priority_min_tier_check CHECK /,
+      /^constraint club_program_settings club_program_settings_credit_channels_check CHECK /,
+      /^constraint shipping_rates shipping_rates_pkey PRIMARY KEY \(currency, service\)$/,
+      /^constraint shipping_rates shipping_rates_updated_by_fkey FOREIGN KEY \(updated_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint drops drops_platine_window CHECK \(\(early_access_platine_hours <= early_access_hours\)\)$/,
+      /^constraint drops drops_live_platine CHECK \(\(\(mode = 'DRAW'::text\) OR \(early_access_platine_hours IS NULL\)\)\)$/,
+      /^constraint circle_posts circle_posts_experience CHECK \(\(\(experience IS NULL\) OR \(kind = 'INVITATION'::text\)\)\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    // drops.early_access_hours keeps its default of 48 for the previous image.
+    expect(withIt.filter((o) => o.startsWith('table drops early_access_hours '))).toEqual(['table drops early_access_hours smallint NO 48']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0026_club_program'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0026: one row of program at most, its defaults the columns\', each value in its bounds and PALLADIUM\'s window at least PLATINE\'s; one shipping rate per currency and service; a draw\'s PLATINE window within PALLADIUM\'s; an experience on an invitation only', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (15, 'M', 'Program checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    // The row's defaults are the program's: 4 and 2 hours, standard and express, 1 and every piece, PLATINE, € 50 and € 100 in EUR for 12 months, every channel, 2, 3 and 3.
+    await run(`INSERT INTO club_program_settings (id) VALUES (1)`);
+    const row = (await sql<Record<string, unknown>>`SELECT * FROM club_program_settings`.execute(t.db)).rows[0]!;
+    expect({ ...row, updated_at: undefined }).toEqual({
+      id: 1, early_access_palladium_hours: 4, early_access_platine_hours: 2, shipping_free_platine: 'STANDARD', shipping_free_palladium: 'EXPRESS', care_pieces_platine: 1,
+      care_pieces_palladium: null, messages_priority_min_tier: 2, gift_platine_model_id: null, gift_palladium_model_id: null, credit_platine_minor: 5000, credit_palladium_minor: 10000,
+      credit_currency: 'EUR', credit_validity_months: 12, credit_channels: ['DRAW', 'LIVE', 'SALON'], experience_members_evening_min_tier: 2, experience_launch_preview_min_tier: 3,
+      experience_partner_min_tier: 3, updated_by: null, updated_at: undefined,
+    });
+    await expect(run(`INSERT INTO club_program_settings (id) VALUES (2)`)).rejects.toSatisfy((e) => isCheckViolation(e));
+    for (const [set, what, constraint] of [
+      [`early_access_platine_hours = 5`, 'PLATINE before PALLADIUM', 'club_program_settings_early_access'],
+      [`early_access_palladium_hours = 337`, 'over 336 hours', undefined],
+      [`early_access_platine_hours = -1`, 'negative hours', undefined],
+      [`shipping_free_platine = 'FAST'`, 'an unknown shipping', undefined],
+      [`care_pieces_palladium = 21`, 'care over 20', undefined],
+      [`messages_priority_min_tier = 1`, 'priority from TITANE', undefined],
+      [`credit_platine_minor = 100000001`, 'a credit over the bound', undefined],
+      [`credit_currency = 'JPY'`, 'another currency', undefined],
+      [`credit_validity_months = 0`, 'no validity', undefined],
+      [`credit_channels = '{}'`, 'no channel', undefined],
+      [`credit_channels = '{DRAW,STORE}'`, 'an unknown channel', undefined],
+      [`experience_partner_min_tier = 4`, 'an experience above PALLADIUM', undefined],
+    ] as [string, string, string | undefined][]) {
+      await check(run(`UPDATE club_program_settings SET ${set} WHERE id = 1`), what, constraint);
+    }
+    await run(`UPDATE club_program_settings SET early_access_palladium_hours = 3, early_access_platine_hours = 3, care_pieces_palladium = 0, messages_priority_min_tier = 0, credit_channels = '{SALON}' WHERE id = 1`);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (15, 'ECLIPSE', 'RING', 'PRGCHK') RETURNING id`.execute(t.db)).rows[0].id;
+    await run(`UPDATE club_program_settings SET gift_platine_model_id = '${model}' WHERE id = 1`);
+    await expect(run(`DELETE FROM models WHERE id = '${model}'`)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await run(`DELETE FROM club_program_settings`);
+    // One rate per currency and service, 0 to 1 000 000.00, in the house's currencies.
+    await run(`INSERT INTO shipping_rates (currency, service, fee_minor) VALUES ('EUR', 'STANDARD', 2000)`);
+    await expect(run(`INSERT INTO shipping_rates (currency, service, fee_minor) VALUES ('EUR', 'STANDARD', 2500)`)).rejects.toSatisfy((e) => isUniqueViolation(e, 'shipping_rates_pkey'));
+    await run(`INSERT INTO shipping_rates (currency, service, fee_minor) VALUES ('EUR', 'EXPRESS', 0)`);
+    await check(run(`INSERT INTO shipping_rates (currency, service, fee_minor) VALUES ('JPY', 'STANDARD', 2000)`), 'another currency');
+    await check(run(`INSERT INTO shipping_rates (currency, service, fee_minor) VALUES ('GBP', 'OVERNIGHT', 2000)`), 'an unknown service');
+    await check(run(`INSERT INTO shipping_rates (currency, service, fee_minor) VALUES ('GBP', 'STANDARD', -1)`), 'a negative fee');
+    await run(`DELETE FROM shipping_rates`);
+    // A draw's PLATINE window: NULL (PALLADIUM's time), or 0 to PALLADIUM's.
+    const drop = await drawDrop(model, { early_access_hours: '4' });
+    await run(`UPDATE drops SET early_access_platine_hours = 2 WHERE id = '${drop}'`);
+    await run(`UPDATE drops SET early_access_platine_hours = 4 WHERE id = '${drop}'`);
+    await check(run(`UPDATE drops SET early_access_platine_hours = 5 WHERE id = '${drop}'`), 'PLATINE before PALLADIUM', 'drops_platine_window');
+    await check(run(`UPDATE drops SET early_access_platine_hours = -1 WHERE id = '${drop}'`), 'negative hours');
+    await run(`UPDATE drops SET early_access_platine_hours = NULL WHERE id = '${drop}'`);
+    // An experience on an invitation only.
+    const post = async (kind: string, extra: string) => run(`INSERT INTO circle_posts (kind, title, ${extra ? 'event_at, ' : ''}experience) VALUES ('${kind}', 'Evening', ${extra ? `${extra}, ` : ''}'MEMBERS_EVENING')`);
+    await post('INVITATION', `now()`);
+    await check(post('NOTE', ''), 'an experience on a note', 'circle_posts_experience');
+    await check(run(`INSERT INTO circle_posts (kind, title, event_at, experience) VALUES ('INVITATION', 'Evening', now(), 'GALA')`), 'an unknown experience');
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -2206,8 +2314,9 @@ describe('migrations', () => {
       '0023_releases_collectors',
       // NOCTURNE (plan of 2026-10-05): the variants of a model and a draw's price.
       '0024_model_variants',
-      // The next nine (plan of 2026-10-06), deployment G: the messages with ORBES Client Services.
+      // The next nine (plan of 2026-10-06), deployment G: the messages with ORBES Client Services; the club's program.
       '0025_client_messages',
+      '0026_club_program',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

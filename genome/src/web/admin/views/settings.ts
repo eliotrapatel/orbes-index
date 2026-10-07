@@ -11,12 +11,17 @@
  *  - Carriers: Colissimo, Chronopost, DHL Express and UPS from the first boot, more added; each with its tracking link,
  *    `{tracking}` where the number goes (an example shown); set aside (never offered for a shipment again) or offered
  *    again.
+ *  - SHIPPING (plan NEXT-NINE, BP-19 T2), optional: what an order's delivery costs below the free shipping of PLATINE
+ *    and PALLADIUM, per currency and service, '—' for none (none preset: the order then carries no shipping, as
+ *    before, unless Client Services enters a fee on it). Edit shipping (ADMIN) sets them whole, audited
+ *    `order.shipping_rates.update`.
  */
 import { h } from '../../shared/dom.js';
 import { formatDateTime } from '../format.js';
 import { alertsInput, alertsProblem, ALERT_LIMITS, carrierProblem, LOGISTICS_LIMITS, locationProblem, TRACKING_PLACEHOLDER, trackingLink } from '../model/orders.js';
 import { can } from '../model/permissions.js';
-import type { Carrier, OrderAlertSettings, StockLocation } from '../types.js';
+import { rateField, rateText, ratesChanged, ratesInput, ratesProblem, ratesValues, SHIPPING_SERVICE_LABELS } from '../model/program.js';
+import { HOUSE_CURRENCIES, SHIPPING_SERVICES, type Carrier, type HouseCurrency, type OrderAlertSettings, type ShippingRatesSheet, type StockLocation } from '../types.js';
 import { href } from '../router.js';
 import { button, defList, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
@@ -29,7 +34,7 @@ const EXAMPLE_TRACKING = '6A12345678901';
 const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
 export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
-  const [alerts, locations, carriers] = await Promise.all([ctx.api.orderAlerts(), ctx.api.locations(), ctx.api.carriers()]);
+  const [alerts, locations, carriers, rates] = await Promise.all([ctx.api.orderAlerts(), ctx.api.locations(), ctx.api.carriers(), ctx.api.shippingRates()]);
   const admin = can(ctx.session.admin.role, 'manageLogistics');
   const done = (msg: string) => (v: unknown) => {
     if (!v) return;
@@ -48,6 +53,7 @@ export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
     alertsSection(ctx, alerts, admin, done),
     locationsSection(ctx, locations.items, admin, done),
     carriersSection(ctx, carriers.items, admin, done),
+    shippingSection(ctx, rates, admin, done),
   );
 }
 
@@ -216,5 +222,42 @@ function carriersSection(ctx: ViewContext, items: Carrier[], admin: boolean, don
       { caption: 'Carriers', empty: 'No carrier yet: they are created at the first boot.' },
     ),
     { id: 'settings-carriers', tools: admin ? [button('Add carrier', { kind: 'ghost', testId: 'carrier-add', onClick: () => edit(null) })] : [] },
+  );
+}
+
+function shippingSection(ctx: ViewContext, sheet: ShippingRatesSheet, admin: boolean, done: (msg: string) => (v: unknown) => void): HTMLElement {
+  const rates = sheet.items;
+  const edit = () =>
+    void openDialog({
+      title: 'Shipping rates',
+      eyebrow: 'Settings · Shipping',
+      body: h('p', { class: 'dialog__text' }, 'An amount in units for each rate the house charges, or empty for none. PLATINE and PALLADIUM orders keep their free shipping.'),
+      fields: HOUSE_CURRENCIES.flatMap((c) =>
+        SHIPPING_SERVICES.map((sv) => ({ name: rateField(c, sv), label: `${c} · ${SHIPPING_SERVICE_LABELS[sv]}`, maxlength: 12, value: ratesValues(rates)[rateField(c, sv)] })),
+      ),
+      validate: (v) => ratesProblem(v) ?? (ratesChanged(rates, ratesInput(v)) ? null : 'Nothing has changed.'),
+      confirmLabel: 'Save',
+      submit: async (v) => {
+        await ctx.api.setShippingRates(ratesInput(v));
+      },
+    }).then(done('Shipping rates saved.'));
+  return section(
+    'Shipping',
+    [
+      h(
+        'p',
+        { class: 'notice' },
+        'Optional. What an order’s delivery costs below the free shipping of PLATINE and PALLADIUM (Club → Tiers). A rate set here is added to each new order in its currency. Empty: the order carries no shipping, as today, and Client Services may enter a fee on the order.',
+      ),
+      table<HouseCurrency>(
+        [
+          { label: 'Currency', cell: (c) => c, kind: ['nowrap'] },
+          ...SHIPPING_SERVICES.map((sv) => ({ label: SHIPPING_SERVICE_LABELS[sv], cell: (c: HouseCurrency) => h('span', { data: { testid: `rate-${rateField(c, sv)}` } }, rateText(rates, c, sv)), kind: ['nowrap' as const] })),
+        ],
+        [...HOUSE_CURRENCIES],
+        { caption: 'Shipping rates' },
+      ),
+    ],
+    { id: 'settings-shipping', tools: admin ? [button('Edit shipping', { kind: 'ghost', testId: 'shipping-edit', onClick: edit })] : [] },
   );
 }

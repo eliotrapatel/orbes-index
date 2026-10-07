@@ -2244,7 +2244,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.evaluate(() => location.hash)).toBe('#/club?tab=tiers');
     expect(await p.locator('.side__link.is-active').textContent()).toBe('Club');
     // The three tiers, each from its threshold, with the words by default.
-    await expect.poll(() => p.locator('.tiers .panel__title').allTextContents()).toEqual(['TITANE', 'PLATINE', 'PALLADIUM']);
+    await expect.poll(() => p.locator('.tiers .panel:not(#tier-program) .panel__title').allTextContents()).toEqual(['TITANE', 'PLATINE', 'PALLADIUM']);
     expect(await p.locator('.tiers .deflist__row', { hasText: 'Reached' }).locator('.deflist__value').evaluateAll((els) => els.map((e) => e.firstChild?.textContent))).toEqual([
       'From 1 piece held',
       'From 5 pieces held',
@@ -2297,10 +2297,83 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await signIn(ap, auditor.email, auditor.password);
     await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
     await go(ap, '#/club?tab=tiers', 'Club');
-    await expect.poll(() => ap.locator('.tiers .panel__title').count()).toBe(3);
+    await expect.poll(() => ap.locator('.tiers .panel:not(#tier-program) .panel__title').count()).toBe(3);
     expect(await ap.locator('[data-testid^=tier-edit-], [data-testid^=tier-restore-]').count()).toBe(0);
     expect(await cspViolations(ap)).toEqual([]);
     await ac.close();
+  }, STEP_TIMEOUT);
+
+  it('sets THE PROGRAM from Club → Tiers (plan NEXT-NINE, BP-19 T2): the figures read, refused before sending, saved whole by an ADMIN, each tier\'s lines following; an OPERATOR reads', async () => {
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    await go(p, '#/club?tab=tiers', 'Club');
+    // THE PROGRAM first, above the three tiers, with the defaults.
+    await expect.poll(() => p.locator('.tiers .panel__title').allTextContents()).toEqual(['THE PROGRAM', 'TITANE', 'PLATINE', 'PALLADIUM']);
+    expect(await p.locator('[data-testid=program-early]').textContent()).toBe('PALLADIUM 4 hours · PLATINE 2 hours');
+    expect(await p.locator('[data-testid=program-shipping]').textContent()).toBe('PLATINE Standard · PALLADIUM Express');
+    expect(await p.locator('[data-testid=program-care]').textContent()).toBe('PLATINE 1 piece a year · PALLADIUM Every piece');
+    expect(await p.locator('[data-testid=program-priority]').textContent()).toBe('From PLATINE');
+    expect(await p.locator('[data-testid=program-gift-platine]').textContent()).toBe('None');
+    expect(await p.locator('[data-testid=program-credit-platine]').textContent()).toBe('€\u00a050 · valid 12 months');
+    expect(await p.locator('[data-testid=program-credit-channels]').textContent()).toBe('Draw, LIVE RELEASE, The private salon');
+    expect(await p.locator('[data-testid=program-changed]').textContent()).toBe('The defaults');
+    // Each tier lists its program's lines as /verify will show them, above its words.
+    expect(await p.locator('[data-testid=tier-program-TITANE]').textContent()).toBe('None');
+    expect(await p.locator('[data-testid=tier-program-PLATINE] li').first().textContent()).toBe(
+      'Early access to each draw: a place reserved directly 2 hours before entries open to everyone, unless its page says otherwise.',
+    );
+    expect(await p.locator('[data-testid=tier-program-PALLADIUM] li').allTextContents()).toContain('Free express shipping on every order.');
+
+    // Refused before anything is sent: PALLADIUM after PLATINE; unchanged.
+    await p.click('[data-testid=program-edit]');
+    expect(await p.locator('dialog input[name=earlyAccessPalladiumHours]').inputValue()).toBe('4');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await p.fill('dialog input[name=earlyAccessPalladiumHours]', '1');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('PALLADIUM’s early access starts no later than PLATINE’s.');
+    // Saved: 6 hours and 3, the welcome gift of PALLADIUM, a credit of € 75 for PLATINE, express for PLATINE too.
+    await p.fill('dialog input[name=earlyAccessPalladiumHours]', '6');
+    await p.fill('dialog input[name=earlyAccessPlatineHours]', '3');
+    await p.selectOption('dialog select[name=shippingFreePlatine]', 'EXPRESS');
+    const giftLabel = await p.locator(`dialog select[name=giftPalladiumModelId] option[value="${modelId}"]`).textContent();
+    expect(giftLabel).toMatch(/ · (one size|\d+ sizes) · \d+ available$/);
+    await p.selectOption('dialog select[name=giftPalladiumModelId]', modelId);
+    await p.fill('dialog input[name=creditPlatine]', '75');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=program-early]').textContent()).toBe('PALLADIUM 6 hours · PLATINE 3 hours');
+    expect(await p.locator('[data-testid=program-shipping]').textContent()).toBe('PLATINE Express · PALLADIUM Express');
+    expect(await p.locator('[data-testid=program-credit-platine]').textContent()).toBe('€\u00a075 · valid 12 months');
+    expect(await p.locator('[data-testid=program-changed]').textContent()).toMatch(new RegExp(`^Changed by ${ADMIN.email.replace('.', '\\.')} on .+ UTC$`));
+    const giftName = (await p.locator('[data-testid=program-gift-palladium]').textContent())!;
+    expect(await p.locator('[data-testid=tier-program-PALLADIUM] li').allTextContents()).toContain(`A welcome gift, ${giftName}, added to your next order.`);
+    expect(await p.locator('[data-testid=tier-program-PLATINE] li').allTextContents()).toContain('Free express shipping on every order.');
+    const row = await ctx.db.selectFrom('club_program_settings').selectAll().executeTakeFirstOrThrow();
+    expect(row).toMatchObject({ early_access_palladium_hours: 6, early_access_platine_hours: 3, shipping_free_platine: 'EXPRESS', gift_palladium_model_id: modelId, credit_platine_minor: 7500 });
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'club-program', { full: true });
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+
+    // An OPERATOR reads THE PROGRAM without Edit program (an ADMIN's), and still edits the words of a tier.
+    const operator = { email: 'program.operator@orbes.test', password: 'program operator passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...operator, role: 'OPERATOR' }, SYSTEM_ACTOR);
+    const oc = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const op = await oc.newPage();
+    await watch(op);
+    await signIn(op, operator.email, operator.password);
+    await expect.poll(async () => (await title(op).textContent())?.trim()).toBe('Dashboard');
+    await go(op, '#/club?tab=tiers', 'Club');
+    await expect.poll(() => op.locator('[data-testid=program-early]').textContent()).toBe('PALLADIUM 6 hours · PLATINE 3 hours');
+    expect(await op.locator('[data-testid=program-edit]').count()).toBe(0);
+    expect(await op.locator('[data-testid^=tier-edit-]').count()).toBe(3);
+    expect(await cspViolations(op)).toEqual([]);
+    await oc.close();
+    // Back to the defaults for the steps that follow.
+    await ctx.db.deleteFrom('club_program_settings').execute();
   }, STEP_TIMEOUT);
 
   it('gives an AUDITOR a read-only console', async () => {

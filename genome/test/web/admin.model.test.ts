@@ -218,6 +218,26 @@ import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX } from '../../src/server/services/me
 import { DEFAULT_CARE as SHARED_CARE } from '../../src/web/shared/care.js';
 import { DEFAULT_CARE as VERIFY_CARE } from '../../src/web/verify/copy.js';
 import { can, CAPABILITY_MIN_ROLE, ROLE_RANK, saleOnly } from '../../src/web/admin/model/permissions.js';
+import {
+  careText,
+  changedText,
+  channelsText,
+  creditText,
+  giftOptionLabel,
+  giftOptions,
+  giftText,
+  PROGRAM_LIMITS as WEB_PROGRAM_LIMITS,
+  programChanged,
+  programInput,
+  programProblem,
+  programValues,
+  rateText,
+  ratesChanged,
+  ratesInput,
+  ratesProblem,
+  ratesValues,
+} from '../../src/web/admin/model/program.js';
+import { checkProgram, DEFAULT_PROGRAM, PROGRAM_LIMITS as SERVER_PROGRAM_LIMITS } from '../../src/server/services/club-program.js';
 import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, READY_TO_SELL, retailerLabel, retailerOptions, SALE_CARD_NOTE, saleVerdict } from '../../src/web/admin/model/sale.js';
 import { SALE_REFUSALS as SERVER_SALE_REFUSALS, SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { SALE_REFUSAL_MESSAGES } from '../../src/server/routes/admin/sale.js';
@@ -280,6 +300,11 @@ describe('admin enums mirror the server', () => {
       'CLIENT_CONVERSATION_STATUSES',
       'CLIENT_MESSAGE_AUTHORS',
       'CLIENT_MESSAGE_CONTEXTS',
+      'SHIPPING_FREE_LEVELS',
+      'SHIPPING_SERVICES',
+      'HOUSE_CURRENCIES',
+      'CREDIT_CHANNELS',
+      'CIRCLE_EXPERIENCES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
@@ -625,6 +650,70 @@ describe('the Club\'s tiers (P-X04)', () => {
     expect(can('AUDITOR', 'manageClubTiers')).toBe(false);
     expect(can('OPERATOR', 'manageClubTiers')).toBe(true);
     expect(can('ADMIN', 'manageClubTiers')).toBe(true);
+  });
+});
+
+describe('THE PROGRAM and SHIPPING (plan NEXT-NINE, BP-19 T2)', () => {
+  const defaults = (): web.ClubProgram => ({ ...DEFAULT_PROGRAM, creditChannels: [...DEFAULT_PROGRAM.creditChannels] });
+  const model = (over: Partial<web.GiftModel> = {}): web.GiftModel => ({ id: 'm1', name: 'ECLIPSE', active: true, discontinued: false, sizes: 3, available: 4, imageUrl: null, ...over });
+
+  it('holds the bounds the server holds, and lets only an ADMIN change THE PROGRAM', () => {
+    expect(WEB_PROGRAM_LIMITS).toEqual(SERVER_PROGRAM_LIMITS);
+    expect(['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'].map((r) => can(r as web.AdminRole, 'manageClubProgram'))).toEqual([false, false, false, true]);
+    expect(['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'].map((r) => can(r as web.AdminRole, 'manageLogistics'))).toEqual([false, false, false, true]);
+  });
+
+  it('says each setting in words: hours, care, credit, channels, the gifts and who changed it', () => {
+    expect(careText(1)).toBe('1 piece a year');
+    expect(careText(null)).toBe('Every piece');
+    expect(careText(0)).toBe('None');
+    expect(creditText(5000, defaults())).toBe('€\u00a050 · valid 12 months');
+    expect(creditText(0, defaults())).toBe('None');
+    expect(channelsText(['SALON', 'DRAW'])).toBe('Draw, The private salon');
+    expect(giftOptionLabel(model())).toBe('ECLIPSE · 3 sizes · 4 available');
+    expect(giftOptionLabel(model({ sizes: 1, available: 0 }))).toBe('ECLIPSE · one size · 0 available');
+    expect(giftText(null)).toEqual({ value: 'None', note: null });
+    expect(giftText(model({ active: false, discontinued: true }))).toEqual({ value: 'ECLIPSE', note: 'This gift’s model is discontinued: no gift is added until another is chosen.' });
+    // A gift model discontinued since it was chosen stays offered, said so; the active ones are listed with their sizes.
+    expect(giftOptions({ giftOptions: [model()] }, model({ id: 'm2', name: 'HALO', active: false }))).toEqual([
+      { value: '', label: 'None' },
+      { value: 'm1', label: 'ECLIPSE · 3 sizes · 4 available' },
+      { value: 'm2', label: 'HALO · discontinued' },
+    ]);
+    expect(changedText({ updatedAt: null, updatedBy: null })).toBe('The defaults');
+    expect(changedText({ updatedAt: '2026-10-06T14:02:00.000Z', updatedBy: { id: 'a', email: 'a@orbes.test' } })).toBe('Changed by a@orbes.test on 06 OCT 2026 · 14:02 UTC');
+  });
+
+  it('sends what the dialog holds as the server takes it, refusing first what it would refuse', () => {
+    const v = programValues(defaults());
+    expect(programProblem(v)).toBeNull();
+    expect(programInput(v)).toEqual(defaults());
+    expect(checkProgram(programInput(v))).toEqual(defaults());
+    expect(programChanged(defaults(), programInput(v))).toBe(false);
+    expect(programProblem({ ...v, earlyAccessPalladiumHours: '1', earlyAccessPlatineHours: '2' })).toBe('PALLADIUM’s early access starts no later than PLATINE’s.');
+    expect(programProblem({ ...v, earlyAccessPalladiumHours: '337' })).toBe('Each early access is 0 to 336 hours.');
+    expect(programProblem({ ...v, creditPlatine: 'fifty' })).toBe('A credit is an amount in units: 50, or 50.50 (0 for none).');
+    expect(programProblem({ ...v, creditValidityMonths: '0' })).toBe('A credit is valid 1 to 60 months.');
+    expect(programProblem({ ...v, creditDraw: '', creditLive: '', creditSalon: '' })).toBe('The credit is taken off at least one kind of order.');
+    const next = programInput({ ...v, carePiecesPalladium: '2', creditPalladium: '120.50', creditLive: '', giftPlatineModelId: 'm1', messagesPriorityMinTier: '0' });
+    expect(next).toMatchObject({ carePiecesPalladium: 2, creditPalladiumMinor: 12050, creditChannels: ['DRAW', 'SALON'], giftPlatineModelId: 'm1', messagesPriorityMinTier: 0 });
+    expect(programChanged(defaults(), next)).toBe(true);
+    // A sheet carries more than the figures (its gifts, lines, author): only the figures count.
+    const sheet: web.ClubProgramSheet = { ...defaults(), gifts: { platine: null, palladium: null }, giftOptions: [], lines: { TITANE: [], PLATINE: [], PALLADIUM: [] }, updatedAt: null, updatedBy: null };
+    expect(programChanged(sheet, programInput(programValues(sheet)))).toBe(false);
+  });
+
+  it('reads and writes the shipping rates, — for none', () => {
+    const rates: web.ShippingRate[] = [{ currency: 'EUR', service: 'STANDARD', feeMinor: 2000 }];
+    expect(rateText(rates, 'EUR', 'STANDARD')).toBe('€\u00a020');
+    expect(rateText(rates, 'EUR', 'EXPRESS')).toBe('—');
+    const v = ratesValues(rates);
+    expect(v['EUR-STANDARD']).toBe('20');
+    expect(v['CHF-EXPRESS']).toBe('');
+    expect(ratesProblem(v)).toBeNull();
+    expect(ratesChanged(rates, ratesInput(v))).toBe(false);
+    expect(ratesProblem({ ...v, 'GBP-EXPRESS': 'x' })).toBe('GBP Express: an amount in units, 20 or 20.50, or empty for none.');
+    expect(ratesInput({ ...v, 'EUR-STANDARD': '', 'USD-EXPRESS': '35.5' })).toEqual([{ currency: 'USD', service: 'EXPRESS', feeMinor: 3550 }]);
   });
 });
 

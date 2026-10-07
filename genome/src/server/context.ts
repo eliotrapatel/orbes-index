@@ -35,6 +35,7 @@ import { CategoryRegistry } from './services/categories.js';
 import { CertificateService } from './services/certificates.js';
 import { CircleService } from './services/circle.js';
 import { ClubService } from './services/club.js';
+import { ClubProgramService } from './services/club-program.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -138,6 +139,8 @@ export interface AppServices {
   shopify: ShopifyExportService;
   /** MESSAGES (plan NEXT-NINE, CS-01): the collector writes to ORBES Client Services, who answer from the console's Messages board. */
   messages: MessageService;
+  /** THE PROGRAM (plan NEXT-NINE, BP-19 T2): the figures of the tiers' benefits, and the optional shipping rates. */
+  clubProgram: ClubProgramService;
 }
 
 export interface AppContext {
@@ -249,6 +252,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const segments = new SegmentService({ db, audit, clock });
     const shopify = new ShopifyExportService({ db, audit, publicOrigin: config.publicOrigin, clock });
     const messages = new MessageService({ db, audit, lookbook, clock });
+    const clubProgram = new ClubProgramService({ db, audit, clock });
 
     const services: AppServices = {
       issuance,
@@ -288,6 +292,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       activity,
       shopify,
       messages,
+      clubProgram,
       ...overrides.services,
     };
 

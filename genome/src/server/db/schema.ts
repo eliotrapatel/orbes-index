@@ -243,6 +243,35 @@ export type ClientMessageAuthor = (typeof CLIENT_MESSAGE_AUTHORS)[number];
 export const CLIENT_MESSAGE_CONTEXTS = ['PIECE', 'ORDER', 'RELEASE', 'SCAN', 'MODEL'] as const;
 export type ClientMessageContext = (typeof CLIENT_MESSAGE_CONTEXTS)[number];
 
+/**
+ * The free shipping a tier of the club gives on every order (club_program_settings.shipping_free_platine and
+ * `_palladium`, migration 0026, BP-19 T2/T4): none, standard or express.
+ */
+export const SHIPPING_FREE_LEVELS = ['NONE', 'STANDARD', 'EXPRESS'] as const;
+export type ShippingFreeLevel = (typeof SHIPPING_FREE_LEVELS)[number];
+
+/** How an order's piece is delivered (shipping_rates.service, migration 0026; orders.shipping_service, migration 0027). */
+export const SHIPPING_SERVICES = ['STANDARD', 'EXPRESS'] as const;
+export type ShippingService = (typeof SHIPPING_SERVICES)[number];
+
+/**
+ * The currencies of the house (shipping_rates.currency and club_program_settings.credit_currency, migration 0026): those
+ * an order is priced in (services/orders.ts ORDER_CURRENCIES).
+ */
+export const HOUSE_CURRENCIES = ['EUR', 'GBP', 'USD', 'CHF'] as const;
+export type HouseCurrency = (typeof HOUSE_CURRENCIES)[number];
+
+/** The channels a tier's credit may be taken off (club_program_settings.credit_channels, migration 0026): a draw, a LIVE RELEASE, the private salon. */
+export const CREDIT_CHANNELS = ['DRAW', 'LIVE', 'SALON'] as const;
+export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
+
+/**
+ * What an invitation of the circle is (circle_posts.experience, migration 0026, BP-19 T7): the members' evening, a launch
+ * preview or a partner experience, each from the tier THE PROGRAM names; NULL for any other post.
+ */
+export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
+export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
+
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
 export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
@@ -717,6 +746,11 @@ export interface DropsTable {
    * place directly, first come, first served, within `quantity`: 0..336 hours, 48 by default; 0, none.
    */
   early_access_hours: WithDefault<number>;
+  /**
+   * Migration 0026 (BP-19 T3): PLATINE's early access, 0..336 hours, never longer than `early_access_hours`, which is
+   * then PALLADIUM's; NULL: from the same time as PALLADIUM (every drop published before). NULL on a LIVE RELEASE.
+   */
+  early_access_platine_hours: ColumnType<number | null, number | null | undefined, number | null>;
   published_at: TimestampNullable;
   cancelled_at: TimestampNullable;
   /** secretbox `v1.<iv>.<ciphertext>` of the 32-byte seed, the drop's id as associated data; never changes. */
@@ -846,6 +880,8 @@ export interface CirclePostsTable {
   created_at: TimestampDefault;
   /** Migration 0023 (N5): shown to a segment's members only (segments.id); null: to the tier. */
   segment_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0026 (BP-19 T7): what an INVITATION is (the members' evening, a launch preview, a partner experience); null otherwise. */
+  experience: ColumnType<CircleExperience | null, CircleExperience | null | undefined, CircleExperience | null>;
 }
 
 /** The photographs of a circle post (migration 0016, P-X01): at most 4, positions 1–4; post_id, sha256, created_by and created_at never change. */
@@ -1232,6 +1268,48 @@ export interface OrderAlertSettingsTable {
 }
 
 /**
+ * The club's program (migration 0026, BP-19 T2): the figures of the tiers' benefits set in the console's THE PROGRAM;
+ * one row at most (`id` 1), none inserted: the defaults are the columns' (services/club-program.ts DEFAULT_PROGRAM).
+ */
+export interface ClubProgramSettingsTable {
+  id: WithDefault<number>;             // always 1
+  /** A new draw's early access by default, in hours before entries open to everyone: PALLADIUM 4, PLATINE 2 (≤ PALLADIUM's); 0..336. */
+  early_access_palladium_hours: WithDefault<number>;
+  early_access_platine_hours: WithDefault<number>;
+  shipping_free_platine: WithDefault<ShippingFreeLevel>;
+  shipping_free_palladium: WithDefault<ShippingFreeLevel>;
+  /** Pieces cared for a year, 0..20: PLATINE 1; PALLADIUM NULL, every piece. */
+  care_pieces_platine: WithDefault<number>;
+  care_pieces_palladium: ColumnType<number | null, number | null | undefined, number | null>;
+  /** The Messages board's priority from this tier: 2 PLATINE, 3 PALLADIUM, 0 off. */
+  messages_priority_min_tier: WithDefault<number>;
+  /** The welcome gift of each tier: a model of the catalogue (models.id), or none. */
+  gift_platine_model_id: ColumnType<string | null, string | null | undefined, string | null>;
+  gift_palladium_model_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The credit of each tier in minor units (0: none), its currency, its validity in months, the channels it is taken off. */
+  credit_platine_minor: WithDefault<number>;
+  credit_palladium_minor: WithDefault<number>;
+  credit_currency: WithDefault<HouseCurrency>;
+  credit_validity_months: WithDefault<number>;
+  credit_channels: WithDefault<CreditChannel[]>;
+  /** The lowest tier (1..3) invited to each experience of the circle. */
+  experience_members_evening_min_tier: WithDefault<number>;
+  experience_launch_preview_min_tier: WithDefault<number>;
+  experience_partner_min_tier: WithDefault<number>;
+  updated_by: string | null;
+  updated_at: TimestampDefault;
+}
+
+/** What an order's delivery costs below the free shipping of the tiers (migration 0026), per currency and service; optional, none inserted. */
+export interface ShippingRatesTable {
+  currency: HouseCurrency;
+  service: ShippingService;
+  fee_minor: number;                   // 0..100 000 000
+  updated_by: string | null;
+  updated_at: TimestampDefault;
+}
+
+/**
  * The guests of an after-room (migration 0023, A3): the parent's entries still WAITING or QUEUED at its sell-out, each
  * with its place in the after-room's line (their order in the parent's), remembered once; never changed.
  */
@@ -1430,6 +1508,8 @@ export interface Database {
   invoices: InvoicesTable;
   event_journal: EventJournalTable;
   order_alert_settings: OrderAlertSettingsTable;
+  club_program_settings: ClubProgramSettingsTable;
+  shipping_rates: ShippingRatesTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
   segments: SegmentsTable;
@@ -1535,6 +1615,8 @@ export type SegmentRow = Selectable<SegmentsTable>;
 export type ActivityHourlyRow = Selectable<ActivityHourlyTable>;
 export type ClientConversationRow = Selectable<ClientConversationsTable>;
 export type ClientMessageRow = Selectable<ClientMessagesTable>;
+export type ClubProgramSettingsRow = Selectable<ClubProgramSettingsTable>;
+export type ShippingRateRow = Selectable<ShippingRatesTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

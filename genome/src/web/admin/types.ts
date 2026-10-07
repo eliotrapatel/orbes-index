@@ -113,6 +113,26 @@ export type ClientMessageAuthor = (typeof CLIENT_MESSAGE_AUTHORS)[number];
 export const CLIENT_MESSAGE_CONTEXTS = ['PIECE', 'ORDER', 'RELEASE', 'SCAN', 'MODEL'] as const;
 export type ClientMessageContext = (typeof CLIENT_MESSAGE_CONTEXTS)[number];
 
+/** The free shipping a tier gives (club_program_settings.shipping_free_*, BP-19 T2): none, standard or express. */
+export const SHIPPING_FREE_LEVELS = ['NONE', 'STANDARD', 'EXPRESS'] as const;
+export type ShippingFreeLevel = (typeof SHIPPING_FREE_LEVELS)[number];
+
+/** How a piece is delivered (shipping_rates.service). */
+export const SHIPPING_SERVICES = ['STANDARD', 'EXPRESS'] as const;
+export type ShippingService = (typeof SHIPPING_SERVICES)[number];
+
+/** The house's currencies (shipping_rates.currency, club_program_settings.credit_currency). */
+export const HOUSE_CURRENCIES = ['EUR', 'GBP', 'USD', 'CHF'] as const;
+export type HouseCurrency = (typeof HOUSE_CURRENCIES)[number];
+
+/** The channels a tier's credit is taken off (club_program_settings.credit_channels). */
+export const CREDIT_CHANNELS = ['DRAW', 'LIVE', 'SALON'] as const;
+export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
+
+/** What an invitation of the circle is (circle_posts.experience, BP-19 T7). */
+export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
+export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
+
 /** Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon. */
 export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON'] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
@@ -1939,6 +1959,60 @@ export interface ClubTierSheet {
   /** The console changed its words. */
   edited: boolean;
   updatedAt: Iso | null;
+}
+
+/** THE PROGRAM (plan NEXT-NINE, BP-19 T2; GET and PUT /api/admin/club/program). */
+export interface ClubProgram {
+  earlyAccessPalladiumHours: number;
+  earlyAccessPlatineHours: number;
+  shippingFreePlatine: ShippingFreeLevel;
+  shippingFreePalladium: ShippingFreeLevel;
+  carePiecesPlatine: number;
+  /** null: every piece. */
+  carePiecesPalladium: number | null;
+  /** 0: off. */
+  messagesPriorityMinTier: 0 | 2 | 3;
+  giftPlatineModelId: string | null;
+  giftPalladiumModelId: string | null;
+  creditPlatineMinor: number;
+  creditPalladiumMinor: number;
+  creditCurrency: HouseCurrency;
+  creditValidityMonths: number;
+  creditChannels: CreditChannel[];
+  experienceMembersEveningMinTier: 1 | 2 | 3;
+  experienceLaunchPreviewMinTier: 1 | 2 | 3;
+  experiencePartnerMinTier: 1 | 2 | 3;
+}
+
+/** A model a welcome gift may be. */
+export interface GiftModel {
+  id: string;
+  name: string;
+  active: boolean;
+  discontinued: boolean;
+  sizes: number;
+  available: number;
+  imageUrl: string | null;
+}
+
+export interface ClubProgramSheet extends ClubProgram {
+  gifts: { platine: GiftModel | null; palladium: GiftModel | null };
+  giftOptions: GiftModel[];
+  /** What each tier's program says, as /verify shows it. */
+  lines: Record<ClubTierName, string[]>;
+  updatedAt: Iso | null;
+  updatedBy: { id: string; email: string } | null;
+}
+
+/** One rate of SHIPPING (Orders → Settings). */
+export interface ShippingRate {
+  currency: HouseCurrency;
+  service: ShippingService;
+  feeMinor: number;
+}
+
+export interface ShippingRatesSheet {
+  items: (ShippingRate & { updatedAt: Iso; updatedBy: { id: string; email: string } | null })[];
 }
 
 // ── Orders (plan LIVE RELEASE+, routes/admin/orders.ts) ───────────────────

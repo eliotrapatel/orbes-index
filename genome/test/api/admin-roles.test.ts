@@ -16,7 +16,7 @@
  * size mix proposed at creation, the feasibility check and the best time to open read by an AUDITOR; the Shopify
  * exports read by an AUDITOR, the order CSV masked, the Shopify ids pasted back by an OPERATOR; the Messages board of
  * the next nine, CS-01, read by an AUDITOR, its conversations answered, taken and closed by an OPERATOR, assigned by an
- * ADMIN);
+ * ADMIN; THE PROGRAM of the club's tiers and the orders' shipping rates, BP-19 T2, read by an AUDITOR, set by an ADMIN);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -179,6 +179,9 @@ const PROBES: Probe[] = [
   { group: 'tiers', method: 'GET', url: '/api/admin/club/tiers', min: 'AUDITOR' },
   { group: 'tiers', method: 'PATCH', url: '/api/admin/club/tiers/TITANE', body: INVALID, min: 'OPERATOR' },
   { group: 'tiers', method: 'PATCH', url: '/api/admin/club/tiers/PALLADIUM', body: INVALID, min: 'OPERATOR' },
+  // The next nine (BP-19 T2): THE PROGRAM read by an AUDITOR, changed by an ADMIN.
+  { group: 'program', method: 'GET', url: '/api/admin/club/program', min: 'AUDITOR' },
+  { group: 'program', method: 'PUT', url: '/api/admin/club/program', body: INVALID, min: 'ADMIN' },
   // P-X08: the requests of the private salon, read by an AUDITOR, closed by an OPERATOR.
   { group: 'requests', method: 'GET', url: '/api/admin/club/requests', min: 'AUDITOR' },
   { group: 'requests', method: 'GET', url: '/api/admin/club/requests?status=CLOSED', min: 'AUDITOR' },
@@ -199,6 +202,9 @@ const PROBES: Probe[] = [
   { group: 'orders', method: 'GET', url: '/api/admin/orders.csv', min: 'AUDITOR' },
   { group: 'orders', method: 'GET', url: '/api/admin/orders/alerts', min: 'AUDITOR' },
   { group: 'orders', method: 'PUT', url: '/api/admin/orders/alerts', body: INVALID, min: 'ADMIN' },
+  // BP-19 T2: the optional shipping rates, read by an AUDITOR, set by an ADMIN.
+  { group: 'orders', method: 'GET', url: '/api/admin/orders/shipping-rates', min: 'AUDITOR' },
+  { group: 'orders', method: 'PUT', url: '/api/admin/orders/shipping-rates', body: INVALID, min: 'ADMIN' },
   { group: 'orders', method: 'GET', url: `/api/admin/orders/${UUID}`, min: 'AUDITOR' },
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/transition`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/location`, body: INVALID, min: 'OPERATOR' },
@@ -338,6 +344,7 @@ describe('admin role enforcement', () => {
       'logistics',
       'atelier',
       'messages',
+      'program',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

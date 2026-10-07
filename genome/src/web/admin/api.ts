@@ -68,6 +68,8 @@ import type {
   CirclePostInput,
   CircleRsvpAnswer,
   CircleStats,
+  ClubProgram,
+  ClubProgramSheet,
   ClubTierName,
   ClubTierSheet,
   DashboardData,
@@ -106,6 +108,8 @@ import type {
   ModelChange,
   VariantInput,
   OwnerList,
+  ShippingRate,
+  ShippingRatesSheet,
   ShopifyLink,
   ShopifyProduct,
   OwnerLock,
@@ -975,6 +979,16 @@ export class AdminApi {
     return this.request('PUT', '/api/admin/orders/alerts', { body: delays });
   }
 
+  /** SHIPPING (BP-19 T2): the optional rates below the free shipping of the tiers. */
+  shippingRates(): Promise<ShippingRatesSheet> {
+    return this.get('/api/admin/orders/shipping-rates');
+  }
+
+  /** ADMIN: the rates set whole; a rate left out is cleared. */
+  setShippingRates(rates: ShippingRate[]): Promise<ShippingRatesSheet> {
+    return this.request('PUT', '/api/admin/orders/shipping-rates', { body: { rates } });
+  }
+
   // ── Locations and carriers ───────────────────────────────────────────────
 
   locations(): Promise<Items<StockLocation>> {
@@ -1222,6 +1236,16 @@ export class AdminApi {
   /** A tier's benefits, one per line; null restores the words by default. */
   updateClubTier(tier: ClubTierName, benefits: string | null): Promise<ClubTierSheet> {
     return this.patch(`/api/admin/club/tiers/${encodeURIComponent(tier)}`, { benefits });
+  }
+
+  /** THE PROGRAM (BP-19 T2): the figures of the tiers' benefits, the gift models, each tier's lines. */
+  clubProgram(): Promise<ClubProgramSheet> {
+    return this.get('/api/admin/club/program');
+  }
+
+  /** ADMIN: THE PROGRAM changed whole. */
+  updateClubProgram(program: ClubProgram): Promise<ClubProgramSheet> {
+    return this.request('PUT', '/api/admin/club/program', { body: program });
   }
 
   // ── MESSAGES (plan NEXT-NINE, CS-01) ─────────────────────────────────────

@@ -20,6 +20,10 @@ import {
   CLIENT_MESSAGE_CONTEXTS,
   CLUB_TIER_NAMES,
   CODE_STATUSES,
+  CREDIT_CHANNELS,
+  HOUSE_CURRENCIES,
+  SHIPPING_FREE_LEVELS,
+  SHIPPING_SERVICES,
   DROP_ENTRY_STATUSES,
   INVOICE_KINDS,
   LIVE_ENTRY_STATUSES,
@@ -41,6 +45,7 @@ import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_L
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
+import { PRIORITY_TIERS, PROGRAM_LIMITS } from '../services/club-program.js';
 import { DRAW_PRICE_MAX_MINOR, DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
 import { MAX_ISSUE_BATCH } from '../services/issuance.js';
 import { LIVE_QUESTION_LIMITS } from '../services/question.js';
@@ -868,6 +873,42 @@ export const clubTierParams = z.object({ tier: z.enum(CLUB_TIER_NAMES) });
  */
 export const updateClubTierBody = body({
   benefits: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), text(CLUB_TIER_BENEFITS_MAX * 2).nullable()),
+});
+
+// ── Admin: THE PROGRAM (plan NEXT-NINE, BP-19 T2) ─────────────────────────
+
+const programTier = z.union([z.literal(1), z.literal(2), z.literal(3)]);
+const optionalModel = z.preprocess((v) => (v === '' ? null : v), uuid.nullable());
+
+/**
+ * PUT /api/admin/club/program (ADMIN): THE PROGRAM whole, each value within its bounds (services/club-program.ts holds
+ * PALLADIUM's early access at least PLATINE's, and a gift's model existing and active).
+ */
+export const clubProgramBody = body({
+  earlyAccessPalladiumHours: whole(PROGRAM_LIMITS.hours.min, PROGRAM_LIMITS.hours.max, 'hours'),
+  earlyAccessPlatineHours: whole(PROGRAM_LIMITS.hours.min, PROGRAM_LIMITS.hours.max, 'hours'),
+  shippingFreePlatine: z.enum(SHIPPING_FREE_LEVELS),
+  shippingFreePalladium: z.enum(SHIPPING_FREE_LEVELS),
+  carePiecesPlatine: whole(PROGRAM_LIMITS.care.min, PROGRAM_LIMITS.care.max, 'pieces'),
+  carePiecesPalladium: whole(PROGRAM_LIMITS.care.min, PROGRAM_LIMITS.care.max, 'pieces').nullable(),
+  messagesPriorityMinTier: z.union(PRIORITY_TIERS.map((t) => z.literal(t)) as [z.ZodLiteral<0>, z.ZodLiteral<2>, z.ZodLiteral<3>]),
+  giftPlatineModelId: optionalModel,
+  giftPalladiumModelId: optionalModel,
+  creditPlatineMinor: whole(PROGRAM_LIMITS.credit.min, PROGRAM_LIMITS.credit.max, 'minor units'),
+  creditPalladiumMinor: whole(PROGRAM_LIMITS.credit.min, PROGRAM_LIMITS.credit.max, 'minor units'),
+  creditCurrency: z.enum(HOUSE_CURRENCIES),
+  creditValidityMonths: whole(PROGRAM_LIMITS.validity.min, PROGRAM_LIMITS.validity.max, 'months'),
+  creditChannels: z.array(z.enum(CREDIT_CHANNELS)).min(1, 'At least one channel').max(CREDIT_CHANNELS.length),
+  experienceMembersEveningMinTier: programTier,
+  experienceLaunchPreviewMinTier: programTier,
+  experiencePartnerMinTier: programTier,
+});
+
+/** PUT /api/admin/orders/shipping-rates (ADMIN): the rates set, each currency and service once; a rate left out is cleared. */
+export const shippingRatesBody = body({
+  rates: z
+    .array(body({ currency: z.enum(HOUSE_CURRENCIES), service: z.enum(SHIPPING_SERVICES), feeMinor: whole(PROGRAM_LIMITS.fee.min, PROGRAM_LIMITS.fee.max, 'minor units') }))
+    .max(HOUSE_CURRENCIES.length * SHIPPING_SERVICES.length),
 });
 
 // ── Admin: the private salon's requests (P-X08) ──────────────────────────

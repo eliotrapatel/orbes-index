@@ -7,6 +7,9 @@
  *   GET    /api/admin/orders.csv                AUDITOR   every order the same filters keep, as a CSV
  *   GET    /api/admin/orders/alerts             AUDITOR   the delays after which an order stands out (M3)
  *   PUT    /api/admin/orders/alerts             ADMIN     those delays, changed (the console's settings)
+ *   GET    /api/admin/orders/shipping-rates     AUDITOR   SHIPPING (plan NEXT-NINE, BP-19 T2): the optional rates below the
+ *                                                         free shipping of PLATINE and PALLADIUM, per currency and service
+ *   PUT    /api/admin/orders/shipping-rates     ADMIN     those rates, set whole (services/club-program.ts)
  *   GET    /api/admin/orders/:id                AUDITOR   one order: its facts, timing, piece and history
  *   POST   /api/admin/orders/:id/transition     OPERATOR  PAID; SHIPPED (its piece linked; carrier, tracking number,
  *                                                         declared value); DELIVERED; CANCELLED (a note)
@@ -37,6 +40,7 @@ import {
   orderTermsBody,
   orderTransitionBody,
   parse,
+  shippingRatesBody,
 } from '../../http/schemas.js';
 import { adminActor, hasRole, requireAdmin } from '../../http/sessions.js';
 import type { OrderBoard, OrderBoardFilter, OrderDetail } from '../../services/fulfilment.js';
@@ -70,7 +74,7 @@ function boardFilter(query: unknown): OrderBoardFilter {
 }
 
 export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { orders, fulfilment, atelier } = ctx.services;
+  const { orders, fulfilment, atelier, clubProgram } = ctx.services;
   const detail = async (request: FastifyRequest, id: string) => orderDetailJson(await fulfilment.detail(id), readsClientEmails(request));
 
   app.get('/api/admin/orders', async (request) => orderBoardJson(await fulfilment.board(boardFilter(request.query)), readsClientEmails(request)));
@@ -89,6 +93,13 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   app.put('/api/admin/orders/alerts', { config: ADMIN }, async (request) => {
     const b = parse(orderAlertsBody, request.body);
     return fulfilment.setDelays(b, adminActor(request));
+  });
+
+  app.get('/api/admin/orders/shipping-rates', async () => clubProgram.shippingRates());
+
+  app.put('/api/admin/orders/shipping-rates', { config: ADMIN }, async (request) => {
+    const b = parse(shippingRatesBody, request.body);
+    return clubProgram.setShippingRates(b.rates, adminActor(request));
   });
 
   app.get('/api/admin/orders/:id', async (request) => {

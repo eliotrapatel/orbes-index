@@ -122,6 +122,13 @@ describe('schema', () => {
       ['client_conversations', 'status', S.CLIENT_CONVERSATION_STATUSES],
       ['client_messages', 'author', S.CLIENT_MESSAGE_AUTHORS],
       ['client_messages', 'context_kind', S.CLIENT_MESSAGE_CONTEXTS],
+      ['club_program_settings', 'shipping_free_platine', S.SHIPPING_FREE_LEVELS],
+      ['club_program_settings', 'shipping_free_palladium', S.SHIPPING_FREE_LEVELS],
+      ['club_program_settings', 'credit_currency', S.HOUSE_CURRENCIES],
+      ['club_program_settings', 'credit_channels', S.CREDIT_CHANNELS],
+      ['shipping_rates', 'currency', S.HOUSE_CURRENCIES],
+      ['shipping_rates', 'service', S.SHIPPING_SERVICES],
+      ['circle_posts', 'experience', S.CIRCLE_EXPERIENCES],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
