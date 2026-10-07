@@ -106,9 +106,10 @@ export interface Column<T> {
   cell: (row: T) => Child;
   /**
    * 'num' right-aligns, 'mono' for id columns, 'wide' takes remaining width, 'nowrap'; 'wrap', with 'actions': the
-   * row's buttons go to a second line rather than past the page's width.
+   * row's buttons go to a second line rather than past the page's width; 'email', a client's email (in a
+   * `.cell-email`) on one line up to about thirty characters, a longer one on a second line.
    */
-  kind?: ('num' | 'mono' | 'wide' | 'nowrap' | 'actions' | 'wrap')[];
+  kind?: ('num' | 'mono' | 'wide' | 'nowrap' | 'actions' | 'wrap' | 'email')[];
 }
 
 /** The empty state of a list or a chart: the mark and one line saying what is missing. */

@@ -158,6 +158,8 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     mkdirSync(OUT_DIR, { recursive: true });
     await p.evaluate(async () => {
       document.querySelectorAll('.toast').forEach((x) => x.remove());
+      // From the top: a page captured whole while scrolled draws its sticky sidebar and bar where it stopped.
+      window.scrollTo(0, 0);
       await document.fonts.ready;
     });
     await p.waitForTimeout(300);

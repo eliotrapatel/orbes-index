@@ -94,8 +94,8 @@ export async function messagesView(ctx: ViewContext): Promise<HTMLElement> {
             },
             {
               label: 'Client',
-              cell: (r) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: r.account.id }), 'data-testid': 'conversation-client' } }, r.account.email),
-              kind: ['nowrap'],
+              cell: (r) => h('span', { class: 'cell-email' }, h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: r.account.id }), 'data-testid': 'conversation-client' } }, r.account.email)),
+              kind: ['email'],
             },
             { label: 'Concerns', cell: (r) => (r.care ? h('span', null, concernsCell(r.concerns, r.moreConcerns), careLink(r.care)) : concernsCell(r.concerns, r.moreConcerns)) },
             {

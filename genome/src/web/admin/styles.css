@@ -770,6 +770,23 @@ a.bar__label:hover {
   justify-content: flex-end;
 }
 
+/* A client's email (the Messages board): one line up to about thirty characters, a longer one to a second line, so
+   the board's last columns stay in the page. */
+.table .col--email {
+  white-space: normal;
+}
+
+.cell-email {
+  display: inline-block;
+  width: max-content;
+  max-width: 16em;
+  overflow-wrap: anywhere;
+}
+
+.cell-email .idlink {
+  white-space: normal;
+}
+
 .table tbody tr {
   transition: background-color var(--t-fast) var(--ease);
 }
@@ -4704,6 +4721,12 @@ a.bar__label:hover {
   overflow-wrap: anywhere;
 }
 
+/* The board's six steps: to a second line on a phone rather than past the page's width. */
+.care__tabs {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+
 /* ── Messages (CS-01) ──────────────────────────────────────────────────── */
 
 /* The priority tag of a PLATINE or PALLADIUM client on the board and a conversation's head. */
@@ -4715,6 +4738,19 @@ a.bar__label:hover {
   letter-spacing: var(--track-label);
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+/* On a phone, a long email (a conversation's or a client sheet's title, a client's link in a sheet, a message's author)
+   breaks rather than widens the page. */
+@media (max-width: 860px) {
+  .page-head__title,
+  .thread__author {
+    overflow-wrap: anywhere;
+  }
+
+  .deflist__value .idlink {
+    white-space: normal;
+  }
 }
 
 /* A conversation: the messages oldest first, the client's and the answers apart by a rule. */

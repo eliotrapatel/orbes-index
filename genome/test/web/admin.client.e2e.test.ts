@@ -140,6 +140,8 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     mkdirSync(OUT_DIR, { recursive: true });
     await p.evaluate(async () => {
       document.querySelectorAll('.toast').forEach((x) => x.remove());
+      // From the top: a page captured whole while scrolled draws its sticky sidebar and bar where it stopped.
+      window.scrollTo(0, 0);
       await document.fonts.ready;
     });
     await p.screenshot({ path: join(OUT_DIR, `admin-client-${name}.png`), fullPage: true });
