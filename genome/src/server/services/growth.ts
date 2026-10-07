@@ -174,7 +174,9 @@ export function cohortTable(collectors: readonly { first: Date; second: Date | n
   const by = new Map<string, { first: Date; second: Date | null }[]>();
   for (const c of collectors) {
     const m = monthOf(c.first);
-    by.set(m, [...(by.get(m) ?? []), c]);
+    const group = by.get(m);
+    if (group) group.push(c);
+    else by.set(m, [c]);
   }
   return [...months]
     .reverse()
@@ -355,7 +357,7 @@ function purchases(account?: string): RawBuilder<unknown> {
   const reg = account ? sql`AND w.account_id = ${account}` : sql``;
   const inv = account ? sql`JOIN orders io ON io.id = i.order_id AND io.account_id = ${account}` : sql``;
   return sql`
-    SELECT o.account_id, o.paid_at AS at, o.id::text AS ref, o.channel AS source, coalesce(m.variant_of, m.id) AS model_id,
+    SELECT o.account_id, o.paid_at AS at, o.id AS ref, o.channel AS source, coalesce(m.variant_of, m.id) AS model_id,
            coalesce(iv.currency, o.currency) AS currency, coalesce(iv.net, 0)::bigint AS value
       FROM orders o
       JOIN models m ON m.id = o.model_id
@@ -363,7 +365,7 @@ function purchases(account?: string): RawBuilder<unknown> {
                    FROM invoices i ${inv} GROUP BY i.order_id) iv ON iv.order_id = o.id
      WHERE o.paid_at IS NOT NULL AND o.channel <> 'GIFT' AND o.status NOT IN ('CANCELLED', 'RETURNED') ${own}
     UNION ALL
-    SELECT w.account_id, w.started_at, w.id::text,
+    SELECT w.account_id, w.started_at, w.id,
            CASE WHEN EXISTS (SELECT 1 FROM warranties wa WHERE wa.product_id = w.product_id AND wa.voided_at IS NULL AND (wa.retailer_id IS NOT NULL OR wa.retailer IS NOT NULL))
                 THEN 'POINT_OF_SALE' ELSE 'ELSEWHERE' END,
            coalesce(m.variant_of, m.id),
@@ -391,26 +393,33 @@ interface CollectorRow {
   first_model: string;
 }
 
-/** Every collector with a purchase (DELETED accounts left out): their pieces and value in `currency`, their first two pieces. */
+/**
+ * Every collector with a purchase (DELETED accounts left out): their pieces and value in `currency`, their first two
+ * pieces, the pieces they hold now. Grouped by account alone (the window's order), then joined to the account and to the
+ * pieces held: one sort of the purchases, no sort of the groups.
+ */
 function collectorRows(currency: Currency): RawBuilder<CollectorRow> {
   return sql<CollectorRow>`
     WITH pur AS (${purchases()}),
          r AS (SELECT pur.*, row_number() OVER (PARTITION BY pur.account_id ORDER BY pur.at, pur.ref) AS rn FROM pur),
+         agg AS (
+           SELECT r.account_id,
+                  (count(*) FILTER (WHERE r.value IS NOT NULL AND r.currency = ${currency}))::int AS priced,
+                  (count(*) FILTER (WHERE r.value IS NULL))::int AS unpriced,
+                  coalesce(sum(r.value) FILTER (WHERE r.value IS NOT NULL AND r.currency = ${currency}), 0)::bigint AS value,
+                  min(r.at) FILTER (WHERE r.rn = 1) AS first_at,
+                  min(r.at) FILTER (WHERE r.rn = 2) AS second_at,
+                  min(r.source) FILTER (WHERE r.rn = 1) AS first_source,
+                  min(r.model_id::text) FILTER (WHERE r.rn = 1) AS first_model
+             FROM r GROUP BY r.account_id),
          held AS (SELECT o.account_id, count(*)::int AS n FROM ownership o JOIN products p ON p.id = o.product_id
                    WHERE o.ended_at IS NULL AND p.status NOT IN (${EXCLUDED}) GROUP BY o.account_id)
-    SELECT r.account_id, a.email, a.country, coalesce(h.n, 0)::int AS held,
-           (count(*) FILTER (WHERE r.value IS NOT NULL AND r.currency = ${currency}))::int AS priced,
-           (count(*) FILTER (WHERE r.value IS NULL))::int AS unpriced,
-           coalesce(sum(r.value) FILTER (WHERE r.value IS NOT NULL AND r.currency = ${currency}), 0)::bigint AS value,
-           min(r.at) FILTER (WHERE r.rn = 1) AS first_at,
-           min(r.at) FILTER (WHERE r.rn = 2) AS second_at,
-           min(r.source) FILTER (WHERE r.rn = 1) AS first_source,
-           min(r.model_id::text) FILTER (WHERE r.rn = 1) AS first_model
-      FROM r
-      JOIN accounts a ON a.id = r.account_id
-      LEFT JOIN held h ON h.account_id = r.account_id
-     WHERE a.status <> 'DELETED'
-     GROUP BY r.account_id, a.email, a.country, h.n`;
+    SELECT agg.account_id, a.email, a.country, coalesce(h.n, 0)::int AS held, agg.priced, agg.unpriced, agg.value,
+           agg.first_at, agg.second_at, agg.first_source, agg.first_model
+      FROM agg
+      JOIN accounts a ON a.id = agg.account_id
+      LEFT JOIN held h ON h.account_id = agg.account_id
+     WHERE a.status <> 'DELETED'`;
 }
 
 /** The tier of `held` pieces under `thresholds` (CLUB_TIER_THRESHOLDS unless a test stubs them), as club.ts tierForPieces. */
@@ -476,7 +485,12 @@ export class GrowthService {
       const groups = (keyOf: (r: (typeof counted)[number]) => string | null, keys?: readonly (string | null)[], label: (k: string | null) => string | null = () => null): LtvGroup[] => {
         const by = new Map<string | null, number[]>();
         for (const k of keys ?? []) by.set(k, []);
-        for (const r of counted) by.set(keyOf(r), [...(by.get(keyOf(r)) ?? []), r.value]);
+        for (const r of counted) {
+          const k = keyOf(r);
+          const values = by.get(k);
+          if (values) values.push(r.value);
+          else by.set(k, [r.value]);
+        }
         const out = [...by.entries()].map(([key, values]) => {
           const s = ltvStats(values);
           return { key, label: label(key), collectors: s.collectors, totalMinor: s.totalMinor, averageMinor: s.averageMinor, medianMinor: s.medianMinor };
@@ -533,7 +547,12 @@ export class GrowthService {
         await clubMembersByTier(trx, this.thresholds),
       ];
       const byAccount = new Map<string, { start: Date; end: Date | null }[]>();
-      for (const i of intervals) byAccount.set(i.account_id, [...(byAccount.get(i.account_id) ?? []), { start: dateOf(i.started_at)!, end: dateOf(i.ended_at) }]);
+      for (const i of intervals) {
+        const iv = { start: dateOf(i.started_at)!, end: dateOf(i.ended_at) };
+        const held = byAccount.get(i.account_id);
+        if (held) held.push(iv);
+        else byAccount.set(i.account_id, [iv]);
+      }
       const reached = [...byAccount.values()].map((iv) => tierReachDates(iv, this.thresholds));
       const counts: Record<FunnelStep, Map<string, number>> = {
         scans: new Map(scans.map((s) => [s.month, s.scans])),
@@ -702,6 +721,8 @@ export class GrowthService {
     if (this.db.isTransaction) return fn(this.db);
     return this.db.transaction().execute(async (trx) => {
       await sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`.execute(trx);
+      // The purchases are sorted once per reading (by account, then time): in memory rather than on disk.
+      await sql`SET LOCAL work_mem = '64MB'`.execute(trx);
       return fn(trx);
     });
   }

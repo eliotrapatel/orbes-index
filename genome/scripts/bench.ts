@@ -1,7 +1,7 @@
 /**
  * ORBES GENOME CODE performance benchmarks.
  *
- *   npx tsx scripts/bench.ts [--only decoder,api,issuance,bundles] [--quick]
+ *   npx tsx scripts/bench.ts [--only decoder,api,issuance,bundles,growth] [--quick]
  *                            [--frames N] [--free N] [--reps N] [--requests N]
  *                            [--issue N] [--concurrency N] [--no-chromium]
  *                            [--json PATH]
@@ -24,6 +24,14 @@
  * (c) issuance  issueProduct (serial allocation, Ed25519 sign + self-check,
  *               genome, code, audit chain) sequential and concurrent.
  * (d) bundles   production web build: raw, gzip -9 and brotli -11 sizes.
+ * (e) growth    GROWTH (plan NEXT-NINE, BP-29), only with `--only growth`: 50 000
+ *               accounts, 100 000 pieces and 40 000 paid orders with their
+ *               invoices written in bulk, then GET /api/admin/growth and the first
+ *               page of GET /api/admin/growth/collectors through app.inject, as an
+ *               AUDITOR, on PGlite and, when configured, on PostgreSQL. bench.ts
+ *               has no VPS profile: the VPS figure is the p95 × 2 (the factor of
+ *               scripts/live-load.ts `--vps-factor 2`), the target under 1 s
+ *               (docs/reports/performance.md, « GROWTH at 100 000 pieces »).
  *
  * Prints markdown tables and writes every number to genome/out/bench/results.json
  * (or --json PATH). Frames and request mixes are seeded: same arguments → same
@@ -57,6 +65,7 @@ import { capture, makeCode } from '../test/decoder/fixtures.js';
 import { PRESETS, simulateCapture } from '../test/support/camera-sim.js';
 import { Prng } from '../test/support/prng.js';
 import { grayToRgba, type GrayImage } from '../test/support/raster.js';
+import { seedGrowthHouse } from '../test/support/growth.js';
 import { BROWSER_TARGETS, buildWeb } from './build-web.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -65,7 +74,7 @@ const ORIGIN = 'https://verify.orbes.bench';
 
 // ── Options ────────────────────────────────────────────────────────────────
 
-type Section = 'decoder' | 'api' | 'issuance' | 'bundles';
+type Section = 'decoder' | 'api' | 'issuance' | 'bundles' | 'growth';
 
 interface Options {
   only: Set<Section>;
@@ -102,7 +111,7 @@ function parseArgs(argv: string[]): Options {
     const a = argv[i];
     if (a === '--only') {
       const list = (argv[++i] ?? '').split(',').map((s) => s.trim()) as Section[];
-      for (const s of list) if (!['decoder', 'api', 'issuance', 'bundles'].includes(s)) throw new Error(`unknown section ${s}`);
+      for (const s of list) if (!['decoder', 'api', 'issuance', 'bundles', 'growth'].includes(s)) throw new Error(`unknown section ${s}`);
       o.only = new Set(list);
     } else if (a === '--quick') Object.assign(o, { frames: 6, free: 4, reps: 1, warmup: 2, requests: 200, issue: 40 });
     else if (a === '--frames') o.frames = num(argv[++i], a);
@@ -789,6 +798,80 @@ async function benchBundles() {
   }
 }
 
+// ── (e) GROWTH at 100 000 pieces ───────────────────────────────────────────
+
+/** The size of the house GROWTH is measured on (plan NEXT-NINE, §3.9 Tests: Load). */
+const GROWTH_BENCH = Object.freeze({ accounts: 50_000, pieces: 100_000, orders: 40_000 });
+/** bench.ts has no VPS profile: the VPS figure is the measured p95 × this (scripts/live-load.ts `--vps-factor 2`). */
+const GROWTH_VPS_FACTOR = 2;
+/** The VPS figure GROWTH must stay under, in milliseconds. */
+const GROWTH_VPS_TARGET_MS = 1000;
+
+async function benchGrowth(label: string, open: () => Promise<World>, o: Options) {
+  log(`### ${label}\n`);
+  const w = await open();
+  try {
+    const t0 = performance.now();
+    await seedGrowthHouse(w.ctx.db, { modelId: w.modelId, ...GROWTH_BENCH });
+    const seedS = Math.round(performance.now() - t0) / 1000;
+    const counts = await sql<{ accounts: number; pieces: number; orders: number; invoices: number }>`
+      SELECT (SELECT count(*) FROM accounts)::int AS accounts, (SELECT count(*) FROM products)::int AS pieces,
+             (SELECT count(*) FROM orders)::int AS orders, (SELECT count(*) FROM invoices)::int AS invoices`.execute(w.ctx.db);
+    // An AUDITOR's session, as the console reads the page.
+    const email = `growth-auditor-${randomUUID().slice(0, 8)}@orbes.bench`;
+    const password = 'growth bench passphrase 2026';
+    await w.ctx.services.auth.createAdmin({ email, password, role: 'AUDITOR' }, SYSTEM_ACTOR);
+    const login = await w.app.inject({ method: 'POST', url: '/api/admin/auth/login', headers: { origin: ORIGIN }, payload: { email, password } });
+    if (login.statusCode !== 200) throw new Error(`growth bench: login ${login.statusCode} ${login.body}`);
+    const cookie = (login.cookies as { name: string; value: string }[]).map((c) => `${c.name}=${c.value}`).join('; ');
+    const timed = async (url: string) => {
+      const ms: number[] = [];
+      for (let i = 0; i < o.warmup + o.reps * 5; i++) {
+        const s0 = performance.now();
+        const res = await w.app.inject({ method: 'GET', url, headers: { cookie } });
+        const dt = performance.now() - s0;
+        if (res.statusCode !== 200) throw new Error(`growth bench: ${url} ${res.statusCode} ${res.body.slice(0, 200)}`);
+        if (i >= o.warmup) ms.push(dt);
+      }
+      return stats(ms);
+    };
+    const report = await timed('/api/admin/growth');
+    const collectors = await timed('/api/admin/growth/collectors');
+    const vps = (s: Stats) => Math.round(s.p95 * GROWTH_VPS_FACTOR * 10) / 10;
+    const row = (name: string, s: Stats) => [name, s.n, fmt(s.p50), fmt(s.p95), fmt(s.max), fmt(vps(s)), vps(s) < GROWTH_VPS_TARGET_MS ? 'yes' : 'NO'];
+    log(`house: ${counts.rows[0]!.accounts} accounts, ${counts.rows[0]!.pieces} pieces, ${counts.rows[0]!.orders} orders, ${counts.rows[0]!.invoices} invoices and credit notes (written in ${seedS} s)\n`);
+    log(table(['GET', 'n', 'p50 ms', 'p95 ms', 'max ms', `VPS (p95 × ${GROWTH_VPS_FACTOR}) ms`, `under ${GROWTH_VPS_TARGET_MS} ms`], [row('/api/admin/growth', report), row('/api/admin/growth/collectors (page 1)', collectors)]));
+    log('');
+    return { label, house: counts.rows[0], seedSeconds: seedS, report: { latencyMs: report, vpsMs: vps(report) }, collectors: { latencyMs: collectors, vpsMs: vps(collectors) }, vpsFactor: GROWTH_VPS_FACTOR, targetMs: GROWTH_VPS_TARGET_MS };
+  } finally {
+    await w.close();
+  }
+}
+
+async function benchGrowthDatabases(o: Options) {
+  log('## (e) GROWTH at 100 000 pieces\n');
+  const out: Record<string, unknown> = {};
+  const pgUrl = process.env.ORBES_TEST_POSTGRES_URL;
+  if (pgUrl) {
+    const admin: Db = createDb(pgUrl);
+    const dbName = `orbes_bench_${randomBytes(6).toString('hex')}`;
+    await sql`CREATE DATABASE ${sql.id(dbName)}`.execute(admin);
+    const u = new URL(pgUrl);
+    u.pathname = `/${dbName}`;
+    try {
+      out.postgres = await benchGrowth('PostgreSQL (pg pool of 10, localhost)', () => openWorld('postgres', u.toString()), o);
+    } finally {
+      await sql`DROP DATABASE IF EXISTS ${sql.id(dbName)} WITH (FORCE)`.execute(admin);
+      await closeDb(admin);
+    }
+  } else {
+    log('(PostgreSQL skipped: set ORBES_TEST_POSTGRES_URL to a role with CREATEDB; measured on PGlite)\n');
+    out.postgres = null;
+  }
+  out.pglite = await benchGrowth('PGlite (in-memory, WASM)', () => openWorld('pglite', 'pglite:memory'), o);
+  return out;
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -801,6 +884,7 @@ async function main(): Promise<void> {
   if (o.only.has('decoder')) results.decoder = await benchDecoder(o);
   if (o.only.has('api') || o.only.has('issuance')) results.databases = await benchDatabases(o);
   if (o.only.has('bundles')) results.bundles = await benchBundles();
+  if (o.only.has('growth')) results.growth = await benchGrowthDatabases(o);
   (results.machine as Record<string, unknown>).loadAverageAtEnd = loadavg().map((x) => Math.round(x * 100) / 100);
   results.durationS = Math.round((Date.now() - started.getTime()) / 100) / 10;
   mkdirSync(dirname(o.json), { recursive: true });

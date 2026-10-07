@@ -26,6 +26,7 @@
  * Scans: 40 in Nov 2025, 60 in Jan 2026, 10 in Sep 2025 (before the window).
  */
 import { createHash, randomUUID } from 'node:crypto';
+import { sql } from 'kysely';
 import { packIdentity } from '../../src/core/identity.js';
 import type { Db } from '../../src/server/db/connection.js';
 import { jsonText, type AcquiredVia, type AccountStatus, type OrderChannel, type OrderStatus } from '../../src/server/db/schema.js';
@@ -434,4 +435,74 @@ export async function seedGrowth(db: Db): Promise<GrowthFixture> {
     releases: { L1: L1.id, D1: D1.id, D2: D2.id, draft: draft.id, cancelled: cancelled.id, afterRoom: afterRoom.id, ahead: ahead.id },
     orders: { a2Live, a2Gift, a2Returned, a3Cancelled, a5Credited },
   };
+}
+
+/**
+ * The house scripts/bench.ts measures GROWTH on (plan NEXT-NINE, §3.9 Tests: Load; `--only growth`), written in bulk
+ * (generate_series), as test data is: `accounts` accounts created over two years in six countries; `pieces` pieces of
+ * three models (`modelId` priced € 4 800, HALO € 1 200, ORBIT without a price), each with one ownership (seven in ten
+ * registered first, two received by transfer, one given by ORBES); `orders` paid orders of the private salon on the
+ * first pieces, one in ten in pounds and one in twenty cancelled with its credit note, each with its invoice; the daily
+ * scans of two years. The category J must exist.
+ */
+export async function seedGrowthHouse(db: Db, o: { modelId: string; accounts: number; pieces: number; orders: number }): Promise<void> {
+  const { accounts, pieces, orders } = o;
+  const base = new Date();
+  const category = (await db.selectFrom('categories').select('id').where('code', '=', 'J').executeTakeFirstOrThrow()).id;
+  const location = (await db.selectFrom('stock_locations').select('id').orderBy('created_at').executeTakeFirstOrThrow()).id;
+  await sql`UPDATE models SET base_price_minor = 480000, base_currency = 'EUR' WHERE id = ${o.modelId}`.execute(db);
+  const halo = (await db.insertInto('models').values({ category_id: category, name: 'HALO', type: 'RING', sku_prefix: `HAL-${randomUUID().slice(0, 6)}`, base_price_minor: 120_000, base_currency: 'EUR' }).returning('id').executeTakeFirstOrThrow()).id;
+  const orbit = (await db.insertInto('models').values({ category_id: category, name: 'ORBIT', type: 'RING', sku_prefix: `ORB-${randomUUID().slice(0, 6)}` }).returning('id').executeTakeFirstOrThrow()).id;
+  await sql`
+    INSERT INTO accounts (email, email_normalized, password_hash, country, created_at)
+    SELECT 'growth-' || i || '@bench.test', 'growth-' || i || '@bench.test', 'unused',
+           (ARRAY['FR', 'GB', 'US', 'IT', 'DE', NULL])[1 + i % 6], ${base}::timestamptz - (i % 730) * interval '1 day'
+      FROM generate_series(1, ${accounts}) i`.execute(db);
+  await sql`
+    INSERT INTO products (product_id, packed_identity, year, category_id, serial, sku, model_id, material, status, ownership_state)
+    SELECT 'O25-J-' || CASE WHEN i < 100000 THEN lpad(i::text, 5, '0') ELSE i::text END,
+           ((25::bigint << 25) | (${category}::bigint << 20) | i), 2025, ${category}, i, 'GROWTH-' || i,
+           (ARRAY[${o.modelId}::uuid, ${halo}::uuid, ${orbit}::uuid])[1 + i % 3], '925 STERLING SILVER', 'OWNED', 'OWNED'
+      FROM generate_series(1, ${pieces}) i`.execute(db);
+  await sql`
+    WITH a AS (SELECT id, row_number() OVER (ORDER BY email) AS n FROM accounts WHERE email LIKE 'growth-%@bench.test'),
+         p AS (SELECT id, serial FROM products WHERE sku LIKE 'GROWTH-%')
+    INSERT INTO ownership (product_id, account_id, acquired_via, started_at)
+    SELECT p.id, a.id, CASE WHEN p.serial % 10 < 7 THEN 'FIRST_REGISTRATION' WHEN p.serial % 10 < 9 THEN 'TRANSFER' ELSE 'ADMIN' END,
+           ${base}::timestamptz - (p.serial % 700) * interval '1 day'
+      FROM p JOIN a ON a.n = 1 + p.serial % ${accounts}`.execute(db);
+  // One request of the private salon per order, named by its piece's serial so that its order finds it.
+  await sql`
+    INSERT INTO shop_requests (account_id, model_id, note, status, created_at, handled_at, outcome)
+    SELECT w.account_id, p.model_id, 'GROWTH-' || p.serial, 'CLOSED',
+           ${base}::timestamptz - (p.serial % 700) * interval '1 day' - interval '2 hours',
+           ${base}::timestamptz - (p.serial % 700) * interval '1 day' - interval '1 hour', 'ACCEPTED'
+      FROM ownership w JOIN products p ON p.id = w.product_id
+     WHERE p.sku LIKE 'GROWTH-%' AND p.serial <= ${orders}`.execute(db);
+  await sql`
+    INSERT INTO orders (channel, account_id, model_id, shop_request_id, price_minor, currency, status, reserved_at, paid_at, cancelled_at, location_id, product_id)
+    SELECT 'SALON', r.account_id, r.model_id, r.id, CASE WHEN r.model_id = ${halo}::uuid THEN 120000 ELSE 480000 END,
+           CASE WHEN p.serial % 10 = 0 THEN 'GBP' ELSE 'EUR' END,
+           CASE WHEN p.serial % 20 = 1 THEN 'CANCELLED' ELSE 'PAID' END,
+           r.handled_at, r.handled_at + interval '30 minutes',
+           CASE WHEN p.serial % 20 = 1 THEN r.handled_at + interval '1 day' END,
+           ${location}::uuid, CASE WHEN p.serial % 20 = 1 THEN NULL ELSE p.id END
+      FROM shop_requests r JOIN products p ON p.sku = r.note
+     WHERE r.note LIKE 'GROWTH-%'`.execute(db);
+  const lines = JSON.stringify([{ kind: 'PIECE', label: 'PIECE', detail: 'THE PRIVATE SALON', amountMinor: 0 }]);
+  await sql`
+    INSERT INTO invoices (kind, year, sequence, order_id, issuer, buyer, lines, currency, subtotal_minor, total_minor, issued_at)
+    SELECT 'INVOICE', extract(year FROM paid_at AT TIME ZONE 'UTC')::int, row_number() OVER (ORDER BY id), id, '{"name":"CONGLOMERAT LLC"}', '{}', ${lines}::jsonb,
+           currency, price_minor, price_minor, paid_at
+      FROM orders WHERE channel = 'SALON' AND paid_at IS NOT NULL`.execute(db);
+  await sql`
+    INSERT INTO invoices (kind, year, sequence, order_id, credits_invoice_id, issuer, buyer, lines, currency, subtotal_minor, total_minor, issued_at)
+    SELECT 'CREDIT_NOTE', extract(year FROM o.cancelled_at AT TIME ZONE 'UTC')::int, row_number() OVER (ORDER BY o.id), o.id, i.id, i.issuer, i.buyer, i.lines,
+           i.currency, i.subtotal_minor, i.total_minor, o.cancelled_at
+      FROM orders o JOIN invoices i ON i.order_id = o.id AND i.kind = 'INVOICE' WHERE o.status = 'CANCELLED'`.execute(db);
+  await sql`
+    INSERT INTO scan_daily_stats (day, country, result_state, event_type, n)
+    SELECT (${base}::timestamptz - d * interval '1 day')::date, c, 'AUTHENTIC', 'VERIFY', 20 + d % 40
+      FROM generate_series(1, 730) d, unnest(ARRAY['FR', 'GB', 'US']) c`.execute(db);
+  await sql`ANALYZE`.execute(db);
 }

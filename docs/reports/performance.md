@@ -270,3 +270,29 @@ ORBES_E2E_STRICT=1 npx vitest run test/e2e/camera-scan.test.ts
 npx tsx scripts/bench.ts                      # ≈ 100 s; --quick for a smoke run
 ORBES_TEST_POSTGRES_URL=postgres://… npx tsx scripts/bench.ts --only api,issuance
 ```
+
+## 6. GROWTH at 100 000 pieces (`bench.ts` e, 2026-10-07)
+
+Plan NEXT-NINE, §3.9 BP-29, step 9.3: the console's Growth page on a house of **50 000 accounts, 100 000 pieces and 40 000 paid orders** (42 000 invoices and credit notes; `test/support/growth.ts seedGrowthHouse`, written in bulk in about 12 s), measured through `app.inject` as an AUDITOR: `GET /api/admin/growth` (the report, 12 months, in euros) and the first page of `GET /api/admin/growth/collectors`, 6 warm-up requests then 15 timed ones each.
+
+```sh
+cd genome
+npx tsx scripts/bench.ts --only growth          # PGlite; PostgreSQL too when ORBES_TEST_POSTGRES_URL is set
+```
+
+`bench.ts` has no VPS profile: the VPS figure is the measured p95 × 2, the factor `scripts/live-load.ts` uses (`--vps-factor 2`). The target is a VPS figure under 1 s.
+
+**Where.** This Mac (10 × Apple M2 Pro, 16 GiB, Node v24.16.0), shared with other work: 1-minute load 8 to 10 throughout. **PostgreSQL was not available** (`ORBES_TEST_POSTGRES_URL` unset), so the figures are **PGlite's** (in-memory, WASM, one thread), which runs these aggregations several times slower than PostgreSQL 16; the PostgreSQL run is left to CI or the hand-over (`ORBES_TEST_POSTGRES_URL=postgres://… npx tsx scripts/bench.ts --only growth`).
+
+| GET | n | p50 ms | p95 ms | VPS (p95 × 2) ms | under 1 000 ms |
+|---|---|---|---|---|---|
+| `/api/admin/growth` | 15 | 1 506 | 1 659 | 3 318 | **no** |
+| `/api/admin/growth/collectors` (page 1) | 15 | 438 | 505 | 1 010 | **no** (by 10 ms) |
+
+**A miss on PGlite, after optimisation.** The first run read the report at p50 9 091 ms (p95 10 666 ms): the breakdowns of lifetime value, the cohorts and the tiers reached gathered their rows by copying an array for each row (quadratic in a group's size). As the plan says for a miss, only the queries and `0032`'s indexes were then optimised, with no snapshot table and no cache:
+
+- each group, cohort and account's ownerships is now built by appending, not copying (the report's work in JavaScript: 7.7 s → 0.17 s);
+- the collectors' query groups the purchases by account alone, in the window's order, then joins the account and the pieces held (no second sort of 47 000 groups), and orders ties by the uuid rather than its text;
+- the reading's transaction sets `work_mem` to 64 MB (`SET LOCAL`), so the purchases are sorted in memory rather than on disk.
+
+What is left is the database's work on PGlite: the collectors' query about 0.85 s (the purchases of 47 000 collectors: 38 000 orders with their invoices, 44 000 pieces registered from elsewhere), the funnel about 0.25 s, the revenue about 0.18 s. The figure is recorded and the build goes on; the PostgreSQL run decides the VPS figure at hand-over.

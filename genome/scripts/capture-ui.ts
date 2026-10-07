@@ -97,6 +97,11 @@
  *                 story-card-selected.png, story-card-registered.png, 1080 × 1920), each place with its button
  *                 (story-place-*.png) and the preview (story-preview-*.png), on the NOCTURNE demo's LIVE CONFIRMED, a draw's
  *                 PLACE HELD and the ceremony. Not run by default (screens for the owner's review)
+ *   --only growth
+ *                 GROWTH alone (plan NEXT-NINE, BP-29, step 9.3): the console's Growth page (admin-09-growth.png, full
+ *                 page at 1440 × 900; admin-09-growth-phone.png at 390 px) and the client sheet of its first collector
+ *                 with its Lifetime value (admin-09-growth-client.png), on the demo dataset with GROWTH's fourteen months
+ *                 written over it (test/support/growth.ts). Not run by default (screens for the owner's review)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -140,6 +145,7 @@ import { SalonService } from '../src/server/services/salon.js';
 import { sessionCookieName } from '../src/server/services/sessions.js';
 import { defaultLocationId, ensureSku, linkDropSizes } from '../src/server/services/stock.js';
 import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor, type ManualClock } from '../src/server/types.js';
+import { seedGrowth } from '../test/support/growth.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
 import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, fullScreenshot, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, watchPage as watchPageInto, webpOf } from '../test/support/ui-stage.js';
 import { eachState } from '../test/support/nocturne-stage.js';
@@ -170,7 +176,7 @@ const DESKTOP = { width: 1440, height: 900 } as const;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot' | 'story';
+type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot' | 'story' | 'growth';
 
 function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | null } {
   let out = DEFAULT_OUT;
@@ -179,8 +185,8 @@ function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | nu
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot' || argv[i + 1] === 'story')) only = argv[++i] as Only;
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot, --only story)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot' || argv[i + 1] === 'story' || argv[i + 1] === 'growth')) only = argv[++i] as Only;
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot, --only story, --only growth)`);
   }
   return { out, raw, only };
 }
@@ -2001,8 +2007,65 @@ async function captureStory(out: string, shots: Shots): Promise<void> {
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
+// ── GROWTH (plan NEXT-NINE, BP-29) ─────────────────────────────────────────
+
+/**
+ * GROWTH (plan NEXT-NINE, §3.9 BP-29, step 9.3): the console's Growth page in full at a desk's size and at a phone's,
+ * and the client sheet of the first row of COLLECTORS BY VALUE with its Lifetime value, on the demo dataset with the
+ * fourteen months of test/support/growth.ts written over it. `--only growth`, for the owner's review before merge.
+ */
+async function captureGrowth(stage: Stage, shots: Shots): Promise<void> {
+  await seedGrowth(stage.db);
+  const first = (await stage.ctx.services.growth.collectors()).items[0];
+  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
+  try {
+    const context = await browser.newContext({ viewport: { ...DESKTOP }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    watchPage(page, 'admin-growth');
+    await page.goto(`${stage.origin}/admin`);
+    await page.waitForSelector('[data-testid=login-form]');
+    await page.fill('input[name=email]', ADMIN.email);
+    await page.fill('input[name=password]', ADMIN.password);
+    await page.click('[data-testid=login-submit]');
+    await page.waitForSelector('.view--dashboard');
+    await page.goto(`${stage.origin}/admin#/growth`);
+    await page.waitForSelector('.view--growth [data-testid=growth-collectors] tbody tr');
+    await page.evaluate(() => document.fonts.ready);
+    await sleep(1600); // bar fills
+    await shots.full(page, 'admin-09-growth');
+    if (first) {
+      await page.goto(`${stage.origin}/admin#/owners/${first.accountId}`);
+      await page.waitForSelector('[data-testid=owner-lifetime-value]');
+      await sleep(900);
+      await shots.viewport(page, 'admin-09-growth-client');
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${stage.origin}/admin#/growth`);
+    await page.waitForSelector('.view--growth [data-testid=growth-collectors] tbody tr');
+    await sleep(1600);
+    await shots.full(page, 'admin-09-growth-phone');
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+}
+
 async function main(): Promise<void> {
   const { out, raw, only } = parseArgs(process.argv.slice(2));
+  if (only === 'growth') {
+    const workDir = mkdtempSync(join(tmpdir(), 'orbes-capture-ui-'));
+    const stage = await startStage(workDir);
+    try {
+      const shots = new Shots(out, raw);
+      log('GROWTH:');
+      await captureGrowth(stage, shots);
+      log(`${shots.written.length} screenshots in ${relative(process.cwd(), out) || '.'}`);
+    } finally {
+      await stage.close().catch(() => {});
+      rmSync(workDir, { recursive: true, force: true });
+    }
+    return;
+  }
   if (only === 'story') {
     const shots = new Shots(out, raw);
     log('SHARE TO STORIES:');
