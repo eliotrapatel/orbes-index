@@ -28,7 +28,7 @@ import {
 import { CLUB_TIER_THRESHOLDS as CLUB_TIER_THRESHOLDS_FOR_GROWTH } from '../../src/server/services/club.js';
 import { parseHash } from '../../src/web/admin/router.js';
 import { PAIRS_FALLBACK_MAX } from '../../src/server/services/lookbook.js';
-import { effectiveKind, fitChange, fitChanged, fitFormValues, fitProblem, fitsText, fitUnitLabel, kindChange, SIZE_KIND_OPTIONS, sizeKindLine, SIZES_TEXT } from '../../src/web/admin/model/sizes.js';
+import { effectiveKind, fitChange, fitChanged, fitFormValues, fitProblem, fitsText, fitUnitLabel, kindChange, NEW_MODEL_SIZE_TYPE, SIZE_KIND_OPTIONS, SIZE_TYPE_CHOICES, sizeKindLine, SIZES_TEXT } from '../../src/web/admin/model/sizes.js';
 import { fitWithin, modelPhotoImpact, PHOTO_MAX_BYTES, PHOTO_MAX_SIDE, PHOTO_MIME_TYPES, PHOTO_QUALITIES, photoFacts, PIECE_PHOTO_IMPACT } from '../../src/web/admin/model/photo.js';
 import {
   ANALYTICS_RANGES,
@@ -2594,6 +2594,19 @@ describe('a model\'s Sizes and a salon request\'s size (plan NEXT-NINE, AC-01)',
       fitHint: 'Empty: the size’s label itself is read, for example 52 or 17.5 CM.',
       saved: 'Sizes saved.',
     });
+  });
+
+  it('offers a new model\'s size type, required, Choose first (plan NEXT LOT §3.3 item 6b)', () => {
+    expect(Object.keys(SIZE_TYPE_CHOICES)).toEqual([...serverSchema.SIZE_TYPES]);
+    expect(NEW_MODEL_SIZE_TYPE.options).toEqual([
+      { value: '', label: 'Choose' },
+      { value: 'RING', label: 'Ring size' },
+      { value: 'BRACELET', label: 'Bracelet size' },
+      { value: 'NECKLACE', label: 'Necklace length' },
+      { value: 'WATCH', label: 'Watch (one size)' },
+      { value: 'ONE_SIZE', label: 'One size' },
+    ]);
+    expect(NEW_MODEL_SIZE_TYPE.hint).toBe('A ring’s, a bracelet’s or a necklace’s sizes are ticked next, on its page.');
   });
 
   it('reads each size\'s fit in the type\'s unit, or by its label; the Edit dialog sends whole millimetres and says a mistake first', () => {

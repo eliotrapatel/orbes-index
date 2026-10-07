@@ -48,7 +48,7 @@ describe('PAIRS WELL WITH in the console (plan NEXT-NINE, BP-34): PUT /api/admin
   const audits = (id: string) => h.ctx.db.selectFrom('audit_logs').selectAll().where('action', '=', 'model.pairs').where('target_id', '=', id).orderBy('id').execute();
 
   async function model(name: string, extra: Record<string, unknown> = {}): Promise<string> {
-    const created = safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name, type: 'BRACELET', skuPrefix: `PR-${name.slice(0, 6)}`, collectionId: catalog.collectionId })) as { id: string };
+    const created = safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name, type: 'BRACELET', skuPrefix: `PR-${name.slice(0, 6)}`, collectionId: catalog.collectionId, sizeType: 'BRACELET' })) as { id: string };
     if (Object.keys(extra).length) expect((await operator.patch(`/api/admin/models/${created.id}`, extra)).statusCode).toBe(200);
     return created.id;
   }

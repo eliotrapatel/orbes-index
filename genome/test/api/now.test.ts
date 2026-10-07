@@ -42,7 +42,7 @@ describe('NOW\'s reads (NOCTURNE N3)', () => {
     h = await createHarness();
     operator = await adminClient(h, 'OPERATOR');
     catalog = await seedCatalog(h.ctx);
-    const aurore = safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name: 'AURORE', type: 'RING', skuPrefix: 'NOW-AU' })) as { id: string };
+    const aurore = safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name: 'AURORE', type: 'RING', skuPrefix: 'NOW-AU', sizeType: 'RING' })) as { id: string };
     auroreId = aurore.id;
     const gold = await operator.post(`/api/admin/models/${catalog.modelId}/variants`, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'NOW-GD', mainLabel: 'Steel', mainSwatch: '#9D9B96' });
     expect(gold.statusCode, gold.body).toBe(201);

@@ -98,7 +98,7 @@ describe('the lookbook of the models (P-R02)', () => {
   async function otherModel(name: string, collection: string | null): Promise<string> {
     const col = collection ? (await h.ctx.db.insertInto('collections').values({ name: collection }).returning('id').executeTakeFirstOrThrow()).id : null;
     const created = safeJson(
-      await operator.post('/api/admin/models', { categoryCode: 'J', name, type: 'PENDANT', skuPrefix: `LB-${name.slice(0, 6)}`, ...(col ? { collectionId: col } : {}) }),
+      await operator.post('/api/admin/models', { categoryCode: 'J', name, type: 'PENDANT', skuPrefix: `LB-${name.slice(0, 6)}`, sizeType: 'ONE_SIZE', ...(col ? { collectionId: col } : {}) }),
     ) as { id: string };
     return created.id;
   }

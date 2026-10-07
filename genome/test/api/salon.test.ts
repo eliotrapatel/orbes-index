@@ -93,8 +93,14 @@ describe('the private salon (P-X08)', () => {
     return { ...a, id: await accountIdOf(a.email) };
   }
 
-  async function newModel(name: string): Promise<string> {
-    const res = await operator.post('/api/admin/models', { categoryCode: 'J', name, type: 'PENDANT', skuPrefix: `SL-${name.slice(0, 6)}` });
+  /**
+   * A model created by the console (of one size, plan NEXT LOT §3.3), or `typeless`, a model of before H1 (its size type
+   * to give, no size yet), as a fixture builds it.
+   */
+  async function newModel(name: string, opts: { typeless?: boolean } = {}): Promise<string> {
+    const input = { categoryCode: 'J', name, type: 'PENDANT', skuPrefix: `SL-${name.slice(0, 6)}` };
+    if (opts.typeless) return (await h.ctx.services.catalog.createModel(input, SYSTEM_ACTOR)).id;
+    const res = await operator.post('/api/admin/models', { ...input, sizeType: 'ONE_SIZE' });
     expect(res.statusCode, res.body).toBe(201);
     return (safeJson(res) as { id: string }).id;
   }
@@ -319,7 +325,7 @@ describe('the private salon (P-X08)', () => {
   });
 
   it('a model of two sizes or more: its sizes and the one YOUR SIZES suggests on the sheet; REQUEST THIS PIECE with one of them or none, never another; the size kept, shown to the console and taken by the ACCEPTED order with its SKU (AC-01)', async () => {
-    const halo = await newModel('HALO');
+    const halo = await newModel('HALO', { typeless: true });
     expect((await operator.patch(model(halo), { slug: 'halo', lookbook: 'RESERVED' })).statusCode).toBe(200);
     const skus = Object.fromEntries(await Promise.all(['54', '50', '52'].map(async (l) => [l, await ensureSku(h.ctx.db, halo, l)] as const)));
     expect((await operator.request('PUT', `${model(halo)}/sizes`, { body: { sizeKind: 'RING' } })).statusCode).toBe(200);

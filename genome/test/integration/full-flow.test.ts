@@ -177,10 +177,13 @@ describe('full flow: issue → print → scan → verify → own → transfer �
         skuPrefix: 'MNL-RG',
         defaultMaterial: '925 STERLING SILVER',
         careInstructions: 'Wipe with a soft, dry cloth after wear.',
+        sizeType: 'RING',
       }),
       201,
     );
     s.modelId = model.id;
+    // Plan NEXT LOT §3.3: a ring's sizes are ticked on its page before a piece names one.
+    expect(json(await s.admin.request('PUT', `/api/admin/models/${model.id}/sizes`, { body: { ticked: ['52'] } }), 200)).toMatchObject({ sizeType: 'RING', offered: 1 });
   });
 
   it('issues O26-J-00184 with a signed code, a genome and a claim code', async () => {

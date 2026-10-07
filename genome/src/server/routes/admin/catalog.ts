@@ -13,7 +13,10 @@
  * ADMIN discontinues a model and reinstates it (P-R06: POST …/discontinue and
  * …/reinstate, no body; the console asks for a typed phrase first). Its sizes
  * (plan NEXT-NINE, AC-01): its size kind and each size's fit, read by AUDITOR
- * and set by OPERATOR (GET and PUT …/sizes). Its pairs (plan NEXT-NINE, BP-34, PAIRS WELL WITH): the models its sheet
+ * and set by OPERATOR (GET and PUT …/sizes); since the next lot (plan NEXT LOT
+ * §3.3) its size type, given at creation, and its declared sizes, ticked (PUT
+ * …/sizes), removed or set aside and reinstated one by one (POST
+ * …/sizes/:skuId/remove and …/reinstate, OPERATOR, no body). Its pairs (plan NEXT-NINE, BP-34, PAIRS WELL WITH): the models its sheet
  * ends with, set by OPERATOR (PUT …/pairs) and read with the model. The
  * services validate, write and audit; these routes only parse and shape.
  */
@@ -28,6 +31,7 @@ import {
   createVariantBody,
   emptyBody,
   modelPairsBody,
+  modelSizeParams,
   modelSizesBody,
   parse,
   updateCollectionBody,
@@ -108,6 +112,7 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
         skuPrefix: b.skuPrefix,
         defaultMaterial: b.defaultMaterial ?? null,
         careInstructions: b.careInstructions ?? null,
+        ...(b.sizeType !== undefined ? { sizeType: b.sizeType } : {}),
       },
       adminActor(request),
     );
@@ -158,7 +163,8 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     return created;
   });
 
-  // AC-01, the model's Sizes: which saved size preselects its size, and the measures each of its sizes fits (in whole mm).
+  // AC-01, the model's Sizes: which saved size preselects its size, and the measures each of its sizes fits (in whole mm);
+  // NEXT LOT §3.3: its size type and its declared sizes.
   app.get('/api/admin/models/:id/sizes', async (request) => {
     const { id } = parse(catalogParams, request.params);
     return sizes.modelSizes(id);
@@ -167,7 +173,30 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
   app.put('/api/admin/models/:id/sizes', async (request) => {
     const { id } = parse(catalogParams, request.params);
     const b = parse(modelSizesBody, request.body);
-    return sizes.setModelSizes(id, { ...(b.sizeKind !== undefined ? { sizeKind: b.sizeKind } : {}), ...(b.fits !== undefined ? { fits: b.fits } : {}) }, adminActor(request));
+    return sizes.change(
+      id,
+      {
+        ...(b.sizeType !== undefined ? { sizeType: b.sizeType } : {}),
+        ...(b.sizeKind !== undefined ? { sizeKind: b.sizeKind } : {}),
+        ...(b.ticked !== undefined ? { ticked: b.ticked } : {}),
+        ...(b.fits !== undefined ? { fits: b.fits } : {}),
+      },
+      adminActor(request),
+    );
+  });
+
+  // NEXT LOT §3.3: one size taken off (removed when nothing uses it, otherwise set aside), or offered again.
+  app.post('/api/admin/models/:id/sizes/:skuId/remove', async (request) => {
+    const { id, skuId } = parse(modelSizeParams, request.params);
+    parse(emptyBody, request.body);
+    const { outcome } = await sizes.removeSize(id, skuId, adminActor(request));
+    return { outcome, sizes: await sizes.modelSizes(id) };
+  });
+
+  app.post('/api/admin/models/:id/sizes/:skuId/reinstate', async (request) => {
+    const { id, skuId } = parse(modelSizeParams, request.params);
+    parse(emptyBody, request.body);
+    return sizes.reinstateSize(id, skuId, adminActor(request));
   });
 
   // BP-34, PAIRS WELL WITH: the models a main model's sheet ends with, in their order (none, or two or three).

@@ -78,7 +78,10 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     // ── Catalogue and issuance ──
     expect((await op.post('/api/admin/categories', { code: 'J', name: 'Jewelry' })).statusCode).toBe(201);
     const col = safeJson(await op.post('/api/admin/collections', { name: 'ORBIT' })) as { id: string };
-    const model = safeJson(await op.post('/api/admin/models', { categoryCode: 'J', collectionId: col.id, name: 'MONOLITHE', type: 'RING', skuPrefix: 'MNL' })) as { id: string };
+    const model = safeJson(await op.post('/api/admin/models', { categoryCode: 'J', collectionId: col.id, name: 'MONOLITHE', type: 'RING', skuPrefix: 'MNL', sizeType: 'RING' })) as { id: string };
+    // Its pieces are issued as on a model of before H1 (plan NEXT LOT §3.3: its size type to give), the Generator's sizes
+    // free text as before.
+    await ctx.db.updateTable('models').set({ size_type: null }).where('id', '=', model.id).execute();
     const issued = await op.post('/api/admin/products', { categoryCode: 'J', modelId: model.id, material: '925 STERLING SILVER', withClaimSecret: true });
     expect(issued.statusCode, issued.body).toBe(201);
     const p = safeJson(issued) as any;

@@ -269,4 +269,26 @@ describe('CatalogService (collections and models)', () => {
       expect((await catalog.getCollection(eclipse)).name).toBe('ECLIPSE NOIRE');
     });
   });
+
+  it('gives a new model its size type (NEXT LOT §3.3 item 6b): its kind derived, ONE SIZE declared at once for a watch or a model of one size, none for a ring; model.create carries it', async () => {
+    const watch = await catalog.createModel({ categoryCode: 'J', name: 'SOLSTICE', type: 'AUTOMATIC WATCH', skuPrefix: 'SOL-WT', sizeType: 'WATCH' }, admin);
+    expect(watch).toMatchObject({ sizeType: 'WATCH', sizesOffered: 1 });
+    const one = await catalog.createModel({ categoryCode: 'J', name: 'NOCTURNE', type: 'FRAGRANCE', skuPrefix: 'NOC-FR', sizeType: 'ONE_SIZE' }, admin);
+    expect(one).toMatchObject({ sizeType: 'ONE_SIZE', sizesOffered: 1 });
+    const ring = await catalog.createModel({ categoryCode: 'J', name: 'ORBITE', type: 'RING', skuPrefix: 'ORB-RG', sizeType: 'RING' }, admin);
+    expect(ring).toMatchObject({ sizeType: 'RING', sizesOffered: 0 });
+    const rows = await t.db.selectFrom('models as m').leftJoin('skus as k', 'k.model_id', 'm.id').select(['m.sku_prefix', 'm.size_type', 'm.size_kind', 'k.code', 'k.size_label']).where('m.id', 'in', [watch.id, one.id, ring.id]).orderBy('m.sku_prefix').execute();
+    expect(rows).toEqual([
+      { sku_prefix: 'NOC-FR', size_type: 'ONE_SIZE', size_kind: null, code: 'NOC-FR', size_label: null },
+      { sku_prefix: 'ORB-RG', size_type: 'RING', size_kind: 'RING', code: null, size_label: null },
+      { sku_prefix: 'SOL-WT', size_type: 'WATCH', size_kind: 'WRIST', code: 'SOL-WT', size_label: null },
+    ]);
+    const created = (await audit.list({ action: 'model.create' })).items.filter((e) => [watch.id, one.id, ring.id].includes(e.targetId!));
+    expect(created.map((e) => (e.details as { sizeType?: string }).sizeType).sort()).toEqual(['ONE_SIZE', 'RING', 'WATCH']);
+    // Without one (a fixture, the demo's seed): no type, as a model of before H1.
+    const typeless = await catalog.createModel({ categoryCode: 'J', name: 'AURORE', type: 'PENDANT', skuPrefix: 'AUR-PD' }, admin);
+    expect(typeless).toMatchObject({ sizeType: null, sizesOffered: 0 });
+    expect((await audit.list({ action: 'model.create', targetId: typeless.id })).items[0]!.details).not.toHaveProperty('sizeType');
+    expect((await domainError(catalog.createModel({ categoryCode: 'J', name: 'X', type: 'RING', skuPrefix: 'X-WR', sizeType: 'WRIST' as never }, admin))).publicMessage).toBe('Give the model its size type.');
+  });
 });

@@ -41,6 +41,7 @@ import {
   SHOP_REQUEST_OUTCOMES,
   SHOP_REQUEST_STATUSES,
   SIZE_KINDS,
+  SIZE_TYPES,
   STAFF_ROLES,
   VERIFICATION_STATES,
 } from '../db/schema.js';
@@ -79,7 +80,7 @@ import {
   LIVE_SIZES,
 } from '../services/live-console.js';
 import { PRICE_LABEL_MAX, SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
-import { FIT_RANGE_MM } from '../services/sizes.js';
+import { FIT_RANGE_MM, TICKED_LABEL_MAX } from '../services/sizes.js';
 import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
 import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../services/salon.js';
 import { SHOPIFY_PERIOD_MAX_DAYS } from '../services/shopify.js';
@@ -477,7 +478,10 @@ export const createModelBody = body({
   skuPrefix,
   defaultMaterial: optionalText(200),
   careInstructions: optionalText(2000),
-});
+  // Plan NEXT LOT §3.3 item 6b: a model is given its size type at creation (a watch or a model of one size has its ONE
+  // SIZE at once; a ring's, a bracelet's or a necklace's sizes are ticked next, on its page).
+  sizeType: z.enum(SIZE_TYPES).optional(),
+}).refine((b) => b.sizeType !== undefined, { message: 'Give the model its size type.' });
 
 /** The letter in `/api/admin/categories/:code/active`, any case. */
 export const categoryParams = z.object({
@@ -1677,11 +1681,24 @@ export const shopifyLinkBody = body({
 /** A size's fit, in whole millimetres of the model's size kind: both or neither (the service checks the pair). */
 const fitMm = z.number().int('A whole number of millimetres').min(FIT_RANGE_MM.min, `From ${FIT_RANGE_MM.min} mm`).max(FIT_RANGE_MM.max, `At most ${FIT_RANGE_MM.max} mm`).nullable();
 
-/** PUT /api/admin/models/:id/sizes: the model's size kind (null: none) and its sizes' fits; either may be left out. */
+/**
+ * PUT /api/admin/models/:id/sizes: the model's size type and the sizes ticked from its list (plan NEXT LOT §3.3), or
+ * next-nine's size kind (null: none; a model with no size type only), and its sizes' fits; at least one of them, never a
+ * size type and a size kind at once.
+ */
 export const modelSizesBody = body({
+  sizeType: z.enum(SIZE_TYPES).optional(),
   sizeKind: z.enum(SIZE_KINDS).nullable().optional(),
+  ticked: z.array(z.string().trim().min(1, 'Required').max(TICKED_LABEL_MAX, `At most ${TICKED_LABEL_MAX} characters`)).max(66, 'At most 66 sizes').optional(),
   fits: z.array(z.strictObject({ skuId: uuid, fitMinMm: fitMm, fitMaxMm: fitMm })).max(200, 'At most 200 sizes').optional(),
-}).refine((b) => b.sizeKind !== undefined || (b.fits !== undefined && b.fits.length > 0), { message: 'Give a size type or a fit' });
+})
+  .refine((b) => b.sizeType === undefined || b.sizeKind === undefined, { message: 'Give a size type or a size kind, not both.' })
+  .refine((b) => b.sizeType !== undefined || b.sizeKind !== undefined || b.ticked !== undefined || (b.fits !== undefined && b.fits.length > 0), {
+    message: 'Give a size type, the sizes ticked or a fit',
+  });
+
+/** POST /api/admin/models/:id/sizes/:skuId/remove and …/reinstate: one of the model's sizes. */
+export const modelSizeParams = z.object({ id: uuid, skuId: uuid });
 
 // ── A model's pairs (plan NEXT-NINE, BP-34) ────────────────────────────────
 

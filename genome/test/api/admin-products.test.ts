@@ -44,13 +44,17 @@ describe('admin products, codes and records', () => {
         skuPrefix: 'mnl-rg',
         defaultMaterial: '925 STERLING SILVER',
         careInstructions: 'Polish with a soft dry cloth.',
+        sizeType: 'RING',
       });
       expect(model.statusCode, model.body).toBe(201);
       const m = safeJson(model) as any;
-      expect(m).toMatchObject({ name: 'MONOLITHE', type: 'RING', skuPrefix: 'MNL-RG', category: { code: 'J' }, collection: { id: collectionId, name: 'ORBIT' } });
+      expect(m).toMatchObject({ name: 'MONOLITHE', type: 'RING', skuPrefix: 'MNL-RG', category: { code: 'J' }, collection: { id: collectionId, name: 'ORBIT' }, sizeType: 'RING', sizesOffered: 0 });
       modelId = m.id;
-      expect((await operator.post('/api/admin/models', { categoryCode: 'J', name: 'X', type: 'Y', skuPrefix: 'MNL-RG' })).statusCode).toBe(409);
-      expect((await operator.post('/api/admin/models', { categoryCode: 'Q', name: 'X', type: 'Y', skuPrefix: 'NEW' })).statusCode).toBe(404);
+      // The pieces below are issued as on a model of before H1 (plan NEXT LOT §3.3: its size type to give), whose
+      // Generator sizes are free text as before; a typed model's are sizes.test.ts's and issuance.test.ts's.
+      await h.ctx.db.updateTable('models').set({ size_type: null }).where('id', '=', modelId).execute();
+      expect((await operator.post('/api/admin/models', { categoryCode: 'J', name: 'X', type: 'Y', skuPrefix: 'MNL-RG', sizeType: 'ONE_SIZE' })).statusCode).toBe(409);
+      expect((await operator.post('/api/admin/models', { categoryCode: 'Q', name: 'X', type: 'Y', skuPrefix: 'NEW', sizeType: 'ONE_SIZE' })).statusCode).toBe(404);
 
       const lists = await Promise.all(['/api/admin/categories', '/api/admin/collections', '/api/admin/models'].map((u) => auditor.get(u)));
       for (const l of lists) {
@@ -127,7 +131,7 @@ describe('admin products, codes and records', () => {
     });
 
     it('names the model variant on the list rows (modelVariant) and the detail (model.variant), null without a label (NEXT LOT §3.1)', async () => {
-      const created = await operator.post('/api/admin/models', { categoryCode: 'J', collectionId, name: 'ORBITE', type: 'BRACELET', skuPrefix: 'ORB-BR', defaultMaterial: '925 STERLING SILVER' });
+      const created = await operator.post('/api/admin/models', { categoryCode: 'J', collectionId, name: 'ORBITE', type: 'BRACELET', skuPrefix: 'ORB-BR', defaultMaterial: '925 STERLING SILVER', sizeType: 'ONE_SIZE' });
       expect(created.statusCode, created.body).toBe(201);
       const main = (safeJson(created) as any).id as string;
       const variant = await operator.post(`/api/admin/models/${main}/variants`, { label: 'Blue', swatch: '#1F3A6B', skuPrefix: 'ORB-BL', mainLabel: 'Steel', mainSwatch: '#C9CCD1' });

@@ -70,7 +70,7 @@
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import { LOOKBOOK_STATES, type LookbookState } from '../db/schema.js';
+import { LOOKBOOK_STATES, SIZE_TYPES, type LookbookState, type SizeType } from '../db/schema.js';
 import { conflict, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -78,6 +78,8 @@ import type { CategoryRegistry } from './categories.js';
 import { normalizeMinTier, normalizePriceLabel, normalizeSlug, normalizeSpecs, normalizeStory, pairsFallbackOf, plainText, storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES } from './orders.js';
+import { LISTED_SIZE_TYPES, SIZE_TYPE_KIND } from './sizes.js';
+import { ensureSku } from './stock.js';
 
 /** A model's care guide, at most (models.care_guide, migration 0022). */
 export const CARE_GUIDE_MAX = 8000;
@@ -158,6 +160,9 @@ export interface ModelRecord {
   variantSwatch: string | null;
   /** N1: a main model's variants, in the order they were added; none for a variant, nor for a model alone. */
   variants: ModelVariantRecord[];
+  /** Plan NEXT LOT §3.3: its size type (null: to give), and how many of its declared sizes are offered. */
+  sizeType: SizeType | null;
+  sizesOffered: number;
   createdAt: Date;
   /**
    * Plan NEXT-NINE, BP-34 (PAIRS WELL WITH), on one model read alone (getModel): the models its sheet ends with, in their
@@ -277,6 +282,11 @@ export interface CreateModelInput {
   skuPrefix: string;
   defaultMaterial?: string | null;
   careInstructions?: string | null;
+  /**
+   * Plan NEXT LOT §3.3: its size type (POST /api/admin/models requires it; optional here for the fixtures and the demo
+   * seed that build models directly). A watch or a model of one size declares ONE SIZE at once.
+   */
+  sizeType?: SizeType;
 }
 
 /**
@@ -531,6 +541,8 @@ export class CatalogService {
     const defaultMaterial = optionalText(input.defaultMaterial, 'Default material', 200);
     const careInstructions = optionalText(input.careInstructions, 'Care instructions', 2000);
     const collectionId = input.collectionId ?? null;
+    const sizeType = input.sizeType;
+    if (sizeType !== undefined && !(SIZE_TYPES as readonly string[]).includes(sizeType)) throw validationError('Give the model its size type.');
 
     const category = /^[A-Z]$/.test(categoryCode) ? await this.categories.getByCode(categoryCode) : undefined;
     if (!category) throw notFound('Category', 'CATEGORY_NOT_FOUND');
@@ -550,17 +562,21 @@ export class CatalogService {
             sku_prefix: skuPrefix,
             default_material: defaultMaterial,
             care_instructions: careInstructions,
+            ...(sizeType !== undefined ? { size_type: sizeType, size_kind: SIZE_TYPE_KIND[sizeType] } : {}),
             created_at: this.clock(),
           })
           .returning('id')
           .executeTakeFirstOrThrow();
+        // §3.3 item 6b: a watch or a model of one size has its one size at once; a ring's, a bracelet's or a necklace's
+        // sizes are ticked next, on its page (until then, every flow naming a size of it is refused).
+        if (sizeType !== undefined && !LISTED_SIZE_TYPES.includes(sizeType)) await ensureSku(tx, r.id, null);
         await this.audit.record(
           {
             actor,
             action: 'model.create',
             targetType: 'model',
             targetId: r.id,
-            details: { name, type, skuPrefix, category: category.code, collectionId },
+            details: { name, type, skuPrefix, category: category.code, collectionId, ...(sizeType !== undefined ? { sizeType } : {}) },
           },
           tx,
         );
@@ -960,6 +976,7 @@ export class CatalogService {
         'm.variant_of',
         'm.variant_label',
         'm.variant_swatch',
+        'm.size_type',
         'm.created_at',
         'c.id as category_index',
         'c.code as category_code',
@@ -973,6 +990,8 @@ export class CatalogService {
         eb.selectFrom('skus as k').select((k) => k.fn.max('k.shopify_product_id').as('p')).whereRef('k.model_id', '=', 'm.id').as('shopify_product_id'),
         eb.selectFrom('skus as k').select((k) => k.fn.countAll<number>().as('n')).whereRef('k.model_id', '=', 'm.id').as('sku_count'),
         eb.selectFrom('skus as k').select((k) => k.fn.countAll<number>().as('n')).whereRef('k.model_id', '=', 'm.id').where('k.shopify_variant_id', 'is not', null).as('variants_linked'),
+        // Plan NEXT LOT §3.3: its offered sizes (the Catalogue's line).
+        eb.selectFrom('skus as k').select((k) => k.fn.countAll<number>().as('n')).whereRef('k.model_id', '=', 'm.id').where('k.set_aside_at', 'is', null).as('sizes_offered'),
       ]);
   }
 
@@ -1095,6 +1114,8 @@ type ModelQueryRow = {
   shopify_product_id: string | null;
   sku_count: number | string | null;
   variants_linked: number | string | null;
+  size_type: SizeType | null;
+  sizes_offered: number | string | null;
   created_at: Date;
   category_index: number;
   category_code: string;
@@ -1155,6 +1176,8 @@ function toModelRecord(r: ModelQueryRow, gallery: GalleryImageRecord[], others: 
     variantLabel: r.variant_label,
     variantSwatch: r.variant_swatch,
     variants,
+    sizeType: r.size_type,
+    sizesOffered: Number(r.sizes_offered ?? 0),
     createdAt: r.created_at,
   };
 }

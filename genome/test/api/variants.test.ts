@@ -243,7 +243,7 @@ describe('the variants of a model (NOCTURNE N1)', () => {
     expect((await audits('model.update', gold!.id)).at(-1)!.details).toMatchObject({ before: { variantLabel: 'Gold', variantSwatch: '#B88A3A' }, after: { variantLabel: 'Yellow gold', variantSwatch: '#F0D692' } });
     expect((safeJson(await operator.patch(url(gold!.id), { variantLabel: 'Gold', variantSwatch: '#B88A3A' })) as ModelJson).variantLabel).toBe('Gold');
     // A model alone may drop its own.
-    const alone = safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name: 'AURORE', type: 'PENDANT', skuPrefix: 'VAR-AUR' })) as ModelJson;
+    const alone = safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name: 'AURORE', type: 'PENDANT', skuPrefix: 'VAR-AUR', sizeType: 'ONE_SIZE' })) as ModelJson;
     expect((safeJson(await operator.patch(url(alone.id), { variantLabel: 'Silver', variantSwatch: '#D7D5D0' })) as ModelJson).variantLabel).toBe('Silver');
     expect((safeJson(await operator.patch(url(alone.id), { variantLabel: '', variantSwatch: '' })) as ModelJson).variantLabel).toBeNull();
     // The list says the same as the page; the page adds the model's pairs (plan NEXT-NINE, BP-34), which the list leaves out.
@@ -310,7 +310,7 @@ describe('the variants of a model (NOCTURNE N1)', () => {
 
   it('THE PRIVATE SALON: its reserved variants one entry with their prices; each dot of a sheet with the account\'s own request', async () => {
     const main = await read(catalog.modelId);
-    const salon = safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name: 'ZENITH', type: 'BRACELET', skuPrefix: 'VAR-ZN' })) as ModelJson;
+    const salon = safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name: 'ZENITH', type: 'BRACELET', skuPrefix: 'VAR-ZN', sizeType: 'BRACELET' })) as ModelJson;
     const night = safeJson(await addVariant(salon.id, { label: 'Night', swatch: '#0A0A0A', skuPrefix: 'VAR-ZN-NT', mainLabel: 'Day', mainSwatch: '#F6F2EA' })) as ModelJson;
     expect((await operator.patch(url(salon.id), { lookbook: 'RESERVED', slug: 'variants-zenith', priceLabel: '€ 4 800', privateMinTier: 1 })).statusCode).toBe(200);
     expect((await operator.patch(url(night.id), { lookbook: 'RESERVED', slug: 'variants-zenith-night', priceLabel: '€ 5 200', privateMinTier: 1 })).statusCode).toBe(200);

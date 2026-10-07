@@ -11,7 +11,7 @@
  *
  * The server checks everything again (services/sizes.ts); the ranges and units are constants, never a setting.
  */
-import type { ModelSizeRow, ModelSizes, ModelSizesChange, SizeKind } from '../types.js';
+import type { ModelSizeRow, ModelSizes, ModelSizesChange, SizeKind, SizeType } from '../types.js';
 
 /** What each size type is called in the console. */
 export const SIZE_KIND_NAMES: Readonly<Record<SizeKind, string>> = Object.freeze({
@@ -26,6 +26,21 @@ export const SIZE_KIND_OPTIONS: readonly { value: string; label: string }[] = Ob
   { value: '', label: 'None' },
   ...(Object.keys(SIZE_KIND_NAMES) as SizeKind[]).map((k) => ({ value: k, label: SIZE_KIND_NAMES[k] })),
 ]);
+
+/** What each size type is called in the console's choices (plan NEXT LOT §3.3): a watch is one size. */
+export const SIZE_TYPE_CHOICES: Readonly<Record<SizeType, string>> = Object.freeze({
+  RING: 'Ring size',
+  BRACELET: 'Bracelet size',
+  NECKLACE: 'Necklace length',
+  WATCH: 'Watch (one size)',
+  ONE_SIZE: 'One size',
+});
+
+/** The `New model` dialog's Size type (plan NEXT LOT §3.3 item 6b): required, Choose first. */
+export const NEW_MODEL_SIZE_TYPE = Object.freeze({
+  options: Object.freeze([{ value: '', label: 'Choose' }, ...(Object.keys(SIZE_TYPE_CHOICES) as SizeType[]).map((t) => ({ value: t, label: SIZE_TYPE_CHOICES[t] }))]),
+  hint: 'A ring’s, a bracelet’s or a necklace’s sizes are ticked next, on its page.',
+});
 
 /** The section's words, as the plan has them. */
 export const SIZES_TEXT = Object.freeze({

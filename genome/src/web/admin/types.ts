@@ -475,6 +475,9 @@ export interface Model {
   variantSwatch: string | null;
   /** N1: a main model's variants, in the order they were added; none for a variant, nor for a model alone. */
   variants: ModelVariant[];
+  /** Plan NEXT LOT §3.3: its size type (null: to give), and how many of its declared sizes are offered. */
+  sizeType: SizeType | null;
+  sizesOffered: number;
   createdAt: Iso;
   /**
    * Plan NEXT-NINE, BP-34 (Pairs well with), on a model read alone: the models its sheet ends with, in their order, as

@@ -56,10 +56,11 @@ import {
 import { can } from '../model/permissions.js';
 import { basePriceText, productExportSummary, SHOPIFY_CURRENCY_OPTIONS, shopifyLinkInput, shopifyLinkProblem, shopifyStatus, shopifyValues, variantField } from '../model/shopify.js';
 import { modelPhotoImpact } from '../model/photo.js';
+import { NEW_MODEL_SIZE_TYPE } from '../model/sizes.js';
 import { variantLine } from '../model/variants.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { ORDER_CURRENCIES, type Category, type Collection, type Model } from '../types.js';
+import { ORDER_CURRENCIES, type Category, type Collection, type Model, type SizeType } from '../types.js';
 import { button, linkButton, mono, pageHeader, section, statusMark, table, type Column } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
@@ -152,6 +153,8 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'skuPrefix', label: 'SKU prefix (e.g. MNL-RG)', required: true, maxlength: 32 },
         { name: 'defaultMaterial', label: 'Default material', maxlength: 200 },
         { name: 'careInstructions', label: 'Care instructions', kind: 'textarea', maxlength: 2000 },
+        // Plan NEXT LOT §3.3 item 6b: every new model is given its size type.
+        { name: 'sizeType', label: 'Size type', kind: 'select', required: true, options: [...NEW_MODEL_SIZE_TYPE.options], value: '', hint: NEW_MODEL_SIZE_TYPE.hint },
       ],
       validate: (v) => (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v.skuPrefix.trim()) ? 'SKU prefix: letters, digits, dot, underscore, hyphen.' : null),
       confirmLabel: 'Create model',
@@ -161,6 +164,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
           name: v.name.trim(),
           type: v.type.trim(),
           skuPrefix: v.skuPrefix.trim(),
+          sizeType: v.sizeType as SizeType,
           ...(v.collectionId ? { collectionId: v.collectionId } : {}),
           ...(v.defaultMaterial?.trim() ? { defaultMaterial: v.defaultMaterial.trim() } : {}),
           ...(v.careInstructions?.trim() ? { careInstructions: v.careInstructions.trim() } : {}),

@@ -19,7 +19,7 @@
  * ADMIN; THE PROGRAM of the club's tiers and the orders' shipping rates, BP-19 T2, read by an AUDITOR, set by an ADMIN;
  * the Yearly care board, BP-19 T6, read by an AUDITOR, its steps taken by an OPERATOR; THE HOUSE'S GUARANTEE, IN-01,
  * granted, changed and revoked by an OPERATOR, its defaults read by an AUDITOR and set by an ADMIN; a model's Sizes, AC-01,
- * read by an AUDITOR and set by an OPERATOR; GROWTH, BP-29, read by an AUDITOR);
+ * read by an AUDITOR and set by an OPERATOR, its sizes declared, removed and reinstated by an OPERATOR (NEXT LOT §3.3); GROWTH, BP-29, read by an AUDITOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -232,6 +232,9 @@ const PROBES: Probe[] = [
   // AC-01: a model's Sizes (its size kind and its sizes' fits) read by an AUDITOR, set by an OPERATOR.
   { group: 'sizes', method: 'GET', url: `/api/admin/models/${UUID}/sizes`, min: 'AUDITOR' },
   { group: 'sizes', method: 'PUT', url: `/api/admin/models/${UUID}/sizes`, body: INVALID, min: 'OPERATOR' },
+  // NEXT LOT §3.3: a size taken off a model (removed or set aside) and reinstated, by an OPERATOR.
+  { group: 'sizes', method: 'POST', url: `/api/admin/models/${UUID}/sizes/${UUID}/remove`, min: 'OPERATOR' },
+  { group: 'sizes', method: 'POST', url: `/api/admin/models/${UUID}/sizes/${UUID}/reinstate`, min: 'OPERATOR' },
   // BP-34: a model's pairs (PAIRS WELL WITH) set by an OPERATOR; read with the model (GET /api/admin/models/:id, AUDITOR).
   { group: 'pairs', method: 'PUT', url: `/api/admin/models/${UUID}/pairs`, body: INVALID, min: 'OPERATOR' },
   // Plan LIVE RELEASE+: the orders read by an AUDITOR, stepped by an OPERATOR, their alerts' delays set by an ADMIN; the

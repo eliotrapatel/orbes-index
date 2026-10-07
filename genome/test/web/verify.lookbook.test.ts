@@ -648,6 +648,8 @@ describe('the console\'s Lookbook page (P-R02)', () => {
     variantLabel: null,
     variantSwatch: null,
     variants: [],
+    sizeType: null,
+    sizesOffered: 0,
     createdAt: '2026-10-01T08:00:00.000Z',
     ...extra,
   });

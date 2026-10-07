@@ -648,7 +648,7 @@ describe('every admin mutation lands in the hash-chained audit log, attributed t
 
     const cat = await step('category', () => admin.post('/api/admin/categories', { code: 'K', name: 'Leather', warrantyMonths: 24 }));
     const col = await step('collection', () => admin.post('/api/admin/collections', { name: 'AUDIT-COLLECTION' }));
-    const model = await step('model', () => admin.post('/api/admin/models', { categoryCode: cat.code, collectionId: col.id, name: 'M', type: 'BAG', skuPrefix: 'AUD-1' }));
+    const model = await step('model', () => admin.post('/api/admin/models', { categoryCode: cat.code, collectionId: col.id, name: 'M', type: 'BAG', skuPrefix: 'AUD-1', sizeType: 'ONE_SIZE' }));
     const issued = await step('issue', () => admin.post('/api/admin/products', { categoryCode: cat.code, modelId: model.id, material: 'CALF' }));
     const pid = issued.product.productId as string;
     await step('artifact', () => admin.get(`/api/admin/codes/${issued.code.id}/artifact.svg`));

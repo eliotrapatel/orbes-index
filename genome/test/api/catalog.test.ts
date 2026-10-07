@@ -6,10 +6,13 @@
  * pieces; its category and SKU prefix never change; an inactive model or
  * category issues no new piece (409) while its pieces verify as before.
  * An ADMIN discontinues a model and reinstates it (P-R06: POST
- * /api/admin/models/:id/discontinue and /reinstate).
+ * /api/admin/models/:id/discontinue and /reinstate). A model is created with
+ * its size type (plan NEXT LOT §3.3 item 6b: POST /api/admin/models).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { inTransaction } from '../../src/server/db/connection.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
+import { offeredSku } from '../../src/server/services/sizes.js';
 import { adminClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 interface ModelJson {
@@ -228,5 +231,28 @@ describe('the editable catalogue (A-10)', () => {
     expect(entries[0].details).toEqual({ name: 'MONOLITHE II', skuPrefix: expect.stringMatching(/^MNL-/), discontinuedAt: m.discontinuedAt, wasActive: true, issuedPieces: expect.any(Number) });
     expect(entries[1].details).toMatchObject({ discontinuedAt: m.discontinuedAt });
     expect((await operator.patch(`/api/admin/models/${catalog.modelId}`, { lookbook: 'HIDDEN', careInstructions: 'Polish with a soft dry cloth.' })).statusCode).toBe(200);
+  });
+
+  it('POST /api/admin/models requires the size type (NEXT LOT §3.3 item 6b): ONE SIZE declared at once for a watch or a model of one size; a ring\'s sizes ticked next, none named before', async () => {
+    const create = (body: Record<string, unknown>) => operator.post('/api/admin/models', { categoryCode: 'J', name: 'SOLSTICE', type: 'AUTOMATIC WATCH', ...body });
+    let res = await create({ skuPrefix: 'API-WT' });
+    expect(res.statusCode).toBe(400);
+    expect(errorOf(res)).toEqual({ code: 'VALIDATION_FAILED', message: 'Give the model its size type.' });
+    expect((await create({ skuPrefix: 'API-WT', sizeType: 'WRIST' })).statusCode).toBe(400);
+    res = await create({ skuPrefix: 'API-WT', sizeType: 'WATCH' });
+    expect(res.statusCode, res.body).toBe(201);
+    const watch = safeJson(res) as ModelJson & { sizeType: string; sizesOffered: number };
+    expect(watch).toMatchObject({ sizeType: 'WATCH', sizesOffered: 1 });
+    expect(safeJson(await auditor.get(`/api/admin/models/${watch.id}/sizes`))).toMatchObject({ sizeType: 'WATCH', sizeKind: 'WRIST', offered: 1, sizes: [{ label: null, code: 'API-WT' }] });
+    res = await create({ name: 'ORBITE', type: 'RING', skuPrefix: 'API-RG', sizeType: 'RING' });
+    expect(res.statusCode, res.body).toBe(201);
+    const ring = safeJson(res) as ModelJson;
+    expect(safeJson(await auditor.get(`/api/admin/models/${ring.id}/sizes`))).toMatchObject({ sizeType: 'RING', offered: 0, sizes: [] });
+    // Until a size is ticked, every flow naming a size of it is refused.
+    for (const label of ['52', null]) {
+      await expect(inTransaction(h.ctx.db, (tx) => offeredSku(tx, ring.id, label))).rejects.toMatchObject({ code: 'SIZE_NOT_DECLARED', httpStatus: 400 });
+    }
+    const created = (await h.ctx.audit.list({ action: 'model.create', targetId: ring.id })).items[0]!;
+    expect(created.details).toMatchObject({ skuPrefix: 'API-RG', sizeType: 'RING' });
   });
 });

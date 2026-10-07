@@ -117,6 +117,7 @@ import type {
   ModelChange,
   ModelSizes,
   ModelSizesChange,
+  SizeType,
   VariantInput,
   OwnerList,
   ShippingRate,
@@ -529,6 +530,8 @@ export class AdminApi {
     collectionId?: string;
     defaultMaterial?: string;
     careInstructions?: string;
+    /** Plan NEXT LOT §3.3: required since H1. */
+    sizeType: SizeType;
   }): Promise<Model> {
     return this.post('/api/admin/models', input);
   }

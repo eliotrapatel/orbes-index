@@ -386,8 +386,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await page.fill('dialog input[name=type]', 'PENDANT');
     await page.fill('dialog input[name=skuPrefix]', 'ECL-PD');
     await page.fill('dialog input[name=defaultMaterial]', '18K YELLOW GOLD');
+    // Plan NEXT LOT §3.3 item 6b: every new model is given its size type, required.
+    await page.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    expect(await page.locator('dialog select[name=sizeType] option').allTextContents()).toEqual(['Choose', 'Ring size', 'Bracelet size', 'Necklace length', 'Watch (one size)', 'One size']);
+    await page.selectOption('dialog select[name=sizeType]', 'NECKLACE');
     await confirmDialog(page);
     await page.waitForSelector('.toast:has-text("Model created.")');
+    expect((await ctx.db.selectFrom('models').select(['size_type', 'size_kind']).where('sku_prefix', '=', 'ECL-PD').executeTakeFirstOrThrow())).toEqual({ size_type: 'NECKLACE', size_kind: 'NECKLACE' });
     await expect.poll(() => page.locator('td:has-text("ECL-PD")').count()).toBe(1);
     await shot(page, 'catalogue');
   }, STEP_TIMEOUT);
