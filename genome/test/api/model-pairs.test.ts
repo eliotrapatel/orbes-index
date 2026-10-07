@@ -64,6 +64,8 @@ describe('PAIRS WELL WITH in the console (plan NEXT-NINE, BP-34): PUT /api/admin
     expect(v.statusCode, v.body).toBe(201);
     blue = (safeJson(v) as { id: string }).id;
     a = await model('ZENITH', { lookbook: 'RESERVED', slug: 'zenith' });
+    // ORBIT is published a minute after ZENITH: the collection's newest first is ORBIT, then ZENITH.
+    h.clock.advance(60_000);
     b = await model('ORBIT', { lookbook: 'PUBLIC', slug: 'orbit' });
     c = await model('NOCTURNE');
     d = await model('ECLIPSE', { lookbook: 'PUBLIC', slug: 'eclipse' });
@@ -125,22 +127,28 @@ describe('PAIRS WELL WITH in the console (plan NEXT-NINE, BP-34): PUT /api/admin
   });
 
   it('reads each pair with whether the sheet shows it, what the sheet shows without them, and a variant\'s as its main model\'s', async () => {
-    expect((await put(main, [b, a, d])).statusCode).toBe(200);
+    expect((await put(main, [a, b, d])).statusCode).toBe(200);
     const m = await read(main);
     expect(m.pairs.map((p) => [p.name, p.lookbook, p.slug, p.shown])).toEqual([
-      ['ORBIT', 'PUBLIC', 'orbit', 'EVERYONE'],
       ['ZENITH', 'RESERVED', 'zenith', 'SALON'],
+      ['ORBIT', 'PUBLIC', 'orbit', 'EVERYONE'],
       ['ECLIPSE', 'PUBLIC', 'eclipse', 'DISCONTINUED'],
     ]);
     expect(Object.keys(m.pairs[0]!).sort()).toEqual(['id', 'label', 'lookbook', 'name', 'position', 'shown', 'slug', 'swatch']);
     // Without picks, the sheet would show the other models of the collection as an owner reads them, the newest first:
-    // ORBIT and ZENITH (NOCTURNE is hidden, ECLIPSE discontinued, MONOLITHE has no address).
-    expect(m.pairsFallback).toEqual([
+    // ORBIT, then ZENITH (NOCTURNE is hidden, ECLIPSE discontinued, MONOLITHE has no address), never the picks' order
+    // (ZENITH, then ORBIT) although two picks show.
+    const fallback = [
       { name: 'ORBIT', label: null },
       { name: 'ZENITH', label: null },
-    ]);
-    // A variant's record carries its main model's pairs.
-    expect((await read(blue)).pairs.map((p) => p.id)).toEqual([b, a, d]);
+    ];
+    expect(m.pairsFallback).toEqual(fallback);
+    // A variant's record carries its main model's pairs, and the same fallback.
+    expect((await read(blue)).pairs.map((p) => p.id)).toEqual([a, b, d]);
+    expect((await read(blue)).pairsFallback).toEqual(fallback);
+    // Without picks, the fallback is the same.
+    expect((await put(main, [])).statusCode).toBe(200);
+    expect((await read(main)).pairsFallback).toEqual(fallback);
     // A hidden pick reads Not shown.
     expect((await put(main, [c, b])).statusCode).toBe(200);
     expect((await read(main)).pairs.map((p) => p.shown)).toEqual(['HIDDEN', 'EVERYONE']);

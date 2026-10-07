@@ -75,7 +75,7 @@ import { conflict, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import type { CategoryRegistry } from './categories.js';
-import { normalizeMinTier, normalizePriceLabel, normalizeSlug, normalizeSpecs, normalizeStory, pairsOf, plainText, storyFingerprint } from './lookbook.js';
+import { normalizeMinTier, normalizePriceLabel, normalizeSlug, normalizeSpecs, normalizeStory, pairsFallbackOf, plainText, storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES } from './orders.js';
 
@@ -166,7 +166,7 @@ export interface ModelRecord {
   pairs?: ModelPairRecord[];
   /**
    * BP-34: what the sheet shows when no pick is shown, up to three models of its collection as an owner of the highest
-   * tier reads them (services/lookbook.ts pairsOf); empty: nothing (no other model shown in its collection, or none).
+   * tier reads them, whatever the picks (services/lookbook.ts pairsFallbackOf); empty: nothing (no other model shown in its collection, or none).
    */
   pairsFallback?: { name: string; label: string | null }[];
 }
@@ -174,7 +174,7 @@ export interface ModelRecord {
 /**
  * A model picked for PAIRS WELL WITH (BP-34), as the console lists it: its place, the model (its name and label among
  * its variants), its place in the lookbook and whether the sheet shows it: to EVERYONE (PUBLIC), to the owners of the
- * salon's tier (SALON: RESERVED), or not (HIDDEN; DISCONTINUED; NO_ADDRESS).
+ * salon's tier (SALON: RESERVED), or not (HIDDEN: hidden or without an address; DISCONTINUED).
  */
 export interface ModelPairRecord {
   position: number;
@@ -441,7 +441,7 @@ export class CatalogService {
     // BP-34: the pairs of its main model (a variant's sheet is its main model's), and what the sheet shows without them.
     const root = mainId ?? id;
     const rootCollection = mainId ? (related.find((r) => r.id === mainId)?.collection_id ?? null) : row.collection_id;
-    const [pairs, fallback] = await Promise.all([this.pairRecords(root), pairsOf(this.db, root, rootCollection, 3)]);
+    const [pairs, fallback] = await Promise.all([this.pairRecords(root), pairsFallbackOf(this.db, root, rootCollection, 3)]);
     return {
       ...toModelRecord(row, (await this.galleries(id)).get(id) ?? [], related),
       pairs,

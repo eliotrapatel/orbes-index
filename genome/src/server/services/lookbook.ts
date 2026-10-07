@@ -322,63 +322,84 @@ export interface ModelPair {
 /**
  * PAIRS WELL WITH (plan NEXT-NINE, BP-34) of the sheet of the group led by `rootId` (its main model, or a model alone),
  * for a reader of `tier` (0 signed out, or an account that holds no piece): (a) the picks of the main model
- * (`model_pairs`), in their order, each the reader may see (PUBLIC; RESERVED only from its `private_min_tier`, an owner),
- * never discontinued nor without an address, `variant` set only when the pick is itself a variant; (b) when none of them
- * shows, the models of the sheet's collection (`collectionId`) by the same rule, one per variant group (its lead: the
- * main model, else its first variant shown), never the sheet's own group, the latest published first, then by name, at
- * most PAIRS_FALLBACK_MAX; a model with no collection gets none.
+ * (`pairPicks`) when at least one of them shows; (b) else what the sheet shows without them (`pairsFallbackOf`).
  */
 export async function pairsOf(db: Db, rootId: string, collectionId: string | null, tier: number): Promise<ModelPair[]> {
+  const picks = await pairPicks(db, rootId, tier);
+  return picks.length > 0 ? picks : pairsFallbackOf(db, rootId, collectionId, tier);
+}
+
+/** The models a reader of `tier` may see (PUBLIC; RESERVED only from its `private_min_tier`), never discontinued nor without an address. */
+function visiblePairs(db: Db, tier: number) {
   const shown: LookbookState[] = tier >= 1 ? ['PUBLIC', 'RESERVED'] : ['PUBLIC'];
-  const visible = () =>
-    db
-      .selectFrom('models as m')
-      .select((eb) => [
-        'm.id',
-        'm.slug',
-        'm.name',
-        'm.type',
-        'm.lookbook',
-        'm.image_sha256',
-        'm.variant_of',
-        'm.variant_label',
-        'm.created_at',
-        'm.published_at',
-        eb.selectFrom('model_images as mi').select('mi.sha256').whereRef('mi.model_id', '=', 'm.id').orderBy('mi.position').limit(1).as('first_image'),
-      ])
-      .where('m.slug', 'is not', null)
-      .where('m.discontinued_at', 'is', null)
-      .where('m.lookbook', 'in', shown)
-      .where((eb) => eb.or([eb('m.lookbook', '<>', 'RESERVED'), eb('m.private_min_tier', '<=', tier)]));
-  type Row = Awaited<ReturnType<ReturnType<typeof visible>['execute']>>[number];
-  const card = (r: Row): ModelPair => ({
+  return db
+    .selectFrom('models as m')
+    .select((eb) => [
+      'm.id',
+      'm.slug',
+      'm.name',
+      'm.type',
+      'm.lookbook',
+      'm.image_sha256',
+      'm.variant_of',
+      'm.variant_label',
+      'm.created_at',
+      'm.published_at',
+      eb.selectFrom('model_images as mi').select('mi.sha256').whereRef('mi.model_id', '=', 'm.id').orderBy('mi.position').limit(1).as('first_image'),
+    ])
+    .where('m.slug', 'is not', null)
+    .where('m.discontinued_at', 'is', null)
+    .where('m.lookbook', 'in', shown)
+    .where((eb) => eb.or([eb('m.lookbook', '<>', 'RESERVED'), eb('m.private_min_tier', '<=', tier)]));
+}
+
+type PairRow = Awaited<ReturnType<ReturnType<typeof visiblePairs>['execute']>>[number];
+
+function pairCard(r: PairRow): ModelPair {
+  return {
     slug: r.slug!,
     name: r.name,
     type: r.type,
     variant: r.variant_of !== null ? r.variant_label : null,
     imageUrl: mediaUrl(r.image_sha256) ?? mediaUrl(r.first_image),
     reserved: r.lookbook === 'RESERVED',
-  });
-  const picks = await visible()
+  };
+}
+
+/**
+ * BP-34 (a): the picks of the main model `rootId` (`model_pairs`), in their order, each a reader of `tier` may see,
+ * `variant` set only when the pick is itself a variant; empty when none shows.
+ */
+export async function pairPicks(db: Db, rootId: string, tier: number): Promise<ModelPair[]> {
+  const picks = await visiblePairs(db, tier)
     .innerJoin('model_pairs as p', 'p.paired_model_id', 'm.id')
     .where('p.model_id', '=', rootId)
     .orderBy('p.position')
     .execute();
-  if (picks.length > 0) return picks.map(card);
+  return picks.map(pairCard);
+}
+
+/**
+ * BP-34 (b): what the sheet of the group led by `rootId` shows when none of its picks shows, whatever its picks: the
+ * models of the sheet's collection (`collectionId`) a reader of `tier` may see, one per variant group (its lead: the
+ * main model, else its first variant shown), never the sheet's own group, the latest published first, then by name, at
+ * most PAIRS_FALLBACK_MAX; a model with no collection gets none.
+ */
+export async function pairsFallbackOf(db: Db, rootId: string, collectionId: string | null, tier: number): Promise<ModelPair[]> {
   if (collectionId === null) return [];
-  const rows = await visible()
+  const rows = await visiblePairs(db, tier)
     .where('m.collection_id', '=', collectionId)
     .where('m.id', '<>', rootId)
     .where((eb) => eb.or([eb('m.variant_of', 'is', null), eb('m.variant_of', '<>', rootId)]))
     .execute();
-  const groups = new Map<string, Row[]>();
+  const groups = new Map<string, PairRow[]>();
   for (const r of rows) groups.set(r.variant_of ?? r.id, [...(groups.get(r.variant_of ?? r.id) ?? []), r]);
-  const latest = (g: readonly Row[]) => Math.max(...g.map((r) => (r.published_at ? r.published_at.getTime() : -Infinity)));
+  const latest = (g: readonly PairRow[]) => Math.max(...g.map((r) => (r.published_at ? r.published_at.getTime() : -Infinity)));
   return [...groups.entries()]
     .map(([root, g]) => ({ lead: sortGroup(g, root)[0]!, at: latest(g) }))
     .sort((a, b) => b.at - a.at || (a.lead.name < b.lead.name ? -1 : a.lead.name > b.lead.name ? 1 : 0) || (a.lead.slug! < b.lead.slug! ? -1 : 1))
     .slice(0, PAIRS_FALLBACK_MAX)
-    .map(({ lead }) => card(lead));
+    .map(({ lead }) => pairCard(lead));
 }
 
 export interface LookbookServiceDeps {
