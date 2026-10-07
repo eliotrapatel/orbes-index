@@ -56,6 +56,7 @@ import type { AuditService } from './audit.js';
 import { careThisYear, type CareAllowance } from './care.js';
 import { activeGifts, effectiveProgramLines, programLines, readProgram, type ClubProgram } from './club-program.js';
 import type { AccountDropEntry, DropService } from './drops.js';
+import { accountGuarantees, type AccountGuarantee } from './guarantees.js';
 import { orderReference } from './orders.js';
 import { creditBalances, ensureGrants } from './tier-grants.js';
 
@@ -304,6 +305,11 @@ export interface ClubStatus {
   /** The pieces held now each tier starts from, TITANE first (CLUB_TIER_THRESHOLDS): YOUR TIER's meter has a dot per piece up to the last (plan NEXT-NINE, BP-19 T1). */
   tierThresholds: number[];
   entries: AccountDropEntry[];
+  /**
+   * IN-01: the house's guarantees shown to the client, still waiting, set aside or entered, the soonest validity first
+   * (services/guarantees.ts accountGuarantees); nothing of a guarantee not shown.
+   */
+  guarantees: AccountGuarantee[];
 }
 
 /** One tier as the console's Tiers tab reads it (GET /api/admin/club/tiers, P-X04). */
@@ -391,6 +397,7 @@ export class ClubService {
       inUse: await this.inUse(accountId, standing.tier, program),
       tierThresholds: [...CLUB_TIER_THRESHOLDS],
       entries,
+      guarantees: await accountGuarantees(this.db, accountId, this.clock()),
     };
   }
 

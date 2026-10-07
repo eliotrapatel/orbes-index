@@ -76,6 +76,18 @@
  * `quantity`). A selection obliges no one: ORBES Client Services concludes
  * each sale; no email is sent (the account's page says it).
  *
+ * THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01; services/guarantees.ts, migration 0029): a place granted by ORBES
+ * Client Services and set aside for the release. Its holder's entry uses it (ENTER: `guarantee_id` and its `pieces`,
+ * read after the entry's row; WITHDRAW and a lock unbind it, the guarantee staying ACTIVE). During its holder's own early
+ * access, RESERVE uses it at once: SELECTED for its pieces, with no tier, the guarantee USED. Early access never takes a
+ * guaranteed piece (DROP_FULL counts them), and a DRAFT's quantity never goes below them (409 DROP_GUARANTEES_EXCEED).
+ * At the draw, the guaranteed entries are SELECTED first, without a rank or a tier, their guarantees USED; `drawOrder`
+ * ranks only the other entries, for the places left (the quantity less the pieces held or sold and those just
+ * selected); the guarantees set aside and not used are carried to the next release of their model or collection, or
+ * expire with a chosen release (as at a cancellation). The page lists them apart once drawn (`guaranteed`: each entry's
+ * id and pieces, never an account). CONFIRMED creates one order per piece (orderForDrawEntry). Every count of places
+ * held is in pieces.
+ *
  * A LIVE RELEASE (services/live.ts, migration 0021) is a row of the same table, `mode` LIVE: the draw's public pages, its
  * entries (ENTER, WITHDRAW, RESERVE), the console's list, change, publication and cancellation, the draw and OFFER NEXT
  * know only the drops whose `mode` is DRAW: a LIVE one is left out of a list, a 404 or a refusal (409 DROP_LIVE).
@@ -83,7 +95,7 @@
  * The audit log names the drop and the entry's id, never an email: ENTER,
  * WITHDRAW and a direct reservation (`drop.enter`, `drop.withdraw`,
  * `drop.reserve` with the tier that allowed it, the account as actor), the draw
- * (`drop.draw`, with the seed it reveals) and every console action
+ * (`drop.draw`, with the seed it reveals and the guaranteed places and pieces) and every console action
  * (`drop.create`, `drop.update`, `drop.publish`, `drop.cancel`,
  * `drop.entry.confirm`, `drop.entry.lapse`, `drop.entry.offer`). A lock of
  * an account (OwnerService) withdraws its open entries
@@ -99,9 +111,10 @@ import { isUniqueViolation } from '../db/pg-errors.js';
 import type { DropEntryStatus, DropRow, DropUpdate } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
-import type { AuditService } from './audit.js';
+import type { AuditRecordInput, AuditService } from './audit.js';
 import { CLUB_TIER_THRESHOLDS, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { readProgram } from './club-program.js';
+import { coverOnPublish, guaranteedPieces, holderGuarantee, releaseCovered, releaseGuaranteed, useGuarantees, type ReleaseGuaranteed } from './guarantees.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, orderForDrawEntry } from './orders.js';
@@ -297,6 +310,8 @@ const notEntered = () => conflict('DROP_NOT_ENTERED', 'You are not entered in th
 const entryNotSelected = () => conflict('DROP_ENTRY_NOT_SELECTED', 'Only an entry whose place is held can be concluded.');
 const placeHeld = (until: Date) => conflict('DROP_PLACE_HELD', `The place is held until ${until.toISOString().slice(0, 16).replace('T', ' ')} UTC: it lapses only after that time.`);
 const dropFull = () => conflict('DROP_FULL', 'Every piece of this release is held or sold.');
+/** IN-01: a quantity below the pieces held or guaranteed by the house. */
+const guaranteesExceed = (n: number) => conflict('DROP_GUARANTEES_EXCEED', `${n} ${n === 1 ? 'piece' : 'pieces'} of this release ${n === 1 ? 'is' : 'are'} guaranteed by the house.`);
 const waitlistEmpty = () => conflict('DROP_WAITLIST_EMPTY', 'No entry is left on the waiting list.');
 const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
 const dropLive = () => conflict('DROP_LIVE', 'This release is a LIVE RELEASE: it has no draw and no waiting list.');
@@ -476,6 +491,12 @@ export interface DropSheet extends DropCard {
    * and its page says no end figure (plan LIVE RELEASE+, choice 5 and decision 30), nor how many took part.
    */
   reserved: number;
+  /**
+   * IN-01: the places guaranteed by the house, once drawn (empty before): each entry that used a guarantee here, by its
+   * id, with its pieces, selected first and listed apart without a rank. No account marker of any kind: YOURS comes only
+   * from the account's own entry (AccountDropEntry `guaranteed`, true only for a guarantee shown to the client).
+   */
+  guaranteed: { id: string; pieces: number }[];
 }
 
 /** An entry as the drawn drop's page lists it (GET /api/v1/drops/:id/entries): never its account. */
@@ -499,8 +520,15 @@ export interface AccountDropEntry {
   rank: number | null;
   /** A SELECTED (or concluded) entry: the end of the place held. */
   respondBy: Date | null;
-  /** P-X02: a place reserved directly during the early access (isReservation), not drawn. */
+  /** P-X02: a place reserved directly during the early access (isReservation, or with the house's guarantee), not drawn. */
   reserved: boolean;
+  /**
+   * IN-01: the entry uses the house's guarantee and the guarantee is shown to the client; false for a guarantee not
+   * shown, which leaves no mark for its holder. The only signal the app uses for YOURS among GUARANTEED BY THE HOUSE.
+   */
+  guaranteed: boolean;
+  /** IN-01: the pieces of the place (its shown guarantee's), 1 otherwise. */
+  pieces: number;
   opensAt: Date;
   closesAt: Date;
   drawnAt: Date | null;
@@ -539,8 +567,10 @@ export interface AdminDrop {
   seedHash: string;
   seed: string | null;
   entries: DropEntryCounts;
-  /** P-X02: the entries SELECTED or CONFIRMED that are direct reservations (the rest of `entries` SELECTED or CONFIRMED was drawn). */
+  /** P-X02: the entries SELECTED or CONFIRMED that are direct reservations (the rest of `entries` SELECTED or CONFIRMED was drawn); the guaranteed ones apart. */
   reserved: number;
+  /** IN-01: the house's guarantees set aside for the release or used in it: how many places, how many pieces. */
+  guaranteed: ReleaseGuaranteed;
 }
 
 /** An entry as the console lists it; the routes mask the email for an AUDITOR. */
@@ -557,6 +587,10 @@ export interface AdminDropEntry {
   respondBy: Date | null;
   /** P-X02: a place reserved directly during the early access (its tier and seniority those of its request). */
   reserved: boolean;
+  /** IN-01: the entry uses the house's guarantee (GUARANTEED: no rank, no tier). */
+  guaranteed: boolean;
+  /** IN-01: the pieces of its place (1, or its guarantee's). */
+  pieces: number;
   handledBy: { id: string; email: string } | null;
   handledAt: Date | null;
   note: string | null;
@@ -577,6 +611,9 @@ export interface DrawOutcome {
   places: number;
   selected: number;
   waitlisted: number;
+  /** IN-01: the guaranteed places selected first, and their pieces. */
+  guaranteed: number;
+  guaranteedPieces: number;
 }
 
 const EMPTY_COUNTS = (): DropEntryCounts => ({ ENTERED: 0, SELECTED: 0, WAITLISTED: 0, CONFIRMED: 0, LAPSED: 0, WITHDRAWN: 0 });
@@ -601,6 +638,8 @@ type EntryRow = {
   handled_email: string | null;
   handled_at: Date | null;
   note: string | null;
+  guarantee_id: string | null;
+  pieces: number;
 };
 
 function entryView(r: EntryRow): AdminDropEntry {
@@ -615,6 +654,8 @@ function entryView(r: EntryRow): AdminDropEntry {
     rank: r.rank,
     respondBy: r.respond_by,
     reserved: isReservation(r),
+    guaranteed: r.guarantee_id !== null,
+    pieces: r.pieces,
     handledBy: r.handled_by && r.handled_email ? { id: r.handled_by, email: r.handled_email } : null,
     handledAt: r.handled_at,
     note: r.note,
@@ -629,9 +670,16 @@ type AccountEntryRow = Pick<DropRow, 'title' | 'opens_at' | 'closes_at' | 'publi
   tier: number | null;
   rank: number | null;
   respond_by: Date | null;
+  pieces: number;
+  guarantee_id: string | null;
+  guarantee_visible: boolean | null;
+  guarantee_used_at: Date | null;
 };
 
 function accountEntryView(r: AccountEntryRow, now: Date): AccountDropEntry {
+  // A guarantee used before the release opened was used by a direct reservation of its holder's early access.
+  const guaranteedReservation = r.guarantee_id !== null && r.guarantee_used_at !== null && r.guarantee_used_at.getTime() < new Date(r.opens_at).getTime();
+  const shown = r.guarantee_id !== null && r.guarantee_visible === true;
   return {
     id: r.id,
     dropId: r.drop_id,
@@ -641,7 +689,9 @@ function accountEntryView(r: AccountEntryRow, now: Date): AccountDropEntry {
     enteredAt: r.created_at,
     rank: r.rank,
     respondBy: r.respond_by,
-    reserved: isReservation(r),
+    reserved: isReservation(r) || guaranteedReservation,
+    guaranteed: shown,
+    pieces: shown ? r.pieces : 1,
     opensAt: r.opens_at,
     closesAt: r.closes_at,
     drawnAt: r.drawn_at,
@@ -673,7 +723,8 @@ export async function withdrawAccountEntries(tx: Db, accountId: string): Promise
   const rows = await tx
     .updateTable('drop_entries as e')
     .from('drops as d')
-    .set({ status: 'WITHDRAWN' })
+    // IN-01: a guarantee it used is unbound and stays ACTIVE (a lock does not revoke it).
+    .set({ status: 'WITHDRAWN', guarantee_id: null, pieces: 1 })
     .whereRef('d.id', '=', 'e.drop_id')
     .where('e.account_id', '=', accountId)
     .where('e.status', '=', 'ENTERED')
@@ -799,7 +850,11 @@ export class DropService {
     const r = await this.reads(this.db).where('d.id', '=', id).where('d.published_at', 'is not', null).where('d.mode', '=', 'DRAW').executeTakeFirst();
     if (!r) throw dropNotFound();
     // Drawn, the release is over: no end figure (plan LIVE RELEASE+, choice 5), the places reserved directly no longer counted.
-    const reserved = r.drawn_at ? 0 : ((await this.tallies(this.db, [id])).get(id)?.reserved ?? 0);
+    const reserved = r.drawn_at ? 0 : await this.reservedPieces(this.db, id);
+    // IN-01: once drawn, the places the house guaranteed, by entry id and pieces, never their accounts.
+    const guaranteed = r.drawn_at
+      ? (await this.db.selectFrom('drop_entries').select(['id', 'pieces']).where('drop_id', '=', id).where('guarantee_id', 'is not', null).orderBy('id').execute()).map((e) => ({ id: e.id, pieces: e.pieces }))
+      : [];
     return {
       ...this.card(r, now),
       description: r.description,
@@ -810,6 +865,7 @@ export class DropService {
       seedHash: toHex(r.seed_hash),
       seed: r.drawn_at && r.seed ? toHex(r.seed) : null,
       reserved,
+      guaranteed,
     };
   }
 
@@ -862,24 +918,31 @@ export class DropService {
       if (d.cancelled_at) throw dropCancelled();
       if (d.drawn_at) throw dropDrawn();
       if (dropState(d, now) !== 'OPEN') throw dropNotOpen();
-      const existing = await tx.selectFrom('drop_entries').select(['id', 'status', 'tier', 'rank']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
+      const existing = await tx.selectFrom('drop_entries').select(['id', 'status', 'tier', 'rank', 'guarantee_id']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
+      // A place reserved directly (IN-01: with the house's guarantee too, then without a tier) is not entered again.
+      if (existing && (isReservation(existing) || (existing.guarantee_id !== null && existing.status !== 'ENTERED' && existing.status !== 'WITHDRAWN'))) throw alreadyReserved();
+      if (existing && existing.status !== 'WITHDRAWN') throw alreadyEntered();
+      // IN-01: the house's guarantee set aside for this release, after the entry's row (the lock order): the entry uses it.
+      const g = await holderGuarantee(tx, accountId, d);
+      const bound = g ? { guarantee_id: g.id, pieces: g.pieces } : { guarantee_id: null, pieces: 1 };
       let entry: string;
       let again = false;
       if (existing) {
-        if (isReservation(existing)) throw alreadyReserved();
-        if (existing.status !== 'WITHDRAWN') throw alreadyEntered();
-        await tx.updateTable('drop_entries').set({ status: 'ENTERED' }).where('id', '=', existing.id).where('status', '=', 'WITHDRAWN').execute();
+        await tx.updateTable('drop_entries').set({ status: 'ENTERED', ...bound }).where('id', '=', existing.id).where('status', '=', 'WITHDRAWN').execute();
         entry = existing.id;
         again = true;
       } else {
         try {
-          entry = (await tx.insertInto('drop_entries').values({ drop_id: id, account_id: accountId, created_at: now }).returning('id').executeTakeFirstOrThrow()).id;
+          entry = (await tx.insertInto('drop_entries').values({ drop_id: id, account_id: accountId, created_at: now, ...bound }).returning('id').executeTakeFirstOrThrow()).id;
         } catch (e) {
           if (isUniqueViolation(e, 'drop_entries_drop_account_key')) throw alreadyEntered();
           throw e;
         }
       }
-      await this.audit.record({ actor, action: 'drop.enter', targetType: 'drop', targetId: id, details: { entryId: entry, ...(again ? { again: true } : {}) } }, tx);
+      await this.audit.record(
+        { actor, action: 'drop.enter', targetType: 'drop', targetId: id, details: { entryId: entry, ...(again ? { again: true } : {}), ...(g ? { guaranteeId: g.id } : {}) } },
+        tx,
+      );
       return entry;
     });
     return this.accountEntry(accountId, entryId);
@@ -895,17 +958,15 @@ export class DropService {
       const d = await this.lockPublished(tx, id);
       if (d.drawn_at) throw dropDrawn();
       if (d.cancelled_at) throw dropCancelled();
-      const row = await tx
-        .updateTable('drop_entries')
-        .set({ status: 'WITHDRAWN' })
-        .where('drop_id', '=', id)
-        .where('account_id', '=', accountId)
-        .where('status', '=', 'ENTERED')
-        .returning('id')
-        .executeTakeFirst();
-      if (!row) throw notEntered();
-      await this.audit.record({ actor, action: 'drop.withdraw', targetType: 'drop', targetId: id, details: { entryId: row.id } }, tx);
-      return row.id;
+      const before = await tx.selectFrom('drop_entries').select(['id', 'guarantee_id']).where('drop_id', '=', id).where('account_id', '=', accountId).where('status', '=', 'ENTERED').forUpdate().executeTakeFirst();
+      if (!before) throw notEntered();
+      // IN-01: the guarantee it used is unbound and stays ACTIVE: entering again uses it again.
+      await tx.updateTable('drop_entries').set({ status: 'WITHDRAWN', guarantee_id: null, pieces: 1 }).where('id', '=', before.id).execute();
+      await this.audit.record(
+        { actor, action: 'drop.withdraw', targetType: 'drop', targetId: id, details: { entryId: before.id, ...(before.guarantee_id ? { guaranteeId: before.guarantee_id } : {}) } },
+        tx,
+      );
+      return before.id;
     });
     return this.accountEntry(accountId, entryId);
   }
@@ -943,14 +1004,16 @@ export class DropService {
       if (now.getTime() < from.getTime()) throw earlyAccessNotOpen(from);
       const existing = await tx.selectFrom('drop_entries').select(['id', 'status']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
       if (existing && existing.status !== 'WITHDRAWN') throw alreadyReserved();
-      const held = await tx
-        .selectFrom('drop_entries')
-        .select((eb) => eb.fn.countAll<number>().as('n'))
-        .where('drop_id', '=', id)
-        .where('status', 'in', ['SELECTED', 'CONFIRMED'])
-        .executeTakeFirstOrThrow();
-      if (Number(held.n) >= d.quantity) throw dropFull();
-      const place = { status: 'SELECTED' as const, tier: standing.tier, seniority: standing.seniority, respond_by: new Date(now.getTime() + d.purchase_window_hours * HOUR_MS) };
+      // IN-01: a holder's reservation uses the house's guarantee, after the entry's row (the lock order); the pieces the
+      // house guarantees to others are never taken by an early access (DROP_FULL counts them).
+      const g = await holderGuarantee(tx, accountId, d);
+      const held = await this.heldPieces(tx, id);
+      const guaranteed = await guaranteedPieces(tx, id, g?.id);
+      if (held + guaranteed + (g?.pieces ?? 1) > d.quantity) throw dropFull();
+      const respondBy = new Date(now.getTime() + d.purchase_window_hours * HOUR_MS);
+      const place = g
+        ? { status: 'SELECTED' as const, tier: null, seniority: null, respond_by: respondBy, guarantee_id: g.id, pieces: g.pieces }
+        : { status: 'SELECTED' as const, tier: standing.tier, seniority: standing.seniority, respond_by: respondBy, guarantee_id: null, pieces: 1 };
       let entry: string;
       if (existing) {
         // Never a deletion and a new row: a withdrawn entry (none can be before the opening, but the rule holds) is taken up.
@@ -964,10 +1027,19 @@ export class DropService {
           throw e;
         }
       }
+      const notes: AuditRecordInput[] = [];
+      if (g) await useGuarantees(tx, [g.id], id, now, actor, notes, 'reserve');
       await this.audit.record(
-        { actor, action: 'drop.reserve', targetType: 'drop', targetId: id, details: { entryId: entry, tier: standing.tier, respondBy: place.respond_by.toISOString() } },
+        {
+          actor,
+          action: 'drop.reserve',
+          targetType: 'drop',
+          targetId: id,
+          details: { entryId: entry, tier: standing.tier, respondBy: place.respond_by.toISOString(), ...(g ? { guaranteeId: g.id, pieces: g.pieces } : {}) },
+        },
         tx,
       );
+      for (const n of notes) await this.audit.record(n, tx);
       return entry;
     });
     return this.accountEntry(accountId, entryId);
@@ -981,9 +1053,10 @@ export class DropService {
     const rows = await this.reads(this.db).where('d.mode', '=', 'DRAW').orderBy('d.created_at', 'desc').orderBy('d.id').limit(page.pageSize).offset(pageOffset(page)).execute();
     const tallies = await this.tallies(this.db, rows.map((r) => r.id));
     const creators = await this.staffEmails(this.db, rows.map((r) => r.created_by));
+    const guaranteed = await releaseGuaranteed(this.db, rows.map((r) => r.id));
     const now = this.clock();
     return makePage(
-      rows.map((r) => this.adminView(r, now, tallies.get(r.id), creators)),
+      rows.map((r) => this.adminView(r, now, tallies.get(r.id), creators, guaranteed.get(r.id))),
       Number(total.n),
       page,
     );
@@ -1101,7 +1174,13 @@ export class DropService {
         if (d.cancelled_at) throw dropCancelled();
         if (d.published_at) throw dropPublished();
         if (change.title !== undefined) note('title', 'title', d.title, cleanTitle(change.title));
-        if (change.quantity !== undefined) note('quantity', 'quantity', d.quantity, cleanQuantity(change.quantity));
+        if (change.quantity !== undefined) {
+          const quantity = cleanQuantity(change.quantity);
+          // IN-01: never below the pieces held or guaranteed by the house.
+          const floor = (await this.heldPieces(tx, id)) + (await guaranteedPieces(tx, id));
+          if (quantity < floor) throw guaranteesExceed(await guaranteedPieces(tx, id));
+          note('quantity', 'quantity', d.quantity, quantity);
+        }
         if (change.purchaseWindowHours !== undefined) note('purchaseWindowHours', 'purchase_window_hours', d.purchase_window_hours, cleanWindow(change.purchaseWindowHours));
         if (change.earlyAccessHours !== undefined || change.earlyAccessPlatineHours !== undefined) {
           // Both windows by tier (BP-19 T3): PLATINE's never longer than PALLADIUM's; a drop of before keeps its NULL
@@ -1159,6 +1238,9 @@ export class DropService {
       await tx.updateTable('drops').set({ published_at: now }).where('id', '=', id).execute();
       const early = earlyAccessOpensAt({ ...d, published_at: now });
       const earlyPlatine = earlyAccessOpensAt({ ...d, published_at: now }, 2);
+      // IN-01: the house's guarantees waiting for the next release of its model or collection, set aside while they fit.
+      const covered: AuditRecordInput[] = [];
+      await coverOnPublish(tx, { ...d, published_at: now }, now, actor, covered);
       await this.audit.record(
         {
           actor,
@@ -1178,6 +1260,7 @@ export class DropService {
         },
         tx,
       );
+      for (const n of covered) await this.audit.record(n, tx);
       return this.adminDrop(tx, id);
     });
   }
@@ -1193,7 +1276,11 @@ export class DropService {
       if (d.cancelled_at) throw dropCancelled();
       await tx.updateTable('drops').set({ cancelled_at: now }).where('id', '=', id).execute();
       const counts = (await this.tallies(tx, [id])).get(id)?.counts ?? EMPTY_COUNTS();
+      // IN-01: its guarantees not used, carried to the next release of their model or collection, or expired.
+      const notes: AuditRecordInput[] = [];
+      await releaseCovered(tx, id, 'CANCELLED', now, actor, notes);
       await this.audit.record({ actor, action: 'drop.cancel', targetType: 'drop', targetId: id, details: { published: d.published_at !== null, entered: counts.ENTERED } }, tx);
+      for (const n of notes) await this.audit.record(n, tx);
       return this.adminDrop(tx, id);
     });
   }
@@ -1217,7 +1304,10 @@ export class DropService {
       if (!d.published_at) throw dropNotPublished();
       if (now.getTime() < d.closes_at.getTime()) throw dropNotClosed();
       const seed = openDropSeed(this.seedKey, d);
-      const entered = await tx.selectFrom('drop_entries').select(['id', 'account_id']).where('drop_id', '=', id).where('status', '=', 'ENTERED').orderBy('id').execute();
+      const all = await tx.selectFrom('drop_entries').select(['id', 'account_id', 'guarantee_id', 'pieces']).where('drop_id', '=', id).where('status', '=', 'ENTERED').orderBy('id').execute();
+      // IN-01: the entries with the house's guarantee are selected first, without a rank; the draw ranks the others.
+      const guaranteedEntries = all.filter((e) => e.guarantee_id !== null);
+      const entered = all.filter((e) => e.guarantee_id === null);
       const standings = await clubStandings(tx, entered.map((e) => e.account_id), now);
       const order = drawOrder(
         entered.map((e) => {
@@ -1226,14 +1316,21 @@ export class DropService {
         }),
         seed,
       );
-      const held = await tx
-        .selectFrom('drop_entries')
-        .select((eb) => eb.fn.countAll<number>().as('n'))
-        .where('drop_id', '=', id)
-        .where('status', 'in', ['SELECTED', 'CONFIRMED'])
-        .executeTakeFirstOrThrow();
-      const places = Math.max(0, d.quantity - Number(held.n));
+      const held = await this.heldPieces(tx, id);
       const respondBy = new Date(now.getTime() + d.purchase_window_hours * HOUR_MS);
+      const notes: AuditRecordInput[] = [];
+      const guaranteedPieceCount = guaranteedEntries.reduce((n, e) => n + e.pieces, 0);
+      if (guaranteedEntries.length > 0) {
+        await tx
+          .updateTable('drop_entries')
+          .set({ status: 'SELECTED', respond_by: respondBy, tier: null, seniority: null, rank: null })
+          .where('id', 'in', guaranteedEntries.map((e) => e.id))
+          .where('status', '=', 'ENTERED')
+          .execute();
+        await useGuarantees(tx, guaranteedEntries.map((e) => e.guarantee_id!), id, now, actor, notes, 'draw');
+      }
+      // The places left: the quantity less the pieces held or sold, and those the house's guarantees just took.
+      const places = Math.max(0, d.quantity - held - guaranteedPieceCount);
       for (let i = 0; i < order.length; i += DRAW_CHUNK) {
         const chunk = order.slice(i, i + DRAW_CHUNK);
         const values = sql.join(
@@ -1249,14 +1346,31 @@ export class DropService {
            WHERE e.id = v.id AND e.drop_id = ${id} AND e.status = 'ENTERED'`.execute(tx);
       }
       await tx.updateTable('drops').set({ seed, drawn_at: now }).where('id', '=', id).execute();
+      // IN-01: the guarantees set aside for it and not used: a model's or a collection's carried, a chosen release's expired.
+      await releaseCovered(tx, id, 'ENDED', now, actor, notes);
       const selected = Math.min(places, order.length);
       const waitlisted = order.length - selected;
       await this.audit.record(
-        { actor, action: 'drop.draw', targetType: 'drop', targetId: id, details: { entries: order.length, places, selected, waitlisted, seed: toHex(seed) } },
+        {
+          actor,
+          action: 'drop.draw',
+          targetType: 'drop',
+          targetId: id,
+          details: { entries: order.length, places, selected, waitlisted, guaranteed: guaranteedEntries.length, guaranteedPieces: guaranteedPieceCount, seed: toHex(seed) },
+        },
         tx,
       );
+      for (const n of notes) await this.audit.record(n, tx);
       seed.fill(0);
-      return { drop: await this.adminDrop(tx, id), entries: order.length, places, selected, waitlisted };
+      return {
+        drop: await this.adminDrop(tx, id),
+        entries: order.length,
+        places,
+        selected,
+        waitlisted,
+        guaranteed: guaranteedEntries.length,
+        guaranteedPieces: guaranteedPieceCount,
+      };
     });
   }
 
@@ -1315,13 +1429,7 @@ export class DropService {
       const d = await this.lock(tx, id);
       if (d.mode === 'LIVE') throw dropLive();
       if (!d.drawn_at) throw dropNotDrawn();
-      const held = await tx
-        .selectFrom('drop_entries')
-        .select((eb) => eb.fn.countAll<number>().as('n'))
-        .where('drop_id', '=', id)
-        .where('status', 'in', ['SELECTED', 'CONFIRMED'])
-        .executeTakeFirstOrThrow();
-      if (Number(held.n) >= d.quantity) throw dropFull();
+      if ((await this.heldPieces(tx, id)) >= d.quantity) throw dropFull();
       const next = await tx.selectFrom('drop_entries').select(['id', 'rank']).where('drop_id', '=', id).where('status', '=', 'WAITLISTED').orderBy('rank').limit(1).forUpdate().executeTakeFirst();
       if (!next) throw waitlistEmpty();
       const respondBy = new Date(now.getTime() + d.purchase_window_hours * HOUR_MS);
@@ -1353,20 +1461,49 @@ export class DropService {
       if (e.status !== 'SELECTED') throw entryNotSelected();
       if (to === 'LAPSED' && e.respond_by && now.getTime() < e.respond_by.getTime()) throw placeHeld(e.respond_by);
       await tx.updateTable('drop_entries').set({ status: to, handled_by: actor.id!, handled_at: now, note: text }).where('id', '=', e.id).execute();
-      const order = to === 'CONFIRMED' ? await orderForDrawEntry(tx, e.id, actor, now) : { order: null, notes: [] };
+      const order = to === 'CONFIRMED' ? await orderForDrawEntry(tx, e.id, actor, now) : { order: null, orders: [], notes: [] };
       await this.audit.record(
         {
           actor,
           action: to === 'CONFIRMED' ? 'drop.entry.confirm' : 'drop.entry.lapse',
           targetType: 'drop',
           targetId: id,
-          details: { entryId: e.id, rank: e.rank, ...(text !== null ? { noted: true } : {}), ...(order.order ? { orderId: order.order.id } : {}) },
+          details: {
+            entryId: e.id,
+            rank: e.rank,
+            ...(text !== null ? { noted: true } : {}),
+            ...(order.order ? { orderId: order.order.id } : {}),
+            ...(order.orders.length > 1 ? { orderIds: order.orders.map((o) => o.id) } : {}),
+          },
         },
         tx,
       );
       for (const n of order.notes) await this.audit.record(n, tx);
     });
     return this.adminEntry(id, entry);
+  }
+
+  /** The pieces of a drop's places held or sold (SELECTED, CONFIRMED): each entry's pieces (IN-01: a guaranteed place may hold several). */
+  private async heldPieces(db: Db, id: string): Promise<number> {
+    const r = await db
+      .selectFrom('drop_entries')
+      .select((eb) => eb.fn.coalesce(eb.fn.sum<number>('pieces'), sql<number>`0`).as('n'))
+      .where('drop_id', '=', id)
+      .where('status', 'in', ['SELECTED', 'CONFIRMED'])
+      .executeTakeFirstOrThrow();
+    return Number(r.n);
+  }
+
+  /** The pieces reserved directly before the draw (SELECTED or CONFIRMED, never ranked): a holder's reservation with the house's guarantee included. */
+  private async reservedPieces(db: Db, id: string): Promise<number> {
+    const r = await db
+      .selectFrom('drop_entries')
+      .select((eb) => eb.fn.coalesce(eb.fn.sum<number>('pieces'), sql<number>`0`).as('n'))
+      .where('drop_id', '=', id)
+      .where('status', 'in', ['SELECTED', 'CONFIRMED'])
+      .where('rank', 'is', null)
+      .executeTakeFirstOrThrow();
+    return Number(r.n);
   }
 
   /** The drop's row FOR UPDATE (every console action and the draw), any state; 404 DROP_NOT_FOUND. */
@@ -1476,7 +1613,13 @@ export class DropService {
     return new Map(rows.map((r) => [r.id, r.email]));
   }
 
-  private adminView(r: DropReadRow, now: Date, tally: { counts: DropEntryCounts; reserved: number } | undefined, creators: Map<string, string>): AdminDrop {
+  private adminView(
+    r: DropReadRow,
+    now: Date,
+    tally: { counts: DropEntryCounts; reserved: number } | undefined,
+    creators: Map<string, string>,
+    guaranteed: ReleaseGuaranteed | undefined,
+  ): AdminDrop {
     return {
       id: r.id,
       title: r.title,
@@ -1503,6 +1646,7 @@ export class DropService {
       seed: r.drawn_at && r.seed ? toHex(r.seed) : null,
       entries: tally?.counts ?? EMPTY_COUNTS(),
       reserved: tally?.reserved ?? 0,
+      guaranteed: guaranteed ?? { places: 0, pieces: 0 },
     };
   }
 
@@ -1511,7 +1655,8 @@ export class DropService {
     if (!r) throw dropNotFound();
     const tallies = await this.tallies(db, [id]);
     const creators = await this.staffEmails(db, [r.created_by]);
-    return this.adminView(r, this.clock(), tallies.get(id), creators);
+    const guaranteed = await releaseGuaranteed(db, [id]);
+    return this.adminView(r, this.clock(), tallies.get(id), creators, guaranteed.get(id));
   }
 
   /** The rows of a drop's entries as the console reads them: the account's email, the console user who concluded it. */
@@ -1520,7 +1665,10 @@ export class DropService {
       .selectFrom('drop_entries as e')
       .innerJoin('accounts as a', 'a.id', 'e.account_id')
       .leftJoin('admin_users as h', 'h.id', 'e.handled_by')
-      .select(['e.id', 'e.account_id', 'a.email', 'e.status', 'e.created_at', 'e.tier', 'e.seniority', 'e.rank', 'e.respond_by', 'e.handled_by', 'h.email as handled_email', 'e.handled_at', 'e.note']);
+      .select([
+        'e.id', 'e.account_id', 'a.email', 'e.status', 'e.created_at', 'e.tier', 'e.seniority', 'e.rank', 'e.respond_by', 'e.handled_by', 'h.email as handled_email', 'e.handled_at', 'e.note',
+        'e.guarantee_id', 'e.pieces',
+      ]);
   }
 
   private async adminEntry(dropId: string, entryId: string): Promise<AdminDropEntry> {
@@ -1534,7 +1682,11 @@ export class DropService {
     return db
       .selectFrom('drop_entries as e')
       .innerJoin('drops as d', 'd.id', 'e.drop_id')
-      .select(['e.id', 'e.drop_id', 'e.status', 'e.created_at', 'e.tier', 'e.rank', 'e.respond_by', 'd.title', 'd.opens_at', 'd.closes_at', 'd.published_at', 'd.cancelled_at', 'd.drawn_at']);
+      .leftJoin('house_guarantees as g', 'g.id', 'e.guarantee_id')
+      .select([
+        'e.id', 'e.drop_id', 'e.status', 'e.created_at', 'e.tier', 'e.rank', 'e.respond_by', 'e.pieces', 'e.guarantee_id', 'g.visible as guarantee_visible', 'g.used_at as guarantee_used_at',
+        'd.title', 'd.opens_at', 'd.closes_at', 'd.published_at', 'd.cancelled_at', 'd.drawn_at',
+      ]);
   }
 
   private async accountEntry(accountId: string, entryId: string): Promise<AccountDropEntry> {

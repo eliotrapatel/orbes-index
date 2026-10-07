@@ -12,7 +12,7 @@ const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'activity_hourly', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs', 'authentication_events',
   'bench_items', 'care_requests', 'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps',
   'client_conversations', 'client_messages', 'club_program_settings', 'club_tiers', 'codes', 'collections', 'credit_uses', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops',
-  'event_journal', 'genomes', 'invoices', 'live_access_models', 'live_addons', 'live_entries', 'live_entry_addons', 'live_interest', 'live_messages',
+  'event_journal', 'genomes', 'guarantee_settings', 'house_guarantees', 'invoices', 'live_access_models', 'live_addons', 'live_entries', 'live_entry_addons', 'live_interest', 'live_messages',
   'live_tier_windows', 'media_objects', 'model_images', 'models', 'order_alert_settings', 'order_events', 'orders', 'ownership', 'ownership_certificates',
   'ownership_transfers', 'product_status_history', 'products', 'release_answers', 'retailers', 'returns', 'revocations', 'scan_daily_stats', 'scan_events',
   'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shipping_rates', 'shop_requests', 'sku_thresholds', 'skus', 'stock_locations', 'stock_movements',
@@ -171,7 +171,8 @@ describe('migrations', () => {
     expect(has(/INDEX stock_movements_balance_idx ON public\.stock_movements USING btree \(sku_id, location_id\)$/)).toBe(true);
     expect(has(/UNIQUE INDEX stock_movements_transfer_key ON public\.stock_movements USING btree \(transfer_id, reason\) WHERE \(transfer_id IS NOT NULL\)$/)).toBe(true);
     expect(has(/UNIQUE INDEX orders_live_entry_key ON public\.orders USING btree \(live_entry_id, piece\)$/)).toBe(true);
-    expect(has(/UNIQUE INDEX orders_drop_entry_key ON public\.orders USING btree \(drop_entry_id\)$/)).toBe(true);
+    // 0029 widened it to one order per entry and piece (a guaranteed place of several pieces).
+    expect(has(/UNIQUE INDEX orders_drop_entry_key ON public\.orders USING btree \(drop_entry_id, piece\)$/)).toBe(true);
     expect(has(/UNIQUE INDEX orders_shop_request_key ON public\.orders USING btree \(shop_request_id\)$/)).toBe(true);
     expect(has(/INDEX orders_board_idx ON public\.orders USING btree \(status, reserved_at\)$/)).toBe(true);
     expect(has(/INDEX orders_stock_reservation_idx ON public\.orders USING btree \(sku_id, location_id\) WHERE \(reservation = 'STOCK'::text\)$/)).toBe(true);
@@ -231,6 +232,20 @@ describe('migrations', () => {
     for (const [idx, c] of [['product', 'product_id'], ['label_carrier', 'label_carrier_id'], ['return_carrier', 'return_carrier_id'], ['handled_by', 'handled_by']]) {
       expect(has(new RegExp(`INDEX care_requests_${idx}_idx ON public\\.care_requests USING btree \\(${c}\\)$`)), c).toBe(true);
     }
+    // 0029: the house's guarantee. An account's by status; those set aside for a release; those waiting for one; one ACTIVE
+    // per account and release; a guarantee used once per entry; a draw's order per piece; every foreign key at the head of
+    // an index.
+    expect(has(/INDEX house_guarantees_account_idx ON public\.house_guarantees USING btree \(account_id, status\)$/)).toBe(true);
+    expect(has(/INDEX house_guarantees_covered_idx ON public\.house_guarantees USING btree \(covered_drop_id\) WHERE \(status = 'ACTIVE'::text\)$/)).toBe(true);
+    expect(has(/INDEX house_guarantees_waiting_idx ON public\.house_guarantees USING btree \(scope, model_id, collection_id\) WHERE \(\(status = 'ACTIVE'::text\) AND \(covered_drop_id IS NULL\)\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX house_guarantees_one_per_release ON public\.house_guarantees USING btree \(account_id, covered_drop_id\) WHERE \(\(status = 'ACTIVE'::text\) AND \(covered_drop_id IS NOT NULL\)\)$/)).toBe(true);
+    for (const c of ['drop', 'model', 'collection', 'covered_drop', 'used_drop']) {
+      expect(has(new RegExp(`INDEX house_guarantees_${c}_idx ON public\\.house_guarantees USING btree \\(${c}_id\\)$`)), c).toBe(true);
+    }
+    for (const c of ['revoked_by', 'granted_by', 'updated_by']) expect(has(new RegExp(`INDEX house_guarantees_${c}_idx ON public\\.house_guarantees USING btree \\(${c}\\)$`)), c).toBe(true);
+    expect(has(/INDEX guarantee_settings_updated_by_idx ON public\.guarantee_settings USING btree \(updated_by\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX drop_entries_guarantee_key ON public\.drop_entries USING btree \(guarantee_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX live_entries_guarantee_key ON public\.live_entries USING btree \(guarantee_id\)$/)).toBe(true);
   });
 
   /**
@@ -2387,7 +2402,8 @@ describe('migrations', () => {
     await use();
     await expect(run(`DELETE FROM credit_uses WHERE id = '${open}'`)).rejects.toSatisfy(isGuardViolation);
     // The down step refuses while a GIFT order or a credit use exists: neither can be removed, so this database stays at
-    // 0027 (0028, which holds nothing here, goes down first).
+    // 0027 (0029 and 0028, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0029_house_guarantee']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0028_yearly_care']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0027_tier_grants cannot be rolled back: 1 welcome gift orders and 2 credit uses exist/);
     expect((await migrationStatus(t.db)).find((m) => m.name === '0027_tier_grants')?.executedAt).toBeDefined();
@@ -2396,7 +2412,7 @@ describe('migrations', () => {
     await run(`DELETE FROM credit_uses`);
     await run(`ALTER TABLE credit_uses ENABLE TRIGGER credit_uses_no_delete`);
     await run(`DELETE FROM orders WHERE channel = 'GIFT'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee']);
   });
 
   /** What names an object of 0028 in a snapshot: its table and its objects. */
@@ -2491,7 +2507,9 @@ describe('migrations', () => {
     const other = (await insert({ year: '2027' })).rows[0].id;
     await run(`UPDATE care_requests SET status = 'CANCELLED', cancelled_at = now(), cancelled_by = 'account' WHERE id = '${other}'`);
     await insert({ year: '2027' });
-    // The down step refuses while a request or a YEARLY_CARE record exists: neither can be removed, so this database stays at 0028.
+    // The down step refuses while a request or a YEARLY_CARE record exists: neither can be removed, so this database stays at
+    // 0028 (0029, which holds nothing here, goes down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0029_house_guarantee']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0028_yearly_care cannot be rolled back: 3 care requests and 1 yearly care records exist/);
     expect((await migrationStatus(t.db)).find((m) => m.name === '0028_yearly_care')?.executedAt).toBeDefined();
     // Cleared by hand for the roll-backs that follow (the service never deletes either).
@@ -2499,6 +2517,163 @@ describe('migrations', () => {
     await run(`DELETE FROM care_requests`);
     await run(`ALTER TABLE care_requests ENABLE TRIGGER care_requests_no_delete`);
     await run(`DELETE FROM service_records WHERE type = 'YEARLY_CARE'`);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee']);
+  });
+
+  /** What names an object of 0029 in a snapshot: its two tables, the entries' new columns and constraints, and its indexes. */
+  const of0029 = (o: string) => /\b(house_guarantees\w*|guarantee_settings\w*|guarantee_id|drop_entries_guarantee\w*|drop_entries_pieces\w*|live_entries_guarantee\w*)\b/.test(o) || /^table drop_entries pieces /.test(o);
+
+  it('0029 adds the house\'s guarantees, their settings, the entries\' guarantee and pieces, and a draw\'s order per piece, and nothing else; down restores 0028 exactly (orders_source and orders_drop_entry_key of 0027), and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0029_house_guarantee');
+    const added = withIt.filter((o) => !before.includes(o));
+    const removed = before.filter((o) => !withIt.includes(o));
+    // Besides its own objects, 0029 changes only orders_source (a DRAW order may be a second piece) and
+    // orders_drop_entry_key (one order per entry and piece), and the drop_entries' standing CHECKs it adds.
+    expect(added.filter((o) => !of0029(o)).map((o) => o.split(' ').slice(0, 3).join(' '))).toEqual([
+      'constraint orders orders_drop_entry_key',
+      'constraint orders orders_source',
+      'index CREATE UNIQUE',
+    ]);
+    expect(added).toContainEqual(expect.stringMatching(/^constraint orders orders_drop_entry_key UNIQUE \(drop_entry_id, piece\)$/));
+    expect(added).toContainEqual(expect.stringMatching(/^constraint orders orders_source CHECK .*\(channel = ANY \(ARRAY\['LIVE'::text, 'DRAW'::text\]\)\) OR \(piece = 1\)/));
+    expect(added).toContainEqual(expect.stringMatching(/^index CREATE UNIQUE INDEX orders_drop_entry_key ON public\.orders USING btree \(drop_entry_id, piece\)$/));
+    expect(removed.map((o) => o.split(' ').slice(0, 3).join(' '))).toEqual(['constraint orders orders_drop_entry_key', 'constraint orders orders_source', 'index CREATE UNIQUE']);
+    expect(removed).toContainEqual(expect.stringMatching(/^index CREATE UNIQUE INDEX orders_drop_entry_key ON public\.orders USING btree \(drop_entry_id\)$/));
+    expect(removed).toContainEqual(expect.stringMatching(/^constraint orders orders_source CHECK .*\(\(channel = 'LIVE'::text\) OR \(piece = 1\)\)/));
+    expect(before.filter((o) => /house_guarantees|guarantee_settings|guarantee_id/.test(o))).toEqual([]);
+    const columns = (table: string) => added.filter((o) => o.startsWith(`table ${table} `)).map((o) => o.split(' ')[2]);
+    expect(columns('house_guarantees')).toEqual([
+      'account_id', 'closed_at', 'closed_reason', 'collection_id', 'covered_at', 'covered_drop_id', 'drop_id', 'granted_at', 'granted_by', 'id', 'model_id', 'note',
+      'pieces', 'revoke_note', 'revoked_by', 'scope', 'status', 'updated_at', 'updated_by', 'used_at', 'used_drop_id', 'valid_until', 'visible',
+    ]);
+    expect(columns('guarantee_settings')).toEqual(['id', 'pieces', 'updated_at', 'updated_by', 'valid_days', 'visible']);
+    expect(columns('drop_entries')).toEqual(['guarantee_id', 'pieces']);
+    expect(columns('live_entries')).toEqual(['guarantee_id']);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger house_guarantees house_guarantees_immutable']);
+    for (const c of [
+      /^constraint house_guarantees house_guarantees_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint house_guarantees house_guarantees_drop_id_fkey FOREIGN KEY \(drop_id\) REFERENCES drops\(id\) ON DELETE RESTRICT$/,
+      /^constraint house_guarantees house_guarantees_model_id_fkey FOREIGN KEY \(model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint house_guarantees house_guarantees_collection_id_fkey FOREIGN KEY \(collection_id\) REFERENCES collections\(id\) ON DELETE RESTRICT$/,
+      /^constraint house_guarantees house_guarantees_covered_drop_id_fkey FOREIGN KEY \(covered_drop_id\) REFERENCES drops\(id\) ON DELETE RESTRICT$/,
+      /^constraint house_guarantees house_guarantees_used_drop_id_fkey FOREIGN KEY \(used_drop_id\) REFERENCES drops\(id\) ON DELETE RESTRICT$/,
+      /^constraint house_guarantees house_guarantees_scope CHECK /,
+      /^constraint house_guarantees house_guarantees_release_cover CHECK /,
+      /^constraint house_guarantees house_guarantees_valid CHECK \(\(valid_until > granted_at\)\)$/,
+      /^constraint house_guarantees house_guarantees_cover CHECK \(\(\(covered_drop_id IS NULL\) = \(covered_at IS NULL\)\)\)$/,
+      /^constraint house_guarantees house_guarantees_used CHECK /,
+      /^constraint house_guarantees house_guarantees_closed CHECK /,
+      /^constraint house_guarantees house_guarantees_revoked CHECK \(\(\(status = 'REVOKED'::text\) = \(revoked_by IS NOT NULL\)\)\)$/,
+      /^constraint guarantee_settings guarantee_settings_updated_by_fkey FOREIGN KEY \(updated_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint drop_entries drop_entries_guarantee_id_fkey FOREIGN KEY \(guarantee_id\) REFERENCES house_guarantees\(id\) ON DELETE RESTRICT$/,
+      /^constraint drop_entries drop_entries_guaranteed CHECK \(\(\(guarantee_id IS NULL\) OR \(\(rank IS NULL\) AND \(tier IS NULL\)\)\)\)$/,
+      /^constraint drop_entries drop_entries_pieces CHECK \(\(\(pieces = 1\) OR \(guarantee_id IS NOT NULL\)\)\)$/,
+      /^constraint drop_entries drop_entries_guarantee_key UNIQUE \(guarantee_id\)$/,
+      /^constraint live_entries live_entries_guarantee_id_fkey FOREIGN KEY \(guarantee_id\) REFERENCES house_guarantees\(id\) ON DELETE RESTRICT$/,
+      /^constraint live_entries live_entries_guarantee_key UNIQUE \(guarantee_id\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0029_house_guarantee'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0029: a guarantee of exactly one target matching its scope, its pieces 1 to 5, valid after its grant, set aside both or neither (a chosen release\'s own only), used with its time and release, closed exactly when not ACTIVE, revoked with who; one ACTIVE per account and release; its identity fixed; one settings row; a guaranteed entry never ranked, more than one piece only with a guarantee; a DRAW order per piece; down refused while a DRAW order of a second piece exists', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (22, 'G', 'Guarantee checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const account = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('guarantee@example.com', 'guarantee@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const other = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('guarantee2@example.com', 'guarantee2@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email_normalized, email, password_hash, role) VALUES ('guarantee@orbes.test', 'guarantee@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`.execute(t.db)).rows[0].id;
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (22, 'MONOLITHE', 'RING', 'GARCHK') RETURNING id`.execute(t.db)).rows[0].id;
+    const collection = (await sql<{ id: string }>`INSERT INTO collections (name) VALUES ('GUARANTEE CHECKS') RETURNING id`.execute(t.db)).rows[0].id;
+    const location = (await sql<{ id: string }>`INSERT INTO stock_locations (name) VALUES ('GUARANTEE CHECKS') RETURNING id`.execute(t.db)).rows[0].id;
+    const drop = (
+      await sql<{ id: string }>`INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash)
+        VALUES (${model}, 'GUARANTEE CHECK', 10, now() + interval '1 day', now() + interval '2 days', ${`v1.${'A'.repeat(16)}.${'B'.repeat(64)}`}, ${new Uint8Array(32)}) RETURNING id`.execute(t.db)
+    ).rows[0].id;
+    const other_drop = (
+      await sql<{ id: string }>`INSERT INTO drops (model_id, title, quantity, opens_at, closes_at, seed_enc, seed_hash)
+        VALUES (${model}, 'GUARANTEE CHECK 2', 10, now() + interval '1 day', now() + interval '2 days', ${`v1.${'A'.repeat(16)}.${'B'.repeat(64)}`}, ${new Uint8Array(32)}) RETURNING id`.execute(t.db)
+    ).rows[0].id;
+    const insert = (cols: Record<string, string>) => {
+      const all: Record<string, string> = { account_id: `'${account}'`, scope: `'MODEL'`, model_id: `'${model}'`, valid_until: `now() + interval '90 days'`, granted_by: `'${admin}'`, ...cols };
+      return sql.raw<{ id: string }>(`INSERT INTO house_guarantees (${Object.keys(all).join(', ')}) VALUES (${Object.values(all).join(', ')}) RETURNING id`).execute(t.db);
+    };
+    // Exactly one target, matching the scope.
+    await check(insert({ model_id: 'NULL' }), 'a MODEL without its model', 'house_guarantees_scope');
+    await check(insert({ collection_id: `'${collection}'` }), 'a MODEL with a collection too', 'house_guarantees_scope');
+    await check(insert({ scope: `'COLLECTION'` }), 'a COLLECTION naming a model', 'house_guarantees_scope');
+    await check(insert({ scope: `'RELEASE'`, model_id: 'NULL' }), 'a RELEASE without its release', 'house_guarantees_scope');
+    await check(insert({ scope: `'BOUTIQUE'` }), 'an unknown scope');
+    // Pieces 1 to 5; valid after its grant; a note of 1 to 500 characters.
+    await check(insert({ pieces: '0' }), 'no piece');
+    await check(insert({ pieces: '6' }), 'six pieces');
+    await check(insert({ valid_until: `now() - interval '1 day'` }), 'valid until before its grant', 'house_guarantees_valid');
+    await check(insert({ note: `'  '` }), 'a blank note');
+    await check(insert({ note: `'${'x'.repeat(501)}'` }), 'a note over 500 characters');
+    // Set aside both or neither; a chosen release's own release only.
+    await check(insert({ covered_drop_id: `'${drop}'` }), 'set aside without its time', 'house_guarantees_cover');
+    await check(insert({ covered_at: 'now()' }), 'a time without its release', 'house_guarantees_cover');
+    await check(insert({ scope: `'RELEASE'`, model_id: 'NULL', drop_id: `'${drop}'`, covered_drop_id: `'${other_drop}'`, covered_at: 'now()' }), 'a chosen release set aside for another', 'house_guarantees_release_cover');
+    // USED exactly with its time and release; closed exactly when not ACTIVE, with its reason; REVOKED exactly with who.
+    await check(insert({ status: `'USED'`, closed_at: 'now()', closed_reason: `'USED'` }), 'used without its time', 'house_guarantees_used');
+    await check(insert({ used_at: 'now()', used_drop_id: `'${drop}'` }), 'a use on an ACTIVE guarantee', 'house_guarantees_used');
+    await check(insert({ status: `'EXPIRED'` }), 'expired without its closing', 'house_guarantees_closed');
+    await check(insert({ status: `'EXPIRED'`, closed_at: 'now()' }), 'closed without its reason', 'house_guarantees_closed');
+    await check(insert({ closed_at: 'now()', closed_reason: `'REVOKED'` }), 'an ACTIVE guarantee closed', 'house_guarantees_closed');
+    await check(insert({ status: `'REVOKED'`, closed_at: 'now()', closed_reason: `'REVOKED'` }), 'revoked without who', 'house_guarantees_revoked');
+    await check(insert({ status: `'EXPIRED'`, closed_at: 'now()', closed_reason: `'LOST'` }), 'an unknown reason');
+    await insert({ status: `'REVOKED'`, closed_at: 'now()', closed_reason: `'REVOKED'`, revoked_by: `'${admin}'` });
+    await insert({ scope: `'COLLECTION'`, model_id: 'NULL', collection_id: `'${collection}'`, status: `'USED'`, used_at: 'now()', used_drop_id: `'${drop}'`, closed_at: 'now()', closed_reason: `'USED'` });
+    // One ACTIVE guarantee per account and release set aside; the waiting ones are many.
+    const set = (await insert({ scope: `'RELEASE'`, model_id: 'NULL', drop_id: `'${drop}'`, covered_drop_id: `'${drop}'`, covered_at: 'now()', pieces: '2' })).rows[0].id;
+    await expect(insert({ covered_drop_id: `'${drop}'`, covered_at: 'now()' })).rejects.toSatisfy((e) => isUniqueViolation(e, 'house_guarantees_one_per_release'));
+    await insert({});
+    await insert({});
+    // Its identity, target and grant never change.
+    for (const q of [
+      `UPDATE house_guarantees SET account_id = '${other}' WHERE id = '${set}'`,
+      `UPDATE house_guarantees SET drop_id = '${other_drop}', covered_drop_id = '${other_drop}' WHERE id = '${set}'`,
+      `UPDATE house_guarantees SET granted_at = now() - interval '1 day' WHERE id = '${set}'`,
+    ]) {
+      await expect(run(q), q).rejects.toSatisfy(isGuardViolation);
+    }
+    // One settings row at most; each value in its bounds.
+    await check(run(`INSERT INTO guarantee_settings (id) VALUES (2)`), 'a second settings row');
+    await check(run(`INSERT INTO guarantee_settings (valid_days) VALUES (731)`), 'valid 731 days');
+    await check(run(`INSERT INTO guarantee_settings (pieces) VALUES (6)`), 'six pieces by default');
+    await run(`INSERT INTO guarantee_settings (updated_by) VALUES ('${admin}')`);
+    await expect(run(`INSERT INTO guarantee_settings (id) VALUES (1)`)).rejects.toSatisfy((e) => isUniqueViolation(e));
+    // A guaranteed entry: never ranked nor tiered; more than one piece only with a guarantee; a guarantee used once.
+    const entry = (cols: Record<string, string>) => {
+      const all: Record<string, string> = { drop_id: `'${drop}'`, account_id: `'${account}'`, ...cols };
+      return sql.raw<{ id: string }>(`INSERT INTO drop_entries (${Object.keys(all).join(', ')}) VALUES (${Object.values(all).join(', ')}) RETURNING id`).execute(t.db);
+    };
+    await check(entry({ pieces: '2' }), 'two pieces without a guarantee', 'drop_entries_pieces');
+    await check(entry({ pieces: '6', guarantee_id: `'${set}'` }), 'six pieces');
+    await check(entry({ guarantee_id: `'${set}'`, status: `'SELECTED'`, tier: '2', seniority: '0', respond_by: 'now()' }), 'a guaranteed entry with a tier', 'drop_entries_guaranteed');
+    const held = (await entry({ guarantee_id: `'${set}'`, pieces: '2', status: `'CONFIRMED'`, respond_by: 'now()', handled_at: 'now()' })).rows[0].id;
+    await expect(entry({ account_id: `'${other}'`, guarantee_id: `'${set}'` })).rejects.toSatisfy((e) => isUniqueViolation(e, 'drop_entries_guarantee_key'));
+    // A draw's entry gives one order per piece; never a second order of the same piece; a salon order stays one piece.
+    const order = (cols: Record<string, string>) => {
+      const all: Record<string, string> = { channel: `'DRAW'`, drop_entry_id: `'${held}'`, drop_id: `'${drop}'`, account_id: `'${account}'`, model_id: `'${model}'`, location_id: `'${location}'`, ...cols };
+      return sql.raw<{ id: string }>(`INSERT INTO orders (${Object.keys(all).join(', ')}) VALUES (${Object.values(all).join(', ')}) RETURNING id`).execute(t.db);
+    };
+    await order({ piece: '1' });
+    await order({ piece: '2' });
+    await expect(order({ piece: '2' })).rejects.toSatisfy((e) => isUniqueViolation(e, 'orders_drop_entry_key'));
+    const request = (await sql<{ id: string }>`INSERT INTO shop_requests (account_id, model_id, status, handled_at, outcome) VALUES (${account}, ${model}, 'CLOSED', now(), 'ACCEPTED') RETURNING id`.execute(t.db)).rows[0].id;
+    await check(order({ channel: `'SALON'`, drop_entry_id: 'NULL', drop_id: 'NULL', shop_request_id: `'${request}'`, piece: '2' }), 'a second piece of a salon order', 'orders_source');
+    // The down step refuses while a DRAW order of a second piece exists: it cannot be removed, so this database stays at 0029.
+    await expect(migrateDown(t.db)).rejects.toThrow(/0029_house_guarantee cannot be rolled back: 1 draw orders of a second piece or more exist/);
+    expect((await migrationStatus(t.db)).find((m) => m.name === '0029_house_guarantee')?.executedAt).toBeDefined();
+    // Cleared by hand for the roll-backs that follow.
+    await run(`DELETE FROM orders WHERE drop_entry_id = '${held}'`);
+    await run(`DELETE FROM drop_entries WHERE drop_id IN ('${drop}', '${other_drop}')`);
+    await run(`DELETE FROM house_guarantees`);
+    await run(`DELETE FROM guarantee_settings`);
   });
 
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
@@ -2554,11 +2729,13 @@ describe('migrations', () => {
       '0023_releases_collectors',
       // NOCTURNE (plan of 2026-10-05): the variants of a model and a draw's price.
       '0024_model_variants',
-      // The next nine (plan of 2026-10-06), deployment G: the messages with ORBES Client Services; the club's program; the tiers' grants; the yearly care.
+      // The next nine (plan of 2026-10-06), deployment G: the messages with ORBES Client Services; the club's program; the tiers' grants; the yearly care; the house's guarantee.
       '0025_client_messages',
       '0026_club_program',
       '0027_tier_grants',
       '0028_yearly_care',
+      // THE HOUSE'S GUARANTEE.
+      '0029_house_guarantee',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

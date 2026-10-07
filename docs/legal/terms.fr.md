@@ -174,7 +174,7 @@ ORBES peut proposer un modèle en un nombre limité de pièces lors d'une sortie
 
 **Le salon privé.** ORBES peut réserver des modèles aux propriétaires d'une pièce (THE PRIVATE SALON). Chaque modèle est présenté, avec un prix indicatif, aux comptes connectés dont le palier atteint celui qu'ORBES fixe pour lui (TITANE, PLATINE ou PALLADIUM) ; au-dessous de ce palier, il n'est pas présenté. Depuis la fiche d'un modèle, un compte peut le demander, avec une note facultative de 500 caractères au plus. Une demande n'engage ni le compte ni ORBES et ne forme aucun contrat : ORBES Client Services contacte le compte et conclut avec lui toute vente, hors du service. Rien n'est payé sur le service, et il n'envoie aucun e-mail. Un compte a une seule demande ouverte par modèle ; une fois qu'ORBES Client Services l'a close, acceptée ou refusée, avec une note de ce qui a été fait, le compte peut demander le modèle de nouveau. Une demande acceptée devient une commande (article 14). Ni votre note ni celle d'ORBES Client Services ne sont inscrites au journal d'audit du service.
 
-*Code : R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84, R85, R86, R87, R88, R89, R119, R120, R137, R140, R141, R147, R148, R149, N7.*
+*Code : R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84, R85, R86, R87, R88, R89, R119, R120, R137, R140, R141, R147, R148, R149, R150, N7.*
 
 ## Article 13 — LIVE RELEASES
 

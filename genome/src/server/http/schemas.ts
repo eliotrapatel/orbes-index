@@ -27,6 +27,7 @@ import {
   SHIPPING_FREE_LEVELS,
   SHIPPING_SERVICES,
   DROP_ENTRY_STATUSES,
+  GUARANTEE_SCOPES,
   INVOICE_KINDS,
   LIVE_ENTRY_STATUSES,
   LOOKBOOK_STATES,
@@ -47,6 +48,7 @@ import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_L
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
 import { CARE_ADDRESS_LIMITS } from '../services/care.js';
+import { GUARANTEE_NOTE_MAX, GUARANTEE_PIECES, GUARANTEE_VALID_DAYS } from '../services/guarantees.js';
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
 import { PRIORITY_TIERS, PROGRAM_LIMITS } from '../services/club-program.js';
 import { DRAW_PRICE_MAX_MINOR, DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
@@ -1417,6 +1419,46 @@ export const careCompleteBody = optionalBody({ notes: optionalText(4000) });
 
 /** POST /api/admin/care/:id/cancel: a note, for ORBES only (1 to 500 characters). */
 export const careCancelBody = body({ note: text(CARE_ADDRESS_LIMITS.note) });
+
+// ── THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01) ─────────────────────────
+
+const guaranteePieces = whole(GUARANTEE_PIECES.min, GUARANTEE_PIECES.max, 'pieces');
+const guaranteeNote = z.preprocess((v) => (v === '' ? null : v), text(GUARANTEE_NOTE_MAX).nullable().optional());
+
+/** A guarantee (PATCH /api/admin/guarantees/:id, POST …/revoke). */
+export const guaranteeParams = z.object({ id: uuid });
+
+/**
+ * POST /api/admin/owners/:id/guarantees (OPERATOR): what it covers (`scope` and the release, model or collection's id),
+ * its pieces, the last day it covers a release opening (`validUntil`, a calendar day in Paris), whether the client sees
+ * it, and a note for Client Services (optional).
+ */
+export const grantGuaranteeBody = body({
+  scope: z.enum(GUARANTEE_SCOPES),
+  targetId: uuid,
+  pieces: guaranteePieces,
+  validUntil: isoDate,
+  visible: z.boolean(),
+  note: guaranteeNote,
+});
+
+/** PATCH /api/admin/guarantees/:id (OPERATOR): its pieces, validity, shown, note; at least one. */
+export const updateGuaranteeBody = body({
+  pieces: guaranteePieces.optional(),
+  validUntil: isoDate.optional(),
+  visible: z.boolean().optional(),
+  note: guaranteeNote,
+}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one term of the guarantee to change');
+
+/** POST /api/admin/guarantees/:id/revoke (OPERATOR): an optional note. */
+export const revokeGuaranteeBody = optionalBody({ note: guaranteeNote });
+
+/** PUT /api/admin/settings/guarantees (ADMIN): the Grant dialog's defaults. */
+export const guaranteeSettingsBody = body({
+  validDays: whole(GUARANTEE_VALID_DAYS.min, GUARANTEE_VALID_DAYS.max, 'days'),
+  pieces: guaranteePieces,
+  visible: z.boolean(),
+});
 
 /** PUT /api/admin/orders/alerts: the delays of the alerts (M3), in days. */
 export const orderAlertsBody = body({

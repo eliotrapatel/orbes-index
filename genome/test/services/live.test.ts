@@ -39,6 +39,7 @@ import {
   windowsFor,
   LIVE_GESTURE_MIN_MS,
 } from '../../src/server/services/live.js';
+import { GuaranteeService } from '../../src/server/services/guarantees.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
 import { OwnershipService } from '../../src/server/services/ownership.js';
 import { OwnerService } from '../../src/server/services/owners.js';
@@ -403,7 +404,7 @@ describe('LiveService', () => {
       for (const x of rows) expect(x.queued_at).toEqual(T0);
       // The first three of the size take the three pieces at once.
       expect(rows.map((x) => x.status)).toEqual(['TURN', 'TURN', 'TURN', 'QUEUED', 'QUEUED', 'QUEUED']);
-      expect((await audits(r.id)).find((x) => x.action === 'drop.live.queue')).toEqual({ action: 'drop.live.queue', actor: 'system', details: { entries: 6 } });
+      expect((await audits(r.id)).find((x) => x.action === 'drop.live.queue')).toEqual({ action: 'drop.live.queue', actor: 'system', details: { entries: 6, guaranteed: 0 } });
       // After T0: behind, in arrival order, straight into the line.
       const late = [await accountOfTier(f, 3), await accountOfTier(f, 0)];
       f.clock.set(at(10 * SECOND));
@@ -887,6 +888,124 @@ describe('LiveService', () => {
       await f.live.end(r.id, f.admin);
       expect(await entry(r.id, a.id)).toMatchObject({ status: 'ENDED', ended_at: at(-MINUTE) });
       expect(await advance(r, T0)).toMatchObject({ queued: 0, turns: 0, ended: null });
+    });
+  });
+
+  describe('the house’s guarantee (IN-01)', () => {
+    const guarantees = () => new GuaranteeService({ db: t.db, audit: f.audit, clock: f.clock.now });
+    const grant = (accountId: string, dropId: string, o: { pieces?: number; visible?: boolean } = {}) =>
+      guarantees().grant(accountId, { scope: 'RELEASE', targetId: dropId, pieces: o.pieces ?? 1, validUntil: '2026-12-31', visible: o.visible ?? true }, f.admin);
+    const guaranteeOf = async (accountId: string) => t.db.selectFrom('house_guarantees').selectAll().where('account_id', '=', accountId).executeTakeFirstOrThrow();
+
+    it('puts its holder first in line at T0 whatever its tier; a late holder first among those still waiting in its size; the places ahead count it first; USED when its turn is given', async () => {
+      const r = await release({ sizes: [{ label: '52', stock: 1 }] });
+      const palladium = await accountOfTier(f, 3);
+      const holder = await accountOfTier(f, 1);
+      await grant(holder.id, r.id);
+      f.clock.set(at(-MINUTE));
+      await f.live.enter(palladium.id, r.id, { sizeId: r.sizes[0]!.id }, palladium.actor);
+      const entered = await f.live.enter(holder.id, r.id, { sizeId: r.sizes[0]!.id }, holder.actor);
+      expect(entered).toMatchObject({ status: 'WAITING', guaranteed: true });
+      expect((await guaranteeOf(holder.id)).status).toBe('ACTIVE');
+      await advance(r, T0);
+      // The line: the holder first, the PALLADIUM after it; the holder's turn uses its guarantee.
+      expect((await entriesOf(t.db, r.id)).map((x) => [x.account_id, x.position, x.status])).toEqual([
+        [holder.id, 1, 'TURN'],
+        [palladium.id, 2, 'QUEUED'],
+      ]);
+      expect(await guaranteeOf(holder.id)).toMatchObject({ status: 'USED', used_drop_id: r.id, closed_reason: 'USED' });
+      expect((await audits(r.id)).find((x) => x.action === 'drop.live.queue')!.details).toEqual({ entries: 2, guaranteed: 1 });
+      // A turn missed never gives it back.
+      expect(await advance(r, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 1 });
+      expect((await guaranteeOf(holder.id)).status).toBe('USED');
+
+      // A late holder: first among those still waiting in its size, wherever its place in the line.
+      const r2 = await release({ sizes: [{ label: '52', stock: 1 }, { label: '54', stock: 1 }] });
+      const room = [await accountOfTier(f, 2), await accountOfTier(f, 0), await accountOfTier(f, 0)];
+      const late = await accountOfTier(f, 0);
+      await grant(late.id, r2.id);
+      f.clock.set(at(-MINUTE));
+      for (const a of room) await f.live.enter(a.id, r2.id, { sizeId: r2.sizes[0]!.id }, a.actor);
+      await advance(r2, T0);
+      f.clock.set(at(10 * SECOND));
+      const lateView = await f.live.enter(late.id, r2.id, { sizeId: r2.sizes[0]!.id }, late.actor);
+      expect(lateView).toMatchObject({ status: 'QUEUED', position: 4, ahead: 0, guaranteed: true });
+      // The room in the order of the line: its first in its turn, the two others behind the holder.
+      const line = (await entriesOf(t.db, r2.id)).filter((x) => x.account_id !== late.id);
+      const views = await Promise.all(line.map((x) => f.live.entry(x.account_id, r2.id)));
+      expect(views.map((v) => [v!.status, v!.position, v!.ahead])).toEqual([
+        ['TURN', 1, null],
+        ['QUEUED', 2, 1],
+        ['QUEUED', 3, 2],
+      ]);
+      // The first turn runs out: the late holder takes the piece, before the second of the room.
+      expect(await advance(r2, at(31 * SECOND))).toMatchObject({ missed: 1, turns: 1 });
+      expect((await entry(r2.id, late.id)).status).toBe('TURN');
+      expect((await entry(r2.id, line[1]!.account_id)).status).toBe('QUEUED');
+    });
+
+    it('lets its holder in whatever the rule, for up to max(per collector, its pieces), in a size that can still serve it (LIVE_GUARANTEE_SIZE_FULL), its size changed under the same check', async () => {
+      const r = await release({ minTier: 3, perAccount: 1, sizes: [{ label: '50', stock: 1 }, { label: '52', stock: 3 }] });
+      const holder = await accountOfTier(f, 1);
+      const second = await accountOfTier(f, 3);
+      const outsider = await accountOfTier(f, 1);
+      await grant(holder.id, r.id, { pieces: 2 });
+      await grant(second.id, r.id, { pieces: 1 });
+      f.clock.set(at(-MINUTE));
+      expect((await f.live.access(holder.id, r.id)).access).toMatchObject({ allowed: true, missing: null });
+      await rejects(f.live.enter(outsider.id, r.id, { sizeId: r.sizes[1]!.id }, outsider.actor), 'LIVE_NOT_ELIGIBLE', 403);
+      await rejects(f.live.enter(holder.id, r.id, { sizeId: r.sizes[1]!.id, quantity: 3 }, holder.actor), 'LIVE_QUANTITY_INVALID', 400);
+      expect(await f.live.enter(holder.id, r.id, { sizeId: r.sizes[1]!.id, quantity: 2 }, holder.actor)).toMatchObject({ quantity: 2, guaranteed: true });
+      // Size 52 holds 3: the holder's 2 leave 1 for another guaranteed place.
+      await rejects(f.live.enter(second.id, r.id, { sizeId: r.sizes[1]!.id, quantity: 2 }, second.actor), 'LIVE_QUANTITY_INVALID', 400);
+      // I'LL BE THERE likewise: the holder in, the outsider refused.
+      await rejects(f.live.setInterest(outsider.id, r.id, r.sizes[1]!.id, outsider.actor), 'LIVE_NOT_ELIGIBLE', 403);
+      expect(await f.live.enter(second.id, r.id, { sizeId: r.sizes[0]!.id }, second.actor)).toMatchObject({ size: { label: '50' }, guaranteed: true });
+      // Its size changed before T0: never into a size its guarantee cannot be given in.
+      const full = await rejects(f.live.changeSize(holder.id, r.id, { sizeId: r.sizes[0]!.id, quantity: 1 }, holder.actor), 'LIVE_GUARANTEE_SIZE_FULL', 409);
+      expect(full.message).toBe('Your guaranteed place cannot be given in this size: choose another size.');
+      expect(await f.live.changeSize(second.id, r.id, { sizeId: r.sizes[1]!.id }, second.actor)).toMatchObject({ size: { label: '52' } });
+      await rejects(f.live.changeSize(second.id, r.id, { sizeId: r.sizes[1]!.id, quantity: 2 }, second.actor), 'LIVE_QUANTITY_INVALID', 400);
+      const third = await accountOfTier(f, 3);
+      await grant(third.id, r.id, { pieces: 1 });
+      await rejects(f.live.enter(third.id, r.id, { sizeId: r.sizes[1]!.id }, third.actor), 'LIVE_GUARANTEE_SIZE_FULL', 409);
+    });
+
+    it('LEFT or REMOVED unbinds it, ACTIVE still, and entering again uses it again; an after-room is never covered', async () => {
+      const r = await release({ sizes: [{ label: '52', stock: 2 }] });
+      const holder = await accountOfTier(f, 0);
+      const g = (await grant(holder.id, r.id)).guarantee;
+      f.clock.set(at(-2 * MINUTE));
+      await f.live.enter(holder.id, r.id, { sizeId: r.sizes[0]!.id }, holder.actor);
+      expect((await f.live.leave(holder.id, r.id, holder.actor)).guaranteed).toBe(false);
+      expect((await entry(r.id, holder.id)).guarantee_id).toBeNull();
+      expect((await guaranteeOf(holder.id)).status).toBe('ACTIVE');
+      expect(await f.live.enter(holder.id, r.id, { sizeId: r.sizes[0]!.id }, holder.actor)).toMatchObject({ guaranteed: true });
+      const e = await entry(r.id, holder.id);
+      expect(e.guarantee_id).toBe(g.id);
+      expect((await audits(r.id)).filter((x) => x.action === 'drop.live.leave').at(-1)!.details).toEqual({ entryId: e.id, from: 'WAITING', guaranteeId: g.id });
+      await f.live.remove(r.id, e.id, f.admin);
+      expect(await entry(r.id, holder.id)).toMatchObject({ status: 'REMOVED', guarantee_id: null });
+      expect((await guaranteeOf(holder.id)).status).toBe('ACTIVE');
+
+      // An after-room's release, sold out: the after-room opens for the line; a guarantee of its model waits.
+      const afterModel = await createModel(t.db, 'AFTER');
+      const parent = await release({ sizes: [{ label: '52', stock: 1 }], afterRoom: { modelId: afterModel, priceMinor: 100_000, sizes: [{ label: '52', stock: 1 }] } as never });
+      const buyer = await accountOfTier(f, 0);
+      const waiter = await accountOfTier(f, 0);
+      f.clock.set(at(-MINUTE));
+      await f.live.enter(buyer.id, parent.id, { sizeId: parent.sizes[0]!.id }, buyer.actor);
+      await f.live.enter(waiter.id, parent.id, { sizeId: parent.sizes[0]!.id }, waiter.actor);
+      await advance(parent, T0);
+      const first = (await entriesOf(t.db, parent.id))[0]!;
+      expect(first.status).toBe('TURN');
+      const turn = first.account_id === buyer.id ? buyer : waiter;
+      await holdAndSecure(parent.id, turn.id, turn.actor);
+      await f.live.confirm(turn.id, parent.id, turn.actor);
+      expect((await t.db.selectFrom('drops').select('published_at').where('id', '=', parent.afterRoom!.id).executeTakeFirstOrThrow()).published_at).not.toBeNull();
+      const late = await accountOfTier(f, 0);
+      const waiting = await guarantees().grant(late.id, { scope: 'MODEL', targetId: afterModel, pieces: 1, validUntil: '2026-12-31', visible: true }, f.admin);
+      expect(waiting.setAsideFor).toBeNull();
     });
   });
 

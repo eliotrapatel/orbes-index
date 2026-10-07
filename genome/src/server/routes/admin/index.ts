@@ -8,7 +8,7 @@
  * the draw of a drop, a model discontinued or reinstated, a LIVE RELEASE
  * ended now or an entry removed from it, the delays of the order alerts,
  * a location or a carrier added or changed, a conversation of the Messages board
- * assigned); every mutation needs the CSRF token and a same-origin
+ * assigned, the defaults of THE HOUSE'S GUARANTEE); every mutation needs the CSRF token and a same-origin
  * request. Each mutation is audited by the service it calls (or by the route
  * for the few table writes without a service), with the admin's id and the
  * hashed client IP as the actor. Bodies are JSON (≤ 16 KB) except on the
@@ -27,6 +27,7 @@ import { adminUserRoutes } from './admins.js';
 import { adminAnalyticsRoutes } from './analytics.js';
 import { adminAtelierRoutes } from './atelier.js';
 import { adminCareRoutes } from './care.js';
+import { adminGuaranteeRoutes } from './guarantees.js';
 import { adminDocumentRoutes } from './documents.js';
 import { adminDropRoutes } from './drops.js';
 import { adminAuthRoutes } from './auth.js';
@@ -76,6 +77,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminOwnerRoutes, deps);
   await app.register(adminMessageRoutes, deps);
   await app.register(adminCareRoutes, deps);
+  await app.register(adminGuaranteeRoutes, deps);
   await app.register(adminDropRoutes, deps);
   await app.register(adminLiveRoutes, deps);
   await app.register(adminOrderRoutes, deps);

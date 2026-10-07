@@ -289,6 +289,24 @@ export type CareRequestStatus = (typeof CARE_REQUEST_STATUSES)[number];
 export const CARE_CANCELLED_BY = ['account', 'admin'] as const;
 export type CareCancelledBy = (typeof CARE_CANCELLED_BY)[number];
 
+/**
+ * What THE HOUSE'S GUARANTEE covers (house_guarantees.scope, migration 0029, IN-01): a chosen release, the next release of
+ * a model (a main model's covers its variants), or the next release of a collection.
+ */
+export const GUARANTEE_SCOPES = ['RELEASE', 'MODEL', 'COLLECTION'] as const;
+export type GuaranteeScope = (typeof GUARANTEE_SCOPES)[number];
+
+/**
+ * A guarantee as stored (house_guarantees.status): ACTIVE (waiting, set aside or entered: computed, never stored), USED
+ * at the draw, a direct reservation or a LIVE turn, EXPIRED with its release, REVOKED by Client Services.
+ */
+export const GUARANTEE_STATUSES = ['ACTIVE', 'USED', 'EXPIRED', 'REVOKED'] as const;
+export type GuaranteeStatus = (typeof GUARANTEE_STATUSES)[number];
+
+/** Why a guarantee closed (house_guarantees.closed_reason): used, its release ended or cancelled, revoked. */
+export const GUARANTEE_CLOSED_REASONS = ['USED', 'RELEASE_ENDED', 'RELEASE_CANCELLED', 'REVOKED'] as const;
+export type GuaranteeClosedReason = (typeof GUARANTEE_CLOSED_REASONS)[number];
+
 /** Why a credit taken off an order was given back (credit_uses.released_reason, migration 0027): removed, the order cancelled or returned. */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
 export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
@@ -870,6 +888,10 @@ export interface DropEntriesTable {
   handled_by: string | null;           // admin_users.id
   handled_at: TimestampNullable;
   note: string | null;                 // ≤ 500 characters, the console's
+  /** Migration 0029 (IN-01): the house's guarantee this entry uses, once each; a guaranteed entry is never ranked nor tiered. */
+  guarantee_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0029: the pieces of its place, 1..5; above 1 only with a guarantee. */
+  pieces: WithDefault<number>;
 }
 
 /**
@@ -1024,6 +1046,8 @@ export interface LiveEntriesTable {
   /** Keyed SHA-256 of the entry's network prefix, 32 bytes; erased 30 days after the release's end. */
   network_hash: ColumnType<Uint8Array | null, Uint8Array | null | undefined, Uint8Array | null>;
   country: ColumnType<string | null, string | null | undefined, string | null>;     // two capital letters
+  /** Migration 0029 (IN-01): the house's guarantee this entry uses (first in line in its size), once each. */
+  guarantee_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /** The models whose owners may enter a LIVE RELEASE (migration 0021). */
@@ -1394,6 +1418,50 @@ export interface CareRequestsTable {
   handled_by: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
+/**
+ * THE HOUSE'S GUARANTEE (migration 0029, IN-01): a place granted by Client Services to one account at a chosen release or
+ * the next release of a model or collection, for 1..5 pieces, valid for a release opening by `valid_until`, shown to the
+ * client or not; set aside for a release (`covered_drop_id`), then USED, EXPIRED or REVOKED. Its identity, target and
+ * grant never change. Its computed state (waiting, set aside, entered) is never stored (services/guarantees.ts).
+ */
+export interface HouseGuaranteesTable {
+  id: Generated<string>;
+  account_id: string;
+  scope: GuaranteeScope;
+  drop_id: ColumnType<string | null, string | null | undefined, string | null>;
+  model_id: ColumnType<string | null, string | null | undefined, string | null>;
+  collection_id: ColumnType<string | null, string | null | undefined, string | null>;
+  pieces: WithDefault<number>;         // 1..5
+  valid_until: Timestamp;
+  visible: WithDefault<boolean>;
+  /** For Client Services: 1..500 characters; never shown in the app nor in the audit log, in the client's export. */
+  note: ColumnType<string | null, string | null | undefined, string | null>;
+  covered_drop_id: ColumnType<string | null, string | null | undefined, string | null>;
+  covered_at: TimestampNullable;
+  status: ColumnType<GuaranteeStatus, GuaranteeStatus | undefined, GuaranteeStatus>;
+  used_at: TimestampNullable;
+  used_drop_id: ColumnType<string | null, string | null | undefined, string | null>;
+  closed_at: TimestampNullable;
+  closed_reason: ColumnType<GuaranteeClosedReason | null, GuaranteeClosedReason | null | undefined, GuaranteeClosedReason | null>;
+  revoked_by: ColumnType<string | null, string | null | undefined, string | null>;
+  revoke_note: ColumnType<string | null, string | null | undefined, string | null>;
+  /** admin_users.id; NULL for a script. */
+  granted_by: ColumnType<string | null, string | null | undefined, string | null>;
+  granted_at: TimestampDefault;
+  updated_by: ColumnType<string | null, string | null | undefined, string | null>;
+  updated_at: TimestampNullable;
+}
+
+/** The Grant dialog's defaults (migration 0029, Orders → Settings, House guarantee): one row at most (`id` 1), none inserted. */
+export interface GuaranteeSettingsTable {
+  id: WithDefault<number>;             // always 1
+  valid_days: WithDefault<number>;     // 1..730, 90
+  pieces: WithDefault<number>;         // 1..5, 1
+  visible: WithDefault<boolean>;       // true
+  updated_by: string | null;
+  updated_at: TimestampDefault;
+}
+
 /** What an order's delivery costs below the free shipping of the tiers (migration 0026), per currency and service; optional, none inserted. */
 export interface ShippingRatesTable {
   currency: HouseCurrency;
@@ -1607,6 +1675,8 @@ export interface Database {
   tier_grants: TierGrantsTable;
   credit_uses: CreditUsesTable;
   care_requests: CareRequestsTable;
+  house_guarantees: HouseGuaranteesTable;
+  guarantee_settings: GuaranteeSettingsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
   segments: SegmentsTable;
@@ -1717,6 +1787,8 @@ export type ShippingRateRow = Selectable<ShippingRatesTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
 export type CareRequestRow = Selectable<CareRequestsTable>;
+export type HouseGuaranteeRow = Selectable<HouseGuaranteesTable>;
+export type GuaranteeSettingsRow = Selectable<GuaranteeSettingsTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

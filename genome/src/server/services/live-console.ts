@@ -79,6 +79,7 @@ import {
   type LiveAccessRule,
   type LivePhase,
 } from './live.js';
+import { coverOnPublish, guaranteedPieces, releaseCovered, releaseGuaranteed, type ReleaseGuaranteed } from './guarantees.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { knownLocation, linkDropSizes } from './stock.js';
@@ -107,6 +108,8 @@ export const LIVE_CONSOLE_LINE_MAX = 200;
 export const LIVE_CIRCLE_TITLE = 'A LIVE RELEASE';
 
 const MINUTE_MS = 60_000;
+/** IN-01: fewer pieces than the house guarantees for the release (as drops.ts says it for a draw). */
+const guaranteesExceed = (n: number) => conflict('DROP_GUARANTEES_EXCEED', `${n} ${n === 1 ? 'piece' : 'pieces'} of this release ${n === 1 ? 'is' : 'are'} guaranteed by the house.`);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
 const PARIS = 'Europe/Paris';
@@ -668,6 +671,8 @@ export interface AdminLiveRelease extends AdminLiveCard {
   seedHash: string;
   /** Its after-room, set or opened; null without one (and for an after-room). */
   afterRoom: AdminAfterRoom | null;
+  /** IN-01: the house's guarantees set aside for the release or used in it: how many places, how many pieces. */
+  guaranteed: ReleaseGuaranteed;
   /** An after-room's own page: the release it follows; null for a release. */
   afterRoomOf: { id: string; title: string } | null;
 }
@@ -1031,6 +1036,9 @@ export class LiveConsoleService {
           (k === 'afterRoom' && listIds(before.afterRoom) !== listIds(after.afterRoom)),
       );
       if (changed.length === 0) return this.release(tx, id);
+      // IN-01: never fewer pieces than the house guarantees for the release.
+      const guaranteed = await guaranteedPieces(tx, id);
+      if (after.sizes.reduce((n, x) => n + x.stock, 0) < guaranteed) throw guaranteesExceed(guaranteed);
       if (after.modelId !== before.modelId) await this.checkModel(tx, after.modelId);
       if (after.afterRoom && after.afterRoom.modelId !== before.afterRoom?.modelId) await this.checkModel(tx, after.afterRoom.modelId);
       await this.checkAccess(tx, after);
@@ -1082,6 +1090,9 @@ export class LiveConsoleService {
       await tx.updateTable('drops').set({ published_at: now }).where('id', '=', id).execute();
       const published = { ...d, published_at: now };
       const notes: AuditRecordInput[] = [];
+      // IN-01: the house's guarantees waiting for the next release of its model or collection, set aside while they fit.
+      const covered: AuditRecordInput[] = [];
+      await coverOnPublish(tx, published, now, actor, covered);
       let postId: string | null = null;
       if (opts?.circlePost === true) {
         const post = await this.circlePost(tx, published, now);
@@ -1121,6 +1132,7 @@ export class LiveConsoleService {
             .map((x) => `${x.after ? 'AFTER-ROOM ' : ''}${x.l.label}:${x.l.short}`),
         },
       });
+      notes.push(...covered);
       for (const n of notes) await this.audit.record(n, tx);
       return this.release(tx, id);
     });
@@ -1200,6 +1212,8 @@ export class LiveConsoleService {
         .returning(['id'])
         .execute();
       const interest = await tx.selectFrom('live_interest').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', id).executeTakeFirstOrThrow();
+      // IN-01: its guarantees not used, carried to the next release of their model or collection, or expired.
+      await releaseCovered(tx, id, 'CANCELLED', now, actor, afterRoom);
       await this.audit.record({ actor, action: 'drop.live.cancel', targetType: 'drop', targetId: id, details: { published: d.published_at !== null, announced: isAnnounced(d, now), interest: Number(interest.n) } }, tx);
       for (const p of withdrawn) await this.audit.record({ actor, action: 'circle.post.unpublish', targetType: 'circle_post', targetId: p.id, details: { dropId: id, by: 'drop.live.cancel' } }, tx);
       for (const n of afterRoom) await this.audit.record(n, tx);
@@ -1668,6 +1682,7 @@ export class LiveConsoleService {
       this.locationOf(db, r),
       r.parent_drop_id ? Promise.resolve(null) : this.questions.tally(r, db),
     ]);
+    const guaranteed = (await releaseGuaranteed(db, [id])).get(id) ?? { places: 0, pieces: 0 };
     const stages = liveStages(r, now);
     const silhouette = r.silhouette_sha256 ? { sha256: r.silhouette_sha256, url: mediaUrl(r.silhouette_sha256)! } : null;
     return {
@@ -1714,6 +1729,7 @@ export class LiveConsoleService {
       seedHash: toHex(r.seed_hash),
       afterRoom,
       afterRoomOf: parent ?? null,
+      guaranteed,
     };
   }
 
@@ -1725,12 +1741,14 @@ export class LiveConsoleService {
       .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
       .select([
         'e.id', 'e.account_id', 'a.email', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at',
-        'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.gesture_ms', 'e.let_in_by',
+        'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.gesture_ms', 'e.let_in_by', 'e.guarantee_id',
       ])
       .where('e.drop_id', '=', d.id);
     if (filter.statuses) q = q.where('e.status', 'in', [...filter.statuses]);
     const rows = await q
       .orderBy(sql`e.position IS NULL`)
+      // IN-01: the places guaranteed by the house first, as the line gives them turns in their size.
+      .orderBy(sql`e.guarantee_id IS NULL`)
       .orderBy('e.position')
       .orderBy('e.joined_at')
       .orderBy('e.id')
@@ -1755,6 +1773,7 @@ export class LiveConsoleService {
       endedAt: r.ended_at,
       gestureMs: r.gesture_ms,
       letIn: r.let_in_by !== null,
+      guaranteed: r.guarantee_id !== null,
     }));
   }
 }

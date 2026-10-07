@@ -13,6 +13,9 @@
  *   POST  /api/admin/drops/:id/entries/:entryId/lapse       OPERATOR  LAPSED, after `respond_by` only
  *   POST  /api/admin/drops/:id/offer-next                   OPERATOR  the next of the waiting list, SELECTED
  *
+ * A drop and its entries carry THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): `guaranteed` (places and pieces), and each
+ * entry's `guaranteed` and `pieces`; the guarantees of a release are GET /api/admin/drops/:id/guarantees (guarantees.ts).
+ *
  * An AUDITOR reads the customers' emails masked (`j***@example.com`);
  * OPERATOR and ADMIN read them in clear (serialize.ts `clientEmail`). No
  * route returns a drop's seed before its draw, nor ever its sealed seed.

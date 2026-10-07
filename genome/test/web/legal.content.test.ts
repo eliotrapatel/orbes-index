@@ -510,7 +510,8 @@ describe('legal pages: the privacy policy, written from the code', () => {
     // The audit entry of an order's change says a note was written (`noted`), never what it says.
     expect(orders).toMatch(/details: \{ \.\.\.\(before \? \{ from: before\.status \} : \{ channel: after\.channel \}\), to: after\.status, \.\.\.details, \.\.\.\(change\.note \? \{ noted: true \} : \{\}\) \}/);
     // The engine's own: the line at the opening and the end, as counts, naming no entry.
-    expect(details.get('drop.live.queue')).toEqual([' entries: placed.length ']);
+    // (IN-01: the places guaranteed by the house among them, a count too.)
+    expect(details.get('drop.live.queue')).toEqual([' entries: placed.length, guaranteed ']);
     expect(details.get('drop.live.end')!.join()).not.toMatch(/entryId|account/);
     for (const [lang, i, counts] of [['en', 1, 'The line formed at the opening and the end of a release are written there as counts only.'], ['fr', 2, "La file formée à l'ouverture et la fin d'une sortie n'y sont inscrites qu'en nombres."]] as const) {
       const text = sectionText(DOCUMENTS.privacy[lang], 'live');

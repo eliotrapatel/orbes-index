@@ -14,6 +14,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { accessAccounts, accessOf, liveRefusal, liveRuleText, type LiveAccessRule } from '../../src/server/services/live.js';
+import { GuaranteeService } from '../../src/server/services/guarantees.js';
 import { LiveInsightsService } from '../../src/server/services/live-insights.js';
 import { LiveRoomService } from '../../src/server/services/live-room.js';
 import { SegmentService } from '../../src/server/services/segments.js';
@@ -183,6 +184,31 @@ describe('a release’s rules, read at each step', () => {
     const refused = await rejects(f.live.setInterest(titane.id, or.id, or.sizes[0]!.id, titane.actor), 'LIVE_NOT_ELIGIBLE', 403);
     expect(refused.message).toBe('This release is for owners from PLATINE or selected collectors.');
     expect((await rejects(f.live.setInterest(platine.id, and.id, and.sizes[0]!.id, platine.actor), 'LIVE_NOT_ELIGIBLE')).message).toBe('This release is for selected collectors.');
+  });
+
+  it('lets the holder of the house’s guarantee in whatever the rule (plan NEXT-NINE, IN-01): at I’LL BE THERE, the entry, the room and SECURE, its turn used', async () => {
+    const s = await segments.create({ name: 'Nobody', criteria: { match: 'ALL', rules: [{ kind: 'COUNTRY', countries: ['IS'] }] } }, f.admin);
+    const holder = await accountOfTier(f, 0);
+    const outsider = await accountOfTier(f, 0);
+    const T0 = new Date(f.clock.now().getTime() + 2 * HOUR);
+    const r = await createLiveRelease(f, { opensAt: T0, minTier: 3, accessSegmentId: s.id, minParticipations: 3, sizes: [{ label: '52', stock: 1 }] });
+    const row = await t.db.selectFrom('drops').selectAll().where('id', '=', r.id).executeTakeFirstOrThrow();
+    expect(await accessOf(t.db, row, holder.id, f.clock.now())).toMatchObject({ allowed: false, missing: 'TIER' });
+    await new GuaranteeService({ db: t.db, audit: f.audit, clock: f.clock.now }).grant(holder.id, { scope: 'RELEASE', targetId: r.id, pieces: 1, validUntil: '2026-12-31', visible: false }, f.admin);
+    // Its rule alone would not let it in: the guarantee does, and nothing in the access says why.
+    expect(await accessOf(t.db, row, holder.id, f.clock.now())).toEqual({ allowed: true, tier: 0, missing: null, participations: 0 });
+    expect(await accessOf(t.db, row, outsider.id, f.clock.now())).toMatchObject({ allowed: false });
+    await f.live.setInterest(holder.id, r.id, r.sizes[0]!.id, holder.actor);
+    expect((await room.viewer(holder.id, r.id, 'state')).access.allowed).toBe(true);
+    await rejects(room.viewer(outsider.id, r.id, 'state'), 'LIVE_NOT_ELIGIBLE', 403);
+    f.clock.set(new Date(T0.getTime() - MINUTE));
+    await f.live.enter(holder.id, r.id, { sizeId: r.sizes[0]!.id }, holder.actor);
+    f.clock.set(T0);
+    await f.live.advance(r.id);
+    // Its turn used the guarantee: SECURE still lets it through.
+    expect((await t.db.selectFrom('house_guarantees').select('status').where('account_id', '=', holder.id).executeTakeFirstOrThrow()).status).toBe('USED');
+    await holdAndSecure(r.id, holder.id, holder.actor);
+    expect((await f.live.entry(holder.id, r.id))?.status).toBe('SECURED');
   });
 
   it('counts the accounts the rules let in, in one query, as the entry reads each one: the planner’s eligible collectors', async () => {

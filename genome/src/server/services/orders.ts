@@ -59,7 +59,8 @@
  *                then): PLATINE's free standard and PALLADIUM's free express (THE PROGRAM), otherwise the optional rate of
  *                the order's currency (Orders → Settings, SHIPPING), otherwise none, as before. An order keeps it if the
  *                tier changes later. An order travelling with another (`with_order_id`: the 2nd to 5th piece of a LIVE
- *                entry) carries its parent's service at 0 and follows it; only the parent's invoice carries the fee.
+ *                entry, or of a draw's place guaranteed by the house for several pieces, IN-01) carries its parent's
+ *                service at 0 and follows it; only the parent's invoice carries the fee.
  *                A known limit: a parent cancelled leaves the others travelling with it, at 0, the entry's fee gone
  *                with it (handing its role to the next piece is the owner's decision, API §16.24).
  *                Client Services enters a fee by hand (`setTerms`, RESERVED; 409 ORDER_SHIPPING_FREE over a free
@@ -1018,49 +1019,65 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
 }
 
 /**
- * The order of an entry of a draw confirmed by Client Services, in the transaction that confirms it (the drop's row and
- * the entry's held): RESERVED at the drop's location, with the draw's price and currency when it has one (plan NOCTURNE,
- * addition 5: instead of « to be confirmed »), its size (and a price the draw does not give) to be entered (`setTerms`)
- * (`reservedAt`: the time of the sale, for an entry confirmed before its order existed). Idempotent (null when the entry
- * has its order).
+ * The orders of an entry of a draw confirmed by Client Services, in the transaction that confirms it (the drop's row and
+ * the entry's held): one per piece of the entry (`pieces`: 1, or a house's guarantee's, plan NEXT-NINE IN-01), RESERVED
+ * at the drop's location, with the draw's price and currency when it has one (plan NOCTURNE, addition 5: instead of « to
+ * be confirmed »), its size (and a price the draw does not give) to be entered (`setTerms`) (`reservedAt`: the time of
+ * the sale, for an entry confirmed before its order existed). Following BP-19, the first carries the shipping and any
+ * welcome gift; the others travel with it (its service, shipping 0). Idempotent (only the pieces without an order get
+ * one; `order` is the first created, null when the entry has its orders).
  */
-export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, now: Date, opts: { reservedAt?: Date } = {}): Promise<{ order: OrderRow | null; notes: AuditRecordInput[] }> {
+export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, now: Date, opts: { reservedAt?: Date } = {}): Promise<{ order: OrderRow | null; orders: OrderRow[]; notes: AuditRecordInput[] }> {
   const e = await tx
     .selectFrom('drop_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
-    .select(['e.id', 'e.account_id', 'e.status', 'd.id as drop_id', 'd.model_id', 'd.stock_location_id', 'd.price_minor', 'd.currency'])
+    .select(['e.id', 'e.account_id', 'e.status', 'e.pieces', 'd.id as drop_id', 'd.model_id', 'd.stock_location_id', 'd.price_minor', 'd.currency'])
     .where('e.id', '=', entryId)
     .executeTakeFirst();
   if (!e || e.status !== 'CONFIRMED') throw new Error(`orderForDrawEntry: entry ${entryId} is not CONFIRMED`);
   // The draw's price, both or neither (drops_draw_price), within an order's bounds.
   const priced = e.price_minor !== null && e.currency !== null && e.price_minor <= ORDER_AMOUNT_MAX_MINOR;
-  if (await tx.selectFrom('orders').select('id').where('drop_entry_id', '=', e.id).executeTakeFirst()) return { order: null, notes: [] };
+  const existing = new Set((await tx.selectFrom('orders').select('piece').where('drop_entry_id', '=', e.id).execute()).map((r) => r.piece));
+  const pieces = Math.max(1, Number(e.pieces) || 1);
+  if (existing.size >= pieces) return { order: null, orders: [], notes: [] };
   const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now))];
-  const order = await createOrder(
-    tx,
-    {
-      channel: 'DRAW',
-      dropEntryId: e.id,
-      dropId: e.drop_id,
-      accountId: e.account_id,
-      modelId: e.model_id,
-      sizeLabel: null,
-      skuId: null,
-      priceMinor: priced ? e.price_minor : null,
-      currency: priced ? e.currency : null,
-      addons: [],
-      surprise: null,
-      locationId: await releaseLocation(tx, e.stock_location_id),
-      reservedAt: opts.reservedAt,
-      shipping: await shippingFor(tx, e.account_id, priced ? e.currency : null, now),
-    },
-    { hold: true },
-    actor,
-    now,
-    notes,
-  );
-  notes.push(...(await attachGifts(tx, order, actor, now)).notes);
-  return { order, notes };
+  const locationId = await releaseLocation(tx, e.stock_location_id);
+  let parent = existing.has(1) ? await tx.selectFrom('orders').selectAll().where('drop_entry_id', '=', e.id).where('piece', '=', 1).executeTakeFirst() : undefined;
+  const orders: OrderRow[] = [];
+  for (let piece = 1; piece <= pieces; piece++) {
+    if (existing.has(piece)) continue;
+    const created = await createOrder(
+      tx,
+      {
+        channel: 'DRAW',
+        dropEntryId: e.id,
+        piece,
+        dropId: e.drop_id,
+        accountId: e.account_id,
+        modelId: e.model_id,
+        sizeLabel: null,
+        skuId: null,
+        priceMinor: priced ? e.price_minor : null,
+        currency: priced ? e.currency : null,
+        addons: [],
+        surprise: null,
+        locationId,
+        reservedAt: opts.reservedAt,
+        shipping: parent ? travellingShipping(parent) : await shippingFor(tx, e.account_id, priced ? e.currency : null, now),
+        withOrderId: parent?.id ?? null,
+      },
+      { hold: true },
+      actor,
+      now,
+      notes,
+    );
+    orders.push(created);
+    if (piece === 1) parent = created;
+  }
+  // BP-19 T5: the welcome gift, on the sale's first order only.
+  const first = orders.find((o) => o.piece === 1);
+  if (first) notes.push(...(await attachGifts(tx, first, actor, now)).notes);
+  return { order: orders[0] ?? null, orders, notes };
 }
 
 /**
@@ -2010,7 +2027,7 @@ export class OrderService {
         await tx.selectFrom('drop_entries').select('id').where('id', '=', e.id).forUpdate().executeTakeFirstOrThrow();
         const created = await orderForDrawEntry(tx, e.id, SYSTEM_ACTOR, now, { reservedAt: e.handled_at ?? now });
         notes.push(...created.notes);
-        return created.order ? 1 : 0;
+        return created.orders.length;
       });
     }
     return { ...setup, linked, orders };

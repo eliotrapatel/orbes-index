@@ -478,9 +478,9 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'the lock withdraws the open entries (P-R03)': 'withdrawAccountEntries(tx, account.id)',
   'the early access window, 48 hours by default and set per release (P-X02)': 'throw earlyAccessNotOpen(from);',
   'only PLATINE and PALLADIUM, at the moment of the request (P-X02)': 'if (standing.tier < EARLY_ACCESS_MIN_TIER) throw tierRequired();',
-  'first come, first served within the pieces, then full (P-X02)': 'if (Number(held.n) >= d.quantity) throw dropFull();',
+  'first come, first served within the pieces, then full (P-X02)': 'if (held + guaranteed + (g?.pieces ?? 1) > d.quantity) throw dropFull();',
   'one entry or reservation per account, the place held until respond_by (P-X02)': 'throw alreadyReserved();',
-  'the draw only on the places left (P-X02)': 'const places = Math.max(0, d.quantity - Number(held.n));',
+  'the draw only on the places left (P-X02)': 'const places = Math.max(0, d.quantity - held - guaranteedPieceCount);',
   'the circle for the owners, each post from its tier, read again at each request (P-X01)': "if (tier < 1) throw ownersOnly();",
   'an answer YES or NO until the event, within its places (P-X01)': 'if (Number(yes.n) >= p.capacity) throw circleFull();',
   'one final vote per poll (P-X01)': 'if (voted) throw alreadyVoted();',
@@ -511,12 +511,12 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'a piece returned goes to the next in line (choice 5)': ".set((eb) => ({ status: 'MISSED', ended_at: eb.ref('turn_expires_at') }))",
   'add-ons at their price when chosen (choice 34)': 'addons.map((a) => ({ entry_id: e.id, addon_id: a.id, price_minor: a.price_minor }))',
   'pieces added, each recorded with the quantity line (choice 36)': 'quantityLine: d.quantity_line',
-  'a person in the line let take their turn (choice 3)': 'await this.grant(tx, d, [entry], now, admin);',
+  'a person in the line let take their turn (choice 3)': 'await this.grant(tx, d, [entry], now, admin, used);',
   'closed at the sell-out (choice 26)': "soldOutAt && soldOutAt.getTime() < d.closes_at.getTime() ? 'SOLD_OUT'",
   'the network\'s fingerprint erased after 30 days': 'const cutoff = new Date(now.getTime() - LIVE_NETWORK_RETENTION_DAYS * DAY_MS);',
   // LIVE RELEASE+ (plan of 2026-10-04).
   'an order per piece at PAY (choice 6, Interconnection)': 'notes.push(...(await ordersForLiveEntry(tx, e.id, actor, now)).notes);',
-  'an order for a draw\'s entry confirmed (choice 6)': "const order = to === 'CONFIRMED' ? await orderForDrawEntry(tx, e.id, actor, now) : { order: null, notes: [] };",
+  'an order for a draw\'s entry confirmed (choice 6)': "const order = to === 'CONFIRMED' ? await orderForDrawEntry(tx, e.id, actor, now) : { order: null, orders: [], notes: [] };",
   'an order for a salon request ACCEPTED (choice 6)': "const order = input.outcome === 'ACCEPTED' ? await orderForShopRequest(tx, requestId, actor, at) : { order: null, notes: [] };",
   'the legal steps of an order (Interconnection)': 'if (!isOrderTransitionAllowed(o.status, s.to)) throw stepNotAllowed(o.status, s.to);',
   'a piece in stock, or one to make with its identity reserved (choices 8, 15)': 'const identity = await reserveIdentity(tx, { modelId: o.model_id, skuId: o.sku_id, sizeLabel: o.size_label }, now);',
@@ -538,6 +538,8 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'YOU TOOK PART, YOU SECURED A PIECE (choice 5)': "app.get('/api/v1/account/participation', async (request) => {",
   'the question after for a week (choice 11)': 'return { opensAt, closesAt: new Date(opensAt.getTime() + LIVE_QUESTION_OPEN_DAYS * DAY_MS) };',
   'activity counted per hour without any account (choice 10)': ".insertInto('activity_hourly')",
+  // The next nine (plan of 2026-10-06), IN-01.
+  'the house\'s guarantee, always within the release\'s pieces (IN-01)': 'if (room.taken + pieces > room.capacity) throw exceedsRelease(room.capacity, room.taken);',
 };
 
 // ── Sources, for the absences of §10 ───────────────────────────────────────

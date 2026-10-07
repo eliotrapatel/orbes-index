@@ -85,6 +85,8 @@ export async function settleAfterRoom(tx: Db, parent: Pick<DropRow, 'id' | 'pare
       .where('drop_id', '=', parent.id)
       .where('status', 'in', ['WAITING', 'QUEUED'])
       .orderBy(sql`position IS NULL`)
+      // IN-01: the places guaranteed by the house first, as the line gives them turns.
+      .orderBy(sql`guarantee_id IS NULL`)
       .orderBy('position')
       .orderBy('joined_at')
       .orderBy('id')

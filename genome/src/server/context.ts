@@ -40,6 +40,7 @@ import { ClubService } from './services/club.js';
 import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
 import { CareService, eraseCareLabels } from './services/care.js';
+import { GuaranteeService } from './services/guarantees.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -149,6 +150,8 @@ export interface AppServices {
   tierGrants: TierGrantService;
   /** The yearly care (plan NEXT-NINE, BP-19 T6): asked for from the piece, a prepaid label both ways, recorded as YEARLY CARE. */
   care: CareService;
+  /** THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): a guaranteed place at a coming release, granted by Client Services. */
+  guarantees: GuaranteeService;
 }
 
 export interface AppContext {
@@ -263,6 +266,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const clubProgram = new ClubProgramService({ db, audit, clock });
     const tierGrants = new TierGrantService({ db, audit, clock, log });
     const care = new CareService({ db, audit, warranty, clock });
+    const guarantees = new GuaranteeService({ db, audit, clock });
 
     const services: AppServices = {
       issuance,
@@ -305,6 +309,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       clubProgram,
       tierGrants,
       care,
+      guarantees,
       ...overrides.services,
     };
 

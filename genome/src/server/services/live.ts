@@ -39,6 +39,15 @@
  * a size straight into its line, at the place it was given (its order in the parent's line); then the turns, the hold,
  * the add-ons and PAY as above, with the parent's per-tier windows. It has no boutique board.
  *
+ * THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01; services/guarantees.ts, migration 0029): a holder of a guarantee set
+ * aside for the release is let in whatever its rule (`accessOf`), takes up to max(`per_account`, its pieces), in a size
+ * that can still serve it (409 LIVE_GUARANTEE_SIZE_FULL, at ENTER and CHANGE SIZE). Its entry (`guarantee_id`) comes
+ * first in line at T0 (`lineOrder`) and first among those waiting in its size afterwards (`giveTurnsNow`, the places
+ * ahead, the console's list and the after-room's guests order `guarantee_id IS NULL, position`); the turn given uses the
+ * guarantee (USED). LEAVE, REMOVE and a lock before the turn unbind it, the guarantee staying ACTIVE; at the end and at
+ * a cancellation, a guarantee set aside and not used is carried to the next release of its model or collection, or
+ * expires with a chosen release. An after-room is never covered.
+ *
  * Access (`accessOf`), read at INTEREST, ENTER and SECURE (just before the action takes the release's row: its rules no
  * longer change once it is announced), and when the room is read: an ACTIVE account against each rule the release has,
  * combined as `access_combine` says (AND, the default: every rule; OR: any one of them):
@@ -89,6 +98,7 @@ import { afterRoomDoors, afterRoomPlace, isAfterRoom, settleAfterRoom, type Afte
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { CLUB_EXCLUDED_STATUSES, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
+import { holderGuarantee, holdsGuaranteeFor, releaseCovered, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
 import { ordersForLiveEntry } from './orders.js';
 import { readActingAccount } from './ownership.js';
 import { participationCount, participations } from './participation.js';
@@ -248,12 +258,13 @@ export function windowsFor(d: Pick<DropRow, 'turn_seconds' | 'pay_minutes'>, ove
 const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
- * The line at T0 (pure): the tier (descending, when `tierPriority`), then `drawKey(seed, id)` (ascending), then the id.
- * Anyone with the seed, the entries and their tiers computes the same places.
+ * The line at T0 (pure): the places guaranteed by the house first (plan NEXT-NINE, IN-01: `guaranteed`), then the tier
+ * (descending, when `tierPriority`), then `drawKey(seed, id)` (ascending), then the id. Anyone with the seed, the entries
+ * and their tiers computes the same places.
  */
-export function lineOrder<T extends { id: string; tier: number }>(entries: readonly T[], seed: Uint8Array, tierPriority: boolean): T[] {
+export function lineOrder<T extends { id: string; tier: number; guaranteed?: boolean }>(entries: readonly T[], seed: Uint8Array, tierPriority: boolean): T[] {
   const keyed = entries.map((e) => ({ e, id: e.id.toLowerCase(), key: drawKey(seed, e.id) }));
-  keyed.sort((a, b) => (tierPriority ? b.e.tier - a.e.tier : 0) || compare(a.key, b.key) || compare(a.id, b.id));
+  keyed.sort((a, b) => Number(b.e.guaranteed === true) - Number(a.e.guaranteed === true) || (tierPriority ? b.e.tier - a.e.tier : 0) || compare(a.key, b.key) || compare(a.id, b.id));
   return keyed.map((k) => k.e);
 }
 
@@ -316,6 +327,8 @@ const notEntered = () => conflict('LIVE_NOT_ENTERED', 'You are not in this relea
 const notInLine = () => conflict('LIVE_NOT_IN_LINE', 'You are no longer in the line of this release.');
 const sizeUnknown = () => new DomainError('LIVE_SIZE_UNKNOWN', 400, 'Choose one of the sizes of this release.');
 const sizeSoldOut = () => conflict('LIVE_SIZE_SOLD_OUT', 'Every piece in this size is reserved.');
+/** IN-01: the size cannot serve the house's guarantee of the entry (verify/copy.ts GUARANTEE.sizeFull). */
+const guaranteeSizeFull = () => conflict('LIVE_GUARANTEE_SIZE_FULL', 'Your guaranteed place cannot be given in this size: choose another size.');
 const quantityInvalid = (max: number) => new DomainError('LIVE_QUANTITY_INVALID', 400, max === 1 ? 'This release offers one piece per person.' : `This release offers 1 to ${max} pieces per person.`);
 const sizeLocked = () => conflict('LIVE_SIZE_LOCKED', 'Sizes are fixed once the release opens.');
 const notYourTurn = () => conflict('LIVE_NOT_YOUR_TURN', 'It is not your turn.');
@@ -520,6 +533,8 @@ export async function accessOf(
   if (counted !== null) rules.push({ rule: 'PARTICIPATION', met: async () => counted >= (d.min_participations ?? 0) });
   if (d.access_segment_id) rules.push({ rule: 'SEGMENT', met: () => isSegmentMember(db, d.access_segment_id!, accountId, now) });
   if (rules.length === 0) return { allowed: true, tier, missing: null, participations: counted };
+  // IN-01: the house's guarantee lets its holder in whatever the release's rule.
+  if (await holdsGuaranteeFor(db, accountId, d.id)) return { allowed: true, tier, missing: null, participations: counted };
   if (d.access_combine === 'OR') {
     for (const r of rules) if (await r.met()) return { allowed: true, tier, missing: null, participations: counted };
     return { allowed: false, tier, missing: rules[0]!.rule, participations: counted };
@@ -613,6 +628,8 @@ export interface LiveEntryView {
    * sell-out until the after-room ends; null otherwise (and for anyone else: an entry's own).
    */
   afterRoom: AfterRoomDoor | null;
+  /** IN-01: the entry uses the house's guarantee and the guarantee is shown to the client (false for one not shown). */
+  guaranteed: boolean;
 }
 
 /** An account's interest (I'LL BE THERE). */
@@ -661,6 +678,8 @@ export interface AdminLiveEntry {
   endedAt: Date | null;
   gestureMs: number | null;
   letIn: boolean;
+  /** IN-01: the entry uses the house's guarantee (GUARANTEED: first in line in its size). */
+  guaranteed: boolean;
 }
 
 export interface LiveMessageView {
@@ -729,6 +748,9 @@ export async function removeAccountLiveEntries(
         .set({ status: 'REMOVED', removed_by: admin, removed_at: sql<Date>`greatest(${now}::timestamptz, joined_at)`, ended_at: sql<Date>`greatest(${now}::timestamptz, joined_at)` })
         .where('id', 'in', ids)
         .execute();
+      // IN-01: a guarantee not used yet (WAITING, QUEUED) is unbound and stays ACTIVE: a lock does not revoke it.
+      const waiting = before.filter((e) => e.status === 'WAITING' || e.status === 'QUEUED').map((e) => e.id);
+      if (waiting.length > 0) await tx.updateTable('live_entries').set({ guarantee_id: null }).where('id', 'in', waiting).execute();
     }
     entries = before
       .map((e) => ({ dropId: e.drop_id, entryId: e.id, from: e.status }))
@@ -924,6 +946,7 @@ export async function liveEntryViews(
     .select([
       'e.id', 'e.drop_id', 'e.account_id', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at',
       'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.let_in_by', 'd.paused_at', 'd.price_minor', 'd.currency',
+      'e.guarantee_id',
     ])
     .where('d.mode', '=', 'LIVE')
     .where('d.published_at', 'is not', null);
@@ -947,6 +970,7 @@ export async function liveEntryViews(
     )
   ).flat();
   const doors = await afterRoomDoors(db, rows.filter((r) => r.status === 'ENDED').map((r) => r.id));
+  const shown = await visibleGuaranteeIds(db, rows.map((r) => r.guarantee_id));
   const queued = rows.filter((r) => r.status === 'QUEUED');
   const ahead = new Map<string, number>();
   // Only the line before them counts: their releases and sizes, up to the last of their places (one entry's own read, at
@@ -955,11 +979,12 @@ export async function liveEntryViews(
     const drops = [...new Set(part.map((r) => r.drop_id))];
     const sizes = [...new Set(part.map((r) => r.size_id))];
     const last = Math.max(...part.map((r) => r.position ?? 0));
+    // IN-01: the places guaranteed by the house come first in their size, wherever they stand in the line.
     const r = await sql<{ id: string; ahead: number }>`
       SELECT q.id, q.ahead
-        FROM (SELECT id, (row_number() OVER (PARTITION BY drop_id, size_id ORDER BY position) - 1)::int AS ahead
+        FROM (SELECT id, (row_number() OVER (PARTITION BY drop_id, size_id ORDER BY (guarantee_id IS NULL), position) - 1)::int AS ahead
                 FROM live_entries
-               WHERE drop_id IN (${sql.join(drops)}) AND size_id IN (${sql.join(sizes)}) AND status = 'QUEUED' AND position <= ${last}) AS q
+               WHERE drop_id IN (${sql.join(drops)}) AND size_id IN (${sql.join(sizes)}) AND status = 'QUEUED' AND (position <= ${last} OR guarantee_id IS NOT NULL)) AS q
        WHERE q.id IN (${sql.join(part.map((x) => x.id))})`.execute(db);
     for (const a of r.rows) ahead.set(a.id, Number(a.ahead));
   }
@@ -997,6 +1022,7 @@ export async function liveEntryViews(
       priceMinor: price,
       totalMinor: r.quantity * unit,
       afterRoom: doors.get(r.id) ?? null,
+      guaranteed: r.guarantee_id !== null && shown.has(r.guarantee_id),
     });
   }
   return out;
@@ -1044,11 +1070,12 @@ type EntryRow = {
   press_started_at: Date | null;
   secured_at: Date | null;
   hold_expires_at: Date | null;
+  guarantee_id: string | null;
 };
 
 const ENTRY_COLUMNS = [
   'id', 'drop_id', 'account_id', 'size_id', 'quantity', 'status', 'tier', 'position', 'joined_at', 'turn_at', 'turn_expires_at', 'turn_token_hash',
-  'press_started_at', 'secured_at', 'hold_expires_at',
+  'press_started_at', 'secured_at', 'hold_expires_at', 'guarantee_id',
 ] as const;
 
 export class LiveService {
@@ -1130,7 +1157,11 @@ export class LiveService {
       if (!access.allowed) throw notEligible(await liveAccessRule(tx, d, now), access);
       const existing = await tx.selectFrom('live_entries').select(['id', 'status', 'position']).where('drop_id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
       if (existing && !(existing.status === 'LEFT' && existing.position === null)) throw alreadyEntered();
-      const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity);
+      // IN-01: the house's guarantee set aside for this release, after the entry's row (the lock order): up to its pieces,
+      // the size still serving it; never in an after-room.
+      const g = await holderGuarantee(tx, account, d);
+      const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity, g?.pieces);
+      if (g) await this.checkGuaranteedSize(tx, d.id, size.id, quantity, existing?.id ?? null);
       const late = now.getTime() >= d.opens_at.getTime();
       if (late) {
         await this.formLine(tx, d, now, notes);
@@ -1142,7 +1173,7 @@ export class LiveService {
       const slot = late
         ? { status: 'QUEUED' as const, position: place ?? (await this.lastPosition(tx, id)) + 1, queued_at: now }
         : { status: 'WAITING' as const, position: null, queued_at: null };
-      const values = { size_id: size.id, quantity, tier: access.tier, joined_at: now, ended_at: null, network_hash: networkHash, country, ...slot };
+      const values = { size_id: size.id, quantity, tier: access.tier, joined_at: now, ended_at: null, network_hash: networkHash, country, guarantee_id: g?.id ?? null, ...slot };
       let entryId: string;
       if (existing) {
         await tx.updateTable('live_entries').set(values).where('id', '=', existing.id).where('status', '=', 'LEFT').execute();
@@ -1160,7 +1191,7 @@ export class LiveService {
         action: 'drop.live.enter',
         targetType: 'drop',
         targetId: id,
-        details: { entryId, sizeId: size.id, quantity, ...(late ? { position: slot.position } : {}), ...(existing ? { again: true } : {}) },
+        details: { entryId, sizeId: size.id, quantity, ...(late ? { position: slot.position } : {}), ...(existing ? { again: true } : {}), ...(g ? { guaranteeId: g.id } : {}) },
       });
       await this.record(tx, notes);
     });
@@ -1183,8 +1214,10 @@ export class LiveService {
       if (!e || e.status === 'LEFT') throw notEntered();
       if (now.getTime() >= d.opens_at.getTime() || e.position !== null) throw sizeLocked();
       if (e.status !== 'WAITING') throw notInLine();
-      const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity ?? e.quantity);
+      const g = e.guarantee_id ? await tx.selectFrom('house_guarantees').select(['id', 'pieces']).where('id', '=', e.guarantee_id).forUpdate().executeTakeFirst() : undefined;
+      const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity ?? e.quantity, g?.pieces);
       if (size.id === e.size_id && quantity === e.quantity) return;
+      if (g) await this.checkGuaranteedSize(tx, d.id, size.id, quantity, e.id);
       await tx.updateTable('live_entries').set({ size_id: size.id, quantity }).where('id', '=', e.id).where('status', '=', 'WAITING').execute();
       await this.audit.record({ actor, action: 'drop.live.size', targetType: 'drop', targetId: id, details: { entryId: e.id, sizeId: size.id, quantity, before: { sizeId: e.size_id, quantity: e.quantity } } }, tx);
     });
@@ -1207,9 +1240,20 @@ export class LiveService {
       if (e.status !== 'WAITING' && e.status !== 'QUEUED' && e.status !== 'TURN') throw notInLine();
       // A turn that has run out, the engine not having marked it yet: MISSED at its deadline, not LEFT.
       if (e.status === 'TURN' && effectiveDeadline(e.turn_expires_at!, d, now).getTime() <= now.getTime()) throw turnPassed();
-      await tx.updateTable('live_entries').set({ status: 'LEFT', ended_at: maxDate(now, e.joined_at) }).where('id', '=', e.id).execute();
-      if (e.status === 'TURN') await this.giveTurnsNow(tx, d, now);
-      await this.audit.record({ actor, action: 'drop.live.leave', targetType: 'drop', targetId: id, details: { entryId: e.id, from: e.status } }, tx);
+      // IN-01: a guarantee not used yet (WAITING, QUEUED) is unbound and stays ACTIVE; one used at the turn stays used.
+      const unbind = e.guarantee_id !== null && e.status !== 'TURN';
+      await tx
+        .updateTable('live_entries')
+        .set({ status: 'LEFT', ended_at: maxDate(now, e.joined_at), ...(unbind ? { guarantee_id: null } : {}) })
+        .where('id', '=', e.id)
+        .execute();
+      const notes: AuditRecordInput[] = [];
+      if (e.status === 'TURN') await this.giveTurnsNow(tx, d, now, notes);
+      await this.audit.record(
+        { actor, action: 'drop.live.leave', targetType: 'drop', targetId: id, details: { entryId: e.id, from: e.status, ...(e.guarantee_id ? { guaranteeId: e.guarantee_id } : {}) } },
+        tx,
+      );
+      await this.record(tx, notes);
     });
     return (await this.viewerEntry(this.db, account, id))!;
   }
@@ -1356,8 +1400,10 @@ export class LiveService {
       const e = await this.runningHold(tx, d, account, now);
       await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
       await tx.updateTable('live_entries').set({ status: 'RELEASED', ended_at: now }).where('id', '=', e.id).where('status', '=', 'SECURED').execute();
-      await this.giveTurnsNow(tx, d, now);
+      const notes: AuditRecordInput[] = [];
+      await this.giveTurnsNow(tx, d, now, notes);
       await this.audit.record({ actor, action: 'drop.live.release', targetType: 'drop', targetId: id, details: { entryId: e.id } }, tx);
+      await this.record(tx, notes);
     });
     return (await this.viewerEntry(this.db, account, id))!;
   }
@@ -1382,8 +1428,10 @@ export class LiveService {
     return this.control(dropId, async (tx, d, now) => {
       if (!d.paused_at) throw notPaused();
       const pausedMs = await this.unpause(tx, d, now);
-      await this.giveTurnsNow(tx, d, now);
+      const notes: AuditRecordInput[] = [];
+      await this.giveTurnsNow(tx, d, now, notes);
       await this.audit.record({ actor, action: 'drop.live.resume', targetType: 'drop', targetId: d.id, details: { pausedMs } }, tx);
+      await this.record(tx, notes);
     });
   }
 
@@ -1427,7 +1475,8 @@ export class LiveService {
       }
       await tx.updateTable('drop_sizes').set({ stock: s.stock + pieces }).where('id', '=', s.id).execute();
       await tx.updateTable('drops').set({ quantity: d.quantity + pieces }).where('id', '=', d.id).execute();
-      await this.giveTurnsNow(tx, d, now);
+      const notes: AuditRecordInput[] = [];
+      await this.giveTurnsNow(tx, d, now, notes);
       await this.audit.record(
         {
           actor,
@@ -1438,6 +1487,7 @@ export class LiveService {
         },
         tx,
       );
+      await this.record(tx, notes);
     });
   }
 
@@ -1452,8 +1502,10 @@ export class LiveService {
       const ranOut = effectiveDeadline(e.hold_expires_at!, d, now).getTime() <= now.getTime();
       await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
       await tx.updateTable('live_entries').set({ status: 'EXPIRED', ended_at: ranOut ? e.hold_expires_at : now }).where('id', '=', e.id).execute();
-      await this.giveTurnsNow(tx, d, now);
+      const notes: AuditRecordInput[] = [];
+      await this.giveTurnsNow(tx, d, now, notes);
       await this.audit.record({ actor, action: 'drop.live.free', targetType: 'drop', targetId: d.id, details: { entryId: e.id } }, tx);
+      await this.record(tx, notes);
     });
   }
 
@@ -1473,8 +1525,9 @@ export class LiveService {
       if (entry.status !== 'QUEUED') throw entryNotQueued();
       const total = (await this.sizeTotals(tx, d.id)).find((s) => s.id === entry.size_id)!;
       if (entry.quantity > freeOf(total)) throw noFreePiece();
-      await this.grant(tx, d, [entry], now, admin);
-      notes.push({ actor, action: 'drop.live.let_in', targetType: 'drop', targetId: d.id, details: { entryId: entry.id, position: entry.position } });
+      const used: AuditRecordInput[] = [];
+      await this.grant(tx, d, [entry], now, admin, used);
+      notes.push({ actor, action: 'drop.live.let_in', targetType: 'drop', targetId: d.id, details: { entryId: entry.id, position: entry.position } }, ...used);
       await this.record(tx, notes);
     });
   }
@@ -1521,9 +1574,20 @@ export class LiveService {
       if (!(LIVE_OPEN_STATUSES as readonly string[]).includes(e.status)) throw entryClosed();
       const at = maxDate(now, e.joined_at);
       await tx.deleteFrom('live_entry_addons').where('entry_id', '=', e.id).execute();
-      await tx.updateTable('live_entries').set({ status: 'REMOVED', removed_by: admin, removed_at: at, ended_at: at }).where('id', '=', e.id).execute();
-      if (e.status === 'TURN' || e.status === 'SECURED') await this.giveTurnsNow(tx, d, now);
-      await this.audit.record({ actor, action: 'drop.live.remove', targetType: 'drop', targetId: d.id, details: { entryId: e.id, from: e.status } }, tx);
+      // IN-01: a guarantee not used yet (WAITING, QUEUED) is unbound and stays ACTIVE; one used at the turn stays used.
+      const unbind = e.guarantee_id !== null && (e.status === 'WAITING' || e.status === 'QUEUED');
+      await tx
+        .updateTable('live_entries')
+        .set({ status: 'REMOVED', removed_by: admin, removed_at: at, ended_at: at, ...(unbind ? { guarantee_id: null } : {}) })
+        .where('id', '=', e.id)
+        .execute();
+      const notes: AuditRecordInput[] = [];
+      if (e.status === 'TURN' || e.status === 'SECURED') await this.giveTurnsNow(tx, d, now, notes);
+      await this.audit.record(
+        { actor, action: 'drop.live.remove', targetType: 'drop', targetId: d.id, details: { entryId: e.id, from: e.status, ...(e.guarantee_id ? { guaranteeId: e.guarantee_id } : {}) } },
+        tx,
+      );
+      await this.record(tx, notes);
     });
   }
 
@@ -1606,7 +1670,7 @@ export class LiveService {
       out.ended = await this.settleEnd(tx, d, now, notes);
       // A pause the end has just ended (settleEnd): what ran out before it began is marked now, as a pass after it would.
       if (paused && !d.paused_at) await this.runOut(tx, d, now, out);
-      out.turns = await this.giveTurnsNow(tx, d, now);
+      out.turns = await this.giveTurnsNow(tx, d, now, notes);
       await this.record(tx, notes);
       return out;
     });
@@ -1728,17 +1792,37 @@ export class LiveService {
     return e;
   }
 
-  /** A size of the release (with stock) and a quantity within `per_account` and that stock. */
-  private async choice(tx: Db, d: LiveDrop, sizeId: string, quantity: number | undefined): Promise<{ size: { id: string; stock: number }; quantity: number }> {
+  /**
+   * A size of the release (with stock) and a quantity within `per_account` and that stock; IN-01: a holder of the house's
+   * guarantee up to max(per_account, its pieces).
+   */
+  private async choice(tx: Db, d: LiveDrop, sizeId: string, quantity: number | undefined, guaranteedPieces?: number): Promise<{ size: { id: string; stock: number }; quantity: number }> {
     const sid = knownId(sizeId, sizeUnknown);
     const size = await tx.selectFrom('drop_sizes').select(['id', 'stock']).where('drop_id', '=', d.id).where('id', '=', sid).executeTakeFirst();
     if (!size) throw sizeUnknown();
     if (size.stock < 1) throw sizeSoldOut();
-    const max = d.per_account ?? LIVE_PER_ACCOUNT.default;
+    const max = Math.max(d.per_account ?? LIVE_PER_ACCOUNT.default, guaranteedPieces ?? 0);
     const q = quantity ?? 1;
     if (!Number.isInteger(q) || q < 1 || q > max) throw quantityInvalid(max);
     if (q > size.stock) throw sizeSoldOut();
     return { size, quantity: q };
+  }
+
+  /**
+   * IN-01: whether a size can still serve a guaranteed entry of `quantity` pieces: its stock less the pieces confirmed
+   * without a guarantee and those of the other guaranteed entries in it (409 LIVE_GUARANTEE_SIZE_FULL otherwise).
+   */
+  private async checkGuaranteedSize(tx: Db, dropId: string, sizeId: string, quantity: number, entryId: string | null): Promise<void> {
+    const size = await tx.selectFrom('drop_sizes').select('stock').where('drop_id', '=', dropId).where('id', '=', sizeId).executeTakeFirstOrThrow();
+    const rows = await tx
+      .selectFrom('live_entries')
+      .select(['id', 'quantity', 'status', 'guarantee_id'])
+      .where('drop_id', '=', dropId)
+      .where('size_id', '=', sizeId)
+      .where((eb) => eb.or([eb('status', '=', 'CONFIRMED'), eb.and([eb('guarantee_id', 'is not', null), eb('status', 'in', ['WAITING', 'QUEUED', 'TURN', 'SECURED'])])]))
+      .execute();
+    const taken = rows.filter((r) => r.id !== entryId).reduce((n, r) => n + r.quantity, 0);
+    if (taken + quantity > size.stock) throw guaranteeSizeFull();
   }
 
   private async lastPosition(tx: Db, dropId: string): Promise<number> {
@@ -1773,7 +1857,7 @@ export class LiveService {
    * before T0 after the line formed) goes behind, by arrival. Returns the entries placed.
    */
   private async formLine(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[]): Promise<number> {
-    const waiting = await tx.selectFrom('live_entries').select(['id', 'account_id', 'tier', 'joined_at']).where('drop_id', '=', d.id).where('status', '=', 'WAITING').execute();
+    const waiting = await tx.selectFrom('live_entries').select(['id', 'account_id', 'tier', 'joined_at', 'guarantee_id']).where('drop_id', '=', d.id).where('status', '=', 'WAITING').execute();
     if (waiting.length === 0) return 0;
     const start = await this.lastPosition(tx, d.id);
     let placed: { id: string; tier: number; queuedAt: Date }[];
@@ -1782,7 +1866,7 @@ export class LiveService {
       const seed = openDropSeed(this.seedKey, d);
       try {
         placed = lineOrder(
-          waiting.map((w) => ({ id: w.id, tier: standings.get(w.account_id.toLowerCase())?.tier ?? 0, queuedAt: maxDate(d.opens_at, w.joined_at) })),
+          waiting.map((w) => ({ id: w.id, tier: standings.get(w.account_id.toLowerCase())?.tier ?? 0, queuedAt: maxDate(d.opens_at, w.joined_at), guaranteed: w.guarantee_id !== null })),
           seed,
           d.tier_priority ?? true,
         );
@@ -1804,7 +1888,10 @@ export class LiveService {
           FROM (VALUES ${values}) AS v(id, position, tier, queued_at)
          WHERE e.id = v.id AND e.drop_id = ${d.id} AND e.status = 'WAITING'`.execute(tx);
     }
-    if (start === 0) notes.push({ actor: SYSTEM_ACTOR, action: 'drop.live.queue', targetType: 'drop', targetId: d.id, details: { entries: placed.length } });
+    if (start === 0) {
+      const guaranteed = waiting.filter((w) => w.guarantee_id !== null).length;
+      notes.push({ actor: SYSTEM_ACTOR, action: 'drop.live.queue', targetType: 'drop', targetId: d.id, details: { entries: placed.length, guaranteed } });
+    }
     return placed.length;
   }
 
@@ -1849,7 +1936,10 @@ export class LiveService {
       .where('status', 'in', statuses)
       .returning('id')
       .execute();
-    notes.push({ actor, action: 'drop.live.end', targetType: 'drop', targetId: d.id, details: { reason, at: at.toISOString(), ended: ended.length, ...extra } }, ...afterRoom);
+    // IN-01: the guarantees set aside for it and not used, unbound from their entries: carried, or expired.
+    const guarantees: AuditRecordInput[] = [];
+    await releaseCovered(tx, d.id, 'ENDED', at, actor, guarantees);
+    notes.push({ actor, action: 'drop.live.end', targetType: 'drop', targetId: d.id, details: { reason, at: at.toISOString(), ended: ended.length, ...extra } }, ...afterRoom, ...guarantees);
   }
 
   /**
@@ -1886,7 +1976,7 @@ export class LiveService {
    * free pieces, its QUEUED entries by place; one that wants more than the size can still give is passed over, the
    * first that fits takes a turn, one that does not fit yet stops the size. Returns the turns given.
    */
-  private async giveTurnsNow(tx: Db, d: LiveDrop, now: Date): Promise<number> {
+  private async giveTurnsNow(tx: Db, d: LiveDrop, now: Date, notes: AuditRecordInput[]): Promise<number> {
     if (now.getTime() < d.opens_at.getTime() || d.ended_at || d.paused_at || now.getTime() >= d.closes_at.getTime()) return 0;
     const open = (await this.sizeTotals(tx, d.id)).filter((s) => freeOf(s) > 0);
     if (open.length === 0) return 0;
@@ -1896,6 +1986,8 @@ export class LiveService {
       .where('drop_id', '=', d.id)
       .where('status', '=', 'QUEUED')
       .where('size_id', 'in', open.map((s) => s.id))
+      // IN-01: the places guaranteed by the house first in their size, then the line.
+      .orderBy(sql`guarantee_id IS NULL`)
       .orderBy('position')
       .execute();
     const grants: EntryRow[] = [];
@@ -1911,12 +2003,15 @@ export class LiveService {
         if (free === 0) break;
       }
     }
-    if (grants.length) await this.grant(tx, d, grants, now, null);
+    if (grants.length) await this.grant(tx, d, grants, now, null, notes);
     return grants.length;
   }
 
-  /** Turns for `entries` (QUEUED), each with its tier's turn window and its secret's hash; `letInBy` for a LET IN. */
-  private async grant(tx: Db, d: LiveDrop, entries: readonly EntryRow[], now: Date, letInBy: string | null): Promise<void> {
+  /**
+   * Turns for `entries` (QUEUED), each with its tier's turn window and its secret's hash; `letInBy` for a LET IN. IN-01: a
+   * turn given uses the house's guarantee of its entry (USED; noted `guarantee.use` on `notes`).
+   */
+  private async grant(tx: Db, d: LiveDrop, entries: readonly EntryRow[], now: Date, letInBy: string | null, notes: AuditRecordInput[]): Promise<void> {
     const overrides = await this.tierWindows(tx, d);
     for (let i = 0; i < entries.length; i += 500) {
       const values = sql.join(
@@ -1931,6 +2026,8 @@ export class LiveService {
           FROM (VALUES ${values}) AS v(id, expires, hash)
          WHERE e.id = v.id AND e.drop_id = ${d.id} AND e.status = 'QUEUED'`.execute(tx);
     }
+    const guaranteed = entries.map((e) => e.guarantee_id).filter((g): g is string => g !== null);
+    if (guaranteed.length > 0) await useGuarantees(tx, guaranteed, d.id, now, SYSTEM_ACTOR, notes, 'turn');
   }
 
   /** A console control on a published LIVE RELEASE, under its row lock (FOR UPDATE); returns its state after. */
@@ -1985,7 +2082,7 @@ export class LiveService {
       .innerJoin('drop_sizes as s', 's.id', 'e.size_id')
       .select([
         'e.id', 'e.account_id', 'a.email', 'e.status', 'e.size_id', 's.label', 'e.quantity', 'e.tier', 'e.position', 'e.joined_at', 'e.turn_at',
-        'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.gesture_ms', 'e.let_in_by',
+        'e.turn_expires_at', 'e.secured_at', 'e.hold_expires_at', 'e.confirmed_at', 'e.ended_at', 'e.gesture_ms', 'e.let_in_by', 'e.guarantee_id',
       ])
       .where('e.id', '=', entryId)
       .executeTakeFirstOrThrow();
@@ -2008,6 +2105,7 @@ export class LiveService {
       endedAt: r.ended_at,
       gestureMs: r.gesture_ms,
       letIn: r.let_in_by !== null,
+      guaranteed: r.guarantee_id !== null,
     };
   }
 

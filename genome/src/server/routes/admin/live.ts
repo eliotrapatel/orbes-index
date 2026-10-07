@@ -49,6 +49,9 @@
  * Client Services follows the confirmed reservations through their orders (routes/admin/orders.ts: the Orders board
  * replaces the LIVE plan's list, its CSV and its CONCLUDED / CANCELLED resolution).
  *
+ * A release and its entries carry THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): `guaranteed` (places and pieces), and
+ * each entry's `guaranteed`, the guaranteed entries listed first; its guarantees are GET /api/admin/drops/:id/guarantees.
+ *
  * An AUDITOR reads the customers' emails masked (`j***@example.com`), in the board, its stream, the entries, the bot
  * radar and the collector insights; OPERATOR and ADMIN in clear (serialize.ts). The board link's secret is in the
  * answer that issues it and nowhere else. Every mutation is audited by its service.

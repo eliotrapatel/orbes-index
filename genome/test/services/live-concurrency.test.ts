@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ADVISORY_LOCK, closeDb, createDb, type Db } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { DomainError } from '../../src/server/errors.js';
+import { GuaranteeService } from '../../src/server/services/guarantees.js';
 import { LiveEngine } from '../../src/server/services/live-engine.js';
 import { LiveService } from '../../src/server/services/live.js';
 import { createTestDb } from '../support/db.js';
@@ -317,6 +318,57 @@ for (const backend of BACKENDS) {
       expect(failing.failed).toBeGreaterThanOrEqual(1);
       expect(await statusOf(other, a.id)).toBe('WAITING');
       expect((await f.live.advance(other.id))!.queued).toBe(1);
+    });
+
+    it('the house’s guarantee (plan NEXT-NINE, IN-01): a grant racing T0 binds the holder’s entry either way, the stock never passed', async () => {
+      const guarantees = new GuaranteeService({ db: handle.db, audit: f.audit, clock: f.clock.now });
+      const r = await release({ sizes: [{ label: '52', stock: 1 }] });
+      f.clock.set(at(-30 * SECOND));
+      const holder = await accountOfTier(f, 0);
+      const other = await accountOfTier(f, 3);
+      for (const a of [holder, other]) await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
+      const grant = () => guarantees.grant(holder.id, { scope: 'RELEASE', targetId: r.id, pieces: 1, validUntil: '2026-12-31', visible: true }, f.admin);
+      f.clock.set(T0);
+      expect(await together([grant, () => f.live.advance(r.id), () => f.live.advance(r.id)])).toEqual(['ok', 'ok', 'ok']);
+      const g = await handle.db.selectFrom('house_guarantees').select(['id', 'status']).where('account_id', '=', holder.id).executeTakeFirstOrThrow();
+      const e = await handle.db.selectFrom('live_entries').select(['status', 'guarantee_id']).where('drop_id', '=', r.id).where('account_id', '=', holder.id).executeTakeFirstOrThrow();
+      expect(e.guarantee_id).toBe(g.id);
+      // Bound before the line: its turn first, the guarantee used; bound after: ACTIVE, first for the next piece.
+      if (g.status === 'USED') expect(e.status).toBe('TURN');
+      else expect([g.status, e.status]).toEqual(['ACTIVE', 'QUEUED']);
+      expect(await held(r)).toBe(1);
+      expect(await auditCount(r, 'drop.live.queue')).toBe(1);
+    });
+
+    it('the house’s guarantee: a draw or an entry racing its revocation, one order wins, never a deadlock', async () => {
+      const guarantees = new GuaranteeService({ db: handle.db, audit: f.audit, clock: f.clock.now });
+      const start = new Date('2026-12-06T09:00:00.000Z');
+      f.clock.set(start);
+      const opens = new Date(start.getTime() + 3_600_000);
+      const d = await f.drops.create({ modelId: f.modelId, title: 'A DRAW', quantity: 2, opensAt: opens, closesAt: new Date(opens.getTime() + 3_600_000), earlyAccessHours: 0 }, f.admin);
+      await f.drops.publish(d.id, f.admin);
+      const [a, b] = [await accountOfTier(f, 0), await accountOfTier(f, 0)];
+      const ga = (await guarantees.grant(a.id, { scope: 'RELEASE', targetId: d.id, pieces: 1, validUntil: '2026-12-31', visible: true }, f.admin)).guarantee;
+      const gb = (await guarantees.grant(b.id, { scope: 'RELEASE', targetId: d.id, pieces: 1, validUntil: '2026-12-31', visible: true }, f.admin)).guarantee;
+      f.clock.set(new Date(opens.getTime() + 60_000));
+      // An entry racing its guarantee's revocation: entered as an ordinary entry, or with the guarantee then unbound.
+      expect(await together([() => f.drops.enter(a.id, d.id, a.actor), () => guarantees.revoke(ga.id, null, f.admin)])).toEqual(['ok', 'ok']);
+      expect(await handle.db.selectFrom('drop_entries').select(['status', 'guarantee_id', 'pieces']).where('account_id', '=', a.id).executeTakeFirstOrThrow()).toEqual({ status: 'ENTERED', guarantee_id: null, pieces: 1 });
+      await f.drops.enter(b.id, d.id, b.actor);
+      // The draw racing a revocation: used at the draw (the revocation refused), or revoked first (drawn as an ordinary entry).
+      f.clock.set(new Date(opens.getTime() + 2 * 3_600_000));
+      const outcomes = await together([() => f.drops.draw(d.id, f.admin), () => guarantees.revoke(gb.id, null, f.admin)]);
+      const status = (await handle.db.selectFrom('house_guarantees').select('status').where('id', '=', gb.id).executeTakeFirstOrThrow()).status;
+      const entry = await handle.db.selectFrom('drop_entries').select(['status', 'rank', 'guarantee_id']).where('account_id', '=', b.id).executeTakeFirstOrThrow();
+      if (outcomes[1] === 'ok') {
+        expect(status).toBe('REVOKED');
+        expect(entry).toMatchObject({ status: 'SELECTED', guarantee_id: null });
+        expect(entry.rank).not.toBeNull();
+      } else {
+        expect(outcomes).toEqual(['ok', 'GUARANTEE_USED']);
+        expect(status).toBe('USED');
+        expect(entry).toEqual({ status: 'SELECTED', rank: null, guarantee_id: gb.id });
+      }
     });
 
     it('the engine leads under its advisory lock, ticks, and hands the lock back when it stops', async () => {

@@ -231,6 +231,8 @@ export interface InsightEntry {
    */
   resolution: LiveResolution | null;
   country: string | null;
+  /** IN-01: the entry uses the house's guarantee: first in line in its size (services/live.ts giveTurnsNow). */
+  guaranteed?: boolean;
 }
 
 /**
@@ -738,7 +740,8 @@ export function dueTurns(r: InsightRelease, entries: readonly InsightEntry[], no
     const servable = s.stock - confirmed;
     const head = own
       .filter((e) => e.status === 'QUEUED' && e.quantity <= servable)
-      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0];
+      // IN-01: the places guaranteed by the house first in their size, as the engine gives the turns.
+      .sort((a, b) => Number(b.guaranteed === true) - Number(a.guaranteed === true) || (a.position ?? 0) - (b.position ?? 0))[0];
     if (!head || head.quantity > free) continue;
     // The clock moves only on what makes this turn due or shows the engine at work: T0, the head's own place in the line,
     // a turn given, pieces returned (a turn or a hold that ended), a place ahead of the head left, a confirmation that
@@ -1731,7 +1734,7 @@ export class LiveInsightsService {
       .selectFrom('live_entries as e')
       .select([
         'id', 'drop_id', 'account_id', 'size_id', 'quantity', 'status', 'tier', 'position', 'joined_at', 'queued_at', 'turn_at', 'turn_expires_at', 'secured_at',
-        'hold_expires_at', 'confirmed_at', 'ended_at', 'gesture_ms', 'country',
+        'hold_expires_at', 'confirmed_at', 'ended_at', 'gesture_ms', 'country', 'guarantee_id',
       ])
       .select(entryOutcome.as('resolution'))
       .where('drop_id', 'in', [...dropIds])
@@ -1761,6 +1764,7 @@ export class LiveInsightsService {
       gestureMs: r.gesture_ms,
       resolution: r.resolution,
       country: r.country,
+      guaranteed: r.guarantee_id !== null,
     }));
   }
 

@@ -352,4 +352,27 @@ describe('password change and assisted recovery (C-04)', () => {
       expect(errorOf(locked).code).toBe('ACCOUNT_NOT_ACTIVE');
     });
   });
+
+  it('lists in the club’s status only the house’s guarantees shown to the client (plan NEXT-NINE, IN-01): nothing of one not shown', async () => {
+    const catalog = await seedCatalog(h.ctx);
+    const operator = await adminClient(h, 'OPERATOR');
+    const { client, email } = await accountClient(h);
+    const id = (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow()).id;
+    const grant = async (visible: boolean, validUntil: string) => {
+      const res = await operator.post(`/api/admin/owners/${id}/guarantees`, { scope: 'MODEL', targetId: catalog.modelId, pieces: 1, validUntil, visible, note: 'Internal.' });
+      expect(res.statusCode, res.body).toBe(201);
+      return (safeJson(res) as { guarantee: { id: string } }).guarantee.id;
+    };
+    const status = async () => safeJson(await client.get('/api/v1/club/status')) as { guarantees: Record<string, unknown>[] };
+    expect((await status()).guarantees).toEqual([]);
+    const hiddenId = await grant(false, '2027-06-30');
+    expect((await status()).guarantees).toEqual([]);
+    const later = await grant(true, '2027-09-30');
+    const sooner = await grant(true, '2027-03-31');
+    const shown = (await status()).guarantees;
+    expect(shown.map((g) => g.id)).toEqual([sooner, later]);
+    expect(shown[0]).toEqual({ id: sooner, scope: 'MODEL', target: 'MONOLITHE', pieces: 1, validUntil: '2027-03-31T21:59:59.999Z', release: null });
+    expect(JSON.stringify(shown)).not.toContain(hiddenId);
+    expect(JSON.stringify(shown)).not.toContain('Internal.');
+  });
 });

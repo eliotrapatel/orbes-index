@@ -51,6 +51,12 @@
  * (`messages`, plan NEXT-NINE CS-01): its id and status, null when it never
  * wrote. A lock leaves the conversation as it is: staff can still answer it.
  *
+ * THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01; services/guarantees.ts): the
+ * sheet lists the account's guarantees (`guarantees`), each with its note; the
+ * export carries every one, shown to the client or not, with its note (the
+ * right of access). A lock unbinds a guarantee from the entries it withdraws or
+ * removes and never revokes it.
+ *
  * The one-time recovery code of the sheet is AccountRecoveryService's (C-04),
  * not a second mechanism. Emails are masked for an AUDITOR by the routes
  * (routes/admin/serialize.ts `clientEmail`): the service returns them as stored.
@@ -75,6 +81,7 @@ import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote }
 import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import { accountCareRequests, careThisYear, type CareAllowance, type ExportedCareRequest } from './care.js';
+import { accountGuaranteesForStaff, exportedGuarantees, type AdminGuarantee, type ExportedGuarantee } from './guarantees.js';
 import { accountGrants, creditBalances } from './tier-grants.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
@@ -259,6 +266,8 @@ export interface OwnerSheet {
   messages: { conversationId: string; status: ClientConversationStatus } | null;
   /** BP-19 T10: the account's Club block (ownerClub). */
   club: OwnerClub;
+  /** IN-01: the house's guarantees granted to the account, the open ones first (services/guarantees.ts). */
+  guarantees: AdminGuarantee[];
 }
 
 /** BP-19 T10: what the tier program gave the account and what is in use (the console's Club block). */
@@ -392,6 +401,11 @@ export interface AccountExport {
    * step's time, and the name and address the piece returns to as the collector gave them; never who handled it.
    */
   careRequests: ExportedCareRequest[];
+  /**
+   * The house's guarantees granted to the account (plan NEXT-NINE, IN-01), oldest first: every one, shown to the client
+   * or not, with Client Services' note (the right of access requires it); never who granted it.
+   */
+  guarantees: ExportedGuarantee[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
@@ -542,6 +556,7 @@ export class OwnerService {
       accountConversation(this.db, owner.id),
     ]);
     const club = await this.ownerClub(owner.id, standing.tier, now);
+    const guarantees = await accountGuaranteesForStaff(this.db, owner.id, now);
     return {
       ...client,
       owner,
@@ -559,6 +574,7 @@ export class OwnerService {
         country: s.country?.trim() ?? null,
       })),
       messages: conversation,
+      guarantees,
     };
   }
 
@@ -847,6 +863,7 @@ export class OwnerService {
       const orders = await accountOrders(tx, a.id);
       const messages = await accountMessages(tx, a.id);
       const careRequests = await accountCareRequests(tx, a.id);
+      const guarantees = await exportedGuarantees(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -929,6 +946,7 @@ export class OwnerService {
         orders,
         messages,
         careRequests,
+        guarantees,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -964,6 +982,7 @@ export class OwnerService {
             orders: out.orders.length,
             messages: out.messages.length,
             careRequests: out.careRequests.length,
+            guarantees: out.guarantees.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

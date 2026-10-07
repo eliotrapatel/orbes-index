@@ -46,7 +46,7 @@ import { deriveDropSeedKey, drawKey, drawOrder, DropService } from '../../src/se
 import { testConfig } from '../../src/server/config.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { isCheckViolation } from '../../src/server/db/pg-errors.js';
-import { createLiveRelease, liveFixtureOn } from '../support/live.js';
+import { createLiveRelease, holdPieces, liveFixtureOn } from '../support/live.js';
 import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 const HOUR = 3_600_000;
@@ -456,7 +456,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     expect(await mine(platine.client)).toMatchObject({ status: 'SELECTED', respondBy, state: 'DRAWN' });
     expect(await mine(senior.client)).toMatchObject({ status: 'WAITLISTED', rank: 3, respondBy: null });
     // The draw is audited with its counts and the seed it reveals.
-    expect((await audits('drop.draw', d.id))[0]!.details).toEqual({ entries: 5, places: 2, selected: 2, waitlisted: 3, seed: s.seed });
+    expect((await audits('drop.draw', d.id))[0]!.details).toEqual({ entries: 5, places: 2, selected: 2, waitlisted: 3, guaranteed: 0, guaranteedPieces: 0, seed: s.seed });
     // Entries no longer change once drawn.
     expect(errorOf(await withdraw(platine.client, d.id)).code).toBe('DROP_ALREADY_DRAWN');
     expect(errorOf(await enter((await accountClient(h)).client, d.id)).code).toBe('DROP_ALREADY_DRAWN');
@@ -894,5 +894,146 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       expect(safeJson(await admin.post(`${adminUrl(full.id)}/draw`))).toMatchObject({ entries: 1, places: 0, selected: 0, waitlisted: 1 });
       expect((await status(waiting.client)).entries.find((e) => e.dropId === full.id)).toMatchObject({ status: 'WAITLISTED', rank: 1 });
     });
+  });
+});
+
+describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
+  let h: Harness;
+  let operator: Client;
+  let admin: Client;
+
+  const adminUrl = (id = '') => `/api/admin/drops${id ? `/${id}` : ''}`;
+  const accountIdOf = async (email: string) => (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow()).id;
+  const at = (offsetMs: number) => new Date(h.clock.now().getTime() + offsetMs).toISOString();
+  async function staff(): Promise<void> {
+    operator = await adminClient(h, 'OPERATOR');
+    admin = await adminClient(h, 'ADMIN');
+  }
+  /** A signed-in collector holding `n` pieces now (5 PLATINE, 10 PALLADIUM). */
+  async function collector(n = 0) {
+    const a = await accountClient(h);
+    const id = await accountIdOf(a.email);
+    if (n) await holdPieces(h.ctx.db, id, n, (await seedCatalog(h.ctx)).modelId);
+    return { ...a, id };
+  }
+  async function release(body: Record<string, unknown>, opensIn: number, hours = 2): Promise<AdminDropJson> {
+    const { modelId } = await seedCatalog(h.ctx);
+    const res = await operator.post(adminUrl(), { modelId, title: 'MONOLITHE — guaranteed', quantity: 4, opensAt: at(opensIn), closesAt: at(opensIn + hours * HOUR), earlyAccessHours: 0, ...body });
+    expect(res.statusCode, res.body).toBe(201);
+    const d = safeJson(res) as AdminDropJson;
+    expect((await operator.post(`${adminUrl(d.id)}/publish`)).statusCode).toBe(200);
+    return d;
+  }
+  const guarantee = async (accountId: string, body: Record<string, unknown>) => {
+    const res = await operator.post(`/api/admin/owners/${accountId}/guarantees`, { pieces: 1, validUntil: '2027-12-31', visible: true, ...body });
+    expect(res.statusCode, res.body).toBe(201);
+    return safeJson(res) as { guarantee: { id: string; state: string }; setAsideFor: { id: string; title: string } | null };
+  };
+  const entryOf = async (c: Client, dropId: string) =>
+    ((safeJson(await c.get('/api/v1/club/status')) as { entries: (EntryJson & { guaranteed: boolean; pieces: number })[] }).entries).find((e) => e.dropId === dropId)!;
+  const sheetOf = async (c: Client, id: string) => {
+    const res = await c.get(`/api/v1/drops/${id}`);
+    expect(res.statusCode, res.body).toBe(200);
+    return safeJson(res) as SheetJson & { guaranteed: { id: string; pieces: number }[] };
+  };
+
+  beforeAll(async () => {
+    h = await createHarness();
+    await seedCatalog(h.ctx);
+    await staff();
+  });
+  afterAll(() => h?.close());
+
+  it('selects the guaranteed places first, without a rank and for their pieces: places = quantity − reserved − guaranteed; the seed proof from the page holds and no guaranteed id is ranked; guaranteed[] is empty before the draw, then exactly {id, pieces} for everyone; a hidden guarantee says guaranteed: false to its holder; CONFIRMED gives one order per piece, the first with the shipping', async () => {
+    const d = await release({ quantity: 4 }, HOUR);
+    const shown = await collector(5);
+    const hidden = await collector();
+    await guarantee(shown.id, { scope: 'RELEASE', targetId: d.id, pieces: 2 });
+    await guarantee(hidden.id, { scope: 'RELEASE', targetId: d.id, visible: false });
+    const others = [await collector(), await collector(1), await collector(), await collector()];
+    expect((await sheetOf(h.client(), d.id)).guaranteed).toEqual([]);
+    h.clock.advance(HOUR);
+    await staff();
+    for (const c of [shown, hidden, ...others]) expect((await c.client.post(`/api/v1/club/drops/${d.id}/enter`)).statusCode).toBe(200);
+    expect(await entryOf(shown.client, d.id)).toMatchObject({ status: 'ENTERED', guaranteed: true, pieces: 2 });
+    expect(await entryOf(hidden.client, d.id)).toMatchObject({ status: 'ENTERED', guaranteed: false, pieces: 1 });
+    expect((await sheetOf(shown.client, d.id)).guaranteed).toEqual([]);
+    // WITHDRAW unbinds it, the guarantee still set aside; entering again uses it again.
+    expect((await shown.client.post(`/api/v1/club/drops/${d.id}/withdraw`)).statusCode).toBe(200);
+    expect(await h.ctx.db.selectFrom('drop_entries').select(['guarantee_id', 'pieces']).where('account_id', '=', shown.id).executeTakeFirstOrThrow()).toEqual({ guarantee_id: null, pieces: 1 });
+    expect((await shown.client.post(`/api/v1/club/drops/${d.id}/enter`)).statusCode).toBe(200);
+    expect(await entryOf(shown.client, d.id)).toMatchObject({ guaranteed: true, pieces: 2 });
+
+    h.clock.advance(2 * HOUR);
+    await staff();
+    const outcome = safeJson(await admin.post(`${adminUrl(d.id)}/draw`)) as { drop: AdminDropJson & { guaranteed: { places: number; pieces: number } }; entries: number; places: number; selected: number; waitlisted: number; guaranteed: number; guaranteedPieces: number };
+    // Four pieces: three guaranteed (2 + 1), one place left for the four others.
+    expect(outcome).toMatchObject({ entries: 4, places: 1, selected: 1, waitlisted: 3, guaranteed: 2, guaranteedPieces: 3 });
+    expect(outcome.drop).toMatchObject({ guaranteed: { places: 2, pieces: 3 }, reserved: 0, entries: { SELECTED: 3, WAITLISTED: 3, ENTERED: 0 } });
+    const shownEntry = await entryOf(shown.client, d.id);
+    const hiddenEntry = await entryOf(hidden.client, d.id);
+    expect(shownEntry).toMatchObject({ status: 'SELECTED', rank: null, guaranteed: true, pieces: 2 });
+    expect(hiddenEntry).toMatchObject({ status: 'SELECTED', rank: null, guaranteed: false, pieces: 1 });
+    const rows = await h.ctx.db.selectFrom('drop_entries').select(['id', 'tier', 'seniority', 'rank', 'pieces']).where('id', 'in', [shownEntry.id, hiddenEntry.id]).execute();
+    for (const r of rows) expect([r.tier, r.seniority, r.rank]).toEqual([null, null, null]);
+    expect((await h.ctx.db.selectFrom('house_guarantees').select('status').where('account_id', 'in', [shown.id, hidden.id]).execute()).map((g) => g.status)).toEqual(['USED', 'USED']);
+
+    // The page: the guaranteed places apart, by entry id and pieces, nothing else, whoever reads it.
+    const expected = [
+      { id: shownEntry.id, pieces: 2 },
+      { id: hiddenEntry.id, pieces: 1 },
+    ].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const reader of [h.client(), shown.client, hidden.client, others[0]!.client]) {
+      const s = await sheetOf(reader, d.id);
+      expect(s.guaranteed).toEqual(expected);
+      for (const item of s.guaranteed) expect(Object.keys(item).sort()).toEqual(['id', 'pieces']);
+    }
+    // The seed proof: the ranks recomputed from the published entries and the revealed seed are exactly the published
+    // ones, and no guaranteed id is among them.
+    const s = await sheetOf(h.client(), d.id);
+    const page = safeJson(await h.client().get(`/api/v1/drops/${d.id}/entries?pageSize=200`)) as { items: { id: string; tier: number; seniority: number; rank: number }[]; total: number };
+    expect(page.total).toBe(4);
+    const recomputed = drawOrder(page.items.map((e) => ({ id: e.id, tier: e.tier as 0, seniority: e.seniority })), new Uint8Array(Buffer.from(s.seed!, 'hex')));
+    expect(page.items.map((e) => [e.id, e.rank])).toEqual(recomputed.map((e) => [e.id, e.rank]));
+    for (const g of expected) expect(page.items.map((e) => e.id)).not.toContain(g.id);
+
+    // CONFIRMED: one order per piece; the first carries the shipping (PLATINE: free standard), the other travels with it.
+    const confirmed = await operator.post(`${adminUrl(d.id)}/entries/${shownEntry.id}/confirm`);
+    expect(confirmed.statusCode, confirmed.body).toBe(200);
+    const orders = await h.ctx.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', shownEntry.id).orderBy('piece').execute();
+    expect(orders.map((o) => [o.piece, o.channel, o.shipping_service, o.shipping_minor, o.shipping_benefit])).toEqual([
+      [1, 'DRAW', 'STANDARD', 0, 2],
+      [2, 'DRAW', 'STANDARD', 0, null],
+    ]);
+    expect([orders[0]!.with_order_id, orders[1]!.with_order_id]).toEqual([null, orders[0]!.id]);
+  });
+
+  it('keeps the guaranteed pieces from an early access (DROP_FULL), lets a PLATINE holder reserve with the guarantee, and floors a DRAFT\'s quantity at the guaranteed pieces', async () => {
+    const d = await release({ quantity: 3, earlyAccessHours: 4, earlyAccessPlatineHours: 2 }, 10 * HOUR);
+    const holder = await collector(5);
+    const [q, r] = [await collector(10), await collector(10)];
+    await guarantee(holder.id, { scope: 'RELEASE', targetId: d.id, pieces: 2 });
+    h.clock.advance(6 * HOUR);
+    await staff();
+    // PALLADIUM's window: one place left beside the two the house guarantees.
+    expect((await q.client.post(`/api/v1/club/drops/${d.id}/reserve`)).statusCode).toBe(200);
+    expect(errorOf(await r.client.post(`/api/v1/club/drops/${d.id}/reserve`)).code).toBe('DROP_FULL');
+    // PLATINE's window: the holder's reservation uses the guarantee, for its pieces.
+    h.clock.advance(2 * HOUR);
+    await staff();
+    const res = await holder.client.post(`/api/v1/club/drops/${d.id}/reserve`);
+    expect(res.statusCode, res.body).toBe(200);
+    expect((safeJson(res) as { entry: EntryJson & { guaranteed: boolean; pieces: number } }).entry).toMatchObject({ status: 'SELECTED', reserved: true, guaranteed: true, pieces: 2 });
+    expect(await h.ctx.db.selectFrom('drop_entries').select(['tier', 'rank', 'pieces']).where('account_id', '=', holder.id).where('drop_id', '=', d.id).executeTakeFirstOrThrow()).toEqual({ tier: null, rank: null, pieces: 2 });
+    expect((await h.ctx.db.selectFrom('house_guarantees').select(['status', 'used_drop_id']).where('account_id', '=', holder.id).executeTakeFirstOrThrow())).toEqual({ status: 'USED', used_drop_id: d.id });
+    expect((await sheetOf(h.client(), d.id))).toMatchObject({ reserved: 3, guaranteed: [] });
+
+    // A DRAFT whose chosen-release guarantee holds 2 pieces: its quantity never below them.
+    const { modelId } = await seedCatalog(h.ctx);
+    const draft = safeJson(await operator.post(adminUrl(), { modelId, title: 'DRAFT', quantity: 4, opensAt: at(20 * HOUR), closesAt: at(22 * HOUR) })) as AdminDropJson;
+    await guarantee((await collector()).id, { scope: 'RELEASE', targetId: draft.id, pieces: 2 });
+    const low = await operator.patch(adminUrl(draft.id), { quantity: 1 });
+    expect([low.statusCode, errorOf(low).code, errorOf(low).message]).toEqual([409, 'DROP_GUARANTEES_EXCEED', '2 pieces of this release are guaranteed by the house.']);
+    expect((await operator.patch(adminUrl(draft.id), { quantity: 2 })).statusCode).toBe(200);
   });
 });

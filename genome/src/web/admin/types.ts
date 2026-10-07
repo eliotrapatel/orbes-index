@@ -138,6 +138,14 @@ export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
 export const CARE_REQUEST_STATUSES = ['REQUESTED', 'LABEL_SENT', 'RECEIVED', 'RETURNING', 'DONE', 'CANCELLED'] as const;
 export type CareRequestStatus = (typeof CARE_REQUEST_STATUSES)[number];
 
+/** What THE HOUSE'S GUARANTEE covers (house_guarantees.scope, IN-01): a chosen release, the next of a model, of a collection. */
+export const GUARANTEE_SCOPES = ['RELEASE', 'MODEL', 'COLLECTION'] as const;
+export type GuaranteeScope = (typeof GUARANTEE_SCOPES)[number];
+
+/** A guarantee as stored (house_guarantees.status, IN-01). */
+export const GUARANTEE_STATUSES = ['ACTIVE', 'USED', 'EXPIRED', 'REVOKED'] as const;
+export type GuaranteeStatus = (typeof GUARANTEE_STATUSES)[number];
+
 /** What an invitation of the circle is (circle_posts.experience, BP-19 T7). */
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];

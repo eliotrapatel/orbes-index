@@ -227,3 +227,84 @@ describe('the client sheet and the Shopify exports: the console\'s routes', () =
     }
   });
 });
+
+describe('THE HOUSE’S GUARANTEE on the client sheet (plan NEXT-NINE, IN-01)', () => {
+  let h: Harness;
+  let f: LiveFixture;
+  let op: Client;
+  let auditor: Client;
+  let admin: Client;
+  const NOTE = 'Waited at the boutique for the first release: Client Services owe a place.';
+  const accountIdOf = async (email: string) => (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow()).id;
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set(at(0));
+    f = await liveFixtureOn(h.ctx, h.clock);
+    op = await adminClient(h, 'OPERATOR');
+    auditor = await adminClient(h, 'AUDITOR');
+    admin = await adminClient(h, 'ADMIN');
+  });
+  afterAll(() => h?.close());
+
+  it('grants, lists, changes and revokes a guarantee from the client sheet; a release lists its guarantees, the emails masked for an AUDITOR; the settings', async () => {
+    const draw = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — guaranteed', quantity: 3, opensAt: at(HOUR), closesAt: at(2 * HOUR), earlyAccessHours: 0 }, f.admin);
+    await f.drops.publish(draw.id, f.admin);
+    const { email } = await accountClient(h);
+    const id = await accountIdOf(email);
+    const granted = await op.post(`/api/admin/owners/${id}/guarantees`, { scope: 'MODEL', targetId: f.modelId, pieces: 2, validUntil: '2026-12-31', visible: false, note: NOTE });
+    expect(granted.statusCode, granted.body).toBe(201);
+    const out = safeJson(granted) as Json;
+    expect(out.setAsideFor).toEqual({ id: draw.id, title: 'ECLIPSE — guaranteed' });
+    expect(out.guarantee).toMatchObject({ scope: 'MODEL', target: { kind: 'MODEL', id: f.modelId, name: 'MONOLITHE' }, pieces: 2, visible: false, note: NOTE, state: 'SET_ASIDE', release: { id: draw.id, mode: 'DRAW' } });
+    const bad = await op.post(`/api/admin/owners/${id}/guarantees`, { scope: 'MODEL', targetId: f.modelId, pieces: 6, validUntil: '2026-12-31', visible: true });
+    expect([bad.statusCode, errorOf(bad).code]).toEqual([400, 'VALIDATION_FAILED']);
+    // The client sheet lists it; the AUDITOR reads the same sheet, the client's email masked.
+    const sheet = safeJson(await op.get(`/api/admin/owners/${id}`)) as Json;
+    expect(sheet.guarantees).toEqual([expect.objectContaining({ id: out.guarantee.id, note: NOTE, state: 'SET_ASIDE', grantedBy: expect.objectContaining({ email: expect.stringContaining('@orbes.test') }) })]);
+    expect(((safeJson(await auditor.get(`/api/admin/owners/${id}`)) as Json).guarantees as Json[])[0]!.id).toBe(out.guarantee.id);
+    const ofRelease = (c: Client) => c.get(`/api/admin/drops/${draw.id}/guarantees`);
+    expect(((safeJson(await ofRelease(op)) as Json).items as Json[])[0]).toMatchObject({ id: out.guarantee.id, account: { id, email }, pieces: 2, visible: false, state: 'SET_ASIDE', entry: null });
+    expect(((safeJson(await ofRelease(auditor)) as Json).items as Json[])[0]!.account.email).not.toBe(email);
+    expect((safeJson(await op.get(`/api/admin/drops/${draw.id}`)) as Json).guaranteed).toEqual({ places: 1, pieces: 2 });
+    // Changed, then revoked with a note.
+    const changed = await op.patch(`/api/admin/guarantees/${out.guarantee.id}`, { visible: true, pieces: 1 });
+    expect(changed.statusCode, changed.body).toBe(200);
+    expect((safeJson(changed) as Json).guarantee).toMatchObject({ visible: true, pieces: 1 });
+    expect((await op.patch(`/api/admin/guarantees/${out.guarantee.id}`, {})).statusCode).toBe(400);
+    const revoked = await op.post(`/api/admin/guarantees/${out.guarantee.id}/revoke`, { note: 'Granted twice.' });
+    expect(revoked.statusCode, revoked.body).toBe(200);
+    expect((safeJson(revoked) as Json).guarantee).toMatchObject({ status: 'REVOKED', state: 'REVOKED', revokeNote: 'Granted twice.' });
+    // The settings: read by an AUDITOR, set by an ADMIN.
+    expect(safeJson(await auditor.get('/api/admin/settings/guarantees'))).toMatchObject({ validDays: 90, pieces: 1, visible: true });
+    const saved = await admin.request('PUT', '/api/admin/settings/guarantees', { body: { validDays: 120, pieces: 2, visible: false } });
+    expect(saved.statusCode, saved.body).toBe(200);
+    expect(safeJson(await auditor.get('/api/admin/settings/guarantees'))).toMatchObject({ validDays: 120, pieces: 2, visible: false });
+    expect((await admin.request('PUT', '/api/admin/settings/guarantees', { body: { validDays: 731, pieces: 1, visible: true } })).statusCode).toBe(400);
+    await admin.request('PUT', '/api/admin/settings/guarantees', { body: { validDays: 90, pieces: 1, visible: true } });
+  });
+
+  it('a lock unbinds the guarantee of its open entry and never revokes it; a LOCKED account is never granted one; the export carries every guarantee with its note; the audit log neither the email nor the note', async () => {
+    const draw = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — lock', quantity: 3, opensAt: at(3 * HOUR), closesAt: at(4 * HOUR), earlyAccessHours: 0 }, f.admin);
+    await f.drops.publish(draw.id, f.admin);
+    const { email } = await accountClient(h);
+    const id = await accountIdOf(email);
+    const g = (safeJson(await op.post(`/api/admin/owners/${id}/guarantees`, { scope: 'RELEASE', targetId: draw.id, pieces: 2, validUntil: '2026-12-31', visible: false, note: NOTE })) as Json).guarantee;
+    h.clock.set(at(3 * HOUR + MINUTE));
+    await f.drops.enter(id, draw.id, { type: 'account', id });
+    expect(await h.ctx.db.selectFrom('drop_entries').select(['guarantee_id', 'pieces']).where('account_id', '=', id).executeTakeFirstOrThrow()).toEqual({ guarantee_id: g.id, pieces: 2 });
+    admin = await adminClient(h, 'ADMIN');
+    op = await adminClient(h, 'OPERATOR');
+    expect((await admin.post(`/api/admin/owners/${id}/lock`)).statusCode).toBe(200);
+    expect(await h.ctx.db.selectFrom('drop_entries').select(['status', 'guarantee_id', 'pieces']).where('account_id', '=', id).executeTakeFirstOrThrow()).toEqual({ status: 'WITHDRAWN', guarantee_id: null, pieces: 1 });
+    expect((await h.ctx.db.selectFrom('house_guarantees').select('status').where('id', '=', g.id).executeTakeFirstOrThrow()).status).toBe('ACTIVE');
+    const refused = await op.post(`/api/admin/owners/${id}/guarantees`, { scope: 'MODEL', targetId: f.modelId, pieces: 1, validUntil: '2026-12-31', visible: true });
+    expect([refused.statusCode, errorOf(refused).code]).toEqual([403, 'ACCOUNT_LOCKED']);
+    // The right of access: every guarantee, the hidden one too, with its note.
+    const exported = safeJson(await admin.get(`/api/admin/owners/${id}/export`)) as Json;
+    expect(exported.guarantees).toEqual([expect.objectContaining({ id: g.id, scope: 'RELEASE', target: 'ECLIPSE — lock', pieces: 2, visible: false, note: NOTE, status: 'ACTIVE', releaseId: draw.id })]);
+    const logged = JSON.stringify(await h.ctx.db.selectFrom('audit_logs').select('details').where('action', 'like', 'guarantee.%').execute());
+    expect(logged).not.toContain(email);
+    expect(logged).not.toContain('Waited at the boutique');
+  });
+});
