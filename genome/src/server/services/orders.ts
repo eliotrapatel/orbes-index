@@ -62,6 +62,20 @@
  *                entry) carries its parent's service at 0 and follows it; only the parent's invoice carries the fee.
  *                Client Services enters a fee by hand (`setTerms`, RESERVED; 409 ORDER_SHIPPING_FREE over a free
  *                benefit); MARK PAID is never refused for shipping. Audited `order.shipping`. Returns are unchanged.
+ *   the gift     (BP-19 T5) the account's welcome gift added to its next order (`attachGifts`, at the end of the three
+ *                sale paths, the first order of a sale only): for each GIFT grant whose tier it holds now, with no open
+ *                GIFT order, while its tier has an active gift model (THE PROGRAM), a GIFT order at 0 in its order's
+ *                currency (none yet: NULL, until its price is entered), travelling with it (`with_order_id`, its
+ *                shipping at 0). A model of one size gets its SKU and holds stock (or a piece to make) at once; several
+ *                leave its size TO BE CONFIRMED until Client Services chooses it (`setTerms`). Paid with its order, in
+ *                its transaction, without an invoice of its own (its order's carries the GIFT line); its order is not
+ *                paid while its size is to be chosen (409 ORDER_GIFT_SIZE_MISSING); cancelled with its order (its grant
+ *                waits again); a return of its order leaves it. Audited `order.create` and `order.gift`.
+ *   the credit   (BP-19 T5) taken off a RESERVED order by Client Services (`applyCredit`): its channel one THE PROGRAM
+ *                names, its currency the credit's, the account at the grant's tier now, the grant not expired, the
+ *                amount within the balance and the piece's price; PALLADIUM's grant first, then the earliest expiry. A
+ *                CREDIT line on the invoice. Removed while RESERVED (`removeCredit`), released when the order is
+ *                cancelled or returned, the expiry unchanged. Audited `order.credit.apply`, `.remove`, `.release`.
  *
  * The LIVE RELEASES' Client Services resolution is retired into the orders (the console's Orders board steps them): the
  * sales committed before migration 0022, or by the previous image, get their orders at boot (`OrderService.prepare`),
@@ -91,6 +105,7 @@ import {
   type ProductStatus,
   type ReturnOutcome,
   type ShippingService,
+  type CreditReleaseReason,
 } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock, type Logger, noopLogger } from '../types.js';
@@ -103,8 +118,9 @@ import { writeJournal } from './journal.js';
 import { isTransitionAllowed, LifecycleService, returnTargetOf } from './lifecycle.js';
 import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { tierOf } from './club.js';
-import { readProgram, shippingRate } from './club-program.js';
-import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockLevel } from './stock.js';
+import { giftModelOf, readProgram, shippingRate } from './club-program.js';
+import { creditBalances, ensureGrants } from './tier-grants.js';
+import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockBalances, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -179,6 +195,12 @@ const priceMissing = () => conflict('ORDER_PRICE_MISSING', 'Enter the order’s 
 const returnChanged = () => conflict('ORDER_RETURN_CHANGED', 'The piece changed during the return. Please try again.');
 const shippingFree = () => conflict('ORDER_SHIPPING_FREE', 'This order’s shipping is free with its tier: no fee is added to it.');
 const shippingWith = () => conflict('ORDER_SHIPPING_WITH', 'This order travels with another: its shipping is that order’s.');
+const giftSizeMissing = () => conflict('ORDER_GIFT_SIZE_MISSING', 'Choose the welcome gift’s size before marking it paid.');
+const giftTermsFixed = () => conflict('ORDER_TERMS_FIXED', 'A welcome gift has no price of its own: it travels with its order.');
+const creditNone = () => conflict('ORDER_CREDIT_NONE', 'This client has no credit to take off this order.');
+const creditCurrency = () => conflict('ORDER_CREDIT_CURRENCY', 'The credit is in another currency than this order.');
+const creditChannel = () => conflict('ORDER_CREDIT_CHANNEL', 'The credit is not taken off this kind of order.');
+const creditExceeds = () => conflict('ORDER_CREDIT_EXCEEDS', 'This is more than the credit left, or than the piece’s price.');
 const notRestockable = (status: ProductStatus) =>
   new DomainError('ORDER_RETURN_NOT_RESTOCKABLE', 409, 'The piece’s record does not let it go back to stock now: settle its record first, or archive it.', { detail: `status ${status}` });
 
@@ -304,8 +326,20 @@ export interface OrderView {
   shopifyOrderId: string | null;
   /** BP-19 T4: its shipping (service, fee, free tier), all null for none. */
   shipping: OrderShipping;
-  /** BP-19: the order it travels with (a GIFT order, the 2nd to 5th piece of a LIVE entry), by id and reference. */
-  withOrder: { id: string; reference: string } | null;
+  /**
+   * BP-19: the order it travels with (a GIFT order, the 2nd to 5th piece of a LIVE entry), by id and reference, and once
+   * that order has shipped its carrier and tracking number (SHIP WITH ITS ORDER).
+   */
+  withOrder: { id: string; reference: string; shipment: { carrierId: string; trackingNumber: string } | null } | null;
+  /** BP-19 T5: the welcome gift travelling with it (not cancelled): its order, model and step, and whether its size is to be chosen. */
+  gift: { id: string; reference: string; model: string; status: OrderStatus; sizeToChoose: boolean } | null;
+  /** BP-19 T5, on a GIFT order: its tier, and while its size is to be chosen, its model's sizes with the pieces available. */
+  giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[] } | null;
+  /** BP-19 T5: the client's credit usable now (balance, currency, expiry) and the credit taken off this order (released or not). */
+  credit: {
+    available: { grantId: string; tier: 2 | 3; balanceMinor: number; currency: string; expiresAt: Date }[];
+    applied: { id: string; grantId: string; tier: 2 | 3; amountMinor: number; appliedAt: Date; releasedAt: Date | null; releasedReason: CreditReleaseReason | null }[];
+  };
   /** Its return (RETURNED): where the piece went, the note, and whether ORBES took its buyer's ownership back. */
   return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string; at: Date; ownershipReclaimed: boolean } | null;
   /** Its invoice and credit note (services/invoices.ts), in order of issue. */
@@ -397,6 +431,12 @@ export interface AccountOrder {
    * travelling with another the reference of that order (`withOrder`), which carries the fee; null without shipping.
    */
   shipping: (OrderShipping & { withOrder: string | null }) | null;
+  /** BP-19: the reference of the order it travels with (a welcome gift's, a LIVE entry's further pieces), or null. */
+  withOrder: string | null;
+  /** BP-19 T5: a welcome gift's tier (PLATINE, PALLADIUM); null for any other order. */
+  giftTier: 'PLATINE' | 'PALLADIUM' | null;
+  /** BP-19 T5: the credit taken off it (its open uses), in its currency; 0 for none. */
+  creditMinor: number;
   status: OrderStatus;
   reservedAt: Date;
   paidAt: Date | null;
@@ -504,6 +544,110 @@ export async function shippingFor(tx: Db, accountId: string, currency: string | 
 /** The shipping of an order travelling with `parent`: its service at 0 (none when it has none), never a benefit of its own. */
 export function travellingShipping(parent: Pick<OrderRow, 'shipping_service'>): OrderShipping {
   return parent.shipping_service === null ? { ...NO_SHIPPING } : { service: parent.shipping_service, minor: 0, benefit: null };
+}
+
+/** An order's welcome gifts still open (not cancelled), oldest first. */
+async function openGifts(tx: Db, parentId: string, opts: { forUpdate?: boolean } = {}): Promise<OrderRow[]> {
+  let q = tx.selectFrom('orders').selectAll().where('with_order_id', '=', parentId).where('channel', '=', 'GIFT').where('status', '<>', 'CANCELLED').orderBy('reserved_at').orderBy('id');
+  if (opts.forUpdate) q = q.forUpdate();
+  return q.execute();
+}
+
+/** An order's credit taken off it and not released, with each grant's tier. */
+async function openCreditUses(tx: Db, orderId: string, opts: { forUpdate?: boolean } = {}) {
+  let q = tx
+    .selectFrom('credit_uses as u')
+    .innerJoin('tier_grants as g', 'g.id', 'u.grant_id')
+    .select(['u.id', 'u.grant_id', 'u.amount_minor', 'u.applied_at', 'g.tier', 'g.currency'])
+    .where('u.order_id', '=', orderId)
+    .where('u.released_at', 'is', null)
+    .orderBy('g.tier', 'desc')
+    .orderBy('u.applied_at')
+    .orderBy('u.id');
+  if (opts.forUpdate) q = q.forUpdate();
+  return q.execute();
+}
+
+/**
+ * Release the credit taken off an order (BP-19 T5): its open uses given back, their grant's expiry unchanged; audited
+ * `order.credit.remove` or `order.credit.release`, with an event and a journal entry. Nothing when none is open.
+ */
+async function releaseCredit(tx: Db, o: OrderRow, reason: CreditReleaseReason, actor: Actor, now: Date): Promise<AuditRecordInput[]> {
+  const uses = await openCreditUses(tx, o.id, { forUpdate: true });
+  if (uses.length === 0) return [];
+  await tx
+    .updateTable('credit_uses')
+    .set({ released_at: now, released_reason: reason, released_by: actor.type === 'admin' ? actor.id! : null })
+    .where('id', 'in', uses.map((u) => u.id))
+    .execute();
+  const amount = uses.reduce((n, u) => n + u.amount_minor, 0);
+  return [await recordChange(tx, o, o, reason === 'REMOVED' ? 'order.credit.remove' : 'order.credit.release', { details: { reason, amountMinor: amount, uses: uses.map((u) => u.id) } }, actor, now)];
+}
+
+/**
+ * The welcome gifts of the account, added to `parent`, the first order of a sale (BP-19 T5), in its transaction: for
+ * each GIFT grant whose tier the account holds now, with no open GIFT order, while its tier has an active gift model
+ * (THE PROGRAM), a GIFT order travelling with `parent`: the gift's model at 0 in `parent`'s currency (NULL while it has
+ * none), at its location, its shipping at 0; a model of one size (or none yet) with its SKU, holding stock or a piece to
+ * make at once, several with its size to be chosen. The grant's rows are locked, then the open gift orders read again:
+ * two sales at once never give one grant two gifts. Audited `order.create` (GIFT) and `order.gift` (on `parent`).
+ */
+export async function attachGifts(tx: Db, parent: OrderRow, actor: Actor, now: Date): Promise<{ orders: OrderRow[]; notes: AuditRecordInput[] }> {
+  const notes: AuditRecordInput[] = [];
+  const orders: OrderRow[] = [];
+  if (parent.channel === 'GIFT' || parent.with_order_id !== null) return { orders, notes };
+  const standing = await tierOf(tx, parent.account_id, now);
+  if (standing.tier < 2) return { orders, notes };
+  const grants = await tx
+    .selectFrom('tier_grants')
+    .selectAll()
+    .where('account_id', '=', parent.account_id)
+    .where('kind', '=', 'GIFT')
+    .where('tier', '<=', standing.tier)
+    .orderBy('tier')
+    .forUpdate()
+    .execute();
+  if (grants.length === 0) return { orders, notes };
+  const taken = new Set(
+    (await tx.selectFrom('orders').select('gift_grant_id').where('gift_grant_id', 'in', grants.map((g) => g.id)).where('status', '<>', 'CANCELLED').execute()).map((r) => r.gift_grant_id),
+  );
+  const program = await readProgram(tx);
+  for (const g of grants) {
+    if (taken.has(g.id)) continue;
+    const modelId = giftModelOf(program, g.tier as 2 | 3);
+    if (!modelId) continue;
+    const model = await tx.selectFrom('models').select(['id', 'active', 'discontinued_at']).where('id', '=', modelId).executeTakeFirst();
+    if (!model || !model.active || model.discontinued_at !== null) continue;
+    const skus = await tx.selectFrom('skus').select(['id', 'size_label']).where('model_id', '=', modelId).orderBy('code').execute();
+    const one = skus.length === 0 ? { id: await ensureSku(tx, modelId, null), size_label: null } : skus.length === 1 ? skus[0]! : null;
+    const gift = await createOrder(
+      tx,
+      {
+        channel: 'GIFT',
+        giftGrantId: g.id,
+        withOrderId: parent.id,
+        dropId: null,
+        accountId: parent.account_id,
+        modelId,
+        sizeLabel: one?.size_label ?? null,
+        skuId: one?.id ?? null,
+        priceMinor: parent.currency === null ? null : 0,
+        currency: parent.currency,
+        addons: [],
+        surprise: null,
+        locationId: parent.location_id,
+        shipping: travellingShipping(parent),
+      },
+      { hold: true },
+      actor,
+      now,
+      notes,
+    );
+    await tx.updateTable('tier_grants').set({ model_id: modelId }).where('id', '=', g.id).execute();
+    notes.push(await recordChange(tx, parent, parent, 'order.gift', { details: { giftOrderId: gift.id, grantId: g.id, tier: g.tier, modelId, sizeToChoose: one === null } }, actor, now));
+    orders.push(gift);
+  }
+  return { orders, notes };
 }
 
 /** A piece to make as the event journal says it (`bench.create`, `.cancel`, `.move`, `.engrave`): never its engraving text. */
@@ -672,6 +816,8 @@ interface NewOrder {
   /** BP-19 T4: its shipping (none by default), and the order it travels with. */
   shipping?: OrderShipping;
   withOrderId?: string | null;
+  /** BP-19 T5: a GIFT order's grant. */
+  giftGrantId?: string;
 }
 
 /**
@@ -699,6 +845,7 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
       location_id: n.locationId,
       reserved_at: n.reservedAt && n.reservedAt < now ? n.reservedAt : now,
       with_order_id: n.withOrderId ?? null,
+      gift_grant_id: n.giftGrantId ?? null,
       shipping_service: n.shipping?.service ?? null,
       shipping_minor: n.shipping?.service ? n.shipping.minor : null,
       shipping_benefit: n.shipping?.service ? n.shipping.benefit : null,
@@ -707,7 +854,13 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
     .executeTakeFirstOrThrow();
   const benchNotes: AuditRecordInput[] = [];
   if (opts.hold) o = await hold(tx, o, actor, now, benchNotes);
-  const source: JsonObject = n.liveEntryId ? { liveEntryId: n.liveEntryId, piece: o.piece } : n.dropEntryId ? { dropEntryId: n.dropEntryId } : { shopRequestId: n.shopRequestId! };
+  const source: JsonObject = n.liveEntryId
+    ? { liveEntryId: n.liveEntryId, piece: o.piece }
+    : n.dropEntryId
+      ? { dropEntryId: n.dropEntryId }
+      : n.giftGrantId
+        ? { giftGrantId: n.giftGrantId }
+        : { shopRequestId: n.shopRequestId! };
   notes.push(
     await recordChange(
       tx,
@@ -780,6 +933,8 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
     .orderBy('l.position')
     .execute();
   const locationId = await releaseLocation(tx, e.stock_location_id);
+  // BP-19 T5: the account's grants, its tier read now.
+  notes.push(...(await ensureGrants(tx, e.account_id, now)));
   // BP-19 T4: one fee for the entry, on its first piece; the others travel with it (its service at 0).
   let parent = existing.has(1) ? await tx.selectFrom('orders').selectAll().where('live_entry_id', '=', e.id).where('piece', '=', 1).executeTakeFirst() : undefined;
   for (let piece = 1; piece <= e.quantity; piece++) {
@@ -813,6 +968,9 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
     orders.push(created);
     if (piece === 1) parent = created;
   }
+  // BP-19 T5: the welcome gift, on the sale's first order only.
+  const first = orders.find((o) => o.piece === 1);
+  if (first) notes.push(...(await attachGifts(tx, first, actor, now)).notes);
   return { orders, notes };
 }
 
@@ -834,7 +992,7 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
   // The draw's price, both or neither (drops_draw_price), within an order's bounds.
   const priced = e.price_minor !== null && e.currency !== null && e.price_minor <= ORDER_AMOUNT_MAX_MINOR;
   if (await tx.selectFrom('orders').select('id').where('drop_entry_id', '=', e.id).executeTakeFirst()) return { order: null, notes: [] };
-  const notes: AuditRecordInput[] = [];
+  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, e.account_id, now))];
   const order = await createOrder(
     tx,
     {
@@ -858,6 +1016,7 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
     now,
     notes,
   );
+  notes.push(...(await attachGifts(tx, order, actor, now)).notes);
   return { order, notes };
 }
 
@@ -869,7 +1028,7 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
   const r = await tx.selectFrom('shop_requests').select(['id', 'account_id', 'model_id', 'status', 'outcome']).where('id', '=', requestId).executeTakeFirst();
   if (!r || r.status !== 'CLOSED' || r.outcome !== 'ACCEPTED') throw new Error(`orderForShopRequest: request ${requestId} is not ACCEPTED`);
   if (await tx.selectFrom('orders').select('id').where('shop_request_id', '=', r.id).executeTakeFirst()) return { order: null, notes: [] };
-  const notes: AuditRecordInput[] = [];
+  const notes: AuditRecordInput[] = [...(await ensureGrants(tx, r.account_id, now))];
   const order = await createOrder(
     tx,
     {
@@ -892,6 +1051,7 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
     now,
     notes,
   );
+  notes.push(...(await attachGifts(tx, order, actor, now)).notes);
   return { order, notes };
 }
 
@@ -948,6 +1108,8 @@ async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date
   switch (s.to) {
     case 'PAID': {
       if (o.price_minor === null || o.currency === null) throw priceMissing();
+      // BP-19 T5: its welcome gift's size chosen first; the gift is paid with it, below.
+      if ((await openGifts(tx, o.id, { forUpdate: true })).some((g) => g.status === 'RESERVED' && g.sku_id === null)) throw giftSizeMissing();
       after = await updateOrder(tx, o.id, { status: 'PAID', paid_at: now });
       break;
     }
@@ -978,6 +1140,8 @@ async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date
       const released = await release(tx, o, 'Reserved identity retired: its order was cancelled', actor, now, extra);
       after = await updateOrder(tx, released.id, { status: 'CANCELLED', cancelled_at: now });
       details = { released: o.reservation };
+      // BP-19 T5: the credit taken off it given back, its expiry unchanged.
+      extra.push(...(await releaseCredit(tx, after, 'CANCELLED', actor, now)));
       break;
     }
   }
@@ -985,6 +1149,13 @@ async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date
   // PAID issues the invoice; paid, then cancelled, a credit note cancels it (services/invoices.ts).
   const document = s.to === 'PAID' ? await issueInvoice(tx, after, actor, now) : s.to === 'CANCELLED' && o.status === 'PAID' ? await issueCreditNote(tx, after, 'cancel', actor, now) : null;
   if (document) notes.push(document);
+  // BP-19 T5: its welcome gift follows it: paid with it, cancelled with it (its grant then waits again).
+  if (o.channel !== 'GIFT' && (s.to === 'PAID' || s.to === 'CANCELLED')) {
+    for (const g of await openGifts(tx, o.id, { forUpdate: true })) {
+      if (s.to === 'PAID' && g.status === 'RESERVED') await step(tx, g, { to: 'PAID', note: null }, actor, now, notes);
+      if (s.to === 'CANCELLED' && (g.status === 'RESERVED' || g.status === 'PAID')) await step(tx, g, { to: 'CANCELLED', note: 'Its order was cancelled.' }, actor, now, notes);
+    }
+  }
   return after;
 }
 
@@ -1134,6 +1305,53 @@ export class OrderService {
       .where('x.order_id', '=', id)
       .executeTakeFirst();
     const invoices = await orderInvoices(this.db, [id]);
+    // BP-19: what travels with it, what it travels with, its credit.
+    const parent = r.with_order_id ? await this.db.selectFrom('orders').select(['carrier_id', 'tracking_number']).where('id', '=', r.with_order_id).executeTakeFirst() : undefined;
+    const parentShipment = parent?.carrier_id && parent.tracking_number ? { carrierId: parent.carrier_id, trackingNumber: parent.tracking_number } : null;
+    const giftRow = await this.db
+      .selectFrom('orders as g')
+      .innerJoin('models as m', 'm.id', 'g.model_id')
+      .select(['g.id', 'g.status', 'g.sku_id', 'm.name', 'm.variant_label'])
+      .where('g.with_order_id', '=', id)
+      .where('g.channel', '=', 'GIFT')
+      .where('g.status', '<>', 'CANCELLED')
+      .orderBy('g.reserved_at')
+      .executeTakeFirst();
+    const gift = giftRow
+      ? { id: giftRow.id, reference: orderReference(giftRow.id), model: giftRow.variant_label ? `${giftRow.name} in ${giftRow.variant_label}` : giftRow.name, status: giftRow.status, sizeToChoose: giftRow.sku_id === null }
+      : null;
+    let giftOf: OrderView['giftOf'] = null;
+    if (r.channel === 'GIFT' && r.gift_grant_id) {
+      const grant = await this.db.selectFrom('tier_grants').select('tier').where('id', '=', r.gift_grant_id).executeTakeFirstOrThrow();
+      const sizes =
+        r.sku_id === null
+          ? await Promise.all(
+              (await this.db.selectFrom('skus').select(['id', 'size_label']).where('model_id', '=', r.model_id).orderBy('code').execute()).map(async (k) => ({
+                skuId: k.id,
+                label: k.size_label,
+                available: (await stockBalances(this.db, { skuId: k.id })).reduce((n, b) => n + Math.max(0, b.available), 0),
+              })),
+            )
+          : [];
+      giftOf = { tier: grant.tier as 2 | 3, sizes };
+    }
+    const now = this.clock();
+    const standing = await tierOf(this.db, r.account_id, now);
+    const credit: OrderView['credit'] = {
+      available: (await creditBalances(this.db, r.account_id))
+        .filter((c) => c.tier <= standing.tier && c.balanceMinor > 0 && c.expiresAt.getTime() > now.getTime())
+        .map((c) => ({ grantId: c.grantId, tier: c.tier, balanceMinor: c.balanceMinor, currency: c.currency, expiresAt: c.expiresAt })),
+      applied: (
+        await this.db
+          .selectFrom('credit_uses as u')
+          .innerJoin('tier_grants as t', 't.id', 'u.grant_id')
+          .select(['u.id', 'u.grant_id', 'u.amount_minor', 'u.applied_at', 'u.released_at', 'u.released_reason', 't.tier'])
+          .where('u.order_id', '=', id)
+          .orderBy('u.applied_at')
+          .orderBy('u.id')
+          .execute()
+      ).map((u) => ({ id: u.id, grantId: u.grant_id, tier: u.tier as 2 | 3, amountMinor: u.amount_minor, appliedAt: u.applied_at, releasedAt: u.released_at, releasedReason: u.released_reason })),
+    };
     return {
       id: r.id,
       reference: orderReference(r.id),
@@ -1172,7 +1390,10 @@ export class OrderService {
       productId: r.piece_reference ?? null,
       shopifyOrderId: r.shopify_order_id,
       shipping: shippingOf(r),
-      withOrder: r.with_order_id ? { id: r.with_order_id, reference: orderReference(r.with_order_id) } : null,
+      withOrder: r.with_order_id ? { id: r.with_order_id, reference: orderReference(r.with_order_id), shipment: parentShipment } : null,
+      gift,
+      giftOf,
+      credit,
       return: returned
         ? {
             outcome: returned.outcome,
@@ -1213,6 +1434,7 @@ export class OrderService {
         'o.shipping_minor',
         'o.shipping_benefit',
         'o.with_order_id',
+        'o.gift_grant_id',
         'o.status',
         'o.reserved_at',
         'o.paid_at',
@@ -1237,6 +1459,22 @@ export class OrderService {
       .limit(ACCOUNT_ORDERS_LIMIT)
       .execute();
     const invoices = await orderInvoices(this.db, rows.map((r) => r.id));
+    // BP-19 T5: each welcome gift's tier, and the credit taken off each order.
+    const grantIds = rows.map((r) => r.gift_grant_id).filter((x): x is string => x !== null);
+    const giftTiers = new Map(grantIds.length ? (await this.db.selectFrom('tier_grants').select(['id', 'tier']).where('id', 'in', grantIds).execute()).map((g) => [g.id, g.tier]) : []);
+    const credits = new Map(
+      rows.length
+        ? (
+            await this.db
+              .selectFrom('credit_uses')
+              .select((eb) => ['order_id', eb.fn.sum<string>('amount_minor').as('n')])
+              .where('order_id', 'in', rows.map((r) => r.id))
+              .where('released_at', 'is', null)
+              .groupBy('order_id')
+              .execute()
+          ).map((c) => [c.order_id, Number(c.n)])
+        : [],
+    );
     const documentOf = (orderId: string, kind: InvoiceKind) => {
       const i = invoices.find((x) => x.order.id === orderId && x.kind === kind);
       return i ? { number: i.number, issuedAt: i.issuedAt } : null;
@@ -1254,6 +1492,9 @@ export class OrderService {
       currency: r.price_minor === null ? null : r.currency,
       addons: r.addons.map((a) => ({ label: a.label, priceMinor: a.priceMinor })),
       shipping: r.shipping_service === null ? null : { ...shippingOf(r), withOrder: r.with_order_id ? orderReference(r.with_order_id) : null },
+      withOrder: r.with_order_id ? orderReference(r.with_order_id) : null,
+      giftTier: r.gift_grant_id ? (giftTiers.get(r.gift_grant_id) === 3 ? 'PALLADIUM' : 'PLATINE') : null,
+      creditMinor: credits.get(r.id) ?? 0,
       status: r.status,
       reservedAt: r.reserved_at,
       paidAt: r.paid_at,
@@ -1305,6 +1546,8 @@ export class OrderService {
     const id = knownOrderId(orderId);
     const s = checkStep(input);
     await this.change(id, async (tx, o, now, notes) => {
+      // A welcome gift is paid with its order (BP-19 T5), never alone.
+      if (o.channel === 'GIFT' && s.to === 'PAID') throw stepNotAllowed(o.status, s.to);
       await step(tx, o, s, actor, now, notes);
     });
     return this.get(id);
@@ -1404,6 +1647,8 @@ export class OrderService {
         ...(to ? { pieceStatus: to } : {}),
       };
       notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.note, details }, actor, now), ...extra);
+      // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is.
+      notes.push(...(await releaseCredit(tx, after, 'RETURNED', actor, now)));
       const credit = await issueCreditNote(tx, after, 'return', actor, now);
       if (credit) notes.push(credit);
       // Last: the piece's status, which LifecycleService audits at once (the audit chain's lock: no row is locked after it).
@@ -1495,10 +1740,21 @@ export class OrderService {
       const sizeChange = size !== undefined && o.sku_id !== skuId;
       const priceChange = price !== undefined && (price !== o.price_minor || currency !== o.currency);
       if ((sizeChange || priceChange) && o.channel === 'LIVE') throw termsFixed();
+      if (priceChange && o.channel === 'GIFT') throw giftTermsFixed();
       if (priceChange) {
         if (o.status !== 'RESERVED') throw conflict('ORDER_PAID', 'The price of an order paid no longer changes.');
+        // BP-19 T5: a credit taken off it stays in its currency and within the piece's price.
+        const credited = await openCreditUses(tx, o.id);
+        if (credited.length > 0 && credited.some((u) => u.currency !== currency)) throw creditCurrency();
+        if (credited.reduce((n, u) => n + u.amount_minor, 0) > (price ?? 0)) throw creditExceeds();
         after = await updateOrder(tx, o.id, { price_minor: price, currency });
         fields.push('price');
+        // Its welcome gift takes 0 in its currency.
+        for (const g of await openGifts(tx, o.id, { forUpdate: true })) {
+          if (g.status !== 'RESERVED' || (g.price_minor === 0 && g.currency === currency)) continue;
+          const priced = await updateOrder(tx, g.id, { price_minor: currency === null ? null : 0, currency });
+          extra.push(await recordChange(tx, g, priced, 'order.terms', { details: { fields: ['price'], withOrderId: o.id } }, actor, now));
+        }
       }
       if (engraving !== undefined && engraving !== o.engraving_text) {
         after = await updateOrder(tx, o.id, { engraving_text: engraving });
@@ -1562,6 +1818,68 @@ export class OrderService {
       notes.push(await recordChange(tx, f, after, 'order.shipping', { details: { service: next.service, minor: next.minor, benefit: null, withOrderId: parent.id } }, actor, now));
     }
     return notes;
+  }
+
+  /**
+   * APPLY CREDIT (plan NEXT-NINE, BP-19 T5; OPERATOR): `amountMinor` of the client's credit taken off a RESERVED order,
+   * until real payment exists (the invoice then carries a CREDIT line): the order's channel one THE PROGRAM names (409
+   * ORDER_CREDIT_CHANNEL); its price entered; grants of the account's tier now, not expired, with a balance (409
+   * ORDER_CREDIT_NONE), in the order's currency (409 ORDER_CREDIT_CURRENCY); the amount within their balance and, with
+   * what is already taken off it, within the piece's price (409 ORDER_CREDIT_EXCEEDS). PALLADIUM's grant first, then the
+   * earliest expiry, split over several when one does not cover it. The order's row, then the grants FOR UPDATE: two at
+   * once never take more than the balance. Audited `order.credit.apply`.
+   */
+  async applyCredit(orderId: string, amountMinor: number, actor: Actor): Promise<OrderView> {
+    assertOperator(actor);
+    const id = knownOrderId(orderId);
+    if (!Number.isInteger(amountMinor) || amountMinor < 1 || amountMinor > ORDER_AMOUNT_MAX_MINOR) throw validationError('A credit is an amount above 0.');
+    await this.change(id, async (tx, o, now, notes) => {
+      if (o.status !== 'RESERVED') throw orderClosed();
+      if (o.channel === 'GIFT') throw creditChannel();
+      const program = await readProgram(tx);
+      if (!(program.creditChannels as readonly string[]).includes(o.channel)) throw creditChannel();
+      if (o.price_minor === null || o.currency === null) throw validationError('Enter the order’s price and currency before taking a credit off it.');
+      const standing = await tierOf(tx, o.account_id, now);
+      const grants = (await creditBalances(tx, o.account_id, { forUpdate: true })).filter((g) => g.tier <= standing.tier && g.expiresAt.getTime() > now.getTime() && g.balanceMinor > 0);
+      if (grants.length === 0) throw creditNone();
+      const usable = grants.filter((g) => g.currency === o.currency);
+      if (usable.length === 0) throw creditCurrency();
+      const taken = (await openCreditUses(tx, o.id)).reduce((n, u) => n + u.amount_minor, 0);
+      if (amountMinor > usable.reduce((n, g) => n + g.balanceMinor, 0) || taken + amountMinor > o.price_minor) throw creditExceeds();
+      let left = amountMinor;
+      const uses: JsonObject[] = [];
+      for (const g of usable) {
+        if (left === 0) break;
+        const part = Math.min(left, g.balanceMinor);
+        const open = await tx.selectFrom('credit_uses').select(['id', 'amount_minor']).where('grant_id', '=', g.grantId).where('order_id', '=', o.id).where('released_at', 'is', null).executeTakeFirst();
+        if (open) {
+          // One open use per grant and order: a second application adds to it (released, then taken again whole).
+          await tx.updateTable('credit_uses').set({ released_at: now, released_reason: 'REMOVED', released_by: actor.type === 'admin' ? actor.id! : null }).where('id', '=', open.id).execute();
+        }
+        const row = await tx
+          .insertInto('credit_uses')
+          .values({ grant_id: g.grantId, order_id: o.id, amount_minor: part + (open?.amount_minor ?? 0), applied_by: actor.type === 'admin' ? actor.id! : null, applied_at: now })
+          .returning('id')
+          .executeTakeFirstOrThrow();
+        uses.push({ useId: row.id, grantId: g.grantId, tier: g.tier, amountMinor: part });
+        left -= part;
+      }
+      notes.push(await recordChange(tx, o, o, 'order.credit.apply', { details: { amountMinor, currency: o.currency, uses } }, actor, now));
+    });
+    return this.get(id);
+  }
+
+  /** REMOVE CREDIT (BP-19 T5; OPERATOR): the credit taken off a RESERVED order given back whole, its expiry unchanged. Audited `order.credit.remove`. */
+  async removeCredit(orderId: string, actor: Actor): Promise<OrderView> {
+    assertOperator(actor);
+    const id = knownOrderId(orderId);
+    await this.change(id, async (tx, o, now, notes) => {
+      if (o.status !== 'RESERVED') throw orderClosed();
+      const released = await releaseCredit(tx, o, 'REMOVED', actor, now);
+      if (released.length === 0) throw conflict('ORDER_CREDIT_NONE', 'No credit is taken off this order.');
+      notes.push(...released);
+    });
+    return this.get(id);
   }
 
   /**

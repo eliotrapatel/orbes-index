@@ -383,7 +383,16 @@ export const ORDERS = Object.freeze({
   }),
   /** Where the piece was sold; a welcome gift (plan NEXT-NINE, BP-19 T5) travels with an order. */
   channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT' }),
-  rows: Object.freeze({ size: 'SIZE', price: 'PRICE', shipping: 'SHIPPING', total: 'TOTAL', carrier: 'CARRIER', tracking: 'TRACKING NUMBER' }),
+  rows: Object.freeze({ size: 'SIZE', price: 'PRICE', shipping: 'SHIPPING', credit: 'CREDIT', total: 'TOTAL', carrier: 'CARRIER', tracking: 'TRACKING NUMBER' }),
+  /**
+   * BP-19 T5: a welcome gift, on its own card: its line (WELCOME GIFT · PLATINE), its price (none of its own), and while
+   * it waits the order it travels with. The credit taken off an order reads − € 50 (CREDIT).
+   */
+  gift: Object.freeze({
+    price: 'WELCOME GIFT',
+    travels: (reference: string) => `Your welcome gift travels with order ${reference}.`,
+  }),
+  credit: (amount: string) => `\u2212 ${amount}`,
   /**
    * BP-19 T4: an order's shipping, free by its tier (FREE · PLATINE, FREE EXPRESS · PALLADIUM), at its fee (€ 20, EXPRESS
    * · € 40), or carried by the order it travels with.

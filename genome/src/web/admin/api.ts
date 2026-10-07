@@ -892,6 +892,16 @@ export class AdminApi {
     return this.patch(`/api/admin/orders/${encodeURIComponent(id)}/terms`, change);
   }
 
+  /** OPERATOR: APPLY CREDIT (plan NEXT-NINE, BP-19 T5): a tier's credit taken off the order's invoice. */
+  applyOrderCredit(id: string, amountMinor: number): Promise<OrderDetail> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/credit`, { amountMinor });
+  }
+
+  /** OPERATOR: REMOVE CREDIT: what was taken off the order given back. */
+  removeOrderCredit(id: string): Promise<OrderDetail> {
+    return this.request('DELETE', `/api/admin/orders/${encodeURIComponent(id)}/credit`);
+  }
+
   /** OPERATOR: the buyer's name and address (null clears one). */
   setOrderBuyer(id: string, buyer: { name: string | null; address: string | null }): Promise<OrderDetail> {
     return this.request('PUT', `/api/admin/orders/${encodeURIComponent(id)}/buyer`, { body: buyer });

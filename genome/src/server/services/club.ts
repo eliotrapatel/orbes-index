@@ -48,6 +48,7 @@ import { DomainError, forbidden, notFound, validationError } from '../errors.js'
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import type { AccountDropEntry, DropService } from './drops.js';
+import { ensureGrants } from './tier-grants.js';
 
 /** The pieces that count for nothing in the club: revoked, flagged or retired by ORBES, whose ownership stays open (N3). */
 export const CLUB_EXCLUDED_STATUSES: readonly ProductStatus[] = Object.freeze(['REVOKED', 'COUNTERFEIT_FLAGGED', 'RETIRED'] as const);
@@ -326,6 +327,10 @@ export class ClubService {
    * (GET /api/v1/club/status): any signed-in account.
    */
   async status(accountId: string): Promise<ClubStatus> {
+    // The tiers' grants (plan NEXT-NINE, BP-19 T5), made here too when the tier was reached without a write that makes them.
+    await inTransaction(this.db, async (tx) => {
+      for (const n of await ensureGrants(tx, accountId, this.clock())) await this.audit.record(n, tx);
+    });
     const [standing, words, entries] = await Promise.all([this.tierOf(accountId), this.benefitWords(this.db), this.drops.accountEntries(accountId)]);
     const nextLevel = standing.tier + 1;
     const next: ClubNextTier | null =

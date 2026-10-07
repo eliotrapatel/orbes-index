@@ -28,8 +28,10 @@ import {
 } from '../db/schema.js';
 import { DomainError, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type ActorType, type Clock } from '../types.js';
-import type { AuditService } from './audit.js';
+import type { AuditRecordInput, AuditService } from './audit.js';
+import { CLUB_EXCLUDED_STATUSES } from './club.js';
 import { productPayload, writeJournal } from './journal.js';
+import { ensureGrants } from './tier-grants.js';
 
 // ── The state machine (data) ───────────────────────────────────────────────
 
@@ -469,6 +471,13 @@ export class LifecycleService {
     }
     // The event journal (plan LIVE RELEASE+, N1): every change of a piece's status, in its transaction.
     await writeJournal(tx, [{ type: opts.action, entityType: 'product', entityId: product.id, payload: productPayload({ ...product, status: to }, at) }], at);
+    // A piece counted again by the club (a reinstatement, a flag lifted): its owner's tiers' grants (plan NEXT-NINE,
+    // BP-19 T5), before the audit entries.
+    const granted: AuditRecordInput[] = [];
+    if (CLUB_EXCLUDED_STATUSES.includes(product.status) && !CLUB_EXCLUDED_STATUSES.includes(to)) {
+      const owner = await tx.selectFrom('ownership').select('account_id').where('product_id', '=', product.id).where('ended_at', 'is', null).executeTakeFirst();
+      if (owner) granted.push(...(await ensureGrants(tx, owner.account_id, now)));
+    }
 
     await this.audit.record(
       {
@@ -486,6 +495,7 @@ export class LifecycleService {
       },
       tx,
     );
+    for (const n of granted) await this.audit.record(n, tx);
     const fromStatus = product.status;
     // Keep the caller's in-memory row truthful for any follow-up work in the same transaction.
     product.status = to;

@@ -223,7 +223,7 @@ describe('the orders\' shipping (BP-19 T4)', () => {
       expect(await shippingOfRow(o.id)).toEqual(['EXPRESS', 0, null]);
       expect((await auditsOf(o.id, 'order.shipping'))[0]!.details).toMatchObject({ service: 'EXPRESS', minor: 0, withOrderId: first!.id });
     }
-    expect((await orders().get(second!.id)).withOrder).toEqual({ id: first!.id, reference: orderReference(first!.id) });
+    expect((await orders().get(second!.id)).withOrder).toEqual({ id: first!.id, reference: orderReference(first!.id), shipment: null });
     // Paid: one fee, on the first's invoice; the others carry no SHIPPING line.
     for (const o of [first!, second!, third!]) await pay(o.id);
     expect(linesOf((await invoiceOf(first!.id)).lines).filter((l) => l.kind === 'SHIPPING')).toEqual([{ kind: 'SHIPPING', label: 'SHIPPING · EXPRESS', detail: null, amountMinor: 4_000 }]);

@@ -10,6 +10,10 @@
  *  - The order: its channel, release, the collector (the email masked for an AUDITOR) and the reference they hold, the
  *    model, size, price, add-ons, surprise and engraving text; EDIT (OPERATOR): a draw's or a salon's size, price and
  *    currency, any order's engraving text (decision 31).
+ *  - Its welcome gift and its credit (plan NEXT-NINE, BP-19 T5): the GIFT order travelling with it (its size to
+ *    choose: MARK PAID waits for it), the client's credit usable now and the credit taken off it; APPLY CREDIT and
+ *    REMOVE CREDIT (OPERATOR, while RESERVED). A GIFT order says its tier and the order it travels with; its size is
+ *    chosen among its model's (EDIT), and SHIP is prefilled with its order's carrier and tracking number.
  *  - Its buyer: the name and address entered by Client Services (masked for an AUDITOR); EDIT (OPERATOR).
  *  - Its piece: the location it is served from (CHANGE: what it holds moves), what it holds (a piece in stock, a piece
  *    being made at the atelier), the piece that fulfils it (LINK A PIECE picked from the stock, also in place of a
@@ -22,13 +26,21 @@
  */
 import { h, type Child } from '../../shared/dom.js';
 import { formatDateTime, humanize } from '../format.js';
-import { formatMoney } from '../model/live.js';
+import { formatMoney, parseMoney } from '../model/live.js';
 import {
   addonsLine,
   buyerInput,
   buyerProblem,
   CHANNEL_LABELS,
+  creditActions,
+  creditAppliedLine,
+  creditAvailableLine,
+  creditProblem,
+  creditValue,
   DOCUMENT_LABELS,
+  giftHeaderLine,
+  giftLine,
+  giftSizeOptions,
   durationText,
   EVENT_LABELS,
   eventActor,
@@ -68,6 +80,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
   const o = d.order;
   const now = ctx.now();
   const acts = orderActions(o, ctx.session.admin.role);
+  const credits = creditActions(o, ctx.session.admin.role);
   const eyebrow = `${o.reference} · ${CHANNEL_LABELS[o.channel]}`;
   const done = (msg: string) => (v: unknown) => {
     if (!v) return;
@@ -99,9 +112,24 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       title: 'Ship',
       eyebrow,
       body: h('p', { class: 'dialog__text' }, `The piece leaves ${o.location.name}: the order reads SHIPPED, with its carrier and tracking number, which the collector reads with its link.`),
+      // SHIP WITH ITS ORDER (BP-19 T5): an order travelling with another, prefilled with that order's carrier and tracking number.
       fields: [
-        { name: 'carrierId', label: 'Carrier', kind: 'select', required: true, options: [{ value: '', label: 'Choose a carrier' }, ...active.map((c) => ({ value: c.id, label: c.name }))], value: '' },
-        { name: 'trackingNumber', label: 'Tracking number', required: true, maxlength: 40 },
+        {
+          name: 'carrierId',
+          label: 'Carrier',
+          kind: 'select',
+          required: true,
+          options: [{ value: '', label: 'Choose a carrier' }, ...active.map((c) => ({ value: c.id, label: c.name }))],
+          value: o.withOrder?.shipment && active.some((c) => c.id === o.withOrder!.shipment!.carrierId) ? o.withOrder.shipment.carrierId : '',
+        },
+        {
+          name: 'trackingNumber',
+          label: 'Tracking number',
+          required: true,
+          maxlength: 40,
+          value: o.withOrder?.shipment?.trackingNumber ?? '',
+          ...(o.withOrder?.shipment ? { hint: `As ${o.withOrder.reference} shipped: it travels with it.` } : {}),
+        },
         {
           name: 'declaredValue',
           label: 'Declared value',
@@ -266,7 +294,16 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
   const editTerms = () => {
     const v = termsValues(o);
     const fields: DialogField[] = [];
-    if (acts.terms.size) {
+    if (acts.terms.size && o.channel === 'GIFT') {
+      fields.push({
+        name: 'giftSize',
+        label: 'Size',
+        kind: 'select',
+        options: [{ value: '', label: 'Choose a size' }, ...giftSizeOptions(o)],
+        value: v.giftSize,
+        hint: 'Among the gift model’s sizes. The order then holds a piece of that size, or one is made for it.',
+      });
+    } else if (acts.terms.size) {
       fields.push(
         { name: 'size', label: 'Size', maxlength: ORDER_LIMITS.size, value: v.size, hint: 'As the model’s sizes are named: 52, M. The order then holds a piece of that size, or one is made for it.' },
         { name: 'oneSize', label: 'One size', kind: 'checkbox', value: v.oneSize, hint: 'The model has no sizes.' },
@@ -317,8 +354,35 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
   const releaseLink = o.release
     ? h('a', { class: 'idlink', attrs: { href: o.channel === 'LIVE' ? href('liveRelease', { dropId: o.release.id }) : href('drop', { dropId: o.release.id }) } }, o.release.title)
     : 'The private salon';
+  // ── The credit (BP-19 T5) ────────────────────────────────────────────────
+  const applyCredit = () =>
+    void openDialog({
+      title: 'Apply credit',
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, 'A tier’s credit taken off this order’s invoice, in its currency. It is given back if the order is cancelled or returned, with its expiry unchanged.'),
+      fields: [{ name: 'amount', label: 'Amount', maxlength: 12, value: creditValue(o), hint: `In ${o.currency ?? 'its currency'}, in units: 50, or 50.50. Available: ${creditAvailableLine(o)}.` }],
+      validate: (v) => creditProblem(o, v),
+      confirmLabel: 'Apply credit',
+      submit: async (v) => {
+        await ctx.api.applyOrderCredit(o.id, parseMoney(v.amount)!);
+      },
+    }).then(done('Credit applied.'));
+  const removeCredit = () =>
+    void openDialog({
+      title: 'Remove credit',
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, `The credit taken off this order (${creditAppliedLine(o)}) is given back to the client, with its expiry unchanged.`),
+      confirmLabel: 'Remove credit',
+      submit: async () => {
+        await ctx.api.removeOrderCredit(o.id);
+      },
+    }).then(done('Credit removed.'));
+  const gift = giftLine(o);
   const orderRows: DefRow[] = [
     { label: 'Channel', value: CHANNEL_LABELS[o.channel] },
+    ...(o.channel === 'GIFT' && o.withOrder
+      ? [{ label: 'Travels with', value: h('a', { class: 'idlink', attrs: { href: href('order', { orderId: o.withOrder.id }) }, data: { testid: 'order-gift-parent' } }, o.withOrder.reference) }]
+      : []),
     { label: 'Release', value: releaseLink },
     ...(d.sourceReference ? [{ label: 'Collector’s reference', value: mono(d.sourceReference), note: o.source.piece > 1 ? `Piece ${o.source.piece} of the reservation` : undefined }] : []),
     { label: 'Collector', value: h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: d.account.id }) }, data: { testid: 'order-collector' } }, d.account.email) },
@@ -327,10 +391,21 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Price', value: priceLine(o) },
     { label: 'Add-ons', value: addonsLine(o) },
     { label: 'Shipping', value: h('span', { data: { testid: 'order-shipping' } }, shippingLine(o)) },
+    ...(gift && o.gift ? [{ label: 'Welcome gift', value: h('a', { class: 'idlink', attrs: { href: href('order', { orderId: o.gift.id }) }, data: { testid: 'order-gift' } }, gift) }] : []),
+    ...(o.channel !== 'GIFT'
+      ? [
+          { label: 'Credit available', value: h('span', { data: { testid: 'order-credit-available' } }, creditAvailableLine(o)) },
+          { label: 'Credit applied', value: h('span', { data: { testid: 'order-credit-applied' } }, creditAppliedLine(o)) },
+        ]
+      : []),
     { label: 'Engraving', value: o.engravingText ?? 'None' },
     { label: 'Surprise', value: o.surprise ?? 'None' },
   ];
-  const termsTool = acts.terms.size || acts.terms.price || acts.terms.engraving || acts.terms.shipping ? [button('Edit', { kind: 'ghost', testId: 'order-terms', onClick: editTerms })] : [];
+  const termsTool = [
+    ...(acts.terms.size || acts.terms.price || acts.terms.engraving || acts.terms.shipping ? [button('Edit', { kind: 'ghost', testId: 'order-terms', onClick: editTerms })] : []),
+    ...(credits.apply ? [button('Apply credit', { kind: 'ghost', testId: 'order-credit-apply', onClick: applyCredit })] : []),
+    ...(credits.remove ? [button('Remove credit', { kind: 'ghost', testId: 'order-credit-remove', onClick: removeCredit })] : []),
+  ];
   const orderSection = section('Order', defList(orderRows), { id: 'order-facts', tools: termsTool });
 
   // ── The buyer ────────────────────────────────────────────────────────────
@@ -531,7 +606,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow: 'Clients · Orders',
       title: o.reference,
       identifier: true,
-      lead: `${o.release?.title ?? CHANNEL_LABELS[o.channel]} · ${o.model.name} · ${d.account.email}`,
+      lead: giftHeaderLine(o) ?? `${o.release?.title ?? CHANNEL_LABELS[o.channel]} · ${o.model.name} · ${d.account.email}`,
       actions: [linkButton('Packing slip', href('packingSlip', { orderId: o.id }), 'secondary'), linkButton('All orders', href('orders'), 'ghost')],
     }),
     ...sections,

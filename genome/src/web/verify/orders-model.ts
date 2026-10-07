@@ -9,9 +9,11 @@
  *                  current one marked, those to come without one; a CANCELLED or RETURNED order shows the steps it
  *                  reached, then that end with its date;
  *   the terms      SIZE, PRICE, each add-on at its price, its SHIPPING (plan NEXT-NINE, BP-19 T4: free by its tier, at
- *                  its fee, or with the order it travels with; no row without shipping), and the TOTAL when there are
- *                  add-ons or a fee; a draw's or a salon's size and price read TO BE CONFIRMED until ORBES Client
- *                  Services enters them (left out once cancelled);
+ *                  its fee, or with the order it travels with; no row without shipping), the CREDIT taken off it (BP-19
+ *                  T5: − € 50), and the TOTAL when there are add-ons, a fee or a credit; a draw's or a salon's size and
+ *                  price read TO BE CONFIRMED until ORBES Client Services enters them (left out once cancelled); a
+ *                  welcome gift (BP-19 T5) reads WELCOME GIFT · its tier, its PRICE WELCOME GIFT, and while it waits
+ *                  the order it travels with;
  *   the shipment   once shipped: the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT, the carrier's page (https only);
  *   the documents  (M6) its INVOICE and CREDIT NOTE with their numbers (PDFs; the number in the reading face), the CARE GUIDE of its model while the
  *                  piece is on its way or kept, its OWNERSHIP CERTIFICATE once the piece is registered to the account;
@@ -172,16 +174,20 @@ export function orderRows(o: AccountOrder): Row[] {
   const priced = o.priceMinor !== null && o.currency !== null;
   const cancelled = o.status === 'CANCELLED';
   const size = o.size === null ? ORDERS.toConfirm : o.size.label ? upper(o.size.label) : ORDERS.oneSize;
+  // A welcome gift has no price of its own (BP-19 T5): it travels with its order.
+  const gift = o.channel === 'GIFT';
   const rows: Row[] = [
     ...(cancelled && o.size === null ? [] : [[ORDERS.rows.size, size] as Row]),
-    ...(cancelled && !priced ? [] : [[ORDERS.rows.price, priced ? money(o.priceMinor!) : ORDERS.toConfirm] as Row]),
+    ...(gift ? [[ORDERS.rows.price, ORDERS.gift.price] as Row] : cancelled && !priced ? [] : [[ORDERS.rows.price, priced ? money(o.priceMinor!) : ORDERS.toConfirm] as Row]),
     // An add-on adds to the price: « + € 150 » (C24), its words the app's.
     ...(cancelled && o.currency === null ? [] : o.addons).map((a): Row => [upper(a.label), o.currency ? `+ ${money(a.priceMinor)}` : money(a.priceMinor)]),
   ];
   const shipping = shippingValue(o);
   if (shipping) rows.push([ORDERS.rows.shipping, shipping]);
   const fee = shippingFee(o);
-  if (priced && (o.addons.length > 0 || fee > 0)) rows.push([ORDERS.rows.total, money(o.addons.reduce((n, a) => n + a.priceMinor, o.priceMinor! + fee))]);
+  const credit = !gift && priced && typeof o.creditMinor === 'number' && Number.isInteger(o.creditMinor) && o.creditMinor > 0 ? o.creditMinor : 0;
+  if (credit > 0) rows.push([ORDERS.rows.credit, ORDERS.credit(money(credit))]);
+  if (!gift && priced && (o.addons.length > 0 || fee > 0 || credit > 0)) rows.push([ORDERS.rows.total, money(o.addons.reduce((n, a) => n + a.priceMinor, o.priceMinor! + fee - credit))]);
   return rows;
 }
 
@@ -191,6 +197,8 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number): OrderModel 
   if (!ORDER_STATUSES.includes(o.status) || !ORDER_CHANNELS.includes(o.channel) || typeof o.reservedAt !== 'string') return null;
   const shipped = o.status === 'SHIPPED' || o.status === 'DELIVERED' || o.status === 'RETURNED';
   const s = shipped ? o.shipment : null;
+  const giftTier = o.channel === 'GIFT' && (o.giftTier === 'PLATINE' || o.giftTier === 'PALLADIUM') ? o.giftTier : null;
+  const parent = typeof o.withOrder === 'string' && REFERENCE.test(o.withOrder) ? o.withOrder : null;
   return {
     id: o.id,
     key: `order-${o.reference.toLowerCase()}`,
@@ -198,8 +206,14 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number): OrderModel 
     title: upper(o.model),
     modelVariant: typeof o.modelVariant === 'string' && o.modelVariant.trim() !== '' ? o.modelVariant.trim() : null,
     // A release names itself; the private salon has none: the model with its variant follows it (C32).
-    line: [ORDERS.channel[o.channel], o.release ? upper(o.release) : o.channel === 'SALON' ? modelWithVariant(upper(o.model), o.modelVariant).toUpperCase() : ''].filter((x) => x.length > 0).join(' · '),
-    sentence: ORDERS.sentence[o.status],
+    line: [
+      ORDERS.channel[o.channel],
+      o.channel === 'GIFT' ? (giftTier ?? '') : o.release ? upper(o.release) : o.channel === 'SALON' ? modelWithVariant(upper(o.model), o.modelVariant).toUpperCase() : '',
+    ]
+      .filter((x) => x.length > 0)
+      .join(' · '),
+    // A welcome gift waiting says the order it travels with (BP-19 T5).
+    sentence: o.channel === 'GIFT' && parent && (o.status === 'RESERVED' || o.status === 'PAID') ? ORDERS.gift.travels(parent) : ORDERS.sentence[o.status],
     steps: orderSteps(o, offsetMinutes),
     rows: orderRows(o),
     shipment: s

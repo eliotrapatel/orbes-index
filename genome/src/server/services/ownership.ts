@@ -52,6 +52,7 @@ import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford,
 import { findProduct, loadStatusHistory, requireProduct, returnTargetOf, TRANSITIONS, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { mediaUrl } from './media.js';
 import { deliverOnRegistration, orderReference } from './orders.js';
+import { ensureGrants } from './tier-grants.js';
 import { consumeScanToken, inspectScanToken, TRANSFER_TOKEN_TTL_MS, type ScanTokenFailure, type ScanTokenResult } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantySummary } from './warranty.js';
 
@@ -495,6 +496,8 @@ export class OwnershipService {
       // The piece of an order shipped to this buyer, registered by them: the order is DELIVERED (services/orders.ts),
       // its row locked before any audit entry of this transaction.
       const delivered = await deliverOnRegistration(tx, p.id, accountId, actor, now);
+      // The tiers' grants this piece may open (plan NEXT-NINE, BP-19 T5), before any audit entry.
+      const granted = await ensureGrants(tx, accountId, now);
       const ownershipState = ownershipStateFor({ verified }, false);
       const statusChange = await this.lifecycle.applyForService(
         tx,
@@ -513,7 +516,7 @@ export class OwnershipService {
         },
         tx,
       );
-      for (const n of delivered) await this.audit.record(n, tx);
+      for (const n of [...delivered, ...granted]) await this.audit.record(n, tx);
       return { productId: p.product_id, accountId, acquiredVia: 'FIRST_REGISTRATION', verified, ownershipState, since: now, statusChange };
     });
   }
@@ -662,6 +665,8 @@ export class OwnershipService {
         .set({ status: 'ACCEPTED', to_account_id: accountId, completed_at: now })
         .where('id', '=', t.id)
         .execute();
+      // The tiers' grants the piece received may open (plan NEXT-NINE, BP-19 T5), before any audit entry.
+      const granted = await ensureGrants(tx, accountId, now);
       const ownershipState = ownershipStateFor(current, false);
       const statusChange = await this.lifecycle.applyForService(
         tx,
@@ -681,6 +686,7 @@ export class OwnershipService {
         },
         tx,
       );
+      for (const n of granted) await this.audit.record(n, tx);
       return { productId: p.product_id, accountId, acquiredVia: 'TRANSFER', verified: current.verified, ownershipState, since: endedAt, statusChange };
     });
   }

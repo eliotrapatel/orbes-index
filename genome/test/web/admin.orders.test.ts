@@ -41,7 +41,15 @@ import {
   carrierProblem,
   cardHolds,
   CHANNEL_LABELS,
+  creditActions,
+  creditAppliedLine,
+  creditAvailableLine,
+  creditProblem,
+  creditValue,
   delaysLine,
+  giftHeaderLine,
+  giftLine,
+  giftSizeOptions,
   durationText,
   EVENT_LABELS,
   eventActor,
@@ -107,6 +115,9 @@ const view = (o: Partial<OrderView> = {}): OrderView => ({
   shopifyOrderId: null,
   shipping: { service: null, minor: null, benefit: null },
   withOrder: null,
+  gift: null,
+  giftOf: null,
+  credit: { available: [], applied: [] },
   return: null,
   invoices: [],
   events: [],
@@ -210,7 +221,7 @@ describe('an order\'s shipping (plan NEXT-NINE, BP-19 T4)', () => {
     expect(shippingLine(view({ shipping: { service: 'STANDARD', minor: 0, benefit: 2 } }))).toBe('Standard · free (PLATINE)');
     expect(shippingLine(view({ shipping: { service: 'EXPRESS', minor: 0, benefit: 3 } }))).toBe('Express · free (PALLADIUM)');
     expect(shippingLine(view({ currency: 'EUR', shipping: { service: 'STANDARD', minor: 2_000, benefit: null } }))).toBe('Standard · €\u00a020');
-    expect(shippingLine(view({ withOrder: { id: 'p', reference: 'OR-12345678' }, shipping: { service: 'STANDARD', minor: 0, benefit: null } }))).toBe('With OR-12345678');
+    expect(shippingLine(view({ withOrder: { id: 'p', reference: 'OR-12345678', shipment: null }, shipping: { service: 'STANDARD', minor: 0, benefit: null } }))).toBe('With OR-12345678');
     expect(shippingLine(view())).toBe('None');
     expect(CHANNEL_LABELS.GIFT).toBe('Welcome gift');
     expect(EVENT_LABELS['order.shipping']).toBe('Shipping');
@@ -232,6 +243,68 @@ describe('an order\'s shipping (plan NEXT-NINE, BP-19 T4)', () => {
   });
 });
 
+describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () => {
+  const grant = { grantId: 'g3', tier: 3 as const, balanceMinor: 5_000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' };
+  it('says the gift travelling with an order, and a GIFT order\'s tier and parent', () => {
+    expect(giftLine(view())).toBeNull();
+    expect(giftLine(view({ gift: { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED', sizeToChoose: false } }))).toBe('OR-AAAA0001 · ANNEAU · RESERVED');
+    expect(giftLine(view({ gift: { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED', sizeToChoose: true } }))).toBe('OR-AAAA0001 · ANNEAU · SIZE TO CHOOSE');
+    const g = view({ channel: 'GIFT', withOrder: { id: 'p', reference: 'OR-12345678', shipment: null }, giftOf: { tier: 2, sizes: [] } });
+    expect(giftHeaderLine(g)).toBe('Welcome gift · PLATINE · travels with OR-12345678');
+    expect(giftHeaderLine(view())).toBeNull();
+    expect(EVENT_LABELS['order.gift']).toBe('Welcome gift added');
+    expect(EVENT_LABELS['order.credit.apply']).toBe('Credit applied');
+  });
+
+  it('chooses a GIFT order\'s size among its model\'s; it is never paid alone, and its parent waits for that size', () => {
+    const g = view({ channel: 'GIFT', priceMinor: 0, currency: 'EUR', withOrder: { id: 'p', reference: 'OR-12345678', shipment: null }, giftOf: { tier: 3, sizes: [{ skuId: 's1', label: '52', available: 2 }, { skuId: 's2', label: '54', available: 0 }] } });
+    expect(giftSizeOptions(g)).toEqual([{ value: '52', label: '52 · 2 available' }, { value: '54', label: '54 · none available' }]);
+    const a = orderActions(g, 'OPERATOR');
+    expect(a.pay).toBe(false);
+    expect(a.terms).toMatchObject({ size: true, price: false, shipping: false });
+    expect(termsChange(g, { ...termsValues(g), giftSize: '54' }, a.terms)).toEqual({ sizeLabel: '54' });
+    expect(termsProblem(g, termsValues(g), a.terms)).toBe('Nothing has changed.');
+    expect(shipWaitsFor(g)).toBe('Its size is to be chosen.');
+    expect(shipWaitsFor({ ...g, skuId: 's1', sizeLabel: '52' })).toBe('It is paid with OR-12345678.');
+    const parent = view({ priceMinor: 300_000, currency: 'EUR', skuId: 's', sizeLabel: '52', reservation: 'STOCK', gift: { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED', sizeToChoose: true } });
+    expect(orderActions(parent, 'OPERATOR').pay).toBe(false);
+    expect(shipWaitsFor(parent)).toBe('Choose the welcome gift’s size first.');
+    expect(orderActions({ ...parent, gift: { ...parent.gift!, sizeToChoose: false } }, 'OPERATOR').pay).toBe(true);
+  });
+
+  it('says the credit available and applied, and offers APPLY within the balance and the price, REMOVE once applied', () => {
+    expect(creditAvailableLine(view())).toBe('None');
+    const o = view({ priceMinor: 3_000, currency: 'EUR', credit: { available: [grant], applied: [] } });
+    expect(creditAvailableLine(o)).toBe('PALLADIUM €\u00a050 until 06 OCT 2027');
+    expect(creditAppliedLine(o)).toBe('None');
+    expect(creditActions(o, 'OPERATOR')).toEqual({ apply: true, remove: false });
+    expect(creditActions(o, 'AUDITOR')).toEqual({ apply: false, remove: false });
+    // Within the piece's price: € 30 here.
+    expect(creditValue(o)).toBe('30');
+    expect(creditProblem(o, { amount: '30' })).toBeNull();
+    expect(creditProblem(o, { amount: '0' })).toBe('The credit is an amount in units above 0: 50, or 50.50.');
+    expect(creditProblem(o, { amount: '31' })).toBe('At most €\u00a030: the credit left in EUR, within the piece’s price.');
+    // Another currency, not priced, a GIFT order, past RESERVED: nothing to apply.
+    expect(creditActions(view({ priceMinor: 3_000, currency: 'GBP', credit: { available: [grant], applied: [] } }), 'OPERATOR').apply).toBe(false);
+    expect(creditActions(view({ credit: { available: [grant], applied: [] } }), 'OPERATOR').apply).toBe(false);
+    expect(creditActions({ ...o, channel: 'GIFT' }, 'OPERATOR').apply).toBe(false);
+    expect(creditActions({ ...o, status: 'PAID' }, 'OPERATOR').apply).toBe(false);
+    const applied = view({
+      priceMinor: 300_000,
+      currency: 'EUR',
+      credit: {
+        available: [],
+        applied: [
+          { id: 'u1', grantId: 'g2', tier: 2, amountMinor: 2_000, appliedAt: 'x', releasedAt: 'y', releasedReason: 'REMOVED' },
+          { id: 'u2', grantId: 'g2', tier: 2, amountMinor: 5_000, appliedAt: 'x', releasedAt: null, releasedReason: null },
+        ],
+      },
+    });
+    expect(creditAppliedLine(applied)).toBe('\u2212 €\u00a050 (PLATINE)');
+    expect(creditActions(applied, 'OPERATOR')).toEqual({ apply: false, remove: true });
+  });
+});
+
 describe('what a role may do with an order', () => {
   it('offers each step only where the server takes it, to an OPERATOR', () => {
     const reserved = view();
@@ -246,7 +319,7 @@ describe('what a role may do with an order', () => {
     expect(orderActions(live, 'ADMIN').terms).toEqual({ size: false, price: false, engraving: true, shipping: true });
     // The shipping: RESERVED only, and never on an order travelling with another (its parent's).
     expect(orderActions(paidStock, 'OPERATOR').terms.shipping).toBe(false);
-    expect(orderActions(view({ withOrder: { id: 'p', reference: 'OR-12345678' } }), 'OPERATOR').terms.shipping).toBe(false);
+    expect(orderActions(view({ withOrder: { id: 'p', reference: 'OR-12345678', shipment: null } }), 'OPERATOR').terms.shipping).toBe(false);
     expect(orderActions(live, 'ADMIN').linkPiece).toBe(false);
     // A finished piece in place of a piece to make still being made (choice 8); not once it is finished or cancelled.
     for (const [status, linkable] of [['TO_MAKE', true], ['IN_PROGRESS', true], ['DONE', false], ['CANCELLED', false]] as const) {
@@ -291,7 +364,7 @@ describe('what a role may do with an order', () => {
 
     const o = view();
     const a = orderActions(o, 'OPERATOR').terms;
-    expect(termsValues(o)).toEqual({ size: '', oneSize: '', price: '', currency: 'EUR', engraving: '', shippingService: 'STANDARD', shippingFee: '' });
+    expect(termsValues(o)).toEqual({ size: '', oneSize: '', price: '', currency: 'EUR', engraving: '', shippingService: 'STANDARD', shippingFee: '', giftSize: '' });
     expect(termsProblem(o, termsValues(o), a)).toBe('Nothing has changed.');
     expect(termsChange(o, { size: '52', price: '4800', currency: 'GBP', engraving: ' A. & L. ' }, a)).toEqual({ sizeLabel: '52', priceMinor: 480_000, currency: 'GBP', engravingText: 'A. & L.' });
     expect(termsChange(o, { size: '', oneSize: 'true', price: '', currency: 'EUR', engraving: '' }, a)).toEqual({ sizeLabel: null });

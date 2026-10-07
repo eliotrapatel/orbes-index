@@ -41,7 +41,8 @@
  *                     and not drawn, cancelled, drawn with a place held, a waiting list and a place lapsed, concluded
  *                     with its order PAID, in its early access with every piece reserved, open with every piece
  *                     reserved; a collector (r.castel) with an entry in each, and the October draw withdrawn
- *   stress            the extreme content of fidelity rule 5
+ *   stress            the extreme content of fidelity rule 5; THE PROGRAM's welcome gift (a model of one size) and
+ *                     the PALLADIUM credit in use on an order (BP-19 T5)
  *   empty             every empty state: no model shown, no release, an account without a piece, and an owner
  *                     (one piece of a model kept out of the collection) before an empty circle
  *
@@ -1053,6 +1054,16 @@ async function seedStress(w: World): Promise<void> {
       await ctx.services.orders.transition(order, { to: 'SHIPPED', carrierId: await carrier(w, 'Chronopost'), trackingNumber: 'XY48291563748201937465012FR', declaredValueMinor: 640_000 }, admin);
     }
   }
+  // THE PROGRAM (plan NEXT-NINE, BP-19 T5): the welcome gift of PLATINE and PALLADIUM, a model of one size with one piece
+  // counted in stock, chosen after the four orders (none of them carries a gift); and the PALLADIUM credit (€ 100, made
+  // with the first order: the account reached PALLADIUM before it) in use on the last order, RESERVED at € 4 800.
+  clock.set(at('2026-09-14T10:00:00Z'));
+  const charm = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: null, name: 'ORBITAL CHARM', type: 'PENDANT', skuPrefix: 'ORB-CH', defaultMaterial: '925 STERLING SILVER' }, admin);
+  await ctx.services.stock.adjust({ skuId: await ensureSku(ctx.db, charm.id, null), locationId: (await ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id, delta: 1, note: 'Counted at the atelier.' }, admin);
+  const program = await ctx.services.clubProgram.read();
+  await ctx.services.clubProgram.update({ ...program, giftPlatineModelId: charm.id, giftPalladiumModelId: charm.id }, admin);
+  const last = await ctx.db.selectFrom('orders').select('id').where('account_id', '=', you.id).where('channel', '=', 'SALON').where('status', '=', 'RESERVED').where('price_minor', '=', 480_000).executeTakeFirstOrThrow();
+  await ctx.services.orders.applyCredit(last.id, 10_000, admin);
   // Eight posts in the circle.
   clock.set(at('2026-09-20T09:00:00Z'));
   for (let i = 1; i <= 8; i++) {

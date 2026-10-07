@@ -39,7 +39,7 @@ import { orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { createAccount } from '../support/live.js';
+import { createAccount, holdPieces } from '../support/live.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -639,5 +639,71 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await figuresInDisplayFace(a)).toEqual([]);
     expect(await csp(a)).toEqual([]);
     await a.context().close();
+  }, STEP_TIMEOUT);
+
+  // Last: its orders would change the counts of the scenes before it.
+  it('takes a tier\'s credit off an order and chooses its welcome gift\'s size before MARK PAID (BP-19 T5)', async () => {
+    // A gift model of two sizes, one piece of each in stock, THE PROGRAM's gift of PLATINE; a PLATINE account's salon order.
+    const france = (await ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    const gift = (
+      await ctx.db
+        .insertInto('models')
+        .values({ category_id: (await ctx.categories.getByCode('J'))!.index, name: 'JONC', type: 'RING', sku_prefix: 'JNC-RG', default_material: '925 STERLING SILVER' })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    for (const size of ['50', '52']) await ctx.services.stock.adjust({ skuId: await inTransaction(ctx.db, (tx) => ensureSku(tx, gift, size)), locationId: france, delta: 1, note: 'Counted.' }, admin);
+    await ctx.services.clubProgram.update({ ...(await ctx.services.clubProgram.read()), giftPlatineModelId: gift }, admin);
+    const account = await createAccount(ctx.db);
+    await holdPieces(ctx.db, account.id, 5, modelId);
+    const request = await ctx.db.insertInto('shop_requests').values({ account_id: account.id, model_id: modelId, created_at: ctx.clock() }).returning('id').executeTakeFirstOrThrow();
+    await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
+    const parent = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).where('channel', '=', 'SALON').executeTakeFirstOrThrow()).id;
+    await ctx.services.orders.setTerms(parent, { sizeLabel: '58', priceMinor: 300_000, currency: 'EUR' }, admin);
+    await ctx.services.orders.setBuyer(parent, { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris\nFrance' }, admin);
+    const giftOrder = (await ctx.db.selectFrom('orders').select('id').where('with_order_id', '=', parent).where('channel', '=', 'GIFT').executeTakeFirstOrThrow()).id;
+
+    const p = await open(OPERATOR);
+    await go(p, `#/orders/${parent}`, orderReference(parent));
+    expect(await p.locator('[data-testid=order-gift]').textContent()).toBe(`${orderReference(giftOrder)} · JONC · SIZE TO CHOOSE`);
+    expect(await p.locator('[data-testid=order-credit-available]').textContent()).toMatch(/^PLATINE €\s50 until \d{2} [A-Z]{3} \d{4}$/u);
+    expect(await p.locator('[data-testid=order-credit-applied]').textContent()).toBe('None');
+    // Not paid before the gift's size is chosen.
+    expect(await p.locator('[data-testid=order-pay]').count()).toBe(0);
+    expect(await p.locator('#order-step').textContent()).toContain('Choose the welcome gift’s size first.');
+    // APPLY CREDIT, prefilled with what the order takes: € 50.
+    await p.click('[data-testid=order-credit-apply]');
+    expect(await p.locator('dialog input[name=amount]').inputValue()).toBe('50');
+    await p.fill('dialog input[name=amount]', '60');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toContain('At most €');
+    await p.fill('dialog input[name=amount]', '50');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=order-credit-applied]').textContent()).toMatch(/^\u2212 €\s50 \(PLATINE\)$/u);
+    expect(await p.locator('[data-testid=order-credit-available]').textContent()).toBe('None');
+    expect(await p.locator('[data-testid=order-credit-remove]').count()).toBe(1);
+    // The gift's page: its tier and its order; its size chosen among its model's.
+    await p.click('[data-testid=order-gift]');
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(orderReference(giftOrder));
+    expect(await p.locator('.page-head').textContent()).toContain(`Welcome gift · PLATINE · travels with ${orderReference(parent)}`);
+    expect(await p.locator('[data-testid=order-pay]').count()).toBe(0);
+    expect(await p.locator('#order-step').textContent()).toContain('Its size is to be chosen.');
+    await p.click('[data-testid=order-terms]');
+    expect(await p.locator('dialog select[name=giftSize] option').allTextContents()).toEqual(['Choose a size', '50 · 1 available', '52 · 1 available']);
+    await p.selectOption('dialog select[name=giftSize]', '52');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('#order-step').textContent()).toContain(`It is paid with ${orderReference(parent)}.`);
+    await shot(p, 'gift-order');
+    // Back to its order: MARK PAID, the invoice less the credit.
+    await go(p, `#/orders/${parent}`, orderReference(parent));
+    await p.click('[data-testid=order-pay]');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('PAID');
+    await expect.poll(() => p.locator('#order-documents tbody tr').first().textContent()).toMatch(/€\s2\s950/u);
+    expect(await p.locator('#order-history').textContent()).toContain('Credit applied');
+    await shot(p, 'credit-paid');
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+    await ctx.db.deleteFrom('club_program_settings').execute();
   }, STEP_TIMEOUT);
 });

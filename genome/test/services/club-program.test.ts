@@ -13,7 +13,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { HOUSE_CURRENCIES } from '../../src/server/db/schema.js';
-import { checkProgram, DEFAULT_PROGRAM, programLines, type ClubProgram } from '../../src/server/services/club-program.js';
+import { checkProgram, DEFAULT_PROGRAM, programLines, programMoney, type ClubProgram } from '../../src/server/services/club-program.js';
+import { liveMoney } from '../../src/server/services/live-console.js';
 import { ORDER_CURRENCIES } from '../../src/server/services/orders.js';
 import { adminClient, createAdmin, createHarness, errorOf, type Client, type Harness } from '../api/support.js';
 import { createModel } from '../support/live.js';
@@ -30,6 +31,12 @@ async function rejects(p: Promise<unknown>, code: string, status?: number): Prom
   if (status !== undefined) expect((e as DomainError).httpStatus).toBe(status);
   return e as DomainError;
 }
+
+describe('THE PROGRAM\'s amounts', () => {
+  it('says money as the LIVE console does (programMoney, kept apart to avoid an import cycle)', () => {
+    for (const currency of HOUSE_CURRENCIES) for (const minor of [0, 5_000, 10_050, 123_456_789]) expect(programMoney(minor, currency)).toBe(liveMoney(minor, currency));
+  });
+});
 
 describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
   let h: Harness;

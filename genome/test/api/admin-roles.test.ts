@@ -211,6 +211,9 @@ const PROBES: Probe[] = [
   { group: 'orders', method: 'PATCH', url: `/api/admin/orders/${UUID}/terms`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'PUT', url: `/api/admin/orders/${UUID}/buyer`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/piece`, body: INVALID, min: 'OPERATOR' },
+  // BP-19 T5: a tier's credit taken off an order, and given back, by an OPERATOR.
+  { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/credit`, body: INVALID, min: 'OPERATOR' },
+  { group: 'orders', method: 'DELETE', url: `/api/admin/orders/${UUID}/credit`, min: 'OPERATOR' },
   // Step S4: a return opened by an OPERATOR (to the archive by an ADMIN only: the case below); the invoices and credit notes read by an AUDITOR (the buyer masked).
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/return`, body: INVALID, min: 'OPERATOR' },
   { group: 'invoices', method: 'GET', url: '/api/admin/invoices', min: 'AUDITOR' },

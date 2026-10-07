@@ -916,6 +916,12 @@ export interface AccountOrder {
    * with another order, that order's reference (which carries the fee); null or absent: no shipping.
    */
   shipping?: { service: 'STANDARD' | 'EXPRESS' | null; minor: number | null; benefit: 2 | 3 | null; withOrder: string | null } | null;
+  /** BP-19: the reference of the order it travels with (a welcome gift's), or null; absent from a server before it. */
+  withOrder?: string | null;
+  /** BP-19 T5: a welcome gift's tier (PLATINE, PALLADIUM); null for any other order. */
+  giftTier?: 'PLATINE' | 'PALLADIUM' | null;
+  /** BP-19 T5: the credit taken off it, in its currency; 0 for none. */
+  creditMinor?: number;
   status: OrderStatus;
   reservedAt: string;
   paidAt: string | null;

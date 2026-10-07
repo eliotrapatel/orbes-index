@@ -128,6 +128,41 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
     expect(orderRows(order({ currency: 'CHF', priceMinor: 480_050, addons: [] }))[1]).toEqual(['PRICE', `CHF${NBSP}4${NBSP}800.50`]);
   });
 
+  it('says a welcome gift (BP-19 T5): WELCOME GIFT · its tier, no price of its own, the order it travels with while it waits', () => {
+    const gift = order({
+      channel: 'GIFT',
+      release: null,
+      model: 'Anneau',
+      size: { label: null },
+      priceMinor: 0,
+      currency: 'EUR',
+      addons: [],
+      withOrder: 'OR-9F8E7D6C',
+      giftTier: 'PLATINE',
+      shipping: { service: 'STANDARD', minor: 0, benefit: null, withOrder: 'OR-9F8E7D6C' },
+    });
+    const m = orderModel(gift, 0)!;
+    expect(m.line).toBe('WELCOME GIFT · PLATINE');
+    expect(m.sentence).toBe('Your welcome gift travels with order OR-9F8E7D6C.');
+    expect(m.rows).toEqual([['SIZE', 'ONE SIZE'], ['PRICE', 'WELCOME GIFT'], ['SHIPPING', 'WITH ORDER OR-9F8E7D6C']]);
+    // Once shipped, its step says it.
+    expect(orderModel({ ...gift, status: 'SHIPPED', paidAt: '2026-10-06T09:00:00.000Z', shippedAt: '2026-10-07T09:00:00.000Z', shipment: SHIPMENT }, 0)!.sentence).toBe(ORDERS.sentence.SHIPPED);
+    // A size still to choose, and an unknown tier: TO BE CONFIRMED, the channel alone.
+    expect(orderModel({ ...gift, size: null, giftTier: null }, 0)!.line).toBe('WELCOME GIFT');
+  });
+
+  it('takes the CREDIT off the TOTAL (BP-19 T5): − € 50, never on a price to be confirmed', () => {
+    expect(orderRows(order({ addons: [], creditMinor: 5_000 }))).toEqual([
+      ['SIZE', '52'],
+      ['PRICE', `€${NBSP}4${NBSP}800`],
+      ['CREDIT', `\u2212 €${NBSP}50`],
+      ['TOTAL', `€${NBSP}4${NBSP}750`],
+    ]);
+    expect(orderRows(order({ creditMinor: 5_000, shipping: { service: 'STANDARD', minor: 2_000, benefit: null, withOrder: null } })).at(-1)).toEqual(['TOTAL', `€${NBSP}5${NBSP}020`]);
+    expect(orderRows(order({ addons: [], creditMinor: 0 }))).toEqual(orderRows(order({ addons: [] })));
+    expect(orderRows(order({ addons: [], priceMinor: null, currency: null, creditMinor: 5_000 })).map((r) => r[0])).toEqual(['SIZE', 'PRICE']);
+  });
+
   it('says its SHIPPING (BP-19 T4): free by its tier, at its fee (EXPRESS named), with the order it travels with; no row without shipping; the TOTAL with a fee', () => {
     const ship = (shipping: AccountOrder['shipping'], extra: Partial<AccountOrder> = {}) => orderRows(order({ addons: [], shipping, ...extra }));
     expect(ship({ service: 'STANDARD', minor: 0, benefit: 2, withOrder: null })).toEqual([['SIZE', '52'], ['PRICE', `€${NBSP}4${NBSP}800`], ['SHIPPING', 'FREE · PLATINE']]);

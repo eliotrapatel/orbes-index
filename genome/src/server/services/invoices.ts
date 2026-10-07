@@ -220,6 +220,30 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
       ? [{ kind: 'SHIPPING' as const, label: `SHIPPING · ${o.shipping_service}`, detail: o.shipping_benefit === 2 || o.shipping_benefit === 3 ? `FREE · ${TIER_WORDS[o.shipping_benefit]}` : null, amountMinor: o.shipping_minor }]
       : []),
   ];
+  // BP-19 T5: the credit taken off it (one line per grant, negative), then the welcome gift travelling with it (at 0).
+  const credits = await tx
+    .selectFrom('credit_uses as u')
+    .innerJoin('tier_grants as g', 'g.id', 'u.grant_id')
+    .select((eb) => ['g.tier', eb.fn.sum<string>('u.amount_minor').as('amount')])
+    .where('u.order_id', '=', o.id)
+    .where('u.released_at', 'is', null)
+    .groupBy('g.tier')
+    .orderBy('g.tier', 'desc')
+    .execute();
+  for (const c of credits) lines.push({ kind: 'CREDIT', label: `CREDIT · ${TIER_WORDS[c.tier as 2 | 3]}`, detail: null, amountMinor: -Number(c.amount) });
+  const gifts = await tx
+    .selectFrom('orders as g')
+    .innerJoin('models as m', 'm.id', 'g.model_id')
+    .select(['g.id', 'm.name', 'm.variant_label'])
+    .where('g.with_order_id', '=', o.id)
+    .where('g.channel', '=', 'GIFT')
+    .where('g.status', '<>', 'CANCELLED')
+    .orderBy('g.reserved_at')
+    .orderBy('g.id')
+    .execute();
+  for (const g of gifts) {
+    lines.push({ kind: 'GIFT', label: `WELCOME GIFT · ${g.name}${g.variant_label ? ` IN ${g.variant_label.toUpperCase()}` : ''}`, detail: `ORDER ${orderReference(g.id)}`, amountMinor: 0 });
+  }
   const total = lines.reduce((n, l) => n + l.amountMinor, 0);
   const buyer: InvoiceBuyer = { name: o.buyer_name, address: o.buyer_address, email: facts.email };
   const year = now.getUTCFullYear();

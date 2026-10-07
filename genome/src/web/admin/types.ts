@@ -129,6 +129,10 @@ export type HouseCurrency = (typeof HOUSE_CURRENCIES)[number];
 export const CREDIT_CHANNELS = ['DRAW', 'LIVE', 'SALON'] as const;
 export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
 
+/** Why a credit taken off an order was given back (credit_uses.released_reason, BP-19 T5). */
+export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
+export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
+
 /** What an invitation of the circle is (circle_posts.experience, BP-19 T7). */
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
@@ -2133,8 +2137,17 @@ export interface OrderView {
   shopifyOrderId: string | null;
   /** BP-19 T4: its shipping (service, fee, the tier that made it free), all null for none. */
   shipping: { service: ShippingService | null; minor: number | null; benefit: 2 | 3 | null };
-  /** BP-19: the order it travels with. */
-  withOrder: { id: string; reference: string } | null;
+  /** BP-19: the order it travels with, and once that order has shipped its carrier and tracking number (SHIP WITH ITS ORDER). */
+  withOrder: { id: string; reference: string; shipment: { carrierId: string; trackingNumber: string } | null } | null;
+  /** BP-19 T5: the welcome gift travelling with it (not cancelled): its order, model and step, and whether its size is to be chosen. */
+  gift: { id: string; reference: string; model: string; status: OrderStatus; sizeToChoose: boolean } | null;
+  /** BP-19 T5, on a GIFT order: its tier, and while its size is to be chosen, its model's sizes with the pieces available. */
+  giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[] } | null;
+  /** BP-19 T5: the client's credit usable now, and the credit taken off this order (released or not). */
+  credit: {
+    available: { grantId: string; tier: 2 | 3; balanceMinor: number; currency: string; expiresAt: Iso }[];
+    applied: { id: string; grantId: string; tier: 2 | 3; amountMinor: number; appliedAt: Iso; releasedAt: Iso | null; releasedReason: CreditReleaseReason | null }[];
+  };
   /** Its return (RETURNED): where the piece went, the note, whether ORBES took its buyer's ownership back. */
   return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string; at: Iso; ownershipReclaimed: boolean } | null;
   /** Its invoice and credit note, in order of issue. */

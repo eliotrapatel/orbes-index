@@ -174,7 +174,7 @@ ORBES may offer a model in a limited number of pieces in a release, announced on
 
 **The private salon.** ORBES may reserve models for the owners of a piece (THE PRIVATE SALON). Each model is shown, with an indicative price, to the signed-in accounts whose tier reaches the one ORBES sets for it (TITANE, PLATINE or PALLADIUM); below that tier, it is not shown. From the page of a model, an account may request it, with an optional note of at most 500 characters. A request obliges neither the account nor ORBES and creates no contract: ORBES Client Services contacts the account and concludes any sale with it, outside the service. Nothing is paid on the service, and it sends no email. An account holds one open request per model; once ORBES Client Services has closed it, accepted or declined, with a note of what was done, the account may request the model again. A request accepted becomes an order (article 14). Neither your note nor that of ORBES Client Services is written to the service's audit log.
 
-*Code: R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84, R85, R86, R87, R88, R89, R119, R120, R137, R140, R141, N7.*
+*Code: R58, R59, R60, R61, R62, R63, R64, R65, R66, R67, R68, R69, R70, R71, R72, R73, R74, R75, R84, R85, R86, R87, R88, R89, R119, R120, R137, R140, R141, R147, R148, N7.*
 
 ## Article 13 — LIVE RELEASES
 

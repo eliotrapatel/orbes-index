@@ -17,6 +17,9 @@
  *   PATCH  /api/admin/orders/:id/terms          OPERATOR  a draw's or a salon's size, price and currency; any engraving
  *   PUT    /api/admin/orders/:id/buyer          OPERATOR  the buyer's name and address (decision 31)
  *   POST   /api/admin/orders/:id/piece          OPERATOR  the piece that fulfils it, picked from the stock
+ *   POST   /api/admin/orders/:id/credit         OPERATOR  APPLY CREDIT (plan NEXT-NINE, BP-19 T5): a tier's credit taken off
+ *                                                         a RESERVED order's invoice, within its balance and the price
+ *   DELETE /api/admin/orders/:id/credit         OPERATOR  REMOVE CREDIT: what was taken off it, given back
  *   POST   /api/admin/orders/:id/return         OPERATOR  RETURNED (choice 20): back to stock at a location, with a
  *                                                         note; the claim code of the piece's new card when ORBES took
  *                                                         its buyer's ownership back (shown once, no-store)
@@ -38,6 +41,7 @@ import {
   orderPieceBody,
   orderReturnBody,
   orderTermsBody,
+  orderCreditBody,
   orderTransitionBody,
   parse,
   shippingRatesBody,
@@ -139,6 +143,19 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const { id } = parse(orderParams, request.params);
     const { productId } = parse(orderPieceBody, request.body);
     await atelier.linkFromStock(id, productId, adminActor(request));
+    return detail(request, id);
+  });
+
+  app.post('/api/admin/orders/:id/credit', async (request) => {
+    const { id } = parse(orderParams, request.params);
+    const { amountMinor } = parse(orderCreditBody, request.body);
+    await orders.applyCredit(id, amountMinor, adminActor(request));
+    return detail(request, id);
+  });
+
+  app.delete('/api/admin/orders/:id/credit', async (request) => {
+    const { id } = parse(orderParams, request.params);
+    await orders.removeCredit(id, adminActor(request));
     return detail(request, id);
   });
 

@@ -1283,6 +1283,11 @@ export const orderLocationBody = body({ locationId: uuid });
  * neither), any order's engraving text (`null` or '' clears it), and its shipping while RESERVED (plan NEXT-NINE, BP-19
  * T4: the service with its fee, both or neither; `null` for both: no shipping). At least one.
  */
+/** APPLY CREDIT (plan NEXT-NINE, BP-19 T5): the amount taken off the order's invoice, in its currency's minor units. */
+export const orderCreditBody = body({
+  amountMinor: orderAmount.refine((n) => n >= 1, 'A credit is an amount above 0'),
+});
+
 export const orderTermsBody = body({
   sizeLabel: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.size).nullable().optional()),
   priceMinor: orderAmount.nullable().optional(),

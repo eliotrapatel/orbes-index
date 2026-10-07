@@ -17,7 +17,9 @@
  *   6. the stock and the orders (plan LIVE RELEASE+): the first boot's
  *      locations and carriers, the pieces and sizes on sale linked to their
  *      SKUs, the orders of the sales committed without them
- *      (OrderService.prepare, idempotent).
+ *      (OrderService.prepare, idempotent); then the tiers' grants of the
+ *      accounts at PLATINE or PALLADIUM (plan NEXT-NINE, BP-19 T5:
+ *      TierGrantService.prepare, idempotent).
  */
 import { closeDb, createDb, type Db } from './db/connection.js';
 import { parseDatabaseUrl } from './db/url.js';
@@ -36,6 +38,7 @@ import { CertificateService } from './services/certificates.js';
 import { CircleService } from './services/circle.js';
 import { ClubService } from './services/club.js';
 import { ClubProgramService } from './services/club-program.js';
+import { TierGrantService } from './services/tier-grants.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -141,6 +144,8 @@ export interface AppServices {
   messages: MessageService;
   /** THE PROGRAM (plan NEXT-NINE, BP-19 T2): the figures of the tiers' benefits, and the optional shipping rates. */
   clubProgram: ClubProgramService;
+  /** The tiers' grants (plan NEXT-NINE, BP-19 T5): the welcome gift and the credit, once per tier and per account, ever. */
+  tierGrants: TierGrantService;
 }
 
 export interface AppContext {
@@ -253,6 +258,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const shopify = new ShopifyExportService({ db, audit, publicOrigin: config.publicOrigin, clock });
     const messages = new MessageService({ db, audit, lookbook, clock });
     const clubProgram = new ClubProgramService({ db, audit, clock });
+    const tierGrants = new TierGrantService({ db, audit, clock, log });
 
     const services: AppServices = {
       issuance,
@@ -293,6 +299,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       shopify,
       messages,
       clubProgram,
+      tierGrants,
       ...overrides.services,
     };
 
@@ -332,6 +339,9 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     if (prepared.locations.length + prepared.carriers.length + prepared.linked.products + prepared.linked.sizes + prepared.orders > 0) {
       log.info(prepared, 'stock and orders ready');
     }
+    // The tiers' grants of the accounts already at PLATINE or PALLADIUM (plan NEXT-NINE, BP-19 T5).
+    const grants = await services.tierGrants.prepare();
+    if (grants > 0) log.info({ grants }, 'tier grants ready');
     return ctx;
   } catch (e) {
     if (ownsDb) await closeDb(db).catch(() => {});

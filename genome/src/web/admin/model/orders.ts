@@ -12,7 +12,7 @@
  *  - An order's documents (M7): its invoice and credit note, named.
  *  - The packing slip: the piece, its size, its add-ons, the engraving and the surprise; never a price.
  */
-import { formatCount } from '../format.js';
+import { formatCount, formatDate, humanize } from '../format.js';
 import { can } from './permissions.js';
 import { formatMoney, moneyField, parseMoney } from './live.js';
 import {
@@ -153,6 +153,82 @@ export function shippingLine(o: Pick<OrderView, 'shipping' | 'withOrder' | 'curr
   return `${service} · ${o.currency ? formatMoney(s.minor, o.currency) : moneyField(s.minor)}`;
 }
 
+// ── The welcome gift and the credit (plan NEXT-NINE, BP-19 T5) ─────────────
+
+/** A GIFT order's header line: `Welcome gift · PLATINE · travels with OR-…`; null for any other order. */
+export function giftHeaderLine(o: Pick<OrderView, 'channel' | 'giftOf' | 'withOrder'>): string | null {
+  if (o.channel !== 'GIFT' || !o.giftOf) return null;
+  return `Welcome gift · ${TIER_NAMES[o.giftOf.tier]}${o.withOrder ? ` · travels with ${o.withOrder.reference}` : ''}`;
+}
+
+/** The welcome gift travelling with an order: `OR-… · MODEL · RESERVED`, or `… · SIZE TO CHOOSE`; null without one. */
+export function giftLine(o: Pick<OrderView, 'gift'>): string | null {
+  const g = o.gift;
+  if (!g) return null;
+  return `${g.reference} · ${g.model} · ${g.sizeToChoose && g.status === 'RESERVED' ? 'SIZE TO CHOOSE' : humanize(g.status)}`;
+}
+
+/** A GIFT order's sizes to choose from, with the pieces available: `52 · 2 available`, `One size · none available`. */
+export function giftSizeOptions(o: Pick<OrderView, 'giftOf'>): { value: string; label: string }[] {
+  return (o.giftOf?.sizes ?? []).map((s) => ({
+    value: s.label ?? ONE_SIZE_VALUE,
+    label: `${s.label ?? 'One size'} · ${s.available > 0 ? `${formatCount(s.available)} available` : 'none available'}`,
+  }));
+}
+
+/** The value of the one-size choice in the gift's sizes (the server reads ONE SIZE as the model in one size). */
+export const ONE_SIZE_VALUE = 'ONE SIZE';
+
+/** The credit taken off the order now (its open uses), in its currency's minor units. */
+export function creditTaken(o: Pick<OrderView, 'credit'>): number {
+  return (o.credit?.applied ?? []).filter((u) => u.releasedAt === null).reduce((n, u) => n + u.amountMinor, 0);
+}
+
+/** The client's credit usable now: `PLATINE € 50 until 06 OCT 2027`, several joined by ` · `, or None. */
+export function creditAvailableLine(o: Pick<OrderView, 'credit'>): string {
+  const a = o.credit?.available ?? [];
+  if (a.length === 0) return 'None';
+  return a.map((c) => `${TIER_NAMES[c.tier]} ${formatMoney(c.balanceMinor, c.currency)} until ${formatDate(c.expiresAt)}`).join(' · ');
+}
+
+/** The credit taken off this order, per tier: `− € 50 (PLATINE)`, or None. */
+export function creditAppliedLine(o: Pick<OrderView, 'credit' | 'currency'>): string {
+  const open = (o.credit?.applied ?? []).filter((u) => u.releasedAt === null);
+  if (open.length === 0 || !o.currency) return 'None';
+  const byTier = new Map<2 | 3, number>();
+  for (const u of open) byTier.set(u.tier, (byTier.get(u.tier) ?? 0) + u.amountMinor);
+  return [...byTier.entries()]
+    .sort((x, y) => y[0] - x[0])
+    .map(([tier, minor]) => `\u2212 ${formatMoney(minor, o.currency!)} (${TIER_NAMES[tier]})`)
+    .join(' · ');
+}
+
+/** The credit usable on this order: the balances in its currency, and what its price leaves (null before it is priced). */
+export function creditRoom(o: Pick<OrderView, 'credit' | 'currency' | 'priceMinor'>): number {
+  if (o.priceMinor === null || o.currency === null) return 0;
+  const balance = (o.credit?.available ?? []).filter((c) => c.currency === o.currency).reduce((n, c) => n + c.balanceMinor, 0);
+  return Math.max(0, Math.min(balance, o.priceMinor - creditTaken(o)));
+}
+
+/** APPLY CREDIT and REMOVE CREDIT: an OPERATOR's, on a RESERVED order other than a welcome gift. */
+export function creditActions(o: OrderView, role: AdminRole | null | undefined): { apply: boolean; remove: boolean } {
+  const ok = can(role, 'manageOrders') && o.status === 'RESERVED' && o.channel !== 'GIFT';
+  return { apply: ok && creditRoom(o) > 0, remove: ok && creditTaken(o) > 0 };
+}
+
+/** APPLY CREDIT's amount, prefilled: the most the order takes (its balance, within the price). */
+export function creditValue(o: OrderView): string {
+  return moneyField(creditRoom(o));
+}
+
+/** What the server would refuse in APPLY CREDIT. */
+export function creditProblem(o: OrderView, v: Record<string, string>): string | null {
+  const minor = parseMoney(v.amount);
+  if (minor === null || minor < 1) return 'The credit is an amount in units above 0: 50, or 50.50.';
+  if (minor > creditRoom(o)) return `At most ${formatMoney(creditRoom(o), o.currency ?? 'EUR')}: the credit left in ${o.currency ?? 'its currency'}, within the piece’s price.`;
+  return null;
+}
+
 /** An order's add-ons with their prices: `ENGRAVING € 150 · GIFT BOX € 0`, or None. */
 export function addonsLine(o: Pick<OrderView, 'addons' | 'currency'>): string {
   if (o.addons.length === 0) return 'None';
@@ -178,6 +254,10 @@ export const EVENT_LABELS: Readonly<Record<string, string>> = Object.freeze({
   'order.buyer': 'Buyer entered',
   'order.link': 'Piece linked',
   'order.shipping': 'Shipping',
+  'order.gift': 'Welcome gift added',
+  'order.credit.apply': 'Credit applied',
+  'order.credit.remove': 'Credit removed',
+  'order.credit.release': 'Credit given back',
 });
 
 /** Who made a change of an order: a console user by email, the collector, or ORBES itself. */
@@ -226,14 +306,20 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
   const holding = HOLDING.includes(o.status);
   const sale = o.channel !== 'LIVE';
   return {
-    pay: ok && o.status === 'RESERVED' && o.priceMinor !== null,
+    // A welcome gift is paid with its order; an order waits for its gift's size (BP-19 T5).
+    pay: ok && o.status === 'RESERVED' && o.priceMinor !== null && o.channel !== 'GIFT' && !(o.gift?.sizeToChoose ?? false),
     ship: ok && o.status === 'PAID' && o.reservation === 'STOCK' && o.productId !== null,
     deliver: ok && o.status === 'SHIPPED',
     cancel: ok && holding,
     return: ok && (o.status === 'SHIPPED' || o.status === 'DELIVERED') && o.productId !== null,
     archive: can(role, 'archiveReturn') && (o.status === 'SHIPPED' || o.status === 'DELIVERED') && o.productId !== null,
     location: ok && holding && o.productId === null,
-    terms: { size: ok && holding && sale && o.productId === null, price: ok && o.status === 'RESERVED' && sale, engraving: ok && holding, shipping: ok && o.status === 'RESERVED' && !o.withOrder },
+    terms: {
+      size: ok && holding && sale && o.productId === null,
+      price: ok && o.status === 'RESERVED' && sale && o.channel !== 'GIFT',
+      engraving: ok && holding,
+      shipping: ok && o.status === 'RESERVED' && !o.withOrder,
+    },
     buyer: ok,
     linkPiece: ok && holding && o.productId === null && (o.reservation === 'STOCK' || (o.reservation === 'BENCH' && o.bench !== null && (o.bench.status === 'TO_MAKE' || o.bench.status === 'IN_PROGRESS'))),
   };
@@ -242,7 +328,12 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
 /** Why the order cannot ship yet, said under its step (null when it can, or once past it). */
 export function shipWaitsFor(o: OrderView): string | null {
   if (o.status !== 'PAID' && o.status !== 'RESERVED') return null;
+  if (o.channel === 'GIFT') {
+    if (o.skuId === null) return 'Its size is to be chosen.';
+    if (o.status === 'RESERVED') return o.withOrder ? `It is paid with ${o.withOrder.reference}.` : 'It is paid with its order.';
+  }
   if (o.skuId === null) return 'Its size is to be entered.';
+  if (o.status === 'RESERVED' && o.priceMinor !== null && o.gift?.sizeToChoose) return 'Choose the welcome gift’s size first.';
   if (o.reservation === 'BENCH') return o.status === 'RESERVED' && o.priceMinor === null ? 'Its piece is being made at the atelier; its price is to be entered.' : 'Its piece is being made at the atelier.';
   if (o.status === 'RESERVED') return o.priceMinor === null ? 'Its price is to be entered: it is paid once priced, and its invoice issued then.' : 'It ships once paid.';
   if (o.reservation === 'STOCK' && o.productId === null) return 'Link its piece from the stock.';
@@ -307,6 +398,7 @@ export function termsValues(o: OrderView): Record<string, string> {
     engraving: o.engravingText ?? '',
     shippingService: o.shipping?.service ?? 'STANDARD',
     shippingFee: o.shipping?.service && o.shipping.minor !== null ? moneyField(o.shipping.minor) : '',
+    giftSize: o.channel === 'GIFT' && o.skuId !== null ? (o.sizeLabel ?? ONE_SIZE_VALUE) : '',
   };
 }
 
@@ -336,7 +428,11 @@ export function termsProblem(o: OrderView, v: Record<string, string>, a: OrderAc
 /** The terms that change: the size when one is said (or ONE SIZE), the price with its currency, the engraving. */
 export function termsChange(o: OrderView, v: Record<string, string>, a: OrderActions['terms']): OrderTermsChange {
   const change: OrderTermsChange = {};
-  if (a.size) {
+  if (a.size && o.channel === 'GIFT') {
+    // A welcome gift's size, chosen among its model's (BP-19 T5).
+    const size = v.giftSize ?? '';
+    if (size && size !== (o.skuId === null ? '' : (o.sizeLabel ?? ONE_SIZE_VALUE))) change.sizeLabel = size === ONE_SIZE_VALUE ? null : size;
+  } else if (a.size) {
     const size = (v.size ?? '').trim();
     if (v.oneSize === 'true') {
       if (o.skuId === null || o.sizeLabel !== null) change.sizeLabel = null;

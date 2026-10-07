@@ -41,7 +41,6 @@ import {
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
-import { liveMoney } from './live-console.js';
 import { mediaUrl } from './media.js';
 import { stockBalances } from './stock.js';
 
@@ -233,6 +232,17 @@ export function giftName(name: string, variantLabel: string | null): string {
 // ── The lines ──────────────────────────────────────────────────────────────
 
 const CHANNEL_WORDS: Readonly<Record<CreditChannel, string>> = Object.freeze({ DRAW: 'a draw', LIVE: 'a LIVE RELEASE', SALON: 'THE PRIVATE SALON' });
+const SIGNS: Readonly<Record<string, string>> = Object.freeze({ EUR: '€', GBP: '£', USD: '$', CHF: 'CHF' });
+
+/**
+ * An amount as the house writes it in a sentence (as live-console.ts liveMoney and verify's formatMoney): `€ 50`,
+ * `€ 4 800.50`, no-break spaces after the sign and between the thousands. Kept here so THE PROGRAM reads no service of the releases.
+ */
+export function programMoney(minor: number, currency: string): string {
+  const units = String(Math.floor(minor / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
+  const cents = minor % 100;
+  return `${SIGNS[currency] ?? currency}\u00a0${units}${cents ? `.${String(cents).padStart(2, '0')}` : ''}`;
+}
 
 /** `a, b or c`. */
 function orList(items: readonly string[]): string {
@@ -267,7 +277,7 @@ export function programLines(p: ClubProgram, tier: 1 | 2 | 3, gifts: Partial<Rec
     const credit = creditOf(p, t);
     if (credit > 0 && p.creditChannels.length > 0) {
       const months = p.creditValidityMonths;
-      lines.push(`A credit of ${liveMoney(credit, p.creditCurrency)}, valid ${months} ${months === 1 ? 'month' : 'months'}, on a piece from ${orList(p.creditChannels.map((c) => CHANNEL_WORDS[c]))}.`);
+      lines.push(`A credit of ${programMoney(credit, p.creditCurrency)}, valid ${months} ${months === 1 ? 'month' : 'months'}, on a piece from ${orList(p.creditChannels.map((c) => CHANNEL_WORDS[c]))}.`);
     }
   }
   if (p.experienceMembersEveningMinTier === tier) lines.push('The members’ evening, once a year, by invitation in THE CIRCLE.');
