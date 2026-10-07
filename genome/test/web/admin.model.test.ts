@@ -334,6 +334,7 @@ describe('admin enums mirror the server', () => {
       'GUARANTEE_SCOPES',
       'GUARANTEE_STATUSES',
       'SIZE_KINDS',
+      'SIZE_TYPES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }

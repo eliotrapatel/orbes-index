@@ -314,6 +314,14 @@ export type GuaranteeClosedReason = (typeof GUARANTEE_CLOSED_REASONS)[number];
 export const SIZE_KINDS = ['RING', 'BRACELET', 'WRIST', 'NECKLACE'] as const;
 export type SizeKind = (typeof SIZE_KINDS)[number];
 
+/**
+ * A model's size type (models.size_type, migration 0033, plan NEXT LOT §3.3): what its sizes are ticked from in the
+ * Catalogue (services/sizes.ts standardSizes): ring sizes, bracelet sizes, necklace lengths, or a single SKU (WATCH,
+ * ONE_SIZE). NULL: 'To give'.
+ */
+export const SIZE_TYPES = ['RING', 'BRACELET', 'NECKLACE', 'WATCH', 'ONE_SIZE'] as const;
+export type SizeType = (typeof SIZE_TYPES)[number];
+
 /** Why a credit taken off an order was given back (credit_uses.released_reason, migration 0027): removed, the order cancelled or returned. */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
 export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
@@ -427,6 +435,11 @@ export interface ModelsTable {
   variant_swatch: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0030 (AC-01): which saved size of a collector preselects its size; NULL: none, or on a variant its main model's. */
   size_kind: ColumnType<SizeKind | null, SizeKind | null | undefined, SizeKind | null>;
+  /**
+   * Migration 0033 (plan NEXT LOT §3.3): its size type; NULL: 'To give' (its sizes work as before until it has one).
+   * Once given, `size_kind` is derived from it (`models_size_type_kind`: WATCH the wrist, ONE_SIZE none).
+   */
+  size_type: ColumnType<SizeType | null, SizeType | null | undefined, SizeType | null>;
   created_at: TimestampDefault;
 }
 
@@ -1134,6 +1147,8 @@ export interface StockLocationsTable {
 /**
  * A model in one size (migration 0022): one per model and size label (NULL: one size), its code and its future Shopify
  * ids. No stock column: the stock is the ledger's (stock_movements). id, model_id, size_label and created_at never change.
+ * Since migration 0033 (plan NEXT LOT §3.3) a model's sizes are declared in the Catalogue; removed when unused,
+ * otherwise set aside (services/sizes.ts SKU_USES).
  */
 export interface SkusTable {
   id: Generated<string>;
@@ -1146,6 +1161,10 @@ export interface SkusTable {
   /** Migration 0030 (AC-01): the measures this size fits, in its model's size kind's whole millimetres, both or neither (min ≤ max, 1..1 000); NULL: its label is read. */
   fit_min_mm: ColumnType<number | null, number | null | undefined, number | null>;
   fit_max_mm: ColumnType<number | null, number | null | undefined, number | null>;
+  /** Migration 0033: when the size was set aside (no longer offered for new releases, supplier orders or the salon); NULL: offered. */
+  set_aside_at: TimestampNullable;
+  /** Migration 0033: admin_users.id of who set it aside; NULL for a script, never without set_aside_at (`skus_set_aside`). */
+  set_aside_by: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /**

@@ -96,7 +96,9 @@ describe('the runbook of the next nine (docs/launch/DEPLOY-NEXT-NINE.md)', () =>
       '0031_model_pairs',
       '0032_growth_indexes',
     ]);
-    expect(NAMES.at(-1)).toBe(DEPLOY_G.at(-1));
+    // A later number has its own plan and runbook: 0033 on are the next lot's (plan of 2026-10-07), deployments H1 and H2 after G.
+    expect(NAMES.filter((n) => n > DEPLOY_G.at(-1)!).every((n) => numberOf(n) >= 33)).toBe(true);
+    expect(NAMES.filter((n) => numberOf(n) > 32)[0]).toBe('0033_model_sizes');
     expect(BEFORE_G.slice(-2)).toEqual(['0024_model_variants', TEST_ENTRANTS]);
     // TEST ENTRANTS sorts before the next nine, as the migrator (Kysely) and psql order them.
     expect([...AFTER_G].sort()).toEqual(AFTER_G);

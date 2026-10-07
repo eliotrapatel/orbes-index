@@ -150,6 +150,10 @@ export type GuaranteeStatus = (typeof GUARANTEE_STATUSES)[number];
 export const SIZE_KINDS = ['RING', 'BRACELET', 'WRIST', 'NECKLACE'] as const;
 export type SizeKind = (typeof SIZE_KINDS)[number];
 
+/** A model's size type (models.size_type, plan NEXT LOT §3.3): ring, bracelet, necklace, watch or one size; null: to give. */
+export const SIZE_TYPES = ['RING', 'BRACELET', 'NECKLACE', 'WATCH', 'ONE_SIZE'] as const;
+export type SizeType = (typeof SIZE_TYPES)[number];
+
 /** What an invitation of the circle is (circle_posts.experience, BP-19 T7). */
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];

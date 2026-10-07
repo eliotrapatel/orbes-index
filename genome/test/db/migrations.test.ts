@@ -259,6 +259,9 @@ describe('migrations', () => {
     expect(has(/INDEX accounts_created_at_idx ON public\.accounts USING btree \(created_at\)$/)).toBe(true);
     expect(has(/INDEX ownership_account_started_idx ON public\.ownership USING btree \(account_id, started_at\)$/)).toBe(true);
     expect(has(/INDEX orders_paid_idx ON public\.orders USING btree \(account_id, paid_at\) WHERE \(paid_at IS NOT NULL\)$/)).toBe(true);
+    // 0033: a model's offered sizes; who set a size aside, its foreign key at the head of an index.
+    expect(has(/INDEX skus_model_offered_idx ON public\.skus USING btree \(model_id\) WHERE \(set_aside_at IS NULL\)$/)).toBe(true);
+    expect(has(/INDEX skus_set_aside_by_idx ON public\.skus USING btree \(set_aside_by\)$/)).toBe(true);
   });
 
   /**
@@ -2472,7 +2475,8 @@ describe('migrations', () => {
     await use();
     await expect(run(`DELETE FROM credit_uses WHERE id = '${open}'`)).rejects.toSatisfy(isGuardViolation);
     // The down step refuses while a GIFT order or a credit use exists: neither can be removed, so this database stays at
-    // 0027 (0032, 0031, 0030, 0029 and 0028, which hold nothing here, go down first).
+    // 0027 (0033, 0032, 0031, 0030, 0029 and 0028, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0033_model_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0032_growth_indexes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0031_model_pairs']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
@@ -2485,7 +2489,7 @@ describe('migrations', () => {
     await run(`DELETE FROM credit_uses`);
     await run(`ALTER TABLE credit_uses ENABLE TRIGGER credit_uses_no_delete`);
     await run(`DELETE FROM orders WHERE channel = 'GIFT'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes']);
   });
 
   /** What names an object of 0028 in a snapshot: its table and its objects. */
@@ -2581,7 +2585,8 @@ describe('migrations', () => {
     await run(`UPDATE care_requests SET status = 'CANCELLED', cancelled_at = now(), cancelled_by = 'account' WHERE id = '${other}'`);
     await insert({ year: '2027' });
     // The down step refuses while a request or a YEARLY_CARE record exists: neither can be removed, so this database stays at
-    // 0028 (0032, 0031, 0030 and 0029, which hold nothing here, go down first).
+    // 0028 (0033, 0032, 0031, 0030 and 0029, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0033_model_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0032_growth_indexes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0031_model_pairs']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
@@ -2593,7 +2598,7 @@ describe('migrations', () => {
     await run(`DELETE FROM care_requests`);
     await run(`ALTER TABLE care_requests ENABLE TRIGGER care_requests_no_delete`);
     await run(`DELETE FROM service_records WHERE type = 'YEARLY_CARE'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes']);
   });
 
   /** What names an object of 0029 in a snapshot: its two tables, the entries' new columns and constraints, and its indexes. */
@@ -2743,7 +2748,8 @@ describe('migrations', () => {
     const request = (await sql<{ id: string }>`INSERT INTO shop_requests (account_id, model_id, status, handled_at, outcome) VALUES (${account}, ${model}, 'CLOSED', now(), 'ACCEPTED') RETURNING id`.execute(t.db)).rows[0].id;
     await check(order({ channel: `'SALON'`, drop_entry_id: 'NULL', drop_id: 'NULL', shop_request_id: `'${request}'`, piece: '2' }), 'a second piece of a salon order', 'orders_source');
     // The down step refuses while a DRAW order of a second piece exists: it cannot be removed, so this database stays at 0029
-    // (0032, 0031 and 0030, which hold nothing here, go down first).
+    // (0033, 0032, 0031 and 0030, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0033_model_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0032_growth_indexes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0031_model_pairs']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
@@ -2754,7 +2760,7 @@ describe('migrations', () => {
     await run(`DELETE FROM drop_entries WHERE drop_id IN ('${drop}', '${other_drop}')`);
     await run(`DELETE FROM house_guarantees`);
     await run(`DELETE FROM guarantee_settings`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes']);
   });
 
   /** What names an object of 0030 in a snapshot: its table, the models' size kind, the SKUs' fit and the requests' size. */
@@ -2789,7 +2795,7 @@ describe('migrations', () => {
       expect(added.some((o) => c.test(o)), String(c)).toBe(true);
     }
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes']);
     expect(await snapshot()).toEqual(latest);
     // The trigger of the same name guards the size in 0030 and not in 0029: its function's arguments say so.
     const args = async () =>
@@ -2797,11 +2803,12 @@ describe('migrations', () => {
         await sql<{ args: string }>`SELECT encode(tgargs, 'escape') AS args FROM pg_trigger WHERE tgname = 'shop_requests_immutable_identity'`.execute(t.db)
       ).rows[0]!.args.split('\\000').filter(Boolean);
     expect(await args()).toEqual(['id', 'account_id', 'model_id', 'created_at', 'note', 'size_label']);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0033_model_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0032_growth_indexes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0031_model_pairs']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
     expect(await args()).toEqual(['id', 'account_id', 'model_id', 'created_at', 'note']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes']);
   });
 
   it('0030: a size of each kind in its range and step, once per account and kind, cleared by deleting it; a model\'s size kind one of the four; a size\'s fit both or neither, from 1 to 1 000, never reversed; a request\'s size of 1 to 100 characters, trimmed, never changed', async () => {
@@ -2883,7 +2890,7 @@ describe('migrations', () => {
       expect(added.some((o) => c.test(o)), String(c)).toBe(true);
     }
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0031_model_pairs', '0032_growth_indexes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0031_model_pairs', '0032_growth_indexes', '0033_model_sizes']);
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -2927,8 +2934,92 @@ describe('migrations', () => {
       'index CREATE INDEX ownership_account_started_idx ON public.ownership USING btree (account_id, started_at)',
     ]);
     expect(before.filter((o) => !withIt.includes(o))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0032_growth_indexes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0032_growth_indexes', '0033_model_sizes']);
     expect(await snapshot()).toEqual(latest);
+  });
+
+  /** What names an object of 0033 in a snapshot: the models' size type, its two CHECKs, the SKUs' set-aside columns and indexes. */
+  const of0033 = (o: string) => /\b(models_size_type\w*|skus_set_aside\w*|skus_model_offered_idx)\b/.test(o) || /^table (models size_type|skus set_aside_(at|by)) /.test(o);
+
+  it('0033 adds a model\'s size type and a size set aside, and nothing else; down drops them and restores 0032 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0033_model_sizes');
+    const added = withIt.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !of0033(o))).toEqual([]);
+    expect(before.filter((o) => !withIt.includes(o))).toEqual([]);
+    expect(before.filter(of0033)).toEqual([]);
+    expect(added.filter((o) => o.startsWith('table '))).toEqual([
+      'table models size_type text YES ',
+      'table skus set_aside_at timestamp with time zone YES ',
+      'table skus set_aside_by uuid YES ',
+    ]);
+    for (const c of [
+      /^constraint models models_size_type_check CHECK /,
+      /^constraint models models_size_type_kind CHECK /,
+      /^constraint skus skus_set_aside CHECK \(\(\(set_aside_by IS NULL\) OR \(set_aside_at IS NOT NULL\)\)\)$/,
+      /^constraint skus skus_set_aside_by_fkey FOREIGN KEY \(set_aside_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^index CREATE INDEX skus_set_aside_by_idx ON public\.skus USING btree \(set_aside_by\)$/,
+      /^index CREATE INDEX skus_model_offered_idx ON public\.skus USING btree \(model_id\) WHERE \(set_aside_at IS NULL\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect(added).toHaveLength(9);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
+    // Existing data: a model and its SKUs written before 0033 are untouched by it: no type ('To give'), every size offered.
+    await sql`INSERT INTO categories (id, code, name) VALUES (25, 'Y', 'Sizes before') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix, size_kind) VALUES (25, 'BEFORE', 'SIGNET RING', 'SZB-RG', 'RING') RETURNING id`.execute(t.db)).rows[0].id;
+    await sql`INSERT INTO skus (model_id, size_label, code) VALUES (${model}, 'SIZE 52', 'SZB-RG-SIZE-52'), (${model}, '54', 'SZB-RG-54'), (${model}, NULL, 'SZB-RG')`.execute(t.db);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0033_model_sizes']);
+    expect(await snapshot()).toEqual(latest);
+    expect((await sql<{ size_type: string | null; size_kind: string | null }>`SELECT size_type, size_kind FROM models WHERE id = ${model}`.execute(t.db)).rows).toEqual([{ size_type: null, size_kind: 'RING' }]);
+    expect(
+      (await sql<{ code: string; set_aside_at: Date | null; set_aside_by: string | null }>`SELECT code, set_aside_at, set_aside_by FROM skus WHERE model_id = ${model} ORDER BY code`.execute(t.db)).rows,
+    ).toEqual([
+      { code: 'SZB-RG', set_aside_at: null, set_aside_by: null },
+      { code: 'SZB-RG-54', set_aside_at: null, set_aside_by: null },
+      { code: 'SZB-RG-SIZE-52', set_aside_at: null, set_aside_by: null },
+    ]);
+    // Cleared by hand for the roll-backs that follow.
+    await sql`DELETE FROM skus WHERE model_id = ${model}`.execute(t.db);
+    await sql`DELETE FROM models WHERE id = ${model}`.execute(t.db);
+  });
+
+  it('0033: a size type one of the five, the saved size it preselects with derived from it (WATCH the wrist, ONE_SIZE none); a size set aside by an admin only with its time, its admin kept (RESTRICT)', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (26, 'Z', 'Size type checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (26, 'TYPED', 'RING', 'SZT-RG') RETURNING id`.execute(t.db)).rows[0].id;
+    const type = (sizeType: string, sizeKind: string) => run(`UPDATE models SET size_type = ${sizeType}, size_kind = ${sizeKind} WHERE id = '${model}'`);
+    // One of the five; WRIST is a saved size's kind, never a size type.
+    await check(type(`'WRIST'`, `'WRIST'`), 'WRIST as a size type', 'models_size_type_check');
+    await check(type(`'ANKLE'`, 'NULL'), 'an unknown size type', 'models_size_type_check');
+    // The kind follows the type: RING, BRACELET and NECKLACE their own, WATCH the wrist, ONE_SIZE none.
+    await check(type(`'RING'`, `'BRACELET'`), 'RING with the kind BRACELET', 'models_size_type_kind');
+    await check(type(`'RING'`, 'NULL'), 'RING without its kind', 'models_size_type_kind');
+    await check(type(`'WATCH'`, 'NULL'), 'WATCH without WRIST', 'models_size_type_kind');
+    await check(type(`'WATCH'`, `'RING'`), 'WATCH with RING', 'models_size_type_kind');
+    await check(type(`'ONE_SIZE'`, `'RING'`), 'ONE_SIZE with a kind', 'models_size_type_kind');
+    await check(type(`'NECKLACE'`, `'WRIST'`), 'NECKLACE with WRIST', 'models_size_type_kind');
+    for (const [t1, k1] of [[`'RING'`, `'RING'`], [`'BRACELET'`, `'BRACELET'`], [`'NECKLACE'`, `'NECKLACE'`], [`'WATCH'`, `'WRIST'`], [`'ONE_SIZE'`, 'NULL']] as const) await type(t1, k1);
+    // No type ('To give'): any kind, or none, as before 0033.
+    await type('NULL', `'BRACELET'`);
+    await type('NULL', 'NULL');
+    // A size set aside: by an admin only with its time; by a script with its time alone; offered again with neither.
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email, email_normalized, password_hash, role) VALUES ('sizes@orbes.test', 'sizes@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`.execute(t.db)).rows[0].id;
+    const sku = (await sql<{ id: string }>`INSERT INTO skus (model_id, size_label, code) VALUES (${model}, '58', 'SZT-RG-58') RETURNING id`.execute(t.db)).rows[0].id;
+    expect((await sql<{ set_aside_at: Date | null }>`SELECT set_aside_at FROM skus WHERE id = ${sku}`.execute(t.db)).rows).toEqual([{ set_aside_at: null }]);
+    await check(run(`UPDATE skus SET set_aside_by = '${admin}' WHERE id = '${sku}'`), 'set aside by an admin without its time', 'skus_set_aside');
+    await run(`UPDATE skus SET set_aside_at = now() WHERE id = '${sku}'`);
+    await run(`UPDATE skus SET set_aside_by = '${admin}' WHERE id = '${sku}'`);
+    await expect(run(`DELETE FROM admin_users WHERE id = '${admin}'`)).rejects.toSatisfy(isForeignKeyViolation);
+    await expect(run(`UPDATE skus SET set_aside_by = '00000000-0000-4000-8000-000000000000' WHERE id = '${sku}'`)).rejects.toSatisfy(isForeignKeyViolation);
+    await run(`UPDATE skus SET set_aside_at = NULL, set_aside_by = NULL WHERE id = '${sku}'`);
+    // Its identity stays guarded as before (skus_immutable_identity).
+    await expect(run(`UPDATE skus SET size_label = '60' WHERE id = '${sku}'`)).rejects.toSatisfy(isGuardViolation);
+    // Cleared by hand for the roll-backs that follow.
+    await run(`DELETE FROM skus WHERE model_id = '${model}'`);
+    await run(`DELETE FROM models WHERE id = '${model}'`);
+    await run(`DELETE FROM admin_users WHERE id = '${admin}'`);
   });
 
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
@@ -2999,6 +3090,8 @@ describe('migrations', () => {
       '0031_model_pairs',
       // GROWTH.
       '0032_growth_indexes',
+      // The next lot (plan of 2026-10-07), deployment H1: sizes per model and per variant.
+      '0033_model_sizes',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();
