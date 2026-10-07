@@ -581,7 +581,10 @@ export interface OwnershipCertificateDocument {
   category: string;
   collection: string | null;
   model: string;
+  /** Its model's label among its variants (NEXT LOT §3.1: « Steel »), or null for a model without one. */
+  modelVariant: string | null;
   type: string;
+  /** The piece's free-text Size field set at issuance, printed in the row labelled VARIANT. */
   variant: string | null;
   material: string;
   createdYear: number;

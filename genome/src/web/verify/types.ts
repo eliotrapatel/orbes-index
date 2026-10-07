@@ -296,6 +296,8 @@ export interface CertificatePiece {
   category: { code: string; name: string };
   collection: string | null;
   model: string;
+  /** NEXT LOT §3.1: its model's label among its variants (« Blue »: MONOLITHE in blue), or null. */
+  modelVariant?: string | null;
   type: string;
   variant: string | null;
   material: string;

@@ -594,6 +594,8 @@ export interface ProductOverview {
   categoryCode: string;
   collection: string | null;
   model: string;
+  /** The model's label among its variants (NEXT LOT §3.1: « Steel »), or null for a model without one. */
+  modelVariant: string | null;
   modelType: string;
   variant: string | null;
   material: string;
@@ -917,7 +919,8 @@ export interface AnomalyContext {
 export interface ProductDetail {
   product: ProductJson & {
     category: { index: number; code: string; name: string };
-    model: { id: string; name: string; type: string; skuPrefix: string; care: string | null; imageUrl: string | null };
+    /** `variant`: the model's label among its variants (NEXT LOT §3.1: « Steel »), or null for a model without one. */
+    model: { id: string; name: string; type: string; variant: string | null; skuPrefix: string; care: string | null; imageUrl: string | null };
     collection: string | null;
     /** The piece's own photograph (F-04), taken at issuance; null without one. */
     photoUrl: string | null;

@@ -245,6 +245,7 @@ describe('OwnershipCertificateService', () => {
         category: { code: 'J', name: 'Jewelry' },
         collection: 'ORBIT',
         model: 'MONOLITHE',
+        modelVariant: null,
         type: 'RING',
         variant: null,
         material: '925 STERLING SILVER',
@@ -283,6 +284,22 @@ describe('OwnershipCertificateService', () => {
     }
     expect(await certificates.lookup(offer.token)).toMatchObject({ status: 'VALID', piece: { discontinuedYear: null } });
     expect(Buffer.from((await certificates.renderPdf(offer.token)).body as Uint8Array).equals(Buffer.from(before.body as Uint8Array))).toBe(true);
+  });
+
+  it('names the model variant (NEXT LOT §3.1), read live from the model: its label, null without one', async () => {
+    const { p, owner } = await owned();
+    const offer = await certificates.create(owner.id, p.productId, {}, owner.actor);
+    expect(await certificates.lookup(offer.token)).toMatchObject({ status: 'VALID', piece: { model: 'MONOLITHE', modelVariant: null } });
+    await t.db.updateTable('models').set({ variant_label: 'Steel', variant_swatch: '#C9CCD1' }).where('id', '=', modelId).execute();
+    try {
+      expect(await certificates.lookup(offer.token)).toMatchObject({ status: 'VALID', piece: { model: 'MONOLITHE', modelVariant: 'Steel', variant: null } });
+      // Renamed later, the new label shows: nothing is copied onto the piece.
+      await t.db.updateTable('models').set({ variant_label: 'Brushed steel' }).where('id', '=', modelId).execute();
+      expect(await certificates.lookup(offer.token)).toMatchObject({ piece: { modelVariant: 'Brushed steel' } });
+    } finally {
+      await t.db.updateTable('models').set({ variant_label: null, variant_swatch: null }).where('id', '=', modelId).execute();
+    }
+    expect(await certificates.lookup(offer.token)).toMatchObject({ piece: { modelVariant: null } });
   });
 
   it('NO_LONGER_VALID after a transfer, for good; the new owner makes their own', async () => {

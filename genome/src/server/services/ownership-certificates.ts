@@ -172,7 +172,10 @@ export interface CertificatePiece {
   category: { code: string; name: string };
   collection: string | null;
   model: string;
+  /** Its model's label among its variants (NEXT LOT §3.1: « Steel »), read live; null for a model without one. */
+  modelVariant: string | null;
   type: string;
+  /** The piece's free-text Size field set at issuance (SIZE in the app). */
   variant: string | null;
   material: string;
   createdYear: number;
@@ -516,6 +519,7 @@ export class OwnershipCertificateService {
         category: owned.category,
         collection: owned.collection,
         model: owned.model,
+        modelVariant: owned.modelVariant,
         type: owned.type,
         variant: owned.variant,
         material: owned.material,
@@ -544,6 +548,7 @@ export class OwnershipCertificateService {
       category: piece.category.name,
       collection: piece.collection,
       model: piece.model,
+      modelVariant: piece.modelVariant,
       type: piece.type,
       variant: piece.variant,
       material: piece.material,
@@ -590,6 +595,7 @@ export class OwnershipCertificateService {
       category: owned.category.name,
       collection: owned.collection,
       model: owned.model,
+      modelVariant: owned.modelVariant,
       type: owned.type,
       variant: owned.variant,
       material: owned.material,

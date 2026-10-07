@@ -1072,6 +1072,7 @@ The **ownership certificate** (F-06): what a buyer at a distance, a resale platf
     "category": { "code": "J", "name": "Jewelry" },
     "collection": "ORBIT",
     "model": "MONOLITHE",
+    "modelVariant": "Steel",
     "type": "RING",
     "variant": null,
     "material": "925 STERLING SILVER",
@@ -1085,7 +1086,7 @@ The **ownership certificate** (F-06): what a buyer at a distance, a resale platf
 }
 ```
 
-- **`VALID`**: the piece (the fields of a result's product lines and its GENOME, and `discontinuedYear`: the UTC year its model was discontinued, P-R06, read live, or `null`; a reinstated model says it no more), the ownership (`verified`: by its claim code or by ORBES Client Services; `since`: the **day** it began, UTC), the warranty (as in §10.5), and `incidentReported: false`, no loss or theft reported. `checkedAt` is the moment of the reading.
+- **`VALID`**: the piece (the fields of a result's product lines and its GENOME; `modelVariant`, its model's label among its variants, plan NEXT LOT §3.1, read live from the model, or `null` for a model without one, while `variant` stays the piece's own Size field; and `discontinuedYear`: the UTC year its model was discontinued, P-R06, read live, or `null`; a reinstated model says it no more), the ownership (`verified`: by its claim code or by ORBES Client Services; `since`: the **day** it began, UTC), the warranty (as in §10.5), and `incidentReported: false`, no loss or theft reported. `checkedAt` is the moment of the reading.
 - **`NO_LONGER_VALID`** (`{ "status": "NO_LONGER_VALID", "checkedAt": … }`, nothing else): the link has expired; or the piece **changed hands** (the ownership period the certificate was created in has ended: a transfer, or a change by ORBES Client Services); or the piece has been **LOST, STOLEN, REVOKED, COUNTERFEIT_FLAGGED or RETIRED since the certificate was created** (read from the status history: a piece found again, or reinstated, does not bring an earlier certificate back; its owner creates a new one). RETIRED, the terminal status, ends a certificate too.
 - **`404 CERTIFICATE_NOT_FOUND`** for an unknown token, a malformed one and a link **withdrawn** (by its owner, or with the account's lock or assisted recovery, §11.7): one code and one message, so a withdrawn link says no more than one that never existed.
 - **Never** a name, an email, an account, the ownership period's or the certificate's own id, nor the word AUTHENTIC: a certificate attests what the registry records, not the object it is shown with (BRAND §4.6). A scan of the piece's ORBES CODE, and the transfer bound to it (§11.3), remain what checks the object itself.
@@ -2838,6 +2839,7 @@ Item:
   "categoryCode": "J",
   "collection": "ORBIT",
   "model": "MONOLITHE",
+  "modelVariant": "Steel",
   "modelType": "RING",
   "variant": "Size 52",
   "material": "925 STERLING SILVER",
@@ -2858,7 +2860,7 @@ Item:
 }
 ```
 
-`codeId`, `codeVersion` and `codeIssue` refer to the ACTIVE code and are `null` when there is none. Errors: `400 VALIDATION_FAILED`.
+`codeId`, `codeVersion` and `codeIssue` refer to the ACTIVE code and are `null` when there is none. `modelVariant` (plan NEXT LOT §3.1) is the model's label among its variants (`models.variant_label`, read live for the page's rows beside the view), or `null` for a model without one; `variant` stays the piece's own Size field. Errors: `400 VALIDATION_FAILED`.
 
 ### 14.2 `POST /api/admin/products` — issue a product
 
@@ -2968,7 +2970,7 @@ AUDITOR. Full product record. `:productId` is the canonical id or the uuid.
   "product": {
     "…": "every field of the issuance response's product object, plus:",
     "category": { "index": 1, "code": "J", "name": "Jewelry" },
-    "model": { "id": "73c6…", "name": "MONOLITHE", "type": "RING", "skuPrefix": "MNL-RG", "care": "Polish with a soft dry cloth.", "imageUrl": "/api/v1/media/9f2c4e8a…" },
+    "model": { "id": "73c6…", "name": "MONOLITHE", "type": "RING", "variant": "Steel", "skuPrefix": "MNL-RG", "care": "Polish with a soft dry cloth.", "imageUrl": "/api/v1/media/9f2c4e8a…" },
     "collection": "ORBIT",
     "photoUrl": null
   },
@@ -3005,6 +3007,7 @@ AUDITOR. Full product record. `:productId` is the canonical id or the uuid.
 - `codes[].verification` re-verifies each stored code live (payload fields against the row, payload hash, Ed25519 signature, key trust). It is `{ "valid": true, "keyStatus" }` or `{ "valid": false, "reason", "keyStatus" }` with `reason` one of `UNKNOWN_KEY`, `PAYLOAD_INVALID`, `PAYLOAD_MISMATCH`, `PAYLOAD_HASH_MISMATCH`, `SIGNATURE_INVALID`, `KEY_REVOKED`. A row tampered with in the database shows up here as invalid. Read views never include `data`.
 - `ownership.current` is `{ "accountId", "acquiredVia", "verified", "since", "transferPending" }` or `null`; `ownership.owners` lists every ownership period with the account's email (masked for an AUDITOR, §16.2) and display name; each account opens its sheet in the console (§16.11); `ownership.transfers` lists every transfer (a pending transfer past its expiry reads `EXPIRED`).
 - `anomalies` lists up to 100 anomalies of the product, most severe first (shape and order of §16.4); `services` the service records (§14.8).
+- `product.model.variant` (plan NEXT LOT §3.1) is the model's label among its variants (`models.variant_label`, read live), or `null` for a model without one: the product page shows it under the model's name. The piece's own Size field stays `product.variant`.
 - `product.photoUrl` is the piece's own photograph (§14.12) and `product.model.imageUrl` its model's reference photograph (§13.4), each `/api/v1/media/<sha256>` or `null`: the product page shows both, for ORBES staff; /verify shows the model's alone (F-04; plan NOCTURNE, decision 9).
 - `lifecycle.allowed` lists the statuses `transitions` accepts now; `returnTo` is where a return, recovery or reinstatement would lead; `canReinstate` is true for a REVOKED product whose previous status is known.
 

@@ -126,6 +126,36 @@ describe('admin products, codes and records', () => {
       expect((await auditor.get(`/api/admin/products/${a.product.id}`)).statusCode).toBe(200);
     });
 
+    it('names the model variant on the list rows (modelVariant) and the detail (model.variant), null without a label (NEXT LOT §3.1)', async () => {
+      const created = await operator.post('/api/admin/models', { categoryCode: 'J', collectionId, name: 'ORBITE', type: 'BRACELET', skuPrefix: 'ORB-BR', defaultMaterial: '925 STERLING SILVER' });
+      expect(created.statusCode, created.body).toBe(201);
+      const main = (safeJson(created) as any).id as string;
+      const variant = await operator.post(`/api/admin/models/${main}/variants`, { label: 'Blue', swatch: '#1F3A6B', skuPrefix: 'ORB-BL', mainLabel: 'Steel', mainSwatch: '#C9CCD1' });
+      expect(variant.statusCode, variant.body).toBe(201);
+      const blue = (safeJson(variant) as any).id as string;
+
+      const plain = await issueViaApi();
+      const steel = await issueViaApi({ modelId: main });
+      const inBlue = await issueViaApi({ modelId: blue });
+
+      const rowOf = async (productId: string) => {
+        const list = safeJson(await auditor.get(`/api/admin/products?q=${productId}`)) as any;
+        expect(list.items).toHaveLength(1);
+        return list.items[0];
+      };
+      expect(await rowOf(plain.product.productId)).toMatchObject({ model: 'MONOLITHE', modelVariant: null });
+      expect(await rowOf(steel.product.productId)).toMatchObject({ model: 'ORBITE', modelVariant: 'Steel' });
+      expect(await rowOf(inBlue.product.productId)).toMatchObject({ model: 'ORBITE', modelVariant: 'Blue' });
+      // Every row of a page carries the field, a label or null.
+      const page = safeJson(await auditor.get('/api/admin/products?pageSize=25')) as any;
+      for (const row of page.items) expect(row).toHaveProperty('modelVariant');
+
+      const detailOf = async (productId: string) => (safeJson(await auditor.get(`/api/admin/products/${productId}`)) as any).product.model;
+      expect(await detailOf(plain.product.productId)).toMatchObject({ name: 'MONOLITHE', variant: null });
+      expect(await detailOf(steel.product.productId)).toMatchObject({ name: 'ORBITE', variant: 'Steel' });
+      expect(await detailOf(inBlue.product.productId)).toMatchObject({ name: 'ORBITE', variant: 'Blue' });
+    });
+
     it('moves a product through its lifecycle; revocation and reinstatement are ADMIN-only', async () => {
       const p = await issueViaApi();
       const pid = p.product.productId;

@@ -511,6 +511,7 @@ function ownershipDoc(extra: Partial<OwnershipCertificateDocument> = {}): Owners
     category: 'Jewelry',
     collection: 'ORBIT',
     model: 'Monolithe',
+    modelVariant: null,
     type: 'Ring',
     variant: 'Size 54',
     material: '925 Sterling Silver',

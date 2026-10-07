@@ -54,7 +54,11 @@ export function escapeLike(s: string): string {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
-export function overviewJson(r: ProductOverviewRow) {
+/**
+ * One row of the products list. `modelVariant` is its model's label among its variants (NEXT LOT §3.1: « Steel »),
+ * read live from `models.variant_label` beside the view's row, or null for a model without one.
+ */
+export function overviewJson(r: ProductOverviewRow & { model_variant?: string | null }) {
   return {
     id: r.id,
     productId: r.product_id,
@@ -63,6 +67,7 @@ export function overviewJson(r: ProductOverviewRow) {
     categoryCode: r.category_code.trim(),
     collection: r.collection,
     model: r.model,
+    modelVariant: r.model_variant ?? null,
     modelType: r.model_type,
     variant: r.variant,
     material: r.material,
@@ -144,7 +149,22 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
       );
     }
     const total = await q.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
-    const rows = await q.selectAll().orderBy('created_at', 'desc').orderBy('product_id').limit(page.pageSize).offset(pageOffset(page)).execute();
+    const rows = await q
+      .selectAll()
+      // NEXT LOT §3.1: the model's variant label, read on the page's rows only (no change to the view).
+      .select((eb) =>
+        eb
+          .selectFrom('products as p')
+          .innerJoin('models as m', 'm.id', 'p.model_id')
+          .select('m.variant_label')
+          .whereRef('p.id', '=', 'product_overview.id')
+          .as('model_variant'),
+      )
+      .orderBy('created_at', 'desc')
+      .orderBy('product_id')
+      .limit(page.pageSize)
+      .offset(pageOffset(page))
+      .execute();
     return makePage(rows.map(overviewJson), Number(total.n), page);
   });
 
@@ -154,7 +174,7 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const overview = await db.selectFrom('product_overview').selectAll().where('id', '=', product.id).executeTakeFirstOrThrow();
     const model = await db
       .selectFrom('models')
-      .select(['id', 'name', 'type', 'sku_prefix', 'care_instructions', 'image_sha256'])
+      .select(['id', 'name', 'type', 'sku_prefix', 'care_instructions', 'image_sha256', 'variant_label'])
       .where('id', '=', product.model_id)
       .executeTakeFirstOrThrow();
     const genomeRows = await db.selectFrom('genomes').selectAll().where('product_id', '=', product.id).orderBy('genome_version').execute();
@@ -175,7 +195,16 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
       product: {
         ...productJson(toProductRecord(product, overview.category_code.trim())),
         category: { index: product.category_id, code: overview.category_code.trim(), name: overview.category },
-        model: { id: model.id, name: model.name, type: model.type, skuPrefix: model.sku_prefix, care: model.care_instructions, imageUrl: mediaUrl(model.image_sha256) },
+        // `variant`: the model's label among its variants (NEXT LOT §3.1), null for a model without one.
+        model: {
+          id: model.id,
+          name: model.name,
+          type: model.type,
+          variant: model.variant_label,
+          skuPrefix: model.sku_prefix,
+          care: model.care_instructions,
+          imageUrl: mediaUrl(model.image_sha256),
+        },
         collection: overview.collection,
         // The piece's own photograph (F-04, §14.12); the model's reference photograph is `model.imageUrl`.
         photoUrl: mediaUrl(product.photo_sha256),

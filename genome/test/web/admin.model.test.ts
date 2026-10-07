@@ -1144,7 +1144,7 @@ function detail(over: Partial<ProductDetail> = {}): ProductDetail {
       createdAt: '2026-09-02T10:00:00.000Z',
       updatedAt: '2026-09-02T10:00:00.000Z',
       category: { index: 1, code: 'J', name: 'Jewelry' },
-      model: { id: '22222222-2222-4222-8222-222222222222', name: 'MONOLITHE', type: 'RING', skuPrefix: 'MNL-RG', care: null, imageUrl: null },
+      model: { id: '22222222-2222-4222-8222-222222222222', name: 'MONOLITHE', type: 'RING', variant: null, skuPrefix: 'MNL-RG', care: null, imageUrl: null },
       collection: 'ORBIT',
       photoUrl: null,
     },
