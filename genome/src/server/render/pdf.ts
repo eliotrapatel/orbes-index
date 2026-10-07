@@ -20,9 +20,15 @@
  * its ink is then laid over what is under it instead of knocking it out, so
  * the claim code printed beneath the panel stays on its own plate.
  *
- * Plates and links: a page may also carry flat fills drawn first, under
- * everything else (`fills`: the ivory plate of the ownership certificate's
- * GENOME), and link annotations (`links`: a rectangle that opens a URL, the
+ * Plates, layers and links: a page may also carry flat fills drawn first,
+ * under everything else (`fills`: the ivory plate of the ownership
+ * certificate's GENOME); ordered layers drawn right after them (`layers`, the
+ * certificate card 79t, plan NEXT LOT §3.2): a filled path, a stroked path
+ * with its own width, caps and joins, and a clipped group (its items drawn
+ * inside a clip path). In `k-only` mode a layer may name its K percentage, so
+ * a slightly warm grey (#F1F1EE, #B4B4B1) prints as the K tint of the same
+ * lightness, which kSolid cannot express; without one, its colour goes
+ * through kSolid like any other. And link annotations (`links`: a rectangle that opens a URL, the
  * certificate's live address). A link is the one piece of text a PDF here
  * holds: its URL, in the annotation, never as lettering a font would draw.
  *
@@ -55,6 +61,8 @@ export interface PdfPage {
   shapes?: readonly PdfShape[];
   /** Flat fills in page millimetres, drawn first, under the placements and marks (a plate). */
   fills?: readonly PdfShape[];
+  /** Ordered layers in page millimetres, drawn right after `fills`, before the placements, marks and shapes. */
+  layers?: readonly PdfLayer[];
   /** Link annotations in page millimetres: a rectangle that opens `url` (http or https only). */
   links?: readonly PdfLink[];
 }
@@ -86,6 +94,39 @@ export interface PdfShape {
   overprint?: boolean;
   rule?: 'non-zero' | 'even-odd';
 }
+
+/** How a layer is inked: its colour ('#rrggbb'), and in `k-only` mode its K percentage when given (0..100). */
+export interface PdfLayerInk {
+  color: string;
+  /** K-only output: this K tint instead of kSolid(color) (required for a colour that is not neutral). */
+  k?: number;
+}
+
+/** A filled path (non-zero unless said). */
+export interface PdfFillLayer extends PdfLayerInk {
+  kind: 'fill';
+  d: string;
+  rule?: 'non-zero' | 'even-odd';
+}
+
+/** A stroked path with its own width (mm), caps and joins. */
+export interface PdfStrokeLayer extends PdfLayerInk {
+  kind: 'stroke';
+  d: string;
+  width: number;
+  cap: 'butt' | 'round' | 'square';
+  join: 'miter' | 'round' | 'bevel';
+}
+
+/** A clipped group: its items drawn inside the clip path (non-zero unless said), in order. */
+export interface PdfClipLayer {
+  kind: 'clip';
+  clip: string;
+  rule?: 'non-zero' | 'even-odd';
+  items: readonly PdfLayer[];
+}
+
+export type PdfLayer = PdfFillLayer | PdfStrokeLayer | PdfClipLayer;
 
 export interface PdfMeta {
   title: string;
@@ -199,6 +240,33 @@ function drawShapes(doc: PDFKit.PDFDocument, shapes: readonly PdfShape[], spots:
   doc.restore();
 }
 
+/** A layer's colour in the output's mode. */
+function layerColor(ink: PdfLayerInk, mode: PdfColorMode): string | Cmyk {
+  if (!parseHexColor(ink.color)) throw new RangeError(`a layer's colour is '#rrggbb', got ${JSON.stringify(ink.color)}`);
+  if (ink.k !== undefined && !(Number.isFinite(ink.k) && ink.k >= 0 && ink.k <= 100)) throw new RangeError(`a layer's K is a percentage in 0..100, got ${ink.k}`);
+  if (mode !== 'k-only') return ink.color;
+  return kTint(ink.k ?? kSolid(ink.color));
+}
+
+/** Draw layers in page millimetres, in order (the transform to millimetres is the caller's). */
+function drawLayers(doc: PDFKit.PDFDocument, layers: readonly PdfLayer[], mode: PdfColorMode): void {
+  for (const layer of layers) {
+    if (layer.kind === 'fill') {
+      doc.path(layer.d).fill(layerColor(layer, mode), layer.rule ?? 'non-zero');
+    } else if (layer.kind === 'stroke') {
+      if (!(Number.isFinite(layer.width) && layer.width > 0)) throw new RangeError('a stroke layer needs a positive width');
+      doc.path(layer.d).lineWidth(layer.width).lineCap(layer.cap).lineJoin(layer.join).stroke(layerColor(layer, mode));
+    } else if (layer.kind === 'clip') {
+      doc.save();
+      doc.path(layer.clip).clip(layer.rule ?? 'non-zero');
+      drawLayers(doc, layer.items, mode);
+      doc.restore();
+    } else {
+      throw new RangeError(`unknown layer kind ${JSON.stringify((layer as { kind: unknown }).kind)}`);
+    }
+  }
+}
+
 const LINK_URL_RE = /^https?:\/\/[\x21-\x7e]{1,2000}$/;
 
 function addLinks(doc: PDFKit.PDFDocument, links: readonly PdfLink[]): void {
@@ -253,6 +321,13 @@ export async function renderPdf(pages: readonly PdfPage[], meta: PdfMeta): Promi
     for (const page of pages) {
       doc.addPage({ size: [mmToPt(page.widthMm), mmToPt(page.heightMm)], margin: 0 });
       if (page.fills && page.fills.length > 0) drawShapes(doc, page.fills, spots, mode, overprint);
+      if (page.layers && page.layers.length > 0) {
+        doc.save();
+        const k = mmToPt(1);
+        doc.transform(k, 0, 0, k, 0, 0);
+        drawLayers(doc, page.layers, mode);
+        doc.restore();
+      }
       for (const pl of page.placements) drawScene(doc, pl.scene, pl.xMm, pl.yMm, mode);
       if (page.marks && page.marks.length > 0) {
         doc.save();

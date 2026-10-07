@@ -58,7 +58,21 @@ export {
   type OwnershipCertificateDocument,
   type RenderedCertificates,
 } from './certificate.js';
-export { renderPdf, sceneToPdf, type PdfLink, type PdfMeta, type PdfPage, type PdfPlacement, type PdfShape, type PdfSpotColor } from './pdf.js';
+export {
+  renderPdf,
+  sceneToPdf,
+  type PdfClipLayer,
+  type PdfFillLayer,
+  type PdfLayer,
+  type PdfLayerInk,
+  type PdfLink,
+  type PdfMeta,
+  type PdfPage,
+  type PdfPlacement,
+  type PdfShape,
+  type PdfSpotColor,
+  type PdfStrokeLayer,
+} from './pdf.js';
 export { PNG_SIGNATURE, pixelsFor, readPngDpi, setPngDpi, svgToPng } from './png.js';
 export {
   ARTIFACT_LABEL_HEIGHT_U,
