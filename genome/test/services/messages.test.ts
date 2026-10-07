@@ -328,6 +328,50 @@ describe('MessageService (CS-01)', () => {
     expect(await messages().summary()).toEqual({ toAnswer: 4, priority: 1 });
   });
 
+  it('puts first and marks the tier THE PROGRAM names (BP-19 T8): from PALLADIUM only, or off, then the longest waiting first only; and gives no answer time anywhere', async () => {
+    for (const c of await t.db.selectFrom('client_conversations').select('id').where('status', '!=', 'CLOSED').execute()) await messages().close(c.id, operator);
+    const none = await accountOfTier(f, 0);
+    const platine = await accountOfTier(f, 2);
+    const palladium = await accountOfTier(f, 3);
+    for (const a of [none, platine, palladium]) {
+      await write(a, 'Hello.');
+      clock.advance(MINUTE);
+    }
+    const admin = await staff('ADMIN');
+    const program = await ctx.services.clubProgram.read();
+    const order = async () => (await messages().board({}, { page: 1, pageSize: 50 }, operator)).items.map((r) => [r.account.id, r.priority]);
+    try {
+      // The default, PLATINE: PALLADIUM, then PLATINE, then the rest.
+      expect(await order()).toEqual([
+        [palladium.id, 'PALLADIUM'],
+        [platine.id, 'PLATINE'],
+        [none.id, null],
+      ]);
+      // From PALLADIUM: PLATINE waits with the rest, unmarked.
+      await ctx.services.clubProgram.update({ ...program, messagesPriorityMinTier: 3 }, admin);
+      expect(await order()).toEqual([
+        [palladium.id, 'PALLADIUM'],
+        [none.id, null],
+        [platine.id, null],
+      ]);
+      expect(await messages().summary()).toEqual({ toAnswer: 3, priority: 1 });
+      // Off: the longest waiting first only, no mark.
+      await ctx.services.clubProgram.update({ ...program, messagesPriorityMinTier: 0 }, admin);
+      expect(await order()).toEqual([
+        [none.id, null],
+        [platine.id, null],
+        [palladium.id, null],
+      ]);
+      expect(await messages().summary()).toEqual({ toAnswer: 3, priority: 0 });
+      const conv = await messages().conversation((await conversationOf(palladium.id)).id);
+      expect(conv.priority).toBeNull();
+      // No due time, answer time or SLA in any field.
+      expect(JSON.stringify(conv)).not.toMatch(/due|sla|answerBy|deadline/i);
+    } finally {
+      await ctx.services.clubProgram.update(program, admin);
+    }
+  });
+
   it('finds a conversation by a scan\'s REF, and says what it concerns: the latest place, and how many more', async () => {
     const a = await createAccount(t.db);
     const [piece] = await holdPieces(t.db, a.id, 1, f.modelId);

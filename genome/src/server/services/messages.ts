@@ -22,7 +22,8 @@
  *   markRead  POST /api/v1/account/messages/read: read up to a time (never later than now).
  *   board     GET /api/admin/messages: TO_ANSWER first; within it PALLADIUM, then PLATINE, then the rest (the tier read
  *             now, `clubStandings`), the longest waiting first in each; then the others, newest message first. The
- *             priority applies from MESSAGE_PRIORITY_MIN_TIER (PLATINE; BP-19's T8 turns it into a setting).
+ *             priority applies from THE PROGRAM's `messages_priority_min_tier` (BP-19 T8: PLATINE by default,
+ *             PALLADIUM, or off: then the longest waiting first only), read at each board.
  *   answer    POST /api/admin/messages/:id/answer (OPERATOR): an existing conversation only (staff never open one:
  *             404 CONVERSATION_NOT_FOUND), FOR UPDATE; ANSWERED, and `answered_by` set when empty. `message.answer`.
  *   take / assign / close: who answers it (`message.take`, `message.assign {before, after}`, ADMIN), and CLOSED
@@ -47,6 +48,7 @@ import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { clubStandings, tierName, type ClubTier, type ClubTierName } from './club.js';
 import { openCareOf } from './care.js';
+import { readProgram, type PriorityTier } from './club-program.js';
 import { liveReference } from './live-console.js';
 import { isAnnounced, liveStages, stagesAt } from './live.js';
 import type { LookbookService } from './lookbook.js';
@@ -58,10 +60,13 @@ export const MESSAGE_LIMITS = Object.freeze({ collector: 2000, staff: 4000, labe
 /** A collector writes at most `messages` messages in any rolling `windowMs`. */
 export const MESSAGE_RATE = Object.freeze({ messages: 10, windowMs: 60 * 60_000 });
 /**
- * The tier from which a conversation is answered first and marked on the board (2 PLATINE). Fixed until BP-19's T8
- * replaces it with the setting `messages_priority_min_tier`, without changing the behaviour.
+ * Whether a conversation is answered first and marked on the board: its account's tier read now (`tier.level`) from
+ * THE PROGRAM's `messages_priority_min_tier` (BP-19 T8; 2 PLATINE by default, 3 PALLADIUM, 0 off). Its mark is the
+ * tier's name; null below it, or when the priority is off.
  */
-export const MESSAGE_PRIORITY_MIN_TIER = 2;
+export function priorityOf(tier: ConversationTier, minTier: PriorityTier): ClubTierName | null {
+  return minTier !== 0 && tier.level >= minTier ? tier.name : null;
+}
 /** The excerpt of the last message on the board, in characters. */
 export const MESSAGE_EXCERPT = 140;
 /** The sides of a conversation as the collector reads them: never a staff member's name. */
@@ -141,7 +146,7 @@ export interface BoardConversation {
   id: string;
   account: { id: string; email: string };
   tier: ConversationTier;
-  /** `PALLADIUM` or `PLATINE` from MESSAGE_PRIORITY_MIN_TIER, read now; null otherwise. */
+  /** `PALLADIUM` or `PLATINE` from THE PROGRAM's priority tier (messages_priority_min_tier), read now; null otherwise. */
   priority: ClubTierName | null;
   /** The latest context of the collector's messages, and how many other places they concern. */
   concerns: MessageConcerns | null;
@@ -182,7 +187,7 @@ export type BoardPage = Page<BoardConversation> & { toAnswer: number };
 /** GET /api/admin/messages/summary: the sidebar's badge. */
 export interface MessagesSummary {
   toAnswer: number;
-  /** Of them, the conversations answered first (MESSAGE_PRIORITY_MIN_TIER and up). */
+  /** Of them, the conversations answered first (THE PROGRAM's priority tier and up; 0 when it is off). */
   priority: number;
 }
 
@@ -616,7 +621,7 @@ export class MessageService {
 
   // ── The console ──────────────────────────────────────────────────────────
 
-  /** The tier of each account now, and its priority mark (MESSAGE_PRIORITY_MIN_TIER and up). */
+  /** The tier of each account now. */
   private async tiers(accountIds: readonly string[]): Promise<Map<string, ConversationTier>> {
     const standings = await clubStandings(this.db, accountIds, this.clock());
     const out = new Map<string, ConversationTier>();
@@ -627,8 +632,9 @@ export class MessageService {
     return out;
   }
 
-  private static priorityOf(tier: ConversationTier): ClubTierName | null {
-    return tier.level >= MESSAGE_PRIORITY_MIN_TIER ? tier.name : null;
+  /** THE PROGRAM's priority tier now (BP-19 T8): 2 PLATINE, 3 PALLADIUM, 0 off. */
+  private async priorityMin(): Promise<PriorityTier> {
+    return (await readProgram(this.db)).messagesPriorityMinTier;
   }
 
   /**
@@ -660,9 +666,10 @@ export class MessageService {
     const all = await query.execute();
     const waiting = all.filter((c) => c.status === 'TO_ANSWER');
     const tiers = await this.tiers([...new Set(waiting.map((c) => c.account_id))]);
+    const min = await this.priorityMin();
     const rank = (accountId: string) => {
       const t = tiers.get(accountId);
-      return t && MessageService.priorityOf(t) ? t.level : 0;
+      return t && priorityOf(t, min) ? t.level : 0;
     };
     const sorted = [
       ...waiting.sort(
@@ -676,13 +683,13 @@ export class MessageService {
         .sort((x, y) => y.last_message_at.getTime() - x.last_message_at.getTime() || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0)),
     ];
     const slice = sorted.slice((page.page - 1) * page.pageSize, page.page * page.pageSize);
-    const rows = await this.rows(slice.map((c) => c.id));
+    const rows = await this.rows(slice.map((c) => c.id), min);
     const toAnswer = await this.db.selectFrom('client_conversations').select((eb) => eb.fn.countAll<number>().as('n')).where('status', '=', 'TO_ANSWER').executeTakeFirstOrThrow();
     return { ...makePage(slice.map((c) => rows.get(c.id)!).filter(Boolean), sorted.length, page), toAnswer: Number(toAnswer.n) };
   }
 
   /** The board's rows of these conversations, by id. */
-  private async rows(ids: readonly string[]): Promise<Map<string, BoardConversation>> {
+  private async rows(ids: readonly string[], min: PriorityTier): Promise<Map<string, BoardConversation>> {
     const out = new Map<string, BoardConversation>();
     if (ids.length === 0) return out;
     const heads = await this.heads(ids);
@@ -710,7 +717,7 @@ export class MessageService {
         id: h.id,
         account: { id: h.account_id, email: h.email },
         tier,
-        priority: MessageService.priorityOf(tier),
+        priority: priorityOf(tier, min),
         concerns: mine.at(-1)?.concerns ?? null,
         moreConcerns: Math.max(0, distinct.size - 1),
         lastMessage: { author: l.author, excerpt: excerpt(l.body), at: l.created_at },
@@ -813,7 +820,7 @@ export class MessageService {
       id: h.id,
       account: { id: h.account_id, email: h.email },
       tier,
-      priority: MessageService.priorityOf(tier),
+      priority: priorityOf(tier, await this.priorityMin()),
       waitingSince: h.waiting_since,
       status: h.status,
       answeredBy: h.answered_by ? { id: h.answered_by, email: h.answered_email ?? '' } : null,
@@ -914,7 +921,8 @@ export class MessageService {
   async summary(): Promise<MessagesSummary> {
     const waiting = await this.db.selectFrom('client_conversations').select('account_id').where('status', '=', 'TO_ANSWER').execute();
     const tiers = await this.tiers(waiting.map((w) => w.account_id));
-    return { toAnswer: waiting.length, priority: waiting.filter((w) => MessageService.priorityOf(tiers.get(w.account_id)!) !== null).length };
+    const min = await this.priorityMin();
+    return { toAnswer: waiting.length, priority: waiting.filter((w) => priorityOf(tiers.get(w.account_id)!, min) !== null).length };
   }
 
 }

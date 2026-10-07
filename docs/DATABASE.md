@@ -1656,7 +1656,7 @@ Migration `0026_club_program` (plan NEXT-NINE, BP-19 T2; [API §16.21](API.md#16
 | `shipping_free_platine`, `shipping_free_palladium` | `text` | NOT NULL | `'STANDARD'`, `'EXPRESS'` | `CHECK IN ('NONE','STANDARD','EXPRESS')` (`SHIPPING_FREE_LEVELS`): the free shipping of each tier. |
 | `care_pieces_platine` | `smallint` | NOT NULL | `1` | `CHECK (… BETWEEN 0 AND 20)`: the pieces cared for a year; 0: none. |
 | `care_pieces_palladium` | `smallint` | NULL | NULL | `CHECK (… BETWEEN 0 AND 20)`; NULL: every piece. |
-| `messages_priority_min_tier` | `smallint` | NOT NULL | `2` | `CHECK IN (0, 2, 3)`: the Messages board's priority from PLATINE or PALLADIUM; 0: off. |
+| `messages_priority_min_tier` | `smallint` | NOT NULL | `2` | `CHECK IN (0, 2, 3)`: the Messages board's priority from PLATINE or PALLADIUM; 0: off. Read by `MessageService` at each board, conversation and summary (BP-19 T8): it drives the order and the mark. |
 | `gift_platine_model_id`, `gift_palladium_model_id` | `uuid` | NULL | — | FK → `models.id`, each leading its index (`club_program_settings_gift_platine_model_id_idx`, `…_gift_palladium_model_id_idx`): the welcome gift of each tier; NULL: none. Active when set (a service rule; one discontinued since may stay, and gives no gift). |
 | `credit_platine_minor`, `credit_palladium_minor` | `integer` | NOT NULL | `5000`, `10000` | `CHECK (… BETWEEN 0 AND 100000000)`: each tier's credit in minor units; 0: none. |
 | `credit_currency` | `text` | NOT NULL | `'EUR'` | `CHECK IN ('EUR','GBP','USD','CHF')` (`HOUSE_CURRENCIES`): the one currency of the credit. |
