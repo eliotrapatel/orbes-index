@@ -100,6 +100,12 @@
  *    sheet (routes/admin/owners.ts), never the buyer nor an engraving; the
  *    hourly counts of sign-ins and scans by country and tier
  *    (`activity_hourly`: no account column), kept;
+ *  - YOUR SIZES (plan NEXT-NINE, AC-01, services/sizes.ts, migration 0030):
+ *    the sizes an account saves (`account_sizes`: a kind and a measure),
+ *    kept until cleared (a cleared size is a deleted row), audited
+ *    `account.sizes.update` with the kinds only, exported
+ *    (AccountExport.sizes); they only preselect a size the collector
+ *    confirms; the account section's sentence says so;
  *  - the sound signature (P-D07, shared/prefs.ts): the one preference the
  *    verify app keeps on the device, in local storage, under SOUND_PREF_KEY
  *    `orbes.sound`: "off", written only by SOUND OFF and removed by SOUND
@@ -165,6 +171,7 @@ const EN: LegalDocument = {
         'ORBES records what is done with your account: the pieces registered to it and since when, the transfers, the reports of loss or theft, the links to ownership certificates (of each link, only a fingerprint), and the recovery codes ORBES Client Services gives you (only as a hash).',
         'Each sign-in opens a session of 30 days at most. It is kept with a pseudonym of your IP address and the identification string of your browser (its user agent), for the security of your account.',
         "The service's audit log, which records every change, names your account by its identifier and a pseudonym of the IP address, never by your email address or your name.",
+        'The sizes you save in YOUR SIZES are kept with your account until you clear them, and only preselect a size you then confirm.',
         'In MY PIECES, SUBSCRIBE of ORBES Care, once ORBES publishes it, opens a third-party page (Whop) in a new tab. That page collects its own data under its own policy; the service sends it neither your account nor your piece.',
       ],
     },
@@ -366,6 +373,7 @@ const FR: LegalDocument = {
         "ORBES enregistre ce qui est fait avec votre compte : les pièces qui y sont enregistrées et depuis quand, les transferts, les déclarations de perte ou de vol, les liens vers des certificats de propriété (de chaque lien, une empreinte seulement), et les codes de récupération que vous remet ORBES Client Services (sous forme d'empreinte seulement).",
         "Chaque connexion ouvre une session de 30 jours au plus. Elle est gardée avec un pseudonyme de votre adresse IP et la chaîne d'identification de votre navigateur (son user agent), pour la sécurité de votre compte.",
         "Le journal d'audit du service, qui enregistre chaque modification, désigne votre compte par son identifiant et un pseudonyme de l'adresse IP, jamais par votre adresse e-mail ni par votre nom.",
+        "Les tailles que vous enregistrez dans YOUR SIZES sont conservées avec votre compte jusqu'à ce que vous les effaciez, et ne font que présélectionner une taille que vous confirmez ensuite.",
         "Dans MY PIECES, SUBSCRIBE d'ORBES Care, une fois qu'ORBES le publie, ouvre une page tierce (Whop) dans un nouvel onglet. Cette page collecte ses propres données selon sa propre politique ; le service ne lui transmet ni votre compte ni votre pièce.",
       ],
     },

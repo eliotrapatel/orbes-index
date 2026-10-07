@@ -23,6 +23,7 @@
  *   ─────────────────────────────────
  *   MESSAGES                    NEW ›     the conversation with ORBES Client Services (plan NEXT-NINE, CS-01): NEW
  *                                         while an answer is unread; its view in the sheet (below)
+ *   YOUR SIZES      RING 52 · WRIST … ›   the sizes saved (plan NEXT-NINE, AC-01), or NOT SET; its view in the sheet
  *   SOUND                         (●)     the sound signature (P-D07), as the footer's SOUND ON / OFF
  *   CHANGE PASSWORD                 ›     its form in the sheet (C39): the current password, a new one; CANCEL
  *   MY PIECES                       ›
@@ -35,26 +36,32 @@
  * the place it concerned (a link to it; a scan has none), the body as written; then YOUR REPLY (YOUR MESSAGE before the
  * first) and SEND. Opening it marks the conversation read. The collector never sees a status.
  *
+ * YOUR SIZES (AC-01): the title and its lead, then RING SIZE, BRACELET SIZE, WRIST, FOR WATCHES and
+ * NECKLACE LENGTH, each a select (NOT SET, then its range) with its unit as its hint; SAVE (filled) saves them whole and
+ * the sheet comes back with 'Your sizes are saved.'; CANCEL comes back unchanged. A failure is said under the fields,
+ * with the server's message.
+ *
  * A modal dialog: the page under it is inert and holds still; focus goes to its title and comes back to the account
  * button when it closes.
  */
 import { h } from '../../shared/dom.js';
 import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { ACCOUNT, ACCOUNT_PASSWORD, MESSAGES, PIECES, SOUND, TIER } from '../copy.js';
+import { ACCOUNT, ACCOUNT_PASSWORD, ACCOUNT_SIZES, MESSAGES, PIECES, SOUND, TIER } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
 import { messageProblem, threadModel, type ConcerningTarget, type ThreadModel } from '../messages-model.js';
 import type { SessionStore } from '../session.js';
+import { NO_SIZES, SIZE_FIELDS, sizeFieldValue, sizeOptions, sizesFromForm, sizesSummary } from '../sizes-model.js';
 import type { SoundSwitch } from '../sound.js';
 import { tierModel } from '../tier-model.js';
-import type { ClubStatus } from '../types.js';
+import type { AccountSizes, ClubStatus, SizeKind } from '../types.js';
 import { FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
-import { button, definitionList, field, icon, leadRow, switchControl, textLink, tierDots } from './nocturne.js';
+import { button, definitionList, field, icon, leadRow, selectField, switchControl, textLink, tierDots } from './nocturne.js';
 import { PIECES_PATH, withNumerals } from './common.js';
 
 export interface AccountSheetDeps {
-  api: Pick<ApiClient, 'clubStatus' | 'products' | 'changePassword' | 'logout' | 'messages' | 'writeMessage' | 'readMessages' | 'messagesUnread'>;
+  api: Pick<ApiClient, 'clubStatus' | 'products' | 'changePassword' | 'logout' | 'messages' | 'writeMessage' | 'readMessages' | 'messagesUnread' | 'sizes' | 'saveSizes'>;
   session: SessionStore;
   sound: SoundSwitch;
   /** MY PIECES, in the app. */
@@ -73,7 +80,7 @@ export interface AccountSheetDeps {
   onRead?(): void;
 }
 
-type View = 'account' | 'password' | 'messages';
+type View = 'account' | 'password' | 'messages' | 'sizes';
 
 export class AccountSheet {
   readonly el: HTMLElement;
@@ -93,6 +100,8 @@ export class AccountSheet {
   private thread: ThreadModel | null = null;
   private threadError: string | null = null;
   private replyDraft = '';
+  /** YOUR SIZES (AC-01): the sizes saved, null until read (or unreadable: the row then says nothing of them). */
+  private sizes: AccountSizes | null = null;
 
   constructor(private readonly deps: AccountSheetDeps) {
     this.panel = h('section', { class: 'n-account__panel', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'account-title' } });
@@ -163,16 +172,19 @@ export class AccountSheet {
   /** The club's status and the pieces, read afresh: YOUR TIER as it is now. */
   private async read(): Promise<void> {
     const gen = ++this.readGen;
-    const [club, pieces, unread] = await Promise.all([
+    const [club, pieces, unread, sizes] = await Promise.all([
       this.deps.api.clubStatus().catch((e: unknown) => {
         this.deps.session.noteError(e);
         return null;
       }),
       this.deps.api.products().catch(() => null),
       this.deps.api.messagesUnread().catch(() => false),
+      this.deps.api.sizes().catch(() => null),
     ]);
     if (gen !== this.readGen || !this.isOpen) return;
     this.club = club;
+    // Saved meanwhile in the sheet's own view: what it saved stands.
+    if (this.view !== 'sizes') this.sizes = sizes;
     // MESSAGES opened meanwhile has read it: NEW stays off.
     this.unread = this.view === 'messages' ? false : unread;
     this.listed = pieces?.length ?? 0;
@@ -199,7 +211,8 @@ export class AccountSheet {
       h('h2', { class: 'n-g n-lb', id: 'account-title', attrs: { tabindex: -1 }, text: ACCOUNT.title }),
       h('button', { class: 'n-account__close', attrs: { type: 'button', 'aria-label': ACCOUNT.close }, data: { key: 'close' }, on: { click: () => this.close() } }, icon('close')),
     );
-    const body = this.view === 'password' ? this.passwordView() : this.view === 'messages' ? this.messagesView() : this.accountView(s.account.email);
+    const body =
+      this.view === 'password' ? this.passwordView() : this.view === 'messages' ? this.messagesView() : this.view === 'sizes' ? this.sizesView() : this.accountView(s.account.email);
     this.panel.replaceChildren(h('div', { class: 'n-handle', attrs: { 'aria-hidden': 'true' } }), head, ...body);
   }
 
@@ -222,6 +235,7 @@ export class AccountSheet {
         'div',
         { class: 'n-account__rows' },
         this.messagesRow(),
+        this.sizesRow(),
         h('label', { class: 'n-row n-account__sound' }, h('span', { class: 'n-g n-row__label', text: SOUND.label }), sw.el),
         leadRow(ACCOUNT_PASSWORD.change, { onOpen: () => this.openPassword(), attrs: { 'data-key': 'password' } }),
         leadRow(PIECES.link, {
@@ -451,6 +465,63 @@ export class AccountSheet {
       await this.readThread(true);
     });
     return h('div', { class: 'n-px n-messages__reply' }, form);
+  }
+
+  // ── YOUR SIZES (plan NEXT-NINE, AC-01) ───────────────────────────────────
+
+  /** The second row: YOUR SIZES, its line the sizes saved (`RING 52 · WRIST 16.5 CM`) or NOT SET; nothing while unread. */
+  private sizesRow(): HTMLElement {
+    const row = leadRow(ACCOUNT_SIZES.row, { onOpen: () => this.openSizes(), attrs: { 'data-key': 'sizes' }, extraClass: 'n-account__sizes' });
+    if (this.sizes) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__sizes-line' }, ...withNumerals(sizesSummary(this.sizes))), row.lastChild);
+    return row;
+  }
+
+  private openSizes(): void {
+    this.view = 'sizes';
+    this.notice = null;
+    this.render();
+    this.focusTitle();
+  }
+
+  private closeSizes(notice: string | null): void {
+    this.view = 'account';
+    this.notice = notice;
+    this.render();
+    this.panel.querySelector<HTMLElement>('[data-key="sizes"]')?.focus({ preventScroll: true });
+  }
+
+  /** The four sizes, each a select (NOT SET, then its range), its unit as its hint; SAVE saves them whole, CANCEL under it goes back. */
+  private sizesView(): HTMLElement[] {
+    const saved = this.sizes ?? NO_SIZES;
+    const fields = SIZE_FIELDS.map((f) => ({ kind: f.kind, ...selectField(`account-size-${f.kind.toLowerCase()}`, f.label, sizeOptions(f.kind), sizeFieldValue(f.kind, saved[f.kind]), f.hint) }));
+    const cancel = button(ACCOUNT_SIZES.cancel, { outline: true, onClick: () => this.closeSizes(null) });
+    const form = nocturneForm(
+      this.deps.session,
+      'sizes',
+      fields.map((f) => f.el),
+      ACCOUNT_SIZES.save,
+      async () => {
+        const values = Object.fromEntries(fields.map((f) => [f.kind, f.select.value])) as Record<SizeKind, string>;
+        try {
+          this.sizes = await this.deps.api.saveSizes(sizesFromForm(values));
+        } catch (e) {
+          this.deps.session.noteError(e);
+          throw new FormError(`${ACCOUNT_SIZES.failed} ${messageOf(e)}`);
+        }
+        this.closeSizes(ACCOUNT_SIZES.saved);
+      },
+    );
+    return [
+      h(
+        'section',
+        { class: 'n-px n-account__sizes-view', attrs: { 'aria-labelledby': 'account-sizes-title' } },
+        h('h3', { class: 'n-g n-t3 n-ivc', id: 'account-sizes-title', text: ACCOUNT_SIZES.title }),
+        h('p', { class: 'n-tx n-account__sizes-lead', text: ACCOUNT_SIZES.lead }),
+        form,
+        // SAVE filled, then CANCEL under it, the hairline button.
+        h('div', { class: 'n-account__sizes-cancel' }, cancel),
+      ),
+    ];
   }
 
   // ── CHANGE PASSWORD (C-04, C39) ──────────────────────────────────────────

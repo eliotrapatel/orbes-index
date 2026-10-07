@@ -22,6 +22,7 @@
  */
 import type {
   AccountMessage,
+  AccountSizes,
   AccountThread,
   MessageContextInput,
   AccountOrder,
@@ -223,8 +224,10 @@ export class ApiClient {
   }
 
   /** P-X08, REQUEST THIS PIECE: a model of THE PRIVATE SALON, with the account's optional note (409 SHOP_REQUEST_OPEN while one is open). */
-  async requestPiece(slug: string, note: string | null): Promise<ShopRequest> {
-    const r = await this.request<{ request?: ShopRequest }>('POST', `/api/v1/club/lookbook/${encodeURIComponent(slug)}/request`, note ? { note } : {}, { csrf: true });
+  async requestPiece(slug: string, note: string | null, size: string | null = null): Promise<ShopRequest> {
+    // AC-01: the size asked, or none (NOT SURE YET, a model of one size).
+    const body = { ...(note ? { note } : {}), ...(size ? { size } : {}) };
+    const r = await this.request<{ request?: ShopRequest }>('POST', `/api/v1/club/lookbook/${encodeURIComponent(slug)}/request`, body, { csrf: true });
     if (!r?.request || typeof r.request.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.request;
   }
@@ -738,6 +741,20 @@ export class ApiClient {
   }
 
   /** Whether an answer is unread: NOW's line and the account sheet's NEW. */
+  /** YOUR SIZES (AC-01): the sizes the account saved, in its units; null where none is. */
+  async sizes(): Promise<AccountSizes> {
+    const r = await this.request<{ sizes?: AccountSizes }>('GET', '/api/v1/account/sizes');
+    if (!r?.sizes || typeof r.sizes !== 'object') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.sizes;
+  }
+
+  /** YOUR SIZES saved whole: a kind null is cleared. */
+  async saveSizes(sizes: AccountSizes): Promise<AccountSizes> {
+    const r = await this.request<{ sizes?: AccountSizes }>('PUT', '/api/v1/account/sizes', { sizes }, { csrf: true });
+    if (!r?.sizes || typeof r.sizes !== 'object') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.sizes;
+  }
+
   async messagesUnread(): Promise<boolean> {
     const r = await this.request<{ unread?: unknown }>('GET', '/api/v1/account/messages/unread');
     if (typeof r?.unread !== 'boolean') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');

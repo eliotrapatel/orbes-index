@@ -827,6 +827,11 @@ export const LOOKBOOK = Object.freeze({
     requestedLabel: 'REQUESTED',
     requested: 'ORBES Client Services will contact you.',
     requestFailed: 'The request could not be sent.',
+    /** AC-01: the size picker of a model of two sizes or more, above the note; the size asked under REQUESTED. */
+    size: 'YOUR SIZE',
+    notSure: 'NOT SURE YET',
+    sizeHint: 'ORBES Client Services confirms it with you.',
+    requestedSize: (size: string) => `SIZE ${size}`,
   }),
   /** The text link of each card, and the one under an authentic result. */
   seeModel: 'SEE THE MODEL',
@@ -1257,6 +1262,33 @@ export const ACCOUNT = Object.freeze({
 });
 
 /**
+ * YOUR SIZES (plan NEXT-NINE, AC-01): a row of the account sheet, second after MESSAGES, its line the sizes saved
+ * (`RING 52 · WRIST 16.5 CM`, or NOT SET), and its view in the sheet: four sizes, each a field of its own, SAVE and
+ * CANCEL. A size saved preselects a model's size in I'LL BE THERE, the LIVE ready check and a salon request, always
+ * confirmed by the collector. The hints only name the unit: no guide to measuring.
+ */
+export const ACCOUNT_SIZES = Object.freeze({
+  row: 'YOUR SIZES',
+  notSet: 'NOT SET',
+  title: 'YOUR SIZES',
+  lead: 'Your sizes preselect the size of a release or a request, for a model of that kind. You confirm it each time.',
+  ring: 'RING SIZE',
+  ringHint: 'French size.',
+  bracelet: 'BRACELET SIZE',
+  wrist: 'WRIST, FOR WATCHES',
+  necklace: 'NECKLACE LENGTH',
+  cmHint: 'In centimetres.',
+  save: 'SAVE',
+  cancel: 'CANCEL',
+  /** Said in the account view once saved. */
+  saved: 'Your sizes are saved.',
+  /** A failure, followed by the server's message. */
+  failed: 'Your sizes could not be saved just now.',
+  /** Each size's word in the row's line: `RING 52`, `WRIST 16.5 CM`. */
+  short: Object.freeze({ RING: 'RING', BRACELET: 'BRACELET', WRIST: 'WRIST', NECKLACE: 'NECKLACE' }),
+});
+
+/**
  * The sound signature (P-D07): SOUND ON / OFF, a text link at the foot of the landing. Its accessible name is SOUND,
  * its state is said by aria-pressed (ON or OFF beside the word is for the eye). On by default; kept on this device.
  */
@@ -1322,6 +1354,9 @@ export const LIVE = Object.freeze({
     withdrawn: 'Withdrawn. You may say it again until the opening.',
     signIn: 'Sign in to say you will be there, with your size.',
     count: (n: number) => (n === 1 ? '1 COLLECTOR WILL BE THERE' : `${n} COLLECTORS WILL BE THERE`),
+    /** AC-01: a size preselected from YOUR SIZES, under the sizes, until the collector confirms it or taps another. */
+    fromYours: (size: string) => `${sizeName(size)} · FROM YOUR SIZES`,
+    checkSize: 'Check it is right for this model before you confirm.',
   }),
   /** The boutique board: the countdown, the door, the pieces left overall, live. */
   board: Object.freeze({
@@ -1354,6 +1389,8 @@ export const LIVE = Object.freeze({
     clock: 'CLOCK',
     granted: 'GRANTED',
     choose: 'TO CHOOSE',
+    /** AC-01: the size preselected from YOUR SIZES, not ready until the collector taps a size or enters. */
+    toConfirm: 'TO CONFIRM',
     live: 'LIVE',
     reconnecting: 'RECONNECTING',
     synced: 'SYNCED TO ORBES',

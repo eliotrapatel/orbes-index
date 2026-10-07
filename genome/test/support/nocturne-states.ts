@@ -187,6 +187,23 @@ async function openAccountSheet(run: StateRun): Promise<void> {
   await fitSheet(run.page);
 }
 
+/** YOUR SIZES (plan NEXT-NINE, AC-01): the account sheet opened, then its view of the four sizes, the phone grown to it. */
+async function openSizes(run: StateRun): Promise<void> {
+  await openAccountSheet(run);
+  await run.page.locator('.n-account').getByRole('button', { name: /^YOUR SIZES/ }).click();
+  await run.page.locator('.n-account:not([hidden]) .n-account__sizes-view form').waitFor({ timeout: 20_000 });
+  await fitSheet(run.page);
+}
+
+/** YOUR SIZES' fields set (a value of each select, '' for NOT SET), then SAVE, the sheet back with its sentence. */
+async function saveSizes(run: StateRun, values: Readonly<Record<string, string>>): Promise<void> {
+  await openSizes(run);
+  for (const [kind, value] of Object.entries(values)) await run.page.selectOption(`#account-size-${kind}`, value);
+  await button(run, 'SAVE').click();
+  await run.page.getByText('Your sizes are saved.').first().waitFor({ timeout: 20_000 });
+  await fitSheet(run.page);
+}
+
 /** The phone grown (or shrunk) to the sheet: its top (under the header and the rail), its content and its foot's padding. */
 async function fitSheet(page: Page, selector = '.n-account__panel'): Promise<void> {
   const height = await page.evaluate((sel) => {
@@ -907,6 +924,9 @@ export const UI_STATES: readonly UiState[] = [
   },
   { id: 'model-salon', title: 'A model of THE PRIVATE SALON: ZENITH, REQUEST THIS PIECE', refs: ['C33'], variant: 'full', as: you, path: sheet('zenith'), ready: '.view--sheet .sheet__body section' },
   { id: 'model-salon-signed-out', title: 'A model of THE PRIVATE SALON, signed out: not in the collection', refs: ['C40'], variant: 'full', path: sheet('zenith'), ready: '.view--sheet[data-state="missing"]' },
+  // Plan NEXT-NINE, AC-01: a model of the salon in four sizes: YOUR SIZE, the size YOUR SIZES suggests; REQUESTED · SIZE 54.
+  { id: 'model-salon-sizes', title: 'THE PRIVATE SALON in sizes: YOUR SIZE, 52 preselected from YOUR SIZES, NOT SURE YET', refs: ['AC-01'], variant: 'full', as: 'sized', path: sheet('halo'), ready: '.view--sheet .n-model__yours' },
+  { id: 'model-salon-size-requested', title: 'THE PRIVATE SALON: REQUESTED, SIZE 54', refs: ['AC-01'], variant: 'full', as: 'sizedRequested', path: sheet('halo'), ready: '.view--sheet .n-model__requested-size' },
   { id: 'model-not-found', title: 'A model’s address that leads nowhere', refs: ['C40'], variant: 'full', path: at('/verify/lookbook/no-such-model'), ready: '.view--sheet[data-state="missing"]' },
   { id: 'collection-empty', title: 'THE COLLECTION with no model', refs: ['C40'], variant: 'empty', path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__empty', stress: true },
   { id: 'collection-stress', title: 'THE COLLECTION with a 24-character name, no photograph', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__group', stress: true },
@@ -1017,6 +1037,8 @@ export const UI_STATES: readonly UiState[] = [
   },
   { id: 'live-announced', title: 'A LIVE RELEASE before the room, signed in: YOUR SIZE, I’LL BE THERE', refs: ['C20'], variant: 'full', as: you, path: release('blue'), act: (run) => run.page.locator('.n-live__there button.live__size', { hasText: /^17$/ }).click(), ready: '.view--live .n-live__there' },
   { id: 'live-announced-guaranteed', title: 'A LIVE RELEASE before the room, for a holder of the house’s guarantee: I’LL BE THERE, then its line', refs: ['IN-01'], variant: 'full', as: 'holder', path: release('blue'), ready: '.view--live .live__guarantee' },
+  // Plan NEXT-NINE, AC-01: I'LL BE THERE with the size YOUR SIZES preselects (a bracelet of 17 cm), to check.
+  { id: 'live-announced-from-yours', title: 'A LIVE RELEASE before the room: 17 preselected, SIZE 17 · FROM YOUR SIZES, I’LL BE THERE', refs: ['AC-01'], variant: 'full', as: 'sized', path: release('blue'), ready: '.view--live .n-live__yours-block:not([hidden])' },
   { id: 'live-announced-signed-out', title: 'A LIVE RELEASE before the room, signed out: I’LL BE THERE opens the sign-in', refs: ['C28'], variant: 'full', path: release('blue'), ready: '.view--live' },
   { id: 'live-veiled', title: 'A LIVE RELEASE not yet revealed, for owners from PLATINE: not eligible', refs: ['C7', 'C28'], variant: 'full', as: you, path: release('veiled'), ready: '.view--live' },
   { id: 'live-veiled-platine', title: 'A LIVE RELEASE not yet revealed, for a PLATINE account', refs: ['C7'], variant: 'full', as: 'platine', path: release('veiled'), ready: '.view--live .n-live__there' },
@@ -1377,6 +1399,64 @@ export const UI_STATES: readonly UiState[] = [
     },
     ready: '.view--live .n-question',
   },
+  // ── YOUR SIZES (plan NEXT-NINE, AC-01): the view of a collector who saved two sizes; then an account without a piece
+  // saves its own, reads them again and clears them, in order ──
+  {
+    id: 'sizes-view',
+    title: 'The account sheet: YOUR SIZES, a ring of 52 and a bracelet of 17 cm saved, the wrist and the necklace NOT SET, SAVE, CANCEL',
+    refs: ['AC-01'],
+    variant: 'full',
+    as: 'sized',
+    path: at('/verify'),
+    // It writes nothing: it runs with the writes of YOUR SIZES, before them (the content test's shards, CONTENT_SHARDS).
+    mutates: true,
+    act: (run) => openSizes(run),
+    ready: '.n-account:not([hidden]) .n-account__sizes-view form',
+    viewport: true,
+  },
+  {
+    id: 'sizes-save',
+    title: 'YOUR SIZES saved: a ring of 52 and a wrist of 16.5 cm; the sheet says so, its row RING 52 · WRIST 16.5 CM',
+    refs: ['AC-01'],
+    variant: 'full',
+    as: 'sizer',
+    path: at('/verify'),
+    mutates: true,
+    act: (run) => saveSizes(run, { ring: '52', wrist: '16.5' }),
+    ready: '.n-account:not([hidden]) .n-account__sizes-line',
+    viewport: true,
+  },
+  {
+    id: 'sizes-reopen',
+    title: 'YOUR SIZES opened again: the ring of 52 and the wrist of 16.5 cm as saved',
+    refs: ['AC-01'],
+    variant: 'full',
+    as: 'sizer',
+    path: at('/verify'),
+    mutates: true,
+    act: async (run) => {
+      await openSizes(run);
+      const values = await run.page.evaluate(() => ['ring', 'bracelet', 'wrist', 'necklace'].map((k) => (document.querySelector(`#account-size-${k}`) as HTMLSelectElement | null)?.value ?? null));
+      if (JSON.stringify(values) !== JSON.stringify(['52', '', '16.5', ''])) throw new Error(`YOUR SIZES read again: ${JSON.stringify(values)}`);
+    },
+    ready: '.n-account:not([hidden]) .n-account__sizes-view form',
+    viewport: true,
+  },
+  {
+    id: 'sizes-clear',
+    title: 'YOUR SIZES cleared: every size NOT SET, its row NOT SET',
+    refs: ['AC-01'],
+    variant: 'full',
+    as: 'sizer',
+    path: at('/verify'),
+    mutates: true,
+    act: async (run) => {
+      await saveSizes(run, { ring: '', bracelet: '', wrist: '', necklace: '' });
+      await run.page.locator('.n-account__sizes-line', { hasText: /^NOT SET$/ }).waitFor({ timeout: 20_000 });
+    },
+    ready: '.n-account:not([hidden]) .n-account__sizes-line',
+    viewport: true,
+  },
   {
     id: 'room-ready',
     title: 'The room, entered: YOU’RE READY',
@@ -1393,6 +1473,30 @@ export const UI_STATES: readonly UiState[] = [
       await button(run, 'ENTER THE ROOM').click();
       await run.page.getByText('YOU’RE READY').first().waitFor({ timeout: 20_000 });
       await run.page.waitForFunction((n) => new RegExp(`(^|\\D)${n} IN THE ROOM`).test(document.body.innerText), before + 1, { timeout: 20_000 });
+    },
+    ready: '.view--live .live-door',
+  },
+];
+
+/**
+ * Plan NEXT-NINE, AC-01: the room of a collector who saved a bracelet of 17 cm (the room demo's `sized`): 17 preselected,
+ * READY CHECK SIZE 17 · TO CONFIRM; then 17 tapped, the size ready. Outside UI_STATES (the room's shard holds its limit
+ * of states): test/web/nocturne.content-room.e2e.test.ts reaches them with their own checks (shownSuite).
+ */
+export const ROOM_SIZE_STATES: readonly UiState[] = [
+  { id: 'room-from-yours', title: 'The room: 17 preselected from YOUR SIZES, READY CHECK SIZE 17 · TO CONFIRM', refs: ['AC-01'], variant: 'room', as: 'sized', path: release('room'), ready: '.view--live .live__yours-block--room:not([hidden])' },
+  {
+    id: 'room-from-yours-confirmed',
+    title: 'The room: 17 tapped, READY CHECK SIZE 17 ready, ENTER THE ROOM',
+    refs: ['AC-01'],
+    variant: 'room',
+    as: 'sized',
+    path: release('room'),
+    act: async (run) => {
+      await run.page.locator('.view--live .live__yours-block--room:not([hidden])').waitFor({ timeout: 20_000 });
+      await run.page.locator('.live__picker button.live__size', { hasText: /^17$/ }).click();
+      await run.page.locator('.view--live .live__yours-block--room').waitFor({ state: 'hidden', timeout: 20_000 });
+      await run.page.waitForFunction(() => [...document.querySelectorAll('.live__check')].some((c) => /^SIZE/.test(c.textContent ?? '') && c.classList.contains('is-ok')), null, { timeout: 20_000 });
     },
     ready: '.view--live .live-door',
   },

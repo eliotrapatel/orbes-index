@@ -45,6 +45,10 @@
  *   moves: a collector holding one shown to it before the blue LIVE RELEASE; in the room, one shown and one not; in the
  *   draws, a draw open with a place guaranteed (shown and not), a draw open entered with one, a draw drawn with two
  *   guaranteed places, shown and not, and a guarantee waiting for the next release of ZENITH)
+ *   (plan NEXT-NINE, AC-01: YOUR SIZES, seeded last in the full and room variants so nothing of the story moves:
+ *   MONOLITHE reads a bracelet size; HALO, a ring of THE PRIVATE SALON from PALLADIUM in sizes 50 to 56; in the full
+ *   demo two PALLADIUM collectors who saved their sizes, one of them with HALO requested in size 54, and an account
+ *   without a piece that saves and clears its own; in the room, a TITANE collector who saved a bracelet of 17 cm)
  *   stress            the extreme content of fidelity rule 5; THE PROGRAM's welcome gift (a model of one size) and
  *                     the PALLADIUM credit in use on an order (BP-19 T5)
  *   empty             every empty state: no model shown, no release, an account without a piece, and an owner
@@ -207,6 +211,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'afterroom-ends') await seedAfterRoomEnds(w);
     if (variant === 'draws') await seedDraws(w);
     if (variant === 'full' || variant === 'room' || variant === 'draws') await seedGuarantees(w, variant);
+    if (variant === 'full' || variant === 'room') await seedSizes(w, variant);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -1057,6 +1062,57 @@ async function seedGuarantees(w: World, variant: 'full' | 'room' | 'draws'): Pro
   await grant(holder, { scope: 'MODEL', targetId: w.models.zenith!, validUntil: '2027-01-03' });
   clock.set(at('2026-10-05T11:30:00Z'));
   await drops.enter(holder.id, entered, holder.actor);
+}
+
+// ── YOUR SIZES (plan NEXT-NINE, AC-01) ─────────────────────────────────────
+
+/**
+ * YOUR SIZES, seeded last (no serial of 2026 moves: the pieces held carry serials of 2025). MONOLITHE reads a bracelet
+ * size (its variants inherit it). In the full demo: HALO, a ring of THE PRIVATE SALON offered from PALLADIUM (no other
+ * account of the story reads it) in sizes 50 · 52 · 54 · 56; `sized`, PALLADIUM, who saved a ring of 52 and a bracelet
+ * of 17 cm (HALO's 52 and the blue release's 17 preselected); `sizedRequested`, PALLADIUM, who saved 54 and requested
+ * HALO in size 54; `sizer`, without a piece, who saves and clears its sizes in the writes. In the room: `sized`, TITANE,
+ * a bracelet of 17 cm saved and no I'LL BE THERE (its room preselects 17, TO CONFIRM).
+ */
+async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {
+  const { ctx, admin, clock } = w;
+  clock.set(at('2026-10-05T12:00:00Z'));
+  await ctx.services.sizes.setModelSizes(w.models.steel!, { sizeKind: 'BRACELET' }, admin);
+  const since = { variant: '17', year: 2025, startedAt: at('2026-06-01T10:00:00Z') };
+  if (variant === 'room') {
+    const sized = await account(w, 'sized', 'v.lemaire@example.com');
+    await holdPieces(ctx.db, sized.id, 1, w.models.steel!, since);
+    await ctx.services.sizes.set(sized.id, { BRACELET: 17 }, sized.actor);
+    return;
+  }
+  const care = 'Store this piece on its own, away from humidity, perfume and cosmetics. Wipe it with a soft, dry cloth after wearing. ORBES Client Services offers inspection, cleaning and polishing.';
+  const halo = (await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'HALO', type: 'RING', skuPrefix: 'HAL-RG', defaultMaterial: '18K YELLOW GOLD', careInstructions: care }, admin)).id;
+  await ctx.services.media.setModelImage(halo, { mime: 'image/webp', bytes: nocturnePhoto('gold') }, admin);
+  await ctx.services.catalog.updateModel(
+    halo,
+    {
+      lookbook: 'RESERVED',
+      slug: 'halo',
+      story: 'One band of gold, closed without a seam: the ring of the house, worn alone.',
+      specs: 'Metal: 18K yellow gold\nFinish: Polished',
+      priceLabel: '€ 6 400',
+      privateMinTier: 3,
+    },
+    admin,
+  );
+  w.models.halo = halo;
+  w.demo.slugs.halo = 'halo';
+  for (const size of ['50', '52', '54', '56']) await ensureSku(ctx.db, halo, size);
+  await ctx.services.sizes.setModelSizes(halo, { sizeKind: 'RING' }, admin);
+  const sized = await account(w, 'sized', 'v.lemaire@example.com');
+  await holdPieces(ctx.db, sized.id, 10, w.models.steel!, since);
+  await ctx.services.sizes.set(sized.id, { RING: 52, BRACELET: 17 }, sized.actor);
+  const requested = await account(w, 'sizedRequested', 'o.benali@example.com');
+  await holdPieces(ctx.db, requested.id, 10, w.models.steel!, since);
+  await ctx.services.sizes.set(requested.id, { RING: 54 }, requested.actor);
+  clock.set(at('2026-10-05T12:30:00Z'));
+  await ctx.services.salon.request(requested.id, 'halo', null, requested.actor, '54');
+  await account(w, 'sizer', 's.girard@example.com');
 }
 
 // ── The yearly care (plan NEXT-NINE, BP-19 T6) ─────────────────────────────

@@ -23,10 +23,11 @@ const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
  * 320 px): THE COLLECTION and a model's sheet since N6 (a model's next release a draw, ENTRIES CLOSE … UTC); THE
  * RELEASES, a draw's page and a LIVE RELEASE's pages since N7 (a date of THE REVEALS held whole while it fits); THE
  * CIRCLE, a post, the sign-in and the legal pages since N8 (a post's duo, rows and results, the four tabs in French);
- * MY PIECES and a piece that could not be shown since N9 (C40).
+ * MY PIECES and a piece that could not be shown since N9 (C40); YOUR SIZES' view in the account sheet (plan NEXT-NINE,
+ * AC-01).
  */
 const NARROW = [375, 360, 320] as const;
-const NARROW_STATES = /^(collection|model|releases|live-|draw|circle|post|legal|pieces-sign|pieces-failed|piece-failed)(-|$)/;
+const NARROW_STATES = /^(collection|model|releases|live-|draw|circle|post|legal|pieces-sign|pieces-failed|piece-failed|sizes-view)(-|$)/;
 /**
  * Screens that are not extreme cases but hold the longest lines: N7's THE REVEALS of a release not yet revealed (C7,
  * C28); N8's feed with an invitation's YES / NO (C8), an invitation's and a poll's rows, duo and results (C22, C34),
@@ -40,6 +41,9 @@ const NARROW_TOO = [
   // THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): its box, GUARANTEED BY THE HOUSE, the account sheet's blocks, the
   // LIVE RELEASE's line, at 375, 360 and 320 px too (the room at the stage's 390 px).
   'draw-guaranteed', 'draw-guaranteed-entered', 'draw-guaranteed-drawn', 'draw-guarantee-account', 'draw-guarantee-pieces', 'live-announced-guaranteed', 'room-guaranteed',
+  // YOUR SIZES (plan NEXT-NINE, AC-01): its view in the account sheet, the salon's size picker and I'LL BE THERE with the
+  // size it preselects, at 375, 360 and 320 px too.
+  'sizes-view', 'model-salon-sizes', 'model-salon-size-requested', 'live-announced-from-yours',
 ];
 
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */

@@ -80,6 +80,11 @@
  *                 WRITE TO ORBES CLIENT SERVICES and MESSAGES alone (messages-*-phone.png, messages-*-desk.png; plan
  *                 NEXT-NINE, CS-01): MESSAGES_SHOTS, states of the parity tool, each at a phone's and a desk's size.
  *                 Not run by default (screens for the owner's review, into --out)
+ *   --only sizes
+ *                 YOUR SIZES alone (sizes-*-phone.png, sizes-*-desk.png; plan NEXT-NINE, AC-01): SIZES_SHOTS, the
+ *                 account sheet's view, saved, the salon's picker and REQUESTED with its size, I'LL BE THERE and the
+ *                 room with the size preselected, then confirmed; each at a phone's and a desk's size. Not run by
+ *                 default (screens for the owner's review, into --out)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -126,7 +131,7 @@ import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor, type ManualCl
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from '../test/support/live.js';
 import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, fullScreenshot, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, watchPage as watchPageInto, webpOf } from '../test/support/ui-stage.js';
 import { eachState } from '../test/support/nocturne-stage.js';
-import { openState, stateById } from '../test/support/nocturne-states.js';
+import { openState, ROOM_SIZE_STATES, stateById, type UiState } from '../test/support/nocturne-states.js';
 import { buildWeb } from './build-web.js';
 import { shoot as shootState } from './parity.js';
 
@@ -153,7 +158,7 @@ const DESKTOP = { width: 1440, height: 900 } as const;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-type Only = 'live' | 'plus' | 'nocturne' | 'messages';
+type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes';
 
 function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | null } {
   let out = DEFAULT_OUT;
@@ -162,8 +167,8 @@ function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | nu
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages')) only = argv[++i] as Only;
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes')) only = argv[++i] as Only;
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes)`);
   }
   return { out, raw, only };
 }
@@ -1838,13 +1843,20 @@ export const MESSAGES_SHOTS: readonly { state: string; name: string }[] = Object
 const DESK = Object.freeze({ width: 1440, height: 900 });
 
 async function captureMessages(shots: Shots): Promise<void> {
-  // The phones, then the desks, each on a demo of its own: a state that writes (a message sent, an answer) runs once
-  // per demo, so the desk's thread is not the phone's written twice.
+  await capturePhonesAndDesks(shots, MESSAGES_SHOTS, 'MESSAGES', stateById);
+}
+
+/**
+ * Each of `list`'s states at a phone's size, then at a desk's, the phones and the desks each on a demo of their own: a
+ * state that writes (a message sent, an answer, sizes saved) runs once per demo, so the desk's is not the phone's
+ * written twice.
+ */
+async function capturePhonesAndDesks(shots: Shots, list: readonly { state: string; name: string }[], label: string, find: (id: string) => UiState): Promise<void> {
   const failures: string[] = [];
   for (const desk of [false, true]) {
     const names = new Map<string, string>();
-    const states = MESSAGES_SHOTS.map((s) => {
-      const phone = stateById(s.state);
+    const states = list.map((s) => {
+      const phone = find(s.state);
       const state = desk ? { ...phone, id: `${phone.id}-desk`, size: DESK } : phone;
       names.set(state.id, `${s.name}-${desk ? 'desk' : 'phone'}`);
       return state;
@@ -1864,13 +1876,42 @@ async function captureMessages(shots: Shots): Promise<void> {
       log,
     );
   }
-  if (failures.length) throw new Error(`${failures.length} MESSAGES capture(s) failed:\n${failures.join('\n')}`);
+  if (failures.length) throw new Error(`${failures.length} ${label} capture(s) failed:\n${failures.join('\n')}`);
+}
+
+// ── YOUR SIZES (plan NEXT-NINE, AC-01) ───────────────────────────────────
+
+/**
+ * YOUR SIZES (plan NEXT-NINE, AC-01, step 4.3): the account sheet's view of a collector who saved two sizes, an account's
+ * sizes saved (its row's line), THE PRIVATE SALON's picker with the size suggested and REQUESTED · SIZE 54, I'LL BE THERE
+ * with its size preselected, and the room's READY CHECK at TO CONFIRM then ready, each at a phone's size and a desk's.
+ * `--only sizes` writes them alone.
+ */
+export const SIZES_SHOTS: readonly { state: string; name: string }[] = Object.freeze([
+  { state: 'sizes-view', name: 'sizes-01-view' },
+  { state: 'sizes-save', name: 'sizes-02-saved' },
+  { state: 'model-salon-sizes', name: 'sizes-03-salon-picker' },
+  { state: 'model-salon-size-requested', name: 'sizes-04-salon-requested' },
+  { state: 'live-announced-from-yours', name: 'sizes-05-ill-be-there' },
+  { state: 'room-from-yours', name: 'sizes-06-room-to-confirm' },
+  { state: 'room-from-yours-confirmed', name: 'sizes-07-room-confirmed' },
+]);
+
+async function captureSizes(shots: Shots): Promise<void> {
+  await capturePhonesAndDesks(shots, SIZES_SHOTS, 'YOUR SIZES', (id) => ROOM_SIZE_STATES.find((s) => s.id === id) ?? stateById(id));
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const { out, raw, only } = parseArgs(process.argv.slice(2));
+  if (only === 'sizes') {
+    const shots = new Shots(out, raw);
+    log('YOUR SIZES:');
+    await captureSizes(shots);
+    log(`${shots.written.length} screenshots in ${relative(process.cwd(), out) || '.'}`);
+    return;
+  }
   if (only === 'messages') {
     const shots = new Shots(out, raw);
     log('MESSAGES:');

@@ -213,8 +213,34 @@ export interface SalonModel {
   price: string | null;
   /** The tier it is offered from (TITANE, PLATINE, PALLADIUM). */
   tier: string;
-  /** The account's open request (REQUESTED: ORBES Client Services will contact it), with its model (CS-01: WRITE TO ORBES CLIENT SERVICES attaches it); null: REQUEST THIS PIECE is offered. */
-  request: { id: string; modelId: string } | null;
+  /**
+   * The account's open request (REQUESTED: ORBES Client Services will contact it), with its model (CS-01: WRITE TO ORBES
+   * CLIENT SERVICES attaches it) and the size asked (AC-01, REQUESTED · SIZE 52; null: none); null: REQUEST THIS PIECE
+   * is offered.
+   */
+  request: { id: string; modelId: string; size: string | null } | null;
+  /** AC-01: the model's sizes (the picker shows from two, with NOT SURE YET); none for a model of one size. */
+  sizes: string[];
+  /** AC-01: the size YOUR SIZES suggests, one of `sizes`; null for none. The collector confirms it by its own press. */
+  suggested: string | null;
+}
+
+/** AC-01: the salon's size picker, for a model of two sizes or more; null otherwise (REQUEST THIS PIECE sends no size). */
+export function salonPicker(salon: Pick<SalonModel, 'sizes' | 'suggested' | 'request'> | null): { sizes: string[]; suggested: string | null } | null {
+  if (!salon || salon.request || salon.sizes.length < 2) return null;
+  return { sizes: salon.sizes, suggested: salon.suggested };
+}
+
+/**
+ * AC-01: the size REQUEST THIS PIECE sends: the one the collector tapped (`tapped`, its size or null for NOT SURE YET),
+ * else the one YOUR SIZES suggests, preselected and confirmed by the press (`fromYours` while it stands untapped), else
+ * none (NOT SURE YET). Always none for a model of one size (no picker).
+ */
+export function salonSizePick(salon: Pick<SalonModel, 'sizes' | 'suggested' | 'request'> | null, tapped: { size: string | null } | null): { size: string | null; fromYours: boolean } {
+  const picker = salonPicker(salon);
+  if (!picker) return { size: null, fromYours: false };
+  if (tapped) return { size: tapped.size !== null && picker.sizes.includes(tapped.size) ? tapped.size : null, fromYours: false };
+  return { size: picker.suggested, fromYours: picker.suggested !== null };
 }
 
 /** What a sheet shows of one model of its group (N6: what its dot switches). */
@@ -309,8 +335,8 @@ export function selectDot(m: SheetModel, slug: string): SheetModel {
 }
 
 /** The sheet once the account requested the model of the dot `slug` (REQUEST THIS PIECE): REQUESTED on it, and on its dot. */
-export function withRequest(m: SheetModel, slug: string, id: string, modelId: string): SheetModel {
-  const requested = (f: SheetFace): SheetFace => (f.slug === slug && f.salon ? { ...f, salon: { ...f.salon, request: { id, modelId } } } : f);
+export function withRequest(m: SheetModel, slug: string, id: string, modelId: string, size: string | null = null): SheetModel {
+  const requested = (f: SheetFace): SheetFace => (f.slug === slug && f.salon ? { ...f, salon: { ...f.salon, request: { id, modelId, size } } } : f);
   return { ...requested(m), sizes: m.sizes, dots: m.dots.map((d) => ({ ...d, face: requested(d.face) })) };
 }
 
@@ -320,7 +346,18 @@ function salonModel(v: LookbookSheet['salon']): SalonModel | null {
   const tier = TIER_NAMES[Number(v.minTier)];
   if (!tier) return null;
   const r = v.request;
-  return { price: priceOf(v.priceLabel), tier, request: r && typeof r.id === 'string' && typeof r.modelId === 'string' && r.status === 'OPEN' ? { id: r.id, modelId: r.modelId } : null };
+  const sizes = Array.isArray(v.sizes) ? v.sizes.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+  const suggested = typeof v.suggestedSize === 'string' && sizes.includes(v.suggestedSize) ? v.suggestedSize : null;
+  return {
+    price: priceOf(v.priceLabel),
+    tier,
+    request:
+      r && typeof r.id === 'string' && typeof r.modelId === 'string' && r.status === 'OPEN'
+        ? { id: r.id, modelId: r.modelId, size: typeof r.size === 'string' && r.size.trim() !== '' ? r.size : null }
+        : null,
+    sizes,
+    suggested,
+  };
 }
 
 function discontinuedLine(year: unknown): string | null {

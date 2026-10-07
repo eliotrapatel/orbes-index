@@ -1759,6 +1759,40 @@ body.nocturne .view--sheet.n-model {
   margin-top: 22px;
 }
 
+/* AC-01, YOUR SIZE: the sizes, wrapping, and NOT SURE YET in words; the size YOUR SIZES suggests and its check. */
+.n-model__size-field {
+  margin-top: 22px;
+}
+
+.n-model__size-picker {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+
+.n-sizes__option.n-model__not-sure {
+  width: auto;
+  padding: 0 18px;
+  font-size: var(--n-fs-tl);
+  letter-spacing: var(--n-track-micro);
+}
+
+.n-model__yours {
+  margin-top: 14px;
+}
+
+.n-model__yours-check {
+  margin-top: 6px;
+}
+
+.n-model__size-hint {
+  margin-top: 10px;
+}
+
+.n-model__requested-size {
+  margin-top: 8px;
+}
+
 /* REQUESTED (C33, state 2): its word in ivory, its sentence, then the contact of ORBES Client Services. */
 .n-model__requested {
   margin-top: 22px;
@@ -2291,6 +2325,19 @@ body.nocturne[data-screen="live"] {
 
 .n-live__there-lead {
   margin-top: 14px;
+}
+
+/* AC-01: the size YOUR SIZES preselects (SIZE 52 · FROM YOUR SIZES), then the sentence to check it, under the sizes. */
+.n-live__yours-block {
+  margin-top: 14px;
+}
+
+.n-live__yours-check {
+  margin-top: 6px;
+}
+
+.live__yours-block[hidden] {
+  display: none;
 }
 
 .n-live__there-lead[hidden],
@@ -2849,6 +2896,30 @@ body.nocturne[data-screen="live"] {
 /* MESSAGES' row: NEW at its right, before the chevron. */
 .n-row__new {
   margin-left: auto;
+}
+
+/* YOUR SIZES' row (plan NEXT-NINE, AC-01): the sizes saved at its right, before the chevron, wrapping at their dots on a
+   narrow phone; the row's word keeps its line. */
+.n-row__value {
+  margin-left: auto;
+  min-width: 0;
+  text-align: right;
+}
+
+.n-account__sizes .n-row__label {
+  flex: none;
+}
+
+.n-account__sizes-view {
+  margin-top: 20px;
+}
+
+.n-account__sizes-lead {
+  margin-top: 10px;
+}
+
+.n-account__sizes-cancel {
+  margin-top: 10px;
 }
 
 .n-messages__head {

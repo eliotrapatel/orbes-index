@@ -256,7 +256,7 @@ The lock ends every session of the account, revokes its recovery code, withdraws
 
 ORBES processes the data of the service (account, registrations, scans, entries and reservations in releases, entries, options and reservations in the LIVE RELEASES, answers to the question after, orders and their invoices, answers and votes in the circle, requests in the private salon) as its privacy policy describes, which also says how ORBES groups collectors and counts their activity by hour. The service sends your orders to no online store. You can ask ORBES Client Services for a copy of everything the ORBES registry holds about your account. Your requests in the private salon, with your notes, are in that copy. Your entries in the LIVE RELEASES, with their options, and your I'LL BE THERE are in that copy. Your orders, with the buyer's name and address, their steps and their invoices, and your answers to the questions after are in that copy.
 
-*Code: R21, R90, R117, R133, R139, R144, R145, N10.*
+*Code: R21, R90, R117, R133, R139, R144, R145, R151, N10.*
 
 ## Article 18 — Liability
 

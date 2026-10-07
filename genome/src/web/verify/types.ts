@@ -399,7 +399,14 @@ export interface LookbookSheetVariant extends VariantDot {
   specs: { label: string; value: string }[];
   care: string | null;
   discontinuedYear: number | null;
-  salon?: { priceLabel: string | null; minTier: number; request?: ShopRequest | null };
+  salon?: {
+    priceLabel: string | null;
+    minTier: number;
+    request?: ShopRequest | null;
+    /** AC-01: the model's sizes (the picker shows from two), and the one YOUR SIZES suggests; absent from an older server. */
+    sizes?: string[];
+    suggestedSize?: string | null;
+  };
 }
 
 /** An account's request for a model of the private salon (P-X08), as its sheet and REQUEST THIS PIECE give it. */
@@ -409,6 +416,8 @@ export interface ShopRequest {
   createdAt: string;
   /** The model requested: what WRITE TO ORBES CLIENT SERVICES attaches on its sheet (CS-01). */
   modelId: string;
+  /** AC-01: the size asked (REQUESTED · SIZE 52); null or absent: none. */
+  size?: string | null;
 }
 
 /** A model's sheet (P-R02: GET /api/v1/lookbook/:slug, or the club's for an owner). */
@@ -435,7 +444,14 @@ export interface LookbookSheet {
    * P-X08, a RESERVED sheet read through the club (THE PRIVATE SALON): its price (or null), the lowest tier it is shown
    * to, and the account's open request (null: none, REQUEST THIS PIECE is offered).
    */
-  salon?: { priceLabel: string | null; minTier: number; request?: ShopRequest | null };
+  salon?: {
+    priceLabel: string | null;
+    minTier: number;
+    request?: ShopRequest | null;
+    /** AC-01: the model's sizes (the picker shows from two), and the one YOUR SIZES suggests; absent from an older server. */
+    sizes?: string[];
+    suggestedSize?: string | null;
+  };
   /** NOCTURNE N1: this model's own dot among its variants, or null. */
   variant?: VariantDot | null;
   /** NOCTURNE N1: the dots of its group the reader may see, the main model first, this one `selected`; empty for a model alone. */
@@ -951,6 +967,8 @@ export interface LiveState {
   interest: LiveInterest | null;
   /** IN-01: the house's guarantee set aside for this release, shown to the client: its pieces; null otherwise. */
   guarantee?: { pieces: number } | null;
+  /** AC-01: the size YOUR SIZES preselects, only without an entry or an interest; null otherwise. The collector confirms it. */
+  savedSize?: { id: string; label: string } | null;
 }
 
 /** An entry of the account in MY PIECES (GET /api/v1/live/mine), with its release, each part from its stage. */
@@ -1072,3 +1090,7 @@ export interface AccountThread {
   messages: AccountMessage[];
   unread: boolean;
 }
+
+/** YOUR SIZES (AC-01; GET and PUT /api/v1/account/sizes): a ring size, and centimetres for the others; null: not set. */
+export type SizeKind = 'RING' | 'BRACELET' | 'WRIST' | 'NECKLACE';
+export type AccountSizes = Record<SizeKind, number | null>;

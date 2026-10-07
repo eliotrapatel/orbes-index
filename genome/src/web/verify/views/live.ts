@@ -74,7 +74,7 @@ import {
   formatMoney,
   heldEntry,
   HOLD_MS,
-  initialSize,
+  initialPick,
   interestLine,
   isEndedSheet,
   lineFacts,
@@ -225,6 +225,10 @@ class LivePage {
   private access: LiveAccess | null = null;
   /** IN-01: the house's guarantee set aside for this release, shown to the account (its pieces), or null. */
   private guarantee: { pieces: number } | null = null;
+  /** AC-01: the size YOUR SIZES preselects (the server's, without an entry or an interest), or null. */
+  private savedSize: { id: string; label: string } | null = null;
+  /** AC-01: the size picked is YOUR SIZES' and not confirmed yet (no size tapped, nothing pressed). */
+  private fromYours = false;
   private interest: LiveInterest | null = null;
   private viewer: LiveViewer = 'unknown';
   /** The read of the state under way, if any. */
@@ -439,6 +443,7 @@ class LivePage {
     this.access = state.access;
     this.interest = state.interest;
     this.guarantee = state.guarantee ?? null;
+    this.savedSize = state.savedSize ?? null;
     this.setRoom(state.room);
     this.setEntry(state.entry);
     this.settle();
@@ -477,8 +482,40 @@ class LivePage {
     if (entry?.status !== 'QUEUED' && entry?.status !== 'TURN') this.sizeWasFull = false;
     this.entry = entry;
     const held = heldEntry(entry);
-    if (held) this.picked = { sizeId: held.size.id, quantity: held.quantity };
-    else if (this.picked.sizeId === null && this.sheet && !isEndedSheet(this.sheet)) this.picked = { sizeId: initialSize(this.sheet, entry, this.interest), quantity: this.picked.quantity };
+    if (held) {
+      this.picked = { sizeId: held.size.id, quantity: held.quantity };
+      this.fromYours = false;
+    } else if (this.picked.sizeId === null && this.sheet && !isEndedSheet(this.sheet)) {
+      const first = initialPick(this.sheet, entry, this.interest, this.savedSize);
+      this.picked = { sizeId: first.sizeId, quantity: this.picked.quantity };
+      this.fromYours = first.from === 'saved';
+    }
+  }
+
+  /** AC-01: the two lines under the sizes while the size picked is YOUR SIZES' and not confirmed; null otherwise. */
+  private fromYoursLines(): { size: string; check: string } | null {
+    if (!this.fromYours || this.interest || heldEntry(this.entry)) return null;
+    const label = this.sizeLabel(this.picked.sizeId);
+    return label === null ? null : { size: LIVE.there.fromYours(label), check: LIVE.there.checkSize };
+  }
+
+  /**
+   * The two lines (AC-01), drawn under a size picker, hidden while there is nothing to confirm: in NOCTURNE's pieces
+   * under I'LL BE THERE, in the room's own look (choice 4) under its picker.
+   */
+  private yoursBlock(look: 'nocturne' | 'room'): { el: HTMLElement; update(): void } {
+    const nocturne = look === 'nocturne';
+    const size = h('p', { class: nocturne ? 'n-g n-lb n-live__yours live__yours' : 'live__overline live__yours' });
+    const check = h('p', { class: nocturne ? 'n-sm n-live__yours-check live__yours-check' : 'live__note live__yours-check', text: LIVE.there.checkSize });
+    const el = h('div', { class: nocturne ? 'n-live__yours-block live__yours-block' : 'live__yours-block live__yours-block--room', attrs: { hidden: true } }, size, check);
+    return {
+      el,
+      update: () => {
+        const lines = this.fromYoursLines();
+        el.hidden = lines === null;
+        setFact(size, lines?.size ?? '');
+      },
+    };
   }
 
   /**
@@ -1063,6 +1100,8 @@ class LivePage {
           const said = h('p', { class: 'n-g n-t3 n-ivc n-live__said live__there-said' });
           const label = h('p', { class: 'n-g n-lb n-live__size-label', id: 'live-size', text: LIVE.yourSize });
           const sizes = this.sizes();
+          // AC-01: the size YOUR SIZES preselects, to check before I'LL BE THERE.
+          const yours = this.yoursBlock('nocturne');
           const lead = h('p', { class: 'n-sm n-live__there-lead', text: next === 'said' ? LIVE.there.change : LIVE.there.lead });
           const errorLine = h('p', { class: 'n-sm n-ivc n-live__error form__error', attrs: { role: 'alert', hidden: true } });
           const action = button(LIVE.there.action, { extraClass: 'n-live__there-action', onClick: () => this.sayThere() });
@@ -1070,11 +1109,12 @@ class LivePage {
           // Said: the size said stands in YOUR SIZE's place over the sizes (C28, state 1); the group keeps its name.
           // IN-01: under I'LL BE THERE, the house's guarantee shown to the account.
           const guaranteed = this.guarantee ? h('p', { class: 'n-sm n-live__there-lead live__guarantee', text: GUARANTEE.liveAnnounced }) : null;
-          body.replaceChildren(...[next === 'said' ? said : label, sizes.el, lead, errorLine, next === 'said' ? withdraw : action, guaranteed].filter((x): x is HTMLElement => x !== null));
+          body.replaceChildren(...[next === 'said' ? said : label, sizes.el, next === 'said' ? null : yours.el, lead, errorLine, next === 'said' ? withdraw : action, guaranteed].filter((x): x is HTMLElement => x !== null));
           sizes.el.setAttribute('aria-label', LIVE.yourSize);
           refresh = () => {
             setFact(said, this.interest ? LIVE.there.said(this.interest.size.label) : '');
             sizes.update();
+            yours.update();
             this.showError(errorLine);
             action.disabled = this.busy || this.picked.sizeId === null;
             action.setAttribute('aria-busy', String(this.busy));
@@ -1136,6 +1176,8 @@ class LivePage {
       if (this.interest.size.id !== sizeId) void this.setThere(sizeId);
       return;
     }
+    // AC-01: a size tapped is the collector's own: the lines of YOUR SIZES go.
+    this.fromYours = false;
     this.picked = { ...this.picked, sizeId };
     this.screen?.update();
   }
@@ -1163,7 +1205,10 @@ class LivePage {
       else after = await this.deps.api.liveInterest(s.id, sizeId);
       if (this.disposed) return;
       this.interest = after;
-      if (after) this.picked = { ...this.picked, sizeId: after.size.id };
+      if (after) {
+        this.picked = { ...this.picked, sizeId: after.size.id };
+        this.fromYours = false;
+      }
       const delta = (after ? 1 : 0) - (before ? 1 : 0);
       const sheet = this.live();
       if (delta !== 0 && sheet) this.sheet = { ...sheet, interest: Math.max(0, sheet.interest + delta) };
@@ -1226,11 +1271,14 @@ class LivePage {
     const fewer = h('button', { class: 'btn live__step', attrs: { type: 'button', 'aria-label': LIVE.fewer }, on: { click: () => onQuantity?.(this.picked.quantity - 1) }, text: '−' });
     const more = h('button', { class: 'btn live__step', attrs: { type: 'button', 'aria-label': LIVE.more }, on: { click: () => onQuantity?.(this.picked.quantity + 1) }, text: '+' });
     const quantity = max > 1 ? h('div', { class: 'live__qty', attrs: { role: 'group', 'aria-labelledby': 'live-qty' } }, h('span', { class: 'live__overline', id: 'live-qty', text: LIVE.quantity }), fewer, value, more) : null;
-    const el = h('div', { class: 'live__picker' }, label, grid, quantity);
+    // AC-01: the size YOUR SIZES preselects, to confirm by a tap or by entering.
+    const yours = this.yoursBlock('room');
+    const el = h('div', { class: 'live__picker' }, label, grid, yours.el, quantity);
     return {
       el,
       update: (choosing: boolean) => {
         el.classList.toggle('is-choosing', choosing);
+        yours.update();
         const choices = sizeChoices(s, this.room, this.picked.sizeId);
         for (const c of choices) {
           const b = buttons.get(c.id);
@@ -1330,7 +1378,7 @@ class LivePage {
         setTimeout(() => door.classList.add('is-open'), prefersReducedMotion() ? 0 : DOOR_DELAY_MS);
       }
       if (opened) return;
-      const checksNow = readyChecks({ access: this.access, size: this.sizeLabel(this.picked.sizeId), connection: this.connection, synced: this.synced });
+      const checksNow = readyChecks({ access: this.access, size: this.sizeLabel(this.picked.sizeId), toConfirm: this.fromYoursLines() !== null, connection: this.connection, synced: this.synced });
       const key = checksNow.map((c) => `${c.value}:${c.ok}`).join('|');
       if (checks.dataset.key !== key) {
         checks.dataset.key = key;
@@ -1373,6 +1421,7 @@ class LivePage {
     const presence = h('p', { class: 'live__presence' }, h('span', { class: 'live__dot', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'live__presence-text' }));
     const picker = this.picker(
       (id) => {
+        this.fromYours = false;
         this.picked = { ...this.picked, sizeId: id };
         this.screen?.update();
       },
@@ -1431,6 +1480,8 @@ class LivePage {
       void this.act(() => this.deps.api.liveSize(s.id, sizeId, this.maxPieces(s) > 1 ? this.picked.quantity : undefined));
       return;
     }
+    // AC-01: a size tapped, the one YOUR SIZES preselected too, is the collector's confirmation.
+    this.fromYours = false;
     this.picked = { ...this.picked, sizeId };
     this.screen?.update();
   }

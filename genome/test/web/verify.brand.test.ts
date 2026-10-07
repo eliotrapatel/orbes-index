@@ -202,6 +202,8 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     '.n-crumb',
     '.n-dbip',
     '.n-fl__link',
+    // YOUR SIZES' selects (plan NEXT-NINE, AC-01): a field's line, its reading face at the input's size.
+    '.n-fld__select-input',
     '.n-foot__club-link',
     '.n-opt2__option',
     '.n-own__link',

@@ -11,7 +11,8 @@
  *   tabs()        underlined tabs, as a tablist (`.tabs`, MY PIECES; `.tabsx`, a result's; `.switch2`, SIGN IN)
  *   accordionRow() a row with a hairline that opens (+ / −); leadRow() one that leads on (›)
  *   definitionList() facts (`.dl`), or label and value rows (`.kv`)
- *   field()       a field underlined on the dark (`.fld`, its label `.lab`)
+ *   field()       a field underlined on the dark (`.fld`, its label `.lab`); selectField() its twin for a native
+ *                 select (YOUR SIZES, plan NEXT-NINE AC-01), its chevron drawn at the line's right
  *   plateCard()   a plate card framed by a hairline inset 14 px (`.card`)
  *   fadedPhoto()  a photograph shown whole at the column's full width, fading into the ground at its top and foot
  *                 (`.ph.fade.contain`); lift() the text that rises 56 px onto it
@@ -248,6 +249,27 @@ export function field(id: string, label: string, input: HTMLInputElement, hint?:
   const hintEl = hint ? h('p', { class: 'n-sm n-fld__hint', id: `${id}-hint`, text: hint }) : null;
   if (hintEl) input.setAttribute('aria-describedby', hintEl.id);
   return h('div', { class: 'n-fld-group' }, h('label', { class: 'n-fld', attrs: { for: id } }, h('span', { class: 'n-g n-lab', text: label })), input, hintEl);
+}
+
+/**
+ * A native select styled as a field underlined on the dark (YOUR SIZES, AC-01): its label (Gravesend), the select in the
+ * reading face with the canvas's chevron turned down at its right, and the hint it is described by.
+ */
+export function selectField(id: string, label: string, options: readonly { value: string; label: string }[], value: string, hint?: string): { el: HTMLElement; select: HTMLSelectElement } {
+  const select = h(
+    'select',
+    { class: 'n-fld__input n-fld__select-input', id, attrs: { name: id } },
+    ...options.map((o) => h('option', { attrs: { value: o.value }, text: o.label })),
+  );
+  select.value = value;
+  const hintEl = hint ? h('p', { class: 'n-sm n-fld__hint', id: `${id}-hint`, text: hint }) : null;
+  if (hintEl) select.setAttribute('aria-describedby', hintEl.id);
+  const chevron = icon('chev', { small: true });
+  chevron.classList.add('n-fld__chev');
+  return {
+    el: h('div', { class: 'n-fld-group' }, h('label', { class: 'n-fld', attrs: { for: id } }, h('span', { class: 'n-g n-lab', text: label })), h('div', { class: 'n-fld__select' }, select, chevron), hintEl),
+    select,
+  };
 }
 
 /** A plate card: the plate, a hairline frame inset 14 px; centred unless `left`. */

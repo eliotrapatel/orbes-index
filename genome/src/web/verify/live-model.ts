@@ -343,14 +343,18 @@ export interface ReadyCheck {
   ok: boolean;
 }
 
-/** READY CHECK: signed in · access · size · connection live · clock synced to ORBES. */
-export function readyChecks(o: { access: LiveAccess | null; size: string | null; connection: 'live' | 'reconnecting'; synced: boolean }): ReadyCheck[] {
+/**
+ * READY CHECK: signed in · access · size · connection live · clock synced to ORBES. A size preselected from YOUR SIZES
+ * (AC-01, `toConfirm`) reads `52 · TO CONFIRM`, not ready until the collector taps a size or enters.
+ */
+export function readyChecks(o: { access: LiveAccess | null; size: string | null; toConfirm?: boolean; connection: 'live' | 'reconnecting'; synced: boolean }): ReadyCheck[] {
   const r = LIVE.ready;
   const tier = o.access?.tier ?? 0;
+  const confirming = o.size !== null && o.toConfirm === true;
   return [
     { label: r.signedIn, value: '', ok: true },
     { label: r.access, value: o.access?.allowed ? (tier >= 1 ? tierLabel(tier) : r.granted) : '', ok: o.access?.allowed === true },
-    { label: r.size, value: o.size ?? r.choose, ok: o.size !== null },
+    { label: r.size, value: o.size === null ? r.choose : confirming ? `${o.size} · ${r.toConfirm}` : o.size, ok: o.size !== null && !confirming },
     { label: r.connection, value: o.connection === 'live' ? r.live : r.reconnecting, ok: o.connection === 'live' },
     { label: r.clock, value: o.synced ? r.synced : r.syncing, ok: o.synced },
   ];
@@ -380,16 +384,31 @@ export function sizeChoices(sheet: LiveSheet, room: LiveRoom | null, selected: s
     .map((s) => ({ id: s.id, label: s.label, available: (servable(roomSize(room, s.id)) ?? 1) >= 1, selected: s.id === selected }));
 }
 
+/** Where the picker's first size comes from (AC-01: YOUR SIZES' is to be confirmed). */
+export type InitialSizeFrom = 'entry' | 'interest' | 'saved' | 'only';
+
 /**
- * The size preselected in the picker: the entry's, else the one said with I'LL BE THERE (when it is still offered), else
- * the only size of a one-size release; null otherwise (the collector picks one).
+ * The size preselected in the picker and where it comes from, in this order: the entry's, the one said with I'LL BE
+ * THERE (when it is still offered), the one YOUR SIZES preselects (AC-01: the server's `savedSize`, still offered; the
+ * collector confirms it), the only size of a one-size release; null otherwise (the collector picks one).
  */
-export function initialSize(sheet: LiveSheet, entry: LiveEntry | null, interest: LiveInterest | null): string | null {
+export function initialPick(
+  sheet: LiveSheet,
+  entry: LiveEntry | null,
+  interest: LiveInterest | null,
+  savedSize: { id: string; label?: string } | null = null,
+): { sizeId: string | null; from: InitialSizeFrom | null } {
   const offered = sheet.sizes.filter((s) => s.stock > 0);
   const held = heldEntry(entry);
-  if (held && offered.some((s) => s.id === held.size.id)) return held.size.id;
-  if (interest && offered.some((s) => s.id === interest.size.id)) return interest.size.id;
-  return offered.length === 1 ? offered[0]!.id : null;
+  if (held && offered.some((s) => s.id === held.size.id)) return { sizeId: held.size.id, from: 'entry' };
+  if (interest && offered.some((s) => s.id === interest.size.id)) return { sizeId: interest.size.id, from: 'interest' };
+  if (savedSize && offered.some((s) => s.id === savedSize.id)) return { sizeId: savedSize.id, from: 'saved' };
+  return offered.length === 1 ? { sizeId: offered[0]!.id, from: 'only' } : { sizeId: null, from: null };
+}
+
+/** The size preselected in the picker (initialPick's): the entry's, I'LL BE THERE's, YOUR SIZES', the only one. */
+export function initialSize(sheet: LiveSheet, entry: LiveEntry | null, interest: LiveInterest | null, savedSize: { id: string; label?: string } | null = null): string | null {
+  return initialPick(sheet, entry, interest, savedSize).sizeId;
 }
 
 /** The last minute: the lock's orbits turn back into alignment. */

@@ -1118,6 +1118,31 @@ body.nocturne .n-column > * {
   margin-top: 6px;
 }
 
+/* A select as a field (YOUR SIZES, plan NEXT-NINE AC-01): the same line, the canvas's chevron turned down at its right,
+   room kept for it; its options on the plate in the reading face. */
+.n-fld__select {
+  position: relative;
+}
+
+.n-fld__select-input {
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+.n-fld__select-input option {
+  background: var(--vault-plate);
+  color: var(--vault-ink);
+}
+
+.n-fld__chev {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  margin-top: -8px;
+  transform: rotate(90deg);
+  pointer-events: none;
+}
+
 .n-fieldline {
   display: flex;
   align-items: flex-end;

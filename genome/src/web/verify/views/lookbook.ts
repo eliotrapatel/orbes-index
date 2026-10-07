@@ -22,8 +22,10 @@
  * DISCONTINUED · <year>), SIZES 16 · 17 · 18 (addition 8), the dots (each switches the sheet: its photographs, story,
  * facts, care, the salon's price and request; the address follows, so a variant's own address opens it selected), You
  * own N; the model's next release as a plate row (its day and hour, no countdown); for a model of the salon its price,
- * the tier it is offered from, its sentence, a note and REQUEST THIS PIECE (the sheet's one primary action), or once
- * requested REQUESTED with WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01); THE STORY, the gallery full width, SPECIFICATIONS, CARE.
+ * the tier it is offered from, its sentence, for a model of two sizes or more YOUR SIZE (its sizes and NOT SURE YET, the
+ * one YOUR SIZES suggests preselected with SIZE 52 · FROM YOUR SIZES, else NOT SURE YET; plan NEXT-NINE, AC-01), a note
+ * and REQUEST THIS PIECE (the sheet's one primary action), or once requested REQUESTED (and SIZE 52 when one was asked)
+ * with WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01); THE STORY, the gallery full width, SPECIFICATIONS, CARE.
  *
  * The grid reads GET /api/v1/lookbook (the same for everyone) and, for a signed-in account, the club's reserved models
  * (a 403 for an account that holds no piece: the teaser; none of its tier: what opens the salon, `opensAt`) and its
@@ -37,15 +39,15 @@
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { LOOKBOOK } from '../copy.js';
+import { LIVE, LOOKBOOK } from '../copy.js';
 import { modelContext } from '../messages-model.js';
-import { cardFace, lookbookGroups, lookbookSheetPath, ownedLine, SALON_NOTE_MAX, selectDot, sheetLine, sheetModel, withRequest, type CardModel, type CollectionGroup, type SheetModel } from '../lookbook-model.js';
+import { cardFace, lookbookGroups, lookbookSheetPath, ownedLine, SALON_NOTE_MAX, salonPicker, salonSizePick, selectDot, sheetLine, sheetModel, withRequest, type CardModel, type CollectionGroup, type SheetModel } from '../lookbook-model.js';
 import { nextRelease, type NextReleaseModel } from '../next-release-model.js';
 import type { SessionStore } from '../session.js';
 import type { ClubLookbook, DropCard, LiveCard, OwnedPiece, SalonOpening } from '../types.js';
 import { LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { appAnchor, button, definitionList, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, textLink, variantDots } from './nocturne.js';
+import { appAnchor, button, definitionList, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, sizeButtons, textLink, variantDots } from './nocturne.js';
 import { writeButton } from './write.js';
 
 export interface LookbookView {
@@ -363,6 +365,11 @@ class SheetPage {
   /** P-X08: REQUEST THIS PIECE under way, its refusal, the note typed (kept across a render). */
   private busy = false;
   private requestError: string | null = null;
+  /**
+   * AC-01: the size the collector tapped in YOUR SIZE on the model of the dot `slug` (null: NOT SURE YET), kept across a
+   * render; none tapped yet: the size YOUR SIZES suggests is preselected, to confirm.
+   */
+  private sizeTapped: { slug: string; size: string | null } | null = null;
   private readonly note = h('textarea', {
     class: 'n-model__note sheet__note',
     attrs: { id: 'sheet-note', name: 'note', rows: 3, maxlength: SALON_NOTE_MAX, 'aria-describedby': 'sheet-note-hint' },
@@ -611,6 +618,8 @@ class SheetPage {
           'div',
           { class: 'n-model__requested sheet__requested', attrs: { role: 'status' } },
           h('p', { class: 'n-g n-t3 n-ivc n-model__requested-label', text: LOOKBOOK.salon.requestedLabel }),
+          // AC-01: the size asked, under its label.
+          salon.request.size ? h('p', { class: 'n-g n-lb n-model__requested-size' }, ...withNumerals(LOOKBOOK.salon.requestedSize(salon.request.size))) : null,
           h('p', { class: 'n-tx n-model__requested-text sheet__requested-text', text: LOOKBOOK.salon.requested }),
         ),
         // WRITE TO ORBES CLIENT SERVICES, the model and its request attached (CS-01).
@@ -619,6 +628,7 @@ class SheetPage {
     } else {
       out.push(
         h('p', { class: 'n-tx n-model__salon-lead', text: LOOKBOOK.salon.lead }),
+        this.salonSizes(s),
         h(
           'div',
           { class: 'n-fld-group n-model__note-field' },
@@ -637,6 +647,59 @@ class SheetPage {
     return h('section', { class: 'n-px n-sec n-model__salon sheet__section sheet__salon', attrs: { 'aria-labelledby': 'sheet-salon' } }, ...out.filter((x): x is HTMLElement => x !== null));
   }
 
+  /**
+   * AC-01: the size the request asks for the sheet's model: the one tapped, else YOUR SIZES' suggestion; null for NOT SURE
+   * YET, and for a model of one size (no picker). `fromYours` while the suggestion stands untapped.
+   */
+  private salonSizeOf(s: SheetModel): { size: string | null; fromYours: boolean } {
+    return salonSizePick(s.salon, this.sizeTapped?.slug === s.slug ? this.sizeTapped : null);
+  }
+
+  /**
+   * AC-01, YOUR SIZE: for a model of two sizes or more, its sizes and NOT SURE YET above the note; the size YOUR SIZES
+   * suggests preselected with SIZE 52 · FROM YOUR SIZES and the sentence to check it, else NOT SURE YET; then the hint.
+   * Nothing is sent before REQUEST THIS PIECE.
+   */
+  private salonSizes(s: SheetModel): HTMLElement | null {
+    const picker = salonPicker(s.salon);
+    if (!picker) return null;
+    const picked = this.salonSizeOf(s);
+    const NOT_SURE = '';
+    const group = sizeButtons(
+      [...picker.sizes.map((z) => ({ id: z, label: z })), { id: NOT_SURE, label: LOOKBOOK.salon.notSure }],
+      {
+        selected: picked.size ?? NOT_SURE,
+        label: LOOKBOOK.salon.size,
+        onSelect: (id) => {
+          this.sizeTapped = { slug: s.slug, size: id === NOT_SURE ? null : id };
+          quietly(this.body, () => this.render());
+          this.body.querySelector<HTMLElement>('.n-model__size-picker [aria-pressed="true"]')?.focus();
+        },
+      },
+    );
+    group.classList.add('n-model__size-picker');
+    group.setAttribute('aria-labelledby', 'sheet-size');
+    group.removeAttribute('aria-label');
+    const notSure = group.lastElementChild as HTMLElement | null;
+    notSure?.classList.remove('n-num');
+    notSure?.classList.add('n-g', 'n-model__not-sure');
+    return h(
+      'div',
+      { class: 'n-model__size-field' },
+      h('p', { class: 'n-g n-lb n-model__size-label', id: 'sheet-size', text: LOOKBOOK.salon.size }),
+      group,
+      picked.fromYours && picked.size
+        ? h(
+            'div',
+            { class: 'n-model__yours' },
+            h('p', { class: 'n-g n-lb n-model__yours-size' }, ...withNumerals(LIVE.there.fromYours(picked.size))),
+            h('p', { class: 'n-sm n-model__yours-check', text: LIVE.there.checkSize }),
+          )
+        : null,
+      h('p', { class: 'n-sm n-fld__hint n-model__size-hint', text: LOOKBOOK.salon.sizeHint }),
+    );
+  }
+
   /** REQUEST THIS PIECE: the request recorded, then the sheet says ORBES Client Services will contact you. */
   private async requestPiece(): Promise<void> {
     if (this.busy || this.load.kind !== 'ready' || !this.load.sheet.salon) return;
@@ -646,10 +709,13 @@ class SheetPage {
     this.render();
     try {
       const note = this.note.value.trim();
-      const request = await this.deps.api.requestPiece(sheet.slug, note.length > 0 ? note : null);
+      // AC-01: the size picked (YOUR SIZES' suggestion is confirmed by this press), or none.
+      const size = this.salonSizeOf(sheet).size;
+      const request = await this.deps.api.requestPiece(sheet.slug, note.length > 0 ? note : null, size);
       if (this.disposed) return;
       this.note.value = '';
-      this.load = { kind: 'ready', sheet: withRequest(this.load.kind === 'ready' ? this.load.sheet : sheet, sheet.slug, request.id, request.modelId) };
+      this.sizeTapped = null;
+      this.load = { kind: 'ready', sheet: withRequest(this.load.kind === 'ready' ? this.load.sheet : sheet, sheet.slug, request.id, request.modelId, request.size ?? size) };
     } catch (e) {
       if (this.disposed) return;
       this.deps.session.noteError(e);

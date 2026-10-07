@@ -58,7 +58,7 @@ import {
 } from '../../src/web/shared/lookbook.js';
 import * as verifyCopy from '../../src/web/verify/copy.js';
 import { DEFAULT_CARE, LOOKBOOK, PHOTOS } from '../../src/web/verify/copy.js';
-import { cardFace, LOOKBOOK_PATH, lookbookGroups, lookbookRouteOf, lookbookSheetPath, ownedLine, SALON_NOTE_MAX, selectDot, sheetLine, sheetModel, withRequest } from '../../src/web/verify/lookbook-model.js';
+import { cardFace, LOOKBOOK_PATH, lookbookGroups, lookbookRouteOf, lookbookSheetPath, ownedLine, SALON_NOTE_MAX, salonPicker, salonSizePick, selectDot, sheetLine, sheetModel, withRequest } from '../../src/web/verify/lookbook-model.js';
 import type { LookbookCard, LookbookSheet, VerifyOutcome } from '../../src/web/verify/types.js';
 import { resultViewModel } from '../../src/web/verify/view-model.js';
 import { contextInput, modelContext } from '../../src/web/verify/messages-model.js';
@@ -269,8 +269,10 @@ describe('a model\'s sheet (P-R02)', () => {
     expect(selectDot(s, 'elsewhere')).toBe(s);
     // REQUEST THIS PIECE on a dot: REQUESTED on it and on its dot, nowhere else.
     const requested = withRequest(selectDot(s, 'monolithe-onyx'), 'monolithe-onyx', 'r-1', 'm-1');
-    expect(requested.salon!.request).toEqual({ id: 'r-1', modelId: 'm-1' });
-    expect(selectDot(selectDot(requested, 'monolithe'), 'monolithe-onyx').salon!.request).toEqual({ id: 'r-1', modelId: 'm-1' });
+    expect(requested.salon!.request).toEqual({ id: 'r-1', modelId: 'm-1', size: null });
+    expect(selectDot(selectDot(requested, 'monolithe'), 'monolithe-onyx').salon!.request).toEqual({ id: 'r-1', modelId: 'm-1', size: null });
+    // AC-01: requested with a size, REQUESTED says it.
+    expect(withRequest(selectDot(s, 'monolithe-onyx'), 'monolithe-onyx', 'r-1', 'm-1', '52').salon!.request).toEqual({ id: 'r-1', modelId: 'm-1', size: '52' });
     expect(requested.dots[0]!.face.salon).toBeNull();
     // One dot alone is no choice: none.
     expect(sheetModel(sheet({ variants: [variant('monolithe', 'Steel', '#9D9B96', { selected: true })] })).dots).toEqual([]);
@@ -301,9 +303,15 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
 
   it('gives a reserved sheet read through the club its price, its tier and the account\'s open request; nothing on a public sheet', () => {
     const salon = (extra: Partial<NonNullable<LookbookSheet['salon']>> = {}) => sheetModel(sheet({ lookbook: 'RESERVED', salon: { priceLabel: '€ 4 800', minTier: 2, request: null, ...extra } })).salon;
-    expect(salon()).toEqual({ price: '€ 4 800', tier: 'PLATINE', request: null });
-    expect(salon({ priceLabel: null, minTier: 1 })).toEqual({ price: null, tier: 'TITANE', request: null });
-    expect(salon({ minTier: 3, request: { id: 'r-1', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm-1' } })).toEqual({ price: '€ 4 800', tier: 'PALLADIUM', request: { id: 'r-1', modelId: 'm-1' } });
+    expect(salon()).toEqual({ price: '€ 4 800', tier: 'PLATINE', request: null, sizes: [], suggested: null });
+    expect(salon({ priceLabel: null, minTier: 1 })).toEqual({ price: null, tier: 'TITANE', request: null, sizes: [], suggested: null });
+    expect(salon({ minTier: 3, request: { id: 'r-1', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm-1' } })).toEqual({
+      price: '€ 4 800',
+      tier: 'PALLADIUM',
+      request: { id: 'r-1', modelId: 'm-1', size: null },
+      sizes: [],
+      suggested: null,
+    });
     // A closed request offers REQUEST THIS PIECE again; a tier the club does not have, nothing to request from.
     expect(salon({ request: { id: 'r-1', status: 'CLOSED', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm-1' } })!.request).toBeNull();
     expect(salon({ minTier: 4 })).toBeNull();
@@ -311,6 +319,36 @@ describe('THE PRIVATE SALON on /verify (P-X08)', () => {
     expect(sheetModel(sheet({ salon: { priceLabel: '€ 1', minTier: 1, request: null } })).salon).toBeNull();
     // The tiers it names are the club's.
     expect([1, 2, 3].map((t) => salon({ minTier: t })!.tier)).toEqual([...SERVER_TIER_NAMES]);
+  });
+
+  it('offers YOUR SIZE for a model of two sizes or more: YOUR SIZES\' suggestion preselected to confirm, else NOT SURE YET, which sends no size; never a size the model lacks (AC-01)', () => {
+    const salon = (extra: Partial<NonNullable<LookbookSheet['salon']>> = {}) => sheetModel(sheet({ lookbook: 'RESERVED', salon: { priceLabel: null, minTier: 1, request: null, ...extra } })).salon;
+    // The sizes as the server sends them; a suggestion it does not list is no suggestion.
+    expect(salon({ sizes: ['50', '52', '54'], suggestedSize: '52' })).toMatchObject({ sizes: ['50', '52', '54'], suggested: '52' });
+    expect(salon({ sizes: ['50', '52'], suggestedSize: '60' })!.suggested).toBeNull();
+    expect(salon({ sizes: ['50', 7 as unknown as string, ''], suggestedSize: null })!.sizes).toEqual(['50']);
+    // The picker from two sizes; none for one size, none once requested.
+    expect(salonPicker(salon({ sizes: ['50', '52'] }))).toEqual({ sizes: ['50', '52'], suggested: null });
+    expect(salonPicker(salon({ sizes: ['52'], suggestedSize: '52' }))).toBeNull();
+    expect(salonPicker(salon({ sizes: ['50', '52'], request: { id: 'r', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm', size: '52' } }))).toBeNull();
+    // What REQUEST THIS PIECE sends: the suggestion while untapped (from YOUR SIZES), the size tapped, or null.
+    const suggested = salon({ sizes: ['50', '52', '54'], suggestedSize: '52' });
+    expect(salonSizePick(suggested, null)).toEqual({ size: '52', fromYours: true });
+    expect(salonSizePick(suggested, { size: '54' })).toEqual({ size: '54', fromYours: false });
+    expect(salonSizePick(suggested, { size: '52' })).toEqual({ size: '52', fromYours: false });
+    expect(salonSizePick(suggested, { size: null })).toEqual({ size: null, fromYours: false });
+    expect(salonSizePick(suggested, { size: '99' })).toEqual({ size: null, fromYours: false });
+    expect(salonSizePick(salon({ sizes: ['50', '52'] }), null)).toEqual({ size: null, fromYours: false });
+    expect(salonSizePick(salon({ sizes: ['52'], suggestedSize: '52' }), null)).toEqual({ size: null, fromYours: false });
+    // REQUESTED with its size, as the server keeps it.
+    expect(salon({ request: { id: 'r', status: 'OPEN', createdAt: '2026-10-04T10:00:00.000Z', modelId: 'm', size: '52' } })!.request).toEqual({ id: 'r', modelId: 'm', size: '52' });
+    // The words: YOUR SIZE, NOT SURE YET, its hint, and SIZE 52 under REQUESTED.
+    expect([LOOKBOOK.salon.size, LOOKBOOK.salon.notSure, LOOKBOOK.salon.sizeHint, LOOKBOOK.salon.requestedSize('52')]).toEqual([
+      'YOUR SIZE',
+      'NOT SURE YET',
+      'ORBES Client Services confirms it with you.',
+      'SIZE 52',
+    ]);
   });
 
   it('gives a PUBLIC sheet read through the club the dot of its variant in the salon: its price, its tier and the account\'s open request (N6)', () => {

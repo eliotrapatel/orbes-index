@@ -203,3 +203,35 @@ export function hiddenGuaranteeSuite(name: string, cases: readonly { state: UiSt
     );
   });
 }
+
+/**
+ * Plan NEXT-NINE, AC-01: states kept out of UI_STATES (a shard at its limit, ROOM_SIZE_STATES), each reached on its demo
+ * and checked by its words: each of `present` shown, none of `absent`.
+ */
+export function shownSuite(name: string, cases: readonly { state: UiState; present: readonly RegExp[]; absent?: readonly RegExp[] }[]): void {
+  describe.skipIf(!HAS_CHROMIUM)(`${name} (Chromium)`, () => {
+    it(
+      `shows what each of ${cases.length} screens says, and nothing it no longer says`,
+      async () => {
+        const found: string[] = [];
+        await eachState(
+          cases.map((c) => c.state),
+          async (state, { stage, demo, browser }) => {
+            const c = cases.find((x) => x.state === state)!;
+            const opened = await openState(browser, stage, demo, state);
+            try {
+              const texts = await pageTexts(opened.page);
+              for (const re of c.present) if (!texts.some((t) => re.test(t))) found.push(`${state.id}: does not show ${re}`);
+              for (const re of c.absent ?? []) if (texts.some((t) => re.test(t))) found.push(`${state.id}: shows ${re}`);
+            } finally {
+              await opened.close();
+            }
+          },
+          () => {},
+        );
+        expect(found).toEqual([]);
+      },
+      SHARD_TIMEOUT_MS,
+    );
+  });
+}

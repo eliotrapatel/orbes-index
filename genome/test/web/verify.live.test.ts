@@ -23,6 +23,7 @@ import {
   doorOpen,
   formatMoney,
   heldEntry,
+  initialPick,
   initialSize,
   isEndedSheet,
   lineFacts,
@@ -390,6 +391,18 @@ describe('the room', () => {
     expect(pending.map((c) => [c.value, c.ok])).toEqual([['', true], ['GRANTED', true], ['TO CHOOSE', false], ['RECONNECTING', false], ['SYNCING', false]]);
   });
 
+  it('reads a size YOUR SIZES preselected as 52 · TO CONFIRM, not ready, until the collector taps a size or enters (AC-01)', () => {
+    const access = { allowed: true, tier: 2, missing: null, participations: null };
+    const size = (o: { size: string | null; toConfirm?: boolean }) => readyChecks({ access, connection: 'live', synced: true, ...o })[2];
+    expect(size({ size: '52', toConfirm: true })).toEqual({ label: 'SIZE', value: '52 · TO CONFIRM', ok: false });
+    expect(size({ size: '52', toConfirm: false })).toEqual({ label: 'SIZE', value: '52', ok: true });
+    expect(size({ size: null, toConfirm: true })).toEqual({ label: 'SIZE', value: 'TO CHOOSE', ok: false });
+    expect(LIVE.ready.toConfirm).toBe('TO CONFIRM');
+    expect(LIVE.there.fromYours('52')).toBe('SIZE 52 · FROM YOUR SIZES');
+    expect(LIVE.there.fromYours('ONE SIZE')).toBe('ONE SIZE · FROM YOUR SIZES');
+    expect(LIVE.there.checkSize).toBe('Check it is right for this model before you confirm.');
+  });
+
   it('offers the sizes with stock, the one of I\'LL BE THERE preselected, the only one of a one-size release', () => {
     const s = sheet();
     expect(sizeChoices(s, room(), S52)).toEqual([
@@ -409,6 +422,15 @@ describe('the room', () => {
     expect(initialSize(s, null, { ...interest, size: { id: S56, label: '56' } })).toBeNull();
     expect(initialSize(s, null, null)).toBeNull();
     expect(initialSize(sheet({ sizes: [{ id: S52, label: 'ONE SIZE', stock: 25 }] }), null, null)).toBe(S52);
+    // AC-01, in order: the entry's, I'LL BE THERE's, then the size YOUR SIZES preselects (still offered), then the only one.
+    const saved = { id: S52, label: '52' };
+    expect(initialPick(s, entry(), interest, saved)).toEqual({ sizeId: S52, from: 'entry' });
+    expect(initialPick(s, null, interest, saved)).toEqual({ sizeId: S48, from: 'interest' });
+    expect(initialPick(s, null, null, saved)).toEqual({ sizeId: S52, from: 'saved' });
+    expect(initialSize(s, null, null, saved)).toBe(S52);
+    expect(initialPick(s, null, null, { id: S56, label: '56' })).toEqual({ sizeId: null, from: null });
+    expect(initialPick(sheet({ sizes: [{ id: S52, label: 'ONE SIZE', stock: 25 }] }), null, null, { id: S52, label: 'ONE SIZE' })).toEqual({ sizeId: S52, from: 'saved' });
+    expect(initialPick(sheet({ sizes: [{ id: S52, label: 'ONE SIZE', stock: 25 }] }), null, null, null)).toEqual({ sizeId: S52, from: 'only' });
   });
 
   it('turns the lock\'s orbits back into alignment during the last minute, a step a second, aligned at T0', () => {

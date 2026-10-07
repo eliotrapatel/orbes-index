@@ -1353,6 +1353,16 @@ body[data-screen="live"]:has(.view--live.is-light) .corners {
   text-decoration: line-through;
 }
 
+/* AC-01: under the room's sizes, the size YOUR SIZES preselects and the sentence to check it, centred. */
+.live__yours-block--room {
+  margin-top: 14px;
+  text-align: center;
+}
+
+.live__yours-block--room .live__note {
+  margin: 6px auto 0;
+}
+
 .live__qty {
   display: flex;
   align-items: center;
