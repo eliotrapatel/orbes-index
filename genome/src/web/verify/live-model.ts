@@ -33,6 +33,7 @@ import type {
 } from './types.js';
 import { formatMoney, modelWithVariant, upper } from './view-model.js';
 import { referenceWords, releaseContext } from './messages-model.js';
+import { storyCardModel, type StoryCardModel } from './story-card.js';
 
 const MEDIA_SRC = /^\/api\/v1\/media\/[0-9a-f]{64}$/;
 const SECOND = 1000;
@@ -528,6 +529,15 @@ export function pictureOf(c: Pick<LiveCard, 'imageUrl' | 'silhouetteUrl' | 'name
 export function liveHeading(c: Pick<LiveCard, 'name' | 'variant'>): string | null {
   if (typeof c.name !== 'string' || !c.name.trim()) return null;
   return upper(modelWithVariant(c.name, c.variant));
+}
+
+/**
+ * SHARE TO STORIES under CONFIRMED (plan NEXT-NINE, §3.8 BP-10): the CONFIRMED story card of a piece secured: LIVE
+ * RELEASE, the model with its variant (MONOLITHE / IN BLUE; an after-room's piece is a LIVE RELEASE's too, never THE
+ * AFTER-ROOM), the day of T0 on this phone's calendar. Null before the name's stage or without the model's photograph.
+ */
+export function liveStoryModel(s: Pick<LiveSheet | LiveEndedSheet, 'imageUrl' | 'name' | 'variant' | 'opensAt'>, localZone: string): StoryCardModel | null {
+  return storyCardModel('live', { photo: s.imageUrl, model: s.name, variant: s.variant ?? null, at: s.opensAt, zone: localZone });
 }
 
 /**

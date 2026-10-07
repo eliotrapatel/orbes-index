@@ -31,6 +31,7 @@ import {
   interestLine,
   liveCards,
   liveHeading,
+  liveStoryModel,
   accessRules,
   liveReference,
   measureClock,
@@ -57,6 +58,7 @@ import {
   type LiveScreenInput,
 } from '../../src/web/verify/live-model.js';
 import { SEAL_RINGS, SPECIMEN_GLYPHS, specimenData } from '../../src/web/verify/live-seal.js';
+import { StoryCards } from '../../src/web/verify/story-card.js';
 import type { LiveAccountEntry, LiveCard, LiveEndedSheet, LiveEntry, LiveRoom, LiveSheet } from '../../src/web/verify/types.js';
 
 const ID = '8a1d0c55-4b2e-4f3a-9c1d-0e5f6a7b8c9d';
@@ -786,5 +788,47 @@ describe('the vault palette (brand.css), computed', () => {
     expect(contrast(token('--vault-ground'), token('--vault-ink'))).toBeGreaterThanOrEqual(4.5);
     expect(brand).toMatch(/--vault-hairline: rgba\(246, 242, 234, 0\.14\);/);
     expect(brand).toMatch(/--vault-hairline-strong: rgba\(246, 242, 234, 0\.34\);/);
+  });
+});
+
+describe('SHARE TO STORIES under CONFIRMED (plan NEXT-NINE, §3.8 BP-10)', () => {
+  const view = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/views/live.ts'), 'utf8');
+  const PHOTO = `/api/v1/media/${'c'.repeat(64)}`;
+
+  it('makes the CONFIRMED card of a piece secured: LIVE RELEASE, the model with its variant, the day of T0 on this phone', () => {
+    const s = { imageUrl: PHOTO, name: 'MONOLITHE', variant: 'Blue', opensAt: '2026-10-08T17:00:00.000Z' };
+    expect(liveStoryModel(s, 'Europe/Paris')).toEqual({ origin: 'live', photo: PHOTO, status: 'CONFIRMED', eyebrow: 'LIVE RELEASE', title: ['MONOLITHE', 'IN BLUE'], date: '8 OCTOBER 2026' });
+    // On a phone in Tokyo, T0 of 17:00 UTC is already the next day.
+    expect(liveStoryModel(s, 'Asia/Tokyo')!.date).toBe('9 OCTOBER 2026');
+    // The silhouette is never the card's photograph: without the model's own, no card.
+    expect(liveStoryModel({ ...s, imageUrl: null }, 'UTC')).toBeNull();
+  });
+
+  it('shows the button on the CONFIRMED screen, under the receipt plate; never on the final page\'s receipt', () => {
+    const confirmed = view.slice(view.indexOf('private confirmedScreen'), view.indexOf('private storyOpen'));
+    expect(confirmed).toContain('this.storyOpen(e),');
+    const receipt = view.slice(view.indexOf('private receipt(e: LiveEntry'), view.indexOf('private questionBlock'));
+    expect(receipt).not.toMatch(/storyOpen|storyButton|STORY/);
+    const past = view.slice(view.indexOf('private pastScreen'), view.indexOf('private receipt(e: LiveEntry'));
+    expect(past).not.toMatch(/storyOpen|storyButton|STORY/);
+    // The house's full-width hairline button on the ivory screen, its card kept per entry.
+    expect(view).toContain('storyButton(this.stories.card(e.id, m), m, { house: true })');
+  });
+
+  it('reuses the card of an entry when the screen is built again: drawn once', async () => {
+    const blob = new Blob([new Uint8Array([1])], { type: 'image/png' });
+    let drawn = 0;
+    const cards = new StoryCards(() => {
+      drawn++;
+      return Promise.resolve(blob);
+    });
+    const m = liveStoryModel({ imageUrl: PHOTO, name: 'MONOLITHE', variant: null, opensAt: '2026-10-08T17:00:00.000Z' }, 'UTC')!;
+    const first = cards.card('entry', m);
+    await first.ready;
+    // A sell-out on one's own confirmation reads the release again (its sheet ENDED): the same words, the same card.
+    const again = cards.card('entry', liveStoryModel({ imageUrl: PHOTO, name: 'MONOLITHE', variant: null, opensAt: '2026-10-08T17:00:00.000Z' }, 'UTC')!);
+    expect(again).toBe(first);
+    expect(again.blob).toBe(blob);
+    expect(drawn).toBe(1);
   });
 });

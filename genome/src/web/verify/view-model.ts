@@ -28,6 +28,7 @@ import { contactLines, type ContactLines } from '../shared/client-services.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
 import { scanContext, warrantyContext, type WriteContext } from './messages-model.js';
+import type { StoryInput } from './story-card.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
 
 export type Tone = 'authentic' | 'caution' | 'void';
@@ -171,6 +172,12 @@ export interface ResultViewModel {
    * the reader's, with its GENOME and its model.
    */
   ceremony?: CeremonyModel;
+  /**
+   * SHARE TO STORIES under the ceremony (plan NEXT-NINE, §3.8 BP-10): what its REGISTERED card is made of (the model's
+   * photograph, its type and collection, the model with its variant, the day of the registration on this phone), set
+   * with the ceremony only. Its card exists only with a photograph of this origin's media route (story-card.ts).
+   */
+  story?: StoryInput;
   /** Footnote on the limits of a code-based verification (positive results only). */
   footnote?: string;
   /** "1 OCT 2026 · 14:32" in the viewer's time zone. */
@@ -483,6 +490,8 @@ export function resultViewModel(
     if (opts.ceremony === true && vm.ownership.kind === 'yours' && vm.genome && name) {
       const collection = upper(p?.collection);
       vm.ceremony = collection ? { name, collection } : { name };
+      // BP-10: the REGISTERED card, the day of this reading as its owner, right after the registration.
+      vm.story = { photo: vm.photos[0]?.src ?? null, model: p?.model, variant: p?.modelVariant ?? null, type: p?.type, collection: p?.collection, at: outcome.verifiedAt, zone: opts.offsetMinutes ?? 0 };
     }
     // J-02: a registered piece reads the same for its owner signed out and for every copy of its code, so a buyer is
     // told what shows that the seller holds the registration. AUTHENTIC — REGISTERED only, and never over a notice of
@@ -620,8 +629,8 @@ export function initialTab(vm: Pick<ResultViewModel, 'ownership'>): TabId {
   return m.kind === 'register' || (m.kind === 'registered' && m.transfer !== undefined) ? 'ownership' : 'product';
 }
 
-/** The only URLs a photograph may come from: this origin's media route, named by a SHA-256. */
-const MEDIA_URL = /^\/api\/v1\/media\/[0-9a-f]{64}$/;
+/** The only URLs a photograph may come from: this origin's media route, named by a SHA-256 (the story card's too, story-card.ts). */
+export const MEDIA_URL = /^\/api\/v1\/media\/[0-9a-f]{64}$/;
 
 /**
  * The photograph of a piece (F-04): its model's reference photograph (or its variant's, NOCTURNE N1), what the customer

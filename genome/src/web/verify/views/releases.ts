@@ -34,7 +34,8 @@
  * access, how long a place drawn is held, the places reserved directly), the paragraph on the early access. YOUR ENTRY:
  * signed out the sign-in and CREATE ACCOUNT of the OWNERSHIP panel (any account may enter); signed in what the entry
  * means now, ENTER THE DRAW (the page's filled button) or RESERVE A PLACE (PLATINE and PALLADIUM during the early
- * access), WITHDRAW, and for a place held or concluded WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01). THE DRAW: what a place drawn obliges to,
+ * access), WITHDRAW, for a place held, reserved or concluded SHARE TO STORIES (plan NEXT-NINE, BP-10: the SELECTED story
+ * card) and WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01). THE DRAW: what a place drawn obliges to,
  * its rule word for word, its commitment, the seed's fingerprint; once drawn the seed, checked on this phone against the
  * fingerprint, and the entries by rank, the account's own marked, a hundred at a time, never said how many. Its last
  * line, HOW RELEASES WORK (plan NEXT-NINE, FT-01). After a reservation the page is read again: its places. The scan is the SCAN ring's, THE RELEASES the crumb's and the rail's.
@@ -52,6 +53,7 @@ import { guaranteeBox, guaranteedLines, guaranteeFor } from '../guarantee-model.
 import { CHANGE_RETRY_MS, countdown as countdownGroups, liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
 import {
   drawLines,
+  drawStoryModel,
   entryModel,
   participationModel,
   pastCards,
@@ -72,6 +74,8 @@ import { lookbookSheetPath } from '../lookbook-model.js';
 import { dayAndHour, RELEASES_PATH, viewRoot, withNumerals } from './common.js';
 import { appAnchor, button, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, quietLine, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
+import { storyButton } from './story.js';
+import { StoryCards } from '../story-card.js';
 import { messageOf } from './forms.js';
 import { BANNER_REFRESH_MS } from './live-banner.js';
 import { OwnershipPanel } from './ownership.js';
@@ -731,6 +735,8 @@ class ReleasePage {
   private load: ReleaseLoad = { kind: 'loading' };
   private entry: EntryLoad = { kind: 'none' };
   private draw: DrawList = { kind: 'idle' };
+  /** BP-10: the SELECTED story card of the account's entry, drawn once (YOUR ENTRY built again reuses it). */
+  private readonly stories = new StoryCards();
   /** The seed checked on this phone against its fingerprint: null until known. */
   private seedMatches: boolean | null = null;
   private signIn: OwnershipPanel | null = null;
@@ -1048,11 +1054,23 @@ class ReleasePage {
       if (m.canEnter) out.push(action(RELEASES.enter, 'release__enter', () => void this.act('enter')));
       if (m.canReserve) out.push(action(RELEASES.reserve, 'release__reserve', () => void this.act('reserve')));
       if (m.canWithdraw) out.push(action(RELEASES.withdraw, 'release__withdraw', () => void this.act('withdraw'), true));
+      // BP-10: a place selected (drawn, reserved directly, concluded): SHARE TO STORIES, its card SELECTED.
+      out.push(this.storyOpen(s, this.entry.entry));
       // WRITE TO ORBES CLIENT SERVICES, under the entry's actions, the release attached (CS-01).
       if (m.write) out.push(writeButton(m.write));
     }
     this.entrySection.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
     if (hadFocus && !this.entrySection.contains(document.activeElement)) (this.entrySection.querySelector<HTMLElement>('input, button:not([disabled])') ?? heading).focus({ preventScroll: true });
+  }
+
+  /**
+   * SHARE TO STORIES (plan NEXT-NINE, §3.8 BP-10) for a place SELECTED, drawn or reserved directly, and once CONFIRMED
+   * (CONCLUDED): the hairline button of the SELECTED card (DRAW, the draw's title, the day of the draw or of the
+   * reservation), once drawn; none without the release's photograph, nor for any other entry or a cancelled release.
+   */
+  private storyOpen(s: ReleaseSheetModel, entry: ClubEntry | null): HTMLButtonElement | null {
+    const m = drawStoryModel(s, entry, this.deps.offsetMinutes);
+    return m && entry ? storyButton(this.stories.card(entry.id, m), m) : null;
   }
 
   /** What the entry means now: its status (ENTERED, PLACE HELD…) in ivory capitals, then its sentence. */

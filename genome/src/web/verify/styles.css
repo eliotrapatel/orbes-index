@@ -757,7 +757,8 @@ body.nocturne .pieces__empty {
 
 .is-ceremony .n-ceremony__name,
 .is-ceremony .n-ceremony__collection,
-.is-ceremony .n-ceremony__share-line {
+.is-ceremony .n-ceremony__share-line,
+.is-ceremony .n-ceremony__story {
   animation: brand-rise 1.2s var(--ease) both;
   animation-delay: 2.3s;
 }
@@ -766,7 +767,8 @@ body.nocturne .pieces__empty {
   animation-delay: 2.5s;
 }
 
-.is-ceremony .n-ceremony__share-line {
+.is-ceremony .n-ceremony__share-line,
+.is-ceremony .n-ceremony__story {
   animation-delay: 2.8s;
 }
 
@@ -1035,8 +1037,13 @@ body.nocturne .pieces__empty {
   .is-ceremony .n-gen .genome-svg g[data-layer="genome"],
   .is-ceremony .n-ceremony__name,
   .is-ceremony .n-ceremony__collection,
-  .is-ceremony .n-ceremony__share-line {
+  .is-ceremony .n-ceremony__share-line,
+  .is-ceremony .n-ceremony__story {
     animation: none;
+  }
+  /* SHARE TO STORIES (BP-10) fades in where it stands. */
+  .n-story__open.is-rising {
+    animation-name: n-story-fade;
   }
 }
 
@@ -3112,4 +3119,95 @@ body.nocturne[data-screen="live"] {
 
 .now__messages-sentence {
   margin-top: 6px;
+}
+
+/* ── SHARE TO STORIES (plan NEXT-NINE, §3.8 BP-10): the button under a LIVE RELEASE's CONFIRMED, a draw's place
+   selected and the ceremony, and the story card's full-screen preview (views/story.ts) ── */
+
+/* Full column width, a hairline button (NOCTURNE's .n-btn--ol; the house's .btn on the ivory CONFIRMED screen), never
+   filled; shown once its card is drawn, rising 0.4 s (a fade under reduced motion). */
+.n-story__open {
+  margin-top: 18px;
+}
+
+.n-story__open[hidden] {
+  display: none;
+}
+
+.n-story__open.is-rising {
+  animation: n-story-rise 0.4s var(--ease) both;
+}
+
+/* CONFIRMED: directly under the receipt plate, as far below it as the plate stands from the words above. */
+.live__confirmed .n-story__open {
+  margin-top: 28px;
+}
+
+/* The ceremony: under SHARE THE GENOME, rising with it at 2.8 s. */
+.n-ceremony__story .n-story__open {
+  margin-top: 20px;
+}
+
+@keyframes n-story-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes n-story-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* The preview: the whole screen on the ground, CLOSE on the right of its head, the card 9:16 with a hairline, SHARE
+   (filled) and SAVE IMAGE (hairline) at the column's width. */
+.n-story {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--safe-top) var(--n-margin) calc(12px + var(--safe-bottom));
+  background: var(--vault-ground);
+  color: var(--vault-ink);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.n-story__head {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  max-width: calc(var(--n-column) - 2 * var(--n-margin));
+  flex: none;
+}
+
+.n-story__card {
+  display: block;
+  flex: none;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 200px);
+  max-height: calc(100dvh - 200px);
+  margin-top: 4px;
+  box-shadow: 0 0 0 1px var(--vault-hairline-strong);
+}
+
+.n-story__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: calc(var(--n-column) - 2 * var(--n-margin));
+  margin-top: 12px;
+  flex: none;
+}
+
+.n-story__note {
+  width: 100%;
+  max-width: calc(var(--n-column) - 2 * var(--n-margin));
+  margin-top: 10px;
+  color: var(--vault-soft);
+  text-align: center;
 }

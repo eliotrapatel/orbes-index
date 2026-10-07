@@ -30,17 +30,18 @@
  *
  * Skipped (not failed) when the Chromium binary is absent.
  */
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sql } from 'kysely';
 import type { Browser, BrowserContext, Locator, Page } from 'playwright-core';
+import { PNG } from 'pngjs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startLiveEngine } from '../../src/server/context.js';
 import type { LiveEngine } from '../../src/server/services/live-engine.js';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { createManualClock, SYSTEM_ACTOR } from '../../src/server/types.js';
-import { LIVE, RELEASES } from '../../src/web/verify/copy.js';
+import { LIVE, RELEASES, STORY } from '../../src/web/verify/copy.js';
 import { countdown } from '../../src/web/verify/live-model.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
@@ -62,6 +63,7 @@ async function textOf(loc: Locator, expected: string | RegExp): Promise<void> {
   else await expect.poll(async () => norm(await loc.innerText()), POLL).toMatch(expected);
 }
 const visible = (loc: Locator, timeout = POLL.timeout) => loc.waitFor({ state: 'visible', timeout });
+const countOf = (loc: Locator, n: number) => expect.poll(() => loc.count(), POLL).toBe(n);
 
 interface Watched {
   page: Page;
@@ -502,6 +504,76 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     expect(reads.length).toBe(before);
     expect(problems).toEqual([]);
   }, 60_000);
+
+  it('offers SHARE TO STORIES under CONFIRMED (BP-10), its card CONFIRMED, when this confirmation sells the release out too; never on its final page', async () => {
+    const t0 = new Date(Date.now() + 3_000);
+    const r = await release({ opensAt: t0, sizes: [{ label: '52', stock: 1 }], turnSeconds: 60 });
+    const me = await account(1);
+    await srv.ctx.services.live.enter(me.id, r.id, { sizeId: r.sizes[0]!.id }, me.actor);
+    await expect.poll(async () => (await statusOf(r.id, me.id))?.status, POLL).toBe('TURN');
+    const token = await turnToken(r.id, me.id);
+    await srv.ctx.services.live.press(me.id, r.id, token);
+    await sleep(1_500);
+    await srv.ctx.services.live.secure(me.id, r.id, token, me.actor);
+    const { page, problems } = await phone(me.token, { reducedMotion: 'reduce' });
+    // A browser whose share sheet takes no file: SAVE IMAGE, filled.
+    await page.addInitScript('Object.defineProperty(navigator, "canShare", { configurable: true, value: () => false });');
+    await page.goto(`${srv.origin}/verify/releases/${r.id}`);
+    // PAY confirms the last piece: the release is SOLD OUT by this confirmation.
+    const pay = page.locator('.live__pay');
+    await visible(pay);
+    await pay.click();
+    await textOf(page.locator('h1'), 'CONFIRMED');
+    expect((await statusOf(r.id, me.id))?.status).toBe('CONFIRMED');
+    const open = page.getByRole('button', { name: STORY.button });
+    await visible(open);
+    // The house's full-width hairline button on the ivory screen, directly under the receipt plate, above CLIENT SERVICES.
+    expect(
+      await open.evaluate((el) => [
+        el.classList.contains('btn') && el.classList.contains('btn--block'),
+        !!(el.previousElementSibling?.matches('.live__receipt-plate') || el.previousElementSibling?.querySelector('.live__receipt-plate')),
+        el.nextElementSibling?.classList.contains('live__cs-title'),
+        el.getBoundingClientRect().width === el.parentElement!.getBoundingClientRect().width - Number.parseFloat(getComputedStyle(el.parentElement!).paddingLeft) - Number.parseFloat(getComputedStyle(el.parentElement!).paddingRight),
+      ]),
+    ).toEqual([true, true, true, true]);
+    // The room says SOLD OUT meanwhile: the screen stays CONFIRMED, its button with it.
+    await sleep(2_500);
+    await textOf(page.locator('h1'), 'CONFIRMED');
+    await visible(open);
+    expect((await tapZoneFloors(page)).problems).toEqual([]);
+    expect((await screenChecks(page)).contrast).toEqual([]);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-live-confirmed-story.png'), fullPage: true });
+
+    // The preview, then SAVE IMAGE: the CONFIRMED card, 1080 × 1920.
+    await open.click();
+    const dialog = page.getByRole('dialog', { name: STORY.label });
+    await visible(dialog);
+    await countOf(dialog.getByRole('button', { name: STORY.share, exact: true }), 0);
+    await textOf(dialog.locator('.n-story__note'), STORY.cannotShare);
+    const day = await page.evaluate((iso) => new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase(), t0.toISOString());
+    expect(await dialog.locator('img').getAttribute('alt')).toBe(`ORBES. CONFIRMED. LIVE RELEASE. MONOLITHE. ${day}. THEORBES.COM`);
+    for (const width of [320, 360, 375]) {
+      await page.setViewportSize({ width, height: 700 });
+      expect((await tapZoneFloors(page)).problems).toEqual([]);
+    }
+    await page.setViewportSize({ width: 390, height: 844 });
+    const [download] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: STORY.save }).click()]);
+    expect(download.suggestedFilename()).toBe('ORBES-STORY.png');
+    const path = join(OUT_DIR, 'story-confirmed.png');
+    await download.saveAs(path);
+    const png = PNG.sync.read(readFileSync(path));
+    expect([png.width, png.height]).toEqual([1080, 1920]);
+    expect([...png.data.subarray(0, 3)]).toEqual([10, 10, 10]);
+    await page.keyboard.press('Escape');
+    await countOf(page.getByRole('dialog'), 0);
+
+    // Its final page, read again: CONFIRMED and its receipt, never the button (the owner's three places only).
+    await page.reload();
+    await visible(page.locator('.n-live__past'));
+    await visible(page.locator('.n-live__receipt'));
+    await countOf(page.getByRole('button', { name: STORY.button }), 0);
+    expect(problems).toEqual([]);
+  }, 90_000);
 
   it('says every edge page plainly, each with one action: not signed in, not eligible, turn passed, hold ended, left, removed, sold out in your size, ended; past its end, its final state', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 3_000), minTier: 1, sizes: [{ label: '50', stock: 5 }, { label: '52', stock: 1 }], turnSeconds: 60 });

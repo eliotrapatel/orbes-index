@@ -91,3 +91,58 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE overflow: nothing overflows its column 
     20 * 60_000,
   );
 });
+
+/**
+ * SHARE TO STORIES (plan NEXT-NINE, §3.8 BP-10): its three places with the button shown, then the preview open, at the
+ * stage's 390 px and at 375, 360 and 320 px: nothing overflows, and the button, SHARE and SAVE IMAGE keep 44 px.
+ */
+describe.skipIf(!HAS_CHROMIUM)('SHARE TO STORIES: its places and its preview fit every phone (Chromium)', () => {
+  it(
+    'keeps the button, the preview, SHARE and SAVE IMAGE inside the column at 390, 375, 360 and 320 px, each 44 px high or more',
+    async () => {
+      const found: string[] = [];
+      const states = ['live-confirmed', 'draw-place-held', 'result-ceremony'].map((id) => UI_STATES.find((s) => s.id === id)!);
+      const tall = async (page: import('playwright-core').Page, name: string, where: string) => {
+        const heights = await page.getByRole('button', { name, exact: true }).evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+        if (heights.length !== 1 || heights[0]! < 44) found.push(`${where}: ${name} ${heights.join(', ')}`);
+      };
+      await eachState(
+        states,
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          const page = opened.page;
+          try {
+            // A share sheet that takes a file: SHARE shown beside SAVE IMAGE.
+            await page.evaluate(() => {
+              Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+              Object.defineProperty(navigator, 'share', { configurable: true, value: () => Promise.resolve() });
+            });
+            const open = page.getByRole('button', { name: 'SHARE TO STORIES' });
+            await open.waitFor({ state: 'visible', timeout: 20_000 });
+            const size = page.viewportSize()!;
+            for (const width of [size.width, ...NARROW]) {
+              await page.setViewportSize({ width, height: size.height });
+              await settle(page, 300);
+              for (const line of await overflows(page)) found.push(`${state.id} at ${width} px: ${line}`);
+              await tall(page, 'SHARE TO STORIES', `${state.id} at ${width} px`);
+            }
+            await page.setViewportSize(size);
+            await open.click();
+            await page.getByRole('dialog', { name: 'Your story card' }).waitFor({ state: 'visible' });
+            for (const width of [size.width, ...NARROW]) {
+              await page.setViewportSize({ width, height: 640 });
+              await settle(page, 300);
+              for (const line of await overflows(page)) found.push(`${state.id}, the preview at ${width} px: ${line}`);
+              for (const name of ['SHARE', 'SAVE IMAGE']) await tall(page, name, `${state.id}, the preview at ${width} px`);
+            }
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect(found).toEqual([]);
+    },
+    10 * 60_000,
+  );
+});

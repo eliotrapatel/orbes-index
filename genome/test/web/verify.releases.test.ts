@@ -13,6 +13,7 @@ import { dropNotFound, drawOrder } from '../../src/server/services/drops.js';
 import { RELEASES } from '../../src/web/verify/copy.js';
 import {
   drawLines,
+  drawStoryModel,
   earlyAccessOf,
   entryModel,
   type EarlyAccess,
@@ -241,6 +242,25 @@ describe('an account\'s entry (P-R03)', () => {
     expect(entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'CONFIRMED', rank: 1 }), opts)).toMatchObject({ label: 'CONCLUDED', sentence: RELEASES.status.confirmed, write: { kind: 'RELEASE', id: ID, label: 'MONOLITHE — RELEASE I · CONCLUDED' } });
     expect(entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'WAITLISTED', rank: 4 }), opts).write).toBeNull();
     expect(entryModel({ ...release, state: 'DRAWN' }, entry({ status: 'LAPSED', rank: 2 }), opts)).toMatchObject({ label: 'LAPSED', sentence: RELEASES.status.lapsed });
+  });
+
+  it('offers SHARE TO STORIES (BP-10) for a place SELECTED, reserved directly or concluded only, its card SELECTED; the page\'s words unchanged', () => {
+    const page = releaseSheet(sheet({ state: 'DRAWN', drawnAt: '2026-10-14T18:00:00.000Z' }), 120);
+    const drawn = { ...release, state: 'DRAWN' as const };
+    const held = entry({ status: 'SELECTED', rank: 1, respondBy: '2026-10-16T12:00:00.000Z', drawnAt: '2026-10-14T18:00:00.000Z' });
+    expect(drawStoryModel(page, held, 120)).toEqual({ origin: 'draw', photo: media(1), status: 'SELECTED', eyebrow: 'DRAW', title: ['MONOLITHE', '— RELEASE I'], date: '14 OCTOBER 2026' });
+    const reserved = entry({ status: 'SELECTED', reserved: true, enteredAt: '2026-10-10T23:30:00.000Z', respondBy: '2026-10-12T23:30:00.000Z' });
+    expect(drawStoryModel(page, reserved, 120)).toMatchObject({ status: 'SELECTED', date: '11 OCTOBER 2026' });
+    const concluded = entry({ status: 'CONFIRMED', rank: 1, drawnAt: '2026-10-14T18:00:00.000Z' });
+    expect(drawStoryModel(page, concluded, 120)).toMatchObject({ status: 'SELECTED' });
+    for (const status of ['ENTERED', 'WAITLISTED', 'LAPSED', 'WITHDRAWN'] as const) expect(drawStoryModel(page, entry({ status, drawnAt: '2026-10-14T18:00:00.000Z' }), 120), status).toBeNull();
+    expect(drawStoryModel({ ...page, state: 'CANCELLED' }, held, 120)).toBeNull();
+    expect(drawStoryModel({ ...page, image: null }, held, 120)).toBeNull();
+    // The page's own words stay PLACE HELD, PLACE RESERVED and CONCLUDED: only the card says SELECTED.
+    expect(entryModel(drawn, held, opts).label).toBe('PLACE HELD');
+    expect(entryModel(drawn, reserved, opts).label).toBe('PLACE RESERVED');
+    expect(entryModel(drawn, concluded, opts).label).toBe('CONCLUDED');
+    expect(Object.values(RELEASES.statusLabel)).not.toContain('SELECTED');
   });
 
   it('groups the account\'s entries for MY PIECES, each with its release\'s page', () => {

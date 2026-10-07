@@ -30,6 +30,7 @@ import { RELEASES } from './copy.js';
 import type { ClubEntry, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease } from './types.js';
 import { formatDate, formatDateTime, formatDateTimeLong, formatMoney, modelWithVariant, upper, utcOffsetLabel } from './view-model.js';
 import { releaseContext, type WriteContext } from './messages-model.js';
+import { storyCardModel, type StoryCardModel } from './story-card.js';
 
 /** The list of the releases, and the page of one under it. */
 export const RELEASES_PATH = '/verify/releases';
@@ -410,6 +411,22 @@ export function entryModel(
     default:
       return { ...base, sentence: st.lapsed };
   }
+}
+
+/**
+ * SHARE TO STORIES on a draw's page (plan NEXT-NINE, §3.8 BP-10): the SELECTED story card of the account's place, drawn
+ * (SELECTED), reserved directly (PLACE RESERVED) or concluded (CONFIRMED): DRAW, the draw's title (its model's name on a
+ * line of its own), the day of the draw or, for a reservation, the day it was reserved, on this phone's calendar
+ * (`offsetMinutes` east of UTC). Null for any other entry, a cancelled release, or without the release's photograph.
+ */
+export function drawStoryModel(
+  s: Pick<ReleaseSheetModel, 'state' | 'title' | 'model' | 'image'>,
+  entry: Pick<ClubEntry, 'status' | 'reserved' | 'enteredAt' | 'drawnAt'> | null,
+  offsetMinutes: number,
+): StoryCardModel | null {
+  if (!entry || s.state === 'CANCELLED' || (entry.status !== 'SELECTED' && entry.status !== 'CONFIRMED')) return null;
+  const model = s.model.split(' · ')[0]?.trim() || null;
+  return storyCardModel('draw', { photo: s.image?.src, title: s.title, model, at: entry.reserved === true ? entry.enteredAt : entry.drawnAt, zone: offsetMinutes });
 }
 
 /** One entry of MY PIECES: its release (a link to its page), its status and what it means now. */

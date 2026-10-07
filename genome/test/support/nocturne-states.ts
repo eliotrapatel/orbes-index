@@ -985,7 +985,7 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'draw-signed-out', title: 'A draw, signed out: the sign-in', refs: ['C19'], variant: 'full', path: release('draw'), ready: '.view--release form' },
   { id: 'draw-soon', title: 'A draw before its entries open', refs: ['C42'], variant: 'draw-soon', as: you, path: release('draw'), ready: '.view--release section' },
   { id: 'draw-early', title: 'A draw in its early access, for a PLATINE account: RESERVE A PLACE', refs: ['C42'], variant: 'draw-early', as: 'platine', path: release('draw'), ready: '.view--release section' },
-  { id: 'draw-drawn', title: 'A draw drawn: THIS RELEASE IS OVER, the seed checked, the entries by rank', refs: ['C29'], variant: 'full', as: you, path: release('draw:MONOLITHE IN GOLD'), ready: '.view--release section' },
+  { id: 'draw-drawn', title: 'A draw drawn: THIS RELEASE IS OVER, the seed checked, the entries by rank', refs: ['C29'], variant: 'full', as: you, path: release('draw:MONOLITHE IN GOLD'), ready: '.view--release section .n-story__open:not([hidden])' },
   { id: 'draw-not-found', title: 'A release’s address that leads nowhere', refs: ['C40'], variant: 'full', path: at('/verify/releases/00000000-0000-4000-8000-000000000000'), ready: '.view--release, .view--live' },
   { id: 'draw-soon-platine', title: 'A draw before its early access, for a PLATINE account: from when it may reserve a place', refs: ['C42'], variant: 'draw-soon', as: 'platine', path: release('draw'), ready: '.view--release .release__status' },
   { id: 'draw-early-others', title: 'A draw in its early access, for a TITANE account: PLATINE and PALLADIUM owners are reserving', refs: ['C42'], variant: 'draw-early', as: you, path: release('draw'), ready: '.view--release .release__status' },
@@ -997,12 +997,12 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'draw-cancelled', title: 'A draw cancelled: CANCELLED, there will be no draw', refs: ['C19'], variant: 'draws', as: you, path: release('cancelled'), ready: '.view--release .release__status' },
   { id: 'draw-cancelled-entered', title: 'A draw cancelled, entered: ENTERED, there will be no draw', refs: ['C19', 'C31'], variant: 'draws', as: 'entrant', path: release('cancelled'), ready: '.view--release .release__status' },
   { id: 'draw-withdrawn', title: 'A draw open, the entry withdrawn: WITHDRAWN, ENTER THE DRAW again', refs: ['C19', 'C31'], variant: 'draws', as: 'entrant', path: release('draw'), ready: '.view--release .release__status' },
-  { id: 'draw-place-held', title: 'A draw drawn, the account selected: PLACE HELD until …, ORBES Client Services', refs: ['C29', 'C31'], variant: 'draws', as: 'entrant', path: release('selected'), ready: '.view--release .release__status' },
+  { id: 'draw-place-held', title: 'A draw drawn, the account selected: PLACE HELD until …, ORBES Client Services', refs: ['C29', 'C31'], variant: 'draws', as: 'entrant', path: release('selected'), ready: '.view--release:has(.release__status) .n-story__open:not([hidden])' },
   { id: 'draw-waiting-list', title: 'A draw drawn, the account on the WAITING LIST, its rank', refs: ['C29', 'C31'], variant: 'draws', as: 'entrant', path: release('waitlisted'), ready: '.view--release .release__status' },
   { id: 'draw-waiting-list-no-piece', title: 'A draw drawn, an account without a piece on the WAITING LIST', refs: ['C29', 'C31'], variant: 'draws', as: 'newcomer', path: release('selected'), ready: '.view--release .release__status' },
   { id: 'draw-lapsed', title: 'A draw drawn, the place held lapsed: LAPSED', refs: ['C29', 'C31'], variant: 'draws', as: 'entrant', path: release('lapsed'), ready: '.view--release .release__status' },
   { id: 'draw-full', title: 'A draw in its early access, every piece reserved: EVERY PIECE RESERVED, the waiting list after', refs: ['C42'], variant: 'draws', as: you, path: release('full'), ready: '.view--release .release__status' },
-  { id: 'draw-place-reserved', title: 'A PLATINE account’s direct reservation: PLACE RESERVED, held until …, ORBES Client Services', refs: ['C42', 'C31'], variant: 'draws', as: 'platine', path: release('full'), ready: '.view--release .release__status' },
+  { id: 'draw-place-reserved', title: 'A PLATINE account’s direct reservation: PLACE RESERVED, held until …, ORBES Client Services', refs: ['C42', 'C31'], variant: 'draws', as: 'platine', path: release('full'), ready: '.view--release:has(.release__status) .n-story__open:not([hidden])' },
   { id: 'draw-open-full', title: 'A draw open, every piece reserved: you may still enter, the waiting list', refs: ['C19'], variant: 'draws', as: you, path: release('openFull'), ready: '.view--release .release__status' },
   {
     id: 'pieces-draws',
@@ -1017,8 +1017,8 @@ export const UI_STATES: readonly UiState[] = [
   // THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01), in the draws demo: shown to `holder`, not shown to `quiet`.
   { id: 'draw-guaranteed', title: 'A draw open, a place guaranteed by the house for 2 pieces, not entered yet: THE HOUSE’S GUARANTEE, ENTER THE DRAW', refs: ['IN-01'], variant: 'draws', as: 'holder', path: release('guaranteed'), ready: '.view--release .release__guarantee' },
   { id: 'draw-guaranteed-entered', title: 'A draw open, entered with the house’s guarantee: selected first at the draw', refs: ['IN-01'], variant: 'draws', as: 'holder', path: release('guaranteedEntered'), ready: '.view--release .release__guarantee' },
-  { id: 'draw-guaranteed-drawn', title: 'A draw drawn: GUARANTEED BY THE HOUSE above the ranked list, YOURS on the holder’s own line', refs: ['IN-01'], variant: 'draws', as: 'holder', path: release('guaranteedDrawn'), ready: '.view--release .release__guaranteed-list' },
-  { id: 'draw-guaranteed-hidden', title: 'The same draw for a holder whose guarantee is not shown: the GUARANTEED lines, no YOURS, no box', refs: ['IN-01'], variant: 'draws', as: 'quiet', path: release('guaranteedDrawn'), ready: '.view--release .release__guaranteed-list' },
+  { id: 'draw-guaranteed-drawn', title: 'A draw drawn: GUARANTEED BY THE HOUSE above the ranked list, YOURS on the holder’s own line', refs: ['IN-01'], variant: 'draws', as: 'holder', path: release('guaranteedDrawn'), ready: '.view--release:has(.release__guaranteed-list) .n-story__open:not([hidden])' },
+  { id: 'draw-guaranteed-hidden', title: 'The same draw for a holder whose guarantee is not shown: the GUARANTEED lines, no YOURS, no box', refs: ['IN-01'], variant: 'draws', as: 'quiet', path: release('guaranteedDrawn'), ready: '.view--release:has(.release__guaranteed-list) .n-story__open:not([hidden])' },
   {
     id: 'draw-guarantee-account',
     title: 'The account sheet of a holder: THE HOUSE’S GUARANTEE, one block per guarantee shown (set aside, entered, waiting for ZENITH)',
@@ -1065,7 +1065,7 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'live-line', title: 'The line: YOUR PLACE, ahead in your size, the pieces left', refs: ['live-09'], variant: 'live', as: 'line', path: release('live'), ready: '.view--live .live__ahead' },
   { id: 'live-turn', title: 'The turn: PRESS AND HOLD THE SEAL', refs: ['live-10'], variant: 'live', as: 'turn', path: release('live'), ready: '.view--live .live-hold' },
   { id: 'live-secured', title: 'Secured: the piece, the add-ons, PAY · total', refs: ['live-11'], variant: 'live', as: 'secured', path: release('live'), ready: '.view--live .live__pay' },
-  { id: 'live-confirmed', title: 'CONFIRMED, in ivory', refs: ['live-12'], variant: 'live', as: 'confirmed', path: release('live'), ready: '.view--live h1' },
+  { id: 'live-confirmed', title: 'CONFIRMED, in ivory', refs: ['live-12'], variant: 'live', as: 'confirmed', path: release('live'), ready: '.view--live:has(h1) .n-story__open:not([hidden])' },
   { id: 'live-sold-out-size', title: 'SOLD OUT IN SIZE 17: stay, or LEAVE THE LINE', refs: ['live-20'], variant: 'live', as: 'soldout', path: release('live'), ready: '.view--live .live__edge' },
   { id: 'live-missed', title: 'YOUR TURN HAS PASSED', refs: ['live-15', 'C30'], variant: 'live', as: 'missed', path: release('live'), ready: '.view--live .n-live__end' },
   { id: 'live-expired', title: 'YOUR HOLD HAS ENDED', refs: ['live-16', 'C30'], variant: 'live', as: 'expired', path: release('live'), ready: '.view--live .n-live__end' },
@@ -1266,6 +1266,8 @@ export const UI_STATES: readonly UiState[] = [
       await registerPiece(run, 'ceremony');
       await button(run, 'VIEW AS OWNER').click();
       await run.page.getByText('SHARE THE GENOME').first().waitFor({ timeout: 20_000 });
+      // Plan NEXT-NINE, BP-10: SHARE TO STORIES, once its card is drawn.
+      await button(run, 'SHARE TO STORIES').waitFor({ timeout: 20_000 });
       await sleep(2_500);
     }),
   },

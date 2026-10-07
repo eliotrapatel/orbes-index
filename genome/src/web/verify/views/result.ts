@@ -37,8 +37,10 @@
  * at 220 px (C36), above the photograph; its eight glyphs appear one by one (opacity and scale of each
  * `data-layer=genome` group, delayed by its `--i`, set through the CSSOM), then the name of the model and its
  * collection, with a short vibration where the device has one. SHARE THE GENOME is a text link: its PNG is drawn
- * when the result is built (share-image.ts), so the tap shares a ready file. With reduced motion, all of it is shown
- * at once, without motion.
+ * when the result is built (share-image.ts), so the tap shares a ready file. Under it, SHARE TO STORIES (plan
+ * NEXT-NINE, BP-10): the full-width hairline button of the REGISTERED story card (story-card.ts, views/story.ts), shown
+ * once its card is drawn, never without the model's photograph. With reduced motion, all of it is shown at once,
+ * without motion.
  *
  * Everything shown comes from the server outcome through resultViewModel().
  */
@@ -47,12 +49,14 @@ import { CEREMONY, LOOKBOOK, MESSAGES, PHOTOS, RECEIVING } from '../copy.js';
 import { genomeFromModel, nocturneGenome } from '../genome-view.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import { prepareShareImage, shareGenomeImage } from '../share-image.js';
+import { storyCardModel, StoryCards, type StoryCardModel } from '../story-card.js';
 import { initialTab, type CeremonyModel, type PhotoModel, type ResultViewModel, type TabId } from '../view-model.js';
 import { viewRoot, withNumerals } from './common.js';
 import { button, fadedPhoto, textLink, toneMark } from './nocturne.js';
 import { OwnershipPanel, type OwnershipDeps } from './ownership.js';
 import { carePanel, productPanel, warrantyPanel } from './panels.js';
 import { reportSection, type ReportDeps } from './report.js';
+import { storyButton } from './story.js';
 import { tabsView, type TabsView } from './tabs.js';
 import { writeButton } from './write.js';
 
@@ -81,7 +85,7 @@ export const CEREMONY_VIBRATION: readonly number[] = [18, 90, 18];
  * The ceremony under the GENOME (P-D01, C36): the name of the model and its collection, then SHARE THE GENOME, shown
  * once its image is ready (a browser that cannot draw it offers no link). The PNG is drawn now, before any tap.
  */
-function ceremonyBlock(c: CeremonyModel, glyphs: Parameters<typeof prepareShareImage>[0], alive: () => boolean): HTMLElement {
+function ceremonyBlock(c: CeremonyModel, glyphs: Parameters<typeof prepareShareImage>[0], alive: () => boolean, story: StoryCardModel | null): HTMLElement {
   let image: Blob | null = null;
   const share = textLink(CEREMONY.share, { onOpen: () => void (image && shareGenomeImage(image)), extraClass: 'n-ceremony__share' }) as HTMLButtonElement;
   const line = h('p', { class: 'n-ceremony__share-line', attrs: { hidden: true } }, share);
@@ -96,6 +100,8 @@ function ceremonyBlock(c: CeremonyModel, glyphs: Parameters<typeof prepareShareI
     h('p', { class: 'n-g n-t1 n-ceremony__name' }, ...withNumerals(c.name)),
     c.collection ? h('p', { class: 'n-g n-lb n-ceremony__collection' }, ...withNumerals(c.collection)) : null,
     line,
+    // BP-10: SHARE TO STORIES under SHARE THE GENOME, its REGISTERED card drawn now, rising with it (2.8 s).
+    story ? h('div', { class: 'n-ceremony__story' }, storyButton(new StoryCards().card('registered', story), story)) : null,
   );
 }
 
@@ -172,7 +178,7 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
   if (vm.genome) {
     genome = nocturneGenome(vm.genome, { size: ceremony ? 220 : 200, extraClass: 'n-result__genome' });
     if (ceremony && ceremonyGenome) {
-      const block = ceremonyBlock(ceremony, ceremonyGenome, () => !disposed);
+      const block = ceremonyBlock(ceremony, ceremonyGenome, () => !disposed, vm.story ? storyCardModel('registered', vm.story) : null);
       ceremonyNames = block.querySelector<HTMLElement>('.n-ceremony__name');
       genome = h('div', { class: 'n-result__ceremony' }, genome, block);
       if (!prefersReducedMotion()) {

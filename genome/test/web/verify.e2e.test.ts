@@ -72,7 +72,7 @@ import { certificateLinkLettering } from '../../src/server/render/certificate.js
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import { DEFAULT_PROGRAM, effectiveProgramLines, programLines } from '../../src/server/services/club-program.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
-import { CEREMONY, CIRCLE, CLAIM_HELD, LOOKBOOK as LOOKBOOK_COPY, ORBES_CARE, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
+import { CEREMONY, CIRCLE, CLAIM_HELD, LOOKBOOK as LOOKBOOK_COPY, ORBES_CARE, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE, STORY } from '../../src/web/verify/copy.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -201,6 +201,34 @@ async function standInsForCeremony(page: Page, mode: 'share' | 'save'): Promise<
 }
 
 const vibrationsOf = (page: Page) => page.evaluate(() => (window as unknown as { vibrations: unknown[] }).vibrations);
+
+/**
+ * SHARE TO STORIES's stand-ins (plan NEXT-NINE, BP-10): a share sheet that takes one file (`share`: what it was handed,
+ * and whether the tap was still active then) or none (`save`: the browser cannot share a file).
+ */
+async function standInsForStory(page: Page, mode: 'share' | 'save'): Promise<void> {
+  await page.evaluate((m) => {
+    const w = window as unknown as { shared: unknown[] };
+    w.shared = [];
+    Object.defineProperty(navigator, 'canShare', { configurable: true, value: (d: ShareData) => m === 'share' && (d.files?.length ?? 0) === 1 });
+    Object.defineProperty(navigator, 'share', {
+      configurable: true,
+      value: async (d: ShareData) => {
+        const file = d.files![0]!;
+        const entry = { files: d.files!.length, name: file.name, type: file.type, title: d.title, keys: Object.keys(d).sort(), activeTap: navigator.userActivation.isActive, png: false };
+        entry.png = [...new Uint8Array(await file.slice(0, 4).arrayBuffer())].join(',') === '137,80,78,71';
+        w.shared.push(entry);
+        // The collector closes the share sheet.
+        throw new DOMException('closed', 'AbortError');
+      },
+    });
+  }, mode);
+}
+
+/** Today on the phone's calendar, as the card says it (8 OCTOBER 2026). */
+const storyDay = (page: Page) =>
+  page.evaluate(() => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase());
+
 
 /** What the sound signature (P-D07) did on the page: each AudioContext created, then each voice of a chord (its Hz). */
 interface SoundRecord {
@@ -765,6 +793,130 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
       .poll(() => page.evaluate(() => (window as unknown as { shared: unknown[] }).shared), POLL)
       .toEqual([{ name: 'ORBES-GENOME.png', type: 'image/png', title: CEREMONY.shareTitle, activeTap: true, png: true }]);
     expect(problems.filter((p) => !/internetdisconnected|ERR_INTERNET_DISCONNECTED/.test(p))).toEqual([]);
+  }, 120_000);
+
+  it('offers SHARE TO STORIES after a first registration (BP-10): the REGISTERED card, 1080 × 1920, its preview, SHARE and SAVE IMAGE', async () => {
+    // A MONOLITHE BRACELET of its own, in gold, with its model's photograph (the suite's model has none).
+    const shared = await srv.ctx.db.selectFrom('models').select(['category_id', 'collection_id', 'name', 'default_material', 'care_instructions']).where('id', '=', srv.modelId).executeTakeFirstOrThrow();
+    const gold = await srv.ctx.db.insertInto('models').values({ ...shared, type: 'BRACELET', sku_prefix: 'MNL-ST', variant_label: 'Gold', variant_swatch: '#B08D57' }).returning('id').executeTakeFirstOrThrow();
+    await srv.ctx.services.media.setModelImage(gold.id, { mime: 'image/jpeg', bytes: jpegPhoto(600, 600) }, SYSTEM_ACTOR);
+    const issued = await srv.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: gold.id, material: '925 STERLING SILVER', year: 2026 }, SYSTEM_ACTOR);
+    await srv.ctx.services.warranty.activate(issued.product.id, { purchaseDate: '2026-09-21', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
+    const { page, problems } = await openVerify(browser, srv, { reducedMotion: 'reduce' });
+    await uploadPhoto(page, writeCodePng(srv.workDir, 'story.png', issued));
+    expect(await resultTitle(page)).toBe('AUTHENTIC FIRST REGISTRATION');
+    // The scan itself offers no story card.
+    await countOf(page.getByRole('button', { name: STORY.button }), 0);
+    await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await page.getByLabel('EMAIL').fill('story.bp-10@example.com');
+    await page.getByLabel('PASSWORD').fill(PASSWORD);
+    await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
+    await page.getByRole('button', { name: 'REGISTER THIS PIECE' }).click();
+    await textOf(page.locator('.n-own__status'), 'REGISTERED TO YOU');
+    await standInsForStory(page, 'share');
+    await page.getByRole('button', { name: 'VIEW AS OWNER' }).click();
+    await expect.poll(() => resultTitle(page), { timeout: 30_000 }).toMatch(/^AUTHENTIC (OWNERSHIP VERIFIED|REGISTERED)$/);
+
+    // Under the names and SHARE THE GENOME (kept): SHARE TO STORIES, full column width, a hairline button never filled.
+    const open = page.getByRole('button', { name: STORY.button });
+    await visible(open);
+    await visible(page.getByRole('button', { name: CEREMONY.share }));
+    expect(await open.evaluate((el) => el.closest('.n-ceremony') !== null && el.previousElementSibling === null && el.parentElement!.previousElementSibling!.classList.contains('n-ceremony__share-line'))).toBe(true);
+    expect(await open.evaluate((el) => [el.classList.contains('n-btn--ol'), getComputedStyle(el).backgroundColor])).toEqual([true, 'rgba(0, 0, 0, 0)']);
+    const widths = await open.evaluate((el) => {
+      const section = el.closest('.n-ceremony')!;
+      const cs = getComputedStyle(section);
+      return [el.getBoundingClientRect().width, section.getBoundingClientRect().width - Number.parseFloat(cs.paddingLeft) - Number.parseFloat(cs.paddingRight)];
+    });
+    expect(widths[0]).toBeCloseTo(widths[1]!, 0);
+    await keepsFloors(page, [STORY.button, CEREMONY.share, 'SCAN ANOTHER']);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, [STORY.button]);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+
+    // The preview: a full-screen dialog, the page under it inert, the focus on CLOSE; Escape closes it, the focus back.
+    await open.click();
+    const dialog = page.getByRole('dialog', { name: STORY.label });
+    await visible(dialog);
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe(STORY.close);
+    expect(await page.evaluate(() => [...document.body.children].filter((el) => !el.classList.contains('n-story')).every((el) => (el as HTMLElement).inert || (el as HTMLElement).hidden || el.tagName === 'SCRIPT'))).toBe(true);
+    const card = dialog.locator('img.n-story__card');
+    await expect.poll(() => card.evaluate((img) => (img as HTMLImageElement).complete && (img as HTMLImageElement).naturalWidth), POLL).toBe(1080);
+    expect(await card.evaluate((img) => [(img as HTMLImageElement).naturalHeight, img.getAttribute('src')!.startsWith('blob:')])).toEqual([1920, true]);
+    expect(await card.getAttribute('alt')).toBe('ORBES. REGISTERED. BRACELET · ORBIT. MONOLITHE IN GOLD. ' + `${await storyDay(page)}. THEORBES.COM`);
+    const box = (await card.boundingBox())!;
+    expect(box.width / box.height).toBeCloseTo(9 / 16, 2);
+    expect(box.height).toBeLessThanOrEqual(MOBILE_VIEWPORT.height - 200 + 1);
+    await keepsFloors(page, [STORY.share, STORY.save]);
+    for (const width of PHONE_WIDTHS) {
+      await page.setViewportSize({ width, height: 640 });
+      await keepsFloors(page, [STORY.share, STORY.save]);
+    }
+    await page.setViewportSize(MOBILE_VIEWPORT);
+    await page.screenshot({ path: join(OUT_DIR, 'story-preview.png') });
+    const blobUrl = (await card.getAttribute('src'))!;
+    await page.keyboard.press('Escape');
+    await countOf(page.getByRole('dialog', { name: STORY.label }), 0);
+    expect(await page.evaluate(() => document.activeElement?.textContent)).toBe(STORY.button);
+    // Its object URL is revoked on close.
+    expect(
+      await page.evaluate(
+        (u) =>
+          new Promise<string>((resolve) => {
+            const img = new Image();
+            img.onload = () => resolve('read');
+            img.onerror = () => resolve('revoked');
+            img.src = u;
+          }),
+        blobUrl,
+      ),
+    ).toBe('revoked');
+
+    // SHARE: exactly one image/png file, ORBES-STORY.png titled ORBES, no text and no link, handed over within the tap.
+    await open.click();
+    await page.getByRole('button', { name: STORY.share, exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { shared: unknown[] }).shared), POLL)
+      .toEqual([{ files: 1, name: 'ORBES-STORY.png', type: 'image/png', title: 'ORBES', keys: ['files', 'title'], activeTap: true, png: true }]);
+    // A closed share sheet leaves the preview as it is.
+    await visible(page.getByRole('dialog', { name: STORY.label }));
+
+    // SAVE IMAGE: the PNG saved, IMAGE SAVED for 3 s. The card: 1080 × 1920, the ground in its corner, the photograph in its window.
+    const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: STORY.save }).click()]);
+    expect(download.suggestedFilename()).toBe('ORBES-STORY.png');
+    await visible(page.getByRole('button', { name: STORY.saved }));
+    const path = join(OUT_DIR, 'story-registered.png');
+    await download.saveAs(path);
+    const png = PNG.sync.read(readFileSync(path));
+    expect([png.width, png.height]).toEqual([1080, 1920]);
+    expect(readFileSync(path).subarray(12, 16).toString('latin1')).toBe('IHDR');
+    const pixel = (x: number, y: number) => [...png.data.subarray((y * png.width + x) * 4, (y * png.width + x) * 4 + 3)];
+    expect(pixel(2, 2)).toEqual([10, 10, 10]);
+    expect(pixel(1077, 1917)).toEqual([10, 10, 10]);
+    // The photograph's middle (the test's gradient, blue 160) shows through its window; the ground stays above it.
+    const middle = pixel(540, 790);
+    expect(middle[2]).toBeGreaterThan(100);
+    expect(pixel(540, 230)).toEqual([10, 10, 10]);
+    await expect.poll(() => page.getByRole('button', { name: STORY.save }).count(), { timeout: 6_000, interval: 200 }).toBe(1);
+    await page.getByRole('button', { name: STORY.close }).click();
+
+    // A browser that cannot share a file: SHARE is not shown, SAVE IMAGE is the filled button, one ash line says so.
+    await standInsForStory(page, 'save');
+    await open.click();
+    const dialog2 = page.getByRole('dialog', { name: STORY.label });
+    await visible(dialog2);
+    await countOf(dialog2.getByRole('button', { name: STORY.share, exact: true }), 0);
+    expect(await dialog2.getByRole('button', { name: STORY.save }).evaluate((el) => el.classList.contains('n-btn--ol'))).toBe(false);
+    await textOf(dialog2.locator('.n-story__note'), STORY.cannotShare);
+    await keepsFloors(page, [STORY.save]);
+    const [saved] = await Promise.all([page.waitForEvent('download'), dialog2.getByRole('button', { name: STORY.save }).click()]);
+    expect(saved.suggestedFilename()).toBe('ORBES-STORY.png');
+    await page.keyboard.press('Escape');
+    expect(await page.evaluate(() => (window as unknown as { shared: unknown[] }).shared)).toEqual([]);
+    // The one failed load is this test's own probe of the revoked URL.
+    expect(problems.filter((p) => !/Failed to load resource: net::ERR_FILE_NOT_FOUND/.test(p))).toEqual([]);
   }, 120_000);
 
   it('receives a piece with its transfer code (F-03): scan, sign in, VERIFY AGAIN, the code of this piece only, then the owner view', async () => {

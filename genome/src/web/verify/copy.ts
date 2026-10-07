@@ -1660,3 +1660,32 @@ export const LIVE = Object.freeze({
     announce: 'A second door has opened.',
   }),
 });
+
+/**
+ * SHARE TO STORIES (plan NEXT-NINE of 2026-10-06, §3.8 BP-10): the button under a LIVE RELEASE's CONFIRMED, a draw's
+ * place SELECTED and the ceremony of a first registration, the story card's words (story-card.ts) and its preview
+ * (views/story.ts). The page's own words stay PLACE HELD, PLACE RESERVED and CONCLUDED; only the card says SELECTED.
+ */
+export const STORY = Object.freeze({
+  button: 'SHARE TO STORIES',
+  /** The preview's accessible name. */
+  label: 'Your story card',
+  /** The card's label in its hairline box, by where it comes from. */
+  status: Object.freeze({ live: 'CONFIRMED', draw: 'SELECTED', registered: 'REGISTERED' }),
+  /** The card's line over its title (a registration's: the piece's type and collection). */
+  kind: Object.freeze({ live: LIVE.kind, draw: NOW.draw }),
+  wordmark: 'ORBES',
+  site: 'THEORBES.COM',
+  share: 'SHARE',
+  save: 'SAVE IMAGE',
+  saved: 'IMAGE SAVED',
+  close: 'CLOSE',
+  /** Under SAVE IMAGE where the browser cannot share a file. */
+  cannotShare: 'This browser cannot share an image. Save it, then add it to your story from your photos.',
+  /** The card's alternative text: its words, joined. */
+  alt: (...words: string[]) => words.join('. '),
+  /** The title handed to the share sheet with the file (no text, no link). */
+  shareTitle: 'ORBES',
+  /** The file, shared or saved. */
+  filename: 'ORBES-STORY.png',
+});

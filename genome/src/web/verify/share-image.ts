@@ -138,8 +138,8 @@ export function drawShareImage(ctx: ShareContext, genome: Pick<Genome, 'glyphs' 
   if (names.collection) drawLine(ctx, names.collection, 1188, 24, 0.24, fonts, inkSoft);
 }
 
-/** The stacks of --font-display and --font as the page defines them (brand.css). */
-function pageFonts(): ShareFonts {
+/** The stacks of --font-display and --font as the page defines them (brand.css); the story card's too (story-card.ts). */
+export function pageFonts(): ShareFonts {
   const css = getComputedStyle(document.documentElement);
   const read = (name: string, fallback: string): string => css.getPropertyValue(name).trim() || fallback;
   const reading = read('--font', 'sans-serif');

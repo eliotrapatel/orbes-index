@@ -30,8 +30,8 @@
  *               resets it; the space bar or Enter holds it from the keyboard; a short vibration where allowed
  *   secured     the reveal: the seal's GENOME glyphs with P-D01's ceremony motion, the seal's glow, the chord and the
  *               vibration; then the piece, its size, the add-ons, PAY · total, 5:00 to confirm, RELEASE MY PLACE
- *   confirmed   out into the light: the page turns ivory (house style), the reservation, its reference, ORBES Client
- *               Services
+ *   confirmed   out into the light: the page turns ivory (house style), the reservation, its reference, SHARE TO
+ *               STORIES under it (plan NEXT-NINE, BP-10: the CONFIRMED story card), ORBES Client Services
  *   edge pages  inside the room: not signed in (the sign-in), not eligible, sold out in its size: a vault page with
  *               one action each. The end of a visit (C30): turn passed, hold ended, place released, left, removed, the
  *               release (or its after-room) ended, gone: the photograph, LIVE RELEASE and its day, its title, the outcome
@@ -88,6 +88,7 @@ import {
   liveSheetModel,
   livePastModel,
   liveHeading,
+  liveStoryModel,
   lockAngle,
   pastDay,
   pictureOf,
@@ -121,6 +122,8 @@ import { writeButton } from './write.js';
 import { OwnershipPanel } from './ownership.js';
 import { QuestionBlock } from './question.js';
 import { CEREMONY_VIBRATION } from './result.js';
+import { storyButton } from './story.js';
+import { StoryCards } from '../story-card.js';
 
 /** The state read while the stream is lost. */
 export const LIVE_POLL_MS = 2000;
@@ -242,6 +245,8 @@ class LivePage {
   /** AC-01: the size picked is YOUR SIZES' and not confirmed yet (no size tapped, nothing pressed). */
   private fromYours = false;
   private interest: LiveInterest | null = null;
+  /** BP-10: the CONFIRMED story card of each entry, drawn once (a screen built again reuses it). */
+  private readonly stories = new StoryCards();
   private viewer: LiveViewer = 'unknown';
   /** The read of the state under way, if any. */
   private reading: Promise<void> | null = null;
@@ -1939,11 +1944,22 @@ class LivePage {
       this.fact(this.afterRoomOf() ? LIVE.afterRoom.confirmedOf(this.name()) : LIVE.confirmedOf(this.name()), 'live__confirmed-of'),
       h('p', { class: 'prose live__confirmed-text', text: LIVE.reservedIn(e.size.label, e.quantity) }),
       bracket(h('div', { class: 'live__receipt-plate' }, rows)),
+      this.storyOpen(e),
       h('p', { class: 'live__overline live__cs-title', text: LIVE.clientServices }),
       writeButton(write, { house: true }),
       piecesLink(() => this.deps.onPieces(), 'live__pieces'),
     );
     return { kind: 'confirmed', el, update: () => undefined };
+  }
+
+  /**
+   * SHARE TO STORIES under the receipt (plan NEXT-NINE, §3.8 BP-10): the house's full-width hairline button of the
+   * CONFIRMED card (LIVE RELEASE, its model with its variant, the day of T0; an after-room's piece too), once drawn; none
+   * without the model's photograph. Never on the release's final page.
+   */
+  private storyOpen(e: LiveEntry): HTMLButtonElement | null {
+    const m = this.sheet ? liveStoryModel(this.sheet, this.deps.localZone) : null;
+    return m ? storyButton(this.stories.card(e.id, m), m, { house: true }) : null;
   }
 
   /**

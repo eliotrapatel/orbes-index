@@ -24,6 +24,7 @@ import {
   STATUS,
   type ProblemKind,
 } from '../../src/web/verify/copy.js';
+import { storyCardModel } from '../../src/web/verify/story-card.js';
 import { VERIFICATION_STATES, type VerificationState, type VerifyOutcome } from '../../src/web/verify/types.js';
 import {
   discontinuedYearOf,
@@ -484,6 +485,22 @@ describe('verify view-model: the ceremony of a first registration (P-D01)', () =
     // No GENOME to reveal (glyphs the app cannot read), or no model to name.
     expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { ...mine, genome: { ...GENOME, glyphs: [1, 2, 3] } }), { ceremony: true }).ceremony).toBeUndefined();
     expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', { ...mine, product: { ...PRODUCT, model: ' ' } }), { ceremony: true }).ceremony).toBeUndefined();
+  });
+
+  it('offers both share links (BP-10): SHARE THE GENOME, and SHARE TO STORIES\'s REGISTERED card with the model\'s photograph', () => {
+    const photo = `/api/v1/media/${'d'.repeat(64)}`;
+    const withPhoto = { ...mine, product: { ...PRODUCT, type: 'Bracelet', modelVariant: 'Gold', imageUrl: photo } };
+    const vm = resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', withPhoto), { ceremony: true, offsetMinutes: 120 });
+    expect(vm.ceremony).toEqual({ name: 'MONOLITHE', collection: 'ORBIT' });
+    expect(vm.story).toEqual({ photo, model: 'Monolithe', variant: 'Gold', type: 'Bracelet', collection: 'Orbit', at: '2026-10-01T08:30:00.000Z', zone: 120 });
+    expect(storyCardModel('registered', vm.story!)).toEqual({ origin: 'registered', photo, status: 'REGISTERED', eyebrow: 'BRACELET · ORBIT', title: ['MONOLITHE', 'IN GOLD'], date: '1 OCTOBER 2026' });
+    // Without the model's photograph: the ceremony and SHARE THE GENOME, no story card.
+    const bare = resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', mine), { ceremony: true });
+    expect(bare.ceremony).toBeDefined();
+    expect(storyCardModel('registered', bare.story!)).toBeNull();
+    // Never without the ceremony.
+    expect(resultViewModel(outcome('AUTHENTIC_OWNERSHIP_VERIFIED', withPhoto)).story).toBeUndefined();
+    expect(resultViewModel(outcome('AUTHENTIC_REGISTERED', { ...withPhoto, ownership: { registered: true, you: false } }), { ceremony: true }).story).toBeUndefined();
   });
 
   it('carries neither the identity of the piece nor anything of the account', () => {

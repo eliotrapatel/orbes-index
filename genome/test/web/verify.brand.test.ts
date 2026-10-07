@@ -804,6 +804,83 @@ describe('verify app: the ceremony of a first registration (P-D01)', () => {
   });
 });
 
+describe('verify app: SHARE TO STORIES (plan NEXT-NINE, §3.8 BP-10)', () => {
+  const storySrc = readFileSync(join(WEB, 'verify/story-card.ts'), 'utf8');
+  const storyView = readFileSync(join(WEB, 'verify/views/story.ts'), 'utf8');
+  const liveView = readFileSync(join(WEB, 'verify/views/live.ts'), 'utf8');
+  const releasesView = readFileSync(join(WEB, 'verify/views/releases.ts'), 'utf8');
+  const shellView = readFileSync(join(WEB, 'verify/views/shell.ts'), 'utf8');
+
+  it('writes STORY calmly: no exclamation mark, no word of §4.5, and never the GENOME', () => {
+    const said = (v: unknown): string[] =>
+      typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('MONOLITHE', 'IN BLUE'))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];
+    const words = said(verifyCopy.STORY).join('\n');
+    expect(words.length).toBeGreaterThan(150);
+    expect(words).not.toContain('!');
+    expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+    expect(words).not.toMatch(/GENOME/i);
+    expect(verifyCopy.STORY).toMatchObject({
+      button: 'SHARE TO STORIES',
+      label: 'Your story card',
+      status: { live: 'CONFIRMED', draw: 'SELECTED', registered: 'REGISTERED' },
+      kind: { live: 'LIVE RELEASE', draw: 'DRAW' },
+      wordmark: 'ORBES',
+      site: 'THEORBES.COM',
+      share: 'SHARE',
+      save: 'SAVE IMAGE',
+      saved: 'IMAGE SAVED',
+      close: 'CLOSE',
+      cannotShare: 'This browser cannot share an image. Save it, then add it to your story from your photos.',
+      shareTitle: 'ORBES',
+      filename: 'ORBES-STORY.png',
+    });
+  });
+
+  it('draws the card on the phone, from this origin\'s media only, and sends nothing: no fetch, no beacon, no storage', () => {
+    for (const src of [storySrc, storyView]) {
+      expect(src).not.toMatch(/\bfetch\(|sendBeacon|XMLHttpRequest|localStorage|sessionStorage|indexedDB|\.innerHTML|\bimport\(/);
+    }
+    expect(storySrc).toContain('MEDIA_URL.test(d.photo)');
+    expect(storySrc).toContain("document.fonts.load(STORY_FONT");
+    expect(storySrc).toContain('document.fonts.check(STORY_FONT)');
+    expect(storySrc).toContain('STORY_PHOTO_MS = 8_000');
+    expect(storySrc).toContain('STORY_FONT_MS = 4_000');
+    // Letter by letter: never the canvas's letterSpacing (Safari has none).
+    expect(storySrc).not.toMatch(/letterSpacing\s*=/);
+    expect(storySrc).toContain('for (const d of MONOGRAM_PATHS) ctx.fill(new Path2D(d));');
+  });
+
+  it('shows a full-width hairline button, never filled, only once its card is ready; the preview a modal dialog', () => {
+    expect(storyView).toContain("button(STORY.button, { outline: true, onClick: open, extraClass: 'n-story__open', attrs })");
+    expect(storyView).toContain("h('button', { class: ['btn', 'btn--block', 'n-story__open'], attrs, on: { click: open }, text: STORY.button })");
+    expect(storyView).toContain("const attrs = { type: 'button', 'aria-haspopup': 'dialog', hidden: true };");
+    expect(rule(styles, '.n-story__open[hidden]').display).toBe('none');
+    const rising = rules(styles).filter((r) => r.selectors.includes('.n-story__open.is-rising'));
+    expect(rising.map((r) => r.decls.animation ?? r.decls['animation-name'])).toEqual(['n-story-fade', 'n-story-rise 0.4s var(--ease) both']);
+    expect(styles).toMatch(/@media \(prefers-reduced-motion: reduce\) \{[^@]*\.n-story__open\.is-rising \{\s*animation-name: n-story-fade;/);
+    expect(storyView).toContain("{ class: 'n-story', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-label': STORY.label } }");
+    expect(storyView).toContain('URL.revokeObjectURL(this.url)');
+    expect(rule(styles, '.n-story__card')['max-height']).toBe('calc(100dvh - 200px)');
+    expect(rule(styles, '.n-story').background).toBe('var(--vault-ground)');
+    // Another screen closes it.
+    expect(shellView).toContain('closeStoryPreview();');
+  });
+
+  it('stands in the three places the owner named, and only there', () => {
+    const confirmed = liveView.slice(liveView.indexOf('private confirmedScreen'), liveView.indexOf('private storyOpen'));
+    expect(confirmed.indexOf('this.storyOpen(e)')).toBeGreaterThan(confirmed.indexOf('bracket('));
+    expect(confirmed.indexOf('this.storyOpen(e)')).toBeLessThan(confirmed.indexOf('LIVE.clientServices'));
+    expect(liveView.match(/this\.storyOpen\(/g)).toHaveLength(1);
+    const entry = releasesView.slice(releasesView.indexOf('private renderEntry'), releasesView.indexOf('private storyOpen'));
+    expect(entry.indexOf('this.storyOpen(s, this.entry.entry)')).toBeGreaterThan(entry.indexOf('RELEASES.withdraw'));
+    expect(entry.indexOf('this.storyOpen(s, this.entry.entry)')).toBeLessThan(entry.indexOf('writeButton(m.write)'));
+    const block = resultView.slice(resultView.indexOf('function ceremonyBlock'), resultView.indexOf('export function resultView'));
+    expect(block.indexOf("storyButton(new StoryCards().card('registered', story), story)")).toBeGreaterThan(block.indexOf('    line,'));
+    const users = readdirSync(join(WEB, 'verify/views')).filter((f) => readFileSync(join(WEB, 'verify/views', f), 'utf8').includes('storyButton('));
+    expect(users.sort()).toEqual(['live.ts', 'releases.ts', 'result.ts', 'story.ts']);
+  });
+});
+
 describe('verify app: the scan as a ritual (P-D10)', () => {
   const scanningSrc = readFileSync(join(WEB, 'verify/views/scanning.ts'), 'utf8');
   const verifyingSrc = readFileSync(join(WEB, 'verify/views/verifying.ts'), 'utf8');

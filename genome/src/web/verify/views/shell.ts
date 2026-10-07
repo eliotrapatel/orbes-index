@@ -37,6 +37,7 @@ import { CHAPTER_PATHS, showRailLive } from '../../shared/chapters.js';
 import { PIECES_PATH } from './common.js';
 import { appAnchor, CHAPTERS, drawSound, footer, icon, monogram } from './nocturne.js';
 import { registerMessages, registerWriteSheet, WriteSheet } from './write.js';
+import { closeStoryPreview } from './story.js';
 
 export interface ShellDeps {
   api: ApiClient;
@@ -197,9 +198,10 @@ export class Shell {
     const nocturne = chrome || NOCTURNE_SCREENS.includes(screen);
     document.body.classList.toggle('nocturne', nocturne);
     for (const el of [this.header, this.rail, this.foot, this.ring]) el.hidden = !chrome;
-    // Another screen (a chapter, back, a link): the sheets give way to it.
+    // Another screen (a chapter, back, a link): the sheets give way to it, and the story card's preview (BP-10).
     if (this.sheet.isOpen) this.sheet.close();
     if (this.write.isOpen) this.write.close();
+    closeStoryPreview();
     const chapter = chapterOf(screen);
     for (const [c, link] of this.links) {
       if (c === chapter) link.setAttribute('aria-current', 'page');
