@@ -1183,13 +1183,17 @@ export interface Drop {
   closesAt: Iso;
   /** How long a place drawn is held, in hours (1 to 336). */
   purchaseWindowHours: number;
-  /** P-X02: the early access before the opening, in hours (0, none, to 336). */
+  /** P-X02: PALLADIUM's early access before the opening, in hours (0, none, to 336). */
   earlyAccessHours: number;
+  /** BP-19 T3: PLATINE's, never more than PALLADIUM's. */
+  earlyAccessPlatineHours: number;
   /** NOCTURNE (addition 5): its price in minor units with its currency, or null for both (none): its orders take it. */
   priceMinor: number | null;
   currency: string | null;
-  /** When PLATINE and PALLADIUM may reserve a place directly (from the publication at the earliest); null without an early access. */
+  /** When PALLADIUM may reserve a place directly (from the publication at the earliest); null without an early access. */
   earlyAccessOpensAt: Iso | null;
+  /** BP-19 T3: when PLATINE may; null without one for PLATINE. */
+  earlyAccessPlatineOpensAt: Iso | null;
   state: DropState;
   publishedAt: Iso | null;
   cancelledAt: Iso | null;
@@ -1214,8 +1218,10 @@ export interface DropInput {
   opensAt: Iso;
   closesAt: Iso;
   purchaseWindowHours?: number;
-  /** P-X02: hours of early access (48 when omitted, 0 for none). */
+  /** P-X02: PALLADIUM's hours of early access (THE PROGRAM's when omitted, 0 for none). */
   earlyAccessHours?: number;
+  /** BP-19 T3: PLATINE's hours, never more than PALLADIUM's (THE PROGRAM's when omitted). */
+  earlyAccessPlatineHours?: number;
   /** NOCTURNE (addition 5): its price in minor units with its currency, together; null for both: none. */
   priceMinor?: number | null;
   currency?: OrderCurrency | null;

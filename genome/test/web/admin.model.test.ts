@@ -145,6 +145,7 @@ import {
   CLUB_TABS,
   clubTab,
   DROP_LIMITS,
+  EARLY_ACCESS_DEFAULTS,
   dropActions,
   dropChange,
   dropFormValues,
@@ -480,9 +481,11 @@ describe('the Club\'s drops (P-R03)', () => {
     closesAt: '2026-10-14T10:00:00.000Z',
     purchaseWindowHours: 48,
     earlyAccessHours: 48,
+    earlyAccessPlatineHours: 24,
     priceMinor: null,
     currency: null,
     earlyAccessOpensAt: '2026-10-10T10:00:00.000Z',
+    earlyAccessPlatineOpensAt: '2026-10-11T10:00:00.000Z',
     state: 'DRAFT',
     publishedAt: null,
     cancelledAt: null,
@@ -499,29 +502,43 @@ describe('the Club\'s drops (P-R03)', () => {
   it('holds the server\'s bounds, and reads the times of the dialog in UTC', () => {
     expect(DROP_LIMITS).toMatchObject({ title: DROP_TITLE_MAX, description: DROP_DESCRIPTION_MAX, quantity: DROP_QUANTITY_MAX, note: DROP_NOTE_MAX });
     expect([DROP_LIMITS.windowMin, DROP_LIMITS.windowMax, DROP_LIMITS.windowDefault]).toEqual([PURCHASE_WINDOW_HOURS.min, PURCHASE_WINDOW_HOURS.max, PURCHASE_WINDOW_HOURS.default]);
-    expect([DROP_LIMITS.earlyMin, DROP_LIMITS.earlyMax, DROP_LIMITS.earlyDefault]).toEqual([EARLY_ACCESS_HOURS.min, EARLY_ACCESS_HOURS.max, EARLY_ACCESS_HOURS.default]);
+    expect([DROP_LIMITS.earlyMin, DROP_LIMITS.earlyMax]).toEqual([EARLY_ACCESS_HOURS.min, EARLY_ACCESS_HOURS.max]);
+    // A new draw's early access by default is THE PROGRAM's (BP-19 T3).
+    expect(EARLY_ACCESS_DEFAULTS).toEqual({ palladium: DEFAULT_PROGRAM.earlyAccessPalladiumHours, platine: DEFAULT_PROGRAM.earlyAccessPlatineHours });
     expect(typeof adminDropFits).toBe('function');
     expect(typeof adminDropEntryFits).toBe('function');
     expect(localUtc('2026-10-12T10:05:00.000Z')).toBe('2026-10-12T10:05');
     expect(utcInstant('2026-10-12T10:05')).toBe('2026-10-12T10:05:00.000Z');
     expect(utcInstant('12/10/2026')).toBeNull();
     expect(localUtc(null)).toBe('');
-    // A new release opens tomorrow at 10:00 UTC, for two days, a place held 48 hours, after an early access of 48 hours.
-    expect(dropFormValues(null, new Date('2026-10-04T22:30:00Z'))).toMatchObject({ opensAt: '2026-10-05T10:00', closesAt: '2026-10-07T10:00', quantity: '1', purchaseWindowHours: '48', earlyAccessHours: '48' });
+    // A new release opens tomorrow at 10:00 UTC, for two days, a place held 48 hours, after THE PROGRAM's early access
+    // by tier (4 and 2 hours by default, or as set).
+    expect(dropFormValues(null, new Date('2026-10-04T22:30:00Z'))).toMatchObject({ opensAt: '2026-10-05T10:00', closesAt: '2026-10-07T10:00', quantity: '1', purchaseWindowHours: '48', earlyAccessHours: '4', earlyAccessPlatineHours: '2' });
+    expect(dropFormValues(null, new Date('2026-10-04T22:30:00Z'), { palladium: 6, platine: 3 })).toMatchObject({ earlyAccessHours: '6', earlyAccessPlatineHours: '3' });
   });
 
-  it('sets the early access of a draft (P-X02): 0 to 336 hours, sent when changed; said with its time, and the places the draw gives', () => {
-    expect(dropFormValues(base, new Date())).toMatchObject({ earlyAccessHours: '48' });
-    for (const bad of ['337', '-1', '1.5', '']) expect(dropProblem(values({ earlyAccessHours: bad })), bad).toBe('The early access lasts 0 to 336 hours (0: none).');
-    expect(dropProblem(values({ earlyAccessHours: '0' }))).toBeNull();
-    expect(dropInput(values({ earlyAccessHours: '0' }))).toMatchObject({ earlyAccessHours: 0 });
-    expect(dropChange(base, values({ earlyAccessHours: '24' }))).toEqual({ earlyAccessHours: 24 });
+  it('sets the early access of a draft by tier (P-X02, BP-19 T3): 0 to 336 hours each, PLATINE\'s never more than PALLADIUM\'s, sent when changed; said with their times, and the places the draw gives', () => {
+    expect(dropFormValues(base, new Date())).toMatchObject({ earlyAccessHours: '48', earlyAccessPlatineHours: '24' });
+    for (const bad of ['337', '-1', '1.5', '']) {
+      expect(dropProblem(values({ earlyAccessHours: bad })), bad).toBe('An early access lasts 0 to 336 hours (0: none).');
+      expect(dropProblem(values({ earlyAccessPlatineHours: bad })), bad).toBe('An early access lasts 0 to 336 hours (0: none).');
+    }
+    expect(dropProblem(values({ earlyAccessHours: '12', earlyAccessPlatineHours: '24' }))).toBe('PALLADIUM’s early access starts no later than PLATINE’s.');
+    expect(dropProblem(values({ earlyAccessHours: '0', earlyAccessPlatineHours: '0' }))).toBeNull();
+    expect(dropInput(values({ earlyAccessHours: '0', earlyAccessPlatineHours: '0' }))).toMatchObject({ earlyAccessHours: 0, earlyAccessPlatineHours: 0 });
+    expect(dropChange(base, values({ earlyAccessHours: '30' }))).toEqual({ earlyAccessHours: 30 });
+    expect(dropChange(base, values({ earlyAccessPlatineHours: '12' }))).toEqual({ earlyAccessPlatineHours: 12 });
     expect(dropChange(base, values())).toEqual({});
-    // Said with its time; none at 0, or for a release published once open.
-    expect(earlyAccessLine(base)).toBe('48 hours · from 10 OCT 2026 · 10:00 UTC');
-    expect(earlyAccessLine({ earlyAccessHours: 1, earlyAccessOpensAt: '2026-10-12T09:00:00.000Z' })).toBe('1 hour · from 12 OCT 2026 · 09:00 UTC');
-    expect(earlyAccessLine({ earlyAccessHours: 0, earlyAccessOpensAt: null })).toBe('None');
-    expect(earlyAccessLine({ earlyAccessHours: 48, earlyAccessOpensAt: null })).toBe('None');
+    // Said with their times (PLATINE's day when it is another); none at 0, or for a release published once open.
+    expect(earlyAccessLine(base)).toBe('PALLADIUM 48 hours · from 10 OCT 2026 · 10:00 UTC; PLATINE 24 hours · from 11 OCT 2026 · 10:00 UTC');
+    expect(
+      earlyAccessLine({ earlyAccessHours: 4, earlyAccessOpensAt: '2026-10-10T06:00:00.000Z', earlyAccessPlatineHours: 2, earlyAccessPlatineOpensAt: '2026-10-10T08:00:00.000Z' }),
+    ).toBe('PALLADIUM 4 hours · from 10 OCT 2026 · 06:00 UTC; PLATINE 2 hours · from 08:00 UTC');
+    expect(earlyAccessLine({ earlyAccessHours: 1, earlyAccessOpensAt: '2026-10-12T09:00:00.000Z', earlyAccessPlatineHours: 0, earlyAccessPlatineOpensAt: null })).toBe(
+      'PALLADIUM 1 hour · from 12 OCT 2026 · 09:00 UTC; PLATINE none',
+    );
+    expect(earlyAccessLine({ earlyAccessHours: 0, earlyAccessOpensAt: null, earlyAccessPlatineHours: 0, earlyAccessPlatineOpensAt: null })).toBe('None');
+    expect(earlyAccessLine({ earlyAccessHours: 48, earlyAccessOpensAt: null, earlyAccessPlatineHours: 48, earlyAccessPlatineOpensAt: null })).toBe('None');
     // Published now: at its time, at once when it has begun, never once entries are open or without one.
     expect(earlyAccessOnPublish(base, new Date('2026-10-09T10:00:00Z'))).toBe('from 10 OCT 2026 · 10:00 UTC');
     expect(earlyAccessOnPublish(base, new Date('2026-10-11T10:00:00Z'))).toBe('from its publication');

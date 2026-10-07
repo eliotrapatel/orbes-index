@@ -58,13 +58,14 @@ export function dropFields(models: readonly Model[], values: Record<string, stri
       value: values.purchaseWindowHours,
       hint: `How long a place drawn or reserved is held for its entrant: ${DROP_LIMITS.windowMin} to ${DROP_LIMITS.windowMax} hours, ${DROP_LIMITS.windowDefault} by default.`,
     },
+    { name: 'earlyAccessHours', label: 'Early access, PALLADIUM (hours)', required: true, maxlength: 3, value: values.earlyAccessHours },
     {
-      name: 'earlyAccessHours',
-      label: 'Early access (hours)',
+      name: 'earlyAccessPlatineHours',
+      label: 'Early access, PLATINE (hours)',
       required: true,
       maxlength: 3,
-      value: values.earlyAccessHours,
-      hint: `Before entries open, PLATINE and PALLADIUM owners reserve a place directly, first come, first served, within the pieces: ${DROP_LIMITS.earlyMin} to ${DROP_LIMITS.earlyMax} hours, ${DROP_LIMITS.earlyDefault} by default, ${DROP_LIMITS.earlyMin} for none. The draw gives the places left.`,
+      value: values.earlyAccessPlatineHours,
+      hint: 'Before entries open, PALLADIUM owners, then PLATINE owners, reserve a place directly, first come, first served, within the pieces. PALLADIUM’s window is at least PLATINE’s; 0 for none. The draw gives the places left.',
     },
     // NOCTURNE (addition 5): the price shown on the draw's card and page, which its orders take.
     { name: 'price', label: 'Price', maxlength: 14, value: values.price, hint: 'Per piece, in units: 4200, or 4200.50. Shown on the release’s card and page; each order of the draw takes it. Empty: none (the order’s price is entered by Client Services).' },
@@ -211,7 +212,9 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
   );
 
   let created: string | null = null;
-  const newDrop = () =>
+  const newDrop = async () => {
+    // The early access by default: THE PROGRAM's (BP-19 T3), read when the dialog opens.
+    const program = await ctx.api.clubProgram();
     void openDialog({
       title: 'New release',
       eyebrow: 'Club · Drops',
@@ -220,7 +223,7 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
         { class: 'dialog__text' },
         'A draft: nothing of it is public until it is published. Its seed is drawn now and committed by its fingerprint, which its page shows from the publication on: the draw cannot be run with another.',
       ),
-      fields: dropFields(models.items, dropFormValues(null, ctx.now()), { model: true }),
+      fields: dropFields(models.items, dropFormValues(null, ctx.now(), { palladium: program.earlyAccessPalladiumHours, platine: program.earlyAccessPlatineHours }), { model: true }),
       validate: dropProblem,
       confirmLabel: 'Create release',
       submit: async (v) => {
@@ -231,6 +234,7 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
       notify('Release created as a draft.');
       ctx.navigate(href('drop', { dropId: created }));
     });
+  };
 
   const drawsSection = section(
     'Drops',
@@ -258,7 +262,7 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
       ),
       pager(list, (p) => ctx.setQuery({ page: p })),
     ],
-    { id: 'drops', tools: canManage ? [button('New release', { kind: 'ghost', testId: 'drop-new', onClick: newDrop })] : [] },
+    { id: 'drops', tools: canManage ? [button('New release', { kind: 'ghost', testId: 'drop-new', onClick: () => void newDrop() })] : [] },
   );
   return h('div', { class: 'club__drops' }, liveSection, drawsSection);
 }

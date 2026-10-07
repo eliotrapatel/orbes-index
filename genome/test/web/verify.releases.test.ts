@@ -13,7 +13,9 @@ import { dropNotFound, drawOrder } from '../../src/server/services/drops.js';
 import { RELEASES } from '../../src/web/verify/copy.js';
 import {
   drawLines,
+  earlyAccessOf,
   entryModel,
+  type EarlyAccess,
   groupHex,
   isReleaseId,
   myEntries,
@@ -72,8 +74,25 @@ function sheet(extra: Partial<DropSheet> = {}): DropSheet {
   };
 }
 
-/** A release with its early access (P-X02): 48 hours before its opening, from 10 OCT 2026 · 10:00 UTC. */
+/** A release with its early access (P-X02): 48 hours before its opening, from 10 OCT 2026 · 10:00 UTC, one time for both tiers (as published before BP-19 T3). */
 const EARLY = { earlyAccessHours: 48, earlyAccessOpensAt: '2026-10-10T10:00:00.000Z' } as const;
+/** BP-19 T3: PALLADIUM 4 hours before its opening (06:00 UTC), PLATINE 2 hours before (08:00 UTC). */
+const BY_TIER = {
+  earlyAccessHours: 4,
+  earlyAccessPlatineHours: 2,
+  earlyAccessOpensAt: '2026-10-12T06:00:00.000Z',
+  earlyAccessPlatineOpensAt: '2026-10-12T08:00:00.000Z',
+  earlyAccessPlatineOpen: false,
+} as const;
+/** An early access as the release's page passes it to its entry: one time for both tiers unless said. */
+const early = (opensAt: string, open: boolean, platine: { opensAt?: string | null; open?: boolean } = {}): EarlyAccess => ({
+  opensAt,
+  open,
+  platineOpensAt: platine.opensAt === undefined ? opensAt : platine.opensAt,
+  platineOpen: platine.open ?? open,
+  palladiumHours: 48,
+  platineHours: 48,
+});
 
 function entry(extra: Partial<ClubEntry> = {}): ClubEntry {
   return {
@@ -241,11 +260,12 @@ describe('the early access of a release (P-X02)', () => {
       stateLabel: 'ENTRIES OPEN SOON',
       access: 'PLATINE AND PALLADIUM: FROM 10 OCT 2026 · 10:00 UTC · EVERYONE: FROM 12 OCT 2026 · 10:00 UTC',
       earlyNote: RELEASES.earlyNote,
-      earlyAccess: { opensAt: EARLY.earlyAccessOpensAt, open: false },
+      earlyAccess: { opensAt: EARLY.earlyAccessOpensAt, open: false, platineOpensAt: EARLY.earlyAccessOpensAt },
       full: false,
     });
     expect(before.rows.map((r) => r.label)).toEqual(['PIECES', 'EARLY ACCESS', 'ENTRIES OPEN', 'ENTRIES CLOSE', 'PLACE HELD']);
-    expect(before.rows[1]).toEqual({ label: 'EARLY ACCESS', value: '10 OCT 2026 · 10:00 UTC', local: '10 OCT 2026 · 12:00 on this phone (UTC+02:00)' });
+    // BP-19 T3: the EARLY ACCESS fact gives each tier's hours (one time for both here); the line under the state its times.
+    expect(before.rows[1]).toEqual({ label: 'EARLY ACCESS', value: 'PALLADIUM 48 HOURS · PLATINE 48 HOURS' });
     // During it: EARLY ACCESS, and the places reserved directly.
     const during = releaseSheet(sheet({ ...EARLY, state: 'UPCOMING', earlyAccessOpen: true, reserved: 1 }), 0);
     expect(during).toMatchObject({ stateLabel: 'EARLY ACCESS', earlyAccess: { open: true }, full: false });
@@ -272,8 +292,60 @@ describe('the early access of a release (P-X02)', () => {
     expect(soon).toMatchObject({ stateLabel: 'ENTRIES OPEN SOON' });
   });
 
+  it('says each tier\'s time when they differ (BP-19 T3): PALLADIUM, then PLATINE, then everyone; each tier\'s hours among the facts; PALLADIUM owners, then PLATINE owners, in the paragraph', () => {
+    const before = releaseSheet(sheet({ ...BY_TIER, state: 'UPCOMING' }), 120);
+    expect(before).toMatchObject({
+      stateLabel: 'ENTRIES OPEN SOON',
+      access: 'PALLADIUM: FROM 12 OCT 2026 · 06:00 UTC · PLATINE: FROM 12 OCT 2026 · 08:00 UTC · EVERYONE: FROM 12 OCT 2026 · 10:00 UTC',
+      earlyNote: RELEASES.earlyNoteByTier,
+      earlyAccess: { opensAt: BY_TIER.earlyAccessOpensAt, open: false, platineOpensAt: BY_TIER.earlyAccessPlatineOpensAt, platineOpen: false },
+    });
+    expect(before.rows.find((r) => r.label === 'EARLY ACCESS')).toEqual({ label: 'EARLY ACCESS', value: 'PALLADIUM 4 HOURS · PLATINE 2 HOURS' });
+    expect(RELEASES.earlyNoteByTier).toBe(
+      'Before entries open to everyone, PALLADIUM owners, then PLATINE owners, reserve a place directly, first come, first served, within the pieces of the release: their tier is the one their account holds when they reserve. The pieces left then go to the draw.',
+    );
+    // During PALLADIUM's hours: EARLY ACCESS already.
+    expect(releaseSheet(sheet({ ...BY_TIER, state: 'UPCOMING', earlyAccessOpen: true }), 0)).toMatchObject({ stateLabel: 'EARLY ACCESS', earlyAccess: { open: true, platineOpen: false } });
+    // PLATINE without a window of its own: only PALLADIUM's time, and its hours.
+    const palladiumOnly = releaseSheet(sheet({ ...BY_TIER, earlyAccessPlatineHours: 0, earlyAccessPlatineOpensAt: null, state: 'UPCOMING' }), 0);
+    expect(palladiumOnly.access).toBe('PALLADIUM: FROM 12 OCT 2026 · 06:00 UTC · EVERYONE: FROM 12 OCT 2026 · 10:00 UTC');
+    expect(palladiumOnly.rows.find((r) => r.label === 'EARLY ACCESS')?.value).toBe('PALLADIUM 4 HOURS');
+    // Two equal times: the release keeps the one line of before.
+    const alike = releaseSheet(sheet({ ...BY_TIER, earlyAccessPlatineHours: 4, earlyAccessPlatineOpensAt: BY_TIER.earlyAccessOpensAt, state: 'UPCOMING' }), 0);
+    expect(alike).toMatchObject({ access: 'PLATINE AND PALLADIUM: FROM 12 OCT 2026 · 06:00 UTC · EVERYONE: FROM 12 OCT 2026 · 10:00 UTC', earlyNote: RELEASES.earlyNote });
+  });
+
+  it('tells each tier its own time (BP-19 T3): PALLADIUM reserves from its hours, PLATINE is told when its own begin, the others wait', () => {
+    const opts = { offsetMinutes: 120 };
+    const opens = '12 October 2026, 12:00 (UTC+02:00)';
+    const platineFrom = '12 October 2026, 10:00 (UTC+02:00)';
+    const base = { id: ID, title: 'MONOLITHE — RELEASE I', state: 'UPCOMING' as const, opensAt: '2026-10-12T10:00:00.000Z', full: false };
+    // Before any window: each tier its own time.
+    const soon = { ...base, earlyAccess: early(BY_TIER.earlyAccessOpensAt, false, { opensAt: BY_TIER.earlyAccessPlatineOpensAt, open: false }) };
+    expect(entryModel(soon, null, { ...opts, tier: 3 }).sentence).toBe(RELEASES.status.earlySoon('PALLADIUM', '12 October 2026, 08:00 (UTC+02:00)'));
+    expect(entryModel(soon, null, { ...opts, tier: 2 }).sentence).toBe(RELEASES.status.earlySoon('PLATINE', platineFrom));
+    // PALLADIUM's hours: PALLADIUM reserves; PLATINE is told when; the others read that PALLADIUM owners reserve.
+    const palladium = { ...base, earlyAccess: early(BY_TIER.earlyAccessOpensAt, true, { opensAt: BY_TIER.earlyAccessPlatineOpensAt, open: false }) };
+    expect(entryModel(palladium, null, { ...opts, tier: 3 })).toMatchObject({ canReserve: true, sentence: RELEASES.status.early('PALLADIUM', opens) });
+    expect(entryModel(palladium, null, { ...opts, tier: 2 })).toMatchObject({ canReserve: false, sentence: RELEASES.status.earlyPalladium(platineFrom) });
+    expect(RELEASES.status.earlyPalladium(platineFrom)).toBe(`PALLADIUM owners are reserving their places now. As a PLATINE owner, you may reserve a place from ${platineFrom}.`);
+    for (const tier of [1, 0, undefined]) {
+      expect(entryModel(palladium, null, { ...opts, tier }), String(tier)).toMatchObject({ canReserve: false, sentence: RELEASES.status.earlyOthersPalladium(opens) });
+    }
+    expect(RELEASES.status.earlyOthersPalladium(opens)).toBe(`PALLADIUM owners are reserving their places now. Entries open to everyone on ${opens}.`);
+    // PLATINE's hours: both reserve, the others read the sentence of before.
+    const both = { ...base, earlyAccess: early(BY_TIER.earlyAccessOpensAt, true, { opensAt: BY_TIER.earlyAccessPlatineOpensAt, open: true }) };
+    expect(entryModel(both, null, { ...opts, tier: 2 })).toMatchObject({ canReserve: true, sentence: RELEASES.status.early('PLATINE', opens) });
+    expect(entryModel(both, null, { ...opts, tier: 1 }).sentence).toBe(RELEASES.status.earlyOthers(opens));
+    // PLATINE without a window of its own: it waits with the others.
+    const none = { ...base, earlyAccess: early(BY_TIER.earlyAccessOpensAt, true, { opensAt: null, open: false }) };
+    expect(entryModel(none, null, { ...opts, tier: 2 })).toMatchObject({ canReserve: false, sentence: RELEASES.status.earlyOthersPalladium(opens) });
+    // The page passes the server's fields as they are.
+    expect(earlyAccessOf({ ...card({ ...BY_TIER, state: 'UPCOMING', earlyAccessOpen: true, earlyAccessPlatineOpen: true }) })).toMatchObject({ open: true, platineOpen: true, palladiumHours: 4, platineHours: 2 });
+  });
+
   it('offers RESERVE A PLACE to a PLATINE or PALLADIUM account during the early access only, while a piece is left', () => {
-    const release = { id: ID, title: 'MONOLITHE — RELEASE I', state: 'UPCOMING' as const, opensAt: '2026-10-12T10:00:00.000Z', earlyAccess: { opensAt: EARLY.earlyAccessOpensAt, open: true }, full: false };
+    const release = { id: ID, title: 'MONOLITHE — RELEASE I', state: 'UPCOMING' as const, opensAt: '2026-10-12T10:00:00.000Z', earlyAccess: early(EARLY.earlyAccessOpensAt, true), full: false };
     const opts = { offsetMinutes: 120 };
     const opens = '12 October 2026, 12:00 (UTC+02:00)';
     expect(entryModel(release, null, { ...opts, tier: 2 })).toMatchObject({ canReserve: true, canEnter: false, sentence: RELEASES.status.early('PLATINE', opens) });
@@ -285,9 +357,9 @@ describe('the early access of a release (P-X02)', () => {
     }
     // Every piece reserved: nothing to reserve, the waiting list of the draw after the opening.
     expect(entryModel({ ...release, full: true }, null, { ...opts, tier: 3 })).toMatchObject({ canReserve: false, sentence: RELEASES.status.full(opens) });
-    expect(entryModel({ ...release, state: 'OPEN', earlyAccess: { ...release.earlyAccess, open: false }, full: true }, null, { ...opts, tier: 3 })).toMatchObject({ canEnter: true, canReserve: false, sentence: RELEASES.status.openFull });
+    expect(entryModel({ ...release, state: 'OPEN', earlyAccess: early(EARLY.earlyAccessOpensAt, false), full: true }, null, { ...opts, tier: 3 })).toMatchObject({ canEnter: true, canReserve: false, sentence: RELEASES.status.openFull });
     // Before the early access: a PLATINE account is told when it may reserve, any other when entries open.
-    const soon = { ...release, earlyAccess: { ...release.earlyAccess, open: false } };
+    const soon = { ...release, earlyAccess: early(EARLY.earlyAccessOpensAt, false) };
     expect(entryModel(soon, null, { ...opts, tier: 2 })).toMatchObject({ canReserve: false, sentence: RELEASES.status.earlySoon('PLATINE', '10 October 2026, 12:00 (UTC+02:00)') });
     expect(entryModel(soon, null, { ...opts, tier: 1 })).toMatchObject({ canReserve: false, sentence: RELEASES.status.upcoming(opens) });
     // Once entries are open, RESERVE A PLACE is gone: ENTER THE DRAW, for everyone.
@@ -410,6 +482,10 @@ describe('the releases\' copy (P-R03)', () => {
     expect(RELEASES.enter).toBe('ENTER THE DRAW');
     // P-X02: the plan's line, word for word, and the action of the early access.
     expect(RELEASES.access('…', '…')).toBe('PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …');
+    // BP-19 T3: the line by tier, word for word; the rule's tier wording unchanged and free of the tiers' figures.
+    expect(RELEASES.accessByTier('a', 'b', 'c')).toBe('PALLADIUM: FROM a · PLATINE: FROM b · EVERYONE: FROM c');
+    expect(RELEASES.rule).toContain('The entries are ranked by tier, from PALLADIUM to PLATINE to TITANE, then the accounts that hold no piece;');
+    expect(RELEASES.rule).not.toMatch(/\b\d+ (?:pieces?|hours?)\b/i);
     expect(RELEASES.reserve).toBe('RESERVE A PLACE');
     expect(RELEASES.status.selected('16 October 2026, 14:00 (UTC+02:00)')).toBe('Your place is held until 16 October 2026, 14:00 (UTC+02:00) — ORBES Client Services will contact you.');
     // The server's 404 says what the page says.

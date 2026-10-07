@@ -2664,9 +2664,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const model = await ctx.db.insertInto('models').values({ category_id: category.index, name: 'SOLSTICE', type: 'RING', sku_prefix: 'SOL-EA' }).returning('id').executeTakeFirstOrThrow();
     const staff = await ctx.services.auth.createAdmin({ email: 'early.access@orbes.test', password: 'orbes early access passphrase 2026', role: 'ADMIN' }, SYSTEM_ACTOR);
     const actor = { type: 'admin' as const, id: staff.id };
-    // Two pieces, entries open to everyone in a day: published inside its early access of 48 hours, which opens with it.
+    // Two pieces, entries open to everyone in a day: published inside its early access of 48 hours for both tiers, which opens with it.
     const drop = await ctx.services.drops.create(
-      { modelId: model.id, title: 'SOLSTICE — release I', quantity: 2, opensAt: new Date(Date.now() + 86_400_000), closesAt: new Date(Date.now() + 2 * 86_400_000) },
+      { modelId: model.id, title: 'SOLSTICE — release I', quantity: 2, opensAt: new Date(Date.now() + 86_400_000), closesAt: new Date(Date.now() + 2 * 86_400_000), earlyAccessHours: 48, earlyAccessPlatineHours: 48 },
       actor,
     );
     await ctx.services.drops.publish(drop.id, actor);
@@ -2689,7 +2689,8 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.release__state'), 'EARLY ACCESS');
     await textOf(page.locator('.release__access'), /^PLATINE AND PALLADIUM: FROM \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC · EVERYONE: FROM \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
     await textsOf(page.locator('.release__rows .release__label'), ['PIECES', 'EARLY ACCESS', 'ENTRIES OPEN', 'ENTRIES CLOSE', 'PLACE HELD', 'RESERVED DIRECTLY']);
-    await textOf(page.locator('.release__rows .release__row', { hasText: 'EARLY ACCESS' }).locator('.release__local'), /^\d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} on this phone \(UTC\+0[12]:00\)$/);
+    // BP-19 T3: the EARLY ACCESS fact gives each tier's hours (one window of 48 for both here).
+    await textOf(page.locator('.release__rows .release__row', { hasText: 'EARLY ACCESS' }).locator('.release__utc'), 'PALLADIUM 48 HOURS · PLATINE 48 HOURS');
     const reserved = page.locator('.release__rows .release__row', { hasText: 'RESERVED DIRECTLY' }).locator('.release__utc');
     await textOf(reserved, '0 OF 2 PIECES');
     await textOf(page.locator('.release__early'), RELEASES.earlyNote);

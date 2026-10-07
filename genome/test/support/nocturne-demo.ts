@@ -575,8 +575,12 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   }
   if (announceDraw) {
     const opens = variant === 'draw-soon' ? at('2026-10-07T10:00:00Z') : at('2026-10-05T10:00:00Z');
-    const early = variant === 'draw-early' ? 72 : variant === 'draw-soon' ? 24 : 0;
-    const drawOpens = variant === 'draw-early' ? at('2026-10-06T10:00:00Z') : opens;
+    // The early access by tier (plan NEXT-NINE, BP-19 T3): draw-early opens at 18:00 UTC, PALLADIUM from 4 hours
+    // before and PLATINE from 2 hours before (THE PROGRAM's defaults), NOW (16:49 UTC) inside PLATINE's window;
+    // draw-soon keeps one window of 24 hours for both tiers.
+    const early = variant === 'draw-early' ? 4 : variant === 'draw-soon' ? 24 : 0;
+    const platineEarly = variant === 'draw-early' ? 2 : early;
+    const drawOpens = variant === 'draw-early' ? at('2026-10-05T18:00:00Z') : opens;
     clock.set(at('2026-10-01T12:30:00Z'));
     const d = await ctx.services.drops.create(
       {
@@ -588,6 +592,7 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
         closesAt: at('2026-10-11T18:00:00Z'),
         purchaseWindowHours: 48,
         earlyAccessHours: early,
+        earlyAccessPlatineHours: platineEarly,
         // N1 (addition 5): the draw's price, shown on its card and page, taken by its orders.
         priceMinor: 420_000,
         currency: 'EUR',
@@ -912,7 +917,9 @@ async function seedDraws(w: World): Promise<void> {
         opensAt: at(o.opens),
         closesAt: at(o.closes),
         purchaseWindowHours: o.window ?? 48,
+        // One window for both tiers, as the draws of lot E had it.
         earlyAccessHours: o.early ?? 0,
+        earlyAccessPlatineHours: o.early ?? 0,
       },
       admin,
     );

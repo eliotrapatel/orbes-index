@@ -567,7 +567,7 @@ const purchaseWindowHours = z
   .int('Must be a whole number of hours')
   .min(PURCHASE_WINDOW_HOURS.min, `At least ${PURCHASE_WINDOW_HOURS.min} hour`)
   .max(PURCHASE_WINDOW_HOURS.max, `At most ${PURCHASE_WINDOW_HOURS.max} hours`);
-/** P-X02: the early access before the opening, 0 (none) to 336 hours. */
+/** P-X02: the early access before the opening, 0 (none) to 336 hours: PALLADIUM's, and PLATINE's (plan NEXT-NINE, BP-19 T3). */
 const earlyAccessHours = z
   .number()
   .int('Must be a whole number of hours')
@@ -583,8 +583,9 @@ const drawPriceTogether = (b: { priceMinor?: number | null; currency?: string | 
 
 /**
  * POST /api/admin/drops (§16.19): a DRAFT of a model's release, its entries' window (`closesAt` after `opensAt`), its
- * pieces, how long a place drawn is held (48 hours when omitted) and its early access (P-X02: the hours before the
- * opening when PLATINE and PALLADIUM reserve a place directly, 48 when omitted, 0 for none), and its price with its
+ * pieces, how long a place drawn is held (48 hours when omitted) and its early access by tier (P-X02, BP-19 T3: the
+ * hours before the opening when PALLADIUM, `earlyAccessHours`, and PLATINE, `earlyAccessPlatineHours`, reserve a place
+ * directly; THE PROGRAM's when omitted, 0 for none; PLATINE's never more than PALLADIUM's), and its price with its
  * currency (NOCTURNE, addition 5: optional, both or neither). The description is plain text ('' and null: none).
  */
 export const createDropBody = body({
@@ -596,6 +597,7 @@ export const createDropBody = body({
   closesAt: isoDateTime,
   purchaseWindowHours: purchaseWindowHours.optional(),
   earlyAccessHours: earlyAccessHours.optional(),
+  earlyAccessPlatineHours: earlyAccessHours.optional(),
   priceMinor: drawPrice.nullable().optional(),
   currency: z.preprocess((v) => (v === '' ? null : v), drawCurrency.nullable().optional()),
 })
@@ -616,6 +618,7 @@ export const updateDropBody = body({
   closesAt: isoDateTime.optional(),
   purchaseWindowHours: purchaseWindowHours.optional(),
   earlyAccessHours: earlyAccessHours.optional(),
+  earlyAccessPlatineHours: earlyAccessHours.optional(),
   priceMinor: drawPrice.nullable().optional(),
   currency: z.preprocess((v) => (v === '' ? null : v), drawCurrency.nullable().optional()),
 })

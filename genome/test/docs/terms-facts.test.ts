@@ -51,6 +51,7 @@ import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, tierForP
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } from '../../src/server/services/after-room.js';
 import { VERIFICATION_COPY } from '../../src/server/services/copy.js';
 import { DROP_SEED_BYTES, EARLY_ACCESS_HOURS, EARLY_ACCESS_MIN_TIER, PURCHASE_WINDOW_HOURS } from '../../src/server/services/drops.js';
+import { DEFAULT_PROGRAM, PROGRAM_LIMITS } from '../../src/server/services/club-program.js';
 import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
 import { normalizeMinTier, PRICE_LABEL_MAX } from '../../src/server/services/lookbook.js';
 import {
@@ -314,21 +315,26 @@ const CONSTANTS: Record<string, ConstantSpec> = {
     fr: [`${PURCHASE_WINDOW_HOURS.default} heures`],
     en: [`${PURCHASE_WINDOW_HOURS.default} hours`],
   },
+  // R71 (plan NEXT-NINE, BP-19 T3): a window by tier, THE PROGRAM's by default, each within the drop's bounds.
   EARLY_ACCESS_HOURS: {
-    value: `${EARLY_ACCESS_HOURS.default} heures par défaut, de ${EARLY_ACCESS_HOURS.min} à ${EARLY_ACCESS_HOURS.max}`,
-    fr: [`${EARLY_ACCESS_HOURS.default} heures par défaut`],
-    en: [`${EARLY_ACCESS_HOURS.default} hours by default`],
+    value: `PALLADIUM ${DEFAULT_PROGRAM.earlyAccessPalladiumHours} heures et PLATINE ${DEFAULT_PROGRAM.earlyAccessPlatineHours} heures par défaut, de ${EARLY_ACCESS_HOURS.min} à ${EARLY_ACCESS_HOURS.max}`,
+    fr: [`dès ${DEFAULT_PROGRAM.earlyAccessPalladiumHours} heures avant son ouverture`, `dès ${DEFAULT_PROGRAM.earlyAccessPlatineHours} heures avant, par défaut`],
+    en: [`from ${DEFAULT_PROGRAM.earlyAccessPalladiumHours} hours before its opening`, `from ${DEFAULT_PROGRAM.earlyAccessPlatineHours} hours before, by default`],
+    holds: () => {
+      expect(PROGRAM_LIMITS.hours).toEqual({ min: EARLY_ACCESS_HOURS.min, max: EARLY_ACCESS_HOURS.max });
+      expect(DEFAULT_PROGRAM.earlyAccessPlatineHours).toBeLessThanOrEqual(DEFAULT_PROGRAM.earlyAccessPalladiumHours);
+    },
   },
   EARLY_ACCESS_MIN_TIER: {
     value: '—',
     holds: () => {
-      // R72: PLATINE and PALLADIUM, from 5 pieces held (R61), reserve directly; TITANE does not.
+      // R72: PALLADIUM, then PLATINE from 5 pieces held (R61), reserve directly (BP-19 T3); TITANE does not.
       expect(EARLY_ACCESS_MIN_TIER).toBe(2);
       expect(tierName(EARLY_ACCESS_MIN_TIER)).toBe('PLATINE');
       expect(CLUB_TIER_THRESHOLDS[EARLY_ACCESS_MIN_TIER - 1]).toBe(5);
     },
-    fr: ['PLATINE et PALLADIUM', 'au moment de sa demande'],
-    en: ['PLATINE and PALLADIUM', 'at the time of the request'],
+    fr: ['PALLADIUM et PLATINE', 'au moment de sa demande'],
+    en: ['PALLADIUM and PLATINE', 'at the time of the request'],
   },
   CIRCLE_LINK_HOSTS: {
     value: '—',

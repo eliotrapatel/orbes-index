@@ -777,10 +777,10 @@ export const LOOKBOOK = Object.freeze({
  * ORBES Client Services concludes each sale and sends no email: the account's page says it. Reached from the landing
  * and from MY PIECES, which groups the account's entries. The word is DRAW, never another (BRAND §4.5).
  *
- * The early access (P-X02): before entries open to everyone (48 hours by default, set per release), the owners
- * PLATINE and PALLADIUM reserve a place directly, first come, first served, within the pieces of the release; the
- * pieces left then go to the draw. The release's page says both times, the privilege is recalled in THE CIRCLE and in
- * MY PIECES.
+ * The early access (P-X02), by tier (plan NEXT-NINE, BP-19 T3): before entries open to everyone (PALLADIUM 4 hours and
+ * PLATINE 2 hours by default, set per release), the owners PALLADIUM, then PLATINE, reserve a place directly, first
+ * come, first served, within the pieces of the release; the pieces left then go to the draw. The release's page says
+ * the times, the privilege is recalled in THE CIRCLE and in MY PIECES.
  */
 export const RELEASES = Object.freeze({
   title: 'THE RELEASES',
@@ -827,11 +827,19 @@ export const RELEASES = Object.freeze({
   earlyState: 'EARLY ACCESS',
   /** P-X02: said after the state once every piece is held by a direct reservation, before the draw. */
   fullState: 'EVERY PIECE RESERVED',
-  /** P-X02: the line under a release's state, its two openings in UTC (the facts say them on this phone too). */
+  /** P-X02: the line under a release's state, its two openings in UTC, when PLATINE and PALLADIUM reserve from the same time. */
   access: (early: string, everyone: string) => `PLATINE AND PALLADIUM: FROM ${early} · EVERYONE: FROM ${everyone}`,
-  /** P-X02: THE RELEASE's paragraph on its early access (its times are the line under the state and the facts). */
+  /** BP-19 T3: the line under a release's state when each tier has its own time (PLATINE's left out when it has none). */
+  accessByTier: (palladium: string, platine: string | null, everyone: string) =>
+    [`PALLADIUM: FROM ${palladium}`, ...(platine ? [`PLATINE: FROM ${platine}`] : []), `EVERYONE: FROM ${everyone}`].join(' · '),
+  /** P-X02: THE RELEASE's paragraph on its early access, when PLATINE and PALLADIUM reserve from the same time. */
   earlyNote:
     'Before entries open to everyone, PLATINE and PALLADIUM owners reserve a place directly, first come, first served, within the pieces of the release: their tier is the one their account holds when they reserve. The pieces left then go to the draw.',
+  /** BP-19 T3: THE RELEASE's paragraph when each tier has its own time. */
+  earlyNoteByTier:
+    'Before entries open to everyone, PALLADIUM owners, then PLATINE owners, reserve a place directly, first come, first served, within the pieces of the release: their tier is the one their account holds when they reserve. The pieces left then go to the draw.',
+  /** BP-19 T3: the EARLY ACCESS row, each tier's hours (`4 HOURS`), PLATINE's left out when it has none. */
+  earlyHours: (palladium: string, platine: string | null) => (platine ? `PALLADIUM ${palladium} · PLATINE ${platine}` : `PALLADIUM ${palladium}`),
   pieces: (n: number) => (n === 1 ? '1 PIECE' : `${n} PIECES`),
   hours: (n: number) => (n === 1 ? '1 HOUR' : `${n} HOURS`),
   /** A time shown in UTC, then on the phone's own clock. */
@@ -873,6 +881,10 @@ export const RELEASES = Object.freeze({
     early: (tier: string, until: string) => `As a ${tier} owner, you may reserve a place now, until entries open to everyone on ${until}. First come, first served, within the pieces of the release.`,
     /** P-X02, any other account during the early access. */
     earlyOthers: (until: string) => `PLATINE and PALLADIUM owners are reserving their places now. Entries open to everyone on ${until}.`,
+    /** BP-19 T3, a PLATINE account during PALLADIUM's hours: when its own begin. */
+    earlyPalladium: (from: string) => `PALLADIUM owners are reserving their places now. As a PLATINE owner, you may reserve a place from ${from}.`,
+    /** BP-19 T3, any other account during PALLADIUM's hours only. */
+    earlyOthersPalladium: (until: string) => `PALLADIUM owners are reserving their places now. Entries open to everyone on ${until}.`,
     /** P-X02, every piece held by a direct reservation: before entries open, then once they are. */
     full: (until: string) => `Every piece of this release has been reserved. Entries open to everyone on ${until}: the draw then ranks a waiting list, should a place open.`,
     openFull: 'Every piece of this release has been reserved. You may still enter: the draw ranks a waiting list, and ORBES Client Services contacts its first ranks should a place open.',

@@ -200,6 +200,8 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
     .updateTable('drops')
     .set({
       mode: 'LIVE',
+      // A LIVE RELEASE has no early access, nor PLATINE's window of a draw (drops_live_platine, migration 0026).
+      early_access_platine_hours: null,
       live_min_tier: o.minTier ?? 0,
       tier_priority: o.tierPriority ?? true,
       room_opens_minutes: o.roomOpensMinutes ?? 5,

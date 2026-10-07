@@ -436,12 +436,18 @@ export interface DropCard {
   quantity: number;
   opensAt: string;
   closesAt: string;
-  /** P-X02: the hours of early access before `opensAt` (0: none). */
+  /** P-X02: PALLADIUM's hours of early access before `opensAt` (0: none). */
   earlyAccessHours: number;
-  /** When PLATINE and PALLADIUM may reserve a place directly; null without an early access. */
+  /** BP-19 T3: PLATINE's hours (PALLADIUM's for a release published before the windows by tier). */
+  earlyAccessPlatineHours?: number;
+  /** When PALLADIUM may reserve a place directly, the first; null without an early access. */
   earlyAccessOpensAt: string | null;
-  /** Whether direct reservations are open now (the server's clock). */
+  /** BP-19 T3: when PLATINE may; null without one for PLATINE. */
+  earlyAccessPlatineOpensAt?: string | null;
+  /** Whether direct reservations are open now, from PALLADIUM's time (the server's clock). */
   earlyAccessOpen: boolean;
+  /** BP-19 T3: whether PLATINE's are open now. */
+  earlyAccessPlatineOpen?: boolean;
   /** NOCTURNE (addition 5): the price of a piece in minor units with its currency; null for both when ORBES gave none. */
   priceMinor?: number | null;
   currency?: string | null;

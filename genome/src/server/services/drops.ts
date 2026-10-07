@@ -26,11 +26,16 @@
  * id, back to ENTERED: never a deletion and a new row, which would let a
  * draw be run again with other ids.
  *
- * The early access (P-X02): `early_access_hours` before `opens_at` (48 by
- * default, 0 to 336; 0: none), and from the drop's publication at the
- * earliest (`earlyAccessOpensAt`), an account PLATINE or PALLADIUM (the
- * club's tier 2 or 3, read by `tierOf` at the moment of its request)
- * RESERVES a place directly (`reserve`): its entry is SELECTED at once,
+ * The early access (P-X02; by tier since plan NEXT-NINE, BP-19 T3, migration
+ * 0026): `early_access_hours` before `opens_at` for PALLADIUM and
+ * `early_access_platine_hours` for PLATINE (NULL, a drop published before:
+ * PALLADIUM's time), 0 to 336 each, PLATINE's never longer; 0: none. A new
+ * draw takes them from THE PROGRAM (services/club-program.ts: 4 and 2 hours
+ * by default) unless the console gives its own. From the drop's publication
+ * at the earliest (`earlyAccessOpensAt`, by tier), an account PLATINE or
+ * PALLADIUM (the club's tier 2 or 3, read by `tierOf` at the moment of its
+ * request) RESERVES a place directly from its tier's time (`reserve`): its
+ * entry is SELECTED at once,
  * the place held for `purchase_window_hours` (`respond_by`), with the tier
  * and seniority of that moment and no rank. First come, first served,
  * under the drop's row lock (FOR UPDATE), within `quantity`: once the
@@ -96,6 +101,7 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
 import { CLUB_TIER_THRESHOLDS, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
+import { readProgram } from './club-program.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, orderForDrawEntry } from './orders.js';
@@ -117,10 +123,11 @@ export const DROP_QUANTITY_MAX = 10_000;
 /** How long a place drawn is held, in hours: 1 to 336 (14 days), 48 by default (drop_entries.respond_by). */
 export const PURCHASE_WINDOW_HOURS = Object.freeze({ min: 1, max: 336, default: 48 });
 /**
- * The early access of a drop (P-X02), in hours before `opens_at`: 0 (none) to 336 (14 days), 48 by default (the plan's
- * choice 10, set per drop).
+ * The early access of a drop (P-X02), in hours before `opens_at`, PALLADIUM's (`early_access_hours`) and PLATINE's
+ * (`early_access_platine_hours`, never longer): 0 (none) to 336 (14 days). The defaults of a new draw come from THE
+ * PROGRAM (plan NEXT-NINE, BP-19 T3: 4 and 2 hours), set per drop.
  */
-export const EARLY_ACCESS_HOURS = Object.freeze({ min: 0, max: 336, default: 48 });
+export const EARLY_ACCESS_HOURS = Object.freeze({ min: 0, max: 336 });
 /** The lowest tier that reserves a place directly during an early access: PLATINE (then PALLADIUM). */
 export const EARLY_ACCESS_MIN_TIER: ClubTier = 2;
 /** The console's note on an entry it concludes (CONFIRMED, LAPSED). */
@@ -154,13 +161,22 @@ export function dropState(d: Pick<DropRow, 'published_at' | 'cancelled_at' | 'dr
   return 'CLOSED';
 }
 
+/** PLATINE's early access of a drop, in hours: its own, or PALLADIUM's for a drop published before (NULL). */
+export function platineHoursOf(d: Pick<DropRow, 'early_access_hours'> & { early_access_platine_hours?: number | null }): number {
+  return d.early_access_platine_hours === null || d.early_access_platine_hours === undefined ? Number(d.early_access_hours) || 0 : Number(d.early_access_platine_hours) || 0;
+}
+
 /**
- * When the early access of a drop begins (P-X02): `opens_at − early_access_hours`, or its publication when that came
- * later (nothing of a drop is open before it is published); null without one (0 hours, or a drop published at or after
- * its opening).
+ * When the early access of a drop begins for a tier (P-X02; plan NEXT-NINE, BP-19 T3): PALLADIUM (3, the default)
+ * `opens_at − early_access_hours`, PLATINE (2) `opens_at − coalesce(early_access_platine_hours, early_access_hours)`;
+ * each from its publication when that came later (nothing of a drop is open before it is published); null without one
+ * (0 hours, or a drop published at or after its opening).
  */
-export function earlyAccessOpensAt(d: Pick<DropRow, 'opens_at' | 'early_access_hours' | 'published_at'>): Date | null {
-  const hours = Number(d.early_access_hours) || 0;
+export function earlyAccessOpensAt(
+  d: Pick<DropRow, 'opens_at' | 'early_access_hours' | 'published_at'> & { early_access_platine_hours?: number | null },
+  tier: 2 | 3 = 3,
+): Date | null {
+  const hours = tier === 3 ? Number(d.early_access_hours) || 0 : platineHoursOf(d);
   if (hours <= 0) return null;
   const opens = new Date(d.opens_at).getTime();
   const published = d.published_at ? new Date(d.published_at).getTime() : null;
@@ -168,10 +184,17 @@ export function earlyAccessOpensAt(d: Pick<DropRow, 'opens_at' | 'early_access_h
   return new Date(Math.max(opens - hours * HOUR_MS, published ?? Number.NEGATIVE_INFINITY));
 }
 
-/** Whether direct reservations are open at `now`: a published drop, neither cancelled nor drawn, within its early access. */
-export function inEarlyAccess(d: Pick<DropRow, 'opens_at' | 'early_access_hours' | 'published_at' | 'cancelled_at' | 'drawn_at'>, now: Date): boolean {
+/**
+ * Whether direct reservations are open at `now` for a tier (PALLADIUM by default: from its start): a published drop,
+ * neither cancelled nor drawn, within that tier's early access.
+ */
+export function inEarlyAccess(
+  d: Pick<DropRow, 'opens_at' | 'early_access_hours' | 'published_at' | 'cancelled_at' | 'drawn_at'> & { early_access_platine_hours?: number | null },
+  now: Date,
+  tier: 2 | 3 = 3,
+): boolean {
   if (!d.published_at || d.cancelled_at || d.drawn_at) return false;
-  const from = earlyAccessOpensAt(d);
+  const from = earlyAccessOpensAt(d, tier);
   return from !== null && now.getTime() >= from.getTime() && now.getTime() < new Date(d.opens_at).getTime();
 }
 
@@ -267,6 +290,7 @@ const utcMinute = (t: Date) => `${t.toISOString().slice(0, 16).replace('T', ' ')
 const earlyAccessNotOpen = (from: Date) => conflict('DROP_EARLY_ACCESS_NOT_OPEN', `Direct reservations for this release open on ${utcMinute(from)}.`);
 const earlyAccessClosed = (none: boolean) =>
   conflict('DROP_EARLY_ACCESS_CLOSED', none ? 'This release offers no direct reservation: its places go to the draw.' : 'Direct reservations for this release are closed: the places left go to the draw.');
+const earlyAccessOrder = () => validationError('PALLADIUM’s early access starts no later than PLATINE’s.');
 const tierRequired = () =>
   new DomainError('DROP_TIER_REQUIRED', 403, `Only ${tierName(EARLY_ACCESS_MIN_TIER)} and ${tierName(3)} owners reserve a place directly: from ${CLUB_TIER_THRESHOLDS[EARLY_ACCESS_MIN_TIER - 1]} pieces held.`);
 const notEntered = () => conflict('DROP_NOT_ENTERED', 'You are not entered in this draw.');
@@ -303,8 +327,10 @@ export interface CreateDropInput {
   opensAt: Date;
   closesAt: Date;
   purchaseWindowHours?: number;
-  /** P-X02: hours of early access before `opensAt` (EARLY_ACCESS_HOURS; 48 when omitted, 0 for none). */
+  /** P-X02: PALLADIUM's hours of early access before `opensAt` (EARLY_ACCESS_HOURS; THE PROGRAM's when omitted, 0 for none). */
   earlyAccessHours?: number;
+  /** BP-19 T3: PLATINE's hours, never more than PALLADIUM's (THE PROGRAM's when omitted, within PALLADIUM's). */
+  earlyAccessPlatineHours?: number;
   /** NOCTURNE (addition 5): its price in minor units with its currency, both or neither (null: none, the default). */
   priceMinor?: number | null;
   currency?: string | null;
@@ -320,6 +346,7 @@ export interface DropChange {
   closesAt?: Date;
   purchaseWindowHours?: number;
   earlyAccessHours?: number;
+  earlyAccessPlatineHours?: number;
   /** Its price and currency, given together; null for both clears it. */
   priceMinor?: number | null;
   currency?: string | null;
@@ -414,12 +441,18 @@ export interface DropCard {
   quantity: number;
   opensAt: Date;
   closesAt: Date;
-  /** P-X02: the hours of early access before `opensAt` the drop was published with (0: none). */
+  /** P-X02: PALLADIUM's hours of early access before `opensAt` the drop was published with (0: none). */
   earlyAccessHours: number;
-  /** When PLATINE and PALLADIUM may reserve a place directly (earlyAccessOpensAt); null without an early access. */
+  /** BP-19 T3: PLATINE's hours (PALLADIUM's for a drop published before the windows by tier). */
+  earlyAccessPlatineHours: number;
+  /** When PALLADIUM may reserve a place directly (earlyAccessOpensAt), the first; null without an early access. */
   earlyAccessOpensAt: Date | null;
-  /** Whether direct reservations are open now (inEarlyAccess). */
+  /** BP-19 T3: when PLATINE may (earlyAccessOpensAt for tier 2); null without one for PLATINE. */
+  earlyAccessPlatineOpensAt: Date | null;
+  /** Whether direct reservations are open now (inEarlyAccess: from PALLADIUM's time). */
   earlyAccessOpen: boolean;
+  /** BP-19 T3: whether PLATINE's are open now. */
+  earlyAccessPlatineOpen: boolean;
   /** NOCTURNE (addition 5): the price of a piece in minor units, with its currency; null for both when ORBES gave none. */
   priceMinor: number | null;
   currency: string | null;
@@ -486,13 +519,17 @@ export interface AdminDrop {
   opensAt: Date;
   closesAt: Date;
   purchaseWindowHours: number;
-  /** P-X02: hours of early access before `opensAt` (0: none). */
+  /** P-X02: PALLADIUM's hours of early access before `opensAt` (0: none). */
   earlyAccessHours: number;
+  /** BP-19 T3: PLATINE's hours (PALLADIUM's for a drop created before the windows by tier). */
+  earlyAccessPlatineHours: number;
   /** NOCTURNE (addition 5): its price in minor units with its currency, or null for both (none). */
   priceMinor: number | null;
   currency: string | null;
-  /** When direct reservations begin (earlyAccessOpensAt: a DRAFT's from its opening, a published drop's not before its publication); null without one. */
+  /** When direct reservations begin, PALLADIUM's (earlyAccessOpensAt: a DRAFT's from its opening, a published drop's not before its publication); null without one. */
   earlyAccessOpensAt: Date | null;
+  /** BP-19 T3: PLATINE's; null without one. */
+  earlyAccessPlatineOpensAt: Date | null;
   state: DropState;
   publishedAt: Date | null;
   cancelledAt: Date | null;
@@ -874,14 +911,16 @@ export class DropService {
   }
 
   /**
-   * RESERVE (P-X02): during the early access of a published drop (earlyAccessOpensAt ≤ now < `opens_at`), an account
-   * PLATINE or PALLADIUM at the moment of its request (tierOf, read in this transaction) holds a place at once: its entry
+   * RESERVE (P-X02): during the early access of a published drop, an account PLATINE or PALLADIUM at the moment of its
+   * request (tierOf, read in this transaction) holds a place at once, from its tier's time (plan NEXT-NINE, BP-19 T3:
+   * earlyAccessOpensAt of its tier ≤ now < `opens_at`): its entry
    * is SELECTED, the place held for `purchase_window_hours` (`respond_by`), its tier and seniority of that moment kept,
    * no rank (the draw ranks only the entries ENTERED). First come, first served: the drop's row FOR UPDATE, so two
    * requests count the places one after the other, within `quantity` (the entries SELECTED or CONFIRMED). Refused: a
    * LOCKED account (403 ACCOUNT_LOCKED), an unknown or unpublished drop (404 DROP_NOT_FOUND), a cancelled or drawn one
-   * (409), before the early access (409 DROP_EARLY_ACCESS_NOT_OPEN), from `opens_at` on or without one (409
-   * DROP_EARLY_ACCESS_CLOSED), a tier below PLATINE (403 DROP_TIER_REQUIRED), an account that already holds an entry in
+   * (409), without an early access or from `opens_at` on (409 DROP_EARLY_ACCESS_CLOSED), a tier below PLATINE (403
+   * DROP_TIER_REQUIRED), before its tier's time (409 DROP_EARLY_ACCESS_NOT_OPEN, with that time; none for its tier: 409
+   * DROP_EARLY_ACCESS_CLOSED), an account that already holds an entry in
    * it (409 DROP_ALREADY_RESERVED), a full drop (409 DROP_FULL). Audited `drop.reserve` with the entry and its tier.
    */
   async reserve(accountId: string, dropId: string, actor: Actor): Promise<AccountDropEntry> {
@@ -894,11 +933,14 @@ export class DropService {
       const d = await this.lockPublished(tx, id, 'update');
       if (d.cancelled_at) throw dropCancelled();
       if (d.drawn_at) throw dropDrawn();
-      const from = earlyAccessOpensAt(d);
-      if (from === null || now.getTime() >= d.opens_at.getTime()) throw earlyAccessClosed(from === null);
-      if (now.getTime() < from.getTime()) throw earlyAccessNotOpen(from);
+      const first = earlyAccessOpensAt(d);
+      if (first === null || now.getTime() >= d.opens_at.getTime()) throw earlyAccessClosed(first === null);
+      // The tier first, then its own window (BP-19 T3): PALLADIUM from its time, PLATINE from its own.
       const standing = await tierOf(tx, accountId, now);
       if (standing.tier < EARLY_ACCESS_MIN_TIER) throw tierRequired();
+      const from = earlyAccessOpensAt(d, standing.tier === 3 ? 3 : 2);
+      if (from === null) throw earlyAccessClosed(true);
+      if (now.getTime() < from.getTime()) throw earlyAccessNotOpen(from);
       const existing = await tx.selectFrom('drop_entries').select(['id', 'status']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
       if (existing && existing.status !== 'WITHDRAWN') throw alreadyReserved();
       const held = await tx
@@ -952,7 +994,10 @@ export class DropService {
     return this.adminDrop(this.db, knownId(dropId, dropNotFound));
   }
 
-  /** A new DRAFT, its seed drawn, sealed and committed now. OPERATOR; audited `drop.create` with the seed's SHA-256. */
+  /**
+   * A new DRAFT, its seed drawn, sealed and committed now; its early access by tier given, or THE PROGRAM's (BP-19 T3:
+   * PLATINE's within PALLADIUM's). OPERATOR; audited `drop.create` with the seed's SHA-256 and both windows.
+   */
   async create(input: CreateDropInput, actor: Actor): Promise<AdminDrop> {
     assertStaff(actor, 'create a release');
     const title = cleanTitle(input.title);
@@ -962,11 +1007,17 @@ export class DropService {
     const closesAt = cleanTime(input.closesAt, 'The close');
     checkWindow(opensAt, closesAt);
     const hours = cleanWindow(input.purchaseWindowHours ?? PURCHASE_WINDOW_HOURS.default);
-    const early = cleanEarlyAccess(input.earlyAccessHours ?? EARLY_ACCESS_HOURS.default);
+    const givenEarly = input.earlyAccessHours === undefined ? undefined : cleanEarlyAccess(input.earlyAccessHours);
+    const givenPlatine = input.earlyAccessPlatineHours === undefined ? undefined : cleanEarlyAccess(input.earlyAccessPlatineHours);
     const price = cleanDrawPrice(input.priceMinor ?? null, input.currency ?? null);
     const modelId = knownId(input.modelId, () => notFound('Model', 'MODEL_NOT_FOUND'));
     return inTransaction(this.db, async (tx) => {
       const now = this.clock();
+      const program = await readProgram(tx);
+      const early = givenEarly ?? program.earlyAccessPalladiumHours;
+      // PLATINE's window as given, or THE PROGRAM's, never longer than PALLADIUM's.
+      const platine = givenPlatine ?? Math.min(program.earlyAccessPlatineHours, early);
+      if (platine > early) throw earlyAccessOrder();
       const model = await tx.selectFrom('models').select(['id', 'active']).where('id', '=', modelId).executeTakeFirst();
       if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
       if (!model.active) throw modelInactive();
@@ -987,6 +1038,7 @@ export class DropService {
           closes_at: closesAt,
           purchase_window_hours: hours,
           early_access_hours: early,
+          early_access_platine_hours: platine,
           price_minor: price?.minor ?? null,
           currency: price?.currency ?? null,
           seed_enc: sealed,
@@ -1009,6 +1061,7 @@ export class DropService {
             closesAt: closesAt.toISOString(),
             purchaseWindowHours: hours,
             earlyAccessHours: early,
+            earlyAccessPlatineHours: platine,
             priceMinor: price?.minor ?? null,
             currency: price?.currency ?? null,
             seedHash: toHex(seedHash),
@@ -1041,14 +1094,24 @@ export class DropService {
         after[key] = shown(to);
       };
       if (change.description !== undefined) note('description', 'description', d.description, cleanDescription(change.description), (v) => describedAs((v as string | null) ?? null));
-      const structural = (['modelId', 'title', 'quantity', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'priceMinor', 'currency'] as const).filter((k) => change[k] !== undefined);
+      const structural = (['modelId', 'title', 'quantity', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency'] as const).filter(
+        (k) => change[k] !== undefined,
+      );
       if (structural.length > 0) {
         if (d.cancelled_at) throw dropCancelled();
         if (d.published_at) throw dropPublished();
         if (change.title !== undefined) note('title', 'title', d.title, cleanTitle(change.title));
         if (change.quantity !== undefined) note('quantity', 'quantity', d.quantity, cleanQuantity(change.quantity));
         if (change.purchaseWindowHours !== undefined) note('purchaseWindowHours', 'purchase_window_hours', d.purchase_window_hours, cleanWindow(change.purchaseWindowHours));
-        if (change.earlyAccessHours !== undefined) note('earlyAccessHours', 'early_access_hours', d.early_access_hours, cleanEarlyAccess(change.earlyAccessHours));
+        if (change.earlyAccessHours !== undefined || change.earlyAccessPlatineHours !== undefined) {
+          // Both windows by tier (BP-19 T3): PLATINE's never longer than PALLADIUM's; a drop of before keeps its NULL
+          // (PALLADIUM's time) until PLATINE's is given.
+          const early = change.earlyAccessHours !== undefined ? cleanEarlyAccess(change.earlyAccessHours) : d.early_access_hours;
+          const platine = change.earlyAccessPlatineHours !== undefined ? cleanEarlyAccess(change.earlyAccessPlatineHours) : d.early_access_platine_hours;
+          if (platine !== null && platine > early) throw earlyAccessOrder();
+          note('earlyAccessHours', 'early_access_hours', d.early_access_hours, early);
+          note('earlyAccessPlatineHours', 'early_access_platine_hours', d.early_access_platine_hours, platine);
+        }
         if (change.priceMinor !== undefined || change.currency !== undefined) {
           const price = cleanDrawPrice(change.priceMinor ?? null, change.currency ?? null);
           note('priceMinor', 'price_minor', d.price_minor, price?.minor ?? null);
@@ -1095,6 +1158,7 @@ export class DropService {
       if (!model.active) throw modelInactive();
       await tx.updateTable('drops').set({ published_at: now }).where('id', '=', id).execute();
       const early = earlyAccessOpensAt({ ...d, published_at: now });
+      const earlyPlatine = earlyAccessOpensAt({ ...d, published_at: now }, 2);
       await this.audit.record(
         {
           actor,
@@ -1107,7 +1171,9 @@ export class DropService {
             opensAt: d.opens_at.toISOString(),
             closesAt: d.closes_at.toISOString(),
             earlyAccessHours: d.early_access_hours,
+            earlyAccessPlatineHours: platineHoursOf(d),
             earlyAccessOpensAt: early ? early.toISOString() : null,
+            earlyAccessPlatineOpensAt: earlyPlatine ? earlyPlatine.toISOString() : null,
           },
         },
         tx,
@@ -1363,8 +1429,11 @@ export class DropService {
       opensAt: r.opens_at,
       closesAt: r.closes_at,
       earlyAccessHours: r.early_access_hours,
+      earlyAccessPlatineHours: platineHoursOf(r),
       earlyAccessOpensAt: earlyAccessOpensAt(r),
+      earlyAccessPlatineOpensAt: earlyAccessOpensAt(r, 2),
       earlyAccessOpen: inEarlyAccess(r, now),
+      earlyAccessPlatineOpen: inEarlyAccess(r, now, 2),
       priceMinor: r.price_minor !== null && r.currency !== null ? r.price_minor : null,
       currency: r.price_minor !== null && r.currency !== null ? r.currency : null,
     };
@@ -1418,9 +1487,11 @@ export class DropService {
       closesAt: r.closes_at,
       purchaseWindowHours: r.purchase_window_hours,
       earlyAccessHours: r.early_access_hours,
+      earlyAccessPlatineHours: platineHoursOf(r),
       priceMinor: r.price_minor !== null && r.currency !== null ? r.price_minor : null,
       currency: r.price_minor !== null && r.currency !== null ? r.currency : null,
       earlyAccessOpensAt: earlyAccessOpensAt(r),
+      earlyAccessPlatineOpensAt: earlyAccessOpensAt(r, 2),
       state: dropState(r, now),
       publishedAt: r.published_at,
       cancelledAt: r.cancelled_at,

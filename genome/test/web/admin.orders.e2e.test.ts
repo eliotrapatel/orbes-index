@@ -192,7 +192,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     const drop = await ctx.services.drops.create({ modelId, title: 'THE VAULT RING', quantity: 3, opensAt: new Date(Date.now() + 2 * MINUTE), closesAt: new Date(Date.now() + HOUR), earlyAccessHours: 0 }, admin);
     await ctx.db
       .updateTable('drops')
-      .set({ mode: 'LIVE', live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1, price_minor: 480_000, currency: 'EUR', quantity_line: '3 PIECES', published_at: new Date() })
+      .set({ mode: 'LIVE', early_access_platine_hours: null, live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1, price_minor: 480_000, currency: 'EUR', quantity_line: '3 PIECES', published_at: new Date() })
       .where('id', '=', drop.id)
       .execute();
     const size = await ctx.db.insertInto('drop_sizes').values({ drop_id: drop.id, label: '54', position: 1, stock: 3 }).returning('id').executeTakeFirstOrThrow();

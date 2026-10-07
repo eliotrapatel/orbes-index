@@ -73,17 +73,50 @@ const stateOf = (s: unknown): DropState => (STATES.has(s as DropState) ? (s as D
 /** The lowest tier that reserves a place directly during an early access (P-X02): PLATINE (server: EARLY_ACCESS_MIN_TIER). */
 export const EARLY_ACCESS_MIN_TIER = 2;
 
-/** The early access of a release as the server sent it (P-X02): when it opens, and whether it is open now; null without one. */
+/**
+ * The early access of a release as the server sent it (P-X02, by tier since BP-19 T3): when PALLADIUM's opens and whether
+ * it is open now (the release's EARLY ACCESS), then PLATINE's (null: none for PLATINE); null without one.
+ */
 export interface EarlyAccess {
   opensAt: string;
   open: boolean;
+  platineOpensAt: string | null;
+  platineOpen: boolean;
+  /** Each tier's hours before the opening, as the release was published with them. */
+  palladiumHours: number;
+  platineHours: number;
 }
 
-/** A release's early access, when the server names a valid time for it, and only before entries open to everyone. */
-export function earlyAccessOf(c: Pick<DropCard, 'state' | 'earlyAccessOpensAt' | 'earlyAccessOpen'>): EarlyAccess | null {
+const validTime = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v));
+
+/**
+ * A release's early access, when the server names a valid time for it, and only before entries open to everyone. A
+ * release published before the windows by tier, or without PLATINE's fields, reads PALLADIUM's time for both.
+ */
+export function earlyAccessOf(
+  c: Pick<DropCard, 'state' | 'earlyAccessOpensAt' | 'earlyAccessOpen' | 'earlyAccessHours' | 'earlyAccessPlatineHours' | 'earlyAccessPlatineOpensAt' | 'earlyAccessPlatineOpen'>,
+): EarlyAccess | null {
   const at = c?.earlyAccessOpensAt;
-  if (typeof at !== 'string' || Number.isNaN(Date.parse(at))) return null;
-  return { opensAt: at, open: c.earlyAccessOpen === true && stateOf(c.state) === 'UPCOMING' };
+  if (!validTime(at)) return null;
+  const upcoming = stateOf(c.state) === 'UPCOMING';
+  const open = c.earlyAccessOpen === true && upcoming;
+  const byTier = c.earlyAccessPlatineOpensAt !== undefined;
+  const platineOpensAt = byTier ? (validTime(c.earlyAccessPlatineOpensAt) ? c.earlyAccessPlatineOpensAt : null) : at;
+  const palladiumHours = Number.isInteger(c.earlyAccessHours) && c.earlyAccessHours > 0 ? c.earlyAccessHours : 0;
+  const platineHours = Number.isInteger(c.earlyAccessPlatineHours) && c.earlyAccessPlatineHours! >= 0 ? c.earlyAccessPlatineHours! : palladiumHours;
+  return {
+    opensAt: at,
+    open,
+    platineOpensAt,
+    platineOpen: upcoming && platineOpensAt !== null && (byTier ? c.earlyAccessPlatineOpen === true : open),
+    palladiumHours,
+    platineHours: platineOpensAt === null ? 0 : platineHours,
+  };
+}
+
+/** Whether PALLADIUM and PLATINE reserve from one time (a release of before the windows by tier, or one set alike). */
+export function sameEarlyTime(e: EarlyAccess): boolean {
+  return e.platineOpensAt !== null && Date.parse(e.platineOpensAt) === Date.parse(e.opensAt);
 }
 
 /** A release's state as its page and the list say it: EARLY ACCESS while PLATINE and PALLADIUM reserve. */
@@ -174,7 +207,10 @@ export interface ReleaseSheetModel {
   opensAt: string;
   /** P-X02: its early access (when it opens, whether it is open now); null without one. */
   earlyAccess: EarlyAccess | null;
-  /** P-X02: `PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …` (UTC), under the state; null without an early access. */
+  /**
+   * P-X02: `PLATINE AND PALLADIUM: FROM … · EVERYONE: FROM …` (UTC), under the state, or by tier (BP-19 T3) `PALLADIUM:
+   * FROM … · PLATINE: FROM … · EVERYONE: FROM …` when their times differ; null without an early access.
+   */
   access: string | null;
   /** P-X02: THE RELEASE's paragraph on the early access; null without one. */
   earlyNote: string | null;
@@ -207,7 +243,9 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
   const price = drawPrice(s);
   const rows: ReleaseRow[] = [...(price ? [{ label: RELEASES.rows.price, value: price }] : []), { label: RELEASES.rows.pieces, value: String(quantity) }];
   const earlyAt = early ? twoClocks(early.opensAt, offsetMinutes) : null;
-  if (earlyAt) rows.push({ label: RELEASES.rows.early, value: earlyAt.utc, local: earlyAt.local });
+  const platineAt = early?.platineOpensAt ? twoClocks(early.platineOpensAt, offsetMinutes) : null;
+  // BP-19 T3: the EARLY ACCESS row gives each tier's hours; the line under the state gives their times.
+  if (early) rows.push({ label: RELEASES.rows.early, value: RELEASES.earlyHours(RELEASES.hours(early.palladiumHours), platineAt ? RELEASES.hours(early.platineHours) : null) });
   rows.push(
     { label: RELEASES.rows.opens, value: opens.utc, local: opens.local },
     { label: RELEASES.rows.closes, value: closes.utc, local: closes.local },
@@ -231,8 +269,8 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     // Drawn, the release is over (plan LIVE RELEASE+, decision 30): its page says so, neutral.
     stateLabel: state === 'DRAWN' ? RELEASES.over : [stateLabelOf(state, early), full ? RELEASES.fullState : ''].filter((x) => x.length > 0).join(' · '),
     earlyAccess: early,
-    access: earlyAt && opens.utc ? RELEASES.access(earlyAt.utc, opens.utc) : null,
-    earlyNote: early ? RELEASES.earlyNote : null,
+    access: earlyAt && opens.utc ? (sameEarlyTime(early!) ? RELEASES.access(earlyAt.utc, opens.utc) : RELEASES.accessByTier(earlyAt.utc, platineAt?.utc ?? null, opens.utc)) : null,
+    earlyNote: early ? (sameEarlyTime(early) ? RELEASES.earlyNote : RELEASES.earlyNoteByTier) : null,
     full,
     eyebrow: model.collection && model.collection.trim() ? upper(model.collection) : upper(model.name),
     model: modelLine(model),
@@ -320,12 +358,19 @@ export function entryModel(
       case 'UPCOMING': {
         const early = release.earlyAccess ?? null;
         const tier = reservingTier(opts.tier);
+        // BP-19 T3: each tier from its own time, PALLADIUM's first; a release of before reads one time for both.
+        const own = early && tier ? (opts.tier === 3 ? early.opensAt : early.platineOpensAt) : null;
+        const ownOpen = early && tier ? (opts.tier === 3 ? early.open : early.platineOpen) : false;
+        const bothOpen = early ? early.open && early.platineOpen : false;
         if (early?.open) {
           if (release.full) return none(st.full(opens));
-          return tier ? none(st.early(tier, opens), false, true) : none(st.earlyOthers(opens));
+          if (tier && ownOpen) return none(st.early(tier, opens), false, true);
+          // A PLATINE account during PALLADIUM's hours: when its own begin (none of its own: as any other account).
+          if (tier && own) return none(st.earlyPalladium(inSentence(own, opts.offsetMinutes)));
+          return none(bothOpen ? st.earlyOthers(opens) : st.earlyOthersPalladium(opens));
         }
         // Before the early access: a PLATINE or PALLADIUM account is told when it may reserve.
-        if (early && tier && Date.parse(early.opensAt) < Date.parse(release.opensAt)) return none(st.earlySoon(tier, inSentence(early.opensAt, opts.offsetMinutes)));
+        if (early && tier && own && Date.parse(own) < Date.parse(release.opensAt)) return none(st.earlySoon(tier, inSentence(own, opts.offsetMinutes)));
         return none(release.full ? st.full(opens) : st.upcoming(opens));
       }
       case 'CLOSED':

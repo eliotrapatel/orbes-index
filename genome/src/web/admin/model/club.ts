@@ -12,9 +12,11 @@
  *    CONFIRMED (its place held) and LAPSED (only once that time has passed),
  *    OFFER NEXT while places are left; the phrases typed before the
  *    irreversible ones (the draw, a cancellation).
- *  - Its early access (P-X02): the hours before the opening when PLATINE
- *    and PALLADIUM reserve a place directly (0 for none, 48 by default),
- *    said with its time, and the places the draw will give.
+ *  - Its early access (P-X02), by tier (plan NEXT-NINE, BP-19 T3): the hours
+ *    before the opening when PALLADIUM, then PLATINE, reserve a place
+ *    directly (0 for none; THE PROGRAM's 4 and 2 by default, PLATINE's never
+ *    more than PALLADIUM's), said with their times, and the places the draw
+ *    will give.
  *  - Its price (plan NOCTURNE, addition 5): optional, typed in units with
  *    its currency; shown on its card and page on /verify, and taken by the
  *    order of each entry Client Services confirms.
@@ -59,7 +61,14 @@ export function clubTab(query: Record<string, string>): ClubTab {
 }
 
 /** The bounds the server holds a drop to (services/drops.ts; the early access, P-X02, EARLY_ACCESS_HOURS). */
-export const DROP_LIMITS = Object.freeze({ title: 120, description: 2000, quantity: 10_000, windowMin: 1, windowMax: 336, windowDefault: 48, earlyMin: 0, earlyMax: 336, earlyDefault: 48, note: 500, priceMax: 100_000_000 });
+export const DROP_LIMITS = Object.freeze({ title: 120, description: 2000, quantity: 10_000, windowMin: 1, windowMax: 336, windowDefault: 48, earlyMin: 0, earlyMax: 336, note: 500, priceMax: 100_000_000 });
+
+/** A new draw's early access by default (BP-19 T3): THE PROGRAM's, PALLADIUM's then PLATINE's hours (services/club-program.ts DEFAULT_PROGRAM). */
+export interface EarlyAccessDefaults {
+  palladium: number;
+  platine: number;
+}
+export const EARLY_ACCESS_DEFAULTS: Readonly<EarlyAccessDefaults> = Object.freeze({ palladium: 4, platine: 2 });
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -79,8 +88,11 @@ export function utcInstant(local: string | null | undefined): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
-/** The dialog's values of a drop: its own, or a new one's (entries open tomorrow at 10:00 UTC for two days). */
-export function dropFormValues(d: Drop | null, now: Date): Record<string, string> {
+/**
+ * The dialog's values of a drop: its own, or a new one's (entries open tomorrow at 10:00 UTC for two days, its early
+ * access THE PROGRAM's by tier).
+ */
+export function dropFormValues(d: Drop | null, now: Date, early: EarlyAccessDefaults = EARLY_ACCESS_DEFAULTS): Record<string, string> {
   if (d) {
     return {
       modelId: d.model.id,
@@ -91,6 +103,7 @@ export function dropFormValues(d: Drop | null, now: Date): Record<string, string
       closesAt: localUtc(d.closesAt),
       purchaseWindowHours: String(d.purchaseWindowHours),
       earlyAccessHours: String(d.earlyAccessHours),
+      earlyAccessPlatineHours: String(d.earlyAccessPlatineHours),
       price: d.priceMinor === null ? '' : moneyField(d.priceMinor),
       currency: d.currency ?? 'EUR',
     };
@@ -105,7 +118,8 @@ export function dropFormValues(d: Drop | null, now: Date): Record<string, string
     opensAt: localUtc(opens.toISOString()),
     closesAt: localUtc(closes.toISOString()),
     purchaseWindowHours: String(DROP_LIMITS.windowDefault),
-    earlyAccessHours: String(DROP_LIMITS.earlyDefault),
+    earlyAccessHours: String(early.palladium),
+    earlyAccessPlatineHours: String(Math.min(early.platine, early.palladium)),
     price: '',
     currency: 'EUR',
   };
@@ -129,7 +143,11 @@ export function dropProblem(v: Record<string, string>): string | null {
   const hours = wholeNumber(v.purchaseWindowHours);
   if (hours === null || hours < DROP_LIMITS.windowMin || hours > DROP_LIMITS.windowMax) return `A place is held ${DROP_LIMITS.windowMin} to ${DROP_LIMITS.windowMax} hours.`;
   const early = wholeNumber(v.earlyAccessHours);
-  if (early === null || early < DROP_LIMITS.earlyMin || early > DROP_LIMITS.earlyMax) return `The early access lasts ${DROP_LIMITS.earlyMin} to ${DROP_LIMITS.earlyMax} hours (${DROP_LIMITS.earlyMin}: none).`;
+  const platine = wholeNumber(v.earlyAccessPlatineHours);
+  for (const hours of [early, platine]) {
+    if (hours === null || hours < DROP_LIMITS.earlyMin || hours > DROP_LIMITS.earlyMax) return `An early access lasts ${DROP_LIMITS.earlyMin} to ${DROP_LIMITS.earlyMax} hours (${DROP_LIMITS.earlyMin}: none).`;
+  }
+  if (platine! > early!) return 'PALLADIUM’s early access starts no later than PLATINE’s.';
   return drawPriceProblem(v);
 }
 
@@ -160,6 +178,7 @@ export function dropInput(v: Record<string, string>): DropInput {
     closesAt: utcInstant(v.closesAt)!,
     purchaseWindowHours: Number(v.purchaseWindowHours),
     earlyAccessHours: Number(v.earlyAccessHours),
+    earlyAccessPlatineHours: Number(v.earlyAccessPlatineHours),
     // NOCTURNE (addition 5): the price with its currency, or neither.
     ...((v.price ?? '').trim() === '' ? { priceMinor: null, currency: null } : { priceMinor: parseMoney(v.price)!, currency: v.currency as OrderCurrency }),
   };
@@ -177,6 +196,7 @@ export function dropChange(d: Drop, v: Record<string, string>): DropChange {
   if (Date.parse(next.closesAt) !== Date.parse(d.closesAt)) out.closesAt = next.closesAt;
   if (next.purchaseWindowHours !== d.purchaseWindowHours) out.purchaseWindowHours = next.purchaseWindowHours;
   if (next.earlyAccessHours !== d.earlyAccessHours) out.earlyAccessHours = next.earlyAccessHours;
+  if (next.earlyAccessPlatineHours !== d.earlyAccessPlatineHours) out.earlyAccessPlatineHours = next.earlyAccessPlatineHours;
   if ((next.priceMinor ?? null) !== d.priceMinor || (next.currency ?? null) !== d.currency) {
     out.priceMinor = next.priceMinor ?? null;
     out.currency = next.currency ?? null;
@@ -199,10 +219,19 @@ export function placesToDraw(d: Pick<Drop, 'entries' | 'quantity'>): number {
   return Math.max(0, d.quantity - placesTaken(d));
 }
 
-/** P-X02: the early access as the console says it: `48 hours · from 10 OCT 2026 · 10:00 UTC`, or `None`. */
-export function earlyAccessLine(d: Pick<Drop, 'earlyAccessHours' | 'earlyAccessOpensAt'>): string {
+/**
+ * P-X02, by tier (BP-19 T3): the early access as the console says it, `PALLADIUM 4 hours · from 10 OCT 2026 · 06:00 UTC;
+ * PLATINE 2 hours · from 08:00 UTC` (PLATINE's day said when it is another), or `None`.
+ */
+export function earlyAccessLine(d: Pick<Drop, 'earlyAccessHours' | 'earlyAccessOpensAt' | 'earlyAccessPlatineHours' | 'earlyAccessPlatineOpensAt'>): string {
   if (!d.earlyAccessOpensAt || !(d.earlyAccessHours > 0)) return 'None';
-  return `${d.earlyAccessHours} ${d.earlyAccessHours === 1 ? 'hour' : 'hours'} · from ${formatDateTime(d.earlyAccessOpensAt)}`;
+  const hours = (n: number) => `${n} ${n === 1 ? 'hour' : 'hours'}`;
+  const palladiumAt = formatDateTime(d.earlyAccessOpensAt);
+  const palladium = `PALLADIUM ${hours(d.earlyAccessHours)} · from ${palladiumAt}`;
+  if (!d.earlyAccessPlatineOpensAt || !(d.earlyAccessPlatineHours > 0)) return `${palladium}; PLATINE none`;
+  const platineAt = formatDateTime(d.earlyAccessPlatineOpensAt);
+  const sameDay = platineAt.split(' · ')[0] === palladiumAt.split(' · ')[0];
+  return `${palladium}; PLATINE ${hours(d.earlyAccessPlatineHours)} · from ${sameDay ? platineAt.split(' · ').slice(1).join(' · ') : platineAt}`;
 }
 
 /**

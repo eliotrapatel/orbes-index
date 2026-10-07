@@ -1966,14 +1966,18 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const local = (d: Date) => d.toISOString().slice(0, 16);
     await p.fill('dialog input[name=opensAt]', local(opens));
     await p.fill('dialog input[name=closesAt]', local(closes));
-    // The early access (P-X02): 48 hours by default, set here to 24.
-    expect(await p.inputValue('dialog input[name=earlyAccessHours]')).toBe('48');
+    // The early access by tier (P-X02, BP-19 T3): THE PROGRAM's 4 and 2 hours by default, set here to 24 and 12.
+    expect(await p.inputValue('dialog input[name=earlyAccessHours]')).toBe('4');
+    expect(await p.inputValue('dialog input[name=earlyAccessPlatineHours]')).toBe('2');
     await p.fill('dialog input[name=earlyAccessHours]', '24');
+    await p.fill('dialog input[name=earlyAccessPlatineHours]', '12');
     await confirmDialog(p);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('MONOLITHE — release I');
     const dropId = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
     await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('DRAFT');
-    await expect.poll(() => p.locator('[data-testid=drop-early-access]').textContent()).toMatch(/^24 hours · from \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
+    await expect.poll(() => p.locator('[data-testid=drop-early-access]').textContent()).toMatch(
+      /^PALLADIUM 24 hours · from \d{1,2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC; PLATINE 12 hours · from (?:\d{1,2} [A-Z]{3} \d{4} · )?\d{2}:\d{2} UTC$/,
+    );
     expect(await p.locator('[data-testid=drop-reserved]').textContent()).toBe('0 of 3');
     const seedHash = (await ctx.db.selectFrom('drops').select('seed_hash').where('id', '=', dropId).executeTakeFirstOrThrow()).seed_hash;
     expect(await p.locator('[data-testid=drop-seed-hash] .mono').getAttribute('title')).toBe(Buffer.from(seedHash).toString('hex'));
