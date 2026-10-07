@@ -15,7 +15,7 @@
  * before it is asked for.
  */
 import { formatCount, percent } from '../format.js';
-import type { AdminRole, CirclePost, CirclePostChange, CirclePostInput, CirclePostKind, CircleStats, Drop, Model } from '../types.js';
+import { CIRCLE_EXPERIENCES, type AdminRole, type CircleExperience, type CirclePost, type CirclePostChange, type CirclePostInput, type CirclePostKind, type CircleStats, type ClubProgram, type Drop, type Model } from '../types.js';
 import { localUtc, utcInstant } from './club.js';
 import type { BarRow } from './dashboard.js';
 import { can } from './permissions.js';
@@ -38,6 +38,32 @@ export const CIRCLE_LIMITS = Object.freeze({
 export const CIRCLE_LINK_HOSTS: readonly string[] = Object.freeze(['theorbes.com', 'youtube.com', 'vimeo.com']);
 
 export const CIRCLE_KIND_LABELS: Readonly<Record<CirclePostKind, string>> = Object.freeze({ NOTE: 'Note', INVITATION: 'Invitation', POLL: 'Poll' });
+
+/** What an invitation may be (BP-19 T7): an experience of the tier program, its tier set in THE PROGRAM. */
+export const CIRCLE_EXPERIENCE_LABELS: Readonly<Record<CircleExperience, string>> = Object.freeze({
+  MEMBERS_EVENING: 'Members’ evening',
+  LAUNCH_PREVIEW: 'Launch preview',
+  PARTNER_EXPERIENCE: 'Partner experience',
+});
+
+/** The Experience select of an invitation's dialog: None, then each experience. */
+export const CIRCLE_EXPERIENCE_OPTIONS: readonly { value: string; label: string }[] = Object.freeze([
+  { value: '', label: 'None' },
+  ...CIRCLE_EXPERIENCES.map((e) => ({ value: e, label: CIRCLE_EXPERIENCE_LABELS[e] })),
+]);
+
+/** The tier field's hint once an experience is chosen: the tier is THE PROGRAM's, locked. */
+export const EXPERIENCE_TIER_HINT = 'Set in Club → Tiers, THE PROGRAM.';
+
+/** The tier THE PROGRAM names for an experience (services/club-program.ts experienceTier). */
+export function experienceTier(p: Pick<ClubProgram, 'experienceMembersEveningMinTier' | 'experienceLaunchPreviewMinTier' | 'experiencePartnerMinTier'>, e: CircleExperience): 1 | 2 | 3 {
+  return e === 'MEMBERS_EVENING' ? p.experienceMembersEveningMinTier : e === 'LAUNCH_PREVIEW' ? p.experienceLaunchPreviewMinTier : p.experiencePartnerMinTier;
+}
+
+/** A post's kind as the list says it, its experience beside it: `Invitation · Members’ evening`. */
+export function kindLine(p: Pick<CirclePost, 'kind' | 'experience'>): string {
+  return p.experience ? `${CIRCLE_KIND_LABELS[p.kind]} · ${CIRCLE_EXPERIENCE_LABELS[p.experience]}` : CIRCLE_KIND_LABELS[p.kind];
+}
 
 /** The tiers a post reaches, by its lowest one. */
 export const CIRCLE_TIER_OPTIONS: readonly { value: string; label: string }[] = Object.freeze([
@@ -76,6 +102,7 @@ export function circleFormValues(kind: CirclePostKind, p: CirclePost | null, now
       modelId: p.model?.id ?? '',
       externalUrl: p.externalUrl ?? '',
       segmentId: p.segment?.id ?? '',
+      experience: p.experience ?? '',
     };
   }
   const event = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 7, 19));
@@ -91,6 +118,7 @@ export function circleFormValues(kind: CirclePostKind, p: CirclePost | null, now
     modelId: '',
     externalUrl: '',
     segmentId: '',
+    experience: '',
   };
 }
 
@@ -162,6 +190,7 @@ export function circleInput(kind: CirclePostKind, v: Record<string, string>): Ci
     ...(v.segmentId ? { segmentId: v.segmentId } : {}),
   };
   if (kind === 'INVITATION') {
+    out.experience = (CIRCLE_EXPERIENCES as readonly string[]).includes(v.experience ?? '') ? (v.experience as CircleExperience) : null;
     out.eventAt = utcInstant(v.eventAt);
     out.eventPlace = (v.eventPlace ?? '').trim() === '' ? null : v.eventPlace.trim();
     out.capacity = (v.capacity ?? '').trim() === '' ? null : Number(v.capacity);
@@ -178,6 +207,9 @@ export function circleChange(p: CirclePost, v: Record<string, string>): CirclePo
   if ((next.body ?? null) !== (p.body ?? null)) out.body = next.body ?? null;
   if (next.minTier !== p.minTier) out.minTier = next.minTier;
   if (p.kind === 'INVITATION') {
+    if ((next.experience ?? null) !== (p.experience ?? null)) out.experience = next.experience ?? null;
+    // An experience's tier is THE PROGRAM's: the server sets it, whatever is sent.
+    if (next.experience) delete out.minTier;
     if (next.eventAt && Date.parse(next.eventAt) !== Date.parse(p.eventAt ?? '')) out.eventAt = next.eventAt;
     if ((next.eventPlace ?? null) !== p.eventPlace) out.eventPlace = next.eventPlace ?? null;
     if ((next.capacity ?? null) !== p.capacity) out.capacity = next.capacity ?? null;

@@ -3786,6 +3786,8 @@ P-X01 (`routes/admin/circle.ts`, `services/circle.ts`; the photographs in `route
 
 A post may name a **segment** (`segmentId`, plan LIVE RELEASE+, choice 27; `null`: none; **`404 SEGMENT_NOT_FOUND`**): only that segment's members among its tiers read it, evaluated at each request (the feed, the post, an answer, a vote: the same `404 CIRCLE_POST_NOT_FOUND` for anyone else); the post object says it as `segment: { id, name }`, a member never reads its name. Audited with `circle.post.create`, `.update` and `.publish` (`segmentId`).
 
+An invitation may be an **experience** of the tier program (`experience`, plan NEXT-NINE, BP-19 T7: `MEMBERS_EVENING`, `LAUNCH_PREVIEW`, `PARTNER_EXPERIENCE`, or `null`), on `POST` and `PATCH`; any other kind refuses one (**`422 VALIDATION_FAILED`** *Only an invitation is an experience.*), an unknown value is `400`. Its `minTier` is then the tier THE PROGRAM names for it (§16.21: the members' evening from PLATINE, the launch previews and the partner experiences from PALLADIUM by default), set when the experience is, whatever `minTier` is sent; cleared, the post keeps its tier or takes the one sent. The post object, the feed's cards and a member's post carry `experience`; /verify shows it above the invitation's title (*MEMBERS' EVENING*, *LAUNCH PREVIEW*, *PARTNER EXPERIENCE*). Audited with `circle.post.create` and `.update` (`experience`, and the tier it set). In the console, the invitation's dialog has *Experience* (None, Members' evening, Launch preview, Partner experience): once one is chosen, *Read by* shows THE PROGRAM's tier, locked (*Set in Club → Tiers, THE PROGRAM.*); the list says the experience beside the kind.
+
 The post object (`AdminCirclePost`):
 
 ```json
@@ -3795,6 +3797,7 @@ The post object (`AdminCirclePost`):
   "title": "Which stone next winter?",
   "body": "Two stones are in the atelier.\n\nTell us which one you would wear.",
   "minTier": 1,
+  "experience": null,
   "eventAt": null,
   "eventPlace": null,
   "capacity": null,

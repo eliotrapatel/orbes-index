@@ -1022,6 +1022,8 @@ export const CIRCLE = Object.freeze({
   /** A post below the reader's tier, withdrawn, or an address that leads nowhere. */
   notFound: 'This post is not in the circle.',
   kind: Object.freeze({ NOTE: 'NOTE', INVITATION: 'INVITATION', POLL: 'POLL' }),
+  /** An invitation's experience of the tier program (plan NEXT-NINE, BP-19 T7), above its title. */
+  experience: Object.freeze({ MEMBERS_EVENING: 'MEMBERS’ EVENING', LAUNCH_PREVIEW: 'LAUNCH PREVIEW', PARTNER_EXPERIENCE: 'PARTNER EXPERIENCE' }),
   /** The text link of each post of the feed. */
   see: Object.freeze({ NOTE: 'READ THE NOTE', INVITATION: 'SEE THE INVITATION', POLL: 'SEE THE POLL' }),
   /** Who reads a post reserved to the higher tiers. */

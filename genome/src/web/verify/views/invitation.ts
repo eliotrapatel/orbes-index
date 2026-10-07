@@ -88,6 +88,7 @@ export class CircleCardLines {
     if (this.opts.titleId) link.setAttribute('aria-describedby', this.opts.titleId);
     const lines: (HTMLElement | null)[] = [
         h('p', { class: 'n-g n-lb n-circle-card__kind circle-card__kind', text: kindLine(card) }),
+        card.experience ? h('p', { class: 'n-g n-lb n-circle-card__experience circle-card__experience', text: card.experience }) : null,
         h(this.opts.heading, { class: 'n-g n-t2 n-circle-card__title circle-card__title', id: this.opts.titleId }, ...withNumerals(card.title)),
         card.date ? h('p', { class: 'n-sm n-num n-circle-card__date', text: card.date }) : null,
         event

@@ -640,6 +640,8 @@ export interface CircleCard {
   title: string;
   /** The lowest tier that reads it: 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
   minTier: number;
+  /** An invitation's experience of the tier program (plan NEXT-NINE, BP-19 T7), shown above its title; null otherwise. */
+  experience?: 'MEMBERS_EVENING' | 'LAUNCH_PREVIEW' | 'PARTNER_EXPERIENCE' | null;
   publishedAt: string;
   cover: CirclePhoto | null;
   eventAt: string | null;

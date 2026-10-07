@@ -93,11 +93,19 @@ function eventLine(eventAt: string | null, place: string | null): string | null 
   return [`${t} UTC`, place && place.trim() ? upper(place) : ''].filter((x) => x.length > 0).join(' · ');
 }
 
+/** An invitation's experience in its words (CIRCLE.experience); null for another kind or none. */
+function experienceOf(kind: CirclePostKind, e: unknown): string | null {
+  if (kind !== 'INVITATION' || typeof e !== 'string') return null;
+  return (CIRCLE.experience as Readonly<Record<string, string>>)[e] ?? null;
+}
+
 export interface CircleCardModel {
   id: string;
   href: string;
   kind: CirclePostKind;
   kindLabel: string;
+  /** An invitation's experience (BP-19 T7), above its title: MEMBERS’ EVENING, LAUNCH PREVIEW, PARTNER EXPERIENCE; null otherwise. */
+  experience: string | null;
   title: string;
   /** The day it was published: `3 OCT 2026`. */
   date: string;
@@ -150,6 +158,7 @@ export function circleCards(cards: readonly CircleCard[]): CircleCardModel[] {
       href: circlePostPath(c.id),
       kind,
       kindLabel: CIRCLE.kind[kind],
+      experience: experienceOf(kind, c.experience),
       title,
       date: formatDate(c.publishedAt),
       reach: reachOf(c.minTier),
@@ -186,6 +195,8 @@ export interface CirclePostModel {
   id: string;
   kind: CirclePostKind;
   kindLabel: string;
+  /** As a card's: an invitation's experience, or null. */
+  experience: string | null;
   title: string;
   date: string;
   reach: string | null;
@@ -248,6 +259,7 @@ export function circlePostModel(p: CirclePost, offsetMinutes: number): CirclePos
     id: p.id,
     kind,
     kindLabel: CIRCLE.kind[kind],
+    experience: experienceOf(kind, p.experience),
     title,
     date: formatDate(p.publishedAt),
     reach: reachOf(p.minTier),

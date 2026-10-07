@@ -470,6 +470,7 @@ class PostPage {
             'div',
             { class: ['n-px', 'n-post__head', photos ? null : 'n-post__head--bare'] },
             h('p', { class: 'n-g n-lb circle-post__kind', text: kindLine(p) }),
+            p.experience ? h('p', { class: 'n-g n-lb circle-post__experience', text: p.experience }) : null,
             h('h1', { class: 'n-g n-t1 n-post__title circle-post__title', id: 'circle-post-title' }, ...withNumerals(p.title)),
             p.date ? h('p', { class: 'n-sm n-num n-post__date circle-post__date', text: p.date }) : null,
             storyBlock(p.body, { className: 'n-post__text circle-post__text', paragraphClass: 'n-art circle-post__paragraph' }),

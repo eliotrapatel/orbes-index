@@ -26,6 +26,7 @@ import { CLUB_TIER_THRESHOLDS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto } from '../support/images.js';
+import { holdPieces } from '../support/live.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 const HOUR = 3_600_000;
@@ -334,7 +335,7 @@ describe('the owners\' circle (P-X01)', () => {
     expect(seen.items.map((p) => p.id)).not.toContain(draft.id);
     // No body in the feed: a post carries it.
     // NOCTURNE (addition 6): an invitation's places and whether answers are open; null for another kind.
-    for (const p of seen.items) expect(Object.keys(p).sort()).toEqual(['answer', 'cover', 'eventAt', 'eventPlace', 'id', 'invitation', 'kind', 'minTier', 'publishedAt', 'title', 'voted']);
+    for (const p of seen.items) expect(Object.keys(p).sort()).toEqual(['answer', 'cover', 'eventAt', 'eventPlace', 'experience', 'id', 'invitation', 'kind', 'minTier', 'publishedAt', 'title', 'voted']);
     for (const p of seen.items) if (p.kind !== 'INVITATION') expect((p as { invitation?: unknown }).invitation).toBeNull();
     expect((await read(titane.client, forAll.id)).body).toBe(forAll.body);
     // Below its tier, unpublished, unknown or malformed: one 404.
@@ -573,6 +574,54 @@ describe('the owners\' circle (P-X01)', () => {
     expect(next.visits.total).toBe(2);
     expect(Object.keys(next.visits.daily[0]!).sort()).toEqual(['day', 'visits']);
     expect(errorOf(await auditor.get('/api/admin/analytics/circle?days=367')).code).toBe('VALIDATION_FAILED');
+  });
+
+  it('makes an invitation an experience of the tier program (plan NEXT-NINE, BP-19 T7): on an invitation only, its tier THE PROGRAM\'s, shown to that tier and up only, carried by the views and the audit', async () => {
+    const holding = async (n: number) => {
+      const a = await accountClient(h);
+      const id = await accountIdOf(a.email);
+      await holdPieces(h.ctx.db, id, n, catalog.modelId);
+      return { ...a, id };
+    };
+    const titane = await holding(1);
+    const platine = await holding(5);
+    const palladium = await holding(10);
+    const event = { eventAt: at(48 * HOUR), eventPlace: 'The atelier' };
+    // On an invitation only: a note or a poll refuses one (422); an unknown experience is 400.
+    const note = await operator.post(posts(), { kind: 'NOTE', title: 'A note', experience: 'MEMBERS_EVENING' });
+    expect([note.statusCode, errorOf(note).code]).toEqual([422, 'VALIDATION_FAILED']);
+    const poll = await operator.post(posts(), { kind: 'POLL', title: 'A poll', pollOptions: ['A', 'B'], experience: 'LAUNCH_PREVIEW' });
+    expect(poll.statusCode).toBe(422);
+    expect((await operator.post(posts(), { kind: 'INVITATION', title: 'A gala', ...event, experience: 'GALA' })).statusCode).toBe(400);
+    // Its tier is THE PROGRAM's, whatever is sent: the members' evening from PLATINE, the launch preview from PALLADIUM.
+    const evening = await create({ kind: 'INVITATION', title: 'The members’ evening', ...event, minTier: 1, experience: 'MEMBERS_EVENING' });
+    expect([evening.minTier, (evening as AdminPostJson & { experience: string }).experience]).toEqual([2, 'MEMBERS_EVENING']);
+    const preview = await create({ kind: 'INVITATION', title: 'A launch preview', ...event, experience: 'LAUNCH_PREVIEW' });
+    expect(preview.minTier).toBe(3);
+    expect((await audits('circle.post.create', preview.id))[0]!.details).toMatchObject({ experience: 'LAUNCH_PREVIEW', minTier: 3 });
+    // THE PROGRAM changed: a new experience takes its tier then.
+    const program = await h.ctx.services.clubProgram.read();
+    await h.ctx.services.clubProgram.update({ ...program, experiencePartnerMinTier: 2 }, { type: 'admin', id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'ADMIN').executeTakeFirstOrThrow()).id });
+    const partner = await create({ kind: 'INVITATION', title: 'A partner experience', ...event, experience: 'PARTNER_EXPERIENCE' });
+    expect(partner.minTier).toBe(2);
+    // A change: the tier follows the experience; a tier sent with one is not taken; without it, the post's tier is the console's again.
+    const changed = safeJson(await operator.patch(posts(partner.id), { experience: 'LAUNCH_PREVIEW', minTier: 1 })) as AdminPostJson & { experience: string };
+    expect([changed.minTier, changed.experience]).toEqual([3, 'LAUNCH_PREVIEW']);
+    expect((await audits('circle.post.update', partner.id)).at(-1)!.details).toMatchObject({ before: { experience: 'PARTNER_EXPERIENCE', minTier: 2 }, after: { experience: 'LAUNCH_PREVIEW', minTier: 3 } });
+    const cleared = safeJson(await operator.patch(posts(partner.id), { experience: null, minTier: 1 })) as AdminPostJson & { experience: string | null };
+    expect([cleared.minTier, cleared.experience]).toEqual([1, null]);
+    await h.ctx.services.clubProgram.update(program, { type: 'admin', id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'ADMIN').executeTakeFirstOrThrow()).id });
+    // Read from its tier up: a member below gets 404; the feed and the post carry the experience.
+    h.clock.advance(1_000);
+    await publish(evening.id);
+    h.clock.advance(1_000);
+    await publish(preview.id);
+    expect((await titane.client.get(`/api/v1/club/circle/${evening.id}`)).statusCode).toBe(404);
+    expect((await platine.client.get(`/api/v1/club/circle/${preview.id}`)).statusCode).toBe(404);
+    expect((await read(platine.client, evening.id) as PostJson & { experience: string }).experience).toBe('MEMBERS_EVENING');
+    const cards = (await feed(palladium.client)).items as (CardJson & { experience: string | null })[];
+    expect(cards.filter((c) => c.id === evening.id || c.id === preview.id).map((c) => c.experience)).toEqual(['LAUNCH_PREVIEW', 'MEMBERS_EVENING']);
+    expect((await feed(titane.client)).items.map((c) => c.id)).not.toContain(evening.id);
   });
 
   it('lists an account\'s answers and votes in its right-of-access export', async () => {

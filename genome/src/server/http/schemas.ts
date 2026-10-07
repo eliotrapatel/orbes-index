@@ -17,6 +17,7 @@ import {
   CIRCLE_POST_KINDS,
   CIRCLE_RSVP_ANSWERS,
   CARE_REQUEST_STATUSES,
+  CIRCLE_EXPERIENCES,
   CLIENT_CONVERSATION_STATUSES,
   CLIENT_MESSAGE_CONTEXTS,
   CLUB_TIER_NAMES,
@@ -798,6 +799,8 @@ const circleFields = {
   externalUrl: z.preprocess(emptyToNull, z.string().trim().max(CIRCLE_URL_MAX, `At most ${CIRCLE_URL_MAX} characters`).nullable().optional()),
   /** Plan LIVE RELEASE+ (choice 27): the post shown to a segment's members only (among its tiers); null: to the tiers. */
   segmentId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  /** BP-19 T7: what an invitation is (the members' evening, a launch preview, a partner experience); its tier then THE PROGRAM's. */
+  experience: z.preprocess(emptyToNull, z.enum(CIRCLE_EXPERIENCES).nullable().optional()),
 };
 
 /**

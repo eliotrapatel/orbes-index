@@ -2510,6 +2510,12 @@ body.nocturne[data-screen="live"] {
   margin-top: 10px;
 }
 
+/* An invitation's experience (plan NEXT-NINE, BP-19 T7), in the eyebrow's style under its kind, above its title. */
+.n-circle-card__experience,
+.circle-post__experience {
+  margin-top: 6px;
+}
+
 .n-circle-card__date {
   margin-top: 6px;
 }

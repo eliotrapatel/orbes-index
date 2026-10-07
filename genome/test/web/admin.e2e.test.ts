@@ -2090,6 +2090,15 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.click('[data-testid=circle-new-invitation]');
     expect(await p.locator('dialog select[name=minTier] option').allTextContents()).toEqual(['Every owner (TITANE and up)', 'PLATINE and PALLADIUM', 'PALLADIUM only']);
     expect(await p.locator('dialog [name=pollOptions]').count()).toBe(0);
+    // An experience of the tier program (plan NEXT-NINE, BP-19 T7) locks the tier to THE PROGRAM's; None gives it back.
+    expect(await p.locator('dialog select[name=experience] option').allTextContents()).toEqual(['None', 'Members’ evening', 'Launch preview', 'Partner experience']);
+    await p.selectOption('dialog select[name=experience]', 'MEMBERS_EVENING');
+    expect(await p.locator('dialog select[name=minTier]').isDisabled()).toBe(true);
+    expect(await p.locator('dialog select[name=minTier]').inputValue()).toBe('2');
+    expect(await p.locator('dialog .cfield[data-field=minTier] .cfield__hint').textContent()).toBe('Set in Club → Tiers, THE PROGRAM.');
+    await p.selectOption('dialog select[name=experience]', '');
+    expect(await p.locator('dialog select[name=minTier]').isDisabled()).toBe(false);
+    await p.selectOption('dialog select[name=minTier]', '1');
     await p.fill('dialog input[name=title]', 'Dinner at the atelier');
     await p.fill('dialog textarea[name=body]', 'Twelve places.\n\nThe whole team.');
     const event = new Date(Date.now() + 7 * 86_400_000);

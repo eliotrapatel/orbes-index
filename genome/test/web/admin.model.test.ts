@@ -186,6 +186,9 @@ import type { LockOutcome as ServerLockOutcome, OwnerSheet as ServerOwnerSheet }
 import type { AdminShopRequest as ServerShopRequest } from '../../src/server/services/salon.js';
 import {
   answersLine,
+  CIRCLE_EXPERIENCE_OPTIONS,
+  experienceTier as webExperienceTier,
+  kindLine as circleKindLine,
   circleActions,
   circleAddress,
   circleChange,
@@ -238,7 +241,7 @@ import {
   ratesProblem,
   ratesValues,
 } from '../../src/web/admin/model/program.js';
-import { checkProgram, DEFAULT_PROGRAM, PROGRAM_LIMITS as SERVER_PROGRAM_LIMITS } from '../../src/server/services/club-program.js';
+import { checkProgram, DEFAULT_PROGRAM, experienceTier, PROGRAM_LIMITS as SERVER_PROGRAM_LIMITS } from '../../src/server/services/club-program.js';
 import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, READY_TO_SELL, retailerLabel, retailerOptions, SALE_CARD_NOTE, saleVerdict } from '../../src/web/admin/model/sale.js';
 import { SALE_REFUSALS as SERVER_SALE_REFUSALS, SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { SALE_REFUSAL_MESSAGES } from '../../src/server/routes/admin/sale.js';
@@ -767,6 +770,7 @@ describe('the Club\'s circle (P-X01)', () => {
     title: 'Dinner at the atelier',
     body: 'Twelve places.',
     minTier: 1,
+    experience: null,
     eventAt: '2026-10-12T19:00:00.000Z',
     eventPlace: 'Paris',
     capacity: 12,
@@ -847,6 +851,22 @@ describe('the Club\'s circle (P-X01)', () => {
     const poll = { ...base, kind: 'POLL' as const, eventAt: null, eventPlace: null, capacity: null, pollOptions: ['Gold', 'Platinum'] };
     expect(circleChange(poll, values(poll))).toEqual({});
     expect(circleChange(poll, values(poll, { pollOptions: 'Gold\nPlatinum\nTitanium' }))).toEqual({ pollOptions: ['Gold', 'Platinum', 'Titanium'] });
+  });
+
+  it('makes an invitation an experience of the tier program (BP-19 T7): its options, its tier THE PROGRAM\'s, said beside its kind, sent without a tier of its own', () => {
+    expect(CIRCLE_EXPERIENCE_OPTIONS.map((o) => o.label)).toEqual(['None', 'Members’ evening', 'Launch preview', 'Partner experience']);
+    expect(serverSchema.CIRCLE_EXPERIENCES.map((e) => webExperienceTier(DEFAULT_PROGRAM, e))).toEqual(serverSchema.CIRCLE_EXPERIENCES.map((e) => experienceTier(DEFAULT_PROGRAM, e)));
+    expect(serverSchema.CIRCLE_EXPERIENCES.map((e) => webExperienceTier(DEFAULT_PROGRAM, e))).toEqual([2, 3, 3]);
+    expect(circleKindLine(base)).toBe('Invitation');
+    expect(circleKindLine({ ...base, experience: 'MEMBERS_EVENING' })).toBe('Invitation · Members’ evening');
+    expect(circleInput('INVITATION', values(base, { experience: 'LAUNCH_PREVIEW' }))).toMatchObject({ experience: 'LAUNCH_PREVIEW' });
+    expect(circleInput('INVITATION', values(base))).toMatchObject({ experience: null });
+    expect(circleInput('NOTE', { title: 'A note', experience: 'LAUNCH_PREVIEW' })).not.toHaveProperty('experience');
+    // An experience chosen: the tier is the server's to set; cleared, the console's tier is sent again.
+    expect(circleChange(base, values(base, { experience: 'MEMBERS_EVENING', minTier: '2' }))).toEqual({ experience: 'MEMBERS_EVENING' });
+    const evening = { ...base, experience: 'MEMBERS_EVENING' as const, minTier: 2 };
+    expect(circleChange(evening, values(evening))).toEqual({});
+    expect(circleChange(evening, values(evening, { experience: '', minTier: '1' }))).toEqual({ experience: null, minTier: 1 });
   });
 
   it('offers each action to the role that may take it, says the post\'s reach, its answers and its results', () => {

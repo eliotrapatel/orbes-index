@@ -101,6 +101,19 @@ describe('the feed (P-X01)', () => {
     expect(poll).toMatchObject({ reach: 'PALLADIUM', mine: 'YOU VOTED', linkLabel: 'SEE THE POLL', image: null });
     expect(circleCards([card({ id: 'nope' })])).toEqual([]);
   });
+
+  it('names an invitation\'s experience of the tier program above its title (plan NEXT-NINE, BP-19 T7), and nothing for another kind', () => {
+    const [evening, preview, partner, plain, note] = circleCards([
+      card({ kind: 'INVITATION', experience: 'MEMBERS_EVENING' }),
+      card({ id: '3c2b1a00-4b2e-4f3a-9c1d-0e5f6a7b8c92', kind: 'INVITATION', experience: 'LAUNCH_PREVIEW' }),
+      card({ id: '3c2b1a00-4b2e-4f3a-9c1d-0e5f6a7b8c93', kind: 'INVITATION', experience: 'PARTNER_EXPERIENCE' }),
+      card({ id: '3c2b1a00-4b2e-4f3a-9c1d-0e5f6a7b8c94', kind: 'INVITATION', experience: null }),
+      card({ id: '3c2b1a00-4b2e-4f3a-9c1d-0e5f6a7b8c95', kind: 'NOTE', experience: 'MEMBERS_EVENING' }),
+    ]);
+    expect([evening, preview, partner, plain, note].map((c) => c!.experience)).toEqual(['MEMBERS’ EVENING', 'LAUNCH PREVIEW', 'PARTNER EXPERIENCE', null, null]);
+    expect(circlePostModel(invitation({}), 0).experience).toBeNull();
+    expect(circlePostModel({ ...invitation({}), experience: 'MEMBERS_EVENING' }, 0).experience).toBe('MEMBERS’ EVENING');
+  });
 });
 
 describe('a post (P-X01)', () => {

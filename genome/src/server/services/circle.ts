@@ -39,15 +39,21 @@
  * photographs through MediaService; the answers to an invitation (the routes
  * mask the emails for an AUDITOR) and the results of a poll; and the Analytics
  * panel: the members of the club by tier now, the visits by day.
+ *
+ * An invitation may be an experience of the tier program (plan NEXT-NINE, BP-19 T7: `experience` MEMBERS_EVENING,
+ * LAUNCH_PREVIEW or PARTNER_EXPERIENCE, migration 0026): its tier is then the one THE PROGRAM names for it
+ * (`experienceTier`, the members' evening from PLATINE, the others from PALLADIUM by default), set when the experience
+ * is, whatever tier is sent; any other kind refuses one (422). /verify shows it above the invitation's title.
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import { CIRCLE_POST_KINDS, CIRCLE_RSVP_ANSWERS, type CirclePostKind, type CirclePostRow, type CirclePostUpdate, type CircleRsvpAnswer, type DropRow, type LookbookState } from '../db/schema.js';
+import { CIRCLE_EXPERIENCES, CIRCLE_POST_KINDS, CIRCLE_RSVP_ANSWERS, type CircleExperience, type CirclePostKind, type CirclePostRow, type CirclePostUpdate, type CircleRsvpAnswer, type DropRow, type LookbookState } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, noopLogger, pageOffset, pageRequest, systemClock, type Actor, type Clock, type Logger, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
 import { clubMembersByTier, ownersOnly, tierOf, type ClubMembers } from './club.js';
+import { experienceTier, readProgram } from './club-program.js';
 import { dropNotFound, dropState, type DropState } from './drops.js';
 import { isAnnounced, liveStages, stagesAt } from './live.js';
 import { storyFingerprint } from './lookbook.js';
@@ -150,6 +156,14 @@ export function normalizeBody(v: unknown): string | null {
     .replace(/\n{3,}/g, '\n\n');
 }
 
+/** What an invitation is (BP-19 T7): one of CIRCLE_EXPERIENCES, or null; never on another kind (422). */
+function cleanExperience(v: unknown, kind: CirclePostKind): CircleExperience | null {
+  if (v === undefined || v === null || v === '') return null;
+  if (!(CIRCLE_EXPERIENCES as readonly unknown[]).includes(v)) throw validationError('An experience is the members’ evening, a launch preview or a partner experience.');
+  if (kind !== 'INVITATION') throw new DomainError('VALIDATION_FAILED', 422, 'Only an invitation is an experience.');
+  return v as CircleExperience;
+}
+
 function cleanTier(v: unknown): number {
   if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 3) throw validationError('The tier is 1 (TITANE), 2 (PLATINE) or 3 (PALLADIUM).');
   return v;
@@ -243,6 +257,8 @@ export interface CircleCard {
   title: string;
   /** The lowest tier that reads it: 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
   minTier: number;
+  /** An invitation's experience of the tier program (BP-19 T7), or null. */
+  experience: CircleExperience | null;
   publishedAt: Date;
   /** Its first photograph, or null. */
   cover: CirclePhoto | null;
@@ -313,6 +329,8 @@ export interface AdminCirclePost {
   title: string;
   body: string | null;
   minTier: number;
+  /** An invitation's experience of the tier program (BP-19 T7), or null: its tier is then THE PROGRAM's. */
+  experience: CircleExperience | null;
   eventAt: Date | null;
   eventPlace: string | null;
   capacity: number | null;
@@ -370,6 +388,8 @@ export interface CirclePostInput {
   externalUrl?: string | null;
   /** A segment whose members alone read it (among its tiers); null: its tiers. */
   segmentId?: string | null;
+  /** An invitation's experience (BP-19 T7); its tier is then THE PROGRAM's, whatever `minTier` says. */
+  experience?: CircleExperience | null;
 }
 
 /** A change of a post: any field but its kind; null (or '') clears an optional one. */
@@ -438,10 +458,11 @@ const CARD_COLUMNS = [
   'p.created_by',
   'p.created_at',
   'p.segment_id',
+  'p.experience',
 ] as const;
 
-/** A post's card: everything but its body (and an invitation's experience, migration 0026, BP-19 T7). */
-type CardRow = Omit<CirclePostRow, 'body' | 'experience'>;
+/** A post's card: everything but its body. */
+type CardRow = Omit<CirclePostRow, 'body'>;
 
 // ── Service ────────────────────────────────────────────────────────────────
 
@@ -509,6 +530,7 @@ export class CircleService {
         kind: r.kind,
         title: r.title,
         minTier: r.min_tier,
+        experience: r.experience,
         publishedAt: r.published_at!,
         cover: covers.get(r.id) ?? null,
         eventAt: r.event_at,
@@ -635,7 +657,8 @@ export class CircleService {
     if (!(CIRCLE_POST_KINDS as readonly string[]).includes(kind)) throw validationError('A post is a NOTE, an INVITATION or a POLL.');
     const title = oneLine(input.title, 'The title', CIRCLE_TITLE_MAX);
     const body = normalizeBody(input.body ?? null);
-    const minTier = cleanTier(input.minTier ?? 1);
+    const experience = cleanExperience(input.experience, kind);
+    const sentTier = cleanTier(input.minTier ?? 1);
     const eventAt = input.eventAt === undefined || input.eventAt === null ? null : cleanEventAt(input.eventAt);
     const eventPlace = cleanPlace(input.eventPlace ?? null);
     const capacity = cleanCapacity(input.capacity ?? null);
@@ -648,6 +671,8 @@ export class CircleService {
     return inTransaction(this.db, async (tx) => {
       await this.checkLinks(tx, dropId, modelId);
       await this.checkSegment(tx, segmentId);
+      // An experience's invitation reads from the tier THE PROGRAM names for it (BP-19 T7).
+      const minTier = experience ? experienceTier(await readProgram(tx), experience) : sentTier;
       const row = await tx
         .insertInto('circle_posts')
         .values({
@@ -663,6 +688,7 @@ export class CircleService {
           model_id: modelId,
           external_url: externalUrl,
           segment_id: segmentId,
+          experience,
           created_by: actor.id!,
           created_at: this.clock(),
         })
@@ -687,6 +713,7 @@ export class CircleService {
             modelId,
             externalUrl,
             segmentId,
+            experience,
           },
         },
         tx,
@@ -720,7 +747,11 @@ export class CircleService {
       };
       if (change.title !== undefined) note('title', 'title', p.title, oneLine(change.title, 'The title', CIRCLE_TITLE_MAX));
       if (change.body !== undefined) note('body', 'body', p.body, normalizeBody(change.body), (v) => bodyAs((v as string | null) ?? null));
-      if (change.minTier !== undefined) note('minTier', 'min_tier', p.min_tier, cleanTier(change.minTier));
+      // An experience (BP-19 T7) fixes the tier THE PROGRAM names for it; without one, the tier sent, or the post's.
+      const experience = change.experience !== undefined ? cleanExperience(change.experience, p.kind) : p.experience;
+      note('experience', 'experience', p.experience, experience);
+      if (experience) note('minTier', 'min_tier', p.min_tier, experienceTier(await readProgram(tx), experience));
+      else if (change.minTier !== undefined) note('minTier', 'min_tier', p.min_tier, cleanTier(change.minTier));
       const eventAt = change.eventAt !== undefined ? (change.eventAt === null ? null : cleanEventAt(change.eventAt)) : p.event_at;
       const eventPlace = change.eventPlace !== undefined ? cleanPlace(change.eventPlace) : p.event_place;
       const capacity = change.capacity !== undefined ? cleanCapacity(change.capacity) : p.capacity;
@@ -974,6 +1005,7 @@ export class CircleService {
       kind: p.kind,
       title: p.title,
       minTier: p.min_tier,
+      experience: p.experience,
       publishedAt: p.published_at!,
       cover: photos[0] ?? null,
       eventAt: p.event_at,
@@ -1041,6 +1073,7 @@ export class CircleService {
         kind: r.kind,
         title: r.title,
         minTier: r.min_tier,
+        experience: r.experience,
         eventAt: r.event_at,
         eventPlace: r.event_place,
         capacity: r.capacity,

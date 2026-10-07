@@ -1822,6 +1822,8 @@ export interface CirclePost {
   body?: string | null;
   /** The lowest tier that reads it: 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
   minTier: number;
+  /** An invitation's experience of the tier program (BP-19 T7): its tier is then THE PROGRAM's; null otherwise. */
+  experience: CircleExperience | null;
   eventAt: Iso | null;
   eventPlace: string | null;
   /** The places answered YES at most; null: no limit. */
@@ -1856,6 +1858,8 @@ export interface CirclePostInput {
   modelId?: string | null;
   externalUrl?: string | null;
   segmentId?: string | null;
+  /** An invitation's experience (BP-19 T7); its tier then THE PROGRAM's. */
+  experience?: CircleExperience | null;
 }
 
 /** PATCH /api/admin/circle/posts/:id: any field but the kind; null clears an optional one. */

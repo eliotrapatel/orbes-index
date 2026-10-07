@@ -41,6 +41,10 @@ import {
   CIRCLE_LIMITS,
   CIRCLE_LINK_HOSTS,
   CIRCLE_TIER_OPTIONS,
+  CIRCLE_EXPERIENCE_OPTIONS,
+  EXPERIENCE_TIER_HINT,
+  experienceTier,
+  kindLine,
   linkableDrops,
   linkableModels,
   pollResultLines,
@@ -49,7 +53,7 @@ import { galleryMoved, galleryWithAlt } from '../model/lookbook.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { CIRCLE_RSVP_ANSWERS, type CircleAnswer, type CirclePhoto, type CirclePost, type CirclePostKind, type CircleRsvpAnswer, type Drop, type Model, type SegmentName } from '../types.js';
+import { CIRCLE_EXPERIENCES, CIRCLE_RSVP_ANSWERS, type CircleAnswer, type CircleExperience, type ClubProgram, type CirclePhoto, type CirclePost, type CirclePostKind, type CircleRsvpAnswer, type Drop, type Model, type SegmentName } from '../types.js';
 import { barList, button, defList, emptyState, field, filterBar, linkButton, pageHeader, pager, section, select, statusMark, table } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
@@ -84,6 +88,15 @@ export function circleFields(kind: CirclePostKind, values: Record<string, string
     },
   ];
   if (kind === 'INVITATION') {
+    // BP-19 T7: an invitation may be an experience of the tier program; its tier is then THE PROGRAM's (lockExperienceTier).
+    out.splice(2, 0, {
+      name: 'experience',
+      label: 'Experience',
+      kind: 'select',
+      options: [...CIRCLE_EXPERIENCE_OPTIONS],
+      value: values.experience ?? '',
+      hint: 'The members’ evening, a launch preview or a partner experience: shown above its title, read from the tier THE PROGRAM sets.',
+    });
     out.push(
       { name: 'eventAt', label: 'Event (UTC)', kind: 'datetime', required: true, value: values.eventAt, hint: 'Answers close when it begins.' },
       { name: 'eventPlace', label: 'Place', maxlength: CIRCLE_LIMITS.place, value: values.eventPlace, hint: 'Optional.' },
@@ -110,6 +123,28 @@ export function circleFields(kind: CirclePostKind, values: Record<string, string
   return out;
 }
 
+/**
+ * In the dialog just opened: once an experience is chosen, the tier field shows the tier THE PROGRAM sets for it and is
+ * locked, with its hint (BP-19 T7); without one, it is the console's again.
+ */
+function lockExperienceTier(program: ClubProgram | null): void {
+  const dialogs = document.querySelectorAll<HTMLDialogElement>('dialog.dialog');
+  const dlg = dialogs[dialogs.length - 1];
+  const experience = dlg?.querySelector<HTMLSelectElement>('select[name=experience]');
+  const tier = dlg?.querySelector<HTMLSelectElement>('select[name=minTier]');
+  const hint = tier?.closest('.cfield')?.querySelector<HTMLElement>('.cfield__hint');
+  if (!experience || !tier || !hint || !program) return;
+  const own = hint.textContent ?? '';
+  const sync = () => {
+    const e = (CIRCLE_EXPERIENCES as readonly string[]).includes(experience.value) ? (experience.value as CircleExperience) : null;
+    if (e) tier.value = String(experienceTier(program, e));
+    tier.disabled = e !== null;
+    hint.textContent = e ? EXPERIENCE_TIER_HINT : own;
+  };
+  experience.addEventListener('change', sync);
+  sync();
+}
+
 /** What a dialog of `kind` says first. */
 const KIND_LEADS: Readonly<Record<CirclePostKind, string>> = Object.freeze({
   NOTE: 'Words and photographs for the owners: a piece of news, the story of a making, a film.',
@@ -119,12 +154,18 @@ const KIND_LEADS: Readonly<Record<CirclePostKind, string>> = Object.freeze({
 
 /** The Circle tab of the Club page: every post, and the three ways to write one. */
 export async function circleTab(ctx: ViewContext): Promise<HTMLElement> {
-  const [list, drops, models, segments] = await Promise.all([ctx.api.circlePosts(pageParam(ctx), 50), ctx.api.drops(1, 50), ctx.api.models(), ctx.api.segmentNames()]);
+  const [list, drops, models, segments, program] = await Promise.all([
+    ctx.api.circlePosts(pageParam(ctx), 50),
+    ctx.api.drops(1, 50),
+    ctx.api.models(),
+    ctx.api.segmentNames(),
+    ctx.api.clubProgram().catch(() => null),
+  ]);
   const canManage = can(ctx.session.admin.role, 'manageCircle');
 
   let created: string | null = null;
-  const newPost = (kind: CirclePostKind) =>
-    void openDialog({
+  const newPost = (kind: CirclePostKind) => {
+    const opened = openDialog({
       title: `New ${CIRCLE_KIND_LABELS[kind].toLowerCase()}`,
       eyebrow: 'Club · Circle',
       body: [h('p', { class: 'dialog__text' }, KIND_LEADS[kind]), h('p', { class: 'dialog__text' }, 'Created unpublished: nobody reads it until it is published.')],
@@ -134,11 +175,14 @@ export async function circleTab(ctx: ViewContext): Promise<HTMLElement> {
       submit: async (v) => {
         created = (await ctx.api.createCirclePost(circleInput(kind, v))).id;
       },
-    }).then((r) => {
+    });
+    lockExperienceTier(program);
+    void opened.then((r) => {
       if (!r || !created) return;
       notify('Post created, not published yet.');
       ctx.navigate(href('circlePost', { postId: created }));
     });
+  };
 
   return section(
     'Circle',
@@ -147,7 +191,7 @@ export async function circleTab(ctx: ViewContext): Promise<HTMLElement> {
         [
           {
             label: 'Post',
-            cell: (p) => h('span', null, h('a', { class: 'idlink', attrs: { href: href('circlePost', { postId: p.id }), 'data-testid': 'circle-link' } }, p.title), h('span', { class: 'cell-sub' }, CIRCLE_KIND_LABELS[p.kind])),
+            cell: (p) => h('span', null, h('a', { class: 'idlink', attrs: { href: href('circlePost', { postId: p.id }), 'data-testid': 'circle-link' } }, p.title), h('span', { class: 'cell-sub', data: { testid: 'circle-kind' } }, kindLine(p))),
             kind: ['wide'],
           },
           { label: 'Read by', cell: (p) => audienceLine(p), kind: ['nowrap'] },
@@ -196,11 +240,12 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.postId ?? '';
   const answer = CIRCLE_RSVP_ANSWERS.find((a) => a === ctx.route.query.answer) as CircleRsvpAnswer | undefined;
   const p = await ctx.api.circlePost(id);
-  const [drops, models, segments, answers] = await Promise.all([
+  const [drops, models, segments, answers, program] = await Promise.all([
     ctx.api.drops(1, 50),
     ctx.api.models(),
     ctx.api.segmentNames(),
     p.kind === 'INVITATION' ? ctx.api.circleAnswers(id, { ...(answer ? { answer } : {}), page: pageParam(ctx), pageSize: 50 }) : Promise.resolve(null),
+    p.kind === 'INVITATION' ? ctx.api.clubProgram().catch(() => null) : Promise.resolve(null),
   ]);
   const role = ctx.session.admin.role;
   const acts = circleActions(p, role);
@@ -212,8 +257,8 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
   };
 
   // ── The post ─────────────────────────────────────────────────────────────
-  const edit = () =>
-    void openDialog({
+  const edit = () => {
+    const opened = openDialog({
       title: `Edit the ${CIRCLE_KIND_LABELS[p.kind].toLowerCase()}`,
       eyebrow,
       body: h('p', { class: 'dialog__text' }, p.published ? 'Published: a change shows in the circle at once. Its kind never changes.' : 'Not published: nobody reads it yet. Its kind never changes.'),
@@ -223,7 +268,10 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
       submit: async (v) => {
         await ctx.api.updateCirclePost(p.id, circleChange(p, v));
       },
-    }).then(done('Post saved.'));
+    });
+    lockExperienceTier(program);
+    void opened.then(done('Post saved.'));
+  };
 
   const publish = () =>
     void openDialog({
@@ -250,7 +298,7 @@ export async function circlePostView(ctx: ViewContext): Promise<HTMLElement> {
   const links: Child[] = [];
   const rows: { label: string; value: Child; note?: string }[] = [
     { label: 'State', value: h('span', { data: { testid: 'circle-state' } }, stateMark(p)) },
-    { label: 'Kind', value: CIRCLE_KIND_LABELS[p.kind] },
+    { label: 'Kind', value: h('span', { data: { testid: 'circle-kind' } }, kindLine(p)), note: p.experience ? 'Read from the tier THE PROGRAM sets for it' : undefined },
     { label: 'Read by', value: h('span', { data: { testid: 'circle-audience' } }, audienceLine(p)), note: p.segment ? 'Its members, read again at each visit' : undefined },
     { label: 'Published', value: p.publishedAt ? formatDateTime(p.publishedAt) : 'Not yet' },
     { label: 'Created', value: `${formatDateTime(p.createdAt)}${p.createdBy ? ` · ${p.createdBy.email}` : ''}` },
