@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
 import { buildApp } from '../../src/server/app.js';
 import { DomainError } from '../../src/server/errors.js';
-import { clubStandings, tierOf } from '../../src/server/services/club.js';
+import { CLUB_TIER_THRESHOLDS, clubStandings, tierOf } from '../../src/server/services/club.js';
 import { accessOf } from '../../src/server/services/live.js';
 import { segmentMembers } from '../../src/server/services/segments.js';
 import { shareOf, splitOf, testPhrase, testRunSettings, TEST_RUN_DEFAULTS, TestEntrantService, type TestRunSettingsInput } from '../../src/server/services/test-entrants.js';
@@ -217,7 +217,8 @@ describe('the pool, the overrides, START / ADD MORE / STOP / END TEST', () => {
     await drive(w, 0);
     const palladium = await w.h.ctx.db.selectFrom('test_entrants').select('account_id').where('tier', '=', 3).executeTakeFirstOrThrow();
     const standing = await tierOf(w.h.ctx.db, palladium.account_id, w.h.clock.now());
-    expect(standing).toEqual({ pieces: 5, tier: 3, seniority: 0 });
+    // The pieces PALLADIUM starts from (CLUB_TIER_THRESHOLDS: 10 since the next nine's tier program).
+    expect(standing).toEqual({ pieces: CLUB_TIER_THRESHOLDS[2], tier: 3, seniority: 0 });
     const many = await clubStandings(w.h.ctx.db, [palladium.account_id, real.id], w.h.clock.now());
     expect(many.get(real.id)!.tier).toBe(1);
     // A segment's TIER rule (a LIVE RELEASE's access by a segment) reads the same test row.
