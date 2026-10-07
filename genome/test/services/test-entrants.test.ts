@@ -459,6 +459,48 @@ describe('a draw end to end', () => {
     expect(Number((await w.h.ctx.db.selectFrom('test_entrants').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n)).toBe(12);
   });
 
+  it('the report\'s checks find a fault planted: a confirmed place without its order', async () => {
+    const drop = await openDraw(w);
+    const real = await createAccount(w.h.ctx.db);
+    await w.h.ctx.services.drops.enter(real.id, drop, real.actor);
+    const now = w.h.clock.now();
+    await w.h.ctx.db.updateTable('drop_entries').set({ status: 'CONFIRMED', tier: 0, seniority: 0, respond_by: now, handled_at: now, handled_by: w.f.admin.id }).where('drop_id', '=', drop).execute();
+    const d = await w.h.ctx.db.selectFrom('drops').selectAll().where('id', '=', drop).executeTakeFirstOrThrow();
+    const report = await w.tests.report(d, now);
+    expect(report.passed).toBe(3);
+    expect(report.checks.find((c) => c.id === 'ORDERS')).toMatchObject({ pass: false, line: '1 of 1 confirmed place has no order.' });
+    expect(report.checks.find((c) => c.id === 'STOCK')).toMatchObject({ pass: false, line: '1 place confirmed, 0 orders.' });
+  });
+
+  it('the sweeper resumes a confirmation due after a restart', async () => {
+    const drop = await openDraw(w, { quantity: 2, opensIn: HOUR, closesIn: 2 * HOUR, earlyAccessHours: 48 });
+    const run = await w.tests.start(drop, press(drop, { palladium: 1 }, { behaviour: { reservePct: 100, confirmPct: 100 } }), w.f.admin);
+    await drive(w, 0);
+    expect(await statusOf(w, run.id)).toBe('DONE');
+    await w.tests.sweep();
+    const due = await w.h.ctx.db.selectFrom('test_run_entrants').select('confirm_due_at').where('run_id', '=', run.id).executeTakeFirstOrThrow();
+    expect(due.confirm_due_at).toBeInstanceOf(Date);
+    // A new process on the same database: its sweeper finds the time due and confirms.
+    const app = await buildApp(w.h.ctx, { serveStatic: false, liveHub: { pulseMs: 0, cacheMs: 0 } });
+    try {
+      app.testEntrants.useTimers(false);
+      w.h.clock.advance(61_000);
+      expect(await app.testEntrants.sweep()).toBe(1);
+    } finally {
+      await app.close();
+    }
+    expect((await w.h.ctx.db.selectFrom('drop_entries').select('status').where('drop_id', '=', drop).executeTakeFirstOrThrow()).status).toBe('CONFIRMED');
+    expect((await w.h.ctx.db.selectFrom('test_run_entrants').select('outcome').where('run_id', '=', run.id).executeTakeFirstOrThrow()).outcome).toBe('CONFIRMED');
+  });
+});
+
+describe('END TEST and the tier program', () => {
+  let w: World;
+  beforeAll(async () => {
+    w = await world();
+  });
+  afterAll(() => w?.h.close());
+
   it('END TEST cancels the test\'s GIFT orders and gives back its credits: parents first, a GIFT order closed with its order skipped, a credit left on a cancelled order released; the grants stay; the report 5/5', async () => {
     const admin = w.f.admin;
     const france = (await w.h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
@@ -522,40 +564,6 @@ describe('a draw end to end', () => {
     // The grants stay with the pool's accounts (once per tier and account, never deleted): the gift waits again, the credit is whole.
     expect((await w.h.ctx.db.selectFrom('tier_grants').select('kind').where('account_id', 'in', testIds).execute()).map((g) => g.kind).sort()).toEqual(['CREDIT', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT', 'GIFT']);
     for (const id of testIds) expect((await creditBalances(w.h.ctx.db, id)).map((c) => c.balanceMinor)).toEqual([5000]);
-  });
-
-  it('the report\'s checks find a fault planted: a confirmed place without its order', async () => {
-    const drop = await openDraw(w);
-    const real = await createAccount(w.h.ctx.db);
-    await w.h.ctx.services.drops.enter(real.id, drop, real.actor);
-    const now = w.h.clock.now();
-    await w.h.ctx.db.updateTable('drop_entries').set({ status: 'CONFIRMED', tier: 0, seniority: 0, respond_by: now, handled_at: now, handled_by: w.f.admin.id }).where('drop_id', '=', drop).execute();
-    const d = await w.h.ctx.db.selectFrom('drops').selectAll().where('id', '=', drop).executeTakeFirstOrThrow();
-    const report = await w.tests.report(d, now);
-    expect(report.passed).toBe(3);
-    expect(report.checks.find((c) => c.id === 'ORDERS')).toMatchObject({ pass: false, line: '1 of 1 confirmed place has no order.' });
-    expect(report.checks.find((c) => c.id === 'STOCK')).toMatchObject({ pass: false, line: '1 place confirmed, 0 orders.' });
-  });
-
-  it('the sweeper resumes a confirmation due after a restart', async () => {
-    const drop = await openDraw(w, { quantity: 2, opensIn: HOUR, closesIn: 2 * HOUR, earlyAccessHours: 48 });
-    const run = await w.tests.start(drop, press(drop, { palladium: 1 }, { behaviour: { reservePct: 100, confirmPct: 100 } }), w.f.admin);
-    await drive(w, 0);
-    expect(await statusOf(w, run.id)).toBe('DONE');
-    await w.tests.sweep();
-    const due = await w.h.ctx.db.selectFrom('test_run_entrants').select('confirm_due_at').where('run_id', '=', run.id).executeTakeFirstOrThrow();
-    expect(due.confirm_due_at).toBeInstanceOf(Date);
-    // A new process on the same database: its sweeper finds the time due and confirms.
-    const app = await buildApp(w.h.ctx, { serveStatic: false, liveHub: { pulseMs: 0, cacheMs: 0 } });
-    try {
-      app.testEntrants.useTimers(false);
-      w.h.clock.advance(61_000);
-      expect(await app.testEntrants.sweep()).toBe(1);
-    } finally {
-      await app.close();
-    }
-    expect((await w.h.ctx.db.selectFrom('drop_entries').select('status').where('drop_id', '=', drop).executeTakeFirstOrThrow()).status).toBe('CONFIRMED');
-    expect((await w.h.ctx.db.selectFrom('test_run_entrants').select('outcome').where('run_id', '=', run.id).executeTakeFirstOrThrow()).outcome).toBe('CONFIRMED');
   });
 });
 

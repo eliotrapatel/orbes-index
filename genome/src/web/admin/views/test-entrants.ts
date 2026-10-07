@@ -266,7 +266,7 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
         h(
           'p',
           { class: 'dialog__text' },
-          `Then, for its test entrants only: their open orders are cancelled one by one (the stock goes back; a piece to make has its identity retired for good), their entries closed${t.mode === 'DRAW' ? ', and in a drawn draw their places held or confirmed lapse, so that staff can OFFER NEXT to real collectors' : ''}. The test accounts are kept for the next test.`,
+          `Then, for its test entrants only: their open orders are cancelled one by one (the stock goes back; a piece to make has its identity retired for good), with the welcome gifts travelling with them and the credit taken off them given back, their entries closed${t.mode === 'DRAW' ? ', and in a drawn draw their places held or confirmed lapse, so that staff can OFFER NEXT to real collectors' : ''}. The test accounts are kept for the next test.`,
         ),
       ],
       phrase: endPhrase,
