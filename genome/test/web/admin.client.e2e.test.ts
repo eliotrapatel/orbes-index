@@ -11,6 +11,8 @@
  *     back, the model then LINKED.
  *  3. The Orders page (N3): the Shopify order export of the month, the collector by email.
  *  4. An AUDITOR reads the sheet with the email masked, offered no Shopify ids to paste; its order export masked.
+ *  5. (plan NEXT-NINE, BP-34) A model's Pairs well with on its Lookbook page: none picked and what the sheet shows, Edit
+ *     pairs and its checks, the table, a variant's page, an AUDITOR reading.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -420,5 +422,81 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     expect(problems).toEqual([]);
     await a.context().close();
   }, STEP_TIMEOUT);
-});
 
+  it('picks a model\'s Pairs well with on its Lookbook page (plan NEXT-NINE, BP-34): none picked and what the sheet shows, Edit pairs and its checks, the table, a variant\'s page, an AUDITOR reading', async () => {
+    const catalog = ctx.services.catalog;
+    const orbital = (await catalog.createCollection({ name: 'ORBITAL' }, f.admin)).id;
+    const make = async (name: string, prefix: string, lookbook: 'PUBLIC' | 'RESERVED' | 'HIDDEN', collectionId: string | null) => {
+      const id = (await catalog.createModel({ categoryCode: 'J', collectionId, name, type: 'BRACELET', skuPrefix: prefix }, f.admin)).id;
+      if (lookbook !== 'HIDDEN') await catalog.updateModel(id, { lookbook, slug: prefix.toLowerCase() }, f.admin);
+      return id;
+    };
+    const main = await make('HALO', 'HALO-PW', 'PUBLIC', orbital);
+    const zenith = await make('ZENITH', 'ZENITH-PW', 'RESERVED', orbital);
+    const orbit = await make('ORBIT', 'ORBIT-PW', 'PUBLIC', null);
+    const gone = await make('ECLIPSE', 'ECLIPSE-PW', 'PUBLIC', null);
+    await catalog.discontinueModel(gone, f.admin);
+    const blue = (await catalog.createVariant(main, { label: 'Blue', swatch: '#16224A', skuPrefix: 'HALO-PW-BL', mainLabel: 'Steel', mainSwatch: '#9D9B96' }, f.admin)).id;
+
+    const p = await open(OPERATOR);
+    await go(p, `#/catalogue/${main}`, 'HALO · STEEL');
+    // Last on the page, as on the sheet; none picked: what the sheet shows now (ZENITH, of the same collection).
+    expect(await p.locator('.view--lookbook > section').evaluateAll((els) => els.at(-1)?.id)).toBe('pairs');
+    expect(await text(p, '#pairs .panel__note')).toBe('None picked');
+    expect(await text(p, '[data-testid=pairs-lead]')).toBe('Two or three models shown at the end of its sheet in THE COLLECTION, in this order. None picked: the sheet shows up to three other models of its collection, the newest first.');
+    expect(await text(p, '[data-testid=pairs-none] .empty__text')).toBe('None picked.');
+    expect(await text(p, '[data-testid=pairs-shown-now]')).toBe('Shown now: ZENITH');
+
+    // Edit pairs: every model but this one and its variants, a discontinued one left out; the checks before sending.
+    await p.click('[data-testid=pairs-edit]');
+    await p.waitForSelector('dialog [name=pair1]');
+    expect(await text(p, 'dialog .dialog__title')).toBe('Pairs well with');
+    expect(await p.locator('dialog .cfield__label').allTextContents()).toEqual(['First model', 'Second model', 'Third model (optional)']);
+    const options = await p.locator('dialog [name=pair1] option').allTextContents();
+    expect(options[0]).toBe('None');
+    expect(options).toEqual(expect.arrayContaining(['ZENITH — Reserved', 'ORBIT — Public']));
+    expect(options.filter((o) => /^HALO|ECLIPSE/.test(o))).toEqual([]);
+    await p.selectOption('dialog [name=pair1]', zenith);
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => text(p, 'dialog'), POLL).toContain('Pick two or three models, or none: the sheet then shows other models of its collection.');
+    await p.selectOption('dialog [name=pair2]', zenith);
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => text(p, 'dialog'), POLL).toContain('Each model is picked once.');
+    await p.selectOption('dialog [name=pair2]', orbit);
+    await confirmDialog(p);
+    await expect.poll(() => text(p, '#pairs .panel__note'), POLL).toBe('2 of 3');
+    expect(await p.locator('#pairs [data-testid=pair-model]').allTextContents()).toEqual(['ZENITH', 'ORBIT']);
+    expect(await p.locator('#pairs [data-testid=pair-lookbook]').allTextContents()).toEqual(['Reserved', 'Public']);
+    expect(await p.locator('#pairs [data-testid=pair-shown]').allTextContents()).toEqual(['Owners of the salon’s tier', 'Everyone']);
+    expect((await catalog.getModel(main)).pairs!.map((x) => x.id)).toEqual([zenith, orbit]);
+    const audit = await ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'model.pairs').where('target_id', '=', main).execute();
+    expect(audit.map((r) => r.details)).toEqual([{ before: [], after: [zenith, orbit] }]);
+    // The same picks again: Nothing has changed.
+    await p.click('[data-testid=pairs-edit]');
+    await p.waitForSelector('dialog [name=pair1]');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => text(p, 'dialog'), POLL).toContain('Nothing has changed.');
+    await p.keyboard.press('Escape');
+    await p.waitForSelector('dialog.dialog', { state: 'detached', timeout: 15_000 });
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'model-pairs');
+
+    // A variant's page: set on its main model, a link to it; no Edit pairs.
+    await go(p, `#/catalogue/${blue}`, 'HALO · BLUE');
+    expect(await text(p, '[data-testid=pairs-main]')).toBe('HALO · STEEL');
+    expect(await p.locator('[data-testid=pairs-main]').getAttribute('href')).toBe(`#/catalogue/${main}`);
+    expect(await text(p, '#pairs')).toContain('Its sheet is its main model’s: the pairs are the same for every dot.');
+    expect(await p.locator('[data-testid=pairs-edit]').count()).toBe(0);
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+
+    // An AUDITOR reads the pairs, edits nothing.
+    const a = await open(AUDITOR);
+    await go(a, `#/catalogue/${main}`, 'HALO · STEEL');
+    expect(await a.locator('#pairs [data-testid=pair-model]').allTextContents()).toEqual(['ZENITH', 'ORBIT']);
+    expect(await a.locator('[data-testid=pairs-edit]').count()).toBe(0);
+    expect(await csp(a)).toEqual([]);
+    expect(problems).toEqual([]);
+    await a.context().close();
+  }, STEP_TIMEOUT);
+});

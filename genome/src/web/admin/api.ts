@@ -533,6 +533,11 @@ export class AdminApi {
     return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/sizes`, { body: change });
   }
 
+  /** BP-34, OPERATOR: the models a main model's sheet ends with (PAIRS WELL WITH), in their order: none, two or three. */
+  setModelPairs(id: string, models: readonly string[]): Promise<Model> {
+    return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/pairs`, { body: { models } });
+  }
+
   // ── Shopify readiness (plan LIVE RELEASE+, N2 and N3): files in Shopify's formats, nothing sent to it ──
 
   /** N2: the product CSV of the models priced in the store's currency. */

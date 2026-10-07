@@ -184,8 +184,12 @@ export interface ModelPairRecord {
   swatch: string | null;
   lookbook: LookbookState;
   slug: string | null;
-  shown: 'EVERYONE' | 'SALON' | 'HIDDEN' | 'DISCONTINUED';
+  shown: ModelPairShown;
 }
+
+/** Whether a model's sheet shows a pair (BP-34; mirrored in web/admin/types.ts PAIR_SHOWN). */
+export const MODEL_PAIR_SHOWN = Object.freeze(['EVERYONE', 'SALON', 'HIDDEN', 'DISCONTINUED'] as const);
+export type ModelPairShown = (typeof MODEL_PAIR_SHOWN)[number];
 
 /** PAIRS WELL WITH (BP-34): a model picks none, or two or three models. */
 export const MODEL_PAIRS_MAX = 3;

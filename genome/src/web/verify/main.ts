@@ -845,6 +845,8 @@ class App {
         replaceEntry(history.state, lookbookSheetPath(variant));
       },
       onRelease: (id) => this.openRelease(id),
+      // BP-34: a card of PAIRS WELL WITH opens that model's sheet in this sheet's history entry (back: THE COLLECTION).
+      onSheet: (slug) => this.openSheet(slug),
       localZone: localZone(),
       focus,
     });

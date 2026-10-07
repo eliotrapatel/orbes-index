@@ -931,6 +931,9 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'collection-empty', title: 'THE COLLECTION with no model', refs: ['C40'], variant: 'empty', path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__empty', stress: true },
   { id: 'collection-stress', title: 'THE COLLECTION with a 24-character name, no photograph', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__group', stress: true },
   { id: 'model-stress', title: 'A model of 24 characters without a photograph, € 125 400 in the salon', refs: ['same pieces'], variant: 'stress', as: you, path: sheet('long'), ready: '.view--sheet .sheet__body section', stress: true },
+  // Plan NEXT-NINE, BP-34: PAIRS WELL WITH as the console picked it on MONOLITHE (the pairs stage), read by a TITANE owner:
+  // ZENITH of THE PRIVATE SALON, then MONOLITHE ARCHITECTURALE (24 characters, no photograph); the C6 foot, picked.
+  { id: 'model-pairs', title: 'A model’s sheet: PAIRS WELL WITH as picked, ZENITH and MONOLITHE ARCHITECTURALE', refs: ['C6', 'BP-34'], variant: 'pairs', as: you, path: sheet('steel'), ready: '.view--sheet .n-model__pairs', stress: true },
 
   // ── THE RELEASES ──
   { id: 'releases', title: 'THE RELEASES, LIVE: the LIVE RELEASES and the draw', refs: ['C7'], variant: 'full', as: you, path: at('/verify/releases'), ready: '.view--releases article.live-card' },
@@ -1920,15 +1923,28 @@ export async function overflows(page: Page): Promise<string[]> {
       const own = [...el.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent ?? '').join('').replace(/\s+/g, ' ').trim();
       return `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? `.${el.className.trim().split(/\s+/).join('.')}` : ''}${own ? ` «${own.slice(0, 60)}»` : ''}`;
     };
+    /**
+     * A row that scrolls sideways on purpose (overflow-x auto or scroll, PAIRS WELL WITH's: plan NEXT-NINE, BP-34): its
+     * cards may lie past the column while scrolled out of view; the row itself must stay inside the column.
+     */
+    const scrolls = (cs: CSSStyleDeclaration) => cs.overflowX === 'auto' || cs.overflowX === 'scroll';
+    const inScroller = (el: Element) => {
+      for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) if (scrolls(getComputedStyle(p))) return true;
+      return false;
+    };
     for (const el of document.body.querySelectorAll('*')) {
       if (!(el instanceof HTMLElement)) continue;
       if (!el.checkVisibility({ visibilityProperty: true })) continue;
+      if (scrolls(getComputedStyle(el)) && el.clientWidth > 0) {
+        const r = el.getBoundingClientRect();
+        if (r.left < -1 || r.right > width + 1) out.push(`${name(el)}, a row that scrolls, reaches past the column (${Math.round(r.left)} to ${Math.round(r.right)} of ${width})`);
+      }
       const hasText = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? '').trim().length > 0);
       const control = /^(BUTTON|INPUT|TEXTAREA|SELECT|IMG|A)$/.test(el.tagName);
       if (!hasText && !control) continue;
       const r = el.getBoundingClientRect();
       if (r.width <= 1 || r.height <= 1) continue;
-      if (r.left < -1 || r.right > width + 1) out.push(`${name(el)} reaches past the column (${Math.round(r.left)} to ${Math.round(r.right)} of ${width})`);
+      if ((r.left < -1 || r.right > width + 1) && !inScroller(el)) out.push(`${name(el)} reaches past the column (${Math.round(r.left)} to ${Math.round(r.right)} of ${width})`);
       const cs = getComputedStyle(el);
       if (hasText && cs.display !== 'inline' && el.clientWidth > 0 && el.scrollWidth > el.clientWidth + 1 && cs.overflowX !== 'auto' && cs.overflowX !== 'scroll') {
         out.push(`${name(el)} is wider than its box (${el.scrollWidth} px in ${el.clientWidth})`);

@@ -88,6 +88,10 @@
  *   --only how
  *                 HOW RELEASES WORK alone (how-releases-work-phone.png, how-releases-work-desk.png; plan NEXT-NINE,
  *                 FT-01): the page at a phone's and a desk's size. Not run by default (screens for the owner's review)
+ *   --only foot
+ *                 The C6 foot boards alone (c6-foot-*-phone.png, c6-foot-*-desk.png; plan NEXT-NINE, steps 6.0 and 7.2):
+ *                 MONOLITHE's sheet, THE RELEASES OF THIS MODEL then PAIRS WELL WITH, signed out, signed in TITANE (the
+ *                 fallback) and on the pairs stage (the console's picks). Not run by default (screens for the owner's review)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -161,7 +165,7 @@ const DESKTOP = { width: 1440, height: 900 } as const;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how';
+type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot';
 
 function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | null } {
   let out = DEFAULT_OUT;
@@ -170,8 +174,8 @@ function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | nu
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how')) only = argv[++i] as Only;
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot')) only = argv[++i] as Only;
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot)`);
   }
   return { out, raw, only };
 }
@@ -1913,10 +1917,36 @@ async function captureHow(shots: Shots): Promise<void> {
   await capturePhonesAndDesks(shots, HOW_SHOTS, 'HOW RELEASES WORK', stateById);
 }
 
+// ── The C6 foot (plan NEXT-NINE, CO-01 and BP-34) ─────────────────────────
+
+/**
+ * The C6 foot boards (plan NEXT-NINE, steps 6.0 and 7.2): MONOLITHE's sheet with THE RELEASES OF THIS MODEL and PAIRS WELL
+ * WITH, signed out (no pair: ORBITAL has no other public model), signed in TITANE (the fallback, ZENITH) and on the pairs
+ * stage (the console's picks, ZENITH and MONOLITHE ARCHITECTURALE), each at a phone's size and a desk's. `--only foot`.
+ */
+export const FOOT_SHOTS: readonly { state: string; name: string }[] = Object.freeze([
+  { state: 'c6-foot-signed-out', name: 'c6-foot-1-signed-out' },
+  { state: 'model', name: 'c6-foot-2-signed-in-titane' },
+  { state: 'model-pairs', name: 'c6-foot-3-picked' },
+]);
+
+async function captureFoot(shots: Shots): Promise<void> {
+  // Signed out: MONOLITHE's sheet as a visitor reads it (the state `model`, without its session).
+  const find = (id: string): UiState => (id === 'c6-foot-signed-out' ? { ...stateById('model'), id, as: undefined } : stateById(id));
+  await capturePhonesAndDesks(shots, FOOT_SHOTS, 'C6 foot', find);
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const { out, raw, only } = parseArgs(process.argv.slice(2));
+  if (only === 'foot') {
+    const shots = new Shots(out, raw);
+    log('C6 foot:');
+    await captureFoot(shots);
+    log(`${shots.written.length} screenshots in ${relative(process.cwd(), out) || '.'}`);
+    return;
+  }
   if (only === 'how') {
     const shots = new Shots(out, raw);
     log('HOW RELEASES WORK:');

@@ -28,7 +28,8 @@
  * with WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01); THE STORY, the gallery full width, SPECIFICATIONS, CARE;
  * then THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01), once the model has a past release: each one of the model and
  * its variants whatever the dot, the newest first, its date and its kind and variant (LIVE RELEASE · IN STEEL), a row to
- * its page, the six newest then SHOW ALL N RELEASES.
+ * its page, the six newest then SHOW ALL N RELEASES; and, last, PAIRS WELL WITH (plan NEXT-NINE, BP-34), one row of
+ * cards that scrolls sideways, each another model's photograph, name and type, opening its sheet in this history entry.
  *
  * The grid reads GET /api/v1/lookbook (the same for everyone) and, for a signed-in account, the club's reserved models
  * (a 403 for an account that holds no piece: the teaser; none of its tier: what opens the salon, `opensAt`) and its
@@ -59,6 +60,7 @@ import {
   withRequest,
   type CardModel,
   type CollectionGroup,
+  type PairCard,
   type SheetModel,
 } from '../lookbook-model.js';
 import { nextRelease, type NextReleaseModel } from '../next-release-model.js';
@@ -98,6 +100,8 @@ export interface SheetDeps {
   onVariant(slug: string): void;
   /** The model's next release, and a row of THE RELEASES OF THIS MODEL (CO-01): its page. */
   onRelease(id: string): void;
+  /** A card of PAIRS WELL WITH (BP-34): that model's sheet, in this sheet's history entry. */
+  onSheet?(slug: string): void;
   /** This phone's time zone: THE RELEASES OF THIS MODEL dates each release on its calendar (CO-01); UTC by default. */
   localZone?: string;
   /** Opened as a screen change: once read, focus comes to its title (the model's name), as it came to the sheet's before. */
@@ -140,6 +144,13 @@ async function signedInNow(session: Session): Promise<boolean | null> {
   } catch {
     return null;
   }
+}
+
+/** A card's name and its small ›, the › kept on the line of the name's last word (BP-34). */
+function nameWithChevron(name: string): (Node | string)[] {
+  const at = name.lastIndexOf(' ');
+  const last = h('span', { class: 'n-nw' }, ...withNumerals(name.slice(at + 1)), '\u00a0', icon('chev', { small: true }));
+  return at < 0 ? [last] : [...withNumerals(name.slice(0, at + 1)), last];
 }
 
 /** A photograph removed meanwhile takes its frame with it: never a broken image. */
@@ -561,6 +572,8 @@ class SheetPage {
     );
     // CO-01: THE RELEASES OF THIS MODEL, after CARE, only once the model has a past release.
     if (s.releases.length > 0) sections.push(this.releasesSection(s));
+    // BP-34: PAIRS WELL WITH, the very last section, only when it has a card.
+    if (s.pairs.length > 0) sections.push(this.pairsSection(s.pairs));
     this.body.replaceChildren(...sections.filter((x): x is HTMLElement => x !== null));
     if (hadFocus && !this.body.contains(document.activeElement)) this.body.querySelector<HTMLElement>('#sheet-salon')?.focus({ preventScroll: true });
     this.focusTitle();
@@ -639,6 +652,36 @@ class SheetPage {
       h('h2', { class: 'n-g n-t3 n-model__heading', id: 'sheet-releases', text: LOOKBOOK.releases.title }),
       h('div', { class: 'n-model__release-rows' }, ...rows),
       more,
+    );
+  }
+
+  /**
+   * BP-34, PAIRS WELL WITH: the very last section, its heading on the margin, then one row of cards that scrolls sideways
+   * (only the row, never the page), each 72 % of the column so the next one peeks (a lone card the column whole): the
+   * model's photograph whole and square, lazy, without a fade (a broken one hides, the words stay), its name and a ›,
+   * its type. A card opens that model's sheet in this sheet's history entry.
+   */
+  private pairsSection(pairs: readonly PairCard[]): HTMLElement {
+    const cards = pairs.map((p) => {
+      const photo = p.image ? hideWhenBroken(fadedPhoto(p.image.src, p.image.alt, { fade: false, extraClass: 'n-model__pair-photo' })) : null;
+      // Square, at the card's width: the canvas's height is the column's.
+      photo?.style.removeProperty('height');
+      const card = appAnchor(
+        p.href,
+        ['n-model__pair'],
+        this.deps.onSheet ? () => this.deps.onSheet!(p.slug) : undefined,
+        ...(photo ? [photo] : []),
+        h('p', { class: 'n-g n-t3 n-ivc n-model__pair-name' }, ...nameWithChevron(p.title)),
+        h('p', { class: 'n-g n-lb n-model__pair-line' }, ...withNumerals(p.line)),
+      );
+      card.setAttribute('aria-label', p.label);
+      return h('li', { class: 'n-model__pair-item' }, card);
+    });
+    return h(
+      'section',
+      { class: ['n-sec', 'n-model__pairs', pairs.length === 1 ? 'n-model__pairs--one' : null], attrs: { 'aria-labelledby': 'sheet-pairs' } },
+      h('div', { class: 'n-px' }, h('h2', { class: 'n-g n-t3 n-model__heading', id: 'sheet-pairs', text: LOOKBOOK.pairs.title })),
+      h('ul', { class: 'n-model__pairs-row', attrs: { role: 'list' } }, ...cards),
     );
   }
 

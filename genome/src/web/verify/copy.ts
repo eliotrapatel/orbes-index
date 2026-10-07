@@ -892,6 +892,18 @@ export const LOOKBOOK = Object.freeze({
     label: (kind: string, date: string, variant: string | null) => `${kind}, ${date}${variant ? `, in ${variant.toLowerCase()}` : ''}: see the release`,
     more: (n: number) => `SHOW ALL ${n} RELEASES`,
   }),
+  /**
+   * Plan NEXT-NINE, BP-34: PAIRS WELL WITH, the very last section of a model's sheet: one row of cards, each a model's
+   * photograph, its name (MONOLITHE IN BLUE for a picked variant) and its type (BRACELET · THE PRIVATE SALON for a model of
+   * the salon shown to an owner); never a price.
+   */
+  pairs: Object.freeze({
+    title: 'PAIRS WELL WITH',
+    withVariant: (name: string, variant: string | null) => (variant ? `${name} IN ${variant.toUpperCase()}` : name),
+    line: (type: string, reserved: boolean) => (reserved ? `${type} · THE PRIVATE SALON` : type),
+    /** A card's accessible name: « MONOLITHE IN BLUE, bracelet: see the model ». */
+    label: (title: string, type: string) => `${title}, ${type.toLowerCase()}: see the model`,
+  }),
   /** The accessible names of a sheet's photographs and of a card's. */
   photosLabel: (model: string) => `Photographs of the ${model} model`,
   story: 'THE STORY',

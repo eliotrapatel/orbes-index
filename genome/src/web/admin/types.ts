@@ -472,6 +472,29 @@ export interface Model {
   /** N1: a main model's variants, in the order they were added; none for a variant, nor for a model alone. */
   variants: ModelVariant[];
   createdAt: Iso;
+  /**
+   * Plan NEXT-NINE, BP-34 (Pairs well with), on a model read alone: the models its sheet ends with, in their order, as
+   * picked on its main model (a variant's: its main model's, read only); absent from the list.
+   */
+  pairs?: ModelPair[];
+  /** BP-34: what the sheet shows when no pick is shown, as an owner of the highest tier reads it; empty: nothing. */
+  pairsFallback?: { name: string; label: string | null }[];
+}
+
+/** Whether a model's sheet shows a pair (BP-34), as the server says it (services/catalog.ts ModelPairRecord). */
+export type PairShown = 'EVERYONE' | 'SALON' | 'HIDDEN' | 'DISCONTINUED';
+export const PAIR_SHOWN: readonly PairShown[] = Object.freeze(['EVERYONE', 'SALON', 'HIDDEN', 'DISCONTINUED']);
+
+/** A model picked for PAIRS WELL WITH (BP-34): its place, the model, its place in the lookbook, whether it is shown. */
+export interface ModelPair {
+  position: number;
+  id: string;
+  name: string;
+  label: string | null;
+  swatch: string | null;
+  lookbook: LookbookState;
+  slug: string | null;
+  shown: PairShown;
 }
 
 /** NOCTURNE N1: a variant of a model, as its main model's page lists it (VARIANTS). */

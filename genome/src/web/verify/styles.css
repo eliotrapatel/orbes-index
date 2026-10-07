@@ -1826,6 +1826,65 @@ body.nocturne .view--sheet.n-model {
   text-align: center;
 }
 
+/* PAIRS WELL WITH (plan NEXT-NINE, BP-34): the sheet's last section, its heading on the margin, then one row that
+   scrolls sideways (only the row: the page never does), snapping card by card, 16 px between two; each card 72 % of
+   the column so the next one peeks, a lone card the column whole; its photograph square and whole, without a fade. */
+.n-model__pairs-row {
+  display: flex;
+  gap: 16px;
+  margin: 18px 0 0;
+  padding: 0 var(--n-margin);
+  list-style: none;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: var(--n-margin);
+  scrollbar-width: none;
+}
+
+.n-model__pairs-row::-webkit-scrollbar {
+  display: none;
+}
+
+.n-model__pair-item {
+  flex: 0 0 72%;
+  min-width: 0;
+  scroll-snap-align: start;
+}
+
+.n-model__pairs--one .n-model__pair-item {
+  flex-basis: 100%;
+}
+
+.n-model__pair {
+  display: block;
+  color: var(--vault-ink);
+  text-decoration: none;
+}
+
+.n-model__pair:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+.n-model__pair-photo {
+  aspect-ratio: 1 / 1;
+}
+
+.n-model__pair-name {
+  margin-top: 14px;
+  overflow-wrap: anywhere;
+}
+
+.n-model__pair-name .n-ic {
+  display: inline-block;
+  vertical-align: -3px;
+}
+
+.n-model__pair-line {
+  margin-top: 6px;
+}
+
 /* The gallery: each photograph whole at the column's full width, without the fade, 2 px apart (C22's). */
 .n-model__gallery-photo + .n-model__gallery-photo {
   margin-top: 2px;

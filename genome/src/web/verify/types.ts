@@ -463,6 +463,20 @@ export interface LookbookSheet {
    * exactly its id, kind, opening and variant; absent from an older server.
    */
   releases?: ModelRelease[];
+  /** Plan NEXT-NINE, BP-34 (PAIRS WELL WITH): the models its very last section shows; absent from an older server. */
+  pairs?: ModelPair[];
+}
+
+/** A card of PAIRS WELL WITH (BP-34): a model's address, name, type, its label when it is a variant, its photograph. */
+export interface ModelPair {
+  slug: string;
+  name: string;
+  type: string;
+  /** « Blue » when the model shown is itself a variant; else null. */
+  variant: string | null;
+  imageUrl: string | null;
+  /** A model of THE PRIVATE SALON, shown to an owner of its tier. */
+  reserved: boolean;
 }
 
 /** A past release of a model, as its sheet lists it (CO-01): its page's id, its kind, its opening, its variant's label. */

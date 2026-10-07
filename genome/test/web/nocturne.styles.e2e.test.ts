@@ -1192,6 +1192,23 @@ async function aModel(page: Page): Promise<void> {
   await check(page, '.n-model__release .n-acc__line', { 'margin-top': 6, 'font-size': 9.5, color: ASH });
   expect(isHelvetica((await read(page, '.n-model__release .numeral', ['font-family']))['font-family']!)).toBe(true);
   expect(isGravesend((await read(page, '.n-model__release .n-acc__title', ['font-family']))['font-family']!)).toBe(true);
+  // PAIRS WELL WITH (plan NEXT-NINE, BP-34), the last section: its heading on the margin as the others', one row that
+  // scrolls sideways (16 px between cards), a lone card the column whole, its photograph square without a fade, its name
+  // ivory in Gravesend with its small › in ash, its type a label in ash.
+  expect((await read(page, 'section:has(#sheet-pairs)', ['padding-top']))['padding-top']).toBe('76px');
+  await check(page, '#sheet-pairs', { 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  await check(page, '.n-model__pairs > .n-px', { 'padding-left': 24, 'padding-right': 24 });
+  await check(page, '.n-model__pairs-row', { display: 'flex', 'column-gap': 16, 'margin-top': 18, 'padding-left': 24, 'padding-right': 24, 'overflow-x': 'auto', 'scroll-snap-type': 'x mandatory' });
+  const lone = await check(page, '.n-model__pair-item', { 'scroll-snap-align': 'start' });
+  expect(Number(lone._w)).toBeCloseTo(390 - 48, 0);
+  // On the photograph's ground while it loads, as every photograph of the sheet.
+  const square = await check(page, '.n-model__pair-photo', { 'background-color': (await read(page, '.n-model__photo', ['background-color']))['background-color']! });
+  expect(Number(square._h)).toBeCloseTo(Number(square._w), 0);
+  expect(await page.locator('.n-model__pair-photo').evaluate((el) => el.classList.contains('n-fade'))).toBe(false);
+  await check(page, '.n-model__pair-name', { 'margin-top': 14, 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  await check(page, '.n-model__pair-name .n-ic--sm', { width: 16, height: 16, color: ASH });
+  await check(page, '.n-model__pair-line', { 'margin-top': 6, 'font-size': 9.5, color: ASH });
+  await check(page, '.n-model__pair', { 'text-decoration-line': 'none', color: IV });
   // A dot chosen: the sheet is that variant's, its address too, the pressed dot keeping the focus; You own N the same.
   const steelSrc = await page.locator('.n-model__photo img').getAttribute('src');
   await page.locator('.n-model__dots').getByRole('button', { name: 'Gold' }).click();

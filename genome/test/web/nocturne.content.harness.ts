@@ -106,14 +106,15 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   program,
   // The account sheet's MESSAGES and its write sheet (plan NEXT-NINE, CS-01), in the draw-leads demo, in order.
   messages: accountMessages,
-  collection: (s) => full(s) && !s.mutates && named('collection', 'model')(s),
+  // THE COLLECTION and a model's sheet, with PAIRS WELL WITH as picked (plan NEXT-NINE, BP-34: the pairs stage).
+  collection: (s) => (full(s) || s.variant === 'pairs') && !s.mutates && named('collection', 'model')(s),
   releases: (s) => full(s) && !s.mutates && named('releases', 'draw', 'live')(s),
   circle: (s) => full(s) && !s.mutates && named('circle', 'post', 'legal', 'certificate')(s),
   writes: (s) => full(s) && !!s.mutates,
   room: (s) => ROOM_VARIANTS.includes(s.variant),
   draws: (s) => s.variant === 'draws',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'stress' && !named('account')(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'stress' && s.variant !== 'pairs' && !named('account')(s),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */

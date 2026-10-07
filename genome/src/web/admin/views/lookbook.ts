@@ -25,10 +25,14 @@
  *  - Sizes (plan NEXT-NINE, AC-01): which saved size of a collector (YOUR
  *    SIZES) preselects the model's size, and the measures each of its sizes
  *    (its SKUs) fits; a variant without a size type reads its main model's.
+ *  - Pairs well with (plan NEXT-NINE, BP-34), last as on the sheet: the two
+ *    or three models its sheet ends with, in their order, each with whether
+ *    the sheet shows it; none picked, what it shows now; Edit pairs, three
+ *    selects. A variant's page links to its main model, where they are set.
  *
  * OPERATOR edits (editCatalog, photograph), an AUDITOR reads. Each change is
  * one request, audited by the server (model.update, model.gallery.*,
- * model.sizes.update), then
+ * model.sizes.update, model.pairs), then
  * the page is read again.
  */
 import { h } from '../../shared/dom.js';
@@ -60,11 +64,12 @@ import {
 } from '../model/lookbook.js';
 import { can } from '../model/permissions.js';
 import { modelPhotoImpact } from '../model/photo.js';
+import { lookbookWord, pairFormValues, pairModelLabel, pairOptions, pairsChange, pairsNote, pairsProblem, PAIRS_TEXT, shownLabel, shownNow } from '../model/pairs.js';
 import { effectiveKind, fitChange, fitChanged, fitFormValues, fitProblem, fitsText, fitUnitLabel, kindChange, SIZE_KIND_OPTIONS, sizeKindLine, SIZES_TEXT } from '../model/sizes.js';
 import { toneOf } from '../model/tone.js';
 import { dotChange, dotFormValues, dotProblem, keepsLabel, proposeVariantPrefix, VARIANT_LABEL_MAX, variantFormValues, variantInput, variantProblem } from '../model/variants.js';
 import { href } from '../router.js';
-import type { GalleryImage, Model, ModelSizeRow, ModelVariant } from '../types.js';
+import type { GalleryImage, Model, ModelPair, ModelSizeRow, ModelVariant } from '../types.js';
 import { button, defList, emptyState, linkButton, mono, pageHeader, section, statusMark, table, type Column } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
@@ -487,6 +492,59 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
     },
   );
 
+  // ── Pairs well with (BP-34), last as on the sheet ──────────────────────
+  const editPairs = async () => {
+    let options: { value: string; label: string }[];
+    try {
+      options = pairOptions(m, (await ctx.api.models()).items);
+    } catch (e) {
+      notifyError(e, 'The models could not be read.');
+      return;
+    }
+    const values = pairFormValues(m);
+    const r = await openDialog({
+      title: PAIRS_TEXT.dialogTitle,
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, PAIRS_TEXT.lead),
+      fields: PAIRS_TEXT.fields.map((label, i) => ({ name: `pair${i + 1}`, label, kind: 'select' as const, options, value: values[i] ?? '' })),
+      validate: (v) => pairsProblem(m, [v.pair1, v.pair2, v.pair3]),
+      confirmLabel: PAIRS_TEXT.save,
+      submit: async (v) => {
+        await ctx.api.setModelPairs(m.id, pairsChange([v.pair1, v.pair2, v.pair3]));
+      },
+    });
+    done(PAIRS_TEXT.saved)(r);
+  };
+  const pairColumns: Column<ModelPair>[] = [
+    { label: 'Position', cell: (p) => h('span', { data: { testid: 'pair-position' } }, String(p.position)), kind: ['num', 'nowrap'] },
+    { label: 'Model', cell: (p) => h('span', { class: 'variant-label', data: { testid: 'pair-model' } }, dotOnly(p.swatch), pairModelLabel(p)) },
+    { label: 'Lookbook', cell: (p) => h('span', { data: { testid: 'pair-lookbook' } }, lookbookWord(p.lookbook)), kind: ['nowrap'] },
+    { label: 'Shown', cell: (p) => h('span', { data: { testid: 'pair-shown' } }, shownLabel(p.shown)) },
+  ];
+  const pairs = m.pairs ?? [];
+  const pairsSection = m.variantOf
+    ? section(
+        'Pairs well with',
+        defList([
+          {
+            label: PAIRS_TEXT.variant,
+            value: h('a', { attrs: { href: href('model', { modelId: m.variantOf.id }), 'data-testid': 'pairs-main' } }, `${humanize(m.variantOf.name)}${m.variantOf.label ? ` · ${humanize(m.variantOf.label)}` : ''}`),
+            note: PAIRS_TEXT.variantNote,
+          },
+        ]),
+        { id: 'pairs', note: pairsNote(pairs) },
+      )
+    : section(
+        'Pairs well with',
+        [
+          h('p', { class: 'prose', data: { testid: 'pairs-lead' } }, PAIRS_TEXT.lead),
+          pairs.length
+            ? h('div', { data: { testid: 'pairs' } }, table(pairColumns, pairs, { caption: 'Pairs well with' }))
+            : h('div', { data: { testid: 'pairs-none' } }, emptyState(PAIRS_TEXT.none), h('p', { class: 'prose', data: { testid: 'pairs-shown-now' } }, shownNow(m))),
+        ],
+        { id: 'pairs', note: pairsNote(pairs), tools: canEdit ? [button('Edit pairs', { kind: 'ghost', testId: 'pairs-edit', onClick: () => void editPairs() })] : [] },
+      );
+
   return h(
     'div',
     { class: 'view view--lookbook' },
@@ -506,7 +564,16 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
     story,
     specs,
     gallery,
+    pairsSection,
   );
+}
+
+/** A pick's dot, its colour set through the CSSOM; nothing for a model without one. */
+function dotOnly(swatch: string | null): HTMLElement | null {
+  if (!swatch) return null;
+  const dot = h('span', { class: 'variant-dot', attrs: { 'aria-hidden': 'true' } });
+  dot.style.backgroundColor = swatch;
+  return dot;
 }
 
 /** The labels a model's label may not take: its main model's (a variant), or its variants' (a main model). */

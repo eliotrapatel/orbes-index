@@ -14,6 +14,9 @@ import { issueBatchBody } from '../../src/server/http/schemas.js';
 import { MAX_CERTIFICATE_ITEMS } from '../../src/server/render/certificate.js';
 import { MAX_ISSUE_BATCH } from '../../src/server/services/issuance.js';
 import { IMAGE_MIME_TYPES as SERVER_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES as SERVER_MAX_IMAGE_BYTES, MAX_IMAGE_SIDE as SERVER_MAX_IMAGE_SIDE } from '../../src/server/media/image.js';
+import { lookbookWord, pairFormValues, pairModelLabel, pairOptions, pairsChange, pairsNote, pairsProblem, PAIRS_MAX, PAIRS_TEXT, shownLabel, shownNow } from '../../src/web/admin/model/pairs.js';
+import { MODEL_PAIR_SHOWN } from '../../src/server/services/catalog.js';
+import { PAIRS_FALLBACK_MAX } from '../../src/server/services/lookbook.js';
 import { effectiveKind, fitChange, fitChanged, fitFormValues, fitProblem, fitsText, fitUnitLabel, kindChange, SIZE_KIND_OPTIONS, sizeKindLine, SIZES_TEXT } from '../../src/web/admin/model/sizes.js';
 import { fitWithin, modelPhotoImpact, PHOTO_MAX_BYTES, PHOTO_MAX_SIDE, PHOTO_MIME_TYPES, PHOTO_QUALITIES, photoFacts, PIECE_PHOTO_IMPACT } from '../../src/web/admin/model/photo.js';
 import {
@@ -2556,5 +2559,76 @@ describe('a model\'s Sizes and a salon request\'s size (plan NEXT-NINE, AC-01)',
     expect(acceptedSizeLine({ size: '52' }, 'ACCEPTED')).toBe('The order takes size 52.');
     expect(acceptedSizeLine({ size: '52' }, 'DECLINED')).toBeNull();
     expect(acceptedSizeLine({ size: null }, 'ACCEPTED')).toBeNull();
+  });
+});
+
+describe('a model\'s Pairs well with in the console (plan NEXT-NINE, BP-34)', () => {
+  const pick = (position: number, id: string, over: Partial<web.ModelPair> = {}): web.ModelPair => ({ position, id, name: 'ZENITH', label: null, swatch: null, lookbook: 'RESERVED', slug: 'zenith', shown: 'SALON', ...over });
+  const row = (id: string, over: Partial<web.Model> = {}) =>
+    ({ id, name: 'MONOLITHE', variantLabel: null, variantOf: null, lookbook: 'PUBLIC', discontinuedAt: null, ...over }) as Pick<web.Model, 'id' | 'name' | 'variantLabel' | 'variantOf' | 'lookbook' | 'discontinuedAt'>;
+
+  it('mirrors the server: whether a pair is shown, at most three', () => {
+    expect(web.PAIR_SHOWN).toEqual([...MODEL_PAIR_SHOWN]);
+    expect(PAIRS_MAX).toBe(3);
+    expect(PAIRS_FALLBACK_MAX).toBe(3);
+  });
+
+  it('says whether the sheet shows each pick, its model with its label, its place in the lookbook, and the section\'s note', () => {
+    expect(web.PAIR_SHOWN.map(shownLabel)).toEqual(['Everyone', 'Owners of the salon’s tier', 'Not shown: hidden', 'Not shown: discontinued']);
+    expect(pairModelLabel({ name: 'MONOLITHE', label: 'Blue' })).toBe('MONOLITHE · Blue');
+    expect(pairModelLabel({ name: 'ZENITH', label: null })).toBe('ZENITH');
+    expect((['PUBLIC', 'RESERVED', 'HIDDEN'] as const).map(lookbookWord)).toEqual(['Public', 'Reserved', 'Hidden']);
+    expect(pairsNote([pick(1, 'a'), pick(2, 'b')])).toBe('2 of 3');
+    expect(pairsNote([])).toBe('None picked');
+  });
+
+  it('says what the sheet shows when none is picked, or why nothing', () => {
+    expect(shownNow({ collection: { id: 'c', name: 'ORBITAL' }, pairsFallback: [{ name: 'ZENITH', label: null }, { name: 'MONOLITHE ARCHITECTURALE', label: null }] })).toBe('Shown now: ZENITH, MONOLITHE ARCHITECTURALE');
+    expect(shownNow({ collection: { id: 'c', name: 'ORBITAL' }, pairsFallback: [] })).toBe('Shown now: nothing (no other public model in ORBITAL)');
+    expect(shownNow({ collection: null, pairsFallback: [] })).toBe('Shown now: nothing (the model has no collection)');
+    expect(shownNow({ collection: null })).toBe('Shown now: nothing (the model has no collection)');
+  });
+
+  it('offers None, then every model but this one and its variants, discontinued ones left out unless picked', () => {
+    const m = { id: 'main', pairs: [pick(1, 'old')] };
+    const models = [
+      row('main', { variantLabel: 'Steel' }),
+      row('blue', { variantLabel: 'Blue', variantOf: { id: 'main', name: 'MONOLITHE', label: 'Steel' } }),
+      row('zenith', { name: 'ZENITH', lookbook: 'RESERVED' }),
+      row('other-blue', { name: 'HALO', variantLabel: 'Blue', variantOf: { id: 'halo', name: 'HALO', label: null } }),
+      row('hidden', { name: 'NOCTURNE', lookbook: 'HIDDEN' }),
+      row('gone', { name: 'ECLIPSE', discontinuedAt: '2026-09-01T00:00:00.000Z' }),
+      row('old', { name: 'ORBIT', discontinuedAt: '2026-09-01T00:00:00.000Z' }),
+    ];
+    expect(pairOptions(m, models)).toEqual([
+      { value: '', label: 'None' },
+      { value: 'zenith', label: 'ZENITH — Reserved' },
+      { value: 'other-blue', label: 'HALO · Blue — Public' },
+      { value: 'hidden', label: 'NOCTURNE — Hidden' },
+      { value: 'old', label: 'ORBIT — Public' },
+    ]);
+  });
+
+  it('reads the selects in order and says before sending what the server would refuse: one model, a model twice, nothing changed', () => {
+    const m = { pairs: [pick(2, 'b'), pick(1, 'a')] };
+    expect(pairFormValues(m)).toEqual(['a', 'b', '']);
+    expect(pairFormValues({ pairs: [] })).toEqual(['', '', '']);
+    expect(pairFormValues({})).toEqual(['', '', '']);
+    expect(pairsChange(['a', '', 'c'])).toEqual(['a', 'c']);
+    expect(pairsChange([undefined, ' b ', ''])).toEqual(['b']);
+    expect(pairsProblem(m, ['a', '', ''])).toBe(PAIRS_TEXT.count);
+    expect(PAIRS_TEXT.count).toBe('Pick two or three models, or none: the sheet then shows other models of its collection.');
+    expect(pairsProblem(m, ['a', 'a', ''])).toBe('Each model is picked once.');
+    expect(pairsProblem(m, ['a', 'b', ''])).toBe('Nothing has changed.');
+    expect(pairsProblem(m, ['b', 'a', ''])).toBeNull();
+    expect(pairsProblem(m, ['a', 'b', 'c'])).toBeNull();
+    expect(pairsProblem(m, ['', '', ''])).toBeNull();
+    expect(pairsProblem({ pairs: [] }, ['', '', ''])).toBe('Nothing has changed.');
+  });
+
+  it('says it in the house\'s words', () => {
+    expect(PAIRS_TEXT.lead).toBe('Two or three models shown at the end of its sheet in THE COLLECTION, in this order. None picked: the sheet shows up to three other models of its collection, the newest first.');
+    expect(PAIRS_TEXT.fields).toEqual(['First model', 'Second model', 'Third model (optional)']);
+    expect([PAIRS_TEXT.save, PAIRS_TEXT.saved, PAIRS_TEXT.none, PAIRS_TEXT.variant, PAIRS_TEXT.variantNote]).toEqual(['Save pairs', 'Pairs saved.', 'None picked.', 'Set on its main model', 'Its sheet is its main model’s: the pairs are the same for every dot.']);
   });
 });

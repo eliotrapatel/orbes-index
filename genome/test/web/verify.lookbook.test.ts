@@ -66,6 +66,7 @@ import {
   lookbookSheetPath,
   modelReleaseRows,
   ownedLine,
+  pairCards,
   RELEASES_SHOWN,
   SALON_NOTE_MAX,
   salonPicker,
@@ -208,6 +209,7 @@ describe('a model\'s sheet (P-R02)', () => {
       sizes: null,
       dots: [],
       releases: [],
+      pairs: [],
     });
     // The model's own care; a RESERVED sheet; no story, no photograph from elsewhere, none twice.
     const reserved = sheetModel(sheet({ lookbook: 'RESERVED', care: '  Polish with a soft cloth. ', story: ' \n ', coverUrl: null, gallery: [{ url: media(2), alt: '' }, { url: media(2), alt: null }, { url: 'https://evil.example/a.jpg', alt: 'x' }] }));
@@ -377,6 +379,48 @@ describe('THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01)', () => {
     expect(LOOKBOOK.releases.variant('Blue')).toBe('IN BLUE');
     expect(LOOKBOOK.releases.line('DRAW', null)).toBe('DRAW');
     expect(LOOKBOOK.releases.label('DRAW', '14 SEP 2026', 'Gold')).toBe('DRAW, 14 SEP 2026, in gold: see the release');
+  });
+});
+
+describe('PAIRS WELL WITH (plan NEXT-NINE, BP-34)', () => {
+  const pair = (over: Record<string, unknown> = {}) => ({ slug: 'zenith', name: 'Zenith', type: 'Bracelet', variant: null, imageUrl: media(4), reserved: false, ...over });
+
+  it('names each card: the model, IN BLUE for a picked variant, its type, THE PRIVATE SALON for a reserved one; its sheet; its photograph from the media route', () => {
+    expect(pairCards([pair({ reserved: true }), pair({ slug: 'monolithe-blue', name: 'MONOLITHE', variant: 'Blue', imageUrl: null })])).toEqual([
+      { slug: 'zenith', href: '/verify/lookbook/zenith', title: 'ZENITH', line: 'BRACELET · THE PRIVATE SALON', label: 'ZENITH, bracelet: see the model', image: { src: media(4), alt: PHOTOS.modelAlt('ZENITH', 'BRACELET') } },
+      { slug: 'monolithe-blue', href: '/verify/lookbook/monolithe-blue', title: 'MONOLITHE IN BLUE', line: 'BRACELET', label: 'MONOLITHE IN BLUE, bracelet: see the model', image: null },
+    ]);
+  });
+
+  it('drops a photograph from anywhere but the media route (the words stay), and a card without an address or a name', () => {
+    const cards = pairCards([
+      pair({ imageUrl: 'https://evil.example/a.jpg' }),
+      pair({ slug: '../admin' }),
+      pair({ slug: null }),
+      pair({ name: '  ' }),
+      null,
+      pair({ slug: 'halo', name: 'Halo', variant: '  ', imageUrl: null }),
+    ]);
+    expect(cards.map((c) => [c.slug, c.title, c.image])).toEqual([
+      ['zenith', 'ZENITH', null],
+      ['halo', 'HALO', null],
+    ]);
+    for (const bad of [undefined, null, {}, 'list']) expect(pairCards(bad)).toEqual([]);
+  });
+
+  it('keeps the cards whichever dot is chosen, and says it in the house\'s words', () => {
+    const variants = [
+      { slug: 'monolithe', label: 'Steel', swatch: '#9d9b96', selected: true, lookbook: 'PUBLIC' as const, name: 'Monolithe', type: 'Ring', collection: 'Orbit', coverUrl: media(1), gallery: [], story: null, specs: [], care: null, discontinuedYear: null },
+      { slug: 'monolithe-blue', label: 'Blue', swatch: '#16224a', selected: false, lookbook: 'PUBLIC' as const, name: 'Monolithe', type: 'Ring', collection: 'Orbit', coverUrl: media(2), gallery: [], story: null, specs: [], care: null, discontinuedYear: null },
+    ];
+    const s = sheetModel(sheet({ variant: { label: 'Steel', swatch: '#9d9b96' }, variants, pairs: [pair()] }));
+    expect(s.pairs.map((p) => p.slug)).toEqual(['zenith']);
+    expect(selectDot(s, 'monolithe-blue').pairs).toEqual(s.pairs);
+    expect(withRequest(s, 'monolithe', 'r', 'm').pairs).toEqual(s.pairs);
+    expect(LOOKBOOK.pairs.title).toBe('PAIRS WELL WITH');
+    expect(LOOKBOOK.pairs.withVariant('MONOLITHE', 'Blue')).toBe('MONOLITHE IN BLUE');
+    expect(LOOKBOOK.pairs.withVariant('MONOLITHE', null)).toBe('MONOLITHE');
+    expect(LOOKBOOK.pairs.line('BRACELET', false)).toBe('BRACELET');
   });
 });
 
@@ -679,6 +723,9 @@ describe('the lookbook\'s copy', () => {
     // CO-01: THE RELEASES OF THIS MODEL's words.
     const r = LOOKBOOK.releases;
     lines.push(r.title, ...Object.values(r.kind), r.variant('Blue'), r.line('DRAW', 'IN BLUE'), r.label('LIVE RELEASE', '5 OCT 2026', 'Steel'), r.more(9));
+    // BP-34: PAIRS WELL WITH's words.
+    const p = LOOKBOOK.pairs;
+    lines.push(p.title, p.withVariant('MONOLITHE', 'Blue'), p.line('BRACELET', true), p.label('MONOLITHE IN BLUE', 'BRACELET'));
     expect(lines.length).toBeGreaterThan(10);
     expect(findForbidden(lines.join('\n'), [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
     expect(lines.join('\n')).not.toMatch(/!|lottery/i);

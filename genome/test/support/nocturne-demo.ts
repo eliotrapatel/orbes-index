@@ -54,6 +54,8 @@
  *                     ARCHITECTURALE in its two finishes, seeded last (plan NEXT-NINE, CO-01: SHOW ALL 9 RELEASES)
  *   empty             every empty state: no model shown, no release, an account without a piece, and an owner
  *                     (one piece of a model kept out of the collection) before an empty circle
+ *   pairs             the full story, and PAIRS WELL WITH picked by the console on MONOLITHE (plan NEXT-NINE, BP-34):
+ *                     ZENITH, then MONOLITHE ARCHITECTURALE (public in ORBITAL, its 24-character name, no photograph)
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -85,7 +87,8 @@ export type DemoVariant =
   | 'afterroom-ends'
   | 'draws'
   | 'stress'
-  | 'empty';
+  | 'empty'
+  | 'pairs';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -101,6 +104,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'draws',
   'stress',
   'empty',
+  'pairs',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -199,20 +203,23 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
       modelId: '',
     },
   };
-  if (variant === 'empty') await seedEmpty(w);
-  else if (variant === 'stress') await seedStress(w);
+  // The pairs stage (plan NEXT-NINE, BP-34) tells the full story, then the console picks MONOLITHE's pairs.
+  const story: Exclude<DemoVariant, 'pairs'> = variant === 'pairs' ? 'full' : variant;
+  if (story === 'empty') await seedEmpty(w);
+  else if (story === 'stress') await seedStress(w);
   else {
     await seedCatalogue(w);
-    await seedStory(w, variant);
-    if (variant === 'full' || variant === 'rules') await seedScanCases(w);
-    if (variant === 'full') await seedYearlyCare(w);
-    if (variant === 'room') await seedRoom(w);
-    if (variant === 'live') await seedLive(w);
-    if (variant === 'afterroom') await seedAfterRoom(w);
-    if (variant === 'afterroom-ends') await seedAfterRoomEnds(w);
-    if (variant === 'draws') await seedDraws(w);
-    if (variant === 'full' || variant === 'room' || variant === 'draws') await seedGuarantees(w, variant);
-    if (variant === 'full' || variant === 'room') await seedSizes(w, variant);
+    await seedStory(w, story);
+    if (story === 'full' || story === 'rules') await seedScanCases(w);
+    if (story === 'full') await seedYearlyCare(w);
+    if (story === 'room') await seedRoom(w);
+    if (story === 'live') await seedLive(w);
+    if (story === 'afterroom') await seedAfterRoom(w);
+    if (story === 'afterroom-ends') await seedAfterRoomEnds(w);
+    if (story === 'draws') await seedDraws(w);
+    if (story === 'full' || story === 'room' || story === 'draws') await seedGuarantees(w, story);
+    if (story === 'full' || story === 'room') await seedSizes(w, story);
+    if (variant === 'pairs') await seedPairs(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -1303,6 +1310,21 @@ async function seedStress(w: World): Promise<void> {
     admin,
   );
   await seedModelReleases(w);
+}
+
+/**
+ * Plan NEXT-NINE, BP-34 (the pairs stage): MONOLITHE ARCHITECTURALE shown in ORBITAL (public, no photograph yet), then the
+ * console picks MONOLITHE's PAIRS WELL WITH: ZENITH (THE PRIVATE SALON, from TITANE), then MONOLITHE ARCHITECTURALE.
+ */
+async function seedPairs(w: World): Promise<void> {
+  const { ctx, admin, clock } = w;
+  clock.set(at('2026-10-04T09:00:00Z'));
+  const long = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: w.collection, name: 'MONOLITHE ARCHITECTURALE', type: 'ARTICULATED BRACELET', skuPrefix: 'MNL-AR', defaultMaterial: '925 STERLING SILVER, BRUSHED AND POLISHED', careInstructions: null }, admin);
+  await ctx.services.catalog.updateModel(long.id, { lookbook: 'PUBLIC', slug: 'monolithe-architecturale', story: 'A model without a photograph yet.' }, admin);
+  w.models.long = long.id;
+  w.demo.slugs.long = 'monolithe-architecturale';
+  clock.set(at('2026-10-04T09:10:00Z'));
+  await ctx.services.catalog.setPairs(w.models.steel!, [w.models.zenith!, long.id], admin);
 }
 
 /**

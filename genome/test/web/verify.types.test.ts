@@ -43,7 +43,7 @@ import type {
   CertificateOffer as ServerCertificateOffer,
   OwnerCertificate as ServerOwnerCertificate,
 } from '../../src/server/services/ownership-certificates.js';
-import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookbookSheet, SalonCard as ServerSalonCard } from '../../src/server/services/lookbook.js';
+import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookbookSheet, ModelPair as ServerModelPair, SalonCard as ServerSalonCard } from '../../src/server/services/lookbook.js';
 import type { SalonSheet as ServerSalonSheet, ShopRequestView as ServerShopRequest } from '../../src/server/services/salon.js';
 import type { AccountOrder as ServerAccountOrder, OrderCareGuide as ServerOrderCareGuide } from '../../src/server/services/orders.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
@@ -84,6 +84,7 @@ import {
   type LiveSheet,
   type LookbookCard,
   type LookbookSheet,
+  type ModelPair,
   type ModelRelease,
   type OwnedPiece,
   type OwnerCertificate,
@@ -112,6 +113,9 @@ export const sheetFits = (s: Json<ServerLookbookSheet>): LookbookSheet => s;
 // …and THE RELEASES OF THIS MODEL's rows (plan NEXT-NINE, CO-01), both ways: the web type names exactly what the server sends.
 export const modelReleaseFits = (r: Json<ServerModelRelease>): ModelRelease => r;
 export const modelReleaseBack = (r: ModelRelease): Json<ServerModelRelease> => r;
+// …and PAIRS WELL WITH's cards (plan NEXT-NINE, BP-34), both ways.
+export const modelPairFits = (p: Json<ServerModelPair>): ModelPair => p;
+export const modelPairBack = (p: ModelPair): Json<ServerModelPair> => p;
 // …and THE PRIVATE SALON's (P-X08): a card with its price and tier, a sheet with the account's request, a request made.
 export const salonCardFits = (c: Json<ServerSalonCard>): LookbookCard => c;
 export const salonSheetFits = (s: Json<ServerSalonSheet>): LookbookSheet => s;
