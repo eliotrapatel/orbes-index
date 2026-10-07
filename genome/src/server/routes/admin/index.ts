@@ -14,7 +14,8 @@
  * hashed client IP as the actor. Bodies are JSON (≤ 16 KB) except on the
  * photograph routes (media.ts: an image of at most 1 MiB, F-04; a photograph
  * of a model's lookbook gallery, P-R02; a photograph of a post of the circle,
- * P-X01; the silhouette of a LIVE RELEASE). RETAIL (A-08, a seller's account)
+ * P-X01; the silhouette of a LIVE RELEASE) and the prepaid label of a yearly
+ * care (care.ts: a PDF of at most 2 MiB, BP-19 T6). RETAIL (A-08, a seller's account)
  * reaches only the routes that declare it: the sale mode, the list of points
  * of sale and its own session, password and second factor.
  */
@@ -25,6 +26,7 @@ import type { RouteDeps } from '../public.js';
 import { adminUserRoutes } from './admins.js';
 import { adminAnalyticsRoutes } from './analytics.js';
 import { adminAtelierRoutes } from './atelier.js';
+import { adminCareRoutes } from './care.js';
 import { adminDocumentRoutes } from './documents.js';
 import { adminDropRoutes } from './drops.js';
 import { adminAuthRoutes } from './auth.js';
@@ -73,6 +75,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminRecordRoutes, deps);
   await app.register(adminOwnerRoutes, deps);
   await app.register(adminMessageRoutes, deps);
+  await app.register(adminCareRoutes, deps);
   await app.register(adminDropRoutes, deps);
   await app.register(adminLiveRoutes, deps);
   await app.register(adminOrderRoutes, deps);

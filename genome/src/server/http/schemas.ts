@@ -16,6 +16,7 @@ import {
   ANOMALY_STATUSES,
   CIRCLE_POST_KINDS,
   CIRCLE_RSVP_ANSWERS,
+  CARE_REQUEST_STATUSES,
   CLIENT_CONVERSATION_STATUSES,
   CLIENT_MESSAGE_CONTEXTS,
   CLUB_TIER_NAMES,
@@ -44,6 +45,7 @@ import { ATELIER_MAKE_MAX, BENCH_VIEWS, ISSUE_TEXT_LIMITS, THRESHOLD_MAX, WORK_S
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
+import { CARE_ADDRESS_LIMITS } from '../services/care.js';
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
 import { PRIORITY_TIERS, PROGRAM_LIMITS } from '../services/club-program.js';
 import { DRAW_PRICE_MAX_MINOR, DROP_DESCRIPTION_MAX, DROP_NOTE_MAX, DROP_QUANTITY_MAX, DROP_TITLE_MAX, EARLY_ACCESS_HOURS, PURCHASE_WINDOW_HOURS } from '../services/drops.js';
@@ -1378,6 +1380,40 @@ export const answerMessageBody = body({ body: z.unknown() });
 
 /** POST /api/admin/messages/:id/assign (ADMIN): an active OPERATOR or ADMIN. */
 export const assignMessageBody = body({ adminId: uuid });
+
+// ── The yearly care (plan NEXT-NINE, BP-19 T6) ───────────────────────────
+
+const careTracking = z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9 -]{2,39}$/, 'A tracking number has 3 to 40 letters and digits');
+
+/**
+ * POST /api/v1/account/products/:productId/care: the name and the address the piece returns to, trimmed (1 to 200 and 1
+ * to 1 000 characters). Empty or missing, services/care.ts answers 'Enter the name and the address the piece returns to.'
+ */
+export const careRequestBody = body({
+  name: z.string().trim().max(CARE_ADDRESS_LIMITS.name, `At most ${CARE_ADDRESS_LIMITS.name} characters`).default(''),
+  address: z.string().trim().max(CARE_ADDRESS_LIMITS.address, `At most ${CARE_ADDRESS_LIMITS.address} characters`).default(''),
+});
+
+/** A care request of the account's (POST /api/v1/account/care/:id/cancel, GET …/label.pdf) or of the console's. */
+export const careParams = z.object({ id: uuid });
+
+/** GET /api/admin/care: a status's tab, a year. */
+export const adminCareQuery = z.object({
+  status: queryOptional(z.enum(CARE_REQUEST_STATUSES)),
+  year: queryOptional(z.coerce.number().int('A year').min(2026, 'From 2026').max(2099, 'Until 2099')),
+});
+
+/** POST /api/admin/care/:id/label: the label's carrier and tracking number, in the query (the body is the PDF itself). */
+export const careLabelQuery = z.object({ carrierId: uuid, tracking: careTracking });
+
+/** POST /api/admin/care/:id/return: the carrier and the tracking number of the piece shipped back. */
+export const careShipBody = body({ carrierId: uuid, tracking: careTracking });
+
+/** POST /api/admin/care/:id/complete: the notes of the YEARLY_CARE record, optional. */
+export const careCompleteBody = optionalBody({ notes: optionalText(4000) });
+
+/** POST /api/admin/care/:id/cancel: a note, for ORBES only (1 to 500 characters). */
+export const careCancelBody = body({ note: text(CARE_ADDRESS_LIMITS.note) });
 
 /** PUT /api/admin/orders/alerts: the delays of the alerts (M3), in days. */
 export const orderAlertsBody = body({

@@ -67,7 +67,8 @@ export type AcquiredVia = (typeof ACQUIRED_VIA)[number];
 export const TRANSFER_STATUSES = ['PENDING', 'ACCEPTED', 'CANCELLED', 'EXPIRED'] as const;
 export type TransferStatus = (typeof TRANSFER_STATUSES)[number];
 
-export const SERVICE_TYPES = ['INSPECTION', 'CLEANING', 'POLISH', 'RESIZE', 'REPAIR', 'REPLACEMENT', 'AUTHENTICATION'] as const;
+/** YEARLY_CARE (migration 0028, BP-19 T6): the record the yearly care opens at the atelier; only the care flow opens one. */
+export const SERVICE_TYPES = ['INSPECTION', 'CLEANING', 'POLISH', 'RESIZE', 'REPAIR', 'REPLACEMENT', 'AUTHENTICATION', 'YEARLY_CARE'] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 
 export const SERVICE_STATUSES = ['OPEN', 'COMPLETED', 'CANCELLED'] as const;
@@ -276,6 +277,17 @@ export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
 /** What an account received on reaching a tier (tier_grants.kind, migration 0027, BP-19 T5): its welcome gift, its credit. */
 export const TIER_GRANT_KINDS = ['GIFT', 'CREDIT'] as const;
 export type TierGrantKind = (typeof TIER_GRANT_KINDS)[number];
+
+/**
+ * The steps of a yearly care (care_requests.status, migration 0028, BP-19 T6): asked for, its prepaid label sent, the
+ * piece at the atelier, on its way back, done; or cancelled before it is shipped back.
+ */
+export const CARE_REQUEST_STATUSES = ['REQUESTED', 'LABEL_SENT', 'RECEIVED', 'RETURNING', 'DONE', 'CANCELLED'] as const;
+export type CareRequestStatus = (typeof CARE_REQUEST_STATUSES)[number];
+
+/** Who cancelled a yearly care (care_requests.cancelled_by): the collector's account, or ORBES. */
+export const CARE_CANCELLED_BY = ['account', 'admin'] as const;
+export type CareCancelledBy = (typeof CARE_CANCELLED_BY)[number];
 
 /** Why a credit taken off an order was given back (credit_uses.released_reason, migration 0027): removed, the order cancelled or returned. */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
@@ -1350,6 +1362,38 @@ export interface CreditUsesTable {
   released_by: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
+/**
+ * A yearly care asked for from a piece (migration 0028, BP-19 T6): its steps, the address the piece returns to
+ * (personal data, never in the audit log), its prepaid label (a PDF, erased 30 days after the request ends) and the
+ * YEARLY_CARE record it opened. Never deleted; its identity, year, tier and address never change.
+ */
+export interface CareRequestsTable {
+  id: Generated<string>;
+  account_id: string;
+  product_id: string;
+  year: number;                        // 2026..2099, UTC
+  tier: number;                        // 2 PLATINE, 3 PALLADIUM, at the request
+  status: ColumnType<CareRequestStatus, CareRequestStatus | undefined, CareRequestStatus>;
+  requested_at: TimestampDefault;
+  return_name: string;                 // 1..200 trimmed
+  return_address: string;              // 1..1000 trimmed
+  label_pdf: ColumnType<Uint8Array | null, Uint8Array | null | undefined, Uint8Array | null>;
+  label_carrier_id: ColumnType<string | null, string | null | undefined, string | null>;
+  label_tracking: ColumnType<string | null, string | null | undefined, string | null>;
+  label_at: TimestampNullable;
+  service_record_id: ColumnType<string | null, string | null | undefined, string | null>;
+  received_at: TimestampNullable;
+  return_carrier_id: ColumnType<string | null, string | null | undefined, string | null>;
+  return_tracking: ColumnType<string | null, string | null | undefined, string | null>;
+  return_shipped_at: TimestampNullable;
+  done_at: TimestampNullable;
+  cancelled_at: TimestampNullable;
+  cancelled_by: ColumnType<CareCancelledBy | null, CareCancelledBy | null | undefined, CareCancelledBy | null>;
+  /** Staff only: 1..500 characters. */
+  note: ColumnType<string | null, string | null | undefined, string | null>;
+  handled_by: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
 /** What an order's delivery costs below the free shipping of the tiers (migration 0026), per currency and service; optional, none inserted. */
 export interface ShippingRatesTable {
   currency: HouseCurrency;
@@ -1562,6 +1606,7 @@ export interface Database {
   shipping_rates: ShippingRatesTable;
   tier_grants: TierGrantsTable;
   credit_uses: CreditUsesTable;
+  care_requests: CareRequestsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
   segments: SegmentsTable;
@@ -1671,6 +1716,7 @@ export type ClubProgramSettingsRow = Selectable<ClubProgramSettingsTable>;
 export type ShippingRateRow = Selectable<ShippingRatesTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
+export type CareRequestRow = Selectable<CareRequestsTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

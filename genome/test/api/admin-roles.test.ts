@@ -16,7 +16,8 @@
  * size mix proposed at creation, the feasibility check and the best time to open read by an AUDITOR; the Shopify
  * exports read by an AUDITOR, the order CSV masked, the Shopify ids pasted back by an OPERATOR; the Messages board of
  * the next nine, CS-01, read by an AUDITOR, its conversations answered, taken and closed by an OPERATOR, assigned by an
- * ADMIN; THE PROGRAM of the club's tiers and the orders' shipping rates, BP-19 T2, read by an AUDITOR, set by an ADMIN);
+ * ADMIN; THE PROGRAM of the club's tiers and the orders' shipping rates, BP-19 T2, read by an AUDITOR, set by an ADMIN;
+ * the Yearly care board, BP-19 T6, read by an AUDITOR, its steps taken by an OPERATOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -47,6 +48,8 @@ const UUID = randomUUID();
 const INVALID = { definitelyNotAField: true };
 /** A real photograph: the image routes check the type before the target, so an allowed probe ends in 404. */
 const PHOTO = { body: Buffer.from(jpegPhoto(8, 8)), headers: { 'content-type': 'image/jpeg' } };
+/** A yearly care's label, the PDF itself, without its carrier and tracking number: an allowed probe ends in 400. */
+const LABEL = { body: Buffer.from('%PDF-1.4\n%%EOF\n', 'latin1'), headers: { 'content-type': 'application/pdf' } };
 
 const PROBES: Probe[] = [
   { group: 'dashboard', method: 'GET', url: '/api/admin/dashboard', min: 'AUDITOR' },
@@ -195,6 +198,15 @@ const PROBES: Probe[] = [
   { group: 'messages', method: 'POST', url: `/api/admin/messages/${UUID}/take`, body: INVALID, min: 'OPERATOR' },
   { group: 'messages', method: 'POST', url: `/api/admin/messages/${UUID}/assign`, body: INVALID, min: 'ADMIN' },
   { group: 'messages', method: 'POST', url: `/api/admin/messages/${UUID}/close`, body: INVALID, min: 'OPERATOR' },
+  // BP-19 T6: the Yearly care board read by an AUDITOR, its steps by an OPERATOR (manageCare); the label is the PDF itself.
+  { group: 'care', method: 'GET', url: '/api/admin/care', min: 'AUDITOR' },
+  { group: 'care', method: 'GET', url: '/api/admin/care?status=DONE&year=2026', min: 'AUDITOR' },
+  { group: 'care', method: 'GET', url: `/api/admin/care/${UUID}`, min: 'AUDITOR' },
+  { group: 'care', method: 'POST', url: `/api/admin/care/${UUID}/label`, ...LABEL, min: 'OPERATOR' },
+  { group: 'care', method: 'POST', url: `/api/admin/care/${UUID}/receive`, body: INVALID, min: 'OPERATOR' },
+  { group: 'care', method: 'POST', url: `/api/admin/care/${UUID}/return`, body: INVALID, min: 'OPERATOR' },
+  { group: 'care', method: 'POST', url: `/api/admin/care/${UUID}/complete`, body: INVALID, min: 'OPERATOR' },
+  { group: 'care', method: 'POST', url: `/api/admin/care/${UUID}/cancel`, body: INVALID, min: 'OPERATOR' },
   // Plan LIVE RELEASE+: the orders read by an AUDITOR, stepped by an OPERATOR, their alerts' delays set by an ADMIN; the
   // locations and carriers read by an AUDITOR, set by an ADMIN; the atelier read by an AUDITOR, worked by an OPERATOR.
   { group: 'orders', method: 'GET', url: '/api/admin/orders', min: 'AUDITOR' },
@@ -348,6 +360,7 @@ describe('admin role enforcement', () => {
       'atelier',
       'messages',
       'program',
+      'care',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

@@ -6,7 +6,8 @@
  * Filters: To answer (n) · Answered · Closed · All; Everyone · Mine · Unassigned; a search by the client's email or a
  * scan's REF. Columns: the priority (`Priority · PALLADIUM` or `Priority · PLATINE`, the tier read now), the client (its
  * sheet; the email masked for an AUDITOR), what the messages concern (the latest, then `+N more`; a link to its page),
- * the last message's excerpt, the waiting time, the status and who answers. The server orders the rows: To answer first,
+ * the last message's excerpt, the waiting time, the status and who answers. A client's open yearly care (BP-19 T6) adds
+ * `Yearly care · O26-J-00184` under what the messages concern, a link to its request. The server orders the rows: To answer first,
  * PALLADIUM, then PLATINE, then the rest, the longest waiting first; then the others, newest first. Each row opens its
  * conversation (views/conversation.ts).
  */
@@ -26,6 +27,7 @@ import {
   statusFilterLabel,
   WHO_FILTERS,
 } from '../model/messages.js';
+import { careHref, careLinkText } from '../model/care.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
 import type { ConversationRow } from '../types.js';
@@ -43,6 +45,14 @@ export function concernsCell(c: ConversationRow['concerns'], more = 0): HTMLElem
     link ? h('a', { class: 'idlink', attrs: { href: link } }, text) : h('span', null, text),
     extra ? h('span', { class: 'cell-sub' }, extra) : null,
   );
+}
+
+/**
+ * The client's open yearly care (BP-19 T6): `Yearly care · O26-J-00184`, a link to its page on the Yearly care board.
+ * It changes neither the conversation's status nor its place in the order.
+ */
+export function careLink(care: NonNullable<ConversationRow['care']>): HTMLElement {
+  return h('a', { class: 'idlink cell-sub', attrs: { href: careHref(care), 'data-testid': 'conversation-care' } }, careLinkText(care));
 }
 
 export async function messagesView(ctx: ViewContext): Promise<HTMLElement> {
@@ -87,7 +97,7 @@ export async function messagesView(ctx: ViewContext): Promise<HTMLElement> {
               cell: (r) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: r.account.id }), 'data-testid': 'conversation-client' } }, r.account.email),
               kind: ['nowrap'],
             },
-            { label: 'Concerns', cell: (r) => concernsCell(r.concerns, r.moreConcerns) },
+            { label: 'Concerns', cell: (r) => (r.care ? h('span', null, concernsCell(r.concerns, r.moreConcerns), careLink(r.care)) : concernsCell(r.concerns, r.moreConcerns)) },
             {
               label: 'Last message',
               cell: (r) =>

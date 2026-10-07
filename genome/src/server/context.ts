@@ -39,6 +39,7 @@ import { CircleService } from './services/circle.js';
 import { ClubService } from './services/club.js';
 import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
+import { CareService, eraseCareLabels } from './services/care.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -146,6 +147,8 @@ export interface AppServices {
   clubProgram: ClubProgramService;
   /** The tiers' grants (plan NEXT-NINE, BP-19 T5): the welcome gift and the credit, once per tier and per account, ever. */
   tierGrants: TierGrantService;
+  /** The yearly care (plan NEXT-NINE, BP-19 T6): asked for from the piece, a prepaid label both ways, recorded as YEARLY CARE. */
+  care: CareService;
 }
 
 export interface AppContext {
@@ -259,6 +262,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const messages = new MessageService({ db, audit, lookbook, clock });
     const clubProgram = new ClubProgramService({ db, audit, clock });
     const tierGrants = new TierGrantService({ db, audit, clock, log });
+    const care = new CareService({ db, audit, warranty, clock });
 
     const services: AppServices = {
       issuance,
@@ -300,6 +304,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       messages,
       clubProgram,
       tierGrants,
+      care,
       ...overrides.services,
     };
 
@@ -353,7 +358,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
 export interface Housekeeping {
   /** Run every job once now (also what the timer does). Errors are logged, never thrown. */
-  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; activity: number; scanHistory: number; liveNetworks: number }>;
+  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; activity: number; scanHistory: number; liveNetworks: number; careLabels: number }>;
   /** Stop the timer and wait for a running pass to finish. */
   stop(): Promise<void>;
 }
@@ -365,8 +370,9 @@ export interface Housekeeping {
  * time to open, plan LIVE RELEASE+: services/activity.ts) and, when
  * SCAN_RETENTION_DAYS is set, purges scan history older than the retention
  * period, and erases the network hashes of the LIVE RELEASES' entries 30 days
- * after their release ended (services/live.ts), every `intervalMs` (default
- * 10 min).
+ * after their release ended (services/live.ts), and the prepaid labels of the
+ * yearly care 30 days after their request ended (services/care.ts), every
+ * `intervalMs` (default 10 min).
  *
  * The daily statistics and the hourly activity always run before the purge,
  * and a pass where either failed purges nothing: no scan leaves the history
@@ -382,7 +388,7 @@ export function startHousekeeping(
   let running: Promise<unknown> | undefined;
 
   const runOnce = async () => {
-    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, activity: 0, scanHistory: 0, liveNetworks: 0 };
+    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, activity: 0, scanHistory: 0, liveNetworks: 0, careLabels: 0 };
     /** Runs one job; false when it failed (logged). */
     const job = async (name: keyof typeof result, fn: () => Promise<number>): Promise<boolean> => {
       try {
@@ -406,6 +412,7 @@ export function startHousekeeping(
       );
     }
     await job('liveNetworks', () => eraseLiveNetworkHashes(ctx.db, ctx.clock()));
+    await job('careLabels', () => eraseCareLabels(ctx.db, ctx.clock()));
     if (Object.values(result).some((n) => n > 0)) ctx.log.info(result, 'housekeeping');
     return result;
   };

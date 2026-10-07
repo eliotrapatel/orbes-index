@@ -66,6 +66,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   answerMessages: 'OPERATOR',
   /** The Messages board (CS-01): assign a conversation to an active OPERATOR or ADMIN. */
   assignMessages: 'ADMIN',
+  /** The Yearly care board (BP-19 T6): send the prepaid label, receive the piece, ship it back, complete, cancel. */
+  manageCare: 'OPERATOR',
   /**
    * The orders (plan LIVE RELEASE+): their steps (paid, shipped, delivered, cancelled), their location, terms and buyer,
    * the piece picked from the stock; the buyer's details in clear (an AUDITOR reads them masked).

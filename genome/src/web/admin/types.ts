@@ -31,7 +31,8 @@ export type AdminRole = (typeof ADMIN_ROLES)[number];
 export const STAFF_ROLES = ['OPERATOR', 'AUDITOR', 'RETAIL'] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
-export const SERVICE_TYPES = ['INSPECTION', 'CLEANING', 'POLISH', 'RESIZE', 'REPAIR', 'REPLACEMENT', 'AUTHENTICATION'] as const;
+/** YEARLY_CARE (BP-19 T6): opened by the yearly care's flow only; the product page's dialog never offers it. */
+export const SERVICE_TYPES = ['INSPECTION', 'CLEANING', 'POLISH', 'RESIZE', 'REPAIR', 'REPLACEMENT', 'AUTHENTICATION', 'YEARLY_CARE'] as const;
 export type ServiceType = (typeof SERVICE_TYPES)[number];
 
 export const VERIFICATION_STATES = [
@@ -132,6 +133,10 @@ export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
 /** Why a credit taken off an order was given back (credit_uses.released_reason, BP-19 T5). */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
 export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
+
+/** The steps of a yearly care (care_requests.status, BP-19 T6). */
+export const CARE_REQUEST_STATUSES = ['REQUESTED', 'LABEL_SENT', 'RECEIVED', 'RETURNING', 'DONE', 'CANCELLED'] as const;
+export type CareRequestStatus = (typeof CARE_REQUEST_STATUSES)[number];
 
 /** What an invitation of the circle is (circle_posts.experience, BP-19 T7). */
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
@@ -1924,6 +1929,8 @@ export interface ConversationRow {
   waitingSince: Iso | null;
   status: ClientConversationStatus;
   answeredBy: { id: string; email: string } | null;
+  /** The client's open yearly care (BP-19 T6): `Yearly care · O26-J-00184`, a link to its page; null without one. */
+  care: { id: string; serial: string } | null;
 }
 
 /** GET /api/admin/messages: a page of the board and the count To answer. */
@@ -2373,4 +2380,43 @@ export interface IssuedBenchItem {
   codeId: string;
   /** Shown once. */
   claimCode?: string;
+}
+
+// ── The yearly care (plan NEXT-NINE, BP-19 T6) ─────────────────────────────
+
+/** A shipment of a yearly care: its carrier, its tracking number and link, when it left. */
+export interface CareShipment {
+  carrier: { id: string; name: string };
+  tracking: string;
+  trackingUrl: string;
+  at: Iso;
+}
+
+/** A row of the Yearly care board (GET /api/admin/care): the client's email masked for an AUDITOR. */
+export interface CareRow {
+  id: string;
+  status: CareRequestStatus;
+  requestedAt: Iso;
+  year: number;
+  /** The tier the account held when it asked. */
+  tier: ClubTierName;
+  piece: { productId: string; model: string };
+  account: { id: string; email: string };
+}
+
+/** GET /api/admin/care/:id: the return name and address masked for an AUDITOR. */
+export interface CareSheet extends CareRow {
+  returnName: string;
+  returnAddress: string;
+  /** The prepaid label: its shipment, and whether its PDF is still kept. */
+  label: (CareShipment & { pdf: boolean }) | null;
+  receivedAt: Iso | null;
+  serviceRecordId: string | null;
+  return: CareShipment | null;
+  doneAt: Iso | null;
+  cancelledAt: Iso | null;
+  cancelledBy: 'account' | 'admin' | null;
+  note: string | null;
+  handledBy: { id: string; email: string } | null;
+  conversation: { conversationId: string; status: ClientConversationStatus } | null;
 }

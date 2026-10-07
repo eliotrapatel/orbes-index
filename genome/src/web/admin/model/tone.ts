@@ -90,6 +90,8 @@ const CIRCLE: Record<string, Tone> = { PUBLISHED: 'solid', UNPUBLISHED: 'outline
 const SHOP_REQUEST: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
 /** A conversation of the Messages board (CS-01): one to answer waits for ORBES Client Services, as an open case does. */
 const CONVERSATION: Record<string, Tone> = { TO_ANSWER: 'alert', ANSWERED: 'solid', CLOSED: 'muted' };
+/** A yearly care (BP-19 T6): to act on while ORBES holds the next step, solid once done. */
+const CARE: Record<string, Tone> = { REQUESTED: 'alert', LABEL_SENT: 'outline', RECEIVED: 'alert', RETURNING: 'outline', DONE: 'solid', CANCELLED: 'muted' };
 /** An answer to an invitation of the circle (P-X01): a place taken, or declined. */
 const CIRCLE_ANSWER: Record<string, Tone> = { YES: 'solid', NO: 'muted' };
 const VERIFICATION: Record<string, Tone> = {
@@ -125,6 +127,7 @@ export type ToneDomain =
   | 'circleAnswer'
   | 'shopRequest'
   | 'conversation'
+  | 'care'
   | 'livePhase'
   | 'liveEntry'
   | 'order'
@@ -150,6 +153,7 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   circleAnswer: CIRCLE_ANSWER,
   shopRequest: SHOP_REQUEST,
   conversation: CONVERSATION,
+  care: CARE,
   livePhase: LIVE_PHASE,
   liveEntry: LIVE_ENTRY,
   order: ORDER,

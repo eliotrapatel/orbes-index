@@ -658,6 +658,17 @@ describe('verify app: one button to ORBES Client Services, the email under FORGO
     expect(words).not.toContain('!');
     expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
   });
+
+  it('writes the tier program\'s words calmly (YEARLY_CARE, TIER; plan NEXT-NINE BP-19): no exclamation mark and no word of §4.5', () => {
+    const said = (v: unknown): string[] =>
+      typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('PLATINE', 1, 2026))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];
+    for (const group of ['YEARLY_CARE', 'TIER'] as const) {
+      const words = said(verifyCopy[group]).join('\n');
+      expect(words.length, group).toBeGreaterThan(50);
+      expect(words, group).not.toContain('!');
+      expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN]), group).toEqual([]);
+    }
+  });
 });
 
 describe('verify app: the lexicon of BRAND-DESIGN-SYSTEM §4.5, and the second-hand guidance (J-02)', () => {

@@ -42,6 +42,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/server/config.js';
+import { CARE_LABEL_BODY_LIMIT_BYTES, CARE_LABEL_UPLOAD_ROUTE } from '../../src/server/routes/admin/care.js';
 import { MEDIA_BODY_LIMIT_BYTES, MEDIA_UPLOAD_ROUTES } from '../../src/server/routes/admin/media.js';
 import { LIVE_STREAM_ROUTES } from '../../src/server/http/live-stream.js';
 import { BODY_LIMIT_BYTES } from '../../src/server/app.js';
@@ -382,25 +383,45 @@ describe('deploy/vps/Caddyfile', () => {
     expect(d).toMatch(/path \/admin \/admin\/\* \/api\/admin \/api\/admin\/\*/);
   });
 
-  it('limits every body to 64 KB, except the five image uploads of the console (F-04, P-R02, P-X01, the LIVE RELEASES): 1 200 KB, over the app\'s 1 MiB', () => {
+  it('limits every body to 64 KB, except the five image uploads of the console (F-04, P-R02, P-X01, the LIVE RELEASES): 1 200 KB, over the app\'s 1 MiB; and the yearly care\'s label (BP-19 T6): 2 200 KB, over the app\'s 2 MiB', () => {
     const d = directives(caddyfile);
     // Caddy reads KB as 1 000 bytes.
     const kb = (v: string) => Number(/^(\d+)KB$/.exec(v)![1]) * 1000;
     const limits = [...d.matchAll(/request_body (\S+) \{\s*max_size (\S+)\s*\}/g)].map((m) => [m[1], m[2]]);
     expect(limits).toEqual([
       ['@photo_upload', '1200KB'],
-      ['@not_photo_upload', '64KB'],
+      ['@label_upload', '2200KB'],
+      ['@not_upload', '64KB'],
     ]);
-    // No request_body without a matcher: exactly one of the two applies to any request.
-    expect([...d.matchAll(/request_body/g)]).toHaveLength(2);
+    // No request_body without a matcher: exactly one of the three applies to any request.
+    expect([...d.matchAll(/request_body/g)]).toHaveLength(3);
     expect(kb('1200KB')).toBeGreaterThan(MEDIA_BODY_LIMIT_BYTES);
+    expect(kb('2200KB')).toBeGreaterThan(CARE_LABEL_BODY_LIMIT_BYTES);
     expect(kb('64KB')).toBeGreaterThan(BODY_LIMIT_BYTES);
     expect(kb('64KB')).toBeLessThan(MEDIA_BODY_LIMIT_BYTES);
-    // The exception is a POST to one of the upload paths; its complement is the very same pair, negated.
+    // The label's exception is a POST to its one path…
+    const label = /@label_upload \{\n\t\tmethod POST\n\t\tpath_regexp (\S+)\n\t\}/.exec(d);
+    expect(label, 'the @label_upload matcher').not.toBeNull();
+    const labelRe = new RegExp(label![1]);
+    const care = CARE_LABEL_UPLOAD_ROUTE.replace(':id', '73c68b47-012d-4569-a59a-fd2effa613c1');
+    expect(labelRe.test(care)).toBe(true);
+    expect(labelRe.test(`${care}/`)).toBe(true);
+    for (const path of ['/api/admin/care/73c68b47-012d-4569-a59a-fd2effa613c1', '/api/admin/care//label', '/api/admin/care/x/label/y', '/api/v1/account/care/x/label.pdf', '/api/admin/models/1/image']) {
+      expect(labelRe.test(path), path).toBe(false);
+    }
+    // The photographs' exception is a POST to one of the upload paths; the complement is a POST to either, negated.
     const upload = /@photo_upload \{\n\t\tmethod POST\n\t\tpath_regexp (\S+)\n\t\}/.exec(d);
     expect(upload, 'the @photo_upload matcher').not.toBeNull();
     const pattern = upload![1];
-    expect(d).toContain(`@not_photo_upload {\n\t\tnot {\n\t\t\tmethod POST\n\t\t\tpath_regexp ${pattern}\n\t\t}\n\t}`);
+    const both = /@not_upload \{\n\t\tnot \{\n\t\t\tmethod POST\n\t\t\tpath_regexp (\S+)\n\t\t\}\n\t\}/.exec(d);
+    expect(both, 'the @not_upload matcher').not.toBeNull();
+    expect(both![1]).toBe(pattern.replace(/\)\/\?\$$/, '|care/[^/]+/label)/?$'));
+    const union = new RegExp(both![1]);
+    for (const route of [...MEDIA_UPLOAD_ROUTES, CARE_LABEL_UPLOAD_ROUTE]) {
+      const path = route.replace(':id', '73c68b47-012d-4569-a59a-fd2effa613c1').replace(':productId', 'O26-J-00184');
+      expect(union.test(path), route).toBe(true);
+    }
+    expect(union.test('/api/admin/care/73c68b47-012d-4569-a59a-fd2effa613c1/receive')).toBe(false);
     // The pattern is RE2 and JavaScript alike here: it matches the app's five routes, with or without a trailing slash…
     const re = new RegExp(pattern);
     const sample = (route: string) => route.replace(':id', '73c68b47-012d-4569-a59a-fd2effa613c1').replace(':productId', 'O26-J-00184');

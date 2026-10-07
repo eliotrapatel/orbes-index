@@ -117,6 +117,9 @@ import type {
   ShopRequestOutcome,
   ClientConversationStatus,
   Conversation,
+  CareRequestStatus,
+  CareRow,
+  CareSheet,
   ConversationPage,
   MessagesSummary,
   ShopRequestStatus,
@@ -1292,6 +1295,42 @@ export class AdminApi {
   /** OPERATOR: CLOSED; the client writing again reopens it. */
   closeConversation(id: string): Promise<Conversation> {
     return this.post(`/api/admin/messages/${encodeURIComponent(id)}/close`);
+  }
+
+  // ── The yearly care (plan NEXT-NINE, BP-19 T6) ───────────────────────────
+
+  /** The Yearly care board: a step's tab, oldest first; a year. */
+  careRequests(q: { status?: CareRequestStatus; year?: number; page?: number; pageSize?: number } = {}): Promise<Paged<CareRow>> {
+    return this.get('/api/admin/care', q);
+  }
+
+  careRequest(id: string): Promise<CareSheet> {
+    return this.get(`/api/admin/care/${encodeURIComponent(id)}`);
+  }
+
+  /** OPERATOR: SEND LABEL, the PDF itself (at most 2 MB), its carrier and tracking number. */
+  sendCareLabel(id: string, pdf: Blob, carrierId: string, tracking: string): Promise<CareSheet> {
+    return this.request('POST', `/api/admin/care/${encodeURIComponent(id)}/label`, { query: { carrierId, tracking }, upload: { type: 'application/pdf', data: pdf } });
+  }
+
+  /** OPERATOR: RECEIVED AT THE ATELIER, the YEARLY_CARE record opened. */
+  receiveCare(id: string): Promise<CareSheet> {
+    return this.post(`/api/admin/care/${encodeURIComponent(id)}/receive`);
+  }
+
+  /** OPERATOR: SHIP BACK, to the address the client gave. */
+  shipCareBack(id: string, carrierId: string, tracking: string): Promise<CareSheet> {
+    return this.post(`/api/admin/care/${encodeURIComponent(id)}/return`, { carrierId, tracking });
+  }
+
+  /** OPERATOR: COMPLETE, the notes going to the service record. */
+  completeCare(id: string, notes: string): Promise<CareSheet> {
+    return this.post(`/api/admin/care/${encodeURIComponent(id)}/complete`, notes.trim() ? { notes } : {});
+  }
+
+  /** OPERATOR: CANCEL, with a note, before the piece is shipped back. */
+  cancelCare(id: string, note: string): Promise<CareSheet> {
+    return this.post(`/api/admin/care/${encodeURIComponent(id)}/cancel`, { note });
   }
 
   // ── The Club: the private salon's requests (P-X08) ───────────────────────

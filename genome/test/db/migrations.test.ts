@@ -10,7 +10,7 @@ import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_
 
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'activity_hourly', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs', 'authentication_events',
-  'bench_items', 'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps',
+  'bench_items', 'care_requests', 'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps',
   'client_conversations', 'client_messages', 'club_program_settings', 'club_tiers', 'codes', 'collections', 'credit_uses', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops',
   'event_journal', 'genomes', 'invoices', 'live_access_models', 'live_addons', 'live_entries', 'live_entry_addons', 'live_interest', 'live_messages',
   'live_tier_windows', 'media_objects', 'model_images', 'models', 'order_alert_settings', 'order_events', 'orders', 'ownership', 'ownership_certificates',
@@ -222,6 +222,14 @@ describe('migrations', () => {
     expect(has(/UNIQUE INDEX credit_uses_open_key ON public\.credit_uses USING btree \(grant_id, order_id\) WHERE \(released_at IS NULL\)$/)).toBe(true);
     for (const c of ['grant', 'order', 'applied_by', 'released_by']) {
       expect(has(new RegExp(`INDEX credit_uses_${c}_idx ON public\\.credit_uses USING btree \\(${c === 'grant' || c === 'order' ? `${c}_id` : c}\\)$`)), c).toBe(true);
+    }    // 0028: the yearly care. One request per piece and year not cancelled; an account's by year; the board by status and
+    // time; every foreign key at the head of an index.
+    expect(has(/UNIQUE INDEX care_requests_once ON public\.care_requests USING btree \(product_id, year\) WHERE \(status <> 'CANCELLED'::text\)$/)).toBe(true);
+    expect(has(/INDEX care_requests_account_idx ON public\.care_requests USING btree \(account_id, year\)$/)).toBe(true);
+    expect(has(/INDEX care_requests_status_idx ON public\.care_requests USING btree \(status, requested_at\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX care_requests_service_record_id_key ON public\.care_requests USING btree \(service_record_id\)$/)).toBe(true);
+    for (const [idx, c] of [['product', 'product_id'], ['label_carrier', 'label_carrier_id'], ['return_carrier', 'return_carrier_id'], ['handled_by', 'handled_by']]) {
+      expect(has(new RegExp(`INDEX care_requests_${idx}_idx ON public\\.care_requests USING btree \\(${c}\\)$`)), c).toBe(true);
     }
   });
 
@@ -2378,7 +2386,9 @@ describe('migrations', () => {
     await run(`UPDATE credit_uses SET released_at = now(), released_reason = 'REMOVED', released_by = '${admin}' WHERE id = '${open}'`);
     await use();
     await expect(run(`DELETE FROM credit_uses WHERE id = '${open}'`)).rejects.toSatisfy(isGuardViolation);
-    // The down step refuses while a GIFT order or a credit use exists: neither can be removed, so this database stays at 0027.
+    // The down step refuses while a GIFT order or a credit use exists: neither can be removed, so this database stays at
+    // 0027 (0028, which holds nothing here, goes down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0028_yearly_care']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0027_tier_grants cannot be rolled back: 1 welcome gift orders and 2 credit uses exist/);
     expect((await migrationStatus(t.db)).find((m) => m.name === '0027_tier_grants')?.executedAt).toBeDefined();
     // Cleared by hand for the roll-backs that follow (the service never deletes either).
@@ -2386,6 +2396,109 @@ describe('migrations', () => {
     await run(`DELETE FROM credit_uses`);
     await run(`ALTER TABLE credit_uses ENABLE TRIGGER credit_uses_no_delete`);
     await run(`DELETE FROM orders WHERE channel = 'GIFT'`);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care']);
+  });
+
+  /** What names an object of 0028 in a snapshot: its table and its objects. */
+  const of0028 = (o: string) => /\bcare_requests\w*\b/.test(o);
+
+  it('0028 adds the care requests and YEARLY_CARE to the service types, and nothing else; down restores 0027 exactly (0001\'s type CHECK), and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0028_yearly_care');
+    const added = withIt.filter((o) => !before.includes(o));
+    const removed = before.filter((o) => !withIt.includes(o));
+    // Besides its own table, 0028 changes only the service records' type CHECK (re-created with YEARLY_CARE).
+    expect(added.filter((o) => !of0028(o)).map((o) => o.split(' ').slice(0, 3).join(' '))).toEqual(['constraint service_records service_records_type_check']);
+    expect(removed.map((o) => o.split(' ').slice(0, 3).join(' '))).toEqual(['constraint service_records service_records_type_check']);
+    expect(added).toContainEqual(expect.stringMatching(/^constraint service_records service_records_type_check CHECK .*'AUTHENTICATION'::text, 'YEARLY_CARE'::text\]/));
+    expect(removed).toContainEqual(expect.stringMatching(/^constraint service_records service_records_type_check CHECK .*'AUTHENTICATION'::text\]\)\)\)$/));
+    expect(before.filter(of0028)).toEqual([]);
+    const columns = added.filter((o) => o.startsWith('table care_requests ')).map((o) => o.split(' ')[2]);
+    expect(columns).toEqual([
+      'account_id', 'cancelled_at', 'cancelled_by', 'done_at', 'handled_by', 'id', 'label_at', 'label_carrier_id', 'label_pdf', 'label_tracking', 'note', 'product_id',
+      'received_at', 'requested_at', 'return_address', 'return_carrier_id', 'return_name', 'return_shipped_at', 'return_tracking', 'service_record_id', 'status', 'tier', 'year',
+    ]);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual(['trigger care_requests care_requests_immutable', 'trigger care_requests care_requests_no_delete']);
+    for (const c of [
+      /^constraint care_requests care_requests_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint care_requests care_requests_product_id_fkey FOREIGN KEY \(product_id\) REFERENCES products\(id\) ON DELETE RESTRICT$/,
+      /^constraint care_requests care_requests_service_record_id_fkey FOREIGN KEY \(service_record_id\) REFERENCES service_records\(id\) ON DELETE RESTRICT$/,
+      /^constraint care_requests care_requests_label_carrier_id_fkey FOREIGN KEY \(label_carrier_id\) REFERENCES carriers\(id\) ON DELETE RESTRICT$/,
+      /^constraint care_requests care_requests_return_carrier_id_fkey FOREIGN KEY \(return_carrier_id\) REFERENCES carriers\(id\) ON DELETE RESTRICT$/,
+      /^constraint care_requests care_requests_handled_by_fkey FOREIGN KEY \(handled_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint care_requests care_requests_steps CHECK /,
+      /^constraint care_requests care_requests_label CHECK /,
+      /^constraint care_requests care_requests_return CHECK /,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0028_yearly_care'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0028: a request of a piece and a year, its tier and its address; each step with the columns it needs; once per piece and year unless cancelled; its identity and address fixed, never deleted; YEARLY_CARE a service type; down refused while a request or a YEARLY_CARE record exists', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (21, 'H', 'Care checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const account = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('care@example.com', 'care@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (21, 'HALO', 'RING', 'CARECHK') RETURNING id`.execute(t.db)).rows[0].id;
+    const product = (
+      await sql<{ id: string }>`INSERT INTO products (product_id, packed_identity, year, category_id, serial, sku, model_id, material)
+        VALUES ('O26-H-00001', ${(26 << 25) | (21 << 20) | 1}, 2026, 21, 1, 'CARECHK-1', ${model}, 'SILVER') RETURNING id`.execute(t.db)
+    ).rows[0];
+    const carrier = (await sql<{ id: string }>`INSERT INTO carriers (name, tracking_url) VALUES ('Care checks', 'https://track.example/{tracking}') RETURNING id`.execute(t.db)).rows[0].id;
+    const record = (await sql<{ id: string }>`INSERT INTO service_records (product_id, type) VALUES (${product.id}, 'YEARLY_CARE') RETURNING id`.execute(t.db)).rows[0].id;
+    await check(run(`INSERT INTO service_records (product_id, type) VALUES ('${product.id}', 'GILDING')`), 'an unknown service type');
+    const insert = (cols: Record<string, string>) => {
+      const all: Record<string, string> = { account_id: `'${account}'`, product_id: `'${product.id}'`, year: '2026', tier: '2', return_name: `'Camille Martin'`, return_address: `'12 rue de la Paix, Paris'`, ...cols };
+      return sql.raw<{ id: string }>(`INSERT INTO care_requests (${Object.keys(all).join(', ')}) VALUES (${Object.values(all).join(', ')}) RETURNING id`).execute(t.db);
+    };
+    const label = { status: `'LABEL_SENT'`, label_at: 'now()', label_carrier_id: `'${carrier}'`, label_tracking: `'6A12345678901'`, label_pdf: `'\\x255044462d'::bytea` };
+    await check(insert({ year: '2025' }), 'a year before 2026');
+    await check(insert({ tier: '1' }), 'a TITANE request');
+    await check(insert({ return_name: `'   '` }), 'a blank name');
+    await check(insert({ return_address: `'${'x'.repeat(1001)}'` }), 'an address over 1 000 characters');
+    await check(insert({ status: `'LABEL_SENT'` }), 'a label sent without its label', 'care_requests_steps');
+    await check(insert({ ...label, label_tracking: `'!'` }), 'a malformed tracking number');
+    await check(insert({ ...label, label_carrier_id: 'NULL' }), 'a label without its carrier');
+    await check(insert({ ...label, status: `'RECEIVED'`, received_at: 'now()' }), 'received without its record');
+    await check(insert({ status: `'CANCELLED'` }), 'cancelled without its time', 'care_requests_steps');
+    await check(insert({ status: `'CANCELLED'`, cancelled_at: 'now()' }), 'cancelled without who');
+    await check(insert({ cancelled_at: 'now()', cancelled_by: `'account'` }), 'a time of cancellation on an open request', 'care_requests_steps');
+    await check(insert({ label_pdf: `'\\x25'::bytea` }), 'a PDF without its label', 'care_requests_label');
+    await check(insert({ status: `'CANCELLED'`, cancelled_at: 'now()', cancelled_by: `'robot'` }), 'an unknown canceller');
+    await check(insert({ note: `''` }), 'an empty note');
+    // A request through its steps; once per piece and year while not cancelled.
+    const id = (await insert({})).rows[0].id;
+    await expect(insert({})).rejects.toSatisfy((e) => isUniqueViolation(e, 'care_requests_once'));
+    await run(`UPDATE care_requests SET status = 'LABEL_SENT', label_at = now(), label_carrier_id = '${carrier}', label_tracking = '6A12345678901', label_pdf = '\\x255044462d'::bytea WHERE id = '${id}'`);
+    await run(`UPDATE care_requests SET status = 'RECEIVED', received_at = now(), service_record_id = '${record}' WHERE id = '${id}'`);
+    await check(run(`UPDATE care_requests SET status = 'DONE', done_at = now() WHERE id = '${id}'`), 'done before it is shipped back', 'care_requests_steps');
+    await run(`UPDATE care_requests SET status = 'RETURNING', return_carrier_id = '${carrier}', return_tracking = '6A12345678902', return_shipped_at = now() WHERE id = '${id}'`);
+    await check(run(`UPDATE care_requests SET status = 'CANCELLED', cancelled_at = now(), cancelled_by = 'admin' WHERE id = '${id}'`), 'cancelled once shipped back', 'care_requests_steps');
+    await run(`UPDATE care_requests SET status = 'DONE', done_at = now() WHERE id = '${id}'`);
+    // The label's PDF may be erased (the housekeeping); the identity, year, tier and address never change; never deleted.
+    await run(`UPDATE care_requests SET label_pdf = NULL WHERE id = '${id}'`);
+    for (const q of [
+      `UPDATE care_requests SET return_address = 'Elsewhere' WHERE id = '${id}'`,
+      `UPDATE care_requests SET year = 2027 WHERE id = '${id}'`,
+      `UPDATE care_requests SET tier = 3 WHERE id = '${id}'`,
+      `DELETE FROM care_requests WHERE id = '${id}'`,
+    ]) {
+      await expect(run(q), q).rejects.toSatisfy(isGuardViolation);
+    }
+    // A cancelled request gives the year back.
+    const other = (await insert({ year: '2027' })).rows[0].id;
+    await run(`UPDATE care_requests SET status = 'CANCELLED', cancelled_at = now(), cancelled_by = 'account' WHERE id = '${other}'`);
+    await insert({ year: '2027' });
+    // The down step refuses while a request or a YEARLY_CARE record exists: neither can be removed, so this database stays at 0028.
+    await expect(migrateDown(t.db)).rejects.toThrow(/0028_yearly_care cannot be rolled back: 3 care requests and 1 yearly care records exist/);
+    expect((await migrationStatus(t.db)).find((m) => m.name === '0028_yearly_care')?.executedAt).toBeDefined();
+    // Cleared by hand for the roll-backs that follow (the service never deletes either).
+    await run(`ALTER TABLE care_requests DISABLE TRIGGER care_requests_no_delete`);
+    await run(`DELETE FROM care_requests`);
+    await run(`ALTER TABLE care_requests ENABLE TRIGGER care_requests_no_delete`);
+    await run(`DELETE FROM service_records WHERE type = 'YEARLY_CARE'`);
   });
 
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
@@ -2441,10 +2554,11 @@ describe('migrations', () => {
       '0023_releases_collectors',
       // NOCTURNE (plan of 2026-10-05): the variants of a model and a draw's price.
       '0024_model_variants',
-      // The next nine (plan of 2026-10-06), deployment G: the messages with ORBES Client Services; the club's program; the tiers' grants.
+      // The next nine (plan of 2026-10-06), deployment G: the messages with ORBES Client Services; the club's program; the tiers' grants; the yearly care.
       '0025_client_messages',
       '0026_club_program',
       '0027_tier_grants',
+      '0028_yearly_care',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

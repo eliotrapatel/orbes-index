@@ -215,6 +215,45 @@ export interface ServiceRecord {
   closedAt: string | null;
 }
 
+/** A shipment of a yearly care (BP-19 T6): its carrier, its tracking number and link, when it left. */
+export interface CareShipment {
+  carrier: { id: string; name: string };
+  tracking: string;
+  trackingUrl: string;
+  at: string;
+}
+
+export type CareRequestStatus = 'REQUESTED' | 'LABEL_SENT' | 'RECEIVED' | 'RETURNING' | 'DONE' | 'CANCELLED';
+
+/** A yearly care request of the account's, as it reads it. */
+export interface CareRequestView {
+  id: string;
+  status: CareRequestStatus;
+  year: number;
+  requestedAt: string;
+  returnName: string;
+  returnAddress: string;
+  /** The prepaid label, and whether its PDF can still be downloaded. */
+  label: (CareShipment & { pdf: boolean }) | null;
+  receivedAt: string | null;
+  return: CareShipment | null;
+  doneAt: string | null;
+  cancelledAt: string | null;
+}
+
+/** GET /api/v1/account/products/:productId/care: the yearly care of a piece for the account (BP-19 T6). */
+export interface PieceCare {
+  year: number;
+  tier: string | null;
+  /** Pieces a year: a number (0: none), or ALL. */
+  allowance: number | 'ALL';
+  used: number;
+  request: CareRequestView | null;
+  reason: 'AVAILABLE' | 'NOT_INCLUDED' | 'USED' | 'PIECE_DONE' | 'UNAVAILABLE';
+  /** The buyer name and address of the account's last order, to prefill the request's form; null without one. */
+  addressHint?: { name: string; address: string } | null;
+}
+
 /** POST /api/v1/ownership/incidents. */
 export interface IncidentReport {
   productId: string;

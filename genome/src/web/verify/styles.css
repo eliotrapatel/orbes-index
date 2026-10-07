@@ -1473,6 +1473,60 @@ body.nocturne .view--piece {
   margin-top: 14px;
 }
 
+/* YEARLY CARE (plan NEXT-NINE, BP-19 T6): above SERVICE HISTORY, set apart from it by a hairline; its steps' head in the
+   display face, its sentences in the reading face, its rows `.kv`, its form's fields underlined. */
+.n-piece__care-year {
+  margin-bottom: 24px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--vault-hairline);
+}
+
+.n-piece__care-year-text,
+.n-piece__care-year-question {
+  margin-top: 10px;
+}
+
+.n-piece__care-year-head {
+  margin-top: 12px;
+}
+
+.n-piece__care-year-rows {
+  margin-top: 14px;
+}
+
+.n-piece__care-year-value {
+  overflow-wrap: anywhere;
+}
+
+.n-piece__care-year-to {
+  margin-top: 18px;
+}
+
+.n-piece__care-year-lead {
+  margin-top: 6px;
+}
+
+.n-piece__care-year .n-fld-group {
+  margin-top: 18px;
+}
+
+.n-piece__care-year .n-form__actions {
+  margin-top: 18px;
+}
+
+/* The address: an underlined textarea, its lines as written. */
+.n-piece__care-year-address {
+  height: auto;
+  min-height: 88px;
+  padding: 10px 0;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.n-piece__care-year-error {
+  margin-top: 12px;
+}
+
 .n-piece__care-text,
 .n-piece__care-lead {
   margin-top: 10px;

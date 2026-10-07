@@ -196,6 +196,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     await seedCatalogue(w);
     await seedStory(w, variant);
     if (variant === 'full' || variant === 'rules') await seedScanCases(w);
+    if (variant === 'full') await seedYearlyCare(w);
     if (variant === 'room') await seedRoom(w);
     if (variant === 'live') await seedLive(w);
     if (variant === 'afterroom') await seedAfterRoom(w);
@@ -990,6 +991,74 @@ async function seedDraws(w: World): Promise<void> {
   await enter(demo.releases.draw!, '2026-10-05T11:00:00Z', entrant);
   clock.set(at('2026-10-05T12:00:00Z'));
   await drops.withdraw(entrant.id, demo.releases.draw!, entrant.actor);
+}
+
+// ── The yearly care (plan NEXT-NINE, BP-19 T6) ─────────────────────────────
+
+/** A prepaid label of the demo: the smallest PDF a carrier's site would give (a test file of this demo only). */
+const DEMO_LABEL_PDF = new TextEncoder().encode('%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n');
+
+/**
+ * The yearly care in the full demo, each step on a piece of a PLATINE account (its allowance: 1 piece a year), seeded
+ * last so that no serial the story shows moves: the first voter's pieces may be cared for; PLATINE's first piece is
+ * REQUESTED (its second, the year used); the second voter's has its prepaid label; the third voter's is on its way back
+ * (IN SERVICE); and a fifth PLATINE account, its five pieces of 2025, has had its care done. Each piece's role is
+ * `care…` in the demo's pieces.
+ */
+async function seedYearlyCare(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const serialsOf = async (accountId: string) =>
+    (
+      await ctx.db
+        .selectFrom('ownership as o')
+        .innerJoin('products as p', 'p.id', 'o.product_id')
+        .select('p.product_id')
+        .where('o.account_id', '=', accountId)
+        .where('o.ended_at', 'is', null)
+        .orderBy('p.year', 'desc')
+        .orderBy('p.serial')
+        .execute()
+    ).map((r) => r.product_id);
+  const to = { name: 'Ana Lindqvist', address: '8 rue de Sévigné\n75004 Paris\nFrance' };
+  const ask = async (a: DemoAccount, serial: string, address = to) => (await ctx.services.care.request(a.id, serial, address, a.actor)).request!.id;
+  const [platine, voter1, voter2, voter3] = ['platine', 'voter1', 'voter2', 'voter3'].map((k) => demo.accounts[k]!);
+  clock.set(at('2026-06-01T10:00:00Z'));
+  const cared = await account(w, 'cared', 'l.fontaine@example.com');
+  await holdPieces(ctx.db, cared.id, 5, w.models.gold!, { variant: '18', year: 2025, startedAt: at('2026-06-01T10:00:00Z') });
+  const [p1, p2] = await serialsOf(platine.id);
+  demo.pieces.careAvailable = (await serialsOf(voter1.id))[0]!;
+  demo.pieces.careRequested = p1!;
+  demo.pieces.careUsed = p2!;
+  demo.pieces.careLabel = (await serialsOf(voter2.id))[0]!;
+  demo.pieces.careReturning = (await serialsOf(voter3.id))[0]!;
+  demo.pieces.careDone = (await serialsOf(cared.id))[0]!;
+  // PLATINE asks on 1 October.
+  clock.set(at('2026-10-01T09:00:00Z'));
+  await ask(platine, demo.pieces.careRequested, to);
+  // The second voter's label, sent on 2 October.
+  const label = await ask(voter2, demo.pieces.careLabel, { name: 'Owner Two', address: '3 place des Vosges\n75004 Paris' });
+  clock.set(at('2026-10-02T10:00:00Z'));
+  await ctx.services.care.sendLabel(label, { pdf: DEMO_LABEL_PDF, carrierId: await carrier(w, 'Colissimo'), tracking: '6A20261002001' }, admin);
+  // The third voter's piece: its label on 1 October, at the atelier on 3 October, shipped back on 5 October.
+  clock.set(at('2026-09-28T09:00:00Z'));
+  const back = await ask(voter3, demo.pieces.careReturning, { name: 'Owner Three', address: '21 rue des Archives\n75004 Paris' });
+  clock.set(at('2026-10-01T10:00:00Z'));
+  await ctx.services.care.sendLabel(back, { pdf: DEMO_LABEL_PDF, carrierId: await carrier(w, 'Colissimo'), tracking: '6A20261001001' }, admin);
+  clock.set(at('2026-10-03T10:00:00Z'));
+  await ctx.services.care.receive(back, admin);
+  clock.set(at('2026-10-05T09:00:00Z'));
+  await ctx.services.care.shipBack(back, { carrierId: await carrier(w, 'Chronopost'), tracking: 'XY20261005001FR' }, admin);
+  // The fifth account's care, asked for in September and done on 25 September.
+  clock.set(at('2026-09-10T09:00:00Z'));
+  const done = await ask(cared, demo.pieces.careDone, { name: 'Louise Fontaine', address: '5 rue Charlot\n75003 Paris' });
+  clock.set(at('2026-09-11T09:00:00Z'));
+  await ctx.services.care.sendLabel(done, { pdf: DEMO_LABEL_PDF, carrierId: await carrier(w, 'Colissimo'), tracking: '6A20260911001' }, admin);
+  clock.set(at('2026-09-15T09:00:00Z'));
+  await ctx.services.care.receive(done, admin);
+  clock.set(at('2026-09-24T09:00:00Z'));
+  await ctx.services.care.shipBack(done, { carrierId: await carrier(w, 'Colissimo'), tracking: '6A20260924001' }, admin);
+  clock.set(at('2026-09-25T09:00:00Z'));
+  await ctx.services.care.complete(done, { notes: 'Inspected, cleaned and polished.' }, admin);
 }
 
 // ── The extreme content (fidelity rule 5) and the empty states ─────────────

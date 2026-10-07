@@ -30,7 +30,7 @@ describe('createContext', () => {
       expect(admins).toEqual([{ email: 'root@orbes.test', role: 'ADMIN' }]);
       expect((await ctx.keys.list()).filter((k) => k.status === 'ACTIVE')).toHaveLength(1);
       expect(Object.keys(ctx.services).sort()).toEqual(
-        ['activity', 'anomaly', 'atelier', 'auth', 'authenticators', 'catalog', 'certificates', 'circle', 'club', 'clubProgram', 'drops', 'fulfilment', 'invoices', 'issuance', 'lifecycle', 'live', 'liveConsole', 'liveInsights', 'liveRoom', 'lookbook', 'media', 'messages', 'orders', 'owners', 'ownership', 'ownershipCertificates', 'pastReleases', 'questions', 'recovery', 'reports', 'retailers', 'sale', 'salon', 'segments', 'shopify', 'stock', 'tierGrants', 'verification', 'warranty'].sort(),
+        ['activity', 'anomaly', 'atelier', 'auth', 'authenticators', 'care', 'catalog', 'certificates', 'circle', 'club', 'clubProgram', 'drops', 'fulfilment', 'invoices', 'issuance', 'lifecycle', 'live', 'liveConsole', 'liveInsights', 'liveRoom', 'lookbook', 'media', 'messages', 'orders', 'owners', 'ownership', 'ownershipCertificates', 'pastReleases', 'questions', 'recovery', 'reports', 'retailers', 'sale', 'salon', 'segments', 'shopify', 'stock', 'tierGrants', 'verification', 'warranty'].sort(),
       );
       // Nothing secret in the startup log.
       const text = JSON.stringify(log.lines);
@@ -119,6 +119,8 @@ describe('housekeeping', () => {
       expect(first.sessions).toBe(0);
       // The LIVE RELEASES' network hashes are erased 30 days after their release (services/live.ts): none here.
       expect(first.liveNetworks).toBe(0);
+      // The yearly care's labels are erased 30 days after their request ended (services/care.ts): none here.
+      expect(first.careLabels).toBe(0);
       clock.advance(ctx.config.sessionTtlHours.account * 3_600_000 + 1);
       const r = await hk.runOnce();
       expect(r.sessions).toBe(1);

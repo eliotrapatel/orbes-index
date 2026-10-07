@@ -46,6 +46,7 @@ import { makePage, systemClock, type Actor, type Clock, type Page, type PageRequ
 import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { clubStandings, tierName, type ClubTier, type ClubTierName } from './club.js';
+import { openCareOf } from './care.js';
 import { liveReference } from './live-console.js';
 import { isAnnounced, liveStages, stagesAt } from './live.js';
 import type { LookbookService } from './lookbook.js';
@@ -149,6 +150,11 @@ export interface BoardConversation {
   waitingSince: Date | null;
   status: ClientConversationStatus;
   answeredBy: { id: string; email: string } | null;
+  /**
+   * The client's open yearly care (BP-19 T6), read from `care_requests`: the board's and the head's `Yearly care ·
+   * O26-J-00184`, a link to its page. It changes neither the status nor the order; null without one.
+   */
+  care: { id: string; serial: string } | null;
 }
 
 /** A conversation of the console (GET /api/admin/messages/:id). */
@@ -680,7 +686,9 @@ export class MessageService {
     const out = new Map<string, BoardConversation>();
     if (ids.length === 0) return out;
     const heads = await this.heads(ids);
-    const tiers = await this.tiers([...new Set(heads.map((h) => h.account_id))]);
+    const accounts = [...new Set(heads.map((h) => h.account_id))];
+    const tiers = await this.tiers(accounts);
+    const cares = await openCareOf(this.db, accounts);
     const [last, contexts] = await Promise.all([
       this.db
         .selectFrom('client_messages as m')
@@ -709,6 +717,7 @@ export class MessageService {
         waitingSince: h.waiting_since,
         status: h.status,
         answeredBy: h.answered_by ? { id: h.answered_by, email: h.answered_email ?? '' } : null,
+        care: cares.get(h.account_id) ?? null,
       });
     }
     return out;
@@ -788,6 +797,7 @@ export class MessageService {
     const [h] = await this.heads([cid]);
     if (!h) throw conversationNotFound();
     const tier = (await this.tiers([h.account_id])).get(h.account_id)!;
+    const care = (await openCareOf(this.db, [h.account_id])).get(h.account_id) ?? null;
     const [messages, contexts] = await Promise.all([
       this.db
         .selectFrom('client_messages as m')
@@ -807,6 +817,7 @@ export class MessageService {
       waitingSince: h.waiting_since,
       status: h.status,
       answeredBy: h.answered_by ? { id: h.answered_by, email: h.answered_email ?? '' } : null,
+      care,
       createdAt: h.created_at,
       closedAt: h.closed_at,
       closedBy: h.closed_by ? { id: h.closed_by, email: h.closed_email ?? '' } : null,

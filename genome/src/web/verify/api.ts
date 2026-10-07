@@ -56,6 +56,7 @@ import type {
   LookbookSheet,
   OwnedPiece,
   OwnerCertificate,
+  PieceCare,
   OwnershipConfirmation,
   Participation,
   PastReleasesPage,
@@ -625,6 +626,39 @@ export class ApiClient {
     const r = await this.request<{ services?: unknown }>('GET', `/api/v1/products/${encodeURIComponent(productId)}/service-history`);
     if (!Array.isArray(r?.services)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.services as ServiceRecord[];
+  }
+
+  // ── YEARLY CARE (plan NEXT-NINE, BP-19 T6; API §10.18) ──────────────────
+
+  /** The yearly care of one of the account's pieces: its allowance, its request, and the address of the last order. */
+  async pieceCare(productId: string): Promise<PieceCare> {
+    const r = await this.request<PieceCare>('GET', `/api/v1/account/products/${encodeURIComponent(productId)}/care`);
+    if (!r || typeof r.year !== 'number' || typeof r.reason !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** REQUEST YEARLY CARE, with the name and the address the piece returns to. */
+  async requestCare(productId: string, name: string, address: string): Promise<PieceCare> {
+    const r = await this.request<PieceCare>('POST', `/api/v1/account/products/${encodeURIComponent(productId)}/care`, { name, address }, { csrf: true });
+    if (!r || typeof r.year !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** CANCEL REQUEST, while it is REQUESTED. */
+  async cancelCare(id: string): Promise<PieceCare> {
+    const r = await this.request<PieceCare>('POST', `/api/v1/account/care/${encodeURIComponent(id)}/cancel`, undefined, { csrf: true });
+    if (!r || typeof r.year !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** DOWNLOAD LABEL: the prepaid label, as a PDF to save. */
+  async careLabel(id: string): Promise<DownloadedFile> {
+    const res = await this.send('GET', `/api/v1/account/care/${encodeURIComponent(id)}/label.pdf`, undefined, {});
+    if (!res.ok) throw toApiError(res.status, await readJson(res));
+    const type = res.headers.get('content-type') ?? '';
+    const blob = await res.blob();
+    if (!type.startsWith('application/pdf') || blob.size === 0 || blob.size > MAX_FILE_BYTES) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
+    return { blob, filename: filenameOf(res.headers.get('content-disposition'), 'ORBES-yearly-care-label.pdf') };
   }
 
   /** REPORT LOST / STOLEN: from then on every scan of the piece shows UNUSUAL ACTIVITY, and a pending transfer is cancelled. */

@@ -74,6 +74,7 @@ import { normalizeEmail } from './auth.js';
 import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote } from './circle.js';
 import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
+import { accountCareRequests, type ExportedCareRequest } from './care.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
 import { participatedReleases, releasesTakenPart } from './participation.js';
@@ -365,6 +366,11 @@ export interface AccountExport {
    * concerned, and the answers, signed ORBES Client Services; never who answered.
    */
   messages: ExportedMessage[];
+  /**
+   * The account's yearly care requests (plan NEXT-NINE, BP-19 T6), oldest first: the piece, the year and the tier, each
+   * step's time, and the name and address the piece returns to as the collector gave them; never who handled it.
+   */
+  careRequests: ExportedCareRequest[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
@@ -780,6 +786,7 @@ export class OwnerService {
       const releaseAnswers = await accountReleaseAnswers(tx, a.id);
       const orders = await accountOrders(tx, a.id);
       const messages = await accountMessages(tx, a.id);
+      const careRequests = await accountCareRequests(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -861,6 +868,7 @@ export class OwnerService {
         releaseAnswers,
         orders,
         messages,
+        careRequests,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -895,6 +903,7 @@ export class OwnerService {
             releaseAnswers: out.releaseAnswers.length,
             orders: out.orders.length,
             messages: out.messages.length,
+            careRequests: out.careRequests.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

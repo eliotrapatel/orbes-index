@@ -22,7 +22,8 @@
  *                                               loss ORBES Client Services recorded, or a piece the server would refuse
  *                                               to report: their sentence
  *     WRITE TO ORBES CLIENT SERVICES            the write sheet, the piece attached (plan NEXT-NINE, CS-01)
- *     WARRANTY (C35): STATUS, FROM, UNTIL and its sentence; SERVICE: SERVICE HISTORY, each service; CARE: CARING FOR
+ *     WARRANTY (C35): STATUS, FROM, UNTIL and its sentence; SERVICE: YEARLY CARE (plan NEXT-NINE, BP-19 T6, only when
+ *     the tier includes it: views/yearly-care.ts), then SERVICE HISTORY, each service; CARE: CARING FOR
  *     THIS PIECE, then ORBES CARE and SUBSCRIBE (its page, a new tab) or « Subscriptions open soon. »
  *
  * Signed out, the OWNERSHIP panel's sign-in forms stand alone, as on MY PIECES; a piece the account does not hold (an
@@ -46,6 +47,7 @@ import { PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { FormError, messageOf, nocturneForm } from './forms.js';
 import { accLink, appAnchor, button, definitionList, failedState, field, icon, loadingState, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
+import { YearlyCareBlock } from './yearly-care.js';
 import { OwnershipPanel } from './ownership.js';
 import { modelPhoto } from './result.js';
 import { tabsView } from './tabs.js';
@@ -235,6 +237,8 @@ class PieceCard {
   private notice: string | null = null;
   private services: { kind: 'loading' } | { kind: 'ready'; list: ServiceRecord[] } | { kind: 'failed'; message: string } | null = null;
   private readonly servicePanel = h('div', { class: 'n-piece__panel' });
+  /** YEARLY CARE (BP-19 T6), above SERVICE HISTORY: drawn only when the tier includes it, or a request of the piece is open. */
+  private readonly yearlyCare: YearlyCareBlock;
   private certificates: OwnerCertificate[] | null;
   private offer: CertificateOffer | null = null;
   private creating = false;
@@ -247,6 +251,7 @@ class PieceCard {
   ) {
     this.model = pieceModel(piece);
     this.certificates = deps.certificates;
+    this.yearlyCare = new YearlyCareBlock({ api: deps.api, session: deps.session, productId: piece.productId });
     const m = this.model;
     const key = m.key || 'piece';
     const slug = m.lookbook;
@@ -316,7 +321,10 @@ class PieceCard {
       case 'warranty':
         return this.warrantyPanel();
       case 'service':
-        if (this.services === null) void this.loadServices();
+        if (this.services === null) {
+          void this.loadServices();
+          void this.yearlyCare.load();
+        }
         return this.servicePanel;
       case 'care':
         return this.carePanel();
@@ -394,7 +402,7 @@ class PieceCard {
           ),
         ),
       );
-    this.servicePanel.replaceChildren(...out);
+    this.servicePanel.replaceChildren(this.yearlyCare.root, ...out);
     if (hadFocus && !this.servicePanel.contains(document.activeElement)) this.servicePanel.closest<HTMLElement>('[role="tabpanel"]')?.focus({ preventScroll: true });
   }
 

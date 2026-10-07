@@ -1942,11 +1942,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await signIn(p, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
     // Club in the Clients group after Owners, then Segments, Orders and Invoices (plan LIVE RELEASE+, with Atelier in
-    // the Registry), Messages first (plan NEXT-NINE, CS-01); the ADMIN's sidebar, twenty-five links, still fits a 900 px
-    // screen.
+    // the Registry), Messages first (plan NEXT-NINE, CS-01), Yearly care after Warranties (BP-19 T6); the ADMIN's sidebar,
+    // twenty-six links, still fits a 900 px screen.
     const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
-    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['messages', 'owners', 'club', 'segments', 'orders', 'invoices', 'warranties', 'retailers', 'sale']);
-    expect(await p.locator('.side__link').count()).toBe(25);
+    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['messages', 'owners', 'club', 'segments', 'orders', 'invoices', 'warranties', 'care', 'retailers', 'sale']);
+    expect(await p.locator('.side__link').count()).toBe(26);
     for (const id of ['sign-out', 'change-password']) {
       const box = (await p.locator(`[data-testid=${id}]`).boundingBox())!;
       expect(box.y + box.height, id).toBeLessThanOrEqual(900);
@@ -2378,6 +2378,73 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await oc.close();
     // Back to the defaults for the steps that follow.
     await ctx.db.deleteFrom('club_program_settings').execute();
+  }, STEP_TIMEOUT);
+
+  it('handles a yearly care from Clients → Yearly care (plan NEXT-NINE, BP-19 T6): the return address the client gave, the label sent as a PDF, the piece received; the client\'s Messages row links it; an AUDITOR reads it masked', async () => {
+    // The PLATINE owner of the Tiers step asks for the yearly care of a piece, and has written once to Client Services.
+    const owner = await ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', 'tier.owner@example.com').executeTakeFirstOrThrow();
+    const serial = (
+      await ctx.db.selectFrom('ownership as o').innerJoin('products as p', 'p.id', 'o.product_id').select('p.product_id').where('o.account_id', '=', owner.id).where('o.ended_at', 'is', null).orderBy('p.product_id').executeTakeFirstOrThrow()
+    ).product_id;
+    const actor = { type: 'account' as const, id: owner.id };
+    await ctx.services.messages.write(owner.id, { body: 'A question about my pieces.' }, actor);
+    const asked = await ctx.services.care.request(owner.id, serial, { name: 'Ada Owner', address: '12 rue de la Paix\n75002 Paris' }, actor);
+    const careId = asked.request!.id;
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    // Its link in the sidebar, under Clients after Warranties.
+    expect(await p.locator('.side__link[data-route=care]').textContent()).toBe('Yearly care');
+    // The client's Messages row links the open request.
+    await go(p, '#/messages', 'Messages');
+    await expect.poll(() => p.locator('[data-testid=conversation-care]').first().textContent()).toBe(`Yearly care · ${serial}`);
+    await p.click('[data-testid=conversation-care]');
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(serial);
+    // The board: Requested first; the request's page with the address the client gave, in clear.
+    await go(p, '#/care', 'Yearly care');
+    await expect.poll(() => p.locator('[data-testid=care-piece]').allTextContents()).toContain(serial);
+    await go(p, `#/care/${careId}`, serial);
+    expect(await p.locator('[data-testid=care-status]').textContent()).toBe('Requested');
+    expect(await p.locator('[data-testid=care-return-address]').innerText()).toBe('Ada Owner\n12 rue de la Paix\n75002 Paris');
+    expect(await p.locator('[data-testid=care-conversation]').textContent()).toBe('To answer');
+    // SEND LABEL: refused without the PDF; then the PDF, a carrier and the tracking number.
+    await p.click('[data-testid=care-label]');
+    const carrier = await p.locator('dialog select[name=carrierId] option').nth(1).getAttribute('value');
+    await p.selectOption('dialog select[name=carrierId]', carrier!);
+    await p.fill('dialog input[name=tracking]', '6A12345678901');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Choose the label, a PDF.');
+    await p.setInputFiles('dialog [data-testid=care-label-file]', { name: 'label.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4\n%%EOF\n', 'latin1') });
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=care-status]').textContent()).toBe('Label sent');
+    expect(await p.locator('[data-testid=care-label-shipment]').textContent()).toMatch(/ · 6A12345678901$/);
+    // RECEIVED AT THE ATELIER: the YEARLY CARE record opened.
+    await p.click('[data-testid=care-receive]');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=care-status]').textContent()).toBe('At the atelier');
+    const record = await ctx.db.selectFrom('service_records as s').innerJoin('products as p', 'p.id', 's.product_id').select(['s.type', 's.status']).where('p.product_id', '=', serial).executeTakeFirstOrThrow();
+    expect(record).toEqual({ type: 'YEARLY_CARE', status: 'OPEN' });
+    // Nothing was written in the client's messages.
+    expect((await ctx.db.selectFrom('client_messages').select('author').execute()).filter((m) => m.author === 'STAFF')).toEqual([]);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'yearly-care', { full: true });
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+    // An AUDITOR reads the request, the address and the email masked, without an action.
+    const auditor = { email: 'care.audit@orbes.test', password: 'care auditor passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...auditor, role: 'AUDITOR' }, SYSTEM_ACTOR);
+    const ac = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ap = await ac.newPage();
+    await watch(ap);
+    await signIn(ap, auditor.email, auditor.password);
+    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    await go(ap, `#/care/${careId}`, serial);
+    expect(await ap.locator('[data-testid=care-return-address]').innerText()).not.toContain('rue de la Paix');
+    expect(await ap.locator('button[data-testid=care-label], button[data-testid=care-receive], button[data-testid=care-return], button[data-testid=care-complete], button[data-testid=care-cancel]').count()).toBe(0);
+    expect(await cspViolations(ap)).toEqual([]);
+    await ac.close();
   }, STEP_TIMEOUT);
 
   it('gives an AUDITOR a read-only console', async () => {

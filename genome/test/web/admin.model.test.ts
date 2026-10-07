@@ -307,6 +307,7 @@ describe('admin enums mirror the server', () => {
       'CREDIT_CHANNELS',
       'CIRCLE_EXPERIENCES',
       'CREDIT_RELEASE_REASONS',
+      'CARE_REQUEST_STATUSES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }

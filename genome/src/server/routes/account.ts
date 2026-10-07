@@ -19,7 +19,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountOrderParams, changePasswordBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountOrderParams, careParams, careRequestBody, changePasswordBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
@@ -34,7 +34,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, warranty } = ctx.services;
+  const { auth, care, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, warranty } = ctx.services;
 
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
@@ -153,6 +153,37 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const { account } = requireAccount(request);
     const { id } = parse(accountOrderParams, request.params);
     return { careGuide: await orders.careGuide(account.id, id) };
+  });
+
+  // The yearly care (plan NEXT-NINE, BP-19 T6; API §10.18): asked for from a piece the account holds, with the address
+  // it returns to in the request's own form (prefilled from the account's last order); its prepaid label downloaded
+  // here only, by its own account (404 for any other). Nothing is written in MESSAGES.
+  app.get('/api/v1/account/products/:productId/care', async (request) => {
+    const { account } = requireAccount(request);
+    const { productId } = parse(productParams, request.params);
+    const [status, addressHint] = await Promise.all([care.status(account.id, productId), care.addressHint(account.id)]);
+    return { ...status, addressHint };
+  });
+
+  app.post('/api/v1/account/products/:productId/care', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { productId } = parse(productParams, request.params);
+    const b = parse(careRequestBody, request.body);
+    const status = await care.request(account.id, productId, { name: b.name, address: b.address }, accountActor(request));
+    reply.code(201);
+    return status;
+  });
+
+  app.post('/api/v1/account/care/:id/cancel', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(careParams, request.params);
+    return care.cancelByAccount(account.id, id, accountActor(request));
+  });
+
+  app.get('/api/v1/account/care/:id/label.pdf', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(careParams, request.params);
+    return sendPdf(reply, await care.labelPdf(account.id, id));
   });
 
   app.get('/api/v1/products/:productId/service-history', async (request) => {

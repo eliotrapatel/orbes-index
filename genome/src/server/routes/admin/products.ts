@@ -19,7 +19,7 @@ import { packIdentity } from '../../../core/identity.js';
 import { decodePayload, signingMessage } from '../../../core/payload.js';
 import { verifyEd25519Node } from '../../crypto/ed25519-node.js';
 import type { CodeRow, ProductOverviewRow } from '../../db/schema.js';
-import { forbidden } from '../../errors.js';
+import { DomainError, forbidden } from '../../errors.js';
 import { isKeyTrustedAt } from '../../keys/key-service.js';
 import {
   completeServiceBody,
@@ -270,6 +270,8 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
   app.post('/api/admin/products/:productId/services', async (request, reply) => {
     const { productId } = parse(productParams, request.params);
     const b = parse(openServiceBody, request.body);
+    // The yearly care (BP-19 T6) is opened by its own flow only (services/care.ts), never from here.
+    if (b.type === 'YEARLY_CARE') throw new DomainError('VALIDATION_FAILED', 422, 'The yearly care is opened from the Yearly care board, when the piece reaches the atelier.');
     const service = await warranty.openService(
       productId,
       { type: b.type, location: b.location ?? null, notes: b.notes ?? null, performedBy: b.performedBy ?? null },

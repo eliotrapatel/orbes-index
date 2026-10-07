@@ -4685,6 +4685,19 @@ a.bar__label:hover {
   overflow-wrap: break-word;
 }
 
+/* ── Yearly care (BP-19 T6) ─────────────────────────────────────────────── */
+
+/* The name and the address a piece returns to, their lines as the client wrote them. */
+.care__address {
+  display: grid;
+  gap: 2px;
+}
+
+.care__address-lines {
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
 /* ── Messages (CS-01) ──────────────────────────────────────────────────── */
 
 /* The priority tag of a PLATINE or PALLADIUM client on the board and a conversation's head. */

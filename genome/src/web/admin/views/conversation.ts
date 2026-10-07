@@ -1,7 +1,8 @@
 /**
  * A conversation of the Messages board (plan NEXT-NINE of 2026-10-06, §3.1 CS-01; `#/messages/:conversationId`).
  *
- * Head: the client (its sheet), the tier, the priority tag, the status and who answers. `Take it` (OPERATOR) makes the
+ * Head: the client (its sheet), the tier, the priority tag, the status and who answers, and the client's open yearly
+ * care (BP-19 T6) as a link to its request. `Take it` (OPERATOR) makes the
  * reader the one who answers; an ADMIN chooses any active OPERATOR or ADMIN; `Close conversation` (OPERATOR, after a
  * confirmation). The thread: each message with its author (the client, or the staff member's email) and its time, and
  * on the client's what it concerns, a link to its page (a scan's to its verification event while the scan retention
@@ -19,7 +20,7 @@ import { busy, button, defList, field, pageHeader, section, select, setFieldErro
 import { openDialog } from '../ui/dialog.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
-import { concernsCell } from './messages.js';
+import { careLink, concernsCell } from './messages.js';
 
 function messageItem(m: ConversationMessage, client: string): HTMLElement {
   return h(
@@ -89,6 +90,7 @@ export async function conversationView(ctx: ViewContext): Promise<HTMLElement> {
     ...(tag ? [{ label: 'Priority', value: h('span', { class: 'messages__priority', attrs: { 'data-testid': 'conversation-priority' } }, tag) }] : []),
     { label: 'Status', value: h('span', { attrs: { 'data-testid': 'conversation-status' } }, statusMark(STATUS_LABELS[c.status], toneOf('conversation', c.status))), note: c.waitingSince ? `Waiting since ${formatDateTime(c.waitingSince)}` : undefined },
     { label: 'Answering', value: h('span', { attrs: { 'data-testid': 'conversation-answering' } }, answeringText(c)) },
+    ...(c.care ? [{ label: 'Yearly care', value: careLink(c.care), note: 'Open: on the Yearly care board' }] : []),
   ]);
 
   const answer = (() => {

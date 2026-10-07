@@ -84,6 +84,7 @@ import { workSheetsView } from './views/sheets.js';
 import { packingSlipView } from './views/slip.js';
 import { teamView } from './views/team.js';
 import { warrantiesView } from './views/warranties.js';
+import { careRequestView, careView } from './views/care.js';
 
 interface NavItem {
   route: RouteName;
@@ -129,6 +130,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'orders', label: 'Orders' },
       { route: 'invoices', label: 'Invoices' },
       { route: 'warranties', label: 'Warranties' },
+      { route: 'care', label: 'Yearly care' },
       { route: 'retailers', label: 'Points of sale' },
       { route: 'sale', label: 'Sale mode', cap: 'sell' },
     ],
@@ -166,6 +168,8 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   liveRelease: { view: liveReleaseView, title: 'Live release', nav: 'club' },
   circlePost: { view: circlePostView, title: 'Circle', nav: 'club' },
   warranties: { view: warrantiesView, title: 'Warranties', nav: 'warranties' },
+  care: { view: careView, title: 'Yearly care', nav: 'care' },
+  careRequest: { view: careRequestView, title: 'Yearly care', nav: 'care' },
   revocations: { view: revocationsView, title: 'Revocations', nav: 'revocations' },
   keys: { view: keysView, title: 'Keys', nav: 'keys' },
   audit: { view: auditView, title: 'Audit log', nav: 'audit' },

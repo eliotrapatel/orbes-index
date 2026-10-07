@@ -476,6 +476,52 @@ export const ORBES_CARE = Object.freeze({
 });
 
 /**
+ * YEARLY CARE (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T6), in a piece's SERVICE tab above SERVICE HISTORY: the yearly
+ * care a PLATINE or PALLADIUM tier includes, asked for from the piece with the address it returns to, then each step.
+ * Shown only when the account's tier has a care allowance (or a request of the piece is still open). Apart from ORBES
+ * CARE, the subscription of the CARE tab, which stays as it is. The prepaid label is shown here only.
+ */
+const CARE_PIECES = (allowance: number | 'ALL') => (allowance === 'ALL' ? 'every piece' : allowance === 1 ? '1 piece' : `${allowance} pieces`);
+
+export const YEARLY_CARE = Object.freeze({
+  /** The block's label, and its accessible name. */
+  label: 'YEARLY CARE',
+  available: (tier: string, allowance: number | 'ALL', year: number) =>
+    `Your ${tier} tier includes the yearly care of ${CARE_PIECES(allowance)} in ${year}: inspection, cleaning and polishing by the ORBES atelier. ORBES Client Services sends you a prepaid label for this piece, and returns it to you at no cost.`,
+  request: 'REQUEST YEARLY CARE',
+  /** The request's own form, in place. */
+  confirm: (year: number) => `Request the yearly care of this piece for ${year}?`,
+  returnAddress: 'RETURN ADDRESS',
+  returnLead: 'Where ORBES returns the piece once its care is done.',
+  name: 'NAME',
+  address: 'ADDRESS',
+  prefilled: 'From your last order. Check it before you confirm.',
+  missing: 'Enter the name and the address the piece returns to.',
+  confirmRequest: 'CONFIRM REQUEST',
+  cancel: 'CANCEL',
+  /** The longest name and address (services/care.ts CARE_ADDRESS_LIMITS). */
+  nameMax: 200,
+  addressMax: 1000,
+  requested: (date: string) => `REQUESTED · ${date}`,
+  requestedText: 'ORBES Client Services is preparing your prepaid label. It will appear here.',
+  cancelRequest: 'CANCEL REQUEST',
+  labelTitle: 'YOUR PREPAID LABEL',
+  labelText: 'Print it, pack the piece in its box and hand it to the carrier.',
+  download: 'DOWNLOAD LABEL',
+  carrier: 'CARRIER',
+  tracking: 'TRACKING NUMBER',
+  received: 'AT THE ATELIER',
+  receivedText: 'The ORBES atelier has received your piece.',
+  returning: 'ON ITS WAY BACK',
+  track: 'TRACK THE SHIPMENT',
+  done: (year: number) => `Its yearly care for ${year} is complete. It is recorded in SERVICE HISTORY.`,
+  cancelled: 'This request was cancelled.',
+  used: (year: number) => `Your yearly care for ${year} has been used for another piece. It renews on 1 January.`,
+  pieceDone: (year: number) => `This piece has had its yearly care for ${year}.`,
+  unavailable: 'The yearly care cannot be requested for this piece just now.',
+});
+
+/**
  * THE CLUB'S TIERS (P-X04, at the head of MY PIECES): the account's tier, TITANE, PLATINE or PALLADIUM (1, 5 and 10
  * pieces held now, never a revoked one), its name in the display face and its pieces in the reading face, the benefits
  * of the tier and of those below it (the server's words, set by ORBES), and the way to the next tier. An account that

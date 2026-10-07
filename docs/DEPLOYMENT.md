@@ -1247,7 +1247,7 @@ cd deploy/vps && scripts/deploy.sh                # HEAD; or scripts/deploy.sh v
 | Smoke tests | Through Caddy on the VPS itself (`curl --resolve`, TLS verified): `/api/v1/health` → `"ok":true`, `/.well-known/orbes-keys.json` → an ACTIVE key, `/verify` → 200. |
 | Rollback, or repair forward | A failure of the last three steps (health, Caddy, the signing key, the smoke tests) in a release that applied **no** migration redeploys the previous image tag and waits for health, once the previous image is known to run on the schema. A release that **did** (its migrations committed together, then something failed) is kept: the previous image cannot run on the new schema, so no rollback is attempted, `ORBES_IMAGE_TAG` stays on the new tag with the stack started on it, and the way to repair forward is printed (below). A migration that fails applies nothing (one transaction): the previous image then comes back as usual. The outcome is appended to `.state/deploys.log`. |
 
-**The photograph uploads at the edge (F-04, lot 5; P-R02; P-X01).** The Caddyfile refuses any request body over 64 KB (the app's JSON limit is 16 KB). The console's photographs travel as the image itself, up to 1 MiB, on five routes only: `POST /api/admin/models/:id/image`, `POST /api/admin/products/:productId/photo` ([API §13.4, §14.12](API.md#134-models)) and, from the « Potentiel » deployment A, `POST /api/admin/models/:id/gallery` (a photograph of a model's lookbook gallery) and `POST /api/admin/circle/posts/:id/photos` (a photograph of a post of the owners' circle, [API §16.20](API.md#1620-the-circle-the-club-pages-posts-extension-of-the-contract)) and, from deployment D, `POST /api/admin/live/:id/silhouette` (the silhouette of a LIVE RELEASE). Two mutually exclusive matchers give exactly these paths, for `POST` only, `max_size 1200KB` (1 200 000 bytes: the app's 1 048 576 and room to spare), and every other request, a `DELETE` of the same paths and the order of a gallery or of a post's photographs (a `PATCH`) included, the 64 KB it had:
+**The photograph uploads at the edge (F-04, lot 5; P-R02; P-X01).** The Caddyfile refuses any request body over 64 KB (the app's JSON limit is 16 KB). The console's photographs travel as the image itself, up to 1 MiB, on five routes only: `POST /api/admin/models/:id/image`, `POST /api/admin/products/:productId/photo` ([API §13.4, §14.12](API.md#134-models)) and, from the « Potentiel » deployment A, `POST /api/admin/models/:id/gallery` (a photograph of a model's lookbook gallery) and `POST /api/admin/circle/posts/:id/photos` (a photograph of a post of the owners' circle, [API §16.20](API.md#1620-the-circle-the-club-pages-posts-extension-of-the-contract)) and, from deployment D, `POST /api/admin/live/:id/silhouette` (the silhouette of a LIVE RELEASE). From deployment G (plan NEXT-NINE, BP-19 T6), the prepaid label of a yearly care travels as the PDF itself, up to 2 MiB, on one route: `POST /api/admin/care/:id/label` ([API §16.29](API.md#1629-yearly-care-extension-of-the-contract)). Three mutually exclusive matchers give the photographs' paths, for `POST` only, `max_size 1200KB` (1 200 000 bytes: the app's 1 048 576 and room to spare), the label's path `max_size 2200KB` (the app's 2 097 152 and room to spare), and every other request, a `DELETE` of the same paths and the order of a gallery or of a post's photographs (a `PATCH`) included, the 64 KB it had:
 
 ```caddyfile
 @photo_upload {
@@ -1257,18 +1257,25 @@ cd deploy/vps && scripts/deploy.sh                # HEAD; or scripts/deploy.sh v
 request_body @photo_upload {
 	max_size 1200KB
 }
-@not_photo_upload {
+@label_upload {
+	method POST
+	path_regexp ^/api/admin/care/[^/]+/label/?$
+}
+request_body @label_upload {
+	max_size 2200KB
+}
+@not_upload {
 	not {
 		method POST
-		path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos|live/[^/]+/silhouette)/?$
+		path_regexp ^/api/admin/(models/[^/]+/(image|gallery)|products/[^/]+/photo|circle/posts/[^/]+/photos|live/[^/]+/silhouette|care/[^/]+/label)/?$
 	}
 }
-request_body @not_photo_upload {
+request_body @not_upload {
 	max_size 64KB
 }
 ```
 
-The admin allowlist (`ADMIN_ALLOWED_IPS`) still applies to both, and the app refuses anything over 1 MiB (`413`), any other type (`415`) and any session-less or under-OPERATOR request (`401`, `403`) before reading the body. `genome/test/ops/vps-stack.test.ts` checks the two limits, that no `request_body` is left without a matcher, and that the pattern matches the app's upload routes (`MEDIA_UPLOAD_ROUTES`) and nothing else of the API. Each change of the shared VPS's edge goes out with a deployment announced to the other session first (lot 5; the « Potentiel » deployment A, [its runbook](launch/DEPLOY-POTENTIEL-2026-10.md)); `deploy.sh` validates the Caddyfile before anything changes (above) and recreates Caddy because its configuration changed. Check after the deployment: a photograph saved from the console's Catalogue (Photo, or a model's Lookbook page) and from a post of the Club's Circle is accepted, and a 100 KB body sent to `/api/v1/verify` still gets `413` from the edge:
+The admin allowlist (`ADMIN_ALLOWED_IPS`) still applies to every one, and the app refuses a photograph over 1 MiB or a label over 2 MiB (`413`), any other type (`415`) and any session-less or under-OPERATOR request (`401`, `403`) before reading the body. `genome/test/ops/vps-stack.test.ts` checks the three limits, that no `request_body` is left without a matcher, and that the patterns match the app's upload routes (`MEDIA_UPLOAD_ROUTES`, `CARE_LABEL_UPLOAD_ROUTE`) and nothing else of the API. Each change of the shared VPS's edge goes out with a deployment announced to the other session first (lot 5; the « Potentiel » deployment A, [its runbook](launch/DEPLOY-POTENTIEL-2026-10.md)); `deploy.sh` validates the Caddyfile before anything changes (above) and recreates Caddy because its configuration changed. Check after the deployment: a photograph saved from the console's Catalogue (Photo, or a model's Lookbook page) and from a post of the Club's Circle is accepted, and a 100 KB body sent to `/api/v1/verify` still gets `413` from the edge:
 
 ```bash
 head -c 102400 /dev/zero | curl -sS -o /dev/null -w '%{http_code}\n' -X POST -H 'content-type: application/json' --data-binary @- "https://$APP_DOMAIN/api/v1/verify"

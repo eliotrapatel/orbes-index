@@ -373,7 +373,7 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
               eyebrow: pid,
               body: h('p', { class: 'dialog__text' }, 'The product moves to SERVICED until the record is completed.'),
               fields: [
-                { name: 'type', label: 'Service', kind: 'select', options: SERVICE_TYPES.map((t) => ({ value: t, label: humanize(t) })), required: true },
+                { name: 'type', label: 'Service', kind: 'select', options: SERVICE_TYPES.filter((t) => t !== 'YEARLY_CARE').map((t) => ({ value: t, label: humanize(t) })), required: true },
                 { name: 'location', label: 'Location', maxlength: 200 },
                 { name: 'performedBy', label: 'Performed by', maxlength: 200 },
                 { name: 'notes', label: 'Notes', kind: 'textarea', maxlength: 4000 },

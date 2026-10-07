@@ -406,14 +406,17 @@ export class WarrantyService {
 
   // ── Service records ──────────────────────────────────────────────────────
 
-  /** Open a service record and move the product to SERVICED. */
-  async openService(productId: string, input: OpenServiceInput, actor: Actor): Promise<ServiceRecord> {
+  /**
+   * Open a service record and move the product to SERVICED. `trx`: the caller's transaction (the yearly care's step,
+   * services/care.ts), so that the record and the step commit together.
+   */
+  async openService(productId: string, input: OpenServiceInput, actor: Actor, trx?: Db): Promise<ServiceRecord> {
     if (!SERVICE_TYPES.includes(input.type)) throw validationError('Unknown service type.');
     const location = cleanText(input.location, 'Location', MAX_TEXT);
     const notes = cleanText(input.notes, 'Notes', MAX_NOTES, true);
     const performedBy = cleanText(input.performedBy, 'Performed by', MAX_TEXT) ?? actorLabel(actor);
     const now = this.clock();
-    return inTransaction(this.db, async (tx) => {
+    return inTransaction(trx ?? this.db, async (tx) => {
       const product = await requireProduct(tx, productId, { forUpdate: true });
       await this.lifecycle.applyForService(
         tx,
@@ -441,16 +444,16 @@ export class WarrantyService {
     });
   }
 
-  /** Complete an open service; the last one to close returns the product to its pre-service status. */
-  async completeService(serviceId: string, input: { notes?: string | null } = {}, actor: Actor): Promise<ServiceClosure> {
+  /** Complete an open service; the last one to close returns the product to its pre-service status. `trx`: as openService. */
+  async completeService(serviceId: string, input: { notes?: string | null } = {}, actor: Actor, trx?: Db): Promise<ServiceClosure> {
     const notes = cleanText(input.notes, 'Notes', MAX_NOTES, true);
-    return this.closeService(serviceId, 'COMPLETED', notes, actor);
+    return this.closeService(serviceId, 'COMPLETED', notes, actor, trx);
   }
 
-  /** Cancel an open service (opened by mistake, client withdrew); same status return as completion. */
-  async cancelService(serviceId: string, input: { reason: string }, actor: Actor): Promise<ServiceClosure> {
+  /** Cancel an open service (opened by mistake, client withdrew); same status return as completion. `trx`: as openService. */
+  async cancelService(serviceId: string, input: { reason: string }, actor: Actor, trx?: Db): Promise<ServiceClosure> {
     const reason = cleanReason(input.reason, 'Reason', true)!;
-    return this.closeService(serviceId, 'CANCELLED', `Cancelled: ${reason}`, actor);
+    return this.closeService(serviceId, 'CANCELLED', `Cancelled: ${reason}`, actor, trx);
   }
 
   /** Service records of a product, oldest first. */
@@ -495,10 +498,10 @@ export class WarrantyService {
 
   // ── internals ────────────────────────────────────────────────────────────
 
-  private async closeService(serviceId: string, status: 'COMPLETED' | 'CANCELLED', notes: string | null, actor: Actor): Promise<ServiceClosure> {
+  private async closeService(serviceId: string, status: 'COMPLETED' | 'CANCELLED', notes: string | null, actor: Actor, trx?: Db): Promise<ServiceClosure> {
     if (typeof serviceId !== 'string' || !UUID_RE.test(serviceId)) throw notFound('Service record', 'SERVICE_NOT_FOUND');
     const now = this.clock();
-    return inTransaction(this.db, async (tx) => {
+    return inTransaction(trx ?? this.db, async (tx) => {
       const peek = await tx.selectFrom('service_records').select('product_id').where('id', '=', serviceId).executeTakeFirst();
       if (!peek) throw notFound('Service record', 'SERVICE_NOT_FOUND');
       // Lock order product → service, the same as openService, so concurrent calls cannot deadlock.

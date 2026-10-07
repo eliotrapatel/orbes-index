@@ -99,6 +99,13 @@ async function piecesTab(run: StateRun, name: 'PIECES' | 'ORDERS' | 'RELEASES'):
   await run.page.locator(`.view--pieces[data-tab="${name.toLowerCase()}"]`).waitFor();
 }
 
+/** A piece's SERVICE tab, its YEARLY CARE drawn (plan NEXT-NINE, BP-19 T6) and its SERVICE HISTORY read. */
+async function serviceCare(run: StateRun): Promise<void> {
+  await tab(run, 'SERVICE').click();
+  await run.page.locator('.view--piece .piece__yearly-care:not([hidden])').waitFor();
+  await run.page.locator('.view--piece .n-piece__service-wait').waitFor({ state: 'detached' });
+}
+
 /** A result read from a photo of `role`'s code, then `then` on it. */
 function result(role: string, then?: (run: StateRun) => Promise<void>): Pick<UiState, 'path' | 'act' | 'ready'> {
   return {
@@ -591,6 +598,42 @@ export const UI_STATES: readonly UiState[] = [
       await run.page.getByText('No service has been recorded for this piece.').first().waitFor();
     },
     ready: '.view--piece .n-piece__article',
+  },
+  // YEARLY CARE (plan NEXT-NINE, BP-19 T6): above SERVICE HISTORY, for a PLATINE account, each step on a piece of its own.
+  ...(
+    [
+      ['piece-care-available', 'careAvailable', 'voter1', 'A PLATINE piece: SERVICE, YEARLY CARE, REQUEST YEARLY CARE'],
+      ['piece-care-requested', 'careRequested', 'platine', 'A PLATINE piece: YEARLY CARE REQUESTED, its return address, CANCEL REQUEST'],
+      ['piece-care-used', 'careUsed', 'platine', 'A PLATINE piece: the year’s yearly care used for another piece'],
+      ['piece-care-label', 'careLabel', 'voter2', 'A PLATINE piece: YOUR PREPAID LABEL, DOWNLOAD LABEL'],
+      ['piece-care-returning', 'careReturning', 'voter3', 'A PLATINE piece in service: ON ITS WAY BACK, TRACK THE SHIPMENT'],
+      ['piece-care-done', 'careDone', 'cared', 'A PLATINE piece: its yearly care complete, YEARLY CARE in SERVICE HISTORY'],
+    ] as const
+  ).map(
+    ([id, role, who, title]): UiState => ({
+      id,
+      title,
+      refs: ['BP-19'],
+      variant: 'full',
+      as: who,
+      path: piece(role),
+      act: (run) => serviceCare(run),
+      ready: '.view--piece .piece__yearly-care:not([hidden])',
+    }),
+  ),
+  {
+    id: 'piece-care-request',
+    title: 'A PLATINE piece: REQUEST YEARLY CARE, its own form: RETURN ADDRESS, NAME, ADDRESS, CONFIRM REQUEST · CANCEL',
+    refs: ['BP-19'],
+    variant: 'full',
+    as: 'voter1',
+    path: piece('careAvailable'),
+    act: async (run) => {
+      await serviceCare(run);
+      await button(run, 'REQUEST YEARLY CARE').click();
+      await run.page.locator('.piece__yearly-care form textarea').waitFor();
+    },
+    ready: '.view--piece .piece__yearly-care form',
   },
   {
     id: 'pieces-certificate-choice',

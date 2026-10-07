@@ -39,6 +39,9 @@ export const ROUTES = [
   { name: 'segmentNew', path: '/segments/new' },
   { name: 'segment', path: '/segments/:segmentId' },
   { name: 'warranties', path: '/warranties' },
+  /** The Yearly care board (BP-19 T6): the requests by step; a request's page from its row, or from a client's Messages row. */
+  { name: 'care', path: '/care' },
+  { name: 'careRequest', path: '/care/:careId' },
   { name: 'anomalies', path: '/anomalies' },
   { name: 'cases', path: '/cases' },
   { name: 'revocations', path: '/revocations' },
