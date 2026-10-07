@@ -504,6 +504,9 @@ describe('the Club\'s drops (P-R03)', () => {
     seed: null,
     entries: { ENTERED: 0, SELECTED: 0, WAITLISTED: 0, CONFIRMED: 0, LAPSED: 0, WITHDRAWN: 0 },
     reserved: 0,
+    guaranteed: { places: 0, pieces: 0 },
+    heldPieces: 0,
+    guaranteedEntered: { places: 0, pieces: 0 },
   };
   const values = (extra: Record<string, string> = {}) => ({ ...dropFormValues(base, new Date()), ...extra });
 
@@ -596,7 +599,7 @@ describe('the Club\'s drops (P-R03)', () => {
   });
 
   it('confirms a place held at any time, lapses it only once its time has passed', () => {
-    const entry: web.DropEntry = { id: 'e', accountId: 'a', email: 'a@example.com', status: 'SELECTED', enteredAt: '', tier: 1, seniority: 0, rank: 1, respondBy: '2026-10-16T11:00:00.000Z', reserved: false, handledBy: null, handledAt: null, note: null };
+    const entry: web.DropEntry = { id: 'e', accountId: 'a', email: 'a@example.com', status: 'SELECTED', enteredAt: '', tier: 1, seniority: 0, rank: 1, respondBy: '2026-10-16T11:00:00.000Z', reserved: false, guaranteed: false, pieces: 1, handledBy: null, handledAt: null, note: null };
     expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T10:59:59Z'))).toEqual({ confirm: true, lapse: false });
     expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T11:00:00Z'))).toEqual({ confirm: true, lapse: true });
     expect(entryActions(entry, 'AUDITOR', new Date('2026-10-17T00:00:00Z'))).toEqual({ confirm: false, lapse: false });

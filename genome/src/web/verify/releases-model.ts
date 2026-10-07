@@ -226,6 +226,8 @@ export interface ReleaseSheetModel {
   seedHex: string | null;
   seedHashHex: string;
   drawn: boolean;
+  /** IN-01: once drawn, the places guaranteed by the house, by entry id and pieces (never an account). */
+  guaranteed: { id: string; pieces: number }[];
 }
 
 /** Hexadecimal in groups of four, for reading and comparing by eye. */
@@ -284,6 +286,7 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     seed: seedHex ? groupHex(seedHex) : null,
     seedHex,
     drawn: state === 'DRAWN',
+    guaranteed: state === 'DRAWN' && Array.isArray(s.guaranteed) ? s.guaranteed.filter((x) => x && isReleaseId(x.id) && Number.isInteger(x.pieces)) : [],
   };
 }
 
@@ -417,6 +420,8 @@ export interface MyEntryModel {
   title: string;
   stateLabel: string;
   entry: EntryModel;
+  /** IN-01: the entry uses the house's guarantee, shown to the client: its small label beside the status. */
+  guaranteed?: boolean;
 }
 
 export function myEntries(entries: readonly ClubEntry[], opts: { offsetMinutes: number }): MyEntryModel[] {
@@ -432,6 +437,7 @@ export function myEntries(entries: readonly ClubEntry[], opts: { offsetMinutes: 
         stateLabel: RELEASES.state[state],
         // An entry exists: the early access no longer decides anything (a reservation reads PLACE RESERVED).
         entry: entryModel({ id: e.dropId, title: upper(e.title), state, opensAt: e.opensAt }, e, opts),
+        guaranteed: e.guaranteed === true,
       };
     });
 }

@@ -41,6 +41,10 @@
  *                     and not drawn, cancelled, drawn with a place held, a waiting list and a place lapsed, concluded
  *                     with its order PAID, in its early access with every piece reserved, open with every piece
  *                     reserved; a collector (r.castel) with an entry in each, and the October draw withdrawn
+ *   (plan NEXT-NINE, IN-01: THE HOUSE'S GUARANTEE, seeded last in the full, room and draws variants so nothing of the story
+ *   moves: a collector holding one shown to it before the blue LIVE RELEASE; in the room, one shown and one not; in the
+ *   draws, a draw open with a place guaranteed (shown and not), a draw open entered with one, a draw drawn with two
+ *   guaranteed places, shown and not, and a guarantee waiting for the next release of ZENITH)
  *   stress            the extreme content of fidelity rule 5; THE PROGRAM's welcome gift (a model of one size) and
  *                     the PALLADIUM credit in use on an order (BP-19 T5)
  *   empty             every empty state: no model shown, no release, an account without a piece, and an owner
@@ -202,6 +206,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (variant === 'afterroom') await seedAfterRoom(w);
     if (variant === 'afterroom-ends') await seedAfterRoomEnds(w);
     if (variant === 'draws') await seedDraws(w);
+    if (variant === 'full' || variant === 'room' || variant === 'draws') await seedGuarantees(w, variant);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -991,6 +996,67 @@ async function seedDraws(w: World): Promise<void> {
   await enter(demo.releases.draw!, '2026-10-05T11:00:00Z', entrant);
   clock.set(at('2026-10-05T12:00:00Z'));
   await drops.withdraw(entrant.id, demo.releases.draw!, entrant.actor);
+}
+
+// ── THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01) ──────────────────────────
+
+/**
+ * The house's guarantees, granted by the console last of all (no piece is issued: the accounts hold none, so no serial of
+ * the story moves). `full`: `holder` before the blue LIVE RELEASE (I'LL BE THERE). `room`: `roomHolder` (shown, for 2
+ * pieces) and `roomQuiet` (not shown), neither in the room yet. `draws`: `holder` (shown) and `quiet` (not shown) on a
+ * draw open since this morning, neither entered (THE GUARANTEED DRAW); `holder` entered with one on a second (THE
+ * ENTERED DRAW); both entered with theirs on a draw drawn on 4 Oct with two collectors ranked (THE GUARANTEED DRAW OF
+ * OCTOBER); and `holder`'s guarantee waiting for the next release of ZENITH.
+ */
+async function seedGuarantees(w: World, variant: 'full' | 'room' | 'draws'): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  const grant = (a: DemoAccount, input: { scope: 'RELEASE' | 'MODEL'; targetId: string; pieces?: number; validUntil: string; visible?: boolean }) =>
+    ctx.services.guarantees.grant(a.id, { pieces: 1, visible: true, ...input }, admin);
+  if (variant === 'full') {
+    clock.set(at('2026-10-05T08:00:00Z'));
+    const holder = await account(w, 'holder', 'c.marchand@example.com');
+    await grant(holder, { scope: 'RELEASE', targetId: demo.releases.blue!, validUntil: '2026-12-31' });
+    return;
+  }
+  if (variant === 'room') {
+    clock.set(at('2026-10-05T08:00:00Z'));
+    const holder = await account(w, 'roomHolder', 'c.marchand@example.com');
+    const quiet = await account(w, 'roomQuiet', 'e.weiss@example.com');
+    await grant(holder, { scope: 'RELEASE', targetId: demo.releases.room!, pieces: 2, validUntil: '2026-12-31' });
+    await grant(quiet, { scope: 'RELEASE', targetId: demo.releases.room!, validUntil: '2026-12-31', visible: false });
+    return;
+  }
+  const drops = ctx.services.drops;
+  const draw = async (key: string, o: { model: string; title: string; quantity: number; created: string; opens: string; closes: string }) => {
+    clock.set(at(o.created));
+    const d = await drops.create({ modelId: w.models[o.model]!, title: o.title, quantity: o.quantity, opensAt: at(o.opens), closesAt: at(o.closes), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, admin);
+    await drops.publish(d.id, admin);
+    demo.releases[key] = d.id;
+    return d.id;
+  };
+  clock.set(at('2026-09-29T08:00:00Z'));
+  const holder = await account(w, 'holder', 'c.marchand@example.com');
+  const quiet = await account(w, 'quiet', 'e.weiss@example.com');
+  const ranked = [await account(w, 'ranked1', 'n.duval@example.com'), await account(w, 'ranked2', 'p.renaud@example.com')];
+  // Drawn on 4 Oct: two guaranteed places (2 pieces shown to `holder`, 1 not shown to `quiet`), then the ranked list.
+  const drawn = await draw('guaranteedDrawn', { model: 'steel', title: 'MONOLITHE IN STEEL, THE GUARANTEED DRAW OF OCTOBER', quantity: 4, created: '2026-09-29T09:00:00Z', opens: '2026-10-01T10:00:00Z', closes: '2026-10-04T18:00:00Z' });
+  clock.set(at('2026-09-30T09:00:00Z'));
+  await grant(holder, { scope: 'RELEASE', targetId: drawn, pieces: 2, validUntil: '2026-12-31' });
+  await grant(quiet, { scope: 'RELEASE', targetId: drawn, validUntil: '2026-12-31', visible: false });
+  clock.set(at('2026-10-02T10:00:00Z'));
+  for (const a of [holder, quiet, ...ranked]) await drops.enter(a.id, drawn, a.actor);
+  clock.set(at('2026-10-04T18:05:00Z'));
+  await drops.draw(drawn, admin);
+  // Open since this morning: a place guaranteed for 2 pieces (shown) and one not shown, neither entered yet.
+  const open = await draw('guaranteed', { model: 'gold', title: 'MONOLITHE IN GOLD, THE GUARANTEED DRAW', quantity: 3, created: '2026-10-04T19:00:00Z', opens: '2026-10-05T10:00:00Z', closes: '2026-10-11T18:00:00Z' });
+  const entered = await draw('guaranteedEntered', { model: 'blue', title: 'MONOLITHE IN BLUE, THE ENTERED DRAW', quantity: 2, created: '2026-10-04T19:30:00Z', opens: '2026-10-05T10:00:00Z', closes: '2026-10-11T18:00:00Z' });
+  clock.set(at('2026-10-05T09:00:00Z'));
+  await grant(holder, { scope: 'RELEASE', targetId: open, pieces: 2, validUntil: '2026-11-30' });
+  await grant(quiet, { scope: 'RELEASE', targetId: open, validUntil: '2026-11-30', visible: false });
+  await grant(holder, { scope: 'RELEASE', targetId: entered, validUntil: '2026-12-15' });
+  await grant(holder, { scope: 'MODEL', targetId: w.models.zenith!, validUntil: '2027-01-03' });
+  clock.set(at('2026-10-05T11:30:00Z'));
+  await drops.enter(holder.id, entered, holder.actor);
 }
 
 // ── The yearly care (plan NEXT-NINE, BP-19 T6) ─────────────────────────────

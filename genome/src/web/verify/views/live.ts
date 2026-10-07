@@ -63,7 +63,7 @@ import { bracket } from '../../shared/corners.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { LIVE, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
+import { GUARANTEE, LIVE, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
 import {
   addonChoices,
   aheadLine,
@@ -223,6 +223,8 @@ class LivePage {
   private room: LiveRoom | null = null;
   private entry: LiveEntry | null = null;
   private access: LiveAccess | null = null;
+  /** IN-01: the house's guarantee set aside for this release, shown to the account (its pieces), or null. */
+  private guarantee: { pieces: number } | null = null;
   private interest: LiveInterest | null = null;
   private viewer: LiveViewer = 'unknown';
   /** The read of the state under way, if any. */
@@ -436,6 +438,7 @@ class LivePage {
     this.refusal = null;
     this.access = state.access;
     this.interest = state.interest;
+    this.guarantee = state.guarantee ?? null;
     this.setRoom(state.room);
     this.setEntry(state.entry);
     this.settle();
@@ -790,6 +793,16 @@ class LivePage {
     return h('p', { class: ['live__note', extra], text });
   }
 
+  /** The pieces the account may take: the release's per collector, or (IN-01) its guarantee's when higher. */
+  private maxPieces(s: { perAccount: number }): number {
+    return Math.max(s.perAccount, this.guarantee?.pieces ?? 0);
+  }
+
+  /** IN-01: the room's line under the size chooser, while a guarantee shown to the account applies here; '' otherwise. */
+  private guaranteeLine(s: { perAccount: number }): string {
+    return this.guarantee || this.entry?.guaranteed === true ? GUARANTEE.liveRoom(this.maxPieces(s)) : '';
+  }
+
   /** The piece on a plate: its photograph, else its silhouette, else the seal; a picture that fails takes the seal's place. */
   private piece(picture: LivePicture | null, extra: string, sweep = false): HTMLElement {
     const plate = h('div', { class: ['live__plate', extra] });
@@ -1055,7 +1068,9 @@ class LivePage {
           const action = button(LIVE.there.action, { extraClass: 'n-live__there-action', onClick: () => this.sayThere() });
           const withdraw = button(LIVE.there.withdraw, { outline: true, extraClass: 'n-live__withdraw', onClick: () => void this.setThere(null) });
           // Said: the size said stands in YOUR SIZE's place over the sizes (C28, state 1); the group keeps its name.
-          body.replaceChildren(next === 'said' ? said : label, sizes.el, lead, errorLine, next === 'said' ? withdraw : action);
+          // IN-01: under I'LL BE THERE, the house's guarantee shown to the account.
+          const guaranteed = this.guarantee ? h('p', { class: 'n-sm n-live__there-lead live__guarantee', text: GUARANTEE.liveAnnounced }) : null;
+          body.replaceChildren(...[next === 'said' ? said : label, sizes.el, lead, errorLine, next === 'said' ? withdraw : action, guaranteed].filter((x): x is HTMLElement => x !== null));
           sizes.el.setAttribute('aria-label', LIVE.yourSize);
           refresh = () => {
             setFact(said, this.interest ? LIVE.there.said(this.interest.size.label) : '');
@@ -1206,7 +1221,7 @@ class LivePage {
       grid.append(b);
     }
     // I'LL BE THERE says a size only (`onQuantity` null): the quantity is chosen in the room.
-    const max = onQuantity ? s.perAccount : 1;
+    const max = onQuantity ? this.maxPieces(s) : 1;
     const value = h('span', { class: 'live__qty-value', attrs: { 'aria-live': 'polite' } });
     const fewer = h('button', { class: 'btn live__step', attrs: { type: 'button', 'aria-label': LIVE.fewer }, on: { click: () => onQuantity?.(this.picked.quantity - 1) }, text: '−' });
     const more = h('button', { class: 'btn live__step', attrs: { type: 'button', 'aria-label': LIVE.more }, on: { click: () => onQuantity?.(this.picked.quantity + 1) }, text: '+' });
@@ -1265,7 +1280,9 @@ class LivePage {
     const readyLine = this.note('', 'live__ready-line');
     const choose = this.note(LIVE.chooseLine, 'live__choose');
     const leave = h('button', { class: 'textlink live__leave', attrs: { type: 'button' }, on: { click: () => void this.act(() => this.deps.api.liveLeave(s.id)) }, text: LIVE.leaveRoom });
-    const prep = h('div', { class: 'live__prep' }, plate, picker.el, errorLine, choose, enter, ready, readyLine, leave);
+    // IN-01: under the size chooser, the house's guarantee shown to the account.
+    const guaranteed = this.note('', 'live__guarantee');
+    const prep = h('div', { class: 'live__prep' }, plate, picker.el, guaranteed, errorLine, choose, enter, ready, readyLine, leave);
     // SEE THE MODEL under the model's line while the door is closed; at T0 the room is the piece's alone.
     const seeModel = this.seeModel(m.lookbook);
     // The ticks sound only from a context a gesture made: any tap or key in the room before T0 makes it (a collector
@@ -1329,6 +1346,9 @@ class LivePage {
         );
       }
       picker.update(!entered);
+      const line = this.guaranteeLine(s);
+      setFact(guaranteed, line);
+      guaranteed.hidden = line === '';
       this.showError(errorLine);
       choose.hidden = entered;
       enter.hidden = entered;
@@ -1357,7 +1377,7 @@ class LivePage {
         this.screen?.update();
       },
       (q) => {
-        this.picked = { ...this.picked, quantity: Math.min(s.perAccount, Math.max(1, q)) };
+        this.picked = { ...this.picked, quantity: Math.min(this.maxPieces(s), Math.max(1, q)) };
         this.screen?.update();
       },
     );
@@ -1408,7 +1428,7 @@ class LivePage {
     if (!s || this.busy) return;
     if (held?.status === 'WAITING') {
       if (held.size.id === sizeId) return;
-      void this.act(() => this.deps.api.liveSize(s.id, sizeId, s.perAccount > 1 ? this.picked.quantity : undefined));
+      void this.act(() => this.deps.api.liveSize(s.id, sizeId, this.maxPieces(s) > 1 ? this.picked.quantity : undefined));
       return;
     }
     this.picked = { ...this.picked, sizeId };
@@ -1419,7 +1439,7 @@ class LivePage {
     this.deps.sound.prime();
     const s = this.live();
     if (!s || this.busy) return;
-    const quantity = Math.min(s.perAccount, Math.max(1, q));
+    const quantity = Math.min(this.maxPieces(s), Math.max(1, q));
     const held = heldEntry(this.entry);
     if (held?.status === 'WAITING') {
       if (held.quantity !== quantity) void this.act(() => this.deps.api.liveSize(s.id, held.size.id, quantity));
@@ -1437,7 +1457,7 @@ class LivePage {
     if (!s || !sizeId) return;
     const from = document.activeElement;
     void this.act(
-      () => this.deps.api.liveEnter(s.id, sizeId, s.perAccount > 1 ? this.picked.quantity : undefined),
+      () => this.deps.api.liveEnter(s.id, sizeId, this.maxPieces(s) > 1 ? this.picked.quantity : undefined),
       () => {
         // ENTER goes once entered: the keyboard's focus moves to the size now chosen, still changeable until T0.
         requestAnimationFrame(() => {

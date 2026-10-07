@@ -39,13 +39,13 @@ import {
   earlyAccessOnPublish,
   entryActions,
   placesTaken,
-  placesToDraw,
   releaseAddress,
   tierName,
 } from '../model/club.js';
+import { drawGuaranteeLine, GUARANTEE_STATE_LABELS, guaranteedText, placesLeftForDraw, validUntilText } from '../model/guarantees.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { DROP_ENTRY_STATUSES, type Drop, type DropEntry, type DropEntryStatus } from '../types.js';
+import { DROP_ENTRY_STATUSES, type Drop, type DropEntry, type DropEntryStatus, type ReleaseGuarantee } from '../types.js';
 import { button, defList, field, filterBar, linkButton, mono, pageHeader, pager, section, select, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
@@ -55,10 +55,11 @@ import { pageParam, type ViewContext } from './context.js';
 export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.dropId ?? '';
   const status = DROP_ENTRY_STATUSES.find((s) => s === ctx.route.query.status) as DropEntryStatus | undefined;
-  const [d, entries, models] = await Promise.all([
+  const [d, entries, models, guarantees] = await Promise.all([
     ctx.api.drop(id),
     ctx.api.dropEntries(id, { ...(status ? { status } : {}), page: pageParam(ctx), pageSize: 50 }),
     ctx.api.models(),
+    ctx.api.releaseGuarantees(id),
   ]);
   const role = ctx.session.admin.role;
   const acts = dropActions(d, role);
@@ -129,6 +130,10 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       },
     }).then(done('Release cancelled.'));
 
+  const ranked = d.entries.ENTERED - d.guaranteedEntered.places;
+  // The places the draw gives: the pieces less those held or sold and those the guaranteed entries take first.
+  const left = placesLeftForDraw(d);
+  const guaranteedLine = drawGuaranteeLine(d);
   const draw = () =>
     void openDialog({
       title: 'Run the draw',
@@ -138,8 +143,10 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
         h(
           'p',
           { class: 'dialog__text' },
-          `${formatCount(d.entries.ENTERED)} ${d.entries.ENTERED === 1 ? 'entry takes' : 'entries take'} part, for ${formatCount(placesToDraw(d))} ${placesToDraw(d) === 1 ? 'place' : 'places'} of ${formatCount(d.quantity)} ${d.quantity === 1 ? 'piece' : 'pieces'}${placesTaken(d) > 0 ? ` (${formatCount(placesTaken(d))} already held or sold by direct reservations: lapse first those whose time has passed)` : ''}.`,
+          `${formatCount(ranked)} ${ranked === 1 ? 'entry takes' : 'entries take'} part, for ${formatCount(left)} ${left === 1 ? 'place' : 'places'} of ${formatCount(d.quantity)} ${d.quantity === 1 ? 'piece' : 'pieces'}${placesTaken(d) > 0 ? ` (${formatCount(placesTaken(d))} already held or sold by direct reservations: lapse first those whose time has passed)` : ''}.`,
         ),
+        // IN-01: the guaranteed places, selected first, apart from the ranking.
+        ...(guaranteedLine ? [h('p', { class: 'dialog__text', data: { testid: 'draw-guaranteed' } }, guaranteedLine)] : []),
         h(
           'p',
           { class: 'dialog__text' },
@@ -178,6 +185,8 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       note: d.earlyAccessOpensAt ? 'PLATINE and PALLADIUM owners reserve a place directly until entries open, first come, first served.' : undefined,
     },
     ...(d.earlyAccessOpensAt || d.reserved > 0 ? [{ label: 'Reserved directly', value: h('span', { data: { testid: 'drop-reserved' } }, `${formatCount(d.reserved)} of ${formatCount(d.quantity)}`), note: 'Places held or sold by a direct reservation: the draw gives the others.' }] : []),
+    // IN-01: the places the house guarantees, apart from those reserved directly.
+    ...(d.guaranteed.places > 0 ? [{ label: 'Guaranteed', value: h('span', { data: { testid: 'drop-guaranteed' } }, guaranteedText(d.guaranteed)), note: 'Selected first at the draw, listed apart on the public page.' }] : []),
     { label: 'Entries open', value: formatDateTime(d.opensAt) },
     { label: 'Entries close', value: formatDateTime(d.closesAt) },
     { label: 'Place held', value: `${d.purchaseWindowHours} ${d.purchaseWindowHours === 1 ? 'hour' : 'hours'}` },
@@ -250,6 +259,8 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
                 'span',
                 { data: { testid: 'entry-status' } },
                 statusMark(humanize(e.status), toneOf('dropEntry', e.status)),
+                e.guaranteed ? h('span', { class: 'row-marks' }, statusMark('GUARANTEED', 'outline')) : null,
+                e.guaranteed && e.pieces > 1 ? h('span', { class: 'cell-sub' }, `${e.pieces} pieces`) : null,
                 e.reserved ? h('span', { class: 'cell-sub', data: { testid: 'entry-reserved' } }, 'Reserved directly') : null,
                 e.status === 'SELECTED' && e.respondBy ? h('span', { class: 'cell-sub' }, `Held until ${formatDateTime(e.respondBy)}`) : null,
                 e.handledBy ? h('span', { class: 'cell-sub' }, `${e.handledBy.email} · ${formatDateTime(e.handledAt)}`) : null,
@@ -303,6 +314,27 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       actions: [linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
     }),
     release,
+    guaranteesSection(guarantees.items),
     list,
+  );
+}
+
+/** IN-01: the release's guarantees (set aside for it, or used in it); the emails masked for an AUDITOR by the server. */
+export function guaranteesSection(items: ReleaseGuarantee[], kind: 'DRAW' | 'LIVE' = 'DRAW'): HTMLElement {
+  return section(
+    'Guarantees',
+    table<ReleaseGuarantee>(
+      [
+        { label: 'Account', cell: (g) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: g.account.id }), 'data-testid': 'guarantee-account' } }, g.account.email), kind: ['wide'] },
+        { label: 'Pieces', cell: (g) => formatCount(g.pieces), kind: ['num'] },
+        { label: 'Shown', cell: (g) => (g.visible ? 'Yes' : 'No'), kind: ['nowrap'] },
+        { label: 'Status', cell: (g) => statusMark(GUARANTEE_STATE_LABELS[g.state], toneOf('guarantee', g.state)), kind: ['nowrap'] },
+        { label: 'Entry', cell: (g) => (g.entry ? mono(g.entry.id, g.entry.id.slice(0, 8)) : '—'), kind: ['nowrap'] },
+        { label: 'Valid until', cell: (g) => validUntilText(g), kind: ['nowrap'] },
+      ],
+      items,
+      { empty: 'No guarantee: granted from a client sheet.', caption: 'Guarantees' },
+    ),
+    { id: 'guarantees', note: kind === 'LIVE' ? 'Places guaranteed by the house: first in line in their size' : 'Places guaranteed by the house: selected first, for their pieces' },
   );
 }

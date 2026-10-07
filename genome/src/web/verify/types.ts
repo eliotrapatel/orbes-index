@@ -505,6 +505,11 @@ export interface DropSheet extends DropCard {
   seed: string | null;
   /** P-X02: the places reserved directly during the early access, held or sold; at `quantity`, the release is full (0 once drawn). */
   reserved: number;
+  /**
+   * Plan NEXT-NINE, IN-01: once drawn, the places guaranteed by the house, by entry id and pieces, never an account
+   * (empty before the draw); YOURS comes only from the account's own entry (ClubEntry `guaranteed`).
+   */
+  guaranteed?: { id: string; pieces: number }[];
 }
 
 /** One entry of a drawn release (GET /api/v1/drops/:id/entries): never its account. `tier` 0 is no tier. */
@@ -585,9 +590,28 @@ export interface ClubEntry {
   respondBy: string | null;
   /** P-X02: a place reserved directly during the early access, not drawn. */
   reserved: boolean;
+  /** IN-01: the entry uses the house's guarantee, shown to the client (false for one not shown). */
+  guaranteed?: boolean;
+  /** IN-01: the pieces of its place (its shown guarantee's), 1 otherwise. */
+  pieces?: number;
   opensAt: string;
   closesAt: string;
   drawnAt: string | null;
+}
+
+/**
+ * IN-01: THE HOUSE'S GUARANTEE as its holder reads it (GET /api/v1/club/status `guarantees`): shown to the client only,
+ * waiting, set aside or entered. `target`: a model (`MONOLITHE IN BLUE`), a collection, or a release's title (null while
+ * it may not be said); `release`: the release it is set aside for, once announced (its title null before a LIVE
+ * RELEASE's name stage).
+ */
+export interface ClubGuarantee {
+  id: string;
+  scope: 'RELEASE' | 'MODEL' | 'COLLECTION';
+  target: string | null;
+  pieces: number;
+  validUntil: string;
+  release: { id: string; mode: 'DRAW' | 'LIVE'; title: string | null } | null;
 }
 
 /** A tier of the club by name: 1 TITANE, 2 PLATINE, 3 PALLADIUM. */
@@ -636,6 +660,8 @@ export interface ClubStatus {
   inUse?: ClubInUse;
   tierThresholds: number[];
   entries: ClubEntry[];
+  /** IN-01: the house's guarantees shown to the client, the soonest validity first. */
+  guarantees?: ClubGuarantee[];
 }
 
 /** A post of the owners' circle (P-X01): a NOTE, an INVITATION (answered YES or NO) or a POLL (one vote). */
@@ -895,6 +921,8 @@ export interface LiveEntry {
   totalMinor: number;
   /** ENDED by the sell-out while in the line: the after-room's door; null otherwise. */
   afterRoom?: AfterRoomDoor | null;
+  /** IN-01: the entry uses the house's guarantee, shown to the client: first in line in its size. */
+  guaranteed?: boolean;
 }
 
 /** The account against the release's rules now. */
@@ -921,6 +949,8 @@ export interface LiveState {
   access: LiveAccess;
   entry: LiveEntry | null;
   interest: LiveInterest | null;
+  /** IN-01: the house's guarantee set aside for this release, shown to the client: its pieces; null otherwise. */
+  guarantee?: { pieces: number } | null;
 }
 
 /** An entry of the account in MY PIECES (GET /api/v1/live/mine), with its release, each part from its stage. */

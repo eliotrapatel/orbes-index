@@ -44,7 +44,8 @@
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { LIVE, LOOKBOOK, RELEASES } from '../copy.js';
+import { GUARANTEE, LIVE, LOOKBOOK, RELEASES } from '../copy.js';
+import { guaranteeBox, guaranteedLines, guaranteeFor } from '../guarantee-model.js';
 import { CHANGE_RETRY_MS, countdown as countdownGroups, liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
 import {
   drawLines,
@@ -63,7 +64,7 @@ import {
   type ReleaseSheetModel,
 } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
-import type { ClubEntry, DrawEntry } from '../types.js';
+import type { ClubEntry, ClubGuarantee, DrawEntry } from '../types.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import { dayAndHour, RELEASES_PATH, viewRoot, withNumerals } from './common.js';
 import { appAnchor, button, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, quietLine, textLink } from './nocturne.js';
@@ -732,6 +733,8 @@ class ReleasePage {
   private entryGen = 0;
   /** The account's tier now, read with its entry (the club's status): PLATINE and PALLADIUM reserve during the early access. */
   private tier = 0;
+  /** IN-01: the house's guarantee shown to the account and set aside for this release (the club's status), or null. */
+  private guarantee: ClubGuarantee | null = null;
   /** Drawn: the account's part in the release, read with its entry; null when none (or when it could not be read). */
   private part: string | null = null;
   /** What the hero was drawn from: drawn again only when it changes (the photograph is not loaded again). */
@@ -797,6 +800,7 @@ class ReleasePage {
       this.entryGen++;
       this.entry = { kind: 'none' };
       this.tier = 0;
+      this.guarantee = null;
       this.part = null;
       this.actionError = null;
     }
@@ -815,6 +819,7 @@ class ReleasePage {
       if (gen !== this.entryGen || this.disposed) return;
       this.part = part ? (participationModel(part).marks.get(id) ?? null) : null;
       this.tier = Number(status.tier?.level) || 0;
+      this.guarantee = guaranteeFor(status, id);
       this.entry = { kind: 'ready', entry: status.entries.find((e) => e.dropId === id) ?? null };
     } catch (e) {
       if (gen !== this.entryGen || this.disposed) return;
@@ -1008,6 +1013,18 @@ class ReleasePage {
       const m = entryModel(this.releaseOf(s), this.entry.entry, this.entryOpts());
       out.push(this.sentence(m));
       if (m.entryId) out.push(h('p', { class: 'n-sm n-num n-release__entry-id release__entry-id', text: RELEASES.entryId(m.entryId) }));
+      // IN-01: THE HOUSE'S GUARANTEE, a hairline box under the status and the entry number (a guarantee shown only).
+      const box = guaranteeBox({ state: s.state, drawn: s.drawn }, this.entry.entry, this.guarantee, { canReserve: m.canReserve });
+      if (box) {
+        out.push(
+          h(
+            'div',
+            { class: 'n-release__guarantee release__guarantee', attrs: { role: 'note' } },
+            h('p', { class: 'n-g n-lb', text: GUARANTEE.title }),
+            h('p', { class: 'n-sm n-release__guarantee-text' }, ...withNumerals(box)),
+          ),
+        );
+      }
       if (this.actionError) out.push(h('p', { class: 'n-sm n-ivc n-release__error form__error', attrs: { role: 'alert' }, text: this.actionError }));
       // The one filled button of the page: ENTER THE DRAW, or RESERVE A PLACE (P-X02, a PLATINE or PALLADIUM account
       // during the early access); should both be offered, the second is a hairline button.
@@ -1072,7 +1089,31 @@ class ReleasePage {
     const items = d.kind === 'idle' ? [] : d.items;
     const yours = this.entry.kind === 'ready' && this.entry.entry ? this.entry.entry.id : null;
     const lines = drawLines(items, yours);
-    const out: HTMLElement[] = [h('h3', { class: 'n-g n-t3 n-release__entries', id: 'release-entries', text: RELEASES.section.entries }), h('p', { class: 'n-sm n-release__para release__entries-lead', text: RELEASES.entriesLead })];
+    const out: HTMLElement[] = [h('h3', { class: 'n-g n-t3 n-release__entries', id: 'release-entries', text: RELEASES.section.entries })];
+    // IN-01: GUARANTEED BY THE HOUSE, above the ranked list: each line its pieces and its entry's id, YOURS only from the
+    // account's own entry when its guarantee is shown to it.
+    const own = this.entry.kind === 'ready' ? this.entry.entry : null;
+    const guaranteed = guaranteedLines(this.load.kind === 'ready' ? this.load.sheet.guaranteed : [], own);
+    if (guaranteed.length > 0) {
+      out.push(
+        h('h4', { class: 'n-g n-lb n-release__guaranteed release__guaranteed', id: 'release-guaranteed', text: GUARANTEE.list.title }),
+        h('p', { class: 'n-sm n-release__para release__guaranteed-lead', text: GUARANTEE.list.lead }),
+        h(
+          'ul',
+          { class: 'n-release__list release__guaranteed-list', attrs: { 'aria-labelledby': 'release-guaranteed' } },
+          ...guaranteed.map((l) =>
+            h(
+              'li',
+              { class: ['n-release__item', 'release__item', 'release__guaranteed-item', l.yours ? 'is-yours' : null] },
+              h('span', { class: 'n-g n-lb n-release__item-line release__item-line' }, ...withNumerals(l.line)),
+              h('span', { class: 'n-sm n-num n-release__item-id release__item-id', text: l.id }),
+              l.yours ? h('span', { class: 'n-g n-lb n-ivc n-release__item-yours release__item-yours', text: RELEASES.yours }) : null,
+            ),
+          ),
+        ),
+      );
+    }
+    out.push(h('p', { class: 'n-sm n-release__para release__entries-lead', text: RELEASES.entriesLead }));
     if (lines.length > 0) {
       out.push(
         h(

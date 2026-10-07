@@ -37,6 +37,9 @@ const NARROW_TOO = [
   'releases', 'live-veiled', 'circle', 'post-invitation', 'post-poll', 'post-poll-voted', 'pieces-sign-in-refused', 'legal-terms-fr', 'legal-faq-fr', 'pieces-failed', 'piece-failed', 'circle-failed', 'post-failed',
   // The tier program (plan NEXT-NINE, BP-19): THE CLUB, IN USE and the yearly care's block at 375, 360 and 320 px too.
   'club', 'club-platine', 'account-sheet-in-use', 'piece-care-request', 'piece-care-requested', 'piece-care-label', 'piece-care-returning',
+  // THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): its box, GUARANTEED BY THE HOUSE, the account sheet's blocks, the
+  // LIVE RELEASE's line, at 375, 360 and 320 px too (the room at the stage's 390 px).
+  'draw-guaranteed', 'draw-guaranteed-entered', 'draw-guaranteed-drawn', 'draw-guarantee-account', 'draw-guarantee-pieces', 'live-announced-guaranteed', 'room-guaranteed',
 ];
 
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */

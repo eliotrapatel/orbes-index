@@ -2064,6 +2064,34 @@ body.nocturne .view--release.n-release {
   margin-top: 8px;
 }
 
+/* THE HOUSE'S GUARANTEE in YOUR ENTRY (plan NEXT-NINE, IN-01): a hairline box, its label, its sentence. */
+.n-release__guarantee {
+  margin-top: 18px;
+  padding: 14px 16px;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+}
+
+.n-release__guarantee-text {
+  margin-top: 8px;
+}
+
+/* GUARANTEED BY THE HOUSE, above the ranked list once drawn: its title, its lead, its lines. */
+.n-release__guaranteed {
+  margin-top: 30px;
+}
+
+.n-release__guaranteed + .n-release__para {
+  margin-top: 12px;
+}
+
+/* A small hairline label beside the status of an entry with the house's guarantee (MY PIECES). */
+.n-pieces__guarantee {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 3px 7px;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+}
+
 .n-release__action {
   margin-top: 22px;
 }

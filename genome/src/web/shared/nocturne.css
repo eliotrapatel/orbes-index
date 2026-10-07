@@ -1604,6 +1604,25 @@ body.nocturne .n-column > * {
   margin-top: 14px;
 }
 
+/* THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): a block per guarantee shown, under YOUR TIER, its hairline above. */
+.n-account__guarantee {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-account__guarantee-sentence {
+  margin-top: 10px;
+}
+
+.n-account__guarantee-rows {
+  margin-top: 10px;
+}
+
+.n-account__guarantee-note {
+  margin-top: 10px;
+}
+
 .n-account__rows {
   margin-top: 30px;
   border-top: 1px solid var(--vault-hairline);

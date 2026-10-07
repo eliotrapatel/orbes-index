@@ -348,4 +348,77 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     expect(problems).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);
+
+  it('grants THE HOUSE’S GUARANTEE from the client sheet (plan NEXT-NINE, IN-01): the Grant dialog, Change and Revoke; the draw’s Guaranteed row, its guarantees and the GUARANTEED mark; the defaults in Orders → Settings, an ADMIN’s', async () => {
+    const now = clock.now().getTime();
+    const draw = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — guaranteed', quantity: 4, opensAt: new Date(now - MINUTE), closesAt: new Date(now + 2 * HOUR), earlyAccessHours: 0 }, f.admin);
+    await f.drops.publish(draw.id, f.admin);
+    const client = await createAccount(ctx.db);
+    // Another collector entered with a guarantee: the entries' GUARANTEED mark.
+    const other = await createAccount(ctx.db);
+    await ctx.services.guarantees.grant(other.id, { scope: 'RELEASE', targetId: draw.id, pieces: 1, validUntil: new Date(now + 30 * 24 * HOUR).toISOString().slice(0, 10), visible: false }, f.admin);
+    await f.drops.enter(other.id, draw.id, other.actor);
+
+    const p = await open(OPERATOR);
+    await go(p, `#/owners/${client.id}`, client.email);
+    expect(await text(p, '#guarantees')).toContain('No guarantee.');
+    await p.click('[data-testid=guarantee-grant]');
+    await p.waitForSelector('dialog.dialog');
+    expect(await text(p, 'dialog .dialog__title, dialog h2')).toBe('Grant the house’s guarantee');
+    await p.selectOption('dialog [name=scope]', 'RELEASE');
+    await p.selectOption('dialog [name=releaseId]', draw.id);
+    expect(await text(p, 'dialog [data-testid=guarantee-rule]')).toMatch(/^A draw: any ORBES account enters/);
+    await p.selectOption('dialog [name=pieces]', '2');
+    await p.fill('dialog [name=note]', 'Waited at the boutique for the first release.');
+    await confirmDialog(p);
+    await expect.poll(async () => text(p, '.toast'), POLL).toContain('Guarantee granted. Set aside for ECLIPSE — guaranteed.');
+    await expect.poll(async () => rowsOf(p, 'guarantees').count(), POLL).toBe(1);
+    const row = rowsOf(p, 'guarantees').first();
+    expect((await row.textContent())!.replace(/\s+/g, ' ')).toMatch(/ECLIPSE — guaranteed.*2.*Yes.*SET ASIDE.*ECLIPSE — guaranteed.*Waited at the boutique/);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'guarantee-sheet');
+    // Change: no longer shown to the client.
+    await row.locator('[data-testid=guarantee-change]').click();
+    await p.waitForSelector('dialog.dialog');
+    await p.locator('dialog [name=visible]').uncheck({ force: true });
+    await confirmDialog(p);
+    await expect.poll(async () => ((await rowsOf(p, 'guarantees').first().textContent()) ?? '').includes('No'), POLL).toBe(true);
+
+    // The draw's page: the Guaranteed row, its guarantees, the GUARANTEED mark on the entry that uses one.
+    await go(p, `#/club/drops/${draw.id}`, 'ECLIPSE — guaranteed');
+    expect(await text(p, '[data-testid=drop-guaranteed]')).toBe('2 places · 3 pieces');
+    expect(await rowsOf(p, 'guarantees').count()).toBe(2);
+    expect(await text(p, '#entries tbody tr')).toContain('GUARANTEED');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'guarantee-drop');
+
+    // Revoke, with a note.
+    await go(p, `#/owners/${client.id}`, client.email);
+    await rowsOf(p, 'guarantees').first().locator('[data-testid=guarantee-revoke]').click();
+    await p.waitForSelector('dialog.dialog');
+    expect(await text(p, 'dialog')).toContain('The client’s entry, if any, stays as an ordinary entry. Recorded in the audit log.');
+    await p.fill('dialog [name=note]', 'Granted twice.');
+    await confirmDialog(p);
+    await expect.poll(async () => text(p, '[data-testid=guarantee-state]'), POLL).toBe('REVOKED');
+    expect(await rowsOf(p, 'guarantees').first().locator('[data-testid=guarantee-change]').count()).toBe(0);
+    // An OPERATOR reads the defaults, never changes them.
+    await go(p, '#/settings', 'Settings');
+    expect(await text(p, '[data-testid=guarantee-valid-days]')).toBe('90 days');
+    expect(await p.locator('[data-testid=guarantee-settings-edit]').count()).toBe(0);
+    await p.context().close();
+
+    const a = await open(ADMIN);
+    await go(a, '#/settings', 'Settings');
+    expect([await text(a, '[data-testid=guarantee-pieces]'), await text(a, '[data-testid=guarantee-visible]')]).toEqual(['1 piece', 'Yes']);
+    await a.click('[data-testid=guarantee-settings-edit]');
+    await a.waitForSelector('dialog.dialog');
+    await a.fill('dialog [name=validDays]', '120');
+    await confirmDialog(a);
+    await expect.poll(async () => text(a, '[data-testid=guarantee-valid-days]'), POLL).toBe('120 days');
+    await shot(a, 'guarantee-settings');
+    expect(await csp(a)).toEqual([]);
+    expect(problems).toEqual([]);
+    await a.context().close();
+  }, STEP_TIMEOUT);
 });
+

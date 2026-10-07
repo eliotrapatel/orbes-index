@@ -72,6 +72,7 @@ import {
   windowLine,
   type LivePart,
 } from '../model/live.js';
+import { guaranteedText, stockWarning } from '../model/guarantees.js';
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { modelChoice } from '../model/variants.js';
@@ -84,6 +85,7 @@ import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 import { bestTimePanel } from './best-time.js';
+import { guaranteesSection } from './drop.js';
 import { loadLiveIntelligence, liveIntelligenceSections, liveSignals, sizeSellOut } from './live-intelligence.js';
 
 /** The board read again this often while the stream is refused or lost. */
@@ -172,11 +174,13 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const published = hasBoard(r.phase);
   // The best time to open while T0 may still move (its settings change); the after-room has none of its own.
   const timing = r.editable && !r.afterRoomOf;
-  const [boardRead, entries, intelligence, bestTime] = await Promise.all([
+  const [boardRead, entries, intelligence, bestTime, guarantees] = await Promise.all([
     published ? ctx.api.liveBoard(id) : Promise.resolve(null),
     published && status ? ctx.api.liveEntries(id, { status, page: entriesPage, pageSize: 50 }) : Promise.resolve(null),
     loadLiveIntelligence(ctx.api, r),
     timing ? ctx.api.liveBestTime(id).catch(() => 'failed' as const) : Promise.resolve(null),
+    // IN-01: the release's guarantees (an after-room has none).
+    r.afterRoomOf ? Promise.resolve({ items: [] }) : ctx.api.releaseGuarantees(id),
   ]);
   // The console moved on while the release was read: this page is stale, and starts nothing. Every read is above this
   // line, so the follower below starts only for the page on screen.
@@ -275,6 +279,8 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           'span',
           { data: { testid: 'live-entry-status' } },
           statusMark(humanize(e.status), toneOf('liveEntry', e.status)),
+          // IN-01: a place guaranteed by the house, first in line in its size.
+          e.guaranteed ? h('span', { class: 'row-marks' }, statusMark('GUARANTEED', 'outline')) : null,
           e.letIn ? h('span', { class: 'cell-sub' }, 'Let in by the console') : null,
           deadline ? h('span', { class: 'cell-sub' }, deadline) : null,
         );
@@ -540,7 +546,10 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           const p = parseSizes(x.sizes, r.sizes);
           if ('problem' in p) return h('p', { class: 'dialog__text soft' }, p.problem);
           const total = p.sizes.reduce((n, s) => n + s.stock, 0);
-          return h('p', { class: 'dialog__text', data: { testid: 'live-sizes-preview' } }, `${formatCount(total)} ${total === 1 ? 'piece' : 'pieces'} in all · announced as « ${(x.quantityLine ?? '').trim() || defaultQuantityLine(total)} »`);
+          // IN-01: the stock never below the pieces the house guarantees (the server refuses the save).
+          const warning = stockWarning(total, r.guaranteed);
+          const preview = h('p', { class: 'dialog__text', data: { testid: 'live-sizes-preview' } }, `${formatCount(total)} ${total === 1 ? 'piece' : 'pieces'} in all · announced as « ${(x.quantityLine ?? '').trim() || defaultQuantityLine(total)} »`);
+          return warning ? h('div', null, preview, h('p', { class: 'dialog__text', data: { testid: 'live-sizes-guaranteed' } }, warning)) : preview;
         },
       },
     );
@@ -746,6 +755,8 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         { label: 'Sizes', value: h('span', { data: { testid: 'live-sizes' } }, sizesLine(r.sizes)) },
         { label: 'Pieces', value: formatCount(r.quantity) },
         { label: 'Quantity line', value: h('span', { data: { testid: 'live-quantity-line' } }, r.quantityLine), note: r.editable ? undefined : 'Announced: only ADD PIECES raises a stock now.' },
+        // IN-01: the places the house guarantees, first in line in their size.
+        ...(r.guaranteed.places > 0 ? [{ label: 'Guaranteed', value: h('span', { data: { testid: 'live-guaranteed' } }, guaranteedText(r.guaranteed)), note: 'First in line in their size, listed first.' }] : []),
         { label: 'Stock location', value: h('span', { data: { testid: 'live-location' } }, r.location?.name ?? 'None yet'), note: r.locationId ? undefined : 'The default location' },
       ]),
       { id: 'live-part-sizes', tools: edit('Edit', 'live-edit-sizes', sizesPart) },
@@ -1007,6 +1018,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     // Once published, the board leads, the intelligence of the release's stage after its people; a draft opens on its
     // publication, then its planner and forecast.
     ...(published ? [boardSection, entriesSection, servicesSection, ...readings, ...best, releaseSection] : [releaseSection, ...readings, ...best]),
+    ...(parent ? [] : [guaranteesSection(guarantees.items, 'LIVE')]),
     h('div', { class: 'grid grid--2 live__parts' }, ...ownParts),
   );
 

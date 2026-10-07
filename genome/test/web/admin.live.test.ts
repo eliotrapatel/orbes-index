@@ -145,6 +145,7 @@ function release(o: Partial<LiveRelease> = {}): LiveRelease {
     seedHash: 'ab'.repeat(32),
     afterRoom: null,
     afterRoomOf: null,
+    guaranteed: { places: 0, pieces: 0 },
     ...o,
   };
 }

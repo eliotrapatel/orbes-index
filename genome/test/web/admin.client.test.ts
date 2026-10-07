@@ -135,3 +135,122 @@ describe('the client sheet (N4)', () => {
     expect(RELEASE_KIND_LABELS).toEqual({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW' });
   });
 });
+
+// ── THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01) ─────────────────────────────
+
+import type { AdminGuarantee as ServerGuarantee, AdminReleaseGuarantee as ServerReleaseGuarantee, GrantOutcome as ServerGrant, GuaranteeSettingsSheet as ServerSettings } from '../../src/server/services/guarantees.js';
+import { GUARANTEE_NOTE_MAX, GUARANTEE_PIECES, GUARANTEE_VALID_DAYS } from '../../src/server/services/guarantees.js';
+import {
+  changeInput,
+  changeProblem,
+  coversText,
+  drawGuaranteeLine,
+  GRANT_HINTS,
+  grantInput,
+  grantProblem,
+  grantToast,
+  grantValues,
+  GUARANTEE_LIMITS,
+  GUARANTEE_STATE_LABELS,
+  guaranteeActions,
+  guaranteedText,
+  modelOptions,
+  placesLeftForDraw,
+  releaseOptions,
+  settingsInput,
+  settingsProblem,
+  stockWarning,
+} from '../../src/web/admin/model/guarantees.js';
+import { CAPABILITY_MIN_ROLE } from '../../src/web/admin/model/permissions.js';
+import { toneOf } from '../../src/web/admin/model/tone.js';
+import { GUARANTEE_STATES as WEB_STATES } from '../../src/web/admin/types.js';
+import { GUARANTEE_STATES as SERVER_STATES } from '../../src/server/services/guarantees.js';
+
+export const guaranteeFits = (g: Json<ServerGuarantee>): web.Guarantee => g;
+export const releaseGuaranteeFits = (g: Json<ServerReleaseGuarantee>): web.ReleaseGuarantee => g;
+export const grantFits = (g: Json<ServerGrant>): web.GuaranteeGrant => g;
+export const guaranteeSettingsFits = (s: Json<ServerSettings>): web.GuaranteeSettings => s;
+
+describe('THE HOUSE’S GUARANTEE in the console (IN-01)', () => {
+  const g = (o: Partial<web.Guarantee> = {}): web.Guarantee =>
+    ({ id: 'g', scope: 'MODEL', target: { kind: 'MODEL', id: 'm', name: 'MONOLITHE', variant: null }, pieces: 1, validUntil: '2026-12-31T22:59:59.999Z', visible: true, note: null, status: 'ACTIVE', state: 'WAITING', ...o }) as web.Guarantee;
+
+  it('holds the server’s bounds, states, roles and tones', () => {
+    expect(typeof guaranteeFits).toBe('function');
+    expect(GUARANTEE_LIMITS).toEqual({ pieces: { min: GUARANTEE_PIECES.min, max: GUARANTEE_PIECES.max }, validDays: { min: GUARANTEE_VALID_DAYS.min, max: GUARANTEE_VALID_DAYS.max }, note: GUARANTEE_NOTE_MAX });
+    expect([...WEB_STATES]).toEqual([...SERVER_STATES]);
+    expect(Object.keys(GUARANTEE_STATE_LABELS)).toEqual([...SERVER_STATES]);
+    expect(Object.values(GUARANTEE_STATE_LABELS)).toEqual(['WAITING FOR A RELEASE', 'SET ASIDE', 'ENTERED', 'USED', 'EXPIRED', 'REVOKED']);
+    expect([CAPABILITY_MIN_ROLE.grantGuarantee, CAPABILITY_MIN_ROLE.manageGuaranteeSettings]).toEqual(['OPERATOR', 'ADMIN']);
+    expect(SERVER_STATES.map((s) => toneOf('guarantee', s))).toEqual(['outline', 'outline', 'solid', 'solid', 'muted', 'alert']);
+  });
+
+  it('says what a guarantee covers: the next release of a model (a variant after its name), of a collection, or a release', () => {
+    expect(coversText(g())).toBe('Next release of MONOLITHE');
+    expect(coversText(g({ target: { kind: 'MODEL', id: 'm', name: 'MONOLITHE', variant: 'Blue' } }))).toBe('Next release of MONOLITHE · Blue');
+    expect(coversText(g({ target: { kind: 'COLLECTION', id: 'c', name: 'ÉCLIPSE', variant: null } }))).toBe('Next release of the ÉCLIPSE collection');
+    expect(coversText(g({ target: { kind: 'RELEASE', id: 'd', name: 'MONOLITHE BLUE', variant: null } }))).toBe('MONOLITHE BLUE');
+    const models = [
+      { id: 'a', name: 'MONOLITHE', active: true, discontinuedAt: null, variantOf: null, variantLabel: 'Steel' },
+      { id: 'b', name: 'MONOLITHE', active: true, discontinuedAt: null, variantOf: { id: 'a', name: 'MONOLITHE', label: 'Steel' }, variantLabel: 'Blue' },
+      { id: 'c', name: 'ZENITH', active: false, discontinuedAt: null, variantOf: null, variantLabel: null },
+    ] as unknown as web.Model[];
+    expect(modelOptions(models)).toEqual([{ value: 'a', label: 'MONOLITHE' }, { value: 'b', label: 'MONOLITHE · Blue' }]);
+    expect(GRANT_HINTS.model).toBe('A main model covers its variants; a variant covers itself.');
+  });
+
+  it('offers the draws in DRAFT, UPCOMING or OPEN and the LIVE RELEASES not ended, never an after-room, each with its rule', () => {
+    const draw = (id: string, state: web.Drop['state']) => ({ id, title: id.toUpperCase(), state }) as web.Drop;
+    const live = (id: string, o: Partial<web.LiveRelease>) => ({ id, title: id.toUpperCase(), phase: 'ANNOUNCED', over: false, afterRoomOf: null, access: { text: 'owners from PLATINE' }, ...o }) as web.LiveRelease;
+    const options = releaseOptions(
+      [draw('a', 'DRAFT'), draw('b', 'UPCOMING'), draw('c', 'OPEN'), draw('d', 'CLOSED'), draw('e', 'DRAWN'), draw('f', 'CANCELLED')],
+      [live('g', {}), live('h', { phase: 'ENDED' }), live('i', { over: true }), live('j', { afterRoomOf: { id: 'g', title: 'G' } })],
+    );
+    expect(options.map((o) => o.value)).toEqual(['a', 'b', 'c', 'g']);
+    expect(options[3]!.rule).toBe('A LIVE RELEASE for owners from PLATINE. A holder of the guarantee enters whatever the rule.');
+  });
+
+  it('checks a grant before it is sent, then sends only its target, pieces, day, shown and note; its toast says where it was set aside', () => {
+    const start = grantValues({ pieces: 1, visible: true, defaultValidUntil: '2027-01-30' });
+    expect(start).toMatchObject({ scope: 'MODEL', pieces: '1', validUntil: '2027-01-30', visible: 'true' });
+    expect(grantProblem(start, '2026-11-01')).toBe('Choose the model.');
+    expect(grantProblem({ ...start, scope: 'COLLECTION' }, '2026-11-01')).toBe('Choose the collection.');
+    expect(grantProblem({ ...start, scope: 'RELEASE' }, '2026-11-01')).toBe('Choose the release.');
+    const v = { ...start, modelId: 'm1', note: '  Waited at the boutique.  ' };
+    expect(grantProblem(v, '2026-11-01')).toBeNull();
+    expect(grantProblem({ ...v, pieces: '6' }, '2026-11-01')).toBe('A guarantee covers 1 to 5 pieces.');
+    expect(grantProblem({ ...v, validUntil: '2026-10-31' }, '2026-11-01')).toBe('Valid until is today or later.');
+    expect(grantProblem({ ...v, note: 'x'.repeat(501) }, '2026-11-01')).toBe('A note has at most 500 characters.');
+    expect(grantInput(v)).toEqual({ scope: 'MODEL', targetId: 'm1', pieces: 1, validUntil: '2027-01-30', visible: true, note: 'Waited at the boutique.' });
+    expect(grantInput({ ...v, scope: 'RELEASE', releaseId: 'd1', visible: '', note: '' })).toMatchObject({ targetId: 'd1', visible: false, note: null });
+    expect(grantToast({ setAsideFor: { id: 'd', title: 'MONOLITHE BLUE' } })).toBe('Guarantee granted. Set aside for MONOLITHE BLUE.');
+    expect(grantToast({ setAsideFor: null })).toBe('Guarantee granted. It is set aside when the next release is published.');
+  });
+
+  it('changes only what changed, while ACTIVE, for a role that grants', () => {
+    const x = g({ pieces: 2, note: 'Old.' });
+    const same = { pieces: '2', validUntil: '2026-12-31', visible: 'true', note: 'Old.' };
+    expect(changeProblem(x, same, '2026-11-01')).toBe('Nothing has changed.');
+    expect(changeInput(x, { ...same, pieces: '3', visible: '' })).toEqual({ pieces: 3, visible: false });
+    expect(changeInput(x, { ...same, note: '' })).toEqual({ note: null });
+    expect(changeInput(x, { ...same, validUntil: '2027-02-01' })).toEqual({ validUntil: '2027-02-01' });
+    expect(guaranteeActions(x, true)).toEqual({ change: true, revoke: true });
+    expect(guaranteeActions(g({ status: 'USED' }), true)).toEqual({ change: false, revoke: false });
+    expect(guaranteeActions(x, false)).toEqual({ change: false, revoke: false });
+  });
+
+  it('says a release’s guaranteed places and pieces, the draw’s sentence, the places left, the stock’s floor, the defaults', () => {
+    expect(guaranteedText({ places: 0, pieces: 0 })).toBe('None');
+    expect(guaranteedText({ places: 2, pieces: 3 })).toBe('2 places · 3 pieces');
+    expect(guaranteedText({ places: 1, pieces: 1 })).toBe('1 place · 1 piece');
+    const d = { quantity: 6, heldPieces: 1, guaranteedEntered: { places: 2, pieces: 3 } };
+    expect(placesLeftForDraw(d)).toBe(2);
+    expect(drawGuaranteeLine(d)).toBe('2 guaranteed places, 3 pieces, are selected first; the draw ranks the other entries for the 2 places left.');
+    expect(drawGuaranteeLine({ ...d, guaranteedEntered: { places: 0, pieces: 0 } })).toBeNull();
+    expect(stockWarning(2, { pieces: 3 })).toBe('3 pieces of this release are guaranteed by the house: the stock cannot go below.');
+    expect(stockWarning(3, { pieces: 3 })).toBeNull();
+    expect(settingsProblem({ validDays: '731', pieces: '1' })).toBe('Valid for is 1 to 730 days.');
+    expect(settingsProblem({ validDays: '90', pieces: '6' })).toBe('A guarantee covers 1 to 5 pieces.');
+    expect(settingsInput({ validDays: '90', pieces: '2', visible: '' })).toEqual({ validDays: 90, pieces: 2, visible: false });
+  });
+});

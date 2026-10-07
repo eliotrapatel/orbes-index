@@ -1018,7 +1018,7 @@ export const RELEASES = Object.freeze({
   noObligation: 'A place drawn obliges you to nothing: ORBES Client Services concludes each sale with you, and sends no email. Your entries are followed in MY PIECES.',
   /** The rule of the draw, exactly as the server applies it (services/drops.ts drawOrder). */
   rule:
-    'The entries are ranked by tier, from PALLADIUM to PLATINE to TITANE, then the accounts that hold no piece; then by seniority, the full years since the account’s first piece, the most first; then by the SHA-256 of the 32 bytes of the seed followed by the entry’s identifier in lower-case letters, in increasing hexadecimal order. The tier and the seniority are those of the moment of the draw. The first ranks, as many as there are pieces left after the direct reservations of PLATINE and PALLADIUM owners, are selected; the next are on the waiting list, in that order.',
+    'The entries are ranked by tier, from PALLADIUM to PLATINE to TITANE, then the accounts that hold no piece; then by seniority, the full years since the account’s first piece, the most first; then by the SHA-256 of the 32 bytes of the seed followed by the entry’s identifier in lower-case letters, in increasing hexadecimal order. The tier and the seniority are those of the moment of the draw. The first ranks, as many as there are pieces left after the direct reservations of PLATINE and PALLADIUM owners, are selected; the next are on the waiting list, in that order. Places guaranteed by ORBES are selected first, for the pieces they cover, and listed apart without a rank.',
   commitment: 'The seed was drawn when the release was created, and its fingerprint published with it. Once the draw has taken place, the seed is published here: its SHA-256 is that fingerprint, and anyone can rank the entries below again.',
   /** Labels in the display face, so no figure: the commitment's sentence names SHA-256. */
   seedHash: 'SEED FINGERPRINT',
@@ -1042,6 +1042,47 @@ export const RELEASES = Object.freeze({
     label: 'EARLY ACCESS',
     recall: 'PLATINE and PALLADIUM owners reserve a place in each release directly, before it opens to everyone: first come, first served, within its pieces. Each release’s page gives the times.',
   }),
+});
+
+/**
+ * THE HOUSE'S GUARANTEE (plan NEXT-NINE, §3.3 IN-01): a place at a coming release, granted by ORBES Client Services to one
+ * collector, shown only when Client Services chose to show it (one not shown leaves no mark anywhere in the app). It
+ * names a place in a release and is never said of authenticity: never on a scan result, a certificate or a piece's page.
+ * No NOW line and no notification.
+ */
+export const GUARANTEE = Object.freeze({
+  /** The account sheet's block, the draw page's box, the label in MY PIECES. */
+  title: 'THE HOUSE’S GUARANTEE',
+  /** The account sheet's sentence, by what it covers. */
+  model: (name: string) => `A guaranteed place at the next release of ${name}.`,
+  collection: (name: string) => `A guaranteed place at the next release of the ${name} collection.`,
+  release: (title: string) => `A guaranteed place at ${title}.`,
+  /** A chosen release whose name may not be said yet. */
+  comingRelease: 'A guaranteed place at a coming release.',
+  rows: Object.freeze({ release: 'RELEASE', pieces: 'PIECES', validUntil: 'VALID UNTIL' }),
+  /** The RELEASE row before a LIVE RELEASE's name stage. */
+  unnamed: 'TO BE REVEALED',
+  note: 'Granted by ORBES. Personal and used once: it cannot be transferred.',
+  /** `1 piece`, `2 pieces`: inside a sentence. */
+  pieces: (n: number) => (n === 1 ? '1 piece' : `${n} pieces`),
+  /** A draw's page, YOUR ENTRY. */
+  box: Object.freeze({
+    upcoming: (pieces: string) => `ORBES guarantees you a place in this release. Enter the draw once entries open: you are selected first, for ${pieces}.`,
+    open: (pieces: string) => `ORBES guarantees you a place in this release. Enter the draw: you are selected first, for ${pieces}.`,
+    entered: (pieces: string) => `You are entered with the house’s guarantee: you are selected first at the draw, for ${pieces}.`,
+    reservation: 'Your reservation uses the house’s guarantee.',
+  }),
+  /** THE ENTRIES, above the ranked list, once drawn. */
+  list: Object.freeze({
+    title: 'GUARANTEED BY THE HOUSE',
+    lead: 'Set aside before the draw: selected first, without a rank, and left out of the ranking below.',
+    line: (pieces: number) => `GUARANTEED · ${pieces === 1 ? '1 PIECE' : `${pieces} PIECES`}`,
+  }),
+  /** A LIVE RELEASE's page: announced, under I'LL BE THERE; in the room, under the size chooser. */
+  liveAnnounced: 'ORBES guarantees you a place in this release. Be in the room at the opening: you are first in line in your size.',
+  liveRoom: (pieces: number) => `You are first in line in your size, for up to ${pieces === 1 ? '1 piece' : `${pieces} pieces`}.`,
+  /** The server's refusal of a size its guarantee cannot be given in (services/live.ts, LIVE_GUARANTEE_SIZE_FULL). */
+  sizeFull: 'Your guaranteed place cannot be given in this size: choose another size.',
 });
 
 /**
@@ -1295,8 +1336,8 @@ export const LIVE = Object.freeze({
   /** How the places are drawn at the opening (the release's tier priority). */
   rule: (tierPriority: boolean) =>
     tierPriority
-      ? 'Places are drawn by tier, then at random, among the collectors present at the opening. Those who arrive later join behind, in order of arrival.'
-      : 'Places are drawn at random among the collectors present at the opening. Those who arrive later join behind, in order of arrival.',
+      ? 'Places are drawn by tier, then at random, among the collectors present at the opening. Those who arrive later join behind, in order of arrival. Places guaranteed by ORBES come first in their size.'
+      : 'Places are drawn at random among the collectors present at the opening. Those who arrive later join behind, in order of arrival. Places guaranteed by ORBES come first in their size.',
   // The room
   untilOpening: 'UNTIL THE OPENING',
   inRoom: (n: number) => `${n} IN THE ROOM`,

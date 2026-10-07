@@ -6,7 +6,8 @@
  * of a drop, a model discontinued or reinstated, a LIVE RELEASE ended now or
  * an entry removed from it, a returned piece archived, the settings of the
  * orders: their delays, the locations, the carriers and the shipping rates; a
- * conversation of the Messages board assigned; THE PROGRAM of the club's tiers). Every role
+ * conversation of the Messages board assigned; THE PROGRAM of the club's tiers; the defaults of THE HOUSE'S
+ * GUARANTEE). Every role
  * changes its own password and second factor. RETAIL (A-08), under AUDITOR,
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
@@ -68,6 +69,10 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   assignMessages: 'ADMIN',
   /** The Yearly care board (BP-19 T6): send the prepaid label, receive the piece, ship it back, complete, cancel. */
   manageCare: 'OPERATOR',
+  /** THE HOUSE'S GUARANTEE (IN-01): grant one from the client sheet, change it, revoke it. */
+  grantGuarantee: 'OPERATOR',
+  /** THE HOUSE'S GUARANTEE (IN-01): the Grant dialog's defaults in Orders → Settings. */
+  manageGuaranteeSettings: 'ADMIN',
   /**
    * The orders (plan LIVE RELEASE+): their steps (paid, shipped, delivered, cancelled), their location, terms and buyer,
    * the piece picked from the stock; the buyer's details in clear (an AUDITOR reads them masked).

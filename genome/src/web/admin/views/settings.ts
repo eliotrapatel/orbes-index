@@ -15,13 +15,16 @@
  *    and PALLADIUM, per currency and service, '—' for none (none preset: the order then carries no shipping, as
  *    before, unless Client Services enters a fee on it). Edit shipping (ADMIN) sets them whole, audited
  *    `order.shipping_rates.update`.
+ *  - House guarantee (plan NEXT-NINE, IN-01): the Grant dialog's defaults, valid for 90 days (1 to 730), 1 piece (1 to
+ *    5), shown to the client; who set them and when. Changed by an ADMIN, audited `guarantee.settings`.
  */
 import { h } from '../../shared/dom.js';
 import { formatDateTime } from '../format.js';
 import { alertsInput, alertsProblem, ALERT_LIMITS, carrierProblem, LOGISTICS_LIMITS, locationProblem, TRACKING_PLACEHOLDER, trackingLink } from '../model/orders.js';
+import { GUARANTEE_LIMITS, PIECES_OPTIONS, piecesText, settingsInput, settingsProblem, settingsValues } from '../model/guarantees.js';
 import { can } from '../model/permissions.js';
 import { rateField, rateText, ratesChanged, ratesInput, ratesProblem, ratesValues, SHIPPING_SERVICE_LABELS } from '../model/program.js';
-import { HOUSE_CURRENCIES, SHIPPING_SERVICES, type Carrier, type HouseCurrency, type OrderAlertSettings, type ShippingRatesSheet, type StockLocation } from '../types.js';
+import { HOUSE_CURRENCIES, SHIPPING_SERVICES, type Carrier, type GuaranteeSettings, type HouseCurrency, type OrderAlertSettings, type ShippingRatesSheet, type StockLocation } from '../types.js';
 import { href } from '../router.js';
 import { button, defList, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
@@ -34,7 +37,7 @@ const EXAMPLE_TRACKING = '6A12345678901';
 const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
 export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
-  const [alerts, locations, carriers, rates] = await Promise.all([ctx.api.orderAlerts(), ctx.api.locations(), ctx.api.carriers(), ctx.api.shippingRates()]);
+  const [alerts, locations, carriers, rates, guarantee] = await Promise.all([ctx.api.orderAlerts(), ctx.api.locations(), ctx.api.carriers(), ctx.api.shippingRates(), ctx.api.guaranteeSettings()]);
   const admin = can(ctx.session.admin.role, 'manageLogistics');
   const done = (msg: string) => (v: unknown) => {
     if (!v) return;
@@ -54,6 +57,44 @@ export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
     locationsSection(ctx, locations.items, admin, done),
     carriersSection(ctx, carriers.items, admin, done),
     shippingSection(ctx, rates, admin, done),
+    guaranteeSection(ctx, guarantee, can(ctx.session.admin.role, 'manageGuaranteeSettings'), done),
+  );
+}
+
+/** IN-01: the Grant dialog's defaults, each grant setting its own terms. */
+function guaranteeSection(ctx: ViewContext, g: GuaranteeSettings, admin: boolean, done: (msg: string) => (v: unknown) => void): HTMLElement {
+  const edit = () =>
+    void openDialog({
+      title: 'House guarantee',
+      eyebrow: 'Settings · House guarantee',
+      body: h('p', { class: 'dialog__text' }, 'The starting values of Grant a guarantee on the client sheet. Each grant may set its own.'),
+      fields: [
+        {
+          name: 'validDays',
+          label: 'Valid for (days)',
+          required: true,
+          maxlength: 3,
+          value: settingsValues(g).validDays,
+          hint: `${GUARANTEE_LIMITS.validDays.min} to ${GUARANTEE_LIMITS.validDays.max}: from the day it is granted.`,
+        },
+        { name: 'pieces', label: 'Pieces', kind: 'select', options: [...PIECES_OPTIONS], value: settingsValues(g).pieces },
+        { name: 'visible', label: 'Shown to the client', kind: 'checkbox', value: settingsValues(g).visible },
+      ],
+      validate: (v) => settingsProblem(v) ?? (JSON.stringify(settingsInput(v)) === JSON.stringify({ validDays: g.validDays, pieces: g.pieces, visible: g.visible }) ? 'Nothing has changed.' : null),
+      confirmLabel: 'Save',
+      submit: async (v) => {
+        await ctx.api.setGuaranteeSettings(settingsInput(v));
+      },
+    }).then(done('House guarantee saved.'));
+  return section(
+    'House guarantee',
+    defList([
+      { label: 'Valid for', value: h('span', { data: { testid: 'guarantee-valid-days' } }, days(g.validDays)), note: 'A guarantee covers a release that opens by its date.' },
+      { label: 'Pieces', value: h('span', { data: { testid: 'guarantee-pieces' } }, piecesText(g.pieces)) },
+      { label: 'Shown to the client', value: h('span', { data: { testid: 'guarantee-visible' } }, g.visible ? 'Yes' : 'No') },
+      { label: 'Set', value: g.updatedAt ? `${formatDateTime(g.updatedAt)}${g.updatedBy ? ` · ${g.updatedBy.email}` : ''}` : 'The defaults' },
+    ]),
+    { id: 'settings-guarantee', tools: admin ? [button('Edit', { kind: 'ghost', testId: 'guarantee-settings-edit', onClick: edit })] : [] },
   );
 }
 

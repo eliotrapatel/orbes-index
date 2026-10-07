@@ -274,6 +274,11 @@ export interface LiveOwnState {
   access: LiveAccess;
   entry: LiveEntryView | null;
   interest: LiveInterestView | null;
+  /**
+   * IN-01: the house's guarantee set aside for this release for the account, its pieces, when it is shown to the client;
+   * null otherwise (one not shown leaves no mark).
+   */
+  guarantee: { pieces: number } | null;
 }
 
 /** An entry of the account in MY PIECES, with its release (each part of it from its stage). */
@@ -541,7 +546,7 @@ export class LiveRoomService {
   /** The account's own entry and interest in a release it may read (`viewer` first). */
   async own(accountId: string, viewer: LiveViewer): Promise<LiveOwnState> {
     const now = this.clock();
-    const [views, interest] = await Promise.all([
+    const [views, interest, guarantee] = await Promise.all([
       liveEntryViews(this.db, this.turnKey, { dropId: viewer.dropId, accountIds: [accountId] }, now),
       this.db
         .selectFrom('live_interest as i')
@@ -550,11 +555,20 @@ export class LiveRoomService {
         .where('i.drop_id', '=', viewer.dropId)
         .where('i.account_id', '=', accountId)
         .executeTakeFirst(),
+      this.db
+        .selectFrom('house_guarantees')
+        .select('pieces')
+        .where('account_id', '=', accountId)
+        .where('covered_drop_id', '=', viewer.dropId)
+        .where('status', '=', 'ACTIVE')
+        .where('visible', '=', true)
+        .executeTakeFirst(),
     ]);
     return {
       access: viewer.access,
       entry: views.get(accountId) ?? null,
       interest: interest ? { dropId: interest.drop_id, size: { id: interest.size_id, label: interest.label }, since: interest.created_at } : null,
+      guarantee: guarantee ? { pieces: guarantee.pieces } : null,
     };
   }
 

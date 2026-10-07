@@ -571,6 +571,10 @@ export interface AdminDrop {
   reserved: number;
   /** IN-01: the house's guarantees set aside for the release or used in it: how many places, how many pieces. */
   guaranteed: ReleaseGuaranteed;
+  /** IN-01: the pieces of the places held or sold (SELECTED, CONFIRMED): a guaranteed place may hold several. */
+  heldPieces: number;
+  /** IN-01: the entries waiting for the draw with the house's guarantee: selected first at the draw, for their pieces. */
+  guaranteedEntered: ReleaseGuaranteed;
 }
 
 /** An entry as the console lists it; the routes mask the email for an AUDITOR. */
@@ -615,6 +619,9 @@ export interface DrawOutcome {
   guaranteed: number;
   guaranteedPieces: number;
 }
+
+/** A drop's entries counted (the console): by status, the direct reservations, the pieces held or sold, the guaranteed entries waiting for the draw. */
+type Tally = { counts: DropEntryCounts; reserved: number; heldPieces: number; guaranteedEntered: ReleaseGuaranteed };
 
 const EMPTY_COUNTS = (): DropEntryCounts => ({ ENTERED: 0, SELECTED: 0, WAITLISTED: 0, CONFIRMED: 0, LAPSED: 0, WITHDRAWN: 0 });
 
@@ -1580,8 +1587,8 @@ export class DropService {
    * The entries of each drop of `ids` by status, and how many of those SELECTED or CONFIRMED are direct reservations of
    * the early access (P-X02; isReservation): what the places held or sold owe to it.
    */
-  private async tallies(db: Db, ids: readonly string[]): Promise<Map<string, { counts: DropEntryCounts; reserved: number }>> {
-    const out = new Map<string, { counts: DropEntryCounts; reserved: number }>();
+  private async tallies(db: Db, ids: readonly string[]): Promise<Map<string, Tally>> {
+    const out = new Map<string, Tally>();
     if (ids.length === 0) return out;
     const rows = await db
       .selectFrom('drop_entries')
@@ -1593,14 +1600,21 @@ export class DropService {
           .countAll<number>()
           .filterWhere((w) => w.and([w('tier', 'is not', null), w('rank', 'is', null)]))
           .as('reserved'),
+        sql<number>`coalesce(sum(pieces), 0)`.as('pieces'),
+        eb.fn.countAll<number>().filterWhere('guarantee_id', 'is not', null).as('guaranteed'),
+        sql<number>`coalesce(sum(pieces) FILTER (WHERE guarantee_id IS NOT NULL), 0)`.as('guaranteed_pieces'),
       ])
       .where('drop_id', 'in', [...ids])
       .groupBy(['drop_id', 'status'])
       .execute();
     for (const r of rows) {
-      const t = out.get(r.drop_id) ?? { counts: EMPTY_COUNTS(), reserved: 0 };
+      const t = out.get(r.drop_id) ?? { counts: EMPTY_COUNTS(), reserved: 0, heldPieces: 0, guaranteedEntered: { places: 0, pieces: 0 } };
       t.counts[r.status] = Number(r.n);
-      if (r.status === 'SELECTED' || r.status === 'CONFIRMED') t.reserved += Number(r.reserved);
+      if (r.status === 'SELECTED' || r.status === 'CONFIRMED') {
+        t.reserved += Number(r.reserved);
+        t.heldPieces += Number(r.pieces);
+      }
+      if (r.status === 'ENTERED') t.guaranteedEntered = { places: Number(r.guaranteed), pieces: Number(r.guaranteed_pieces) };
       out.set(r.drop_id, t);
     }
     return out;
@@ -1616,7 +1630,7 @@ export class DropService {
   private adminView(
     r: DropReadRow,
     now: Date,
-    tally: { counts: DropEntryCounts; reserved: number } | undefined,
+    tally: Tally | undefined,
     creators: Map<string, string>,
     guaranteed: ReleaseGuaranteed | undefined,
   ): AdminDrop {
@@ -1647,6 +1661,8 @@ export class DropService {
       entries: tally?.counts ?? EMPTY_COUNTS(),
       reserved: tally?.reserved ?? 0,
       guaranteed: guaranteed ?? { places: 0, pieces: 0 },
+      heldPieces: tally?.heldPieces ?? 0,
+      guaranteedEntered: tally?.guaranteedEntered ?? { places: 0, pieces: 0 },
     };
   }
 

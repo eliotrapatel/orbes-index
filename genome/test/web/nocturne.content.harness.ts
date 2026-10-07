@@ -170,3 +170,36 @@ export function contentSuite(name: string): void {
     );
   });
 }
+
+/**
+ * Plan NEXT-NINE, IN-01: a guarantee not shown to its holder leaves no mark for it anywhere in the app. Each case opens a
+ * state (or a state's way there for another account) and checks that none of `absent` is shown, while each of
+ * `present` still is (the public GUARANTEED lines of a drawn release, unmarked).
+ */
+export function hiddenGuaranteeSuite(name: string, cases: readonly { state: UiState; absent: readonly RegExp[]; present?: readonly RegExp[] }[]): void {
+  describe.skipIf(!HAS_CHROMIUM)(`THE HOUSE'S GUARANTEE not shown, ${name}: no mark for its holder (Chromium)`, () => {
+    it(
+      `shows no box, block, line, label nor YOURS of a guarantee not shown in ${cases.length} screens`,
+      async () => {
+        const found: string[] = [];
+        await eachState(
+          cases.map((c) => c.state),
+          async (state, { stage, demo, browser }) => {
+            const c = cases.find((x) => x.state === state)!;
+            const opened = await openState(browser, stage, demo, state);
+            try {
+              const texts = await pageTexts(opened.page);
+              for (const re of c.absent) if (texts.some((t) => re.test(t))) found.push(`${state.id}: shows ${re}`);
+              for (const re of c.present ?? []) if (!texts.some((t) => re.test(t))) found.push(`${state.id}: does not show ${re}`);
+            } finally {
+              await opened.close();
+            }
+          },
+          () => {},
+        );
+        expect(found).toEqual([]);
+      },
+      SHARD_TIMEOUT_MS,
+    );
+  });
+}

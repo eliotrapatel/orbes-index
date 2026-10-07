@@ -1017,6 +1017,82 @@ export interface OwnerSheet {
   notes: ClientNote[];
   /** CS-01: the client's conversation with ORBES Client Services and its status; null when the client never wrote. */
   messages: { conversationId: string; status: ClientConversationStatus } | null;
+  /** IN-01: the house's guarantees granted to the client, the open ones first. */
+  guarantees: Guarantee[];
+}
+
+/** IN-01: a guarantee's state, computed by the server (never stored). */
+export const GUARANTEE_STATES = ['WAITING', 'SET_ASIDE', 'ENTERED', 'USED', 'EXPIRED', 'REVOKED'] as const;
+export type GuaranteeState = (typeof GUARANTEE_STATES)[number];
+
+/** IN-01: a guarantee on the client sheet (GET /api/admin/owners/:id `guarantees`). */
+export interface Guarantee {
+  id: string;
+  accountId: string;
+  scope: GuaranteeScope;
+  /** A model (its label among its variants), a collection, or a release (its title). */
+  target: { kind: GuaranteeScope; id: string; name: string; variant: string | null };
+  pieces: number;
+  /** The last instant it covers a release opening: the end of a day in Paris. */
+  validUntil: Iso;
+  visible: boolean;
+  note: string | null;
+  status: GuaranteeStatus;
+  state: GuaranteeState;
+  /** The release it is set aside for, or was used in. */
+  release: { id: string; title: string; mode: DropMode } | null;
+  entryId: string | null;
+  grantedAt: Iso;
+  grantedBy: { id: string; email: string } | null;
+  updatedAt: Iso | null;
+  updatedBy: { id: string; email: string } | null;
+  usedAt: Iso | null;
+  closedAt: Iso | null;
+  closedReason: 'USED' | 'RELEASE_ENDED' | 'RELEASE_CANCELLED' | 'REVOKED' | null;
+  revokeNote: string | null;
+}
+
+/** IN-01: POST /api/admin/owners/:id/guarantees. */
+export interface GuaranteeInput {
+  scope: GuaranteeScope;
+  targetId: string;
+  pieces: number;
+  /** A calendar day, YYYY-MM-DD (Paris). */
+  validUntil: string;
+  visible: boolean;
+  note: string | null;
+}
+
+/** IN-01: PATCH /api/admin/guarantees/:id. */
+export type GuaranteeChange = Partial<Pick<GuaranteeInput, 'pieces' | 'validUntil' | 'visible' | 'note'>>;
+
+/** IN-01: the answer to a grant: the guarantee, and the release it was set aside for at once (null: it waits). */
+export interface GuaranteeGrant {
+  guarantee: Guarantee;
+  setAsideFor: { id: string; title: string } | null;
+}
+
+/** IN-01: a guarantee on a release's page (GET /api/admin/drops/:id/guarantees), the email masked for an AUDITOR. */
+export interface ReleaseGuarantee {
+  id: string;
+  account: { id: string; email: string };
+  pieces: number;
+  visible: boolean;
+  state: GuaranteeState;
+  entry: { id: string; status: string } | null;
+  validUntil: Iso;
+  grantedAt: Iso;
+}
+
+/** IN-01: the Grant dialog's defaults (Orders → Settings, House guarantee). */
+export interface GuaranteeSettings {
+  validDays: number;
+  pieces: number;
+  visible: boolean;
+  /** Today in Paris plus `validDays`: the dialog's starting date. */
+  defaultValidUntil: string;
+  updatedAt: Iso | null;
+  updatedBy: { id: string; email: string } | null;
 }
 
 /** N4: an order on the client sheet: the board's card (without the collector) and the time it reached each step. */
@@ -1224,8 +1300,14 @@ export interface Drop {
   /** The seed, once drawn. */
   seed: string | null;
   entries: Record<DropEntryStatus, number>;
-  /** P-X02: of the entries SELECTED or CONFIRMED, those reserved directly during the early access. */
+  /** P-X02: of the entries SELECTED or CONFIRMED, those reserved directly during the early access (the guaranteed apart). */
   reserved: number;
+  /** IN-01: the house's guarantees set aside for the release or used in it. */
+  guaranteed: { places: number; pieces: number };
+  /** IN-01: the pieces of the places held or sold. */
+  heldPieces: number;
+  /** IN-01: the entries waiting for the draw with the house's guarantee: selected first, for their pieces. */
+  guaranteedEntered: { places: number; pieces: number };
 }
 
 /** POST /api/admin/drops; any field of PATCH /api/admin/drops/:id while a DRAFT (the description only once published). */
@@ -1261,6 +1343,10 @@ export interface DropEntry {
   respondBy: Iso | null;
   /** P-X02: a place reserved directly during the early access (its tier and seniority those of its request, no rank). */
   reserved: boolean;
+  /** IN-01: the entry uses the house's guarantee (GUARANTEED: no rank, no tier). */
+  guaranteed: boolean;
+  /** IN-01: the pieces of its place. */
+  pieces: number;
   handledBy: { id: string; email: string } | null;
   handledAt: Iso | null;
   note: string | null;
@@ -1273,6 +1359,9 @@ export interface DrawOutcome {
   places: number;
   selected: number;
   waitlisted: number;
+  /** IN-01: the guaranteed places selected first, and their pieces. */
+  guaranteed: number;
+  guaranteedPieces: number;
 }
 
 // ── The Club: the LIVE RELEASES ────────────────────────────────────────────
@@ -1351,6 +1440,8 @@ export interface LiveRelease extends LiveCard {
   afterRoom: LiveAfterRoom | null;
   /** An after-room's own page: the release it follows; null for a release. */
   afterRoomOf: { id: string; title: string } | null;
+  /** IN-01: the house's guarantees set aside for the release or used in it. */
+  guaranteed: { places: number; pieces: number };
 }
 
 /** Where the question after stands: never asked (OFF), until the release's end (WAITING), the week after it (OPEN), CLOSED. */
@@ -1532,6 +1623,8 @@ export interface LiveEntry {
   /** From the press of the seal to the secure, in milliseconds. */
   gestureMs: number | null;
   letIn: boolean;
+  /** IN-01: the entry uses the house's guarantee: first in line in its size. */
+  guaranteed: boolean;
 }
 
 /** A size on the live board: its pieces and its people. */

@@ -806,6 +806,6 @@ export function myLiveEntries(list: readonly LiveAccountEntry[]): MyEntryModel[]
       };
       return parent
         ? { id: e.id, dropId: x.release.id, href: afterRoomPath(parent), afterRoomOf: parent, title, stateLabel: LIVE.afterRoom.kind, entry }
-        : { id: e.id, dropId: x.release.id, href: releasePath(x.release.id), title, stateLabel: LIVE.kind, entry };
+        : { id: e.id, dropId: x.release.id, href: releasePath(x.release.id), title, stateLabel: LIVE.kind, entry, guaranteed: e.guaranteed === true };
     });
 }

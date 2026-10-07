@@ -16,6 +16,10 @@
  *   NEXT: PLATINE                         counts for none (the note); nothing when the status cannot be read
  *   3 more pieces … It adds:
  *   – Priority care …
+ *   THE HOUSE’S GUARANTEE                 one block per guarantee shown to the client (plan NEXT-NINE, IN-01), under a
+ *   A guaranteed place at …               hairline: what it covers, its RELEASE once set aside (a link to its page; TO BE
+ *   RELEASE · …  PIECES · 1               REVEALED before a LIVE RELEASE's name), its pieces, until when, and that it is
+ *   VALID UNTIL · 31 DECEMBER 2026        personal; nothing of a guarantee not shown
  *   ─────────────────────────────────
  *   MESSAGES                    NEW ›     the conversation with ORBES Client Services (plan NEXT-NINE, CS-01): NEW
  *                                         while an answer is unread; its view in the sheet (below)
@@ -39,6 +43,7 @@ import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { ACCOUNT, ACCOUNT_PASSWORD, MESSAGES, PIECES, SOUND, TIER } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
+import { guaranteeBlocks } from '../guarantee-model.js';
 import { messageProblem, threadModel, type ConcerningTarget, type ThreadModel } from '../messages-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSwitch } from '../sound.js';
@@ -212,6 +217,7 @@ export class AccountSheet {
     const out: (HTMLElement | null)[] = [
       h('div', { class: 'n-px' }, h('p', { class: 'n-g n-lb', text: ACCOUNT.signedInAs }), h('p', { class: 'n-account__email', text: email })),
       this.tierBlock(),
+      ...this.guaranteeBlocks(),
       h(
         'div',
         { class: 'n-account__rows' },
@@ -287,6 +293,28 @@ export class AccountSheet {
       'section',
       { class: ['n-px', 'n-account__tier', m.badge ? null : 'n-account__club'], attrs: { 'aria-labelledby': 'account-tier' } },
       ...parts.filter((p): p is HTMLElement => p !== null),
+    );
+  }
+
+  /** THE HOUSE'S GUARANTEE (IN-01): one block per guarantee shown to the client, under YOUR TIER; none without one. */
+  private guaranteeBlocks(): HTMLElement[] {
+    return guaranteeBlocks(this.club).map((b) =>
+      h(
+        'section',
+        { class: 'n-px n-account__guarantee', attrs: { 'aria-labelledby': `account-guarantee-${b.id}` } },
+        h('p', { class: 'n-g n-lb', id: `account-guarantee-${b.id}`, text: b.title }),
+        h('p', { class: 'n-sm n-account__guarantee-sentence' }, ...withNumerals(b.sentence)),
+        definitionList(
+          b.rows.map((r) => [
+            r.label,
+            r.releaseId
+              ? textLink(r.value, { href: r.href, onOpen: () => this.toConcerning({ to: 'release', id: r.releaseId! }), extraClass: 'n-account__guarantee-release' })
+              : h('span', null, ...withNumerals(r.value)),
+          ]),
+          { kind: 'kv', extraClass: 'n-account__guarantee-rows' },
+        ),
+        h('p', { class: 'n-sm n-account__guarantee-note', text: b.note }),
+      ),
     );
   }
 

@@ -30,6 +30,28 @@
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, formatDateTime, humanize, shortHash } from '../format.js';
 import { clubBlockLines, tierStanding } from '../model/club.js';
+import {
+  changeInput,
+  changeProblem,
+  changeValues,
+  COVER_OPTIONS,
+  coversText,
+  GRANT_HINTS,
+  grantInput,
+  grantProblem,
+  grantToast,
+  grantValues,
+  GUARANTEE_LIMITS,
+  GUARANTEE_SECTION_NOTE,
+  GUARANTEE_STATE_LABELS,
+  guaranteeActions,
+  modelOptions,
+  parisToday,
+  PIECES_OPTIONS,
+  releaseOptions,
+  REVOKE_TEXT,
+  validUntilText,
+} from '../model/guarantees.js';
 import { STATUS_LABELS } from '../model/messages.js';
 import { formatMoney } from '../model/live.js';
 import { CHANNEL_LABELS, LATE_LABELS, sizeText } from '../model/orders.js';
@@ -37,7 +59,7 @@ import { INTEREST_OUTCOME_LABELS, NOTE_ABOUT_LABELS, orderSteps, participationLi
 import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
-import type { ClientRelease, OwnerSheet } from '../types.js';
+import type { ClientRelease, Guarantee, OwnerSheet } from '../types.js';
 import { button, busy, defList, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
@@ -187,6 +209,7 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
     ),
     ordersPanel(sheet),
     releasesPanel(sheet),
+    guaranteesPanel(ctx, sheet),
     answersPanel(sheet),
     interestPanel(sheet),
     segmentsPanel(sheet),
@@ -263,6 +286,121 @@ function releasesPanel(sheet: OwnerSheet): HTMLElement {
       { empty: 'No release taken part in.', caption: 'Releases' },
     ),
     { id: 'releases', note: participationLine(sheet.releases) },
+  );
+}
+
+/**
+ * IN-01: THE HOUSE'S GUARANTEE, after Releases: the client's guarantees (what each covers, its pieces, until when, shown
+ * or not, its state, its release, who granted it and its note); Grant a guarantee (OPERATOR, the account ACTIVE), Change
+ * and Revoke while it is ACTIVE.
+ */
+function guaranteesPanel(ctx: ViewContext, sheet: OwnerSheet): HTMLElement {
+  const o = sheet.owner;
+  const canGrant = can(ctx.session.admin.role, 'grantGuarantee');
+  const today = parisToday(ctx.now());
+  const done = (msg: string | ((r: unknown) => string)) => (r: unknown) => {
+    if (!r) return;
+    notify(typeof msg === 'string' ? msg : msg(r));
+    ctx.reload();
+  };
+  const termsFields = (v: Record<string, string>) => [
+    { name: 'pieces', label: 'Pieces', kind: 'select' as const, options: [...PIECES_OPTIONS], value: v.pieces, hint: GRANT_HINTS.pieces },
+    { name: 'validUntil', label: 'Valid until', kind: 'date' as const, required: true, value: v.validUntil, hint: GRANT_HINTS.validUntil },
+    { name: 'visible', label: 'Shown to the client', kind: 'checkbox' as const, value: v.visible, hint: GRANT_HINTS.visible },
+    { name: 'note', label: 'Note', kind: 'textarea' as const, maxlength: GUARANTEE_LIMITS.note, value: v.note, hint: GRANT_HINTS.note },
+  ];
+  const grant = async () => {
+    const [settings, models, collections, draws, lives] = await Promise.all([
+      ctx.api.guaranteeSettings(),
+      ctx.api.models(),
+      ctx.api.collections(),
+      ctx.api.drops(1, 50),
+      ctx.api.liveReleases(1, 50),
+    ]);
+    const open = lives.items.filter((r) => r.phase !== 'ENDED' && r.phase !== 'CANCELLED' && !r.over);
+    const releases = releaseOptions(draws.items, await Promise.all(open.map((r) => ctx.api.liveRelease(r.id))));
+    const start = grantValues(settings);
+    let granted: unknown = null;
+    const r = await openDialog({
+      title: 'Grant the house’s guarantee',
+      eyebrow: o.email,
+      fields: [
+        { name: 'scope', label: 'Covers', kind: 'select', options: [...COVER_OPTIONS], value: start.scope },
+        { name: 'modelId', label: 'Model', kind: 'select', options: [{ value: '', label: 'Choose a model' }, ...modelOptions(models.items)], value: '', hint: GRANT_HINTS.model },
+        { name: 'collectionId', label: 'Collection', kind: 'select', options: [{ value: '', label: 'Choose a collection' }, ...collections.items.map((c) => ({ value: c.id, label: c.name }))], value: '' },
+        { name: 'releaseId', label: 'Release', kind: 'select', options: [{ value: '', label: releases.length ? 'Choose a release' : 'No release to choose' }, ...releases.map((x) => ({ value: x.value, label: x.label }))], value: '' },
+        ...termsFields(start),
+      ],
+      live: (v) => {
+        const chosen = v.scope === 'RELEASE' ? releases.find((x) => x.value === v.releaseId) : undefined;
+        return h('p', { class: 'dialog__text', data: { testid: 'guarantee-rule' } }, chosen ? chosen.rule : '');
+      },
+      validate: (v) => grantProblem(v, today),
+      confirmLabel: 'Grant',
+      submit: async (v) => {
+        granted = await ctx.api.grantGuarantee(o.id, grantInput(v));
+      },
+    });
+    if (r && granted) done(() => grantToast(granted as { setAsideFor: { id: string; title: string } | null }))(true);
+  };
+  const change = (g: Guarantee) =>
+    void openDialog({
+      title: 'Change the guarantee',
+      eyebrow: `${o.email} · ${coversText(g)}`,
+      fields: termsFields(changeValues(g)),
+      validate: (v) => changeProblem(g, v, today),
+      confirmLabel: 'Save',
+      submit: async (v) => {
+        await ctx.api.changeGuarantee(g.id, changeInput(g, v));
+      },
+    }).then(done('Guarantee saved.'), notifyError);
+  const revoke = (g: Guarantee) =>
+    void openDialog({
+      title: 'Revoke the guarantee',
+      eyebrow: `${o.email} · ${coversText(g)}`,
+      danger: true,
+      body: h('p', { class: 'dialog__text' }, REVOKE_TEXT),
+      fields: [{ name: 'note', label: 'Note', kind: 'textarea', maxlength: GUARANTEE_LIMITS.note, hint: 'For Client Services: why it was revoked. Optional.' }],
+      confirmLabel: 'Revoke',
+      cancelLabel: 'Keep it',
+      submit: async (v) => {
+        await ctx.api.revokeGuarantee(g.id, v.note.trim() === '' ? null : v.note.trim());
+      },
+    }).then(done('Guarantee revoked.'), notifyError);
+  const tools = canGrant && o.status === 'ACTIVE' ? [button('Grant a guarantee', { kind: 'ghost', testId: 'guarantee-grant', onClick: () => void grant().catch(notifyError) })] : [];
+  return section(
+    'House guarantee',
+    [
+      h('p', { class: 'notice' }, GUARANTEE_SECTION_NOTE),
+      table<Guarantee>(
+        [
+          { label: 'Covers', cell: (g) => h('span', { data: { testid: 'guarantee-covers' } }, coversText(g)) },
+          { label: 'Pieces', cell: (g) => formatCount(g.pieces), kind: ['num'] },
+          { label: 'Valid until', cell: (g) => validUntilText(g), kind: ['nowrap'] },
+          { label: 'Shown', cell: (g) => (g.visible ? 'Yes' : 'No'), kind: ['nowrap'] },
+          { label: 'Status', cell: (g) => h('span', { data: { testid: 'guarantee-state' } }, statusMark(GUARANTEE_STATE_LABELS[g.state], toneOf('guarantee', g.state))), kind: ['nowrap'] },
+          { label: 'Release', cell: (g) => (g.release ? h('a', { class: 'idlink', attrs: { href: releaseHref({ id: g.release.id, kind: g.release.mode }) } }, g.release.title) : '—') },
+          { label: 'Granted', cell: (g) => h('span', null, formatDate(g.grantedAt), h('span', { class: 'cell-sub' }, g.grantedBy?.email ?? 'ORBES')), kind: ['nowrap'] },
+          { label: 'Note', cell: (g) => (g.note ? h('span', { class: 'cell-details' }, g.note) : '—'), kind: ['wide'] },
+          {
+            label: '',
+            cell: (g) => {
+              const a = guaranteeActions(g, canGrant);
+              return h(
+                'span',
+                { class: 'row-actions' },
+                a.change ? button('Change', { kind: 'ghost', testId: 'guarantee-change', onClick: () => change(g) }) : null,
+                a.revoke ? button('Revoke', { kind: 'ghost', testId: 'guarantee-revoke', onClick: () => revoke(g) }) : null,
+              );
+            },
+            kind: ['actions'],
+          },
+        ],
+        sheet.guarantees,
+        { empty: 'No guarantee.', caption: 'House guarantee' },
+      ),
+    ],
+    { id: 'guarantees', tools },
   );
 }
 

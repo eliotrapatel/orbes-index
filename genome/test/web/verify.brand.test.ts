@@ -670,6 +670,17 @@ describe('verify app: one button to ORBES Client Services, the email under FORGO
       expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN]), group).toEqual([]);
     }
   });
+
+  it('writes THE HOUSE’S GUARANTEE calmly (plan NEXT-NINE, IN-01): no exclamation mark, no word of §4.5, a place and never authenticity', () => {
+    const said = (v: unknown): string[] =>
+      typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('MONOLITHE', 2))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];
+    const words = said(verifyCopy.GUARANTEE).join('\n');
+    expect(words.length).toBeGreaterThan(200);
+    expect(words).not.toContain('!');
+    expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+    // The house's guarantee names a place in a release (BRAND §4.5): never what a piece is.
+    expect(words).not.toMatch(/authentic|genuine|real\b|certif/i);
+  });
 });
 
 describe('verify app: the lexicon of BRAND-DESIGN-SYSTEM §4.5, and the second-hand guidance (J-02)', () => {

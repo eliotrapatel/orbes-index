@@ -92,6 +92,11 @@ const SHOP_REQUEST: Record<string, Tone> = { OPEN: 'alert', CLOSED: 'muted' };
 const CONVERSATION: Record<string, Tone> = { TO_ANSWER: 'alert', ANSWERED: 'solid', CLOSED: 'muted' };
 /** A yearly care (BP-19 T6): to act on while ORBES holds the next step, solid once done. */
 const CARE: Record<string, Tone> = { REQUESTED: 'alert', LABEL_SENT: 'outline', RECEIVED: 'alert', RETURNING: 'outline', DONE: 'solid', CANCELLED: 'muted' };
+/**
+ * THE HOUSE'S GUARANTEE (IN-01): waiting for a release or set aside, pending; entered, in force; used, historical in
+ * force; expired, historical; revoked, needing attention as a revocation does.
+ */
+const GUARANTEE: Record<string, Tone> = { WAITING: 'outline', SET_ASIDE: 'outline', ENTERED: 'solid', USED: 'solid', EXPIRED: 'muted', REVOKED: 'alert' };
 /** An answer to an invitation of the circle (P-X01): a place taken, or declined. */
 const CIRCLE_ANSWER: Record<string, Tone> = { YES: 'solid', NO: 'muted' };
 const VERIFICATION: Record<string, Tone> = {
@@ -128,6 +133,7 @@ export type ToneDomain =
   | 'shopRequest'
   | 'conversation'
   | 'care'
+  | 'guarantee'
   | 'livePhase'
   | 'liveEntry'
   | 'order'
@@ -154,6 +160,7 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   shopRequest: SHOP_REQUEST,
   conversation: CONVERSATION,
   care: CARE,
+  guarantee: GUARANTEE,
   livePhase: LIVE_PHASE,
   liveEntry: LIVE_ENTRY,
   order: ORDER,

@@ -16,6 +16,12 @@
  * - Artifacts are attachments: they are fetched as blobs and saved by the UI.
  */
 import type {
+  Guarantee,
+  GuaranteeChange,
+  GuaranteeGrant,
+  GuaranteeInput,
+  GuaranteeSettings,
+  ReleaseGuarantee,
   AdminProfile,
   BestTime,
   LiveFeasibility,
@@ -720,6 +726,36 @@ export class AdminApi {
   /** ADMIN: unlock the account. */
   unlockOwner(accountId: string): Promise<{ status: 'ACTIVE' }> {
     return this.post(`/api/admin/owners/${encodeURIComponent(accountId)}/unlock`);
+  }
+
+  /** IN-01, OPERATOR: grant THE HOUSE'S GUARANTEE to the client. */
+  grantGuarantee(accountId: string, input: GuaranteeInput): Promise<GuaranteeGrant> {
+    return this.post(`/api/admin/owners/${encodeURIComponent(accountId)}/guarantees`, input);
+  }
+
+  /** IN-01, OPERATOR: change a guarantee's pieces, validity, shown or note. */
+  changeGuarantee(id: string, change: GuaranteeChange): Promise<{ guarantee: Guarantee }> {
+    return this.request('PATCH', `/api/admin/guarantees/${encodeURIComponent(id)}`, { body: change });
+  }
+
+  /** IN-01, OPERATOR: revoke a guarantee, with an optional note. */
+  revokeGuarantee(id: string, note: string | null): Promise<{ guarantee: Guarantee }> {
+    return this.post(`/api/admin/guarantees/${encodeURIComponent(id)}/revoke`, note ? { note } : {});
+  }
+
+  /** IN-01: a release's guarantees (a draw's or a LIVE RELEASE's), the emails masked for an AUDITOR. */
+  releaseGuarantees(dropId: string): Promise<Items<ReleaseGuarantee>> {
+    return this.get(`/api/admin/drops/${encodeURIComponent(dropId)}/guarantees`);
+  }
+
+  /** IN-01: the Grant dialog's defaults (Orders → Settings, House guarantee). */
+  guaranteeSettings(): Promise<GuaranteeSettings> {
+    return this.get('/api/admin/settings/guarantees');
+  }
+
+  /** IN-01, ADMIN: those defaults, changed. */
+  setGuaranteeSettings(input: Pick<GuaranteeSettings, 'validDays' | 'pieces' | 'visible'>): Promise<GuaranteeSettings> {
+    return this.request('PUT', '/api/admin/settings/guarantees', { body: input });
   }
 
   /** ADMIN: everything held about the account (right of access), as a JSON file. */

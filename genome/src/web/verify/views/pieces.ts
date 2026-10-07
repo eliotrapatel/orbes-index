@@ -47,7 +47,7 @@
 import { h } from '../../shared/dom.js';
 import { saveDownload } from '../../shared/download.js';
 import type { ApiClient, OrderDocumentKind } from '../api.js';
-import { DEFAULT_CARE, ORDERS, PIECES, QUESTION, RELEASES } from '../copy.js';
+import { DEFAULT_CARE, GUARANTEE, ORDERS, PIECES, QUESTION, RELEASES } from '../copy.js';
 import { orderContext } from '../messages-model.js';
 import { myLiveEntries } from '../live-model.js';
 import { orderModels, type OrderModel } from '../orders-model.js';
@@ -476,6 +476,8 @@ class PiecesPage {
       { class: 'n-pieces__entry pieces__entry-card', data: { status: m.entry.label ?? '' } },
       link,
       h('p', { class: 'n-g n-lb n-pieces__entry-line pieces__entry-state' }, ...withNumerals([m.stateLabel, m.entry.label].filter(Boolean).join(' · '))),
+      // IN-01: a small hairline label beside the status of an entry with the house's guarantee (shown to the client only).
+      m.guaranteed ? h('p', { class: 'n-g n-lb n-pieces__guarantee pieces__guarantee', text: GUARANTEE.title }) : null,
       h('p', { class: 'n-sm n-pieces__entry-line pieces__entry-sentence', text: m.entry.sentence }),
       // The entry's id as the draw publishes it (and hashes it): in the reading face and in lower case, to be compared
       // by eye with the draw's list, never in the label's capitals.
