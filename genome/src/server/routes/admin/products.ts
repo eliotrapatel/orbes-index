@@ -284,6 +284,9 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
   app.post('/api/admin/services/:id/complete', async (request) => {
     const { id } = parse(serviceParams, request.params);
     const b = parse(completeServiceBody, request.body);
+    // A YEARLY_CARE record (BP-19 T6) is closed by its own flow only (services/care.ts COMPLETE or CANCEL), never from here.
+    const record = await db.selectFrom('service_records').select('type').where('id', '=', id).executeTakeFirst();
+    if (record?.type === 'YEARLY_CARE') throw new DomainError('VALIDATION_FAILED', 422, 'The yearly care is completed from the Yearly care board.');
     return warranty.completeService(id, { notes: b.notes ?? null }, adminActor(request));
   });
 

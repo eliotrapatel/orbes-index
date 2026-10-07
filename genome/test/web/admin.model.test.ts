@@ -1299,6 +1299,10 @@ describe('product view model (spec §22)', () => {
     const revoked = detail({ lifecycle: { status: 'REVOKED', allowed: [], returnTo: 'OWNED', canReinstate: true } });
     expect(productActions(revoked, 'OPERATOR').canReinstate).toBe(false);
     expect(productActions(revoked, 'ADMIN').canReinstate).toBe(true);
+    // An OPEN YEARLY_CARE record is closed from the Yearly care board only (the server answers 422 here).
+    const service = { id: 's1', productId: '00184', status: 'OPEN' as const, location: null, notes: null, openedAt: '2026-05-01T00:00:00.000Z', closedAt: null, performedBy: null };
+    const caring = detail({ services: [{ ...service, type: 'YEARLY_CARE' }, { ...service, id: 's2', type: 'REPAIR' }] });
+    expect(productActions(caring, 'OPERATOR').completableServices.map((s) => s.id)).toEqual(['s2']);
   });
 
   it('lists catalogue attributes without cryptographic material', () => {

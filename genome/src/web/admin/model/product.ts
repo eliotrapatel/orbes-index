@@ -141,7 +141,7 @@ export interface ProductActions {
   /** Add months to a started, non-void warranty (POST …/warranty/extend). */
   canExtendWarranty: boolean;
   canOpenService: boolean;
-  /** Open service records the admin may complete. */
+  /** Open service records the admin may complete (never a YEARLY_CARE one). */
   completableServices: ServiceRecord[];
   canConfirmOwnership: boolean;
 }
@@ -163,7 +163,8 @@ export function productActions(d: ProductDetail, role: AdminRole): ProductAction
     canVoidWarranty: can(role, 'warranty') && !w?.voidedAt,
     canExtendWarranty: can(role, 'warranty') && !!w?.startDate && !w?.voidedAt,
     canOpenService: can(role, 'service') && d.lifecycle.allowed.includes('SERVICED'),
-    completableServices: can(role, 'service') ? d.services.filter((s) => s.status === 'OPEN') : [],
+    // Not a YEARLY_CARE record: the Yearly care board closes it with its request (the server refuses it here).
+    completableServices: can(role, 'service') ? d.services.filter((s) => s.status === 'OPEN' && s.type !== 'YEARLY_CARE') : [],
     canConfirmOwnership: can(role, 'confirmOwnership') && owner !== null && !owner.verified,
   };
 }

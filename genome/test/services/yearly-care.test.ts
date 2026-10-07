@@ -271,7 +271,7 @@ describe('the yearly care (BP-19 T6)', () => {
     expect(actions).toEqual(['care.request', 'care.label', 'care.receive', 'care.return', 'care.complete']);
   });
 
-  it('runs a step and its service record in one transaction: a failure rolls both back; the console\'s service route refuses YEARLY_CARE', async () => {
+  it('runs a step and its service record in one transaction: a failure rolls both back; the console\'s service routes refuse YEARLY_CARE', async () => {
     const p = await collector(5);
     const id = ((safeJson(await ask(p.client, p.serials[0]!)) as CareJson).request!).id;
     expect((await label(id)).statusCode).toBe(200);
@@ -289,7 +289,13 @@ describe('the yearly care (BP-19 T6)', () => {
       await sql.raw(`DROP TRIGGER care_test_refuse ON care_requests`).execute(h.t.db);
       await sql.raw(`DROP FUNCTION care_test_refuse()`).execute(h.t.db);
     }
-    expect(safeJson(await operator.post(`/api/admin/care/${id}/receive`))).toMatchObject({ status: 'RECEIVED' });
+    const atelier = safeJson(await operator.post(`/api/admin/care/${id}/receive`)) as { status: string; serviceRecordId: string };
+    expect(atelier.status).toBe('RECEIVED');
+    // Only the care flow closes it too: the product page's complete route refuses it, the record stays OPEN.
+    const notClosed = await operator.post(`/api/admin/services/${atelier.serviceRecordId}/complete`, {});
+    expect(notClosed.statusCode).toBe(422);
+    expect(errorOf(notClosed).code).toBe('VALIDATION_FAILED');
+    expect((await h.t.db.selectFrom('service_records').select('status').where('id', '=', atelier.serviceRecordId).executeTakeFirstOrThrow()).status).toBe('OPEN');
     // Only the care flow opens a YEARLY_CARE record: the product page's route refuses it.
     const refused = await operator.post(`/api/admin/products/${p.serials[1]}/services`, { type: 'YEARLY_CARE', location: 'ORBES atelier' });
     expect(refused.statusCode).toBe(422);

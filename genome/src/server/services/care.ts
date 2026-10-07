@@ -617,7 +617,9 @@ export class CareService {
   async complete(id: string, input: { notes?: unknown }, actor: Actor): Promise<CareSheet> {
     const notes = typeof input?.notes === 'string' && input.notes.trim() !== '' ? input.notes : null;
     return this.step(id, ['RETURNING'], actor, 'care.complete', async (tx, r, now, by) => {
-      await this.warranty.completeService(r.service_record_id!, { notes }, actor, tx);
+      // A record no longer OPEN (closed outside the flow before the console refused it) does not hold the request back.
+      const open = await tx.selectFrom('service_records').select('status').where('id', '=', r.service_record_id!).executeTakeFirst();
+      if (open?.status === 'OPEN') await this.warranty.completeService(r.service_record_id!, { notes }, actor, tx);
       await tx
         .updateTable('care_requests')
         .set({ status: 'DONE', done_at: r.return_shipped_at && now < r.return_shipped_at ? r.return_shipped_at : now, handled_by: by })
