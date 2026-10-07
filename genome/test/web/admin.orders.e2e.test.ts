@@ -665,7 +665,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
 
     const p = await open(OPERATOR);
     await go(p, `#/orders/${parent}`, orderReference(parent));
-    expect(await p.locator('[data-testid=order-gift]').textContent()).toBe(`${orderReference(giftOrder)} · JONC · SIZE TO CHOOSE`);
+    expect(await p.locator('[data-testid=order-gift]').textContent()).toBe(`${orderReference(giftOrder)} · JONC · Size to choose`);
     expect(await p.locator('[data-testid=order-credit-available]').textContent()).toMatch(/^PLATINE €\s50 until \d{2} [A-Z]{3} \d{4}$/u);
     expect(await p.locator('[data-testid=order-credit-applied]').textContent()).toBe('None');
     // Not paid before the gift's size is chosen.
@@ -688,11 +688,21 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('.page-head').textContent()).toContain(`Welcome gift · PLATINE · travels with ${orderReference(parent)}`);
     expect(await p.locator('[data-testid=order-pay]').count()).toBe(0);
     expect(await p.locator('#order-step').textContent()).toContain('Its size is to be chosen.');
+    expect(await p.locator('[data-testid=order-size]').textContent()).toBe('To be confirmed');
+    // CHOOSE SIZE, its own dialog; EDIT holds no size.
+    expect(await p.locator('[data-testid=order-gift-size]').textContent()).toBe('Choose size');
     await p.click('[data-testid=order-terms]');
+    expect(await p.locator('dialog select[name=giftSize]').count()).toBe(0);
+    await p.click('[data-testid=dialog-cancel]');
+    await p.waitForSelector('dialog.dialog', { state: 'detached' });
+    await p.click('[data-testid=order-gift-size]');
+    expect(await p.locator('dialog.dialog .dialog__title').textContent()).toBe('Choose size');
     expect(await p.locator('dialog select[name=giftSize] option').allTextContents()).toEqual(['Choose a size', '50 · 1 available', '52 · 1 available']);
     await p.selectOption('dialog select[name=giftSize]', '52');
     await confirmDialog(p);
     await expect.poll(() => p.locator('#order-step').textContent()).toContain(`It is paid with ${orderReference(parent)}.`);
+    expect(await p.locator('[data-testid=order-size]').textContent()).toBe('52');
+    expect(await p.locator('[data-testid=order-gift-size]').count()).toBe(0);
     await shot(p, 'gift-order');
     // Back to its order: MARK PAID, the invoice less the credit.
     await go(p, `#/orders/${parent}`, orderReference(parent));
@@ -702,6 +712,15 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => p.locator('#order-documents tbody tr').first().textContent()).toMatch(/€\s2\s950/u);
     expect(await p.locator('#order-history').textContent()).toContain('Credit applied');
     await shot(p, 'credit-paid');
+    // SHIP WITH ITS ORDER: the gift, paid with its order, its piece linked from the stock.
+    const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: gift, variant: '52', material: '925 STERLING SILVER' }, admin);
+    await ctx.services.atelier.linkFromStock(giftOrder, piece.product.productId, admin);
+    await go(p, `#/orders/${giftOrder}`, orderReference(giftOrder));
+    expect(await p.locator('[data-testid=order-ship]').textContent()).toBe('Ship with its order');
+    await p.click('[data-testid=order-ship]');
+    expect(await p.locator('dialog.dialog .dialog__title').textContent()).toBe('Ship with its order');
+    await p.click('[data-testid=dialog-cancel]');
+    await p.waitForSelector('dialog.dialog', { state: 'detached' });
     expect(await csp(p)).toEqual([]);
     await p.context().close();
     await ctx.db.deleteFrom('club_program_settings').execute();

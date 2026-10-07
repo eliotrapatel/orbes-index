@@ -7,7 +7,7 @@
  *  - a fee entered by hand gives its SHIPPING line, an empty one clears it; a fee over a free benefit is refused, express
  *    below PALLADIUM is paid at the fee entered;
  *  - an optional rate, once set, is applied at creation; a salon's order or an unpriced draw's takes it when its price
- *    gives it its currency;
+ *    gives it its currency; a rate taken follows a change of currency (none without a rate), a fee entered by hand stays;
  *  - a LIVE entry of three pieces pays one fee: the other two travel with the first (its service at 0), have no SHIPPING
  *    line of their own, and follow it when its shipping changes;
  *  - an order keeps its free shipping after the tier drops;
@@ -185,9 +185,22 @@ describe('the orders\' shipping (BP-19 T4)', () => {
     await orders().setTerms(salon, { sizeLabel: '58', priceMinor: 300_000, currency: 'GBP' }, admin);
     expect(await shippingOfRow(salon)).toEqual(['STANDARD', 1_800, null]);
     expect((await auditsOf(salon, 'order.shipping'))[0]!.details).toMatchObject({ service: 'STANDARD', minor: 1_800, rate: true });
-    // Its price changed later: the shipping stays as set.
-    await orders().setTerms(salon, { priceMinor: 310_000, currency: 'EUR' }, admin);
+    // Its price changed in the same currency: the shipping stays as set.
+    await orders().setTerms(salon, { priceMinor: 305_000, currency: 'GBP' }, admin);
     expect(await shippingOfRow(salon)).toEqual(['STANDARD', 1_800, null]);
+    // In another currency: the rate follows it, audited as the rate's; a currency without a rate gives no shipping.
+    await orders().setTerms(salon, { priceMinor: 310_000, currency: 'EUR' }, admin);
+    expect(await shippingOfRow(salon)).toEqual(['STANDARD', 2_000, null]);
+    expect((await auditsOf(salon, 'order.shipping')).map((a) => a.details)).toEqual([
+      expect.objectContaining({ service: 'STANDARD', minor: 1_800, rate: true }),
+      expect.objectContaining({ service: 'STANDARD', minor: 2_000, rate: true }),
+    ]);
+    await orders().setTerms(salon, { priceMinor: 320_000, currency: 'USD' }, admin);
+    expect(await shippingOfRow(salon)).toEqual([null, null, null]);
+    // A fee entered by hand stays as entered when the currency changes: Client Services enters it again.
+    await orders().setTerms(salon, { shippingService: 'STANDARD', shippingMinor: 2_500 }, admin);
+    await orders().setTerms(salon, { priceMinor: 300_000, currency: 'EUR' }, admin);
+    expect(await shippingOfRow(salon)).toEqual(['STANDARD', 2_500, null]);
     // A LIVE order is created in its currency: the rate at once. A PLATINE account keeps its free shipping.
     const [first] = await liveSale(titane, 1);
     expect([first!.shipping_service, first!.shipping_minor, first!.shipping_benefit]).toEqual(['STANDARD', 2_000, null]);

@@ -2,13 +2,14 @@
  * The welcome gift as an order (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T5, step 2.5; migration 0027), on the services
  * as createContext wires them:
  *
- *  - added to the account's next order (a salon's, a draw's, a LIVE entry's first piece), never without a gift model or
+ *  - added to the account's next order (a salon's, a draw's priced or not, a LIVE entry's first piece), never without a gift model or
  *    with an inactive one, never twice for one grant (one open GIFT order per grant, whatever runs at once);
  *  - a model of one size holds its piece at once (in stock here), its grant's model recorded; a model of several sizes
  *    waits for its size, and its order is not paid before it (409 ORDER_GIFT_SIZE_MISSING);
  *  - a parent with no currency yet gives its gift no price; priced, the gift takes 0 in its currency; the gift travels
  *    with it (its shipping at 0), has no price of its own (409 ORDER_TERMS_FIXED) and is never paid alone;
- *  - paid with its order, with no invoice of its own: the order's invoice carries its GIFT line at 0;
+ *  - paid with its order, with no invoice of its own: the order's invoice carries its GIFT line at 0; an invoice at the
+ *    most lines it carries (six add-ons, its shipping, a credit split over both tiers, both tiers' gifts) is drawn;
  *  - cancelled with its order: its grant waits again, and the next order receives it; a return of its order leaves it.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -17,7 +18,9 @@ import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
+import { INVOICE_MAX_LINES } from '../../src/server/render/invoice.js';
 import { linesOf } from '../../src/server/services/invoices.js';
+import { LIVE_ADDONS_MAX } from '../../src/server/services/live.js';
 import { attachGifts, orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
@@ -201,6 +204,54 @@ describe('the welcome gift (BP-19 T5)', () => {
     expect(await orderRow(gift!.id)).toMatchObject({ status: 'PAID' });
   });
 
+  /** A draw of one piece won by `account`, unpriced or at `priceMinor` EUR: published, entered, drawn, confirmed. Its order. */
+  async function drawOrder(account: { id: string; actor: Actor }, o: { priceMinor?: number } = {}) {
+    const opensAt = new Date(clock.now().getTime() + HOUR);
+    const drop = await ctx.services.drops.create(
+      {
+        modelId: f.modelId,
+        title: 'A DRAW',
+        quantity: 1,
+        opensAt,
+        closesAt: new Date(opensAt.getTime() + HOUR),
+        earlyAccessHours: 0,
+        earlyAccessPlatineHours: 0,
+        ...(o.priceMinor !== undefined ? { priceMinor: o.priceMinor, currency: 'EUR' } : {}),
+      },
+      admin,
+    );
+    await ctx.services.drops.publish(drop.id, admin);
+    clock.set(new Date(opensAt.getTime() + MINUTE));
+    await ctx.services.drops.enter(account.id, drop.id, account.actor);
+    clock.advance(HOUR);
+    await ctx.services.drops.draw(drop.id, admin);
+    const entry = await t.db.selectFrom('drop_entries').select('id').where('drop_id', '=', drop.id).executeTakeFirstOrThrow();
+    await ctx.services.drops.confirm(drop.id, entry.id, null, admin);
+    return t.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', entry.id).where('channel', '=', 'DRAW').executeTakeFirstOrThrow();
+  }
+
+  it('goes with a draw\'s order: unpriced, the gift has no price until its order is priced, then 0 in its currency; priced, 0 at once', async () => {
+    const ring = await giftModel('ANNEAU VI', [null], 3);
+    await setGift(2, ring);
+    const a = await account(5);
+    // An unpriced draw: its order has no currency; the gift neither, and travels with it (PLATINE's free standard at 0).
+    const draw = await drawOrder(a);
+    expect(draw).toMatchObject({ price_minor: null, currency: null, shipping_service: 'STANDARD', shipping_minor: 0, shipping_benefit: 2 });
+    const [gift] = await giftsOf(draw.id);
+    expect(gift).toMatchObject({ channel: 'GIFT', with_order_id: draw.id, model_id: ring, price_minor: null, currency: null, shipping_service: 'STANDARD', shipping_minor: 0, shipping_benefit: null, reservation: 'STOCK' });
+    expect((await auditsOf(draw.id, 'order.gift'))[0]!.details).toMatchObject({ giftOrderId: gift!.id, tier: 2, modelId: ring });
+    // Client Services prices the draw's order: the gift takes 0 in its currency, in the same change.
+    await orders().setTerms(draw.id, { sizeLabel: '52', priceMinor: 420_000, currency: 'EUR' }, admin);
+    expect(await orderRow(gift!.id)).toMatchObject({ price_minor: 0, currency: 'EUR' });
+    // A priced draw: the next PLATINE account's gift is created at 0 in the draw's currency at once.
+    const b = await account(5);
+    const priced = await drawOrder(b, { priceMinor: 450_000 });
+    expect(priced).toMatchObject({ price_minor: 450_000, currency: 'EUR' });
+    const [pricedGift] = await giftsOf(priced.id);
+    expect(pricedGift).toMatchObject({ with_order_id: priced.id, price_minor: 0, currency: 'EUR', shipping_service: 'STANDARD', shipping_minor: 0 });
+    await setGift(2, null);
+  });
+
   it('goes with the first order of a LIVE entry of several pieces only', async () => {
     const ring = await giftModel('ANNEAU IV', [null], 2);
     await setGift(2, ring);
@@ -236,5 +287,50 @@ describe('the welcome gift (BP-19 T5)', () => {
     const open = await t.db.selectFrom('orders').select('gift_grant_id').where('account_id', '=', a.id).where('channel', '=', 'GIFT').where('status', '<>', 'CANCELLED').execute();
     expect(open).toHaveLength(1);
     await setGift(2, null);
+  });
+  it('draws an invoice at the most lines it carries: six add-ons, its shipping, a credit split over both tiers and both tiers\' gifts', async () => {
+    const [platineGift, palladiumGift] = [await giftModel('ANNEAU VII', [null], 2), await giftModel('ANNEAU VIII', [null], 2)];
+    await setGift(2, platineGift);
+    await setGift(3, palladiumGift);
+    const a = await account(10);
+    const opensAt = new Date(clock.now().getTime() + HOUR);
+    const r = await createLiveRelease(f, {
+      opensAt,
+      sizes: [{ label: '52', stock: 2 }],
+      perAccount: 1,
+      priceMinor: 480_000,
+      addons: Array.from({ length: LIVE_ADDONS_MAX }, (_, i) => ({ label: `ADD-ON ${i + 1}`, priceMinor: 1_000 * (i + 1) })),
+    });
+    clock.set(new Date(opensAt.getTime() - MINUTE));
+    await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id, quantity: 1 }, a.actor);
+    clock.set(opensAt);
+    await f.live.advance(r.id);
+    const token = (await f.live.entry(a.id, r.id))!.turn!.token!;
+    await f.live.press(a.id, r.id, token);
+    clock.advance(1500);
+    await f.live.secure(a.id, r.id, token, a.actor);
+    await f.live.setAddons(a.id, r.id, r.addons.map((x) => x.id), a.actor);
+    await f.live.confirm(a.id, r.id, a.actor);
+    const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', a.id).executeTakeFirstOrThrow();
+    const order = await t.db.selectFrom('orders').selectAll().where('live_entry_id', '=', entry.id).where('channel', '=', 'LIVE').executeTakeFirstOrThrow();
+    expect(await giftsOf(order.id)).toHaveLength(2);
+    // € 150 of credit: PALLADIUM's € 100, then PLATINE's € 50.
+    await orders().applyCredit(order.id, 15_000, admin);
+    await pay(order.id);
+    const invoice = await t.db.selectFrom('invoices').selectAll().where('order_id', '=', order.id).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow();
+    const lines = linesOf(invoice.lines);
+    expect(lines.map((l) => l.kind)).toEqual(['PIECE', ...Array(LIVE_ADDONS_MAX).fill('ADDON'), 'SHIPPING', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT']);
+    expect(lines).toHaveLength(INVOICE_MAX_LINES);
+    expect(lines.filter((l) => l.kind === 'CREDIT').map((l) => [l.label, l.amountMinor])).toEqual([
+      ['CREDIT · PALLADIUM', -10_000],
+      ['CREDIT · PLATINE', -5_000],
+    ]);
+    // Its PDF, as the console and MY PIECES serve it.
+    const pdf = await ctx.services.invoices.pdf(invoice.id);
+    expect(pdf.contentType).toBe('application/pdf');
+    expect(Buffer.from(pdf.body).subarray(0, 8).toString('latin1')).toBe('%PDF-1.4');
+    expect((await ctx.services.invoices.accountDocument(a.id, order.id, 'INVOICE')).body.length).toBeGreaterThan(0);
+    await setGift(2, null);
+    await setGift(3, null);
   });
 });

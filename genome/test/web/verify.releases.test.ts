@@ -265,7 +265,7 @@ describe('the early access of a release (P-X02)', () => {
     });
     expect(before.rows.map((r) => r.label)).toEqual(['PIECES', 'EARLY ACCESS', 'ENTRIES OPEN', 'ENTRIES CLOSE', 'PLACE HELD']);
     // BP-19 T3: the EARLY ACCESS fact gives each tier's hours (one time for both here); the line under the state its times.
-    expect(before.rows[1]).toEqual({ label: 'EARLY ACCESS', value: 'PALLADIUM 48 HOURS · PLATINE 48 HOURS' });
+    expect(before.rows[1]).toEqual({ label: 'EARLY ACCESS', value: 'PALLADIUM\u00a048\u00a0HOURS · PLATINE\u00a048\u00a0HOURS' });
     // During it: EARLY ACCESS, and the places reserved directly.
     const during = releaseSheet(sheet({ ...EARLY, state: 'UPCOMING', earlyAccessOpen: true, reserved: 1 }), 0);
     expect(during).toMatchObject({ stateLabel: 'EARLY ACCESS', earlyAccess: { open: true }, full: false });
@@ -300,7 +300,9 @@ describe('the early access of a release (P-X02)', () => {
       earlyNote: RELEASES.earlyNoteByTier,
       earlyAccess: { opensAt: BY_TIER.earlyAccessOpensAt, open: false, platineOpensAt: BY_TIER.earlyAccessPlatineOpensAt, platineOpen: false },
     });
-    expect(before.rows.find((r) => r.label === 'EARLY ACCESS')).toEqual({ label: 'EARLY ACCESS', value: 'PALLADIUM 4 HOURS · PLATINE 2 HOURS' });
+    expect(before.rows.find((r) => r.label === 'EARLY ACCESS')).toEqual({ label: 'EARLY ACCESS', value: 'PALLADIUM\u00a04\u00a0HOURS · PLATINE\u00a02\u00a0HOURS' });
+    // Each tier's words hold together: a narrow phone wraps the row only at ' · ', never between a figure and its unit.
+    expect(before.rows.find((r) => r.label === 'EARLY ACCESS')!.value.split(' · ').map((g) => g.includes(' '))).toEqual([false, false]);
     expect(RELEASES.earlyNoteByTier).toBe(
       'Before entries open to everyone, PALLADIUM owners, then PLATINE owners, reserve a place directly, first come, first served, within the pieces of the release: their tier is the one their account holds when they reserve. The pieces left then go to the draw.',
     );
@@ -309,7 +311,7 @@ describe('the early access of a release (P-X02)', () => {
     // PLATINE without a window of its own: only PALLADIUM's time, and its hours.
     const palladiumOnly = releaseSheet(sheet({ ...BY_TIER, earlyAccessPlatineHours: 0, earlyAccessPlatineOpensAt: null, state: 'UPCOMING' }), 0);
     expect(palladiumOnly.access).toBe('PALLADIUM: FROM 12 OCT 2026 · 06:00 UTC · EVERYONE: FROM 12 OCT 2026 · 10:00 UTC');
-    expect(palladiumOnly.rows.find((r) => r.label === 'EARLY ACCESS')?.value).toBe('PALLADIUM 4 HOURS');
+    expect(palladiumOnly.rows.find((r) => r.label === 'EARLY ACCESS')?.value).toBe('PALLADIUM\u00a04\u00a0HOURS');
     // Two equal times: the release keeps the one line of before.
     const alike = releaseSheet(sheet({ ...BY_TIER, earlyAccessPlatineHours: 4, earlyAccessPlatineOpensAt: BY_TIER.earlyAccessOpensAt, state: 'UPCOMING' }), 0);
     expect(alike).toMatchObject({ access: 'PLATINE AND PALLADIUM: FROM 12 OCT 2026 · 06:00 UTC · EVERYONE: FROM 12 OCT 2026 · 10:00 UTC', earlyNote: RELEASES.earlyNote });

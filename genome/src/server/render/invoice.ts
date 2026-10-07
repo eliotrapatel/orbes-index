@@ -102,10 +102,15 @@ export const INVOICE_LAYOUT = Object.freeze({
 });
 
 /**
- * Lines a page holds: the piece and its add-ons (six at most, as a LIVE RELEASE's), its shipping, a credit and a welcome
- * gift (plan NEXT-NINE, BP-19). Up to seven keep the table's pitch; more share its height.
+ * The most lines of each kind an invoice carries (services/invoices.ts issueInvoice): the piece; its add-ons, six at most
+ * as a LIVE RELEASE's (services/live.ts LIVE_ADDONS_MAX); its shipping; a CREDIT line per tier whose grant it takes from
+ * (PLATINE and PALLADIUM); a welcome gift per tier (an account reaching PALLADIUM at once holds both) (plan NEXT-NINE,
+ * BP-19 T4 and T5). Written out here, the renderer importing no service; test/render/invoice.test.ts holds them to the
+ * services' own figures.
  */
-export const INVOICE_MAX_LINES = 10;
+export const INVOICE_LINE_BUDGET = Object.freeze({ piece: 1, addons: 6, shipping: 1, credit: 2, gift: 2 });
+/** Lines a page holds: the sum of the budget, 12. Up to seven keep the table's pitch; more share its height. */
+export const INVOICE_MAX_LINES = Object.values(INVOICE_LINE_BUDGET).reduce((n, k) => n + k, 0);
 /** The lines that keep the table's own pitch. */
 const FULL_PITCH_LINES = 7;
 

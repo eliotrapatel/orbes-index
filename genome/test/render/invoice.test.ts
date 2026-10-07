@@ -7,7 +7,9 @@
 import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { CertificateInputError } from '../../src/server/render/certificate.js';
-import { addressLines, documentAmount, INVOICE_COPY, INVOICE_LAYOUT, INVOICE_MAX_LINES, invoiceFilename, layoutInvoice, renderInvoicePdf, type InvoiceDocument } from '../../src/server/render/invoice.js';
+import { addressLines, documentAmount, INVOICE_COPY, INVOICE_LAYOUT, INVOICE_LINE_BUDGET, INVOICE_MAX_LINES, invoiceFilename, layoutInvoice, renderInvoicePdf, type InvoiceDocument } from '../../src/server/render/invoice.js';
+import { CLUB_TIER_THRESHOLDS } from '../../src/server/services/club.js';
+import { LIVE_ADDONS_MAX } from '../../src/server/services/live.js';
 import { toDocumentText, toLabelText } from '../../src/server/render/label-font.js';
 import { INVOICE_ISSUER } from '../../src/server/services/invoices.js';
 
@@ -139,21 +141,46 @@ describe('invoice and credit note (M7)', () => {
     }
   });
 
-  it('holds the piece, six add-ons, its shipping, a credit and a welcome gift on its page (BP-19): up to seven lines at the table\'s pitch, more sharing its height above the total', () => {
+  it('holds the most lines an invoice carries (BP-19): the piece, six add-ons, its shipping, a credit and a welcome gift per tier; up to seven at the table\'s pitch, more sharing its height above the total', () => {
+    // The budget is the services' own figures: LIVE_ADDONS_MAX add-ons, one CREDIT and one GIFT line per tier above TITANE.
+    const tiersWithGrants = CLUB_TIER_THRESHOLDS.length - 1;
+    expect(INVOICE_LINE_BUDGET).toEqual({ piece: 1, addons: LIVE_ADDONS_MAX, shipping: 1, credit: tiersWithGrants, gift: tiersWithGrants });
+    expect(INVOICE_MAX_LINES).toBe(1 + LIVE_ADDONS_MAX + 1 + 2 + 2);
     const lines = [
       { label: 'MONOLITHE · SIZE 52', detail: 'LIVE RELEASE · MONOLITHE IN STEEL', amountMinor: 505_000 },
-      ...Array.from({ length: 6 }, (_, i) => ({ label: `ADD-ON ${i + 1}`, detail: null, amountMinor: 1_000 })),
+      ...Array.from({ length: LIVE_ADDONS_MAX }, (_, i) => ({ label: `ADD-ON ${i + 1}`, detail: null, amountMinor: 1_000 })),
       { label: 'SHIPPING · EXPRESS', detail: 'FREE · PALLADIUM', amountMinor: 0 },
       { label: 'CREDIT · PALLADIUM', detail: null, amountMinor: -10_000 },
+      { label: 'CREDIT · PLATINE', detail: null, amountMinor: -5_000 },
       { label: 'WELCOME GIFT · ECLIPSE', detail: 'ORDER OR-1A2B3C4D', amountMinor: 0 },
+      { label: 'WELCOME GIFT · ANNEAU', detail: 'ORDER OR-5E6F7A8B', amountMinor: 0 },
     ];
     expect(lines).toHaveLength(INVOICE_MAX_LINES);
-    const page = layoutInvoice(doc({ lines, totalMinor: lines.reduce((n, l) => n + l.amountMinor, 0) }));
     const L = INVOICE_LAYOUT;
-    // The lettering between the table's head and the total (the hairlines, flat, aside).
-    const inTable = page.marks!.map((m) => bounds(m.d)).filter((b) => b.y1 > L.table.head + 1 && b.y1 < L.total.baseline - L.total.cap - 0.5 && b.y1 - b.y0 > 0.01);
-    expect(inTable.length).toBeGreaterThan(0);
-    expect(Math.max(...inTable.map((b) => b.y1))).toBeLessThan(L.ruleTotal);
+    for (const n of [7, 8, INVOICE_MAX_LINES]) {
+      const some = lines.slice(0, n - 1).concat(lines[lines.length - 1]!);
+      const page = layoutInvoice(doc({ lines: some, totalMinor: some.reduce((k, l) => k + l.amountMinor, 0) }));
+      // The lettering between the table's head and the total (the hairlines, flat, aside): the last detail above the total's rule.
+      const inTable = page.marks!.map((m) => bounds(m.d)).filter((b) => b.y1 > L.table.head + 1 && b.y1 < L.total.baseline - L.total.cap - 0.5 && b.y1 - b.y0 > 0.01);
+      expect(inTable.length, String(n)).toBeGreaterThan(0);
+      expect(Math.max(...inTable.map((b) => b.y1)), String(n)).toBeLessThan(L.ruleTotal);
+    }
+    // At the most lines, each line's detail stays above the next line's lettering.
+    const full = layoutInvoice(doc({ lines, totalMinor: lines.reduce((k, l) => k + l.amountMinor, 0) }));
+    const pitch = (L.ruleTotal - L.table.detailGap - 3 - L.table.first) / (INVOICE_MAX_LINES - 1);
+    const marks = full.marks!.map((m) => bounds(m.d));
+    const near = (y: number) => marks.filter((b) => Math.abs(b.y1 - y) < 0.3);
+    let checked = 0;
+    lines.forEach((l, i) => {
+      if (!l.detail || i === lines.length - 1) return;
+      const detail = near(L.table.first + i * pitch + L.table.detailGap);
+      const next = near(L.table.first + (i + 1) * pitch);
+      expect(detail.length, l.label).toBeGreaterThan(0);
+      expect(next.length, l.label).toBeGreaterThan(0);
+      expect(Math.max(...detail.map((b) => b.y1)), l.label).toBeLessThan(Math.min(...next.map((b) => b.y0)));
+      checked += 1;
+    });
+    expect(checked).toBe(3);
   });
 
   it('renders a valid, deterministic PDF: no font, no text object, no VAT line, its title the document', async () => {

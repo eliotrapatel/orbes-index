@@ -857,8 +857,14 @@ export const RELEASES = Object.freeze({
   /** BP-19 T3: THE RELEASE's paragraph when each tier has its own time. */
   earlyNoteByTier:
     'Before entries open to everyone, PALLADIUM owners, then PLATINE owners, reserve a place directly, first come, first served, within the pieces of the release: their tier is the one their account holds when they reserve. The pieces left then go to the draw.',
-  /** BP-19 T3: the EARLY ACCESS row, each tier's hours (`4 HOURS`), PLATINE's left out when it has none. */
-  earlyHours: (palladium: string, platine: string | null) => (platine ? `PALLADIUM ${palladium} · PLATINE ${platine}` : `PALLADIUM ${palladium}`),
+  /**
+   * BP-19 T3: the EARLY ACCESS row, each tier's hours (`4 HOURS`), PLATINE's left out when it has none. Each tier's words
+   * are joined by no-break spaces, so that a narrow phone wraps the row only at ' · ', never between a figure and its unit.
+   */
+  earlyHours: (palladium: string, platine: string | null) => {
+    const group = (tier: string, hours: string) => `${tier} ${hours}`.replace(/ /g, '\u00a0');
+    return platine ? `${group('PALLADIUM', palladium)} · ${group('PLATINE', platine)}` : group('PALLADIUM', palladium);
+  },
   pieces: (n: number) => (n === 1 ? '1 PIECE' : `${n} PIECES`),
   hours: (n: number) => (n === 1 ? '1 HOUR' : `${n} HOURS`),
   /** A time shown in UTC, then on the phone's own clock. */

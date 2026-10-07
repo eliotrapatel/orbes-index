@@ -38,6 +38,7 @@ import {
   boardFilters,
   buyerInput,
   buyerProblem,
+  canChooseGiftSize,
   carrierProblem,
   cardHolds,
   CHANNEL_LABELS,
@@ -51,6 +52,7 @@ import {
   giftLine,
   giftSizeOptions,
   durationText,
+  GIFT_SIZE_TERMS,
   EVENT_LABELS,
   eventActor,
   LATE_LABELS,
@@ -69,6 +71,7 @@ import {
   shipProblem,
   shipWaitsFor,
   shippingLine,
+  sizeText,
   termsChange,
   termsProblem,
   termsValues,
@@ -248,7 +251,7 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
   it('says the gift travelling with an order, and a GIFT order\'s tier and parent', () => {
     expect(giftLine(view())).toBeNull();
     expect(giftLine(view({ gift: { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED', sizeToChoose: false } }))).toBe('OR-AAAA0001 · ANNEAU · RESERVED');
-    expect(giftLine(view({ gift: { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED', sizeToChoose: true } }))).toBe('OR-AAAA0001 · ANNEAU · SIZE TO CHOOSE');
+    expect(giftLine(view({ gift: { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED', sizeToChoose: true } }))).toBe('OR-AAAA0001 · ANNEAU · Size to choose');
     const g = view({ channel: 'GIFT', withOrder: { id: 'p', reference: 'OR-12345678', shipment: null }, giftOf: { tier: 2, sizes: [] } });
     expect(giftHeaderLine(g)).toBe('Welcome gift · PLATINE · travels with OR-12345678');
     expect(giftHeaderLine(view())).toBeNull();
@@ -262,8 +265,17 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
     const a = orderActions(g, 'OPERATOR');
     expect(a.pay).toBe(false);
     expect(a.terms).toMatchObject({ size: true, price: false, shipping: false });
-    expect(termsChange(g, { ...termsValues(g), giftSize: '54' }, a.terms)).toEqual({ sizeLabel: '54' });
-    expect(termsProblem(g, termsValues(g), a.terms)).toBe('Nothing has changed.');
+    // CHOOSE SIZE, its own dialog, while the size is To be confirmed; EDIT never holds it.
+    expect(sizeText({ sizeLabel: null, skuKnown: false, gift: true })).toBe('To be confirmed');
+    expect(sizeText({ sizeLabel: null, skuKnown: false })).toBe('To enter');
+    expect(sizeText({ sizeLabel: '52', skuKnown: true, gift: true })).toBe('52');
+    expect(canChooseGiftSize(g, a.terms)).toBe(true);
+    expect(canChooseGiftSize(g, orderActions(g, 'AUDITOR').terms)).toBe(false);
+    expect(canChooseGiftSize({ ...g, skuId: 's1', giftOf: { tier: 3, sizes: [] } }, a.terms)).toBe(false);
+    expect(canChooseGiftSize(view({ priceMinor: 300_000, currency: 'EUR' }), orderActions(view(), 'OPERATOR').terms)).toBe(false);
+    expect(GIFT_SIZE_TERMS).toEqual({ size: true, price: false, engraving: false, shipping: false });
+    expect(termsChange(g, { ...termsValues(g), giftSize: '54' }, GIFT_SIZE_TERMS)).toEqual({ sizeLabel: '54' });
+    expect(termsProblem(g, termsValues(g), GIFT_SIZE_TERMS)).toBe('Nothing has changed.');
     expect(shipWaitsFor(g)).toBe('Its size is to be chosen.');
     expect(shipWaitsFor({ ...g, skuId: 's1', sizeLabel: '52' })).toBe('It is paid with OR-12345678.');
     const parent = view({ priceMinor: 300_000, currency: 'EUR', skuId: 's', sizeLabel: '52', reservation: 'STOCK', gift: { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED', sizeToChoose: true } });

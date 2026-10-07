@@ -12,8 +12,9 @@
  *    currency, any order's engraving text (decision 31).
  *  - Its welcome gift and its credit (plan NEXT-NINE, BP-19 T5): the GIFT order travelling with it (its size to
  *    choose: MARK PAID waits for it), the client's credit usable now and the credit taken off it; APPLY CREDIT and
- *    REMOVE CREDIT (OPERATOR, while RESERVED). A GIFT order says its tier and the order it travels with; its size is
- *    chosen among its model's (EDIT), and SHIP is prefilled with its order's carrier and tracking number.
+ *    REMOVE CREDIT (OPERATOR, while RESERVED). A GIFT order says its tier and the order it travels with; its size, To be
+ *    confirmed, is chosen among its model's (CHOOSE SIZE). An order travelling with another ships with SHIP WITH ITS
+ *    ORDER, prefilled with that order's carrier and tracking number.
  *  - Its buyer: the name and address entered by Client Services (masked for an AUDITOR); EDIT (OPERATOR).
  *  - Its piece: the location it is served from (CHANGE: what it holds moves), what it holds (a piece in stock, a piece
  *    being made at the atelier), the piece that fulfils it (LINK A PIECE picked from the stock, also in place of a
@@ -30,6 +31,7 @@ import { formatMoney, parseMoney } from '../model/live.js';
 import {
   addonsLine,
   buyerInput,
+  canChooseGiftSize,
   buyerProblem,
   CHANNEL_LABELS,
   creditActions,
@@ -44,6 +46,7 @@ import {
   durationText,
   EVENT_LABELS,
   eventActor,
+  GIFT_SIZE_TERMS,
   lateSentence,
   noteProblem,
   ORDER_LIMITS,
@@ -107,9 +110,11 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       submit: async (v) => step({ to: 'PAID', ...(v.note.trim() ? { note: v.note.trim() } : {}) }),
     }).then(done('Order paid.'));
   const active = carriers.items.filter((c) => c.active);
+  // SHIP WITH ITS ORDER (BP-19 T5): an order travelling with another (a welcome gift, a LIVE entry's next pieces).
+  const shipLabel = o.withOrder ? 'Ship with its order' : 'Ship';
   const ship = () =>
     void openDialog({
-      title: 'Ship',
+      title: shipLabel,
       eyebrow,
       body: h('p', { class: 'dialog__text' }, `The piece leaves ${o.location.name}: the order reads SHIPPED, with its carrier and tracking number, which the collector reads with its link.`),
       // SHIP WITH ITS ORDER (BP-19 T5): an order travelling with another, prefilled with that order's carrier and tracking number.
@@ -139,7 +144,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
         noteField(false, 'Optional.'),
       ],
       validate: (v) => shipProblem(v, o.currency),
-      confirmLabel: 'Ship',
+      confirmLabel: shipLabel,
       submit: async (v) => step(shipInput(v)),
     }).then(done('Order shipped.'));
   const deliver = () =>
@@ -250,7 +255,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
 
   const stepTools = [
     acts.pay ? button('Mark paid', { kind: 'primary', testId: 'order-pay', onClick: pay }) : null,
-    acts.ship ? button('Ship', { kind: 'primary', testId: 'order-ship', onClick: ship }) : null,
+    acts.ship ? button(shipLabel, { kind: 'primary', testId: 'order-ship', onClick: ship }) : null,
     acts.deliver ? button('Mark delivered', { kind: 'primary', testId: 'order-deliver', onClick: deliver }) : null,
     acts.cancel ? button('Cancel', { kind: 'danger', testId: 'order-cancel', onClick: cancel }) : null,
     acts.return ? button('Open a return', { kind: 'secondary', testId: 'order-return', onClick: returned }) : null,
@@ -291,19 +296,12 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
   const stepSection = section('Step', [strip, defList(stepRows)], { id: 'order-step', tools: stepTools });
 
   // ── The order ────────────────────────────────────────────────────────────
+  // A welcome gift's size is chosen in its own dialog, CHOOSE SIZE (BP-19 T5): EDIT holds the rest of its terms.
+  const terms = o.channel === 'GIFT' ? { ...acts.terms, size: false } : acts.terms;
   const editTerms = () => {
     const v = termsValues(o);
     const fields: DialogField[] = [];
-    if (acts.terms.size && o.channel === 'GIFT') {
-      fields.push({
-        name: 'giftSize',
-        label: 'Size',
-        kind: 'select',
-        options: [{ value: '', label: 'Choose a size' }, ...giftSizeOptions(o)],
-        value: v.giftSize,
-        hint: 'Among the gift model’s sizes. The order then holds a piece of that size, or one is made for it.',
-      });
-    } else if (acts.terms.size) {
+    if (terms.size) {
       fields.push(
         { name: 'size', label: 'Size', maxlength: ORDER_LIMITS.size, value: v.size, hint: 'As the model’s sizes are named: 52, M. The order then holds a piece of that size, or one is made for it.' },
         { name: 'oneSize', label: 'One size', kind: 'checkbox', value: v.oneSize, hint: 'The model has no sizes.' },
@@ -344,13 +342,35 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow,
       body: h('p', { class: 'dialog__text' }, o.channel === 'LIVE' ? 'The size and the price of a LIVE RELEASE order are its release’s: only the engraving text is entered here.' : 'Entered by ORBES Client Services with the collector.'),
       fields,
-      validate: (values) => termsProblem(o, values, acts.terms),
+      validate: (values) => termsProblem(o, values, terms),
       confirmLabel: 'Save',
       submit: async (values) => {
-        await ctx.api.setOrderTerms(o.id, termsChange(o, values, acts.terms));
+        await ctx.api.setOrderTerms(o.id, termsChange(o, values, terms));
       },
     }).then(done('Order saved.'));
   };
+  const chooseSize = () =>
+    void openDialog({
+      title: 'Choose size',
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, 'The welcome gift’s size, confirmed with the collector. The order then holds a piece of that size, or one is made for it.'),
+      fields: [
+        {
+          name: 'giftSize',
+          label: 'Size',
+          kind: 'select',
+          required: true,
+          options: [{ value: '', label: 'Choose a size' }, ...giftSizeOptions(o)],
+          value: termsValues(o).giftSize,
+          hint: 'Among the gift model’s sizes, with the pieces available.',
+        },
+      ],
+      validate: (values) => (values.giftSize ? termsProblem(o, values, GIFT_SIZE_TERMS) : 'Choose a size.'),
+      confirmLabel: 'Choose size',
+      submit: async (values) => {
+        await ctx.api.setOrderTerms(o.id, termsChange(o, values, GIFT_SIZE_TERMS));
+      },
+    }).then(done('Size chosen.'));
   const releaseLink = o.release
     ? h('a', { class: 'idlink', attrs: { href: o.channel === 'LIVE' ? href('liveRelease', { dropId: o.release.id }) : href('drop', { dropId: o.release.id }) } }, o.release.title)
     : 'The private salon';
@@ -387,7 +407,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     ...(d.sourceReference ? [{ label: 'Collector’s reference', value: mono(d.sourceReference), note: o.source.piece > 1 ? `Piece ${o.source.piece} of the reservation` : undefined }] : []),
     { label: 'Collector', value: h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: d.account.id }) }, data: { testid: 'order-collector' } }, d.account.email) },
     { label: 'Model', value: o.model.name },
-    { label: 'Size', value: sizeText({ sizeLabel: o.sizeLabel, skuKnown: o.skuId !== null }) },
+    { label: 'Size', value: h('span', { data: { testid: 'order-size' } }, sizeText({ sizeLabel: o.sizeLabel, skuKnown: o.skuId !== null, gift: o.channel === 'GIFT' })) },
     { label: 'Price', value: priceLine(o) },
     { label: 'Add-ons', value: addonsLine(o) },
     { label: 'Shipping', value: h('span', { data: { testid: 'order-shipping' } }, shippingLine(o)) },
@@ -402,7 +422,8 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Surprise', value: o.surprise ?? 'None' },
   ];
   const termsTool = [
-    ...(acts.terms.size || acts.terms.price || acts.terms.engraving || acts.terms.shipping ? [button('Edit', { kind: 'ghost', testId: 'order-terms', onClick: editTerms })] : []),
+    ...(canChooseGiftSize(o, acts.terms) ? [button('Choose size', { kind: 'ghost', testId: 'order-gift-size', onClick: chooseSize })] : []),
+    ...(terms.size || terms.price || terms.engraving || terms.shipping ? [button('Edit', { kind: 'ghost', testId: 'order-terms', onClick: editTerms })] : []),
     ...(credits.apply ? [button('Apply credit', { kind: 'ghost', testId: 'order-credit-apply', onClick: applyCredit })] : []),
     ...(credits.remove ? [button('Remove credit', { kind: 'ghost', testId: 'order-credit-remove', onClick: removeCredit })] : []),
   ];

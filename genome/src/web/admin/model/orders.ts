@@ -122,10 +122,14 @@ export function viewHolds(o: OrderView): string {
   return holdsLine({ status: o.status, reservation: o.reservation, bench: o.bench, piece: o.productId, location: o.location, sizeLabel: o.sizeLabel, skuKnown: o.skuId !== null });
 }
 
-/** A size as the console reads it: the label, or ONE SIZE once the size is entered without one. */
-export function sizeText(o: { sizeLabel: string | null; skuKnown: boolean }): string {
+/**
+ * A size as the console reads it: the label, or ONE SIZE once the size is entered without one; before it is, `To enter`,
+ * or `To be confirmed` for a welcome gift whose size Client Services chooses (BP-19 T5).
+ */
+export function sizeText(o: { sizeLabel: string | null; skuKnown: boolean; gift?: boolean }): string {
   if (o.sizeLabel) return o.sizeLabel;
-  return o.skuKnown ? 'ONE SIZE' : 'To enter';
+  if (o.skuKnown) return 'ONE SIZE';
+  return o.gift ? 'To be confirmed' : 'To enter';
 }
 
 /** A carrier's tracking link for a number (as services/orders.ts trackingLink). */
@@ -161,12 +165,23 @@ export function giftHeaderLine(o: Pick<OrderView, 'channel' | 'giftOf' | 'withOr
   return `Welcome gift · ${TIER_NAMES[o.giftOf.tier]}${o.withOrder ? ` · travels with ${o.withOrder.reference}` : ''}`;
 }
 
-/** The welcome gift travelling with an order: `OR-… · MODEL · RESERVED`, or `… · SIZE TO CHOOSE`; null without one. */
+/** The welcome gift travelling with an order: `OR-… · MODEL · RESERVED` (its step), or `… · Size to choose`; null without one. */
 export function giftLine(o: Pick<OrderView, 'gift'>): string | null {
   const g = o.gift;
   if (!g) return null;
-  return `${g.reference} · ${g.model} · ${g.sizeToChoose && g.status === 'RESERVED' ? 'SIZE TO CHOOSE' : humanize(g.status)}`;
+  return `${g.reference} · ${g.model} · ${g.sizeToChoose && g.status === 'RESERVED' ? 'Size to choose' : humanize(g.status)}`;
 }
+
+/**
+ * CHOOSE SIZE on a welcome gift's order (BP-19 T5): while its size may change (`terms.size`) and is still to be
+ * confirmed among its model's sizes, which the server lists then.
+ */
+export function canChooseGiftSize(o: Pick<OrderView, 'channel' | 'skuId' | 'giftOf'>, a: OrderActions['terms']): boolean {
+  return a.size && o.channel === 'GIFT' && o.skuId === null && (o.giftOf?.sizes.length ?? 0) > 0;
+}
+
+/** The terms a welcome gift's CHOOSE SIZE changes: its size only. */
+export const GIFT_SIZE_TERMS: OrderActions['terms'] = Object.freeze({ size: true, price: false, engraving: false, shipping: false });
 
 /** A GIFT order's sizes to choose from, with the pieces available: `52 · 2 available`, `One size · none available`. */
 export function giftSizeOptions(o: Pick<OrderView, 'giftOf'>): { value: string; label: string }[] {

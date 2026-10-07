@@ -541,6 +541,27 @@ export async function shippingFor(tx: Db, accountId: string, currency: string | 
   return rate === null ? { ...NO_SHIPPING } : { service: 'STANDARD', minor: rate, benefit: null };
 }
 
+/**
+ * Whether an order's shipping now is the optional rate it took (BP-19 T4), not a fee entered by hand: the last of its
+ * events that set its shipping is its creation with a shipping not free (a creation fixes none other than a tier's or
+ * a rate), or a change audited as the rate's (`rate: true`).
+ */
+async function shippingFromRate(tx: Db, orderId: string): Promise<boolean> {
+  const last = await tx
+    .selectFrom('order_events')
+    .select(['action', 'details'])
+    .where('order_id', '=', orderId)
+    .where('action', 'in', ['order.create', 'order.shipping'])
+    .orderBy('id', 'desc')
+    .limit(1)
+    .executeTakeFirst();
+  if (!last) return false;
+  const details = (last.details ?? {}) as JsonObject;
+  if (last.action === 'order.shipping') return details.rate === true;
+  const created = details.shipping as JsonObject | undefined;
+  return !!created && created.service !== null && created.service !== undefined && (created.benefit === null || created.benefit === undefined);
+}
+
 /** The shipping of an order travelling with `parent`: its service at 0 (none when it has none), never a benefit of its own. */
 export function travellingShipping(parent: Pick<OrderRow, 'shipping_service'>): OrderShipping {
   return parent.shipping_service === null ? { ...NO_SHIPPING } : { service: parent.shipping_service, minor: 0, benefit: null };
@@ -1705,7 +1726,9 @@ export class OrderService {
    * Its shipping (plan NEXT-NINE, BP-19 T4), while RESERVED: a service with its fee, or null for both (no shipping); 409
    * ORDER_SHIPPING_FREE for a fee on the service its tier makes free (another service, express, is paid at the fee
    * entered), 409 ORDER_SHIPPING_WITH for an order travelling with another. The first price of an order without
-   * shipping takes the optional rate of its currency. The orders travelling with it follow (its service at 0). Audited
+   * shipping takes the optional rate of its currency; a rate it took follows a change of its currency (the new
+   * currency's rate, or no shipping when none is set), while a fee entered by hand stays as entered, for Client Services
+   * to enter again. The orders travelling with it follow (its service at 0). Audited
    * `order.shipping` (each order), the service, the fee and the free tier.
    */
   async setTerms(orderId: string, input: OrderTermsInput, actor: Actor): Promise<OrderView> {
@@ -1795,6 +1818,15 @@ export class OrderService {
         if (rate !== null) {
           after = await updateOrder(tx, o.id, { shipping_service: 'STANDARD', shipping_minor: rate, shipping_benefit: null });
           shipped = { service: 'STANDARD', minor: rate, benefit: null, rate: true };
+        }
+      } else if (priceChange && o.currency !== null && currency !== o.currency && o.with_order_id === null && after.shipping_service !== null && after.shipping_benefit === null && (await shippingFromRate(tx, o.id))) {
+        // Its fee came from the rate of its former currency: the new currency's rate, or no shipping when it has none. A
+        // fee entered by hand stays as entered: Client Services enters it again in the new currency.
+        const rate = await shippingRate(tx, currency ?? null, 'STANDARD');
+        const next: OrderShipping = rate === null ? { ...NO_SHIPPING } : { service: 'STANDARD', minor: rate, benefit: null };
+        if (next.service !== after.shipping_service || next.minor !== after.shipping_minor) {
+          after = await updateOrder(tx, o.id, { shipping_service: next.service, shipping_minor: next.minor, shipping_benefit: null });
+          shipped = { service: next.service, minor: next.minor, benefit: null, rate: true };
         }
       }
       if (fields.length === 0 && shipped === null) throw validationError('Nothing to change.');
