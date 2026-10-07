@@ -89,7 +89,12 @@ export async function productView(ctx: ViewContext): Promise<HTMLElement> {
                 : r.plain
                   ? h('span', { class: 'sheet__plain' }, r.value)
                   : statusMark(r.value, r.tone),
-            r.note ? h('span', { class: 'sheet__note' }, r.note) : null,
+            // With a second note line (the model's variant, plan NEXT LOT §3.1), the two notes stack, the second under the first.
+            r.noteLine2
+              ? h('span', { class: 'sheet__notes' }, h('span', { class: 'sheet__note' }, r.note ?? ''), h('span', { class: 'sheet__note sheet__note--variant' }, r.noteLine2))
+              : r.note
+                ? h('span', { class: 'sheet__note' }, r.note)
+                : null,
           ),
         ),
       ),

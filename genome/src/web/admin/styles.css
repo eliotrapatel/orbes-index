@@ -1391,6 +1391,14 @@ a.bar__label:hover {
   color: var(--ink-soft);
 }
 
+/* A note and its second line (the Product row's model, then its variant: plan NEXT LOT §3.1), one under the other. */
+.sheet__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
 .actions {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

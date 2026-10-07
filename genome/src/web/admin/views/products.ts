@@ -51,7 +51,11 @@ export async function productsView(ctx: ViewContext): Promise<HTMLElement> {
     table(
       [
         { label: 'Product', cell: (r) => h('a', { class: 'idlink', attrs: { href: productHref(r.productId) } }, r.productId), kind: ['nowrap'] },
-        { label: 'Model', cell: (r) => h('span', null, humanize(r.model), h('span', { class: 'cell-sub' }, humanize(r.modelType))) },
+        {
+          label: 'Model',
+          // Plan NEXT LOT §3.1: the model's variant directly under its name, then the type, as before.
+          cell: (r) => h('span', null, humanize(r.model), r.modelVariant ? h('span', { class: 'cell-sub cell-sub--variant' }, humanize(r.modelVariant)) : null, h('span', { class: 'cell-sub' }, humanize(r.modelType))),
+        },
         { label: 'Collection', cell: (r) => humanize(r.collection) },
         { label: 'Material', cell: (r) => humanize(r.material), kind: ['wide'] },
         { label: 'Genome', cell: (r) => mono(r.genomeFingerprint), kind: ['nowrap'] },

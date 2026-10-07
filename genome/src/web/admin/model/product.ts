@@ -24,6 +24,8 @@ export interface SheetRow {
   value: string;
   tone: Tone;
   note?: string;
+  /** A second note line under `note` (the Product row: its model's variant, plan NEXT LOT §3.1). */
+  noteLine2?: string;
   mono?: boolean;
   /** A quantity, not a status: shown without a status mark. */
   plain?: boolean;
@@ -52,7 +54,15 @@ export function productSheet(d: ProductDetail): SheetRow[] {
   const w = d.warranty;
 
   const rows: SheetRow[] = [
-    { key: 'product', label: 'Product', value: p.productId, tone: 'solid', note: `${humanize(p.model.name)} · ${humanize(p.model.type)}` },
+    {
+      key: 'product',
+      label: 'Product',
+      value: p.productId,
+      tone: 'solid',
+      note: `${humanize(p.model.name)} · ${humanize(p.model.type)}`,
+      // Plan NEXT LOT §3.1: the model's variant on its own line under the model's name, only with a label.
+      ...(p.model.variant ? { noteLine2: humanize(p.model.variant) } : {}),
+    },
     {
       key: 'status',
       label: 'Lifecycle',
@@ -179,6 +189,8 @@ export function productAttributes(d: ProductDetail): { label: string; value: str
     { label: 'Category', value: `${humanize(p.category.name)} · ${p.category.code}` },
     { label: 'Collection', value: humanize(p.collection) },
     { label: 'Model', value: humanize(p.model.name) },
+    // Plan NEXT LOT §3.1: the model's variant right after the model, only with a label.
+    ...(p.model.variant ? [{ label: 'Variant', value: humanize(p.model.variant) }] : []),
     { label: 'Type', value: humanize(p.model.type) },
     // The piece's field set at issuance: its size (NOCTURNE N1, formerly Variant), as written.
     { label: 'Size', value: p.variant ? humanize(p.variant) : '—' },

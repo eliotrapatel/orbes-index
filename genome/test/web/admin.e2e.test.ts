@@ -536,6 +536,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(body.claimCode).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
     expect(await page.locator('[data-testid=genome-figure] svg path').count()).toBeGreaterThan(8);
     expect(await page.locator('[data-testid=code-figure] svg path').count()).toBeGreaterThan(100);
+    // Plan NEXT LOT §3.1: the result names its model right after the product (a model without a label: no Variant row).
+    const signed = await page.locator('.deflist__row').evaluateAll((rows) => rows.map((r) => [r.querySelector('dt')?.textContent, r.querySelector('dd')?.textContent]));
+    const product = signed.findIndex(([label]) => label === 'Product');
+    expect(signed[product + 1]?.[0]).toBe('Model');
+    expect(signed[product + 1]?.[1]).toMatch(/^\S.* · \S.*$/);
+    expect(signed.some(([label]) => label === 'Variant')).toBe(false);
     await shot(page, 'generator', { full: true });
 
     // Theme switch re-renders the same code on ivory.
@@ -2881,6 +2887,27 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=variant-list] tbody tr').count()).toBe(1);
     expect(await p.locator('[data-testid=variant-list] tbody tr').textContent()).toContain('Night blue');
     await shot(p, 'model-variants', { full: true });
+    // A piece of the variant names it (plan NEXT LOT §3.1): on its own line under the model's name on the product page
+    // (the hero's note, then a Variant row after Model) and in the products list (under the name, before the type).
+    const inBlue = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: variant.id, material: '18K WHITE GOLD', year: 2026 }, SYSTEM_ACTOR);
+    await go(p, `#/products/${inBlue.product.productId}`, inBlue.product.productId);
+    expect(await p.locator('.sheet__row--product .sheet__note').allTextContents()).toEqual(['CONSTELLATION · PENDANT', 'NIGHT BLUE']);
+    const attributes = await p.locator('#attributes .deflist__row').evaluateAll((rows) => rows.map((r) => [r.querySelector('dt')?.textContent, r.querySelector('dd')?.textContent]));
+    const at = attributes.findIndex(([label]) => label === 'Model');
+    expect(attributes.slice(at, at + 3)).toEqual([
+      ['Model', 'CONSTELLATION'],
+      ['Variant', 'NIGHT BLUE'],
+      ['Type', 'PENDANT'],
+    ]);
+    await shot(p, 'product-variant-line', { full: true });
+    await go(p, `#/products?q=${inBlue.product.productId}`, 'Products');
+    await expect.poll(() => p.locator('table.table tbody tr').count()).toBe(1);
+    expect(await p.locator('table.table tbody tr td').nth(1).locator('.cell-sub').allTextContents()).toEqual(['NIGHT BLUE', 'PENDANT']);
+    await shot(p, 'products-variant-line');
+    // A piece of a model without a label shows neither.
+    await go(p, `#/products/${issuedProductId}`, issuedProductId);
+    expect(await p.locator('.sheet__row--product .sheet__note').count()).toBe(1);
+    expect(await p.locator('#attributes dt', { hasText: /^Variant$/ }).count()).toBe(0);
     // The Catalogue says where each stands; a choice of a model names its label.
     await go(p, '#/catalogue', 'Catalogue');
     expect(await p.locator('#models tbody tr', { hasText: 'CST-NI' }).locator('[data-testid=model-variant]').textContent()).toBe('Variant of CONSTELLATION · NIGHT BLUE');

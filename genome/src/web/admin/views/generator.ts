@@ -51,6 +51,7 @@ import {
   decodeBatchCsv,
   formatClaimCode,
   ISSUE_BATCH_LIMITS,
+  issuedModelRows,
   modelsFor,
   parseBatchCsv,
   POLICY_OPTIONS,
@@ -116,7 +117,7 @@ export async function generatorView(ctx: ViewContext): Promise<HTMLElement> {
   if (ctx.route.query.mode === 'batch') {
     mount(root, ...batchFormScreen(ctx, categories, offered, cols.items, (outcome) => show(...batchResultScreen(ctx, outcome))));
   } else {
-    mount(root, ...formScreen(ctx, categories, offered, cols.items, (r) => show(...resultScreen(ctx, r))));
+    mount(root, ...formScreen(ctx, categories, offered, cols.items, (r) => show(...resultScreen(ctx, r, offered))));
   }
   return root;
 }
@@ -309,7 +310,7 @@ function asideNotes(): HTMLElement {
   );
 }
 
-function resultScreen(ctx: ViewContext, r: IssueResponse): HTMLElement[] {
+function resultScreen(ctx: ViewContext, r: IssueResponse, models: readonly Model[]): HTMLElement[] {
   const { product: p, genome: g, code: c } = r;
 
   const claim = r.claimCode ? claimPanel(ctx, p.productId, r.claimCode) : null;
@@ -349,6 +350,8 @@ function resultScreen(ctx: ViewContext, r: IssueResponse): HTMLElement[] {
           { class: 'stack' },
           defList([
             { label: 'Product', value: p.productId },
+            // Plan NEXT LOT §3.1: its model, then its variant (with a label), from the catalogue the form loaded.
+            ...issuedModelRows(p.modelId, models),
             { label: 'Code', value: `${versionLabel('CODE', c.codeVersion)} · ISSUE ${c.issue}` },
             { label: 'Signing key', value: mono(`#${c.keyId}`) },
             { label: 'Nonce', value: mono(c.nonce) },

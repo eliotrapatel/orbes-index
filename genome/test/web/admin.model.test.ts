@@ -110,6 +110,7 @@ import {
   CERTIFICATE_LIMITS,
   decodeBatchCsv,
   ISSUE_BATCH_LIMITS,
+  issuedModelRows,
   parseBatchCsv,
   quantityRows,
   signBatchLabel,
@@ -1335,9 +1336,40 @@ describe('product view model (spec §22)', () => {
     expect(JSON.stringify(attrs)).not.toMatch(/payload|signature|nonce/i);
     expect(attrs.find((a) => a.label === 'Serial')?.value).toBe('00184');
   });
+
+  it('names the model variant (plan NEXT LOT §3.1): a second note line under the Product row\'s model, a Variant row right after Model; nothing without a label', () => {
+    const plain = detail();
+    const steel = detail({ product: { ...plain.product, model: { ...plain.product.model, variant: 'Steel' } } });
+    const sheetOf = (d: ProductDetail) => productSheet(d).find((r) => r.key === 'product')!;
+    expect(sheetOf(steel)).toMatchObject({ note: 'MONOLITHE · RING', noteLine2: 'STEEL' });
+    expect(sheetOf(plain).noteLine2).toBeUndefined();
+    const labels = (d: ProductDetail) => productAttributes(d).map((a) => a.label);
+    expect(labels(steel).slice(labels(steel).indexOf('Model'), labels(steel).indexOf('Model') + 3)).toEqual(['Model', 'Variant', 'Type']);
+    expect(productAttributes(steel).find((a) => a.label === 'Variant')?.value).toBe('STEEL');
+    expect(labels(plain)).not.toContain('Variant');
+    // Every other row is as before.
+    expect(labels(steel).filter((l) => l !== 'Variant')).toEqual(labels(plain));
+    expect(productSheet(steel).map((r) => r.key)).toEqual(productSheet(plain).map((r) => r.key));
+  });
 });
 
 // ── Generator ──────────────────────────────────────────────────────────────
+
+describe('generator: the result names its model and variant (plan NEXT LOT §3.1)', () => {
+  const models = [
+    { id: 'm-steel', name: 'MONOLITHE', type: 'BRACELET', variantLabel: 'Steel' },
+    { id: 'm-blue', name: 'MONOLITHE', type: 'BRACELET', variantLabel: 'Blue' },
+    { id: 'm-plain', name: 'ORBITE', type: 'RING', variantLabel: null },
+  ];
+  it('gives Model · name · type, then Variant only with a label; nothing for a model it does not hold', () => {
+    expect(issuedModelRows('m-blue', models)).toEqual([
+      { label: 'Model', value: 'MONOLITHE · BRACELET' },
+      { label: 'Variant', value: 'BLUE' },
+    ]);
+    expect(issuedModelRows('m-plain', models)).toEqual([{ label: 'Model', value: 'ORBITE · RING' }]);
+    expect(issuedModelRows('m-gone', models)).toEqual([]);
+  });
+});
 
 const form = (over: Partial<IssueForm> = {}): IssueForm => ({
   categoryCode: 'J',

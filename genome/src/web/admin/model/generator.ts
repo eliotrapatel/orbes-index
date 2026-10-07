@@ -13,7 +13,7 @@
 import { csvDocument } from '../../../core/render/csv.js';
 import { artifactCellMm, layoutSheet } from '../../../core/render/sheet-layout.js';
 import type { ArtifactOptions, PrintSheetOptions } from '../api.js';
-import { formatCount } from '../format.js';
+import { formatCount, humanize } from '../format.js';
 import {
   AUTH_POLICY_KINDS,
   ARTIFACT_THEMES,
@@ -843,4 +843,15 @@ export function batchResultsFilename(productionBatch: string | undefined, now: D
 /** The certificate cards a batch can print: its signed pieces that hold a claim code, in order. */
 export function batchCertificateItems(rows: readonly BatchResultRow[]): { productId: string; claimCode: string }[] {
   return rows.flatMap((r) => (r.status === 'ISSUED' && r.productId && r.claimCode ? [{ productId: r.productId, claimCode: r.claimCode }] : []));
+}
+
+/**
+ * The Generator's result for one piece names its model (plan NEXT LOT §3.1): `Model · Monolithe · Bracelet`, then
+ * `Variant · Steel` only when the model has a label. Read from the catalogue the form loaded (no server change); a
+ * model it does not hold (not offered any more) names nothing.
+ */
+export function issuedModelRows(modelId: string, models: readonly Pick<Model, 'id' | 'name' | 'type' | 'variantLabel'>[]): { label: string; value: string }[] {
+  const m = models.find((x) => x.id === modelId);
+  if (!m) return [];
+  return [{ label: 'Model', value: `${humanize(m.name)} · ${humanize(m.type)}` }, ...(m.variantLabel ? [{ label: 'Variant', value: humanize(m.variantLabel) }] : [])];
 }
