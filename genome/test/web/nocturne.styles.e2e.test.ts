@@ -310,7 +310,7 @@ async function theCircle(page: Page): Promise<void> {
   await check(page, `${inv} [data-answer="YES"]`, { height: 54, 'background-color': IV, color: GROUND });
   await check(page, `${inv} [data-answer="NO"]`, { height: 54, 'background-color': 'rgba(0, 0, 0, 0)', 'box-shadow': `${LINE2} 0px 0px 0px 1px inset` });
   expect(await page.locator(`${inv} [data-answer="YES"]`).getAttribute('aria-pressed')).toBe('true');
-  await check(page, `${inv} .n-circle-card__link`, { 'margin-top': 18 });
+  await check(page, `${inv} .n-circle-card__link`, { 'margin-top': 21 });
   await check(page, `${inv} .n-circle-card__see`, { 'font-size': 10.5, 'padding-bottom': 5, color: IV });
   const note = '.n-circle-card[data-kind="note"]';
   await check(page, `.n-circle__item:has(${note})`, { 'padding-top': 76 });
@@ -550,7 +550,7 @@ async function firstRegistration(page: Page): Promise<void> {
   await check(page, '.n-own .n-fld__input', { _h: 44, 'border-bottom-color': LINE2, 'font-size': 16 });
   await check(page, '.n-own .form--signin .n-form__actions', { 'margin-top': 28 });
   await check(page, '.n-own .form--signin .n-btn', { _h: 54, 'background-color': IV, color: GROUND, 'font-size': 11, 'letter-spacing': em(11, 0.28) });
-  await check(page, '.n-own__forgotten', { 'margin-top': 18, 'text-align': 'center' });
+  await check(page, '.n-own__forgotten', { 'margin-top': 21, 'text-align': 'center' });
   // The foot: the assurance note, VERIFIED and REF, SCAN ANOTHER (the hairline button).
   await check(page, '.n-result__footnote', { 'margin-top': 36, 'font-size': 13, color: ASH });
   await check(page, '.n-result__meta', { 'margin-top': 22, 'justify-content': 'space-between' });
