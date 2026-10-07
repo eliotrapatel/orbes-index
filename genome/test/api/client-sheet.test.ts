@@ -9,6 +9,7 @@
  *  - PATCH /api/admin/models/:id: the base price with its currency, the care guide (N2, M6), read again by MY PIECES;
  *  - GET /api/admin/shopify/products.csv, GET and PUT /api/admin/models/:id/shopify, GET /api/admin/shopify/orders.csv:
  *    attachments never stored by a cache, the order CSV's collectors and buyers masked for an AUDITOR, the refusals.
+ *  - the sheet's Lifetime value (plan NEXT-NINE, BP-29): GROWTH's rule (services/growth.ts collectorValue).
  * Which role reaches which route is test/api/admin-roles.test.ts; the files' contents test/services/shopify.test.ts.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -225,6 +226,20 @@ describe('the client sheet and the Shopify exports: the console\'s routes', () =
       const r = await op.get(`/api/admin/shopify/orders.csv${bad}`);
       expect([r.statusCode, errorOf(r).code], bad).toEqual([400, 'VALIDATION_FAILED']);
     }
+  });
+
+  it('reads the Lifetime value (plan NEXT-NINE, BP-29): none while nothing is bought, then each order paid at its invoiced price, as GROWTH counts it', async () => {
+    // The salon's order was paid then cancelled (its credit note nets it to nothing); the LIVE and the draw's are not paid.
+    expect((safeJson(await auditor.get(`/api/admin/owners/${me.id}`)) as Json).lifetimeValue).toEqual([]);
+    await op.request('PUT', `/api/admin/orders/${ids.liveOrder}/buyer`, { body: { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris' } });
+    h.clock.advance(MINUTE);
+    expect((await op.post(`/api/admin/orders/${ids.liveOrder}/transition`, { to: 'PAID' })).statusCode).toBe(200);
+    const sheet = safeJson(await auditor.get(`/api/admin/owners/${me.id}`)) as Json;
+    // Its invoice: the piece (€ 5 050) and its engraving (€ 150).
+    expect(sheet.lifetimeValue).toEqual([{ currency: 'EUR', valueMinor: 520_000 }]);
+    expect(sheet.lifetimeValue).toEqual(await h.ctx.services.growth.collectorValue(me.id));
+    const row = (await h.ctx.services.growth.collectors({ currency: 'EUR' })).items.find((c) => c.accountId === me.id)!;
+    expect(row).toMatchObject({ pieces: 1, valueMinor: 520_000 });
   });
 });
 

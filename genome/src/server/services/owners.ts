@@ -51,6 +51,10 @@
  * (`messages`, plan NEXT-NINE CS-01): its id and status, null when it never
  * wrote. A lock leaves the conversation as it is: staff can still answer it.
  *
+ * GROWTH (plan NEXT-NINE, BP-29): the sheet carries the account's lifetime value
+ * per currency (`lifetimeValue`, services/growth.ts collectorValue), the rule of
+ * COLLECTORS BY VALUE.
+ *
  * THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01; services/guarantees.ts): the
  * sheet lists the account's guarantees (`guarantees`), each with its note; the
  * export carries every one, shown to the client or not, with its notes, the
@@ -83,6 +87,7 @@ import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type
 import { accountCareRequests, careThisYear, type CareAllowance, type ExportedCareRequest } from './care.js';
 import { accountGuaranteesForStaff, exportedGuarantees, type AdminGuarantee, type ExportedGuarantee } from './guarantees.js';
 import { exportedSizes, type ExportedSize } from './sizes.js';
+import { collectorValue, type LifetimeValue } from './growth.js';
 import { accountGrants, creditBalances } from './tier-grants.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
@@ -269,6 +274,12 @@ export interface OwnerSheet {
   club: OwnerClub;
   /** IN-01: the house's guarantees granted to the account, the open ones first (services/guarantees.ts). */
   guarantees: AdminGuarantee[];
+  /**
+   * BP-29: the account's lifetime value per currency, by GROWTH's rule (services/growth.ts collectorValue): its app
+   * orders at their invoiced price after credit notes, and its pieces registered from elsewhere at their model's price.
+   * Empty: no priced piece.
+   */
+  lifetimeValue: LifetimeValue;
 }
 
 /** BP-19 T10: what the tier program gave the account and what is in use (the console's Club block). */
@@ -560,6 +571,7 @@ export class OwnerService {
     ]);
     const club = await this.ownerClub(owner.id, standing.tier, now);
     const guarantees = await accountGuaranteesForStaff(this.db, owner.id, now);
+    const lifetimeValue = await collectorValue(this.db, owner.id);
     return {
       ...client,
       owner,
@@ -578,6 +590,7 @@ export class OwnerService {
       })),
       messages: conversation,
       guarantees,
+      lifetimeValue,
     };
   }
 

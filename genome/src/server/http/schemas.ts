@@ -1244,6 +1244,22 @@ export const analyticsQuery = z
   });
 export type AnalyticsQuery = z.infer<typeof analyticsQuery>;
 
+/**
+ * GROWTH (plan NEXT-NINE, BP-29; GET /api/admin/growth): the window, the last 12 (default) or 24 UTC months, and one
+ * currency of the house (default: the one with the most invoices). Amounts are never converted.
+ */
+const growthCurrency = queryOptional(z.enum(HOUSE_CURRENCIES, { message: `Must be one of ${HOUSE_CURRENCIES.join(', ')}` }));
+export const growthQuery = z.object({
+  months: queryOptional(z.preprocess((v) => (typeof v === 'string' && /^\s*\d{1,3}\s*$/.test(v) ? Number(v) : v), z.union([z.literal(12), z.literal(24)], { message: 'Must be 12 or 24' }))),
+  currency: growthCurrency,
+});
+
+/** COLLECTORS BY VALUE (GET /api/admin/growth/collectors): one currency, a page of 25 from 1. */
+export const growthCollectorsQuery = z.object({
+  currency: growthCurrency,
+  page: queryOptional(z.preprocess((v) => (typeof v === 'string' && /^\s*\d{1,6}\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a whole page number').min(1, 'At least 1').max(100_000, 'At most 100000'))),
+});
+
 export const warrantyListQuery = z.object({
   status: z.enum(['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID']).optional(),
 });

@@ -1693,6 +1693,19 @@ export class LiveInsightsService {
     );
   }
 
+  /**
+   * What each of these LIVE RELEASES measured (`summarize`, as the comparison reads it), by id; an id that is not a LIVE
+   * RELEASE is left out. GROWTH's Latest releases (plan NEXT-NINE, BP-29; services/growth.ts) reads it.
+   */
+  async summaries(dropIds: readonly string[]): Promise<Map<string, ReleaseSummary>> {
+    const ids = [...new Set(dropIds.filter((id) => typeof id === 'string' && UUID_RE.test(id)).map((id) => id.toLowerCase()))];
+    if (ids.length === 0) return new Map();
+    const drops = await this.db.selectFrom('drops').selectAll().where('id', 'in', ids).where('mode', '=', 'LIVE').execute();
+    const live = drops.map((x) => x.id);
+    const [sizes, entries, interest] = await Promise.all([this.sizesOf(live), this.entries(live), this.interestCounts(live)]);
+    return new Map(drops.map((x) => [x.id, summarize(insightRelease(x, sizes.get(x.id) ?? []), entries.filter((e) => e.dropId === x.id), interest.get(x.id) ?? 0)]));
+  }
+
   // ── Reads ────────────────────────────────────────────────────────────────
 
   /** A LIVE RELEASE (404 DROP_NOT_FOUND for anything else), its sizes, its rule and its model's type. */

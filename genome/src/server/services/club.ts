@@ -228,7 +228,7 @@ export interface ClubMembers {
  * their number, then each number given its tier (tierForPieces). A locked account reads nothing of the club, so it is
  * left out. Read only (TERMS-FACTS N3); what comes back names no account.
  */
-export async function clubMembersByTier(db: Db): Promise<ClubMembers> {
+export async function clubMembersByTier(db: Db, thresholds: readonly number[] = CLUB_TIER_THRESHOLDS): Promise<ClubMembers> {
   const held = db
     .selectFrom('ownership as o')
     .innerJoin('products as p', 'p.id', 'o.product_id')
@@ -245,7 +245,8 @@ export async function clubMembersByTier(db: Db): Promise<ClubMembers> {
     .execute();
   const out: ClubMembers = { TITANE: 0, PLATINE: 0, PALLADIUM: 0, total: 0 };
   for (const r of rows) {
-    const name = tierName(tierForPieces(Number(r.pieces)));
+    // GROWTH's tests stub the thresholds (services/growth.ts); everywhere else they are CLUB_TIER_THRESHOLDS.
+    const name = tierName(thresholds === CLUB_TIER_THRESHOLDS ? tierForPieces(Number(r.pieces)) : (thresholds.filter((t) => Number(r.pieces) >= t).length as ClubTier));
     if (!name) continue;
     out[name] += Number(r.accounts);
     out.total += Number(r.accounts);

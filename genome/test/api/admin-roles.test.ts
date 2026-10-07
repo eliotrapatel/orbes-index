@@ -19,7 +19,7 @@
  * ADMIN; THE PROGRAM of the club's tiers and the orders' shipping rates, BP-19 T2, read by an AUDITOR, set by an ADMIN;
  * the Yearly care board, BP-19 T6, read by an AUDITOR, its steps taken by an OPERATOR; THE HOUSE'S GUARANTEE, IN-01,
  * granted, changed and revoked by an OPERATOR, its defaults read by an AUDITOR and set by an ADMIN; a model's Sizes, AC-01,
- * read by an AUDITOR and set by an OPERATOR);
+ * read by an AUDITOR and set by an OPERATOR; GROWTH, BP-29, read by an AUDITOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -285,6 +285,11 @@ const PROBES: Probe[] = [
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle?days=367', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/best-time?days=367', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/best-time?tier=4', min: 'AUDITOR' },
+  // GROWTH (plan NEXT-NINE, BP-29): read by an AUDITOR; RETAIL refused.
+  { group: 'growth', method: 'GET', url: '/api/admin/growth?months=6', min: 'AUDITOR' },
+  { group: 'growth', method: 'GET', url: '/api/admin/growth?currency=JPY', min: 'AUDITOR' },
+  { group: 'growth', method: 'GET', url: '/api/admin/growth/collectors?page=0', min: 'AUDITOR' },
+  { group: 'growth', method: 'GET', url: '/api/admin/growth/releases', min: 'AUDITOR' },
   { group: 'warranties', method: 'GET', url: '/api/admin/warranties', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: '/api/admin/anomalies', min: 'AUDITOR' },
   { group: 'anomalies', method: 'GET', url: `/api/admin/anomalies?type=IMPOSSIBLE_TRAVEL&productId=${PID}&sort=risk`, min: 'AUDITOR' },
@@ -379,6 +384,7 @@ describe('admin role enforcement', () => {
       'guarantees',
       'sizes',
       'pairs',
+      'growth',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

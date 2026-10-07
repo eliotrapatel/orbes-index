@@ -59,6 +59,7 @@ import { OrderService } from './services/orders.js';
 import { InvoiceService } from './services/invoices.js';
 import { AtelierService } from './services/atelier.js';
 import { FulfilmentService } from './services/fulfilment.js';
+import { GrowthService } from './services/growth.js';
 import { OwnerService } from './services/owners.js';
 import { PastReleaseService } from './services/past-releases.js';
 import { SalonService } from './services/salon.js';
@@ -155,6 +156,8 @@ export interface AppServices {
   guarantees: GuaranteeService;
   /** YOUR SIZES (plan NEXT-NINE, AC-01): the sizes a collector saves, which preselect a size it then confirms; a model's size kind and fits. */
   sizes: SizeService;
+  /** GROWTH (plan NEXT-NINE, BP-29): what a collector is worth, repeat buying, the funnel from a scan to PALLADIUM, the revenue; reads only. */
+  growth: GrowthService;
 }
 
 export interface AppContext {
@@ -271,6 +274,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const care = new CareService({ db, audit, warranty, clock });
     const guarantees = new GuaranteeService({ db, audit, clock });
     const sizes = new SizeService({ db, audit, clock });
+    const growth = new GrowthService({ db, clock });
 
     const services: AppServices = {
       issuance,
@@ -315,6 +319,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       care,
       guarantees,
       sizes,
+      growth,
       ...overrides.services,
     };
 

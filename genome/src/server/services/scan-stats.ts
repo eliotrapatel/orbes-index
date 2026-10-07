@@ -249,3 +249,22 @@ export async function scanStatsReport(db: Db, window: { from: string; to: string
     countries,
   };
 }
+
+// ── Months (plan NEXT-NINE, BP-29 GROWTH) ──────────────────────────────────
+
+/**
+ * The scans of each UTC month from the month of `from` to the month of `to` (`YYYY-MM`, both included), as
+ * Analytics counts them (`scan_daily_stats`, every country, state and type: staff scans are never in it): one entry
+ * per month that has scans, oldest first. GROWTH's funnel reads its « Scans » from it (services/growth.ts).
+ */
+export async function scanMonths(db: Db, from: string, to: string): Promise<{ month: string; scans: number }[]> {
+  const rows = await db
+    .selectFrom('scan_daily_stats')
+    .select([sql<string>`to_char(day, 'YYYY-MM')`.as('month'), sql<number>`sum(n)::int`.as('scans')])
+    .where('day', '>=', `${from}-01`)
+    .where('day', '<', sql<string>`(${`${to}-01`}::date + interval '1 month')::date`)
+    .groupBy(sql`to_char(day, 'YYYY-MM')`)
+    .orderBy(sql`to_char(day, 'YYYY-MM')`)
+    .execute();
+  return rows.map((r) => ({ month: r.month, scans: Number(r.scans) }));
+}
