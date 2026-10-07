@@ -4,7 +4,8 @@
  * reinstatement, categories (created, activated, deactivated), console users,
  * points of sale, a customer's recovery code, lock and export, the draw
  * of a drop, a model discontinued or reinstated, a LIVE RELEASE ended now or
- * an entry removed from it, a returned piece archived, the settings of the
+ * an entry removed from it, a release's test entrants sent, stopped and
+ * ended, a returned piece archived, the settings of the
  * orders: their delays, the locations, the carriers and the shipping rates; a
  * conversation of the Messages board assigned; THE PROGRAM of the club's tiers; the defaults of THE HOUSE'S
  * GUARANTEE). Every role
@@ -57,6 +58,11 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   endLiveRelease: 'ADMIN',
   /** Remove an entry from a LIVE RELEASE (its place, or the piece it holds, to the next in line): ADMIN. */
   removeLiveEntry: 'ADMIN',
+  /**
+   * Test entrants (plan TEST ENTRANTS): SEND TEST ENTRANTS and ADD MORE (a phrase to type), STOP, CONFIRM or RELEASE a
+   * test entrant by hand, END TEST (a phrase to type): ADMIN. An AUDITOR and an OPERATOR read the tests and the server.
+   */
+  runTestEntrants: 'ADMIN',
   /** The Club's circle (P-X01): write, publish and withdraw a post, set its photographs. */
   manageCircle: 'OPERATOR',
   /** The Club's tiers (P-X04): the words of each tier's benefits (never its threshold). */

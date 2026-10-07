@@ -54,7 +54,7 @@
  * combined as `access_combine` says (AND, the default: every rule; OR: any one of them):
  *  - the tier: its tier (club.ts `tierOf`, the pieces held now) reaches `live_min_tier` (a rule from TITANE up);
  *  - the pieces: when the release names models (`live_access_models`) or a collection (`access_collection_id`), it
- *    holds now a piece of one of them (a piece's own collection first, its model's otherwise);
+ *    holds now a piece of one of them (its own collection first, its model's otherwise; a test entrant holds one);
  *  - taking part (plan LIVE RELEASE+, choice 4): it has taken part in at least `min_participations` releases
  *    (services/participation.ts), the release itself never counted;
  *  - a segment (choice 27, N5): it is a member of `access_segment_id` now (services/segments.ts).
@@ -97,7 +97,7 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock } from '../types.js';
 import { afterRoomDoors, afterRoomPlace, isAfterRoom, settleAfterRoom, type AfterRoomDoor } from './after-room.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
-import { CLUB_EXCLUDED_STATUSES, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
+import { CLUB_EXCLUDED_STATUSES, clubStandings, isTestEntrant, tierName, tierOf, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
 import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
 import { ordersForLiveEntry } from './orders.js';
@@ -527,7 +527,7 @@ export async function accessOf(
           )
           .limit(1)
           .executeTakeFirst();
-        return held !== undefined;
+        return held !== undefined || (await isTestEntrant(db, accountId)); // a test entrant owns its models (services/test-entrants.ts)
       },
     });
   }

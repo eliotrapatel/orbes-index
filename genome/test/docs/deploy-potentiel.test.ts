@@ -120,9 +120,10 @@ describe('the « Potentiel » runbook (docs/launch/DEPLOY-POTENTIEL-2026-10.md)'
   it('gives every migration after 0013 to a deployment of the plan, and deployment A exactly its own, in order, as the scripts print them', () => {
     // The plan's table: A 0014–0018, B+C 0019–0020; then the LIVE RELEASE's D, 0021. A later number needs a plan
     // (and a runbook) first: 0022 and 0023 are LIVE RELEASE+'s (orders, stock and operations; releases and collectors,
-    // plan of 2026-10-04); 0024 is NOCTURNE's (a model's variants and a draw's price, plan of 2026-10-05).
+    // plan of 2026-10-04); 0024 is NOCTURNE's (a model's variants and a draw's price, plan of 2026-10-05); 0024_z TEST
+    // ENTRANTS' (2026-10-07).
     expect(NAMES.filter((n) => numberOf(n) > 13 && numberOf(n) <= 21)).toEqual([...DEPLOY_A, ...DEPLOY_BC, ...DEPLOY_D]);
-    expect(NAMES.filter((n) => numberOf(n) > 21 && numberOf(n) <= 24)).toEqual(['0022_orders_stock', '0023_releases_collectors', '0024_model_variants']);
+    expect(NAMES.filter((n) => numberOf(n) > 21 && numberOf(n) <= 24)).toEqual(['0022_orders_stock', '0023_releases_collectors', '0024_model_variants', '0024_z_test_entrants']);
     // 0025 on are the next nine's (plan of 2026-10-06, deployment G): 0025 the messages with ORBES Client Services.
     expect(NAMES.filter((n) => numberOf(n) > 24)[0]).toBe('0025_client_messages');
     expect(DEPLOY_D).toEqual(['0021_live_release']);

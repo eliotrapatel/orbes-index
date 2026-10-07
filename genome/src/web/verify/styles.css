@@ -946,15 +946,15 @@ body.nocturne .pieces__empty {
 /* The line of a text link of the panel: the column's own type, so its zone (which reaches above the word) clears the
    button above it wherever the panel stands (a result, MY PIECES, a release's page in the vault). */
 .n-own__tl-line {
-  margin-top: 18px;
+  margin-top: 21px;
   font-size: var(--n-fs-base);
   line-height: var(--n-lh-base);
 }
 
-/* 18 px under the hairline button (the canvas's 16, C39): the text link's 44 px zone, which reaches above its word,
-   clears the button. */
+/* 21 px under the hairline button (the canvas's 16, C39): the text link's 44 px zone, which reaches above its word,
+   clears the button with any font the phone falls back to (18 px left it 0.25 px over on Linux's fonts). */
 .n-own__back {
-  margin-top: 18px;
+  margin-top: 21px;
 }
 
 .n-own__terms {
@@ -2825,10 +2825,11 @@ body.nocturne[data-screen="live"] {
   margin-top: 16px;
 }
 
-/* An invitation's link: 18 px under its YES / NO (C1, C8). */
+/* An invitation's link: 21 px under its YES / NO (C1, C8 draw 18): its 44 px zone, which reaches above its word,
+   clears the buttons with any font the phone falls back to (18 px left it 0.25 px over on Linux's fonts). */
 .n-circle-card[data-kind="invitation"] .n-circle-card__link,
 .now__invitation .n-circle-card__link {
-  margin-top: 18px;
+  margin-top: 21px;
 }
 
 /* NOW's card: its day 8 px under its title (C1). */

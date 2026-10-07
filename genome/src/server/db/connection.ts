@@ -60,6 +60,14 @@ export const PGLITE_PARSERS: NonNullable<PGliteOptions['parsers']> = Object.free
 
 // ── Factories ──────────────────────────────────────────────────────────────
 
+/** The pg pool behind each PostgreSQL database made here: the server's status reads its counts (services/system-status.ts). */
+const POOLS = new WeakMap<object, pg.Pool>();
+
+/** The pg pool of a database made by createDb; null for PGlite (one connection, no pool) or a database made elsewhere. */
+export function poolOf(db: Kysely<any>): pg.Pool | null {
+  return POOLS.get(db) ?? null;
+}
+
 /**
  * Create a Kysely instance for `postgres://…`, `postgresql://…`,
  * `pglite:memory` or `pglite:/abs/dir`. Connections are opened lazily on
@@ -96,7 +104,9 @@ export function createDb(url: string, opts: CreateDbOptions = {}): Db {
   pool.on('error', (err) => {
     opts.log?.error({ err: { message: err.message, code: (err as { code?: string }).code } }, 'postgres pool error');
   });
-  return new Kysely<Database>({ dialect: new PostgresDialect({ pool }) });
+  const db = new Kysely<Database>({ dialect: new PostgresDialect({ pool }) });
+  POOLS.set(db, pool);
+  return db;
 }
 
 /** Wrap an existing PGlite instance (created with `parsers: PGLITE_PARSERS`). Used by the test helper. */

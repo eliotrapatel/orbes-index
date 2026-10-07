@@ -33,10 +33,10 @@ const NAMES = Object.keys(MIGRATIONS);
 const numberOf = (name: string): number => Number(name.slice(0, 4));
 /** The schema deployment E leaves, F's starting point. */
 const AFTER_E = NAMES.filter((n) => numberOf(n) <= 23);
-/** Deployment F: the one migration of NOCTURNE. */
-const DEPLOY_F = NAMES.filter((n) => numberOf(n) > 23 && numberOf(n) <= 24);
-/** The schema deployment F leaves. A later number is the next nine's (plan of 2026-10-06, deployment G, its own runbook). */
-const AFTER_F = NAMES.filter((n) => numberOf(n) <= 24);
+/** Deployment F: the one migration of NOCTURNE (0024_z, TEST ENTRANTS, is its own lot's, after F). */
+const DEPLOY_F = NAMES.filter((n) => numberOf(n) > 23 && n <= '0024_model_variants');
+/** The schema deployment F leaves. A later name is TEST ENTRANTS' (0024_z) or the next nine's (plan of 2026-10-06, deployment G, its own runbook). */
+const AFTER_F = NAMES.filter((n) => n <= '0024_model_variants');
 
 /** What the runbook expects from the scripts, each printed word for word by its source. */
 const MESSAGES: ReadonlyArray<readonly [message: string, source: string]> = [
@@ -76,8 +76,10 @@ describe('the NOCTURNE runbook (docs/launch/DEPLOY-NOCTURNE.md)', () => {
   it('starts from deployment E, 0001 to 0023, and applies exactly 0024, as the scripts print it', () => {
     expect(AFTER_E.at(-1)).toBe('0023_releases_collectors');
     expect(DEPLOY_F).toEqual(['0024_model_variants']);
-    // A later number belongs to the next nine (plan of 2026-10-06), which ships as deployment G after F.
-    expect(NAMES.filter((n) => numberOf(n) > 24).every((n) => numberOf(n) >= 25 && numberOf(n) <= 32)).toBe(true);
+    // A later name has its own lot and runbook: 0024_z is TEST ENTRANTS' (2026-10-07), on the code F deployed; a later
+    // number belongs to the next nine (plan of 2026-10-06), which ships as deployment G after F.
+    expect(NAMES.filter((n) => n > '0024_model_variants')[0]).toBe('0024_z_test_entrants');
+    expect(NAMES.filter((n) => n > '0024_z_test_entrants').every((n) => numberOf(n) >= 25 && numberOf(n) <= 32)).toBe(true);
     expect(runbook).toContain('[le runbook précédent](DEPLOY-LIVE-RELEASE-PLUS.md)');
     expect(outputs.join('\n')).toContain(AFTER_E.slice(-2).join('\n'));
     expect(runbook).toContain(`schema: ${AFTER_E.length} migration(s) applied, all known to orbes-genome:<TAG_F>`);

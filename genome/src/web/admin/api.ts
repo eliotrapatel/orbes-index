@@ -158,6 +158,12 @@ import type {
   SegmentGroup,
   SegmentName,
   SegmentOptions,
+  ActiveTestRun,
+  SystemStatus,
+  TestRunAddInput,
+  TestRunInput,
+  TestRunSummary,
+  TestRunView,
 } from './types.js';
 
 export class ApiError extends Error {
@@ -1265,6 +1271,58 @@ export class AdminApi {
   /** OFFER NEXT: the first of the waiting list, SELECTED. */
   offerNextDropEntry(id: string): Promise<DropEntry> {
     return this.post(`/api/admin/drops/${encodeURIComponent(id)}/offer-next`);
+  }
+
+  // ── Test entrants and the server's status (plan TEST ENTRANTS) ───────────
+
+  /** SEND TEST ENTRANTS (ADMIN, phrase TEST <8>): a draw open, or a LIVE RELEASE's room open; one test at a time. */
+  startTestRun(dropId: string, input: TestRunInput): Promise<{ run: TestRunView }> {
+    return this.post(`/api/admin/drops/${encodeURIComponent(dropId)}/test-runs`, input);
+  }
+
+  /** ADD MORE (ADMIN, the same phrase): up to 1 000 more into a RUNNING test, 5 000 in all. */
+  addTestEntrants(runId: string, input: TestRunAddInput): Promise<{ run: TestRunView }> {
+    return this.post(`/api/admin/test-runs/${encodeURIComponent(runId)}/add`, input);
+  }
+
+  /** STOP (ADMIN, one press): the test entrants stop at once; nothing is cleaned. */
+  stopTestRun(runId: string): Promise<{ run: TestRunView }> {
+    return this.post(`/api/admin/test-runs/${encodeURIComponent(runId)}/stop`);
+  }
+
+  /** CONFIRM a test entrant holding a place (ADMIN): a draw's staff Confirm; on a LIVE RELEASE, it secures and pays now. */
+  confirmTestEntrant(runId: string, accountId: string): Promise<{ run: TestRunView }> {
+    return this.post(`/api/admin/test-runs/${encodeURIComponent(runId)}/entrants/${encodeURIComponent(accountId)}/confirm`);
+  }
+
+  /** RELEASE a test entrant's place (ADMIN, a LIVE RELEASE only): RELEASE MY PLACE now. */
+  releaseTestEntrant(runId: string, accountId: string): Promise<{ run: TestRunView }> {
+    return this.post(`/api/admin/test-runs/${encodeURIComponent(runId)}/entrants/${encodeURIComponent(accountId)}/release`);
+  }
+
+  /** END TEST (ADMIN, phrase END TEST <8>): the report, then the clean-up of the test's orders, entries and places. */
+  endTestRun(runId: string, phrase: string): Promise<{ run: TestRunView }> {
+    return this.post(`/api/admin/test-runs/${encodeURIComponent(runId)}/end`, { phrase });
+  }
+
+  /** The release's newest test not ended, or null; `background` for the refresh made by a timer. */
+  currentTestRun(dropId: string, opts: { background?: boolean } = {}): Promise<{ run: TestRunView | null }> {
+    return this.request('GET', `/api/admin/drops/${encodeURIComponent(dropId)}/test-runs/current`, { background: opts.background === true });
+  }
+
+  /** The release's tests, newest first, each with its report once ended. */
+  testRuns(dropId: string, opts: { background?: boolean } = {}): Promise<{ runs: TestRunSummary[] }> {
+    return this.request('GET', `/api/admin/drops/${encodeURIComponent(dropId)}/test-runs`, { background: opts.background === true });
+  }
+
+  /** The RUNNING test, whatever its release, or null (the Drops tab). */
+  activeTestRun(opts: { background?: boolean } = {}): Promise<{ run: ActiveTestRun | null }> {
+    return this.request('GET', '/api/admin/test-runs/active', { background: opts.background === true });
+  }
+
+  /** The server's status: its latest sample and the last 10 minutes. */
+  systemStatus(opts: { background?: boolean } = {}): Promise<SystemStatus> {
+    return this.request('GET', '/api/admin/system/status', { background: opts.background === true });
   }
 
   // ── The Club: the circle (P-X01) ─────────────────────────────────────────

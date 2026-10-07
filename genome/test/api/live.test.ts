@@ -791,6 +791,8 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       h.clock.advance(2 * SECOND);
       await a.client.post(`/api/v1/live/${r.id}/secure`, { token });
       await a.client.post(`/api/v1/live/${r.id}/confirm`, {});
+      // The server's status times the responses (test entrants §7): a stream served, open for minutes, is not one of them.
+      const timed = vi.spyOn(h.app.systemStatus.http, 'record');
       await h.app.liveHub.pulse();
       expect((await s.next((e) => e.event === 'room' && e.data.over === true)).data).toMatchObject({ phase: 'ENDED', endedReason: 'SOLD_OUT', left: 0 });
       expect((await s.next((e) => e.event === 'you' && (e.data.entry as { status: string }).status === 'CONFIRMED')).data).toBeTruthy();
@@ -798,6 +800,9 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       const after = await openSse(base, `/api/v1/live/${r.id}/stream`, { cookies: a.client.cookies });
       expect(after.status).toBe(204);
       expect(h.app.liveHub.open.accounts.size).toBe(0);
+      await until(() => timed.mock.calls.length > 0);
+      expect(timed.mock.calls.map(([status]) => status)).toEqual([204]);
+      timed.mockRestore();
     });
 
     it('says the end once the engine has recorded it, each viewer’s final entry before the room over; the page whole while a hold runs after an END', async () => {

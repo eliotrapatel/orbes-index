@@ -180,8 +180,8 @@ export async function activePieceCount(db: Db, accountId: string): Promise<numbe
 /**
  * The standing of each account of `accountIds` at `now`, read in one query per thousand accounts: the pieces held
  * now (open ownerships of pieces the club counts), the tier they reach, and the full years since the account's first
- * ownership began. An account with no ownership at all stands at 0, 0, 0. Read only: the ownership table is never
- * written here (TERMS-FACTS N3).
+ * ownership began; a test entrant (migration 0024_z) at its test row's tier and seniority, its tier's threshold as its
+ * pieces. An account with no ownership at all stands at 0, 0, 0. Read only (TERMS-FACTS N3): ownership never written.
  */
 export async function clubStandings(db: Db, accountIds: readonly string[], now: Date): Promise<Map<string, ClubStanding>> {
   const ids = [...new Set(accountIds.filter((id) => typeof id === 'string' && UUID_RE.test(id)).map((id) => id.toLowerCase()))];
@@ -204,9 +204,25 @@ export async function clubStandings(db: Db, accountIds: readonly string[], now: 
       const since = r.since === null ? null : new Date(r.since);
       out.set(r.account_id, { pieces, tier: tierForPieces(pieces), seniority: since ? fullYears(since, now) : 0 });
     }
+    // A test entrant (services/test-entrants.ts, migration 0024_z) stands where its test row puts it, never its pieces.
+    const tests = await db.selectFrom('test_entrants').select(['account_id', 'tier', 'seniority']).where('account_id', 'in', chunk).execute();
+    for (const t of tests) {
+      const tier = Math.min(3, Math.max(0, t.tier)) as ClubTier;
+      out.set(t.account_id, { pieces: tier === 0 ? 0 : CLUB_TIER_THRESHOLDS[tier - 1]!, tier, seniority: t.seniority });
+    }
   }
   for (const id of ids) if (!out.has(id)) out.set(id, { pieces: 0, tier: 0, seniority: 0 });
   return out;
+}
+
+/**
+ * Whether an account is a test entrant (services/test-entrants.ts): one of the pool's accounts, whose tier and seniority
+ * the club reads from its test row (clubStandings), and which counts as owning a LIVE RELEASE's models and collection
+ * (services/live.ts accessOf). Nothing else of the code tells it apart from a collector.
+ */
+export async function isTestEntrant(db: Db, accountId: string): Promise<boolean> {
+  if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) return false;
+  return (await db.selectFrom('test_entrants').select('account_id').where('account_id', '=', accountId.toLowerCase()).executeTakeFirst()) !== undefined;
 }
 
 /** One account's standing in the club at `now` (clubStandings). */

@@ -84,6 +84,11 @@ const LIVE_ENTRY: Record<string, Tone> = {
 const ORDER: Record<string, Tone> = { RESERVED: 'outline', PAID: 'solid', SHIPPED: 'solid', DELIVERED: 'solid', CANCELLED: 'muted', RETURNED: 'muted' };
 /** A piece to make: to make, pending; in progress, in force; done or cancelled, historical. */
 const BENCH: Record<string, Tone> = { TO_MAKE: 'outline', IN_PROGRESS: 'solid', DONE: 'muted', CANCELLED: 'muted' };
+/**
+ * A test of test entrants (plan TEST ENTRANTS): running, in force; done, pending its staff draw or END TEST; stopped or
+ * interrupted, needing END TEST's clean-up; ended, historical.
+ */
+const TEST_RUN: Record<string, Tone> = { RUNNING: 'solid', DONE: 'outline', STOPPED: 'alert', INTERRUPTED: 'alert', ENDED: 'muted' };
 /** A post of the circle (P-X01): in force once published; pending while it is not. */
 const CIRCLE: Record<string, Tone> = { PUBLISHED: 'solid', UNPUBLISHED: 'outline' };
 /** A request of the private salon (P-X08): an open one waits for ORBES Client Services, as an open case does. */
@@ -137,7 +142,8 @@ export type ToneDomain =
   | 'livePhase'
   | 'liveEntry'
   | 'order'
-  | 'bench';
+  | 'bench'
+  | 'testRun';
 
 const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   product: PRODUCT,
@@ -165,6 +171,7 @@ const TABLES: Record<ToneDomain, Record<string, Tone>> = {
   liveEntry: LIVE_ENTRY,
   order: ORDER,
   bench: BENCH,
+  testRun: TEST_RUN,
 };
 
 export function toneOf(domain: ToneDomain, value: string | null | undefined): Tone {

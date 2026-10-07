@@ -24,7 +24,7 @@ import type { AppContext } from './context.js';
 import { DomainError } from './errors.js';
 import { ipHashOf } from './http/client.js';
 import { errorBody, installErrorHandlers } from './http/errors.js';
-import { LiveHub, type LiveHubOptions } from './http/live-stream.js';
+import { LIVE_STREAM_ROUTES, LiveHub, type LiveHubOptions } from './http/live-stream.js';
 import { registerRateLimits } from './http/rate-limit.js';
 import { CONTENT_SECURITY_POLICY, registerSecurity } from './http/security.js';
 import { registerStatic } from './http/static.js';
@@ -36,6 +36,8 @@ import { liveRoutes } from './routes/live.js';
 import { messageRoutes } from './routes/messages.js';
 import { ownershipRoutes } from './routes/ownership.js';
 import { publicRoutes } from './routes/public.js';
+import { SystemStatus } from './services/system-status.js';
+import { TestEntrantService } from './services/test-entrants.js';
 
 /** Contract §3: request bodies are limited to 16 KB. */
 export const BODY_LIMIT_BYTES = 16 * 1024;
@@ -137,6 +139,23 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
     reply.header('connection', 'close');
     throw shuttingDown();
   });
+  // The server's status (services/system-status.ts, `app.systemStatus`): a sample every 2 s for the console's panel and
+  // a test's peaks, every response timed into its last 60 s (a LIVE stream served, open for minutes, is not a response
+  // time; a stream refused is counted); started when the app is ready, stopped when it closes.
+  const systemStatus = new SystemStatus({ db: ctx.db, live: liveHub, clock: ctx.clock, log: ctx.log });
+  app.decorate('systemStatus', systemStatus);
+  app.addHook('onResponse', async (request, reply) => {
+    if (reply.statusCode === 200 && (LIVE_STREAM_ROUTES as readonly string[]).includes(request.routeOptions.url ?? '')) return;
+    systemStatus.http.record(reply.statusCode, reply.elapsedTime);
+  });
+  app.addHook('onReady', async () => systemStatus.start());
+  app.addHook('onClose', async () => systemStatus.stop());
+  // TEST ENTRANTS (services/test-entrants.ts, `app.testEntrants`): the bots act through this app's own routes; a test
+  // left RUNNING by the previous process is INTERRUPTED now; the bots stop before the server closes.
+  const testEntrants = new TestEntrantService({ ctx, inject: (request) => app.inject(request) });
+  app.decorate('testEntrants', testEntrants);
+  app.addHook('preClose', async () => testEntrants.close());
+  await testEntrants.boot();
   const limiters = await registerRateLimits(app, config);
 
   const deps = { ctx, limiters };

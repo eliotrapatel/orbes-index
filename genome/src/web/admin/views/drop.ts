@@ -21,7 +21,11 @@
  *    sale concluded) and
  *    Lapse (only once the place's time has passed) on a place held; Offer
  *    next while places are left. Each is one request under the drop's lock,
- *    audited by the server; then the page is read again.
+ *    audited by the server; then the page is read again. A test entrant's
+ *    account carries TEST (plan TEST ENTRANTS).
+ *  - Test entrants (plan TEST ENTRANTS, views/test-entrants.ts): SEND TEST
+ *    ENTRANTS while the draw is open (ADMIN), the test not ended, PAST TESTS;
+ *    on the right, the server's status (views/server-status.ts).
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDateTime, groupChars, humanize } from '../format.js';
@@ -43,6 +47,7 @@ import {
   tierName,
 } from '../model/club.js';
 import { drawGuaranteeLine, GUARANTEE_STATE_LABELS, guaranteedText, placesLeftForDraw, validUntilText } from '../model/guarantees.js';
+import { drawTestStart } from '../model/test-entrants.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
 import { DROP_ENTRY_STATUSES, type Drop, type DropEntry, type DropEntryStatus, type ReleaseGuarantee } from '../types.js';
@@ -51,15 +56,18 @@ import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
 import { dropFields } from './club.js';
 import { pageParam, type ViewContext } from './context.js';
+import { serverStatusPanel, withServerPanel } from './server-status.js';
+import { loadTestReads, testEntrantsSection, testTag } from './test-entrants.js';
 
 export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.dropId ?? '';
   const status = DROP_ENTRY_STATUSES.find((s) => s === ctx.route.query.status) as DropEntryStatus | undefined;
-  const [d, entries, models, guarantees] = await Promise.all([
+  const [d, entries, models, guarantees, tests] = await Promise.all([
     ctx.api.drop(id),
     ctx.api.dropEntries(id, { ...(status ? { status } : {}), page: pageParam(ctx), pageSize: 50 }),
     ctx.api.models(),
     ctx.api.releaseGuarantees(id),
+    loadTestReads(ctx, id),
   ]);
   const role = ctx.session.admin.role;
   const acts = dropActions(d, role);
@@ -247,7 +255,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
           { label: 'Entry', cell: (e) => mono(e.id, e.id.slice(0, 8)), kind: ['nowrap'] },
           {
             label: 'Account',
-            cell: (e) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: e.accountId }), 'data-testid': 'entry-account' } }, e.email),
+            cell: (e) => h('span', null, h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: e.accountId }), 'data-testid': 'entry-account' } }, e.email), testTag(e.email)),
             kind: ['wide'],
           },
           { label: 'Tier', cell: (e) => tierName(e.tier), kind: ['nowrap'] },
@@ -313,9 +321,10 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       lead: dropLead(d),
       actions: [linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
     }),
-    release,
-    guaranteesSection(guarantees.items),
-    list,
+    withServerPanel(
+      [release, testEntrantsSection(ctx, { mode: 'DRAW', dropId: d.id, eyebrow, start: drawTestStart(d, ctx.now()) }, tests), guaranteesSection(guarantees.items), list],
+      serverStatusPanel(ctx),
+    ),
   );
 }
 

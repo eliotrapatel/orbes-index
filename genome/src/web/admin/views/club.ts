@@ -19,7 +19,9 @@
  * release (OPERATOR) creates a DRAFT whose seed is drawn and committed at
  * once. A drop's row opens its page (`#/club/drops/:dropId`): its facts,
  * publication, cancellation, the draw (ADMIN) and its entries. An AUDITOR
- * reads.
+ * reads. On the right, the server's status (plan TEST ENTRANTS,
+ * views/server-status.ts) and the test running, whatever its release, with
+ * STOP (ADMIN).
  */
 import { h, mount } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
@@ -38,6 +40,7 @@ import { newLiveFields } from './live.js';
 import { reasoning } from './live-intelligence.js';
 import { pageParam, type ViewContext } from './context.js';
 import { requestsTab } from './requests.js';
+import { serverStatusPanel, withServerPanel } from './server-status.js';
 import { tiersTab } from './tiers.js';
 
 /** The fields of a drop's dialog: the active models to choose from, its values. */
@@ -264,5 +267,6 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
     ],
     { id: 'drops', tools: canManage ? [button('New release', { kind: 'ghost', testId: 'drop-new', onClick: () => void newDrop() })] : [] },
   );
-  return h('div', { class: 'club__drops' }, liveSection, drawsSection);
+  // The server's status on the right (plan TEST ENTRANTS), with the test running, whatever its release.
+  return withServerPanel([h('div', { class: 'club__drops' }, liveSection, drawsSection)], serverStatusPanel(ctx, { activeTest: true }));
 }

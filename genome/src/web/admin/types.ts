@@ -2716,3 +2716,175 @@ export interface GrowthRelease {
 
 /** The client sheet's Lifetime value: per currency. */
 export type LifetimeValue = { currency: string; valueMinor: number }[];
+
+// ── Test entrants and the server's status (plan TEST ENTRANTS, 2026-10-07) ──
+
+/** A test's release: a draw or a LIVE RELEASE (test_runs.mode). */
+export const TEST_RUN_MODES = ['DRAW', 'LIVE'] as const;
+export type TestRunMode = (typeof TEST_RUN_MODES)[number];
+
+/**
+ * A test (test_runs.status): RUNNING, its test entrants acting; DONE, every one has acted (a draw's test waits there for
+ * the staff draw); STOPPED by STOP; INTERRUPTED by a restart; ENDED by END TEST, its clean-up done. Only RUNNING blocks
+ * a new test.
+ */
+export const TEST_RUN_STATUSES = ['RUNNING', 'DONE', 'STOPPED', 'INTERRUPTED', 'ENDED'] as const;
+export type TestRunStatus = (typeof TEST_RUN_STATUSES)[number];
+
+/** How the test entrants arrive: all at once, evenly over a number of seconds, or spread from now until T0 (LIVE). */
+export type TestArrivalMode = 'all' | 'burst' | 'before';
+
+/** The settings of one press of SEND TEST ENTRANTS or ADD MORE, without its phrase. */
+export interface TestRunSettings {
+  /** Test entrants per tier: 1 to 1 000 in all per press. */
+  tiers: { none: number; titane: number; platine: number; palladium: number };
+  /** `seconds` for a burst (1 to 3 600); `interestPct`: the share that says I'LL BE THERE first (LIVE). */
+  arrival: { mode: TestArrivalMode; seconds?: number; interestPct: number };
+  /**
+   * LIVE: the shares that PAY, RELEASE MY PLACE, miss their turn or LEAVE (100 in all), the seal held `holdSeconds`
+   * (1.5 to 10). A draw: the share that withdraws after entering, the PLATINE and PALLADIUM that reserve during the early
+   * access, and the share of the places drawn that confirm by themselves.
+   */
+  behaviour: { payPct: number; releasePct: number; missPct: number; leavePct: number; holdSeconds: number; withdrawPct: number; reservePct: number; confirmPct: number };
+  /** LIVE: the size (a size's id; null, one at random), the pieces (1 to 5; null, at random) and the share that adds add-ons. */
+  choices: { size: string | null; quantity: number | null; addOnsPct: number };
+  /** Each test entrant drawn within: its seniority (years), its account's age (days), a country of the list (none: none), and the share on one shared network. */
+  profile: { seniorityMin: number; seniorityMax: number; accountAgeDaysMin: number; accountAgeDaysMax: number; countries: string[]; sharedNetworkPct: number };
+}
+
+/** One press of a run as the server keeps it (test_runs.settings, oldest first): its settings, when, and how many it sent. */
+export interface TestRunPress extends TestRunSettings {
+  at?: Iso;
+  entrants?: number;
+}
+
+/** POST /api/admin/drops/:id/test-runs (ADMIN): SEND TEST ENTRANTS, the phrase typed with the settings. */
+export interface TestRunInput extends TestRunSettings {
+  phrase: string;
+}
+
+/** POST /api/admin/test-runs/:id/add (ADMIN): ADD MORE, the same body; the groups left out keep the run's last settings. */
+export type TestRunAddInput = Pick<TestRunInput, 'phrase' | 'tiers'> & Partial<Omit<TestRunSettings, 'tiers'>>;
+
+/** One tier's test entrants in a run, by what they did. */
+export interface TestRunTier {
+  tier: number;
+  label: 'NO TIER' | 'TITANE' | 'PLATINE' | 'PALLADIUM';
+  entered: number;
+  inRoom: number;
+  selected: number;
+  confirmed: number;
+  lapsed: number;
+  released: number;
+  missed: number;
+  left: number;
+  withdrawn: number;
+}
+
+/** A test entrant holding a place (a draw's SELECTED, a LIVE turn or hold): CONFIRM, and RELEASE on a LIVE RELEASE. */
+export interface TestRunSelected {
+  accountId: string;
+  email: string;
+  tier: number;
+  status: string;
+  respondBy: Iso | null;
+  orderRef: string | null;
+  canConfirm: boolean;
+  canRelease: boolean;
+}
+
+/** One check of a TEST REPORT, computed at END TEST before the clean-up: passed or failed, said in one plain line. */
+export interface TestReportCheck {
+  id: string;
+  label: string;
+  pass: boolean;
+  line: string;
+}
+
+/**
+ * A TEST REPORT: its five checks (one entry per account, the draw's order, no two places, the stock, the orders), how
+ * many passed, and the test's peaks while it ran.
+ */
+export interface TestReport {
+  at?: Iso;
+  checks: TestReportCheck[];
+  passed?: number;
+  total?: number;
+  peaks?: TestRunPeaks | null;
+}
+
+/** The test's own running maxima while it was RUNNING (memory, CPU, response time, loop delay, connections, errors). */
+export type TestRunPeaks = Record<string, unknown>;
+
+/** GET /api/admin/drops/:id/test-runs/current: a run with what its test entrants did. */
+export interface TestRunView {
+  id: string;
+  dropId: string;
+  mode: TestRunMode;
+  status: TestRunStatus;
+  createdAt: Iso;
+  endedAt: Iso | null;
+  /** The email of the ADMIN who sent it. */
+  createdBy: string;
+  /** The settings of each press, oldest first (ADD MORE appends one); one press's settings are read alike. */
+  settings: TestRunPress[] | TestRunPress;
+  /** Test entrants sent, every press together. */
+  entrants: number;
+  byTier: TestRunTier[];
+  /** The release's entries: the real ones, the test ones and all of them. */
+  release: { real: number; test: number; total: number };
+  /** At most 500. */
+  selected: TestRunSelected[];
+  /** The runner's last 20 errors, oldest first (a 429 refused, a route's refusal). */
+  errors: { at: Iso; message: string }[];
+  report: TestReport | null;
+  peaks: TestRunPeaks | null;
+}
+
+/** GET /api/admin/drops/:id/test-runs: the release's tests, newest first. */
+export interface TestRunSummary {
+  id: string;
+  status: TestRunStatus;
+  createdAt: Iso;
+  endedAt: Iso | null;
+  createdBy: string;
+  entrants: number;
+  checksPassed: number | null;
+  checksTotal: number | null;
+  report: TestReport | null;
+  peaks?: TestRunPeaks | null;
+}
+
+/** GET /api/admin/test-runs/active: the RUNNING test, whatever its release (the Drops tab). */
+export interface ActiveTestRun {
+  id: string;
+  dropId: string;
+  dropName: string;
+  mode: TestRunMode;
+  status: TestRunStatus;
+  entrants: number;
+}
+
+/** One sample of the server's status, every 2 s; a value the server cannot read here (macOS, PGlite) is null. */
+export interface SystemSample {
+  at: Iso;
+  /** The app's container (cgroup v2): memory now, its limit and peak; CPU in cores, its limit, the share throttled; processes. */
+  app: { memBytes: number | null; memLimitBytes: number | null; memPeakBytes: number | null; cpuCores: number | null; cpuLimitCores: number | null; throttledPct: number | null; pids: number | null; pidsMax: number | null };
+  /** The server: memory available of its total, swap used, load over 1 and 5 minutes, CPU busy, the disk `/` used. */
+  host: { memAvailableBytes: number | null; memTotalBytes: number | null; swapUsedBytes: number | null; load1: number | null; load5: number | null; cpuPct: number | null; diskUsedPct: number | null };
+  /** The app's Node process: its heap and its limit, resident and external memory, the event loop's delay and busy share. */
+  node: { heapUsedBytes: number | null; heapLimitBytes: number | null; rssBytes: number | null; externalBytes: number | null; loopDelayP50Ms: number | null; loopDelayP99Ms: number | null; loopUtilPct: number | null };
+  /** The LIVE streams open now, the releases and the accounts they follow. */
+  live: { streams: number | null; releases: number | null; accounts: number | null };
+  /** The app's pool (its connections, idle, requests waiting) and the database's (connections of its maximum, active, waiting). */
+  db: { poolTotal: number | null; poolIdle: number | null; poolWaiting: number | null; connections: number | null; maxConnections: number | null; active: number | null; waiting: number | null };
+  /** Over the last 60 s: requests a second, the response time's p95, the 5xx answered and the 429 refused. */
+  http: { rps: number | null; p95Ms: number | null; errors5xx: number | null; refused429: number | null };
+}
+
+/** GET /api/admin/system/status (AUDITOR): the latest sample and the last 10 minutes (300 samples, oldest first). */
+export interface SystemStatus {
+  now: Iso;
+  latest: SystemSample | null;
+  history: SystemSample[];
+}

@@ -146,8 +146,8 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
   it('applies exactly the migrations after 0021, 0022 and 0023, as the scripts print them', () => {
     expect(DEPLOY_E).toEqual(['0022_orders_stock', '0023_releases_collectors']);
     // A later number has its own plan and runbook: 0024 is NOCTURNE's (plan of 2026-10-05: a model's variants and a
-    // draw's price), which ships as its own deployment after E.
-    expect(NAMES.filter((n) => numberOf(n) > 23 && numberOf(n) <= 24)).toEqual(['0024_model_variants']);
+    // draw's price), which ships as its own deployment after E; 0024_z TEST ENTRANTS' (2026-10-07), after it.
+    expect(NAMES.filter((n) => numberOf(n) > 23 && numberOf(n) <= 24)).toEqual(['0024_model_variants', '0024_z_test_entrants']);
     // 0025 on are the next nine's (plan of 2026-10-06), deployment G, after F.
     expect(NAMES.filter((n) => numberOf(n) > 24)[0]).toBe('0025_client_messages');
     const rows = [...section(runbook, '### 1.0').matchAll(/^ *\| `(\d{4}_[a-z0-9_]+)` \|/gm)].map((m) => m[1]);

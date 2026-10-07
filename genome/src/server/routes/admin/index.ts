@@ -55,6 +55,8 @@ import { adminRevocationRoutes } from './revocations.js';
 import { adminSaleRoutes } from './sale.js';
 import { adminSegmentRoutes } from './segments.js';
 import { adminShopifyRoutes } from './shopify.js';
+import { adminSystemRoutes } from './system.js';
+import { adminTestEntrantRoutes } from './test-entrants.js';
 
 export interface AdminRouteDeps extends RouteDeps {
   /** Admin sessions must have passed TOTP (except on the auth routes). */
@@ -67,6 +69,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
 
   await app.register(adminAuthRoutes, deps);
   await app.register(adminDashboardRoutes, deps);
+  await app.register(adminSystemRoutes, deps);
   await app.register(adminAnalyticsRoutes, deps);
   await app.register(adminGrowthRoutes, deps);
   await app.register(adminDocumentRoutes, deps);
@@ -82,6 +85,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminGuaranteeRoutes, deps);
   await app.register(adminDropRoutes, deps);
   await app.register(adminLiveRoutes, deps);
+  await app.register(adminTestEntrantRoutes, deps);
   await app.register(adminOrderRoutes, deps);
   await app.register(adminInvoiceRoutes, deps);
   await app.register(adminAtelierRoutes, deps);

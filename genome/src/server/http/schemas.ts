@@ -83,6 +83,7 @@ import { FIT_RANGE_MM } from '../services/sizes.js';
 import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
 import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../services/salon.js';
 import { SHOPIFY_PERIOD_MAX_DAYS } from '../services/shopify.js';
+import { TEST_PER_PRESS_MAX } from '../services/test-entrants.js';
 import { CERTIFICATE_MAX_DAYS, CERTIFICATE_MIN_DAYS } from '../services/ownership-certificates.js';
 import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
 import { BOARD_SEARCH_MAX, ORDER_ALERT_LIMITS } from '../services/fulfilment.js';
@@ -786,6 +787,73 @@ export const bestTimeQuery = z.object({
 
 /** GET /api/admin/live/:id/entries: one status, the open ones (OPEN), or every entry. */
 export const liveEntriesQuery = z.object({ status: queryOptional(z.enum(['OPEN', ...LIVE_ENTRY_STATUSES])) });
+
+// ── Admin: test entrants (routes/admin/test-entrants.ts) ───────────────────
+
+/** /api/admin/test-runs/:id/… : a test's id. */
+export const testRunParams = z.object({ id: uuid });
+
+/** /api/admin/test-runs/:id/entrants/:accountId/confirm and /release: a test entrant of the test. */
+export const testRunEntrantParams = z.object({ id: uuid, accountId: uuid });
+
+const testShare = z.number().min(0, 'At least 0 %').max(100, 'At most 100 %');
+const testPhrase = z.string().trim().min(1, 'Required').max(40, 'At most 40 characters');
+const testTiers = z
+  .strictObject({
+    none: whole(0, TEST_PER_PRESS_MAX, 'test entrants'),
+    titane: whole(0, TEST_PER_PRESS_MAX, 'test entrants'),
+    platine: whole(0, TEST_PER_PRESS_MAX, 'test entrants'),
+    palladium: whole(0, TEST_PER_PRESS_MAX, 'test entrants'),
+  })
+  .refine((t) => t.none + t.titane + t.platine + t.palladium >= 1 && t.none + t.titane + t.platine + t.palladium <= TEST_PER_PRESS_MAX, `1 to ${TEST_PER_PRESS_MAX} test entrants per press`);
+const testArrival = z.strictObject({ mode: z.enum(['all', 'burst', 'before']), seconds: whole(1, 3600, 'seconds').optional(), interestPct: testShare });
+const testBehaviour = z
+  .strictObject({
+    payPct: testShare,
+    releasePct: testShare,
+    missPct: testShare,
+    leavePct: testShare,
+    holdSeconds: z.number().min(1.5, 'At least 1.5 seconds').max(10, 'At most 10 seconds'),
+    withdrawPct: testShare,
+    reservePct: testShare,
+    confirmPct: testShare,
+  })
+  .refine((b) => Math.abs(b.payPct + b.releasePct + b.missPct + b.leavePct - 100) < 1e-9, { message: 'PAY, RELEASE, missed turns and LEAVE make 100 % together', path: ['payPct'] });
+const testChoices = z.strictObject({
+  /** A size of the release, its id or its label; null: one at random. */
+  size: z.preprocess(emptyToNull, z.string().trim().max(64, 'At most 64 characters').nullable()),
+  /** 1 to 5 pieces (within the release's own limit); null: at random. */
+  quantity: whole(1, LIVE_PER_ACCOUNT.max, 'pieces').nullable(),
+  addOnsPct: testShare,
+});
+const testProfile = z
+  .strictObject({
+    seniorityMin: whole(0, 50, 'years'),
+    seniorityMax: whole(0, 50, 'years'),
+    accountAgeDaysMin: whole(0, 3650, 'days'),
+    accountAgeDaysMax: whole(0, 3650, 'days'),
+    countries: z.array(country).max(250, 'At most 250 countries'),
+    sharedNetworkPct: testShare,
+  })
+  .refine((p) => p.seniorityMin <= p.seniorityMax, { message: 'Seniority: from is at most to', path: ['seniorityMax'] })
+  .refine((p) => p.accountAgeDaysMin <= p.accountAgeDaysMax, { message: 'Account age: from is at most to', path: ['accountAgeDaysMax'] });
+
+/**
+ * POST /api/admin/drops/:id/test-runs (SEND TEST ENTRANTS) and POST /api/admin/test-runs/:id/add (ADD MORE): the typed
+ * phrase (`TEST <8>`, the service checks it), the test entrants per tier (1 to 1 000 per press), and the groups of
+ * settings; a group left out: the settings by default (START) or the run's last press's (ADD MORE).
+ */
+export const testRunBody = body({
+  phrase: testPhrase,
+  tiers: testTiers,
+  arrival: testArrival.optional(),
+  behaviour: testBehaviour.optional(),
+  choices: testChoices.optional(),
+  profile: testProfile.optional(),
+});
+
+/** POST /api/admin/test-runs/:id/end: END TEST, the typed phrase (`END TEST <8>`). */
+export const testRunEndBody = body({ phrase: testPhrase });
 
 // ── Admin: the circle (P-X01) ──────────────────────────────────────────────
 
