@@ -39,6 +39,7 @@ import type { AdminSession } from './types.js';
 import { startAttentionPoll, type AttentionPoll } from './ui/attention.js';
 import { failure, loading } from './ui/components.js';
 import { confirmLeave, heldMessage, releasePage } from './ui/leave-guard.js';
+import { stopRefreshes } from './ui/refresh.js';
 import { notify, notifyError } from './ui/toast.js';
 import { analyticsView } from './views/analytics.js';
 import { atelierView } from './views/atelier.js';
@@ -430,6 +431,7 @@ function showLogin(notice?: string): void {
   resetCodesViewState();
   disposeSaleView();
   disposeLiveView();
+  stopRefreshes();
   setTitle('Sign in');
   mount(
     app,
@@ -512,9 +514,11 @@ function makeContext(r: Route, s: AdminSession): ViewContext {
 }
 
 async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
-  // Whatever comes next, the camera of a sale screen being left stops now, and so does a live board's stream.
+  // Whatever comes next, the camera of a sale screen being left stops now, and so does a live board's stream, and the
+  // server's status and a test read again every 2 s (plan TEST ENTRANTS).
   disposeSaleView();
   disposeLiveView();
+  stopRefreshes();
   const r = parseHash(location.hash);
   const s = session;
   if (!s) return showLogin(endedWhileHeld ? SESSION_ENDED : undefined);

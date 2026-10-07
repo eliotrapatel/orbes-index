@@ -38,6 +38,7 @@ import type {
 import { barList, button, defList, kpi, section, statusMark, table } from '../ui/components.js';
 import { saveDownload } from '../ui/download.js';
 import { notify, notifyError } from '../ui/toast.js';
+import { testTag } from './test-entrants.js';
 import type { ViewContext } from './context.js';
 
 /** The readings of a release, as read with its page: null for one not shown at its stage, 'failed' for one not read. */
@@ -421,7 +422,7 @@ export function liveIntelligenceSections(ctx: ViewContext, r: LiveRelease, data:
           table(
             [
               { label: 'Place', cell: (x) => (x.position === null ? h('span', { class: 'soft' }, '—') : formatCount(x.position)), kind: ['num'] },
-              { label: 'Account', cell: (x) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: x.accountId }), 'data-testid': 'live-bots-account' } }, x.email), kind: ['wide'] },
+              { label: 'Account', cell: (x) => h('span', null, h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: x.accountId }), 'data-testid': 'live-bots-account' } }, x.email), testTag(x.email)), kind: ['wide'] },
               { label: 'Tier', cell: (x) => tierName(x.tier), kind: ['nowrap'] },
               { label: 'Size', cell: (x) => h('span', { class: 'live__size' }, x.size.label), kind: ['nowrap'] },
               { label: 'Status', cell: (x) => statusMark(humanize(x.status), toneOf('liveEntry', x.status)) },

@@ -3447,6 +3447,202 @@ a.bar__label:hover {
   color: var(--ink-soft);
 }
 
+/* ── Test entrants and the server's status (plan TEST ENTRANTS) ────────── */
+
+/* The Drops tab, a draw's page and a LIVE RELEASE's: the page, and the server's status on its right, held in view
+   under the top bar while the page scrolls. Under 1 100 px it comes first, folded (Narrow screens). */
+.with-server {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 0 40px;
+  align-items: start;
+}
+
+.with-server__main > .panel:first-child,
+.with-server__aside > .panel {
+  margin-top: 0;
+}
+
+.with-server__aside {
+  position: sticky;
+  top: 76px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+
+.sstatus .panel__head {
+  flex-wrap: wrap;
+  gap: 4px 18px;
+}
+
+/* Its one line, the toggle that opens it: only on a narrow screen. */
+.sstatus__toggle {
+  display: none;
+}
+
+/* A red row: the line that says when to STOP, in oxblood, its diamond before it (as a critical figure's note). */
+.sstatus__banner {
+  margin: 12px 0 2px;
+  font-size: var(--fs-line);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.6;
+  color: var(--critical);
+}
+
+.sstatus__banner::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 10px 2px 1px;
+  background: var(--critical);
+  transform: rotate(45deg);
+}
+
+/* The test running, on the Drops tab: its release, its status and test entrants, STOP. */
+.sstatus__test {
+  padding: 12px 0 14px;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+
+.sstatus__test-title,
+.tests__subtitle {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.sstatus__test-title {
+  margin-bottom: 6px;
+}
+
+.sstatus__test-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  margin-top: 6px;
+}
+
+.sstatus__test .row-actions {
+  margin-top: 10px;
+}
+
+/* A row: its state and name, its value; under them, a line and its 10 minutes. Twelve rows hold in a 900 px screen. */
+.sstatus__rows {
+  list-style: none;
+}
+
+.sstatus__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 8px 0 7px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.sstatus__label .status {
+  white-space: normal;
+}
+
+.sstatus__value {
+  text-align: right;
+  font-size: var(--fs-line);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.sstatus__row--red .sstatus__value {
+  color: var(--critical);
+}
+
+.sstatus__note {
+  min-width: 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.sstatus__spark {
+  display: block;
+  justify-self: end;
+  width: 96px;
+  height: 18px;
+}
+
+/* A test account in the entries' lists: TEST beside its email. */
+.test-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 5px;
+  border: 1px solid var(--hairline-strong);
+  font-size: var(--fs-nano);
+  letter-spacing: 0.24em;
+  line-height: 1.6;
+  vertical-align: 1px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* A release's TEST ENTRANTS: its buttons, the release's entries real / test / total, its lists and its report. */
+.tests__tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.tests__figures {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 18px;
+}
+
+.tests__subtitle {
+  margin-top: 28px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tests__past {
+  margin-top: 12px;
+}
+
+.tests__errors {
+  list-style: none;
+}
+
+.tests__errors li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--hairline);
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+.tests__checks {
+  list-style: none;
+  margin-top: 18px;
+}
+
+.tests__check {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 2px 14px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.tests__check-label {
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+}
+
+.tests__check .cell-sub {
+  grid-column: 2;
+}
+
 /* ── Display type ──────────────────────────────────────────────────────── */
 
 /* Titles and tracked-capital labels in the display face (brand.css
@@ -3473,6 +3669,8 @@ a.bar__label:hover {
 .live__why-title,
 .live__feasibility-title,
 .live__mix-title,
+.sstatus__test-title,
+.tests__subtitle,
 .deflist__label,
 .table th,
 .empty__text,
@@ -4169,6 +4367,29 @@ a.bar__label:hover {
   .live__parts,
   .live__intel-pair {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The server's status (plan TEST ENTRANTS): first, folded to its one line and its toggle; a red row's banner and the
+   test running stay in view. */
+@media (max-width: 1100px) {
+  .with-server {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .with-server__aside {
+    order: -1;
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
+  .with-server__main {
+    margin-top: 40px;
+  }
+  .sstatus__toggle {
+    display: inline-flex;
+  }
+  .sstatus:not(.is-open) .sstatus__fold {
+    display: none;
   }
 }
 
