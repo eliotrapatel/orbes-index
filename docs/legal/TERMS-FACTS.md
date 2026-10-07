@@ -14,7 +14,7 @@ Ce qui relève d'une procédure humaine et non du code (la vérification d'ident
 
 | Id | Règle | Valeur | Constante | Code | Ligne |
 |---|---|---|---|---|---|
-| R01 | La vérification d'un ORBES CODE est ouverte à tous : ni compte ni connexion. | — | — | `app.post('/api/v1/verify'` | [server/routes/public.ts:215](../../genome/src/server/routes/public.ts#L215) |
+| R01 | La vérification d'un ORBES CODE est ouverte à tous : ni compte ni connexion. | — | — | `app.post('/api/v1/verify'` | [server/routes/public.ts:225](../../genome/src/server/routes/public.ts#L225) |
 | R02 | Un résultat AUTHENTIC dit qu'une identité ORBES a été émise et signée par ORBES, et ce que le registre ORBES en sait. Les messages servis ne disent rien de l'objet présenté. | — | `VERIFICATION_COPY` | `'This ORBES identity was issued and signed by ORBES and is registered to an active piece.'` | [server/services/copy.ts:25](../../genome/src/server/services/copy.ts#L25) |
 | R03 | Une copie parfaite d'un code vérifie comme l'original tant que ses scans restent plausibles pour un seul objet ([simulation](../reports/counterfeit-simulation.md)). La note servie sous chaque résultat positif le dit, et propose un examen de la pièce par ORBES Client Services. | — | `ASSURANCE_NOTE` | `A printed code alone cannot prove that an object is genuine` | [web/verify/copy.ts:755](../../genome/src/web/verify/copy.ts#L755) |
 | R04 | UNUSUAL ACTIVITY DETECTED demande un examen : le message invite à contacter ORBES Client Services avant de se fier à la pièce, sans accuser personne. | — | `VERIFICATION_COPY` | `requires review` | [server/services/copy.ts:43](../../genome/src/server/services/copy.ts#L43) |

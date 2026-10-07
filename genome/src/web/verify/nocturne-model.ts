@@ -56,6 +56,7 @@ export function chapterOf(screen: string): ChapterId | null {
     case 'releases':
     case 'release':
     case 'live':
+    case 'how':
       return 'releases';
     case 'circle':
     case 'circlePost':

@@ -55,13 +55,15 @@ export function isReleaseId(id: string | null | undefined): id is string {
 /**
  * The route of a path under /verify/releases: the list, a release by its id, a LIVE RELEASE's boutique board
  * (`/verify/releases/<id>/board`, its secret in the fragment) or its after-room (`/verify/releases/<id>/after-room`, the
- * release it follows); anything else is the list.
+ * release it follows), or HOW RELEASES WORK (`/verify/releases/how`, plan NEXT-NINE FT-01: never a release's id);
+ * anything else is the list.
  */
-export function releasesRouteOf(path: string): { release: string | null; board?: true; afterRoom?: true } | null {
+export function releasesRouteOf(path: string): { release: string | null; board?: true; afterRoom?: true; how?: true } | null {
   const p = path.replace(/\/+$/, '').toLowerCase();
   if (p === RELEASES_PATH) return { release: null };
   if (!p.startsWith(`${RELEASES_PATH}/`)) return null;
   const rest = p.slice(RELEASES_PATH.length + 1);
+  if (rest === 'how') return { release: null, how: true };
   const sub = /^([^/]+)\/(board|after-room)$/.exec(rest);
   if (sub && isReleaseId(sub[1])) return sub[2] === 'board' ? { release: sub[1]!, board: true } : { release: sub[1]!, afterRoom: true };
   return { release: isReleaseId(rest) ? rest : null };

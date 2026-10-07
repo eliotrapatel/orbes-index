@@ -4,6 +4,8 @@
  *
  *   THE RELEASES                                 the title and its sentence (on PAST, signed in: « You have taken part
  *   Pieces released in a limited number. …       in N releases. », C25)
+ *   HOW RELEASES WORK                            a text link to the page that explains every release (plan NEXT-NINE,
+ *                                                FT-01), on both tabs
  *   LIVE   PAST                                  the underlined tabs (plan LIVE RELEASE+, choice 5)
  *   [the photograph, whole, faded]               each release at the column's full width, its words lifted onto it:
  *   LIVE RELEASE                                 a LIVE RELEASE (C7): where it stands, its title, its day and hour in
@@ -34,8 +36,8 @@
  * means now, ENTER THE DRAW (the page's filled button) or RESERVE A PLACE (PLATINE and PALLADIUM during the early
  * access), WITHDRAW, and for a place held or concluded WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01). THE DRAW: what a place drawn obliges to,
  * its rule word for word, its commitment, the seed's fingerprint; once drawn the seed, checked on this phone against the
- * fingerprint, and the entries by rank, the account's own marked, a hundred at a time, never said how many. After a
- * reservation the page is read again: its places. The scan is the SCAN ring's, THE RELEASES the crumb's and the rail's.
+ * fingerprint, and the entries by rank, the account's own marked, a hundred at a time, never said how many. Its last
+ * line, HOW RELEASES WORK (plan NEXT-NINE, FT-01). After a reservation the page is read again: its places. The scan is the SCAN ring's, THE RELEASES the crumb's and the rail's.
  *
  * Every action is a same-origin JSON call through ApiClient (the session cookie, the CSRF token); server messages are
  * shown as they come. A 401 ends the session on the page, which then offers the sign-in again. CSP-safe: h() and s()
@@ -44,7 +46,8 @@
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { GUARANTEE, LIVE, LOOKBOOK, RELEASES } from '../copy.js';
+import { GUARANTEE, HOW, LIVE, LOOKBOOK, RELEASES } from '../copy.js';
+import { HOW_PATH } from '../how-model.js';
 import { guaranteeBox, guaranteedLines, guaranteeFor } from '../guarantee-model.js';
 import { CHANGE_RETRY_MS, countdown as countdownGroups, liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
 import {
@@ -93,6 +96,8 @@ export interface ReleasesDeps {
   onTab(tab: ReleasesTab): void;
   /** Open a release's page in the app. */
   onRelease(id: string): void;
+  /** HOW RELEASES WORK (plan NEXT-NINE, FT-01), the text link under the lead. */
+  onHow(): void;
   /** This phone's time zone: a LIVE RELEASE's opening is said in Paris, then here when it differs. */
   localZone: string;
 }
@@ -105,6 +110,8 @@ export interface ReleaseDeps {
   onScan(): void;
   /** THE RELEASES: back to the list. */
   onReleases(): void;
+  /** HOW RELEASES WORK (plan NEXT-NINE, FT-01), the page's last line. */
+  onHow(): void;
   /** SEE THE MODEL: its sheet in THE COLLECTION. */
   onModel(slug: string): void;
   /** Minutes east of UTC of this phone's clock. */
@@ -252,7 +259,9 @@ class ListPage {
     );
     tabs.root.classList.add('releases__tabs', 'n-releases__tabs');
     tabs.root.querySelector('[role="tablist"]')?.classList.add('n-px');
-    this.root.append(h('header', { class: 'n-px releases__head n-releases__head' }, h('h1', { class: 'n-g n-t1 releases__title', id: 'releases-title', text: RELEASES.title }), this.lead), tabs.root);
+    // HOW RELEASES WORK under the lead (plan NEXT-NINE, FT-01), on LIVE and on PAST alike.
+    const how = h('p', { class: 'n-releases__how' }, textLink(HOW.link, { href: HOW_PATH, onOpen: () => deps.onHow(), extraClass: 'n-releases__how-link' }));
+    this.root.append(h('header', { class: 'n-px releases__head n-releases__head' }, h('h1', { class: 'n-g n-t1 releases__title', id: 'releases-title', text: RELEASES.title }), this.lead, how), tabs.root);
     this.drawLead();
     this.render();
     void this.fetch();
@@ -957,6 +966,8 @@ class ReleasePage {
       ),
     );
     sections.push(this.entrySection, this.drawSection);
+    // HOW RELEASES WORK, the page's last line (plan NEXT-NINE, FT-01), after THE DRAW and THE ENTRIES.
+    sections.push(h('p', { class: 'n-px n-release__how' }, textLink(HOW.link, { href: HOW_PATH, onOpen: () => this.deps.onHow(), extraClass: 'n-release__how-link' })));
     this.body.replaceChildren(...sections.filter((x): x is HTMLElement => x !== null));
     this.renderEntry();
     this.renderDraw();

@@ -39,6 +39,8 @@
  *   /verify/lookbook/<slug>   a model's sheet (an address that is none: the lookbook);
  *   /verify/club              THE CLUB, the tiers and what each gives (plan NEXT-NINE, BP-19 T9);
  *   /verify/releases          THE RELEASES, the drops ORBES announces (P-R03);
+ *   /verify/releases/how      HOW RELEASES WORK, every release's rules (plan NEXT-NINE, FT-01), over the list's entry or
+ *                             the release's it was opened from;
  *   /verify/releases/<id>     a release's page, its entry and its draw, or a LIVE RELEASE's (an address that is none: the list);
  *   /verify/releases/<id>/board#…  a LIVE RELEASE's boutique board, its secret the fragment: a screen of its own, with no
  *                             entry under it (a boutique's screen has nowhere to go back to);
@@ -69,7 +71,7 @@ import { viewportCorners } from '../shared/corners.js';
 import { byId, focusFirst, h, prefersReducedMotion } from '../shared/dom.js';
 import { ApiClient, ApiError, settledWithin } from './api.js';
 import { buildVerifyInput, defaultZoomLevel, zoomLabel, type ZoomState } from './capture.js';
-import { HINTS, PROBLEMS, problemForApiError, STATUS, type ProblemAction, type ProblemKind } from './copy.js';
+import { HINTS, HOW, PROBLEMS, problemForApiError, STATUS, type ProblemAction, type ProblemKind } from './copy.js';
 import type { DecodeReply } from './protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from './scanner.js';
 import { SessionStore } from './session.js';
@@ -78,6 +80,7 @@ import type { ClientServices, LiveEndedSheet, LiveSheet, VerifyInput } from './t
 import { certificateTokenOf } from './certificate-model.js';
 import { CIRCLE_PATH, circlePostPath, circleRouteOf } from './circle-model.js';
 import { CLUB_PATH, isClubPath } from './club-model.js';
+import { HOW_PATH } from './how-model.js';
 import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
 import { boardTokenOf } from './board-model.js';
 import { afterRoomPath, releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
@@ -87,6 +90,7 @@ import { boardView } from './views/board.js';
 import { certificateView } from './views/certificate.js';
 import { circlePostView, circleView } from './views/circle.js';
 import { clubView } from './views/club.js';
+import { howView } from './views/how.js';
 import { CERTIFICATE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH } from './views/common.js';
 import { messageOf } from './views/forms.js';
 import { liveView } from './views/live.js';
@@ -102,23 +106,23 @@ import { scanView, type ScanView } from './views/scanning.js';
 import { Shell } from './views/shell.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how';
 
 /**
  * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
- * sheet, the releases or a release's page, the circle or a post.
+ * sheet, the releases or a release's page, the circle or a post, THE CLUB, HOW RELEASES WORK.
  */
-type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club';
+type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club' | 'how';
 
 /** The entries above the landing that a scan, MY PIECES or a list takes the place of (their own address goes with them). */
-const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club'];
+const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how'];
 
 /**
  * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, the releases, a
  * release's page, the circle, a post, or the landing (also for a path the app does not know). In any case: the
  * certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' {
+function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === PIECES_PATH) return 'pieces';
   // A piece of MY PIECES; under /verify/pieces, an address that is none is MY PIECES.
@@ -126,7 +130,7 @@ function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificat
   const lookbook = lookbookRouteOf(path);
   if (lookbook) return lookbook.sheet ? 'sheet' : 'lookbook';
   const releases = releasesRouteOf(path);
-  if (releases) return releases.board ? 'board' : releases.release ? 'release' : 'releases';
+  if (releases) return releases.board ? 'board' : releases.how ? 'how' : releases.release ? 'release' : 'releases';
   const circle = circleRouteOf(path);
   if (circle) return circle.post ? 'circlePost' : 'circle';
   // THE CLUB (plan NEXT-NINE, BP-19 T9), built like the lookbook.
@@ -178,7 +182,7 @@ function depthOf(state: unknown): number {
   if (typeof depth === 'number' && Number.isInteger(depth) && depth >= 0) return depth;
   const entry = entryOf(state);
   if (entry === undefined || entry === 'landing') return 0;
-  if (entry === 'sheet' || entry === 'circlePost' || entry === 'piece') return 2;
+  if (entry === 'sheet' || entry === 'circlePost' || entry === 'piece' || entry === 'how') return 2;
   if (entry === 'release') return afterRoomOf(location.pathname) ? 3 : 2;
   return 1;
 }
@@ -234,6 +238,8 @@ class App {
   /** The screen on show that holds listeners (a result, MY PIECES): released when another takes its place. */
   private live: { dispose(): void } | null = null;
   private screen: Screen = 'landing';
+  /** The shell's own document title (index.html), put back when HOW RELEASES WORK is left. */
+  private readonly shellTitle = document.title;
   /** Bumped on every navigation; async work started under an older value is dropped. */
   private generation = 0;
   /** The last verify request, for TRY AGAIN after a connection problem. */
@@ -293,6 +299,8 @@ class App {
         if (!(this.screen === 'sheet' && this.sheetSlug === slug)) void this.showSheet(slug);
       } else if (entry === 'lookbook' || route === 'lookbook') {
         if (this.screen !== 'lookbook') void this.showLookbook();
+      } else if (entry === 'how' || route === 'how') {
+        if (this.screen !== 'how') void this.showHow();
       } else if (entry === 'release' || route === 'release') {
         const id = releaseIdOf(location.pathname);
         const after = afterRoomOf(location.pathname);
@@ -384,6 +392,14 @@ class App {
       } else if (!slug && location.pathname !== LOOKBOOK_PATH) replaceEntry({ screen: 'lookbook' }, LOOKBOOK_PATH);
       if (slug) void this.showSheet(slug, false);
       else void this.showLookbook(false);
+    } else if (route === 'how') {
+      // HOW RELEASES WORK (plan NEXT-NINE, FT-01) over the list, over the landing: back from it returns to the list.
+      if (entryOf(history.state) !== 'how') {
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'releases' }, RELEASES_PATH);
+        pushEntry({ screen: 'how', over: 'releases' }, HOW_PATH);
+      } else if (location.pathname !== HOW_PATH) replaceEntry(history.state, HOW_PATH);
+      void this.showHow(false);
     } else if (route === 'releases' || route === 'release') {
       // The releases (P-R03) over the landing; a release's page over both, so back from it returns to the list. An
       // address under /verify/releases that is none shows the list, its own address put back.
@@ -521,13 +537,30 @@ class App {
    */
   private openReleases(): void {
     const entry = entryOf(history.state);
-    if (entry === 'release') {
+    // HOW RELEASES WORK opened from the list: back to it; opened from a release's page, the list in its place.
+    if (entry === 'release' || (entry === 'how' && (history.state as { over?: unknown } | null)?.over === 'releases')) {
       history.back();
+      return;
+    }
+    if (entry === 'how') {
+      replaceEntry({ screen: 'releases' }, RELEASES_PATH);
+      void this.showReleases();
       return;
     }
     if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') replaceEntry({ screen: 'releases' }, RELEASES_PATH);
     else pushEntry({ screen: 'releases' }, RELEASES_PATH);
     void this.showReleases();
+  }
+
+  /**
+   * HOW RELEASES WORK (plan NEXT-NINE, FT-01), from THE RELEASES (over the list's entry) or from a release's page (over
+   * its entry): back from it returns there. Its entry says which (`over`), so its ‹ THE RELEASES knows the list's place.
+   */
+  private openHow(): void {
+    const entry = entryOf(history.state);
+    if (entry === 'how') return;
+    pushEntry({ screen: 'how', over: entry === 'releases' ? 'releases' : 'release' }, HOW_PATH);
+    void this.showHow();
   }
 
   /**
@@ -629,6 +662,8 @@ class App {
     this.live?.dispose();
     this.live = null;
     document.body.dataset.screen = screen;
+    // HOW RELEASES WORK names the document; every other screen keeps the shell's own title.
+    document.title = screen === 'how' ? HOW.documentTitle : this.shellTitle;
     beforeShow?.();
     this.shell?.show(screen);
     this.host.replaceChildren(next);
@@ -816,6 +851,16 @@ class App {
     else view.dispose();
   }
 
+  /** HOW RELEASES WORK (plan NEXT-NINE, FT-01): every release's rules, their figures read from the server. */
+  private async showHow(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    this.releaseId = null;
+    const view = howView({ api: this.api, onReleases: () => this.openReleases() });
+    if (await this.swap(view.root, 'how', focus)) this.live = view;
+    else view.dispose();
+  }
+
   /** THE RELEASES (P-R03): the drops ORBES announces, each with its page. */
   private async showReleases(focus = true): Promise<void> {
     this.generation++;
@@ -830,6 +875,7 @@ class App {
         if (entryOf(history.state) === 'releases') replaceEntry({ ...(history.state as object), tab });
       },
       onRelease: (id) => this.openRelease(id),
+      onHow: () => this.openHow(),
       localZone: localZone(),
     });
     if (await this.swap(view.root, 'releases', focus)) this.live = view;
@@ -889,6 +935,7 @@ class App {
       id,
       onScan: () => void this.startScan(),
       onReleases: () => this.openReleases(),
+      onHow: () => this.openHow(),
       onModel: (slug) => this.openSheet(slug),
       offsetMinutes: -new Date().getTimezoneOffset(),
     });
@@ -912,6 +959,7 @@ class App {
       onScan: () => void this.startScan(),
       onModel: (slug) => this.openSheet(slug),
       onAfterRoom: (parentId) => this.openAfterRoom(parentId),
+      onHow: () => this.openHow(),
       localZone: localZone(),
       // The chrome is the page's on screen: the one this page asks for is kept until it is mounted (the page left keeps
       // its own while it fades out, and keeps it should this one be given up), then followed while it is shown.

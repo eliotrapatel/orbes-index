@@ -2608,6 +2608,56 @@ body.nocturne[data-screen="live"] {
   margin-top: 30px;
 }
 
+/* HOW RELEASES WORK (plan NEXT-NINE, FT-01): the crumb, the title and its sentence, then its three sections, each a
+   hairline above it, its terms in the display face over their sentences; THE RELEASES at its foot. Its link under THE
+   RELEASES' lead, the last line of a draw's page and of a LIVE RELEASE's NOCTURNE pages: each 30 px or more from the
+   link above it, so their 44 px zones stay apart. */
+.n-how__head {
+  padding-top: 30px;
+}
+
+.n-how__lead {
+  margin-top: 12px;
+}
+
+.n-how__section {
+  margin-top: 34px;
+  padding-top: 26px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-how__term {
+  margin-top: 22px;
+}
+
+.n-how__text {
+  margin-top: 8px;
+}
+
+.n-how__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  list-style: none;
+}
+
+.n-how__back {
+  margin-top: 40px;
+}
+
+.n-releases__how {
+  margin-top: 18px;
+}
+
+.n-release__how {
+  margin-top: 56px;
+}
+
+.n-live__how {
+  margin-top: 40px;
+}
+
 .n-circle__head {
   padding-top: 30px;
 }

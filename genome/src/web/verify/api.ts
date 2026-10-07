@@ -58,6 +58,7 @@ import type {
   OwnedPiece,
   OwnerCertificate,
   PieceCare,
+  ReleaseRules,
   TheClub,
   OwnershipConfirmation,
   Participation,
@@ -309,6 +310,24 @@ export class ApiClient {
   async theClub(): Promise<TheClub> {
     const r = await this.request<TheClub>('GET', '/api/v1/the-club', undefined, { cache: 'default' });
     if (!Array.isArray(r?.tiers) || !Array.isArray(r.tierThresholds)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /**
+   * HOW RELEASES WORK's figures (plan NEXT-NINE, FT-01): the same for everyone; the browser may keep them a minute. An
+   * answer whose figures are not whole numbers in their place is refused, so the page never states a wrong one.
+   */
+  async releaseRules(): Promise<ReleaseRules> {
+    const r = await this.request<ReleaseRules>('GET', '/api/v1/releases/rules', undefined, { cache: 'default' });
+    const whole = (v: unknown, min: number): boolean => typeof v === 'number' && Number.isInteger(v) && v >= min;
+    const ok =
+      Array.isArray(r?.tiers) &&
+      r.tiers.length === 3 &&
+      r.tiers.every((t, i) => t?.name === (['TITANE', 'PLATINE', 'PALLADIUM'] as const)[i] && whole(t.pieces, 1)) &&
+      whole(r.earlyAccess?.PALLADIUM, 0) &&
+      whole(r.earlyAccess?.PLATINE, 0) &&
+      whole(r.placeHeldHours, 1);
+    if (!ok) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r;
   }
 

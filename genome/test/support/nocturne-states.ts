@@ -974,6 +974,8 @@ export const UI_STATES: readonly UiState[] = [
     },
     ready: '#releases-panel-past .releases__more',
   },
+  // HOW RELEASES WORK (plan NEXT-NINE, FT-01): every release's rules, their figures read from GET /api/v1/releases/rules.
+  { id: 'releases-how', title: 'HOW RELEASES WORK: THE WAYS TO TAKE PART, HOW THE ORDER IS SET, WHAT THE HOUSE NEVER DOES', refs: ['FT-01'], variant: 'full', path: at('/verify/releases/how'), ready: '.view--how .n-how__back' },
   { id: 'releases-empty', title: 'THE RELEASES with no release', refs: ['C40'], variant: 'empty', path: at('/verify/releases'), ready: '.view--releases .releases__body p, .view--releases p.prose', stress: true },
   { id: 'releases-stress', title: 'THE RELEASES: a countdown under an hour, one over 9 days, a price in USD', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/releases'), ready: '.view--releases article.live-card', stress: true },
   { id: 'draw', title: 'A draw, entries open, signed in: ENTER THE DRAW', refs: ['C19'], variant: 'full', as: you, path: release('draw'), ready: '.view--release .release__body section, .view--release section' },

@@ -1091,6 +1091,86 @@ export const GUARANTEE = Object.freeze({
 });
 
 /**
+ * HOW RELEASES WORK (plan NEXT-NINE, §3.5 FT-01; /verify/releases/how): one page that explains every release, its three
+ * sections in this order. Every figure is the server's (GET /api/v1/releases/rules: the tiers, the usual early access,
+ * the place held), passed in already said (`4 hours`, `90 minutes`, `48 hours`), never typed here. The order of a draw
+ * names the tier, the seniority and the seed in RELEASES.rule's order; the LIVE order is the tier then chance (LIVE.rule).
+ * No contact, no figure the server did not send, and no line on who confirms a sale.
+ */
+export const HOW = Object.freeze({
+  title: 'HOW RELEASES WORK',
+  /** The document's title while the page is shown. */
+  documentTitle: 'HOW RELEASES WORK · ORBES',
+  /** The text link to the page: under THE RELEASES' lead, at the foot of a release's pages, in the room's foot. */
+  link: 'HOW RELEASES WORK',
+  lead: 'Every ORBES release follows the rules below, as the server applies them. Each release’s page gives its own times.',
+  /** A window of whole hours, else in minutes (`90 minutes`). */
+  hours: (n: number) => plural(n, 'hour', 'hours'),
+  minutes: (n: number) => plural(n, 'minute', 'minutes'),
+  ways: Object.freeze({
+    title: 'THE WAYS TO TAKE PART',
+    draw: Object.freeze({
+      term: 'DRAW',
+      text: (held: string) =>
+        `Any ORBES account may enter a draw while its entries are open, one entry per person, at no charge. After the close, the draw ranks the entries: the first ranks are selected, the next form the waiting list. A place drawn is held for you ${held} unless the release’s page says otherwise, and obliges you to nothing: ORBES Client Services concludes each sale with you.`,
+    }),
+    early: Object.freeze({
+      term: 'EARLY ACCESS',
+      /** PALLADIUM's usual window, then PLATINE's (null: PLATINE has none by default). */
+      text: (palladium: string, platine: string | null) =>
+        `Before a draw opens to everyone, owners reserve a place directly, first come, first served, within the pieces of the release: ${platine ? `PALLADIUM owners from ${palladium} before the opening, PLATINE owners from ${platine} before` : `PALLADIUM owners from ${palladium} before the opening`}. These are the usual times; each release’s page gives its own. The pieces left then go to the draw.`,
+      /** The same window for both tiers. */
+      same: (both: string) =>
+        `Before a draw opens to everyone, owners reserve a place directly, first come, first served, within the pieces of the release: PALLADIUM and PLATINE owners from ${both} before the opening. These are the usual times; each release’s page gives its own. The pieces left then go to the draw.`,
+      /** No early access by default. */
+      none: 'A release may open to PALLADIUM and PLATINE owners before everyone: they then reserve a place directly, first come, first served, within the pieces of the release, and its page gives the times. The pieces left then go to the draw.',
+    }),
+    live: Object.freeze({
+      term: 'LIVE RELEASE',
+      text: 'A release held live, at its announced time. The room opens shortly before the opening; at the opening, the places of the collectors present are drawn and the line moves. When your turn comes, you press and hold the seal to secure your piece, then PAY to confirm it. Each release says who may enter and how many pieces each collector may take.',
+    }),
+    salon: Object.freeze({
+      term: 'THE PRIVATE SALON',
+      text: 'Reserved models shown to the owners of a piece, each from a tier, with its price. You request a piece from its page; ORBES Client Services contacts you to conclude the sale. Nothing is paid in the app.',
+    }),
+  }),
+  order: Object.freeze({
+    title: 'HOW THE ORDER IS SET',
+    tiers: Object.freeze({
+      term: 'THE TIERS',
+      text: 'Your tier is read from the pieces registered to your account now. A piece revoked or retired by ORBES counts for no tier.',
+      /** A tier and the pieces it starts from: `PLATINE · FROM 5 PIECES`. */
+      row: (name: string, pieces: number) => `${name} · FROM ${plural(pieces, 'PIECE', 'PIECES')}`,
+    }),
+    draw: Object.freeze({
+      term: 'IN A DRAW',
+      text: 'Places guaranteed by ORBES are selected first, for the pieces they cover, and listed apart without a rank. The other entries are ranked by tier, the highest first, then the accounts that hold no piece; then by seniority, the full years since your first piece, the most first; then by a seed drawn when the release was created. The seed’s fingerprint is published with the release and the seed itself after the draw, so anyone can rank the entries again. The tier and the seniority are those of the moment of the draw.',
+    }),
+    live: Object.freeze({
+      term: 'IN A LIVE RELEASE',
+      text: 'Places guaranteed by ORBES come first in their size. At the opening, the places of the collectors present in the room are drawn by tier, the highest first, then at random within each tier. A release may instead draw every place at random; its page says so. Those who arrive after the opening join the line behind, in order of arrival.',
+    }),
+  }),
+  never: Object.freeze({
+    title: 'WHAT THE HOUSE NEVER DOES',
+    paid: Object.freeze({ term: 'NO PAID PRIORITY', text: 'No place, rank or early access is ever sold. A tier comes only from the pieces you hold.' }),
+    auctions: Object.freeze({ term: 'NO AUCTIONS', text: 'A piece is never sold to the highest bidder. Its price is set by ORBES, the same for every collector of the release.' }),
+    quantity: Object.freeze({
+      term: 'A FIXED QUANTITY',
+      text: 'Every release announces its number of pieces before it opens, and a draw never changes it once published. During a LIVE RELEASE, if ORBES adds pieces or opens an after-room for those still in line, its page says so at once.',
+    }),
+    account: Object.freeze({ term: 'ONE COLLECTOR, ONE ACCOUNT', text: 'Each person takes part with one ORBES account. ORBES Client Services may set aside an entry made with a second one.' }),
+    returned: Object.freeze({
+      term: 'A RETURNED PIECE',
+      text: 'A piece that returns during a release goes to the next collector: in a LIVE RELEASE, to the next in line; in a draw, ORBES Client Services offers it to the waiting list, in its order. It is never set aside for anyone.',
+    }),
+  }),
+  loading: 'ONE MOMENT…',
+  failed: 'How releases work could not be shown just now.',
+  retry: 'TRY AGAIN',
+});
+
+/**
  * THE CIRCLE (P-X01, /verify/circle, API §10.11): what ORBES publishes for the owners of a piece, by tier: notes, its
  * invitations, answered YES or NO until the event begins and within their places, and its polls, one vote per account,
  * whose results show once the reader has voted. A signed-in account that holds a piece now reads it, each post from its

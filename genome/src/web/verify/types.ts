@@ -660,6 +660,17 @@ export interface TheClub {
 }
 
 /**
+ * GET /api/v1/releases/rules (plan NEXT-NINE, FT-01): the figures HOW RELEASES WORK states, as the server applies them:
+ * each tier from its pieces, the usual early access in minutes (0: none), how long a place drawn is held by default.
+ */
+export interface ReleaseRules {
+  tiers: { name: ClubTierName; level: 1 | 2 | 3; pieces: number }[];
+  earlyAccess: { PALLADIUM: number; PLATINE: number };
+  placeHeldHours: number;
+  salonFromTier: ClubTierName;
+}
+
+/**
  * GET /api/v1/club/status (P-R03): the account's tier now (0: no piece; TITANE, PLATINE, PALLADIUM), and its entries;
  * P-X04: the benefits of its tier and of those below it (lowest first), and the next tier (null at PALLADIUM);
  * plan NEXT-NINE (BP-19 T1): the pieces each tier starts from, TITANE first ([1, 5, 10]), whose last sets the meter.

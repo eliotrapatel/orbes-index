@@ -44,6 +44,8 @@ const NARROW_TOO = [
   // YOUR SIZES (plan NEXT-NINE, AC-01): its view in the account sheet, the salon's size picker and I'LL BE THERE with the
   // size it preselects, at 375, 360 and 320 px too.
   'sizes-view', 'model-salon-sizes', 'model-salon-size-requested', 'live-announced-from-yours',
+  // HOW RELEASES WORK (plan NEXT-NINE, FT-01): its terms and THE TIERS' rows at 375, 360 and 320 px too.
+  'releases-how',
 ];
 
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */

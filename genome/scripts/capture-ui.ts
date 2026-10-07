@@ -85,6 +85,9 @@
  *                 account sheet's view, saved, the salon's picker and REQUESTED with its size, I'LL BE THERE and the
  *                 room with the size preselected, then confirmed; each at a phone's and a desk's size. Not run by
  *                 default (screens for the owner's review, into --out)
+ *   --only how
+ *                 HOW RELEASES WORK alone (how-releases-work-phone.png, how-releases-work-desk.png; plan NEXT-NINE,
+ *                 FT-01): the page at a phone's and a desk's size. Not run by default (screens for the owner's review)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -158,7 +161,7 @@ const DESKTOP = { width: 1440, height: 900 } as const;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes';
+type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how';
 
 function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | null } {
   let out = DEFAULT_OUT;
@@ -167,8 +170,8 @@ function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | nu
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes')) only = argv[++i] as Only;
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how')) only = argv[++i] as Only;
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how)`);
   }
   return { out, raw, only };
 }
@@ -1901,10 +1904,26 @@ async function captureSizes(shots: Shots): Promise<void> {
   await capturePhonesAndDesks(shots, SIZES_SHOTS, 'YOUR SIZES', (id) => ROOM_SIZE_STATES.find((s) => s.id === id) ?? stateById(id));
 }
 
+// ── HOW RELEASES WORK (plan NEXT-NINE, FT-01) ────────────────────────────
+
+/** HOW RELEASES WORK (plan NEXT-NINE, FT-01, step 5.2) at a phone's size and a desk's. `--only how` writes it alone. */
+export const HOW_SHOTS: readonly { state: string; name: string }[] = Object.freeze([{ state: 'releases-how', name: 'how-releases-work' }]);
+
+async function captureHow(shots: Shots): Promise<void> {
+  await capturePhonesAndDesks(shots, HOW_SHOTS, 'HOW RELEASES WORK', stateById);
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const { out, raw, only } = parseArgs(process.argv.slice(2));
+  if (only === 'how') {
+    const shots = new Shots(out, raw);
+    log('HOW RELEASES WORK:');
+    await captureHow(shots);
+    log(`${shots.written.length} screenshots in ${relative(process.cwd(), out) || '.'}`);
+    return;
+  }
   if (only === 'sizes') {
     const shots = new Shots(out, raw);
     log('YOUR SIZES:');

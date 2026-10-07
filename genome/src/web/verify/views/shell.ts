@@ -62,7 +62,7 @@ export interface ShellDeps {
  * The screens drawn in NOCTURNE with its chrome; the others of NOCTURNE (the scanner, VERIFYING…, a problem of the
  * scan: C11, C12, C17) keep the whole screen, without the rail and the ring.
  */
-const CHROME_SCREENS: readonly string[] = ['landing', 'result', 'pieces', 'piece', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club'];
+const CHROME_SCREENS: readonly string[] = ['landing', 'result', 'pieces', 'piece', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how'];
 const NOCTURNE_SCREENS: readonly string[] = [...CHROME_SCREENS, 'scan', 'verifying', 'message'];
 
 /** Safari's bars (addition 13): the ink of NOCTURNE, and the light of the shared certificate, kept as it is. */

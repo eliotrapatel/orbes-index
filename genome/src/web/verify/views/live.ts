@@ -15,7 +15,7 @@
  *               · N COLLECTORS WILL BE THERE · YOUR SIZE and I'LL BE THERE for an account the rule lets in (once said, YOU'LL
  *               BE THERE · SIZE 17 over the sizes: another size changes it, WITHDRAW until T0); signed out, I'LL BE THERE
  *               opens the sign-in; outside the rule, the rule and why (C28) · ADD TO CALENDAR · its description · how the
- *               places are drawn
+ *               places are drawn · HOW RELEASES WORK (plan NEXT-NINE, FT-01: the last line of each of NOCTURNE's pages)
  *   room        THE ROOM IS OPEN · the model, its price and the quantity line (SEE THE MODEL, as announced, until T0) ·
  *               the closed vault door, its lock the seal ·
  *               the countdown on ORBES time · N IN THE ROOM · READY CHECK · YOUR SIZE (the size of I'LL BE THERE
@@ -35,11 +35,12 @@
  *   edge pages  inside the room: not signed in (the sign-in), not eligible, sold out in its size: a vault page with
  *               one action each. The end of a visit (C30): turn passed, hold ended, place released, left, removed, the
  *               release (or its after-room) ended, gone: the photograph, LIVE RELEASE and its day, its title, the outcome
- *               and its sentence, ORBES Client Services for an entry removed, THE RELEASES
+ *               and its sentence, ORBES Client Services for an entry removed, THE RELEASES, HOW RELEASES WORK
  *   past        plan LIVE RELEASE+ (decision 30; C29): ended, the page in its final state, as THE RELEASES' PAST opens it:
  *               ‹ THE RELEASES · the photograph · LIVE RELEASE and its day · its title and line · its pieces as announced ·
  *               SEE THE MODEL · signed in, YOU TOOK PART or YOU SECURED A PIECE · THIS RELEASE IS OVER on a plate · a
- *               piece secured: CONFIRMED and its receipt, in the ivory kept from the room · its description. Never an end
+ *               piece secured: CONFIRMED and its receipt, in the ivory kept from the room · its description · HOW
+ *               RELEASES WORK. Never an end
  *               figure, nor how the account's entry ended (a guest of the after-room keeps the second door until it
  *               closes). For a week after the end, to an account that took part without a piece, ONE QUESTION, the
  *               question after (plan LIVE RELEASE+, choice 11; views/question.ts, a plate card), here and on the page of
@@ -53,6 +54,9 @@
  *               (`afterRoom`, read through the release it follows): THE AFTER-ROOM over its screens, your place from
  *               the line, then the turn, the hold, the add-ons and PAY as in the main room
  *
+ * The room's foot (its screens out of NOCTURNE): HOW RELEASES WORK first (plan NEXT-NINE, FT-01; in a new tab while the
+ * collector holds an entry, so the room stays), THE RELEASES, SOUND, the legal pages.
+ *
  * Real time: the stream (EventSource, `room` and `you` events) while it is open; its state polled every 2 s while it
  * is not (LIVE_POLL_MS), the stream tried again later. Every countdown counts on the server's clock, synced by three
  * round trips (clockOffset). Every action is a same-origin JSON call through ApiClient (the session, the CSRF token);
@@ -63,7 +67,8 @@ import { bracket } from '../../shared/corners.js';
 import { h, prefersReducedMotion, s } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { GUARANTEE, LIVE, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
+import { GUARANTEE, HOW, LIVE, LOOKBOOK, PIECES, RELEASES } from '../copy.js';
+import { HOW_PATH } from '../how-model.js';
 import {
   addonChoices,
   aheadLine,
@@ -168,6 +173,8 @@ export interface LiveDeps {
   /** Read the release again (TRY AGAIN). */
   onRetry(): void;
   onReleases(): void;
+  /** HOW RELEASES WORK (plan NEXT-NINE, FT-01): the last line of NOCTURNE's pages, the first of the room's foot. */
+  onHow(): void;
   onPieces(): void;
   onScan(): void;
   /** SEE THE MODEL: the model's sheet in the lookbook (`/verify/lookbook/<slug>`), from the photograph's stage. */
@@ -217,6 +224,11 @@ class LivePage {
   private readonly notice = h('div', { class: 'live__notice', attrs: { 'aria-live': 'polite' } });
   private readonly stage = h('div', { class: 'live__stage' });
   private readonly foot = h('footer', { class: 'live__foot' });
+  /**
+   * HOW RELEASES WORK, first in the room's foot (plan NEXT-NINE, FT-01): in the app; in a new tab while the collector holds
+   * an entry, so the room stays where it is (syncHowFoot, at each render).
+   */
+  private readonly howFoot = h('a', { class: 'textlink live__how', attrs: { href: HOW_PATH }, text: HOW.link, on: { click: (ev) => this.openHowFromFoot(ev) } });
   private readonly polite = h('p', { class: 'visually-hidden', attrs: { role: 'status', 'aria-live': 'polite' } });
   private readonly assertive = h('p', { class: 'visually-hidden', attrs: { 'aria-live': 'assertive' } });
   private sheet: LiveSheet | LiveEndedSheet | null;
@@ -671,6 +683,33 @@ class LivePage {
     if (!this.screen || this.screen.kind !== kind) this.mount(kind);
     else this.screen.update();
     this.renderNotice();
+    this.syncHowFoot();
+  }
+
+  /** The room's HOW RELEASES WORK opens a new tab while the collector holds an entry, the app's page otherwise. */
+  private syncHowFoot(): void {
+    const apart = this.entry !== null;
+    if ((this.howFoot.getAttribute('target') === '_blank') === apart) return;
+    if (apart) {
+      this.howFoot.setAttribute('target', '_blank');
+      this.howFoot.setAttribute('rel', 'noopener');
+    } else {
+      this.howFoot.removeAttribute('target');
+      this.howFoot.removeAttribute('rel');
+    }
+  }
+
+  private openHowFromFoot(ev: MouseEvent): void {
+    this.syncHowFoot();
+    // A new tab (the entry held, or asked for by the reader) is the browser's; a plain click otherwise stays in the app.
+    if (this.howFoot.getAttribute('target') === '_blank' || ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    ev.preventDefault();
+    this.deps.onHow();
+  }
+
+  /** HOW RELEASES WORK, the last line of NOCTURNE's pages of the release (announced, its end pages, its final page). */
+  private howLine(): HTMLElement {
+    return h('p', { class: 'n-px n-ctr n-live__how' }, textLink(HOW.link, { href: HOW_PATH, onOpen: () => this.deps.onHow(), extraClass: 'n-live__how-link' }));
   }
 
   /** Build the screen again (the release read again). */
@@ -742,10 +781,11 @@ class LivePage {
       this.foot.replaceChildren();
       return;
     }
-    // A page whose one action is THE RELEASES: the foot does not say it twice.
+    // A page whose one action is THE RELEASES: the foot does not say it twice. HOW RELEASES WORK comes first (FT-01).
     const back = screen.back ? null : releasesLink(() => this.deps.onReleases(), { extraClass: 'live__releases' });
     const sound = kind === 'confirmed' ? null : soundToggle(this.deps.sound, 'live__sound');
-    this.foot.replaceChildren(...[back, sound, legalLinks({ extraClass: 'live__legal' })].filter((x): x is HTMLElement => x !== null));
+    this.syncHowFoot();
+    this.foot.replaceChildren(...[this.howFoot, back, sound, legalLinks({ extraClass: 'live__legal' })].filter((x): x is HTMLElement => x !== null));
   }
 
   private build(kind: LiveScreenKind | 'failed', revealing = false): Screen {
@@ -1027,6 +1067,7 @@ class LivePage {
       ...this.hero(m.picture, words),
       rules,
       several ? h('div', { class: 'n-px n-ctr n-live__after-rules' }, there.el, ...tail) : null,
+      this.howLine(),
     );
     return {
       kind: 'announced',
@@ -1976,6 +2017,7 @@ class LivePage {
       receipt,
       ask.el,
       description,
+      this.howLine(),
     );
     let drawn = '';
     return {
@@ -2149,6 +2191,7 @@ class LivePage {
       write ? h('div', { class: 'n-px n-live__contact' }, writeButton(write)) : null,
       ask?.el ?? null,
       h('p', { class: 'n-sec n-ctr n-live__back' }, textLink(LIVE.back, { href: RELEASES_PATH, onOpen: () => this.deps.onReleases(), extraClass: 'n-live__back-link' })),
+      this.howLine(),
     );
     // The release's end may say its reason after the page (SOLD OUT, CLOSED): the words follow it.
     const update = (): void => {
