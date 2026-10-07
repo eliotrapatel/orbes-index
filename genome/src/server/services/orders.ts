@@ -1972,6 +1972,24 @@ export class OrderService {
   }
 
   /**
+   * A credit still taken off a CANCELLED order given back (BP-19 T5), as its cancellation gives it back: its open uses
+   * released with the reason CANCELLED, their grant's expiry unchanged; audited `order.credit.release`. Nothing on an
+   * order not cancelled or with no open use. No route: END TEST's check (services/test-entrants.ts) calls it, after
+   * cancelling a test's orders, for any use their cancellation did not give back. Returns the uses released.
+   */
+  async releaseCancelledCredit(orderId: string, actor: Actor): Promise<number> {
+    assertOperator(actor);
+    const id = knownOrderId(orderId);
+    let released = 0;
+    await this.change(id, async (tx, o, now, notes) => {
+      if (o.status !== 'CANCELLED') return;
+      released = (await openCreditUses(tx, o.id)).length;
+      notes.push(...(await releaseCredit(tx, o, 'CANCELLED', actor, now)));
+    });
+    return released;
+  }
+
+  /**
    * The buyer's name and address (decision 31: entered by Client Services, no form for collectors), at any step; null
    * clears one. Personal data: audited `order.buyer` with the fields changed only, never their words.
    */

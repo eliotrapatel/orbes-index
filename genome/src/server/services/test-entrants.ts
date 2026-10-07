@@ -48,17 +48,23 @@
  * END TEST (ADMIN, the phrase `END TEST <8>`; RUNNING, DONE, STOPPED or INTERRUPTED): the bots stopped; the TEST REPORT
  * computed BEFORE the clean-up (`report`, kept on the run: five checks over the whole release, real and test entries
  * together, and the test's peaks); then, for the test's accounts in that release: their open orders cancelled one by one
- * as Client Services cancels one (the stock goes back, a piece to make is cancelled and its identity retired), their
- * ENTERED draw entries WITHDRAWN, their SELECTED, CONFIRMED and WAITLISTED ones LAPSED (`respond_by` = `handled_at` =
- * now, so `drop_entries_lapsed` holds: staff OFFER NEXT to real collectors), their open LIVE entries REMOVED (LiveService
- * REMOVE) and their CONFIRMED ones too (the room sells their pieces again), their I'LL BE THERE withdrawn before T0,
- * their sessions ended; ENDED. The accounts stay in the pool.
- * TODO (the next lot's merge): END TEST must also cancel the GIFT orders and the credits the next lot gives at PAY.
+ * as Client Services cancels one (the stock goes back, a piece to make is cancelled and its identity retired), the
+ * parents first, with the GIFT orders travelling with them (the next nine's welcome gifts, BP-19 T5: cancelled with
+ * their order, their grant waiting again) and the credit taken off them given back (its uses released, the grant's
+ * expiry unchanged); then checked: no GIFT order of the test left RESERVED or PAID, no credit left taken off a cancelled
+ * order of the test (any left cancelled or given back through OrderService, audited as it audits them); their ENTERED
+ * draw entries WITHDRAWN, their SELECTED, CONFIRMED and WAITLISTED ones LAPSED (`respond_by` = `handled_at` = now, so
+ * `drop_entries_lapsed` holds: staff OFFER NEXT to real collectors), their open LIVE entries REMOVED (LiveService REMOVE)
+ * and their CONFIRMED ones too (the room sells their pieces again), their I'LL BE THERE withdrawn before T0, their
+ * sessions ended; ENDED. The accounts stay in the pool, and so do their tiers' grants (`tier_grants`: once per tier and
+ * per account, ever, never deleted, with no revocation in the tier program): END TEST gives back what the test used of
+ * them, a gift and a credit, and the next test that sets the account at that tier finds them again.
  *
  * Audited `test_run.start`, `.add`, `.stop`, `.confirm`, `.release`, `.end` (the ADMIN as actor); each bot's own actions
  * are audited by the routes as any account's; END TEST's clean-up `drop.withdraw`, `drop.entry.lapse` and
- * `drop.live.interest.withdraw` with `reason: "test_ended"`, `drop.live.remove` and `order.cancel` as their services
- * write them (a CONFIRMED LIVE entry's `drop.live.remove` with `reason: "test_ended"` too).
+ * `drop.live.interest.withdraw` with `reason: "test_ended"`, `drop.live.remove`, `order.cancel` (a GIFT order's too) and
+ * `order.credit.release` as their services write them (a CONFIRMED LIVE entry's `drop.live.remove` with `reason:
+ * "test_ended"` too).
  */
 import { randomInt } from 'node:crypto';
 import { sql } from 'kysely';
@@ -1416,12 +1422,23 @@ export class TestEntrantService {
    * The clean-up of the test's accounts in release `d`, each step through the path that does it for anyone: a LIVE
    * RELEASE's open entries REMOVED (LiveService) and the I'LL BE THERE withdrawn before T0; a draw's ENTERED entries
    * WITHDRAWN and its places LAPSED (under the release's lock, as a lock of an account withdraws them), before the
-   * orders, so that no staff Confirm makes one behind them; the open orders cancelled one by one (OrderService); then a
+   * orders, so that no staff Confirm makes one behind them; the open orders cancelled one by one (OrderService), with
+   * their GIFT orders and credits (`cancelOrders`); then a
    * LIVE RELEASE's places paid REMOVED, so that its room sells their pieces again; the sessions ended. Returns what it
    * did.
    */
   private async cleanUp(d: DropRow, accounts: readonly string[], actor: Actor) {
-    const cleaned = { ordersCancelled: 0, entriesWithdrawn: 0, placesLapsed: 0, entriesRemoved: 0, confirmedRemoved: 0, interestWithdrawn: 0, sessionsEnded: 0 };
+    const cleaned = {
+      ordersCancelled: 0,
+      giftOrdersCancelled: 0,
+      creditsReleased: 0,
+      entriesWithdrawn: 0,
+      placesLapsed: 0,
+      entriesRemoved: 0,
+      confirmedRemoved: 0,
+      interestWithdrawn: 0,
+      sessionsEnded: 0,
+    };
     if (accounts.length === 0) return cleaned;
     if (d.mode === 'LIVE') {
       for (const ids of chunks(accounts)) {
@@ -1439,19 +1456,82 @@ export class TestEntrantService {
     }
     // A place LAPSED is never confirmed (DropService confirms a SELECTED one only): no order appears after the ones cancelled.
     if (d.mode === 'DRAW') Object.assign(cleaned, await this.closeDrawEntries(d, accounts, actor));
-    for (const ids of chunks(accounts)) {
-      const orders = await this.db.selectFrom('orders').select('id').where('drop_id', '=', d.id).where('account_id', 'in', ids).where('status', 'in', ['RESERVED', 'PAID']).orderBy('reserved_at').execute();
-      for (const o of orders) {
-        await this.ctx.services.orders.transition(o.id, { to: 'CANCELLED', note: END_ORDER_NOTE }, actor);
-        cleaned.ordersCancelled++;
-      }
-    }
+    Object.assign(cleaned, await this.cancelOrders(d, accounts, actor));
     if (d.mode === 'LIVE') cleaned.confirmedRemoved = await this.removeConfirmed(d, accounts, actor);
     for (const ids of chunks(accounts)) {
       const r = await this.db.deleteFrom('sessions').where('subject_type', '=', 'account').where('subject_id', 'in', ids).executeTakeFirst();
       cleaned.sessionsEnded += Number(r.numDeletedRows);
     }
     return cleaned;
+  }
+
+  /**
+   * The test's orders in release `d` cancelled one by one as Client Services cancels one (OrderService.transition: the
+   * stock goes back, a piece to make is cancelled and its identity retired, a paid one gets its credit note; BP-19 T5:
+   * its credit given back and the GIFT orders travelling with it cancelled, their grant waiting again), with the GIFT
+   * orders that travel with them (a PLATINE or PALLADIUM test entrant's welcome gift, `drop_id` NULL): the parents first
+   * (`with_order_id` NULL), then by `reserved_at`, each re-read just before its cancel, so that one its parent's
+   * cancellation already closed is skipped. Then the check: no GIFT order of the test left RESERVED or PAID (any left is
+   * cancelled the same way), no credit left taken off a cancelled order of the test (any left is given back,
+   * OrderService.releaseCancelledCredit, audited `order.credit.release`). Returns the orders cancelled (GIFT orders
+   * apart), the GIFT orders cancelled (with their order or alone) and the credit uses given back.
+   */
+  private async cancelOrders(d: DropRow, accounts: readonly string[], actor: Actor): Promise<{ ordersCancelled: number; giftOrdersCancelled: number; creditsReleased: number }> {
+    const out = { ordersCancelled: 0, giftOrdersCancelled: 0, creditsReleased: 0 };
+    const orders = this.ctx.services.orders;
+    // The test's orders: those of its accounts in the release, and the GIFT orders travelling with one of them.
+    const ofTest = (ids: readonly string[]) =>
+      this.db
+        .selectFrom('orders')
+        .where('account_id', 'in', ids)
+        .where((eb) =>
+          eb.or([
+            eb('drop_id', '=', d.id),
+            eb.and([eb('channel', '=', 'GIFT'), eb('with_order_id', 'in', eb.selectFrom('orders as p').select('p.id').where('p.drop_id', '=', d.id).where('p.account_id', 'in', ids))]),
+          ]),
+        );
+    const isOpen = async (id: string) => {
+      const o = await this.db.selectFrom('orders').select('status').where('id', '=', id).executeTakeFirst();
+      return o?.status === 'RESERVED' || o?.status === 'PAID';
+    };
+    const cancel = async (id: string): Promise<boolean> => {
+      if (!(await isOpen(id))) return false;
+      try {
+        await orders.transition(id, { to: 'CANCELLED', note: END_ORDER_NOTE }, actor);
+        return true;
+      } catch (err) {
+        // Closed meanwhile (its parent's cancellation, Client Services): nothing left to do.
+        if (err instanceof DomainError && !(await isOpen(id))) return false;
+        throw err;
+      }
+    };
+    for (const ids of chunks(accounts)) {
+      const gifts = (await ofTest(ids).select('id').where('channel', '=', 'GIFT').where('status', 'in', ['RESERVED', 'PAID']).execute()).map((o) => o.id);
+      const uses = (await this.db.selectFrom('credit_uses').select('id').where('order_id', 'in', ofTest(ids).select('id')).where('released_at', 'is', null).execute()).map((u) => u.id);
+      const open = await ofTest(ids)
+        .select(['id', 'channel'])
+        .where('status', 'in', ['RESERVED', 'PAID'])
+        .orderBy(sql`with_order_id IS NOT NULL`)
+        .orderBy('reserved_at')
+        .orderBy('id')
+        .execute();
+      for (const o of open) if ((await cancel(o.id)) && o.channel !== 'GIFT') out.ordersCancelled++;
+      // The check: no GIFT order of the test left open, no credit left on a cancelled order of the test.
+      for (const g of await ofTest(ids).select('id').where('channel', '=', 'GIFT').where('status', 'in', ['RESERVED', 'PAID']).orderBy('reserved_at').orderBy('id').execute()) await cancel(g.id);
+      const credited = await this.db
+        .selectFrom('credit_uses as u')
+        .innerJoin('orders as o', 'o.id', 'u.order_id')
+        .select('o.id')
+        .distinct()
+        .where('u.released_at', 'is', null)
+        .where('o.status', '=', 'CANCELLED')
+        .where('o.id', 'in', ofTest(ids).select('id'))
+        .execute();
+      for (const o of credited) await orders.releaseCancelledCredit(o.id, actor);
+      if (gifts.length) out.giftOrdersCancelled += (await this.db.selectFrom('orders').select('id').where('id', 'in', gifts).where('status', '=', 'CANCELLED').execute()).length;
+      if (uses.length) out.creditsReleased += (await this.db.selectFrom('credit_uses').select('id').where('id', 'in', uses).where('released_at', 'is not', null).execute()).length;
+    }
+    return out;
   }
 
   /**

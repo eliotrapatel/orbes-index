@@ -13,19 +13,25 @@
  *    and INTERRUPTED); a restart leaves a RUNNING test INTERRUPTED;
  *  - a draw end to end: reservations in the early access, the entries at the opening, the staff's draw, the places
  *    confirmed by themselves (orders created), END TEST (orders cancelled, places lapsed, the report 5/5);
+ *  - END TEST and the tier program (the next nine, BP-19 T5): PLATINE test entrants' orders carrying their welcome GIFT
+ *    order and a credit taken off them, one paid: every order and GIFT order cancelled (the stock back), every credit
+ *    given back (a credit left on a cancelled order too), the report 5/5; the grants stay, their credit whole again;
  *  - a LIVE RELEASE end to end: I'LL BE THERE, the line at T0, PRESS, the hold, SECURE, PAY and RELEASE, END TEST;
  *  - the report's checks find a fault planted; the sweeper resumes a confirmation due after a restart.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
 import { buildApp } from '../../src/server/app.js';
+import { inTransaction } from '../../src/server/db/connection.js';
 import { DomainError } from '../../src/server/errors.js';
 import { CLUB_TIER_THRESHOLDS, clubStandings, tierOf } from '../../src/server/services/club.js';
 import { accessOf } from '../../src/server/services/live.js';
 import { segmentMembers } from '../../src/server/services/segments.js';
+import { ensureSku, stockLevel } from '../../src/server/services/stock.js';
+import { creditBalances } from '../../src/server/services/tier-grants.js';
 import { shareOf, splitOf, testPhrase, testRunSettings, TEST_RUN_DEFAULTS, TestEntrantService, type TestRunSettingsInput } from '../../src/server/services/test-entrants.js';
 import { createHarness, type Harness } from '../api/support.js';
-import { createAccount, createCollection, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -68,7 +74,7 @@ async function world(): Promise<World> {
 }
 
 /** A draw published now: OPEN (its opening an hour ago) unless told otherwise. */
-async function openDraw(w: World, o: { quantity?: number; opensIn?: number; closesIn?: number; earlyAccessHours?: number } = {}) {
+async function openDraw(w: World, o: { quantity?: number; opensIn?: number; closesIn?: number; earlyAccessHours?: number; priceMinor?: number } = {}) {
   const now = w.h.clock.now().getTime();
   const d = await w.h.ctx.services.drops.create(
     {
@@ -78,6 +84,7 @@ async function openDraw(w: World, o: { quantity?: number; opensIn?: number; clos
       opensAt: new Date(now + (o.opensIn ?? -HOUR)),
       closesAt: new Date(now + (o.closesIn ?? HOUR)),
       earlyAccessHours: o.earlyAccessHours ?? 0,
+      ...(o.priceMinor !== undefined ? { priceMinor: o.priceMinor, currency: 'EUR' } : {}),
     },
     w.f.admin,
   );
@@ -450,6 +457,71 @@ describe('a draw end to end', () => {
     expect(lapses.length).toBe(testEntries.length);
     // The accounts stay in the pool, ready for the next test.
     expect(Number((await w.h.ctx.db.selectFrom('test_entrants').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n)).toBe(12);
+  });
+
+  it('END TEST cancels the test\'s GIFT orders and gives back its credits: parents first, a GIFT order closed with its order skipped, a credit left on a cancelled order released; the grants stay; the report 5/5', async () => {
+    const admin = w.f.admin;
+    const france = (await w.h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    // THE PROGRAM: PLATINE's welcome gift, a model of one size with three pieces in stock; its credit by default (50.00 EUR).
+    const giftModel = await createModel(w.h.ctx.db, 'ANNEAU CADEAU');
+    const giftSku = await inTransaction(w.h.ctx.db, (tx) => ensureSku(tx, giftModel, null));
+    await w.h.ctx.services.stock.adjust({ skuId: giftSku, locationId: france, delta: 3, note: 'Counted.' }, admin);
+    const program = await w.h.ctx.services.clubProgram.read();
+    await w.h.ctx.services.clubProgram.update({ ...program, giftPlatineModelId: giftModel }, admin);
+    const giftStock = async () => (await stockLevel(w.h.ctx.db, giftSku, france)).available;
+    expect(await giftStock()).toBe(3);
+
+    // Three PLATINE test entrants reserve in the early access of a priced draw and confirm by themselves: an order each,
+    // its welcome gift travelling with it (holding its piece).
+    const drop = await openDraw(w, { quantity: 4, opensIn: HOUR, closesIn: 2 * HOUR, earlyAccessHours: 48, priceMinor: 120_000 });
+    const run = await w.tests.start(drop, press(drop, { platine: 3 }, { behaviour: { reservePct: 100, confirmPct: 100 } }), admin);
+    await drive(w, 0);
+    await w.tests.sweep();
+    w.h.clock.advance(61_000);
+    expect(await w.tests.sweep()).toBe(3);
+    const testIds = (await w.h.ctx.db.selectFrom('test_run_entrants').select('account_id').where('run_id', '=', run.id).execute()).map((r) => r.account_id);
+    const parents = await w.h.ctx.db.selectFrom('orders').select(['id', 'account_id', 'status', 'currency']).where('drop_id', '=', drop).orderBy('reserved_at').orderBy('id').execute();
+    expect(parents.map((o) => [o.status, o.currency])).toEqual(Array.from({ length: 3 }, () => ['RESERVED', 'EUR']));
+    const gifts = await w.h.ctx.db.selectFrom('orders').select(['id', 'with_order_id', 'status', 'drop_id']).where('channel', '=', 'GIFT').where('account_id', 'in', testIds).execute();
+    expect(gifts.map((g) => g.with_order_id).sort()).toEqual(parents.map((o) => o.id).sort());
+    expect(gifts.every((g) => g.status === 'RESERVED' && g.drop_id === null)).toBe(true);
+    expect(await giftStock()).toBe(0);
+    // Client Services takes credit off each; the second is paid (its gift paid with it, its invoice issued); the third
+    // cancelled by hand (its gift with it, its credit given back).
+    const [first, second, third] = parents;
+    await w.h.ctx.services.orders.applyCredit(first!.id, 3000, admin);
+    await w.h.ctx.services.orders.applyCredit(second!.id, 2000, admin);
+    await w.h.ctx.services.orders.transition(second!.id, { to: 'PAID' }, admin);
+    expect((await w.h.ctx.db.selectFrom('orders').select('status').where('with_order_id', '=', second!.id).executeTakeFirstOrThrow()).status).toBe('PAID');
+    expect((await creditBalances(w.h.ctx.db, second!.account_id)).map((c) => c.balanceMinor)).toEqual([3000]);
+    await w.h.ctx.services.orders.applyCredit(third!.id, 1000, admin);
+    await w.h.ctx.services.orders.transition(third!.id, { to: 'CANCELLED', note: 'Cancelled by Client Services.' }, admin);
+    expect(await giftStock()).toBe(1);
+    // A fault planted: that credit left taken off the cancelled order, as if its cancellation had not given it back.
+    await w.h.ctx.db.updateTable('credit_uses').set({ released_at: null, released_reason: null, released_by: null }).where('order_id', '=', third!.id).execute();
+
+    // END TEST: the report first (5/5), then every order of the test cancelled, its gifts with it, its credit given back.
+    const ended = await w.tests.end(run.id, testPhrase(drop, true), admin);
+    expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([['ONE_ENTRY', true], ['ORDER', true], ['ONE_PLACE', true], ['STOCK', true], ['ORDERS', true]]);
+    const all = await w.h.ctx.db.selectFrom('orders').select(['id', 'channel', 'status']).where('account_id', 'in', testIds).execute();
+    expect(all.filter((o) => o.channel === 'GIFT')).toHaveLength(3);
+    expect(all.every((o) => o.status === 'CANCELLED')).toBe(true);
+    expect(await giftStock()).toBe(3);
+    const uses = await w.h.ctx.db.selectFrom('credit_uses').select(['order_id', 'released_at', 'released_reason']).where('order_id', 'in', [first!.id, second!.id, third!.id]).execute();
+    expect(uses).toHaveLength(3);
+    expect(uses.every((u) => u.released_at !== null && u.released_reason === 'CANCELLED')).toBe(true);
+    // Audited `order.credit.release` at each cancellation, the third's twice (by hand, then END TEST's check).
+    const releases = await w.h.ctx.db.selectFrom('audit_logs').select(['target_id', 'details']).where('action', '=', 'order.credit.release').where('target_id', 'in', [first!.id, second!.id, third!.id]).execute();
+    expect(releases.map((r) => r.target_id).sort()).toEqual([first!.id, second!.id, third!.id, third!.id].sort());
+    // A GIFT order is cancelled with its order (audited `order.cancel`), never cancelled twice.
+    const giftCancels = await w.h.ctx.db.selectFrom('audit_logs').select('target_id').where('action', '=', 'order.cancel').where('target_id', 'in', gifts.map((g) => g.id)).execute();
+    expect(giftCancels.map((c) => c.target_id).sort()).toEqual(gifts.map((g) => g.id).sort());
+    const endAudit = await w.h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'test_run.end').where('target_id', '=', run.id).executeTakeFirstOrThrow();
+    // Two orders cancelled by END TEST (the third was already), their two gifts with them; three credits given back.
+    expect((endAudit.details as { cleaned: Record<string, number> }).cleaned).toMatchObject({ ordersCancelled: 2, giftOrdersCancelled: 2, creditsReleased: 3 });
+    // The grants stay with the pool's accounts (once per tier and account, never deleted): the gift waits again, the credit is whole.
+    expect((await w.h.ctx.db.selectFrom('tier_grants').select('kind').where('account_id', 'in', testIds).execute()).map((g) => g.kind).sort()).toEqual(['CREDIT', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT', 'GIFT']);
+    for (const id of testIds) expect((await creditBalances(w.h.ctx.db, id)).map((c) => c.balanceMinor)).toEqual([5000]);
   });
 
   it('the report\'s checks find a fault planted: a confirmed place without its order', async () => {
