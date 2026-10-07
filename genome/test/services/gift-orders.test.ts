@@ -11,6 +11,7 @@
  *    with it (its shipping at 0), has no price of its own (409 ORDER_TERMS_FIXED) and is never paid alone;
  *  - paid with its order, with no invoice of its own: the order's invoice carries its GIFT line at 0; an invoice at the
  *    most lines it carries (six add-ons, its shipping, a credit split over both tiers, both tiers' gifts) is drawn;
+ *  - in the Shopify order export, its own order at 0.00 (Source orbes-gift), once its parent is priced;
  *  - while its size is to be chosen, the collector's saved size (YOUR SIZES, AC-01) is a hint for Client Services only:
  *    the matching size's label or the saved measure; nothing is chosen for them;
  *  - cancelled with its order: its grant waits again, and the next order receives it, with the gift model THE PROGRAM
@@ -178,6 +179,39 @@ describe('the welcome gift (BP-19 T5)', () => {
     const giftLine = linesOf(invoice.lines).find((l) => l.kind === 'GIFT')!;
     expect(giftLine).toEqual({ kind: 'GIFT', label: 'WELCOME GIFT · JONC', detail: `ORDER ${orderReference(gift!.id)}`, amountMinor: 0 });
     expect(invoice.total_minor).toBe(300_000);
+  });
+
+  it('is exported to Shopify as its own order at 0.00 (Source orbes-gift), and only once its parent is priced (§3.2 T4)', async () => {
+    const pendant = await giftModel('PENDENTIF', [null], 1);
+    await setGift(2, pendant);
+    const a = await account(5);
+    const parent = await salonOrder(a.id);
+    const [gift] = await giftsOf(parent);
+    expect(gift).toMatchObject({ price_minor: null, currency: null });
+    const day = gift!.reserved_at.toISOString().slice(0, 10);
+    const exported = async () => {
+      const csv = (await ctx.services.shopify.orderCsv({ from: day, to: day }, { email: (e) => e, buyer: (b) => b })).body;
+      const header = csv.split('\r\n')[0]!.split(',').map((c) => c.replace(/^"|"$/g, ''));
+      const rows = csv.trimEnd().split('\r\n').slice(1).map((l) => l.split('","').map((c) => c.replace(/^"|"$/g, '')));
+      const at = (name: string) => header.indexOf(name);
+      const firstRows = new Map(rows.filter((r) => r[at('Source')] !== '').map((r) => [r[at('Name')], r]));
+      return { of: (id: string) => firstRows.get(orderReference(id)), at };
+    };
+    // Unpriced, with its unpriced SALON parent: neither is exported yet.
+    const before = await exported();
+    expect(before.of(parent)).toBeUndefined();
+    expect(before.of(gift!.id)).toBeUndefined();
+    // Priced: the gift is its own order, at 0.00, with no shipping of its own; the parent keeps its price.
+    await orders().setTerms(parent, { sizeLabel: '58', priceMinor: 300_000, currency: 'EUR' }, admin);
+    const after = await exported();
+    const row = after.of(gift!.id)!;
+    expect(row).toBeDefined();
+    const cell = (name: string) => row[after.at(name)];
+    expect([cell('Currency'), cell('Subtotal'), cell('Shipping'), cell('Taxes'), cell('Total'), cell('Lineitem price'), cell('Lineitem name'), cell('Source')]).toEqual([
+      'EUR', '0.00', '0.00', '0.00', '0.00', '0.00', 'PENDENTIF', 'orbes-gift',
+    ]);
+    expect(after.of(parent)![after.at('Subtotal')]).toBe('3000.00');
+    expect(after.of(parent)![after.at('Source')]).toBe('orbes-salon');
   });
 
   it('shows Client Services the collector\'s saved size as a hint only while its size is to be chosen: the matching size, or the saved measure; nothing is chosen (AC-01)', async () => {
