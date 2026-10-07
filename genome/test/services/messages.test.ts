@@ -466,4 +466,19 @@ describe('MessageService (CS-01)', () => {
     ]);
     expect(JSON.stringify(exported)).not.toContain(operator.id);
   });
+
+  it('labels the place of a house guarantee not shown, used at the draw, PLACE HELD as the release page says it, never a mark of the guarantee', async () => {
+    const opensAt = new Date(clock.now().getTime() + 2 * HOUR);
+    const guaranteed = await f.drops.create({ modelId: f.modelId, title: 'Monolithe in gold', quantity: 3, opensAt, closesAt: new Date(opensAt.getTime() + HOUR), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, f.admin);
+    await f.drops.publish(guaranteed.id, f.admin);
+    const holder = await createAccount(t.db);
+    await ctx.services.guarantees.grant(holder.id, { scope: 'RELEASE', targetId: guaranteed.id, pieces: 1, validUntil: '2026-12-31', visible: false }, f.admin);
+    clock.set(new Date(opensAt.getTime() + MINUTE));
+    await f.drops.enter(holder.id, guaranteed.id, holder.actor);
+    clock.advance(HOUR);
+    await f.drops.draw(guaranteed.id, f.admin);
+    expect(await t.db.selectFrom('drop_entries').select(['status', 'tier', 'rank']).where('drop_id', '=', guaranteed.id).where('account_id', '=', holder.id).executeTakeFirstOrThrow()).toEqual({ status: 'SELECTED', tier: null, rank: null });
+    expect((await write(holder, 'My place.', { kind: 'RELEASE', id: guaranteed.id })).message.concerning?.label).toBe('MONOLITHE IN GOLD · PLACE HELD');
+    expect((await f.drops.accountEntries(holder.id)).find((e) => e.dropId === guaranteed.id)).toMatchObject({ reserved: false, guaranteed: false });
+  });
 });

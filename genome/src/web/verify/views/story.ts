@@ -70,6 +70,8 @@ class StoryPreview {
   private readonly url: string;
   private readonly inerted: HTMLElement[] = [];
   private savedTimer: ReturnType<typeof setTimeout> | null = null;
+  /** IMAGE SAVED, said to a screen reader (visually hidden). */
+  private readonly status = h('p', { class: 'visually-hidden n-story__status', attrs: { role: 'status' } });
   private closed = false;
 
   constructor(
@@ -90,6 +92,7 @@ class StoryPreview {
       h('img', { class: 'n-story__card', attrs: { src: this.url, alt: STORY.alt(...storyWords(m)), width: 1080, height: 1920, decoding: 'async' } }),
       h('div', { class: 'n-story__actions' }, share, save),
       canShare ? null : h('p', { class: 'n-sm n-story__note', text: STORY.cannotShare }),
+      this.status,
     );
     this.el.addEventListener('keydown', (ev) => {
       if (ev.key === 'Escape') {
@@ -120,13 +123,15 @@ class StoryPreview {
     this.saved(save);
   }
 
-  /** SAVE IMAGE reads IMAGE SAVED for 3 s. */
+  /** SAVE IMAGE reads IMAGE SAVED for 3 s, said by the status line too (a focused button's new words are not always read). */
   private saved(save: HTMLButtonElement): void {
     if (this.closed) return;
     save.textContent = STORY.saved;
+    this.status.textContent = STORY.saved;
     if (this.savedTimer) clearTimeout(this.savedTimer);
     this.savedTimer = setTimeout(() => {
       save.textContent = STORY.save;
+      this.status.textContent = '';
       this.savedTimer = null;
     }, STORY_SAVED_MS);
   }

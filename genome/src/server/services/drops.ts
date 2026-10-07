@@ -492,6 +492,12 @@ export interface DropSheet extends DropCard {
    */
   reserved: number;
   /**
+   * Before the draw, whether every piece is taken, as RESERVE counts it (DROP_FULL): the places held or sold and the
+   * pieces the house still guarantees (IN-01, unused). `reserved` leaves the guaranteed pieces out, so a release can be
+   * full before it reads `quantity OF quantity`. It names no account and no guarantee. False once drawn or cancelled.
+   */
+  full: boolean;
+  /**
    * IN-01: the places guaranteed by the house, once drawn (empty before): each entry that used a guarantee here, by its
    * id, with its pieces, selected first and listed apart without a rank. No account marker of any kind: YOURS comes only
    * from the account's own entry (AccountDropEntry `guaranteed`, true only for a guarantee shown to the client).
@@ -683,9 +689,18 @@ type AccountEntryRow = Pick<DropRow, 'title' | 'opens_at' | 'closes_at' | 'publi
   guarantee_used_at: Date | null;
 };
 
-function accountEntryView(r: AccountEntryRow, now: Date): AccountDropEntry {
-  // A guarantee used before the release opened was used by a direct reservation of its holder's early access.
+/**
+ * Whether an account's entry is a place RESERVED (its early access) rather than a place HELD (drawn): a direct
+ * reservation (isReservation), or a guarantee used before the release opened, by a direct reservation of its holder's
+ * early access. A guarantee used at the draw (selected first, rank null and no tier) is a place held, as any drawn place:
+ * its holder's words never hint at a guarantee they are not shown. The release page and MESSAGES' context both read it.
+ */
+export function entryReserved(r: { tier: number | null; rank: number | null; guarantee_id: string | null; guarantee_used_at: Date | null; opens_at: Date | string }): boolean {
   const guaranteedReservation = r.guarantee_id !== null && r.guarantee_used_at !== null && r.guarantee_used_at.getTime() < new Date(r.opens_at).getTime();
+  return isReservation(r) || guaranteedReservation;
+}
+
+function accountEntryView(r: AccountEntryRow, now: Date): AccountDropEntry {
   const shown = r.guarantee_id !== null && r.guarantee_visible === true;
   return {
     id: r.id,
@@ -696,7 +711,7 @@ function accountEntryView(r: AccountEntryRow, now: Date): AccountDropEntry {
     enteredAt: r.created_at,
     rank: r.rank,
     respondBy: r.respond_by,
-    reserved: isReservation(r) || guaranteedReservation,
+    reserved: entryReserved(r),
     guaranteed: shown,
     pieces: shown ? r.pieces : 1,
     opensAt: r.opens_at,
@@ -858,6 +873,8 @@ export class DropService {
     if (!r) throw dropNotFound();
     // Drawn, the release is over: no end figure (plan LIVE RELEASE+, choice 5), the places reserved directly no longer counted.
     const reserved = r.drawn_at ? 0 : await this.reservedPieces(this.db, id);
+    // As RESERVE refuses DROP_FULL: the places held or sold, and the pieces the house still guarantees to its holders.
+    const full = !r.drawn_at && !r.cancelled_at && (await this.heldPieces(this.db, id)) + (await guaranteedPieces(this.db, id)) >= r.quantity;
     // IN-01: once drawn, the places the house guaranteed, by entry id and pieces, never their accounts.
     const guaranteed = r.drawn_at
       ? (await this.db.selectFrom('drop_entries').select(['id', 'pieces']).where('drop_id', '=', id).where('guarantee_id', 'is not', null).orderBy('id').execute()).map((e) => ({ id: e.id, pieces: e.pieces }))
@@ -872,6 +889,7 @@ export class DropService {
       seedHash: toHex(r.seed_hash),
       seed: r.drawn_at && r.seed ? toHex(r.seed) : null,
       reserved,
+      full,
       guaranteed,
     };
   }

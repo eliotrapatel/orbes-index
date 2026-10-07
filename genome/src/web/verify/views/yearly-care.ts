@@ -110,11 +110,18 @@ export class YearlyCareBlock {
         return [
           h('p', { class: 'n-g n-t3 n-ivc n-piece__care-year-head', text: b.head }),
           this.rows(b.rows),
-          b.track ? h('p', { class: 'n-piece__action-line' }, textLink(b.track.text, { href: b.track.href, newTab: true, extraClass: 'n-piece__care-year-track' })) : null,
+          b.track ? h('p', { class: 'n-piece__action-line' }, this.trackLink(b.track)) : null,
         ];
       default:
         return [this.text(b.text)];
     }
+  }
+
+  /** TRACK THE SHIPMENT, in a new tab, its accessible name saying where (ORDERS.trackLabel). */
+  private trackLink(t: { text: string; href: string; label: string }): HTMLElement {
+    const link = textLink(t.text, { href: t.href, newTab: true, extraClass: 'n-piece__care-year-track' });
+    link.setAttribute('aria-label', t.label);
+    return link;
   }
 
   private openForm(): void {

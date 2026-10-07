@@ -45,10 +45,11 @@ import {
 import { DomainError, conflict, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, systemClock, type Actor, type Clock, type Page, type PageRequest } from '../types.js';
 import type { AuditService } from './audit.js';
-import { customerAccountLocked } from './auth.js';
+import { customerAccountLocked, normalizeEmail } from './auth.js';
 import { clubStandings, tierName, type ClubTier, type ClubTierName } from './club.js';
 import { openCareOf } from './care.js';
 import { readProgram, type PriorityTier } from './club-program.js';
+import { entryReserved } from './drops.js';
 import { liveReference } from './live-console.js';
 import { isAnnounced, liveStages, stagesAt } from './live.js';
 import type { LookbookService } from './lookbook.js';
@@ -179,6 +180,11 @@ export interface BoardFilter {
   who?: 'mine' | 'unassigned';
   /** A client's email (part of it), or a scan's REF (8 hex characters). */
   q?: string;
+  /**
+   * The whole email only, never part of it: for a reader who sees the clients' emails masked (an AUDITOR), so that
+   * extending `q` a character at a time cannot rebuild an address.
+   */
+  exactEmail?: boolean;
 }
 
 /** The board's page, with the count of To answer (its filter's label and the sidebar's badge). */
@@ -599,8 +605,16 @@ export class MessageService {
   /** The account's own entry in a release, in words: PLACE HELD, PLACE RESERVED, CONFIRMED · REFERENCE LR-…, REMOVED. */
   private async entryWords(tx: Db, account: string, dropId: string, mode: DropMode): Promise<string[]> {
     if (mode === 'DRAW') {
-      const e = await tx.selectFrom('drop_entries').select(['status', 'rank']).where('drop_id', '=', dropId).where('account_id', '=', account).executeTakeFirst();
-      if (e?.status === 'SELECTED') return [e.rank === null ? 'PLACE RESERVED' : 'PLACE HELD'];
+      const e = await tx
+        .selectFrom('drop_entries as e')
+        .innerJoin('drops as d', 'd.id', 'e.drop_id')
+        .leftJoin('house_guarantees as g', 'g.id', 'e.guarantee_id')
+        .select(['e.status', 'e.tier', 'e.rank', 'e.guarantee_id', 'g.used_at as guarantee_used_at', 'd.opens_at'])
+        .where('e.drop_id', '=', dropId)
+        .where('e.account_id', '=', account)
+        .executeTakeFirst();
+      // As the release page says it (drops.ts entryReserved): a guarantee used at the draw is a place held, never a mark.
+      if (e?.status === 'SELECTED') return [entryReserved(e) ? 'PLACE RESERVED' : 'PLACE HELD'];
       // The sale concluded, as MY PIECES says it of a draw's entry.
       if (e?.status === 'CONFIRMED') return ['CONCLUDED'];
       return [];
@@ -656,9 +670,10 @@ export class MessageService {
     if (q !== '') {
       const ref = SCAN_REF_RE.test(q) ? q.toUpperCase() : null;
       const like = `%${q.toLowerCase().replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+      const exact = filter.exactEmail ? (normalizeEmail(q)?.normalized ?? null) : null;
       query = query.where((eb) =>
         eb.or([
-          eb('a.email_normalized', 'like', like),
+          ...(!filter.exactEmail ? [eb('a.email_normalized', 'like', like)] : exact !== null ? [eb('a.email_normalized', '=', exact)] : []),
           ...(ref ? [eb.exists(eb.selectFrom('client_messages as r').select('r.id').whereRef('r.conversation_id', '=', 'c.id').where('r.scan_ref', '=', ref))] : []),
         ]),
       );

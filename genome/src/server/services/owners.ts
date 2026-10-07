@@ -88,7 +88,7 @@ import { accountCareRequests, careThisYear, type CareAllowance, type ExportedCar
 import { accountGuaranteesForStaff, exportedGuarantees, type AdminGuarantee, type ExportedGuarantee } from './guarantees.js';
 import { exportedSizes, type ExportedSize } from './sizes.js';
 import { collectorValue, type LifetimeValue } from './growth.js';
-import { accountGrants, creditBalances } from './tier-grants.js';
+import { accountGrants, accountTierGrants, creditBalances, type ExportedTierGrant } from './tier-grants.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
 import { participatedReleases, releasesTakenPart } from './participation.js';
@@ -420,6 +420,12 @@ export interface AccountExport {
   guarantees: ExportedGuarantee[];
   /** The sizes the account saved in YOUR SIZES (plan NEXT-NINE, AC-01): each kind's value in its unit, and when it was saved. */
   sizes: ExportedSize[];
+  /**
+   * The tiers' grants of the account (plan NEXT-NINE, BP-19 T5), oldest first: each welcome GIFT (its model once an
+   * order carries it) and each CREDIT with its amount, currency, expiry, balance and uses (the order, the amount, when
+   * taken off and given back, and why); never who applied or released them.
+   */
+  tierGrants: ExportedTierGrant[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
@@ -881,6 +887,7 @@ export class OwnerService {
       const careRequests = await accountCareRequests(tx, a.id);
       const guarantees = await exportedGuarantees(tx, a.id);
       const sizes = await exportedSizes(tx, a.id);
+      const tierGrants = await accountTierGrants(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -965,6 +972,7 @@ export class OwnerService {
         careRequests,
         guarantees,
         sizes,
+        tierGrants,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -1002,6 +1010,7 @@ export class OwnerService {
             careRequests: out.careRequests.length,
             guarantees: out.guarantees.length,
             sizes: out.sizes.length,
+            tierGrants: out.tierGrants.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

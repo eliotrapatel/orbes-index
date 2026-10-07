@@ -526,7 +526,8 @@ export class OwnershipService {
    * Refused with 409 TRANSFERS_PAUSED for 72 hours after an assisted recovery of the account
    * (`accounts.transfers_frozen_until`, AccountRecoveryService). The account row is read FOR SHARE
    * before the product is locked (lock order account → product, as in the recovery), so a transfer
-   * started while a recovery commits waits for it and sees the pause.
+   * started while a recovery commits waits for it and sees the pause. Refused with 409 CARE_OPEN while the piece's
+   * yearly care is REQUESTED or LABEL_SENT (plan NEXT-NINE, BP-19 T6).
    */
   async initiateTransfer(accountId: string, productId: string, actor: Actor): Promise<TransferOffer> {
     assertAccountId(accountId);
@@ -542,6 +543,10 @@ export class OwnershipService {
       if (await this.pendingTransfer(tx, p.id)) {
         throw new DomainError('TRANSFER_ALREADY_PENDING', 409, 'A transfer is already pending for this product. Cancel it first.');
       }
+      // Its yearly care under way (plan NEXT-NINE, BP-19 T6): the request names this owner and their return address.
+      // RECEIVED and RETURNING are already refused below (the piece is SERVICED).
+      const care = await tx.selectFrom('care_requests').select('id').where('product_id', '=', p.id).where('status', 'in', ['REQUESTED', 'LABEL_SENT']).executeTakeFirst();
+      if (care) throw new DomainError('CARE_OPEN', 409, "This piece's yearly care is under way: cancel the request or wait until it returns.");
       if (!TRANSFERABLE_STATUSES.includes(p.status)) {
         throw new DomainError('TRANSFER_NOT_ALLOWED', 409, 'This product cannot be transferred at this time.', { detail: `status ${p.status}` });
       }

@@ -293,6 +293,11 @@ describe('the early access of a release (P-X02)', () => {
     // Every piece reserved: said after the state until the draw, entries opened or not.
     expect(releaseSheet(sheet({ ...EARLY, state: 'UPCOMING', earlyAccessOpen: true, reserved: 3 }), 0)).toMatchObject({ stateLabel: 'EARLY ACCESS · EVERY PIECE RESERVED', full: true });
     expect(releaseSheet(sheet({ ...EARLY, state: 'OPEN', reserved: 3 }), 0)).toMatchObject({ stateLabel: 'ENTRIES OPEN · EVERY PIECE RESERVED', full: true, earlyAccess: { open: false } });
+    // Full as RESERVE counts it (IN-01: the pieces the house still guarantees), the figure of the places reserved unchanged.
+    const guaranteedFull = releaseSheet(sheet({ ...EARLY, state: 'UPCOMING', earlyAccessOpen: true, reserved: 2, full: true }), 0);
+    expect(guaranteedFull).toMatchObject({ stateLabel: 'EARLY ACCESS · EVERY PIECE RESERVED', full: true });
+    expect(guaranteedFull.rows.find((r) => r.label === 'RESERVED DIRECTLY')).toEqual({ label: 'RESERVED DIRECTLY', value: '2 OF 3 PIECES' });
+    expect(releaseSheet(sheet({ ...EARLY, state: 'DRAWN', reserved: 0, full: true, seed: 'cd'.repeat(32), drawnAt: '2026-10-14T12:00:00.000Z' }), 0).full).toBe(false);
     // Drawn, the release is over: no end figure, the places reserved directly no longer counted.
     const drawn = releaseSheet(sheet({ ...EARLY, state: 'DRAWN', reserved: 3, seed: 'cd'.repeat(32), drawnAt: '2026-10-14T12:00:00.000Z' }), 0);
     expect(drawn).toMatchObject({ stateLabel: 'THIS RELEASE IS OVER', full: false });

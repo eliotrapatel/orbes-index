@@ -1079,7 +1079,9 @@ class ReleasePage {
   }
 
   private releaseOf(s: ReleaseSheetModel) {
-    return { id: s.id, title: s.title, state: s.state, opensAt: s.opensAt, earlyAccess: s.earlyAccess, full: s.full };
+    // Full counts the pieces the house guarantees: the holder of a guarantee shown and set aside for this release may
+    // still reserve its own place with it (the server answers DROP_FULL when it cannot).
+    return { id: s.id, title: s.title, state: s.state, opensAt: s.opensAt, earlyAccess: s.earlyAccess, full: s.full && this.guarantee === null };
   }
 
   private entryOpts() {

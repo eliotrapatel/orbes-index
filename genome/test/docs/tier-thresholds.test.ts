@@ -133,11 +133,14 @@ describe('the tiers at 1, 5 and 10 pieces (plan NEXT-NINE, BP-19 T1)', () => {
     expect(paragraph(draftFr, '**Accès anticipé.**')).toContain(`(dès ${T2} pièces)`);
   });
 
-  it('states the constant in the note for counsel (item 17) and in BRAND §4.5', () => {
-    const item17 = read('docs/legal/counsel-note.fr.md')
-      .split('\n')
-      .find((l) => l.startsWith('17. '));
+  it('states the constant in the note for counsel (items 15 and 17) and in BRAND §4.5', () => {
+    const note = read('docs/legal/counsel-note.fr.md').split('\n');
+    const item17 = note.find((l) => l.startsWith('17. '));
     expect(item17).toContain(`Seuls les seuils (${T1}, ${T2} et ${T3} pièces)`);
+    // Item 15, the early access, as article 12 states it: PALLADIUM and PLATINE from their thresholds.
+    const item15 = note.find((l) => l.startsWith('15. '))!;
+    for (const words of [`PALLADIUM (dès ${T3} pièces)`, `PLATINE (dès ${T2} pièces)`, `borné par le seuil de ${T2} pièces`]) expect(item15, words).toContain(words);
+    expect(item15).not.toContain('48 heures');
     const brand = read('docs/BRAND-DESIGN-SYSTEM.md');
     const lexicon = brand.slice(brand.indexOf('### 4.5 Lexicon'), brand.indexOf('### 4.6 '));
     expect(paragraph(lexicon, "**The tiers' words**")).toContain(`TITANE from ${T1} piece, PLATINE from ${T2}, PALLADIUM from ${T3}`);

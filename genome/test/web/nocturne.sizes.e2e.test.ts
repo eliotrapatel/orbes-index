@@ -122,7 +122,7 @@ const CASES: { state: UiState; check: Check }[] = [
       holds.releaseAll();
       await view(page).locator('form').waitFor({ timeout: 20_000 });
       expect(await fieldValues(page)).toEqual(SAVED);
-      expect(await page.evaluate(() => document.activeElement?.id)).toBe('account-title');
+      expect(await page.evaluate(() => document.activeElement?.id)).toBe('account-sizes-title');
       await view(page).getByRole('button', { name: 'SAVE' }).click();
       await page.getByText('Your sizes are saved.').first().waitFor({ timeout: 20_000 });
       expect(sent).toEqual([{ sizes: { RING: 52, BRACELET: 17, WRIST: null, NECKLACE: null } }]);

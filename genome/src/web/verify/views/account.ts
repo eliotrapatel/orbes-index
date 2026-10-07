@@ -184,6 +184,12 @@ export class AccountSheet {
     this.panel.querySelector<HTMLElement>('#account-title')?.focus({ preventScroll: true });
   }
 
+  /** The heading of the view open now (MESSAGES, YOUR SIZES): a screen reader says the view changed. */
+  private focusView(): void {
+    const id = this.view === 'messages' ? 'account-messages-title' : this.view === 'sizes' ? 'account-sizes-title' : 'account-title';
+    this.panel.querySelector<HTMLElement>(`#${id}`)?.focus({ preventScroll: true });
+  }
+
   /** The club's status and the pieces, read afresh: YOUR TIER as it is now. */
   private async read(): Promise<void> {
     const gen = ++this.readGen;
@@ -365,7 +371,7 @@ export class AccountSheet {
     this.thread = null;
     this.threadError = null;
     this.render();
-    this.focusTitle();
+    this.focusView();
     void this.readThread();
   }
 
@@ -399,7 +405,7 @@ export class AccountSheet {
     const list = this.panel.querySelector<HTMLElement>('.n-messages__list');
     list?.lastElementChild?.scrollIntoView({ block: 'end' });
     if (focusReply) this.panel.querySelector<HTMLElement>('textarea')?.focus({ preventScroll: true });
-    else this.focusTitle();
+    else this.focusView();
   }
 
   private messagesView(): HTMLElement[] {
@@ -411,7 +417,7 @@ export class AccountSheet {
     );
     const t = this.thread;
     const out: (HTMLElement | null)[] = [
-      h('div', { class: 'n-px n-messages__head' }, back, h('h3', { class: 'n-g n-t3 n-ivc n-messages__title', text: MESSAGES.title })),
+      h('div', { class: 'n-px n-messages__head' }, back, h('h3', { class: 'n-g n-t3 n-ivc n-messages__title', id: 'account-messages-title', attrs: { tabindex: -1 }, text: MESSAGES.title })),
     ];
     if (this.threadError) out.push(h('p', { class: 'n-px n-err n-messages__error', attrs: { role: 'alert' }, text: this.threadError }));
     if (!t) {
@@ -499,7 +505,7 @@ export class AccountSheet {
     this.notice = null;
     this.sizesError = null;
     this.render();
-    this.focusTitle();
+    this.focusView();
     // Not read yet (or unreadable): read them before the fields show, ONE MOMENT… meanwhile.
     if (this.sizes === null) void this.readSizes();
   }
@@ -524,7 +530,7 @@ export class AccountSheet {
   /** The view drawn again once its sizes are read (or could not be), the focus on its title. */
   private showSizes(): void {
     this.render();
-    this.focusTitle();
+    this.focusView();
   }
 
   private closeSizes(notice: string | null): void {
@@ -540,7 +546,7 @@ export class AccountSheet {
    */
   private sizesView(): HTMLElement[] {
     const cancel = button(ACCOUNT_SIZES.cancel, { outline: true, onClick: () => this.closeSizes(null) });
-    const head = [h('h3', { class: 'n-g n-t3 n-ivc', id: 'account-sizes-title', text: ACCOUNT_SIZES.title }), h('p', { class: 'n-tx n-account__sizes-lead', text: ACCOUNT_SIZES.lead })];
+    const head = [h('h3', { class: 'n-g n-t3 n-ivc', id: 'account-sizes-title', attrs: { tabindex: -1 }, text: ACCOUNT_SIZES.title }), h('p', { class: 'n-tx n-account__sizes-lead', text: ACCOUNT_SIZES.lead })];
     const saved = this.sizes;
     if (saved === null) {
       const waiting = this.sizesError

@@ -20,10 +20,12 @@
  * benefits and in NEXT's.
  */
 import { TIER } from './copy.js';
-import type { ClubInUse, ClubStatus, ClubTierName } from './types.js';
+import type { ClubInUse, ClubStatus, ClubTierName, CreditChannel } from './types.js';
 import { formatDate, formatMoney } from './view-model.js';
 
 const NAMES: readonly ClubTierName[] = ['TITANE', 'PLATINE', 'PALLADIUM'];
+/** The credit's channels in THE PROGRAM's order (the server's CREDIT_CHANNELS). */
+const CREDIT_CHANNELS: readonly CreditChannel[] = ['DRAW', 'LIVE', 'SALON'];
 
 /** The meter's dots when the status does not say: the pieces PALLADIUM starts from (the server's CLUB_TIER_THRESHOLDS[2], held equal by test/web/verify.tiers.test.ts). */
 export const TIER_DOTS = 10;
@@ -78,7 +80,9 @@ export function inUseModel(u: ClubInUse | null | undefined): TierModel['inUse'] 
   if (gifts.some((g) => g?.state === 'PENDING')) rows.push([TIER.gift, TIER.giftNext]);
   for (const ref of new Set(gifts.filter((g) => g?.state === 'WITH_ORDER' && typeof g.orderReference === 'string').map((g) => g.orderReference!))) rows.push([TIER.gift, TIER.giftWith(ref)]);
   if (rows.length === 0) return null;
-  return { label: TIER.inUse, rows, note: rows.some(([l]) => l === TIER.credit) ? TIER.creditNote : null };
+  // The note names the orders THE PROGRAM takes the credit off, in its order; none known, no note (never a promise).
+  const channels = Array.isArray(u.creditChannels) ? CREDIT_CHANNELS.filter((ch) => u.creditChannels.includes(ch)) : [];
+  return { label: TIER.inUse, rows, note: rows.some(([l]) => l === TIER.credit) && channels.length > 0 ? TIER.creditNote(channels) : null };
 }
 
 export function tierModel(status: Pick<ClubStatus, 'tier' | 'pieces'> & Partial<Pick<ClubStatus, 'benefits' | 'next' | 'tierThresholds' | 'program' | 'inUse'>>, listed = 0): TierModel {

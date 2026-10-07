@@ -1713,7 +1713,7 @@ Migration `0027_tier_grants` (plan NEXT-NINE, BP-19 T5): what an account receive
 | `model_id` | `uuid` | NULL | — | FK → `models.id` (`tier_grants_model_id_idx`): a GIFT's model as given, set each time it is attached to an order; `tier_grants_gift`: never on a CREDIT. |
 
 - **Triggers:** `tier_grants_immutable` (BEFORE UPDATE: `id`, `account_id`, `tier`, `kind`, `granted_at`, `amount_minor`, `currency`, `expires_at`), `tier_grants_no_delete` (BEFORE DELETE, *a grant is never taken back*). It waits while the account is below its tier. No personal data beyond the account it names.
-- **Written by:** `ensureGrants` (`services/tier-grants.ts`), in the transaction that may raise the tier: a first registration, a transfer accepted, a piece reinstated, an order's creation, `ClubService.status`, and `TierGrantService.prepare` at boot (§9); `INSERT … ON CONFLICT ON CONSTRAINT tier_grants_once DO NOTHING`, audited `club.grant` only for a row inserted. `model_id` by `attachGifts` (`services/orders.ts`). **Read by:** the gift's order (`attachGifts`), the credit's balance (`creditBalances`), an order's page.
+- **Written by:** `ensureGrants` (`services/tier-grants.ts`), in the transaction that may raise the tier: a first registration, a transfer accepted, a piece reinstated, an order's creation, `ClubService.status`, and `TierGrantService.prepare` at boot (§9); `INSERT … ON CONFLICT ON CONSTRAINT tier_grants_once DO NOTHING`, audited `club.grant` only for a row inserted. `model_id` by `attachGifts` (`services/orders.ts`). **Read by:** the gift's order (`attachGifts`), the credit's balance (`creditBalances`), an order's page, and the account's export (`accountTierGrants`, API §16.13 `tierGrants`: every grant with its model, amount, currency, expiry and balance).
 
 ### 5.67 `credit_uses`
 
@@ -1727,7 +1727,7 @@ Migration `0027_tier_grants` (plan NEXT-NINE, BP-19 T5): a credit taken off an o
 | `applied_by`, `applied_at` | `uuid`, `timestamptz` | NULL, NOT NULL | —, `now()` | FK → `admin_users.id` (`credit_uses_applied_by_idx`). |
 | `released_at`, `released_reason`, `released_by` | `timestamptz`, `text`, `uuid` | NULL | — | `CHECK (released_reason IN ('REMOVED','CANCELLED','RETURNED'))` (`CREDIT_RELEASE_REASONS`); `credit_uses_released`: both or neither; `released_by` FK → `admin_users.id` (`credit_uses_released_by_idx`), only once released; `credit_uses_times`: after it was applied. |
 
-- **Written by:** `OrderService.applyCredit` (`POST /api/admin/orders/:id/credit`, OPERATOR; a second application on one grant releases the open use as `REMOVED` and inserts the whole), `removeCredit` (`DELETE`), a cancellation and a return (`CANCELLED`, `RETURNED`); audited `order.credit.apply`, `order.credit.remove`, `order.credit.release`. **Read by:** the invoice's CREDIT lines (§5.55), an order's page, MY PIECES' `creditMinor`.
+- **Written by:** `OrderService.applyCredit` (`POST /api/admin/orders/:id/credit`, OPERATOR; a second application on one grant releases the open use as `REMOVED` and inserts the whole), `removeCredit` (`DELETE`), a cancellation and a return (`CANCELLED`, `RETURNED`); audited `order.credit.apply`, `order.credit.remove`, `order.credit.release`. **Read by:** the invoice's CREDIT lines (§5.55), an order's page, MY PIECES' `creditMinor`, and the account's export (API §16.13 `tierGrants[].uses`: the order's reference, the amount, `applied_at`, `released_at` and `released_reason`; never `applied_by` nor `released_by`).
 
 ### 5.68 `care_requests`
 

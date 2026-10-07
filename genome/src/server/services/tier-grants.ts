@@ -26,6 +26,7 @@ import { SYSTEM_ACTOR, systemClock, type Clock, type Logger, noopLogger } from '
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_THRESHOLDS, tierOf } from './club.js';
 import { creditOf, readProgram } from './club-program.js';
+import { orderReference } from './orders.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -131,6 +132,62 @@ export async function creditBalances(db: Db, accountId: string, opts: { forUpdat
 /** An account's grants as their rows hold them, its tiers in order (the console's, the export's). */
 export async function accountGrants(db: Db, accountId: string): Promise<TierGrantRow[]> {
   return db.selectFrom('tier_grants').selectAll().where('account_id', '=', accountId).orderBy('tier').orderBy('kind').execute();
+}
+
+/**
+ * A tier's grant in the account's export (the right of access, plan NEXT-NINE BP-19 T5): its tier and kind, when it was
+ * granted; a CREDIT's amount, currency, expiry, balance now and each use (the order, the amount, when taken off and
+ * when given back, and why); a GIFT's model once attached to an order. Never who applied or released a use.
+ */
+export interface ExportedTierGrant {
+  tier: 'PLATINE' | 'PALLADIUM';
+  kind: TierGrantKind;
+  grantedAt: Date;
+  amountMinor: number | null;
+  currency: string | null;
+  expiresAt: Date | null;
+  /** A GIFT's model as given (its name, and its variant's label or null); null on a CREDIT and before an order carries it. */
+  model: { name: string; variant: string | null } | null;
+  /** A CREDIT's amount less its open uses; null on a GIFT. */
+  balanceMinor: number | null;
+  /** A CREDIT's uses, oldest first; [] on a GIFT. */
+  uses: { orderReference: string; amountMinor: number; appliedAt: Date; releasedAt: Date | null; reason: CreditReleaseReason | null }[];
+}
+
+/** Every grant of the account, oldest first, with a credit's uses (OwnerService.exportData). */
+export async function accountTierGrants(db: Db, accountId: string): Promise<ExportedTierGrant[]> {
+  const grants = await db
+    .selectFrom('tier_grants as g')
+    .leftJoin('models as m', 'm.id', 'g.model_id')
+    .select(['g.id', 'g.tier', 'g.kind', 'g.granted_at', 'g.amount_minor', 'g.currency', 'g.expires_at', 'm.name as model_name', 'm.variant_label as model_variant'])
+    .where('g.account_id', '=', accountId)
+    .orderBy('g.granted_at')
+    .orderBy('g.tier')
+    .orderBy('g.kind')
+    .execute();
+  if (grants.length === 0) return [];
+  const uses = await db
+    .selectFrom('credit_uses')
+    .select(['grant_id', 'order_id', 'amount_minor', 'applied_at', 'released_at', 'released_reason'])
+    .where('grant_id', 'in', grants.map((g) => g.id))
+    .orderBy('applied_at')
+    .orderBy('id')
+    .execute();
+  return grants.map((g) => {
+    const own = uses.filter((u) => u.grant_id === g.id);
+    const credit = g.kind === 'CREDIT';
+    return {
+      tier: g.tier === 3 ? 'PALLADIUM' : 'PLATINE',
+      kind: g.kind,
+      grantedAt: g.granted_at,
+      amountMinor: g.amount_minor,
+      currency: g.currency,
+      expiresAt: g.expires_at,
+      model: g.model_name ? { name: g.model_name, variant: g.model_variant ?? null } : null,
+      balanceMinor: credit ? Math.max(0, (g.amount_minor ?? 0) - own.filter((u) => u.released_at === null).reduce((n, u) => n + u.amount_minor, 0)) : null,
+      uses: own.map((u) => ({ orderReference: orderReference(u.order_id), amountMinor: u.amount_minor, appliedAt: u.applied_at, releasedAt: u.released_at, reason: u.released_reason })),
+    };
+  });
 }
 
 /** Why a credit taken off an order is given back, by the step that gives it back. */

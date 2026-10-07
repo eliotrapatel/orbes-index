@@ -1,6 +1,7 @@
 /**
  * The Messages board of the console (plan NEXT-NINE of 2026-10-06, §3.1 CS-01; API §16.28), by role: an AUDITOR reads
- * with the clients' emails masked; an OPERATOR answers, takes and closes; only an ADMIN assigns; RETAIL reaches nothing.
+ * with the clients' emails masked and searches by the whole email only; an OPERATOR answers, takes and closes; only an
+ * ADMIN assigns; RETAIL reaches nothing.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { accountClient, adminClient, createAdmin, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
@@ -51,6 +52,19 @@ describe('the Messages board by role (CS-01)', () => {
       expect(res.statusCode, url).toBe(403);
       expect(errorOf(res).code).toBe('FORBIDDEN');
     }
+  });
+
+  it('lets an AUDITOR search by the whole email only, never part of it; an OPERATOR by part of it', async () => {
+    const ids = async (c: Client, q: string) => ((safeJson(await c.get(`/api/admin/messages?status=ALL&q=${encodeURIComponent(q)}`)) as { items: RowJson[] }).items).map((r) => r.id);
+    const prefix = collector.email.slice(0, 3);
+    // Part of the email: no row for the AUDITOR (it would rebuild the address a character at a time).
+    for (const q of [prefix, collector.email.slice(0, -1), '@example.com']) expect(await ids(auditor, q), q).toEqual([]);
+    // The whole email, in any case: the row, its email still masked.
+    const whole = safeJson(await auditor.get(`/api/admin/messages?status=ALL&q=${encodeURIComponent(collector.email.toUpperCase())}`)) as { items: RowJson[] };
+    expect(whole.items.map((r) => r.id)).toEqual([conversation]);
+    expect(whole.items[0]!.account.email).toMatch(/^o\*\*\*@example\.com$/);
+    // An OPERATOR reads the emails in clear: part of one finds it.
+    expect(await ids(operator, prefix)).toEqual([conversation]);
   });
 
   it('lets an OPERATOR read the email in clear, answer, take and close; only an ADMIN assigns', async () => {

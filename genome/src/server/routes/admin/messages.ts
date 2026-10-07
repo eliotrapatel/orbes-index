@@ -4,7 +4,8 @@
  * conversation: they answer one a client opened.
  *
  *   GET  /api/admin/messages                 AUDITOR   the board: `?status=` TO_ANSWER (default), ANSWERED, CLOSED or
- *                                                      ALL; `?who=` mine or unassigned; `?q=` an email or a scan's REF
+ *                                                      ALL; `?who=` mine or unassigned; `?q=` an email (part of it;
+ *                                                      the whole email for a reader who sees it masked) or a scan's REF
  *   GET  /api/admin/messages/summary         AUDITOR   the sidebar's badge: To answer, and those answered first
  *   GET  /api/admin/messages/:id             AUDITOR   a conversation and its messages
  *   POST /api/admin/messages/:id/answer      OPERATOR  an answer, signed ORBES Client Services for the client
@@ -32,8 +33,9 @@ export const adminMessageRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
 
   app.get('/api/admin/messages', async (request) => {
     const q = parse(adminMessagesQuery, request.query);
-    const page = await messages.board({ ...(q.status ? { status: q.status } : {}), ...(q.who ? { who: q.who } : {}), ...(q.q ? { q: q.q } : {}) }, pageOf(request.query), adminActor(request));
     const inClear = readsClientEmails(request);
+    // A reader who sees the emails masked searches by the whole email only: part of it would rebuild the address.
+    const page = await messages.board({ ...(q.status ? { status: q.status } : {}), ...(q.who ? { who: q.who } : {}), ...(q.q ? { q: q.q } : {}), exactEmail: !inClear }, pageOf(request.query), adminActor(request));
     return { ...page, items: page.items.map((c) => rowJson(c, inClear)) };
   });
 

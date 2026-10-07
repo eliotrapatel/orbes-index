@@ -82,7 +82,8 @@ describe('YEARLY CARE (care-model.ts)', () => {
         ['CARRIER', 'COLISSIMO'],
         ['TRACKING NUMBER', '6A12345678901'],
       ],
-      track: { text: 'TRACK THE SHIPMENT', href: shipment.trackingUrl },
+      // Its accessible name says where it leads, as YOUR ORDERS' does.
+      track: { text: 'TRACK THE SHIPMENT', href: shipment.trackingUrl, label: 'Track the shipment 6A12345678901 on the site of Colissimo (opens in a new tab)' },
     });
     expect(careModel(status({ used: 1, reason: 'PIECE_DONE', request: request({ status: 'DONE' }) }))!.block).toEqual({ kind: 'done', text: 'Its yearly care for 2026 is complete. It is recorded in SERVICE HISTORY.' });
   });

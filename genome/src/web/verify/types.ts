@@ -549,6 +549,8 @@ export interface DropSheet extends DropCard {
   seed: string | null;
   /** P-X02: the places reserved directly during the early access, held or sold; at `quantity`, the release is full (0 once drawn). */
   reserved: number;
+  /** Before the draw, every piece taken as RESERVE counts it: the places held and the pieces the house still guarantees. */
+  full?: boolean;
   /**
    * Plan NEXT-NINE, IN-01: once drawn, the places guaranteed by the house, by entry id and pieces, never an account
    * (empty before the draw); YOURS comes only from the account's own entry (ClubEntry `guaranteed`).
@@ -677,7 +679,12 @@ export interface ClubInUse {
   credit: { balanceMinor: number; currency: string; expiresAt: string } | null;
   care: { year: number; used: number; allowance: number | 'ALL' } | null;
   gifts: { tier: ClubTierName; model: string; state: 'PENDING' | 'WITH_ORDER'; orderReference: string | null }[];
+  /** THE PROGRAM's "Credit usable on": the orders the credit is taken off (the note under CREDIT names them). */
+  creditChannels: CreditChannel[];
 }
+
+/** The orders a tier's credit may be taken off (the server's CREDIT_CHANNELS). */
+export type CreditChannel = 'DRAW' | 'LIVE' | 'SALON';
 
 /** GET /api/v1/the-club (plan NEXT-NINE, BP-19 T9): every tier, from how many pieces, its lines; no account. */
 export interface TheClub {

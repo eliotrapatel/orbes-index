@@ -47,6 +47,10 @@ const NARROW_TOO = [
   // HOW RELEASES WORK (plan NEXT-NINE, FT-01): its terms and THE TIERS' rows at 375, 360 and 320 px too.
   'releases-how',
 ];
+/** Of NARROW_TOO, opened at the stage's 390 px only: the LIVE room with the guarantee's line. */
+const STAGE_ONLY = ['room-guaranteed'];
+/** Whether a state is opened at the narrower phones too: by its name (NARROW_STATES), or named in NARROW_TOO. */
+const atNarrow = (id: string) => NARROW_STATES.test(id) || (NARROW_TOO.includes(id) && !STAGE_ONLY.includes(id));
 
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [
@@ -73,7 +77,7 @@ describe.skipIf(!HAS_CHROMIUM)('NOCTURNE overflow: nothing overflows its column 
             }
             // The narrower phones too: the same page, made narrower.
             const size = opened.page.viewportSize()!;
-            for (const width of NARROW_STATES.test(state.id) ? NARROW : []) {
+            for (const width of atNarrow(state.id) ? NARROW : []) {
               await opened.page.setViewportSize({ width, height: size.height });
               await settle(opened.page, 300);
               for (const line of await overflows(opened.page)) {

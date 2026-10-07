@@ -256,4 +256,36 @@ describe('the orders\' shipping (BP-19 T4)', () => {
     expect(byName.get(orderReference(second!.id))![at('Shipping')]).toBe('0.00');
     await ctx.services.clubProgram.setShippingRates([], admin);
   });
+
+  it('gives an unpriced draw\'s travelling piece no fee of its own when priced first; the first\'s rate then reaches only the RESERVED ones', async () => {
+    await ctx.services.clubProgram.setShippingRates([{ currency: 'EUR', service: 'STANDARD', feeMinor: 1_500 }], admin);
+    const a = await accountWith(1);
+    const opensAt = new Date(clock.now().getTime() + 2 * HOUR);
+    const drop = await ctx.services.drops.create({ modelId: f.modelId, title: 'A DRAW', quantity: 4, opensAt, closesAt: new Date(opensAt.getTime() + HOUR), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, admin);
+    await ctx.services.drops.publish(drop.id, admin);
+    await ctx.services.guarantees.grant(a.id, { scope: 'RELEASE', targetId: drop.id, pieces: 3, validUntil: '2026-12-31', visible: true }, admin);
+    clock.set(new Date(opensAt.getTime() + MINUTE));
+    await ctx.services.drops.enter(a.id, drop.id, a.actor);
+    clock.advance(HOUR);
+    await ctx.services.drops.draw(drop.id, admin);
+    const entry = await t.db.selectFrom('drop_entries').select('id').where('drop_id', '=', drop.id).executeTakeFirstOrThrow();
+    await ctx.services.drops.confirm(drop.id, entry.id, null, admin);
+    const [first, second, third] = await t.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', entry.id).orderBy('piece').execute();
+    for (const o of [second!, third!]) expect(o.with_order_id).toBe(first!.id);
+    // Priced before the first: no fee of its own, whatever the rate of its currency.
+    await orders().setTerms(second!.id, { sizeLabel: '52', priceMinor: 420_000, currency: 'EUR' }, admin);
+    expect(await shippingOfRow(second!.id)).toEqual([null, null, null]);
+    expect(await auditsOf(second!.id, 'order.shipping')).toEqual([]);
+    // The third is priced and paid before the first: its shipping stays as it was paid.
+    await orders().setTerms(third!.id, { sizeLabel: '52', priceMinor: 420_000, currency: 'EUR' }, admin);
+    await pay(third!.id);
+    expect(linesOf((await invoiceOf(third!.id)).lines).map((l) => l.kind)).toEqual(['PIECE']);
+    // The first priced: the rate, once; the RESERVED piece follows at 0; the PAID one is left untouched.
+    await orders().setTerms(first!.id, { sizeLabel: '52', priceMinor: 420_000, currency: 'EUR' }, admin);
+    expect(await shippingOfRow(first!.id)).toEqual(['STANDARD', 1_500, null]);
+    expect(await shippingOfRow(second!.id)).toEqual(['STANDARD', 0, null]);
+    expect(await shippingOfRow(third!.id)).toEqual([null, null, null]);
+    expect(await auditsOf(third!.id, 'order.shipping')).toEqual([]);
+    await ctx.services.clubProgram.setShippingRates([], admin);
+  });
 });

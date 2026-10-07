@@ -1024,6 +1024,8 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
     // PALLADIUM's window: one place left beside the two the house guarantees.
     expect((await q.client.post(`/api/v1/club/drops/${d.id}/reserve`)).statusCode).toBe(200);
     expect(errorOf(await r.client.post(`/api/v1/club/drops/${d.id}/reserve`)).code).toBe('DROP_FULL');
+    // The page says it is full as RESERVE counts it, its figure of places reserved unchanged, naming no guarantee.
+    expect(await sheetOf(h.client(), d.id)).toMatchObject({ reserved: 1, full: true, guaranteed: [] });
     // PLATINE's window: the holder's reservation uses the guarantee, for its pieces.
     h.clock.advance(2 * HOUR);
     await staff();
@@ -1032,7 +1034,7 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
     expect((safeJson(res) as { entry: EntryJson & { guaranteed: boolean; pieces: number } }).entry).toMatchObject({ status: 'SELECTED', reserved: true, guaranteed: true, pieces: 2 });
     expect(await h.ctx.db.selectFrom('drop_entries').select(['tier', 'rank', 'pieces']).where('account_id', '=', holder.id).where('drop_id', '=', d.id).executeTakeFirstOrThrow()).toEqual({ tier: null, rank: null, pieces: 2 });
     expect((await h.ctx.db.selectFrom('house_guarantees').select(['status', 'used_drop_id']).where('account_id', '=', holder.id).executeTakeFirstOrThrow())).toEqual({ status: 'USED', used_drop_id: d.id });
-    expect((await sheetOf(h.client(), d.id))).toMatchObject({ reserved: 3, guaranteed: [] });
+    expect((await sheetOf(h.client(), d.id))).toMatchObject({ reserved: 3, full: true, guaranteed: [] });
 
     // A DRAFT whose chosen-release guarantee holds 2 pieces: its quantity never below them.
     const { modelId } = await seedCatalog(h.ctx);

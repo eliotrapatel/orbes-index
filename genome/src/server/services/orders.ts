@@ -1869,7 +1869,8 @@ export class OrderService {
           after = await updateOrder(tx, o.id, { shipping_service: shipping.service, shipping_minor: shipping.minor, shipping_benefit: null });
           shipped = { service: shipping.service, minor: shipping.minor, benefit: null, ...(was.benefit !== null ? { freeBefore: was.benefit } : {}) };
         }
-      } else if (priceChange && o.currency === null && currency && after.shipping_service === null) {
+      } else if (priceChange && o.currency === null && currency && o.with_order_id === null && after.shipping_service === null) {
+        // An order travelling with another takes no fee of its own: it follows its first order's service at 0.
         const rate = await shippingRate(tx, currency, 'STANDARD');
         if (rate !== null) {
           after = await updateOrder(tx, o.id, { shipping_service: 'STANDARD', shipping_minor: rate, shipping_benefit: null });
@@ -1895,10 +1896,10 @@ export class OrderService {
     return this.get(id);
   }
 
-  /** The orders travelling with `parent` take its service at 0 (none when it has none), in its transaction; audited `order.shipping`. */
+  /** The RESERVED orders travelling with `parent` take its service at 0 (none when it has none), in its transaction; a paid one keeps its shipping. Audited `order.shipping`. */
   private async followShipping(tx: Db, parent: OrderRow, actor: Actor, now: Date): Promise<AuditRecordInput[]> {
     const notes: AuditRecordInput[] = [];
-    const followers = await tx.selectFrom('orders').selectAll().where('with_order_id', '=', parent.id).where('status', '<>', 'CANCELLED').orderBy('piece').orderBy('id').forUpdate().execute();
+    const followers = await tx.selectFrom('orders').selectAll().where('with_order_id', '=', parent.id).where('status', '=', 'RESERVED').orderBy('piece').orderBy('id').forUpdate().execute();
     const next = travellingShipping(parent);
     for (const f of followers) {
       if (f.shipping_service === next.service && f.shipping_minor === next.minor && f.shipping_benefit === null) continue;

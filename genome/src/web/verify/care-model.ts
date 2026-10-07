@@ -21,7 +21,7 @@
  *
  * A request cancelled this year adds « This request was cancelled. » above what may be done now.
  */
-import { YEARLY_CARE } from './copy.js';
+import { ORDERS, YEARLY_CARE } from './copy.js';
 import type { CareRequestView, PieceCare } from './types.js';
 import { formatDate } from './view-model.js';
 
@@ -32,7 +32,7 @@ export type CareBlock =
   | { kind: 'requested'; head: string; text: string; rows: CareRow[]; action: string; requestId: string }
   | { kind: 'label'; head: string; text: string; rows: CareRow[]; download: string | null; requestId: string }
   | { kind: 'received'; head: string; text: string }
-  | { kind: 'returning'; head: string; rows: CareRow[]; track: { text: string; href: string } | null }
+  | { kind: 'returning'; head: string; rows: CareRow[]; track: { text: string; href: string; label: string } | null }
   | { kind: 'done'; text: string }
   | { kind: 'used'; text: string }
   | { kind: 'pieceDone'; text: string }
@@ -100,7 +100,11 @@ function requestBlock(r: CareRequestView): CareBlock | null {
         kind: 'returning',
         head: YEARLY_CARE.returning,
         rows: r.return ? shipmentRows(r.return) : [],
-        track: r.return && /^https:\/\//.test(r.return.trackingUrl) ? { text: YEARLY_CARE.track, href: r.return.trackingUrl } : null,
+        // Its accessible name says where it leads, as YOUR ORDERS' TRACK THE SHIPMENT does (ORDERS.trackLabel).
+        track:
+          r.return && /^https:\/\//.test(r.return.trackingUrl)
+            ? { text: YEARLY_CARE.track, href: r.return.trackingUrl, label: ORDERS.trackLabel(r.return.tracking, r.return.carrier.name) }
+            : null,
       };
     case 'DONE':
       return { kind: 'done', text: YEARLY_CARE.done(r.year) };

@@ -12,7 +12,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
-import { accountClient, adminClient, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
+import { holdPieces } from '../support/live.js';
+import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 const NEW_PASSWORD = 'a brand new passphrase';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -374,6 +375,8 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(x.messages).toEqual([]);
       // No size saved in YOUR SIZES either (the test below exports them).
       expect(x.sizes).toEqual([]);
+      // No grant of a tier either: one piece is TITANE (the test below exports them).
+      expect(x.tierGrants).toEqual([]);
       // Every audit entry that names the account: about it, and made by it (the claim code mistyped on a piece it
       // does not own, the STOLEN declaration and its time, the report), each with its piece or the scan's REF.
       expect(x.activity.map((e: any) => [e.action, e.by, e.productId, e.reference, e.status])).toEqual([
@@ -403,7 +406,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, tierGrants: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 
@@ -426,6 +429,58 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(x.activity.map((e: any) => e.action)).toContain('account.sizes.update');
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit[0]!.details).toMatchObject({ sizes: 2 });
+    });
+
+    it('holds the tiers\' grants: each GIFT and CREDIT, a credit\'s balance and its uses by order, never who applied them (BP-19 T5)', async () => {
+      const owner = await accountClient(h);
+      const id = await accountIdOf(owner.email);
+      // PLATINE: its grants are given at the status' read.
+      await holdPieces(h.t.db, id, 5, catalog.modelId);
+      expect((await owner.client.get('/api/v1/club/status')).statusCode).toBe(200);
+      const operator = await createAdmin(h.ctx, 'OPERATOR');
+      const staff = { type: 'admin' as const, id: operator.id };
+      // A salon's order, priced in euros: 20.00 taken off then given back, 15.00 taken off.
+      const request = await h.t.db.insertInto('shop_requests').values({ account_id: id, model_id: catalog.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+      h.clock.advance(60_000);
+      await h.ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, staff);
+      const order = (await h.t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+      await h.ctx.services.orders.setTerms(order, { sizeLabel: '58', priceMinor: 300_000, currency: 'EUR' }, staff);
+      await h.ctx.services.orders.applyCredit(order, 2_000, staff);
+      h.clock.advance(60_000);
+      await h.ctx.services.orders.removeCredit(order, staff);
+      h.clock.advance(60_000);
+      await h.ctx.services.orders.applyCredit(order, 1_500, staff);
+      const res = await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${id}/export`);
+      const x = safeJson(res) as Record<string, any>;
+      const grants = await h.t.db.selectFrom('tier_grants').selectAll().where('account_id', '=', id).execute();
+      const credit = grants.find((g) => g.kind === 'CREDIT')!;
+      const gift = grants.find((g) => g.kind === 'GIFT')!;
+      const reference = `OR-${order.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+      expect(x.tierGrants).toEqual(
+        expect.arrayContaining([
+          { tier: 'PLATINE', kind: 'GIFT', grantedAt: gift.granted_at.toISOString(), amountMinor: null, currency: null, expiresAt: null, model: null, balanceMinor: null, uses: [] },
+          {
+            tier: 'PLATINE',
+            kind: 'CREDIT',
+            grantedAt: credit.granted_at.toISOString(),
+            amountMinor: 5_000,
+            currency: 'EUR',
+            expiresAt: credit.expires_at!.toISOString(),
+            model: null,
+            balanceMinor: 3_500,
+            uses: [
+              { orderReference: reference, amountMinor: 2_000, appliedAt: expect.any(String), releasedAt: expect.any(String), reason: 'REMOVED' },
+              { orderReference: reference, amountMinor: 1_500, appliedAt: expect.any(String), releasedAt: null, reason: null },
+            ],
+          },
+        ]),
+      );
+      expect(x.tierGrants).toHaveLength(2);
+      // Never who applied or released a use.
+      expect(JSON.stringify(x.tierGrants)).not.toContain(operator.id);
+      expect(JSON.stringify(x.tierGrants)).not.toContain(operator.email);
+      const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
+      expect(audit[0]!.details).toMatchObject({ tierGrants: 2 });
     });
 
     it('holds the account\'s messages with ORBES Client Services, signed ORBES Client Services, never who answered; the sheet links the conversation (CS-01)', async () => {

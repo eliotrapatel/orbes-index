@@ -263,7 +263,8 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     const drawn = twoClocks(s.drawnAt, offsetMinutes);
     rows.push({ label: RELEASES.rows.drawn, value: drawn.utc, local: drawn.local });
   }
-  const full = quantity > 0 && reserved >= quantity && (state === 'UPCOMING' || state === 'OPEN' || state === 'CLOSED');
+  // Full as RESERVE counts it (the server's `full`: the pieces the house guarantees too), or every piece reserved.
+  const full = (s.full === true || (quantity > 0 && reserved >= quantity)) && (state === 'UPCOMING' || state === 'OPEN' || state === 'CLOSED');
   const seedHashHex = typeof s.seedHash === 'string' && HEX64.test(s.seedHash) ? s.seedHash : '';
   const seedHex = state === 'DRAWN' && typeof s.seed === 'string' && HEX64.test(s.seed) ? s.seed : null;
   const model = s.model ?? { name: '', type: '', collection: null, imageUrl: null, lookbook: null };

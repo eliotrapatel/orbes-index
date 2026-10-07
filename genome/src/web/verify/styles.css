@@ -1846,11 +1846,24 @@ body.nocturne .view--sheet.n-model {
   overscroll-behavior-x: contain;
   scroll-snap-type: x mandatory;
   scroll-padding-inline: var(--n-margin);
-  scrollbar-width: none;
 }
 
-.n-model__pairs-row::-webkit-scrollbar {
-  display: none;
+/* On a touch screen the row is swiped: no scrollbar. With a mouse, a thin one says the row scrolls and can be dragged. */
+@media (hover: none) {
+  .n-model__pairs-row {
+    scrollbar-width: none;
+  }
+
+  .n-model__pairs-row::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .n-model__pairs-row {
+    scrollbar-width: thin;
+    scrollbar-color: var(--vault-hairline-strong) transparent;
+  }
 }
 
 .n-model__pair-item {
@@ -1871,7 +1884,9 @@ body.nocturne .view--sheet.n-model {
 
 .n-model__pair:focus-visible {
   outline: 2px solid var(--vault-ink);
-  outline-offset: 2px;
+  /* Inside the card: the row scrolls (overflow-x: auto clips it vertically too), and an outer ring would lose its top
+     and bottom edges. */
+  outline-offset: -2px;
 }
 
 .n-model__pair-photo {

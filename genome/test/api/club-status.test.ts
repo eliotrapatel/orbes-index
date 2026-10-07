@@ -6,7 +6,7 @@
  *    is invited to; none without a tier; NEXT's `program`, what the next tier's program adds;
  *  - `inUse`: the credit left and until when, usable now; the yearly care of the year (null when the tier gives none);
  *    a PENDING welcome gift only while its tier is held and has an active gift model, WITH_ORDER from its order until
- *    it is delivered;
+ *    it is delivered; the channels THE PROGRAM takes the credit off (`creditChannels`), which its note names;
  *  - PLATINE's words by default are none: its early access and priority are its program's lines.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -27,6 +27,7 @@ interface StatusJson {
     credit: { balanceMinor: number; currency: string; expiresAt: string } | null;
     care: { year: number; used: number; allowance: number | 'ALL' } | null;
     gifts: { tier: string; model: string; state: string; orderReference: string | null }[];
+    creditChannels: string[];
   };
 }
 
@@ -102,7 +103,12 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
       care: { year: 2026, used: 0, allowance: 1 },
       // No gift model in THE PROGRAM: no WELCOME GIFT row, never a gift that would not come.
       gifts: [],
+      // THE PROGRAM's "Credit usable on", which the note under CREDIT names.
+      creditChannels: ['DRAW', 'LIVE', 'SALON'],
     });
+    await setProgram({ creditChannels: ['DRAW', 'LIVE'] });
+    expect((await status(a.client)).inUse.creditChannels).toEqual(['DRAW', 'LIVE']);
+    await setProgram({ creditChannels: ['DRAW', 'LIVE', 'SALON'] });
     // A gift model set: the row reads WITH YOUR NEXT ORDER.
     const charm = await createModel(h.t.db, 'ORBITAL CHARM');
     await setProgram({ giftPlatineModelId: charm });
@@ -134,7 +140,7 @@ describe('YOUR TIER: the program and the benefits in use (BP-19 T10)', () => {
     await setProgram({ carePiecesPlatine: 1 });
     // Below its tier, the credit waits: no row; TITANE has no care row either.
     const titane = await holding(1);
-    expect((await status(titane.client)).inUse).toEqual({ credit: null, care: null, gifts: [] });
+    expect((await status(titane.client)).inUse).toEqual({ credit: null, care: null, gifts: [], creditChannels: ['DRAW', 'LIVE', 'SALON'] });
     await h.t.db.updateTable('ownership').set({ ended_at: h.clock.now() }).where('account_id', '=', a.id).where('product_id', 'in', (eb) => eb.selectFrom('products').select('id').where('product_id', '!=', serial)).execute();
     expect((await status(a.client)).inUse.credit).toBeNull();
   });

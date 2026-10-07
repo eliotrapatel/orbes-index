@@ -49,7 +49,7 @@
  * its early access and priority are its program's lines.
  */
 import { inTransaction, type Db } from '../db/connection.js';
-import { CLUB_TIER_NAMES, type ClubTierName, type ProductStatus } from '../db/schema.js';
+import { CLUB_TIER_NAMES, type ClubTierName, type CreditChannel, type ProductStatus } from '../db/schema.js';
 import { DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -279,6 +279,8 @@ export interface ClubInUse {
    * WITH_ORDER from the order it travels with until it is DELIVERED; never a gift that would not come.
    */
   gifts: { tier: ClubTierName; model: string; state: 'PENDING' | 'WITH_ORDER'; orderReference: string | null }[];
+  /** THE PROGRAM's "Credit usable on" (CREDIT_CHANNELS' order): the orders the credit is taken off, as the note under it says. */
+  creditChannels: CreditChannel[];
 }
 
 /** GET /api/v1/the-club (BP-19 T9): every tier, what it gives and from how many pieces; no account. */
@@ -436,7 +438,7 @@ export class ClubService {
         if (g.tier <= tier && a) gifts.push({ tier: name, model: a.name, state: 'PENDING', orderReference: null });
       }
     }
-    return { credit, care, gifts };
+    return { credit, care, gifts, creditChannels: [...p.creditChannels] };
   }
 
   /** THE CLUB (GET /api/v1/the-club, public): every tier's program lines then its words, the credit's currency, the gifts. */

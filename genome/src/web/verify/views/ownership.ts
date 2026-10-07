@@ -49,7 +49,7 @@ import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
 import type { OwnershipConfirmation, TransferOffer } from '../types.js';
 import { formatDate, formatDateTime, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
-import { ACCOUNT_PASSWORD, CLAIM_HELD, CONTACT, NOT_DELIVERED_NOTE, PIECES, RECEIVING, STAFF_SCAN_NOTE } from '../copy.js';
+import { ACCOUNT_PASSWORD, CLAIM_HELD, CONTACT, NOT_DELIVERED_NOTE, PIECES, RECEIVING, STAFF_SCAN_NOTE, YEARLY_CARE } from '../copy.js';
 import { contactBlock, PIECES_PATH, piecesLink, sectionLabel, termsNote, withNumerals } from './common.js';
 import { accountForm, field as vaultField, FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
 import { appAnchor, button, contactLines, field, textLink } from './nocturne.js';
@@ -706,7 +706,12 @@ export class OwnershipPanel {
 
   private createTransfer(productId: string): void {
     void this.run(async () => {
-      this.state.offer = await this.deps.api.initiateTransfer(productId);
+      try {
+        this.state.offer = await this.deps.api.initiateTransfer(productId);
+      } catch (e) {
+        // The piece's yearly care under way (409 CARE_OPEN): said in the app's own words.
+        throw e instanceof ApiError && e.code === 'CARE_OPEN' ? new ApiError(e.status, e.code, YEARLY_CARE.transferOpen) : e;
+      }
     });
   }
 

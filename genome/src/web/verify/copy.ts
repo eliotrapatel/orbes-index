@@ -519,6 +519,8 @@ export const YEARLY_CARE = Object.freeze({
   used: (year: number) => `Your yearly care for ${year} has been used for another piece. It renews on 1 January.`,
   pieceDone: (year: number) => `This piece has had its yearly care for ${year}.`,
   unavailable: 'The yearly care cannot be requested for this piece just now.',
+  /** CREATE TRANSFER CODE refused while the piece's care is REQUESTED or LABEL_SENT (409 CARE_OPEN, API §11.2). */
+  transferOpen: "This piece's yearly care is under way: cancel the request or wait until it returns.",
 });
 
 /**
@@ -530,6 +532,14 @@ export const YEARLY_CARE = Object.freeze({
 const TIER_WAY = (tier: string, missing: number, from: number) =>
   `${missing} more ${Number(missing) === 1 ? 'piece registered to your account opens' : 'pieces registered to your account open'} ${tier}, from ${from} pieces held.`;
 const TIER_FIRST = (tier: string) => `A piece registered to your ORBES account opens ${tier}, the first tier of the club`;
+/** The orders a credit is taken off, as THE PROGRAM's credit line names them (`a draw, a LIVE RELEASE or THE PRIVATE SALON`). */
+const CREDIT_WORDS = Object.freeze({ DRAW: 'a draw', LIVE: 'a LIVE RELEASE', SALON: 'THE PRIVATE SALON' });
+const CREDIT_ON = (channels: readonly ('DRAW' | 'LIVE' | 'SALON')[]) => {
+  // Anything but a list (never sent so): THE PROGRAM's default, every channel.
+  const list: readonly ('DRAW' | 'LIVE' | 'SALON')[] = Array.isArray(channels) ? channels : ['DRAW', 'LIVE', 'SALON'];
+  const words = list.map((c) => CREDIT_WORDS[c]).filter((w) => w !== undefined);
+  return words.length <= 1 ? (words[0] ?? '') : `${words.slice(0, -1).join(', ')} or ${words[words.length - 1]}`;
+};
 
 export const TIER = Object.freeze({
   /** The section's label, and its accessible name. */
@@ -556,8 +566,11 @@ export const TIER = Object.freeze({
   inUse: 'IN USE',
   credit: 'CREDIT',
   creditValue: (amount: string, date: string) => `${amount} · UNTIL ${date}`,
-  /** Under the rows, when a credit exists. */
-  creditNote: 'ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.',
+  /**
+   * Under the rows, when a credit exists: the orders THE PROGRAM's "Credit usable on" names, in its order and in the
+   * words of the program's credit line (services/club-program.ts CHANNEL_WORDS, `a, b or c`).
+   */
+  creditNote: (channels: readonly ('DRAW' | 'LIVE' | 'SALON')[]) => `ORBES Client Services takes it off the invoice of a piece from ${CREDIT_ON(channels)}.`,
   care: 'YEARLY CARE',
   careOf: (used: number, allowance: number, year: number) => `${used} OF ${allowance} ${allowance === 1 ? 'PIECE' : 'PIECES'} IN ${year}`,
   careAll: (used: number, year: number) => `EVERY PIECE · ${used} IN ${year}`,

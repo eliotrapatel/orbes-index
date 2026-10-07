@@ -12,6 +12,8 @@
  *    400 without its carrier or tracking number;
  *  - a piece received by transfer (TRANSFERRED) can be cared for, by PLATINE and by PALLADIUM; TITANE, a LOST, STOLEN
  *    or SERVICED piece, a pending transfer and a piece not held are refused;
+ *  - the other way round: a transfer of the piece is refused while its care is REQUESTED or LABEL_SENT (409
+ *    CARE_OPEN), and allowed once the request is cancelled;
  *  - two requests at once by a PLATINE account: one wins; cancelling gives the allowance back;
  *  - the full flow opens and closes a YEARLY_CARE record, the piece IN SERVICE and back, listed in SERVICE HISTORY;
  *  - the label is served to its own account only, and erased 30 days after the request ends;
@@ -24,6 +26,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { careAllowance, eraseCareLabels, CARE_LABEL_MAX_BYTES } from '../../src/server/services/care.js';
 import { DEFAULT_PROGRAM } from '../../src/server/services/club-program.js';
 import type { Actor } from '../../src/server/types.js';
+import { YEARLY_CARE } from '../../src/web/verify/copy.js';
 import { accountClient, adminClient, createHarness, errorOf, safeJson, seedCatalog, type Catalog, type Client, type Harness } from '../api/support.js';
 import { holdPieces } from '../support/live.js';
 
@@ -201,6 +204,31 @@ describe('the yearly care (BP-19 T6)', () => {
     const res = await ask(stranger.client, p.serials[4]!);
     expect(res.statusCode).toBe(404);
     expect((await care(stranger.client, p.serials[4]!)).statusCode).toBe(404);
+  });
+
+  it('refuses a transfer of the piece while its care is REQUESTED or LABEL_SENT (409 CARE_OPEN), and allows it once cancelled', async () => {
+    const p = await collector(5);
+    const offer = (serial: string) => p.client.post('/api/v1/ownership/transfers', { productId: serial });
+    const transfers = async (serial: string) =>
+      (await h.t.db.selectFrom('ownership_transfers as t').innerJoin('products as pr', 'pr.id', 't.product_id').select('t.id').where('pr.product_id', '=', serial).execute()).length;
+    // REQUESTED: refused; cancelled by the collector: allowed.
+    const first = ((safeJson(await ask(p.client, p.serials[0]!)) as CareJson).request!).id;
+    const refused = await offer(p.serials[0]!);
+    expect(refused.statusCode, refused.body).toBe(409);
+    expect(errorOf(refused)).toMatchObject({ code: 'CARE_OPEN', message: "This piece's yearly care is under way: cancel the request or wait until it returns." });
+    // The verify app says it in the same words (copy.ts).
+    expect(errorOf(refused).message).toBe(YEARLY_CARE.transferOpen);
+    expect(await transfers(p.serials[0]!)).toBe(0);
+    expect((await p.client.post(`/api/v1/account/care/${first}/cancel`)).statusCode).toBe(200);
+    expect((await offer(p.serials[0]!)).statusCode).toBe(201);
+    // LABEL_SENT: refused, another piece of the account not held back; cancelled by ORBES: allowed.
+    const second = ((safeJson(await ask(p.client, p.serials[1]!)) as CareJson).request!).id;
+    expect((await label(second)).statusCode).toBe(200);
+    expect(errorOf(await offer(p.serials[1]!)).code).toBe('CARE_OPEN');
+    expect(await transfers(p.serials[1]!)).toBe(0);
+    expect((await offer(p.serials[2]!)).statusCode).toBe(201);
+    await h.ctx.services.care.cancel(second, { note: 'Cancelled at the client\'s request.' }, admin);
+    expect((await offer(p.serials[1]!)).statusCode).toBe(201);
   });
 
   it('lets one of two requests at once by a PLATINE account win, and gives the allowance back when it is cancelled', async () => {
