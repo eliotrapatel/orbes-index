@@ -35,9 +35,13 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * 2026-10-06): the privacy policy's messages with ORBES Client Services (CS-01) and its saved sizes (AC-01); the terms'
  * article 12, its tiers at 1, 5 and 10 pieces, its early access by tier and its benefits paragraph (BP-19). The build's
  * start date, 2026-10-06, and its final commit's, 2026-10-07, are not after E's published 2026-10-07, so the version is
- * the day after it, as the plan's rule sets it. Its date never holds the deployment.
+ * the day after it, as the plan's rule sets it. Its date never holds the deployment. 2026-10-09 is the version of
+ * deployment H1 of the next lot (plan of 2026-10-07, §3.2): the terms' article 2 (the ORBES CODE printed on the
+ * certificate card, the claim code printed on it) and its claim-code paragraph, and the FAQ's three answers on the
+ * card, which named a scratch-off panel the card 79t no longer has; the build's date, 2026-10-07, is not after G's
+ * 2026-10-08, so the version is the day after it, set mechanically. Step 4.7 moves it to the date of H1's final commit.
  */
-export const LEGAL_VERSION = '2026-10-08';
+export const LEGAL_VERSION = '2026-10-09';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

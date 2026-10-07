@@ -891,7 +891,8 @@ describe('terms of use (docs/legal/terms.fr.md, terms.en.md)', () => {
       expect(text, lang).not.toMatch(/visual signature|signature visuelle|GENOME[^.;:\n]*\bsignature\b/i);
       const code = terms[lang].split('\n').find((l) => l.startsWith('- **ORBES CODE**'))!;
       expect(code, lang).toContain('ORBES SEAL');
-      expect(code, lang).toMatch(lang === 'fr' ? /imprimé, marqué à chaud ou gravé/ : /printed, foiled or engraved/);
+      // Card only, in the box (plan NEXT LOT §3.2): the ORBES CODE is printed on the certificate card, nothing on the piece.
+      expect(code, lang).toMatch(lang === 'fr' ? /imprimé sur la carte certificat remise avec la pièce/ : /printed on the certificate card delivered with the piece/);
     }
   });
 

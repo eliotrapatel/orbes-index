@@ -1,6 +1,6 @@
 # Terms of use of the ORBES GENOME CODE service
 
-**Draft for legal review, not validated.** Version: 8 October 2026. [Version française](terms.fr.md).
+**Draft for legal review, not validated.** Version: 9 October 2026. [Version française](terms.fr.md).
 
 Each article ends with a *Code: …* line that points to the rules of the code it describes ([TERMS-FACTS](TERMS-FACTS.md)). These lines are for the review and are not published. The [À COMPLÉTER: …] fields await the legal identity of ORBES and counsel's choices ([note for counsel](counsel-note.fr.md), in French). Every field keeps the French marker, so that one search finds them all in both languages.
 
@@ -15,11 +15,11 @@ The service is published by CONGLOMERAT LLC ("ORBES"), whose full identity is gi
 ## Article 2 — Definitions
 
 - **Piece**: an ORBES object that carries an ORBES CODE.
-- **ORBES CODE**: the code printed, foiled or engraved on the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.
+- **ORBES CODE**: the code printed on the certificate card delivered with the piece, which carries its ORBES identity and the signature of ORBES; the ORBES SEAL is its centre.
 - **ORBES identity**: the identifier of a piece, issued and signed by ORBES, and its ORBES GENOME, eight glyphs derived from that identifier, which let you recognise it at a glance.
 - **ORBES registry**: what ORBES records for each piece: the account of its registered owner, its warranty, its services, reports of its loss or theft.
 - **ORBES account**: the account created on the service with an email address and a password.
-- **Certificate card** and **claim code**: the card delivered with a piece, and the code printed under its scratch-off panel, never on the piece, which allows the first registration.
+- **Certificate card** and **claim code**: the card delivered with a piece, and the code printed on it, never on the piece, which allows the first registration.
 - **Transfer code**: the code the registered owner creates to pass on the registration of a piece.
 - **Ownership certificate**: the page, reached through a link the registered owner creates, that shows what the ORBES registry says about a piece.
 - **Release**: the offer of a model in a limited number of pieces, which ORBES accounts enter before a draw (article 12).
@@ -94,7 +94,7 @@ ORBES endeavours to keep the service available, without committing to it: it may
 
 **After a scan.** The scan that reads AUTHENTIC — FIRST REGISTRATION opens the registration for 15 minutes, once, and for that piece only. You register the piece while signed in to your ORBES account. A scan made in a browser signed in to the ORBES console is a test by ORBES staff and does not open the registration.
 
-**Claim code.** A piece delivered with a certificate card is registered only with the claim code printed under its scratch-off panel. Keep the card, scratch the panel only when you register, and share the claim code with no one. Beyond 5 attempts with a wrong value per hour for one piece, attempts are refused until the end of the hour. When the unusual activity of a piece comes from its scans alone, its registration stays open to the holder of the claim code.
+**Claim code.** A piece delivered with a certificate card is registered only with the claim code printed on it. Keep the card and share the claim code with no one. Beyond 5 attempts with a wrong value per hour for one piece, attempts are refused until the end of the hour. When the unusual activity of a piece comes from its scans alone, its registration stays open to the holder of the claim code.
 
 **One registered owner.** A piece is registered to one account at a time. Once registered, it passes on only through a transfer (article 8), or returns to ORBES with the return of its order (article 14).
 

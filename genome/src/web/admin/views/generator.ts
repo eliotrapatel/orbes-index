@@ -11,8 +11,8 @@
  * page keeps the ones taken before, for ORBES staff). The claim code exists only in
  * this page's memory: it is never stored client-side and disappears when
  * the operator leaves or hides it.
- * While it is shown, the certificate card that carries it (PDF, claim code
- * under the scratch-off panel) can be downloaded; the server checks the code
+ * While it is shown, the certificate card that carries it (PDF, the card 79t,
+ * claim code in plain sight) can be downloaded; the server checks the code
  * against its hash before printing it, and the button goes with Copy when
  * the code is hidden.
  *

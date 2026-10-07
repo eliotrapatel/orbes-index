@@ -37,7 +37,7 @@ Ce guide ne décrit que ce que fait le logiciel. Ses sources :
 - **Les points de vente.** Un ADMIN les crée dans `Points of sale` (groupe `Clients` de la barre latérale) : chaque boutique, chaque grand magasin et la boutique en ligne, sans pays pour celle-ci. Une boutique fermée est désactivée, jamais supprimée.
 - **Un compte par personne** (§10) : RETAIL pour chaque vendeur, OPERATOR pour l'atelier et ORBES Client Services. Jamais de compte partagé, même sur le téléphone d'un comptoir.
 - **Les coordonnées d'ORBES Client Services** sont configurées (`CLIENT_SERVICES_EMAIL`, `CLIENT_SERVICES_PHONE`, `CLIENT_SERVICES_HOURS`, LAUNCH §10). L'application des collectionneurs ne les montre plus : partout où elle renvoie vers ORBES Client Services, elle montre `WRITE TO ORBES CLIENT SERVICES`, dont les messages arrivent dans `Messages` (§3). Seul `FORGOTTEN PASSWORD` garde l'adresse e-mail, pour un client qui a aussi perdu son code de récupération ; les pages légales gardent l'adresse, le téléphone et les horaires.
-- **La carte certificat.** Tant qu'elle porte la mention PROOF, aucune carte n'est remise à un client (kit, §6) : la première vente attend la validation de la carte par la marque.
+- **La carte certificat.** Fait : le propriétaire a validé la carte 79t, MINT CERTIFICATE, le 2026-10-07, et aucune carte ne porte plus la mention PROOF (kit, §2).
 - **Le claim code.** Toute pièce destinée à la vente est émise avec son claim code : dans `Generator`, la case `Issue a one-time claim code (shown once, stored as a hash)` (pour un lot : `Issue a one-time claim code for each piece (shown once, stored as a hash)`) reste cochée, comme par défaut. C'est lui qui prouve, à l'enregistrement, que le client tient la carte. Une pièce émise sans claim code s'enregistre sans preuve : une fois sa garantie activée, le premier compte connecté qui la scanne peut l'enregistrer à son nom. Si une telle pièce est vendue, le client l'enregistre au comptoir, aussitôt la garantie activée ; puis un OPERATOR, la facture vue, confirme la propriété sur la fiche de la pièce (`Actions`, groupe `Ownership` → `Confirm ownership`, API §14.10).
 - **La checklist du §9**, une fois, par chaque personne qui vendra ou répondra aux clients.
 
@@ -72,7 +72,7 @@ Sur le téléphone du comptoir, avec votre compte RETAIL (ou OPERATOR) :
 4. Lisez l'écran (tableau ci-dessous). Avec `READY TO SELL`, vérifiez que l'identité affichée (`O26-…`) est celle imprimée sur la carte certificat rangée avec la pièce.
 5. `Activate warranty`, dans les 10 minutes qui suivent le scan (`This scan stays valid for … minutes.`). Passé ce délai, scannez de nouveau.
 6. L'écran affiche `WARRANTY ACTIVE`, les dates de la garantie et votre point de vente, puis `Tell the client` : `Register your piece with its card at theorbes.com/verify.`
-7. Remettez la carte certificat, **zone à gratter intacte** : le personnel ne la gratte jamais. Puis `Next sale`.
+7. Remettez la carte certificat, **son claim code imprimé en clair** : le personnel ne le saisit ni ne le recopie jamais. Puis `Next sale`.
 
 Le mode Boutique inscrit la vente **aujourd'hui**, avec le pays du point de vente. Pour une vente d'un autre jour (téléphone indisponible, vente oubliée), un OPERATOR l'inscrit dans la console, ci-dessous.
 
@@ -97,7 +97,7 @@ Puis `Activate`. La console répond `Warranty activated.` ; en tête de fiche, `
 
 ### Ce que vous dites
 
-> Votre pièce est inscrite chez ORBES et sa garantie commence aujourd'hui. Enregistrez-la à votre nom avec sa carte sur theorbes.com/verify : tapez l'adresse, scannez l'ORBES CODE, puis grattez la zone de la carte pour lire le claim code. Il l'enregistre une seule fois, à votre nom.
+> Votre pièce est inscrite chez ORBES et sa garantie commence aujourd'hui. Enregistrez-la à votre nom avec sa carte sur theorbes.com/verify : tapez l'adresse, scannez l'ORBES CODE, puis saisissez le claim code imprimé sur la carte. Il l'enregistre une seule fois, à votre nom.
 
 > Gardez la carte avec la pièce, et ne photographiez ni ne partagez jamais ce code.
 
@@ -123,7 +123,7 @@ Une vente en ligne s'inscrit **dans la console, avant l'envoi**, pour que le cli
    - `Country` : le pays de livraison, en deux lettres. Remplissez-le toujours : la boutique en ligne n'a pas de pays par défaut.
 
    Puis `Activate`, et vérifiez `Warranty` `ACTIVE`.
-3. La carte certificat va **dans le colis, dans l'emballage, avec la pièce**, zone à gratter intacte. Le claim code n'apparaît jamais à l'extérieur du colis, sur la facture, dans l'e-mail de confirmation ni dans aucun message.
+3. La carte certificat va **dans le colis, dans l'emballage, avec la pièce**, son claim code imprimé en clair. Le claim code n'apparaît jamais à l'extérieur du colis, sur la facture, dans l'e-mail de confirmation ni dans aucun message.
 4. Le texte d'emballage en trois étapes est celui du [kit](PACKAGING-KIT.md), §1.
 
 Dans l'e-mail d'expédition, ou sur la notice glissée dans le colis :
@@ -158,7 +158,7 @@ Le client lit : *This ORBES identity was issued and signed by ORBES and has not 
 
 **Ce que vous faites.** Guidez le client : `OWNERSHIP` → `SIGN IN` ou `CREATE ACCOUNT` → `CLAIM CODE` → `REGISTER THIS PIECE`. Délai passé : il scanne de nouveau. Après 5 claim codes manqués en une heure, l'enregistrement de la pièce attend jusqu'à une heure.
 
-> Votre pièce est prête à être enregistrée. Dans l'onglet OWNERSHIP, connectez-vous ou créez votre compte ORBES, puis saisissez le claim code de votre carte, sous la zone à gratter. Si le délai affiché est passé, scannez de nouveau la pièce.
+> Votre pièce est prête à être enregistrée. Dans l'onglet OWNERSHIP, connectez-vous ou créez votre compte ORBES, puis saisissez le claim code imprimé sur votre carte. Si le délai affiché est passé, scannez de nouveau la pièce.
 
 ### AUTHENTIC — REGISTERED
 
@@ -280,7 +280,7 @@ Une pièce enregistrée change de mains par un **code de transfert**, créé par
 
 **Cas particuliers.**
 
-- Une pièce revendue avant tout enregistrement n'a pas de propriétaire : aucun code de transfert ne peut exister. Si la zone de la carte est intacte, l'acheteur l'enregistre avec le claim code (kit, §2).
+- Une pièce revendue avant tout enregistrement n'a pas de propriétaire : aucun code de transfert ne peut exister. Si le vendeur lui remet la carte certificat, l'acheteur l'enregistre avec le claim code imprimé dessus (kit, §2).
 - Le vendeur a donné le code d'une autre pièce : l'acheteur lit *This transfer code is not for this piece. Check the code with the owner of this piece.* Il demande au vendeur le code de cette pièce-ci, avant de payer.
 - L'acheteur s'est connecté après son scan : `VERIFY AGAIN`, comme ci-dessus. Si plus de 15 minutes ont passé depuis le scan, l'écran le dit (`The window to receive this piece from this scan has closed. Scan the code again to receive it.`) et n'envoie rien ; `SCAN AGAIN`, connecté, puis le code. Un téléphone sans caméra lit le code d'une photo (`UPLOAD A PHOTO`, sur l'accueil de theorbes.com/verify).
 - Un autre compte se connecte sur le même résultat : la fenêtre de 15 minutes reste celle du compte qui a scanné, et l'écran demande `VERIFY AGAIN`.
@@ -540,7 +540,7 @@ Rien ne part en boutique tant qu'une ligne dont cela dépend reste ouverte.
 | La checklist du §9 réalisée seule, en moins de 30 minutes, par une personne qui n'a jamais vu la console (critère d'acceptation de J-09) : son temps, et ce qui l'a arrêtée | Propriétaire, avec cette personne | la première vente | Ouvert |
 | Vérification d'identité (§6), dont la règle de la facture : seulement celle d'une pièce que le compte détient encore (`CURRENT`), jamais celle d'une pièce cédée depuis, que le vendeur a pu remettre à l'acheteur | Juriste | le premier code de récupération, verrouillage ou export à la demande d'un client | Ouvert |
 | Phrases à dire (§1 à §6) | Marque et juridique | la formation des vendeurs | Ouvert |
-| Carte certificat sans la mention PROOF (kit, §6) | Marque | la première carte remise à un client | Ouvert |
+| Carte certificat sans la mention PROOF (kit, §6) | Marque | la première carte remise à un client | Fait : 79t validée le 2026-10-07 |
 | Retour d'une commande expédiée (§2) : la suite d'une pièce dont la garantie a commencé | Propriétaire | la première vente en ligne | Ouvert |
 
 **Écart assumé.** Le brief demande de « lire un résultat UNKNOWN » pendant la checklist. Elle fait lire INVALID SIGNATURE, qui a le même écran : en production, le seul UNKNOWN ORBES CODE qu'on puisse produire à la demande ouvre un signal CRITICAL de clé compromise, et l'autre cause (un serveur en retard sur la version du code) ne s'imprime pas (§9, étape 6). Le scan de la planche n'ouvre aucun signal dans `Anomalies`, mais compte une fois dans `Analytics` (`Counterfeit signals by country`) : c'est attendu.

@@ -189,8 +189,9 @@ describe('the runbook of the next nine (docs/launch/DEPLOY-NEXT-NINE.md)', () =>
     expect(runbook).toContain(`\`"placeHeldHours":${PURCHASE_WINDOW_HOURS.default}\``);
     for (const path of ['/verify/club', '/verify/releases/how']) expect(commands).toContain(`curl -s -o /dev/null -w '%{http_code}\\n' https://verify.theorbes.com${path}`);
     expect(readDoc('genome/src/server/http/static.ts')).toContain("app.get('/verify/*', verify);");
-    // The one legal version of G, its date never holding the deployment.
-    expect(LEGAL_VERSION).toBe(G_LEGAL_VERSION);
+    // The one legal version of G, its date never holding the deployment; a later lot moves LEGAL_VERSION on (the next
+    // lot's H1, plan of 2026-10-07), never back.
+    expect(LEGAL_VERSION >= G_LEGAL_VERSION).toBe(true);
     expect(readDoc('genome/test/web/legal.content.test.ts')).toContain(`'${G_LEGAL_VERSION}': '`);
     expect(runbook).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${G_LEGAL_VERSION}';\`.`);
     expect(section(runbook, '## 0.')).toContain('Sa date ne retient jamais le déploiement.');

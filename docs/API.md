@@ -2956,7 +2956,7 @@ Example request:
 ```
 
 - `code.data` is the base64url of the 79-byte framed data: exactly what a scanner reads and what `POST /api/v1/verify` takes. Anyone holding it can print a code that verifies, so it is returned only to OPERATOR responses that produce codes (issuance and re-issue), never in read views.
-- `claimCode` is present only with `withClaimSecret: true` and is **returned once**: only its scrypt hash is stored. Print it under the scratch-off panel of the certificate card supplied with the product: `POST /api/admin/certificates` (§15.7) renders that card after checking the code against its hash.
+- `claimCode` is present only with `withClaimSecret: true` and is **returned once**: only its scrypt hash is stored. Print it on the certificate card supplied with the piece, in plain sight: `POST /api/admin/certificates` (§15.7) renders that card after checking the code against its hash.
 - `code.nonce` and `code.payloadHash` are hexadecimal; `issuedDay` counts days since 2024-01-01 UTC.
 - Several pieces that share a template (a production run, a collection in sizes): §14.11 issues up to 50 per request, one result per piece.
 

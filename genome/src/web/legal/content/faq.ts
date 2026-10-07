@@ -45,15 +45,15 @@ const EN: LegalDocument = {
       title: 'Buying a piece second-hand?',
       blocks: [
         RESALE_GUIDANCE,
-        'Once a piece is registered, every copy of its code reads AUTHENTIC — REGISTERED as well. Only the registered owner can create a transfer code, and the transfer completes when you enter it in your own ORBES account: the transfer code is what shows that the seller holds the registration. A scratched certificate card shows nothing, since its claim code has already been used.',
-        'A piece sold before anyone registered it has no owner yet, so no transfer code can exist: if the scratch-off panel of its certificate card is intact, register it with its claim code.',
+        'Once a piece is registered, every copy of its code reads AUTHENTIC — REGISTERED as well. Only the registered owner can create a transfer code, and the transfer completes when you enter it in your own ORBES account: the transfer code is what shows that the seller holds the registration. The certificate card of a registered piece shows nothing, since its claim code has already been used.',
+        'A piece sold before anyone registered it has no owner yet, so no transfer code can exist: if you receive its certificate card, register it with the claim code printed on it.',
       ],
     },
     {
       id: 'claim-code',
       title: 'I have lost my claim code',
       blocks: [
-        'The claim code is printed only under the scratch-off panel of the certificate card delivered with the piece, never on the piece. ORBES keeps only a fingerprint of it and cannot read it back to you.',
+        'The claim code is printed only on the certificate card delivered with the piece, never on the piece. ORBES keeps only a fingerprint of it and cannot read it back to you.',
         'If the card is lost before you register the piece, write to ORBES Client Services, with the proof of purchase of the piece.',
         'Once the piece is registered, the card is no longer needed: the piece then passes on with a transfer code, never with the card. After 5 wrong claim codes within an hour for one piece, its registration waits until the end of the hour.',
       ],
@@ -128,15 +128,15 @@ const FR: LegalDocument = {
       title: "Vous achetez une pièce d'occasion ?",
       blocks: [
         RESALE_GUIDANCE_FR,
-        "Dès qu'une pièce est enregistrée, chaque copie de son code affiche elle aussi AUTHENTIC — REGISTERED. Seul le propriétaire enregistré peut créer un code de transfert, et le transfert s'achève quand vous le saisissez dans votre propre compte ORBES : c'est donc le code de transfert qui montre que le vendeur détient l'enregistrement. Une carte certificat grattée ne montre rien, puisque son claim code a déjà servi.",
-        "Une pièce vendue avant tout enregistrement n'a pas encore de propriétaire, donc aucun code de transfert ne peut exister : si la zone à gratter de sa carte certificat est intacte, enregistrez-la avec son claim code.",
+        "Dès qu'une pièce est enregistrée, chaque copie de son code affiche elle aussi AUTHENTIC — REGISTERED. Seul le propriétaire enregistré peut créer un code de transfert, et le transfert s'achève quand vous le saisissez dans votre propre compte ORBES : c'est donc le code de transfert qui montre que le vendeur détient l'enregistrement. La carte certificat d'une pièce enregistrée ne montre rien, puisque son claim code a déjà servi.",
+        "Une pièce vendue avant tout enregistrement n'a pas encore de propriétaire, donc aucun code de transfert ne peut exister : si vous recevez sa carte certificat, enregistrez-la avec le claim code imprimé dessus.",
       ],
     },
     {
       id: 'claim-code',
       title: "J'ai perdu mon claim code",
       blocks: [
-        "Le claim code n'est imprimé que sous la zone à gratter de la carte certificat remise avec la pièce, jamais sur la pièce. ORBES n'en garde qu'une empreinte et ne peut pas vous le relire.",
+        "Le claim code n'est imprimé que sur la carte certificat remise avec la pièce, jamais sur la pièce. ORBES n'en garde qu'une empreinte et ne peut pas vous le relire.",
         "Si la carte est perdue avant l'enregistrement de la pièce, écrivez à ORBES Client Services, avec la preuve d'achat de la pièce.",
         "Une fois la pièce enregistrée, la carte ne sert plus : la pièce se transmet ensuite par un code de transfert, jamais par la carte. Après 5 claim codes erronés en une heure pour une même pièce, son enregistrement attend la fin de l'heure.",
       ],

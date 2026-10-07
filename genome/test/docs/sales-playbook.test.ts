@@ -448,10 +448,13 @@ describe('sales playbook (docs/launch/SALES-PLAYBOOK.md)', () => {
     expect(sheet(1)).toContain(`dans les ${expected.SALE_TOKEN_TTL_MS} qui suivent le scan`);
   });
 
-  it('closes a sale with the sentence of the sale mode, word for word, and hands over the card unscratched', () => {
+  it('closes a sale with the sentence of the sale mode, word for word, and hands over the card with its claim code printed in plain sight', () => {
     const shop = sheet(1);
     expect(shop).toContain(`\`${CLIENT_REGISTRATION}\``);
-    expect(shop).toContain('zone à gratter intacte');
+    // The card 79t prints the claim code in plain sight, with no panel to scratch (plan NEXT LOT §3.2).
+    expect(shop).toContain('son claim code imprimé en clair');
+    expect(shop).toContain('le personnel ne le saisit ni ne le recopie jamais');
+    expect(playbook).not.toMatch(/gratt/i);
     expect(quotes(shop).join(' ')).toContain('theorbes.com/verify');
     // Online, the warranty starts in the console, with a country, before the parcel leaves.
     const online = sheet(2);

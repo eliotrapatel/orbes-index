@@ -1,6 +1,6 @@
 # Conditions générales d'utilisation du service ORBES GENOME CODE
 
-**Brouillon pour revue juridique, non validé.** Version : 8 octobre 2026. [English version](terms.en.md).
+**Brouillon pour revue juridique, non validé.** Version : 9 octobre 2026. [English version](terms.en.md).
 
 Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du code qu'il décrit ([TERMS-FACTS](TERMS-FACTS.md)). Ces lignes servent à la revue et ne sont pas publiées. Les champs [À COMPLÉTER : …] attendent l'identité légale d'ORBES et les choix de l'avocat ([note pour l'avocat](counsel-note.fr.md)).
 
@@ -15,11 +15,11 @@ Le service est édité par CONGLOMERAT LLC (« ORBES »), dont l'identité compl
 ## Article 2 — Définitions
 
 - **Pièce** : un objet ORBES qui porte un ORBES CODE.
-- **ORBES CODE** : le code imprimé, marqué à chaud ou gravé sur la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.
+- **ORBES CODE** : le code imprimé sur la carte certificat remise avec la pièce, qui porte son identité ORBES et la signature d'ORBES ; l'ORBES SEAL en est le centre.
 - **Identité ORBES** : l'identifiant d'une pièce, émis et signé par ORBES, et son ORBES GENOME, huit signes tirés de cet identifiant, qui permettent de la reconnaître d'un coup d'œil.
 - **Registre ORBES** : ce qu'ORBES enregistre pour chaque pièce : compte du propriétaire enregistré, garantie, entretiens, déclarations de perte ou de vol.
 - **Compte ORBES** : le compte créé sur le service avec une adresse e-mail et un mot de passe.
-- **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé sous sa zone à gratter, jamais sur la pièce, qui permet le premier enregistrement.
+- **Carte certificat** et **claim code** : la carte remise avec une pièce, et le code imprimé dessus, jamais sur la pièce, qui permet le premier enregistrement.
 - **Code de transfert** : le code que le propriétaire enregistré crée pour transmettre l'enregistrement d'une pièce.
 - **Certificat de propriété** : la page, accessible par un lien que crée le propriétaire enregistré, qui montre ce que le registre ORBES dit d'une pièce.
 - **Sortie** : l'offre d'un modèle en un nombre limité de pièces, à laquelle les comptes ORBES s'inscrivent avant un tirage (article 12).
@@ -94,7 +94,7 @@ ORBES s'efforce de maintenir le service accessible, sans s'y engager : il peut �
 
 **Après un scan.** Le scan qui affiche AUTHENTIC — FIRST REGISTRATION ouvre l'enregistrement pour 15 minutes, une seule fois et pour cette pièce seulement. Vous enregistrez la pièce en étant connecté à votre compte ORBES. Un scan fait dans un navigateur connecté à la console ORBES est un test du personnel ORBES et n'ouvre pas l'enregistrement.
 
-**Claim code.** Une pièce livrée avec une carte certificat ne s'enregistre qu'avec le claim code imprimé sous sa zone à gratter. Conservez la carte, ne grattez la zone qu'au moment d'enregistrer, et ne communiquez le claim code à personne. Au-delà de 5 essais erronés par heure pour une même pièce, les essais sont refusés jusqu'à la fin de l'heure. Quand l'activité inhabituelle d'une pièce vient seulement de ses scans, son enregistrement reste ouvert au détenteur du claim code.
+**Claim code.** Une pièce livrée avec une carte certificat ne s'enregistre qu'avec le claim code imprimé dessus. Conservez la carte et ne communiquez le claim code à personne. Au-delà de 5 essais erronés par heure pour une même pièce, les essais sont refusés jusqu'à la fin de l'heure. Quand l'activité inhabituelle d'une pièce vient seulement de ses scans, son enregistrement reste ouvert au détenteur du claim code.
 
 **Un propriétaire enregistré.** Une pièce n'est enregistrée qu'à un seul compte à la fois. Déjà enregistrée, elle ne se transmet que par un transfert (article 8), ou revient à ORBES avec le retour de sa commande (article 14).
 
