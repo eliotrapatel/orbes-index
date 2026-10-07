@@ -35,6 +35,7 @@ import { clubRoutes } from './routes/club.js';
 import { liveRoutes } from './routes/live.js';
 import { ownershipRoutes } from './routes/ownership.js';
 import { publicRoutes } from './routes/public.js';
+import { SystemStatus } from './services/system-status.js';
 
 /** Contract §3: request bodies are limited to 16 KB. */
 export const BODY_LIMIT_BYTES = 16 * 1024;
@@ -136,6 +137,15 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
     reply.header('connection', 'close');
     throw shuttingDown();
   });
+  // The server's status (services/system-status.ts, `app.systemStatus`): a sample every 2 s for the console's panel and
+  // a test's peaks, every response timed into its last 60 s; started when the app is ready, stopped when it closes.
+  const systemStatus = new SystemStatus({ db: ctx.db, live: liveHub, clock: ctx.clock, log: ctx.log });
+  app.decorate('systemStatus', systemStatus);
+  app.addHook('onResponse', async (_request, reply) => {
+    systemStatus.http.record(reply.statusCode, reply.elapsedTime);
+  });
+  app.addHook('onReady', async () => systemStatus.start());
+  app.addHook('onClose', async () => systemStatus.stop());
   const limiters = await registerRateLimits(app, config);
 
   const deps = { ctx, limiters };

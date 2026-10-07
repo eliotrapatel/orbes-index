@@ -617,6 +617,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/admin/auth/totp/setup` | RETAIL | yes | auth | 12.4 |
 | POST | `/api/admin/auth/totp/enable` | RETAIL | yes | auth | 12.4 |
 | GET | `/api/admin/dashboard` | AUDITOR | — | admin | 13.1 |
+| GET | `/api/admin/system/status` | AUDITOR | — | admin | 13.5 |
 | GET | `/api/admin/categories` | AUDITOR | — | admin | 13.2 |
 | POST | `/api/admin/categories` | **ADMIN** | yes | admin | 13.2 |
 | POST | `/api/admin/categories/:code/active` | **ADMIN** | yes | admin | 13.2 |
@@ -2539,6 +2540,38 @@ Both take an empty JSON body (`{}`) or none (any field is `400 VALIDATION_FAILED
 AUDITOR. Paginated, newest first, from the `product_overview` view.
 
 | Query | Rules |
+### 13.5 `GET /api/admin/system/status` — the server's status (extension of the contract)
+
+AUDITOR (every console role from AUDITOR; RETAIL: `403 FORBIDDEN`). What the console's Server panel reads every 2 s (test entrants: the Drops tab, a draw's page, a LIVE RELEASE's page). The app takes a sample every 2 s from its start and keeps the last 300, 10 minutes (`services/system-status.ts`); the route only reads them, and takes a first one when a request comes before it. No query string.
+
+```json
+{
+  "now": "2026-10-07T03:10:02.114Z",
+  "latest": {
+    "at": "2026-10-07T03:10:01.002Z",
+    "app": { "memBytes": 412876800, "memLimitBytes": 805306368, "memPeakBytes": 530579456, "cpuCores": 0.412,
+             "cpuLimitCores": 1.5, "throttledPct": 0, "pids": 23, "pidsMax": 256 },
+    "host": { "memAvailableBytes": 1918382080, "memTotalBytes": 4090892288, "swapUsedBytes": 268435456, "load1": 0.84,
+              "load5": 0.62, "cpuPct": 18.5, "diskUsedPct": 41.2 },
+    "node": { "heapUsedBytes": 98566144, "heapLimitBytes": 2197815296, "rssBytes": 251658240, "externalBytes": 4194304,
+              "loopDelayP50Ms": 0.4, "loopDelayP99Ms": 3.1, "loopUtilPct": 12.7 },
+    "live": { "streams": 42, "releases": 1, "accounts": 40 },
+    "db": { "poolTotal": 6, "poolIdle": 4, "poolWaiting": 0, "connections": 8, "maxConnections": 40, "active": 1, "waiting": 0 },
+    "http": { "rps": 37.4, "p95Ms": 18.3, "errors5xx": 0, "refused429": 2 }
+  },
+  "history": [ { "at": "2026-10-07T03:00:03.001Z", "…": "…" }, "… oldest first, the newest last (the same as latest)" ]
+}
+```
+
+- `app`: the app's container, from its cgroup v2 (`/sys/fs/cgroup`, or the process's own cgroup under it): `memory.current`, `memory.max`, `memory.peak`; `cpuCores`, the cores used since the previous sample (`cpu.stat` `usage_usec`), against `cpuLimitCores` (`cpu.max`: quota / period); `throttledPct`, the share of the CPU periods throttled since the previous sample; `pids.current`, `pids.max`. A limit of `max` reads `null` (no limit).
+- `host`: the server, from `/proc` (the host's, in the container too): `MemAvailable`, `MemTotal`, the swap used (`SwapTotal` − `SwapFree`), the load over 1 and 5 minutes, `cpuPct` its CPU busy since the previous sample (`/proc/stat`, iowait counted idle), and `diskUsedPct` of `/` as `df` counts it (statfs: used / (used + available)).
+- `node`: the heap used and V8's limit, the resident and external memory, the event loop's delay p50 and p99 since the previous sample (a timer every 20 ms, its own interval taken off) and its busy share (`loopUtilPct`).
+- `live`: the LIVE RELEASES' streams open on this process (§16.23), the releases they follow and the accounts following them (console users included).
+- `db`: the app's pool (`poolTotal` connections, `poolIdle`, `poolWaiting`: queries waiting for a connection); this database's connections in `pg_stat_activity`, those running a query (`active`), those waiting on a lock (`waiting`), and the server's `max_connections`. One query per sample; still unanswered after 1 s, that sample's four are `null`, and the next sample sends none while it waits.
+- `http`: every response of the app over the last 60 s (since the start, when younger): `rps`, `p95Ms` (from bins about 9 % wide, never under the true value; `null` without a response), the `5xx` sent and the `429` refused.
+
+`at` and `now` are the server's clock. A rate needs two readings: the first sample after a start has `cpuCores`, `throttledPct` and `cpuPct` `null`. Whatever the host cannot give is `null`, never an error: macOS has no cgroup nor `/proc`, PGlite (development, tests, the demo) no pool nor other connections. The same samples raise a running test's peaks (the TEST REPORT's `peaks`: `appMemBytes`, `appCpuCores`, `p95Ms`, `loopDelayP99Ms`, `liveStreams`, `dbConnections`, `poolWaiting`, their maxima while it runs, and `errors5xx`, `refused429`, the responses counted meanwhile). **200**. Errors: `401`, `403 FORBIDDEN`.
+
 |---|---|
 | `status` | One of the 12 product statuses. |
 | `category` | One letter (case-insensitive). |

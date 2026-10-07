@@ -48,6 +48,8 @@ const PHOTO = { body: Buffer.from(jpegPhoto(8, 8)), headers: { 'content-type': '
 
 const PROBES: Probe[] = [
   { group: 'dashboard', method: 'GET', url: '/api/admin/dashboard', min: 'AUDITOR' },
+  // Test entrants §7: the server's status, read by an AUDITOR.
+  { group: 'system', method: 'GET', url: '/api/admin/system/status', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics', min: 'AUDITOR' },
   { group: 'documents', method: 'GET', url: '/api/admin/documents', min: 'AUDITOR' },
   { group: 'documents', method: 'GET', url: '/api/admin/documents/sales-playbook', min: 'AUDITOR' },
@@ -326,6 +328,7 @@ describe('admin role enforcement', () => {
       'shopify',
       'logistics',
       'atelier',
+      'system',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
