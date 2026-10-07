@@ -878,6 +878,20 @@ export const LOOKBOOK = Object.freeze({
     closes: 'ENTRIES CLOSE',
     utc: (time: string) => `${time} UTC`,
   }),
+  /**
+   * Plan NEXT-NINE, CO-01: THE RELEASES OF THIS MODEL, after CARE: each past release of the model and its variants, the
+   * newest first, its opening date as the title (5 OCT 2026), its kind and variant as its line (LIVE RELEASE · IN STEEL;
+   * DRAW alone for a model alone), its page; the six newest, then SHOW ALL 9 RELEASES. Never a quantity nor an end figure.
+   */
+  releases: Object.freeze({
+    title: 'THE RELEASES OF THIS MODEL',
+    kind: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW' }),
+    variant: (label: string) => `IN ${label.toUpperCase()}`,
+    line: (kind: string, variant: string | null) => (variant ? `${kind} · ${variant}` : kind),
+    /** The row's accessible name: « DRAW, 14 SEP 2026, in gold: see the release ». */
+    label: (kind: string, date: string, variant: string | null) => `${kind}, ${date}${variant ? `, in ${variant.toLowerCase()}` : ''}: see the release`,
+    more: (n: number) => `SHOW ALL ${n} RELEASES`,
+  }),
   /** The accessible names of a sheet's photographs and of a card's. */
   photosLabel: (model: string) => `Photographs of the ${model} model`,
   story: 'THE STORY',

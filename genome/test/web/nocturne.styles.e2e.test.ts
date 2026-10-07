@@ -1182,7 +1182,16 @@ async function aModel(page: Page): Promise<void> {
   await check(page, '.n-model__facts', { 'margin-top': 14, 'border-top-width': 1, 'border-top-color': LINE });
   await check(page, '.n-model__facts .n-kv__row', { 'padding-top': 13, 'font-size': 13.5 });
   await check(page, '.n-model__care', { 'margin-top': 14, 'font-size': 15, color: ASH });
-  for (const id of ['#sheet-story', '#sheet-specs', '#sheet-care']) expect((await read(page, `section:has(> ${id})`, ['padding-top']))['padding-top']).toBe('76px');
+  for (const id of ['#sheet-story', '#sheet-specs', '#sheet-care', '#sheet-releases']) expect((await read(page, `section:has(> ${id})`, ['padding-top']))['padding-top']).toBe('76px');
+  // THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01): its heading as the others', its rows the rulebook's .acc under a
+  // hairline 14 px below it, each date ivory with its figures in the reading face, its line a label in ash.
+  await check(page, '#sheet-releases', { 'font-size': 11, 'letter-spacing': em(11, 0.26), color: IV });
+  await check(page, '.n-model__release-rows', { 'margin-top': 14, 'border-top-width': 1, 'border-top-color': LINE });
+  await check(page, '.n-model__release', { display: 'flex', 'column-gap': 16, 'padding-top': 20, 'padding-bottom': 20, 'border-bottom-width': 1, 'border-bottom-color': LINE });
+  await check(page, '.n-model__release .n-acc__title', { color: IV });
+  await check(page, '.n-model__release .n-acc__line', { 'margin-top': 6, 'font-size': 9.5, color: ASH });
+  expect(isHelvetica((await read(page, '.n-model__release .numeral', ['font-family']))['font-family']!)).toBe(true);
+  expect(isGravesend((await read(page, '.n-model__release .n-acc__title', ['font-family']))['font-family']!)).toBe(true);
   // A dot chosen: the sheet is that variant's, its address too, the pressed dot keeping the focus; You own N the same.
   const steelSrc = await page.locator('.n-model__photo img').getAttribute('src');
   await page.locator('.n-model__dots').getByRole('button', { name: 'Gold' }).click();

@@ -18,6 +18,10 @@
  * change once published). A LIVE RELEASE's parts each from its stage (services/live.ts liveStages), read at its end
  * (stagesAt): one ended before its name was revealed is named nowhere, even once the time set for its name has passed.
  * No count of entries, of pieces confirmed or left, no reason of the end, no interest.
+ *
+ * THE RELEASES OF THIS MODEL (plan NEXT-NINE of 2026-10-06, §3.6 CO-01): a model's sheet lists its past releases by the
+ * same rule (`endedReleases`, the query PAST reads): `modelReleases` gives each one's id, kind, opening and variant,
+ * nothing more (services/lookbook.ts, the sheet's `releases`).
  */
 import { sql } from 'kysely';
 import type { Db } from '../db/connection.js';
@@ -79,7 +83,7 @@ export class PastReleaseService {
   /** A page of the releases ended at now, the newest opening first. */
   async page(req: PageRequest): Promise<Page<PastReleaseCard>> {
     const now = this.clock();
-    const ended = this.ended();
+    const ended = endedReleases(this.db);
     const total = await ended.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
     const rows = await ended
       .innerJoin('models as m', 'm.id', 'd.model_id')
@@ -103,30 +107,66 @@ export class PastReleaseService {
     const releases = await releasesTakenPart(this.db, accountId, this.clock());
     return { count: releases.length, releases };
   }
+}
 
-  /** The releases ended: published, never cancelled, never an after-room. */
-  private ended() {
-    return this.db
-      .selectFrom('drops as d')
-      .where('d.published_at', 'is not', null)
-      .where('d.cancelled_at', 'is', null)
-      .where('d.parent_drop_id', 'is', null)
-      .where((eb) =>
-        eb.or([
-          eb.and([eb('d.mode', '=', 'DRAW'), eb('d.drawn_at', 'is not', null)]),
-          eb.and([
-            eb('d.mode', '=', 'LIVE'),
-            eb('d.ended_at', 'is not', null),
-            eb(sql<Date>`coalesce(d.announce_at, d.published_at)`, '<=', eb.ref('d.ended_at')),
-            eb.not(
-              eb.exists(
-                eb.selectFrom('live_entries as e').select('e.id').whereRef('e.drop_id', '=', 'd.id').where('e.status', 'in', ['TURN', 'SECURED']),
-              ),
+/**
+ * The releases ended (THE RELEASES' PAST's rule, read by PAST and by a model's sheet, services/lookbook.ts
+ * modelReleases): published, never cancelled, never an after-room; a draw once drawn; a LIVE RELEASE once over, its end
+ * recorded after its announcement and no turn or hold left to run.
+ */
+export function endedReleases(db: Db) {
+  return db
+    .selectFrom('drops as d')
+    .where('d.published_at', 'is not', null)
+    .where('d.cancelled_at', 'is', null)
+    .where('d.parent_drop_id', 'is', null)
+    .where((eb) =>
+      eb.or([
+        eb.and([eb('d.mode', '=', 'DRAW'), eb('d.drawn_at', 'is not', null)]),
+        eb.and([
+          eb('d.mode', '=', 'LIVE'),
+          eb('d.ended_at', 'is not', null),
+          eb(sql<Date>`coalesce(d.announce_at, d.published_at)`, '<=', eb.ref('d.ended_at')),
+          eb.not(
+            eb.exists(
+              eb.selectFrom('live_entries as e').select('e.id').whereRef('e.drop_id', '=', 'd.id').where('e.status', 'in', ['TURN', 'SECURED']),
             ),
-          ]),
+          ),
         ]),
-      );
-  }
+      ]),
+    );
+}
+
+/**
+ * A past release of a model, as its sheet lists it (plan NEXT-NINE of 2026-10-06, §3.6 CO-01, THE RELEASES OF THIS
+ * MODEL): its id (its page), its kind, its opening and its model's label among its variants (« Blue »; null for a model
+ * alone). Nothing else: no title, no quantity, no end figure, no mark of the reader's part.
+ */
+export interface ModelRelease {
+  id: string;
+  kind: 'LIVE' | 'DRAW';
+  opensAt: Date;
+  variant: string | null;
+}
+
+/**
+ * The releases ended (`endedReleases`) of the models `modelIds` (a model and its variants), the newest opening first,
+ * then by id; every one, no limit. A LIVE RELEASE is kept only once its name was revealed by its end (its stages read at
+ * `now`, as PAST names it): one ended before its name stage is named nowhere.
+ */
+export async function modelReleases(db: Db, modelIds: readonly string[], now: Date): Promise<ModelRelease[]> {
+  if (modelIds.length === 0) return [];
+  const rows = await endedReleases(db)
+    .innerJoin('models as m', 'm.id', 'd.model_id')
+    .where('d.model_id', 'in', [...modelIds])
+    .selectAll('d')
+    .select('m.variant_label as model_variant')
+    .orderBy('d.opens_at', 'desc')
+    .orderBy('d.id')
+    .execute();
+  return rows
+    .filter((r) => r.mode !== 'LIVE' || liveStages(r, stagesAt(r, now))?.name === true)
+    .map((r) => ({ id: r.id, kind: r.mode === 'LIVE' ? 'LIVE' : 'DRAW', opensAt: r.opens_at, variant: r.model_variant }));
 }
 
 function card(r: PastRow, now: Date): PastReleaseCard {

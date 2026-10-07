@@ -45,7 +45,9 @@ import { sql } from 'kysely';
 import type { Db } from '../db/connection.js';
 import type { LookbookState } from '../db/schema.js';
 import { DomainError, validationError } from '../errors.js';
+import { systemClock, type Clock } from '../types.js';
 import { mediaUrl } from './media.js';
+import { modelReleases, type ModelRelease } from './past-releases.js';
 import { sizesOnce, skuSizes } from './stock.js';
 
 /** The address of a sheet: lower-case letters and digits, words joined by single hyphens. */
@@ -280,17 +282,27 @@ export interface LookbookSheet {
   variants: LookbookSheetVariant[];
   /** N3 (addition 8): the sizes of the models of its group the reader may see, from their SKUs; none in one size. */
   sizes: string[];
+  /**
+   * Plan NEXT-NINE, CO-01 (THE RELEASES OF THIS MODEL): the past releases of its whole group (the model and every one of
+   * its variants, whatever the dot), the newest opening first, each exactly {id, kind, opensAt, variant}; empty for a
+   * model never released (services/past-releases.ts modelReleases).
+   */
+  releases: ModelRelease[];
 }
 
 export interface LookbookServiceDeps {
   db: Db;
+  /** CO-01: the moment a LIVE RELEASE's stages are read at (its name revealed by its end). */
+  clock?: Clock;
 }
 
 export class LookbookService {
   private readonly db: Db;
+  private readonly clock: Clock;
 
   constructor(deps: LookbookServiceDeps) {
     this.db = deps.db;
+    this.clock = deps.clock ?? systemClock;
   }
 
   /** The PUBLIC models, by collection (models without one last), then by name. */
@@ -348,9 +360,12 @@ export class LookbookService {
     const root = m.variant_of ?? m.id;
     const group = sortGroup(await this.sheetRows(tier).where((eb) => eb.or([eb('m.id', '=', root), eb('m.variant_of', '=', root)])).execute(), root);
     const ids = group.length > 1 ? group.map((g) => g.id) : [m.id];
-    const [galleries, sizes] = await Promise.all([
+    // CO-01: the releases of the whole group, the variants the reader may not see included (a past release is public).
+    const groupIds = (await this.db.selectFrom('models').select('id').where((eb) => eb.or([eb('id', '=', root), eb('variant_of', '=', root)])).execute()).map((r) => r.id);
+    const [galleries, sizes, releases] = await Promise.all([
       this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt']).where('model_id', 'in', ids).orderBy('model_id').orderBy('position').execute(),
       skuSizes(this.db, group.map((g) => g.id)),
+      modelReleases(this.db, groupIds, this.clock()),
     ]);
     const galleryOf = (r: SheetRow): LookbookImage[] =>
       // The cover is shown once: a gallery photograph made the reference photograph since is left out here.
@@ -394,6 +409,7 @@ export class LookbookService {
         ...(g.lookbook === 'RESERVED' ? { salon: salonFacts(g) } : {}),
       })),
       sizes: sizesOnce(group.flatMap((g) => sizes.get(g.id) ?? [])),
+      releases,
     };
     return { modelId: m.id, sheet, variantIds: Object.fromEntries(dotted(group).map((g) => [g.slug!, g.id])) };
   }

@@ -35,7 +35,7 @@ import type {
   LiveRoom as ServerLiveRoom,
   LiveSheet as ServerLiveSheet,
 } from '../../src/server/services/live-room.js';
-import type { AccountParticipation as ServerAccountParticipation, PastReleaseCard as ServerPastReleaseCard } from '../../src/server/services/past-releases.js';
+import type { AccountParticipation as ServerAccountParticipation, ModelRelease as ServerModelRelease, PastReleaseCard as ServerPastReleaseCard } from '../../src/server/services/past-releases.js';
 import type { Page } from '../../src/server/types.js';
 import { INCIDENT_TYPES as SERVER_INCIDENTS, type OwnedProduct } from '../../src/server/services/ownership.js';
 import type {
@@ -84,6 +84,7 @@ import {
   type LiveSheet,
   type LookbookCard,
   type LookbookSheet,
+  type ModelRelease,
   type OwnedPiece,
   type OwnerCertificate,
   type Participation,
@@ -108,6 +109,9 @@ export const offerFits = (o: Json<ServerCertificateOffer>): CertificateOffer => 
 // …and the lookbook's answers (P-R02): a model of a list, a model's sheet.
 export const cardFits = (c: Json<ServerLookbookCard>): LookbookCard => c;
 export const sheetFits = (s: Json<ServerLookbookSheet>): LookbookSheet => s;
+// …and THE RELEASES OF THIS MODEL's rows (plan NEXT-NINE, CO-01), both ways: the web type names exactly what the server sends.
+export const modelReleaseFits = (r: Json<ServerModelRelease>): ModelRelease => r;
+export const modelReleaseBack = (r: ModelRelease): Json<ServerModelRelease> => r;
 // …and THE PRIVATE SALON's (P-X08): a card with its price and tier, a sheet with the account's request, a request made.
 export const salonCardFits = (c: Json<ServerSalonCard>): LookbookCard => c;
 export const salonSheetFits = (s: Json<ServerSalonSheet>): LookbookSheet => s;

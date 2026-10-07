@@ -458,6 +458,20 @@ export interface LookbookSheet {
   variants?: LookbookSheetVariant[];
   /** NOCTURNE N3 (addition 8): the sizes of the models of its group, from their SKUs; none in one size. */
   sizes?: string[];
+  /**
+   * Plan NEXT-NINE, CO-01 (THE RELEASES OF THIS MODEL): the past releases of its whole group, the newest first, each
+   * exactly its id, kind, opening and variant; absent from an older server.
+   */
+  releases?: ModelRelease[];
+}
+
+/** A past release of a model, as its sheet lists it (CO-01): its page's id, its kind, its opening, its variant's label. */
+export interface ModelRelease {
+  id: string;
+  kind: 'LIVE' | 'DRAW';
+  opensAt: string;
+  /** « Blue »; null for a model alone. */
+  variant: string | null;
 }
 
 /** A release's state as the public reads it (P-R03): a DRAFT is never sent. */

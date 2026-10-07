@@ -18,6 +18,7 @@ import type { IssueResult } from '../../src/server/services/issuance.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { readDoc } from '../docs/lexicon.js';
 import { jpegPhoto, SVG_IMAGE } from '../support/images.js';
+import { createAccount, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 interface GalleryImage {
@@ -69,6 +70,8 @@ interface Sheet {
   variants: unknown[];
   /** NOCTURNE N3: its sizes, from the SKUs of the model and its variants. */
   sizes: string[];
+  /** Plan NEXT-NINE, CO-01: THE RELEASES OF THIS MODEL. */
+  releases: unknown[];
 }
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -330,6 +333,8 @@ describe('the lookbook of the models (P-R02)', () => {
       variants: [],
       // NOCTURNE N3 (addition 8): its sizes from its SKUs; its piece issued in one size names none.
       sizes: [],
+      // Plan NEXT-NINE, CO-01: never released, no past release.
+      releases: [],
     } satisfies Sheet);
     // A RESERVED or HIDDEN model, an unknown or malformed address: one 404, never cached.
     for (const slug of ['zenith', 'nope', 'Not an address', '-x']) {
@@ -416,5 +421,166 @@ describe('the lookbook of the models (P-R02)', () => {
     } finally {
       await budgets.close();
     }
+  });
+});
+
+/**
+ * THE RELEASES OF THIS MODEL (plan NEXT-NINE of 2026-10-06, §3.6 CO-01): a sheet's `releases`, the past releases of its
+ * model's whole group by THE RELEASES' PAST's rule (services/past-releases.ts modelReleases), each exactly its id, kind,
+ * opening and variant, the newest first; the same through the club and from any dot's address.
+ */
+describe('THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01): a sheet\'s past releases', () => {
+  const START = Date.parse('2026-11-02T09:00:00.000Z');
+  const MINUTE = 60_000;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+  let h: Harness;
+  let f: LiveFixture;
+  let main: string;
+  let blue: string;
+  let other: string;
+  let alone: string;
+  const ids: Record<string, string> = {};
+
+  interface Release {
+    id: string;
+    kind: string;
+    opensAt: string;
+    variant: string | null;
+  }
+  const releasesOf = async (slug: string, c?: Client): Promise<Release[]> => {
+    const res = await (c ?? h.client()).get(c ? `/api/v1/club/lookbook/${slug}` : `/api/v1/lookbook/${slug}`);
+    expect(res.statusCode, res.body).toBe(200);
+    return (safeJson(res) as { releases: Release[] }).releases;
+  };
+
+  /** A draw of `modelId` opening at `opens` (from START), published unless `draft`; drawn once its entries close when `drawn`. */
+  async function draw(key: string, modelId: string, opens: number, o: { drawn?: boolean; draft?: boolean; cancel?: boolean; closes?: number } = {}): Promise<string> {
+    h.clock.set(new Date(START + opens - HOUR));
+    const d = await f.drops.create({ modelId, title: `DRAW ${key}`, quantity: 2, opensAt: new Date(START + opens), closesAt: new Date(START + (o.closes ?? opens + HOUR)), earlyAccessHours: 0 }, f.admin);
+    if (!o.draft) await f.drops.publish(d.id, f.admin);
+    if (o.cancel) await f.drops.cancel(d.id, f.admin);
+    if (o.drawn) {
+      h.clock.set(new Date(START + (o.closes ?? opens + HOUR) + MINUTE));
+      await f.drops.draw(d.id, f.admin);
+    }
+    ids[key] = d.id;
+    return d.id;
+  }
+
+  /** A LIVE RELEASE of `modelId` opening at `opens` (from START); `end`: ended by ORBES at its close, `early`: before its room. */
+  async function live(key: string, modelId: string, opens: number, end: 'close' | 'early' | 'held' | null, afterRoom = false): Promise<string> {
+    h.clock.set(new Date(START + opens - 2 * HOUR));
+    const r = await createLiveRelease(f, {
+      modelId,
+      opensAt: new Date(START + opens),
+      closesAt: new Date(START + opens + HOUR),
+      quantityLine: '25 PIECES',
+      ...(afterRoom ? { afterRoom: { modelId: main, priceMinor: 90_000, sizes: [{ label: 'ONE SIZE', stock: 1 }] } } : {}),
+    });
+    if (r.afterRoom) ids.afterRoom = r.afterRoom.id;
+    if (end === 'early') {
+      // Its name revealed only an hour before it opens: ended by ORBES before then, it is named nowhere.
+      await h.ctx.db.updateTable('drops').set({ name_at: new Date(START + opens - HOUR), photo_at: new Date(START + opens - HOUR) }).where('id', '=', r.id).execute();
+      await f.live.end(r.id, f.admin);
+    } else if (end === 'held') {
+      // A piece secured, not confirmed, when ORBES ends it: its hold still runs.
+      const who = await createAccount(h.ctx.db);
+      h.clock.set(new Date(START + opens - MINUTE));
+      await f.live.enter(who.id, r.id, { sizeId: r.sizes[0]!.id }, who.actor);
+      h.clock.set(new Date(START + opens));
+      await f.live.advance(r.id);
+      h.clock.advance(2000);
+      const token = (await f.live.entry(who.id, r.id))!.turn!.token!;
+      await f.live.press(who.id, r.id, token);
+      h.clock.advance(1500);
+      await f.live.secure(who.id, r.id, token, who.actor);
+      await f.live.end(r.id, f.admin);
+    } else if (end === 'close') {
+      h.clock.set(new Date(START + opens + HOUR + MINUTE));
+      await f.live.advance(r.id);
+    }
+    ids[key] = r.id;
+    return r.id;
+  }
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set(new Date(START - 30 * DAY));
+    f = await liveFixtureOn(h.ctx, h.clock);
+    const catalog = h.ctx.services.catalog;
+    main = (await catalog.createModel({ categoryCode: 'J', name: 'HALO', type: 'RING', skuPrefix: 'HAL-ST' }, f.admin)).id;
+    await catalog.updateModel(main, { lookbook: 'PUBLIC', slug: 'halo' }, f.admin);
+    blue = (await catalog.createVariant(main, { label: 'Blue', swatch: '#16224A', skuPrefix: 'HAL-BL', mainLabel: 'Steel', mainSwatch: '#9D9B96' }, f.admin)).id;
+    // A variant kept HIDDEN: its releases are the model's all the same (a past release is public).
+    const gold = (await catalog.createVariant(main, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'HAL-GD' }, f.admin)).id;
+    await catalog.updateModel(blue, { lookbook: 'PUBLIC', slug: 'halo-blue' }, f.admin);
+    other = (await catalog.createModel({ categoryCode: 'J', name: 'ZENITH', type: 'RING', skuPrefix: 'ZEN-ST' }, f.admin)).id;
+    await catalog.updateModel(other, { lookbook: 'PUBLIC', slug: 'zenith' }, f.admin);
+    alone = (await catalog.createModel({ categoryCode: 'J', name: 'ORBIT', type: 'RING', skuPrefix: 'ORB-ST' }, f.admin)).id;
+    await catalog.updateModel(alone, { lookbook: 'PUBLIC', slug: 'orbit' }, f.admin);
+    await catalog.createModel({ categoryCode: 'J', name: 'NEVER', type: 'RING', skuPrefix: 'NEV-ST' }, f.admin).then((m) => catalog.updateModel(m.id, { lookbook: 'PUBLIC', slug: 'never' }, f.admin));
+
+    // Shown: a drawn draw of each dot, two LIVE RELEASES ended (one sold through its hold), the model alone's drawn draw.
+    await draw('drawnSteel', main, 1 * DAY, { drawn: true });
+    await draw('drawnGold', gold, 3 * DAY, { drawn: true });
+    await live('liveBlue', blue, 5 * DAY, 'close');
+    await live('liveSteel', main, 7 * DAY, 'close', true);
+    await draw('drawnAlone', alone, 2 * DAY, { drawn: true });
+    // Never shown: an open draw, a closed one not drawn, a cancelled one, a draft; a LIVE RELEASE still to come, one
+    // running, one ended before its name stage, one whose hold still runs; an after-room; another model's draw.
+    await draw('open', main, 8 * DAY, { closes: 20 * DAY });
+    await draw('closed', main, 6 * DAY);
+    await draw('cancelled', main, 4 * DAY, { cancel: true });
+    await draw('draft', main, 4 * DAY + HOUR, { draft: true });
+    await live('early', blue, 9 * DAY, 'early');
+    await live('coming', main, 30 * DAY, null);
+    await draw('otherDrawn', other, 2 * DAY + HOUR, { drawn: true });
+    // Last, at the same opening, so the clock stays inside the hold: one running, one ended with its hold still running.
+    await live('running', blue, 12 * DAY, null);
+    await live('held', main, 12 * DAY, 'held');
+    await f.live.advance(ids.running!);
+    // The steel LIVE RELEASE's after-room, of the model too, ended: hidden even after its release (decision 28).
+    await h.ctx.db.updateTable('drops').set({ published_at: h.clock.now(), ended_at: h.clock.now(), ended_reason: 'CLOSED' }).where('id', '=', ids.afterRoom!).execute();
+  });
+  afterAll(() => h?.close());
+
+  it('lists the past releases of the model and every variant, the newest first, each with its label; never one still to come, cancelled, a draft, an after-room nor another model\'s', async () => {
+    const list = await releasesOf('halo');
+    expect(list.map((r) => r.id)).toEqual([ids.liveSteel, ids.liveBlue, ids.drawnGold, ids.drawnSteel]);
+    expect(list.map((r) => [r.kind, r.variant])).toEqual([
+      ['LIVE', 'Steel'],
+      ['LIVE', 'Blue'],
+      ['DRAW', 'Gold'],
+      ['DRAW', 'Steel'],
+    ]);
+    expect(list.map((r) => r.opensAt)).toEqual([7, 5, 3, 1].map((d) => new Date(START + d * DAY).toISOString()));
+    for (const key of ['open', 'closed', 'cancelled', 'draft', 'early', 'held', 'coming', 'running', 'otherDrawn', 'afterRoom']) expect(list.map((r) => r.id), key).not.toContain(ids[key]);
+    expect((await releasesOf('zenith')).map((r) => r.id)).toEqual([ids.otherDrawn]);
+  });
+
+  it('gives each release exactly {id, kind, opensAt, variant}: no title, no quantity, no end figure', async () => {
+    for (const r of await releasesOf('halo')) expect(Object.keys(r).sort()).toEqual(['id', 'kind', 'opensAt', 'variant']);
+    const res = await h.client().get('/api/v1/lookbook/halo');
+    for (const word of ['DRAW drawnSteel', '25 PIECES', 'quantity', 'endedReason', 'SOLD_OUT', 'title']) expect(res.body, word).not.toContain(word);
+  });
+
+  it('says variant null for a model alone, and nothing for a model never released', async () => {
+    expect(await releasesOf('orbit')).toEqual([{ id: ids.drawnAlone, kind: 'DRAW', opensAt: new Date(START + 2 * DAY).toISOString(), variant: null }]);
+    expect(await releasesOf('never')).toEqual([]);
+  });
+
+  it('gives the same list from a variant\'s address and through the club, and keeps the hold\'s release out until it is over', async () => {
+    const list = await releasesOf('halo');
+    expect(await releasesOf('halo-blue')).toEqual(list);
+    const { client, email } = await accountClient(h);
+    const owner = await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow();
+    await holdPieces(h.ctx.db, owner.id, 1, other);
+    expect(await releasesOf('halo', client)).toEqual(list);
+    expect(await releasesOf('halo-blue', client)).toEqual(list);
+    // The hold confirmed: that release ended, it is listed (the newest).
+    const held = await h.ctx.db.selectFrom('live_entries').select('account_id').where('drop_id', '=', ids.held!).where('status', '=', 'SECURED').executeTakeFirstOrThrow();
+    await f.live.confirm(held.account_id, ids.held!, { type: 'account', id: held.account_id });
+    expect((await releasesOf('halo')).map((r) => r.id)).toEqual([ids.held, ...list.map((r) => r.id)]);
   });
 });

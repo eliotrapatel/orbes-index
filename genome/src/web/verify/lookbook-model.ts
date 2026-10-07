@@ -23,6 +23,12 @@
  *    sheet read through the club its price, the tier it is offered from, and
  *    the account's open request (then ORBES Client Services will contact it)
  *    or REQUEST THIS PIECE, with an optional note.
+ *  - THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01): a sheet's past
+ *    releases, of the model and all its variants whatever the dot, the
+ *    newest first: each its opening date on this phone's calendar, its kind
+ *    and variant (LIVE RELEASE · IN STEEL), its page; the six newest, then
+ *    SHOW ALL N RELEASES. One with an id or a kind the server would not
+ *    send is left out.
  *  - NOCTURNE (N3, reused by THE COLLECTION in N6): an entry's dots (its
  *    variants, each with its address, label, colour and photograph), its
  *    sizes (SIZES 16 · 17 · 18, from the SKUs of the model and its
@@ -34,7 +40,8 @@
  */
 import { isLookbookSlug, storyParagraphs } from '../shared/lookbook.js';
 import { DEFAULT_CARE, DISCONTINUED, LOOKBOOK, PHOTOS } from './copy.js';
-import type { LookbookCard, LookbookSheet, LookbookSheetVariant, OwnedPiece } from './types.js';
+import { isReleaseId, releasePath, zonedDate } from './releases-model.js';
+import type { LookbookCard, LookbookSheet, LookbookSheetVariant, ModelRelease, OwnedPiece } from './types.js';
 import { discontinuedYearOf, upper, type Row } from './view-model.js';
 
 /** The account's note on a request of the private salon (P-X08): as the server holds it (services/salon.ts SHOP_NOTE_MAX). */
@@ -283,6 +290,46 @@ export interface SheetModel extends SheetFace {
   sizes: string | null;
   /** Its dots, the main model first; none for a model alone. */
   dots: SheetDot[];
+  /** CO-01: THE RELEASES OF THIS MODEL, the newest first, the same whichever dot is selected; none: no section. */
+  releases: ModelReleaseRow[];
+}
+
+/** CO-01: the rows THE RELEASES OF THIS MODEL shows before SHOW ALL N RELEASES unfolds the rest. */
+export const RELEASES_SHOWN = 6;
+
+/** A row of THE RELEASES OF THIS MODEL (CO-01): a past release of the model or one of its variants, a link to its page. */
+export interface ModelReleaseRow {
+  id: string;
+  href: string;
+  /** `5 OCT 2026`: its opening on this phone's calendar (PAST dates its cards so). */
+  date: string;
+  /** `LIVE RELEASE · IN STEEL`; `DRAW` alone for a model alone. */
+  line: string;
+  /** Its accessible name: `DRAW, 14 SEP 2026, in gold: see the release`. */
+  label: string;
+}
+
+/**
+ * THE RELEASES OF THIS MODEL (CO-01): the sheet's past releases in the server's order (the newest first), each dated on
+ * `localZone`'s calendar; one without an id of its own, a kind, or a readable opening is left out.
+ */
+export function modelReleaseRows(list: unknown, localZone: string): ModelReleaseRow[] {
+  const out: ModelReleaseRow[] = [];
+  for (const r of Array.isArray(list) ? (list as (Partial<ModelRelease> | null)[]) : []) {
+    if (!r || !isReleaseId(r.id) || (r.kind !== 'LIVE' && r.kind !== 'DRAW') || typeof r.opensAt !== 'string') continue;
+    const date = zonedDate(r.opensAt, localZone);
+    if (!date) continue;
+    const kind = LOOKBOOK.releases.kind[r.kind];
+    const label = typeof r.variant === 'string' && r.variant.trim() !== '' ? r.variant.trim() : null;
+    out.push({
+      id: r.id,
+      href: releasePath(r.id),
+      date,
+      line: LOOKBOOK.releases.line(kind, label ? LOOKBOOK.releases.variant(label) : null),
+      label: LOOKBOOK.releases.label(kind, date, label),
+    });
+  }
+  return out;
 }
 
 function photosOf(cover: unknown, gallery: unknown, alt: string): LookbookPhoto[] {
@@ -319,25 +366,26 @@ function faceOf(
   };
 }
 
-export function sheetModel(s: LookbookSheet): SheetModel {
+/** A sheet as the server sent it; `localZone`, this phone's time zone, dates THE RELEASES OF THIS MODEL (CO-01). */
+export function sheetModel(s: LookbookSheet, localZone = 'UTC'): SheetModel {
   const category = upper(s.category?.name);
   const face = faceOf(s, category, s.variant?.label, s.story);
   const dots: SheetDot[] = (Array.isArray(s.variants) ? s.variants : [])
     .filter((v) => isLookbookSlug(v?.slug) && typeof v.label === 'string' && v.label.trim() !== '' && SWATCH.test(v.swatch ?? ''))
     .map((v) => ({ slug: v.slug, label: v.label.trim(), swatch: v.swatch, face: v.slug === s.slug ? face : faceOf(v, category, v.label, s.story) }));
-  return { ...face, sizes: sizesLine(s.sizes), dots: dots.length > 1 ? dots : [] };
+  return { ...face, sizes: sizesLine(s.sizes), dots: dots.length > 1 ? dots : [], releases: modelReleaseRows(s.releases, localZone) };
 }
 
 /** The sheet with another of its dots selected (N6): that model's face; the sheet as it is for a slug it has no dot of. */
 export function selectDot(m: SheetModel, slug: string): SheetModel {
   const d = m.dots.find((x) => x.slug === slug);
-  return d ? { ...d.face, sizes: m.sizes, dots: m.dots } : m;
+  return d ? { ...d.face, sizes: m.sizes, dots: m.dots, releases: m.releases } : m;
 }
 
 /** The sheet once the account requested the model of the dot `slug` (REQUEST THIS PIECE): REQUESTED on it, and on its dot. */
 export function withRequest(m: SheetModel, slug: string, id: string, modelId: string, size: string | null = null): SheetModel {
   const requested = (f: SheetFace): SheetFace => (f.slug === slug && f.salon ? { ...f, salon: { ...f.salon, request: { id, modelId, size } } } : f);
-  return { ...requested(m), sizes: m.sizes, dots: m.dots.map((d) => ({ ...d, face: requested(d.face) })) };
+  return { ...requested(m), sizes: m.sizes, dots: m.dots.map((d) => ({ ...d, face: requested(d.face) })), releases: m.releases };
 }
 
 /** The salon of a reserved sheet; null when the server sent none (a tier it does not name: nothing to request from). */

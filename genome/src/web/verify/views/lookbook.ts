@@ -25,7 +25,10 @@
  * the tier it is offered from, its sentence, for a model of two sizes or more YOUR SIZE (its sizes and NOT SURE YET, the
  * one YOUR SIZES suggests preselected with SIZE 52 · FROM YOUR SIZES, else NOT SURE YET; plan NEXT-NINE, AC-01), a note
  * and REQUEST THIS PIECE (the sheet's one primary action), or once requested REQUESTED (and SIZE 52 when one was asked)
- * with WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01); THE STORY, the gallery full width, SPECIFICATIONS, CARE.
+ * with WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01); THE STORY, the gallery full width, SPECIFICATIONS, CARE;
+ * then THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01), once the model has a past release: each one of the model and
+ * its variants whatever the dot, the newest first, its date and its kind and variant (LIVE RELEASE · IN STEEL), a row to
+ * its page, the six newest then SHOW ALL N RELEASES.
  *
  * The grid reads GET /api/v1/lookbook (the same for everyone) and, for a signed-in account, the club's reserved models
  * (a 403 for an account that holds no piece: the teaser; none of its tier: what opens the salon, `opensAt`) and its
@@ -41,13 +44,29 @@ import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { LIVE, LOOKBOOK } from '../copy.js';
 import { modelContext } from '../messages-model.js';
-import { cardFace, lookbookGroups, lookbookSheetPath, ownedLine, SALON_NOTE_MAX, salonPicker, salonSizePick, selectDot, sheetLine, sheetModel, withRequest, type CardModel, type CollectionGroup, type SheetModel } from '../lookbook-model.js';
+import {
+  cardFace,
+  lookbookGroups,
+  lookbookSheetPath,
+  ownedLine,
+  RELEASES_SHOWN,
+  SALON_NOTE_MAX,
+  salonPicker,
+  salonSizePick,
+  selectDot,
+  sheetLine,
+  sheetModel,
+  withRequest,
+  type CardModel,
+  type CollectionGroup,
+  type SheetModel,
+} from '../lookbook-model.js';
 import { nextRelease, type NextReleaseModel } from '../next-release-model.js';
 import type { SessionStore } from '../session.js';
 import type { ClubLookbook, DropCard, LiveCard, OwnedPiece, SalonOpening } from '../types.js';
 import { LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { appAnchor, button, definitionList, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, sizeButtons, textLink, variantDots } from './nocturne.js';
+import { accLink, appAnchor, button, definitionList, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, sizeButtons, textLink, variantDots } from './nocturne.js';
 import { writeButton } from './write.js';
 
 export interface LookbookView {
@@ -77,8 +96,10 @@ export interface SheetDeps {
   onCollection(): void;
   /** A dot chosen: the sheet's address becomes that variant's (no new history entry). */
   onVariant(slug: string): void;
-  /** The model's next release: its page. */
+  /** The model's next release, and a row of THE RELEASES OF THIS MODEL (CO-01): its page. */
   onRelease(id: string): void;
+  /** This phone's time zone: THE RELEASES OF THIS MODEL dates each release on its calendar (CO-01); UTC by default. */
+  localZone?: string;
   /** Opened as a screen change: once read, focus comes to its title (the model's name), as it came to the sheet's before. */
   focus?: boolean;
 }
@@ -377,6 +398,8 @@ class SheetPage {
   private focusPending: boolean;
   /** The address the sheet reads: the one it was opened with, then the dot chosen (the address follows it). */
   private slug: string | null;
+  /** CO-01: SHOW ALL N RELEASES pressed (every row of THE RELEASES OF THIS MODEL shown), kept across a render. */
+  private releasesUnfolded = false;
 
   constructor(private readonly deps: SheetDeps) {
     this.focusPending = deps.focus === true;
@@ -430,7 +453,7 @@ class SheetPage {
     }
     if (load === null) {
       try {
-        load = slug === null ? { kind: 'missing' } : { kind: 'ready', sheet: sheetModel(await this.deps.api.lookbookSheet(slug)) };
+        load = slug === null ? { kind: 'missing' } : { kind: 'ready', sheet: sheetModel(await this.deps.api.lookbookSheet(slug), this.deps.localZone) };
       } catch (e) {
         if (stale()) return;
         load = e instanceof ApiError && e.status === 404 ? { kind: 'missing' } : { kind: 'failed', message: messageOf(e) };
@@ -454,7 +477,7 @@ class SheetPage {
     try {
       const s = await this.deps.session.ensure();
       if (s.status !== 'signed-in') return opts.owner ? 'not-owner' : { kind: 'missing' };
-      const sheet = sheetModel(await this.deps.api.clubLookbookSheet(slug));
+      const sheet = sheetModel(await this.deps.api.clubLookbookSheet(slug), this.deps.localZone);
       return { kind: 'ready', sheet };
     } catch (e) {
       this.deps.session.noteError(e);
@@ -536,6 +559,8 @@ class SheetPage {
         h('p', { class: 'n-tx n-model__care sheet__care', text: s.care }),
       ),
     );
+    // CO-01: THE RELEASES OF THIS MODEL, after CARE, only once the model has a past release.
+    if (s.releases.length > 0) sections.push(this.releasesSection(s));
     this.body.replaceChildren(...sections.filter((x): x is HTMLElement => x !== null));
     if (hadFocus && !this.body.contains(document.activeElement)) this.body.querySelector<HTMLElement>('#sheet-salon')?.focus({ preventScroll: true });
     this.focusTitle();
@@ -574,6 +599,47 @@ class SheetPage {
     );
     el.classList.add('n-model__dots');
     return el;
+  }
+
+  /**
+   * CO-01, THE RELEASES OF THIS MODEL: each past release of the model and its variants, the newest first, a row with a
+   * hairline that leads on (›) to its page: its opening date (figures in the reading face), then its kind and variant.
+   * The six newest; beyond them SHOW ALL N RELEASES unfolds the rest in place, the focus moving to the seventh.
+   */
+  private releasesSection(s: SheetModel): HTMLElement {
+    const shown = this.releasesUnfolded ? s.releases : s.releases.slice(0, RELEASES_SHOWN);
+    const rows = shown.map((r) =>
+      accLink(h('span', { class: 'n-num' }, ...withNumerals(r.date)), {
+        line: r.line,
+        lineKind: 'lb',
+        href: r.href,
+        onOpen: () => this.deps.onRelease(r.id),
+        label: r.label,
+        extraClass: 'n-model__release',
+      }),
+    );
+    const more =
+      shown.length < s.releases.length
+        ? h(
+            'p',
+            { class: 'n-model__releases-more' },
+            textLink(LOOKBOOK.releases.more(s.releases.length), {
+              onOpen: () => {
+                this.releasesUnfolded = true;
+                quietly(this.body, () => this.render());
+                this.body.querySelectorAll<HTMLElement>('.n-model__release')[RELEASES_SHOWN]?.focus();
+              },
+              extraClass: 'n-model__releases-all',
+            }),
+          )
+        : null;
+    return h(
+      'section',
+      { class: 'n-px n-sec sheet__section n-model__releases', attrs: { 'aria-labelledby': 'sheet-releases' } },
+      h('h2', { class: 'n-g n-t3 n-model__heading', id: 'sheet-releases', text: LOOKBOOK.releases.title }),
+      h('div', { class: 'n-model__release-rows' }, ...rows),
+      more,
+    );
   }
 
   /** The model's next release (C6): a plate row, the live dot, its kind, its variant and its day and hour; its page. */

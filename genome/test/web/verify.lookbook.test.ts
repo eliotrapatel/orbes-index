@@ -58,7 +58,23 @@ import {
 } from '../../src/web/shared/lookbook.js';
 import * as verifyCopy from '../../src/web/verify/copy.js';
 import { DEFAULT_CARE, LOOKBOOK, PHOTOS } from '../../src/web/verify/copy.js';
-import { cardFace, LOOKBOOK_PATH, lookbookGroups, lookbookRouteOf, lookbookSheetPath, ownedLine, SALON_NOTE_MAX, salonPicker, salonSizePick, selectDot, sheetLine, sheetModel, withRequest } from '../../src/web/verify/lookbook-model.js';
+import {
+  cardFace,
+  LOOKBOOK_PATH,
+  lookbookGroups,
+  lookbookRouteOf,
+  lookbookSheetPath,
+  modelReleaseRows,
+  ownedLine,
+  RELEASES_SHOWN,
+  SALON_NOTE_MAX,
+  salonPicker,
+  salonSizePick,
+  selectDot,
+  sheetLine,
+  sheetModel,
+  withRequest,
+} from '../../src/web/verify/lookbook-model.js';
 import type { LookbookCard, LookbookSheet, VerifyOutcome } from '../../src/web/verify/types.js';
 import { resultViewModel } from '../../src/web/verify/view-model.js';
 import { contextInput, modelContext } from '../../src/web/verify/messages-model.js';
@@ -191,6 +207,7 @@ describe('a model\'s sheet (P-R02)', () => {
       salon: null,
       sizes: null,
       dots: [],
+      releases: [],
     });
     // The model's own care; a RESERVED sheet; no story, no photograph from elsewhere, none twice.
     const reserved = sheetModel(sheet({ lookbook: 'RESERVED', care: '  Polish with a soft cloth. ', story: ' \n ', coverUrl: null, gallery: [{ url: media(2), alt: '' }, { url: media(2), alt: null }, { url: 'https://evil.example/a.jpg', alt: 'x' }] }));
@@ -288,6 +305,78 @@ describe('a model\'s sheet (P-R02)', () => {
     expect(lookbookRouteOf('/verify/lookbook/a/b')).toEqual({ sheet: null });
     expect(lookbookRouteOf('/verify/pieces')).toBeNull();
     expect(lookbookRouteOf('/verify/lookbooks')).toBeNull();
+  });
+});
+
+describe('THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01)', () => {
+  const id = (n: number) => `${String(n).padStart(8, '0')}-0000-4000-8000-000000000000`;
+  const release = (n: number, kind: 'LIVE' | 'DRAW', opensAt: string, variant: string | null) => ({ id: id(n), kind, opensAt, variant });
+
+  it('dates each release on the phone\'s calendar, says its kind and variant, opens its page, and names it whole for a screen reader', () => {
+    const rows = modelReleaseRows(
+      [
+        release(1, 'LIVE', '2026-10-05T03:00:00.000Z', 'Steel'),
+        release(2, 'LIVE', '2026-09-28T17:00:00.000Z', 'Gold'),
+        release(3, 'DRAW', '2026-09-14T10:00:00.000Z', 'Gold'),
+        release(4, 'DRAW', '2026-09-10T10:00:00.000Z', null),
+      ],
+      'Europe/Paris',
+    );
+    expect(rows).toEqual([
+      { id: id(1), href: `/verify/releases/${id(1)}`, date: '5 OCT 2026', line: 'LIVE RELEASE · IN STEEL', label: 'LIVE RELEASE, 5 OCT 2026, in steel: see the release' },
+      { id: id(2), href: `/verify/releases/${id(2)}`, date: '28 SEP 2026', line: 'LIVE RELEASE · IN GOLD', label: 'LIVE RELEASE, 28 SEP 2026, in gold: see the release' },
+      { id: id(3), href: `/verify/releases/${id(3)}`, date: '14 SEP 2026', line: 'DRAW · IN GOLD', label: 'DRAW, 14 SEP 2026, in gold: see the release' },
+      // A model alone: its kind only.
+      { id: id(4), href: `/verify/releases/${id(4)}`, date: '10 SEP 2026', line: 'DRAW', label: 'DRAW, 10 SEP 2026: see the release' },
+    ]);
+    // The phone's calendar: 05:00 in Paris is still 4 October in New York.
+    expect(modelReleaseRows([release(1, 'LIVE', '2026-10-05T03:00:00.000Z', null)], 'America/New_York')[0]!.date).toBe('4 OCT 2026');
+    expect(modelReleaseRows([release(1, 'LIVE', '2026-10-05T03:00:00.000Z', null)], 'Not/AZone')[0]!.date).toBe('5 OCT 2026');
+  });
+
+  it('leaves out a release without an id of its own, a kind the server does not send, or an opening it cannot read; nothing but a list', () => {
+    const good = release(9, 'DRAW', '2026-09-14T10:00:00.000Z', 'Blue');
+    const rows = modelReleaseRows(
+      [
+        null,
+        { ...good, id: '../admin' },
+        { ...good, id: 'not-an-id' },
+        { ...good, kind: 'SALON' },
+        { ...good, opensAt: 'yesterday' },
+        { ...good, opensAt: 12 },
+        { ...good, variant: '   ' },
+        good,
+      ],
+      'UTC',
+    );
+    expect(rows.map((r) => r.line)).toEqual(['DRAW', 'DRAW · IN BLUE']);
+    for (const bad of [undefined, null, {}, 'list', 3]) expect(modelReleaseRows(bad, 'UTC')).toEqual([]);
+  });
+
+  it('keeps every row on the sheet whichever dot is chosen, and shows six before SHOW ALL N RELEASES', () => {
+    expect(RELEASES_SHOWN).toBe(6);
+    const releases = Array.from({ length: 9 }, (_, i) => release(i + 1, i % 2 ? 'LIVE' : 'DRAW', `2026-09-${String(20 - i).padStart(2, '0')}T10:00:00.000Z`, 'Steel'));
+    const variants = [
+      { slug: 'monolithe', label: 'Steel', swatch: '#9d9b96', selected: true, lookbook: 'PUBLIC' as const, name: 'Monolithe', type: 'Ring', collection: 'Orbit', coverUrl: media(1), gallery: [], story: null, specs: [], care: null, discontinuedYear: null },
+      { slug: 'monolithe-blue', label: 'Blue', swatch: '#16224a', selected: false, lookbook: 'PUBLIC' as const, name: 'Monolithe', type: 'Ring', collection: 'Orbit', coverUrl: media(2), gallery: [], story: null, specs: [], care: null, discontinuedYear: null },
+    ];
+    const s = sheetModel(sheet({ variant: { label: 'Steel', swatch: '#9d9b96' }, variants, releases }), 'UTC');
+    expect(s.releases).toHaveLength(9);
+    expect(s.releases.map((r) => r.date).slice(0, 2)).toEqual(['20 SEP 2026', '19 SEP 2026']);
+    expect(selectDot(s, 'monolithe-blue').releases).toEqual(s.releases);
+    expect(withRequest(s, 'monolithe', 'r', 'm').releases).toEqual(s.releases);
+    expect(s.releases.slice(0, RELEASES_SHOWN)).toHaveLength(6);
+    expect(LOOKBOOK.releases.more(s.releases.length)).toBe('SHOW ALL 9 RELEASES');
+    // A sheet from an older server, or of a model never released: no row, no section.
+    expect(sheetModel(sheet()).releases).toEqual([]);
+  });
+
+  it('says it in the house\'s words: the title, the kinds, the variant, the more link', () => {
+    expect(LOOKBOOK.releases.title).toBe('THE RELEASES OF THIS MODEL');
+    expect(LOOKBOOK.releases.kind).toEqual({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW' });
+    expect(LOOKBOOK.releases.variant('Blue')).toBe('IN BLUE');
+    expect(LOOKBOOK.releases.line('DRAW', null)).toBe('DRAW');
+    expect(LOOKBOOK.releases.label('DRAW', '14 SEP 2026', 'Gold')).toBe('DRAW, 14 SEP 2026, in gold: see the release');
   });
 });
 
@@ -587,6 +676,9 @@ describe('the lookbook\'s copy', () => {
     // Each function said with what it takes: a name, or (NOCTURNE N3) the sizes and the pieces owned of a model.
     const ARGS: Record<string, unknown[]> = { sizes: ['16', '17', '18'], youOwn: [2, 'steel', 'gold'], locked: ['PALLADIUM', 5] };
     const lines = Object.entries(LOOKBOOK).flatMap(([k, v]) => (typeof v === 'function' ? [String((v as (...a: unknown[]) => string)(...(ARGS[k] ?? ['MONOLITHE'])))] : [String(v)]));
+    // CO-01: THE RELEASES OF THIS MODEL's words.
+    const r = LOOKBOOK.releases;
+    lines.push(r.title, ...Object.values(r.kind), r.variant('Blue'), r.line('DRAW', 'IN BLUE'), r.label('LIVE RELEASE', '5 OCT 2026', 'Steel'), r.more(9));
     expect(lines.length).toBeGreaterThan(10);
     expect(findForbidden(lines.join('\n'), [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
     expect(lines.join('\n')).not.toMatch(/!|lottery/i);

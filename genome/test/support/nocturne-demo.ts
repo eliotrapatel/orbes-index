@@ -50,7 +50,8 @@
  *   demo two PALLADIUM collectors who saved their sizes, one of them with HALO requested in size 54, and an account
  *   without a piece that saves and clears its own; in the room, a TITANE collector who saved a bracelet of 17 cm)
  *   stress            the extreme content of fidelity rule 5; THE PROGRAM's welcome gift (a model of one size) and
- *                     the PALLADIUM credit in use on an order (BP-19 T5)
+ *                     the PALLADIUM credit in use on an order (BP-19 T5); nine past releases of MONOLITHE
+ *                     ARCHITECTURALE in its two finishes, seeded last (plan NEXT-NINE, CO-01: SHOW ALL 9 RELEASES)
  *   empty             every empty state: no model shown, no release, an account without a piece, and an owner
  *                     (one piece of a model kept out of the collection) before an empty circle
  *
@@ -1301,6 +1302,42 @@ async function seedStress(w: World): Promise<void> {
 
     admin,
   );
+  await seedModelReleases(w);
+}
+
+/**
+ * Plan NEXT-NINE, CO-01: nine past releases of MONOLITHE ARCHITECTURALE in September, seeded last so nothing of the
+ * extreme content moves: six draws drawn and three LIVE RELEASES closed at their time, in its two finishes, nobody
+ * entered. Its sheet lists the six newest under THE RELEASES OF THIS MODEL, then SHOW ALL 9 RELEASES.
+ */
+async function seedModelReleases(w: World): Promise<void> {
+  const { ctx, admin, clock } = w;
+  const releases: { day: number; kind: 'DRAW' | 'LIVE'; model: 'long' | 'cobalt' }[] = [
+    { day: 3, kind: 'DRAW', model: 'long' },
+    { day: 6, kind: 'DRAW', model: 'cobalt' },
+    { day: 9, kind: 'LIVE', model: 'long' },
+    { day: 12, kind: 'DRAW', model: 'cobalt' },
+    { day: 15, kind: 'DRAW', model: 'long' },
+    { day: 18, kind: 'LIVE', model: 'long' },
+    { day: 21, kind: 'DRAW', model: 'cobalt' },
+    { day: 24, kind: 'DRAW', model: 'long' },
+    { day: 27, kind: 'LIVE', model: 'cobalt' },
+  ];
+  for (const r of releases) {
+    const opens = at(`2026-09-${String(r.day).padStart(2, '0')}T10:00:00Z`);
+    clock.set(new Date(opens.getTime() - 2 * DAY));
+    if (r.kind === 'DRAW') {
+      const d = await ctx.services.drops.create({ modelId: w.models[r.model]!, title: 'MONOLITHE ARCHITECTURALE, A DRAW OF SEPTEMBER', quantity: 4, opensAt: opens, closesAt: new Date(opens.getTime() + 8 * HOUR), earlyAccessHours: 0 }, admin);
+      await ctx.services.drops.publish(d.id, admin);
+      clock.set(new Date(opens.getTime() + 8 * HOUR + MINUTE));
+      await ctx.services.drops.draw(d.id, admin);
+    } else {
+      const l = await createLiveRelease(w.f, { modelId: w.models[r.model]!, opensAt: opens, minTier: 1, sizes: [{ label: '17', stock: 12 }], quantityLine: '12 PIECES', priceMinor: 12_540_000 });
+      await titled(w, l.id, 'MONOLITHE ARCHITECTURALE, LIVE');
+      clock.set(new Date(opens.getTime() + 2 * HOUR));
+      await ctx.services.live.advance(l.id);
+    }
+  }
 }
 
 /**

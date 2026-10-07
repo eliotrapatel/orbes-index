@@ -845,6 +845,7 @@ class App {
         replaceEntry(history.state, lookbookSheetPath(variant));
       },
       onRelease: (id) => this.openRelease(id),
+      localZone: localZone(),
       focus,
     });
     if (await this.swap(view.root, 'sheet', focus)) this.live = view;

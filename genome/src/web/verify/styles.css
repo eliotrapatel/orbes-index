@@ -1814,6 +1814,18 @@ body.nocturne .view--sheet.n-model {
   margin-top: 14px;
 }
 
+/* THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01): its rows under a hairline, 14 px under the heading as the facts;
+   SHOW ALL N RELEASES centred under them. */
+.n-model__release-rows {
+  margin-top: 14px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-model__releases-more {
+  margin-top: 22px;
+  text-align: center;
+}
+
 /* The gallery: each photograph whole at the column's full width, without the fade, 2 px apart (C22's). */
 .n-model__gallery-photo + .n-model__gallery-photo {
   margin-top: 2px;

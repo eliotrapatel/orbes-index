@@ -245,7 +245,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const retailers = new RetailerService({ db, audit, clock });
     const sale = new SaleService({ db, verification, warranty, clock });
     const media = new MediaService({ db, audit, clock, log });
-    const lookbook = new LookbookService({ db });
+    const lookbook = new LookbookService({ db, clock });
     const drops = new DropService({ db, audit, seedKey: deriveDropSeedKey(config), clock });
     const club = new ClubService({ db, drops, audit, clock });
     const salon = new SalonService({ db, audit, lookbook, club, clock });
