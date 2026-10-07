@@ -121,7 +121,7 @@ class ClubPage {
             'div',
             { class: 'n-px n-club__plate' },
             h('h2', { class: 'n-g n-t2 n-club__name', id, text: t.name }),
-            h('p', { class: 'n-g n-lb n-num n-club__from' }, ...withNumerals(t.from)),
+            h('p', { class: 'n-sm n-num n-club__from' }, ...withNumerals(t.from)),
             t.lines.length ? h('ul', { class: 'n-club__lines' }, ...t.lines.map((line) => h('li', { class: 'n-sm n-club__line' }, ...withNumerals(line)))) : null,
           ),
           t.gift

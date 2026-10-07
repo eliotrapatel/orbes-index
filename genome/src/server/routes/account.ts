@@ -158,18 +158,25 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   // The yearly care (plan NEXT-NINE, BP-19 T6; API §10.18): asked for from a piece the account holds, with the address
   // it returns to in the request's own form (prefilled from the account's last order); its prepaid label downloaded
   // here only, by its own account (404 for any other). Nothing is written in MESSAGES.
+  // Every answer of the piece's care carries the address hint, the POSTs' too, so that after CANCEL REQUEST the form
+  // opens prefilled again (to change the address, the collector cancels and asks again). It is read once the status
+  // has settled, so a request's transaction never waits on a read beside it.
+  const withHint = async <T extends object>(accountId: string, status: Promise<T>) => {
+    const s = await status;
+    return { ...s, addressHint: await care.addressHint(accountId) };
+  };
+
   app.get('/api/v1/account/products/:productId/care', async (request) => {
     const { account } = requireAccount(request);
     const { productId } = parse(productParams, request.params);
-    const [status, addressHint] = await Promise.all([care.status(account.id, productId), care.addressHint(account.id)]);
-    return { ...status, addressHint };
+    return withHint(account.id, care.status(account.id, productId));
   });
 
   app.post('/api/v1/account/products/:productId/care', async (request, reply) => {
     const { account } = requireAccount(request);
     const { productId } = parse(productParams, request.params);
     const b = parse(careRequestBody, request.body);
-    const status = await care.request(account.id, productId, { name: b.name, address: b.address }, accountActor(request));
+    const status = await withHint(account.id, care.request(account.id, productId, { name: b.name, address: b.address }, accountActor(request)));
     reply.code(201);
     return status;
   });
@@ -177,7 +184,7 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.post('/api/v1/account/care/:id/cancel', async (request) => {
     const { account } = requireAccount(request);
     const { id } = parse(careParams, request.params);
-    return care.cancelByAccount(account.id, id, accountActor(request));
+    return withHint(account.id, care.cancelByAccount(account.id, id, accountActor(request)));
   });
 
   app.get('/api/v1/account/care/:id/label.pdf', async (request, reply) => {

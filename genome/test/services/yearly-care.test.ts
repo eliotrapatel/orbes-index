@@ -161,6 +161,16 @@ describe('the yearly care (BP-19 T6)', () => {
     expect(masked.returnName).not.toBe('Camille Martin');
     expect(masked.returnAddress).not.toContain('rue de la Paix');
     expect(masked.account.email).not.toBe(p.email);
+    // The request's answer and CANCEL REQUEST's carry the hint too, so the form opens prefilled again after a cancel
+    // (to change the address, the collector cancels and asks again); never another account's.
+    const hint = { name: 'C. Martin', address: '1 avenue Montaigne\n75008 Paris' };
+    expect((safeJson(res) as CareJson).addressHint).toEqual(hint);
+    const cancelled = await p.client.post(`/api/v1/account/care/${id}/cancel`);
+    expect(cancelled.statusCode, cancelled.body).toBe(200);
+    expect(safeJson(cancelled)).toMatchObject({ reason: 'AVAILABLE', request: { status: 'CANCELLED' }, addressHint: hint });
+    const again = await ask(other.client, other.serials[0]!);
+    expect(again.statusCode, again.body).toBe(201);
+    expect((safeJson(again) as CareJson).addressHint).toBeNull();
   });
 
   it('cares for a piece received by transfer, by PLATINE and by PALLADIUM', async () => {
