@@ -226,7 +226,7 @@ export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];
 
 /**
- * A run of test entrants (test_runs.status, migration 0024a): RUNNING (its bots acting) → DONE (every bot has acted)
+ * A run of test entrants (test_runs.status, migration 0024_z): RUNNING (its bots acting) → DONE (every bot has acted)
  * → ENDED (END TEST, its clean-up done); STOPPED by STOP, INTERRUPTED by a restart while it ran. Only RUNNING blocks a
  * new test.
  */
@@ -1263,7 +1263,7 @@ export interface ActivityHourlyTable {
 }
 
 /**
- * The pool of test accounts (migration 0024a, TEST ENTRANTS): the tier and seniority the club reads for each instead of
+ * The pool of test accounts (migration 0024_z, TEST ENTRANTS): the tier and seniority the club reads for each instead of
  * its pieces (services/club.ts clubStandings), set by the press that sends it.
  */
 export interface TestEntrantsTable {
@@ -1273,7 +1273,7 @@ export interface TestEntrantsTable {
   created_at: TimestampDefault;
 }
 
-/** A test of a release (migration 0024a): its presses' settings, its bots counted, its report and peaks. */
+/** A test of a release (migration 0024_z): its presses' settings, its bots counted, its report and peaks. */
 export interface TestRunsTable {
   id: Generated<string>;
   drop_id: string;
@@ -1292,7 +1292,7 @@ export interface TestRunsTable {
   peaks: JsonbNullable<JsonObject>;
 }
 
-/** A bot of a run (migration 0024a): its network, what it was drawn to do, what it did; a draw's confirmation due. */
+/** A bot of a run (migration 0024_z): its network, what it was drawn to do, what it did; a draw's confirmation due. */
 export interface TestRunEntrantsTable {
   run_id: string;
   account_id: string;

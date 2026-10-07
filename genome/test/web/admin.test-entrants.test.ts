@@ -238,9 +238,14 @@ describe('a press of SEND TEST ENTRANTS and ADD MORE', () => {
     expect([live({ quantity: '6' }), live({ quantity: '' }), live({ quantity: '5' })]).toEqual(['Each takes 1 to 5 pieces, or a number at random.', null, null]);
     expect(live({ interestPct: '120' })).toBe('The share that says I’LL BE THERE is 0 to 100 %.');
     expect(draw({ confirmPct: '' })).toBe('The share that confirms by itself is 0 to 100 %.');
-    // A draw in its early access only: a test needs PLATINE and PALLADIUM that reserve.
-    expect(draw({}, { earlyOnly: true })).toBe('Only the early access is open: set a share of PLATINE and PALLADIUM that reserves.');
-    expect(draw({ reservePct: '50' }, { earlyOnly: true })).toBeNull();
+    // A draw in its early access only: a test needs PLATINE or PALLADIUM that reserve, as the server asks (the default
+    // press, 100 TITANE, reserving 50 %, would be refused « Start the test while the draw is open »).
+    const early = 'Only the early access is open: send PLATINE or PALLADIUM test entrants, with a share that reserves.';
+    expect(draw({}, { earlyOnly: true })).toBe(early);
+    expect(draw({ reservePct: '50' }, { earlyOnly: true })).toBe(early);
+    expect(draw({ reservePct: '0', 'tier:palladium': '10' }, { earlyOnly: true })).toBe(early);
+    expect(draw({ reservePct: '50', 'tier:platine': '10' }, { earlyOnly: true })).toBeNull();
+    expect(draw({ reservePct: '50', 'tier:titane': '0', 'tier:palladium': '10' }, { earlyOnly: true })).toBeNull();
     expect(live({ seniorityMin: '5', seniorityMax: '3' })).toBe('Seniority runs from 0 to 50 years, from the lower to the higher.');
     expect(live({ seniorityMax: '51' })).toBe('Seniority runs from 0 to 50 years, from the lower to the higher.');
     expect(live({ ageMax: '3651' })).toBe('An account’s age runs from 0 to 3\u2009650 days, from the lower to the higher.');
@@ -334,6 +339,18 @@ describe('a release’s test', () => {
       { label: 'DATABASE WAITING', value: '—' },
       { label: 'ERRORS (5XX)', value: '0' },
       { label: 'REFUSED (429)', value: '3' },
+    ]);
+    // A jsonb column gives the keys back by their length: the rows keep the panel's order, the app's memory and CPU first.
+    expect(peakRows({ p95Ms: 1, errors5xx: 0, refused429: 0, appMemBytes: 2048, appCpuCores: 0.5, liveStreams: 1, poolWaiting: 0, dbConnections: 2, loopDelayP99Ms: 3 }).map((r) => r.label)).toEqual([
+      'APP MEMORY',
+      'APP CPU',
+      'RESPONSE TIME p95',
+      'EVENT LOOP DELAY p99',
+      'LIVE CONNECTIONS',
+      'DATABASE CONNECTIONS',
+      'DATABASE WAITING',
+      'ERRORS (5XX)',
+      'REFUSED (429)',
     ]);
     // Grouped peaks are read through; a name the console does not know is said from its key.
     expect(peakRows({ app: { memBytes: 2048 }, queueDepthMs: 5, note: 'x' })).toEqual([

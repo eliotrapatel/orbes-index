@@ -171,7 +171,7 @@ export async function activePieceCount(db: Db, accountId: string): Promise<numbe
 /**
  * The standing of each account of `accountIds` at `now`, read in one query per thousand accounts: the pieces held
  * now (open ownerships of pieces the club counts), the tier they reach, and the full years since the account's first
- * ownership began; a test entrant (migration 0024a) at its test row's tier and seniority, its tier's threshold as its
+ * ownership began; a test entrant (migration 0024_z) at its test row's tier and seniority, its tier's threshold as its
  * pieces. An account with no ownership at all stands at 0, 0, 0. Read only (TERMS-FACTS N3): ownership never written.
  */
 export async function clubStandings(db: Db, accountIds: readonly string[], now: Date): Promise<Map<string, ClubStanding>> {
@@ -195,7 +195,7 @@ export async function clubStandings(db: Db, accountIds: readonly string[], now: 
       const since = r.since === null ? null : new Date(r.since);
       out.set(r.account_id, { pieces, tier: tierForPieces(pieces), seniority: since ? fullYears(since, now) : 0 });
     }
-    // A test entrant (services/test-entrants.ts, migration 0024a) stands where its test row puts it, never its pieces.
+    // A test entrant (services/test-entrants.ts, migration 0024_z) stands where its test row puts it, never its pieces.
     const tests = await db.selectFrom('test_entrants').select(['account_id', 'tier', 'seniority']).where('account_id', 'in', chunk).execute();
     for (const t of tests) {
       const tier = Math.min(3, Math.max(0, t.tier)) as ClubTier;

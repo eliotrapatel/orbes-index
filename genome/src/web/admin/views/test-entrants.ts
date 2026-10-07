@@ -10,12 +10,13 @@
  *    CONFIRM (and RELEASE on a LIVE RELEASE), the runner's last errors; ADD MORE (a phrase) and STOP while it runs; END
  *    TEST (a phrase, danger) until it has ended.
  *  - PAST TESTS: when, by whom, how many, the checks of its report passed; the report itself (its checks, each passed or
- *    failed in one line, and its peaks).
+ *    failed in one line, and its peaks); END TEST for an earlier test not ended (a newer one sent since).
  * An AUDITOR and an OPERATOR read everything, without a button.
  */
 import { h, mount, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
 import { tierName } from '../model/club.js';
+import { can } from '../model/permissions.js';
 import {
   arrivalOptions,
   checksLine,
@@ -76,7 +77,7 @@ export function loadTestReads(ctx: ViewContext, dropId: string): Promise<TestRea
 
 /** A test account's mark beside its email in the entries' lists (its email ends @orbes.test); null for any other. */
 export function testTag(email: string): HTMLElement | null {
-  return isTestAccount(email) ? h('span', { class: 'test-tag', attrs: { title: 'A test entrant (plan TEST ENTRANTS)' }, data: { testid: 'test-tag' } }, 'TEST') : null;
+  return isTestAccount(email) ? h('span', { class: 'test-tag', attrs: { title: 'A test entrant: an account of the test pool, cleaned up by END TEST' }, data: { testid: 'test-tag' } }, 'TEST') : null;
 }
 
 /** The fields of SEND TEST ENTRANTS and ADD MORE: a draw's, or a LIVE RELEASE's. */
@@ -181,6 +182,7 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
   let runs: TestRunSummary[] = reads.runs?.runs ?? [];
   let runKey = '';
   let pastKey = '';
+  let toolsKey = '';
   // Not read yet: the page's read failed (the section says so until a read answers).
   let unread = reads.current === null;
 
@@ -254,7 +256,7 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
   };
 
   const endPhrase = testPhrase('end', t.dropId);
-  const end = (r: TestRunView) =>
+  const end = (r: Pick<TestRunView, 'id'>) =>
     void openDialog({
       title: 'End the test',
       eyebrow: t.eyebrow,
@@ -315,13 +317,18 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
   // ── The test not ended ───────────────────────────────────────────────────
   const drawRun = () => {
     const a = testRunActions(run, role, t.start);
-    mount(
-      tools,
-      a.send ? button('Send test entrants', { kind: 'primary', testId: 'test-send', onClick: send }) : null,
-      run && a.addMore ? button('Add more', { kind: 'ghost', testId: 'test-add', onClick: () => addMore(run!) }) : null,
-      run && a.stop ? stopButton(run) : null,
-      run && a.end ? button('End test', { kind: 'danger', testId: 'test-end', onClick: () => end(run!) }) : null,
-    );
+    // The buttons are drawn again only when they change: STOP keeps its focus, and a press held across a refresh still clicks.
+    const tk = JSON.stringify([a, run?.id ?? null]);
+    if (tk !== toolsKey) {
+      toolsKey = tk;
+      mount(
+        tools,
+        a.send ? button('Send test entrants', { kind: 'primary', testId: 'test-send', onClick: send }) : null,
+        run && a.addMore ? button('Add more', { kind: 'ghost', testId: 'test-add', onClick: () => addMore(run!) }) : null,
+        run && a.stop ? stopButton(run) : null,
+        run && a.end ? button('End test', { kind: 'danger', testId: 'test-end', onClick: () => end(run!) }) : null,
+      );
+    }
     if (!run) {
       mount(runBox, unread ? h('p', { class: 'notice' }, 'The test could not be read just now: it is asked again every 2 seconds.') : null);
       return;
@@ -330,6 +337,9 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
     const s: TestRunSettings = lastSettings(r);
     const presses = pressCount(r);
     const columns = TEST_TIER_COLUMNS[r.mode];
+    // A row's CONFIRM or RELEASE focused keeps its focus when the list is drawn again.
+    const focused = document.activeElement instanceof HTMLElement && runBox.contains(document.activeElement) ? document.activeElement : null;
+    const refocus = focused?.dataset.testid ? { testid: focused.dataset.testid, account: focused.closest<HTMLElement>('[data-account]')?.dataset.account ?? null } : null;
     mount(
       runBox,
       defList([
@@ -374,7 +384,7 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
                 const x = testEntrantActions(r, e, role);
                 return h(
                   'span',
-                  { class: 'row-actions' },
+                  { class: 'row-actions', data: { account: e.accountId } },
                   x.confirm ? button('Confirm', { kind: 'ghost', testId: 'test-entrant-confirm', onClick: () => byHand(r, e, 'confirm') }) : null,
                   x.release ? button('Release', { kind: 'ghost', testId: 'test-entrant-release', onClick: () => byHand(r, e, 'release') }) : null,
                 );
@@ -394,6 +404,10 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
           ]
         : [h('p', { class: 'footnote', data: { testid: 'test-errors' } }, 'No error from the test entrants.')]),
     );
+    if (refocus) {
+      const within = refocus.account ? runBox.querySelector(`[data-account="${refocus.account}"]`) : runBox;
+      within?.querySelector<HTMLElement>(`[data-testid="${refocus.testid}"]`)?.focus();
+    }
   };
   // STOP: one press, no phrase (nothing is cleaned).
   const stopButton = (r: TestRunView) => {
@@ -426,7 +440,18 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
             },
             kind: ['num'],
           },
-          { label: '', cell: (x: TestRunSummary) => (x.report ? button('Report', { kind: 'ghost', testId: 'test-report', onClick: () => showReport(x) }) : null), kind: ['actions'] },
+          {
+            label: '',
+            // An earlier test not ended (a newer one sent since) keeps its END TEST here.
+            cell: (x: TestRunSummary) =>
+              h(
+                'span',
+                { class: 'row-actions' },
+                x.report ? button('Report', { kind: 'ghost', testId: 'test-report', onClick: () => showReport(x) }) : null,
+                x.status !== 'ENDED' && can(role, 'runTestEntrants') ? button('End test', { kind: 'danger', testId: 'test-past-end', onClick: () => end(x) }) : null,
+              ),
+            kind: ['actions'],
+          },
         ],
         past,
         { caption: 'Past tests', empty: 'No past test of this release.' },

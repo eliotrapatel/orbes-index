@@ -154,8 +154,8 @@ const valueOf = (v: Record<string, string>, k: string): string => v[k] ?? testRu
 
 /**
  * What the server would refuse in a press, said before anything is sent; null when it can go. `already`: the run's test
- * entrants before ADD MORE (5 000 in all). `earlyOnly`: a draw in its early access only, where a test needs a share that
- * reserves.
+ * entrants before ADD MORE (5 000 in all). `earlyOnly`: a draw in its early access only, where a test needs PLATINE or
+ * PALLADIUM test entrants and a share that reserves (as the server asks).
  */
 export function testRunProblem(mode: TestRunMode, v: Record<string, string>, opts: { already?: number; earlyOnly?: boolean } = {}): string | null {
   const L = TEST_ENTRANTS_LIMITS;
@@ -196,7 +196,7 @@ export function testRunProblem(mode: TestRunMode, v: Record<string, string>, opt
     ] as const) {
       if (pct(valueOf(v, k)) === null) return `The share that ${what} is 0 to 100 %.`;
     }
-    if (opts.earlyOnly && pct(valueOf(v, 'reservePct')) === 0) return 'Only the early access is open: set a share of PLATINE and PALLADIUM that reserves.';
+    if (opts.earlyOnly && (pct(valueOf(v, 'reservePct')) === 0 || tiers.platine + tiers.palladium === 0)) return 'Only the early access is open: send PLATINE or PALLADIUM test entrants, with a share that reserves.';
   }
 
   const sMin = whole(valueOf(v, 'seniorityMin'));
@@ -412,21 +412,25 @@ function peakValue(key: string, v: number): string {
   return Number.isInteger(v) ? formatCount(v) : formatDecimal(v);
 }
 
+/** The peaks in the panel's order, app memory and CPU first (a jsonb column gives its keys back in its own order). */
+const PEAK_ORDER: readonly string[] = ['appMemBytes', 'memBytes', 'appCpuCores', 'cpuCores', 'p95Ms', 'loopDelayP99Ms', 'liveStreams', 'streams', 'dbConnections', 'connections', 'poolWaiting', 'errors5xx', 'refused429'];
+
 /**
  * A run's peaks as rows (`APP MEMORY`, `412 MB`; `—` for a value this server cannot read), a group's (`{ app: { memBytes } }`)
- * read through; anything else left out.
+ * read through; anything else left out. In PEAK_ORDER, a name it does not know last.
  */
 export function peakRows(peaks: Record<string, unknown> | null | undefined): { label: string; value: string }[] {
-  const out: { label: string; value: string }[] = [];
+  const out: { key: string; label: string; value: string }[] = [];
   const walk = (o: Record<string, unknown>) => {
     for (const [k, v] of Object.entries(o)) {
-      if (typeof v === 'number' && Number.isFinite(v)) out.push({ label: peakLabel(k), value: peakValue(k, v) });
-      else if (v === null) out.push({ label: peakLabel(k), value: '—' });
+      if (typeof v === 'number' && Number.isFinite(v)) out.push({ key: k, label: peakLabel(k), value: peakValue(k, v) });
+      else if (v === null) out.push({ key: k, label: peakLabel(k), value: '—' });
       else if (v && typeof v === 'object' && !Array.isArray(v)) walk(v as Record<string, unknown>);
     }
   };
   if (peaks) walk(peaks);
-  return out;
+  const rank = (k: string) => (PEAK_ORDER.includes(k) ? PEAK_ORDER.indexOf(k) : PEAK_ORDER.length);
+  return out.sort((a, b) => rank(a.key) - rank(b.key)).map(({ label, value }) => ({ label, value }));
 }
 
 /** A test account of the pool: its email (masked or not) ends @orbes.test. */

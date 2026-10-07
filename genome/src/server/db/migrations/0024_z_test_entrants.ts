@@ -1,7 +1,9 @@
 /**
- * 0024a — the test entrants (the owner's lot of 2026-10-07: TEST ENTRANTS, services/test-entrants.ts): artificial
+ * 0024_z — the test entrants (the owner's lot of 2026-10-07: TEST ENTRANTS, services/test-entrants.ts): artificial
  * collectors the console sends into a draw or a LIVE RELEASE, real ORBES accounts that behave as any collector does.
- * Named `0024a` so that it sorts after 0024 and before the next lot's 0025 (Kysely refuses migrations out of order).
+ * Named `0024_z` so that it sorts after 0024_model_variants and before the next lot's 0025 both in Kysely's order (by
+ * code unit) and in a locale's (psql's ORDER BY, which passes over the `_`): Kysely refuses migrations out of order, and
+ * deploy.sh reads the list as psql sorts it.
  *
  * `test_entrants`: the pool of test accounts, one row per account (`test-0001@orbes.test`, …): the tier (0 to 3) and
  * the seniority (0 to 50 full years) the club reads for it instead of its pieces (services/club.ts `clubStandings`),

@@ -1,12 +1,14 @@
 /**
- * TEST ENTRANTS (the owner's lot of 2026-10-07; services/test-entrants.ts, migration 0024a), against a migrated
+ * TEST ENTRANTS (the owner's lot of 2026-10-07; services/test-entrants.ts, migration 0024_z), against a migrated
  * database, the whole app (its bots act through its own routes) and a manual clock; the runner's and the sweeper's
  * timers off, the tests driving `tick` and `sweep` themselves:
  *
- *  - the pool: `test-0001@orbes.test`, `TEST 0001`, ACTIVE, never signs in; reused by the next test of another release,
- *    created when short, capped at 5 000 accounts in all;
+ *  - the pool: `test-0001@orbes.test`, `TEST 0001`, ACTIVE, never signs in; a test not yet ended keeps its accounts (a
+ *    DONE draw's tiers hold); once ended, reused by the next test of another release; created when short, capped at
+ *    5 000 accounts in all; each account on its own network, the same in every test;
  *  - the two overrides: a test PALLADIUM entry ranks first in a draw (its tier and seniority from its test row), and a
- *    test account passes an owners-only LIVE rule;
+ *    test account passes an owners-only LIVE rule, and a release open to a segment of owners;
+ *  - the runner fills a slot as soon as its request ends;
  *  - START, ADD MORE, STOP and END TEST: their refusals and transitions (only RUNNING blocks; END TEST on DONE, STOPPED
  *    and INTERRUPTED); a restart leaves a RUNNING test INTERRUPTED;
  *  - a draw end to end: reservations in the early access, the entries at the opening, the staff's draw, the places
@@ -21,9 +23,9 @@ import { DomainError } from '../../src/server/errors.js';
 import { clubStandings, tierOf } from '../../src/server/services/club.js';
 import { accessOf } from '../../src/server/services/live.js';
 import { segmentMembers } from '../../src/server/services/segments.js';
-import { shareOf, splitOf, testPhrase, testRunSettings, TEST_RUN_DEFAULTS, type TestEntrantService, type TestRunSettingsInput } from '../../src/server/services/test-entrants.js';
+import { shareOf, splitOf, testPhrase, testRunSettings, TEST_RUN_DEFAULTS, TestEntrantService, type TestRunSettingsInput } from '../../src/server/services/test-entrants.js';
 import { createHarness, type Harness } from '../api/support.js';
-import { createAccount, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createCollection, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -167,16 +169,43 @@ describe('the pool, the overrides, START / ADD MORE / STOP / END TEST', () => {
     expect(new Set(networks.map((n) => n.network)).size).toBe(5);
     expect(networks.every((n) => /^100\.64\.\d+\.0\/24$/.test(n.network))).toBe(true);
 
-    // Another release: the five reused, two more made; a withdrawal for every one asked.
+    // Another release while the first test is DONE, its draw still to come: its five accounts stay its own (their tiers
+    // hold for its draw, their sessions for its places), seven others are made; a withdrawal for every one asked.
+    const poolSize = async () => Number((await w.h.ctx.db.selectFrom('test_entrants').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n);
+    const tiersOf = async (runId: string) =>
+      (await w.h.ctx.db.selectFrom('test_run_entrants as r').innerJoin('test_entrants as t', 't.account_id', 'r.account_id').select('t.tier').where('r.run_id', '=', runId).execute()).map((r) => r.tier).sort();
+    const emailsOf = async (runId: string) =>
+      (await w.h.ctx.db.selectFrom('test_run_entrants as r').innerJoin('accounts as a', 'a.id', 'r.account_id').select('a.email').where('r.run_id', '=', runId).orderBy('a.email').execute()).map((r) => r.email);
     const other = await openDraw(w);
     const second = await w.tests.start(other, press(other, { titane: 7 }, { behaviour: { withdrawPct: 100 } }), w.f.admin);
     expect(second.entrants).toBe(7);
-    expect(Number((await w.h.ctx.db.selectFrom('test_entrants').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n)).toBe(7);
+    expect(await poolSize()).toBe(12);
+    expect(await emailsOf(second.id)).toEqual(Array.from({ length: 7 }, (_, k) => `test-${String(k + 6).padStart(4, '0')}@orbes.test`));
+    expect(await tiersOf(view.id)).toEqual([0, 1, 1, 2, 3]);
     await drive(w, 0);
     expect(await statusOf(w, second.id)).toBe('RUNNING');
     await drive(w, 12_000, 1000);
     expect(await statusOf(w, second.id)).toBe('DONE');
     expect((await w.tests.view(second.id)).byTier[1]!.withdrawn).toBe(7);
+
+    // A second test on the first release: other accounts (they entered it once), made since the others are held, each
+    // on its own network, none of the first test's.
+    await w.tests.end(view.id, testPhrase(drop, true), w.f.admin);
+    const again = await w.tests.start(drop, press(drop, { titane: 2 }), w.f.admin);
+    expect(await emailsOf(again.id)).toEqual(['test-0013@orbes.test', 'test-0014@orbes.test']);
+    const nets = async (runId: string) => (await w.h.ctx.db.selectFrom('test_run_entrants').select('network').where('run_id', '=', runId).execute()).map((n) => n.network).sort();
+    expect(await nets(again.id)).toEqual(['100.64.12.0/24', '100.64.13.0/24']);
+    expect(await nets(view.id)).toEqual(['100.64.0.0/24', '100.64.1.0/24', '100.64.2.0/24', '100.64.3.0/24', '100.64.4.0/24']);
+    await drive(w, 0);
+    expect(await statusOf(w, again.id)).toBe('DONE');
+
+    // Once ENDED, the first test's accounts go back to the pool: the next test of another release reuses them.
+    const fourth = await openDraw(w);
+    const reused = await w.tests.start(fourth, press(fourth, { titane: 5 }), w.f.admin);
+    expect(await emailsOf(reused.id)).toEqual(await emailsOf(view.id));
+    expect(await poolSize()).toBe(14);
+    await drive(w, 0);
+    expect(await statusOf(w, reused.id)).toBe('DONE');
   });
 
   it('the tier override: a test PALLADIUM entry ranks first in a draw, before a real owner; its standing is its test row\'s', async () => {
@@ -212,6 +241,16 @@ describe('the pool, the overrides, START / ADD MORE / STOP / END TEST', () => {
     const real = await createAccount(w.h.ctx.db);
     expect(await accessOf(w.h.ctx.db, d, test.account_id, w.h.clock.now())).toMatchObject({ allowed: true, missing: null });
     expect(await accessOf(w.h.ctx.db, d, real.id, w.h.clock.now())).toMatchObject({ allowed: false, missing: 'PIECE' });
+
+    // A release open to a segment of owners (a model's, a collection's): the test account is let in, the real one not.
+    const collection = await createCollection(w.h.ctx.db, 'ORBIT');
+    for (const rule of [{ kind: 'OWNS_MODEL' as const, modelIds: [w.f.modelId] }, { kind: 'OWNS_COLLECTION' as const, collectionIds: [collection] }]) {
+      const segment = await w.h.ctx.services.segments.create({ name: `Owners ${rule.kind}`, criteria: { match: 'ALL', rules: [rule] } }, w.f.admin);
+      const gated = await createLiveRelease(w.f, { opensAt: new Date(w.h.clock.now().getTime() + 2 * MINUTE), accessSegmentId: segment.id });
+      const g = await w.h.ctx.db.selectFrom('drops').selectAll().where('id', '=', gated.id).executeTakeFirstOrThrow();
+      expect(await accessOf(w.h.ctx.db, g, test.account_id, w.h.clock.now()), rule.kind).toMatchObject({ allowed: true, missing: null });
+      expect(await accessOf(w.h.ctx.db, g, real.id, w.h.clock.now()), rule.kind).toMatchObject({ allowed: false, missing: 'SEGMENT' });
+    }
   });
 
   it('refuses a wrong phrase, a release not open, a second RUNNING test; ADD MORE, STOP, and END TEST on STOPPED, DONE and INTERRUPTED', async () => {
@@ -279,6 +318,39 @@ describe('the pool, the overrides, START / ADD MORE / STOP / END TEST', () => {
   });
 });
 
+describe('the runner', () => {
+  let w: World;
+  beforeAll(async () => {
+    w = await world();
+  });
+  afterAll(() => w?.h.close());
+
+  it('fills a slot as soon as its request ends: 200 bots due at once all act from one tick, not 32 a tick', async () => {
+    const drop = await openDraw(w, { quantity: 200 });
+    // A server that answers at once: the runner alone sets the pace.
+    let sent = 0;
+    const fast = new TestEntrantService({
+      ctx: w.h.ctx,
+      inject: async () => {
+        sent++;
+        return { statusCode: 201, body: '{}' };
+      },
+    });
+    fast.useTimers(false);
+    const run = await fast.start(drop, press(drop, { titane: 200 }), w.f.admin);
+    fast.useTimers(true);
+    try {
+      await fast.tick();
+      await fast.settle();
+      expect(sent).toBe(200);
+      await fast.tick();
+      expect(await statusOf(w, run.id)).toBe('DONE');
+    } finally {
+      await fast.close();
+    }
+  });
+});
+
 describe('the pool\'s cap', () => {
   let w: World;
   beforeAll(async () => {
@@ -296,7 +368,7 @@ describe('the pool\'s cap', () => {
       INSERT INTO test_entrants (account_id) SELECT id FROM a`.execute(w.h.ctx.db);
     const drop = await openDraw(w);
     const e = await rejects(w.tests.start(drop, press(drop, { titane: 2 }), w.f.admin), 'TEST_POOL_FULL', 409);
-    expect(e.publicMessage).toBe('The pool holds at most 5000 test accounts: this press needs 2 more, and 1 can still be made.');
+    expect(e.publicMessage).toBe('The pool holds at most 5000 test accounts: this press needs 2 more, and 1 can still be made. END TEST on an earlier test gives its accounts back.');
     expect(await w.tests.active()).toBeNull();
     const run = await w.tests.start(drop, press(drop, { titane: 1 }), w.f.admin);
     expect(run.entrants).toBe(1);
@@ -451,10 +523,18 @@ describe('a LIVE RELEASE end to end', () => {
     const orders = await w.h.ctx.db.selectFrom('orders').select(['status', 'addons']).where('drop_id', '=', release.id).execute();
     expect(orders).toHaveLength(3);
     expect(orders.every((o) => o.status === 'RESERVED' && (o.addons as unknown[]).length === 1)).toBe(true);
+    expect((await w.h.ctx.services.liveRoom.frame(release.id))?.room).toMatchObject({ left: 3 });
 
     const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
     expect(ended.report?.checks.map((c) => c.pass)).toEqual([true, true, true, true, true]);
     expect((await w.h.ctx.db.selectFrom('orders').select('status').where('drop_id', '=', release.id).execute()).every((o) => o.status === 'CANCELLED')).toBe(true);
+    // The places paid are closed too (REMOVED, `confirmed_at` cleared): the room sells their three pieces again.
+    const after = await w.h.ctx.db.selectFrom('live_entries').select(['status', 'confirmed_at', 'removed_by', 'removed_at', 'ended_at']).where('drop_id', '=', release.id).execute();
+    expect(after.map((e) => e.status).sort()).toEqual(['RELEASED', 'RELEASED', 'RELEASED', 'REMOVED', 'REMOVED', 'REMOVED']);
+    expect(after.filter((e) => e.status === 'REMOVED').every((e) => e.confirmed_at === null && e.removed_by === w.f.admin.id && e.removed_at?.getTime() === e.ended_at?.getTime())).toBe(true);
+    const removals = await w.h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.remove').where('target_id', '=', release.id).execute();
+    expect(removals.map((r) => r.details)).toEqual(Array.from({ length: 3 }, () => expect.objectContaining({ from: 'CONFIRMED', reason: 'test_ended' })));
+    expect((await w.h.ctx.services.liveRoom.frame(release.id))?.room).toMatchObject({ left: 6, held: 0 });
   });
 
   it('by hand: a bot on its turn secures and pays now (CONFIRM); RELEASE needs a held piece, and a draw\'s place is never released', async () => {

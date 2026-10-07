@@ -24,7 +24,7 @@ import type { AppContext } from './context.js';
 import { DomainError } from './errors.js';
 import { ipHashOf } from './http/client.js';
 import { errorBody, installErrorHandlers } from './http/errors.js';
-import { LiveHub, type LiveHubOptions } from './http/live-stream.js';
+import { LIVE_STREAM_ROUTES, LiveHub, type LiveHubOptions } from './http/live-stream.js';
 import { registerRateLimits } from './http/rate-limit.js';
 import { CONTENT_SECURITY_POLICY, registerSecurity } from './http/security.js';
 import { registerStatic } from './http/static.js';
@@ -139,10 +139,12 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
     throw shuttingDown();
   });
   // The server's status (services/system-status.ts, `app.systemStatus`): a sample every 2 s for the console's panel and
-  // a test's peaks, every response timed into its last 60 s; started when the app is ready, stopped when it closes.
+  // a test's peaks, every response timed into its last 60 s (a LIVE stream served, open for minutes, is not a response
+  // time; a stream refused is counted); started when the app is ready, stopped when it closes.
   const systemStatus = new SystemStatus({ db: ctx.db, live: liveHub, clock: ctx.clock, log: ctx.log });
   app.decorate('systemStatus', systemStatus);
-  app.addHook('onResponse', async (_request, reply) => {
+  app.addHook('onResponse', async (request, reply) => {
+    if (reply.statusCode === 200 && (LIVE_STREAM_ROUTES as readonly string[]).includes(request.routeOptions.url ?? '')) return;
     systemStatus.http.record(reply.statusCode, reply.elapsedTime);
   });
   app.addHook('onReady', async () => systemStatus.start());

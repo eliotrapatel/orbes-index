@@ -229,7 +229,7 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
       x = sql<SqlBool>`coalesce((select te.tier from test_entrants as te where te.account_id = ${account}), ${tierSql(piecesHeld(db, account))}) in (${sql.join(r.tiers)})`; // a test entrant's tier: its test row (club.ts clubStandings)
       break;
     case 'OWNS_MODEL':
-      x = exists(
+      x = sql<SqlBool>`(${exists(
         db
           .selectFrom('ownership as mo')
           .innerJoin('products as mp', 'mp.id', 'mo.product_id')
@@ -238,10 +238,10 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
           .where('mo.ended_at', 'is', null)
           .where('mp.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
           .where('mp.model_id', 'in', r.modelIds),
-      );
+      )} or exists (select 1 from test_entrants as te where te.account_id = ${account}))`; // a test entrant owns the release's model (services/test-entrants.ts)
       break;
     case 'OWNS_COLLECTION':
-      x = exists(
+      x = sql<SqlBool>`(${exists(
         db
           .selectFrom('ownership as co')
           .innerJoin('products as cp', 'cp.id', 'co.product_id')
@@ -251,7 +251,7 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
           .where('co.ended_at', 'is', null)
           .where('cp.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
           .where((w) => w(w.fn.coalesce('cp.collection_id', 'cm.collection_id'), 'in', r.collectionIds)),
-      );
+      )} or exists (select 1 from test_entrants as te where te.account_id = ${account}))`; // a test entrant owns the release's collection (services/test-entrants.ts)
       break;
     case 'SIZE': {
       const sizes = sql.join(r.sizes);

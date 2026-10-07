@@ -1997,16 +1997,16 @@ describe('migrations', () => {
     );
   });
 
-  /** What names an object of 0024a in a snapshot: its three tables. */
-  const of0024a = (o: string) => /\btest_(entrants|runs|run_entrants)\b/.test(o);
+  /** What names an object of 0024_z in a snapshot: its three tables. */
+  const of0024z = (o: string) => /\btest_(entrants|runs|run_entrants)\b/.test(o);
 
-  it('0024a adds the test entrants (test_entrants, test_runs, test_run_entrants), and nothing else; down restores 0024 exactly, and up again', async () => {
+  it('0024_z adds the test entrants (test_entrants, test_runs, test_run_entrants), and nothing else; down restores 0024 exactly, and up again', async () => {
     const latest = await snapshot();
-    const { with: withIt, without: before } = await rollBackTo('0024a_test_entrants');
+    const { with: withIt, without: before } = await rollBackTo('0024_z_test_entrants');
     const added = withIt.filter((o) => !before.includes(o));
-    expect(added.filter((o) => !of0024a(o))).toEqual([]);
-    expect(before.filter(of0024a)).toEqual([]);
-    expect(withIt.filter((o) => !of0024a(o))).toEqual(before);
+    expect(added.filter((o) => !of0024z(o))).toEqual([]);
+    expect(before.filter(of0024z)).toEqual([]);
+    expect(withIt.filter((o) => !of0024z(o))).toEqual(before);
     for (const c of [
       /^index CREATE UNIQUE INDEX test_runs_one_running ON public\.test_runs USING btree \(status\) WHERE \(status = 'RUNNING'::text\)$/,
       /^constraint test_entrants test_entrants_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
@@ -2015,11 +2015,11 @@ describe('migrations', () => {
     ]) {
       expect(added.some((o) => c.test(o)), String(c)).toBe(true);
     }
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0024a_test_entrants']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0024_z_test_entrants']);
     expect(await snapshot()).toEqual(latest);
   });
 
-  it('0024a: a test row\'s tier 0 to 3 and seniority 0 to 50; one RUNNING test in the whole database; ENDED with when and by whom, never otherwise; a bot\'s network a /24 of 100.x', async () => {
+  it('0024_z: a test row\'s tier 0 to 3 and seniority 0 to 50; one RUNNING test in the whole database; ENDED with when and by whom, never otherwise; a bot\'s network a /24 of 100.x', async () => {
     const run = (q: string) => sql.raw(q).execute(t.db);
     const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
     const statuses = await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'test_runs'::regclass AND conname = 'test_runs_status_check'`.execute(t.db);
@@ -2106,8 +2106,8 @@ describe('migrations', () => {
       '0023_releases_collectors',
       // NOCTURNE (plan of 2026-10-05): the variants of a model and a draw's price.
       '0024_model_variants',
-      // TEST ENTRANTS (2026-10-07): the pool, the tests and their bots; 0024a sorts before the next lot's 0025.
-      '0024a_test_entrants',
+      // TEST ENTRANTS (2026-10-07): the pool, the tests and their bots; 0024_z sorts after 0024 and before the next lot's 0025.
+      '0024_z_test_entrants',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

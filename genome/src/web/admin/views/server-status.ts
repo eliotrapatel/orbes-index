@@ -58,8 +58,9 @@ export function serverStatusPanel(ctx: ViewContext, opts: { activeTest?: boolean
   toggle.classList.add('sstatus__toggle');
   toggle.setAttribute('aria-expanded', 'false');
   toggle.setAttribute('aria-controls', 'server-status-rows');
-  // Only a change is announced: the banner is drawn again every 2 s.
-  const banner = h('p', { class: 'sstatus__banner', attrs: { hidden: true, 'aria-live': 'assertive' }, data: { testid: 'server-strained' } });
+  // Only a change is announced (its words are set only when they change); never hidden, so that a screen reader hears
+  // its first words: empty, it takes no room (styles.css).
+  const banner = h('p', { class: 'sstatus__banner', attrs: { 'aria-live': 'assertive' }, data: { testid: 'server-strained' } });
   const testBox = h('div', { class: 'sstatus__test', attrs: { hidden: true }, data: { testid: 'server-test' } });
   const panel = h(
     'section',
@@ -84,7 +85,6 @@ export function serverStatusPanel(ctx: ViewContext, opts: { activeTest?: boolean
     if (said !== bannerText) {
       bannerText = said;
       banner.textContent = said;
-      banner.hidden = said === '';
     }
     mount(fold, h('ul', { class: 'sstatus__rows', data: { testid: 'server-rows' } }, ...rows.map(rowItem)));
   };
@@ -92,7 +92,7 @@ export function serverStatusPanel(ctx: ViewContext, opts: { activeTest?: boolean
     load: () => ctx.api.systemStatus({ background: true }),
     apply,
     failed: () => {
-      note.textContent = 'UNAVAILABLE: THE LAST READ IS SHOWN';
+      note.textContent = read ? 'UNAVAILABLE: THE LAST READ IS SHOWN' : 'UNAVAILABLE';
       if (!read) mount(fold, h('p', { class: 'notice' }, 'The server’s status could not be read just now: it is asked again every 2 seconds.'));
     },
     everyMs: STATUS_REFRESH_MS,

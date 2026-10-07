@@ -3500,6 +3500,15 @@ a.bar__label:hover {
   transform: rotate(45deg);
 }
 
+/* No row red: the banner stays, empty and without room, so that its first words are announced. */
+.sstatus__banner:empty {
+  margin: 0;
+}
+
+.sstatus__banner:empty::before {
+  display: none;
+}
+
 /* The test running, on the Drops tab: its release, its status and test entrants, STOP. */
 .sstatus__test {
   padding: 12px 0 14px;

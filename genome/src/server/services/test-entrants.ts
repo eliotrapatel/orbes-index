@@ -1,5 +1,5 @@
 /**
- * TEST ENTRANTS (the owner's lot of 2026-10-07; migration 0024a): the console sends artificial collectors into a draw
+ * TEST ENTRANTS (the owner's lot of 2026-10-07; migration 0024_z): the console sends artificial collectors into a draw
  * or a LIVE RELEASE, to prove its process right, prove it holds a crowd and see it live.
  *
  * A test entrant is an ordinary ORBES account of the pool (`test-0001@orbes.test`, `TEST 0001`, ACTIVE, a password hash
@@ -8,15 +8,16 @@
  *  - its tier and seniority come from its test row (`test_entrants`), set by the press that sends it, never from pieces
  *    (club.ts `clubStandings`, which every reader of a tier uses: the draw, the early access, the LIVE line, access;
  *    and a segment's TIER rule, segments.ts);
- *  - it counts as owning the release's models and collection for a LIVE RELEASE's rule (live.ts `accessOf`);
+ *  - it counts as owning the release's models and collection for a LIVE RELEASE's rule (live.ts `accessOf`) and for a
+ *    segment's OWNS_MODEL and OWNS_COLLECTION rules (segments.ts: a release open to a segment of owners);
  *  - END TEST cleans up after it (below).
  *
- * The pool: a press takes accounts of the pool with no entry in the release and in no RUNNING test, and creates the
- * missing ones, at most TEST_POOL_MAX accounts in all. Each bot of a press gets its test row (its tier from the count
- * asked per tier, its seniority drawn within the profile's range), its country (drawn from the profile's list, or
- * none) and its account's age (`created_at` moved back by a number of days drawn within the profile's range: a new
- * account trips the bot radar). The shares of a press (who reserves, withdraws, pays, …) are exact: 70 % of 10 bots is
- * 7 of them, drawn at random.
+ * The pool: a press takes accounts of the pool with no entry in the release and in no test not yet ENDED (END TEST gives
+ * them back), and creates the missing ones, at most TEST_POOL_MAX accounts in all. Each bot of a press gets its test
+ * row (its tier from the count asked per tier, its seniority drawn within the profile's range), its country (drawn from
+ * the profile's list, or none) and its account's age (`created_at` moved back by a number of days drawn within the
+ * profile's range: a new account trips the bot radar). The shares of a press (who reserves, withdraws, pays, …) are
+ * exact: 70 % of 10 bots is 7 of them, drawn at random.
  *
  * A run: START (ADMIN, the phrase `TEST <8>`: a draw OPEN, or in its early access when some PLATINE and PALLADIUM are
  * to reserve; a LIVE RELEASE's room open) → RUNNING, its bots acting; ADD MORE (the same phrase) sends up to
@@ -26,10 +27,11 @@
  *
  * The runner (the MEDIUM method): in this process, each bot acts through this app's own public routes (`app.inject`),
  * signed in with its own session minted here (a collector arrives signed in), with the CSRF token and the Origin the
- * routes require, and from its own address in 100.64.0.0/10 (RFC 6598): its own /24 (100.64.0.0/24, 100.64.1.0/24, …),
- * or the shared 100.127.255.0/24 for the profile's « shared network » share. Validation, guards, rate limits, network
- * hashes, DB-IP and the bot radar all apply. One scheduler loop (every TICK_MS) runs the bots whose next step is due,
- * at most IN_FLIGHT_MAX at a time:
+ * routes require, and from its own address in 100.64.0.0/10 (RFC 6598): its account's own /24 (test-0001 100.64.0.0/24,
+ * test-0002 100.64.1.0/24, …, the same in every test), or the shared 100.127.255.0/24 for the profile's « shared
+ * network » share. Validation, guards, rate limits, network hashes, DB-IP and the bot radar all apply. One scheduler
+ * loop (every TICK_MS, and again as each request ends, so a slot freed is filled at once) runs the bots whose next step
+ * is due, at most IN_FLIGHT_MAX at a time:
  *  - a draw: ENTER at its arrival (a PLATINE or PALLADIUM drawn to reserve RESERVES while the early access is open; a
  *    bot that cannot enter yet waits for the opening, as a collector does); some WITHDRAW a few seconds later;
  *  - a LIVE RELEASE: I'LL BE THERE first for its share (before T0), ENTER with its size and pieces; then it follows its
@@ -49,13 +51,14 @@
  * as Client Services cancels one (the stock goes back, a piece to make is cancelled and its identity retired), their
  * ENTERED draw entries WITHDRAWN, their SELECTED, CONFIRMED and WAITLISTED ones LAPSED (`respond_by` = `handled_at` =
  * now, so `drop_entries_lapsed` holds: staff OFFER NEXT to real collectors), their open LIVE entries REMOVED (LiveService
- * REMOVE) and their I'LL BE THERE withdrawn before T0, their sessions ended; ENDED. The accounts stay in the pool.
+ * REMOVE) and their CONFIRMED ones too (the room sells their pieces again), their I'LL BE THERE withdrawn before T0,
+ * their sessions ended; ENDED. The accounts stay in the pool.
  * TODO (the next lot's merge): END TEST must also cancel the GIFT orders and the credits the next lot gives at PAY.
  *
  * Audited `test_run.start`, `.add`, `.stop`, `.confirm`, `.release`, `.end` (the ADMIN as actor); each bot's own actions
  * are audited by the routes as any account's; END TEST's clean-up `drop.withdraw`, `drop.entry.lapse` and
  * `drop.live.interest.withdraw` with `reason: "test_ended"`, `drop.live.remove` and `order.cancel` as their services
- * write them.
+ * write them (a CONFIRMED LIVE entry's `drop.live.remove` with `reason: "test_ended"` too).
  */
 import { randomInt } from 'node:crypto';
 import { sql } from 'kysely';
@@ -273,7 +276,7 @@ const testEnding = () => conflict('TEST_ENDING', 'END TEST is already under way 
 const drawNotOpen = () => conflict('TEST_DRAW_NOT_OPEN', 'Start the test while the draw is open.');
 const roomNotOpen = () => conflict('TEST_ROOM_NOT_OPEN', 'Start the test once the room is open.');
 const poolFull = (needed: number, left: number) =>
-  conflict('TEST_POOL_FULL', `The pool holds at most ${TEST_POOL_MAX} test accounts: this press needs ${needed} more, and ${left} can still be made.`);
+  conflict('TEST_POOL_FULL', `The pool holds at most ${TEST_POOL_MAX} test accounts: this press needs ${needed} more, and ${left} can still be made. END TEST on an earlier test gives its accounts back.`);
 const runFull = (left: number) => conflict('TEST_RUN_FULL', `A test sends at most ${TEST_RUN_MAX} test entrants: ${left} more can still be sent.`);
 const placeNotHeld = () => conflict('TEST_PLACE_NOT_HELD', 'This test entrant holds no place to confirm.');
 const holdNotHeld = () => conflict('TEST_HOLD_NOT_HELD', 'This test entrant holds no piece to release.');
@@ -405,7 +408,7 @@ const between = (min: number, max: number): number => (max <= min ? min : random
 const pick = <T>(xs: readonly T[]): T => xs[randomInt(xs.length)]!;
 const chunks = <T>(xs: readonly T[], n = CHUNK): T[][] => Array.from({ length: Math.ceil(xs.length / n) }, (_, i) => xs.slice(i * n, i * n + n));
 
-/** The address of bot `i` of a run: its own /24 of 100.64.0.0/10 (16 382 of them), or the shared one. */
+/** The address of the pool's account `i` (its number less one): its own /24 of 100.64.0.0/10 (16 382 of them), or the shared one. */
 export function testNetwork(i: number, shared: boolean): { network: string; ip: string } {
   if (shared) return { network: TEST_SHARED_NETWORK, ip: `100.127.255.${between(1, 254)}` };
   const prefix = `100.${64 + (i >> 8)}.${i & 255}`;
@@ -517,7 +520,8 @@ export class TestEntrantService {
     this.useTimers(false);
     this.run = null;
     await this.settle();
-    await this.sweeping;
+    // A sweep that failed is logged by its timer; the close goes on.
+    await this.sweeping?.catch(() => undefined);
   }
 
   /** The scheduler's and the sweeper's timers on or off (tests drive `tick` and `sweep` themselves). */
@@ -712,7 +716,7 @@ export class TestEntrantService {
           .where('status', 'in', ['RUNNING', 'DONE'])
           .execute();
         await this.settle();
-        await this.sweeping;
+        await this.sweeping?.catch(() => undefined);
       }
       const d = await this.db.selectFrom('drops').selectAll().where('id', '=', run.drop_id).executeTakeFirstOrThrow();
       // 2. The report, before anything is cleaned (kept from a first END TEST cut short).
@@ -952,7 +956,9 @@ export class TestEntrantService {
     const members: { run_id: string; account_id: string; network: string; plan: string; updated_at: Date }[] = [];
     accounts.forEach((a, k) => {
       const i = already + k;
-      const where = testNetwork(i, shared[k]!);
+      // Its /24 from its number in the pool (test-0001 → 100.64.0.0/24), so that no two tests of a release share one.
+      const number = Number(/^test-(\d+)@/.exec(a.email)?.[1] ?? 0);
+      const where = testNetwork(number >= 1 && number <= TEST_POOL_MAX ? number - 1 : i, shared[k]!);
       const offsetMs = n <= 1 ? 0 : Math.round((span * k) / n);
       const plan: BotPlan = { i, ip: where.ip, tier: tiers[k]!, arriveAt: new Date(now.getTime() + offsetMs).toISOString(), offsetMs };
       if (d.mode === 'DRAW') {
@@ -998,9 +1004,10 @@ export class TestEntrantService {
   }
 
   /**
-   * `n` accounts of the pool for release `d`: ACTIVE, with no entry in it (a draw's or a LIVE one) and in no RUNNING test;
-   * the missing ones created (`test-NNNN@orbes.test`, `TEST NNNN`, a password hash nothing matches, a test row), within
-   * TEST_POOL_MAX accounts in all (409 TEST_POOL_FULL).
+   * `n` accounts of the pool for release `d`: ACTIVE, with no entry in it (a draw's or a LIVE one) and in no test not yet
+   * ENDED (a test DONE and waiting for its draw keeps its accounts, their tiers and their sessions); the missing ones
+   * created (`test-NNNN@orbes.test`, `TEST NNNN`, a password hash nothing matches, a test row), within TEST_POOL_MAX
+   * accounts in all (409 TEST_POOL_FULL).
    */
   private async takePool(tx: Db, d: DropRow, n: number, now: Date): Promise<{ id: string; email: string }[]> {
     const free = await sql<{ id: string; email: string }>`
@@ -1010,7 +1017,7 @@ export class TestEntrantService {
          AND NOT EXISTS (SELECT 1 FROM drop_entries AS e WHERE e.drop_id = ${d.id} AND e.account_id = t.account_id)
          AND NOT EXISTS (SELECT 1 FROM live_entries AS e WHERE e.drop_id = ${d.id} AND e.account_id = t.account_id)
          AND NOT EXISTS (SELECT 1 FROM test_run_entrants AS r JOIN test_runs AS x ON x.id = r.run_id
-                          WHERE r.account_id = t.account_id AND (x.status = 'RUNNING' OR x.drop_id = ${d.id}))
+                          WHERE r.account_id = t.account_id AND (x.status <> 'ENDED' OR x.drop_id = ${d.id}))
        ORDER BY a.email_normalized
        LIMIT ${n}
        FOR UPDATE OF t`.execute(tx);
@@ -1106,22 +1113,32 @@ export class TestEntrantService {
         bot.busy = false;
         bot.pending = null;
         this.inFlight.delete(p);
+        // Its slot goes to the next bot due at once, not at the next tick: the load climbs with the bots sent.
+        if (this.run === run && this.timers) this.tick().catch((e) => this.ctx.log.error({ err: { message: (e as Error)?.message } }, 'test entrants: a tick failed'));
       });
     bot.pending = p;
     this.inFlight.add(p);
   }
 
-  /** Every bot has acted: the test is DONE (a draw's waits there for the staff's draw), its peaks kept. */
+  /**
+   * Every bot has acted: the test is DONE (a draw's waits there for the staff's draw), its peaks kept. Written first, and
+   * only while the test still counts the bots this runner holds: an ADD MORE committed meanwhile keeps it RUNNING, its
+   * new bots joining this runner.
+   */
   private async done(run: ActiveRun): Promise<void> {
     if (this.run !== run) return;
-    this.halt(run.id);
-    const peaks = stopRunPeaks(run.id);
-    await this.db
+    const peaks = currentRunPeaks(run.id);
+    const marked = await this.db
       .updateTable('test_runs')
       .set({ status: 'DONE', ...(peaks ? { peaks: jsonText(peaks) } : {}) })
       .where('id', '=', run.id)
       .where('status', '=', 'RUNNING')
-      .execute();
+      .where('entrants', '=', run.bots.length)
+      .returning('id')
+      .executeTakeFirst();
+    if (!marked) return;
+    this.halt(run.id);
+    stopRunPeaks(run.id);
   }
 
   /** A bot's due step. */
@@ -1396,13 +1413,15 @@ export class TestEntrantService {
   // ── END TEST ─────────────────────────────────────────────────────────────
 
   /**
-   * The clean-up of the test's accounts in release `d`, each step through the path that does it for anyone: the open
-   * orders cancelled one by one (OrderService), a LIVE RELEASE's open entries REMOVED (LiveService) and the I'LL BE THERE
-   * withdrawn before T0, a draw's ENTERED entries WITHDRAWN and its places LAPSED (under the release's lock, as a lock
-   * of an account withdraws them), the sessions ended. Returns what it did.
+   * The clean-up of the test's accounts in release `d`, each step through the path that does it for anyone: a LIVE
+   * RELEASE's open entries REMOVED (LiveService) and the I'LL BE THERE withdrawn before T0; a draw's ENTERED entries
+   * WITHDRAWN and its places LAPSED (under the release's lock, as a lock of an account withdraws them), before the
+   * orders, so that no staff Confirm makes one behind them; the open orders cancelled one by one (OrderService); then a
+   * LIVE RELEASE's places paid REMOVED, so that its room sells their pieces again; the sessions ended. Returns what it
+   * did.
    */
   private async cleanUp(d: DropRow, accounts: readonly string[], actor: Actor) {
-    const cleaned = { ordersCancelled: 0, entriesWithdrawn: 0, placesLapsed: 0, entriesRemoved: 0, interestWithdrawn: 0, sessionsEnded: 0 };
+    const cleaned = { ordersCancelled: 0, entriesWithdrawn: 0, placesLapsed: 0, entriesRemoved: 0, confirmedRemoved: 0, interestWithdrawn: 0, sessionsEnded: 0 };
     if (accounts.length === 0) return cleaned;
     if (d.mode === 'LIVE') {
       for (const ids of chunks(accounts)) {
@@ -1418,6 +1437,8 @@ export class TestEntrantService {
       }
       cleaned.interestWithdrawn = await this.withdrawInterest(d, accounts, actor);
     }
+    // A place LAPSED is never confirmed (DropService confirms a SELECTED one only): no order appears after the ones cancelled.
+    if (d.mode === 'DRAW') Object.assign(cleaned, await this.closeDrawEntries(d, accounts, actor));
     for (const ids of chunks(accounts)) {
       const orders = await this.db.selectFrom('orders').select('id').where('drop_id', '=', d.id).where('account_id', 'in', ids).where('status', 'in', ['RESERVED', 'PAID']).orderBy('reserved_at').execute();
       for (const o of orders) {
@@ -1425,7 +1446,7 @@ export class TestEntrantService {
         cleaned.ordersCancelled++;
       }
     }
-    if (d.mode === 'DRAW') Object.assign(cleaned, await this.closeDrawEntries(d, accounts, actor));
+    if (d.mode === 'LIVE') cleaned.confirmedRemoved = await this.removeConfirmed(d, accounts, actor);
     for (const ids of chunks(accounts)) {
       const r = await this.db.deleteFrom('sessions').where('subject_type', '=', 'account').where('subject_id', 'in', ids).executeTakeFirst();
       cleaned.sessionsEnded += Number(r.numDeletedRows);
@@ -1469,6 +1490,37 @@ export class TestEntrantService {
         await this.ctx.audit.record({ actor, action: 'drop.entry.lapse', targetType: 'drop', targetId: d.id, details: { entryId: e.id, rank: e.rank, from: e.status, reason: 'test_ended' } }, tx);
       }
       return { entriesWithdrawn: withdrawn.length, placesLapsed: lapsed.length };
+    });
+  }
+
+  /**
+   * A LIVE RELEASE's places the test's accounts paid for (CONFIRMED, their orders just cancelled) REMOVED, under the
+   * release's row lock (FOR UPDATE, as LiveService's controls take it), as REMOVE closes an open one: `removed_at` =
+   * `ended_at` now, `confirmed_at` cleared (`live_entries_status_confirmed`), their add-ons let go. The room then counts
+   * their pieces free: while the release runs, the engine's next pass gives them to the line. Audited `drop.live.remove`
+   * with `from: "CONFIRMED"` and `reason: "test_ended"`.
+   */
+  private async removeConfirmed(d: DropRow, accounts: readonly string[], actor: Actor): Promise<number> {
+    return inTransaction(this.db, async (tx) => {
+      await tx.selectFrom('drops').select('id').where('id', '=', d.id).forUpdate().execute();
+      const now = this.now();
+      let n = 0;
+      for (const ids of chunks(accounts)) {
+        const at = sql<Date>`greatest(${now}::timestamptz, joined_at)`;
+        const gone = await tx
+          .updateTable('live_entries')
+          .set({ status: 'REMOVED', confirmed_at: null, removed_by: actor.id!, removed_at: at, ended_at: at })
+          .where('drop_id', '=', d.id)
+          .where('account_id', 'in', ids)
+          .where('status', '=', 'CONFIRMED')
+          .where('resolution', 'is', null)
+          .returning('id')
+          .execute();
+        if (gone.length) await tx.deleteFrom('live_entry_addons').where('entry_id', 'in', gone.map((e) => e.id)).execute();
+        for (const e of gone) await this.ctx.audit.record({ actor, action: 'drop.live.remove', targetType: 'drop', targetId: d.id, details: { entryId: e.id, from: 'CONFIRMED', reason: 'test_ended' } }, tx);
+        n += gone.length;
+      }
+      return n;
     });
   }
 

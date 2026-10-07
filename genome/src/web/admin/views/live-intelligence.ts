@@ -376,7 +376,7 @@ export function liveIntelligenceSections(ctx: ViewContext, r: LiveRelease, data:
           subtitle('Came without a piece'),
           table(
             [
-              { label: 'Account', cell: (x) => h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: x.accountId }), 'data-testid': 'live-collectors-account' } }, x.email), kind: ['wide'] },
+              { label: 'Account', cell: (x) => h('span', null, h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: x.accountId }), 'data-testid': 'live-collectors-account' } }, x.email), testTag(x.email)), kind: ['wide'] },
               { label: 'Tier', cell: (x) => tierName(x.tier), kind: ['nowrap'] },
               { label: 'Size', cell: (x) => h('span', { class: 'live__size' }, x.size), kind: ['nowrap'] },
               { label: 'Status', cell: (x) => statusMark(humanize(x.status), toneOf('liveEntry', x.status)) },

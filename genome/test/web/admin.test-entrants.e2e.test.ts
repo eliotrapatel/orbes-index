@@ -10,7 +10,8 @@
  *     reads it all, its emails masked, without a button. END TEST (the phrase): PAST TESTS keeps it, 5/5, its report
  *     with its five checks and its peaks.
  *  2. A LIVE RELEASE's room open: a test sent from its page; the Drops tab shows it running, wherever it is, and STOP
- *     halts it; the release's page then says STOPPED, and END TEST still cleans up.
+ *     halts it; the release's page then says STOPPED; a second test sent, the first one's END TEST under PAST TESTS
+ *     still cleans it up, and the second ends from the top.
  *  3. Under 1 100 px the Server panel comes first, folded to its one line, which opens it.
  * No CSP violation, no page error, no figure in the display face.
  */
@@ -254,9 +255,33 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     await expect.poll(() => text(p, 'test-status'), { timeout: 15_000 }).toBe('STOPPED');
     expect(await p.locator('[data-testid=test-stop]').count()).toBe(0);
     expect(await p.locator('[data-testid=test-send]').count()).toBe(1);
-    await p.click('[data-testid=test-end]');
+    // A second test sent meanwhile: the STOPPED one goes under PAST TESTS with its END TEST, which still cleans it up.
+    await p.click('[data-testid=test-send]');
+    await p.waitForSelector('dialog.dialog');
+    await p.fill('dialog input[name="tier:titane"]', '2');
+    await p.selectOption('dialog select[name=arrival]', 'before');
+    await confirmDialog(p, `TEST ${id8}`);
+    await expect.poll(() => text(p, 'test-status'), { timeout: 15_000 }).toBe('RUNNING');
+    // STOP keeps its focus while the test's figures change under it (read again every 2 s).
+    await p.focus('[data-testid=test-stop]');
+    const fan = await ctx.services.auth.registerAccount({ email: 'tests.fan@example.com', password: 'tests fan passphrase 2026' }, {});
+    const size = await ctx.db.selectFrom('drop_sizes').select('id').where('drop_id', '=', r.id).executeTakeFirstOrThrow();
+    await ctx.services.live.enter(fan.account.id, r.id, { sizeId: size.id }, { type: 'account', id: fan.account.id });
+    await expect.poll(async () => (await p.locator('[data-testid=test-release] .kpi__value').first().textContent())?.trim(), { timeout: 15_000 }).toBe('1');
+    expect(await p.evaluate(() => document.activeElement?.getAttribute('data-testid'))).toBe('test-stop');
+    await expect.poll(() => p.locator('[data-testid=test-past-end]').count(), { timeout: 15_000 }).toBe(1);
+    expect(await p.locator('[data-testid=test-past-checks]').allTextContents()).toEqual(['—']);
+    await p.click('[data-testid=test-past-end]');
+    await p.waitForSelector('dialog.dialog--danger');
     await confirmDialog(p, `END TEST ${id8}`);
     await expect.poll(() => text(p, 'test-past-checks'), { timeout: 30_000 }).toMatch(/^\d\/5$/);
+    expect(await p.locator('[data-testid=test-past-end]').count()).toBe(0);
+    expect(await text(p, 'test-status')).toBe('RUNNING');
+    // The test sent since ends from the top.
+    await p.click('[data-testid=test-end]');
+    await confirmDialog(p, `END TEST ${id8}`);
+    await expect.poll(async () => (await p.locator('[data-testid=test-past-checks]').allTextContents()).filter((x) => /^\d\/5$/.test(x)).length, { timeout: 30_000 }).toBe(2);
+    expect(await p.locator('[data-testid=test-status]').count()).toBe(0);
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);
