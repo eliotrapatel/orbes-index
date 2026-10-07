@@ -13,7 +13,7 @@ import { DEFAULT_CARE, ORBES_CARE, ORDERS, PIECES } from './copy.js';
 import { orderDate } from './orders-model.js';
 import { releasePath } from './releases-model.js';
 import type { ClientServices, IncidentType, OwnedPiece, PieceOrigin, ServiceRecord } from './types.js';
-import { formatDate, formatDateLong, photoModels, pieceLines, productLines, upper, validGlyphs, warrantyModel, type GenomeModel, type PhotoModel, type Row } from './view-model.js';
+import { formatDate, formatDateLong, modelVariantLine, photoModels, pieceLines, productLines, upper, validGlyphs, warrantyModel, type GenomeModel, type PhotoModel, type Row } from './view-model.js';
 
 export type PieceTabId = 'ownership' | 'warranty' | 'service' | 'care';
 
@@ -38,6 +38,8 @@ export interface PieceModel {
   key: string;
   /** The model's name, as the list and the piece's page title it (C3, C4): `MONOLITHE`. */
   name: string;
+  /** The line right under the name, in the list and on the piece's page (plan NEXT LOT §3.1): its model's variant, `STEEL`; null without one. */
+  variant: string | null;
   /** Under the name on the piece's page (C4; addition 1): TYPE / CATEGORY / MATERIAL / SIZE 17 / CREATED YYYY. */
   pieceLines: string[];
   /** Under the name in the list (C3; addition 1): `BRACELET · 925 STERLING SILVER · SIZE 17`. */
@@ -52,7 +54,7 @@ export interface PieceModel {
   origin: PieceOriginModel | null;
   /** The GENOME on the plate; absent when the server sent none, or one the app cannot draw faithfully. */
   genome?: GenomeModel;
-  /** MODEL / TYPE / CATEGORY / MATERIAL / CREATED YYYY. */
+  /** MODEL / VARIANT (with a label) / TYPE / CATEGORY / MATERIAL / CREATED YYYY. */
   productLines: string[];
   /**
    * The photographs of the piece (F-04), its own first, then its model's, each with its alternative text: those of an
@@ -203,6 +205,7 @@ export function pieceModel(p: OwnedPiece, opts: { now?: Date; offsetMinutes?: nu
     productId,
     key: productId.toLowerCase(),
     name: upper(p.model),
+    variant: modelVariantLine(p.modelVariant),
     pieceLines: lines,
     listLine: [upper(p.type), upper(p.material), size ?? ''].filter((x) => x.length > 0).join(' · '),
     stateLine: registered && p.since ? `${status} · ${PIECES.since(formatDate(p.since))}` : status,

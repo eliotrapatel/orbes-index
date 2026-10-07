@@ -67,6 +67,7 @@ export function certificateScreen(r: CertificateLookup | null, opts: { offsetMin
     lead: CERTIFICATE.lead.valid,
     productId,
     key: productId.toLowerCase(),
+    // The piece's modelVariant rides with it: MODEL / VARIANT / TYPE / … (plan NEXT LOT §3.1).
     productLines: productLines(p),
     recordRows: record,
     certificateRows: [

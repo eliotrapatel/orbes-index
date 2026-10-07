@@ -259,6 +259,8 @@ class PieceCard {
       'section',
       { class: 'n-ctr n-result__lines n-piece__lines', attrs: { 'aria-label': 'The piece' } },
       h('h1', { class: 'n-g n-t1 n-result__name', id: 'piece-title', attrs: { tabindex: -1 } }, ...withNumerals(m.name)),
+      // Plan NEXT LOT §3.1: the model's variant on its own line, right under its name, in the style of the lines.
+      m.variant ? h('p', { class: 'n-g n-lines__line piece__variant' }, ...withNumerals(m.variant)) : null,
       h('ul', { class: 'n-lines n-result__line-list piece__lines' }, ...m.pieceLines.map((line) => h('li', { class: 'n-g n-lines__line' }, ...withNumerals(line)))),
       slug ? h('p', { class: 'n-result__model-line' }, textLink(LOOKBOOK.seeModel, { href: lookbookSheetPath(slug), onOpen: deps.onModel ? () => deps.onModel!(slug) : undefined, extraClass: 'n-piece__model-link' })) : null,
     );

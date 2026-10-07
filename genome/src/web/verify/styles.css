@@ -646,6 +646,19 @@ body.nocturne .pieces__empty {
   list-style: none;
 }
 
+/* Plan NEXT LOT §3.1: the model's variant, right under its name, read as the first of the lines under it (their gap). */
+.n-result__variant,
+.piece__variant {
+  margin-top: 16px;
+  padding: 0 var(--n-margin);
+  overflow-wrap: anywhere;
+}
+
+.n-result__variant + .n-result__line-list,
+.piece__variant + .n-result__line-list {
+  margin-top: 7px;
+}
+
 .n-result__model-line {
   margin-top: 22px;
 }
@@ -1163,6 +1176,12 @@ body.nocturne .view--piece {
 
 .n-pieces__line {
   margin-top: 8px;
+}
+
+/* Plan NEXT LOT §3.1: the model's variant under the name, in the style of the line under it. */
+.n-pieces__variant {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
 }
 
 .n-pieces__state {

@@ -41,6 +41,19 @@ function piece(extra: Partial<OwnedPiece> = {}): OwnedPiece {
   };
 }
 
+describe('MY PIECES: the variant line (plan NEXT LOT §3.1)', () => {
+  it('names the model variant on its own line, in capitals, second of the product lines; nothing for a blank label', () => {
+    const m = pieceModel(piece({ modelVariant: '  Brushed   steel ', variant: '17' }));
+    expect(m.name).toBe('MONOLITHE');
+    expect(m.variant).toBe('BRUSHED STEEL');
+    expect(m.productLines).toEqual(['MONOLITHE', 'BRUSHED STEEL', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    // The lines under it are unchanged: the size stays in them, the variant is not.
+    expect(m.listLine).toBe(pieceModel(piece({ variant: '17' })).listLine);
+    expect(m.pieceLines).toEqual(pieceModel(piece({ variant: '17' })).pieceLines);
+    for (const none of [null, '', '   ']) expect(pieceModel(piece({ modelVariant: none })).variant).toBeNull();
+  });
+});
+
 describe('MY PIECES: a piece on its plate', () => {
   it('draws the GENOME of the list (integer version, glyph ids as one pattern) as the result does, and the same product lines', () => {
     const m = pieceModel(piece());
@@ -51,6 +64,8 @@ describe('MY PIECES: a piece on its plate', () => {
     expect(genomeRowMarkup(m.genome!, { layout: 'orbit' })).not.toBeNull();
     expect(m.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
     expect(m.productLines).toEqual(productLines({ model: 'Monolithe', type: 'Ring', category: { name: 'Jewelry' }, material: '925 Sterling Silver', createdYear: 2026 }));
+    // Without a model variant, no line under the name (plan NEXT LOT §3.1).
+    expect(m.variant).toBeNull();
     // A genome the app cannot draw faithfully is left out, never guessed.
     expect(pieceModel(piece({ genome: { ...piece().genome!, glyphs: [1, 2, 3] } })).genome).toBeUndefined();
     expect(pieceModel(piece({ genome: null })).genome).toBeUndefined();

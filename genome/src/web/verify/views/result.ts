@@ -198,6 +198,8 @@ export function resultView(vm: ResultViewModel, handlers: ResultHandlers): Resul
         'section',
         { class: 'n-ctr n-result__lines', attrs: { 'aria-label': 'The piece' } },
         vm.modelName ? h('h2', { class: 'n-g n-t1 n-result__name' }, ...withNumerals(vm.modelName)) : null,
+        // Plan NEXT LOT §3.1: the model's variant on its own line, right under its name, in the style of the lines.
+        vm.modelVariant ? h('p', { class: 'n-g n-lines__line n-result__variant' }, ...withNumerals(vm.modelVariant)) : null,
         h('ul', { class: 'n-lines n-result__line-list' }, ...vm.pieceLines.map((line) => h('li', { class: 'n-g n-lines__line' }, ...withNumerals(line)))),
         // Under the lines that name the model: its sheet in THE COLLECTION, a text link (the hairline button stays the foot's).
         slug

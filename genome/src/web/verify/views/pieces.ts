@@ -350,6 +350,8 @@ class PiecesPage {
     see.setAttribute('aria-describedby', titleId);
     const words = [
       h('div', { class: 'n-sb n-pieces__name-line' }, h('h2', { class: 'n-g n-t2 n-pieces__name', id: titleId }, ...withNumerals(m.name)), h('span', { class: 'n-sm n-num n-pieces__id', text: m.productId })),
+      // Plan NEXT LOT §3.1: the model's variant on its own line, right under the name, in the style of the line under it.
+      m.variant ? h('p', { class: 'n-g n-lb n-pieces__variant' }, ...withNumerals(m.variant)) : null,
       m.listLine ? h('p', { class: 'n-g n-lb n-pieces__line' }, ...withNumerals(m.listLine)) : null,
       h('p', { class: 'n-state n-pieces__state' }, m.registered ? icon('check', { small: true }) : null, ...stateWords(m.stateLine)),
       h('p', { class: 'n-pieces__see-line' }, see),

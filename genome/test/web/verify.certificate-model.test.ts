@@ -97,6 +97,17 @@ describe('certificate page', () => {
     expect(odd.key).toBe('');
   });
 
+  it('puts the model variant right under the model in the piece\'s lines (plan NEXT LOT §3.1), and nothing without one', () => {
+    const s = certificateScreen(valid({ piece: { ...valid().piece, modelVariant: 'Steel' } }));
+    if (s.kind !== 'valid') throw new Error(s.kind);
+    expect(s.productLines).toEqual(['MONOLITHE', 'STEEL', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    for (const none of [null, undefined, ' ']) {
+      const plain = certificateScreen(valid({ piece: { ...valid().piece, modelVariant: none } }));
+      if (plain.kind !== 'valid') throw new Error(plain.kind);
+      expect(plain.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    }
+  });
+
   it('says DISCONTINUED · <year> last of the piece\'s lines once its model was (P-R06), as the result does', () => {
     const s = certificateScreen(valid({ piece: { ...valid().piece, discontinuedYear: 2027 } }));
     if (s.kind !== 'valid') throw new Error(s.kind);

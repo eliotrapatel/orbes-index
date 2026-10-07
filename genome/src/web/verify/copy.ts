@@ -807,6 +807,14 @@ export const DISCONTINUED = Object.freeze({
 });
 
 /**
+ * The model's variant (plan NEXT LOT §3.1): its label on its own line under the model's name (the label itself, no
+ * word added), and the result's PRODUCT tab has its row, under MODEL. Never the piece's size, which is SIZE.
+ */
+export const MODEL_VARIANT = Object.freeze({
+  row: 'VARIANT',
+});
+
+/**
  * THE COLLECTION (P-R02, /verify/lookbook): the lookbook of the models ORBES shows, grouped by collection, each on an
  * ivory plate with SEE THE MODEL; then a model's sheet (/verify/lookbook/<slug>): its photographs, its story, its
  * specifications and its care. An owner signed in also sees THE PRIVATE SALON (P-X08): the reserved models its tier

@@ -34,10 +34,12 @@ import {
   formatDateTimeLong,
   initialTab,
   isAuthenticState,
+  modelVariantLine,
   modelWithVariant,
   normalizeCodeInput,
   photoModels,
   pieceLines,
+  productLines,
   recoveryContactModel,
   registrationOpen,
   resultViewModel,
@@ -182,13 +184,46 @@ describe('verify view-model: AUTHENTIC', () => {
     expect(vm.ownership).toEqual({ kind: 'unregistered' });
   });
 
-  it('keeps the size out of the brand lines (contract §4) but lists it as SIZE (NOCTURNE N1: the field set at issuance, formerly VARIANT; a value written before as it is), and falls back to the default care text', () => {
+  it('keeps the size out of the brand lines (contract §4, MODEL / VARIANT / TYPE / CATEGORY / MATERIAL / CREATED since NEXT LOT §3.1) but lists it as SIZE (NOCTURNE N1: the field set at issuance, formerly VARIANT; a value written before as it is), and falls back to the default care text', () => {
     // The demo's O26-J-00184 is a SIZE 52 MONOLITHE RING: its lines read MONOLITHE / RING / JEWELRY / 925 STERLING SILVER / CREATED 2026.
     const v = resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, variant: 'Size 52', care: '  ' } }));
     expect(v.productLines).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
     expect(v.productRows).toContainEqual(['SIZE', 'SIZE 52']);
+    // Without a model variant, no VARIANT row: VARIANT is the model's variant, never the size.
     expect(v.productRows.map((r) => r[0])).not.toContain('VARIANT');
     expect(v.care).toBe(DEFAULT_CARE);
+    // With one (« Steel »), the line comes second and the row right under MODEL; the size is still SIZE.
+    const steel = resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, modelVariant: 'Steel', variant: 'Size 52' } }));
+    expect(steel.productLines).toEqual(['MONOLITHE', 'STEEL', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    const keys = steel.productRows.map((r) => r[0]);
+    expect(steel.productRows[keys.indexOf('MODEL')]).toEqual(['MODEL', 'MONOLITHE']);
+    expect(steel.productRows[keys.indexOf('MODEL') + 1]).toEqual(['VARIANT', 'STEEL']);
+    expect(steel.productRows).toContainEqual(['SIZE', 'SIZE 52']);
+    expect(steel.productRows.filter((r) => r[0] === 'VARIANT')).toEqual([['VARIANT', 'STEEL']]);
+  });
+});
+
+describe('verify view-model: the variant line (plan NEXT LOT §3.1)', () => {
+  it('modelVariantLine trims, keeps runs of spaces to one, writes capitals, and treats a blank label as none', () => {
+    expect(modelVariantLine('Steel')).toBe('STEEL');
+    expect(modelVariantLine('  Brushed   cobalt \t')).toBe('BRUSHED COBALT');
+    for (const none of ['', '   ', null, undefined]) expect(modelVariantLine(none)).toBeNull();
+  });
+
+  it('productLines puts the variant second, and is exactly as before without one', () => {
+    expect(productLines({ ...PRODUCT, modelVariant: 'Steel' })).toEqual(['MONOLITHE', 'STEEL', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    expect(productLines({ ...PRODUCT, modelVariant: '  ' })).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+    expect(productLines({ ...PRODUCT })).toEqual(['MONOLITHE', 'RING', 'JEWELRY', '925 STERLING SILVER', 'CREATED 2026']);
+  });
+
+  it('sets modelVariant with modelName on an authentic result, and never on one that is not', () => {
+    const vm = resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, modelVariant: 'Blue', variant: '17' } }));
+    expect(vm.modelName).toBe('MONOLITHE');
+    expect(vm.modelVariant).toBe('BLUE');
+    // The piece's lines under it are unchanged: the variant is its own line.
+    expect(vm.pieceLines).toEqual(['RING', 'JEWELRY', '925 STERLING SILVER', 'SIZE 17', 'CREATED 2026']);
+    expect(resultViewModel(outcome('AUTHENTIC', { product: { ...PRODUCT, variant: '17' } })).modelVariant).toBeUndefined();
+    expect(resultViewModel(outcome('INVALID_SIGNATURE')).modelVariant).toBeUndefined();
   });
 });
 

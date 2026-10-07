@@ -26,7 +26,7 @@
  */
 import { contactLines, type ContactLines } from '../shared/client-services.js';
 import { isLookbookSlug } from '../shared/lookbook.js';
-import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
+import { ASSURANCE_NOTE, CONTACT, DEFAULT_CARE, DISCONTINUED, FALLBACK_TITLES, MODEL_VARIANT, PHOTOS, RESALE_ACTION, RESALE_GUIDANCE } from './copy.js';
 import { scanContext, warrantyContext, type WriteContext } from './messages-model.js';
 import type { StoryInput } from './story-card.js';
 import { VERIFICATION_STATES, type ClientServices, type VerificationState, type VerifyOutcome, type WarrantyStatus } from './types.js';
@@ -150,13 +150,15 @@ export interface ResultViewModel {
   /** The address of its model's sheet in THE COLLECTION (P-R02), under the product lines: authentic results of a PUBLIC model only. */
   lookbook?: string;
   genome?: GenomeModel;
-  /** Brand lines: MODEL / TYPE / CATEGORY / MATERIAL / CREATED YYYY, then DISCONTINUED · YYYY when its model was (P-R06). */
+  /** Brand lines: MODEL / VARIANT (with a label) / TYPE / CATEGORY / MATERIAL / CREATED YYYY, then DISCONTINUED · YYYY when its model was (P-R06). */
   productLines: string[];
   /**
    * NOCTURNE (C9, C13, C14): the model's name over the lines, then TYPE / CATEGORY / MATERIAL / SIZE 17 / CREATED YYYY
    * (addition 1: the piece's size, from the issuance field Size), then DISCONTINUED · YYYY. Empty with no product.
    */
   modelName?: string;
+  /** The line right under the model's name (plan NEXT LOT §3.1): its variant, `STEEL`; set with `modelName`, only with a label. */
+  modelVariant?: string;
   pieceLines: string[];
   tabs: TabId[];
   productRows: Row[];
@@ -322,9 +324,23 @@ export function upper(s: string | undefined | null): string {
   return (s ?? '').trim().toUpperCase();
 }
 
-/** Contract §4: exactly MODEL / TYPE / CATEGORY / MATERIAL / CREATED (the size belongs to the rows), as a result and MY PIECES show them. */
+/**
+ * The model's variant as the line under its name shows it (plan NEXT LOT §3.1): its label as stored, trimmed, runs of
+ * spaces kept to one, in capitals (`STEEL`, `BLUE`); null for a model without one, or a blank label.
+ */
+export function modelVariantLine(label: string | null | undefined): string | null {
+  const line = typeof label === 'string' ? label.trim().replace(/\s+/g, ' ').toUpperCase() : '';
+  return line === '' ? null : line;
+}
+
+/**
+ * Contract §4, with the variant line of plan NEXT LOT §3.1: exactly MODEL / VARIANT / TYPE / CATEGORY / MATERIAL /
+ * CREATED (the size belongs to the rows), VARIANT only for a model with a label, as a result, MY PIECES and the
+ * shared certificate show them.
+ */
 export function productLines(p: {
   model: string;
+  modelVariant?: string | null;
   type: string;
   category?: { name: string } | null;
   material: string;
@@ -334,6 +350,7 @@ export function productLines(p: {
   const discontinued = discontinuedYearOf(p.discontinuedYear);
   return [
     upper(p.model),
+    modelVariantLine(p.modelVariant) ?? '',
     upper(p.type),
     upper(p.category?.name),
     upper(p.material),
@@ -446,10 +463,17 @@ export function resultViewModel(
   if (authentic && p) {
     vm.productLines = productLines(p);
     vm.pieceLines = pieceLines(p);
-    if (upper(p.model)) vm.modelName = upper(p.model);
+    // Plan NEXT LOT §3.1: the model's variant, the line under its name and a row under MODEL (never the size: SIZE).
+    const variant = modelVariantLine(p.modelVariant);
+    if (upper(p.model)) {
+      vm.modelName = upper(p.model);
+      if (variant) vm.modelVariant = variant;
+    }
     const rows: Row[] = [['PRODUCT ID', p.productId]];
     if (p.collection) rows.push(['COLLECTION', upper(p.collection)]);
-    rows.push(['MODEL', upper(p.model)], ['TYPE', upper(p.type)]);
+    rows.push(['MODEL', upper(p.model)]);
+    if (variant) rows.push([MODEL_VARIANT.row, variant]);
+    rows.push(['TYPE', upper(p.type)]);
     // The piece's free-text field set at issuance, its size (NOCTURNE N1: SIZE, formerly VARIANT), as written.
     if (p.variant) rows.push(['SIZE', upper(p.variant)]);
     rows.push(['CATEGORY', upper(p.category?.name)], ['MATERIAL', upper(p.material)], ['CREATED', String(p.createdYear)]);
