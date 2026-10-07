@@ -92,6 +92,11 @@
  *                 The C6 foot boards alone (c6-foot-*-phone.png, c6-foot-*-desk.png; plan NEXT-NINE, steps 6.0 and 7.2):
  *                 MONOLITHE's sheet, THE RELEASES OF THIS MODEL then PAIRS WELL WITH, signed out, signed in TITANE (the
  *                 fallback) and on the pairs stage (the console's picks). Not run by default (screens for the owner's review)
+ *   --only story
+ *                 SHARE TO STORIES alone (plan NEXT-NINE, step 8.3): the three story cards as their PNG (story-card-confirmed.png,
+ *                 story-card-selected.png, story-card-registered.png, 1080 × 1920), each place with its button
+ *                 (story-place-*.png) and the preview (story-preview-*.png), on the NOCTURNE demo's LIVE CONFIRMED, a draw's
+ *                 PLACE HELD and the ceremony. Not run by default (screens for the owner's review)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -165,7 +170,7 @@ const DESKTOP = { width: 1440, height: 900 } as const;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot';
+type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot' | 'story';
 
 function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | null } {
   let out = DEFAULT_OUT;
@@ -174,8 +179,8 @@ function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | nu
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot')) only = argv[++i] as Only;
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot' || argv[i + 1] === 'story')) only = argv[++i] as Only;
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot, --only story)`);
   }
   return { out, raw, only };
 }
@@ -1936,10 +1941,75 @@ async function captureFoot(shots: Shots): Promise<void> {
   await capturePhonesAndDesks(shots, FOOT_SHOTS, 'C6 foot', find);
 }
 
+// ── SHARE TO STORIES (plan NEXT-NINE, BP-10) ─────────────────────────────
+
+/**
+ * SHARE TO STORIES (plan NEXT-NINE, §3.8 BP-10, step 8.3): for each of the three places, the screen with its button
+ * (`story-place-<card>`), the preview with SHARE and SAVE IMAGE (`story-preview-<card>`, a share sheet that takes a file
+ * standing in), and the card itself as SAVE IMAGE writes it (`story-card-<card>`, the PNG unquantised, 1080 × 1920).
+ * `--only story` writes them alone, for the owner's review before merge.
+ */
+export const STORY_SHOTS: readonly { state: string; card: string }[] = Object.freeze([
+  { state: 'live-confirmed', card: 'confirmed' },
+  { state: 'draw-place-held', card: 'selected' },
+  { state: 'result-ceremony', card: 'registered' },
+]);
+
+async function captureStory(out: string, shots: Shots): Promise<void> {
+  const failures: string[] = [];
+  await eachState(
+    STORY_SHOTS.map((s) => stateById(s.state)),
+    async (state, { stage, demo, browser }) => {
+      const card = STORY_SHOTS.find((s) => s.state === state.id)!.card;
+      const opened = await openState(browser, stage, demo, state);
+      try {
+        const page = opened.page;
+        const open = page.getByRole('button', { name: 'SHARE TO STORIES' });
+        await open.waitFor({ state: 'visible', timeout: 20_000 });
+        await sleep(600);
+        await open.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+        await sleep(300);
+        shots.png(`story-place-${card}`, await page.screenshot({ type: 'png' }));
+        // A phone whose share sheet takes the file: SHARE shown, filled, over SAVE IMAGE.
+        await page.evaluate(() => {
+          Object.defineProperty(navigator, 'canShare', { configurable: true, value: () => true });
+          Object.defineProperty(navigator, 'share', { configurable: true, value: () => Promise.reject(new DOMException('closed', 'AbortError')) });
+        });
+        await open.click();
+        const dialog = page.getByRole('dialog', { name: 'Your story card' });
+        await dialog.waitFor({ state: 'visible' });
+        await page.waitForFunction(() => {
+          const img = document.querySelector<HTMLImageElement>('.n-story__card');
+          return !!img && img.complete && img.naturalWidth === 1080;
+        });
+        shots.png(`story-preview-${card}`, await page.screenshot({ type: 'png' }));
+        const [download] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: 'SAVE IMAGE' }).click()]);
+        const path = join(out, `story-card-${card}.png`);
+        await download.saveAs(path);
+        shots.written.push(path);
+        log(`  story-card-${card}.png  ${(statSync(path).size / 1024).toFixed(0)} KB`);
+      } catch (e) {
+        failures.push(`${state.id}: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        await opened.close();
+      }
+    },
+    log,
+  );
+  if (failures.length) throw new Error(`${failures.length} SHARE TO STORIES capture(s) failed:\n${failures.join('\n')}`);
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
   const { out, raw, only } = parseArgs(process.argv.slice(2));
+  if (only === 'story') {
+    const shots = new Shots(out, raw);
+    log('SHARE TO STORIES:');
+    await captureStory(out, shots);
+    log(`${shots.written.length} files in ${relative(process.cwd(), out) || '.'}`);
+    return;
+  }
   if (only === 'foot') {
     const shots = new Shots(out, raw);
     log('C6 foot:');
