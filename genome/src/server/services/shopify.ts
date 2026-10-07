@@ -222,6 +222,8 @@ interface OrderRow {
   shipped_at: Date | null;
   cancelled_at: Date | null;
   shopify_order_id: string | null;
+  shipping_minor: number | null;
+  with_order_id: string | null;
   email: string;
   model_name: string;
   sku_code: string | null;
@@ -423,7 +425,7 @@ export class ShopifyExportService {
       .leftJoin('carriers as c', 'c.id', 'o.carrier_id')
       .select([
         'o.id', 'o.channel', 'o.status', 'o.size_label', 'o.price_minor', 'o.currency', 'o.addons', 'o.buyer_name', 'o.buyer_address', 'o.reserved_at', 'o.paid_at',
-        'o.shipped_at', 'o.cancelled_at', 'o.shopify_order_id', 'a.email', 'm.name as model_name', 'k.code as sku_code', 'c.name as carrier_name', 'l.name as location_name',
+        'o.shipped_at', 'o.cancelled_at', 'o.shopify_order_id', 'o.shipping_minor', 'o.with_order_id', 'a.email', 'm.name as model_name', 'k.code as sku_code', 'c.name as carrier_name', 'l.name as location_name',
       ])
       .where('o.reserved_at', '>=', new Date(start))
       .where('o.reserved_at', '<', new Date(end + DAY_MS))
@@ -434,6 +436,8 @@ export class ShopifyExportService {
     const out: string[][] = [];
     for (const r of rows) {
       const subtotal = r.price_minor + r.addons.reduce((n, a) => n + a.priceMinor, 0);
+      // BP-19 T4: its shipping fee (0 when free by its tier); an order travelling with another carries none of its own.
+      const shipping = r.with_order_id === null ? (r.shipping_minor ?? 0) : 0;
       const fulfilled = shopifyFulfilled(r.status);
       const financial = shopifyFinancialStatus(r.status, r.paid_at !== null);
       const buyer = view.buyer({ name: r.buyer_name, address: r.buyer_address });
@@ -460,9 +464,9 @@ export class ShopifyExportService {
         'Fulfilled at': shopifyDate(fulfilled ? r.shipped_at : null),
         Currency: r.currency,
         Subtotal: majorUnits(subtotal),
-        Shipping: '0.00',
+        Shipping: majorUnits(shipping),
         Taxes: '0.00',
-        Total: majorUnits(subtotal),
+        Total: majorUnits(subtotal + shipping),
         'Shipping Method': r.carrier_name ?? '',
         'Created at': shopifyDate(r.reserved_at),
         ...line({ name: r.size_label ? `${r.model_name} - ${r.size_label}` : r.model_name, price: r.price_minor, sku: r.sku_code ?? '', shipping: true }),
@@ -475,7 +479,7 @@ export class ShopifyExportService {
         'Shipping Address1': lines[0] ?? '',
         'Shipping Address2': lines.slice(1).join(', '),
         'Canceled at': shopifyDate(r.cancelled_at),
-        'Refunded Amount': financial === 'refunded' ? majorUnits(subtotal) : '',
+        'Refunded Amount': financial === 'refunded' ? majorUnits(subtotal + shipping) : '',
         Vendor: SHOPIFY_VENDOR,
         Location: r.location_name,
         Id: r.shopify_order_id ?? '',

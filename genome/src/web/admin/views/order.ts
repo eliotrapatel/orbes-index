@@ -44,6 +44,7 @@ import {
   shipProblem,
   shipWaitsFor,
   sizeText,
+  shippingLine,
   termsChange,
   termsProblem,
   termsValues,
@@ -277,6 +278,27 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'currency', label: 'Currency', kind: 'select', options: ORDER_CURRENCIES.map((c) => ({ value: c, label: c })), value: v.currency },
       );
     }
+    if (acts.terms.shipping) {
+      fields.push(
+        {
+          name: 'shippingService',
+          label: 'Shipping service',
+          kind: 'select',
+          options: [
+            { value: 'STANDARD', label: 'Standard' },
+            { value: 'EXPRESS', label: 'Express' },
+          ],
+          value: v.shippingService,
+        },
+        {
+          name: 'shippingFee',
+          label: 'Shipping fee',
+          maxlength: 12,
+          value: v.shippingFee,
+          hint: 'In units: 20, or 20.50; 0 for free. Empty: no shipping line. A PLATINE or PALLADIUM order keeps its free shipping; express below PALLADIUM is paid at the fee entered.',
+        },
+      );
+    }
     if (acts.terms.engraving) {
       fields.push({ name: 'engraving', label: 'Engraving text', maxlength: ORDER_LIMITS.engraving, value: v.engraving, hint: 'As it is to be engraved, on one line; empty for none. Its piece to make carries it to the atelier.' });
     }
@@ -304,10 +326,11 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     { label: 'Size', value: sizeText({ sizeLabel: o.sizeLabel, skuKnown: o.skuId !== null }) },
     { label: 'Price', value: priceLine(o) },
     { label: 'Add-ons', value: addonsLine(o) },
+    { label: 'Shipping', value: h('span', { data: { testid: 'order-shipping' } }, shippingLine(o)) },
     { label: 'Engraving', value: o.engravingText ?? 'None' },
     { label: 'Surprise', value: o.surprise ?? 'None' },
   ];
-  const termsTool = acts.terms.size || acts.terms.price || acts.terms.engraving ? [button('Edit', { kind: 'ghost', testId: 'order-terms', onClick: editTerms })] : [];
+  const termsTool = acts.terms.size || acts.terms.price || acts.terms.engraving || acts.terms.shipping ? [button('Edit', { kind: 'ghost', testId: 'order-terms', onClick: editTerms })] : [];
   const orderSection = section('Order', defList(orderRows), { id: 'order-facts', tools: termsTool });
 
   // ── The buyer ────────────────────────────────────────────────────────────

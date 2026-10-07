@@ -183,9 +183,10 @@ export type ShopRequestOutcome = (typeof SHOP_REQUEST_OUTCOMES)[number];
 
 /**
  * The channel an order comes from (orders.channel, migration 0022): an entry of a LIVE RELEASE CONFIRMED, an entry of a
- * draw confirmed by Client Services, a request of the private salon closed as ACCEPTED.
+ * draw confirmed by Client Services, a request of the private salon closed as ACCEPTED; since migration 0027 (BP-19 T5),
+ * a welcome GIFT, its own order at price 0 travelling with the order it was added to.
  */
-export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON'] as const;
+export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT'] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 
 /**
@@ -271,6 +272,14 @@ export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
  */
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
+
+/** What an account received on reaching a tier (tier_grants.kind, migration 0027, BP-19 T5): its welcome gift, its credit. */
+export const TIER_GRANT_KINDS = ['GIFT', 'CREDIT'] as const;
+export type TierGrantKind = (typeof TIER_GRANT_KINDS)[number];
+
+/** Why a credit taken off an order was given back (credit_uses.released_reason, migration 0027): removed, the order cancelled or returned. */
+export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
+export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
 
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
@@ -1173,6 +1182,16 @@ export interface OrdersTable {
   /** The piece that fulfils it. */
   product_id: ColumnType<string | null, string | null | undefined, string | null>;
   shopify_order_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /**
+   * Migration 0027 (BP-19 T4, T5): the order it travels with (a GIFT order, the 2nd to 5th piece of a LIVE entry), never
+   * changed; a GIFT order's grant.
+   */
+  with_order_id: ColumnType<string | null, string | null | undefined, string | null>;
+  gift_grant_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Its shipping, both or neither (NULL: none, as before): the service and the fee in its currency; the tier that made it free (2, 3), at 0 only. */
+  shipping_service: ColumnType<ShippingService | null, ShippingService | null | undefined, ShippingService | null>;
+  shipping_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  shipping_benefit: ColumnType<number | null, number | null | undefined, number | null>;
 }
 
 /** An order's history (migration 0022), append-only: each change as its audit action, the status after it, a note, who. */
@@ -1298,6 +1317,37 @@ export interface ClubProgramSettingsTable {
   experience_partner_min_tier: WithDefault<number>;
   updated_by: string | null;
   updated_at: TimestampDefault;
+}
+
+/**
+ * What an account received on reaching a tier (migration 0027, BP-19 T5): its welcome gift and its credit, once per tier
+ * and per account, ever (`tier_grants_once`); never deleted, its identity and amount never changed.
+ */
+export interface TierGrantsTable {
+  id: Generated<string>;
+  account_id: string;
+  tier: number;                        // 2 PLATINE, 3 PALLADIUM
+  kind: TierGrantKind;
+  granted_at: TimestampDefault;
+  /** A CREDIT's amount (1..100 000 000 minor units), currency and expiry; NULL on a GIFT. */
+  amount_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  currency: ColumnType<string | null, string | null | undefined, string | null>;
+  expires_at: TimestampNullable;
+  /** A GIFT's model as given, set each time it is attached to an order; NULL on a CREDIT. */
+  model_id: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+/** A credit taken off an order (migration 0027): released (removed, cancelled, returned) or open; never deleted. */
+export interface CreditUsesTable {
+  id: Generated<string>;
+  grant_id: string;
+  order_id: string;
+  amount_minor: number;                // > 0
+  applied_by: string | null;           // admin_users.id
+  applied_at: TimestampDefault;
+  released_at: TimestampNullable;
+  released_reason: ColumnType<CreditReleaseReason | null, CreditReleaseReason | null | undefined, CreditReleaseReason | null>;
+  released_by: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /** What an order's delivery costs below the free shipping of the tiers (migration 0026), per currency and service; optional, none inserted. */
@@ -1510,6 +1560,8 @@ export interface Database {
   order_alert_settings: OrderAlertSettingsTable;
   club_program_settings: ClubProgramSettingsTable;
   shipping_rates: ShippingRatesTable;
+  tier_grants: TierGrantsTable;
+  credit_uses: CreditUsesTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
   segments: SegmentsTable;
@@ -1617,6 +1669,8 @@ export type ClientConversationRow = Selectable<ClientConversationsTable>;
 export type ClientMessageRow = Selectable<ClientMessagesTable>;
 export type ClubProgramSettingsRow = Selectable<ClubProgramSettingsTable>;
 export type ShippingRateRow = Selectable<ShippingRatesTable>;
+export type TierGrantRow = Selectable<TierGrantsTable>;
+export type CreditUseRow = Selectable<CreditUsesTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

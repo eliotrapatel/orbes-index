@@ -10,7 +10,9 @@
  *                changed nor deleted (migration 0022's trigger); a credit note follows it.
  *   content      as issued, kept unchanged: the issuer (INVOICE_ISSUER), the buyer (the name and address ORBES Client
  *                Services entered on the order, and the account's email), the lines (the piece, its model and size,
- *                where it was sold; each add-on as sold), the currency, the subtotal and the total; `vat_rate_bp` and
+ *                where it was sold; each add-on as sold; since plan NEXT-NINE, BP-19 T4 and T5, its SHIPPING, a CREDIT
+ *                taken off it, negative, and the welcome GIFT travelling with it, at 0: each line read back with its
+ *                own kind), the currency, the subtotal and the total; `vat_rate_bp` and
  *                `vat_minor` NULL. A credit note repeats the lines, the buyer and the amounts of the invoice it
  *                cancels, in full, once (`credits_invoice_id`).
  *   history      issued in the transaction of the order's step (services/orders.ts): one entry of the event journal
@@ -67,11 +69,18 @@ export function monthRange(month: unknown): { from: Date; to: Date } {
 export const monthOf = (d: Date): string => d.toISOString().slice(0, 7);
 
 /** Where a piece was sold, as its invoice line says it beneath the piece. */
-const CHANNEL_WORDS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON' });
+const CHANNEL_WORDS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT' });
 
-/** One line as issued (`invoices.lines`). */
+/** The kinds of an invoice's lines: the piece, an add-on, and (BP-19) its shipping, a credit taken off it, a welcome gift. */
+export const INVOICE_LINE_KINDS = Object.freeze(['PIECE', 'ADDON', 'SHIPPING', 'CREDIT', 'GIFT'] as const);
+export type InvoiceLineKind = (typeof INVOICE_LINE_KINDS)[number];
+
+/** The tiers as a free shipping's or a credit's line names them. */
+const TIER_WORDS: Readonly<Record<2 | 3, string>> = Object.freeze({ 2: 'PLATINE', 3: 'PALLADIUM' });
+
+/** One line as issued (`invoices.lines`): a CREDIT's amount is negative. */
 export interface InvoiceLine {
-  kind: 'PIECE' | 'ADDON';
+  kind: InvoiceLineKind;
   label: string;
   detail: string | null;
   amountMinor: number;
@@ -190,6 +199,8 @@ async function nextSequence(tx: Db, kind: InvoiceKind, year: number, now: Date):
  * `invoice.issue`; returns the audit entry for the caller to write last. None when the order already has one.
  */
 export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date): Promise<AuditRecordInput | null> {
+  // A welcome gift has no invoice of its own: its order's carries its GIFT line (BP-19 T5).
+  if (o.channel === 'GIFT') return null;
   if (o.price_minor === null || o.currency === null) throw new Error(`issueInvoice: order ${o.id} has no price`);
   if (await tx.selectFrom('invoices').select('id').where('order_id', '=', o.id).where('kind', '=', 'INVOICE').executeTakeFirst()) return null;
   const facts = await tx
@@ -204,6 +215,10 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
   const lines: InvoiceLine[] = [
     { kind: 'PIECE', label: `${facts.model}${size}`, detail: [CHANNEL_WORDS[o.channel], facts.release].filter(Boolean).join(' · '), amountMinor: o.price_minor },
     ...o.addons.map((a): InvoiceLine => ({ kind: 'ADDON', label: a.label, detail: null, amountMinor: a.priceMinor })),
+    // BP-19 T4: its shipping, free by its tier or at its fee; an order travelling with another has no line of its own.
+    ...(o.shipping_service !== null && o.shipping_minor !== null && o.with_order_id === null
+      ? [{ kind: 'SHIPPING' as const, label: `SHIPPING · ${o.shipping_service}`, detail: o.shipping_benefit === 2 || o.shipping_benefit === 3 ? `FREE · ${TIER_WORDS[o.shipping_benefit]}` : null, amountMinor: o.shipping_minor }]
+      : []),
   ];
   const total = lines.reduce((n, l) => n + l.amountMinor, 0);
   const buyer: InvoiceBuyer = { name: o.buyer_name, address: o.buyer_address, email: facts.email };
@@ -278,10 +293,12 @@ export async function issueCreditNote(tx: Db, o: OrderRow, reason: 'cancel' | 'r
 
 const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 
-function linesOf(raw: unknown[]): InvoiceLine[] {
+/** The lines as issued, each known kind read as itself (an unknown stored kind reads as PIECE). */
+export function linesOf(raw: unknown[]): InvoiceLine[] {
   return raw.map((l) => {
     const x = (l ?? {}) as Record<string, unknown>;
-    return { kind: x.kind === 'ADDON' ? 'ADDON' : 'PIECE', label: str(x.label) ?? '', detail: str(x.detail), amountMinor: Number(x.amountMinor) || 0 };
+    const kind = (INVOICE_LINE_KINDS as readonly unknown[]).includes(x.kind) ? (x.kind as InvoiceLineKind) : 'PIECE';
+    return { kind, label: str(x.label) ?? '', detail: str(x.detail), amountMinor: Number(x.amountMinor) || 0 };
   });
 }
 

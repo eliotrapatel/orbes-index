@@ -164,6 +164,8 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       priceMinor: 480_000,
       currency: 'EUR',
       addons: [{ label: 'Engraving', priceMinor: 25_000 }],
+      // BP-19 T4: an account below PLATINE, no rate set: no shipping, as before.
+      shipping: null,
       status: 'RESERVED',
       ...(await times(ids.live1)),
       shipment: null,
@@ -187,6 +189,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       priceMinor: 490_000,
       currency: 'EUR',
       addons: [],
+      shipping: null,
       status: 'DELIVERED',
       ...(await times(ids.delivered)),
       shipment: { carrier: 'Colissimo', trackingNumber: '6A 1234 5678 901', trackingUrl: 'https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901' },
@@ -208,7 +211,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     const list = (safeJson(res) as { orders: Json[] }).orders;
     for (const o of list) {
       expect(Object.keys(o).sort()).toEqual(
-        ['addons', 'cancelledAt', 'channel', 'currency', 'deliveredAt', 'documents', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'size', 'status'].sort(),
+        ['addons', 'cancelledAt', 'channel', 'currency', 'deliveredAt', 'documents', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status'].sort(),
       );
       expect(Object.keys(o.documents).sort()).toEqual(['careGuide', 'certificate', 'creditNote', 'invoice']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);

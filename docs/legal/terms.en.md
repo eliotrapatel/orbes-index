@@ -226,7 +226,7 @@ Each piece reserved for an account is an order: a piece of a LIVE RELEASE confir
 
 **What is recorded.** For each order, the service records the account, where it comes from, the model, the size, the price, the options, the surprise of its release, the engraving text, the buyer's name and address, the time of each step with the note ORBES Client Services may add, the carrier, the tracking number and the value declared for its insurance, where its piece is kept, and its invoices; the privacy policy says more (article 17).
 
-*Code: R118, R119, R120, R121, R122, R123, R124, R125, R126, R127, R128, R129, R130, R131, R132.*
+*Code: R118, R119, R120, R121, R122, R123, R124, R125, R126, R127, R128, R129, R130, R131, R132, R146.*
 
 ## Article 15 — The owners' circle
 

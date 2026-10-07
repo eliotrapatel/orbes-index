@@ -59,7 +59,7 @@ const HOLDING: readonly OrderStatus[] = ['RESERVED', 'PAID'];
 // ── Words ──────────────────────────────────────────────────────────────────
 
 /** A channel as the console names it. */
-export const CHANNEL_LABELS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'PRIVATE SALON' });
+export const CHANNEL_LABELS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'PRIVATE SALON', GIFT: 'Welcome gift' });
 
 /** Why an order is late, as its mark says it (no figure: the display face sets it). */
 export const LATE_LABELS: Readonly<Record<OrderLateRule, string>> = Object.freeze({
@@ -138,6 +138,21 @@ export function priceLine(o: Pick<OrderView, 'priceMinor' | 'currency'>): string
   return o.priceMinor === null || o.currency === null ? 'To enter' : formatMoney(o.priceMinor, o.currency);
 }
 
+const TIER_NAMES: Readonly<Record<2 | 3, string>> = Object.freeze({ 2: 'PLATINE', 3: 'PALLADIUM' });
+
+/**
+ * An order's shipping (plan NEXT-NINE, BP-19 T4): `Standard · free (PLATINE)`, `Express · free (PALLADIUM)`, `Standard ·
+ * € 20`, `With OR-…` for an order travelling with another, or `None`.
+ */
+export function shippingLine(o: Pick<OrderView, 'shipping' | 'withOrder' | 'currency'>): string {
+  const s = o.shipping;
+  if (o.withOrder) return `With ${o.withOrder.reference}`;
+  if (!s || s.service === null || s.minor === null) return 'None';
+  const service = s.service === 'EXPRESS' ? 'Express' : 'Standard';
+  if (s.benefit === 2 || s.benefit === 3) return `${service} · free (${TIER_NAMES[s.benefit]})`;
+  return `${service} · ${o.currency ? formatMoney(s.minor, o.currency) : moneyField(s.minor)}`;
+}
+
 /** An order's add-ons with their prices: `ENGRAVING € 150 · GIFT BOX € 0`, or None. */
 export function addonsLine(o: Pick<OrderView, 'addons' | 'currency'>): string {
   if (o.addons.length === 0) return 'None';
@@ -162,6 +177,7 @@ export const EVENT_LABELS: Readonly<Record<string, string>> = Object.freeze({
   'order.terms': 'Terms entered',
   'order.buyer': 'Buyer entered',
   'order.link': 'Piece linked',
+  'order.shipping': 'Shipping',
 });
 
 /** Who made a change of an order: a console user by email, the collector, or ORBES itself. */
@@ -197,8 +213,8 @@ export interface OrderActions {
   /** A return to the archive (its piece RETIRED): ADMIN only, as the server. */
   archive: boolean;
   location: boolean;
-  /** The size, the price and the currency (a draw's or a salon's), and the engraving text (any order). */
-  terms: { size: boolean; price: boolean; engraving: boolean };
+  /** The size, the price and the currency (a draw's or a salon's), the engraving text (any order), the shipping (RESERVED, its own). */
+  terms: { size: boolean; price: boolean; engraving: boolean; shipping: boolean };
   buyer: boolean;
   /** A piece picked from the stock: an order holding one, or a piece to make still being made; none linked yet. */
   linkPiece: boolean;
@@ -217,7 +233,7 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
     return: ok && (o.status === 'SHIPPED' || o.status === 'DELIVERED') && o.productId !== null,
     archive: can(role, 'archiveReturn') && (o.status === 'SHIPPED' || o.status === 'DELIVERED') && o.productId !== null,
     location: ok && holding && o.productId === null,
-    terms: { size: ok && holding && sale && o.productId === null, price: ok && o.status === 'RESERVED' && sale, engraving: ok && holding },
+    terms: { size: ok && holding && sale && o.productId === null, price: ok && o.status === 'RESERVED' && sale, engraving: ok && holding, shipping: ok && o.status === 'RESERVED' && !o.withOrder },
     buyer: ok,
     linkPiece: ok && holding && o.productId === null && (o.reservation === 'STOCK' || (o.reservation === 'BENCH' && o.bench !== null && (o.bench.status === 'TO_MAKE' || o.bench.status === 'IN_PROGRESS'))),
   };
@@ -289,6 +305,8 @@ export function termsValues(o: OrderView): Record<string, string> {
     price: o.priceMinor === null ? '' : moneyField(o.priceMinor),
     currency: o.currency ?? 'EUR',
     engraving: o.engravingText ?? '',
+    shippingService: o.shipping?.service ?? 'STANDARD',
+    shippingFee: o.shipping?.service && o.shipping.minor !== null ? moneyField(o.shipping.minor) : '',
   };
 }
 
@@ -303,6 +321,12 @@ export function termsProblem(o: OrderView, v: Record<string, string>, a: OrderAc
     const price = (v.price ?? '').trim();
     if (price && (parseMoney(price) === null || parseMoney(price)! > ORDER_AMOUNT_MAX_MINOR)) return 'The price is an amount in units: 4800, or 4800.50.';
     if (price && !(ORDER_CURRENCIES as readonly string[]).includes(v.currency ?? '')) return 'Choose the currency.';
+  }
+  if (a.shipping) {
+    const fee = (v.shippingFee ?? '').trim();
+    if (fee && (parseMoney(fee) === null || parseMoney(fee)! > ORDER_AMOUNT_MAX_MINOR)) return 'The shipping fee is an amount in units: 20, or 20.50; empty for no shipping.';
+    if (fee && v.shippingService !== 'STANDARD' && v.shippingService !== 'EXPRESS') return 'Choose the shipping service.';
+    if (fee && parseMoney(fee)! > 0 && o.shipping?.benefit && v.shippingService === o.shipping.service) return 'This order’s shipping is free with its tier: no fee is added to it.';
   }
   if ((v.engraving ?? '').trim().length > ORDER_LIMITS.engraving) return `An engraving has at most ${ORDER_LIMITS.engraving} characters.`;
   if (/[\r\n]/.test(v.engraving ?? '')) return 'An engraving is one line.';
@@ -330,6 +354,16 @@ export function termsChange(o: OrderView, v: Record<string, string>, a: OrderAct
   if (a.engraving) {
     const engraving = (v.engraving ?? '').trim() || null;
     if (engraving !== o.engravingText) change.engravingText = engraving;
+  }
+  if (a.shipping) {
+    // An empty fee: no shipping line.
+    const fee = (v.shippingFee ?? '').trim();
+    const minor = fee ? parseMoney(fee) : null;
+    const service = minor === null ? null : v.shippingService === 'EXPRESS' ? 'EXPRESS' : 'STANDARD';
+    if (service !== (o.shipping?.service ?? null) || minor !== (o.shipping?.minor ?? null)) {
+      change.shippingService = service;
+      change.shippingMinor = minor;
+    }
   }
   return change;
 }

@@ -381,9 +381,19 @@ export const ORDERS = Object.freeze({
     CANCELLED: 'This order has been cancelled.',
     RETURNED: 'This order has been returned to ORBES.',
   }),
-  /** Where the piece was sold. */
-  channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON' }),
-  rows: Object.freeze({ size: 'SIZE', price: 'PRICE', total: 'TOTAL', carrier: 'CARRIER', tracking: 'TRACKING NUMBER' }),
+  /** Where the piece was sold; a welcome gift (plan NEXT-NINE, BP-19 T5) travels with an order. */
+  channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT' }),
+  rows: Object.freeze({ size: 'SIZE', price: 'PRICE', shipping: 'SHIPPING', total: 'TOTAL', carrier: 'CARRIER', tracking: 'TRACKING NUMBER' }),
+  /**
+   * BP-19 T4: an order's shipping, free by its tier (FREE · PLATINE, FREE EXPRESS · PALLADIUM), at its fee (€ 20, EXPRESS
+   * · € 40), or carried by the order it travels with.
+   */
+  shipping: Object.freeze({
+    free: (tier: string) => `FREE · ${tier}`,
+    freeExpress: (tier: string) => `FREE EXPRESS · ${tier}`,
+    express: (fee: string) => `EXPRESS · ${fee}`,
+    withOrder: (reference: string) => `WITH ORDER ${reference}`,
+  }),
   oneSize: 'ONE SIZE',
   /** A draw's or a salon's size or price, before ORBES Client Services enters it. */
   toConfirm: 'TO BE CONFIRMED',

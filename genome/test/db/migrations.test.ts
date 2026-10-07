@@ -11,12 +11,12 @@ import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_
 const EXPECTED_TABLES = [
   'account_recovery_codes', 'accounts', 'activity_hourly', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs', 'authentication_events',
   'bench_items', 'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps',
-  'client_conversations', 'client_messages', 'club_program_settings', 'club_tiers', 'codes', 'collections', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops',
+  'client_conversations', 'client_messages', 'club_program_settings', 'club_tiers', 'codes', 'collections', 'credit_uses', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops',
   'event_journal', 'genomes', 'invoices', 'live_access_models', 'live_addons', 'live_entries', 'live_entry_addons', 'live_interest', 'live_messages',
   'live_tier_windows', 'media_objects', 'model_images', 'models', 'order_alert_settings', 'order_events', 'orders', 'ownership', 'ownership_certificates',
   'ownership_transfers', 'product_status_history', 'products', 'release_answers', 'retailers', 'returns', 'revocations', 'scan_daily_stats', 'scan_events',
   'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shipping_rates', 'shop_requests', 'sku_thresholds', 'skus', 'stock_locations', 'stock_movements',
-  'warranties',
+  'tier_grants', 'warranties',
 ];
 
 describe('migrations', () => {
@@ -212,6 +212,17 @@ describe('migrations', () => {
     }
     expect(has(/UNIQUE INDEX shipping_rates_pkey ON public\.shipping_rates USING btree \(currency, service\)$/)).toBe(true);
     expect(has(/INDEX shipping_rates_updated_by_idx ON public\.shipping_rates USING btree \(updated_by\)$/)).toBe(true);
+    // 0027: the grants and the orders' shipping. One grant of a kind per tier and account; one open GIFT order per
+    // grant; one open use per grant and order; every foreign key at the head of an index.
+    expect(has(/UNIQUE INDEX tier_grants_once ON public\.tier_grants USING btree \(account_id, tier, kind\)$/)).toBe(true);
+    expect(has(/INDEX tier_grants_model_id_idx ON public\.tier_grants USING btree \(model_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX orders_gift_grant_key ON public\.orders USING btree \(gift_grant_id\) WHERE \(status <> 'CANCELLED'::text\)$/)).toBe(true);
+    expect(has(/INDEX orders_with_order_idx ON public\.orders USING btree \(with_order_id\)$/)).toBe(true);
+    expect(has(/INDEX orders_gift_grant_idx ON public\.orders USING btree \(gift_grant_id\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX credit_uses_open_key ON public\.credit_uses USING btree \(grant_id, order_id\) WHERE \(released_at IS NULL\)$/)).toBe(true);
+    for (const c of ['grant', 'order', 'applied_by', 'released_by']) {
+      expect(has(new RegExp(`INDEX credit_uses_${c}_idx ON public\\.credit_uses USING btree \\(${c === 'grant' || c === 'order' ? `${c}_id` : c}\\)$`)), c).toBe(true);
+    }
   });
 
   /**
@@ -2261,6 +2272,122 @@ describe('migrations', () => {
     await check(run(`INSERT INTO circle_posts (kind, title, event_at, experience) VALUES ('INVITATION', 'Evening', now(), 'GALA')`), 'an unknown experience');
   });
 
+  /** What names an object of 0027 in a snapshot: its two tables, the orders' new columns and constraints, its indexes, the orders' re-created guard. */
+  const of0027 = (o: string) =>
+    /\b(tier_grants\w*|credit_uses\w*|with_order_id|gift_grant_id|shipping_service|shipping_minor|shipping_benefit|orders_shipping\w*|orders_with_order\w*|orders_gift_grant\w*)\b/.test(o);
+
+  it('0027 adds the grants, the credit uses, the orders\' shipping and GIFT channel, and nothing else; down restores 0026 exactly (the channel CHECK, orders_source and the identity guard of 0022), and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0027_tier_grants');
+    const added = withIt.filter((o) => !before.includes(o));
+    const removed = before.filter((o) => !withIt.includes(o));
+    // Besides its own objects, 0027 changes only the channel CHECK and orders_source (re-created with GIFT, the latter
+    // naming the new columns); the guard keeps its name.
+    expect(added.filter((o) => !of0027(o)).map((o) => o.split(' ').slice(0, 3).join(' '))).toEqual(['constraint orders orders_channel_check']);
+    expect(added).toContainEqual(expect.stringMatching(/^constraint orders orders_source CHECK .*\(channel = ANY \(ARRAY\['SALON'::text, 'GIFT'::text\]\)\) = \(drop_id IS NULL\).*gift_grant_id IS NOT NULL.*with_order_id IS NOT NULL/));
+    expect(removed.map((o) => o.split(' ').slice(0, 3).join(' '))).toEqual(['constraint orders orders_channel_check', 'constraint orders orders_source']);
+    expect(added).toContainEqual(expect.stringMatching(/^constraint orders orders_channel_check CHECK \(\(channel = ANY \(ARRAY\['LIVE'::text, 'DRAW'::text, 'SALON'::text, 'GIFT'::text\]\)\)\)$/));
+    expect(removed).toContainEqual(expect.stringMatching(/^constraint orders orders_channel_check CHECK \(\(channel = ANY \(ARRAY\['LIVE'::text, 'DRAW'::text, 'SALON'::text\]\)\)\)$/));
+    const columns = (table: string) => added.filter((o) => o.startsWith(`table ${table} `)).map((o) => o.split(' ')[2]);
+    expect(columns('tier_grants')).toEqual(['account_id', 'amount_minor', 'currency', 'expires_at', 'granted_at', 'id', 'kind', 'model_id', 'tier']);
+    expect(columns('credit_uses')).toEqual(['amount_minor', 'applied_at', 'applied_by', 'grant_id', 'id', 'order_id', 'released_at', 'released_by', 'released_reason']);
+    expect(columns('orders')).toEqual(['gift_grant_id', 'shipping_benefit', 'shipping_minor', 'shipping_service', 'with_order_id']);
+    for (const c of ['gift_grant_id', 'shipping_benefit', 'shipping_minor', 'shipping_service', 'with_order_id']) expect(added.some((o) => o.startsWith(`table orders ${c} `) && o.includes(' YES ')), c).toBe(true);
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual([
+      'trigger credit_uses credit_uses_immutable',
+      'trigger credit_uses credit_uses_no_delete',
+      'trigger tier_grants tier_grants_immutable',
+      'trigger tier_grants tier_grants_no_delete',
+    ]);
+    for (const c of [
+      /^constraint tier_grants tier_grants_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint tier_grants tier_grants_model_id_fkey FOREIGN KEY \(model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint tier_grants tier_grants_once UNIQUE \(account_id, tier, kind\)$/,
+      /^constraint tier_grants tier_grants_credit CHECK /,
+      /^constraint tier_grants tier_grants_gift CHECK \(\(\(kind = 'GIFT'::text\) OR \(model_id IS NULL\)\)\)$/,
+      /^constraint credit_uses credit_uses_grant_id_fkey FOREIGN KEY \(grant_id\) REFERENCES tier_grants\(id\) ON DELETE RESTRICT$/,
+      /^constraint credit_uses credit_uses_order_id_fkey FOREIGN KEY \(order_id\) REFERENCES orders\(id\) ON DELETE RESTRICT$/,
+      /^constraint credit_uses credit_uses_released CHECK /,
+      /^constraint orders orders_with_order_id_fkey FOREIGN KEY \(with_order_id\) REFERENCES orders\(id\) ON DELETE RESTRICT$/,
+      /^constraint orders orders_gift_grant_id_fkey FOREIGN KEY \(gift_grant_id\) REFERENCES tier_grants\(id\) ON DELETE RESTRICT$/,
+      /^constraint orders orders_shipping CHECK \(\(\(shipping_minor IS NULL\) = \(shipping_service IS NULL\)\)\)$/,
+      /^constraint orders orders_shipping_benefit CHECK \(\(\(shipping_benefit IS NULL\) OR \(shipping_minor = 0\)\)\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0027_tier_grants'));
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0027: a grant of a kind once per tier and account, ever, never deleted, its amount fixed; a credit with its amount, currency and expiry, a gift with neither; a use released with its reason; an order\'s shipping both or neither, free only at 0; a GIFT order with its grant and the order it travels with, one open per grant; down refused while a GIFT order or a credit use exists', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (16, 'N', 'Grant checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const account = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('grants@example.com', 'grants@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email_normalized, email, password_hash, role) VALUES ('grants@orbes.test', 'grants@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`.execute(t.db)).rows[0].id;
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (16, 'ECLIPSE', 'RING', 'GRTCHK') RETURNING id`.execute(t.db)).rows[0].id;
+    const location = (await sql<{ id: string }>`INSERT INTO stock_locations (name) VALUES ('GRANT CHECKS') RETURNING id`.execute(t.db)).rows[0].id;
+    const grant = (cols: string) => sql.raw<{ id: string }>(`INSERT INTO tier_grants (account_id, ${cols.split('|')[0]}) VALUES ('${account}', ${cols.split('|')[1]}) RETURNING id`).execute(t.db);
+    // A CREDIT has its amount, currency and expiry; a GIFT none; tiers 2 and 3 only; an expiry after the grant.
+    await check(grant(`tier, kind|2, 'CREDIT'`), 'a credit without its amount', 'tier_grants_credit');
+    await check(grant(`tier, kind, amount_minor, currency, expires_at|2, 'GIFT', 5000, 'EUR', now() + interval '1 year'`), 'a gift with an amount', 'tier_grants_credit');
+    await check(grant(`tier, kind, amount_minor, currency, expires_at, model_id|2, 'CREDIT', 5000, 'EUR', now() + interval '1 year', '${model}'`), 'a credit with a model', 'tier_grants_gift');
+    await check(grant(`tier, kind|1, 'GIFT'`), 'a TITANE grant');
+    await check(grant(`tier, kind, amount_minor, currency, expires_at|2, 'CREDIT', 0, 'EUR', now() + interval '1 year'`), 'a credit of 0');
+    await check(grant(`tier, kind, amount_minor, currency, expires_at|2, 'CREDIT', 5000, 'EUR', now() - interval '1 day'`), 'an expiry before the grant', 'tier_grants_expiry');
+    const credit = (await grant(`tier, kind, amount_minor, currency, expires_at|2, 'CREDIT', 5000, 'EUR', now() + interval '1 year'`)).rows[0].id;
+    const gift = (await grant(`tier, kind|2, 'GIFT'`)).rows[0].id;
+    // Once per tier and account, ever: never deleted, its identity and amount fixed; a gift's model set later.
+    await expect(grant(`tier, kind|2, 'GIFT'`)).rejects.toSatisfy((e) => isUniqueViolation(e, 'tier_grants_once'));
+    await run(`UPDATE tier_grants SET model_id = '${model}' WHERE id = '${gift}'`);
+    for (const q of [
+      `UPDATE tier_grants SET amount_minor = 9000 WHERE id = '${credit}'`,
+      `UPDATE tier_grants SET expires_at = now() + interval '2 years' WHERE id = '${credit}'`,
+      `UPDATE tier_grants SET tier = 3 WHERE id = '${gift}'`,
+      `DELETE FROM tier_grants WHERE id = '${gift}'`,
+    ]) {
+      await expect(run(q), q).rejects.toSatisfy(isGuardViolation);
+    }
+    // An order: shipping both or neither, a benefit at 0 only; a GIFT with its grant and the order it travels with.
+    const request = (await sql<{ id: string }>`INSERT INTO shop_requests (account_id, model_id, status, handled_at, outcome) VALUES (${account}, ${model}, 'CLOSED', now(), 'ACCEPTED') RETURNING id`.execute(t.db)).rows[0].id;
+    const order = (cols: Record<string, string>) => {
+      const all: Record<string, string> = { channel: `'SALON'`, account_id: `'${account}'`, model_id: `'${model}'`, location_id: `'${location}'`, ...cols };
+      return sql.raw<{ id: string }>(`INSERT INTO orders (${Object.keys(all).join(', ')}) VALUES (${Object.values(all).join(', ')}) RETURNING id`).execute(t.db);
+    };
+    await check(order({ shop_request_id: `'${request}'`, shipping_service: `'STANDARD'` }), 'a service without its fee', 'orders_shipping');
+    await check(order({ shop_request_id: `'${request}'`, shipping_minor: '2000' }), 'a fee without its service', 'orders_shipping');
+    await check(order({ shop_request_id: `'${request}'`, shipping_service: `'STANDARD'`, shipping_minor: '2000', shipping_benefit: '2' }), 'a free shipping with a fee', 'orders_shipping_benefit');
+    await check(order({ shop_request_id: `'${request}'`, shipping_service: `'OVERNIGHT'`, shipping_minor: '0' }), 'an unknown service');
+    await check(order({ shop_request_id: `'${request}'`, shipping_service: `'EXPRESS'`, shipping_minor: '0', shipping_benefit: '1' }), 'a free shipping of TITANE');
+    const parent = (await order({ shop_request_id: `'${request}'`, shipping_service: `'STANDARD'`, shipping_minor: '0', shipping_benefit: '2' })).rows[0].id;
+    await check(order({ channel: `'GIFT'`, with_order_id: `'${parent}'` }), 'a GIFT without its grant', 'orders_source');
+    await check(order({ channel: `'GIFT'`, gift_grant_id: `'${gift}'` }), 'a GIFT travelling with nothing', 'orders_source');
+    await check(order({ channel: `'SALON'`, shop_request_id: `'${request}'`, gift_grant_id: `'${gift}'` }), 'a grant on a salon order', 'orders_source');
+    const giftOrder = (await order({ channel: `'GIFT'`, gift_grant_id: `'${gift}'`, with_order_id: `'${parent}'`, price_minor: '0', currency: `'EUR'`, shipping_service: `'STANDARD'`, shipping_minor: '0' })).rows[0].id;
+    await expect(order({ channel: `'GIFT'`, gift_grant_id: `'${gift}'`, with_order_id: `'${parent}'` })).rejects.toSatisfy((e) => isUniqueViolation(e, 'orders_gift_grant_key'));
+    await expect(run(`UPDATE orders SET with_order_id = NULL WHERE id = '${giftOrder}'`)).rejects.toSatisfy(isGuardViolation);
+    // A credit taken off the order: more than 0, released with its reason, both or neither; never deleted; one open per grant and order.
+    const use = (cols = '') => sql.raw<{ id: string }>(`INSERT INTO credit_uses (grant_id, order_id, amount_minor, applied_by${cols ? `, ${cols.split('|')[0]}` : ''}) VALUES ('${credit}', '${parent}', 2000, '${admin}'${cols ? `, ${cols.split('|')[1]}` : ''}) RETURNING id`).execute(t.db);
+    await check(use(`released_at|now()`), 'released without its reason', 'credit_uses_released');
+    await check(use(`released_reason|'REMOVED'`), 'a reason without its time', 'credit_uses_released');
+    await check(use(`released_at, released_reason|now(), 'LOST'`), 'an unknown reason');
+    await check(sql.raw(`INSERT INTO credit_uses (grant_id, order_id, amount_minor) VALUES ('${credit}', '${parent}', 0)`).execute(t.db), 'an amount of 0');
+    const open = (await use()).rows[0].id;
+    await expect(use()).rejects.toSatisfy((e) => isUniqueViolation(e, 'credit_uses_open_key'));
+    await expect(run(`UPDATE credit_uses SET amount_minor = 1000 WHERE id = '${open}'`)).rejects.toSatisfy(isGuardViolation);
+    await run(`UPDATE credit_uses SET released_at = now(), released_reason = 'REMOVED', released_by = '${admin}' WHERE id = '${open}'`);
+    await use();
+    await expect(run(`DELETE FROM credit_uses WHERE id = '${open}'`)).rejects.toSatisfy(isGuardViolation);
+    // The down step refuses while a GIFT order or a credit use exists: neither can be removed, so this database stays at 0027.
+    await expect(migrateDown(t.db)).rejects.toThrow(/0027_tier_grants cannot be rolled back: 1 welcome gift orders and 2 credit uses exist/);
+    expect((await migrationStatus(t.db)).find((m) => m.name === '0027_tier_grants')?.executedAt).toBeDefined();
+    // Cleared by hand for the roll-backs that follow (the service never deletes either).
+    await run(`ALTER TABLE credit_uses DISABLE TRIGGER credit_uses_no_delete`);
+    await run(`DELETE FROM credit_uses`);
+    await run(`ALTER TABLE credit_uses ENABLE TRIGGER credit_uses_no_delete`);
+    await run(`DELETE FROM orders WHERE channel = 'GIFT'`);
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -2314,9 +2441,10 @@ describe('migrations', () => {
       '0023_releases_collectors',
       // NOCTURNE (plan of 2026-10-05): the variants of a model and a draw's price.
       '0024_model_variants',
-      // The next nine (plan of 2026-10-06), deployment G: the messages with ORBES Client Services; the club's program.
+      // The next nine (plan of 2026-10-06), deployment G: the messages with ORBES Client Services; the club's program; the tiers' grants.
       '0025_client_messages',
       '0026_club_program',
+      '0027_tier_grants',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

@@ -40,6 +40,7 @@ import {
   buyerProblem,
   carrierProblem,
   cardHolds,
+  CHANNEL_LABELS,
   delaysLine,
   durationText,
   EVENT_LABELS,
@@ -59,6 +60,7 @@ import {
   shipInput,
   shipProblem,
   shipWaitsFor,
+  shippingLine,
   termsChange,
   termsProblem,
   termsValues,
@@ -103,6 +105,8 @@ const view = (o: Partial<OrderView> = {}): OrderView => ({
   shipment: null,
   productId: null,
   shopifyOrderId: null,
+  shipping: { service: null, minor: null, benefit: null },
+  withOrder: null,
   return: null,
   invoices: [],
   events: [],
@@ -201,17 +205,48 @@ describe('the board', () => {
   });
 });
 
+describe('an order\'s shipping (plan NEXT-NINE, BP-19 T4)', () => {
+  it('says it: free by its tier, at its fee, with the order it travels with, or None; Welcome gift as a channel', () => {
+    expect(shippingLine(view({ shipping: { service: 'STANDARD', minor: 0, benefit: 2 } }))).toBe('Standard · free (PLATINE)');
+    expect(shippingLine(view({ shipping: { service: 'EXPRESS', minor: 0, benefit: 3 } }))).toBe('Express · free (PALLADIUM)');
+    expect(shippingLine(view({ currency: 'EUR', shipping: { service: 'STANDARD', minor: 2_000, benefit: null } }))).toBe('Standard · €\u00a020');
+    expect(shippingLine(view({ withOrder: { id: 'p', reference: 'OR-12345678' }, shipping: { service: 'STANDARD', minor: 0, benefit: null } }))).toBe('With OR-12345678');
+    expect(shippingLine(view())).toBe('None');
+    expect(CHANNEL_LABELS.GIFT).toBe('Welcome gift');
+    expect(EVENT_LABELS['order.shipping']).toBe('Shipping');
+  });
+
+  it('enters a fee in the terms\' dialog while RESERVED: sent with its service, an empty fee clears it, never a fee on a free benefit\'s service', () => {
+    const o = view({ priceMinor: 300_000, currency: 'EUR' });
+    const a = orderActions(o, 'OPERATOR').terms;
+    expect(termsValues(o)).toMatchObject({ shippingService: 'STANDARD', shippingFee: '' });
+    expect(termsChange(o, { ...termsValues(o), shippingFee: '20' }, a)).toEqual({ shippingService: 'STANDARD', shippingMinor: 2_000 });
+    expect(termsChange(o, { ...termsValues(o), shippingService: 'EXPRESS', shippingFee: '40.50' }, a)).toEqual({ shippingService: 'EXPRESS', shippingMinor: 4_050 });
+    expect(termsProblem(o, { ...termsValues(o), shippingFee: 'twenty' }, a)).toBe('The shipping fee is an amount in units: 20, or 20.50; empty for no shipping.');
+    const fee = view({ priceMinor: 300_000, currency: 'EUR', shipping: { service: 'STANDARD', minor: 2_000, benefit: null } });
+    expect(termsChange(fee, { ...termsValues(fee), shippingFee: '' }, a)).toEqual({ shippingService: null, shippingMinor: null });
+    const free = view({ priceMinor: 300_000, currency: 'EUR', shipping: { service: 'STANDARD', minor: 0, benefit: 2 } });
+    expect(termsProblem(free, { ...termsValues(free), shippingFee: '20' }, a)).toBe('This order’s shipping is free with its tier: no fee is added to it.');
+    expect(termsProblem(free, { ...termsValues(free), shippingService: 'EXPRESS', shippingFee: '35' }, a)).toBeNull();
+    expect(termsProblem(free, termsValues(free), a)).toBe('Nothing has changed.');
+  });
+});
+
 describe('what a role may do with an order', () => {
   it('offers each step only where the server takes it, to an OPERATOR', () => {
     const reserved = view();
-    expect(orderActions(reserved, 'AUDITOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: false, return: false, archive: false, location: false, terms: { size: false, price: false, engraving: false }, buyer: false, linkPiece: false });
+    expect(orderActions(reserved, 'AUDITOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: false, return: false, archive: false, location: false, terms: { size: false, price: false, engraving: false, shipping: false }, buyer: false, linkPiece: false });
     // Not priced yet: not paid (its invoice needs its price, step S4).
-    expect(orderActions(reserved, 'OPERATOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: true, return: false, archive: false, location: true, terms: { size: true, price: true, engraving: true }, buyer: true, linkPiece: false });
+    expect(orderActions(reserved, 'OPERATOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: true, return: false, archive: false, location: true, terms: { size: true, price: true, engraving: true, shipping: true }, buyer: true, linkPiece: false });
     expect(orderActions(view({ priceMinor: 480_000, currency: 'EUR' }), 'OPERATOR').pay).toBe(true);
     const paidStock = view({ status: 'PAID', paidAt: 'x', skuId: 's', reservation: 'STOCK' });
     expect(orderActions(paidStock, 'OPERATOR')).toMatchObject({ pay: false, ship: false, cancel: true, terms: { size: true, price: false, engraving: true }, linkPiece: true });
     const live = view({ channel: 'LIVE', skuId: 's', reservation: 'BENCH', sizeLabel: '52', priceMinor: 1, currency: 'EUR' });
-    expect(orderActions(live, 'ADMIN').terms).toEqual({ size: false, price: false, engraving: true });
+    // A LIVE RELEASE's order: its size and price are its release's; its shipping is entered while RESERVED (BP-19 T4).
+    expect(orderActions(live, 'ADMIN').terms).toEqual({ size: false, price: false, engraving: true, shipping: true });
+    // The shipping: RESERVED only, and never on an order travelling with another (its parent's).
+    expect(orderActions(paidStock, 'OPERATOR').terms.shipping).toBe(false);
+    expect(orderActions(view({ withOrder: { id: 'p', reference: 'OR-12345678' } }), 'OPERATOR').terms.shipping).toBe(false);
     expect(orderActions(live, 'ADMIN').linkPiece).toBe(false);
     // A finished piece in place of a piece to make still being made (choice 8); not once it is finished or cancelled.
     for (const [status, linkable] of [['TO_MAKE', true], ['IN_PROGRESS', true], ['DONE', false], ['CANCELLED', false]] as const) {
@@ -256,7 +291,7 @@ describe('what a role may do with an order', () => {
 
     const o = view();
     const a = orderActions(o, 'OPERATOR').terms;
-    expect(termsValues(o)).toEqual({ size: '', oneSize: '', price: '', currency: 'EUR', engraving: '' });
+    expect(termsValues(o)).toEqual({ size: '', oneSize: '', price: '', currency: 'EUR', engraving: '', shippingService: 'STANDARD', shippingFee: '' });
     expect(termsProblem(o, termsValues(o), a)).toBe('Nothing has changed.');
     expect(termsChange(o, { size: '52', price: '4800', currency: 'GBP', engraving: ' A. & L. ' }, a)).toEqual({ sizeLabel: '52', priceMinor: 480_000, currency: 'GBP', engravingText: 'A. & L.' });
     expect(termsChange(o, { size: '', oneSize: 'true', price: '', currency: 'EUR', engraving: '' }, a)).toEqual({ sizeLabel: null });

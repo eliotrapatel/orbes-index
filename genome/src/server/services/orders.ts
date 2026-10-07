@@ -55,6 +55,13 @@
  *                is registered to them; nothing of the house's side (the location, what it holds, the surprise, the
  *                value declared, the notes, who handled it).
  *   Shopify      an order keeps its future Shopify id (`shopify_order_id`); nothing calls Shopify in this lot.
+ *   shipping     (plan NEXT-NINE, BP-19 T4; migration 0027) fixed at the order's creation (`shippingFor`, the tier read
+ *                then): PLATINE's free standard and PALLADIUM's free express (THE PROGRAM), otherwise the optional rate of
+ *                the order's currency (Orders → Settings, SHIPPING), otherwise none, as before. An order keeps it if the
+ *                tier changes later. An order travelling with another (`with_order_id`: the 2nd to 5th piece of a LIVE
+ *                entry) carries its parent's service at 0 and follows it; only the parent's invoice carries the fee.
+ *                Client Services enters a fee by hand (`setTerms`, RESERVED; 409 ORDER_SHIPPING_FREE over a free
+ *                benefit); MARK PAID is never refused for shipping. Audited `order.shipping`. Returns are unchanged.
  *
  * The LIVE RELEASES' Client Services resolution is retired into the orders (the console's Orders board steps them): the
  * sales committed before migration 0022, or by the previous image, get their orders at boot (`OrderService.prepare`),
@@ -71,6 +78,7 @@ import { inTransaction, type Db } from '../db/connection.js';
 import {
   ORDER_STATUSES,
   RETURN_OUTCOMES,
+  SHIPPING_SERVICES,
   jsonText,
   type InvoiceKind,
   type JsonObject,
@@ -82,6 +90,7 @@ import {
   type OrderUpdate,
   type ProductStatus,
   type ReturnOutcome,
+  type ShippingService,
 } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock, type Logger, noopLogger } from '../types.js';
@@ -93,6 +102,8 @@ import { mediaUrl } from './media.js';
 import { writeJournal } from './journal.js';
 import { isTransitionAllowed, LifecycleService, returnTargetOf } from './lifecycle.js';
 import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
+import { tierOf } from './club.js';
+import { readProgram, shippingRate } from './club-program.js';
 import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -166,6 +177,8 @@ const orderClosed = () => conflict('ORDER_CLOSED', 'This order can no longer cha
 const carrierUnknown = () => notFound('Carrier', 'CARRIER_NOT_FOUND');
 const priceMissing = () => conflict('ORDER_PRICE_MISSING', 'Enter the order’s price before it is paid: its invoice is issued then.');
 const returnChanged = () => conflict('ORDER_RETURN_CHANGED', 'The piece changed during the return. Please try again.');
+const shippingFree = () => conflict('ORDER_SHIPPING_FREE', 'This order’s shipping is free with its tier: no fee is added to it.');
+const shippingWith = () => conflict('ORDER_SHIPPING_WITH', 'This order travels with another: its shipping is that order’s.');
 const notRestockable = (status: ProductStatus) =>
   new DomainError('ORDER_RETURN_NOT_RESTOCKABLE', 409, 'The piece’s record does not let it go back to stock now: settle its record first, or archive it.', { detail: `status ${status}` });
 
@@ -195,14 +208,30 @@ export interface OrderReturned {
   claimCode?: string;
 }
 
-/** What Client Services enters on an order: a draw's or a salon's size, price and currency; any order's engraving text. */
+/**
+ * What Client Services enters on an order: a draw's or a salon's size, price and currency; any order's engraving text;
+ * its shipping while RESERVED (BP-19 T4: the service with its fee, both together; null for both: no shipping).
+ */
 export interface OrderTermsInput {
   /** null: one size. */
   sizeLabel?: string | null;
   priceMinor?: number | null;
   currency?: string | null;
   engravingText?: string | null;
+  shippingService?: ShippingService | null;
+  shippingMinor?: number | null;
 }
+
+/** An order's shipping (BP-19 T4): its service and fee, and the tier that made it free; all null for none. */
+export interface OrderShipping {
+  service: ShippingService | null;
+  minor: number | null;
+  /** 2 PLATINE, 3 PALLADIUM: the tier that made it free; null otherwise. */
+  benefit: 2 | 3 | null;
+}
+
+/** No shipping: as an order before migration 0027, or below the free tiers without a rate. */
+export const NO_SHIPPING: Readonly<OrderShipping> = Object.freeze({ service: null, minor: null, benefit: null });
 
 /** The buyer's name and address (decision 31); null clears. */
 export interface OrderBuyerInput {
@@ -273,6 +302,10 @@ export interface OrderView {
   /** The piece that fulfils it, by its reference. */
   productId: string | null;
   shopifyOrderId: string | null;
+  /** BP-19 T4: its shipping (service, fee, free tier), all null for none. */
+  shipping: OrderShipping;
+  /** BP-19: the order it travels with (a GIFT order, the 2nd to 5th piece of a LIVE entry), by id and reference. */
+  withOrder: { id: string; reference: string } | null;
   /** Its return (RETURNED): where the piece went, the note, and whether ORBES took its buyer's ownership back. */
   return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string; at: Date; ownershipReclaimed: boolean } | null;
   /** Its invoice and credit note (services/invoices.ts), in order of issue. */
@@ -303,6 +336,8 @@ export interface ExportedOrder {
   priceMinor: number | null;
   currency: string | null;
   addons: { label: string; priceMinor: number }[];
+  /** BP-19 T4: its shipping, all null for none. */
+  shipping: OrderShipping;
   engravingText: string | null;
   buyer: { name: string | null; address: string | null };
   status: OrderStatus;
@@ -357,6 +392,11 @@ export interface AccountOrder {
   currency: string | null;
   /** As sold, each at its price per piece. */
   addons: { label: string; priceMinor: number }[];
+  /**
+   * BP-19 T4: its shipping (the service, the fee in its currency, the tier that made it free), and for an order
+   * travelling with another the reference of that order (`withOrder`), which carries the fee; null without shipping.
+   */
+  shipping: (OrderShipping & { withOrder: string | null }) | null;
   status: OrderStatus;
   reservedAt: Date;
   paidAt: Date | null;
@@ -429,7 +469,41 @@ export function orderPayload(o: OrderRow): JsonObject {
     declaredValueMinor: o.declared_value_minor,
     productId: o.product_id,
     shopifyOrderId: o.shopify_order_id,
+    withOrderId: o.with_order_id,
+    giftGrantId: o.gift_grant_id,
+    shippingService: o.shipping_service,
+    shippingMinor: o.shipping_minor,
+    shippingBenefit: o.shipping_benefit,
   };
+}
+
+/** An order's shipping as its row holds it. */
+export function shippingOf(o: Pick<OrderRow, 'shipping_service' | 'shipping_minor' | 'shipping_benefit'>): OrderShipping {
+  if (o.shipping_service === null || o.shipping_minor === null) return { ...NO_SHIPPING };
+  return { service: o.shipping_service, minor: o.shipping_minor, benefit: o.shipping_benefit === 2 || o.shipping_benefit === 3 ? o.shipping_benefit : null };
+}
+
+/**
+ * The shipping of an order created now for `accountId` in `currency` (BP-19 T4), read in the sale's transaction: the
+ * free shipping of the account's tier now (PALLADIUM's, then PLATINE's, as THE PROGRAM sets them: NONE gives none),
+ * otherwise the optional STANDARD rate of the order's currency, otherwise none (no shipping line, as before). A currency
+ * not known yet (a salon's order, a draw without a price) takes the free service only; its rate comes when `setTerms`
+ * gives it its currency.
+ */
+export async function shippingFor(tx: Db, accountId: string, currency: string | null, now: Date): Promise<OrderShipping> {
+  const [standing, program] = await Promise.all([tierOf(tx, accountId, now), readProgram(tx)]);
+  for (const tier of [3, 2] as const) {
+    if (standing.tier < tier) continue;
+    const free = tier === 3 ? program.shippingFreePalladium : program.shippingFreePlatine;
+    if (free !== 'NONE') return { service: free, minor: 0, benefit: tier };
+  }
+  const rate = await shippingRate(tx, currency, 'STANDARD');
+  return rate === null ? { ...NO_SHIPPING } : { service: 'STANDARD', minor: rate, benefit: null };
+}
+
+/** The shipping of an order travelling with `parent`: its service at 0 (none when it has none), never a benefit of its own. */
+export function travellingShipping(parent: Pick<OrderRow, 'shipping_service'>): OrderShipping {
+  return parent.shipping_service === null ? { ...NO_SHIPPING } : { service: parent.shipping_service, minor: 0, benefit: null };
 }
 
 /** A piece to make as the event journal says it (`bench.create`, `.cancel`, `.move`, `.engrave`): never its engraving text. */
@@ -595,6 +669,9 @@ interface NewOrder {
   locationId: string;
   /** When the sale was made, for an order created after it (at boot: `OrderService.prepare`); `now` otherwise. */
   reservedAt?: Date;
+  /** BP-19 T4: its shipping (none by default), and the order it travels with. */
+  shipping?: OrderShipping;
+  withOrderId?: string | null;
 }
 
 /**
@@ -621,6 +698,10 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
       surprise: n.surprise,
       location_id: n.locationId,
       reserved_at: n.reservedAt && n.reservedAt < now ? n.reservedAt : now,
+      with_order_id: n.withOrderId ?? null,
+      shipping_service: n.shipping?.service ?? null,
+      shipping_minor: n.shipping?.service ? n.shipping.minor : null,
+      shipping_benefit: n.shipping?.service ? n.shipping.benefit : null,
     })
     .returningAll()
     .executeTakeFirstOrThrow();
@@ -628,7 +709,26 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
   if (opts.hold) o = await hold(tx, o, actor, now, benchNotes);
   const source: JsonObject = n.liveEntryId ? { liveEntryId: n.liveEntryId, piece: o.piece } : n.dropEntryId ? { dropEntryId: n.dropEntryId } : { shopRequestId: n.shopRequestId! };
   notes.push(
-    await recordChange(tx, null, o, 'order.create', { details: { ...source, dropId: n.dropId, skuId: o.sku_id, locationId: o.location_id, reservation: o.reservation }, at: o.reserved_at }, actor, now),
+    await recordChange(
+      tx,
+      null,
+      o,
+      'order.create',
+      {
+        details: {
+          ...source,
+          dropId: n.dropId,
+          skuId: o.sku_id,
+          locationId: o.location_id,
+          reservation: o.reservation,
+          ...(o.shipping_service ? { shipping: { service: o.shipping_service, minor: o.shipping_minor, benefit: o.shipping_benefit } } : {}),
+          ...(o.with_order_id ? { withOrderId: o.with_order_id } : {}),
+        },
+        at: o.reserved_at,
+      },
+      actor,
+      now,
+    ),
     ...benchNotes,
   );
   return o;
@@ -680,33 +780,38 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
     .orderBy('l.position')
     .execute();
   const locationId = await releaseLocation(tx, e.stock_location_id);
+  // BP-19 T4: one fee for the entry, on its first piece; the others travel with it (its service at 0).
+  let parent = existing.has(1) ? await tx.selectFrom('orders').selectAll().where('live_entry_id', '=', e.id).where('piece', '=', 1).executeTakeFirst() : undefined;
   for (let piece = 1; piece <= e.quantity; piece++) {
     if (existing.has(piece)) continue;
-    orders.push(
-      await createOrder(
-        tx,
-        {
-          channel: 'LIVE',
-          liveEntryId: e.id,
-          piece,
-          dropId: e.drop_id,
-          accountId: e.account_id,
-          modelId: e.model_id,
-          sizeLabel: sizeLabelOf(e.label),
-          skuId,
-          priceMinor: e.price_minor,
-          currency: e.currency,
-          addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
-          surprise: e.surprise_enabled === true ? e.surprise_text : null,
-          locationId,
-          reservedAt: opts.reservedAt,
-        },
-        { hold: opts.hold ?? true },
-        actor,
-        now,
-        notes,
-      ),
+    const shipping = parent ? travellingShipping(parent) : await shippingFor(tx, e.account_id, e.currency, now);
+    const created = await createOrder(
+      tx,
+      {
+        channel: 'LIVE',
+        liveEntryId: e.id,
+        piece,
+        dropId: e.drop_id,
+        accountId: e.account_id,
+        modelId: e.model_id,
+        sizeLabel: sizeLabelOf(e.label),
+        skuId,
+        priceMinor: e.price_minor,
+        currency: e.currency,
+        addons: addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.price_minor })),
+        surprise: e.surprise_enabled === true ? e.surprise_text : null,
+        locationId,
+        reservedAt: opts.reservedAt,
+        shipping,
+        withOrderId: parent?.id ?? null,
+      },
+      { hold: opts.hold ?? true },
+      actor,
+      now,
+      notes,
     );
+    orders.push(created);
+    if (piece === 1) parent = created;
   }
   return { orders, notes };
 }
@@ -746,6 +851,7 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
       surprise: null,
       locationId: await releaseLocation(tx, e.stock_location_id),
       reservedAt: opts.reservedAt,
+      shipping: await shippingFor(tx, e.account_id, priced ? e.currency : null, now),
     },
     { hold: true },
     actor,
@@ -779,6 +885,7 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
       addons: [],
       surprise: null,
       locationId: await defaultLocationId(tx),
+      shipping: await shippingFor(tx, r.account_id, null, now),
     },
     { hold: true },
     actor,
@@ -944,6 +1051,7 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
     priceMinor: r.price_minor,
     currency: r.currency,
     addons: r.addons.map((a) => ({ label: a.label, priceMinor: a.priceMinor })),
+    shipping: shippingOf(r),
     engravingText: r.engraving_text,
     buyer: { name: r.buyer_name, address: r.buyer_address },
     status: r.status,
@@ -1063,6 +1171,8 @@ export class OrderService {
           : null,
       productId: r.piece_reference ?? null,
       shopifyOrderId: r.shopify_order_id,
+      shipping: shippingOf(r),
+      withOrder: r.with_order_id ? { id: r.with_order_id, reference: orderReference(r.with_order_id) } : null,
       return: returned
         ? {
             outcome: returned.outcome,
@@ -1099,6 +1209,10 @@ export class OrderService {
         'o.price_minor',
         'o.currency',
         'o.addons',
+        'o.shipping_service',
+        'o.shipping_minor',
+        'o.shipping_benefit',
+        'o.with_order_id',
         'o.status',
         'o.reserved_at',
         'o.paid_at',
@@ -1139,6 +1253,7 @@ export class OrderService {
       priceMinor: r.price_minor,
       currency: r.price_minor === null ? null : r.currency,
       addons: r.addons.map((a) => ({ label: a.label, priceMinor: a.priceMinor })),
+      shipping: r.shipping_service === null ? null : { ...shippingOf(r), withOrder: r.with_order_id ? orderReference(r.with_order_id) : null },
       status: r.status,
       reservedAt: r.reserved_at,
       paidAt: r.paid_at,
@@ -1341,6 +1456,12 @@ export class OrderService {
    * that size, or one to make), price and currency (before PAID only; 409 ORDER_TERMS_FIXED for a LIVE order, whose
    * are its release's), and any order's engraving text (its piece to make carries it too). A size changes until a
    * piece is linked (409 ORDER_PIECE_LINKED). Audited `order.terms` with the fields changed, never the engraving text.
+   *
+   * Its shipping (plan NEXT-NINE, BP-19 T4), while RESERVED: a service with its fee, or null for both (no shipping); 409
+   * ORDER_SHIPPING_FREE for a fee on the service its tier makes free (another service, express, is paid at the fee
+   * entered), 409 ORDER_SHIPPING_WITH for an order travelling with another. The first price of an order without
+   * shipping takes the optional rate of its currency. The orders travelling with it follow (its service at 0). Audited
+   * `order.shipping` (each order), the service, the fee and the free tier.
    */
   async setTerms(orderId: string, input: OrderTermsInput, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
@@ -1354,7 +1475,15 @@ export class OrderService {
     if (currency !== undefined && currency !== null && !(ORDER_CURRENCIES as readonly string[]).includes(currency)) throw validationError(`A price is in ${ORDER_CURRENCIES.join(', ')}.`);
     if ((price === undefined) !== (currency === undefined) || (price === null) !== (currency === null)) throw validationError('A price comes with its currency.');
     const engraving = has('engravingText') ? cleanText(input.engravingText, ORDER_TEXT_LIMITS.engraving, 'The engraving text') : undefined;
-    if (size === undefined && price === undefined && engraving === undefined) throw validationError('Nothing to change.');
+    let shipping: OrderShipping | undefined;
+    if (has('shippingService') || has('shippingMinor') || input.shippingService === null || input.shippingMinor === null) {
+      const service = input.shippingService ?? null;
+      const minor = input.shippingMinor ?? null;
+      if ((service === null) !== (minor === null)) throw validationError('A shipping fee comes with its service.');
+      if (service !== null && !(SHIPPING_SERVICES as readonly string[]).includes(service)) throw validationError(`A shipping service is ${SHIPPING_SERVICES.join(' or ')}.`);
+      shipping = service === null ? { ...NO_SHIPPING } : { service, minor: cleanAmount(minor, 'The shipping fee'), benefit: null };
+    }
+    if (size === undefined && price === undefined && engraving === undefined && shipping === undefined) throw validationError('Nothing to change.');
     await this.change(id, async (tx, o, now, notes) => {
       if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
       const fields: string[] = [];
@@ -1393,10 +1522,46 @@ export class OrderService {
         after = await hold(tx, await updateOrder(tx, released.id, { size_label: label, sku_id: skuId }), actor, now, extra);
         fields.push('size');
       }
-      if (fields.length === 0) throw validationError('Nothing to change.');
-      notes.push(await recordChange(tx, o, after, 'order.terms', { details: { fields, reservation: after.reservation } }, actor, now), ...extra);
+      // The shipping (BP-19 T4): entered by hand while RESERVED, or the rate of the first currency of an order without one.
+      let shipped: JsonObject | null = null;
+      if (shipping !== undefined) {
+        if (o.status !== 'RESERVED') throw conflict('ORDER_PAID', 'The shipping of an order paid no longer changes.');
+        if (o.with_order_id !== null) throw shippingWith();
+        const was = shippingOf(after);
+        if (was.service !== shipping.service || was.minor !== shipping.minor) {
+          if (was.benefit !== null && shipping.service === was.service && (shipping.minor ?? 0) > 0) throw shippingFree();
+          if ((shipping.minor ?? 0) > 0 && after.currency === null) throw validationError('Enter the order’s price and currency before a shipping fee.');
+          after = await updateOrder(tx, o.id, { shipping_service: shipping.service, shipping_minor: shipping.minor, shipping_benefit: null });
+          shipped = { service: shipping.service, minor: shipping.minor, benefit: null, ...(was.benefit !== null ? { freeBefore: was.benefit } : {}) };
+        }
+      } else if (priceChange && o.currency === null && currency && after.shipping_service === null) {
+        const rate = await shippingRate(tx, currency, 'STANDARD');
+        if (rate !== null) {
+          after = await updateOrder(tx, o.id, { shipping_service: 'STANDARD', shipping_minor: rate, shipping_benefit: null });
+          shipped = { service: 'STANDARD', minor: rate, benefit: null, rate: true };
+        }
+      }
+      if (fields.length === 0 && shipped === null) throw validationError('Nothing to change.');
+      if (fields.length > 0) notes.push(await recordChange(tx, o, after, 'order.terms', { details: { fields, reservation: after.reservation } }, actor, now), ...extra);
+      if (shipped !== null) {
+        notes.push(await recordChange(tx, o, after, 'order.shipping', { details: shipped }, actor, now));
+        notes.push(...(await this.followShipping(tx, after, actor, now)));
+      }
     });
     return this.get(id);
+  }
+
+  /** The orders travelling with `parent` take its service at 0 (none when it has none), in its transaction; audited `order.shipping`. */
+  private async followShipping(tx: Db, parent: OrderRow, actor: Actor, now: Date): Promise<AuditRecordInput[]> {
+    const notes: AuditRecordInput[] = [];
+    const followers = await tx.selectFrom('orders').selectAll().where('with_order_id', '=', parent.id).where('status', '<>', 'CANCELLED').orderBy('piece').orderBy('id').forUpdate().execute();
+    const next = travellingShipping(parent);
+    for (const f of followers) {
+      if (f.shipping_service === next.service && f.shipping_minor === next.minor && f.shipping_benefit === null) continue;
+      const after = await updateOrder(tx, f.id, { shipping_service: next.service, shipping_minor: next.minor, shipping_benefit: null });
+      notes.push(await recordChange(tx, f, after, 'order.shipping', { details: { service: next.service, minor: next.minor, benefit: null, withOrderId: parent.id } }, actor, now));
+    }
+    return notes;
   }
 
   /**

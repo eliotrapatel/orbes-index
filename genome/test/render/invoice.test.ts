@@ -69,7 +69,10 @@ describe('invoice and credit note (M7)', () => {
       'USD 1 000 000.00',
       'CHF 0.00',
     ]);
-    expect(() => documentAmount(-1, 'EUR')).toThrow(CertificateInputError);
+    // A credit taken off the order (plan NEXT-NINE, BP-19 T5): its minus sign; never a fraction of a minor unit.
+    expect(documentAmount(-5_000, 'EUR')).toBe('EUR -50.00');
+    expect(documentAmount(-1, 'EUR')).toBe('EUR -0.01');
+    expect(() => documentAmount(1.5, 'EUR')).toThrow(CertificateInputError);
     expect(addressLines('12 rue de l’Église, Bât. B\n\n75003 Paris\r\nFrance')).toEqual(["12 RUE DE L'EGLISE, BAT. B", '75003 PARIS', 'FRANCE']);
     expect(addressLines('1\n2\n3\n4\n5\n6\n7')).toEqual(['1', '2', '3', '4', '5, 6, 7']);
     expect(addressLines(null)).toEqual([]);
@@ -129,9 +132,28 @@ describe('invoice and credit note (M7)', () => {
       doc({ lines: [] }),
       doc({ lines: Array.from({ length: INVOICE_MAX_LINES + 1 }, () => ({ label: 'X', detail: null, amountMinor: 0 })), totalMinor: 0 }),
       doc({ totalMinor: 1 }),
+      // A credit larger than what it is taken off: a total below zero.
+      doc({ lines: [{ label: 'MONOLITHE', detail: null, amountMinor: 100 }, { label: 'CREDIT · PLATINE', detail: null, amountMinor: -200 }], totalMinor: -100 }),
     ]) {
       expect(() => layoutInvoice(bad), JSON.stringify([bad.number, bad.order, bad.currency, bad.lines.length, bad.totalMinor])).toThrow(CertificateInputError);
     }
+  });
+
+  it('holds the piece, six add-ons, its shipping, a credit and a welcome gift on its page (BP-19): up to seven lines at the table\'s pitch, more sharing its height above the total', () => {
+    const lines = [
+      { label: 'MONOLITHE · SIZE 52', detail: 'LIVE RELEASE · MONOLITHE IN STEEL', amountMinor: 505_000 },
+      ...Array.from({ length: 6 }, (_, i) => ({ label: `ADD-ON ${i + 1}`, detail: null, amountMinor: 1_000 })),
+      { label: 'SHIPPING · EXPRESS', detail: 'FREE · PALLADIUM', amountMinor: 0 },
+      { label: 'CREDIT · PALLADIUM', detail: null, amountMinor: -10_000 },
+      { label: 'WELCOME GIFT · ECLIPSE', detail: 'ORDER OR-1A2B3C4D', amountMinor: 0 },
+    ];
+    expect(lines).toHaveLength(INVOICE_MAX_LINES);
+    const page = layoutInvoice(doc({ lines, totalMinor: lines.reduce((n, l) => n + l.amountMinor, 0) }));
+    const L = INVOICE_LAYOUT;
+    // The lettering between the table's head and the total (the hairlines, flat, aside).
+    const inTable = page.marks!.map((m) => bounds(m.d)).filter((b) => b.y1 > L.table.head + 1 && b.y1 < L.total.baseline - L.total.cap - 0.5 && b.y1 - b.y0 > 0.01);
+    expect(inTable.length).toBeGreaterThan(0);
+    expect(Math.max(...inTable.map((b) => b.y1))).toBeLessThan(L.ruleTotal);
   });
 
   it('renders a valid, deterministic PDF: no font, no text object, no VAT line, its title the document', async () => {

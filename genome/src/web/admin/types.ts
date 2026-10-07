@@ -133,8 +133,8 @@ export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
 
-/** Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon. */
-export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON'] as const;
+/** Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon, a welcome gift (BP-19 T5). */
+export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT'] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 
 /** The steps of an order (orders.status): RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
@@ -2131,6 +2131,10 @@ export interface OrderView {
   shipment: { carrier: { id: string; name: string }; trackingNumber: string; trackingUrl: string; declaredValueMinor: number | null } | null;
   productId: string | null;
   shopifyOrderId: string | null;
+  /** BP-19 T4: its shipping (service, fee, the tier that made it free), all null for none. */
+  shipping: { service: ShippingService | null; minor: number | null; benefit: 2 | 3 | null };
+  /** BP-19: the order it travels with. */
+  withOrder: { id: string; reference: string } | null;
   /** Its return (RETURNED): where the piece went, the note, whether ORBES took its buyer's ownership back. */
   return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string; at: Iso; ownershipReclaimed: boolean } | null;
   /** Its invoice and credit note, in order of issue. */
@@ -2188,7 +2192,8 @@ export interface Invoice {
   creditedBy: { id: string; number: string } | null;
   issuer: { name: string; address: string[] };
   buyer: { name: string | null; address: string | null; email: string | null };
-  lines: { kind: 'PIECE' | 'ADDON'; label: string; detail: string | null; amountMinor: number }[];
+  /** BP-19: a SHIPPING, a CREDIT (negative) and a welcome GIFT line beside the piece and its add-ons. */
+  lines: { kind: 'PIECE' | 'ADDON' | 'SHIPPING' | 'CREDIT' | 'GIFT'; label: string; detail: string | null; amountMinor: number }[];
   currency: OrderCurrency;
   subtotalMinor: number;
   vatRateBp: number | null;
@@ -2218,6 +2223,9 @@ export interface OrderTermsChange {
   priceMinor?: number | null;
   currency?: OrderCurrency | null;
   engravingText?: string | null;
+  /** BP-19 T4: the shipping, with its fee, or null for both. */
+  shippingService?: ShippingService | null;
+  shippingMinor?: number | null;
 }
 
 // ── Locations and carriers (routes/admin/logistics.ts) ───────────────────

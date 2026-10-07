@@ -129,6 +129,9 @@ describe('schema', () => {
       ['shipping_rates', 'currency', S.HOUSE_CURRENCIES],
       ['shipping_rates', 'service', S.SHIPPING_SERVICES],
       ['circle_posts', 'experience', S.CIRCLE_EXPERIENCES],
+      ['tier_grants', 'kind', S.TIER_GRANT_KINDS],
+      ['credit_uses', 'released_reason', S.CREDIT_RELEASE_REASONS],
+      ['orders', 'shipping_service', S.SHIPPING_SERVICES],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));

@@ -881,9 +881,9 @@ export interface LiveAccountEntry {
 }
 
 /** The channel an order was sold through (plan LIVE RELEASE+, choice 6): a LIVE RELEASE, a draw, the private salon. */
-export type OrderChannel = 'LIVE' | 'DRAW' | 'SALON';
+export type OrderChannel = 'LIVE' | 'DRAW' | 'SALON' | 'GIFT';
 /** The server's order (ORDER_CHANNELS in db/schema.ts). */
-export const ORDER_CHANNELS: readonly OrderChannel[] = ['LIVE', 'DRAW', 'SALON'];
+export const ORDER_CHANNELS: readonly OrderChannel[] = ['LIVE', 'DRAW', 'SALON', 'GIFT'];
 
 /** An order's step: RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
 export type OrderStatus = 'RESERVED' | 'PAID' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';
@@ -911,6 +911,11 @@ export interface AccountOrder {
   currency: string | null;
   /** Each at its price per piece. */
   addons: { label: string; priceMinor: number }[];
+  /**
+   * BP-19 T4: its shipping (STANDARD or EXPRESS, the fee in its currency, the tier that made it free) and, travelling
+   * with another order, that order's reference (which carries the fee); null or absent: no shipping.
+   */
+  shipping?: { service: 'STANDARD' | 'EXPRESS' | null; minor: number | null; benefit: 2 | 3 | null; withOrder: string | null } | null;
   status: OrderStatus;
   reservedAt: string;
   paidAt: string | null;

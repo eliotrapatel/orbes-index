@@ -101,17 +101,26 @@ export const INVOICE_LAYOUT = Object.freeze({
   foot: { baseline: 287, cap: 1.2, tracking: 0.35 },
 });
 
-/** Lines a page holds: the piece and its add-ons (six at most, as a LIVE RELEASE's). */
-export const INVOICE_MAX_LINES = 7;
+/**
+ * Lines a page holds: the piece and its add-ons (six at most, as a LIVE RELEASE's), its shipping, a credit and a welcome
+ * gift (plan NEXT-NINE, BP-19). Up to seven keep the table's pitch; more share its height.
+ */
+export const INVOICE_MAX_LINES = 10;
+/** The lines that keep the table's own pitch. */
+const FULL_PITCH_LINES = 7;
 
 const NUMBER_RE = /^(INV|CN)-20\d{2}-\d{6}$/;
 const ORDER_RE = /^OR-[0-9A-F]{8}$/;
 
-/** An amount in minor units as a document says it: `EUR 4 800.00`, the thousands set apart by a space. */
+/**
+ * An amount in minor units as a document says it: `EUR 4 800.00`, the thousands set apart by a space; a credit taken off
+ * the order with a minus sign, `EUR -50.00` (BP-19 T5).
+ */
 export function documentAmount(minor: number, currency: string): string {
-  if (!Number.isSafeInteger(minor) || minor < 0) throw new CertificateInputError('an amount is a whole number of minor units');
-  const units = String(Math.floor(minor / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return `${currency} ${units}.${String(minor % 100).padStart(2, '0')}`;
+  if (!Number.isSafeInteger(minor)) throw new CertificateInputError('an amount is a whole number of minor units');
+  const abs = Math.abs(minor);
+  const units = String(Math.floor(abs / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `${currency} ${minor < 0 ? '-' : ''}${units}.${String(abs % 100).padStart(2, '0')}`;
 }
 
 /** The buyer's address on at most INVOICE_LAYOUT.addressLines lines, as the lettering draws it. */
@@ -129,6 +138,7 @@ export function layoutInvoice(d: InvoiceDocument): PdfPage {
   if (!/^[A-Z]{3}$/.test(d.currency)) throw new CertificateInputError('not a currency');
   if (d.lines.length < 1 || d.lines.length > INVOICE_MAX_LINES) throw new CertificateInputError(`one to ${INVOICE_MAX_LINES} lines`);
   if (d.lines.reduce((n, l) => n + l.amountMinor, 0) !== d.totalMinor) throw new CertificateInputError('the total is the sum of the lines');
+  if (d.totalMinor < 0) throw new CertificateInputError('a total is never below zero');
   const L = INVOICE_LAYOUT;
   const C = INVOICE_COPY;
   const R = L.rows;
@@ -184,8 +194,10 @@ export function layoutInvoice(d: InvoiceDocument): PdfPage {
   section(C.description, L.left, T.head);
   section(C.amount, L.right, T.head, 'end');
   const describe = L.right - L.left - T.amountWidth - 4;
+  // Up to seven lines at the table's pitch; more share its height, the last detail still above the total's rule.
+  const pitch = d.lines.length <= FULL_PITCH_LINES ? T.pitch : (L.ruleTotal - T.detailGap - 3 - T.first) / (d.lines.length - 1);
   d.lines.forEach((l, i) => {
-    const baseline = T.first + i * T.pitch;
+    const baseline = T.first + i * pitch;
     value(toDocumentText(l.label), L.left, baseline, describe);
     if (l.detail) fitted(toDocumentText(l.detail), { cap: T.detailCap, minCap: R.minValueCap, tracking: R.labelTracking, x: L.left, baseline: baseline + T.detailGap, maxWidth: describe });
     line(documentAmount(l.amountMinor, d.currency), { cap: R.valueCap, tracking: R.valueTracking, x: L.right, baseline, align: 'end' });

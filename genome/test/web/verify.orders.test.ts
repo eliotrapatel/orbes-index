@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ORDERS } from '../../src/web/verify/copy.js';
-import { ORDER_PATH, orderDate, orderDocuments, orderModel, orderModels, orderRows, orderSteps } from '../../src/web/verify/orders-model.js';
+import { ORDER_PATH, orderDate, orderDocuments, orderModel, orderModels, orderRows, orderSteps, shippingValue } from '../../src/web/verify/orders-model.js';
 import type { AccountOrder } from '../../src/web/verify/types.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
 
@@ -126,6 +126,29 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
       ['PRICE', 'TO BE CONFIRMED'],
     ]);
     expect(orderRows(order({ currency: 'CHF', priceMinor: 480_050, addons: [] }))[1]).toEqual(['PRICE', `CHF${NBSP}4${NBSP}800.50`]);
+  });
+
+  it('says its SHIPPING (BP-19 T4): free by its tier, at its fee (EXPRESS named), with the order it travels with; no row without shipping; the TOTAL with a fee', () => {
+    const ship = (shipping: AccountOrder['shipping'], extra: Partial<AccountOrder> = {}) => orderRows(order({ addons: [], shipping, ...extra }));
+    expect(ship({ service: 'STANDARD', minor: 0, benefit: 2, withOrder: null })).toEqual([['SIZE', '52'], ['PRICE', `€${NBSP}4${NBSP}800`], ['SHIPPING', 'FREE · PLATINE']]);
+    expect(ship({ service: 'EXPRESS', minor: 0, benefit: 3, withOrder: null })[2]).toEqual(['SHIPPING', 'FREE EXPRESS · PALLADIUM']);
+    // A fee: the row, and the TOTAL with it.
+    expect(ship({ service: 'STANDARD', minor: 2_000, benefit: null, withOrder: null })).toEqual([
+      ['SIZE', '52'],
+      ['PRICE', `€${NBSP}4${NBSP}800`],
+      ['SHIPPING', `€${NBSP}20`],
+      ['TOTAL', `€${NBSP}4${NBSP}820`],
+    ]);
+    expect(ship({ service: 'EXPRESS', minor: 4_000, benefit: null, withOrder: null })[2]).toEqual(['SHIPPING', `EXPRESS · €${NBSP}40`]);
+    // Travelling with another order: that order carries the fee, no TOTAL of its own for it.
+    expect(ship({ service: 'STANDARD', minor: 0, benefit: null, withOrder: 'OR-9F8E7D6C' })).toEqual([['SIZE', '52'], ['PRICE', `€${NBSP}4${NBSP}800`], ['SHIPPING', 'WITH ORDER OR-9F8E7D6C']]);
+    // No shipping (an order of before, or below PLATINE without a fee): no row, as before.
+    expect(ship(null)).toEqual(orderRows(order({ addons: [] })));
+    expect(ship(undefined)).toEqual(orderRows(order({ addons: [] })));
+    // With add-ons and a fee: the TOTAL counts both. A fee in no currency the app can say: no row.
+    expect(orderRows(order({ shipping: { service: 'STANDARD', minor: 2_000, benefit: null, withOrder: null } })).at(-1)).toEqual(['TOTAL', `€${NBSP}5${NBSP}070`]);
+    expect(shippingValue({ shipping: { service: 'STANDARD', minor: 2_000, benefit: null, withOrder: null }, currency: null })).toBeNull();
+    expect(ORDERS.channel.GIFT).toBe('WELCOME GIFT');
   });
 
   it('a CANCELLED order never promises a confirmation: the size and the price never entered are left out', () => {

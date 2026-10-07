@@ -734,7 +734,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       ]);
       expect(Object.keys(exported.orders[0]!).sort()).toEqual([
         'addons', 'buyer', 'cancelledAt', 'carrier', 'channel', 'currency', 'deliveredAt', 'engravingText', 'history', 'invoices', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference',
-        'release', 'reservedAt', 'returnedAt', 'shippedAt', 'size', 'status', 'trackingNumber',
+        'release', 'reservedAt', 'returnedAt', 'shippedAt', 'shipping', 'size', 'status', 'trackingNumber',
       ]);
       expect((await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'account.export').where('target_id', '=', sale.account.id).executeTakeFirstOrThrow()).details).toMatchObject({ orders: 1 });
       expect(exported.orders[0]!.invoices).toEqual([]);

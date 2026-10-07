@@ -226,7 +226,7 @@ Chaque pièce réservée à un compte est une commande : une pièce d'une LIVE R
 
 **Ce qui est enregistré.** Pour chaque commande, le service enregistre le compte, sa provenance, le modèle, la taille, le prix, les options, la surprise de sa sortie, le texte de la gravure, le nom et l'adresse de l'acheteur, l'heure de chaque étape avec la note qu'ORBES Client Services peut y ajouter, le transporteur, le numéro de suivi et la valeur déclarée pour son assurance, le lieu où sa pièce est gardée, et ses factures ; la politique de confidentialité en dit plus (article 17).
 
-*Code : R118, R119, R120, R121, R122, R123, R124, R125, R126, R127, R128, R129, R130, R131, R132.*
+*Code : R118, R119, R120, R121, R122, R123, R124, R125, R126, R127, R128, R129, R130, R131, R132, R146.*
 
 ## Article 15 — Le cercle des propriétaires
 

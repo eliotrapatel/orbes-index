@@ -1280,14 +1280,22 @@ export const orderLocationBody = body({ locationId: uuid });
 
 /**
  * PATCH /api/admin/orders/:id/terms: a draw's or a salon's size (`null`: one size), price and currency (both or
- * neither), and any order's engraving text (`null` or '' clears it). At least one.
+ * neither), any order's engraving text (`null` or '' clears it), and its shipping while RESERVED (plan NEXT-NINE, BP-19
+ * T4: the service with its fee, both or neither; `null` for both: no shipping). At least one.
  */
 export const orderTermsBody = body({
   sizeLabel: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.size).nullable().optional()),
   priceMinor: orderAmount.nullable().optional(),
   currency: z.enum(ORDER_CURRENCIES).nullable().optional(),
   engravingText: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.engraving).nullable().optional()),
-}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one term of the order to change');
+  shippingService: z.enum(SHIPPING_SERVICES).nullable().optional(),
+  shippingMinor: orderAmount.nullable().optional(),
+})
+  .refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one term of the order to change')
+  .refine((b) => (b.shippingService === undefined) === (b.shippingMinor === undefined) && (b.shippingService === null) === (b.shippingMinor === null), {
+    message: 'A shipping fee is sent with its service, or both are cleared (null)',
+    path: ['shippingMinor'],
+  });
 
 /** PUT /api/admin/orders/:id/buyer: the buyer's name and address (decision 31); `null` or '' clears one. */
 export const orderBuyerBody = body({

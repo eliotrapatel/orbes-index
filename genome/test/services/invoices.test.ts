@@ -18,12 +18,12 @@ import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
-import { INVOICE_ISSUER, invoiceNumber, monthRange } from '../../src/server/services/invoices.js';
+import { INVOICE_ISSUER, INVOICE_LINE_KINDS, invoiceNumber, linesOf, monthRange } from '../../src/server/services/invoices.js';
 import { readJournal, replayJournal } from '../../src/server/services/journal.js';
 import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 import { LEGAL_IDENTITY } from '../../src/web/legal/content/notice.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { createAccount, createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -297,6 +297,49 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     await rejects(invoices().accountDocument(one.accountId, one.id, 'CREDIT_NOTE'), 'INVOICE_NOT_FOUND', 404);
     await rejects(invoices().accountDocument(two.accountId, one.id, 'INVOICE'), 'INVOICE_NOT_FOUND', 404);
     expect((await invoices().accountDocument(two.accountId, two.id, 'CREDIT_NOTE')).filename).toBe(`ORBES-credit-note-${credit!.number}.pdf`);
+  });
+
+  it('reads every line back with its own kind (plan NEXT-NINE, BP-19): SHIPPING, CREDIT and GIFT beside PIECE and ADDON, on the invoice, its credit note and MY PIECES\' documents; an old invoice unchanged', () => {
+    expect([...INVOICE_LINE_KINDS]).toEqual(['PIECE', 'ADDON', 'SHIPPING', 'CREDIT', 'GIFT']);
+    const issued = [
+      { kind: 'PIECE', label: 'MONOLITHE · SIZE 52', detail: 'DRAW · THE OCTOBER DRAW', amountMinor: 420_000 },
+      { kind: 'SHIPPING', label: 'SHIPPING · STANDARD', detail: 'FREE · PLATINE', amountMinor: 0 },
+      { kind: 'CREDIT', label: 'CREDIT · PLATINE', detail: null, amountMinor: -5_000 },
+      { kind: 'GIFT', label: 'WELCOME GIFT · ECLIPSE', detail: 'ORDER OR-1A2B3C4D', amountMinor: 0 },
+    ];
+    expect(linesOf(JSON.parse(JSON.stringify(issued)))).toEqual(issued);
+    // An invoice issued before: its PIECE and ADDON lines read as they were; an unknown kind stays a PIECE.
+    expect(linesOf([{ kind: 'PIECE', label: 'A', detail: null, amountMinor: 1 }, { kind: 'ADDON', label: 'B', detail: null, amountMinor: 2 }, { kind: 'BONUS', label: 'C', detail: null, amountMinor: 3 }])).toEqual([
+      { kind: 'PIECE', label: 'A', detail: null, amountMinor: 1 },
+      { kind: 'ADDON', label: 'B', detail: null, amountMinor: 2 },
+      { kind: 'PIECE', label: 'C', detail: null, amountMinor: 3 },
+    ]);
+  });
+
+  it('carries the SHIPPING line on the invoice, its credit note and the account\'s PDFs, read back with its kind (BP-19 T4)', async () => {
+    const a = await createAccount(t.db);
+    await holdPieces(t.db, a.id, 5, f.modelId);
+    const { id } = await salonOrder({ accountId: a.id, priceMinor: 300_000, buyer: { name: 'Jane Doe', address: '1 rue de Paris\n75001 Paris' } });
+    await pay(id);
+    const shipping = { kind: 'SHIPPING', label: 'SHIPPING · STANDARD', detail: 'FREE · PLATINE', amountMinor: 0 };
+    const [invoice] = await invoiceRows(id);
+    expect(invoice!.lines).toEqual([{ kind: 'PIECE', label: 'MONOLITHE · SIZE 58', detail: 'THE PRIVATE SALON', amountMinor: 300_000 }, shipping]);
+    expect((await invoices().get(invoice!.id)).lines[1]).toEqual(shipping);
+    clock.advance(MINUTE);
+    await orders().transition(id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
+    const [, credit] = await invoiceRows(id);
+    expect(credit!.kind).toBe('CREDIT_NOTE');
+    expect((await invoices().get(credit!.id)).lines).toEqual((await invoices().get(invoice!.id)).lines);
+    // MY PIECES' documents: both PDFs, their account's own.
+    for (const kind of ['INVOICE', 'CREDIT_NOTE'] as const) {
+      const pdf = await invoices().accountDocument(a.id, id, kind);
+      expect(pdf.contentType).toBe('application/pdf');
+      expect(new TextDecoder().decode(pdf.body.slice(0, 8))).toBe('%PDF-1.4');
+    }
+    // The right of access exports them as issued.
+    const exported = (await ctx.services.owners.exportData(a.id, admin)).orders.find((o) => o.invoices.length === 2)!;
+    expect(exported.invoices[0]!.lines[1]).toEqual({ label: 'SHIPPING · STANDARD', detail: 'FREE · PLATINE', amountMinor: 0 });
+    expect(exported.shipping).toEqual({ service: 'STANDARD', minor: 0, benefit: 2 });
   });
 
   it('the orders paid at boot get their invoices too (a LIVE resolution CONCLUDED, mapped to PAID by the system)', async () => {

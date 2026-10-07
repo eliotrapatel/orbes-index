@@ -8,8 +8,10 @@
  *   the steps      RESERVED · PAID · SHIPPED · DELIVERED, each reached with its date (on this phone's calendar), the
  *                  current one marked, those to come without one; a CANCELLED or RETURNED order shows the steps it
  *                  reached, then that end with its date;
- *   the terms      SIZE, PRICE, each add-on at its price, and the TOTAL when there are add-ons; a draw's or a salon's size
- *                  and price read TO BE CONFIRMED until ORBES Client Services enters them (left out once cancelled);
+ *   the terms      SIZE, PRICE, each add-on at its price, its SHIPPING (plan NEXT-NINE, BP-19 T4: free by its tier, at
+ *                  its fee, or with the order it travels with; no row without shipping), and the TOTAL when there are
+ *                  add-ons or a fee; a draw's or a salon's size and price read TO BE CONFIRMED until ORBES Client
+ *                  Services enters them (left out once cancelled);
  *   the shipment   once shipped: the CARRIER, the TRACKING NUMBER and TRACK THE SHIPMENT, the carrier's page (https only);
  *   the documents  (M6) its INVOICE and CREDIT NOTE with their numbers (PDFs; the number in the reading face), the CARE GUIDE of its model while the
  *                  piece is on its way or kept, its OWNERSHIP CERTIFICATE once the piece is registered to the account;
@@ -138,9 +140,32 @@ export function orderSteps(o: AccountOrder, offsetMinutes?: number): OrderStepMo
   return [...ORDER_PATH.filter((s) => s === 'RESERVED' || at[s] !== null).map((s) => step(s, 'done')), step(o.status, 'current')];
 }
 
+const TIER_WORDS: Readonly<Record<2 | 3, string>> = Object.freeze({ 2: 'PLATINE', 3: 'PALLADIUM' });
+
 /**
- * SIZE, PRICE, each add-on at its price (per piece), and the TOTAL when there are add-ons and a price. A cancelled
- * order never promises a confirmation: the size and the price never entered are left out (possibly every row).
+ * An order's SHIPPING row (BP-19 T4): FREE · PLATINE, FREE EXPRESS · PALLADIUM, its fee (EXPRESS · € 40 for express),
+ * WITH ORDER OR-… when it travels with another; null without shipping, or a fee the app cannot say.
+ */
+export function shippingValue(o: Pick<AccountOrder, 'shipping' | 'currency'>): string | null {
+  const s = o.shipping;
+  if (!s || (s.service !== 'STANDARD' && s.service !== 'EXPRESS') || typeof s.minor !== 'number') return null;
+  if (typeof s.withOrder === 'string' && REFERENCE.test(s.withOrder)) return ORDERS.shipping.withOrder(s.withOrder);
+  if (s.benefit === 2 || s.benefit === 3) return s.service === 'EXPRESS' ? ORDERS.shipping.freeExpress(TIER_WORDS[s.benefit]) : ORDERS.shipping.free(TIER_WORDS[s.benefit]);
+  if (!o.currency) return null;
+  const fee = formatMoney(s.minor, o.currency);
+  return s.service === 'EXPRESS' ? ORDERS.shipping.express(fee) : fee;
+}
+
+/** The fee an order adds to its TOTAL: its own shipping, never one it travels with. */
+function shippingFee(o: AccountOrder): number {
+  const s = o.shipping;
+  return s && typeof s.minor === 'number' && s.minor > 0 && !s.withOrder ? s.minor : 0;
+}
+
+/**
+ * SIZE, PRICE, each add-on at its price (per piece), its SHIPPING (BP-19 T4), and the TOTAL when there are add-ons or a
+ * fee, and a price. A cancelled order never promises a confirmation: the size and the price never entered are left out
+ * (possibly every row).
  */
 export function orderRows(o: AccountOrder): Row[] {
   const money = (minor: number) => (o.currency ? formatMoney(minor, o.currency) : ORDERS.toConfirm);
@@ -153,7 +178,10 @@ export function orderRows(o: AccountOrder): Row[] {
     // An add-on adds to the price: « + € 150 » (C24), its words the app's.
     ...(cancelled && o.currency === null ? [] : o.addons).map((a): Row => [upper(a.label), o.currency ? `+ ${money(a.priceMinor)}` : money(a.priceMinor)]),
   ];
-  if (priced && o.addons.length > 0) rows.push([ORDERS.rows.total, money(o.addons.reduce((n, a) => n + a.priceMinor, o.priceMinor!))]);
+  const shipping = shippingValue(o);
+  if (shipping) rows.push([ORDERS.rows.shipping, shipping]);
+  const fee = shippingFee(o);
+  if (priced && (o.addons.length > 0 || fee > 0)) rows.push([ORDERS.rows.total, money(o.addons.reduce((n, a) => n + a.priceMinor, o.priceMinor! + fee))]);
   return rows;
 }
 
