@@ -4,6 +4,7 @@ import { sql, type Kysely } from 'kysely';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { isCheckViolation, isForeignKeyViolation, isGuardViolation, isUniqueViolation, PG_ERROR, pgError } from '../../src/server/db/pg-errors.js';
 import { createMigrator, migrateDown, migrateToLatest, migrationStatus, MIGRATIONS } from '../../src/server/db/migrate.js';
+import { TEST_RUN_STATUSES } from '../../src/server/db/schema.js';
 import * as m0007 from '../../src/server/db/migrations/0007_print_batch_indexes.js';
 import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js';
 import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_accept.js';
@@ -15,7 +16,7 @@ const EXPECTED_TABLES = [
   'live_entries', 'live_entry_addons', 'live_interest', 'live_messages', 'live_tier_windows', 'media_objects', 'model_images', 'models', 'order_alert_settings',
   'order_events', 'orders', 'ownership', 'ownership_certificates', 'ownership_transfers', 'product_status_history', 'products', 'release_answers', 'retailers',
   'returns', 'revocations', 'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shop_requests',
-  'sku_thresholds', 'skus', 'stock_locations', 'stock_movements', 'warranties',
+  'sku_thresholds', 'skus', 'stock_locations', 'stock_movements', 'test_entrants', 'test_run_entrants', 'test_runs', 'warranties',
 ];
 
 describe('migrations', () => {
@@ -1922,7 +1923,7 @@ describe('migrations', () => {
     expect((await sql<{ price_minor: number | null; currency: string | null }>`SELECT price_minor, currency FROM drops WHERE id = ${priced}`.execute(t.db)).rows[0]).toEqual({ price_minor: null, currency: null });
     expect((await sql<{ n: number }>`SELECT count(*)::int AS n FROM models WHERE id IN (${main}, ${variant})`.execute(t.db)).rows[0].n).toBe(2);
     expect((await sql<{ n: number }>`SELECT count(*)::int AS n FROM pg_proc WHERE proname = 'orbes_models_variant_rules'`.execute(t.db)).rows[0].n).toBe(0);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0024_model_variants']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(Object.keys(MIGRATIONS).filter((n) => n >= '0024_model_variants'));
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -1996,6 +1997,62 @@ describe('migrations', () => {
     );
   });
 
+  /** What names an object of 0024a in a snapshot: its three tables. */
+  const of0024a = (o: string) => /\btest_(entrants|runs|run_entrants)\b/.test(o);
+
+  it('0024a adds the test entrants (test_entrants, test_runs, test_run_entrants), and nothing else; down restores 0024 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0024a_test_entrants');
+    const added = withIt.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !of0024a(o))).toEqual([]);
+    expect(before.filter(of0024a)).toEqual([]);
+    expect(withIt.filter((o) => !of0024a(o))).toEqual(before);
+    for (const c of [
+      /^index CREATE UNIQUE INDEX test_runs_one_running ON public\.test_runs USING btree \(status\) WHERE \(status = 'RUNNING'::text\)$/,
+      /^constraint test_entrants test_entrants_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint test_run_entrants test_run_entrants_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES test_entrants\(account_id\) ON DELETE RESTRICT$/,
+      /^index CREATE INDEX test_runs_drop_idx ON public\.test_runs USING btree \(drop_id, created_at\)$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0024a_test_entrants']);
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0024a: a test row\'s tier 0 to 3 and seniority 0 to 50; one RUNNING test in the whole database; ENDED with when and by whom, never otherwise; a bot\'s network a /24 of 100.x', async () => {
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const statuses = await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'test_runs'::regclass AND conname = 'test_runs_status_check'`.execute(t.db);
+    expect([...statuses.rows[0].def.matchAll(/'([A-Z]+)'::text/g)].map((m) => m[1]).sort()).toEqual([...TEST_RUN_STATUSES].sort());
+    await sql`INSERT INTO categories (id, code, name) VALUES (14, 'L', 'Test entrants') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (14, 'T', 'RING', 'TESTENT') RETURNING id`.execute(t.db)).rows[0].id;
+    const drop = await drawDrop(model);
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email, email_normalized, password_hash, role) VALUES ('te@orbes.test', 'te@orbes.test', 'scrypt$x', 'ADMIN') RETURNING id`.execute(t.db)).rows[0].id;
+    const account = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('test-9001@orbes.test', 'test-9001@orbes.test', '!test') RETURNING id`.execute(t.db)).rows[0].id;
+    for (const [tier, seniority] of [[-1, 0], [4, 0], [1, -1], [1, 51]]) {
+      await check(run(`INSERT INTO test_entrants (account_id, tier, seniority) VALUES ('${account}', ${tier}, ${seniority})`), `${tier} ${seniority}`);
+    }
+    await run(`INSERT INTO test_entrants (account_id, tier, seniority) VALUES ('${account}', 3, 50)`);
+    const testRun = (status: string, extra = '') =>
+      sql.raw<{ id: string }>(`INSERT INTO test_runs (drop_id, mode, status, settings, entrants, created_by${extra ? ', ended_at, ended_by' : ''}) VALUES ('${drop}', 'DRAW', '${status}', '[]', 1, '${admin}'${extra}) RETURNING id`).execute(t.db);
+    const first = (await testRun('RUNNING')).rows[0].id;
+    await expect(testRun('RUNNING')).rejects.toSatisfy((e) => isUniqueViolation(e, 'test_runs_one_running'));
+    await testRun('DONE');
+    await testRun('STOPPED');
+    await check(testRun('ENDED'), 'ENDED without its time', 'test_runs_ended');
+    await check(testRun('DONE', `, now(), '${admin}'`), 'a time for a test not ended', 'test_runs_ended');
+    await testRun('ENDED', `, now(), '${admin}'`);
+    await check(run(`INSERT INTO test_runs (drop_id, mode, settings, entrants, created_by) VALUES ('${drop}', 'DRAW', '{}', 1, '${admin}')`), 'settings not a list');
+    await check(run(`INSERT INTO test_runs (drop_id, mode, status, settings, entrants, created_by) VALUES ('${drop}', 'DRAW', 'DONE', '[]', 5001, '${admin}')`), 'more than 5 000');
+    for (const network of ['10.0.0.0/24', '100.64.0.1/24', '100.64.0.0/16']) {
+      await check(run(`INSERT INTO test_run_entrants (run_id, account_id, network, plan) VALUES ('${first}', '${account}', '${network}', '{}')`), network);
+    }
+    await run(`INSERT INTO test_run_entrants (run_id, account_id, network, plan) VALUES ('${first}', '${account}', '100.127.255.0/24', '{"tier": 3}')`);
+    // The account stays while the pool names it; the test row while a bot does.
+    await expect(run(`DELETE FROM test_entrants WHERE account_id = '${account}'`)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(run(`DELETE FROM accounts WHERE id = '${account}'`)).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+  });
+
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
     const latest = await snapshot();
     const { with: withCertificates, without: before } = await rollBackTo('0013_ownership_certificates');
@@ -2049,6 +2106,8 @@ describe('migrations', () => {
       '0023_releases_collectors',
       // NOCTURNE (plan of 2026-10-05): the variants of a model and a draw's price.
       '0024_model_variants',
+      // TEST ENTRANTS (2026-10-07): the pool, the tests and their bots; 0024a sorts before the next lot's 0025.
+      '0024a_test_entrants',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

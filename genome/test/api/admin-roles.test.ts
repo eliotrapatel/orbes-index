@@ -123,6 +123,16 @@ const PROBES: Probe[] = [
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/confirm`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/lapse`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/offer-next`, body: INVALID, min: 'OPERATOR' },
+  // TEST ENTRANTS (2026-10-07): sent, added, stopped, confirmed or released by hand and ended by an ADMIN; read by an AUDITOR.
+  { group: 'test-entrants', method: 'POST', url: `/api/admin/drops/${UUID}/test-runs`, body: INVALID, min: 'ADMIN' },
+  { group: 'test-entrants', method: 'POST', url: `/api/admin/test-runs/${UUID}/add`, body: INVALID, min: 'ADMIN' },
+  { group: 'test-entrants', method: 'POST', url: `/api/admin/test-runs/${UUID}/stop`, body: INVALID, min: 'ADMIN' },
+  { group: 'test-entrants', method: 'POST', url: `/api/admin/test-runs/${UUID}/entrants/${UUID}/confirm`, body: INVALID, min: 'ADMIN' },
+  { group: 'test-entrants', method: 'POST', url: `/api/admin/test-runs/${UUID}/entrants/${UUID}/release`, body: INVALID, min: 'ADMIN' },
+  { group: 'test-entrants', method: 'POST', url: `/api/admin/test-runs/${UUID}/end`, body: INVALID, min: 'ADMIN' },
+  { group: 'test-entrants', method: 'GET', url: `/api/admin/drops/${UUID}/test-runs/current`, min: 'AUDITOR' },
+  { group: 'test-entrants', method: 'GET', url: `/api/admin/drops/${UUID}/test-runs`, min: 'AUDITOR' },
+  { group: 'test-entrants', method: 'GET', url: '/api/admin/test-runs/active', min: 'AUDITOR' },
   // The LIVE RELEASES (plan of 2026-10-04): read by an AUDITOR; created, edited, published, cancelled, their silhouette and
   // board link and their live controls by an OPERATOR; END NOW and REMOVE by an ADMIN.
   { group: 'live', method: 'GET', url: '/api/admin/live', min: 'AUDITOR' },
@@ -329,6 +339,7 @@ describe('admin role enforcement', () => {
       'logistics',
       'atelier',
       'system',
+      'test-entrants',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

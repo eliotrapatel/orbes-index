@@ -225,6 +225,14 @@ export type InvoiceKind = (typeof INVOICE_KINDS)[number];
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];
 
+/**
+ * A run of test entrants (test_runs.status, migration 0024a): RUNNING (its bots acting) → DONE (every bot has acted)
+ * → ENDED (END TEST, its clean-up done); STOPPED by STOP, INTERRUPTED by a restart while it ran. Only RUNNING blocks a
+ * new test.
+ */
+export const TEST_RUN_STATUSES = ['RUNNING', 'DONE', 'STOPPED', 'INTERRUPTED', 'ENDED'] as const;
+export type TestRunStatus = (typeof TEST_RUN_STATUSES)[number];
+
 /** The image types media_objects stores (migration 0012): the console uploads JPEG or WebP only (F-04). */
 export const MEDIA_MIME_TYPES = ['image/jpeg', 'image/webp'] as const;
 export type MediaMimeType = (typeof MEDIA_MIME_TYPES)[number];
@@ -1254,6 +1262,48 @@ export interface ActivityHourlyTable {
   scans: WithDefault<number>;
 }
 
+/**
+ * The pool of test accounts (migration 0024a, TEST ENTRANTS): the tier and seniority the club reads for each instead of
+ * its pieces (services/club.ts clubStandings), set by the press that sends it.
+ */
+export interface TestEntrantsTable {
+  account_id: string;
+  tier: WithDefault<number>;           // 0..3
+  seniority: WithDefault<number>;      // 0..50 full years
+  created_at: TimestampDefault;
+}
+
+/** A test of a release (migration 0024a): its presses' settings, its bots counted, its report and peaks. */
+export interface TestRunsTable {
+  id: Generated<string>;
+  drop_id: string;
+  mode: DropMode;
+  status: WithDefault<TestRunStatus>;
+  /** Each press (START, then each ADD MORE), oldest first: its time, its bots and its settings. */
+  settings: Jsonb<JsonValue[]>;
+  entrants: number;                    // 0..5000
+  created_by: string;                  // admin_users.id
+  created_at: TimestampDefault;
+  ended_at: TimestampNullable;
+  ended_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id
+  /** The TEST REPORT, computed at END TEST before the clean-up. */
+  report: JsonbNullable<JsonObject>;
+  /** The test's running maxima while it ran (services/system-status.ts). */
+  peaks: JsonbNullable<JsonObject>;
+}
+
+/** A bot of a run (migration 0024a): its network, what it was drawn to do, what it did; a draw's confirmation due. */
+export interface TestRunEntrantsTable {
+  run_id: string;
+  account_id: string;
+  /** Its /24 in 100.64.0.0/10 (RFC 6598). */
+  network: string;
+  plan: Jsonb<JsonObject>;
+  outcome: ColumnType<string | null, string | null | undefined, string | null>;
+  confirm_due_at: TimestampNullable;
+  updated_at: TimestampDefault;
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -1371,6 +1421,9 @@ export interface Database {
   release_answers: ReleaseAnswersTable;
   segments: SegmentsTable;
   activity_hourly: ActivityHourlyTable;
+  test_entrants: TestEntrantsTable;
+  test_runs: TestRunsTable;
+  test_run_entrants: TestRunEntrantsTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -1468,6 +1521,9 @@ export type AfterRoomGuestRow = Selectable<AfterRoomGuestsTable>;
 export type ReleaseAnswerRow = Selectable<ReleaseAnswersTable>;
 export type SegmentRow = Selectable<SegmentsTable>;
 export type ActivityHourlyRow = Selectable<ActivityHourlyTable>;
+export type TestEntrantRow = Selectable<TestEntrantsTable>;
+export type TestRunRow = Selectable<TestRunsTable>;
+export type TestRunEntrantRow = Selectable<TestRunEntrantsTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;

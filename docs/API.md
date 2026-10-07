@@ -694,6 +694,15 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/admin/drops/:id/entries/:entryId/confirm` | OPERATOR | yes | admin | 16.19 |
 | POST | `/api/admin/drops/:id/entries/:entryId/lapse` | OPERATOR | yes | admin | 16.19 |
 | POST | `/api/admin/drops/:id/offer-next` | OPERATOR | yes | admin | 16.19 |
+| POST | `/api/admin/drops/:id/test-runs` | **ADMIN** | yes | admin | 16.28 |
+| GET | `/api/admin/drops/:id/test-runs/current` | AUDITOR | — | admin | 16.28 |
+| GET | `/api/admin/drops/:id/test-runs` | AUDITOR | — | admin | 16.28 |
+| GET | `/api/admin/test-runs/active` | AUDITOR | — | admin | 16.28 |
+| POST | `/api/admin/test-runs/:id/add` | **ADMIN** | yes | admin | 16.28 |
+| POST | `/api/admin/test-runs/:id/stop` | **ADMIN** | yes | admin | 16.28 |
+| POST | `/api/admin/test-runs/:id/entrants/:accountId/confirm` | **ADMIN** | yes | admin | 16.28 |
+| POST | `/api/admin/test-runs/:id/entrants/:accountId/release` | **ADMIN** | yes | admin | 16.28 |
+| POST | `/api/admin/test-runs/:id/end` | **ADMIN** | yes | admin | 16.28 |
 | GET | `/api/admin/circle/posts` | AUDITOR | — | admin | 16.20 |
 | POST | `/api/admin/circle/posts` | OPERATOR | yes | admin | 16.20 |
 | GET | `/api/admin/circle/posts/:id` | AUDITOR | — | admin | 16.20 |
@@ -2531,15 +2540,6 @@ A model's narrative is its lookbook sheet (P-R02, §8.8): its story and its spec
 
 Both take an empty JSON body (`{}`) or none (any field is `400 VALIDATION_FAILED`), and the CSRF rules of §2.2. **200** — the model object (`discontinuedAt` set or `null`, `active`). Errors: `400 VALIDATION_FAILED` (`:id` not a UUID, a field in the body), `401`, `403 FORBIDDEN` (below ADMIN), `404 MODEL_NOT_FOUND`, `409 MODEL_ALREADY_DISCONTINUED`, `409 MODEL_NOT_DISCONTINUED`. The database holds it below the service: `models_discontinued_inactive` (a discontinued model is never active) and `models_discontinued_by_when` (an author only with the date), DATABASE §5.3.
 
----
-
-## 14. Admin: products and lifecycle
-
-### 14.1 `GET /api/admin/products`
-
-AUDITOR. Paginated, newest first, from the `product_overview` view.
-
-| Query | Rules |
 ### 13.5 `GET /api/admin/system/status` — the server's status (extension of the contract)
 
 AUDITOR (every console role from AUDITOR; RETAIL: `403 FORBIDDEN`). What the console's Server panel reads every 2 s (test entrants: the Drops tab, a draw's page, a LIVE RELEASE's page). The app takes a sample every 2 s from its start and keeps the last 300, 10 minutes (`services/system-status.ts`); the route only reads them, and takes a first one when a request comes before it. No query string.
@@ -2572,6 +2572,15 @@ AUDITOR (every console role from AUDITOR; RETAIL: `403 FORBIDDEN`). What the con
 
 `at` and `now` are the server's clock. A rate needs two readings: the first sample after a start has `cpuCores`, `throttledPct` and `cpuPct` `null`. Whatever the host cannot give is `null`, never an error: macOS has no cgroup nor `/proc`, PGlite (development, tests, the demo) no pool nor other connections. The same samples raise a running test's peaks (the TEST REPORT's `peaks`: `appMemBytes`, `appCpuCores`, `p95Ms`, `loopDelayP99Ms`, `liveStreams`, `dbConnections`, `poolWaiting`, their maxima while it runs, and `errors5xx`, `refused429`, the responses counted meanwhile). **200**. Errors: `401`, `403 FORBIDDEN`.
 
+---
+
+## 14. Admin: products and lifecycle
+
+### 14.1 `GET /api/admin/products`
+
+AUDITOR. Paginated, newest first, from the `product_overview` view.
+
+| Query | Rules |
 |---|---|
 | `status` | One of the 12 product statuses. |
 | `category` | One letter (case-insensitive). |
@@ -3946,6 +3955,77 @@ The store is not decided (plan LIVE RELEASE+ of 2026-10-04, choices 9, 24 and 25
 In the console: **Catalogue** — a model's base price, its currency and its care guide in its *Edit*; the list's *Price · Shopify* (the base price, and NOT LINKED, LINKED or LINKED · 2 OF 4 SIZES); *Shopify export* (every role that reads: the store's currency, what the file holds and leaves out said first); *Shopify* on a model's row (OPERATOR: the product's and each size's ids pasted back). **Orders** — *Shopify export*: the period, the current month to today by default.
 
 Errors of this section: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 FORBIDDEN`, `403 CSRF_FAILED`, `404 MODEL_NOT_FOUND`, `409 SHOPIFY_PRODUCT_TAKEN`, `409 SHOPIFY_VARIANT_TAKEN`.
+
+### 16.28 Test entrants: a release's tests (extension of the contract)
+
+The owner's lot of 2026-10-07 (`routes/admin/test-entrants.ts`, `services/test-entrants.ts`, migration `0024a_test_entrants`, DATABASE §5.62 to §5.64): from a draw's page or a LIVE RELEASE's page, an ADMIN sends **test entrants**, artificial collectors, to prove the release's process, prove it holds a crowd and watch it live. A test entrant is an ordinary ORBES account of a pool (`test-0001@orbes.test`, display name `TEST 0001`, ACTIVE, a password hash no password matches: it never signs in), reused from test to test (5 000 accounts at most). It behaves exactly as a collector: it enters through the public routes (§10.10, §8.10) with its own session minted by the server, the CSRF token and the site's Origin, from its own address in `100.64.0.0/10` (RFC 6598; its own `/24`, or `100.127.255.0/24` for the « shared network » share), so validation, rate limits, network hashes and the bot radar apply; it wins, takes real places and pieces, and PAY or a Confirm creates its real orders; public counts and the console's figures count it. Only three things are its own: its tier and seniority come from its test row, never from pieces (every reader of a tier: the draw, the early access, the LIVE line, access); it counts as owning a LIVE RELEASE's models and collection for its rule; and END TEST cleans up after it.
+
+| Method | Path | Role | Purpose |
+|---|---|---|---|
+| POST | `/api/admin/drops/:id/test-runs` | **ADMIN** | SEND TEST ENTRANTS (the body below): a draw `OPEN`, or in its early access when some PLATINE and PALLADIUM are to reserve (`409 TEST_DRAW_NOT_OPEN` « Start the test while the draw is open. »); a LIVE RELEASE announced, its room open, not over (`409 TEST_ROOM_NOT_OPEN` « Start the test once the room is open. »). One test RUNNING at a time in the whole console (`409 TEST_RUNNING`); the pool at most 5 000 accounts (`409 TEST_POOL_FULL`, its message saying how many more could still be made). **201** `{ "run": TestRunView }`. Audited `test_run.start` `{ dropId, mode, entrants, tiers }` |
+| POST | `/api/admin/test-runs/:id/add` | **ADMIN** | ADD MORE: the same body (the phrase `TEST <8>`, the tiers; a group left out keeps the run's last press's), only on a RUNNING test (`409 TEST_NOT_RUNNING`), at most 5 000 test entrants per test (`409 TEST_RUN_FULL`). **200** `{ run }`. Audited `test_run.add` `{ dropId, entrants, total, tiers }` |
+| POST | `/api/admin/test-runs/:id/stop` | **ADMIN** | STOP, no body, one press: the test entrants halt at once, nothing is cleaned; `STOPPED` (`409 TEST_NOT_RUNNING` unless RUNNING). **200** `{ run }`. Audited `test_run.stop` |
+| POST | `/api/admin/test-runs/:id/entrants/:accountId/confirm` | **ADMIN** | CONFIRM by hand, no body: a draw's `SELECTED` place confirmed by the staff's Confirm (§16.19, its order created); on a LIVE RELEASE, the test entrant on its turn or holding its piece presses, holds the seal, secures and pays now (`409 TEST_PLACE_NOT_HELD` otherwise). **200** `{ run }`. Audited `test_run.confirm` `{ accountId, entryId }` |
+| POST | `/api/admin/test-runs/:id/entrants/:accountId/release` | **ADMIN** | RELEASE by hand, no body, a LIVE RELEASE only: the held piece given back now (RELEASE MY PLACE; `409 TEST_HOLD_NOT_HELD` without a hold); a draw's place is never given back (`409 TEST_DRAW_NO_RELEASE`). **200** `{ run }`. Audited `test_run.release` |
+| POST | `/api/admin/test-runs/:id/end` | **ADMIN** | END TEST, `{ "phrase": "END TEST 1A2B3C4D" }`, on RUNNING, DONE, STOPPED or INTERRUPTED (`409 TEST_ENDED` once ended): see below. **200** `{ run }`, `ENDED` with its `report`. Audited `test_run.end` `{ dropId, from, checksPassed, checksTotal, cleaned }` |
+| GET | `/api/admin/drops/:id/test-runs/current` | AUDITOR | `{ "run": TestRunView \| null }`: the release's newest test not ended (`404 DROP_NOT_FOUND`) |
+| GET | `/api/admin/drops/:id/test-runs` | AUDITOR | `{ "runs": TestRunSummary[] }`: the release's tests, newest first |
+| GET | `/api/admin/test-runs/active` | AUDITOR | `{ "run": { id, dropId, dropName, mode, status, entrants } \| null }`: the RUNNING test, whatever its release (the Drops tab) |
+
+The body of SEND TEST ENTRANTS and ADD MORE (strict; every group but `tiers` optional, a group left out taking the settings by default at START and the last press's at ADD MORE; a group sent is whole):
+
+```json
+{
+  "phrase": "TEST 1A2B3C4D",
+  "tiers": { "none": 0, "titane": 100, "platine": 0, "palladium": 0 },
+  "arrival": { "mode": "burst", "seconds": 10, "interestPct": 0 },
+  "behaviour": { "payPct": 70, "releasePct": 20, "missPct": 10, "leavePct": 0, "holdSeconds": 1.5,
+                 "withdrawPct": 0, "reservePct": 0, "confirmPct": 70 },
+  "choices": { "size": null, "quantity": 1, "addOnsPct": 0 },
+  "profile": { "seniorityMin": 0, "seniorityMax": 3, "accountAgeDaysMin": 30, "accountAgeDaysMax": 720,
+               "countries": [], "sharedNetworkPct": 0 }
+}
+```
+
+- `phrase`: `TEST` and the release's id, its first 8 characters in capitals (spaces and case aside; `400 VALIDATION_FAILED` « Type TEST 1A2B3C4D to confirm. »).
+- `tiers`: test entrants per tier (NO TIER, TITANE, PLATINE, PALLADIUM), whole numbers, 1 to 1 000 per press in all.
+- `arrival.mode`: `all` (at once), `burst` (evenly over `seconds`, 1 to 3 600, 10 by default) or `before` (a LIVE RELEASE only: spread from now until T0); `interestPct`: the share that says I'LL BE THERE first (a LIVE RELEASE, before T0).
+- `behaviour`: on a LIVE RELEASE, the shares that PAY, RELEASE MY PLACE, miss their turn (do nothing) or LEAVE (on their turn, or 5 to 60 s after entering), 100 in all, and the seal held `holdSeconds` (1.5 to 10) between PRESS and SECURE; PAY or RELEASE comes 2 to 10 s after SECURE. On a draw, the share that withdraws 2 to 10 s after entering, the share of the PLATINE and PALLADIUM that reserve during the early access instead (a test entrant that cannot enter yet waits for the opening), and the share of the places held that confirm by themselves (`confirmPct`). Every share is exact (70 % of 10 is 7), the test entrants drawn at random.
+- `choices` (a LIVE RELEASE): `size`, one of the release's sizes, its id or its label (`400` otherwise), or `null` for one at random each; `quantity`, 1 to 5 pieces, or `null` at random, within the release's own limit and the size's stock; `addOnsPct`, the share that adds one of its add-ons.
+- `profile`: each test entrant drawn within: its seniority (0 to 50 years), its account's age (0 to 3 650 days: its account's `createdAt` moved back; a new account trips the bot radar), a country of `countries` (ISO 3166-1 alpha-2; none: none) and the share coming from the one shared network.
+
+A press takes the pool's accounts with no entry in the release and in no RUNNING test, makes the missing ones, and sets each one's test row (its tier, a seniority), its country and its account's age.
+
+**A run**: `RUNNING` (its test entrants acting), `DONE` (every one has acted; a draw's test waits there for the staff's draw), `STOPPED` (STOP), `INTERRUPTED` (a restart or a deploy while it ran: the next start of the server marks it), `ENDED` (END TEST). Only `RUNNING` blocks a new test. While a draw's test is RUNNING or DONE, each place a test entrant holds (drawn, reserved in the early access or offered next) and drawn to confirm is confirmed by the staff's Confirm, with the test's ADMIN as actor, 5 to 60 s after it is held; the time is kept in the database, so a restart resumes it. The others keep their place until its time ends and lapse as anyone's.
+
+**END TEST**: the test entrants stop; the TEST REPORT is computed **before** the clean-up and kept (a clean-up cut short keeps it: END TEST again finishes it); then, for the test's accounts in that release: their open orders (RESERVED, PAID) cancelled one by one as Client Services cancels one (§16.24: the stock goes back, a piece to make is cancelled and its reserved identity retired), a draw's `ENTERED` entries `WITHDRAWN` and its `SELECTED`, `CONFIRMED` and `WAITLISTED` ones `LAPSED` now (`respondBy` set to that time, their rank kept: staff OFFER NEXT to real collectors), a LIVE RELEASE's open entries `REMOVED` (§16.23 REMOVE: a piece held goes to the next) and their I'LL BE THERE withdrawn before T0, their sessions ended. `ENDED`. The accounts stay in the pool. A LIVE entry `CONFIRMED` stays so (only its orders are cancelled).
+
+`TestRunView`:
+
+```json
+{
+  "id": "7c1e…", "dropId": "1a2b3c4d-…", "mode": "DRAW", "status": "RUNNING",
+  "createdAt": "2026-10-07T03:00:00.000Z", "endedAt": null, "createdBy": "admin@theorbes.com",
+  "settings": [ { "at": "2026-10-07T03:00:00.000Z", "entrants": 100, "tiers": { … }, "arrival": { … }, "behaviour": { … }, "choices": { … }, "profile": { … } } ],
+  "entrants": 100,
+  "byTier": [ { "tier": 0, "label": "NO TIER", "entered": 0, "inRoom": 0, "selected": 0, "confirmed": 0, "lapsed": 0,
+                "released": 0, "missed": 0, "left": 0, "withdrawn": 0 }, "… TITANE, PLATINE, PALLADIUM" ],
+  "release": { "real": 412, "test": 100, "total": 512 },
+  "selected": [ { "accountId": "…", "email": "test-0042@orbes.test", "tier": 1, "status": "SELECTED",
+                  "respondBy": "2026-10-09T03:00:00.000Z", "orderRef": null, "canConfirm": true, "canRelease": false } ],
+  "errors": [ { "at": "2026-10-07T03:00:04.120Z", "message": "ENTER refused for test-0042@orbes.test: 429 RATE_LIMITED" } ],
+  "report": null,
+  "peaks": null
+}
+```
+
+`settings`: each press, oldest first, with its time and its test entrants. `byTier` by the test row's tier: on a draw `entered` (an entry), `inRoom` (`ENTERED` or `WAITLISTED`), `selected`, `confirmed`, `lapsed`, `withdrawn`; on a LIVE RELEASE `inRoom` (WAITING, QUEUED, TURN, SECURED), `selected` (TURN, SECURED), `confirmed`, `lapsed` (EXPIRED), `released`, `missed`, `left`. `release`: the release's entries, any test's counted as `test`. `selected` (at most 500): the test entrants holding a place (a draw's `SELECTED` or `CONFIRMED`; a LIVE `TURN`, `SECURED` or `CONFIRMED`), `respondBy` the end of the place held (a LIVE hold's, or its turn's), `orderRef` its order's `OR-` reference; the email masked for an AUDITOR. `errors`: the last 20 refusals the test entrants met (this process's memory). `peaks`: the test's running maxima while it ran (§13.5), saved every ~10 s.
+
+`report` (and `TestRunSummary.report`): `{ "at", "checks": [ { "id", "label", "pass", "line" } ], "passed", "total", "peaks" }`, five checks over the whole release, real and test entries together, each with one plain line: `ONE_ENTRY` one entry per account; `ORDER` a drawn draw's order follows tier then seniority (the ranks recomputed from the seed it revealed; the early access's reservations are outside the ranking), or a LIVE RELEASE's line at T0 by tier when it gives tier priority; `ONE_PLACE` nobody holds two places (a LIVE RELEASE and its after-room together; 1 to 5 pieces each); `STOCK` the places held or sold within the release's pieces (per size on a LIVE RELEASE), one order per place or piece confirmed, no stock line below zero; `ORDERS` every confirmed place has its order (one per piece on a LIVE RELEASE). `TestRunSummary`: `{ id, status, createdAt, endedAt, createdBy, entrants, checksPassed, checksTotal, report, peaks }`, the checks `null` until END TEST.
+
+Errors besides: `400 VALIDATION_FAILED`, `401`, `403 FORBIDDEN` (below ADMIN for a change), `403 CSRF_FAILED`, `404 DROP_NOT_FOUND`, `404 TEST_RUN_NOT_FOUND`, `404 TEST_ENTRANT_NOT_FOUND`, `409 TEST_ENDING` (END TEST already under way).
+
+In the console: a draw's page and a LIVE RELEASE's page carry **Test entrants** (BRAND-DESIGN-SYSTEM §6, principle 25): **Send test entrants** (ADMIN, a phrase to type), the test not ended read every 2 s (its status, settings, test entrants by tier, the release's entries real, test and in all, those holding a place with **Confirm** and, on a LIVE RELEASE, **Release**, the last errors), **Add more**, **Stop**, **End test** (a phrase to type), then **Past tests** with each report. A test entrant's email carries **TEST** in the entries' lists. The **Server** panel (§13.5) stands on the right of these pages and of the Drops tab, which also shows the test running with **Stop**.
 
 ## 17. Admin: keys, audit log and console users
 

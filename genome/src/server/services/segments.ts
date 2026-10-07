@@ -226,7 +226,7 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
       x = securedIn(db, account, r.dropId);
       break;
     case 'TIER':
-      x = sql<SqlBool>`${tierSql(piecesHeld(db, account))} in (${sql.join(r.tiers)})`;
+      x = sql<SqlBool>`coalesce((select te.tier from test_entrants as te where te.account_id = ${account}), ${tierSql(piecesHeld(db, account))}) in (${sql.join(r.tiers)})`; // a test entrant's tier: its test row (club.ts clubStandings)
       break;
     case 'OWNS_MODEL':
       x = exists(

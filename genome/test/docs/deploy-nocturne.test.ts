@@ -33,9 +33,9 @@ const NAMES = Object.keys(MIGRATIONS);
 const numberOf = (name: string): number => Number(name.slice(0, 4));
 /** The schema deployment E leaves, F's starting point. */
 const AFTER_E = NAMES.filter((n) => numberOf(n) <= 23);
-/** Deployment F: the one migration of NOCTURNE. */
-const DEPLOY_F = NAMES.filter((n) => numberOf(n) > 23);
-const AFTER_F = NAMES;
+/** Deployment F: the one migration of NOCTURNE (0024a, TEST ENTRANTS, is its own lot's, after F). */
+const DEPLOY_F = NAMES.filter((n) => numberOf(n) > 23 && n <= '0024_model_variants');
+const AFTER_F = NAMES.filter((n) => n <= '0024_model_variants');
 
 /** What the runbook expects from the scripts, each printed word for word by its source. */
 const MESSAGES: ReadonlyArray<readonly [message: string, source: string]> = [
@@ -75,6 +75,8 @@ describe('the NOCTURNE runbook (docs/launch/DEPLOY-NOCTURNE.md)', () => {
   it('starts from deployment E, 0001 to 0023, and applies exactly 0024, as the scripts print it', () => {
     expect(AFTER_E.at(-1)).toBe('0023_releases_collectors');
     expect(DEPLOY_F).toEqual(['0024_model_variants']);
+    // A later name has its own lot and runbook: 0024a is TEST ENTRANTS' (2026-10-07), on the code F deployed.
+    expect(NAMES.filter((n) => n > '0024_model_variants')).toEqual(['0024a_test_entrants']);
     expect(runbook).toContain('[le runbook précédent](DEPLOY-LIVE-RELEASE-PLUS.md)');
     expect(outputs.join('\n')).toContain(AFTER_E.slice(-2).join('\n'));
     expect(runbook).toContain(`schema: ${AFTER_E.length} migration(s) applied, all known to orbes-genome:<TAG_F>`);

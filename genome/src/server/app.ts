@@ -36,6 +36,7 @@ import { liveRoutes } from './routes/live.js';
 import { ownershipRoutes } from './routes/ownership.js';
 import { publicRoutes } from './routes/public.js';
 import { SystemStatus } from './services/system-status.js';
+import { TestEntrantService } from './services/test-entrants.js';
 
 /** Contract §3: request bodies are limited to 16 KB. */
 export const BODY_LIMIT_BYTES = 16 * 1024;
@@ -146,6 +147,12 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   });
   app.addHook('onReady', async () => systemStatus.start());
   app.addHook('onClose', async () => systemStatus.stop());
+  // TEST ENTRANTS (services/test-entrants.ts, `app.testEntrants`): the bots act through this app's own routes; a test
+  // left RUNNING by the previous process is INTERRUPTED now; the bots stop before the server closes.
+  const testEntrants = new TestEntrantService({ ctx, inject: (request) => app.inject(request) });
+  app.decorate('testEntrants', testEntrants);
+  app.addHook('preClose', async () => testEntrants.close());
+  await testEntrants.boot();
   const limiters = await registerRateLimits(app, config);
 
   const deps = { ctx, limiters };
