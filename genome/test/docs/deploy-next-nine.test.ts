@@ -101,6 +101,8 @@ describe('the runbook of the next nine (docs/launch/DEPLOY-NEXT-NINE.md)', () =>
     // TEST ENTRANTS sorts before the next nine, as the migrator (Kysely) and psql order them.
     expect([...AFTER_G].sort()).toEqual(AFTER_G);
     expect(runbook).toContain('[son runbook](DEPLOY-NOCTURNE.md)');
+    // The merge of TEST ENTRANTS extends END TEST to what the tier program gives (its TODO in services/test-entrants.ts).
+    expect(runbook).toContain('À cette fusion, END TEST est étendu, avec son test : il annule aussi les commandes GIFT, les usages de crédit et les avantages de palier des comptes de test');
     expect(runbook).toContain(`le commit \`${PREV_COMMIT}\` (image \`orbes-genome:${PREV_TAG}\``);
     expect(runbook).toContain(`les vingt-cinq migrations de \`${BEFORE_G[0]}\` à \`${TEST_ENTRANTS}\``);
     expect(BEFORE_G).toHaveLength(25);
