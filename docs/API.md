@@ -608,6 +608,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/v1/live/:id/board/stream` | — (the board link's secret) | origin only | live | 8.10 |
 | GET | `/api/v1/releases/past` | — | — | api | 8.11 |
 | GET | `/api/v1/the-club` | — | — | api | 8.12 |
+| GET | `/api/v1/releases/rules` | — | — | api | 8.13 |
 | POST | `/api/v1/verify` | — (account cookie optional; a console cookie makes it a staff scan, §9.7) | — | verify | 9 |
 | POST | `/api/v1/reports` | — (account cookie optional) | origin only | verify | 8.5 |
 | POST | `/api/v1/certificates/lookup` | — | — | verify | 8.7 |
@@ -1322,6 +1323,34 @@ Plan NEXT-NINE, BP-19 T9 (`routes/public.ts`, `services/club.ts` `theClub`). The
 `pieces`: the pieces held now each tier starts from (`CLUB_TIER_THRESHOLDS`, a constant of the code); `lines`: what the tier adds, THE PROGRAM's lines first (§16.21, `programLines`: its early access, shipping, yearly care, the priority with Client Services on the tier it starts from, its welcome gift while its model is active, its credit, the experiences of the circle on the tier each invites from), then the tier's words (§16.21, the Tiers tab; PLATINE's are none by default); `creditCurrency`: the one currency the credit applies to (THE PROGRAM's `creditCurrency`); `gifts`: each tier's welcome gift while its model is active, its name and its reference photograph (`null` without one).
 
 In the verify app: **THE CLUB** (`/verify/club`), linked from the footer (above the legal pages, in the app) and from the account sheet (a row under MY PIECES): the figures of the lead and of each tier read from here, never typed into the app's words; a plate per tier (its name, FROM n PIECES, its lines, its gift's photograph); HOW THE TIERS WORK (*The credit applies to orders in euros.* from `creditCurrency`); then *YOUR TIER: PLATINE · 6 PIECES HELD* (the account sheet), *YOUR FIRST PIECE OPENS TITANE* (MY PIECES) or *SIGN IN TO SEE YOUR TIER* (MY PIECES' sign-in). The page has no link to HOW RELEASES WORK.
+
+### 8.13 HOW RELEASES WORK: `GET /api/v1/releases/rules` (extension of the contract)
+
+Plan NEXT-NINE, FT-01 (`routes/public.ts`, `services/release-rules.ts` `releaseRules`). The figures the page that explains every release states, read where the server applies them: the same for everyone, no session, no account named, nothing written, rate group `api`, `Cache-Control: public, max-age=60`.
+
+```json
+{
+  "tiers": [
+    { "name": "TITANE", "level": 1, "pieces": 1 },
+    { "name": "PLATINE", "level": 2, "pieces": 5 },
+    { "name": "PALLADIUM", "level": 3, "pieces": 10 }
+  ],
+  "earlyAccess": { "PALLADIUM": 240, "PLATINE": 120 },
+  "placeHeldHours": 48,
+  "salonFromTier": "TITANE"
+}
+```
+
+| Field | Notes |
+|---|---|
+| `tiers` | Each tier from the pieces held now it starts from (`CLUB_TIER_THRESHOLDS`, a constant of the code, as §8.12). |
+| `earlyAccess` | A new draw's early access by default, PALLADIUM's and PLATINE's, in minutes before entries open to everyone: THE PROGRAM's windows (§16.21, 4 and 2 hours by default; `0`: none). Each draw may set its own, which its page gives (§8.9). |
+| `placeHeldHours` | How long a place drawn is held by default (`PURCHASE_WINDOW_HOURS.default`); a draw may set its own (§8.9 `purchaseWindowHours`). |
+| `salonFromTier` | The lowest tier THE PRIVATE SALON may offer a model from (a model's tier, §10.9). |
+
+In the verify app: **HOW RELEASES WORK** (`/verify/releases/how`), in NOCTURNE's chrome without a photograph: THE WAYS TO TAKE PART (DRAW, EARLY ACCESS, LIVE RELEASE, THE PRIVATE SALON), HOW THE ORDER IS SET (THE TIERS with *TITANE · FROM 1 PIECE*, IN A DRAW, IN A LIVE RELEASE) and WHAT THE HOUSE NEVER DOES (NO PAID PRIORITY, NO AUCTIONS, A FIXED QUANTITY, ONE COLLECTOR, ONE ACCOUNT, A RETURNED PIECE). Every figure comes from here, never typed into the app's words: a window of whole hours reads *4 hours*, another *90 minutes*. It is linked under the lead of THE RELEASES, as the last line of a draw's page and of a LIVE RELEASE's pages before and after the room, and first in the room's foot (in a new tab while the collector holds an entry); never from THE CLUB nor the boutique board.
+
+Errors: `429 RATE_LIMITED`.
 
 ## 9. Verification: `POST /api/v1/verify`
 

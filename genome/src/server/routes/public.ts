@@ -5,7 +5,8 @@
  * sheets), the drops (P-R03: the releases to come, a release's page
  * and, once drawn, its entries by rank), THE RELEASES' PAST (plan LIVE
  * RELEASE+, choice 5: the releases ended), THE CLUB (plan NEXT-NINE, BP-19
- * T9: the tiers and what each gives), the report a customer may attach
+ * T9: the tiers and what each gives), the rules HOW RELEASES WORK states
+ * (plan NEXT-NINE, FT-01: their figures), the report a customer may attach
  * to a scan that was not authentic, and the ownership certificate an owner
  * shares (F-06: its live record and its PDF, by the token of the link).
  *
@@ -46,6 +47,7 @@ import { assertSameOrigin, loadAccount, loadStaff } from '../http/sessions.js';
 import { notFound } from '../errors.js';
 import type { Actor } from '../types.js';
 import type { ScanMeta } from '../services/verification.js';
+import { releaseRules } from '../services/release-rules.js';
 import { safeFilename } from './admin/codes.js';
 
 export interface RouteDeps {
@@ -210,6 +212,14 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     const club = await ctx.services.club.theClub();
     reply.header('cache-control', DROPS_CACHE_CONTROL);
     return club;
+  });
+
+  // HOW RELEASES WORK (plan NEXT-NINE, FT-01; §8.13): the figures the page states, read where the server applies them
+  // (the tiers' thresholds, THE PROGRAM's default early access, how long a place drawn is held). Read only, kept a minute.
+  app.get('/api/v1/releases/rules', async (_request, reply) => {
+    const rules = await releaseRules(ctx);
+    reply.header('cache-control', DROPS_CACHE_CONTROL);
+    return rules;
   });
 
   app.post('/api/v1/verify', { config: { rateGroup: 'verify' } }, async (request, reply) => {
