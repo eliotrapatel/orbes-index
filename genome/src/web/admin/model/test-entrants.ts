@@ -154,10 +154,11 @@ const valueOf = (v: Record<string, string>, k: string): string => v[k] ?? testRu
 
 /**
  * What the server would refuse in a press, said before anything is sent; null when it can go. `already`: the run's test
- * entrants before ADD MORE (5 000 in all). `earlyOnly`: a draw in its early access only, where a test needs PLATINE or
- * PALLADIUM test entrants and a share that reserves (as the server asks).
+ * entrants before ADD MORE (5 000 in all). `earlyOnly`: a draw in its early access only, where a test needs test
+ * entrants of a tier whose window is open and a share that reserves (as the server asks): PALLADIUM, or PLATINE too
+ * once its own window is open (`earlyPlatine`, BP-19 T3; unsaid: open).
  */
-export function testRunProblem(mode: TestRunMode, v: Record<string, string>, opts: { already?: number; earlyOnly?: boolean } = {}): string | null {
+export function testRunProblem(mode: TestRunMode, v: Record<string, string>, opts: { already?: number; earlyOnly?: boolean; earlyPlatine?: boolean } = {}): string | null {
   const L = TEST_ENTRANTS_LIMITS;
   const tiers = tierCounts(v);
   if (!tiers) return 'Type a whole number of test entrants for each tier (0, or empty, for none).';
@@ -196,7 +197,8 @@ export function testRunProblem(mode: TestRunMode, v: Record<string, string>, opt
     ] as const) {
       if (pct(valueOf(v, k)) === null) return `The share that ${what} is 0 to 100 %.`;
     }
-    if (opts.earlyOnly && (pct(valueOf(v, 'reservePct')) === 0 || tiers.platine + tiers.palladium === 0)) return 'Only the early access is open: send PLATINE or PALLADIUM test entrants, with a share that reserves.';
+    if (opts.earlyOnly && opts.earlyPlatine !== false && (pct(valueOf(v, 'reservePct')) === 0 || tiers.platine + tiers.palladium === 0)) return 'Only the early access is open: send PLATINE or PALLADIUM test entrants, with a share that reserves.';
+    if (opts.earlyOnly && opts.earlyPlatine === false && (pct(valueOf(v, 'reservePct')) === 0 || tiers.palladium === 0)) return 'Only PALLADIUM’s early access is open: send PALLADIUM test entrants, with a share that reserves.';
   }
 
   const sMin = whole(valueOf(v, 'seniorityMin'));
@@ -251,21 +253,37 @@ export function testPhrase(action: 'send' | 'end', dropId: string): string {
   return `${action === 'end' ? 'END TEST' : 'TEST'} ${dropId.slice(0, 8).toUpperCase()}`;
 }
 
-/** Whether a test can start on the release now, a draw only in its early access (`earlyOnly`), and the line that says it. */
+/**
+ * Whether a test can start on the release now, a draw only in its early access (`earlyOnly`, PLATINE's own window open
+ * too or not: `earlyPlatine`), and the line that says it.
+ */
 export interface TestStart {
   open: boolean;
   earlyOnly: boolean;
+  earlyPlatine?: boolean;
   line: string;
 }
 
-/** A draw: open to entries, or in its early access (then the test needs a share that reserves). */
-export function drawTestStart(d: Pick<Drop, 'state' | 'earlyAccessOpensAt' | 'opensAt'>, now: Date): TestStart {
+/** A draw: open to entries, or in its early access (then the test needs a share that reserves, of a tier whose window is open). */
+export function drawTestStart(d: Pick<Drop, 'state' | 'earlyAccessOpensAt' | 'earlyAccessPlatineOpensAt' | 'opensAt'>, now: Date): TestStart {
   if (d.state === 'OPEN') {
     return { open: true, earlyOnly: false, line: 'Entries are open: test entrants enter through the release’s own routes, each signed in on its own network, and are drawn with the real entries.' };
   }
   const t = now.getTime();
   if (d.state === 'UPCOMING' && d.earlyAccessOpensAt && Date.parse(d.earlyAccessOpensAt) <= t && t < Date.parse(d.opensAt)) {
-    return { open: true, earlyOnly: true, line: 'The early access is open: the PLATINE and PALLADIUM test entrants set to reserve do so now; entries open to the others at the time above.' };
+    // BP-19 T3: PLATINE's window opens at its own time, never before PALLADIUM's (a release read without it: PALLADIUM's).
+    const platineAt = d.earlyAccessPlatineOpensAt === undefined ? d.earlyAccessOpensAt : d.earlyAccessPlatineOpensAt;
+    if (platineAt && Date.parse(platineAt) <= t) {
+      return { open: true, earlyOnly: true, earlyPlatine: true, line: 'The early access is open: the PLATINE and PALLADIUM test entrants set to reserve do so now; entries open to the others at the time above.' };
+    }
+    return {
+      open: true,
+      earlyOnly: true,
+      earlyPlatine: false,
+      line: platineAt
+        ? 'PALLADIUM’s early access is open: the PALLADIUM test entrants set to reserve do so now, the PLATINE ones at their own time; entries open to the others at the time above.'
+        : 'PALLADIUM’s early access is open: the PALLADIUM test entrants set to reserve do so now (PLATINE has none on this release); entries open to the others at the time above.',
+    };
   }
   return { open: false, earlyOnly: false, line: 'A test starts while the draw is open, or during its early access to reserve.' };
 }

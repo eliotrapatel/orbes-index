@@ -16,6 +16,10 @@
  *  - END TEST and the tier program (the next nine, BP-19 T5): PLATINE test entrants' orders carrying their welcome GIFT
  *    order and a credit taken off them, one paid: every order and GIFT order cancelled (the stock back), every credit
  *    given back (a credit left on a cancelled order too), the report 5/5; the grants stay, their credit whole again;
+ *  - the early access by tier (BP-19 T3): PALLADIUM reserves from its time, a PLATINE test entrant waits for its own
+ *    window, never refused; a start needs a tier whose window is open;
+ *  - the report and the house's guarantee (IN-01): a guaranteed draw place of 2 pieces with its 2 orders, a guaranteed
+ *    LIVE holder of no tier first in the line and over the per-account: every check passes;
  *  - a LIVE RELEASE end to end: I'LL BE THERE, the line at T0, PRESS, the hold, SECURE, PAY and RELEASE, END TEST;
  *  - the report's checks find a fault planted; the sweeper resumes a confirmation due after a restart.
  */
@@ -74,7 +78,7 @@ async function world(): Promise<World> {
 }
 
 /** A draw published now: OPEN (its opening an hour ago) unless told otherwise. */
-async function openDraw(w: World, o: { quantity?: number; opensIn?: number; closesIn?: number; earlyAccessHours?: number; priceMinor?: number } = {}) {
+async function openDraw(w: World, o: { quantity?: number; opensIn?: number; closesIn?: number; earlyAccessHours?: number; earlyAccessPlatineHours?: number; priceMinor?: number } = {}) {
   const now = w.h.clock.now().getTime();
   const d = await w.h.ctx.services.drops.create(
     {
@@ -84,6 +88,7 @@ async function openDraw(w: World, o: { quantity?: number; opensIn?: number; clos
       opensAt: new Date(now + (o.opensIn ?? -HOUR)),
       closesAt: new Date(now + (o.closesIn ?? HOUR)),
       earlyAccessHours: o.earlyAccessHours ?? 0,
+      ...(o.earlyAccessPlatineHours !== undefined ? { earlyAccessPlatineHours: o.earlyAccessPlatineHours } : {}),
       ...(o.priceMinor !== undefined ? { priceMinor: o.priceMinor, currency: 'EUR' } : {}),
     },
     w.f.admin,
@@ -491,6 +496,117 @@ describe('a draw end to end', () => {
     }
     expect((await w.h.ctx.db.selectFrom('drop_entries').select('status').where('drop_id', '=', drop).executeTakeFirstOrThrow()).status).toBe('CONFIRMED');
     expect((await w.h.ctx.db.selectFrom('test_run_entrants').select('outcome').where('run_id', '=', run.id).executeTakeFirstOrThrow()).outcome).toBe('CONFIRMED');
+  });
+});
+
+describe('the early access by tier (plan NEXT-NINE, BP-19 T3)', () => {
+  let w: World;
+  beforeAll(async () => {
+    w = await world();
+  });
+  afterAll(() => w?.h.close());
+
+  it('PALLADIUM reserves from its time, a PLATINE test entrant waits for its own window and reserves there, never refused; a start needs a tier whose window is open', async () => {
+    const drop = await openDraw(w, { quantity: 8, opensIn: 3 * HOUR, closesIn: 4 * HOUR, earlyAccessHours: 48, earlyAccessPlatineHours: 2 });
+    // Only PALLADIUM's window is open: PLATINE reservers alone cannot start a test.
+    await rejects(w.tests.start(drop, press(drop, { platine: 2 }, { behaviour: { reservePct: 100 } }), w.f.admin), 'TEST_DRAW_NOT_OPEN', 409);
+    const run = await w.tests.start(drop, press(drop, { platine: 2, palladium: 2 }, { behaviour: { reservePct: 100, confirmPct: 0 } }), w.f.admin);
+    const outcomes = async () =>
+      (
+        await w.h.ctx.db.selectFrom('test_run_entrants as r').innerJoin('test_entrants as t', 't.account_id', 'r.account_id').select(['t.tier', 'r.outcome']).where('r.run_id', '=', run.id).orderBy('t.tier').orderBy('r.outcome').execute()
+      ).map((r) => [r.tier, r.outcome]);
+
+    // PALLADIUM reserves now; the PLATINE wait, nothing asked of the server yet.
+    await drive(w, 0);
+    let view = await w.tests.view(run.id);
+    expect(view.status).toBe('RUNNING');
+    expect(view.byTier.map((t) => t.selected)).toEqual([0, 0, 0, 2]);
+    expect(await outcomes()).toEqual([
+      [2, null],
+      [2, null],
+      [3, 'RESERVED'],
+      [3, 'RESERVED'],
+    ]);
+    expect(view.errors).toEqual([]);
+
+    // PLATINE's own window (2 h before the opening): they reserve, and the test is DONE.
+    w.h.clock.advance(HOUR - 1000);
+    await drive(w, 0);
+    expect((await w.tests.view(run.id)).byTier.map((t) => t.selected)).toEqual([0, 0, 0, 2]);
+    w.h.clock.advance(1000);
+    await drive(w, 0);
+    view = await w.tests.view(run.id);
+    expect(view.byTier.map((t) => t.selected)).toEqual([0, 0, 2, 2]);
+    expect(await outcomes()).toEqual([
+      [2, 'RESERVED'],
+      [2, 'RESERVED'],
+      [3, 'RESERVED'],
+      [3, 'RESERVED'],
+    ]);
+    expect(view.errors).toEqual([]);
+    expect(await statusOf(w, run.id)).toBe('DONE');
+    // Once PLATINE's window is open, PLATINE reservers alone may start (the test DONE no longer blocks one).
+    const second = await openDraw(w, { quantity: 4, opensIn: HOUR, closesIn: 2 * HOUR, earlyAccessHours: 48, earlyAccessPlatineHours: 2 });
+    expect((await w.tests.start(second, press(second, { platine: 1 }, { behaviour: { reservePct: 100, confirmPct: 0 } }), w.f.admin)).status).toBe('RUNNING');
+  });
+});
+
+describe('the report and the house\'s guarantee (plan NEXT-NINE, IN-01)', () => {
+  let w: World;
+  beforeAll(async () => {
+    w = await world();
+  });
+  afterAll(() => w?.h.close());
+  const until = () => new Date(w.h.clock.now().getTime() + 30 * 86_400_000).toISOString().slice(0, 10);
+
+  it('a draw: a real guaranteed place of 2 pieces, confirmed with its 2 orders, counts 2 pieces against the stock; STOCK and ORDERS pass', async () => {
+    const drop = await openDraw(w, { quantity: 4 });
+    const holder = await createAccount(w.h.ctx.db);
+    await w.h.ctx.services.guarantees.grant(holder.id, { scope: 'RELEASE', targetId: drop, pieces: 2, validUntil: until(), visible: true }, w.f.admin);
+    await w.h.ctx.services.drops.enter(holder.id, drop, holder.actor);
+    const run = await w.tests.start(drop, press(drop, { titane: 3 }, { behaviour: { confirmPct: 0 } }), w.f.admin);
+    await drive(w, 0);
+    expect(await statusOf(w, run.id)).toBe('DONE');
+    w.h.clock.advance(HOUR);
+    expect(await w.h.ctx.services.drops.draw(drop, w.f.admin)).toMatchObject({ guaranteed: 1, guaranteedPieces: 2, selected: 2 });
+    const entry = await w.h.ctx.db.selectFrom('drop_entries').select(['id', 'pieces']).where('drop_id', '=', drop).where('account_id', '=', holder.id).executeTakeFirstOrThrow();
+    expect(entry.pieces).toBe(2);
+    await w.h.ctx.services.drops.confirm(drop, entry.id, null, w.f.admin);
+    expect(await w.h.ctx.db.selectFrom('orders').select('id').where('drop_entry_id', '=', entry.id).execute()).toHaveLength(2);
+    const d = await w.h.ctx.db.selectFrom('drops').selectAll().where('id', '=', drop).executeTakeFirstOrThrow();
+    const report = await w.tests.report(d, w.h.clock.now());
+    expect(report.checks.find((c) => c.id === 'STOCK')).toEqual({ id: 'STOCK', label: 'Stock matches the orders', pass: true, line: '4 of 4 places held or sold, 1 confirmed with 2 orders; no stock below zero.' });
+    expect(report.checks.find((c) => c.id === 'ORDERS')).toMatchObject({ pass: true });
+    expect(report.passed).toBe(5);
+  });
+
+  it('a LIVE RELEASE: a real guaranteed holder of no tier first in the line, asking 3 pieces over a per-account of 1; ORDER and ONE_PLACE pass', async () => {
+    const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
+    const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 6 }], perAccount: 1 });
+    const holder = await createAccount(w.h.ctx.db);
+    await w.h.ctx.services.guarantees.grant(holder.id, { scope: 'RELEASE', targetId: release.id, pieces: 3, validUntil: until(), visible: true }, w.f.admin);
+    await w.h.ctx.services.live.enter(holder.id, release.id, { sizeId: release.sizes[0]!.id, quantity: 3 }, holder.actor);
+    const run = await w.tests.start(
+      release.id,
+      press(release.id, { palladium: 2 }, { behaviour: { payPct: 0, releasePct: 0, missPct: 100, leavePct: 0, holdSeconds: 1.5 }, choices: { size: '52', quantity: 1, addOnsPct: 0 } }),
+      w.f.admin,
+    );
+    await drive(w, 0, 500, release.id);
+    w.h.clock.set(t0);
+    await drive(w, 1000, 500, release.id);
+    const line = await w.h.ctx.db.selectFrom('live_entries').select(['account_id', 'tier', 'quantity', 'guarantee_id']).where('drop_id', '=', release.id).orderBy('position').execute();
+    expect(line.map((e) => [e.account_id === holder.id, e.tier])).toEqual([
+      [true, 0],
+      [false, 3],
+      [false, 3],
+    ]);
+    expect(line[0]!.quantity).toBe(3);
+    const d = await w.h.ctx.db.selectFrom('drops').selectAll().where('id', '=', release.id).executeTakeFirstOrThrow();
+    const report = await w.tests.report(d, w.h.clock.now());
+    expect(report.checks.find((c) => c.id === 'ORDER')).toEqual({ id: 'ORDER', label: 'The line’s order', pass: true, line: '3 placed at T0 by tier, the highest first.' });
+    expect(report.checks.find((c) => c.id === 'ONE_PLACE')).toMatchObject({ pass: true });
+    expect(report.passed).toBe(5);
+    await w.tests.stop(run.id, w.f.admin);
   });
 });
 

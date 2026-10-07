@@ -139,7 +139,7 @@ export function testFields(t: Pick<TestTarget, 'mode' | 'sizes' | 'perAccount'>,
 }
 
 /** The total a dialog would send, or what stops it, under its fields. */
-function pressPreview(mode: TestRunMode, v: Record<string, string>, opts: { already?: number; earlyOnly?: boolean }): HTMLElement {
+function pressPreview(mode: TestRunMode, v: Record<string, string>, opts: { already?: number; earlyOnly?: boolean; earlyPlatine?: boolean }): HTMLElement {
   const tiers = tierCounts(v);
   const problem = testRunProblem(mode, v, opts);
   const total = tiers ? tierTotal(tiers) : null;
@@ -206,8 +206,8 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
         h('p', { class: 'dialog__text' }, 'One test at a time in the console. The server’s panel shows when the load is too much: then STOP.'),
       ],
       fields: testFields(t, testRunValues()),
-      live: (v) => pressPreview(t.mode, v, { earlyOnly: t.start.earlyOnly }),
-      validate: (v) => testRunProblem(t.mode, v, { earlyOnly: t.start.earlyOnly }),
+      live: (v) => pressPreview(t.mode, v, { earlyOnly: t.start.earlyOnly, earlyPlatine: t.start.earlyPlatine }),
+      validate: (v) => testRunProblem(t.mode, v, { earlyOnly: t.start.earlyOnly, earlyPlatine: t.start.earlyPlatine }),
       phrase: sendPhrase,
       confirmLabel: 'Send test entrants',
       submit: async (v) => {
@@ -230,8 +230,8 @@ export function testEntrantsSection(ctx: ViewContext, t: TestTarget, reads: Test
         `Into the same test, with its last settings or new ones: ${formatCount(TEST_ENTRANTS_LIMITS.perPress)} at most per press, ${formatCount(TEST_ENTRANTS_LIMITS.perRun)} in the test (${formatCount(r.entrants)} now).`,
       ),
       fields: testFields(t, testRunValues(lastSettings(r))),
-      live: (v) => pressPreview(t.mode, v, { already: r.entrants, earlyOnly: t.start.earlyOnly }),
-      validate: (v) => testRunProblem(t.mode, v, { already: r.entrants, earlyOnly: t.start.earlyOnly }),
+      live: (v) => pressPreview(t.mode, v, { already: r.entrants, earlyOnly: t.start.earlyOnly, earlyPlatine: t.start.earlyPlatine }),
+      validate: (v) => testRunProblem(t.mode, v, { already: r.entrants, earlyOnly: t.start.earlyOnly, earlyPlatine: t.start.earlyPlatine }),
       phrase: sendPhrase,
       confirmLabel: 'Add test entrants',
       submit: async (v) => {

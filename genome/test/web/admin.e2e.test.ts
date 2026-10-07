@@ -1973,6 +1973,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
     expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['messages', 'owners', 'club', 'segments', 'orders', 'invoices', 'warranties', 'care', 'retailers', 'sale']);
     expect(await p.locator('.side__link').count()).toBe(27);
+    // Every link one height, its count badges (Anomalies, Messages) shown or not, whatever font the system falls back to.
+    expect(new Set(await p.locator('.side__link').evaluateAll((links) => links.map((a) => a.getBoundingClientRect().height))).size).toBe(1);
     for (const id of ['sign-out', 'change-password']) {
       const box = (await p.locator(`[data-testid=${id}]`).boundingBox())!;
       expect(box.y + box.height, id).toBeLessThanOrEqual(900);
@@ -2911,6 +2913,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const overview = p.locator('.side__group', { hasText: 'Overview' }).locator('.side__link');
     expect(await overview.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['dashboard', 'growth', 'generator', 'documents']);
     expect(await p.locator('.side__link').count()).toBe(27);
+    // Every link one height, its count badges (Anomalies, Messages) shown or not, whatever font the system falls back to.
+    expect(new Set(await p.locator('.side__link').evaluateAll((links) => links.map((a) => a.getBoundingClientRect().height))).size).toBe(1);
     for (const id of ['sign-out', 'change-password']) {
       const box = (await p.locator(`[data-testid=${id}]`).boundingBox())!;
       expect(box.y + box.height, id).toBeLessThanOrEqual(900);

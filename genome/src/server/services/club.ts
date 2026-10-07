@@ -242,9 +242,10 @@ export interface ClubMembers {
 /**
  * How many ACTIVE accounts stand at each tier now: the pieces each holds, counted as `tierOf` counts them, grouped by
  * their number, then each number given its tier (tierForPieces). A locked account reads nothing of the club, so it is
- * left out. Read only (TERMS-FACTS N3); what comes back names no account.
+ * left out. Read only (TERMS-FACTS N3); what comes back names no account. `withoutTestEntrants`: the test entrants' pool
+ * left out too (GROWTH's funnel, services/growth.ts).
  */
-export async function clubMembersByTier(db: Db, thresholds: readonly number[] = CLUB_TIER_THRESHOLDS): Promise<ClubMembers> {
+export async function clubMembersByTier(db: Db, thresholds: readonly number[] = CLUB_TIER_THRESHOLDS, opts: { withoutTestEntrants?: boolean } = {}): Promise<ClubMembers> {
   const held = db
     .selectFrom('ownership as o')
     .innerJoin('products as p', 'p.id', 'o.product_id')
@@ -253,6 +254,7 @@ export async function clubMembersByTier(db: Db, thresholds: readonly number[] = 
     .where('o.ended_at', 'is', null)
     .where('p.status', 'not in', [...CLUB_EXCLUDED_STATUSES])
     .where('a.status', '=', 'ACTIVE')
+    .$if(opts.withoutTestEntrants === true, (q) => q.where(({ not, exists, selectFrom }) => not(exists(selectFrom('test_entrants as te').select('te.account_id').whereRef('te.account_id', '=', 'o.account_id')))))
     .groupBy('o.account_id');
   const rows = await db
     .selectFrom(held.as('h'))

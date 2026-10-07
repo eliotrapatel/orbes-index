@@ -322,7 +322,10 @@ for (const backend of BACKENDS) {
 
     it('the house’s guarantee (plan NEXT-NINE, IN-01): a grant racing T0 binds the holder’s entry either way, the stock never passed', async () => {
       const guarantees = new GuaranteeService({ db: handle.db, audit: f.audit, clock: f.clock.now });
-      const r = await release({ sizes: [{ label: '52', stock: 1 }] });
+      // A second size gives the release room for the guarantee whichever order the release's lock gives; both collectors
+      // want the 52. With the 52 alone, the line formed first gives its only piece to the tier 3 and the grant is then
+      // refused (GUARANTEE_EXCEEDS_RELEASE: the next test shows that order on its own).
+      const r = await release({ sizes: [{ label: '52', stock: 1 }, { label: '54', stock: 1 }] });
       f.clock.set(at(-30 * SECOND));
       const holder = await accountOfTier(f, 0);
       const other = await accountOfTier(f, 3);
@@ -338,6 +341,34 @@ for (const backend of BACKENDS) {
       else expect([g.status, e.status]).toEqual(['ACTIVE', 'QUEUED']);
       expect(await held(r)).toBe(1);
       expect(await auditCount(r, 'drop.live.queue')).toBe(1);
+    });
+
+    it('the house’s guarantee: the line formed before the grant (PostgreSQL’s other order, issued in turn here): refused when the stock is held, bound QUEUED when another size has room', async () => {
+      const guarantees = new GuaranteeService({ db: handle.db, audit: f.audit, clock: f.clock.now });
+      for (const sizes of [[{ label: '52', stock: 1 }], [{ label: '52', stock: 1 }, { label: '54', stock: 1 }]]) {
+        const r = await release({ sizes });
+        f.clock.set(at(-30 * SECOND));
+        const holder = await accountOfTier(f, 0);
+        const other = await accountOfTier(f, 3);
+        for (const a of [holder, other]) await f.live.enter(a.id, r.id, { sizeId: r.sizes[0]!.id }, a.actor);
+        f.clock.set(T0);
+        await f.live.advance(r.id);
+        expect(await statusOf(r, other.id)).toBe('TURN');
+        const outcome = await together([() => guarantees.grant(holder.id, { scope: 'RELEASE', targetId: r.id, pieces: 1, validUntil: '2026-12-31', visible: true }, f.admin)]);
+        await f.live.advance(r.id);
+        const g = await handle.db.selectFrom('house_guarantees').select(['id', 'status']).where('account_id', '=', holder.id).executeTakeFirst();
+        const e = await handle.db.selectFrom('live_entries').select(['status', 'guarantee_id']).where('drop_id', '=', r.id).where('account_id', '=', holder.id).executeTakeFirstOrThrow();
+        if (sizes.length === 1) {
+          expect(outcome).toEqual(['GUARANTEE_EXCEEDS_RELEASE']);
+          expect(g).toBeUndefined();
+          expect(e).toEqual({ status: 'QUEUED', guarantee_id: null });
+        } else {
+          expect(outcome).toEqual(['ok']);
+          expect([g!.status, e.status, e.guarantee_id]).toEqual(['ACTIVE', 'QUEUED', g!.id]);
+        }
+        expect(await held(r)).toBe(1);
+        expect(await auditCount(r, 'drop.live.queue')).toBe(1);
+      }
     });
 
     it('the house’s guarantee: a draw or an entry racing its revocation, one order wins, never a deadlock', async () => {

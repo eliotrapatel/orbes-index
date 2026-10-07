@@ -19,8 +19,8 @@
  * profile's range: a new account trips the bot radar). The shares of a press (who reserves, withdraws, pays, …) are
  * exact: 70 % of 10 bots is 7 of them, drawn at random.
  *
- * A run: START (ADMIN, the phrase `TEST <8>`: a draw OPEN, or in its early access when some PLATINE and PALLADIUM are
- * to reserve; a LIVE RELEASE's room open) → RUNNING, its bots acting; ADD MORE (the same phrase) sends up to
+ * A run: START (ADMIN, the phrase `TEST <8>`: a draw OPEN, or in the early access of a tier sent to reserve, PALLADIUM's
+ * or PLATINE's own; a LIVE RELEASE's room open) → RUNNING, its bots acting; ADD MORE (the same phrase) sends up to
  * TEST_PER_PRESS_MAX more into it, TEST_RUN_MAX at most in all; DONE once every bot has acted (a draw's test waits there
  * for the staff's draw); STOP halts the bots at once and cleans nothing (STOPPED); a restart of the server leaves it
  * INTERRUPTED (`boot`). Only a RUNNING test blocks a new one (`test_runs_one_running`): one test at a time.
@@ -32,8 +32,9 @@
  * network » share. Validation, guards, rate limits, network hashes, DB-IP and the bot radar all apply. One scheduler
  * loop (every TICK_MS, and again as each request ends, so a slot freed is filled at once) runs the bots whose next step
  * is due, at most IN_FLIGHT_MAX at a time:
- *  - a draw: ENTER at its arrival (a PLATINE or PALLADIUM drawn to reserve RESERVES while the early access is open; a
- *    bot that cannot enter yet waits for the opening, as a collector does); some WITHDRAW a few seconds later;
+ *  - a draw: ENTER at its arrival (a PLATINE or PALLADIUM drawn to reserve RESERVES while its own tier's early access is
+ *    open, a PLATINE early for its own waiting for it; a bot that cannot enter yet waits for the opening, as a collector
+ *    does); some WITHDRAW a few seconds later;
  *  - a LIVE RELEASE: I'LL BE THERE first for its share (before T0), ENTER with its size and pieces; then it follows its
  *    turn as a phone whose stream is lost does, reading GET /state every POLL_MS (its turn's secret is there); on its
  *    TURN: PRESS, the hold, SECURE, its add-ons, then PAY or RELEASE MY PLACE after a few seconds; or it misses its turn,
@@ -76,7 +77,7 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import type { Actor } from '../types.js';
 import { isAfterRoom } from './after-room.js';
 import type { ClubTier } from './club.js';
-import { dropNotFound, dropState, drawOrder, inEarlyAccess } from './drops.js';
+import { dropNotFound, dropState, drawOrder, earlyAccessOpensAt, inEarlyAccess } from './drops.js';
 import { isAnnounced, LIVE_OPEN_STATUSES, LIVE_PER_ACCOUNT, roomOpensAt } from './live.js';
 import { orderReference } from './orders.js';
 import { sessionCookieName } from './sessions.js';
@@ -569,7 +570,7 @@ export class TestEntrantService {
 
   /**
    * SEND TEST ENTRANTS (POST /api/admin/drops/:id/test-runs, ADMIN): the phrase `TEST <8>`, then a press into a draw OPEN
-   * (or in its early access when PLATINE and PALLADIUM are to reserve) or a LIVE RELEASE whose room is open. Refused:
+   * (or in the early access of a tier sent to reserve: PALLADIUM's, or PLATINE's own) or a LIVE RELEASE whose room is open. Refused:
    * another test RUNNING (409 TEST_RUNNING), the release not open (409), the pool full (409 TEST_POOL_FULL). Audited
    * `test_run.start`.
    */
@@ -912,10 +913,13 @@ export class TestEntrantService {
 
   // ── The pool and a press ─────────────────────────────────────────────────
 
-  /** Refused unless a draw is OPEN (or in its early access, some to reserve), or a LIVE RELEASE's room is open and not over. */
+  /**
+   * Refused unless a draw is OPEN (or in the early access of a tier sent to reserve: PALLADIUM's from its time, PLATINE's
+   * from its own, BP-19 T3), or a LIVE RELEASE's room is open and not over.
+   */
   private assertOpen(d: DropRow, s: TestRunSettings, now: Date): void {
     if (d.mode === 'DRAW') {
-      const early = s.behaviour.reservePct > 0 && s.tiers.platine + s.tiers.palladium > 0 && inEarlyAccess(d, now);
+      const early = s.behaviour.reservePct > 0 && ((s.tiers.palladium > 0 && inEarlyAccess(d, now, 3)) || (s.tiers.platine > 0 && inEarlyAccess(d, now, 2)));
       if (dropState(d, now) !== 'OPEN' && !early) throw drawNotOpen();
       return;
     }
@@ -1157,11 +1161,21 @@ export class TestEntrantService {
         const w = await this.call(run, bot, 'POST', `/api/v1/club/drops/${id}/withdraw`, 'WITHDRAW');
         return this.finish(run, bot, w.ok ? 'WITHDRAWN' : 'ENTERED');
       }
-      // ARRIVE: a reservation during the early access, else ENTER once the draw is open (a bot early waits for it).
-      if (plan.reserve && inEarlyAccess(run.drop, new Date(now))) {
-        const r = await this.call(run, bot, 'POST', `/api/v1/club/drops/${id}/reserve`, 'RESERVE');
-        if (r.ok) return this.finish(run, bot, 'RESERVED');
-        if (r.code !== 'DROP_FULL' && r.code !== 'DROP_EARLY_ACCESS_CLOSED') return this.finish(run, bot, 'REFUSED');
+      // ARRIVE: a reservation during its own tier's early access (PALLADIUM's from its time, PLATINE's from its own,
+      // BP-19 T3: a PLATINE bot early for it waits for it), else ENTER once the draw is open (a bot early waits for it).
+      if (plan.reserve) {
+        const tier = plan.tier === 3 ? 3 : 2;
+        if (inEarlyAccess(run.drop, new Date(now), tier)) {
+          const r = await this.call(run, bot, 'POST', `/api/v1/club/drops/${id}/reserve`, 'RESERVE');
+          if (r.ok) return this.finish(run, bot, 'RESERVED');
+          if (r.code !== 'DROP_FULL' && r.code !== 'DROP_EARLY_ACCESS_CLOSED' && r.code !== 'DROP_EARLY_ACCESS_NOT_OPEN') return this.finish(run, bot, 'REFUSED');
+        } else {
+          const own = earlyAccessOpensAt(run.drop, tier);
+          if (own !== null && now < own.getTime() && own.getTime() + plan.offsetMs < run.drop.opens_at.getTime()) {
+            bot.at = own.getTime() + plan.offsetMs;
+            return;
+          }
+        }
       }
       if (now < run.drop.opens_at.getTime()) {
         bot.at = run.drop.opens_at.getTime() + plan.offsetMs;
@@ -1628,7 +1642,9 @@ export class TestEntrantService {
   }
 
   private async drawChecks(d: DropRow): Promise<TestReportCheck[]> {
-    const entries = await this.db.selectFrom('drop_entries').select(['id', 'account_id', 'status', 'tier', 'seniority', 'rank']).where('drop_id', '=', d.id).execute();
+    const entries = await this.db.selectFrom('drop_entries').select(['id', 'account_id', 'status', 'tier', 'seniority', 'rank', 'pieces']).where('drop_id', '=', d.id).execute();
+    // IN-01: a place guaranteed by the house holds its guarantee's pieces (1 to 5), one order each.
+    const piecesOf = (e: { pieces: number }) => Math.max(1, Number(e.pieces) || 1);
     const checks: TestReportCheck[] = [oneEntry(entries)];
 
     // 2. The draw's order: tier, then seniority, then the seed's key, recomputed from the seed it revealed.
@@ -1655,9 +1671,11 @@ export class TestEntrantService {
     const twice = [...places.values()].filter((n) => n > 1).length;
     checks.push(onePlace(twice, ''));
 
-    // 4. Stock: the places held or sold within the release's pieces, one order per confirmed place, no stock below zero.
-    const held = entries.filter((e) => e.status === 'SELECTED' || e.status === 'CONFIRMED').length;
+    // 4. Stock: the pieces of the places held or sold within the release's pieces, one order per piece confirmed, no
+    // stock below zero.
+    const held = entries.filter((e) => e.status === 'SELECTED' || e.status === 'CONFIRMED').reduce((n, e) => n + piecesOf(e), 0);
     const confirmed = entries.filter((e) => e.status === 'CONFIRMED');
+    const confirmedPieces = confirmed.reduce((n, e) => n + piecesOf(e), 0);
     const orders = await this.db
       .selectFrom('orders as o')
       .innerJoin('drop_entries as e', 'e.id', 'o.drop_entry_id')
@@ -1668,39 +1686,44 @@ export class TestEntrantService {
     const negative = await this.negativeStock(orders);
     checks.push(
       stock(
-        held <= d.quantity && forConfirmed === confirmed.length && negative === 0,
+        held <= d.quantity && forConfirmed === confirmedPieces && negative === 0,
         held > d.quantity
           ? `${count(held, 'place')} held or sold for ${count(d.quantity, 'piece')}.`
-          : forConfirmed !== confirmed.length
-            ? `${count(confirmed.length, 'place')} confirmed, ${count(forConfirmed, 'order')}.`
+          : forConfirmed !== confirmedPieces
+            ? `${count(confirmed.length, 'place')} confirmed${confirmedPieces !== confirmed.length ? ` for ${count(confirmedPieces, 'piece')}` : ''}, ${count(forConfirmed, 'order')}.`
             : negative > 0
               ? `${negative} stock ${negative === 1 ? 'line is' : 'lines are'} below zero.`
               : `${held} of ${count(d.quantity, 'place')} held or sold, ${confirmed.length} confirmed with ${count(forConfirmed, 'order')}; no stock below zero.`,
       ),
     );
 
-    // 5. Every confirmed place has its order.
-    const missing = confirmed.filter((e) => !orders.some((o) => o.drop_entry_id === e.id)).length;
+    // 5. Every confirmed place has its orders, one per piece.
+    const missing = confirmed.filter((e) => orders.filter((o) => o.drop_entry_id === e.id).length < piecesOf(e)).length;
     checks.push(ordersCheck(missing, confirmed.length));
     return checks;
   }
 
   private async liveChecks(d: DropRow, now: Date): Promise<TestReportCheck[]> {
     const entries = await this.db
-      .selectFrom('live_entries')
-      .select(['id', 'account_id', 'status', 'quantity', 'tier', 'position', 'queued_at', 'size_id'])
-      .where('drop_id', '=', d.id)
+      .selectFrom('live_entries as e')
+      .leftJoin('house_guarantees as g', 'g.id', 'e.guarantee_id')
+      .select(['e.id', 'e.account_id', 'e.status', 'e.quantity', 'e.tier', 'e.position', 'e.queued_at', 'e.size_id', 'g.pieces as guaranteed_pieces'])
+      .where('e.drop_id', '=', d.id)
       .execute();
     const checks: TestReportCheck[] = [oneEntry(entries)];
 
-    // 2. The line at T0: by tier (high first) when the release gives tier priority.
+    // 2. The line at T0: the places guaranteed by the house first (IN-01, as many as the line's formation counted:
+    // `drop.live.queue`), then by tier (high first) within each part when the release gives tier priority.
     const atT0 = entries.filter((e) => e.position !== null && e.queued_at !== null && new Date(e.queued_at).getTime() === d.opens_at.getTime()).sort((a, b) => a.position! - b.position!);
     if (now.getTime() < d.opens_at.getTime() || atT0.length === 0) {
       checks.push({ id: 'ORDER', label: 'The line’s order', pass: true, line: 'The line has not formed yet: nothing to check.' });
     } else if (d.tier_priority === false) {
       checks.push({ id: 'ORDER', label: 'The line’s order', pass: true, line: `${atT0.length} in the line at T0, the tiers together (no tier priority).` });
     } else {
-      const out = atT0.findIndex((e, i) => i > 0 && atT0[i - 1]!.tier < e.tier);
+      const formed = await this.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.queue').where('target_id', '=', d.id).orderBy('id').executeTakeFirst();
+      const details = (typeof formed?.details === 'string' ? JSON.parse(formed.details) : formed?.details) as { guaranteed?: unknown } | null | undefined;
+      const first = Number(details?.guaranteed) || 0;
+      const out = atT0.findIndex((e, i) => i > 0 && i !== first && atT0[i - 1]!.tier < e.tier);
       checks.push(
         out >= 0
           ? { id: 'ORDER', label: 'The line’s order', pass: false, line: `Place ${atT0[out]!.position} stands behind a lower tier.` }
@@ -1717,7 +1740,8 @@ export class TestEntrantService {
     for (const e of family) if ((LIVE_OPEN_STATUSES as readonly string[]).includes(e.status) || e.status === 'CONFIRMED') holding.set(e.account_id, (holding.get(e.account_id) ?? 0) + 1);
     const twice = [...holding.values()].filter((n) => n > 1).length;
     const perAccount = d.per_account ?? LIVE_PER_ACCOUNT.max;
-    const outOfBounds = entries.filter((e) => e.quantity < 1 || e.quantity > perAccount).length;
+    // IN-01: a holder of the house's guarantee may ask up to max(per_account, its guarantee's pieces).
+    const outOfBounds = entries.filter((e) => e.quantity < 1 || e.quantity > Math.max(perAccount, Number(e.guaranteed_pieces) || 0)).length;
     checks.push(
       outOfBounds > 0
         ? { id: 'ONE_PLACE', label: 'Nobody holds two places', pass: false, line: `${outOfBounds} ${outOfBounds === 1 ? 'entry asks' : 'entries ask'} for pieces outside 1 to ${perAccount}.` }
