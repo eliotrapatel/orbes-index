@@ -32,8 +32,10 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * participation and by segment, PAST, the question after), 15, 16 and 17, and the privacy policy's orders, segments,
  * client sheet and hourly activity; the next date the rule allows after D's published 2026-10-06, set mechanically
  * (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md §0). 2026-10-08 is the one version of deployment G, the next nine (plan of
- * 2026-10-06): the privacy policy's messages with ORBES Client Services (CS-01); the build's start date, 2026-10-06,
- * not being after 2026-10-07, the day after it, as the plan's rule sets it. Its date never holds the deployment.
+ * 2026-10-06): the privacy policy's messages with ORBES Client Services (CS-01) and its saved sizes (AC-01); the terms'
+ * article 12, its tiers at 1, 5 and 10 pieces, its early access by tier and its benefits paragraph (BP-19). The build's
+ * start date, 2026-10-06, and its final commit's, 2026-10-07, are not after E's published 2026-10-07, so the version is
+ * the day after it, as the plan's rule sets it. Its date never holds the deployment.
  */
 export const LEGAL_VERSION = '2026-10-08';
 
