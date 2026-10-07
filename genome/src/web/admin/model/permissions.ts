@@ -24,6 +24,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   /** The sale mode (#/sale): scan the piece, choose the point of sale, start the warranty. Exactly CAPABILITY_ROLES.sell. */
   sell: 'RETAIL',
   read: 'AUDITOR',
+  /** Growth (plan NEXT-NINE, BP-29): the report and COLLECTORS BY VALUE, the emails masked for an AUDITOR; never RETAIL. */
+  readGrowth: 'AUDITOR',
   verifyAudit: 'AUDITOR',
   /** Customers' emails in clear (the server masks them for an AUDITOR: j***@example.com). */
   readClientEmails: 'OPERATOR',

@@ -17,6 +17,8 @@ export const ROUTES = [
   { name: 'codes', path: '/codes' },
   { name: 'scans', path: '/scans' },
   { name: 'analytics', path: '/analytics' },
+  /** Growth (plan NEXT-NINE, BP-29): Analytics' sibling under Overview, after the Dashboard. */
+  { name: 'growth', path: '/growth' },
   { name: 'owners', path: '/owners' },
   /** The Messages board (CS-01): one conversation per client; a conversation's page from its row. */
   { name: 'messages', path: '/messages' },

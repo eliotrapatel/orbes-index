@@ -25,11 +25,13 @@
  * now; and the notes Client Services wrote on its orders, draw entries,
  * requests of the private salon and LIVE reservations. One line, Messages
  * (CS-01), gives the status of its conversation with ORBES Client Services
- * and opens it.
+ * and opens it. One line, Lifetime value (plan NEXT-NINE, BP-29), what the
+ * client is worth by GROWTH's rule, after the tier and its Club block.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, formatDateTime, humanize, shortHash } from '../format.js';
 import { clubBlockLines, tierStanding } from '../model/club.js';
+import { lifetimeValueText, NOTES } from '../model/growth.js';
 import {
   changeInput,
   changeProblem,
@@ -174,6 +176,8 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
               : l.value,
           ),
         })),
+        // BP-29: what the client is worth, by GROWTH's rule.
+        { label: 'Lifetime value', value: h('span', { data: { testid: 'owner-lifetime-value' } }, lifetimeValueText(sheet.lifetimeValue)), note: NOTES.ltv },
         {
           label: 'Messages',
           value: sheet.messages

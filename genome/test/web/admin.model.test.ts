@@ -16,6 +16,17 @@ import { MAX_ISSUE_BATCH } from '../../src/server/services/issuance.js';
 import { IMAGE_MIME_TYPES as SERVER_IMAGE_MIME_TYPES, MAX_IMAGE_BYTES as SERVER_MAX_IMAGE_BYTES, MAX_IMAGE_SIDE as SERVER_MAX_IMAGE_SIDE } from '../../src/server/media/image.js';
 import { lookbookWord, pairFormValues, pairModelLabel, pairOptions, pairsChange, pairsNote, pairsProblem, PAIRS_MAX, PAIRS_TEXT, shownLabel, shownNow } from '../../src/web/admin/model/pairs.js';
 import { MODEL_PAIR_SHOWN } from '../../src/server/services/catalog.js';
+import { clubNowLine, cohortCells, collectorRow, collectorsRange, durationText, EMPTY, funnelBars, funnelNote, growthKpis, growthParams, GROWTH_COLLECTORS_PAGE, lifetimeValueText, ltvGroupRows, money, NOTES, perCollectorFigures, rateText as growthRate, releaseRow, repeatFigures, revenueBars, revenueGroupRows, secondPieceBars } from '../../src/web/admin/model/growth.js';
+import { FUNNEL_STEPS, GROWTH_WINDOWS, PIECE_SOURCES, SECOND_PIECE_BUCKETS, type GrowthReport } from '../../src/web/admin/types.js';
+import {
+  FUNNEL_STEPS as SERVER_FUNNEL_STEPS,
+  GROWTH_COLLECTORS_PAGE as SERVER_GROWTH_COLLECTORS_PAGE,
+  GROWTH_WINDOWS as SERVER_GROWTH_WINDOWS,
+  PIECE_SOURCES as SERVER_PIECE_SOURCES,
+  SECOND_PIECE_BUCKETS as SERVER_SECOND_PIECE_BUCKETS,
+} from '../../src/server/services/growth.js';
+import { CLUB_TIER_THRESHOLDS as CLUB_TIER_THRESHOLDS_FOR_GROWTH } from '../../src/server/services/club.js';
+import { parseHash } from '../../src/web/admin/router.js';
 import { PAIRS_FALLBACK_MAX } from '../../src/server/services/lookbook.js';
 import { effectiveKind, fitChange, fitChanged, fitFormValues, fitProblem, fitsText, fitUnitLabel, kindChange, SIZE_KIND_OPTIONS, sizeKindLine, SIZES_TEXT } from '../../src/web/admin/model/sizes.js';
 import { fitWithin, modelPhotoImpact, PHOTO_MAX_BYTES, PHOTO_MAX_SIDE, PHOTO_MIME_TYPES, PHOTO_QUALITIES, photoFacts, PIECE_PHOTO_IMPACT } from '../../src/web/admin/model/photo.js';
@@ -2630,5 +2641,176 @@ describe('a model\'s Pairs well with in the console (plan NEXT-NINE, BP-34)', ()
     expect(PAIRS_TEXT.lead).toBe('Two or three models shown at the end of its sheet in THE COLLECTION, in this order. None picked: the sheet shows up to three other models of its collection, the newest first.');
     expect(PAIRS_TEXT.fields).toEqual(['First model', 'Second model', 'Third model (optional)']);
     expect([PAIRS_TEXT.save, PAIRS_TEXT.saved, PAIRS_TEXT.none, PAIRS_TEXT.variant, PAIRS_TEXT.variantNote]).toEqual(['Save pairs', 'Pairs saved.', 'None picked.', 'Set on its main model', 'Its sheet is its main model’s: the pairs are the same for every dot.']);
+  });
+});
+
+describe('the Growth page (plan NEXT-NINE, BP-29: model/growth.ts)', () => {
+  /** The house writes its amounts with no-break spaces: read here as plain ones. */
+  const plain = <T,>(v: T): T => JSON.parse(JSON.stringify(v).replace(/\u00a0/g, ' '));
+  const report = (over: Partial<GrowthReport> = {}): GrowthReport => ({
+    window: { months: 12, from: '2025-11', to: '2026-10', list: [], currency: 'EUR', currencies: ['EUR', 'GBP'], generatedAt: '2026-10-15T12:00:00.000Z' },
+    ltv: {
+      perCollector: { collectors: 7, totalMinor: 2_715_000, averageMinor: 387_857, medianMinor: 240_000, topTenthFromMinor: 960_000 },
+      unpricedPieces: 1,
+      byTier: [
+        { key: 'PALLADIUM', label: null, collectors: 1, totalMinor: null, averageMinor: null, medianMinor: null },
+        { key: 'PLATINE', label: null, collectors: 0, totalMinor: null, averageMinor: null, medianMinor: null },
+        { key: 'TITANE', label: null, collectors: 3, totalMinor: 1_200_000, averageMinor: 400_000, medianMinor: 120_000 },
+        { key: 'NONE', label: null, collectors: 3, totalMinor: 910_000, averageMinor: 303_333, medianMinor: 240_000 },
+      ],
+      byCountry: [
+        { key: 'FR', label: null, collectors: 5, totalMinor: 1_925_000, averageMinor: 385_000, medianMinor: 120_000 },
+        { key: null, label: null, collectors: 1, totalMinor: null, averageMinor: null, medianMinor: null },
+      ],
+      byFirstModel: [{ key: 'm1', label: 'HALO', collectors: 5, totalMinor: 1_150_000, averageMinor: 230_000, medianMinor: 120_000 }],
+      byChannel: [
+        { key: 'LIVE', label: null, collectors: 1, totalMinor: null, averageMinor: null, medianMinor: null },
+        { key: 'POINT_OF_SALE', label: null, collectors: 0, totalMinor: null, averageMinor: null, medianMinor: null },
+        { key: 'SALON', label: null, collectors: 3, totalMinor: 1_395_000, averageMinor: 465_000, medianMinor: 550_000 },
+      ],
+    },
+    repeat: {
+      collectors: 8,
+      withSecond: 4,
+      rate: 0.5,
+      medianDays: 168,
+      buckets: { MONTH: 0, THREE_MONTHS: 1, SIX_MONTHS: 1, YEAR: 1, LATER: 1 },
+      cohorts: [{ month: '2026-02', collectors: 2, within: [0, 1, null, null], toDate: 1 }],
+    },
+    funnel: {
+      thresholds: [1, 5, 10],
+      totals: { scans: 100, accounts: 9, owners: 4, buyers: 5, platine: 1, palladium: 1 },
+      months: [],
+      clubNow: { TITANE: 4, PLATINE: 0, PALLADIUM: 1, total: 5 },
+    },
+    revenue: {
+      months: [
+        { month: '2026-10', orders: 2, invoicedMinor: 550_000, creditedMinor: 0, netMinor: 550_000 },
+        { month: '2026-09', orders: 0, invoicedMinor: 0, creditedMinor: 120_000, netMinor: -120_000 },
+        { month: '2026-08', orders: 1, invoicedMinor: 275_000, creditedMinor: 0, netMinor: 275_000 },
+      ],
+      total: { orders: 3, invoicedMinor: 825_000, creditedMinor: 120_000, netMinor: 705_000 },
+      byChannel: [{ key: 'SALON', label: null, collectors: 4, orders: 5, netMinor: 790_000 }],
+      byCountry: [{ key: 'IT', label: null, collectors: 1, orders: 1, netMinor: null }],
+      byModel: [{ key: 'm1', label: 'HALO', collectors: 6, orders: 6, netMinor: 605_000 }],
+    },
+    ...over,
+  });
+
+  it('mirrors the server\'s windows, sources, steps, buckets and page size', () => {
+    expect([...GROWTH_WINDOWS]).toEqual([...SERVER_GROWTH_WINDOWS]);
+    expect([...PIECE_SOURCES]).toEqual([...SERVER_PIECE_SOURCES]);
+    expect([...FUNNEL_STEPS]).toEqual([...SERVER_FUNNEL_STEPS]);
+    expect([...SECOND_PIECE_BUCKETS]).toEqual(SERVER_SECOND_PIECE_BUCKETS.map((b) => b.key));
+    expect(GROWTH_COLLECTORS_PAGE).toBe(SERVER_GROWTH_COLLECTORS_PAGE);
+  });
+
+  it('reads its state from the query, the defaults for anything the server would refuse', () => {
+    expect(growthParams({})).toEqual({ months: 12, currency: null, ltv: 'tier', rev: 'channel', page: 1 });
+    expect(growthParams({ months: '24', currency: 'GBP', ltv: 'model', rev: 'country', page: '3' })).toEqual({ months: 24, currency: 'GBP', ltv: 'model', rev: 'country', page: 3 });
+    expect(growthParams({ months: '6', currency: 'JPY', ltv: 'x', rev: 'tier', page: '-1' })).toEqual({ months: 12, currency: null, ltv: 'tier', rev: 'channel', page: 1 });
+  });
+
+  it('writes amounts in the house\'s money, a withheld one as —, and the four figures', () => {
+    expect(plain([money(480_000, 'EUR'), money(-5_000, 'EUR'), money(null, 'EUR'), money(100_050, 'GBP')])).toEqual(['€ 4 800', '−€ 50', '—', '£ 1 000.50']);
+    expect([growthRate(0.5), growthRate(0.183), growthRate(null)]).toEqual(['50 %', '18 %', '—']);
+    expect(plain(growthKpis(report()).map((k) => [k.label, k.value, k.note]))).toEqual([
+      ['Collectors', '7', 'AVERAGE VALUE € 3 878.57'],
+      ['Second piece', '50 %', 'MEDIAN 168 DAYS'],
+      ['New owners', '4', 'IN 12 MONTHS'],
+      ['Net revenue', '€ 7 050', 'IN 12 MONTHS · AFTER CREDIT NOTES'],
+    ]);
+    // The labels set in the display face carry no figure but the one GROWTH names (TOP 10% FROM, set in --font).
+    for (const k of growthKpis(report())) expect(k.label).not.toMatch(/\d/);
+    expect(plain(perCollectorFigures(report()).map((f) => [f.label, f.value]))).toEqual([
+      ['Collectors', '7'],
+      ['Average', '€ 3 878.57'],
+      ['Median', '€ 2 400'],
+      ['Top 10% from', '€ 9 600'],
+      ['Pieces without a price', '1'],
+    ]);
+  });
+
+  it('names the breakdowns\' groups and withholds a group\'s amounts under three collectors', () => {
+    expect(plain(ltvGroupRows(report(), 'tier').map((r) => [r.label, r.collectors, r.total, r.average, r.median, r.masked]))).toEqual([
+      ['PALLADIUM', '1', '—', '—', '—', true],
+      ['PLATINE', '0', '—', '—', '—', false],
+      ['TITANE', '3', '€ 12 000', '€ 4 000', '€ 1 200', false],
+      ['No piece held now', '3', '€ 9 100', '€ 3 033.33', '€ 2 400', false],
+    ]);
+    expect(ltvGroupRows(report(), 'country').map((r) => r.label)).toEqual(['FR', 'Not given']);
+    expect(ltvGroupRows(report(), 'model').map((r) => r.label)).toEqual(['HALO']);
+    expect(ltvGroupRows(report(), 'channel').map((r) => r.label)).toEqual(['LIVE RELEASE', 'POINT OF SALE', 'THE PRIVATE SALON']);
+    expect(plain(revenueGroupRows(report(), 'country'))).toEqual([{ key: 'IT', label: 'IT', orders: '1', net: '—', masked: true }]);
+    expect(plain(revenueGroupRows(report(), 'channel')[0])).toMatchObject({ label: 'THE PRIVATE SALON', orders: '5', net: '€ 7 900' });
+    expect(NOTES.masked).toBe('Fewer than 3 collectors: amounts not shown.');
+  });
+
+  it('COLLECTORS BY VALUE: each row opens the client sheet; the range and its pages', () => {
+    const row = collectorRow({ accountId: 'a1', email: 'j***@example.com', tier: null, country: null, pieces: 3, valueMinor: 605_000, firstPieceAt: '2025-09-20T12:00:00.000Z' }, 'EUR');
+    expect(plain(row)).toEqual({ link: '#/owners/a1', email: 'j***@example.com', tier: 'No piece held now', country: 'Not given', pieces: '3', value: '€ 6 050', first: '20 SEP 2025' });
+    expect(collectorsRange({ page: 1, pageSize: 25, total: 27 })).toEqual({ text: '1–25 of 27', previous: false, next: true });
+    expect(collectorsRange({ page: 2, pageSize: 25, total: 27 })).toEqual({ text: '26–27 of 27', previous: true, next: false });
+    expect(collectorsRange({ page: 1, pageSize: 25, total: 0 })).toEqual({ text: '0–0 of 0', previous: false, next: false });
+  });
+
+  it('repeat buying: the buckets as bars, a cohort\'s shares and its marks not reached', () => {
+    expect(secondPieceBars(report()).map((b) => [b.label, b.value, b.share])).toEqual([
+      ['Within a month', 0, '0%'],
+      ['One to three months', 1, '25%'],
+      ['Three to six months', 1, '25%'],
+      ['Six months to a year', 1, '25%'],
+      ['After a year', 1, '25%'],
+    ]);
+    expect(cohortCells(report().repeat.cohorts[0]!)).toEqual({ month: 'February 2026', collectors: '2', within: ['0 %', '50 %', '—', '—'], toDate: '50 %' });
+    expect(repeatFigures(report()).map((f) => f.value)).toEqual(['8', '4', '50 %', '168 days']);
+  });
+
+  it('the funnel: each step\'s share of the one before, accounts per 100 scans, its note and the club now from the thresholds', () => {
+    expect(funnelBars(report()).map((b) => [b.label, b.value, b.share])).toEqual([
+      ['Scans', 100, ''],
+      ['Accounts created', 9, '9 per 100 scans'],
+      ['Registered owners', 4, '44% of the step before'],
+      ['Buyers', 5, '125% of the step before'],
+      ['Reached PLATINE', 1, '20% of the step before'],
+      ['Reached PALLADIUM', 1, '100% of the step before'],
+    ]);
+    expect(funnelNote([...CLUB_TIER_THRESHOLDS_FOR_GROWTH])).toBe('Each account in the month it first reached the step · tiers by pieces held: TITANE 1, PLATINE 5, PALLADIUM 10');
+    expect(clubNowLine(report())).toBe('In the club now: 4 TITANE · 0 PLATINE · 1 PALLADIUM');
+  });
+
+  it('the revenue: the months as bars, the oldest first, each opening its Invoices page, a month below zero marked', () => {
+    expect(plain(revenueBars(report()).map((b) => [b.label, b.value, b.negative, b.link]))).toEqual([
+      ['August 2026', '€ 2 750', false, '#/invoices?month=2026-08'],
+      ['September 2026', '−€ 1 200', true, '#/invoices?month=2026-09'],
+      ['October 2026', '€ 5 500', false, '#/invoices?month=2026-10'],
+    ]);
+    expect(revenueBars(report())[2]!.fraction).toBe(1);
+  });
+
+  it('Latest releases and the client sheet\'s Lifetime value', () => {
+    expect([durationText(40_000), durationText(260_000), durationText(3_900_000), durationText(null)]).toEqual(['40 S', '4 MIN 20 S', '1 H 05 MIN', '—']);
+    expect(releaseRow({ id: 'l1', mode: 'LIVE', title: 'MONOLITHE', opensAt: '2025-11-20T12:00:00.000Z', pieces: 3, sold: 1, sellOutMs: null, entries: null })).toEqual({
+      link: '#/club/live/l1',
+      title: 'MONOLITHE',
+      method: 'LIVE RELEASE',
+      opened: '20 NOV 2025',
+      pieces: '3',
+      sold: '1',
+      soldOutIn: '—',
+      entries: '—',
+    });
+    expect(releaseRow({ id: 'd1', mode: 'DRAW', title: 'HALO', opensAt: '2026-01-05T12:00:00.000Z', pieces: 10, sold: 2, sellOutMs: null, entries: 3 })).toMatchObject({ link: '#/club/drops/d1', method: 'DRAW', entries: '3' });
+    expect(lifetimeValueText([])).toBe('—');
+    expect(lifetimeValueText(undefined)).toBe('—');
+    expect(plain(lifetimeValueText([{ currency: 'EUR', valueMinor: 670_000 }, { currency: 'GBP', valueMinor: 100_000 }]))).toBe('€ 6 700 · £ 1 000');
+    expect(EMPTY).toEqual({ ltv: 'No piece counted yet.', repeat: 'No collector has a piece yet.', revenue: 'No invoice in these months.', releases: 'No release has opened yet.' });
+  });
+
+  it('Growth shows for AUDITOR and up, never for RETAIL', () => {
+    expect(can('AUDITOR', 'readGrowth')).toBe(true);
+    expect(can('ADMIN', 'readGrowth')).toBe(true);
+    expect(can('RETAIL', 'readGrowth')).toBe(false);
+    expect(parseHash('#/growth?months=24').name).toBe('growth');
   });
 });

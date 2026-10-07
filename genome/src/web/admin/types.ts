@@ -1046,6 +1046,8 @@ export interface OwnerSheet {
   messages: { conversationId: string; status: ClientConversationStatus } | null;
   /** IN-01: the house's guarantees granted to the client, the open ones first. */
   guarantees: Guarantee[];
+  /** BP-29: the client's lifetime value per currency, by GROWTH's rule; empty when no priced piece is counted. */
+  lifetimeValue: LifetimeValue;
 }
 
 /** IN-01: a guarantee's state, computed by the server (never stored). */
@@ -2598,3 +2600,119 @@ export interface CareSheet extends CareRow {
   handledBy: { id: string; email: string } | null;
   conversation: { conversationId: string; status: ClientConversationStatus } | null;
 }
+
+// ── GROWTH (plan NEXT-NINE, BP-29; services/growth.ts, API §16.31) ─────────
+
+/** The windows of GROWTH, in months (services/growth.ts GROWTH_WINDOWS); the page opens on the first. */
+export const GROWTH_WINDOWS = [12, 24] as const;
+export type GrowthWindowMonths = (typeof GROWTH_WINDOWS)[number];
+/** Where a counted piece came from (services/growth.ts PIECE_SOURCES). */
+export const PIECE_SOURCES = ['LIVE', 'DRAW', 'SALON', 'POINT_OF_SALE', 'ELSEWHERE'] as const;
+export type PieceSource = (typeof PIECE_SOURCES)[number];
+/** The funnel's steps, in order (services/growth.ts FUNNEL_STEPS). */
+export const FUNNEL_STEPS = ['scans', 'accounts', 'owners', 'buyers', 'platine', 'palladium'] as const;
+export type FunnelStep = (typeof FUNNEL_STEPS)[number];
+/** The time to the second piece, by bucket (services/growth.ts SECOND_PIECE_BUCKETS). */
+export const SECOND_PIECE_BUCKETS = ['MONTH', 'THREE_MONTHS', 'SIX_MONTHS', 'YEAR', 'LATER'] as const;
+export type SecondPieceBucket = (typeof SECOND_PIECE_BUCKETS)[number];
+
+/** A group of collectors' lifetime values; amounts null under three collectors. */
+export interface GrowthLtvGroup {
+  key: string | null;
+  label: string | null;
+  collectors: number;
+  totalMinor: number | null;
+  averageMinor: number | null;
+  medianMinor: number | null;
+}
+
+export interface GrowthRevenueMonth {
+  month: string;
+  orders: number;
+  invoicedMinor: number;
+  creditedMinor: number;
+  netMinor: number;
+}
+
+/** A group of the revenue; its amount null under three collectors. */
+export interface GrowthRevenueGroup {
+  key: string | null;
+  label: string | null;
+  collectors: number;
+  orders: number;
+  netMinor: number | null;
+}
+
+/** GET /api/admin/growth: it names no account. */
+export interface GrowthReport {
+  window: { months: GrowthWindowMonths; from: string; to: string; list: string[]; currency: HouseCurrency; currencies: HouseCurrency[]; generatedAt: Iso };
+  ltv: {
+    perCollector: { collectors: number; totalMinor: number; averageMinor: number | null; medianMinor: number | null; topTenthFromMinor: number | null };
+    unpricedPieces: number;
+    byTier: GrowthLtvGroup[];
+    byCountry: GrowthLtvGroup[];
+    byFirstModel: GrowthLtvGroup[];
+    byChannel: GrowthLtvGroup[];
+  };
+  repeat: {
+    collectors: number;
+    withSecond: number;
+    rate: number | null;
+    medianDays: number | null;
+    buckets: Record<SecondPieceBucket, number>;
+    /** The newest month first; `within` per mark (1, 3, 6, 12 months), null while not reached. */
+    cohorts: { month: string; collectors: number; within: (number | null)[]; toDate: number }[];
+  };
+  funnel: {
+    thresholds: number[];
+    totals: Record<FunnelStep, number>;
+    /** The newest month first. */
+    months: { month: string; counts: Record<FunnelStep, number> }[];
+    clubNow: { TITANE: number; PLATINE: number; PALLADIUM: number; total: number };
+  };
+  revenue: {
+    /** The newest month first. */
+    months: GrowthRevenueMonth[];
+    total: Omit<GrowthRevenueMonth, 'month'>;
+    byChannel: GrowthRevenueGroup[];
+    byCountry: GrowthRevenueGroup[];
+    byModel: GrowthRevenueGroup[];
+  };
+}
+
+/** A row of COLLECTORS BY VALUE (GET /api/admin/growth/collectors): the email masked for an AUDITOR. */
+export interface GrowthCollector {
+  accountId: string;
+  email: string;
+  tier: ClubTierName | null;
+  country: string | null;
+  pieces: number;
+  valueMinor: number;
+  firstPieceAt: Iso;
+}
+
+export interface GrowthCollectors {
+  currency: HouseCurrency;
+  currencies: HouseCurrency[];
+  page: number;
+  pageSize: number;
+  total: number;
+  items: GrowthCollector[];
+}
+
+/** A release of Latest releases (GET /api/admin/growth/releases). */
+export interface GrowthRelease {
+  id: string;
+  mode: DropMode;
+  title: string;
+  opensAt: Iso;
+  pieces: number;
+  sold: number;
+  /** LIVE: from T0 to its last piece confirmed, when every piece was. */
+  sellOutMs: number | null;
+  /** DRAW: its entries. */
+  entries: number | null;
+}
+
+/** The client sheet's Lifetime value: per currency. */
+export type LifetimeValue = { currency: string; valueMinor: number }[];

@@ -42,7 +42,13 @@
  * phone (A-08: the points of sale, a RETAIL account and its first sign-in in
  * the sale shell, a sale through the phone's camera in under 20 s, nothing
  * else reachable). The AUDITOR reads a model's Lookbook page without its
- * edits. No CSP violation or page error is tolerated.
+ * edits. Growth under Overview (plan NEXT-NINE, BP-29): every section, the
+ * window and the tabs, COLLECTORS BY VALUE paged and opening the client sheet
+ * (its Lifetime value), the console's figures gathered with their links, one
+ * failing panel leaving the rest, no sideways scroll at 390 px, the ADMIN's
+ * sidebar with Growth, Messages and Yearly care fitting 1 440 × 900; an
+ * AUDITOR reads the emails masked, RETAIL never sees it. No CSP violation or
+ * page error is tolerated.
  *
  * Set ORBES_SCREENSHOTS=1 to write 1440×900 screenshots of the dashboard,
  * the generator result and the product page to genome/out/.
@@ -74,6 +80,7 @@ import { inTransaction } from '../../src/server/db/connection.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { seedGrowth } from '../support/growth.js';
 import { jpegPhoto } from '../support/images.js';
 import { svgToGray } from '../support/raster.js';
 import { writePng } from '../support/image-io.js';
@@ -1945,10 +1952,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
     // Club in the Clients group after Owners, then Segments, Orders and Invoices (plan LIVE RELEASE+, with Atelier in
     // the Registry), Messages first (plan NEXT-NINE, CS-01), Yearly care after Warranties (BP-19 T6); the ADMIN's sidebar,
-    // twenty-six links, still fits a 900 px screen.
+    // twenty-seven links with Growth under Overview (BP-29), still fits a 900 px screen.
     const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
     expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['messages', 'owners', 'club', 'segments', 'orders', 'invoices', 'warranties', 'care', 'retailers', 'sale']);
-    expect(await p.locator('.side__link').count()).toBe(26);
+    expect(await p.locator('.side__link').count()).toBe(27);
     for (const id of ['sign-out', 'change-password']) {
       const box = (await p.locator(`[data-testid=${id}]`).boundingBox())!;
       expect(box.y + box.height, id).toBeLessThanOrEqual(900);
@@ -2866,6 +2873,165 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await figuresInDisplayFace(p)).toEqual([]);
     expect(await cspViolations(p)).toEqual([]);
     await c.close();
+  }, STEP_TIMEOUT);
+
+  it('reads Growth under Overview (plan NEXT-NINE, BP-29): every section, the window and the tabs, COLLECTORS BY VALUE paged and opening the client sheet, the console\'s figures gathered with their links, one failing panel leaving the rest; an AUDITOR reads the emails masked; RETAIL never sees it', async () => {
+    // Fourteen months of a house (test/support/growth.ts) and 25 collectors more, so that COLLECTORS BY VALUE pages.
+    const fixture = await seedGrowth(ctx.db);
+    for (let i = 0; i < 25; i++) {
+      const a = await fixture.world.account('2026-09-01', 'FR');
+      await fixture.world.own(a, await fixture.world.piece(fixture.models.halo), 'FIRST_REGISTRATION', '2026-09-02');
+    }
+    const report = await ctx.services.growth.report();
+    const collectors = await ctx.services.growth.collectors();
+    expect(collectors.total).toBeGreaterThan(25);
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    // Overview: Dashboard, Growth, …; the ADMIN's sidebar with Growth, Messages and Yearly care still fits 1 440 × 900.
+    const overview = p.locator('.side__group', { hasText: 'Overview' }).locator('.side__link');
+    expect(await overview.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['dashboard', 'growth', 'generator', 'documents']);
+    expect(await p.locator('.side__link').count()).toBe(27);
+    for (const id of ['sign-out', 'change-password']) {
+      const box = (await p.locator(`[data-testid=${id}]`).boundingBox())!;
+      expect(box.y + box.height, id).toBeLessThanOrEqual(900);
+    }
+    await p.click('.side__link[data-route=growth]');
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Growth');
+    expect(await p.locator('.side__link.is-active').textContent()).toBe('Growth');
+    expect(await p.locator('.page-head__eyebrow').textContent()).toBe('Overview');
+    expect(await p.locator('.page-head__lead').textContent()).toBe(
+      'How the house grows: what a collector is worth, who comes back for a second piece, how a scan becomes a member, and the revenue. Clients are named only in COLLECTORS BY VALUE, masked for read-only staff.',
+    );
+    // The window, the currency (two appear), the four figures and every section.
+    expect(await p.locator('[data-testid=growth-window-12]').getAttribute('aria-current')).toBe('page');
+    expect(await p.locator('[data-testid=growth-currency]').inputValue()).toBe('EUR');
+    expect(await p.locator('[data-testid=growth-kpis] .kpi__label').allTextContents()).toEqual(['Collectors', 'Second piece', 'New owners', 'Net revenue']);
+    expect(await p.locator('[data-testid=growth-kpis] .kpi__value').first().textContent()).toBe(String(report.ltv.perCollector.collectors));
+    expect(await p.locator('.view--growth .panel__title').allTextContents()).toEqual([
+      'Lifetime value',
+      'Repeat buying',
+      'From scan to PALLADIUM',
+      'Revenue',
+      'Elsewhere in the console',
+      'Scans by country',
+      'The circle by tier',
+      'Latest releases',
+      'Best time to open',
+    ]);
+    expect(await p.locator('[data-testid=growth-per-collector] .kpi__label').allTextContents()).toEqual(['Collectors', 'Average', 'Median', 'Top 10% from', 'Pieces without a price']);
+    expect(await p.locator('#growth-funnel .panel__note').textContent()).toBe('Each account in the month it first reached the step · tiers by pieces held: TITANE 1, PLATINE 5, PALLADIUM 10');
+    expect(await p.locator('[data-testid=growth-funnel] .bar__label').allTextContents()).toEqual(['Scans', 'Accounts created', 'Registered owners', 'Buyers', 'Reached PLATINE', 'Reached PALLADIUM']);
+    expect(await p.locator('[data-testid=growth-club-now]').textContent()).toMatch(/^In the club now: \d+ TITANE · \d+ PLATINE · \d+ PALLADIUM$/);
+    expect(await p.locator('[data-testid=growth-second-piece] .bar__label').allTextContents()).toEqual(['Within a month', 'One to three months', 'Three to six months', 'Six months to a year', 'After a year']);
+    expect(await p.locator('#growth-repeat thead th').allTextContents()).toEqual(['Cohort', 'Collectors', 'In a month', 'In three months', 'In six months', 'In a year', 'To date']);
+    // A group under three collectors shows its count and —.
+    const tiers = p.locator('[data-testid=growth-ltv-groups] tbody tr');
+    expect(await tiers.locator('td:first-child').allTextContents()).toEqual(['PALLADIUM', 'PLATINE', 'TITANE', 'No piece held now']);
+    expect(await p.locator('[data-testid=growth-masked]').textContent()).toBe('Fewer than 3 collectors: amounts not shown.');
+    // Revenue: each month opens the Invoices page of that month.
+    const lastMonth = report.revenue.months[0]!.month;
+    expect(await p.locator('[data-testid=growth-revenue-bars] a.bar__label').last().getAttribute('href')).toBe(`#/invoices?month=${lastMonth}`);
+    // Counts and amounts read in Helvetica Neue, as everywhere in the console.
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'growth', { full: true });
+
+    // The window's tabs and the breakdowns' tabs are links.
+    await p.click('[data-testid=growth-window-24]');
+    await expect.poll(() => p.locator('[data-testid=growth-window-24]').getAttribute('aria-current')).toBe('page');
+    expect(await p.evaluate(() => location.hash)).toBe('#/growth?months=24&ltv=tier&rev=channel');
+    await expect.poll(() => p.locator('#growth-funnel tbody tr').count()).toBe(24);
+    await p.click('[data-testid=growth-ltv-country]');
+    await expect.poll(() => p.locator('[data-testid=growth-ltv-groups] thead th').first().textContent()).toBe('Country');
+    expect(await p.locator('[data-testid=growth-ltv-groups] tbody td:first-child').allTextContents()).toContain('Not given');
+    await p.click('[data-testid=growth-rev-model]');
+    await expect.poll(() => p.locator('[data-testid=growth-revenue-groups] thead th').first().textContent()).toBe('Model');
+    expect(await p.evaluate(() => location.hash)).toBe('#/growth?months=24&ltv=country&rev=model');
+
+    // COLLECTORS BY VALUE: 25 a page, Next and Previous; a row opens the client sheet.
+    const rows = p.locator('[data-testid=growth-collectors] tbody tr');
+    expect(await rows.count()).toBe(25);
+    expect(await p.locator('[data-testid=growth-collectors] thead th').allTextContents()).toEqual(['Client', 'Tier now', 'Country', 'Pieces counted', 'Value', 'First piece']);
+    expect(await p.locator('[data-testid=growth-collector]').first().textContent()).toBe(collectors.items[0]!.email);
+    expect(await p.locator('[data-testid=growth-collectors-range]').textContent()).toBe(`1–25 of ${collectors.total}`);
+    expect(await p.locator('[data-testid=growth-collectors-previous]').isDisabled()).toBe(true);
+    await p.click('[data-testid=growth-collectors-next]');
+    await expect.poll(() => p.locator('[data-testid=growth-collectors-range]').textContent()).toBe(`26–${collectors.total} of ${collectors.total}`);
+    expect(await p.evaluate(() => location.hash)).toContain('page=2');
+    await p.click('[data-testid=growth-collectors-previous]');
+    await expect.poll(() => p.locator('[data-testid=growth-collectors-range]').textContent()).toBe(`1–25 of ${collectors.total}`);
+    await p.locator('[data-testid=growth-collector]').first().click();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(collectors.items[0]!.email);
+    // The client sheet's Lifetime value, as GROWTH counts it.
+    expect((await p.locator('[data-testid=owner-lifetime-value]').textContent())!.replace(/ /g, ' ')).toBe(
+      (await ctx.services.growth.collectorValue(collectors.items[0]!.accountId)).map((v) => `€ ${String(v.valueMinor / 100).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}`).join(' · '),
+    );
+
+    // The console's own figures, each linking to its detailed page.
+    await go(p, '#/growth', 'Growth');
+    const elsewhere = p.locator('[data-testid=growth-elsewhere]');
+    await expect.poll(() => elsewhere.locator('.panel--growth-releases tbody tr').count()).toBe(Math.min(6, (await ctx.services.growth.releases()).length));
+    expect(await elsewhere.locator('.panel--growth-scans .panel__tools a').getAttribute('href')).toBe('#/analytics?days=30');
+    expect(await elsewhere.locator('.panel--growth-circle .panel__tools a').getAttribute('href')).toBe('#/analytics');
+    expect(await elsewhere.locator('.panel--growth-releases .panel__tools a').getAttribute('href')).toBe('#/club?tab=drops');
+    expect(await elsewhere.locator('.panel--growth-best .panel__tools a').getAttribute('href')).toBe('#/analytics?days=30');
+    expect(await elsewhere.locator('.panel--growth-releases thead th').allTextContents()).toEqual(['Release', 'Method', 'Opened', 'Pieces', 'Sold', 'Sold out in', 'Entries']);
+    expect(await elsewhere.locator('.panel--growth-releases tbody tr', { hasText: 'MONOLITHE — LIVE' }).locator('a').getAttribute('href')).toBe(`#/club/live/${fixture.releases.L1}`);
+    expect(await elsewhere.locator('.panel--growth-releases tbody tr', { hasText: 'HALO — DRAW' }).locator('a').getAttribute('href')).toBe(`#/club/drops/${fixture.releases.D1}`);
+    expect(await elsewhere.locator('[data-testid=growth-best-time]').textContent()).toMatch(/^(\d{2}:00 Paris · \d+ % of the activity|Not enough activity yet\.)$/);
+
+    // One panel that fails says so; the rest of the page stands.
+    await p.route('**/api/admin/growth/releases', (r) => r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"code":"INTERNAL","message":"x"}}' }));
+    await p.evaluate(() => (location.hash = '#/growth?months=12'));
+    await expect.poll(() => elsewhere.locator('.panel--growth-releases .empty__text').textContent()).toBe('This figure could not be read. The rest of the page is current.');
+    expect(await p.locator('[data-testid=growth-collectors] tbody tr').count()).toBe(25);
+    expect(await elsewhere.locator('.panel--growth-scans .growth__failed').count()).toBe(0);
+    await p.unroute('**/api/admin/growth/releases');
+
+    // On a phone: the page never scrolls sideways.
+    await p.setViewportSize({ width: 390, height: 844 });
+    try {
+      await go(p, '#/growth?months=24', 'Growth');
+      await expect.poll(() => p.locator('[data-testid=growth-collectors] tbody tr').count()).toBe(25);
+      expect(await p.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+      await shot(p, 'growth-phone', { full: true });
+    } finally {
+      await p.setViewportSize({ width: 1440, height: 900 });
+    }
+    expect(await cspViolations(p)).toEqual([]);
+    await c.close();
+
+    // An AUDITOR reads Growth, every email masked.
+    const ac = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const ap = await ac.newPage();
+    await watch(ap);
+    const auditor = { email: 'growth-audit@orbes.test', password: 'growth auditor passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...auditor, role: 'AUDITOR' }, SYSTEM_ACTOR);
+    await signIn(ap, auditor.email, auditor.password);
+    await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('Dashboard');
+    expect(await ap.locator('.side__link[data-route=growth]').count()).toBe(1);
+    await go(ap, '#/growth', 'Growth');
+    await expect.poll(() => ap.locator('[data-testid=growth-collector]').count()).toBe(25);
+    for (const shown of await ap.locator('[data-testid=growth-collector]').allTextContents()) expect(shown).toMatch(/^[^@*]\*\*\*@[^@]+$/);
+    expect(await ap.content()).not.toContain(collectors.items[0]!.email);
+    expect(await cspViolations(ap)).toEqual([]);
+    await ac.close();
+
+    // RETAIL never sees it: the sale shell alone, #/growth leads back to the sale mode.
+    const seller = { email: 'growth-retail@orbes.test', password: 'growth retail passphrase 2026' };
+    await ctx.services.auth.createAdmin({ ...seller, role: 'RETAIL' }, SYSTEM_ACTOR);
+    const rc = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const rp = await rc.newPage();
+    await watch(rp);
+    await signIn(rp, seller.email, seller.password);
+    await expect.poll(async () => (await title(rp).textContent())?.trim()).toBe('Sale mode');
+    expect(await rp.locator('.side__link[data-route=growth]').count()).toBe(0);
+    await rp.evaluate(() => (location.hash = '#/growth'));
+    await expect.poll(async () => (await title(rp).textContent())?.trim()).toBe('Sale mode');
+    expect(await rp.locator('.view--growth').count()).toBe(0);
+    await rc.close();
   }, STEP_TIMEOUT);
 
   it('raised no page error or CSP violation', () => {

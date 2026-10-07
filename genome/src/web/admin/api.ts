@@ -51,6 +51,9 @@ import type {
   AdminSessionInfo,
   AdminUser,
   AnalyticsData,
+  GrowthCollectors,
+  GrowthRelease,
+  GrowthReport,
   StaffDocument,
   StaffDocumentSummary,
   AnomalyContext,
@@ -466,6 +469,21 @@ export class AdminApi {
   /** The panel The Circle (P-X01): the members of the club by tier now, the visits of the same window by day. */
   circleStats(q: { days?: number; from?: string; to?: string } = {}): Promise<CircleStats> {
     return this.get('/api/admin/analytics/circle', q);
+  }
+
+  /** GROWTH (plan NEXT-NINE, BP-29): the report of the last 12 or 24 months, in one currency. */
+  growth(q: { months?: number; currency?: string } = {}): Promise<GrowthReport> {
+    return this.get('/api/admin/growth', q);
+  }
+
+  /** COLLECTORS BY VALUE: a page of 25, the highest value first; the emails masked for an AUDITOR by the server. */
+  growthCollectors(q: { currency?: string; page?: number } = {}): Promise<GrowthCollectors> {
+    return this.get('/api/admin/growth/collectors', q);
+  }
+
+  /** GROWTH's Latest releases: the 6 latest past their opening. */
+  growthReleases(): Promise<Items<GrowthRelease>> {
+    return this.get('/api/admin/growth/releases');
   }
 
   categories(): Promise<Items<Category>> {

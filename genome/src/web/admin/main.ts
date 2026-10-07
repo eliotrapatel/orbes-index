@@ -59,6 +59,7 @@ import { dashboardView } from './views/dashboard.js';
 import { dropView } from './views/drop.js';
 import { generatorView } from './views/generator.js';
 import { genomesView } from './views/genomes.js';
+import { growthView } from './views/growth.js';
 import { keysView } from './views/keys.js';
 import { disposeLiveView, liveReleaseView } from './views/live.js';
 import { loginView } from './views/login.js';
@@ -97,6 +98,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     group: 'Overview',
     items: [
       { route: 'dashboard', label: 'Dashboard' },
+      { route: 'growth', label: 'Growth', cap: 'readGrowth' },
       { route: 'generator', label: 'Generator', cap: 'issue' },
       { route: 'documents', label: 'Documents' },
     ],
@@ -157,6 +159,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   model: { view: lookbookView, title: 'Lookbook', nav: 'catalogue' },
   scans: { view: scansView, title: 'Verification events', nav: 'scans' },
   analytics: { view: analyticsView, title: 'Analytics', nav: 'analytics' },
+  growth: { view: growthView, title: 'Growth', nav: 'growth' },
   anomalies: { view: anomaliesView, title: 'Anomalies', nav: 'anomalies' },
   cases: { view: casesView, title: 'Cases', nav: 'cases' },
   messages: { view: messagesView, title: 'Messages', nav: 'messages' },

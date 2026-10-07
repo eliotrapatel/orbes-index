@@ -75,8 +75,9 @@ body {
 
 .side__brand {
   display: block;
-  /* 28 and 24 px: the room the Segments link of an ADMIN's sidebar needed (plan LIVE RELEASE+), with the foot's and the monogram's. */
-  padding: 28px 32px 24px;
+  /* 24 and 20 px: the room the Segments link of an ADMIN's sidebar needed (plan LIVE RELEASE+), then Growth under
+     Overview (plan NEXT-NINE, BP-29), with the foot's and the monogram's. */
+  padding: 24px 32px 20px;
   text-decoration: none;
   border-bottom: 1px solid var(--hairline);
 }
@@ -3530,6 +3531,11 @@ a.bar__label:hover {
   font-family: var(--font);
 }
 
+/* And a figure inside a display-face label (Growth's TOP 10% FROM, plan NEXT-NINE BP-29). */
+.growth__figure {
+  font-family: var(--font);
+}
+
 /* ── Orders, the atelier, the settings (plan LIVE RELEASE+) ──────────────── */
 
 .panel__text {
@@ -4766,4 +4772,117 @@ a.bar__label:hover {
 
 .thread__answer .cfield {
   width: 100%;
+}
+
+/* ── Growth (plan NEXT-NINE, BP-29) ───────────────────────────────────────
+   Analytics' sibling: the console's paper, ink and hairlines; figures in
+   --font under their display-face labels, hairline bars, no cards. */
+
+.view--growth .page-head__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 18px;
+}
+
+/* Amounts are longer than counts (€ 21 150, £ 1 000.50): the display size a step down, and never past the cell. */
+.view--growth .kpi__value {
+  font-size: var(--fs-display);
+  overflow-wrap: anywhere;
+}
+
+/* Its notes say a window and what it counts (IN 12 MONTHS · AFTER CREDIT NOTES): on two lines rather than cut. */
+.view--growth .kpi__note {
+  white-space: normal;
+}
+
+.growth__figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 14px 0 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.growth__fig {
+  padding: 4px 22px 22px;
+  border-left: 1px solid var(--hairline);
+  min-width: 0;
+}
+
+.growth__fig:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.growth__value {
+  margin: 12px 0 0;
+  font-size: var(--fs-line);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.growth__note {
+  margin: 8px 0 0;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.growth__block {
+  margin-top: 30px;
+}
+
+.growth__block > .range {
+  margin-bottom: 8px;
+}
+
+.growth__line,
+.growth__headline {
+  margin: 14px 0 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.growth__headline {
+  font-size: var(--fs-line);
+  color: var(--ink);
+}
+
+/* The funnel's shares (12 per 100 scans) and the revenue's amounts need more room than a count. */
+.growth__bars--wide .bar {
+  grid-template-columns: var(--bar-label, 190px) minmax(0, 1fr) 72px 190px;
+}
+
+.growth__money .bar {
+  grid-template-columns: var(--bar-label, 190px) minmax(0, 1fr) 130px;
+}
+
+.growth__elsewhere {
+  margin-top: 54px;
+}
+
+.growth__heading {
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--ink);
+}
+
+@media (max-width: 560px) {
+  .view--growth .kpi__value {
+    font-size: var(--fs-heading);
+  }
+}
+
+@media (max-width: 860px) {
+  .growth__bars--wide .bar {
+    grid-template-columns: 120px minmax(0, 1fr) 56px;
+  }
+  .growth__money .bar {
+    grid-template-columns: 110px minmax(0, 1fr) 100px;
+  }
+  .growth__fig {
+    padding-left: 0;
+    border-left: 0;
+  }
 }
