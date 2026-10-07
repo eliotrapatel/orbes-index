@@ -740,7 +740,6 @@ export class ApiClient {
     await this.request('POST', '/api/v1/account/messages/read', { upTo }, { csrf: true });
   }
 
-  /** Whether an answer is unread: NOW's line and the account sheet's NEW. */
   /** YOUR SIZES (AC-01): the sizes the account saved, in its units; null where none is. */
   async sizes(): Promise<AccountSizes> {
     const r = await this.request<{ sizes?: AccountSizes }>('GET', '/api/v1/account/sizes');
@@ -755,6 +754,7 @@ export class ApiClient {
     return r.sizes;
   }
 
+  /** Whether an answer is unread: NOW's line and the account sheet's NEW. */
   async messagesUnread(): Promise<boolean> {
     const r = await this.request<{ unread?: unknown }>('GET', '/api/v1/account/messages/unread');
     if (typeof r?.unread !== 'boolean') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');

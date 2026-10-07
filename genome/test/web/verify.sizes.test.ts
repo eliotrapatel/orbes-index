@@ -71,6 +71,10 @@ describe('YOUR SIZES (AC-01)', () => {
       cancel: 'CANCEL',
       saved: 'Your sizes are saved.',
       failed: 'Your sizes could not be saved just now.',
+      // The view while the sizes are read, and when they cannot be (no field, no SAVE): the house's ONE MOMENT… and TRY AGAIN.
+      loading: 'ONE MOMENT…',
+      unreadable: 'Your sizes could not be shown just now.',
+      retry: 'TRY AGAIN',
       short: { RING: 'RING', BRACELET: 'BRACELET', WRIST: 'WRIST', NECKLACE: 'NECKLACE' },
     });
     expect(SIZE_FIELDS.map((f) => [f.kind, f.label, f.hint])).toEqual([

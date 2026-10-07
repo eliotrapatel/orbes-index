@@ -1284,6 +1284,11 @@ export const ACCOUNT_SIZES = Object.freeze({
   saved: 'Your sizes are saved.',
   /** A failure, followed by the server's message. */
   failed: 'Your sizes could not be saved just now.',
+  /** The view while the sizes are read; it shows no field until they are. */
+  loading: 'ONE MOMENT…',
+  /** The sizes could not be read: followed by the server's message, then TRY AGAIN; no field and no SAVE. */
+  unreadable: 'Your sizes could not be shown just now.',
+  retry: 'TRY AGAIN',
   /** Each size's word in the row's line: `RING 52`, `WRIST 16.5 CM`. */
   short: Object.freeze({ RING: 'RING', BRACELET: 'BRACELET', WRIST: 'WRIST', NECKLACE: 'NECKLACE' }),
 });

@@ -2922,6 +2922,16 @@ body.nocturne[data-screen="live"] {
   margin-top: 10px;
 }
 
+/* Until the sizes are read, ONE MOMENT…; when they cannot be, the sentence and TRY AGAIN, then CANCEL. */
+.n-account__sizes-loading,
+.n-account__sizes-error {
+  margin-top: 18px;
+}
+
+.n-account__sizes-retry {
+  margin-top: 18px;
+}
+
 .n-messages__head {
   margin-top: 10px;
 }

@@ -39,7 +39,9 @@
  * YOUR SIZES (AC-01): the title and its lead, then RING SIZE, BRACELET SIZE, WRIST, FOR WATCHES and
  * NECKLACE LENGTH, each a select (NOT SET, then its range) with its unit as its hint; SAVE (filled) saves them whole and
  * the sheet comes back with 'Your sizes are saved.'; CANCEL comes back unchanged. A failure is said under the fields,
- * with the server's message.
+ * with the server's message. The fields open only on the sizes as read for this account: ONE MOMENT… until they are,
+ * and, when they cannot be read, the sentence with the server's message, TRY AGAIN and CANCEL, and no SAVE (so that a
+ * SAVE never clears a size it was not shown).
  *
  * A modal dialog: the page under it is inert and holds still; focus goes to its title and comes back to the account
  * button when it closes.
@@ -52,7 +54,7 @@ import { CLUB_PATH } from '../club-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
 import { messageProblem, threadModel, type ConcerningTarget, type ThreadModel } from '../messages-model.js';
 import type { SessionStore } from '../session.js';
-import { NO_SIZES, SIZE_FIELDS, sizeFieldValue, sizeOptions, sizesFromForm, sizesSummary } from '../sizes-model.js';
+import { SIZE_FIELDS, sizeFieldValue, sizeOptions, sizesFromForm, sizesSummary } from '../sizes-model.js';
 import type { SoundSwitch } from '../sound.js';
 import { tierModel } from '../tier-model.js';
 import type { AccountSizes, ClubStatus, SizeKind } from '../types.js';
@@ -100,8 +102,14 @@ export class AccountSheet {
   private thread: ThreadModel | null = null;
   private threadError: string | null = null;
   private replyDraft = '';
-  /** YOUR SIZES (AC-01): the sizes saved, null until read (or unreadable: the row then says nothing of them). */
+  /**
+   * YOUR SIZES (AC-01): the sizes saved, null until read for this opening (or unreadable: the row then says nothing of
+   * them, and the view reads them before it shows its fields). Forgotten as the sheet closes: another account may sign in.
+   */
   private sizes: AccountSizes | null = null;
+  /** The view's own read of the sizes: why it failed (the server's message), null while it reads or once read. */
+  private sizesError: string | null = null;
+  private sizesGen = 0;
 
   constructor(private readonly deps: AccountSheetDeps) {
     this.panel = h('section', { class: 'n-account__panel', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'account-title' } });
@@ -113,8 +121,11 @@ export class AccountSheet {
       }
     });
     deps.session.subscribe((s) => {
-      // Signed out here or elsewhere (a 401): the sheet has nothing left to show.
-      if (s.status !== 'signed-in' && this.isOpen) this.close();
+      // Signed out here or elsewhere (a 401): the sheet has nothing left to show, and nothing of the account is kept.
+      if (s.status !== 'signed-in') {
+        if (this.isOpen) this.close();
+        this.sizes = null;
+      }
     });
   }
 
@@ -150,6 +161,10 @@ export class AccountSheet {
   close(): void {
     if (!this.isOpen) return;
     this.readGen++;
+    // The sizes are read again at the next opening, for whichever account is signed in then.
+    this.sizesGen++;
+    this.sizes = null;
+    this.sizesError = null;
     this.el.hidden = true;
     document.documentElement.classList.remove('n-locked');
     for (const el of this.deps.outside()) el.inert = false;
@@ -183,8 +198,11 @@ export class AccountSheet {
     ]);
     if (gen !== this.readGen || !this.isOpen) return;
     this.club = club;
-    // Saved meanwhile in the sheet's own view: what it saved stands.
-    if (this.view !== 'sizes') this.sizes = sizes;
+    // Read or saved meanwhile in the sheet's own view: that stands. Read here first: an open view waiting for them shows them.
+    if (this.sizes === null && sizes !== null) {
+      this.sizes = sizes;
+      if (this.view === 'sizes') this.showSizes();
+    }
     // MESSAGES opened meanwhile has read it: NEW stays off.
     this.unread = this.view === 'messages' ? false : unread;
     this.listed = pieces?.length ?? 0;
@@ -479,6 +497,32 @@ export class AccountSheet {
   private openSizes(): void {
     this.view = 'sizes';
     this.notice = null;
+    this.sizesError = null;
+    this.render();
+    this.focusTitle();
+    // Not read yet (or unreadable): read them before the fields show, ONE MOMENT… meanwhile.
+    if (this.sizes === null) void this.readSizes();
+  }
+
+  /** The sizes read for the view: its fields once they are, or the sentence and the server's message. */
+  private async readSizes(): Promise<void> {
+    const gen = ++this.sizesGen;
+    try {
+      const sizes = await this.deps.api.sizes();
+      // Read meanwhile by the sheet's own read (its fields already drawn): those stand.
+      if (gen !== this.sizesGen || !this.isOpen || this.sizes !== null) return;
+      this.sizes = sizes;
+      this.sizesError = null;
+    } catch (e) {
+      this.deps.session.noteError(e);
+      if (gen !== this.sizesGen || !this.isOpen || this.sizes !== null) return;
+      this.sizesError = messageOf(e);
+    }
+    if (this.view === 'sizes') this.showSizes();
+  }
+
+  /** The view drawn again once its sizes are read (or could not be), the focus on its title. */
+  private showSizes(): void {
     this.render();
     this.focusTitle();
   }
@@ -490,11 +534,32 @@ export class AccountSheet {
     this.panel.querySelector<HTMLElement>('[data-key="sizes"]')?.focus({ preventScroll: true });
   }
 
-  /** The four sizes, each a select (NOT SET, then its range), its unit as its hint; SAVE saves them whole, CANCEL under it goes back. */
+  /**
+   * The four sizes, each a select (NOT SET, then its range), its unit as its hint; SAVE saves them whole, CANCEL under it
+   * goes back. Until the sizes are read, ONE MOMENT…; when they cannot be, the sentence and TRY AGAIN, no field, no SAVE.
+   */
   private sizesView(): HTMLElement[] {
-    const saved = this.sizes ?? NO_SIZES;
-    const fields = SIZE_FIELDS.map((f) => ({ kind: f.kind, ...selectField(`account-size-${f.kind.toLowerCase()}`, f.label, sizeOptions(f.kind), sizeFieldValue(f.kind, saved[f.kind]), f.hint) }));
     const cancel = button(ACCOUNT_SIZES.cancel, { outline: true, onClick: () => this.closeSizes(null) });
+    const head = [h('h3', { class: 'n-g n-t3 n-ivc', id: 'account-sizes-title', text: ACCOUNT_SIZES.title }), h('p', { class: 'n-tx n-account__sizes-lead', text: ACCOUNT_SIZES.lead })];
+    const saved = this.sizes;
+    if (saved === null) {
+      const waiting = this.sizesError
+        ? [
+            h('p', { class: 'n-err n-account__sizes-error', attrs: { role: 'alert' }, text: `${ACCOUNT_SIZES.unreadable} ${this.sizesError}` }),
+            h('div', { class: 'n-account__sizes-retry' }, button(ACCOUNT_SIZES.retry, { outline: true, onClick: () => this.openSizes() })),
+          ]
+        : [h('p', { class: 'n-g n-lb n-account__sizes-loading', attrs: { role: 'status' }, text: ACCOUNT_SIZES.loading })];
+      return [
+        h(
+          'section',
+          { class: 'n-px n-account__sizes-view', attrs: { 'aria-labelledby': 'account-sizes-title' } },
+          ...head,
+          ...waiting,
+          h('div', { class: 'n-account__sizes-cancel' }, cancel),
+        ),
+      ];
+    }
+    const fields = SIZE_FIELDS.map((f) => ({ kind: f.kind, ...selectField(`account-size-${f.kind.toLowerCase()}`, f.label, sizeOptions(f.kind), sizeFieldValue(f.kind, saved[f.kind]), f.hint) }));
     const form = nocturneForm(
       this.deps.session,
       'sizes',
@@ -515,8 +580,7 @@ export class AccountSheet {
       h(
         'section',
         { class: 'n-px n-account__sizes-view', attrs: { 'aria-labelledby': 'account-sizes-title' } },
-        h('h3', { class: 'n-g n-t3 n-ivc', id: 'account-sizes-title', text: ACCOUNT_SIZES.title }),
-        h('p', { class: 'n-tx n-account__sizes-lead', text: ACCOUNT_SIZES.lead }),
+        ...head,
         form,
         // SAVE filled, then CANCEL under it, the hairline button.
         h('div', { class: 'n-account__sizes-cancel' }, cancel),
