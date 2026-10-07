@@ -345,7 +345,8 @@ const DEPTH: { state: UiState; check: Check } = {
     await now('RELEASES > PIECES');
     // RELEASES > a release > PIECES (pushed over the release's page) > NOW.
     await releases();
-    await reach(() => page.locator('.view--releases a[href^="/verify/releases/"]').first().click(), /^\/verify\/releases\/.+/, '.view--live, .view--release');
+    // A release's own link: HOW RELEASES WORK (/verify/releases/how, FT-01) stands under the list's lead, before them.
+    await reach(() => page.locator('.view--releases a[href^="/verify/releases/"]:not([href="/verify/releases/how"])').first().click(), /^\/verify\/releases\/(?!how$).+/, '.view--live, .view--release');
     await pieces();
     await now('RELEASES > a release > PIECES');
     // A sheet > its next release (the list and the release's page pushed over the sheet) > NOW.
