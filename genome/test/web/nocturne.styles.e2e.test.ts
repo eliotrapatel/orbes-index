@@ -527,7 +527,12 @@ async function firstRegistration(page: Page): Promise<void> {
   // The model's name and the lines (SIZE among them), SEE THE MODEL 22 px under.
   await check(page, '.n-result__lines', { 'margin-top': 40 });
   await check(page, '.n-result__name', { 'font-size': 26, 'letter-spacing': em(26, 0.08), 'line-height': 29.12, color: IV });
-  await check(page, '.n-result__line-list', { 'margin-top': 16, 'row-gap': 7 });
+  // The first line sits 16 px under the name; with the model's variant (plan NEXT LOT §3.1) that is its line, and the
+  // lines follow it at their own gap.
+  if ((await page.locator('.n-result__variant').count()) > 0) {
+    await check(page, '.n-result__variant', { 'margin-top': 16, 'font-size': 11, 'letter-spacing': em(11, 0.24), color: ASH });
+    await check(page, '.n-result__line-list', { 'margin-top': 7, 'row-gap': 7 });
+  } else await check(page, '.n-result__line-list', { 'margin-top': 16, 'row-gap': 7 });
   await check(page, '.n-result__line-list .n-lines__line', { 'font-size': 11, 'letter-spacing': em(11, 0.24), color: ASH });
   await check(page, '.n-result__model-line', { 'margin-top': 22 });
   // The tabs spread across the column, OWNERSHIP open.
