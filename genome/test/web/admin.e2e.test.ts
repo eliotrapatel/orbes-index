@@ -2298,7 +2298,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     }
     await go(p, `#/owners/${a.account.id}`, 'tier.owner@example.com');
     await expect.poll(() => p.locator('[data-testid=owner-tier]').textContent()).toBe('PLATINE · 5 pieces held');
+    // The Club block under the tier (plan NEXT-NINE, BP-19 T10): PLATINE's yearly care of the year, none asked for yet.
+    await expect.poll(() => p.locator('[data-testid=owner-club]').allTextContents()).toContainEqual(expect.stringMatching(/^\d{4}: 0 of 1$/));
     expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'owner-club', { full: true });
     await c.close();
 
     // An AUDITOR reads the tiers, without an action.
@@ -2414,6 +2417,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // The board: Requested first; the request's page with the address the client gave, in clear.
     await go(p, '#/care', 'Yearly care');
     await expect.poll(() => p.locator('[data-testid=care-piece]').allTextContents()).toContain(serial);
+    await shot(p, 'yearly-care-board', { full: true });
     await go(p, `#/care/${careId}`, serial);
     expect(await p.locator('[data-testid=care-status]').textContent()).toBe('Requested');
     expect(await p.locator('[data-testid=care-return-address]').innerText()).toBe('Ada Owner\n12 rue de la Paix\n75002 Paris');
