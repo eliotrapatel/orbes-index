@@ -1,7 +1,9 @@
 /**
- * CertificateService — the certificate card that carries a product's
- * one-time claim code under a scratch-off panel (render/certificate.ts), as
- * a PDF card, an A4 sheet of cards, or a CSV for variable-data printing.
+ * CertificateService — the certificate card 79t (render/certificate.ts, plan
+ * NEXT LOT §3.2), which carries a product's ORBES CODE and its one-time claim
+ * code in plain sight, as a PDF card, an A4 sheet of eight cards, or a CSV
+ * for variable-data printing. The card draws the product's ACTIVE code, its
+ * model's variant, its Size field and the year of its identity.
  *
  * The claim code is shown once at issuance and only its scrypt hash is
  * stored, so the console sends the code back with the request. Before
@@ -29,6 +31,7 @@
  * progress: a second one answers 429 RATE_LIMITED until the first is done.
  */
 import { computeGenome } from '../../core/genome/genome.js';
+import { frameCodeData } from '../../core/payload.js';
 import type { Db } from '../db/connection.js';
 import type { ProductRow } from '../db/schema.js';
 import { DomainError, tooManyRequests, validationError } from '../errors.js';
@@ -47,7 +50,7 @@ import {
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { formatGrouped, normalizeClaimCode, verifyClaimCode } from './claim-codes.js';
-import { GENOME_VERSION, NOT_PRINTABLE } from './issuance.js';
+import { NOT_PRINTABLE } from './issuance.js';
 import { requireProduct } from './lifecycle.js';
 
 export interface CertificateRequestItem {
@@ -60,7 +63,7 @@ export interface CertificateRequestItem {
 export interface CertificateRenderOptions {
   /** 'pdf' (default) or 'csv'. */
   format?: CertificateFormat;
-  /** PDF only: 'card' (default, one 85 × 55 mm page per card) or 'sheet' (A4, ten cards). */
+  /** PDF only: 'card' (default, one 95 × 62 mm page per card) or 'sheet' (A4, eight cards). */
   layout?: CertificateLayout;
 }
 
@@ -222,26 +225,42 @@ export class CertificateService {
     }
 
     const models = new Map(
-      (await this.db.selectFrom('models').select(['id', 'name', 'type']).where('id', 'in', [...new Set(rows.map((r) => r.p.model_id))]).execute()).map((m) => [m.id, m]),
-    );
-    const versions = new Map(
       (
         await this.db
-          .selectFrom('genomes')
-          .select((eb) => ['product_id', eb.fn.max('genome_version').as('version')])
-          .where('product_id', 'in', [...seen])
-          .groupBy('product_id')
+          .selectFrom('models')
+          .select(['id', 'name', 'type', 'variant_label'])
+          .where('id', 'in', [...new Set(rows.map((r) => r.p.model_id))])
           .execute()
-      ).map((g) => [g.product_id, Number(g.version)]),
+      ).map((m) => [m.id, m]),
+    );
+    // The card draws the piece's ACTIVE code (plan NEXT LOT §3.2): its signed payload and signature, its issue, and
+    // the genome version it was signed with (the GENOME row printed beside it is the same).
+    const codes = new Map(
+      (
+        await this.db
+          .selectFrom('codes')
+          .innerJoin('genomes', 'genomes.id', 'codes.genome_id')
+          .select(['codes.product_id', 'codes.payload', 'codes.signature', 'codes.issue', 'genomes.genome_version'])
+          .where('codes.product_id', 'in', [...seen])
+          .where('codes.status', '=', 'ACTIVE')
+          .execute()
+      ).map((c) => [c.product_id, c]),
     );
     return rows.map(({ p, code }) => {
       const model = models.get(p.model_id);
+      const active = codes.get(p.id);
+      // A piece without an ACTIVE code has no card to draw: step 2.4 refuses it (NO_ACTIVE_CODE) with the other refusals.
+      if (!active) throw new Error(`no ACTIVE code for ${p.product_id}`);
       return {
         productId: p.product_id,
         model: model ? `${model.name} · ${model.type}` : '',
+        modelVariant: model?.variant_label ?? null,
+        size: p.variant,
         material: p.material,
+        year: p.year,
         // The genome is a public function of the signed identity: the one the code carries.
-        genome: computeGenome(Number(p.packed_identity), versions.get(p.id) ?? GENOME_VERSION),
+        genome: computeGenome(Number(p.packed_identity), active.genome_version),
+        code: { data: frameCodeData(active.payload, active.signature), issue: active.issue },
         claimCode: formatGrouped(normalizeClaimCode(code)!),
       };
     });

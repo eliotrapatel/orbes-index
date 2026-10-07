@@ -15,10 +15,11 @@
  *
  * Spot colours: a page may also carry flat fills (`shapes`) in a named spot
  * colour, written as a Separation colour space with a CMYK alternate (how a
- * viewer or an office printer shows it). The certificate card uses one for
- * its scratch-off panel. A shape can be set to overprint (OP/op true, OPM 1):
- * its ink is then laid over what is under it instead of knocking it out, so
- * the claim code printed beneath the panel stays on its own plate.
+ * viewer or an office printer shows it). The certificate card used one for
+ * its scratch-off panel until the card 79t, which has none (plan NEXT LOT
+ * §3.2). A shape can be set to overprint (OP/op true, OPM 1): its ink is then
+ * laid over what is under it instead of knocking it out, so what is printed
+ * beneath it stays on its own plate.
  *
  * Plates, layers and links: a page may also carry flat fills drawn first,
  * under everything else (`fills`: the ivory plate of the ownership
@@ -57,7 +58,7 @@ export interface PdfPage {
   marks?: readonly StrokePath[];
   /** Colour for `marks` (default black). */
   markColor?: string;
-  /** Flat fills in page millimetres, drawn last, over the placements and marks (a scratch-off panel). */
+  /** Flat fills in page millimetres, drawn last, over the placements and marks (a spot-colour panel). */
   shapes?: readonly PdfShape[];
   /** Flat fills in page millimetres, drawn first, under the placements and marks (a plate). */
   fills?: readonly PdfShape[];

@@ -192,7 +192,7 @@ docker compose ps                                                # caddy, app, p
 - [x] Attribution for the GeoIP data: "IP Geolocation by DB-IP" (CC BY 4.0), see `NOTICE.md`: in the footer of every screen of `/verify` (NOW, a result, MY PIECES, THE COLLECTION, THE RELEASES, THE CIRCLE), at the foot of every legal page, in the privacy policy and in the credits of the legal notice, each a link to db-ip.com (J-06).
 - [ ] Customer copy reviewed by legal. The system never claims a scan proves an object is genuine; keep it that way in packaging and marketing.
 - [ ] ORBES Client Services contact, from the brand: set `CLIENT_SERVICES_EMAIL`, `CLIENT_SERVICES_PHONE` and `CLIENT_SERVICES_HOURS` in `.env` ([DEPLOYMENT §3.1](DEPLOYMENT.md#31-variables)), then run `scripts/deploy.sh`. Until then, FORGOTTEN PASSWORD? offers no email and the legal pages no contact. Check with a test piece: void its warranty in the console, scan it on a phone, open the WARRANTY tab: it shows WRITE TO ORBES CLIENT SERVICES (CS-01); signed out, FORGOTTEN PASSWORD? shows CONTACT ORBES CLIENT SERVICES.
-- [ ] Packaging and website text: "Verify only at theorbes.com/verify". The words are in the [packaging kit](launch/PACKAGING-KIT.md), in French and English:
+- [ ] Packaging and website text: "Verify only at verify.theorbes.com" on the packaging and the certificate card, "Verify only at theorbes.com/verify" on the website (it opens the same scanner). The words are in the [packaging kit](launch/PACKAGING-KIT.md), in French and English:
   - the three steps of the packaging, the same as on the certificate card;
   - the card's copy and the claim code rules;
   - the second-hand sentence;

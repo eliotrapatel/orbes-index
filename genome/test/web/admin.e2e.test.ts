@@ -550,7 +550,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
 
     // The certificate card that carries the claim code, checked against its hash by the server.
     const [card] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=download-certificate]')]);
-    expect(card.suggestedFilename()).toBe(`ORBES-certificate-${issuedProductId}-PROOF.pdf`);
+    expect(card.suggestedFilename()).toBe(`ORBES-certificate-${issuedProductId}.pdf`);
     expect(readFileSync((await card.path())!).subarray(0, 8).toString('latin1')).toBe('%PDF-1.4');
 
     // Hiding drops the only copy the console holds, and the card download goes with it.
@@ -1638,9 +1638,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await three;
     page.removeAllListeners('download');
     expect(cards).toEqual([
-      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-50-sheet-PROOF-part-1-of-3\.pdf$/),
-      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-50-sheet-PROOF-part-2-of-3\.pdf$/),
-      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-20-sheet-PROOF-part-3-of-3\.pdf$/),
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-50-sheet-part-1-of-3\.pdf$/),
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-50-sheet-part-2-of-3\.pdf$/),
+      expect.stringMatching(/^ORBES-certificates-\d{4}-\d{2}-\d{2}-20-sheet-part-3-of-3\.pdf$/),
     ]);
     await expect.poll(() => page.locator('[data-testid=batch-saved]').textContent()).toBe('Certificate cards saved, in 3 files.');
 

@@ -6,7 +6,9 @@
  *  - no forbidden term, English (BRAND §4.5 and §4.1) or French (the kit's
  *    own lexicon), outside the marked lexicon block, and no exclamation mark;
  *  - the lexicon quotes every term of §4.5 and at least those the brief names;
- *  - the official address in every part, the "verify only" mention in both
+ *  - the official address in every part (verify.theorbes.com on the packaging
+ *    and the card, as the card prints it; theorbes.com/verify, which opens the
+ *    same scanner, in the announcement), the "verify only" mention in both
  *    languages, and no other web address;
  *  - the three steps and the "verify only" line word for word as the
  *    certificate card draws them (CERTIFICATE_COPY), so card and packaging
@@ -52,8 +54,12 @@ const parts = {
   announcement: section(kit, '## 5. Announcement draft'),
 };
 
-const ADDRESS = 'theorbes.com/verify';
-const VERIFY_ONLY = { en: 'Verify only at theorbes.com/verify', fr: 'Vérifiez uniquement sur theorbes.com/verify' };
+/** The address the packaging and the card teach (the card 79t, plan NEXT LOT §3.2), and the "verify only" line's long forms. */
+const ADDRESS = 'verify.theorbes.com';
+const VERIFY_ONLY = { en: 'Verify only at verify.theorbes.com', fr: 'Vérifiez uniquement sur verify.theorbes.com' };
+/** The announcement's address and long forms: theorbes.com/verify, which redirects to verify.theorbes.com. */
+const ANNOUNCEMENT_ADDRESS = 'theorbes.com/verify';
+const ANNOUNCEMENT_VERIFY_ONLY = { en: 'Verify only at theorbes.com/verify', fr: 'Vérifiez uniquement sur theorbes.com/verify' };
 /** The J-02 sentence, as /verify shows it under AUTHENTIC — REGISTERED (RESALE_GUIDANCE), and its French. */
 const RESALE = {
   en: RESALE_GUIDANCE,
@@ -122,11 +128,12 @@ describe('packaging kit (docs/launch/PACKAGING-KIT.md)', () => {
     expect(text.match(/!(?!\[)/g) ?? []).toEqual([]);
   });
 
-  it('teaches one address, theorbes.com/verify, on the packaging, the card and the announcement, in both languages', () => {
-    for (const name of ['packaging', 'card', 'announcement'] as const) expect(parts[name], name).toContain(ADDRESS);
+  it("teaches verify.theorbes.com on the packaging and the card; the announcement's theorbes.com/verify redirects there", () => {
+    for (const name of ['packaging', 'card'] as const) expect(parts[name], name).toContain(ADDRESS);
+    expect(parts.announcement).toContain(ANNOUNCEMENT_ADDRESS);
     for (const lang of ['en', 'fr'] as const) {
       expect(parts.packaging).toContain(VERIFY_ONLY[lang]);
-      expect(parts.announcement).toContain(VERIFY_ONLY[lang]);
+      expect(parts.announcement).toContain(ANNOUNCEMENT_VERIFY_ONLY[lang]);
     }
     expect(parts.packaging).toContain(VERIFY_ONLY.fr.toUpperCase());
     // No other web address: a typo in a printed domain would send customers elsewhere.
@@ -146,13 +153,13 @@ describe('packaging kit (docs/launch/PACKAGING-KIT.md)', () => {
     expect(CERTIFICATE_COPY.verifyOnly.toLowerCase()).toBe(VERIFY_ONLY.en.toLowerCase());
   });
 
-  it('keeps the claim code off the piece and gives the second-hand sentence in English and French', () => {
+  it('keeps the claim code off the piece, prints the card on one side, and gives the second-hand sentence in English and French', () => {
     expect(parts.card).toMatch(/never on the piece/i);
     expect(parts.card).toMatch(/jamais sur la pièce/i);
-    for (const lang of ['en', 'fr'] as const) {
-      expect(parts.card, `card verso, ${lang}`).toContain(RESALE[lang]);
-      expect(parts.resale, `§3, ${lang}`).toContain(RESALE[lang]);
-    }
+    // The card 79t has one side, its back blank (owner, 2026-10-07): the second-hand sentence is no longer on a verso.
+    expect(parts.card).toContain('One side only; the back is blank (owner, 2026-10-07).');
+    expect(parts.card).toContain('Une seule face ; le dos est blanc (propriétaire, 2026-10-07).');
+    for (const lang of ['en', 'fr'] as const) expect(parts.resale, `§3, ${lang}`).toContain(RESALE[lang]);
   });
 
   it('writes in §3 the very sentence /verify shows under AUTHENTIC — REGISTERED (RESALE_GUIDANCE, J-02)', () => {
@@ -201,5 +208,6 @@ describe('packaging kit (docs/launch/PACKAGING-KIT.md)', () => {
     const launch = section(readDoc('docs/LAUNCH.md'), '## 10.');
     expect(launch).toContain('(launch/PACKAGING-KIT.md)');
     expect(launch).toContain(VERIFY_ONLY.en);
+    expect(launch).toContain(ANNOUNCEMENT_VERIFY_ONLY.en);
   });
 });

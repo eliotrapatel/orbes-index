@@ -11,6 +11,10 @@
  * byte. Before writing anything the script reads its own cells back through
  * the decoder-side path (unmask, Reed-Solomon, CRC, signature) and aborts if
  * the sample would not verify.
+ *
+ * The sample's payload and signature are exported (`sampleInput`): the
+ * certificate card specimen (scripts/certificate-specimen.ts) prints this
+ * very code, the one 79t's assets/orbes-code-sample.svg draws.
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -43,9 +47,10 @@ const PREVIEW_WIDTH_PX = 1200;
 /** Never a production key: derived from a public string so anyone can reproduce the samples. */
 const SAMPLE_SECRET_KEY = sha256(utf8('ORBES CODE-01 public sample key - never valid in production'));
 
-const SAMPLE_IDENTITY: ProductIdentity = { year: 2026, categoryIndex: 1, serial: 184 };
+export const SAMPLE_IDENTITY: ProductIdentity = { year: 2026, categoryIndex: 1, serial: 184 };
 
-function sampleInput(): { data: Uint8Array; genome: Genome } {
+/** The sample code's framed data (payload and signature, issue 1) and its genome. Deterministic. */
+export function sampleInput(): { data: Uint8Array; genome: Genome } {
   const payload = encodePayload({
     codeVersion: 1,
     genomeVersion: 1,
@@ -99,4 +104,5 @@ function main(): void {
   console.log(`wrote ${SAMPLES.length} SVGs to ${ASSETS} and PNG previews to ${PREVIEWS}`);
 }
 
-main();
+const invokedDirectly = process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (invokedDirectly) main();

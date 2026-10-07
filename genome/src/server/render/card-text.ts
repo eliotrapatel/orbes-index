@@ -51,6 +51,8 @@ export interface CardRun {
   inkRight: number;
   /** Where the next character would start (the run's origin plus its advance), mm. */
   end: number;
+  /** The right edge of the last glyph's ink as drawn, kerning included (equal to inkRight without kerning), mm. */
+  drawnRight: number;
 }
 
 /** Cap height of a face as a fraction of its em. */
@@ -107,6 +109,38 @@ export function cardFmt(n: number): string {
   return s === '-0' ? '0' : s;
 }
 
+/**
+ * A screen's raster grid, for comparing a render with a screen capture (test/render/certificate.test.ts compares the
+ * card with 79t's front.png, a Chrome screenshot): a screen rasteriser (Skia, in Chrome) puts each glyph's baseline
+ * on a whole device pixel and its origin on a quarter pixel, rounded down. Print files never use it.
+ */
+export interface GlyphGrid {
+  /** Device pixels per millimetre. */
+  pxPerMm: number;
+  /** Where the page's origin falls, in device pixels. */
+  originPx: { x: number; y: number };
+}
+
+let glyphGrid: GlyphGrid | null = null;
+
+/** Run `draw` with every glyph placed on `grid`'s pixels (see GlyphGrid); synchronous, restored afterwards. */
+export function onGlyphGrid<T>(grid: GlyphGrid, draw: () => T): T {
+  const before = glyphGrid;
+  glyphGrid = grid;
+  try {
+    return draw();
+  } finally {
+    glyphGrid = before;
+  }
+}
+
+/** A glyph's origin as placed: as computed, or on the glyph grid when one is set. */
+function onGrid(x: number, baseline: number): [number, number] {
+  if (!glyphGrid) return [x, baseline];
+  const { pxPerMm: k, originPx: o } = glyphGrid;
+  return [(Math.floor((o.x + x * k) * 4) / 4 - o.x) / k, (Math.round(o.y + baseline * k) - o.y) / k];
+}
+
 const PARSED = new WeakMap<CardGlyph, (string | number)[]>();
 
 /** A glyph's outline as tokens: commands and numbers. */
@@ -140,18 +174,23 @@ function glyphPath(g: CardGlyph, ox: number, baseline: number, k: number): strin
 }
 
 /** Draw the drawable characters of `text` from the origin x0 (not the ink edge). */
-function drawFrom(chars: readonly string[], spec: CardTypeSpec, x0: number, baseline: number): { d: string; end: number } {
+function drawFrom(chars: readonly string[], spec: CardTypeSpec, x0: number, baseline: number): { d: string; end: number; drawnRight: number } {
   const f = CARD_FACES[spec.face];
   const k = spec.size / f.unitsPerEm;
   let x = x0;
   let d = '';
+  let drawnRight = x0;
   chars.forEach((c, i) => {
     const g = glyph(f, c);
-    if (g.b) d += glyphPath(g, x, baseline, k);
+    if (g.b) {
+      const [gx, gy] = onGrid(x, baseline);
+      d += glyphPath(g, gx, gy, k);
+      drawnRight = x + g.b[2] * k;
+    }
     x += g.a * k + spec.tracking * spec.size;
     if (spec.kerning !== false && i + 1 < chars.length) x += (f.kern[c + chars[i + 1]] ?? 0) * k;
   });
-  return { d, end: x };
+  return { d, end: x, drawnRight };
 }
 
 /**
@@ -163,8 +202,8 @@ export function cardText(text: string, spec: CardTypeSpec & { x: number; baselin
   const m = cardMetrics(text, spec);
   const align = spec.align ?? 'start';
   const x0 = align === 'start' ? spec.x - m.lsb : align === 'end' ? spec.x - m.ink - m.lsb : spec.x - m.ink / 2 - m.lsb;
-  const { d, end } = drawFrom(chars, spec, x0, spec.baseline);
-  return { d, inkLeft: x0 + m.lsb, inkRight: x0 + m.lsb + m.ink, end };
+  const { d, end, drawnRight } = drawFrom(chars, spec, x0, spec.baseline);
+  return { d, inkLeft: x0 + m.lsb, inkRight: x0 + m.lsb + m.ink, end, drawnRight: chars.length > 0 ? drawnRight : x0 + m.lsb };
 }
 
 /** One part of a run: its text and its face. */
@@ -185,14 +224,17 @@ export function cardRun(parts: readonly CardRunPart[], spec: { x: number; baseli
     return { face, size, tracking: (spec.tracking * spec.size) / size, kerning: spec.kerning };
   };
   const drawn = parts.map((p) => ({ chars: [...drawable(p.text, p.face)], spec: specOf(p.face), text: p.text })).filter((p) => p.chars.length > 0);
-  if (drawn.length === 0) return { d: '', inkLeft: spec.x, inkRight: spec.x, end: spec.x };
+  if (drawn.length === 0) return { d: '', inkLeft: spec.x, inkRight: spec.x, end: spec.x, drawnRight: spec.x };
   let d = '';
   let cx = spec.x;
   let inkRight = spec.x;
+  let drawnRight = spec.x;
   drawn.forEach((p, i) => {
     const m = cardMetrics(p.text, p.spec);
     const x0 = i === 0 ? cx - m.lsb : cx;
-    d += drawFrom(p.chars, p.spec, x0, spec.baseline).d;
+    const part = drawFrom(p.chars, p.spec, x0, spec.baseline);
+    d += part.d;
+    if (part.d !== '') drawnRight = part.drawnRight;
     cx = x0 + m.advance;
     if (i === drawn.length - 1) {
       // build.py: the ink's end is the run's end less the last part's trailing tracking and the last glyph's right bearing.
@@ -202,7 +244,7 @@ export function cardRun(parts: readonly CardRunPart[], spec: { x: number; baseli
       inkRight = cx - p.spec.tracking * p.spec.size - rsb;
     }
   });
-  return { d, inkLeft: spec.x, inkRight, end: cx };
+  return { d, inkLeft: spec.x, inkRight, end: cx, drawnRight };
 }
 
 /**

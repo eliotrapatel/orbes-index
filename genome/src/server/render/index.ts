@@ -27,7 +27,7 @@ export {
   type ResolvedArtifactOptions,
 } from './artifact.js';
 export {
-  CARD_LAYOUT,
+  CARD_79T,
   CERTIFICATE_CARD,
   CERTIFICATE_COPY,
   CERTIFICATE_FORMATS,
@@ -38,7 +38,6 @@ export {
   MAX_CERTIFICATE_ITEMS,
   OWNERSHIP_CERTIFICATE_COPY,
   OWNERSHIP_CERTIFICATE_LAYOUT,
-  SCRATCH_OFF_SPOT,
   certificateCardSvg,
   certificateLinkLettering,
   certificatesCsv,
@@ -46,6 +45,8 @@ export {
   layoutCertificateCard,
   layoutCertificateSheet,
   layoutOwnershipCertificate,
+  sizeLabel,
+  variantLine,
   renderCertificateCsv,
   renderCertificatePdf,
   renderOwnershipCertificatePdf,

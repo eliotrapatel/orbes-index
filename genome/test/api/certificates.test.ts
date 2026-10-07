@@ -69,25 +69,26 @@ describe('certificate cards API', () => {
     ];
 
     const card = await post(operator, { items: items.slice(0, 1) });
-    expectAttachment(card, /^application\/pdf$/, new RegExp(`^attachment; filename="ORBES-certificate-${a.product.productId}-PROOF\\.pdf"$`));
+    expectAttachment(card, /^application\/pdf$/, new RegExp(`^attachment; filename="ORBES-certificate-${a.product.productId}\\.pdf"$`));
     expect(card.rawPayload.subarray(0, 8).toString('latin1')).toBe('%PDF-1.4');
 
     const sheet = await post(operator, { items, format: 'pdf', layout: 'sheet' });
-    expectAttachment(sheet, /^application\/pdf$/, /^attachment; filename="ORBES-certificates-\d{4}-\d{2}-\d{2}-2-sheet-PROOF\.pdf"$/);
+    expectAttachment(sheet, /^application\/pdf$/, /^attachment; filename="ORBES-certificates-\d{4}-\d{2}-\d{2}-2-sheet\.pdf"$/);
 
     const csv = await post(operator, { items, format: 'csv' });
-    expectAttachment(csv, /^text\/csv; charset=utf-8/, /^attachment; filename="ORBES-certificates-\d{4}-\d{2}-\d{2}-2-PROOF\.csv"$/);
+    expectAttachment(csv, /^text\/csv; charset=utf-8/, /^attachment; filename="ORBES-certificates-\d{4}-\d{2}-\d{2}-2\.csv"$/);
     expect(csv.body).toBe(
-      '"productId","model","material","code"\r\n' +
-        `"${a.product.productId}","MONOLITHE · RING","925 STERLING SILVER","${a.claimCode}"\r\n` +
-        `"${b.product.productId}","MONOLITHE · RING","925 STERLING SILVER","${b.claimCode}"\r\n`,
+      // 79t's columns (plan NEXT LOT §3.2): the variant line as printed (none for this model and piece) and the year.
+      '"productId","model","variant","material","year","code"\r\n' +
+        `"${a.product.productId}","MONOLITHE · RING","","925 STERLING SILVER","20${a.product.productId.slice(1, 3)}","${a.claimCode}"\r\n` +
+        `"${b.product.productId}","MONOLITHE · RING","","925 STERLING SILVER","20${b.product.productId.slice(1, 3)}","${b.claimCode}"\r\n`,
     );
 
     // Audited with product ids, never the codes.
     const entries = (await h.ctx.audit.list({ action: 'certificate.render' })).items;
     expect(entries).toHaveLength(3);
     const last = entries.find((e) => e.details.format === 'csv')!;
-    expect(last.details).toEqual({ productIds: [a.product.productId, b.product.productId], count: 2, format: 'csv', layoutStatus: 'PROOF' });
+    expect(last.details).toEqual({ productIds: [a.product.productId, b.product.productId], count: 2, format: 'csv', layoutStatus: 'VALIDATED' });
     expect(entries.find((e) => e.targetId === a.product.productId)?.details).toMatchObject({ format: 'pdf', layout: 'card', count: 1 });
     expect(entries.every((e) => e.actorType === 'admin' && e.ipHash)).toBe(true);
 
@@ -229,7 +230,7 @@ describe('certificate cards API', () => {
     const elsewhere = svc.render(items, { format: 'csv' }, other);
     await expect(again).rejects.toMatchObject({ code: 'RATE_LIMITED', httpStatus: 429 });
     await expect(first).resolves.toMatchObject({ contentType: 'application/pdf' });
-    await expect(elsewhere).resolves.toMatchObject({ filename: expect.stringMatching(/-PROOF\.csv$/) });
+    await expect(elsewhere).resolves.toMatchObject({ filename: expect.stringMatching(/-2\.csv$/) });
     // Once it is done, the same admin may render again, even after a refusal.
     await expect(svc.render([{ productId: c.product.productId, claimCode: 'ZZZZ-ZZZZ-ZZZZ' }], {}, one)).rejects.toMatchObject({ code: 'CLAIM_CODE_MISMATCH' });
     await expect(svc.render(items, { format: 'csv' }, one)).resolves.toBeTruthy();

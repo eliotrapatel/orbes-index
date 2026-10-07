@@ -35,116 +35,95 @@ Sur la boîte, le fourreau ou la pochette, ou sur la notice glissée avec la pi�
 Printed, in the house voice (uppercase, tracked), word for word the card's lines:
 
 ```
-1  OPEN THEORBES.COM/VERIFY
-2  SCAN THE ORBES CODE
-3  REGISTER WITH THE CLAIM CODE
+1  SCAN THE ORBES CODE
+2  ENTER THE CLAIM CODE
+3  THE PIECE IS REGISTERED TO YOU
 
-VERIFY ONLY AT THEORBES.COM/VERIFY
+VERIFY ONLY AT VERIFY.THEORBES.COM
 ```
 
 Long form (insert, website, e-mail):
 
-> 1. Open theorbes.com/verify: type the address into your phone's browser.
-> 2. Scan the ORBES CODE of your piece.
-> 3. Register the piece in your name with the claim code from its certificate card.
+> 1. Open verify.theorbes.com: type the address into your phone's browser, then scan the ORBES CODE on the certificate card.
+> 2. Enter the claim code printed on the card, under CLAIM CODE · KEEP IT PRIVATE.
+> 3. The piece is registered to you, in your ORBES account.
 >
-> Verify only at theorbes.com/verify.
+> Verify only at verify.theorbes.com.
 
 ### FR
 
 Imprimé, dans la voix de la maison (capitales espacées) :
 
 ```
-1  OUVREZ THEORBES.COM/VERIFY
-2  SCANNEZ L'ORBES CODE
-3  ENREGISTREZ AVEC LE CLAIM CODE
+1  SCANNEZ L'ORBES CODE
+2  SAISISSEZ LE CLAIM CODE
+3  LA PIÈCE EST ENREGISTRÉE À VOTRE NOM
 
-VÉRIFIEZ UNIQUEMENT SUR THEORBES.COM/VERIFY
+VÉRIFIEZ UNIQUEMENT SUR VERIFY.THEORBES.COM
 ```
 
 Forme longue (encart, site, e-mail) :
 
-> 1. Ouvrez theorbes.com/verify : tapez l'adresse dans le navigateur de votre téléphone.
-> 2. Scannez l'ORBES CODE de votre pièce.
-> 3. Enregistrez la pièce à votre nom avec le claim code de sa carte certificat.
+> 1. Ouvrez verify.theorbes.com : tapez l'adresse dans le navigateur de votre téléphone, puis scannez l'ORBES CODE de la carte certificat.
+> 2. Saisissez le claim code imprimé sur la carte, sous CLAIM CODE · KEEP IT PRIVATE.
+> 3. La pièce est enregistrée à votre nom, dans votre compte ORBES.
 >
-> Vérifiez uniquement sur theorbes.com/verify.
+> Vérifiez uniquement sur verify.theorbes.com.
 
 ### Rules · Règles
 
 | EN | FR |
 |---|---|
 | **The address is typed.** Nothing on the packaging opens a website: no other code, beside the ORBES CODE or anywhere else, and no frame or arrow inviting a scan (BRAND §1.2 and §2.10; the words to avoid are in §4). | **L'adresse se tape.** Rien sur l'emballage n'ouvre de site : aucun autre code, ni à côté de l'ORBES CODE ni ailleurs, et aucun cadre ni flèche qui appelle au scan (BRAND §1.2 et §2.10 ; les mots à éviter sont au §4). |
-| **One address.** theorbes.com/verify opens the scanner at verify.theorbes.com/verify; the customer may read either in the address bar. No short link, no campaign address, no other domain. | **Une seule adresse.** theorbes.com/verify ouvre le scanner sur verify.theorbes.com/verify ; le client peut lire l'une ou l'autre dans la barre d'adresse. Pas de lien raccourci, pas d'adresse de campagne, aucun autre domaine. |
+| **One address.** verify.theorbes.com, as the card prints it, opens the scanner; theorbes.com/verify, which the announcement teaches (§5), opens the same scanner. No short link, no campaign address, no other domain. | **Une seule adresse.** verify.theorbes.com, comme l'imprime la carte, ouvre le scanner ; theorbes.com/verify, qu'apprend l'annonce (§5), ouvre le même scanner. Pas de lien raccourci, pas d'adresse de campagne, aucun autre domaine. |
 | **English words on screen.** `/verify` is in English. The French copy keeps the names the customer will read there: ORBES CODE, CLAIM CODE, SCAN ORBES CODE. | **Les mots de l'écran restent en anglais.** `/verify` est en anglais. Le texte français garde les noms que le client y lira : ORBES CODE, CLAIM CODE, SCAN ORBES CODE. |
-| **Step 2 names the ORBES CODE**, what the customer scans, not the ORBES SEAL, which is only its centre (BRAND §2.1). The brief said "scan the seal"; the card and this kit say ORBES CODE. | **L'étape 2 nomme l'ORBES CODE**, ce que le client scanne, et non l'ORBES SEAL, qui n'en est que le centre (BRAND §2.1). Le brief disait « scanner le sceau » ; la carte et ce kit disent ORBES CODE. |
-| **Step 3 needs an ORBES account.** After the scan, `/verify` offers to sign in or to create one; registration follows that scan. | **L'étape 3 demande un compte ORBES.** Après le scan, `/verify` propose de se connecter ou d'en créer un ; l'enregistrement suit ce scan. |
-| **Capitals.** The printed lines set the address in capitals. Before printing, type THEORBES.COM/VERIFY in capitals on a phone and check that it reaches the scanner (§6). If it does not, the packaging sets the address in lower case, and no card is printed until the redirect accepts capitals or the card's lettering can draw lower case: its stroked capitals (`genome/src/server/render/label-font.ts`) have none, so the card cannot simply switch. | **Capitales.** Les lignes imprimées composent l'adresse en capitales. Avant impression, tapez THEORBES.COM/VERIFY en capitales sur un téléphone et vérifiez que le scanner s'ouvre (§6). Sinon, l'emballage passe l'adresse en minuscules, et aucune carte n'est imprimée tant que la redirection n'accepte pas les capitales ou que le lettrage de la carte ne sait pas tracer de minuscules : ses capitales gravées (`genome/src/server/render/label-font.ts`) n'en ont pas, la carte ne peut donc pas simplement changer. |
+| **Step 1 names the ORBES CODE**, what the customer scans, not the ORBES SEAL, which is only its centre (BRAND §2.1). The brief said "scan the seal"; the card and this kit say ORBES CODE. | **L'étape 1 nomme l'ORBES CODE**, ce que le client scanne, et non l'ORBES SEAL, qui n'en est que le centre (BRAND §2.1). Le brief disait « scanner le sceau » ; la carte et ce kit disent ORBES CODE. |
+| **Step 2 needs an ORBES account.** After the scan, `/verify` offers to sign in or to create one; registration follows that scan. | **L'étape 2 demande un compte ORBES.** Après le scan, `/verify` propose de se connecter ou d'en créer un ; l'enregistrement suit ce scan. |
+| **Capitals.** The printed lines set the address in capitals, as the card does. A host name reads the same in capitals: before printing, type VERIFY.THEORBES.COM in capitals on a phone and check that it reaches the scanner (§6). | **Capitales.** Les lignes imprimées composent l'adresse en capitales, comme la carte. Un nom de domaine se lit de même en capitales : avant impression, tapez VERIFY.THEORBES.COM en capitales sur un téléphone et vérifiez que le scanner s'ouvre (§6). |
 
 ---
 
 ## 2. Certificate card · Carte certificat
 
-### Recto: the card the console draws · Recto : la carte que dessine la console
+### The card the console draws · La carte que dessine la console
 
-The recto is the card of BRAND §7, not a second template: the console offers DOWNLOAD CERTIFICATE CARD while the claim code is shown, and `POST /api/admin/certificates` returns A4 sheets of ten and the print shop's CSV ([API §15.7](../API.md#157-post-apiadmincertificates-extension-of-the-contract), LAUNCH §7). The server checks each claim code against its stored hash before drawing it. This kit fixes the card's words only.
+The card is 79t, MINT CERTIFICATE, the card of BRAND §7, not a second template: 95 × 62 mm, one side. The console offers DOWNLOAD CERTIFICATE CARD while the claim code is shown, and `POST /api/admin/certificates` returns A4 sheets of eight cards and the print shop's CSV ([API §15.7](../API.md#157-post-apiadmincertificates-extension-of-the-contract), LAUNCH §7). The server checks each claim code against its stored hash before drawing it. This kit fixes the card's words only.
 
-Le recto est la carte de BRAND §7, pas un second gabarit : la console propose DOWNLOAD CERTIFICATE CARD tant que le claim code est affiché, et `POST /api/admin/certificates` donne les planches A4 de dix cartes et le CSV de l'imprimeur. Le serveur vérifie chaque claim code contre son empreinte avant de le dessiner. Ce kit ne fixe que les mots de la carte.
+La carte est 79t, MINT CERTIFICATE, la carte de BRAND §7, pas un second gabarit : 95 × 62 mm, une seule face. La console propose DOWNLOAD CERTIFICATE CARD tant que le claim code est affiché, et `POST /api/admin/certificates` donne les planches A4 de huit cartes et le CSV de l'imprimeur. Le serveur vérifie chaque claim code contre son empreinte avant de le dessiner. Ce kit ne fixe que les mots de la carte.
 
-![Certificate card specimen: ORBES and CERTIFICATE with the PROOF mention, the monogram, identity, GENOME row, model, material, three steps, claim code under the scratch-off panel](../assets/certificate-card-specimen.svg)
+![Certificate card specimen 79t: MINT CERTIFICATE in the top rule, the ORBES CODE, ORBES, the identity, the GENOME row, the monogram with the year, the piece's three lines, the three steps, the claim code in plain sight, VERIFY ONLY AT VERIFY.THEORBES.COM in the bottom rule](../assets/certificate-card-specimen.svg)
 
 Its copy, in English like `/verify`, word for word as `CERTIFICATE_COPY` draws it:
 
 | Line | Copy |
 |---|---|
-| Title | CERTIFICATE |
-| Identity | the piece's identity (e.g. O26-J-00184), its GENOME row and fingerprint |
-| Facts | MODEL · MATERIAL |
-| Steps | 1 OPEN THEORBES.COM/VERIFY · 2 SCAN THE ORBES CODE · 3 REGISTER WITH THE CLAIM CODE |
-| Panel | CLAIM CODE, and the code `XXXX-XXXX-XXXX` under the scratch-off panel |
-| Foot | VERIFY ONLY AT THEORBES.COM/VERIFY |
-| Until the brand's sign-off | PROOF · LAYOUT NOT VALIDATED |
+| Top rule | MINT CERTIFICATE |
+| Code | the piece's ORBES CODE, to scan |
+| Identity | ORBES, the piece's identity (e.g. O26-J-00184), its GENOME row and fingerprint, the monogram with the year of the identity |
+| The piece | the model and its type · the variant and the size (e.g. BLUE  ·  SIZE 17) · the material |
+| Steps | 1 SCAN THE ORBES CODE · 2 ENTER THE CLAIM CODE · 3 THE PIECE IS REGISTERED TO YOU |
+| Claim code | CLAIM CODE · KEEP IT PRIVATE, then the code `XXXX-XXXX-XXXX`, in plain sight |
+| Bottom rule | VERIFY ONLY AT VERIFY.THEORBES.COM |
 
-En français, pour relecture (la carte reste imprimée en anglais) : CERTIFICAT · MODÈLE · MATIÈRE · 1 OUVREZ THEORBES.COM/VERIFY · 2 SCANNEZ L'ORBES CODE · 3 ENREGISTREZ AVEC LE CLAIM CODE · CLAIM CODE · VÉRIFIEZ UNIQUEMENT SUR THEORBES.COM/VERIFY.
+En français, pour relecture (la carte reste imprimée en anglais, MINT CERTIFICATE compris) : 1 SCANNEZ L'ORBES CODE · 2 SAISISSEZ LE CLAIM CODE · 3 LA PIÈCE EST ENREGISTRÉE À VOTRE NOM · CLAIM CODE · GARDEZ-LE POUR VOUS · VÉRIFIEZ UNIQUEMENT SUR VERIFY.THEORBES.COM.
 
-**Declared deviation · Écart assumé.** The brief opened the card in the console only after the brand's validation. It ships now, and every card, sheet and file name says PROOF until `CERTIFICATE_LAYOUT_STATUS` becomes `VALIDATED` on the brand's sign-off (`genome/src/server/render/certificate.ts`, BRAND §8 item 20). No card is printed for customers before that.
-Le brief n'ouvrait la carte dans la console qu'après validation par la marque. Elle est livrée dès maintenant, et chaque carte, planche et nom de fichier porte PROOF tant que `CERTIFICATE_LAYOUT_STATUS` n'est pas passé à `VALIDATED`, sur validation de la marque. Aucune carte n'est imprimée pour un client avant.
+**Validated · Validée.** The owner validated the card 79t on 2026-10-07: `CERTIFICATE_LAYOUT_STATUS` is `VALIDATED` (`genome/src/server/render/certificate.ts`, BRAND §8 item 20), and no card, sheet or file name says PROOF.
+Le propriétaire a validé la carte 79t le 2026-10-07 : `CERTIFICATE_LAYOUT_STATUS` vaut `VALIDATED`, et aucune carte, planche ni nom de fichier ne porte PROOF.
 
 ### The claim code · Le claim code
 
 | EN | FR |
 |---|---|
-| Under the scratch-off panel (spot colour ORBES SCRATCH-OFF), on the card only. **Never on the piece**, its tag or the outside of the packaging; never in a photograph, an e-mail or a message (BRAND §2.10). | Sous la zone à gratter (ton direct ORBES SCRATCH-OFF), sur la carte seulement. **Jamais sur la pièce**, son étiquette ou l'extérieur de l'emballage ; jamais dans une photo, un e-mail ou un message (BRAND §2.10). |
-| The card goes inside the packaging, with the piece. Staff never scratch the panel: the console shows the code once and keeps only its hash. | La carte va dans l'emballage, avec la pièce. Le personnel ne gratte jamais la zone : la console montre le code une fois et n'en garde que l'empreinte. |
+| Printed on the card in plain sight, under CLAIM CODE · KEEP IT PRIVATE: there is no scratch-off panel (owner, 2026-10-07). **Never on the piece**, its tag or the outside of the packaging; never in a photograph, an e-mail or a message (BRAND §2.10). | Imprimé en clair sur la carte, sous CLAIM CODE · KEEP IT PRIVATE : il n'y a pas de zone à gratter (propriétaire, 2026-10-07). **Jamais sur la pièce**, son étiquette ou l'extérieur de l'emballage ; jamais dans une photo, un e-mail ou un message (BRAND §2.10). |
+| The card goes inside the packaging, with the piece: whoever holds it can register the piece at verify.theorbes.com. The console shows the code once and keeps only its hash. | La carte va dans l'emballage, avec la pièce : qui la détient peut enregistrer la pièce sur verify.theorbes.com. La console montre le code une fois et n'en garde que l'empreinte. |
 | It registers the piece once, at its first registration. Afterwards the piece changes hands with a transfer code (valid 7 days), never with the card; the console refuses to draw a card for a registered piece. | Il enregistre la pièce une seule fois, à sa première inscription. Ensuite la pièce change de mains par un code de transfert (valable 7 jours), jamais par la carte ; la console refuse de dessiner la carte d'une pièce enregistrée. |
 | After 5 wrong attempts within an hour, registration of that piece is paused for up to an hour. | Après 5 essais manqués en une heure, l'enregistrement de cette pièce est suspendu pendant une heure au plus. |
 | A card lost before registration: the customer writes to ORBES Client Services. | Carte perdue avant l'enregistrement : le client écrit à ORBES Client Services. |
 
-### Verso: fixed text (proposal) · Verso : texte fixe (proposition)
+### Verso · Verso
 
-The console draws the recto only. The verso is the same on every card and is printed by the print shop from one fixed plate, or becomes an insert if the brand prefers. Proposed copy, house voice (uppercase titles, one sentence-case paragraph each):
-
-Le recto seul est dessiné par la console. Le verso, identique sur toutes les cartes, est imprimé par l'imprimeur à partir d'une plaque fixe, ou devient un encart si la marque le préfère. Proposition :
-
-**EN**
-
-> **YOUR CLAIM CODE**
-> Scratch the panel only when you register your piece at theorbes.com/verify. The claim code registers it once, in your name. Keep this card with your piece; never photograph or share the code.
->
-> **CHANGE OF OWNER**
-> Buying this piece? Ask the seller for a transfer code from their ORBES account: only its registered owner can create one. If the panel is intact and the piece is not yet registered, register it with this claim code.
->
-> VERIFY ONLY AT THEORBES.COM/VERIFY
-
-**FR**
-
-> **VOTRE CLAIM CODE**
-> Ne grattez la zone qu'au moment d'enregistrer votre pièce sur theorbes.com/verify. Le claim code l'enregistre une seule fois, à votre nom. Gardez cette carte avec votre pièce ; ne photographiez et ne partagez jamais le code.
->
-> **CHANGEMENT DE PROPRIÉTAIRE**
-> Vous achetez cette pièce ? Demandez au vendeur un code de transfert depuis son compte ORBES : seul le propriétaire enregistré de la pièce peut en créer un. Si la zone est intacte et la pièce pas encore enregistrée, enregistrez-la avec ce claim code.
->
-> VÉRIFIEZ UNIQUEMENT SUR THEORBES.COM/VERIFY
+One side only; the back is blank (owner, 2026-10-07).
+Une seule face ; le dos est blanc (propriétaire, 2026-10-07).
 
 ---
 

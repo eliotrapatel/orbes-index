@@ -1,32 +1,38 @@
 /**
- * Certificate card (render/certificate.ts): the 85 × 55 mm card that carries
- * a claim code under a scratch-off panel, the A4 sheet of ten, the CSV for
- * print shops, and the BRAND §7 specimen.
+ * Certificate card (render/certificate.ts): the card 79t, MINT CERTIFICATE
+ * (plan NEXT LOT §3.2, validated by the owner on 2026-10-07), 95 × 62 mm, one
+ * side, carrying the ORBES CODE and the claim code in plain sight; the A4
+ * sheet of eight; the CSV for print shops; the BRAND §7 specimen.
  *
- * What a print shop and a buyer rely on is checked: a valid, deterministic,
- * pure-vector PDF without any font; K-only black; the scratch-off panel as a
- * Separation plate set to overprint and covering the code; every mark inside
- * the card's safe area; the brand's monogram as a flat ink fill of its
- * master outlines, clear of the lettering; the sheet's geometry and cut
- * marks; never the ORBES
- * CODE on the card; the claim code never present as text; PROOF until the
- * brand validates the layout; CSV quoting and formula guards. And the
- * ownership certificate (F-06): one A4 page of a piece's record, its GENOME on
- * an ivory plate, its live link lettered and as an annotation, never a font,
- * a name or the word AUTHENTIC, deterministic.
+ * What a print shop and a buyer rely on is checked: the geometry pinned to
+ * 79t's build.py (test/fixtures/card-79t/, the design's record), every mark
+ * inside the card; the ORBES CODE scanning back to the piece's signed
+ * payload; the card against 79t's own front.png, pixel for pixel within the
+ * plan's tolerance; a valid, deterministic, pure-vector PDF without any font
+ * or text, K only with the greys as K tints and no spot colour; the claim
+ * code never present as text; the sheet's geometry and cut marks; PROOF only
+ * for a PROOF layout; CSV quoting and formula guards. And the ownership
+ * certificate (F-06): one A4 page of a piece's record, its GENOME on an ivory
+ * plate, its live link lettered and as an annotation, never a font, a name or
+ * the word AUTHENTIC, deterministic.
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
+import { PNG } from 'pngjs';
 import { describe, expect, it } from 'vitest';
 import { CERTIFICATE_SPECIMEN_ITEM, renderCertificateSpecimenFiles } from '../../scripts/certificate-specimen.js';
+import { sampleInput } from '../../scripts/render-samples.js';
+import { encodeOrbesCode } from '../../src/core/code/encoder.js';
+import { CODE01_TOTAL_CELLS, cellCenter } from '../../src/core/code/profile.js';
 import { computeGenome } from '../../src/core/genome/genome.js';
 import { genomeLayout } from '../../src/core/genome/render.js';
 import { packIdentity } from '../../src/core/identity.js';
-import { MONOGRAM_BOUNDS, MONOGRAM_PATHS, monogramPathData, pathBounds } from '../../src/core/render/monogram.js';
+import { MONOGRAM_BOUNDS, MONOGRAM_PATHS, pathBounds } from '../../src/core/render/monogram.js';
+import { onGlyphGrid, cardMetrics } from '../../src/server/render/card-text.js';
 import {
-  CARD_LAYOUT,
+  CARD_79T,
   CERTIFICATE_CARD,
   CERTIFICATE_COPY,
   CERTIFICATE_LAYOUT_STATUS,
@@ -35,40 +41,53 @@ import {
   MAX_CERTIFICATE_ITEMS,
   OWNERSHIP_CERTIFICATE_COPY,
   OWNERSHIP_CERTIFICATE_LAYOUT,
-  SCRATCH_OFF_SPOT,
   certificateCardSvg,
   certificateLinkLettering,
   certificatesCsv,
   csvField,
-  gridCutMarks,
   layoutCertificateCard,
   layoutCertificateSheet,
   layoutOwnershipCertificate,
-  measureText,
   mmToPt,
+  pixelsFor,
   renderCertificateCsv,
   renderCertificatePdf,
   renderOwnershipCertificatePdf,
   renderPdf,
+  gridCutMarks,
   sheetFooter,
-  textRun,
+  sizeLabel,
+  svgToPng,
   toLabelText,
+  variantLine,
+  type CertificateCard,
   type CertificateItem,
   type OwnershipCertificateDocument,
+  type PdfLayer,
 } from '../../src/server/render/index.js';
+import { kTintOf } from '../../src/server/render/certificate.js';
 import { ORBES_CODE_STYLES } from '../../src/core/code/styles.js';
-import { STROKE_RATIO } from '../../src/server/render/label-font.js';
+import { requireDecoder } from './decoder-support.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ASSETS = join(HERE, '..', '..', '..', 'docs', 'assets');
+const FIXTURE = join(HERE, '..', 'fixtures', 'card-79t');
+const OUT = join(HERE, '..', '..', 'out');
 const DATE = new Date('2026-10-02T09:30:00.000Z');
+/** The claim code build.py draws (79t-mint/build.py :108 and :175); the specimen file keeps its own invented one. */
+const CLAIM_79T = '7MSE-SK34-PWMC';
 
+/** A piece of 79t's: MONOLITHE · BRACELET in BLUE, SIZE 17, with the sample ORBES CODE of its serial. */
 function item(serial: number, extra: Partial<CertificateItem> = {}): CertificateItem {
   return {
     productId: `O26-J-${String(serial).padStart(5, '0')}`,
-    model: 'MONOLITHE · RING',
+    model: 'MONOLITHE · BRACELET',
+    modelVariant: 'Blue',
+    size: '17',
     material: '925 STERLING SILVER',
+    year: 2026,
     genome: computeGenome(packIdentity({ year: 2026, categoryIndex: 1, serial })),
+    code: { data: sampleInput().data, issue: 1 },
     claimCode: '7KQ2-M4TD-9XWH',
     ...extra,
   };
@@ -101,18 +120,19 @@ function pdfObjects(pdf: Uint8Array): string {
   return latin1(pdf).replace(/(?<!end)stream\r?\n[\s\S]*?endstream/g, 'stream endstream');
 }
 
-/** Endpoints of every M/L/A command of absolute path data. */
-function points(d: string): [number, number][] {
+/** Every coordinate pair of absolute path data (M L Q C A: the end point of an arc), as [x, y]. */
+function coords(d: string): [number, number][] {
   const out: [number, number][] = [];
-  for (const m of d.matchAll(/([MLA])([^MLAZ]*)/g)) {
-    const n = m[2].trim().split(/[ ,]+/).map(Number);
-    out.push([n[n.length - 2], n[n.length - 1]]);
+  for (const m of d.matchAll(/([MLQCA])([^MLQCAZ]*)/g)) {
+    const n = m[2].trim().split(/[ ,]+/).filter(Boolean).map(Number);
+    if (m[1] === 'A') out.push([n[5], n[6]]);
+    else for (let i = 0; i + 1 < n.length; i += 2) out.push([n[i], n[i + 1]]);
   }
   return out;
 }
 
 function bounds(d: string, pad = 0): { x0: number; y0: number; x1: number; y1: number } {
-  const p = points(d);
+  const p = coords(d);
   return {
     x0: Math.min(...p.map(([x]) => x)) - pad,
     y0: Math.min(...p.map(([, y]) => y)) - pad,
@@ -121,290 +141,489 @@ function bounds(d: string, pad = 0): { x0: number; y0: number; x1: number; y1: n
   };
 }
 
+/** The layers a page shows, with the clip path standing for a clipped group (its items show only inside it). */
+function marks(layers: readonly PdfLayer[]): { d: string; pad: number; layer: PdfLayer }[] {
+  return layers.map((l) => (l.kind === 'clip' ? { d: l.clip, pad: 0, layer: l } : { d: l.d, pad: l.kind === 'stroke' ? l.width / 2 : 0, layer: l }));
+}
+
 /** Every claim-code spelling a reader could search for. */
 const spellings = (code: string) => [code, code.replace(/-/g, ''), code.replace(/-/g, ' ')];
 
-describe('certificate card layout', () => {
-  it('keeps every mark inside the safe area of the 85 × 55 mm card', () => {
-    const { widthMm: w, heightMm: h, safeMm: s } = CERTIFICATE_CARD;
-    for (const status of ['PROOF', 'VALIDATED'] as const) {
-      const card = layoutCertificateCard(item(184), status);
-      for (const st of card.strokes) {
-        const b = bounds(st.d, st.width / 2);
-        expect(b.x0).toBeGreaterThanOrEqual(s);
-        expect(b.y0).toBeGreaterThanOrEqual(s);
-        expect(b.x1).toBeLessThanOrEqual(w - s);
-        expect(b.y1).toBeLessThanOrEqual(h - s);
-      }
-      const g = card.genome;
-      expect(g.xMm).toBeGreaterThanOrEqual(s - 1); // the row layout's own margin may reach past the ink
-      expect(g.yMm + g.scene.heightMm).toBeLessThanOrEqual(CARD_LAYOUT.rows.baselines[0] - CARD_LAYOUT.rows.valueCap);
-      const p = card.panelBox;
-      expect(p.x).toBeGreaterThanOrEqual(s);
-      expect(p.x + p.w).toBeLessThanOrEqual(w - s);
-      expect(p.y + p.h).toBeLessThanOrEqual(h - s);
-      const m = pathBounds(card.monogram);
-      expect(m.x).toBeGreaterThanOrEqual(s);
-      expect(m.y).toBeGreaterThanOrEqual(s);
-      expect(m.x + m.w).toBeLessThanOrEqual(w - s + 1e-3);
-      expect(m.y + m.h).toBeLessThanOrEqual(h - s);
-    }
-  });
+const strokes = (card: CertificateCard) => card.layers.filter((l): l is Extract<PdfLayer, { kind: 'stroke' }> => l.kind === 'stroke');
 
-  it('carries the monogram: the master outlines as a flat fill against the right margin, from the cap line of ORBES to the identity baseline', () => {
-    const L = CARD_LAYOUT;
-    for (const status of ['PROOF', 'VALIDATED'] as const) {
-      const card = layoutCertificateCard(item(184), status);
-      const box = card.monogramBox;
-      expect(box.y).toBeCloseTo(L.brand.baseline - L.brand.cap, 9);
-      expect(box.y + box.h).toBeCloseTo(L.id.baseline, 9);
-      expect(box.x + box.w).toBeCloseTo(L.right, 9);
-      expect(box.w / box.h).toBeCloseTo(MONOGRAM_BOUNDS.w / MONOGRAM_BOUNDS.h, 9);
-      // 11 mm high, 14.4 mm wide; the outlines are the master's, placed on that box (three decimals).
-      expect(box.h).toBeCloseTo(11, 9);
-      expect(box.w).toBeCloseTo(14.4, 2);
-      expect(card.monogram).toEqual(monogramPathData({ x: box.x, y: box.y, width: box.w }));
-      expect(card.monogram).toHaveLength(MONOGRAM_PATHS.length);
-      const ink = pathBounds(card.monogram);
-      expect(ink.x).toBeCloseTo(box.x, 2);
-      expect(ink.y).toBeCloseTo(box.y, 2);
-      expect(ink.w).toBeCloseTo(box.w, 2);
-      expect(ink.h).toBeCloseTo(box.h, 2);
-      // Clear of every other mark by at least 3 mm across and 3 mm down: the CERTIFICATE line and its
-      // PROOF mention end to its left, the GENOME row and its fingerprint start below it.
-      for (const st of card.strokes) {
-        const b = bounds(st.d, st.width / 2);
-        const apart = b.x1 <= box.x - 3 || b.y0 >= box.y + box.h + 3;
-        expect(apart, st.d.slice(0, 40)).toBe(true);
-      }
-      expect(card.genome.yMm).toBeGreaterThanOrEqual(box.y + box.h);
-    }
-  });
-
-  it('sets CERTIFICATE under the word, and PROOF after it on the same line', () => {
-    const L = CARD_LAYOUT;
-    const proof = layoutCertificateCard(item(184), 'PROOF');
-    const [brand, title, mention] = proof.strokes.map((st) => bounds(st.d));
-    expect(Math.abs(brand.x0 - title.x0)).toBeLessThan(0.3); // both start at the left margin (O and C bear differently)
-    expect(title.y1).toBeCloseTo(L.title.baseline, 1);
-    expect(mention.y1).toBeCloseTo(L.proof.baseline, 1);
-    expect(mention.x0 - title.x1).toBeGreaterThan(L.proof.gapMm - 1);
-    expect(title.y0 - brand.y1).toBeGreaterThan(1);
-  });
-
-  it('centres the claim code inside the panel that covers it, whatever its characters', () => {
-    for (const code of ['7KQ2-M4TD-9XWH', 'WWWW-MMMM-QQQQ', '1111-1111-1111', '0000-GGGG-DDDD']) {
-      const card = layoutCertificateCard(item(184, { claimCode: code }), 'PROOF');
-      const b = bounds(card.code.d, card.code.width / 2);
-      const p = card.panelBox;
-      expect(b.x0, code).toBeGreaterThanOrEqual(p.x + 0.5);
-      expect(b.x1, code).toBeLessThanOrEqual(p.x + p.w - 0.5);
-      expect(b.y0, code).toBeGreaterThanOrEqual(p.y + 0.5);
-      expect(b.y1, code).toBeLessThanOrEqual(p.y + p.h - 0.5);
-      expect(Math.abs((b.x0 + b.x1) / 2 - (p.x + p.w / 2))).toBeLessThan(0.05);
-      // The panel's path is the rounded rectangle of panelBox.
-      const pb = bounds(card.panel);
-      expect([pb.x0, pb.y0, pb.x1, pb.y1]).toEqual([p.x, p.y, p.x + p.w, p.y + p.h]);
-    }
-  });
-
-  it('keeps the steps out of the claim-code column', () => {
-    const card = layoutCertificateCard(item(184), 'PROOF');
-    const left = card.strokes.filter((st) => {
-      const b = bounds(st.d);
-      return b.y0 > CARD_LAYOUT.rule.y && b.y1 < CARD_LAYOUT.panel.y + CARD_LAYOUT.panel.h && b.x0 < CARD_LAYOUT.claim.x;
+describe('certificate card 79t: what it is', () => {
+  it('is 95 × 62 mm, one side, VALIDATED, its copy word for word as 79t sets it', () => {
+    expect(CERTIFICATE_CARD).toEqual({ widthMm: 95, heightMm: 62, safeMm: 5.19 });
+    expect(CERTIFICATE_LAYOUT_STATUS).toBe('VALIDATED');
+    expect(CERTIFICATE_COPY).toEqual({
+      title: 'MINT CERTIFICATE',
+      brand: 'ORBES',
+      genome: 'GENOME',
+      steps: ['SCAN THE ORBES CODE', 'ENTER THE CLAIM CODE', 'THE PIECE IS REGISTERED TO YOU'],
+      claimCode: 'CLAIM CODE · KEEP IT PRIVATE',
+      verifyOnly: 'VERIFY ONLY AT VERIFY.THEORBES.COM',
+      proof: 'PROOF · LAYOUT NOT VALIDATED',
     });
-    expect(left.length).toBe(6); // three numbers, three steps
-    for (const st of left) expect(bounds(st.d, st.width / 2).x1).toBeLessThan(CARD_LAYOUT.claim.x - 1);
   });
 
-  it('fits long free text: shrinks it, then cuts it with "...", never past the right edge', () => {
-    const long = 'Sterling silver 925, hand-polished, with a brushed inner band and an engraved serial number';
-    const short = layoutCertificateCard(item(184), 'VALIDATED');
-    const card = layoutCertificateCard(item(184, { material: long, model: 'Monolithe Œuvre · Bague très longue à motif gravé' }), 'VALIDATED');
-    expect(card.strokes).toHaveLength(short.strokes.length);
-    for (const st of card.strokes) expect(bounds(st.d, st.width / 2).x1).toBeLessThanOrEqual(CARD_LAYOUT.right + 0.2);
-    // Strokes 5 and 7 are the model and material values (VALIDATED: no PROOF line): shrunk to the 1.0 mm floor,
-    // whose stroke is the 0.1 mm hairline floor, against 1.3 × 0.085 mm at full size. At 1.0 mm the material is
-    // still wider than the column, so the bound above also proves it was cut short.
-    expect(short.strokes[7].width).toBeCloseTo(CARD_LAYOUT.rows.valueCap * STROKE_RATIO, 9);
-    expect(card.strokes[5].width).toBeCloseTo(0.1, 9);
-    expect(card.strokes[7].width).toBeCloseTo(0.1, 9);
-    expect(measureText(toLabelText(long), CARD_LAYOUT.rows.valueTracking) * CARD_LAYOUT.rows.minValueCap).toBeGreaterThan(CARD_LAYOUT.right - CARD_LAYOUT.rows.valueX);
-    // Accents and punctuation outside the lettering never throw; empty text leaves the row blank.
-    expect(() => layoutCertificateCard(item(184, { material: '¿¡ ✓ —' }), 'PROOF')).not.toThrow();
-    expect(layoutCertificateCard(item(184, { material: '✓' }), 'PROOF').strokes).toHaveLength(layoutCertificateCard(item(184), 'PROOF').strokes.length - 1);
-  });
-
-  it('draws free text that fits once shrunk whole, at the size that fills the column', () => {
-    const { right, rows } = CARD_LAYOUT;
-    const whole = (text: string, cap: number) =>
-      textRun(text, { capHeight: cap, tracking: rows.valueTracking, x: rows.valueX, baseline: rows.baselines[1], align: 'start' }).d;
-    const fit = (text: string) => (right - rows.valueX) / measureText(text, rows.valueTracking);
-    // Fits at 1.22 mm, where width × cap rounds to one ulp above the column: drawn whole, not cut with '...'.
-    const material = toLabelText('Oxidised sterling silver 925 with gold vermeil');
-    expect(fit(material)).toBeGreaterThan(rows.minValueCap);
-    expect(fit(material)).toBeLessThan(rows.valueCap);
-    expect(layoutCertificateCard(item(184, { material }), 'VALIDATED').strokes[7].d).toBe(whole(material, fit(material)));
-    // Every length down to the 1.0 mm floor: never cut, whatever the rounding.
-    const long = 'Oxidised sterling silver 925 with gold vermeil, hand-polished, brushed inner band';
-    let shrunk = 0;
-    for (let n = 1; n <= long.length; n++) {
-      const text = toLabelText(long.slice(0, n));
-      if (fit(text) < rows.minValueCap) break;
-      if (fit(text) < rows.valueCap) shrunk++;
-      const card = layoutCertificateCard(item(184, { material: text }), 'VALIDATED');
-      expect(card.strokes[7].d, text).toBe(whole(text, Math.min(rows.valueCap, fit(text))));
-    }
-    expect(shrunk).toBeGreaterThan(10);
-  });
-
-  it('says PROOF until the brand validates the layout', () => {
-    expect(CERTIFICATE_LAYOUT_STATUS).toBe('PROOF');
-    const proof = layoutCertificateCard(item(184), 'PROOF');
-    const validated = layoutCertificateCard(item(184), 'VALIDATED');
-    expect(proof.strokes.length).toBe(validated.strokes.length + 1);
-    expect(CERTIFICATE_COPY.proof).toMatch(/^PROOF/);
-  });
-
-  it('never draws the ORBES CODE: only the GENOME row of the identity', () => {
-    const it0 = item(184);
-    const card = layoutCertificateCard(it0, 'PROOF');
-    expect(card.genome.scene.primitives).toEqual(genomeLayout(it0.genome, 'row').primitives);
-    for (const p of card.genome.scene.primitives) expect(['genome', 'decor']).toContain(p.layer);
-    // The glyphs are drawn at 2.6 mm: above the 2.1 mm floor of a printed glyph (BRAND §2.6).
-    expect(card.genome.scene.widthMm / card.genome.scene.viewBox.w * 2).toBeCloseTo(CARD_LAYOUT.genome.glyphMm, 9);
-  });
-
-  it('refuses what it cannot draw', () => {
-    expect(() => layoutCertificateCard(item(184, { claimCode: '7kq2-m4td-9xwh' }), 'PROOF')).toThrow(CertificateInputError);
-    expect(() => layoutCertificateCard(item(184, { claimCode: '7KQ2M4TD9XWH' }), 'PROOF')).toThrow(CertificateInputError);
-    expect(() => layoutCertificateCard(item(184, { claimCode: 'UUUU-UUUU-UUUU' }), 'PROOF')).toThrow(CertificateInputError);
-    expect(() => layoutCertificateCard(item(184, { productId: 'x' }), 'PROOF')).toThrow(CertificateInputError);
+  it('prints its two warm greys as the K tints of their lightness: #F1F1EE K 5.9, #B4B4B1 K 29.8', () => {
+    expect(kTintOf('#F1F1EE')).toBe(5.9);
+    expect(kTintOf('#B4B4B1')).toBe(29.8);
+    expect(CARD_79T.guilloche).toMatchObject({ ground: '#F1F1EE', groundK: 5.9, line: '#B4B4B1', lineK: 29.8, lineWidth: 0.06, pitch: 0.3, amplitude: 0.42, wavelength: 2.2 });
+    expect(kTintOf(CARD_79T.guilloche.ground)).toBe(CARD_79T.guilloche.groundK);
+    expect(kTintOf(CARD_79T.guilloche.line)).toBe(CARD_79T.guilloche.lineK);
   });
 });
 
+describe('certificate card 79t: geometry pinned to build.py', () => {
+  const card = layoutCertificateCard(item(184, { claimCode: CLAIM_79T }), 'VALIDATED');
+
+  it('draws one 0.1125 mm rule, butt and mitred, 5.25 mm inside the trim, cut round each legend with 1.4 mm of white each side of its ink', () => {
+    const rule = strokes(card).find((l) => l.width === 0.1125)!;
+    expect(rule).toMatchObject({ cap: 'butt', join: 'miter', color: '#0A0A0A' });
+    const p = coords(rule.d);
+    expect(new Set(p.map(([x]) => x).filter((x) => x < 10))).toEqual(new Set([5.25]));
+    expect(new Set(p.map(([x]) => x).filter((x) => x > 85))).toEqual(new Set([89.75]));
+    expect(new Set(p.map(([, y]) => y))).toEqual(new Set([5.25, 56.75]));
+    // The ends at each break: 1.4 mm from the legend's ink, both sides; each legend centred on the card.
+    const [top, bottom] = card.boxes.legends;
+    expect(top.text).toBe('MINT CERTIFICATE');
+    expect(bottom.text).toBe('VERIFY ONLY AT VERIFY.THEORBES.COM');
+    for (const [legend, y] of [
+      [top, 5.25],
+      [bottom, 56.75],
+    ] as const) {
+      const ends = p.filter(([x, py]) => py === y && x > 10 && x < 85).map(([x]) => x).sort((a, b) => a - b);
+      expect(ends).toHaveLength(2);
+      expect(legend.left - ends[0]).toBeCloseTo(1.4, 3);
+      expect(ends[1] - legend.right).toBeCloseTo(1.4, 3);
+      expect((legend.left + legend.right) / 2).toBeCloseTo(47.5, 6);
+    }
+    // 79t's legend widths (unkerned metrics: MINT CERTIFICATE 12.73, VERIFY ONLY AT … 28.20).
+    expect(top.right - top.left).toBeCloseTo(12.725, 2);
+    expect(bottom.right - bottom.left).toBeCloseTo(28.195, 2);
+  });
+
+  it('places the ORBES CODE in a 32 mm box at (10.138, 10.886), flat on the stock, its decor in its own tints', () => {
+    expect(card.boxes.code).toEqual({ x: 10.1376, y: 10.8856, w: 32, h: 32 });
+    const [code, genome] = card.placements;
+    expect(code).toMatchObject({ xMm: 10.1376, yMm: 10.8856 });
+    expect(code.scene).toMatchObject({ widthMm: 32, heightMm: 32, paper: null, ink: '#0A0A0A', viewBox: { x: -25, y: -25, w: 50, h: 50 } });
+    // The piece's own code: its framed data and its GENOME glyphs, with the decor.
+    const it = item(184);
+    expect(code.scene.primitives).toEqual(encodeOrbesCode({ data: it.code.data, genomeGlyphs: it.genome.glyphs }, { decor: true }).primitives);
+    expect(code.scene.primitives.filter((p) => p.layer === 'decor').map((p) => p.tone)).toEqual([0.35, 0.25, 0.25]);
+    // Its ring 11.5 mm in (the box's edge 0.6144 mm outside the ring), moved 0.748 mm left; the step numbers centred
+    // on their measure (the widest of 1, 2 and 3) from the ring's edge.
+    expect(10.1376 + 0.748 + 0.6144).toBeCloseTo(11.5, 9);
+    const numberWidth = Math.max(...['1', '2', '3'].map((n) => cardMetrics(n, { face: 'regular', size: (1.05 * 0.64) / 0.714, tracking: 0 }).ink));
+    expect(numberWidth).toBeCloseTo(0.451818, 5);
+    expect(CARD_79T.steps.numberCentreX).toBeCloseTo(11.5 + numberWidth / 2, 5);
+    expect(CARD_79T.steps.textX).toBeCloseTo(11.5 + numberWidth + 1.35, 5);
+    // The GENOME row: its first glyph's ink on the column's edge, at one fixed scale.
+    const row = genomeLayout(it.genome, 'row');
+    expect(genome.scene.widthMm).toBeCloseTo(row.viewBox.w * CARD_79T.genome.rowScale, 9);
+    expect(genome.xMm + (-1 - row.viewBox.x) * CARD_79T.genome.rowScale).toBeCloseTo(48.0052875, 9);
+    expect(CARD_79T.genome.rowScale * 25.43).toBeCloseTo(15.354193, 5);
+  });
+
+  it('sets the column from 48.01 to 81.27, the claim code centred on it, its baseline and step 3\'s on 50.5', () => {
+    expect(CARD_79T.column.x0).toBeCloseTo(48.01, 2);
+    expect(CARD_79T.column.x1).toBeCloseTo(81.27, 2);
+    expect(CARD_79T.column.x1 - CARD_79T.column.x0).toBeCloseTo(33.26, 2);
+    expect(card.boxes.claimCode.left).toBeCloseTo(48.0052875, 6);
+    expect(card.boxes.claimCode.right).toBeCloseTo(81.2659125, 6);
+    expect(card.boxes.claimCode.baseline).toBe(50.5);
+    expect(CARD_79T.steps.baselines).toEqual([47.14, 48.82, 50.5]);
+    expect(CARD_79T.claim.codeBaseline).toBe(CARD_79T.steps.baselines[2]);
+    // Equal air to the ring (its right edge 42.2712) and to the 8 mm bound.
+    expect(48.0052875 - 42.2712).toBeCloseTo(95 - 8 - 81.2659125, 9);
+  });
+
+  it('places the monogram by MONOGRAM_BOUNDS (42.90, 100.15, 457.32, 416.69): 13.0 × 9.93 mm, its right edge on 81.27, from 17.47 to 27.40', () => {
+    expect([MONOGRAM_BOUNDS.x, MONOGRAM_BOUNDS.y, MONOGRAM_BOUNDS.x + MONOGRAM_BOUNDS.w, MONOGRAM_BOUNDS.y + MONOGRAM_BOUNDS.h].map((v) => Math.round(v * 100) / 100)).toEqual([
+      42.9, 100.15, 457.32, 416.69,
+    ]);
+    const b = pathBounds(MONOGRAM_PATHS);
+    expect(b.x).toBeCloseTo(42.9, 2);
+    expect(b.y + b.h).toBeCloseTo(416.69, 2);
+    const m = card.boxes.monogram;
+    expect(m.w).toBe(13);
+    expect(m.h).toBeCloseTo(9.93, 2);
+    expect(m.x + m.w).toBeCloseTo(81.2659125, 9);
+    expect(m.y).toBeCloseTo(17.47, 2);
+    expect(m.y + m.h).toBeCloseTo(27.4, 2);
+    // Filled with the guilloche: a clip of the master outlines holding the K 5.9 ground and the K 29.8 waves.
+    const mono = card.layers[0];
+    expect(mono.kind).toBe('clip');
+    if (mono.kind !== 'clip') return;
+    const cb = bounds(mono.clip);
+    expect(cb.x0).toBeCloseTo(m.x, 2);
+    expect(cb.x1).toBeCloseTo(m.x + m.w, 2);
+    expect(mono.items).toMatchObject([
+      { kind: 'fill', color: '#F1F1EE', k: 5.9 },
+      { kind: 'stroke', color: '#B4B4B1', k: 29.8, width: 0.06, cap: 'round', join: 'round' },
+    ]);
+  });
+
+  it('layers the year on it: 2.4 mm, 7.76 mm wide, centred, cut out by a 0.165 mm halo of bare stock, filled with the same guilloche', () => {
+    expect(CARD_79T.year).toEqual({ size: 2.4, tracking: 0.4, haloMm: 0.165, bandMm: 3 });
+    const y = card.boxes.year;
+    expect(y.right - y.left).toBeCloseTo(7.76, 2);
+    expect((y.left + y.right) / 2).toBeCloseTo(CARD_79T.monogram.centreX, 6);
+    expect(card.layers[1]).toMatchObject({ kind: 'stroke', width: 0.33, color: CARD_79T.stock, k: 0, join: 'round' });
+    expect(card.layers[2]).toMatchObject({ kind: 'fill', color: CARD_79T.stock, k: 0 });
+    expect(card.layers[3]).toMatchObject({ kind: 'clip', items: [{ k: 5.9 }, { k: 29.8 }] });
+    expect(card.layers[1].kind === 'stroke' && card.layers[1].d).toBe(card.layers[3].kind === 'clip' && card.layers[3].clip);
+  });
+
+  it('sets CLAIM CODE · KEEP IT PRIVATE and its line 0.5 mm lower than the column\'s rhythm put them', () => {
+    // build.py: the label's baseline at 44.39747 and the line at 45.34747, both lowered by 0.5 mm.
+    expect(CARD_79T.claim.labelBaseline).toBeCloseTo(44.39747 + 0.5, 9);
+    expect(CARD_79T.claim.lineY).toBeCloseTo(45.34747 + 0.5, 9);
+    const line = strokes(card).find((l) => l.width === 0.1)!;
+    expect(line).toMatchObject({ cap: 'butt' });
+    expect(coords(line.d)).toEqual([
+      [48.005, 45.847],
+      [81.266, 45.847],
+    ]);
+  });
+
+  it('keeps every mark 5.19 mm inside the trim, and every mark but the rule and its legends 8 mm inside; the legends sit on the rule', () => {
+    for (const status of ['VALIDATED', 'PROOF'] as const) {
+      const c = layoutCertificateCard(item(184), status);
+      const [top, bottom] = c.boxes.legends;
+      // The rule, then its two legends, in that order among the layers.
+      const ruleAt = c.layers.findIndex((l) => l.kind === 'stroke' && l.width === 0.1125);
+      for (const [i, { d, pad, layer }] of marks(c.layers).entries()) {
+        const b = bounds(d, pad);
+        const isRule = i === ruleAt;
+        const isLegend = i === ruleAt + 1 || i === ruleAt + 2;
+        if (isRule) {
+          expect(b.x0, status).toBeGreaterThanOrEqual(CERTIFICATE_CARD.safeMm);
+          expect(b.y0, status).toBeGreaterThanOrEqual(CERTIFICATE_CARD.safeMm);
+          expect(b.x1, status).toBeLessThanOrEqual(95 - CERTIFICATE_CARD.safeMm);
+          expect(b.y1, status).toBeLessThanOrEqual(62 - CERTIFICATE_CARD.safeMm);
+        } else if (isLegend) {
+          // On the rule: half its cap height (0.32 mm) outside it, as 79t sets them (the round letters' overshoot besides).
+          expect(layer.kind, status).toBe('fill');
+          expect(Math.min(b.y0, 62 - b.y1), status).toBeGreaterThanOrEqual(5.25 - 0.64 / 2 - 0.03);
+          expect(b.x0, status).toBeGreaterThanOrEqual(Math.min(top.left, bottom.left) - 0.01);
+          expect(b.x1, status).toBeLessThanOrEqual(Math.max(top.right, bottom.right) + 0.01);
+        } else {
+          expect(b.x0, status).toBeGreaterThanOrEqual(8);
+          expect(b.y0, status).toBeGreaterThanOrEqual(8);
+          expect(b.x1, status).toBeLessThanOrEqual(87);
+          expect(b.y1, status).toBeLessThanOrEqual(54);
+        }
+      }
+      // The ORBES CODE's outermost ink (its decor hairline, r 24.04 + 0.04 u) and the GENOME row.
+      const code = c.placements[0];
+      const reach = (24.04 + 0.04) * 0.64;
+      expect(code.xMm + 16 - reach).toBeGreaterThanOrEqual(8);
+      expect(code.yMm + 16 - reach).toBeGreaterThanOrEqual(8);
+      const g = c.placements[1];
+      expect(g.xMm + g.scene.widthMm).toBeLessThanOrEqual(87);
+    }
+  });
+});
+
+describe('certificate card 79t: variable data', () => {
+  it('prints the year of the identity it is given: O27 prints 2027', () => {
+    const a = layoutCertificateCard(item(184), 'VALIDATED');
+    const b = layoutCertificateCard(item(184, { productId: 'O27-J-00184', year: 2027 }), 'VALIDATED');
+    expect(a.layers[2].kind === 'fill' && a.layers[2].d).not.toBe(b.layers[2].kind === 'fill' && b.layers[2].d);
+    const w = (year: string) => cardMetrics(year, { face: 'gravesend', size: 2.4, tracking: 0.4 }).ink;
+    expect(b.boxes.year.right - b.boxes.year.left).toBeCloseTo(w('2027'), 9);
+    expect(() => layoutCertificateCard(item(184, { year: 26 }), 'VALIDATED')).toThrow(CertificateInputError);
+  });
+
+  it('writes line 2 in its four forms: BLUE  ·  SIZE 17, SIZE 17, BLUE, and a size already worded or ONE SIZE as written', () => {
+    expect(variantLine({ modelVariant: 'Blue', size: '17' })).toBe('BLUE  ·  SIZE 17');
+    expect(variantLine({ modelVariant: null, size: '17' })).toBe('SIZE 17');
+    expect(variantLine({ modelVariant: 'Blue', size: null })).toBe('BLUE');
+    expect(variantLine({ modelVariant: '  ', size: '' })).toBe('');
+    expect(sizeLabel('Size 54')).toBe('SIZE 54');
+    expect(sizeLabel('One size')).toBe('ONE SIZE');
+    expect(sizeLabel('17.5')).toBe('SIZE 17.5');
+    expect(variantLine({ modelVariant: 'Bleu nuit', size: 'One size' })).toBe('BLEU NUIT  ·  ONE SIZE');
+  });
+
+  it('draws the three lines at their pitch, and without variant or size moves the material up one pitch; the claim block never moves', () => {
+    const P = CARD_79T.piece;
+    const full = layoutCertificateCard(item(184), 'VALIDATED');
+    expect(full.boxes.lines.map((l) => [l.text, l.baseline])).toEqual([
+      ['MONOLITHE · BRACELET', P.firstBaseline],
+      ['BLUE  ·  SIZE 17', P.firstBaseline + P.pitch],
+      ['925 STERLING SILVER', P.firstBaseline + 2 * P.pitch],
+    ]);
+    expect(full.boxes.lines.every((l) => l.size === 1.2)).toBe(true);
+    const bare = layoutCertificateCard(item(184, { modelVariant: null, size: null }), 'VALIDATED');
+    expect(bare.boxes.lines.map((l) => [l.text, l.baseline])).toEqual([
+      ['MONOLITHE · BRACELET', P.firstBaseline],
+      ['925 STERLING SILVER', P.firstBaseline + P.pitch],
+    ]);
+    expect(bare.boxes.claimCode).toEqual(full.boxes.claimCode);
+    expect(strokes(bare).map((s) => s.d)).toEqual(strokes(full).map((s) => s.d));
+  });
+
+  it('fits long text to the column: shrinks it to 1.0 mm, then cuts it with "...", never past x 81.27', () => {
+    const long = layoutCertificateCard(
+      item(184, { model: 'MONOLITHE ARCHITECTURALE · BRACELET', material: '925 Sterling Silver, rhodium plated, with a satin finish on every face' }),
+      'VALIDATED',
+    );
+    const [model, , material] = long.boxes.lines;
+    expect(model.text).toBe('MONOLITHE ARCHITECTURALE · BRACELET');
+    expect(model.size).toBeLessThan(1.2);
+    expect(model.size).toBeGreaterThanOrEqual(1.0);
+    expect(material.size).toBe(1.0);
+    expect(material.text.endsWith('...')).toBe(true);
+    for (const l of long.boxes.lines) expect(l.right).toBeLessThanOrEqual(CARD_79T.column.x1 + 1e-9);
+  });
+
+  it('removes accents as every printed document does, and drops a character it has no outline for', () => {
+    const c = layoutCertificateCard(item(184, { model: 'Éclat d’été · Bague', modelVariant: 'Émeraude', size: '52' }), 'VALIDATED');
+    expect(c.boxes.lines.map((l) => l.text)).toEqual([toLabelText('Éclat d’été · Bague'), 'EMERAUDE  ·  SIZE 52', '925 STERLING SILVER']);
+    expect(toLabelText('Éclat d’été · Bague')).toBe('ECLAT D ETE · BAGUE');
+  });
+
+  it('clears the monogram with a 6-digit serial', () => {
+    const c = layoutCertificateCard(item(184, { productId: 'O26-J-999999' }), 'VALIDATED');
+    expect(c.boxes.serial.right).toBeLessThan(c.boxes.monogram.x - 4);
+  });
+
+  it('centres any claim code on the column, inside the 8 mm bound and clear of the ORBES CODE', () => {
+    // 79t's code is the column's measure; Helvetica Neue's letters are not all as wide, so the widest (W, M) reach
+    // past the column, still clear of the ring and inside the bound, and the narrowest (1) stay inside it.
+    for (const code of [CLAIM_79T, '7KQ2-M4TD-9XWH', '1111-1111-1111', 'WWWW-MMMM-WWWW', 'AVAT-PYPT-PAPA']) {
+      const c = layoutCertificateCard(item(184, { claimCode: code }), 'VALIDATED');
+      const b = c.boxes.claimCode;
+      expect((b.left + b.right) / 2, code).toBeCloseTo((CARD_79T.column.x0 + CARD_79T.column.x1) / 2, 6);
+      expect(b.left, code).toBeGreaterThan(42.2712 + 1);
+      expect(b.right, code).toBeLessThan(87);
+    }
+  });
+
+  it('says PROOF · LAYOUT NOT VALIDATED in the top rule, in MINT CERTIFICATE\'s place, only for a PROOF layout', () => {
+    const proof = layoutCertificateCard(item(184), 'PROOF');
+    expect(proof.boxes.legends.map((l) => l.text)).toEqual(['PROOF · LAYOUT NOT VALIDATED', 'VERIFY ONLY AT VERIFY.THEORBES.COM']);
+    const [top] = proof.boxes.legends;
+    const rule = coords(strokes(proof).find((l) => l.width === 0.1125)!.d).filter(([x, y]) => y === 5.25 && x > 10 && x < 85).map(([x]) => x).sort((a, b) => a - b);
+    expect(top.left - rule[0]).toBeCloseTo(1.4, 3);
+    expect(layoutCertificateCard(item(184), 'VALIDATED').boxes.legends[0].text).toBe('MINT CERTIFICATE');
+  });
+
+  it('refuses what it cannot draw', () => {
+    expect(() => layoutCertificateCard(item(1, { productId: 'nope' }), 'VALIDATED')).toThrow(CertificateInputError);
+    expect(() => layoutCertificateCard(item(1, { claimCode: '7KQ2-M4TD-9XW' }), 'VALIDATED')).toThrow(CertificateInputError);
+    expect(() => layoutCertificateCard(item(1, { claimCode: '7KQ2-M4TD-9XWU' }), 'VALIDATED')).toThrow(CertificateInputError);
+    expect(() => layoutCertificateCard(item(1, { genome: { ...item(1).genome, fingerprint: 'X' } }), 'VALIDATED')).toThrow(CertificateInputError);
+    expect(() => layoutCertificateCard(item(1, { code: undefined as never }), 'VALIDATED')).toThrow(CertificateInputError);
+  });
+});
+
+/** The card as Chrome drew 79t's front.png: (6, 6) device pixels from its corner, 6 device pixels per CSS pixel. */
+const PX_PER_MM = (6 * 96) / 25.4;
+
+/** A PNG's first pixel of the card's stock from the top-left, along the row and column through (x, y). */
+function cardCorner(img: PNG): { x: number; y: number } {
+  const stock = (i: number) => img.data[i] === 251 && img.data[i + 1] === 251 && img.data[i + 2] === 249;
+  let x = 0;
+  while (x < img.width && !stock((300 * img.width + x) * 4)) x++;
+  let y = 0;
+  while (y < img.height && !stock((y * img.width + 300) * 4)) y++;
+  return { x, y };
+}
+
+/** Rasterise a card SVG into a frame of the reference's size, its corner at `corner`, on the reference's table colour. */
+async function renderLike(svg: string, ref: PNG, corner: { x: number; y: number }): Promise<PNG> {
+  const k = PX_PER_MM;
+  const inner = svg.replace(/^<svg[^>]*>/, '').replace(/<\/svg>\s*$/, '');
+  const [x, y, w, h] = [-corner.x / k, -corner.y / k, ref.width / k, ref.height / k];
+  const frame = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${x} ${y} ${w} ${h}"><rect x="${x}" y="${y}" width="${w}" height="${h}" fill="#D9D8D4"/>${inner}</svg>`;
+  return PNG.sync.read(Buffer.from(await svgToPng(frame, { widthPx: ref.width, dpi: 600 })));
+}
+
+describe('certificate card 79t: its ORBES CODE scans', () => {
+  it('decodes, from the card rendered at 600 dpi, to the piece\'s signed payload', async () => {
+    const decoder = await requireDecoder();
+    const it = item(184);
+    const png = await svgToPng(certificateCardSvg(it, { edge: false }), { widthPx: pixelsFor(95, 600), dpi: 600 });
+    const img = PNG.sync.read(Buffer.from(png));
+    expect(img.width).toBe(2244);
+    const res = decoder.decodeOrbesCode(decoder.rgbaToGray(img.data, img.width, img.height), { readGenome: true });
+    expect(res.ok, res.ok ? '' : `${res.reason} ${res.detail ?? ''}`).toBe(true);
+    if (!res.ok) return;
+    expect(Buffer.from(res.data).equals(Buffer.from(it.code.data))).toBe(true);
+    expect(res.genome?.glyphs).toEqual(it.genome.glyphs);
+  });
+});
+
+describe('certificate card 79t: fidelity to the validated design (test/fixtures/card-79t/79t-mint/front.png)', () => {
+  it('matches 79t: at most 0.5 % of its pixels differ by more than 48/255 in a channel, and every cell of the ORBES CODE reads the same', async () => {
+    const ref = PNG.sync.read(readFileSync(join(FIXTURE, '79t-mint', 'front.png')));
+    // A Chrome screenshot at deviceScaleFactor 6 of 360 × 236 CSS px: the card from (6, 6), 22.68 px per mm.
+    expect([ref.width, ref.height]).toEqual([2160, 1416]);
+    const corner = cardCorner(ref);
+    expect(corner).toEqual({ x: 6, y: 6 });
+    const specimen = { ...CERTIFICATE_SPECIMEN_ITEM, claimCode: CLAIM_79T };
+    // Chrome put each glyph's baseline on a whole device pixel and its origin on a quarter pixel (Skia's glyph
+    // positioning): the type is placed so for the comparison, which then measures the card, not the rasteriser.
+    const svg = onGlyphGrid({ pxPerMm: PX_PER_MM, originPx: corner }, () => certificateCardSvg(specimen, { edge: false }));
+    const mine = await renderLike(svg, ref, corner);
+    const diff = new PNG({ width: ref.width, height: ref.height });
+    let differ = 0;
+    for (let i = 0; i < ref.data.length; i += 4) {
+      let d = 0;
+      for (let c = 0; c < 3; c++) d = Math.max(d, Math.abs(ref.data[i + c] - mine.data[i + c]));
+      if (d > 48) differ++;
+      const v = 255 - Math.min(255, d * 3);
+      diff.data.set([d > 48 ? 255 : v, v, v, 255], i);
+    }
+    mkdirSync(OUT, { recursive: true });
+    writeFileSync(join(OUT, 'card-79t-diff.png'), PNG.sync.write(diff));
+    writeFileSync(join(OUT, 'card-79t-specimen.png'), PNG.sync.write(mine));
+    const share = differ / (ref.width * ref.height);
+    expect(share, `${differ} pixels differ (${(share * 100).toFixed(3)} %): see out/card-79t-diff.png`).toBeLessThanOrEqual(0.005);
+
+    // Every cell of the code, at its centre: dark in both or light in both.
+    const lum = (img: PNG, x: number, y: number) => {
+      const i = (Math.round(y) * img.width + Math.round(x)) * 4;
+      return (img.data[i] + img.data[i + 1] + img.data[i + 2]) / 3;
+    };
+    const { x: cx, y: cy } = { x: corner.x + (CARD_79T.code.x + 16) * PX_PER_MM, y: corner.y + (CARD_79T.code.y + 16) * PX_PER_MM };
+    const u = (0.64 * PX_PER_MM);
+    const wrong: number[] = [];
+    for (let flat = 0; flat < CODE01_TOTAL_CELLS; flat++) {
+      const p = cellCenter(flat);
+      const [x, y] = [cx + p.x * u, cy + p.y * u];
+      if (lum(ref, x, y) < 128 !== lum(mine, x, y) < 128) wrong.push(flat);
+    }
+    expect(wrong).toEqual([]);
+  }, 60_000);
+});
+
 describe('certificate sheet', () => {
-  it('lays ten abutting cards on A4: 2 × 5, 11 mm top and bottom, centred', () => {
-    const l = layoutCertificateSheet(23);
-    expect([l.pageWidthMm, l.pageHeightMm]).toEqual([210, 297]);
-    expect(l.pages.map((p) => p.length)).toEqual([10, 10, 3]);
-    const first = l.pages[0];
-    expect(first[0]).toEqual({ index: 0, xMm: 20, yMm: 11, row: 0, column: 0 });
-    expect(first[1]).toEqual({ index: 1, xMm: 105, yMm: 11, row: 0, column: 1 });
-    expect(first[9]).toEqual({ index: 9, xMm: 105, yMm: 231, row: 4, column: 1 });
-    expect(first[9].yMm + CERTIFICATE_CARD.heightMm).toBe(297 - CERTIFICATE_SHEET.marginYmm);
-    expect(l.pages[2][0]).toEqual({ index: 20, xMm: 20, yMm: 11, row: 0, column: 0 });
+  it('lays eight abutting cards on A4: 2 × 4, the grid centred, 10 mm left and right, 24.5 mm top and bottom', () => {
+    expect(CERTIFICATE_SHEET).toEqual({ page: 'A4', columns: 2, rows: 4, marginYmm: 24.5, footer: { centerYmm: 284, barRightMm: 186, barLabel: 'before' } });
+    const s = layoutCertificateSheet(19);
+    expect(s.pages.map((p) => p.length)).toEqual([8, 8, 3]);
+    expect(s.pages[0].map((p) => [p.xMm, p.yMm])).toEqual([
+      [10, 24.5],
+      [105, 24.5],
+      [10, 86.5],
+      [105, 86.5],
+      [10, 148.5],
+      [105, 148.5],
+      [10, 210.5],
+      [105, 210.5],
+    ]);
+    expect(210 - (105 + 95)).toBe(10);
+    expect(297 - (210.5 + 62)).toBe(24.5);
     expect(() => layoutCertificateSheet(0)).toThrow(CertificateInputError);
   });
 
   it('puts cut marks only outside the grid, on every cut line', () => {
-    const marks = gridCutMarks(20, 11, 2, 5, 85, 55);
-    const segments = [...marks.d.matchAll(/M([\d.]+) ([\d.]+)L([\d.]+) ([\d.]+)/g)].map((m) => m.slice(1).map(Number));
-    expect(segments).toHaveLength(2 * 3 + 2 * 6);
+    const cuts = gridCutMarks(10, 24.5, 2, 4, 95, 62);
+    const segments = [...cuts.d.matchAll(/M([\d.]+) ([\d.]+)L([\d.]+) ([\d.]+)/g)].map((m) => m.slice(1).map(Number));
+    expect(segments).toHaveLength(2 * 3 + 2 * 5);
     for (const [x0, y0, x1, y1] of segments) {
-      const outside = (x: number, y: number) => x < 20 || x > 190 || y < 11 || y > 286;
+      const outside = (x: number, y: number) => x < 10 || x > 200 || y < 24.5 || y > 272.5;
       expect(outside(x0, y0) && outside(x1, y1)).toBe(true);
       expect(Math.hypot(x1 - x0, y1 - y0)).toBeCloseTo(3, 9);
     }
-    expect(() => gridCutMarks(0, 0, 0, 1, 1, 1)).toThrow(RangeError);
   });
 
-  it('keeps the footer clear of the cut marks, of the x = 190 mm cut line and of the unprintable bottom edge', () => {
+  it('keeps the footer at 284 mm, clear of the cut marks, of the x = 200 mm cut line and of the unprintable bottom edge', () => {
     const sheet = layoutCertificateSheet(MAX_CERTIFICATE_ITEMS);
     // The longest caption the renderer writes: PROOF, a two-digit count, the last page.
     const footer = sheetFooter(sheet, sheet.pages.length - 1, 'ORBES CERTIFICATE CARDS · PROOF · 2026-10-02 · 50 CARDS', CERTIFICATE_SHEET.footer);
     expect(footer).toHaveLength(3);
     const [caption, bar, label] = footer.map((st) => bounds(st.d, st.width / 2));
     const cutMarksEnd = CERTIFICATE_SHEET.marginYmm + CERTIFICATE_SHEET.rows * CERTIFICATE_CARD.heightMm + 1 + 3;
+    expect(cutMarksEnd).toBe(276.5);
     for (const b of [caption, bar, label]) {
-      expect(b.y0).toBeGreaterThanOrEqual(cutMarksEnd + 0.8);
-      expect(b.y1).toBeLessThanOrEqual(297 - 3.5);
+      expect(b.y0).toBeGreaterThanOrEqual(cutMarksEnd + 5);
+      expect(b.y1).toBeLessThanOrEqual(297 - 10);
     }
     // One line: the caption, then '10 MM', then the bar, ending short of the right cut line.
     expect(caption.x1).toBeLessThan(label.x0 - 1);
     expect(label.x1).toBeLessThan(bar.x0);
-    expect(bar.x1).toBeLessThan(20 + 2 * CERTIFICATE_CARD.widthMm - 1);
+    expect(bar.x1).toBeLessThan(10 + 2 * CERTIFICATE_CARD.widthMm - 1);
     const unpadded = bounds(footer[1].d);
     expect(unpadded.x1 - unpadded.x0).toBeCloseTo(10, 9);
+  });
+
+  it('cards per request: 50, which make 7 sheets (6 × 8 + 2); 48 make six full sheets', async () => {
+    expect(MAX_CERTIFICATE_ITEMS).toBe(50);
+    expect(layoutCertificateSheet(48).pages.map((p) => p.length)).toEqual([8, 8, 8, 8, 8, 8]);
+    expect(layoutCertificateSheet(50).pages.map((p) => p.length)).toEqual([8, 8, 8, 8, 8, 8, 2]);
   });
 });
 
 describe('certificate PDF', () => {
-  it('one card per page at 85 × 55 mm: valid, vector, no font, no image, no text', async () => {
+  it('one card per page at 95 × 62 mm: valid, vector, no font, no image, no text, no spot colour', async () => {
     const r = await renderCertificatePdf([item(184)], { createdAt: DATE });
     expect(r.contentType).toBe('application/pdf');
-    expect(r.filename).toBe('ORBES-certificate-O26-J-00184-PROOF.pdf');
+    expect(r.filename).toBe('ORBES-certificate-O26-J-00184.pdf');
     const pdf = r.body as Uint8Array;
     const text = latin1(pdf);
     expect(text.startsWith('%PDF-1.4\n')).toBe(true);
     expect(text.trimEnd().endsWith('%%EOF')).toBe(true);
-    expect(text).toMatch(/\/MediaBox \[0 0 240\.944882 155\.905512\]/);
+    expect(text).toMatch(/\/MediaBox \[0 0 269\.291339 175\.748031\]/);
     expect(text).toMatch(/\/Count 1\b/);
-    expect(pdfObjects(pdf)).not.toMatch(/\/Font|\/Subtype\s*\/Image|\/XObject|\/DCTDecode|\/JPXDecode/);
+    expect(pdfObjects(pdf)).not.toMatch(/\/Font|\/Subtype\s*\/Image|\/XObject|\/DCTDecode|\/JPXDecode|\/Separation|\/ExtGState/);
     const content = pdfStreams(pdf);
     expect(content).not.toMatch(/\bBT\b|\bTj\b|\bTJ\b|\bBI\b|\bDo\b/);
-    expect(content).toMatch(/\bS\n/); // stroked lettering
-    expect(content).toMatch(/\bf\n/); // filled glyphs, monogram and panel
+    expect(content).toMatch(/\bS\n/); // the rule, the line, the guilloche
+    expect(content).toMatch(/\bf\n/); // the type, the code, the GENOME
+    expect(content).toMatch(/\bW n\n/); // the monogram's and the year's clips
 
     const three = await renderCertificatePdf([item(1), item(2), item(3)], { createdAt: DATE });
     expect(latin1(three.body)).toMatch(/\/Count 3\b/);
-    expect(three.filename).toBe('ORBES-certificates-2026-10-02-3-card-PROOF.pdf');
+    expect(three.filename).toBe('ORBES-certificates-2026-10-02-3-card.pdf');
   });
 
-  it('the scratch-off panel is a Separation plate, overprinting, drawn last over the code', async () => {
-    const pdf = (await renderCertificatePdf([item(184)], { createdAt: DATE })).body as Uint8Array;
-    const objects = pdfObjects(pdf);
-    expect(objects).toContain('[/Separation /ORBES#20SCRATCH-OFF /DeviceCMYK');
-    expect(objects).toContain(`/C1 [${SCRATCH_OFF_SPOT.cmyk.map((v) => v / 100).join(' ')}]`);
-    expect(objects).toMatch(/\/Type \/ExtGState\n\/OP true\n\/op true\n\/OPM 1/);
-    const content = pdfStreams(pdf);
-    const panelAt = content.indexOf('/GsOP gs');
-    expect(panelAt).toBeGreaterThan(0);
-    expect(content.slice(panelAt)).toMatch(/^\/GsOP gs\n[\s\S]*?\/CS0 cs\n1 scn\nf\n/);
-    // Nothing is painted after the panel: it covers the code.
-    expect(content.slice(panelAt)).not.toMatch(/\bS\n/);
-    expect((content.match(/\/GsOP gs/g) ?? []).length).toBe(1);
-  });
-
-  it('fills the monogram in K, before the panel: five flat outlines beside the GENOME glyphs', async () => {
-    const card = layoutCertificateCard(item(184), 'PROOF');
-    const content = pdfStreams((await renderCertificatePdf([item(184)], { createdAt: DATE })).body as Uint8Array);
-    const beforePanel = content.slice(0, content.indexOf('/GsOP gs'));
-    // Every fill before the panel: one per GENOME primitive, then one per monogram outline.
-    expect((beforePanel.match(/\bf\*?\n/g) ?? []).length).toBe(card.genome.scene.primitives.length + MONOGRAM_PATHS.length);
-    // The first outline starts where the card's path data says (pdfkit writes its M as an m).
-    const [, x, y] = /^M([\d.]+) ([\d.]+)/.exec(card.monogram[0])!;
-    expect(beforePanel).toContain(`${x} ${y} m`);
-    expect(content.slice(content.indexOf('/GsOP gs'))).not.toContain(`${x} ${y} m`);
-  });
-
-  it('black is K only: no RGB anywhere, every process colour C = M = Y = 0', async () => {
+  it('K only: no RGB anywhere, every colour C = M = Y = 0, the greys as K 5.9 and K 29.8, the stock never inked but where the year is cut out', async () => {
     const content = pdfStreams((await renderCertificatePdf([item(184), item(185)], { layout: 'sheet', createdAt: DATE })).body as Uint8Array);
     expect(content).not.toMatch(/DeviceRGB/);
     expect(content).toContain('0 0 0 1 scn');
     expect(content).toContain('0 0 0 1 SCN');
-    for (const m of content.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) (scn|SCN)/g)) expect([m[1], m[2], m[3]]).toEqual(['0', '0', '0']);
+    expect(content).toMatch(/0 0 0 0\.059\d* scn/);
+    expect(content).toMatch(/0 0 0 0\.298\d* SCN/);
+    // The code's decor hairlines keep their tints (K 35 and K 25).
+    expect(content).toContain('0 0 0 0.35 scn');
+    expect(content).toContain('0 0 0 0.25 scn');
+    const tints = new Set<string>();
+    for (const m of content.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) (scn|SCN)/g)) {
+      expect([m[1], m[2], m[3]]).toEqual(['0', '0', '0']);
+      tints.add(Number(m[4]).toFixed(3));
+    }
+    expect([...tints].sort()).toEqual(['0.000', '0.059', '0.250', '0.298', '0.350', '1.000']);
   });
 
-  it('A4 sheets of ten with cut marks and a footer saying PROOF', async () => {
+  it('A4 sheets of eight with cut marks outside the grid and a footer clear of them', async () => {
     const r = await renderCertificatePdf(Array.from({ length: 12 }, (_, i) => item(i + 1)), { layout: 'sheet', createdAt: DATE });
-    expect(r.filename).toBe('ORBES-certificates-2026-10-02-12-sheet-PROOF.pdf');
+    expect(r.filename).toBe('ORBES-certificates-2026-10-02-12-sheet.pdf');
     const text = latin1(r.body);
     expect(text).toMatch(new RegExp(`/MediaBox \\[0 0 ${mmToPt(210).toFixed(6).replace(/0+$/, '')} ${mmToPt(297).toFixed(6).replace(/0+$/, '')}\\]`));
     expect(text).toMatch(/\/Count 2\b/);
     // The title is UTF-16 (it holds '·'): read it without its zero bytes.
-    expect(text.replace(/\0/g, '')).toContain('ORBES CERTIFICATE CARDS · PROOF · 2026-10-02 · 12 CARDS');
+    expect(text.replace(/\0/g, '')).toContain('ORBES CERTIFICATE CARDS · 2026-10-02 · 12 CARDS');
+    expect(text.replace(/\0/g, '')).not.toContain('PROOF');
+    const fifty = await renderCertificatePdf(Array.from({ length: 50 }, (_, i) => item(i + 1)), { layout: 'sheet', createdAt: DATE });
+    expect(latin1(fifty.body)).toMatch(/\/Count 7\b/);
   });
 
-  it('VALIDATED drops every PROOF mention', async () => {
-    const r = await renderCertificatePdf([item(184)], { createdAt: DATE, status: 'VALIDATED' });
-    expect(r.filename).toBe('ORBES-certificate-O26-J-00184.pdf');
-    expect(latin1(r.body)).not.toMatch(/PROOF/);
-    const sheet = await renderCertificatePdf([item(184)], { createdAt: DATE, status: 'VALIDATED', layout: 'sheet' });
-    expect(sheet.filename).toBe('ORBES-certificates-2026-10-02-1-sheet.pdf');
-    const proof = await renderCertificatePdf([item(184)], { createdAt: DATE });
-    expect(latin1(proof.body)).toMatch(/\(ORBES, certificate, PROOF, O26-J-00184\)/);
+  it('a PROOF layout says PROOF in the top rule, the caption and the file names', async () => {
+    const r = await renderCertificatePdf([item(184)], { createdAt: DATE, status: 'PROOF' });
+    expect(r.filename).toBe('ORBES-certificate-O26-J-00184-PROOF.pdf');
+    expect(latin1(r.body)).toMatch(/\(ORBES, certificate, PROOF, O26-J-00184\)/);
+    const sheet = await renderCertificatePdf([item(184)], { createdAt: DATE, status: 'PROOF', layout: 'sheet' });
+    expect(sheet.filename).toBe('ORBES-certificates-2026-10-02-1-sheet-PROOF.pdf');
+    expect(latin1(sheet.body).replace(/\0/g, '')).toContain('ORBES CERTIFICATE CARDS · PROOF · 2026-10-02 · 1 CARDS');
+    const validated = await renderCertificatePdf([item(184)], { createdAt: DATE });
+    expect(latin1(validated.body)).not.toMatch(/PROOF/);
   });
 
   it('is deterministic for the same input and date', async () => {
@@ -422,6 +641,8 @@ describe('certificate PDF', () => {
       const all = latin1(pdf) + pdfStreams(pdf);
       for (const s of spellings(code)) expect(all).not.toContain(s);
     }
+    const svg = certificateCardSvg(item(184, { claimCode: code }));
+    for (const s of spellings(code)) expect(svg).not.toContain(s);
   });
 
   it('bounds a request', async () => {
@@ -444,24 +665,26 @@ describe('certificate PDF', () => {
 });
 
 describe('certificate CSV for variable-data printing', () => {
-  it('productId, model, material, code: quoted, CRLF, values as recorded', () => {
-    const r = renderCertificateCsv([item(184), item(185, { material: 'Or jaune 18 carats, « Soleil »', claimCode: '0000-1111-2222' })], { createdAt: DATE });
+  it('productId, model, variant (line 2 as printed), material, year, code: quoted, CRLF, values as recorded', () => {
+    const r = renderCertificateCsv(
+      [item(184), item(185, { modelVariant: null, size: 'One size', material: 'Or jaune 18 carats, « Soleil »', claimCode: '0000-1111-2222', year: 2027 })],
+      { createdAt: DATE },
+    );
     expect(r.contentType).toBe('text/csv; charset=utf-8; header=present');
-    // Until the brand validates the layout, the print shop's file says PROOF in its name, as the PDFs do.
-    expect(r.filename).toBe('ORBES-certificates-2026-10-02-2-PROOF.csv');
+    expect(r.filename).toBe('ORBES-certificates-2026-10-02-2.csv');
     expect(r.body).toBe(
-      '"productId","model","material","code"\r\n' +
-        '"O26-J-00184","MONOLITHE · RING","925 STERLING SILVER","7KQ2-M4TD-9XWH"\r\n' +
-        '"O26-J-00185","MONOLITHE · RING","Or jaune 18 carats, « Soleil »","0000-1111-2222"\r\n',
+      '"productId","model","variant","material","year","code"\r\n' +
+        '"O26-J-00184","MONOLITHE · BRACELET","BLUE  ·  SIZE 17","925 STERLING SILVER","2026","7KQ2-M4TD-9XWH"\r\n' +
+        '"O26-J-00185","MONOLITHE · BRACELET","ONE SIZE","Or jaune 18 carats, « Soleil »","2027","0000-1111-2222"\r\n',
     );
   });
 
-  it('names the file PROOF until the layout is VALIDATED, its columns unchanged either way', () => {
+  it('names the file PROOF only for a PROOF layout, its columns unchanged either way', () => {
     const proof = renderCertificateCsv([item(184)], { createdAt: DATE, status: 'PROOF' });
     const validated = renderCertificateCsv([item(184)], { createdAt: DATE, status: 'VALIDATED' });
     expect(proof.filename).toBe('ORBES-certificates-2026-10-02-1-PROOF.csv');
     expect(validated.filename).toBe('ORBES-certificates-2026-10-02-1.csv');
-    expect(renderCertificateCsv([item(184)], { createdAt: DATE }).filename).toBe(CERTIFICATE_LAYOUT_STATUS === 'PROOF' ? proof.filename : validated.filename);
+    expect(renderCertificateCsv([item(184)], { createdAt: DATE }).filename).toBe(validated.filename);
     expect(proof.body).toBe(validated.body);
   });
 
@@ -480,24 +703,40 @@ describe('certificate CSV for variable-data printing', () => {
 });
 
 describe('certificate specimen (BRAND §7)', () => {
-  it('shows the card with its panel, and the code the panel covers', () => {
+  it('shows 79t on its stock with the piece of 79t: the ORBES CODE, the GENOME row, the guilloche; no scratch-off panel', () => {
     const svg = certificateCardSvg(CERTIFICATE_SPECIMEN_ITEM);
-    expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="85mm" height="55mm" viewBox="0 0 85 55">/);
-    expect(svg).toContain('data-spot="ORBES SCRATCH-OFF" fill="#A6A6A6"');
-    expect(certificateCardSvg(CERTIFICATE_SPECIMEN_ITEM, { panel: false })).not.toContain('data-layer="scratch-off"');
-    // The monogram, a flat fill in the card's ink, five outlines.
-    const monogram = /<g data-layer="monogram" fill="#0A0A0A">\n((?:<path d="[^"]+"\/>\n)+)<\/g>/.exec(svg);
-    expect(monogram).not.toBeNull();
-    expect(monogram![1].match(/<path /g)).toHaveLength(5);
+    expect(svg).toMatch(/^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" width="95mm" height="62mm" viewBox="0 0 95 62">/);
+    expect(svg).toContain('<rect data-layer="stock" width="95" height="62" fill="#FBFBF9"/>');
+    expect(svg).toContain('<g data-layer="orbes-code"');
+    expect(svg).toContain('<g data-layer="genome"');
+    expect(svg).toContain('stroke="#B4B4B1"');
+    expect(svg).not.toMatch(/scratch|<text|font/i);
+    expect(CERTIFICATE_SPECIMEN_ITEM).toMatchObject({ productId: 'O26-J-00184', model: 'MONOLITHE · BRACELET', modelVariant: 'Blue', size: '17', year: 2026, claimCode: '7KQ2-M4TD-9XWH' });
     expect(CERTIFICATE_SPECIMEN_ITEM.genome.fingerprint).toBe('G1-E1DC-BE52');
+    // The ORBES CODE of render-samples.ts, the one 79t's assets/orbes-code-sample.svg draws.
+    expect(Buffer.from(CERTIFICATE_SPECIMEN_ITEM.code.data).equals(Buffer.from(sampleInput().data))).toBe(true);
+    expect(readFileSync(join(FIXTURE, 'assets', 'orbes-code-sample.svg'), 'utf8')).toBe(readFileSync(join(ASSETS, 'orbes-code-sample.svg'), 'utf8'));
   });
 
-  it('the committed specimen files are byte for byte what scripts/certificate-specimen.ts produces (run it after any change)', async () => {
-    for (const f of await renderCertificateSpecimenFiles()) {
+  it('the committed specimen files are byte for byte what scripts/certificate-specimen.ts produces (run it after any change); the revealed one is gone', async () => {
+    const files = await renderCertificateSpecimenFiles();
+    expect(files.map((f) => f.name)).toEqual(['certificate-card-specimen.svg', 'certificate-card-specimen.pdf']);
+    for (const f of files) {
       const path = join(ASSETS, f.name);
       expect(existsSync(path), `${path} missing: run npx tsx scripts/certificate-specimen.ts`).toBe(true);
       expect(Buffer.from(readFileSync(path)).equals(Buffer.from(f.bytes)), `${f.name} is stale: run npx tsx scripts/certificate-specimen.ts`).toBe(true);
     }
+    expect(existsSync(join(ASSETS, 'certificate-card-specimen-revealed.svg'))).toBe(false);
+  });
+
+  it('keeps 79t\'s record in the repository: build.py with tex.py and its assets, and its front.png', () => {
+    for (const f of ['tex.py', '79t-mint/build.py', '79t-mint/front.png', 'assets/orbes-code-sample.svg', 'assets/genome-row.svg', 'assets/orbes-monogram.svg', 'assets/gravesend-sans-500.woff2']) {
+      expect(existsSync(join(FIXTURE, f)), f).toBe(true);
+    }
+    const build = readFileSync(join(FIXTURE, '79t-mint', 'build.py'), 'utf8');
+    expect(build).toContain("cert = 'MINT CERTIFICATE'");
+    expect(build).toContain("'7MSE-SK34-PWMC'");
+    expect(build).toContain('MB = (42.90, 100.15, 457.32, 416.69)');
   });
 });
 

@@ -144,7 +144,7 @@ describe('card text (render/card-text.ts)', () => {
   it('drops a character the face has no outline for, and draws nothing for an empty run', () => {
     expect(drawable('MONOLITHE ÉTÉ & CO', 'gravesend')).toBe('MONOLITHE T  CO');
     expect(cardText('', { face: 'gravesend', size: 1, tracking: 0, x: 3, baseline: 4 }).d).toBe('');
-    expect(cardRun([], { x: 3, baseline: 4, size: 1, tracking: 0 })).toEqual({ d: '', inkLeft: 3, inkRight: 3, end: 3 });
+    expect(cardRun([], { x: 3, baseline: 4, size: 1, tracking: 0 })).toEqual({ d: '', inkLeft: 3, inkRight: 3, end: 3, drawnRight: 3 });
     expect(cardFmt(-0.0001)).toBe('0');
     expect(cardFmt(1.23456)).toBe('1.235');
   });

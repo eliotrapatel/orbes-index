@@ -263,7 +263,7 @@ export interface CertificateItem {
 export interface CertificateOptions {
   /** 'pdf' (default) or 'csv' (variable-data file for a print shop). */
   format?: 'pdf' | 'csv';
-  /** PDF only: 'card' (default, 85 × 55 mm pages) or 'sheet' (A4, ten cards). */
+  /** PDF only: 'card' (default, 95 × 62 mm pages) or 'sheet' (A4, eight cards). */
   layout?: 'card' | 'sheet';
 }
 
