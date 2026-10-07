@@ -246,9 +246,11 @@ describe('the variants of a model (NOCTURNE N1)', () => {
     const alone = safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name: 'AURORE', type: 'PENDANT', skuPrefix: 'VAR-AUR' })) as ModelJson;
     expect((safeJson(await operator.patch(url(alone.id), { variantLabel: 'Silver', variantSwatch: '#D7D5D0' })) as ModelJson).variantLabel).toBe('Silver');
     expect((safeJson(await operator.patch(url(alone.id), { variantLabel: '', variantSwatch: '' })) as ModelJson).variantLabel).toBeNull();
-    // The list says the same as the page.
+    // The list says the same as the page; the page adds the model's pairs (plan NEXT-NINE, BP-34), which the list leaves out.
     const listed = (safeJson(await auditor.get('/api/admin/models')) as { items: ModelJson[] }).items;
-    expect(listed.find((m) => m.id === catalog.modelId)).toEqual(await read(catalog.modelId));
+    const { pairs, pairsFallback, ...page } = (await read(catalog.modelId)) as ModelJson & { pairs: unknown; pairsFallback: unknown };
+    expect(listed.find((m) => m.id === catalog.modelId)).toEqual(page);
+    expect([pairs, pairsFallback]).toEqual([[], []]);
     expect(listed.find((m) => m.id === blue!.id)!.variantOf).toEqual({ id: catalog.modelId, name: 'MONOLITHE', label: 'Steel' });
   });
 

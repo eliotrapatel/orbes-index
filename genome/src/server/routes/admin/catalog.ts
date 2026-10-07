@@ -13,7 +13,8 @@
  * ADMIN discontinues a model and reinstates it (P-R06: POST …/discontinue and
  * …/reinstate, no body; the console asks for a typed phrase first). Its sizes
  * (plan NEXT-NINE, AC-01): its size kind and each size's fit, read by AUDITOR
- * and set by OPERATOR (GET and PUT …/sizes). The
+ * and set by OPERATOR (GET and PUT …/sizes). Its pairs (plan NEXT-NINE, BP-34, PAIRS WELL WITH): the models its sheet
+ * ends with, set by OPERATOR (PUT …/pairs) and read with the model. The
  * services validate, write and audit; these routes only parse and shape.
  */
 import type { FastifyPluginAsync } from 'fastify';
@@ -26,6 +27,7 @@ import {
   createModelBody,
   createVariantBody,
   emptyBody,
+  modelPairsBody,
   modelSizesBody,
   parse,
   updateCollectionBody,
@@ -166,6 +168,13 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const { id } = parse(catalogParams, request.params);
     const b = parse(modelSizesBody, request.body);
     return sizes.setModelSizes(id, { ...(b.sizeKind !== undefined ? { sizeKind: b.sizeKind } : {}), ...(b.fits !== undefined ? { fits: b.fits } : {}) }, adminActor(request));
+  });
+
+  // BP-34, PAIRS WELL WITH: the models a main model's sheet ends with, in their order (none, or two or three).
+  app.put('/api/admin/models/:id/pairs', async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    const b = parse(modelPairsBody, request.body);
+    return catalog.setPairs(id, b.models, adminActor(request));
   });
 
   // P-R06: ADMIN only, reversible (the console asks for a typed phrase first). Discontinuing also makes the model inactive.

@@ -18,7 +18,7 @@ import type { IssueResult } from '../../src/server/services/issuance.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { readDoc } from '../docs/lexicon.js';
 import { jpegPhoto, SVG_IMAGE } from '../support/images.js';
-import { createAccount, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { createAccount, createCollection, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 interface GalleryImage {
@@ -72,6 +72,8 @@ interface Sheet {
   sizes: string[];
   /** Plan NEXT-NINE, CO-01: THE RELEASES OF THIS MODEL. */
   releases: unknown[];
+  /** Plan NEXT-NINE, BP-34: PAIRS WELL WITH. */
+  pairs: unknown[];
 }
 
 const sha256 = (b: Uint8Array) => createHash('sha256').update(b).digest('hex');
@@ -122,9 +124,11 @@ describe('the lookbook of the models (P-R02)', () => {
   it('keeps every model HIDDEN without an address until the console shows it: nothing public, no lookbook on its results', async () => {
     const m = await read(catalog.modelId);
     expect(m).toMatchObject({ lookbook: 'HIDDEN', slug: null, story: null, specs: null, publishedAt: null, gallery: [] });
-    // The list and the one model answer alike.
+    // The list and the one model answer alike; the one model read alone adds its pairs (plan NEXT-NINE, BP-34: none here).
     const listed = (safeJson(await auditor.get('/api/admin/models')) as { items: ModelJson[] }).items.find((x) => x.id === catalog.modelId);
-    expect(listed).toEqual(m);
+    const { pairs, pairsFallback, ...alone } = m as ModelJson & { pairs: unknown; pairsFallback: unknown };
+    expect(listed).toEqual(alone);
+    expect([pairs, pairsFallback]).toEqual([[], []]);
     expect(await publicList()).toEqual([]);
     const verified = safeJson(await h.client().post('/api/v1/verify', { code: piece.code.data })) as { state: string; product?: Record<string, unknown> };
     expect(verified.state).toMatch(/^AUTHENTIC/);
@@ -335,6 +339,8 @@ describe('the lookbook of the models (P-R02)', () => {
       sizes: [],
       // Plan NEXT-NINE, CO-01: never released, no past release.
       releases: [],
+      // Plan NEXT-NINE, BP-34: no pick, no other model shown in its collection.
+      pairs: [],
     } satisfies Sheet);
     // A RESERVED or HIDDEN model, an unknown or malformed address: one 404, never cached.
     for (const slug of ['zenith', 'nope', 'Not an address', '-x']) {
@@ -582,5 +588,130 @@ describe('THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01): a sheet\'s past re
     const held = await h.ctx.db.selectFrom('live_entries').select('account_id').where('drop_id', '=', ids.held!).where('status', '=', 'SECURED').executeTakeFirstOrThrow();
     await f.live.confirm(held.account_id, ids.held!, { type: 'account', id: held.account_id });
     expect((await releasesOf('halo')).map((r) => r.id)).toEqual([ids.held, ...list.map((r) => r.id)]);
+  });
+});
+
+/**
+ * PAIRS WELL WITH (plan NEXT-NINE of 2026-10-06, §3.7 BP-34): a sheet's `pairs`, the very last section's models
+ * (services/lookbook.ts pairsOf): the main model's picks in their order, each the reader may see, never discontinued;
+ * else up to three models of its collection, one per variant group, never its own, the latest published first; the same
+ * from a variant's address; each card exactly {slug, name, type, variant, imageUrl, reserved}, never a price.
+ */
+describe('PAIRS WELL WITH (plan NEXT-NINE, BP-34): a sheet\'s last section', () => {
+  let h: Harness;
+  let f: LiveFixture;
+  const m: Record<string, string> = {};
+  let titane: Client;
+  let palladium: Client;
+
+  interface Pair {
+    slug: string;
+    name: string;
+    type: string;
+    variant: string | null;
+    imageUrl: string | null;
+    reserved: boolean;
+  }
+  const pairsOf = async (slug: string, c?: Client): Promise<Pair[]> => {
+    const res = await (c ?? h.client()).get(c ? `/api/v1/club/lookbook/${slug}` : `/api/v1/lookbook/${slug}`);
+    expect(res.statusCode, `${slug} ${res.body.slice(0, 200)}`).toBe(200);
+    return (safeJson(res) as { pairs: Pair[] }).pairs;
+  };
+  const slugs = (list: Pair[]) => list.map((p) => p.slug);
+  const pick = (model: string, ids: string[]) => h.ctx.services.catalog.setPairs(m[model]!, ids.map((k) => m[k]!), f.admin);
+
+  /** A model of `collection` shown as `lookbook` at the next minute (its publication's time orders the fallback). */
+  async function model(key: string, name: string, collection: string | null, lookbook: 'PUBLIC' | 'RESERVED' | 'HIDDEN', extra: Record<string, unknown> = {}): Promise<string> {
+    h.clock.advance(60_000);
+    const catalog = h.ctx.services.catalog;
+    const id = (await catalog.createModel({ categoryCode: 'J', collectionId: collection, name, type: 'BRACELET', skuPrefix: `PW-${key.toUpperCase()}` }, f.admin)).id;
+    await catalog.updateModel(id, { lookbook, ...(lookbook === 'HIDDEN' ? {} : { slug: key }), ...extra }, f.admin);
+    m[key] = id;
+    return id;
+  }
+
+  async function owner(pieces: number): Promise<Client> {
+    const { client, email } = await accountClient(h);
+    const a = await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow();
+    await holdPieces(h.ctx.db, a.id, pieces, f.modelId);
+    return client;
+  }
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set(new Date('2026-09-01T09:00:00.000Z'));
+    f = await liveFixtureOn(h.ctx, h.clock);
+    const orbital = await createCollection(h.ctx.db, 'ORBITAL');
+    const other = await createCollection(h.ctx.db, 'SATURN');
+    await model('halo', 'HALO', orbital, 'PUBLIC');
+    m.haloBlue = (await h.ctx.services.catalog.createVariant(m.halo!, { label: 'Blue', swatch: '#16224A', skuPrefix: 'PW-HALOBL', mainLabel: 'Steel', mainSwatch: '#9D9B96' }, f.admin)).id;
+    await h.ctx.services.catalog.updateModel(m.haloBlue, { lookbook: 'PUBLIC', slug: 'halo-blue' }, f.admin);
+    await model('zenith', 'ZENITH', orbital, 'RESERVED', { privateMinTier: 1, priceLabel: '€ 4 800' });
+    await model('orbit', 'ORBIT', orbital, 'PUBLIC');
+    m.orbitGold = (await h.ctx.services.catalog.createVariant(m.orbit!, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'PW-ORBGD', mainLabel: 'Steel', mainSwatch: '#9D9B96' }, f.admin)).id;
+    h.clock.advance(60_000);
+    await h.ctx.services.catalog.updateModel(m.orbitGold, { lookbook: 'PUBLIC', slug: 'orbit-gold' }, f.admin);
+    await model('nocturne', 'NOCTURNE', orbital, 'HIDDEN');
+    await model('eclipse', 'ECLIPSE', orbital, 'PUBLIC');
+    await h.ctx.services.catalog.discontinueModel(m.eclipse!, f.admin);
+    await model('pallas', 'PALLAS', orbital, 'RESERVED', { privateMinTier: 3 });
+    await model('aura', 'AURA', orbital, 'PUBLIC');
+    await model('star', 'STAR', other, 'PUBLIC');
+    m.starRed = (await h.ctx.services.catalog.createVariant(m.star!, { label: 'Red', swatch: '#8A1F1F', skuPrefix: 'PW-STARRD', mainLabel: 'Steel', mainSwatch: '#9D9B96' }, f.admin)).id;
+    await h.ctx.services.catalog.updateModel(m.starRed, { lookbook: 'PUBLIC', slug: 'star-red' }, f.admin);
+    await model('lone', 'LONE', null, 'PUBLIC');
+    // Photographs: STAR in red its reference photograph; AURA only a gallery photograph (its card takes the first).
+    await h.ctx.services.media.setModelImage(m.starRed, { mime: 'image/jpeg', bytes: jpegPhoto(400, 400) }, f.admin);
+    await h.ctx.services.media.addModelGalleryImage(m.aura!, { mime: 'image/jpeg', bytes: jpegPhoto(300, 300) }, f.admin);
+    titane = await owner(1);
+    palladium = await owner(10);
+  });
+  afterAll(() => h?.close());
+
+  it('none picked: up to three models of its collection the reader may see, one per group, never its own, the latest published first', async () => {
+    // Signed out: the PUBLIC ones (ZENITH and PALLAS reserved, NOCTURNE hidden, ECLIPSE discontinued, HALO its own).
+    expect(slugs(await pairsOf('halo'))).toEqual(['aura', 'orbit']);
+    // ORBIT and its gold variant are one card, led by the main model; its own group never, from a variant's address too.
+    expect(await pairsOf('halo-blue')).toEqual(await pairsOf('halo'));
+    // An owner: THE PRIVATE SALON from its tier (ZENITH from TITANE, PALLAS from PALLADIUM); at most three.
+    expect(slugs(await pairsOf('halo', titane))).toEqual(['aura', 'orbit', 'zenith']);
+    expect(slugs(await pairsOf('halo', palladium))).toEqual(['aura', 'pallas', 'orbit']);
+    const zenith = (await pairsOf('halo', titane)).find((p) => p.slug === 'zenith')!;
+    expect(zenith).toEqual({ slug: 'zenith', name: 'ZENITH', type: 'BRACELET', variant: null, imageUrl: null, reserved: true });
+    // The fallback of a model of the other collection: its own group never, nothing else there.
+    expect(await pairsOf('star-red')).toEqual([]);
+    // No collection and no pick: none.
+    expect(await pairsOf('lone')).toEqual([]);
+  });
+
+  it('the picks in their order, each the reader may see: a picked variant by its own address and label, a hidden or discontinued one never', async () => {
+    await pick('halo', ['starRed', 'zenith', 'nocturne']);
+    const out = await pairsOf('halo');
+    expect(out).toEqual([{ slug: 'star-red', name: 'STAR', type: 'BRACELET', variant: 'Red', imageUrl: expect.stringMatching(/^\/api\/v1\/media\/[0-9a-f]{64}$/), reserved: false }]);
+    for (const p of out) expect(Object.keys(p).sort()).toEqual(['imageUrl', 'name', 'reserved', 'slug', 'type', 'variant']);
+    expect(slugs(await pairsOf('halo', titane))).toEqual(['star-red', 'zenith']);
+    // The same from a variant's address (its sheet is its main model's).
+    expect(await pairsOf('halo-blue', titane)).toEqual(await pairsOf('halo', titane));
+    // A main model picked reads without a variant; a discontinued pick never shows.
+    await pick('halo', ['orbit', 'eclipse', 'aura']);
+    const second = await pairsOf('halo');
+    expect(second.map((p) => [p.slug, p.variant])).toEqual([
+      ['orbit', null],
+      ['aura', null],
+    ]);
+    // AURA's card takes the first photograph of its gallery.
+    expect(second[1]!.imageUrl).toMatch(/^\/api\/v1\/media\/[0-9a-f]{64}$/);
+    expect((await h.client().get('/api/v1/lookbook/halo')).body).not.toContain('price');
+  });
+
+  it('a RESERVED pick only through the club from its tier; every pick the reader may not see: the fallback', async () => {
+    await pick('halo', ['pallas', 'zenith']);
+    expect(slugs(await pairsOf('halo', palladium))).toEqual(['pallas', 'zenith']);
+    expect(slugs(await pairsOf('halo', titane))).toEqual(['zenith']);
+    // Signed out, neither shows: the collection's models instead.
+    expect(slugs(await pairsOf('halo'))).toEqual(['aura', 'orbit']);
+    await pick('halo', ['nocturne', 'eclipse']);
+    expect(slugs(await pairsOf('halo'))).toEqual(['aura', 'orbit']);
+    await pick('halo', []);
   });
 });

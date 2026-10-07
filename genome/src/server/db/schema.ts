@@ -1153,6 +1153,19 @@ export interface AccountSizesTable {
 }
 
 /**
+ * A model's pairs (migration 0031, plan NEXT-NINE BP-34, PAIRS WELL WITH): the models its sheet shows at its very end,
+ * in their order (`position` 1..3), each once, never itself. Set on a main model or a model alone (services/catalog.ts
+ * setPairs: 0, 2 or 3 rows, never a model of its own variant group).
+ */
+export interface ModelPairsTable {
+  model_id: string;
+  position: number;
+  paired_model_id: string;
+  created_at: TimestampDefault;
+  created_by: string | null;
+}
+
+/**
  * The stock ledger (migration 0022): a delta of a SKU at a location and why, append-only. The balance of a (SKU,
  * location) is the sum of its deltas (services/stock.ts).
  */
@@ -1704,6 +1717,7 @@ export interface Database {
   house_guarantees: HouseGuaranteesTable;
   guarantee_settings: GuaranteeSettingsTable;
   account_sizes: AccountSizesTable;
+  model_pairs: ModelPairsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
   segments: SegmentsTable;

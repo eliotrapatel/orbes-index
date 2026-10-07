@@ -1598,3 +1598,13 @@ export const modelSizesBody = body({
   sizeKind: z.enum(SIZE_KINDS).nullable().optional(),
   fits: z.array(z.strictObject({ skuId: uuid, fitMinMm: fitMm, fitMaxMm: fitMm })).max(200, 'At most 200 sizes').optional(),
 }).refine((b) => b.sizeKind !== undefined || (b.fits !== undefined && b.fits.length > 0), { message: 'Give a size type or a fit' });
+
+// ── A model's pairs (plan NEXT-NINE, BP-34) ────────────────────────────────
+
+/**
+ * PUT /api/admin/models/:id/pairs: the models its sheet ends with (PAIRS WELL WITH), in their order: none, or two or
+ * three (the service refuses one, and a model picked twice).
+ */
+export const modelPairsBody = body({
+  models: z.array(uuid).max(3, 'At most three models'),
+});

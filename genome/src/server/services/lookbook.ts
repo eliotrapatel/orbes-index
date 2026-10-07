@@ -39,6 +39,14 @@
  * MediaService's, which stores its photographs). The
  * lists carry no story (the verify client refuses answers over 256 000
  * characters): a sheet does.
+ *
+ * THE RELEASES OF THIS MODEL (plan NEXT-NINE of 2026-10-06, §3.6 CO-01): a sheet carries the past releases of its
+ * model's whole group (`releases`), by THE RELEASES' PAST's rule (services/past-releases.ts modelReleases), each only
+ * its id, kind, opening and variant, the same whichever dot is asked.
+ *
+ * PAIRS WELL WITH (§3.7 BP-34): a sheet carries the models its very last section shows (`pairs`, `pairsOf`): the two or
+ * three the console picked on its main model (`model_pairs`, CatalogService.setPairs), each the reader may see, else up
+ * to three of its collection; never a price.
  */
 import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
@@ -288,6 +296,89 @@ export interface LookbookSheet {
    * model never released (services/past-releases.ts modelReleases).
    */
   releases: ModelRelease[];
+  /**
+   * Plan NEXT-NINE, BP-34 (PAIRS WELL WITH): the models its very last section shows, the same whichever dot is asked
+   * (`pairsOf`); empty: no section.
+   */
+  pairs: ModelPair[];
+}
+
+/** The fallback of PAIRS WELL WITH (BP-34): at most this many models of the sheet's collection when none is picked or shown. */
+export const PAIRS_FALLBACK_MAX = 3;
+
+/** A card of PAIRS WELL WITH (BP-34): a model the reader may see, its sheet's address, its photograph; no price, no dots. */
+export interface ModelPair {
+  slug: string;
+  name: string;
+  type: string;
+  /** Its label among its variants when the model shown is itself a variant (« Blue »: MONOLITHE IN BLUE); else null. */
+  variant: string | null;
+  /** Its reference photograph, else the first of its gallery; null without either. */
+  imageUrl: string | null;
+  /** A model of THE PRIVATE SALON (RESERVED), shown to an owner of its tier. */
+  reserved: boolean;
+}
+
+/**
+ * PAIRS WELL WITH (plan NEXT-NINE, BP-34) of the sheet of the group led by `rootId` (its main model, or a model alone),
+ * for a reader of `tier` (0 signed out, or an account that holds no piece): (a) the picks of the main model
+ * (`model_pairs`), in their order, each the reader may see (PUBLIC; RESERVED only from its `private_min_tier`, an owner),
+ * never discontinued nor without an address, `variant` set only when the pick is itself a variant; (b) when none of them
+ * shows, the models of the sheet's collection (`collectionId`) by the same rule, one per variant group (its lead: the
+ * main model, else its first variant shown), never the sheet's own group, the latest published first, then by name, at
+ * most PAIRS_FALLBACK_MAX; a model with no collection gets none.
+ */
+export async function pairsOf(db: Db, rootId: string, collectionId: string | null, tier: number): Promise<ModelPair[]> {
+  const shown: LookbookState[] = tier >= 1 ? ['PUBLIC', 'RESERVED'] : ['PUBLIC'];
+  const visible = () =>
+    db
+      .selectFrom('models as m')
+      .select((eb) => [
+        'm.id',
+        'm.slug',
+        'm.name',
+        'm.type',
+        'm.lookbook',
+        'm.image_sha256',
+        'm.variant_of',
+        'm.variant_label',
+        'm.created_at',
+        'm.published_at',
+        eb.selectFrom('model_images as mi').select('mi.sha256').whereRef('mi.model_id', '=', 'm.id').orderBy('mi.position').limit(1).as('first_image'),
+      ])
+      .where('m.slug', 'is not', null)
+      .where('m.discontinued_at', 'is', null)
+      .where('m.lookbook', 'in', shown)
+      .where((eb) => eb.or([eb('m.lookbook', '<>', 'RESERVED'), eb('m.private_min_tier', '<=', tier)]));
+  type Row = Awaited<ReturnType<ReturnType<typeof visible>['execute']>>[number];
+  const card = (r: Row): ModelPair => ({
+    slug: r.slug!,
+    name: r.name,
+    type: r.type,
+    variant: r.variant_of !== null ? r.variant_label : null,
+    imageUrl: mediaUrl(r.image_sha256) ?? mediaUrl(r.first_image),
+    reserved: r.lookbook === 'RESERVED',
+  });
+  const picks = await visible()
+    .innerJoin('model_pairs as p', 'p.paired_model_id', 'm.id')
+    .where('p.model_id', '=', rootId)
+    .orderBy('p.position')
+    .execute();
+  if (picks.length > 0) return picks.map(card);
+  if (collectionId === null) return [];
+  const rows = await visible()
+    .where('m.collection_id', '=', collectionId)
+    .where('m.id', '<>', rootId)
+    .where((eb) => eb.or([eb('m.variant_of', 'is', null), eb('m.variant_of', '<>', rootId)]))
+    .execute();
+  const groups = new Map<string, Row[]>();
+  for (const r of rows) groups.set(r.variant_of ?? r.id, [...(groups.get(r.variant_of ?? r.id) ?? []), r]);
+  const latest = (g: readonly Row[]) => Math.max(...g.map((r) => (r.published_at ? r.published_at.getTime() : -Infinity)));
+  return [...groups.entries()]
+    .map(([root, g]) => ({ lead: sortGroup(g, root)[0]!, at: latest(g) }))
+    .sort((a, b) => b.at - a.at || (a.lead.name < b.lead.name ? -1 : a.lead.name > b.lead.name ? 1 : 0) || (a.lead.slug! < b.lead.slug! ? -1 : 1))
+    .slice(0, PAIRS_FALLBACK_MAX)
+    .map(({ lead }) => card(lead));
 }
 
 export interface LookbookServiceDeps {
@@ -360,12 +451,15 @@ export class LookbookService {
     const root = m.variant_of ?? m.id;
     const group = sortGroup(await this.sheetRows(tier).where((eb) => eb.or([eb('m.id', '=', root), eb('m.variant_of', '=', root)])).execute(), root);
     const ids = group.length > 1 ? group.map((g) => g.id) : [m.id];
-    // CO-01: the releases of the whole group, the variants the reader may not see included (a past release is public).
-    const groupIds = (await this.db.selectFrom('models').select('id').where((eb) => eb.or([eb('id', '=', root), eb('variant_of', '=', root)])).execute()).map((r) => r.id);
-    const [galleries, sizes, releases] = await Promise.all([
+    // CO-01: the releases of the whole group, the variants the reader may not see included (a past release is public);
+    // BP-34: the pairs of its main model, the fallback from the main model's collection.
+    const whole = await this.db.selectFrom('models').select(['id', 'collection_id']).where((eb) => eb.or([eb('id', '=', root), eb('variant_of', '=', root)])).execute();
+    const collectionId = whole.find((g) => g.id === root)?.collection_id ?? null;
+    const [galleries, sizes, releases, pairs] = await Promise.all([
       this.db.selectFrom('model_images').select(['model_id', 'sha256', 'alt']).where('model_id', 'in', ids).orderBy('model_id').orderBy('position').execute(),
       skuSizes(this.db, group.map((g) => g.id)),
-      modelReleases(this.db, groupIds, this.clock()),
+      modelReleases(this.db, whole.map((g) => g.id), this.clock()),
+      pairsOf(this.db, root, collectionId, tier),
     ]);
     const galleryOf = (r: SheetRow): LookbookImage[] =>
       // The cover is shown once: a gallery photograph made the reference photograph since is left out here.
@@ -410,6 +504,7 @@ export class LookbookService {
       })),
       sizes: sizesOnce(group.flatMap((g) => sizes.get(g.id) ?? [])),
       releases,
+      pairs,
     };
     return { modelId: m.id, sheet, variantIds: Object.fromEntries(dotted(group).map((g) => [g.slug!, g.id])) };
   }

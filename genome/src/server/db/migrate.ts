@@ -41,6 +41,7 @@ import * as m0027 from './migrations/0027_tier_grants.js';
 import * as m0028 from './migrations/0028_yearly_care.js';
 import * as m0029 from './migrations/0029_house_guarantee.js';
 import * as m0030 from './migrations/0030_account_sizes.js';
+import * as m0031 from './migrations/0031_model_pairs.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
@@ -74,6 +75,7 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0028_yearly_care': m0028,
   '0029_house_guarantee': m0029,
   '0030_account_sizes': m0030,
+  '0031_model_pairs': m0031,
 });
 
 class StaticMigrationProvider implements MigrationProvider {

@@ -50,6 +50,11 @@
  * and its colour change through the same edit (`model.update`), together; a variant and a model with variants keep
  * theirs (409 VARIANT_LABEL_REQUIRED), a label is unique within a model and its variants (409 VARIANT_LABEL_TAKEN).
  *
+ * PAIRS WELL WITH (plan NEXT-NINE of 2026-10-06, §3.7 BP-34, migration 0031): a main model or a model alone picks the
+ * two or three models its sheet ends with (`setPairs`, audited `model.pairs`), in their order, from any collection; a
+ * variant's sheet is its main model's, so are its pairs. Its record read alone carries them (`pairs`, each with whether
+ * the sheet shows it) and what the sheet shows without them (`pairsFallback`).
+ *
  * DISCONTINUED (P-R06, migration 0019): an ADMIN closes a model's edition
  * (`discontinueModel`, audited `model.discontinue`) and may open it again
  * (`reinstateModel`, `model.reinstate`). Discontinuing sets
@@ -70,7 +75,7 @@ import { conflict, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import type { CategoryRegistry } from './categories.js';
-import { normalizeMinTier, normalizePriceLabel, normalizeSlug, normalizeSpecs, normalizeStory, plainText, storyFingerprint } from './lookbook.js';
+import { normalizeMinTier, normalizePriceLabel, normalizeSlug, normalizeSpecs, normalizeStory, pairsOf, plainText, storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES } from './orders.js';
 
@@ -154,7 +159,36 @@ export interface ModelRecord {
   /** N1: a main model's variants, in the order they were added; none for a variant, nor for a model alone. */
   variants: ModelVariantRecord[];
   createdAt: Date;
+  /**
+   * Plan NEXT-NINE, BP-34 (PAIRS WELL WITH), on one model read alone (getModel): the models its sheet ends with, in their
+   * order, as picked on its main model (a variant's record carries its main model's, read only); none picked: empty.
+   */
+  pairs?: ModelPairRecord[];
+  /**
+   * BP-34: what the sheet shows when no pick is shown, up to three models of its collection as an owner of the highest
+   * tier reads them (services/lookbook.ts pairsOf); empty: nothing (no other model shown in its collection, or none).
+   */
+  pairsFallback?: { name: string; label: string | null }[];
 }
+
+/**
+ * A model picked for PAIRS WELL WITH (BP-34), as the console lists it: its place, the model (its name and label among
+ * its variants), its place in the lookbook and whether the sheet shows it: to EVERYONE (PUBLIC), to the owners of the
+ * salon's tier (SALON: RESERVED), or not (HIDDEN; DISCONTINUED; NO_ADDRESS).
+ */
+export interface ModelPairRecord {
+  position: number;
+  id: string;
+  name: string;
+  label: string | null;
+  swatch: string | null;
+  lookbook: LookbookState;
+  slug: string | null;
+  shown: 'EVERYONE' | 'SALON' | 'HIDDEN' | 'DISCONTINUED';
+}
+
+/** PAIRS WELL WITH (BP-34): a model picks none, or two or three models. */
+export const MODEL_PAIRS_MAX = 3;
 
 /** A variant of a model as its main model's page lists it (VARIANTS). */
 export interface ModelVariantRecord {
@@ -400,7 +434,73 @@ export class CatalogService {
     const related = await this.modelQuery()
       .where((eb) => (mainId ? eb.or([eb('m.variant_of', '=', id), eb('m.id', '=', mainId)]) : eb('m.variant_of', '=', id)))
       .execute();
-    return toModelRecord(row, (await this.galleries(id)).get(id) ?? [], related);
+    // BP-34: the pairs of its main model (a variant's sheet is its main model's), and what the sheet shows without them.
+    const root = mainId ?? id;
+    const rootCollection = mainId ? (related.find((r) => r.id === mainId)?.collection_id ?? null) : row.collection_id;
+    const [pairs, fallback] = await Promise.all([this.pairRecords(root), pairsOf(this.db, root, rootCollection, 3)]);
+    return {
+      ...toModelRecord(row, (await this.galleries(id)).get(id) ?? [], related),
+      pairs,
+      pairsFallback: fallback.map((f) => ({ name: f.name, label: f.variant })),
+    };
+  }
+
+  /** BP-34: the models `modelId` (a main model or a model alone) pairs with, in their order, with whether its sheet shows each. */
+  private async pairRecords(modelId: string): Promise<ModelPairRecord[]> {
+    const rows = await this.db
+      .selectFrom('model_pairs as p')
+      .innerJoin('models as m', 'm.id', 'p.paired_model_id')
+      .select(['p.position', 'm.id', 'm.name', 'm.variant_label', 'm.variant_swatch', 'm.lookbook', 'm.slug', 'm.discontinued_at'])
+      .where('p.model_id', '=', modelId)
+      .orderBy('p.position')
+      .execute();
+    return rows.map((r) => ({
+      position: r.position,
+      id: r.id,
+      name: r.name,
+      label: r.variant_label,
+      swatch: r.variant_swatch,
+      lookbook: r.lookbook,
+      slug: r.slug,
+      shown: r.discontinued_at ? 'DISCONTINUED' : r.lookbook === 'HIDDEN' || !r.slug ? 'HIDDEN' : r.lookbook === 'RESERVED' ? 'SALON' : 'EVERYONE',
+    }));
+  }
+
+  /**
+   * PAIRS WELL WITH (plan NEXT-NINE, BP-34; PUT /api/admin/models/:id/pairs): the models a main model or a model alone
+   * ends its sheet with, in their order: none, or two or three (400 VALIDATION_FAILED otherwise), each once (400), never
+   * the model itself nor one of its variants (409 PAIR_SAME_MODEL), each a known model (404 MODEL_NOT_FOUND). A variant's
+   * pairs are its main model's (409 MODEL_IS_VARIANT). The model is locked while its rows are replaced, in one
+   * transaction; no change writes nothing. Audited `model.pairs` with the ids before and after.
+   */
+  async setPairs(modelId: string, ids: readonly string[], actor: Actor): Promise<ModelRecord> {
+    if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw notFound('Model', 'MODEL_NOT_FOUND');
+    const id = modelId.toLowerCase();
+    if (!Array.isArray(ids)) throw validationError('Pick two or three models, or none.');
+    const after = ids.map((x) => (typeof x === 'string' ? x.toLowerCase() : ''));
+    if (after.length === 1 || after.length > MODEL_PAIRS_MAX) throw validationError('Pick two or three models, or none: the sheet then shows other models of its collection.');
+    if (after.some((x) => !UUID_RE.test(x))) throw notFound('Model', 'MODEL_NOT_FOUND');
+    if (new Set(after).size !== after.length) throw validationError('Each model is picked once.');
+    await inTransaction(this.db, async (tx) => {
+      const m = await tx.selectFrom('models').select(['id', 'variant_of']).where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!m) throw notFound('Model', 'MODEL_NOT_FOUND');
+      if (m.variant_of) throw conflict('MODEL_IS_VARIANT', 'A variant’s pairs are set on its main model: its sheet is the same.');
+      const picked = after.length ? await tx.selectFrom('models').select(['id', 'variant_of']).where('id', 'in', after).execute() : [];
+      if (picked.length !== after.length) throw notFound('Model', 'MODEL_NOT_FOUND');
+      if (picked.some((p) => p.id === id || p.variant_of === id)) throw conflict('PAIR_SAME_MODEL', 'A model pairs with another model, not with itself or one of its variants.');
+      const before = (await tx.selectFrom('model_pairs').select('paired_model_id').where('model_id', '=', id).orderBy('position').execute()).map((r) => r.paired_model_id);
+      if (before.length === after.length && before.every((x, i) => x === after[i])) return;
+      await tx.deleteFrom('model_pairs').where('model_id', '=', id).execute();
+      if (after.length) {
+        const now = this.clock();
+        await tx
+          .insertInto('model_pairs')
+          .values(after.map((paired, i) => ({ model_id: id, position: i + 1, paired_model_id: paired, created_at: now, created_by: adminIdOf(actor) })))
+          .execute();
+      }
+      await this.audit.record({ actor, action: 'model.pairs', targetType: 'model', targetId: id, details: { before, after } }, tx);
+    });
+    return this.getModel(id);
   }
 
   /** The galleries of every model (or of one), each in its order. */

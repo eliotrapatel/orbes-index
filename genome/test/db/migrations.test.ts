@@ -13,7 +13,7 @@ const EXPECTED_TABLES = [
   'bench_items', 'care_requests', 'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps',
   'client_conversations', 'client_messages', 'club_program_settings', 'club_tiers', 'codes', 'collections', 'credit_uses', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops',
   'event_journal', 'genomes', 'guarantee_settings', 'house_guarantees', 'invoices', 'live_access_models', 'live_addons', 'live_entries', 'live_entry_addons', 'live_interest', 'live_messages',
-  'live_tier_windows', 'media_objects', 'model_images', 'models', 'order_alert_settings', 'order_events', 'orders', 'ownership', 'ownership_certificates',
+  'live_tier_windows', 'media_objects', 'model_images', 'model_pairs', 'models', 'order_alert_settings', 'order_events', 'orders', 'ownership', 'ownership_certificates',
   'ownership_transfers', 'product_status_history', 'products', 'release_answers', 'retailers', 'returns', 'revocations', 'scan_daily_stats', 'scan_events',
   'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shipping_rates', 'shop_requests', 'sku_thresholds', 'skus', 'stock_locations', 'stock_movements',
   'tier_grants', 'warranties',
@@ -246,6 +246,12 @@ describe('migrations', () => {
     expect(has(/INDEX guarantee_settings_updated_by_idx ON public\.guarantee_settings USING btree \(updated_by\)$/)).toBe(true);
     expect(has(/UNIQUE INDEX drop_entries_guarantee_key ON public\.drop_entries USING btree \(guarantee_id\)$/)).toBe(true);
     expect(has(/UNIQUE INDEX live_entries_guarantee_key ON public\.live_entries USING btree \(guarantee_id\)$/)).toBe(true);
+    // 0031: a model's pairs. One per model and place, a model paired once per model; every foreign key at the head of an
+    // index.
+    expect(has(/UNIQUE INDEX model_pairs_pkey ON public\.model_pairs USING btree \(model_id, "?position"?\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX model_pairs_model_paired_key ON public\.model_pairs USING btree \(model_id, paired_model_id\)$/)).toBe(true);
+    expect(has(/INDEX model_pairs_paired_model_idx ON public\.model_pairs USING btree \(paired_model_id\)$/)).toBe(true);
+    expect(has(/INDEX model_pairs_created_by_idx ON public\.model_pairs USING btree \(created_by\)$/)).toBe(true);
   });
 
   /**
@@ -2402,7 +2408,8 @@ describe('migrations', () => {
     await use();
     await expect(run(`DELETE FROM credit_uses WHERE id = '${open}'`)).rejects.toSatisfy(isGuardViolation);
     // The down step refuses while a GIFT order or a credit use exists: neither can be removed, so this database stays at
-    // 0027 (0030, 0029 and 0028, which hold nothing here, go down first).
+    // 0027 (0031, 0030, 0029 and 0028, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0031_model_pairs']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0029_house_guarantee']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0028_yearly_care']);
@@ -2413,7 +2420,7 @@ describe('migrations', () => {
     await run(`DELETE FROM credit_uses`);
     await run(`ALTER TABLE credit_uses ENABLE TRIGGER credit_uses_no_delete`);
     await run(`DELETE FROM orders WHERE channel = 'GIFT'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee', '0030_account_sizes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee', '0030_account_sizes', '0031_model_pairs']);
   });
 
   /** What names an object of 0028 in a snapshot: its table and its objects. */
@@ -2509,7 +2516,8 @@ describe('migrations', () => {
     await run(`UPDATE care_requests SET status = 'CANCELLED', cancelled_at = now(), cancelled_by = 'account' WHERE id = '${other}'`);
     await insert({ year: '2027' });
     // The down step refuses while a request or a YEARLY_CARE record exists: neither can be removed, so this database stays at
-    // 0028 (0030 and 0029, which hold nothing here, go down first).
+    // 0028 (0031, 0030 and 0029, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0031_model_pairs']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0029_house_guarantee']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0028_yearly_care cannot be rolled back: 3 care requests and 1 yearly care records exist/);
@@ -2519,7 +2527,7 @@ describe('migrations', () => {
     await run(`DELETE FROM care_requests`);
     await run(`ALTER TABLE care_requests ENABLE TRIGGER care_requests_no_delete`);
     await run(`DELETE FROM service_records WHERE type = 'YEARLY_CARE'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee', '0030_account_sizes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee', '0030_account_sizes', '0031_model_pairs']);
   });
 
   /** What names an object of 0029 in a snapshot: its two tables, the entries' new columns and constraints, and its indexes. */
@@ -2669,7 +2677,8 @@ describe('migrations', () => {
     const request = (await sql<{ id: string }>`INSERT INTO shop_requests (account_id, model_id, status, handled_at, outcome) VALUES (${account}, ${model}, 'CLOSED', now(), 'ACCEPTED') RETURNING id`.execute(t.db)).rows[0].id;
     await check(order({ channel: `'SALON'`, drop_entry_id: 'NULL', drop_id: 'NULL', shop_request_id: `'${request}'`, piece: '2' }), 'a second piece of a salon order', 'orders_source');
     // The down step refuses while a DRAW order of a second piece exists: it cannot be removed, so this database stays at 0029
-    // (0030, which holds nothing here, goes down first).
+    // (0031 and 0030, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0031_model_pairs']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0029_house_guarantee cannot be rolled back: 1 draw orders of a second piece or more exist/);
     expect((await migrationStatus(t.db)).find((m) => m.name === '0029_house_guarantee')?.executedAt).toBeDefined();
@@ -2678,7 +2687,7 @@ describe('migrations', () => {
     await run(`DELETE FROM drop_entries WHERE drop_id IN ('${drop}', '${other_drop}')`);
     await run(`DELETE FROM house_guarantees`);
     await run(`DELETE FROM guarantee_settings`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs']);
   });
 
   /** What names an object of 0030 in a snapshot: its table, the models' size kind, the SKUs' fit and the requests' size. */
@@ -2713,7 +2722,7 @@ describe('migrations', () => {
       expect(added.some((o) => c.test(o)), String(c)).toBe(true);
     }
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs']);
     expect(await snapshot()).toEqual(latest);
     // The trigger of the same name guards the size in 0030 and not in 0029: its function's arguments say so.
     const args = async () =>
@@ -2721,9 +2730,10 @@ describe('migrations', () => {
         await sql<{ args: string }>`SELECT encode(tgargs, 'escape') AS args FROM pg_trigger WHERE tgname = 'shop_requests_immutable_identity'`.execute(t.db)
       ).rows[0]!.args.split('\\000').filter(Boolean);
     expect(await args()).toEqual(['id', 'account_id', 'model_id', 'created_at', 'note', 'size_label']);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0031_model_pairs']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
     expect(await args()).toEqual(['id', 'account_id', 'model_id', 'created_at', 'note']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs']);
   });
 
   it('0030: a size of each kind in its range and step, once per account and kind, cleared by deleting it; a model\'s size kind one of the four; a size\'s fit both or neither, from 1 to 1 000, never reversed; a request\'s size of 1 to 100 characters, trimmed, never changed', async () => {
@@ -2783,6 +2793,60 @@ describe('migrations', () => {
     await run(`DELETE FROM skus WHERE model_id = '${model}'`);
     await run(`DELETE FROM models WHERE id = '${model}'`);
     await run(`DELETE FROM account_sizes`);
+  });
+
+  it('0031 adds model_pairs, and nothing else; down drops it and restores 0030 exactly, and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0031_model_pairs');
+    const added = withIt.filter((o) => !before.includes(o));
+    expect(added.filter((o) => !/\bmodel_pairs\w*\b/.test(o))).toEqual([]);
+    expect(before.filter((o) => o.includes('model_pairs'))).toEqual([]);
+    expect(withIt.filter((o) => !o.includes('model_pairs'))).toEqual(before);
+    expect(added.filter((o) => o.startsWith('table model_pairs ')).map((o) => o.split(' ')[2])).toEqual(['created_at', 'created_by', 'model_id', 'paired_model_id', 'position']);
+    for (const c of [
+      /^constraint model_pairs model_pairs_model_id_fkey FOREIGN KEY \(model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint model_pairs model_pairs_paired_model_id_fkey FOREIGN KEY \(paired_model_id\) REFERENCES models\(id\) ON DELETE RESTRICT$/,
+      /^constraint model_pairs model_pairs_created_by_fkey FOREIGN KEY \(created_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint model_pairs model_pairs_pkey PRIMARY KEY \(model_id, "?position"?\)$/,
+      /^constraint model_pairs model_pairs_model_paired_key UNIQUE \(model_id, paired_model_id\)$/,
+      /^constraint model_pairs model_pairs_not_self CHECK \(\(paired_model_id <> model_id\)\)$/,
+      /^constraint model_pairs model_pairs_position_check CHECK /,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0031_model_pairs']);
+    expect(await snapshot()).toEqual(latest);
+  });
+
+  it('0031: a pair in place 1 to 3, once per model and place, a model paired once per model, never with itself; its models and author kept (RESTRICT)', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (24, 'Q', 'Pair checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const model = async (name: string) => (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix) VALUES (24, ${name}, 'RING', ${`PAIR-${name}`}) RETURNING id`.execute(t.db)).rows[0].id;
+    const [a, b, c, d] = [await model('A'), await model('B'), await model('C'), await model('D')];
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email, email_normalized, password_hash, role) VALUES ('pairs@orbes.test', 'pairs@orbes.test', 'scrypt$x', 'OPERATOR') RETURNING id`.execute(t.db)).rows[0].id;
+    const pair = (m: string, position: number, paired: string, by = 'NULL') => run(`INSERT INTO model_pairs (model_id, position, paired_model_id, created_by) VALUES ('${m}', ${position}, '${paired}', ${by})`);
+    await check(pair(a, 0, b), 'place 0', 'model_pairs_position_check');
+    await check(pair(a, 4, b), 'place 4', 'model_pairs_position_check');
+    await check(pair(a, 1, a), 'itself', 'model_pairs_not_self');
+    await pair(a, 1, b, `'${admin}'`);
+    await pair(a, 2, c);
+    await pair(a, 3, d);
+    await expect(pair(a, 1, d)).rejects.toSatisfy((e) => isUniqueViolation(e, 'model_pairs_pkey'));
+    await run(`DELETE FROM model_pairs WHERE model_id = '${a}' AND position = 3`);
+    await expect(pair(a, 3, b)).rejects.toSatisfy((e) => isUniqueViolation(e, 'model_pairs_model_paired_key'));
+    // Another model may pair with the same ones; a model's pairs keep it, the model paired and the author (RESTRICT).
+    await pair(b, 1, c);
+    await pair(b, 2, a);
+    for (const q of [`DELETE FROM models WHERE id = '${a}'`, `DELETE FROM models WHERE id = '${c}'`, `DELETE FROM admin_users WHERE id = '${admin}'`]) {
+      await expect(run(q), q).rejects.toSatisfy(isForeignKeyViolation);
+    }
+    await expect(run(`INSERT INTO model_pairs (model_id, position, paired_model_id) VALUES ('${c}', 1, '00000000-0000-4000-8000-000000000000')`)).rejects.toSatisfy(isForeignKeyViolation);
+    // Cleared by hand for the roll-backs that follow.
+    await run(`DELETE FROM model_pairs`);
+    await run(`DELETE FROM models WHERE category_id = 24`);
+    await run(`DELETE FROM admin_users WHERE id = '${admin}'`);
   });
 
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
@@ -2847,6 +2911,8 @@ describe('migrations', () => {
       '0029_house_guarantee',
       // YOUR SIZES.
       '0030_account_sizes',
+      // PAIRS WELL WITH.
+      '0031_model_pairs',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

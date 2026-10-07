@@ -220,6 +220,8 @@ const PROBES: Probe[] = [
   // AC-01: a model's Sizes (its size kind and its sizes' fits) read by an AUDITOR, set by an OPERATOR.
   { group: 'sizes', method: 'GET', url: `/api/admin/models/${UUID}/sizes`, min: 'AUDITOR' },
   { group: 'sizes', method: 'PUT', url: `/api/admin/models/${UUID}/sizes`, body: INVALID, min: 'OPERATOR' },
+  // BP-34: a model's pairs (PAIRS WELL WITH) set by an OPERATOR; read with the model (GET /api/admin/models/:id, AUDITOR).
+  { group: 'pairs', method: 'PUT', url: `/api/admin/models/${UUID}/pairs`, body: INVALID, min: 'OPERATOR' },
   // Plan LIVE RELEASE+: the orders read by an AUDITOR, stepped by an OPERATOR, their alerts' delays set by an ADMIN; the
   // locations and carriers read by an AUDITOR, set by an ADMIN; the atelier read by an AUDITOR, worked by an OPERATOR.
   { group: 'orders', method: 'GET', url: '/api/admin/orders', min: 'AUDITOR' },
@@ -376,6 +378,7 @@ describe('admin role enforcement', () => {
       'care',
       'guarantees',
       'sizes',
+      'pairs',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
