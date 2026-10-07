@@ -152,15 +152,17 @@ describe('the tiers of the club (P-X04)', () => {
     for (const t of read) {
       expect(t.benefits).toBe(CLUB_TIER_DEFAULT_BENEFITS[t.tier as keyof typeof CLUB_TIER_DEFAULT_BENEFITS]);
       expect(t.defaultBenefits).toBe(t.benefits);
-      // In English, one benefit per line, within the bounds the console holds them to.
-      expect(normalizeBenefits(t.benefits)).toBe(t.benefits);
+      // In English, one benefit per line, within the bounds the console holds them to (PLATINE's none: the default, null).
+      expect(normalizeBenefits(t.benefits)).toBe(t.benefits === '' ? null : t.benefits);
       expect(t.benefits).not.toMatch(/!|product|token|NFT|crypto|lottery/i);
     }
-    // PLATINE says its early access, 48 hours by default; PALLADIUM its commissions and the atelier.
+    // PLATINE says nothing of its own by default: its early access and priority are THE PROGRAM's lines (plan NEXT-NINE,
+    // BP-19 T1); PALLADIUM its commissions and the atelier.
     expect(CLUB_TIER_DEFAULT_BENEFITS.TITANE).toMatch(/circle/);
     expect(CLUB_TIER_DEFAULT_BENEFITS.TITANE).toMatch(/draw/);
-    expect(CLUB_TIER_DEFAULT_BENEFITS.PLATINE).toMatch(/Priority care/);
-    expect(CLUB_TIER_DEFAULT_BENEFITS.PLATINE).toMatch(/48 hours/);
+    expect(CLUB_TIER_DEFAULT_BENEFITS.PLATINE).toBe('');
+    expect(benefitLines(CLUB_TIER_DEFAULT_BENEFITS.PLATINE)).toEqual([]);
+    expect(Object.values(CLUB_TIER_DEFAULT_BENEFITS).join('\n')).not.toMatch(/48 hours|Priority care/);
     expect(CLUB_TIER_DEFAULT_BENEFITS.PALLADIUM).toMatch(/commissions/);
     expect(CLUB_TIER_DEFAULT_BENEFITS.PALLADIUM).toMatch(/yearly visit to the ORBES atelier/);
   });

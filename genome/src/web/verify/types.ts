@@ -600,6 +600,23 @@ export interface ClubNextTier {
   pieces: number;
   missing: number;
   benefits: string[];
+  /** Plan NEXT-NINE, BP-19 T10: what its program adds (THE PROGRAM's lines of that tier), before its words. */
+  program?: string[];
+}
+
+/** BP-19 T10: the account's benefits in use (GET /api/v1/club/status `inUse`). */
+export interface ClubInUse {
+  credit: { balanceMinor: number; currency: string; expiresAt: string } | null;
+  care: { year: number; used: number; allowance: number | 'ALL' } | null;
+  gifts: { tier: ClubTierName; model: string; state: 'PENDING' | 'WITH_ORDER'; orderReference: string | null }[];
+}
+
+/** GET /api/v1/the-club (plan NEXT-NINE, BP-19 T9): every tier, from how many pieces, its lines; no account. */
+export interface TheClub {
+  tiers: { name: ClubTierName; level: 1 | 2 | 3; pieces: number; lines: string[] }[];
+  tierThresholds: number[];
+  creditCurrency: string;
+  gifts: { tier: ClubTierName; model: string; imageUrl: string | null }[];
 }
 
 /**
@@ -613,6 +630,10 @@ export interface ClubStatus {
   seniority: number;
   benefits: string[];
   next: ClubNextTier | null;
+  /** Plan NEXT-NINE, BP-19 T10: what THE PROGRAM gives the account's tier now, before the tiers' words. */
+  program?: string[];
+  /** BP-19 T10: its benefits in use. */
+  inUse?: ClubInUse;
   tierThresholds: number[];
   entries: ClubEntry[];
 }

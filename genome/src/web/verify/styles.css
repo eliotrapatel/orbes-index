@@ -2470,6 +2470,69 @@ body.nocturne[data-screen="live"] {
    its photographs whole and unfaded, its words, THE INVITATION and YOUR ANSWER, THE POLL, TO SEE. Every value is the
    boards' own (c.py C8, c2.py C22, c4.py C34: their markup's margins), set on the pieces of views/nocturne.ts. */
 
+/* THE CLUB (plan NEXT-NINE, BP-19 T9): its lead, a plate per tier with a hairline above, HOW THE TIERS WORK, the way to
+   the reader's tier. */
+.n-club__head {
+  padding-top: 30px;
+}
+
+.n-club__lead {
+  margin-top: 12px;
+}
+
+.n-club__tier {
+  margin-top: 34px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-club__plate {
+  padding-top: 26px;
+}
+
+.n-club__from {
+  margin-top: 8px;
+}
+
+.n-club__lines,
+.n-club__rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  list-style: none;
+}
+
+.n-club__line,
+.n-club__rule {
+  position: relative;
+  padding-left: 14px;
+}
+
+.n-club__line::before,
+.n-club__rule::before {
+  content: "–";
+  position: absolute;
+  left: 0;
+}
+
+.n-club__gift {
+  margin: 22px 0 0;
+}
+
+.n-club__gift-name {
+  margin-top: 12px;
+}
+
+.n-club__how {
+  margin-top: 40px;
+  padding-top: 26px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-club__way {
+  margin-top: 30px;
+}
+
 .n-circle__head {
   padding-top: 30px;
 }

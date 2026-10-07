@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { CLUB_TIER_DEFAULT_BENEFITS, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, benefitLines } from '../../src/server/services/club.js';
 import { TIER } from '../../src/web/verify/copy.js';
-import { TIER_DOTS, tierDotsOf, tierModel } from '../../src/web/verify/tier-model.js';
+import { inUseModel, TIER_DOTS, tierDotsOf, tierModel } from '../../src/web/verify/tier-model.js';
 import type { ClubStatus, ClubTierName } from '../../src/web/verify/types.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
 
@@ -41,6 +41,7 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
       badge: { name: 'TITANE', pieces: '1 piece held' },
       meter: { on: 1, of: 10 },
       benefits: lines('TITANE'),
+      inUse: null,
       next: { label: 'NEXT: PLATINE', sentence: '4 more pieces registered to your account open PLATINE, from 5 pieces held. It adds:', benefits: lines('PLATINE') },
       top: null,
       note: null,
@@ -53,6 +54,44 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
     expect(platine.benefits).toEqual([...lines('TITANE'), ...lines('PLATINE')]);
     expect(platine.next).toEqual({ label: 'NEXT: PALLADIUM', sentence: '4 more pieces registered to your account open PALLADIUM, from 10 pieces held. It adds:', benefits: lines('PALLADIUM') });
     expect(tierModel(status(2, 9), 9).next?.sentence).toBe('1 more piece registered to your account opens PALLADIUM, from 10 pieces held. It adds:');
+  });
+
+  it('puts the program\'s lines before the tiers\' words, in YOUR TIER and in NEXT (plan NEXT-NINE, BP-19 T10)', () => {
+    const s = { ...status(2, 6), program: ['Free shipping on every order.'], next: { ...status(2, 6).next!, program: ['Free express shipping on every order.'] } };
+    const m = tierModel(s, 6);
+    expect(m.benefits).toEqual(['Free shipping on every order.', ...lines('TITANE'), ...lines('PLATINE')]);
+    expect(m.next!.benefits).toEqual(['Free express shipping on every order.', ...lines('PALLADIUM')]);
+  });
+
+  it('shows IN USE only when a row exists: the credit and until when, the yearly care, one WELCOME GIFT row for the next order and one per order (plan NEXT-NINE, BP-19 T10)', () => {
+    expect(inUseModel({ credit: null, care: null, gifts: [] })).toBeNull();
+    expect(inUseModel(undefined)).toBeNull();
+    expect(inUseModel({ credit: { balanceMinor: 5000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' }, care: { year: 2026, used: 0, allowance: 1 }, gifts: [] })).toEqual({
+      label: 'IN USE',
+      rows: [
+        ['CREDIT', '€\u00a050 · UNTIL 6 OCT 2027'],
+        ['YEARLY CARE', '0 OF 1 PIECE IN 2026'],
+      ],
+      note: 'ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.',
+    });
+    expect(inUseModel({ credit: null, care: { year: 2026, used: 2, allowance: 'ALL' }, gifts: [] })!.rows).toEqual([['YEARLY CARE', 'EVERY PIECE · 2 IN 2026']]);
+    expect(inUseModel({ credit: null, care: { year: 2026, used: 1, allowance: 3 }, gifts: [] })!.rows).toEqual([['YEARLY CARE', '1 OF 3 PIECES IN 2026']]);
+    const gifts = inUseModel({
+      credit: null,
+      care: null,
+      gifts: [
+        { tier: 'PLATINE', model: 'ORBITAL CHARM', state: 'PENDING', orderReference: null },
+        { tier: 'PALLADIUM', model: 'ORBITAL CHARM', state: 'PENDING', orderReference: null },
+        { tier: 'PLATINE', model: 'ANNEAU', state: 'WITH_ORDER', orderReference: 'OR-7C21A9F0' },
+      ],
+    })!;
+    expect(gifts.rows).toEqual([
+      ['WELCOME GIFT', 'WITH YOUR NEXT ORDER'],
+      ['WELCOME GIFT', 'WITH ORDER OR-7C21A9F0'],
+    ]);
+    expect(gifts.note).toBeNull();
+    // No tier: no IN USE, whatever is sent.
+    expect(tierModel({ ...status(0, 0), inUse: { credit: { balanceMinor: 5000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' }, care: null, gifts: [] } }, 0).inUse).toBeNull();
   });
 
   it('says PALLADIUM is the highest, with every benefit and no next tier', () => {
@@ -72,6 +111,7 @@ describe('the tier at the head of MY PIECES (P-X04)', () => {
       badge: null,
       meter: null,
       benefits: [],
+      inUse: null,
       next: { label: 'NEXT: TITANE', sentence: 'A piece registered to your ORBES account opens TITANE, the first tier of the club:', benefits: lines('TITANE') },
       top: null,
       note: null,

@@ -165,6 +165,7 @@ import {
   tierBenefitsProblem,
   tierName,
   tierStanding,
+  clubBlockLines,
   tierThreshold,
   utcInstant,
 } from '../../src/web/admin/model/club.js';
@@ -666,6 +667,27 @@ describe('the Club\'s tiers (P-X04)', () => {
     expect(tierStanding({ level: 1, name: 'TITANE', pieces: 1, seniority: 1 })).toBe('TITANE · 1 piece held · 1 year');
     expect(tierStanding({ level: 0, name: null, pieces: 0, seniority: 0 })).toBe('None · 0 pieces held');
     expect(tierStanding(undefined)).toBe('—');
+  });
+
+  it('says an owner\'s Club block under the tier line (BP-19 T10): each credit and what is left, each welcome gift, the yearly care of the year', () => {
+    expect(clubBlockLines(undefined)).toEqual([]);
+    expect(
+      clubBlockLines({
+        tier: 'PLATINE',
+        grants: [
+          { tier: 'PLATINE', kind: 'CREDIT', grantedAt: '2026-10-06T09:00:00Z', amountMinor: 5000, balanceMinor: 3000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00Z', gift: null },
+          { tier: 'PLATINE', kind: 'GIFT', grantedAt: '2026-10-06T09:00:00Z', amountMinor: null, balanceMinor: null, currency: null, expiresAt: null, gift: { state: 'WITH_ORDER', orderId: 'o1', orderReference: 'OR-7C21A9F0' } },
+          { tier: 'PALLADIUM', kind: 'GIFT', grantedAt: '2026-10-06T09:00:00Z', amountMinor: null, balanceMinor: null, currency: null, expiresAt: null, gift: { state: 'PENDING', orderId: null, orderReference: null } },
+        ],
+        careThisYear: { year: 2026, used: 0, allowance: 1, open: { id: 'c1', productId: 'O26-J-00184' } },
+      }),
+    ).toEqual([
+      { label: 'Credit PLATINE', value: '€\u00a050, €\u00a030 left, until 06 OCT 2027', link: null },
+      { label: 'Welcome gift PLATINE', value: 'with OR-7C21A9F0', link: { kind: 'order', id: 'o1' } },
+      { label: 'Welcome gift PALLADIUM', value: 'pending', link: null },
+      { label: 'Yearly care', value: '2026: 0 of 1 · open: O26-J-00184', link: { kind: 'care', id: 'c1' } },
+    ]);
+    expect(clubBlockLines({ tier: 'PALLADIUM', grants: [], careThisYear: { year: 2026, used: 2, allowance: 'ALL', open: null } })).toEqual([{ label: 'Yearly care', value: '2026: 2 · every piece', link: null }]);
   });
 
   it('lets OPERATOR change the words, an AUDITOR read them', () => {

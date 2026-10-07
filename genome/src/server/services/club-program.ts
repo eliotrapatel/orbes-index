@@ -249,54 +249,102 @@ function orList(items: readonly string[]): string {
   return items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} or ${items[items.length - 1]}`;
 }
 
+const earlyLine = (hours: number) => `Early access to each draw: a place reserved directly ${hours} ${hours === 1 ? 'hour' : 'hours'} before entries open to everyone, unless its page says otherwise.`;
+const SHIPPING_LINES: Readonly<Partial<Record<ShippingFreeLevel, string>>> = Object.freeze({ STANDARD: 'Free shipping on every order.', EXPRESS: 'Free express shipping on every order.' });
+const careLine = (care: number | null) =>
+  care === null
+    ? 'The yearly care of every piece by the ORBES atelier, once a year each, asked for from the piece, with a prepaid label both ways.'
+    : care > 0
+      ? `The yearly care of ${care === 1 ? '1 piece' : `${care} pieces`} a year by the ORBES atelier, asked for from the piece, with a prepaid label both ways.`
+      : null;
+const PRIORITY_LINE = 'Priority with ORBES Client Services: your messages are read first.';
+const giftLine = (gift: string) => `A welcome gift, ${gift}, added to your next order.`;
+function creditLine(p: ClubProgram, t: 2 | 3): string | null {
+  const credit = creditOf(p, t);
+  if (credit <= 0 || p.creditChannels.length === 0) return null;
+  const months = p.creditValidityMonths;
+  return `A credit of ${programMoney(credit, p.creditCurrency)}, valid ${months} ${months === 1 ? 'month' : 'months'}, on a piece from ${orList(p.creditChannels.map((c) => CHANNEL_WORDS[c]))}.`;
+}
+const EVENING_LINE = 'The members’ evening, once a year, by invitation in THE CIRCLE.';
+function experienceLine(launch: boolean, partner: boolean): string | null {
+  if (launch && partner) return 'Launch previews and partner experiences, by invitation in THE CIRCLE.';
+  if (launch) return 'Launch previews, by invitation in THE CIRCLE.';
+  if (partner) return 'Partner experiences, by invitation in THE CIRCLE.';
+  return null;
+}
+/** A tier's early access, shipping and care lines (PLATINE and PALLADIUM). */
+function serviceLines(p: ClubProgram, t: 2 | 3): string[] {
+  const out: string[] = [];
+  const hours = t === 3 ? p.earlyAccessPalladiumHours : p.earlyAccessPlatineHours;
+  if (hours > 0) out.push(earlyLine(hours));
+  const shipping = SHIPPING_LINES[t === 3 ? p.shippingFreePalladium : p.shippingFreePlatine];
+  if (shipping) out.push(shipping);
+  const care = careLine(t === 3 ? p.carePiecesPalladium : p.carePiecesPlatine);
+  if (care) out.push(care);
+  return out;
+}
+
 /**
  * What a tier's program says (§3.2 T2, « The program lines »), in this order: its early access, its free shipping, its
  * yearly care, the priority with Client Services (on the tier it starts from), its welcome gift (while its model is
  * active: `gifts` names the active ones by tier), its credit, then the experiences of the circle (each on the tier it
  * invites from). A setting that gives nothing gives no line. TITANE (1) has no early access, shipping, care, gift nor
- * credit.
+ * credit. What the tier adds, as THE CLUB and the console's tiers say it.
  */
 export function programLines(p: ClubProgram, tier: 1 | 2 | 3, gifts: Partial<Record<2 | 3, string | null>> = {}): string[] {
   const lines: string[] = [];
-  if (tier >= 2) {
-    const t = tier as 2 | 3;
-    const hours = t === 3 ? p.earlyAccessPalladiumHours : p.earlyAccessPlatineHours;
-    if (hours > 0) lines.push(`Early access to each draw: a place reserved directly ${hours} ${hours === 1 ? 'hour' : 'hours'} before entries open to everyone, unless its page says otherwise.`);
-    const shipping = t === 3 ? p.shippingFreePalladium : p.shippingFreePlatine;
-    if (shipping === 'STANDARD') lines.push('Free shipping on every order.');
-    if (shipping === 'EXPRESS') lines.push('Free express shipping on every order.');
-    const care = t === 3 ? p.carePiecesPalladium : p.carePiecesPlatine;
-    if (care === null) lines.push('The yearly care of every piece by the ORBES atelier, once a year each, asked for from the piece, with a prepaid label both ways.');
-    else if (care > 0) lines.push(`The yearly care of ${care === 1 ? '1 piece' : `${care} pieces`} a year by the ORBES atelier, asked for from the piece, with a prepaid label both ways.`);
-  }
-  if (p.messagesPriorityMinTier !== 0 && p.messagesPriorityMinTier === tier) lines.push('Priority with ORBES Client Services: your messages are read first.');
+  if (tier >= 2) lines.push(...serviceLines(p, tier as 2 | 3));
+  if (p.messagesPriorityMinTier !== 0 && p.messagesPriorityMinTier === tier) lines.push(PRIORITY_LINE);
   if (tier >= 2) {
     const t = tier as 2 | 3;
     const gift = gifts[t];
-    if (gift) lines.push(`A welcome gift, ${gift}, added to your next order.`);
-    const credit = creditOf(p, t);
-    if (credit > 0 && p.creditChannels.length > 0) {
-      const months = p.creditValidityMonths;
-      lines.push(`A credit of ${programMoney(credit, p.creditCurrency)}, valid ${months} ${months === 1 ? 'month' : 'months'}, on a piece from ${orList(p.creditChannels.map((c) => CHANNEL_WORDS[c]))}.`);
-    }
+    if (gift) lines.push(giftLine(gift));
+    const credit = creditLine(p, t);
+    if (credit) lines.push(credit);
   }
-  if (p.experienceMembersEveningMinTier === tier) lines.push('The members’ evening, once a year, by invitation in THE CIRCLE.');
-  const launch = p.experienceLaunchPreviewMinTier === tier;
-  const partner = p.experiencePartnerMinTier === tier;
-  if (launch && partner) lines.push('Launch previews and partner experiences, by invitation in THE CIRCLE.');
-  else if (launch) lines.push('Launch previews, by invitation in THE CIRCLE.');
-  else if (partner) lines.push('Partner experiences, by invitation in THE CIRCLE.');
+  if (p.experienceMembersEveningMinTier === tier) lines.push(EVENING_LINE);
+  const experiences = experienceLine(p.experienceLaunchPreviewMinTier === tier, p.experiencePartnerMinTier === tier);
+  if (experiences) lines.push(experiences);
   return lines;
+}
+
+/**
+ * What the program gives an account of `tier` now (GET /api/v1/club/status `program`, BP-19 T10): the early access,
+ * the shipping and the care of its own tier (the highest version it holds), the priority from the tier it starts
+ * from, the welcome gift and the credit of its own tier only, and every experience it is invited to. [] without a tier.
+ */
+export function effectiveProgramLines(p: ClubProgram, tier: number, gifts: Partial<Record<2 | 3, string | null>> = {}): string[] {
+  if (tier < 1) return [];
+  const lines: string[] = [];
+  if (tier >= 2) lines.push(...serviceLines(p, tier >= 3 ? 3 : 2));
+  if (p.messagesPriorityMinTier !== 0 && tier >= p.messagesPriorityMinTier) lines.push(PRIORITY_LINE);
+  if (tier >= 2) {
+    const t = (tier >= 3 ? 3 : 2) as 2 | 3;
+    const gift = gifts[t];
+    if (gift) lines.push(giftLine(gift));
+    const credit = creditLine(p, t);
+    if (credit) lines.push(credit);
+  }
+  if (tier >= p.experienceMembersEveningMinTier) lines.push(EVENING_LINE);
+  const experiences = experienceLine(tier >= p.experienceLaunchPreviewMinTier, tier >= p.experiencePartnerMinTier);
+  if (experiences) lines.push(experiences);
+  return lines;
+}
+
+/** The gift model of each tier while it is active (the condition attachGifts uses): its name, and its photograph. */
+export async function activeGifts(db: Db, p: ClubProgram): Promise<Record<2 | 3, GiftModel | null>> {
+  const models = await giftModels(db, [p.giftPlatineModelId, p.giftPalladiumModelId]);
+  const active = (id: string | null) => {
+    const m = id ? models.get(id) : undefined;
+    return m && m.active ? m : null;
+  };
+  return { 2: active(p.giftPlatineModelId), 3: active(p.giftPalladiumModelId) };
 }
 
 /** The program lines of every tier, the gifts named while their model is active. */
 export async function tierProgramLines(db: Db, p: ClubProgram): Promise<Record<ClubTierName, string[]>> {
-  const models = await giftModels(db, [p.giftPlatineModelId, p.giftPalladiumModelId]);
-  const active = (id: string | null) => {
-    const m = id ? models.get(id) : undefined;
-    return m && m.active ? m.name : null;
-  };
-  const gifts = { 2: active(p.giftPlatineModelId), 3: active(p.giftPalladiumModelId) };
+  const a = await activeGifts(db, p);
+  const gifts = { 2: a[2]?.name ?? null, 3: a[3]?.name ?? null };
   return { TITANE: programLines(p, 1, gifts), PLATINE: programLines(p, 2, gifts), PALLADIUM: programLines(p, 3, gifts) };
 }
 

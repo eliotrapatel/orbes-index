@@ -990,6 +990,8 @@ export interface OwnerSheet {
   owner: OwnerRecord;
   /** P-X04: the account's tier in the club now (level 0 and name null: none), the pieces it counts, the full years since its first ownership. */
   tier: { level: 0 | 1 | 2 | 3; name: ClubTierName | null; pieces: number; seniority: number };
+  /** BP-19 T10: the Club block: its grants (a credit and what is left, a gift and where it is), its yearly care of the year. */
+  club: OwnerClub;
   pieces: OwnedPiece[];
   transfers: { id: string; productId: string; createdAt: Iso; expiresAt: Iso }[];
   scans: { id: string; reference: string; occurredAt: Iso; eventType: string; state: string; productId: string | null; country: string | null }[];
@@ -2387,6 +2389,22 @@ export interface IssuedBenchItem {
 }
 
 // ── The yearly care (plan NEXT-NINE, BP-19 T6) ─────────────────────────────
+
+/** BP-19 T10: what the tier program gave an account and what is in use (GET /api/admin/owners/:id `club`). */
+export interface OwnerClub {
+  tier: ClubTierName | null;
+  grants: {
+    tier: ClubTierName;
+    kind: 'GIFT' | 'CREDIT';
+    grantedAt: Iso;
+    amountMinor: number | null;
+    balanceMinor: number | null;
+    currency: string | null;
+    expiresAt: Iso | null;
+    gift: { state: 'PENDING' | 'WITH_ORDER' | 'DELIVERED'; orderId: string | null; orderReference: string | null } | null;
+  }[];
+  careThisYear: { year: number; used: number; allowance: number | 'ALL'; open: { id: string; productId: string } | null } | null;
+}
 
 /** A shipment of a yearly care: its carrier, its tracking number and link, when it left. */
 export interface CareShipment {

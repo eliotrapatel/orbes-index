@@ -2263,7 +2263,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       'From 5 pieces held',
       'From 10 pieces held',
     ]);
-    expect(await p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents()).toEqual(CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n'));
+    expect(await p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents()).toEqual(CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n').filter(Boolean));
     for (const t of ['TITANE', 'PLATINE', 'PALLADIUM']) expect(await p.locator(`[data-testid=tier-words-${t}]`).textContent(), t).toBe('Default');
     expect(await p.locator('[data-testid^=tier-restore-]').count()).toBe(0);
 
@@ -2284,7 +2284,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.click('[data-testid=tier-restore-PLATINE]');
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=tier-words-PLATINE]').textContent()).toBe('Default');
-    expect(await p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents()).toEqual(CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n'));
+    expect(await p.locator('[data-testid=tier-benefits-PLATINE] li').allTextContents()).toEqual(CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n').filter(Boolean));
     expect(await ctx.db.selectFrom('club_tiers').selectAll().execute()).toEqual([]);
     expect(await cspViolations(p)).toEqual([]);
 

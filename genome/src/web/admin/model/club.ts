@@ -27,7 +27,7 @@
  *    who closes one (OPERATOR, an OPEN one), what the Close dialog's note
  *    must be (required, 2 000 characters), and a request's model line.
  */
-import { formatDateTime } from '../format.js';
+import { formatDate, formatDateTime } from '../format.js';
 import { formatMoney, moneyField, parseMoney } from './live.js';
 import { can } from './permissions.js';
 import {
@@ -354,6 +354,43 @@ export function tierBenefitsChange(t: Pick<ClubTierSheet, 'benefits' | 'defaultB
 /** A tier's threshold: `From 1 piece held`, `From 5 pieces held`. */
 export function tierThreshold(t: Pick<ClubTierSheet, 'pieces'>): string {
   return `From ${t.pieces} ${t.pieces === 1 ? 'piece' : 'pieces'} held`;
+}
+
+/** One line of an owner's Club block (BP-19 T10), and where it leads. */
+export interface ClubBlockLine {
+  label: string;
+  value: string;
+  /** The order a gift travels with, or the open yearly care. */
+  link: { kind: 'order'; id: string } | { kind: 'care'; id: string } | null;
+}
+
+/**
+ * An owner's Club block, under the tier line: `Credit PLATINE € 50, € 50 left, until 06 OCT 2027`, `Welcome gift
+ * PLATINE: pending` (`with OR-…`, `delivered`), `Yearly care: 2026: 0 of 1` (a link to an open request).
+ */
+export function clubBlockLines(c: OwnerSheet['club'] | null | undefined): ClubBlockLine[] {
+  if (!c) return [];
+  const out: ClubBlockLine[] = [];
+  for (const g of c.grants) {
+    if (g.kind === 'CREDIT' && g.amountMinor !== null && g.currency) {
+      out.push({
+        label: `Credit ${g.tier}`,
+        value: `${formatMoney(g.amountMinor, g.currency)}, ${formatMoney(g.balanceMinor ?? 0, g.currency)} left, until ${formatDate(g.expiresAt)}`,
+        link: null,
+      });
+    }
+    if (g.kind === 'GIFT' && g.gift) {
+      const state = g.gift.state === 'PENDING' ? 'pending' : g.gift.state === 'DELIVERED' ? 'delivered' : `with ${g.gift.orderReference ?? 'its order'}`;
+      out.push({ label: `Welcome gift ${g.tier}`, value: state, link: g.gift.state === 'WITH_ORDER' && g.gift.orderId ? { kind: 'order', id: g.gift.orderId } : null });
+    }
+  }
+  const care = c.careThisYear;
+  if (care) {
+    // The year in the value: a label is set in the display face, which takes no figure.
+    const of = care.allowance === 'ALL' ? `${care.year}: ${care.used} · every piece` : `${care.year}: ${care.used} of ${care.allowance}`;
+    out.push({ label: 'Yearly care', value: care.open ? `${of} · open: ${care.open.productId}` : of, link: care.open ? { kind: 'care', id: care.open.id } : null });
+  }
+  return out;
 }
 
 /** An account's tier on its sheet (A-06): `PLATINE · 5 pieces held · 2 years`, or `None · 0 pieces held`. */

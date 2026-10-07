@@ -13,9 +13,15 @@
  * TIER_DOTS of them, the pieces PALLADIUM starts from as the status sends them
  * (`tierThresholds`, the server's CLUB_TIER_THRESHOLDS: 10); TIER_DOTS, the
  * same figure, only when the status does not say.
+ *
+ * IN USE (plan NEXT-NINE, BP-19 T10), shown only when a row exists: the CREDIT left and until when, the YEARLY CARE of
+ * the year (no row when the tier gives none), a WELCOME GIFT while its tier has an active gift model (WITH YOUR NEXT
+ * ORDER, then WITH ORDER OR-… until it is delivered). The program's lines come before the tiers' words, in the
+ * benefits and in NEXT's.
  */
 import { TIER } from './copy.js';
-import type { ClubStatus, ClubTierName } from './types.js';
+import type { ClubInUse, ClubStatus, ClubTierName } from './types.js';
+import { formatDate, formatMoney } from './view-model.js';
 
 const NAMES: readonly ClubTierName[] = ['TITANE', 'PLATINE', 'PALLADIUM'];
 
@@ -38,8 +44,10 @@ export interface TierModel {
   badge: { name: ClubTierName; pieces: string } | null;
   /** The meter under the badge: `of` dots (TIER_DOTS), `on` of them filled (the pieces held, to `of`); null without a tier. */
   meter: { on: number; of: number } | null;
-  /** The benefits of the tier and of those below it, lowest first; [] without a tier. */
+  /** The program's lines for the tier, then the words of the tier and of those below it, lowest first; [] without a tier. */
   benefits: string[];
+  /** IN USE (BP-19 T10): its rows, and the credit's note when a credit is in it; null when no row exists. */
+  inUse: { label: string; rows: (readonly [string, string])[]; note: string | null } | null;
   /** The way to the next tier; null at the highest, or when the server did not say. */
   next: { label: string; sentence: string; benefits: string[] } | null;
   /** PALLADIUM: no tier above. */
@@ -52,7 +60,28 @@ const lines = (v: unknown): string[] => (Array.isArray(v) ? v.filter((l): l is s
 const count = (v: unknown): number => (typeof v === 'number' && Number.isInteger(v) && v >= 0 ? v : 0);
 
 /** The tier block of MY PIECES; `listed` is the number of pieces the page shows (to explain a piece that counts for none). */
-export function tierModel(status: Pick<ClubStatus, 'tier' | 'pieces'> & Partial<Pick<ClubStatus, 'benefits' | 'next' | 'tierThresholds'>>, listed = 0): TierModel {
+/** IN USE's rows from the status (BP-19 T10); null when none exists. */
+export function inUseModel(u: ClubInUse | null | undefined): TierModel['inUse'] {
+  if (!u || typeof u !== 'object') return null;
+  const rows: (readonly [string, string])[] = [];
+  const c = u.credit;
+  if (c && Number.isInteger(c.balanceMinor) && c.balanceMinor > 0 && typeof c.currency === 'string' && typeof c.expiresAt === 'string') {
+    rows.push([TIER.credit, TIER.creditValue(formatMoney(c.balanceMinor, c.currency), formatDate(c.expiresAt))]);
+  }
+  const care = u.care;
+  if (care && Number.isInteger(care.year) && Number.isInteger(care.used)) {
+    if (care.allowance === 'ALL') rows.push([TIER.care, TIER.careAll(care.used, care.year)]);
+    else if (typeof care.allowance === 'number' && care.allowance > 0) rows.push([TIER.care, TIER.careOf(care.used, care.allowance, care.year)]);
+  }
+  // One row for the gifts the next order carries (PLATINE's and PALLADIUM's together), one per order a gift travels with.
+  const gifts = Array.isArray(u.gifts) ? u.gifts : [];
+  if (gifts.some((g) => g?.state === 'PENDING')) rows.push([TIER.gift, TIER.giftNext]);
+  for (const ref of new Set(gifts.filter((g) => g?.state === 'WITH_ORDER' && typeof g.orderReference === 'string').map((g) => g.orderReference!))) rows.push([TIER.gift, TIER.giftWith(ref)]);
+  if (rows.length === 0) return null;
+  return { label: TIER.inUse, rows, note: rows.some(([l]) => l === TIER.credit) ? TIER.creditNote : null };
+}
+
+export function tierModel(status: Pick<ClubStatus, 'tier' | 'pieces'> & Partial<Pick<ClubStatus, 'benefits' | 'next' | 'tierThresholds' | 'program' | 'inUse'>>, listed = 0): TierModel {
   const level = count(status?.tier?.level);
   const name = level >= 1 && level <= 3 ? NAMES[level - 1]! : null;
   const pieces = count(status?.pieces);
@@ -65,14 +94,15 @@ export function tierModel(status: Pick<ClubStatus, 'tier' | 'pieces'> & Partial<
       ? {
           label: TIER.next(nextName),
           sentence: name === null ? TIER.first(nextName) : TIER.nextWay(nextName, missing, from),
-          benefits: lines(n.benefits),
+          benefits: [...lines(n.program), ...lines(n.benefits)],
         }
       : null;
   return {
     label: name ? TIER.label : TIER.noneLabel,
     badge: name ? { name, pieces: TIER.pieces(pieces) } : null,
     meter: name ? { on: Math.min(pieces, tierDotsOf(status)), of: tierDotsOf(status) } : null,
-    benefits: name ? lines(status.benefits) : [],
+    benefits: name ? [...lines(status.program), ...lines(status.benefits)] : [],
+    inUse: name ? inUseModel(status.inUse) : null,
     next,
     top: name === 'PALLADIUM' ? TIER.top : null,
     note: listed > pieces ? TIER.counted : null,

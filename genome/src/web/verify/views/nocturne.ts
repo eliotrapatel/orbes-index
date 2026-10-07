@@ -31,7 +31,8 @@
 import { h, s } from '../../shared/dom.js';
 import { GEOIP_ATTRIBUTION, LEGAL_PAGES, legalPath } from '../../shared/legal.js';
 import { monogramSvg } from '../../shared/monogram.js';
-import { LEGAL, SOUND } from '../copy.js';
+import { LEGAL, SOUND, TIER } from '../copy.js';
+import { CLUB_PATH } from '../club-model.js';
 import { swatchGradient } from '../nocturne-model.js';
 import { withNumerals } from './common.js';
 import type { SoundSwitch } from '../sound.js';
@@ -479,11 +480,12 @@ export type Chapter = (typeof CHAPTERS)[number];
 const NEW_TAB = { target: '_blank', rel: 'noopener' } as const;
 
 /**
- * The footer, as on the canvas: the monogram; PRIVACY · TERMS · LEGAL · HELP (a new tab, so the screen stays); SOUND
+ * The footer, as on the canvas: the monogram; THE CLUB (plan NEXT-NINE, BP-19 T9: its page, in the app, same tab);
+ * PRIVACY · TERMS · LEGAL · HELP (a new tab, so the screen stays); SOUND
  * ON / OFF (the sound signature, P-D07: its accessible name SOUND, its state pressed); DB-IP's attribution; © ORBES ·
  * PARIS (in ash: the canvas's smoke is under 4.5 : 1; © ORBES · GENOME CODE · PARIS from 560 px wide, as before).
  */
-export function footer(sound: SoundSwitch | null, onSound: () => void): { el: HTMLElement; soundButton: HTMLButtonElement | null } {
+export function footer(sound: SoundSwitch | null, onSound: () => void, onClub?: () => void): { el: HTMLElement; soundButton: HTMLButtonElement | null } {
   let soundButton: HTMLButtonElement | null = null;
   if (sound) {
     const state = h('b', { class: 'n-snd__state', attrs: { 'aria-hidden': 'true' } });
@@ -493,6 +495,7 @@ export function footer(sound: SoundSwitch | null, onSound: () => void): { el: HT
     'footer',
     { class: 'n-foot' },
     monogram(38, { label: true }),
+    onClub ? h('p', { class: 'n-g n-foot__club' }, appAnchor(CLUB_PATH, ['n-foot__club-link'], onClub, TIER.club)) : null,
     h(
       'nav',
       { class: 'n-g n-fl', attrs: { 'aria-label': LEGAL.label } },

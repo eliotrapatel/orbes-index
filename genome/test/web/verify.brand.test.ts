@@ -202,6 +202,7 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     '.n-crumb',
     '.n-dbip',
     '.n-fl__link',
+    '.n-foot__club-link',
     '.n-opt2__option',
     '.n-own__link',
     '.n-own__terms-link',
@@ -659,10 +660,10 @@ describe('verify app: one button to ORBES Client Services, the email under FORGO
     expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
   });
 
-  it('writes the tier program\'s words calmly (YEARLY_CARE, TIER; plan NEXT-NINE BP-19): no exclamation mark and no word of §4.5', () => {
+  it('writes the tier program\'s words calmly (YEARLY_CARE, TIER, CLUB_PAGE; plan NEXT-NINE BP-19): no exclamation mark and no word of §4.5', () => {
     const said = (v: unknown): string[] =>
       typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('PLATINE', 1, 2026))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];
-    for (const group of ['YEARLY_CARE', 'TIER'] as const) {
+    for (const group of ['YEARLY_CARE', 'TIER', 'CLUB_PAGE'] as const) {
       const words = said(verifyCopy[group]).join('\n');
       expect(words.length, group).toBeGreaterThan(50);
       expect(words, group).not.toContain('!');

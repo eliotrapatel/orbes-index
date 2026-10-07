@@ -184,6 +184,23 @@ describe('the tiers\' grants (BP-19 T5)', () => {
     await t.db.deleteFrom('club_program_settings').execute();
   });
 
+  it('lists a PENDING gift in YOUR TIER only while its tier is held and has an active gift model (BP-19 T10): never a gift that would not come', async () => {
+    const a = await createAccount(t.db);
+    await holdPieces(t.db, a.id, 5, f.modelId);
+    await ctx.services.tierGrants.ensure(a.id);
+    expect((await grantsOf(a.id)).map((g) => [g.tier, g.kind])).toContainEqual([2, 'GIFT']);
+    // No gift model: no row.
+    expect((await ctx.services.club.inUse(a.id, 2)).gifts).toEqual([]);
+    // A gift model: WITH YOUR NEXT ORDER.
+    const program = ctx.services.clubProgram;
+    await program.update({ ...(await program.read()), giftPlatineModelId: f.modelId }, admin);
+    const name = (await t.db.selectFrom('models').select('name').where('id', '=', f.modelId).executeTakeFirstOrThrow()).name.toUpperCase();
+    expect((await ctx.services.club.inUse(a.id, 2)).gifts).toEqual([{ tier: 'PLATINE', model: name, state: 'PENDING', orderReference: null }]);
+    // Below its tier it waits: no row.
+    expect((await ctx.services.club.inUse(a.id, 1)).gifts).toEqual([]);
+    await t.db.deleteFrom('club_program_settings').execute();
+  });
+
   it('counts the months in UTC calendar months', () => {
     expect(addUtcMonths(new Date('2026-01-31T10:00:00Z'), 1).toISOString()).toBe('2026-02-28T10:00:00.000Z');
     expect(addUtcMonths(new Date('2026-11-03T09:00:00Z'), 12).toISOString()).toBe('2027-11-03T09:00:00.000Z');

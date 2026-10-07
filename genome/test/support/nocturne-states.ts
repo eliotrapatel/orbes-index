@@ -599,6 +599,11 @@ export const UI_STATES: readonly UiState[] = [
     },
     ready: '.view--piece .n-piece__article',
   },
+  // THE CLUB (plan NEXT-NINE, BP-19 T9): the tiers and what each gives; the way to the reader's own tier.
+  { id: 'club', title: 'THE CLUB, signed out: the tiers, HOW THE TIERS WORK, SIGN IN TO SEE YOUR TIER', refs: ['BP-19'], variant: 'full', path: at('/verify/club'), ready: '.view--club .n-club__way' },
+  { id: 'club-platine', title: 'THE CLUB of a PLATINE account: YOUR TIER: PLATINE · 5 PIECES HELD', refs: ['BP-19'], variant: 'full', as: 'platine', path: at('/verify/club'), ready: '.view--club .n-club__way' },
+  { id: 'club-no-piece', title: 'THE CLUB of an account without a piece: YOUR FIRST PIECE OPENS TITANE', refs: ['BP-19'], variant: 'full', as: 'newcomer', path: at('/verify/club'), ready: '.view--club .n-club__way' },
+  { id: 'club-stress', title: 'THE CLUB of the extreme content: PALLADIUM, ten pieces, the welcome gift ORBITAL CHARM', refs: ['BP-19'], variant: 'stress', as: you, path: at('/verify/club'), ready: '.view--club .n-club__way', stress: true },
   // YEARLY CARE (plan NEXT-NINE, BP-19 T6): above SERVICE HISTORY, for a PLATINE account, each step on a piece of its own.
   ...(
     [
@@ -785,6 +790,17 @@ export const UI_STATES: readonly UiState[] = [
     ready: '.n-account:not([hidden]) .n-account__tier',
     viewport: true,
     stress: true,
+  },
+  {
+    id: 'account-sheet-in-use',
+    title: 'The account sheet of a PLATINE account: YOUR TIER, IN USE (its credit, its yearly care), the program’s lines, THE CLUB',
+    refs: ['BP-19'],
+    variant: 'full',
+    as: 'platine',
+    path: at('/verify'),
+    act: (run) => openAccountSheet(run),
+    ready: '.n-account:not([hidden]) .n-account__in-use',
+    viewport: true,
   },
   {
     id: 'account-sheet-password',

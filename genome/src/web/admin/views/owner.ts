@@ -29,7 +29,7 @@
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, formatDateTime, humanize, shortHash } from '../format.js';
-import { tierStanding } from '../model/club.js';
+import { clubBlockLines, tierStanding } from '../model/club.js';
 import { STATUS_LABELS } from '../model/messages.js';
 import { formatMoney } from '../model/live.js';
 import { CHANNEL_LABELS, LATE_LABELS, sizeText } from '../model/orders.js';
@@ -141,6 +141,17 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
         { label: 'Name', value: o.displayName ?? '—' },
         { label: 'Country', value: o.country ?? '—' },
         { label: 'Tier', value: h('span', { data: { testid: 'owner-tier' } }, tierStanding(sheet.tier)), note: 'In the club now: from the pieces held, never a revoked, flagged or retired one' },
+        // BP-19 T10: the Club block under the tier line: the credits and what is left, the welcome gifts, the yearly care.
+        ...clubBlockLines(sheet.club).map((l) => ({
+          label: l.label,
+          value: h(
+            'span',
+            { data: { testid: 'owner-club' } },
+            l.link
+              ? h('a', { class: 'idlink', attrs: { href: l.link.kind === 'order' ? href('order', { orderId: l.link.id }) : href('careRequest', { careId: l.link.id }) } }, l.value)
+              : l.value,
+          ),
+        })),
         {
           label: 'Messages',
           value: sheet.messages

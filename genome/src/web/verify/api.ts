@@ -57,6 +57,7 @@ import type {
   OwnedPiece,
   OwnerCertificate,
   PieceCare,
+  TheClub,
   OwnershipConfirmation,
   Participation,
   PastReleasesPage,
@@ -298,6 +299,13 @@ export class ApiClient {
   async clubStatus(): Promise<ClubStatus> {
     const r = await this.request<ClubStatus>('GET', '/api/v1/club/status');
     if (!Array.isArray(r?.entries)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** THE CLUB (plan NEXT-NINE, BP-19 T9): every tier and what it gives, for everyone; the browser may keep it a minute. */
+  async theClub(): Promise<TheClub> {
+    const r = await this.request<TheClub>('GET', '/api/v1/the-club', undefined, { cache: 'default' });
+    if (!Array.isArray(r?.tiers) || !Array.isArray(r.tierThresholds)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r;
   }
 

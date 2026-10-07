@@ -682,6 +682,11 @@ async function chrome(page: Page): Promise<void> {
   // The footer: the monogram 38 px, the legal links at 10 px, SOUND, DB-IP's attribution, © ORBES · PARIS in ash.
   await check(page, '.n-foot', { 'margin-top': 96, 'padding-top': 40, 'padding-left': 24, 'padding-right': 24, 'border-top-width': 1, 'border-top-color': LINE });
   await check(page, '.n-foot > svg.n-mono', { _w: 38, _h: 38, color: IV });
+  // THE CLUB (plan NEXT-NINE, BP-19 T9): its line 30 px under the monogram, at 10 px in ash, its 44 px zone; the legal
+  // links 30 px under it, so the two zones clear each other.
+  await check(page, '.n-foot__club', { 'margin-top': 30, 'font-size': 10, 'letter-spacing': em(10, 0.22), color: ASH });
+  expect(await page.locator('.n-foot__club a').allInnerTexts()).toEqual(['THE CLUB']);
+  expect(Number((await read(page, '.n-foot__club-link', []))._h)).toBeGreaterThanOrEqual(44 - 0.05);
   await check(page, '.n-fl', { display: 'grid', 'column-gap': 22, 'row-gap': 12, 'margin-top': 30, 'font-size': 10, 'letter-spacing': em(10, 0.22), color: ASH, 'justify-content': 'start' });
   expect(await page.locator('.n-fl a').allInnerTexts()).toEqual(['PRIVACY', 'TERMS', 'LEGAL', 'HELP']);
   for (const target of await page.locator('.n-fl a').evaluateAll((els) => els.map((e) => e.getAttribute('target')))) expect(target).toBe('_blank');
@@ -778,9 +783,9 @@ async function sheet(page: Page): Promise<void> {
   await check(page, '.n-account__benefits', { 'margin-top': 10, 'row-gap': 6 });
   await check(page, '.n-account__benefit', { 'padding-left': 14, 'font-size': 13, color: ASH });
   await check(page, '.n-account__benefit', { content: '"–"', position: 'absolute', left: 0 }, '::before');
-  // The rows: SOUND with its switch, CHANGE PASSWORD, MY PIECES, the legal pages; their hairlines; 10.5 px, 0.22 em words.
+  // The rows: SOUND with its switch, CHANGE PASSWORD, MY PIECES, THE CLUB (BP-19 T9), the legal pages; their hairlines; 10.5 px, 0.22 em words.
   await check(page, '.n-account__rows', { 'margin-top': 30, 'border-top-width': 1, 'border-top-color': LINE });
-  expect(await page.locator('.n-account__rows .n-row__label').allInnerTexts()).toEqual(['MESSAGES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'PRIVACY · TERMS · LEGAL · HELP']);
+  expect(await page.locator('.n-account__rows .n-row__label').allInnerTexts()).toEqual(['MESSAGES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'THE CLUB', 'PRIVACY · TERMS · LEGAL · HELP']);
   await check(page, '.n-account__rows .n-row', { display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'column-gap': 14, 'padding-top': 16, 'padding-bottom': 16, 'padding-left': 24, 'padding-right': 24, 'border-bottom-width': 1, 'border-bottom-color': LINE, 'font-size': 15 });
   await check(page, '.n-account__rows .n-row__label', { 'font-size': 10.5, 'letter-spacing': em(10.5, 0.22) });
   await check(page, '.n-account__rows .n-row--lead svg', { width: 16, height: 16, 'stroke-width': '1.4px' });

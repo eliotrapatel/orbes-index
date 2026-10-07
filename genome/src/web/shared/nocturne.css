@@ -1573,6 +1573,19 @@ body.nocturne .n-column > * {
   left: 0;
 }
 
+/* IN USE (plan NEXT-NINE, BP-19 T10): the credit, the yearly care, the welcome gift, as `.kv` rows; the credit's note. */
+.n-account__in-use {
+  margin-top: 18px;
+}
+
+.n-account__in-use-rows {
+  margin-top: 6px;
+}
+
+.n-account__in-use-note {
+  margin-top: 10px;
+}
+
 .n-account__next-label {
   margin-top: 20px;
   color: var(--vault-ink);
@@ -1640,6 +1653,24 @@ html.n-locked body {
   color: var(--vault-soft);
   font-size: var(--n-fs-micro);
   letter-spacing: var(--n-track-micro);
+}
+
+/* THE CLUB (plan NEXT-NINE, BP-19 T9): a line of its own above the legal pages (30 px under it, so the two 44 px zones
+   clear each other), in the app; its 44 px zone given back. */
+.n-foot__club {
+  margin-top: 30px;
+  color: var(--vault-soft);
+  font-size: var(--n-fs-micro);
+  letter-spacing: var(--n-track-micro);
+}
+
+.n-foot__club-link {
+  display: inline-block;
+  margin: -14.5px -9px -14.5px 0;
+  padding: 14.5px 9px 14.5px 0;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
 }
 
 /* Each link's 44 px zone: padding above and below its word and after it (into the 22 px between two), given back. */

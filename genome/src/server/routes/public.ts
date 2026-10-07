@@ -4,7 +4,8 @@
  * (F-04), the lookbook of the models (P-R02: the PUBLIC ones and their
  * sheets), the drops (P-R03: the releases to come, a release's page
  * and, once drawn, its entries by rank), THE RELEASES' PAST (plan LIVE
- * RELEASE+, choice 5: the releases ended), the report a customer may attach
+ * RELEASE+, choice 5: the releases ended), THE CLUB (plan NEXT-NINE, BP-19
+ * T9: the tiers and what each gives), the report a customer may attach
  * to a scan that was not authentic, and the ownership certificate an owner
  * shares (F-06: its live record and its PDF, by the token of the link).
  *
@@ -201,6 +202,14 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     const page = await ctx.services.pastReleases.page(pageOf(request.query));
     reply.header('cache-control', DROPS_CACHE_CONTROL);
     return page;
+  });
+
+  // THE CLUB (plan NEXT-NINE, BP-19 T9; §8.12): every tier, from how many pieces, what its program gives and its words,
+  // the credit's currency and the welcome gifts; the same for everyone, no account named. Kept a minute.
+  app.get('/api/v1/the-club', async (_request, reply) => {
+    const club = await ctx.services.club.theClub();
+    reply.header('cache-control', DROPS_CACHE_CONTROL);
+    return club;
   });
 
   app.post('/api/v1/verify', { config: { rateGroup: 'verify' } }, async (request, reply) => {

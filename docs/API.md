@@ -590,6 +590,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/v1/live/:id/board` | — (the board link's secret) | origin only | live | 8.10 |
 | POST | `/api/v1/live/:id/board/stream` | — (the board link's secret) | origin only | live | 8.10 |
 | GET | `/api/v1/releases/past` | — | — | api | 8.11 |
+| GET | `/api/v1/the-club` | — | — | api | 8.12 |
 | POST | `/api/v1/verify` | — (account cookie optional; a console cookie makes it a staff scan, §9.7) | — | verify | 9 |
 | POST | `/api/v1/reports` | — (account cookie optional) | origin only | verify | 8.5 |
 | POST | `/api/v1/certificates/lookup` | — | — | verify | 8.7 |
@@ -1271,6 +1272,27 @@ No count of entries, of pieces confirmed or left, no reason of the end, no inter
 
 Errors: `429 RATE_LIMITED`.
 
+### 8.12 THE CLUB: `GET /api/v1/the-club` (extension of the contract)
+
+Plan NEXT-NINE, BP-19 T9 (`routes/public.ts`, `services/club.ts` `theClub`). The tiers and what each gives, the same for everyone: no session, no account named, `Cache-Control: public, max-age=60`.
+
+```json
+{
+  "tiers": [
+    { "name": "TITANE", "level": 1, "pieces": 1, "lines": ["The owners’ circle: its notes, its invitations and its polls.", "Priority in the draw of each release, before the accounts that hold no piece."] },
+    { "name": "PLATINE", "level": 2, "pieces": 5, "lines": ["Early access to each draw: a place reserved directly 2 hours before entries open to everyone, unless its page says otherwise.", "Free shipping on every order.", "…"] },
+    { "name": "PALLADIUM", "level": 3, "pieces": 10, "lines": ["…", "Special commissions, made for you by the ORBES atelier.", "A yearly visit to the ORBES atelier."] }
+  ],
+  "tierThresholds": [1, 5, 10],
+  "creditCurrency": "EUR",
+  "gifts": [ { "tier": "PALLADIUM", "model": "ORBITAL CHARM", "imageUrl": "/api/v1/media/4b1a…" } ]
+}
+```
+
+`pieces`: the pieces held now each tier starts from (`CLUB_TIER_THRESHOLDS`, a constant of the code); `lines`: what the tier adds, THE PROGRAM's lines first (§16.21, `programLines`: its early access, shipping, yearly care, the priority with Client Services on the tier it starts from, its welcome gift while its model is active, its credit, the experiences of the circle on the tier each invites from), then the tier's words (§16.21, the Tiers tab; PLATINE's are none by default); `creditCurrency`: the one currency the credit applies to (THE PROGRAM's `creditCurrency`); `gifts`: each tier's welcome gift while its model is active, its name and its reference photograph (`null` without one).
+
+In the verify app: **THE CLUB** (`/verify/club`), linked from the footer (above the legal pages, in the app) and from the account sheet (a row under MY PIECES): the figures of the lead and of each tier read from here, never typed into the app's words; a plate per tier (its name, FROM n PIECES, its lines, its gift's photograph); HOW THE TIERS WORK (*The credit applies to orders in euros.* from `creditCurrency`); then *YOUR TIER: PLATINE · 6 PIECES HELD* (the account sheet), *YOUR FIRST PIECE OPENS TITANE* (MY PIECES) or *SIGN IN TO SEE YOUR TIER* (MY PIECES' sign-in). The page has no link to HOW RELEASES WORK.
+
 ## 9. Verification: `POST /api/v1/verify`
 
 Submits a decoded ORBES CODE and returns the public verification outcome. No session is required and no CSRF token is needed. If the request carries a valid `orbes_session` cookie, the server uses it only to recognise the current owner and, for a reader who is not the owner of a piece whose transfer is pending, to give the scan's transfer token (`transfer`, §9.2, F-03). If it carries a console session (`orbes_admin`) the console would let in, the scan is a **staff scan** (§9.7): recorded as `ADMIN_TEST` under that console user, outside `UNSOLD_PIECE_SCAN` and the history rules (the code's own findings of steps 6–7 are still recorded), without a registration or transfer token. Rate group `verify` (60 per minute per client by default). Each processed request is recorded as a scan event and feeds anomaly scoring (a staff scan only reads it).
@@ -1903,6 +1925,8 @@ P-R03, P-X02 and P-X04 (`routes/club.ts`, `services/club.ts`, `services/drops.ts
 
 **`GET /api/v1/club/status`, 200**: the account's standing now, the benefits of its tier and the next tier (P-X04), and its entries in the published releases, the latest opening first (at most 50). Open to any signed-in account, owner or not; `/api/v1/account/me` (§10.4) does not change.
 
+Plan NEXT-NINE, BP-19 T10: `program`, what THE PROGRAM gives the account's tier now (`effectiveProgramLines`: the early access, the shipping and the care of its own tier, the priority from the tier it starts from, the welcome gift and the credit of its own tier only, the experiences it is invited to; `[]` without a tier), before the tiers' words (`benefits`, which keeps its meaning); `next.program`, what the next tier's program adds. `inUse`, its benefits in use: `credit` the credit left (its grants usable now, the tier held and not expired, in one currency; PALLADIUM's first) and the earliest expiry, or `null`; `care` the yearly care of the year (UTC), `{ year, used, allowance }` (`allowance` a number or `"ALL"`), `null` when its tier gives none; `gifts` a PENDING welcome gift only while its tier is held and has an active gift model (the condition the next order's gift follows), WITH_ORDER with the reference of the order it travels with until it is DELIVERED. In the verify app: YOUR TIER's IN USE (*CREDIT € 50 · UNTIL 6 OCT 2027*, *YEARLY CARE 0 OF 1 PIECE IN 2026* or *EVERY PIECE · 2 IN 2026*, *WELCOME GIFT WITH YOUR NEXT ORDER* or *WITH ORDER OR-…*; the credit's note), shown only when a row exists, then the program's lines and the tiers' words; NEXT's program's lines and words.
+
 ```json
 {
   "tier": { "level": 2, "name": "PLATINE" },
@@ -1910,16 +1934,28 @@ P-R03, P-X02 and P-X04 (`routes/club.ts`, `services/club.ts`, `services/drops.ts
   "seniority": 1,
   "benefits": [
     "The owners’ circle: its notes, its invitations and its polls.",
-    "Priority in the draw of each release, before the accounts that hold no piece.",
-    "Priority care for your pieces with ORBES Client Services.",
-    "Early access to each release: a place reserved directly before it opens to everyone, 48 hours ahead unless its page says otherwise."
+    "Priority in the draw of each release, before the accounts that hold no piece."
   ],
+  "program": [
+    "Early access to each draw: a place reserved directly 2 hours before entries open to everyone, unless its page says otherwise.",
+    "Free shipping on every order.",
+    "The yearly care of 1 piece a year by the ORBES atelier, asked for from the piece, with a prepaid label both ways.",
+    "Priority with ORBES Client Services: your messages are read first.",
+    "A credit of € 50, valid 12 months, on a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.",
+    "The members’ evening, once a year, by invitation in THE CIRCLE."
+  ],
+  "inUse": {
+    "credit": { "balanceMinor": 5000, "currency": "EUR", "expiresAt": "2027-10-06T09:00:00.000Z" },
+    "care": { "year": 2026, "used": 0, "allowance": 1 },
+    "gifts": [ { "tier": "PLATINE", "model": "ORBITAL CHARM", "state": "PENDING", "orderReference": null } ]
+  },
   "next": {
     "level": 3,
     "name": "PALLADIUM",
     "pieces": 10,
     "missing": 4,
-    "benefits": ["Special commissions, made for you by the ORBES atelier.", "A yearly visit to the ORBES atelier."]
+    "benefits": ["Special commissions, made for you by the ORBES atelier.", "A yearly visit to the ORBES atelier."],
+    "program": ["Early access to each draw: a place reserved directly 4 hours before entries open to everyone, unless its page says otherwise.", "…"]
   },
   "tierThresholds": [1, 5, 10],
   "entries": [
@@ -3489,6 +3525,7 @@ AUDITOR. The owner's sheet for ORBES Client Services (A-06): what they need whil
   - `notes`: the notes ORBES Client Services wrote on its orders' steps, its draw entries, its requests of the private salon closed and its LIVE reservations concluded, the latest first: `{ "at", "about": "ORDER" | "DRAW" | "SALON" | "LIVE", "subject", "orderId", "text", "by" }`, `subject` the order's reference, the release's title or the model's name, `by` the console user's email (`null` for a script).
   Never the buyer's name and address (on the order's page, §16.24) nor an engraving's words. An AUDITOR reads the account's email masked, the rest as an OPERATOR.
 - `messages` (plan NEXT-NINE, CS-01): the account's conversation with ORBES Client Services, `{ "conversationId", "status": "TO_ANSWER" | "ANSWERED" | "CLOSED" }`, or `null` when it never wrote (§16.28).
+- `club` (plan NEXT-NINE, BP-19 T10): `{ "tier", "grants": [{ "tier", "kind": "GIFT" | "CREDIT", "grantedAt", "amountMinor", "balanceMinor", "currency", "expiresAt", "gift": { "state": "PENDING" | "WITH_ORDER" | "DELIVERED", "orderId", "orderReference" } | null }], "careThisYear": { "year", "used", "allowance", "open": { "id", "productId" } | null } | null }`: what the tier program gave the account (PLATINE's first) and the yearly care of the year (`null` when its tier gives none and none is open). The console's *Club* lines under the tier: *Credit PLATINE € 50, € 50 left, until 06 OCT 2027*, *Welcome gift PLATINE: pending* (*with OR-…*, a link to that order; *delivered*), *Yearly care: 2026: 0 of 1* (an open request linked).
 
 Errors: `400 VALIDATION_FAILED` (malformed id), `404 ACCOUNT_NOT_FOUND`.
 

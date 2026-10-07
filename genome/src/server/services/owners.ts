@@ -74,7 +74,8 @@ import { normalizeEmail } from './auth.js';
 import { accountCircleData, type ExportedCircleAnswer, type ExportedCircleVote } from './circle.js';
 import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
-import { accountCareRequests, type ExportedCareRequest } from './care.js';
+import { accountCareRequests, careThisYear, type CareAllowance, type ExportedCareRequest } from './care.js';
+import { accountGrants, creditBalances } from './tier-grants.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
 import { participatedReleases, releasesTakenPart } from './participation.js';
@@ -256,6 +257,26 @@ export interface OwnerSheet {
   notes: ClientNote[];
   /** CS-01: the account's conversation with ORBES Client Services, its status; null when it never wrote. */
   messages: { conversationId: string; status: ClientConversationStatus } | null;
+  /** BP-19 T10: the account's Club block (ownerClub). */
+  club: OwnerClub;
+}
+
+/** BP-19 T10: what the tier program gave the account and what is in use (the console's Club block). */
+export interface OwnerClub {
+  tier: ClubTierName | null;
+  /** Its grants, PLATINE's first: a credit with what is left and until when; a gift, pending, with an order, or delivered. */
+  grants: {
+    tier: ClubTierName;
+    kind: 'GIFT' | 'CREDIT';
+    grantedAt: Date;
+    amountMinor: number | null;
+    balanceMinor: number | null;
+    currency: string | null;
+    expiresAt: Date | null;
+    gift: { state: 'PENDING' | 'WITH_ORDER' | 'DELIVERED'; orderId: string | null; orderReference: string | null } | null;
+  }[];
+  /** Its yearly care of the year, and the open request (a link to it); null when its tier gives none and none is open. */
+  careThisYear: { year: number; used: number; allowance: CareAllowance; open: { id: string; productId: string } | null } | null;
 }
 
 export interface LockOutcome {
@@ -452,6 +473,43 @@ export class OwnerService {
     return this.summaries({ kind: 'all' }, page);
   }
 
+  /** The account's Club block (BP-19 T10): its grants with their balances and gifts, its yearly care of the year. */
+  private async ownerClub(accountId: string, tier: ClubTier, now: Date): Promise<OwnerClub> {
+    const [grants, balances, care] = await Promise.all([accountGrants(this.db, accountId), creditBalances(this.db, accountId), careThisYear(this.db, accountId, now)]);
+    const giftIds = grants.filter((g) => g.kind === 'GIFT').map((g) => g.id);
+    const giftOrders = giftIds.length
+      ? await this.db.selectFrom('orders').select(['gift_grant_id', 'status', 'with_order_id']).where('gift_grant_id', 'in', giftIds).where('status', '<>', 'CANCELLED').execute()
+      : [];
+    return {
+      tier: tierName(tier),
+      grants: grants
+        .slice()
+        .sort((a, b) => a.tier - b.tier || (a.kind < b.kind ? 1 : -1))
+        .map((g) => {
+          const balance = balances.find((b) => b.grantId === g.id);
+          const order = giftOrders.find((o) => o.gift_grant_id === g.id);
+          return {
+            tier: tierName(g.tier as ClubTier)!,
+            kind: g.kind,
+            grantedAt: g.granted_at,
+            amountMinor: g.amount_minor,
+            balanceMinor: balance ? balance.balanceMinor : null,
+            currency: g.currency,
+            expiresAt: g.expires_at,
+            gift:
+              g.kind === 'GIFT'
+                ? {
+                    state: !order ? 'PENDING' : order.status === 'DELIVERED' || order.status === 'RETURNED' ? 'DELIVERED' : 'WITH_ORDER',
+                    orderId: order?.with_order_id ?? null,
+                    orderReference: order?.with_order_id ? orderReference(order.with_order_id) : null,
+                  }
+                : null,
+          };
+        }),
+      careThisYear: care.allowance === 0 && !care.open ? null : { year: care.year, used: care.used, allowance: care.allowance, open: care.open },
+    };
+  }
+
   /** One account's sheet: the account, its pieces, its transfers in progress and its latest scans. */
   async sheet(accountId: string): Promise<OwnerSheet> {
     assertAccountId(accountId);
@@ -483,10 +541,12 @@ export class OwnerService {
       this.client(owner.id, now),
       accountConversation(this.db, owner.id),
     ]);
+    const club = await this.ownerClub(owner.id, standing.tier, now);
     return {
       ...client,
       owner,
       tier: { level: standing.tier, name: tierName(standing.tier), pieces: standing.pieces, seniority: standing.seniority },
+      club,
       pieces,
       transfers: transfers.map((t) => ({ id: t.id, productId: t.product_id, createdAt: t.created_at, expiresAt: t.expires_at })),
       scans: scans.map((s) => ({

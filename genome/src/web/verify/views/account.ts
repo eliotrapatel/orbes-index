@@ -8,7 +8,9 @@
  *   you@example.com
  *   YOUR TIER                             the club's tier (P-X04), moved here from MY PIECES (decision 10): the tier
  *   TITANE                2 pieces held   and the pieces it counts, its ten dots (one per piece up to PALLADIUM,
- *   ● ● ○ ○ ○ ○ ○ ○ ○ ○                   TIER_DOTS), the benefits of the tier and of those below it, NEXT and
+ *   ● ● ○ ○ ○ ○ ○ ○ ○ ○                   TIER_DOTS), IN USE (plan NEXT-NINE, BP-19 T10: the credit, the yearly
+ *   IN USE  CREDIT  € 50 · UNTIL …        care, the welcome gift, when a row exists), the program's lines and the
+ *                                         benefits of the tier and of those below it, NEXT and
  *                                         what it adds (PALLADIUM: the highest); without a
  *   – The owners' circle: …               tier, THE CLUB and what a first piece opens; a piece revoked or retired
  *   NEXT: PLATINE                         counts for none (the note); nothing when the status cannot be read
@@ -20,6 +22,7 @@
  *   SOUND                         (●)     the sound signature (P-D07), as the footer's SOUND ON / OFF
  *   CHANGE PASSWORD                 ›     its form in the sheet (C39): the current password, a new one; CANCEL
  *   MY PIECES                       ›
+ *   THE CLUB                        ›     the tiers and what each gives (BP-19 T9), in the app
  *   PRIVACY · TERMS · LEGAL · HELP  ›     the legal pages' index, in a new tab
  *   [            SIGN OUT            ]
  *
@@ -34,14 +37,15 @@
 import { h } from '../../shared/dom.js';
 import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { ACCOUNT, ACCOUNT_PASSWORD, MESSAGES, PIECES, SOUND } from '../copy.js';
+import { ACCOUNT, ACCOUNT_PASSWORD, MESSAGES, PIECES, SOUND, TIER } from '../copy.js';
+import { CLUB_PATH } from '../club-model.js';
 import { messageProblem, threadModel, type ConcerningTarget, type ThreadModel } from '../messages-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSwitch } from '../sound.js';
 import { tierModel } from '../tier-model.js';
 import type { ClubStatus } from '../types.js';
 import { FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
-import { button, field, icon, leadRow, switchControl, textLink, tierDots } from './nocturne.js';
+import { button, definitionList, field, icon, leadRow, switchControl, textLink, tierDots } from './nocturne.js';
 import { PIECES_PATH, withNumerals } from './common.js';
 
 export interface AccountSheetDeps {
@@ -50,6 +54,8 @@ export interface AccountSheetDeps {
   sound: SoundSwitch;
   /** MY PIECES, in the app. */
   onPieces(): void;
+  /** THE CLUB's page, in the app (plan NEXT-NINE, BP-19 T9). */
+  onTheClub(): void;
   /** The sound was switched here: the footer's SOUND says it too. */
   onSound(): void;
   /** The club's status was read here: the header's tier follows it. */
@@ -220,6 +226,14 @@ export class AccountSheet {
           },
           attrs: { 'data-key': 'pieces' },
         }),
+        leadRow(TIER.club, {
+          href: CLUB_PATH,
+          onOpen: () => {
+            this.close();
+            this.deps.onTheClub();
+          },
+          attrs: { 'data-key': 'club' },
+        }),
         leadRow(ACCOUNT.legal, { href: LEGAL_PATH, newTab: true, attrs: { 'data-key': 'legal' } }),
       ),
       this.notice ? h('p', { class: 'n-err n-account__notice', attrs: { role: 'status' }, text: this.notice }) : null,
@@ -245,6 +259,15 @@ export class AccountSheet {
         ? h('div', { class: 'n-sb n-account__badge', data: { tier: m.badge.name } }, h('span', { class: 'n-g n-t2 n-account__tier-name', text: m.badge.name }), h('span', { class: 'n-sm n-account__tier-pieces', text: m.badge.pieces }))
         : null,
       m.meter ? tierDots(m.meter.on, m.meter.of, { start: true }) : null,
+      m.inUse
+        ? h(
+            'div',
+            { class: 'n-account__in-use', attrs: { 'aria-labelledby': 'account-in-use' } },
+            h('p', { class: 'n-g n-lb n-account__in-use-label', id: 'account-in-use', text: m.inUse.label }),
+            definitionList(m.inUse.rows, { kind: 'kv', extraClass: 'n-account__in-use-rows' }),
+            m.inUse.note ? h('p', { class: 'n-sm n-account__in-use-note', text: m.inUse.note }) : null,
+          )
+        : null,
       list(m.benefits),
       m.next
         ? h(

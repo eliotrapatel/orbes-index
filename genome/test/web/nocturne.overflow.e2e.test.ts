@@ -33,7 +33,11 @@ const NARROW_STATES = /^(collection|model|releases|live-|draw|circle|post|legal|
  * MY PIECES' sign-in refused (C18) and the French legal pages, their four tabs on two lines (C23, C41); N9's
  * could-not-be-shown of MY PIECES, a piece, THE CIRCLE and a post, each with the reason the browser gives (C40).
  */
-const NARROW_TOO = ['releases', 'live-veiled', 'circle', 'post-invitation', 'post-poll', 'post-poll-voted', 'pieces-sign-in-refused', 'legal-terms-fr', 'legal-faq-fr', 'pieces-failed', 'piece-failed', 'circle-failed', 'post-failed'];
+const NARROW_TOO = [
+  'releases', 'live-veiled', 'circle', 'post-invitation', 'post-poll', 'post-poll-voted', 'pieces-sign-in-refused', 'legal-terms-fr', 'legal-faq-fr', 'pieces-failed', 'piece-failed', 'circle-failed', 'post-failed',
+  // The tier program (plan NEXT-NINE, BP-19): THE CLUB, IN USE and the yearly care's block at 375, 360 and 320 px too.
+  'club', 'club-platine', 'account-sheet-in-use', 'piece-care-request', 'piece-care-requested', 'piece-care-label', 'piece-care-returning',
+];
 
 /** What overflowed at 5efd4c9 on purpose: a state, the start of the line overflows() writes, and why. */
 const KNOWN: readonly { state: string; starts: string; reason: string }[] = [

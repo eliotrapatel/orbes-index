@@ -37,6 +37,7 @@
  *                    is the fragment, which no request line or proxy log holds;
  *   /verify/lookbook          THE COLLECTION, the lookbook of the models (P-R02);
  *   /verify/lookbook/<slug>   a model's sheet (an address that is none: the lookbook);
+ *   /verify/club              THE CLUB, the tiers and what each gives (plan NEXT-NINE, BP-19 T9);
  *   /verify/releases          THE RELEASES, the drops ORBES announces (P-R03);
  *   /verify/releases/<id>     a release's page, its entry and its draw, or a LIVE RELEASE's (an address that is none: the list);
  *   /verify/releases/<id>/board#…  a LIVE RELEASE's boutique board, its secret the fragment: a screen of its own, with no
@@ -76,6 +77,7 @@ import { SoundSignature } from './sound.js';
 import type { ClientServices, LiveEndedSheet, LiveSheet, VerifyInput } from './types.js';
 import { certificateTokenOf } from './certificate-model.js';
 import { CIRCLE_PATH, circlePostPath, circleRouteOf } from './circle-model.js';
+import { CLUB_PATH, isClubPath } from './club-model.js';
 import { lookbookRouteOf, lookbookSheetPath } from './lookbook-model.js';
 import { boardTokenOf } from './board-model.js';
 import { afterRoomPath, releasePath, releasesRouteOf, RELEASES_PATH } from './releases-model.js';
@@ -84,6 +86,7 @@ import { orderReference, type ConcerningTarget } from './messages-model.js';
 import { boardView } from './views/board.js';
 import { certificateView } from './views/certificate.js';
 import { circlePostView, circleView } from './views/circle.js';
+import { clubView } from './views/club.js';
 import { CERTIFICATE_PATH, LANDING_PATH, LOOKBOOK_PATH, PIECES_PATH } from './views/common.js';
 import { messageOf } from './views/forms.js';
 import { liveView } from './views/live.js';
@@ -99,23 +102,23 @@ import { scanView, type ScanView } from './views/scanning.js';
 import { Shell } from './views/shell.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club';
 
 /**
  * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
  * sheet, the releases or a release's page, the circle or a post.
  */
-type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost';
+type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club';
 
 /** The entries above the landing that a scan, MY PIECES or a list takes the place of (their own address goes with them). */
-const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost'];
+const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club'];
 
 /**
  * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, the releases, a
  * release's page, the circle, a post, or the landing (also for a path the app does not know). In any case: the
  * certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' {
+function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === PIECES_PATH) return 'pieces';
   // A piece of MY PIECES; under /verify/pieces, an address that is none is MY PIECES.
@@ -126,6 +129,8 @@ function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificat
   if (releases) return releases.board ? 'board' : releases.release ? 'release' : 'releases';
   const circle = circleRouteOf(path);
   if (circle) return circle.post ? 'circlePost' : 'circle';
+  // THE CLUB (plan NEXT-NINE, BP-19 T9), built like the lookbook.
+  if (isClubPath(path)) return 'club';
   return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
 }
 
@@ -299,6 +304,8 @@ class App {
         if (!(this.screen === 'circlePost' && this.postId === id)) void this.showCirclePost(id);
       } else if (entry === 'circle' || route === 'circle') {
         if (this.screen !== 'circle') void this.showCircle();
+      } else if (entry === 'club' || route === 'club') {
+        if (this.screen !== 'club') void this.showClub();
       } else if (this.screen !== 'landing') void this.showLanding();
     });
     // A certificate's fragment changed in place (pasted, edited): the certificate of the new one.
@@ -325,6 +332,7 @@ class App {
           else this.openPieces({ tab: 'pieces' });
         },
         onSignIn: () => this.openPieces(),
+        onTheClub: () => this.openClub(),
         onScan: () => void this.startScan(),
         onConcerning: (target) => this.openConcerning(target),
         onMessagesRead: () => {
@@ -401,6 +409,13 @@ class App {
       } else if (!id && location.pathname !== CIRCLE_PATH) replaceEntry({ screen: 'circle' }, CIRCLE_PATH);
       if (id) void this.showCirclePost(id, false);
       else void this.showCircle(false);
+    } else if (route === 'club') {
+      // THE CLUB over the landing, as the lookbook: its own address put back.
+      if (entryOf(history.state) !== 'club') {
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'club' }, CLUB_PATH);
+      } else if (location.pathname !== CLUB_PATH) replaceEntry({ screen: 'club' }, CLUB_PATH);
+      void this.showClub(false);
     } else {
       replaceEntry({ screen: 'landing' }, location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
       void this.showLanding(false);
@@ -528,6 +543,17 @@ class App {
     if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle') replaceEntry({ screen: 'circle' }, CIRCLE_PATH);
     else pushEntry({ screen: 'circle' }, CIRCLE_PATH);
     void this.showCircle();
+  }
+
+  /**
+   * THE CLUB (plan NEXT-NINE, BP-19 T9), from the footer or the account sheet: over the current entry, or in the place of
+   * a chapter's (as the rail's chapters take each other's).
+   */
+  private openClub(): void {
+    const entry = entryOf(history.state);
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle' || entry === 'club') replaceEntry({ screen: 'club' }, CLUB_PATH);
+    else pushEntry({ screen: 'club' }, CLUB_PATH);
+    void this.showClub();
   }
 
   /** A post of the circle, over the feed's entry (from a post of the feed). Back from it returns to the feed. */
@@ -733,6 +759,20 @@ class App {
       offsetMinutes: -new Date().getTimezoneOffset(),
     });
     if (await this.swap(view.root, 'circlePost', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** THE CLUB (plan NEXT-NINE, BP-19 T9): the tiers and what each gives, for everyone; signed in, the way to its own. */
+  private async showClub(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    const view = clubView({
+      api: this.api,
+      session: this.session,
+      onAccount: (trigger) => this.shell?.sheet.open(trigger),
+      onPieces: () => this.openPieces(),
+    });
+    if (await this.swap(view.root, 'club', focus)) this.live = view;
     else view.dispose();
   }
 

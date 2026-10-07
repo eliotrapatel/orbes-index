@@ -88,8 +88,8 @@ const named =
     names.some((n) => s.id === n || s.id.startsWith(`${n}-`));
 const full = (s: UiState) => s.variant === 'full';
 const accountMessages = named('account-write', 'account-messages');
-/** The tier program's states (plan NEXT-NINE, BP-19): a piece's YEARLY CARE. */
-const program = named('piece-care');
+/** The tier program's states (plan NEXT-NINE, BP-19) in the full demo: a piece's YEARLY CARE, THE CLUB, IN USE. */
+const program = (s: UiState) => full(s) && !s.mutates && named('piece-care', 'club', 'account-sheet-in-use')(s);
 const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroom-ends'];
 
 /**
@@ -101,9 +101,9 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   scan: (s) => full(s) && !s.mutates && named('now', 'scan', 'photo', 'problem')(s),
   results: (s) => full(s) && !s.mutates && named('result')(s),
   // MY PIECES, and the account sheet (C2: its own, over NOW, in the full, draw-leads and stress demos).
-  pieces: (s) => (full(s) && !s.mutates && named('pieces', 'piece')(s) && !program(s)) || (named('account')(s) && !accountMessages(s)),
-  // The tier program (plan NEXT-NINE, BP-19): a piece's YEARLY CARE at each step, in the full demo.
-  program: (s) => full(s) && !s.mutates && program(s),
+  pieces: (s) => ((full(s) && !s.mutates && named('pieces', 'piece')(s)) || (named('account')(s) && !accountMessages(s))) && !program(s),
+  // The tier program (plan NEXT-NINE, BP-19), in the full demo: a piece's YEARLY CARE at each step, THE CLUB, IN USE.
+  program,
   // The account sheet's MESSAGES and its write sheet (plan NEXT-NINE, CS-01), in the draw-leads demo, in order.
   messages: accountMessages,
   collection: (s) => full(s) && !s.mutates && named('collection', 'model')(s),

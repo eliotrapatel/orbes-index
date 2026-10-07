@@ -70,6 +70,7 @@ import { genomeLayout } from '../../src/core/genome/render.js';
 import { frameCodeData, unframeCodeData } from '../../src/core/payload.js';
 import { certificateLinkLettering } from '../../src/server/render/certificate.js';
 import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
+import { DEFAULT_PROGRAM, effectiveProgramLines, programLines } from '../../src/server/services/club-program.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { CEREMONY, CIRCLE, CLAIM_HELD, LOOKBOOK as LOOKBOOK_COPY, ORBES_CARE, RECEIVING, RELEASES, RESALE_ACTION, RESALE_GUIDANCE, STAFF_SCAN_NOTE } from '../../src/web/verify/copy.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
@@ -472,7 +473,15 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await legalLinksOf(footer)).toEqual(FOOT);
     await attrOf(footer.getByRole('link', { name: 'IP Geolocation by DB-IP' }), 'href', 'https://db-ip.com');
     await attrOf(footer.getByRole('link', { name: 'IP Geolocation by DB-IP' }), 'target', '_blank');
-    for (const a of await footer.getByRole('link').all()) await attrOf(a, 'rel', 'noopener');
+    for (const a of await footer.getByRole('link').all()) {
+      // THE CLUB (plan NEXT-NINE, BP-19 T9) is a page of the app: the same tab.
+      if ((await a.innerText()).trim() === 'THE CLUB') {
+        await attrOf(a, 'href', '/verify/club');
+        expect(await a.getAttribute('target')).toBeNull();
+        continue;
+      }
+      await attrOf(a, 'rel', 'noopener');
+    }
     // Words in the display face, under the screen and its actions, in the page's flow.
     const privacy = footer.getByRole('link', { name: 'PRIVACY' });
     expect(await privacy.evaluate((el) => getComputedStyle(el).fontFamily)).toMatch(/^"?Gravesend Sans"?/);
@@ -2737,7 +2746,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(page.locator('.pieces__releases .pieces__entry-state'), 'ENTRIES OPEN SOON · PLACE RESERVED');
     await openAccount(page);
     await textOf(page.locator('.n-account__tier-name'), 'PLATINE');
-    await countOf(page.locator('.n-account__benefits:not(.n-account__benefits--next) .n-account__benefit', { hasText: 'Early access to each release' }), 1);
+    await countOf(page.locator('.n-account__benefits:not(.n-account__benefits--next) .n-account__benefit', { hasText: 'Early access to each draw' }), 1);
     await page.keyboard.press('Escape');
     await countOf(page.locator('.pieces__early:not([hidden])'), 0);
     await countOf(page.locator('.pieces__early-text'), 0);
@@ -2761,7 +2770,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(other.page.locator('.pieces__early:not([hidden])'), 0);
     await openAccount(other.page);
     await textOf(other.page.locator('.n-account__next-label'), 'NEXT: PLATINE');
-    await countOf(other.page.locator('.n-account__benefits--next .n-account__benefit', { hasText: 'Early access to each release' }), 1);
+    await countOf(other.page.locator('.n-account__benefits--next .n-account__benefit', { hasText: 'Early access to each draw' }), 1);
     await other.page.keyboard.press('Escape');
     await other.page.goto(`${srv.origin}/verify/circle`);
     await textOf(other.page.locator('.circle__early .circle__early-label'), 'EARLY ACCESS');
@@ -2817,16 +2826,21 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     expect(await tier.locator('.n-account__tier-pieces').evaluate((el) => getComputedStyle(el).fontFamily)).not.toMatch(/Gravesend/);
     await countOf(tier.locator('.n-meter__dot'), 10);
     await countOf(tier.locator('.n-meter__dot.is-on'), 5);
-    // The benefits of TITANE and PLATINE, then PALLADIUM: five more pieces, and what ORBES says it adds.
+    // IN USE (plan NEXT-NINE, BP-19 T10): PLATINE's credit and its yearly care of the year.
+    await textsOf(tier.locator('.n-account__in-use .n-kv__label'), ['CREDIT', 'YEARLY CARE']);
+    // The program's lines of PLATINE, then the benefits of TITANE and PLATINE (none by default), then PALLADIUM: five
+    // more pieces, its program's lines and what ORBES says it adds.
     await textsOf(tier.locator('.n-account__benefits:not(.n-account__benefits--next) .n-account__benefit'), [
+      ...effectiveProgramLines(DEFAULT_PROGRAM, 2),
       ...CLUB_TIER_DEFAULT_BENEFITS.TITANE.split('\n'),
-      ...CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n'),
-    ]);
+      ...CLUB_TIER_DEFAULT_BENEFITS.PLATINE.split('\n').filter(Boolean),
+    ].map(norm));
     await textOf(tier.locator('.n-account__next-label'), 'NEXT: PALLADIUM');
     await textOf(tier.locator('.n-account__next-way'), '5 more pieces registered to your account open PALLADIUM, from 10 pieces held. It adds:');
-    await textsOf(tier.locator('.n-account__benefits--next .n-account__benefit'), ['A commission of your own.', 'A yearly visit to the atelier.']);
-    // Then MESSAGES (plan NEXT-NINE, CS-01), SOUND, CHANGE PASSWORD, MY PIECES, the legal pages (their index, a new tab), SIGN OUT.
-    await textsOf(sheet.locator('.n-row__label'), ['MESSAGES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'PRIVACY · TERMS · LEGAL · HELP']);
+    await textsOf(tier.locator('.n-account__benefits--next .n-account__benefit'), [...programLines(DEFAULT_PROGRAM, 3), 'A commission of your own.', 'A yearly visit to the atelier.'].map(norm));
+    // Then MESSAGES (plan NEXT-NINE, CS-01), SOUND, CHANGE PASSWORD, MY PIECES, THE CLUB (BP-19 T9), the legal pages
+    // (their index, a new tab), SIGN OUT.
+    await textsOf(sheet.locator('.n-row__label'), ['MESSAGES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'THE CLUB', 'PRIVACY · TERMS · LEGAL · HELP']);
     await attrOf(sheet.getByRole('link', { name: 'PRIVACY · TERMS · LEGAL · HELP' }), 'href', '/legal');
     await attrOf(sheet.getByRole('link', { name: 'PRIVACY · TERMS · LEGAL · HELP' }), 'target', '_blank');
     await attrOf(sheet.getByRole('link', { name: 'MY PIECES' }), 'href', '/verify/pieces');

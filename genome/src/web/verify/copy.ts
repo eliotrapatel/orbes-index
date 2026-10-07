@@ -552,6 +552,54 @@ export const TIER = Object.freeze({
   top: 'PALLADIUM is the highest tier of the club.',
   /** Shown when MY PIECES lists more pieces than the tier counts: a piece revoked or retired by ORBES counts for none. */
   counted: 'A piece revoked or retired by ORBES counts for no tier.',
+  /** The benefits in use (plan NEXT-NINE, BP-19 T10): shown only when a row exists. */
+  inUse: 'IN USE',
+  credit: 'CREDIT',
+  creditValue: (amount: string, date: string) => `${amount} · UNTIL ${date}`,
+  /** Under the rows, when a credit exists. */
+  creditNote: 'ORBES Client Services takes it off the invoice of a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.',
+  care: 'YEARLY CARE',
+  careOf: (used: number, allowance: number, year: number) => `${used} OF ${allowance} ${allowance === 1 ? 'PIECE' : 'PIECES'} IN ${year}`,
+  careAll: (used: number, year: number) => `EVERY PIECE · ${used} IN ${year}`,
+  gift: 'WELCOME GIFT',
+  giftNext: 'WITH YOUR NEXT ORDER',
+  giftWith: (ref: string) => `WITH ORDER ${ref}`,
+  /** The account sheet's row under MY PIECES, and the footer's line: THE CLUB's page. */
+  club: 'THE CLUB',
+});
+
+/**
+ * THE CLUB (plan NEXT-NINE of 2026-10-06, §3.2 BP-19 T9; /verify/club): a public page that explains the tiers, their
+ * figures and their benefits read from the server (GET /api/v1/the-club), never typed here. Signed in, the account's
+ * own tier; without a tier, what its first piece opens; signed out, the sign-in.
+ */
+const CURRENCY_WORDS: Readonly<Record<string, string>> = Object.freeze({ EUR: 'euros', GBP: 'pounds sterling', USD: 'US dollars', CHF: 'Swiss francs' });
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+export const CLUB_PAGE = Object.freeze({
+  title: 'THE CLUB',
+  /** The figures of the tiers, as the server holds them (CLUB_TIER_THRESHOLDS). */
+  lead: (titane: number, platine: number, palladium: number) =>
+    `Your tier is set by the pieces registered to your ORBES account now: TITANE from ${plural(titane, 'piece', 'pieces')}, PLATINE from ${platine}, PALLADIUM from ${palladium}.`,
+  /** Under a tier's name. */
+  from: (n: number) => `FROM ${plural(n, 'PIECE', 'PIECES')}`,
+  /** A welcome gift's photograph. */
+  giftAlt: (model: string) => `${model}, photographed by ORBES`,
+  how: 'HOW THE TIERS WORK',
+  follows: 'Your tier follows the pieces registered to you at every moment: a piece passed on, revoked or retired by ORBES counts for no tier, and your tier follows at once.',
+  once: 'The welcome gift and the credit are given once per tier and per account.',
+  currency: (code: string) => `The credit applies to orders in ${CURRENCY_WORDS[code] ?? code}.`,
+  shipping: 'Free shipping applies to deliveries, not to returns.',
+  draws: 'Each draw’s page gives its own early access times.',
+  /** Signed in with a tier: the account sheet. */
+  yourTier: (name: string, pieces: number) => `YOUR TIER: ${name} · ${plural(pieces, 'PIECE', 'PIECES')} HELD`,
+  /** Signed in without a tier: MY PIECES. */
+  first: 'YOUR FIRST PIECE OPENS TITANE',
+  /** Signed out: MY PIECES' sign-in. */
+  signIn: 'SIGN IN TO SEE YOUR TIER',
+  loading: 'ONE MOMENT…',
+  failed: 'The club could not be shown just now.',
+  retry: 'TRY AGAIN',
 });
 
 /**
