@@ -53,8 +53,8 @@
  *
  * THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01; services/guarantees.ts): the
  * sheet lists the account's guarantees (`guarantees`), each with its note; the
- * export carries every one, shown to the client or not, with its note (the
- * right of access). A lock unbinds a guarantee from the entries it withdraws or
+ * export carries every one, shown to the client or not, with its notes, the
+ * grant's and the revocation's (the right of access). A lock unbinds a guarantee from the entries it withdraws or
  * removes and never revokes it.
  *
  * The one-time recovery code of the sheet is AccountRecoveryService's (C-04),
@@ -403,7 +403,7 @@ export interface AccountExport {
   careRequests: ExportedCareRequest[];
   /**
    * The house's guarantees granted to the account (plan NEXT-NINE, IN-01), oldest first: every one, shown to the client
-   * or not, with Client Services' note (the right of access requires it); never who granted it.
+   * or not, with Client Services' notes, the grant's and the revocation's (the right of access requires them); never who granted it.
    */
   guarantees: ExportedGuarantee[];
   /**

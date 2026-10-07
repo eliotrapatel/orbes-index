@@ -971,6 +971,36 @@ describe('LiveService', () => {
       await rejects(f.live.enter(third.id, r.id, { sizeId: r.sizes[1]!.id }, third.actor), 'LIVE_GUARANTEE_SIZE_FULL', 409);
     });
 
+    it('a guarantee not shown never refuses its holder a size: where the size cannot serve it, the entry is an ordinary one, within the per collector, the guarantee set aside still', async () => {
+      const r = await release({ perAccount: 1, sizes: [{ label: '50', stock: 1 }, { label: '52', stock: 2 }, { label: '54', stock: 2 }] });
+      const [shown, wide, hidden] = [await accountOfTier(f, 0), await accountOfTier(f, 0), await accountOfTier(f, 0)];
+      await grant(shown.id, r.id);
+      await grant(wide.id, r.id, { pieces: 2 });
+      const g = (await grant(hidden.id, r.id, { pieces: 2, visible: false })).guarantee;
+      f.clock.set(at(-MINUTE));
+      // Size 50 taken by a shown guarantee, size 54 by another for 2 pieces.
+      await f.live.enter(shown.id, r.id, { sizeId: r.sizes[0]!.id }, shown.actor);
+      await f.live.enter(wide.id, r.id, { sizeId: r.sizes[2]!.id, quantity: 2 }, wide.actor);
+      /** No word of the guarantee in what the holder reads (`guaranteed: false` is every ordinary entry's). */
+      const unmarked = (v: unknown) => expect(JSON.stringify(v).replace('"guaranteed":false', '')).not.toMatch(/guarant/i);
+      // Size 50: let in as anyone, the entry not bound.
+      const entered = await f.live.enter(hidden.id, r.id, { sizeId: r.sizes[0]!.id }, hidden.actor);
+      expect(entered).toMatchObject({ status: 'WAITING', size: { label: '50' }, quantity: 1, guaranteed: false });
+      unmarked(entered);
+      expect((await entry(r.id, hidden.id)).guarantee_id).toBeNull();
+      expect(await guaranteeOf(hidden.id)).toMatchObject({ status: 'ACTIVE', covered_drop_id: r.id });
+      // A size that serves it binds it; one that cannot unbinds it, within the per collector as anyone's.
+      expect(await f.live.changeSize(hidden.id, r.id, { sizeId: r.sizes[1]!.id, quantity: 2 }, hidden.actor)).toMatchObject({ quantity: 2, guaranteed: false });
+      expect((await entry(r.id, hidden.id)).guarantee_id).toBe(g.id);
+      const wider = await rejects(f.live.changeSize(hidden.id, r.id, { sizeId: r.sizes[2]!.id, quantity: 2 }, hidden.actor), 'LIVE_QUANTITY_INVALID', 400);
+      expect(wider.message).toBe('This release offers one piece per person.');
+      const moved = await f.live.changeSize(hidden.id, r.id, { sizeId: r.sizes[2]!.id, quantity: 1 }, hidden.actor);
+      expect(moved).toMatchObject({ size: { label: '54' }, quantity: 1, guaranteed: false });
+      unmarked(moved);
+      expect((await entry(r.id, hidden.id)).guarantee_id).toBeNull();
+      expect(await guaranteeOf(hidden.id)).toMatchObject({ status: 'ACTIVE', covered_drop_id: r.id });
+    });
+
     it('LEFT or REMOVED unbinds it, ACTIVE still, and entering again uses it again; an after-room is never covered', async () => {
       const r = await release({ sizes: [{ label: '52', stock: 2 }] });
       const holder = await accountOfTier(f, 0);

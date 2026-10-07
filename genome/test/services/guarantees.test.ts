@@ -11,6 +11,7 @@
  *  - its computed states (waiting, set aside, entered, used, expired, revoked), never stored;
  *  - a change and a revocation, while bound too (the entry stays as an ordinary one), and never once used;
  *  - carried or expired at a draw, a cancellation and every end of a LIVE RELEASE (sold out, closed, ended, cancelled);
+ *  - bound to a LIVE entry already waiting only when its size can still serve it (LIVE stock is checked per size);
  *  - the Grant dialog's defaults (Orders → Settings), ADMIN only;
  *  - the audit log: ids, pieces, dates, shown, whether a note was given; never the note's words.
  */
@@ -322,6 +323,30 @@ describe('the house’s guarantee (IN-01)', () => {
     f.clock.set(new Date(T0.getTime() + 2 * HOUR));
     await f.live.advance(closed.id);
     expect(await row(ofLive[1]!.id)).toMatchObject({ status: 'EXPIRED', closed_reason: 'RELEASE_ENDED' });
+  });
+
+  it('binds an entry already waiting in a LIVE RELEASE only when its size can still serve it; otherwise the entry stays an ordinary one and CHANGE SIZE checks again', async () => {
+    f.clock.set(START);
+    const model = await createModel(t.db, 'BIND LIVE');
+    const T0 = inDays(1);
+    const live = await createLiveRelease(f, { opensAt: T0, modelId: model, sizes: [{ label: '50', stock: 1 }, { label: '52', stock: 2 }] });
+    const [shown, late] = [await createAccount(t.db), await createAccount(t.db)];
+    await grant(shown.id, { scope: 'RELEASE', targetId: live.id });
+    f.clock.set(new Date(T0.getTime() - 2 * 60_000));
+    // Size 50 holds 1 piece, the shown holder's guaranteed one.
+    expect(await f.live.enter(shown.id, live.id, { sizeId: live.sizes[0]!.id }, shown.actor)).toMatchObject({ guaranteed: true });
+    await f.live.enter(late.id, live.id, { sizeId: live.sizes[0]!.id }, late.actor);
+    // Granted while waiting in size 50: the release has room (3 pieces), its size none: set aside, not bound.
+    const lateG = (await grant(late.id, { scope: 'MODEL', targetId: model })).guarantee;
+    expect(await row(lateG.id)).toMatchObject({ status: 'ACTIVE', covered_drop_id: live.id });
+    const entryOf = () => t.db.selectFrom('live_entries').select(['size_id', 'guarantee_id']).where('account_id', '=', late.id).executeTakeFirstOrThrow();
+    expect(await entryOf()).toEqual({ size_id: live.sizes[0]!.id, guarantee_id: null });
+    expect(await stateOf(late.id, lateG.id)).toBe('SET_ASIDE');
+    expect((await audits('guarantee.grant')).find((x) => x.id === lateG.id)!.details).not.toHaveProperty('entryId');
+    // CHANGE SIZE to a size that can serve it: bound.
+    expect(await f.live.changeSize(late.id, live.id, { sizeId: live.sizes[1]!.id }, late.actor)).toMatchObject({ guaranteed: true });
+    expect(await entryOf()).toEqual({ size_id: live.sizes[1]!.id, guarantee_id: lateG.id });
+    expect(await stateOf(late.id, lateG.id)).toBe('ENTERED');
   });
 
   it('keeps the Grant dialog’s defaults in Orders → Settings: 90 days, 1 piece, shown; set by an ADMIN, audited', async () => {

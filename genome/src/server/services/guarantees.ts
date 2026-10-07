@@ -299,7 +299,31 @@ export async function coverNextRelease(
   return null;
 }
 
-/** Bind a guarantee just set aside to its account's entry in that release, when one is waiting (a draw's ENTERED, a LIVE WAITING or QUEUED). */
+/**
+ * IN-01: whether a size of a LIVE RELEASE can still serve a guaranteed entry of `quantity` pieces (LIVE stock is checked
+ * per size): its stock less the pieces CONFIRMED in it and those of the other guaranteed entries still open in it
+ * (WAITING, QUEUED, TURN, SECURED). `entryId`, the entry itself, is left out of the count. LiveService.enter and
+ * changeSize ask it, and so does a guarantee bound to an entry already waiting.
+ */
+export async function sizeServesGuarantee(tx: Db, dropId: string, sizeId: string, quantity: number, entryId: string | null): Promise<boolean> {
+  const size = await tx.selectFrom('drop_sizes').select('stock').where('drop_id', '=', dropId).where('id', '=', sizeId).executeTakeFirst();
+  if (!size) return false;
+  const rows = await tx
+    .selectFrom('live_entries')
+    .select(['id', 'quantity'])
+    .where('drop_id', '=', dropId)
+    .where('size_id', '=', sizeId)
+    .where((eb) => eb.or([eb('status', '=', 'CONFIRMED'), eb.and([eb('guarantee_id', 'is not', null), eb('status', 'in', ['WAITING', 'QUEUED', 'TURN', 'SECURED'])])]))
+    .execute();
+  const taken = rows.filter((r) => r.id !== entryId).reduce((n, r) => n + r.quantity, 0);
+  return taken + quantity <= size.stock;
+}
+
+/**
+ * Bind a guarantee just set aside to its account's entry in that release, when one is waiting (a draw's ENTERED, a LIVE
+ * WAITING or QUEUED). A LIVE entry is bound only when its size can still serve the guarantee (sizeServesGuarantee);
+ * otherwise it stays an ordinary entry, the guarantee set aside and unused, and a CHANGE SIZE checks again.
+ */
 async function bindWaitingEntry(tx: Db, g: { id: string; account_id: string; pieces: number }, d: Pick<DropRow, 'id' | 'mode'>): Promise<string | null> {
   if (d.mode === 'DRAW') {
     const e = await tx
@@ -313,11 +337,20 @@ async function bindWaitingEntry(tx: Db, g: { id: string; account_id: string; pie
       .executeTakeFirst();
     return e?.id ?? null;
   }
+  const waiting = await tx
+    .selectFrom('live_entries')
+    .select(['id', 'size_id', 'quantity'])
+    .where('drop_id', '=', d.id)
+    .where('account_id', '=', g.account_id)
+    .where('status', 'in', [...LIVE_WAITING])
+    .where('guarantee_id', 'is', null)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!waiting || !(await sizeServesGuarantee(tx, d.id, waiting.size_id, waiting.quantity, waiting.id))) return null;
   const e = await tx
     .updateTable('live_entries')
     .set({ guarantee_id: g.id })
-    .where('drop_id', '=', d.id)
-    .where('account_id', '=', g.account_id)
+    .where('id', '=', waiting.id)
     .where('status', 'in', [...LIVE_WAITING])
     .where('guarantee_id', 'is', null)
     .returning('id')
@@ -529,7 +562,7 @@ export interface AccountGuarantee {
   release: { id: string; mode: DropMode; title: string | null } | null;
 }
 
-/** A guarantee in the client's copy of their data (the right of access): every one, shown or not, with its note. */
+/** A guarantee in the client's copy of their data (the right of access): every one, shown or not, with its notes. */
 export interface ExportedGuarantee {
   id: string;
   scope: GuaranteeScope;
@@ -538,6 +571,8 @@ export interface ExportedGuarantee {
   validUntil: Date;
   visible: boolean;
   note: string | null;
+  /** Client Services' note at a revocation (optional), exported like the grant's note. */
+  revokeNote: string | null;
   status: GuaranteeStatus;
   releaseId: string | null;
   grantedAt: Date;
@@ -763,7 +798,7 @@ export async function accountGuarantees(db: Db, accountId: string, now: Date): P
   return out;
 }
 
-/** Every guarantee of an account, for its right-of-access export: shown or not, with its note, oldest first. */
+/** Every guarantee of an account, for its right-of-access export: shown or not, with its notes (grant and revocation), oldest first. */
 export async function exportedGuarantees(db: Db, accountId: string): Promise<ExportedGuarantee[]> {
   const rows = (await viewRows(db).where('g.account_id', '=', accountId).orderBy('g.granted_at').orderBy('g.id').execute()) as ViewRow[];
   return rows.map((r) => {
@@ -776,6 +811,7 @@ export async function exportedGuarantees(db: Db, accountId: string): Promise<Exp
       validUntil: r.valid_until,
       visible: r.visible,
       note: r.note,
+      revokeNote: r.revoke_note,
       status: r.status,
       releaseId: r.used_drop_id ?? r.covered_drop_id,
       grantedAt: r.granted_at,

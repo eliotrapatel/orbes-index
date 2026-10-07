@@ -284,7 +284,7 @@ describe('THE HOUSE’S GUARANTEE on the client sheet (plan NEXT-NINE, IN-01)', 
     await admin.request('PUT', '/api/admin/settings/guarantees', { body: { validDays: 90, pieces: 1, visible: true } });
   });
 
-  it('a lock unbinds the guarantee of its open entry and never revokes it; a LOCKED account is never granted one; the export carries every guarantee with its note; the audit log neither the email nor the note', async () => {
+  it('a lock unbinds the guarantee of its open entry and never revokes it; a LOCKED account is never granted one; the export carries every guarantee with its notes, at the grant and at a revocation; the audit log neither the email nor the notes', async () => {
     const draw = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — lock', quantity: 3, opensAt: at(3 * HOUR), closesAt: at(4 * HOUR), earlyAccessHours: 0 }, f.admin);
     await f.drops.publish(draw.id, f.admin);
     const { email } = await accountClient(h);
@@ -302,7 +302,13 @@ describe('THE HOUSE’S GUARANTEE on the client sheet (plan NEXT-NINE, IN-01)', 
     expect([refused.statusCode, errorOf(refused).code]).toEqual([403, 'ACCOUNT_LOCKED']);
     // The right of access: every guarantee, the hidden one too, with its note.
     const exported = safeJson(await admin.get(`/api/admin/owners/${id}/export`)) as Json;
-    expect(exported.guarantees).toEqual([expect.objectContaining({ id: g.id, scope: 'RELEASE', target: 'ECLIPSE — lock', pieces: 2, visible: false, note: NOTE, status: 'ACTIVE', releaseId: draw.id })]);
+    expect(exported.guarantees).toEqual([expect.objectContaining({ id: g.id, scope: 'RELEASE', target: 'ECLIPSE — lock', pieces: 2, visible: false, note: NOTE, revokeNote: null, status: 'ACTIVE', releaseId: draw.id })]);
+    // A revoked one with the revocation's note too.
+    expect((await admin.post(`/api/admin/owners/${id}/unlock`)).statusCode).toBe(200);
+    op = await adminClient(h, 'OPERATOR');
+    expect((await op.post(`/api/admin/guarantees/${g.id}/revoke`, { note: 'Waited at the boutique for a refund.' })).statusCode).toBe(200);
+    const again = safeJson(await admin.get(`/api/admin/owners/${id}/export`)) as Json;
+    expect(again.guarantees).toEqual([expect.objectContaining({ id: g.id, note: NOTE, revokeNote: 'Waited at the boutique for a refund.', status: 'REVOKED' })]);
     const logged = JSON.stringify(await h.ctx.db.selectFrom('audit_logs').select('details').where('action', 'like', 'guarantee.%').execute());
     expect(logged).not.toContain(email);
     expect(logged).not.toContain('Waited at the boutique');

@@ -41,7 +41,8 @@
  *
  * THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01; services/guarantees.ts, migration 0029): a holder of a guarantee set
  * aside for the release is let in whatever its rule (`accessOf`), takes up to max(`per_account`, its pieces), in a size
- * that can still serve it (409 LIVE_GUARANTEE_SIZE_FULL, at ENTER and CHANGE SIZE). Its entry (`guarantee_id`) comes
+ * that can still serve it (409 LIVE_GUARANTEE_SIZE_FULL, at ENTER and CHANGE SIZE; a guarantee not shown leaves no mark
+ * there: the entry is an ordinary one and the guarantee stays set aside). Its entry (`guarantee_id`) comes
  * first in line at T0 (`lineOrder`) and first among those waiting in its size afterwards (`giveTurnsNow`, the places
  * ahead, the console's list and the after-room's guests order `guarantee_id IS NULL, position`); the turn given uses the
  * guarantee (USED). LEAVE, REMOVE and a lock before the turn unbind it, the guarantee staying ACTIVE; at the end and at
@@ -98,7 +99,7 @@ import { afterRoomDoors, afterRoomPlace, isAfterRoom, settleAfterRoom, type Afte
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { CLUB_EXCLUDED_STATUSES, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { DROP_QUANTITY_MAX, drawKey, dropNotFound, openDropSeed } from './drops.js';
-import { holderGuarantee, holdsGuaranteeFor, releaseCovered, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
+import { holderGuarantee, holdsGuaranteeFor, releaseCovered, sizeServesGuarantee, useGuarantees, visibleGuaranteeIds } from './guarantees.js';
 import { ordersForLiveEntry } from './orders.js';
 import { readActingAccount } from './ownership.js';
 import { participationCount, participations } from './participation.js';
@@ -1158,10 +1159,11 @@ export class LiveService {
       const existing = await tx.selectFrom('live_entries').select(['id', 'status', 'position']).where('drop_id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
       if (existing && !(existing.status === 'LEFT' && existing.position === null)) throw alreadyEntered();
       // IN-01: the house's guarantee set aside for this release, after the entry's row (the lock order): up to its pieces,
-      // the size still serving it; never in an after-room.
-      const g = await holderGuarantee(tx, account, d);
-      const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity, g?.pieces);
-      if (g) await this.checkGuaranteedSize(tx, d.id, size.id, quantity, existing?.id ?? null);
+      // the size still serving it; never in an after-room. One not shown that the size cannot serve leaves no mark: the
+      // entry is an ordinary one and the guarantee stays set aside.
+      const held = await holderGuarantee(tx, account, d);
+      const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity, held?.pieces);
+      const g = held ? await this.guaranteeInSize(tx, d, held, size.id, quantity, existing?.id ?? null) : null;
       const late = now.getTime() >= d.opens_at.getTime();
       if (late) {
         await this.formLine(tx, d, now, notes);
@@ -1214,12 +1216,26 @@ export class LiveService {
       if (!e || e.status === 'LEFT') throw notEntered();
       if (now.getTime() >= d.opens_at.getTime() || e.position !== null) throw sizeLocked();
       if (e.status !== 'WAITING') throw notInLine();
-      const g = e.guarantee_id ? await tx.selectFrom('house_guarantees').select(['id', 'pieces']).where('id', '=', e.guarantee_id).forUpdate().executeTakeFirst() : undefined;
-      const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity ?? e.quantity, g?.pieces);
+      // IN-01: the entry's guarantee, or the one set aside for the account when the entry is not bound (its size could not
+      // serve it): the new size is checked again, and binds it when it can.
+      const held = e.guarantee_id
+        ? await tx.selectFrom('house_guarantees').select(['id', 'pieces', 'visible']).where('id', '=', e.guarantee_id).forUpdate().executeTakeFirst()
+        : await holderGuarantee(tx, account, d);
+      const { size, quantity } = await this.choice(tx, d, input.sizeId, input.quantity ?? e.quantity, held?.pieces);
       if (size.id === e.size_id && quantity === e.quantity) return;
-      if (g) await this.checkGuaranteedSize(tx, d.id, size.id, quantity, e.id);
-      await tx.updateTable('live_entries').set({ size_id: size.id, quantity }).where('id', '=', e.id).where('status', '=', 'WAITING').execute();
-      await this.audit.record({ actor, action: 'drop.live.size', targetType: 'drop', targetId: id, details: { entryId: e.id, sizeId: size.id, quantity, before: { sizeId: e.size_id, quantity: e.quantity } } }, tx);
+      const g = held ? await this.guaranteeInSize(tx, d, held, size.id, quantity, e.id) : null;
+      const bound = g?.id ?? null;
+      await tx.updateTable('live_entries').set({ size_id: size.id, quantity, guarantee_id: bound }).where('id', '=', e.id).where('status', '=', 'WAITING').execute();
+      await this.audit.record(
+        {
+          actor,
+          action: 'drop.live.size',
+          targetType: 'drop',
+          targetId: id,
+          details: { entryId: e.id, sizeId: size.id, quantity, before: { sizeId: e.size_id, quantity: e.quantity }, ...(bound !== e.guarantee_id ? { guaranteeId: bound, guaranteeBefore: e.guarantee_id } : {}) },
+        },
+        tx,
+      );
     });
     return (await this.viewerEntry(this.db, account, id))!;
   }
@@ -1809,20 +1825,17 @@ export class LiveService {
   }
 
   /**
-   * IN-01: whether a size can still serve a guaranteed entry of `quantity` pieces: its stock less the pieces confirmed
-   * without a guarantee and those of the other guaranteed entries in it (409 LIVE_GUARANTEE_SIZE_FULL otherwise).
+   * IN-01: the guarantee an entry of `quantity` pieces in a size binds, or null. A size that can no longer serve it
+   * (sizeServesGuarantee: its stock less the CONFIRMED pieces and those of the other guaranteed entries in it) refuses a
+   * guarantee shown to the client (409 LIVE_GUARANTEE_SIZE_FULL). One not shown leaves no mark for its holder: the entry
+   * is an ordinary one (within the release's per collector, as anyone's), the guarantee staying set aside and unused.
    */
-  private async checkGuaranteedSize(tx: Db, dropId: string, sizeId: string, quantity: number, entryId: string | null): Promise<void> {
-    const size = await tx.selectFrom('drop_sizes').select('stock').where('drop_id', '=', dropId).where('id', '=', sizeId).executeTakeFirstOrThrow();
-    const rows = await tx
-      .selectFrom('live_entries')
-      .select(['id', 'quantity', 'status', 'guarantee_id'])
-      .where('drop_id', '=', dropId)
-      .where('size_id', '=', sizeId)
-      .where((eb) => eb.or([eb('status', '=', 'CONFIRMED'), eb.and([eb('guarantee_id', 'is not', null), eb('status', 'in', ['WAITING', 'QUEUED', 'TURN', 'SECURED'])])]))
-      .execute();
-    const taken = rows.filter((r) => r.id !== entryId).reduce((n, r) => n + r.quantity, 0);
-    if (taken + quantity > size.stock) throw guaranteeSizeFull();
+  private async guaranteeInSize<G extends { id: string; visible: boolean }>(tx: Db, d: LiveDrop, g: G, sizeId: string, quantity: number, entryId: string | null): Promise<G | null> {
+    if (await sizeServesGuarantee(tx, d.id, sizeId, quantity, entryId)) return g;
+    if (g.visible) throw guaranteeSizeFull();
+    const max = d.per_account ?? LIVE_PER_ACCOUNT.default;
+    if (quantity > max) throw quantityInvalid(max);
+    return null;
   }
 
   private async lastPosition(tx: Db, dropId: string): Promise<number> {
