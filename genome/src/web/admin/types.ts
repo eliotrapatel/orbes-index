@@ -146,6 +146,10 @@ export type GuaranteeScope = (typeof GUARANTEE_SCOPES)[number];
 export const GUARANTEE_STATUSES = ['ACTIVE', 'USED', 'EXPIRED', 'REVOKED'] as const;
 export type GuaranteeStatus = (typeof GUARANTEE_STATUSES)[number];
 
+/** Which saved size preselects a model's size (models.size_kind, AC-01): a ring, a bracelet, a wrist, a necklace. */
+export const SIZE_KINDS = ['RING', 'BRACELET', 'WRIST', 'NECKLACE'] as const;
+export type SizeKind = (typeof SIZE_KINDS)[number];
+
 /** What an invitation of the circle is (circle_posts.experience, BP-19 T7). */
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];

@@ -9,7 +9,7 @@ import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js'
 import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_accept.js';
 
 const EXPECTED_TABLES = [
-  'account_recovery_codes', 'accounts', 'activity_hourly', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs', 'authentication_events',
+  'account_recovery_codes', 'account_sizes', 'accounts', 'activity_hourly', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs', 'authentication_events',
   'bench_items', 'care_requests', 'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes', 'circle_post_images', 'circle_posts', 'circle_rsvps',
   'client_conversations', 'client_messages', 'club_program_settings', 'club_tiers', 'codes', 'collections', 'credit_uses', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops',
   'event_journal', 'genomes', 'guarantee_settings', 'house_guarantees', 'invoices', 'live_access_models', 'live_addons', 'live_entries', 'live_entry_addons', 'live_interest', 'live_messages',
@@ -2402,7 +2402,8 @@ describe('migrations', () => {
     await use();
     await expect(run(`DELETE FROM credit_uses WHERE id = '${open}'`)).rejects.toSatisfy(isGuardViolation);
     // The down step refuses while a GIFT order or a credit use exists: neither can be removed, so this database stays at
-    // 0027 (0029 and 0028, which hold nothing here, go down first).
+    // 0027 (0030, 0029 and 0028, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0029_house_guarantee']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0028_yearly_care']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0027_tier_grants cannot be rolled back: 1 welcome gift orders and 2 credit uses exist/);
@@ -2412,7 +2413,7 @@ describe('migrations', () => {
     await run(`DELETE FROM credit_uses`);
     await run(`ALTER TABLE credit_uses ENABLE TRIGGER credit_uses_no_delete`);
     await run(`DELETE FROM orders WHERE channel = 'GIFT'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee', '0030_account_sizes']);
   });
 
   /** What names an object of 0028 in a snapshot: its table and its objects. */
@@ -2508,7 +2509,8 @@ describe('migrations', () => {
     await run(`UPDATE care_requests SET status = 'CANCELLED', cancelled_at = now(), cancelled_by = 'account' WHERE id = '${other}'`);
     await insert({ year: '2027' });
     // The down step refuses while a request or a YEARLY_CARE record exists: neither can be removed, so this database stays at
-    // 0028 (0029, which holds nothing here, goes down first).
+    // 0028 (0030 and 0029, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0029_house_guarantee']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0028_yearly_care cannot be rolled back: 3 care requests and 1 yearly care records exist/);
     expect((await migrationStatus(t.db)).find((m) => m.name === '0028_yearly_care')?.executedAt).toBeDefined();
@@ -2517,7 +2519,7 @@ describe('migrations', () => {
     await run(`DELETE FROM care_requests`);
     await run(`ALTER TABLE care_requests ENABLE TRIGGER care_requests_no_delete`);
     await run(`DELETE FROM service_records WHERE type = 'YEARLY_CARE'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee', '0030_account_sizes']);
   });
 
   /** What names an object of 0029 in a snapshot: its two tables, the entries' new columns and constraints, and its indexes. */
@@ -2666,7 +2668,9 @@ describe('migrations', () => {
     await expect(order({ piece: '2' })).rejects.toSatisfy((e) => isUniqueViolation(e, 'orders_drop_entry_key'));
     const request = (await sql<{ id: string }>`INSERT INTO shop_requests (account_id, model_id, status, handled_at, outcome) VALUES (${account}, ${model}, 'CLOSED', now(), 'ACCEPTED') RETURNING id`.execute(t.db)).rows[0].id;
     await check(order({ channel: `'SALON'`, drop_entry_id: 'NULL', drop_id: 'NULL', shop_request_id: `'${request}'`, piece: '2' }), 'a second piece of a salon order', 'orders_source');
-    // The down step refuses while a DRAW order of a second piece exists: it cannot be removed, so this database stays at 0029.
+    // The down step refuses while a DRAW order of a second piece exists: it cannot be removed, so this database stays at 0029
+    // (0030, which holds nothing here, goes down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
     await expect(migrateDown(t.db)).rejects.toThrow(/0029_house_guarantee cannot be rolled back: 1 draw orders of a second piece or more exist/);
     expect((await migrationStatus(t.db)).find((m) => m.name === '0029_house_guarantee')?.executedAt).toBeDefined();
     // Cleared by hand for the roll-backs that follow.
@@ -2674,6 +2678,111 @@ describe('migrations', () => {
     await run(`DELETE FROM drop_entries WHERE drop_id IN ('${drop}', '${other_drop}')`);
     await run(`DELETE FROM house_guarantees`);
     await run(`DELETE FROM guarantee_settings`);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes']);
+  });
+
+  /** What names an object of 0030 in a snapshot: its table, the models' size kind, the SKUs' fit and the requests' size. */
+  const of0030 = (o: string) =>
+    /\b(account_sizes\w*|models_size_kind\w*|skus_fit|shop_requests_size_label\w*)\b/.test(o) || /^table (models size_kind|skus fit_m(in|ax)_mm|shop_requests size_label) /.test(o);
+
+  it('0030 adds the accounts\' sizes, a model\'s size kind, a size\'s fit and a request\'s size, and the request\'s guard of it, and nothing else; down restores 0029 exactly (0020\'s trigger), and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0030_account_sizes');
+    const added = withIt.filter((o) => !before.includes(o));
+    const removed = before.filter((o) => !withIt.includes(o));
+    // Besides its own objects, 0030 only creates shop_requests_immutable_identity again (the same name, size_label guarded too).
+    expect(added.filter((o) => !of0030(o))).toEqual([]);
+    expect(removed).toEqual([]);
+    expect(before.filter(of0030)).toEqual([]);
+    expect(added.filter((o) => o.startsWith('table account_sizes ')).map((o) => o.split(' ')[2])).toEqual(['account_id', 'kind', 'updated_at', 'value_mm']);
+    expect(added.filter((o) => o.startsWith('table ') && !o.startsWith('table account_sizes '))).toEqual([
+      'table models size_kind text YES ',
+      'table shop_requests size_label text YES ',
+      'table skus fit_max_mm smallint YES ',
+      'table skus fit_min_mm smallint YES ',
+    ]);
+    for (const c of [
+      /^constraint account_sizes account_sizes_account_id_fkey FOREIGN KEY \(account_id\) REFERENCES accounts\(id\) ON DELETE RESTRICT$/,
+      /^constraint account_sizes account_sizes_pkey PRIMARY KEY \(account_id, kind\)$/,
+      /^constraint account_sizes account_sizes_value CHECK /,
+      /^constraint account_sizes account_sizes_kind_check CHECK /,
+      /^constraint models models_size_kind_check CHECK /,
+      /^constraint skus skus_fit CHECK /,
+      /^constraint shop_requests shop_requests_size_label_check CHECK /,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes']);
+    expect(await snapshot()).toEqual(latest);
+    // The trigger of the same name guards the size in 0030 and not in 0029: its function's arguments say so.
+    const args = async () =>
+      (
+        await sql<{ args: string }>`SELECT encode(tgargs, 'escape') AS args FROM pg_trigger WHERE tgname = 'shop_requests_immutable_identity'`.execute(t.db)
+      ).rows[0]!.args.split('\\000').filter(Boolean);
+    expect(await args()).toEqual(['id', 'account_id', 'model_id', 'created_at', 'note', 'size_label']);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
+    expect(await args()).toEqual(['id', 'account_id', 'model_id', 'created_at', 'note']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes']);
+  });
+
+  it('0030: a size of each kind in its range and step, once per account and kind, cleared by deleting it; a model\'s size kind one of the four; a size\'s fit both or neither, from 1 to 1 000, never reversed; a request\'s size of 1 to 100 characters, trimmed, never changed', async () => {
+    await sql`INSERT INTO categories (id, code, name) VALUES (23, 'H', 'Size checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const account = (await sql<{ id: string }>`INSERT INTO accounts (email, email_normalized, password_hash) VALUES ('sizes@example.com', 'sizes@example.com', 'scrypt$x') RETURNING id`.execute(t.db)).rows[0].id;
+    const size = (kind: string, mm: number) => run(`INSERT INTO account_sizes (account_id, kind, value_mm) VALUES ('${account}', '${kind}', ${mm})`);
+    // Each kind in its range and step (whole millimetres: a French ring size, or centimetres × 10).
+    await check(size('RING', 39), 'a ring 39', 'account_sizes_value');
+    await check(size('RING', 77), 'a ring 77', 'account_sizes_value');
+    await check(size('BRACELET', 139), 'a bracelet under 14 cm', 'account_sizes_value');
+    await check(size('BRACELET', 142), 'a bracelet off its half centimetre', 'account_sizes_value');
+    await check(size('WRIST', 147), 'a wrist off its half centimetre', 'account_sizes_value');
+    await check(size('WRIST', 245), 'a wrist over 24 cm', 'account_sizes_value');
+    await check(size('NECKLACE', 355), 'a necklace off its centimetre', 'account_sizes_value');
+    await check(size('NECKLACE', 1010), 'a necklace over 1 m', 'account_sizes_value');
+    await check(size('ANKLE', 200), 'an unknown kind');
+    for (const [kind, mm] of [['RING', 40], ['BRACELET', 240], ['WRIST', 145], ['NECKLACE', 1000]] as const) await size(kind, mm);
+    // Once per account and kind; a cleared size is a deleted row.
+    await expect(size('RING', 52)).rejects.toSatisfy((e) => isUniqueViolation(e, 'account_sizes_pkey'));
+    await run(`UPDATE account_sizes SET value_mm = 76 WHERE account_id = '${account}' AND kind = 'RING'`);
+    await run(`DELETE FROM account_sizes WHERE account_id = '${account}' AND kind = 'NECKLACE'`);
+    expect((await sql<{ kind: string; value_mm: number }>`SELECT kind, value_mm FROM account_sizes WHERE account_id = ${account} ORDER BY kind`.execute(t.db)).rows).toEqual([
+      { kind: 'BRACELET', value_mm: 240 },
+      { kind: 'RING', value_mm: 76 },
+      { kind: 'WRIST', value_mm: 145 },
+    ]);
+    // A model's size kind: one of the four, or none.
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix, size_kind) VALUES (23, 'MONOLITHE', 'RING', 'SIZCHK', 'RING') RETURNING id`.execute(t.db)).rows[0].id;
+    await check(run(`UPDATE models SET size_kind = 'ANKLE' WHERE id = '${model}'`), 'an unknown size kind', 'models_size_kind_check');
+    await run(`UPDATE models SET size_kind = NULL WHERE id = '${model}'`);
+    // A size's fit: both or neither, 1 to 1 000, the first at most the second; it may change.
+    const sku = (await sql<{ id: string }>`INSERT INTO skus (model_id, size_label, code) VALUES (${model}, '52', 'SIZCHK-52') RETURNING id`.execute(t.db)).rows[0].id;
+    const fit = (min: string, max: string) => run(`UPDATE skus SET fit_min_mm = ${min}, fit_max_mm = ${max} WHERE id = '${sku}'`);
+    await check(fit('51', 'NULL'), 'a fit from without to', 'skus_fit');
+    await check(fit('NULL', '53'), 'a fit to without from', 'skus_fit');
+    await check(fit('53', '51'), 'a fit reversed', 'skus_fit');
+    await check(fit('0', '51'), 'a fit from 0', 'skus_fit');
+    await check(fit('160', '1001'), 'a fit over 1 000', 'skus_fit');
+    await fit('52', '52');
+    await fit('160', '175');
+    await fit('NULL', 'NULL');
+    // A request's size: 1 to 100 characters, trimmed; never changed once asked, nor added after.
+    const request = (label: string) => sql.raw<{ id: string }>(`INSERT INTO shop_requests (account_id, model_id, size_label) VALUES ('${account}', '${model}', ${label}) RETURNING id`).execute(t.db);
+    await check(request(`''`), 'an empty size');
+    await check(request(`' 52'`), 'a size not trimmed');
+    await check(request(`'${'X'.repeat(101)}'`), 'a size over 100 characters');
+    const asked = (await request(`'52'`)).rows[0].id;
+    await expect(run(`UPDATE shop_requests SET size_label = '54' WHERE id = '${asked}'`)).rejects.toSatisfy(isGuardViolation);
+    await expect(run(`UPDATE shop_requests SET size_label = NULL WHERE id = '${asked}'`)).rejects.toSatisfy(isGuardViolation);
+    await run(`UPDATE shop_requests SET status = 'CLOSED', handled_at = now(), outcome = 'DECLINED' WHERE id = '${asked}'`);
+    const unsized = (await request('NULL')).rows[0].id;
+    await expect(run(`UPDATE shop_requests SET size_label = '52' WHERE id = '${unsized}'`)).rejects.toSatisfy(isGuardViolation);
+    // Cleared by hand for the roll-backs that follow.
+    await run(`DELETE FROM shop_requests WHERE model_id = '${model}'`);
+    await run(`DELETE FROM skus WHERE model_id = '${model}'`);
+    await run(`DELETE FROM models WHERE id = '${model}'`);
+    await run(`DELETE FROM account_sizes`);
   });
 
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
@@ -2736,6 +2845,8 @@ describe('migrations', () => {
       '0028_yearly_care',
       // THE HOUSE'S GUARANTEE.
       '0029_house_guarantee',
+      // YOUR SIZES.
+      '0030_account_sizes',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

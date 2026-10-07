@@ -19,7 +19,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountOrderParams, careParams, careRequestBody, changePasswordBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountOrderParams, accountSizesBody, careParams, careRequestBody, changePasswordBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
@@ -34,7 +34,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, care, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, warranty } = ctx.services;
+  const { auth, care, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, sizes, warranty } = ctx.services;
 
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
@@ -98,6 +98,19 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
   app.get('/api/v1/account/products', async (request) => {
     const { account } = requireAccount(request);
     return { products: await ownership.listForAccount(account.id) };
+  });
+
+  // YOUR SIZES (plan NEXT-NINE, AC-01; API §10.19): the sizes the account saved, in its units (a ring size, centimetres),
+  // and saved whole: a kind null or left out is cleared. They preselect a size the collector then confirms; nothing else.
+  app.get('/api/v1/account/sizes', async (request) => {
+    const { account } = requireAccount(request);
+    return { sizes: await sizes.get(account.id) };
+  });
+
+  app.put('/api/v1/account/sizes', async (request) => {
+    const { account } = requireAccount(request);
+    const b = parse(accountSizesBody, request.body);
+    return { sizes: await sizes.set(account.id, b.sizes, accountActor(request)) };
   });
 
   // MY PIECES (plan LIVE RELEASE+, choice 6): the account's own orders, step by step; never another account's.

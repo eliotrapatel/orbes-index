@@ -82,6 +82,7 @@ import { tierName, tierOf, type ClubTier, type ClubTierName } from './club.js';
 import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type ExportedDropEntry } from './drops.js';
 import { accountCareRequests, careThisYear, type CareAllowance, type ExportedCareRequest } from './care.js';
 import { accountGuaranteesForStaff, exportedGuarantees, type AdminGuarantee, type ExportedGuarantee } from './guarantees.js';
+import { exportedSizes, type ExportedSize } from './sizes.js';
 import { accountGrants, creditBalances } from './tier-grants.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
 import { accountLiveData, auditRemovedLiveEntries, removeAccountLiveEntries, type ExportedLiveEntry, type ExportedLiveInterest } from './live.js';
@@ -406,6 +407,8 @@ export interface AccountExport {
    * or not, with Client Services' notes, the grant's and the revocation's (the right of access requires them); never who granted it.
    */
   guarantees: ExportedGuarantee[];
+  /** The sizes the account saved in YOUR SIZES (plan NEXT-NINE, AC-01): each kind's value in its unit, and when it was saved. */
+  sizes: ExportedSize[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
    * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
@@ -864,6 +867,7 @@ export class OwnerService {
       const messages = await accountMessages(tx, a.id);
       const careRequests = await accountCareRequests(tx, a.id);
       const guarantees = await exportedGuarantees(tx, a.id);
+      const sizes = await exportedSizes(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
       // accepted for a rare ADMIN request (DATABASE §5.21).
@@ -947,6 +951,7 @@ export class OwnerService {
         messages,
         careRequests,
         guarantees,
+        sizes,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
           action: e.action,
@@ -983,6 +988,7 @@ export class OwnerService {
             messages: out.messages.length,
             careRequests: out.careRequests.length,
             guarantees: out.guarantees.length,
+            sizes: out.sizes.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),
           },

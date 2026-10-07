@@ -11,7 +11,9 @@
  * the console's Lookbook page (its gallery is routes/admin/media.ts's). Its variants (plan NOCTURNE, N1): a label and
  * its colour change through the same edit; ADD A VARIANT (POST …/variants, OPERATOR, as editing a model) creates one. An
  * ADMIN discontinues a model and reinstates it (P-R06: POST …/discontinue and
- * …/reinstate, no body; the console asks for a typed phrase first). The
+ * …/reinstate, no body; the console asks for a typed phrase first). Its sizes
+ * (plan NEXT-NINE, AC-01): its size kind and each size's fit, read by AUDITOR
+ * and set by OPERATOR (GET and PUT …/sizes). The
  * services validate, write and audit; these routes only parse and shape.
  */
 import type { FastifyPluginAsync } from 'fastify';
@@ -24,6 +26,7 @@ import {
   createModelBody,
   createVariantBody,
   emptyBody,
+  modelSizesBody,
   parse,
   updateCollectionBody,
   updateModelBody,
@@ -40,7 +43,7 @@ function categoryJson(c: CategoryRecord, issued: ReadonlyMap<number, number>) {
 
 export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { categories } = ctx;
-  const { catalog } = ctx.services;
+  const { catalog, sizes } = ctx.services;
 
   // ── Categories ───────────────────────────────────────────────────────────
 
@@ -151,6 +154,18 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     );
     reply.code(201);
     return created;
+  });
+
+  // AC-01, the model's Sizes: which saved size preselects its size, and the measures each of its sizes fits (in whole mm).
+  app.get('/api/admin/models/:id/sizes', async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    return sizes.modelSizes(id);
+  });
+
+  app.put('/api/admin/models/:id/sizes', async (request) => {
+    const { id } = parse(catalogParams, request.params);
+    const b = parse(modelSizesBody, request.body);
+    return sizes.setModelSizes(id, { ...(b.sizeKind !== undefined ? { sizeKind: b.sizeKind } : {}), ...(b.fits !== undefined ? { fits: b.fits } : {}) }, adminActor(request));
   });
 
   // P-R06: ADMIN only, reversible (the console asks for a typed phrase first). Discontinuing also makes the model inactive.

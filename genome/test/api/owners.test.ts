@@ -372,6 +372,8 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(x.orders).toEqual([]);
       // No message to ORBES Client Services either (the test below exports them).
       expect(x.messages).toEqual([]);
+      // No size saved in YOUR SIZES either (the test below exports them).
+      expect(x.sizes).toEqual([]);
       // Every audit entry that names the account: about it, and made by it (the claim code mistyped on a piece it
       // does not own, the STOLEN declaration and its time, the report), each with its piece or the scan's REF.
       expect(x.activity.map((e: any) => [e.action, e.by, e.productId, e.reference, e.status])).toEqual([
@@ -401,12 +403,29 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 
       expect((await cs.get('/api/admin/owners/5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6/export')).statusCode).toBe(404);
       expect(UUID_RE.test(id)).toBe(true);
+    });
+
+    it('holds the sizes the account saved in YOUR SIZES, each in its unit and with when it was saved (AC-01)', async () => {
+      const owner = await accountClient(h);
+      const id = await accountIdOf(owner.email);
+      const saved = await owner.client.request('PUT', '/api/v1/account/sizes', { body: { sizes: { RING: 52, WRIST: 16.5 } } });
+      expect(saved.statusCode).toBe(200);
+      const res = await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${id}/export`);
+      const x = safeJson(res) as Record<string, any>;
+      const at = h.clock.now().toISOString();
+      expect(x.sizes).toEqual([
+        { kind: 'RING', value: 52, unit: 'FR', updatedAt: at },
+        { kind: 'WRIST', value: 16.5, unit: 'CM', updatedAt: at },
+      ]);
+      expect(x.activity.map((e: any) => e.action)).toContain('account.sizes.update');
+      const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
+      expect(audit[0]!.details).toMatchObject({ sizes: 2 });
     });
 
     it('holds the account\'s messages with ORBES Client Services, signed ORBES Client Services, never who answered; the sheet links the conversation (CS-01)', async () => {

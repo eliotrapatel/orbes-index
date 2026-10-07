@@ -137,6 +137,8 @@ describe('schema', () => {
       ['house_guarantees', 'scope', S.GUARANTEE_SCOPES],
       ['house_guarantees', 'status', S.GUARANTEE_STATUSES],
       ['house_guarantees', 'closed_reason', S.GUARANTEE_CLOSED_REASONS],
+      ['account_sizes', 'kind', S.SIZE_KINDS],
+      ['models', 'size_kind', S.SIZE_KINDS],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));

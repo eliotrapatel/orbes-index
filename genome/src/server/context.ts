@@ -41,6 +41,7 @@ import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
 import { CareService, eraseCareLabels } from './services/care.js';
 import { GuaranteeService } from './services/guarantees.js';
+import { SizeService } from './services/sizes.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -152,6 +153,8 @@ export interface AppServices {
   care: CareService;
   /** THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): a guaranteed place at a coming release, granted by Client Services. */
   guarantees: GuaranteeService;
+  /** YOUR SIZES (plan NEXT-NINE, AC-01): the sizes a collector saves, which preselect a size it then confirms; a model's size kind and fits. */
+  sizes: SizeService;
 }
 
 export interface AppContext {
@@ -267,6 +270,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const tierGrants = new TierGrantService({ db, audit, clock, log });
     const care = new CareService({ db, audit, warranty, clock });
     const guarantees = new GuaranteeService({ db, audit, clock });
+    const sizes = new SizeService({ db, audit, clock });
 
     const services: AppServices = {
       issuance,
@@ -310,6 +314,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       tierGrants,
       care,
       guarantees,
+      sizes,
       ...overrides.services,
     };
 

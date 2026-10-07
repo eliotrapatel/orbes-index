@@ -18,7 +18,8 @@
  * the next nine, CS-01, read by an AUDITOR, its conversations answered, taken and closed by an OPERATOR, assigned by an
  * ADMIN; THE PROGRAM of the club's tiers and the orders' shipping rates, BP-19 T2, read by an AUDITOR, set by an ADMIN;
  * the Yearly care board, BP-19 T6, read by an AUDITOR, its steps taken by an OPERATOR; THE HOUSE'S GUARANTEE, IN-01,
- * granted, changed and revoked by an OPERATOR, its defaults read by an AUDITOR and set by an ADMIN);
+ * granted, changed and revoked by an OPERATOR, its defaults read by an AUDITOR and set by an ADMIN; a model's Sizes, AC-01,
+ * read by an AUDITOR and set by an OPERATOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. The sale mode names its roles
@@ -216,6 +217,9 @@ const PROBES: Probe[] = [
   { group: 'guarantees', method: 'GET', url: `/api/admin/drops/${UUID}/guarantees`, min: 'AUDITOR' },
   { group: 'guarantees', method: 'GET', url: '/api/admin/settings/guarantees', min: 'AUDITOR' },
   { group: 'guarantees', method: 'PUT', url: '/api/admin/settings/guarantees', body: INVALID, min: 'ADMIN' },
+  // AC-01: a model's Sizes (its size kind and its sizes' fits) read by an AUDITOR, set by an OPERATOR.
+  { group: 'sizes', method: 'GET', url: `/api/admin/models/${UUID}/sizes`, min: 'AUDITOR' },
+  { group: 'sizes', method: 'PUT', url: `/api/admin/models/${UUID}/sizes`, body: INVALID, min: 'OPERATOR' },
   // Plan LIVE RELEASE+: the orders read by an AUDITOR, stepped by an OPERATOR, their alerts' delays set by an ADMIN; the
   // locations and carriers read by an AUDITOR, set by an ADMIN; the atelier read by an AUDITOR, worked by an OPERATOR.
   { group: 'orders', method: 'GET', url: '/api/admin/orders', min: 'AUDITOR' },
@@ -371,6 +375,7 @@ describe('admin role enforcement', () => {
       'program',
       'care',
       'guarantees',
+      'sizes',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

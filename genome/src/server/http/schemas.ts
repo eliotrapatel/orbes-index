@@ -40,6 +40,7 @@ import {
   SERVICE_TYPES,
   SHOP_REQUEST_OUTCOMES,
   SHOP_REQUEST_STATUSES,
+  SIZE_KINDS,
   STAFF_ROLES,
   VERIFICATION_STATES,
 } from '../db/schema.js';
@@ -78,6 +79,7 @@ import {
   LIVE_SIZES,
 } from '../services/live-console.js';
 import { PRICE_LABEL_MAX, SLUG_MAX, SPECS_MAX, STORY_MAX } from '../services/lookbook.js';
+import { FIT_RANGE_MM } from '../services/sizes.js';
 import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX, GALLERY_MAX } from '../services/media.js';
 import { SHOP_NOTE_MAX, SHOP_RESOLUTION_MAX } from '../services/salon.js';
 import { SHOPIFY_PERIOD_MAX_DAYS } from '../services/shopify.js';
@@ -268,6 +270,17 @@ export const publicCircleParams = z.object({ id: z.string().max(64) });
  */
 export const salonRequestBody = optionalBody({
   note: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), text(SHOP_NOTE_MAX).nullable().optional()),
+  /** AC-01: the size asked, one of the model's (the service checks it: 400 otherwise); null or left out: NOT SURE YET. */
+  size: z.preprocess((v) => (typeof v === 'string' && v.trim() === '' ? null : v), text(100).nullable().optional()),
+});
+
+/**
+ * PUT /api/v1/account/sizes (AC-01, YOUR SIZES): every kind's size in the collector's units, a ring size or
+ * centimetres; null or left out clears it. The service checks each range and step (services/sizes.ts SIZE_RANGES).
+ */
+const savedSize = z.number({ error: 'Must be a number' }).finite('Must be a number').nullable().optional();
+export const accountSizesBody = body({
+  sizes: z.strictObject({ RING: savedSize, BRACELET: savedSize, WRIST: savedSize, NECKLACE: savedSize }, { error: 'Your sizes are an object' }),
 });
 
 /** POST /api/v1/club/circle/:id/rsvp (P-X01): the account's answer to an invitation, YES or NO. */
@@ -1574,3 +1587,14 @@ export const shopifyLinkBody = body({
     .array(z.strictObject({ size: z.string().trim().min(1, 'Required').max(100, 'At most 100 characters').nullable(), variantId: shopifyPasted }))
     .max(200, 'At most 200 sizes'),
 });
+
+// ── A model's sizes (plan NEXT-NINE, AC-01) ────────────────────────────────
+
+/** A size's fit, in whole millimetres of the model's size kind: both or neither (the service checks the pair). */
+const fitMm = z.number().int('A whole number of millimetres').min(FIT_RANGE_MM.min, `From ${FIT_RANGE_MM.min} mm`).max(FIT_RANGE_MM.max, `At most ${FIT_RANGE_MM.max} mm`).nullable();
+
+/** PUT /api/admin/models/:id/sizes: the model's size kind (null: none) and its sizes' fits; either may be left out. */
+export const modelSizesBody = body({
+  sizeKind: z.enum(SIZE_KINDS).nullable().optional(),
+  fits: z.array(z.strictObject({ skuId: uuid, fitMinMm: fitMm, fitMaxMm: fitMm })).max(200, 'At most 200 sizes').optional(),
+}).refine((b) => b.sizeKind !== undefined || (b.fits !== undefined && b.fits.length > 0), { message: 'Give a size type or a fit' });

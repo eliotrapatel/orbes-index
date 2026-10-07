@@ -307,6 +307,13 @@ export type GuaranteeStatus = (typeof GUARANTEE_STATUSES)[number];
 export const GUARANTEE_CLOSED_REASONS = ['USED', 'RELEASE_ENDED', 'RELEASE_CANCELLED', 'REVOKED'] as const;
 export type GuaranteeClosedReason = (typeof GUARANTEE_CLOSED_REASONS)[number];
 
+/**
+ * The sizes a collector saves in YOUR SIZES (account_sizes.kind, migration 0030, AC-01), and which of them preselects a
+ * model's size (models.size_kind): a ring size, a bracelet size, a wrist (for watches) and a necklace length.
+ */
+export const SIZE_KINDS = ['RING', 'BRACELET', 'WRIST', 'NECKLACE'] as const;
+export type SizeKind = (typeof SIZE_KINDS)[number];
+
 /** Why a credit taken off an order was given back (credit_uses.released_reason, migration 0027): removed, the order cancelled or returned. */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
 export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
@@ -410,6 +417,8 @@ export interface ModelsTable {
   variant_label: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0024: the dot's colour, `#RRGGBB` in capitals, with its label (both or neither). */
   variant_swatch: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0030 (AC-01): which saved size of a collector preselects its size; NULL: none, or on a variant its main model's. */
+  size_kind: ColumnType<SizeKind | null, SizeKind | null | undefined, SizeKind | null>;
   created_at: TimestampDefault;
 }
 
@@ -989,6 +998,8 @@ export interface ShopRequestsTable {
   resolution_note: string | null;      // ≤ 2 000 characters, the console's
   /** Migration 0022: ACCEPTED (an order follows) or DECLINED, set when CLOSED; NULL for one closed before. */
   outcome: ColumnType<ShopRequestOutcome | null, ShopRequestOutcome | null | undefined, ShopRequestOutcome | null>;
+  /** Migration 0030 (AC-01): the size asked with REQUEST THIS PIECE, one of the model's (1..100 characters); NULL: not sure yet, or one size. Never changes. */
+  size_label: ColumnType<string | null, string | null | undefined, never>;
 }
 
 /**
@@ -1124,6 +1135,21 @@ export interface SkusTable {
   shopify_product_id: ColumnType<string | null, string | null | undefined, string | null>;
   shopify_variant_id: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: TimestampDefault;
+  /** Migration 0030 (AC-01): the measures this size fits, in its model's size kind's whole millimetres, both or neither (min ≤ max, 1..1 000); NULL: its label is read. */
+  fit_min_mm: ColumnType<number | null, number | null | undefined, number | null>;
+  fit_max_mm: ColumnType<number | null, number | null | undefined, number | null>;
+}
+
+/**
+ * A size a collector saved in YOUR SIZES (migration 0030, AC-01): one per account and kind, in whole millimetres (the
+ * French ring size itself, or centimetres × 10), within its kind's range and step (`account_sizes_value`). A cleared
+ * size is a deleted row.
+ */
+export interface AccountSizesTable {
+  account_id: string;
+  kind: SizeKind;
+  value_mm: number;
+  updated_at: TimestampDefault;
 }
 
 /**
@@ -1677,6 +1703,7 @@ export interface Database {
   care_requests: CareRequestsTable;
   house_guarantees: HouseGuaranteesTable;
   guarantee_settings: GuaranteeSettingsTable;
+  account_sizes: AccountSizesTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
   segments: SegmentsTable;
