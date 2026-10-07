@@ -249,12 +249,11 @@ describe('YOUR SIZES (AC-01)', () => {
     expect(entries.map((e) => e.details)).toEqual([{ sizeKind: { before: null, after: 'RING' }, skus: [sku54] }]);
     // A variant without a kind of its own reads its main model's, named.
     const variant = await h.ctx.services.catalog.createVariant(other.modelId, { label: 'Night', swatch: '#16224A', skuPrefix: 'SIZ-NT', mainLabel: 'Day', mainSwatch: '#9D9B96' }, SYSTEM_ACTOR);
-    expect(await read(auditor).then(() => auditor.get(`/api/admin/models/${variant.id}/sizes`)).then((r) => safeJson(r))).toMatchObject({
-      sizeType: null,
-      sizeKind: null,
-      inherited: { sizeKind: 'RING', from: 'MONOLITHE' },
-      sizes: [],
-    });
+    // Plan NEXT LOT §3.3: made by a fixture without a type, it has none either, and its main model's offered sizes are
+    // copied as they are, each its own SKU under its prefix.
+    const read2 = (await read(auditor).then(() => auditor.get(`/api/admin/models/${variant.id}/sizes`)).then((r) => safeJson(r))) as any;
+    expect(read2).toMatchObject({ sizeType: null, sizeKind: null, inherited: { sizeKind: 'RING', from: 'MONOLITHE' } });
+    expect(read2.sizes.map((z: any) => [z.label, z.code])).toEqual([[null, 'SIZ-NT'], ['52', 'SIZ-NT-52'], ['54', 'SIZ-NT-54']]);
   });
 
   it('serves the account\'s routes signed in only, the write with its CSRF token and same origin, 400 off range', async () => {
@@ -573,7 +572,8 @@ describe('DECLARED SIZES (NEXT LOT §3.3)', () => {
     // A variant is named with its label; a model of one size lists ONE SIZE.
     const main = await model('OFF-MN', 'ONE_SIZE', 'PENDANT');
     const blue = await h.ctx.services.catalog.createVariant(main, { label: 'Blue', swatch: '#1F3A6B', skuPrefix: 'OFF-BL', mainLabel: 'Steel', mainSwatch: '#9D9B96' }, SYSTEM_ACTOR);
-    await sizes().declare(blue.id, { sizeType: 'ONE_SIZE' }, admin);
+    // Plan NEXT LOT §3.3: the variant copies its main model's type and ONE SIZE.
+    expect(await sizes().modelSizes(blue.id)).toMatchObject({ sizeType: 'ONE_SIZE', offered: 1 });
     const named = (await h.t.db.selectFrom('models').select('name').where('id', '=', main).executeTakeFirstOrThrow()).name;
     expect(await refusal(inTransaction(h.t.db, (tx) => offeredSku(tx, blue.id, '52')))).toMatchObject({ code: 'SIZE_NOT_DECLARED', message: `Size 52 is not one of ${named} · BLUE’s sizes (ONE SIZE). Add it on the model’s page, in the Catalogue.` });
     expect(await inTransaction(h.t.db, (tx) => offeredSku(tx, main, 'ONE SIZE'))).toMatchObject({ label: null, typed: true });

@@ -156,8 +156,11 @@ export const adminCatalogRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
         swatch: b.swatch,
         skuPrefix: b.skuPrefix,
         ...(b.mainLabel !== undefined ? { mainLabel: b.mainLabel, mainSwatch: b.mainSwatch } : {}),
+        ...(b.sizeType !== undefined ? { sizeType: b.sizeType } : {}),
       },
       adminActor(request),
+      // Plan NEXT LOT §3.3 item 6: a variant made after H1 is given its size type (its main model's, or this one).
+      { requireSizeType: true },
     );
     reply.code(201);
     return created;

@@ -524,6 +524,8 @@ export interface VariantInput {
   skuPrefix: string;
   mainLabel?: string;
   mainSwatch?: string;
+  /** Plan NEXT LOT §3.3 item 6: its size type, when its main model has none yet (required then). */
+  sizeType?: SizeType;
 }
 
 /** One photograph of a model's lookbook gallery (P-R02). */

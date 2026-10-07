@@ -321,9 +321,12 @@ describe('certificate cards API', () => {
       skuPrefix: `MNL-BL${Math.random().toString(36).slice(2, 5).toUpperCase()}`,
       mainLabel: 'Steel',
       mainSwatch: '#C9CCD1',
+      // Plan NEXT LOT §3.3: its main model has no size type yet, so the variant is given its own, and its size ticked.
+      sizeType: 'BRACELET',
     });
     expect(variant.statusCode, variant.body).toBe(201);
     const blue = (safeJson(variant) as { id: string }).id;
+    expect((await operator.request('PUT', `/api/admin/models/${blue}/sizes`, { body: { ticked: ['17'] } })).statusCode).toBe(200);
     const p = await issue(h.ctx, { ...catalog, modelId: blue }, { withClaimSecret: true, variant: '17' });
     const items = [{ productId: p.product.productId, claimCode: p.claimCode }];
 

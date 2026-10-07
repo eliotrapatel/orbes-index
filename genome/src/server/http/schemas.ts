@@ -554,6 +554,8 @@ export const createVariantBody = body({
   skuPrefix,
   mainLabel: z.preprocess((v) => (v === '' || v === null ? undefined : v), variantLabel.optional()),
   mainSwatch: z.preprocess((v) => (v === '' || v === null ? undefined : v), variantSwatch.optional()),
+  // Plan NEXT LOT §3.3 item 6: the variant's size type, when its main model has none yet (the service requires it then).
+  sizeType: z.enum(SIZE_TYPES).optional(),
 }).refine((b) => (b.mainLabel === undefined) === (b.mainSwatch === undefined), {
   message: 'The model’s own label is sent with its colour',
   path: ['mainLabel'],

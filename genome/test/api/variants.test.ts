@@ -15,6 +15,7 @@
  *    and page, and taken by the order of each entry Client Services confirms, instead of « to be confirmed ».
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ensureSku } from '../../src/server/services/stock.js';
 import { normalizeSwatch, normalizeVariantLabel, VARIANT_LABEL_MAX } from '../../src/server/services/catalog.js';
 import { DRAW_PRICE_MAX_MINOR } from '../../src/server/services/drops.js';
 import { ORDER_AMOUNT_MAX_MINOR } from '../../src/server/services/orders.js';
@@ -158,7 +159,10 @@ describe('the variants of a model (NOCTURNE N1)', () => {
     const missing = await addVariant(catalog.modelId, { label: 'Gold', swatch: '#b88a3a', skuPrefix: 'VAR-GD' });
     expect([missing.statusCode, errorOf(missing).code]).toEqual([400, 'VALIDATION_FAILED']);
     expect(errorOf(missing).message).toBe('Give this model its own label and colour first: it is one of the dots of its variants.');
-    const res = await addVariant(catalog.modelId, { label: 'Gold', swatch: '#b88a3a', skuPrefix: 'var-gd', mainLabel: 'Steel', mainSwatch: '9d9b96' });
+    // Plan NEXT LOT §3.3 item 6: its main model has no size type yet, so the variant is given one.
+    const untyped = await addVariant(catalog.modelId, { label: 'Gold', swatch: '#b88a3a', skuPrefix: 'var-gd', mainLabel: 'Steel', mainSwatch: '9d9b96' });
+    expect([untyped.statusCode, errorOf(untyped)]).toEqual([400, { code: 'VALIDATION_FAILED', message: 'Give the model its size type.' }]);
+    const res = await addVariant(catalog.modelId, { label: 'Gold', swatch: '#b88a3a', skuPrefix: 'var-gd', mainLabel: 'Steel', mainSwatch: '9d9b96', sizeType: 'ONE_SIZE' });
     expect(res.statusCode, res.body).toBe(201);
     const gold = safeJson(res) as ModelJson;
     const main = await read(catalog.modelId);
@@ -195,23 +199,25 @@ describe('the variants of a model (NOCTURNE N1)', () => {
       collectionId: catalog.collectionId,
       label: 'Gold',
       swatch: '#B88A3A',
-      copied: ['type', 'collection', 'story', 'specs', 'care'],
+      copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes'],
+      sizeType: 'ONE_SIZE',
+      sizes: ['ONE SIZE'],
     });
     expect((await audits('model.update', catalog.modelId)).at(-1)!.details).toMatchObject({ before: { variantLabel: null, variantSwatch: null }, after: { variantLabel: 'Steel', variantSwatch: '#9D9B96' } });
 
     // A second variant: in the order they were added; the main model's dot already given (what is sent for it is not read).
     h.clock.advance(1000);
-    const blue = safeJson(await addVariant(catalog.modelId, { label: 'Blue', swatch: '#16224A', skuPrefix: 'VAR-BL' })) as ModelJson;
+    const blue = safeJson(await addVariant(catalog.modelId, { label: 'Blue', swatch: '#16224A', skuPrefix: 'VAR-BL', sizeType: 'ONE_SIZE' })) as ModelJson;
     expect((await read(catalog.modelId)).variants.map((v) => v.label)).toEqual(['Gold', 'Blue']);
 
     // Refused: a variant of a variant (never chained), a label of the group whatever its case, a SKU prefix taken, the forms.
     const chained = await addVariant(blue.id, { label: 'Night', swatch: '#0A0A0A', skuPrefix: 'VAR-NT' });
     expect([chained.statusCode, errorOf(chained).code]).toEqual([409, 'MODEL_IS_VARIANT']);
     for (const label of ['gold', 'STEEL']) {
-      const taken = await addVariant(catalog.modelId, { label, swatch: '#0A0A0A', skuPrefix: `VAR-${label}` });
+      const taken = await addVariant(catalog.modelId, { label, swatch: '#0A0A0A', skuPrefix: `VAR-${label}`, sizeType: 'RING' });
       expect([taken.statusCode, errorOf(taken).code], label).toEqual([409, 'VARIANT_LABEL_TAKEN']);
     }
-    const prefix = await addVariant(catalog.modelId, { label: 'Night', swatch: '#0A0A0A', skuPrefix: 'VAR-GD' });
+    const prefix = await addVariant(catalog.modelId, { label: 'Night', swatch: '#0A0A0A', skuPrefix: 'VAR-GD', sizeType: 'RING' });
     expect([prefix.statusCode, errorOf(prefix).code]).toEqual([409, 'SKU_PREFIX_TAKEN']);
     for (const body of [
       { label: '', swatch: '#0A0A0A', skuPrefix: 'VAR-X' },
@@ -411,5 +417,49 @@ describe('the variants of a model (NOCTURNE N1)', () => {
     // Priced, it is paid without terms entered first (its invoice issued at the draw's price).
     const paid = await h.ctx.services.orders.transition(order.id, { to: 'PAID' }, actor);
     expect([paid.status, paid.priceMinor]).toEqual(['PAID', 420_000]);
+  });
+
+  it('ADD A VARIANT copies its main model\'s size type, kind and offered sizes with their fits, each its own SKU at 0; never one set aside; later changes reach neither (NEXT LOT §3.3)', async () => {
+    const operatorActor = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
+    const sizes = h.ctx.services.sizes;
+    const main = (await h.ctx.services.catalog.createModel({ categoryCode: 'J', name: 'HALO', type: 'RING', skuPrefix: 'VAR-HL', sizeType: 'RING' }, operatorActor)).id;
+    await sizes.declare(main, { ticked: ['50', '52', '54', '58'] }, operatorActor);
+    const id = async (modelId: string, label: string) => (await h.ctx.db.selectFrom('skus').select('id').where('model_id', '=', modelId).where('size_label', '=', label).executeTakeFirstOrThrow()).id;
+    await sizes.setModelSizes(main, { fits: [{ skuId: await id(main, '52'), fitMinMm: 51, fitMaxMm: 53 }] }, operatorActor);
+    await h.ctx.db.updateTable('skus').set({ shopify_variant_id: '1958' }).where('id', '=', await id(main, '58')).execute();
+    expect(await sizes.removeSize(main, await id(main, '58'), operatorActor)).toEqual({ outcome: 'SET_ASIDE' });
+    // A typed main model's type is copied: one sent is refused.
+    const sent = await addVariant(main, { label: 'Blue', swatch: '#16224A', skuPrefix: 'VAR-HL-BL', mainLabel: 'Steel', mainSwatch: '#9D9B96', sizeType: 'BRACELET' });
+    expect([sent.statusCode, errorOf(sent)]).toEqual([400, { code: 'VALIDATION_FAILED', message: 'This model has its size type: its variant copies it.' }]);
+    const res = await addVariant(main, { label: 'Blue', swatch: '#16224A', skuPrefix: 'VAR-HL-BL', mainLabel: 'Steel', mainSwatch: '#9D9B96' });
+    expect(res.statusCode, res.body).toBe(201);
+    const blue = (safeJson(res) as ModelJson).id;
+    const section = await sizes.modelSizes(blue);
+    expect(section).toMatchObject({ sizeType: 'RING', sizeKind: 'RING', offered: 3, setAside: 0 });
+    expect(section.sizes.map((z) => [z.label, z.code, z.fitMinMm, z.fitMaxMm])).toEqual([
+      ['50', 'VAR-HL-BL-50', null, null],
+      ['52', 'VAR-HL-BL-52', 51, 53],
+      ['54', 'VAR-HL-BL-54', null, null],
+    ]);
+    // Their stock is their own, at 0 (no movement).
+    expect(await h.ctx.db.selectFrom('stock_movements').select('id').where('sku_id', 'in', section.sizes.map((z) => z.skuId)).execute()).toEqual([]);
+    const [created] = await audits('model.variant.create', blue);
+    expect(created!.details).toMatchObject({ copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes'], sizeType: 'RING', sizes: ['50', '52', '54'] });
+    // Nothing links the two afterwards: a change on the main never reaches the variant, nor the reverse.
+    await sizes.declare(main, { ticked: ['50', '52', '54', '56'] }, operatorActor);
+    expect((await sizes.modelSizes(blue)).sizes.map((z) => z.label)).toEqual(['50', '52', '54']);
+    await sizes.declare(blue, { ticked: ['50'] }, operatorActor);
+    expect((await sizes.modelSizes(main)).sizes.filter((z) => z.setAsideAt === null).map((z) => z.label)).toEqual(['50', '52', '54', '56']);
+    // A main model of one size: its ONE SIZE copied under the variant's prefix.
+    const one = (await h.ctx.services.catalog.createModel({ categoryCode: 'J', name: 'NOCTURNE', type: 'FRAGRANCE', skuPrefix: 'VAR-NC', sizeType: 'ONE_SIZE' }, operatorActor)).id;
+    const night = safeJson(await addVariant(one, { label: 'Night', swatch: '#0A0A0A', skuPrefix: 'VAR-NC-NT', mainLabel: 'Day', mainSwatch: '#F6F2EA' })) as ModelJson;
+    expect((await sizes.modelSizes(night.id)).sizes.map((z) => [z.label, z.code])).toEqual([[null, 'VAR-NC-NT']]);
+    // A main model with no type, given one: the variant takes it, the main's offered sizes copied as they are; the main unchanged.
+    const old = (await h.ctx.services.catalog.createModel({ categoryCode: 'J', name: 'ORBITE', type: 'RING', skuPrefix: 'VAR-OB' }, operatorActor)).id;
+    for (const label of ['SIZE 52', 'S']) await ensureSku(h.ctx.db, old, label);
+    const gold = safeJson(await addVariant(old, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'VAR-OB-GD', mainLabel: 'Silver', mainSwatch: '#D7D5D0', sizeType: 'RING' })) as ModelJson;
+    expect(await sizes.modelSizes(gold.id)).toMatchObject({ sizeType: 'RING', sizeKind: 'RING', offered: 2 });
+    expect((await sizes.modelSizes(gold.id)).sizes.map((z) => [z.label, z.onList])).toEqual([['S', false], ['SIZE 52', true]]);
+    expect(await sizes.modelSizes(old)).toMatchObject({ sizeType: null, sizeKind: null });
   });
 });

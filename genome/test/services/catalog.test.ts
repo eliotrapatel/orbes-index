@@ -5,6 +5,7 @@ import { packIdentity } from '../../src/core/identity.js';
 import { isGuardViolation } from '../../src/server/db/pg-errors.js';
 import { CatalogService, MODEL_IDENTITY_MESSAGE, type ModelRecord, type UpdateModelInput } from '../../src/server/services/catalog.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
+import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 
@@ -290,5 +291,30 @@ describe('CatalogService (collections and models)', () => {
     expect(typeless).toMatchObject({ sizeType: null, sizesOffered: 0 });
     expect((await audit.list({ action: 'model.create', targetId: typeless.id })).items[0]!.details).not.toHaveProperty('sizeType');
     expect((await domainError(catalog.createModel({ categoryCode: 'J', name: 'X', type: 'RING', skuPrefix: 'X-WR', sizeType: 'WRIST' as never }, admin))).publicMessage).toBe('Give the model its size type.');
+  });
+
+  it('copies a main model\'s offered sizes to its new variant (NEXT LOT §3.3): a typeless main as they are, the variant typeless too unless given a type; a size set aside never', async () => {
+    const main = await catalog.createModel({ categoryCode: 'J', name: 'ECLIPSE', type: 'RING', skuPrefix: 'ECL-RG' }, admin);
+    for (const label of ['SIZE 52', '54', null]) await ensureSku(t.db, main.id, label);
+    await t.db.updateTable('skus').set({ set_aside_at: clock.now(), fit_min_mm: null }).where('model_id', '=', main.id).where('size_label', '=', '54').execute();
+    await t.db.updateTable('skus').set({ fit_min_mm: 51, fit_max_mm: 53 }).where('model_id', '=', main.id).where('size_label', '=', 'SIZE 52').execute();
+    const blue = await catalog.createVariant(main.id, { label: 'Blue', swatch: '#16224A', skuPrefix: 'ECL-BL', mainLabel: 'Silver', mainSwatch: '#D7D5D0' }, admin);
+    expect(blue).toMatchObject({ sizeType: null, sizesOffered: 2 });
+    expect(await t.db.selectFrom('skus').select(['code', 'size_label', 'fit_min_mm', 'fit_max_mm', 'set_aside_at']).where('model_id', '=', blue.id).orderBy('code').execute()).toEqual([
+      { code: 'ECL-BL', size_label: null, fit_min_mm: null, fit_max_mm: null, set_aside_at: null },
+      { code: 'ECL-BL-SIZE-52', size_label: 'SIZE 52', fit_min_mm: 51, fit_max_mm: 53, set_aside_at: null },
+    ]);
+    const created = (await audit.list({ action: 'model.variant.create', targetId: blue.id })).items[0]!.details as Record<string, unknown>;
+    expect(created).toMatchObject({ copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes'], sizes: ['ONE SIZE', 'SIZE 52'] });
+    expect(created).not.toHaveProperty('sizeType');
+    // The route's rule: a variant of a typeless main is given its type (400 otherwise); a typed main's is copied.
+    expect((await domainError(catalog.createVariant(main.id, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'ECL-GD' }, admin, { requireSizeType: true }))).publicMessage).toBe('Give the model its size type.');
+    const gold = await catalog.createVariant(main.id, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'ECL-GD', sizeType: 'RING' }, admin, { requireSizeType: true });
+    expect(gold).toMatchObject({ sizeType: 'RING', sizesOffered: 2 });
+    expect((await t.db.selectFrom('models').select(['size_type', 'size_kind']).where('id', '=', main.id).executeTakeFirstOrThrow())).toEqual({ size_type: null, size_kind: null });
+    const typed = await catalog.createModel({ categoryCode: 'J', name: 'ZENITH', type: 'BANGLE', skuPrefix: 'ZEN-BG', sizeType: 'BRACELET' }, admin);
+    await t.db.updateTable('models').set({ variant_label: 'Steel', variant_swatch: '#9D9B96' }).where('id', '=', typed.id).execute();
+    expect((await domainError(catalog.createVariant(typed.id, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'ZEN-GD', sizeType: 'RING' }, admin))).publicMessage).toBe('This model has its size type: its variant copies it.');
+    expect(await catalog.createVariant(typed.id, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'ZEN-GD' }, admin, { requireSizeType: true })).toMatchObject({ sizeType: 'BRACELET', sizesOffered: 0 });
   });
 });

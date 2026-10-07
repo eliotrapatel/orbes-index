@@ -44,7 +44,7 @@ describe('NOW\'s reads (NOCTURNE N3)', () => {
     catalog = await seedCatalog(h.ctx);
     const aurore = safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name: 'AURORE', type: 'RING', skuPrefix: 'NOW-AU', sizeType: 'RING' })) as { id: string };
     auroreId = aurore.id;
-    const gold = await operator.post(`/api/admin/models/${catalog.modelId}/variants`, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'NOW-GD', mainLabel: 'Steel', mainSwatch: '#9D9B96' });
+    const gold = await operator.post(`/api/admin/models/${catalog.modelId}/variants`, { label: 'Gold', swatch: '#B88A3A', skuPrefix: 'NOW-GD', mainLabel: 'Steel', mainSwatch: '#9D9B96', sizeType: 'RING' });
     expect(gold.statusCode, gold.body).toBe(201);
     goldId = (safeJson(gold) as { id: string }).id;
     // Published in this order: AURORE, then MONOLITHE in steel, then in gold an hour later.

@@ -45,7 +45,9 @@
  * ADD A VARIANT (`createVariant`, audited `model.variant.create`) creates one from its main model: a model that copies
  * its category, collection, name, type, story, specifications and care (instructions and guide), with its own label,
  * colour (`variantLabel`, `variantSwatch`: one of the model's dots) and SKU prefix, HIDDEN from the lookbook until its
- * photographs are set and it is published like any model; its material, prices and sizes are its own. The main model
+ * photographs are set and it is published like any model; its material and prices are its own; its sizes are copied from
+ * its main model when it is added, then its own (plan NEXT LOT §3.3: its size type and kind, and its main model's offered
+ * sizes with their fits, each its own SKU under its own prefix, at 0; nothing links the two afterwards). The main model
  * carries its own label and colour too (its first variant gives them when it has none, audited `model.update`). A label
  * and its colour change through the same edit (`model.update`), together; a variant and a model with variants keep
  * theirs (409 VARIANT_LABEL_REQUIRED), a label is unique within a model and its variants (409 VARIANT_LABEL_TAKEN).
@@ -79,7 +81,7 @@ import { normalizeMinTier, normalizePriceLabel, normalizeSlug, normalizeSpecs, n
 import { mediaUrl } from './media.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES } from './orders.js';
 import { LISTED_SIZE_TYPES, SIZE_TYPE_KIND } from './sizes.js';
-import { ensureSku } from './stock.js';
+import { compareSizes, ensureSku, ONE_SIZE_LABEL } from './stock.js';
 
 /** A model's care guide, at most (models.care_guide, migration 0022). */
 export const CARE_GUIDE_MAX = 8000;
@@ -299,6 +301,11 @@ export interface CreateVariantInput {
   skuPrefix: string;
   mainLabel?: string | null;
   mainSwatch?: string | null;
+  /**
+   * Plan NEXT LOT §3.3 item 6: the variant's size type, given only when its main model has none yet (a model of before
+   * H1); a typed main model's is copied.
+   */
+  sizeType?: SizeType;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -598,8 +605,14 @@ export class CatalogService {
    * is itself a variant (409 MODEL_IS_VARIANT: variants are never chained), a label its model or another of its variants
    * has (409 VARIANT_LABEL_TAKEN), a SKU prefix another model has (409 SKU_PREFIX_TAKEN). Audited `model.variant.create`
    * with its main model, its label and colour, and what was copied.
+   *
+   * Its sizes (plan NEXT LOT §3.3): the main model's size type and kind, and each of its offered sizes (never one set
+   * aside), its own SKU under the variant's prefix (MNL-RG-BL-52), with its fit; later changes on either never reach the
+   * other. A main model with no type: `sizeType` (required with `requireSizeType`, the route's: 400 'Give the model its
+   * size type.') gives the variant its type, the main's offered sizes copied as they are; without one (a fixture, the
+   * demo) the variant has no type either. A typed main model's type is copied: `sizeType` is refused (400).
    */
-  async createVariant(mainId: string, input: CreateVariantInput, actor: Actor): Promise<ModelRecord> {
+  async createVariant(mainId: string, input: CreateVariantInput, actor: Actor, opts: { requireSizeType?: boolean } = {}): Promise<ModelRecord> {
     const id = modelKey(mainId);
     if (input === null || typeof input !== 'object') throw validationError('Send the variant’s label, colour and SKU prefix.');
     const label = normalizeVariantLabel(input.label);
@@ -607,6 +620,8 @@ export class CatalogService {
     if (label === null || swatch === null) throw validationError('A variant has its label and its colour: one of its model’s dots.');
     const skuPrefix = requiredText(input.skuPrefix, 'SKU prefix', 32).toUpperCase();
     if (!SKU_PREFIX_RE.test(skuPrefix)) throw validationError('SKU prefix may contain letters, digits, dot, underscore and hyphen only.');
+    const givenType = input.sizeType;
+    if (givenType !== undefined && !(SIZE_TYPES as readonly string[]).includes(givenType)) throw validationError('Give the model its size type.');
     try {
       const variantId = await inTransaction(this.db, async (tx) => {
         const main = await tx
@@ -625,6 +640,8 @@ export class CatalogService {
             'm.variant_of',
             'm.variant_label',
             'm.variant_swatch',
+            'm.size_type',
+            'm.size_kind',
             'c.code as category_code',
           ])
           .where('m.id', '=', id)
@@ -649,6 +666,11 @@ export class CatalogService {
             tx,
           );
         }
+        // Its size type: the main model's, or the one given for a main model with none yet.
+        if (main.size_type !== null && givenType !== undefined) throw validationError('This model has its size type: its variant copies it.');
+        if (main.size_type === null && givenType === undefined && opts.requireSizeType) throw validationError('Give the model its size type.');
+        const sizeType = main.size_type ?? givenType ?? null;
+        const sizeKind = main.size_type !== null ? main.size_kind : givenType !== undefined ? SIZE_TYPE_KIND[givenType] : null;
         const r = await tx
           .insertInto('models')
           .values({
@@ -665,10 +687,31 @@ export class CatalogService {
             variant_of: id,
             variant_label: label,
             variant_swatch: swatch,
+            ...(sizeType !== null ? { size_type: sizeType, size_kind: sizeKind } : {}),
             created_at: now,
           })
           .returning('id')
           .executeTakeFirstOrThrow();
+        // The main model's offered sizes, each its own SKU under the variant's prefix, with its fit.
+        const offered = await tx
+          .selectFrom('skus')
+          .select(['size_label', 'fit_min_mm', 'fit_max_mm'])
+          .where('model_id', '=', id)
+          .where('set_aside_at', 'is', null)
+          .orderBy('created_at')
+          .orderBy('id')
+          .execute();
+        const sizes: string[] = [];
+        for (const k of offered.sort((a, b) => compareSizes(a.size_label, b.size_label))) {
+          const skuId = await ensureSku(tx, r.id, k.size_label);
+          if (k.fit_min_mm !== null || k.fit_max_mm !== null) await tx.updateTable('skus').set({ fit_min_mm: k.fit_min_mm, fit_max_mm: k.fit_max_mm }).where('id', '=', skuId).execute();
+          sizes.push(k.size_label ?? ONE_SIZE_LABEL);
+        }
+        // A watch or a model of one size has its ONE SIZE (§3.3 item 6b), copied or declared here.
+        if (sizeType !== null && !LISTED_SIZE_TYPES.includes(sizeType) && !offered.some((k) => k.size_label === null)) {
+          await ensureSku(tx, r.id, null);
+          sizes.unshift(ONE_SIZE_LABEL);
+        }
         await this.audit.record(
           {
             actor,
@@ -684,7 +727,9 @@ export class CatalogService {
               collectionId: main.collection_id,
               label,
               swatch,
-              copied: ['type', 'collection', 'story', 'specs', 'care'],
+              copied: ['type', 'collection', 'story', 'specs', 'care', 'sizes'],
+              ...(sizeType !== null ? { sizeType } : {}),
+              sizes,
             },
           },
           tx,

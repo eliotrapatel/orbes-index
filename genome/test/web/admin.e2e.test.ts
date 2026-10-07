@@ -2851,7 +2851,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await signIn(p, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
     // A model of its own, with what ADD A VARIANT copies.
-    const main = await ctx.services.catalog.createModel({ categoryCode: 'J', name: 'CONSTELLATION', type: 'PENDANT', skuPrefix: 'CST-PD', careInstructions: 'Wipe it with a soft, dry cloth.' }, SYSTEM_ACTOR);
+    // Created with its size type, as every model is since plan NEXT LOT §3.3: its variant copies it.
+    const main = await ctx.services.catalog.createModel({ categoryCode: 'J', name: 'CONSTELLATION', type: 'PENDANT', skuPrefix: 'CST-PD', careInstructions: 'Wipe it with a soft, dry cloth.', sizeType: 'ONE_SIZE' }, SYSTEM_ACTOR);
     await ctx.services.catalog.updateModel(main.id, { story: 'Seven stones, as the stars of the north.', specs: 'Metal: 18k white gold' }, SYSTEM_ACTOR);
     await go(p, `#/catalogue/${main.id}`, 'CONSTELLATION');
     const section = p.locator('#variants');
