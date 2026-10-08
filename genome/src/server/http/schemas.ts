@@ -1453,6 +1453,17 @@ export const orderTermsBody = body({
     path: ['shippingMinor'],
   });
 
+/**
+ * POST /api/v1/account/orders/:id/case (plan NEXT LOT §3.6.D): REQUEST A RETURN or EXCHANGE THE SIZE, with one of the
+ * four reasons, an optional note and, for an exchange, the new size by its label.
+ */
+export const accountOrderCaseBody = body({
+  kind: z.enum(['RETURN', 'EXCHANGE']),
+  reason: z.enum(ORDER_CASE_REASONS),
+  note: z.preprocess(emptyToNull, z.string().max(1000, 'At most 500 characters').nullable().optional()),
+  sizeLabel: z.preprocess(emptyToNull, z.string().max(100, 'Choose the new size').nullable().optional()),
+});
+
 /** PUT /api/v1/account/orders/:id/engraving (plan NEXT LOT §3.6.C): the words, checked by the service in its own words. */
 export const accountEngravingBody = body({ text: z.string().max(200, 'Up to 20 characters: letters, figures, spaces and . & ’ -') });
 

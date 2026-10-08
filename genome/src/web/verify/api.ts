@@ -25,6 +25,7 @@ import type {
   AccountMessage,
   AccountSizes,
   DeliveryAddressInput,
+  OrderCaseRequest,
   AccountThread,
   MessageContextInput,
   AccountOrder,
@@ -677,6 +678,13 @@ export class ApiClient {
     const blob = await res.blob();
     if (!type.startsWith('application/pdf') || blob.size === 0 || blob.size > MAX_FILE_BYTES) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
     return { blob, filename: filenameOf(res.headers.get('content-disposition'), `ORBES-${number}.pdf`) };
+  }
+
+  /** REQUEST A RETURN or EXCHANGE THE SIZE (plan NEXT LOT §3.6.D): the order case opens at once; the order after it. */
+  async requestOrderCase(orderId: string, input: OrderCaseRequest): Promise<AccountOrder> {
+    const r = await this.request<{ order?: AccountOrder }>('POST', `/api/v1/account/orders/${encodeURIComponent(orderId)}/case`, input, { csrf: true });
+    if (!r?.order || typeof r.order.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.order;
   }
 
   /** An order's engraving (plan NEXT LOT §3.6.C): its words, or null to remove it; the order after it. */

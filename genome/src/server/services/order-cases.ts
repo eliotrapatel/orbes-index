@@ -9,7 +9,14 @@
  *   open      Client Services (OPERATOR) opens a RETURN or a size EXCHANGE on an order SHIPPED or DELIVERED, at any
  *             time (question 20 as built: the collector's own 14 days do not bind Client Services), with a reason and a
  *             note; an exchange names one of its model's other sizes in stock at the order's location (409
- *             EXCHANGE_SIZE_NOT_IN_STOCK). The collector's own request comes with §3.6.D (step 6.9).
+ *             EXCHANGE_SIZE_NOT_IN_STOCK).
+ *   request   the collector's own (plan NEXT LOT §3.6.D, step 6.9; POST /api/v1/account/orders/:id/case): a RETURN or a
+ *             size EXCHANGE of its own order DELIVERED, not a welcome gift (409 RETURN_NOT_ALLOWED), within 14 days of
+ *             its delivery (409 RETURN_WINDOW_CLOSED), with one of the four reasons and an optional note; an exchange
+ *             names another of its model's sizes, available at the order's location now (409
+ *             EXCHANGE_SIZE_NOT_IN_STOCK; the size is not held). The case opens at once, and the request is written into
+ *             the collector's MESSAGES as its own message, in the same transaction (MessageService.writeIn, without the
+ *             message rate).
  *   report    the agent or Client Services reports a parcel SHIPPED BACK_TO_SENDER, LOST or DAMAGED, with a note: a case
  *             naming the shipment, whose status takes its kind.
  *   receive   the agent records the parcel back (a return, an exchange, a parcel back to sender or damaged; never a lost
@@ -59,6 +66,9 @@ import { createExchangeOrder, hold, lockOrder, orderReference, recordChange, ret
 import { parcelKeyOf, parcelOrders } from './parcels.js';
 import type { LocationScope } from './receptions.js';
 import { sizesForExchange } from './sizes.js';
+import type { MessageService } from './messages.js';
+import { customerAccountLocked } from './auth.js';
+import { RETURN_WINDOW_DAYS } from './parcels.js';
 import { knownLocation, lockSku, recordMovement } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -89,6 +99,20 @@ const lostNotReceived = () => conflict('ORDER_CASE_NOT_RECEIVABLE', 'A lost parc
 export const exchangeSizeOut = () => conflict('EXCHANGE_SIZE_NOT_IN_STOCK', 'This size is no longer in stock. Choose another.');
 const notShippedOrDelivered = (from: string) => new DomainError('ORDER_TRANSITION_NOT_ALLOWED', 409, 'This order cannot move to that step.', { detail: `${from} → order case` });
 const noShippedParcel = () => notFound('Shipment', 'SHIPMENT_NOT_FOUND');
+/** Plan NEXT LOT §3.6.D: the collector's own request. */
+export const returnWindowClosed = () => conflict('RETURN_WINDOW_CLOSED', 'The 14 days to return this piece have passed. ORBES Client Services can assist you.');
+const returnNotAllowed = () => conflict('RETURN_NOT_ALLOWED', 'This piece cannot be returned from here. ORBES Client Services can assist you.');
+
+/** The reasons a collector gives, as its message in MESSAGES says them (plan NEXT LOT §3.6.D). */
+export const ORDER_CASE_REASON_WORDS: Readonly<Record<OrderCaseReason, string>> = Object.freeze({
+  SIZE: 'The size does not fit',
+  NOT_AS_EXPECTED: 'The piece is not as I expected',
+  DAMAGED: 'The piece arrived damaged',
+  OTHER: 'Another reason',
+});
+/** The collector's note, at most (the app's field; the table takes 1 000). */
+export const ORDER_CASE_COLLECTOR_NOTE_MAX = 500;
+const DAY_MS = 24 * 60 * 60_000;
 
 // ── Views ──────────────────────────────────────────────────────────────────
 
@@ -185,6 +209,17 @@ export interface OrderCaseServiceDeps {
   audit: AuditService;
   lifecycle?: LifecycleService;
   clock?: Clock;
+  /** Writes a collector's request into its MESSAGES (plan NEXT LOT §3.6.D). */
+  messages?: MessageService;
+}
+
+/** What the collector asks (POST /api/v1/account/orders/:id/case). */
+export interface RequestCaseInput {
+  kind: 'RETURN' | 'EXCHANGE';
+  reason: OrderCaseReason;
+  note?: string | null;
+  /** An exchange's new size, by its label. */
+  sizeLabel?: string | null;
 }
 
 export class OrderCaseService {
@@ -192,11 +227,13 @@ export class OrderCaseService {
   private readonly audit: AuditService;
   private readonly lifecycle: LifecycleService;
   private readonly clock: Clock;
+  private readonly messages: MessageService | undefined;
 
   constructor(deps: OrderCaseServiceDeps) {
     this.db = deps.db;
     this.audit = deps.audit;
     this.clock = deps.clock ?? systemClock;
+    this.messages = deps.messages;
     this.lifecycle = deps.lifecycle ?? new LifecycleService({ db: deps.db, audit: deps.audit, clock: this.clock });
   }
 
@@ -320,6 +357,66 @@ export class OrderCaseService {
       return c.id;
     });
     return this.get(caseId);
+  }
+
+  /**
+   * The collector's own request (REQUEST A RETURN, EXCHANGE THE SIZE; plan NEXT LOT §3.6.D): see the header. In one
+   * transaction, the account FOR SHARE (403 ACCOUNT_LOCKED), its order's row FOR UPDATE (404 ORDER_NOT_FOUND for another
+   * account's), the case inserted after its message (`message_id`). Audited `order.case.open` `{ caseId, kind, reason,
+   * sizeLabel?, by: 'account' }` with the account as actor, and `message.write`; never the note. Returns the case's id.
+   */
+  async request(accountId: string, orderId: string, input: RequestCaseInput, actor: Actor): Promise<string> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw orderNotFound();
+    const account = accountId.toLowerCase();
+    const id = known(orderId, orderNotFound);
+    if (!input || !(['RETURN', 'EXCHANGE'] as const).includes(input.kind)) throw validationError('Ask for a return or an exchange of size.');
+    if (!(ORDER_CASE_REASONS as readonly string[]).includes(input.reason)) throw validationError('Choose a reason.');
+    const note = cleanText(input.note, ORDER_CASE_COLLECTOR_NOTE_MAX, 'Your note', false);
+    const asked = input.kind === 'EXCHANGE' ? (typeof input.sizeLabel === 'string' ? input.sizeLabel.trim() : '') : null;
+    if (input.kind === 'EXCHANGE' && !asked) throw validationError('Choose the new size.');
+    if (input.kind === 'RETURN' && input.sizeLabel) throw validationError('A return names no new size.');
+    if (!this.messages) throw new Error('OrderCaseService.request: no MessageService');
+    const messages = this.messages;
+    return inTransaction(this.db, async (tx) => {
+      const a = await tx.selectFrom('accounts').select('status').where('id', '=', account).forShare().executeTakeFirst();
+      if (!a) throw orderNotFound();
+      if (a.status !== 'ACTIVE') throw customerAccountLocked();
+      const o = await tx.selectFrom('orders').selectAll().where('id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
+      if (!o) throw orderNotFound();
+      if (o.status !== 'DELIVERED' || o.channel === 'GIFT' || o.delivered_at === null) throw returnNotAllowed();
+      const now = this.clock();
+      if (now.getTime() >= o.delivered_at.getTime() + RETURN_WINDOW_DAYS * DAY_MS) throw returnWindowClosed();
+      await this.assertNoOpenCase(tx, [o.id]);
+      let exchange: { skuId: string; label: string } | null = null;
+      if (asked !== null) {
+        const size = (await sizesForExchange(tx, o.id)).find((s) => s.label !== null && s.label.toUpperCase() === asked.toUpperCase());
+        if (!size) throw validationError("Choose one of the model's other sizes.");
+        if (!size.selectable) throw exchangeSizeOut();
+        exchange = { skuId: size.skuId, label: size.label! };
+      }
+      // The request, as the collector's own message in MESSAGES: its reason, then its note.
+      const head = exchange ? `EXCHANGE REQUESTED: SIZE ${exchange.label} — ${ORDER_CASE_REASON_WORDS[input.reason]}.` : `RETURN REQUESTED — ${ORDER_CASE_REASON_WORDS[input.reason]}.`;
+      const { message } = await messages.writeIn(tx, account, { body: note ? `${head}\n\n${note}` : head, context: { kind: 'ORDER', orderId: o.id } }, actor, { rate: false });
+      const c = await tx
+        .insertInto('order_cases')
+        .values({
+          order_id: o.id,
+          kind: input.kind,
+          opened_by_type: 'account',
+          opened_by_id: account,
+          opened_at: now,
+          reason: input.reason,
+          note,
+          exchange_sku_id: exchange?.skuId ?? null,
+          exchange_size_label: exchange?.label ?? null,
+          message_id: message.id,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      const n = await recordChange(tx, o, o, 'order.case.open', { details: { caseId: c.id, kind: input.kind, reason: input.reason, ...(exchange ? { sizeLabel: exchange.label } : {}), by: 'account' } }, actor, now);
+      await this.audit.record(n, tx);
+      return c.id;
+    });
   }
 
   /**

@@ -1,6 +1,6 @@
 /**
  * Order cases (plan NEXT LOT of 2026-10-07, §1.1 (b) and §3.5.6.7, step 5.10; services/order-cases.ts), on the services
- * as createContext wires them. The collector's own requests (§3.6.D) join this file with step 6.9.
+ * as createContext wires them.
  *
  * Parcel problems:
  *  - back to sender → the agent records it → RESHIP: its pieces back in stock, still bound, packed again; their
@@ -23,6 +23,13 @@
  *  - a return on a parcel shipped and never marked delivered: once decided, the parcel DELIVERED, off On its way, its
  *    photo erased 14 days later;
  *  - cancel the order case.
+ * The collector's own requests (§3.6.D, step 6.9):
+ *  - a DELIVERED order, not a welcome gift, within 14 days of its delivery (the edge included), one open at a time;
+ *  - an exchange's sizes: another of the model's, in stock at the order's location (the others refused);
+ *  - the request written into MESSAGES as the collector's own message in the same transaction (a failure rolls both
+ *    back), even at the message limit; audited without the note;
+ *  - the return address: the order's location's, or none;
+ *  - two requests at once give one order case.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -35,7 +42,8 @@ import { creditBalances } from '../../src/server/services/tier-grants.js';
 import type { Actor } from '../../src/server/types.js';
 import { createAdmin, createHarness, seedCatalog, type Catalog, type Harness } from '../api/support.js';
 import { packAndShip, stockPieces, type StockedPiece } from '../support/fulfil.js';
-import { createAccount, holdPieces } from '../support/live.js';
+import { createAccount, createModel, holdPieces } from '../support/live.js';
+import { MESSAGE_RATE } from '../../src/server/services/messages.js';
 
 const MINUTE = 60_000;
 const DAY = 86_400_000;
@@ -450,6 +458,152 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       expect((await db().selectFrom('shipments').select('photo_sha256').where('id', '=', shipment.id).executeTakeFirstOrThrow()).photo_sha256).toBeNull();
       // A new request can open once the first is ended.
       expect((await cases().open(id, { kind: 'RETURN', reason: 'OTHER', note: 'Changed their mind.' }, operator)).status).toBe('OPEN');
+    });
+  });
+  describe('the collector\'s own requests (plan NEXT LOT §3.6.D)', () => {
+    /** A shipped order delivered now, for a new account: its id, its account and the account's actor. */
+    async function delivered(label = freshSize()): Promise<{ id: string; accountId: string; collector: Actor }> {
+      const a = await createAccount(db());
+      const skuId = await skuOf(label);
+      const id = await salonOrder(label, { paid: true, accountId: a.id });
+      await stock(skuId, 1, [id]);
+      await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, operator);
+      h.clock.advance(MINUTE);
+      await orders().transition(id, { to: 'DELIVERED' }, operator);
+      return { id, accountId: a.id, collector: a.actor };
+    }
+    const accountCase = async (accountId: string, id: string) => (await orders().accountOrder(accountId, id)).case;
+
+    it('asks for a return of a DELIVERED order within its 14 days (the edge included), not a welcome gift\'s, one at a time; written into MESSAGES as the collector\'s own message, audited without the note', async () => {
+      const { id, accountId, collector } = await delivered();
+      const deliveredAt = (await row(id)).delivered_at!;
+      // A shipped order, not delivered: not from here.
+      const other = await createAccount(db());
+      expect(await refusal(cases().request(other.id, id, { kind: 'RETURN', reason: 'SIZE' }, other.actor))).toMatchObject({ code: 'ORDER_NOT_FOUND', status: 404 });
+      expect(await refusal(cases().request(accountId, id, { kind: 'RETURN', reason: 'WRONG' as never }, collector))).toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect(await refusal(cases().request(accountId, id, { kind: 'RETURN', reason: 'SIZE', note: 'x'.repeat(501) }, collector))).toMatchObject({ code: 'VALIDATION_FAILED' });
+      // RETURNS AND EXCHANGES offered until the 14th day.
+      const mine = await orders().accountOrder(accountId, id);
+      expect(mine.returnable).toEqual({ until: new Date(deliveredAt.getTime() + 14 * DAY), sizes: expect.any(Array) });
+      // One millisecond before the 14 days: asked; at the 14 days: closed (on another order).
+      h.clock.set(new Date(deliveredAt.getTime() + 14 * DAY - 1));
+      const opened = await cases().request(accountId, id, { kind: 'RETURN', reason: 'SIZE', note: 'Too large on my finger.' }, collector);
+      const c = await db().selectFrom('order_cases').selectAll().where('id', '=', opened).executeTakeFirstOrThrow();
+      expect(c).toMatchObject({ kind: 'RETURN', status: 'OPEN', opened_by_type: 'account', opened_by_id: accountId, reason: 'SIZE', note: 'Too large on my finger.', exchange_sku_id: null });
+      // Its message in MESSAGES, the collector's own, about the order.
+      const message = await db().selectFrom('client_messages').selectAll().where('id', '=', c.message_id!).executeTakeFirstOrThrow();
+      expect(message).toMatchObject({ author: 'COLLECTOR', body: 'RETURN REQUESTED — The size does not fit.\n\nToo large on my finger.', context_kind: 'ORDER', order_id: id });
+      expect((await db().selectFrom('client_conversations').select('status').where('account_id', '=', accountId).executeTakeFirstOrThrow()).status).toBe('TO_ANSWER');
+      // One open at a time; RETURNS AND EXCHANGES no longer offered; the case on the card.
+      expect(await refusal(cases().request(accountId, id, { kind: 'RETURN', reason: 'OTHER' }, collector))).toEqual({ code: 'ORDER_CASE_OPEN', status: 409, message: 'A request is already open for this order.' });
+      const after = await orders().accountOrder(accountId, id);
+      expect(after.returnable).toBeNull();
+      expect(after.case).toEqual({ kind: 'RETURN', status: 'OPEN', openedAt: h.clock.now(), receivedAt: null, sizeLabel: null, returnAddress: null, outcome: null, exchangeOrder: null });
+      // Audited with the account as actor, never the note.
+      const audit = await db().selectFrom('audit_logs').select(['actor_type', 'details']).where('action', '=', 'order.case.open').where('target_id', '=', id).executeTakeFirstOrThrow();
+      expect(audit).toEqual({ actor_type: 'account', details: expect.objectContaining({ caseId: opened, kind: 'RETURN', reason: 'SIZE', by: 'account' }) });
+      expect(JSON.stringify(await db().selectFrom('audit_logs').select('details').execute())).not.toContain('Too large');
+      // The right of access: its cases with the collector's own words, never who handled them.
+      const exported = await h.ctx.services.owners.exportData(accountId, admin);
+      const order = exported.orders.find((o) => o.cases.length > 0)!;
+      expect(order.cases).toEqual([
+        { kind: 'RETURN', openedBy: 'YOU', openedAt: h.clock.now(), reason: 'SIZE', note: 'Too large on my finger.', sizeLabel: null, status: 'OPEN', receivedAt: null, closedAt: null, outcome: null, cancelledAt: null },
+      ]);
+      // The 14 days past, on another order: closed.
+      const late = await delivered();
+      const lateAt = (await row(late.id)).delivered_at!;
+      h.clock.set(new Date(lateAt.getTime() + 14 * DAY));
+      expect(await refusal(cases().request(late.accountId, late.id, { kind: 'RETURN', reason: 'SIZE' }, late.collector))).toEqual({
+        code: 'RETURN_WINDOW_CLOSED',
+        status: 409,
+        message: 'The 14 days to return this piece have passed. ORBES Client Services can assist you.',
+      });
+      expect((await orders().accountOrder(late.accountId, late.id)).returnable).toBeNull();
+      // A shipped order not delivered yet: not from here.
+      const a = await createAccount(db());
+      const label = freshSize();
+      const shipped = await salonOrder(label, { paid: true, accountId: a.id });
+      await stock(await skuOf(label), 1, [shipped]);
+      await packAndShip(h.ctx, shipped, { carrierId: colissimo, trackingNumber: '6A12345678901' }, operator);
+      expect(await refusal(cases().request(a.id, shipped, { kind: 'RETURN', reason: 'SIZE' }, a.actor))).toEqual({ code: 'RETURN_NOT_ALLOWED', status: 409, message: 'This piece cannot be returned from here. ORBES Client Services can assist you.' });
+      // A LOCKED account asks nothing.
+      const locked = await delivered();
+      await db().updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', locked.accountId).execute();
+      expect(await refusal(cases().request(locked.accountId, locked.id, { kind: 'RETURN', reason: 'SIZE' }, locked.collector))).toMatchObject({ code: 'ACCOUNT_LOCKED', status: 403 });
+    });
+
+    it('asks for a size exchange among the model\'s other sizes in stock at the order\'s location (the others greyed out and refused); the return address its location\'s; Client Services\' decision reaches the card', async () => {
+      const { id, accountId, collector } = await delivered();
+      const inStock = freshSize();
+      const outOfStock = freshSize();
+      await stock(await skuOf(inStock), 1);
+      await skuOf(outOfStock);
+      const sizes = (await orders().accountOrder(accountId, id)).returnable!.sizes;
+      expect(sizes.find((x) => x.label === inStock)).toEqual({ label: inStock, available: true });
+      expect(sizes.find((x) => x.label === outOfStock)).toEqual({ label: outOfStock, available: false });
+      expect(await refusal(cases().request(accountId, id, { kind: 'EXCHANGE', reason: 'SIZE', sizeLabel: outOfStock }, collector))).toEqual({ code: 'EXCHANGE_SIZE_NOT_IN_STOCK', status: 409, message: 'This size is no longer in stock. Choose another.' });
+      expect(await refusal(cases().request(accountId, id, { kind: 'EXCHANGE', reason: 'SIZE', sizeLabel: '999' }, collector))).toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect(await refusal(cases().request(accountId, id, { kind: 'EXCHANGE', reason: 'SIZE' }, collector))).toMatchObject({ code: 'VALIDATION_FAILED', message: 'Choose the new size.' });
+      // Nothing was written by the refusals: no case, no message.
+      expect(await db().selectFrom('order_cases').select('id').where('order_id', '=', id).execute()).toEqual([]);
+      expect(await db().selectFrom('client_messages as m').innerJoin('client_conversations as c', 'c.id', 'm.conversation_id').select('m.id').where('c.account_id', '=', accountId).execute()).toEqual([]);
+      // The order's location with an address: the return address.
+      await h.ctx.services.stock.updateLocation(france, { address: '12 rue du Faubourg\n75008 Paris' }, admin);
+      const opened = await cases().request(accountId, id, { kind: 'EXCHANGE', reason: 'NOT_AS_EXPECTED', sizeLabel: inStock.toLowerCase() }, collector);
+      const message = await db().selectFrom('client_messages as m').innerJoin('order_cases as c', 'c.message_id', 'm.id').select('m.body').where('c.id', '=', opened).executeTakeFirstOrThrow();
+      expect(message.body).toBe(`EXCHANGE REQUESTED: SIZE ${inStock} — The piece is not as I expected.`);
+      expect(await accountCase(accountId, id)).toMatchObject({ kind: 'EXCHANGE', status: 'OPEN', sizeLabel: inStock, returnAddress: '12 rue du Faubourg\n75008 Paris' });
+      // The agent receives it, ORBES exchanges it: the card names the EXCHANGE order.
+      h.clock.advance(DAY);
+      await cases().receive(opened, { pieceState: 'OK' }, agent, scope());
+      expect(await accountCase(accountId, id)).toMatchObject({ status: 'RECEIVED', receivedAt: h.clock.now() });
+      const decided = await cases().decide(opened, { decision: 'EXCHANGE', pieceTo: 'RESTOCKED', note: 'Exchanged.' }, operator, { admin: false });
+      const exchange = decided.case.decision!.exchangeOrder!;
+      expect(await accountCase(accountId, id)).toMatchObject({ status: 'CLOSED', outcome: 'EXCHANGE', exchangeOrder: { id: exchange.id, reference: exchange.reference } });
+      // The EXCHANGE order is the collector's, with its delivery address and its steps.
+      expect((await orders().accountOrder(accountId, exchange.id)).channel).toBe('EXCHANGE');
+      await h.ctx.services.stock.updateLocation(france, { address: null }, admin);
+    });
+
+    it('opens a return at the message limit (no rate), rolls the message back with a refused request, and gives one order case to two requests at once', async () => {
+      const { id, accountId, collector } = await delivered();
+      for (let i = 0; i < MESSAGE_RATE.messages; i++) await h.ctx.services.messages.write(accountId, { body: `Message ${i}` }, collector);
+      expect(await refusal(h.ctx.services.messages.write(accountId, { body: 'One more.' }, collector))).toMatchObject({ code: 'MESSAGE_LIMIT', status: 429 });
+      // At the limit, the request still opens; its message written beside it.
+      const opened = await cases().request(accountId, id, { kind: 'RETURN', reason: 'DAMAGED' }, collector);
+      expect((await db().selectFrom('order_cases').select('message_id').where('id', '=', opened).executeTakeFirstOrThrow()).message_id).not.toBeNull();
+      // Two requests at once on another order: one order case, one message.
+      const twice = await delivered();
+      const results = await Promise.allSettled([
+        cases().request(twice.accountId, twice.id, { kind: 'RETURN', reason: 'SIZE' }, twice.collector),
+        cases().request(twice.accountId, twice.id, { kind: 'RETURN', reason: 'OTHER' }, twice.collector),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(((results.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason as DomainError).code).toBe('ORDER_CASE_OPEN');
+      expect(await db().selectFrom('order_cases').select('id').where('order_id', '=', twice.id).execute()).toHaveLength(1);
+      const messages = await db().selectFrom('client_messages as m').innerJoin('client_conversations as c', 'c.id', 'm.conversation_id').select('m.id').where('c.account_id', '=', twice.accountId).execute();
+      expect(messages).toHaveLength(1);
+      // A welcome gift, delivered with its order: never from here (it is never refunded), and RETURNS AND EXCHANGES not offered.
+      const giftModel = await createModel(db(), 'GIFT CUFF');
+      const giftSku = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, giftModel, null));
+      const program = await h.ctx.services.clubProgram.read();
+      await h.ctx.services.clubProgram.update({ ...program, giftPlatineModelId: giftModel }, admin);
+      const platine = await createAccount(db());
+      await holdPieces(db(), platine.id, 5, catalog.modelId);
+      const label = freshSize();
+      const parent = await salonOrder(label, { accountId: platine.id });
+      const gift = (await db().selectFrom('orders').select('id').where('with_order_id', '=', parent).where('channel', '=', 'GIFT').executeTakeFirstOrThrow()).id;
+      await stockPieces(h.ctx, { skuId: giftSku, locationId: france, count: 1, material: '925 STERLING SILVER', forOrderIds: [gift] }, operator);
+      h.clock.advance(MINUTE);
+      await orders().transition(parent, { to: 'PAID' }, operator);
+      await stock(await skuOf(label), 1, [parent]);
+      await packAndShip(h.ctx, parent, { carrierId: colissimo, trackingNumber: '6A12345678901' }, operator);
+      h.clock.advance(MINUTE);
+      for (const o of [parent, gift]) await orders().transition(o, { to: 'DELIVERED' }, operator);
+      expect((await orders().accountOrder(platine.id, gift)).returnable).toBeNull();
+      expect((await orders().accountOrder(platine.id, parent)).returnable).not.toBeNull();
+      expect(await refusal(cases().request(platine.id, gift, { kind: 'RETURN', reason: 'SIZE' }, platine.actor))).toMatchObject({ code: 'RETURN_NOT_ALLOWED', status: 409 });
+      await h.ctx.services.clubProgram.update({ ...program, giftPlatineModelId: null }, admin);
     });
   });
 });

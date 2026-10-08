@@ -301,7 +301,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });
-    const orderCases = new OrderCaseService({ db, audit, lifecycle, clock });
+    const orderCases = new OrderCaseService({ db, audit, lifecycle, clock, messages });
     const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
     const growth = new GrowthService({ db, clock });
     const claimRenewals = new ClaimRenewalService({ db, audit, certificates, revealKey: deriveClaimRevealKey(config), clock });

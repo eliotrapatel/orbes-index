@@ -1143,6 +1143,35 @@ export interface AccountOrder {
   engravingOffer?: { priceMinor: number | null; included: boolean; maxLength: number } | null;
   /** What the collector may change on it now, as the server reads it. Absent from a server before it: nothing. */
   editable?: { address: boolean; engraving: boolean };
+  /**
+   * Plan NEXT LOT §3.6.A: IN PREPARATION's time (paid, its piece assigned), kept once reached; null when never reached.
+   * Absent from a server before it: none.
+   */
+  preparingAt?: string | null;
+  /** A delivery problem ORBES Client Services is looking into: one sentence replaces the step's. */
+  deliveryIssue?: boolean;
+  /** Plan NEXT LOT §3.6.D: RETURNS AND EXCHANGES while it may be asked, until when, each other size and whether it is in stock. */
+  returnable?: { until: string; sizes: { label: string; available: boolean }[] } | null;
+  /** Its latest return or size exchange: never a note nor who handled it. */
+  case?: {
+    kind: 'RETURN' | 'EXCHANGE';
+    status: 'OPEN' | 'RECEIVED' | 'CLOSED' | 'CANCELLED';
+    openedAt: string;
+    receivedAt: string | null;
+    sizeLabel: string | null;
+    returnAddress: string | null;
+    outcome: 'REFUND' | 'EXCHANGE' | 'RESHIP' | null;
+    exchangeOrder: { id: string; reference: string } | null;
+  } | null;
+}
+
+/** REQUEST A RETURN or EXCHANGE THE SIZE (POST /api/v1/account/orders/:id/case, API §10.23). */
+export interface OrderCaseRequest {
+  kind: 'RETURN' | 'EXCHANGE';
+  reason: 'SIZE' | 'NOT_AS_EXPECTED' | 'DAMAGED' | 'OTHER';
+  note?: string | null;
+  /** An exchange's new size, by its label. */
+  sizeLabel?: string | null;
 }
 
 /** A delivery address as the collector types it (plan NEXT LOT §3.6.B): a name, the lines, a country and a phone. */

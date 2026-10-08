@@ -19,7 +19,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderAddressBody, accountOrderParams, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
@@ -179,6 +179,18 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const { id } = parse(accountOrderParams, request.params);
     reply.header('cache-control', 'no-store');
     return { order: await orders.setEngraving(account.id, id, null, accountActor(request)) };
+  });
+
+  // RETURNS AND EXCHANGES (plan NEXT LOT §3.6.D; API §10.23): a return or a size exchange asked within 14 days of the
+  // delivery; the order case opens at once and the request is written into the collector's MESSAGES. The order back.
+  app.post('/api/v1/account/orders/:id/case', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    const b = parse(accountOrderCaseBody, request.body);
+    await ctx.services.orderCases.request(account.id, id, { kind: b.kind, reason: b.reason, note: b.note ?? null, sizeLabel: b.sizeLabel ?? null }, accountActor(request));
+    reply.header('cache-control', 'no-store');
+    reply.code(201);
+    return { order: await orders.accountOrder(account.id, id) };
   });
 
   // MY PIECES (plan LIVE RELEASE+, choice 6): the account's own orders, step by step; never another account's.

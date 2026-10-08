@@ -14,7 +14,8 @@
  *
  *   write     POST /api/v1/account/messages: the context resolved first; then in one transaction, the account FOR
  *             SHARE (403 ACCOUNT_LOCKED when locked), the rate (MESSAGE_RATE: 10 in a rolling hour, else 429
- *             MESSAGE_LIMIT), the
+ *             MESSAGE_LIMIT; `writeIn`, a return or an exchange requested in YOUR ORDERS, plan NEXT LOT §3.6.D, writes
+ *             in its caller's transaction, its ORDER context resolved there, without the rate), the
  *             conversation created or locked FOR UPDATE, the message; TO_ANSWER, its waiting time kept when it was
  *             waiting already; a CLOSED conversation reopens. Audited `message.write` with the account as actor.
  *   thread    GET /api/v1/account/messages: the conversation oldest first, staff never named (ORBES CLIENT SERVICES),
@@ -377,17 +378,37 @@ export class MessageService {
     const now = this.clock();
     // What the message concerns, read before the transaction: the lookbook reads on its own connection.
     const context = input?.context ? await this.resolveContext(this.db, account, input.context, now) : null;
-    return inTransaction(this.db, async (tx) => {
-      const a = await tx.selectFrom('accounts').select('status').where('id', '=', account).forShare().executeTakeFirst();
-      if (!a) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
-      if (a.status !== 'ACTIVE') throw customerAccountLocked();
-      // The conversation, created on the first message, then held for this one.
-      await tx
-        .insertInto('client_conversations')
-        .values({ account_id: account, status: 'TO_ANSWER', waiting_since: now, last_message_at: now, created_at: now })
-        .onConflict((oc) => oc.column('account_id').doNothing())
-        .execute();
-      const c = await tx.selectFrom('client_conversations').select(['id', 'status', 'waiting_since']).where('account_id', '=', account).forUpdate().executeTakeFirstOrThrow();
+    return inTransaction(this.db, (tx) => this.insertMessage(tx, account, words, context, actor, now, { rate: true }));
+  }
+
+  /**
+   * A collector's message written in the caller's transaction (plan NEXT LOT §3.6.D: a return or an exchange requested
+   * from YOUR ORDERS, written into MESSAGES as the collector's own message): its ORDER context resolved inside `tx` (no
+   * lookbook read), then as `write` writes it, the account FOR SHARE, the conversation, the message. `rate: false` skips
+   * MESSAGE_RATE: one open order case per order already bounds it, and a collector who has just written several
+   * messages must still be able to ask for a return within the 14 days. Audited `message.write` as `write` is.
+   */
+  async writeIn(tx: Db, accountId: string, input: { body: unknown; context: { kind: 'ORDER'; orderId: string } }, actor: Actor, opts: { rate: boolean }): Promise<{ message: CollectorMessage }> {
+    const account = assertAccount(accountId);
+    const words = normalizeCollectorBody(input?.body);
+    const now = this.clock();
+    const context = await this.resolveContext(tx, account, { kind: 'ORDER', id: input.context.orderId }, now);
+    return this.insertMessage(tx, account, words, context, actor, now, opts);
+  }
+
+  /** The message written in `tx`: see `write` (the rate checked unless `rate` is false). */
+  private async insertMessage(tx: Db, account: string, words: string, context: ResolvedContext | null, actor: Actor, now: Date, opts: { rate: boolean }): Promise<{ message: CollectorMessage }> {
+    const a = await tx.selectFrom('accounts').select('status').where('id', '=', account).forShare().executeTakeFirst();
+    if (!a) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+    if (a.status !== 'ACTIVE') throw customerAccountLocked();
+    // The conversation, created on the first message, then held for this one.
+    await tx
+      .insertInto('client_conversations')
+      .values({ account_id: account, status: 'TO_ANSWER', waiting_since: now, last_message_at: now, created_at: now })
+      .onConflict((oc) => oc.column('account_id').doNothing())
+      .execute();
+    const c = await tx.selectFrom('client_conversations').select(['id', 'status', 'waiting_since']).where('account_id', '=', account).forUpdate().executeTakeFirstOrThrow();
+    if (opts.rate) {
       const recent = await tx
         .selectFrom('client_messages')
         .select((eb) => eb.fn.countAll<number>().as('n'))
@@ -396,54 +417,54 @@ export class MessageService {
         .where('created_at', '>', new Date(now.getTime() - MESSAGE_RATE.windowMs))
         .executeTakeFirstOrThrow();
       if (Number(recent.n) >= MESSAGE_RATE.messages) throw messageLimit();
-      const at = await nextMessageAt(tx, c.id, now);
-      const m = await tx
-        .insertInto('client_messages')
-        .values({
-          conversation_id: c.id,
-          author: 'COLLECTOR',
-          body: words,
-          context_kind: context?.kind ?? null,
-          context_label: context?.label ?? null,
-          product_id: context?.product_id ?? null,
-          order_id: context?.order_id ?? null,
-          drop_id: context?.drop_id ?? null,
-          model_id: context?.model_id ?? null,
-          shop_request_id: context?.shop_request_id ?? null,
-          scan_event_id: context?.scan_event_id ?? null,
-          scan_ref: context?.scan_ref ?? null,
-          created_at: at,
-        })
-        .returning(['id', 'created_at'])
-        .executeTakeFirstOrThrow();
-      const reopened = c.status === 'CLOSED';
-      await tx
-        .updateTable('client_conversations')
-        .set({
-          status: 'TO_ANSWER',
-          // Still waiting: since the first message not answered.
-          waiting_since: c.status === 'TO_ANSWER' && c.waiting_since ? c.waiting_since : at,
-          last_message_at: at,
-          closed_at: null,
-          closed_by: null,
-        })
-        .where('id', '=', c.id)
-        .execute();
-      await this.audit.record(
-        { actor, action: 'message.write', targetType: 'client_conversation', targetId: c.id, details: { conversationId: c.id, messageId: m.id, context: context?.kind ?? null, reopened } },
-        tx,
-      );
-      const path = context ? await this.pathFor(tx, context) : null;
-      return {
-        message: {
-          id: m.id,
-          from: MESSAGE_FROM.COLLECTOR,
-          body: words,
-          at: m.created_at,
-          concerning: context ? { kind: context.kind, label: context.label, path } : null,
-        },
-      };
-    });
+    }
+    const at = await nextMessageAt(tx, c.id, now);
+    const m = await tx
+      .insertInto('client_messages')
+      .values({
+        conversation_id: c.id,
+        author: 'COLLECTOR',
+        body: words,
+        context_kind: context?.kind ?? null,
+        context_label: context?.label ?? null,
+        product_id: context?.product_id ?? null,
+        order_id: context?.order_id ?? null,
+        drop_id: context?.drop_id ?? null,
+        model_id: context?.model_id ?? null,
+        shop_request_id: context?.shop_request_id ?? null,
+        scan_event_id: context?.scan_event_id ?? null,
+        scan_ref: context?.scan_ref ?? null,
+        created_at: at,
+      })
+      .returning(['id', 'created_at'])
+      .executeTakeFirstOrThrow();
+    const reopened = c.status === 'CLOSED';
+    await tx
+      .updateTable('client_conversations')
+      .set({
+        status: 'TO_ANSWER',
+        // Still waiting: since the first message not answered.
+        waiting_since: c.status === 'TO_ANSWER' && c.waiting_since ? c.waiting_since : at,
+        last_message_at: at,
+        closed_at: null,
+        closed_by: null,
+      })
+      .where('id', '=', c.id)
+      .execute();
+    await this.audit.record(
+      { actor, action: 'message.write', targetType: 'client_conversation', targetId: c.id, details: { conversationId: c.id, messageId: m.id, context: context?.kind ?? null, reopened } },
+      tx,
+    );
+    const path = context ? await this.pathFor(tx, context) : null;
+    return {
+      message: {
+        id: m.id,
+        from: MESSAGE_FROM.COLLECTOR,
+        body: words,
+        at: m.created_at,
+        concerning: context ? { kind: context.kind, label: context.label, path } : null,
+      },
+    };
   }
 
   /** The conversation as the collector reads it, oldest first (GET /api/v1/account/messages). */

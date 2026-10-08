@@ -118,6 +118,8 @@ import {
   SHIPPING_SERVICES,
   jsonText,
   type AddressSource,
+  type OrderCaseOutcome,
+  type OrderCaseStatus,
   type InvoiceKind,
   type JsonObject,
   type OrderAddonSnapshot,
@@ -147,7 +149,8 @@ import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { tierOf } from './club.js';
 import { engravingPrice, engravingPrices, giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, ensureGrants } from './tier-grants.js';
-import { offeredSku, savedSizeHint } from './sizes.js';
+import { offeredSku, savedSizeHint, sizesForExchange } from './sizes.js';
+import { RETURN_WINDOW_DAYS } from './parcels.js';
 import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockBalances, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -502,6 +505,24 @@ export interface ExportedOrder {
   }[];
   /** Each step with its time and the note Client Services added. */
   history: { status: OrderStatus; at: Date; note: string | null }[];
+  /**
+   * Plan NEXT LOT §3.6.D: its order cases (returns, size exchanges, parcel problems), oldest first: the kind, who opened
+   * it (the collector or ORBES Client Services, never by name), the reason and the collector's own note, the size asked,
+   * the times and the outcome; never staff's notes nor who handled it.
+   */
+  cases: {
+    kind: string;
+    openedBy: 'YOU' | 'ORBES_CLIENT_SERVICES';
+    openedAt: Date;
+    reason: string | null;
+    note: string | null;
+    sizeLabel: string | null;
+    status: string;
+    receivedAt: Date | null;
+    closedAt: Date | null;
+    outcome: string | null;
+    cancelledAt: Date | null;
+  }[];
 }
 
 /** The orders MY PIECES reads, at most: the account's latest (GET /api/v1/account/orders). */
@@ -583,6 +604,35 @@ export interface AccountOrder {
    * started) and the engraving (RESERVED or PAID, packing not started, one offered).
    */
   editable: { address: boolean; engraving: boolean };
+  /**
+   * Plan NEXT LOT §3.6.A: IN PREPARATION's time, the later of its payment and the moment it took its piece in the stock
+   * (its creation, or a waiting order served); kept once reached, whatever its status now; null when never reached.
+   */
+  preparingAt: Date | null;
+  /** A LOST, DAMAGED or BACK_TO_SENDER order case of its parcel not ended: one sentence replaces the step's. */
+  deliveryIssue: boolean;
+  /**
+   * Plan NEXT LOT §3.6.D: RETURNS AND EXCHANGES, while it may be asked: DELIVERED, not a welcome gift, within 14 days of
+   * its delivery (`until`), no order case not ended; each other size of its model and whether it is in stock at the
+   * order's location now (none for a model of one size). null otherwise.
+   */
+  returnable: { until: Date; sizes: { label: string; available: boolean }[] } | null;
+  /**
+   * Its latest return or size exchange (asked by the collector or opened by Client Services): its kind, status, when it
+   * was opened and the parcel received, the size asked, the address to send the piece back to (its location's; null
+   * without one), the outcome and the EXCHANGE order. Never a note, a reason, the piece's state nor who handled it. null
+   * without one.
+   */
+  case: {
+    kind: 'RETURN' | 'EXCHANGE';
+    status: OrderCaseStatus;
+    openedAt: Date;
+    receivedAt: Date | null;
+    sizeLabel: string | null;
+    returnAddress: string | null;
+    outcome: OrderCaseOutcome | null;
+    exchangeOrder: { id: string; reference: string } | null;
+  } | null;
 }
 
 /** The documents of an order in MY PIECES (M6). */
@@ -1819,6 +1869,7 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
     ? await db.selectFrom('order_events').select(['order_id', 'status', 'note', 'created_at']).where('order_id', 'in', rows.map((r) => r.id)).orderBy('id').execute()
     : [];
   const invoices = await orderInvoices(db, rows.map((r) => r.id));
+  const cases = rows.length ? await db.selectFrom('order_cases').selectAll().where('order_id', 'in', rows.map((r) => r.id)).orderBy('opened_at').orderBy('id').execute() : [];
   return rows.map((r) => ({
     reference: orderReference(r.id),
     channel: r.channel,
@@ -1853,7 +1904,44 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
         lines: i.lines.map((l) => ({ label: l.label, detail: l.detail, amountMinor: l.amountMinor })),
       })),
     history: events.filter((e) => e.order_id === r.id).map((e) => ({ status: e.status, at: e.created_at, note: e.note })),
+    cases: cases
+      .filter((c) => c.order_id === r.id)
+      .map((c) => ({
+        kind: c.kind,
+        openedBy: c.opened_by_type === 'account' ? ('YOU' as const) : ('ORBES_CLIENT_SERVICES' as const),
+        openedAt: c.opened_at,
+        reason: c.reason,
+        note: c.opened_by_type === 'account' ? c.note : null,
+        sizeLabel: c.exchange_size_label,
+        status: c.status,
+        receivedAt: c.received_at,
+        closedAt: c.closed_at,
+        outcome: c.outcome,
+        cancelledAt: c.cancelled_at,
+      })),
   }));
+}
+
+/**
+ * IN PREPARATION's time (plan NEXT LOT §3.6.A, §1.1 (c)): the first moment the order was both paid and holding its piece
+ * in the stock, the later of its payment and the change that made it hold the piece (its creation holding stock at once,
+ * a waiting order served: `reservation` in each change's details, as fulfilment.ts readySince reads them); kept once
+ * reached, whatever its status now; null when never reached (an order waiting for stock, one cancelled while waiting).
+ */
+export function preparingAt(paidAt: Date | null, events: readonly { at: Date; details: JsonObject }[]): Date | null {
+  if (paidAt === null) return null;
+  let holding: unknown = null;
+  let since: Date | null = null;
+  for (const e of events) {
+    if (Object.prototype.hasOwnProperty.call(e.details, 'reservation')) {
+      const r = e.details.reservation;
+      if (r === 'STOCK' && holding !== 'STOCK') since = e.at;
+      if (r !== 'STOCK') since = null;
+      holding = r;
+    }
+    if (holding === 'STOCK' && since !== null && e.at.getTime() >= paidAt.getTime()) return since.getTime() > paidAt.getTime() ? since : paidAt;
+  }
+  return null;
 }
 
 /**
@@ -2165,6 +2253,7 @@ export class OrderService {
         : [],
     );
     const prices = await engravingPrices(this.db);
+    const care = await this.accountCases(rows);
     const deliveryOf = (r: (typeof rows)[number]): OrderAddress => (r.with_order_id === null ? ownAddress(r) : ownAddress(parents.get(r.with_order_id)!, r.with_order_id));
     // The order's own invoice and the credit note that cancels it; the others (plan NEXT LOT §3.6.C) listed apart.
     const mainOf = (orderId: string) => invoices.find((x) => x.order.id === orderId && x.kind === 'INVOICE' && x.supplements === null);
@@ -2214,7 +2303,68 @@ export class OrderService {
       imageUrl: mediaUrl(r.model_image),
       claimCode: claimCodes.get(r.id) ?? null,
       ...accountDelivery(r, deliveryOf(r), prices),
+      ...care.get(r.id)!,
     }));
+  }
+
+  /**
+   * The steps and cases of the account's orders as MY PIECES reads them (plan NEXT LOT §3.6.A, §3.6.D): `preparingAt`,
+   * `deliveryIssue`, `returnable` and `case`, per order.
+   */
+  private async accountCases(
+    rows: readonly Pick<OrderRow, 'id' | 'channel' | 'status' | 'paid_at' | 'delivered_at' | 'sku_id'>[],
+  ): Promise<Map<string, Pick<AccountOrder, 'preparingAt' | 'deliveryIssue' | 'returnable' | 'case'>>> {
+    const out = new Map<string, Pick<AccountOrder, 'preparingAt' | 'deliveryIssue' | 'returnable' | 'case'>>();
+    if (rows.length === 0) return out;
+    const ids = rows.map((r) => r.id);
+    // What each held, in order: the changes that say it (`reservation`), each at its time.
+    const events = await this.db.selectFrom('order_events').select(['order_id', 'created_at', 'details']).where('order_id', 'in', ids).orderBy('id').execute();
+    const cases = await this.db.selectFrom('order_cases').selectAll().where('order_id', 'in', ids).orderBy('opened_at').orderBy('id').execute();
+    // A parcel problem names its shipment: every order of the parcel reads it.
+    const problems = await this.db
+      .selectFrom('order_cases as c')
+      .innerJoin('shipment_items as i', 'i.shipment_id', 'c.shipment_id')
+      .select('i.order_id')
+      .where('i.order_id', 'in', ids)
+      .where('c.kind', 'in', ['BACK_TO_SENDER', 'LOST', 'DAMAGED'])
+      .where('c.status', 'in', ['OPEN', 'RECEIVED'])
+      .execute();
+    const troubled = new Set(problems.map((p) => p.order_id));
+    const locations = new Map(
+      (await this.db.selectFrom('orders as o').innerJoin('stock_locations as l', 'l.id', 'o.location_id').select(['o.id', 'l.address']).where('o.id', 'in', ids).execute()).map((x) => [x.id, x.address]),
+    );
+    const now = this.clock();
+    for (const r of rows) {
+      const mine = cases.filter((c) => c.order_id === r.id);
+      const open = mine.some((c) => c.status === 'OPEN' || c.status === 'RECEIVED');
+      const last = [...mine].reverse().find((c) => c.kind === 'RETURN' || c.kind === 'EXCHANGE');
+      let returnable: AccountOrder['returnable'] = null;
+      if (r.status === 'DELIVERED' && r.channel !== 'GIFT' && r.delivered_at !== null && !open) {
+        const until = new Date(r.delivered_at.getTime() + RETURN_WINDOW_DAYS * 24 * 60 * 60_000);
+        if (now.getTime() < until.getTime()) {
+          const sizes = r.sku_id === null ? [] : await sizesForExchange(this.db, r.id);
+          returnable = { until, sizes: sizes.filter((x) => x.label !== null).map((x) => ({ label: x.label!, available: x.selectable })) };
+        }
+      }
+      out.set(r.id, {
+        preparingAt: preparingAt(r.paid_at, events.filter((e) => e.order_id === r.id).map((e) => ({ at: e.created_at, details: (e.details ?? {}) as JsonObject }))),
+        deliveryIssue: troubled.has(r.id),
+        returnable,
+        case: last
+          ? {
+              kind: last.kind as 'RETURN' | 'EXCHANGE',
+              status: last.status,
+              openedAt: last.opened_at,
+              receivedAt: last.received_at,
+              sizeLabel: last.exchange_size_label,
+              returnAddress: locations.get(r.id) ?? null,
+              outcome: last.outcome,
+              exchangeOrder: last.exchange_order_id ? { id: last.exchange_order_id, reference: orderReference(last.exchange_order_id) } : null,
+            }
+          : null,
+      });
+    }
+    return out;
   }
 
   /** One of the account's own orders as MY PIECES shows it (404 ORDER_NOT_FOUND for any other). */

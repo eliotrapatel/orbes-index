@@ -18,6 +18,7 @@ import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 import { countPiecesIn, packAndShip, stockPieces } from '../support/fulfil.js';
+import { ensureSku } from '../../src/server/services/stock.js';
 import { poolDraw } from '../support/draws.js';
 
 type Json = Record<string, any>;
@@ -187,6 +188,11 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       engraving: null,
       engravingOffer: { priceMinor: null, included: true, maxLength: 20 },
       editable: { address: true, engraving: true },
+      // Plan NEXT LOT §3.6.A, §3.6.D: not paid, not in preparation; no delivery problem, no return to ask, no case.
+      preparingAt: null,
+      deliveryIssue: false,
+      returnable: null,
+      case: null,
     });
     // A draw's: its size and price still to be entered.
     expect(byId.get(ids.draw)).toMatchObject({ channel: 'DRAW', release: 'MONOLITHE — RELEASE I', model: 'MONOLITHE', size: null, priceMinor: null, currency: null, addons: [], status: 'RESERVED', paidAt: null, shipment: null });
@@ -222,6 +228,12 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       engraving: { text: 'A. & L.', priceMinor: null },
       engravingOffer: { priceMinor: null, included: false, maxLength: 20 },
       editable: { address: false, engraving: false },
+      // Plan NEXT LOT §3.6.A: in preparation from the moment its piece came into stock (after its payment), kept once
+      // shipped and delivered; §3.6.D: delivered, a return or an exchange may be asked for 14 days.
+      preparingAt: (await h.ctx.db.selectFrom('order_events').select('created_at').where('order_id', '=', ids.delivered).where('action', '=', 'order.serve').executeTakeFirstOrThrow()).created_at.toISOString(),
+      deliveryIssue: false,
+      returnable: { until: new Date(Date.parse(delivered.deliveredAt) + 14 * 24 * HOUR).toISOString(), sizes: expect.any(Array) },
+      case: null,
     });
     for (const k of ['reservedAt', 'paidAt', 'shippedAt', 'deliveredAt']) expect(delivered[k], k).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Date.parse(delivered.reservedAt)).toBeLessThan(Date.parse(delivered.paidAt));
@@ -237,7 +249,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     const list = (safeJson(res) as { orders: Json[] }).orders;
     for (const o of list) {
       expect(Object.keys(o).sort()).toEqual(
-        ['addons', 'address', 'addressOf', 'cancelledAt', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'documents', 'editable', 'engraving', 'engravingOffer', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
+        ['addons', 'address', 'addressOf', 'cancelledAt', 'case', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'deliveryIssue', 'documents', 'editable', 'engraving', 'engravingOffer', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'preparingAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnable', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
       );
       expect(Object.keys(o.documents).sort()).toEqual(['careGuide', 'certificate', 'creditNote', 'invoice', 'others']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);
@@ -527,5 +539,109 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     expect((await other.get(`/api/v1/account/orders/${orderId}/documents/${order.documents.others[0].number}`)).statusCode).toBe(404);
     expect((await mine.get(`/api/v1/account/orders/${orderId}/documents/INV-2026-999999`)).statusCode).toBe(404);
     await h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, op);
+  });
+});
+
+describe('IN PREPARATION, a delivery problem and a return asked from YOUR ORDERS (plan NEXT LOT §3.6.A, §3.6.D, step 6.9)', () => {
+  let h: Harness;
+  let f: LiveFixture;
+  let mine: Client;
+  let mineId: string;
+  let other: Client;
+  let colissimo: string;
+  let france: string;
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set('2026-11-12T09:00:00.000Z');
+    f = await liveFixtureOn(h.ctx, h.clock);
+    colissimo = (await h.ctx.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
+    france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    const a = await accountClient(h);
+    mine = a.client;
+    mineId = (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', a.email.toLowerCase()).executeTakeFirstOrThrow()).id;
+    other = (await accountClient(h)).client;
+  }, 60_000);
+  afterAll(() => h?.close());
+
+  const orderOf = async (id: string) => ((safeJson(await mine.get('/api/v1/account/orders')) as { orders: Json[] }).orders).find((o) => o.id === id)!;
+  async function paidSalon(size: string): Promise<string> {
+    h.clock.advance(MINUTE);
+    const request = await h.ctx.db.insertInto('shop_requests').values({ account_id: mineId, model_id: f.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+    await h.ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
+    const id = (await h.ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+    await h.ctx.services.orders.setTerms(id, { sizeLabel: size, priceMinor: 420_000, currency: 'EUR' }, f.admin);
+    h.clock.advance(MINUTE);
+    await h.ctx.services.orders.transition(id, { to: 'PAID' }, f.admin);
+    return id;
+  }
+
+  it('reads IN PREPARATION from the later of the payment and the piece taken in stock, null while it waits, kept once shipped, delivered and returned; null for an order cancelled while waiting', async () => {
+    const id = await paidSalon('58');
+    expect(await h.ctx.db.selectFrom('orders').select('reservation').where('id', '=', id).executeTakeFirstOrThrow()).toEqual({ reservation: 'AWAITING' });
+    const waiting = await orderOf(id);
+    expect(waiting).toMatchObject({ status: 'PAID', preparingAt: null, deliveryIssue: false });
+    // Never says it waits, nor where, nor what it holds.
+    for (const word of ['AWAITING', 'STOCK', 'WAREHOUSE', 'reservation', 'LATE']) expect(JSON.stringify(waiting)).not.toContain(word);
+    h.clock.advance(MINUTE);
+    const sku = (await h.ctx.db.selectFrom('orders').select('sku_id').where('id', '=', id).executeTakeFirstOrThrow()).sku_id!;
+    await stockPieces(h.ctx, { skuId: sku, locationId: france, count: 1, material: '925 STERLING SILVER', forOrderIds: [id] }, f.admin);
+    const served = (await h.ctx.db.selectFrom('order_events').select('created_at').where('order_id', '=', id).where('action', '=', 'order.serve').executeTakeFirstOrThrow()).created_at;
+    const paidAt = (await h.ctx.db.selectFrom('orders').select('paid_at').where('id', '=', id).executeTakeFirstOrThrow()).paid_at!;
+    expect(served.getTime()).toBeGreaterThan(paidAt.getTime());
+    expect((await orderOf(id)).preparingAt).toBe(served.toISOString());
+    // Shipped: kept. A parcel reported lost: a delivery problem until its order case ends.
+    h.clock.advance(MINUTE);
+    await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
+    expect(await orderOf(id)).toMatchObject({ status: 'SHIPPED', preparingAt: served.toISOString(), deliveryIssue: false });
+    const lost = await h.ctx.services.orderCases.report(id, { kind: 'LOST', note: 'The carrier lost track of it.' }, f.admin, null);
+    expect((await orderOf(id)).deliveryIssue).toBe(true);
+    await h.ctx.services.orderCases.cancel(lost.id, { note: 'Found by the carrier.' }, f.admin);
+    expect((await orderOf(id)).deliveryIssue).toBe(false);
+    // Delivered, then returned: kept.
+    h.clock.advance(MINUTE);
+    await h.ctx.services.orders.transition(id, { to: 'DELIVERED' }, f.admin);
+    expect((await orderOf(id)).preparingAt).toBe(served.toISOString());
+    // An order holding its piece from its creation: in preparation from its payment.
+    const sku62 = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, f.modelId, '62'));
+    await stockPieces(h.ctx, { skuId: sku62, locationId: france, count: 1, material: '925 STERLING SILVER' }, f.admin);
+    const ready = await paidSalon('62');
+    const readyPaid = (await h.ctx.db.selectFrom('orders').select('paid_at').where('id', '=', ready).executeTakeFirstOrThrow()).paid_at!;
+    expect((await orderOf(ready)).preparingAt).toBe(readyPaid.toISOString());
+    // An order cancelled while waiting: never reached.
+    const waits = await paidSalon('60');
+    expect((await orderOf(waits)).preparingAt).toBeNull();
+    h.clock.advance(MINUTE);
+    await h.ctx.services.orders.transition(waits, { to: 'CANCELLED', note: 'The client withdrew.' }, f.admin);
+    expect(await orderOf(waits)).toMatchObject({ status: 'CANCELLED', preparingAt: null });
+  });
+
+  it('asks for a return over HTTP: a session, the CSRF token and the same origin, a strict body; 201 the order with its case; another account\'s order 404', async () => {
+    const id = (await h.ctx.db.selectFrom('orders').select('id').where('account_id', '=', mineId).where('status', '=', 'DELIVERED').executeTakeFirstOrThrow()).id;
+    const url = `/api/v1/account/orders/${id}/case`;
+    const body = { kind: 'RETURN', reason: 'SIZE', note: 'Too large.' };
+    expect((await h.client().post(url, body)).statusCode).toBe(401);
+    expect(errorOf(await mine.post(url, body, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await mine.post(url, body, { origin: 'https://evil.example' })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await mine.post(url, { ...body, kind: 'LOST' })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await mine.post(url, { ...body, price: 1 })).code).toBe('VALIDATION_FAILED');
+    expect((await other.post(url, body)).statusCode).toBe(404);
+    const res = await mine.post(url, body);
+    expect(res.statusCode).toBe(201);
+    expect(res.headers['cache-control']).toBe('no-store');
+    const order = (safeJson(res) as Json).order;
+    expect(order).toMatchObject({ id, returnable: null, case: { kind: 'RETURN', status: 'OPEN', sizeLabel: null, outcome: null, exchangeOrder: null } });
+    expect(JSON.stringify(order)).not.toContain('Too large');
+    const again = await mine.post(url, body);
+    expect([again.statusCode, errorOf(again).code]).toEqual([409, 'ORDER_CASE_OPEN']);
+    // Its message, in MESSAGES, the collector's own.
+    const thread = safeJson(await mine.get('/api/v1/account/messages')) as Json;
+    expect(thread.messages.at(-1)).toMatchObject({ from: 'YOU', body: 'RETURN REQUESTED — The size does not fit.\n\nToo large.', concerning: { kind: 'ORDER' } });
+    // Decided: RETURNED, IN PREPARATION kept, the case CLOSED on the card.
+    h.clock.advance(MINUTE);
+    const c = await h.ctx.db.selectFrom('order_cases').select('id').where('order_id', '=', id).where('kind', '=', 'RETURN').executeTakeFirstOrThrow();
+    await h.ctx.services.orderCases.receive(c.id, { pieceState: 'OK' }, f.admin, null);
+    await h.ctx.services.orderCases.decide(c.id, { decision: 'REFUND', pieceTo: 'RESTOCKED', note: 'Refunded.' }, f.admin, { admin: true });
+    expect(await orderOf(id)).toMatchObject({ status: 'RETURNED', preparingAt: expect.any(String), case: { status: 'CLOSED', outcome: 'REFUND' } });
   });
 });

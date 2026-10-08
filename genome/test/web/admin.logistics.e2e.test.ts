@@ -441,6 +441,11 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(await g.locator('[data-testid=slip-piece]').textContent()).toBe(right!.productId);
     expect(await g.locator('.printdoc__foot').textContent()).toBe('ORBES Client Services');
     expect(await g.locator('[data-testid=packing-slip]').textContent()).not.toMatch(/PRIVATE SALON|€|EUR|4200/);
+    // Plan NEXT LOT §3.6.B: where it goes, its country by its English name and its phone (the first address: no change).
+    expect(await g.locator('[data-testid=slip-buyer-country]').textContent()).toBe('France');
+    expect(await g.locator('[data-testid=slip-buyer-phone]').textContent()).toBe('Phone: +33 6 12 34 56 78');
+    expect(await g.locator('[data-testid=slip-address-changed]').count()).toBe(0);
+    await shot(g, 'agent-slip-country-phone');
 
     // On its way, then delivered.
     await go(g, '#/logistics', 'Logistics');

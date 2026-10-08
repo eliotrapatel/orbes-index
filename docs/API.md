@@ -564,7 +564,9 @@ The orders, the stock, the invoices, the segments and Shopify (plan LIVE RELEASE
 | `ORDER_CASE_RECEIVED` | 409 | 'The parcel of this request is already recorded.' (§16.34). |
 | `ORDER_CASE_NOT_RECEIVABLE` | 409 | 'A lost parcel does not come back: ORBES decides it as it stands.' (§16.34). |
 | `ORDER_CASE_CLOSED` | 409 | 'This request is already decided or cancelled.' (§16.34). |
-| `EXCHANGE_SIZE_NOT_IN_STOCK` | 409 | 'This size is no longer in stock. Choose another.': an exchange's size with nothing available at the order's location (§16.34). |
+| `EXCHANGE_SIZE_NOT_IN_STOCK` | 409 | 'This size is no longer in stock. Choose another.': an exchange's size with nothing available at the order's location (§16.34, §10.23). |
+| `RETURN_WINDOW_CLOSED` | 409 | (§10.23) 'The 14 days to return this piece have passed. ORBES Client Services can assist you.': the collector's request 14 days or more after the delivery. |
+| `RETURN_NOT_ALLOWED` | 409 | (§10.23) 'This piece cannot be returned from here. ORBES Client Services can assist you.': the collector's request on an order not DELIVERED, or on a welcome gift. |
 | `CARRIER_NOT_FOUND` | 404 | No carrier with this id, or one set aside (for a shipment). |
 | `CARRIER_NAME_TAKEN` | 409 | Another carrier has this name, whatever the case. |
 | `SKU_NOT_FOUND` | 404 | No SKU with this id. |
@@ -714,6 +716,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | PUT | `/api/v1/account/orders/:id/address` | Account | yes | api | 10.21 |
 | PUT | `/api/v1/account/orders/:id/engraving` | Account | yes | api | 10.22 |
 | DELETE | `/api/v1/account/orders/:id/engraving` | Account | yes | api | 10.22 |
+| POST | `/api/v1/account/orders/:id/case` | Account | yes | api | 10.23 |
 | GET | `/api/v1/account/messages` | Account | — | api | 10.17 |
 | POST | `/api/v1/account/messages` | Account | yes | api | 10.17 |
 | POST | `/api/v1/account/messages/read` | Account | yes | api | 10.17 |
@@ -2372,7 +2375,11 @@ MY PIECES' orders (plan LIVE RELEASE+ of 2026-10-04, choice 6; `routes/account.t
       "addressOf": null,
       "engraving": { "text": "J.M.", "priceMinor": 3000 },
       "engravingOffer": { "priceMinor": 3000, "included": false, "maxLength": 20 },
-      "editable": { "address": false, "engraving": false }
+      "editable": { "address": false, "engraving": false },
+      "preparingAt": "2026-10-05T09:12:40.000Z",
+      "deliveryIssue": false,
+      "returnable": null,
+      "case": null
     }
   ]
 }
@@ -2388,6 +2395,8 @@ MY PIECES' orders (plan LIVE RELEASE+ of 2026-10-04, choice 6; `routes/account.t
 - `reference`: `OR-` and the id's first 8 hexadecimal characters, in capitals, as the console shows it.
 - `claimCode` (plan NEXT LOT §3.4, §10.20): `{ "status": "WAITING", "madeAt": "…" }` while a new claim code ORBES Client Services made for the order's piece waits for this account's one reading: the row still the piece's code, the order open, the piece unregistered and printable (a code a LOST piece hides shows again once it is back). `null` otherwise, and once it is read. Never the code.
 - `address` (plan NEXT LOT §3.6.B, §10.21): its delivery address, its own or, for an order travelling with another, that order's: the `name`, the `lines` as typed, the `country` (ISO 3166-1 alpha-2) and the `phone` (each `null` when not entered: an address of before has no country nor phone); `null` while no name and address are entered. `addressOf`: the reference of the order it travels with, whose address it is delivered to, or `null`. `editable.address`: whether the collector may change it now (its own order, `RESERVED` or `PAID`, packing not started). Never who entered it.
+- `preparingAt` (plan NEXT LOT §3.6.A): IN PREPARATION's time, the later of its payment and the moment the order took its piece in the stock (its creation when it held one at once, otherwise the time a waiting order was served); kept once reached, whatever its status now; `null` when never reached (an order waiting for supplier stock, one cancelled while waiting). Never says that it waits, nor where. `deliveryIssue`: a parcel problem of its parcel (lost, damaged, back to sender) not ended: the app shows one sentence in place of the step's; never the case itself.
+- `returnable` (plan NEXT LOT §3.6.D, §10.23): while a return or a size exchange may be asked, `{ "until", "sizes": [ { "label", "available" } ] }`: `DELIVERED`, not a welcome gift, within 14 days of its delivery, no order case not ended; each other offered size of its model and whether it is in stock at the order's location now (none for a model of one size); `null` otherwise. `case`: its latest return or size exchange, asked by the collector or opened by Client Services, `{ "kind": "RETURN"|"EXCHANGE", "status": "OPEN"|"RECEIVED"|"CLOSED"|"CANCELLED", "openedAt", "receivedAt", "sizeLabel", "returnAddress", "outcome": "REFUND"|"EXCHANGE"|null, "exchangeOrder": { "id", "reference" } | null }`: `returnAddress` is the order's location's postal address (`null` without one: Client Services sends it in MESSAGES); never a note, a reason, the piece's state nor who handled it; `null` without one.
 - `engraving` (plan NEXT LOT §3.6.C, §10.22): its words and the price it was taken at (`priceMinor`, in its currency; `null` for one bought as the release's add-on, whose price is on its add-on row, and for one entered before this lot), or `null`. `engravingOffer`: the engraving it may carry, `{ priceMinor, included, maxLength: 20 }`: the release's add-on (`included`, no price), or the price of its currency from Orders → Settings (the one its engraving took, when it has one); `null` on a welcome gift, or without a price for its currency (or a currency not entered yet). `editable.engraving`: whether the collector may add, change or remove it now (`RESERVED` or `PAID`, packing not started, one offered). MY PIECES' TOTAL counts a settings-priced engraving; an add-on's is already its add-on row.
 - `imageUrl` (plan NOCTURNE, addition 3): the cover photograph of the order's model, or of its variant (itself a model), as §10.5 names it, or `null`; never a piece's own photograph (decision 9).
 - `documents` (§10.14): its `invoice` once paid and the `creditNote` that cancels it once cancelled after it was paid or returned (each its number and time of issue, §16.25), `null` before; `others` (plan NEXT LOT §3.6.C), its other documents in order of issue, `{ kind, number, issuedAt }`: a supplementary invoice (an engraving added after PAID), a credit note for single lines (an engraving removed after PAID), the credit note of a supplementary invoice; `careGuide` while the piece is on its way or kept (neither cancelled nor returned); `certificate` once the piece that fulfils it is registered to the account, while a certificate may be created for it (not lost, stolen, revoked, flagged nor retired).
@@ -2456,6 +2465,8 @@ Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 FOR
 ### 10.17 MESSAGES: `GET` and `POST /api/v1/account/messages`, `POST /api/v1/account/messages/read`, `GET /api/v1/account/messages/unread` (extension of the contract)
 
 Plan NEXT-NINE, CS-01 (`genome/src/server/routes/messages.ts`, `services/messages.ts`). The collector writes to ORBES Client Services from the app (WRITE TO ORBES CLIENT SERVICES, or from MESSAGES); Client Services answer from the console (§16.28); the answers are read in the account, under MESSAGES. **Nothing is emailed**, messages carry **no files**, and only people write here: the house writes nothing on its own. An account session is required (`401` signed out: the app asks the visitor to sign in or create an account first); every POST needs the CSRF token and a same-origin request (§2.2); rate group `api`; answers are `Cache-Control: no-store`.
+
+A return or a size exchange asked from YOUR ORDERS (§10.23) is written here as the collector's own message about the order, in the request's transaction, without the message rate (`MessageService.writeIn`).
 
 One conversation per collector. Staff are **never named** to the collector (the answers come `from: "ORBES_CLIENT_SERVICES"`), and the collector never sees a status.
 
@@ -2535,6 +2546,20 @@ Plan NEXT LOT of 2026-10-07, §3.6.C (`routes/account.ts`, `OrderService.setEngr
 - Audited `order.engraving` `{ by: 'collector', priced, addon, removed? }` with the account as actor, and `invoice.issue` / `invoice.credit` for a document: **never the words**.
 
 Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 ACCOUNT_LOCKED`, `404 ORDER_NOT_FOUND`, `409 ORDER_CLOSED`, `409 ORDER_PACKING_STARTED`, `409 ORDER_ENGRAVING_INCLUDED`, `409 ORDER_ENGRAVING_UNAVAILABLE`, `429 RATE_LIMITED`.
+
+### 10.23 RETURNS AND EXCHANGES: a return or a size exchange asked from YOUR ORDERS (extension of the contract)
+
+Plan NEXT LOT of 2026-10-07, §3.6.D (`routes/account.ts`, `OrderCaseService.request` in `services/order-cases.ts`, `MessageService.writeIn`; DATABASE §5.87). « A button on a delivered order, within the 14 days. For an exchange, only sizes in stock can be chosen; the others are greyed out »; « It opens the case for Client Services, who decides »; « A return is sent back at the collector's cost, with the carrier they choose, to the address shown on the order ». An account session (`401`), the CSRF token and a same-origin request, a strict body; `Cache-Control: no-store`; a LOCKED account asks nothing (`403 ACCOUNT_LOCKED`).
+
+**`POST /api/v1/account/orders/:id/case`** with `{ "kind": "RETURN"|"EXCHANGE", "reason": "SIZE"|"NOT_AS_EXPECTED"|"DAMAGED"|"OTHER", "note"?: ≤ 500 characters, "sizeLabel"?: an exchange's new size }` → **201** `{ "order": { … } }`, the order as §10.13 reads it, its `case` OPEN.
+
+- The account's own order (`404 ORDER_NOT_FOUND`), `DELIVERED` and not a welcome gift (`409 RETURN_NOT_ALLOWED`), before 14 days have passed since its delivery, counted on the server's clock (`409 RETURN_WINDOW_CLOSED`), with no order case not ended (`409 ORDER_CASE_OPEN`).
+- An exchange names another offered size of its model (`400 VALIDATION_FAILED` otherwise, *Choose the new size.*), available at the order's location now (`409 EXCHANGE_SIZE_NOT_IN_STOCK`); the size is not held: ORBES decides once the piece is received.
+- In one transaction, the order's row held: the request written into the collector's MESSAGES as its own message about the order, *RETURN REQUESTED — The size does not fit.* or *EXCHANGE REQUESTED: SIZE 18 — The size does not fit.*, then its note (TO ANSWER on the console's board; the message rate does not apply: one open case per order bounds it); then the order case, opened by the account (`opened_by_type` account, its reason, its note, the size asked, the message). Two requests at once give one case; a refusal writes neither.
+- Audited `order.case.open` `{ caseId, kind, reason, sizeLabel?, by: 'account' }` with the account as actor, and `message.write`; never the note.
+- Then as every order case (§16.34): the agent records the parcel back (`case.receivedAt`), ORBES decides (a return: RETURNED with its credit note; an exchange: an EXCHANGE order, `case.exchangeOrder`) or Client Services cancels it, answering in MESSAGES. After the 14 days, Client Services may still open a return or an exchange (§16.34, question 20 as built).
+
+Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 ACCOUNT_LOCKED`, `404 ORDER_NOT_FOUND`, `409 RETURN_NOT_ALLOWED`, `409 RETURN_WINDOW_CLOSED`, `409 ORDER_CASE_OPEN`, `409 EXCHANGE_SIZE_NOT_IN_STOCK`, `429 RATE_LIMITED`.
 
 ## 11. Ownership endpoints
 
@@ -3939,7 +3964,7 @@ In the console: *Lock account* and *Unlock account* on the owner's sheet, each b
 | `liveEntries` | Every entry of the account in a LIVE RELEASE (§10.12), oldest first: `entryId`, `dropId`, `title`, `size`, `quantity`, `status`, `tier`, `position`, `joinedAt`, `queuedAt`, `turnAt`, `turnExpiresAt`, `pressStartedAt`, `gestureMs` (the length of the hold, in milliseconds), `securedAt`, `holdExpiresAt`, `confirmedAt`, `endedAt`, `letIn` (whether the console let it take its turn out of order), `country`, `currency`, `priceMinor`, `addons` (`label`, `priceMinor` at the time), `resolution` (`CONCLUDED`, `CANCELLED` or `null`), `handledAt`, `resolutionNote`. Never its network's hash (`notIncluded`), nor who let it in, removed it or concluded it. |
 | `liveInterest` | Every I'LL BE THERE of the account still held: `dropId`, `title`, `size`, `since`. |
 | `releaseAnswers` | (plan LIVE RELEASE+, choice 11) Every answer of the account to the question after a LIVE RELEASE (§10.16), oldest first: `dropId`, `title`, `question` (its words as the release asked them), `answer` (its position, from 1), `answerText`, `answeredAt` (its latest change). |
-| `orders` | (plan LIVE RELEASE+) Every order of the account (§10.13), oldest first: `reference`, `channel`, `release`, `model`, `size`, `priceMinor`, `currency`, `addons` (`label`, `priceMinor`), `engravingText`, `buyer` (the delivery address on the order as it is now: `name`, `address`, and since plan NEXT LOT §3.6.B `country` and `phone`), `status`, `reservedAt`, `paidAt`, `shippedAt`, `deliveredAt`, `cancelledAt`, `returnedAt`, `carrier`, `trackingNumber`; its `invoices`, each document as issued: `number`, `kind`, `issuedAt`, `currency`, `totalMinor`, the `buyer` it was issued to (`name`, `address` and the account's `email` at issue, which may differ from the order's buyer entered since) and its `lines` (`label`, `detail`, `amountMinor`); its `history` (`status`, `at`, `note`), never who handled it. |
+| `orders` | (plan LIVE RELEASE+) Every order of the account (§10.13), oldest first: `reference`, `channel`, `release`, `model`, `size`, `priceMinor`, `currency`, `addons` (`label`, `priceMinor`), `engravingText`, `buyer` (the delivery address on the order as it is now: `name`, `address`, and since plan NEXT LOT §3.6.B `country` and `phone`), `status`, `reservedAt`, `paidAt`, `shippedAt`, `deliveredAt`, `cancelledAt`, `returnedAt`, `carrier`, `trackingNumber`; its `invoices`, each document as issued: `number`, `kind`, `issuedAt`, `currency`, `totalMinor`, the `buyer` it was issued to (`name`, `address` and the account's `email` at issue, which may differ from the order's buyer entered since) and its `lines` (`label`, `detail`, `amountMinor`); its `history` (`status`, `at`, `note`); since plan NEXT LOT §3.6.D its `cases` (`kind`, `openedBy` `YOU` or `ORBES_CLIENT_SERVICES`, `openedAt`, `reason`, the collector's own `note`, `sizeLabel`, `status`, `receivedAt`, `closedAt`, `outcome`, `cancelledAt`); never who handled it. |
 | `messages` | (plan NEXT-NINE, CS-01) Every message of the account's conversation with ORBES Client Services (§10.17), oldest first: `at`, `from` (`YOU` or `ORBES_CLIENT_SERVICES`; never who answered), `body`, `concerning` (`kind`, `label`) or `null`. |
 | `careRequests` | (plan NEXT-NINE, BP-19 T6) Every yearly care request of the account (§10.18), oldest first: `id`, `productId`, `year`, `tier`, `status`, `requestedAt`, `returnName`, `returnAddress` (as the collector gave them), `labelAt`, `receivedAt`, `returnShippedAt`, `doneAt`, `cancelledAt`. Never the label itself nor who handled it. |
 | `sizes` | (plan NEXT-NINE, AC-01) The sizes the account saved in YOUR SIZES (§10.19), in the order ring, bracelet, wrist, necklace: `kind`, `value` (a French ring size, or centimetres), `unit` (`FR` or `CM`), `updatedAt`. `account.export` counts them (`sizes`). |
@@ -4749,7 +4774,7 @@ In the console: **Supplier orders** (`#/supplier-orders`, the sidebar's Registry
 
 ### 16.34 Order cases (extension of the contract)
 
-Plan NEXT LOT of 2026-10-07, §1.1 (b) and §3.5.6.7 (deployment H2; migration `0037`, DATABASE §5.87). One table and one service for every return, size exchange and parcel problem (`services/order-cases.ts`, `ctx.services.orderCases`). Not « cases »: the console's Cases are the customers' reports on scans (§16.8). An order has one order case not ended at most (`409 ORDER_CASE_OPEN`). A case goes OPEN → RECEIVED (the agent records the parcel back) → CLOSED (ORBES decides), or ends CANCELLED. Its notes (the client's, the agent's or the staff member's words) never reach the audit log, the order's events nor the journal; an AUDITOR reads the case without any of them. The collector's own request (REQUEST A RETURN, EXCHANGE THE SIZE) comes with §3.6.D.
+Plan NEXT LOT of 2026-10-07, §1.1 (b) and §3.5.6.7 (deployment H2; migration `0037`, DATABASE §5.87). One table and one service for every return, size exchange and parcel problem (`services/order-cases.ts`, `ctx.services.orderCases`); the collector asks for a return or an exchange itself from YOUR ORDERS (§10.23, `request`: `openedBy` COLLECTOR, its message in MESSAGES, `messageId`). Not « cases »: the console's Cases are the customers' reports on scans (§16.8). An order has one order case not ended at most (`409 ORDER_CASE_OPEN`). A case goes OPEN → RECEIVED (the agent records the parcel back) → CLOSED (ORBES decides), or ends CANCELLED. Its notes (the client's, the agent's or the staff member's words) never reach the audit log, the order's events nor the journal; an AUDITOR reads the case without any of them. The collector's own request (REQUEST A RETURN, EXCHANGE THE SIZE) comes with §3.6.D.
 
 | Method | Path | Role | |
 |---|---|---|---|
