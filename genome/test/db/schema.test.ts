@@ -140,6 +140,9 @@ describe('schema', () => {
       ['account_sizes', 'kind', S.SIZE_KINDS],
       ['models', 'size_kind', S.SIZE_KINDS],
       ['models', 'size_type', S.SIZE_TYPES],
+      ['claim_code_renewals', 'kind', S.CLAIM_RENEWAL_KINDS],
+      ['claim_code_renewals', 'status', S.CLAIM_RENEWAL_STATUSES],
+      ['claim_code_renewals', 'withdrawn_reason', S.CLAIM_RENEWAL_WITHDRAWN_REASONS],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -597,6 +600,83 @@ describe('schema', () => {
       isForeignKeyViolation(e),
     );
     await expect(t.db.deleteFrom('ownership').where('id', '=', period.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+  });
+
+  it('claim_code_renewals (0034): each kind its target and status; sealed exactly while WAITING; read and withdrawn with their times; a reason but for UNSHOWN; one code waiting per piece; identity guarded; never deleted', async () => {
+    const { product, model } = await seedProduct(t.db);
+    const other = (await seedProduct(t.db)).product;
+    const account = await t.db.insertInto('accounts').values({ email: 'renewal@example.com', email_normalized: 'renewal@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const admin = await t.db.insertInto('admin_users').values({ email: 'renewal@orbes.test', email_normalized: 'renewal@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
+    const location = await t.db.insertInto('stock_locations').values({ name: 'RENEWAL STOCK' }).returning('id').executeTakeFirstOrThrow();
+    const request = await t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id }).returning('id').executeTakeFirstOrThrow();
+    const order = await t.db
+      .insertInto('orders')
+      .values({ channel: 'SALON', shop_request_id: request.id, account_id: account.id, model_id: model.id, location_id: location.id, product_id: product.id })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const base = { product_id: product.id, claim_hash: 'scrypt$hash', reason: 'Card lost at the warehouse.', created_by: admin.id };
+    const staff: S.NewClaimCodeRenewal = { ...base, kind: 'STAFF', status: 'SHOWN' };
+    const buyer: S.NewClaimCodeRenewal = { ...base, kind: 'BUYER', status: 'WAITING', order_id: order.id, account_id: account.id, sealed_code: 'v1.iv.sealed' };
+    const unshown: S.NewClaimCodeRenewal = { product_id: product.id, claim_hash: 'scrypt$other', kind: 'UNSHOWN', status: 'UNSHOWN', order_id: order.id };
+    const insert = (v: S.NewClaimCodeRenewal) => t.db.insertInto('claim_code_renewals').values(v).returning('id').executeTakeFirstOrThrow();
+    const now = new Date('2026-10-08T12:00:00.000Z');
+    for (const [label, v, constraint] of [
+      // Each kind its target: STAFF neither order nor account, BUYER both, UNSHOWN the order alone.
+      ['STAFF with an order', { ...staff, order_id: order.id }, 'claim_code_renewals_target'],
+      ['BUYER without its account', { ...buyer, account_id: null }, 'claim_code_renewals_target'],
+      ['BUYER without its order', { ...buyer, order_id: null }, 'claim_code_renewals_target'],
+      ['UNSHOWN with an account', { ...unshown, account_id: account.id }, 'claim_code_renewals_target'],
+      ['UNSHOWN without its order', { ...unshown, order_id: null }, 'claim_code_renewals_target'],
+      // Each kind its statuses.
+      ['STAFF waiting', { ...staff, status: 'WAITING', sealed_code: 'v1.x.y' }, 'claim_code_renewals_kind_status'],
+      ['BUYER shown', { ...buyer, status: 'SHOWN', sealed_code: null }, 'claim_code_renewals_kind_status'],
+      ['UNSHOWN read', { ...unshown, status: 'READ', read_at: now }, 'claim_code_renewals_kind_status'],
+      // An unknown kind or status fails its own CHECK and the kind's statuses together.
+      ['an unknown status', { ...staff, status: 'LOST' as 'SHOWN' }, undefined],
+      ['an unknown kind', { ...staff, kind: 'AGENT' as 'STAFF' }, undefined],
+      // Sealed exactly while WAITING.
+      ['WAITING without its sealed code', { ...buyer, sealed_code: null }, 'claim_code_renewals_sealed'],
+      ['SHOWN with a sealed code', { ...staff, sealed_code: 'v1.x.y' }, 'claim_code_renewals_sealed'],
+      ['READ with its sealed code', { ...buyer, status: 'READ', read_at: now }, 'claim_code_renewals_sealed'],
+      // Read exactly when READ.
+      ['READ without its time', { ...buyer, status: 'READ', sealed_code: null }, 'claim_code_renewals_read'],
+      ['WAITING with a read time', { ...buyer, read_at: now }, 'claim_code_renewals_read'],
+      // Withdrawn exactly when WITHDRAWN, its time and reason together.
+      ['WITHDRAWN without its reason', { ...buyer, status: 'WITHDRAWN', sealed_code: null, withdrawn_at: now }, 'claim_code_renewals_withdrawn'],
+      ['WITHDRAWN without its time', { ...buyer, status: 'WITHDRAWN', sealed_code: null, withdrawn_reason: 'REGISTERED' }, 'claim_code_renewals_withdrawn'],
+      ['WAITING with a withdrawal', { ...buyer, withdrawn_at: now, withdrawn_reason: 'REGISTERED' }, 'claim_code_renewals_withdrawn'],
+      ['SHOWN with a reason withdrawn', { ...staff, withdrawn_reason: 'REGISTERED' }, 'claim_code_renewals_withdrawn'],
+      ['an unknown reason withdrawn', { ...buyer, status: 'WITHDRAWN', sealed_code: null, withdrawn_at: now, withdrawn_reason: 'LOST' as 'REGISTERED' }, 'claim_code_renewals_withdrawn_reason_check'],
+      // A reason of 1 to 500 characters, exactly when the kind is not UNSHOWN.
+      ['STAFF without its reason', { ...staff, reason: null }, 'claim_code_renewals_reason'],
+      ['UNSHOWN with a reason', { ...unshown, reason: 'x' }, 'claim_code_renewals_reason'],
+      ['a blank reason', { ...staff, reason: '   ' }, 'claim_code_renewals_reason_check'],
+      ['a reason of 501 characters', { ...staff, reason: 'x'.repeat(501) }, 'claim_code_renewals_reason_check'],
+    ] as const) {
+      await expect(insert(v as S.NewClaimCodeRenewal), label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    }
+    await insert({ ...staff, reason: 'x'.repeat(500) });
+    const shown = await insert(staff);
+    const waiting = await insert(buyer);
+    await insert(unshown);
+    // One code waits per piece; another piece may have its own.
+    await expect(insert(buyer)).rejects.toSatisfy((e) => isUniqueViolation(e, 'claim_code_renewals_waiting_key'));
+    await insert({ ...buyer, product_id: other.id });
+    // Read: the sealed code wiped, the time kept; then a new one may wait.
+    await t.db.updateTable('claim_code_renewals').set({ status: 'READ', read_at: now, sealed_code: null }).where('id', '=', waiting.id).execute();
+    const next = await insert(buyer);
+    await t.db.updateTable('claim_code_renewals').set({ status: 'WITHDRAWN', withdrawn_at: now, withdrawn_reason: 'RENEWED_AGAIN', sealed_code: null }).where('id', '=', next.id).execute();
+    // Its identity, target, hash, reason and author never change; a row is never deleted nor truncated.
+    for (const set of [{ product_id: other.id }, { kind: 'BUYER' as const }, { order_id: order.id }, { account_id: account.id }, { claim_hash: 'scrypt$changed' }, { reason: 'Rewritten.' }, { created_by: null }, { created_at: now }]) {
+      await expect(t.db.updateTable('claim_code_renewals').set(set).where('id', '=', shown.id).execute(), JSON.stringify(set)).rejects.toSatisfy(isGuardViolation);
+    }
+    await expect(t.db.deleteFrom('claim_code_renewals').where('id', '=', shown.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(sql`TRUNCATE claim_code_renewals`.execute(t.db)).rejects.toSatisfy(isGuardViolation);
+    // Its piece, order, account and author stay while a row names them (RESTRICT).
+    await expect(t.db.deleteFrom('orders').where('id', '=', order.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(t.db.deleteFrom('accounts').where('id', '=', account.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(t.db.deleteFrom('admin_users').where('id', '=', admin.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(insert({ ...staff, product_id: '00000000-0000-4000-8000-000000000000' })).rejects.toSatisfy((e) => isForeignKeyViolation(e));
   });
 
   it('audit_logs is append-only at the database level', async () => {

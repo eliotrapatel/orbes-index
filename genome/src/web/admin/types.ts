@@ -154,6 +154,14 @@ export type SizeKind = (typeof SIZE_KINDS)[number];
 export const SIZE_TYPES = ['RING', 'BRACELET', 'NECKLACE', 'WATCH', 'ONE_SIZE'] as const;
 export type SizeType = (typeof SIZE_TYPES)[number];
 
+/** A new claim code (claim_code_renewals, plan NEXT LOT §3.4): shown once to staff, sealed for the buyer, or made unseen. */
+export const CLAIM_RENEWAL_KINDS = ['STAFF', 'BUYER', 'UNSHOWN'] as const;
+export type ClaimRenewalKind = (typeof CLAIM_RENEWAL_KINDS)[number];
+export const CLAIM_RENEWAL_STATUSES = ['SHOWN', 'UNSHOWN', 'WAITING', 'READ', 'WITHDRAWN'] as const;
+export type ClaimRenewalStatus = (typeof CLAIM_RENEWAL_STATUSES)[number];
+export const CLAIM_RENEWAL_WITHDRAWN_REASONS = ['RENEWED_AGAIN', 'ORDER_CANCELLED', 'ORDER_RETURNED', 'REGISTERED', 'UNREADABLE', 'SUPERSEDED'] as const;
+export type ClaimRenewalWithdrawnReason = (typeof CLAIM_RENEWAL_WITHDRAWN_REASONS)[number];
+
 /** What an invitation of the circle is (circle_posts.experience, BP-19 T7). */
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];

@@ -322,6 +322,24 @@ export type SizeKind = (typeof SIZE_KINDS)[number];
 export const SIZE_TYPES = ['RING', 'BRACELET', 'NECKLACE', 'WATCH', 'ONE_SIZE'] as const;
 export type SizeType = (typeof SIZE_TYPES)[number];
 
+/**
+ * A new claim code (claim_code_renewals.kind, migration 0034, plan NEXT LOT §3.4): shown once to STAFF (a piece with no
+ * buyer), sealed for the BUYER of the piece's open order, or UNSHOWN (made when that order was cancelled, seen by no one).
+ */
+export const CLAIM_RENEWAL_KINDS = ['STAFF', 'BUYER', 'UNSHOWN'] as const;
+export type ClaimRenewalKind = (typeof CLAIM_RENEWAL_KINDS)[number];
+
+/** Where a new claim code stands (claim_code_renewals.status): STAFF is SHOWN, UNSHOWN is UNSHOWN, BUYER WAITING → READ or WITHDRAWN. */
+export const CLAIM_RENEWAL_STATUSES = ['SHOWN', 'UNSHOWN', 'WAITING', 'READ', 'WITHDRAWN'] as const;
+export type ClaimRenewalStatus = (typeof CLAIM_RENEWAL_STATUSES)[number];
+
+/**
+ * Why a buyer's new claim code was withdrawn (claim_code_renewals.withdrawn_reason): a newer code, its order cancelled or
+ * returned, the piece registered, a key that no longer opens it, the piece's code changed by another path.
+ */
+export const CLAIM_RENEWAL_WITHDRAWN_REASONS = ['RENEWED_AGAIN', 'ORDER_CANCELLED', 'ORDER_RETURNED', 'REGISTERED', 'UNREADABLE', 'SUPERSEDED'] as const;
+export type ClaimRenewalWithdrawnReason = (typeof CLAIM_RENEWAL_WITHDRAWN_REASONS)[number];
+
 /** Why a credit taken off an order was given back (credit_uses.released_reason, migration 0027): removed, the order cancelled or returned. */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
 export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
@@ -1665,6 +1683,34 @@ export interface TestRunEntrantsTable {
   updated_at: TimestampDefault;
 }
 
+/**
+ * A new claim code (migration 0034, plan NEXT LOT §3.4): one row per code made by New claim code, or made unseen when a
+ * sold piece's order was cancelled. Its identity, target, hash, reason and author never change; it is never deleted. The
+ * code itself is never stored, except sealed while a buyer's code waits (`sealed_code`, exactly while WAITING).
+ */
+export interface ClaimCodeRenewalsTable {
+  id: Generated<string>;
+  product_id: string;
+  kind: ClaimRenewalKind;
+  /** BUYER and UNSHOWN: the order it was made for; NULL for STAFF. */
+  order_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** BUYER: the order's account at the time; NULL otherwise. */
+  account_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The scrypt hash this row wrote into products.claim_secret_hash: the piece's current code while the two are equal. */
+  claim_hash: string;
+  /** The buyer's code sealed (crypto/secretbox.ts, AAD `claim-renewal:<id>:<order_id>:<account_id>`), exactly while WAITING. */
+  sealed_code: ColumnType<string | null, string | null | undefined, string | null>;
+  status: ClaimRenewalStatus;
+  read_at: TimestampNullable;
+  withdrawn_at: TimestampNullable;
+  withdrawn_reason: ColumnType<ClaimRenewalWithdrawnReason | null, ClaimRenewalWithdrawnReason | null | undefined, ClaimRenewalWithdrawnReason | null>;
+  /** The staff member's reason, 1..500 characters; NULL exactly for UNSHOWN. Kept in the audit log too. */
+  reason: ColumnType<string | null, string | null | undefined, string | null>;
+  /** admin_users.id; NULL for the system. */
+  created_by: ColumnType<string | null, string | null | undefined, string | null>;
+  created_at: TimestampDefault;
+}
+
 export interface RevocationsTable {
   id: Generated<string>;
   target_type: RevocationTargetType;
@@ -1796,6 +1842,7 @@ export interface Database {
   test_entrants: TestEntrantsTable;
   test_runs: TestRunsTable;
   test_run_entrants: TestRunEntrantsTable;
+  claim_code_renewals: ClaimCodeRenewalsTable;
   revocations: RevocationsTable;
   audit_logs: AuditLogsTable;
   product_overview: ProductOverviewView;
@@ -1905,6 +1952,8 @@ export type GuaranteeSettingsRow = Selectable<GuaranteeSettingsTable>;
 export type TestEntrantRow = Selectable<TestEntrantsTable>;
 export type TestRunRow = Selectable<TestRunsTable>;
 export type TestRunEntrantRow = Selectable<TestRunEntrantsTable>;
+export type ClaimCodeRenewalRow = Selectable<ClaimCodeRenewalsTable>;
+export type NewClaimCodeRenewal = Insertable<ClaimCodeRenewalsTable>;
 export type RevocationRow = Selectable<RevocationsTable>;
 export type NewRevocation = Insertable<RevocationsTable>;
 export type AuditLogRow = Selectable<AuditLogsTable>;
