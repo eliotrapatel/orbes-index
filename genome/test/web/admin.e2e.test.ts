@@ -2085,10 +2085,12 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
     // Club in the Clients group after Owners, then Segments, Orders and Invoices (plan LIVE RELEASE+, with Atelier in
     // the Registry), Messages first (plan NEXT-NINE, CS-01), Yearly care after Warranties (BP-19 T6); the ADMIN's sidebar,
-    // twenty-seven links with Growth under Overview (BP-29), still fits a 900 px screen.
+    // twenty-eight links with Growth under Overview (BP-29) and Supplier orders under Registry (plan NEXT LOT §3.5.4.2),
+    // still fits a 900 px screen.
     const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
     expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['messages', 'owners', 'club', 'segments', 'orders', 'invoices', 'warranties', 'care', 'retailers', 'sale']);
-    expect(await p.locator('.side__link').count()).toBe(27);
+    // 28 with Supplier orders under Registry (plan NEXT LOT §3.5.4.2).
+    expect(await p.locator('.side__link').count()).toBe(28);
     // Every link one height, its count badges (Anomalies, Messages) shown or not, whatever font the system falls back to.
     expect(new Set(await p.locator('.side__link').evaluateAll((links) => links.map((a) => a.getBoundingClientRect().height))).size).toBe(1);
     for (const id of ['sign-out', 'change-password']) {
@@ -3058,7 +3060,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // Overview: Dashboard, Growth, …; the ADMIN's sidebar with Growth, Messages and Yearly care still fits 1 440 × 900.
     const overview = p.locator('.side__group', { hasText: 'Overview' }).locator('.side__link');
     expect(await overview.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['dashboard', 'growth', 'generator', 'documents']);
-    expect(await p.locator('.side__link').count()).toBe(27);
+    // 28 with Supplier orders under Registry (plan NEXT LOT §3.5.4.2).
+    expect(await p.locator('.side__link').count()).toBe(28);
     // Every link one height, its count badges (Anomalies, Messages) shown or not, whatever font the system falls back to.
     expect(new Set(await p.locator('.side__link').evaluateAll((links) => links.map((a) => a.getBoundingClientRect().height))).size).toBe(1);
     for (const id of ['sign-out', 'change-password']) {
