@@ -13,8 +13,8 @@
  * plus which actions the current admin can take. Pure, so the rules that
  * decide what an operator is offered are unit-tested without a browser.
  */
-import { formatCount, formatDate, humanize, versionLabel } from '../format.js';
-import type { AdminRole, CodeJson, LiveCodeCheck, ProductDetail, ProductStatus, ServiceRecord } from '../types.js';
+import { formatCount, formatDate, formatDateTime, humanize, versionLabel } from '../format.js';
+import type { AdminRole, ClaimCodeSituation, ClaimRenewalRecord, ClaimRenewalWithdrawnReason, ClaimSituation, CodeJson, LiveCodeCheck, OrderClaimCode, ProductDetail, ProductStatus, ServiceRecord } from '../types.js';
 import { can } from './permissions.js';
 import { toneOf, type Tone } from './tone.js';
 
@@ -154,6 +154,8 @@ export interface ProductActions {
   /** Open service records the admin may complete (never a YEARLY_CARE one). */
   completableServices: ServiceRecord[];
   canConfirmOwnership: boolean;
+  /** NEW CLAIM CODE (plan NEXT LOT §3.4): OPERATOR and above, and the server says the piece is renewable. */
+  canRenewClaim: boolean;
 }
 
 export function productActions(d: ProductDetail, role: AdminRole): ProductActions {
@@ -176,6 +178,9 @@ export function productActions(d: ProductDetail, role: AdminRole): ProductAction
     // Not a YEARLY_CARE record: the Yearly care board closes it with its request (the server refuses it here).
     completableServices: can(role, 'service') ? d.services.filter((s) => s.status === 'OPEN' && s.type !== 'YEARLY_CARE') : [],
     canConfirmOwnership: can(role, 'confirmOwnership') && owner !== null && !owner.verified,
+    // Not for a piece registered, issued without a claim code, RESERVED, not printable, with no ACTIVE code, or sold
+    // outside an order (the server's `claimCode.refusal`).
+    canRenewClaim: can(role, 'renewClaimCode') && d.claimCode.renewable !== null,
   };
 }
 
@@ -203,4 +208,121 @@ export function productAttributes(d: ProductDetail): { label: string; value: str
     { label: 'Authentication policy', value: humanize(p.authPolicy.replace(/\+/g, ' + ')) },
     { label: 'Claim code', value: p.hasClaimSecret ? 'ISSUED (HASH STORED)' : 'NONE' },
   ];
+}
+
+// ── NEW CLAIM CODE (plan NEXT LOT §3.4) ─────────────────────────────────────
+
+/** The `Reason` field's hint in both dialogs. */
+export const CLAIM_REASON_HINT = 'Kept in the audit log. For example: card lost at the warehouse, card damaged.';
+/** The longest reason (services/claim-renewals.ts CLAIM_RENEWAL_REASON_MAX). */
+export const CLAIM_REASON_MAX = 500;
+/** The shown-once dialog's text after New claim code for a piece in stock (ui/claim-code.ts). */
+export const CLAIM_CARD_TEXT = "Print its card now and put it in the piece's box: the old card no longer registers it. Shown once: only its hash is kept.";
+/** The section's empty line and note. */
+export const CLAIM_RENEWALS_EMPTY = 'No new claim code has been made for this piece.';
+export const CLAIM_RENEWALS_NOTE = 'The codes themselves are never kept.';
+
+/** What New claim code's dialog says and does, by the situation the server gave. */
+export interface ClaimDialogCopy {
+  /** The first paragraph. */
+  text: string;
+  /** A second line (a sold piece: answer the buyer in Messages). */
+  then: string | null;
+  confirm: string;
+  /** The code is shown to staff (in stock, or sold at a point of sale with question 8's answer (a)). */
+  shown: boolean;
+  /** The toast after a code made for the buyer. */
+  toast: string | null;
+}
+
+export function claimDialogCopy(renewable: ClaimSituation, order: { reference: string } | null): ClaimDialogCopy {
+  if (renewable === 'SOLD') {
+    const ref = order?.reference ?? '';
+    return {
+      text: `This piece is sold, on order ${ref}, and not registered yet. Its new claim code is shown once to its buyer, on that order in YOUR ORDERS, and never in the console. The code on the buyer's card stops working at once.`,
+      then: `Then answer the buyer in Messages: their new claim code and their new card wait on order ${ref}.`,
+      confirm: 'Make it for the buyer',
+      shown: false,
+      toast: `New claim code made. It waits for the buyer on order ${ref}.`,
+    };
+  }
+  if (renewable === 'SOLD_IN_STORE') {
+    return {
+      text: "This piece was sold at a point of sale, with no order: its buyer has no YOUR ORDERS. Its new claim code is shown once, here, with its certificate card to print and hand to the buyer. The code on the buyer's card stops working at once.",
+      then: null,
+      confirm: 'Make a new claim code',
+      shown: true,
+      toast: null,
+    };
+  }
+  return {
+    text: 'This piece has no buyer. Its new claim code is shown once, here, with its certificate card to print. The code on its current card stops working at once: put the new card in its box.',
+    then: null,
+    confirm: 'Make a new claim code',
+    shown: true,
+    toast: null,
+  };
+}
+
+/** The `New claim codes` section's notice above its table, or null. */
+export function claimCodeNotice(s: ClaimCodeSituation): string | null {
+  if (s.cardNeeded) {
+    const ref = s.renewals[0]?.order?.reference ?? '';
+    return noCardNotice(ref);
+  }
+  if (s.refusal === 'NO_ACTIVE_CODE') return 'This piece has no active code: re-issue its code first, then make a new claim code.';
+  if (s.refusal === 'SOLD_IN_STORE') return 'Sold at a point of sale, with no order: a new claim code is not made for this piece.';
+  return null;
+}
+
+/** No card registers the piece: its code was made for the buyer of a cancelled order (product page and order page). */
+export function noCardNotice(reference: string): string {
+  return `No card registers this piece: its claim code was made for the buyer of order ${reference}, which was cancelled. Make a new claim code and put its card in the box before the piece is sold again.`;
+}
+
+const WITHDRAWN_WORDS: Readonly<Record<ClaimRenewalWithdrawnReason, string>> = Object.freeze({
+  RENEWED_AGAIN: 'a newer code',
+  ORDER_CANCELLED: 'order cancelled',
+  ORDER_RETURNED: 'order returned',
+  REGISTERED: 'registered',
+  UNREADABLE: 'could not be read',
+  SUPERSEDED: 'replaced',
+});
+
+/** A row's `For` column: whom the code was made for. */
+export function claimRenewalFor(r: Pick<ClaimRenewalRecord, 'kind' | 'order'>): string {
+  if (r.kind === 'STAFF') return 'Staff · in stock';
+  if (r.kind === 'BUYER') return `Buyer · order ${r.order?.reference ?? ''}`;
+  return `No one · order ${r.order?.reference ?? ''} cancelled`;
+}
+
+/** A row's `Status` column. */
+export function claimRenewalStatus(r: Pick<ClaimRenewalRecord, 'status' | 'readAt' | 'withdrawnReason'>): string {
+  switch (r.status) {
+    case 'SHOWN':
+      return 'Shown once to staff';
+    case 'WAITING':
+      return 'Waiting for the buyer';
+    case 'READ':
+      return `Read by the buyer · ${formatDateTime(r.readAt)}`;
+    case 'WITHDRAWN':
+      return `Withdrawn · ${r.withdrawnReason ? WITHDRAWN_WORDS[r.withdrawnReason] : ''}`;
+    case 'UNSHOWN':
+      return 'Never shown';
+  }
+}
+
+/** The order page's `Claim code` row (plan NEXT LOT §3.4): its value and note. */
+export function orderClaimCodeRow(c: OrderClaimCode): { value: string; note: string } {
+  switch (c.status) {
+    case 'WAITING':
+      return { value: 'WAITING FOR THE BUYER', note: `New code made ${formatDateTime(c.madeAt)}` };
+    case 'READ':
+      return { value: 'READ BY THE BUYER', note: `On ${formatDateTime(c.readAt)}` };
+    default:
+      return {
+        value: `WITHDRAWN · ${(c.withdrawnReason ? WITHDRAWN_WORDS[c.withdrawnReason] : '').toUpperCase()}`,
+        note: `New code made ${formatDateTime(c.madeAt)}`,
+      };
+  }
 }

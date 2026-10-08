@@ -66,14 +66,19 @@ import {
   termsValues,
   viewHolds,
 } from '../model/orders.js';
+import { noCardNotice, orderClaimCodeRow } from '../model/product.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
 import { ORDER_CURRENCIES, type OrderDocument, type OrderReturned, type OrderStatus, type OrderTransitionInput } from '../types.js';
-import { button, copyButton, defList, linkButton, mono, pageHeader, section, statusMark, table, type DefRow } from '../ui/components.js';
+import { button, defList, linkButton, mono, pageHeader, section, statusMark, table, type DefRow } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
+import { claimCodeDialog } from '../ui/claim-code.js';
 import { saveDownload } from '../ui/download.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
+
+/** A return's new claim code, as its dialog has always said it (ui/claim-code.ts; plan NEXT LOT §3.4 keeps it unchanged). */
+export const RETURN_CLAIM_TEXT = 'The piece’s next buyer registers it with this code; the card that left with it no longer does. Shown once: download its certificate card now. Only its hash is kept.';
 
 /** The steps in order, as the strip shows them. */
 const STEPS: readonly OrderStatus[] = ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED'];
@@ -224,36 +229,11 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     }).then((v) => {
       const r = result as OrderReturned | null;
       if (!v || !r) return;
-      if (r.claimCode) void claimCodeDialog(r.productId, r.claimCode).then(() => done('Order returned.')(true));
+      // The new card's claim code, shown once (only its hash is kept), with the card to download (ui/claim-code.ts).
+      if (r.claimCode) void claimCodeDialog(ctx, { productId: r.productId, code: r.claimCode, text: RETURN_CLAIM_TEXT, testId: 'return-card' }).then(() => done('Order returned.')(true));
       else done('Order returned.')(true);
     });
   };
-  /** The new card's claim code, shown once (only its hash is kept), with the card to download. */
-  const claimCodeDialog = (productId: string, code: string) => {
-    const card = button('Download certificate card', { kind: 'ghost', testId: 'return-card' });
-    card.addEventListener('click', async () => {
-      card.disabled = true;
-      try {
-        saveDownload(await ctx.api.certificates([{ productId, claimCode: code }], { format: 'pdf', layout: 'card' }));
-      } catch (e) {
-        notifyError(e, 'The certificate card could not be produced.');
-      } finally {
-        card.disabled = false;
-      }
-    });
-    return openDialog({
-      title: 'Its new claim code',
-      eyebrow: productId,
-      body: [
-        h('p', { class: 'dialog__text' }, 'The piece’s next buyer registers it with this code; the card that left with it no longer does. Shown once: download its certificate card now. Only its hash is kept.'),
-        h('p', { class: 'claimcode', data: { testid: 'claim-code' } }, mono(code)),
-        h('div', { class: 'row-actions' }, copyButton(code, 'Copy the claim code'), card),
-      ],
-      confirmLabel: 'Done',
-      cancelLabel: 'Close',
-    });
-  };
-
   const stepTools = [
     acts.pay ? button('Mark paid', { kind: 'primary', testId: 'order-pay', onClick: pay }) : null,
     acts.ship ? button(shipLabel, { kind: 'primary', testId: 'order-ship', onClick: ship }) : null,
@@ -536,12 +516,23 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
           },
         ]
       : []),
+    // NEW CLAIM CODE (plan NEXT LOT §3.4): Client Services answers the buyer from here; never the code.
+    ...(d.claimCode
+      ? [
+          {
+            label: 'Claim code',
+            value: h('span', { data: { testid: 'order-claim-code' } }, statusMark(orderClaimCodeRow(d.claimCode).value, d.claimCode.status === 'WITHDRAWN' ? 'muted' : 'outline')),
+            note: orderClaimCodeRow(d.claimCode).note,
+          },
+        ]
+      : []),
   ];
   const pieceTools = [
     acts.location ? button('Change location', { kind: 'ghost', testId: 'order-location', onClick: moveTo }) : null,
     acts.linkPiece ? button('Link a piece', { kind: 'ghost', testId: 'order-link', onClick: linkPiece }) : null,
   ].filter((b): b is HTMLButtonElement => b !== null);
-  const pieceSection = section('Piece', defList(pieceRows), { id: 'order-piece', tools: pieceTools });
+  const noCard = d.claimCode?.cardNeeded && d.claimCode.cardNeededOrder ? h('p', { class: 'notice', data: { testid: 'order-claim-notice' } }, noCardNotice(d.claimCode.cardNeededOrder.reference)) : null;
+  const pieceSection = section('Piece', noCard ? [noCard, defList(pieceRows)] : defList(pieceRows), { id: 'order-piece', tools: pieceTools });
 
   // ── The shipment ─────────────────────────────────────────────────────────
   const shipmentSection = o.shipment

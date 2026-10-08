@@ -110,6 +110,8 @@ import type {
   IssueInput,
   IssueResponse,
   IssuedCodeJson,
+  ClaimRenewal,
+  ClaimSituation,
   Items,
   KeyJson,
   LifecycleSnapshot,
@@ -671,6 +673,14 @@ export class AdminApi {
 
   reissueCode(productId: string, reason: string): Promise<{ code: IssuedCodeJson }> {
     return this.post(`/api/admin/products/${encodeURIComponent(productId)}/codes/reissue`, { reason });
+  }
+
+  /**
+   * NEW CLAIM CODE (plan NEXT LOT §3.4): the situation the dialog showed and the newest new claim code it saw. A piece in
+   * stock answers its code once (no-store); a sold piece's code goes to its buyer and never comes back here.
+   */
+  renewClaimCode(productId: string, input: { reason: string; expect: ClaimSituation; after: string | null }): Promise<ClaimRenewal> {
+    return this.post(`/api/admin/products/${encodeURIComponent(productId)}/claim-code`, input);
   }
 
   /** `retailerId`: a point of sale of the register (the console never sends the free-text `retailer` any more). */

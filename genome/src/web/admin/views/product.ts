@@ -17,13 +17,29 @@ import { h } from '../../shared/dom.js';
 import { anomalyName, formatDate, formatDateTime, humanize, isoDay, shortHash, summarizeDetails, versionLabel } from '../format.js';
 import { can } from '../model/permissions.js';
 import { PIECE_PHOTO_IMPACT } from '../model/photo.js';
-import { openAnomalies, productActions, productAttributes, productSheet, type ProductActions } from '../model/product.js';
+import {
+  CLAIM_CARD_TEXT,
+  CLAIM_REASON_HINT,
+  CLAIM_REASON_MAX,
+  CLAIM_RENEWALS_EMPTY,
+  CLAIM_RENEWALS_NOTE,
+  claimCodeNotice,
+  claimDialogCopy,
+  claimRenewalFor,
+  claimRenewalStatus,
+  openAnomalies,
+  productActions,
+  productAttributes,
+  productSheet,
+  type ProductActions,
+} from '../model/product.js';
 import { confirmationPhrase } from '../model/registry.js';
 import { retailerOptions } from '../model/sale.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
 import { SERVICE_TYPES, type IssuedCodeJson, type ProductDetail, type ProductStatus, type Retailer } from '../types.js';
 import { artifactPanel } from '../ui/artifacts.js';
+import { claimCodeDialog } from '../ui/claim-code.js';
 import { anomalyStatus, button, defList, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { genomeFigure } from '../ui/figures.js';
@@ -128,6 +144,7 @@ export async function productView(ctx: ViewContext): Promise<HTMLElement> {
   parts.push(section('Product', defList(productAttributes(d).map((a) => ({ label: a.label, value: a.mono ? mono(a.value) : a.value })), 'deflist--cols'), { id: 'attributes' }));
   parts.push(photographsPanel(ctx, d));
   parts.push(codesPanel(d, actions));
+  parts.push(claimRenewalsPanel(d));
   parts.push(ownershipPanel(d));
   parts.push(warrantyPanel(d));
   parts.push(anomaliesPanel(d));
@@ -324,6 +341,12 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
       : null,
   );
 
+  // NEW CLAIM CODE (plan NEXT LOT §3.4): its own group, the claim code being another thing than the ORBES CODE.
+  group(
+    'Claim code',
+    a.canRenewClaim ? button('New claim code', { testId: 'action-claim-code', onClick: () => void newClaimCodeDialog(ctx, d) }) : null,
+  );
+
   group(
     'Warranty',
     a.canActivateWarranty
@@ -433,6 +456,43 @@ function actionsPanel(ctx: ViewContext, d: ProductDetail, a: ProductActions): HT
   return section('Actions', h('div', { class: 'actions' }, ...groups), { id: 'actions', note: 'Every action is signed into the audit log' });
 }
 
+/**
+ * NEW CLAIM CODE (plan NEXT LOT §3.4). A piece in stock: the code shown once, here, with its card to print (the shared
+ * dialog of ui/claim-code.ts). A sold piece: made for its buyer, who reads it once in YOUR ORDERS; the console never has
+ * it (only the toast). The situation and the newest code the page read go with the request: a piece sold or given a new
+ * code meanwhile is refused (409), and the page is read again.
+ */
+async function newClaimCodeDialog(ctx: ViewContext, d: ProductDetail): Promise<void> {
+  const pid = d.product.productId;
+  const s = d.claimCode;
+  if (s.renewable === null) return;
+  const copy = claimDialogCopy(s.renewable, s.order);
+  let code: string | null = null;
+  const ok = await openDialog({
+    title: 'New claim code',
+    eyebrow: pid,
+    body: [
+      h('p', { class: 'dialog__text', data: { testid: 'claim-code-text' } }, copy.text),
+      ...(copy.then ? [h('p', { class: 'dialog__text', data: { testid: 'claim-code-then' } }, copy.then)] : []),
+    ],
+    fields: [{ name: 'reason', label: 'Reason', kind: 'textarea', required: true, maxlength: CLAIM_REASON_MAX, hint: CLAIM_REASON_HINT }],
+    confirmLabel: copy.confirm,
+    working: 'Making…',
+    submit: async (v) => {
+      const r = await ctx.api.renewClaimCode(pid, { reason: v.reason.trim(), expect: s.renewable!, after: s.lastRenewalId });
+      code = r.claimCode ?? null;
+    },
+  });
+  if (!ok) return;
+  if (copy.shown && code) {
+    await claimCodeDialog(ctx, { productId: pid, code, text: CLAIM_CARD_TEXT, testId: 'claim-card' });
+    code = null;
+    done(ctx, 'New claim code made.');
+  } else {
+    done(ctx, copy.toast ?? 'New claim code made.');
+  }
+}
+
 async function transitionDialog(ctx: ViewContext, d: ProductDetail, allowed: ProductStatus[]): Promise<void> {
   const pid = d.product.productId;
   const options = allowed.map((s) => ({ value: s, label: humanize(s) + (s === d.lifecycle.returnTo ? ' (return)' : '') }));
@@ -514,6 +574,32 @@ function codesPanel(d: ProductDetail, a: ProductActions): HTMLElement {
       { empty: 'No code issued.' },
     ),
     { id: 'codes', note: a.canDownload ? 'Signature re-verified live on every load' : 'Signature re-verified live · downloads need OPERATOR' },
+  );
+}
+
+/** `New claim codes` (plan NEXT LOT §3.4), under Codes: read by every role that reads the page; never a code. */
+function claimRenewalsPanel(d: ProductDetail): HTMLElement {
+  const notice = claimCodeNotice(d.claimCode);
+  return section(
+    'New claim codes',
+    [
+      notice ? h('p', { class: 'notice', data: { testid: 'claim-code-notice' } }, notice) : null,
+      table(
+        [
+          { label: 'When', cell: (r) => formatDateTime(r.at), kind: ['nowrap'] },
+          { label: 'By', cell: (r) => r.by ?? 'System' },
+          {
+            label: 'For',
+            cell: (r) => (r.kind === 'BUYER' && r.order ? h('a', { class: 'idlink', attrs: { href: href('order', { orderId: r.order.id }) } }, claimRenewalFor(r)) : claimRenewalFor(r)),
+          },
+          { label: 'Status', cell: (r) => claimRenewalStatus(r) },
+          { label: 'Reason', cell: (r) => r.reason ?? '—', kind: ['wide'] },
+        ],
+        d.claimCode.renewals,
+        { empty: CLAIM_RENEWALS_EMPTY },
+      ),
+    ].filter((x): x is HTMLElement => x !== null),
+    { id: 'claim-codes', note: CLAIM_RENEWALS_NOTE },
   );
 }
 

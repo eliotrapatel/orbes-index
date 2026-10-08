@@ -952,6 +952,59 @@ export interface ProductDetail {
   anomalies: AnomalyRecord[];
   statusHistory: StatusHistoryEntry[];
   lifecycle: LifecycleSnapshot;
+  /** NEW CLAIM CODE (plan NEXT LOT §3.4): what New claim code may do for the piece, and its new claim codes; never a code. */
+  claimCode: ClaimCodeSituation;
+}
+
+/** Whom a new claim code is made for (services/claim-renewals.ts CLAIM_SITUATIONS). */
+export type ClaimSituation = 'IN_STOCK' | 'SOLD' | 'SOLD_IN_STORE';
+/** Why New claim code is not offered for a piece. */
+export type ClaimRefusal = 'REGISTERED' | 'NO_CLAIM_CODE' | 'NOT_PRINTABLE' | 'NO_ACTIVE_CODE' | 'SOLD_IN_STORE';
+
+/** One new claim code of a piece (`New claim codes`): never its code. */
+export interface ClaimRenewalRecord {
+  id: string;
+  at: Iso;
+  /** The staff member's email; null for the system. */
+  by: string | null;
+  kind: ClaimRenewalKind;
+  order: { id: string; reference: string } | null;
+  status: ClaimRenewalStatus;
+  readAt: Iso | null;
+  withdrawnAt: Iso | null;
+  withdrawnReason: ClaimRenewalWithdrawnReason | null;
+  reason: string | null;
+}
+
+/** The product page's `claimCode` (GET /api/admin/products/:productId). */
+export interface ClaimCodeSituation {
+  renewable: ClaimSituation | null;
+  refusal: ClaimRefusal | null;
+  /** The piece's open order. */
+  order: { id: string; reference: string } | null;
+  /** The newest new claim code: the dialog sends it back as `after`. */
+  lastRenewalId: string | null;
+  /** No card registers the piece: its current code is an UNSHOWN one, made when its order was cancelled. */
+  cardNeeded: boolean;
+  /** Newest first. */
+  renewals: ClaimRenewalRecord[];
+}
+
+/** POST /api/admin/products/:productId/claim-code: the code itself only for a piece in stock (shown once). */
+export interface ClaimRenewal {
+  claimCode?: string;
+  renewal: ClaimRenewalRecord;
+}
+
+/** The order page's `claimCode` (GET /api/admin/orders/:id): the order's newest new claim code for its buyer. */
+export interface OrderClaimCode {
+  status: ClaimRenewalStatus;
+  madeAt: Iso;
+  readAt: Iso | null;
+  withdrawnAt: Iso | null;
+  withdrawnReason: ClaimRenewalWithdrawnReason | null;
+  cardNeeded: boolean;
+  cardNeededOrder: { id: string; reference: string } | null;
 }
 
 // ── Registries ─────────────────────────────────────────────────────────────
@@ -2397,6 +2450,8 @@ export interface OrderDetail {
   piece: { productId: string; status: ProductStatus; registered: boolean } | null;
   actors: Record<string, string>;
   delays: OrderAlertDelays;
+  /** NEW CLAIM CODE (plan NEXT LOT §3.4): the order's newest new claim code made for its buyer, or null; never the code. */
+  claimCode: OrderClaimCode | null;
 }
 
 /** POST /api/admin/orders/:id/transition. */
@@ -2410,7 +2465,7 @@ export type OrderTransitionInput =
 export type OrderReturnInput = { outcome: 'RESTOCKED'; locationId: string; note: string } | { outcome: 'ARCHIVED'; note: string };
 
 /** The order after its return, and the claim code of its piece's new card when it went back to stock (shown once). */
-export interface OrderReturned extends OrderDetail {
+export interface OrderReturned extends Omit<OrderDetail, 'claimCode'> {
   productId: string;
   claimCode?: string;
 }

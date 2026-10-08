@@ -54,6 +54,8 @@ export interface DialogOptions {
   validate?: (values: DialogValues) => string | null;
   /** Performed while the dialog is open; a thrown error is shown in the dialog. */
   submit?: (values: DialogValues) => Promise<void>;
+  /** Confirm's label while `submit` runs ('Working…' by default; NEW CLAIM CODE's 'Making…'). */
+  working?: string;
   /** After the fields: drawn from the values when the dialog opens and again at every input or change. */
   live?: (values: DialogValues) => Child | Child[];
 }
@@ -219,7 +221,7 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
       confirm.disabled = true;
       cancel.disabled = true;
       confirm.setAttribute('aria-busy', 'true');
-      confirm.textContent = 'Working…';
+      confirm.textContent = o.working ?? 'Working…';
       try {
         await o.submit(values);
         finish(values);

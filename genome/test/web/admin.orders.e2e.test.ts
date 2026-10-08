@@ -505,6 +505,10 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => p.locator('dialog [data-testid=claim-code]').textContent()).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
     const fresh = (await p.locator('dialog [data-testid=claim-code]').textContent())!;
     expect(fresh).not.toBe(lateClaim);
+    // Its words unchanged since the dialog became the one New claim code shares (plan NEXT LOT §3.4).
+    expect(await p.locator('dialog .dialog__text').first().textContent()).toBe(
+      'The piece’s next buyer registers it with this code; the card that left with it no longer does. Shown once: download its certificate card now. Only its hash is kept.',
+    );
     const [card] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=return-card]')]);
     expect(card.suggestedFilename()).toMatch(/\.pdf$/);
     await shot(p, 'return-claim-code');

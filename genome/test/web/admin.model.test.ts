@@ -305,7 +305,20 @@ import { checkProgram, DEFAULT_PROGRAM, experienceTier, PROGRAM_LIMITS as SERVER
 import { CLIENT_REGISTRATION, minutesLeft, pieceLines, preselectedRetailer, READY_TO_SELL, retailerLabel, retailerOptions, SALE_CARD_NOTE, saleVerdict } from '../../src/web/admin/model/sale.js';
 import { SALE_REFUSALS as SERVER_SALE_REFUSALS, SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { SALE_REFUSAL_MESSAGES } from '../../src/server/routes/admin/sale.js';
-import { primaryCode, productActions, productAttributes, productSheet } from '../../src/web/admin/model/product.js';
+import {
+  CLAIM_CARD_TEXT,
+  claimCodeNotice,
+  claimDialogCopy,
+  claimRenewalFor,
+  claimRenewalStatus,
+  noCardNotice,
+  orderClaimCodeRow,
+  primaryCode,
+  productActions,
+  productAttributes,
+  productSheet,
+} from '../../src/web/admin/model/product.js';
+import { RETURN_CLAIM_TEXT } from '../../src/web/admin/views/order.js';
 import {
   chainVerdict,
   channelLabel,
@@ -1267,6 +1280,8 @@ function detail(over: Partial<ProductDetail> = {}): ProductDetail {
     anomalies: [],
     statusHistory: [],
     lifecycle: { status: 'OWNED', allowed: ['TRANSFERRED', 'SERVICED', 'RESOLD', 'RETIRED', 'REVOKED', 'COUNTERFEIT_FLAGGED', 'LOST', 'STOLEN'], returnTo: null, canReinstate: false },
+    // Registered: no new claim code (plan NEXT LOT §3.4).
+    claimCode: { renewable: null, refusal: 'REGISTERED', order: null, lastRenewalId: null, cardNeeded: false, renewals: [] },
   };
   return { ...base, ...over };
 }
@@ -1339,6 +1354,76 @@ describe('product view model (spec §22)', () => {
 
     const auditor = productActions(d, 'AUDITOR');
     expect(auditor).toMatchObject({ transitions: [], canReissue: false, canDownload: false, canVoidWarranty: false, canOpenService: false, revocableCodeId: null });
+  });
+
+  it('offers New claim code to OPERATOR and ADMIN, only where the server says the piece is renewable (plan NEXT LOT §3.4)', () => {
+    const situation = (over: Partial<ProductDetail['claimCode']>): ProductDetail['claimCode'] => ({ renewable: null, refusal: null, order: null, lastRenewalId: null, cardNeeded: false, renewals: [], ...over });
+    for (const renewable of ['IN_STOCK', 'SOLD', 'SOLD_IN_STORE'] as const) {
+      const d = detail({ claimCode: situation({ renewable }) });
+      expect(productActions(d, 'OPERATOR').canRenewClaim, renewable).toBe(true);
+      expect(productActions(d, 'ADMIN').canRenewClaim, renewable).toBe(true);
+      expect(productActions(d, 'AUDITOR').canRenewClaim, renewable).toBe(false);
+      expect(productActions(d, 'RETAIL').canRenewClaim, renewable).toBe(false);
+    }
+    for (const refusal of ['REGISTERED', 'NO_CLAIM_CODE', 'NOT_PRINTABLE', 'NO_ACTIVE_CODE', 'SOLD_IN_STORE'] as const) {
+      expect(productActions(detail({ claimCode: situation({ refusal }) }), 'ADMIN').canRenewClaim, refusal).toBe(false);
+    }
+    expect(CAPABILITY_MIN_ROLE.renewClaimCode).toBe('OPERATOR');
+    // The notice above `New claim codes`.
+    expect(claimCodeNotice(situation({ refusal: 'NO_ACTIVE_CODE' }))).toBe('This piece has no active code: re-issue its code first, then make a new claim code.');
+    expect(claimCodeNotice(situation({ refusal: 'SOLD_IN_STORE' }))).toBe('Sold at a point of sale, with no order: a new claim code is not made for this piece.');
+    expect(claimCodeNotice(situation({ renewable: 'IN_STOCK' }))).toBeNull();
+    const unshown = { id: 'u', at: '2026-10-07T12:10:00.000Z', by: 'ops@orbes.test', kind: 'UNSHOWN' as const, order: { id: 'o', reference: 'OR-3F9A21C4' }, status: 'UNSHOWN' as const, readAt: null, withdrawnAt: null, withdrawnReason: null, reason: null };
+    expect(claimCodeNotice(situation({ renewable: 'IN_STOCK', cardNeeded: true, renewals: [unshown] }))).toBe(
+      'No card registers this piece: its claim code was made for the buyer of order OR-3F9A21C4, which was cancelled. Make a new claim code and put its card in the box before the piece is sold again.',
+    );
+    expect(noCardNotice('OR-3F9A21C4')).toContain('order OR-3F9A21C4, which was cancelled');
+  });
+
+  it('words New claim code\'s dialogs and its history as the plan does (plan NEXT LOT §3.4)', () => {
+    expect(claimDialogCopy('IN_STOCK', null)).toEqual({
+      text: 'This piece has no buyer. Its new claim code is shown once, here, with its certificate card to print. The code on its current card stops working at once: put the new card in its box.',
+      then: null,
+      confirm: 'Make a new claim code',
+      shown: true,
+      toast: null,
+    });
+    expect(claimDialogCopy('SOLD', { reference: 'OR-3F9A21C4' })).toEqual({
+      text: "This piece is sold, on order OR-3F9A21C4, and not registered yet. Its new claim code is shown once to its buyer, on that order in YOUR ORDERS, and never in the console. The code on the buyer's card stops working at once.",
+      then: 'Then answer the buyer in Messages: their new claim code and their new card wait on order OR-3F9A21C4.',
+      confirm: 'Make it for the buyer',
+      shown: false,
+      toast: 'New claim code made. It waits for the buyer on order OR-3F9A21C4.',
+    });
+    expect(CLAIM_CARD_TEXT).toBe("Print its card now and put it in the piece's box: the old card no longer registers it. Shown once: only its hash is kept.");
+    // A return's text is today's, unchanged.
+    expect(RETURN_CLAIM_TEXT).toBe('The piece’s next buyer registers it with this code; the card that left with it no longer does. Shown once: download its certificate card now. Only its hash is kept.');
+    const order = { id: 'o', reference: 'OR-3F9A21C4' };
+    expect(claimRenewalFor({ kind: 'STAFF', order: null })).toBe('Staff · in stock');
+    expect(claimRenewalFor({ kind: 'BUYER', order })).toBe('Buyer · order OR-3F9A21C4');
+    expect(claimRenewalFor({ kind: 'UNSHOWN', order })).toBe('No one · order OR-3F9A21C4 cancelled');
+    expect(claimRenewalStatus({ status: 'SHOWN', readAt: null, withdrawnReason: null })).toBe('Shown once to staff');
+    expect(claimRenewalStatus({ status: 'WAITING', readAt: null, withdrawnReason: null })).toBe('Waiting for the buyer');
+    expect(claimRenewalStatus({ status: 'READ', readAt: '2026-10-07T14:05:00.000Z', withdrawnReason: null })).toBe('Read by the buyer · 07 OCT 2026 · 14:05 UTC');
+    expect(claimRenewalStatus({ status: 'UNSHOWN', readAt: null, withdrawnReason: null })).toBe('Never shown');
+    for (const [reason, words] of [
+      ['RENEWED_AGAIN', 'Withdrawn · a newer code'],
+      ['ORDER_CANCELLED', 'Withdrawn · order cancelled'],
+      ['ORDER_RETURNED', 'Withdrawn · order returned'],
+      ['REGISTERED', 'Withdrawn · registered'],
+      ['UNREADABLE', 'Withdrawn · could not be read'],
+      ['SUPERSEDED', 'Withdrawn · replaced'],
+    ] as const) {
+      expect(claimRenewalStatus({ status: 'WITHDRAWN', readAt: null, withdrawnReason: reason })).toBe(words);
+    }
+    // The order page's row.
+    const base = { madeAt: '2026-10-07T14:02:00.000Z', readAt: null, withdrawnAt: null, withdrawnReason: null, cardNeeded: false, cardNeededOrder: null };
+    expect(orderClaimCodeRow({ ...base, status: 'WAITING' })).toEqual({ value: 'WAITING FOR THE BUYER', note: 'New code made 07 OCT 2026 · 14:02 UTC' });
+    expect(orderClaimCodeRow({ ...base, status: 'READ', readAt: '2026-10-07T14:05:00.000Z' })).toEqual({ value: 'READ BY THE BUYER', note: 'On 07 OCT 2026 · 14:05 UTC' });
+    expect(orderClaimCodeRow({ ...base, status: 'WITHDRAWN', withdrawnAt: '2026-10-07T15:00:00.000Z', withdrawnReason: 'ORDER_CANCELLED' })).toEqual({
+      value: 'WITHDRAWN · ORDER CANCELLED',
+      note: 'New code made 07 OCT 2026 · 14:02 UTC',
+    });
   });
 
   it('follows the server rules for warranty, re-issue and ownership confirmation', () => {

@@ -33,6 +33,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   issue: 'OPERATOR',
   transition: 'OPERATOR',
   reissueCode: 'OPERATOR',
+  /** NEW CLAIM CODE (plan NEXT LOT §3.4): a lost card's code replaced for a piece not registered yet ("OPERATOR too"). */
+  renewClaimCode: 'OPERATOR',
   /** Artifact downloads produce printable, verifying codes (server: OPERATOR). */
   download: 'OPERATOR',
   warranty: 'OPERATOR',

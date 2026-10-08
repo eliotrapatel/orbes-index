@@ -3112,6 +3112,108 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await rc.close();
   }, STEP_TIMEOUT);
 
+  // Last: it issues pieces of the model, which the earlier tests count.
+  it('makes a new claim code (plan NEXT LOT §3.4): in stock, shown once with its card; sold, only a toast, the code nowhere in the page or its answers', async () => {
+    const { verifyClaimCode } = await import('../../src/server/services/claim-codes.js');
+    const { openText } = await import('../../src/server/crypto/secretbox.js');
+    const { claimRevealAad, deriveClaimRevealKey } = await import('../../src/server/services/claim-renewals.js');
+    const { orderReference } = await import('../../src/server/services/orders.js');
+    const sectionOf = (p: Page) => p.locator('#claim-codes');
+    // Its own signed-in page: the main page's session ended in an earlier test.
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const page = await c.newPage();
+    await watch(page);
+    await signIn(page, ADMIN.email, ADMIN.password);
+    // A piece in stock: no buyer.
+    const inStock = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, variant: '57', material: '925 STERLING SILVER', withClaimSecret: true }, SYSTEM_ACTOR);
+    await go(page, `#/products/${inStock.product.productId}`, inStock.product.productId);
+    expect(await sectionOf(page).textContent()).toContain('No new claim code has been made for this piece.');
+    expect(await sectionOf(page).textContent()).toContain('The codes themselves are never kept.');
+    expect(await page.locator('.actions__group', { hasText: 'Claim code' }).locator('[data-testid=action-claim-code]').count()).toBe(1);
+    await page.click('[data-testid=action-claim-code]');
+    expect((await page.locator('dialog .dialog__title').textContent())?.trim()).toBe('New claim code');
+    expect(await page.locator('dialog [data-testid=claim-code-text]').textContent()).toBe(
+      'This piece has no buyer. Its new claim code is shown once, here, with its certificate card to print. The code on its current card stops working at once: put the new card in its box.',
+    );
+    expect(await page.locator('dialog .cfield__hint').first().textContent()).toBe('Kept in the audit log. For example: card lost at the warehouse, card damaged.');
+    expect((await page.locator('[data-testid=dialog-confirm]').textContent())?.trim()).toBe('Make a new claim code');
+    await page.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
+    await page.fill('dialog textarea[name=reason]', 'Card damaged at the warehouse.');
+    await page.click('[data-testid=dialog-confirm]');
+    // Shown once, with its card to print (the dialog a return uses, its own words).
+    await expect.poll(() => page.locator('dialog [data-testid=claim-code]').textContent(), { timeout: 15_000 }).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    const code = (await page.locator('dialog [data-testid=claim-code]').textContent())!;
+    expect(await page.locator('dialog .dialog__text').first().textContent()).toBe("Print its card now and put it in the piece's box: the old card no longer registers it. Shown once: only its hash is kept.");
+    const hash = (await ctx.db.selectFrom('products').select('claim_secret_hash').where('id', '=', inStock.product.id).executeTakeFirstOrThrow()).claim_secret_hash!;
+    expect(await verifyClaimCode(code, hash)).toBe(true);
+    expect(await verifyClaimCode(inStock.claimCode!, hash)).toBe(false);
+    const [card] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=claim-card]')]);
+    expect(card.suggestedFilename()).toMatch(/\.pdf$/);
+    expect(readFileSync((await card.path())!).subarray(0, 5).toString()).toBe('%PDF-');
+    await shot(page, 'claim-code-in-stock');
+    await confirmDialog(page);
+    await expect.poll(() => sectionOf(page).locator('tbody tr').count()).toBe(1);
+    expect(await sectionOf(page).locator('tbody tr').first().textContent()).toMatch(/Staff · in stock\s*Shown once to staff\s*Card damaged at the warehouse\./);
+    expect(await page.locator('body').textContent()).not.toContain(code);
+
+    // A sold piece: made for its buyer; the console never has the code.
+    const france = (await ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    const sku = await inTransaction(ctx.db, (tx) => ensureSku(tx, modelId, '59'));
+    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, SYSTEM_ACTOR);
+    const sold = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, variant: '59', material: '925 STERLING SILVER', withClaimSecret: true }, SYSTEM_ACTOR);
+    const email = 'claim-buyer@example.com';
+    const account = (await ctx.db.insertInto('accounts').values({ email, email_normalized: email, password_hash: 'unused' }).returning('id').executeTakeFirstOrThrow()).id;
+    const request = await ctx.db.insertInto('shop_requests').values({ account_id: account, model_id: modelId }).returning('id').executeTakeFirstOrThrow();
+    const staff = { type: 'admin' as const, id: (await ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow()).id };
+    await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, staff);
+    const orderId = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+    await ctx.services.orders.setTerms(orderId, { sizeLabel: '59', priceMinor: 300_000, currency: 'EUR' }, staff);
+    await ctx.services.atelier.linkFromStock(orderId, sold.product.productId, staff);
+    const ref = orderReference(orderId);
+    const answers: string[] = [];
+    const record = async (r: import('playwright-core').Response) => {
+      if (r.url().includes('/api/')) answers.push(await r.text().catch(() => ''));
+    };
+    page.on('response', record);
+    try {
+      await go(page, `#/products/${sold.product.productId}`, sold.product.productId);
+      await page.click('[data-testid=action-claim-code]');
+      expect(await page.locator('dialog [data-testid=claim-code-text]').textContent()).toBe(
+        `This piece is sold, on order ${ref}, and not registered yet. Its new claim code is shown once to its buyer, on that order in YOUR ORDERS, and never in the console. The code on the buyer's card stops working at once.`,
+      );
+      expect(await page.locator('dialog [data-testid=claim-code-then]').textContent()).toBe(`Then answer the buyer in Messages: their new claim code and their new card wait on order ${ref}.`);
+      expect((await page.locator('[data-testid=dialog-confirm]').textContent())?.trim()).toBe('Make it for the buyer');
+      await page.fill('dialog textarea[name=reason]', 'The buyer lost the card.');
+      await shot(page, 'claim-code-sold-dialog');
+      await confirmDialog(page);
+      await page.waitForSelector(`.toast:has-text("New claim code made. It waits for the buyer on order ${ref}.")`);
+      expect(await page.locator('dialog [data-testid=claim-code]').count()).toBe(0);
+      await expect.poll(() => sectionOf(page).locator('tbody tr').count()).toBe(1);
+      expect(await sectionOf(page).locator('tbody tr').first().textContent()).toContain(`Buyer · order ${ref}`);
+      expect(await sectionOf(page).locator('tbody tr').first().textContent()).toContain('Waiting for the buyer');
+      if (SCREENSHOTS) await sectionOf(page).screenshot({ path: join(OUT_DIR, 'admin-claim-code-section.png') });
+      // The order page's row, for Client Services answering the buyer.
+      await go(page, `#/orders/${orderId}`, ref);
+      await expect.poll(() => page.locator('[data-testid=order-claim-code]').textContent()).toBe('WAITING FOR THE BUYER');
+      expect(await page.locator('#order-piece').textContent()).toMatch(/New code made \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC/);
+      if (SCREENSHOTS) await page.locator('#order-piece').screenshot({ path: join(OUT_DIR, 'admin-claim-code-order.png') });
+      // The code, read from its sealed copy here only: in no DOM and no answer the console received.
+      const row = await ctx.db.selectFrom('claim_code_renewals').selectAll().where('product_id', '=', sold.product.id).executeTakeFirstOrThrow();
+      const sealed = openText(deriveClaimRevealKey(ctx.config), row.sealed_code!, claimRevealAad(row));
+      const html = await page.content();
+      for (const text of [html, ...answers]) {
+        expect(text).not.toContain(sealed);
+        expect(text).not.toContain(sealed.replace(/-/g, ''));
+        expect(text).not.toContain(row.sealed_code!);
+      }
+      expect(answers.length).toBeGreaterThan(2);
+    } finally {
+      page.off('response', record);
+    }
+    await c.close();
+  }, STEP_TIMEOUT);
+
   it('raised no page error or CSP violation', () => {
     expect(problems).toEqual([]);
   });
