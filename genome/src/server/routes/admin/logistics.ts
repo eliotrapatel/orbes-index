@@ -54,6 +54,13 @@
  *                                                                               403 from the agent)
  *   POST   /api/admin/logistics/orders/:id/delivered            LOGISTICS_ACT   Mark delivered
  *   GET    /api/admin/logistics/shipments/:id/photo             LOGISTICS_READ  the packing photo, no-store
+ *
+ * Order cases (step 5.10, services/order-cases.ts; ORBES decides in routes/admin/order-cases.ts):
+ *
+ *   POST   /api/admin/logistics/orders/:id/order-case           LOGISTICS_ACT   a parcel problem reported (BACK_TO_SENDER,
+ *                                                                               LOST, DAMAGED) with a note (201)
+ *   GET    /api/admin/logistics/order-cases                     LOGISTICS_READ  the parcels expected back (?locationId=)
+ *   POST   /api/admin/logistics/order-cases/:id/received        LOGISTICS_ACT   the parcel back, the piece OK or DAMAGED
  */
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../context.js';
@@ -65,7 +72,11 @@ import {
   countInBody,
   createReceptionBody,
   declineCorrectionBody,
+  casesToReceiveQuery,
   logisticsStockQuery,
+  orderCaseParams,
+  receiveOrderCaseBody,
+  reportParcelBody,
   orderParams,
   packingCheckBody,
   packingScanBody,
@@ -281,5 +292,27 @@ export const adminLogisticsRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
     reply.header('cache-control', 'no-store');
     reply.header('x-content-type-options', 'nosniff');
     return reply.send(Buffer.from(photo.bytes.buffer, photo.bytes.byteOffset, photo.bytes.byteLength));
+  });
+
+  // ── Order cases (step 5.10) ──────────────────────────────────────────────
+  app.post('/api/admin/logistics/orders/:id/order-case', { config: ACT }, async (request, reply) => {
+    const { id } = parse(orderParams, request.params);
+    const b = parse(reportParcelBody, request.body);
+    const c = await ctx.services.orderCases.report(id, { kind: b.kind, note: b.note }, adminActor(request), await scopeOf(request));
+    // The agent reads the case it opened, its words included; an AUDITOR never reports.
+    return reply.code(201).send(c);
+  });
+
+  app.get('/api/admin/logistics/order-cases', { config: READ }, async (request) => {
+    const q = parse(casesToReceiveQuery, request.query);
+    const items = await ctx.services.orderCases.toReceive(await scopeOf(request), q.locationId ? { locationId: q.locationId } : {});
+    return { items };
+  });
+
+  app.post('/api/admin/logistics/order-cases/:id/received', { config: ACT }, async (request) => {
+    const { id } = parse(orderCaseParams, request.params);
+    const b = parse(receiveOrderCaseBody, request.body);
+    const c = await ctx.services.orderCases.receive(id, { pieceState: b.pieceState, note: b.note ?? null }, adminActor(request), await scopeOf(request));
+    return { id: c.id, status: c.status, kind: c.kind, received: c.received };
   });
 };

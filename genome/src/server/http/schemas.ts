@@ -44,6 +44,8 @@ import {
   SIZE_TYPES,
   STAFF_ROLES,
   STOCK_CORRECTION_STATUSES,
+  ORDER_CASE_PIECE_STATES,
+  ORDER_CASE_REASONS,
   SUPPLIER_ORDER_STATUSES,
   SUPPLIER_RETURN_SETTLEMENTS,
   VERIFICATION_STATES,
@@ -98,6 +100,7 @@ import { SUPPLIER_LIMITS } from '../services/suppliers.js';
 import { SUPPLIER_ORDER_LIMITS } from '../services/supplier-orders.js';
 import { RECEPTION_LIMITS } from '../services/receptions.js';
 import { LOGISTICS_LIMITS } from '../services/logistics.js';
+import { ORDER_CASE_LIMITS } from '../services/order-cases.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -1807,6 +1810,38 @@ export const shipParcelBody = body({
   trackingNumber: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9 -]{2,39}$/, 'A tracking number has 3 to 40 letters and digits'),
   declaredValues: z.array(z.strictObject({ orderId: uuid, minor: orderAmount.nullable() })).max(10, 'At most 10 orders').optional(),
 });
+
+// ── Admin: order cases (routes/admin/order-cases.ts, logistics.ts and orders.ts, plan NEXT LOT §3.5.6.7) ─
+
+export const orderCaseParams = z.object({ id: uuid });
+
+/** POST /api/admin/orders/:id/case: a return or a size exchange opened by Client Services, its reason and note. */
+export const openOrderCaseBody = body({
+  kind: z.enum(['RETURN', 'EXCHANGE']),
+  reason: z.enum(ORDER_CASE_REASONS),
+  exchangeSkuId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  note: text(ORDER_CASE_LIMITS.note),
+}).refine((b) => (b.kind === 'EXCHANGE') === Boolean(b.exchangeSkuId), { message: 'An exchange names its new size; a return none', path: ['exchangeSkuId'] });
+
+/** POST /api/admin/logistics/orders/:id/order-case: a parcel problem reported, with a note. */
+export const reportParcelBody = body({ kind: z.enum(['BACK_TO_SENDER', 'LOST', 'DAMAGED']), note: text(ORDER_CASE_LIMITS.note) });
+
+/** GET /api/admin/logistics/order-cases: one location. */
+export const casesToReceiveQuery = z.object({ locationId: queryOptional(uuid) });
+
+/** POST /api/admin/logistics/order-cases/:id/received: the piece's state, and a note. */
+export const receiveOrderCaseBody = body({ pieceState: z.enum(ORDER_CASE_PIECE_STATES), note: z.preprocess(emptyToNull, text(ORDER_CASE_LIMITS.receiveNote).nullable().optional()) });
+
+/** POST /api/admin/order-cases/:id/decide: ORBES's decision, where the piece goes, a note. */
+export const decideOrderCaseBody = body({
+  decision: z.enum(['REFUND', 'EXCHANGE', 'RESHIP']),
+  pieceTo: z.enum(['RESTOCKED', 'ARCHIVED']).nullable().optional(),
+  locationId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  note: z.preprocess(emptyToNull, text(ORDER_CASE_LIMITS.decisionNote).nullable().optional()),
+});
+
+/** POST /api/admin/order-cases/:id/cancel: why it ends with no decision. */
+export const cancelOrderCaseBody = body({ note: text(ORDER_CASE_LIMITS.cancelNote) });
 
 // ── Admin: the atelier (routes/admin/atelier.ts) ──────────────────────────
 

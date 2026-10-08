@@ -953,6 +953,8 @@ interface NewOrder {
   withOrderId?: string | null;
   /** BP-19 T5: a GIFT order's grant. */
   giftGrantId?: string;
+  /** Plan NEXT LOT §3.5.6.7: an EXCHANGE order's original. */
+  exchangeOfOrderId?: string;
 }
 
 /**
@@ -981,6 +983,7 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
       reserved_at: n.reservedAt && n.reservedAt < now ? n.reservedAt : now,
       with_order_id: n.withOrderId ?? null,
       gift_grant_id: n.giftGrantId ?? null,
+      exchange_of_order_id: n.exchangeOfOrderId ?? null,
       shipping_service: n.shipping?.service ?? null,
       shipping_minor: n.shipping?.service ? n.shipping.minor : null,
       shipping_benefit: n.shipping?.service ? n.shipping.benefit : null,
@@ -995,7 +998,9 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
       ? { dropEntryId: n.dropEntryId }
       : n.giftGrantId
         ? { giftGrantId: n.giftGrantId }
-        : { shopRequestId: n.shopRequestId! };
+        : n.exchangeOfOrderId
+          ? { exchangeOfOrderId: n.exchangeOfOrderId }
+          : { shopRequestId: n.shopRequestId! };
   notes.push(
     await recordChange(
       tx,
@@ -1344,8 +1349,40 @@ export async function deliverOnRegistration(tx: Db, productUuid: string, account
     .executeTakeFirst();
   if (!o) return [];
   const notes: AuditRecordInput[] = [];
+  // Plan NEXT LOT §3.5.6.7: a parcel reported lost, damaged or back to sender, whose piece its buyer registers meanwhile,
+  // arrived: its order case, not yet recorded back by the agent, is cancelled ('Registered by its buyer.'), never decided.
+  await cancelParcelProblem(tx, o, now, notes);
   await step(tx, o, { to: 'DELIVERED', note: null, details: { by: 'registration' } }, actor, now, notes);
   return notes;
+}
+
+/** The note of a parcel problem cancelled by its buyer's registration. */
+export const REGISTERED_BY_BUYER = 'Registered by its buyer.';
+
+/**
+ * A parcel problem still OPEN on the shipment of a shipped order, cancelled by the system (the parcel arrived: its
+ * buyer registered its piece); the shipment SHIPPED again. Audited `order.case.cancel` `{ caseId, kind, by: 'registration' }`.
+ */
+async function cancelParcelProblem(tx: Db, o: OrderRow, now: Date, notes: AuditRecordInput[]): Promise<void> {
+  const open = await tx
+    .selectFrom('order_cases as c')
+    .innerJoin('shipment_items as i', 'i.shipment_id', 'c.shipment_id')
+    .select(['c.id', 'c.order_id', 'c.kind', 'c.shipment_id', 'c.opened_at'])
+    .where('i.order_id', '=', o.id)
+    .where('c.status', '=', 'OPEN')
+    .where('c.kind', 'in', ['BACK_TO_SENDER', 'LOST', 'DAMAGED'])
+    .execute();
+  for (const c of open) {
+    const owner = c.order_id === o.id ? o : await lockOrder(tx, c.order_id);
+    await tx.selectFrom('order_cases').select('id').where('id', '=', c.id).forUpdate().execute();
+    await tx
+      .updateTable('order_cases')
+      .set({ status: 'CANCELLED', cancelled_at: now < c.opened_at ? c.opened_at : now, cancelled_by: null, cancel_note: REGISTERED_BY_BUYER })
+      .where('id', '=', c.id)
+      .execute();
+    await tx.updateTable('shipments').set({ status: 'SHIPPED' }).where('id', '=', c.shipment_id!).where('status', '=', c.kind as 'BACK_TO_SENDER' | 'LOST' | 'DAMAGED').execute();
+    notes.push(await recordChange(tx, owner, owner, 'order.case.cancel', { details: { caseId: c.id, kind: c.kind, by: 'registration' } }, SYSTEM_ACTOR, now));
+  }
 }
 
 /**
@@ -1361,6 +1398,142 @@ export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via:
   const after = await updateOrder(tx, o.id, { product_id: productUuid, reservation: 'STOCK' });
   const note = await recordChange(tx, o, after, 'order.link', { details: { productId: productUuid, via, reservation: 'STOCK' } }, actor, now);
   return { order: after, note };
+}
+
+/**
+ * The core of a return (choice 20; services/order-cases.ts decides a return or an exchange with it, plan NEXT LOT
+ * §3.5.6.7), in the caller's transaction, the piece's row and the order's locked: as `OrderService.returnOrder` says,
+ * the piece back to stock at a location with its new claim code (its hash prepared before the transaction), or to the
+ * archive; the ownership taken back; the credit given back; the credit note. `expected` is what the caller read before
+ * its transaction (409 ORDER_RETURN_CHANGED when it changed). Returns the order after it, the piece's reference and
+ * `finish`, the piece's change of status, which the caller runs last (LifecycleService audits at once).
+ */
+export async function returnInTransaction(
+  tx: Db,
+  o: OrderRow,
+  r: { outcome: ReturnOutcome; locationId: string | null; note: string },
+  expected: { productId: string | null; reclaim: boolean; claimHash: string | null },
+  actor: Actor,
+  now: Date,
+  notes: AuditRecordInput[],
+  lifecycle: LifecycleService,
+): Promise<{ after: OrderRow; productId: string; finish: () => Promise<void> }> {
+  const claimHash = expected.claimHash;
+  if (!isOrderTransitionAllowed(o.status, 'RETURNED')) throw stepNotAllowed(o.status, 'RETURNED');
+  if (o.product_id === null || o.sku_id === null) throw pieceNotLinked();
+  if (o.product_id !== expected.productId) throw returnChanged();
+  const locationId = r.outcome === 'RESTOCKED' ? await knownLocation(tx, r.locationId!) : null;
+  if (locationId) await lockSku(tx, o.sku_id);
+  const p = await tx.selectFrom('products').selectAll().where('id', '=', o.product_id).forUpdate().executeTakeFirstOrThrow();
+  const owner = await tx.selectFrom('ownership').selectAll().where('product_id', '=', p.id).where('ended_at', 'is', null).forUpdate().executeTakeFirst();
+  if ((owner !== undefined) !== expected.reclaim) throw returnChanged();
+  // Plan NEXT LOT §3.4: a buyer's new claim code still waiting is withdrawn (RESTOCKED writes its own new code, shown
+  // to staff; ARCHIVED retires the piece).
+  const withdrawn = await withdrawWaiting(tx, p.id, 'ORDER_RETURNED', actor, now);
+  // The piece's status once back: ready to be sold again (RESOLD; ISSUED if it never was), or retired.
+  let to: ProductStatus | null;
+  if (r.outcome === 'ARCHIVED') to = p.status === 'RETIRED' || p.status === 'REVOKED' ? null : 'RETIRED';
+  else to = p.status === 'ISSUED' || p.status === 'RESOLD' ? null : 'RESOLD';
+  if (to !== null && !isTransitionAllowed(p.status, to, await returnTargetOf(tx, p))) throw notRestockable(p.status);
+  if (locationId) await recordMovement(tx, { skuId: o.sku_id, locationId, delta: 1, reason: 'RETURNED', orderId: o.id, productId: p.id, note: r.note }, actor, now);
+  const extra: AuditRecordInput[] = [];
+  // Back to stock, the piece serves the next order waiting for it there (plan NEXT LOT §3.5).
+  if (locationId) extra.push(...(await serveWaiting(tx, o.sku_id, locationId, actor, now)));
+  if (owner) {
+    // ORBES takes the ownership back: it ends, a transfer pending with it is cancelled, the piece is unregistered.
+    const endedAt = now < owner.started_at ? owner.started_at : now;
+    await tx.updateTable('ownership').set({ ended_at: endedAt, ended_reason: 'RETURNED' }).where('id', '=', owner.id).execute();
+    const transfers = await tx
+      .updateTable('ownership_transfers')
+      .set({ status: 'CANCELLED', completed_at: now })
+      .where('product_id', '=', p.id)
+      .where('status', '=', 'PENDING')
+      .returning('id')
+      .execute();
+    extra.push(
+      {
+        actor,
+        action: 'ownership.reclaim',
+        targetType: 'product',
+        targetId: p.product_id,
+        details: { accountId: owner.account_id, orderId: o.id, outcome: r.outcome, claimCodeReissued: claimHash !== null },
+      },
+      ...transfers.map((t): AuditRecordInput => ({ actor, action: 'ownership.transfer.cancel', targetType: 'product', targetId: p.product_id, details: { transferId: t.id, reason: 'order_returned' } })),
+    );
+  }
+  if (owner || claimHash) {
+    // Unregistered once its ownership is taken back; back to stock, a new claim code: the card that left with it no
+    // longer registers it.
+    await tx
+      .updateTable('products')
+      .set({ updated_at: now, ...(owner ? { ownership_state: 'UNREGISTERED' as const } : {}), ...(claimHash ? { claim_secret_hash: claimHash } : {}) })
+      .where('id', '=', p.id)
+      .execute();
+    if (owner) p.ownership_state = 'UNREGISTERED';
+    if (claimHash) p.claim_secret_hash = claimHash;
+  }
+  await tx
+    .insertInto('returns')
+    .values({ order_id: o.id, outcome: r.outcome, location_id: locationId, note: r.note, ownership_id: owner?.id ?? null, created_by: actor.type === 'admin' ? actor.id! : null, created_at: now })
+    .execute();
+  const after = await updateOrder(tx, o.id, { status: 'RETURNED', returned_at: now });
+  const details: JsonObject = {
+    outcome: r.outcome,
+    ...(locationId ? { locationId } : {}),
+    ownershipReclaimed: owner !== undefined,
+    ...(claimHash ? { claimCodeReissued: true } : {}),
+    ...(to ? { pieceStatus: to } : {}),
+  };
+  notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.note, details }, actor, now), ...extra, ...withdrawn);
+  // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is.
+  notes.push(...(await releaseCredit(tx, after, 'RETURNED', actor, now)));
+  const credit = await issueCreditNote(tx, after, 'return', actor, now);
+  if (credit) notes.push(credit);
+  // The piece's status, which LifecycleService audits at once: left to the caller to run last (no row is locked after it).
+  const finish = async () => {
+    if (to !== null) {
+      await lifecycle.applyForService(tx, p, to, { reason: `Order ${orderReference(o.id)} returned`, via: 'order.return', ...(owner ? { ownershipState: 'UNREGISTERED' as const } : {}) }, actor);
+    }
+  };
+  return { after, productId: p.product_id, finish };
+}
+
+/**
+ * The EXCHANGE order of a size exchange decided (plan NEXT LOT §3.5.6.7), in the caller's transaction, its original
+ * RETURNED: the original's account, release, price, currency, add-ons, surprise, engraving words, shipping and buyer
+ * (its delivery address), the new size, at the original's location; it holds a piece in stock or waits like any order,
+ * and is PAID at once with its own invoice (SIZE EXCHANGE beneath the piece). Audited `order.create` (EXCHANGE),
+ * `order.pay` with `invoice.issue`, and `order.exchange` on the original.
+ */
+export async function createExchangeOrder(tx: Db, original: OrderRow, sku: { id: string; label: string | null }, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+  let o = await createOrder(
+    tx,
+    {
+      channel: 'EXCHANGE',
+      exchangeOfOrderId: original.id,
+      dropId: original.drop_id,
+      accountId: original.account_id,
+      modelId: original.model_id,
+      sizeLabel: sku.label,
+      skuId: sku.id,
+      priceMinor: original.price_minor,
+      currency: original.currency,
+      addons: original.addons,
+      surprise: original.surprise,
+      locationId: original.location_id,
+      shipping: shippingOf(original),
+    },
+    { hold: true },
+    actor,
+    now,
+    notes,
+  );
+  if (original.engraving_text !== null || original.buyer_name !== null || original.buyer_address !== null) {
+    o = await updateOrder(tx, o.id, { engraving_text: original.engraving_text, buyer_name: original.buyer_name, buyer_address: original.buyer_address });
+  }
+  const paid = await step(tx, o, { to: 'PAID', note: null }, actor, now, notes);
+  notes.push(await recordChange(tx, original, original, 'order.exchange', { details: { exchangeOrderId: paid.id, skuId: sku.id } }, actor, now));
+  return paid;
 }
 
 /** Every order of an account, oldest first, for its right-of-access export (OwnerService.exportData). */
@@ -1777,83 +1950,16 @@ export class OrderService {
       if (peek.product_id !== null) await tx.selectFrom('products').select('id').where('id', '=', peek.product_id).forUpdate().execute();
     };
     let productId = '';
-    await this.change(id, async (tx, o, now, notes) => {
-      if (!isOrderTransitionAllowed(o.status, 'RETURNED')) throw stepNotAllowed(o.status, 'RETURNED');
-      if (o.product_id === null || o.sku_id === null) throw pieceNotLinked();
-      if (o.product_id !== peek.product_id) throw returnChanged();
-      const locationId = r.outcome === 'RESTOCKED' ? await knownLocation(tx, r.locationId!) : null;
-      if (locationId) await lockSku(tx, o.sku_id);
-      const p = await tx.selectFrom('products').selectAll().where('id', '=', o.product_id).forUpdate().executeTakeFirstOrThrow();
-      const owner = await tx.selectFrom('ownership').selectAll().where('product_id', '=', p.id).where('ended_at', 'is', null).forUpdate().executeTakeFirst();
-      if ((owner !== undefined) !== reclaim) throw returnChanged();
-      // Plan NEXT LOT §3.4: a buyer's new claim code still waiting is withdrawn (RESTOCKED writes its own new code, shown
-      // to staff; ARCHIVED retires the piece).
-      const withdrawn = await withdrawWaiting(tx, p.id, 'ORDER_RETURNED', actor, now);
-      // The piece's status once back: ready to be sold again (RESOLD; ISSUED if it never was), or retired.
-      let to: ProductStatus | null;
-      if (r.outcome === 'ARCHIVED') to = p.status === 'RETIRED' || p.status === 'REVOKED' ? null : 'RETIRED';
-      else to = p.status === 'ISSUED' || p.status === 'RESOLD' ? null : 'RESOLD';
-      if (to !== null && !isTransitionAllowed(p.status, to, await returnTargetOf(tx, p))) throw notRestockable(p.status);
-      if (locationId) await recordMovement(tx, { skuId: o.sku_id, locationId, delta: 1, reason: 'RETURNED', orderId: o.id, productId: p.id, note: r.note }, actor, now);
-      const extra: AuditRecordInput[] = [];
-      // Back to stock, the piece serves the next order waiting for it there (plan NEXT LOT §3.5).
-      if (locationId) extra.push(...(await serveWaiting(tx, o.sku_id, locationId, actor, now)));
-      if (owner) {
-        // ORBES takes the ownership back: it ends, a transfer pending with it is cancelled, the piece is unregistered.
-        const endedAt = now < owner.started_at ? owner.started_at : now;
-        await tx.updateTable('ownership').set({ ended_at: endedAt, ended_reason: 'RETURNED' }).where('id', '=', owner.id).execute();
-        const transfers = await tx
-          .updateTable('ownership_transfers')
-          .set({ status: 'CANCELLED', completed_at: now })
-          .where('product_id', '=', p.id)
-          .where('status', '=', 'PENDING')
-          .returning('id')
-          .execute();
-        extra.push(
-          {
-            actor,
-            action: 'ownership.reclaim',
-            targetType: 'product',
-            targetId: p.product_id,
-            details: { accountId: owner.account_id, orderId: o.id, outcome: r.outcome, claimCodeReissued: claimHash !== null },
-          },
-          ...transfers.map((t): AuditRecordInput => ({ actor, action: 'ownership.transfer.cancel', targetType: 'product', targetId: p.product_id, details: { transferId: t.id, reason: 'order_returned' } })),
-        );
-      }
-      if (owner || claimHash) {
-        // Unregistered once its ownership is taken back; back to stock, a new claim code: the card that left with it no
-        // longer registers it.
-        await tx
-          .updateTable('products')
-          .set({ updated_at: now, ...(owner ? { ownership_state: 'UNREGISTERED' as const } : {}), ...(claimHash ? { claim_secret_hash: claimHash } : {}) })
-          .where('id', '=', p.id)
-          .execute();
-        if (owner) p.ownership_state = 'UNREGISTERED';
-        if (claimHash) p.claim_secret_hash = claimHash;
-      }
-      await tx
-        .insertInto('returns')
-        .values({ order_id: o.id, outcome: r.outcome, location_id: locationId, note: r.note, ownership_id: owner?.id ?? null, created_by: actor.type === 'admin' ? actor.id! : null, created_at: now })
-        .execute();
-      const after = await updateOrder(tx, o.id, { status: 'RETURNED', returned_at: now });
-      const details: JsonObject = {
-        outcome: r.outcome,
-        ...(locationId ? { locationId } : {}),
-        ownershipReclaimed: owner !== undefined,
-        ...(claimHash ? { claimCodeReissued: true } : {}),
-        ...(to ? { pieceStatus: to } : {}),
-      };
-      notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.note, details }, actor, now), ...extra, ...withdrawn);
-      // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is.
-      notes.push(...(await releaseCredit(tx, after, 'RETURNED', actor, now)));
-      const credit = await issueCreditNote(tx, after, 'return', actor, now);
-      if (credit) notes.push(credit);
-      // Last: the piece's status, which LifecycleService audits at once (the audit chain's lock: no row is locked after it).
-      if (to !== null) {
-        await this.lifecycle.applyForService(tx, p, to, { reason: `Order ${orderReference(o.id)} returned`, via: 'order.return', ...(owner ? { ownershipState: 'UNREGISTERED' } : {}) }, actor);
-      }
-      productId = p.product_id;
-    }, pieceFirst);
+    await this.change(
+      id,
+      async (tx, o, now, notes) => {
+        const done = await returnInTransaction(tx, o, r, { productId: peek.product_id, reclaim, claimHash }, actor, now, notes, this.lifecycle);
+        // Last: the piece's status, which LifecycleService audits at once (the audit chain's lock: no row is locked after it).
+        await done.finish();
+        productId = done.productId;
+      },
+      pieceFirst,
+    );
     return { order: await this.get(id), productId, ...(claimCode ? { claimCode } : {}) };
   }
 

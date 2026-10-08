@@ -345,6 +345,15 @@ const PROBES: Probe[] = [
   { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/ship`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
   { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/delivered`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
   { group: 'packing', method: 'GET', url: `/api/admin/logistics/shipments/${UUID}/photo`, min: 'LOGISTICS', roles: LOGISTICS_READ },
+  // Order cases (plan NEXT LOT §3.5.6.9, step 5.10): the agent reports and receives; Client Services opens; ORBES decides.
+  { group: 'order-cases', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/order-case`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'order-cases', method: 'GET', url: '/api/admin/logistics/order-cases', min: 'LOGISTICS', roles: LOGISTICS_READ },
+  { group: 'order-cases', method: 'GET', url: `/api/admin/logistics/order-cases?locationId=${UUID}`, min: 'LOGISTICS', roles: LOGISTICS_READ },
+  { group: 'order-cases', method: 'POST', url: `/api/admin/logistics/order-cases/${UUID}/received`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'order-cases', method: 'POST', url: `/api/admin/orders/${UUID}/case`, body: INVALID, min: 'OPERATOR' },
+  { group: 'order-cases', method: 'GET', url: `/api/admin/order-cases/${UUID}`, min: 'AUDITOR' },
+  { group: 'order-cases', method: 'POST', url: `/api/admin/order-cases/${UUID}/decide`, body: INVALID, min: 'OPERATOR' },
+  { group: 'order-cases', method: 'POST', url: `/api/admin/order-cases/${UUID}/cancel`, body: INVALID, min: 'OPERATOR' },
   { group: 'logistics', method: 'GET', url: '/api/admin/locations', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/locations', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/locations/${UUID}`, body: INVALID, min: 'ADMIN' },
@@ -475,6 +484,7 @@ describe('admin role enforcement', () => {
       'receptions',
       'logistics-stock',
       'packing',
+      'order-cases',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
@@ -577,6 +587,9 @@ describe('admin role enforcement', () => {
       ['GET', '/api/admin/locations'],
       ['GET', '/api/admin/carriers'],
       ['GET', '/api/admin/orders/alerts'],
+      ['GET', `/api/admin/order-cases/${UUID}`],
+      ['POST', `/api/admin/order-cases/${UUID}/decide`, INVALID],
+      ['POST', `/api/admin/orders/${UUID}/case`, INVALID],
       ['GET', '/api/admin/atelier/stock'],
       ['GET', '/api/admin/supplier-orders'],
       ['GET', '/api/admin/supplier-orders/proposal'],
@@ -617,6 +630,9 @@ describe('admin role enforcement', () => {
         `POST /api/admin/logistics/orders/${UUID}/ship`,
         `POST /api/admin/logistics/orders/${UUID}/delivered`,
         `GET /api/admin/logistics/shipments/${UUID}/photo`,
+        `POST /api/admin/logistics/orders/${UUID}/order-case`,
+        'GET /api/admin/logistics/order-cases',
+        `POST /api/admin/logistics/order-cases/${UUID}/received`,
       ].sort(),
     );
     // Its own session: me (its role, never its locations' names), a TOTP enrolment started, sign-out.

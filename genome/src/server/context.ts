@@ -79,6 +79,7 @@ import { StockService } from './services/stock.js';
 import { SupplierOrderService } from './services/supplier-orders.js';
 import { deriveCardClaimKey, ReceptionService } from './services/receptions.js';
 import { LogisticsService } from './services/logistics.js';
+import { OrderCaseService } from './services/order-cases.js';
 import { purgePackingPhotos } from './services/parcels.js';
 import { SupplierService } from './services/suppliers.js';
 import { VerificationService } from './services/verification.js';
@@ -170,6 +171,8 @@ export interface AppServices {
   receptions: ReceptionService;
   /** Logistics (plan NEXT LOT §3.5.6.6): the stock as the agent and ORBES read it, corrections, transfers, minimums, pieces counted in. */
   logistics: LogisticsService;
+  /** Order cases (plan NEXT LOT §1.1 (b), §3.5.6.7): returns, size exchanges and parcel problems, opened, received, decided. */
+  orderCases: OrderCaseService;
   /** GROWTH (plan NEXT-NINE, BP-29): what a collector is worth, repeat buying, the funnel from a scan to PALLADIUM, the revenue; reads only. */
   growth: GrowthService;
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code for a piece not registered yet, shown once to staff or sealed for its buyer. */
@@ -298,6 +301,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });
+    const orderCases = new OrderCaseService({ db, audit, lifecycle, clock });
     const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
     const growth = new GrowthService({ db, clock });
     const claimRenewals = new ClaimRenewalService({ db, audit, certificates, revealKey: deriveClaimRevealKey(config), clock });
@@ -349,6 +353,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       supplierOrders,
       receptions,
       logistics,
+      orderCases,
       growth,
       claimRenewals,
       ...overrides.services,

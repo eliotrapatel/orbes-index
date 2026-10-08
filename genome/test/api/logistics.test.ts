@@ -16,6 +16,8 @@
  *    without an address, the photo's upload (an image body only: 415 otherwise; bytes that are no photo 422), the photo
  *    read no-store by the agent and AUDITOR+, never RETAIL; Ship refused from the agent with a declared value (403);
  *    the scan drawing from the `verify` rate group, as /api/v1/verify.
+ *  - the order cases (step 5.10): the agent reports a parcel problem and records it back; an AUDITOR reads the case
+ *    without its note; ORBES decides it, no-store; Client Services opens a return (201).
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -23,7 +25,7 @@ import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { jpegPhoto } from '../support/images.js';
 import { createAccount } from '../support/live.js';
-import { stockPieces } from '../support/fulfil.js';
+import { packAndShip, stockPieces } from '../support/fulfil.js';
 import { adminClient, createAdmin, createHarness, errorOf, safeJson, seedCatalog, type Client, type Harness } from './support.js';
 
 type Json = Record<string, any>;
@@ -239,6 +241,44 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       } finally {
         await limited.close();
       }
+    });
+  });
+  describe('the order cases (step 5.10)', () => {
+    it('lets the agent report a parcel back to sender and record it; an AUDITOR reads it without its note; an OPERATOR decides it, no-store; Client Services opens a return', async () => {
+      const catalog = await seedCatalog(h.ctx);
+      const sku = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, catalog.modelId, '58'));
+      const ops = { type: 'admin' as const, id: (await createAdmin(h.ctx, 'OPERATOR')).id };
+      const account = await createAccount(h.t.db);
+      const request = await h.t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: catalog.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+      await h.ctx.services.salon.close(request.id, { note: 'Accepted.', outcome: 'ACCEPTED' }, ops);
+      const id = (await h.t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+      await h.ctx.services.orders.setTerms(id, { sizeLabel: '58', priceMinor: 420_000, currency: 'EUR' }, ops);
+      await h.ctx.services.orders.changeLocation(id, logistics, ops);
+      h.clock.advance(60_000);
+      await h.ctx.services.orders.transition(id, { to: 'PAID' }, ops);
+      await stockPieces(h.ctx, { skuId: sku, locationId: logistics, count: 1, forOrderIds: [id] }, ops);
+      const colissimo = (await h.t.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
+      await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, ops);
+      const reported = await agent.post(`/api/admin/logistics/orders/${id}/order-case`, { kind: 'BACK_TO_SENDER', note: 'Address unknown.' });
+      expect(reported.statusCode).toBe(201);
+      const c = safeJson(reported) as Json;
+      expect((safeJson(await agent.get('/api/admin/logistics/order-cases')) as Json).items.map((i: Json) => [i.id, i.kind])).toEqual([[c.id, 'BACK_TO_SENDER']]);
+      expect(errorOf(await auditor.post(`/api/admin/logistics/order-cases/${c.id}/received`, { pieceState: 'OK' })).code).toBe('FORBIDDEN');
+      expect((safeJson(await agent.post(`/api/admin/logistics/order-cases/${c.id}/received`, { pieceState: 'OK' })) as Json).status).toBe('RECEIVED');
+      expect(errorOf(await agent.get(`/api/admin/order-cases/${c.id}`)).code).toBe('FORBIDDEN');
+      expect((safeJson(await auditor.get(`/api/admin/order-cases/${c.id}`)) as Json).note).toBeNull();
+      expect((safeJson(await operator.get(`/api/admin/order-cases/${c.id}`)) as Json).note).toBe('Address unknown.');
+      const decided = await operator.post(`/api/admin/order-cases/${c.id}/decide`, { decision: 'RESHIP' });
+      expect([decided.statusCode, decided.headers['cache-control']]).toEqual([200, 'no-store']);
+      expect((safeJson(decided) as Json).case.status).toBe('CLOSED');
+      // Packed and shipped again, delivered, then a return opened by Client Services.
+      await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A00000000002' }, ops);
+      await agent.post(`/api/admin/logistics/orders/${id}/delivered`);
+      expect(errorOf(await auditor.post(`/api/admin/orders/${id}/case`, { kind: 'RETURN', reason: 'SIZE', note: 'Too small.' })).code).toBe('FORBIDDEN');
+      const opened = await operator.post(`/api/admin/orders/${id}/case`, { kind: 'RETURN', reason: 'SIZE', note: 'Too small.' });
+      expect(opened.statusCode).toBe(201);
+      expect(safeJson(opened)).toMatchObject({ kind: 'RETURN', status: 'OPEN', reason: 'SIZE', note: 'Too small.' });
+      expect(errorOf(await operator.post(`/api/admin/orders/${id}/case`, { kind: 'EXCHANGE', reason: 'SIZE', note: 'No size named.' })).code).toBe('VALIDATION_FAILED');
     });
   });
 });

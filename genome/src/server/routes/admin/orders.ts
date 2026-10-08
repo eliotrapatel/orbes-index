@@ -20,6 +20,10 @@
  *   POST   /api/admin/orders/:id/credit         OPERATOR  APPLY CREDIT (plan NEXT-NINE, BP-19 T5): a tier's credit taken off
  *                                                         a RESERVED order's invoice, within its balance and the price
  *   DELETE /api/admin/orders/:id/credit         OPERATOR  REMOVE CREDIT: what was taken off it, given back
+ *   POST   /api/admin/orders/:id/case           OPERATOR  Open a return (plan NEXT LOT §3.5.4.4, step 5.10): a RETURN or a
+ *                                                         size EXCHANGE opened by Client Services, with its reason and
+ *                                                         note (201 the order case, services/order-cases.ts); kept
+ *                                                         beside /return until the console moves to it (step 5.11e)
  *   POST   /api/admin/orders/:id/return         OPERATOR  RETURNED (choice 20): back to stock at a location, with a
  *                                                         note; the claim code of the piece's new card when ORBES took
  *                                                         its buyer's ownership back (shown once, no-store)
@@ -38,6 +42,7 @@ import {
   orderBuyerBody,
   orderLocationBody,
   orderParams,
+  openOrderCaseBody,
   orderPieceBody,
   orderReturnBody,
   orderTermsBody,
@@ -50,6 +55,7 @@ import { adminActor, hasRole, requireAdmin } from '../../http/sessions.js';
 import type { OrderBoard, OrderBoardFilter, OrderDetail } from '../../services/fulfilment.js';
 import type { OrderTransitionInput, OrderView } from '../../services/orders.js';
 import type { AdminRouteDeps } from './index.js';
+import { orderCaseJson } from './order-cases.js';
 import { clientEmail, orderBuyer, readsClientEmails } from './serialize.js';
 
 const ADMIN = { guard: { minRole: 'ADMIN' as const } };
@@ -171,5 +177,13 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     // `claimCode` here is the new card's code (a string), never the order page's block of plan NEXT LOT §3.4, left out.
     const { claimCode: _block, ...page } = await detail(request, id);
     return { ...page, productId: r.productId, ...(r.claimCode ? { claimCode: r.claimCode } : {}) };
+  });
+
+  // Plan NEXT LOT §3.5.4.4 (step 5.10): Open a return, as an order case; ORBES decides it once the agent has the parcel.
+  app.post('/api/admin/orders/:id/case', async (request, reply) => {
+    const { id } = parse(orderParams, request.params);
+    const b = parse(openOrderCaseBody, request.body);
+    const c = await ctx.services.orderCases.open(id, { kind: b.kind, reason: b.reason, exchangeSkuId: b.exchangeSkuId ?? null, note: b.note }, adminActor(request));
+    return reply.code(201).send(orderCaseJson(request, c));
   });
 };
