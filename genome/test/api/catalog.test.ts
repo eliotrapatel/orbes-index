@@ -121,13 +121,13 @@ describe('the editable catalogue (A-10)', () => {
     const off = await operator.patch(`/api/admin/models/${catalog.modelId}`, { active: false });
     expect(off.statusCode, off.body).toBe(200);
     expect(await modelOf(catalog.modelId)).toMatchObject({ active: false, products: 1 });
-    const refused = await issueViaApi(operator);
+    const refused = await issueViaApi(admin);
     expect(refused.statusCode).toBe(409);
     expect(errorOf(refused)).toEqual({ code: 'MODEL_INACTIVE', message: 'This model is no longer offered for new products.' });
     expect((await verify(piece.code.data)).state).toMatch(/^AUTHENTIC/);
 
     expect((await operator.patch(`/api/admin/models/${catalog.modelId}`, { active: true })).statusCode).toBe(200);
-    expect((await issueViaApi(operator)).statusCode).toBe(201);
+    expect((await issueViaApi(admin)).statusCode).toBe(201);
     expect((await modelOf(catalog.modelId)).products).toBe(2);
   });
 
@@ -160,14 +160,14 @@ describe('the editable catalogue (A-10)', () => {
     expect(safeJson(off)).toMatchObject({ code: 'J', active: false, products: issuedInJ });
     // Asked again for the state it has: 200, nothing changes and nothing is audited.
     expect(safeJson(await admin.post('/api/admin/categories/J/active', { active: false }))).toMatchObject({ code: 'J', active: false });
-    expect(errorOf(await issueViaApi(operator)).code).toBe('CATEGORY_INACTIVE');
+    expect(errorOf(await issueViaApi(admin)).code).toBe('CATEGORY_INACTIVE');
     expect((await verify(piece.code.data)).state).toMatch(/^AUTHENTIC/);
     // The public list names the categories that accept new pieces; the console lists them all.
     expect((safeJson(await h.client().get('/api/v1/categories')) as { code: string }[]).map((c) => c.code)).not.toContain('J');
     expect((safeJson(await auditor.get('/api/admin/categories')) as { items: { code: string; active: boolean }[] }).items.find((c) => c.code === 'J')?.active).toBe(false);
 
     expect(safeJson(await admin.post('/api/admin/categories/J/active', { active: true }))).toMatchObject({ code: 'J', active: true });
-    expect((await issueViaApi(operator)).statusCode).toBe(201);
+    expect((await issueViaApi(admin)).statusCode).toBe(201);
     const actions = (await h.ctx.db.selectFrom('audit_logs').select('action').where('target_type', '=', 'category').where('target_id', '=', 'J').orderBy('id').execute()).map((r) => r.action);
     expect(actions.slice(-2)).toEqual(['category.deactivate', 'category.activate']);
 
@@ -205,7 +205,7 @@ describe('the editable catalogue (A-10)', () => {
     expect(after.state).toMatch(/^AUTHENTIC/);
     expect(after.product?.discontinuedYear).toBe(year);
     expect((await sheet()).discontinuedYear).toBe(year);
-    expect(errorOf(await issueViaApi(operator)).code).toBe('MODEL_INACTIVE');
+    expect(errorOf(await issueViaApi(admin)).code).toBe('MODEL_INACTIVE');
     // Only Reinstate offers it again: an edit to active is refused; any other edit goes through.
     const reactivated = await operator.patch(`/api/admin/models/${catalog.modelId}`, { active: true });
     expect([reactivated.statusCode, errorOf(reactivated).code]).toEqual([409, 'MODEL_DISCONTINUED']);
@@ -219,7 +219,7 @@ describe('the editable catalogue (A-10)', () => {
     expect((await h.ctx.db.selectFrom('models').select('discontinued_by').where('id', '=', catalog.modelId).executeTakeFirstOrThrow()).discontinued_by).toBeNull();
     expect((await verify(piece.code.data)).product).not.toHaveProperty('discontinuedYear');
     expect((await sheet()).discontinuedYear).toBeNull();
-    expect((await issueViaApi(operator)).statusCode).toBe(201);
+    expect((await issueViaApi(admin)).statusCode).toBe(201);
     expect(errorOf(await admin.post(url('reinstate'))).code).toBe('MODEL_NOT_DISCONTINUED');
 
     // Audited, each with the admin and what it touched.

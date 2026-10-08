@@ -6,8 +6,9 @@
  * and service records, ownership confirmation. A piece's photograph has its
  * own routes (media.ts: an image body, not JSON).
  *
- * Roles: reads AUDITOR; mutations OPERATOR; revoking (a transition to
- * REVOKED) and reinstating ADMIN. The services own the business rules and
+ * Roles: reads AUDITOR; mutations OPERATOR; issuing (the generator, ADMIN
+ * only since plan NEXT LOT step 5.13), revoking (a transition to REVOKED) and
+ * reinstating ADMIN. The services own the business rules and
  * audit every change with the admin actor (id + hashed IP).
  *
  * The detail view re-verifies every stored code live (payload fields, hash,
@@ -229,7 +230,9 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
 
   // ── Issue ────────────────────────────────────────────────────────────────
 
-  app.post('/api/admin/products', async (request, reply) => {
+  // The Generator is ADMIN's (plan NEXT LOT §3.5.4.5, step 5.13): one-offs (samples, press pieces, replacements); the
+  // stock's pieces come from the receptions (routes/admin/logistics.ts), never from here.
+  app.post('/api/admin/products', { config: { guard: { minRole: 'ADMIN' } } }, async (request, reply) => {
     // The service validates the body with its own strict schema (unknown fields → 400).
     const r = await issuance.issueProduct((request.body ?? {}) as IssueProductInput, adminActor(request));
     reply.code(201);
@@ -244,7 +247,7 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
 
   // A batch: up to 50 pieces sharing a template, one result per piece. 200 even when pieces failed (read each
   // result): pieces already signed are never undone, so their one-time claim codes must reach the operator.
-  app.post('/api/admin/products/batch', { config: { guard: { minRole: 'OPERATOR' } } }, async (request) => {
+  app.post('/api/admin/products/batch', { config: { guard: { minRole: 'ADMIN' } } }, async (request) => {
     const { template, items } = parse(issueBatchBody, request.body);
     const r = await issuance.issueBatch(template, items, adminActor(request));
     return { issued: r.issued, failed: r.failed, skipped: r.skipped, items: r.lines.map(issueBatchLineJson) };

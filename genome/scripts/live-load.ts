@@ -18,8 +18,8 @@
  *      LIVE RELEASE+): taken part in a release AND a member of the segment (both read at each check: the stream, I'LL
  *      BE THERE, ENTER, SECURE), a surprise in every box, the question after, and an after-room of 25 pieces opening a
  *      minute after the sell-out for five minutes; and its stock at its location (STOCKED: one size wholly in stock,
- *      one in part, one with none), so that PAY reserves a piece in stock under the SKU's lock, or makes a piece to
- *      make that reserves an ORBES identity;
+ *      one in part, one with none), so that PAY reserves a piece in stock under the SKU's lock, or the order waits
+ *      for supplier stock (AWAITING, plan NEXT LOT §3.5: no piece to make, no identity reserved);
  *   2. N concurrent streams (GET /api/v1/live/:id/stream, one per account), plus the console's stream and a boutique
  *      board's (the owner watches, a boutique shows the door), opened over the seconds after the announcement; half of
  *      the accounts say I'LL BE THERE over those seconds;
@@ -49,7 +49,7 @@
  *   CPU              the app's busiest five seconds                                            < one core
  *   and none of: an answer other than 200, a stream refused or dropped before the end, an error in the app's log, a
  *   room that did not sell out, or orders other than the pieces confirmed (one per piece, those of STOCKED held in
- *   stock and every other one a piece to make with its reserved identity).
+ *   stock and every other one waiting for supplier stock, AWAITING).
  *
  * The VPS's CPU on this machine: a VPS vCPU is taken as --vps-factor times slower than the core the app runs on here
  * (DEFAULT_VPS_FACTOR), and what runs on the app's thread is multiplied by it before it is held against its target: the
@@ -137,9 +137,9 @@ const ADDONS = [
   { label: 'GIFT BOX', priceMinor: 5_000 },
 ];
 /**
- * The pieces made in advance at the release's location, by size (plan LIVE RELEASE+, choice 8): PAY holds one of them
- * under its SKU's lock; the other pieces are made to order, each piece to make reserving an ORBES identity (choice 15).
- * One size wholly in stock, one in part, one with none: 13 pieces held in stock, 12 to make.
+ * The pieces in stock in advance at the release's location, by size (plan LIVE RELEASE+, choice 8): PAY holds one of them
+ * under its SKU's lock; the other orders wait for supplier stock (AWAITING, plan NEXT LOT §3.5). One size wholly in
+ * stock, one in part, one with none: 13 pieces held in stock, 12 waiting.
  */
 const STOCKED: Readonly<Record<string, number>> = Object.freeze({ '52': 9, '54': 4 });
 /** The after-room (plan LIVE RELEASE+, choice 2): a model of its own, 25 pieces in three sizes, an add-on, none in stock. */
@@ -887,7 +887,7 @@ interface LevelResult {
     late: number;
     outcome: RoomOutcome;
   };
-  /** What the rooms left in the database: the orders, the pieces to make, the after-room's guests, the journal. */
+  /** What the rooms left in the database: the orders (held in stock or waiting), the after-room's guests, the journal. */
   facts: ReleaseFacts;
   appErrors: number;
   messageErrors: number;

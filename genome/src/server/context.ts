@@ -58,7 +58,6 @@ import { deriveTransferCodeKey, OwnershipService } from './services/ownership.js
 import { OwnershipCertificateService } from './services/ownership-certificates.js';
 import { OrderService } from './services/orders.js';
 import { InvoiceService } from './services/invoices.js';
-import { AtelierService } from './services/atelier.js';
 import { FulfilmentService } from './services/fulfilment.js';
 import { GrowthService } from './services/growth.js';
 import { OwnerService } from './services/owners.js';
@@ -141,8 +140,6 @@ export interface AppServices {
   invoices: InvoiceService;
   /** The fulfilment board (plan LIVE RELEASE+): the orders by step, their time in it and the late ones (M3), the CSV, the delays. */
   fulfilment: FulfilmentService;
-  /** The atelier (plan LIVE RELEASE+): the stock and its thresholds, the pieces to make, their work sheets, the pieces issued. */
-  atelier: AtelierService;
   /** The segments (plan LIVE RELEASE+, choice 27): saved groups of collectors, their members read live, their CSV. */
   segments: SegmentService;
   /** The question after a LIVE RELEASE (plan LIVE RELEASE+, choice 11): who is asked it, their answers, the console's count. */
@@ -289,7 +286,6 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const orders = new OrderService({ db, audit, lifecycle, clock, log });
     const invoices = new InvoiceService({ db, clock });
     const fulfilment = new FulfilmentService({ db, audit, orders, clock });
-    const atelier = new AtelierService({ db, audit, issuance, orders, clock });
     const segments = new SegmentService({ db, audit, clock });
     const shopify = new ShopifyExportService({ db, audit, publicOrigin: config.publicOrigin, clock });
     const messages = new MessageService({ db, audit, lookbook, clock });
@@ -338,7 +334,6 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       orders,
       invoices,
       fulfilment,
-      atelier,
       segments,
       questions,
       activity,

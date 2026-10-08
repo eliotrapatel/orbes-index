@@ -1,12 +1,13 @@
 /**
- * The console's routes of the orders, the atelier and their settings (plan LIVE RELEASE+, step S2), over HTTP with real
+ * The console's routes of the orders, the stock and their settings (plan LIVE RELEASE+, step S2), over HTTP with real
  * sessions (OPERATOR, AUDITOR, ADMIN):
  *
  *  - the board and an order's page, the buyer's name and address masked for an AUDITOR as the emails are; the steps
- *    with what each requires; the terms of a salon's order, the buyer, the location, a piece picked from the stock;
+ *    with what each requires; the terms of a salon's order, the buyer, the location; its piece bound by the packing
+ *    scan, its parcel shipped through Logistics (the SHIPPED gate, plan NEXT LOT step 5.12);
  *  - the delays of the alerts (ADMIN), the locations and the carriers (ADMIN), their validation, audited;
- *  - the atelier: the stock, a minimum and its suggestion confirmed, the pieces to make started and finished (the claim
- *    code once, no-store), the work sheets with each code's data (OPERATOR only, no-store), the CSV of what to make.
+ *  - the stock through Logistics' routes since the atelier went (plan NEXT LOT step 5.13): a minimum, a count corrected,
+ *    a transfer; the atelier's routes and Link a piece answer 404.
  * Which role reaches which route is test/api/admin-roles.test.ts.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -20,7 +21,7 @@ import { packParcel, scanIntoParcel, stockPieces } from '../support/fulfil.js';
 type Json = Record<string, any>;
 const MINUTE = 60_000;
 
-describe('orders, the atelier and their settings: the console\'s routes', () => {
+describe('orders, the stock and their settings: the console\'s routes', () => {
   let h: Harness;
   let f: LiveFixture;
   let op: Client;
@@ -102,7 +103,7 @@ describe('orders, the atelier and their settings: the console\'s routes', () => 
     // No piece to make is created for it (plan NEXT LOT §3.5): a piece counted in where it waits serves it
     // (test/support/fulfil.ts stockPieces), the packing scan binds it; it ships only through its parcel's Ship, once
     // packed (the SHIPPED gate, step 5.12), with its carrier, tracking link and declared value.
-    expect((safeJson(await auditor.get(`/api/admin/atelier/bench?origin=SALON`)) as Json).groups.flatMap((g: Json) => g.items).find((b: Json) => b.order?.id === id)).toBeUndefined();
+    expect(await h.ctx.db.selectFrom('bench_items').select('id').where('order_id', '=', id).execute()).toEqual([]);
     const [piece] = await stockPieces(h.ctx, { skuId: (safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json).order.skuId, locationId: logistics, count: 1, productionBatch: 'B-2026-11-SALON', material: '925 STERLING SILVER', forOrderIds: [id] }, f.admin);
     expect((safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json).order).toMatchObject({ reservation: 'STOCK', productId: null });
     await scanIntoParcel(h.ctx, id, {}, f.admin);
@@ -123,23 +124,27 @@ describe('orders, the atelier and their settings: the console\'s routes', () => 
     expect(delivered.timing).toMatchObject({ rule: 'UNREGISTERED', late: false });
   });
 
-  it('links a piece picked from the stock to an order holding one, which ships only then', async () => {
+  it('binds a piece of the stock to an order by the packing scan, which ships only once packed; Link a piece is gone', async () => {
     const sku = await inTransaction(h.ctx.db, (tx) => ensureSku(tx, f.modelId, '56'));
     const piece = await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '56', material: '925 STERLING SILVER' }, f.admin);
-    expect((await op.post('/api/admin/atelier/stock/adjust', { skuId: sku, locationId: france, delta: 1, note: 'Counted.' })).statusCode).toBe(200);
+    // Counted in through Logistics (a piece on the shelf, then the count corrected up by ORBES, applied at once).
+    expect((await op.post('/api/admin/logistics/count-in', { skuId: sku, productIds: [piece.product.productId], note: 'On the shelf.' })).statusCode).toBe(200);
+    expect((await op.post('/api/admin/logistics/corrections', { skuId: sku, locationId: france, delta: 1, reason: 'Counted.' })).statusCode).toBe(201);
     const id = await salonOrder();
     await op.patch(`/api/admin/orders/${id}/terms`, { sizeLabel: '56', priceMinor: 480_000, currency: 'EUR' });
     expect((safeJson(await op.post(`/api/admin/orders/${id}/transition`, { to: 'PAID' })) as Json).order).toMatchObject({ status: 'PAID', reservation: 'STOCK', productId: null });
-    // In stock, its piece not linked yet: it does not ship.
+    // In stock, its piece not bound yet: it does not ship.
     const carrier = ((safeJson(await auditor.get('/api/admin/carriers')) as { items: Json[] }).items.find((c) => c.name === 'Colissimo'))!;
     const ship = { to: 'SHIPPED', carrierId: carrier.id, trackingNumber: '6A12345678902' };
     const unlinked = await op.post(`/api/admin/orders/${id}/transition`, ship);
     expect([unlinked.statusCode, errorOf(unlinked).code]).toEqual([409, 'ORDER_PIECE_NOT_LINKED']);
-    expect(errorOf(await op.post(`/api/admin/orders/${id}/piece`, { productId: 'nope' })).code).toBe('VALIDATION_FAILED');
-    const linked = safeJson(await op.post(`/api/admin/orders/${id}/piece`, { productId: piece.product.productId })) as Json;
-    expect(linked.order).toMatchObject({ reservation: 'STOCK', productId: piece.product.productId });
-    expect(linked.order.events.at(-1)).toMatchObject({ action: 'order.link' });
-    // Linked, not packed: the SHIPPED gate (step 5.12); packed through the agent's steps, its parcel's Ship sends it.
+    // Link a piece is gone with the atelier (plan NEXT LOT step 5.13): the packing scan binds the piece.
+    expect((await op.post(`/api/admin/orders/${id}/piece`, { productId: piece.product.productId })).statusCode).toBe(404);
+    await scanIntoParcel(h.ctx, id, {}, f.admin);
+    const bound = safeJson(await op.get(`/api/admin/orders/${id}`)) as Json;
+    expect(bound.order).toMatchObject({ reservation: 'STOCK', productId: piece.product.productId });
+    expect(bound.order.events.map((e: Json) => e.action)).toContain('order.link');
+    // Bound, not packed: the SHIPPED gate (step 5.12); packed through the agent's steps, its parcel's Ship sends it.
     expect(errorOf(await op.post(`/api/admin/orders/${id}/transition`, ship)).code).toBe('ORDER_NOT_PACKED');
     await packParcel(h.ctx, id, {}, f.admin);
     await op.post(`/api/admin/logistics/orders/${id}/ship`, { carrierId: carrier.id, trackingNumber: '6A12345678902' });
@@ -185,47 +190,35 @@ describe('orders, the atelier and their settings: the console\'s routes', () => 
     expect((await h.ctx.db.selectFrom('audit_logs').select('action').where('target_id', '=', fedex.id).orderBy('id').execute()).map((a) => a.action)).toEqual(['carrier.create', 'carrier.update', 'carrier.update']);
   });
 
-  it('reads the stock, sets a minimum, confirms its suggestion; prints the work sheets (OPERATOR, each code\'s data, no-store); the CSV of what to make', async () => {
+  it('reads the stock, sets a minimum, corrects a count and transfers pieces through Logistics; the atelier\'s routes answer 404 (plan NEXT LOT step 5.13)', async () => {
     const sku = await inTransaction(h.ctx.db, (tx) => ensureSku(tx, f.modelId, '58'));
-    expect((await op.request('PUT', '/api/admin/atelier/thresholds', { body: { skuId: sku, locationId: logistics, minimum: 2 } })).statusCode).toBe(204);
-    const stock = safeJson(await auditor.get(`/api/admin/atelier/stock?locationId=${logistics}`)) as Json;
-    expect(stock.rows.find((r: Json) => r.sku.id === sku)).toMatchObject({ onHand: 0, reserved: 0, available: 0, toMake: 0, minimum: 2, suggestion: 2 });
-    const made = await op.post('/api/admin/atelier/make', { skuId: sku, locationId: logistics, quantity: 2 });
-    expect(made.statusCode).toBe(201);
-    const items = (safeJson(made) as { items: Json[] }).items;
-    expect(items.map((b) => [b.status, b.origin, b.piece.status])).toEqual([
-      ['TO_MAKE', { kind: 'STOCK' }, 'RESERVED'],
-      ['TO_MAKE', { kind: 'STOCK' }, 'RESERVED'],
-    ]);
-    expect((safeJson(await auditor.get(`/api/admin/atelier/stock?locationId=${logistics}`)) as Json).rows.find((r: Json) => r.sku.id === sku)).toMatchObject({ toMake: 2, suggestion: 0 });
-    // A count corrected at FRANCE, then two pieces moved to LOGISTICS (two movements, paired).
-    expect(errorOf(await op.post('/api/admin/atelier/stock/adjust', { skuId: sku, locationId: france, delta: 3 })).code).toBe('VALIDATION_FAILED');
-    expect(safeJson(await op.post('/api/admin/atelier/stock/adjust', { skuId: sku, locationId: france, delta: 3, note: 'Counted.' }))).toEqual({ onHand: 3, reserved: 0, available: 3 });
-    const moved = safeJson(await op.post('/api/admin/atelier/stock/transfer', { skuId: sku, fromLocationId: france, toLocationId: logistics, quantity: 2, note: '' })) as Json;
+    expect((await op.request('PUT', '/api/admin/logistics/minimums', { body: { skuId: sku, locationId: logistics, minimum: 2 } })).statusCode).toBe(204);
+    const stock = safeJson(await auditor.get(`/api/admin/logistics/stock?locationId=${logistics}`)) as Json;
+    expect(stock.rows.find((r: Json) => r.sku.id === sku)).toMatchObject({ onHand: 0, reserved: 0, available: 0, waiting: 0, minimum: 2, toOrder: 2 });
+    // Two pieces counted in at FRANCE (ORBES's correction applied at once), then one moved to LOGISTICS (two movements, paired).
+    const pieces = [];
+    for (let i = 0; i < 2; i++) pieces.push((await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '58', material: '925 STERLING SILVER' }, f.admin)).product.productId);
+    expect((await op.post('/api/admin/logistics/count-in', { skuId: sku, productIds: pieces, note: 'On the shelf.' })).statusCode).toBe(200);
+    expect(errorOf(await op.post('/api/admin/logistics/corrections', { skuId: sku, locationId: france, delta: 3, reason: 'Counted.' })).code).toBe('STOCK_NOT_BACKED');
+    expect((await op.post('/api/admin/logistics/corrections', { skuId: sku, locationId: france, delta: 2, reason: 'Counted.' })).statusCode).toBe(201);
+    const moved = safeJson(await op.post('/api/admin/logistics/transfers', { skuId: sku, fromLocationId: france, toLocationId: logistics, quantity: 1, note: '' })) as Json;
     expect([moved.from, moved.to]).toEqual([
       { onHand: 1, reserved: 0, available: 1 },
-      { onHand: 2, reserved: 0, available: 2 },
+      { onHand: 1, reserved: 0, available: 1 },
     ]);
-    expect(errorOf(await op.post('/api/admin/atelier/stock/transfer', { skuId: sku, fromLocationId: france, toLocationId: logistics, quantity: 2 })).code).toBe('STOCK_NOT_AVAILABLE');
-
-    expect((await auditor.post('/api/admin/atelier/sheets', { origin: 'STOCK', skuId: sku })).statusCode).toBe(403);
-    const sheets = await op.post('/api/admin/atelier/sheets', { origin: 'STOCK', skuId: sku });
-    expect(sheets.headers['cache-control']).toBe('no-store');
-    const body = safeJson(sheets) as { printedAt: string; sheets: Json[] };
-    expect(body.sheets.map((s) => s.reference)).toEqual(items.map((b) => b.piece.reference));
-    expect(body.sheets[0]).toMatchObject({ sizeLabel: '58', location: 'LOGISTICS WAREHOUSE', order: null, code: { data: expect.stringMatching(/^[A-Za-z0-9_-]+$/), glyphs: expect.any(Array) } });
-    expect(errorOf(await op.post('/api/admin/atelier/sheets', { benchItemIds: [items[0]!.id], origin: 'STOCK' })).code).toBe('VALIDATION_FAILED');
-    // The bench never reads the data: the code is drawn only on a sheet.
-    expect(JSON.stringify(safeJson(await op.get('/api/admin/atelier/bench?origin=STOCK')))).not.toContain(body.sheets[0]!.code.data);
-
-    expect((safeJson(await op.post(`/api/admin/atelier/bench/${items[1]!.id}/cancel`, {})) as Json).status).toBe('CANCELLED');
-    const csv = await auditor.get(`/api/admin/atelier/bench.csv?origin=STOCK&skuId=${sku}`);
-    expect(csv.headers['content-type']).toBe('text/csv; charset=utf-8; header=present');
-    expect(csv.headers['content-disposition']).toMatch(/^attachment; filename="ORBES-atelier-\d{4}-\d{2}-\d{2}\.csv"$/);
-    const lines = csv.body.trimEnd().split('\r\n');
-    expect(lines).toHaveLength(2);
-    expect(lines[1]).toContain(`"FOR STOCK","MONOLITHE","58"`);
-    expect(lines[1]).toContain(`"${items[0]!.piece.reference}","TO_MAKE"`);
+    expect(errorOf(await op.post('/api/admin/logistics/transfers', { skuId: sku, fromLocationId: france, toLocationId: logistics, quantity: 2 })).code).toBe('STOCK_NOT_AVAILABLE');
+    expect((safeJson(await auditor.get(`/api/admin/logistics/stock?locationId=${logistics}`)) as Json).rows.find((r: Json) => r.sku.id === sku)).toMatchObject({ onHand: 1, minimum: 2, toOrder: 1 });
+    // The atelier's routes are gone: no stock of its own, no pieces to make, no work sheets.
+    for (const [method, url] of [
+      ['GET', `/api/admin/atelier/stock?locationId=${logistics}`],
+      ['PUT', '/api/admin/atelier/thresholds'],
+      ['POST', '/api/admin/atelier/make'],
+      ['GET', '/api/admin/atelier/bench?origin=STOCK'],
+      ['GET', '/api/admin/atelier/bench.csv'],
+      ['POST', '/api/admin/atelier/sheets'],
+    ] as const) {
+      expect((await op.request(method, url, method === 'GET' ? {} : { body: { skuId: sku } })).statusCode, url).toBe(404);
+    }
     h.clock.advance(MINUTE);
   });
 });

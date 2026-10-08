@@ -2743,123 +2743,14 @@ export interface Carrier {
   active: boolean;
 }
 
-// ── The atelier (routes/admin/atelier.ts) ─────────────────────────────────
+// ── LOGISTICS (plan NEXT LOT §3.5.3 and §3.5.4.1; routes/admin/logistics.ts) ─
 
-/** What the list of pieces to make shows. */
-export const BENCH_VIEWS = ['OPEN', 'DONE', 'CANCELLED', 'ALL'] as const;
-export type BenchView = (typeof BENCH_VIEWS)[number];
-
-export interface SkuRef {
-  id: string;
-  code: string;
-  model: { id: string; name: string };
-  sizeLabel: string | null;
-  /** Set aside in the Catalogue (plan NEXT LOT §3.3): no longer offered; listed in the stock only where something remains. */
-  setAside: boolean;
-}
-
+/** A SKU's level at a location (a transfer's answer, POST /api/admin/logistics/transfers). */
 export interface StockLevel {
   onHand: number;
   reserved: number;
   available: number;
 }
-
-export interface AtelierStockRow extends StockLevel {
-  sku: SkuRef;
-  location: { id: string; name: string };
-  toMake: number;
-  minimum: number | null;
-  suggestion: number;
-}
-
-export interface AtelierStock {
-  rows: AtelierStockRow[];
-  skus: SkuRef[];
-  locations: { id: string; name: string; isDefault: boolean }[];
-}
-
-/** Whom pieces to make are for. */
-export type BenchOrigin = { kind: 'RELEASE'; release: { id: string; title: string } } | { kind: 'SALON' } | { kind: 'STOCK' };
-
-export interface BenchItem {
-  id: string;
-  status: BenchItemStatus;
-  createdAt: Iso;
-  startedAt: Iso | null;
-  doneAt: Iso | null;
-  cancelledAt: Iso | null;
-  piece: { id: string; reference: string; status: ProductStatus; material: string; signed: boolean };
-  order: { id: string; reference: string; status: OrderStatus; channel: OrderChannel } | null;
-  origin: BenchOrigin;
-  sku: SkuRef;
-  location: { id: string; name: string };
-  engravingText: string | null;
-  surprise: string | null;
-  addons: string[];
-}
-
-export interface BenchGroup {
-  origin: BenchOrigin;
-  sku: SkuRef;
-  counts: Record<BenchItemStatus, number>;
-  items: BenchItem[];
-}
-
-export interface BenchList {
-  groups: BenchGroup[];
-  total: number;
-  releases: { id: string; title: string }[];
-}
-
-/** The list's filters (its query). */
-export interface BenchFilters {
-  view?: BenchView;
-  /** A release's id, SALON or STOCK. */
-  origin?: string;
-  skuId?: string;
-  locationId?: string;
-}
-
-/** A work sheet (POST /api/admin/atelier/sheets, OPERATOR): its code's data to draw at print size. */
-export interface WorkSheet {
-  benchItemId: string;
-  status: BenchItemStatus;
-  reference: string;
-  code: { codeId: string; data: string; glyphs: number[] };
-  model: string;
-  sizeLabel: string | null;
-  skuCode: string;
-  addons: string[];
-  engravingText: string | null;
-  surprise: string | null;
-  release: string | null;
-  order: { reference: string; channel: OrderChannel } | null;
-  location: string;
-  createdAt: Iso;
-}
-
-export interface WorkSheets {
-  printedAt: Iso;
-  sheets: WorkSheet[];
-}
-
-/** POST /api/admin/atelier/bench/:id/done: what the atelier says of the finished piece. */
-export interface IssueBenchInput {
-  material?: string;
-  productionBatch?: string;
-  productionDate?: string;
-  withClaimSecret: boolean;
-}
-
-export interface IssuedBenchItem {
-  item: BenchItem;
-  productId: string;
-  codeId: string;
-  /** Shown once. */
-  claimCode?: string;
-}
-
-// ── LOGISTICS (plan NEXT LOT §3.5.3 and §3.5.4.1; routes/admin/logistics.ts) ─
 
 /** A size as Logistics and the supplier orders name it: its model, the model's variant, its size and its SKU code. */
 export interface LogisticsSku {

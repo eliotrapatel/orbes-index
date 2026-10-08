@@ -46,8 +46,8 @@
  *                change; the identities (`product.issue`, `product.transition`), the stock (`stock.move`) and the
  *                invoices (`invoice.issue`, `invoice.credit`) journal their own changes; a return that takes an
  *                ownership back is audited `ownership.reclaim` too.
- *   the piece    the one that fulfils the order, linked when one is picked from stock (`attachPiece`, `order.link`):
- *                the order then holds it in stock until it is shipped.
+ *   the piece    the one that fulfils the order, bound by the agent's packing scan of its card (`attachPiece` via
+ *                `scan`, `order.link`, services/logistics.ts): the order then holds it in stock until it is shipped.
  *   the buyer    name and address, entered by Client Services (decision 31; no form for collectors): kept on the order
  *                only, never in the audit log, the order's events nor the journal (which say they were entered, never
  *                what they are), and exported to the account under the right of access (`accountOrders`); the
@@ -1420,13 +1420,13 @@ async function cancelParcelProblem(tx: Db, o: OrderRow, now: Date, notes: AuditR
 }
 
 /**
- * Link the piece that fulfils an order (Interconnection: the atelier issues it, or picks one from stock), in the
- * caller's transaction, the order's row and its SKU locked, the piece issued: the order RESERVED or PAID now holds
- * that piece in stock at its location (`reservation` STOCK, `product_id`); `via` says how (`bench`: its piece to make
- * finished, `stock`: a piece picked from the stock, `scan`: the packing scan of its card, plan NEXT LOT §3.5.6.8). One event, one journal entry and the audit entry returned for the
- * caller to write last (`order.link`).
+ * Bind the piece that fulfils an order, in the caller's transaction, the order's row and its SKU locked, the piece
+ * issued: the order RESERVED or PAID now holds that piece in stock at its location (`reservation` STOCK, `product_id`).
+ * Its one way since the atelier went (plan NEXT LOT step 5.13): the packing scan of its card (`via` `scan`, §3.5.6.8;
+ * the vias `bench` and `stock` of the atelier and of Link a piece are gone, their past entries kept). One event, one
+ * journal entry and the audit entry returned for the caller to write last (`order.link`).
  */
-export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via: 'bench' | 'stock' | 'scan', actor: Actor, now: Date): Promise<{ order: OrderRow; note: AuditRecordInput }> {
+export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via: 'scan', actor: Actor, now: Date): Promise<{ order: OrderRow; note: AuditRecordInput }> {
   if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
   if (o.product_id !== null) throw pieceLinked();
   const after = await updateOrder(tx, o.id, { product_id: productUuid, reservation: 'STOCK' });

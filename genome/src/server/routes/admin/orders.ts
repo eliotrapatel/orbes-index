@@ -1,7 +1,8 @@
 /**
  * The orders in the console (plan LIVE RELEASE+ of 2026-10-04, The console → Orders, Clients): the fulfilment board
- * (services/fulfilment.ts), an order's page and its steps (services/orders.ts), a piece picked from the stock
- * (services/atelier.ts). It replaces the LIVE plan's Client Services list.
+ * (services/fulfilment.ts), an order's page and its steps (services/orders.ts). It replaces the LIVE plan's Client
+ * Services list. An order's piece is bound by the agent's packing scan (routes/admin/logistics.ts): Link a piece,
+ * `POST /api/admin/orders/:id/piece`, is removed with the atelier (plan NEXT LOT step 5.13).
  *
  *   GET    /api/admin/orders                    AUDITOR   the board by step (?channel=&dropId=&locationId=&late=&q=)
  *   GET    /api/admin/orders.csv                AUDITOR   every order the same filters keep, as a CSV
@@ -20,7 +21,6 @@
  *   POST   /api/admin/orders/:id/location       OPERATOR  served from another location (what it holds moves)
  *   PATCH  /api/admin/orders/:id/terms          OPERATOR  a draw's or a salon's size, price and currency; any engraving
  *   PUT    /api/admin/orders/:id/buyer          OPERATOR  the buyer's name and address (decision 31)
- *   POST   /api/admin/orders/:id/piece          OPERATOR  the piece that fulfils it, picked from the stock
  *   POST   /api/admin/orders/:id/credit         OPERATOR  APPLY CREDIT (plan NEXT-NINE, BP-19 T5): a tier's credit taken off
  *                                                         a RESERVED order's invoice, within its balance and the price
  *   DELETE /api/admin/orders/:id/credit         OPERATOR  REMOVE CREDIT: what was taken off it, given back
@@ -44,7 +44,6 @@ import {
   orderLocationBody,
   orderParams,
   openOrderCaseBody,
-  orderPieceBody,
   orderTermsBody,
   orderCreditBody,
   orderTransitionBody,
@@ -85,7 +84,7 @@ function boardFilter(query: unknown): OrderBoardFilter {
 }
 
 export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { orders, fulfilment, atelier, clubProgram } = ctx.services;
+  const { orders, fulfilment, clubProgram } = ctx.services;
   const detail = async (request: FastifyRequest, id: string) => {
     const inClear = readsClientEmails(request);
     const d = orderDetailJson(await fulfilment.detail(id), inClear);
@@ -156,13 +155,6 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const { id } = parse(orderParams, request.params);
     const b = parse(orderBuyerBody, request.body);
     await orders.setBuyer(id, { name: b.name, address: b.address }, adminActor(request));
-    return detail(request, id);
-  });
-
-  app.post('/api/admin/orders/:id/piece', async (request) => {
-    const { id } = parse(orderParams, request.params);
-    const { productId } = parse(orderPieceBody, request.body);
-    await atelier.linkFromStock(id, productId, adminActor(request));
     return detail(request, id);
   });
 

@@ -3,7 +3,7 @@
  * live-insights.ts), with known figures:
  *
  *  - the feasibility check (K5): per size, the pieces on sale against the pieces available at the release's location
- *    (on hand less what orders hold) and the pieces being made for the stock there; the after-room's sizes from what
+ *    (on hand less what orders hold; no piece is made for the stock any more, plan NEXT LOT §3.5); the after-room's sizes from what
  *    the release's leave; a warning per size, never a refusal; recorded with the publication;
  *  - the release's location: the default one until the console names another, checked, audited;
  *  - the size mix (L1): the sizes in stock at the location first, then the planner's demand where it exceeds the stock;
@@ -171,8 +171,6 @@ describe('the release and the stock', () => {
     await receive(k54, france, 1);
     await receive(k52, logistics, 10);
     await receive(k54, logistics, 3);
-    // Two pieces of 54 being made for the stock at FRANCE WAREHOUSE (not on hand: never in the mix, nor in the check).
-    await ctx.services.atelier.makeForStock({ skuId: k54, locationId: france, quantity: 2 }, f.admin);
 
     // The size mix: no past release, the planner has no basis; the stock at each location as it is.
     const mix = await ctx.services.liveInsights.sizeMix(f.modelId, null);

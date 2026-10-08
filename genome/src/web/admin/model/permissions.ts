@@ -33,7 +33,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   verifyAudit: 'AUDITOR',
   /** Customers' emails in clear (the server masks them for an AUDITOR: j***@example.com). */
   readClientEmails: 'OPERATOR',
-  issue: 'OPERATOR',
+  /** The Generator (plan NEXT LOT §3.5.4.5, step 5.13): ADMIN only, for one-offs; its pieces never enter Logistics' stock. */
+  issue: 'ADMIN',
   transition: 'OPERATOR',
   reissueCode: 'OPERATOR',
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): a lost card's code replaced for a piece not registered yet ("OPERATOR too"). */

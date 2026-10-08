@@ -523,7 +523,9 @@ describe('permissions', () => {
     expect(can('AUDITOR', 'read')).toBe(true);
     expect(can('AUDITOR', 'issue')).toBe(false);
     expect(can('AUDITOR', 'download')).toBe(false);
-    expect(can('OPERATOR', 'issue')).toBe(true);
+    // The Generator is ADMIN's (plan NEXT LOT §3.5.4.5, step 5.13).
+    expect(can('OPERATOR', 'issue')).toBe(false);
+    expect(can('ADMIN', 'issue')).toBe(true);
     expect(can('OPERATOR', 'download')).toBe(true);
     expect(can('OPERATOR', 'manageKeys')).toBe(false);
     expect(can('OPERATOR', 'revokeProduct')).toBe(false);

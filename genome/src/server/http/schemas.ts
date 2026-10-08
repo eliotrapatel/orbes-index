@@ -49,7 +49,6 @@ import {
   SUPPLIER_RETURN_SETTLEMENTS,
   VERIFICATION_STATES,
 } from '../db/schema.js';
-import { ATELIER_MAKE_MAX, BENCH_VIEWS, ISSUE_TEXT_LIMITS, THRESHOLD_MAX, WORK_SHEETS_MAX } from '../services/atelier.js';
 import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_LABEL_MAX } from '../services/catalog.js';
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
@@ -1436,9 +1435,6 @@ export const orderBuyerBody = body({
   address: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.buyerAddress).nullable()),
 });
 
-/** POST /api/admin/orders/:id/piece: the piece picked from the stock to fulfil the order, by its reference. */
-export const orderPieceBody = body({ productId: productRef });
-
 // ── Admin: the invoices (plan LIVE RELEASE+, M7: routes/admin/invoices.ts) ─
 
 /** A month, `YYYY-MM` (UTC). */
@@ -1832,51 +1828,13 @@ export const decideOrderCaseBody = body({
 /** POST /api/admin/order-cases/:id/cancel: why it ends with no decision. */
 export const cancelOrderCaseBody = body({ note: text(ORDER_CASE_LIMITS.cancelNote) });
 
-// ── Admin: the atelier (routes/admin/atelier.ts) ──────────────────────────
+// ── Admin: the stock's transfers and minimums (routes/admin/logistics.ts; the atelier's routes removed, plan NEXT LOT step 5.13) ─
 
-/** GET /api/admin/atelier/stock: one model, one location. */
-export const atelierStockQuery = z.object({ modelId: queryOptional(uuid), locationId: queryOptional(uuid) });
-
-
-/** POST /api/admin/atelier/stock/transfer: pieces of a SKU moved from one location to another. */
+/** POST /api/admin/logistics/transfers: pieces of a SKU moved from one location to another. */
 export const stockTransferBody = body({ skuId: uuid, fromLocationId: uuid, toLocationId: uuid, quantity: whole(1, STOCK_MOVE_MAX, 'pieces'), note: z.preprocess(emptyToNull, text(STOCK_NOTE_MAX).nullable().optional()) });
 
-/** POST /api/admin/atelier/stock/adjust: a count corrected, up or down, with why. */
-export const stockAdjustBody = body({
-  skuId: uuid,
-  locationId: uuid,
-  delta: z.number().int('Must be a whole number of pieces').min(-STOCK_MOVE_MAX, `At least -${STOCK_MOVE_MAX}`).max(STOCK_MOVE_MAX, `At most ${STOCK_MOVE_MAX}`).refine((n) => n !== 0, 'Not 0'),
-  note: text(STOCK_NOTE_MAX),
-});
-
-/** PUT /api/admin/atelier/thresholds: a SKU's minimum at a location (L2), or none (`null`). */
-export const stockThresholdBody = body({ skuId: uuid, locationId: uuid, minimum: whole(1, THRESHOLD_MAX, 'pieces').nullable() });
-
-/** POST /api/admin/atelier/make: pieces to make for the stock (a suggestion confirmed). */
-export const makeForStockBody = body({ skuId: uuid, locationId: uuid, quantity: whole(1, ATELIER_MAKE_MAX, 'pieces') });
-
-const benchOrigin = z.union([uuid, z.enum(['SALON', 'STOCK'])]);
-
-/** GET /api/admin/atelier/bench and its CSV: open, finished, cancelled or all; one origin (a release, SALON, STOCK), one SKU, one location. */
-export const benchQuery = z.object({ view: queryOptional(z.enum(BENCH_VIEWS)), origin: queryOptional(benchOrigin), skuId: queryOptional(uuid), locationId: queryOptional(uuid) });
-
-export const benchParams = z.object({ id: uuid });
-
-/** POST /api/admin/atelier/bench/:id/done: what the atelier says of the finished piece; a claim code unless refused. */
-export const benchDoneBody = optionalBody({
-  material: z.preprocess(emptyToNull, text(ISSUE_TEXT_LIMITS.material).nullable().optional()),
-  productionBatch: z.preprocess(emptyToNull, text(ISSUE_TEXT_LIMITS.productionBatch).nullable().optional()),
-  productionDate: z.preprocess(emptyToNull, isoDate.nullable().optional()),
-  withClaimSecret: z.boolean().optional(),
-});
-
-/** POST /api/admin/atelier/sheets: the work sheets of the pieces named, or of those an origin, a SKU and a location keep. */
-export const workSheetsBody = body({
-  benchItemIds: z.array(uuid).min(1, 'At least one piece').max(WORK_SHEETS_MAX, `At most ${WORK_SHEETS_MAX} pieces`).optional(),
-  origin: benchOrigin.optional(),
-  skuId: uuid.optional(),
-  locationId: uuid.optional(),
-}).refine((b) => !(b.benchItemIds && (b.origin || b.skuId || b.locationId)), 'Name the pieces, or narrow by origin, SKU and location: not both');
+/** PUT /api/admin/logistics/minimums: a SKU's minimum at a location (L2), or none (`null`). */
+export const stockThresholdBody = body({ skuId: uuid, locationId: uuid, minimum: whole(1, STOCK_MOVE_MAX, 'pieces').nullable() });
 
 // ── Admin: keys ────────────────────────────────────────────────────────────
 

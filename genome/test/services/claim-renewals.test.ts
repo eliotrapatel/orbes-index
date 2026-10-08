@@ -21,7 +21,7 @@ import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { claimRevealAad, ClaimRenewalService, deriveClaimRevealKey } from '../../src/server/services/claim-renewals.js';
 import { verifyClaimCode } from '../../src/server/services/claim-codes.js';
-import { reserveIdentity } from '../../src/server/services/issuance.js';
+import { packIdentity } from '../../src/core/identity.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -289,9 +289,31 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
     await ctx.services.lifecycle.transition(lost.product.id, 'LOST', { reason: 'Not found at the count.' }, admin);
     expect(await situation(lost)).toMatchObject({ renewable: null, refusal: 'NOT_PRINTABLE' });
     await rejects(renewFor(lost, 'IN_STOCK'), 'PRODUCT_NOT_PRINTABLE', 409);
-    // RESERVED: an identity with no claim code yet.
+    // RESERVED: an identity with no claim code yet, as the atelier left it (no identity is reserved since plan NEXT LOT
+    // step 5.13; those reserved before stay so): written as reserveIdentity wrote its row.
     const sku = await inTransaction(t.db, (tx) => ensureSku(tx, f.modelId, '39'));
-    const reserved = await inTransaction(t.db, (tx) => reserveIdentity(tx, { modelId: f.modelId, skuId: sku, sizeLabel: '39' }, clock.now()));
+    const skuCode = (await t.db.selectFrom('skus').select('code').where('id', '=', sku).executeTakeFirstOrThrow()).code;
+    const identity = { year: 2026, categoryIndex: (await t.db.selectFrom('models').select('category_id').where('id', '=', f.modelId).executeTakeFirstOrThrow()).category_id, serial: 99_901 };
+    const reserved = await t.db
+      .insertInto('products')
+      .values({
+        product_id: `O26-J-${identity.serial}`,
+        packed_identity: packIdentity(identity),
+        year: identity.year,
+        category_id: identity.categoryIndex,
+        serial: identity.serial,
+        sku: skuCode,
+        model_id: f.modelId,
+        variant: '39',
+        material: '925 STERLING SILVER',
+        status: 'RESERVED',
+        ownership_state: 'UNREGISTERED',
+        sku_id: sku,
+        created_at: clock.now(),
+        updated_at: clock.now(),
+      })
+      .returning(['id', 'product_id as productId'])
+      .executeTakeFirstOrThrow();
     expect(await renewals().situation(reserved.productId)).toMatchObject({ renewable: null, refusal: 'NO_CLAIM_CODE' });
     await rejects(renewals().renew(reserved.productId, { reason: 'x', expect: 'IN_STOCK', after: null }, admin), 'NO_CLAIM_SECRET', 422);
     // No ACTIVE code: revoked, then re-issued.

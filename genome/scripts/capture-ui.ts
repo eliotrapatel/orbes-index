@@ -59,13 +59,12 @@
  *     page, its turn (the seal held half way), CONFIRMED · the question after
  *     · YOUR ORDERS at each step (RESERVED, SHIPPED with its tracking, DELIVERED,
  *     PAID) · an order's documents, its care guide open · AFTER THE RELEASES;
- *     then the console (1440 × 900): Orders (two late), an order, Atelier,
+ *     then the console (1440 × 900): Orders (two late), an order, Logistics,
  *     Invoices, Segments, a segment, Settings, the client sheet, the
  *     Catalogue's Shopify export, a draft release's parts (the after-room,
  *     the access, the surprise, the question after), its best time to open,
- *     PUBLISH with the feasibility check's warnings; then the four printed
- *     documents: the work sheet and the packing slip as the console prints
- *     them, the invoice and the ownership certificate of an order as their
+ *     PUBLISH with the feasibility check's warnings; then the three printed
+ *     documents: the packing slip as the console prints it, the invoice and the ownership certificate of an order as their
  *     PDFs read (Quick Look on macOS, pdftoppm elsewhere)
  *
  *   --only live   the LIVE RELEASE's captures alone (live-*.png), the others
@@ -148,7 +147,6 @@ import { frameCodeData } from '../src/core/payload.js';
 import { startLiveEngine, type AppContext } from '../src/server/context.js';
 import type { Db } from '../src/server/db/connection.js';
 import { DEMO_FIRST_REGISTRATION_PRODUCT_ID, DEMO_TIMELINE_START, seedDemo } from '../src/server/db/seed/demo.js';
-import { AtelierService } from '../src/server/services/atelier.js';
 import { AuditService } from '../src/server/services/audit.js';
 import { deriveDropSeedKey, DropService } from '../src/server/services/drops.js';
 import { deriveLiveTurnKey, LiveService } from '../src/server/services/live.js';
@@ -1219,14 +1217,14 @@ function pdfFirstPage(pdf: Uint8Array | string, workDir: string, name: string): 
 /**
  * Every new state of LIVE RELEASE+ (plan of 2026-10-04, its Method: the screens; the LIVE RELEASE's Quality bar 7), in
  * the order of its flow: the collector's screens on the phone of verify (the ivory of THE RELEASES, the vault, then MY
- * PIECES), the console's new pages (1 440 × 900), then the four printed documents, black on white.
+ * PIECES), the console's new pages (1 440 × 900), then the three printed documents, black on white.
  *
  * One collector, Hélène Morel (PLATINE, five pieces of MONOLITHE), lived through the releases of the last days on
  * services of their own clock over the stage's database (test/support/live.ts liveFixture, as test/web/verify.orders.e2e
- * does), ORBES Client Services and the atelier following her orders on that clock too: the draw (her place confirmed,
- * then paid: PAID, its piece being made), LIVE I (her piece secured, paid, made at the atelier, shipped by Colissimo and
- * registered by her today: DELIVERED), a request of the private salon accepted (an ORBITE paid, made and shipped by
- * Chronopost: SHIPPED), LIVE II (in the line at the sell-out: the question after on its final page), LIVE III (I'LL BE
+ * does), ORBES Client Services and the agent's steps (Logistics) following her orders on that clock too: the draw (her
+ * place confirmed, then paid: PAID, waiting for supplier stock), LIVE I (her piece secured, paid, counted in from the
+ * stock, packed and shipped by Colissimo and registered by her today: DELIVERED), a request of the private salon
+ * accepted (an ORBITE paid, counted in, packed and shipped by Chronopost: SHIPPED), LIVE II (in the line at the sell-out: the question after on its final page), LIVE III (I'LL BE
  * THERE, never came: the question in MY PIECES). Today, with the live engine running: LIVE IV sells out and its
  * after-room opens its second door a minute later, where she secures an ORBITE (RESERVED); LIVE V is announced for the
  * selected collectors or those who have taken part in three releases, with a surprise in every box; a release for the
@@ -1267,13 +1265,12 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     const newcomer = await account('t.nguyen@example.com', 0);
     type Who = typeof me;
 
-    // ── The last days, on services of their own clock: the releases, ORBES Client Services and the atelier ──
+    // ── The last days, on services of their own clock: the releases, ORBES Client Services and the agent's steps ──
     const past = await stageFixture(stage, createManualClock(new Date(Date.now() - 9 * DAY)));
     const admin = past.admin;
-    /** The past's clock at `hour`:`minute` in Paris, `days` ago: ORBES Client Services and the atelier at work in the day, the releases at 19:00. */
+    /** The past's clock at `hour`:`minute` in Paris, `days` ago: ORBES Client Services and the agent at work in the day, the releases at 19:00. */
     const on = (days: number, hour: number, minute = 0) => past.clock.set(new Date(parisAt(-days, hour).getTime() + minute * MINUTE));
     const orders = new OrderService({ db, audit: past.audit, clock: past.clock.now });
-    const atelier = new AtelierService({ db, audit: past.audit, issuance: ctx.services.issuance, orders, clock: past.clock.now });
     // The agent's steps on the past's clock too (plan NEXT LOT §3.5.6.8; the SHIPPED gate, step 5.12): Start packing, the
     // card's scan, the photo, Packed, Ship (which starts each piece's warranty, question 14).
     const shipping = new LogisticsService({
@@ -1432,10 +1429,9 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     // ── Today: Hélène receives LIVE I's piece and registers it with its claim code (its warranty started at SHIP): DELIVERED ──
     const scan = await ctx.services.verification.verify({ code: (await ctx.services.issuance.printableCode(done!.codeId)).data }, {});
     await ctx.services.ownership.registerFirst(me.id, { registrationToken: scan.registration!.token, claimCode: done!.claimCode! }, me.actor);
-    // A minimum for MONOLITHE in size 54 at FRANCE WAREHOUSE: the atelier suggests what to make; one piece to make for
-    // the stock, its work sheet printed (an order no longer gets one since plan NEXT LOT §3.5; the atelier goes in 5.13).
-    await ctx.services.atelier.setThreshold({ skuId: sku54, locationId: france, minimum: 3 }, admin);
-    const [stockBench] = await ctx.services.atelier.makeForStock({ skuId: sku54, locationId: france, quantity: 1 }, admin);
+    // A minimum for MONOLITHE in size 54 at FRANCE WAREHOUSE (Logistics → Stock): Supplier orders' To order proposes
+    // what it lacks (plan NEXT LOT §3.5.6.4; the atelier and its pieces to make are gone, step 5.13).
+    await ctx.services.logistics.setMinimum({ skuId: sku54, locationId: france, minimum: 3 }, admin);
     // The Catalogue: MONOLITHE's base price (N2) and its care guide (M6).
     await ctx.services.catalog.updateModel(
       monolithe,

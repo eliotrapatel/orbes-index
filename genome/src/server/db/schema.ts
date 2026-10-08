@@ -23,8 +23,9 @@ import type { ActorType } from '../types.js';
 
 /**
  * RESERVED (migration 0022, L6): an ORBES identity reserved for a piece to make, printed on the atelier's work sheet but
- * not issued; /verify answers it as an unknown code. Never written in product_status_history (PRODUCT_HISTORY_STATUSES):
- * its lifecycle starts when the atelier issues it, or when its order is cancelled (RETIRED).
+ * not issued; /verify answers it as an unknown code. Never written in product_status_history (PRODUCT_HISTORY_STATUSES).
+ * No identity is reserved any more (plan NEXT LOT §3.5, the atelier removed in step 5.13): those already reserved stay
+ * as they are, reserved and unused (§3.5.8).
  */
 export const PRODUCT_STATUSES = [
   'RESERVED', 'ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRED', 'SERVICED',

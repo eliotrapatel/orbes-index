@@ -25,7 +25,6 @@ import { sessionGuard } from '../../http/sessions.js';
 import type { RouteDeps } from '../public.js';
 import { adminUserRoutes } from './admins.js';
 import { adminAnalyticsRoutes } from './analytics.js';
-import { adminAtelierRoutes } from './atelier.js';
 import { adminCareRoutes } from './care.js';
 import { adminGuaranteeRoutes } from './guarantees.js';
 import { adminDocumentRoutes } from './documents.js';
@@ -92,7 +91,6 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminOrderRoutes, deps);
   await app.register(adminOrderCaseRoutes, deps);
   await app.register(adminInvoiceRoutes, deps);
-  await app.register(adminAtelierRoutes, deps);
   await app.register(adminLocationRoutes, deps);
   await app.register(adminLogisticsRoutes, deps);
   await app.register(adminSupplierOrderRoutes, deps);

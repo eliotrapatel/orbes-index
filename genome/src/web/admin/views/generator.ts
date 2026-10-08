@@ -100,7 +100,7 @@ import type { ViewContext } from './context.js';
 export async function generatorView(ctx: ViewContext): Promise<HTMLElement> {
   const role = ctx.session.admin.role;
   if (!can(role, 'issue')) {
-    return h('div', { class: 'view' }, pageHeader({ eyebrow: 'Generator', title: 'Issue a product', lead: 'Issuing requires the OPERATOR role.' }));
+    return h('div', { class: 'view' }, pageHeader({ eyebrow: 'Generator', title: 'Issue a product', lead: 'Issuing requires the ADMIN role.' }));
   }
   const [cats, models, cols] = await Promise.all([ctx.api.categories(), ctx.api.models(), ctx.api.collections()]);
   const root = h('div', { class: 'view view--generator' });

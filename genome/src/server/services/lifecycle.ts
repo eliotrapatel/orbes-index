@@ -42,8 +42,8 @@ const NON_INCIDENT = S('ISSUED', 'ACTIVATED', 'REGISTERED', 'OWNED', 'TRANSFERRE
 
 /**
  * Contract §2.6, row for row. REVOKED leaves only through `reinstate()`; RETIRED is terminal. RESERVED (migration 0022:
- * an identity reserved for a piece to make) leaves through no transition: the atelier issues it, or its order's
- * cancellation retires it (issuance.ts retireReservedIdentity), and its history starts there.
+ * an identity reserved for a piece to make) leaves through no transition: since the atelier went (plan NEXT LOT §3.5.8,
+ * step 5.13) the identities already reserved stay reserved and unused, as the owner decided.
  */
 export const TRANSITIONS: Readonly<Record<ProductStatus, readonly ProductStatus[]>> = Object.freeze({
   RESERVED: S(),

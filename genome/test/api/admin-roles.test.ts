@@ -11,7 +11,7 @@
  * discontinued or reinstated (P-R06), a LIVE RELEASE ended now or an entry removed from it (its creation, edits,
  * publication, cancellation, silhouette, board link and live controls: OPERATOR), and the settings of the orders: their
  * alerts' delays, the locations and the carriers (plan LIVE RELEASE+; the orders' steps, returns, terms, buyer and piece,
- * and the atelier's stock, pieces to make and work sheets: OPERATOR; the invoices and credit notes read by an AUDITOR;
+ * and, since the atelier's removal (plan NEXT LOT step 5.13), Logistics' stock below: OPERATOR; the invoices and credit notes read by an AUDITOR;
  * the segments read by an AUDITOR, their members' CSV too, built, counted live, changed and deleted by an OPERATOR; the
  * size mix proposed at creation, the feasibility check and the best time to open read by an AUDITOR; the Shopify
  * exports read by an AUDITOR, the order CSV masked, the Shopify ids pasted back by an OPERATOR; the Messages board of
@@ -97,8 +97,9 @@ const PROBES: Probe[] = [
   { group: 'collections', method: 'POST', url: '/api/admin/collections', body: INVALID, min: 'OPERATOR' },
   { group: 'collections', method: 'PATCH', url: `/api/admin/collections/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'products', method: 'GET', url: '/api/admin/products', min: 'AUDITOR' },
-  { group: 'products', method: 'POST', url: '/api/admin/products', body: INVALID, min: 'OPERATOR' },
-  { group: 'products', method: 'POST', url: '/api/admin/products/batch', body: INVALID, min: 'OPERATOR' },
+  // The Generator, ADMIN only (plan NEXT LOT §3.5.4.5, step 5.13).
+  { group: 'products', method: 'POST', url: '/api/admin/products', body: INVALID, min: 'ADMIN' },
+  { group: 'products', method: 'POST', url: '/api/admin/products/batch', body: INVALID, min: 'ADMIN' },
   { group: 'products', method: 'GET', url: `/api/admin/products/${PID}`, min: 'AUDITOR' },
   { group: 'lifecycle', method: 'POST', url: `/api/admin/products/${PID}/transitions`, body: INVALID, min: 'OPERATOR' },
   { group: 'lifecycle', method: 'POST', url: `/api/admin/products/${PID}/reinstate`, body: INVALID, min: 'ADMIN' },
@@ -273,7 +274,8 @@ const PROBES: Probe[] = [
   // BP-34: a model's pairs (PAIRS WELL WITH) set by an OPERATOR; read with the model (GET /api/admin/models/:id, AUDITOR).
   { group: 'pairs', method: 'PUT', url: `/api/admin/models/${UUID}/pairs`, body: INVALID, min: 'OPERATOR' },
   // Plan LIVE RELEASE+: the orders read by an AUDITOR, stepped by an OPERATOR, their alerts' delays set by an ADMIN; the
-  // locations and carriers read by an AUDITOR, set by an ADMIN; the atelier read by an AUDITOR, worked by an OPERATOR.
+  // locations and carriers read by an AUDITOR, set by an ADMIN (the atelier's routes, and Link a piece, removed: plan NEXT
+  // LOT step 5.13; its stock is Logistics', below).
   { group: 'orders', method: 'GET', url: '/api/admin/orders', min: 'AUDITOR' },
   { group: 'orders', method: 'GET', url: `/api/admin/orders?channel=LIVE&dropId=${UUID}&locationId=${UUID}&late=true&q=OR-1`, min: 'AUDITOR' },
   { group: 'orders', method: 'GET', url: '/api/admin/orders.csv', min: 'AUDITOR' },
@@ -287,7 +289,6 @@ const PROBES: Probe[] = [
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/location`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'PATCH', url: `/api/admin/orders/${UUID}/terms`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'PUT', url: `/api/admin/orders/${UUID}/buyer`, body: INVALID, min: 'OPERATOR' },
-  { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/piece`, body: INVALID, min: 'OPERATOR' },
   // BP-19 T5: a tier's credit taken off an order, and given back, by an OPERATOR.
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/credit`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'DELETE', url: `/api/admin/orders/${UUID}/credit`, min: 'OPERATOR' },
@@ -359,19 +360,6 @@ const PROBES: Probe[] = [
   { group: 'logistics', method: 'GET', url: '/api/admin/carriers', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/carriers', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/carriers/${UUID}`, body: INVALID, min: 'ADMIN' },
-  { group: 'atelier', method: 'GET', url: '/api/admin/atelier/stock', min: 'AUDITOR' },
-  { group: 'atelier', method: 'GET', url: `/api/admin/atelier/stock?modelId=${UUID}&locationId=${UUID}`, min: 'AUDITOR' },
-  { group: 'atelier', method: 'POST', url: '/api/admin/atelier/stock/transfer', body: INVALID, min: 'OPERATOR' },
-  { group: 'atelier', method: 'POST', url: '/api/admin/atelier/stock/adjust', body: INVALID, min: 'OPERATOR' },
-  { group: 'atelier', method: 'PUT', url: '/api/admin/atelier/thresholds', body: INVALID, min: 'OPERATOR' },
-  { group: 'atelier', method: 'POST', url: '/api/admin/atelier/make', body: INVALID, min: 'OPERATOR' },
-  { group: 'atelier', method: 'GET', url: '/api/admin/atelier/bench', min: 'AUDITOR' },
-  { group: 'atelier', method: 'GET', url: `/api/admin/atelier/bench?view=ALL&origin=STOCK&skuId=${UUID}&locationId=${UUID}`, min: 'AUDITOR' },
-  { group: 'atelier', method: 'GET', url: '/api/admin/atelier/bench.csv', min: 'AUDITOR' },
-  { group: 'atelier', method: 'POST', url: `/api/admin/atelier/bench/${UUID}/start`, body: INVALID, min: 'OPERATOR' },
-  { group: 'atelier', method: 'POST', url: `/api/admin/atelier/bench/${UUID}/done`, body: INVALID, min: 'OPERATOR' },
-  { group: 'atelier', method: 'POST', url: `/api/admin/atelier/bench/${UUID}/cancel`, body: INVALID, min: 'OPERATOR' },
-  { group: 'atelier', method: 'POST', url: '/api/admin/atelier/sheets', body: INVALID, min: 'OPERATOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/circle?days=367', min: 'AUDITOR' },
   { group: 'analytics', method: 'GET', url: '/api/admin/analytics/best-time?days=367', min: 'AUDITOR' },
@@ -468,7 +456,6 @@ describe('admin role enforcement', () => {
       'segments',
       'shopify',
       'logistics',
-      'atelier',
       'messages',
       'program',
       'care',
@@ -589,7 +576,6 @@ describe('admin role enforcement', () => {
       ['GET', `/api/admin/order-cases/${UUID}`],
       ['POST', `/api/admin/order-cases/${UUID}/decide`, INVALID],
       ['POST', `/api/admin/orders/${UUID}/case`, INVALID],
-      ['GET', '/api/admin/atelier/stock'],
       ['GET', '/api/admin/supplier-orders'],
       ['GET', '/api/admin/supplier-orders/proposal'],
       ['GET', '/api/admin/suppliers'],

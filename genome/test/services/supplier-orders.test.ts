@@ -83,10 +83,10 @@ describe('SupplierOrderService (plan NEXT LOT §3.5.6.3)', () => {
     const [k52, k54, k56] = [await skuOf('52'), await skuOf('54'), await skuOf('56')];
     // 52: three orders waiting at FRANCE, a minimum of 2 there (nothing on hand): 5 to order.
     for (let i = 0; i < 3; i++) await salonOrder('52');
-    await h.ctx.services.atelier.setThreshold({ skuId: k52, locationId: france, minimum: 2 }, admin);
+    await h.ctx.services.logistics.setMinimum({ skuId: k52, locationId: france, minimum: 2 }, admin);
     // 54: one piece on hand, a minimum of 4 at LOGISTICS: 3 under the minimum.
     await receive(k54, logistics, 1);
-    await h.ctx.services.atelier.setThreshold({ skuId: k54, locationId: logistics, minimum: 4 }, admin);
+    await h.ctx.services.logistics.setMinimum({ skuId: k54, locationId: logistics, minimum: 4 }, admin);
     // 56: one order waiting, then the size set aside: left out entirely (question 7, as built).
     await salonOrder('56');
     const proposal = await so().proposal();

@@ -26,15 +26,9 @@ import type {
   BestTime,
   LiveFeasibility,
   LiveSizeMix,
-  AtelierStock,
-  BenchFilters,
-  BenchItem,
-  BenchList,
   Carrier,
   InvoiceFilters,
   InvoiceList,
-  IssueBenchInput,
-  IssuedBenchItem,
   OrderAlertDelays,
   OrderAlertSettings,
   OrderBoard,
@@ -45,9 +39,7 @@ import type {
   OrderCaseReason,
   OrderTermsChange,
   OrderTransitionInput,
-  StockLevel,
   StockLocation,
-  WorkSheets,
   AdminSession,
   AdminSessionInfo,
   AdminUser,
@@ -114,6 +106,7 @@ import type {
   ClaimRenewal,
   ClaimSituation,
   Items,
+  StockLevel,
   KeyJson,
   LifecycleSnapshot,
   Model,
@@ -1122,11 +1115,6 @@ export class AdminApi {
     return this.request('PUT', `/api/admin/orders/${encodeURIComponent(id)}/buyer`, { body: buyer });
   }
 
-  /** OPERATOR: the piece picked from the stock to fulfil the order. */
-  linkOrderPiece(id: string, productId: string): Promise<OrderDetail> {
-    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/piece`, { productId });
-  }
-
   /** OPERATOR: Open a return (plan NEXT LOT §3.5.4.4): a return or a size exchange, its reason and Client Services' note. */
   openOrderCase(id: string, input: { kind: 'RETURN' | 'EXCHANGE'; reason: OrderCaseReason; exchangeSkuId?: string | null; note: string }): Promise<OrderCaseRecord> {
     return this.post(`/api/admin/orders/${encodeURIComponent(id)}/case`, input);
@@ -1257,62 +1245,6 @@ export class AdminApi {
   /** ADMIN: its name, its tracking link, offered or set aside. */
   updateCarrier(id: string, change: { name?: string; trackingUrl?: string; active?: boolean }): Promise<Carrier> {
     return this.patch(`/api/admin/carriers/${encodeURIComponent(id)}`, change);
-  }
-
-  // ── The atelier ──────────────────────────────────────────────────────────
-
-  atelierStock(f: { modelId?: string; locationId?: string } = {}): Promise<AtelierStock> {
-    return this.get('/api/admin/atelier/stock', { modelId: f.modelId, locationId: f.locationId });
-  }
-
-  /** OPERATOR: pieces of a SKU moved between locations. */
-  transferStock(input: { skuId: string; fromLocationId: string; toLocationId: string; quantity: number; note?: string }): Promise<{ transferId: string; from: StockLevel; to: StockLevel }> {
-    return this.post('/api/admin/atelier/stock/transfer', input);
-  }
-
-  /** OPERATOR: a count corrected, with why. */
-  adjustStock(input: { skuId: string; locationId: string; delta: number; note: string }): Promise<StockLevel> {
-    return this.post('/api/admin/atelier/stock/adjust', input);
-  }
-
-  /** OPERATOR: a SKU's minimum at a location, or none. */
-  setStockThreshold(input: { skuId: string; locationId: string; minimum: number | null }): Promise<void> {
-    return this.request('PUT', '/api/admin/atelier/thresholds', { body: input });
-  }
-
-  /** OPERATOR: pieces to make for the stock (a suggestion confirmed). */
-  makeForStock(input: { skuId: string; locationId: string; quantity: number }): Promise<Items<BenchItem>> {
-    return this.post('/api/admin/atelier/make', input);
-  }
-
-  bench(f: BenchFilters = {}): Promise<BenchList> {
-    return this.get('/api/admin/atelier/bench', { view: f.view, origin: f.origin, skuId: f.skuId, locationId: f.locationId });
-  }
-
-  /** What to make, as a CSV. */
-  async benchCsv(f: BenchFilters = {}): Promise<Download> {
-    const res = await this.request<Response>('GET', '/api/admin/atelier/bench.csv', { raw: true, query: { view: f.view, origin: f.origin, skuId: f.skuId, locationId: f.locationId } });
-    return toDownload(res, 'orbes-atelier.csv');
-  }
-
-  /** OPERATOR: TO MAKE → IN PROGRESS. */
-  startBench(id: string): Promise<BenchItem> {
-    return this.post(`/api/admin/atelier/bench/${encodeURIComponent(id)}/start`);
-  }
-
-  /** OPERATOR: IN PROGRESS → DONE, the piece issued (its claim code shown once). */
-  finishBench(id: string, input: IssueBenchInput): Promise<IssuedBenchItem> {
-    return this.post(`/api/admin/atelier/bench/${encodeURIComponent(id)}/done`, input);
-  }
-
-  /** OPERATOR: a piece to make for the stock cancelled. */
-  cancelBench(id: string): Promise<BenchItem> {
-    return this.post(`/api/admin/atelier/bench/${encodeURIComponent(id)}/cancel`);
-  }
-
-  /** OPERATOR: the work sheets of the pieces named, or of those the filters keep (each code's data to draw). */
-  workSheets(input: { benchItemIds?: string[]; origin?: string; skuId?: string; locationId?: string }): Promise<WorkSheets> {
-    return this.post('/api/admin/atelier/sheets', input);
   }
 
   // ── Logistics (plan NEXT LOT §3.5.6.9; the agent's locations only, for a LOGISTICS login) ──

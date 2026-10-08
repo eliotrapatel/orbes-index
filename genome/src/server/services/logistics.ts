@@ -1,8 +1,8 @@
 /**
  * Logistics (plan NEXT LOT of 2026-10-07, §3.5.6.6, step 5.8; API §16.33): the stock of every size at each location as
  * the agent and ORBES read it, the corrections the agent proposes and ORBES approves, the transfers and minimums, and the
- * pieces counted in. It sits beside the atelier (services/atelier.ts), whose routes serve the Atelier page until the
- * console moves to Logistics. The packing and the shipping (step 5.9, §3.5.6.8; the parcels read in services/parcels.ts):
+ * pieces counted in. It replaces the atelier (services/atelier.ts, removed in step 5.13 with its routes, its pieces to
+ * make and Link a piece). The packing and the shipping (step 5.9, §3.5.6.8; the parcels read in services/parcels.ts):
  *
  *   to ship        the parcels whose open orders are all paid and hold their piece in stock (`toShip`), the oldest ready
  *                  first, LATE past the READY delay; those on their way (`onItsWay`); one parcel (`parcel`, the
@@ -49,7 +49,7 @@
  *                  with a note (`stock.correction.decline`) once (409 CORRECTION_NOT_PENDING). A correction is never
  *                  deleted.
  *   transfers      StockService.transfer (only available pieces; the destination's waiting orders served).
- *   minimums       a SKU's minimum at a location (`stock.threshold`), as the atelier set it.
+ *   minimums       a SKU's minimum at a location (`stock.threshold`), as the atelier's Stock tab set it before.
  *   count in       named pieces of a SKU (ISSUED or RESOLD, unregistered, in no open order, never counted in) get
  *                  `stock_entered_at`: no movement, the count already holds them or a correction up follows (409
  *                  PIECE_NOT_COUNTABLE otherwise). Audited `stock.count_in` `{ skuId, productIds }`, never the note.

@@ -1843,8 +1843,9 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await watch(p);
     await signIn(p, operator.email, operator.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
-    // OPERATOR: no key management in the console.
-    expect(await p.locator('.side__link', { hasText: 'Generator' }).count()).toBe(1);
+    // OPERATOR: no key management in the console, and no Generator since it is ADMIN's (plan NEXT LOT step 5.13).
+    expect(await p.locator('.side__link', { hasText: 'Generator' }).count()).toBe(0);
+    expect(await p.locator('.side__link', { hasText: 'Logistics' }).count()).toBe(1);
 
     await go(p, '#/security', 'Security');
     await p.click('[data-testid=totp-begin]');

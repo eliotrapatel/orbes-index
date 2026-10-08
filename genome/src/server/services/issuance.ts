@@ -681,41 +681,13 @@ export class IssuanceService {
     return { ids, codes };
   }
 
-  // ── Reserved identities (plan LIVE RELEASE+, L6) ────────────────────────
-
-  /**
-   * The ORBES code of an identity RESERVED for a piece to make, for its work sheet (L6): issue 1, signed now when the
-   * identity has none yet (an ACTIVE code is kept as it is), in its own transaction under the piece's row lock. The piece
-   * stays RESERVED: /verify answers its code as an unknown one, naming no piece, until the atelier issues it
-   * (`inSigningTransaction`, services/atelier.ts). Audited `code.sign` when it signs. Returns the code's id.
-   */
-  async signReserved(productUuid: string, actor: Actor): Promise<{ codeId: string; signed: boolean }> {
-    if (typeof productUuid !== 'string' || !UUID_RE.test(productUuid)) throw notFound('Product', 'PRODUCT_NOT_FOUND');
-    return this.withRetries(
-      (signer) =>
-        inTransaction(this.db, async (trx) => {
-          await this.lockSigner(trx, signer);
-          const p = await trx.selectFrom('products').selectAll().where('id', '=', productUuid.toLowerCase()).forUpdate().executeTakeFirst();
-          if (!p) throw notFound('Product', 'PRODUCT_NOT_FOUND');
-          const active = await trx.selectFrom('codes').select('id').where('product_id', '=', p.id).where('status', '=', 'ACTIVE').executeTakeFirst();
-          if (active) return { codeId: active.id, signed: false };
-          if (p.status !== 'RESERVED') throw conflict('PRODUCT_NOT_RESERVED', `${p.product_id} is no longer reserved for a piece to make.`, `status ${p.status}`);
-          const now = this.clock();
-          const code = await this.signFirstCode(trx, signer, p, now);
-          await this.audit.record(
-            { actor, action: 'code.sign', targetType: 'product', targetId: p.product_id, details: { productId: p.product_id, codeId: code.id, issue: code.issue, keyId: signer.keyId, reserved: true } },
-            trx,
-          );
-          return { codeId: code.id, signed: true };
-        }),
-      'reissue',
-    );
-  }
+  // ── The signing transaction of a reception (plan NEXT LOT §3.5.6.5) ─────
 
   /**
    * One transaction holding the active signer (FOR SHARE), retried with a fresh signer or a fresh transaction as an
-   * issue is: `work` takes its rows' locks and may sign issue 1 of an identity RESERVED without a code (`signFirst`,
-   * the piece's row locked by `work` first). The atelier issues a finished piece in it (services/atelier.ts).
+   * issue is: `work` takes its rows' locks and may sign issue 1 of a piece it issues without a code (`signFirst`, the
+   * piece's row locked by `work` first). A reception's worker issues its pieces in it (services/receptions.ts,
+   * `issueStockIdentity`); the atelier's pieces to make and their reserved identities are gone (step 5.13).
    */
   async inSigningTransaction<T>(work: (trx: Db, signFirst: (product: ProductRow, now: Date) => Promise<CodeRecord>) => Promise<T>): Promise<T> {
     return this.withRetries(
@@ -1020,7 +992,7 @@ export class IssuanceService {
       .executeTakeFirstOrThrow();
   }
 
-  /** Issue 1 of a piece without any code (a reserved identity), its row locked by the caller, for its genome. */
+  /** Issue 1 of a piece without any code (a reception's, issueStockIdentity), its row locked by the caller, for its genome. */
   private async signFirstCode(trx: Db, signer: ActiveSigner, product: ProductRow, now: Date): Promise<CodeRow> {
     const any = await trx.selectFrom('codes').select('id').where('product_id', '=', product.id).executeTakeFirst();
     if (any) throw conflict('CODE_EXISTS', `${product.product_id} already has a code.`);
@@ -1190,128 +1162,6 @@ async function allocateSerial(trx: Db, year: number, categoryIndex: number): Pro
   return serial;
 }
 
-/** The material a reserved identity carries when its model names none: the atelier confirms it when it issues the piece. */
-export const RESERVED_MATERIAL_PENDING = 'TO BE CONFIRMED';
-
-/**
- * Reserve the ORBES identity of a piece to make (L6), in the caller's transaction: the next serial of the year and of
- * the model's category, taken as an issue takes it (never reused), the product RESERVED (unregistered, no claim code)
- * in its SKU and size, with the model's material (RESERVED_MATERIAL_PENDING when it names none), its genome and its
- * warranty, not started. No code is signed and nothing is written in the status history: /verify answers the identity
- * as unknown until the atelier issues the piece (its history then starts, null → ISSUED). Journaled `product.reserve`.
- */
-export async function reserveIdentity(
-  trx: Db,
-  input: { modelId: string; skuId: string; sizeLabel: string | null },
-  now: Date,
-): Promise<{ id: string; productId: string }> {
-  if (!trx.isTransaction) throw new Error('reserveIdentity must run inside a transaction');
-  const model = await trx
-    .selectFrom('models as m')
-    .innerJoin('categories as c', 'c.id', 'm.category_id')
-    .select(['m.category_id', 'm.default_material', 'c.code', 'c.warranty_months'])
-    .where('m.id', '=', input.modelId)
-    .executeTakeFirst();
-  if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
-  const sku = await trx.selectFrom('skus').select(['code']).where('id', '=', input.skuId).where('model_id', '=', input.modelId).executeTakeFirst();
-  if (!sku) throw notFound('SKU', 'SKU_NOT_FOUND');
-  const material =
-    model.default_material?.trim() ||
-    (
-      await trx
-        .selectFrom('products')
-        .select('material')
-        .where('model_id', '=', input.modelId)
-        .where('status', '!=', 'RESERVED')
-        .orderBy('created_at', 'desc')
-        .limit(1)
-        .executeTakeFirst()
-    )?.material ||
-    RESERVED_MATERIAL_PENDING;
-  const year = now.getUTCFullYear();
-  const categoryIndex = model.category_id;
-  const serial = await allocateSerial(trx, year, categoryIndex);
-  const identity: ProductIdentity = { year, categoryIndex, serial };
-  const packed = packIdentity(identity);
-  const code = model.code.trim();
-  const productId = formatProductId(identity, { byIndex: (i) => (i === categoryIndex ? { code, index: i, name: code } : undefined), byCode: () => undefined });
-  const row = await trx
-    .insertInto('products')
-    .values({
-      product_id: productId,
-      packed_identity: packed,
-      year,
-      category_id: categoryIndex,
-      serial,
-      sku: sku.code,
-      model_id: input.modelId,
-      variant: input.sizeLabel,
-      material,
-      status: 'RESERVED',
-      ownership_state: 'UNREGISTERED',
-      sku_id: input.skuId,
-      created_at: now,
-      updated_at: now,
-    })
-    .returningAll()
-    .executeTakeFirstOrThrow();
-  const genome = computeGenome(packed, GENOME_VERSION);
-  await trx
-    .insertInto('genomes')
-    .values({
-      product_id: row.id,
-      genome_version: genome.version,
-      genome_id: productId,
-      value: genome.value,
-      glyphs: genome.glyphs,
-      pattern: genome.ids.join('·'),
-      fingerprint: genome.fingerprint,
-      created_at: now,
-    })
-    .execute();
-  await trx.insertInto('warranties').values({ product_id: row.id, duration_months: model.warranty_months, created_at: now, updated_at: now }).execute();
-  await writeJournal(trx, [{ type: 'product.reserve', entityType: 'product', entityId: row.id, payload: productPayload(row, now) }], now);
-  return { id: row.id, productId };
-}
-
-/**
- * Retire a RESERVED identity whose piece will not be made (its order cancelled, its piece to make cancelled), in the
- * caller's transaction: RETIRED for good, its serial never reused; its status history starts there (null → RETIRED,
- * with the reason); the code its work sheet carried, when one was signed, revoked (a `revocations` row, CODE_REVOKED).
- * Journaled `product.retire`. A piece no longer RESERVED (issued meanwhile) is left as it is: false.
- */
-export async function retireReservedIdentity(trx: Db, productUuid: string, reason: string, actor: Actor, now: Date): Promise<boolean> {
-  const row = await trx
-    .updateTable('products')
-    .set({ status: 'RETIRED', updated_at: now })
-    .where('id', '=', productUuid)
-    .where('status', '=', 'RESERVED')
-    .returningAll()
-    .executeTakeFirst();
-  if (!row) return false;
-  await trx
-    .insertInto('product_status_history')
-    .values({ product_id: row.id, from_status: null, to_status: 'RETIRED', reason, actor_type: actor.type, actor_id: actor.id ?? null, created_at: now })
-    .execute();
-  // A code signed for its work sheet (IssuanceService.signReserved) is revoked with it: a sheet that leaves the atelier
-  // never verifies as a piece that was never made.
-  const revoked = await trx
-    .updateTable('codes')
-    .set({ status: 'REVOKED', revoked_at: now, revocation_reason: reason })
-    .where('product_id', '=', row.id)
-    .where('status', '=', 'ACTIVE')
-    .returning('id')
-    .execute();
-  for (const c of revoked) {
-    await trx
-      .insertInto('revocations')
-      .values({ target_type: 'CODE', target_id: c.id, reason_code: CODE_REVOKED_REASON_CODE, reason, created_by: actorLabel(actor), created_at: now })
-      .execute();
-  }
-  await writeJournal(trx, [{ type: 'product.retire', entityType: 'product', entityId: row.id, payload: productPayload(row, now) }], now);
-  return true;
-}
-
 /** A piece a reception issues (plan NEXT LOT §3.5.6.5): its model and size, its material, batch, claim hash and reception line. */
 export interface StockIdentityInput {
   modelId: string;
@@ -1421,45 +1271,6 @@ export async function issueStockIdentity(
       },
     },
   };
-}
-
-/** What the atelier says of a finished piece when it issues its reserved identity. */
-export interface ConfirmReservedInput {
-  material: string;
-  productionBatch: string | null;
-  productionDate: string | null;
-  /** The scrypt hash of its claim code, or null for none. */
-  claimHash: string | null;
-}
-
-/**
- * Issue a RESERVED identity (L6: issuing the piece confirms it), in the caller's transaction, the piece's row locked
- * and its code signed: ISSUED, unregistered, with its material, batch and production date and its claim code's hash;
- * its status history starts there (null → ISSUED, "Product issued", as any issue). Journaled `product.issue`; the
- * caller writes the audit entry. 409 PRODUCT_NOT_RESERVED for a piece no longer RESERVED.
- */
-export async function confirmReservedIdentity(trx: Db, product: ProductRow, input: ConfirmReservedInput, actor: Actor, now: Date): Promise<ProductRow> {
-  if (product.status !== 'RESERVED') throw conflict('PRODUCT_NOT_RESERVED', `${product.product_id} is no longer reserved for a piece to make.`, `status ${product.status}`);
-  const row = await trx
-    .updateTable('products')
-    .set({
-      status: 'ISSUED',
-      material: input.material,
-      production_batch: input.productionBatch,
-      production_date: input.productionDate,
-      claim_secret_hash: input.claimHash,
-      updated_at: now,
-    })
-    .where('id', '=', product.id)
-    .where('status', '=', 'RESERVED')
-    .returningAll()
-    .executeTakeFirstOrThrow();
-  await trx
-    .insertInto('product_status_history')
-    .values({ product_id: row.id, from_status: null, to_status: 'ISSUED', reason: 'Product issued', actor_type: actor.type, actor_id: actor.id ?? null, created_at: now })
-    .execute();
-  await writeJournal(trx, [{ type: 'product.issue', entityType: 'product', entityId: row.id, payload: productPayload(row, now) }], now);
-  return row;
 }
 
 function sha256(b: Uint8Array): Uint8Array {

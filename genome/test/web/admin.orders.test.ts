@@ -62,7 +62,7 @@ import {
 import { can } from '../../src/web/admin/model/permissions.js';
 import { toneOf } from '../../src/web/admin/model/tone.js';
 import { href, parseHash } from '../../src/web/admin/router.js';
-import { BENCH_VIEWS, ORDER_CURRENCIES, ORDER_LATE_RULES, type BenchItem, type OrderCard, type OrderDetail, type OrderView } from '../../src/web/admin/types.js';
+import { ORDER_CURRENCIES, ORDER_LATE_RULES, type OrderCard, type OrderDetail, type OrderView } from '../../src/web/admin/types.js';
 
 const ID = '0f8e7d6c-5b4a-4398-8877-665544332211';
 const LOC = '11111111-2222-4333-8444-555555555555';
@@ -103,24 +103,6 @@ const view = (o: Partial<OrderView> = {}): OrderView => ({
   return: null,
   invoices: [],
   events: [],
-  ...o,
-});
-
-const bench = (o: Partial<BenchItem> = {}): BenchItem => ({
-  id: ID,
-  status: 'TO_MAKE',
-  createdAt: '2026-11-01T09:00:00.000Z',
-  startedAt: null,
-  doneAt: null,
-  cancelledAt: null,
-  piece: { id: 'p', reference: 'O26-J-00184', status: 'RESERVED', material: '925 STERLING SILVER', signed: false },
-  order: null,
-  origin: { kind: 'STOCK' },
-  sku: { id: 's', code: 'MNL-RG-52', model: { id: 'm', name: 'MONOLITHE' }, sizeLabel: '52', setAside: false },
-  location: { id: LOC, name: 'FRANCE WAREHOUSE' },
-  engravingText: null,
-  surprise: null,
-  addons: [],
   ...o,
 });
 
@@ -520,7 +502,6 @@ describe('routes and the API client', () => {
     await api.changeOrderLocation(ID, LOC);
     await api.setOrderTerms(ID, { engravingText: 'A.' });
     await api.setOrderBuyer(ID, { name: 'J', address: null });
-    await api.linkOrderPiece(ID, 'O26-J-00184');
     await api.orderAlerts();
     await api.setOrderAlerts({ reservedDays: 2, readyDays: 3, shippedDays: 10, unregisteredDays: 30 });
     await api.locations();
@@ -529,17 +510,6 @@ describe('routes and the API client', () => {
     await api.carriers();
     await api.createCarrier({ name: 'FedEx', trackingUrl: 'https://f/{tracking}' });
     await api.updateCarrier(LOC, { active: false });
-    await api.atelierStock({ locationId: LOC });
-    await api.transferStock({ skuId: ID, fromLocationId: LOC, toLocationId: ID, quantity: 1 });
-    await api.adjustStock({ skuId: ID, locationId: LOC, delta: -1, note: 'x' });
-    await api.setStockThreshold({ skuId: ID, locationId: LOC, minimum: null });
-    await api.makeForStock({ skuId: ID, locationId: LOC, quantity: 2 });
-    await api.bench({ view: 'ALL', origin: 'STOCK' });
-    await api.benchCsv({});
-    await api.startBench(ID);
-    await api.finishBench(ID, { withClaimSecret: true });
-    await api.cancelBench(ID);
-    await api.workSheets({ benchItemIds: [ID] });
     await api.openOrderCase(ID, { kind: 'RETURN', reason: 'SIZE', note: 'Returned.' });
     await api.invoices({ month: '2026-11', kind: 'INVOICE' });
     const month = await api.invoicesCsv('2026-11');
@@ -555,7 +525,6 @@ describe('routes and the API client', () => {
       `POST /api/admin/orders/${ID}/location`,
       `PATCH /api/admin/orders/${ID}/terms`,
       `PUT /api/admin/orders/${ID}/buyer`,
-      `POST /api/admin/orders/${ID}/piece`,
       'GET /api/admin/orders/alerts',
       'PUT /api/admin/orders/alerts',
       'GET /api/admin/locations',
@@ -564,17 +533,6 @@ describe('routes and the API client', () => {
       'GET /api/admin/carriers',
       'POST /api/admin/carriers',
       `PATCH /api/admin/carriers/${LOC}`,
-      `GET /api/admin/atelier/stock?locationId=${LOC}`,
-      'POST /api/admin/atelier/stock/transfer',
-      'POST /api/admin/atelier/stock/adjust',
-      'PUT /api/admin/atelier/thresholds',
-      'POST /api/admin/atelier/make',
-      'GET /api/admin/atelier/bench?view=ALL&origin=STOCK',
-      'GET /api/admin/atelier/bench.csv',
-      `POST /api/admin/atelier/bench/${ID}/start`,
-      `POST /api/admin/atelier/bench/${ID}/done`,
-      `POST /api/admin/atelier/bench/${ID}/cancel`,
-      'POST /api/admin/atelier/sheets',
       `POST /api/admin/orders/${ID}/case`,
       'GET /api/admin/invoices?month=2026-11&kind=INVOICE',
       'GET /api/admin/invoices.csv?month=2026-11',
@@ -587,12 +545,10 @@ describe('routes and the API client', () => {
     expect(month.filename).toBe('ORBES-orders-2026-11-10.csv');
     const bodies = calls.map((c) => (typeof c.init.body === 'string' ? JSON.parse(c.init.body) : undefined));
     expect(bodies[6]).toEqual({ name: 'J', address: null });
-    expect(bodies[9]).toEqual({ reservedDays: 2, readyDays: 3, shippedDays: 10, unregisteredDays: 30 });
-    expect(bodies[19]).toEqual({ skuId: ID, locationId: LOC, minimum: null });
-    expect(bodies[26]).toEqual({ benchItemIds: [ID] });
-    expect(bodies[27]).toEqual({ kind: 'RETURN', reason: 'SIZE', note: 'Returned.' });
-    expect(bodies[32]).toEqual({ decision: 'REFUND', pieceTo: 'RESTOCKED', locationId: LOC, note: 'Unworn.' });
-    expect(bodies[33]).toEqual({ note: 'Withdrawn.' });
+    expect(bodies[8]).toEqual({ reservedDays: 2, readyDays: 3, shippedDays: 10, unregisteredDays: 30 });
+    expect(bodies[15]).toEqual({ kind: 'RETURN', reason: 'SIZE', note: 'Returned.' });
+    expect(bodies[20]).toEqual({ decision: 'REFUND', pieceTo: 'RESTOCKED', locationId: LOC, note: 'Unworn.' });
+    expect(bodies[21]).toEqual({ note: 'Withdrawn.' });
     expect(calls.every((c) => c.init.method === 'GET' || (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
   });
 });
