@@ -68,6 +68,7 @@ import { keysView } from './views/keys.js';
 import { disposeLiveView, liveReleaseView } from './views/live.js';
 import { loginView } from './views/login.js';
 import { logisticsView } from './views/logistics.js';
+import { disposeShippingView, shippingView } from './views/shipping.js';
 import { conversationView } from './views/conversation.js';
 import { messagesView } from './views/messages.js';
 import { orderView } from './views/order.js';
@@ -88,7 +89,7 @@ import { scansView } from './views/scans.js';
 import { securityView } from './views/security.js';
 import { settingsView } from './views/settings.js';
 import { workSheetsView } from './views/sheets.js';
-import { packingSlipView } from './views/slip.js';
+import { packingSlipView, shippingSlipView } from './views/slip.js';
 import { teamView } from './views/team.js';
 import { warrantiesView } from './views/warranties.js';
 import { careRequestView, careView } from './views/care.js';
@@ -156,6 +157,9 @@ const NAV: { group: string; items: NavItem[] }[] = [
   },
 ];
 
+/** What a LOGISTICS login reaches (plan NEXT LOT §3.5.3): Logistics and its pages, and its own security page. */
+const LOGISTICS_ROUTES: ReadonlySet<string> = new Set(['logistics', 'logisticsOrder', 'logisticsSlip', 'security']);
+
 /** The sidebar of a LOGISTICS login (plan NEXT LOT §3.5.3): one item, Logistics. */
 const LOGISTICS_NAV: { group: string; items: NavItem[] }[] = [{ group: 'Registry', items: [{ route: 'logistics', label: 'Logistics', cap: 'readLogistics' }] }];
 
@@ -202,6 +206,8 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   atelier: { view: atelierView, title: 'Atelier', nav: 'logistics' },
   workSheets: { view: workSheetsView, title: 'Work sheets', nav: 'logistics' },
   logistics: { view: logisticsView, title: 'Logistics', nav: 'logistics' },
+  logisticsOrder: { view: shippingView, title: 'Parcel', nav: 'logistics' },
+  logisticsSlip: { view: shippingSlipView, title: 'Packing slip', nav: 'logistics' },
   supplierOrders: { view: supplierOrdersView, title: 'Supplier orders', nav: 'supplierOrders' },
   document: { view: documentView, title: 'Document', nav: 'documents' },
 };
@@ -501,6 +507,7 @@ function showLogin(notice?: string): void {
   resetProductViewState();
   resetCodesViewState();
   disposeSaleView();
+  disposeShippingView();
   disposeLiveView();
   stopRefreshes();
   setTitle('Sign in');
@@ -588,6 +595,7 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
   // Whatever comes next, the camera of a sale screen being left stops now, and so does a live board's stream, and the
   // server's status and a test read again every 2 s (plan TEST ENTRANTS).
   disposeSaleView();
+  disposeShippingView();
   disposeLiveView();
   stopRefreshes();
   const r = parseHash(location.hash);
@@ -633,7 +641,7 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
     return;
   }
   // Nothing but Logistics for a person at the agent (plan NEXT LOT §3.5.3; the server refuses the rest anyway).
-  if (logisticsOnly(s.admin.role) && r.name !== 'logistics' && r.name !== 'security') {
+  if (logisticsOnly(s.admin.role) && !LOGISTICS_ROUTES.has(r.name)) {
     goTo(href('logistics'));
     return;
   }

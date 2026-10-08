@@ -3,6 +3,9 @@
  * at the logistics agent, and its only one (`logisticsOnly`: any other address leads back here); for ORBES staff, the
  * same page for every location, in the Atelier's place in the sidebar. Its tabs, by `?tab=`:
  *
+ *  - To ship (n), first: the parcels whose paid orders all hold their piece in stock, the oldest first, each with its
+ *    pieces, add-ons, engraving, where it goes, its step and the marks LATE and ADDRESS CHANGED, to its parcel's page
+ *    (views/shipping.ts); On its way: the parcels shipped, Mark delivered.
  *  - Stock: every size of every model and variant at each location, 0 included: on hand, reserved, available, waiting,
  *    the minimum. The agent proposes a correction, which ORBES approves. ORBES staff read the location, what to order
  *    (TO ORDER) and the sizes whose count no ORBES identity backs (NO PIECE · 3, with the notice over the table), and
@@ -37,6 +40,11 @@ import {
   minimumValue,
   noPieceMark,
   offersLocationFilter,
+  othersText,
+  PACKING_TEXT,
+  PARCEL_STEP_LABELS,
+  shipToLine,
+  TO_SHIP_TEXT,
   receiveProblem,
   RETURNS_TEXT,
   serialsOf,
@@ -52,7 +60,7 @@ import {
 import { can, logisticsOnly } from '../model/permissions.js';
 import type { Tone } from '../model/tone.js';
 import { href } from '../router.js';
-import type { CaseToReceive, LogisticsLocation, LogisticsStock, LogisticsStockRow, StockCorrection, StockCorrectionStatus } from '../types.js';
+import type { CaseToReceive, LogisticsLocation, LogisticsStock, LogisticsStockRow, OnItsWayRow, StockCorrection, StockCorrectionStatus, ToShipRow } from '../types.js';
 import { button, field, filterBar, mono, pageHeader, section, select, statusMark, table, type Column } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
@@ -90,10 +98,13 @@ export async function logisticsView(ctx: ViewContext): Promise<HTMLElement> {
   const here = <T extends { location: { id: string } }>(rows: readonly T[]) => (locationId ? rows.filter((r) => r.location.id === locationId) : [...rows]);
   const toReceive = here(cases.items);
   const listed = here(corrections.items);
-  const counts: LogisticsCounts = { returns: toReceive.length, corrections: listed.filter((c) => c.status === 'TO_APPROVE').length };
+  const toShip = here(parcels.toShip);
+  const onItsWay = here(parcels.onItsWay);
+  const counts: LogisticsCounts = { ship: toShip.length, returns: toReceive.length, corrections: listed.filter((c) => c.status === 'TO_APPROVE').length };
 
   let body: Child[];
-  if (tab === 'returns') body = [returnsTab(ctx, toReceive, locations)];
+  if (tab === 'ship') body = shipTab(ctx, toShip, onItsWay, locations);
+  else if (tab === 'returns') body = [returnsTab(ctx, toReceive, locations)];
   else if (tab === 'corrections') body = [correctionsTab(ctx, listed, locations)];
   else body = [stockTab(ctx, await ctx.api.logisticsStock(locationId ? { locationId } : {}))];
 
@@ -121,6 +132,61 @@ function after(ctx: ViewContext, message: string): (v: unknown) => void {
     notify(message);
     ctx.reload();
   };
+}
+
+// ── To ship ────────────────────────────────────────────────────────────────
+
+function shipTab(ctx: ViewContext, toShip: ToShipRow[], onItsWay: OnItsWayRow[], locations: readonly LogisticsLocation[]): HTMLElement[] {
+  const act = can(ctx.session.admin.role, 'logistics');
+  const several = locations.length > 1;
+  const parcelLink = (id: string, reference: string) => h('a', { class: 'idlink mono', attrs: { href: href('logisticsOrder', { orderId: id }) }, data: { testid: 'parcel-link' } }, reference);
+  const deliver = (r: OnItsWayRow) =>
+    void openDialog({
+      title: PACKING_TEXT.deliveredTitle,
+      eyebrow: r.reference,
+      body: h('p', { class: 'dialog__text' }, PACKING_TEXT.deliveredText),
+      confirmLabel: PACKING_TEXT.deliveredTitle,
+      submit: async () => {
+        await ctx.api.markParcelDelivered(r.id);
+      },
+    }).then(after(ctx, PACKING_TEXT.deliveredToast));
+  const toShipColumns: Column<ToShipRow>[] = [
+    {
+      label: 'Order',
+      cell: (r) => h('span', null, parcelLink(r.id, r.reference), othersText(r.others) ? h('span', { class: 'cell-sub', data: { testid: 'parcel-others' } }, othersText(r.others)!) : null),
+      kind: ['nowrap'],
+    },
+    { label: 'Ready since', cell: (r) => formatDate(r.readySince), kind: ['nowrap'] },
+    { label: 'Pieces', cell: (r) => h('span', { data: { testid: 'parcel-pieces' } }, ...r.pieces.map((p) => h('span', { class: 'cell-details' }, skuWords(p)))) },
+    { label: 'Add-ons', cell: (r) => (r.addons.length ? r.addons.join(' · ') : '—') },
+    { label: 'Engraving', cell: (r) => (r.engraving ? 'Yes' : '—'), kind: ['nowrap'] },
+    { label: 'Ship to', cell: (r) => shipToLine(r.shipTo) },
+    ...(several ? [{ label: 'Location', cell: (r) => r.location.name, kind: ['nowrap'] } satisfies Column<ToShipRow>] : []),
+    {
+      label: 'Step',
+      cell: (r) =>
+        h(
+          'span',
+          { class: 'parcel__marks', data: { testid: 'parcel-step' } },
+          statusMark(PARCEL_STEP_LABELS[r.step], r.step === 'PACKED' ? 'solid' : 'outline'),
+          r.late ? h('span', { class: 'cell-sub', data: { testid: 'parcel-late' } }, statusMark('LATE', 'alert')) : null,
+          r.addressChanged ? h('span', { class: 'cell-sub', data: { testid: 'parcel-address-changed' } }, statusMark('ADDRESS CHANGED', 'alert')) : null,
+        ),
+      kind: ['nowrap'],
+    },
+  ];
+  const onItsWayColumns: Column<OnItsWayRow>[] = [
+    { label: 'Order', cell: (r) => parcelLink(r.id, r.reference), kind: ['nowrap'] },
+    { label: 'Shipped', cell: (r) => formatDate(r.shippedAt), kind: ['nowrap'] },
+    { label: 'Carrier', cell: (r) => r.carrier.name },
+    { label: 'Tracking number', cell: (r) => h('a', { class: 'idlink', attrs: { href: r.trackingUrl, target: '_blank', rel: 'noopener noreferrer' } }, r.trackingNumber), kind: ['nowrap'] },
+    ...(several ? [{ label: 'Location', cell: (r) => r.location.name, kind: ['nowrap'] } satisfies Column<OnItsWayRow>] : []),
+    ...(act ? [{ label: '', cell: (r) => button(PACKING_TEXT.deliveredTitle, { kind: 'ghost', testId: 'parcel-delivered', onClick: () => deliver(r) }), kind: ['actions'] } satisfies Column<OnItsWayRow>] : []),
+  ];
+  return [
+    section(TO_SHIP_TEXT.title, [h('p', { class: 'panel__text' }, TO_SHIP_TEXT.lead), table(toShipColumns, toShip, { caption: TO_SHIP_TEXT.title, empty: TO_SHIP_TEXT.empty })], { id: 'logistics-ship' }),
+    section(TO_SHIP_TEXT.onItsWay, table(onItsWayColumns, onItsWay, { caption: TO_SHIP_TEXT.onItsWay, empty: TO_SHIP_TEXT.onItsWayEmpty }), { id: 'logistics-on-its-way' }),
+  ];
 }
 
 // ── Stock ──────────────────────────────────────────────────────────────────

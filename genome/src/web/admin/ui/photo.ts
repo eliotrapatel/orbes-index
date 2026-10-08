@@ -23,8 +23,11 @@ export interface EncodedPhoto {
   height: number;
 }
 
-/** Decode `file`, scale it to PHOTO_MAX_SIDE at most and encode it as a JPEG of at most PHOTO_MAX_BYTES. */
-export async function reencodePhoto(file: Blob): Promise<EncodedPhoto> {
+/**
+ * Decode `file`, scale it to PHOTO_MAX_SIDE at most (`maxSide`: the packing photo's 1600 px, plan NEXT LOT §3.5.3) and
+ * encode it as a JPEG of at most PHOTO_MAX_BYTES.
+ */
+export async function reencodePhoto(file: Blob, maxSide: number = PHOTO_MAX_SIDE): Promise<EncodedPhoto> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -32,7 +35,7 @@ export async function reencodePhoto(file: Blob): Promise<EncodedPhoto> {
     throw new ApiError(0, 'PHOTO_UNREADABLE', 'This file could not be opened as a photograph. Choose a JPEG, PNG or WebP image.');
   }
   try {
-    const { width, height } = fitWithin(bitmap.width, bitmap.height, PHOTO_MAX_SIDE);
+    const { width, height } = fitWithin(bitmap.width, bitmap.height, maxSide);
     if (width === 0) throw new ApiError(0, 'PHOTO_UNREADABLE', 'This photograph is empty.');
     const canvas = document.createElement('canvas');
     canvas.width = width;

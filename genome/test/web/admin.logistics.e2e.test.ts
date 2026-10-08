@@ -9,9 +9,12 @@
  *     a count no identity backs marked NO PIECE with the notice over the table, its piece counted in.
  *  2. Returns: a delivered order's return opened by Client Services is to receive at the agent's location; the agent
  *     records the parcel back, the piece OK, and the order case reads RECEIVED for ORBES to decide.
+ *  3. To ship (step 5.11b): a paid order holding its piece is listed; on its parcel's page the agent starts packing,
+ *     scans a card of another size (refused) then the right one (photo fallback), adds the photo, ticks the checklist,
+ *     packs and ships it; On its way, Mark delivered; the agent's packing slip, without a channel or a price.
  * No CSP violation, no page error, no figure in the display face.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -19,11 +22,15 @@ import { fileURLToPath } from 'node:url';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildWeb } from '../../scripts/build-web.js';
+import { fromBase64Url } from '../../src/core/bytes.js';
 import { orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import type { Actor } from '../../src/server/types.js';
 import { createAdmin, createHarness, seedCatalog, type Catalog, type Harness } from '../api/support.js';
-import { packAndShip, stockPieces } from '../support/fulfil.js';
+import { codeSource, phonePhoto } from '../e2e/support.js';
+import { packAndShip, stockPieces, type StockedPiece } from '../support/fulfil.js';
+import { writePng } from '../support/image-io.js';
+import { jpegPhoto } from '../support/images.js';
 import { createAccount } from '../support/live.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -167,10 +174,12 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     const sku = (await h.t.db.selectFrom('skus').select('code').where('id', '=', sku52).executeTakeFirstOrThrow()).code;
     const code54 = (await h.t.db.selectFrom('skus').select('code').where('id', '=', sku54).executeTakeFirstOrThrow()).code;
 
-    // The agent: its sign-in lands on Logistics, Stock first, its counters beside the tabs.
+    // The agent: its sign-in lands on Logistics, To ship first, its counters beside the tabs; then its Stock.
     const g = await open(agentLogin, 'Logistics');
-    expect(await tabTexts(g)).toEqual(['Stock', 'Returns (0)', 'Corrections (0)']);
-    expect(await g.locator('[data-testid=logistics-tab-stock]').getAttribute('aria-current')).toBe('page');
+    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+    expect(await g.locator('[data-testid=logistics-tab-ship]').getAttribute('aria-current')).toBe('page');
+    await g.click('[data-testid=logistics-tab-stock]');
+    await expect.poll(() => g.locator('[data-testid=logistics-tab-stock]').getAttribute('aria-current')).toBe('page');
     // One location: no Location filter, no Location column; never what ORBES alone reads.
     expect(await g.locator('[data-testid=logistics-location]').count()).toBe(0);
     expect(await g.locator('#logistics-stock thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'On hand', 'Reserved', 'Available', 'Waiting', 'Minimum', '']);
@@ -204,7 +213,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await confirmDialog(g);
     // Nothing moved yet.
     await expect.poll(() => stockRow(g, sku).locator('td').nth(3).textContent()).toBe('2');
-    await expect.poll(() => tabTexts(g)).toEqual(['Stock', 'Returns (0)', 'Corrections (2)']);
+    await expect.poll(() => tabTexts(g)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (2)']);
     await g.click('[data-testid=logistics-tab-corrections]');
     // Its two, and ORBES's own count of the pieces, applied at once.
     await expect.poll(() => g.locator('[data-testid=correction-status]').allTextContents()).toEqual(['TO APPROVE', 'TO APPROVE', 'APPROVED']);
@@ -218,7 +227,9 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await a.click('.side__link[data-route=logistics]');
     await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Logistics');
     expect(await a.locator('.side__link.is-active').textContent()).toBe('Logistics');
-    expect(await tabTexts(a)).toEqual(['Stock', 'Returns (0)', 'Corrections (2)']);
+    expect(await tabTexts(a)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (2)']);
+    await a.click('[data-testid=logistics-tab-stock]');
+    await expect.poll(() => a.locator('#logistics-stock thead th').count()).toBeGreaterThan(0);
     expect(await a.locator('#logistics-stock thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'Location', 'On hand', 'Reserved', 'Available', 'Waiting', 'Minimum', 'To order', '']);
     await expect.poll(() => stockRow(a, sku).count()).toBe(2);
     await a.selectOption('[data-testid=logistics-location]', warehouse);
@@ -242,7 +253,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await shot(a, 'decline', { dialog: true });
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Correction declined.")');
-    await expect.poll(() => tabTexts(a)).toEqual(['Stock', 'Returns (0)', 'Corrections (0)']);
+    await expect.poll(() => tabTexts(a)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await a.locator('[data-testid=correction-status]').allTextContents()).toEqual(['DECLINEDCounted again at ORBES: two pieces.', 'APPROVED', 'APPROVED']);
     await shot(a, 'corrections');
 
@@ -300,7 +311,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     const reference = orderReference(orderId);
 
     const g = await open(agentLogin, 'Logistics');
-    expect(await tabTexts(g)).toEqual(['Stock', 'Returns (1)', 'Corrections (0)']);
+    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Stock', 'Returns (1)', 'Corrections (0)']);
     await g.click('[data-testid=logistics-tab-returns]');
     await expect.poll(() => g.locator('#logistics-returns thead th').allTextContents()).toEqual(['Order', 'Kind', 'Piece', 'Opened on', '']);
     const row = g.locator('#logistics-returns tbody tr');
@@ -321,8 +332,118 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await confirmDialog(g);
     await g.waitForSelector('.toast:has-text("Recorded: ORBES decides.")');
     await expect.poll(() => g.locator('#logistics-returns .empty__text').textContent()).toBe('No parcel expected back.');
-    expect(await tabTexts(g)).toEqual(['Stock', 'Returns (0)', 'Corrections (0)']);
+    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await h.ctx.services.orderCases.get(opened.id)).toMatchObject({ status: 'RECEIVED', received: { pieceState: 'OK', note: 'In its box, unworn.' } });
+    expect(await csp(g)).toEqual([]);
+    await g.context().close();
+  }, STEP_TIMEOUT);
+
+  it('ships a parcel through the agent\'s steps: start packing, the card scanned (another size refused), the photo, the checklist, packed, shipped, delivered; its slip', async () => {
+    const orderId = await salonOrder('54');
+    await h.ctx.services.orders.setBuyer(orderId, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' }, admin);
+    h.clock.advance(MINUTE);
+    await h.ctx.services.orders.transition(orderId, { to: 'PAID' }, admin);
+    const [right] = await stockPieces(h.ctx, { skuId: sku54, locationId: france, count: 1, material: '925 STERLING SILVER' }, admin);
+    const [wrong] = await stockPieces(h.ctx, { skuId: sku52, locationId: france, count: 1, material: '925 STERLING SILVER' }, admin);
+    const reference = orderReference(orderId);
+    const cardPhoto = (piece: StockedPiece, name: string) => {
+      const file = join(workDir, name);
+      writePng(file, phonePhoto(codeSource({ data: fromBase64Url(piece.data), genomeGlyphs: piece.glyphs })));
+      return file;
+    };
+
+    const g = await open(agentLogin, 'Logistics');
+    expect(await tabTexts(g)).toEqual(['To ship (1)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+    expect(await g.locator('#logistics-ship .panel__text').textContent()).toBe(
+      'Paid orders whose pieces are all in stock, the oldest first. An order of several pieces ships in one parcel, once every piece is there.',
+    );
+    expect(await g.locator('#logistics-ship thead th').allTextContents()).toEqual(['Order', 'Ready since', 'Pieces', 'Add-ons', 'Engraving', 'Ship to', 'Step']);
+    const row = g.locator('#logistics-ship tbody tr');
+    expect(await row.count()).toBe(1);
+    expect(await row.locator('[data-testid=parcel-pieces]').textContent()).toBe('MONOLITHE · 54');
+    expect(await row.locator('td').nth(5).textContent()).toBe('Ada Martin · 75007 Paris');
+    expect(await row.locator('[data-testid=parcel-step]').textContent()).toBe('READY TO PACK');
+    expect(await g.locator('#logistics-on-its-way .empty__text').textContent()).toBe('No parcel on its way.');
+    await shot(g, 'to-ship');
+
+    // The parcel's page: Start packing locks the address and the engraving for the collector.
+    await row.locator('[data-testid=parcel-link]').click();
+    await expect.poll(async () => (await title(g).textContent())?.trim()).toBe(reference);
+    expect(await g.locator('.side__link.is-active').textContent()).toBe('Logistics');
+    expect(await g.locator('[data-testid=parcel-piece]').allTextContents()).toEqual(['MONOLITHE']);
+    expect(await g.locator('[data-testid=parcel-name]').textContent()).toBe('Ada Martin');
+    expect(await g.locator('#parcel-ship-to').textContent()).not.toMatch(/€|EUR|@/);
+    await g.click('[data-testid=parcel-start]');
+    expect(await g.locator('dialog .dialog__text').textContent()).toBe('From now on, the collector can no longer change the address or the engraving: only ORBES Client Services can.');
+    await confirmDialog(g);
+    await g.waitForSelector('.toast:has-text("Packing started.")');
+    await expect.poll(() => g.locator('[data-testid=parcel-step]').textContent()).toBe('PACKING');
+    expect((await g.locator('#parcel-checklist .ccheck__label, [data-testid=parcel-checklist] .ccheck__label').allTextContents())).toEqual(['The right piece: its card scanned', 'The card, its claim code visible', 'The box and the pouch']);
+    expect(await g.locator('[data-testid=parcel-check-scan] input').isDisabled()).toBe(true);
+    expect(await g.locator('[data-testid=parcel-packed]').isDisabled()).toBe(true);
+    expect(await g.locator('[data-testid=parcel-photo-note]').textContent()).toBe('No photo yet. Seen by ORBES only, never by the collector. Deleted 14 days after delivery.');
+
+    // A card of another size is refused; the right one binds its piece.
+    await g.setInputFiles('[data-testid=parcel-scan-photo]', cardPhoto(wrong!, 'wrong-card.png'));
+    await expect.poll(() => g.locator('[data-testid=parcel-scan-message]').textContent(), { timeout: 30_000 }).toBe(
+      'This card is MONOLITHE · 52. This order needs MONOLITHE · 54: take a piece of that model, variant and size.',
+    );
+    await g.setInputFiles('[data-testid=parcel-scan-photo]', cardPhoto(right!, 'right-card.png'));
+    await g.waitForSelector(`.toast:has-text("MONOLITHE · 54 · ${right!.productId}: the right piece.")`, { timeout: 30_000 });
+    await expect.poll(() => g.locator('[data-testid=parcel-check-scan] input').isChecked()).toBe(true);
+
+    // The photo, scaled in the browser; then every line ticked: Packed.
+    const photo = join(workDir, 'parcel.jpg');
+    writeFileSync(photo, jpegPhoto(2400, 1800));
+    await g.setInputFiles('[data-testid=parcel-photo-file]', photo);
+    await g.waitForSelector('.toast:has-text("Photo added.")');
+    await expect.poll(() => g.locator('[data-testid=parcel-photo-view]').count()).toBe(1);
+    const stored = await h.t.db.selectFrom('shipments').select(['photo_mime']).where('order_id', '=', orderId).executeTakeFirstOrThrow();
+    expect(stored.photo_mime).toBe('image/jpeg');
+    for (const label of ['The card, its claim code visible', 'The box and the pouch']) await g.locator('[data-testid=parcel-check]', { hasText: label }).click();
+    await expect.poll(() => g.locator('[data-testid=parcel-packed]').isDisabled()).toBe(false);
+    await shot(g, 'packing');
+    await g.click('[data-testid=parcel-packed]');
+    await g.waitForSelector('.toast:has-text("Packed.")');
+    await expect.poll(() => g.locator('[data-testid=parcel-step]').textContent()).toBe('PACKED');
+
+    // Ship: the carriers come with the parcel's reply; never a declared value from the agent.
+    await g.click('[data-testid=parcel-ship]');
+    expect(await g.locator('dialog .dialog__title').textContent()).toBe('Ship the parcel');
+    expect(await g.locator('dialog input[name^=declared_]').count()).toBe(0);
+    await g.selectOption('dialog select[name=carrierId]', colissimo);
+    await g.fill('dialog input[name=trackingNumber]', '6A');
+    await g.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => g.locator('dialog .dialog__error').textContent()).toBe('A tracking number has 3 to 40 letters and digits.');
+    await g.fill('dialog input[name=trackingNumber]', '6A98765432101');
+    await shot(g, 'ship', { dialog: true });
+    await confirmDialog(g);
+    await g.waitForSelector('.toast:has-text("Shipped.")');
+    await expect.poll(() => g.locator('[data-testid=parcel-tracking]').textContent()).toBe('6A98765432101');
+    expect(await h.t.db.selectFrom('orders').select(['status', 'product_id']).where('id', '=', orderId).executeTakeFirstOrThrow()).toEqual({ status: 'SHIPPED', product_id: right!.uuid });
+    expect(await h.ctx.services.warranty.get(right!.productId)).toMatchObject({ status: 'ACTIVE' });
+
+    // Its slip: each piece and what goes with it, no channel, release or price.
+    await g.click('a:has-text("Packing slip")');
+    await expect.poll(() => g.locator('[data-testid=slip-reference]').textContent()).toBe(reference);
+    expect(await g.locator('[data-testid=slip-model]').textContent()).toBe('MONOLITHE');
+    expect(await g.locator('[data-testid=slip-piece]').textContent()).toBe(right!.productId);
+    expect(await g.locator('.printdoc__foot').textContent()).toBe('ORBES Client Services');
+    expect(await g.locator('[data-testid=packing-slip]').textContent()).not.toMatch(/PRIVATE SALON|€|EUR|4200/);
+
+    // On its way, then delivered.
+    await go(g, '#/logistics', 'Logistics');
+    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+    expect(await g.locator('#logistics-ship .empty__text').textContent()).toBe('Nothing to ship: no paid order has its pieces in stock.');
+    const way = g.locator('#logistics-on-its-way tbody tr');
+    expect(await way.locator('td').nth(2).textContent()).toBe('Colissimo');
+    await way.locator('[data-testid=parcel-delivered]').click();
+    expect(await g.locator('dialog .dialog__text').textContent()).toBe('The parcel has reached the collector. It is also marked delivered by itself when the collector registers the piece with its card.');
+    await confirmDialog(g);
+    await g.waitForSelector('.toast:has-text("Delivered.")');
+    await expect.poll(() => g.locator('#logistics-on-its-way .empty__text').textContent()).toBe('No parcel on its way.');
+    expect((await h.t.db.selectFrom('orders').select('status').where('id', '=', orderId).executeTakeFirstOrThrow()).status).toBe('DELIVERED');
+    expect(await figuresInDisplayFace(g)).toEqual([]);
     expect(await csp(g)).toEqual([]);
     await g.context().close();
   }, STEP_TIMEOUT);

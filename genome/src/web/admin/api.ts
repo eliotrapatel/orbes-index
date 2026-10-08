@@ -126,6 +126,8 @@ import type {
   CaseToReceive,
   LogisticsStock,
   ParcelsBoard,
+  PackingScan,
+  ShippingOrderView,
   StockCorrection,
   StockCorrections,
   StockCorrectionStatus,
@@ -1266,6 +1268,46 @@ export class AdminApi {
   /** LOGISTICS and AUDITOR+: To ship, On its way, and the scope's locations. */
   parcels(f: { locationId?: string } = {}): Promise<ParcelsBoard> {
     return this.get('/api/admin/logistics/orders', { locationId: f.locationId });
+  }
+
+  /** LOGISTICS and AUDITOR+: a parcel, keyed by any of its orders (no price, email, account nor release; its carriers). */
+  parcel(orderId: string): Promise<ShippingOrderView> {
+    return this.get(`/api/admin/logistics/orders/${encodeURIComponent(orderId)}`);
+  }
+
+  /** LOGISTICS and OPERATOR+: Start packing (the collector can no longer change the address or the engraving). */
+  startPacking(orderId: string): Promise<ShippingOrderView> {
+    return this.post(`/api/admin/logistics/orders/${encodeURIComponent(orderId)}/packing`, {});
+  }
+
+  /** LOGISTICS and OPERATOR+: a card's ORBES CODE scanned (the body of /verify); the right piece bound to its order. */
+  scanPackingCard(orderId: string, input: { code: string; genome?: { glyphs: (number | null)[]; confidence?: number[] }; client?: Record<string, unknown> }): Promise<PackingScan> {
+    return this.post(`/api/admin/logistics/orders/${encodeURIComponent(orderId)}/packing/scan`, input);
+  }
+
+  /** LOGISTICS and OPERATOR+: the packed parcel's photo, a JPEG of at most 1 MiB (seen by ORBES only). */
+  setPackingPhoto(orderId: string, photo: Blob): Promise<ShippingOrderView> {
+    return this.request('PUT', `/api/admin/logistics/orders/${encodeURIComponent(orderId)}/packing/photo`, { upload: { type: 'image/jpeg', data: photo } });
+  }
+
+  /** LOGISTICS and OPERATOR+: Packed, the checklist's lines ticked by key. */
+  checkPacked(orderId: string, ticked: string[]): Promise<ShippingOrderView> {
+    return this.post(`/api/admin/logistics/orders/${encodeURIComponent(orderId)}/packing/check`, { ticked });
+  }
+
+  /** LOGISTICS and OPERATOR+: Ship; a declared value per order from ORBES staff only (403 from the agent). */
+  shipParcel(orderId: string, input: { carrierId: string; trackingNumber: string; declaredValues?: { orderId: string; minor: number | null }[] }): Promise<ShippingOrderView> {
+    return this.post(`/api/admin/logistics/orders/${encodeURIComponent(orderId)}/ship`, input);
+  }
+
+  /** LOGISTICS and OPERATOR+: the parcel reached the collector. */
+  markParcelDelivered(orderId: string): Promise<ShippingOrderView> {
+    return this.post(`/api/admin/logistics/orders/${encodeURIComponent(orderId)}/delivered`, {});
+  }
+
+  /** LOGISTICS and OPERATOR+: a parcel problem reported (an order case ORBES decides). */
+  reportParcel(orderId: string, input: { kind: 'BACK_TO_SENDER' | 'LOST' | 'DAMAGED'; note: string }): Promise<{ id: string }> {
+    return this.post(`/api/admin/logistics/orders/${encodeURIComponent(orderId)}/order-case`, input);
   }
 
   /** LOGISTICS and AUDITOR+: the parcels expected back at the scope's locations (Returns → To receive). */

@@ -96,7 +96,7 @@ const view = (o: Partial<OrderView> = {}): OrderView => ({
   source: { liveEntryId: null, piece: 1, dropEntryId: null, shopRequestId: 'r' },
   release: null,
   accountId: 'a',
-  model: { id: 'm', name: 'MONOLITHE' },
+  model: { id: 'm', name: 'MONOLITHE', variant: null },
   sizeLabel: null,
   skuId: null,
   priceMinor: null,
@@ -450,6 +450,8 @@ describe('what a role may do with an order', () => {
       buyer: { name: 'Jane Doe', address: '1 rue de la Paix' },
     });
     expect(JSON.stringify(slip)).not.toMatch(/4800|480000|15000|150/);
+    // A variant's piece reads its variant after the model (plan NEXT LOT §3.5.3): the agent picks by model, variant and size.
+    expect(packingSlip({ ...d, order: { ...d.order, model: { id: 'm', name: 'MONOLITHE', variant: 'BLUE' } } }).model).toBe('MONOLITHE · BLUE');
   });
 });
 

@@ -592,7 +592,8 @@ export function packingSlip(d: OrderDetail): PackingSlip {
     sourceReference: d.sourceReference,
     channel: CHANNEL_LABELS[o.channel],
     release: o.release?.title ?? null,
-    model: o.model.name,
+    // The variant after the model (plan NEXT LOT §3.5.3): the agent picks by model, variant and size.
+    model: o.model.variant ? `${o.model.name} · ${o.model.variant}` : o.model.name,
     piece: o.productId,
     size: sizeText({ sizeLabel: o.sizeLabel, skuKnown: o.skuId !== null }),
     addons: o.addons.map((a) => a.label),

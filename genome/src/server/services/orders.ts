@@ -312,7 +312,7 @@ export interface OrderView {
   source: { liveEntryId: string | null; piece: number; dropEntryId: string | null; shopRequestId: string | null };
   release: { id: string; title: string } | null;
   accountId: string;
-  model: { id: string; name: string };
+  model: { id: string; name: string; /** Plan NEXT LOT §3.5.3: the slip's Piece reads MONOLITHE · BLUE. */ variant: string | null };
   sizeLabel: string | null;
   skuId: string | null;
   priceMinor: number | null;
@@ -1673,7 +1673,7 @@ export class OrderService {
       .leftJoin('carriers as c', 'c.id', 'o.carrier_id')
       .leftJoin('products as p', 'p.id', 'o.product_id')
       .selectAll('o')
-      .select(['m.name as model_name', 'l.name as location_name', 'd.title as release_title', 'c.name as carrier_name', 'c.tracking_url', 'p.product_id as piece_reference'])
+      .select(['m.name as model_name', 'm.variant_label as model_variant', 'l.name as location_name', 'd.title as release_title', 'c.name as carrier_name', 'c.tracking_url', 'p.product_id as piece_reference'])
       .where('o.id', '=', id)
       .executeTakeFirst();
     if (!r) throw orderNotFound();
@@ -1748,7 +1748,7 @@ export class OrderService {
       source: { liveEntryId: r.live_entry_id, piece: r.piece, dropEntryId: r.drop_entry_id, shopRequestId: r.shop_request_id },
       release: r.drop_id && r.release_title ? { id: r.drop_id, title: r.release_title } : null,
       accountId: r.account_id,
-      model: { id: r.model_id, name: r.model_name },
+      model: { id: r.model_id, name: r.model_name, variant: r.model_variant },
       sizeLabel: r.size_label,
       skuId: r.sku_id,
       priceMinor: r.price_minor,

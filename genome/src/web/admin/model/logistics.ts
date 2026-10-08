@@ -9,8 +9,8 @@
  * The server stays the authority (409 STOCK_NOT_AVAILABLE, STOCK_NOT_BACKED, PIECE_NOT_COUNTABLE; 404 outside the
  * login's locations).
  */
-import { formatCount } from '../format.js';
-import type { CaseToReceive, LogisticsLocation, LogisticsSku, OrderCaseKind, StockCorrectionStatus } from '../types.js';
+import { formatCount, formatDateTime } from '../format.js';
+import type { CaseToReceive, LogisticsLocation, LogisticsSku, OrderCaseKind, ParcelActor, ParcelStep, ShippingOrderView, StockCorrectionStatus, ToShipRow } from '../types.js';
 
 /** The bounds of services/logistics.ts and services/stock.ts (LOGISTICS_LIMITS, STOCK_MOVE_MAX, THRESHOLD_MAX). */
 export const LOGISTICS_LIMITS = Object.freeze({ move: 10_000, reason: 500, note: 500, minimum: 10_000, countIn: 100, receiveNote: 500 });
@@ -26,13 +26,14 @@ export const LOGISTICS_LEAD =
 
 /** The tabs, in their order (`?tab=`). */
 export const LOGISTICS_TABS = Object.freeze([
+  { id: 'ship', label: 'To ship' },
   { id: 'stock', label: 'Stock' },
   { id: 'returns', label: 'Returns' },
   { id: 'corrections', label: 'Corrections' },
 ] as const);
 export type LogisticsTab = (typeof LOGISTICS_TABS)[number]['id'];
 
-/** The tabs with a counter (§3.5.3): Returns, the parcels to receive; Corrections, those waiting for ORBES. */
+/** The tabs with a counter (§3.5.3): To ship, the parcels listed; Returns, the parcels to receive; Corrections, those waiting for ORBES. */
 export type LogisticsCounts = Partial<Record<LogisticsTab, number>>;
 
 /** The tab the query names, the first one otherwise. */
@@ -237,4 +238,174 @@ export function receiveProblem(v: Record<string, string>): string | null {
   if (v.pieceState !== 'OK' && v.pieceState !== 'DAMAGED') return 'Say whether the piece is OK or damaged.';
   if ((v.note ?? '').trim().length > LOGISTICS_LIMITS.receiveNote) return `A note has at most ${LOGISTICS_LIMITS.receiveNote} characters.`;
   return null;
+}
+
+// ── To ship and a parcel (step 5.11b) ──────────────────────────────────────
+
+/** The packing photo's longer side, at most, as the console scales it before sending (≤ 1 MiB as a JPEG). */
+export const PACKING_PHOTO_MAX_SIDE = 1600;
+
+export const TO_SHIP_TEXT = Object.freeze({
+  title: 'To ship',
+  lead: 'Paid orders whose pieces are all in stock, the oldest first. An order of several pieces ships in one parcel, once every piece is there.',
+  empty: 'Nothing to ship: no paid order has its pieces in stock.',
+  onItsWay: 'On its way',
+  onItsWayEmpty: 'No parcel on its way.',
+});
+
+/** A parcel's step as its mark reads. */
+export const PARCEL_STEP_LABELS: Readonly<Record<ParcelStep, string>> = Object.freeze({
+  NOT_READY: 'NOT READY',
+  READY_TO_PACK: 'READY TO PACK',
+  PACKING: 'PACKING',
+  PACKED: 'PACKED',
+  SHIPPED: 'SHIPPED',
+  DELIVERED: 'DELIVERED',
+  BACK_TO_SENDER: 'BACK TO SENDER',
+  LOST: 'LOST',
+  DAMAGED: 'DAMAGED',
+});
+
+/** The other orders travelling in a parcel: '+ 2 pieces'; null when it holds one. */
+export function othersText(others: number): string | null {
+  return others > 0 ? `+ ${formatCount(others)} ${others === 1 ? 'piece' : 'pieces'}` : null;
+}
+
+/** A piece as the agent picks it: `MONOLITHE · BLUE`. */
+export function pieceWords(p: { model: string; variant: string | null }): string {
+  return p.variant ? `${p.model} · ${p.variant}` : p.model;
+}
+
+/** Ship to on the list: the name · the city (the address's last line) · the country, what is known of them. */
+export function shipToLine(to: ToShipRow['shipTo']): string {
+  const lines = (to.address ?? '').split('\n').map((l) => l.trim()).filter((l) => l !== '');
+  const parts = [to.name, lines.at(-1) ?? null, to.country].filter((x): x is string => !!x);
+  return parts.length ? parts.join(' · ') : 'Not entered';
+}
+
+export const PACKING_TEXT = Object.freeze({
+  startTitle: 'Start packing',
+  startText: 'From now on, the collector can no longer change the address or the engraving: only ORBES Client Services can.',
+  started: 'Packing started.',
+  scan: 'Scan the card',
+  photo: 'Add the photo',
+  photoAgain: 'Replace the photo',
+  viewPhoto: 'View the photo',
+  noPhoto: 'No photo yet.',
+  photoNote: 'Seen by ORBES only, never by the collector. Deleted 14 days after delivery.',
+  photoAdded: 'Photo added.',
+  packed: 'Packed',
+  packedToast: 'Packed.',
+  shipTitle: 'Ship the parcel',
+  shipText: 'The collector sees the carrier and the tracking link in YOUR ORDERS. Make the label and the customs papers with your carrier’s own tools.',
+  trackingHint: '3 to 40 letters and digits.',
+  shipped: 'Shipped.',
+  notShipped: 'Not shipped yet.',
+  deliveredTitle: 'Mark delivered',
+  deliveredText: 'The parcel has reached the collector. It is also marked delivered by itself when the collector registers the piece with its card.',
+  deliveredToast: 'Delivered.',
+  reportTitle: 'Report a parcel problem',
+  reportConfirm: 'Report',
+  reportText: 'ORBES decides whether to ship another piece or refund the collector.',
+  reported: 'Reported to ORBES.',
+});
+
+/** What happened to a parcel, as the agent reports it. */
+export const PARCEL_PROBLEM_LABELS = Object.freeze({ BACK_TO_SENDER: 'Back to sender', LOST: 'Lost', DAMAGED: 'Damaged' } as const);
+
+/** A parcel's history, step by step (services/parcels.ts PARCEL_HISTORY_ACTIONS). */
+export const HISTORY_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  'order.pack.start': 'Packing started',
+  'order.pack.scan': 'Card scanned',
+  'order.pack.photo': 'Photo added',
+  'order.pack.check': 'Packed',
+  'order.ship': 'Shipped',
+  'order.deliver': 'Delivered',
+  'order.reship': 'To ship again',
+  'order.case.open': 'Request opened',
+  'order.case.receive': 'Parcel back',
+  'order.case.decide': 'Decided by ORBES',
+  'order.case.cancel': 'Request cancelled',
+  'order.cancel': 'Order cancelled',
+});
+
+/** Who made a parcel's change: a role, never a name. */
+export const HISTORY_BY: Readonly<Record<ParcelActor, string>> = Object.freeze({ ORBES: 'ORBES', LOGISTICS: 'The agent', COLLECTOR: 'The collector', SYSTEM: 'ORBES' });
+
+/** ADDRESS CHANGED's line: 'Changed on 7 Oct 2026 at 14:02 by the collector.' */
+export function addressChangedLine(c: { at: string | Date; by: 'COLLECTOR' | 'STAFF' }): string {
+  const [day, time] = formatDateTime(c.at).split(' · ');
+  return `Changed on ${day}${time ? ` at ${time.replace(/ .*$/, '')}` : ''} by ${c.by === 'COLLECTOR' ? 'the collector' : 'ORBES Client Services'}.`;
+}
+
+/** A card scanned: the right piece, named. */
+export function scanMessage(piece: { productId: string; sku: Pick<LogisticsSku, 'model' | 'variant' | 'sizeLabel'> }): string {
+  return `${skuWords(piece.sku)} · ${piece.productId}: the right piece.`;
+}
+
+/** What may be done with a parcel now, by a role that acts on Logistics (`act`); the server stays the authority. */
+export function parcelActions(view: Pick<ShippingOrderView, 'step' | 'shipment'>, act: boolean): { start: boolean; scan: boolean; photo: boolean; check: boolean; ship: boolean; deliver: boolean; report: boolean } {
+  const packing = view.shipment?.status === 'PACKING';
+  return {
+    start: act && view.step === 'READY_TO_PACK',
+    scan: act && packing,
+    photo: act && packing,
+    check: act && packing,
+    ship: act && view.shipment?.status === 'PACKED',
+    deliver: act && view.shipment?.status === 'SHIPPED',
+    report: act && view.shipment?.status === 'SHIPPED',
+  };
+}
+
+/** Packed may be pressed: every line ticked (the cards by their scans), and the photo added. */
+export function checklistComplete(view: Pick<ShippingOrderView, 'checklist' | 'shipment'>, ticked: ReadonlySet<string>): boolean {
+  return !!view.shipment?.photo && view.checklist.every((l) => (l.byScan ? l.ticked : ticked.has(l.key)));
+}
+
+const TRACKING_RE = /^[A-Za-z0-9][A-Za-z0-9 -]{2,39}$/;
+const MONEY_RE = /^\d{1,9}(?:[.,]\d{1,2})?$/;
+
+/** Ship: a carrier, a tracking number the server takes, each declared value an amount (ORBES staff). */
+export function shipProblem(v: Record<string, string>, declared: readonly { orderId: string; currency: string | null }[]): string | null {
+  if (!UUID_RE.test(v.carrierId ?? '')) return 'Choose a carrier.';
+  if (!TRACKING_RE.test((v.trackingNumber ?? '').trim())) return 'A tracking number has 3 to 40 letters and digits.';
+  for (const d of declared) {
+    const t = (v[`declared_${d.orderId}`] ?? '').trim();
+    if (t === '') continue;
+    if (!d.currency) return 'Enter the order’s price first to declare a value.';
+    if (!MONEY_RE.test(t)) return 'A declared value reads 4800, or 4800.50.';
+  }
+  return null;
+}
+
+/** A parcel problem: what happened, and a note. */
+export function reportProblem(v: Record<string, string>): string | null {
+  if (!(v.kind in PARCEL_PROBLEM_LABELS)) return 'Say what happened.';
+  const note = (v.note ?? '').trim();
+  if (!note) return 'Say what happened in the note.';
+  if (note.length > 1000) return 'A note has at most 1000 characters.';
+  return null;
+}
+
+/** The agent's packing slip (§3.5.3): ORBES's rows without Channel, Release and Source, one block per piece. */
+export interface ShippingSlip {
+  reference: string;
+  buyer: { name: string | null; address: string | null };
+  pieces: { reference: string; piece: string; serial: string | null; size: string; addons: string[]; engraving: string | null; surprise: string | null }[];
+}
+
+export function shippingSlip(view: ShippingOrderView): ShippingSlip {
+  return {
+    reference: view.reference,
+    buyer: { name: view.shipTo.name, address: view.shipTo.address },
+    pieces: view.orders.map((o) => ({
+      reference: o.reference,
+      piece: pieceWords(o),
+      serial: o.piece?.productId ?? null,
+      size: sizeText(o.sizeLabel),
+      addons: o.addons,
+      engraving: o.engraving,
+      surprise: o.surprise,
+    })),
+  };
 }

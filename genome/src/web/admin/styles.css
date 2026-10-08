@@ -3787,6 +3787,39 @@ fieldset.cfield--checks > .cfield__label {
   font-family: var(--font);
 }
 
+/* ── Logistics: a parcel's page (plan NEXT LOT §3.5.3) ───────────────────── */
+
+.checklist {
+  display: grid;
+  gap: 14px;
+  margin: 22px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.checklist .ccheck__box:disabled + .ccheck__mark {
+  border-style: dashed;
+}
+
+.parcel__scanner,
+.parcel__photo {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  margin: 22px 0 0;
+}
+
+.parcel__scanner .parcel__scan,
+.parcel__scanner .sale__scan {
+  width: 100%;
+  max-width: 420px;
+}
+
+.parcel__marks {
+  display: inline-grid;
+  gap: 6px;
+}
+
 /* ── Orders, the atelier, the settings (plan LIVE RELEASE+) ──────────────── */
 
 .panel__text {

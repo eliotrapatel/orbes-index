@@ -1,12 +1,14 @@
 /**
  * Logistics in the console (plan NEXT LOT of 2026-10-07, §3.5.3 and §3.5.4.1; steps 5.11a to 5.11c) — the pure models
  * and the API client: model/logistics.ts against the server's rules (its bounds mirrored and compared), the tabs and
- * their counters, the Location filter, a size's words and marks, the dialogs' checks and what they send, what each role
- * may do; AdminApi's Logistics paths, methods and bodies.
+ * their counters, the Location filter, a size's words and marks, To ship and a parcel (its steps, its checklist, the
+ * agent's packing slip), the dialogs' checks and what they send, what each role may do; AdminApi's Logistics paths, methods and bodies.
  */
 import { describe, expect, it } from 'vitest';
 import { LOGISTICS_LIMITS as SERVER_LOGISTICS_LIMITS } from '../../src/server/services/logistics.js';
 import { ORDER_CASE_LIMITS } from '../../src/server/services/order-cases.js';
+import { PACKING_PHOTO_MAX_BYTES, PARCEL_HISTORY_ACTIONS } from '../../src/server/services/parcels.js';
+import { PHOTO_MAX_BYTES } from '../../src/web/admin/model/photo.js';
 import { STOCK_MOVE_MAX, STOCK_NOTE_MAX } from '../../src/server/services/stock.js';
 import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
 import {
@@ -35,9 +37,24 @@ import {
   transferProblem,
   unbackedNotice,
 } from '../../src/web/admin/model/logistics.js';
+import {
+  checklistComplete,
+  HISTORY_BY,
+  HISTORY_LABELS,
+  othersText,
+  PACKING_PHOTO_MAX_SIDE,
+  PARCEL_STEP_LABELS,
+  parcelActions,
+  pieceWords,
+  reportProblem,
+  scanMessage,
+  shippingSlip,
+  shipProblem,
+  shipToLine,
+} from '../../src/web/admin/model/logistics.js';
 import { can, logisticsOnly } from '../../src/web/admin/model/permissions.js';
 import { href, parseHash } from '../../src/web/admin/router.js';
-import { ADMIN_ROLES, ORDER_CASE_KINDS, STOCK_CORRECTION_STATUSES, type LogisticsSku } from '../../src/web/admin/types.js';
+import { ADMIN_ROLES, ORDER_CASE_KINDS, SHIPMENT_STATUSES, STOCK_CORRECTION_STATUSES, type LogisticsSku, type ShippingOrderView } from '../../src/web/admin/types.js';
 
 const ID = '0f0e0d0c-0b0a-4908-8706-050403020100';
 const LOC = '1f0e0d0c-0b0a-4908-8706-050403020100';
@@ -65,10 +82,12 @@ describe('the mirrors of the server', () => {
 
 describe('the page', () => {
   it('reads its tab from the query, the first one otherwise; the counters apart from the words', () => {
-    expect(LOGISTICS_TABS.map((t) => t.id)).toEqual(['stock', 'returns', 'corrections']);
-    expect(logisticsTab({})).toBe('stock');
+    // To ship first: the agent's daily work (Default (mine), §5.1).
+    expect(LOGISTICS_TABS.map((t) => t.id)).toEqual(['ship', 'stock', 'returns', 'corrections']);
+    expect(logisticsTab({})).toBe('ship');
     expect(logisticsTab({ tab: 'corrections' })).toBe('corrections');
-    expect(logisticsTab({ tab: 'atelier' })).toBe('stock');
+    expect(logisticsTab({ tab: 'atelier' })).toBe('ship');
+    expect(tabText('ship', { ship: 3 })).toEqual(['To ship', '(3)']);
     expect(tabText('returns', { returns: 2, corrections: 0 })).toEqual(['Returns', '(2)']);
     expect(tabText('corrections', { returns: 2, corrections: 0 })).toEqual(['Corrections', '(0)']);
     // Stock has no counter.
@@ -162,6 +181,95 @@ describe('the dialogs', () => {
   });
 });
 
+const PARCEL: ShippingOrderView = {
+  id: ID,
+  reference: 'OR-0F0E0D0C',
+  location: { id: LOC, name: 'FRANCE WAREHOUSE' },
+  step: 'PACKING',
+  readySince: '2026-11-03T09:00:00.000Z',
+  late: false,
+  orders: [
+    { orderId: ID, reference: 'OR-0F0E0D0C', status: 'PAID', model: 'MONOLITHE', variant: 'BLUE', sizeLabel: '52', skuCode: 'MNL-BLU-52', addons: ['INITIALS'], engraving: 'A. & L.', surprise: null, piece: { productId: 'O26-J-00184', scanned: true } },
+    { orderId: OTHER, reference: 'OR-2F0E0D0C', status: 'PAID', model: 'ORBITE', variant: null, sizeLabel: null, skuCode: 'ORB', addons: [], engraving: null, surprise: 'A silk pouch', piece: null },
+  ],
+  shipTo: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: null, phone: null },
+  addressChanged: null,
+  shipment: { id: ID, status: 'PACKING', packingStartedAt: '2026-11-03T10:00:00.000Z', packedAt: null, shippedAt: null, deliveredAt: null, photo: false, carrier: null, trackingNumber: null, trackingUrl: null },
+  checklist: [
+    { key: `piece:${ID}`, label: 'The right piece: its card scanned (1 of 2)', byScan: true, ticked: true },
+    { key: `card:${ID}`, label: 'The card, its claim code visible (1 of 2)', byScan: false, ticked: false },
+    { key: 'box', label: 'The box and the pouch', byScan: false, ticked: false },
+  ],
+  history: [],
+  carriers: [{ id: LOC, name: 'Colissimo' }],
+};
+
+describe('To ship and a parcel', () => {
+  it('names a parcel\'s step, its other pieces, a piece, where it goes, and a card scanned', () => {
+    expect(Object.keys(PARCEL_STEP_LABELS).sort()).toEqual([...SHIPMENT_STATUSES.filter((x) => x !== 'CANCELLED'), 'NOT_READY', 'READY_TO_PACK'].sort());
+    expect(PARCEL_STEP_LABELS.READY_TO_PACK).toBe('READY TO PACK');
+    expect(othersText(2)).toBe('+ 2 pieces');
+    expect(othersText(1)).toBe('+ 1 piece');
+    expect(othersText(0)).toBeNull();
+    expect(pieceWords({ model: 'MONOLITHE', variant: 'BLUE' })).toBe('MONOLITHE · BLUE');
+    expect(pieceWords({ model: 'MONOLITHE', variant: null })).toBe('MONOLITHE');
+    expect(shipToLine({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris\n', country: 'FR' })).toBe('Ada Martin · 75007 Paris · FR');
+    expect(shipToLine({ name: null, address: null, country: null })).toBe('Not entered');
+    expect(scanMessage({ productId: 'O26-J-00184', sku: SKU })).toBe('MONOLITHE · BLUE · 52 · O26-J-00184: the right piece.');
+  });
+
+  it('names every step of a parcel\'s history, by a role, never a name', () => {
+    for (const a of PARCEL_HISTORY_ACTIONS) expect(HISTORY_LABELS[a], a).toBeTruthy();
+    expect(Object.values(HISTORY_BY)).toEqual(['ORBES', 'The agent', 'The collector', 'ORBES']);
+  });
+
+  it('offers each step where the server takes it; Packed once every line is ticked, every card scanned and the photo added', () => {
+    expect(parcelActions({ step: 'READY_TO_PACK', shipment: null }, true)).toMatchObject({ start: true, scan: false, check: false, ship: false });
+    expect(parcelActions(PARCEL, true)).toMatchObject({ start: false, scan: true, photo: true, check: true, ship: false, deliver: false, report: false });
+    expect(parcelActions(PARCEL, false)).toMatchObject({ start: false, scan: false, photo: false, check: false });
+    expect(parcelActions({ step: 'PACKED', shipment: { ...PARCEL.shipment!, status: 'PACKED' } }, true)).toMatchObject({ ship: true, scan: false });
+    expect(parcelActions({ step: 'SHIPPED', shipment: { ...PARCEL.shipment!, status: 'SHIPPED' } }, true)).toMatchObject({ deliver: true, report: true });
+    const all = new Set([`card:${ID}`, 'box']);
+    expect(checklistComplete(PARCEL, all)).toBe(false); // no photo
+    const withPhoto = { ...PARCEL, shipment: { ...PARCEL.shipment!, photo: true } };
+    expect(checklistComplete(withPhoto, all)).toBe(true);
+    expect(checklistComplete(withPhoto, new Set(['box']))).toBe(false);
+    // A card's line is ticked by its scan, never by hand.
+    expect(checklistComplete({ ...withPhoto, checklist: withPhoto.checklist.map((l) => ({ ...l, ticked: false })) }, new Set([...all, `piece:${ID}`]))).toBe(false);
+  });
+
+  it('checks Ship and a parcel problem', () => {
+    expect(shipProblem({ carrierId: '', trackingNumber: '6A123' }, [])).toBe('Choose a carrier.');
+    expect(shipProblem({ carrierId: LOC, trackingNumber: '6A' }, [])).toBe('A tracking number has 3 to 40 letters and digits.');
+    expect(shipProblem({ carrierId: LOC, trackingNumber: '6A12345678901' }, [])).toBeNull();
+    const declared = [{ orderId: ID, currency: 'EUR' }];
+    expect(shipProblem({ carrierId: LOC, trackingNumber: '6A123', [`declared_${ID}`]: '4800.50' }, declared)).toBeNull();
+    expect(shipProblem({ carrierId: LOC, trackingNumber: '6A123', [`declared_${ID}`]: 'a lot' }, declared)).toBe('A declared value reads 4800, or 4800.50.');
+    expect(shipProblem({ carrierId: LOC, trackingNumber: '6A123', [`declared_${ID}`]: '10' }, [{ orderId: ID, currency: null }])).toMatch(/price first/);
+    expect(reportProblem({ kind: '', note: 'x' })).toBe('Say what happened.');
+    expect(reportProblem({ kind: 'LOST', note: '' })).toBe('Say what happened in the note.');
+    expect(reportProblem({ kind: 'DAMAGED', note: 'The box arrived crushed.' })).toBeNull();
+  });
+
+  it('builds the agent\'s packing slip from the parcel: one block per piece, without Channel, Release, Source or a price', () => {
+    const slip = shippingSlip(PARCEL);
+    expect(slip).toEqual({
+      reference: 'OR-0F0E0D0C',
+      buyer: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' },
+      pieces: [
+        { reference: 'OR-0F0E0D0C', piece: 'MONOLITHE · BLUE', serial: 'O26-J-00184', size: '52', addons: ['INITIALS'], engraving: 'A. & L.', surprise: null },
+        { reference: 'OR-2F0E0D0C', piece: 'ORBITE', serial: null, size: 'ONE SIZE', addons: [], engraving: null, surprise: 'A silk pouch' },
+      ],
+    });
+    expect(Object.keys(slip)).not.toEqual(expect.arrayContaining(['channel', 'release', 'sourceReference']));
+  });
+
+  it('scales the packing photo to 1600 px, within the server\'s 1 MiB', () => {
+    expect(PACKING_PHOTO_MAX_SIDE).toBe(1600);
+    expect(PHOTO_MAX_BYTES).toBe(PACKING_PHOTO_MAX_BYTES);
+  });
+});
+
 describe('what each role may do', () => {
   it('lets the agent read and act on its locations only, ORBES\'s OPERATOR approve and act at once, an AUDITOR read', () => {
     const roles = [...ADMIN_ROLES];
@@ -192,6 +300,14 @@ describe('the API client', () => {
     await api.setLogisticsMinimum({ skuId: ID, locationId: LOC, minimum: 4 });
     await api.countIn({ skuId: ID, productIds: ['O26-J-00184'], note: 'On the shelf.' });
     await api.parcels({ locationId: LOC });
+    await api.parcel(ID);
+    await api.startPacking(ID);
+    await api.scanPackingCard(ID, { code: 'AAAA' });
+    await api.setPackingPhoto(ID, new Blob([new Uint8Array([0xff, 0xd8])], { type: 'image/jpeg' }));
+    await api.checkPacked(ID, ['box']);
+    await api.shipParcel(ID, { carrierId: LOC, trackingNumber: '6A123' });
+    await api.markParcelDelivered(ID);
+    await api.reportParcel(ID, { kind: 'LOST', note: 'Never arrived.' });
     await api.casesToReceive();
     await api.receiveCase(ID, { pieceState: 'OK', note: null });
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
@@ -204,6 +320,14 @@ describe('the API client', () => {
       'PUT /api/admin/logistics/minimums',
       'POST /api/admin/logistics/count-in',
       `GET /api/admin/logistics/orders?locationId=${LOC}`,
+      `GET /api/admin/logistics/orders/${ID}`,
+      `POST /api/admin/logistics/orders/${ID}/packing`,
+      `POST /api/admin/logistics/orders/${ID}/packing/scan`,
+      `PUT /api/admin/logistics/orders/${ID}/packing/photo`,
+      `POST /api/admin/logistics/orders/${ID}/packing/check`,
+      `POST /api/admin/logistics/orders/${ID}/ship`,
+      `POST /api/admin/logistics/orders/${ID}/delivered`,
+      `POST /api/admin/logistics/orders/${ID}/order-case`,
       'GET /api/admin/logistics/order-cases',
       `POST /api/admin/logistics/order-cases/${ID}/received`,
     ]);
@@ -213,7 +337,12 @@ describe('the API client', () => {
     expect(bodies[4]).toEqual({ note: 'Counted again: 12.' });
     expect(bodies[6]).toEqual({ skuId: ID, locationId: LOC, minimum: 4 });
     expect(bodies[7]).toEqual({ skuId: ID, productIds: ['O26-J-00184'], note: 'On the shelf.' });
-    expect(bodies[10]).toEqual({ pieceState: 'OK', note: null });
+    expect(calls[12]!.init.body).toBeInstanceOf(Blob);
+    expect((calls[12]!.init.headers as Record<string, string>)['content-type']).toBe('image/jpeg');
+    expect(bodies[13]).toEqual({ ticked: ['box'] });
+    expect(bodies[14]).toEqual({ carrierId: LOC, trackingNumber: '6A123' });
+    expect(bodies[16]).toEqual({ kind: 'LOST', note: 'Never arrived.' });
+    expect(bodies[18]).toEqual({ pieceState: 'OK', note: null });
     expect(calls.every((c) => c.init.method === 'GET' || (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
   });
 });

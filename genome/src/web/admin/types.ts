@@ -2474,7 +2474,8 @@ export interface OrderView {
   source: { liveEntryId: string | null; piece: number; dropEntryId: string | null; shopRequestId: string | null };
   release: { id: string; title: string } | null;
   accountId: string;
-  model: { id: string; name: string };
+  /** Its variant's label (BLUE), or null: the packing slip's Piece reads MONOLITHE · BLUE (plan NEXT LOT §3.5.3). */
+  model: { id: string; name: string; variant: string | null };
   sizeLabel: string | null;
   skuId: string | null;
   priceMinor: number | null;
@@ -2839,6 +2840,71 @@ export interface OnItsWayRow {
   carrier: { id: string; name: string };
   trackingNumber: string;
   trackingUrl: string;
+}
+
+/** One order of a parcel as the agent packs it: never a price. */
+export interface ParcelPiece {
+  orderId: string;
+  reference: string;
+  status: OrderStatus;
+  model: string;
+  variant: string | null;
+  sizeLabel: string | null;
+  skuCode: string | null;
+  /** The add-ons' labels only. */
+  addons: string[];
+  engraving: string | null;
+  surprise: string | null;
+  /** The piece bound by its packing scan, and whether it is scanned in the current shipment. */
+  piece: { productId: string; scanned: boolean } | null;
+}
+
+/** A line of the packing checklist: ticked by hand, or (`byScan`) only by the card's scan. */
+export interface ChecklistLine {
+  key: string;
+  label: string;
+  byScan: boolean;
+  ticked: boolean;
+}
+
+/** Who made a change of a parcel, as its history says it: a role, never a name. */
+export type ParcelActor = 'ORBES' | 'LOGISTICS' | 'COLLECTOR' | 'SYSTEM';
+
+/** GET /api/admin/logistics/orders/:id: a parcel as the agent and ORBES read it. No price, email, account nor release. */
+export interface ShippingOrderView {
+  /** The parcel's key: its first order. */
+  id: string;
+  reference: string;
+  location: { id: string; name: string };
+  step: ParcelStep;
+  readySince: Iso | null;
+  late: boolean;
+  orders: ParcelPiece[];
+  shipTo: { name: string | null; address: string | null; country: string | null; phone: string | null };
+  /** ADDRESS CHANGED: when and by whom the address was replaced; null until then. */
+  addressChanged: { at: Iso; by: 'COLLECTOR' | 'STAFF' } | null;
+  shipment: {
+    id: string;
+    status: ShipmentStatus;
+    packingStartedAt: Iso;
+    packedAt: Iso | null;
+    shippedAt: Iso | null;
+    deliveredAt: Iso | null;
+    photo: boolean;
+    carrier: { id: string; name: string } | null;
+    trackingNumber: string | null;
+    trackingUrl: string | null;
+  } | null;
+  checklist: ChecklistLine[];
+  history: { action: string; at: Iso; by: ParcelActor; order: string }[];
+  /** The active carriers, for Ship (the agent never reads the carriers' route). */
+  carriers: { id: string; name: string }[];
+}
+
+/** POST …/packing/scan: the piece the card named, and the parcel after it. */
+export interface PackingScan {
+  piece: { productId: string; sku: LogisticsSku };
+  parcel: ShippingOrderView;
 }
 
 /** GET /api/admin/logistics/orders: To ship and On its way, and the scope's locations (the Location filter). */
