@@ -2867,6 +2867,17 @@ describe('a model\'s Sizes and a salon request\'s size (plan NEXT-NINE, AC-01; p
     expect(removeDialog({ ...monolithe.sizes[1]!, label: '58', awaiting: 4 }).text[1]).toBe('4 orders wait for size 58: once it is set aside, the supplier-order draft no longer orders it for them.');
     expect(removeDialog({ ...monolithe.sizes[1]!, label: '58', awaiting: 1 }).text[1]).toBe('1 order waits for size 58: once it is set aside, the supplier-order draft no longer orders it for them.');
     expect(removeDialog(monolithe.sizes[3]!).title).toBe('Remove ONE SIZE');
+    // A label that carries its word is named as written, never « Size SIZE 52 ».
+    expect(removeDialog({ ...monolithe.sizes[1]!, label: 'SIZE 52', awaiting: 2 })).toEqual({
+      title: 'Remove SIZE 52',
+      text: [
+        'SIZE 52 has stock, orders or pieces, so it is set aside. New releases, supplier orders and the private salon no longer offer it. Its stock, pieces, orders and history keep it, and you can reinstate it.',
+        '2 orders wait for SIZE 52: once it is set aside, the supplier-order draft no longer orders it for them.',
+      ],
+      confirm: 'Set aside',
+    });
+    expect(removeDialog({ ...monolithe.sizes[4]!, label: 'SIZE 60' }).text).toEqual(['SIZE 60 has no stock, order or piece: it is removed, with its SKU MNL-RG-60.']);
+    expect(reinstateDialog({ label: 'SIZE 56' }).title).toBe('Reinstate SIZE 56');
     expect(reinstateDialog(monolithe.sizes[5]!)).toEqual({ title: 'Reinstate size 58', text: 'New releases, supplier orders and the private salon offer it again.', confirm: 'Reinstate' });
     expect(removable(monolithe, monolithe.sizes[0]!)).toBe(true);
     expect(removable(monolithe, monolithe.sizes[5]!)).toBe(false);

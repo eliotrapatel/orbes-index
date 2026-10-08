@@ -587,6 +587,8 @@ describe('DECLARED SIZES (NEXT LOT §3.3)', () => {
     await sizes().removeSize(ring, s58, admin);
     expect(await refusal(resolve('58'))).toEqual({ code: 'SIZE_SET_ASIDE', status: 409, message: `Size 58 of ${parent} is set aside. Reinstate it on the model’s page to offer it again.` });
     expect(await resolve('58', { allowSetAside: true })).toEqual({ skuId: s58, label: '58', typed: true });
+    // A label that carries its word is named as written, never « Size SIZE 53 ».
+    expect(await refusal(resolve('SIZE 53'))).toMatchObject({ code: 'SIZE_NOT_DECLARED', message: `SIZE 53 is not one of ${parent}’s sizes (50, 52, 54, SIZE 52). Add it on the model’s page, in the Catalogue.` });
     // A variant is named with its label; a model of one size lists ONE SIZE.
     const main = await model('OFF-MN', 'ONE_SIZE', 'PENDANT');
     const blue = await h.ctx.services.catalog.createVariant(main, { label: 'Blue', swatch: '#1F3A6B', skuPrefix: 'OFF-BL', mainLabel: 'Steel', mainSwatch: '#9D9B96' }, SYSTEM_ACTOR);

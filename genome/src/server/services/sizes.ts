@@ -211,8 +211,8 @@ export function listEntryOf(type: SizeType | null, label: string | null | undefi
   return standardSizes(type).includes(entry) ? entry : null;
 }
 
-/** How a size is named in a sentence: « Size 52 », or « ONE SIZE ». */
-const sizeName = (label: string | null) => (label === null ? ONE_SIZE_LABEL : `Size ${label}`);
+/** How a size is named in a sentence: « Size 52 », a label that carries its word as written (« SIZE 52 », never « Size SIZE 52 »), or « ONE SIZE ». */
+const sizeName = (label: string | null) => (label === null ? ONE_SIZE_LABEL : /^(SIZE\b|ONE SIZE$)/i.test(label.trim()) ? label : `Size ${label}`);
 /** How a size is listed: « 52 », or « ONE SIZE ». */
 const sizeText = (label: string | null) => label ?? ONE_SIZE_LABEL;
 

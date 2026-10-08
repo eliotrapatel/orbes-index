@@ -142,8 +142,12 @@ export function deriveSku(prefix: string, label?: string | null): string {
 
 /** A size as a list names it: « 52 », or « ONE SIZE ». */
 export const sizeText = (label: string | null): string => label ?? ONE_SIZE_LABEL;
-/** A size as a sentence names it: « Size 52 », or « ONE SIZE ». */
-export const sizeName = (label: string | null): string => (label === null ? ONE_SIZE_LABEL : `Size ${label}`);
+/** A label that already carries its word (« SIZE 52 », « ONE SIZE »): a sentence names it as written, never « Size SIZE 52 ». */
+const worded = (label: string): boolean => /^(SIZE\b|ONE SIZE$)/i.test(label.trim());
+/** A size as a sentence names it: « Size 52 », « SIZE 52 » as written, or « ONE SIZE ». */
+export const sizeName = (label: string | null): string => (label === null ? ONE_SIZE_LABEL : worded(label) ? label : `Size ${label}`);
+/** A size inside a sentence or a title: « size 52 », « SIZE 52 » as written, or « ONE SIZE ». */
+const sizeOf = (label: string | null): string => (label === null ? ONE_SIZE_LABEL : worded(label) ? label : `size ${label}`);
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -299,21 +303,20 @@ export function tickProblem(c: { adds: string[]; removes: string[]; setsAside: s
 /** Remove's confirm dialog for one size: removed when nothing uses it, otherwise set aside (and the orders waiting for it). */
 export function removeDialog(row: Pick<ModelSizeRow, 'label' | 'code' | 'used' | 'awaiting'>): { title: string; text: string[]; confirm: string } {
   const named = sizeName(row.label);
-  const title = row.label === null ? `Remove ${ONE_SIZE_LABEL}` : `Remove size ${row.label}`;
+  const title = `Remove ${sizeOf(row.label)}`;
   if (!row.used) return { title, text: [`${named} has no stock, order or piece: it is removed, with its SKU ${row.code}.`], confirm: 'Remove' };
   const text = [
     `${named} has stock, orders or pieces, so it is set aside. New releases, supplier orders and the private salon no longer offer it. Its stock, pieces, orders and history keep it, and you can reinstate it.`,
   ];
   if (row.awaiting > 0) {
-    const of = row.label === null ? ONE_SIZE_LABEL : `size ${row.label}`;
-    text.push(`${row.awaiting === 1 ? '1 order waits' : `${row.awaiting} orders wait`} for ${of}: once it is set aside, the supplier-order draft no longer orders it for them.`);
+    text.push(`${row.awaiting === 1 ? '1 order waits' : `${row.awaiting} orders wait`} for ${sizeOf(row.label)}: once it is set aside, the supplier-order draft no longer orders it for them.`);
   }
   return { title, text, confirm: 'Set aside' };
 }
 
 /** Reinstate's confirm dialog. */
 export function reinstateDialog(row: Pick<ModelSizeRow, 'label'>): { title: string; text: string; confirm: string } {
-  return { title: row.label === null ? `Reinstate ${ONE_SIZE_LABEL}` : `Reinstate size ${row.label}`, text: SIZES_TEXT.reinstateText, confirm: 'Reinstate' };
+  return { title: `Reinstate ${sizeOf(row.label)}`, text: SIZES_TEXT.reinstateText, confirm: 'Reinstate' };
 }
 
 /** Whether Remove is pressed on this size: an offered one, never the last offered. */
