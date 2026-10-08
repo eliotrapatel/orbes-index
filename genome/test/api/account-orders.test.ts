@@ -17,6 +17,7 @@ import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
+import { stockPiece } from '../support/fulfil.js';
 
 type Json = Record<string, any>;
 const MINUTE = 60_000;
@@ -92,14 +93,12 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     await f.drops.confirm(d.id, entry, 'Sold by phone.', f.admin);
     ids.draw = (await h.ctx.db.selectFrom('orders').select('id').where('drop_entry_id', '=', entry).executeTakeFirstOrThrow()).id;
 
-    // The private salon: terms, buyer and engraving entered; paid, made at the atelier, shipped, delivered.
+    // The private salon: terms, buyer and engraving entered; paid, its piece taken from the stock, shipped, delivered.
     ids.delivered = await salonOrder(mineId);
     await orders().setTerms(ids.delivered, { sizeLabel: '54', priceMinor: 490_000, currency: 'EUR', engravingText: 'A. & L.' }, f.admin);
     await orders().setBuyer(ids.delivered, { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris' }, f.admin);
     await step(ids.delivered, { to: 'PAID', note: 'Paid by transfer.' });
-    const bench = await h.ctx.db.selectFrom('bench_items').select('id').where('order_id', '=', ids.delivered).executeTakeFirstOrThrow();
-    await h.ctx.services.atelier.start(bench.id, f.admin);
-    await h.ctx.services.atelier.done(bench.id, { material: '925 STERLING SILVER' }, f.admin);
+    await stockPiece(h.ctx, { orderId: ids.delivered, material: '925 STERLING SILVER' }, f.admin);
     await step(ids.delivered, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A 1234 5678 901', declaredValueMinor: 470_123 });
     await step(ids.delivered, { to: 'DELIVERED' });
 

@@ -1,6 +1,6 @@
 /**
- * The stock (plan LIVE RELEASE+ of 2026-10-04, choices 8, 9 and 16; migration 0022): pieces made in advance count in
- * stock, the rest are made to order (services/orders.ts).
+ * The stock (plan LIVE RELEASE+ of 2026-10-04, choices 8, 9 and 16; migration 0022): the pieces counted at each
+ * location; an order without a piece available waits for supplier stock (services/orders.ts, plan NEXT LOT §3.5).
  *
  *   locations  FRANCE WAREHOUSE (the default: draws and the private salon's orders go there when nothing else names a
  *              location) and LOGISTICS WAREHOUSE, created at the first boot (`ensureStockSetup`, idempotent: only while
@@ -27,7 +27,8 @@
  * the rows of the order or the release it serves: two orders never take the same last piece, and a transfer never moves
  * a piece an order has just reserved. Each movement is journaled (`stock.move`, services/journal.ts) in its transaction; the
  * console's are audited (`stock.transfer`, `stock.adjust`, ids and counts only), as are the first boot's presets
- * (`stock.setup`).
+ * (`stock.setup`). A count corrected up and a transfer in serve the orders waiting for that size there, the oldest
+ * first (services/orders.ts serveWaiting), in the same transaction.
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
@@ -38,6 +39,7 @@ import { conflict, DomainError, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { writeJournal } from './journal.js';
+import { serveWaiting } from './orders.js';
 import { offeredSku } from './sizes.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -519,7 +521,8 @@ export class StockService {
   /**
    * Move `quantity` pieces (1 to STOCK_MOVE_MAX) of a SKU from one location to another: two movements, TRANSFER_OUT
    * and TRANSFER_IN, paired by one transfer id, in one transaction. Only available pieces move (409
-   * STOCK_NOT_AVAILABLE): those reserved by orders stay where their orders are. Audited `stock.transfer`.
+   * STOCK_NOT_AVAILABLE): those reserved by orders stay where their orders are. The pieces moved in serve the orders
+   * waiting for them there (`order.serve`). Audited `stock.transfer`.
    */
   async transfer(input: { skuId: string; fromLocationId: string; toLocationId: string; quantity: number; note?: string | null }, actor: Actor): Promise<{ transferId: string; from: StockLevel; to: StockLevel }> {
     const skuId = knownSku(input?.skuId);
@@ -537,15 +540,17 @@ export class StockService {
       const transferId = randomUUID();
       await recordMovement(tx, { skuId, locationId: from, delta: -quantity, reason: 'TRANSFER_OUT', transferId, note }, actor, now);
       await recordMovement(tx, { skuId, locationId: to, delta: quantity, reason: 'TRANSFER_IN', transferId, note }, actor, now);
+      const served = await serveWaiting(tx, skuId, to, actor, now);
       await this.audit.record({ actor, action: 'stock.transfer', targetType: 'sku', targetId: skuId, details: { transferId, from, to, quantity, ...(note ? { noted: true } : {}) } }, tx);
+      for (const n of served) await this.audit.record(n, tx);
       return { transferId, from: await stockLevel(tx, skuId, from), to: await stockLevel(tx, skuId, to) };
     });
   }
 
   /**
    * Correct the count of a SKU at a location by `delta` (± 1 to STOCK_MOVE_MAX), with the reason in a note (required):
-   * a count, a piece found, a piece damaged. Never below what orders reserve there (409 STOCK_NOT_AVAILABLE).
-   * Audited `stock.adjust`.
+   * a count, a piece found, a piece damaged. Never below what orders reserve there (409 STOCK_NOT_AVAILABLE). A count
+   * up serves the orders waiting there (`order.serve`). Audited `stock.adjust`.
    */
   async adjust(input: { skuId: string; locationId: string; delta: number; note: string }, actor: Actor): Promise<StockLevel> {
     const skuId = knownSku(input?.skuId);
@@ -559,7 +564,9 @@ export class StockService {
       const level = await stockLevel(tx, skuId, locationId);
       if (delta < 0 && level.available + delta < 0) throw notAvailable(Math.max(0, level.available));
       await recordMovement(tx, { skuId, locationId, delta, reason: 'ADJUSTED', note }, actor, now);
+      const served = delta > 0 ? await serveWaiting(tx, skuId, locationId, actor, now) : [];
       await this.audit.record({ actor, action: 'stock.adjust', targetType: 'sku', targetId: skuId, details: { locationId, delta } }, tx);
+      for (const n of served) await this.audit.record(n, tx);
       return stockLevel(tx, skuId, locationId);
     });
   }

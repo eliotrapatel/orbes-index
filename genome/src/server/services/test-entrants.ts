@@ -49,8 +49,9 @@
  * END TEST (ADMIN, the phrase `END TEST <8>`; RUNNING, DONE, STOPPED or INTERRUPTED): the bots stopped; the TEST REPORT
  * computed BEFORE the clean-up (`report`, kept on the run: five checks over the whole release, real and test entries
  * together, and the test's peaks); then, for the test's accounts in that release: their open orders cancelled one by one
- * as Client Services cancels one (the stock goes back, a piece to make is cancelled and its identity retired), the
- * parents first, with the GIFT orders travelling with them (the next nine's welcome gifts, BP-19 T5: cancelled with
+ * as Client Services cancels one (the stock goes back and serves the next order waiting for it; no serial is retired,
+ * an order holding no reserved identity since plan NEXT LOT §3.5), the parents first, those awaiting supplier stock
+ * before those holding stock (so the pieces freed serve real waiting orders, not test orders about to be cancelled), with the GIFT orders travelling with them (the next nine's welcome gifts, BP-19 T5: cancelled with
  * their order, their grant waiting again) and the credit taken off them given back (its uses released, the grant's
  * expiry unchanged); then checked: no GIFT order of the test left RESERVED or PAID, no credit left taken off a cancelled
  * order of the test (any left cancelled or given back through OrderService, audited as it audits them); their ENTERED
@@ -1481,10 +1482,11 @@ export class TestEntrantService {
 
   /**
    * The test's orders in release `d` cancelled one by one as Client Services cancels one (OrderService.transition: the
-   * stock goes back, a piece to make is cancelled and its identity retired, a paid one gets its credit note; BP-19 T5:
+   * stock goes back and serves the next order waiting for it, a paid one gets its credit note; BP-19 T5:
    * its credit given back and the GIFT orders travelling with it cancelled, their grant waiting again), with the GIFT
    * orders that travel with them (a PLATINE or PALLADIUM test entrant's welcome gift, `drop_id` NULL): the parents first
-   * (`with_order_id` NULL), then by `reserved_at`, each re-read just before its cancel, so that one its parent's
+   * (`with_order_id` NULL), those awaiting supplier stock before those holding stock (plan NEXT LOT §3.5.9: the pieces
+   * freed then serve real waiting orders), then by `reserved_at`, each re-read just before its cancel, so that one its parent's
    * cancellation already closed is skipped. Then the check: no GIFT order of the test left RESERVED or PAID (any left is
    * cancelled the same way), no credit left taken off a cancelled order of the test (any left is given back,
    * OrderService.releaseCancelledCredit, audited `order.credit.release`). Returns the orders cancelled (GIFT orders
@@ -1526,6 +1528,7 @@ export class TestEntrantService {
         .select(['id', 'channel'])
         .where('status', 'in', ['RESERVED', 'PAID'])
         .orderBy(sql`with_order_id IS NOT NULL`)
+        .orderBy(sql`reservation IS NOT DISTINCT FROM 'STOCK'`)
         .orderBy('reserved_at')
         .orderBy('id')
         .execute();

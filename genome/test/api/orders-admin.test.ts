@@ -15,6 +15,7 @@ import { orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createAccount, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
+import { stockPiece } from '../support/fulfil.js';
 
 type Json = Record<string, any>;
 const MINUTE = 60_000;
@@ -58,15 +59,16 @@ describe('orders, the atelier and their settings: the console\'s routes', () => 
     const board = safeJson(await auditor.get('/api/admin/orders?channel=SALON')) as Json;
     expect(board.columns.map((c: Json) => c.status)).toEqual(['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED']);
     expect(board.columns[0].items.map((x: Json) => x.id)).toContain(id);
-    expect(board.delays).toMatchObject({ reservedDays: 2, readyDays: 3, shippedDays: 10, unregisteredDays: 30 });
+    expect(board.delays).toMatchObject({ reservedDays: 2, readyDays: 5, shippedDays: 10, unregisteredDays: 30 });
     expect(errorOf(await auditor.get('/api/admin/orders?channel=SHOP')).code).toBe('VALIDATION_FAILED');
     expect((await auditor.get('/api/admin/orders/00000000-0000-4000-8000-000000000000')).statusCode).toBe(404);
 
-    // Terms: the size (a piece to make, none in stock), the price; the engraving.
+    // Terms: the size (none in stock: it waits for supplier stock), the price; the engraving.
     expect(errorOf(await op.patch(`/api/admin/orders/${id}/terms`, {})).code).toBe('VALIDATION_FAILED');
     expect(errorOf(await op.patch(`/api/admin/orders/${id}/terms`, { priceMinor: 480_000 })).code).toBe('VALIDATION_FAILED');
     const terms = safeJson(await op.patch(`/api/admin/orders/${id}/terms`, { sizeLabel: '52', priceMinor: 480_000, currency: 'EUR', engravingText: 'A. & L.' })) as Json;
-    expect(terms.order).toMatchObject({ sizeLabel: '52', priceMinor: 480_000, currency: 'EUR', engravingText: 'A. & L.', reservation: 'BENCH', bench: { status: 'TO_MAKE' } });
+    expect(terms.order).toMatchObject({ sizeLabel: '52', priceMinor: 480_000, currency: 'EUR', engravingText: 'A. & L.', reservation: 'AWAITING' });
+    expect(terms.order).not.toHaveProperty('bench');
 
     // The buyer: in clear for an OPERATOR, masked for an AUDITOR, never in the audit log.
     const buyer = safeJson(await op.request('PUT', `/api/admin/orders/${id}/buyer`, { body: { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris' } })) as Json;
@@ -83,9 +85,9 @@ describe('orders, the atelier and their settings: the console\'s routes', () => 
     expect((await op.get(`/api/admin/orders.csv?q=${orderReference(id)}`)).body).toContain('"Jane Doe","1 rue de la Paix\n75002 Paris"');
     expect(errorOf(await op.request('PUT', `/api/admin/orders/${id}/buyer`, { body: { name: 'Jane\nDoe', address: null } })).code).toBe('VALIDATION_FAILED');
 
-    // The location: its piece to make goes there.
+    // The location: it waits there.
     const moved = safeJson(await op.post(`/api/admin/orders/${id}/location`, { locationId: logistics })) as Json;
-    expect(moved.order).toMatchObject({ location: { id: logistics }, reservation: 'BENCH' });
+    expect(moved.order).toMatchObject({ location: { id: logistics }, reservation: 'AWAITING' });
 
     // Steps: SHIPPED before the piece is ready is refused; a RETURN is not a step of this page; CANCELLED needs a note.
     expect(errorOf(await op.post(`/api/admin/orders/${id}/transition`, { to: 'RETURNED', outcome: 'ARCHIVED', note: 'x' })).code).toBe('VALIDATION_FAILED');
@@ -97,16 +99,14 @@ describe('orders, the atelier and their settings: the console\'s routes', () => 
     expect(errorOf(await op.post(`/api/admin/orders/${id}/transition`, { ...ship, trackingNumber: '#' })).code).toBe('VALIDATION_FAILED');
     expect(errorOf(await op.post(`/api/admin/orders/${id}/transition`, { to: 'CANCELLED' })).code).toBe('VALIDATION_FAILED');
 
-    // The atelier makes its piece: then it ships, with its carrier, tracking link and declared value.
-    const bench = (safeJson(await auditor.get(`/api/admin/atelier/bench?origin=SALON`)) as Json).groups.flatMap((g: Json) => g.items).find((b: Json) => b.order?.id === id);
-    expect(bench).toMatchObject({ status: 'TO_MAKE', engravingText: 'A. & L.', location: { id: logistics } });
-    expect((safeJson(await op.post(`/api/admin/atelier/bench/${bench.id}/start`, {})) as Json).status).toBe('IN_PROGRESS');
-    const issued = await op.post(`/api/admin/atelier/bench/${bench.id}/done`, { material: '925 STERLING SILVER' });
-    expect(issued.headers['cache-control']).toBe('no-store');
-    expect(safeJson(issued)).toMatchObject({ productId: bench.piece.reference, claimCode: expect.stringMatching(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/), item: { status: 'DONE' } });
+    // No piece to make is created for it (plan NEXT LOT §3.5): its piece is taken from the stock (test/support/fulfil.ts
+    // stockPiece: a piece issued, bound with Link a piece); then it ships, with its carrier, tracking link and declared value.
+    expect((safeJson(await auditor.get(`/api/admin/atelier/bench?origin=SALON`)) as Json).groups.flatMap((g: Json) => g.items).find((b: Json) => b.order?.id === id)).toBeUndefined();
+    const piece = await stockPiece(h.ctx, { orderId: id, productionBatch: 'B-2026-11-SALON', material: '925 STERLING SILVER' }, f.admin);
+    expect((safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json).order).toMatchObject({ reservation: 'STOCK', productId: piece.productId });
     const shipped = safeJson(await op.post(`/api/admin/orders/${id}/transition`, ship)) as Json;
-    expect(shipped.order).toMatchObject({ status: 'SHIPPED', productId: bench.piece.reference, shipment: { carrier: { name: 'Colissimo' }, trackingNumber: '6A12345678901', trackingUrl: 'https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901', declaredValueMinor: 480_000 } });
-    expect(shipped.piece).toEqual({ productId: bench.piece.reference, status: 'ISSUED', registered: false });
+    expect(shipped.order).toMatchObject({ status: 'SHIPPED', productId: piece.productId, shipment: { carrier: { name: 'Colissimo' }, trackingNumber: '6A12345678901', trackingUrl: 'https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901', declaredValueMinor: 480_000 } });
+    expect(shipped.piece).toEqual({ productId: piece.productId, status: 'ISSUED', registered: false });
     const delivered = safeJson(await op.post(`/api/admin/orders/${id}/transition`, { to: 'DELIVERED' })) as Json;
     expect(delivered.order.status).toBe('DELIVERED');
     expect(delivered.timing).toMatchObject({ rule: 'UNREGISTERED', late: false });
@@ -138,7 +138,7 @@ describe('orders, the atelier and their settings: the console\'s routes', () => 
     const set = safeJson(await admin.request('PUT', '/api/admin/orders/alerts', { body })) as Json;
     expect(set).toMatchObject({ ...body, updatedBy: { email: expect.stringMatching(/^admin-/) } });
     expect(safeJson(await auditor.get('/api/admin/orders/alerts'))).toMatchObject(body);
-    await admin.request('PUT', '/api/admin/orders/alerts', { body: { reservedDays: 2, readyDays: 3, shippedDays: 10, unregisteredDays: 30 } });
+    await admin.request('PUT', '/api/admin/orders/alerts', { body: { reservedDays: 2, readyDays: 5, shippedDays: 10, unregisteredDays: 30 } });
   });
 
   it('adds and renames a location, makes it the default; adds a carrier with its tracking link, edits it, sets it aside (ADMIN), audited', async () => {

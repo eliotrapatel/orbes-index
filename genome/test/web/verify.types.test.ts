@@ -184,7 +184,9 @@ describe('verify wire types', () => {
 
   it('know the same steps and channels of an order as the server (plan LIVE RELEASE+, choice 6)', () => {
     expect([...ORDER_STATUSES]).toEqual([...SERVER_ORDER_STATUSES]);
-    expect([...ORDER_CHANNELS]).toEqual([...SERVER_ORDER_CHANNELS]);
+    // The size exchange (plan NEXT LOT §3.5, migration 0037) joins the app's list with its words in step 6.10 (§3.6.D):
+    // until then it is the one channel the app does not show.
+    expect([...ORDER_CHANNELS, 'EXCHANGE']).toEqual([...SERVER_ORDER_CHANNELS]);
   });
 
   it('are structurally compatible (checked by tsc)', () => {

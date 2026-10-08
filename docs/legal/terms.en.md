@@ -1,6 +1,6 @@
 # Terms of use of the ORBES GENOME CODE service
 
-**Draft for legal review, not validated.** Version: 9 October 2026. [Version française](terms.fr.md).
+**Draft for legal review, not validated.** Version: 10 October 2026. [Version française](terms.fr.md).
 
 Each article ends with a *Code: …* line that points to the rules of the code it describes ([TERMS-FACTS](TERMS-FACTS.md)). These lines are for the review and are not published. The [À COMPLÉTER: …] fields await the legal identity of ORBES and counsel's choices ([note for counsel](counsel-note.fr.md), in French). Every field keeps the French marker, so that one search finds them all in both languages.
 
@@ -216,7 +216,7 @@ Each piece reserved for an account is an order: a piece of a LIVE RELEASE confir
 
 **Its steps.** An order is RESERVED, then PAID, SHIPPED and DELIVERED. It may be CANCELLED while it is RESERVED or PAID, and RETURNED once it is SHIPPED or DELIVERED; no other step is possible. ORBES Client Services records each step; nothing is paid on the service. An order is PAID only once its price is entered.
 
-**Its piece.** For each order, ORBES holds a piece of its model and size in stock when one is available, or plans to make it: the ORBES identity of a piece made for an order is reserved when it is planned, and confirmed when the piece is finished. A cancelled order frees its piece; a piece planned for it is no longer made, and its reserved ORBES identity is withdrawn, its number never used again.
+**Its piece.** For each order, ORBES holds a piece of its model and size in stock when one is available; otherwise the order waits for the next delivery from ORBES's suppliers, and waiting orders are served the oldest first (a piece sent again for a parcel lost or damaged on its way goes before them). A cancelled order frees its piece, which goes to the next order waiting for it.
 
 **Delivery.** ORBES Client Services enters on the order the name and the address of the buyer, and any engraving text: the service has no form for them. An order ships with a carrier and a tracking number, which MY PIECES then shows with TRACK THE SHIPMENT, a link to the carrier's own page. It is DELIVERED when ORBES Client Services records it, or as soon as the account that ordered it registers its piece (article 7) while it is SHIPPED.
 

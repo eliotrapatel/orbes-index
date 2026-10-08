@@ -237,6 +237,8 @@ export const SKU_USES = Object.freeze({
     Object.freeze({ table: 'reception_lines', column: 'sku_id' }),
     Object.freeze({ table: 'supplier_returns', column: 'sku_id' }),
     Object.freeze({ table: 'stock_corrections', column: 'sku_id' }),
+    // Migration 0037: the size a size exchange asks for.
+    Object.freeze({ table: 'order_cases', column: 'exchange_sku_id' }),
   ]),
   others: Object.freeze([
     'an OPEN salon request (shop_requests) of the model in the same size, whatever its case',

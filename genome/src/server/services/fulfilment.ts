@@ -7,12 +7,14 @@
  *   timing     an order's step started when it reached it (`reserved_at`, `paid_at`…). It is late (M3) past the delay
  *              of its rule, each editable (`order_alert_settings`, the defaults its columns'):
  *                RESERVED      over 2 days since it was reserved;
- *                READY         PAID with its piece ready (held in stock at its location) but not shipped, over 3 days
- *                              since it was both paid and ready, whichever came last (`readySince`, from its history);
+ *                READY         PAID with its piece ready (held in stock at its location) but not shipped, over 5 days
+ *                              since it was both paid and ready, whichever came last (`readySince`, from its history;
+ *                              plan NEXT LOT §3.5: 5 days, the owner's);
  *                SHIPPED       not delivered, over 10 days since it was shipped;
  *                UNREGISTERED  DELIVERED, its piece not registered by its buyer (no ownership of that account on that
  *                              piece), over 30 days since it was delivered.
- *              A PAID order whose piece is still being made, a CANCELLED or RETURNED one, is never late.
+ *              A PAID order still awaiting supplier stock (Awaiting stock), a CANCELLED or RETURNED one, is never
+ *              late.
  *   the board  the columns RESERVED, PAID, SHIPPED, DELIVERED, CANCELLED, RETURNED, each with its count, its late count
  *              and its first BOARD_COLUMN_MAX cards: the steps in progress the longest waiting first, CANCELLED and
  *              RETURNED the latest first. Narrowed by channel, release, location, the late ones only, and a search (an
@@ -28,7 +30,7 @@
 import { orderClaimCard, orderClaimCode, type OrderClaimCard, type OrderClaimCode } from './claim-renewals.js';
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { BenchItemStatus, JsonObject, OrderChannel, OrderReservation, OrderStatus } from '../db/schema.js';
+import type { JsonObject, OrderChannel, OrderReservation, OrderStatus } from '../db/schema.js';
 import { ORDER_STATUSES } from '../db/schema.js';
 import { validationError } from '../errors.js';
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
@@ -39,8 +41,8 @@ import { orderReference, trackingLink, type OrderService, type OrderView } from 
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
-/** The delays of the alerts (M3), in days: the columns' defaults of migration 0022. */
-export const ORDER_ALERT_DEFAULTS = Object.freeze({ reservedDays: 2, readyDays: 3, shippedDays: 10, unregisteredDays: 30 });
+/** The delays of the alerts (M3), in days: the columns' defaults of migration 0022 (READY's 5 since 0037, plan NEXT LOT §3.5). */
+export const ORDER_ALERT_DEFAULTS = Object.freeze({ reservedDays: 2, readyDays: 5, shippedDays: 10, unregisteredDays: 30 });
 /** Each delay's bounds, as the CHECKs of migration 0022 hold them. */
 export const ORDER_ALERT_LIMITS = Object.freeze({
   reservedDays: Object.freeze({ min: 1, max: 90 }),
@@ -138,8 +140,8 @@ export function orderTiming(o: TimedOrder, delays: OrderAlertDelays, now: Date):
 
 /**
  * When an order's piece became ready, from its history (oldest first): the time of the change that last made it hold a
- * piece in stock after it held none or a piece to make (each change that moves what it holds says so in its details,
- * `reservation`). Null when it holds no piece in stock.
+ * piece in stock after it held none or awaited supplier stock (each change that moves what it holds says so in its
+ * details, `reservation`; a waiting order served, `order.serve`). Null when it holds no piece in stock.
  */
 export function readySince(events: readonly { at: Date; details: JsonObject }[]): Date | null {
   let holding: unknown = null;
@@ -180,8 +182,6 @@ export interface OrderCard {
   engraving: boolean;
   location: { id: string; name: string };
   reservation: OrderReservation | null;
-  /** Its open piece to make. */
-  bench: { status: BenchItemStatus } | null;
   /** The piece that fulfils it, by its reference. */
   piece: string | null;
   shipment: { carrier: string; trackingNumber: string } | null;
@@ -288,7 +288,6 @@ interface BoardRow {
   carrier_name: string | null;
   tracking_url: string | null;
   piece_reference: string | null;
-  bench_status: BenchItemStatus | null;
   registered: boolean;
 }
 
@@ -532,7 +531,6 @@ export class FulfilmentService {
       engraving: r.engraving_text !== null,
       location: { id: r.location_id, name: r.location_name },
       reservation: r.reservation,
-      bench: r.bench_status ? { status: r.bench_status } : null,
       piece: r.piece_reference,
       shipment: r.carrier_name && r.tracking_number ? { carrier: r.carrier_name, trackingNumber: r.tracking_number } : null,
       timing,
@@ -578,13 +576,12 @@ export class FulfilmentService {
       .leftJoin('skus as k', 'k.id', 'o.sku_id')
       .leftJoin('carriers as c', 'c.id', 'o.carrier_id')
       .leftJoin('products as p', 'p.id', 'o.product_id')
-      .leftJoin('bench_items as b', (j) => j.onRef('b.order_id', '=', 'o.id').on('b.status', 'in', ['TO_MAKE', 'IN_PROGRESS']))
       .select([
         'o.id', 'o.channel', 'o.live_entry_id', 'o.drop_id', 'o.account_id', 'o.model_id', 'o.size_label', 'o.price_minor', 'o.currency', 'o.addons', 'o.surprise',
         'o.engraving_text', 'o.buyer_name', 'o.buyer_address', 'o.status', 'o.reserved_at', 'o.paid_at', 'o.shipped_at', 'o.delivered_at', 'o.cancelled_at',
         'o.returned_at', 'o.location_id', 'o.reservation', 'o.tracking_number', 'o.declared_value_minor', 'm.name as model_name', 'a.email',
         'l.name as location_name', 'd.title as release_title', 'k.code as sku_code', 'c.name as carrier_name', 'c.tracking_url',
-        'p.product_id as piece_reference', 'b.status as bench_status',
+        'p.product_id as piece_reference',
       ])
       .select(sql<boolean>`EXISTS (SELECT 1 FROM ownership w WHERE w.product_id = o.product_id AND w.account_id = o.account_id)`.as('registered'));
     if (accountId) query = query.where('o.account_id', '=', accountId);
@@ -598,9 +595,7 @@ export class FulfilmentService {
       else if (live) query = query.where(sql<boolean>`replace(o.live_entry_id::text, '-', '') LIKE ${`${live[1].toLowerCase()}%`}`);
       else if (PIECE_REF_RE.test(q)) {
         const ref = q.toUpperCase();
-        query = query.where((eb) =>
-          eb.or([eb('p.product_id', '=', ref), eb.exists(eb.selectFrom('bench_items as x').innerJoin('products as xp', 'xp.id', 'x.product_id').select('x.id').whereRef('x.order_id', '=', 'o.id').where('xp.product_id', '=', ref))]),
-        );
+        query = query.where('p.product_id', '=', ref);
       } else {
         const like = `%${likeLiteral(q)}%`;
         query = query.where((eb) => eb.or([eb('m.name', 'ilike', like), eb('d.title', 'ilike', like)]));

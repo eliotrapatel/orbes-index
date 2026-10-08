@@ -236,7 +236,8 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number): OrderModel 
     modelVariant: typeof o.modelVariant === 'string' && o.modelVariant.trim() !== '' ? o.modelVariant.trim() : null,
     // A release names itself; the private salon has none: the model with its variant follows it (C32).
     line: [
-      ORDERS.channel[o.channel],
+      // A channel ORDER_CHANNELS does not list (EXCHANGE until step 6.10) was turned away above.
+      ORDERS.channel[o.channel as keyof typeof ORDERS.channel],
       o.channel === 'GIFT' ? (giftTier ?? '') : o.release ? upper(o.release) : o.channel === 'SALON' ? modelWithVariant(upper(o.model), o.modelVariant).toUpperCase() : '',
     ]
       .filter((x) => x.length > 0)

@@ -164,6 +164,7 @@ import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOption
 import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, fullScreenshot, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, watchPage as watchPageInto, webpOf } from '../test/support/ui-stage.js';
 import { eachState } from '../test/support/nocturne-stage.js';
 import { openState, ROOM_SIZE_STATES, stateById, type UiState } from '../test/support/nocturne-states.js';
+import { stockPiece } from '../test/support/fulfil.js';
 import { buildWeb } from './build-web.js';
 import { shoot as shootState } from './parity.js';
 
@@ -1272,7 +1273,6 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     const atelier = new AtelierService({ db, audit: past.audit, issuance: ctx.services.issuance, orders, clock: past.clock.now });
     const salon = new SalonService({ db, audit: past.audit, lookbook: ctx.services.lookbook, club: ctx.services.club, clock: past.clock.now });
     const carrier = async (name: string) => (await db.selectFrom('carriers').select('id').where('name', '=', name).executeTakeFirstOrThrow()).id;
-    const benchOf = async (orderId: string) => (await db.selectFrom('bench_items').select('id').where('order_id', '=', orderId).executeTakeFirstOrThrow()).id;
     const titled = async (id: string, title: string) => {
       await db.updateTable('drops').set({ title }).where('id', '=', id).execute();
     };
@@ -1349,24 +1349,18 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     await orders.setTerms(salonOrder, { sizeLabel: '54', priceMinor: 190_000, currency: 'EUR' }, admin);
     await orders.setBuyer(salonOrder, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
 
-    // Four days ago: LIVE I's pieces paid (one cancelled the next morning), Hélène's engraved, her pieces at the bench.
+    // Four days ago: LIVE I's pieces paid (one cancelled the next morning), Hélène's engraved; her pieces wait for supplier stock.
     on(4, 10);
     await orders.setBuyer(mine, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
     await orders.setTerms(mine, { engravingText: 'H. M.' }, admin);
     on(4, 11);
     await orders.transition(mine, { to: 'PAID' }, admin);
-    on(4, 14);
-    const myBench = await benchOf(mine);
-    await atelier.start(myBench, admin);
     on(4, 16);
     await orders.transition(salonOrder, { to: 'PAID' }, admin);
     on(4, 17);
     await orders.transition(cancelled, { to: 'PAID' }, admin);
     on(3, 10);
     await orders.transition(cancelled, { to: 'CANCELLED', note: 'The client changed her mind before shipping; refunded in full.' }, admin);
-    on(3, 11);
-    const salonBench = await benchOf(salonOrder);
-    await atelier.start(salonBench, admin);
 
     // LIVE II, three days ago: one piece; Hélène joins the line behind the newcomer, who secures it: SOLD OUT.
     on(3, 18);
@@ -1379,9 +1373,10 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     await past.live.enter(me.id, live2.id, { sizeId: live2.sizes[0]!.id }, me.actor);
     await buy(live2.id, newcomer);
 
-    // Two days ago: Hélène's LIVE I piece made and shipped by Colissimo; the draw's piece and Michael's paid.
+    // Two days ago: Hélène's LIVE I piece taken from the stock (plan NEXT LOT §3.5, step 5.5: test/support/fulfil.ts
+    // stockPiece) and shipped by Colissimo; the draw's piece and Michael's paid.
     on(2, 11);
-    const done = await atelier.done(myBench, { productionBatch: 'B-2026-10-LIVE-I' }, admin);
+    const done = await stockPiece(ctx, { orderId: mine, productionBatch: 'B-2026-10-LIVE-I', atelier }, admin);
     on(2, 15);
     await orders.transition(mine, { to: 'SHIPPED', carrierId: await carrier('Colissimo'), trackingNumber: '6A12345678901', declaredValueMinor: 520_000 }, admin);
     on(2, 16);
@@ -1389,16 +1384,11 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     on(2, 16, 30);
     await orders.setBuyer(paid, { name: 'Michael Okafor', address: '22 Kensington Church Street\nLondon W8 4EP\nUnited Kingdom' }, admin);
     await orders.transition(paid, { to: 'PAID' }, admin);
-    on(2, 17);
-    await atelier.start(await benchOf(drawn), admin);
-    // Yesterday: the ORBITE finished and shipped by Chronopost; the rival's engraved piece begun, still to be paid.
+    // Yesterday: the ORBITE taken from the stock and shipped by Chronopost; the rival's engraved piece still to be paid.
     on(1, 10);
-    await atelier.done(salonBench, { productionBatch: 'B-2026-10-SALON' }, admin);
+    await stockPiece(ctx, { orderId: salonOrder, productionBatch: 'B-2026-10-SALON', atelier }, admin);
     on(1, 11);
     await orders.transition(salonOrder, { to: 'SHIPPED', carrierId: await carrier('Chronopost'), trackingNumber: 'XY482915637FR', declaredValueMinor: 190_000 }, admin);
-    on(1, 12);
-    const rivalBench = await benchOf(rivals);
-    await atelier.start(rivalBench, admin);
 
     // LIVE III, yesterday: Hélène said I'LL BE THERE and never came; it closed with a piece left.
     on(1, 18);
@@ -1425,8 +1415,10 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     await ctx.services.warranty.activate(piece, { purchaseDate: new Date().toISOString().slice(0, 10), retailer: 'ORBES PARIS', country: 'FR' }, admin);
     const scan = await ctx.services.verification.verify({ code: (await ctx.services.issuance.printableCode(done.codeId)).data }, {});
     await ctx.services.ownership.registerFirst(me.id, { registrationToken: scan.registration!.token, claimCode: done.claimCode! }, me.actor);
-    // A minimum for MONOLITHE in size 54 at FRANCE WAREHOUSE: the atelier suggests what to make.
+    // A minimum for MONOLITHE in size 54 at FRANCE WAREHOUSE: the atelier suggests what to make; one piece to make for
+    // the stock, its work sheet printed (an order no longer gets one since plan NEXT LOT §3.5; the atelier goes in 5.13).
     await ctx.services.atelier.setThreshold({ skuId: sku54, locationId: france, minimum: 3 }, admin);
+    const [stockBench] = await ctx.services.atelier.makeForStock({ skuId: sku54, locationId: france, quantity: 1 }, admin);
     // The Catalogue: MONOLITHE's base price (N2) and its care guide (M6).
     await ctx.services.catalog.updateModel(
       monolithe,
@@ -1709,7 +1701,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     const print = await signIn(paper, 'plus-print');
     await print.emulateMedia({ media: 'print' });
     for (const [hash, testid, name] of [
-      [`#/atelier/sheets?id=${rivalBench}`, 'work-sheet', 'plus-27-work-sheet'],
+      [`#/atelier/sheets?id=${stockBench!.id}`, 'work-sheet', 'plus-27-work-sheet'],
       [`#/orders/${mine}/slip`, 'packing-slip', 'plus-28-packing-slip'],
     ] as const) {
       await print.evaluate((h) => (location.hash = h), hash);

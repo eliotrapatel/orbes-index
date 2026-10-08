@@ -52,14 +52,15 @@ describe('orderTiming and readySince (M3, pure)', () => {
     expect(orderTiming(base, d, new Date(at(2).getTime() + 1)).late).toBe(true);
   });
 
-  it('PAID is late 3 days after it was both paid and ready; never while its piece is being made', () => {
-    const paid: TimedOrder = { ...base, status: 'PAID', paidAt: at(1), reservation: 'BENCH' };
+  it('PAID is late 5 days after it was both paid and ready (plan NEXT LOT §3.5: 5 days); never while it awaits supplier stock', () => {
+    expect(d.readyDays).toBe(5);
+    const paid: TimedOrder = { ...base, status: 'PAID', paidAt: at(1), reservation: 'AWAITING' };
     expect(orderTiming(paid, d, at(30))).toEqual({ since: at(1), dueAt: null, rule: null, late: false });
     // Ready before it was paid: from the payment.
-    expect(orderTiming({ ...paid, reservation: 'STOCK', readySince: at(0) }, d, at(4))).toEqual({ since: at(1), dueAt: at(4), rule: 'READY', late: false });
+    expect(orderTiming({ ...paid, reservation: 'STOCK', readySince: at(0) }, d, at(6))).toEqual({ since: at(1), dueAt: at(6), rule: 'READY', late: false });
     // Ready after: from the day it was ready.
-    const late = orderTiming({ ...paid, reservation: 'STOCK', readySince: at(5) }, d, at(8.5));
-    expect([late.dueAt, late.rule, late.late]).toEqual([at(8), 'READY', true]);
+    const late = orderTiming({ ...paid, reservation: 'STOCK', readySince: at(5) }, d, at(10.5));
+    expect([late.dueAt, late.rule, late.late]).toEqual([at(10), 'READY', true]);
   });
 
   it('SHIPPED is late past 10 days; DELIVERED past 30 while its buyer has not registered the piece; CANCELLED and RETURNED never', () => {
@@ -74,11 +75,12 @@ describe('orderTiming and readySince (M3, pure)', () => {
     expect(orderTiming(base, { ...d, reservedDays: 5 }, at(4)).late).toBe(false);
   });
 
-  it('reads when the piece became ready from the history: the last change that made it hold one in stock after holding none or one to make', () => {
+  it('reads when the piece became ready from the history: the last change that made it hold one in stock after holding none or awaiting supplier stock', () => {
     const e = (day: number, details: Record<string, unknown>) => ({ at: at(day), details: details as never });
-    expect(readySince([e(0, { reservation: 'BENCH' }), e(1, {}), e(3, { reservation: 'STOCK', via: 'bench' }), e(4, { fields: ['engraving'], reservation: 'STOCK' })])).toEqual(at(3));
+    // A waiting order served (order.serve) is ready from then on.
+    expect(readySince([e(0, { reservation: 'AWAITING' }), e(1, {}), e(3, { reservation: 'STOCK', skuId: 'k', locationId: 'l' }), e(4, { fields: ['engraving'], reservation: 'STOCK' })])).toEqual(at(3));
     expect(readySince([e(0, { reservation: 'STOCK' }), e(1, { reservation: null }), e(2, { reservation: 'STOCK' })])).toEqual(at(2));
-    expect(readySince([e(0, { reservation: 'STOCK' }), e(1, { reservation: 'BENCH' })])).toBeNull();
+    expect(readySince([e(0, { reservation: 'STOCK' }), e(1, { reservation: 'AWAITING' })])).toBeNull();
     expect(readySince([])).toBeNull();
   });
 });
@@ -185,8 +187,7 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
       surprise: null,
       engraving: true,
       location: { id: france, name: 'FRANCE WAREHOUSE' },
-      reservation: 'BENCH',
-      bench: { status: 'TO_MAKE' },
+      reservation: 'AWAITING',
       piece: null,
       shipment: null,
       timing: { since: sale.orders[0]!.reserved_at, rule: 'RESERVED', late: false },
@@ -209,12 +210,15 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
     await orders().transition(shipped.id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A00000000001' }, admin);
     const paidMaking = (await salonOrder('57', model)).order;
     await orders().transition(paidMaking.id, { to: 'PAID' }, admin);
-    expect(paidMaking.reservation).toBe('BENCH');
+    expect(paidMaking.reservation).toBe('AWAITING');
     const narrow = { q: 'LATE' };
     const lateOnes = async () => (await board({ ...narrow, late: true })).columns.flatMap((c) => c.items.map((x) => [x.id, x.timing.rule]));
 
     expect(await lateOnes()).toEqual([]);
     clock.advance(2 * DAY + MINUTE);
+    expect(await lateOnes()).toEqual([[reserved.id, 'RESERVED']]);
+    // READY: 5 days (plan NEXT LOT §3.5); an order awaiting supplier stock is never late.
+    clock.advance(2 * DAY);
     expect(await lateOnes()).toEqual([[reserved.id, 'RESERVED']]);
     clock.advance(DAY);
     expect(await lateOnes()).toEqual([
@@ -230,7 +234,7 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
       ['CANCELLED', 0, 0],
       ['RETURNED', 0, 0],
     ]);
-    clock.advance(7 * DAY);
+    clock.advance(5 * DAY);
     expect((await lateOnes()).map(([, rule]) => rule)).toEqual(['RESERVED', 'READY', 'SHIPPED']);
     // Delivered: late 30 days on while its buyer has not registered the piece.
     await orders().transition(shipped.id, { to: 'DELIVERED' }, admin);
@@ -264,8 +268,10 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
     expect(await all({ q: orderReference(salon.id) })).toEqual([salon.id]);
     expect(await all({ q: orderReference(salon.id).toLowerCase().replace('-', '') })).toEqual([salon.id]);
     expect(await all({ q: liveReference(sale.entryId) })).toEqual([sale.orders[0]!.id]);
-    const bench = await t.db.selectFrom('bench_items as b').innerJoin('products as p', 'p.id', 'b.product_id').select('p.product_id').where('b.order_id', '=', salon.id).executeTakeFirstOrThrow();
-    expect(await all({ q: bench.product_id })).toEqual([salon.id]);
+    // A piece's reference finds the order it fulfils (no piece to make carries one any more, plan NEXT LOT §3.5).
+    const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '58', material: '925 STERLING SILVER' }, admin);
+    await ctx.services.atelier.linkFromStock(salon.id, piece.product.productId, admin);
+    expect(await all({ q: piece.product.productId })).toEqual([salon.id]);
     expect(await all({ q: 'monolith' })).toEqual(expect.arrayContaining([salon.id, sale.orders[0]!.id]));
     expect(await all({ q: '%' })).toEqual([]);
     expect((await board()).releases.map((r) => r.id)).toContain(sale.release.id);

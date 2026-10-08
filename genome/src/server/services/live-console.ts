@@ -824,8 +824,8 @@ export class LiveConsoleService {
 
   /**
    * The feasibility check (plan LIVE RELEASE+, choice 12, K5; services/release-stock.ts): per size, the pieces on sale
-   * against the stock available at the release's location and the pieces being made for the stock there, its
-   * after-room's sizes after its own; what remains is made to order once sold. A warning, never a refusal: the console
+   * against the stock available at the release's location, its after-room's sizes after its own; the orders the stock
+   * does not cover wait for supplier stock (plan NEXT LOT §3.5). A warning, never a refusal: the console
    * shows it before PUBLISH, and the publication records it. Read before the publication (a release published already
    * holds pieces for its own orders).
    */
@@ -1126,7 +1126,7 @@ export class LiveConsoleService {
           closesAt: d.closes_at.toISOString(),
           circlePostId: postId,
           locationId: feasible.location?.id ?? null,
-          toMakeToOrder: feasible.short,
+          waitForStock: feasible.short,
           shortSizes: [...feasible.sizes.map((l) => ({ l, after: false })), ...(feasible.afterRoom ?? []).map((l) => ({ l, after: true }))]
             .filter((x) => x.l.short > 0)
             .map((x) => `${x.after ? 'AFTER-ROOM ' : ''}${x.l.label}:${x.l.short}`),

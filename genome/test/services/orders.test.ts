@@ -288,10 +288,10 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       expect((await orders().prepare()).orders).toBe(5);
       const of = (entryId: string) => t.db.selectFrom('orders').selectAll().where('live_entry_id', '=', entryId).orderBy('piece').execute();
       expect((await of(open)).map((o) => [o.piece, o.status, o.reservation])).toEqual([
-        [1, 'RESERVED', 'BENCH'],
-        [2, 'RESERVED', 'BENCH'],
+        [1, 'RESERVED', 'AWAITING'],
+        [2, 'RESERVED', 'AWAITING'],
       ]);
-      expect((await of(concluded)).map((o) => [o.status, o.reservation, o.paid_at?.toISOString()])).toEqual([['PAID', 'BENCH', clock.now().toISOString()]]);
+      expect((await of(concluded)).map((o) => [o.status, o.reservation, o.paid_at?.toISOString()])).toEqual([['PAID', 'AWAITING', clock.now().toISOString()]]);
       const [gone] = await of(cancelled);
       // A cancellation before the orders creates its order holding nothing, then cancels it: no identity is reserved for it.
       expect([gone!.status, gone!.reservation]).toEqual(['CANCELLED', null]);
@@ -346,14 +346,14 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
           currency: 'EUR',
           status: 'RESERVED',
           location_id: logistics,
-          reservation: 'BENCH',
+          reservation: 'AWAITING',
           surprise: null,
           buyer_name: null,
         });
         expect(o.addons).toEqual(sale.release.addons.map((a) => ({ id: a.id, label: a.label, priceMinor: a.priceMinor })));
         expect(o.reserved_at.toISOString()).toBe(sale.entry.confirmed_at!.toISOString());
         // Audited as the collector's, in the transaction of PAY.
-        expect((await auditsOf(o.id, 'order.create'))[0]).toMatchObject({ actor_type: 'account', actor_id: sale.account.id, details: { channel: 'LIVE', liveEntryId: sale.entry.id, piece: i + 1, to: 'RESERVED', reservation: 'BENCH' } });
+        expect((await auditsOf(o.id, 'order.create'))[0]).toMatchObject({ actor_type: 'account', actor_id: sale.account.id, details: { channel: 'LIVE', liveEntryId: sale.entry.id, piece: i + 1, to: 'RESERVED', reservation: 'AWAITING' } });
       }
       // The CSV and board of the LIVE release are untouched; a reference for each order.
       expect(orderReference(sale.orders[0]!.id)).toMatch(/^OR-[0-9A-F]{8}$/);
@@ -374,12 +374,11 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       await f.drops.confirm(d.id, entryId, 'Sold by phone.', admin);
       const [o] = await t.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', entryId).execute();
       expect(o).toMatchObject({ channel: 'DRAW', drop_id: d.id, account_id: a.id, status: 'RESERVED', location_id: logistics, sku_id: null, size_label: null, price_minor: null, reservation: null });
-      // Client Services enters its size and price: it then holds a piece of that size (none in stock: one to make).
+      // Client Services enters its size and price: it then holds a piece of that size (none in stock: it waits for supplier stock).
       clock.advance(MINUTE);
       const view = await orders().setTerms(o!.id, { sizeLabel: '50', priceMinor: 480_000, currency: 'EUR' }, admin);
-      expect(view).toMatchObject({ sizeLabel: '50', priceMinor: 480_000, currency: 'EUR', reservation: 'BENCH', location: { id: logistics, name: 'LOGISTICS WAREHOUSE' } });
-      expect(view.bench?.productId).toMatch(/^O26-J-\d{5}$/);
-      expect((await auditsOf(o!.id, 'order.terms'))[0]!.details).toMatchObject({ fields: ['price', 'size'], reservation: 'BENCH' });
+      expect(view).toMatchObject({ sizeLabel: '50', priceMinor: 480_000, currency: 'EUR', reservation: 'AWAITING', location: { id: logistics, name: 'LOGISTICS WAREHOUSE' } });
+      expect((await auditsOf(o!.id, 'order.terms'))[0]!.details).toMatchObject({ fields: ['price', 'size'], reservation: 'AWAITING' });
     });
 
     it('a request of the private salon closed as ACCEPTED: its order at the default location; DECLINED: none', async () => {
@@ -394,30 +393,83 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
   // ── what an order holds ──────────────────────────────────────────────────
 
   describe('what an order holds', () => {
-    it('a piece in stock when one is available at its location; otherwise a piece to make, its ORBES identity reserved at once (RESERVED, its genome and warranty, no code, no history)', async () => {
+    it('a piece in stock when one is available at its location; otherwise it waits for supplier stock (AWAITING): no piece to make, no identity reserved', async () => {
       const sku = await skuOf('60');
       await receive(sku, france, 1);
       const first = await salonOrder({ size: '60' });
       expect([first.reservation, first.location_id]).toEqual(['STOCK', france]);
       expect(await stockLevel(t.db, sku, france)).toEqual({ onHand: 1, reserved: 1, available: 0 });
-      // The last piece is taken: the next order of that size has it made.
+      // The last piece is taken: the next order of that size waits for supplier stock (plan NEXT LOT §3.5), with no piece
+      // to make and no ORBES identity reserved for it.
+      const pieces = (await t.db.selectFrom('products').select('id').execute()).length;
       const second = await salonOrder({ size: '60' });
-      expect(second.reservation).toBe('BENCH');
-      const [bench] = await benchOf(second.id);
-      expect(bench).toMatchObject({ status: 'TO_MAKE', sku_id: sku, location_id: france, order_id: second.id, drop_id: null, engraving_text: null });
-      const identity = await productRow(bench!.product_id);
-      expect(identity).toMatchObject({ status: 'RESERVED', ownership_state: 'UNREGISTERED', claim_secret_hash: null, model_id: f.modelId, variant: '60', sku_id: sku, year: 2026 });
-      expect(identity.product_id).toMatch(/^O26-J-\d{5}$/);
-      expect(await t.db.selectFrom('genomes').select('genome_id').where('product_id', '=', identity.id).execute()).toEqual([{ genome_id: identity.product_id }]);
-      expect(await t.db.selectFrom('warranties').select(['start_date']).where('product_id', '=', identity.id).execute()).toEqual([{ start_date: null }]);
-      expect(await t.db.selectFrom('codes').select('id').where('product_id', '=', identity.id).execute()).toEqual([]);
-      expect(await t.db.selectFrom('product_status_history').select('id').where('product_id', '=', identity.id).execute()).toEqual([]);
-      expect((await auditsOf(bench!.id, 'bench.create'))[0]!.details).toMatchObject({ orderId: second.id, productId: identity.product_id, skuId: sku });
-      expect((await journalOf(identity.id)).map((j) => [j.type, (j.payload as JsonObject).status])).toEqual([['product.reserve', 'RESERVED']]);
-      // The identities follow one another, as an issue's serial: the next one is the next serial.
-      const third = await salonOrder({ size: '60' });
-      const next = await productRow((await benchOf(third.id))[0]!.product_id);
-      expect(next.serial).toBe(identity.serial + 1);
+      expect(second.reservation).toBe('AWAITING');
+      expect(await benchOf(second.id)).toEqual([]);
+      expect((await t.db.selectFrom('products').select('id').execute()).length).toBe(pieces);
+      expect((await auditsOf(second.id, 'order.terms'))[0]!.details).toMatchObject({ fields: ['size'], reservation: 'AWAITING' });
+      expect(await stockLevel(t.db, sku, france)).toEqual({ onHand: 1, reserved: 1, available: 0 });
+      expect((await orders().get(second.id)).reservation).toBe('AWAITING');
+    });
+
+    it('the orders waiting are served strictly by date, whatever their channel, a reshipment first, each time a piece becomes available: a count up, a transfer in, a cancellation, a location change away, a return to stock', async () => {
+      const sku = await skuOf('61');
+      const live = await liveSale({ sizes: [{ label: '61', stock: 3 }], locationId: france });
+      const a = live.orders[0]!;
+      clock.advance(MINUTE);
+      const b = await salonOrder({ size: '61', priceMinor: 480_000 });
+      clock.advance(MINUTE);
+      const c = await salonOrder({ size: '61' });
+      expect([a, b, c].map((o) => o.reservation)).toEqual(['AWAITING', 'AWAITING', 'AWAITING']);
+      // A reshipment after a parcel lost or damaged goes ahead of the queue (plan NEXT LOT §3.5.6.7: set by an order
+      // case's decision from step 5.10).
+      await t.db.updateTable('orders').set({ queue_first: true }).where('id', '=', c.id).execute();
+      // A count corrected up serves the first in line: the reshipment, by the system, its event saying what it holds now.
+      clock.advance(MINUTE);
+      await receive(sku, france, 1);
+      expect((await orderRow(c.id)).reservation).toBe('STOCK');
+      expect((await eventsOf(c.id)).at(-1)).toMatchObject({ action: 'order.serve', status: 'RESERVED', actor_type: 'system', details: { reservation: 'STOCK', skuId: sku, locationId: france, queueFirst: true } });
+      expect((await auditsOf(c.id, 'order.serve'))[0]).toMatchObject({ actor_type: 'system', details: { reservation: 'STOCK' } });
+      expect((await journalOf(c.id)).at(-1)!.type).toBe('order.serve');
+      // Then strictly the oldest, whatever its channel: the LIVE order before the salon's.
+      clock.advance(MINUTE);
+      await receive(sku, france, 1);
+      expect([(await orderRow(a.id)).reservation, (await orderRow(b.id)).reservation]).toEqual(['STOCK', 'AWAITING']);
+      // A transfer in serves the next; a piece moved elsewhere serves no one there.
+      await receive(sku, logistics, 1);
+      expect((await orderRow(b.id)).reservation).toBe('AWAITING');
+      clock.advance(MINUTE);
+      await stock().transfer({ skuId: sku, fromLocationId: logistics, toLocationId: france, quantity: 1 }, admin);
+      expect((await orderRow(b.id)).reservation).toBe('STOCK');
+      expect(await stockLevel(t.db, sku, france)).toEqual({ onHand: 3, reserved: 3, available: 0 });
+      // A cancellation frees its piece, which serves the next order waiting for it.
+      clock.advance(MINUTE);
+      const d = await salonOrder({ size: '61' });
+      expect(d.reservation).toBe('AWAITING');
+      clock.advance(MINUTE);
+      await orders().transition(a.id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
+      expect((await orderRow(d.id)).reservation).toBe('STOCK');
+      expect((await auditsOf(a.id, 'order.cancel'))[0]!.details).toMatchObject({ released: 'STOCK' });
+      // A location change away frees the piece where the order was: the next order waiting there takes it.
+      clock.advance(MINUTE);
+      const e = await salonOrder({ size: '61' });
+      clock.advance(MINUTE);
+      const moved = await orders().changeLocation(b.id, logistics, admin);
+      expect(moved.reservation).toBe('AWAITING');
+      expect((await orderRow(e.id)).reservation).toBe('STOCK');
+      // A return to stock serves the next order waiting at the location it goes back to.
+      await receive(sku, logistics, 1);
+      expect((await orderRow(b.id)).reservation).toBe('STOCK');
+      const shipped = await walk(b.id, ['PAID', 'SHIPPED']);
+      expect(shipped.status).toBe('SHIPPED');
+      clock.advance(MINUTE);
+      const g = await salonOrder({ size: '61' });
+      expect(g.reservation).toBe('AWAITING');
+      clock.advance(MINUTE);
+      await orders().returnOrder(b.id, { outcome: 'RESTOCKED', locationId: france, note: 'Back in its box.' }, admin);
+      expect((await orderRow(g.id)).reservation).toBe('STOCK');
+      expect(await stockLevel(t.db, sku, france)).toEqual({ onHand: 4, reserved: 4, available: 0 });
+      // Nothing is served where nothing is available: an order waiting elsewhere keeps waiting.
+      expect((await auditsOf(g.id)).map((x) => x.action)).toEqual(['order.create', 'order.terms', 'order.serve']);
     });
 
     it('/verify answers a RESERVED identity as an unknown code, naming no piece and raising no finding', async () => {
@@ -437,31 +489,31 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       expect((await ctx.services.verification.verify({ code: issued.code.data }, {})).state).toBe('AUTHENTIC');
     });
 
-    it('changing its location moves what it holds: a piece to make goes there; a piece in stock is released and taken again there, or made for it', async () => {
+    it('changing its location moves what it holds: an order waiting waits there, or takes a piece there; a piece in stock is released and taken again there, or the order waits there', async () => {
       const sku = await skuOf('64');
       await receive(sku, logistics, 1);
-      // FRANCE has none: a piece to make. Moved to LOGISTICS, the piece to make goes there, its identity kept.
+      // FRANCE has none: the order waits for supplier stock. Moved to LOGISTICS, it takes the piece there.
       const a = await salonOrder({ size: '64' });
-      expect([a.location_id, a.reservation]).toEqual([france, 'BENCH']);
-      const [bench] = await benchOf(a.id);
+      expect([a.location_id, a.reservation]).toEqual([france, 'AWAITING']);
       clock.advance(MINUTE);
-      expect(await orders().changeLocation(a.id, logistics, admin)).toMatchObject({ location: { id: logistics, name: 'LOGISTICS WAREHOUSE' }, reservation: 'BENCH', bench: { id: bench!.id } });
-      expect(await benchOf(a.id)).toEqual([expect.objectContaining({ id: bench!.id, location_id: logistics, status: 'TO_MAKE', product_id: bench!.product_id })]);
-      expect((await journalOf(bench!.id)).map((j) => j.type)).toEqual(['bench.create', 'bench.move']);
-      expect(await stockLevel(t.db, sku, logistics)).toEqual({ onHand: 1, reserved: 0, available: 1 });
-      // An order served from LOGISTICS, its size entered: it holds the piece there. Moved to FRANCE, the piece is
-      // released at LOGISTICS and one is made for FRANCE.
+      expect(await orders().changeLocation(a.id, logistics, admin)).toMatchObject({ location: { id: logistics, name: 'LOGISTICS WAREHOUSE' }, reservation: 'STOCK' });
+      expect(await stockLevel(t.db, sku, logistics)).toEqual({ onHand: 1, reserved: 1, available: 0 });
+      // An order served from LOGISTICS, its size entered: nothing left there, it waits. Moved to FRANCE, it waits there.
       const b = await salonOrder();
       await orders().changeLocation(b.id, logistics, admin);
       clock.advance(MINUTE);
-      expect((await orders().setTerms(b.id, { sizeLabel: '64' }, admin)).reservation).toBe('STOCK');
-      expect(await stockLevel(t.db, sku, logistics)).toEqual({ onHand: 1, reserved: 1, available: 0 });
+      expect((await orders().setTerms(b.id, { sizeLabel: '64' }, admin)).reservation).toBe('AWAITING');
       clock.advance(MINUTE);
       const moved = await orders().changeLocation(b.id, france, admin);
-      expect([moved.location.id, moved.reservation, moved.bench?.productId]).toEqual([france, 'BENCH', expect.stringMatching(/^O26-J-\d{5}$/)]);
-      expect(await stockLevel(t.db, sku, logistics)).toEqual({ onHand: 1, reserved: 0, available: 1 });
-      expect((await auditsOf(b.id, 'order.location')).at(-1)!.details).toMatchObject({ from: 'RESERVED', to: 'RESERVED', fromLocationId: logistics, toLocationId: france, reservation: 'BENCH' });
+      expect([moved.location.id, moved.reservation]).toEqual([france, 'AWAITING']);
+      expect((await auditsOf(b.id, 'order.location')).at(-1)!.details).toMatchObject({ from: 'RESERVED', to: 'RESERVED', fromLocationId: logistics, toLocationId: france, reservation: 'AWAITING' });
       expect((await auditsOf(b.id)).map((x) => x.action)).toEqual(['order.create', 'order.location', 'order.terms', 'order.location']);
+      // The order holding the piece at LOGISTICS, moved to FRANCE: the piece is released at LOGISTICS, and the order
+      // waits at FRANCE.
+      clock.advance(MINUTE);
+      const back = await orders().changeLocation(a.id, france, admin);
+      expect([back.location.id, back.reservation]).toEqual([france, 'AWAITING']);
+      expect(await stockLevel(t.db, sku, logistics)).toEqual({ onHand: 1, reserved: 0, available: 1 });
       // Refused for its own location, an unknown one, or once the order is over.
       await rejects(orders().changeLocation(b.id, france, admin), 'VALIDATION_FAILED', 400);
       await rejects(orders().changeLocation(b.id, '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', admin), 'STOCK_LOCATION_NOT_FOUND', 404);
@@ -469,32 +521,25 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       await rejects(orders().changeLocation(a.id, france, admin), 'ORDER_CLOSED', 409);
     });
 
-    it('CANCELLED releases its piece in stock, or cancels its piece to make and retires its identity, whose serial is never reused', async () => {
+    it('CANCELLED releases its piece in stock, or ends its wait; no identity is retired, no serial taken', async () => {
       const sku = await skuOf('68');
       await receive(sku, france, 1);
       const inStock = await salonOrder({ size: '68' });
-      const toMake = await salonOrder({ size: '68' });
-      expect([inStock.reservation, toMake.reservation]).toEqual(['STOCK', 'BENCH']);
+      const waiting = await salonOrder({ size: '68' });
+      expect([inStock.reservation, waiting.reservation]).toEqual(['STOCK', 'AWAITING']);
+      const retired = (await t.db.selectFrom('products').select('id').where('status', '=', 'RETIRED').execute()).length;
+      clock.advance(MINUTE);
+      const view = await orders().transition(waiting.id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
+      expect([view.status, view.reservation]).toEqual(['CANCELLED', null]);
+      expect((await auditsOf(waiting.id, 'order.cancel'))[0]!.details).toMatchObject({ released: 'AWAITING' });
       clock.advance(MINUTE);
       await orders().transition(inStock.id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
       expect(await stockLevel(t.db, sku, france)).toEqual({ onHand: 1, reserved: 0, available: 1 });
-      const [bench] = await benchOf(toMake.id);
-      clock.advance(MINUTE);
-      const view = await orders().transition(toMake.id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
-      expect([view.status, view.reservation, view.bench]).toEqual(['CANCELLED', null, null]);
-      expect(await benchOf(toMake.id)).toEqual([expect.objectContaining({ status: 'CANCELLED', cancelled_at: clock.now() })]);
-      const retired = await productRow(bench!.product_id);
-      expect(retired.status).toBe('RETIRED');
-      expect(await t.db.selectFrom('product_status_history').select(['from_status', 'to_status', 'reason', 'actor_type']).where('product_id', '=', retired.id).execute()).toEqual([
-        { from_status: null, to_status: 'RETIRED', reason: 'Reserved identity retired: its order was cancelled', actor_type: 'admin' },
-      ]);
-      expect((await journalOf(retired.id)).map((j) => j.type)).toEqual(['product.reserve', 'product.retire']);
-      // Its serial stays taken: the next identity takes the one after.
-      const after = await salonOrder({ size: '70' });
-      expect((await productRow((await benchOf(after.id))[0]!.product_id)).serial).toBeGreaterThan(retired.serial);
+      expect((await t.db.selectFrom('products').select('id').where('status', '=', 'RETIRED').execute()).length).toBe(retired);
       // A note is required; once cancelled, nothing moves it.
+      const after = await salonOrder({ size: '70' });
       await rejects(orders().transition(after.id, { to: 'CANCELLED', note: '  ' } as OrderTransitionInput, admin), 'VALIDATION_FAILED', 400);
-      await rejects(orders().transition(toMake.id, { to: 'PAID' }, admin), 'ORDER_TRANSITION_NOT_ALLOWED', 409);
+      await rejects(orders().transition(waiting.id, { to: 'PAID' }, admin), 'ORDER_TRANSITION_NOT_ALLOWED', 409);
     });
   });
 
@@ -559,9 +604,9 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
 
     it('SHIPPED needs an active carrier, a tracking number and its piece in stock at its location, linked to it: the piece leaves the ledger; the tracking link', async () => {
       const sku = await skuOf('74');
-      // A piece still to make does not ship.
+      // An order waiting for supplier stock does not ship.
       const toMake = await walk((await salonOrder({ size: '74', priceMinor: 480_000 })).id, ['PAID']);
-      expect(toMake.reservation).toBe('BENCH');
+      expect(toMake.reservation).toBe('AWAITING');
       await rejects(orders().transition(toMake.id, inputFor('SHIPPED'), admin), 'ORDER_NOT_READY', 409);
       // A piece in stock at its location (LOGISTICS) ships.
       await receive(sku, logistics, 1);
@@ -636,7 +681,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       expect((await orders().transition(o.id, { to: 'PAID' }, SYSTEM_ACTOR)).status).toBe('PAID');
     });
 
-    it('what Client Services enters: a draw\'s or a salon\'s size and price (a LIVE order\'s are its release\'s), the engraving text on the order and its piece to make', async () => {
+    it('what Client Services enters: a draw\'s or a salon\'s size and price (a LIVE order\'s are its release\'s), the engraving text on the order', async () => {
       const sale = await liveSale();
       const live = sale.orders[0]!;
       await rejects(orders().setTerms(live.id, { sizeLabel: '54' }, admin), 'ORDER_TERMS_FIXED', 409);
@@ -644,25 +689,15 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       clock.advance(MINUTE);
       const view = await orders().setTerms(live.id, { engravingText: 'A. & B. — 2026' }, admin);
       expect(view.engravingText).toBe('A. & B. — 2026');
-      expect((await benchOf(live.id))[0]!.engraving_text).toBe('A. & B. — 2026');
       const audit = (await auditsOf(live.id, 'order.terms'))[0]!;
       expect(audit.details).toMatchObject({ fields: ['engraving'] });
       expect(JSON.stringify(audit.details)).not.toContain('2026');
       expect(JSON.stringify((await journalOf(live.id)).at(-1)!.payload)).not.toContain('A. & B.');
-      // Its piece to make journals the change too: engraved, never the words; cleared, no longer engraved.
-      const bench = (await benchOf(live.id))[0]!;
-      expect(live.reservation).toBe('BENCH');
-      const engraved = (await journalOf(bench.id)).at(-1)!;
-      expect([engraved.type, engraved.payload]).toEqual(['bench.engrave', benchPayload(bench)]);
-      expect(engraved.payload).toMatchObject({ engraving: true });
-      expect(JSON.stringify(engraved.payload)).not.toContain('A. & B.');
+      // No piece to make carries it any more (plan NEXT LOT §3.5): the order waits for supplier stock; cleared, it reads none.
+      expect(live.reservation).toBe('AWAITING');
+      expect(await benchOf(live.id)).toEqual([]);
       clock.advance(MINUTE);
-      await orders().setTerms(live.id, { engravingText: null }, admin);
-      expect((await journalOf(bench.id)).map((j) => [j.type, (j.payload as JsonObject).engraving])).toEqual([
-        ['bench.create', false],
-        ['bench.engrave', true],
-        ['bench.engrave', false],
-      ]);
+      expect((await orders().setTerms(live.id, { engravingText: null }, admin)).engravingText).toBeNull();
       // A salon order: price and currency together, in the house's currencies, before it is paid.
       const o = await salonOrder();
       await rejects(orders().setTerms(o.id, { priceMinor: 480_000 }, admin), 'VALIDATION_FAILED', 400);
@@ -674,21 +709,20 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       // One size, said as such: the model's one-size SKU.
       const one = await salonOrder({ size: null });
       expect((await t.db.selectFrom('skus').select('size_label').where('id', '=', one.sku_id!).executeTakeFirstOrThrow()).size_label).toBeNull();
-      // Typed ONE SIZE: the same, stored as one size. Its SKU named again in another spelling is no change: the piece
-      // to make it holds stays, its reserved identity too.
+      // Typed ONE SIZE: the same, stored as one size. Its SKU named again in another spelling is no change: what it
+      // holds stays (its wait for supplier stock, its history).
       const typed = await salonOrder({ size: 'ONE SIZE', modelId: (await t.db.insertInto('models').values({ category_id: 1, name: 'CHAIN', type: 'PENDANT', sku_prefix: 'CHN-PD' }).returning('id').executeTakeFirstOrThrow()).id });
-      expect([typed.size_label, typed.reservation]).toEqual([null, 'BENCH']);
-      const typedBench = await t.db.selectFrom('bench_items').select(['id', 'status', 'product_id']).where('order_id', '=', typed.id).executeTakeFirstOrThrow();
+      expect([typed.size_label, typed.reservation]).toEqual([null, 'AWAITING']);
+      const typedEvents = (await eventsOf(typed.id)).length;
       await rejects(orders().setTerms(typed.id, { sizeLabel: 'one size' }, admin), 'VALIDATION_FAILED', 400);
-      expect(await t.db.selectFrom('bench_items').select(['id', 'status', 'product_id']).where('order_id', '=', typed.id).execute()).toEqual([typedBench]);
+      expect(await orderRow(typed.id)).toMatchObject({ reservation: 'AWAITING', sku_id: typed.sku_id });
+      expect(await eventsOf(typed.id)).toHaveLength(typedEvents);
       // A size in another case is its SKU's: Small names the SKU of SMALL, and the order says it as the SKU does.
       const small = await salonOrder({ size: 'SMALL' });
       const smaller = await salonOrder({ size: 'small' });
       expect([smaller.sku_id, smaller.size_label]).toEqual([small.sku_id, 'SMALL']);
-      const smallBench = await t.db.selectFrom('bench_items').select('id').where('order_id', '=', small.id).executeTakeFirst();
       await rejects(orders().setTerms(small.id, { sizeLabel: 'Small' }, admin), 'VALIDATION_FAILED', 400);
-      expect(await orderRow(small.id)).toMatchObject({ size_label: 'SMALL', sku_id: small.sku_id });
-      expect(await t.db.selectFrom('bench_items').select('id').where('order_id', '=', small.id).executeTakeFirst()).toEqual(smallBench);
+      expect(await orderRow(small.id)).toMatchObject({ size_label: 'SMALL', sku_id: small.sku_id, reservation: small.reservation });
     });
   });
 
@@ -877,12 +911,13 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
           }
         }
       }
-      // Every order RESERVED or PAID holds exactly one thing, and its piece to make is the open one.
-      const holding = await t.db.selectFrom('orders').select(['id', 'reservation', 'status']).where('model_id', '=', model.id).where('status', 'in', ['RESERVED', 'PAID']).execute();
+      // Every order RESERVED or PAID holds exactly one thing, never a piece to make; none waits while its size is available
+      // where it is (each increase served the waiting orders).
+      const holding = await t.db.selectFrom('orders').select(['id', 'reservation', 'status', 'sku_id', 'location_id']).where('model_id', '=', model.id).where('status', 'in', ['RESERVED', 'PAID']).execute();
       for (const o of holding) {
-        const benches = (await benchOf(o.id)).filter((b) => b.status === 'TO_MAKE' || b.status === 'IN_PROGRESS');
-        expect(benches.length, o.id).toBe(o.reservation === 'BENCH' ? 1 : 0);
+        expect(await benchOf(o.id), o.id).toEqual([]);
         expect(o.reservation).not.toBeNull();
+        if (o.reservation === 'AWAITING') expect((await stockLevel(t.db, o.sku_id!, o.location_id)).available, o.id).toBe(0);
       }
     });
   });

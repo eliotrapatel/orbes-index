@@ -42,7 +42,7 @@
  *   GET    /api/admin/live/size-mix?modelId&locationId       AUDITOR   the sizes a new release of a model is proposed:
  *                                                                     the stock at the location first, then the planner
  *   GET    /api/admin/live/:id/feasibility                   AUDITOR   per size, the pieces on sale against the stock
- *                                                                     and the pieces being made: a warning, never a refusal
+ *                                                                     (the rest waits for supplier stock): a warning, never a refusal
  *   GET    /api/admin/live/:id/best-time?days&country        AUDITOR   the activity of its tiers by hour, Paris time,
  *                                                                     the suggested hour and its T0's
  *

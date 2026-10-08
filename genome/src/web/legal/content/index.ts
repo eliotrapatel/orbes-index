@@ -40,8 +40,13 @@ export { LANGS, type Block, type Lang, type LegalDocument, type LegalSection } f
  * certificate card, the claim code printed on it) and its claim-code paragraph, and the FAQ's three answers on the
  * card, which named a scratch-off panel the card 79t no longer has; the build's date, 2026-10-07, is not after G's
  * 2026-10-08, so the version is the day after it, set mechanically. Step 4.7 moves it to the date of H1's final commit.
+ * 2026-10-10 is the first version of deployment H2 (plan of 2026-10-07, §3.5.11, step 5.5): the terms' « Its piece »
+ * paragraph and the privacy policy's engraving clause, which the atelier's removal made untrue (an order waits for
+ * supplier stock; no piece is made for it); the build's date, 2026-10-08, is not after H1's 2026-10-09, so the version
+ * is the day after it, set mechanically. Steps 5.14 and 6.12 move its fingerprint; the finish step moves it to the date
+ * of H2's final commit.
  */
-export const LEGAL_VERSION = '2026-10-09';
+export const LEGAL_VERSION = '2026-10-10';
 
 export const DOCUMENTS: Readonly<Record<LegalPage, Readonly<Record<Lang, LegalDocument>>>> = Object.freeze({
   privacy: PRIVACY,

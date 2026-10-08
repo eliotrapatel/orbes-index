@@ -171,11 +171,9 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       body: h(
         'p',
         { class: 'dialog__text' },
-        o.reservation === 'BENCH'
-          ? 'The order reads CANCELLED. Its piece to make is cancelled at the atelier, and the ORBES identity reserved for it is retired: its serial is never used again.'
-          : o.reservation === 'STOCK'
-            ? 'The order reads CANCELLED. The piece it holds in stock is free again.'
-            : 'The order reads CANCELLED.',
+        o.reservation === 'STOCK'
+          ? 'The order reads CANCELLED. The piece it holds in stock is free again, and goes to the next order waiting for it.'
+          : 'The order reads CANCELLED.',
       ),
       fields: [noteField(true, 'Why, for Client Services: kept in the order’s history.')],
       validate: (v) => noteProblem(v.note, true),
@@ -447,9 +445,9 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
         'p',
         { class: 'dialog__text' },
         o.reservation === 'STOCK'
-          ? 'The piece it holds is released here and one is taken at the new location, or made for it there.'
-          : o.reservation === 'BENCH'
-            ? 'Its piece to make goes to the new location, where the atelier sends it once finished.'
+          ? 'The piece it holds is released here and one is taken at the new location, or the order waits there for supplier stock.'
+          : o.reservation === 'AWAITING'
+            ? 'The order takes a piece at the new location, or waits there for supplier stock.'
             : 'The order is served from the new location.',
       ),
       fields: [
@@ -474,12 +472,8 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow,
       body: [
         h('p', { class: 'dialog__text' }, `A piece issued of ${o.model.name} in ${sizeText({ sizeLabel: o.sizeLabel, skuKnown: true })}, at ${o.location.name}, never registered: it fulfils this order, which then holds it until it ships.`),
-        o.reservation === 'BENCH' && o.bench
-          ? h(
-              'p',
-              { class: 'dialog__text', data: { testid: 'link-replaces-bench' } },
-              `Its piece to make, ${o.bench.productId}, is then cancelled at the atelier, and the ORBES identity reserved for it retired: its serial is never used again. A finished piece never counted in the stock is counted in with this order.`,
-            )
+        o.reservation === 'AWAITING'
+          ? h('p', { class: 'dialog__text', data: { testid: 'link-awaiting' } }, 'The order waits for supplier stock: a piece never counted in the stock is counted in with this order.')
           : null,
       ],
       fields: [{ name: 'productId', label: 'Piece reference', required: true, maxlength: 20, hint: 'As engraved and printed: O26-J-00184.' }],
@@ -492,15 +486,6 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
   const pieceRows: DefRow[] = [
     { label: 'Location', value: o.location.name },
     ...(o.status === 'RESERVED' || o.status === 'PAID' ? [{ label: 'Holds', value: h('span', { data: { testid: 'order-holds' } }, viewHolds(o)) }] : []),
-    ...(o.bench
-      ? [
-          {
-            label: 'Piece to make',
-            value: h('a', { class: 'idlink', attrs: { href: href('atelier', {}, { skuId: o.skuId ?? undefined }) } }, `${humanize(o.bench.status)} · ${o.bench.productId}`),
-            note: 'Its ORBES identity is reserved; the atelier issues it once finished.',
-          },
-        ]
-      : []),
     ...(d.piece
       ? [
           {

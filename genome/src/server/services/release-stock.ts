@@ -4,11 +4,10 @@
  *
  *   feasibility (K5, choice 12)   before publishing, per size: the pieces on sale against what the stock can give them at
  *                                 the release's location (services/stock.ts: on hand less what orders hold, never below
- *                                 0) and the pieces already being made for the stock there (the atelier's pieces to make
- *                                 without an order: a piece made for an order is that order's). The release's sizes
- *                                 first, then its after-room's from what the release leaves (the same SKU draws on one
- *                                 stock). What neither covers is made to order once sold: a warning per size, never a
- *                                 refusal, never a date (L3, the atelier's capacity, was declined).
+ *                                 0). The release's sizes first, then its after-room's from what the release leaves
+ *                                 (the same SKU draws on one stock). The orders the stock does not cover wait for
+ *                                 supplier stock, the oldest first (plan NEXT LOT §3.5: « 12 in stock, 13 will wait for
+ *                                 supplier stock »): a warning per size, never a refusal, never a date.
  *   size mix (L1, choice 13)      creating a release: the sizes from the stock on hand first, each with what is
  *                                 available at the location; then the planner's demand per size (live-insights.ts
  *                                 releasePlan): when the planner expects more pieces than the stock holds, the difference
@@ -31,26 +30,23 @@ const pieces = (n: number) => `${count(n)} ${n === 1 ? 'piece' : 'pieces'}`;
 
 // ── The stock a release can draw on ────────────────────────────────────────
 
-/** What the stock gives a SKU at a location: on hand less reserved (never below 0), and the pieces being made for the stock. */
+/** What the stock gives a SKU at a location: on hand less reserved (never below 0). */
 export interface StockSupply {
   available: number;
-  toMake: number;
 }
 
-/** The supply of each SKU at a location, from the ledger, the orders' reservations and the open pieces to make for the stock. */
+/** The supply of each SKU at a location, from the ledger and the orders' reservations. */
 export async function stockSupply(db: Db, skuIds: readonly string[], locationId: string): Promise<Map<string, StockSupply>> {
   const ids = [...new Set(skuIds)];
-  const out = new Map<string, StockSupply>(ids.map((id) => [id, { available: 0, toMake: 0 }]));
+  const out = new Map<string, StockSupply>(ids.map((id) => [id, { available: 0 }]));
   if (ids.length === 0) return out;
-  const rows = await sql<{ sku_id: string; on_hand: number; reserved: number; to_make: number }>`
+  const rows = await sql<{ sku_id: string; on_hand: number; reserved: number }>`
     SELECT k.id AS sku_id,
            coalesce((SELECT sum(m.delta) FROM stock_movements m WHERE m.sku_id = k.id AND m.location_id = ${locationId}::uuid), 0)::int AS on_hand,
-           (SELECT count(*) FROM orders o WHERE o.sku_id = k.id AND o.location_id = ${locationId}::uuid AND o.reservation = 'STOCK')::int AS reserved,
-           (SELECT count(*) FROM bench_items b WHERE b.sku_id = k.id AND b.location_id = ${locationId}::uuid AND b.order_id IS NULL
-              AND b.status IN ('TO_MAKE', 'IN_PROGRESS'))::int AS to_make
+           (SELECT count(*) FROM orders o WHERE o.sku_id = k.id AND o.location_id = ${locationId}::uuid AND o.reservation = 'STOCK')::int AS reserved
       FROM skus k
      WHERE k.id IN (${sql.join(ids.map((id) => sql`${id}::uuid`))})`.execute(db);
-  for (const r of rows.rows) out.set(r.sku_id, { available: Math.max(0, Number(r.on_hand) - Number(r.reserved)), toMake: Number(r.to_make) });
+  for (const r of rows.rows) out.set(r.sku_id, { available: Math.max(0, Number(r.on_hand) - Number(r.reserved)) });
   return out;
 }
 
@@ -66,18 +62,15 @@ export interface FeasibilitySize {
   onSale: number;
 }
 
-/** A size checked: what the stock gives it, what is being made for it, what remains to make once sold. */
+/** A size checked: what the stock gives it, and what will wait for supplier stock once sold. */
 export interface FeasibilityLine {
   sizeId: string;
   label: string;
   onSale: number;
   /** Pieces available at the location, from what the sizes before it on the same SKU left. */
   available: number;
-  /** Pieces being made for the stock there, likewise. */
-  toMake: number;
-  /** Of the pieces on sale: from the stock, from the pieces being made, and still to make to order. */
+  /** Of the pieces on sale: from the stock, and those that will wait for supplier stock. */
   fromStock: number;
-  fromBench: number;
   short: number;
 }
 
@@ -87,7 +80,7 @@ export interface Feasibility {
   sizes: FeasibilityLine[];
   /** The after-room's sizes (null without one). */
   afterRoom: FeasibilityLine[] | null;
-  /** Pieces to make to order in all (0: everything on sale is covered). */
+  /** Pieces that will wait for supplier stock in all (0: everything on sale is in stock). */
   short: number;
   /** One per size not covered, in words. */
   warnings: string[];
@@ -95,8 +88,8 @@ export interface Feasibility {
 }
 
 /**
- * The check (pure): each size, in order, takes from its SKU's available pieces, then from the pieces being made for the
- * stock, what the sizes before it left; the release's sizes first, then the after-room's.
+ * The check (pure): each size, in order, takes from its SKU's available pieces what the sizes before it left; the
+ * release's sizes first, then the after-room's.
  */
 export function feasibilityCheck(input: {
   location: { id: string; name: string } | null;
@@ -106,30 +99,27 @@ export function feasibilityCheck(input: {
 }): Feasibility {
   const left = new Map<string, StockSupply>([...input.supply].map(([k, v]) => [k, { ...v }]));
   const take = (s: FeasibilitySize): FeasibilityLine => {
-    const own = s.skuId ? (left.get(s.skuId) ?? { available: 0, toMake: 0 }) : { available: 0, toMake: 0 };
-    const available = own.available;
-    const toMake = own.toMake;
+    const available = s.skuId ? (left.get(s.skuId)?.available ?? 0) : 0;
     const fromStock = Math.min(s.onSale, available);
-    const fromBench = Math.min(s.onSale - fromStock, toMake);
-    if (s.skuId) left.set(s.skuId, { available: available - fromStock, toMake: toMake - fromBench });
-    return { sizeId: s.sizeId, label: s.label, onSale: s.onSale, available, toMake, fromStock, fromBench, short: s.onSale - fromStock - fromBench };
+    if (s.skuId) left.set(s.skuId, { available: available - fromStock });
+    return { sizeId: s.sizeId, label: s.label, onSale: s.onSale, available, fromStock, short: s.onSale - fromStock };
   };
   const sizes = input.sizes.map(take);
   const afterRoom = input.afterRoom ? input.afterRoom.map(take) : null;
   const where = input.location?.name ?? 'no location';
-  const warn = (prefix: string) => (l: FeasibilityLine) =>
-    `${prefix}${l.label}: ${pieces(l.onSale)} on sale; ${count(l.fromStock)} from the stock at ${where} and ${count(l.fromBench)} being made for it: ${pieces(l.short)} more to make to order.`;
+  // The owner's sentence (plan NEXT LOT §2.5): « 52: 12 in stock, 13 will wait for supplier stock. »
+  const warn = (prefix: string) => (l: FeasibilityLine) => `${prefix}${l.label}: ${count(l.fromStock)} in stock, ${count(l.short)} will wait for supplier stock.`;
   const warnings = [...sizes.filter((l) => l.short > 0).map(warn('')), ...(afterRoom ?? []).filter((l) => l.short > 0).map(warn('THE AFTER-ROOM · '))];
   const all = [...sizes, ...(afterRoom ?? [])];
   const short = all.reduce((n, l) => n + l.short, 0);
   const onSale = all.reduce((n, l) => n + l.onSale, 0);
   const reasoning = [
     ...(input.location ? [] : ['No stock location is set up yet: nothing is in stock.']),
-    `Each size against the pieces available at ${where} (on hand less those orders hold) and the pieces the atelier is making for the stock there; a piece made for an order is that order's.`,
+    `Each size against the pieces available at ${where} (on hand less those orders hold).`,
     ...(afterRoom ? ['The release’s sizes first, then its after-room’s from what they leave: the same model in the same size draws on one stock.'] : []),
     short === 0
-      ? `Every one of the ${pieces(onSale)} on sale is covered: nothing to make to order.`
-      : `${pieces(short)} of the ${pieces(onSale)} on sale would be made to order once sold, at the atelier. It does not hold the release back: it can be published as it is.`,
+      ? `Every one of the ${pieces(onSale)} on sale is in stock.`
+      : `${pieces(short)} of the ${pieces(onSale)} on sale would wait for supplier stock once sold, the oldest orders first. It does not hold the release back: it can be published as it is.`,
   ];
   return { location: input.location, sizes, afterRoom, short, warnings, reasoning };
 }

@@ -11,10 +11,13 @@
  *                a draw's and a salon's size, and their price and currency when none is known, are entered by Client
  *                Services (`setTerms`).
  *   held         while RESERVED or PAID, an order whose SKU is known holds one piece of it at its location when one
- *                is available (STOCK: counted as reserved, services/stock.ts); otherwise it creates a piece to make
- *                (bench_items: BENCH) whose ORBES identity is reserved at once (issuance.ts reserveIdentity, L6).
- *                Changing the order's location moves what it holds (`changeLocation`): a piece in stock is released
- *                and taken again at the new location (or made for it); a piece to make goes there.
+ *                is available (STOCK: counted as reserved, services/stock.ts); otherwise it waits for supplier stock
+ *                (AWAITING, plan NEXT LOT §3.5: no piece to make, no identity reserved; never shown to the collector).
+ *                Waiting orders are served strictly by date, whatever their channel (a reshipment after a parcel lost
+ *                or damaged first, `queue_first`), each time a piece becomes available at their location
+ *                (`serveWaiting`: a count corrected up, a transfer in, a cancellation, a location change away, a
+ *                return to stock). Changing the order's location moves what it holds (`changeLocation`): a piece in
+ *                stock is released and taken again at the new location, or the order waits there.
  *   steps        exactly ORDER_TRANSITIONS (`transition`): RESERVED → PAID | CANCELLED; PAID → SHIPPED | CANCELLED;
  *                SHIPPED → DELIVERED | RETURNED; DELIVERED → RETURNED.
  *                PAID: by Client Services (later Whop or Shopify, through the same transition), once its price is
@@ -26,8 +29,8 @@
  *                stock): it leaves the ledger (SHIPPED, −1).
  *                DELIVERED: by Client Services, or by itself when the buyer registers the piece linked to the order
  *                while it is SHIPPED (`deliverOnRegistration`, OwnershipService.registerFirst).
- *                CANCELLED, with a note: a piece in stock is released; a piece to make is cancelled and its reserved
- *                identity retired (RETIRED: its serial is never reused); once PAID, a credit note cancels its invoice.
+ *                CANCELLED, with a note: a piece in stock is released, and serves the next order waiting for it; once
+ *                PAID, a credit note cancels its invoice.
  *                RETURNED (`returnOrder`, choice 20), opened by Client Services with a note and where the piece goes:
  *                back to stock at a location (the ledger's RETURNED, +1; the piece RESOLD, ready to be sold again, unless
  *                it was never sold: ISSUED) or to the archive (the piece RETIRED). When its buyer had registered it, ORBES
@@ -36,19 +39,18 @@
  *                archived, it is retired. A credit note cancels its invoice.
  *   history      every change is one event of the order (order_events: its audit action, the status after it, a note,
  *                who, when), one audit entry (`order.create`, `.pay`, `.ship`, `.deliver`, `.cancel`, `.return`,
- *                `.location`, `.terms`, `.buyer`, `.link`) and one entry of the event journal (the order as it stands after
- *                it; services/journal.ts), in the transaction of the change; the pieces to make (`bench.create`,
- *                `.cancel`, `.move`, `.engrave`, and the atelier's `.start` and `.done`: services/atelier.ts), the
- *                identities (`product.reserve`, `product.retire`, `product.issue`, `product.transition`), the stock
- *                (`stock.move`) and the invoices (`invoice.issue`, `invoice.credit`) journal their own changes; a return
- *                that takes an ownership back is audited `ownership.reclaim` too.
- *   the piece    the one that fulfils the order, linked when the atelier issues its piece to make or picks one from
- *                stock (`attachPiece`, `order.link`): the order then holds it in stock until it is shipped.
+ *                `.location`, `.terms`, `.buyer`, `.link`, `.serve`: a waiting order served, by the system) and one entry
+ *                of the event journal (the order as it stands after it; services/journal.ts), in the transaction of the
+ *                change; the identities (`product.issue`, `product.transition`), the stock (`stock.move`) and the
+ *                invoices (`invoice.issue`, `invoice.credit`) journal their own changes; a return that takes an
+ *                ownership back is audited `ownership.reclaim` too.
+ *   the piece    the one that fulfils the order, linked when one is picked from stock (`attachPiece`, `order.link`):
+ *                the order then holds it in stock until it is shipped.
  *   the buyer    name and address, entered by Client Services (decision 31; no form for collectors): kept on the order
  *                only, never in the audit log, the order's events nor the journal (which say they were entered, never
  *                what they are), and exported to the account under the right of access (`accountOrders`); the
  *                console's routes give them masked to an AUDITOR (OrderView carries them as stored, as the emails).
- *                The engraving text likewise stays on the order and its piece to make.
+ *                The engraving text likewise stays on the order.
  *   MY PIECES    the collector reads their own orders (`forAccount`, choice 6): the steps and their times, the model,
  *                the size, the add-ons and the price, the carrier and the tracking link once shipped, and its documents
  *                (M6): the invoice and the credit note, the model's care guide, the ownership certificate once the piece
@@ -87,7 +89,7 @@
  * a resolution already given mapped (CONCLUDED → PAID, CANCELLED → CANCELLED).
  *
  * Lock order: the source's rows (the release, then the entry; the request), the order, the SKU (stock.ts lockSku), the
- * piece to make and its identity; a return takes the piece returned before the order (as a registration does:
+ * orders waiting for that SKU in queue order (`serveWaiting`); a return takes the piece returned before the order (as a registration does:
  * OwnershipService.registerFirst holds the piece, then delivers its order), then the SKU, the piece's ownership and
  * transfer; the invoice numbers (invoices.ts); the journal; the audit log last: the functions a sale's transaction calls
  * return their audit entries for it to write after its own (a return's change of the piece's status, LifecycleService,
@@ -118,7 +120,6 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
 import { lockPieces, peekClaimRenewals, waitingClaimCodes, withdrawOnCancel, withdrawWaiting, type AccountOrderClaimCode } from './claim-renewals.js';
 import { issueCreditNote, issueInvoice, orderInvoices, type InvoiceBuyer } from './invoices.js';
-import { reserveIdentity, retireReservedIdentity } from './issuance.js';
 import { mediaUrl } from './media.js';
 import { writeJournal } from './journal.js';
 import { isTransitionAllowed, LifecycleService, returnTargetOf } from './lifecycle.js';
@@ -150,7 +151,7 @@ export const ORDER_STEP_ACTIONS: Readonly<Record<Exclude<OrderStatus, 'RESERVED'
   RETURNED: 'order.return',
 });
 
-/** The statuses in which an order holds a piece (STOCK) or a piece to make (BENCH). */
+/** The statuses in which an order holds a piece (STOCK) or waits for one (AWAITING). */
 export const ORDER_HOLDING_STATUSES: readonly OrderStatus[] = Object.freeze(['RESERVED', 'PAID']);
 /** The steps in which an order holds its piece for its buyer (orders_product_key): neither CANCELLED nor RETURNED. */
 const OPEN_STATUSES: readonly OrderStatus[] = Object.freeze(['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED']);
@@ -329,8 +330,6 @@ export interface OrderView {
   returnedAt: Date | null;
   location: { id: string; name: string };
   reservation: OrderReservation | null;
-  /** Its open piece to make, and the reference of the identity reserved for it. */
-  bench: { id: string; status: string; productId: string } | null;
   shipment: { carrier: { id: string; name: string }; trackingNumber: string; trackingUrl: string; declaredValueMinor: number | null } | null;
   /** The piece that fulfils it, by its reference. */
   productId: string | null;
@@ -821,63 +820,63 @@ async function recordChange(
 
 /**
  * What an order RESERVED or PAID, its SKU known and holding nothing, takes at its location: one piece in stock when
- * one is available (STOCK), otherwise a piece to make with its identity reserved (BENCH). Under the SKU's lock.
+ * one is available (STOCK), otherwise it waits for supplier stock (AWAITING: no piece to make, no identity reserved;
+ * plan NEXT LOT §3.5). Under the SKU's lock.
  */
-async function hold(tx: Db, o: OrderRow, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+async function hold(tx: Db, o: OrderRow, _actor: Actor, _now: Date, _notes: AuditRecordInput[]): Promise<OrderRow> {
   if (o.sku_id === null || o.reservation !== null || !ORDER_HOLDING_STATUSES.includes(o.status)) return o;
   await lockSku(tx, o.sku_id);
   const level = await stockLevel(tx, o.sku_id, o.location_id);
-  if (level.available >= 1) return updateOrder(tx, o.id, { reservation: 'STOCK' });
-  const identity = await reserveIdentity(tx, { modelId: o.model_id, skuId: o.sku_id, sizeLabel: o.size_label }, now);
-  const bench = await tx
-    .insertInto('bench_items')
-    .values({
-      order_id: o.id,
-      sku_id: o.sku_id,
-      location_id: o.location_id,
-      drop_id: o.drop_id,
-      product_id: identity.id,
-      engraving_text: o.engraving_text,
-      surprise: o.surprise,
-      created_at: now,
-    })
-    .returningAll()
-    .executeTakeFirstOrThrow();
-  await writeJournal(tx, [{ type: 'bench.create', entityType: 'bench_item', entityId: bench.id, payload: benchPayload(bench) }], now);
-  notes.push({
-    actor,
-    action: 'bench.create',
-    targetType: 'bench_item',
-    targetId: bench.id,
-    details: { orderId: o.id, skuId: o.sku_id, locationId: o.location_id, dropId: o.drop_id, productId: identity.productId },
-  });
-  return updateOrder(tx, o.id, { reservation: 'BENCH' });
+  return updateOrder(tx, o.id, { reservation: level.available >= 1 ? 'STOCK' : 'AWAITING' });
 }
 
 /**
- * Give back what an order holds: a piece in stock is released (under the SKU's lock); its open piece to make is
- * cancelled and the identity reserved for it retired (its serial never reused). Also the atelier's, when an order
- * holding a piece to make takes a finished piece instead (AtelierService.linkFromStock).
+ * Give back what an order holds: a piece in stock is released (under the SKU's lock) and serves the next order waiting
+ * for it there (`serveWaiting`: the owner's « puts the piece back in stock automatically, where it serves the next
+ * waiting order »); an order waiting for stock stops waiting. The audit entries of the orders served are added to
+ * `notes`.
  */
-export async function release(tx: Db, o: OrderRow, reason: string, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+export async function release(tx: Db, o: OrderRow, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
   if (o.reservation === null) return o;
-  if (o.reservation === 'STOCK') {
-    await lockSku(tx, o.sku_id!);
-    return updateOrder(tx, o.id, { reservation: null });
+  if (o.reservation === 'AWAITING') return updateOrder(tx, o.id, { reservation: null });
+  await lockSku(tx, o.sku_id!);
+  const after = await updateOrder(tx, o.id, { reservation: null });
+  notes.push(...(await serveWaiting(tx, o.sku_id!, o.location_id, actor, now)));
+  return after;
+}
+
+/**
+ * Serve the orders waiting for supplier stock of a SKU at a location (plan NEXT LOT §3.5.6.7), in the caller's
+ * transaction: while a piece is available there, the waiting order first in line takes it (STOCK) — a reshipment after
+ * a parcel lost or damaged first (`queue_first`), then strictly the oldest (`reserved_at`, then the id), whatever its
+ * channel. Lock order: the caller's order rows, then the SKU (`lockSku`), then the waiting orders' rows FOR UPDATE in
+ * queue order. Each order served gets its event and journal entry `order.serve` with `reservation: STOCK` (so its
+ * readiness reads it, services/fulfilment.ts readySince) and its audit entry, by the system, returned for the caller to
+ * write last. Called after every increase of what is available: a count corrected up, a transfer in, a cancellation, a
+ * location change away, a size changed, a return to stock.
+ */
+export async function serveWaiting(tx: Db, skuId: string, locationId: string, _actor: Actor, now: Date): Promise<AuditRecordInput[]> {
+  await lockSku(tx, skuId);
+  const level = await stockLevel(tx, skuId, locationId);
+  if (level.available < 1) return [];
+  const waiting = await tx
+    .selectFrom('orders')
+    .selectAll()
+    .where('sku_id', '=', skuId)
+    .where('location_id', '=', locationId)
+    .where('reservation', '=', 'AWAITING')
+    .orderBy('queue_first', 'desc')
+    .orderBy('reserved_at')
+    .orderBy('id')
+    .limit(level.available)
+    .forUpdate()
+    .execute();
+  const notes: AuditRecordInput[] = [];
+  for (const o of waiting) {
+    const after = await updateOrder(tx, o.id, { reservation: 'STOCK' });
+    notes.push(await recordChange(tx, o, after, 'order.serve', { details: { reservation: 'STOCK', skuId, locationId, ...(o.queue_first ? { queueFirst: true } : {}) } }, SYSTEM_ACTOR, now));
   }
-  const bench = await tx.selectFrom('bench_items').selectAll().where('order_id', '=', o.id).where('status', 'in', ['TO_MAKE', 'IN_PROGRESS']).forUpdate().executeTakeFirst();
-  if (bench) {
-    const cancelled = await tx
-      .updateTable('bench_items')
-      .set({ status: 'CANCELLED', cancelled_at: now })
-      .where('id', '=', bench.id)
-      .returningAll()
-      .executeTakeFirstOrThrow();
-    await writeJournal(tx, [{ type: 'bench.cancel', entityType: 'bench_item', entityId: bench.id, payload: benchPayload(cancelled) }], now);
-    const retired = await retireReservedIdentity(tx, bench.product_id, reason, actor, now);
-    notes.push({ actor, action: 'bench.cancel', targetType: 'bench_item', targetId: bench.id, details: { orderId: o.id, productId: bench.product_id, retired } });
-  }
-  return updateOrder(tx, o.id, { reservation: null });
+  return notes;
 }
 
 interface NewOrder {
@@ -937,8 +936,8 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
     })
     .returningAll()
     .executeTakeFirstOrThrow();
-  const benchNotes: AuditRecordInput[] = [];
-  if (opts.hold) o = await hold(tx, o, actor, now, benchNotes);
+  const holdNotes: AuditRecordInput[] = [];
+  if (opts.hold) o = await hold(tx, o, actor, now, holdNotes);
   const source: JsonObject = n.liveEntryId
     ? { liveEntryId: n.liveEntryId, piece: o.piece }
     : n.dropEntryId
@@ -967,7 +966,7 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
       actor,
       now,
     ),
-    ...benchNotes,
+    ...holdNotes,
   );
   return o;
 }
@@ -1253,7 +1252,7 @@ async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date
       details = s.details ?? {};
       break;
     case 'CANCELLED': {
-      const released = await release(tx, o, 'Reserved identity retired: its order was cancelled', actor, now, extra);
+      const released = await release(tx, o, actor, now, extra);
       after = await updateOrder(tx, released.id, { status: 'CANCELLED', cancelled_at: now });
       details = { released: o.reservation };
       // Plan NEXT LOT §3.4: a buyer's new claim code withdrawn, and the piece given a code nobody sees.
@@ -1393,7 +1392,7 @@ export class OrderService {
     this.log = deps.log ?? noopLogger;
   }
 
-  /** An order with its model, location, piece to make, shipment and history (404 ORDER_NOT_FOUND). */
+  /** An order with its model, location, shipment and history (404 ORDER_NOT_FOUND). */
   async get(orderId: string): Promise<OrderView> {
     const id = knownOrderId(orderId);
     const r = await this.db
@@ -1408,13 +1407,6 @@ export class OrderService {
       .where('o.id', '=', id)
       .executeTakeFirst();
     if (!r) throw orderNotFound();
-    const bench = await this.db
-      .selectFrom('bench_items as b')
-      .innerJoin('products as p', 'p.id', 'b.product_id')
-      .select(['b.id', 'b.status', 'p.product_id'])
-      .where('b.order_id', '=', id)
-      .where('b.status', 'in', ['TO_MAKE', 'IN_PROGRESS'])
-      .executeTakeFirst();
     const events = await this.db.selectFrom('order_events').selectAll().where('order_id', '=', id).orderBy('id').execute();
     const returned = await this.db
       .selectFrom('returns as x')
@@ -1504,7 +1496,6 @@ export class OrderService {
       returnedAt: r.returned_at,
       location: { id: r.location_id, name: r.location_name },
       reservation: r.reservation,
-      bench: bench ? { id: bench.id, status: bench.status, productId: bench.product_id } : null,
       shipment:
         r.carrier_id && r.tracking_number
           ? {
@@ -1753,6 +1744,8 @@ export class OrderService {
       if (to !== null && !isTransitionAllowed(p.status, to, await returnTargetOf(tx, p))) throw notRestockable(p.status);
       if (locationId) await recordMovement(tx, { skuId: o.sku_id, locationId, delta: 1, reason: 'RETURNED', orderId: o.id, productId: p.id, note: r.note }, actor, now);
       const extra: AuditRecordInput[] = [];
+      // Back to stock, the piece serves the next order waiting for it there (plan NEXT LOT §3.5).
+      if (locationId) extra.push(...(await serveWaiting(tx, o.sku_id, locationId, actor, now)));
       if (owner) {
         // ORBES takes the ownership back: it ends, a transfer pending with it is cancelled, the piece is unregistered.
         const endedAt = now < owner.started_at ? owner.started_at : now;
@@ -1814,8 +1807,9 @@ export class OrderService {
 
   /**
    * Change where an order is served from (RESERVED or PAID; 409 ORDER_CLOSED after): what it holds moves with it, a
-   * piece in stock released and taken again there (or made for it), a piece to make going there; refused once a piece
-   * is linked to it (409 ORDER_PIECE_LINKED: the piece is transferred instead). Audited `order.location`.
+   * piece in stock released (serving the next order waiting for it) and taken again there, or the order waits there;
+   * refused once a piece is linked to it (409 ORDER_PIECE_LINKED: the piece is transferred instead). Audited
+   * `order.location`.
    */
   async changeLocation(orderId: string, locationId: string, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
@@ -1827,20 +1821,10 @@ export class OrderService {
       if (o.location_id === to) throw validationError('The order is already served from there.');
       const extra: AuditRecordInput[] = [];
       let after: OrderRow;
-      if (o.reservation === 'STOCK') {
-        const released = await release(tx, o, 'Reserved identity retired: its order moved', actor, now, extra);
+      if (o.reservation !== null) {
+        const released = await release(tx, o, actor, now, extra);
         after = await hold(tx, await updateOrder(tx, released.id, { location_id: to }), actor, now, extra);
       } else {
-        if (o.reservation === 'BENCH') {
-          const moved = await tx
-            .updateTable('bench_items')
-            .set({ location_id: to })
-            .where('order_id', '=', o.id)
-            .where('status', 'in', ['TO_MAKE', 'IN_PROGRESS'])
-            .returningAll()
-            .executeTakeFirst();
-          if (moved) await writeJournal(tx, [{ type: 'bench.move', entityType: 'bench_item', entityId: moved.id, payload: benchPayload(moved) }], now);
-        }
         after = await updateOrder(tx, o.id, { location_id: to });
       }
       notes.push(await recordChange(tx, o, after, 'order.location', { details: { fromLocationId: o.location_id, toLocationId: to, reservation: after.reservation } }, actor, now), ...extra);
@@ -1850,8 +1834,8 @@ export class OrderService {
 
   /**
    * What Client Services enters on an order (RESERVED or PAID): a draw's or a salon's size (it then holds a piece of
-   * that size, or one to make), price and currency (before PAID only; 409 ORDER_TERMS_FIXED for a LIVE order, whose
-   * are its release's), and any order's engraving text (its piece to make carries it too). A size changes until a
+   * that size, or waits for one), price and currency (before PAID only; 409 ORDER_TERMS_FIXED for a LIVE order, whose
+   * are its release's), and any order's engraving text. A size changes until a
    * piece is linked (409 ORDER_PIECE_LINKED). Audited `order.terms` with the fields changed, never the engraving text.
    *
    * Its shipping (plan NEXT-NINE, BP-19 T4), while RESERVED: a service with its fee, or null for both (no shipping); 409
@@ -1915,21 +1899,13 @@ export class OrderService {
       }
       if (engraving !== undefined && engraving !== o.engraving_text) {
         after = await updateOrder(tx, o.id, { engraving_text: engraving });
-        const engraved = await tx
-          .updateTable('bench_items')
-          .set({ engraving_text: engraving })
-          .where('order_id', '=', o.id)
-          .where('status', 'in', ['TO_MAKE', 'IN_PROGRESS'])
-          .returningAll()
-          .executeTakeFirst();
-        if (engraved) await writeJournal(tx, [{ type: 'bench.engrave', entityType: 'bench_item', entityId: engraved.id, payload: benchPayload(engraved) }], now);
         fields.push('engraving');
       }
       if (sizeChange) {
         if (o.product_id !== null) throw pieceLinked();
         // Both SKUs locked first, in one order (two orders swapping sizes never wait for each other).
         for (const id of [...new Set([o.sku_id, skuId].filter((x): x is string => x !== null))].sort()) await lockSku(tx, id);
-        const released = await release(tx, after, 'Reserved identity retired: its order changed size', actor, now, extra);
+        const released = await release(tx, after, actor, now, extra);
         // Named as its SKU names it (Small typed for a SKU created SMALL reads SMALL, on the invoice too).
         const label = skuId === null ? null : (await tx.selectFrom('skus').select('size_label').where('id', '=', skuId).executeTakeFirstOrThrow()).size_label;
         after = await hold(tx, await updateOrder(tx, released.id, { size_label: label, sku_id: skuId }), actor, now, extra);

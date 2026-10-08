@@ -6,11 +6,12 @@
  *  1. The board: six columns, the cards of every channel (a private-salon order reserved three days ago stands out as
  *     late, a LIVE RELEASE's piece with its add-on, the collector's LR- reference and the surprise), the filters (late
  *     only, a channel, a search), the CSV.
- *  2. An order's page: its terms and its buyer entered, MARK PAID; its piece made at the atelier (START, DONE: the claim
- *     code shown once), linked to it; SHIP with a carrier, the tracking number and its link, a declared value; MARK
+ *  2. An order's page: its terms and its buyer entered, MARK PAID; waiting for supplier stock (plan NEXT LOT §3.5), it
+ *     takes a piece from the stock with LINK A PIECE; SHIP with a carrier, the tracking number and its link, a declared value; MARK
  *     DELIVERED; its history. Its packing slip: the piece, its size, add-ons, engraving and surprise, never a price; in
  *     print, the slip alone. A piece picked from the stock for an order holding one, paid: no SHIP until it is linked.
- *  3. The atelier: a minimum set, its suggestion confirmed into pieces to make for the stock; their work sheets, each
+ *  3. The atelier: no piece to make for an order any more; a minimum set, its suggestion confirmed into pieces to make
+ *     for the stock; their work sheets, each
  *     with its reference and its ORBES code drawn at 30 mm (in print too); the CSV of what to make.
  *  4. Returns and invoices (step S4): the delivered order's invoice on its page (its PDF); its piece registered by its
  *     buyer, a return opened back to stock: the new claim code shown once with its card to download, the return and
@@ -201,7 +202,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     const row = await ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow();
     admin = { type: 'admin', id: row.id };
 
-    // Three days ago: a salon order, reserved, its piece to make.
+    // Three days ago: a salon order, reserved, waiting for supplier stock.
     const late = await salonOrder('52');
     o.late = late.id;
     collector = late.email;
@@ -231,7 +232,6 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     liveEntryId = entry.id;
     o.live = (await ctx.db.selectFrom('orders').select('id').where('live_entry_id', '=', entry.id).executeTakeFirstOrThrow()).id;
     await ctx.db.updateTable('orders').set({ surprise: 'A silk pouch' }).where('id', '=', o.live).execute();
-    await ctx.db.updateTable('bench_items').set({ surprise: 'A silk pouch' }).where('order_id', '=', o.live).execute();
 
     // A piece made in advance, counted in stock at FRANCE WAREHOUSE, and a salon order that holds it.
     const issued = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, variant: '56', material: '925 STERLING SILVER', withClaimSecret: true }, admin);
@@ -309,12 +309,12 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.context().close();
   }, STEP_TIMEOUT);
 
-  it('takes an order through its steps: terms, buyer, paid; its piece made and linked; shipped and delivered; its packing slip without a price; a piece picked from the stock before it ships', async () => {
+  it('takes an order through its steps: terms, buyer, paid; waiting for supplier stock, a piece linked from the stock; shipped and delivered; its packing slip without a price; a piece picked from the stock before it ships', async () => {
     const p = await open(OPERATOR);
     await go(p, `#/orders/${o.late}`, orderReference(o.late));
     expect(await p.locator('[data-testid=order-late]').textContent()).toContain('Reserved for over 2 days, not paid yet.');
-    expect(await p.locator('[data-testid=order-holds]').textContent()).toBe('To make');
-    expect(await p.locator('#order-step').textContent()).toContain('Its piece is being made at the atelier; its price is to be entered.');
+    expect(await p.locator('[data-testid=order-holds]').textContent()).toBe('Awaiting stock');
+    expect(await p.locator('#order-step').textContent()).toContain('It waits for supplier stock; its price is to be entered.');
     // Only the steps that apply: no SHIP, no DELIVERED before it is paid; not paid before it is priced (its invoice).
     expect(await p.locator('[data-testid=order-ship]').count()).toBe(0);
     expect(await p.locator('[data-testid=order-deliver]').count()).toBe(0);
@@ -348,24 +348,19 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('#order-history tbody tr').first().textContent()).toContain('Paid by transfer.');
     await shot(p, 'order-paid');
 
-    // The atelier makes its piece: started, finished; its claim code shown once.
+    // No piece is made for it any more (plan NEXT LOT §3.5): the atelier lists none. A piece issued for it (its claim
+    // code kept for the return below) is linked from the stock, counted in with the order.
     await go(p, '#/atelier', 'Atelier');
-    const group = p.locator('[data-testid=bench-group]', { hasText: 'PRIVATE SALON · MONOLITHE · 52' });
-    expect(await group.locator('tbody tr').count()).toBe(1);
-    expect(await group.textContent()).toContain('Engraving: A. & L.');
-    await group.locator('[data-testid=bench-start]').click();
+    expect(await p.locator('[data-testid=bench-group]', { hasText: 'PRIVATE SALON · MONOLITHE · 52' }).count()).toBe(0);
+    const made = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, variant: '52', material: '925 STERLING SILVER', withClaimSecret: true }, admin);
+    lateClaim = made.claimCode!;
+    await go(p, `#/orders/${o.late}`, orderReference(o.late));
+    await p.click('[data-testid=order-link]');
+    expect(await p.locator('dialog [data-testid=link-awaiting]').textContent()).toBe('The order waits for supplier stock: a piece never counted in the stock is counted in with this order.');
+    await p.fill('dialog input[name=productId]', made.product.productId);
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=bench-group]', { hasText: 'PRIVATE SALON · MONOLITHE · 52' }).locator('[data-testid=bench-done]').count()).toBe(1);
-    await p.locator('[data-testid=bench-group]', { hasText: 'PRIVATE SALON · MONOLITHE · 52' }).locator('[data-testid=bench-done]').click();
-    expect(await p.inputValue('dialog input[name=material]')).toBe('925 STERLING SILVER');
-    await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog [data-testid=claim-code]').textContent()).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
-    lateClaim = (await p.locator('dialog [data-testid=claim-code]').textContent())!;
-    await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=bench-group]', { hasText: 'PRIVATE SALON · MONOLITHE · 52' }).count()).toBe(0);
 
     // Linked to its order, which ships: a carrier, the tracking number with its link, a declared value.
-    await go(p, `#/orders/${o.late}`, orderReference(o.late));
     await expect.poll(() => p.locator('[data-testid=order-holds]').textContent()).toMatch(/^Piece O26-J-\d{5}$/);
     await p.click('[data-testid=order-ship]');
     await p.selectOption('dialog select[name=carrierId]', { label: 'Colissimo' });
@@ -425,10 +420,8 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
   it('sets a minimum and confirms its suggestion; prints the work sheets, each code at 30 mm; the CSV of what to make', async () => {
     const p = await open(OPERATOR);
     await go(p, '#/atelier', 'Atelier');
-    // The LIVE order's piece to make, its add-on and surprise.
-    const liveGroup = p.locator('[data-testid=bench-group]', { hasText: 'THE VAULT RING · MONOLITHE · 54' });
-    expect(await liveGroup.textContent()).toContain('ENGRAVING');
-    expect(await liveGroup.textContent()).toContain('Surprise: A silk pouch');
+    // The LIVE order waits for supplier stock (plan NEXT LOT §3.5): no piece to make for it.
+    expect(await p.locator('[data-testid=bench-group]', { hasText: 'THE VAULT RING · MONOLITHE · 54' }).count()).toBe(0);
     await p.click('[data-testid=stock-minimum]');
     await p.selectOption('dialog select[name=skuId]', { label: 'MONOLITHE · 54 · MNL-RG-54' });
     await p.selectOption('dialog select[name=locationId]', { label: 'LOGISTICS WAREHOUSE' });

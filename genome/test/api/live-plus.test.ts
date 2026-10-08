@@ -159,7 +159,7 @@ describe('the question after, the stock and the best time over HTTP', () => {
 
     res = await auditor.get(`/api/admin/live/${created.id}/feasibility`);
     expect(res.statusCode).toBe(200);
-    expect(safeJson(res)).toMatchObject({ location: { name: 'FRANCE WAREHOUSE' }, sizes: [{ label: '52', onSale: 2, available: 0, toMake: 0, short: 2 }], afterRoom: null, short: 2 });
+    expect(safeJson(res)).toMatchObject({ location: { name: 'FRANCE WAREHOUSE' }, sizes: [{ label: '52', onSale: 2, available: 0, fromStock: 0, short: 2 }], afterRoom: null, short: 2 });
 
     res = await auditor.get(`/api/admin/live/${created.id}/best-time?country=fr`);
     expect(res.statusCode).toBe(200);

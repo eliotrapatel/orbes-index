@@ -243,10 +243,8 @@ interface ServerReport {
 
 /** What the two rooms left in the database, read once they are over (the orders of LIVE RELEASE+ and the after-room). */
 interface ReleaseFacts {
-  /** The orders of the release and of its after-room; by reservation: a piece held in stock, a piece to make, neither. */
-  orders: { main: number; afterRoom: number; stock: number; bench: number; other: number };
-  /** The pieces to make of those orders, and how many of them hold a reserved ORBES identity (products RESERVED). */
-  bench: { items: number; reserved: number };
+  /** The orders of the release and of its after-room; by reservation: a piece held in stock, awaiting supplier stock, neither. */
+  orders: { main: number; afterRoom: number; stock: number; awaiting: number; other: number };
   afterRoom: { guests: number; reason: string | null; confirmed: number };
   /** The rows of the event journal (services/journal.ts), written with every order and movement. */
   journal: number;
@@ -710,13 +708,6 @@ async function serve(): Promise<void> {
   const factsOf = async (): Promise<ReleaseFacts> => {
     const ids = [created.id, afterRoomId];
     const orders = await db.selectFrom('orders').select(['id', 'drop_id', 'reservation']).where('drop_id', 'in', ids).execute();
-    const bench = await db
-      .selectFrom('bench_items as b')
-      .innerJoin('orders as o', 'o.id', 'b.order_id')
-      .innerJoin('products as p', 'p.id', 'b.product_id')
-      .select('p.status')
-      .where('o.drop_id', 'in', ids)
-      .execute();
     const child = await db.selectFrom('drops').select('ended_reason').where('id', '=', afterRoomId).executeTakeFirstOrThrow();
     const count = async (q: Promise<{ n: number | string | bigint }>) => Number((await q).n);
     return {
@@ -724,10 +715,9 @@ async function serve(): Promise<void> {
         main: orders.filter((o) => o.drop_id === created.id).length,
         afterRoom: orders.filter((o) => o.drop_id === afterRoomId).length,
         stock: orders.filter((o) => o.reservation === 'STOCK').length,
-        bench: orders.filter((o) => o.reservation === 'BENCH').length,
-        other: orders.filter((o) => o.reservation !== 'STOCK' && o.reservation !== 'BENCH').length,
+        awaiting: orders.filter((o) => o.reservation === 'AWAITING').length,
+        other: orders.filter((o) => o.reservation !== 'STOCK' && o.reservation !== 'AWAITING').length,
       },
-      bench: { items: bench.length, reserved: bench.filter((b) => b.status === 'RESERVED').length },
       afterRoom: {
         guests: await count(db.selectFrom('after_room_guests').select((eb) => eb.fn.countAll<number>().as('n')).where('drop_id', '=', afterRoomId).executeTakeFirstOrThrow()),
         reason: child.ended_reason,
@@ -1306,14 +1296,12 @@ async function runLevel(o: Options, viewersWanted: number): Promise<LevelResult>
     afterOutcome.reason === 'SOLD_OUT' &&
     afterOutcome.confirmed === afterQuantity &&
     facts.afterRoom.confirmed === afterQuantity &&
-    // One order per piece confirmed; those of STOCKED held in stock, every other one a piece to make with its identity.
+    // One order per piece confirmed; those of STOCKED held in stock, every other one waiting for supplier stock (plan NEXT LOT §3.5).
     facts.orders.main === quantity &&
     facts.orders.afterRoom === afterQuantity &&
     facts.orders.stock === stocked &&
-    facts.orders.bench === quantity + afterQuantity - stocked &&
-    facts.orders.other === 0 &&
-    facts.bench.items === facts.orders.bench &&
-    facts.bench.reserved === facts.bench.items;
+    facts.orders.awaiting === quantity + afterQuantity - stocked &&
+    facts.orders.other === 0;
   // The busiest five seconds of the app's CPU.
   let busiest = 0;
   for (let i = 0; i + 5 <= report.cpuBySecond.length; i++) busiest = Math.max(busiest, report.cpuBySecond.slice(i, i + 5).reduce((a, b) => a + b, 0) / 5);
@@ -1415,7 +1403,7 @@ function printLevel(r: LevelResult): void {
     `| CPU, the app | busiest five seconds **${r.cpu.busiest5s} of a core** (× ${f}: ${round(r.cpu.busiest5s * f)}) · ${r.cpu.cores} over ${(r.cpu.wallMs / 1000).toFixed(0)} s (user ${r.cpu.userMs} ms, system ${r.cpu.systemMs} ms) | < ${LIVE_LOAD_TARGETS.cpuCores} core: ${yes(r.verdict.cpu)} |`,
     `| The end | ${r.outcome.reason ?? 'not over'} ${r.outcome.endedMs !== null ? `${(r.outcome.endedMs / 1000).toFixed(1)} s after T0` : ''} · ${r.outcome.confirmed} confirmed · ${r.outcome.released} released | every piece confirmed |`,
     `| The after-room | ${r.afterRoom.guests} guests (${r.facts.afterRoom.guests} remembered) · door read p95 ${ms(r.afterRoom.doorRead.p95)} · ${r.afterRoom.streams.opened} streams, ${r.afterRoom.streams.refused} refused, ${r.afterRoom.streams.dropped} dropped · ${r.afterRoom.late} came after their size or the room sold out · ${r.afterRoom.outcome.reason ?? 'not over'} ${r.afterRoom.outcome.endedMs !== null ? `${(r.afterRoom.outcome.endedMs / 1000).toFixed(1)} s after its T0` : ''} · ${r.afterRoom.outcome.confirmed} confirmed · ${r.afterRoom.outcome.released} released | every piece confirmed |`,
-    `| The orders | ${r.facts.orders.main} + ${r.facts.orders.afterRoom} (after-room) · ${r.facts.orders.stock} held in stock · ${r.facts.orders.bench} to make, ${r.facts.bench.reserved} of ${r.facts.bench.items} with a reserved identity · ${r.facts.orders.other} other · ${r.facts.journal} journal rows | one per piece |`,
+    `| The orders | ${r.facts.orders.main} + ${r.facts.orders.afterRoom} (after-room) · ${r.facts.orders.stock} held in stock · ${r.facts.orders.awaiting} awaiting stock · ${r.facts.orders.other} other · ${r.facts.journal} journal rows | one per piece |`,
     `| Answers other than 200 · app errors | ${r.actions.unexpected.length} · ${r.appErrors} | none: ${yes(r.verdict.clean)} |`,
     '',
     `**${r.verdict.pass ? 'Every target met' : 'A target not met'}** at ${r.viewers} in the room.`,

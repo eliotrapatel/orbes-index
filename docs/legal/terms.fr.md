@@ -1,6 +1,6 @@
 # Conditions générales d'utilisation du service ORBES GENOME CODE
 
-**Brouillon pour revue juridique, non validé.** Version : 9 octobre 2026. [English version](terms.en.md).
+**Brouillon pour revue juridique, non validé.** Version : 10 octobre 2026. [English version](terms.en.md).
 
 Chaque article se termine par une ligne *Code : …* qui renvoie aux règles du code qu'il décrit ([TERMS-FACTS](TERMS-FACTS.md)). Ces lignes servent à la revue et ne sont pas publiées. Les champs [À COMPLÉTER : …] attendent l'identité légale d'ORBES et les choix de l'avocat ([note pour l'avocat](counsel-note.fr.md)).
 
@@ -216,7 +216,7 @@ Chaque pièce réservée à un compte est une commande : une pièce d'une LIVE R
 
 **Ses étapes.** Une commande est RESERVED, puis PAID, SHIPPED et DELIVERED. Elle peut être CANCELLED tant qu'elle est RESERVED ou PAID, et RETURNED une fois SHIPPED ou DELIVERED ; aucune autre étape n'est possible. ORBES Client Services enregistre chaque étape ; rien n'est payé sur le service. Une commande n'est PAID qu'une fois son prix saisi.
 
-**Sa pièce.** Pour chaque commande, ORBES tient en stock une pièce de son modèle et de sa taille quand il y en a une, ou prévoit de la fabriquer : l'identité ORBES d'une pièce fabriquée pour une commande est réservée dès qu'elle est prévue, et confirmée quand la pièce est terminée. Une commande annulée libère sa pièce ; une pièce prévue pour elle n'est plus fabriquée, et son identité ORBES réservée est retirée, son numéro n'étant jamais réemployé.
+**Sa pièce.** Pour chaque commande, ORBES tient en stock une pièce de son modèle et de sa taille quand il y en a une ; sinon la commande attend la prochaine livraison des fournisseurs d'ORBES, et les commandes en attente sont servies de la plus ancienne à la plus récente (une pièce renvoyée pour un colis perdu ou endommagé en route passe avant elles). Une commande annulée libère sa pièce, qui va à la prochaine commande qui l'attend.
 
 **Livraison.** ORBES Client Services saisit sur la commande le nom et l'adresse de l'acheteur, et le texte d'une éventuelle gravure : le service n'a pas de formulaire pour cela. Une commande est expédiée avec un transporteur et un numéro de suivi, que MY PIECES montre alors avec TRACK THE SHIPMENT, un lien vers la page du transporteur. Elle est DELIVERED quand ORBES Client Services l'enregistre, ou dès que le compte qui l'a passée enregistre sa pièce (article 7) pendant qu'elle est SHIPPED.
 

@@ -812,6 +812,46 @@ describe('a LIVE RELEASE end to end', () => {
     expect(await db.selectFrom('skus').select('id').where('model_id', '=', model).execute()).toHaveLength(2);
   });
 
+  it('END TEST cancels the test\'s orders waiting for supplier stock before those holding stock (plan NEXT LOT §3.5.9): the piece freed serves the real collector waiting, never a test order; no serial is retired; the report 5/5', async () => {
+    const db = w.h.ctx.db;
+    const model = await createModel(db, 'HALO');
+    await w.h.ctx.services.sizes.declare(model, { sizeType: 'RING', ticked: ['52'] }, w.f.admin);
+    const sku52 = (await db.selectFrom('skus').select('id').where('model_id', '=', model).where('size_label', '=', '52').executeTakeFirstOrThrow()).id;
+    const france = (await db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    await w.h.ctx.services.stock.adjust({ skuId: sku52, locationId: france, delta: 1, note: 'Counted.' }, w.f.admin);
+    const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
+    const release = await createLiveRelease(w.f, { modelId: model, opensAt: t0, sizes: [{ label: '52', stock: 3 }] });
+    const run = await w.tests.start(
+      release.id,
+      press(release.id, { titane: 3 }, { behaviour: { payPct: 100, releasePct: 0, missPct: 0, leavePct: 0, holdSeconds: 1.5 }, choices: { size: '52', quantity: 1, addOnsPct: 0 } }),
+      w.f.admin,
+    );
+    await drive(w, 0, 500, release.id);
+    w.h.clock.set(t0);
+    await drive(w, 20_000, 500, release.id);
+    const tests = await db.selectFrom('orders').select(['id', 'reservation', 'location_id']).where('drop_id', '=', release.id).execute();
+    expect(tests.map((o) => o.reservation).sort()).toEqual(['AWAITING', 'AWAITING', 'STOCK']);
+    // A real collector's order of the same size waits behind them, at the same location.
+    w.h.clock.advance(MINUTE);
+    const real = await createAccount(db);
+    const request = await db.insertInto('shop_requests').values({ account_id: real.id, model_id: model, created_at: w.h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+    await w.h.ctx.services.salon.close(request.id, { note: 'Accepted.', outcome: 'ACCEPTED' }, w.f.admin);
+    const realOrder = (await db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+    expect(tests.every((o) => o.location_id === france)).toBe(true);
+    await w.h.ctx.services.orders.setTerms(realOrder, { sizeLabel: '52' }, w.f.admin);
+    expect((await db.selectFrom('orders').select('reservation').where('id', '=', realOrder).executeTakeFirstOrThrow()).reservation).toBe('AWAITING');
+    const retired = (await db.selectFrom('products').select('id').where('status', '=', 'RETIRED').execute()).length;
+
+    const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
+    expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([['ONE_ENTRY', true], ['ORDER', true], ['ONE_PLACE', true], ['STOCK', true], ['ORDERS', true]]);
+    expect((await db.selectFrom('orders').select('status').where('drop_id', '=', release.id).execute()).every((o) => o.status === 'CANCELLED')).toBe(true);
+    // The waiting test orders went first: the piece freed last served the real order, and no test order was served.
+    expect((await db.selectFrom('orders').select('reservation').where('id', '=', realOrder).executeTakeFirstOrThrow()).reservation).toBe('STOCK');
+    const served = await db.selectFrom('order_events').select('order_id').where('action', '=', 'order.serve').where('order_id', 'in', [...tests.map((o) => o.id), realOrder]).execute();
+    expect(served.map((e) => e.order_id)).toEqual([realOrder]);
+    expect((await db.selectFrom('products').select('id').where('status', '=', 'RETIRED').execute()).length).toBe(retired);
+  });
+
   it('by hand: a bot on its turn secures and pays now (CONFIRM); RELEASE needs a held piece, and a draw\'s place is never released', async () => {
     const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
     const release = await createLiveRelease(w.f, { opensAt: t0, sizes: [{ label: '52', stock: 2 }] });

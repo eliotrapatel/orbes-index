@@ -169,16 +169,16 @@ export type ClaimRenewalWithdrawnReason = (typeof CLAIM_RENEWAL_WITHDRAWN_REASON
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
 
-/** Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon, a welcome gift (BP-19 T5). */
-export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT'] as const;
+/** Where an order comes from (orders.channel): a LIVE RELEASE, a draw, the private salon, a welcome gift (BP-19 T5), a size exchange (plan NEXT LOT §3.5). */
+export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE'] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 
 /** The steps of an order (orders.status): RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
 export const ORDER_STATUSES = ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED'] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
-/** What an order RESERVED or PAID holds at its location (orders.reservation): a piece in stock, or a piece to make. */
-export const ORDER_RESERVATIONS = ['STOCK', 'BENCH'] as const;
+/** What an order RESERVED or PAID holds at its location (orders.reservation): a piece in stock, or nothing yet, waiting for supplier stock (Awaiting stock). */
+export const ORDER_RESERVATIONS = ['STOCK', 'AWAITING'] as const;
 export type OrderReservation = (typeof ORDER_RESERVATIONS)[number];
 
 /** Why the stock moved (stock_movements.reason). */
@@ -188,6 +188,22 @@ export type StockMovementReason = (typeof STOCK_MOVEMENT_REASONS)[number];
 /** A piece to make at the atelier (bench_items.status). */
 export const BENCH_ITEM_STATUSES = ['TO_MAKE', 'IN_PROGRESS', 'DONE', 'CANCELLED'] as const;
 export type BenchItemStatus = (typeof BENCH_ITEM_STATUSES)[number];
+
+/** A parcel's steps (shipments.status, plan NEXT LOT §3.5). */
+export const SHIPMENT_STATUSES = ['PACKING', 'PACKED', 'SHIPPED', 'DELIVERED', 'BACK_TO_SENDER', 'LOST', 'DAMAGED', 'CANCELLED'] as const;
+export type ShipmentStatus = (typeof SHIPMENT_STATUSES)[number];
+
+/** An order case: a return, a size exchange, a parcel problem (order_cases, plan NEXT LOT §1.1 (b)). */
+export const ORDER_CASE_KINDS = ['RETURN', 'EXCHANGE', 'BACK_TO_SENDER', 'LOST', 'DAMAGED'] as const;
+export type OrderCaseKind = (typeof ORDER_CASE_KINDS)[number];
+export const ORDER_CASE_OPENERS = ['account', 'admin'] as const;
+export const ORDER_CASE_REASONS = ['SIZE', 'NOT_AS_EXPECTED', 'DAMAGED', 'OTHER'] as const;
+export type OrderCaseReason = (typeof ORDER_CASE_REASONS)[number];
+export const ORDER_CASE_STATUSES = ['OPEN', 'RECEIVED', 'CLOSED', 'CANCELLED'] as const;
+export type OrderCaseStatus = (typeof ORDER_CASE_STATUSES)[number];
+export const ORDER_CASE_PIECE_STATES = ['OK', 'DAMAGED'] as const;
+export const ORDER_CASE_OUTCOMES = ['REFUND', 'EXCHANGE', 'RESHIP'] as const;
+export const ORDER_CASE_PIECE_DESTINATIONS = ['RESTOCKED', 'ARCHIVED', 'REVOKED'] as const;
 
 /** Where a returned order's piece goes (returns.outcome). */
 export const RETURN_OUTCOMES = ['RESTOCKED', 'ARCHIVED'] as const;
@@ -1583,9 +1599,7 @@ export interface LiveFeasibilityLine {
   label: string;
   onSale: number;
   available: number;
-  toMake: number;
   fromStock: number;
-  fromBench: number;
   short: number;
 }
 
@@ -2410,7 +2424,6 @@ export interface OrderCard {
   engraving: boolean;
   location: { id: string; name: string };
   reservation: OrderReservation | null;
-  bench: { status: BenchItemStatus } | null;
   piece: string | null;
   shipment: { carrier: string; trackingNumber: string } | null;
   timing: OrderTiming;
@@ -2479,7 +2492,6 @@ export interface OrderView {
   returnedAt: Iso | null;
   location: { id: string; name: string };
   reservation: OrderReservation | null;
-  bench: { id: string; status: BenchItemStatus; productId: string } | null;
   shipment: { carrier: { id: string; name: string }; trackingNumber: string; trackingUrl: string; declaredValueMinor: number | null } | null;
   productId: string | null;
   shopifyOrderId: string | null;

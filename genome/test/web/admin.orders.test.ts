@@ -114,7 +114,6 @@ const view = (o: Partial<OrderView> = {}): OrderView => ({
   returnedAt: null,
   location: { id: LOC, name: 'FRANCE WAREHOUSE' },
   reservation: null,
-  bench: null,
   shipment: null,
   productId: null,
   shopifyOrderId: null,
@@ -202,11 +201,11 @@ describe('the board', () => {
   });
 
   it('says what an order holds or what fulfils it', () => {
-    const card = (o: Partial<OrderCard>) => ({ status: 'RESERVED', reservation: null, bench: null, piece: null, location: { id: LOC, name: 'FRANCE WAREHOUSE' }, sizeLabel: null, skuCode: null, ...o }) as OrderCard;
+    const card = (o: Partial<OrderCard>) => ({ status: 'RESERVED', reservation: null, piece: null, location: { id: LOC, name: 'FRANCE WAREHOUSE' }, sizeLabel: null, skuCode: null, ...o }) as OrderCard;
     expect(cardHolds(card({}))).toBe('Size to enter');
     expect(cardHolds(card({ skuCode: 'MNL', reservation: 'STOCK' }))).toBe('In stock at FRANCE WAREHOUSE');
-    expect(cardHolds(card({ skuCode: 'MNL', reservation: 'BENCH', bench: { status: 'TO_MAKE' } }))).toBe('To make');
-    expect(cardHolds(card({ skuCode: 'MNL', reservation: 'BENCH', bench: { status: 'IN_PROGRESS' } }))).toBe('Being made');
+    // Waiting for supplier stock (plan NEXT LOT §3.5): no more piece to make.
+    expect(cardHolds(card({ skuCode: 'MNL', reservation: 'AWAITING' }))).toBe('Awaiting stock');
     expect(cardHolds(card({ status: 'SHIPPED', piece: 'O26-J-00184' }))).toBe('Piece O26-J-00184');
     expect(cardHolds(card({ status: 'CANCELLED' }))).toBe('—');
     expect(viewHolds(view({ skuId: 's', reservation: 'STOCK' }))).toBe('In stock at FRANCE WAREHOUSE');
@@ -355,17 +354,15 @@ describe('what a role may do with an order', () => {
     expect(orderActions(view({ priceMinor: 480_000, currency: 'EUR' }), 'OPERATOR').pay).toBe(true);
     const paidStock = view({ status: 'PAID', paidAt: 'x', skuId: 's', reservation: 'STOCK' });
     expect(orderActions(paidStock, 'OPERATOR')).toMatchObject({ pay: false, ship: false, cancel: true, terms: { size: true, price: false, engraving: true }, linkPiece: true });
-    const live = view({ channel: 'LIVE', skuId: 's', reservation: 'BENCH', sizeLabel: '52', priceMinor: 1, currency: 'EUR' });
+    const live = view({ channel: 'LIVE', skuId: 's', reservation: 'AWAITING', sizeLabel: '52', priceMinor: 1, currency: 'EUR' });
     // A LIVE RELEASE's order: its size and price are its release's; its shipping is entered while RESERVED (BP-19 T4).
     expect(orderActions(live, 'ADMIN').terms).toEqual({ size: false, price: false, engraving: true, shipping: true });
     // The shipping: RESERVED only, and never on an order travelling with another (its parent's).
     expect(orderActions(paidStock, 'OPERATOR').terms.shipping).toBe(false);
     expect(orderActions(view({ withOrder: { id: 'p', reference: 'OR-12345678', shipment: null } }), 'OPERATOR').terms.shipping).toBe(false);
-    expect(orderActions(live, 'ADMIN').linkPiece).toBe(false);
-    // A finished piece in place of a piece to make still being made (choice 8); not once it is finished or cancelled.
-    for (const [status, linkable] of [['TO_MAKE', true], ['IN_PROGRESS', true], ['DONE', false], ['CANCELLED', false]] as const) {
-      expect(orderActions(view({ ...live, bench: { id: 'b', status, productId: 'O26-J-00190' } }), 'OPERATOR').linkPiece, status).toBe(linkable);
-    }
+    // A piece from the stock for an order waiting for supplier stock (plan NEXT LOT §3.5); an AUDITOR never links one.
+    expect([orderActions(live, 'OPERATOR').linkPiece, orderActions(live, 'AUDITOR').linkPiece]).toEqual([true, false]);
+    expect(orderActions(view({ ...live, status: 'CANCELLED', reservation: null }), 'OPERATOR').linkPiece).toBe(false);
     const linked = view({ status: 'PAID', paidAt: 'x', skuId: 's', reservation: 'STOCK', productId: 'O26-J-00184' });
     expect(orderActions(linked, 'OPERATOR')).toMatchObject({ location: false, linkPiece: false, ship: true, terms: { size: false } });
     expect(orderActions(view({ status: 'SHIPPED', productId: 'O26-J-00184' }), 'OPERATOR')).toMatchObject({ deliver: true, cancel: false, return: true, location: false, buyer: true });
@@ -385,8 +382,8 @@ describe('what a role may do with an order', () => {
       false,
     ]);
     expect(shipWaitsFor(view())).toBe('Its size is to be entered.');
-    expect(shipWaitsFor(view({ skuId: 's', reservation: 'BENCH', priceMinor: 480_000, currency: 'EUR' }))).toBe('Its piece is being made at the atelier.');
-    expect(shipWaitsFor(view({ skuId: 's', reservation: 'BENCH' }))).toBe('Its piece is being made at the atelier; its price is to be entered.');
+    expect(shipWaitsFor(view({ skuId: 's', reservation: 'AWAITING', priceMinor: 480_000, currency: 'EUR' }))).toBe('It waits for supplier stock.');
+    expect(shipWaitsFor(view({ skuId: 's', reservation: 'AWAITING' }))).toBe('It waits for supplier stock; its price is to be entered.');
     expect(shipWaitsFor(view({ skuId: 's', reservation: 'STOCK', priceMinor: 480_000, currency: 'EUR' }))).toBe('It ships once paid.');
     expect(shipWaitsFor(view({ skuId: 's', reservation: 'STOCK' }))).toBe('Its price is to be entered: it is paid once priced, and its invoice issued then.');
     expect(shipWaitsFor(paidStock)).toBe('Link its piece from the stock.');

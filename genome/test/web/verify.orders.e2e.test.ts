@@ -50,6 +50,7 @@ import { createLiveRelease, liveFixture, type LiveFixture } from '../support/liv
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
+import { stockPiece } from '../support/fulfil.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
@@ -138,13 +139,11 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await f.live.confirm(me.id, r.id, actor);
     ids.live = (await srv.ctx.db.selectFrom('orders').select('id').where('account_id', '=', me.id).where('channel', '=', 'LIVE').executeTakeFirstOrThrow()).id;
 
-    // Today, ORBES Client Services: paid, the piece made at the atelier, shipped.
+    // Today, ORBES Client Services: paid, its piece taken from the stock (test/support/fulfil.ts stockPiece), shipped.
     const orders = srv.ctx.services.orders;
     await orders.transition(ids.live, { to: 'PAID' }, f.admin);
-    const bench = await srv.ctx.db.selectFrom('bench_items').select('id').where('order_id', '=', ids.live).executeTakeFirstOrThrow();
-    await srv.ctx.services.atelier.start(bench.id, f.admin);
-    const done = await srv.ctx.services.atelier.done(bench.id, { material: '925 STERLING SILVER' }, f.admin);
-    Object.assign(livePiece, { productId: done.productId, codeData: (await srv.ctx.services.issuance.printableCode(done.codeId)).data, claimCode: done.claimCode! });
+    const done = await stockPiece(srv.ctx, { orderId: ids.live, material: '925 STERLING SILVER' }, f.admin);
+    Object.assign(livePiece, { productId: done.productId, codeData: done.data, claimCode: done.claimCode! });
     await orders.transition(ids.live, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
 
     ids.cancelled = await salonOrder(me.id);

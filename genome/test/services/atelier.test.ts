@@ -264,44 +264,35 @@ describe('the atelier (plan LIVE RELEASE+, S2)', () => {
   });
 
   describe('the pieces to make', () => {
-    it('lists them per release (the latest first), the private salon\'s and the stock\'s after, by model and size, with their counts; the CSV says what to make', async () => {
+    it('lists the pieces to make for the stock by model and size, with their counts; an order creates none any more (plan NEXT LOT §3.5: it waits for supplier stock); the CSV says what to make', async () => {
       const model = await createModel(t.db, 'ORBIT');
       const first = await liveSale('48');
       clock.advance(HOUR);
       const second = await liveSale('50', [{ label: 'ENGRAVING', priceMinor: 15_000 }]);
       await ctx.services.orders.setTerms(second.order.id, { engravingText: 'A. & L.' }, admin);
       const salon = await salonOrder('56', model);
+      expect([first.order.reservation, second.order.reservation, salon.reservation]).toEqual(['AWAITING', 'AWAITING', 'AWAITING']);
+      for (const o of [first.order, second.order, salon]) expect(await t.db.selectFrom('bench_items').select('id').where('order_id', '=', o.id).execute(), o.id).toEqual([]);
       const stockSku = await skuOf('58', model);
       await atelier().makeForStock({ skuId: stockSku, locationId: logistics, quantity: 1 }, admin);
       const list = await atelier().bench({});
       const mine = list.groups.filter((g) => (g.origin.kind === 'RELEASE' ? [first.release.id, second.release.id].includes(g.origin.release.id) : g.sku.model.id === model));
-      expect(mine.map((g) => [g.origin.kind === 'RELEASE' ? g.origin.release.id : g.origin.kind, g.sku.sizeLabel, g.counts.TO_MAKE, g.items.length])).toEqual([
-        [second.release.id, '50', 1, 1],
-        [first.release.id, '48', 1, 1],
-        ['SALON', '56', 1, 1],
-        ['STOCK', '58', 1, 1],
-      ]);
-      const engraved = mine[0]!.items[0]!;
-      expect(engraved).toMatchObject({ engravingText: 'A. & L.', addons: ['ENGRAVING'], order: { id: second.order.id, status: 'RESERVED', channel: 'LIVE' } });
-      expect(list.releases.slice(0, 2).map((r) => r.id)).toEqual([second.release.id, first.release.id]);
-      expect(list.total).toBeGreaterThanOrEqual(4);
-      // Narrowed: one release, the salon's, the stock's, one SKU.
-      expect((await atelier().bench({ origin: first.release.id })).groups.map((g) => g.sku.sizeLabel)).toEqual(['48']);
-      expect((await atelier().bench({ origin: 'SALON', skuId: salon.sku_id! })).groups.map((g) => g.origin)).toEqual([{ kind: 'SALON' }]);
+      expect(mine.map((g) => [g.origin.kind === 'RELEASE' ? g.origin.release.id : g.origin.kind, g.sku.sizeLabel, g.counts.TO_MAKE, g.items.length])).toEqual([['STOCK', '58', 1, 1]]);
+      expect(list.releases.map((r) => r.id)).not.toContain(first.release.id);
+      // Narrowed: one release, the salon's (none), the stock's, one SKU.
+      expect((await atelier().bench({ origin: first.release.id })).groups).toEqual([]);
+      expect((await atelier().bench({ origin: 'SALON', skuId: salon.sku_id! })).groups).toEqual([]);
       expect((await atelier().bench({ origin: 'STOCK', skuId: stockSku })).groups.map((g) => g.items[0]!.location.name)).toEqual(['LOGISTICS WAREHOUSE']);
-      expect((await atelier().bench({ view: 'DONE', origin: first.release.id })).groups).toEqual([]);
+      expect((await atelier().bench({ view: 'DONE', origin: 'STOCK', skuId: stockSku })).groups).toEqual([]);
 
-      const csv = await atelier().benchCsv({ origin: second.release.id });
+      const csv = await atelier().benchCsv({ origin: 'STOCK', skuId: stockSku });
       expect(csv.filename).toMatch(/^ORBES-atelier-\d{4}-\d{2}-\d{2}\.csv$/);
       const lines = csv.body.trim().split('\r\n');
       expect(lines[0]).toBe('"for","model","size","sku","location","piece","status","order","channel","add-ons","engraving","surprise","created at","started at","done at"');
       expect(lines).toHaveLength(2);
-      expect(lines[1]).toContain('"50"');
-      expect(lines[1]).toContain('"ENGRAVING"');
-      expect(lines[1]).toContain('"A. & L."');
-      expect(lines[1]).toContain(`"${engraved.piece.reference}"`);
-      const salonCsv = await atelier().benchCsv({ origin: 'SALON', skuId: salon.sku_id! });
-      expect(salonCsv.body.split('\r\n')[1]!.startsWith('"PRIVATE SALON"')).toBe(true);
+      expect(lines[1]).toContain('"58"');
+      expect(lines[1]!.startsWith('"FOR STOCK"')).toBe(true);
+      expect((await atelier().benchCsv({ origin: second.release.id })).body.trim().split('\r\n')).toHaveLength(1);
     });
 
     it('moves exactly TO MAKE → IN PROGRESS → DONE; a piece for the stock is cancelled (its identity retired, its sheet\'s code revoked), an order\'s never', async () => {
@@ -330,12 +321,12 @@ describe('the atelier (plan LIVE RELEASE+, S2)', () => {
       await rejects(atelier().cancel(b!.id, admin), 'BENCH_STEP_NOT_ALLOWED', 409);
       await rejects(atelier().start(b!.id, admin), 'BENCH_STEP_NOT_ALLOWED', 409);
 
-      // An order's piece to make goes with its order.
+      // An order no longer gets a piece to make (plan NEXT LOT §3.5): it waits for supplier stock.
       const o = await salonOrder('61');
-      const own = await benchOfOrder(o.id);
-      await rejects(atelier().cancel(own.id, admin), 'BENCH_FOR_ORDER', 409);
+      expect(o.reservation).toBe('AWAITING');
+      expect(await t.db.selectFrom('bench_items').select('id').where('order_id', '=', o.id).execute()).toEqual([]);
       await rejects(atelier().start('00000000-0000-4000-8000-000000000000', admin), 'BENCH_ITEM_NOT_FOUND', 404);
-      await rejects(atelier().start(own.id, { type: 'account', id: o.account_id }), 'FORBIDDEN', 403);
+      await rejects(atelier().start(a!.id, { type: 'account', id: o.account_id }), 'FORBIDDEN', 403);
     });
   });
 
@@ -393,59 +384,47 @@ describe('the atelier (plan LIVE RELEASE+, S2)', () => {
       await rejects(atelier().sheets({ benchItemIds: Array.from({ length: WORK_SHEETS_MAX + 1 }, () => item!.id) }, admin), 'VALIDATION_FAILED', 400);
     });
 
-    it('a piece made for an order is linked to it when issued (its code signed then if no sheet signed it): the order holds it in stock and ships it', async () => {
+    it('a piece finished for the stock enters it and serves the order waiting for it there; linked from the stock, the order holds it and ships it', async () => {
       const sale = await liveSale('64', [{ label: 'GIFT BOX', priceMinor: 0 }]);
-      expect(sale.order.reservation).toBe('BENCH');
-      const bench = await benchOfOrder(sale.order.id);
+      expect(sale.order.reservation).toBe('AWAITING');
       await ctx.services.orders.transition(sale.order.id, { to: 'PAID' }, admin);
-      // Not ready to ship before the piece is made.
+      // Not ready to ship while it waits for supplier stock.
       await rejects(ctx.services.orders.transition(sale.order.id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, admin), 'ORDER_NOT_READY', 409);
-      await atelier().start(bench.id, admin);
+      const [item] = await atelier().makeForStock({ skuId: sale.order.sku_id!, locationId: sale.order.location_id, quantity: 1 }, admin);
+      await atelier().start(item!.id, admin);
       clock.advance(MINUTE);
-      const issued = await atelier().done(bench.id, { material: '925 STERLING SILVER', withClaimSecret: false }, admin);
+      const issued = await atelier().done(item!.id, { material: '925 STERLING SILVER', withClaimSecret: false }, admin);
       expect(issued.claimCode).toBeUndefined();
-      const p = await productRow(bench.product_id);
-      expect([p.status, p.claim_secret_hash]).toEqual(['ISSUED', null]);
-      expect(await t.db.selectFrom('codes').select(['issue', 'status']).where('product_id', '=', p.id).execute()).toEqual([{ issue: 1, status: 'ACTIVE' }]);
-      const o = await orderRow(sale.order.id);
-      expect([o.product_id, o.reservation, o.status]).toEqual([p.id, 'STOCK', 'PAID']);
-      const link = await t.db.selectFrom('order_events').select(['action', 'status', 'details']).where('order_id', '=', o.id).orderBy('id', 'desc').executeTakeFirstOrThrow();
-      expect(link).toEqual({ action: 'order.link', status: 'PAID', details: { productId: p.id, via: 'bench', reservation: 'STOCK' } });
-      expect((await journalOf(o.id)).at(-1)!.type).toBe('order.link');
-      expect((await auditsOf(o.id, 'order.link'))[0]!.details).toMatchObject({ from: 'PAID', to: 'PAID', productId: p.id, via: 'bench' });
-      expect(await t.db.selectFrom('stock_movements').select(['reason', 'order_id']).where('product_id', '=', p.id).execute()).toEqual([{ reason: 'PRODUCED', order_id: o.id }]);
+      const p = await productRow(item!.piece.id);
+      expect([p.status, p.claim_secret_hash, p.stock_entered_at]).toEqual(['ISSUED', null, clock.now()]);
+      // It entered the stock and served the order waiting there, by the system; the piece itself is bound later.
+      let o = await orderRow(sale.order.id);
+      expect([o.product_id, o.reservation, o.status]).toEqual([null, 'STOCK', 'PAID']);
+      const served = await t.db.selectFrom('order_events').select(['action', 'status', 'actor_type', 'details']).where('order_id', '=', o.id).orderBy('id', 'desc').executeTakeFirstOrThrow();
+      expect(served).toMatchObject({ action: 'order.serve', status: 'PAID', actor_type: 'system', details: { reservation: 'STOCK' } });
+      expect(await t.db.selectFrom('stock_movements').select(['reason', 'order_id']).where('product_id', '=', p.id).execute()).toEqual([{ reason: 'PRODUCED', order_id: null }]);
+      clock.advance(MINUTE);
+      await atelier().linkFromStock(o.id, p.product_id, admin);
+      o = await orderRow(sale.order.id);
+      expect([o.product_id, o.reservation]).toEqual([p.id, 'STOCK']);
+      expect((await auditsOf(o.id, 'order.link'))[0]!.details).toMatchObject({ from: 'PAID', to: 'PAID', productId: p.id, via: 'stock' });
       expect(await stockLevel(t.db, o.sku_id!, o.location_id)).toMatchObject({ reserved: 1 });
-      const view = await ctx.services.orders.get(o.id);
-      expect([view.productId, view.bench]).toEqual([p.product_id, null]);
+      expect((await ctx.services.orders.get(o.id)).productId).toBe(p.product_id);
       // Shipped now: the piece leaves the ledger.
       clock.advance(MINUTE);
       await ctx.services.orders.transition(o.id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
-      expect(await t.db.selectFrom('stock_movements').select(['reason', 'delta']).where('order_id', '=', o.id).orderBy('id').execute()).toEqual([
-        { reason: 'PRODUCED', delta: 1 },
-        { reason: 'SHIPPED', delta: -1 },
-      ]);
+      expect(await t.db.selectFrom('stock_movements').select(['reason', 'delta']).where('order_id', '=', o.id).orderBy('id').execute()).toEqual([{ reason: 'SHIPPED', delta: -1 }]);
       // A location changed once the piece is linked: refused, the piece is transferred instead.
       const other = await liveSale('66');
-      const otherBench = await benchOfOrder(other.order.id);
-      await atelier().start(otherBench.id, admin);
-      await atelier().done(otherBench.id, { material: '925 STERLING SILVER' }, admin);
+      const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '66', material: '925 STERLING SILVER' }, admin);
+      await atelier().linkFromStock(other.order.id, piece.product.productId, admin);
       await rejects(ctx.services.orders.changeLocation(other.order.id, logistics, admin), 'ORDER_PIECE_LINKED', 409);
-      // An order cancelled after its piece was made: the piece stays in stock, free.
+      // An order cancelled after its piece was linked: the piece stays in stock, free.
       clock.advance(MINUTE);
       await ctx.services.orders.transition(other.order.id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
       const freed = await orderRow(other.order.id);
       expect(await stockLevel(t.db, freed.sku_id!, freed.location_id)).toMatchObject({ onHand: 1, reserved: 0, available: 1 });
-      expect((await productRow(otherBench.product_id)).status).toBe('ISSUED');
-    });
-
-    it('an order cancelled while its piece is being made: DONE is refused, the identity retired with the order', async () => {
-      const sale = await liveSale('68');
-      const bench = await benchOfOrder(sale.order.id);
-      await atelier().start(bench.id, admin);
-      await ctx.services.orders.transition(sale.order.id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
-      expect((await benchRow(bench.id)).status).toBe('CANCELLED');
-      await rejects(atelier().done(bench.id, { material: '925 STERLING SILVER' }, admin), 'BENCH_STEP_NOT_ALLOWED', 409);
-      expect((await productRow(bench.product_id)).status).toBe('RETIRED');
+      expect((await productRow(piece.product.id)).status).toBe('ISSUED');
     });
   });
 
@@ -477,51 +456,46 @@ describe('the atelier (plan LIVE RELEASE+, S2)', () => {
       // The same piece for another order: taken.
       const second = await salonOrder('70', model);
       await rejects(atelier().linkFromStock(second.id, a.product.productId, admin), 'PIECE_TAKEN', 409);
-      // An order whose piece is being made may take a finished piece too, never one fulfilling another order.
+      // An order waiting for supplier stock may take a piece too, never one fulfilling another order.
       const third = await salonOrder('70', model);
-      expect(third.reservation).toBe('BENCH');
+      expect(third.reservation).toBe('AWAITING');
       await rejects(atelier().linkFromStock(third.id, a.product.productId, admin), 'PIECE_TAKEN', 409);
-      expect((await orderRow(third.id)).reservation).toBe('BENCH');
+      expect((await orderRow(third.id)).reservation).toBe('AWAITING');
     });
 
-    it('takes a finished piece for an order whose piece is being made: its piece to make cancelled, the piece counted once', async () => {
+    it('takes a piece for an order waiting for supplier stock: counted in with the order when none is available there, taken from what is available otherwise, the piece counted once', async () => {
       const model = await createModel(t.db, 'ORBIT');
       const sku = await skuOf('74', model);
       const issue = () => ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: model, variant: '74', material: '925 STERLING SILVER' }, admin);
       const movementsOf = (productUuid: string) => t.db.selectFrom('stock_movements').select(['reason', 'delta', 'order_id', 'location_id', 'note']).where('product_id', '=', productUuid).execute();
 
-      // Nothing in stock: the order holds a piece to make, started, its work sheet printed (its code signed).
+      // Nothing in stock: the order waits for supplier stock.
       const first = await salonOrder('74', model);
-      expect(first.reservation).toBe('BENCH');
-      const firstBench = await benchOfOrder(first.id);
-      await atelier().start(firstBench.id, admin);
-      const [sheet] = await atelier().sheets({ benchItemIds: [firstBench.id] }, admin);
-      // A piece issued in the Generator, never counted in the stock: counted in with the order.
+      expect(first.reservation).toBe('AWAITING');
+      // A piece issued in the Generator, never counted in the stock: counted in with the order, entering the stock.
       const g = await issue();
       expect(await movementsOf(g.product.id)).toEqual([]);
       clock.advance(MINUTE);
       const linked = await atelier().linkFromStock(first.id, g.product.productId, admin);
-      expect([linked.productId, linked.reservation, linked.bench]).toEqual([g.product.productId, 'STOCK', null]);
-      expect((await benchRow(firstBench.id)).status).toBe('CANCELLED');
-      expect((await productRow(firstBench.product_id)).status).toBe('RETIRED');
-      expect((await t.db.selectFrom('codes').select('status').where('id', '=', sheet!.code.codeId).executeTakeFirstOrThrow()).status).toBe('REVOKED');
+      expect([linked.productId, linked.reservation]).toEqual([g.product.productId, 'STOCK']);
       expect(await movementsOf(g.product.id)).toEqual([
         { reason: 'PRODUCED', delta: 1, order_id: first.id, location_id: first.location_id, note: 'A finished piece never counted in the stock, counted in with the order it fulfils.' },
       ]);
+      expect((await productRow(g.product.id)).stock_entered_at).toEqual(clock.now());
       expect(await stockLevel(t.db, sku, first.location_id)).toEqual({ onHand: 1, reserved: 1, available: 0 });
-      expect((await auditsOf(firstBench.id, 'bench.cancel')).map((a) => a.details)).toEqual([{ orderId: first.id, productId: firstBench.product_id, retired: true }]);
       const event = await t.db.selectFrom('order_events').select(['action', 'details']).where('order_id', '=', first.id).orderBy('id', 'desc').executeTakeFirstOrThrow();
       expect(event).toEqual({ action: 'order.link', details: { productId: g.product.id, via: 'stock', reservation: 'STOCK' } });
 
-      // A piece counted in by a correction after the order took its piece to make: taken from what is available, once.
+      // A piece counted in by a correction after the order began waiting: the correction serves it, then the piece is
+      // taken from what is available, once.
       const second = await salonOrder('74', model);
-      expect(second.reservation).toBe('BENCH');
+      expect(second.reservation).toBe('AWAITING');
       const k = await issue();
       await receive(sku, france, 1);
+      expect((await orderRow(second.id)).reservation).toBe('STOCK');
       await atelier().linkFromStock(second.id, k.product.productId, admin);
       expect(await movementsOf(k.product.id)).toEqual([]);
       expect(await stockLevel(t.db, sku, france)).toEqual({ onHand: 2, reserved: 2, available: 0 });
-      expect((await benchRow((await benchOfOrder(second.id)).id)).status).toBe('CANCELLED');
 
       // A piece the ledger counts, none available at the order's location: refused, nothing changes.
       clock.advance(MINUTE);
@@ -529,10 +503,9 @@ describe('the atelier (plan LIVE RELEASE+, S2)', () => {
       const holder = await salonOrder('74', model);
       expect(holder.reservation).toBe('STOCK');
       const waiting = await salonOrder('74', model);
-      expect(waiting.reservation).toBe('BENCH');
+      expect(waiting.reservation).toBe('AWAITING');
       await rejects(atelier().linkFromStock(waiting.id, g.product.productId, admin), 'STOCK_NOT_AVAILABLE', 409);
-      expect((await orderRow(waiting.id)).reservation).toBe('BENCH');
-      expect((await benchRow((await benchOfOrder(waiting.id)).id)).status).toBe('TO_MAKE');
+      expect((await orderRow(waiting.id)).reservation).toBe('AWAITING');
       // The order holding it in stock takes it.
       expect((await atelier().linkFromStock(holder.id, g.product.productId, admin)).productId).toBe(g.product.productId);
     });

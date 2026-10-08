@@ -75,6 +75,7 @@ import { deriveDropSeedKey } from '../../src/server/services/drops.js';
 import { deriveLiveTurnKey } from '../../src/server/services/live.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
+import { stockPiece } from './fulfil.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from './live.js';
 
 export type DemoVariant =
@@ -343,7 +344,6 @@ async function register(w: World, who: DemoAccount, code: { data: string; claimC
 }
 
 const orderOfEntry = async (w: World, entryId: string) => (await w.ctx.db.selectFrom('orders').select('id').where('drop_entry_id', '=', entryId).executeTakeFirstOrThrow()).id;
-const benchOf = async (w: World, orderId: string) => (await w.ctx.db.selectFrom('bench_items').select('id').where('order_id', '=', orderId).executeTakeFirstOrThrow()).id;
 const carrier = async (w: World, name: string) => (await w.ctx.db.selectFrom('carriers').select('id').where('name', '=', name).executeTakeFirstOrThrow()).id;
 const titled = async (w: World, id: string, title: string, description?: string) => {
   await w.ctx.db.updateTable('drops').set({ title, ...(description ? { description } : {}) }).where('id', '=', id).execute();
@@ -366,17 +366,15 @@ async function pastDraw(w: World, o: { model: string; title: string; opens: stri
   return orderOfEntry(w, entry.id);
 }
 
-/** Make the order's piece at the atelier: started, done; the piece issued and linked to the order. */
-async function make(w: World, orderId: string, role: string, startAt: string, doneAt: string) {
-  w.clock.set(at(startAt));
-  const bench = await benchOf(w, orderId);
-  await w.ctx.services.atelier.start(bench, w.admin);
-  w.clock.set(at(doneAt));
-  const done = await w.ctx.services.atelier.done(bench, { productionBatch: 'B-2026-09-DRAW' }, w.admin);
-  const code = await w.ctx.services.issuance.printableCode(done.codeId);
-  w.issued[role] = { uuid: '', productId: done.productId, codeId: done.codeId, data: code.data, glyphs: code.glyphs, ...(done.claimCode ? { claimCode: done.claimCode } : {}) };
+/**
+ * The order's piece (plan NEXT LOT §3.5, step 5.5: no more piece to make): a piece issued with the draw's batch when it
+ * was finished, taken from the stock for the order (test/support/fulfil.ts stockPiece).
+ */
+async function make(w: World, orderId: string, role: string, doneAt: string) {
+  const done = await stockPiece(w.ctx, { orderId, productionBatch: 'B-2026-09-DRAW', at: at(doneAt), clock: w.clock }, w.admin);
+  w.issued[role] = { uuid: '', productId: done.productId, codeId: done.codeId, data: done.data, glyphs: done.glyphs, ...(done.claimCode ? { claimCode: done.claimCode } : {}) };
   w.demo.pieces[role] = done.productId;
-  w.demo.codes[role] = { data: fromBase64Url(code.data), glyphs: code.glyphs };
+  w.demo.codes[role] = { data: fromBase64Url(done.data), glyphs: done.glyphs };
   return w.issued[role]!;
 }
 
@@ -403,7 +401,7 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   await ctx.services.orders.setBuyer(steelOrder, { name: 'You', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
   clock.set(at('2026-09-15T10:00:00Z'));
   await ctx.services.orders.transition(steelOrder, { to: 'PAID' }, admin);
-  const steelPiece = await make(w, steelOrder, 'returned', '2026-09-15T11:00:00Z', '2026-09-16T09:00:00Z');
+  const steelPiece = await make(w, steelOrder, 'returned', '2026-09-16T09:00:00Z');
   clock.set(at('2026-09-16T10:00:00Z'));
   await ctx.services.warranty.activate(steelPiece.productId, { purchaseDate: '2026-09-16', retailer: 'ORBES PARIS', country: 'FR' }, admin);
   await ctx.services.orders.transition(steelOrder, { to: 'SHIPPED', carrierId: await carrier(w, 'Colissimo'), trackingNumber: '6A10987654321', declaredValueMinor: 420_000 }, admin);
@@ -417,7 +415,7 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   await ctx.services.orders.setBuyer(goldOrder, { name: 'You', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
   clock.set(at('2026-09-16T10:00:00Z'));
   await ctx.services.orders.transition(goldOrder, { to: 'PAID' }, admin);
-  const goldPiece = await make(w, goldOrder, 'gold', '2026-09-16T11:00:00Z', '2026-09-17T16:00:00Z');
+  const goldPiece = await make(w, goldOrder, 'gold', '2026-09-17T16:00:00Z');
   // The other collectors' pieces (held since June): PLATINE, the crowd of the releases and the circle (TITANE), the voters
   // (PLATINE). PLATINE starts from five pieces (plan NEXT-NINE, BP-19 T1): the two more of PLATINE's and of each voter's
   // carry serials of 2025, so the serials of 2026 the story shows stay as they were.
@@ -636,8 +634,12 @@ async function seedScanCases(w: World): Promise<void> {
   const { ctx, admin, clock, demo } = w;
   const owner = demo.accounts.owner!;
   clock.set(at('2026-10-04T10:00:00Z'));
+  // Before plan NEXT LOT §3.5 (step 5.5) two orders of the story took a serial each for a piece to make (ZENITH's,
+  // cancelled, and a draw's order waiting): the scan cases start two serials further on, so the serials the boards show
+  // stay as they were (O26-J-00224 to O26-J-00232 in the full story).
+  const next = Number((await ctx.db.selectFrom('products').select((eb) => eb.fn.max('serial').as('max')).where('year', '=', 2026).executeTakeFirstOrThrow()).max) + 1;
   // A piece sold this weekend, to register: AUTHENTIC — FIRST REGISTRATION (C9, C36).
-  await issue(w, 'first', 'steel', { sold: '2026-10-04' });
+  await issue(w, 'first', 'steel', { serial: next + 2, sold: '2026-10-04' });
   // Its twin for the ceremony (registered by a capture).
   await issue(w, 'ceremony', 'steel', { sold: '2026-10-04' });
   // A piece sold, unregistered, whose code is copied: a burst of scans from many places (C15).
@@ -1253,9 +1255,7 @@ async function seedStress(w: World): Promise<void> {
     await ctx.services.orders.setBuyer(order, { name: 'You', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
     if (i === 1) {
       await ctx.services.orders.transition(order, { to: 'PAID' }, admin);
-      const bench = await benchOf(w, order);
-      await ctx.services.atelier.start(bench, admin);
-      await ctx.services.atelier.done(bench, { productionBatch: 'B-2026-09-STRESS' }, admin);
+      await stockPiece(ctx, { orderId: order, productionBatch: 'B-2026-09-STRESS' }, admin);
       await ctx.services.orders.transition(order, { to: 'SHIPPED', carrierId: await carrier(w, 'Chronopost'), trackingNumber: 'XY48291563748201937465012FR', declaredValueMinor: 640_000 }, admin);
     }
   }

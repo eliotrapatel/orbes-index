@@ -149,6 +149,15 @@ describe('schema', () => {
       ['supplier_returns', 'status', S.SUPPLIER_RETURN_STATUSES],
       ['supplier_returns', 'settlement', S.SUPPLIER_RETURN_SETTLEMENTS],
       ['stock_corrections', 'status', S.STOCK_CORRECTION_STATUSES],
+      ['shipments', 'status', S.SHIPMENT_STATUSES],
+      ['shipments', 'photo_mime', ['image/jpeg', 'image/webp']],
+      ['order_cases', 'kind', S.ORDER_CASE_KINDS],
+      ['order_cases', 'opened_by_type', S.ORDER_CASE_OPENERS],
+      ['order_cases', 'reason', S.ORDER_CASE_REASONS],
+      ['order_cases', 'status', S.ORDER_CASE_STATUSES],
+      ['order_cases', 'piece_state', S.ORDER_CASE_PIECE_STATES],
+      ['order_cases', 'outcome', S.ORDER_CASE_OUTCOMES],
+      ['order_cases', 'piece_to', S.ORDER_CASE_PIECE_DESTINATIONS],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));

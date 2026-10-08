@@ -38,10 +38,10 @@ async function rejects(p: Promise<unknown>, code: string, status?: number): Prom
 describe('the arithmetic (pure)', () => {
   const loc = { id: 'L', name: 'FRANCE WAREHOUSE' };
 
-  it('feasibility: the stock first, then the pieces being made, the after-room from what the release leaves', () => {
+  it('feasibility: the stock, the after-room from what the release leaves; the rest will wait for supplier stock (plan NEXT LOT §3.5)', () => {
     const supply = new Map([
-      ['k52', { available: 4, toMake: 1 }],
-      ['k54', { available: 0, toMake: 2 }],
+      ['k52', { available: 4 }],
+      ['k54', { available: 0 }],
     ]);
     const r = feasibilityCheck({
       location: loc,
@@ -54,23 +54,21 @@ describe('the arithmetic (pure)', () => {
       supply,
     });
     expect(r.sizes).toEqual([
-      { sizeId: 's52', label: '52', onSale: 3, available: 4, toMake: 1, fromStock: 3, fromBench: 0, short: 0 },
-      { sizeId: 's54', label: '54', onSale: 5, available: 0, toMake: 2, fromStock: 0, fromBench: 2, short: 3 },
-      { sizeId: 's56', label: '56', onSale: 1, available: 0, toMake: 0, fromStock: 0, fromBench: 0, short: 1 },
+      { sizeId: 's52', label: '52', onSale: 3, available: 4, fromStock: 3, short: 0 },
+      { sizeId: 's54', label: '54', onSale: 5, available: 0, fromStock: 0, short: 5 },
+      { sizeId: 's56', label: '56', onSale: 1, available: 0, fromStock: 0, short: 1 },
     ]);
-    // The after-room's 52 takes the one piece the release's 52 left, then the one being made: one more to make.
-    expect(r.afterRoom).toEqual([{ sizeId: 'a52', label: '52', onSale: 3, available: 1, toMake: 1, fromStock: 1, fromBench: 1, short: 1 }]);
-    expect(r.short).toBe(5);
-    expect(r.warnings).toEqual([
-      '54: 5 pieces on sale; 0 from the stock at FRANCE WAREHOUSE and 2 being made for it: 3 pieces more to make to order.',
-      '56: 1 piece on sale; 0 from the stock at FRANCE WAREHOUSE and 0 being made for it: 1 piece more to make to order.',
-      'THE AFTER-ROOM · 52: 3 pieces on sale; 1 from the stock at FRANCE WAREHOUSE and 1 being made for it: 1 piece more to make to order.',
-    ]);
-    expect(r.reasoning.at(-1)).toBe('5 pieces of the 12 pieces on sale would be made to order once sold, at the atelier. It does not hold the release back: it can be published as it is.');
+    // The after-room's 52 takes the one piece the release's 52 left: two will wait.
+    expect(r.afterRoom).toEqual([{ sizeId: 'a52', label: '52', onSale: 3, available: 1, fromStock: 1, short: 2 }]);
+    expect(r.short).toBe(8);
+    // The owner's sentence: « 52: 12 in stock, 13 will wait for supplier stock. »
+    expect(r.warnings).toEqual(['54: 0 in stock, 5 will wait for supplier stock.', '56: 0 in stock, 1 will wait for supplier stock.', 'THE AFTER-ROOM · 52: 1 in stock, 2 will wait for supplier stock.']);
+    expect(r.reasoning.join(' ')).not.toMatch(/atelier|to make|made to order/i);
+    expect(r.reasoning.at(-1)).toBe('8 pieces of the 12 pieces on sale would wait for supplier stock once sold, the oldest orders first. It does not hold the release back: it can be published as it is.');
     // Everything covered: no warning.
-    const covered = feasibilityCheck({ location: loc, sizes: [{ sizeId: 's52', label: '52', skuId: 'k52', onSale: 5 }], afterRoom: null, supply });
+    const covered = feasibilityCheck({ location: loc, sizes: [{ sizeId: 's52', label: '52', skuId: 'k52', onSale: 4 }], afterRoom: null, supply });
     expect(covered).toMatchObject({ short: 0, warnings: [], afterRoom: null });
-    expect(covered.reasoning.at(-1)).toBe('Every one of the 5 pieces on sale is covered: nothing to make to order.');
+    expect(covered.reasoning.at(-1)).toBe('Every one of the 4 pieces on sale is in stock.');
   });
 
   it('size mix: the stock first; the planner’s extra pieces where its demand exceeds the stock, largest remainder', () => {
@@ -173,7 +171,7 @@ describe('the release and the stock', () => {
     await receive(k54, france, 1);
     await receive(k52, logistics, 10);
     await receive(k54, logistics, 3);
-    // Two pieces of 54 being made for the stock at FRANCE WAREHOUSE (not on hand: never in the mix).
+    // Two pieces of 54 being made for the stock at FRANCE WAREHOUSE (not on hand: never in the mix, nor in the check).
     await ctx.services.atelier.makeForStock({ skuId: k54, locationId: france, quantity: 2 }, f.admin);
 
     // The size mix: no past release, the planner has no basis; the stock at each location as it is.
@@ -205,17 +203,17 @@ describe('the release and the stock', () => {
     expect(r).toMatchObject({ locationId: null, location: { id: france, name: 'FRANCE WAREHOUSE' } });
     const here = await ctx.services.liveConsole.feasibility(r.id);
     expect(here.location).toEqual({ id: france, name: 'FRANCE WAREHOUSE' });
-    expect(here.sizes.map((l) => [l.label, l.onSale, l.available, l.toMake, l.fromStock, l.fromBench, l.short])).toEqual([
-      ['52', 6, 4, 0, 4, 0, 2],
-      ['54', 4, 1, 2, 1, 2, 1],
-      ['56', 2, 0, 0, 0, 0, 2],
+    expect(here.sizes.map((l) => [l.label, l.onSale, l.available, l.fromStock, l.short])).toEqual([
+      ['52', 6, 4, 4, 2],
+      ['54', 4, 1, 1, 3],
+      ['56', 2, 0, 0, 2],
     ]);
-    expect(here.afterRoom!.map((l) => [l.label, l.onSale, l.available, l.toMake, l.short])).toEqual([
-      ['52', 1, 0, 0, 1],
-      ['54', 1, 0, 0, 1],
+    expect(here.afterRoom!.map((l) => [l.label, l.onSale, l.available, l.short])).toEqual([
+      ['52', 1, 0, 1],
+      ['54', 1, 0, 1],
     ]);
-    expect(here.short).toBe(7);
-    expect(here.warnings[0]).toBe('52: 6 pieces on sale; 4 from the stock at FRANCE WAREHOUSE and 0 being made for it: 2 pieces more to make to order.');
+    expect(here.short).toBe(9);
+    expect(here.warnings[0]).toBe('52: 4 in stock, 2 will wait for supplier stock.');
 
     // At LOGISTICS WAREHOUSE: 52 covered by its 10, 54 by 3 of its 3, the after-room's 52 by what is left.
     const moved = await ctx.services.liveConsole.update(r.id, { stockLocationId: logistics }, f.admin);
@@ -238,7 +236,8 @@ describe('the release and the stock', () => {
     const published = await ctx.services.liveConsole.publish(r.id, {}, f.admin);
     expect(published.publishedAt).not.toBeNull();
     const publish = await t.db.selectFrom('audit_logs').select('details').where('target_id', '=', r.id).where('action', '=', 'drop.live.publish').executeTakeFirstOrThrow();
-    expect(publish.details).toMatchObject({ locationId: logistics, toMakeToOrder: 4, shortSizes: ['54:1', '56:2', 'AFTER-ROOM 54:1'] });
+    expect(publish.details).toMatchObject({ locationId: logistics, waitForStock: 4, shortSizes: ['54:1', '56:2', 'AFTER-ROOM 54:1'] });
+    expect(publish.details).not.toHaveProperty('toMakeToOrder');
   });
 
   it('finds a model’s SKU in a size whatever the case the size is typed in', async () => {

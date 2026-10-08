@@ -26,11 +26,12 @@
  *                  ledger at the location it was made for (PRODUCED, +1), and, made for an order, linked to it (the
  *                  order then holds it in stock: `attachPiece`, `order.link`). A piece of an order held in stock is
  *                  linked by picking one piece of its SKU from the stock (`linkFromStock`): issued and never sold, or
- *                  back from a return. An order holding a piece to make may take a finished piece the same way (one
- *                  made in advance, choice 8): its piece to make is cancelled and its reserved identity retired, and
- *                  the piece is taken from what is available at the order's location or, nothing being available
- *                  there and the piece never having entered the ledger (issued in the Generator), counted in with
- *                  the order (PRODUCED, +1).
+ *                  back from a return. Since plan NEXT LOT §3.5 (step 5.5) an order no longer gets a piece to make: it
+ *                  waits for supplier stock (AWAITING), and may take a piece the same way: the piece is taken from what
+ *                  is available at the order's location or, nothing being available there and the piece never having
+ *                  entered the ledger (issued in the Generator), counted in with the order (PRODUCED, +1, the piece
+ *                  then entering the stock: `stock_entered_at`). A piece finished for the stock serves the orders
+ *                  waiting for it there (services/orders.ts serveWaiting). The atelier goes in step 5.13.
  *
  * Lock order (as services/orders.ts): the order, the SKU, the piece to make, the piece; the serials, the journal; the
  * audit log last. Journaled: `bench.create`, `.start`, `.done`, `.cancel`, `product.issue`, `product.retire`,
@@ -48,7 +49,7 @@ import type { AuditRecordInput, AuditService } from './audit.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
 import { confirmReservedIdentity, RESERVED_MATERIAL_PENDING, reserveIdentity, retireReservedIdentity, type IssuanceService } from './issuance.js';
 import { writeJournal } from './journal.js';
-import { attachPiece, benchPayload, ORDER_HOLDING_STATUSES, orderReference, release, type OrderService, type OrderView } from './orders.js';
+import { attachPiece, benchPayload, ORDER_HOLDING_STATUSES, orderReference, serveWaiting, type OrderService, type OrderView } from './orders.js';
 import { assertSkuOffered } from './sizes.js';
 import { knownLocation, lockSku, recordMovement, STOCK_MOVE_MAX, stockLevel } from './stock.js';
 
@@ -551,7 +552,8 @@ export class AtelierService {
       await lockSku(tx, peek.sku_id);
       const b = await tx.selectFrom('bench_items').selectAll().where('id', '=', id).forUpdate().executeTakeFirstOrThrow();
       if (b.status !== 'IN_PROGRESS') throw stepNotAllowed(b.status, 'DONE');
-      if (order && (!ORDER_HOLDING_STATUSES.includes(order.status) || order.reservation !== 'BENCH')) throw conflict('ORDER_CLOSED', 'This order no longer waits for this piece.');
+      // Since plan NEXT LOT §3.5 an order holds no piece to make: one made for an order no longer serves it.
+      if (order) throw conflict('ORDER_CLOSED', 'This order no longer waits for this piece.');
       const p = await tx.selectFrom('products').selectAll().where('id', '=', b.product_id).forUpdate().executeTakeFirstOrThrow();
       const finalMaterial = material ?? p.material;
       if (finalMaterial === RESERVED_MATERIAL_PENDING) throw validationError('Confirm the material of the piece.');
@@ -561,6 +563,10 @@ export class AtelierService {
       const doneRow = await tx.updateTable('bench_items').set({ status: 'DONE', done_at: now }).where('id', '=', id).returningAll().executeTakeFirstOrThrow();
       await writeJournal(tx, [{ type: 'bench.done', entityType: 'bench_item', entityId: id, payload: benchPayload(doneRow) }], now);
       await recordMovement(tx, { skuId: b.sku_id, locationId: b.location_id, delta: 1, reason: 'PRODUCED', orderId: b.order_id, productId: p.id }, actor, now);
+      // The piece enters the stock (plan NEXT LOT §3.5.5.2: a PRODUCED movement is its entry), and serves an order
+      // waiting for it there.
+      await tx.updateTable('products').set({ stock_entered_at: now }).where('id', '=', p.id).where('stock_entered_at', 'is', null).execute();
+      if (!order) notes.push(...(await serveWaiting(tx, b.sku_id, b.location_id, actor, now)));
       notes.push(
         {
           actor,
@@ -643,12 +649,11 @@ export class AtelierService {
   /**
    * The piece that fulfils an order, picked from the stock (Interconnection): a piece of the order's SKU issued and
    * never sold, or back in stock from a return (STOCK_PIECE_STATUSES), not registered, linked to no other open order.
-   * The order then holds that piece. An order holding one in stock takes it as it is. An order holding a piece to make
-   * (TO_MAKE or IN_PROGRESS) takes it instead (choice 8: a piece made in advance counts): one piece available at the
-   * order's location is taken for it; with none available there, a piece that never entered the ledger (issued in the
-   * Generator) is counted in with the order (PRODUCED, +1), and one already counted elsewhere answers 409
-   * STOCK_NOT_AVAILABLE (transfer it first). Its piece to make is then cancelled and its reserved identity retired (the
-   * code of its work sheet revoked). Audited `order.link` (and `bench.cancel`; the movement journaled `stock.move`).
+   * The order then holds that piece. An order holding one in stock takes it as it is. An order waiting for supplier
+   * stock (AWAITING, plan NEXT LOT §3.5) takes it instead: one piece available at the order's location is taken for it;
+   * with none available there, a piece that never entered the ledger (issued in the Generator) is counted in with the
+   * order (PRODUCED, +1, the piece entering the stock), and one already counted elsewhere answers 409
+   * STOCK_NOT_AVAILABLE (transfer it first). Audited `order.link` (the movement journaled `stock.move`).
    */
   async linkFromStock(orderId: string, productRef: string, actor: Actor): Promise<OrderView> {
     assertStaff(actor);
@@ -662,14 +667,8 @@ export class AtelierService {
       if (!o) throw notFound('Order', 'ORDER_NOT_FOUND');
       if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw conflict('ORDER_CLOSED', 'This order can no longer change.');
       if (o.product_id !== null) throw conflict('ORDER_PIECE_LINKED', 'A piece is already linked to this order.');
-      if (o.reservation !== 'STOCK' && o.reservation !== 'BENCH') throw conflict('ORDER_NOT_READY', 'The piece is not in stock at the order’s location yet.');
+      if (o.reservation !== 'STOCK' && o.reservation !== 'AWAITING') throw conflict('ORDER_NOT_READY', 'The piece is not in stock at the order’s location yet.');
       await lockSku(tx, o.sku_id!);
-      // Its piece to make, while it is made: a piece made for it once finished is linked by `done`, not here.
-      const bench =
-        o.reservation === 'BENCH'
-          ? await tx.selectFrom('bench_items').select(['id', 'status']).where('order_id', '=', o.id).where('status', 'in', [...BENCH_OPEN]).forUpdate().executeTakeFirst()
-          : null;
-      if (o.reservation === 'BENCH' && !bench) throw conflict('ORDER_PIECE_TO_MAKE', 'Its piece is being made: the atelier links it when it is finished.');
       const p = await tx
         .selectFrom('products')
         .selectAll()
@@ -686,13 +685,12 @@ export class AtelierService {
       const taken = await tx.selectFrom('orders').select('id').where('product_id', '=', p.id).where('status', 'in', ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED']).executeTakeFirst();
       if (taken) throw conflict('PIECE_TAKEN', `${p.product_id} fulfils another order.`);
       const notes: AuditRecordInput[] = [];
-      if (bench) {
+      if (o.reservation === 'AWAITING') {
         const level = await stockLevel(tx, o.sku_id!, o.location_id);
         const counted = await tx.selectFrom('stock_movements').select('id').where('product_id', '=', p.id).executeTakeFirst();
         if (level.available < 1 && counted) {
           throw conflict('STOCK_NOT_AVAILABLE', `${p.product_id} is counted in the stock, but no piece of this size is available at the order’s location: transfer it there first.`);
         }
-        await release(tx, o, 'Reserved identity retired: its order took a finished piece from the stock', actor, now, notes);
         if (level.available < 1) {
           await recordMovement(
             tx,
@@ -700,6 +698,7 @@ export class AtelierService {
             actor,
             now,
           );
+          await tx.updateTable('products').set({ stock_entered_at: now }).where('id', '=', p.id).where('stock_entered_at', 'is', null).execute();
         }
       }
       notes.push((await attachPiece(tx, o, p.id, 'stock', actor, now)).note);

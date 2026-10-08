@@ -716,14 +716,14 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.click('[data-testid=live-publish]');
     await expect.poll(() => p.locator('dialog [data-testid=live-feasibility-line]').textContent(), { timeout: 15_000 }).toBe('2 pieces on sale would be made to order once sold (FRANCE WAREHOUSE).');
     expect(await p.locator('dialog [data-testid=live-feasibility-warning]').allTextContents()).toEqual([
-      '52: 3 pieces on sale; 2 from the stock at FRANCE WAREHOUSE and 0 being made for it: 1 piece more to make to order.',
-      '56: 1 piece on sale; 0 from the stock at FRANCE WAREHOUSE and 0 being made for it: 1 piece more to make to order.',
+      '52: 2 in stock, 1 will wait for supplier stock.',
+      '56: 0 in stock, 1 will wait for supplier stock.',
     ]);
     await shot(p, 'feasibility');
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('ANNOUNCED');
     const published = await ctx.db.selectFrom('audit_logs').select('details').where('target_id', '=', id).where('action', '=', 'drop.live.publish').executeTakeFirstOrThrow();
-    expect(published.details).toMatchObject({ locationId: france, toMakeToOrder: 2, shortSizes: ['52:1', '56:1'] });
+    expect(published.details).toMatchObject({ locationId: france, waitForStock: 2, shortSizes: ['52:1', '56:1'] });
     // Announced: the question is fixed, the best time no longer read.
     expect(await p.locator('[data-testid=live-edit-question]').count()).toBe(0);
     expect(await p.locator('#live-best-time').count()).toBe(0);

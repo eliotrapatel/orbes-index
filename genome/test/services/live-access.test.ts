@@ -238,7 +238,7 @@ describe('a release’s rules, read at each step', () => {
     expect((await insights.forecast(variants[2]!.id)).eligible).toBe((await accessAccounts(t.db, row, now))!.size);
   });
 
-  it('says A SURPRISE IN EVERY BOX as a flag, never its description; each order and piece to make carries the description', async () => {
+  it('says A SURPRISE IN EVERY BOX as a flag, never its description; each order carries the description', async () => {
     const buyer = await accountOfTier(f, 0);
     const T0 = new Date(f.clock.now().getTime() + 2 * HOUR);
     const r = await createLiveRelease(f, { opensAt: T0, surprise: 'A silk pouch, hand-stitched.' });
@@ -254,9 +254,9 @@ describe('a release’s rules, read at each step', () => {
     await f.live.confirm(buyer.id, r.id, buyer.actor);
     const order = await t.db.selectFrom('orders').select(['id', 'surprise']).where('live_entry_id', 'in', t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id)).executeTakeFirstOrThrow();
     expect(order.surprise).toBe('A silk pouch, hand-stitched.');
-    // No piece in stock: a piece to make, its work sheet with the surprise.
-    const bench = await t.db.selectFrom('bench_items').select('surprise').where('order_id', '=', order.id).executeTakeFirstOrThrow();
-    expect(bench.surprise).toBe('A silk pouch, hand-stitched.');
+    // No piece in stock: the order waits for supplier stock (plan NEXT LOT §3.5), the surprise on the order alone.
+    expect((await t.db.selectFrom('orders').select('reservation').where('id', '=', order.id).executeTakeFirstOrThrow()).reservation).toBe('AWAITING');
+    expect(await t.db.selectFrom('bench_items').select('id').where('order_id', '=', order.id).execute()).toEqual([]);
   });
 
   describe('the console’s settings', () => {

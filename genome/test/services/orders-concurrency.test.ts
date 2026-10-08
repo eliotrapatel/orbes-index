@@ -1,8 +1,9 @@
 /**
  * The stock under concurrency (plan LIVE RELEASE+ of 2026-10-04, step S1): the last piece of a SKU at a location is held
- * by one order only, whichever channel the orders come from and whatever moves the stock meanwhile; the others have
- * their piece made (a piece to make, its identity reserved). Every change of a SKU's stock or reservations takes the
- * SKU's row first (services/stock.ts lockSku).
+ * by one order only, whichever channel the orders come from and whatever moves the stock meanwhile; the others wait
+ * for supplier stock (AWAITING, plan NEXT LOT §3.5), and each piece that becomes available serves one of them, the
+ * oldest first, never two. Every change of a SKU's stock or reservations takes the SKU's row first (services/stock.ts
+ * lockSku), then the waiting orders' rows in queue order (services/orders.ts serveWaiting).
  *
  * On PGlite (always) the calls are issued together and the database serialises their transactions: every order must
  * give a correct result. On PostgreSQL (opt-in, a pool of 8: true parallelism) the same cases run:
@@ -110,19 +111,16 @@ for (const backend of BACKENDS) {
     const holdings = async (ids: string[]) =>
       (await handle.db.selectFrom('orders').select('reservation').where('id', 'in', ids).execute()).map((o) => o.reservation).sort();
 
-    it('the last piece of a SKU goes to one order only: entered together, the others have their piece made', async () => {
+    it('the last piece of a SKU goes to one order only: entered together, the others wait for supplier stock', async () => {
       const sku = await skuOf('52');
       await receive(sku, france, 1);
       const ids = await Promise.all(Array.from({ length: 6 }, () => salonOrder()));
       clock.advance(MINUTE);
       expect(await together(ids.map((id) => () => ctx.services.orders.setTerms(id, { sizeLabel: '52' }, f.admin)))).toEqual(Array(6).fill('ok'));
-      expect(await holdings(ids)).toEqual(['BENCH', 'BENCH', 'BENCH', 'BENCH', 'BENCH', 'STOCK']);
+      expect(await holdings(ids)).toEqual(['AWAITING', 'AWAITING', 'AWAITING', 'AWAITING', 'AWAITING', 'STOCK']);
       expect(await stockLevel(handle.db, sku, france)).toEqual({ onHand: 1, reserved: 1, available: 0 });
-      // Each piece to make with its own identity, its serial unique.
-      const identities = await handle.db.selectFrom('bench_items as b').innerJoin('products as p', 'p.id', 'b.product_id').select(['p.serial', 'p.status']).where('b.order_id', 'in', ids).execute();
-      expect(identities).toHaveLength(5);
-      expect(new Set(identities.map((p) => p.serial)).size).toBe(5);
-      expect(identities.every((p) => p.status === 'RESERVED')).toBe(true);
+      // No piece to make, no identity reserved for them.
+      expect(await handle.db.selectFrom('bench_items').select('id').where('order_id', 'in', ids).execute()).toEqual([]);
     });
 
     it('confirmed together in different LIVE RELEASES, their orders take the last piece once', async () => {
@@ -144,7 +142,7 @@ for (const backend of BACKENDS) {
       for (const s of sales) await f.live.secure(s.a.id, s.r.id, (await f.live.entry(s.a.id, s.r.id))!.turn!.token!, s.a.actor);
       expect(await together(sales.map((s) => () => f.live.confirm(s.a.id, s.r.id, s.a.actor)))).toEqual(['ok', 'ok', 'ok', 'ok']);
       const ids = (await handle.db.selectFrom('orders').select('id').where('drop_id', 'in', sales.map((s) => s.r.id)).execute()).map((o) => o.id);
-      expect(await holdings(ids)).toEqual(['BENCH', 'BENCH', 'BENCH', 'STOCK']);
+      expect(await holdings(ids)).toEqual(['AWAITING', 'AWAITING', 'AWAITING', 'STOCK']);
       expect(await stockLevel(handle.db, sku, france)).toEqual({ onHand: 1, reserved: 1, available: 0 });
     });
 
@@ -162,8 +160,8 @@ for (const backend of BACKENDS) {
         const reservation = (await handle.db.selectFrom('orders').select('reservation').where('id', '=', id).executeTakeFirstOrThrow()).reservation;
         const level = await stockLevel(handle.db, sku, france);
         if (moved === 'ok') {
-          // The piece left first: the order has its piece made.
-          expect([reservation, level]).toEqual(['BENCH', { onHand: 0, reserved: 0, available: 0 }]);
+          // The piece left first: the order waits for supplier stock.
+          expect([reservation, level]).toEqual(['AWAITING', { onHand: 0, reserved: 0, available: 0 }]);
         } else {
           expect(moved).toBe('STOCK_NOT_AVAILABLE');
           expect([reservation, level]).toEqual(['STOCK', { onHand: 1, reserved: 1, available: 0 }]);
@@ -171,7 +169,7 @@ for (const backend of BACKENDS) {
       }
     });
 
-    it('cancelled together with the reservation of another order, the piece released goes to it or stays available, never twice', async () => {
+    it('cancelled together with the size of another order entered, the piece released goes to it, whichever comes first, never twice', async () => {
       const sku = await skuOf('70');
       await receive(sku, france, 1);
       const first = await salonOrder();
@@ -184,11 +182,39 @@ for (const backend of BACKENDS) {
           () => ctx.services.orders.setTerms(second, { sizeLabel: '70' }, f.admin),
         ]),
       ).toEqual(['ok', 'ok']);
-      const level = await stockLevel(handle.db, sku, france);
-      expect(level.reserved).toBeLessThanOrEqual(level.onHand);
-      expect(level.onHand).toBe(1);
+      // Its size entered first, it waited, then the cancellation served it; entered after, it took the piece released.
       const reservation = (await handle.db.selectFrom('orders').select('reservation').where('id', '=', second).executeTakeFirstOrThrow()).reservation;
-      expect(level).toEqual(reservation === 'STOCK' ? { onHand: 1, reserved: 1, available: 0 } : { onHand: 1, reserved: 0, available: 1 });
+      expect([reservation, await stockLevel(handle.db, sku, france)]).toEqual(['STOCK', { onHand: 1, reserved: 1, available: 0 }]);
+    });
+
+    it('a count up, a transfer in and a cancellation together serve the orders waiting, one piece each, the oldest first, never twice', async () => {
+      const sku = await skuOf('72');
+      await receive(sku, france, 1);
+      await receive(sku, logistics, 1);
+      const holder = await salonOrder();
+      await ctx.services.orders.setTerms(holder, { sizeLabel: '72' }, f.admin);
+      const waiting: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        clock.advance(MINUTE);
+        const id = await salonOrder();
+        await ctx.services.orders.setTerms(id, { sizeLabel: '72' }, f.admin);
+        waiting.push(id);
+      }
+      expect(await holdings(waiting)).toEqual(Array(5).fill('AWAITING'));
+      clock.advance(MINUTE);
+      expect(
+        await together([
+          () => ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Found.' }, f.admin),
+          () => ctx.services.stock.transfer({ skuId: sku, fromLocationId: logistics, toLocationId: france, quantity: 1 }, f.admin),
+          () => ctx.services.orders.transition(holder, { to: 'CANCELLED', note: 'The client withdrew.' }, f.admin),
+        ]),
+      ).toEqual(['ok', 'ok', 'ok']);
+      // Three pieces available: the three oldest served, once each; the two others still wait.
+      const rows = await handle.db.selectFrom('orders').select(['id', 'reservation']).where('id', 'in', waiting).execute();
+      expect(waiting.map((id) => rows.find((r) => r.id === id)!.reservation)).toEqual(['STOCK', 'STOCK', 'STOCK', 'AWAITING', 'AWAITING']);
+      expect(await stockLevel(handle.db, sku, france)).toEqual({ onHand: 3, reserved: 3, available: 0 });
+      const served = await handle.db.selectFrom('order_events').select('order_id').where('action', '=', 'order.serve').where('order_id', 'in', waiting).execute();
+      expect(served.map((e) => e.order_id).sort()).toEqual(waiting.slice(0, 3).sort());
     });
   });
 }

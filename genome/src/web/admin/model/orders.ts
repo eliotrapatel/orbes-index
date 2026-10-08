@@ -59,7 +59,7 @@ const HOLDING: readonly OrderStatus[] = ['RESERVED', 'PAID'];
 // ── Words ──────────────────────────────────────────────────────────────────
 
 /** A channel as the console names it. */
-export const CHANNEL_LABELS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'PRIVATE SALON', GIFT: 'Welcome gift' });
+export const CHANNEL_LABELS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'PRIVATE SALON', GIFT: 'Welcome gift', EXCHANGE: 'SIZE EXCHANGE' });
 
 /** Why an order is late, as its mark says it (no figure: the display face sets it). */
 export const LATE_LABELS: Readonly<Record<OrderLateRule, string>> = Object.freeze({
@@ -103,12 +103,12 @@ export function durationText(since: string | Date, now: Date): string {
 }
 
 /** What an order holds or what fulfils it, in a few words (a card's line, an order's page). */
-export function holdsLine(o: Pick<OrderCard, 'status' | 'reservation' | 'bench' | 'piece' | 'location' | 'sizeLabel'> & { skuKnown: boolean }): string {
+export function holdsLine(o: Pick<OrderCard, 'status' | 'reservation' | 'piece' | 'location' | 'sizeLabel'> & { skuKnown: boolean }): string {
   if (o.piece) return `Piece ${o.piece}`;
   if (!HOLDING.includes(o.status)) return '—';
   if (!o.skuKnown) return 'Size to enter';
   if (o.reservation === 'STOCK') return `In stock at ${o.location.name}`;
-  if (o.reservation === 'BENCH') return o.bench?.status === 'IN_PROGRESS' ? 'Being made' : 'To make';
+  if (o.reservation === 'AWAITING') return 'Awaiting stock';
   return '—';
 }
 
@@ -119,7 +119,7 @@ export function cardHolds(c: OrderCard): string {
 
 /** An order page's holds line. */
 export function viewHolds(o: OrderView): string {
-  return holdsLine({ status: o.status, reservation: o.reservation, bench: o.bench, piece: o.productId, location: o.location, sizeLabel: o.sizeLabel, skuKnown: o.skuId !== null });
+  return holdsLine({ status: o.status, reservation: o.reservation, piece: o.productId, location: o.location, sizeLabel: o.sizeLabel, skuKnown: o.skuId !== null });
 }
 
 /**
@@ -359,7 +359,7 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
       shipping: ok && o.status === 'RESERVED' && !o.withOrder,
     },
     buyer: ok,
-    linkPiece: ok && holding && o.productId === null && (o.reservation === 'STOCK' || (o.reservation === 'BENCH' && o.bench !== null && (o.bench.status === 'TO_MAKE' || o.bench.status === 'IN_PROGRESS'))),
+    linkPiece: ok && holding && o.productId === null && (o.reservation === 'STOCK' || o.reservation === 'AWAITING'),
   };
 }
 
@@ -372,7 +372,7 @@ export function shipWaitsFor(o: OrderView): string | null {
   }
   if (o.skuId === null) return 'Its size is to be entered.';
   if (o.status === 'RESERVED' && o.priceMinor !== null && giftsWaitForSize(o)) return 'Choose the welcome gift’s size first.';
-  if (o.reservation === 'BENCH') return o.status === 'RESERVED' && o.priceMinor === null ? 'Its piece is being made at the atelier; its price is to be entered.' : 'Its piece is being made at the atelier.';
+  if (o.reservation === 'AWAITING') return o.status === 'RESERVED' && o.priceMinor === null ? 'It waits for supplier stock; its price is to be entered.' : 'It waits for supplier stock.';
   if (o.status === 'RESERVED') return o.priceMinor === null ? 'Its price is to be entered: it is paid once priced, and its invoice issued then.' : 'It ships once paid.';
   if (o.reservation === 'STOCK' && o.productId === null) return 'Link its piece from the stock.';
   return null;

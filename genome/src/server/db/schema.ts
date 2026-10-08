@@ -191,7 +191,7 @@ export type ShopRequestOutcome = (typeof SHOP_REQUEST_OUTCOMES)[number];
  * draw confirmed by Client Services, a request of the private salon closed as ACCEPTED; since migration 0027 (BP-19 T5),
  * a welcome GIFT, its own order at price 0 travelling with the order it was added to.
  */
-export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT'] as const;
+export const ORDER_CHANNELS = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE'] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 
 /**
@@ -201,8 +201,11 @@ export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 export const ORDER_STATUSES = ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED', 'RETURNED'] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
-/** What an order RESERVED or PAID holds at its location (orders.reservation, migration 0022): a piece in stock, or a piece to make. */
-export const ORDER_RESERVATIONS = ['STOCK', 'BENCH'] as const;
+/**
+ * What an order RESERVED or PAID holds at its location (orders.reservation, migration 0022; since 0037, plan NEXT LOT
+ * §3.5): a piece in stock, or nothing yet, waiting for supplier stock (AWAITING, never shown to the collector).
+ */
+export const ORDER_RESERVATIONS = ['STOCK', 'AWAITING'] as const;
 export type OrderReservation = (typeof ORDER_RESERVATIONS)[number];
 
 /**
@@ -216,6 +219,42 @@ export type StockMovementReason = (typeof STOCK_MOVEMENT_REASONS)[number];
 /** A piece to make at the atelier (bench_items.status, migration 0022): TO_MAKE → IN_PROGRESS → DONE, or CANCELLED. */
 export const BENCH_ITEM_STATUSES = ['TO_MAKE', 'IN_PROGRESS', 'DONE', 'CANCELLED'] as const;
 export type BenchItemStatus = (typeof BENCH_ITEM_STATUSES)[number];
+
+/**
+ * A parcel's steps (shipments.status, migration 0037, plan NEXT LOT §3.5): PACKING → PACKED → SHIPPED → DELIVERED; the
+ * kind of a parcel problem once shipped (BACK_TO_SENDER, LOST, DAMAGED); or CANCELLED (an order of it cancelled while
+ * packing).
+ */
+export const SHIPMENT_STATUSES = ['PACKING', 'PACKED', 'SHIPPED', 'DELIVERED', 'BACK_TO_SENDER', 'LOST', 'DAMAGED', 'CANCELLED'] as const;
+export type ShipmentStatus = (typeof SHIPMENT_STATUSES)[number];
+
+/** An order case's kind (order_cases.kind, migration 0037, plan NEXT LOT §1.1 (b)): a return, a size exchange, a parcel problem. */
+export const ORDER_CASE_KINDS = ['RETURN', 'EXCHANGE', 'BACK_TO_SENDER', 'LOST', 'DAMAGED'] as const;
+export type OrderCaseKind = (typeof ORDER_CASE_KINDS)[number];
+
+/** Who opened an order case (order_cases.opened_by_type): the collector, or staff. */
+export const ORDER_CASE_OPENERS = ['account', 'admin'] as const;
+export type OrderCaseOpener = (typeof ORDER_CASE_OPENERS)[number];
+
+/** Why a return or an exchange is asked (order_cases.reason). */
+export const ORDER_CASE_REASONS = ['SIZE', 'NOT_AS_EXPECTED', 'DAMAGED', 'OTHER'] as const;
+export type OrderCaseReason = (typeof ORDER_CASE_REASONS)[number];
+
+/** An order case's steps (order_cases.status): OPEN → RECEIVED → CLOSED, or CANCELLED. */
+export const ORDER_CASE_STATUSES = ['OPEN', 'RECEIVED', 'CLOSED', 'CANCELLED'] as const;
+export type OrderCaseStatus = (typeof ORDER_CASE_STATUSES)[number];
+
+/** The piece as the agent found it back (order_cases.piece_state). */
+export const ORDER_CASE_PIECE_STATES = ['OK', 'DAMAGED'] as const;
+export type OrderCasePieceState = (typeof ORDER_CASE_PIECE_STATES)[number];
+
+/** ORBES's decision (order_cases.outcome): a refund, the other size, another piece shipped. */
+export const ORDER_CASE_OUTCOMES = ['REFUND', 'EXCHANGE', 'RESHIP'] as const;
+export type OrderCaseOutcome = (typeof ORDER_CASE_OUTCOMES)[number];
+
+/** Where a case's piece went (order_cases.piece_to): back to stock, to the archive, or revoked (a lost parcel). */
+export const ORDER_CASE_PIECE_DESTINATIONS = ['RESTOCKED', 'ARCHIVED', 'REVOKED'] as const;
+export type OrderCasePieceDestination = (typeof ORDER_CASE_PIECE_DESTINATIONS)[number];
 
 /** Where a returned order's piece goes (returns.outcome, migration 0022): back to stock at a location, or to the archive. */
 export const RETURN_OUTCOMES = ['RESTOCKED', 'ARCHIVED'] as const;
@@ -1534,6 +1573,83 @@ export interface OrdersTable {
   shipping_service: ColumnType<ShippingService | null, ShippingService | null | undefined, ShippingService | null>;
   shipping_minor: ColumnType<number | null, number | null | undefined, number | null>;
   shipping_benefit: ColumnType<number | null, number | null | undefined, number | null>;
+  /** Migration 0037 (plan NEXT LOT §3.5): a reshipment served ahead of the oldest-first queue (a parcel lost or damaged). */
+  queue_first: WithDefault<boolean>;
+  /** An EXCHANGE order's original (unique, never changed). */
+  exchange_of_order_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Start packing: set on every order of a parcel, never cleared (the collector's address and engraving lock). */
+  packing_started_at: TimestampNullable;
+}
+
+/**
+ * A parcel (migration 0037, plan NEXT LOT §3.5.5.3): its first order and the orders travelling with it, packed and shipped
+ * by the agent. Its photo is internal only, erased 14 days after delivery.
+ */
+export interface ShipmentsTable {
+  id: Generated<string>;
+  order_id: string;
+  location_id: string;
+  status: WithDefault<ShipmentStatus>;
+  packing_started_at: TimestampDefault;
+  packing_started_by: string | null;
+  /** The checklist's lines ticked: [{ key, label }]. */
+  checklist: Jsonb<{ key: string; label: string }[], true>;
+  photo: ColumnType<Uint8Array | null, Uint8Array | null | undefined, Uint8Array | null>;
+  photo_mime: ColumnType<string | null, string | null | undefined, string | null>;
+  photo_sha256: ColumnType<string | null, string | null | undefined, string | null>;
+  photo_erased_at: TimestampNullable;
+  packed_at: TimestampNullable;
+  packed_by: ColumnType<string | null, string | null | undefined, string | null>;
+  carrier_id: ColumnType<string | null, string | null | undefined, string | null>;
+  tracking_number: ColumnType<string | null, string | null | undefined, string | null>;
+  shipped_at: TimestampNullable;
+  shipped_by: ColumnType<string | null, string | null | undefined, string | null>;
+  delivered_at: TimestampNullable;
+  cancelled_at: TimestampNullable;
+  created_at: TimestampDefault;
+}
+
+/** An order of a parcel, and the piece its packing scan bound (migration 0037). */
+export interface ShipmentItemsTable {
+  shipment_id: string;
+  order_id: string;
+  product_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** No foreign key: the scans' retention clears it. */
+  scan_event_id: ColumnType<string | null, string | null | undefined, string | null>;
+  scanned_at: TimestampNullable;
+}
+
+/**
+ * An order case (migration 0037, plan NEXT LOT §1.1 (b)): a return, a size exchange or a parcel problem. Its note is the
+ * client's or staff's words: personal data, never in the audit log, the events nor the journal. Never deleted.
+ */
+export interface OrderCasesTable {
+  id: Generated<string>;
+  order_id: string;
+  shipment_id: ColumnType<string | null, string | null | undefined, string | null>;
+  kind: OrderCaseKind;
+  opened_by_type: OrderCaseOpener;
+  opened_by_id: string;
+  opened_at: TimestampDefault;
+  reason: ColumnType<OrderCaseReason | null, OrderCaseReason | null | undefined, OrderCaseReason | null>;
+  note: ColumnType<string | null, string | null | undefined, string | null>;
+  exchange_sku_id: ColumnType<string | null, string | null | undefined, string | null>;
+  exchange_size_label: ColumnType<string | null, string | null | undefined, string | null>;
+  message_id: ColumnType<string | null, string | null | undefined, string | null>;
+  status: WithDefault<OrderCaseStatus>;
+  received_at: TimestampNullable;
+  received_by: ColumnType<string | null, string | null | undefined, string | null>;
+  piece_state: ColumnType<OrderCasePieceState | null, OrderCasePieceState | null | undefined, OrderCasePieceState | null>;
+  receive_note: ColumnType<string | null, string | null | undefined, string | null>;
+  outcome: ColumnType<OrderCaseOutcome | null, OrderCaseOutcome | null | undefined, OrderCaseOutcome | null>;
+  piece_to: ColumnType<OrderCasePieceDestination | null, OrderCasePieceDestination | null | undefined, OrderCasePieceDestination | null>;
+  exchange_order_id: ColumnType<string | null, string | null | undefined, string | null>;
+  decision_note: ColumnType<string | null, string | null | undefined, string | null>;
+  closed_at: TimestampNullable;
+  closed_by: ColumnType<string | null, string | null | undefined, string | null>;
+  cancelled_at: TimestampNullable;
+  cancelled_by: ColumnType<string | null, string | null | undefined, string | null>;
+  cancel_note: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /** An order's history (migration 0022), append-only: each change as its audit action, the status after it, a note, who. */
@@ -2051,6 +2167,9 @@ export interface Database {
   orders: OrdersTable;
   order_events: OrderEventsTable;
   bench_items: BenchItemsTable;
+  shipments: ShipmentsTable;
+  shipment_items: ShipmentItemsTable;
+  order_cases: OrderCasesTable;
   returns: ReturnsTable;
   invoices: InvoicesTable;
   event_journal: EventJournalTable;
@@ -2166,6 +2285,9 @@ export type OrderRow = Selectable<OrdersTable>;
 export type OrderUpdate = Updateable<OrdersTable>;
 export type OrderEventRow = Selectable<OrderEventsTable>;
 export type BenchItemRow = Selectable<BenchItemsTable>;
+export type ShipmentRow = Selectable<ShipmentsTable>;
+export type ShipmentItemRow = Selectable<ShipmentItemsTable>;
+export type OrderCaseRow = Selectable<OrderCasesTable>;
 export type EventJournalRow = Selectable<EventJournalTable>;
 export type AfterRoomGuestRow = Selectable<AfterRoomGuestsTable>;
 export type ReleaseAnswerRow = Selectable<ReleaseAnswersTable>;
