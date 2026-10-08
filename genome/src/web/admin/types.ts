@@ -2914,6 +2914,96 @@ export interface ParcelsBoard {
   locations: LogisticsLocation[];
 }
 
+/** A supplier order's line as a reception counts against it: never a price. */
+export interface ReceptionOrderLine {
+  lineId: string;
+  sku: LogisticsSku;
+  ordered: number;
+  /** What its CONFIRMED receptions brought in, good or not. */
+  alreadyReceived: number;
+  expected: number;
+}
+
+/** GET …/receptions/supplier-order and …/receptions/lines/:id: an open supplier order's lines, without a price. */
+export interface ReceptionOrder {
+  id: string;
+  reference: string;
+  supplierName: string;
+  location: { id: string; name: string };
+  /** YYYY-MM-DD. */
+  expectedOn: string | null;
+  lines: ReceptionOrderLine[];
+  /** The sizes « Add a piece not on this order » offers. */
+  offered: LogisticsSku[];
+}
+
+/** A run of a reception's cards (fixed by serial): its cards, those still sealed, those printed. */
+export interface CardRun {
+  run: number;
+  cards: number;
+  sealed: number;
+  printed: number;
+}
+
+/** A reception as the Logistics page reads it. */
+export interface ReceptionView {
+  id: string;
+  supplierOrder: { id: string; reference: string };
+  /** ORBES staff's; null for the agent (the name shows on the reception page from its lines). */
+  supplierName: string | null;
+  location: { id: string; name: string };
+  status: ReceptionStatus;
+  deliveryNote: string | null;
+  note: string | null;
+  countedAt: Iso;
+  sentBack: { at: Iso; note: string } | null;
+  confirmedAt: Iso | null;
+  lines: { id: string; sku: LogisticsSku; onOrder: boolean; accepted: number; rejected: number; issued: number; note: string | null }[];
+  accepted: number;
+  rejected: number;
+  issuing: { issued: number; accepted: number; done: boolean };
+  cards: { sealed: number; printed: number; erased: Partial<Record<CardErasedReason, number>>; attachedAt: Iso | null; runs: { sheet: CardRun[]; card: CardRun[] } };
+}
+
+/** Rejected pieces waiting to go back to their supplier. */
+export interface SupplierReturnItem {
+  id: string;
+  supplierOrder: { id: string; reference: string };
+  sku: LogisticsSku;
+  quantity: number;
+  status: SupplierReturnStatus;
+}
+
+/** A supplier order on its way to a location (ORBES staff only). */
+export interface ExpectedSupplierOrder {
+  id: string;
+  reference: string;
+  supplierName: string;
+  location: { id: string; name: string };
+  expectedOn: string | null;
+  piecesExpected: number;
+}
+
+/** GET /api/admin/logistics/receptions: the Receptions tab. */
+export interface ReceptionsBoard {
+  toConfirm: ReceptionView[];
+  cardsToPrint: ReceptionView[];
+  backToSupplier: SupplierReturnItem[];
+  /** ORBES staff only. */
+  expected?: ExpectedSupplierOrder[];
+  /** The active carriers, for Sent back. */
+  carriers: { id: string; name: string }[];
+  /** The tab's counter. */
+  count: number;
+}
+
+/** A reception's count, as recorded or recorded again. */
+export interface ReceptionInput {
+  lines: { skuId: string; accepted: number; rejected: number; note?: string | null }[];
+  deliveryNote?: string | null;
+  note?: string | null;
+}
+
 /** GET /api/admin/logistics/order-cases: a parcel the agent expects back (no note, no price, no account). */
 export interface CaseToReceive {
   id: string;

@@ -69,6 +69,7 @@ import { disposeLiveView, liveReleaseView } from './views/live.js';
 import { loginView } from './views/login.js';
 import { logisticsView } from './views/logistics.js';
 import { disposeShippingView, shippingView } from './views/shipping.js';
+import { newReceptionView, receptionView } from './views/reception.js';
 import { conversationView } from './views/conversation.js';
 import { messagesView } from './views/messages.js';
 import { orderView } from './views/order.js';
@@ -158,7 +159,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
 ];
 
 /** What a LOGISTICS login reaches (plan NEXT LOT §3.5.3): Logistics and its pages, and its own security page. */
-const LOGISTICS_ROUTES: ReadonlySet<string> = new Set(['logistics', 'logisticsOrder', 'logisticsSlip', 'security']);
+const LOGISTICS_ROUTES: ReadonlySet<string> = new Set(['logistics', 'logisticsOrder', 'logisticsSlip', 'receptionNew', 'reception', 'security']);
 
 /** The sidebar of a LOGISTICS login (plan NEXT LOT §3.5.3): one item, Logistics. */
 const LOGISTICS_NAV: { group: string; items: NavItem[] }[] = [{ group: 'Registry', items: [{ route: 'logistics', label: 'Logistics', cap: 'readLogistics' }] }];
@@ -208,6 +209,8 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   logistics: { view: logisticsView, title: 'Logistics', nav: 'logistics' },
   logisticsOrder: { view: shippingView, title: 'Parcel', nav: 'logistics' },
   logisticsSlip: { view: shippingSlipView, title: 'Packing slip', nav: 'logistics' },
+  receptionNew: { view: newReceptionView, title: 'Reception', nav: 'logistics' },
+  reception: { view: receptionView, title: 'Reception', nav: 'logistics' },
   supplierOrders: { view: supplierOrdersView, title: 'Supplier orders', nav: 'supplierOrders' },
   document: { view: documentView, title: 'Document', nav: 'documents' },
 };

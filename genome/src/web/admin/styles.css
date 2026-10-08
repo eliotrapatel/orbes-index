@@ -3820,6 +3820,53 @@ fieldset.cfield--checks > .cfield__label {
   gap: 6px;
 }
 
+/* Receptions (plan NEXT LOT §3.5.3): the cards to print, a reception's count. */
+.cards-to-print {
+  display: grid;
+  gap: 22px;
+}
+
+.cards-to-print__item {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.cards-to-print__title {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.reception__lines .cinput--count {
+  width: 72px;
+}
+
+.reception__form .row-actions {
+  margin-top: 18px;
+}
+
+.reception__extra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 18px;
+  margin: 26px 0 0;
+}
+
+.reception__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 24px;
+  margin: 30px 0 0;
+}
+
+@media (max-width: 720px) {
+  .reception__fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ── Orders, the atelier, the settings (plan LIVE RELEASE+) ──────────────── */
 
 .panel__text {

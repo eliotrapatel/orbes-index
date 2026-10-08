@@ -99,7 +99,7 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       // The board: ORBES staff see the order on its way, the agent never.
       const staffBoard = safeJson(await auditor.get(`/api/admin/logistics/receptions?locationId=${logistics}`)) as Json;
       expect(staffBoard.expected).toContainEqual({ id: order.id, reference: order.reference, supplierName: 'Maison Nord', location: { id: logistics, name: 'LOGISTICS WAREHOUSE' }, expectedOn: '2026-11-02', piecesExpected: 3 });
-      expect(Object.keys(safeJson(await agent.get('/api/admin/logistics/receptions')) as Json).sort()).toEqual(['backToSupplier', 'cardsToPrint', 'count', 'toConfirm']);
+      expect(Object.keys(safeJson(await agent.get('/api/admin/logistics/receptions')) as Json).sort()).toEqual(['backToSupplier', 'cardsToPrint', 'carriers', 'count', 'toConfirm']);
 
       // The count: 201; an AUDITOR never counts; counted again.
       expect(errorOf(await auditor.post('/api/admin/logistics/receptions', { supplierOrderId: order.id, lines: [] })).code).toBe('FORBIDDEN');

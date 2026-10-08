@@ -59,6 +59,9 @@ export const ROUTES = [
   /** A parcel's page (plan NEXT LOT §3.5.3), from To ship or On its way, and the agent's packing slip of it. */
   { name: 'logisticsOrder', path: '/logistics/orders/:orderId' },
   { name: 'logisticsSlip', path: '/logistics/orders/:orderId/slip' },
+  /** A reception (plan NEXT LOT §3.5.3): a delivery counted against its supplier order (`?supplierOrder=`), then itself. */
+  { name: 'receptionNew', path: '/logistics/receptions/new' },
+  { name: 'reception', path: '/logistics/receptions/:receptionId' },
   /** Supplier orders (plan NEXT LOT §3.5.4.2): ORBES's page, never a LOGISTICS login's; its Suppliers for now. */
   { name: 'supplierOrders', path: '/supplier-orders' },
   /** A model's lookbook (P-R02): reached from the Catalogue's model row, no link of its own in the sidebar. */

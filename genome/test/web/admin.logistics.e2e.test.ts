@@ -12,6 +12,10 @@
  *  3. To ship (step 5.11b): a paid order holding its piece is listed; on its parcel's page the agent starts packing,
  *     scans a card of another size (refused) then the right one (photo fallback), adds the photo, ticks the checklist,
  *     packs and ships it; On its way, Mark delivered; the agent's packing slip, without a channel or a price.
+ *  4. Receptions (step 5.11c): the agent types the supplier order's reference from its delivery note (a wrong one
+ *     refused), counts the delivery (more than ordered with a note, a rejected piece); ORBES reads it Expected, then
+ *     confirms it; while the identities are issued the cards wait; then they print in their run, and Cards attached;
+ *     the rejected piece goes back to the supplier.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -176,7 +180,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
 
     // The agent: its sign-in lands on Logistics, To ship first, its counters beside the tabs; then its Stock.
     const g = await open(agentLogin, 'Logistics');
-    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await g.locator('[data-testid=logistics-tab-ship]').getAttribute('aria-current')).toBe('page');
     await g.click('[data-testid=logistics-tab-stock]');
     await expect.poll(() => g.locator('[data-testid=logistics-tab-stock]').getAttribute('aria-current')).toBe('page');
@@ -213,7 +217,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await confirmDialog(g);
     // Nothing moved yet.
     await expect.poll(() => stockRow(g, sku).locator('td').nth(3).textContent()).toBe('2');
-    await expect.poll(() => tabTexts(g)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (2)']);
+    await expect.poll(() => tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (2)']);
     await g.click('[data-testid=logistics-tab-corrections]');
     // Its two, and ORBES's own count of the pieces, applied at once.
     await expect.poll(() => g.locator('[data-testid=correction-status]').allTextContents()).toEqual(['TO APPROVE', 'TO APPROVE', 'APPROVED']);
@@ -227,7 +231,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await a.click('.side__link[data-route=logistics]');
     await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Logistics');
     expect(await a.locator('.side__link.is-active').textContent()).toBe('Logistics');
-    expect(await tabTexts(a)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (2)']);
+    expect(await tabTexts(a)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (2)']);
     await a.click('[data-testid=logistics-tab-stock]');
     await expect.poll(() => a.locator('#logistics-stock thead th').count()).toBeGreaterThan(0);
     expect(await a.locator('#logistics-stock thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'Location', 'On hand', 'Reserved', 'Available', 'Waiting', 'Minimum', 'To order', '']);
@@ -253,7 +257,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await shot(a, 'decline', { dialog: true });
     await confirmDialog(a);
     await a.waitForSelector('.toast:has-text("Correction declined.")');
-    await expect.poll(() => tabTexts(a)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+    await expect.poll(() => tabTexts(a)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await a.locator('[data-testid=correction-status]').allTextContents()).toEqual(['DECLINEDCounted again at ORBES: two pieces.', 'APPROVED', 'APPROVED']);
     await shot(a, 'corrections');
 
@@ -311,7 +315,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     const reference = orderReference(orderId);
 
     const g = await open(agentLogin, 'Logistics');
-    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Stock', 'Returns (1)', 'Corrections (0)']);
+    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (1)', 'Corrections (0)']);
     await g.click('[data-testid=logistics-tab-returns]');
     await expect.poll(() => g.locator('#logistics-returns thead th').allTextContents()).toEqual(['Order', 'Kind', 'Piece', 'Opened on', '']);
     const row = g.locator('#logistics-returns tbody tr');
@@ -332,7 +336,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await confirmDialog(g);
     await g.waitForSelector('.toast:has-text("Recorded: ORBES decides.")');
     await expect.poll(() => g.locator('#logistics-returns .empty__text').textContent()).toBe('No parcel expected back.');
-    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await h.ctx.services.orderCases.get(opened.id)).toMatchObject({ status: 'RECEIVED', received: { pieceState: 'OK', note: 'In its box, unworn.' } });
     expect(await csp(g)).toEqual([]);
     await g.context().close();
@@ -353,7 +357,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     };
 
     const g = await open(agentLogin, 'Logistics');
-    expect(await tabTexts(g)).toEqual(['To ship (1)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+    expect(await tabTexts(g)).toEqual(['To ship (1)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await g.locator('#logistics-ship .panel__text').textContent()).toBe(
       'Paid orders whose pieces are all in stock, the oldest first. An order of several pieces ships in one parcel, once every piece is there.',
     );
@@ -433,7 +437,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
 
     // On its way, then delivered.
     await go(g, '#/logistics', 'Logistics');
-    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
     expect(await g.locator('#logistics-ship .empty__text').textContent()).toBe('Nothing to ship: no paid order has its pieces in stock.');
     const way = g.locator('#logistics-on-its-way tbody tr');
     expect(await way.locator('td').nth(2).textContent()).toBe('Colissimo');
@@ -446,5 +450,102 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(await figuresInDisplayFace(g)).toEqual([]);
     expect(await csp(g)).toEqual([]);
     await g.context().close();
+  }, STEP_TIMEOUT);
+
+  it('receives a delivery: the reference from its delivery note, the count, ORBES confirms; the cards print once issued, then attached; the rejected piece back to the supplier', async () => {
+    const nord = await h.ctx.services.suppliers.create({ name: 'MAISON NORD', currency: 'EUR' }, admin);
+    await h.ctx.services.suppliers.setModelSupplier(catalog.modelId, { supplierId: nord.id }, admin);
+    const so = h.ctx.services.supplierOrders;
+    const draft = await so.addToDraft({ skuId: sku52, locationId: france, quantity: 2 }, admin);
+    await so.updateDraft(draft.id, { lines: [{ skuId: sku52, quantity: 2, unitPriceMinor: 12_000 }], expectedOn: '2026-11-02' }, admin);
+    const order = await so.send(draft.id, admin);
+
+    // The agent: a wrong reference refused, the right one opens the count; never a list of the orders on their way.
+    const g = await open(agentLogin, 'Logistics');
+    await g.click('[data-testid=logistics-tab-receptions]');
+    await expect.poll(() => g.locator('#logistics-receive .panel__text').textContent()).toBe(
+      'A delivery has arrived: enter the supplier order’s reference from its delivery note, then count what is in it.',
+    );
+    expect(await g.locator('#logistics-expected').count()).toBe(0);
+    await g.fill('[data-testid=reception-reference]', 'SO-00000000');
+    await g.click('[data-testid=reception-open]');
+    await expect.poll(() => g.locator('[data-testid=reception-reference-error]').textContent()).toBe('No supplier order SO-00000000 is expected here. Check the reference, or ask ORBES.');
+    await g.fill('[data-testid=reception-reference]', order.reference.toLowerCase());
+    await g.click('[data-testid=reception-open]');
+    await expect.poll(async () => (await title(g).textContent())?.trim()).toBe(`Reception · ${order.reference} · MAISON NORD`);
+    expect(await g.locator('.reception__lines thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'Ordered', 'Already received', 'Expected on', 'Received OK', 'Rejected', 'Note']);
+    expect(await g.locator('[data-testid=reception]').textContent()).not.toMatch(/120|EUR|€/);
+    // Three OK for two ordered: a note is asked for.
+    await g.fill(`input[name=accepted_${sku52}]`, '3');
+    await g.fill(`input[name=rejected_${sku52}]`, '1');
+    await g.click('[data-testid=reception-record]');
+    await expect.poll(() => g.locator('[data-testid=reception-error]').textContent()).toBe('Say in a note why more pieces than expected, or a piece not on the order, came in.');
+    await g.fill(`input[name=note_${sku52}]`, 'One more in the box.');
+    await g.fill('input[name=deliveryNote]', 'BL-2207');
+    await shot(g, 'reception-count');
+    await g.click('[data-testid=reception-record]');
+    await g.waitForSelector('.toast:has-text("Reception recorded: ORBES confirms it.")');
+    await expect.poll(() => g.locator('[data-testid=reception-summary]').textContent()).toBe(`${order.reference} · 3 OK · 1 rejected · waiting for ORBES`);
+    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (1)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+    expect(await g.locator('[data-testid=reception-confirm]').count()).toBe(0);
+
+    // ORBES: the order Expected, the reception to confirm, confirmed.
+    const a = await open(ADMIN, 'Dashboard');
+    await go(a, '#/logistics?tab=receptions', 'Logistics');
+    expect(await a.locator('#logistics-receive').count()).toBe(0);
+    await expect.poll(() => a.locator('#logistics-expected tbody tr').filter({ hasText: order.reference }).locator('td').nth(1).textContent()).toBe('MAISON NORD');
+    await a.click('[data-testid=reception-confirm]');
+    expect(await a.locator('[data-testid=reception-confirm-text]').textContent()).toBe(
+      `3 pieces get their ORBES identity now: a serial, a signed ORBES code and a claim code each. They enter the stock at FRANCE WAREHOUSE and go to the orders waiting for them, the oldest first. The agent then prints their cards. 1 rejected piece gets no identity: it is listed TO RETURN on ${order.reference}.`,
+    );
+    await shot(a, 'reception-confirm', { dialog: true });
+    await confirmDialog(a);
+    await a.waitForSelector('.toast:has-text("Reception confirmed: the identities are being issued.")');
+    await expect.poll(() => a.locator('#logistics-to-confirm .empty__text').textContent()).toBe('No reception waiting for ORBES.');
+
+    // While the identities are issued: the progress, nothing to print yet.
+    await g.reload();
+    const cards = g.locator('[data-testid=reception-cards]');
+    await expect.poll(() => cards.locator('.cards-to-print__title').textContent()).toBe(`${order.reference} · 3 cards`);
+    expect(await cards.locator('[data-testid=reception-issuing]').textContent()).toBe('Issuing the identities: 0 of 3.');
+    expect(await cards.locator('[data-testid=reception-print-sheet]').isDisabled()).toBe(true);
+    expect(await cards.locator('[data-testid=reception-attached]').isDisabled()).toBe(true);
+    await h.ctx.services.receptions.issuePending();
+    await g.reload();
+    await expect.poll(() => cards.locator('[data-testid=reception-issuing]').count()).toBe(0);
+    expect(await cards.locator('[data-testid=reception-print-sheet]').textContent()).toBe('Print A4 sheets');
+    expect(await cards.locator('[data-testid=reception-print-card]').textContent()).toBe('Print one per page');
+    expect(await g.locator('#logistics-cards .panel__text').textContent()).toBe(
+      'Print the cards, put each card with its piece, then store the pieces. Each card carries the piece’s ORBES code and its claim code: keep them out of sight.',
+    );
+    await shot(g, 'cards-to-print');
+    const [download] = await Promise.all([g.waitForEvent('download'), cards.locator('[data-testid=reception-print-sheet]').click()]);
+    expect(download.suggestedFilename()).toMatch(/\.pdf$/);
+    await g.waitForSelector('.toast:has-text("Cards printed.")');
+    await cards.locator('[data-testid=reception-attached]').click();
+    expect(await g.locator('dialog .dialog__text').textContent()).toBe('Every card is with its piece. The cards can no longer be printed from here: a lost card needs a new claim code from ORBES.');
+    await confirmDialog(g);
+    await g.waitForSelector('.toast:has-text("Cards attached.")');
+    await expect.poll(() => g.locator('#logistics-cards .empty__text').textContent()).toBe('No cards to print.');
+    expect(await tabTexts(g)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (0)']);
+
+    // The rejected piece goes back to its supplier.
+    const back = g.locator('[data-testid=supplier-return]');
+    expect(await back.textContent()).toBe(`${order.reference} · MONOLITHE · 52 · 1 piece · TO RETURN`);
+    await g.click('[data-testid=supplier-return-sent]');
+    await g.fill('dialog input[name=trackingNumber]', 'RET-0001');
+    await g.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => g.locator('dialog .dialog__error').textContent()).toBe('A tracking number comes with its carrier.');
+    await g.selectOption('dialog select[name=carrierId]', colissimo);
+    await confirmDialog(g);
+    await g.waitForSelector('.toast:has-text("Sent back to the supplier.")');
+    await expect.poll(() => g.locator('#logistics-back-to-supplier .empty__text').textContent()).toBe('Nothing to send back to a supplier.');
+    expect((await so.get(order.id)).status).toBe('RECEIVED');
+    expect(await h.t.db.selectFrom('supplier_returns').select(['status', 'carrier_id', 'tracking_number']).where('supplier_order_id', '=', order.id).execute()).toEqual([{ status: 'RETURNED', carrier_id: colissimo, tracking_number: 'RET-0001' }]);
+    for (const p of [a, g]) {
+      expect(await figuresInDisplayFace(p)).toEqual([]);
+      expect(await csp(p)).toEqual([]);
+      await p.context().close();
+    }
   }, STEP_TIMEOUT);
 });

@@ -10,7 +10,7 @@
  * login's locations).
  */
 import { formatCount, formatDateTime } from '../format.js';
-import type { CaseToReceive, LogisticsLocation, LogisticsSku, OrderCaseKind, ParcelActor, ParcelStep, ShippingOrderView, StockCorrectionStatus, ToShipRow } from '../types.js';
+import type { CaseToReceive, LogisticsLocation, LogisticsSku, OrderCaseKind, ParcelActor, ParcelStep, ReceptionInput, ReceptionOrder, ReceptionStatus, ReceptionView, ShippingOrderView, StockCorrectionStatus, SupplierReturnItem, ToShipRow } from '../types.js';
 
 /** The bounds of services/logistics.ts and services/stock.ts (LOGISTICS_LIMITS, STOCK_MOVE_MAX, THRESHOLD_MAX). */
 export const LOGISTICS_LIMITS = Object.freeze({ move: 10_000, reason: 500, note: 500, minimum: 10_000, countIn: 100, receiveNote: 500 });
@@ -27,13 +27,14 @@ export const LOGISTICS_LEAD =
 /** The tabs, in their order (`?tab=`). */
 export const LOGISTICS_TABS = Object.freeze([
   { id: 'ship', label: 'To ship' },
+  { id: 'receptions', label: 'Receptions' },
   { id: 'stock', label: 'Stock' },
   { id: 'returns', label: 'Returns' },
   { id: 'corrections', label: 'Corrections' },
 ] as const);
 export type LogisticsTab = (typeof LOGISTICS_TABS)[number]['id'];
 
-/** The tabs with a counter (§3.5.3): To ship, the parcels listed; Returns, the parcels to receive; Corrections, those waiting for ORBES. */
+/** The tabs with a counter (§3.5.3): To ship, the parcels listed; Receptions, the server's count; Returns, the parcels to receive; Corrections, those waiting for ORBES. */
 export type LogisticsCounts = Partial<Record<LogisticsTab, number>>;
 
 /** The tab the query names, the first one otherwise. */
@@ -408,4 +409,151 @@ export function shippingSlip(view: ShippingOrderView): ShippingSlip {
       surprise: o.surprise,
     })),
   };
+}
+
+// ── Receptions (step 5.11c) ────────────────────────────────────────────────
+
+/** The bounds of services/receptions.ts (RECEPTION_LIMITS, RECEPTION_RUNS). */
+export const RECEPTION_LIMITS = Object.freeze({ pieces: 10_000, deliveryNote: 60, note: 1000, lineNote: 500, sheetRun: 48, cardRun: 50 });
+
+export const RECEPTION_TEXT = Object.freeze({
+  receiveTitle: 'Receive a delivery',
+  receiveLead: 'A delivery has arrived: enter the supplier order’s reference from its delivery note, then count what is in it.',
+  referenceHint: 'Its reference, for example SO-7C21A0B9.',
+  open: 'Open',
+  expectedTitle: 'Expected',
+  receive: 'Receive',
+  countText: 'Count every piece. A defective piece goes in Rejected: it gets no identity and goes back to the supplier. More pieces than ordered are accepted with a note. What is missing stays expected.',
+  addExtra: 'Add a piece not on this order',
+  notOnOrder: 'Not on the order',
+  record: 'Record the reception',
+  recorded: 'Reception recorded: ORBES confirms it.',
+  toConfirmTitle: 'To confirm',
+  toConfirmEmpty: 'No reception waiting for ORBES.',
+  countAgain: 'Count again',
+  confirmed: 'Reception confirmed: the identities are being issued.',
+  sendBackText: 'The agent counts again and records the reception anew.',
+  sentBack: 'Reception sent back.',
+  cardsTitle: 'Cards to print',
+  cardsText: 'Print the cards, put each card with its piece, then store the pieces. Each card carries the piece’s ORBES code and its claim code: keep them out of sight.',
+  cardsEmpty: 'No cards to print.',
+  printSheets: 'Print A4 sheets',
+  printCards: 'Print one per page',
+  attached: 'Cards attached',
+  attachedText: 'Every card is with its piece. The cards can no longer be printed from here: a lost card needs a new claim code from ORBES.',
+  attachedToast: 'Cards attached.',
+  backTitle: 'Back to the supplier',
+  backEmpty: 'Nothing to send back to a supplier.',
+  returnSent: 'Sent back',
+  returnSentTitle: 'Sent back to the supplier',
+  returnSentToast: 'Sent back to the supplier.',
+});
+
+/** A reception's status as its mark reads. */
+export const RECEPTION_STATUS_LABELS: Readonly<Record<ReceptionStatus, string>> = Object.freeze({ TO_CONFIRM: 'TO CONFIRM', SENT_BACK: 'SENT BACK', CONFIRMED: 'CONFIRMED' });
+
+const pieces = (n: number) => `${formatCount(n)} ${n === 1 ? 'piece' : 'pieces'}`;
+
+/** ORBES's Expected list's lead and empty line, for a location (or every one). */
+export function expectedLead(location: string | null): string {
+  return `Supplier orders on their way to ${location ?? 'your locations'}. Open one when its parcel arrives, and count what is in it.`;
+}
+
+export function expectedEmpty(location: string | null): string {
+  return `No supplier order on its way to ${location ?? 'your locations'}.`;
+}
+
+/** A reception waiting for ORBES: 'SO-7C21A0B9 · 48 OK · 2 rejected · waiting for ORBES'. */
+export function receptionSummary(v: Pick<ReceptionView, 'supplierOrder' | 'accepted' | 'rejected' | 'status'>): string {
+  const counts = `${v.supplierOrder.reference} · ${formatCount(v.accepted)} OK · ${formatCount(v.rejected)} rejected`;
+  return v.status === 'TO_CONFIRM' ? `${counts} · waiting for ORBES` : counts;
+}
+
+/** A confirmed reception's cards: 'SO-7C21A0B9 · 48 cards'. */
+export function cardsLine(v: Pick<ReceptionView, 'supplierOrder' | 'issuing'>): string {
+  return `${v.supplierOrder.reference} · ${formatCount(v.issuing.accepted)} ${v.issuing.accepted === 1 ? 'card' : 'cards'}`;
+}
+
+/** While the identities are issued: 'Issuing the identities: 150 of 500.'; null once every one is. */
+export function issuingLine(v: Pick<ReceptionView, 'issuing'>): string | null {
+  return v.issuing.done ? null : `Issuing the identities: ${formatCount(v.issuing.issued)} of ${formatCount(v.issuing.accepted)}.`;
+}
+
+/** Rejected pieces to send back: 'SO-7C21A0B9 · MONOLITHE · BLUE · 52 · 2 pieces · TO RETURN'. */
+export function supplierReturnLine(x: SupplierReturnItem): string {
+  return `${x.supplierOrder.reference} · ${skuWords(x.sku)} · ${pieces(x.quantity)} · ${x.status === 'TO_RETURN' ? 'TO RETURN' : 'RETURNED'}`;
+}
+
+/** What confirming a reception does, said in its dialog (§3.5.4.1). */
+export function confirmReceptionText(v: Pick<ReceptionView, 'supplierOrder' | 'accepted' | 'rejected' | 'location'>): string {
+  const out: string[] = [];
+  if (v.accepted > 0) {
+    out.push(
+      `${pieces(v.accepted)} ${v.accepted === 1 ? 'gets its' : 'get their'} ORBES identity now: a serial, a signed ORBES code and a claim code each. ${v.accepted === 1 ? 'It enters' : 'They enter'} the stock at ${v.location.name} and ${v.accepted === 1 ? 'goes' : 'go'} to the orders waiting for ${v.accepted === 1 ? 'it' : 'them'}, the oldest first. The agent then prints their cards.`,
+    );
+  }
+  if (v.rejected > 0) out.push(`${formatCount(v.rejected)} rejected ${v.rejected === 1 ? 'piece gets' : 'pieces get'} no identity: ${v.rejected === 1 ? 'it is' : 'they are'} listed TO RETURN on ${v.supplierOrder.reference}.`);
+  return out.join(' ');
+}
+
+/** The reference typed from the delivery note, as the server reads it (SO-7C21A0B9, any case, the dash optional). */
+export function referenceProblem(text: string | undefined): string | null {
+  return /^SO-?[0-9A-F]{8}$/i.test((text ?? '').trim()) ? null : 'A supplier order’s reference reads SO-7C21A0B9.';
+}
+
+const countOf = (text: string | undefined): number | null => {
+  const t = (text ?? '').trim();
+  if (t === '') return 0;
+  if (!/^\d+$/.test(t)) return null;
+  const n = Number(t);
+  return n <= RECEPTION_LIMITS.pieces ? n : null;
+};
+
+/** A count's check: whole numbers, at least one piece, a note where more than expected or a size not on the order came in. */
+export function receptionProblem(order: Pick<ReceptionOrder, 'lines'>, extras: readonly Pick<LogisticsSku, 'id'>[], v: Record<string, string>): string | null {
+  let any = false;
+  const rows = [...order.lines.map((l) => ({ id: l.sku.id, expected: l.expected as number | null })), ...extras.map((k) => ({ id: k.id, expected: null }))];
+  for (const r of rows) {
+    const accepted = countOf(v[`accepted_${r.id}`]);
+    const rejected = countOf(v[`rejected_${r.id}`]);
+    if (accepted === null || rejected === null) return `Count each line in whole pieces, 0 to ${formatCount(RECEPTION_LIMITS.pieces)}.`;
+    if (accepted + rejected > 0) any = true;
+    const note = (v[`note_${r.id}`] ?? '').trim();
+    if (note.length > RECEPTION_LIMITS.lineNote) return `A line’s note has at most ${RECEPTION_LIMITS.lineNote} characters.`;
+    if (!note && ((r.expected === null && accepted + rejected > 0) || (r.expected !== null && accepted > r.expected))) return 'Say in a note why more pieces than expected, or a piece not on the order, came in.';
+  }
+  if (!any) return 'Count at least one piece.';
+  const delivery = (v.deliveryNote ?? '').trim();
+  if (delivery.length > RECEPTION_LIMITS.deliveryNote || delivery.includes('\n')) return `The delivery note is one line of at most ${RECEPTION_LIMITS.deliveryNote} characters.`;
+  if ((v.note ?? '').trim().length > RECEPTION_LIMITS.note) return `A note has at most ${formatCount(RECEPTION_LIMITS.note)} characters.`;
+  return null;
+}
+
+/** What Record the reception sends: every line counted (none at 0), its note; the delivery note and the note. */
+export function receptionInputOf(order: Pick<ReceptionOrder, 'lines'>, extras: readonly Pick<LogisticsSku, 'id'>[], v: Record<string, string>): ReceptionInput {
+  const ids = [...order.lines.map((l) => l.sku.id), ...extras.map((k) => k.id)];
+  const lines = ids
+    .map((id) => ({ skuId: id, accepted: countOf(v[`accepted_${id}`]) ?? 0, rejected: countOf(v[`rejected_${id}`]) ?? 0, note: (v[`note_${id}`] ?? '').trim() || null }))
+    .filter((l) => l.accepted + l.rejected > 0);
+  return { lines, deliveryNote: (v.deliveryNote ?? '').trim() || null, note: (v.note ?? '').trim() || null };
+}
+
+/** A run's button: the layout's words alone for a single run, its number when there are several. */
+export function runLabel(layout: 'sheet' | 'card', run: number, runs: number): string {
+  const words = layout === 'sheet' ? RECEPTION_TEXT.printSheets : RECEPTION_TEXT.printCards;
+  return runs > 1 ? `${words} · run ${formatCount(run)}` : words;
+}
+
+/** What a printed run skipped, said after it: null when nothing was. */
+export function skippedLine(skipped: readonly { productId: string; reason: string }[]): string | null {
+  if (skipped.length === 0) return null;
+  return `Not printed: ${skipped.map((x) => x.productId).join(', ')} (registered, replaced or no longer readable). Tell ORBES.`;
+}
+
+/** Sent back to the supplier: a tracking number comes with its carrier, as the server takes it. */
+export function supplierReturnProblem(v: Record<string, string>): string | null {
+  const tracking = (v.trackingNumber ?? '').trim();
+  if (tracking === '') return null;
+  if (!v.carrierId) return 'A tracking number comes with its carrier.';
+  return TRACKING_RE.test(tracking) ? null : 'A tracking number has 3 to 40 letters and digits.';
 }

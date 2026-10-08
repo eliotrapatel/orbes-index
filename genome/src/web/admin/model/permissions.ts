@@ -108,6 +108,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   logistics: 'OPERATOR',
   /** Logistics: read the stock, the receptions, the orders to ship. Exactly CAPABILITY_ROLES.readLogistics: the agent and AUDITOR and up. */
   readLogistics: 'AUDITOR',
+  /** Logistics (plan NEXT LOT §3.5.4.1): a reception confirmed (the identities issued) or sent back to the agent. */
+  confirmReceptions: 'OPERATOR',
   /** Logistics (plan NEXT LOT §3.5.4.1): the agent's corrections approved or declined, with a note. */
   approveCorrections: 'OPERATOR',
   /** Logistics: transfer, minimum, a count corrected at once, pieces counted in (ORBES is the approver). */

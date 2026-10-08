@@ -126,6 +126,11 @@ import type {
   CaseToReceive,
   LogisticsStock,
   ParcelsBoard,
+  ReceptionInput,
+  ReceptionOrder,
+  ReceptionsBoard,
+  ReceptionView,
+  SupplierReturnItem,
   PackingScan,
   ShippingOrderView,
   StockCorrection,
@@ -1268,6 +1273,70 @@ export class AdminApi {
   /** LOGISTICS and AUDITOR+: To ship, On its way, and the scope's locations. */
   parcels(f: { locationId?: string } = {}): Promise<ParcelsBoard> {
     return this.get('/api/admin/logistics/orders', { locationId: f.locationId });
+  }
+
+  /** LOGISTICS and AUDITOR+: to confirm, cards to print, back to the supplier; the supplier orders expected for ORBES staff only. */
+  receptions(f: { locationId?: string } = {}): Promise<ReceptionsBoard> {
+    return this.get('/api/admin/logistics/receptions', { locationId: f.locationId });
+  }
+
+  /** LOGISTICS and OPERATOR+: the open supplier order of that reference (from its delivery note), its lines without a price. */
+  findReception(reference: string): Promise<ReceptionOrder> {
+    return this.get('/api/admin/logistics/receptions/supplier-order', { reference });
+  }
+
+  /** LOGISTICS and OPERATOR+: an open supplier order's lines, without a price, for a reception being counted. */
+  receptionLines(supplierOrderId: string): Promise<ReceptionOrder> {
+    return this.get(`/api/admin/logistics/receptions/lines/${encodeURIComponent(supplierOrderId)}`);
+  }
+
+  /** LOGISTICS and AUDITOR+: one reception. */
+  reception(id: string): Promise<ReceptionView> {
+    return this.get(`/api/admin/logistics/receptions/${encodeURIComponent(id)}`);
+  }
+
+  /** LOGISTICS and OPERATOR+: a delivery counted against its supplier order (TO_CONFIRM). */
+  recordReception(input: ReceptionInput & { supplierOrderId: string }): Promise<ReceptionView> {
+    return this.post('/api/admin/logistics/receptions', input);
+  }
+
+  /** LOGISTICS and OPERATOR+: counted again, until ORBES confirms it. */
+  updateReception(id: string, input: ReceptionInput): Promise<ReceptionView> {
+    return this.request('PUT', `/api/admin/logistics/receptions/${encodeURIComponent(id)}`, { body: input });
+  }
+
+  /** OPERATOR: sent back to the agent, with ORBES's note. */
+  sendBackReception(id: string, note: string): Promise<ReceptionView> {
+    return this.post(`/api/admin/logistics/receptions/${encodeURIComponent(id)}/send-back`, { note });
+  }
+
+  /** OPERATOR: confirmed: the identities are issued, the pieces enter the stock. */
+  confirmReception(id: string): Promise<ReceptionView> {
+    return this.post(`/api/admin/logistics/receptions/${encodeURIComponent(id)}/confirm`, {});
+  }
+
+  /** LOGISTICS and OPERATOR+: a run of the reception's cards as a PDF (no-store); the pieces skipped, by serial and why. */
+  async receptionCards(id: string, input: { layout: 'card' | 'sheet'; run?: number }): Promise<Download & { printed: number; skipped: { productId: string; reason: string }[] }> {
+    const res = await this.request<Response>('POST', `/api/admin/logistics/receptions/${encodeURIComponent(id)}/cards`, { raw: true, body: input });
+    const skipped = (res.headers.get('x-orbes-cards-skipped') ?? '')
+      .split(',')
+      .filter((x) => x !== '')
+      .map((x) => {
+        const i = x.lastIndexOf(':');
+        return { productId: x.slice(0, i), reason: x.slice(i + 1) };
+      });
+    const printed = Number(res.headers.get('x-orbes-cards-printed') ?? '0');
+    return { ...(await toDownload(res, 'ORBES-cards.pdf')), printed, skipped };
+  }
+
+  /** LOGISTICS and OPERATOR+: every card is with its piece; the sealed codes are erased. */
+  cardsAttached(id: string): Promise<ReceptionView> {
+    return this.post(`/api/admin/logistics/receptions/${encodeURIComponent(id)}/cards-attached`, {});
+  }
+
+  /** LOGISTICS and OPERATOR+: rejected pieces sent back to their supplier (a carrier and a tracking number when there are). */
+  supplierReturnSent(id: string, input: { carrierId?: string | null; trackingNumber?: string | null }): Promise<SupplierReturnItem> {
+    return this.post(`/api/admin/logistics/supplier-returns/${encodeURIComponent(id)}/sent`, input);
   }
 
   /** LOGISTICS and AUDITOR+: a parcel, keyed by any of its orders (no price, email, account nor release; its carriers). */

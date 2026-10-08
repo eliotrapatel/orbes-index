@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { LOGISTICS_LIMITS as SERVER_LOGISTICS_LIMITS } from '../../src/server/services/logistics.js';
 import { ORDER_CASE_LIMITS } from '../../src/server/services/order-cases.js';
 import { PACKING_PHOTO_MAX_BYTES, PARCEL_HISTORY_ACTIONS } from '../../src/server/services/parcels.js';
+import { RECEPTION_LIMITS as SERVER_RECEPTION_LIMITS, RECEPTION_RUNS } from '../../src/server/services/receptions.js';
 import { PHOTO_MAX_BYTES } from '../../src/web/admin/model/photo.js';
 import { STOCK_MOVE_MAX, STOCK_NOTE_MAX } from '../../src/server/services/stock.js';
 import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
@@ -52,6 +53,22 @@ import {
   shipProblem,
   shipToLine,
 } from '../../src/web/admin/model/logistics.js';
+import {
+  cardsLine,
+  confirmReceptionText,
+  expectedEmpty,
+  expectedLead,
+  issuingLine,
+  RECEPTION_LIMITS,
+  receptionInputOf,
+  receptionProblem,
+  receptionSummary,
+  referenceProblem,
+  runLabel,
+  skippedLine,
+  supplierReturnLine,
+  supplierReturnProblem,
+} from '../../src/web/admin/model/logistics.js';
 import { can, logisticsOnly } from '../../src/web/admin/model/permissions.js';
 import { href, parseHash } from '../../src/web/admin/router.js';
 import { ADMIN_ROLES, ORDER_CASE_KINDS, SHIPMENT_STATUSES, STOCK_CORRECTION_STATUSES, type LogisticsSku, type ShippingOrderView } from '../../src/web/admin/types.js';
@@ -83,7 +100,7 @@ describe('the mirrors of the server', () => {
 describe('the page', () => {
   it('reads its tab from the query, the first one otherwise; the counters apart from the words', () => {
     // To ship first: the agent's daily work (Default (mine), §5.1).
-    expect(LOGISTICS_TABS.map((t) => t.id)).toEqual(['ship', 'stock', 'returns', 'corrections']);
+    expect(LOGISTICS_TABS.map((t) => t.id)).toEqual(['ship', 'receptions', 'stock', 'returns', 'corrections']);
     expect(logisticsTab({})).toBe('ship');
     expect(logisticsTab({ tab: 'corrections' })).toBe('corrections');
     expect(logisticsTab({ tab: 'atelier' })).toBe('ship');
@@ -270,13 +287,68 @@ describe('To ship and a parcel', () => {
   });
 });
 
+describe('receptions', () => {
+  const ORDER = {
+    lines: [{ lineId: 'l', sku: SKU, ordered: 50, alreadyReceived: 0, expected: 50 }],
+  };
+  const EXTRA = { ...SKU, id: OTHER, code: 'MNL-BLU-54', sizeLabel: '54' };
+  const VIEW = { supplierOrder: { id: ID, reference: 'SO-7C21A0B9' }, accepted: 48, rejected: 2, status: 'TO_CONFIRM' as const, location: { id: LOC, name: 'LOGISTICS WAREHOUSE' }, issuing: { issued: 150, accepted: 500, done: false } };
+
+  it('holds the server\'s bounds and runs', () => {
+    expect(RECEPTION_LIMITS).toMatchObject({ pieces: SERVER_RECEPTION_LIMITS.pieces, deliveryNote: SERVER_RECEPTION_LIMITS.deliveryNote, note: SERVER_RECEPTION_LIMITS.note, lineNote: SERVER_RECEPTION_LIMITS.lineNote });
+    expect([RECEPTION_LIMITS.sheetRun, RECEPTION_LIMITS.cardRun]).toEqual([RECEPTION_RUNS.sheet, RECEPTION_RUNS.card]);
+  });
+
+  it('says a reception, its cards and their progress, a rejected piece and ORBES\'s Expected list in the plan\'s words', () => {
+    expect(receptionSummary(VIEW)).toBe('SO-7C21A0B9 · 48 OK · 2 rejected · waiting for ORBES');
+    expect(receptionSummary({ ...VIEW, status: 'SENT_BACK' })).toBe('SO-7C21A0B9 · 48 OK · 2 rejected');
+    expect(cardsLine(VIEW)).toBe('SO-7C21A0B9 · 500 cards');
+    expect(issuingLine(VIEW)).toBe('Issuing the identities: 150 of 500.');
+    expect(issuingLine({ issuing: { issued: 500, accepted: 500, done: true } })).toBeNull();
+    expect(confirmReceptionText(VIEW)).toBe(
+      '48 pieces get their ORBES identity now: a serial, a signed ORBES code and a claim code each. They enter the stock at LOGISTICS WAREHOUSE and go to the orders waiting for them, the oldest first. The agent then prints their cards. 2 rejected pieces get no identity: they are listed TO RETURN on SO-7C21A0B9.',
+    );
+    expect(confirmReceptionText({ ...VIEW, accepted: 0, rejected: 1 })).toBe('1 rejected piece gets no identity: it is listed TO RETURN on SO-7C21A0B9.');
+    expect(supplierReturnLine({ id: ID, supplierOrder: VIEW.supplierOrder, sku: SKU, quantity: 2, status: 'TO_RETURN' })).toBe('SO-7C21A0B9 · MONOLITHE · BLUE · 52 · 2 pieces · TO RETURN');
+    expect(expectedLead('LOGISTICS WAREHOUSE')).toBe('Supplier orders on their way to LOGISTICS WAREHOUSE. Open one when its parcel arrives, and count what is in it.');
+    expect(expectedEmpty('LOGISTICS WAREHOUSE')).toBe('No supplier order on its way to LOGISTICS WAREHOUSE.');
+    expect(runLabel('sheet', 1, 1)).toBe('Print A4 sheets');
+    expect(runLabel('card', 2, 3)).toBe('Print one per page · run 2');
+    expect(skippedLine([])).toBeNull();
+    expect(skippedLine([{ productId: 'O26-J-00184', reason: 'REGISTERED' }])).toBe('Not printed: O26-J-00184 (registered, replaced or no longer readable). Tell ORBES.');
+  });
+
+  it('reads a reference as the server does', () => {
+    expect(referenceProblem('so7c21a0b9')).toBeNull();
+    expect(referenceProblem(' SO-7C21A0B9 ')).toBeNull();
+    expect(referenceProblem('7C21A0B9')).toBe('A supplier order’s reference reads SO-7C21A0B9.');
+  });
+
+  it('checks a count (a note for more than expected or a size not on the order) and sends its lines, none at 0', () => {
+    expect(receptionProblem(ORDER, [], {})).toBe('Count at least one piece.');
+    expect(receptionProblem(ORDER, [], { [`accepted_${ID}`]: '2.5' })).toMatch(/whole pieces/);
+    expect(receptionProblem(ORDER, [], { [`accepted_${ID}`]: '51' })).toBe('Say in a note why more pieces than expected, or a piece not on the order, came in.');
+    expect(receptionProblem(ORDER, [], { [`accepted_${ID}`]: '51', [`note_${ID}`]: 'One more.' })).toBeNull();
+    expect(receptionProblem(ORDER, [EXTRA], { [`accepted_${ID}`]: '48', [`rejected_${OTHER}`]: '1' })).toMatch(/note/);
+    expect(receptionProblem(ORDER, [], { [`accepted_${ID}`]: '48', deliveryNote: 'x'.repeat(61) })).toMatch(/delivery note/);
+    expect(receptionInputOf(ORDER, [EXTRA], { [`accepted_${ID}`]: '48', [`rejected_${ID}`]: '2', [`accepted_${OTHER}`]: '0', deliveryNote: ' BL-1 ', note: '' })).toEqual({
+      lines: [{ skuId: ID, accepted: 48, rejected: 2, note: null }],
+      deliveryNote: 'BL-1',
+      note: null,
+    });
+    expect(supplierReturnProblem({ carrierId: '', trackingNumber: 'RET-1' })).toBe('A tracking number comes with its carrier.');
+    expect(supplierReturnProblem({ carrierId: LOC, trackingNumber: 'RET-1' })).toBeNull();
+    expect(supplierReturnProblem({ carrierId: '', trackingNumber: '' })).toBeNull();
+  });
+});
+
 describe('what each role may do', () => {
   it('lets the agent read and act on its locations only, ORBES\'s OPERATOR approve and act at once, an AUDITOR read', () => {
     const roles = [...ADMIN_ROLES];
     expect(roles.filter((r) => can(r, 'readLogistics'))).toEqual(expect.arrayContaining(['LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN']));
     expect(can('RETAIL', 'readLogistics')).toBe(false);
     expect(roles.filter((r) => can(r, 'logistics')).sort()).toEqual(['ADMIN', 'LOGISTICS', 'OPERATOR']);
-    for (const cap of ['approveCorrections', 'manageStock'] as const) expect(roles.filter((r) => can(r, cap)).sort(), cap).toEqual(['ADMIN', 'OPERATOR']);
+    for (const cap of ['approveCorrections', 'manageStock', 'confirmReceptions'] as const) expect(roles.filter((r) => can(r, cap)).sort(), cap).toEqual(['ADMIN', 'OPERATOR']);
     expect(logisticsOnly('LOGISTICS')).toBe(true);
     expect(logisticsOnly('AUDITOR')).toBe(false);
   });
@@ -287,6 +359,7 @@ describe('the API client', () => {
     const calls: { url: string; init: RequestInit }[] = [];
     const fetch: FetchLike = async (url, init = {}) => {
       calls.push({ url, init });
+      if (url.endsWith('/cards')) return new Response('%PDF', { status: 200, headers: { 'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="ORBES-cards.pdf"', 'x-orbes-cards-printed': '2', 'x-orbes-cards-skipped': 'O26-J-00184:REPLACED' } });
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
     };
     const api = new AdminApi({ fetch });
@@ -308,6 +381,17 @@ describe('the API client', () => {
     await api.shipParcel(ID, { carrierId: LOC, trackingNumber: '6A123' });
     await api.markParcelDelivered(ID);
     await api.reportParcel(ID, { kind: 'LOST', note: 'Never arrived.' });
+    await api.receptions({ locationId: LOC });
+    await api.findReception('SO-7C21A0B9');
+    await api.receptionLines(ID);
+    await api.reception(ID);
+    await api.recordReception({ supplierOrderId: ID, lines: [{ skuId: ID, accepted: 1, rejected: 0 }] });
+    await api.updateReception(ID, { lines: [{ skuId: ID, accepted: 2, rejected: 0 }] });
+    await api.sendBackReception(ID, 'Count again.');
+    await api.confirmReception(ID);
+    const printed = await api.receptionCards(ID, { layout: 'sheet', run: 1 });
+    await api.cardsAttached(ID);
+    await api.supplierReturnSent(ID, { carrierId: LOC, trackingNumber: 'RET-1' });
     await api.casesToReceive();
     await api.receiveCase(ID, { pieceState: 'OK', note: null });
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
@@ -328,6 +412,17 @@ describe('the API client', () => {
       `POST /api/admin/logistics/orders/${ID}/ship`,
       `POST /api/admin/logistics/orders/${ID}/delivered`,
       `POST /api/admin/logistics/orders/${ID}/order-case`,
+      `GET /api/admin/logistics/receptions?locationId=${LOC}`,
+      'GET /api/admin/logistics/receptions/supplier-order?reference=SO-7C21A0B9',
+      `GET /api/admin/logistics/receptions/lines/${ID}`,
+      `GET /api/admin/logistics/receptions/${ID}`,
+      'POST /api/admin/logistics/receptions',
+      `PUT /api/admin/logistics/receptions/${ID}`,
+      `POST /api/admin/logistics/receptions/${ID}/send-back`,
+      `POST /api/admin/logistics/receptions/${ID}/confirm`,
+      `POST /api/admin/logistics/receptions/${ID}/cards`,
+      `POST /api/admin/logistics/receptions/${ID}/cards-attached`,
+      `POST /api/admin/logistics/supplier-returns/${ID}/sent`,
       'GET /api/admin/logistics/order-cases',
       `POST /api/admin/logistics/order-cases/${ID}/received`,
     ]);
@@ -342,7 +437,12 @@ describe('the API client', () => {
     expect(bodies[13]).toEqual({ ticked: ['box'] });
     expect(bodies[14]).toEqual({ carrierId: LOC, trackingNumber: '6A123' });
     expect(bodies[16]).toEqual({ kind: 'LOST', note: 'Never arrived.' });
-    expect(bodies[18]).toEqual({ pieceState: 'OK', note: null });
+    expect(bodies[21]).toEqual({ supplierOrderId: ID, lines: [{ skuId: ID, accepted: 1, rejected: 0 }] });
+    expect(bodies[23]).toEqual({ note: 'Count again.' });
+    expect(bodies[25]).toEqual({ layout: 'sheet', run: 1 });
+    expect(printed).toMatchObject({ printed: 2, skipped: [{ productId: 'O26-J-00184', reason: 'REPLACED' }] });
+    expect(bodies[27]).toEqual({ carrierId: LOC, trackingNumber: 'RET-1' });
+    expect(bodies[29]).toEqual({ pieceState: 'OK', note: null });
     expect(calls.every((c) => c.init.method === 'GET' || (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
   });
 });

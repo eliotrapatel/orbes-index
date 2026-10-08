@@ -203,6 +203,8 @@ export interface ReceptionsBoard {
   backToSupplier: SupplierReturnItem[];
   /** ORBES staff only (undefined for the agent): the supplier orders on their way. */
   expected?: ExpectedSupplierOrder[];
+  /** The active carriers, for Sent back (the agent never reads the carriers' route), as a parcel's reply carries them. */
+  carriers: { id: string; name: string }[];
   /** The tab's counter: the agent's receptions waiting for ORBES or sent back, and its cards to print; ORBES's receptions to confirm. */
   count: number;
 }
@@ -871,10 +873,12 @@ export class ReceptionService {
     // A reception of rejected pieces only has no card: it never waits in Cards to print nor in the agent's counter.
     const cardsToPrint = views.filter((v) => v.status === 'CONFIRMED' && v.accepted > 0);
     const backToSupplier = await this.returns(this.db, scope, { status: 'TO_RETURN', locationId: loc });
+    const carriers = await this.db.selectFrom('carriers').select(['id', 'name']).where('active', '=', true).orderBy('name').execute();
     const out: ReceptionsBoard = {
       toConfirm,
       cardsToPrint,
       backToSupplier,
+      carriers,
       count: scope === null ? toConfirm.filter((v) => v.status === 'TO_CONFIRM').length : toConfirm.length + cardsToPrint.length,
     };
     if (scope === null) out.expected = await this.expected(loc ?? undefined);

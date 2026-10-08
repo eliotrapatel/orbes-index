@@ -6,6 +6,9 @@
  *  - To ship (n), first: the parcels whose paid orders all hold their piece in stock, the oldest first, each with its
  *    pieces, add-ons, engraving, where it goes, its step and the marks LATE and ADDRESS CHANGED, to its parcel's page
  *    (views/shipping.ts); On its way: the parcels shipped, Mark delivered.
+ *  - Receptions (n): the agent opens a delivery by its supplier order's reference (never a list of them); ORBES staff
+ *    read the supplier orders Expected. To confirm (ORBES: Confirm, Send back; the agent: Count again), Cards to print
+ *    in fixed runs once every identity is issued, then Cards attached; Back to the supplier (Sent back).
  *  - Stock: every size of every model and variant at each location, 0 included: on hand, reserved, available, waiting,
  *    the minimum. The agent proposes a correction, which ORBES approves. ORBES staff read the location, what to order
  *    (TO ORDER) and the sizes whose count no ORBES identity backs (NO PIECE · 3, with the notice over the table), and
@@ -40,6 +43,18 @@ import {
   minimumValue,
   noPieceMark,
   offersLocationFilter,
+  cardsLine,
+  expectedEmpty,
+  expectedLead,
+  issuingLine,
+  RECEPTION_STATUS_LABELS,
+  RECEPTION_TEXT,
+  receptionSummary,
+  referenceProblem,
+  runLabel,
+  skippedLine,
+  supplierReturnLine,
+  supplierReturnProblem,
   othersText,
   PACKING_TEXT,
   PARCEL_STEP_LABELS,
@@ -60,10 +75,12 @@ import {
 import { can, logisticsOnly } from '../model/permissions.js';
 import type { Tone } from '../model/tone.js';
 import { href } from '../router.js';
-import type { CaseToReceive, LogisticsLocation, LogisticsStock, LogisticsStockRow, OnItsWayRow, StockCorrection, StockCorrectionStatus, ToShipRow } from '../types.js';
-import { button, field, filterBar, mono, pageHeader, section, select, statusMark, table, type Column } from '../ui/components.js';
+import type { CaseToReceive, ExpectedSupplierOrder, LogisticsLocation, LogisticsStock, LogisticsStockRow, OnItsWayRow, ReceptionsBoard, ReceptionView, StockCorrection, StockCorrectionStatus, SupplierReturnItem, ToShipRow } from '../types.js';
+import { button, emptyState, field, filterBar, input, linkButton, mono, pageHeader, section, select, statusMark, table, type Column } from '../ui/components.js';
+import { saveDownload } from '../ui/download.js';
 import { openDialog } from '../ui/dialog.js';
-import { notify } from '../ui/toast.js';
+import { notify, notifyError } from '../ui/toast.js';
+import { confirmButton, sendBackButton } from './reception.js';
 import type { ViewContext } from './context.js';
 
 const CORRECTION_TONES: Readonly<Record<StockCorrectionStatus, Tone>> = Object.freeze({ TO_APPROVE: 'outline', APPROVED: 'solid', DECLINED: 'muted' });
@@ -92,7 +109,7 @@ function logisticsTabs(current: LogisticsTab, counts: LogisticsCounts, locationI
 export async function logisticsView(ctx: ViewContext): Promise<HTMLElement> {
   const tab = logisticsTab(ctx.route.query);
   // Every tab reads the counters, and the scope's locations come with the parcels' board.
-  const [parcels, cases, corrections] = await Promise.all([ctx.api.parcels(), ctx.api.casesToReceive(), ctx.api.stockCorrections()]);
+  const [parcels, cases, corrections, receptions] = await Promise.all([ctx.api.parcels(), ctx.api.casesToReceive(), ctx.api.stockCorrections(), ctx.api.receptions()]);
   const locations = parcels.locations;
   const locationId = locationFilter(ctx.route.query, locations);
   const here = <T extends { location: { id: string } }>(rows: readonly T[]) => (locationId ? rows.filter((r) => r.location.id === locationId) : [...rows]);
@@ -100,10 +117,21 @@ export async function logisticsView(ctx: ViewContext): Promise<HTMLElement> {
   const listed = here(corrections.items);
   const toShip = here(parcels.toShip);
   const onItsWay = here(parcels.onItsWay);
-  const counts: LogisticsCounts = { ship: toShip.length, returns: toReceive.length, corrections: listed.filter((c) => c.status === 'TO_APPROVE').length };
+  const board: ReceptionsBoard = {
+    toConfirm: here(receptions.toConfirm),
+    cardsToPrint: here(receptions.cardsToPrint),
+    backToSupplier: receptions.backToSupplier,
+    carriers: receptions.carriers,
+    ...(receptions.expected ? { expected: here(receptions.expected) } : {}),
+    count: 0,
+  };
+  // The server's rule, on the location shown: the agent's receptions waiting or sent back and its cards to print; ORBES's to confirm.
+  board.count = logisticsOnly(ctx.session.admin.role) ? board.toConfirm.length + board.cardsToPrint.length : board.toConfirm.filter((r) => r.status === 'TO_CONFIRM').length;
+  const counts: LogisticsCounts = { ship: toShip.length, receptions: board.count, returns: toReceive.length, corrections: listed.filter((c) => c.status === 'TO_APPROVE').length };
 
   let body: Child[];
   if (tab === 'ship') body = shipTab(ctx, toShip, onItsWay, locations);
+  else if (tab === 'receptions') body = receptionsTab(ctx, board, locations, locationId);
   else if (tab === 'returns') body = [returnsTab(ctx, toReceive, locations)];
   else if (tab === 'corrections') body = [correctionsTab(ctx, listed, locations)];
   else body = [stockTab(ctx, await ctx.api.logisticsStock(locationId ? { locationId } : {}))];
@@ -187,6 +215,210 @@ function shipTab(ctx: ViewContext, toShip: ToShipRow[], onItsWay: OnItsWayRow[],
     section(TO_SHIP_TEXT.title, [h('p', { class: 'panel__text' }, TO_SHIP_TEXT.lead), table(toShipColumns, toShip, { caption: TO_SHIP_TEXT.title, empty: TO_SHIP_TEXT.empty })], { id: 'logistics-ship' }),
     section(TO_SHIP_TEXT.onItsWay, table(onItsWayColumns, onItsWay, { caption: TO_SHIP_TEXT.onItsWay, empty: TO_SHIP_TEXT.onItsWayEmpty }), { id: 'logistics-on-its-way' }),
   ];
+}
+
+// ── Receptions ─────────────────────────────────────────────────────────────
+
+function receptionsTab(ctx: ViewContext, board: ReceptionsBoard, locations: readonly LogisticsLocation[], locationId: string | undefined): HTMLElement[] {
+  const role = ctx.session.admin.role;
+  const agent = logisticsOnly(role);
+  const act = can(role, 'logistics');
+  const confirm = !agent && can(role, 'confirmReceptions');
+  const several = locations.length > 1;
+  const where = locationId ? (locations.find((l) => l.id === locationId)?.name ?? null) : locations.length === 1 ? locations[0]!.name : null;
+  const out: HTMLElement[] = [];
+
+  // The agent's one way in: the reference on the delivery note.
+  if (agent && act) {
+    const reference = input('reference', { maxlength: 40, placeholder: 'SO-7C21A0B9', mono: true });
+    reference.setAttribute('data-testid', 'reception-reference');
+    const error = h('p', { class: 'form-error', attrs: { role: 'alert', 'aria-live': 'assertive' }, data: { testid: 'reception-reference-error' } });
+    const open = button(RECEPTION_TEXT.open, { kind: 'primary', type: 'submit', testId: 'reception-open' });
+    const form = h('form', { class: 'filters', attrs: { novalidate: true } }, field('Supplier order', reference, { hint: RECEPTION_TEXT.referenceHint }), open);
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      error.textContent = '';
+      const problem = referenceProblem(reference.value);
+      if (problem) {
+        error.textContent = problem;
+        return;
+      }
+      open.disabled = true;
+      try {
+        const order = await ctx.api.findReception(reference.value.trim());
+        ctx.navigate(href('receptionNew', {}, { supplierOrder: order.id }));
+      } catch (e) {
+        open.disabled = false;
+        error.textContent = e instanceof Error ? e.message : 'The supplier order could not be found.';
+      }
+    });
+    out.push(section(RECEPTION_TEXT.receiveTitle, [h('p', { class: 'panel__text' }, RECEPTION_TEXT.receiveLead), form, error], { id: 'logistics-receive' }));
+  }
+
+  // ORBES staff: the supplier orders on their way (never the agent's).
+  if (board.expected) {
+    out.push(
+      section(
+        RECEPTION_TEXT.expectedTitle,
+        [
+          h('p', { class: 'panel__text' }, expectedLead(where)),
+          table(
+            [
+              { label: 'Supplier order', cell: (x) => h('span', { class: 'mono' }, x.reference), kind: ['nowrap'] },
+              { label: 'Supplier', cell: (x) => x.supplierName },
+              ...(several ? [{ label: 'Location', cell: (x) => x.location.name, kind: ['nowrap'] } satisfies Column<ExpectedSupplierOrder>] : []),
+              { label: 'Expected on', cell: (x) => (x.expectedOn ? formatDate(x.expectedOn) : '—'), kind: ['nowrap'] },
+              { label: 'Pieces expected', cell: (x) => formatCount(x.piecesExpected), kind: ['num'] },
+              ...(act ? [{ label: '', cell: (x) => linkButton(RECEPTION_TEXT.receive, href('receptionNew', {}, { supplierOrder: x.id }), 'ghost'), kind: ['actions'] } satisfies Column<ExpectedSupplierOrder>] : []),
+            ],
+            board.expected,
+            { caption: RECEPTION_TEXT.expectedTitle, empty: expectedEmpty(where) },
+          ),
+        ],
+        { id: 'logistics-expected' },
+      ),
+    );
+  }
+
+  // To confirm: the counts waiting for ORBES, or sent back to the agent.
+  const sendBack = (r: ReceptionView) => sendBackButton(ctx, r);
+  out.push(
+    section(
+      RECEPTION_TEXT.toConfirmTitle,
+      table(
+        [
+          { label: 'Reception', cell: (r) => h('a', { class: 'idlink', attrs: { href: href('reception', { receptionId: r.id }) }, data: { testid: 'reception-summary' } }, receptionSummary(r)) },
+          ...(several ? [{ label: 'Location', cell: (r) => r.location.name, kind: ['nowrap'] } satisfies Column<ReceptionView>] : []),
+          { label: 'Counted', cell: (r) => formatDate(r.countedAt), kind: ['nowrap'] },
+          {
+            label: 'Status',
+            cell: (r) =>
+              h(
+                'span',
+                { data: { testid: 'reception-status' } },
+                statusMark(RECEPTION_STATUS_LABELS[r.status], r.status === 'SENT_BACK' ? 'alert' : 'outline'),
+                r.sentBack ? h('span', { class: 'cell-sub prewrap', data: { testid: 'reception-sent-back-note' } }, r.sentBack.note) : null,
+              ),
+            kind: ['nowrap'],
+          },
+          {
+            label: '',
+            cell: (r) =>
+              h(
+                'span',
+                { class: 'row-actions' },
+                act && r.status === 'SENT_BACK' ? linkButton(RECEPTION_TEXT.countAgain, href('reception', { receptionId: r.id }), 'secondary') : null,
+                confirm && r.status === 'TO_CONFIRM' ? confirmButton(ctx, r) : null,
+                confirm && r.status === 'TO_CONFIRM' ? sendBack(r) : null,
+              ),
+            kind: ['actions'],
+          },
+        ],
+        board.toConfirm,
+        { caption: RECEPTION_TEXT.toConfirmTitle, empty: RECEPTION_TEXT.toConfirmEmpty },
+      ),
+      { id: 'logistics-to-confirm' },
+    ),
+  );
+
+  // Cards to print, in fixed runs; Cards attached.
+  const printRun = (r: ReceptionView, layout: 'sheet' | 'card', run: number, runs: number) => {
+    const b = button(runLabel(layout, run, runs), { kind: 'ghost', testId: `reception-print-${layout}`, disabled: !r.issuing.done });
+    b.addEventListener('click', async () => {
+      b.disabled = true;
+      try {
+        const file = await ctx.api.receptionCards(r.id, { layout, run });
+        saveDownload(file);
+        const skipped = skippedLine(file.skipped);
+        notify(skipped ?? 'Cards printed.');
+      } catch (e) {
+        notifyError(e);
+      } finally {
+        b.disabled = false;
+      }
+    });
+    return b;
+  };
+  const attached = (r: ReceptionView) =>
+    button(RECEPTION_TEXT.attached, {
+      kind: 'primary',
+      testId: 'reception-attached',
+      disabled: !r.issuing.done,
+      onClick: () =>
+        void openDialog({
+          title: RECEPTION_TEXT.attached,
+          eyebrow: r.supplierOrder.reference,
+          body: h('p', { class: 'dialog__text' }, RECEPTION_TEXT.attachedText),
+          confirmLabel: RECEPTION_TEXT.attached,
+          submit: async () => {
+            await ctx.api.cardsAttached(r.id);
+          },
+        }).then(after(ctx, RECEPTION_TEXT.attachedToast)),
+    });
+  out.push(
+    section(
+      RECEPTION_TEXT.cardsTitle,
+      [
+        h('p', { class: 'panel__text' }, RECEPTION_TEXT.cardsText),
+        board.cardsToPrint.length
+          ? h(
+              'div',
+              { class: 'cards-to-print' },
+              ...board.cardsToPrint.map((r) =>
+                h(
+                  'div',
+                  { class: 'cards-to-print__item', data: { testid: 'reception-cards' } },
+                  h('p', { class: 'cards-to-print__title' }, cardsLine(r)),
+                  issuingLine(r) ? h('p', { class: 'panel__text', data: { testid: 'reception-issuing' } }, issuingLine(r)!) : null,
+                  act
+                    ? h(
+                        'div',
+                        { class: 'row-actions' },
+                        // While the identities are issued, no run exists yet: the two buttons wait, disabled.
+                        ...(r.cards.runs.sheet.length ? r.cards.runs.sheet : [{ run: 1 }]).map((x) => printRun(r, 'sheet', x.run, r.cards.runs.sheet.length)),
+                        ...(r.cards.runs.card.length ? r.cards.runs.card : [{ run: 1 }]).map((x) => printRun(r, 'card', x.run, r.cards.runs.card.length)),
+                        attached(r),
+                      )
+                    : null,
+                ),
+              ),
+            )
+          : emptyState(RECEPTION_TEXT.cardsEmpty),
+      ],
+      { id: 'logistics-cards' },
+    ),
+  );
+
+  // Back to the supplier: the rejected pieces, sent back by the agent.
+  const sent = (x: SupplierReturnItem) =>
+    void openDialog({
+      title: RECEPTION_TEXT.returnSentTitle,
+      eyebrow: supplierReturnLine(x),
+      fields: [
+        { name: 'carrierId', label: 'Carrier', kind: 'select', options: [{ value: '', label: 'None' }, ...board.carriers.map((c) => ({ value: c.id, label: c.name }))], value: '', hint: 'Optional.' },
+        { name: 'trackingNumber', label: 'Tracking number', maxlength: 40, hint: 'Optional, with its carrier.' },
+      ],
+      validate: supplierReturnProblem,
+      confirmLabel: RECEPTION_TEXT.returnSent,
+      submit: async (v) => {
+        await ctx.api.supplierReturnSent(x.id, { carrierId: v.carrierId || null, trackingNumber: v.trackingNumber.trim() || null });
+      },
+    }).then(after(ctx, RECEPTION_TEXT.returnSentToast));
+  out.push(
+    section(
+      RECEPTION_TEXT.backTitle,
+      table(
+        [
+          { label: 'Pieces', cell: (x) => h('span', { data: { testid: 'supplier-return' } }, supplierReturnLine(x)) },
+          ...(act ? [{ label: '', cell: (x) => button(RECEPTION_TEXT.returnSent, { kind: 'ghost', testId: 'supplier-return-sent', onClick: () => sent(x) }), kind: ['actions'] } satisfies Column<SupplierReturnItem>] : []),
+        ],
+        board.backToSupplier,
+        { caption: RECEPTION_TEXT.backTitle, empty: RECEPTION_TEXT.backEmpty },
+      ),
+      { id: 'logistics-back-to-supplier' },
+    ),
+  );
+  return out;
 }
 
 // ── Stock ──────────────────────────────────────────────────────────────────
