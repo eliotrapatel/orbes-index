@@ -1299,6 +1299,51 @@ body.nocturne .view--piece {
   border-bottom: 1px solid var(--vault-hairline);
 }
 
+/* YOUR NEW CLAIM CODE (plan NEXT LOT §3.4), under the order's sentence: the certificate link's pattern (C35, state 4),
+   the label, its sentences 8 px apart, the code, the hairline button, then the filled one and the two side by side. */
+.n-pieces__claim {
+  margin-top: 20px;
+}
+
+.n-pieces__claim-text,
+.n-pieces__claim-error,
+.n-pieces__claim-notice {
+  margin-top: 8px;
+}
+
+.n-pieces__claim-label + .n-pieces__claim-text {
+  margin-top: 10px;
+}
+
+/* The code in the reading face's numerals, 20 px, tracked 0.08 em: on one line down to 320 px. */
+.n-pieces__claim-code {
+  margin-top: 10px;
+  font-family: var(--font);
+  font-size: var(--n-fs-claim);
+  line-height: 1.3;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+/* Its spoken form, character by character, is for a screen reader: never copied with the code. */
+.n-pieces__claim-code .visually-hidden {
+  user-select: none;
+}
+
+.n-pieces__claim-show,
+.n-pieces__claim-register,
+.n-pieces__claim-duo {
+  margin-top: 16px;
+}
+
+.n-pieces__claim-register + .n-pieces__claim-duo {
+  margin-top: 10px;
+}
+
+.n-pieces__claim .n-btn[aria-busy="true"] {
+  cursor: progress;
+}
+
 .n-pieces__care[hidden],
 .n-pieces__document-error[hidden] {
   display: none;

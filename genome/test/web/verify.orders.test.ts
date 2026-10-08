@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ORDERS } from '../../src/web/verify/copy.js';
-import { ORDER_PATH, orderDate, orderDocuments, orderModel, orderModels, orderRows, orderSteps, shippingValue } from '../../src/web/verify/orders-model.js';
+import { ORDER_PATH, orderClaim, orderDate, orderDocuments, orderModel, orderModels, orderRows, orderSteps, shippingValue } from '../../src/web/verify/orders-model.js';
 import type { AccountOrder } from '../../src/web/verify/types.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
 
@@ -284,6 +284,44 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
     ].join('\n');
     expect(words).not.toContain('!');
     expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+  });
+});
+
+describe('YOUR NEW CLAIM CODE on an order (plan NEXT LOT §3.4)', () => {
+  const waiting = { status: 'WAITING' as const, madeAt: '2026-10-07T12:02:00.000Z' };
+
+  it('shows its block only while a new claim code waits (claimCode.status WAITING), never with the code itself', () => {
+    // A server before it, or no code waiting: no block.
+    expect(orderModel(order(), 0)!.claim).toBeNull();
+    expect(orderModel(order({ claimCode: null }), 0)!.claim).toBeNull();
+    // Anything but WAITING as the server says it is never guessed into a block.
+    for (const claimCode of [{ status: 'READ', madeAt: waiting.madeAt }, { status: 'WAITING' }, { status: 'WAITING', madeAt: 7 }, 'WAITING', true]) {
+      expect(orderClaim(order({ claimCode: claimCode as never })), JSON.stringify(claimCode)).toBeNull();
+    }
+    const m = orderModel(order({ status: 'SHIPPED', modelVariant: 'Blue', shipment: SHIPMENT, claimCode: waiting }), 0)!;
+    expect(m.claim).toEqual({
+      madeAt: waiting.madeAt,
+      registerable: true,
+      saveLabel: 'Save the new certificate card of your MONOLITHE in blue (PDF)',
+      registerLabel: 'Register your MONOLITHE in blue with this claim code',
+    });
+    expect(JSON.stringify(m.claim)).not.toMatch(/[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}/);
+  });
+
+  it('offers REGISTER THIS PIECE on a shipped or delivered order only: a piece not received yet registers by its new card', () => {
+    for (const status of ['SHIPPED', 'DELIVERED'] as const) expect(orderClaim(order({ status, claimCode: waiting }))!.registerable, status).toBe(true);
+    for (const status of ['RESERVED', 'PAID'] as const) expect(orderClaim(order({ status, claimCode: waiting }))!.registerable, status).toBe(false);
+    // Without a variant, the model alone.
+    expect(orderClaim(order({ claimCode: waiting }))!.saveLabel).toBe('Save the new certificate card of your MONOLITHE (PDF)');
+  });
+
+  it('writes its words calmly: the block, the messages, the accessible names (the code read one character at a time)', () => {
+    const C = ORDERS.claim;
+    expect([C.label, C.show, C.register, C.copy, C.save]).toEqual(['YOUR NEW CLAIM CODE', 'SHOW THE CODE', 'REGISTER THIS PIECE', 'COPY CODE', 'SAVE YOUR NEW CARD']);
+    expect(C.lead).toBe('ORBES Client Services has made a new claim code for this piece. The previous one no longer registers it. The new one is shown once only.');
+    expect(C.shownOnce).toBe('This claim code is shown once: keep it now. ORBES cannot show it again.');
+    expect(C.codeLabel('ABCD-EFGH-JKMN')).toBe('Your new claim code: A B C D, E F G H, J K M N');
+    expect(C.registered).toBe('Your piece is registered to your account.');
   });
 });
 

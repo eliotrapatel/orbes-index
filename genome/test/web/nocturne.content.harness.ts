@@ -100,8 +100,9 @@ const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroo
 export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.freeze({
   scan: (s) => full(s) && !s.mutates && named('now', 'scan', 'photo', 'problem')(s),
   results: (s) => full(s) && !s.mutates && named('result')(s),
-  // MY PIECES, and the account sheet (C2: its own, over NOW, in the full, draw-leads and stress demos).
-  pieces: (s) => ((full(s) && !s.mutates && named('pieces', 'piece')(s)) || (named('account')(s) && !accountMessages(s))) && !program(s),
+  // MY PIECES, and the account sheet (C2: its own, over NOW, in the full, draw-leads and stress demos); YOUR NEW CLAIM
+  // CODE waiting on an order (plan NEXT LOT §3.4), on its own stage.
+  pieces: (s) => ((full(s) && !s.mutates && named('pieces', 'piece')(s)) || (named('account')(s) && !accountMessages(s)) || s.variant === 'claim-waiting') && !program(s),
   // The tier program (plan NEXT-NINE, BP-19), in the full demo: a piece's YEARLY CARE at each step, THE CLUB, IN USE.
   program,
   // The account sheet's MESSAGES and its write sheet (plan NEXT-NINE, CS-01), in the draw-leads demo, in order.
@@ -114,7 +115,7 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   room: (s) => ROOM_VARIANTS.includes(s.variant),
   draws: (s) => s.variant === 'draws',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'stress' && s.variant !== 'pairs' && !named('account')(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'stress' && s.variant !== 'pairs' && s.variant !== 'claim-waiting' && !named('account')(s),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */

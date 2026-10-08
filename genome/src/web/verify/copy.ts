@@ -412,6 +412,33 @@ export const ORDERS = Object.freeze({
   /** The order's reference, for ORBES Client Services. */
   reference: (reference: string) => `ORDER ${reference}`,
   /**
+   * YOUR NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code ORBES Client Services made for the order's piece (its card
+   * lost before registration), shown once on a press of SHOW THE CODE, then never again; REGISTER THIS PIECE once the
+   * order is shipped, COPY CODE, and SAVE YOUR NEW CARD, the certificate card with its ORBES CODE and this claim code.
+   */
+  claim: Object.freeze({
+    label: 'YOUR NEW CLAIM CODE',
+    lead: 'ORBES Client Services has made a new claim code for this piece. The previous one no longer registers it. The new one is shown once only.',
+    show: 'SHOW THE CODE',
+    shownOnce: 'This claim code is shown once: keep it now. ORBES cannot show it again.',
+    /** On an order not shipped yet (REGISTER THIS PIECE is not offered): how the piece registers once it has arrived. */
+    arrived: 'Once your piece has arrived, register it by scanning the ORBES CODE on your new card, then entering this claim code.',
+    register: 'REGISTER THIS PIECE',
+    copy: 'COPY CODE',
+    save: 'SAVE YOUR NEW CARD',
+    card: 'Your new certificate card, with its ORBES CODE and this claim code (PDF). Print it, or open it on another screen to scan it.',
+    registered: 'Your piece is registered to your account.',
+    showFailed: 'Your new claim code could not be shown just now.',
+    unavailable: 'This claim code can no longer be shown. ORBES Client Services can assist you.',
+    copied: 'The claim code has been copied.',
+    copyFailed: 'The claim code could not be copied: select it, then copy it.',
+    saveFailed: 'Your new card could not be saved just now.',
+    /** Accessible names: the code, its characters read one by one; what SAVE YOUR NEW CARD and REGISTER THIS PIECE do. */
+    codeLabel: (code: string) => `Your new claim code: ${code.split('-').map((group) => [...group].join(' ')).join(', ')}`,
+    saveLabel: (model: string) => `Save the new certificate card of your ${model} (PDF)`,
+    registerLabel: (model: string) => `Register your ${model} with this claim code`,
+  }),
+  /**
    * Its documents (plan LIVE RELEASE+, M6): the invoice and the credit note (PDFs, issued by CONGLOMERAT LLC), the
    * model's care guide (shown under them), and once the piece is registered to the account its ownership certificate.
    */

@@ -21,6 +21,15 @@
  *    LIVE RELEASE OF its day (its page) and ORDER OR-…, DELIVERED ON its date, which opens ORDERS with the order in view.
  *  - Its orders unreadable (a server error): said in their tab, the pieces still shown; signed out: no orders at all.
  *
+ *  - YOUR NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code ORBES Client Services made for a shipped order's piece,
+ *    and for an order still to ship. Before SHOW THE CODE the code is nowhere in the page nor in what the server sent;
+ *    SHOW THE CODE reads it once (busy while it runs: a second press never spends the reading), then the code in the
+ *    reading face, COPY CODE, SAVE YOUR NEW CARD (its PDF), and REGISTER THIS PIECE on the shipped order (refused: the
+ *    server's words, the button kept; done: its line takes the block's place and the focus, the ORDERS tab kept, the piece
+ *    in PIECES); on the order still to ship, no REGISTER THIS PIECE but how it registers once arrived. A reload leaves no
+ *    block; a reading that fails says so and keeps the button; one the server refuses says so and the block goes. Nothing
+ *    scrolls sideways at 390, 375, 360 and 320 px, the code on one line; captured at phone and desk sizes (out/).
+ *
  * On the screen: the text's contrast on its ground computed from the page's own colours (at least 4.5 : 1), no figure in
  * the display face, no button on ORDERS (its documents are rows; the one hairline button, SCAN ORBES CODE, is the
  * PIECES tab's), the floors of BRAND-DESIGN-SYSTEM §3.8, nothing scrolling sideways; no console error nor CSP report.
@@ -33,6 +42,8 @@ import { fileURLToPath } from 'node:url';
 import type { Browser, Locator, Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
+import { inTransaction } from '../../src/server/db/connection.js';
+import { ensureSku } from '../../src/server/services/stock.js';
 import { DEFAULT_CARE, ORDERS } from '../../src/web/verify/copy.js';
 import { orderDate } from '../../src/web/verify/orders-model.js';
 import { createLiveRelease, liveFixture, type LiveFixture } from '../support/live.js';
@@ -394,4 +405,253 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     expect(visitor.problems).toEqual([]);
     await visitor.page.context().close();
   }, 60_000);
+});
+
+describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan NEXT LOT §3.4; Chromium, phone)', () => {
+  const C = ORDERS.claim;
+  const CODE = /[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}/;
+  let srv: VerifyServer;
+  let browser: Browser;
+  let f: LiveFixture;
+  let colissimo: string;
+  let france: string;
+  let me: { id: string; token: string };
+  let sizeSeq = 40;
+  /** The orders: shipped (REGISTER THIS PIECE), paid and still to ship, and one whose reading fails then is refused. */
+  const ids = { shipped: '', paid: '', refused: '' };
+  const pieces = { shipped: '', paid: '' };
+
+  async function account(tag: string) {
+    const { account: a, session } = await srv.ctx.services.auth.registerAccount({ email: `claim.e2e.${tag}@example.com`, password: PASSWORD }, {});
+    return { id: a.id, token: session.token };
+  }
+
+  /**
+   * A piece of a fresh size counted in at FRANCE WAREHOUSE, sold to the account through the private salon: priced, linked,
+   * paid, its warranty started, then shipped unless told; then ORBES Client Services makes it a new claim code (SOLD).
+   */
+  async function soldWithNewCode(accountId: string, upTo: 'PAID' | 'SHIPPED'): Promise<{ orderId: string; productId: string }> {
+    const { services, db } = srv.ctx;
+    const size = String(sizeSeq++);
+    const sku = await inTransaction(db, (tx) => ensureSku(tx, f.modelId, size));
+    await services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, f.admin);
+    const p = await services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: size, material: '925 STERLING SILVER', withClaimSecret: true }, f.admin);
+    const request = await db.insertInto('shop_requests').values({ account_id: accountId, model_id: f.modelId, created_at: new Date() }).returning('id').executeTakeFirstOrThrow();
+    await services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
+    const orderId = (await db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+    await services.orders.setTerms(orderId, { sizeLabel: size, priceMinor: 420_000, currency: 'EUR' }, f.admin);
+    await services.atelier.linkFromStock(orderId, p.product.productId, f.admin);
+    await services.orders.transition(orderId, { to: 'PAID' }, f.admin);
+    await services.warranty.activate(p.product.id, { purchaseDate: new Date().toISOString().slice(0, 10), retailer: 'ORBES PARIS', country: 'FR' }, f.admin);
+    if (upTo === 'SHIPPED') await services.orders.transition(orderId, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
+    const situation = await services.claimRenewals.situation(p.product.productId);
+    const r = await services.claimRenewals.renew(p.product.productId, { reason: 'Card lost.', expect: 'SOLD', after: situation.lastRenewalId }, f.admin);
+    expect(r.claimCode).toBeUndefined();
+    return { orderId, productId: p.product.productId };
+  }
+
+  beforeAll(async () => {
+    mkdirSync(OUT_DIR, { recursive: true });
+    srv = await startVerifyServer();
+    f = await liveFixture(srv.ctx.db, new Date(Date.now() - DAY).toISOString());
+    colissimo = (await srv.ctx.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
+    france = (await srv.ctx.db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
+    me = await account('me');
+    ({ orderId: ids.refused } = await soldWithNewCode(me.id, 'PAID'));
+    ({ orderId: ids.paid, productId: pieces.paid } = await soldWithNewCode(me.id, 'PAID'));
+    ({ orderId: ids.shipped, productId: pieces.shipped } = await soldWithNewCode(me.id, 'SHIPPED'));
+    browser = await launchChromium();
+  }, 180_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    await srv?.close();
+  });
+
+  const ref = (id: string) => `OR-${id.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+  const card = (page: Page, id: string) => page.locator(`article.n-pieces__order[data-order="${ref(id)}"]`);
+
+  async function phone(width = 390): Promise<{ page: Page; problems: string[]; answers: string[] }> {
+    const context = await (width === 1280 ? browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris' }) : mobileContext(browser));
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: srv.origin });
+    await context.addCookies([{ name: sessionCookieName(srv.ctx.config, 'account'), value: me.token, url: srv.origin }]);
+    const page = await context.newPage();
+    if (width !== 390 && width !== 1280) await page.setViewportSize({ width, height: 844 });
+    const problems: string[] = [];
+    const answers: string[] = [];
+    page.on('console', (m) => {
+      // A request this test cuts on purpose (net::ERR_INTERNET_DISCONNECTED) is no problem of the page.
+      if (m.type() === 'error' && !/Failed to load resource: (the server responded with a status of [45]\d\d|net::ERR_INTERNET_DISCONNECTED)/.test(m.text())) problems.push(`console: ${m.text()}`);
+      if (/Content Security Policy/i.test(m.text())) problems.push(`csp: ${m.text()}`);
+    });
+    page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    // What the server sent to the page, but the one reading's answer (kept apart, to know the code).
+    page.on('response', (res) => {
+      if (!res.url().includes('/api/') || res.url().endsWith('/claim-code')) return;
+      void res.text().then((t) => answers.push(t), () => undefined);
+    });
+    await page.goto(`${srv.origin}/verify/pieces`);
+    await openTab(page, 'ORDERS');
+    return { page, problems, answers };
+  }
+
+  const noSideways = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+
+  it('before SHOW THE CODE: the block under the order\'s sentence, the code nowhere; nothing scrolls sideways at 390, 375, 360 and 320 px', async () => {
+    for (const width of [390, 375, 360, 320]) {
+      const { page, problems } = await phone(width);
+      const shipped = card(page, ids.shipped);
+      await visible(shipped.locator('.pieces__claim'));
+      // Right after the order's sentence, before its rows.
+      expect(await shipped.locator('.n-pieces__order-sentence + .n-pieces__claim').count()).toBe(1);
+      expect(await shipped.locator('.n-pieces__claim + .n-pieces__order-rows').count()).toBe(1);
+      await textOf(shipped.locator('.pieces__claim'), `${C.label} ${C.lead} ${C.show}`);
+      expect(await shipped.getByRole('button', { name: C.show, exact: true }).getAttribute('class')).toContain('n-btn--ol');
+      expect(await page.locator('.pieces__claim').count()).toBe(3);
+      expect(await page.content()).not.toMatch(CODE);
+      expect(await noSideways(page), `${width} px`).toBe(true);
+      if (width === 390) await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-waiting-phone.png'), fullPage: true });
+      expect(problems).toEqual([]);
+      await page.context().close();
+    }
+    const desk = await phone(1280);
+    await visible(card(desk.page, ids.shipped).locator('.pieces__claim-show'));
+    await desk.page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-waiting-desk.png'), fullPage: true });
+    await desk.page.context().close();
+  }, 120_000);
+
+  it('a reading that fails says so and keeps SHOW THE CODE; one the server refuses says so, and the block goes', async () => {
+    const { page, problems } = await phone();
+    const block = card(page, ids.refused).locator('.pieces__claim');
+    await page.route('**/claim-code', (route) => route.abort('internetdisconnected'), { times: 1 });
+    await block.getByRole('button', { name: C.show, exact: true }).click();
+    await textOf(block.getByRole('alert'), C.showFailed);
+    await visible(block.getByRole('button', { name: C.show, exact: true }));
+    // Read meanwhile (the server's one reading spent elsewhere): refused, the block gone, the sentence in its place.
+    await srv.ctx.services.claimRenewals.reveal(me.id, ids.refused, { type: 'account', id: me.id });
+    await block.getByRole('button', { name: C.show, exact: true }).click();
+    await textOf(block, C.unavailable);
+    expect(await block.getByRole('alert').innerText()).toBe(C.unavailable);
+    expect(await block.locator('button').count()).toBe(0);
+    expect(problems).toEqual([]);
+    await page.context().close();
+  }, 60_000);
+
+  it('SHOW THE CODE reads it once (a second press never spends it); COPY CODE, SAVE YOUR NEW CARD; REGISTER THIS PIECE refused, then done: its line, ORDERS kept; a reload leaves no block', async () => {
+    const { page, problems, answers } = await phone();
+    const shipped = card(page, ids.shipped);
+    const block = shipped.locator('.pieces__claim');
+    // The reading held: the button busy, its label kept, disabled; a second press sends nothing.
+    let readings = 0;
+    page.on('request', (r) => {
+      if (r.method() === 'POST' && r.url().endsWith(`/orders/${ids.shipped}/claim-code`)) readings++;
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(`**/orders/${ids.shipped}/claim-code`, async (route) => {
+      await held;
+      await route.continue();
+    });
+    const show = block.getByRole('button', { name: C.show, exact: true });
+    await show.click();
+    await expect.poll(() => show.getAttribute('aria-busy'), POLL).toBe('true');
+    expect(await show.isDisabled()).toBe(true);
+    expect(norm(await show.innerText())).toBe(C.show);
+    await show.dispatchEvent('click');
+    release();
+    const code = block.locator('.pieces__claim-code');
+    await visible(code);
+    const shown = norm(await code.locator('[aria-hidden="true"]').innerText());
+    expect(shown).toMatch(new RegExp(`^${CODE.source}$`));
+    expect(readings).toBe(1);
+    // Never in what the server sent before (the orders, the pieces).
+    for (const a of answers) expect(a).not.toContain(shown);
+    // SHOW THE CODE gone, the code read character by character, the focus on it; one line, in the reading face.
+    expect(await block.getByRole('button', { name: C.show }).count()).toBe(0);
+    expect(await code.locator('.visually-hidden').innerText()).toBe(C.codeLabel(shown));
+    expect(await page.evaluate(() => document.activeElement?.classList.contains('pieces__claim-code'))).toBe(true);
+    expect(await code.evaluate((el) => el.getBoundingClientRect().height < 2 * parseFloat(getComputedStyle(el).fontSize) * 1.3)).toBe(true);
+    await textOf(block.locator('.pieces__claim-once'), C.shownOnce);
+    const register = block.getByRole('button', { name: 'Register your MONOLITHE with this claim code' });
+    await textOf(register, C.register);
+    expect(await register.getAttribute('class')).not.toContain('n-btn--ol');
+    expect(await block.locator('.pieces__claim-arrived').count()).toBe(0);
+    await textOf(block.locator('.n-pieces__claim-card'), C.card);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-shown-phone.png'), fullPage: true });
+
+    // COPY CODE: the code alone on the clipboard.
+    await block.getByRole('button', { name: C.copy, exact: true }).click();
+    await textOf(block.getByRole('status'), C.copied);
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(shown);
+
+    // SAVE YOUR NEW CARD: the card's PDF, the code in the request's body, never in its address.
+    const save = block.getByRole('button', { name: 'Save the new certificate card of your MONOLITHE (PDF)' });
+    await textOf(save, C.save);
+    const [pdf] = await Promise.all([page.waitForEvent('download'), save.click()]);
+    expect(readFileSync((await pdf.path())!).subarray(0, 5).toString()).toBe('%PDF-');
+    expect(pdf.url()).not.toContain(shown);
+    await expect.poll(() => save.getAttribute('aria-busy'), POLL).toBe('false');
+    // Saving fails: said, the code still there.
+    await page.route('**/claim-card.pdf', (route) => route.abort('internetdisconnected'), { times: 1 });
+    await save.click();
+    await textOf(block.getByRole('alert'), C.saveFailed);
+    await visible(code);
+
+    // REGISTER THIS PIECE refused: the server's words, the button kept.
+    await page.route('**/register', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'REGISTRATION_CONFLICT', message: 'This piece changed meanwhile. Try again.' } }) }), { times: 1 });
+    await register.click();
+    await textOf(block.getByRole('alert'), 'This piece changed meanwhile. Try again.');
+    await visible(register);
+    // Done: its line in place of the block, the focus on it; ORDERS kept, the order DELIVERED once read again.
+    await register.click();
+    await textOf(block, C.registered);
+    await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('pieces__claim-done')), POLL).toBe(true);
+    await visible(page.locator(`article.n-pieces__order[data-order="${ref(ids.shipped)}"][data-status="DELIVERED"]`));
+    await textOf(card(page, ids.shipped).locator('.pieces__claim'), C.registered);
+    expect(await page.getByRole('tab', { name: /^ORDERS/ }).getAttribute('aria-selected')).toBe('true');
+    await expect.poll(() => page.evaluate(() => document.activeElement?.classList.contains('pieces__claim-done')), POLL).toBe(true);
+    const owner = await srv.ctx.db.selectFrom('ownership as o').innerJoin('products as p', 'p.id', 'o.product_id').select('o.account_id').where('p.product_id', '=', pieces.shipped).where('o.ended_at', 'is', null).executeTakeFirstOrThrow();
+    expect(owner.account_id).toBe(me.id);
+    expect(problems).toEqual([]);
+
+    // Reloaded: nothing more about it (« then never again »); the piece in PIECES.
+    await page.reload();
+    await openTab(page, 'ORDERS');
+    await visible(card(page, ids.shipped));
+    expect(await card(page, ids.shipped).locator('.pieces__claim').count()).toBe(0);
+    expect(await page.content()).not.toContain(shown);
+    await openTab(page, 'PIECES');
+    await visible(page.locator('article.n-pieces__piece', { hasText: pieces.shipped }));
+    await page.context().close();
+  }, 120_000);
+
+  it('on an order still to ship: the code, how the piece registers once it has arrived, no REGISTER THIS PIECE; one line at 320 px; desk', async () => {
+    const { page, problems } = await phone(320);
+    const block = card(page, ids.paid).locator('.pieces__claim');
+    await block.getByRole('button', { name: C.show, exact: true }).click();
+    const code = block.locator('.pieces__claim-code');
+    await visible(code);
+    await textOf(block.locator('.pieces__claim-arrived'), C.arrived);
+    expect(await block.getByRole('button', { name: C.register }).count()).toBe(0);
+    expect(await block.locator('button').count()).toBe(2);
+    expect(await code.evaluate((el) => el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().right <= document.documentElement.clientWidth)).toBe(true);
+    expect(await noSideways(page)).toBe(true);
+    for (const width of [360, 375, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      expect(await noSideways(page), `${width} px`).toBe(true);
+    }
+    await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-to-ship-phone.png'), fullPage: true });
+    await page.setViewportSize({ width: 1280, height: 900 });
+    expect(await noSideways(page)).toBe(true);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-to-ship-desk.png'), fullPage: true });
+    const desk = await page.context().newPage();
+    await desk.setViewportSize({ width: 1280, height: 900 });
+    await desk.goto(`${srv.origin}/verify/pieces`);
+    await openTab(desk, 'ORDERS');
+    // Read once: the desk's page shows nothing more about it.
+    await visible(card(desk, ids.paid));
+    expect(await card(desk, ids.paid).locator('.pieces__claim').count()).toBe(0);
+    expect(problems).toEqual([]);
+    await page.context().close();
+  }, 120_000);
 });

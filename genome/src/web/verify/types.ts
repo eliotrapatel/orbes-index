@@ -1092,6 +1092,23 @@ export interface AccountOrder {
   documents?: AccountOrderDocuments;
   /** NOCTURNE, addition 3: its model's cover photograph (`/api/v1/media/<sha256>`), or null; absent from a server before it. */
   imageUrl?: string | null;
+  /**
+   * Plan NEXT LOT §3.4: a new claim code ORBES Client Services made for its piece, waiting to be read once (SHOW THE
+   * CODE), with when it was made; never the code itself. null, or absent from a server before it: none waits.
+   */
+  claimCode?: AccountOrderClaimCode | null;
+}
+
+/** A new claim code waiting on an order (plan NEXT LOT §3.4; API §10.13): its status and when it was made, never the code. */
+export interface AccountOrderClaimCode {
+  status: 'WAITING';
+  madeAt: string;
+}
+
+/** POST /api/v1/account/orders/:id/claim-code (SHOW THE CODE, API §10.20): the new claim code, answered once, and its piece. */
+export interface ClaimCodeReading {
+  claimCode: string;
+  productId: string;
 }
 
 /** The documents of an order (plan LIVE RELEASE+, M6). */

@@ -37,8 +37,9 @@ describe('NOCTURNE content baseline', () => {
     const held = names.flatMap((n) => contentShard(n).map((s) => s.id));
     expect([...held].sort()).toEqual(UI_STATES.map((s) => s.id).sort());
     expect(new Set(held).size).toBe(held.length);
-    // About twenty states a shard, so each fits its time limit.
-    for (const n of names) expect(contentShard(n).length, n).toBeLessThanOrEqual(28);
+    // About twenty states a shard, so each fits its time limit; pieces holds one more, YOUR NEW CLAIM CODE's state (plan
+    // NEXT LOT §3.4, step 4.5: claim-waiting, in nocturne.content-pieces), its shard still well within its time limit.
+    for (const n of names) expect(contentShard(n).length, n).toBeLessThanOrEqual(n === 'pieces' ? 29 : 28);
     const files = readdirSync(dirname(fileURLToPath(import.meta.url))).filter((f) => /^nocturne\.content-.+\.e2e\.test\.ts$/.test(f));
     expect(files.sort()).toEqual(names.map((n) => `nocturne.content-${n}.e2e.test.ts`).sort());
   });

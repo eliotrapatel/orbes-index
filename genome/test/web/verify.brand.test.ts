@@ -673,6 +673,17 @@ describe('verify app: one button to ORBES Client Services, the email under FORGO
     }
   });
 
+  it('writes YOUR NEW CLAIM CODE calmly (ORDERS.claim; plan NEXT LOT §3.4): no exclamation mark, no word of §4.5, a piece and never a product', () => {
+    const said = (v: unknown): string[] =>
+      typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('ABCD-EFGH-JKMN'))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];
+    const words = said(verifyCopy.ORDERS.claim).join('\n');
+    expect(words.length).toBeGreaterThan(400);
+    expect(words).not.toContain('!');
+    expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+    expect(words).not.toMatch(/product/i);
+    expect(words).toMatch(/\bpiece\b/);
+  });
+
   it('writes THE HOUSE’S GUARANTEE calmly (plan NEXT-NINE, IN-01): no exclamation mark, no word of §4.5, a place and never authenticity', () => {
     const said = (v: unknown): string[] =>
       typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('MONOLITHE', 2))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];

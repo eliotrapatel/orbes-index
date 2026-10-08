@@ -33,6 +33,7 @@ import type {
   CircleAnswer,
   CircleFeed,
   CirclePost,
+  ClaimCodeReading,
   ClientServices,
   ClubEntry,
   ClubLookbook,
@@ -642,6 +643,45 @@ export class ApiClient {
     const blob = await res.blob();
     if (!type.startsWith('application/pdf') || blob.size === 0 || blob.size > MAX_FILE_BYTES) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
     return { blob, filename: filenameOf(res.headers.get('content-disposition'), `ORBES-${document}.pdf`) };
+  }
+
+  // ── A new claim code on an order (plan NEXT LOT §3.4; API §10.20) ─────────
+
+  /**
+   * SHOW THE CODE: the new claim code ORBES Client Services made for the order's piece, answered once (a POST, never on a
+   * page load); 409 CLAIM_CODE_UNAVAILABLE once read, withdrawn or no longer to be shown.
+   */
+  async revealClaimCode(orderId: string): Promise<ClaimCodeReading> {
+    const r = await this.request<Partial<ClaimCodeReading>>('POST', `/api/v1/account/orders/${encodeURIComponent(orderId)}/claim-code`, undefined, { csrf: true });
+    if (typeof r?.claimCode !== 'string' || r.claimCode.length === 0 || typeof r.productId !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return { claimCode: r.claimCode, productId: r.productId };
+  }
+
+  /** SAVE YOUR NEW CARD: the new certificate card of the order's piece, with this claim code (PDF); the code in the body, never in a URL. */
+  async newClaimCard(orderId: string, claimCode: string): Promise<DownloadedFile> {
+    const path = `/api/v1/account/orders/${encodeURIComponent(orderId)}/claim-card.pdf`;
+    let res = await this.send('POST', path, { claimCode }, { csrf: true });
+    if (!res.ok) {
+      let err = toApiError(res.status, await readJson(res));
+      // One CSRF refresh, as request() does: the token may have rotated since it was last seen.
+      if (err.code === 'CSRF_FAILED' && (await this.me())) {
+        res = await this.send('POST', path, { claimCode }, { csrf: true });
+        if (!res.ok) err = toApiError(res.status, await readJson(res));
+      }
+      if (!res.ok) {
+        if (err.status === 401) this.forgetSession();
+        throw err;
+      }
+    }
+    const type = res.headers.get('content-type') ?? '';
+    const blob = await res.blob();
+    if (!type.startsWith('application/pdf') || blob.size === 0 || blob.size > MAX_FILE_BYTES) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
+    return { blob, filename: filenameOf(res.headers.get('content-disposition'), 'ORBES-certificate-card.pdf') };
+  }
+
+  /** REGISTER THIS PIECE: the order's piece registered to the account with its new claim code, without a scan (a shipped order). */
+  registerFromOrder(orderId: string, claimCode: string): Promise<OwnershipConfirmation> {
+    return this.request<OwnershipConfirmation>('POST', `/api/v1/account/orders/${encodeURIComponent(orderId)}/register`, { claimCode: claimCode.trim() }, { csrf: true });
   }
 
   /** The care guide of an order's model (M6): its own words, or null for the house's general care text. */

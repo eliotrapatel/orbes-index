@@ -32,7 +32,9 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   (three after-rooms of the last two hours, ended with a guest still in their line: sold out, closed, ended by ORBES; and
   a guest who never entered one), `draws` (a draw in every state an entry or a page shows, and r.castel, a collector with
   an entry in each and an order PAID), `stress` (fidelity rule 5) and `empty` (every empty state; an owner of one piece
-  of a model kept out of the collection sees the empty circle).
+  of a model kept out of the collection sees the empty circle). Since then, `pairs` (the full story and PAIRS WELL WITH,
+  plan NEXT-NINE BP-34) and `claim-waiting` (plan NEXT LOT §3.4: the full story, then its one state writes a shipped
+  order of MONOLITHE in blue for you and a new claim code waiting on it, on its own stage).
 - **Where the demo differs from the boards** (live data excepted: times, ids, a countdown's digits, the GENOME's glyphs):
   - Since N1, MONOLITHE in steel is a model and gold and blue its variants (ADD A VARIANT; the dots Steel · Gold · Blue):
     the lookbook's list gives them as one entry, which THE COLLECTION shows as one model with its dots since N6.
@@ -374,6 +376,7 @@ THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one 
 | `pieces-sign-in-refused` | the same, the refusal under the fields | a wrong password | C18 |
 | `pieces` | everything above for you: TITANE, two pieces (O26-J-00184 in steel with THIS PIECE and THE MODEL; O26-J-00199 in gold), four orders (LIVE RESERVED; DRAW DELIVERED, its invoice; DRAW RETURNED, its invoice and credit note; THE PRIVATE SALON CANCELLED), three releases; since N5 the tab PIECES | signed in | C3, verify-12 |
 | `pieces-orders` | (N5) the tab ORDERS: the four orders above | ORDERS | C24, C32, plus-12 |
+| `claim-waiting` | (plan NEXT LOT §3.4, step 4.5) the tab ORDERS with a fifth order, THE PRIVATE SALON · MONOLITHE IN BLUE, SHIPPED, unregistered: under its sentence YOUR NEW CLAIM CODE, *ORBES Client Services has made a new claim code for this piece. …*, SHOW THE CODE (never pressed: no code is on screen) | the `claim-waiting` demo: its state writes the order and the new claim code on its own stage | NEXT LOT §3.4 |
 | `pieces-releases` | (N5) the tab RELEASES: the account's entries | RELEASES | C31 |
 | `piece` | (N5) O26-J-00199 in gold: THE MODEL, SIZE 17, WHERE IT COMES FROM (THE DRAW OF 14 SEPTEMBER, ORDER *OR-…* DELIVERED ON 22 SEP 2026), its GENOME, OWNERSHIP | SEE THE PIECE | C4 |
 | `piece-boutique` | (N5) O26-J-00184 in steel, sold at a boutique: no WHERE IT COMES FROM | SEE THE PIECE | C4 |

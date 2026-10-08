@@ -124,6 +124,8 @@
   --n-fs-release: 26px;
   --n-fs-release-draw: 24px;
   --n-fs-price: 17px;
+  /* YOUR NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code, shown once on an order, in the reading face. */
+  --n-fs-claim: 20px;
   /* The scanner's ground under the camera (C11: `.C.cam`). */
   --n-camera: #050505;
   --n-track-wm: 0.46em;

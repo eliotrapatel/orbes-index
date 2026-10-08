@@ -56,6 +56,9 @@
  *                     (one piece of a model kept out of the collection) before an empty circle
  *   pairs             the full story, and PAIRS WELL WITH picked by the console on MONOLITHE (plan NEXT-NINE, BP-34):
  *                     ZENITH, then MONOLITHE ARCHITECTURALE (public in ORBITAL, its 24-character name, no photograph)
+ *   claim-waiting     the full story; its one state (claim-waiting, test/support/nocturne-states.ts) then writes, on its
+ *                     own stage, a shipped order of MONOLITHE in blue for you and a new claim code waiting on it (plan
+ *                     NEXT LOT §3.4), so no other state sees them
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -88,7 +91,8 @@ export type DemoVariant =
   | 'draws'
   | 'stress'
   | 'empty'
-  | 'pairs';
+  | 'pairs'
+  | 'claim-waiting';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -105,6 +109,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'stress',
   'empty',
   'pairs',
+  'claim-waiting',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -203,8 +208,9 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
       modelId: '',
     },
   };
-  // The pairs stage (plan NEXT-NINE, BP-34) tells the full story, then the console picks MONOLITHE's pairs.
-  const story: Exclude<DemoVariant, 'pairs'> = variant === 'pairs' ? 'full' : variant;
+  // The pairs stage (plan NEXT-NINE, BP-34) tells the full story, then the console picks MONOLITHE's pairs; the
+  // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
+  const story: Exclude<DemoVariant, 'pairs' | 'claim-waiting'> = variant === 'pairs' || variant === 'claim-waiting' ? 'full' : variant;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);
   else {

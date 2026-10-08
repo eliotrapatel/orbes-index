@@ -23,6 +23,9 @@
  *     MONOLITHE                                  its model
  *     ●──○──○──○ RESERVED PAID SHIPPED DELIVERED its steps and their dates (or CANCELLED, or RETURNED)
  *     Your piece is reserved. …                  what its step means
+ *     YOUR NEW CLAIM CODE                        while a new claim code waits on the order (plan NEXT LOT §3.4):
+ *     … [ SHOW THE CODE ]                        shown once on a press, then REGISTER THIS PIECE (once shipped),
+ *                                                COPY CODE and SAVE YOUR NEW CARD; kept in memory until the page is left
  *     SIZE · PRICE · ENGRAVING · TOTAL           its terms; once shipped CARRIER and TRACKING NUMBER, TRACK THE SHIPMENT
  *     ORDER OR-3F9A21C4                          its reference, for ORBES Client Services
  *     [ WRITE TO ORBES CLIENT SERVICES ]         the write sheet, the order attached (plan NEXT-NINE, CS-01)
@@ -46,11 +49,11 @@
  */
 import { h } from '../../shared/dom.js';
 import { saveDownload } from '../../shared/download.js';
-import type { ApiClient, OrderDocumentKind } from '../api.js';
-import { DEFAULT_CARE, GUARANTEE, ORDERS, PIECES, QUESTION, RELEASES } from '../copy.js';
+import { ApiError, type ApiClient, type OrderDocumentKind } from '../api.js';
+import { CLAIM_HELD, DEFAULT_CARE, GUARANTEE, ORDERS, PIECES, QUESTION, RELEASES } from '../copy.js';
 import { orderContext } from '../messages-model.js';
 import { myLiveEntries } from '../live-model.js';
-import { orderModels, type OrderModel } from '../orders-model.js';
+import { orderModels, type OrderClaimModel, type OrderModel } from '../orders-model.js';
 import { pieceModel, type PieceModel } from '../pieces-model.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
@@ -58,7 +61,7 @@ import type { AccountOrder, AccountQuestion, ClientServices, ClubEntry, LiveAcco
 import { recoveryContactModel } from '../view-model.js';
 import { PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { appAnchor, definitionList, fadedPhoto, failedState, icon, lift, loadingState, orderSteps, quietLine, tabs, textLink } from './nocturne.js';
+import { appAnchor, button, definitionList, fadedPhoto, failedState, icon, lift, loadingState, orderSteps, quietLine, tabs, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
 import { OwnershipPanel } from './ownership.js';
 import { QuestionBlock } from './question.js';
@@ -130,6 +133,13 @@ class PiecesPage {
   private questions: AccountQuestion[] = [];
   /** Each question's block, kept while the page lives (a tap keeps its focus). */
   private questionBlocks = new Map<string, QuestionBlock>();
+  /**
+   * Each order's YOUR NEW CLAIM CODE (plan NEXT LOT §3.4), by order id, kept while the page lives: a code shown stays on
+   * its order until the page is left (held in memory only, never stored), and so does the line after REGISTER THIS PIECE.
+   */
+  private claimBlocks = new Map<string, ClaimBlock>();
+  /** The block whose line takes the keyboard focus once the orders are read again (after REGISTER THIS PIECE). */
+  private focusClaim: ClaimBlock | null = null;
   /** The account's tier in the club (P-X02, its early access); null until the club's status is read. */
   private tier: number | null = null;
   private load: Load = { kind: 'idle' };
@@ -198,6 +208,8 @@ class PiecesPage {
       this.orders = [];
       this.questions = [];
       this.questionBlocks.clear();
+      this.claimBlocks.clear();
+      this.focusClaim = null;
       this.tier = null;
       this.signIn ??= new OwnershipPanel(
         { kind: 'account' },
@@ -207,10 +219,17 @@ class PiecesPage {
     this.render();
   }
 
-  private async loadPieces(focusTitle: boolean): Promise<void> {
+  /**
+   * Read the pieces, the entries and the orders. `quiet` (after REGISTER THIS PIECE): the page stays as it is while they
+   * are read, and stays so if they cannot be.
+   */
+  private async loadPieces(focusTitle: boolean, opts: { quiet?: boolean } = {}): Promise<void> {
     const gen = ++this.loadGen;
-    this.load = { kind: 'loading' };
-    this.render();
+    const quiet = opts.quiet === true && this.load.kind === 'ready';
+    if (!quiet) {
+      this.load = { kind: 'loading' };
+      this.render();
+    }
     const soft = <T>(p: Promise<T>, fallback: T): Promise<T> =>
       p.catch((e: unknown) => {
         this.deps.session.noteError(e);
@@ -238,6 +257,10 @@ class PiecesPage {
       if (gen !== this.loadGen || this.disposed) return;
       this.deps.session.noteError(e);
       if (this.deps.session.state.status !== 'signed-in') return;
+      if (quiet) {
+        this.focusClaim = null;
+        return;
+      }
       this.load = { kind: 'failed', message: messageOf(e) };
     }
     // A tab with nothing in it is left out: the page opens on PIECES instead.
@@ -245,6 +268,38 @@ class PiecesPage {
     this.render();
     if (focusTitle) this.focusTitle();
     this.revealOrder();
+    const claim = this.focusClaim;
+    this.focusClaim = null;
+    claim?.focus();
+  }
+
+  /**
+   * REGISTER THIS PIECE done (plan NEXT LOT §3.4): the orders and the pieces read again, quietly, the ORDERS tab kept and
+   * the order's line keeping the keyboard focus; the piece is in PIECES at its next opening.
+   */
+  private onRegistered(block: ClaimBlock): void {
+    this.focusClaim = block;
+    void this.loadPieces(false, { quiet: true });
+  }
+
+  /**
+   * An order's YOUR NEW CLAIM CODE: while a code waits for it (the server says so), or once shown, registered or refused
+   * on this page (until the page is left); none otherwise.
+   */
+  private claimBlockFor(m: OrderModel, deps: OrderDeps): HTMLElement | null {
+    const block = this.claimBlocks.get(m.id);
+    if (m.claim) {
+      if (block) {
+        block.update(m.claim);
+        return block.el;
+      }
+      const made: ClaimBlock = new ClaimBlock(m.id, m.key, m.claim, { ...deps, onRegistered: () => this.onRegistered(made) });
+      this.claimBlocks.set(m.id, made);
+      return made.el;
+    }
+    if (block?.settled) return block.el;
+    this.claimBlocks.delete(m.id);
+    return null;
   }
 
   private focusTitle(): void {
@@ -436,8 +491,8 @@ class PiecesPage {
 
   private ordersPanel(orders: OrderModel[] | null): HTMLElement[] {
     if (orders === null) return [h('div', { class: 'n-px n-pieces__quiet' }, h('p', { class: 'n-sm n-pieces__failed', attrs: { role: 'alert' }, text: ORDERS.loadFailed }))];
-    const deps = { api: this.deps.api, session: this.deps.session };
-    return [h('div', { class: 'n-pieces__orders' }, ...orders.map((m) => orderCard(m, deps)))];
+    const deps: OrderDeps = { api: this.deps.api, session: this.deps.session };
+    return [h('div', { class: 'n-pieces__orders' }, ...orders.map((m) => orderCard(m, deps, this.claimBlockFor(m, deps))))];
   }
 
   /** ORDER OR-… opened from a piece's page: its order in view, its heading focused. */
@@ -502,14 +557,19 @@ function stateWords(line: string): (string | HTMLElement)[] {
 interface OrderDeps {
   api: ApiClient;
   session: SessionStore;
+  /**
+   * REGISTER THIS PIECE done on the order (plan NEXT LOT §3.4): the page reads the orders and the pieces again (each
+   * order's block is given its own by the page).
+   */
+  onRegistered?(productId: string): void;
 }
 
 /**
  * One order of ORDERS (C24, C32): its model's photograph (addition 3), where it was sold, its model, its steps, what its
- * step means, its terms, once shipped the carrier, the number and TRACK THE SHIPMENT (the carrier's page in a new tab),
- * its reference, its documents (M6).
+ * step means, YOUR NEW CLAIM CODE while one waits (plan NEXT LOT §3.4), its terms, once shipped the carrier, the number
+ * and TRACK THE SHIPMENT (the carrier's page in a new tab), its reference, its documents (M6).
  */
-function orderCard(m: OrderModel, deps: OrderDeps): HTMLElement {
+function orderCard(m: OrderModel, deps: OrderDeps, claim: HTMLElement | null = null): HTMLElement {
   const titleId = `${m.key}-title`;
   const ended = m.status === 'CANCELLED' || m.status === 'RETURNED';
   const steps = orderSteps(
@@ -524,6 +584,7 @@ function orderCard(m: OrderModel, deps: OrderDeps): HTMLElement {
     h('h2', { class: 'n-g n-t2 n-pieces__order-title', id: titleId }, ...withNumerals(m.title)),
     steps,
     h('p', { class: 'n-tx n-pieces__order-sentence', text: m.sentence }),
+    claim,
     rows.length > 0 ? h('div', { class: 'n-pieces__order-rows' }, definitionList(rows, { kind: 'kv' })) : null,
     m.shipment?.href
       ? h(
@@ -640,4 +701,191 @@ function orderDocumentsBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
     h('div', { class: 'n-pieces__document-list' }, ...m.documents.map(row)),
     error,
   );
+}
+
+// ── YOUR NEW CLAIM CODE (plan NEXT LOT §3.4) ────────────────────────────────
+
+type ClaimState =
+  /** A code waits: its sentence and SHOW THE CODE (`failed`: it could not be shown just now; the button stays). */
+  | { kind: 'waiting'; failed: boolean }
+  /** Shown, once: the code, held here in memory only, with what may be done with it. */
+  | { kind: 'shown'; code: string; error: string | null; notice: string | null }
+  /** REGISTER THIS PIECE done: its line, in place of the block. */
+  | { kind: 'registered' }
+  /** The server would no longer show it (read, withdrawn, the piece registered, the order ended): its line, the block gone. */
+  | { kind: 'refused' };
+
+/** The request under way, if any: its button is disabled and busy (its label kept), so a second press never sends it again. */
+type ClaimBusy = null | 'show' | 'register' | 'save';
+
+/**
+ * An order's YOUR NEW CLAIM CODE: the new claim code ORBES Client Services made for its piece, read once on a press of
+ * SHOW THE CODE (a POST; never on a page load), then shown here until the page is left, never stored. With it, REGISTER
+ * THIS PIECE (once the order is shipped: the piece registered to the account without a scan), COPY CODE, and SAVE YOUR
+ * NEW CARD (the certificate card with its ORBES CODE and this claim code, as a PDF). The look is the certificate link's
+ * (views/piece.ts): the label, the reading text, the code in the reading face's numerals, the hairline and filled buttons.
+ */
+class ClaimBlock {
+  readonly el = h('div', { class: 'n-pieces__claim pieces__claim' });
+  private state: ClaimState = { kind: 'waiting', failed: false };
+  private busy: ClaimBusy = null;
+  private readonly labelId: string;
+
+  constructor(
+    private readonly orderId: string,
+    key: string,
+    private model: OrderClaimModel,
+    private readonly deps: OrderDeps,
+  ) {
+    this.labelId = `${key}-claim`;
+    this.render();
+  }
+
+  /** Shown, registered or refused here: kept on its order until the page is left, whatever the orders say when read again. */
+  get settled(): boolean {
+    return this.state.kind !== 'waiting';
+  }
+
+  /** The order read again with its code still waiting (REGISTER THIS PIECE offered once it is shipped). */
+  update(model: OrderClaimModel): void {
+    const changed = model.registerable !== this.model.registerable;
+    this.model = model;
+    if (changed) this.render();
+  }
+
+  /** The keyboard focus on the block's line (after REGISTER THIS PIECE) or on its code. */
+  focus(): void {
+    this.el.querySelector<HTMLElement>('.pieces__claim-done, .pieces__claim-code')?.focus({ preventScroll: true });
+  }
+
+  private render(): void {
+    const C = ORDERS.claim;
+    const st = this.state;
+    if (st.kind === 'registered') {
+      this.el.replaceChildren(h('p', { class: 'n-tx n-ivc n-pieces__claim-done pieces__claim-done', attrs: { tabindex: -1, role: 'status' }, text: C.registered }));
+      return;
+    }
+    if (st.kind === 'refused') {
+      this.el.replaceChildren(h('p', { class: 'n-sm n-pieces__claim-refused pieces__claim-refused', attrs: { role: 'alert', tabindex: -1 }, text: C.unavailable }));
+      return;
+    }
+    const block = (...children: (HTMLElement | null)[]) =>
+      h('section', { class: 'n-pieces__claim-block', attrs: { 'aria-labelledby': this.labelId } }, h('p', { class: 'n-g n-lb n-pieces__claim-label', id: this.labelId, text: C.label }), ...children);
+    if (st.kind === 'waiting') {
+      this.el.replaceChildren(
+        block(
+          h('p', { class: 'n-tx n-pieces__claim-text', text: C.lead }),
+          st.failed ? h('p', { class: 'n-err n-pieces__claim-error pieces__claim-error', attrs: { role: 'alert' }, text: C.showFailed }) : null,
+          this.button(C.show, 'show', () => void this.show(), { outline: true, extraClass: 'n-pieces__claim-show pieces__claim-show' }),
+        ),
+      );
+      return;
+    }
+    const m = this.model;
+    this.el.replaceChildren(
+      block(
+        // The code in the reading face's numerals, on one line; read aloud character by character.
+        h(
+          'p',
+          { class: 'n-num n-ivc n-pieces__claim-code pieces__claim-code', attrs: { tabindex: -1 } },
+          h('span', { attrs: { 'aria-hidden': 'true' }, text: st.code }),
+          h('span', { class: 'visually-hidden', text: C.codeLabel(st.code) }),
+        ),
+        h('p', { class: 'n-sm n-pieces__claim-text pieces__claim-once', text: C.shownOnce }),
+        // A piece not received yet is not registered from its order: how it registers once it has arrived.
+        m.registerable ? null : h('p', { class: 'n-sm n-pieces__claim-text pieces__claim-arrived', text: C.arrived }),
+        st.error ? h('p', { class: 'n-err n-pieces__claim-error pieces__claim-error', attrs: { role: 'alert' }, text: st.error }) : null,
+        st.notice ? h('p', { class: 'n-sm n-ivc n-pieces__claim-notice pieces__claim-notice', attrs: { role: 'status' }, text: st.notice }) : null,
+        m.registerable ? this.button(C.register, 'register', () => void this.register(st.code), { extraClass: 'n-pieces__claim-register pieces__claim-register', label: m.registerLabel }) : null,
+        h(
+          'div',
+          { class: 'n-duo n-pieces__claim-duo' },
+          this.button(C.copy, null, () => void this.copy(st.code), { outline: true, extraClass: 'pieces__claim-copy' }),
+          this.button(C.save, 'save', () => void this.save(st.code), { outline: true, extraClass: 'pieces__claim-save', label: m.saveLabel }),
+        ),
+        h('p', { class: 'n-sm n-pieces__claim-text n-pieces__claim-card', text: C.card }),
+      ),
+    );
+  }
+
+  /** A button of the block: disabled and busy (`aria-busy`, its label kept) while its own request runs. */
+  private button(text: string, busy: ClaimBusy, onClick: () => void, opts: { outline?: boolean; extraClass: string; label?: string }): HTMLButtonElement {
+    const running = busy !== null && this.busy === busy;
+    return button(text, { outline: opts.outline, onClick, extraClass: opts.extraClass, attrs: { disabled: running, 'aria-busy': running ? 'true' : 'false', 'aria-label': opts.label ?? null } });
+  }
+
+  private renderFocus(selector: string): void {
+    this.render();
+    this.el.querySelector<HTMLElement>(selector)?.focus({ preventScroll: true });
+  }
+
+  /** SHOW THE CODE: the one reading. Refused by the server, the block goes, saying so; not reached, the button stays. */
+  private async show(): Promise<void> {
+    if (this.busy !== null || this.state.kind !== 'waiting') return;
+    this.busy = 'show';
+    this.render();
+    try {
+      const r = await this.deps.api.revealClaimCode(this.orderId);
+      this.busy = null;
+      this.state = { kind: 'shown', code: r.claimCode, error: null, notice: null };
+      this.renderFocus('.pieces__claim-code');
+    } catch (e) {
+      this.busy = null;
+      this.deps.session.noteError(e);
+      const refused = e instanceof ApiError && (e.status === 403 || e.status === 404 || e.status === 409) && e.code !== 'CSRF_FAILED';
+      this.state = refused ? { kind: 'refused' } : { kind: 'waiting', failed: true };
+      this.renderFocus(refused ? '.pieces__claim-refused' : '.pieces__claim-show');
+    }
+  }
+
+  private async copy(code: string): Promise<void> {
+    if (this.state.kind !== 'shown') return;
+    const C = ORDERS.claim;
+    try {
+      await navigator.clipboard.writeText(code);
+      this.state = { ...this.state, error: null, notice: C.copied };
+    } catch {
+      this.state = { ...this.state, error: C.copyFailed, notice: null };
+    }
+    this.renderFocus('.pieces__claim-copy');
+  }
+
+  /** SAVE YOUR NEW CARD: its PDF saved; the server's words when it no longer draws it here. */
+  private async save(code: string): Promise<void> {
+    if (this.busy !== null || this.state.kind !== 'shown') return;
+    this.busy = 'save';
+    this.state = { ...this.state, error: null, notice: null };
+    this.render();
+    let error: string | null = null;
+    try {
+      saveDownload(await this.deps.api.newClaimCard(this.orderId, code));
+    } catch (e) {
+      this.deps.session.noteError(e);
+      error = e instanceof ApiError && e.status === 409 ? e.message : ORDERS.claim.saveFailed;
+    }
+    this.busy = null;
+    if (this.state.kind === 'shown') this.state = { ...this.state, error };
+    this.renderFocus('.pieces__claim-save');
+  }
+
+  /** REGISTER THIS PIECE: registered, its line in place of the block (the focus on it); refused, the server's words. */
+  private async register(code: string): Promise<void> {
+    if (this.busy !== null || this.state.kind !== 'shown') return;
+    this.busy = 'register';
+    this.state = { ...this.state, error: null, notice: null };
+    this.render();
+    try {
+      const r = await this.deps.api.registerFromOrder(this.orderId, code);
+      this.busy = null;
+      this.state = { kind: 'registered' };
+      this.renderFocus('.pieces__claim-done');
+      this.deps.onRegistered?.(r.productId);
+    } catch (e) {
+      this.busy = null;
+      this.deps.session.noteError(e);
+      const error = e instanceof ApiError && e.status === 429 ? CLAIM_HELD : messageOf(e);
+      if (this.state.kind === 'shown') this.state = { ...this.state, error };
+      this.renderFocus('.pieces__claim-register');
+    }
+  }
 }

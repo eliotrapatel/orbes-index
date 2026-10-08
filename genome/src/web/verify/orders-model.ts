@@ -8,6 +8,9 @@
  *   the steps      RESERVED · PAID · SHIPPED · DELIVERED, each reached with its date (on this phone's calendar), the
  *                  current one marked, those to come without one; a CANCELLED or RETURNED order shows the steps it
  *                  reached, then that end with its date;
+ *   a new code     YOUR NEW CLAIM CODE (plan NEXT LOT §3.4), right after what its step means, only while a new claim code
+ *                  ORBES Client Services made for its piece waits to be read (never the code: SHOW THE CODE asks for it);
+ *                  REGISTER THIS PIECE offered once the order is shipped;
  *   the terms      SIZE, PRICE, each add-on at its price, its SHIPPING (plan NEXT-NINE, BP-19 T4: free by its tier, at
  *                  its fee, or with the order it travels with; no row without shipping), the CREDIT taken off it (BP-19
  *                  T5: − € 50), and the TOTAL when there are add-ons, a fee or a credit; a draw's or a salon's size and
@@ -54,6 +57,8 @@ export interface OrderModel {
   line: string;
   sentence: string;
   steps: OrderStepModel[];
+  /** YOUR NEW CLAIM CODE (plan NEXT LOT §3.4): while a new claim code waits for this account on this order; null otherwise. */
+  claim: OrderClaimModel | null;
   /** SIZE, PRICE, each add-on, TOTAL. */
   rows: Row[];
   /** Once shipped: CARRIER and TRACKING NUMBER, and the carrier's page (null when its address is not https). */
@@ -64,6 +69,30 @@ export interface OrderModel {
   reference: string;
   /** The model's cover photograph (addition 3), with its alternative text; null when it has none. */
   photo: PhotoModel | null;
+}
+
+/** YOUR NEW CLAIM CODE of an order (plan NEXT LOT §3.4): what its block offers, never the code (read once, on a press). */
+export interface OrderClaimModel {
+  /** When ORBES Client Services made it (ISO). */
+  madeAt: string;
+  /** REGISTER THIS PIECE is offered: the order is shipped or delivered (a piece not received yet is not registered here). */
+  registerable: boolean;
+  /** Accessible names of SAVE YOUR NEW CARD and REGISTER THIS PIECE, with the model and its variant. */
+  saveLabel: string;
+  registerLabel: string;
+}
+
+/** An order's YOUR NEW CLAIM CODE: only with a code WAITING as the server says it (status and date only), else null. */
+export function orderClaim(o: AccountOrder): OrderClaimModel | null {
+  const c = o.claimCode;
+  if (!c || typeof c !== 'object' || c.status !== 'WAITING' || typeof c.madeAt !== 'string') return null;
+  const model = modelWithVariant(upper(o.model), o.modelVariant);
+  return {
+    madeAt: c.madeAt,
+    registerable: o.status === 'SHIPPED' || o.status === 'DELIVERED',
+    saveLabel: ORDERS.claim.saveLabel(model),
+    registerLabel: ORDERS.claim.registerLabel(model),
+  };
 }
 
 /** One document of an order: a PDF to save (`file`), or its model's care guide, shown under the documents. */
@@ -215,6 +244,7 @@ export function orderModel(o: AccountOrder, offsetMinutes?: number): OrderModel 
     // A welcome gift waiting says the order it travels with (BP-19 T5).
     sentence: o.channel === 'GIFT' && parent && (o.status === 'RESERVED' || o.status === 'PAID') ? ORDERS.gift.travels(parent) : ORDERS.sentence[o.status],
     steps: orderSteps(o, offsetMinutes),
+    claim: orderClaim(o),
     rows: orderRows(o),
     shipment: s
       ? {
