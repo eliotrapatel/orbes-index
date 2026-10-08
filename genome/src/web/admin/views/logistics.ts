@@ -122,7 +122,7 @@ export async function logisticsView(ctx: ViewContext): Promise<HTMLElement> {
   const board: ReceptionsBoard = {
     toConfirm: here(receptions.toConfirm),
     cardsToPrint: here(receptions.cardsToPrint),
-    backToSupplier: receptions.backToSupplier,
+    backToSupplier: here(receptions.backToSupplier),
     carriers: receptions.carriers,
     ...(receptions.expected ? { expected: here(receptions.expected) } : {}),
     count: 0,

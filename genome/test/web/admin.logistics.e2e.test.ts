@@ -475,6 +475,12 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await expect.poll(async () => (await title(g).textContent())?.trim()).toBe(`Reception · ${order.reference} · MAISON NORD`);
     expect(await g.locator('.reception__lines thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'Ordered', 'Already received', 'Expected on', 'Received OK', 'Rejected', 'Note']);
     expect(await g.locator('[data-testid=reception]').textContent()).not.toMatch(/120|EUR|€/);
+    // Each count cell is named by its column and its line for a screen reader.
+    expect(await Promise.all(['accepted', 'rejected', 'note'].map((n) => g.locator(`input[name=${n}_${sku52}]`).getAttribute('aria-label')))).toEqual([
+      'Received OK · MONOLITHE · 52',
+      'Rejected · MONOLITHE · 52',
+      'Note · MONOLITHE · 52',
+    ]);
     // Three OK for two ordered: a note is asked for.
     await g.fill(`input[name=accepted_${sku52}]`, '3');
     await g.fill(`input[name=rejected_${sku52}]`, '1');

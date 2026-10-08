@@ -36,6 +36,7 @@ import { createContext, type AppContext } from '../../src/server/context.js';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { orderReference } from '../../src/server/services/orders.js';
+import { sizesForExchange } from '../../src/server/services/sizes.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -476,6 +477,13 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     // A return, as an order case (plan NEXT LOT §3.5.4.4): opened by Client Services, the parcel back at the agent.
     await p.click('[data-testid=order-return]');
     expect(await p.locator('dialog .dialog__text').first().textContent()).toBe('The collector sends the piece back at their cost. The agent records it when it arrives; you then decide.');
+    // A size exchange's New size: every size listed, those not in stock greyed out (disabled), never chosen (§3.5.4.4).
+    const exchange = await sizesForExchange(ctx.db, o.late);
+    expect(exchange.some((x) => !x.selectable)).toBe(true);
+    await p.selectOption('dialog select[name=kind]', 'EXCHANGE');
+    const sizeOptions = await p.locator('dialog select[name=exchangeSkuId] option').evaluateAll((els) => (els as HTMLOptionElement[]).map((x) => ({ value: x.value, disabled: x.disabled })));
+    expect(sizeOptions).toEqual([{ value: '', disabled: false }, ...exchange.map((x) => ({ value: x.skuId, disabled: !x.selectable }))]);
+    await p.selectOption('dialog select[name=kind]', 'RETURN');
     await p.click('[data-testid=dialog-confirm]');
     await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
     await p.selectOption('dialog select[name=reason]', 'SIZE');

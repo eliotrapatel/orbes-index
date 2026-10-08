@@ -185,6 +185,8 @@ export interface SupplierReturnItem {
   sku: SupplierOrderSku;
   quantity: number;
   status: string;
+  /** Where the rejected pieces wait: their reception's location (the Logistics page's Location filter). */
+  location: { id: string; name: string };
 }
 
 /** A supplier order on its way to a location (ORBES staff only). */
@@ -996,7 +998,8 @@ export class ReceptionService {
     let q = db
       .selectFrom('supplier_returns as x')
       .innerJoin('receptions as r', 'r.id', 'x.reception_id')
-      .select(['x.id', 'x.supplier_order_id', 'x.sku_id', 'x.quantity', 'x.status', 'r.location_id'])
+      .innerJoin('stock_locations as l', 'l.id', 'r.location_id')
+      .select(['x.id', 'x.supplier_order_id', 'x.sku_id', 'x.quantity', 'x.status', 'r.location_id', 'l.name as location_name'])
       .orderBy('x.created_at')
       .orderBy('x.id');
     if (filter.id) q = q.where('x.id', '=', filter.id);
@@ -1004,7 +1007,7 @@ export class ReceptionService {
     if (filter.locationId) q = q.where('r.location_id', '=', filter.locationId);
     const rows = (await q.execute()).filter((x) => inScope(scope, x.location_id));
     const skus = await skusOf(db, rows.map((x) => x.sku_id));
-    return rows.map((x) => ({ id: x.id, supplierOrder: { id: x.supplier_order_id, reference: supplierOrderReference(x.supplier_order_id) }, sku: skus.get(x.sku_id)!, quantity: x.quantity, status: x.status }));
+    return rows.map((x) => ({ id: x.id, supplierOrder: { id: x.supplier_order_id, reference: supplierOrderReference(x.supplier_order_id) }, sku: skus.get(x.sku_id)!, quantity: x.quantity, status: x.status, location: { id: x.location_id, name: x.location_name } }));
   }
 }
 

@@ -138,13 +138,16 @@ function countForm(ctx: ViewContext, order: ReceptionOrder, current: ReceptionVi
   // The pieces not on this order: those already counted, and those added here.
   const extras: LogisticsSku[] = (current?.lines ?? []).filter((l) => !onOrder.has(l.sku.id)).map((l) => l.sku);
   const error = h('p', { class: 'form-error', attrs: { role: 'alert', 'aria-live': 'assertive' }, data: { testid: 'reception-error' } });
-  const count = (name: string, value: number | undefined) => {
+  // Each cell named for a screen reader by its column and its line: 'Received OK · MONOLITHE · BLUE · 52'.
+  const count = (name: string, label: string, value: number | undefined) => {
     const el = input(name, { value: value === undefined ? '' : String(value), maxlength: 5, inputmode: 'numeric' });
     el.classList.add('cinput--count');
+    el.setAttribute('aria-label', label);
     return el;
   };
-  const note = (name: string, value: string | null | undefined) => {
+  const note = (name: string, label: string, value: string | null | undefined) => {
     const el = input(name, { value: value ?? '', maxlength: 500 });
+    el.setAttribute('aria-label', label);
     return el;
   };
   const rows = h('tbody');
@@ -161,9 +164,9 @@ function countForm(ctx: ViewContext, order: ReceptionOrder, current: ReceptionVi
           h('td', { class: 'col--num' }, formatCount(l.ordered)),
           h('td', { class: 'col--num' }, formatCount(l.alreadyReceived)),
           h('td', { class: 'col--nowrap' }, order.expectedOn ? formatDate(order.expectedOn) : '—'),
-          h('td', null, count(`accepted_${l.sku.id}`, counted.get(l.sku.id)?.accepted)),
-          h('td', null, count(`rejected_${l.sku.id}`, counted.get(l.sku.id)?.rejected)),
-          h('td', null, note(`note_${l.sku.id}`, counted.get(l.sku.id)?.note)),
+          h('td', null, count(`accepted_${l.sku.id}`, `Received OK · ${skuWords(l.sku)}`, counted.get(l.sku.id)?.accepted)),
+          h('td', null, count(`rejected_${l.sku.id}`, `Rejected · ${skuWords(l.sku)}`, counted.get(l.sku.id)?.rejected)),
+          h('td', null, note(`note_${l.sku.id}`, `Note · ${skuWords(l.sku)}`, counted.get(l.sku.id)?.note)),
         ),
       ),
       ...extras.map((k) =>
@@ -176,9 +179,9 @@ function countForm(ctx: ViewContext, order: ReceptionOrder, current: ReceptionVi
           h('td', { class: 'col--num' }, '—'),
           h('td', { class: 'col--num' }, '—'),
           h('td', null, '—'),
-          h('td', null, count(`accepted_${k.id}`, counted.get(k.id)?.accepted)),
-          h('td', null, count(`rejected_${k.id}`, counted.get(k.id)?.rejected)),
-          h('td', null, note(`note_${k.id}`, counted.get(k.id)?.note)),
+          h('td', null, count(`accepted_${k.id}`, `Received OK · ${skuWords(k)}`, counted.get(k.id)?.accepted)),
+          h('td', null, count(`rejected_${k.id}`, `Rejected · ${skuWords(k)}`, counted.get(k.id)?.rejected)),
+          h('td', null, note(`note_${k.id}`, `Note · ${skuWords(k)}`, counted.get(k.id)?.note)),
         ),
       ),
     );

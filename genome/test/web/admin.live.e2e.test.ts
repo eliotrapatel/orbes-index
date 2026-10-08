@@ -645,7 +645,12 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     // A model of its own, in stock at FRANCE WAREHOUSE (the default location): 52 × 2, 54 × 1.
     const category = (await ctx.categories.getByCode('J'))!.index;
     const nocturne = (
-      await ctx.db.insertInto('models').values({ category_id: category, name: 'NOCTURNE', type: 'RING', sku_prefix: 'NCT-RG', default_material: '925 STERLING SILVER' }).returning('id').executeTakeFirstOrThrow()
+      await ctx.db
+        .insertInto('models')
+        // Its variant's label, so that Add to supplier order names the variant it orders (plan NEXT LOT §3.5.4.3).
+        .values({ category_id: category, name: 'NOCTURNE', type: 'RING', sku_prefix: 'NCT-RG', default_material: '925 STERLING SILVER', variant_label: 'BLUE', variant_swatch: '#1F3A93' })
+        .returning('id')
+        .executeTakeFirstOrThrow()
     ).id;
     const france = (await ctx.db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
     for (const [label, n] of [['52', 2], ['54', 1]] as const) {
@@ -697,8 +702,10 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await expect.poll(() => p.locator('[data-testid=live-stock-line]').textContent(), { timeout: 15_000 }).toBe('2 pieces on sale will wait for supplier stock once sold (FRANCE WAREHOUSE).');
     expect(await p.locator('[data-testid=live-stock-warning]').allTextContents()).toEqual(['52: 2 in stock, 1 will wait for supplier stock. Add to supplier order', '56: 0 in stock, 1 will wait for supplier stock. Add to supplier order']);
     await p.locator('[data-testid=live-stock-warning]', { hasText: '52:' }).locator('[data-testid=live-add-to-order]').click();
+    // The size named with its variant, in the dialog's eyebrow and its sentence.
+    expect(await p.locator('dialog .dialog__eyebrow').textContent()).toBe('NOCTURNE · BLUE · 52');
     expect(await p.locator('dialog [data-testid=live-add-to-order-text]').textContent()).toBe(
-      'Add 1 piece of NOCTURNE · 52 to the draft of MAISON NORD, to deliver to FRANCE WAREHOUSE. You confirm the draft before it is sent.',
+      'Add 1 piece of NOCTURNE · BLUE · 52 to the draft of MAISON NORD, to deliver to FRANCE WAREHOUSE. You confirm the draft before it is sent.',
     );
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Added to the draft.")');

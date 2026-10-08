@@ -82,7 +82,7 @@ import {
 import { coverOnPublish, guaranteedPieces, releaseCovered, releaseGuaranteed, type ReleaseGuaranteed } from './guarantees.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
-import { knownLocation, linkDropSizes } from './stock.js';
+import { knownLocation, linkDropSizes, ONE_SIZE_LABEL } from './stock.js';
 import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
 import { feasibilityCheck, stockSupply, type Feasibility, type FeasibilityLine, type FeasibilitySize } from './release-stock.js';
 import { supplierOf } from './suppliers.js';
@@ -1662,7 +1662,8 @@ export class LiveConsoleService {
     const [sizes, afterRoom] = await Promise.all([this.sizesOnSale(db, d.id), child ? this.sizesOnSale(db, child.id) : Promise.resolve(null)]);
     const skus = [...sizes, ...(afterRoom ?? [])].map((x) => x.skuId).filter((x): x is string => x !== null);
     const f = feasibilityCheck({ location, sizes, afterRoom, supply: location ? await stockSupply(db, skus, location.id) : new Map() });
-    // Plan NEXT LOT §3.5.4.3: each size's SKU and supplier, for its Add to supplier order.
+    // Plan NEXT LOT §3.5.4.3: each size's SKU, its words (model · variant · size, as supplier-orders.ts skuWords) and
+    // its supplier, for its Add to supplier order.
     const skuOf = new Map([...sizes, ...(afterRoom ?? [])].map((x) => [x.sizeId, x.skuId]));
     const suppliers = new Map<string, { id: string; name: string } | null>();
     for (const k of new Set(skus)) {
@@ -1670,9 +1671,15 @@ export class LiveConsoleService {
       const row = id ? await db.selectFrom('suppliers').select(['id', 'name']).where('id', '=', id).executeTakeFirst() : undefined;
       suppliers.set(k, row ?? null);
     }
+    const words = new Map(
+      (skus.length
+        ? await db.selectFrom('skus as k').innerJoin('models as m', 'm.id', 'k.model_id').select(['k.id', 'k.size_label', 'm.name', 'm.variant_label']).where('k.id', 'in', [...new Set(skus)]).execute()
+        : []
+      ).map((k) => [k.id, [k.name, k.variant_label, k.size_label ?? ONE_SIZE_LABEL].filter((x): x is string => x !== null && x !== '').join(' · ')]),
+    );
     const withSupplier = (l: FeasibilityLine): FeasibilityLine => {
       const skuId = skuOf.get(l.sizeId) ?? null;
-      return { ...l, skuId, supplier: skuId ? (suppliers.get(skuId) ?? null) : null };
+      return { ...l, skuId, skuWords: skuId ? (words.get(skuId) ?? null) : null, supplier: skuId ? (suppliers.get(skuId) ?? null) : null };
     };
     return { ...f, sizes: f.sizes.map(withSupplier), afterRoom: f.afterRoom ? f.afterRoom.map(withSupplier) : null };
   }

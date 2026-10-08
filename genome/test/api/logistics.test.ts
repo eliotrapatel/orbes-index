@@ -15,7 +15,8 @@
  *  - the packing (step 5.9): the agent's orders to ship (no price, email, account nor release), Start packing refused
  *    without an address, the photo's upload (an image body only: 415 otherwise; bytes that are no photo 422), the photo
  *    read no-store by the agent and AUDITOR+, never RETAIL; Ship refused from the agent with a declared value (403);
- *    the scan drawing from the `verify` rate group, as /api/v1/verify.
+ *    the scan drawing from the `verify` rate group, as /api/v1/verify; Ship to in clear for the agent and an OPERATOR,
+ *    read by an AUDITOR as an order's buyer (`A*** M***`, the address and the phone withheld), list and parcel alike.
  *  - the order cases (step 5.10): the agent reports a parcel problem and records it back; an AUDITOR reads the case
  *    without its note; ORBES decides it, no-store; Client Services opens a return (201); a return decided: its note
  *    read by an AUDITOR neither on the case nor on the order's page (its events, its return).
@@ -140,7 +141,7 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       // The rejected piece, sent back by the agent.
       const board = safeJson(await agent.get('/api/admin/logistics/receptions')) as Json;
       const ret = (board.backToSupplier as Json[]).find((x) => x.supplierOrder.id === order.id)!;
-      expect(ret).toMatchObject({ quantity: 1, status: 'TO_RETURN', sku: { id: k52 } });
+      expect(ret).toMatchObject({ quantity: 1, status: 'TO_RETURN', sku: { id: k52 }, location: { id: logistics, name: 'LOGISTICS WAREHOUSE' } });
       expect(errorOf(await auditor.post(`/api/admin/logistics/supplier-returns/${ret.id}/sent`, {})).code).toBe('FORBIDDEN');
       expect((safeJson(await agent.post(`/api/admin/logistics/supplier-returns/${ret.id}/sent`, {})) as Json).status).toBe('RETURNED');
       expect(JSON.stringify(board)).not.toMatch(/price|Minor|Maison Nord/i);
@@ -198,6 +199,21 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       for (const word of ['price', 'Minor', 'email', 'account', 'release']) expect(JSON.stringify(board)).not.toContain(word);
       expect(errorOf(await agent.post(`/api/admin/logistics/orders/${id}/packing`)).code).toBe('ORDER_ADDRESS_MISSING');
       await operator.request('PUT', `/api/admin/orders/${id}/buyer`, { body: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' } });
+      // Ship to: in clear for the agent and an OPERATOR; an AUDITOR reads it as an order's buyer, the name masked, the
+      // address and the phone withheld, on the list and on the parcel (which the order page and the slip read too).
+      const shipToOf = async (c: Client) => ({
+        row: ((safeJson(await c.get('/api/admin/logistics/orders')) as Json).toShip as Json[]).find((r) => r.id === id)!.shipTo,
+        parcel: (safeJson(await c.get(`/api/admin/logistics/orders/${id}`)) as Json).shipTo,
+      });
+      for (const c of [agent, operator]) {
+        const to = await shipToOf(c);
+        expect(to.row).toMatchObject({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' });
+        expect(to.parcel).toMatchObject({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' });
+      }
+      const masked = await shipToOf(auditor);
+      expect(masked.row).toEqual({ name: 'A*** M***', address: '***', country: null });
+      expect(masked.parcel).toEqual({ name: 'A*** M***', address: '***', country: null, phone: null });
+      for (const word of ['Ada', 'Martin', 'rue du Bac', '75007']) expect(JSON.stringify(masked)).not.toContain(word);
       expect(errorOf(await auditor.post(`/api/admin/logistics/orders/${id}/packing`)).code).toBe('FORBIDDEN');
       const started = safeJson(await agent.post(`/api/admin/logistics/orders/${id}/packing`)) as Json;
       expect(started).toMatchObject({ step: 'PACKING', shipTo: { name: 'Ada Martin' }, carriers: expect.arrayContaining([expect.objectContaining({ name: 'Colissimo' })]) });

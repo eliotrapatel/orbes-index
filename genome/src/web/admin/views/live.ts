@@ -1086,7 +1086,8 @@ function stockBlock(ctx: ViewContext, r: LiveRelease, check: LiveFeasibility | '
           'ul',
           { class: 'live__feasibility-list' },
           ...lines.map((l) => {
-            const sku = `${r.model.name} · ${l.label}`;
+            // The SKU's words name the variant: 'MONOLITHE · BLUE · 52' (the release's model and size without one).
+            const sku = l.skuWords ?? `${r.model.name} · ${l.label}`;
             const button_ =
               add && l.skuId && l.supplier
                 ? button('Add to supplier order', {

@@ -10,6 +10,7 @@
  * login's locations).
  */
 import { formatCount, formatDateTime } from '../format.js';
+import { parseMoney } from './live.js';
 import type { CaseToReceive, LogisticsLocation, LogisticsSku, OrderCaseKind, ParcelActor, ParcelStep, ReceptionInput, ReceptionOrder, ReceptionStatus, ReceptionView, ShippingOrderView, StockCorrectionStatus, SupplierReturnItem, ToShipRow } from '../types.js';
 
 /** The bounds of services/logistics.ts and services/stock.ts (LOGISTICS_LIMITS, STOCK_MOVE_MAX, THRESHOLD_MAX). */
@@ -371,7 +372,6 @@ export function checklistComplete(view: Pick<ShippingOrderView, 'checklist' | 's
 }
 
 const TRACKING_RE = /^[A-Za-z0-9][A-Za-z0-9 -]{2,39}$/;
-const MONEY_RE = /^\d{1,9}(?:[.,]\d{1,2})?$/;
 
 /** Ship: a carrier, a tracking number the server takes, each declared value an amount (ORBES staff). */
 export function shipProblem(v: Record<string, string>, declared: readonly { orderId: string; currency: string | null }[]): string | null {
@@ -381,7 +381,8 @@ export function shipProblem(v: Record<string, string>, declared: readonly { orde
     const t = (v[`declared_${d.orderId}`] ?? '').trim();
     if (t === '') continue;
     if (!d.currency) return 'Enter the order’s price first to declare a value.';
-    if (!MONEY_RE.test(t)) return 'A declared value reads 4800, or 4800.50.';
+    // As Ship sends it (parseMoney): a value it cannot read is refused here, never dropped.
+    if (parseMoney(t) === null) return 'A declared value reads 4800, or 4800.50.';
   }
   return null;
 }

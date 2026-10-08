@@ -568,7 +568,7 @@ function orderCaseSection(ctx: ViewContext, d: OrderDetail, locations: StockLoca
           name: 'exchangeSkuId',
           label: 'New size',
           kind: 'select',
-          options: [{ value: '', label: 'Choose a size' }, ...d.exchangeSizes.map((x) => ({ value: x.skuId, label: x.selectable ? `${x.label} · ${x.available} in stock` : `${x.label} · ${CASE_TEXT.sizeOut}` }))],
+          options: [{ value: '', label: 'Choose a size' }, ...d.exchangeSizes.map((x) => ({ value: x.skuId, label: x.selectable ? `${x.label} · ${x.available} in stock` : `${x.label} · ${CASE_TEXT.sizeOut}`, disabled: !x.selectable }))],
           value: '',
           hint: 'Only the sizes in stock can be chosen.',
           shown: (v) => v.kind === 'EXCHANGE',

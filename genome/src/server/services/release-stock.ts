@@ -74,6 +74,8 @@ export interface FeasibilityLine {
   short: number;
   /** The console's reply only (live-console.ts): the size's SKU and its supplier, for Add to supplier order (§3.5.4.3). */
   skuId?: string | null;
+  /** The size's SKU as the console names it, its variant included: MONOLITHE · BLUE · 52. */
+  skuWords?: string | null;
   supplier?: { id: string; name: string } | null;
 }
 

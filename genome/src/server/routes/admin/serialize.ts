@@ -52,6 +52,24 @@ export function orderBuyer(b: { name: string | null; address: string | null }, i
   return { name: b.name === null ? null : maskName(b.name), address: b.address === null ? null : MASKED_ADDRESS };
 }
 
+/**
+ * Whether the caller reads a parcel's Ship to in clear (plan NEXT LOT §3.5.3, §3.6.B): the agent, who ships it, and
+ * OPERATOR and ADMIN; an AUDITOR reads it masked (`parcelShipTo`).
+ */
+export function readsShipTo(request: FastifyRequest): boolean {
+  return requireAdmin(request).admin.role === 'LOGISTICS' || readsClientEmails(request);
+}
+
+/**
+ * A parcel's Ship to as the caller may read it: in clear (see `readsShipTo`), or as an AUDITOR reads an order's buyer
+ * (`orderBuyer`: the name masked, the address withheld), the phone withheld and the country shown (§3.6.B: a country
+ * alone names no one).
+ */
+export function parcelShipTo<T extends { name: string | null; address: string | null; phone?: string | null }>(to: T, inClear: boolean): T {
+  if (inClear) return to;
+  return { ...to, ...orderBuyer(to, false), ...('phone' in to ? { phone: null } : {}) };
+}
+
 export function adminJson(a: AdminProfile) {
   return { id: a.id, email: a.email, role: a.role, totpEnabled: a.totpEnabled, passwordChangeRequired: a.passwordChangeRequired };
 }

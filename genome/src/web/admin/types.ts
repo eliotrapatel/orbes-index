@@ -1603,6 +1603,8 @@ export interface LiveFeasibilityLine {
   short: number;
   /** Its SKU and supplier (plan NEXT LOT §3.5.4.3), for Add to supplier order. */
   skuId?: string | null;
+  /** Its SKU in words, the variant included: MONOLITHE · BLUE · 52. */
+  skuWords?: string | null;
   supplier?: { id: string; name: string } | null;
 }
 
@@ -3081,6 +3083,8 @@ export interface SupplierReturnItem {
   sku: LogisticsSku;
   quantity: number;
   status: SupplierReturnStatus;
+  /** Where the rejected pieces wait: their reception's location. */
+  location: { id: string; name: string };
 }
 
 /** A supplier order on its way to a location (ORBES staff only). */

@@ -317,8 +317,9 @@ export function textarea(name: string, o: { rows?: number; maxlength?: number; p
   return h('textarea', { class: 'cinput cinput--area', attrs: { name, rows: o.rows ?? 3, maxlength: o.maxlength, placeholder: o.placeholder } });
 }
 
-export function select(name: string, options: { value: string; label: string }[], value?: string): HTMLSelectElement {
-  const el = h('select', { class: 'cinput cinput--select', attrs: { name } }, ...options.map((o) => h('option', { attrs: { value: o.value } }, o.label)));
+/** A select; an option `disabled` is shown greyed out and cannot be chosen. */
+export function select(name: string, options: { value: string; label: string; disabled?: boolean }[], value?: string): HTMLSelectElement {
+  const el = h('select', { class: 'cinput cinput--select', attrs: { name } }, ...options.map((o) => h('option', { attrs: { value: o.value, disabled: o.disabled === true } }, o.label)));
   if (value !== undefined) el.value = value;
   return el;
 }

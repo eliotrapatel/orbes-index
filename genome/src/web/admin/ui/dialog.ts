@@ -29,7 +29,8 @@ export interface DialogField {
    */
   kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'checkbox' | 'password' | 'email' | 'color' | 'checklist';
   autocomplete?: string;
-  options?: { value: string; label: string }[];
+  /** A select's options (a `disabled` one greyed out, never chosen), or a checklist's tick boxes. */
+  options?: { value: string; label: string; disabled?: boolean }[];
   required?: boolean;
   hint?: string;
   maxlength?: number;

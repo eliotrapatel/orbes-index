@@ -262,6 +262,9 @@ describe('To ship and a parcel', () => {
     const declared = [{ orderId: ID, currency: 'EUR' }];
     expect(shipProblem({ carrierId: LOC, trackingNumber: '6A123', [`declared_${ID}`]: '4800.50' }, declared)).toBeNull();
     expect(shipProblem({ carrierId: LOC, trackingNumber: '6A123', [`declared_${ID}`]: 'a lot' }, declared)).toBe('A declared value reads 4800, or 4800.50.');
+    // What Ship cannot send (parseMoney's 7 figures) is refused, never dropped.
+    expect(shipProblem({ carrierId: LOC, trackingNumber: '6A123', [`declared_${ID}`]: '9999999.99' }, declared)).toBeNull();
+    expect(shipProblem({ carrierId: LOC, trackingNumber: '6A123', [`declared_${ID}`]: '10000000' }, declared)).toBe('A declared value reads 4800, or 4800.50.');
     expect(shipProblem({ carrierId: LOC, trackingNumber: '6A123', [`declared_${ID}`]: '10' }, [{ orderId: ID, currency: null }])).toMatch(/price first/);
     expect(reportProblem({ kind: '', note: 'x' })).toBe('Say what happened.');
     expect(reportProblem({ kind: 'LOST', note: '' })).toBe('Say what happened in the note.');
@@ -309,7 +312,7 @@ describe('receptions', () => {
       '48 pieces get their ORBES identity now: a serial, a signed ORBES code and a claim code each. They enter the stock at LOGISTICS WAREHOUSE and go to the orders waiting for them, the oldest first. The agent then prints their cards. 2 rejected pieces get no identity: they are listed TO RETURN on SO-7C21A0B9.',
     );
     expect(confirmReceptionText({ ...VIEW, accepted: 0, rejected: 1 })).toBe('1 rejected piece gets no identity: it is listed TO RETURN on SO-7C21A0B9.');
-    expect(supplierReturnLine({ id: ID, supplierOrder: VIEW.supplierOrder, sku: SKU, quantity: 2, status: 'TO_RETURN' })).toBe('SO-7C21A0B9 · MONOLITHE · BLUE · 52 · 2 pieces · TO RETURN');
+    expect(supplierReturnLine({ id: ID, supplierOrder: VIEW.supplierOrder, sku: SKU, quantity: 2, status: 'TO_RETURN', location: VIEW.location })).toBe('SO-7C21A0B9 · MONOLITHE · BLUE · 52 · 2 pieces · TO RETURN');
     expect(expectedLead('LOGISTICS WAREHOUSE')).toBe('Supplier orders on their way to LOGISTICS WAREHOUSE. Open one when its parcel arrives, and count what is in it.');
     expect(expectedEmpty('LOGISTICS WAREHOUSE')).toBe('No supplier order on its way to LOGISTICS WAREHOUSE.');
     expect(runLabel('sheet', 1, 1)).toBe('Print A4 sheets');

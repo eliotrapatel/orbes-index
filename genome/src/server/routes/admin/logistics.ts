@@ -44,6 +44,9 @@
  *   GET    /api/admin/logistics/orders                          LOGISTICS_READ  To ship and On its way (?locationId=)
  *   GET    /api/admin/logistics/orders/:id                      LOGISTICS_READ  one parcel (ShippingOrderView: no price,
  *                                                                               email, account nor release; its carriers)
+ *                                                                               Ship to reads in clear for the agent,
+ *                                                                               OPERATOR and ADMIN; an AUDITOR reads the
+ *                                                                               name masked, the address and phone withheld
  *   POST   /api/admin/logistics/orders/:id/packing              LOGISTICS_ACT   Start packing
  *   POST   /api/admin/logistics/orders/:id/packing/scan         LOGISTICS_ACT   a card's ORBES CODE scanned (rate group
  *                                                                               `verify`, as /api/v1/verify)
@@ -102,6 +105,7 @@ import { adminActor, requireAdmin } from '../../http/sessions.js';
 import type { ScanMeta } from '../../services/verification.js';
 import { safeFilename } from './codes.js';
 import type { AdminRouteDeps } from './index.js';
+import { parcelShipTo, readsShipTo } from './serialize.js';
 
 /** Who acts on the Logistics routes: the agent (its own locations), OPERATOR and ADMIN; never AUDITOR nor RETAIL. */
 export const LOGISTICS_ACT: readonly AdminRole[] = Object.freeze(['LOGISTICS', 'OPERATOR', 'ADMIN'] as const);
@@ -245,12 +249,16 @@ export const adminLogisticsRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
   // ── Packing and shipping (step 5.9) ──────────────────────────────────────
   app.get('/api/admin/logistics/orders', { config: READ }, async (request) => {
     const q = parse(parcelsQuery, request.query);
-    return logistics.parcels(await scopeOf(request), q.locationId ? { locationId: q.locationId } : {});
+    const board = await logistics.parcels(await scopeOf(request), q.locationId ? { locationId: q.locationId } : {});
+    // An AUDITOR reads Ship to as it reads an order's buyer: the name masked, the address and the phone withheld.
+    const inClear = readsShipTo(request);
+    return { ...board, toShip: board.toShip.map((r) => ({ ...r, shipTo: parcelShipTo(r.shipTo, inClear) })) };
   });
 
   app.get('/api/admin/logistics/orders/:id', { config: READ }, async (request) => {
     const { id } = parse(orderParams, request.params);
-    return logistics.parcel(id, await scopeOf(request));
+    const view = await logistics.parcel(id, await scopeOf(request));
+    return { ...view, shipTo: parcelShipTo(view.shipTo, readsShipTo(request)) };
   });
 
   app.post('/api/admin/logistics/orders/:id/packing', { config: ACT }, async (request) => {
