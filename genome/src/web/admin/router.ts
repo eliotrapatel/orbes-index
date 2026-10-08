@@ -54,7 +54,7 @@ export const ROUTES = [
   /** The atelier (plan LIVE RELEASE+): the stock, the pieces to make; their work sheets printed from it, no link of their own. */
   { name: 'atelier', path: '/atelier' },
   { name: 'workSheets', path: '/atelier/sheets' },
-  /** Logistics (plan NEXT LOT §3.5.3): the agent's page (LOGISTICS), its only one; its tabs come with step 5.11. */
+  /** Logistics (plan NEXT LOT §3.5.3): the agent's page (LOGISTICS), its only one, and ORBES staff's in the Atelier's place; its tabs by `?tab=`. */
   { name: 'logistics', path: '/logistics' },
   /** Supplier orders (plan NEXT LOT §3.5.4.2): ORBES's page, never a LOGISTICS login's; its Suppliers for now. */
   { name: 'supplierOrders', path: '/supplier-orders' },

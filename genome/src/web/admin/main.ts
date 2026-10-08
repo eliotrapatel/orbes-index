@@ -116,8 +116,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'genomes', label: 'Genomes' },
       { route: 'codes', label: 'Codes' },
       { route: 'catalogue', label: 'Catalogue' },
-      { route: 'atelier', label: 'Atelier' },
-      // Plan NEXT LOT §3.5.4.2: under the Atelier's place (Logistics from step 5.11); never a LOGISTICS login's sidebar.
+      // Plan NEXT LOT §3.5.4.1: Logistics in the Atelier's place, Supplier orders under it (never a LOGISTICS login's).
+      { route: 'logistics', label: 'Logistics', cap: 'readLogistics' },
       { route: 'supplierOrders', label: 'Supplier orders' },
     ],
   },
@@ -199,8 +199,8 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   segments: { view: segmentsView, title: 'Segments', nav: 'segments' },
   segmentNew: { view: segmentView, title: 'New segment', nav: 'segments' },
   segment: { view: segmentView, title: 'Segment', nav: 'segments' },
-  atelier: { view: atelierView, title: 'Atelier', nav: 'atelier' },
-  workSheets: { view: workSheetsView, title: 'Work sheets', nav: 'atelier' },
+  atelier: { view: atelierView, title: 'Atelier', nav: 'logistics' },
+  workSheets: { view: workSheetsView, title: 'Work sheets', nav: 'logistics' },
   logistics: { view: logisticsView, title: 'Logistics', nav: 'logistics' },
   supplierOrders: { view: supplierOrdersView, title: 'Supplier orders', nav: 'supplierOrders' },
   document: { view: documentView, title: 'Document', nav: 'documents' },

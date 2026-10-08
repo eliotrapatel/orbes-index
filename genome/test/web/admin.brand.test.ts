@@ -6,7 +6,7 @@
  * icon, sign-in, sidebar) beside a word ORBES that stays typed, and type set
  * from brand.css tokens.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
@@ -146,6 +146,20 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     // LAST 30 DAYS: the tab in the display face, its figures in Helvetica Neue.
     expect(styles).toMatch(/\.range__tab,\n\.gen__notes-title,/);
     expect(rule(styles, '.cbtn__figure,\n.range__figure')['font-family']).toBe('var(--font)');
+  });
+
+  it('never says atelier, handmade or craft in the copy of Logistics and Supplier orders (plan NEXT LOT §0.8, §3.5.10)', () => {
+    // ORBES does not make its pieces: suppliers do. Every view and model of the supply chain, its comments aside.
+    const files = ['model', 'views'].flatMap((dir) =>
+      readdirSync(join(WEB, 'admin', dir))
+        .filter((f) => /^(logistics|shipping|reception|supplier)/.test(f))
+        .map((f) => join(WEB, 'admin', dir, f)),
+    );
+    expect(files.map((f) => f.slice(WEB.length))).toEqual(expect.arrayContaining(['/admin/model/logistics.ts', '/admin/views/logistics.ts', '/admin/model/suppliers.ts', '/admin/views/supplier-orders.ts']));
+    for (const f of files) {
+      const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+      expect(code, f).not.toMatch(/atelier|handmade|hand-made|craft/i);
+    }
   });
 
   it('sets type from brand.css tokens wherever a token has the same value', () => {

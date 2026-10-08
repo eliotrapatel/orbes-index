@@ -108,6 +108,10 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   logistics: 'OPERATOR',
   /** Logistics: read the stock, the receptions, the orders to ship. Exactly CAPABILITY_ROLES.readLogistics: the agent and AUDITOR and up. */
   readLogistics: 'AUDITOR',
+  /** Logistics (plan NEXT LOT §3.5.4.1): the agent's corrections approved or declined, with a note. */
+  approveCorrections: 'OPERATOR',
+  /** Logistics: transfer, minimum, a count corrected at once, pieces counted in (ORBES is the approver). */
+  manageStock: 'OPERATOR',
   /** The segments (plan LIVE RELEASE+, choice 27): built, renamed, changed and deleted; an AUDITOR reads them and their CSV, masked. */
   manageSegments: 'OPERATOR',
   /** Discontinue a model (P-R06: inactive, said DISCONTINUED on its pieces' results) and reinstate it: ADMIN, with a phrase to type. */

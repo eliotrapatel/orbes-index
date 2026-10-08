@@ -2045,6 +2045,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await g.locator('.side__link.is-active').textContent()).toBe('Logistics');
     expect(await g.locator('.side__role').textContent()).toContain('LOGISTICS');
     expect(await g.locator('.page-head__eyebrow').textContent()).toBe('Registry');
+    // Its page's tabs (plan NEXT LOT §3.5.3, step 5.11a), its stock first among them.
+    expect(await g.locator('[data-testid=logistics-tab-stock]').count()).toBe(1);
     await shot(g, 'logistics-shell');
     // Every other address leads back to Logistics (its security page excepted), and the server refuses the rest.
     for (const hash of ['#/dashboard', '#/products', '#/orders', '#/owners', '#/atelier', '#/sale', '#/team', '#/retailers', '#/settings']) {
@@ -2083,10 +2085,13 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await watch(p);
     await signIn(p, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
-    // Club in the Clients group after Owners, then Segments, Orders and Invoices (plan LIVE RELEASE+, with Atelier in
-    // the Registry), Messages first (plan NEXT-NINE, CS-01), Yearly care after Warranties (BP-19 T6); the ADMIN's sidebar,
-    // twenty-eight links with Growth under Overview (BP-29) and Supplier orders under Registry (plan NEXT LOT §3.5.4.2),
-    // still fits a 900 px screen.
+    // Club in the Clients group after Owners, then Segments, Orders and Invoices (plan LIVE RELEASE+), Messages first
+    // (plan NEXT-NINE, CS-01), Yearly care after Warranties (BP-19 T6); the ADMIN's sidebar, twenty-eight links with
+    // Growth under Overview (BP-29), Logistics in the Atelier's place and Supplier orders under it (plan NEXT LOT
+    // §3.5.4.1, no Atelier), still fits a 900 px screen.
+    const registry = p.locator('.side__group', { hasText: 'Registry' }).locator('.side__link');
+    expect(await registry.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['products', 'genomes', 'codes', 'catalogue', 'logistics', 'supplierOrders']);
+    expect(await registry.allTextContents()).not.toContain('Atelier');
     const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
     expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['messages', 'owners', 'club', 'segments', 'orders', 'invoices', 'warranties', 'care', 'retailers', 'sale']);
     // 28 with Supplier orders under Registry (plan NEXT LOT §3.5.4.2).

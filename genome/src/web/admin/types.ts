@@ -2745,6 +2745,119 @@ export interface IssuedBenchItem {
   claimCode?: string;
 }
 
+// ── LOGISTICS (plan NEXT LOT §3.5.3 and §3.5.4.1; routes/admin/logistics.ts) ─
+
+/** A size as Logistics and the supplier orders name it: its model, the model's variant, its size and its SKU code. */
+export interface LogisticsSku {
+  id: string;
+  code: string;
+  model: { id: string; name: string };
+  /** The variant's label (BLUE) of a variant model; null otherwise. */
+  variant: string | null;
+  /** Null: one size. */
+  sizeLabel: string | null;
+  setAside: boolean;
+}
+
+/** A location of the request's scope (the agent's own, or every one for ORBES staff), the default first. */
+export interface LogisticsLocation {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+/** GET /api/admin/logistics/stock: a size at a location. `expected`, `toOrder` and `unbacked` are ORBES staff's only. */
+export interface LogisticsStockRow {
+  sku: LogisticsSku;
+  location: { id: string; name: string };
+  onHand: number;
+  reserved: number;
+  available: number;
+  /** Orders waiting for a piece of this size there (Awaiting stock). */
+  waiting: number;
+  minimum: number | null;
+  expected?: number;
+  toOrder?: number;
+  /** The size's pieces counted without an ORBES identity behind them, every location together (NO PIECE · n). */
+  unbacked?: number;
+}
+
+export interface LogisticsStock {
+  rows: LogisticsStockRow[];
+  /** Every offered size: what a correction, a transfer, a minimum or a count in may name. */
+  skus: LogisticsSku[];
+  locations: LogisticsLocation[];
+  /** ORBES staff's only: how many sizes have pieces counted that no identity backs. */
+  unbackedSizes?: number;
+}
+
+/** A stock correction: the agent's waits for ORBES (TO_APPROVE); ORBES staff's is applied at once (APPROVED). */
+export interface StockCorrection {
+  id: string;
+  sku: LogisticsSku;
+  location: { id: string; name: string };
+  delta: number;
+  reason: string;
+  status: StockCorrectionStatus;
+  proposedAt: Iso;
+  decidedAt: Iso | null;
+  decisionNote: string | null;
+}
+
+/** GET /api/admin/logistics/corrections: the newest first, and how many wait for ORBES (the tab's counter). */
+export interface StockCorrections {
+  items: StockCorrection[];
+  toApprove: number;
+}
+
+/** A parcel's step on the agent's list (plan NEXT LOT §3.5.3). */
+export type ParcelStep = 'NOT_READY' | 'READY_TO_PACK' | Exclude<ShipmentStatus, 'CANCELLED'>;
+
+/** A parcel on the agent's To ship list: an order and the orders travelling with it. */
+export interface ToShipRow {
+  id: string;
+  reference: string;
+  /** The other orders travelling in it ('+ 2 pieces'). */
+  others: number;
+  location: { id: string; name: string };
+  readySince: Iso;
+  late: boolean;
+  pieces: { model: string; variant: string | null; sizeLabel: string | null }[];
+  addons: string[];
+  engraving: boolean;
+  shipTo: { name: string | null; address: string | null; country: string | null };
+  step: 'READY_TO_PACK' | 'PACKING' | 'PACKED';
+  addressChanged: boolean;
+}
+
+/** A parcel on its way. */
+export interface OnItsWayRow {
+  id: string;
+  reference: string;
+  location: { id: string; name: string };
+  shippedAt: Iso;
+  carrier: { id: string; name: string };
+  trackingNumber: string;
+  trackingUrl: string;
+}
+
+/** GET /api/admin/logistics/orders: To ship and On its way, and the scope's locations (the Location filter). */
+export interface ParcelsBoard {
+  toShip: ToShipRow[];
+  onItsWay: OnItsWayRow[];
+  locations: LogisticsLocation[];
+}
+
+/** GET /api/admin/logistics/order-cases: a parcel the agent expects back (no note, no price, no account). */
+export interface CaseToReceive {
+  id: string;
+  order: { id: string; reference: string };
+  kind: OrderCaseKind;
+  pieces: { model: string; variant: string | null; sizeLabel: string | null }[];
+  openedAt: Iso;
+  location: { id: string; name: string };
+}
+
 // ── The yearly care (plan NEXT-NINE, BP-19 T6) ─────────────────────────────
 
 /** BP-19 T10: what the tier program gave an account and what is in use (GET /api/admin/owners/:id `club`). */

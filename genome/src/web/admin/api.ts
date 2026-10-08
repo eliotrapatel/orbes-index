@@ -123,6 +123,12 @@ import type {
   ModelSupplierChange,
   Supplier,
   SupplierInput,
+  CaseToReceive,
+  LogisticsStock,
+  ParcelsBoard,
+  StockCorrection,
+  StockCorrections,
+  StockCorrectionStatus,
   SizeType,
   VariantInput,
   OwnerList,
@@ -1213,6 +1219,63 @@ export class AdminApi {
   /** OPERATOR: the work sheets of the pieces named, or of those the filters keep (each code's data to draw). */
   workSheets(input: { benchItemIds?: string[]; origin?: string; skuId?: string; locationId?: string }): Promise<WorkSheets> {
     return this.post('/api/admin/atelier/sheets', input);
+  }
+
+  // ── Logistics (plan NEXT LOT §3.5.6.9; the agent's locations only, for a LOGISTICS login) ──
+
+  /** LOGISTICS and AUDITOR+: every size at each location; expected, to order and NO PIECE for ORBES staff only. */
+  logisticsStock(f: { locationId?: string; modelId?: string } = {}): Promise<LogisticsStock> {
+    return this.get('/api/admin/logistics/stock', { locationId: f.locationId, modelId: f.modelId });
+  }
+
+  /** LOGISTICS and AUDITOR+: the corrections, the newest first, and how many wait for ORBES. */
+  stockCorrections(f: { status?: StockCorrectionStatus } = {}): Promise<StockCorrections> {
+    return this.get('/api/admin/logistics/corrections', { status: f.status });
+  }
+
+  /** LOGISTICS: a correction proposed for ORBES to approve; OPERATOR+: applied at once. */
+  proposeCorrection(input: { skuId: string; locationId: string; delta: number; reason: string }): Promise<StockCorrection> {
+    return this.post('/api/admin/logistics/corrections', input);
+  }
+
+  /** OPERATOR: the agent's correction approved: the count moves. */
+  approveCorrection(id: string): Promise<StockCorrection> {
+    return this.post(`/api/admin/logistics/corrections/${encodeURIComponent(id)}/approve`, {});
+  }
+
+  /** OPERATOR: the agent's correction declined, with ORBES's note. */
+  declineCorrection(id: string, note: string): Promise<StockCorrection> {
+    return this.post(`/api/admin/logistics/corrections/${encodeURIComponent(id)}/decline`, { note });
+  }
+
+  /** OPERATOR: pieces of a size moved between locations; the destination's waiting orders served. */
+  logisticsTransfer(input: { skuId: string; fromLocationId: string; toLocationId: string; quantity: number; note?: string }): Promise<{ transferId: string; from: StockLevel; to: StockLevel }> {
+    return this.post('/api/admin/logistics/transfers', input);
+  }
+
+  /** OPERATOR: a size's minimum at a location, or none. */
+  setLogisticsMinimum(input: { skuId: string; locationId: string; minimum: number | null }): Promise<void> {
+    return this.request('PUT', '/api/admin/logistics/minimums', { body: input });
+  }
+
+  /** OPERATOR: named pieces of a size enter the stock with their ORBES identity; the count does not move. */
+  countIn(input: { skuId: string; productIds: string[]; note: string }): Promise<{ skuId: string; productIds: string[]; unbacked: number }> {
+    return this.post('/api/admin/logistics/count-in', input);
+  }
+
+  /** LOGISTICS and AUDITOR+: To ship, On its way, and the scope's locations. */
+  parcels(f: { locationId?: string } = {}): Promise<ParcelsBoard> {
+    return this.get('/api/admin/logistics/orders', { locationId: f.locationId });
+  }
+
+  /** LOGISTICS and AUDITOR+: the parcels expected back at the scope's locations (Returns → To receive). */
+  casesToReceive(f: { locationId?: string } = {}): Promise<Items<CaseToReceive>> {
+    return this.get('/api/admin/logistics/order-cases', { locationId: f.locationId });
+  }
+
+  /** LOGISTICS and OPERATOR+: the parcel back at the agent, the piece OK or damaged; ORBES then decides. */
+  receiveCase(id: string, input: { pieceState: 'OK' | 'DAMAGED'; note?: string | null }): Promise<{ id: string; status: string; kind: string }> {
+    return this.post(`/api/admin/logistics/order-cases/${encodeURIComponent(id)}/received`, input);
   }
 
   // ── The Club: the LIVE RELEASES' intelligence ────────────────────────────
