@@ -13,6 +13,9 @@
  * only sells: the sale mode and the list of points of sale it picks from.
  * The sale mode names its roles (CAPABILITY_ROLES): RETAIL, OPERATOR and
  * ADMIN; the read-only AUDITOR, though above RETAIL, does not sell.
+ * LOGISTICS (plan NEXT LOT §3.5.6.1), a person at the logistics agent ranked
+ * with RETAIL, gets the Logistics page of its own locations and its own
+ * account, nothing else (`logisticsOnly`).
  * The server is the authority; the console only hides controls a role
  * cannot use, so nobody is offered a button that will answer 403.
  */
@@ -96,6 +99,13 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   printWorkSheets: 'OPERATOR',
   /** The settings of the orders: the delays after which an order is late, the locations, the carriers and their tracking links, the shipping rates. */
   manageLogistics: 'ADMIN',
+  /**
+   * Logistics (plan NEXT LOT §3.5.6.1): act on the receptions, the packing and shipping, the returns received. Exactly
+   * CAPABILITY_ROLES.logistics: the agent (LOGISTICS), OPERATOR and ADMIN.
+   */
+  logistics: 'OPERATOR',
+  /** Logistics: read the stock, the receptions, the orders to ship. Exactly CAPABILITY_ROLES.readLogistics: the agent and AUDITOR and up. */
+  readLogistics: 'AUDITOR',
   /** The segments (plan LIVE RELEASE+, choice 27): built, renamed, changed and deleted; an AUDITOR reads them and their CSV, masked. */
   manageSegments: 'OPERATOR',
   /** Discontinue a model (P-R06: inactive, said DISCONTINUED on its pieces' results) and reinstate it: ADMIN, with a phrase to type. */
@@ -129,6 +139,9 @@ export type Capability = keyof typeof CAPABILITY_MIN_ROLE;
  */
 export const CAPABILITY_ROLES: Readonly<Partial<Record<Capability, readonly AdminRole[]>>> = Object.freeze({
   sell: Object.freeze(['RETAIL', 'OPERATOR', 'ADMIN'] as const),
+  /** As routes/admin/logistics.ts LOGISTICS_ACT and LOGISTICS_READ (plan NEXT LOT §3.5.6.1). */
+  logistics: Object.freeze(['LOGISTICS', 'OPERATOR', 'ADMIN'] as const),
+  readLogistics: Object.freeze(['LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const),
 });
 
 export function hasRole(role: AdminRole | null | undefined, min: AdminRole): boolean {
@@ -145,4 +158,9 @@ export function can(role: AdminRole | null | undefined, cap: Capability): boolea
 /** A seller's console (RETAIL): the sale mode and its own account, nothing of the registry. */
 export function saleOnly(role: AdminRole | null | undefined): boolean {
   return can(role, 'sell') && !can(role, 'read');
+}
+
+/** The agent's console (LOGISTICS, plan NEXT LOT §3.5.3): the Logistics page of its locations and its own account, nothing else. */
+export function logisticsOnly(role: AdminRole | null | undefined): boolean {
+  return can(role, 'readLogistics') && !can(role, 'read');
 }

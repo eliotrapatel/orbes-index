@@ -13,7 +13,10 @@
  * phone-first frame with the sale mode alone in it. A seller (RETAIL) only
  * ever gets the sale shell: the sale mode, its own security page and
  * password, sign-out; any other address leads back to `#/sale`. The other
- * roles open the sale mode from the sidebar and return with CONSOLE.
+ * roles open the sale mode from the sidebar and return with CONSOLE. A person
+ * at the logistics agent (LOGISTICS, plan NEXT LOT §3.5.3) gets the console
+ * shell with one item, Logistics: its home, and where any other address but
+ * its own security page leads back.
  *
  * While signed in, the Anomalies link carries a badge, the count of OPEN
  * HIGH and CRITICAL findings (GET /api/admin/anomalies/summary), also
@@ -37,7 +40,7 @@ import { AdminApi, ApiError } from './api.js';
 import { formatDateTime } from './format.js';
 import { badgeText, consoleTitle } from './model/anomalies.js';
 import { messagesBadge } from './model/messages.js';
-import { can, saleOnly, type Capability } from './model/permissions.js';
+import { can, logisticsOnly, saleOnly, type Capability } from './model/permissions.js';
 import { href, parseHash, type Route, type RouteName } from './router.js';
 import type { AdminSession } from './types.js';
 import { startAttentionPoll, type AttentionPoll } from './ui/attention.js';
@@ -64,6 +67,7 @@ import { growthView } from './views/growth.js';
 import { keysView } from './views/keys.js';
 import { disposeLiveView, liveReleaseView } from './views/live.js';
 import { loginView } from './views/login.js';
+import { logisticsView } from './views/logistics.js';
 import { conversationView } from './views/conversation.js';
 import { messagesView } from './views/messages.js';
 import { orderView } from './views/order.js';
@@ -149,6 +153,9 @@ const NAV: { group: string; items: NavItem[] }[] = [
   },
 ];
 
+/** The sidebar of a LOGISTICS login (plan NEXT LOT §3.5.3): one item, Logistics. */
+const LOGISTICS_NAV: { group: string; items: NavItem[] }[] = [{ group: 'Registry', items: [{ route: 'logistics', label: 'Logistics', cap: 'readLogistics' }] }];
+
 const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteName }>> = {
   dashboard: { view: dashboardView, title: 'Dashboard', nav: 'dashboard' },
   generator: { view: generatorView, title: 'Generator', nav: 'generator' },
@@ -191,6 +198,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   segment: { view: segmentView, title: 'Segment', nav: 'segments' },
   atelier: { view: atelierView, title: 'Atelier', nav: 'atelier' },
   workSheets: { view: workSheetsView, title: 'Work sheets', nav: 'atelier' },
+  logistics: { view: logisticsView, title: 'Logistics', nav: 'logistics' },
   document: { view: documentView, title: 'Document', nav: 'documents' },
 };
 
@@ -232,9 +240,11 @@ const SESSION_ENDED = 'Your session has ended. Sign in again.';
 const SESSION_ENDED_HELD =
   'Your session has ended. This page stays open so that you can save what it holds: Download results (CSV) needs no session. Then leave the page to sign in again.';
 
-/** Where a session starts: the sale mode for a seller, the dashboard otherwise. */
+/** Where a session starts: the sale mode for a seller, Logistics for a person at the agent, the dashboard otherwise. */
 function home(s: AdminSession | null): string {
-  return s && saleOnly(s.admin.role) ? href('sale') : href('dashboard');
+  if (s && saleOnly(s.admin.role)) return href('sale');
+  if (s && logisticsOnly(s.admin.role)) return href('logistics');
+  return href('dashboard');
 }
 
 function setTitle(t: string): void {
@@ -393,7 +403,7 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
   const nav = h(
     'nav',
     { class: 'side__nav', attrs: { 'aria-label': 'Console' } },
-    ...NAV.map((g) => {
+    ...(logisticsOnly(s.admin.role) ? LOGISTICS_NAV : NAV).map((g) => {
       const items = g.items.filter((i) => !i.cap || can(s.admin.role, i.cap));
       if (items.length === 0) return null;
       return h(
@@ -428,7 +438,7 @@ function buildShell(s: AdminSession): NonNullable<typeof shell> {
       { class: 'side' },
       h(
         'a',
-        { class: 'side__brand', attrs: { href: href('dashboard') } },
+        { class: 'side__brand', attrs: { href: home(s) } },
         monogramSvg({ class: 'side__monogram', decorative: true }),
         h('span', { class: ['wordmark', 'side__wordmark'] }, 'Orbes'),
         h('span', { class: 'side__product' }, 'Genome console'),
@@ -618,6 +628,11 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
     goTo(href('sale'));
     return;
   }
+  // Nothing but Logistics for a person at the agent (plan NEXT LOT §3.5.3; the server refuses the rest anyway).
+  if (logisticsOnly(s.admin.role) && r.name !== 'logistics' && r.name !== 'security') {
+    goTo(href('logistics'));
+    return;
+  }
 
   const sh = ensureShell(s, seller || r.name === 'sale' ? 'sale' : 'console');
   const seq = ++renderSeq;
@@ -644,7 +659,7 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
     return;
   }
   markNav(entry.nav);
-  const group = NAV.find((g) => g.items.some((i) => i.route === entry.nav))?.group ?? '';
+  const group = [...NAV, ...LOGISTICS_NAV].find((g) => g.items.some((i) => i.route === entry.nav))?.group ?? '';
   setCrumb(sh, r.name === 'product' ? `${group} · Products · ${r.params.productId}` : r.name === 'model' ? `${group} · Catalogue · Lookbook` : `${group} · ${entry.title}`);
   setTitle(r.name === 'product' ? r.params.productId : entry.title);
   if (!opts.keepScroll) mount(sh.view, loading());

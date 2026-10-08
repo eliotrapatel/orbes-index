@@ -24,9 +24,10 @@ export interface DialogField {
   /**
    * `checkbox`: its value is `'true'` when ticked, `''` otherwise (`value: 'true'` ticks it at first). 'password'
    * fields are masked and take `autocomplete` ('current-password' or 'new-password'). `color`: the browser's colour
-   * picker, its value `#rrggbb`.
+   * picker, its value `#rrggbb`. `checklist`: a tick box per option under the field's label, its value the ticked
+   * options' values joined by commas (`checkedOf`), `value` the ones ticked at first, comma-joined.
    */
-  kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'checkbox' | 'password' | 'email' | 'color';
+  kind?: 'text' | 'textarea' | 'select' | 'date' | 'datetime' | 'checkbox' | 'password' | 'email' | 'color' | 'checklist';
   autocomplete?: string;
   options?: { value: string; label: string }[];
   required?: boolean;
@@ -35,6 +36,13 @@ export interface DialogField {
   value?: string;
   /** A textarea's height in lines (3 by default). */
   rows?: number;
+  /** Shown only while this holds for the dialog's values (re-read at every input or change); always shown without it. */
+  shown?: (values: DialogValues) => boolean;
+}
+
+/** The values of a `checklist` field, as ticked. */
+export function checkedOf(values: DialogValues, name: string): string[] {
+  return (values[name] ?? '').split(',').filter((v) => v !== '');
 }
 
 export type DialogValues = Record<string, string>;
@@ -64,9 +72,31 @@ function readValues(form: HTMLFormElement): DialogValues {
   const out: DialogValues = {};
   for (const el of Array.from(form.elements)) {
     const c = el as HTMLInputElement;
-    if (c.name && c.name !== '__phrase') out[c.name] = c.type === 'checkbox' ? (c.checked ? 'true' : '') : c.value;
+    if (!c.name || c.name === '__phrase') continue;
+    // A checklist's boxes share its name: the ticked ones' values, comma-joined.
+    if (c.type === 'checkbox' && c.dataset.checklist !== undefined) out[c.name] = [...(out[c.name] ? out[c.name].split(',') : []), ...(c.checked ? [c.value] : [])].join(',');
+    else out[c.name] = c.type === 'checkbox' ? (c.checked ? 'true' : '') : c.value;
   }
   return out;
+}
+
+/** A list of tick boxes under one label (a LOGISTICS login's locations), laid out as a wide field. */
+function checklistField(f: DialogField): HTMLElement {
+  const ticked = new Set((f.value ?? '').split(',').filter((v) => v !== ''));
+  const boxes = (f.options ?? []).map((o) => {
+    const label = checkbox(f.name, o.label, ticked.has(o.value));
+    const box = label.querySelector('input')!;
+    box.value = o.value;
+    box.dataset.checklist = '';
+    return label;
+  });
+  return h(
+    'fieldset',
+    { class: ['cfield', 'cfield--wide', 'cfield--checks'], data: { field: f.name } },
+    h('legend', { class: 'cfield__label' }, f.label, f.required ? h('span', { class: 'cfield__req', attrs: { 'aria-hidden': 'true' } }, ' ·') : null),
+    ...boxes,
+    f.hint ? h('span', { class: 'cfield__hint' }, f.hint) : null,
+  );
 }
 
 /** A tick box with its hint, laid out as a wide field. */
@@ -112,6 +142,7 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
 
     const controls = (o.fields ?? []).map((f) => {
       if (f.kind === 'checkbox') return checkboxField(f);
+      if (f.kind === 'checklist') return checklistField(f);
       const c = controlFor(f);
       if (f.required) c.required = true;
       return field(f.label, c, { hint: f.hint, required: f.required, wide: true });
@@ -171,6 +202,10 @@ export function openDialog(o: DialogOptions): Promise<DialogValues | null> {
     const sync = () => {
       if (busy) return;
       const values = readValues(form);
+      // A field shown only for some values (a login's locations, for LOGISTICS only).
+      (o.fields ?? []).forEach((f, i) => {
+        if (f.shown) controls[i].hidden = !f.shown(values);
+      });
       const danger = dangerOf(values);
       dlg.classList.toggle('dialog--danger', danger);
       confirm.classList.toggle('cbtn--danger', danger);

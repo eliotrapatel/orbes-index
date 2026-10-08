@@ -54,6 +54,8 @@ export const ROUTES = [
   /** The atelier (plan LIVE RELEASE+): the stock, the pieces to make; their work sheets printed from it, no link of their own. */
   { name: 'atelier', path: '/atelier' },
   { name: 'workSheets', path: '/atelier/sheets' },
+  /** Logistics (plan NEXT LOT §3.5.3): the agent's page (LOGISTICS), its only one; its tabs come with step 5.11. */
+  { name: 'logistics', path: '/logistics' },
   /** A model's lookbook (P-R02): reached from the Catalogue's model row, no link of its own in the sidebar. */
   { name: 'model', path: '/catalogue/:modelId' },
   { name: 'retailers', path: '/retailers' },

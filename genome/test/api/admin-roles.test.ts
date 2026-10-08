@@ -22,7 +22,10 @@
  * read by an AUDITOR and set by an OPERATOR, its sizes declared, removed and reinstated by an OPERATOR (NEXT LOT §3.3); GROWTH, BP-29, read by an AUDITOR);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
- * password and second factor, nothing else. The sale mode names its roles
+ * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
+ * a person at the logistics agent, ranks with RETAIL: it reaches the Logistics
+ * routes that name it (LOGISTICS_ACT, LOGISTICS_READ) and its own session,
+ * password and second factor, never the points of sale. The sale mode names its roles
  * (RETAIL, OPERATOR, ADMIN): it starts warranties, so the read-only AUDITOR,
  * though above RETAIL, does not sell.
  *
@@ -42,6 +45,9 @@ import { adminClient, createHarness, errorOf, type Client, type Harness } from '
  */
 type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; url: string; body?: unknown; headers?: Record<string, string>; min: AdminRole; roles?: readonly AdminRole[]; group: string };
 const SELLERS: readonly AdminRole[] = ['RETAIL', 'OPERATOR', 'ADMIN'];
+/** The points of sale: every role but LOGISTICS, ranked with RETAIL (plan NEXT LOT §3.5.6.1). */
+const RETAILER_READERS: readonly AdminRole[] = ['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'];
+const ROLES = ['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const;
 const allows = (p: Probe, role: AdminRole) => (p.roles ? p.roles.includes(role) : RANK[role] >= RANK[p.min]);
 
 const RANK: Record<AdminRole, number> = { RETAIL: 1, LOGISTICS: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 };
@@ -333,8 +339,8 @@ const PROBES: Probe[] = [
   { group: 'auth', method: 'GET', url: '/api/admin/auth/me', min: 'RETAIL' },
   { group: 'auth', method: 'POST', url: '/api/admin/auth/totp/enable', body: INVALID, min: 'RETAIL' },
   { group: 'password', method: 'POST', url: '/api/admin/auth/password', body: INVALID, min: 'RETAIL' },
-  { group: 'retailers', method: 'GET', url: '/api/admin/retailers', min: 'RETAIL' },
-  { group: 'retailers', method: 'GET', url: '/api/admin/retailers?active=true', min: 'RETAIL' },
+  { group: 'retailers', method: 'GET', url: '/api/admin/retailers', min: 'RETAIL', roles: RETAILER_READERS },
+  { group: 'retailers', method: 'GET', url: '/api/admin/retailers?active=true', min: 'RETAIL', roles: RETAILER_READERS },
   { group: 'retailers', method: 'POST', url: '/api/admin/retailers', body: INVALID, min: 'ADMIN' },
   { group: 'retailers', method: 'PATCH', url: `/api/admin/retailers/${UUID}`, body: INVALID, min: 'ADMIN' },
   { group: 'sale', method: 'POST', url: '/api/admin/sale/lookup', body: INVALID, min: 'RETAIL', roles: SELLERS },
@@ -349,7 +355,7 @@ describe('admin role enforcement', () => {
 
   beforeAll(async () => {
     h = await createHarness();
-    for (const role of ['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const) clients[role] = await adminClient(h, role);
+    for (const role of ROLES) clients[role] = await adminClient(h, role);
   });
   afterAll(() => h?.close());
 
@@ -409,7 +415,7 @@ describe('admin role enforcement', () => {
     }
   });
 
-  for (const role of ['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const) {
+  for (const role of ROLES) {
     it(`${role}: allowed exactly where its rank reaches (or where the route names it)`, async () => {
       for (const p of PROBES) {
         const res = await clients[role].request(p.method, p.url, { ...(p.body !== undefined ? { body: p.body } : {}), ...(p.headers ? { headers: p.headers } : {}) });
@@ -439,10 +445,10 @@ describe('admin role enforcement', () => {
     expect((await c.get('/api/admin/dashboard')).statusCode).toBe(401);
   });
 
-  it('OPERATOR, AUDITOR and RETAIL get 403 on every Team route (A-02), before validation', async () => {
+  it('OPERATOR, AUDITOR, RETAIL and LOGISTICS get 403 on every Team route (A-02), before validation', async () => {
     const team = PROBES.filter((p) => p.url.startsWith('/api/admin/admins'));
     expect(team).toHaveLength(9);
-    for (const role of ['OPERATOR', 'AUDITOR', 'RETAIL'] as const) {
+    for (const role of ['OPERATOR', 'AUDITOR', 'RETAIL', 'LOGISTICS'] as const) {
       for (const p of team) {
         const res = await clients[role].request(p.method, p.url, p.body !== undefined ? { body: p.body } : {});
         expect(res.statusCode, `${role} ${p.method} ${p.url}`).toBe(403);
@@ -490,6 +496,42 @@ describe('admin role enforcement', () => {
     expect((await retail.post('/api/admin/auth/logout')).statusCode).toBe(200);
     expect((await retail.get('/api/admin/auth/me')).statusCode).toBe(401);
     clients.RETAIL = await adminClient(h, 'RETAIL');
+  });
+
+  it('LOGISTICS (plan NEXT LOT §3.5.6.1) reaches only its own account and the routes that name it: never the points of sale, the sale mode, owners, orders, the club, locations, carriers or settings', async () => {
+    const agent = clients.LOGISTICS;
+    const refused: [string, string, unknown?][] = [
+      ['GET', '/api/admin/retailers'],
+      ['GET', '/api/admin/retailers?active=true'],
+      ['POST', '/api/admin/sale/lookup', INVALID],
+      ['GET', '/api/admin/owners'],
+      ['GET', '/api/admin/orders'],
+      ['GET', `/api/admin/orders/${UUID}`],
+      ['GET', '/api/admin/club/program'],
+      ['GET', '/api/admin/drops'],
+      ['GET', '/api/admin/locations'],
+      ['GET', '/api/admin/carriers'],
+      ['GET', '/api/admin/orders/alerts'],
+      ['GET', '/api/admin/atelier/stock'],
+      ['GET', '/api/admin/products'],
+      ['GET', '/api/admin/dashboard'],
+      ['POST', '/api/admin/products', { categoryCode: 'J', modelId: UUID, material: 'SILVER' }],
+    ];
+    for (const [method, url, body] of refused) {
+      const res = await agent.request(method, url, body !== undefined ? { body } : {});
+      expect(res.statusCode, `${method} ${url}`).toBe(403);
+      expect(errorOf(res).code, `${method} ${url}`).toBe('FORBIDDEN');
+    }
+    const allowed = PROBES.filter((p) => allows(p, 'LOGISTICS')).map((p) => `${p.method} ${p.url.split('?')[0]}`);
+    expect([...new Set(allowed)].sort()).toEqual(['GET /api/admin/auth/me', 'POST /api/admin/auth/password', 'POST /api/admin/auth/totp/enable'].sort());
+    // Its own session: me (its role, never its locations' names), a TOTP enrolment started, sign-out.
+    const me = await agent.get('/api/admin/auth/me');
+    expect(me.statusCode).toBe(200);
+    expect((JSON.parse(me.body) as { admin: { role: string } }).admin.role).toBe('LOGISTICS');
+    expect((await agent.post('/api/admin/auth/totp/setup')).statusCode).toBe(200);
+    expect((await agent.post('/api/admin/auth/logout')).statusCode).toBe(200);
+    expect((await agent.get('/api/admin/auth/me')).statusCode).toBe(401);
+    clients.LOGISTICS = await adminClient(h, 'LOGISTICS');
   });
 
   it('AUDITOR (A-08) reads the points of sale but never sells: the sale mode starts warranties, a mutation', async () => {

@@ -1992,6 +1992,91 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await adminContext.close();
   }, STEP_TIMEOUT);
 
+  it('gives a person at the logistics agent a LOGISTICS login (plan NEXT LOT §3.5.4.5): its locations on Team, at least one; its first sign-in on Logistics, the only item of its sidebar, nothing else reachable', async () => {
+    const agentEmail = 'agent@logistics.test';
+    const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const a = await adminContext.newPage();
+    await watch(a);
+    await signIn(a, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(a).textContent())?.trim()).toBe('Dashboard');
+    await go(a, '#/team', 'Team');
+    const locations = await ctx.services.stock.locations();
+    expect(locations.length).toBeGreaterThan(1);
+    const warehouse = locations.find((l) => l.name === 'LOGISTICS WAREHOUSE')!;
+
+    // The Locations list shows for LOGISTICS only, nothing ticked among several locations, and one is required.
+    await a.click('[data-testid=team-create]');
+    await a.fill('dialog input[name=email]', agentEmail);
+    const list = a.locator('dialog fieldset[data-field=locations]');
+    expect(await list.isHidden()).toBe(true);
+    expect(await a.locator('dialog [data-field=role] .cfield__hint').textContent()).toBe(
+      'OPERATOR issues and maintains pieces; AUDITOR reads; RETAIL, a seller, gets the sale mode only; LOGISTICS, a person at the logistics agent, gets the stock, the receptions and the orders to ship of its locations.',
+    );
+    await a.selectOption('dialog select[name=role]', 'LOGISTICS');
+    expect(await list.isVisible()).toBe(true);
+    expect(await list.locator('input[type=checkbox]').count()).toBe(locations.length);
+    expect(await list.locator('input[type=checkbox]:checked').count()).toBe(0);
+    await shot(a, 'team-logistics-dialog');
+    await a.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => a.locator('.dialog__error').textContent()).toBe('Choose at least one location.');
+    await list.locator('label', { hasText: 'LOGISTICS WAREHOUSE' }).click();
+    await confirmDialog(a);
+    const temporary = ((await a.locator('[data-testid=temporary-password]').textContent()) ?? '').trim();
+    const agentRow = a.locator('[data-testid=admin-users] tr', { hasText: agentEmail });
+    await expect.poll(() => agentRow.textContent()).toContain('LOGISTICS WAREHOUSE');
+    expect(await agentRow.textContent()).toContain('LOGISTICS');
+    const agent = (await ctx.services.auth.listAdmins()).find((x) => x.email === agentEmail)!;
+    expect(agent).toMatchObject({ role: 'LOGISTICS', stockLocationIds: [warehouse.id] });
+    await shot(a, 'team-logistics');
+
+    // Its first sign-in: the new password, then Logistics, its only page.
+    const agentContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const g = await agentContext.newPage();
+    await watch(g);
+    await signIn(g, agentEmail, temporary);
+    await expect.poll(async () => (await title(g).textContent())?.trim()).toBe('New password');
+    await g.fill('input[name=currentPassword]', temporary);
+    await g.fill('input[name=newPassword]', 'agent passphrase 2026');
+    await g.fill('input[name=confirmPassword]', 'agent passphrase 2026');
+    await g.click('[data-testid=password-save]');
+    await expect.poll(async () => (await title(g).textContent())?.trim()).toBe('Logistics');
+    expect(await g.evaluate(() => location.hash)).toBe('#/logistics');
+    expect((await g.locator('.side__link').allTextContents()).map((t) => t.trim())).toEqual(['Logistics']);
+    expect(await g.locator('.side__link.is-active').textContent()).toBe('Logistics');
+    expect(await g.locator('.side__role').textContent()).toContain('LOGISTICS');
+    expect(await g.locator('.page-head__eyebrow').textContent()).toBe('Registry');
+    await shot(g, 'logistics-shell');
+    // Every other address leads back to Logistics (its security page excepted), and the server refuses the rest.
+    for (const hash of ['#/dashboard', '#/products', '#/orders', '#/owners', '#/atelier', '#/sale', '#/team', '#/retailers', '#/settings']) {
+      await g.evaluate((h) => (location.hash = h), hash);
+      await expect.poll(() => g.evaluate(() => location.hash), { timeout: 5_000 }).toBe('#/logistics');
+    }
+    await go(g, '#/security', 'Security');
+    const refused = await g.evaluate(async () =>
+      Promise.all(['/api/admin/products', '/api/admin/orders', '/api/admin/owners', '/api/admin/dashboard', '/api/admin/retailers', '/api/admin/locations'].map(async (u) => (await fetch(u)).status)),
+    );
+    expect(refused).toEqual([403, 403, 403, 403, 403, 403]);
+
+    // The ADMIN changes the login's locations from its row: its own are ticked; both now.
+    await agentRow.locator('[data-testid=team-role]').click();
+    expect(await a.locator('dialog select[name=role]').inputValue()).toBe('LOGISTICS');
+    expect(await list.locator('input[type=checkbox]:checked').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value))).toEqual([warehouse.id]);
+    for (const l of locations.filter((x) => x.id !== warehouse.id)) await list.locator('label', { hasText: l.name }).click();
+    await confirmDialog(a);
+    await expect.poll(async () => (await ctx.services.auth.adminLocations(agent.id)).length).toBe(locations.length);
+    for (const l of locations) await expect.poll(() => agentRow.textContent()).toContain(l.name);
+    // Stepped down to AUDITOR: the list hides and its locations go.
+    await agentRow.locator('[data-testid=team-role]').click();
+    await a.selectOption('dialog select[name=role]', 'AUDITOR');
+    expect(await list.isHidden()).toBe(true);
+    await confirmDialog(a);
+    await expect.poll(async () => ctx.services.auth.adminLocations(agent.id)).toEqual([]);
+    expect(await cspViolations(a)).toEqual([]);
+    expect(await cspViolations(g)).toEqual([]);
+    await agentContext.close();
+    await adminContext.close();
+  }, STEP_TIMEOUT);
+
   it('runs a release from the Club page (P-R03): created, edited, published; drawn by an ADMIN after a typed phrase; a sale confirmed, a place lapsed after its time, the next offered; an AUDITOR reads', async () => {
     const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
     const p = await c.newPage();

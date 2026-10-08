@@ -3,12 +3,15 @@
  *
  * - list the console users with their role, second factor, lock, disable
  *   and temporary-password state;
- * - create a staff account (OPERATOR, AUDITOR or RETAIL, a seller limited to
- *   the sale mode, A-08) with a temporary password returned once and never
- *   audited; the first sign-in must replace it;
- * - change a role (OPERATOR, AUDITOR or RETAIL: the ADMIN role, like ADMIN
- *   accounts, comes from the shell, where its second factor is enrolled out
- *   of band);
+ * - create a staff account (OPERATOR, AUDITOR, RETAIL, a seller limited to
+ *   the sale mode, A-08, or LOGISTICS, a person at the logistics agent with
+ *   the locations it works at, `stockLocationIds`, plan NEXT LOT §3.5.6.1) with
+ *   a temporary password returned once and never audited; the first sign-in
+ *   must replace it;
+ * - change a role (OPERATOR, AUDITOR, RETAIL or LOGISTICS with its locations,
+ *   which also changes a LOGISTICS login's locations: the ADMIN role, like
+ *   ADMIN accounts, comes from the shell, where its second factor is enrolled
+ *   out of band);
  * - disable (a departure: every session ends at once) and enable again;
  * - lift a sign-in lockout;
  * - list and end the sessions of an admin;
@@ -29,7 +32,7 @@ import type { AdminRouteDeps } from './index.js';
 import { adminJson, itemsOf } from './serialize.js';
 
 function adminSummaryJson(a: AdminSummary) {
-  return { ...adminJson(a), locked: a.locked, disabled: a.disabled, createdAt: a.createdAt };
+  return { ...adminJson(a), locked: a.locked, disabled: a.disabled, createdAt: a.createdAt, stockLocationIds: a.stockLocationIds };
 }
 
 function adminSessionJson(s: AdminSessionSummary) {
@@ -44,7 +47,7 @@ export const adminUserRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
 
   app.post('/api/admin/admins', { config: ADMIN }, async (request, reply) => {
     const b = parse(createStaffBody, request.body);
-    const { admin, temporaryPassword } = await auth.createStaff({ email: b.email, role: b.role }, adminActor(request));
+    const { admin, temporaryPassword } = await auth.createStaff({ email: b.email, role: b.role, stockLocationIds: b.stockLocationIds }, adminActor(request));
     reply.code(201);
     return { admin: adminSummaryJson(admin), temporaryPassword };
   });
@@ -52,7 +55,7 @@ export const adminUserRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
   app.patch('/api/admin/admins/:id/role', { config: ADMIN }, async (request) => {
     const { id } = parse(adminParams, request.params);
     const b = parse(adminRoleBody, request.body);
-    return { admin: adminSummaryJson(await auth.setAdminRole(id, b.role, adminActor(request))) };
+    return { admin: adminSummaryJson(await auth.setAdminRole(id, b.role, adminActor(request), { stockLocationIds: b.stockLocationIds })) };
   });
 
   for (const [path, disabled] of [

@@ -2,12 +2,13 @@
  * Team (ADMIN, A-02): the console users and what an ADMIN does to them when
  * someone joins, changes post or leaves.
  *
- * - NEW STAFF ACCOUNT: an OPERATOR, AUDITOR or RETAIL (a seller, who gets
- *   the sale mode only, A-08) with a temporary password,
+ * - NEW STAFF ACCOUNT: an OPERATOR, AUDITOR, RETAIL (a seller, who gets
+ *   the sale mode only, A-08) or LOGISTICS (a person at the logistics agent,
+ *   with the locations it works at, plan NEXT LOT §3.5.4.5) with a temporary password,
  *   shown once on an ivory, bracketed panel (BRAND §6, secrets are shown
  *   once) with COPY and "I have handed it over — hide". The staff member signs
  *   in with it and must choose their own password before anything else.
- * - Per row: change the role, disable (a departure: sign-in refused, every
+ * - Per row: change the role (and a LOGISTICS login's locations), disable (a departure: sign-in refused, every
  *   session ends at once) or enable, lift a lockout, see and end the
  *   sessions, reset a lost second factor (typed confirmation).
  *
@@ -22,17 +23,28 @@ import { h, mount } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
 import { formatDate, formatDateTime, humanize } from '../format.js';
 import { confirmationPhrase } from '../model/registry.js';
-import { adminState, deviceLabel, teamActions } from '../model/team.js';
-import { STAFF_ROLES, type AdminSessionInfo, type AdminUser, type StaffRole } from '../types.js';
+import { adminState, deviceLabel, initialLocations, locationNames, locationsProblem, ROLE_HINT, teamActions } from '../model/team.js';
+import { STAFF_ROLES, type AdminSessionInfo, type AdminUser, type StaffRole, type StockLocation } from '../types.js';
 import { button, copyButton, pageHeader, section, statusMark, table } from '../ui/components.js';
-import { openDialog } from '../ui/dialog.js';
+import { checkedOf, openDialog, type DialogField } from '../ui/dialog.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 const ROLE_OPTIONS = STAFF_ROLES.map((r) => ({ value: r, label: humanize(r) }));
 
 export async function teamView(ctx: ViewContext): Promise<HTMLElement> {
-  const list = await ctx.api.admins();
+  const [list, locations] = await Promise.all([ctx.api.admins(), ctx.api.locations().then((r) => r.items as StockLocation[])]);
+  /** A LOGISTICS login's locations (plan NEXT LOT §3.5.4.5): shown for that role only, at least one. */
+  const locationsField = (a: AdminUser | null): DialogField => ({
+    name: 'locations',
+    label: 'Locations',
+    kind: 'checklist',
+    required: true,
+    options: locations.map((l) => ({ value: l.id, label: l.name })),
+    value: initialLocations(a, locations).join(','),
+    hint: 'Where this person works: the stock, the receptions and the orders to ship of these locations only.',
+    shown: (v) => v.role === 'LOGISTICS',
+  });
   const selfId = ctx.session.admin.id;
   // No live region here: a screen reader would read the secret aloud the moment it appears. A toast
   // says, without it, that the panel is there (as the generator's claim-code panel, read on demand).
@@ -50,12 +62,13 @@ export async function teamView(ctx: ViewContext): Promise<HTMLElement> {
       ),
       fields: [
         { name: 'email', label: 'Email', kind: 'email', required: true },
-        { name: 'role', label: 'Role', kind: 'select', required: true, options: ROLE_OPTIONS, value: 'OPERATOR', hint: 'OPERATOR issues and maintains pieces; AUDITOR reads; RETAIL, a seller, gets the sale mode only.' },
+        { name: 'role', label: 'Role', kind: 'select', required: true, options: ROLE_OPTIONS, value: 'OPERATOR', hint: ROLE_HINT },
+        locationsField(null),
       ],
-      validate: (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email.trim()) ? null : 'Enter a valid email address.'),
+      validate: (v) => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.email.trim()) ? locationsProblem(v.role, checkedOf(v, 'locations')) : 'Enter a valid email address.'),
       confirmLabel: 'Create account',
       submit: async (v) => {
-        const r = await ctx.api.createStaff(v.email.trim(), v.role as StaffRole);
+        const r = await ctx.api.createStaff(v.email.trim(), v.role as StaffRole, checkedOf(v, 'locations'));
         created = { email: r.admin.email, temporaryPassword: r.temporaryPassword };
       },
     }).then((r) => {
@@ -130,10 +143,11 @@ export async function teamView(ctx: ViewContext): Promise<HTMLElement> {
                     ? 'This account stops being an ADMIN at its next request. The last active ADMIN cannot step down; the ADMIN role is given back from the shell only.'
                     : 'The new role applies at the next request of this account. The ADMIN role is given from the shell only.',
                 ),
-                fields: [{ name: 'role', label: 'Role', kind: 'select', required: true, options: ROLE_OPTIONS, value: a.role === 'ADMIN' ? 'OPERATOR' : a.role }],
+                fields: [{ name: 'role', label: 'Role', kind: 'select', required: true, options: ROLE_OPTIONS, value: a.role === 'ADMIN' ? 'OPERATOR' : a.role, hint: ROLE_HINT }, locationsField(a)],
+                validate: (v) => locationsProblem(v.role, checkedOf(v, 'locations')),
                 confirmLabel: 'Change role',
                 submit: async (v) => {
-                  await ctx.api.setAdminRole(a.id, v.role as StaffRole);
+                  await ctx.api.setAdminRole(a.id, v.role as StaffRole, checkedOf(v, 'locations'));
                 },
               }),
               `Role changed for ${a.email}.`,
@@ -284,7 +298,7 @@ export async function teamView(ctx: ViewContext): Promise<HTMLElement> {
     table(
       [
         { label: 'Email', cell: (a) => h('span', null, a.email, a.id === selfId ? h('span', { class: 'cell-sub' }, 'You') : null), kind: ['wide'] },
-        { label: 'Role', cell: (a) => a.role, kind: ['nowrap'] },
+        { label: 'Role', cell: (a) => (a.role === 'LOGISTICS' ? h('span', null, a.role, h('span', { class: 'cell-sub' }, locationNames(a, locations))) : a.role), kind: ['nowrap'] },
         { label: 'Two-factor', cell: (a) => (a.totpEnabled ? statusMark('ENABLED', 'solid') : statusMark('NOT ENROLLED', 'outline')), kind: ['nowrap'] },
         {
           label: 'State',

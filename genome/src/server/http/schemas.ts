@@ -380,11 +380,13 @@ export const adminPasswordChangeBody = body({ currentPassword: password, newPass
 
 // ── Admin: console users (Team page, ADMIN) ────────────────────────────────
 
-const staffRole = z.enum(STAFF_ROLES, { error: 'Must be OPERATOR, AUDITOR or RETAIL (the ADMIN role is granted from the shell)' });
+const staffRole = z.enum(STAFF_ROLES, { error: 'Must be OPERATOR, AUDITOR, RETAIL or LOGISTICS (the ADMIN role is granted from the shell)' });
+/** A LOGISTICS login's locations (plan NEXT LOT §3.5.6.1): AuthService requires at least one for LOGISTICS, none otherwise. */
+const stockLocationIds = z.array(uuid).max(50, 'At most 50 locations').optional();
 
-export const createStaffBody = body({ email, role: staffRole });
+export const createStaffBody = body({ email, role: staffRole, stockLocationIds });
 
-export const adminRoleBody = body({ role: staffRole });
+export const adminRoleBody = body({ role: staffRole, stockLocationIds });
 
 // ── Ownership ──────────────────────────────────────────────────────────────
 

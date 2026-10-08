@@ -1143,6 +1143,18 @@ a.bar__label:hover {
   gap: 10px;
 }
 
+/* A dialog's list of tick boxes under one label (a LOGISTICS login's locations): a fieldset without its frame. */
+fieldset.cfield--checks {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+fieldset.cfield--checks > .cfield__label {
+  padding: 0;
+}
+
 .ccheck {
   position: relative;
   display: inline-flex;

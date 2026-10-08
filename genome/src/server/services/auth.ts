@@ -22,8 +22,10 @@
  * The audit log is append-only and cannot be erased, so customer PII
  * (emails, names) never goes into it: entries name account ids only.
  *
- * Staff accounts (A-02): an ADMIN creates OPERATOR, AUDITOR and RETAIL (a
- * seller's sale mode, A-08) accounts from the console with a temporary
+ * Staff accounts (A-02): an ADMIN creates OPERATOR, AUDITOR, RETAIL (a
+ * seller's sale mode, A-08) and LOGISTICS (a person at the logistics agent,
+ * tied to the locations it works at, admin_user_locations, plan NEXT LOT
+ * §3.5.6.1) accounts from the console with a temporary
  * password shown once and never audited; the
  * account must choose its own password before anything else
  * (`password_change_required`, 403 PASSWORD_CHANGE_REQUIRED in the guard).
@@ -47,6 +49,7 @@ import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { randomCrockford } from './claim-codes.js';
 import type { IssuedSession, SessionInfo, SessionService } from './sessions.js';
+import { knownLocation } from './stock.js';
 
 export const PASSWORD_MIN_LENGTH = 12;
 export const ADMIN_LOCKOUT_THRESHOLD = 10;
@@ -112,6 +115,8 @@ export interface AdminSummary extends AdminProfile {
   /** Temporarily locked after repeated failed sign-ins. */
   locked: boolean;
   disabled: boolean;
+  /** A LOGISTICS login's locations (admin_user_locations, plan NEXT LOT §3.5.6.1), sorted; empty for every other role. */
+  stockLocationIds: string[];
 }
 
 /** A staff account just created from the console, with its temporary password (returned once, stored only as a hash). */
@@ -142,7 +147,14 @@ export interface CreateAdminInput {
   email: string;
   password: string;
   role: AdminRole;
+  /** A LOGISTICS login's locations: at least one, each a known location; none for any other role. */
+  stockLocationIds?: readonly string[];
 }
+
+/** Plan NEXT LOT §3.5.6.1: a LOGISTICS login works at one location or more, chosen on Team. */
+export const LOGISTICS_LOCATIONS_REQUIRED = 'Choose at least one location.';
+/** At most this many locations per login (a guard on the request, far above any real network of warehouses). */
+export const MAX_LOGIN_LOCATIONS = 50;
 
 /** Decrypted TOTP state kept in admin_users.totp_secret_enc. */
 interface TotpState {
@@ -366,21 +378,31 @@ export class AuthService {
 
   // ── Admins ───────────────────────────────────────────────────────────────
 
-  /** A console user with the given password (shell and first-run bootstrap; any role). */
+  /** A console user with the given password (shell and first-run bootstrap; any role, a LOGISTICS one with its locations). */
   async createAdmin(input: CreateAdminInput, actor: Actor): Promise<AdminProfile> {
     return adminProfile(await this.insertAdmin(input, actor, false));
   }
 
   /**
-   * A staff account created by an ADMIN from the console: OPERATOR, AUDITOR or RETAIL, with a temporary
-   * password returned once (only its hash is stored; it is never audited or logged) that must be
-   * replaced at the first sign-in. ADMIN accounts are created from the shell (createAdmin).
+   * A staff account created by an ADMIN from the console: OPERATOR, AUDITOR, RETAIL or LOGISTICS (with its
+   * locations, at least one), with a temporary password returned once (only its hash is stored; it is never
+   * audited or logged) that must be replaced at the first sign-in. ADMIN accounts are created from the shell
+   * (createAdmin).
    */
-  async createStaff(input: { email: string; role: StaffRole }, actor: Actor): Promise<StaffAccount> {
-    if (!STAFF_ROLES.includes(input?.role)) throw validationError('The console creates OPERATOR, AUDITOR and RETAIL accounts; ADMIN accounts are created from the shell.');
+  async createStaff(input: { email: string; role: StaffRole; stockLocationIds?: readonly string[] }, actor: Actor): Promise<StaffAccount> {
+    if (!STAFF_ROLES.includes(input?.role)) throw validationError('The console creates OPERATOR, AUDITOR, RETAIL and LOGISTICS accounts; ADMIN accounts are created from the shell.');
     const temporaryPassword = generateTemporaryPassword();
-    const row = await this.insertAdmin({ email: input.email, password: temporaryPassword, role: input.role }, actor, true);
-    return { admin: adminSummary(row, this.clock()), temporaryPassword };
+    const row = await this.insertAdmin({ email: input.email, password: temporaryPassword, role: input.role, stockLocationIds: input.stockLocationIds }, actor, true);
+    return { admin: await summaryOf(this.db, row, this.clock()), temporaryPassword };
+  }
+
+  /**
+   * The locations a console login works at (admin_user_locations, plan NEXT LOT §3.5.6.1): a LOGISTICS login's, sorted;
+   * empty for any other role (and for a login that does not exist).
+   */
+  async adminLocations(adminId: string): Promise<string[]> {
+    if (typeof adminId !== 'string' || !UUID_RE.test(adminId)) return [];
+    return locationsOf(this.db, adminId.toLowerCase());
   }
 
   /**
@@ -564,23 +586,45 @@ export class AuthService {
   /** Console users, by email (ADMIN view: role, second factor, lock and disable state; never secrets). */
   async listAdmins(): Promise<AdminSummary[]> {
     const rows = await this.db.selectFrom('admin_users').selectAll().orderBy('email_normalized').execute();
+    const tied = await this.db.selectFrom('admin_user_locations').select(['admin_user_id', 'stock_location_id']).orderBy('stock_location_id').execute();
     const now = this.clock();
-    return rows.map((r) => adminSummary(r, now));
+    return rows.map((r) => adminSummary(r, now, tied.filter((t) => t.admin_user_id === r.id).map((t) => t.stock_location_id)));
   }
 
   /**
    * Change a console user's role. Refused on one's own account (SELF_ACTION) and when it would
    * leave no active ADMIN (LAST_ADMIN). Takes effect at the next request: the guard reads the role
    * from the database every time. The console only offers STAFF_ROLES; ADMIN comes from the shell.
+   * LOGISTICS (plan NEXT LOT §3.5.6.1) comes with its locations (`stockLocationIds`, at least one): a
+   * LOGISTICS login keeping its role has its locations changed to these; a role changed away from
+   * LOGISTICS deletes them in the same transaction. Audited `admin.role_change` (`{ from, to }`, and the
+   * locations when the role is LOGISTICS).
    */
-  async setAdminRole(adminId: string, role: AdminRole, actor: Actor): Promise<AdminSummary> {
+  async setAdminRole(adminId: string, role: AdminRole, actor: Actor, opts: { stockLocationIds?: readonly string[] } = {}): Promise<AdminSummary> {
     if (!ADMIN_ROLES.includes(role)) throw validationError('Unknown admin role.');
     assertNotSelf(adminId, actor);
+    const locations = await cleanLocations(this.db, role, opts.stockLocationIds);
     return this.rosterChange(adminId, async (tx, row) => {
-      if (row.role === role) return row;
+      const before = row.role === 'LOGISTICS' ? await locationsOf(tx, row.id) : [];
+      const sameLocations = before.length === locations.length && before.every((id, i) => id === locations[i]);
+      if (row.role === role && sameLocations) return row;
       if (role !== 'ADMIN') await assertNotLastAdmin(tx, row);
-      const next = await tx.updateTable('admin_users').set({ role, updated_at: this.clock() }).where('id', '=', row.id).returningAll().executeTakeFirstOrThrow();
-      await this.audit.record({ actor, action: 'admin.role_change', targetType: 'admin', targetId: row.id, details: { from: row.role, to: role } }, tx);
+      const next =
+        row.role === role ? row : await tx.updateTable('admin_users').set({ role, updated_at: this.clock() }).where('id', '=', row.id).returningAll().executeTakeFirstOrThrow();
+      // The locations follow the role: those no longer chosen deleted, the new ones tied by this ADMIN.
+      const gone = before.filter((id) => !locations.includes(id));
+      if (gone.length > 0) await tx.deleteFrom('admin_user_locations').where('admin_user_id', '=', row.id).where('stock_location_id', 'in', gone).execute();
+      const added = locations.filter((id) => !before.includes(id));
+      if (added.length > 0) {
+        await tx
+          .insertInto('admin_user_locations')
+          .values(added.map((id) => ({ admin_user_id: row.id, stock_location_id: id, created_by: actorAdminId(actor), created_at: this.clock() })))
+          .execute();
+      }
+      await this.audit.record(
+        { actor, action: 'admin.role_change', targetType: 'admin', targetId: row.id, details: { from: row.role, to: role, ...(role === 'LOGISTICS' ? { stockLocationIds: locations } : {}) } },
+        tx,
+      );
       return next;
     });
   }
@@ -618,7 +662,7 @@ export class AuthService {
     assertNotSelf(adminId, actor);
     return inTransaction(this.db, async (tx) => {
       const row = await this.requireAdmin(tx, adminId, { forUpdate: true });
-      if (row.failed_logins === 0 && row.locked_until === null) return adminSummary(row, this.clock());
+      if (row.failed_logins === 0 && row.locked_until === null) return summaryOf(tx, row, this.clock());
       const next = await tx
         .updateTable('admin_users')
         .set({ failed_logins: 0, locked_until: null, updated_at: this.clock() })
@@ -627,7 +671,7 @@ export class AuthService {
         .executeTakeFirstOrThrow();
       const locked = row.locked_until !== null && row.locked_until.getTime() > this.clock().getTime();
       await this.audit.record({ actor, action: 'admin.unlock', targetType: 'admin', targetId: row.id, details: { failedLogins: row.failed_logins, locked } }, tx);
-      return adminSummary(next, this.clock());
+      return summaryOf(tx, next, this.clock());
     });
   }
 
@@ -908,6 +952,7 @@ export class AuthService {
     const email = normalizeEmail(input?.email);
     if (!email) throw validationError('A valid email address is required.');
     if (!ADMIN_ROLES.includes(input.role)) throw validationError('Unknown admin role.');
+    const locations = await cleanLocations(this.db, input.role, input.stockLocationIds);
     const password = checkPasswordPolicy(input.password, email.email);
     const passwordHash = await hashSecret(password);
     const now = this.clock();
@@ -926,9 +971,22 @@ export class AuthService {
           })
           .returningAll()
           .executeTakeFirstOrThrow();
+        // A LOGISTICS login's locations, in the same transaction (plan NEXT LOT §3.5.6.1).
+        if (locations.length > 0) {
+          await tx
+            .insertInto('admin_user_locations')
+            .values(locations.map((id) => ({ admin_user_id: row.id, stock_location_id: id, created_by: actorAdminId(actor), created_at: now })))
+            .execute();
+        }
         // Never the password, temporary or not: the audit log is permanent.
         await this.audit.record(
-          { actor, action: 'admin.create', targetType: 'admin', targetId: row.id, details: { role: row.role, ...(passwordChangeRequired ? { passwordChangeRequired } : {}) } },
+          {
+            actor,
+            action: 'admin.create',
+            targetType: 'admin',
+            targetId: row.id,
+            details: { role: row.role, ...(row.role === 'LOGISTICS' ? { stockLocationIds: locations } : {}), ...(passwordChangeRequired ? { passwordChangeRequired } : {}) },
+          },
           tx,
         );
         return row;
@@ -948,7 +1006,7 @@ export class AuthService {
     return inTransaction(this.db, async (tx) => {
       await advisoryXactLock(tx, ADVISORY_LOCK.ADMIN_ROSTER);
       const row = await this.requireAdmin(tx, adminId, { forUpdate: true });
-      return adminSummary(await fn(tx, row), this.clock());
+      return summaryOf(tx, await fn(tx, row), this.clock());
     });
   }
 }
@@ -1005,8 +1063,47 @@ function adminProfile(r: AdminUserRow): AdminProfile {
   };
 }
 
-function adminSummary(r: AdminUserRow, now: Date): AdminSummary {
-  return { ...adminProfile(r), locked: r.locked_until !== null && r.locked_until.getTime() > now.getTime(), disabled: r.disabled_at !== null };
+function adminSummary(r: AdminUserRow, now: Date, stockLocationIds: string[]): AdminSummary {
+  return {
+    ...adminProfile(r),
+    locked: r.locked_until !== null && r.locked_until.getTime() > now.getTime(),
+    disabled: r.disabled_at !== null,
+    stockLocationIds,
+  };
+}
+
+/** An admin's summary with its locations, read in `db` (the caller's transaction when there is one). */
+async function summaryOf(db: Db, r: AdminUserRow, now: Date): Promise<AdminSummary> {
+  return adminSummary(r, now, await locationsOf(db, r.id));
+}
+
+/** A login's locations (admin_user_locations), sorted. */
+async function locationsOf(db: Db, adminId: string): Promise<string[]> {
+  const rows = await db.selectFrom('admin_user_locations').select('stock_location_id').where('admin_user_id', '=', adminId).orderBy('stock_location_id').execute();
+  return rows.map((r) => r.stock_location_id);
+}
+
+/**
+ * The locations given with a role (plan NEXT LOT §3.5.6.1): for LOGISTICS at least one (400 'Choose at least one
+ * location.'), each a known location (404 STOCK_LOCATION_NOT_FOUND), each once, sorted; for any other role none.
+ */
+async function cleanLocations(db: Db, role: AdminRole, ids: unknown): Promise<string[]> {
+  const list = ids === undefined || ids === null ? [] : ids;
+  if (!Array.isArray(list) || list.some((id) => typeof id !== 'string')) throw validationError('The locations must be a list of location ids.');
+  if (role !== 'LOGISTICS') {
+    if (list.length > 0) throw validationError('Only a LOGISTICS login works at locations.');
+    return [];
+  }
+  if (list.length === 0) throw validationError(LOGISTICS_LOCATIONS_REQUIRED);
+  if (list.length > MAX_LOGIN_LOCATIONS) throw validationError(`At most ${MAX_LOGIN_LOCATIONS} locations per login.`);
+  const known: string[] = [];
+  for (const id of list as string[]) known.push(await knownLocation(db, id));
+  return [...new Set(known)].sort();
+}
+
+/** The admin behind an actor, who ties a login to its locations; null for the shell or the system. */
+function actorAdminId(actor: Actor): string | null {
+  return actor?.type === 'admin' && typeof actor.id === 'string' && UUID_RE.test(actor.id) ? actor.id : null;
 }
 
 function cleanDisplayName(v: unknown): string | null {

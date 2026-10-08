@@ -6,6 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { base32Decode, totp } from '../../src/server/crypto/totp.js';
+import { inLogisticsScope, logisticsScope } from '../../src/server/routes/admin/logistics.js';
 import { adminClient, createAdmin, createHarness, errorOf, PASSWORD, safeJson, type Client, type Harness } from './support.js';
 
 interface StaffJson {
@@ -17,6 +18,7 @@ interface StaffJson {
   locked: boolean;
   disabled: boolean;
   createdAt: string;
+  stockLocationIds: string[];
 }
 
 async function signIn(h: Harness, email: string, password: string): Promise<Client> {
@@ -49,7 +51,7 @@ describe('Team: staff accounts (A-02)', () => {
 
   it('an ADMIN creates OPERATOR and AUDITOR accounts with a temporary password shown once; never an ADMIN', async () => {
     const { admin, temporaryPassword } = await newStaff('AUDITOR');
-    expect(admin).toEqual({ id: expect.any(String), email: expect.stringMatching(/^staff-/), role: 'AUDITOR', totpEnabled: false, passwordChangeRequired: true, locked: false, disabled: false, createdAt: expect.any(String) });
+    expect(admin).toEqual({ id: expect.any(String), email: expect.stringMatching(/^staff-/), role: 'AUDITOR', totpEnabled: false, passwordChangeRequired: true, locked: false, disabled: false, createdAt: expect.any(String), stockLocationIds: [] });
     expect(temporaryPassword).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}(-[0-9A-HJKMNP-TV-Z]{4}){3}$/);
     const list = safeJson(await boss.get('/api/admin/admins')) as { items: StaffJson[] };
     expect(list.items.find((a) => a.id === admin.id)).toEqual(admin);
@@ -267,6 +269,116 @@ describe('Team: staff accounts (A-02)', () => {
     expect((await boss.patch(`/api/admin/anomalies/${target.id}`, { status: 'RESOLVED', note: 'Test print of an unregistered identity' })).statusCode).toBe(200);
     const after = (safeJson(await boss.get('/api/admin/anomalies?status=RESOLVED')) as { items: { id: string; actorEmail: string | null; resolvedBy: string }[] }).items;
     expect(after.find((a) => a.id === target.id)).toMatchObject({ actorEmail: bossEmail, resolvedBy: `admin:${bossId}` });
+  });
+});
+
+describe('Team: LOGISTICS logins and their locations (plan NEXT LOT §3.5.6.1)', () => {
+  let h: Harness;
+  let boss: Client;
+  let bossId: string;
+  let france: string;
+  let logistics: string;
+
+  beforeAll(async () => {
+    h = await createHarness();
+    const creds = await createAdmin(h.ctx, 'ADMIN');
+    bossId = creds.id;
+    boss = await signIn(h, creds.email, creds.password);
+    const locations = await h.ctx.services.stock.locations();
+    france = locations.find((l) => l.name === 'FRANCE WAREHOUSE')!.id;
+    logistics = locations.find((l) => l.name === 'LOGISTICS WAREHOUSE')!.id;
+  });
+  afterAll(() => h?.close());
+
+  const email = () => `agent-${Math.random().toString(36).slice(2, 8)}@orbes.test`;
+  const create = (body: Record<string, unknown>) => boss.post('/api/admin/admins', { email: email(), role: 'LOGISTICS', ...body });
+
+  it('a LOGISTICS login is created with at least one known location, never another role with locations; audited admin.create with them', async () => {
+    for (const body of [{}, { stockLocationIds: [] }]) {
+      const res = await create(body);
+      expect(res.statusCode, JSON.stringify(body)).toBe(400);
+      expect(errorOf(res)).toEqual({ code: 'VALIDATION_FAILED', message: 'Choose at least one location.' });
+    }
+    const unknown = await create({ stockLocationIds: ['00000000-0000-4000-8000-000000000000'] });
+    expect(unknown.statusCode).toBe(404);
+    expect(errorOf(unknown).code).toBe('STOCK_LOCATION_NOT_FOUND');
+    expect((await create({ stockLocationIds: ['not-a-uuid'] })).statusCode).toBe(400);
+    const operator = await boss.post('/api/admin/admins', { email: email(), role: 'OPERATOR', stockLocationIds: [france] });
+    expect(operator.statusCode).toBe(400);
+    expect(errorOf(operator).message).toBe('Only a LOGISTICS login works at locations.');
+    expect(await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'LOGISTICS').execute()).toEqual([]);
+
+    const res = await create({ stockLocationIds: [logistics, france, logistics.toUpperCase()] });
+    expect(res.statusCode, res.body).toBe(201);
+    const { admin } = safeJson(res) as { admin: StaffJson };
+    expect(admin).toMatchObject({ role: 'LOGISTICS', passwordChangeRequired: true, stockLocationIds: [france, logistics].sort() });
+    expect((safeJson(await boss.get('/api/admin/admins')) as { items: StaffJson[] }).items.find((a) => a.id === admin.id)?.stockLocationIds).toEqual([france, logistics].sort());
+    const tied = await h.ctx.db.selectFrom('admin_user_locations').selectAll().where('admin_user_id', '=', admin.id).orderBy('stock_location_id').execute();
+    expect(tied.map((r) => [r.stock_location_id, r.created_by])).toEqual([france, logistics].sort().map((id) => [id, bossId]));
+    expect((await h.ctx.audit.list({ action: 'admin.create', targetId: admin.id })).items[0]).toMatchObject({
+      actorId: bossId,
+      details: { role: 'LOGISTICS', stockLocationIds: [france, logistics].sort(), passwordChangeRequired: true },
+    });
+    expect(await h.ctx.services.auth.adminLocations(admin.id)).toEqual([france, logistics].sort());
+  });
+
+  it('a role changed to LOGISTICS takes its locations; a LOGISTICS login keeping its role has them changed; a role changed away clears them, in one transaction each, audited admin.role_change', async () => {
+    const created = safeJson(await boss.post('/api/admin/admins', { email: email(), role: 'OPERATOR' })) as { admin: StaffJson };
+    const id = created.admin.id;
+    const role = (body: Record<string, unknown>) => boss.patch(`/api/admin/admins/${id}/role`, body);
+    const locations = () => h.ctx.services.auth.adminLocations(id);
+    const lastChange = async () => (await h.ctx.audit.list({ action: 'admin.role_change', targetId: id })).items[0];
+
+    const none = await role({ role: 'LOGISTICS' });
+    expect(none.statusCode).toBe(400);
+    expect(errorOf(none).message).toBe('Choose at least one location.');
+    expect((await h.ctx.db.selectFrom('admin_users').select('role').where('id', '=', id).executeTakeFirstOrThrow()).role).toBe('OPERATOR');
+
+    const toAgent = await role({ role: 'LOGISTICS', stockLocationIds: [france] });
+    expect(toAgent.statusCode, toAgent.body).toBe(200);
+    expect((safeJson(toAgent) as { admin: StaffJson }).admin).toMatchObject({ role: 'LOGISTICS', stockLocationIds: [france] });
+    expect(await locations()).toEqual([france]);
+    expect(await lastChange()).toMatchObject({ actorId: bossId, details: { from: 'OPERATOR', to: 'LOGISTICS', stockLocationIds: [france] } });
+
+    // Same role, other locations: the login's locations change (today's early return on the same role kept for the rest).
+    const moved = await role({ role: 'LOGISTICS', stockLocationIds: [logistics, france] });
+    expect((safeJson(moved) as { admin: StaffJson }).admin.stockLocationIds).toEqual([france, logistics].sort());
+    expect(await lastChange()).toMatchObject({ details: { from: 'LOGISTICS', to: 'LOGISTICS', stockLocationIds: [france, logistics].sort() } });
+    const kept = await h.ctx.db.selectFrom('admin_user_locations').select(['stock_location_id', 'created_at']).where('admin_user_id', '=', id).where('stock_location_id', '=', france).executeTakeFirstOrThrow();
+    const count = async () => (await h.ctx.audit.list({ action: 'admin.role_change', targetId: id })).items.length;
+    const before = await count();
+    // The same role and the same locations: nothing changes, nothing is audited.
+    expect((await role({ role: 'LOGISTICS', stockLocationIds: [france, logistics] })).statusCode).toBe(200);
+    expect(await count()).toBe(before);
+    await role({ role: 'LOGISTICS', stockLocationIds: [france] });
+    expect(await locations()).toEqual([france]);
+    // A location kept is kept as it was (its row, its time).
+    expect((await h.ctx.db.selectFrom('admin_user_locations').select('created_at').where('admin_user_id', '=', id).where('stock_location_id', '=', france).executeTakeFirstOrThrow()).created_at).toEqual(kept.created_at);
+
+    // Away from LOGISTICS: its locations are deleted with the change, and none may come with it.
+    expect((await role({ role: 'AUDITOR', stockLocationIds: [france] })).statusCode).toBe(400);
+    expect(await locations()).toEqual([france]);
+    const away = await role({ role: 'AUDITOR' });
+    expect((safeJson(away) as { admin: StaffJson }).admin).toMatchObject({ role: 'AUDITOR', stockLocationIds: [] });
+    expect(await locations()).toEqual([]);
+    expect(await lastChange()).toMatchObject({ details: { from: 'LOGISTICS', to: 'AUDITOR' } });
+    expect((await lastChange()).details).not.toHaveProperty('stockLocationIds');
+  });
+
+  it('a LOGISTICS login signs in, changes its own password and reads its own profile; the scope of its routes is its own locations', async () => {
+    const res = await create({ stockLocationIds: [logistics] });
+    const { admin, temporaryPassword } = safeJson(res) as { admin: StaffJson; temporaryPassword: string };
+    const agent = await signIn(h, admin.email, temporaryPassword);
+    expect((await agent.post('/api/admin/auth/password', { currentPassword: temporaryPassword, newPassword: 'agent passphrase 2026' })).statusCode).toBe(200);
+    expect((safeJson(await agent.get('/api/admin/auth/me')) as { admin: { role: string } }).admin.role).toBe('LOGISTICS');
+    const scope = async (adminId: string, role: string) =>
+      logisticsScope(h.ctx, { orbes: { admin: { admin: { id: adminId, role } } } } as unknown as Parameters<typeof logisticsScope>[1]);
+    expect(await scope(admin.id, 'LOGISTICS')).toEqual(new Set([logistics]));
+    expect(inLogisticsScope(await scope(admin.id, 'LOGISTICS'), logistics.toUpperCase())).toBe(true);
+    expect(inLogisticsScope(await scope(admin.id, 'LOGISTICS'), france)).toBe(false);
+    // ORBES staff see every location.
+    expect(await scope(bossId, 'ADMIN')).toBeNull();
+    expect(inLogisticsScope(null, france)).toBe(true);
   });
 });
 

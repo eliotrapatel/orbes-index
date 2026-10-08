@@ -281,7 +281,9 @@ import {
 import { CIRCLE_PHOTOS_MAX, GALLERY_ALT_MAX } from '../../src/server/services/media.js';
 import { DEFAULT_CARE as SHARED_CARE } from '../../src/web/shared/care.js';
 import { DEFAULT_CARE as VERIFY_CARE } from '../../src/web/verify/copy.js';
-import { can, CAPABILITY_MIN_ROLE, ROLE_RANK, saleOnly } from '../../src/web/admin/model/permissions.js';
+import { can, CAPABILITY_MIN_ROLE, logisticsOnly, ROLE_RANK, saleOnly } from '../../src/web/admin/model/permissions.js';
+import { LOGISTICS_ACT as SERVER_LOGISTICS_ACT, LOGISTICS_READ as SERVER_LOGISTICS_READ } from '../../src/server/routes/admin/logistics.js';
+import { LOGISTICS_LOCATIONS_REQUIRED as SERVER_LOCATIONS_REQUIRED } from '../../src/server/services/auth.js';
 import {
   careText,
   changedText,
@@ -331,7 +333,7 @@ import {
   scanReference,
   triageMoves,
 } from '../../src/web/admin/model/registry.js';
-import { adminState, deviceLabel, newPasswordProblem, PASSWORD_MIN_LENGTH, teamActions } from '../../src/web/admin/model/team.js';
+import { adminState, deviceLabel, initialLocations, LOCATIONS_REQUIRED, locationNames, locationsProblem, newPasswordProblem, PASSWORD_MIN_LENGTH, teamActions } from '../../src/web/admin/model/team.js';
 import { toneOf } from '../../src/web/admin/model/tone.js';
 import { PASSWORD_MIN_LENGTH as SERVER_PASSWORD_MIN_LENGTH } from '../../src/server/services/auth.js';
 import * as web from '../../src/web/admin/types.js';
@@ -474,6 +476,23 @@ describe('Team page and password change (A-02)', () => {
     expect(newPasswordProblem('old passphrase', '🔒🔒🔒🔒🔒🔒abcdef', '🔒🔒🔒🔒🔒🔒abcdef')).toBeNull(); // 12 code points
   });
 
+  it('gives a LOGISTICS login its locations (plan NEXT LOT §3.5.4.5): its own ticked, the single location when there is one, at least one required, named in the Role cell', () => {
+    const locations = [
+      { id: 'a', name: 'LOGISTICS WAREHOUSE' },
+      { id: 'b', name: 'PARIS STOCK' },
+    ];
+    expect(initialLocations(null, locations)).toEqual([]);
+    expect(initialLocations(null, [locations[0]])).toEqual(['a']);
+    expect(initialLocations({ role: 'LOGISTICS', stockLocationIds: ['b'] }, locations)).toEqual(['b']);
+    expect(initialLocations({ role: 'OPERATOR', stockLocationIds: [] }, [locations[1]])).toEqual(['b']);
+    expect(LOCATIONS_REQUIRED).toBe(SERVER_LOCATIONS_REQUIRED);
+    expect(locationsProblem('LOGISTICS', [])).toBe('Choose at least one location.');
+    expect(locationsProblem('LOGISTICS', ['a'])).toBeNull();
+    expect(locationsProblem('OPERATOR', [])).toBeNull();
+    expect(locationNames({ role: 'LOGISTICS', stockLocationIds: ['b', 'a'] }, locations)).toBe('LOGISTICS WAREHOUSE · PARIS STOCK');
+    expect(locationNames({ role: 'AUDITOR', stockLocationIds: [] }, locations)).toBe('');
+  });
+
   it('names a session\'s device in a few words', () => {
     expect(deviceLabel('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0 Safari/537.36')).toBe('Chrome · macOS');
     expect(deviceLabel('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1')).toBe('Safari · iOS');
@@ -538,6 +557,20 @@ describe('permissions', () => {
     expect(saleOnly(null)).toBe(false);
     // A role this console does not know is refused everywhere, as on the server.
     expect(can('SELLER' as never, 'sell')).toBe(false);
+  });
+
+  it('ranks LOGISTICS with RETAIL: the Logistics page of its locations only (plan NEXT LOT §3.5.6.1), as the server\'s LOGISTICS_ACT and LOGISTICS_READ', () => {
+    const caps = Object.keys(CAPABILITY_MIN_ROLE) as (keyof typeof CAPABILITY_MIN_ROLE)[];
+    expect(caps.filter((c) => can('LOGISTICS', c))).toEqual(['logistics', 'readLogistics']);
+    expect(ROLE_RANK.LOGISTICS).toBe(ROLE_RANK.RETAIL);
+    const roles = ['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const;
+    expect(roles.filter((r) => can(r, 'logistics'))).toEqual([...SERVER_LOGISTICS_ACT].sort((x, y) => roles.indexOf(x as never) - roles.indexOf(y as never)));
+    expect(roles.filter((r) => can(r, 'readLogistics'))).toEqual([...SERVER_LOGISTICS_READ].sort((x, y) => roles.indexOf(x as never) - roles.indexOf(y as never)));
+    expect(logisticsOnly('LOGISTICS')).toBe(true);
+    for (const role of ['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const) expect(logisticsOnly(role), role).toBe(false);
+    expect(logisticsOnly(null)).toBe(false);
+    expect(saleOnly('LOGISTICS')).toBe(false);
+    expect(can('LOGISTICS', 'sell')).toBe(false);
   });
 });
 

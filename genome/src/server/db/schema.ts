@@ -55,11 +55,11 @@ export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR', 'RETAIL', 'LOGISTICS'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 /**
- * The roles an ADMIN may give from the console (create a staff account, change a role). ADMIN
- * itself is granted from the shell only (scripts/admin.ts), where the second factor is enrolled
+ * The roles an ADMIN may give from the console (create a staff account, change a role; a LOGISTICS
+ * login with its locations, plan NEXT LOT §3.5.6.1). ADMIN itself is granted from the shell only (scripts/admin.ts), where the second factor is enrolled
  * out of band (SECURITY-MODEL §3.3).
  */
-export const STAFF_ROLES = ['OPERATOR', 'AUDITOR', 'RETAIL'] as const satisfies readonly AdminRole[];
+export const STAFF_ROLES = ['OPERATOR', 'AUDITOR', 'RETAIL', 'LOGISTICS'] as const satisfies readonly AdminRole[];
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
 export const SESSION_SUBJECT_TYPES = ['account', 'admin'] as const;

@@ -30,8 +30,8 @@ export type CodeStatus = (typeof CODE_STATUSES)[number];
 export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR', 'RETAIL', 'LOGISTICS'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
-/** Roles the Team page gives (create, change role); ADMIN is granted from the shell only. */
-export const STAFF_ROLES = ['OPERATOR', 'AUDITOR', 'RETAIL'] as const;
+/** Roles the Team page gives (create, change role; LOGISTICS with its locations); ADMIN is granted from the shell only. */
+export const STAFF_ROLES = ['OPERATOR', 'AUDITOR', 'RETAIL', 'LOGISTICS'] as const;
 export type StaffRole = (typeof STAFF_ROLES)[number];
 
 /** YEARLY_CARE (BP-19 T6): opened by the yearly care's flow only; the product page's dialog never offers it. */
@@ -326,6 +326,8 @@ export interface AdminUser extends AdminProfile {
   locked: boolean;
   disabled: boolean;
   createdAt: Iso;
+  /** A LOGISTICS login's locations (plan NEXT LOT §3.5.6.1), sorted; empty for every other role. */
+  stockLocationIds: string[];
 }
 
 /** POST /api/admin/admins: the new staff account and its temporary password, shown once. */

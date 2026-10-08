@@ -423,13 +423,14 @@ export class AdminApi {
     return this.post(`/api/admin/admins/${encodeURIComponent(adminId)}/totp/reset`);
   }
 
-  /** A staff account (OPERATOR, AUDITOR or RETAIL) with a temporary password, returned once. */
-  createStaff(email: string, role: StaffRole): Promise<StaffCreated> {
-    return this.post('/api/admin/admins', { email, role });
+  /** A staff account (OPERATOR, AUDITOR, RETAIL, or LOGISTICS with its locations) with a temporary password, returned once. */
+  createStaff(email: string, role: StaffRole, stockLocationIds?: readonly string[]): Promise<StaffCreated> {
+    return this.post('/api/admin/admins', { email, role, ...(role === 'LOGISTICS' ? { stockLocationIds } : {}) });
   }
 
-  setAdminRole(adminId: string, role: StaffRole): Promise<{ admin: AdminUser }> {
-    return this.patch(`/api/admin/admins/${encodeURIComponent(adminId)}/role`, { role });
+  /** A role changed; LOGISTICS with its locations (also how a LOGISTICS login's locations change). */
+  setAdminRole(adminId: string, role: StaffRole, stockLocationIds?: readonly string[]): Promise<{ admin: AdminUser }> {
+    return this.patch(`/api/admin/admins/${encodeURIComponent(adminId)}/role`, { role, ...(role === 'LOGISTICS' ? { stockLocationIds } : {}) });
   }
 
   disableAdmin(adminId: string): Promise<{ admin: AdminUser; sessionsRevoked: number }> {

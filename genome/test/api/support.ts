@@ -11,6 +11,7 @@ import { createContext, type AppContext, type ContextOverrides } from '../../src
 import type { AdminRole } from '../../src/server/db/schema.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import type { IssueProductInput, IssueResult } from '../../src/server/services/issuance.js';
+import { defaultLocationId } from '../../src/server/services/stock.js';
 import { createManualClock, SYSTEM_ACTOR, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 
@@ -173,15 +174,17 @@ export async function issue(ctx: AppContext, catalog: Catalog, extra: Partial<Is
   );
 }
 
-export async function createAdmin(ctx: AppContext, role: AdminRole): Promise<{ id: string; email: string; password: string }> {
+export async function createAdmin(ctx: AppContext, role: AdminRole, opts: { stockLocationIds?: readonly string[] } = {}): Promise<{ id: string; email: string; password: string }> {
   const email = `${role.toLowerCase()}-${randomUUID().slice(0, 8)}@orbes.test`;
-  const a = await ctx.services.auth.createAdmin({ email, password: PASSWORD, role }, SYSTEM_ACTOR);
+  // A LOGISTICS login works at one location or more (plan NEXT LOT §3.5.6.1): the default location unless others are given.
+  const stockLocationIds = role === 'LOGISTICS' ? (opts.stockLocationIds ?? [await defaultLocationId(ctx.db)]) : undefined;
+  const a = await ctx.services.auth.createAdmin({ email, password: PASSWORD, role, ...(stockLocationIds ? { stockLocationIds } : {}) }, SYSTEM_ACTOR);
   return { id: a.id, email, password: PASSWORD };
 }
 
 /** A logged-in admin client of the given role. */
-export async function adminClient(h: Harness, role: AdminRole, clientOpts: ClientOptions = {}): Promise<Client> {
-  const creds = await createAdmin(h.ctx, role);
+export async function adminClient(h: Harness, role: AdminRole, clientOpts: ClientOptions = {}, adminOpts: { stockLocationIds?: readonly string[] } = {}): Promise<Client> {
+  const creds = await createAdmin(h.ctx, role, adminOpts);
   const c = h.client(clientOpts);
   const res = await c.post('/api/admin/auth/login', { email: creds.email, password: creds.password });
   if (res.statusCode !== 200) throw new Error(`admin login failed: ${res.statusCode} ${res.body}`);
