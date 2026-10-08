@@ -88,14 +88,16 @@ describe('MY PIECES: an order\'s documents', () => {
 
   it('lists each order\'s documents: the invoice once paid, the credit note once cancelled after it, the care guide while the piece comes or is kept', async () => {
     const list = await listed(mine);
-    expect(list.get(delivered)!.documents).toEqual({ invoice: { number: 'INV-2026-000001', issuedAt: expect.any(String) }, creditNote: null, careGuide: true, certificate: false });
+    expect(list.get(delivered)!.documents).toEqual({ invoice: { number: 'INV-2026-000001', issuedAt: expect.any(String) }, creditNote: null, others: [], careGuide: true, certificate: false });
     expect(list.get(cancelled)!.documents).toEqual({
       invoice: { number: 'INV-2026-000002', issuedAt: expect.any(String) },
       creditNote: { number: 'CN-2026-000001', issuedAt: expect.any(String) },
+      // Plan NEXT LOT §3.6.C: no supplementary invoice nor credit note for single lines.
+      others: [],
       careGuide: false,
       certificate: false,
     });
-    expect(list.get(reserved)!.documents).toEqual({ invoice: null, creditNote: null, careGuide: true, certificate: false });
+    expect(list.get(reserved)!.documents).toEqual({ invoice: null, creditNote: null, others: [], careGuide: true, certificate: false });
   });
 
   it('gives the account its own invoice and credit note as PDFs, never stored; nothing of another account\'s', async () => {
@@ -162,6 +164,7 @@ describe('MY PIECES: an order\'s documents', () => {
     expect((await listed(mine)).get(delivered)!.documents).toEqual({
       invoice: { number: 'INV-2026-000001', issuedAt: expect.any(String) },
       creditNote: { number: 'CN-2026-000002', issuedAt: expect.any(String) },
+      others: [],
       careGuide: false,
       certificate: false,
     });

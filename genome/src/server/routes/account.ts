@@ -19,7 +19,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountOrderAddressBody, accountOrderParams, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderAddressBody, accountOrderParams, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
@@ -164,6 +164,23 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     return { order: await orders.setAddress(account.id, id, b as Parameters<typeof orders.setAddress>[2], accountActor(request)) };
   });
 
+  // An order's engraving (plan NEXT LOT §3.6.C): typed until packing starts, with its price from the settings, or its
+  // words only when the release sold it as an add-on; removed (DELETE) except then. The order as MY PIECES reads it.
+  app.put('/api/v1/account/orders/:id/engraving', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    const b = parse(accountEngravingBody, request.body);
+    reply.header('cache-control', 'no-store');
+    return { order: await orders.setEngraving(account.id, id, b.text, accountActor(request)) };
+  });
+
+  app.delete('/api/v1/account/orders/:id/engraving', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    reply.header('cache-control', 'no-store');
+    return { order: await orders.setEngraving(account.id, id, null, accountActor(request)) };
+  });
+
   // MY PIECES (plan LIVE RELEASE+, choice 6): the account's own orders, step by step; never another account's.
   app.get('/api/v1/account/orders', async (request) => {
     const { account } = requireAccount(request);
@@ -205,6 +222,13 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const { account } = requireAccount(request);
     const { id } = parse(accountOrderParams, request.params);
     return sendPdf(reply, await invoices.accountDocument(account.id, id, 'CREDIT_NOTE'));
+  });
+
+  // A supplementary invoice or a credit note for single lines (plan NEXT LOT §3.6.C), by its number (INV-…, CN-…).
+  app.get('/api/v1/account/orders/:id/documents/:number', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id, number } = parse(accountDocumentParams, request.params);
+    return sendPdf(reply, await invoices.accountDocumentByNumber(account.id, id, number));
   });
 
   app.get('/api/v1/account/orders/:id/certificate.pdf', async (request, reply) => {

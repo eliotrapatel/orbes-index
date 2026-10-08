@@ -524,7 +524,7 @@ const PLAN_RULES: Readonly<Record<string, string>> = {
   'a cancellation frees its piece for the next order waiting (plan NEXT LOT §3.5)': 'notes.push(...(await serveWaiting(tx, o.sku_id!, o.location_id, actor, now)));',
   'a return takes the ownership back (choice 20)': "await tx.updateTable('ownership').set({ ended_at: endedAt, ended_reason: 'RETURNED' }).where('id', '=', owner.id).execute();",
   'the invoice issued by CONGLOMERAT LLC, without VAT (choice 22)': 'issuer: jsonText({ name: INVOICE_ISSUER.name, address: [...INVOICE_ISSUER.address] }),',
-  'a credit note cancels the invoice once (choices 20, 22)': 'credits_invoice_id: invoice.id,',
+  'a credit note cancels the invoice once (choices 20, 22; since plan NEXT LOT §3.6.C what remains of it)': "scope: 'FULL',",
   'the buyer never in the journal (decision 31)': 'buyer: o.buyer_name !== null',
   'MY PIECES reads its own orders (choice 6)': "app.get('/api/v1/account/orders', async (request) => {",
   'the ownership certificate once the piece is registered (choice 21)': 'certificate: ORDER_CERTIFICATE_STATUSES.includes(r.status) && r.ownership_id !== null && r.piece_status !== null',
@@ -594,10 +594,13 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(matches(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+ownership\b/g).map((m) => m.file)).toEqual([]);
   },
   N4: () => {
-    // Neither the customer's routes nor the console's: no tool deletes an account (counsel note §4, point 3). The one
-    // DELETE under the account's routes removes one of its saved delivery addresses (YOUR ADDRESSES, plan NEXT LOT
-    // §3.6.B), never the account.
-    expect(ROUTES.filter((r) => r.method === 'delete' && (r.path.startsWith('/api/v1/account') || r.path.startsWith('/api/admin/owners')))).toEqual([{ method: 'delete', path: '/api/v1/account/addresses/:id' }]);
+    // Neither the customer's routes nor the console's: no tool deletes an account (counsel note §4, point 3). The DELETEs
+    // under the account's routes remove one of its saved delivery addresses (YOUR ADDRESSES, plan NEXT LOT §3.6.B) and an
+    // order's engraving (§3.6.C), never the account.
+    expect(ROUTES.filter((r) => r.method === 'delete' && (r.path.startsWith('/api/v1/account') || r.path.startsWith('/api/admin/owners')))).toEqual([
+      { method: 'delete', path: '/api/v1/account/addresses/:id' },
+      { method: 'delete', path: '/api/v1/account/orders/:id/engraving' },
+    ]);
     expect(matches(/status:\s*'DELETED'|status\s*=\s*'DELETED'/g).map((m) => m.file)).toEqual([]);
     // No row of accounts is deleted, through Kysely or in raw SQL, by the server or a script.
     expect(matches(/deleteFrom\(\s*'accounts'\s*\)|\bDELETE\s+FROM\s+"?accounts\b/gi).map((m) => m.file)).toEqual([]);

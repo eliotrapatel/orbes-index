@@ -669,6 +669,24 @@ export class ApiClient {
     return { blob, filename: filenameOf(res.headers.get('content-disposition'), `ORBES-${document}.pdf`) };
   }
 
+  /** Another document of an order (plan NEXT LOT §3.6.C: a supplementary invoice, a credit note for single lines), by its number. */
+  async orderDocumentByNumber(orderId: string, number: string): Promise<DownloadedFile> {
+    const res = await this.send('GET', `/api/v1/account/orders/${encodeURIComponent(orderId)}/documents/${encodeURIComponent(number)}`, undefined, {});
+    if (!res.ok) throw toApiError(res.status, await readJson(res));
+    const type = res.headers.get('content-type') ?? '';
+    const blob = await res.blob();
+    if (!type.startsWith('application/pdf') || blob.size === 0 || blob.size > MAX_FILE_BYTES) throw new ApiError(res.status, 'BAD_RESPONSE', 'Unexpected response.');
+    return { blob, filename: filenameOf(res.headers.get('content-disposition'), `ORBES-${number}.pdf`) };
+  }
+
+  /** An order's engraving (plan NEXT LOT §3.6.C): its words, or null to remove it; the order after it. */
+  async setEngraving(orderId: string, text: string | null): Promise<AccountOrder> {
+    const path = `/api/v1/account/orders/${encodeURIComponent(orderId)}/engraving`;
+    const r = text === null ? await this.request<{ order?: AccountOrder }>('DELETE', path, undefined, { csrf: true }) : await this.request<{ order?: AccountOrder }>('PUT', path, { text }, { csrf: true });
+    if (!r?.order || typeof r.order.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.order;
+  }
+
   // ── A new claim code on an order (plan NEXT LOT §3.4; API §10.20) ─────────
 
   /**

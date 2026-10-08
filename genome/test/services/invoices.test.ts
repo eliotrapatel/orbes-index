@@ -7,6 +7,9 @@
  *    two orders paid at once never sharing a number; its lines (the piece, its size and where it was sold; each add-on
  *    as sold), its buyer (the name and address entered, the account's email), its totals;
  *  - a credit note when an order paid is cancelled (none before PAID) or returned: its invoice cancelled in full, once;
+ *  - (plan NEXT LOT §3.6.C) an engraving added after PAID: a supplementary invoice; removed after PAID: a credit note for
+ *    its one line; a cancellation then credits each invoice for what remains, never a line twice; one main invoice per
+ *    order, one credit note in full per invoice; each listed in MY PIECES and read by its number;
  *  - each journaled (`invoice.issue`, `invoice.credit`, replayed) and audited by ids, numbers and amounts, never the
  *    buyer's details;
  *  - a month's documents with their totals per currency, the month's CSV for the accountant (a credit note's amounts
@@ -19,6 +22,7 @@ import { createContext, type AppContext } from '../../src/server/context.js';
 import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { INVOICE_ISSUER, INVOICE_LINE_KINDS, invoiceNumber, linesOf, monthRange } from '../../src/server/services/invoices.js';
+import { isUniqueViolation } from '../../src/server/db/pg-errors.js';
 import { readJournal, replayJournal } from '../../src/server/services/journal.js';
 import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 import { LEGAL_IDENTITY } from '../../src/web/legal/content/notice.js';
@@ -299,8 +303,99 @@ describe('invoices and credit notes (plan LIVE RELEASE+, S4)', () => {
     expect((await invoices().accountDocument(two.accountId, two.id, 'CREDIT_NOTE')).filename).toBe(`ORBES-credit-note-${credit!.number}.pdf`);
   });
 
+  it('an engraving after PAID (plan NEXT LOT §3.6.C): a supplementary invoice, a credit note for its one line, and at a cancellation each invoice credited for what remains, never a line twice', async () => {
+    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, admin);
+    const { id, accountId } = await salonOrder({ priceMinor: 420_000, buyer: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' } });
+    const collector: Actor = { type: 'account', id: accountId };
+    // Before PAID: its line on the order's invoice.
+    await orders().setEngraving(accountId, id, 'A. M.', collector);
+    await pay(id);
+    const [main] = await invoiceRows(id);
+    expect(linesOf(main!.lines as unknown[]).map((l) => [l.kind, l.label, l.amountMinor])).toEqual([
+      ['PIECE', 'MONOLITHE · SIZE 58', 420_000],
+      ['ENGRAVING', 'Engraving', 3_000],
+    ]);
+    expect(main!.total_minor).toBe(423_000);
+    expect(JSON.stringify(main!.lines)).not.toContain('A. M.');
+    // Removed after PAID: a credit note for that one line, on the order's invoice.
+    clock.advance(MINUTE);
+    await orders().setEngraving(accountId, id, null, collector);
+    // Added again (the price now € 40): a supplementary invoice of one line, billed as the order's invoice was.
+    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 4_000, GBP: null, USD: null, CHF: null } }, admin);
+    clock.advance(MINUTE);
+    await orders().setEngraving(accountId, id, 'A. & M.', collector);
+    // Its words changed: no document.
+    clock.advance(MINUTE);
+    await orders().setEngraving(accountId, id, 'A. M. 2026', collector);
+    const docs = await invoiceRows(id);
+    expect(docs.map((d) => [d.kind, d.credit_scope, d.total_minor])).toEqual([
+      ['INVOICE', null, 423_000],
+      ['CREDIT_NOTE', 'LINES', 3_000],
+      ['INVOICE', null, 4_000],
+    ]);
+    const [, lineCredit, supplement] = docs;
+    expect(lineCredit!.credits_invoice_id).toBe(main!.id);
+    expect(linesOf(lineCredit!.lines as unknown[])).toEqual([{ kind: 'ENGRAVING', label: 'Engraving', detail: null, amountMinor: 3_000 }]);
+    expect(supplement!.supplements_invoice_id).toBe(main!.id);
+    expect(supplement!.buyer).toEqual(main!.buyer);
+    expect(linesOf(supplement!.lines as unknown[])).toEqual([{ kind: 'ENGRAVING', label: 'Engraving', detail: null, amountMinor: 4_000 }]);
+    // Audited and journaled as invoices are, with what each supplements or credits.
+    const issued = (await t.db.selectFrom('audit_logs').select('details').where('action', 'in', ['invoice.issue', 'invoice.credit']).where('target_id', 'in', [lineCredit!.id, supplement!.id]).execute()).map((x) => x.details);
+    expect(issued).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ orderId: id, credits: invoiceNumber('INVOICE', main!.year, main!.sequence), reason: 'engraving', scope: 'LINES', totalMinor: 3_000 }),
+        expect.objectContaining({ orderId: id, supplements: invoiceNumber('INVOICE', main!.year, main!.sequence), totalMinor: 4_000 }),
+      ]),
+    );
+    // MY PIECES: the order's invoice, and the others by their number, each its PDF.
+    const mine = (await orders().forAccount(accountId)).find((o) => o.id === id)!;
+    expect(mine.documents.invoice!.number).toBe(invoiceNumber('INVOICE', main!.year, main!.sequence));
+    expect(mine.documents.others.map((d) => [d.kind, d.number])).toEqual([
+      ['CREDIT_NOTE', invoiceNumber('CREDIT_NOTE', lineCredit!.year, lineCredit!.sequence)],
+      ['INVOICE', invoiceNumber('INVOICE', supplement!.year, supplement!.sequence)],
+    ]);
+    for (const d of mine.documents.others) expect((await invoices().accountDocumentByNumber(accountId, id, d.number)).body.length).toBeGreaterThan(0);
+    await rejects(invoices().accountDocumentByNumber((await createAccount(t.db)).id, id, mine.documents.others[0]!.number), 'INVOICE_NOT_FOUND', 404);
+    await rejects(invoices().accountDocumentByNumber(accountId, id, 'INV-2026-999999'), 'INVOICE_NOT_FOUND', 404);
+    // The PDFs say what each is.
+    expect((await invoices().pdf(supplement!.id)).filename).toMatch(/^ORBES-invoice-INV-/);
+    expect((await invoices().pdf(lineCredit!.id)).filename).toMatch(/^ORBES-credit-note-CN-/);
+    // The database keeps one main invoice per order and one credit note in full per invoice.
+    await expect(
+      t.db.insertInto('invoices').values({ kind: 'INVOICE', year: 2026, sequence: 999_001, order_id: id, issuer: '{}', buyer: '{}', lines: '[{"kind":"PIECE","label":"X","amountMinor":0}]', currency: 'EUR', subtotal_minor: 0, total_minor: 0 }).execute(),
+    ).rejects.toSatisfy((e) => isUniqueViolation(e, 'invoices_one_per_order'));
+    // Cancelled: each invoice credited for what remains (the order's, without its engraving; the supplementary one whole).
+    clock.advance(MINUTE);
+    await orders().transition(id, { to: 'CANCELLED', note: 'The client withdrew.' }, admin);
+    const after = await invoiceRows(id);
+    const full = after.filter((d) => d.credit_scope === 'FULL');
+    expect(full.map((d) => [d.credits_invoice_id, d.total_minor])).toEqual([
+      [main!.id, 420_000],
+      [supplement!.id, 4_000],
+    ]);
+    expect(linesOf(full[0]!.lines as unknown[]).map((l) => l.kind)).toEqual(['PIECE']);
+    // Everything invoiced is credited once: 423 000 + 4 000 = 3 000 + 420 000 + 4 000.
+    const total = (k: 'INVOICE' | 'CREDIT_NOTE') => after.filter((d) => d.kind === k).reduce((n, d) => n + d.total_minor, 0);
+    expect(total('INVOICE')).toBe(total('CREDIT_NOTE'));
+    // MY PIECES: the credit note of the order's invoice, the others listed.
+    const cancelled = (await orders().forAccount(accountId)).find((o) => o.id === id)!;
+    expect(cancelled.documents.creditNote!.number).toBe(invoiceNumber('CREDIT_NOTE', full[0]!.year, full[0]!.sequence));
+    expect(cancelled.documents.others).toHaveLength(3);
+    // The credit note of what remains says so; its PDF is drawn.
+    const view = await invoices().get(full[0]!.id);
+    expect(view).toMatchObject({ scope: 'FULL', remains: true, credits: { id: main!.id } });
+    expect((await invoices().get(main!.id)).creditedBy!.id).toBe(full[0]!.id);
+    expect((await invoices().get(lineCredit!.id))).toMatchObject({ scope: 'LINES', remains: false });
+    expect((await invoices().pdf(full[0]!.id)).body.length).toBeGreaterThan(0);
+    // The journal replays them.
+    const journal = await t.db.selectFrom('event_journal').select(['type', 'entity_id']).where('entity_type', '=', 'invoice').where('entity_id', 'in', [lineCredit!.id, supplement!.id, ...full.map((d) => d.id)]).execute();
+    expect(journal.map((j) => j.type).sort()).toEqual(['invoice.credit', 'invoice.credit', 'invoice.credit', 'invoice.issue']);
+    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, admin);
+  });
+
   it('reads every line back with its own kind (plan NEXT-NINE, BP-19): SHIPPING, CREDIT and GIFT beside PIECE and ADDON, on the invoice, its credit note and MY PIECES\' documents; an old invoice unchanged', () => {
-    expect([...INVOICE_LINE_KINDS]).toEqual(['PIECE', 'ADDON', 'SHIPPING', 'CREDIT', 'GIFT']);
+    // Plan NEXT LOT §3.6.C: and an engraving priced from the settings.
+    expect([...INVOICE_LINE_KINDS]).toEqual(['PIECE', 'ADDON', 'SHIPPING', 'CREDIT', 'GIFT', 'ENGRAVING']);
     const issued = [
       { kind: 'PIECE', label: 'MONOLITHE · SIZE 52', detail: 'DRAW · THE OCTOBER DRAW', amountMinor: 420_000 },
       { kind: 'SHIPPING', label: 'SHIPPING · STANDARD', detail: 'FREE · PLATINE', amountMinor: 0 },

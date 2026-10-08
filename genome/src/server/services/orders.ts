@@ -59,6 +59,14 @@
  *                say it was entered, its country and who, never its words), and exported to the account under the right
  *                of access (`accountOrders`); the console's routes give it masked to an AUDITOR (the name masked, the
  *                address and the phone withheld, the country shown). The engraving text likewise stays on the order.
+ *   engraving    (plan NEXT LOT §3.6.C) the collector types it in YOUR ORDERS (`setEngraving`, at most 20 characters),
+ *                RESERVED or PAID, until packing starts. An order whose LIVE RELEASE sold the engraving as one of its
+ *                add-ons (a label holding the word ENGRAVING, `hasEngravingAddon`) has paid it there: its words only,
+ *                changed until packing, never removed by the collector (409 ORDER_ENGRAVING_INCLUDED). Any other order
+ *                takes the price of its currency from Orders → Settings, Engraving (`engraving_minor`, kept if the
+ *                setting changes; no price: 409 ORDER_ENGRAVING_UNAVAILABLE): added after PAID, a supplementary invoice;
+ *                removed after PAID, a credit note for its line (services/invoices.ts); its words changed, no document.
+ *                Client Services' words (`setTerms`) take the same price. Audited `order.engraving`, never the words.
  *   MY PIECES    the collector reads their own orders (`forAccount`, choice 6): the steps and their times, the model,
  *                the size, the add-ons and the price, the carrier and the tracking link once shipped, and its documents
  *                (M6): the invoice and the credit note, the model's care guide, the ownership certificate once the piece
@@ -128,15 +136,16 @@ import { countryName } from '../../shared/countries.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock, type Logger, noopLogger } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { addressNotFound, checkAddress, checkCountry, checkPhone, defaultAddress, insertAddress, lockAccountAddresses, type DeliveryAddress } from './addresses.js';
+import { customerAccountLocked } from './auth.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
 import { lockPieces, peekClaimRenewals, waitingClaimCodes, withdrawOnCancel, withdrawWaiting, type AccountOrderClaimCode } from './claim-renewals.js';
-import { issueCreditNote, issueInvoice, orderInvoices, type InvoiceBuyer } from './invoices.js';
+import { engravingLine, issueCreditNote, issueInvoice, issueLineCreditNote, issueSupplementaryInvoice, orderInvoices, type InvoiceBuyer } from './invoices.js';
 import { mediaUrl } from './media.js';
 import { writeJournal } from './journal.js';
 import { isTransitionAllowed, LifecycleService, returnTargetOf } from './lifecycle.js';
 import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { tierOf } from './club.js';
-import { giftModelOf, readProgram, shippingRate } from './club-program.js';
+import { engravingPrice, engravingPrices, giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, ensureGrants } from './tier-grants.js';
 import { offeredSku, savedSizeHint } from './sizes.js';
 import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockBalances, stockLevel } from './stock.js';
@@ -220,6 +229,23 @@ const orderClosed = () => conflict('ORDER_CLOSED', 'This order can no longer cha
 /** Plan NEXT LOT §3.6.B: an order travelling with another is delivered to that order's address. */
 const travelsWith = (parentId: string) => conflict('ORDER_TRAVELS_WITH', `This piece travels with order ${orderReference(parentId)}: its address is that order’s.`);
 const packingStarted = () => conflict('ORDER_PACKING_STARTED', 'Packing has begun: write to ORBES Client Services to change this order.');
+/** Plan NEXT LOT §3.6.C. */
+const engravingIncluded = () =>
+  conflict('ORDER_ENGRAVING_INCLUDED', 'Your engraving was bought with your order: its words may change until packing begins. ORBES Client Services can assist you.');
+const engravingUnavailable = () => conflict('ORDER_ENGRAVING_UNAVAILABLE', 'Engraving is not offered on this order.');
+
+/** The collector's engraving (plan NEXT LOT §3.6.C): at most 20 characters of letters, figures, spaces and . & ' ’ -. */
+export const ENGRAVING_COLLECTOR_MAX = 20;
+const ENGRAVING_RE = /^[\p{L}\p{M}0-9 .&'’-]{1,20}$/u;
+const engravingWords = () => validationError('Up to 20 characters: letters, figures, spaces and . & ’ -');
+
+/**
+ * Whether an order carries the release's engraving add-on (plan NEXT LOT §3.6.C, Default: one of its add-ons' labels
+ * holds the word ENGRAVING, whatever its case): its engraving is paid there, no second price.
+ */
+export function hasEngravingAddon(addons: readonly { label: string }[]): boolean {
+  return addons.some((a) => /\bENGRAVING\b/i.test(a.label));
+}
 const carrierUnknown = () => notFound('Carrier', 'CARRIER_NOT_FOUND');
 const priceMissing = () => conflict('ORDER_PRICE_MISSING', 'Enter the order’s price before it is paid: its invoice is issued then.');
 const returnChanged = () => conflict('ORDER_RETURN_CHANGED', 'The piece changed during the return. Please try again.');
@@ -364,6 +390,12 @@ export interface OrderView {
   addons: OrderAddonSnapshot[];
   surprise: string | null;
   engravingText: string | null;
+  /**
+   * Plan NEXT LOT §3.6.C: the price its engraving was taken at (Orders → Settings), null for one bought as the release's
+   * add-on or entered before; who typed its words (COLLECTOR, STAFF).
+   */
+  engravingMinor: number | null;
+  engravingBy: AddressSource | null;
   /**
    * The delivery address (plan NEXT LOT §3.6.B): its own, or the order's it travels with (`addressOf`), as stored; the
    * routes mask it for an AUDITOR (the name masked, the address and the phone withheld, the country shown).
@@ -535,8 +567,22 @@ export interface AccountOrder {
   address: { name: string; lines: string; country: string | null; phone: string | null } | null;
   /** The reference of the order it travels with, whose address it is delivered to; null for an order of its own. */
   addressOf: string | null;
-  /** What the collector may change on it now, as the server reads it: the address (RESERVED or PAID, its own, packing not started). */
-  editable: { address: boolean };
+  /**
+   * Plan NEXT LOT §3.6.C: its engraving's words and the price it was taken at (null: bought as the release's add-on, or
+   * entered before, no price); null without one.
+   */
+  engraving: { text: string; priceMinor: number | null } | null;
+  /**
+   * The engraving it may carry: the price of its currency from Orders → Settings (`priceMinor`; the one its engraving
+   * took, when it has one), or the release's add-on (`included`, no price); the words' `maxLength`; null when none is
+   * offered (a welcome gift, a currency without a price or not entered yet).
+   */
+  engravingOffer: { priceMinor: number | null; included: boolean; maxLength: number } | null;
+  /**
+   * What the collector may change on it now, as the server reads it: the address (RESERVED or PAID, its own, packing not
+   * started) and the engraving (RESERVED or PAID, packing not started, one offered).
+   */
+  editable: { address: boolean; engraving: boolean };
 }
 
 /** The documents of an order in MY PIECES (M6). */
@@ -545,6 +591,12 @@ export interface AccountOrderDocuments {
   invoice: { number: string; issuedAt: Date } | null;
   /** The credit note that cancels it (PDF), once cancelled after PAID or returned. */
   creditNote: { number: string; issuedAt: Date } | null;
+  /**
+   * Plan NEXT LOT §3.6.C: its other documents, in order of issue: a supplementary invoice (an engraving added after
+   * PAID), a credit note for single lines (an engraving removed after PAID), the credit note of a supplementary invoice;
+   * each read by its number (GET /api/v1/account/orders/:id/documents/:number).
+   */
+  others: { kind: InvoiceKind; number: string; issuedAt: Date }[];
   /** The model's care guide: for an order whose piece is on its way or kept (neither cancelled nor returned). */
   careGuide: boolean;
   /** Its ownership certificate (PDF): once its piece is registered to this account, and while it may have one. */
@@ -579,6 +631,7 @@ export function orderPayload(o: OrderRow): JsonObject {
     addons: o.addons,
     surprise: o.surprise,
     engraving: o.engraving_text !== null,
+    engravingMinor: o.engraving_minor,
     buyer: o.buyer_name !== null || o.buyer_address !== null,
     status: o.status,
     reservedAt: iso(o.reserved_at),
@@ -1462,9 +1515,11 @@ export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, no
     }
   }
   notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS[s.to], { note: s.note, details }, actor, now), ...extra);
-  // PAID issues the invoice; paid, then cancelled, a credit note cancels it (services/invoices.ts).
-  const document = s.to === 'PAID' ? await issueInvoice(tx, after, actor, now) : s.to === 'CANCELLED' && o.status === 'PAID' ? await issueCreditNote(tx, after, 'cancel', actor, now) : null;
+  // PAID issues the invoice; paid, then cancelled, a credit note cancels it, and any supplementary invoice, for what is
+  // still invoiced (services/invoices.ts).
+  const document = s.to === 'PAID' ? await issueInvoice(tx, after, actor, now) : null;
   if (document) notes.push(document);
+  if (s.to === 'CANCELLED' && o.status === 'PAID') notes.push(...(await issueCreditNote(tx, after, 'cancel', actor, now)));
   // BP-19 T5: its welcome gift follows it: paid with it, cancelled with it (its grant then waits again).
   if (o.channel !== 'GIFT' && (s.to === 'PAID' || s.to === 'CANCELLED')) {
     for (const g of await openGifts(tx, o.id, { forUpdate: true })) {
@@ -1654,8 +1709,7 @@ export async function returnInTransaction(
   // EXCHANGE order (`createExchangeOrder`), from what is released here.
   const carried = (await openCreditUses(tx, after.id, { forUpdate: true })).map((u): CarriedCredit => ({ grantId: u.grant_id, tier: u.tier as 2 | 3, amountMinor: u.amount_minor }));
   notes.push(...(await releaseCredit(tx, after, 'RETURNED', actor, now)));
-  const credit = await issueCreditNote(tx, after, 'return', actor, now);
-  if (credit) notes.push(credit);
+  notes.push(...(await issueCreditNote(tx, after, 'return', actor, now)));
   // The piece's status, which LifecycleService audits at once: left to the caller to run last (no row is locked after it).
   const finish = async () => {
     if (to !== null) {
@@ -1802,13 +1856,54 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
   }));
 }
 
-/** An order's delivery address as its collector reads it (AccountOrder `address`, `addressOf`, `editable`). */
-function accountDelivery(o: Pick<OrderRow, 'status' | 'with_order_id' | 'packing_started_at'>, a: OrderAddress): Pick<AccountOrder, 'address' | 'addressOf' | 'editable'> {
+/**
+ * An order's delivery address and engraving as its collector reads them (AccountOrder `address`, `addressOf`,
+ * `engraving`, `engravingOffer`, `editable`), `prices` the engraving prices per currency now.
+ */
+function accountDelivery(
+  o: Pick<OrderRow, 'status' | 'channel' | 'with_order_id' | 'packing_started_at' | 'currency' | 'addons' | 'engraving_text' | 'engraving_minor'>,
+  a: OrderAddress,
+  prices: Readonly<Record<string, number | null>>,
+): Pick<AccountOrder, 'address' | 'addressOf' | 'engraving' | 'engravingOffer' | 'editable'> {
+  const open = ORDER_HOLDING_STATUSES.includes(o.status) && o.packing_started_at === null;
+  const offer = engravingOfferOf(o, prices);
   return {
     address: a.name !== null && a.address !== null ? { name: a.name, lines: a.address, country: a.country, phone: a.phone } : null,
     addressOf: a.travelsWith ? orderReference(a.travelsWith) : null,
-    editable: { address: o.with_order_id === null && ORDER_HOLDING_STATUSES.includes(o.status) && o.packing_started_at === null },
+    engraving: o.engraving_text !== null ? { text: o.engraving_text, priceMinor: o.engraving_minor } : null,
+    engravingOffer: offer,
+    editable: { address: o.with_order_id === null && open, engraving: open && offer !== null },
   };
+}
+
+/**
+ * The engraving an order may carry (plan NEXT LOT §3.6.C): none on a welcome gift; the release's add-on (no price);
+ * otherwise the price its engraving took, or its currency's price now; none without either.
+ */
+function engravingOfferOf(o: Pick<OrderRow, 'channel' | 'currency' | 'addons' | 'engraving_text' | 'engraving_minor'>, prices: Readonly<Record<string, number | null>>): AccountOrder['engravingOffer'] {
+  if (o.channel === 'GIFT') return null;
+  if (hasEngravingAddon(o.addons)) return { priceMinor: null, included: true, maxLength: ENGRAVING_COLLECTOR_MAX };
+  if (o.engraving_text !== null) return { priceMinor: o.engraving_minor, included: false, maxLength: ENGRAVING_COLLECTOR_MAX };
+  const price = o.currency === null ? null : (prices[o.currency] ?? null);
+  return price === null ? null : { priceMinor: price, included: false, maxLength: ENGRAVING_COLLECTOR_MAX };
+}
+
+/**
+ * An engraving's price changing on an order already invoiced (plan NEXT LOT §3.6.C), in its transaction: added after
+ * PAID at a price above 0, a supplementary invoice with its ENGRAVING line; removed after PAID, a credit note for that
+ * line (a free one, or one bought as an add-on, issues no document). The invoice already issued never changes.
+ */
+async function engravingDocuments(tx: Db, before: OrderRow, after: OrderRow, actor: Actor, now: Date): Promise<AuditRecordInput[]> {
+  if (before.status !== 'PAID') return [];
+  const notes: AuditRecordInput[] = [];
+  if (before.engraving_minor !== null && before.engraving_minor > 0 && after.engraving_minor === null) {
+    const n = await issueLineCreditNote(tx, after, 'ENGRAVING', actor, now);
+    if (n) notes.push(n);
+  }
+  if (after.engraving_minor !== null && after.engraving_minor > 0 && before.engraving_minor === null) {
+    notes.push(await issueSupplementaryInvoice(tx, after, engravingLine(after.engraving_minor), actor, now));
+  }
+  return notes;
 }
 
 // ── Service ────────────────────────────────────────────────────────────────
@@ -1932,6 +2027,8 @@ export class OrderService {
       addons: r.addons,
       surprise: r.surprise,
       engravingText: r.engraving_text,
+      engravingMinor: r.engraving_minor,
+      engravingBy: r.engraving_by,
       buyer: { name: delivery.name, address: delivery.address, country: delivery.country, phone: delivery.phone },
       addressBy: delivery.by,
       addressAt: delivery.at,
@@ -2018,6 +2115,8 @@ export class OrderService {
         'o.address_at',
         'o.address_changed_at',
         'o.packing_started_at',
+        'o.engraving_text',
+        'o.engraving_minor',
         'm.name as model_name',
         'm.variant_label as model_variant',
         'm.image_sha256 as model_image',
@@ -2065,10 +2164,18 @@ export class OrderService {
           ).map((p) => [p.id, p])
         : [],
     );
+    const prices = await engravingPrices(this.db);
     const deliveryOf = (r: (typeof rows)[number]): OrderAddress => (r.with_order_id === null ? ownAddress(r) : ownAddress(parents.get(r.with_order_id)!, r.with_order_id));
+    // The order's own invoice and the credit note that cancels it; the others (plan NEXT LOT §3.6.C) listed apart.
+    const mainOf = (orderId: string) => invoices.find((x) => x.order.id === orderId && x.kind === 'INVOICE' && x.supplements === null);
     const documentOf = (orderId: string, kind: InvoiceKind) => {
-      const i = invoices.find((x) => x.order.id === orderId && x.kind === kind);
+      const main = mainOf(orderId);
+      const i = kind === 'INVOICE' ? main : main ? invoices.find((x) => x.kind === 'CREDIT_NOTE' && x.scope === 'FULL' && x.credits?.id === main.id) : undefined;
       return i ? { number: i.number, issuedAt: i.issuedAt } : null;
+    };
+    const othersOf = (orderId: string) => {
+      const shown = [documentOf(orderId, 'INVOICE')?.number, documentOf(orderId, 'CREDIT_NOTE')?.number];
+      return invoices.filter((x) => x.order.id === orderId && !shown.includes(x.number)).map((x) => ({ kind: x.kind, number: x.number, issuedAt: x.issuedAt }));
     };
     return rows.map((r) => ({
       id: r.id,
@@ -2100,12 +2207,13 @@ export class OrderService {
       documents: {
         invoice: documentOf(r.id, 'INVOICE'),
         creditNote: documentOf(r.id, 'CREDIT_NOTE'),
+        others: othersOf(r.id),
         careGuide: r.status !== 'CANCELLED' && r.status !== 'RETURNED',
         certificate: ORDER_CERTIFICATE_STATUSES.includes(r.status) && r.ownership_id !== null && r.piece_status !== null && !CERTIFICATE_ENDING_STATUSES.includes(r.piece_status),
       },
       imageUrl: mediaUrl(r.model_image),
       claimCode: claimCodes.get(r.id) ?? null,
-      ...accountDelivery(r, deliveryOf(r)),
+      ...accountDelivery(r, deliveryOf(r), prices),
     }));
   }
 
@@ -2169,6 +2277,62 @@ export class OrderService {
         });
         notes.unshift(await recordChange(tx, o, after, 'order.address', { details: { by: 'collector', country: a.country, changed } }, actor, now));
       }
+      for (const n of notes) await this.audit.record(n, tx);
+    });
+    return this.accountOrder(account, id);
+  }
+
+  /**
+   * The collector's engraving on one of its orders (PUT and DELETE /api/v1/account/orders/:id/engraving; plan NEXT LOT
+   * §3.6.C: « with its price … until packing starts »), `text` null to remove it. Its own order (404 ORDER_NOT_FOUND),
+   * not a welcome gift (409 ORDER_ENGRAVING_UNAVAILABLE), RESERVED or PAID (409 ORDER_CLOSED), packing not started (409
+   * ORDER_PACKING_STARTED); the account ACTIVE (403 ACCOUNT_LOCKED). The words: 1 to 20 letters, figures, spaces and
+   * . & ' ’ - (400). An order with the release's ENGRAVING add-on: its words only, no price, never removed here (409
+   * ORDER_ENGRAVING_INCLUDED). Any other: a new engraving takes its currency's price from the settings (409
+   * ORDER_ENGRAVING_UNAVAILABLE without one), kept; after PAID, its supplementary invoice; removed after PAID, a credit
+   * note for its line; its words changed, no document. The same words again change nothing. The account's lock, then the
+   * order's row. Event and audit `order.engraving` `{ by: 'collector', priced, addon, removed? }`, never the words.
+   */
+  async setEngraving(accountId: string, orderId: string, text: string | null, actor: Actor): Promise<AccountOrder> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw orderNotFound();
+    const account = accountId.toLowerCase();
+    const id = knownOrderId(orderId);
+    let words: string | null = null;
+    if (text !== null) {
+      if (typeof text !== 'string') throw engravingWords();
+      words = text.replace(/\s+/g, ' ').trim();
+      if (!ENGRAVING_RE.test(words)) throw engravingWords();
+    }
+    await inRetriedTransaction(this.db, async (tx) => {
+      const a = await tx.selectFrom('accounts').select('status').where('id', '=', account).forShare().executeTakeFirst();
+      if (!a) throw orderNotFound();
+      if (a.status !== 'ACTIVE') throw customerAccountLocked();
+      const o = await tx.selectFrom('orders').selectAll().where('id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
+      if (!o) throw orderNotFound();
+      if (o.channel === 'GIFT') throw engravingUnavailable();
+      if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
+      if (o.packing_started_at !== null) throw packingStarted();
+      const addon = hasEngravingAddon(o.addons);
+      const now = this.clock();
+      let next: Pick<OrderRow, 'engraving_text' | 'engraving_minor' | 'engraving_by'>;
+      if (words === null) {
+        if (addon) throw engravingIncluded();
+        if (o.engraving_text === null) return;
+        next = { engraving_text: null, engraving_minor: null, engraving_by: null };
+      } else if (o.engraving_text !== null || addon) {
+        // Its words change (or, with the add-on, are typed): the price stays as it is.
+        if (o.engraving_text === words) return;
+        next = { engraving_text: words, engraving_minor: addon ? null : o.engraving_minor, engraving_by: 'COLLECTOR' };
+      } else {
+        const price = await engravingPrice(tx, o.currency);
+        if (price === null) throw engravingUnavailable();
+        next = { engraving_text: words, engraving_minor: price, engraving_by: 'COLLECTOR' };
+      }
+      const after = await updateOrder(tx, o.id, next);
+      const notes: AuditRecordInput[] = [
+        await recordChange(tx, o, after, 'order.engraving', { details: { by: 'collector', priced: after.engraving_minor, addon, ...(words === null ? { removed: true } : {}) } }, actor, now),
+        ...(await engravingDocuments(tx, o, after, actor, now)),
+      ];
       for (const n of notes) await this.audit.record(n, tx);
     });
     return this.accountOrder(account, id);
@@ -2370,10 +2534,23 @@ export class OrderService {
           extra.push(await recordChange(tx, g, priced, 'order.terms', { details: { fields: ['price'], withOrderId: o.id } }, actor, now));
         }
       }
-      if (engraving !== undefined && engraving !== o.engraving_text) {
-        // Migration 0039: Client Services' words (STAFF).
-        after = await updateOrder(tx, o.id, { engraving_text: engraving, engraving_by: engraving === null ? null : 'STAFF' });
+      // Plan NEXT LOT §3.6.C: a currency changed on a RESERVED order: an engraving priced from the settings takes the new
+      // currency's price, or is removed (with its event) when that currency has none; the add-on's is not touched.
+      if (priceChange && after.engraving_minor !== null && after.currency !== o.currency && engraving === undefined) {
+        const repriced = await engravingPrice(tx, after.currency);
+        const moved = await updateOrder(tx, o.id, repriced === null ? { engraving_text: null, engraving_minor: null, engraving_by: null } : { engraving_minor: repriced });
+        extra.push(await recordChange(tx, after, moved, 'order.engraving', { details: { by: 'staff', priced: moved.engraving_minor, addon: false, currency: true, ...(repriced === null ? { removed: true } : {}) } }, actor, now));
+        after = moved;
+      }
+      if (engraving !== undefined && engraving !== after.engraving_text) {
+        // Client Services' words (STAFF). A new engraving without the release's add-on takes its currency's price from the
+        // settings, as the collector's would (none set: no price); its words changed keep their price; removed, none.
+        const addon = hasEngravingAddon(after.addons);
+        const minor = engraving === null || addon ? null : after.engraving_text !== null ? after.engraving_minor : await engravingPrice(tx, after.currency);
+        const before = after;
+        after = await updateOrder(tx, o.id, { engraving_text: engraving, engraving_minor: minor, engraving_by: engraving === null ? null : 'STAFF' });
         fields.push('engraving');
+        extra.push(...(await engravingDocuments(tx, before, after, actor, now)));
       }
       if (sizeChange) {
         if (o.product_id !== null) throw pieceLinked();

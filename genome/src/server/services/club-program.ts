@@ -20,6 +20,10 @@
  *   SHIPPING      `shipping_rates`: what an order's delivery costs below the free shipping of the tiers, per currency
  *                 and service, optional (none preset: an order then carries no shipping, as before). Set whole
  *                 (`setShippingRates`), audited `order.shipping_rates.update`, before and after.
+ *   ENGRAVING     `engraving_prices` (plan NEXT LOT §3.6.C, migration 0039): the engraving's price per currency, for an
+ *                 order whose release did not sell the engraving as an add-on; optional (none preset: a currency without
+ *                 a price offers no engraving). Set whole (`setEngravingPrices`, ADMIN), audited
+ *                 `order.engraving_prices.update`, before and after; read by an order's engraving (`engravingPrice`).
  *
  * Nothing personal is stored here. The tier of each benefit is read when the benefit is used (services/drops.ts,
  * orders.ts, tier-grants.ts), never kept from an earlier reading.
@@ -148,6 +152,13 @@ export interface ShippingRate {
   currency: HouseCurrency;
   service: ShippingService;
   feeMinor: number;
+}
+
+/** ENGRAVING as the console reads it (GET /api/admin/orders/engraving-prices): each currency's price, null for none. */
+export interface EngravingPricesSheet {
+  prices: Record<HouseCurrency, number | null>;
+  updatedAt: Date | null;
+  updatedBy: { id: string; email: string } | null;
 }
 
 /** SHIPPING as the console reads it (GET /api/admin/orders/shipping-rates): the rates set, currency then service. */
@@ -574,6 +585,72 @@ export class ClubProgramService {
     });
     return this.shippingRates();
   }
+
+  // ── ENGRAVING (Orders → Settings, plan NEXT LOT §3.6.C) ─────────────────
+
+  /** The engraving's price per currency (GET /api/admin/orders/engraving-prices), null where none is set. */
+  async engravingPrices(): Promise<EngravingPricesSheet> {
+    const meta = await this.db
+      .selectFrom('engraving_prices as p')
+      .leftJoin('admin_users as u', 'u.id', 'p.updated_by')
+      .select(['p.updated_at', 'p.updated_by', 'u.email'])
+      .orderBy('p.updated_at', 'desc')
+      .limit(1)
+      .executeTakeFirst();
+    return {
+      prices: await engravingPrices(this.db),
+      updatedAt: meta ? meta.updated_at : null,
+      updatedBy: meta?.updated_by && meta.email ? { id: meta.updated_by, email: meta.email } : null,
+    };
+  }
+
+  /**
+   * ENGRAVING set whole (PUT /api/admin/orders/engraving-prices, ADMIN): `{ prices: { EUR, GBP, USD, CHF } }`, each an
+   * amount in minor units within the fee's bounds, or null (that currency's row deleted: no engraving offered in it). An
+   * order keeps the price it took. Audited `order.engraving_prices.update`, before and after.
+   */
+  async setEngravingPrices(input: unknown, actor: Actor): Promise<EngravingPricesSheet> {
+    if (actor?.type !== 'admin' || typeof actor.id !== 'string' || !UUID_RE.test(actor.id)) throw forbidden('Only an ORBES admin sets the engraving prices.');
+    const raw = (input as { prices?: unknown } | null)?.prices;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw validationError('Send the engraving prices.');
+    const next = {} as Record<HouseCurrency, number | null>;
+    for (const c of HOUSE_CURRENCIES) {
+      const v = (raw as Record<string, unknown>)[c];
+      next[c] = v === null || v === undefined ? null : whole(v, PROGRAM_LIMITS.fee, `The ${c} price, in minor units,`);
+    }
+    for (const k of Object.keys(raw)) if (!(HOUSE_CURRENCIES as readonly string[]).includes(k)) throw validationError(`A price is in ${HOUSE_CURRENCIES.join(', ')}.`);
+    await inTransaction(this.db, async (tx) => {
+      const before = await tx.selectFrom('engraving_prices').select(['currency', 'price_minor']).forUpdate().execute();
+      const now = this.clock();
+      await tx.deleteFrom('engraving_prices').execute();
+      const rows = HOUSE_CURRENCIES.filter((c) => next[c] !== null).map((c) => ({ currency: c, price_minor: next[c]!, updated_by: actor.id!, updated_at: now }));
+      if (rows.length) await tx.insertInto('engraving_prices').values(rows).execute();
+      await this.audit.record(
+        {
+          actor,
+          action: 'order.engraving_prices.update',
+          targetType: 'engraving_prices',
+          targetId: null,
+          details: { before: Object.fromEntries(before.map((r) => [r.currency, r.price_minor])), after: Object.fromEntries(rows.map((r) => [r.currency, r.price_minor])) },
+        },
+        tx,
+      );
+    });
+    return this.engravingPrices();
+  }
+}
+
+/** The engraving's price set for a currency (Orders → Settings, Engraving), or null: no engraving offered in it. */
+export async function engravingPrice(db: Db, currency: string | null): Promise<number | null> {
+  if (currency === null || !(HOUSE_CURRENCIES as readonly string[]).includes(currency)) return null;
+  const r = await db.selectFrom('engraving_prices').select('price_minor').where('currency', '=', currency as HouseCurrency).executeTakeFirst();
+  return r ? r.price_minor : null;
+}
+
+/** Every currency's engraving price, null where none is set. */
+export async function engravingPrices(db: Db): Promise<Record<HouseCurrency, number | null>> {
+  const rows = await db.selectFrom('engraving_prices').select(['currency', 'price_minor']).execute();
+  return Object.fromEntries(HOUSE_CURRENCIES.map((c) => [c, rows.find((r) => r.currency === c)?.price_minor ?? null])) as Record<HouseCurrency, number | null>;
 }
 
 /** The rate set for a currency and service, or null (none: the order carries no shipping unless Client Services enters a fee). */

@@ -14,6 +14,17 @@
  *  - the invoice's buyer adds the country's English name; an invoice issued before an address change keeps its buyer;
  *  - `order.address` and `order.buyer` are audited with the country and who, never the words;
  *  - exported to the account with its country and phone.
+ *
+ * And its engraving (plan NEXT LOT §3.6.C, step 6.8):
+ *  - the prices per currency in Orders → Settings (ADMIN), audited before and after; a currency without a price offers no
+ *    engraving, nor does a welcome gift, nor an order whose currency is not entered yet;
+ *  - the collector adds, changes and removes it until packing starts, RESERVED or PAID; the words checked (20 characters
+ *    at most); the price taken kept when the setting changes; after PAID a supplementary invoice or a credit note for its
+ *    line, a free one or its words changed issuing nothing; never the words in the audit log, the events nor the journal;
+ *  - an order whose release sold the engraving as an add-on (its label holds ENGRAVING): its words only, no second
+ *    price, never removed by the collector (409 ORDER_ENGRAVING_INCLUDED); an add-on labelled otherwise offers nothing;
+ *  - Client Services' words take the same price; a currency changed reprices or removes a priced engraving;
+ *  - a LOCKED account changes nothing.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
@@ -86,10 +97,10 @@ describe('an order\'s delivery address (plan NEXT LOT §3.6.B)', () => {
     return id;
   }
 
-  /** A LIVE sale of `quantity` pieces for the account: its orders by piece (the first keys the parcel, the others travel with it). */
-  async function liveSale(account: { id: string; actor: Actor }, quantity: number): Promise<string[]> {
+  /** A LIVE sale of `quantity` pieces for the account: its orders by piece (the first keys the parcel, the others travel with it); the add-ons bought when given. */
+  async function liveSale(account: { id: string; actor: Actor }, quantity: number, addons: { label: string; priceMinor: number }[] = []): Promise<string[]> {
     const opensAt = new Date(clock.now().getTime() + HOUR);
-    const r = await createLiveRelease(f, { modelId: f.modelId, opensAt, sizes: [{ label: '52', stock: 5 }], perAccount: quantity, priceMinor: 480_000 });
+    const r = await createLiveRelease(f, { modelId: f.modelId, opensAt, sizes: [{ label: '52', stock: 5 }], perAccount: quantity, priceMinor: 480_000, ...(addons.length ? { addons } : {}) });
     clock.set(new Date(opensAt.getTime() - MINUTE));
     await f.live.enter(account.id, r.id, { sizeId: r.sizes[0]!.id, quantity }, account.actor);
     clock.set(opensAt);
@@ -98,6 +109,7 @@ describe('an order\'s delivery address (plan NEXT LOT §3.6.B)', () => {
     await f.live.press(account.id, r.id, token);
     clock.advance(1500);
     await f.live.secure(account.id, r.id, token, account.actor);
+    if (addons.length) await f.live.setAddons(account.id, r.id, r.addons.map((x) => x.id), account.actor);
     await f.live.confirm(account.id, r.id, account.actor);
     const entry = await t.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', account.id).executeTakeFirstOrThrow();
     return (await t.db.selectFrom('orders').select('id').where('live_entry_id', '=', entry.id).orderBy('piece').execute()).map((o) => o.id);
@@ -185,14 +197,14 @@ describe('an order\'s delivery address (plan NEXT LOT §3.6.B)', () => {
     const [piece] = await stockPieces(ctx, { skuId: await skuOf('60'), locationId: france, count: 1, material: '925 STERLING SILVER', forOrderIds: [id] }, admin);
     void piece;
     clock.advance(MINUTE);
-    expect((await orders().setAddress(a.id, id, { address: PARIS }, a.actor)).editable).toEqual({ address: true });
+    expect((await orders().setAddress(a.id, id, { address: PARIS }, a.actor)).editable).toMatchObject({ address: true });
     await ctx.services.logistics.startPacking(id, admin, null);
     expect(await refusal(orders().setAddress(a.id, id, { address: LONDON }, a.actor))).toEqual({
       code: 'ORDER_PACKING_STARTED',
       status: 409,
       message: 'Packing has begun: write to ORBES Client Services to change this order.',
     });
-    expect((await orders().accountOrder(a.id, id)).editable).toEqual({ address: false });
+    expect((await orders().accountOrder(a.id, id)).editable).toMatchObject({ address: false });
     // Client Services still does, with the change mark; once shipped, neither.
     clock.advance(MINUTE);
     const staff = await orders().setBuyer(id, { name: GENEVA.name, address: GENEVA.address, country: 'CH', phone: GENEVA.phone }, admin);
@@ -272,5 +284,177 @@ describe('an order\'s delivery address (plan NEXT LOT §3.6.B)', () => {
     expect(exported.orders.find((o) => o.reference === orderReference(id))!.buyer).toEqual({ name: PARIS.name, address: PARIS.address, country: 'FR', phone: PARIS.phone });
     clock.advance(MINUTE);
     await orders().transition(id, { to: 'CANCELLED', note: 'Test over.' }, admin);
+  });
+  describe('its engraving (plan NEXT LOT §3.6.C)', () => {
+    const prices = (p: Partial<Record<'EUR' | 'GBP' | 'USD' | 'CHF', number | null>>) => ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null, ...p } }, admin);
+    const docsOf = (id: string) => t.db.selectFrom('invoices').select(['kind', 'credit_scope', 'supplements_invoice_id', 'total_minor', 'lines']).where('order_id', '=', id).orderBy('issued_at').orderBy('sequence').execute();
+    const mine = async (accountId: string, id: string) => orders().accountOrder(accountId, id);
+
+    it('sets the prices per currency (ADMIN), audited before and after; a currency without a price, a welcome gift or a currency not entered yet offers none', async () => {
+      const operator = { type: 'admin' as const, id: (await t.db.insertInto('admin_users').values({ email: 'op-engraving@orbes.test', email_normalized: 'op-engraving@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow()).id };
+      expect(await refusal(ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, { type: 'account', id: operator.id }))).toMatchObject({ code: 'FORBIDDEN', status: 403 });
+      expect(await refusal(ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: -1, GBP: null, USD: null, CHF: null } }, admin))).toMatchObject({ code: 'VALIDATION_FAILED' });
+      expect(await refusal(ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 1, JPY: 100 } }, admin))).toMatchObject({ code: 'VALIDATION_FAILED' });
+      const sheet = await prices({ EUR: 3_000, CHF: 0 });
+      expect(sheet).toMatchObject({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: 0 }, updatedAt: clock.now(), updatedBy: { id: admin.id } });
+      await prices({ EUR: 3_500 });
+      const audit = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'order.engraving_prices.update').orderBy('id').execute();
+      expect(audit.map((x) => x.details).slice(-2)).toEqual([
+        { before: {}, after: { EUR: 3_000, CHF: 0 } },
+        { before: { EUR: 3_000, CHF: 0 }, after: { EUR: 3_500 } },
+      ]);
+      const a = await createAccount(t.db);
+      // A salon order before its price: no currency, no engraving.
+      const request = await t.db.insertInto('shop_requests').values({ account_id: a.id, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
+      clock.advance(MINUTE);
+      await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
+      const unpriced = (await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+      expect(await mine(a.id, unpriced)).toMatchObject({ engraving: null, engravingOffer: null, editable: { engraving: false } });
+      expect(await refusal(orders().setEngraving(a.id, unpriced, 'J.M.', a.actor))).toEqual({ code: 'ORDER_ENGRAVING_UNAVAILABLE', status: 409, message: 'Engraving is not offered on this order.' });
+      // Priced in EUR: offered at € 35; in GBP (no price): none.
+      await orders().setTerms(unpriced, { sizeLabel: '58', priceMinor: 420_000, currency: 'EUR' }, admin);
+      expect(await mine(a.id, unpriced)).toMatchObject({ engravingOffer: { priceMinor: 3_500, included: false, maxLength: 20 }, editable: { engraving: true } });
+      await orders().setTerms(unpriced, { priceMinor: 300_000, currency: 'GBP' }, admin);
+      expect((await mine(a.id, unpriced)).engravingOffer).toBeNull();
+      // A welcome gift: never.
+      const gift = await createModel(t.db, 'GIFT BANGLE');
+      await inTransaction(t.db, (tx) => ensureSku(tx, gift, null));
+      const program = await ctx.services.clubProgram.read();
+      await ctx.services.clubProgram.update({ ...program, giftPlatineModelId: gift }, admin);
+      const platine = await createAccount(t.db);
+      await holdPieces(t.db, platine.id, 5, f.modelId);
+      const parent = await salonOrder(platine.id);
+      const giftId = (await t.db.selectFrom('orders').select('id').where('with_order_id', '=', parent).where('channel', '=', 'GIFT').executeTakeFirstOrThrow()).id;
+      expect((await mine(platine.id, giftId)).engravingOffer).toBeNull();
+      expect(await refusal(orders().setEngraving(platine.id, giftId, 'J.M.', platine.actor))).toMatchObject({ code: 'ORDER_ENGRAVING_UNAVAILABLE' });
+      await ctx.services.clubProgram.update({ ...program, giftPlatineModelId: null }, admin);
+    });
+
+    it('is added, changed and removed by the collector until packing starts, at the price it took; after PAID a supplementary invoice or a credit note for its line; never its words in the log', async () => {
+      await prices({ EUR: 3_000, CHF: 0 });
+      const a = await createAccount(t.db);
+      const id = await salonOrder(a.id, '62');
+      expect(await refusal(orders().setEngraving(a.id, id, 'Twenty-one characters', a.actor))).toEqual({ code: 'VALIDATION_FAILED', status: 400, message: 'Up to 20 characters: letters, figures, spaces and . & ’ -' });
+      expect(await refusal(orders().setEngraving(a.id, id, 'J.M.!', a.actor))).toMatchObject({ message: 'Up to 20 characters: letters, figures, spaces and . & ’ -' });
+      expect(await refusal(orders().setEngraving(a.id, id, '   ', a.actor))).toMatchObject({ code: 'VALIDATION_FAILED' });
+      // Added before PAID, accents and the house's marks allowed: its price, in TOTAL's reckoning.
+      const added = await orders().setEngraving(a.id, id, 'Hélène & J.-M. ’26', a.actor);
+      expect(added).toMatchObject({ engraving: { text: 'Hélène & J.-M. ’26', priceMinor: 3_000 }, engravingOffer: { priceMinor: 3_000, included: false }, editable: { engraving: true } });
+      expect(await row(id)).toMatchObject({ engraving_text: 'Hélène & J.-M. ’26', engraving_minor: 3_000, engraving_by: 'COLLECTOR' });
+      // The setting changes: the order keeps its price.
+      await prices({ EUR: 4_000, CHF: 0 });
+      clock.advance(MINUTE);
+      expect((await orders().setEngraving(a.id, id, 'H. & J.-M.', a.actor)).engraving).toEqual({ text: 'H. & J.-M.', priceMinor: 3_000 });
+      // Paid: its ENGRAVING line on the invoice; no word on it.
+      await pay(id);
+      const [invoice] = await docsOf(id);
+      expect((invoice!.lines as { kind: string; label: string; amountMinor: number }[]).map((l) => [l.kind, l.label, l.amountMinor])).toEqual([
+        ['PIECE', 'MONOLITHE · SIZE 62', 420_000],
+        ['ENGRAVING', 'Engraving', 3_000],
+      ]);
+      // Its words changed after PAID: no document.
+      clock.advance(MINUTE);
+      await orders().setEngraving(a.id, id, 'H. M.', a.actor);
+      expect(await docsOf(id)).toHaveLength(1);
+      // Removed after PAID: a credit note for its line; added again: a supplementary invoice at today's price.
+      clock.advance(MINUTE);
+      expect((await orders().setEngraving(a.id, id, null, a.actor)).engraving).toBeNull();
+      expect(await row(id)).toMatchObject({ engraving_text: null, engraving_minor: null, engraving_by: null });
+      clock.advance(MINUTE);
+      await orders().setEngraving(a.id, id, 'H. M.', a.actor);
+      expect((await docsOf(id)).map((d) => [d.kind, d.credit_scope, d.supplements_invoice_id !== null, d.total_minor])).toEqual([
+        ['INVOICE', null, false, 423_000],
+        ['CREDIT_NOTE', 'LINES', false, 3_000],
+        ['INVOICE', null, true, 4_000],
+      ]);
+      // Removing an engraving already gone changes nothing.
+      clock.advance(MINUTE);
+      await orders().setEngraving(a.id, id, null, a.actor);
+      await orders().setEngraving(a.id, id, null, a.actor);
+      expect((await docsOf(id)).map((d) => d.credit_scope)).toEqual([null, 'LINES', null, 'LINES']);
+      // Audited by who, its price and whether it was the add-on; never the words, in the log, the events or the journal.
+      const audit = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'order.engraving').where('target_id', '=', id).orderBy('id').execute();
+      expect(audit.map((x) => [x.details.by, x.details.priced, x.details.addon, x.details.removed ?? false])).toEqual([
+        ['collector', 3_000, false, false],
+        ['collector', 3_000, false, false],
+        ['collector', 3_000, false, false],
+        ['collector', null, false, true],
+        ['collector', 4_000, false, false],
+        ['collector', null, false, true],
+      ]);
+      const everything = JSON.stringify([
+        await t.db.selectFrom('audit_logs').select('details').execute(),
+        await t.db.selectFrom('order_events').select(['note', 'details']).execute(),
+        await t.db.selectFrom('event_journal').select('payload').execute(),
+        await t.db.selectFrom('invoices').select(['lines', 'buyer']).execute(),
+      ]);
+      for (const w of ['Hélène', 'H. & J.-M.', 'H. M.']) expect(everything, w).not.toContain(w);
+      // A free engraving (CHF 0): no document after PAID.
+      const b = await createAccount(t.db);
+      const free = await salonOrder(b.id, '64');
+      await orders().setTerms(free, { priceMinor: 300_000, currency: 'CHF' }, admin);
+      await pay(free);
+      expect((await orders().setEngraving(b.id, free, 'B.', b.actor)).engraving).toEqual({ text: 'B.', priceMinor: 0 });
+      await orders().setEngraving(b.id, free, null, b.actor);
+      expect((await docsOf(free)).map((d) => d.kind)).toEqual(['INVOICE']);
+      // Packing started: the words no longer change; a LOCKED account changes nothing.
+      await orders().setEngraving(a.id, id, 'H. M.', a.actor);
+      await stockPieces(ctx, { skuId: await skuOf('62'), locationId: france, count: 1, material: '925 STERLING SILVER', forOrderIds: [id] }, admin);
+      await orders().setAddress(a.id, id, { address: PARIS }, a.actor);
+      await ctx.services.logistics.startPacking(id, admin, null);
+      expect(await refusal(orders().setEngraving(a.id, id, 'H.', a.actor))).toMatchObject({ code: 'ORDER_PACKING_STARTED', status: 409 });
+      expect(await mine(a.id, id)).toMatchObject({ engraving: { text: 'H. M.', priceMinor: 4_000 }, editable: { engraving: false } });
+      await t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', b.id).execute();
+      const locked = await salonOrder(b.id, '64');
+      expect(await refusal(orders().setEngraving(b.id, locked, 'B.', b.actor))).toMatchObject({ code: 'ACCOUNT_LOCKED', status: 403 });
+      await prices({});
+    });
+
+    it('takes the words alone, with no second price, on an order whose release sold the engraving as an add-on; never removed by the collector; an add-on labelled otherwise offers nothing', async () => {
+      await prices({ EUR: 3_000 });
+      const a = await createAccount(t.db);
+      const [order] = await liveSale(a, 1, [{ label: 'ENGRAVING OF YOUR INITIALS AND A DATE', priceMinor: 15_000 }]);
+      expect(await mine(a.id, order!)).toMatchObject({ engraving: null, engravingOffer: { priceMinor: null, included: true, maxLength: 20 }, editable: { engraving: true } });
+      expect(await orders().setEngraving(a.id, order!, 'A. & L.', a.actor)).toMatchObject({ engraving: { text: 'A. & L.', priceMinor: null } });
+      expect(await refusal(orders().setEngraving(a.id, order!, null, a.actor))).toEqual({
+        code: 'ORDER_ENGRAVING_INCLUDED',
+        status: 409,
+        message: 'Your engraving was bought with your order: its words may change until packing begins. ORBES Client Services can assist you.',
+      });
+      await pay(order!);
+      clock.advance(MINUTE);
+      await orders().setEngraving(a.id, order!, 'A. L.', a.actor);
+      expect(await row(order!)).toMatchObject({ engraving_text: 'A. L.', engraving_minor: null, engraving_by: 'COLLECTOR' });
+      // Its invoice: the add-on's line, no ENGRAVING line; no other document.
+      const docs = await docsOf(order!);
+      expect(docs).toHaveLength(1);
+      expect((docs[0]!.lines as { kind: string }[]).map((l) => l.kind)).toEqual(['PIECE', 'ADDON']);
+      expect(docs[0]!.total_minor).toBe(495_000);
+      const audit = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'order.engraving').where('target_id', '=', order!).orderBy('id').execute();
+      expect(audit.map((x) => [x.details.priced, x.details.addon])).toEqual([[null, true], [null, true]]);
+      // An add-on labelled otherwise (GIFT BOX), with no price set: nothing offered.
+      await prices({});
+      const b = await createAccount(t.db);
+      const [boxed] = await liveSale(b, 1, [{ label: 'GIFT BOX', priceMinor: 5_000 }]);
+      expect((await mine(b.id, boxed!)).engravingOffer).toBeNull();
+    });
+
+    it('prices Client Services\' words as the collector\'s; a currency changed on a RESERVED order reprices a priced engraving, or removes it when that currency has none', async () => {
+      await prices({ EUR: 3_000, GBP: 2_500 });
+      const a = await createAccount(t.db);
+      const id = await salonOrder(a.id, '66');
+      await orders().setTerms(id, { engravingText: 'C. S.' }, admin);
+      expect(await row(id)).toMatchObject({ engraving_text: 'C. S.', engraving_minor: 3_000, engraving_by: 'STAFF' });
+      await orders().setTerms(id, { priceMinor: 350_000, currency: 'GBP' }, admin);
+      expect(await row(id)).toMatchObject({ currency: 'GBP', engraving_text: 'C. S.', engraving_minor: 2_500 });
+      await orders().setTerms(id, { priceMinor: 400_000, currency: 'USD' }, admin);
+      expect(await row(id)).toMatchObject({ currency: 'USD', engraving_text: null, engraving_minor: null, engraving_by: null });
+      const events = await t.db.selectFrom('order_events').select('details').where('order_id', '=', id).where('action', '=', 'order.engraving').orderBy('id').execute();
+      expect(events.map((e) => e.details)).toEqual([
+        { by: 'staff', priced: 2_500, addon: false, currency: true },
+        { by: 'staff', priced: null, addon: false, currency: true, removed: true },
+      ]);
+      await prices({});
+    });
   });
 });

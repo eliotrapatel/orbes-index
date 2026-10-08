@@ -170,6 +170,22 @@ describe('orders, the stock and their settings: the console\'s routes', () => {
     await admin.request('PUT', '/api/admin/orders/alerts', { body: { reservedDays: 2, readyDays: 5, shippedDays: 10, unregisteredDays: 30 } });
   });
 
+  it('sets the engraving\'s price per currency (ADMIN; plan NEXT LOT §3.6.C), read by an AUDITOR, set whole, audited before and after', async () => {
+    expect(safeJson(await auditor.get('/api/admin/orders/engraving-prices'))).toEqual({ prices: { EUR: null, GBP: null, USD: null, CHF: null }, updatedAt: null, updatedBy: null });
+    expect((await op.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } } })).statusCode).toBe(403);
+    expect(errorOf(await admin.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: 3_000 } } })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await admin.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: -1, GBP: null, USD: null, CHF: null } } })).code).toBe('VALIDATION_FAILED');
+    const set = safeJson(await admin.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: 3_000, GBP: 2_500, USD: null, CHF: 0 } } })) as Json;
+    expect(set).toMatchObject({ prices: { EUR: 3_000, GBP: 2_500, USD: null, CHF: 0 }, updatedAt: expect.any(String), updatedBy: { email: expect.any(String) } });
+    const cleared = safeJson(await admin.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices: { EUR: null, GBP: null, USD: null, CHF: null } } })) as Json;
+    expect(cleared.prices).toEqual({ EUR: null, GBP: null, USD: null, CHF: null });
+    const audit = await h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'order.engraving_prices.update').orderBy('id').execute();
+    expect(audit.map((a) => a.details)).toEqual([
+      { before: {}, after: { EUR: 3_000, GBP: 2_500, CHF: 0 } },
+      { before: { EUR: 3_000, GBP: 2_500, CHF: 0 }, after: {} },
+    ]);
+  });
+
   it('adds and renames a location, makes it the default; adds a carrier with its tracking link, edits it, sets it aside (ADMIN), audited', async () => {
     expect((await op.post('/api/admin/locations', { name: 'PARIS ATELIER' })).statusCode).toBe(403);
     const paris = safeJson(await admin.post('/api/admin/locations', { name: 'PARIS ATELIER' })) as Json;

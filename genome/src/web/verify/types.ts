@@ -1134,8 +1134,15 @@ export interface AccountOrder {
   address?: { name: string; lines: string; country: string | null; phone: string | null } | null;
   /** The reference of the order it travels with, whose address it is delivered to; null for an order of its own. */
   addressOf?: string | null;
+  /**
+   * Plan NEXT LOT §3.6.C: its engraving's words and the price it was taken at (null: the release's add-on, or one of
+   * before); null without one. Absent from a server before it: none.
+   */
+  engraving?: { text: string; priceMinor: number | null } | null;
+  /** The engraving it may carry: a price from the settings, or the release's add-on (`included`); null when none is offered. */
+  engravingOffer?: { priceMinor: number | null; included: boolean; maxLength: number } | null;
   /** What the collector may change on it now, as the server reads it. Absent from a server before it: nothing. */
-  editable?: { address: boolean };
+  editable?: { address: boolean; engraving: boolean };
 }
 
 /** A delivery address as the collector types it (plan NEXT LOT §3.6.B): a name, the lines, a country and a phone. */
@@ -1178,6 +1185,11 @@ export interface AccountOrderDocuments {
   invoice: { number: string; issuedAt: string } | null;
   /** The credit note that cancels it (PDF), once cancelled after it was paid, or returned. */
   creditNote: { number: string; issuedAt: string } | null;
+  /**
+   * Plan NEXT LOT §3.6.C: its other documents (a supplementary invoice, a credit note for single lines), in order of
+   * issue, each read by its number. Absent from a server before it: none.
+   */
+  others?: { kind: 'INVOICE' | 'CREDIT_NOTE'; number: string; issuedAt: string }[];
   /** The model's care guide: for an order neither cancelled nor returned. */
   careGuide: boolean;
   /** Its ownership certificate (PDF), once its piece is registered to this account. */

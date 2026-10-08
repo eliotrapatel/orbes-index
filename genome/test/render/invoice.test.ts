@@ -141,14 +141,16 @@ describe('invoice and credit note (M7)', () => {
     }
   });
 
-  it('holds the most lines an invoice carries (BP-19): the piece, six add-ons, its shipping, a credit and a welcome gift per tier; up to seven at the table\'s pitch, more sharing its height above the total', () => {
-    // The budget is the services' own figures: LIVE_ADDONS_MAX add-ons, one CREDIT and one GIFT line per tier above TITANE.
+  it('holds the most lines an invoice carries (BP-19): the piece, six add-ons, an engraving (plan NEXT LOT §3.6.C), its shipping, a credit and a welcome gift per tier; up to seven at the table\'s pitch, more sharing its height above the total', () => {
+    // The budget is the services' own figures: LIVE_ADDONS_MAX add-ons, one ENGRAVING line (priced from the settings; one
+    // bought as an add-on is an add-on line), one CREDIT and one GIFT line per tier above TITANE.
     const tiersWithGrants = CLUB_TIER_THRESHOLDS.length - 1;
-    expect(INVOICE_LINE_BUDGET).toEqual({ piece: 1, addons: LIVE_ADDONS_MAX, shipping: 1, credit: tiersWithGrants, gift: tiersWithGrants });
-    expect(INVOICE_MAX_LINES).toBe(1 + LIVE_ADDONS_MAX + 1 + 2 + 2);
+    expect(INVOICE_LINE_BUDGET).toEqual({ piece: 1, addons: LIVE_ADDONS_MAX, engraving: 1, shipping: 1, credit: tiersWithGrants, gift: tiersWithGrants });
+    expect(INVOICE_MAX_LINES).toBe(1 + LIVE_ADDONS_MAX + 1 + 1 + 2 + 2);
     const lines = [
       { label: 'MONOLITHE · SIZE 52', detail: 'LIVE RELEASE · MONOLITHE IN STEEL', amountMinor: 505_000 },
       ...Array.from({ length: LIVE_ADDONS_MAX }, (_, i) => ({ label: `ADD-ON ${i + 1}`, detail: null, amountMinor: 1_000 })),
+      { label: 'Engraving', detail: null, amountMinor: 3_000 },
       { label: 'SHIPPING · EXPRESS', detail: 'FREE · PALLADIUM', amountMinor: 0 },
       { label: 'CREDIT · PALLADIUM', detail: null, amountMinor: -10_000 },
       { label: 'CREDIT · PLATINE', detail: null, amountMinor: -5_000 },

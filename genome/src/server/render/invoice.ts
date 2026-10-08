@@ -56,6 +56,11 @@ export interface InvoiceDocument {
   order: string;
   /** The number of the invoice a credit note cancels; null for an invoice. */
   credits: string | null;
+  /** Plan NEXT LOT §3.6.C: the number of the invoice a supplementary invoice supplements (an engraving after PAID). */
+  supplements?: string | null;
+  /** A credit note's scope: FULL (in full, or what remains: `remains`) or LINES (the lines it lists). */
+  scope?: 'FULL' | 'LINES' | null;
+  remains?: boolean;
   issuer: { name: string; address: readonly string[] };
   /** As entered by ORBES Client Services (masked for an AUDITOR by the caller), and the account's email. */
   /** Plan NEXT LOT §3.6.B: the delivery country's English name, the address's last line (none on an invoice of before). */
@@ -68,13 +73,17 @@ export interface InvoiceDocument {
 /** The fixed lettering (house voice: capitals, tracked). */
 export const INVOICE_COPY = Object.freeze({
   title: Object.freeze({ INVOICE: 'INVOICE', CREDIT_NOTE: 'CREDIT NOTE' } as const),
-  rows: Object.freeze({ number: 'NUMBER', date: 'DATE', order: 'ORDER', credits: 'CANCELS', currency: 'CURRENCY' }),
+  rows: Object.freeze({ number: 'NUMBER', date: 'DATE', order: 'ORDER', credits: 'CANCELS', supplements: 'SUPPLEMENTS', currency: 'CURRENCY' }),
   issuedBy: 'ISSUED BY',
   billedTo: 'BILLED TO',
   description: 'DESCRIPTION',
   amount: 'AMOUNT',
   total: 'TOTAL',
   cancels: (invoice: string) => `THIS CREDIT NOTE CANCELS INVOICE ${invoice} IN FULL.`,
+  /** Plan NEXT LOT §3.6.C: a credit note for single lines, and the one that cancels what remains of an invoice. */
+  cancelsLines: (invoice: string) => `THIS CREDIT NOTE CANCELS THE LINES ABOVE OF INVOICE ${invoice}.`,
+  cancelsRemains: (invoice: string) => `THIS CREDIT NOTE CANCELS WHAT REMAINS OF INVOICE ${invoice}.`,
+  supplements: (invoice: string) => `THIS INVOICE SUPPLEMENTS INVOICE ${invoice}.`,
   foot: 'ORBES · THEORBES.COM',
 });
 
@@ -109,8 +118,8 @@ export const INVOICE_LAYOUT = Object.freeze({
  * BP-19 T4 and T5). Written out here, the renderer importing no service; test/render/invoice.test.ts holds them to the
  * services' own figures.
  */
-export const INVOICE_LINE_BUDGET = Object.freeze({ piece: 1, addons: 6, shipping: 1, credit: 2, gift: 2 });
-/** Lines a page holds: the sum of the budget, 12. Up to seven keep the table's pitch; more share its height. */
+export const INVOICE_LINE_BUDGET = Object.freeze({ piece: 1, addons: 6, engraving: 1, shipping: 1, credit: 2, gift: 2 });
+/** Lines a page holds: the sum of the budget, 13. Up to seven keep the table's pitch; more share its height. */
 export const INVOICE_MAX_LINES = Object.values(INVOICE_LINE_BUDGET).reduce((n, k) => n + k, 0);
 /** The lines that keep the table's own pitch. */
 const FULL_PITCH_LINES = 7;
@@ -141,6 +150,7 @@ export function layoutInvoice(d: InvoiceDocument): PdfPage {
   if (!NUMBER_RE.test(d.number) || (d.kind === 'INVOICE') !== d.number.startsWith('INV-')) throw new CertificateInputError('not a document number');
   if (!ORDER_RE.test(d.order)) throw new CertificateInputError('not an order reference');
   if ((d.kind === 'CREDIT_NOTE') !== (d.credits !== null) || (d.credits !== null && !NUMBER_RE.test(d.credits))) throw new CertificateInputError('a credit note names the invoice it cancels');
+  if (d.supplements && (d.kind !== 'INVOICE' || !NUMBER_RE.test(d.supplements))) throw new CertificateInputError('a supplementary invoice names the invoice it supplements');
   if (!/^[A-Z]{3}$/.test(d.currency)) throw new CertificateInputError('not a currency');
   if (d.lines.length < 1 || d.lines.length > INVOICE_MAX_LINES) throw new CertificateInputError(`one to ${INVOICE_MAX_LINES} lines`);
   if (d.lines.reduce((n, l) => n + l.amountMinor, 0) !== d.totalMinor) throw new CertificateInputError('the total is the sum of the lines');
@@ -175,6 +185,7 @@ export function layoutInvoice(d: InvoiceDocument): PdfPage {
     [C.rows.date, longDate(d.issuedAt)],
     [C.rows.order, d.order],
     ...(d.credits ? [[C.rows.credits, d.credits] as [string, string]] : []),
+    ...(d.supplements ? [[C.rows.supplements, d.supplements] as [string, string]] : []),
     [C.rows.currency, d.currency],
   ];
   facts.forEach(([l, v], i) => {
@@ -211,7 +222,8 @@ export function layoutInvoice(d: InvoiceDocument): PdfPage {
   rule(L.ruleTotal);
   line(C.total, { cap: L.total.cap, tracking: L.total.tracking, x: L.left, baseline: L.total.baseline });
   line(documentAmount(d.totalMinor, d.currency), { cap: L.total.cap, tracking: L.total.tracking, x: L.right, baseline: L.total.baseline, align: 'end' });
-  if (d.credits) line(C.cancels(d.credits), { cap: L.statement.cap, tracking: L.statement.tracking, x: L.left, baseline: L.statement.baseline });
+  const statement = d.credits ? (d.scope === 'LINES' ? C.cancelsLines(d.credits) : d.remains ? C.cancelsRemains(d.credits) : C.cancels(d.credits)) : d.supplements ? C.supplements(d.supplements) : null;
+  if (statement) line(statement, { cap: L.statement.cap, tracking: L.statement.tracking, x: L.left, baseline: L.statement.baseline });
   line(C.foot, { cap: L.foot.cap, tracking: L.foot.tracking, x: L.left, baseline: L.foot.baseline });
 
   return { widthMm: pw, heightMm: ph, placements: [], marks: strokes, markColor: INK, shapes: monogram.map((m) => ({ d: m, color: INK })) };

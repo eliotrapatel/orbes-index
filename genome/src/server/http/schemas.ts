@@ -1453,6 +1453,18 @@ export const orderTermsBody = body({
     path: ['shippingMinor'],
   });
 
+/** PUT /api/v1/account/orders/:id/engraving (plan NEXT LOT §3.6.C): the words, checked by the service in its own words. */
+export const accountEngravingBody = body({ text: z.string().max(200, 'Up to 20 characters: letters, figures, spaces and . & ’ -') });
+
+/** GET /api/v1/account/orders/:id/documents/:number (plan NEXT LOT §3.6.C): a document of the order by its number. */
+export const accountDocumentParams = z.object({ id: uuid, number: z.string().trim().max(20, 'Not a document number') });
+
+/** PUT /api/admin/orders/engraving-prices (plan NEXT LOT §3.6.C): each currency's price in minor units, or null for none. */
+const engravingPrice = whole(PROGRAM_LIMITS.fee.min, PROGRAM_LIMITS.fee.max, 'minor units').nullable();
+export const engravingPricesBody = body({
+  prices: z.strictObject({ EUR: engravingPrice, GBP: engravingPrice, USD: engravingPrice, CHF: engravingPrice }, { error: 'The prices are EUR, GBP, USD and CHF' }),
+});
+
 /** PUT /api/admin/orders/:id/buyer's country and phone (plan NEXT LOT §3.6.B): checked by the service in its own words. */
 const buyerCountry = z.preprocess(emptyToNull, z.string().max(8, 'Choose a country').nullable().optional());
 const buyerPhone = z.preprocess(emptyToNull, z.string().max(60, 'Enter a phone number with its country code').nullable().optional());

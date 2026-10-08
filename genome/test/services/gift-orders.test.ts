@@ -10,7 +10,7 @@
  *  - a parent with no currency yet gives its gift no price; priced, the gift takes 0 in its currency; the gift travels
  *    with it (its shipping at 0), has no price of its own (409 ORDER_TERMS_FIXED) and is never paid alone;
  *  - paid with its order, with no invoice of its own: the order's invoice carries its GIFT line at 0; an invoice at the
- *    most lines it carries (six add-ons, its shipping, a credit split over both tiers, both tiers' gifts) is drawn;
+ *    most lines it carries (six add-ons, an engraving, its shipping, a credit split over both tiers, both tiers' gifts) is drawn;
  *  - in the Shopify order export, its own order at 0.00 (Source orbes-gift), once its parent is priced;
  *  - while its size is to be chosen, the collector's saved size (YOUR SIZES, AC-01) is a hint for Client Services only:
  *    the matching size's label or the saved measure; nothing is chosen for them;
@@ -409,7 +409,7 @@ describe('the welcome gift (BP-19 T5)', () => {
     await setGift(3, null);
   });
 
-  it('draws an invoice at the most lines it carries: six add-ons, its shipping, a credit split over both tiers and both tiers\' gifts', async () => {
+  it('draws an invoice at the most lines it carries: six add-ons, an engraving priced from the settings (plan NEXT LOT §3.6.C), its shipping, a credit split over both tiers and both tiers\' gifts', async () => {
     const [platineGift, palladiumGift] = [await giftModel('ANNEAU VII', [null], 2), await giftModel('ANNEAU VIII', [null], 2)];
     await setGift(2, platineGift);
     await setGift(3, palladiumGift);
@@ -437,10 +437,14 @@ describe('the welcome gift (BP-19 T5)', () => {
     expect(await giftsOf(order.id)).toHaveLength(2);
     // € 150 of credit: PALLADIUM's € 100, then PLATINE's € 50.
     await orders().applyCredit(order.id, 15_000, admin);
+    // An engraving priced from the settings (plan NEXT LOT §3.6.C), entered by Client Services: its own line.
+    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, admin);
+    await orders().setTerms(order.id, { engravingText: 'A. & L.' }, admin);
     await pay(order.id);
+    await ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, admin);
     const invoice = await t.db.selectFrom('invoices').selectAll().where('order_id', '=', order.id).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow();
     const lines = linesOf(invoice.lines);
-    expect(lines.map((l) => l.kind)).toEqual(['PIECE', ...Array(LIVE_ADDONS_MAX).fill('ADDON'), 'SHIPPING', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT']);
+    expect(lines.map((l) => l.kind)).toEqual(['PIECE', ...Array(LIVE_ADDONS_MAX).fill('ADDON'), 'ENGRAVING', 'SHIPPING', 'CREDIT', 'CREDIT', 'GIFT', 'GIFT']);
     expect(lines).toHaveLength(INVOICE_MAX_LINES);
     expect(lines.filter((l) => l.kind === 'CREDIT').map((l) => [l.label, l.amountMinor])).toEqual([
       ['CREDIT · PALLADIUM', -10_000],

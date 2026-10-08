@@ -15,6 +15,14 @@
  *                own kind), the currency, the subtotal and the total; `vat_rate_bp` and
  *                `vat_minor` NULL. A credit note repeats the lines, the buyer and the amounts of the invoice it
  *                cancels, in full, once (`credits_invoice_id`).
+ *   engraving    (plan NEXT LOT §3.6.C) an engraving priced from Orders → Settings is an ENGRAVING line (`Engraving`,
+ *                never its words) on the invoice issued at PAID; one bought as the release's add-on is already its
+ *                ADDON line. Added after PAID, it gets a **supplementary invoice** of its own (`issueSupplementaryInvoice`:
+ *                the next INV- number, `supplements_invoice_id` naming the order's invoice, its buyer as issued there);
+ *                removed after PAID, a **credit note for that one line** (`issueLineCreditNote`, `credit_scope` LINES:
+ *                on the supplementary invoice that carried it, or on the order's invoice). A later cancellation or return
+ *                credits every invoice of the order for what is still invoiced (`issueCreditNote`, FULL), never a line
+ *                twice. An issued invoice never changes.
  *   history      issued in the transaction of the order's step (services/orders.ts): one entry of the event journal
  *                (`invoice.issue`, `invoice.credit`: the document without its buyer) and one audit entry, with ids,
  *                numbers and amounts, never the buyer's details.
@@ -24,7 +32,7 @@
  */
 import { sql, type RawBuilder } from 'kysely';
 import { advisoryXactLock, ADVISORY_LOCK, type Db } from '../db/connection.js';
-import { INVOICE_KINDS, jsonText, type InvoiceKind, type JsonObject, type OrderChannel, type OrderRow } from '../db/schema.js';
+import { INVOICE_KINDS, jsonText, type CreditScope, type InvoiceKind, type JsonObject, type OrderChannel, type OrderRow } from '../db/schema.js';
 import { notFound, validationError } from '../errors.js';
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
 import { renderInvoicePdf, type InvoiceDocument } from '../render/invoice.js';
@@ -72,8 +80,13 @@ export const monthOf = (d: Date): string => d.toISOString().slice(0, 7);
 /** Where a piece was sold, as its invoice line says it beneath the piece. */
 const CHANNEL_WORDS: Readonly<Record<OrderChannel, string>> = Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT', EXCHANGE: 'SIZE EXCHANGE' });
 
-/** The kinds of an invoice's lines: the piece, an add-on, and (BP-19) its shipping, a credit taken off it, a welcome gift. */
-export const INVOICE_LINE_KINDS = Object.freeze(['PIECE', 'ADDON', 'SHIPPING', 'CREDIT', 'GIFT'] as const);
+/**
+ * The kinds of an invoice's lines: the piece, an add-on, and (BP-19) its shipping, a credit taken off it, a welcome gift;
+ * (plan NEXT LOT §3.6.C) an engraving priced from Orders → Settings.
+ */
+export const INVOICE_LINE_KINDS = Object.freeze(['PIECE', 'ADDON', 'SHIPPING', 'CREDIT', 'GIFT', 'ENGRAVING'] as const);
+/** An engraving's line: its label only, never its words. */
+export const ENGRAVING_LINE_LABEL = 'Engraving';
 export type InvoiceLineKind = (typeof INVOICE_LINE_KINDS)[number];
 
 /** The tiers as a free shipping's or a credit's line names them. */
@@ -108,8 +121,14 @@ export interface InvoiceView {
   order: { id: string; reference: string };
   /** The invoice a credit note cancels. */
   credits: { id: string; number: string } | null;
-  /** The credit note that cancels an invoice. */
+  /** The credit note that cancels an invoice in full (or what remains of it). */
   creditedBy: { id: string; number: string } | null;
+  /** Plan NEXT LOT §3.6.C: a supplementary invoice's main invoice; null otherwise. */
+  supplements: { id: string; number: string } | null;
+  /** A credit note's scope: FULL (what remains of its invoice) or LINES (single lines); null on an invoice. */
+  scope: CreditScope | null;
+  /** A FULL credit note of an invoice whose lines were partly credited before: it cancels what remains. */
+  remains: boolean;
   issuer: { name: string; address: string[] };
   buyer: InvoiceBuyer;
   lines: InvoiceLine[];
@@ -148,6 +167,8 @@ interface InvoiceRow {
   sequence: number;
   order_id: string;
   credits_invoice_id: string | null;
+  supplements_invoice_id?: string | null;
+  credit_scope?: CreditScope | null;
   issuer: JsonObject;
   buyer: JsonObject;
   lines: unknown[];
@@ -168,6 +189,8 @@ export function invoicePayload(r: InvoiceRow, credits: string | null): JsonObjec
     orderId: r.order_id,
     creditsInvoiceId: r.credits_invoice_id,
     credits,
+    supplementsInvoiceId: r.supplements_invoice_id ?? null,
+    creditScope: r.credit_scope ?? null,
     issuer: r.issuer,
     lines: r.lines as JsonObject[],
     currency: r.currency,
@@ -208,7 +231,7 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
   // A welcome gift has no invoice of its own: its order's carries its GIFT line (BP-19 T5).
   if (o.channel === 'GIFT') return null;
   if (o.price_minor === null || o.currency === null) throw new Error(`issueInvoice: order ${o.id} has no price`);
-  if (await tx.selectFrom('invoices').select('id').where('order_id', '=', o.id).where('kind', '=', 'INVOICE').executeTakeFirst()) return null;
+  if (await tx.selectFrom('invoices').select('id').where('order_id', '=', o.id).where('kind', '=', 'INVOICE').where('supplements_invoice_id', 'is', null).executeTakeFirst()) return null;
   const facts = await tx
     .selectFrom('orders as o')
     .innerJoin('models as m', 'm.id', 'o.model_id')
@@ -221,6 +244,8 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
   const lines: InvoiceLine[] = [
     { kind: 'PIECE', label: `${facts.model}${size}`, detail: [CHANNEL_WORDS[o.channel], facts.release].filter(Boolean).join(' · '), amountMinor: o.price_minor },
     ...o.addons.map((a): InvoiceLine => ({ kind: 'ADDON', label: a.label, detail: null, amountMinor: a.priceMinor })),
+    // Plan NEXT LOT §3.6.C: an engraving priced from the settings (one bought as the release's add-on is its ADDON line).
+    ...(o.engraving_minor !== null ? [engravingLine(o.engraving_minor)] : []),
     // BP-19 T4: its shipping, free by its tier or at its fee; an order travelling with another has no line of its own.
     ...(o.shipping_service !== null && o.shipping_minor !== null && o.with_order_id === null
       ? [{ kind: 'SHIPPING' as const, label: `SHIPPING · ${o.shipping_service}`, detail: o.shipping_benefit === 2 || o.shipping_benefit === 3 ? `FREE · ${TIER_WORDS[o.shipping_benefit]}` : null, amountMinor: o.shipping_minor }]
@@ -278,49 +303,139 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
   return { actor, action: 'invoice.issue', targetType: 'invoice', targetId: row.id, details: { orderId: o.id, number, currency: o.currency, totalMinor: total } };
 }
 
+/** The ENGRAVING line of an engraving priced at `minor` (plan NEXT LOT §3.6.C): its label, never its words. */
+export function engravingLine(minor: number): InvoiceLine {
+  return { kind: 'ENGRAVING', label: ENGRAVING_LINE_LABEL, detail: null, amountMinor: minor };
+}
+
+const lineKey = (l: InvoiceLine) => JSON.stringify([l.kind, l.label, l.detail, l.amountMinor]);
+
 /**
- * The credit note of an order paid then cancelled or returned, in its transaction (the order's row locked): its
- * invoice cancelled in full, once. Journaled `invoice.credit`; returns the audit entry for the caller to write last.
- * None when the order has no invoice (never paid) or its invoice is credited already.
+ * The lines of an invoice not credited yet: its lines minus those of the credit notes for single lines that credit it
+ * (each line once); none once a credit note credits it in full.
  */
-export async function issueCreditNote(tx: Db, o: OrderRow, reason: 'cancel' | 'return', actor: Actor, now: Date): Promise<AuditRecordInput | null> {
-  const invoice = await tx.selectFrom('invoices').selectAll().where('order_id', '=', o.id).where('kind', '=', 'INVOICE').executeTakeFirst();
-  if (!invoice) return null;
-  if (await tx.selectFrom('invoices').select('id').where('credits_invoice_id', '=', invoice.id).executeTakeFirst()) return null;
+async function uncreditedLines(tx: Db, invoice: { id: string; lines: unknown[] }): Promise<InvoiceLine[]> {
+  const credits = await tx.selectFrom('invoices').select(['lines', 'credit_scope']).where('credits_invoice_id', '=', invoice.id).execute();
+  if (credits.some((c) => c.credit_scope === 'FULL')) return [];
+  const taken = new Map<string, number>();
+  for (const c of credits) for (const l of linesOf(c.lines as unknown[])) taken.set(lineKey(l), (taken.get(lineKey(l)) ?? 0) + 1);
+  const out: InvoiceLine[] = [];
+  for (const l of linesOf(invoice.lines)) {
+    const k = lineKey(l);
+    const n = taken.get(k) ?? 0;
+    if (n > 0) taken.set(k, n - 1);
+    else out.push(l);
+  }
+  return out;
+}
+
+/** Insert a document (its next number under its lock) and journal it; returns its row and number. */
+async function insertDocument(
+  tx: Db,
+  d: { kind: InvoiceKind; orderId: string; creditsInvoiceId?: string; supplementsInvoiceId?: string; scope?: CreditScope; buyer: unknown; lines: InvoiceLine[]; currency: string; vatRateBp?: number | null; vatMinor?: number | null; totalMinor?: number },
+  now: Date,
+): Promise<{ row: InvoiceRow; number: string }> {
+  const total = d.totalMinor ?? d.lines.reduce((n, l) => n + l.amountMinor, 0);
   const year = now.getUTCFullYear();
-  const { sequence, issuedAt } = await nextSequence(tx, 'CREDIT_NOTE', year, now);
-  const row = await tx
+  const { sequence, issuedAt } = await nextSequence(tx, d.kind, year, now);
+  const row = (await tx
     .insertInto('invoices')
     .values({
-      kind: 'CREDIT_NOTE',
+      kind: d.kind,
       year,
       sequence,
-      order_id: o.id,
-      credits_invoice_id: invoice.id,
-      // Migration 0039: a credit note says what it credits; this one, the whole invoice.
-      credit_scope: 'FULL',
+      order_id: d.orderId,
+      credits_invoice_id: d.creditsInvoiceId ?? null,
+      supplements_invoice_id: d.supplementsInvoiceId ?? null,
+      // Migration 0039: a credit note says what it credits.
+      credit_scope: d.kind === 'CREDIT_NOTE' ? (d.scope ?? 'FULL') : null,
       issuer: jsonText({ name: INVOICE_ISSUER.name, address: [...INVOICE_ISSUER.address] }),
-      buyer: jsonText(invoice.buyer),
-      lines: jsonText(invoice.lines),
-      currency: invoice.currency,
-      subtotal_minor: invoice.subtotal_minor,
-      vat_rate_bp: invoice.vat_rate_bp,
-      vat_minor: invoice.vat_minor,
-      total_minor: invoice.total_minor,
+      buyer: jsonText(d.buyer as JsonObject),
+      lines: jsonText(d.lines),
+      currency: d.currency,
+      subtotal_minor: d.vatMinor ? total - d.vatMinor : total,
+      vat_rate_bp: d.vatRateBp ?? null,
+      vat_minor: d.vatMinor ?? null,
+      total_minor: total,
       issued_at: issuedAt,
     })
     .returningAll()
-    .executeTakeFirstOrThrow();
-  const number = invoiceNumber('CREDIT_NOTE', year, sequence);
-  const credits = invoiceNumber('INVOICE', invoice.year, invoice.sequence);
-  await writeJournal(tx, [{ type: 'invoice.credit', entityType: 'invoice', entityId: row.id, payload: invoicePayload(row as InvoiceRow, credits) }], now);
-  return {
-    actor,
-    action: 'invoice.credit',
-    targetType: 'invoice',
-    targetId: row.id,
-    details: { orderId: o.id, number, credits, reason, currency: invoice.currency, totalMinor: invoice.total_minor },
-  };
+    .executeTakeFirstOrThrow()) as InvoiceRow;
+  return { row, number: invoiceNumber(d.kind, year, sequence) };
+}
+
+/**
+ * The credit notes of an order paid then cancelled or returned, in its transaction (the order's row locked): every
+ * invoice of the order, its own and (plan NEXT LOT §3.6.C) its supplementary ones, credited for what is still invoiced
+ * (its lines less those already credited one by one), each once (FULL). Journaled `invoice.credit`; returns the audit
+ * entries for the caller to write last. None when the order has no invoice (never paid), or nothing is left to credit.
+ */
+export async function issueCreditNote(tx: Db, o: OrderRow, reason: 'cancel' | 'return', actor: Actor, now: Date): Promise<AuditRecordInput[]> {
+  const invoices = await tx.selectFrom('invoices').selectAll().where('order_id', '=', o.id).where('kind', '=', 'INVOICE').orderBy('issued_at').orderBy('sequence').execute();
+  const notes: AuditRecordInput[] = [];
+  for (const invoice of invoices) {
+    const left = await uncreditedLines(tx, invoice as unknown as InvoiceRow);
+    if (left.length === 0) continue;
+    // A credit note of the whole invoice repeats its amounts as issued (its VAT included); of what remains, the lines' sum.
+    const whole = left.length === (invoice.lines as unknown[]).length;
+    const { row, number } = await insertDocument(
+      tx,
+      {
+        kind: 'CREDIT_NOTE',
+        orderId: o.id,
+        creditsInvoiceId: invoice.id,
+        scope: 'FULL',
+        buyer: invoice.buyer,
+        lines: left,
+        currency: invoice.currency,
+        ...(whole ? { vatRateBp: invoice.vat_rate_bp, vatMinor: invoice.vat_minor, totalMinor: invoice.total_minor } : {}),
+      },
+      now,
+    );
+    const credits = invoiceNumber('INVOICE', invoice.year, invoice.sequence);
+    await writeJournal(tx, [{ type: 'invoice.credit', entityType: 'invoice', entityId: row.id, payload: invoicePayload(row, credits) }], now);
+    notes.push({
+      actor,
+      action: 'invoice.credit',
+      targetType: 'invoice',
+      targetId: row.id,
+      details: { orderId: o.id, number, credits, reason, currency: row.currency, totalMinor: row.total_minor, ...(whole ? {} : { scope: 'FULL', remains: true }) },
+    });
+  }
+  return notes;
+}
+
+/**
+ * A supplementary invoice of a PAID order (plan NEXT LOT §3.6.C: an engraving added after payment), in its transaction:
+ * the next INV- number, naming the order's invoice (`supplements_invoice_id`), billed to the buyer as issued there, its
+ * one line. Journaled `invoice.issue`; returns the audit entry (`supplements`: the invoice's number).
+ */
+export async function issueSupplementaryInvoice(tx: Db, o: OrderRow, line: InvoiceLine, actor: Actor, now: Date): Promise<AuditRecordInput> {
+  const main = await tx.selectFrom('invoices').selectAll().where('order_id', '=', o.id).where('kind', '=', 'INVOICE').where('supplements_invoice_id', 'is', null).executeTakeFirst();
+  if (!main) throw new Error(`issueSupplementaryInvoice: order ${o.id} has no invoice`);
+  const { row, number } = await insertDocument(tx, { kind: 'INVOICE', orderId: o.id, supplementsInvoiceId: main.id, buyer: main.buyer, lines: [line], currency: main.currency }, now);
+  const supplements = invoiceNumber('INVOICE', main.year, main.sequence);
+  await writeJournal(tx, [{ type: 'invoice.issue', entityType: 'invoice', entityId: row.id, payload: invoicePayload(row, null) }], now);
+  return { actor, action: 'invoice.issue', targetType: 'invoice', targetId: row.id, details: { orderId: o.id, number, currency: row.currency, totalMinor: row.total_minor, supplements } };
+}
+
+/**
+ * A credit note for one line of an order's invoice (plan NEXT LOT §3.6.C: an engraving removed after payment), in its
+ * transaction: the newest invoice of the order still carrying a line of `kind` not credited (a supplementary invoice that
+ * carried it, or the order's invoice), that one line credited (`credit_scope` LINES, the next CN- number). Journaled
+ * `invoice.credit`; returns the audit entry (`scope: 'LINES'`), or null when no such line is left.
+ */
+export async function issueLineCreditNote(tx: Db, o: OrderRow, kind: InvoiceLineKind, actor: Actor, now: Date): Promise<AuditRecordInput | null> {
+  const invoices = await tx.selectFrom('invoices').selectAll().where('order_id', '=', o.id).where('kind', '=', 'INVOICE').orderBy('issued_at', 'desc').orderBy('sequence', 'desc').execute();
+  for (const invoice of invoices) {
+    const line = (await uncreditedLines(tx, invoice as unknown as InvoiceRow)).find((l) => l.kind === kind);
+    if (!line) continue;
+    const { row, number } = await insertDocument(tx, { kind: 'CREDIT_NOTE', orderId: o.id, creditsInvoiceId: invoice.id, scope: 'LINES', buyer: invoice.buyer, lines: [line], currency: invoice.currency }, now);
+    const credits = invoiceNumber('INVOICE', invoice.year, invoice.sequence);
+    await writeJournal(tx, [{ type: 'invoice.credit', entityType: 'invoice', entityId: row.id, payload: invoicePayload(row, credits) }], now);
+    return { actor, action: 'invoice.credit', targetType: 'invoice', targetId: row.id, details: { orderId: o.id, number, credits, reason: 'engraving', scope: 'LINES', currency: row.currency, totalMinor: row.total_minor } };
+  }
+  return null;
 }
 
 // ── Reading ────────────────────────────────────────────────────────────────
@@ -347,6 +462,9 @@ async function readInvoices(db: Db, where: (q: ReturnType<typeof baseQuery>) => 
     order: { id: r.order_id, reference: orderReference(r.order_id) },
     credits: r.credits_invoice_id && r.credits_year !== null ? { id: r.credits_invoice_id, number: invoiceNumber('INVOICE', r.credits_year, r.credits_sequence!) } : null,
     creditedBy: r.credited_by_id && r.credited_by_year !== null ? { id: r.credited_by_id, number: invoiceNumber('CREDIT_NOTE', r.credited_by_year, r.credited_by_sequence!) } : null,
+    supplements: r.supplements_invoice_id && r.supplements_year !== null ? { id: r.supplements_invoice_id, number: invoiceNumber('INVOICE', r.supplements_year, r.supplements_sequence!) } : null,
+    scope: r.credit_scope,
+    remains: r.credit_scope === 'FULL' && r.credits_total !== null && r.total_minor !== r.credits_total,
     issuer: { name: str(r.issuer.name) ?? INVOICE_ISSUER.name, address: Array.isArray(r.issuer.address) ? r.issuer.address.map(String) : [] },
     buyer: { name: str(r.buyer.name), address: str(r.buyer.address), email: str(r.buyer.email), ...(str(r.buyer.country) ? { country: str(r.buyer.country) } : {}) },
     lines: linesOf(r.lines),
@@ -362,9 +480,20 @@ function baseQuery(db: Db) {
   return db
     .selectFrom('invoices as i')
     .leftJoin('invoices as c', 'c.id', 'i.credits_invoice_id')
-    .leftJoin('invoices as n', 'n.credits_invoice_id', 'i.id')
+    // The credit note that cancels it in full (or what remains): one at most (invoices_full_credit_key).
+    .leftJoin('invoices as n', (j) => j.onRef('n.credits_invoice_id', '=', 'i.id').on('n.credit_scope', '=', 'FULL'))
+    .leftJoin('invoices as m', 'm.id', 'i.supplements_invoice_id')
     .selectAll('i')
-    .select(['c.year as credits_year', 'c.sequence as credits_sequence', 'n.id as credited_by_id', 'n.year as credited_by_year', 'n.sequence as credited_by_sequence']);
+    .select([
+      'c.year as credits_year',
+      'c.sequence as credits_sequence',
+      'c.total_minor as credits_total',
+      'n.id as credited_by_id',
+      'n.year as credited_by_year',
+      'n.sequence as credited_by_sequence',
+      'm.year as supplements_year',
+      'm.sequence as supplements_sequence',
+    ]);
 }
 
 /** An order's documents, the invoice first (the console's order page, MY PIECES). */
@@ -381,6 +510,9 @@ export function invoiceDocument(v: InvoiceView, view: BuyerView = inClear): Invo
     issuedAt: v.issuedAt,
     order: v.order.reference,
     credits: v.credits?.number ?? null,
+    supplements: v.supplements?.number ?? null,
+    scope: v.scope,
+    remains: v.remains,
     issuer: v.issuer,
     buyer: view(v.buyer),
     lines: v.lines.map((l) => ({ label: l.label, detail: l.detail, amountMinor: l.amountMinor })),
@@ -483,6 +615,14 @@ export class InvoiceService {
    */
   async accountDocument(accountId: string, orderId: string, kind: InvoiceKind): Promise<{ contentType: string; body: Uint8Array; filename: string }> {
     if (typeof accountId !== 'string' || !UUID_RE.test(accountId) || typeof orderId !== 'string' || !UUID_RE.test(orderId)) throw invoiceNotFound();
+    // The order's own invoice, and the credit note that cancels it (in full, or what remains); a supplementary invoice
+    // and a credit note for single lines are read by their number (`accountDocumentByNumber`).
+    const main = this.db
+      .selectFrom('invoices as x')
+      .select('x.id')
+      .where('x.order_id', '=', orderId.toLowerCase())
+      .where('x.kind', '=', 'INVOICE')
+      .where('x.supplements_invoice_id', 'is', null);
     const row = await this.db
       .selectFrom('invoices as i')
       .innerJoin('orders as o', 'o.id', 'i.order_id')
@@ -490,6 +630,31 @@ export class InvoiceService {
       .where('o.id', '=', orderId.toLowerCase())
       .where('o.account_id', '=', accountId.toLowerCase())
       .where('i.kind', '=', kind)
+      .$if(kind === 'INVOICE', (q) => q.where('i.supplements_invoice_id', 'is', null))
+      .$if(kind === 'CREDIT_NOTE', (q) => q.where('i.credit_scope', '=', 'FULL').where('i.credits_invoice_id', 'in', main))
+      .executeTakeFirst();
+    if (!row) throw invoiceNotFound();
+    return this.pdf(row.id);
+  }
+
+  /**
+   * Any document of an order for its own account by its number (plan NEXT LOT §3.6.C: a supplementary invoice, a credit
+   * note for single lines; `INV-2026-000003`): 404 INVOICE_NOT_FOUND for another account's order, an unknown number, or
+   * a document of another order.
+   */
+  async accountDocumentByNumber(accountId: string, orderId: string, number: string): Promise<{ contentType: string; body: Uint8Array; filename: string }> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId) || typeof orderId !== 'string' || !UUID_RE.test(orderId)) throw invoiceNotFound();
+    const m = typeof number === 'string' ? /^(INV|CN)-(20\d{2})-(\d{6})$/.exec(number.trim().toUpperCase()) : null;
+    if (!m) throw invoiceNotFound();
+    const row = await this.db
+      .selectFrom('invoices as i')
+      .innerJoin('orders as o', 'o.id', 'i.order_id')
+      .select('i.id')
+      .where('o.id', '=', orderId.toLowerCase())
+      .where('o.account_id', '=', accountId.toLowerCase())
+      .where('i.kind', '=', m[1] === 'INV' ? 'INVOICE' : 'CREDIT_NOTE')
+      .where('i.year', '=', Number(m[2]))
+      .where('i.sequence', '=', Number(m[3]))
       .executeTakeFirst();
     if (!row) throw invoiceNotFound();
     return this.pdf(row.id);

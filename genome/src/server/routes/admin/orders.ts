@@ -11,6 +11,9 @@
  *   GET    /api/admin/orders/shipping-rates     AUDITOR   SHIPPING (plan NEXT-NINE, BP-19 T2): the optional rates below the
  *                                                         free shipping of PLATINE and PALLADIUM, per currency and service
  *   PUT    /api/admin/orders/shipping-rates     ADMIN     those rates, set whole (services/club-program.ts)
+ *   GET    /api/admin/orders/engraving-prices   AUDITOR   ENGRAVING (plan NEXT LOT §3.6.C): the engraving's price per currency,
+ *                                                         for orders without their release's ENGRAVING add-on
+ *   PUT    /api/admin/orders/engraving-prices   ADMIN     those prices, set whole (null: no engraving in that currency)
  *   GET    /api/admin/orders/:id                AUDITOR   one order: its facts, timing, piece and history; its order cases
  *                                                         (their notes withheld from an AUDITOR) and, once shipped, the
  *                                                         sizes an exchange may take (plan NEXT LOT §3.5.4.4)
@@ -41,6 +44,7 @@
  */
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import {
+  engravingPricesBody,
   orderAlertsBody,
   orderBoardQuery,
   orderBuyerBody,
@@ -126,6 +130,14 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   app.put('/api/admin/orders/shipping-rates', { config: ADMIN }, async (request) => {
     const b = parse(shippingRatesBody, request.body);
     return clubProgram.setShippingRates(b.rates, adminActor(request));
+  });
+
+  // Plan NEXT LOT §3.6.C: the engraving's price per currency (Orders → Settings, Engraving).
+  app.get('/api/admin/orders/engraving-prices', async () => clubProgram.engravingPrices());
+
+  app.put('/api/admin/orders/engraving-prices', { config: ADMIN }, async (request) => {
+    const b = parse(engravingPricesBody, request.body);
+    return clubProgram.setEngravingPrices(b, adminActor(request));
   });
 
   app.get('/api/admin/orders/:id', async (request) => {

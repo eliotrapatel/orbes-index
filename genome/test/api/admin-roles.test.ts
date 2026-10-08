@@ -289,6 +289,9 @@ const PROBES: Probe[] = [
   // BP-19 T2: the optional shipping rates, read by an AUDITOR, set by an ADMIN.
   { group: 'orders', method: 'GET', url: '/api/admin/orders/shipping-rates', min: 'AUDITOR' },
   { group: 'orders', method: 'PUT', url: '/api/admin/orders/shipping-rates', body: INVALID, min: 'ADMIN' },
+  // Plan NEXT LOT §3.6.C: the engraving's price per currency (Orders → Settings, Engraving).
+  { group: 'orders', method: 'GET', url: '/api/admin/orders/engraving-prices', min: 'AUDITOR' },
+  { group: 'orders', method: 'PUT', url: '/api/admin/orders/engraving-prices', body: INVALID, min: 'ADMIN' },
   { group: 'orders', method: 'GET', url: `/api/admin/orders/${UUID}`, min: 'AUDITOR' },
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/transition`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/location`, body: INVALID, min: 'OPERATOR' },

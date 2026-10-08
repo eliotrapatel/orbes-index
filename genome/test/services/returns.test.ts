@@ -218,6 +218,7 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
     expect(mine!.documents).toEqual({
       invoice: { number: expect.stringMatching(/^INV-2026-\d{6}$/), issuedAt: expect.any(Date) },
       creditNote: { number: expect.stringMatching(/^CN-2026-\d{6}$/), issuedAt: clock.now() },
+      others: [],
       careGuide: false,
       certificate: false,
     });

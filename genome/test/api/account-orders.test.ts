@@ -175,7 +175,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       ...(await times(ids.live1)),
       shipment: null,
       // Not paid yet: no invoice; its care guide (step S4, M6).
-      documents: { invoice: null, creditNote: null, careGuide: true, certificate: false },
+      documents: { invoice: null, creditNote: null, others: [], careGuide: true, certificate: false },
       // NOCTURNE, addition 3: its model's photograph; none taken yet.
       imageUrl: null,
       // Plan NEXT LOT §3.4: no new claim code waits for it.
@@ -183,7 +183,10 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       // Plan NEXT LOT §3.6.B: no delivery address yet (the account saved none); its own order, the address open to change.
       address: null,
       addressOf: null,
-      editable: { address: true },
+      // Plan NEXT LOT §3.6.C: its release sold the engraving as an add-on ('Engraving'): its words only, no second price.
+      engraving: null,
+      engravingOffer: { priceMinor: null, included: true, maxLength: 20 },
+      editable: { address: true, engraving: true },
     });
     // A draw's: its size and price still to be entered.
     expect(byId.get(ids.draw)).toMatchObject({ channel: 'DRAW', release: 'MONOLITHE — RELEASE I', model: 'MONOLITHE', size: null, priceMinor: null, currency: null, addons: [], status: 'RESERVED', paidAt: null, shipment: null });
@@ -208,14 +211,17 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       ...(await times(ids.delivered)),
       shipment: { carrier: 'Colissimo', trackingNumber: '6A 1234 5678 901', trackingUrl: 'https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901' },
       // Paid: its invoice (step S4, M6); its piece not registered by the account: no certificate yet.
-      documents: { invoice: { number: expect.stringMatching(/^INV-2026-\d{6}$/), issuedAt: delivered.paidAt }, creditNote: null, careGuide: true, certificate: false },
+      documents: { invoice: { number: expect.stringMatching(/^INV-2026-\d{6}$/), issuedAt: delivered.paidAt }, creditNote: null, others: [], careGuide: true, certificate: false },
       imageUrl: null,
       claimCode: null,
       // Plan NEXT LOT §3.6.B: its delivery address, as Client Services entered it (the country added to pack it); no
       // longer open to change once shipped.
       address: { name: 'Jane Doe', lines: '1 rue de la Paix\n75002 Paris', country: 'FR', phone: null },
       addressOf: null,
-      editable: { address: false },
+      // Plan NEXT LOT §3.6.C: the words Client Services entered, now the collector's to read, with no price (none set).
+      engraving: { text: 'A. & L.', priceMinor: null },
+      engravingOffer: { priceMinor: null, included: false, maxLength: 20 },
+      editable: { address: false, engraving: false },
     });
     for (const k of ['reservedAt', 'paidAt', 'shippedAt', 'deliveredAt']) expect(delivered[k], k).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Date.parse(delivered.reservedAt)).toBeLessThan(Date.parse(delivered.paidAt));
@@ -225,19 +231,20 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     expect(byId.get(ids.cancelled)).toMatchObject({ status: 'CANCELLED', priceMinor: 300_000, currency: 'EUR', size: null, paidAt: expect.any(String), cancelledAt: expect.any(String), shippedAt: null, shipment: null });
   });
 
-  it('never says the house\'s side of an order: where it is served from, what it holds, the surprise, the engraving\'s words, the value declared, the notes, who handled it (its delivery address is the collector\'s own since plan NEXT LOT §3.6.B)', async () => {
+  it('never says the house\'s side of an order: where it is served from, what it holds, the surprise, the value declared, the notes, who handled it (its delivery address and its engraving are the collector\'s own since plan NEXT LOT §3.6.B and §3.6.C)', async () => {
     await h.ctx.db.updateTable('orders').set({ surprise: 'A silk pouch' }).where('id', '=', ids.live1).execute();
     const res = await mine.get('/api/v1/account/orders');
     const list = (safeJson(res) as { orders: Json[] }).orders;
     for (const o of list) {
       expect(Object.keys(o).sort()).toEqual(
-        ['addons', 'address', 'addressOf', 'cancelledAt', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'documents', 'editable', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
+        ['addons', 'address', 'addressOf', 'cancelledAt', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'documents', 'editable', 'engraving', 'engravingOffer', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
       );
-      expect(Object.keys(o.documents).sort()).toEqual(['careGuide', 'certificate', 'creditNote', 'invoice']);
+      expect(Object.keys(o.documents).sort()).toEqual(['careGuide', 'certificate', 'creditNote', 'invoice', 'others']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);
     }
-    // The delivery address is the collector's own (plan NEXT LOT §3.6.B), never who entered it.
-    for (const secret of ['A silk pouch', 'A. & L.', '470123', 'WAREHOUSE', 'transfer', 'withdrew', 'Sold by phone', f.admin.id, 'BENCH', 'STOCK', 'O26-J-', 'STAFF', 'COLLECTOR']) {
+    // The delivery address and the engraving's words are the collector's own (plan NEXT LOT §3.6.B, §3.6.C), never who
+    // entered them.
+    for (const secret of ['A silk pouch', '470123', 'WAREHOUSE', 'transfer', 'withdrew', 'Sold by phone', f.admin.id, 'BENCH', 'STOCK', 'O26-J-', 'STAFF', 'COLLECTOR']) {
       expect(res.body, secret).not.toContain(secret);
     }
   });
@@ -465,7 +472,7 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     expect(second.isDefault).toBe(true);
     const edited = await mine.request('PUT', `/api/v1/account/addresses/${first.id}`, { body: { ...PARIS, phone: '+33 6 00 00 00 00' } });
     expect(edited.statusCode).toBe(200);
-    expect(((safeJson(edited) as Json).addresses as Json[]).find((x) => x.id === first.id).phone).toBe('+33 6 00 00 00 00');
+    expect(((safeJson(edited) as Json).addresses as Json[]).find((x) => x.id === first.id)!.phone).toBe('+33 6 00 00 00 00');
     expect((await other.request('PUT', `/api/v1/account/addresses/${first.id}`, { body: PARIS })).statusCode).toBe(404);
     expect((await other.post(`/api/v1/account/addresses/${first.id}/default`)).statusCode).toBe(404);
     expect((await other.request('DELETE', `/api/v1/account/addresses/${first.id}`)).statusCode).toBe(404);
@@ -487,5 +494,38 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     expect([theirs.statusCode, errorOf(theirs).code]).toEqual([404, 'ORDER_NOT_FOUND']);
     const bad = await mine.request('PUT', `/api/v1/account/orders/${orderId}/address`, { body: { address: { ...PARIS, phone: '0612' } } });
     expect([bad.statusCode, errorOf(bad).message]).toEqual([400, 'Enter a phone number with its country code.']);
+  });
+
+  it('sets and removes an order\'s engraving (plan NEXT LOT §3.6.C; API §10.22): the CSRF token, the server\'s words, the order back; its other documents by their number', async () => {
+    const op = { type: 'admin' as const, id: f.admin.id };
+    await h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, op);
+    await h.ctx.services.orders.setTerms(orderId, { sizeLabel: '58', priceMinor: 420_000, currency: 'EUR' }, op);
+    const url = `/api/v1/account/orders/${orderId}/engraving`;
+    expect((await h.client().request('PUT', url, { body: { text: 'J.M.' } })).statusCode).toBe(401);
+    expect(errorOf(await mine.request('PUT', url, { body: { text: 'J.M.' }, noCsrf: true })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await mine.request('DELETE', url, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    const bad = await mine.request('PUT', url, { body: { text: 'J.M.!' } });
+    expect([bad.statusCode, errorOf(bad).message]).toEqual([400, 'Up to 20 characters: letters, figures, spaces and . & ’ -']);
+    expect(errorOf(await mine.request('PUT', url, { body: { text: 'J.M.', price: 0 } })).code).toBe('VALIDATION_FAILED');
+    const set = await mine.request('PUT', url, { body: { text: 'J.M.' } });
+    expect(set.statusCode).toBe(200);
+    expect(set.headers['cache-control']).toBe('no-store');
+    expect((safeJson(set) as Json).order).toMatchObject({ id: orderId, engraving: { text: 'J.M.', priceMinor: 3_000 }, engravingOffer: { priceMinor: 3_000, included: false, maxLength: 20 } });
+    expect((await other.request('PUT', url, { body: { text: 'J.M.' } })).statusCode).toBe(404);
+    // Paid, then removed: a credit note for its line, listed and read by its number.
+    h.clock.advance(MINUTE);
+    await h.ctx.services.orders.transition(orderId, { to: 'PAID' }, op);
+    const removed = await mine.request('DELETE', url);
+    expect(removed.statusCode).toBe(200);
+    const order = (safeJson(removed) as Json).order;
+    expect(order.engraving).toBeNull();
+    expect(order.documents.others).toEqual([{ kind: 'CREDIT_NOTE', number: expect.stringMatching(/^CN-2026-\d{6}$/), issuedAt: expect.any(String) }]);
+    const doc = await mine.get(`/api/v1/account/orders/${orderId}/documents/${order.documents.others[0].number}`);
+    expect(doc.statusCode).toBe(200);
+    expect(doc.headers['content-type']).toBe('application/pdf');
+    expect(doc.headers['cache-control']).toBe('no-store');
+    expect((await other.get(`/api/v1/account/orders/${orderId}/documents/${order.documents.others[0].number}`)).statusCode).toBe(404);
+    expect((await mine.get(`/api/v1/account/orders/${orderId}/documents/INV-2026-999999`)).statusCode).toBe(404);
+    await h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: null, GBP: null, USD: null, CHF: null } }, op);
   });
 });
