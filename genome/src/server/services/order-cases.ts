@@ -22,9 +22,11 @@
  *               a parcel problem: each order of the parcel SHIPPED → PAID (`order.reship`). BACK_TO_SENDER: its pieces
  *               back in stock (RETURNED +1), still bound, to pack again (RESHIP), or freed (REFUND: the order
  *               cancelled, a credit note). DAMAGED: each piece back to stock (RETURNED +1, unbound, at the location
- *               ORBES chose, the order's by default; a new claim code nobody sees, as a return's) or to the archive
- *               (RETIRED, ADMIN), as ORBES chooses from the agent's record. LOST: each piece REVOKED (ADMIN), unbound.
- *               RESHIP after DAMAGED or LOST holds new pieces ahead of the queue (`queue_first`); REFUND cancels.
+ *               ORBES chose, the order's by default; a new claim code, shown once to staff in the answer, as a
+ *               return's, so its new card is printed) or to the archive (RETIRED, ADMIN), as ORBES chooses from the
+ *               agent's record. LOST: each piece REVOKED (ADMIN), unbound. RESHIP after DAMAGED or LOST holds new
+ *               pieces ahead of the queue (`queue_first`); REFUND cancels. Each order's `order.reship` event says what
+ *               it holds after the decision (`reservation`), so its readiness restarts then (fulfilment.ts readySince).
  *   cancel    Client Services ends a case with no decision (a request refused or withdrawn; a damaged parcel that never
  *             came back, to report it lost): CANCELLED; a parcel problem's shipment SHIPPED again.
  *
@@ -140,11 +142,15 @@ export interface DecideCaseInput {
   note?: string | null;
 }
 
-/** A decision taken: the case, and the claim code of a returned piece's new card (shown once). */
+/**
+ * A decision taken: the case, and the claim code of a returned piece's new card (shown once); for a damaged parcel's
+ * pieces back to stock, each piece's new claim code (shown once), so staff print the card that goes with it again.
+ */
 export interface CaseDecided {
   case: OrderCaseRecord;
   claimCode?: string;
   productId?: string;
+  claimCodes?: { productId: string; claimCode: string }[];
 }
 
 // ── Checks ─────────────────────────────────────────────────────────────────
@@ -428,7 +434,7 @@ export class OrderCaseService {
       const now = this.clock();
       const notes: AuditRecordInput[] = [];
       const location = d.pieceTo === 'RESTOCKED' ? (d.locationId ?? o.location_id) : null;
-      const done = await returnInTransaction(tx, o, { outcome: d.pieceTo, locationId: location, note: d.note }, { productId: peek.product_id, reclaim: peek.ownership_id !== null, claimHash }, actor, now, notes, this.lifecycle);
+      const done = await returnInTransaction(tx, o, { outcome: d.pieceTo, locationId: location, note: d.note, caseId: c.id }, { productId: peek.product_id, reclaim: peek.ownership_id !== null, claimHash }, actor, now, notes, this.lifecycle);
       let exchangeOrderId: string | null = null;
       if (d.decision === 'EXCHANGE') {
         // The size asked, still one of the model's (in stock or not: the exchange order then waits like any order).
@@ -465,13 +471,19 @@ export class OrderCaseService {
     }
     const pieceTo: OrderCasePieceDestination = c.kind === 'LOST' ? 'REVOKED' : c.kind === 'DAMAGED' ? d.pieceTo! : 'RESTOCKED';
     // A damaged parcel reached its collector, who saw the card in it: each piece back to stock takes a new claim code
-    // nobody sees (as a return's), its hash made first, so that card no longer registers it. Staff print its new card
-    // with New claim code (§3.4, a piece in stock).
-    const reissued = new Map<string, string>();
+    // (as a return's), its hash made first, so that card no longer registers it. The code is shown once to staff in the
+    // answer, so the piece's new card is printed before it ships again (it may serve a waiting order at once).
+    const reissued = new Map<string, { code: string; hash: string }>();
     if (c.kind === 'DAMAGED' && pieceTo === 'RESTOCKED') {
-      for (const i of items) if (i.product_id !== null && !reissued.has(i.product_id)) reissued.set(i.product_id, await hashClaimCode(generateClaimCode()));
+      for (const i of items) {
+        if (i.product_id === null || reissued.has(i.product_id)) continue;
+        const code = generateClaimCode();
+        reissued.set(i.product_id, { code, hash: await hashClaimCode(code) });
+      }
     }
+    let claimCodes: { productId: string; claimCode: string }[] = [];
     await inRetriedTransaction(this.db, async (tx) => {
+      claimCodes = [];
       // The pieces first (as a return), then the parcel's orders, the case and the shipment.
       if (claimHashes.size) await lockPieces(tx, claimHashes.keys());
       const pieceIds = items.map((i) => i.product_id).filter((p): p is string => p !== null);
@@ -507,17 +519,7 @@ export class OrderCaseService {
           product_id: keep ? o.product_id : null,
           queue_first: !keep && d.decision === 'RESHIP',
         });
-        notes.push(
-          await recordChange(
-            tx,
-            o,
-            after,
-            'order.reship',
-            { details: { caseId: c.id, shipmentId: shipment.id, reservation: after.reservation, ...(after.queue_first ? { queueFirst: true } : {}), ...(piece && reissued.has(piece.id) ? { claimCodeReissued: true } : {}) } },
-            actor,
-            now,
-          ),
-        );
+        const reissuedHere = piece && !keep ? reissued.get(piece.id) : undefined;
         if (piece && !keep) {
           // Unbound: a buyer's new claim code waiting on it is withdrawn.
           notes.push(...(await withdrawWaiting(tx, piece.id, 'ORDER_RETURNED', actor, now)));
@@ -528,8 +530,10 @@ export class OrderCaseService {
             await recordMovement(tx, { skuId: o.sku_id, locationId: at, delta: 1, reason: 'RETURNED', orderId: o.id, productId: piece.id, note: null }, actor, now);
             restocked.add(`${o.sku_id}:${at}`);
           }
-          const hash = reissued.get(piece.id);
-          if (hash) await tx.updateTable('products').set({ claim_secret_hash: hash, updated_at: now }).where('id', '=', piece.id).execute();
+          if (reissuedHere) {
+            await tx.updateTable('products').set({ claim_secret_hash: reissuedHere.hash, updated_at: now }).where('id', '=', piece.id).execute();
+            claimCodes.push({ productId: piece.product_id, claimCode: reissuedHere.code });
+          }
         }
         if (piece) {
           // Its status: back on sale once it is free in stock again (RESOLD), archived (RETIRED) or revoked (REVOKED).
@@ -538,6 +542,19 @@ export class OrderCaseService {
           if (to !== null && piece.status !== to) statusChanges.push({ piece, to, orderId: o.id });
         }
         if (d.decision === 'RESHIP' && !keep) after = await hold(tx, after, actor, now, notes);
+        // Its event once it holds what the decision gives it (a piece in stock, or waiting for one): its readiness
+        // restarts from here (fulfilment.ts readySince), never from the first sale's dates.
+        notes.push(
+          await recordChange(
+            tx,
+            o,
+            after,
+            'order.reship',
+            { details: { caseId: c.id, shipmentId: shipment.id, reservation: after.reservation, ...(after.queue_first ? { queueFirst: true } : {}), ...(reissuedHere ? { claimCodeReissued: true } : {}) } },
+            actor,
+            now,
+          ),
+        );
         reshipped.push(after);
       }
       // The pieces back in stock serve the orders waiting there, the reshipments first.
@@ -566,7 +583,8 @@ export class OrderCaseService {
       }
       for (const n of notes) await this.audit.record(n, tx);
     });
-    return { case: await this.get(c.id) };
+    claimCodes.sort((a, b) => a.productId.localeCompare(b.productId));
+    return { case: await this.get(c.id), ...(claimCodes.length ? { claimCodes } : {}) };
   }
 
   // ── Cancelling ───────────────────────────────────────────────────────────

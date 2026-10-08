@@ -17,7 +17,8 @@
  *    read no-store by the agent and AUDITOR+, never RETAIL; Ship refused from the agent with a declared value (403);
  *    the scan drawing from the `verify` rate group, as /api/v1/verify.
  *  - the order cases (step 5.10): the agent reports a parcel problem and records it back; an AUDITOR reads the case
- *    without its note; ORBES decides it, no-store; Client Services opens a return (201).
+ *    without its note; ORBES decides it, no-store; Client Services opens a return (201); a return decided: its note
+ *    read by an AUDITOR neither on the case nor on the order's page (its events, its return).
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -289,6 +290,18 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       expect((safeJson(await operator.post(`/api/admin/order-cases/${returnId}/cancel`, { note: 'The client wrote: I keep it.' })) as Json).cancelled.note).toBe('The client wrote: I keep it.');
       const cancelled = safeJson(await auditor.get(`/api/admin/order-cases/${returnId}`)) as Json;
       expect([cancelled.status, cancelled.note, cancelled.cancelled.note]).toEqual(['CANCELLED', null, null]);
+      // A return decided: ORBES's words never reach an AUDITOR through the order's page either (its events, its return).
+      const again = safeJson(await operator.post(`/api/admin/orders/${id}/case`, { kind: 'RETURN', reason: 'SIZE', note: 'Too small after all.' })) as Json;
+      await agent.post(`/api/admin/logistics/order-cases/${again.id}/received`, { pieceState: 'OK' });
+      const words = 'The client wrote: refund me, I keep nothing.';
+      const settled = await operator.post(`/api/admin/order-cases/${again.id}/decide`, { decision: 'REFUND', pieceTo: 'RESTOCKED', note: words });
+      expect(settled.statusCode).toBe(200);
+      const page = safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json;
+      expect(page.order.status).toBe('RETURNED');
+      expect(page.order.return.note).toBeNull();
+      expect(page.order.events.map((e: Json) => e.action)).toContain('order.return');
+      expect(JSON.stringify(page)).not.toContain(words);
+      expect((safeJson(await operator.get(`/api/admin/orders/${id}`)) as Json).order.return.note).toBe(words);
     });
   });
 });

@@ -358,7 +358,8 @@ export interface OrderView {
     applied: { id: string; grantId: string; tier: 2 | 3; amountMinor: number; appliedAt: Date; releasedAt: Date | null; releasedReason: CreditReleaseReason | null }[];
   };
   /** Its return (RETURNED): where the piece went, the note, and whether ORBES took its buyer's ownership back. */
-  return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string; at: Date; ownershipReclaimed: boolean } | null;
+  /** Its note null for an AUDITOR when the return was decided from an order case (routes/admin/orders.ts). */
+  return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string | null; at: Date; ownershipReclaimed: boolean } | null;
   /** Its invoice and credit note (services/invoices.ts), in order of issue. */
   invoices: OrderDocument[];
   /** Its history, oldest first. */
@@ -1300,7 +1301,9 @@ export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, no
         tracking_number: s.trackingNumber,
         declared_value_minor: s.declaredValueMinor,
       });
-      details = { carrierId: carrier.id, ...(s.declaredValueMinor !== null ? { declaredValueMinor: s.declaredValueMinor } : {}) };
+      // `reservation`: what it holds now (nothing), as every change that moves it says (fulfilment.ts readySince), so a
+      // parcel reshipped after a problem is ready again from its decision, not from its first sale.
+      details = { carrierId: carrier.id, reservation: null, ...(s.declaredValueMinor !== null ? { declaredValueMinor: s.declaredValueMinor } : {}) };
       break;
     }
     case 'DELIVERED':
@@ -1408,12 +1411,14 @@ export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via:
  * delivered, DELIVERED once no order of it is still SHIPPED. `expected` is what the caller read before its transaction
  * (409 ORDER_RETURN_CHANGED when it changed). Returns the order after it, the piece's reference, the credit given back
  * (`credit`, which an exchange carries onto its EXCHANGE order) and `finish`, the piece's change of status, which the
- * caller runs last (LifecycleService audits at once).
+ * caller runs last (LifecycleService audits at once). From an order case (`caseId`), the note is ORBES's decision's,
+ * which an AUDITOR never reads: the `order.return` event keeps no words (`caseId` and `noted` only), the return's row
+ * and the case keep them.
  */
 export async function returnInTransaction(
   tx: Db,
   o: OrderRow,
-  r: { outcome: ReturnOutcome; locationId: string | null; note: string },
+  r: { outcome: ReturnOutcome; locationId: string | null; note: string; caseId?: string },
   expected: { productId: string | null; reclaim: boolean; claimHash: string | null },
   actor: Actor,
   now: Date,
@@ -1488,8 +1493,9 @@ export async function returnInTransaction(
     ownershipReclaimed: owner !== undefined,
     ...(claimHash ? { claimCodeReissued: true } : {}),
     ...(to ? { pieceStatus: to } : {}),
+    ...(r.caseId ? { caseId: r.caseId, noted: true } : {}),
   };
-  notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.note, details }, actor, now), ...extra, ...withdrawn);
+  notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.caseId ? null : r.note, details }, actor, now), ...extra, ...withdrawn);
   // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is. A size exchange carries it onto its
   // EXCHANGE order (`createExchangeOrder`), from what is released here.
   const carried = (await openCreditUses(tx, after.id, { forUpdate: true })).map((u): CarriedCredit => ({ grantId: u.grant_id, tier: u.tier as 2 | 3, amountMinor: u.amount_minor }));

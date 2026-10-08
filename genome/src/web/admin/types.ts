@@ -2513,7 +2513,8 @@ export interface OrderView {
     applied: { id: string; grantId: string; tier: 2 | 3; amountMinor: number; appliedAt: Iso; releasedAt: Iso | null; releasedReason: CreditReleaseReason | null }[];
   };
   /** Its return (RETURNED): where the piece went, the note, whether ORBES took its buyer's ownership back. */
-  return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string; at: Iso; ownershipReclaimed: boolean } | null;
+  /** Its note null for an AUDITOR when the return was decided from an order case (ORBES's decision's words). */
+  return: { outcome: ReturnOutcome; location: { id: string; name: string } | null; note: string | null; at: Iso; ownershipReclaimed: boolean } | null;
   /** Its invoice and credit note, in order of issue. */
   invoices: OrderDocument[];
   events: { action: string; status: OrderStatus; note: string | null; at: Iso; actor: { type: string; id: string | null } }[];

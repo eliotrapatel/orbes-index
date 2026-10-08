@@ -32,7 +32,9 @@
  *
  * An AUDITOR reads the collectors' emails masked (`j***@example.com`) and the buyer's name and address masked
  * (`J*** D***`, the address withheld: serialize.ts), on the board, the order and the CSV; OPERATOR and ADMIN in clear.
- * Every mutation is audited by its service.
+ * A return decided from an order case: its note (ORBES's decision's) withheld from an AUDITOR on the order, as on the
+ * case (order-cases.ts `orderCaseJson`); the `order.return` event of such a return keeps no words. Every mutation is
+ * audited by its service.
  */
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import { forbidden } from '../../errors.js';
@@ -85,7 +87,15 @@ function boardFilter(query: unknown): OrderBoardFilter {
 
 export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { orders, fulfilment, atelier, clubProgram } = ctx.services;
-  const detail = async (request: FastifyRequest, id: string) => orderDetailJson(await fulfilment.detail(id), readsClientEmails(request));
+  const detail = async (request: FastifyRequest, id: string) => {
+    const inClear = readsClientEmails(request);
+    const d = orderDetailJson(await fulfilment.detail(id), inClear);
+    // A return decided from an order case carries ORBES's decision's note: never read by an AUDITOR.
+    if (!inClear && d.order.return && (await ctx.services.orderCases.forOrder(d.order.id)).some((c) => c.decision !== null && (c.kind === 'RETURN' || c.kind === 'EXCHANGE'))) {
+      return { ...d, order: { ...d.order, return: { ...d.order.return, note: null } } };
+    }
+    return d;
+  };
 
   app.get('/api/admin/orders', async (request) => orderBoardJson(await fulfilment.board(boardFilter(request.query)), readsClientEmails(request)));
 

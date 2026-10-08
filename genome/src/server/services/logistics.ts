@@ -834,6 +834,10 @@ export class LogisticsService {
           const productId = items.find((i) => i.order_id === o.id)!.product_id!;
           const w = await tx.selectFrom('warranties').select(['start_date', 'voided_at']).where('product_id', '=', productId).executeTakeFirst();
           if (w?.start_date || w?.voided_at) continue;
+          // Open point (H2's hand-over): question 14 as built names the delivery address's country (§3.5.6.8b, §5.1).
+          // The order's country arrives with migration <N+6>_order_delivery (step 6.6); from step 6.7, pass the
+          // parcel's delivery country here (`addressOf(first order).country`), asserted in packing.test (the warranty's
+          // country and the `warranty.activate` audit). Until then: null.
           await this.warranty.activate(productId, { retailerId: null, country: null }, actor, { tx, via: { via: 'ship', orderId: o.id } });
         }
       }

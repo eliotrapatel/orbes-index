@@ -7,8 +7,10 @@
  *    warranties kept;
  *  - lost → ADMIN only; the pieces revoked; the reshipment ahead of the queue (`queue_first`);
  *  - damaged → refused before the agent records it back; then back to stock (at the location ORBES chose, with a new
- *    claim code: the card the collector saw no longer registers it) or archived (ADMIN) as ORBES chooses; the
- *    reshipment ahead of the queue;
+ *    claim code shown once to staff, which registers the piece, while the card the collector saw no longer does) or
+ *    archived (ADMIN) as ORBES chooses; the reshipment ahead of the queue;
+ *  - a parcel paid and shipped long ago, back to sender or lost, then reshipped from stock: on To ship, ready from the
+ *    decision, not LATE;
  *  - a damaged parcel never back: its order case cancelled, the shipment SHIPPED again, then reported lost;
  *  - refund → a credit note, the piece serving the next order, and a new claim code waiting on its piece replaced
  *    (§3.4's hook in `step()`);
@@ -24,6 +26,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
+import { verifyClaimCode } from '../../src/server/services/claim-codes.js';
 import { linesOf } from '../../src/server/services/invoices.js';
 import { REGISTERED_BY_BUYER } from '../../src/server/services/orders.js';
 import { purgePackingPhotos } from '../../src/server/services/parcels.js';
@@ -179,7 +182,7 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       // Back to stock at the location ORBES chose (not the order's): the piece freed (RESOLD), counted there; the
       // reshipment, at the order's location, waits first in line.
       const hashBefore = (await product(piece.uuid)).claim_secret_hash;
-      await cases().decide(damaged.id, { decision: 'RESHIP', pieceTo: 'RESTOCKED', locationId: warehouse }, operator, { admin: false });
+      const decided = await cases().decide(damaged.id, { decision: 'RESHIP', pieceTo: 'RESTOCKED', locationId: warehouse }, operator, { admin: false });
       expect(await product(piece.uuid)).toMatchObject({ status: 'RESOLD' });
       const back = await db().selectFrom('stock_movements').select(['location_id', 'reason', 'delta']).where('order_id', '=', id).where('reason', '=', 'RETURNED').execute();
       expect(back).toEqual([{ location_id: warehouse, reason: 'RETURNED', delta: 1 }]);
@@ -194,11 +197,21 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       const buyer = (await row(id)).account_id;
       const scan = await h.ctx.services.verification.verify({ code: piece.data }, {});
       expect(await refusal(h.ctx.services.ownership.registerFirst(buyer, { registrationToken: scan.registration!.token, claimCode: piece.claimCode! }, { type: 'account', id: buyer }))).toMatchObject({ code: 'CLAIM_CODE_INVALID' });
+      // Its new claim code, shown once to staff in the answer so its new card is printed: it registers the piece.
+      expect(decided.claimCodes?.map((x) => x.productId)).toEqual([piece.productId]);
+      const fresh = decided.claimCodes![0]!.claimCode;
+      expect(await verifyClaimCode(fresh, (await product(piece.uuid)).claim_secret_hash!)).toBe(true);
+      expect(await verifyClaimCode(piece.claimCode!, (await product(piece.uuid)).claim_secret_hash!)).toBe(false);
+      const nextBuyer = (await createAccount(db())).id;
+      const again = await h.ctx.services.verification.verify({ code: piece.data }, {});
+      h.clock.advance(MINUTE);
+      await h.ctx.services.ownership.registerFirst(nextBuyer, { registrationToken: again.registration!.token, claimCode: fresh }, { type: 'account', id: nextBuyer });
+      expect(await db().selectFrom('ownership').select('account_id').where('product_id', '=', piece.uuid).where('ended_at', 'is', null).executeTakeFirstOrThrow()).toEqual({ account_id: nextBuyer });
       // Another damaged parcel archived by an ADMIN: the piece retired, the reshipment waits first in line.
       const second = await shippedOrder();
       const c2 = await cases().report(second.id, { kind: 'DAMAGED', note: 'Crushed.' }, agent, scope());
       await cases().receive(c2.id, { pieceState: 'DAMAGED' }, agent, scope());
-      await cases().decide(c2.id, { decision: 'RESHIP', pieceTo: 'ARCHIVED' }, admin, { admin: true });
+      expect((await cases().decide(c2.id, { decision: 'RESHIP', pieceTo: 'ARCHIVED' }, admin, { admin: true })).claimCodes).toBeUndefined();
       expect((await product(second.piece.uuid)).status).toBe('RETIRED');
       expect(await row(second.id)).toMatchObject({ reservation: 'AWAITING', queue_first: true });
     });
@@ -214,10 +227,12 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       const c2 = await cases().report(damaged.id, { kind: 'DAMAGED', note: 'Crushed.' }, agent, scope());
       await cases().receive(c2.id, { pieceState: 'OK' }, agent, scope());
       const hashBefore = (await product(damaged.piece.uuid)).claim_secret_hash;
-      await cases().decide(c2.id, { decision: 'REFUND', pieceTo: 'RESTOCKED' }, operator, { admin: false });
+      const refunded = await cases().decide(c2.id, { decision: 'REFUND', pieceTo: 'RESTOCKED' }, operator, { admin: false });
       expect(await row(damaged.id)).toMatchObject({ status: 'CANCELLED', product_id: null });
       expect((await product(damaged.piece.uuid)).status).toBe('RESOLD');
       expect((await product(damaged.piece.uuid)).claim_secret_hash).not.toBe(hashBefore);
+      expect(refunded.claimCodes?.map((x) => x.productId)).toEqual([damaged.piece.productId]);
+      expect(await verifyClaimCode(refunded.claimCodes![0]!.claimCode, (await product(damaged.piece.uuid)).claim_secret_hash!)).toBe(true);
       const level = (await h.ctx.services.logistics.stock({ modelId: catalog.modelId })).rows.find((r) => r.sku.id === damaged.skuId && r.location.id === france)!;
       expect([level.onHand, level.reserved]).toEqual([1, 0]);
     });
@@ -231,6 +246,36 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       expect(await refusal(cases().cancel(damaged.id, { note: 'Again.' }, operator))).toMatchObject({ code: 'ORDER_CASE_CLOSED', status: 409 });
       const lost = await cases().report(id, { kind: 'LOST', note: 'Never came back.' }, operator, null);
       expect(lost.status).toBe('OPEN');
+    });
+
+    it('a parcel paid and shipped long ago, back to sender or lost, then reshipped from stock: on To ship, ready from the decision, not LATE', async () => {
+      // Both paid and shipped 8 days ago.
+      const back = await shippedOrder();
+      const lost = await shippedOrder();
+      await stock(lost.skuId, 1);
+      h.clock.advance(8 * DAY);
+      // Back to sender: its piece back in stock, still bound, ready again from the decision.
+      const c1 = await cases().report(back.id, { kind: 'BACK_TO_SENDER', note: 'Address unknown.' }, agent, scope());
+      await cases().receive(c1.id, { pieceState: 'OK' }, agent, scope());
+      h.clock.advance(MINUTE);
+      const decidedAt = h.clock.now();
+      await cases().decide(c1.id, { decision: 'RESHIP' }, operator, { admin: false });
+      // Lost: a piece in stock taken at once (ahead of the queue), ready from the decision too.
+      const c2 = await cases().report(lost.id, { kind: 'LOST', note: 'No scan for 8 days.' }, operator, null);
+      h.clock.advance(MINUTE);
+      const lostDecidedAt = h.clock.now();
+      await cases().decide(c2.id, { decision: 'RESHIP' }, admin, { admin: true });
+      expect(await row(lost.id)).toMatchObject({ status: 'PAID', reservation: 'STOCK', queue_first: true });
+      const listed = (await h.ctx.services.logistics.parcels(scope())).toShip;
+      expect(listed.find((p) => p.id === back.id)).toMatchObject({ readySince: decidedAt, late: false });
+      expect(listed.find((p) => p.id === lost.id)).toMatchObject({ readySince: lostDecidedAt, late: false });
+      // The order page reads the same: not late, ready from the decision.
+      expect((await h.ctx.services.fulfilment.detail(lost.id)).timing).toMatchObject({ rule: 'READY', late: false });
+      // Five days after the decisions, LATE.
+      h.clock.advance(5 * DAY + MINUTE);
+      const later = (await h.ctx.services.logistics.parcels(scope())).toShip;
+      expect([back.id, lost.id].map((id) => later.find((p) => p.id === id)?.late)).toEqual([true, true]);
+      for (const id of [back.id, lost.id]) await orders().transition(id, { to: 'CANCELLED', note: 'Test over.' }, operator);
     });
 
     it('refund: the order cancelled with a credit note, its piece serving the next order, a new claim code waiting on its piece replaced', async () => {
@@ -291,6 +336,11 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       expect((await db().selectFrom('invoices').select('kind').where('order_id', '=', id).orderBy('issued_at').orderBy('kind', 'desc').execute()).map((i) => i.kind)).toEqual(['INVOICE', 'CREDIT_NOTE']);
       expect((await product(piece.uuid)).status).toBe('RESOLD');
       expect(decided.case.decision).toMatchObject({ outcome: 'REFUND', pieceTo: 'RESTOCKED', note: 'Refunded.' });
+      // The decision's words stay on the case and the return, never on the order's event.
+      const event = await db().selectFrom('order_events').select(['note', 'details']).where('order_id', '=', id).where('action', '=', 'order.return').executeTakeFirstOrThrow();
+      expect(event.note).toBeNull();
+      expect(event.details).toMatchObject({ caseId: opened.id, noted: true });
+      expect((await db().selectFrom('returns').select('note').where('order_id', '=', id).executeTakeFirstOrThrow()).note).toBe('Refunded.');
     });
 
     it('opens a size exchange for a size in stock only; decided: an EXCHANGE order PAID with its invoice naming SIZE EXCHANGE, the original credited', async () => {

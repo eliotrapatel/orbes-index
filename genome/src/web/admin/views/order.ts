@@ -544,7 +544,8 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
         defList([
           { label: 'The piece', value: h('span', { data: { testid: 'return-outcome' } }, r.location ? `${RETURN_LABELS[r.outcome]} · ${r.location.name}` : RETURN_LABELS[r.outcome]) },
           { label: 'Ownership', value: r.ownershipReclaimed ? 'Taken back by ORBES from its buyer' : 'Not registered by its buyer' },
-          { label: 'Note', value: h('span', { class: 'prewrap' }, r.note) },
+          // Withheld (null) from an AUDITOR when the return was decided from an order case.
+          ...(r.note !== null ? [{ label: 'Note', value: h('span', { class: 'prewrap' }, r.note) }] : []),
           { label: 'When', value: formatDateTime(r.at) },
         ]),
         { id: 'order-return' },

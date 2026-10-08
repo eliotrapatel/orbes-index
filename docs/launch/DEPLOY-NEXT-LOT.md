@@ -441,6 +441,10 @@ Sur ton téléphone (Safari), avec le compte d'essai de la maison, puis l'ordina
 
 Écrit à la fin de H2 (plan §4, « Finish H2 »), avec les mêmes parties. Son diff de `deploy/vps` se fera contre le commit de H1 alors en production, tel que le nomme la dernière ligne OK de `.state/deploys.log`, jamais contre G.
 
+Point ouvert déjà noté pour la remise de H2 :
+
+- **Le pays de la garantie démarrée à l'expédition** (question 14, plan §3.5.6.8b) : `ship()` démarre aujourd'hui chaque garantie sans pays. L'étape 6.7 lui passe le pays de l'adresse de livraison du colis, vérifié dans `packing.test` (la garantie et l'audit `warranty.activate`).
+
 ## 3. Ce qui reste à ta décision (sans bloquer)
 
 Le plan (§5.2) garde ces questions ouvertes pour H1 ; sans réponse, la réponse bâtie reste :
