@@ -1115,6 +1115,10 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
   if (!r || r.status !== 'CLOSED' || r.outcome !== 'ACCEPTED') throw new Error(`orderForShopRequest: request ${requestId} is not ACCEPTED`);
   if (await tx.selectFrom('orders').select('id').where('shop_request_id', '=', r.id).executeTakeFirst()) return { order: null, notes: [] };
   const notes: AuditRecordInput[] = [...(await ensureGrants(tx, r.account_id, now))];
+  // AC-01: the size the collector asked, with its SKU (held as any order's); none asked, entered later. Offered when it
+  // was asked (plan NEXT LOT §3.3): a size set aside since stays its own. A typed model's order keeps the declared label
+  // of the SKU it resolves to (SIZE 52 asked where 52 is declared too: 52), so the order and its SKU name one size.
+  const sized = r.size_label === null ? null : await offeredSku(tx, r.model_id, r.size_label, { allowSetAside: true });
   const order = await createOrder(
     tx,
     {
@@ -1123,10 +1127,8 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
       dropId: null,
       accountId: r.account_id,
       modelId: r.model_id,
-      // AC-01: the size the collector asked, with its SKU (held as any order's); none asked, entered later. Offered when
-      // it was asked (plan NEXT LOT §3.3): a size set aside since stays its own.
-      sizeLabel: r.size_label,
-      skuId: r.size_label === null ? null : (await offeredSku(tx, r.model_id, r.size_label, { allowSetAside: true })).skuId,
+      sizeLabel: sized === null ? null : sized.typed ? sized.label : r.size_label,
+      skuId: sized?.skuId ?? null,
       priceMinor: null,
       currency: null,
       addons: [],

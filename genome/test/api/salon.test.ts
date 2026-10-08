@@ -402,4 +402,27 @@ describe('the private salon (P-X08)', () => {
     expect(closed.statusCode, closed.body).toBe(200);
     expect(await h.ctx.db.selectFrom('orders').select(['size_label', 'sku_id']).where('shop_request_id', '=', requestId).executeTakeFirstOrThrow()).toEqual({ size_label: '54', sku_id: s54 });
   });
+
+  it('a typed model with two sizes of one measure (SIZE 52 and 52, NEXT LOT §3.3): a request in SIZE 52 closed ACCEPTED makes an order whose size is its SKU\'s declared label', async () => {
+    const operatorActor = { type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
+    const ring = (await h.ctx.services.catalog.createModel({ categoryCode: 'J', name: 'GEMINI', type: 'RING', skuPrefix: 'SL-GEM', sizeType: 'RING' }, SYSTEM_ACTOR)).id;
+    await ensureSku(h.ctx.db, ring, 'SIZE 52');
+    await h.ctx.services.sizes.declare(ring, { ticked: ['50', '52'] }, operatorActor);
+    await ensureSku(h.ctx.db, ring, '52');
+    expect((await operator.patch(model(ring), { slug: 'gemini-salon', lookbook: 'RESERVED' })).statusCode).toBe(200);
+    const owner = await member(1);
+    expect((safeJson(await owner.client.get('/api/v1/club/lookbook/gemini-salon')) as SheetJson).salon!.sizes).toEqual(['50', '52', 'SIZE 52']);
+    const asked = await requestOf(owner.client, 'gemini-salon', { size: 'SIZE 52' });
+    expect(asked.statusCode, asked.body).toBe(201);
+    const requestId = (safeJson(asked) as { request: RequestJson }).request.id;
+    const closed = await operator.post(`/api/admin/club/requests/${requestId}/close`, { note: 'Confirmed size 52.', outcome: 'ACCEPTED' });
+    expect(closed.statusCode, closed.body).toBe(200);
+    const order = await h.ctx.db
+      .selectFrom('orders as o')
+      .innerJoin('skus as s', 's.id', 'o.sku_id')
+      .select(['o.size_label', 's.size_label as sku_label', 's.code'])
+      .where('o.shop_request_id', '=', requestId)
+      .executeTakeFirstOrThrow();
+    expect(order).toEqual({ size_label: '52', sku_label: '52', code: 'SL-GEM-52' });
+  });
 });
