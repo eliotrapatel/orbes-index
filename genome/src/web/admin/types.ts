@@ -1437,6 +1437,31 @@ export interface Drop {
   heldPieces: number;
   /** IN-01: the entries waiting for the draw with the house's guarantee: selected first, for their pieces. */
   guaranteedEntered: { places: number; pieces: number };
+  /** Plan NEXT LOT §3.6.F: its sizes with their counts, in order; [] for a draw without sizes (one published before). */
+  sizes: DrawSize[];
+}
+
+/** A draw's size as the console reads it (plan NEXT LOT §3.6.F): its pieces, then its entries counted. */
+export interface DrawSize {
+  id: string;
+  label: string;
+  pieces: number;
+  /** The pieces reserved directly in it, held or sold. */
+  reserved: number;
+  /** Its entries waiting for the draw. */
+  entered: number;
+  /** The pieces held or sold in it. */
+  held: number;
+  /** Its waiting list. */
+  waitlisted: number;
+  /** IN-01: the pieces of its guaranteed entries waiting. */
+  guaranteedEntered: number;
+}
+
+/** A draw's size and its pieces as the console sends them (plan NEXT LOT §3.6.F): 0 leaves it out. */
+export interface DrawSizeInput {
+  label: string;
+  pieces: number;
 }
 
 /** POST /api/admin/drops; any field of PATCH /api/admin/drops/:id while a DRAFT (the description only once published). */
@@ -1444,7 +1469,8 @@ export interface DropInput {
   modelId: string;
   title: string;
   description?: string | null;
-  quantity: number;
+  /** Plan NEXT LOT §3.6.F: its sizes and their pieces; its quantity is their sum (a quantity is no longer sent). */
+  sizes: DrawSizeInput[];
   opensAt: Iso;
   closesAt: Iso;
   purchaseWindowHours?: number;
@@ -1476,6 +1502,8 @@ export interface DropEntry {
   guaranteed: boolean;
   /** IN-01: the pieces of its place. */
   pieces: number;
+  /** Plan NEXT LOT §3.6.F: its size; null in a draw without sizes. */
+  size: { id: string; label: string } | null;
   handledBy: { id: string; email: string } | null;
   handledAt: Iso | null;
   note: string | null;
@@ -1491,6 +1519,8 @@ export interface DrawOutcome {
   /** IN-01: the guaranteed places selected first, and their pieces. */
   guaranteed: number;
   guaranteedPieces: number;
+  /** Plan NEXT LOT §3.6.F: per size, the places drawn, the entries selected and waitlisted; [] for a draw without sizes. */
+  sizes: { id: string; label: string; places: number; selected: number; waitlisted: number }[];
 }
 
 // ── The Club: the LIVE RELEASES ────────────────────────────────────────────

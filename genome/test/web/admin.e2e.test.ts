@@ -2081,7 +2081,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await adminContext.close();
   }, STEP_TIMEOUT);
 
-  it('runs a release from the Club page (P-R03): created, edited, published; drawn by an ADMIN after a typed phrase; a sale confirmed, a place lapsed after its time, the next offered; an AUDITOR reads', async () => {
+  it('runs a release from the Club page (P-R03): created in its model\'s sizes (plan NEXT LOT §3.6.F, two dialogs), edited, its Sizes and pieces, published; drawn per size by an ADMIN after a typed phrase; a sale confirmed, a place lapsed after its time, the next offered in its size; the Size column and filter; an AUDITOR reads', async () => {
     const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
     const p = await c.newPage();
     await watch(p);
@@ -2109,11 +2109,23 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('.side__link.is-active').textContent()).toBe('Club');
     await expect.poll(() => p.locator('[data-testid=club-tab-drops]').getAttribute('aria-current')).toBe('page');
 
-    // A new release: a draft, its seed committed at once.
+    // A new release, in two dialogs (plan NEXT LOT §3.6.F): its model, then its fields with one field of pieces per
+    // offered size of that model, the pieces in all said below; a draft, its seed committed at once.
     await p.click('[data-testid=drop-new]');
     await p.selectOption('dialog select[name=modelId]', modelId);
+    expect(await p.locator('dialog input[name=title]').count()).toBe(0);
+    await p.click('[data-testid=dialog-confirm]');
+    await p.waitForSelector('dialog input[name=title]');
+    expect(await p.locator('dialog select[name=modelId]').count()).toBe(0);
+    expect(await p.locator('dialog input[name=quantity]').count()).toBe(0);
+    expect(await p.locator('dialog [data-testid=draw-sizes-lead]').textContent()).toBe('The sizes this model declares. Give each size its pieces; 0 leaves it out of the draw.');
+    const sizeFields = await p.locator('dialog input[name^="size:"]').evaluateAll((els) => els.map((e) => (e as HTMLInputElement).name));
+    expect(sizeFields).toContain('size:52');
+    expect(sizeFields).toContain('size:54');
     await p.fill('dialog input[name=title]', 'MONOLITHE — release I');
-    await p.fill('dialog input[name=quantity]', '3');
+    await p.fill('dialog input[name="size:52"]', '2');
+    await p.fill('dialog input[name="size:54"]', '1');
+    await expect.poll(() => p.locator('dialog [data-testid=draw-pieces-in-all]').textContent()).toBe('3 pieces in all');
     const opens = new Date(Date.now() - 3_600_000);
     const closes = new Date(Date.now() + 3_600_000);
     const local = (d: Date) => d.toISOString().slice(0, 16);
@@ -2135,11 +2147,34 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const seedHash = (await ctx.db.selectFrom('drops').select('seed_hash').where('id', '=', dropId).executeTakeFirstOrThrow()).seed_hash;
     expect(await p.locator('[data-testid=drop-seed-hash] .mono').getAttribute('title')).toBe(Buffer.from(seedHash).toString('hex'));
     expect(await p.locator('[data-testid=drop-seed]').count()).toBe(0);
-    // A draft changes freely: two pieces instead of three.
+    // Its sizes: 52 with 2 pieces, 54 with 1.
+    expect(await p.locator('#sizes tbody tr').evaluateAll((rows) => rows.map((r) => [...r.querySelectorAll('td')].slice(0, 2).map((c) => c.textContent?.trim())))).toEqual([
+      ['Size 52', '2'],
+      ['Size 54', '1'],
+    ]);
+    // A draft changes freely, in the same two dialogs: one piece in 52.
     await p.click('[data-testid=drop-edit]');
-    await p.fill('dialog input[name=quantity]', '2');
+    await p.waitForSelector('dialog select[name=modelId]');
+    expect(await p.inputValue('dialog select[name=modelId]')).toBe(modelId);
+    await p.click('[data-testid=dialog-confirm]');
+    await p.waitForSelector('dialog input[name=title]');
+    expect(await p.inputValue('dialog input[name="size:52"]')).toBe('2');
+    await p.fill('dialog input[name="size:52"]', '1');
     await confirmDialog(p);
     await expect.poll(() => p.locator('#release .deflist__row', { hasText: 'Pieces' }).locator('.deflist__value').textContent()).toBe('2');
+    // Sizes and pieces, alone: the same fields; a size at 0 leaves it out, the pieces in all follow.
+    await p.click('[data-testid=drop-sizes]');
+    await p.waitForSelector('dialog input[name="size:52"]');
+    expect(await p.locator('dialog .dialog__title, dialog h2').first().textContent()).toContain('Sizes and pieces');
+    await p.fill('dialog input[name="size:54"]', '0');
+    await expect.poll(() => p.locator('dialog [data-testid=draw-pieces-in-all]').textContent()).toBe('1 piece in all');
+    await p.fill('dialog input[name="size:54"]', '1');
+    await p.fill('dialog input[name="size:52"]', '1');
+    await p.click('[data-testid=dialog-confirm]');
+    // Nothing changed: said in the dialog, nothing sent.
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await p.click('dialog [data-testid=dialog-cancel]');
+    await p.waitForSelector('dialog.dialog', { state: 'detached' });
     // Published: its page on /verify; only the description changes from then on. Its entries are open already: no early access.
     await p.click('[data-testid=drop-publish]');
     await expect.poll(() => p.locator('dialog').textContent()).toContain('Direct reservations of PLATINE and PALLADIUM owners: none.');
@@ -2147,6 +2182,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('OPEN');
     await expect.poll(() => p.locator('[data-testid=drop-early-access]').textContent()).toBe('None');
     expect(await p.locator('[data-testid=drop-edit]').count()).toBe(0);
+    expect(await p.locator('[data-testid=drop-sizes]').count()).toBe(0);
     expect(await p.locator('[data-testid=drop-page]').getAttribute('href')).toBe(`/verify/releases/${dropId}`);
     await p.click('[data-testid=drop-describe]');
     await p.fill('dialog textarea[name=description]', 'Two pieces, cast in Paris.');
@@ -2164,8 +2200,18 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await ctx.services.warranty.activate(owned.product.id, { purchaseDate: '2026-09-20', retailer: 'ORBES PARIS', country: 'FR' }, SYSTEM_ACTOR);
     const scan = await ctx.services.verification.verify({ code: owned.code.data }, {});
     await ctx.services.ownership.registerFirst(entrants[0]!, { registrationToken: scan.registration!.token, claimCode: owned.claimCode! }, { type: 'account', id: entrants[0]! });
-    for (const id of entrants) await ctx.services.drops.enter(id, dropId, { type: 'account', id });
+    // Two enter in 52 (the TITANE first), one in 54.
+    const sized = await ctx.services.drops.get(dropId);
+    const sizeIdOf = (label: string) => sized.sizes.find((s) => s.label === label)!.id;
+    for (const [i, id] of entrants.entries()) await ctx.services.drops.enter(id, dropId, { type: 'account', id }, { sizeId: sizeIdOf(i < 2 ? '52' : '54') });
     await p.reload();
+    await expect.poll(() => p.locator('#entries tbody tr').count()).toBe(3);
+    // The Size column, and the size filter (All sizes, then each).
+    expect((await p.locator('#entries [data-testid=entry-size]').allTextContents()).sort()).toEqual(['Size 52', 'Size 52', 'Size 54']);
+    await p.selectOption('#entries select[name=size]', sizeIdOf('54'));
+    await expect.poll(() => p.locator('#entries tbody tr').count()).toBe(1);
+    expect(await p.locator('#entries [data-testid=entry-size]').allTextContents()).toEqual(['Size 54']);
+    await p.selectOption('#entries select[name=size]', '');
     await expect.poll(() => p.locator('#entries tbody tr').count()).toBe(3);
     // The entries close; an OPERATOR never draws, an ADMIN does, once, after the phrase.
     await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - 7_200_000), closes_at: new Date(Date.now() - 1_000) }).where('id', '=', dropId).execute();
@@ -2174,29 +2220,41 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.click('[data-testid=drop-draw]');
     await expect.poll(() => p.locator('dialog [data-testid=dialog-confirm]').isDisabled()).toBe(true);
     await confirmDialog(p, `DRAW ${dropId.slice(0, 8).toUpperCase()}`);
-    await p.waitForSelector('.toast:has-text("Drawn: 2 places held, 1 on the waiting list.")');
+    // Its outcome per size (plan NEXT LOT §3.6.F).
+    await p.waitForSelector('.toast:has-text("Drawn. 52: 1 selected, 1 on the waiting list. 54: 1 selected, 0 on the waiting list.")');
     await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('DRAWN');
     await expect.poll(() => p.locator('[data-testid=drop-seed]').count()).toBe(1);
     const rows = p.locator('#entries tbody tr');
+    const rowOf = (n: number) => rows.filter({ hasText: `club.entrant${n}@example.com` });
     await expect.poll(() => rows.locator('td.col--num').first().textContent()).toBe('1');
     expect(await rows.first().textContent()).toContain('TITANE');
     expect(await rows.first().textContent()).toContain('club.entrant1@example.com');
-    expect(await rows.nth(2).locator('[data-testid=entry-status]').textContent()).toContain('WAITLISTED');
-    // The first sale concluded; the second place lapses only after its time.
-    await rows.first().locator('[data-testid=entry-confirm]').click();
+    expect(await rowOf(2).locator('[data-testid=entry-status]').textContent()).toContain('WAITLISTED');
+    expect(await rowOf(3).locator('[data-testid=entry-status]').textContent()).toContain('SELECTED');
+    // Sizes: held or sold and the waiting list, per size; no OFFER NEXT for the release as a whole, none per size while full.
+    const sizeRow = (label: string) => p.locator('#sizes tbody tr', { hasText: `Size ${label}` });
+    expect(await sizeRow('52').evaluate((r) => [...r.querySelectorAll('td')].slice(1, 6).map((c) => c.textContent?.trim()))).toEqual(['1', '0', '0', '1', '1']);
+    expect(await p.locator('[data-testid=drop-offer-next]').count()).toBe(0);
+    expect(await p.locator('[data-testid=size-offer-next]').count()).toBe(0);
+    // The sale in 54 concluded; the place in 52 lapses only after its time.
+    await rowOf(3).locator('[data-testid=entry-confirm]').click();
     await p.fill('dialog textarea[name=note]', 'Sold in the Paris boutique.');
     await confirmDialog(p);
-    await expect.poll(() => rows.first().locator('[data-testid=entry-status]').textContent()).toContain('CONFIRMED');
-    expect(await rows.nth(1).locator('[data-testid=entry-lapse]').count()).toBe(0);
-    await ctx.db.updateTable('drop_entries').set({ respond_by: new Date(Date.now() - 1_000) }).where('drop_id', '=', dropId).where('rank', '=', 2).execute();
+    await expect.poll(() => rowOf(3).locator('[data-testid=entry-status]').textContent()).toContain('CONFIRMED');
+    expect(await rowOf(1).locator('[data-testid=entry-lapse]').count()).toBe(0);
+    await ctx.db.updateTable('drop_entries').set({ respond_by: new Date(Date.now() - 1_000) }).where('drop_id', '=', dropId).where('rank', '=', 1).execute();
     await p.reload();
-    await rows.nth(1).locator('[data-testid=entry-lapse]').click();
+    await rowOf(1).locator('[data-testid=entry-lapse]').click();
     await confirmDialog(p);
-    await expect.poll(() => rows.nth(1).locator('[data-testid=entry-status]').textContent()).toContain('LAPSED');
-    await p.click('[data-testid=drop-offer-next]');
+    await expect.poll(() => rowOf(1).locator('[data-testid=entry-status]').textContent()).toContain('LAPSED');
+    // OFFER NEXT in 52, its place free and its waiting list: the next of 52 is held a place.
+    await expect.poll(() => sizeRow('52').locator('[data-testid=size-offer-next]').count()).toBe(1);
+    expect(await sizeRow('54').locator('[data-testid=size-offer-next]').count()).toBe(0);
+    await sizeRow('52').locator('[data-testid=size-offer-next]').click();
+    await expect.poll(() => p.locator('dialog').textContent()).toContain('The first entry by rank on the waiting list of size 52');
     await confirmDialog(p);
-    await expect.poll(() => rows.nth(2).locator('[data-testid=entry-status]').textContent()).toContain('SELECTED');
-    expect(await p.locator('[data-testid=drop-offer-next]').count()).toBe(0);
+    await expect.poll(() => rowOf(2).locator('[data-testid=entry-status]').textContent()).toContain('SELECTED');
+    expect(await p.locator('[data-testid=size-offer-next]').count()).toBe(0);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'club-drop', { full: true });
     // The Drops tab lists it, its row leading to its page.
@@ -2219,7 +2277,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(async () => (await title(ap).textContent())?.trim()).toBe('MONOLITHE — release I');
     await expect.poll(() => ap.locator('#entries tbody tr').count()).toBe(3);
     for (const shown of await ap.locator('[data-testid=entry-account]').allTextContents()) expect(shown).toMatch(/^c\*\*\*@example\.com$/);
-    for (const action of ['drop-edit', 'drop-describe', 'drop-publish', 'drop-cancel', 'drop-draw', 'drop-offer-next', 'entry-confirm', 'entry-lapse']) {
+    for (const action of ['drop-edit', 'drop-sizes', 'drop-describe', 'drop-publish', 'drop-cancel', 'drop-draw', 'drop-offer-next', 'size-offer-next', 'entry-confirm', 'entry-lapse']) {
       expect(await ap.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
     expect(await cspViolations(ap)).toEqual([]);

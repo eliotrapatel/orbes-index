@@ -141,9 +141,12 @@ const PROBES: Probe[] = [
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/draw`, body: INVALID, min: 'ADMIN' },
   { group: 'drops', method: 'GET', url: `/api/admin/drops/${UUID}/entries`, min: 'AUDITOR' },
   { group: 'drops', method: 'GET', url: `/api/admin/drops/${UUID}/entries?status=SELECTED`, min: 'AUDITOR' },
+  // Plan NEXT LOT §3.6.F: one size's entries; OFFER NEXT in a size.
+  { group: 'drops', method: 'GET', url: `/api/admin/drops/${UUID}/entries?sizeId=${UUID}`, min: 'AUDITOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/confirm`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/entries/${UUID}/lapse`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/offer-next`, body: INVALID, min: 'OPERATOR' },
+  { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/offer-next`, body: { sizeId: UUID }, min: 'OPERATOR' },
   // TEST ENTRANTS (2026-10-07): sent, added, stopped, confirmed or released by hand and ended by an ADMIN; read by an AUDITOR.
   { group: 'test-entrants', method: 'POST', url: `/api/admin/drops/${UUID}/test-runs`, body: INVALID, min: 'ADMIN' },
   { group: 'test-entrants', method: 'POST', url: `/api/admin/test-runs/${UUID}/add`, body: INVALID, min: 'ADMIN' },

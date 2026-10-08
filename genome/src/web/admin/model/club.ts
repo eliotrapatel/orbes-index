@@ -20,6 +20,11 @@
  *  - Its price (plan NOCTURNE, addition 5): optional, typed in units with
  *    its currency; shown on its card and page on /verify, and taken by the
  *    order of each entry Client Services confirms.
+ *  - Its sizes (plan NEXT LOT §3.6.F): one field of pieces per offered size
+ *    of its model (`size:<label>`, empty is 0, 0 leaves it out), 1 to 24
+ *    sizes with pieces and 10 000 pieces in all, the pieces in all said
+ *    below, and per size what the stock gives and what will wait for
+ *    supplier stock; OFFER NEXT per size; the draw's outcome per size.
  *  - The tiers (P-X04): the words of each tier's benefits, one per line, as
  *    the server holds them (600 characters, 8 lines), what is sent (null to
  *    restore the default words), and an account's tier on its sheet.
@@ -27,19 +32,24 @@
  *    who closes one (OPERATOR, an OPEN one), what the Close dialog's note
  *    must be (required, 2 000 characters), and a request's model line.
  */
-import { formatDate, formatDateTime } from '../format.js';
+import { formatCount, formatDate, formatDateTime } from '../format.js';
 import { formatMoney, moneyField, parseMoney } from './live.js';
 import { can } from './permissions.js';
+import { ONE_SIZE_LABEL, sizeName } from './sizes.js';
 import {
   ORDER_CURRENCIES,
   SHOP_REQUEST_OUTCOMES,
   SHOP_REQUEST_STATUSES,
   type AdminRole,
   type ClubTierSheet,
+  type DrawOutcome,
+  type DrawSize,
+  type DrawSizeInput,
   type Drop,
   type DropChange,
   type DropEntry,
   type DropInput,
+  type ModelSizes,
   type OrderCurrency,
   type OwnerSheet,
   type ShopRequest,
@@ -60,8 +70,8 @@ export function clubTab(query: Record<string, string>): ClubTab {
   return CLUB_TABS.find((t) => t.id === query.tab)?.id ?? CLUB_TABS[0].id;
 }
 
-/** The bounds the server holds a drop to (services/drops.ts; the early access, P-X02, EARLY_ACCESS_HOURS). */
-export const DROP_LIMITS = Object.freeze({ title: 120, description: 2000, quantity: 10_000, windowMin: 1, windowMax: 336, windowDefault: 48, earlyMin: 0, earlyMax: 336, note: 500, priceMax: 100_000_000 });
+/** The bounds the server holds a drop to (services/drops.ts; the early access, P-X02, EARLY_ACCESS_HOURS; its sizes, DRAW_SIZES). */
+export const DROP_LIMITS = Object.freeze({ title: 120, description: 2000, quantity: 10_000, windowMin: 1, windowMax: 336, windowDefault: 48, earlyMin: 0, earlyMax: 336, note: 500, priceMax: 100_000_000, sizes: 24 });
 
 /** A new draw's early access by default (BP-19 T3): THE PROGRAM's, PALLADIUM's then PLATINE's hours (services/club-program.ts DEFAULT_PROGRAM). */
 export interface EarlyAccessDefaults {
@@ -98,7 +108,6 @@ export function dropFormValues(d: Drop | null, now: Date, early: EarlyAccessDefa
       modelId: d.model.id,
       title: d.title,
       description: d.description ?? '',
-      quantity: String(d.quantity),
       opensAt: localUtc(d.opensAt),
       closesAt: localUtc(d.closesAt),
       purchaseWindowHours: String(d.purchaseWindowHours),
@@ -114,7 +123,6 @@ export function dropFormValues(d: Drop | null, now: Date, early: EarlyAccessDefa
     modelId: '',
     title: '',
     description: '',
-    quantity: '1',
     opensAt: localUtc(opens.toISOString()),
     closesAt: localUtc(closes.toISOString()),
     purchaseWindowHours: String(DROP_LIMITS.windowDefault),
@@ -134,8 +142,8 @@ export function dropProblem(v: Record<string, string>): string | null {
   if (!title) return 'Give the release a title.';
   if (title.length > DROP_LIMITS.title) return `A title has at most ${DROP_LIMITS.title} characters.`;
   if ((v.description ?? '').trim().length > DROP_LIMITS.description) return `The description has at most ${DROP_LIMITS.description} characters.`;
-  const quantity = wholeNumber(v.quantity);
-  if (quantity === null || quantity < 1 || quantity > DROP_LIMITS.quantity) return `A release has 1 to ${DROP_LIMITS.quantity} pieces.`;
+  const sizes = drawSizesProblem(v);
+  if (sizes) return sizes;
   const opens = utcInstant(v.opensAt);
   const closes = utcInstant(v.closesAt);
   if (!opens || !closes) return 'Use the date and time pickers (UTC) for the opening and the close of entries.';
@@ -173,7 +181,7 @@ export function dropInput(v: Record<string, string>): DropInput {
     modelId: v.modelId,
     title: v.title.trim(),
     description: description === '' ? null : description,
-    quantity: Number(v.quantity),
+    sizes: drawSizesInput(v),
     opensAt: utcInstant(v.opensAt)!,
     closesAt: utcInstant(v.closesAt)!,
     purchaseWindowHours: Number(v.purchaseWindowHours),
@@ -191,7 +199,8 @@ export function dropChange(d: Drop, v: Record<string, string>): DropChange {
   if (next.modelId !== d.model.id) out.modelId = next.modelId;
   if (next.title !== d.title) out.title = next.title;
   if ((next.description ?? null) !== (d.description ?? null)) out.description = next.description ?? null;
-  if (next.quantity !== d.quantity) out.quantity = next.quantity;
+  // Plan NEXT LOT §3.6.F: its sizes when they changed, or always for another model (the new model's sizes).
+  if (out.modelId !== undefined || !sameDrawSizes(d.sizes, next.sizes)) out.sizes = next.sizes;
   if (Date.parse(next.opensAt) !== Date.parse(d.opensAt)) out.opensAt = next.opensAt;
   if (Date.parse(next.closesAt) !== Date.parse(d.closesAt)) out.closesAt = next.closesAt;
   if (next.purchaseWindowHours !== d.purchaseWindowHours) out.purchaseWindowHours = next.purchaseWindowHours;
@@ -202,6 +211,111 @@ export function dropChange(d: Drop, v: Record<string, string>): DropChange {
     out.currency = next.currency ?? null;
   }
   return out;
+}
+
+// ── A draw's sizes (plan NEXT LOT §3.6.F) ─────────────────────────────────
+
+/** A size's field of pieces in the dialog: `size:<label>`. */
+export const SIZE_FIELD = 'size:';
+export const sizeField = (label: string): string => `${SIZE_FIELD}${label}`;
+
+/** The line in place of the fields for a model with no offered size: a draw needs them. */
+export const NO_DRAW_SIZES = 'No sizes yet: give this model its size type and its sizes in the Catalogue.';
+/** The lead of the sizes' fields, and the hint for a model that declares more than a draw takes. */
+export const DRAW_SIZES_LEAD = 'The sizes this model declares. Give each size its pieces; 0 leaves it out of the draw.';
+export const DRAW_SIZES_HINT = `Up to ${DROP_LIMITS.sizes} sizes with pieces.`;
+
+/** A model's offered sizes, as a draw names them: its declared labels not set aside, ONE SIZE for a size of none. */
+export function offeredLabels(m: Pick<ModelSizes, 'sizes'>): string[] {
+  return m.sizes.filter((s) => s.setAsideAt === null).map((s) => s.label ?? ONE_SIZE_LABEL);
+}
+
+/** A size's field as the dialog labels it: « Size 52 », « SIZE 52 » as written, « ONE SIZE ». */
+export function sizeFieldLabel(label: string): string {
+  return label.toUpperCase() === ONE_SIZE_LABEL ? ONE_SIZE_LABEL : sizeName(label);
+}
+
+/** A size inside a sentence: « size 52 », « SIZE 52 » as written, « ONE SIZE ». */
+export function sizeInSentence(label: string): string {
+  const named = sizeFieldLabel(label);
+  return named.startsWith('Size ') ? `size ${named.slice(5)}` : named;
+}
+
+/** The values of a draw's size fields: a draft's pieces in each size it has (0 for the others), empty for a new release. */
+export function drawSizeValues(labels: readonly string[], d: Pick<Drop, 'sizes'> | null): Record<string, string> {
+  const pieces = new Map((d?.sizes ?? []).map((s) => [s.label.toUpperCase(), s.pieces]));
+  return Object.fromEntries(labels.map((l) => [sizeField(l), d ? String(pieces.get(l.toUpperCase()) ?? 0) : '']));
+}
+
+/** The sizes the dialog holds, in their order, each with its pieces (an empty field is 0; null: not a whole number in bounds). */
+export function drawSizesOf(v: Record<string, string>): { label: string; pieces: number | null }[] {
+  return Object.keys(v)
+    .filter((k) => k.startsWith(SIZE_FIELD))
+    .map((k) => {
+      const raw = (v[k] ?? '').trim();
+      const n = raw === '' ? 0 : wholeNumber(raw);
+      return { label: k.slice(SIZE_FIELD.length), pieces: n === null || n > DROP_LIMITS.quantity ? null : n };
+    });
+}
+
+/** What the server would refuse in a draw's sizes, said before anything is sent; null when they hold. */
+export function drawSizesProblem(v: Record<string, string>): string | null {
+  const sizes = drawSizesOf(v);
+  if (sizes.length === 0) return NO_DRAW_SIZES;
+  if (sizes.some((s) => s.pieces === null)) return `A size has 0 to ${formatCount(DROP_LIMITS.quantity)} pieces.`;
+  const withPieces = sizes.filter((s) => (s.pieces ?? 0) > 0);
+  if (withPieces.length < 1 || withPieces.length > DROP_LIMITS.sizes) return `A release has 1 to ${DROP_LIMITS.sizes} sizes with pieces.`;
+  if (withPieces.reduce((n, s) => n + (s.pieces ?? 0), 0) > DROP_LIMITS.quantity) return `A release has at most ${formatCount(DROP_LIMITS.quantity)} pieces.`;
+  return null;
+}
+
+/** The sizes to send (POST, PATCH): those with pieces, in the dialog's order. */
+export function drawSizesInput(v: Record<string, string>): DrawSizeInput[] {
+  return drawSizesOf(v)
+    .filter((s) => (s.pieces ?? 0) > 0)
+    .map((s) => ({ label: s.label, pieces: s.pieces! }));
+}
+
+/** Whether a draft's sizes are those the dialog gives (labels whatever their case, in order). */
+function sameDrawSizes(had: readonly Pick<DrawSize, 'label' | 'pieces'>[], next: readonly DrawSizeInput[]): boolean {
+  return had.length === next.length && had.every((s, i) => s.label.toUpperCase() === next[i]!.label.toUpperCase() && s.pieces === next[i]!.pieces);
+}
+
+/** The change of a draft's sizes from the Sizes and pieces dialog; null when nothing changed. */
+export function drawSizesChange(d: Pick<Drop, 'sizes'>, v: Record<string, string>): DrawSizeInput[] | null {
+  const next = drawSizesInput(v);
+  return sameDrawSizes(d.sizes, next) ? null : next;
+}
+
+/** The pieces the fields give in all: « 12 pieces in all ». */
+export function piecesInAll(v: Record<string, string>): string {
+  const n = drawSizesOf(v).reduce((m, s) => m + (s.pieces ?? 0), 0);
+  return `${formatCount(n)} ${n === 1 ? 'piece' : 'pieces'} in all`;
+}
+
+/**
+ * Plan NEXT LOT §3.5.4.3, per size: what the stock at the draw's location gives it, and what will wait for supplier
+ * stock once sold (« 52: 12 in stock, 13 will wait for supplier stock. »); only the sizes it does not cover.
+ */
+export function drawStockLines(v: Record<string, string>, available: (label: string) => number): string[] {
+  return drawSizesOf(v)
+    .filter((s) => (s.pieces ?? 0) > 0)
+    .flatMap((s) => {
+      const fromStock = Math.min(s.pieces!, Math.max(0, available(s.label)));
+      const short = s.pieces! - fromStock;
+      return short > 0 ? [`${s.label}: ${formatCount(fromStock)} in stock, ${formatCount(short)} will wait for supplier stock.`] : [];
+    });
+}
+
+/** The draw's outcome as its toast says it: per size, « 17: 5 selected, 12 on the waiting list. »; overall for a draw without sizes. */
+export function drawOutcomeText(r: Pick<DrawOutcome, 'selected' | 'waitlisted' | 'sizes'>): string {
+  if (r.sizes.length === 0) return `Drawn: ${formatCount(r.selected)} ${r.selected === 1 ? 'place' : 'places'} held, ${formatCount(r.waitlisted)} on the waiting list.`;
+  return `Drawn. ${r.sizes.map((s) => `${s.label}: ${formatCount(s.selected)} selected, ${formatCount(s.waitlisted)} on the waiting list.`).join(' ')}`;
+}
+
+/** OFFER NEXT in a size: the draw drawn, a place free in it and someone on its waiting list (OPERATOR). */
+export function sizeOfferable(d: Pick<Drop, 'state'>, s: Pick<DrawSize, 'held' | 'pieces' | 'waitlisted'>, role: AdminRole | null | undefined): boolean {
+  return can(role, 'manageDrops') && d.state === 'DRAWN' && s.held < s.pieces && s.waitlisted > 0;
 }
 
 /** The phrase typed before the draw, and before a cancellation: the first eight characters of the drop's id. */
@@ -253,8 +367,10 @@ export interface DropActions {
   cancel: boolean;
   /** ADMIN, once its entries are closed. */
   draw: boolean;
-  /** Places left and someone waiting. */
+  /** Places left and someone waiting (a draw without sizes; with sizes, per size: sizeOfferable). */
   offerNext: boolean;
+  /** Plan NEXT LOT §3.6.F: its sizes and their pieces, a DRAFT only. */
+  sizes: boolean;
 }
 
 /** What `role` may do to the drop now (the server checks again; this only hides what would be refused). */
@@ -267,7 +383,8 @@ export function dropActions(d: Drop, role: AdminRole | null | undefined): DropAc
     publish: manage && draft,
     cancel: manage && d.state !== 'DRAWN' && d.state !== 'CANCELLED',
     draw: can(role, 'drawDrop') && d.state === 'CLOSED',
-    offerNext: manage && d.state === 'DRAWN' && placesTaken(d) < d.quantity && (d.entries.WAITLISTED ?? 0) > 0,
+    offerNext: manage && d.sizes.length === 0 && d.state === 'DRAWN' && placesTaken(d) < d.quantity && (d.entries.WAITLISTED ?? 0) > 0,
+    sizes: manage && draft,
   };
 }
 

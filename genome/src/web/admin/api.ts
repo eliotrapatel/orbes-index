@@ -1497,7 +1497,8 @@ export class AdminApi {
     return this.post(`/api/admin/drops/${encodeURIComponent(id)}/draw`);
   }
 
-  dropEntries(id: string, q: { status?: DropEntryStatus; page?: number; pageSize?: number } = {}): Promise<Paged<DropEntry>> {
+  /** Its entries; plan NEXT LOT §3.6.F: `sizeId`, one size's. */
+  dropEntries(id: string, q: { status?: DropEntryStatus; sizeId?: string; page?: number; pageSize?: number } = {}): Promise<Paged<DropEntry>> {
     return this.get(`/api/admin/drops/${encodeURIComponent(id)}/entries`, q);
   }
 
@@ -1511,9 +1512,9 @@ export class AdminApi {
     return this.post(`/api/admin/drops/${encodeURIComponent(id)}/entries/${encodeURIComponent(entryId)}/lapse`, note ? { note } : {});
   }
 
-  /** OFFER NEXT: the first of the waiting list, SELECTED. */
-  offerNextDropEntry(id: string): Promise<DropEntry> {
-    return this.post(`/api/admin/drops/${encodeURIComponent(id)}/offer-next`);
+  /** OFFER NEXT: the first of the waiting list, SELECTED; plan NEXT LOT §3.6.F: of one size's in a draw with sizes. */
+  offerNextDropEntry(id: string, sizeId?: string | null): Promise<DropEntry> {
+    return this.post(`/api/admin/drops/${encodeURIComponent(id)}/offer-next`, sizeId ? { sizeId } : undefined);
   }
 
   // ── Test entrants and the server's status (plan TEST ENTRANTS) ───────────

@@ -17,7 +17,9 @@
  * views/live.ts). Then the draws: every drop, the latest created first, with
  * its state, its window of entries (UTC), its pieces and its entries; New
  * release (OPERATOR) creates a DRAFT whose seed is drawn and committed at
- * once. A drop's row opens its page (`#/club/drops/:dropId`): its facts,
+ * once, in two dialogs (plan NEXT LOT §3.6.F): its model, then its fields with
+ * one field of pieces per offered size of that model, the pieces in all and
+ * what the stock gives each size below. A drop's row opens its page (`#/club/drops/:dropId`): its facts,
  * publication, cancellation, the draw (ADMIN) and its entries. An AUDITOR
  * reads. On the right, the server's status (plan TEST ENTRANTS,
  * views/server-status.ts) and the test running, whatever its release, with
@@ -26,13 +28,32 @@
 import { h, mount } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
 import { formatMoney, liveStateLabel, newLiveInput, newLiveProblem, newLiveValues, sizeMixLine, sizeMixText } from '../model/live.js';
-import { CLUB_TABS, clubTab, DROP_LIMITS, dropFormValues, dropInput, dropProblem, placesTaken } from '../model/club.js';
+import {
+  CLUB_TABS,
+  clubTab,
+  DRAW_SIZES_HINT,
+  DRAW_SIZES_LEAD,
+  drawSizeValues,
+  drawStockLines,
+  DROP_LIMITS,
+  dropFormValues,
+  dropInput,
+  dropProblem,
+  NO_DRAW_SIZES,
+  offeredLabels,
+  piecesInAll,
+  placesTaken,
+  sizeField,
+  sizeFieldLabel,
+} from '../model/club.js';
 import { can } from '../model/permissions.js';
 import { sizeMixEmptyLine } from '../model/sizes.js';
 import { toneOf } from '../model/tone.js';
 import { modelChoice } from '../model/variants.js';
 import { href } from '../router.js';
 import { ORDER_CURRENCIES, type Drop, type LiveCard, type LiveSizeMix, type Model } from '../types.js';
+import type { Child } from '../../shared/dom.js';
+import type { AdminApi } from '../api.js';
 import { button, pageHeader, pager, section, statusMark, table } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
@@ -44,14 +65,27 @@ import { requestsTab } from './requests.js';
 import { serverStatusPanel, withServerPanel } from './server-status.js';
 import { tiersTab } from './tiers.js';
 
-/** The fields of a drop's dialog: the active models to choose from, its values. */
-export function dropFields(models: readonly Model[], values: Record<string, string>, opts: { model: boolean }): DialogField[] {
-  const options = models.filter((m) => m.active || m.id === values.modelId).map((m) => ({ value: m.id, label: modelChoice(m) }));
+/** The model of a drop's first dialog (plan NEXT LOT §3.6.F): the active models to choose from. */
+export function dropModelField(models: readonly Model[], modelId: string): DialogField {
+  const options = models.filter((m) => m.active || m.id === modelId).map((m) => ({ value: m.id, label: modelChoice(m) }));
+  return { name: 'modelId', label: 'Model', kind: 'select', required: true, options: [{ value: '', label: 'Choose a model' }, ...options], value: modelId };
+}
+
+/**
+ * A draw's fields of pieces, one per offered size of its model, labelled with the size (plan NEXT LOT §3.6.F): in
+ * place of the Pieces field of before.
+ */
+export function drawSizeFields(labels: readonly string[], values: Record<string, string>): DialogField[] {
+  return labels.map((l) => ({ name: sizeField(l), label: sizeFieldLabel(l), maxlength: 5, value: values[sizeField(l)] ?? '' }));
+}
+
+/** The fields of a drop's dialog: the active models to choose from, its values, its model's sizes (plan NEXT LOT §3.6.F). */
+export function dropFields(models: readonly Model[], values: Record<string, string>, opts: { model: boolean; sizes: readonly string[] }): DialogField[] {
   return [
-    ...(opts.model ? [{ name: 'modelId', label: 'Model', kind: 'select' as const, required: true, options: [{ value: '', label: 'Choose a model' }, ...options], value: values.modelId }] : []),
+    ...(opts.model ? [dropModelField(models, values.modelId ?? '')] : []),
     { name: 'title', label: 'Title', required: true, maxlength: DROP_LIMITS.title, value: values.title, hint: 'As the release’s page names it on /verify.' },
     { name: 'description', label: 'Description', kind: 'textarea', rows: 5, maxlength: DROP_LIMITS.description, value: values.description, hint: 'Plain paragraphs, a blank line between two. Optional.' },
-    { name: 'quantity', label: 'Pieces', required: true, maxlength: 5, value: values.quantity, hint: `The places of the draw: 1 to ${formatCount(DROP_LIMITS.quantity)}.` },
+    ...drawSizeFields(opts.sizes, values),
     { name: 'opensAt', label: 'Entries open (UTC)', kind: 'datetime', required: true, value: values.opensAt },
     { name: 'closesAt', label: 'Entries close (UTC)', kind: 'datetime', required: true, value: values.closesAt, hint: 'The draw follows the close, run by an ADMIN.' },
     {
@@ -74,6 +108,33 @@ export function dropFields(models: readonly Model[], values: Record<string, stri
     // NOCTURNE (addition 5): the price shown on the draw's card and page, which its orders take.
     { name: 'price', label: 'Price', maxlength: 14, value: values.price, hint: 'Per piece, in units: 4200, or 4200.50. Shown on the release’s card and page; each order of the draw takes it. Empty: none (the order’s price is entered by Client Services).' },
     { name: 'currency', label: 'Currency', kind: 'select', options: ORDER_CURRENCIES.map((c) => ({ value: c, label: c })), value: values.currency },
+  ];
+}
+
+/**
+ * What a draw's dialog says above its sizes' fields (plan NEXT LOT §3.6.F): the lead, and the hint for a model that
+ * declares more sizes than a draw takes; the line of a model with none in their place.
+ */
+export function drawSizesBody(labels: readonly string[]): HTMLElement[] {
+  if (labels.length === 0) return [h('p', { class: 'dialog__text', data: { testid: 'draw-no-sizes' } }, NO_DRAW_SIZES)];
+  return [
+    h('p', { class: 'dialog__text', data: { testid: 'draw-sizes-lead' } }, DRAW_SIZES_LEAD),
+    ...(labels.length > DROP_LIMITS.sizes ? [h('p', { class: 'dialog__text soft', data: { testid: 'draw-sizes-hint' } }, DRAW_SIZES_HINT)] : []),
+  ];
+}
+
+/** A model's offered sizes and what the stock at the default location gives each (null when it cannot be read). */
+export async function drawSizesOfModel(api: AdminApi, modelId: string): Promise<{ labels: string[]; available: ((label: string) => number) | null }> {
+  const [sizes, mix] = await Promise.all([api.modelSizes(modelId), api.liveSizeMix(modelId, null).catch((): LiveSizeMix | null => null)]);
+  const stock = new Map<string, number>((mix?.sizes ?? []).map((x) => [x.label.toUpperCase(), x.fromStock]));
+  return { labels: offeredLabels(sizes), available: mix ? (label: string) => stock.get(label.toUpperCase()) ?? 0 : null };
+}
+
+/** Below a draw's sizes' fields, as they are typed: the pieces in all, then each size the stock does not cover. */
+export function drawSizesPreview(v: Record<string, string>, available: ((label: string) => number) | null): Child[] {
+  return [
+    h('p', { class: 'dialog__text', data: { testid: 'draw-pieces-in-all' } }, piecesInAll(v)),
+    ...(available ? drawStockLines(v, available).map((line) => h('p', { class: 'dialog__text soft', data: { testid: 'draw-stock-line' } }, line)) : []),
   ];
 }
 
@@ -216,22 +277,39 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
   );
 
   let created: string | null = null;
+  // Plan NEXT LOT §3.6.F: two dialogs, the model first (a draw's sizes are its model's), then its fields.
   const newDrop = async () => {
     // The early access by default: THE PROGRAM's (BP-19 T3), read when the dialog opens.
     const program = await ctx.api.clubProgram();
-    void openDialog({
+    const chosen = await openDialog({
       title: 'New release',
       eyebrow: 'Club · Drops',
-      body: h(
-        'p',
-        { class: 'dialog__text' },
-        'A draft: nothing of it is public until it is published. Its seed is drawn now and committed by its fingerprint, which its page shows from the publication on: the draw cannot be run with another.',
-      ),
-      fields: dropFields(models.items, dropFormValues(null, ctx.now(), { palladium: program.earlyAccessPalladiumHours, platine: program.earlyAccessPlatineHours }), { model: true }),
-      validate: dropProblem,
+      body: h('p', { class: 'dialog__text' }, 'Its model first: a draw’s sizes and their pieces are the model’s offered sizes.'),
+      fields: [dropModelField(models.items, '')],
+      validate: (v) => (v.modelId ? null : 'Choose the model of the release.'),
+      confirmLabel: 'Next',
+    });
+    if (!chosen) return;
+    const modelId = chosen.modelId;
+    const { labels, available } = await drawSizesOfModel(ctx.api, modelId);
+    const model = models.items.find((m) => m.id === modelId);
+    void openDialog({
+      title: 'New release',
+      eyebrow: `Club · Drops${model ? ` · ${modelChoice(model)}` : ''}`,
+      body: [
+        h(
+          'p',
+          { class: 'dialog__text' },
+          'A draft: nothing of it is public until it is published. Its seed is drawn now and committed by its fingerprint, which its page shows from the publication on: the draw cannot be run with another.',
+        ),
+        ...drawSizesBody(labels),
+      ],
+      fields: dropFields(models.items, { ...dropFormValues(null, ctx.now(), { palladium: program.earlyAccessPalladiumHours, platine: program.earlyAccessPlatineHours }), ...drawSizeValues(labels, null) }, { model: false, sizes: labels }),
+      live: (v) => (labels.length > 0 ? drawSizesPreview(v, available) : []),
+      validate: (v) => dropProblem({ ...v, modelId }),
       confirmLabel: 'Create release',
       submit: async (v) => {
-        created = (await ctx.api.createDrop(dropInput(v))).id;
+        created = (await ctx.api.createDrop(dropInput({ ...v, modelId }))).id;
       },
     }).then((r) => {
       if (!r || !created) return;

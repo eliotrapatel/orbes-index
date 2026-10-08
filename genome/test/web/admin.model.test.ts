@@ -201,6 +201,21 @@ import {
   benefitLines,
   CLUB_TABS,
   clubTab,
+  DRAW_SIZES_HINT,
+  DRAW_SIZES_LEAD,
+  drawOutcomeText,
+  drawSizesChange,
+  drawSizesInput,
+  drawSizesProblem,
+  drawSizeValues,
+  drawStockLines,
+  NO_DRAW_SIZES,
+  offeredLabels,
+  piecesInAll,
+  sizeField,
+  sizeFieldLabel,
+  sizeInSentence,
+  sizeOfferable,
   DROP_LIMITS,
   EARLY_ACCESS_DEFAULTS,
   dropActions,
@@ -634,8 +649,10 @@ describe('the Club\'s drops (P-R03)', () => {
     guaranteed: { places: 0, pieces: 0 },
     heldPieces: 0,
     guaranteedEntered: { places: 0, pieces: 0 },
+    // Plan NEXT LOT §3.6.F: its sizes, the model offering 52 and 54.
+    sizes: [{ id: 's52', label: '52', pieces: 2, reserved: 0, entered: 0, held: 0, waitlisted: 0, guaranteedEntered: 0 }],
   };
-  const values = (extra: Record<string, string> = {}) => ({ ...dropFormValues(base, new Date()), ...extra });
+  const values = (extra: Record<string, string> = {}) => ({ ...dropFormValues(base, new Date()), ...drawSizeValues(['52', '54'], base), ...extra });
 
   it('holds the server\'s bounds, and reads the times of the dialog in UTC', () => {
     expect(DROP_LIMITS).toMatchObject({ title: DROP_TITLE_MAX, description: DROP_DESCRIPTION_MAX, quantity: DROP_QUANTITY_MAX, note: DROP_NOTE_MAX });
@@ -651,7 +668,10 @@ describe('the Club\'s drops (P-R03)', () => {
     expect(localUtc(null)).toBe('');
     // A new release opens tomorrow at 10:00 UTC, for two days, a place held 48 hours, after THE PROGRAM's early access
     // by tier (4 and 2 hours by default, or as set).
-    expect(dropFormValues(null, new Date('2026-10-04T22:30:00Z'))).toMatchObject({ opensAt: '2026-10-05T10:00', closesAt: '2026-10-07T10:00', quantity: '1', purchaseWindowHours: '48', earlyAccessHours: '4', earlyAccessPlatineHours: '2' });
+    expect(dropFormValues(null, new Date('2026-10-04T22:30:00Z'))).toMatchObject({ opensAt: '2026-10-05T10:00', closesAt: '2026-10-07T10:00', purchaseWindowHours: '48', earlyAccessHours: '4', earlyAccessPlatineHours: '2' });
+    // Plan NEXT LOT §3.6.F: no Pieces field any more; a draw's pieces are given per size.
+    expect(dropFormValues(null, new Date('2026-10-04T22:30:00Z'))).not.toHaveProperty('quantity');
+    expect(DROP_LIMITS.sizes).toBe(24);
     expect(dropFormValues(null, new Date('2026-10-04T22:30:00Z'), { palladium: 6, platine: 3 })).toMatchObject({ earlyAccessHours: '6', earlyAccessPlatineHours: '3' });
   });
 
@@ -696,25 +716,29 @@ describe('the Club\'s drops (P-R03)', () => {
     expect(dropProblem(values())).toBeNull();
     expect(dropProblem(values({ modelId: '' }))).toBe('Choose the model of the release.');
     expect(dropProblem(values({ title: ' ' }))).toBe('Give the release a title.');
-    expect(dropProblem(values({ quantity: '0' }))).toMatch(/^A release has 1 to/);
-    expect(dropProblem(values({ quantity: '1.5' }))).toMatch(/^A release has 1 to/);
+    expect(dropProblem(values({ [sizeField('52')]: '0' }))).toBe('A release has 1 to 24 sizes with pieces.');
+    expect(dropProblem(values({ [sizeField('52')]: '1.5' }))).toBe(`A size has 0 to ${formatCount(10_000)} pieces.`);
     expect(dropProblem(values({ closesAt: values().opensAt }))).toBe('Entries close after they open.');
     expect(dropProblem(values({ opensAt: '' }))).toMatch(/^Use the date and time pickers/);
     expect(dropProblem(values({ purchaseWindowHours: '337' }))).toBe('A place is held 1 to 336 hours.');
-    expect(dropInput(values({ description: '  ' }))).toMatchObject({ modelId: 'm1', quantity: 2, description: null, opensAt: base.opensAt, closesAt: base.closesAt, purchaseWindowHours: 48 });
+    expect(dropInput(values({ description: '  ' }))).toMatchObject({ modelId: 'm1', sizes: [{ label: '52', pieces: 2 }], description: null, opensAt: base.opensAt, closesAt: base.closesAt, purchaseWindowHours: 48 });
+    expect(dropInput(values())).not.toHaveProperty('quantity');
     expect(dropChange(base, values())).toEqual({});
-    expect(dropChange(base, values({ quantity: '3', closesAt: '2026-10-15T10:00', description: 'Three pieces.' }))).toEqual({ quantity: 3, closesAt: '2026-10-15T10:00:00.000Z', description: 'Three pieces.' });
+    expect(dropChange(base, values({ [sizeField('52')]: '3', closesAt: '2026-10-15T10:00', description: 'Three pieces.' }))).toEqual({ sizes: [{ label: '52', pieces: 3 }], closesAt: '2026-10-15T10:00:00.000Z', description: 'Three pieces.' });
+    // Another model: its sizes are always sent (the new model's).
+    expect(dropChange(base, values({ modelId: 'm2' }))).toEqual({ modelId: 'm2', sizes: [{ label: '52', pieces: 2 }] });
   });
 
   it('offers each action to the role and in the state the server allows it', () => {
-    expect(dropActions(base, 'OPERATOR')).toEqual({ edit: true, describe: false, publish: true, cancel: true, draw: false, offerNext: false });
-    expect(dropActions(base, 'AUDITOR')).toEqual({ edit: false, describe: false, publish: false, cancel: false, draw: false, offerNext: false });
+    expect(dropActions(base, 'OPERATOR')).toEqual({ edit: true, describe: false, publish: true, cancel: true, draw: false, offerNext: false, sizes: true });
+    expect(dropActions(base, 'AUDITOR')).toEqual({ edit: false, describe: false, publish: false, cancel: false, draw: false, offerNext: false, sizes: false });
     const published = { ...base, state: 'OPEN' as const, publishedAt: '2026-10-05T10:00:00.000Z' };
     expect(dropActions(published, 'OPERATOR')).toMatchObject({ edit: false, describe: true, publish: false, cancel: true, draw: false });
     const closed = { ...published, state: 'CLOSED' as const };
     expect(dropActions(closed, 'OPERATOR').draw).toBe(false);
     expect(dropActions(closed, 'ADMIN').draw).toBe(true);
-    const drawn = { ...closed, state: 'DRAWN' as const, drawnAt: '2026-10-14T11:00:00.000Z', entries: { ...base.entries, SELECTED: 1, CONFIRMED: 0, WAITLISTED: 3, LAPSED: 1 } };
+    // A draw without sizes (one published before this lot): one OFFER NEXT for the release.
+    const drawn = { ...closed, state: 'DRAWN' as const, drawnAt: '2026-10-14T11:00:00.000Z', entries: { ...base.entries, SELECTED: 1, CONFIRMED: 0, WAITLISTED: 3, LAPSED: 1 }, sizes: [] };
     expect(placesTaken(drawn)).toBe(1);
     expect(dropActions(drawn, 'OPERATOR')).toMatchObject({ cancel: false, draw: false, offerNext: true });
     expect(dropActions({ ...drawn, entries: { ...drawn.entries, CONFIRMED: 1 } }, 'OPERATOR').offerNext).toBe(false);
@@ -725,8 +749,56 @@ describe('the Club\'s drops (P-R03)', () => {
     expect(releaseAddress(base)).toBe(`/verify/releases/${base.id}`);
   });
 
+  it('gives a draw its pieces per size (plan NEXT LOT §3.6.F): one field per offered size, empty is 0, 1 to 24 with pieces and 10 000 in all; the pieces in all, the stock per size, OFFER NEXT and the outcome per size', () => {
+    // The model's offered sizes, by their declared labels (ONE SIZE for a size of none), not those set aside.
+    const row = (label: string | null, setAsideAt: string | null = null) => ({ skuId: `k${label}`, label, code: `C-${label}`, fitMinMm: null, fitMaxMm: null, setAsideAt, onList: true, sameAs: null, used: false, awaiting: 0 });
+    expect(offeredLabels({ sizes: [row('52'), row('54'), row('58', '2026-10-01T00:00:00.000Z')] })).toEqual(['52', '54']);
+    expect(offeredLabels({ sizes: [row(null)] })).toEqual(['ONE SIZE']);
+    expect(offeredLabels({ sizes: [] })).toEqual([]);
+    expect([sizeFieldLabel('52'), sizeFieldLabel('SIZE 52'), sizeFieldLabel('ONE SIZE')]).toEqual(['Size 52', 'SIZE 52', 'ONE SIZE']);
+    expect([sizeInSentence('17'), sizeInSentence('SIZE 52'), sizeInSentence('ONE SIZE')]).toEqual(['size 17', 'SIZE 52', 'ONE SIZE']);
+    // A new release's fields are empty; a draft's hold its pieces, 0 in its model's other sizes.
+    expect(drawSizeValues(['52', '54'], null)).toEqual({ 'size:52': '', 'size:54': '' });
+    expect(drawSizeValues(['52', '54'], base)).toEqual({ 'size:52': '2', 'size:54': '0' });
+    // Bounds, said as the server says them; a model without sizes says where to give them.
+    expect(drawSizesProblem({})).toBe(NO_DRAW_SIZES);
+    expect(NO_DRAW_SIZES).toBe('No sizes yet: give this model its size type and its sizes in the Catalogue.');
+    expect(drawSizesProblem({ 'size:52': '', 'size:54': '0' })).toBe('A release has 1 to 24 sizes with pieces.');
+    expect(drawSizesProblem({ 'size:52': '-1' })).toBe(`A size has 0 to ${formatCount(10_000)} pieces.`);
+    expect(drawSizesProblem({ 'size:52': '10001' })).toBe(`A size has 0 to ${formatCount(10_000)} pieces.`);
+    expect(drawSizesProblem({ 'size:52': '6000', 'size:54': '4001' })).toBe(`A release has at most ${formatCount(10_000)} pieces.`);
+    const many = Object.fromEntries(Array.from({ length: 25 }, (_, i) => [sizeField(String(40 + i)), '1']));
+    expect(drawSizesProblem(many)).toBe('A release has 1 to 24 sizes with pieces.');
+    expect(drawSizesProblem({ ...many, 'size:40': '0' })).toBeNull();
+    expect([DRAW_SIZES_LEAD, DRAW_SIZES_HINT]).toEqual(['The sizes this model declares. Give each size its pieces; 0 leaves it out of the draw.', 'Up to 24 sizes with pieces.']);
+    // Sent: the sizes with pieces, in order; a draft's change only when they differ.
+    expect(drawSizesInput({ 'size:16': '3', 'size:17': '0', 'size:18': ' 4 ', title: 'X' })).toEqual([{ label: '16', pieces: 3 }, { label: '18', pieces: 4 }]);
+    expect(drawSizesChange(base, { 'size:52': '2', 'size:54': '' })).toBeNull();
+    expect(drawSizesChange(base, { 'size:52': '2', 'size:54': '1' })).toEqual([{ label: '52', pieces: 2 }, { label: '54', pieces: 1 }]);
+    expect(piecesInAll({ 'size:16': '3', 'size:17': '5', 'size:18': '4' })).toBe('12 pieces in all');
+    expect(piecesInAll({ 'size:16': '1' })).toBe('1 piece in all');
+    // The stock at the draw's location, per size: only what it does not cover (plan NEXT LOT §3.5.4.3).
+    expect(drawStockLines({ 'size:52': '25', 'size:54': '2' }, (l) => (l === '52' ? 12 : 5))).toEqual(['52: 12 in stock, 13 will wait for supplier stock.']);
+    expect(drawStockLines({ 'size:52': '0' }, () => 0)).toEqual([]);
+    // OFFER NEXT per size: drawn, a place free in it and a waiting list; the OPERATOR's.
+    const drawn = { ...base, state: 'DRAWN' as const };
+    const s17 = { held: 4, pieces: 5, waitlisted: 2 };
+    expect(sizeOfferable(drawn, s17, 'OPERATOR')).toBe(true);
+    expect(sizeOfferable(drawn, s17, 'AUDITOR')).toBe(false);
+    expect(sizeOfferable(drawn, { ...s17, held: 5 }, 'OPERATOR')).toBe(false);
+    expect(sizeOfferable(drawn, { ...s17, waitlisted: 0 }, 'OPERATOR')).toBe(false);
+    expect(sizeOfferable({ state: 'CLOSED' }, s17, 'OPERATOR')).toBe(false);
+    // A draw with sizes has no OFFER NEXT for the release as a whole.
+    expect(dropActions({ ...drawn, entries: { ...base.entries, SELECTED: 1, WAITLISTED: 2 } }, 'OPERATOR').offerNext).toBe(false);
+    // The outcome per size, or overall for a draw without sizes.
+    expect(drawOutcomeText({ selected: 7, waitlisted: 13, sizes: [{ id: 'a', label: '17', places: 5, selected: 5, waitlisted: 12 }, { id: 'b', label: '18', places: 2, selected: 2, waitlisted: 1 }] })).toBe(
+      'Drawn. 17: 5 selected, 12 on the waiting list. 18: 2 selected, 1 on the waiting list.',
+    );
+    expect(drawOutcomeText({ selected: 2, waitlisted: 1, sizes: [] })).toBe('Drawn: 2 places held, 1 on the waiting list.');
+  });
+
   it('confirms a place held at any time, lapses it only once its time has passed', () => {
-    const entry: web.DropEntry = { id: 'e', accountId: 'a', email: 'a@example.com', status: 'SELECTED', enteredAt: '', tier: 1, seniority: 0, rank: 1, respondBy: '2026-10-16T11:00:00.000Z', reserved: false, guaranteed: false, pieces: 1, handledBy: null, handledAt: null, note: null };
+    const entry: web.DropEntry = { id: 'e', accountId: 'a', email: 'a@example.com', status: 'SELECTED', enteredAt: '', tier: 1, seniority: 0, rank: 1, respondBy: '2026-10-16T11:00:00.000Z', reserved: false, guaranteed: false, pieces: 1, size: null, handledBy: null, handledAt: null, note: null };
     expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T10:59:59Z'))).toEqual({ confirm: true, lapse: false });
     expect(entryActions(entry, 'OPERATOR', new Date('2026-10-16T11:00:00Z'))).toEqual({ confirm: true, lapse: true });
     expect(entryActions(entry, 'AUDITOR', new Date('2026-10-17T00:00:00Z'))).toEqual({ confirm: false, lapse: false });

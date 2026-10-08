@@ -23,6 +23,13 @@
  *    next while places are left. Each is one request under the drop's lock,
  *    audited by the server; then the page is read again. A test entrant's
  *    account carries TEST (plan TEST ENTRANTS).
+ *  - Its sizes (plan NEXT LOT §3.6.F): Edit in two dialogs (the model, then
+ *    the fields with one field of pieces per offered size of that model), and
+ *    Sizes and pieces on a DRAFT (the line of a model with none); a Sizes
+ *    table, Size · Pieces · Reserved · Entered · Held or sold · Waiting list,
+ *    with Offer next per size while it has a place free and a waiting list;
+ *    the entries' Size column and their size filter; the draw's outcome said
+ *    per size.
  *  - Test entrants (plan TEST ENTRANTS, views/test-entrants.ts): SEND TEST
  *    ENTRANTS while the draw is open (ADMIN), the test not ended, PAST TESTS;
  *    on the right, the server's status (views/server-status.ts).
@@ -38,23 +45,30 @@ import {
   dropPhrase,
   dropProblem,
   dropWindow,
+  drawOutcomeText,
   drawPriceText,
+  drawSizesChange,
+  drawSizesProblem,
+  drawSizeValues,
   earlyAccessLine,
   earlyAccessOnPublish,
   entryActions,
   placesTaken,
   releaseAddress,
+  sizeFieldLabel,
+  sizeInSentence,
+  sizeOfferable,
   tierName,
 } from '../model/club.js';
 import { drawGuaranteeLine, GUARANTEE_STATE_LABELS, guaranteedText, placesLeftForDraw, validUntilText } from '../model/guarantees.js';
 import { drawTestStart } from '../model/test-entrants.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
-import { DROP_ENTRY_STATUSES, type Drop, type DropEntry, type DropEntryStatus, type ReleaseGuarantee } from '../types.js';
+import { DROP_ENTRY_STATUSES, type DrawSize, type Drop, type DropEntry, type DropEntryStatus, type ReleaseGuarantee } from '../types.js';
 import { button, defList, field, filterBar, linkButton, mono, pageHeader, pager, section, select, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notify } from '../ui/toast.js';
-import { dropFields } from './club.js';
+import { drawSizeFields, drawSizesBody, drawSizesOfModel, drawSizesPreview, dropFields, dropModelField } from './club.js';
 import { pageParam, type ViewContext } from './context.js';
 import { serverStatusPanel, withServerPanel } from './server-status.js';
 import { loadTestReads, testEntrantsSection, testTag } from './test-entrants.js';
@@ -62,9 +76,11 @@ import { loadTestReads, testEntrantsSection, testTag } from './test-entrants.js'
 export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.dropId ?? '';
   const status = DROP_ENTRY_STATUSES.find((s) => s === ctx.route.query.status) as DropEntryStatus | undefined;
+  // Plan NEXT LOT §3.6.F: one size's entries (a UUID only; the server checks it is one of the draw's).
+  const sizeId = /^[0-9a-f-]{36}$/i.test(ctx.route.query.size ?? '') ? ctx.route.query.size : undefined;
   const [d, entries, models, guarantees, tests] = await Promise.all([
     ctx.api.drop(id),
-    ctx.api.dropEntries(id, { ...(status ? { status } : {}), page: pageParam(ctx), pageSize: 50 }),
+    ctx.api.dropEntries(id, { ...(status ? { status } : {}), ...(sizeId ? { sizeId } : {}), page: pageParam(ctx), pageSize: 50 }),
     ctx.api.models(),
     ctx.api.releaseGuarantees(id),
     loadTestReads(ctx, id),
@@ -79,18 +95,49 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   };
 
   // ── The release ──────────────────────────────────────────────────────────
-  const edit = () =>
-    void openDialog({
+  // Plan NEXT LOT §3.6.F: the model first (its sizes are the draw's), then the fields with its sizes' pieces.
+  const edit = async () => {
+    const chosen = await openDialog({
       title: 'Edit the release',
       eyebrow,
-      body: h('p', { class: 'dialog__text' }, 'A draft changes freely. Once published, only its description does.'),
-      fields: dropFields(models.items, dropFormValues(d, ctx.now()), { model: true }),
-      validate: (v) => dropProblem(v) ?? (Object.keys(dropChange(d, v)).length === 0 ? 'Nothing has changed.' : null),
+      body: h('p', { class: 'dialog__text' }, 'Its model first: a draw’s sizes and their pieces are the model’s offered sizes.'),
+      fields: [dropModelField(models.items, d.model.id)],
+      validate: (v) => (v.modelId ? null : 'Choose the model of the release.'),
+      confirmLabel: 'Next',
+    });
+    if (!chosen) return;
+    const modelId = chosen.modelId;
+    const { labels, available } = await drawSizesOfModel(ctx.api, modelId);
+    await openDialog({
+      title: 'Edit the release',
+      eyebrow,
+      body: [h('p', { class: 'dialog__text' }, 'A draft changes freely. Once published, only its description does.'), ...drawSizesBody(labels)],
+      fields: dropFields(models.items, { ...dropFormValues(d, ctx.now()), ...drawSizeValues(labels, modelId === d.model.id ? d : null) }, { model: false, sizes: labels }),
+      live: (v) => (labels.length > 0 ? drawSizesPreview(v, available) : []),
+      validate: (v) => dropProblem({ ...v, modelId }) ?? (Object.keys(dropChange(d, { ...v, modelId })).length === 0 ? 'Nothing has changed.' : null),
       confirmLabel: 'Save release',
       submit: async (v) => {
-        await ctx.api.updateDrop(d.id, dropChange(d, v));
+        await ctx.api.updateDrop(d.id, dropChange(d, { ...v, modelId }));
       },
     }).then(done('Release saved.'));
+  };
+
+  // Plan NEXT LOT §3.6.F: a DRAFT's sizes and their pieces alone (a draft of before this lot gets its first here).
+  const sizesDialog = async () => {
+    const { labels, available } = await drawSizesOfModel(ctx.api, d.model.id);
+    await openDialog({
+      title: 'Sizes and pieces',
+      eyebrow,
+      body: drawSizesBody(labels),
+      fields: drawSizeFields(labels, drawSizeValues(labels, d)),
+      live: (v) => (labels.length > 0 ? drawSizesPreview(v, available) : []),
+      validate: (v) => drawSizesProblem(v) ?? (drawSizesChange(d, v) === null ? 'Nothing has changed.' : null),
+      confirmLabel: 'Save sizes',
+      submit: async (v) => {
+        await ctx.api.updateDrop(d.id, { sizes: drawSizesChange(d, v)! });
+      },
+    }).then(done('Sizes saved.'));
+  };
 
   const describe = () =>
     void openDialog({
@@ -165,7 +212,8 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       confirmLabel: 'Run the draw',
       submit: async () => {
         const r = await ctx.api.drawDrop(d.id);
-        notify(`Drawn: ${formatCount(r.selected)} ${r.selected === 1 ? 'place' : 'places'} held, ${formatCount(r.waitlisted)} on the waiting list.`);
+        // Plan NEXT LOT §3.6.F: per size, « 17: 5 selected, 12 on the waiting list. »
+        notify(drawOutcomeText(r));
       },
     }).then((r) => r && ctx.reload());
 
@@ -177,6 +225,18 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       confirmLabel: 'Offer the place',
       submit: async () => {
         await ctx.api.offerNextDropEntry(d.id);
+      },
+    }).then(done('The next entry of the waiting list holds a place.'));
+
+  // Plan NEXT LOT §3.6.F: OFFER NEXT per size, the first of that size's waiting list.
+  const offerNextIn = (s: DrawSize) =>
+    void openDialog({
+      title: 'Offer the next place',
+      eyebrow: `${eyebrow} · ${sizeFieldLabel(s.label)}`,
+      body: h('p', { class: 'dialog__text' }, `The first entry by rank on the waiting list of ${sizeInSentence(s.label)} is held a place for ${d.purchaseWindowHours} hours. ORBES Client Services contacts its entrant.`),
+      confirmLabel: 'Offer the place',
+      submit: async () => {
+        await ctx.api.offerNextDropEntry(d.id, s.id);
       },
     }).then(done('The next entry of the waiting list holds a place.'));
 
@@ -212,13 +272,40 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
   ];
   if (d.description) rows.splice(2, 0, { label: 'Description', value: h('span', { class: 'cell-details' }, d.description) });
   const tools = [
-    acts.edit ? button('Edit', { kind: 'ghost', testId: 'drop-edit', onClick: edit }) : null,
+    acts.edit ? button('Edit', { kind: 'ghost', testId: 'drop-edit', onClick: () => void edit() }) : null,
+    acts.sizes ? button('Sizes and pieces', { kind: 'ghost', testId: 'drop-sizes', onClick: () => void sizesDialog() }) : null,
     acts.describe ? button('Description', { kind: 'ghost', testId: 'drop-describe', onClick: describe }) : null,
     acts.publish ? button('Publish', { kind: 'primary', testId: 'drop-publish', onClick: publish }) : null,
     acts.draw ? button('Run the draw', { kind: 'danger', testId: 'drop-draw', onClick: draw }) : null,
     acts.cancel ? button('Cancel', { kind: 'ghost', testId: 'drop-cancel', onClick: cancel }) : null,
   ].filter((b): b is HTMLButtonElement => b !== null);
   const release = section('Release', defList(rows), { id: 'release', tools });
+
+  // ── Sizes (plan NEXT LOT §3.6.F) ─────────────────────────────────────────
+  const sizesSection =
+    d.sizes.length > 0 || d.state === 'DRAFT'
+      ? section(
+          'Sizes',
+          table<DrawSize>(
+            [
+              { label: 'Size', cell: (s) => h('span', { data: { testid: 'size-label' } }, sizeFieldLabel(s.label)), kind: ['nowrap'] },
+              { label: 'Pieces', cell: (s) => formatCount(s.pieces), kind: ['num'] },
+              { label: 'Reserved', cell: (s) => formatCount(s.reserved), kind: ['num'] },
+              { label: 'Entered', cell: (s) => formatCount(s.entered), kind: ['num'] },
+              { label: 'Held or sold', cell: (s) => formatCount(s.held), kind: ['num'] },
+              { label: 'Waiting list', cell: (s) => formatCount(s.waitlisted), kind: ['num'] },
+              {
+                label: '',
+                cell: (s) => h('span', { class: 'row-actions' }, sizeOfferable(d, s, role) ? button('Offer next', { kind: 'ghost', testId: 'size-offer-next', onClick: () => offerNextIn(s) }) : null),
+                kind: ['actions'],
+              },
+            ],
+            d.sizes,
+            { empty: 'No sizes yet: give the release its sizes and their pieces before publishing it.', caption: 'Sizes' },
+          ),
+          { id: 'sizes', note: `${formatCount(d.quantity)} ${d.quantity === 1 ? 'piece' : 'pieces'} in all` },
+        )
+      : null;
 
   // ── Entries ──────────────────────────────────────────────────────────────
   const conclude = (e: DropEntry, to: 'confirm' | 'lapse') =>
@@ -244,11 +331,15 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
 
   const statusFilter = select('status', [{ value: '', label: 'All' }, ...DROP_ENTRY_STATUSES.map((s) => ({ value: s, label: humanize(s) }))], status ?? '');
   statusFilter.addEventListener('change', () => ctx.setQuery({ status: statusFilter.value, page: undefined }));
+  // Plan NEXT LOT §3.6.F: a draw with sizes filters its entries by size.
+  const sized = d.sizes.length > 0;
+  const sizeFilter = sized ? select('size', [{ value: '', label: 'All sizes' }, ...d.sizes.map((s) => ({ value: s.id, label: sizeFieldLabel(s.label) }))], sizeId ?? '') : null;
+  sizeFilter?.addEventListener('change', () => ctx.setQuery({ size: sizeFilter.value, page: undefined }));
   const now = ctx.now();
   const list = section(
     'Entries',
     [
-      filterBar(field('Status', statusFilter)),
+      filterBar(field('Status', statusFilter), ...(sizeFilter ? [field('Size', sizeFilter)] : [])),
       table<DropEntry>(
         [
           { label: 'Rank', cell: (e) => (e.rank === null ? h('span', { class: 'soft' }, '—') : formatCount(e.rank)), kind: ['num'] },
@@ -258,6 +349,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
             cell: (e) => h('span', null, h('a', { class: 'idlink', attrs: { href: href('owner', { accountId: e.accountId }), 'data-testid': 'entry-account' } }, e.email), testTag(e.email)),
             kind: ['wide'],
           },
+          ...(sized ? [{ label: 'Size', cell: (e: DropEntry) => h('span', { data: { testid: 'entry-size' } }, e.size ? sizeFieldLabel(e.size.label) : '—'), kind: ['nowrap' as const] }] : []),
           { label: 'Tier', cell: (e) => tierName(e.tier), kind: ['nowrap'] },
           { label: 'Seniority', cell: (e) => (e.seniority === null ? '—' : `${e.seniority} ${e.seniority === 1 ? 'yr' : 'yrs'}`), kind: ['nowrap'] },
           {
@@ -291,7 +383,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
         ],
         entries.items,
         {
-          empty: status
+          empty: status || sizeId
             ? 'No entry has this status.'
             : d.state === 'DRAFT' || d.state === 'UPCOMING'
               ? d.earlyAccessOpensAt
@@ -322,7 +414,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       actions: [linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
     }),
     withServerPanel(
-      [release, testEntrantsSection(ctx, { mode: 'DRAW', dropId: d.id, eyebrow, start: drawTestStart(d, ctx.now()) }, tests), guaranteesSection(guarantees.items), list],
+      [release, ...(sizesSection ? [sizesSection] : []), testEntrantsSection(ctx, { mode: 'DRAW', dropId: d.id, eyebrow, start: drawTestStart(d, ctx.now()) }, tests), guaranteesSection(guarantees.items), list],
       serverStatusPanel(ctx),
     ),
   );
