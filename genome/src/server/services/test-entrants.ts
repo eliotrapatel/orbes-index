@@ -34,7 +34,9 @@
  * is due, at most IN_FLIGHT_MAX at a time:
  *  - a draw: ENTER at its arrival (a PLATINE or PALLADIUM drawn to reserve RESERVES while its own tier's early access is
  *    open, a PLATINE early for its own waiting for it; a bot that cannot enter yet waits for the opening, as a collector
- *    does); some WITHDRAW a few seconds later;
+ *    does); some WITHDRAW a few seconds later. In a draw with sizes (plan NEXT LOT §3.6.F) each bot enters and reserves
+ *    in a size: the Choices' size, else one of the draw's sizes with pieces at random (a reservation refused in a size
+ *    full enters at the opening, as one refused in a release full);
  *  - a LIVE RELEASE: I'LL BE THERE first for its share (before T0), ENTER with its size and pieces; then it follows its
  *    turn as a phone whose stream is lost does, reading GET /state every POLL_MS (its turn's secret is there); on its
  *    TURN: PRESS, the hold, SECURE, its add-ons, then PAY or RELEASE MY PLACE after a few seconds; or it misses its turn,
@@ -136,7 +138,10 @@ export interface TestRunSettings {
   arrival: { mode: TestArrivalMode; seconds: number; interestPct: number };
   /** LIVE: PAY, RELEASE MY PLACE, a missed turn, LEAVE (100 in all), the seal held `holdSeconds`; a draw: withdraw, reserve, confirm. */
   behaviour: { payPct: number; releasePct: number; missPct: number; leavePct: number; holdSeconds: number; withdrawPct: number; reservePct: number; confirmPct: number };
-  /** LIVE: a size (its id or label; null: one at random), the pieces (1 to 5; null: at random), the share adding an add-on. */
+  /**
+   * A size (its id or label; null: one at random among those with pieces): a LIVE RELEASE's, and a draw's with sizes (plan
+   * NEXT LOT §3.6.F); LIVE: the pieces (1 to 5; null: at random), the share adding an add-on.
+   */
   choices: { size: string | null; quantity: number | null; addOnsPct: number };
   /** Each bot drawn within: its seniority (years), its account's age (days), a country of the list (none: none), the shared network's share. */
   profile: { seniorityMin: number; seniorityMax: number; accountAgeDaysMin: number; accountAgeDaysMax: number; countries: string[]; sharedNetworkPct: number };
@@ -438,7 +443,10 @@ interface BotPlan {
   reserve?: boolean;
   withdraw?: boolean;
   confirm?: boolean;
-  /** A LIVE RELEASE: I'LL BE THERE first, its size and pieces, an add-on, what it does on its turn, how long it holds the seal. */
+  /**
+   * A LIVE RELEASE: I'LL BE THERE first, its size and pieces, an add-on, what it does on its turn, how long it holds the
+   * seal. A draw with sizes (plan NEXT LOT §3.6.F): its size too.
+   */
   interest?: boolean;
   sizeId?: string;
   quantity?: number;
@@ -934,9 +942,10 @@ export class TestEntrantService {
    */
   private async press(tx: Db, runId: string, d: DropRow, s: TestRunSettings, already: number, now: Date): Promise<Bot[]> {
     const n = s.tiers.none + s.tiers.titane + s.tiers.platine + s.tiers.palladium;
-    const sizes = d.mode === 'LIVE' ? await tx.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', d.id).orderBy('position').execute() : [];
+    // A LIVE RELEASE's sizes, and a draw's (plan NEXT LOT §3.6.F: none for a draw published before, one pool).
+    const sizes = await tx.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', d.id).orderBy('position').execute();
     let chosen: { id: string; stock: number } | null = null;
-    if (d.mode === 'LIVE' && s.choices.size !== null) {
+    if (sizes.length > 0 && s.choices.size !== null) {
       const want = s.choices.size.toLowerCase();
       chosen = sizes.find((z) => z.id.toLowerCase() === want || z.label.toLowerCase() === want) ?? null;
       if (!chosen) throw validationError('Choose one of the sizes of this release.');
@@ -976,6 +985,8 @@ export class TestEntrantService {
         plan.reserve = reserve.has(k);
         plan.withdraw = !plan.reserve && withdraw[k]!;
         plan.confirm = confirm[k]!;
+        // Plan NEXT LOT §3.6.F: its size, the Choices' or one with pieces at random.
+        if (sizes.length > 0) plan.sizeId = (chosen ?? (offered.length ? pick(offered) : sizes[0]!)).id;
       } else {
         const size = chosen ?? (offered.length ? pick(offered) : sizes[0]);
         const most = Math.max(1, Math.min(perAccount, size?.stock ?? 1));
@@ -1158,6 +1169,8 @@ export class TestEntrantService {
     const id = run.drop.id;
     const plan = bot.plan;
     if (run.mode === 'DRAW') {
+      // Plan NEXT LOT §3.6.F: ENTER and RESERVE in its size, in a draw with sizes.
+      const sized = plan.sizeId ? { sizeId: plan.sizeId } : undefined;
       if (bot.step === 'WITHDRAW') {
         const w = await this.call(run, bot, 'POST', `/api/v1/club/drops/${id}/withdraw`, 'WITHDRAW');
         return this.finish(run, bot, w.ok ? 'WITHDRAWN' : 'ENTERED');
@@ -1167,9 +1180,9 @@ export class TestEntrantService {
       if (plan.reserve) {
         const tier = plan.tier === 3 ? 3 : 2;
         if (inEarlyAccess(run.drop, new Date(now), tier)) {
-          const r = await this.call(run, bot, 'POST', `/api/v1/club/drops/${id}/reserve`, 'RESERVE');
+          const r = await this.call(run, bot, 'POST', `/api/v1/club/drops/${id}/reserve`, 'RESERVE', sized);
           if (r.ok) return this.finish(run, bot, 'RESERVED');
-          if (r.code !== 'DROP_FULL' && r.code !== 'DROP_EARLY_ACCESS_CLOSED' && r.code !== 'DROP_EARLY_ACCESS_NOT_OPEN') return this.finish(run, bot, 'REFUSED');
+          if (r.code !== 'DROP_FULL' && r.code !== 'DROP_SIZE_FULL' && r.code !== 'DROP_EARLY_ACCESS_CLOSED' && r.code !== 'DROP_EARLY_ACCESS_NOT_OPEN') return this.finish(run, bot, 'REFUSED');
         } else {
           const own = earlyAccessOpensAt(run.drop, tier);
           if (own !== null && now < own.getTime() && own.getTime() + plan.offsetMs < run.drop.opens_at.getTime()) {
@@ -1182,7 +1195,7 @@ export class TestEntrantService {
         bot.at = run.drop.opens_at.getTime() + plan.offsetMs;
         return;
       }
-      const e = await this.call(run, bot, 'POST', `/api/v1/club/drops/${id}/enter`, 'ENTER');
+      const e = await this.call(run, bot, 'POST', `/api/v1/club/drops/${id}/enter`, 'ENTER', sized);
       if (!e.ok) return this.finish(run, bot, 'REFUSED');
       if (plan.withdraw) {
         bot.step = 'WITHDRAW';
@@ -1645,7 +1658,9 @@ export class TestEntrantService {
   }
 
   private async drawChecks(d: DropRow): Promise<TestReportCheck[]> {
-    const entries = await this.db.selectFrom('drop_entries').select(['id', 'account_id', 'status', 'tier', 'seniority', 'rank', 'pieces']).where('drop_id', '=', d.id).execute();
+    const entries = await this.db.selectFrom('drop_entries').select(['id', 'account_id', 'status', 'tier', 'seniority', 'rank', 'pieces', 'size_id']).where('drop_id', '=', d.id).execute();
+    // Plan NEXT LOT §3.6.F: a draw's sizes (none for a draw published before, one pool).
+    const sizes = await this.db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', d.id).orderBy('position').execute();
     // IN-01: a place guaranteed by the house holds its guarantee's pieces (1 to 5), one order each.
     const piecesOf = (e: { pieces: number }) => Math.max(1, Number(e.pieces) || 1);
     const checks: TestReportCheck[] = [oneEntry(entries)];
@@ -1659,12 +1674,22 @@ export class TestEntrantService {
       const recomputed = drawOrder(ranked.map((e) => ({ id: e.id, tier: (e.tier ?? 0) as ClubTier, seniority: e.seniority ?? 0 })), seed);
       const out = ranked.findIndex((e, i) => i > 0 && ((ranked[i - 1]!.tier ?? 0) < (e.tier ?? 0) || ((ranked[i - 1]!.tier ?? 0) === (e.tier ?? 0) && (ranked[i - 1]!.seniority ?? 0) < (e.seniority ?? 0))));
       const moved = recomputed.findIndex((c, i) => c.id !== ranked[i]!.id.toLowerCase() || c.rank !== ranked[i]!.rank);
+      // Plan NEXT LOT §3.6.F: in each size, the places went in rank order (after OFFER NEXT and lapses too, both following
+      // the rank in their size): no entry on the waiting list ranks above one that was given a place.
+      const unfilled = sizes.length > 0 ? fillOutOfOrder(ranked, sizes) : null;
       checks.push(
         out >= 0
           ? { id: 'ORDER', label: 'The draw’s order', pass: false, line: `Rank ${ranked[out]!.rank} stands above a higher tier or seniority.` }
           : moved >= 0
             ? { id: 'ORDER', label: 'The draw’s order', pass: false, line: `Rank ${ranked[moved]!.rank} is not where the seed puts it.` }
-            : { id: 'ORDER', label: 'The draw’s order', pass: true, line: `${count(ranked.length, 'entry', 'entries')} ranked by tier, then seniority, then the seed: the order checks out.` },
+            : unfilled
+              ? { id: 'ORDER', label: 'The draw’s order', pass: false, line: unfilled }
+              : {
+                  id: 'ORDER',
+                  label: 'The draw’s order',
+                  pass: true,
+                  line: `${count(ranked.length, 'entry', 'entries')} ranked by tier, then seniority, then the seed: the order checks out.${sizes.length > 0 ? ' In each size, places went in rank order: no entry on the waiting list ranks above one that was given a place.' : ''}`,
+                },
       );
     }
 
@@ -1687,16 +1712,21 @@ export class TestEntrantService {
       .execute();
     const forConfirmed = orders.filter((o) => confirmed.some((e) => e.id === o.drop_entry_id)).length;
     const negative = await this.negativeStock(orders);
+    // Plan NEXT LOT §3.6.F: in a draw with sizes, held or sold within each size's pieces.
+    const heldIn = (sizeId: string) => entries.filter((e) => e.size_id === sizeId && (e.status === 'SELECTED' || e.status === 'CONFIRMED')).reduce((n, e) => n + piecesOf(e), 0);
+    const overSize = sizes.find((z) => heldIn(z.id) > z.stock);
     checks.push(
       stock(
-        held <= d.quantity && forConfirmed === confirmedPieces && negative === 0,
+        held <= d.quantity && !overSize && forConfirmed === confirmedPieces && negative === 0,
         held > d.quantity
           ? `${count(held, 'place')} held or sold for ${count(d.quantity, 'piece')}.`
+          : overSize
+            ? `Size ${overSize.label}: ${count(heldIn(overSize.id), 'place')} held or sold for ${count(overSize.stock, 'piece')}.`
           : forConfirmed !== confirmedPieces
             ? `${count(confirmed.length, 'place')} confirmed${confirmedPieces !== confirmed.length ? ` for ${count(confirmedPieces, 'piece')}` : ''}, ${count(forConfirmed, 'order')}.`
             : negative > 0
               ? `${negative} stock ${negative === 1 ? 'line is' : 'lines are'} below zero.`
-              : `${held} of ${count(d.quantity, 'place')} held or sold, ${confirmed.length} confirmed with ${count(forConfirmed, 'order')}; no stock below zero.`,
+              : `${held} of ${count(d.quantity, 'place')} held or sold${sizes.length > 0 ? ', within each size’s pieces' : ''}, ${confirmed.length} confirmed with ${count(forConfirmed, 'order')}; no stock below zero.`,
       ),
     );
 
@@ -1796,6 +1826,23 @@ export class TestEntrantService {
 }
 
 // ── The report's lines ─────────────────────────────────────────────────────
+
+/**
+ * Plan NEXT LOT §3.6.F, a draw with sizes: the first size whose places did not go in rank order, said; null when every
+ * size's did. A place held or sold (SELECTED, CONFIRMED) never ranks below an entry still on its size's waiting list; a
+ * place lapsed counts for neither (OFFER NEXT gives it to the next by rank in its size).
+ */
+function fillOutOfOrder(ranked: readonly { status: string; rank: number | null; size_id: string | null }[], sizes: readonly { id: string; label: string }[]): string | null {
+  for (const z of sizes) {
+    const inSize = ranked.filter((e) => e.size_id === z.id);
+    const given = inSize.filter((e) => e.status === 'SELECTED' || e.status === 'CONFIRMED');
+    const waiting = inSize.filter((e) => e.status === 'WAITLISTED');
+    const lastGiven = given.reduce((m, e) => Math.max(m, e.rank ?? 0), 0);
+    const firstWaiting = waiting.reduce((m, e) => Math.min(m, e.rank ?? Infinity), Infinity);
+    if (firstWaiting < lastGiven) return `In size ${z.label}, rank ${firstWaiting} is on the waiting list above rank ${lastGiven}, which was given a place.`;
+  }
+  return null;
+}
 
 /** `1 order`, `3 orders`; `1 entry`, `3 entries`. */
 const count = (n: number, word: string, words = `${word}s`): string => `${n} ${n === 1 ? word : words}`;

@@ -414,7 +414,7 @@ export async function dropView(ctx: ViewContext): Promise<HTMLElement> {
       actions: [linkButton('All drops', href('club', {}, { tab: 'drops' }), 'ghost')],
     }),
     withServerPanel(
-      [release, ...(sizesSection ? [sizesSection] : []), testEntrantsSection(ctx, { mode: 'DRAW', dropId: d.id, eyebrow, start: drawTestStart(d, ctx.now()) }, tests), guaranteesSection(guarantees.items), list],
+      [release, ...(sizesSection ? [sizesSection] : []), testEntrantsSection(ctx, { mode: 'DRAW', dropId: d.id, eyebrow, start: drawTestStart(d, ctx.now()), sizes: d.sizes.map((z) => ({ id: z.id, label: z.label })) }, tests), guaranteesSection(guarantees.items), list],
       serverStatusPanel(ctx),
     ),
   );

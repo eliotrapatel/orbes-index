@@ -59,7 +59,7 @@ export interface TestTarget {
   /** The dialogs' eyebrow, as the page's own. */
   eyebrow: string;
   start: TestStart;
-  /** A LIVE RELEASE's sizes, and the pieces one person may take. */
+  /** A LIVE RELEASE's sizes, and a draw's (plan NEXT LOT §3.6.F); the pieces one person may take (LIVE). */
   sizes?: readonly { id: string; label: string }[];
   perAccount?: number;
 }
@@ -78,6 +78,11 @@ export function loadTestReads(ctx: ViewContext, dropId: string): Promise<TestRea
 /** A test account's mark beside its email in the entries' lists (its email ends @orbes.test); null for any other. */
 export function testTag(email: string): HTMLElement | null {
   return isTestAccount(email) ? h('span', { class: 'test-tag', attrs: { title: 'A test entrant: an account of the test pool, cleaned up by END TEST' }, data: { testid: 'test-tag' } }, 'TEST') : null;
+}
+
+/** Choices · size: one of the release's sizes, or one at random for each bot. */
+function sizeChoice(sizes: readonly { id: string; label: string }[], value: string | undefined): DialogField {
+  return { name: 'size', label: 'Choices · size', kind: 'select', options: [{ value: '', label: 'At random among the release’s sizes' }, ...sizes.map((s) => ({ value: s.id, label: s.label }))], value };
 }
 
 /** The fields of SEND TEST ENTRANTS and ADD MORE: a draw's, or a LIVE RELEASE's. */
@@ -110,15 +115,11 @@ export function testFields(t: Pick<TestTarget, 'mode' | 'sizes' | 'perAccount'>,
           share('reservePct', 'Behaviour · reserve in early access (%)', 'Of the PLATINE and PALLADIUM: the share that reserves a place directly while the early access is open, instead of entering.'),
           share('confirmPct', 'Behaviour · confirm by themselves (%)', 'Of the places drawn, reserved or offered next: the share confirmed by itself 5 to 60 s later, the staff Confirm with its order. The others lapse as usual.'),
         ]),
+    // Choices · size: a LIVE RELEASE's, and a draw's with sizes (plan NEXT LOT §3.6.F), as for a LIVE RELEASE.
+    ...(!live && (t.sizes?.length ?? 0) > 0 ? [sizeChoice(t.sizes ?? [], v.size)] : []),
     ...(live
       ? [
-          {
-            name: 'size',
-            label: 'Choices · size',
-            kind: 'select' as const,
-            options: [{ value: '', label: 'At random among the release’s sizes' }, ...(t.sizes ?? []).map((s) => ({ value: s.id, label: s.label }))],
-            value: v.size,
-          },
+          sizeChoice(t.sizes ?? [], v.size),
           {
             name: 'quantity',
             label: 'Choices · pieces',

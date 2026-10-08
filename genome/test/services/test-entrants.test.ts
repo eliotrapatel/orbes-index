@@ -503,6 +503,96 @@ describe('a draw end to end', () => {
   });
 });
 
+describe('a draw in sizes (plan NEXT LOT §3.6.F)', () => {
+  let w: World;
+  beforeAll(async () => {
+    w = await world();
+  });
+  afterAll(() => w?.h.close());
+
+  /** A draw in sizes 16 (2 pieces), 17 (2) and 18 (1), published now, open since an hour. */
+  async function sizedDraw(): Promise<{ id: string; sizes: { id: string; label: string }[] }> {
+    const now = w.h.clock.now().getTime();
+    const created = await w.h.ctx.services.drops.create(
+      {
+        modelId: w.f.modelId,
+        title: 'MONOLITHE · TEST DRAW IN SIZES',
+        sizes: [
+          { label: '16', pieces: 2 },
+          { label: '17', pieces: 2 },
+          { label: '18', pieces: 1 },
+        ],
+        opensAt: new Date(now - HOUR),
+        closesAt: new Date(now + HOUR),
+        earlyAccessHours: 0,
+      },
+      w.f.admin,
+    );
+    const d = await w.h.ctx.services.drops.publish(created.id, w.f.admin);
+    return { id: d.id, sizes: d.sizes.map((z) => ({ id: z.id, label: z.label })) };
+  }
+  const entriesOf = (dropId: string) => w.h.ctx.db.selectFrom('drop_entries').select(['id', 'size_id', 'status', 'rank']).where('drop_id', '=', dropId).execute();
+
+  it('the bots enter in a size each, spread over the sizes with pieces; the Choices\' size (by id or label) puts them all in it, one not offered refused; the draw fills each size; END TEST: the report 5/5 with its per-size lines', async () => {
+    const d = await sizedDraw();
+    await rejects(w.tests.start(d.id, press(d.id, { titane: 2 }, { choices: { size: '19' } }), w.f.admin), 'VALIDATION_FAILED', 400);
+    const run = await w.tests.start(d.id, press(d.id, { none: 10, titane: 10 }, { behaviour: { confirmPct: 100 } }), w.f.admin);
+    await drive(w, 0);
+    expect(await statusOf(w, run.id)).toBe('DONE');
+    const entered = await entriesOf(d.id);
+    expect(entered).toHaveLength(20);
+    expect(entered.every((e) => e.status === 'ENTERED' && d.sizes.some((z) => z.id === e.size_id))).toBe(true);
+    expect(new Set(entered.map((e) => e.size_id)).size).toBeGreaterThan(1);
+    // The staff's draw, each size in the rank order; the places confirmed by themselves; END TEST.
+    w.h.clock.advance(HOUR);
+    const drawn = await w.h.ctx.services.drops.draw(d.id, w.f.admin);
+    expect(drawn.sizes.map((z) => z.label)).toEqual(['16', '17', '18']);
+    await w.tests.sweep();
+    w.h.clock.advance(61_000);
+    await w.tests.sweep();
+    const ended = await w.tests.end(run.id, testPhrase(d.id, true), w.f.admin);
+    expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([['ONE_ENTRY', true], ['ORDER', true], ['ONE_PLACE', true], ['STOCK', true], ['ORDERS', true]]);
+    expect(ended.report?.checks.find((c) => c.id === 'ORDER')?.line).toContain('In each size, places went in rank order: no entry on the waiting list ranks above one that was given a place.');
+    expect(ended.report?.checks.find((c) => c.id === 'STOCK')?.line).toContain('held or sold, within each size’s pieces');
+    // Every order of the draw in its entry's size, all cancelled by END TEST.
+    const orders = await w.h.ctx.db.selectFrom('orders').select(['status', 'size_label']).where('drop_id', '=', d.id).execute();
+    expect(orders.length).toBeGreaterThan(0);
+    expect(orders.every((o) => o.status === 'CANCELLED' && ['16', '17', '18'].includes(o.size_label ?? ''))).toBe(true);
+
+    // The Choices' size, by its label: every bot in it.
+    const e = await sizedDraw();
+    const in17 = await w.tests.start(e.id, press(e.id, { titane: 4 }, { choices: { size: '17' } }), w.f.admin);
+    await drive(w, 0);
+    const s17 = e.sizes.find((z) => z.label === '17')!.id;
+    expect((await entriesOf(e.id)).map((x) => x.size_id)).toEqual([s17, s17, s17, s17]);
+    expect(await statusOf(w, in17.id)).toBe('DONE');
+    await w.tests.end(in17.id, testPhrase(e.id, true), w.f.admin);
+  });
+
+  it('the report finds a fill broken by hand (a place given in a size above its waiting list) and a size held beyond its pieces', async () => {
+    const d = await sizedDraw();
+    const s16 = d.sizes.find((z) => z.label === '16')!.id;
+    const accounts = [await createAccount(w.h.ctx.db), await createAccount(w.h.ctx.db), await createAccount(w.h.ctx.db)];
+    for (const a of accounts) await w.h.ctx.services.drops.enter(a.id, d.id, a.actor, { sizeId: s16 });
+    w.h.clock.advance(HOUR);
+    await w.h.ctx.services.drops.draw(d.id, w.f.admin);
+    const row = await w.h.ctx.db.selectFrom('drops').selectAll().where('id', '=', d.id).executeTakeFirstOrThrow();
+    const ranked = (await entriesOf(d.id)).sort((a, b) => a.rank! - b.rank!);
+    expect(ranked.map((x) => x.status)).toEqual(['SELECTED', 'SELECTED', 'WAITLISTED']);
+    let report = await w.tests.report(row, w.h.clock.now());
+    expect(report.checks.find((c) => c.id === 'ORDER')?.pass).toBe(true);
+    // Rank 1 put on the waiting list and rank 3 given its place: the fill is out of order.
+    await w.h.ctx.db.updateTable('drop_entries').set({ status: 'WAITLISTED', respond_by: null }).where('id', '=', ranked[0]!.id).execute();
+    await w.h.ctx.db.updateTable('drop_entries').set({ status: 'SELECTED', respond_by: w.h.clock.now() }).where('id', '=', ranked[2]!.id).execute();
+    report = await w.tests.report(row, w.h.clock.now());
+    expect(report.checks.find((c) => c.id === 'ORDER')).toMatchObject({ pass: false, line: 'In size 16, rank 1 is on the waiting list above rank 3, which was given a place.' });
+    // All three given a place in 16, which has 2 pieces: STOCK fails per size (within the release's 5).
+    await w.h.ctx.db.updateTable('drop_entries').set({ status: 'SELECTED', respond_by: w.h.clock.now() }).where('id', '=', ranked[0]!.id).execute();
+    report = await w.tests.report(row, w.h.clock.now());
+    expect(report.checks.find((c) => c.id === 'STOCK')).toMatchObject({ pass: false, line: 'Size 16: 3 places held or sold for 2 pieces.' });
+  });
+});
+
 describe('the early access by tier (plan NEXT-NINE, BP-19 T3)', () => {
   let w: World;
   beforeAll(async () => {

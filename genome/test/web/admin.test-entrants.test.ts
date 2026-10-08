@@ -62,6 +62,7 @@ import * as web from '../../src/web/admin/types.js';
 import type { SystemSample, SystemStatus, TestRunSettings, TestRunTier } from '../../src/web/admin/types.js';
 import type { VisibilitySource } from '../../src/web/admin/ui/attention.js';
 import { startRefresh, stopRefreshes } from '../../src/web/admin/ui/refresh.js';
+import { testFields } from '../../src/web/admin/views/test-entrants.js';
 
 const MB = 1024 ** 2;
 const GB = 1024 ** 3;
@@ -211,6 +212,8 @@ describe('a press of SEND TEST ENTRANTS and ADD MORE', () => {
     expect(draw.choices).toEqual({ size: null, quantity: 1, addOnsPct: 0 });
     expect(draw.arrival).toEqual({ mode: 'burst', seconds: 10, interestPct: 0 });
     expect(draw.behaviour).toEqual({ ...TEST_DEFAULTS.behaviour, reservePct: 40, confirmPct: 100 });
+    // Plan NEXT LOT §3.6.F: a draw with sizes sends the Choices' size as a LIVE RELEASE does.
+    expect(testRunInput('DRAW', drawValues({ size: 's17' }), 'TEST 8A1D0C55').choices).toEqual({ size: 's17', quantity: 1, addOnsPct: 0 });
   });
 
   it('refuses what the server would, before anything is sent', () => {
@@ -280,6 +283,16 @@ describe('a press of SEND TEST ENTRANTS and ADD MORE', () => {
     expect(testSettingsLine('LIVE', { ...TEST_DEFAULTS, tiers: { none: 5, titane: 100, platine: 0, palladium: 1 }, choices: { size: 's52', quantity: null, addOnsPct: 30 }, profile: { ...TEST_DEFAULTS.profile, countries: ['FR', 'JP'] } }, [{ id: 's52', label: '52' }])).toBe(
       '5 NO TIER + 100 TITANE + 1 PALLADIUM · a burst of 10 s · PAY 70 % · RELEASE 20 % · MISS 10 % · LEAVE 0 % · the seal held 1.5 s · size 52, pieces at random · add-ons 30 % · seniority 0–3 yrs · accounts 30–720 days old · from FR, JP · shared network 0 %',
     );
+    // Plan NEXT LOT §3.6.F: a draw with sizes says the size chosen, or one at random.
+    const sizes = [{ id: 's17', label: '17' }];
+    expect(testSettingsLine('DRAW', { ...TEST_DEFAULTS, choices: { size: 's17', quantity: 1, addOnsPct: 0 } }, sizes)).toContain('confirm by themselves 70 % · size 17 · seniority');
+    expect(testSettingsLine('DRAW', TEST_DEFAULTS, sizes)).toContain('confirm by themselves 70 % · a size at random · seniority');
+    // The dialog's Choices · size for a draw with sizes, as for a LIVE RELEASE; none for a draw without.
+    const names = (t: Parameters<typeof testFields>[0]) => testFields(t, testRunValues()).map((f) => f.name);
+    expect(names({ mode: 'DRAW', sizes })).toContain('size');
+    expect(names({ mode: 'DRAW', sizes: [] })).not.toContain('size');
+    expect(names({ mode: 'DRAW' })).not.toContain('quantity');
+    expect(testFields({ mode: 'DRAW', sizes }, testRunValues()).find((f) => f.name === 'size')?.options).toEqual([{ value: '', label: 'At random among the release’s sizes' }, { value: 's17', label: '17' }]);
   });
 });
 

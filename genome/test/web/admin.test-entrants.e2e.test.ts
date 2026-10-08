@@ -226,6 +226,45 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
     await p.context().close();
   }, STEP_TIMEOUT);
 
+  it('sends test entrants into a draw in sizes (plan NEXT LOT §3.6.F): Choices · size as for a LIVE RELEASE, each bot in the size chosen, the report 5/5', async () => {
+    const created = await ctx.services.drops.create(
+      { modelId, title: 'MONOLITHE — release in sizes', sizes: [{ label: '16', pieces: 3 }, { label: '17', pieces: 2 }], opensAt: new Date(Date.now() + HOUR), closesAt: new Date(Date.now() + 2 * HOUR), earlyAccessHours: 0 },
+      admin,
+    );
+    const drop = await ctx.services.drops.publish(created.id, admin);
+    await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - HOUR), closes_at: new Date(Date.now() + 2 * HOUR) }).where('id', '=', drop.id).execute();
+    const s17 = drop.sizes.find((z) => z.label === '17')!.id;
+    const id8 = drop.id.slice(0, 8).toUpperCase();
+    const p = await open(ADMIN);
+    await go(p, `#/club/drops/${drop.id}`, 'MONOLITHE — release in sizes');
+    await p.click('[data-testid=test-send]');
+    await p.waitForSelector('dialog.dialog');
+    // Choices · size: at random among the draw's sizes, or one of them; no pieces nor add-ons (a LIVE RELEASE's only).
+    expect(await p.locator('dialog select[name=size] option').allTextContents()).toEqual(['At random among the release’s sizes', '16', '17']);
+    expect(await p.locator('dialog [name=quantity]').count()).toBe(0);
+    await p.selectOption('dialog select[name=size]', s17);
+    await p.fill('dialog input[name="tier:titane"]', '4');
+    await p.fill('dialog input[name=seconds]', '1');
+    await p.fill('dialog input[name=confirmPct]', '0');
+    await confirmDialog(p, `TEST ${id8}`);
+    await expect.poll(() => text(p, 'test-status'), { timeout: 30_000 }).toBe('DONE');
+    expect(await text(p, 'test-settings')).toContain('confirm by themselves 0 % · size 17 · seniority');
+    await p.reload();
+    await expect.poll(() => p.locator('#entries [data-testid=test-tag]').count()).toBe(4);
+    expect(await p.locator('#entries [data-testid=entry-size]').allTextContents()).toEqual(['Size 17', 'Size 17', 'Size 17', 'Size 17']);
+    // Drawn per size, then END TEST: the report 5/5.
+    await ctx.db.updateTable('drops').set({ closes_at: new Date(Date.now() - 1000) }).where('id', '=', drop.id).execute();
+    await ctx.services.drops.draw(drop.id, admin);
+    await p.reload();
+    await p.waitForSelector('[data-testid=test-end]');
+    await p.click('[data-testid=test-end]');
+    await p.waitForSelector('dialog.dialog--danger');
+    await confirmDialog(p, `END TEST ${id8}`);
+    await expect.poll(() => text(p, 'test-past-checks'), { timeout: 30_000 }).toBe('5/5');
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+  }, STEP_TIMEOUT);
+
   it('shows a LIVE RELEASE’s test running on the Drops tab, where STOP halts it; END TEST still cleans up', async () => {
     const r = await ctx.services.liveConsole.create({ modelId, title: 'THE VAULT RING', opensAt: new Date(Date.now() + 2 * HOUR), closesAt: new Date(Date.now() + 3 * HOUR), priceMinor: 480_000, sizes: [{ label: '52', stock: 3 }] }, admin);
     await ctx.services.liveConsole.publish(r.id, {}, admin);

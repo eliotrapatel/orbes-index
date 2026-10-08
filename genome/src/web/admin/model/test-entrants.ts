@@ -233,7 +233,8 @@ export function testRunInput(mode: TestRunMode, v: Record<string, string>, phras
       confirmPct: num('confirmPct'),
     },
     choices: {
-      size: mode === 'LIVE' && valueOf(v, 'size') ? valueOf(v, 'size') : null,
+      // A LIVE RELEASE's size, and a draw's with sizes (plan NEXT LOT §3.6.F); the field is absent otherwise.
+      size: valueOf(v, 'size') ? valueOf(v, 'size') : null,
       quantity: quantity === '' ? null : Number(quantity),
       addOnsPct: mode === 'LIVE' ? num('addOnsPct') : 0,
     },
@@ -327,7 +328,7 @@ export function testRunLine(run: Pick<TestRunView, 'mode' | 'status'>): string {
   }
 }
 
-/** The settings of a press in one line, as the run's panel says them (`sizes`: a LIVE RELEASE's, to name the size chosen). */
+/** The settings of a press in one line, as the run's panel says them (`sizes`: a LIVE RELEASE's or a draw's, to name the size chosen). */
 export function testSettingsLine(mode: TestRunMode, s: TestRunSettings, sizes: readonly { id: string; label: string }[] = []): string {
   const tiers = TEST_TIERS.filter((t) => s.tiers[t.key] > 0).map((t) => `${formatCount(s.tiers[t.key])} ${t.label}`);
   const arrival = s.arrival.mode === 'all' ? 'all at once' : s.arrival.mode === 'burst' ? `a burst of ${formatCount(s.arrival.seconds ?? 0)} s` : 'spread until T0';
@@ -342,6 +343,8 @@ export function testSettingsLine(mode: TestRunMode, s: TestRunSettings, sizes: r
     parts.push(`${size}, ${pieces}`, `add-ons ${s.choices.addOnsPct} %`);
   } else {
     parts.push(`withdraw ${b.withdrawPct} %`, `reserve ${b.reservePct} %`, `confirm by themselves ${b.confirmPct} %`);
+    // Plan NEXT LOT §3.6.F: a draw with sizes, each bot in the size chosen, or one at random.
+    if (sizes.length > 0) parts.push(s.choices.size === null ? 'a size at random' : `size ${sizes.find((x) => x.id === s.choices.size)?.label ?? s.choices.size}`);
   }
   parts.push(
     `seniority ${p.seniorityMin}–${p.seniorityMax} yrs`,
