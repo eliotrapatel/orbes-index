@@ -22,9 +22,13 @@
  *    and care), asked its label, colour and SKU prefix, then its reference
  *    photograph; its page opens next, for its gallery, material, prices and
  *    publication. A variant's page names its main model.
- *  - Sizes (plan NEXT-NINE, AC-01): which saved size of a collector (YOUR
- *    SIZES) preselects the model's size, and the measures each of its sizes
- *    (its SKUs) fits; a variant without a size type reads its main model's.
+ *  - Sizes (plan NEXT-NINE, AC-01; plan NEXT LOT §3.3): its size type (To
+ *    give until it is given) and its declared sizes, each its own SKU, offered
+ *    or set aside: Edit size type, Tick sizes (a ring, a bracelet, a
+ *    necklace), Remove (removed when unused, otherwise set aside) and
+ *    Reinstate; which saved size of a collector (YOUR SIZES) preselects the
+ *    model's size, and the measures each of its sizes fits. ADD A VARIANT
+ *    copies its offered sizes (and asks its size type when it has none).
  *  - Pairs well with (plan NEXT-NINE, BP-34), last as on the sheet: the two
  *    or three models its sheet ends with, in their order, each with whether
  *    the sheet shows it; none picked, what it shows now; Edit pairs, three
@@ -32,7 +36,7 @@
  *
  * OPERATOR edits (editCatalog, photograph), an AUDITOR reads. Each change is
  * one request, audited by the server (model.update, model.gallery.*,
- * model.sizes.update, model.pairs), then
+ * model.sizes.update, model.sizes.declare, model.pairs), then
  * the page is read again.
  */
 import { h } from '../../shared/dom.js';
@@ -65,16 +69,57 @@ import {
 import { can } from '../model/permissions.js';
 import { modelPhotoImpact } from '../model/photo.js';
 import { lookbookWord, pairFormValues, pairModelLabel, pairOptions, pairsChange, pairsNote, pairsProblem, PAIRS_TEXT, shownLabel, shownNow } from '../model/pairs.js';
-import { effectiveKind, fitChange, fitChanged, fitFormValues, fitProblem, fitsText, fitUnitLabel, kindChange, SIZE_KIND_OPTIONS, sizeKindLine, SIZES_TEXT } from '../model/sizes.js';
+import {
+  canTick,
+  effectiveKind,
+  fitChange,
+  fitChanged,
+  fitFormValues,
+  fitProblem,
+  fitsText,
+  fitUnitLabel,
+  initiallyTicked,
+  offListWarning,
+  preselectedType,
+  reinstateDialog,
+  removable,
+  removeDialog,
+  SIZE_TYPE_WORDS,
+  sizesCountLine,
+  sizeState,
+  sizeText,
+  sizeTypeChange,
+  sizeTypeLive,
+  sizeTypeOptions,
+  sizeTypeRow,
+  sizeTypeText,
+  SIZES_TEXT,
+  tickChanges,
+  tickedOf,
+  tickField,
+  tickLine,
+  tickProblem,
+  variantSizesLine,
+  VARIANT_IMPACT,
+} from '../model/sizes.js';
 import { toneOf } from '../model/tone.js';
 import { dotChange, dotFormValues, dotProblem, keepsLabel, proposeVariantPrefix, VARIANT_LABEL_MAX, variantFormValues, variantInput, variantProblem } from '../model/variants.js';
 import { href } from '../router.js';
-import type { GalleryImage, Model, ModelPair, ModelSizeRow, ModelVariant } from '../types.js';
-import { button, defList, emptyState, linkButton, mono, pageHeader, section, statusMark, table, type Column } from '../ui/components.js';
+import type { GalleryImage, Model, ModelPair, ModelSizeRow, ModelVariant, SizeType } from '../types.js';
+import { button, checkbox, defList, emptyState, linkButton, mono, pageHeader, section, statusMark, table, type Column } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
+
+/**
+ * A model created with a ring's, a bracelet's or a necklace's size type (plan NEXT LOT §3.3 item 6b): its page opens on
+ * the Sizes dialog at once, once. Set by the Catalogue's New model.
+ */
+let pendingTick: string | null = null;
+export function tickSizesOnOpen(modelId: string): void {
+  pendingTick = modelId;
+}
 
 export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.modelId ?? '';
@@ -164,11 +209,7 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
       title: 'Add a variant',
       eyebrow,
       body: [
-        h(
-          'p',
-          { class: 'dialog__text', data: { testid: 'variant-impact' } },
-          'A model of its own, copied from this one: its type, collection, story, specifications and care. Its label, colour and SKU prefix are its own; its photographs come next, then its material, prices and publication, on its page. It stays hidden from THE COLLECTION until it is published.',
-        ),
+        h('p', { class: 'dialog__text', data: { testid: 'variant-impact' } }, VARIANT_IMPACT),
         m.variantLabel === null ? h('p', { class: 'dialog__text' }, 'This model is one of the dots too: give it its own label and colour.') : null,
       ],
       fields: [
@@ -181,12 +222,22 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
         { name: 'label', label: 'Label', required: true, maxlength: VARIANT_LABEL_MAX, value: values.label, hint: 'Its name among the dots: Blue.' },
         { name: 'swatch', label: 'Colour', kind: 'color', value: values.swatch },
         { name: 'skuPrefix', label: 'SKU prefix', maxlength: 32, value: values.skuPrefix, hint: 'Its own, never changed: it starts every SKU issued with it. Empty: the one proposed below.' },
+        // Plan NEXT LOT §3.3 item 6: a variant made now is a new model, given its size type; its main model's when it has one.
+        ...(sizing.sizeType === null
+          ? [{ name: 'sizeType', label: 'Size type', kind: 'select' as const, required: true, options: sizeTypeOptions(null), value: preselectedType(null, effectiveKind(sizing), m.type) }]
+          : []),
       ],
-      live: (v) => h('p', { class: 'dialog__text', data: { testid: 'variant-prefix' } }, `SKU prefix: ${withPrefix(v).skuPrefix || '—'}`),
+      live: (v) => {
+        const sizesLine = variantSizesLine(sizing, withPrefix(v).skuPrefix.trim().toUpperCase());
+        return [
+          h('p', { class: 'dialog__text', data: { testid: 'variant-prefix' } }, `SKU prefix: ${withPrefix(v).skuPrefix || '—'}`),
+          sizesLine ? h('p', { class: 'dialog__text', data: { testid: 'variant-sizes' } }, sizesLine) : null,
+        ];
+      },
       validate: (v) => variantProblem(m, withPrefix(v)),
       confirmLabel: 'Add the variant',
       submit: async (v) => {
-        created = await ctx.api.createVariant(m.id, variantInput(m, withPrefix(v)));
+        created = await ctx.api.createVariant(m.id, variantInput({ variantLabel: m.variantLabel, sizeType: sizing.sizeType }, withPrefix(v)));
       },
     }).then(async (r) => {
       const v = created;
@@ -251,31 +302,48 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
     },
   );
 
-  // ── Sizes (AC-01) ────────────────────────────────────────────────────────
+  // ── Sizes (AC-01; plan NEXT LOT §3.3) ──────────────────────────────────
   const kind = effectiveKind(sizing);
-  const editKind = () =>
+  const type = sizing.sizeType;
+  const editType = () =>
     void openDialog({
       title: 'Size type',
       eyebrow,
-      body: h('p', { class: 'dialog__text' }, SIZES_TEXT.lead),
-      fields: [
-        {
-          name: 'sizeKind',
-          label: 'Size type',
-          kind: 'select',
-          options: [...SIZE_KIND_OPTIONS],
-          value: sizing.sizeKind ?? '',
-          hint: m.variantOf ? 'None: the variant reads its main model’s.' : undefined,
-        },
-      ],
-      validate: (v) => ((v.sizeKind || null) === sizing.sizeKind ? 'Nothing has changed.' : null),
+      body: h('p', { class: 'dialog__text', data: { testid: 'size-type-text' } }, sizeTypeText(m.skuPrefix)),
+      fields: [{ name: 'sizeType', label: 'Size type', kind: 'select', required: true, options: sizeTypeOptions(type), value: preselectedType(type, kind, m.type) }],
+      live: (v) => sizeTypeLive(sizing, v.sizeType ?? '', m.skuPrefix).map((line) => h('p', { class: 'dialog__text', data: { testid: 'size-type-live' } }, line)),
+      validate: (v) => (v.sizeType === type ? 'Nothing has changed.' : null),
       confirmLabel: 'Save size type',
       submit: async (v) => {
-        await ctx.api.setModelSizes(m.id, kindChange(v.sizeKind ?? ''));
+        await ctx.api.setModelSizes(m.id, sizeTypeChange(v.sizeType ?? ''));
       },
     }).then(done(SIZES_TEXT.saved));
+  const tickSizes = () => {
+    if (!canTick(sizing)) return;
+    const before = initiallyTicked(sizing);
+    const changes = (v: Record<string, string>) => tickChanges(sizing, tickedOf(sizing.list, v));
+    void openDialog({
+      title: 'Sizes',
+      eyebrow: `${eyebrow} · ${SIZE_TYPE_WORDS[type!]}`,
+      body: [
+        h('p', { class: 'dialog__text' }, SIZES_TEXT.tickText),
+        type === 'RING' ? null : h('p', { class: 'dialog__text soft', data: { testid: 'size-grid-caption' } }, SIZES_TEXT.tickCaption),
+        h('div', { class: 'size-grid', data: { testid: 'size-grid' }, attrs: { role: 'group', 'aria-label': 'Sizes' } }, ...sizing.list.map((l) => checkbox(tickField(l), l, before.has(l)))),
+      ],
+      live: (v) => h('p', { class: 'dialog__text', data: { testid: 'size-tick-line' } }, tickLine(changes(v))),
+      validate: (v) => tickProblem(changes(v)),
+      confirmLabel: 'Save sizes',
+      submit: async (v) => {
+        await ctx.api.setModelSizes(m.id, { ticked: tickedOf(sizing.list, v) });
+      },
+    }).then(done(SIZES_TEXT.saved));
+  };
+  if (pendingTick === m.id) {
+    pendingTick = null;
+    if (canEdit && canTick(sizing) && sizing.sizes.length === 0) queueMicrotask(tickSizes);
+  }
   const editFit = (row: ModelSizeRow) => {
-    if (kind === null) return;
+    if (kind === null || row.label === null) return;
     const unit = fitUnitLabel(kind);
     void openDialog({
       title: 'Size',
@@ -291,26 +359,87 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
       },
     }).then(done(SIZES_TEXT.saved));
   };
+  const removeSize = (row: ModelSizeRow) => {
+    const d = removeDialog(row);
+    let outcome: 'REMOVED' | 'SET_ASIDE' | null = null;
+    void openDialog({
+      title: d.title,
+      eyebrow,
+      body: d.text.map((t) => h('p', { class: 'dialog__text', data: { testid: 'size-remove-text' } }, t)),
+      confirmLabel: d.confirm,
+      submit: async () => {
+        outcome = (await ctx.api.removeModelSize(m.id, row.skuId)).outcome;
+      },
+    }).then((r) => done(outcome === 'REMOVED' ? SIZES_TEXT.removed : SIZES_TEXT.setAside)(r));
+  };
+  const reinstateSize = (row: ModelSizeRow) => {
+    const d = reinstateDialog(row);
+    void openDialog({
+      title: d.title,
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, d.text),
+      confirmLabel: d.confirm,
+      submit: async () => {
+        await ctx.api.reinstateModelSize(m.id, row.skuId);
+      },
+    }).then(done(SIZES_TEXT.reinstated));
+  };
+  const sizeActions = (r: ModelSizeRow): HTMLElement | null => {
+    if (!canEdit) return null;
+    const buttons: HTMLElement[] = [];
+    if (kind !== null && r.label !== null) buttons.push(button('Edit', { kind: 'ghost', testId: 'model-size-edit', onClick: () => editFit(r) }));
+    if (r.setAsideAt === null) {
+      const remove = button('Remove', { kind: 'ghost', testId: 'model-size-remove', onClick: () => removeSize(r) });
+      if (!removable(sizing, r)) {
+        remove.disabled = true;
+        remove.title = SIZES_TEXT.lastOffered;
+      }
+      buttons.push(remove);
+    } else {
+      buttons.push(button('Reinstate', { kind: 'ghost', testId: 'model-size-reinstate', onClick: () => reinstateSize(r) }));
+    }
+    return h('span', { class: 'row-actions' }, ...buttons);
+  };
   const sizeColumns: Column<ModelSizeRow>[] = [
-    { label: 'Size', cell: (r) => h('span', { data: { testid: 'model-size-label' } }, r.label), kind: ['nowrap'] },
+    { label: 'Size', cell: (r) => h('span', { data: { testid: 'model-size-label' } }, sizeText(r.label)), kind: ['nowrap'] },
     { label: 'SKU', cell: (r) => mono(r.code), kind: ['nowrap'] },
     { label: 'Fits', cell: (r) => h('span', { data: { testid: 'model-size-fits' } }, fitsText(kind, r)) },
-    {
-      label: 'Edit',
-      kind: ['actions'],
-      cell: (r) => (canEdit && kind !== null ? button('Edit', { kind: 'ghost', testId: 'model-size-edit', onClick: () => editFit(r) }) : null),
-    },
+    { label: 'State', cell: (r) => h('span', { data: { testid: 'model-size-state' } }, sizeState(type, r)) },
+    { label: 'Actions', kind: ['actions'], cell: sizeActions },
   ];
+  const typeRow = sizeTypeRow(sizing);
+  const warning = offListWarning(sizing);
   const sizesSection = section(
     'Sizes',
     [
+      h('p', { class: 'prose', data: { testid: 'model-sizes-intro' } }, SIZES_TEXT.intro, ' ', SIZES_TEXT.offers),
       h('p', { class: 'prose', data: { testid: 'model-sizes-lead' } }, SIZES_TEXT.lead),
-      defList([{ label: 'Size type', value: h('span', { data: { testid: 'model-size-kind' } }, sizeKindLine(sizing)) }]),
+      defList([
+        {
+          label: 'Size type',
+          value: h(
+            'span',
+            null,
+            h('span', { data: { testid: 'model-size-kind' } }, typeRow.value),
+            ...typeRow.notes.map((n) => h('span', { class: 'deflist__note', data: { testid: 'model-size-type-note' } }, n)),
+          ),
+        },
+        ...(sizing.sizes.length ? [{ label: 'Sizes', value: h('span', { data: { testid: 'model-sizes-count' } }, sizesCountLine(sizing)) } as const] : []),
+      ]),
+      warning ? h('p', { class: 'panel__text', data: { testid: 'model-sizes-off-list' } }, warning) : null,
       sizing.sizes.length
         ? h('div', { data: { testid: 'model-sizes' } }, table(sizeColumns, sizing.sizes, { empty: SIZES_TEXT.empty, caption: 'Sizes' }))
         : emptyState(SIZES_TEXT.empty),
     ],
-    { id: 'sizes', tools: canEdit ? [button('Edit size type', { kind: 'ghost', testId: 'model-size-kind-edit', onClick: editKind })] : [] },
+    {
+      id: 'sizes',
+      tools: canEdit
+        ? [
+            button('Edit size type', { kind: 'ghost', testId: 'model-size-kind-edit', onClick: editType }),
+            ...(canTick(sizing) ? [button('Tick sizes', { kind: 'ghost', testId: 'model-sizes-tick', onClick: tickSizes })] : []),
+          ]
+        : [],
+    },
   );
 
   // ── Private salon (P-X08) ────────────────────────────────────────────────

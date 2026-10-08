@@ -2050,29 +2050,56 @@ export interface ShopRequest {
   outcome: ShopRequestOutcome | null;
 }
 
-// ── A model's Sizes (plan NEXT-NINE, AC-01) ────────────────────────────────
+// ── A model's Sizes (plan NEXT-NINE, AC-01; plan NEXT LOT §3.3) ────────────
 
-/** A size of a model (its SKU) and the measures it fits, in whole millimetres of its size kind; null: its label is read. */
+/**
+ * A declared size of a model (its SKU) and the measures it fits, in whole millimetres of its size kind (null: its label
+ * is read); where it stands (plan NEXT LOT §3.3).
+ */
 export interface ModelSizeRow {
   skuId: string;
-  label: string;
+  /** null: ONE SIZE. */
+  label: string | null;
   code: string;
   fitMinMm: number | null;
   fitMaxMm: number | null;
+  /** When it was set aside; null: offered. */
+  setAsideAt: Iso | null;
+  /** Its label reads as a size of its type's list (ONE SIZE for a watch or a model of one size); true without a type. */
+  onList: boolean;
+  /** The list's label another declared size reads as too, when this one's label is not the list's own; else null. */
+  sameAs: string | null;
+  /** Something uses it: removing it sets it aside. */
+  used: boolean;
+  /** The orders waiting for supplier stock in this size (from H2); 0 before. */
+  awaiting: number;
 }
 
-/** GET /api/admin/models/:id/sizes: its size kind, what a variant without one reads, its sizes. */
+/** GET /api/admin/models/:id/sizes: its size type and kind, what a variant without either reads, its type's list, its declared sizes. */
 export interface ModelSizes {
   modelId: string;
+  sizeType: SizeType | null;
   sizeKind: SizeKind | null;
   inherited: { sizeKind: SizeKind; from: string } | null;
+  /** Its type's sizes to tick; empty without a type, and for a watch or a model of one size. */
+  list: string[];
   sizes: ModelSizeRow[];
+  offered: number;
+  setAside: number;
 }
 
-/** PUT /api/admin/models/:id/sizes: its kind (null: none) or its sizes' fits, or both. */
+/** PUT /api/admin/models/:id/sizes: its size type, the sizes ticked, its kind (a model with no type; null: none), its sizes' fits. */
 export interface ModelSizesChange {
+  sizeType?: SizeType;
+  ticked?: string[];
   sizeKind?: SizeKind | null;
   fits?: { skuId: string; fitMinMm: number | null; fitMaxMm: number | null }[];
+}
+
+/** POST /api/admin/models/:id/sizes/:skuId/remove: removed (its SKU deleted) or set aside, and the section. */
+export interface ModelSizeRemoved {
+  outcome: 'REMOVED' | 'SET_ASIDE';
+  sizes: ModelSizes;
 }
 
 // ── MESSAGES (plan NEXT-NINE, CS-01) ───────────────────────────────────────

@@ -346,7 +346,18 @@ function stockSection(ctx: ViewContext, stock: AtelierStock, manage: boolean, do
         : null,
       table<AtelierStockRow>(
         [
-          { label: 'Model and size', cell: (r) => h('span', null, skuLabel(r.sku), h('span', { class: 'cell-sub mono' }, r.sku.code)) },
+          {
+            label: 'Model and size',
+            cell: (r) =>
+              h(
+                'span',
+                null,
+                skuLabel(r.sku),
+                h('span', { class: 'cell-sub mono' }, r.sku.code),
+                // Plan NEXT LOT §3.3: a size set aside in the Catalogue, listed while something remains.
+                r.sku.setAside ? h('span', { class: 'cell-sub', data: { testid: 'stock-set-aside' } }, 'Set aside') : null,
+              ),
+          },
           { label: 'Location', cell: (r) => r.location.name, kind: ['nowrap'] },
           { label: 'On hand', cell: (r) => formatCount(r.onHand), kind: ['num'] },
           { label: 'Reserved', cell: (r) => formatCount(r.reserved), kind: ['num'] },

@@ -28,7 +28,47 @@ import {
 import { CLUB_TIER_THRESHOLDS as CLUB_TIER_THRESHOLDS_FOR_GROWTH } from '../../src/server/services/club.js';
 import { parseHash } from '../../src/web/admin/router.js';
 import { PAIRS_FALLBACK_MAX } from '../../src/server/services/lookbook.js';
-import { effectiveKind, fitChange, fitChanged, fitFormValues, fitProblem, fitsText, fitUnitLabel, kindChange, NEW_MODEL_SIZE_TYPE, SIZE_KIND_OPTIONS, SIZE_TYPE_CHOICES, sizeKindLine, SIZES_TEXT } from '../../src/web/admin/model/sizes.js';
+import {
+  canTick,
+  catalogueSizeLine,
+  deriveSku as webDeriveSku,
+  effectiveKind,
+  fitChange,
+  fitChanged,
+  fitFormValues,
+  fitProblem,
+  fitsText,
+  fitUnitLabel,
+  initiallyTicked,
+  listEntryOf as webListEntryOf,
+  NEW_MODEL_SIZE_TYPE,
+  offListWarning,
+  preselectedType,
+  reinstateDialog,
+  removable,
+  removeDialog,
+  SIZE_TYPE_CHOICES,
+  SIZE_TYPE_LINES,
+  sizeMixEmptyLine,
+  sizesCountLine,
+  sizeState,
+  sizeTypeChange,
+  sizeTypeLive,
+  sizeTypeOptions,
+  sizeTypeRow,
+  sizeTypeText,
+  SIZES_TEXT,
+  standardSizes as webStandardSizes,
+  tickChanges,
+  tickedOf,
+  tickField,
+  tickLine,
+  tickProblem,
+  variantSizesLine,
+  VARIANT_IMPACT,
+} from '../../src/web/admin/model/sizes.js';
+import { listEntryOf as serverListEntryOf, standardSizes as serverStandardSizes } from '../../src/server/services/sizes.js';
+import { deriveSku as serverDeriveSku } from '../../src/server/services/stock.js';
 import { fitWithin, modelPhotoImpact, PHOTO_MAX_BYTES, PHOTO_MAX_SIDE, PHOTO_MIME_TYPES, PHOTO_QUALITIES, photoFacts, PIECE_PHOTO_IMPACT } from '../../src/web/admin/model/photo.js';
 import {
   ANALYTICS_RANGES,
@@ -2568,32 +2608,204 @@ describe('analytics view model', () => {
   });
 });
 
-describe('a model\'s Sizes and a salon request\'s size (plan NEXT-NINE, AC-01)', () => {
+describe('a model\'s Sizes and a salon request\'s size (plan NEXT-NINE, AC-01; plan NEXT LOT §3.3)', () => {
+  const row = (over: Partial<web.ModelSizeRow> & Pick<web.ModelSizeRow, 'skuId' | 'label' | 'code'>): web.ModelSizeRow => ({
+    fitMinMm: null,
+    fitMaxMm: null,
+    setAsideAt: null,
+    onList: true,
+    sameAs: null,
+    used: false,
+    awaiting: 0,
+    ...over,
+  });
   const ring: web.ModelSizes = {
     modelId: 'm',
+    sizeType: 'RING',
     sizeKind: 'RING',
     inherited: null,
-    sizes: [
-      { skuId: 'a', label: '52', code: 'MNL-52', fitMinMm: null, fitMaxMm: null },
-      { skuId: 'b', label: '54', code: 'MNL-54', fitMinMm: 53, fitMaxMm: 55 },
-    ],
+    list: webStandardSizes('RING'),
+    sizes: [row({ skuId: 'a', label: '52', code: 'MNL-52' }), row({ skuId: 'b', label: '54', code: 'MNL-54', fitMinMm: 53, fitMaxMm: 55 })],
+    offered: 2,
+    setAside: 0,
   };
-  it('names the size type, and what a variant without one reads from its main model', () => {
-    expect(SIZE_KIND_OPTIONS.map((o) => o.label)).toEqual(['None', 'Ring size', 'Bracelet size', 'Wrist (watches)', 'Necklace length']);
-    expect(SIZE_KIND_OPTIONS.map((o) => o.value)).toEqual(['', ...serverSchema.SIZE_KINDS]);
-    expect(sizeKindLine(ring)).toBe('Ring size');
-    expect(sizeKindLine({ sizeKind: null, inherited: { sizeKind: 'RING', from: 'MONOLITHE' } })).toBe('Reads Ring size from MONOLITHE');
-    expect(sizeKindLine({ sizeKind: null, inherited: null })).toBe('None');
+  /** MONOLITHE as §3.3 draws it: 50, 52, SIZE 52 (same measure), ONE SIZE (off the list), 58 set aside. */
+  const monolithe: web.ModelSizes = {
+    modelId: 'm',
+    sizeType: 'RING',
+    sizeKind: 'RING',
+    inherited: null,
+    list: webStandardSizes('RING'),
+    sizes: [
+      row({ skuId: 'a', label: '50', code: 'MNL-RG-50' }),
+      row({ skuId: 'b', label: '52', code: 'MNL-RG-52', fitMinMm: 51, fitMaxMm: 53, used: true }),
+      row({ skuId: 'c', label: 'SIZE 52', code: 'MNL-RG-SIZE-52', sameAs: '52', used: true }),
+      row({ skuId: 'd', label: null, code: 'MNL-RG', onList: false }),
+      row({ skuId: 'e', label: '60', code: 'MNL-RG-60' }),
+      row({ skuId: 'f', label: '58', code: 'MNL-RG-58', setAsideAt: '2026-10-07T09:00:00.000Z', used: true }),
+    ],
+    offered: 5,
+    setAside: 1,
+  };
+
+  it('names the size type, To give until it is given, and what a variant without one reads from its main model', () => {
+    expect(sizeTypeRow(ring)).toEqual({ value: 'Ring size · French sizes 40 to 76', notes: [] });
+    expect((['RING', 'BRACELET', 'NECKLACE', 'WATCH', 'ONE_SIZE'] as const).map((t) => SIZE_TYPE_LINES[t])).toEqual([
+      'Ring size · French sizes 40 to 76',
+      'Bracelet size · 14 to 24 cm, by 0.5 cm',
+      'Necklace length · 35 to 100 cm, by 1 cm',
+      'Watch · one size',
+      'One size',
+    ]);
+    expect(sizeTypeRow({ sizeType: null, inherited: null })).toEqual({ value: 'To give', notes: ['Its sizes are kept as they are until you give it its type.'] });
+    expect(sizeTypeRow({ sizeType: null, inherited: { sizeKind: 'RING', from: 'MONOLITHE' } })).toEqual({
+      value: 'To give',
+      notes: ['Reads Ring size from MONOLITHE', 'Its sizes are kept as they are until you give it its type.'],
+    });
     expect(effectiveKind({ sizeKind: null, inherited: { sizeKind: 'WRIST', from: 'MONOLITHE' } })).toBe('WRIST');
     expect(effectiveKind({ sizeKind: 'BRACELET', inherited: { sizeKind: 'WRIST', from: 'MONOLITHE' } })).toBe('BRACELET');
-    expect(kindChange('')).toEqual({ sizeKind: null });
-    expect(kindChange('NECKLACE')).toEqual({ sizeKind: 'NECKLACE' });
-    expect(SIZES_TEXT).toEqual({
+    expect(sizesCountLine(ring)).toBe('2 offered');
+    expect(sizesCountLine(monolithe)).toBe('5 offered · 1 set aside');
+    expect(SIZES_TEXT).toMatchObject({
+      intro: 'The sizes this model is made in. Each size is its own SKU, with its own stock in LOGISTICS, at 0 to begin with.',
+      offers: 'New releases, supplier orders and the private salon offer only the sizes offered here.',
       lead: 'Which saved size of a collector preselects this model’s size, in I’LL BE THERE, the LIVE ready check and a salon request. The collector confirms it each time.',
-      empty: 'No sizes yet. A model’s sizes appear here once a release or a piece names them.',
+      empty: 'No sizes yet. Give this model its size type, then tick its sizes.',
       fitHint: 'Empty: the size’s label itself is read, for example 52 or 17.5 CM.',
       saved: 'Sizes saved.',
     });
+  });
+
+  it('mirrors the server\'s lists, their reading and its SKU codes', () => {
+    for (const t of [...serverSchema.SIZE_TYPES, null] as const) expect(webStandardSizes(t), String(t)).toEqual(serverStandardSizes(t));
+    expect(webStandardSizes('BRACELET').slice(0, 3)).toEqual(['14', '14.5', '15']);
+    for (const [t, label] of [
+      ['RING', 'SIZE 52'],
+      ['RING', '52 MM'],
+      ['BRACELET', '17,5 cm'],
+      ['BRACELET', '17.5'],
+      ['NECKLACE', '45'],
+      ['RING', 'S'],
+      ['RING', null],
+      ['WATCH', '52'],
+      ['RING', '39'],
+    ] as const) {
+      expect(webListEntryOf(t, label), `${t} ${label}`).toBe(serverListEntryOf(t, label));
+    }
+    for (const [p, l] of [['MNL-RG', '52'], ['mnl-rg-bl', '17.5'], ['MNL-RG', null]] as const) expect(webDeriveSku(p, l)).toBe(serverDeriveSku(p, l ?? undefined));
+  });
+
+  it('says each size\'s state, and warns of offered sizes off the type\'s list', () => {
+    expect(monolithe.sizes.map((r) => sizeState('RING', r))).toEqual([
+      'Offered',
+      'Offered',
+      'Offered · Same measure as 52',
+      'Offered · Not on the Ring size list',
+      'Offered',
+      'Set aside · 07 OCT 2026',
+    ]);
+    expect(offListWarning(monolithe)).toBe('1 size is not on the Ring size list. It stays offered until you remove it.');
+    expect(offListWarning({ sizeType: 'BRACELET', sizes: [row({ skuId: 'a', label: '52', code: 'X', onList: false }), row({ skuId: 'b', label: '54', code: 'Y', onList: false })] })).toBe(
+      '2 sizes are not on the Bracelet size list. They stay offered until you remove them.',
+    );
+    expect(offListWarning(ring)).toBeNull();
+    expect(offListWarning({ sizeType: null, sizes: monolithe.sizes })).toBeNull();
+    // ONE SIZE has no fit.
+    expect(fitsText('RING', monolithe.sizes[3]!)).toBe('—');
+    expect(canTick(ring)).toBe(true);
+    expect(canTick({ sizeType: 'WATCH' })).toBe(false);
+    expect(canTick({ sizeType: null })).toBe(false);
+  });
+
+  it('the Size type dialog: its text, its choices, its preselection, and what giving a type does', () => {
+    expect(sizeTypeText('MNL-RG')).toBe(
+      'A ring’s sizes are ticked from French sizes 40 to 76, a bracelet’s from 14 to 24 cm by 0.5 cm, a necklace’s from 35 to 100 cm by 1 cm. A watch, like a model of one size, has a single SKU: MNL-RG.',
+    );
+    expect(sizeTypeOptions(null).map((o) => o.label)).toEqual(['Choose', 'Ring size', 'Bracelet size', 'Necklace length', 'Watch (one size)', 'One size']);
+    expect(sizeTypeOptions('RING').map((o) => o.value)).toEqual([...serverSchema.SIZE_TYPES]);
+    // The model's own type; else its size kind; else the whole words of its Type; else Choose.
+    expect(preselectedType('BRACELET', 'RING', 'RING')).toBe('BRACELET');
+    expect(preselectedType(null, 'WRIST', 'RING')).toBe('WATCH');
+    expect(preselectedType(null, 'NECKLACE', null)).toBe('NECKLACE');
+    expect(['SIGNET RING', 'AUTOMATIC WATCH', 'CUFF', 'BANGLE', 'PENDANT', 'NECKLACE', 'CHAIN BRACELET', 'EARRING', 'FRAGRANCE'].map((t) => preselectedType(null, null, t))).toEqual([
+      'RING',
+      'WATCH',
+      'BRACELET',
+      'BRACELET',
+      'NECKLACE',
+      'NECKLACE',
+      'BRACELET',
+      '',
+      '',
+    ]);
+    expect(sizeTypeLive(monolithe, '', 'MNL-RG')).toEqual([]);
+    expect(sizeTypeLive(ring, 'RING', 'MNL-RG')).toEqual(['Then tick its sizes.']);
+    expect(sizeTypeLive(monolithe, 'BRACELET', 'MNL-RG')).toEqual([
+      'Then tick its sizes.',
+      '5 sizes are not on the Bracelet size list: 50, 52, SIZE 52, ONE SIZE, 60. They stay offered until you remove them.',
+    ]);
+    expect(sizeTypeLive(monolithe, 'WATCH', 'MNL-RG')).toEqual(['Its one size, ONE SIZE (SKU MNL-RG), is offered at once. Its other sizes stay offered until you remove them.']);
+    expect(sizeTypeLive({ sizes: [] }, 'ONE_SIZE', 'ECL-PD')).toEqual(['Its one size, ONE SIZE (SKU ECL-PD), is offered at once.']);
+    expect(sizeTypeChange('NECKLACE')).toEqual({ sizeType: 'NECKLACE' });
+  });
+
+  it('the Sizes dialog: its grid, ticked from the offered sizes, and its live line', () => {
+    expect(webStandardSizes('RING')).toHaveLength(37);
+    expect(webStandardSizes('NECKLACE').at(-1)).toBe('100');
+    expect([...initiallyTicked(monolithe)].sort()).toEqual(['50', '52', '60']);
+    expect(tickField('14.5')).toBe('tick:14.5');
+    const values = (ticked: string[]) => Object.fromEntries(monolithe.list.map((l) => [tickField(l), ticked.includes(l) ? 'true' : '']));
+    expect(tickedOf(monolithe.list, values(['54', '50']))).toEqual(['50', '54']);
+    // 52 and SIZE 52 read as one measure: unticking it sets both aside (used); 60, unused, is removed; 54 added, 58 ticked again.
+    const c = tickChanges(monolithe, ['50', '54', '58']);
+    expect(c).toEqual({ adds: ['54', '58'], removes: ['60'], setsAside: ['52'], offeredAfter: 4 });
+    expect(tickLine(c)).toBe('Adds 54, 58 · Removes 60 · Sets aside 52.');
+    expect(tickProblem(c)).toBeNull();
+    const none = tickChanges(monolithe, ['50', '52', '60']);
+    expect(tickLine(none)).toBe('Nothing changes.');
+    expect(tickProblem(none)).toBe('Nothing has changed.');
+    // ONE SIZE, off the list, stays offered: unticking every box leaves it.
+    expect(tickProblem(tickChanges(monolithe, []))).toBeNull();
+    expect(tickProblem(tickChanges(ring, []))).toBe('Leave at least one size offered.');
+  });
+
+  it('Remove\'s two texts (with the orders waiting for the size), Reinstate\'s, and the last offered size kept', () => {
+    expect(removeDialog(monolithe.sizes[4]!)).toEqual({ title: 'Remove size 60', text: ['Size 60 has no stock, order or piece: it is removed, with its SKU MNL-RG-60.'], confirm: 'Remove' });
+    expect(removeDialog(monolithe.sizes[1]!)).toEqual({
+      title: 'Remove size 52',
+      text: ['Size 52 has stock, orders or pieces, so it is set aside. New releases, supplier orders and the private salon no longer offer it. Its stock, pieces, orders and history keep it, and you can reinstate it.'],
+      confirm: 'Set aside',
+    });
+    expect(removeDialog({ ...monolithe.sizes[1]!, label: '58', awaiting: 4 }).text[1]).toBe('4 orders wait for size 58: once it is set aside, the supplier-order draft no longer orders it for them.');
+    expect(removeDialog({ ...monolithe.sizes[1]!, label: '58', awaiting: 1 }).text[1]).toBe('1 order waits for size 58: once it is set aside, the supplier-order draft no longer orders it for them.');
+    expect(removeDialog(monolithe.sizes[3]!).title).toBe('Remove ONE SIZE');
+    expect(reinstateDialog(monolithe.sizes[5]!)).toEqual({ title: 'Reinstate size 58', text: 'New releases, supplier orders and the private salon offer it again.', confirm: 'Reinstate' });
+    expect(removable(monolithe, monolithe.sizes[0]!)).toBe(true);
+    expect(removable(monolithe, monolithe.sizes[5]!)).toBe(false);
+    expect(removable({ offered: 1 }, monolithe.sizes[0]!)).toBe(false);
+    expect(SIZES_TEXT.lastOffered).toBe('A model keeps at least one size offered.');
+  });
+
+  it('the Catalogue\'s line, ADD A VARIANT\'s, and the size mix\'s line with nothing to propose', () => {
+    expect(
+      [
+        { sizeType: 'RING', sizesOffered: 6 },
+        { sizeType: 'BRACELET', sizesOffered: 1 },
+        { sizeType: 'WATCH', sizesOffered: 1 },
+        { sizeType: 'ONE_SIZE', sizesOffered: 1 },
+        { sizeType: null, sizesOffered: 3 },
+      ].map((m) => catalogueSizeLine(m as { sizeType: web.SizeType | null; sizesOffered: number })),
+    ).toEqual(['Ring size · 6 sizes', 'Bracelet size · 1 size', 'Watch · one size', 'One size', 'Size type to give']);
+    expect(VARIANT_IMPACT).toMatch(/^A model of its own, copied from this one: its type, collection, story, specifications, care and sizes\. Its label, colour and SKU prefix are its own;/);
+    const three = { sizeType: 'RING' as const, sizes: [row({ skuId: 'a', label: '50', code: 'A' }), row({ skuId: 'b', label: '52', code: 'B' }), row({ skuId: 'c', label: '54', code: 'C' }), monolithe.sizes[5]!] };
+    expect(variantSizesLine(three, 'MNL-RG-BL')).toBe(
+      'Its sizes are copied: Ring size, 50, 52, 54. Each gets its own SKU under its own prefix (MNL-RG-BL-50), at 0 in LOGISTICS. Change them on its page; later changes to this model never reach it.',
+    );
+    expect(variantSizesLine({ ...three, sizeType: null, sizes: three.sizes.slice(0, 2) }, 'MNL-RG-BL')).toMatch(/^Its sizes are copied: 50, 52\. Each gets/);
+    expect(variantSizesLine({ sizeType: 'WATCH', sizes: [row({ skuId: 'a', label: null, code: 'SOL' })] }, 'SOL-BL')).toBe('Its one size is copied.');
+    expect(variantSizesLine({ sizeType: 'RING', sizes: [] }, 'X')).toBeNull();
+    expect(sizeMixEmptyLine({ offered: ['50', '52', '54'] })).toBe('Nothing in stock and nothing the planner can tell apart yet: set the sizes by hand, among 50 · 52 · 54.');
+    expect(sizeMixEmptyLine({ offered: [] })).toBe('Nothing in stock and nothing the planner can tell apart yet: set the sizes by hand.');
   });
 
   it('offers a new model\'s size type, required, Choose first (plan NEXT LOT §3.3 item 6b)', () => {

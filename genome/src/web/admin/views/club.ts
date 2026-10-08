@@ -28,6 +28,7 @@ import { formatCount, formatDateTime, humanize } from '../format.js';
 import { formatMoney, liveStateLabel, newLiveInput, newLiveProblem, newLiveValues, sizeMixLine, sizeMixText } from '../model/live.js';
 import { CLUB_TABS, clubTab, DROP_LIMITS, dropFormValues, dropInput, dropProblem, placesTaken } from '../model/club.js';
 import { can } from '../model/permissions.js';
+import { sizeMixEmptyLine } from '../model/sizes.js';
 import { toneOf } from '../model/tone.js';
 import { modelChoice } from '../model/variants.js';
 import { href } from '../router.js';
@@ -144,7 +145,7 @@ async function dropsTab(ctx: ViewContext): Promise<HTMLElement> {
       mount(
         holder,
         h('p', { class: 'live__mix-title' }, 'Proposed sizes'),
-        h('p', { class: 'dialog__text', data: { testid: 'live-size-mix-line' } }, text ? sizeMixLine(mix) : 'Nothing in stock and nothing the planner can tell apart yet: set the sizes by hand.'),
+        h('p', { class: 'dialog__text', data: { testid: 'live-size-mix-line' } }, text ? sizeMixLine(mix) : sizeMixEmptyLine(mix)),
         reasoning(mix.reasoning, 'live-size-mix-why'),
       );
       // Written into the sizes while they are the default or the last proposal: sizes typed by hand stay.

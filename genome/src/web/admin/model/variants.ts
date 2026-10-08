@@ -12,7 +12,7 @@
  * The server checks everything again (services/catalog.ts); this only says a mistake before it is sent.
  */
 import { humanize } from '../format.js';
-import type { Model, ModelChange, VariantInput } from '../types.js';
+import type { Model, ModelChange, SizeType, VariantInput } from '../types.js';
 
 /** A variant's label, at most (services/catalog.ts VARIANT_LABEL_MAX, models.variant_label's CHECK). */
 export const VARIANT_LABEL_MAX = 40;
@@ -105,12 +105,14 @@ export function variantProblem(main: Pick<Model, 'skuPrefix' | 'variantLabel' | 
 }
 
 /** What POST /api/admin/models/:id/variants sends, from values variantProblem accepted. */
-export function variantInput(main: Pick<Model, 'variantLabel'>, v: Record<string, string>): VariantInput {
+export function variantInput(main: Pick<Model, 'variantLabel'> & { sizeType?: SizeType | null }, v: Record<string, string>): VariantInput {
   return {
     label: variantLabelText(v.label),
     swatch: swatchOf(v.swatch)!,
     skuPrefix: v.skuPrefix.trim().toUpperCase(),
     ...(main.variantLabel === null ? { mainLabel: variantLabelText(v.mainLabel), mainSwatch: swatchOf(v.mainSwatch)! } : {}),
+    // Plan NEXT LOT §3.3 item 6: its size type when its main model has none (its main model's is copied otherwise).
+    ...(main.sizeType === null && v.sizeType ? { sizeType: v.sizeType as SizeType } : {}),
   };
 }
 

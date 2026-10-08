@@ -391,10 +391,22 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => page.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
     expect(await page.locator('dialog select[name=sizeType] option').allTextContents()).toEqual(['Choose', 'Ring size', 'Bracelet size', 'Necklace length', 'Watch (one size)', 'One size']);
     await page.selectOption('dialog select[name=sizeType]', 'NECKLACE');
-    await confirmDialog(page);
+    await page.click('[data-testid=dialog-confirm]');
     await page.waitForSelector('.toast:has-text("Model created.")');
     expect((await ctx.db.selectFrom('models').select(['size_type', 'size_kind']).where('sku_prefix', '=', 'ECL-PD').executeTakeFirstOrThrow())).toEqual({ size_type: 'NECKLACE', size_kind: 'NECKLACE' });
+    // A necklace's sizes are ticked next: its page opens on the Sizes dialog at once (plan NEXT LOT §3.3 item 6b).
+    await expect.poll(async () => (await title(page).textContent())?.trim(), { timeout: 15_000 }).toBe('ECLIPSE');
+    await expect.poll(() => page.locator('dialog .dialog__title').textContent(), { timeout: 15_000 }).toBe('Sizes');
+    expect(await page.locator('dialog [data-testid=size-grid] input[type=checkbox]').count()).toBe(66);
+    expect(await page.locator('dialog [data-testid=size-grid-caption]').textContent()).toBe('In centimetres.');
+    await page.locator('dialog label.ccheck', { hasText: /^45$/ }).click();
+    await expect.poll(() => page.locator('dialog [data-testid=size-tick-line]').textContent()).toBe('Adds 45.');
+    await confirmDialog(page);
+    await page.waitForSelector('.toast:has-text("Sizes saved.")');
+    await expect.poll(() => page.locator('#sizes [data-testid=model-size-label]').allTextContents()).toEqual(['45']);
+    await go(page, '#/catalogue', 'Catalogue');
     await expect.poll(() => page.locator('td:has-text("ECL-PD")').count()).toBe(1);
+    expect(await page.locator('#models tbody tr', { hasText: 'ECL-PD' }).locator('[data-testid=model-size-type]').textContent()).toBe('Necklace length · 1 size');
     await shot(page, 'catalogue');
   }, STEP_TIMEOUT);
 
@@ -2740,9 +2752,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await ctx.db.selectFrom('models').select(['price_label', 'private_min_tier']).where('id', '=', solstice.id).executeTakeFirstOrThrow()).toEqual({ price_label: '€ 4 800', private_min_tier: 2 });
     expect(await figuresInDisplayFace(p)).toEqual([]);
 
-    // AC-01, its Sizes: none until a release or a piece names them; then its size type and a size's fit, in its unit.
-    expect(await p.locator('#sizes [data-testid=model-size-kind]').textContent()).toBe('None');
-    expect(await p.locator('#sizes .empty').textContent()).toContain('No sizes yet. A model’s sizes appear here once a release or a piece names them.');
+    // AC-01, its Sizes (plan NEXT LOT §3.3): a model of before its size type, To give, its sizes kept as they are; then its
+    // size type and a size's fit, in its unit.
+    expect(await p.locator('#sizes [data-testid=model-size-kind]').textContent()).toBe('To give');
+    expect(await p.locator('#sizes .empty').textContent()).toContain('No sizes yet. Give this model its size type, then tick its sizes.');
     for (const size of ['52', '54']) await inTransaction(ctx.db, (tx) => ensureSku(tx, solstice.id, size));
     await p.reload();
     await expect.poll(() => p.locator('#sizes [data-testid=model-size-label]').allTextContents(), { timeout: 15_000 }).toEqual(['52', '54']);
@@ -2750,10 +2763,14 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // No size type yet: no unit to read a fit in, so no Edit.
     expect(await p.locator('#sizes [data-testid=model-size-edit]').count()).toBe(0);
     await p.click('[data-testid=model-size-kind-edit]');
-    await p.selectOption('dialog select[name=sizeKind]', 'RING');
+    // Preselected from its Type (RING), Choose still offered while it has none.
+    expect(await p.locator('dialog select[name=sizeType]').inputValue()).toBe('RING');
+    expect(await p.locator('dialog select[name=sizeType] option').first().textContent()).toBe('Choose');
+    await p.selectOption('dialog select[name=sizeType]', 'RING');
+    expect(await p.locator('dialog [data-testid=size-type-live]').allTextContents()).toEqual(['Then tick its sizes.']);
     await confirmDialog(p);
     await p.waitForSelector('.toast:has-text("Sizes saved.")');
-    await expect.poll(() => p.locator('#sizes [data-testid=model-size-kind]').textContent()).toBe('Ring size');
+    await expect.poll(() => p.locator('#sizes [data-testid=model-size-kind]').textContent()).toBe('Ring size · French sizes 40 to 76');
     await p.locator('#sizes [data-testid=model-size-edit]').nth(1).click();
     expect(await p.locator('dialog .cfield__hint').first().textContent()).toContain('Empty: the size’s label itself is read, for example 52 or 17.5 CM.');
     await p.fill('dialog input[name=fitFrom]', '55');
@@ -2860,7 +2877,10 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await section.locator('[data-testid=variant-list]').textContent()).toContain('No variant yet.');
     // ADD A VARIANT: the main model's own dot first (it has none yet), then the variant's; refused while a label is missing.
     await p.click('[data-testid=variant-add]');
-    expect(await p.locator('dialog [data-testid=variant-impact]').textContent()).toMatch(/^A model of its own, copied from this one: its type, collection, story, specifications and care\./);
+    expect(await p.locator('dialog [data-testid=variant-impact]').textContent()).toMatch(/^A model of its own, copied from this one: its type, collection, story, specifications, care and sizes\./);
+    // Its one size is copied (plan NEXT LOT §3.3 item 6); its main model has its type, so no Size type field.
+    expect(await p.locator('dialog [data-testid=variant-sizes]').textContent()).toBe('Its one size is copied.');
+    expect(await p.locator('dialog select[name=sizeType]').count()).toBe(0);
     await p.click('[data-testid=dialog-confirm]');
     await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
     await p.fill('dialog input[name=mainLabel]', 'Silver');

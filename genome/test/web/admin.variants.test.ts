@@ -87,6 +87,9 @@ describe('the console\'s variants (NOCTURNE N1)', () => {
     // What is sent: trimmed, the colours in capitals, the SKU prefix too; the main model's dot only while it has none.
     expect(variantInput(fresh, values({ label: '  Night   blue ', skuPrefix: ' mnl-nb ' }))).toEqual({ label: 'Night blue', swatch: '#16224A', skuPrefix: 'MNL-NB', mainLabel: 'Steel', mainSwatch: '#9D9B96' });
     expect(variantInput(model({ variantLabel: 'Steel' }), values())).toEqual({ label: 'Blue', swatch: '#16224A', skuPrefix: 'MNL-BL' });
+    // Plan NEXT LOT §3.3 item 6: the size type given in the dialog when the main model has none; never for a typed main (it is copied).
+    expect(variantInput({ variantLabel: 'Steel', sizeType: null }, values({ sizeType: 'RING' }))).toEqual({ label: 'Blue', swatch: '#16224A', skuPrefix: 'MNL-BL', sizeType: 'RING' });
+    expect(variantInput({ variantLabel: 'Steel', sizeType: 'RING' }, values({ sizeType: 'BRACELET' }))).toEqual({ label: 'Blue', swatch: '#16224A', skuPrefix: 'MNL-BL' });
   });
 
   it('a label and its colour change together; a variant and a model with variants keep theirs; a model alone may drop its own', () => {

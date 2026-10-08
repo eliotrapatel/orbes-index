@@ -115,6 +115,7 @@ import type {
   LifecycleSnapshot,
   Model,
   ModelChange,
+  ModelSizeRemoved,
   ModelSizes,
   ModelSizesChange,
   SizeType,
@@ -555,9 +556,19 @@ export class AdminApi {
     return this.get(`/api/admin/models/${encodeURIComponent(id)}/sizes`);
   }
 
-  /** AC-01, OPERATOR: a model's size kind, or a size's fit (in whole millimetres). */
+  /** AC-01, OPERATOR: a model's size type or the sizes ticked (plan NEXT LOT §3.3), its size kind, or a size's fit (in whole millimetres). */
   setModelSizes(id: string, change: ModelSizesChange): Promise<ModelSizes> {
     return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/sizes`, { body: change });
+  }
+
+  /** Plan NEXT LOT §3.3, OPERATOR: one size taken off a model: removed when nothing uses it, otherwise set aside. */
+  removeModelSize(id: string, skuId: string): Promise<ModelSizeRemoved> {
+    return this.post(`/api/admin/models/${encodeURIComponent(id)}/sizes/${encodeURIComponent(skuId)}/remove`, {});
+  }
+
+  /** Plan NEXT LOT §3.3, OPERATOR: a set-aside size offered again. */
+  reinstateModelSize(id: string, skuId: string): Promise<ModelSizes> {
+    return this.post(`/api/admin/models/${encodeURIComponent(id)}/sizes/${encodeURIComponent(skuId)}/reinstate`, {});
   }
 
   /** BP-34, OPERATOR: the models a main model's sheet ends with (PAIRS WELL WITH), in their order: none, two or three. */

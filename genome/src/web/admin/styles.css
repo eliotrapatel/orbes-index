@@ -4301,6 +4301,25 @@ a.bar__label:hover {
   margin: 0;
 }
 
+/* A model's Sizes dialog (plan NEXT LOT §3.3): its type's sizes to tick, six to a row, four on a narrow console. */
+.size-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin-top: 12px;
+}
+
+.size-grid .ccheck {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 599px) {
+  .size-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
 .segment__group-tools {
   display: flex;
   flex-wrap: wrap;

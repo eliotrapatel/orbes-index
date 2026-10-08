@@ -56,7 +56,7 @@ import {
 import { can } from '../model/permissions.js';
 import { basePriceText, productExportSummary, SHOPIFY_CURRENCY_OPTIONS, shopifyLinkInput, shopifyLinkProblem, shopifyStatus, shopifyValues, variantField } from '../model/shopify.js';
 import { modelPhotoImpact } from '../model/photo.js';
-import { NEW_MODEL_SIZE_TYPE } from '../model/sizes.js';
+import { catalogueSizeLine, LISTED_SIZE_TYPES, NEW_MODEL_SIZE_TYPE } from '../model/sizes.js';
 import { variantLine } from '../model/variants.js';
 import { toneOf } from '../model/tone.js';
 import { href } from '../router.js';
@@ -67,6 +67,7 @@ import { saveDownload } from '../ui/download.js';
 import { photoDialog, photoThumb } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
+import { tickSizesOnOpen } from './lookbook.js';
 
 export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
   const [cats, cols, models] = await Promise.all([ctx.api.categories(), ctx.api.collections(), ctx.api.models()]);
@@ -141,7 +142,8 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       },
     }).then(done('Collection renamed.'));
 
-  const newModel = () =>
+  const newModel = () => {
+    let created: Model | null = null;
     void openDialog({
       title: 'New model',
       eyebrow: 'Catalogue',
@@ -159,7 +161,7 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
       validate: (v) => (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v.skuPrefix.trim()) ? 'SKU prefix: letters, digits, dot, underscore, hyphen.' : null),
       confirmLabel: 'Create model',
       submit: async (v) => {
-        await ctx.api.createModel({
+        created = await ctx.api.createModel({
           categoryCode: v.categoryCode,
           name: v.name.trim(),
           type: v.type.trim(),
@@ -170,7 +172,18 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
           ...(v.careInstructions?.trim() ? { careInstructions: v.careInstructions.trim() } : {}),
         });
       },
-    }).then(done('Model created.'));
+    }).then((r) => {
+      const m: Model | null = created;
+      // Plan NEXT LOT §3.3 item 6b: a ring's, a bracelet's or a necklace's sizes are ticked next, on its page, at once.
+      if (r && m && m.sizeType !== null && LISTED_SIZE_TYPES.includes(m.sizeType)) {
+        notify('Model created.');
+        tickSizesOnOpen(m.id);
+        location.hash = href('model', { modelId: m.id });
+        return;
+      }
+      done('Model created.')(r);
+    });
+  };
 
   // Only what differs is sent; the category and the SKU prefix are not fields at all.
   const editModel = (m: Model) => {
@@ -322,7 +335,8 @@ export async function catalogueView(ctx: ViewContext): Promise<HTMLElement> {
         return line ? h('span', null, humanize(m.name), h('span', { class: 'cell-sub', data: { testid: 'model-variant' } }, line)) : humanize(m.name);
       },
     },
-    { label: 'Type', cell: (m) => humanize(m.type) },
+    // Plan NEXT LOT §3.3 item 5: its size type and how many sizes it offers, or that it is to give.
+    { label: 'Type', cell: (m) => h('span', null, humanize(m.type), h('span', { class: 'cell-sub', data: { testid: 'model-size-type' } }, catalogueSizeLine(m))) },
     { label: 'Category', cell: (m) => `${humanize(m.category.name)} · ${m.category.code}`, kind: ['nowrap'] },
     { label: 'Collection', cell: (m) => humanize(m.collection?.name) },
     { label: 'SKU prefix', cell: (m) => mono(m.skuPrefix), kind: ['nowrap'] },
