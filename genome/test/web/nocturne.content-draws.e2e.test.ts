@@ -80,3 +80,54 @@ describe.skipIf(!HAS_CHROMIUM)('SHARE TO STORIES on a draw\'s page (BP-10, Chrom
     SHARD_TIMEOUT_MS,
   );
 });
+
+// Plan NEXT LOT §3.6.F: a draw in sizes, on its own stage. YOUR SIZE preselected from YOUR SIZES: ENTER THE DRAW enters
+// in it; a size tapped then changes the entry's at once; WITHDRAW keeps it, preselected for the entry again. Nothing
+// sideways at 320 px. The state writes, after its baseline's read.
+describe.skipIf(!HAS_CHROMIUM)('a draw in sizes: enter in a size, change it, withdraw (NEXT LOT §3.6.F, Chromium)', () => {
+  it(
+    'enters in the size preselected, changes it with a tap, keeps it once withdrawn',
+    async () => {
+      const found: string[] = [];
+      await eachState(
+        [stateById('draw-sizes')],
+        async (state, { stage, demo, browser }) => {
+          const opened = await openState(browser, stage, demo, state);
+          try {
+            const page = opened.page;
+            const label = () => page.locator('.n-release__status-label').innerText().then((t) => t.trim());
+            const pressed = () => page.locator('.release__sizes button[aria-pressed="true"]').innerText().then((t) => t.trim());
+            if ((await pressed()) !== '17') found.push(`preselected ${await pressed()}`);
+            await page.getByRole('button', { name: 'ENTER THE DRAW' }).click();
+            await page.locator('.n-release__status-label').waitFor({ state: 'visible' });
+            if ((await label()) !== 'ENTERED · SIZE 17') found.push(`entered: ${await label()}`);
+            const sentence = (await page.locator('.release__sentence').innerText()).trim();
+            if (sentence !== 'You are entered in the draw, in size 17. You may change your size until entries close, and withdraw until the draw.') found.push(`sentence: ${sentence}`);
+            // YOUR SIZES' lines go once the entry has its size; a tap changes it at once.
+            if ((await page.locator('.release__yours').count()) !== 0) found.push('YOUR SIZES lines still shown');
+            await page.locator('.release__sizes button', { hasText: '16' }).click();
+            await page.waitForFunction(() => document.querySelector('.n-release__status-label')?.textContent?.trim() === 'ENTERED · SIZE 16', null, { timeout: 15_000 });
+            if ((await pressed()) !== '16') found.push(`after the change ${await pressed()}`);
+            // 18 is full (reserved by PLATINE): still open to an entry, the waiting list said under the sizes.
+            await page.locator('.release__sizes button', { hasText: '18' }).click();
+            await page.waitForFunction(() => document.querySelector('.n-release__status-label')?.textContent?.trim() === 'ENTERED · SIZE 18', null, { timeout: 15_000 });
+            const note = (await page.locator('.release__size-note').innerText()).trim();
+            if (note !== 'Every piece in size 18 has been reserved. You may still enter: the draw ranks a waiting list in each size.') found.push(`note: ${note}`);
+            await page.getByRole('button', { name: 'WITHDRAW' }).click();
+            await page.waitForFunction(() => document.querySelector('.n-release__status-label')?.textContent?.trim() === 'WITHDRAWN · SIZE 18', null, { timeout: 15_000 });
+            if ((await pressed()) !== '18') found.push(`withdrawn, preselected ${await pressed()}`);
+            if (await page.getByRole('button', { name: 'ENTER THE DRAW' }).isDisabled()) found.push('ENTER THE DRAW disabled with a size picked');
+            await page.setViewportSize({ width: 320, height: 800 });
+            const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+            if (wide > 0) found.push(`sideways ${wide} px at 320`);
+          } finally {
+            await opened.close();
+          }
+        },
+        () => {},
+      );
+      expect(found).toEqual([]);
+    },
+    SHARD_TIMEOUT_MS,
+  );
+});
