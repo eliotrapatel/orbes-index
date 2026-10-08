@@ -674,8 +674,9 @@ export class SupplierOrderService {
 
   /**
    * SENT → EXPECTED (question 11, an optional step): the supplier confirmed the order and its delivery date, which may
-   * change here. 409 SUPPLIER_ORDER_NOT_SENT for a draft, SUPPLIER_ORDER_CLOSED once received or cancelled. Audited
-   * `supplier_order.confirm`.
+   * change here. 409 SUPPLIER_ORDER_NOT_SENT for a draft, SUPPLIER_ORDER_CLOSED once received or cancelled,
+   * SUPPLIER_ORDER_CONFIRMED once confirmed, SUPPLIER_ORDER_PARTLY_RECEIVED for an order whose pieces came in before any
+   * confirmation. Audited `supplier_order.confirm`.
    */
   async supplierConfirmed(supplierOrderId: string, input: { expectedOn?: string | null }, actor: Actor): Promise<SupplierOrderView> {
     assertStaff(actor);
@@ -686,7 +687,9 @@ export class SupplierOrderService {
       const o = await this.lockOrder(tx, id);
       if (o.status === 'DRAFT') throw notSent();
       if (o.status === 'RECEIVED' || o.status === 'CANCELLED') throw supplierOrderClosed();
-      if (o.status !== 'SENT') throw conflict('SUPPLIER_ORDER_CONFIRMED', 'The supplier has already confirmed this order.');
+      if (o.supplier_confirmed_at !== null) throw conflict('SUPPLIER_ORDER_CONFIRMED', 'The supplier has already confirmed this order.');
+      // SENT → PARTLY_RECEIVED without the supplier's confirmation: its pieces are already coming in.
+      if (o.status !== 'SENT') throw conflict('SUPPLIER_ORDER_PARTLY_RECEIVED', 'Pieces of this order have already come in.');
       const after = await tx
         .updateTable('supplier_orders')
         .set({ status: 'EXPECTED', supplier_confirmed_at: now, supplier_confirmed_by: actor.id!, updated_at: now, ...(expectedOn ? { expected_on: expectedOn } : {}) })

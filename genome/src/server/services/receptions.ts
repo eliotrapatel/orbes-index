@@ -31,8 +31,10 @@
  *                  every 250 ms while work remains and polls every 30 s (`start`, from src/server/index.ts beside the
  *                  housekeeping; `confirm` wakes it); tests call `issuePending` themselves (no timer without `start`).
  *   the cards      printed only once every identity is issued (409 RECEPTION_ISSUING), in runs fixed by serial: the
- *                  reception's cards ordered by serial, cut into blocks of 48 (A4 sheets) or 50 (one per page); a card
- *                  erased leaves a gap in its block and never shifts the next run. Each sealed code opened and drawn
+ *                  reception's cards ordered by serial (year, category, serial, then the piece: a total order, so two
+ *                  categories sharing a number never trade places between runs), cut into blocks of 48 (A4 sheets) or
+ *                  50 (one per page); a card erased leaves a gap in its block and never shifts the next run. A
+ *                  reception of rejected pieces only has no card to print. Each sealed code opened and drawn
  *                  through CertificateService.render (the 79t card, checked against the stored hash); a piece whose code
  *                  was replaced (a new claim code), which is registered, or whose sealed copy no longer opens is
  *                  skipped and its sealed copy erased (REPLACED, REGISTERED, UNREADABLE). Audited `card.print`.
@@ -866,7 +868,8 @@ export class ReceptionService {
     const kept = rows.filter((r) => inScope(scope, r.location_id) && (loc === null || r.location_id === loc));
     const views = await Promise.all(kept.map((r) => this.view(r.id, scope)));
     const toConfirm = views.filter((v) => v.status !== 'CONFIRMED');
-    const cardsToPrint = views.filter((v) => v.status === 'CONFIRMED');
+    // A reception of rejected pieces only has no card: it never waits in Cards to print nor in the agent's counter.
+    const cardsToPrint = views.filter((v) => v.status === 'CONFIRMED' && v.accepted > 0);
     const backToSupplier = await this.returns(this.db, scope, { status: 'TO_RETURN', locationId: loc });
     const out: ReceptionsBoard = {
       toConfirm,
@@ -965,7 +968,11 @@ export class ReceptionService {
     return out;
   }
 
-  /** A reception's cards in serial order (the runs are cut from it), with what each piece is now. */
+  /**
+   * A reception's cards in serial order (the runs are cut from it), with what each piece is now. A serial is unique per
+   * year and category only (a supplier's rings and bracelets share their numbers: O26-J-00216 and O26-B-00216), so the
+   * order is total: year, category, serial, then the piece's id. Never a tie, so a run never takes another's card.
+   */
   private async cardRows(db: Db, receptionId: string) {
     return db
       .selectFrom('card_prints as cp')
@@ -974,7 +981,9 @@ export class ReceptionService {
       .select(sql<boolean>`(p.ownership_state <> 'UNREGISTERED' OR EXISTS (SELECT 1 FROM ownership w WHERE w.product_id = p.id AND w.ended_at IS NULL))`.as('registered'))
       .where('cp.reception_id', '=', receptionId)
       .orderBy('p.year')
+      .orderBy('p.category_id')
       .orderBy('p.serial')
+      .orderBy('cp.product_id')
       .execute();
   }
 

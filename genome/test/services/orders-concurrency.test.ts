@@ -216,5 +216,52 @@ for (const backend of BACKENDS) {
       const served = await handle.db.selectFrom('order_events').select('order_id').where('action', '=', 'order.serve').where('order_id', 'in', waiting).execute();
       expect(served.map((e) => e.order_id).sort()).toEqual(waiting.slice(0, 3).sort());
     });
+
+    it('two receptions and a cancellation serving the same waiting orders: one piece each, the oldest first, never a double hold', { timeout: 60_000 }, async () => {
+      // Plan NEXT LOT §3.5.10: the RECEIVED movements of two receptions (issued by two workers at once) and a
+      // cancellation release, all on the same size at FRANCE WAREHOUSE.
+      const sku = await skuOf('74');
+      await handle.db.updateTable('models').set({ default_material: '925 STERLING SILVER' }).where('id', '=', f.modelId).execute();
+      const supplier = await ctx.services.suppliers.create({ name: `Maison ${randomBytes(3).toString('hex')}`, currency: 'EUR' }, f.admin);
+      await ctx.services.suppliers.setModelSupplier(f.modelId, { supplierId: supplier.id }, f.admin);
+      await receive(sku, france, 1);
+      const holder = await salonOrder();
+      await ctx.services.orders.setTerms(holder, { sizeLabel: '74' }, f.admin);
+      const waiting: string[] = [];
+      for (let i = 0; i < 4; i++) {
+        clock.advance(MINUTE);
+        const id = await salonOrder();
+        await ctx.services.orders.setTerms(id, { sizeLabel: '74' }, f.admin);
+        waiting.push(id);
+      }
+      expect(await holdings(waiting)).toEqual(Array(4).fill('AWAITING'));
+      // Two supplier orders of one piece each, counted and confirmed: nothing issued yet (no timer in tests).
+      const rs = ctx.services.receptions;
+      for (let i = 0; i < 2; i++) {
+        const draft = await ctx.services.supplierOrders.addToDraft({ skuId: sku, locationId: france, quantity: 1 }, f.admin);
+        await ctx.services.supplierOrders.updateDraft(draft.id, { lines: [{ skuId: sku, quantity: 1, unitPriceMinor: 12_000 }], expectedOn: '2027-01-04' }, f.admin);
+        await ctx.services.supplierOrders.send(draft.id, f.admin);
+        const r = await rs.record(draft.id, { lines: [{ skuId: sku, accepted: 1, rejected: 0 }] }, f.admin, null);
+        await rs.confirm(r.id, f.admin);
+      }
+      clock.advance(MINUTE);
+      expect(
+        await together([
+          () => rs.issuePending(),
+          () => rs.issuePending(),
+          () => ctx.services.orders.transition(holder, { to: 'CANCELLED', note: 'The client withdrew.' }, f.admin),
+        ]),
+      ).toEqual(['ok', 'ok', 'ok']);
+      // Three pieces on hand (the count, two received): the three oldest served once each, the youngest still waits.
+      const rows = await handle.db.selectFrom('orders').select(['id', 'reservation']).where('id', 'in', waiting).execute();
+      expect(waiting.map((id) => rows.find((r) => r.id === id)!.reservation)).toEqual(['STOCK', 'STOCK', 'STOCK', 'AWAITING']);
+      const level = await stockLevel(handle.db, sku, france);
+      expect(level).toEqual({ onHand: 3, reserved: 3, available: 0 });
+      expect(level.reserved).toBeLessThanOrEqual(level.onHand);
+      const received = await handle.db.selectFrom('stock_movements').select('delta').where('sku_id', '=', sku).where('reason', '=', 'RECEIVED').execute();
+      expect(received.map((m) => m.delta)).toEqual([1, 1]);
+      const served = await handle.db.selectFrom('order_events').select('order_id').where('action', '=', 'order.serve').where('order_id', 'in', waiting).execute();
+      expect(served.map((e) => e.order_id).sort()).toEqual(waiting.slice(0, 3).sort());
+    });
   });
 }

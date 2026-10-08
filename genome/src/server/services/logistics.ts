@@ -138,6 +138,36 @@ async function onHandEverywhere(db: Db, skuId: string): Promise<number> {
   return Number(r.rows[0]?.n ?? 0);
 }
 
+/**
+ * `unbacked` for many SKUs at once (the Stock read lists every offered size): the on-hand counts and the backing pieces
+ * in two grouped queries per 1,000 SKUs, never two per SKU, then subtracted here. The same predicate as `backingPieces`.
+ */
+async function unbackedBySku(db: Db, skuIds: readonly string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  // Bounded IN lists (a parameter each): a few queries for thousands of sizes, never one per size.
+  for (let i = 0; i < skuIds.length; i += 1000) for (const [id, n] of await unbackedOf(db, skuIds.slice(i, i + 1000))) out.set(id, n);
+  return out;
+}
+
+async function unbackedOf(db: Db, skuIds: readonly string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (skuIds.length === 0) return out;
+  const ids = sql.join(skuIds.map((id) => sql`${id}::uuid`));
+  const onHand = await sql<{ sku_id: string; n: number }>`
+    SELECT sku_id, coalesce(sum(delta), 0)::int AS n FROM stock_movements WHERE sku_id IN (${ids}) GROUP BY sku_id`.execute(db);
+  const backing = await sql<{ sku_id: string; n: number }>`
+    SELECT p.sku_id, count(*)::int AS n FROM products p
+     WHERE p.sku_id IN (${ids}) AND p.stock_entered_at IS NOT NULL AND p.ownership_state = 'UNREGISTERED'
+       AND p.status NOT IN (${sql.join(NOT_BACKING.map((s) => sql`${s}`))})
+       AND NOT EXISTS (SELECT 1 FROM ownership w WHERE w.product_id = p.id AND w.ended_at IS NULL)
+       AND NOT EXISTS (SELECT 1 FROM orders o WHERE o.product_id = p.id AND o.status IN ('SHIPPED', 'DELIVERED'))
+     GROUP BY p.sku_id`.execute(db);
+  const backed = new Map(backing.rows.map((r) => [r.sku_id, Number(r.n)]));
+  for (const id of skuIds) out.set(id, 0);
+  for (const r of onHand.rows) out.set(r.sku_id, Math.max(0, Number(r.n) - (backed.get(r.sku_id) ?? 0)));
+  return out;
+}
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export interface LogisticsServiceDeps {
@@ -218,11 +248,7 @@ export class LogisticsService {
     const staff = scope === null;
     const expected = staff ? await expectedBySku(this.db) : new Map<string, number>();
     const drafts = staff ? await this.inDrafts() : new Map<string, number>();
-    const unbacked = new Map<string, number>();
-    if (staff) {
-      const ids = [...new Set(kept.map((r) => r.sku_id))];
-      for (const id of ids) unbacked.set(id, Math.max(0, (await onHandEverywhere(this.db, id)) - (await backingPieces(this.db, id))));
-    }
+    const unbacked = staff ? await unbackedBySku(this.db, [...new Set(kept.map((r) => r.sku_id))]) : new Map<string, number>();
     out.rows = kept
       .map((r) => {
         const sku = skus.get(r.sku_id)!;
@@ -416,7 +442,8 @@ export class LogisticsService {
   /**
    * Named pieces of a SKU enter the stock with their identity (`stock_entered_at`): each ISSUED or RESOLD, unregistered,
    * in no open order, never counted in (409 PIECE_NOT_COUNTABLE, the first such piece named); of that size (409
-   * PIECE_NOT_COUNTABLE). No movement. Audited `stock.count_in` `{ skuId, productIds }`, never the note's words.
+   * PIECE_NOT_COUNTABLE). No movement. Audited `stock.count_in` `{ skuId, productIds }`, never the note's words. The note
+   * is checked but not stored: no column of the plan's data (§3.5.5) holds it, and the audit never does (hand-over).
    */
   async countIn(skuId: string, input: { productRefs: string[]; note: string }, actor: Actor): Promise<{ skuId: string; productIds: string[]; unbacked: number }> {
     assertStaff(actor);

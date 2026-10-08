@@ -160,6 +160,10 @@ describe('LogisticsService (plan NEXT LOT §3.5.6.6)', () => {
     expect(await refusal(lg().countIn(s52, { productRefs: [loose.productId], note: '' }, admin))).toMatchObject({ code: 'VALIDATION_FAILED' });
     const counted = await lg().countIn(s52, { productRefs: [loose.productId.toLowerCase()], note: 'On the shelf at LOGISTICS.' }, admin);
     expect(counted).toEqual({ skuId: s52, productIds: [loose.productId], unbacked: 1 });
+    // The Stock read's figure (grouped over every size listed) is each size's own.
+    const listed = (await lg().stock({ modelId: model })).rows;
+    expect(listed.map((r) => r.unbacked)).toContain(1);
+    for (const r of listed) expect(r.unbacked, `${r.sku.sizeLabel} at ${r.location.name}`).toBe(await lg().unbacked(r.sku.id));
     expect((await h.t.db.selectFrom('products').select('stock_entered_at').where('id', '=', loose.id).executeTakeFirstOrThrow()).stock_entered_at).toEqual(h.clock.now());
     expect((await auditsOf(s52, 'stock.count_in')).at(-1)!.details).toEqual({ skuId: s52, productIds: [loose.productId] });
     expect(JSON.stringify(await auditsOf(s52, 'stock.count_in'))).not.toContain('shelf');

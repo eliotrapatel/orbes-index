@@ -255,6 +255,13 @@ describe('ReceptionService (plan NEXT LOT §3.5.6.5)', () => {
     await rs.confirm(ro.id, admin);
     expect(await rs.issuePending()).toBe(0);
     expect((await rs.view(ro.id, null)).issuing).toEqual({ issued: 0, accepted: 0, done: true });
+    // It has no card: never in Cards to print, nor in the agent's counter; its rejected piece waits to go back.
+    for (const scope of [null, agentScope()]) {
+      const board = await rs.board(scope);
+      expect(board.cardsToPrint.map((v) => v.id)).not.toContain(ro.id);
+      expect(board.toConfirm.map((v) => v.id)).not.toContain(ro.id);
+      expect(board.backToSupplier.map((x) => x.supplierOrder.id)).toContain(rejectedOnly.id);
+    }
   });
 
   it('issues the identities: ISSUED in the stock with their reception line, signed, their claim codes sealed for the cards; one RECEIVED movement per chunk; nothing without the worker; no claim code in an audit or the journal', async () => {
@@ -415,6 +422,60 @@ describe('ReceptionService (plan NEXT LOT §3.5.6.5)', () => {
       ['card.attached', null, null],
     ]);
     expect(printAudits[3]!.details).toEqual({ receptionId: reception.id, cards: 56 });
+  });
+
+  it('cuts the runs in one order when two categories share their serial numbers: every card in exactly one run, before and after printing', { timeout: 120_000 }, async () => {
+    // A supplier's bracelets and necklaces in one delivery: serials are numbered per year and category, so the two models'
+    // numbers overlap (O26-B-00012 and O26-N-00012). The necklaces start one number later, so a run's boundary (48 or
+    // 50) falls between two pieces of the same number.
+    const nord = (await h.t.db.selectFrom('suppliers').select('id').where('name', '=', 'Maison Nord').executeTakeFirstOrThrow()).id;
+    const modelIn = async (code: string, name: string) => {
+      const category = (await h.ctx.categories.getByCode(code)) ?? (await h.ctx.categories.create({ code, name: `${name}s`, warrantyMonths: 24 }, admin));
+      return (
+        await h.ctx.db
+          .insertInto('models')
+          .values({ category_id: category.index, name, type: name, sku_prefix: `${code}-${randomBytes(3).toString('hex').toUpperCase()}`, default_material: '925 STERLING SILVER', supplier_id: nord })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+    };
+    const bracelet = await modelIn('B', 'BRACELET');
+    const necklace = await modelIn('N', 'NECKLACE');
+    await h.ctx.services.issuance.issueProduct({ categoryCode: 'N', modelId: necklace, material: '925 STERLING SILVER' }, admin);
+    const [kb, kn] = [await skuOf('18', bracelet), await skuOf('45', necklace)];
+    const { reception } = await received(logistics, [[kb, 31], [kn, 30]]);
+    const pieces = await productsOf(reception.id);
+    expect(pieces).toHaveLength(61);
+    const serials = (prefix: string) => pieces.filter((p) => p.product_id.slice(4, 5) === prefix).map((p) => p.serial).sort((a, b) => a - b);
+    expect([serials('B')[0], serials('B').at(-1), serials('N')[0], serials('N').at(-1)]).toEqual([1, 31, 2, 31]);
+    // The order: year, category, serial (the bracelets, then the necklaces).
+    const categoryOf = new Map((await h.t.db.selectFrom('products').select(['id', 'category_id']).where('id', 'in', pieces.map((p) => p.id)).execute()).map((p) => [p.id, p.category_id]));
+    const ordered = [...pieces].sort((x, y) => categoryOf.get(x.id)! - categoryOf.get(y.id)! || x.serial - y.serial).map((p) => p.product_id);
+    const scope = agentScope();
+    const before = await rs.view(reception.id, scope);
+    expect(before.cards.runs.sheet.map((r) => r.cards)).toEqual([48, 13]);
+    expect(before.cards.runs.card.map((r) => r.cards)).toEqual([50, 11]);
+    // Each layout's runs, printed one after the other (each print rewrites its rows), hold every card exactly once.
+    for (const [layout, size] of [['sheet', 48], ['card', 50]] as const) {
+      const printed: string[] = [];
+      for (let run = 1; run <= 2; run++) {
+        h.clock.advance(1000);
+        const p = await rs.printCards(reception.id, { layout, run }, agent, scope);
+        expect(p.skipped).toEqual([]);
+        expect(p.printed, `${layout} run ${run}`).toEqual(ordered.slice((run - 1) * size, run * size));
+        printed.push(...p.printed);
+      }
+      expect(printed).toHaveLength(61);
+      expect(new Set(printed).size).toBe(61);
+    }
+    const after = await rs.view(reception.id, scope);
+    const cut = (v: typeof before) => ({ sheet: v.cards.runs.sheet.map((r) => [r.run, r.cards, r.sealed]), card: v.cards.runs.card.map((r) => [r.run, r.cards, r.sealed]) });
+    expect(cut(after)).toEqual(cut(before));
+    expect(after.cards.runs.sheet.every((r) => r.printed === r.cards)).toBe(true);
+    expect(after.cards.runs.card.every((r) => r.printed === r.cards)).toBe(true);
+    expect(after.cards.printed).toBe(61);
+    const counts = await h.t.db.selectFrom('card_prints').select('printed_count').where('reception_id', '=', reception.id).execute();
+    expect(counts.every((c) => c.printed_count === 2)).toBe(true);
   });
 
   it('keeps the agent to its locations: another location\'s reception 404; the board narrowed to its own', async () => {

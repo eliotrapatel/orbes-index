@@ -210,6 +210,8 @@ describe('SupplierOrderService (plan NEXT LOT §3.5.6.3)', () => {
     await h.ctx.db.transaction().execute((tx) => refreshStatus(tx, o.id, h.clock.now()));
     let v = await so().get(o.id);
     expect(v).toMatchObject({ status: 'PARTLY_RECEIVED', pieces: { ordered: 15, received: 8, expected: 7 } });
+    // Confirmed by the supplier before its pieces came in: still named so.
+    expect(await refusal(so().supplierConfirmed(o.id, {}, admin))).toEqual({ code: 'SUPPLIER_ORDER_CONFIRMED', status: 409, message: 'The supplier has already confirmed this order.' });
     expect(v.lines.map((l) => [l.sku.sizeLabel, l.received, l.rejected, l.expected])).toEqual([
       ['52', 8, 2, 2],
       ['54', 0, 0, 5],
@@ -282,6 +284,23 @@ describe('SupplierOrderService (plan NEXT LOT §3.5.6.3)', () => {
     expect(v).toMatchObject({ status: 'SENT', pieces: { expected: 4 }, returns: [expect.objectContaining({ settlement: 'REPLACEMENT', creditMinor: null })] });
     const closed = await so().cancelRest(o.id, { note: 'Nothing will come.' }, admin);
     expect(closed).toMatchObject({ status: 'CANCELLED', receivedAt: null, pieces: { expected: 0 } });
+  });
+
+  it('never says the supplier confirmed an order it did not: pieces in before any confirmation (SENT → PARTLY_RECEIVED)', async () => {
+    const east = await h.ctx.services.suppliers.create({ name: 'East Foundry', currency: 'EUR' }, admin);
+    const model = (await h.ctx.db.insertInto('models').values({ category_id: (await h.ctx.categories.getByCode('J'))!.index, name: 'SOLSTICE', type: 'RING', sku_prefix: 'SOL-RG', default_material: 'SILVER', supplier_id: east.id }).returning('id').executeTakeFirstOrThrow()).id;
+    const k = await skuOf('52', model);
+    const o = await so().addToDraft({ skuId: k, locationId: france, quantity: 4 }, admin);
+    await so().updateDraft(o.id, { lines: [{ skuId: k, quantity: 4, unitPriceMinor: 5_000 }], expectedOn: '2026-12-01' }, admin);
+    await so().send(o.id, admin);
+    const reception = (await h.t.db.insertInto('receptions').values({ supplier_order_id: o.id, location_id: france, status: 'CONFIRMED', confirmed_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow()).id;
+    const line = await lineOf(o.id, k);
+    await h.t.db.insertInto('reception_lines').values({ reception_id: reception, sku_id: k, supplier_order_line_id: line.id, accepted: 1, rejected: 0 }).execute();
+    await h.t.db.updateTable('supplier_order_lines').set({ accepted_quantity: 1 }).where('id', '=', line.id).execute();
+    await h.ctx.db.transaction().execute((tx) => refreshStatus(tx, o.id, h.clock.now()));
+    expect(await so().get(o.id)).toMatchObject({ status: 'PARTLY_RECEIVED', supplierConfirmedAt: null });
+    expect(await refusal(so().supplierConfirmed(o.id, {}, admin))).toEqual({ code: 'SUPPLIER_ORDER_PARTLY_RECEIVED', status: 409, message: 'Pieces of this order have already come in.' });
+    expect((await auditsOf(o.id)).map((a) => a.action)).not.toContain('supplier_order.confirm');
   });
 
   it('prints from the house, to the supplier and to the location with its address, never an email or a phone; the shipping « — » when none', async () => {
