@@ -86,6 +86,7 @@ import { knownLocation, linkDropSizes, ONE_SIZE_LABEL } from './stock.js';
 import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
 import { feasibilityCheck, stockSupply, type Feasibility, type FeasibilityLine, type FeasibilitySize } from './release-stock.js';
 import { supplierOf } from './suppliers.js';
+import { expectedBySku } from './supplier-orders.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -1677,9 +1678,32 @@ export class LiveConsoleService {
         : []
       ).map((k) => [k.id, [k.name, k.variant_label, k.size_label ?? ONE_SIZE_LABEL].filter((x): x is string => x !== null && x !== '').join(' · ')]),
     );
+    // What is already ordered for each SKU to the location (§3.5.6.4): still expected on the supplier orders on their
+    // way, and held by a draft; Add to supplier order adds only the rest, so a shortfall is never ordered twice.
+    const expected = location && skus.length ? await expectedBySku(db, { locationId: location.id, skuIds: skus }) : new Map<string, number>();
+    const drafted = new Map(
+      (location && skus.length
+        ? await db
+            .selectFrom('supplier_order_lines as l')
+            .innerJoin('supplier_orders as o', 'o.id', 'l.supplier_order_id')
+            .select(['l.sku_id', (eb) => eb.fn.sum<number>('l.quantity').as('n')])
+            .where('o.status', '=', 'DRAFT')
+            .where('o.location_id', '=', location.id)
+            .where('l.sku_id', 'in', [...new Set(skus)])
+            .groupBy('l.sku_id')
+            .execute()
+        : []
+      ).map((r) => [r.sku_id, Number(r.n)]),
+    );
     const withSupplier = (l: FeasibilityLine): FeasibilityLine => {
       const skuId = skuOf.get(l.sizeId) ?? null;
-      return { ...l, skuId, skuWords: skuId ? (words.get(skuId) ?? null) : null, supplier: skuId ? (suppliers.get(skuId) ?? null) : null };
+      return {
+        ...l,
+        skuId,
+        skuWords: skuId ? (words.get(skuId) ?? null) : null,
+        supplier: skuId ? (suppliers.get(skuId) ?? null) : null,
+        ordered: skuId ? { expected: expected.get(skuId) ?? 0, inDraft: drafted.get(skuId) ?? 0 } : null,
+      };
     };
     return { ...f, sizes: f.sizes.map(withSupplier), afterRoom: f.afterRoom ? f.afterRoom.map(withSupplier) : null };
   }

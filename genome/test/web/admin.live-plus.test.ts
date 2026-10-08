@@ -29,6 +29,8 @@ import {
 import {
   feasibilityLine,
   addToOrderLine,
+  orderedLine,
+  toAddOf,
   LIVE_LIMITS,
   LIVE_QUESTION_DEFAULT,
   livePartChange,
@@ -44,6 +46,7 @@ import {
   sizeMixLine,
   sizeMixText,
 } from '../../src/web/admin/model/live.js';
+import { noSupplierWords } from '../../src/web/admin/model/supplier-orders.js';
 import type { BestTime, LiveQuestion, LiveRelease } from '../../src/web/admin/types.js';
 
 const ID = '0f8e7d6c-5b4a-4321-8fed-cba987654321';
@@ -181,6 +184,28 @@ describe('the release and the stock in the console', () => {
       'Add 13 pieces of MONOLITHE · BLUE · 52 to the draft of MAISON NORD, to deliver to LOGISTICS WAREHOUSE. You confirm the draft before it is sent.',
     );
     expect(feasibilityLine({ short: 5, location: null })).toBe('5 pieces on sale will wait for supplier stock once sold (no location).');
+  });
+
+  it('adds only what is not already ordered for a short size (plan NEXT LOT §3.5.4.3, §3.5.6.4), and says what is', () => {
+    const nord = { name: 'MAISON NORD' };
+    // Nothing ordered yet: the whole shortfall, nothing said.
+    expect(toAddOf({ short: 13, ordered: { expected: 0, inDraft: 0 } })).toBe(13);
+    expect(orderedLine({ short: 13, ordered: { expected: 0, inDraft: 0 } })).toBeNull();
+    expect(orderedLine({ short: 13, ordered: null })).toBeNull();
+    // Part of it in a draft and on supplier orders on their way: the rest only, never ordered twice.
+    const part = { short: 13, supplier: nord, ordered: { expected: 3, inDraft: 5 } };
+    expect(toAddOf(part)).toBe(5);
+    expect(orderedLine(part)).toBe('Already ordered: 5 in a draft and 3 expected on supplier orders.');
+    expect(addToOrderLine(part, 'MONOLITHE · BLUE · 52', 'LOGISTICS WAREHOUSE')).toBe(
+      'Add 5 pieces of MONOLITHE · BLUE · 52 to the draft of MAISON NORD, to deliver to LOGISTICS WAREHOUSE. You confirm the draft before it is sent.',
+    );
+    // Covered: nothing to add.
+    expect(toAddOf({ short: 1, ordered: { expected: 0, inDraft: 1 } })).toBe(0);
+    expect(orderedLine({ short: 1, ordered: { expected: 0, inDraft: 1 } })).toBe('Already ordered: 1 in a draft.');
+    expect(orderedLine({ short: 2, ordered: { expected: 4, inDraft: 0 } })).toBe('Already ordered: 4 expected on supplier orders.');
+    expect(toAddOf({ short: 2, ordered: { expected: 4, inDraft: 0 } })).toBe(0);
+    // A size without a supplier: where to set one, in the To order's words.
+    expect(noSupplierWords('MONOLITHE · BLUE · 52')).toBe('No supplier set for MONOLITHE · BLUE · 52: set it on the model’s page.');
   });
 });
 

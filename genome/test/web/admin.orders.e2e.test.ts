@@ -41,7 +41,7 @@ import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { codeSource, phonePhoto } from '../e2e/support.js';
-import { stockPieces, type StockedPiece } from '../support/fulfil.js';
+import { stockPiece as stockPieceFor, stockPieces, type StockedPiece } from '../support/fulfil.js';
 import { writePng } from '../support/image-io.js';
 import { jpegPhoto } from '../support/images.js';
 import { createAccount, holdPieces } from '../support/live.js';
@@ -755,5 +755,35 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await csp(p)).toEqual([]);
     await p.context().close();
     await ctx.db.deleteFrom('club_program_settings').execute();
+  }, STEP_TIMEOUT);
+
+  it('keeps the Shipment section of an order shipped before Logistics: its carrier, its tracking link and its declared value, never a parcel NOT READY (plan NEXT LOT §3.5.8)', async () => {
+    // Shipped from its order as before H2: no parcel's shipment, the carrier and tracking number on the order.
+    const legacy = (await salonOrder('60')).id;
+    await ctx.services.orders.setTerms(legacy, { priceMinor: 480_000, currency: 'EUR' }, admin);
+    await ctx.services.orders.transition(legacy, { to: 'PAID' }, admin);
+    await stockPieceFor(ctx, { orderId: legacy }, admin);
+    const colissimo = (await ctx.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
+    await ctx.services.orders.transition(legacy, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A98765432109', declaredValueMinor: 480_000 }, admin);
+    expect((await ctx.services.logistics.parcel(legacy, null)).shipment).toBeNull();
+
+    const p = await open(OPERATOR);
+    await go(p, `#/orders/${legacy}`, orderReference(legacy));
+    await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('SHIPPED');
+    const shipment = p.locator('#order-shipment');
+    expect(await shipment.locator('.panel__title').textContent()).toBe('Shipment');
+    expect(await shipment.textContent()).toContain('Colissimo');
+    expect(await shipment.locator('[data-testid=order-tracking]').textContent()).toBe('6A98765432109');
+    expect(await shipment.locator('[data-testid=order-tracking]').getAttribute('href')).toBe('https://www.laposte.fr/outils/suivre-vos-envois?code=6A98765432109');
+    expect(await shipment.textContent()).toMatch(/Declared value\s*€\s4\s800/u);
+    // No parcel's Shipping section with its NOT READY step; delivered from its step, as before.
+    expect(await p.locator('#order-shipping').count()).toBe(0);
+    expect(await p.locator('[data-testid=parcel-step]').count()).toBe(0);
+    expect(await p.locator('body').textContent()).not.toContain('NOT READY');
+    expect(await p.locator('[data-testid=order-deliver]').count()).toBe(1);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    expect(await csp(p)).toEqual([]);
+    await shot(p, 'order-shipped-before-logistics');
+    await p.context().close();
   }, STEP_TIMEOUT);
 });

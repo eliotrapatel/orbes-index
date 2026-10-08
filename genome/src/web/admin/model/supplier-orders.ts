@@ -31,7 +31,12 @@ export const LIST_TEXT = Object.freeze({
 
 /** A size the proposal cannot order: it has no supplier. */
 export function noSupplierLine(sku: Pick<LogisticsSku, 'model' | 'variant' | 'sizeLabel'>): string {
-  return `No supplier set for ${skuWords(sku)}: set it on the model’s page.`;
+  return noSupplierWords(skuWords(sku));
+}
+
+/** The same sentence from a SKU already in words (a release's short size, §3.5.4.3): `MONOLITHE · BLUE · 52`. */
+export function noSupplierWords(sku: string): string {
+  return `No supplier set for ${sku}: set it on the model’s page.`;
 }
 
 /** A supplier order's status as its mark and the filter read it. */

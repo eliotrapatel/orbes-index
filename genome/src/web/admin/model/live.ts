@@ -696,9 +696,28 @@ export function feasibilityLine(f: Pick<LiveFeasibility, 'short' | 'location'>):
   return f.short === 0 ? 'Every piece on sale is in stock.' : `${formatCount(f.short)} ${f.short === 1 ? 'piece' : 'pieces'} on sale will wait for supplier stock once sold (${where}).`;
 }
 
-/** Add to supplier order from a release (§3.5.4.3): the pieces, the size, the supplier's draft and where it delivers. */
-export function addToOrderLine(l: { short: number; supplier?: { name: string } | null }, sku: string, location: string): string {
-  return `Add ${formatCount(l.short)} ${l.short === 1 ? 'piece' : 'pieces'} of ${sku} to the draft of ${l.supplier?.name ?? 'its supplier'}, to deliver to ${location}. You confirm the draft before it is sent.`;
+type ShortSize = { short: number; ordered?: { expected: number; inDraft: number } | null };
+
+/**
+ * The pieces a release's Add to supplier order adds for a short size (§3.5.4.3, as the proposal §3.5.6.4): its shortfall
+ * less what is already ordered for its SKU to the location, expected on supplier orders or held by a draft (0: covered).
+ */
+export function toAddOf(l: ShortSize): number {
+  return Math.max(0, l.short - (l.ordered?.expected ?? 0) - (l.ordered?.inDraft ?? 0));
+}
+
+/** What is already ordered for a short size, said after its sentence: `Already ordered: 1 in a draft.` (null: nothing). */
+export function orderedLine(l: ShortSize): string | null {
+  const o = l.ordered;
+  if (!o || o.expected + o.inDraft === 0) return null;
+  const parts = [o.inDraft > 0 ? `${formatCount(o.inDraft)} in a draft` : null, o.expected > 0 ? `${formatCount(o.expected)} expected on supplier orders` : null].filter((x): x is string => x !== null);
+  return `Already ordered: ${parts.join(' and ')}.`;
+}
+
+/** Add to supplier order from a release (§3.5.4.3): the pieces still to order, the size, the supplier's draft and where it delivers. */
+export function addToOrderLine(l: ShortSize & { supplier?: { name: string } | null }, sku: string, location: string): string {
+  const n = toAddOf(l);
+  return `Add ${formatCount(n)} ${n === 1 ? 'piece' : 'pieces'} of ${sku} to the draft of ${l.supplier?.name ?? 'its supplier'}, to deliver to ${location}. You confirm the draft before it is sent.`;
 }
 
 /** The surprise as the release's page in the console says it: `In every box · A silk pouch`, or `None`. */

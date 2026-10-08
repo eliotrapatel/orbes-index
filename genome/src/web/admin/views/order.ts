@@ -434,8 +434,24 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
   // ── Shipping (plan NEXT LOT §3.5.4.4) ───────────────────────────────────
   // The agent's steps on the order's parcel, from here for ORBES; a declared value per order of the parcel, in its currency.
   const declared = await declaredOf(ctx, o, parcel);
-  const shippingSections =
-    parcel.shipment || parcel.step === 'READY_TO_PACK' || o.status === 'SHIPPED' || o.status === 'DELIVERED'
+  // An order shipped before Logistics (no parcel's shipment, §3.5.8) keeps its Shipment section as it was: its carrier,
+  // its tracking number with its link and its declared value.
+  const shippingSections = !parcel.shipment && o.shipment
+    ? [
+        section(
+          'Shipment',
+          defList([
+            { label: 'Carrier', value: o.shipment.carrier.name },
+            {
+              label: 'Tracking number',
+              value: h('a', { class: 'idlink', attrs: { href: o.shipment.trackingUrl, target: '_blank', rel: 'noopener noreferrer' }, data: { testid: 'order-tracking' } }, o.shipment.trackingNumber),
+            },
+            { label: 'Declared value', value: o.shipment.declaredValueMinor !== null && o.currency ? formatMoney(o.shipment.declaredValueMinor, o.currency) : 'None' },
+          ]),
+          { id: 'order-shipment' },
+        ),
+      ]
+    : parcel.shipment || parcel.step === 'READY_TO_PACK' || o.status === 'SHIPPED' || o.status === 'DELIVERED'
       ? parcelSections(ctx, parcel, {
           only: 'shipping',
           ...(can(ctx.session.admin.role, 'manageOrders') ? { declared } : {}),

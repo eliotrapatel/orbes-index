@@ -1606,6 +1606,8 @@ export interface LiveFeasibilityLine {
   /** Its SKU in words, the variant included: MONOLITHE · BLUE · 52. */
   skuWords?: string | null;
   supplier?: { id: string; name: string } | null;
+  /** Already ordered for its SKU to the location: still expected on supplier orders on their way, and held by a draft. */
+  ordered?: { expected: number; inDraft: number } | null;
 }
 
 /** The feasibility check before publishing (plan LIVE RELEASE+, choice 12): warnings, never a refusal. */

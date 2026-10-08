@@ -711,6 +711,10 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     await p.waitForSelector('.toast:has-text("Added to the draft.")');
     const drafts = await ctx.services.supplierOrders.list({ status: 'DRAFT' });
     expect(drafts.map((d) => [d.supplier.name, d.location.name, d.pieces.ordered])).toEqual([['MAISON NORD', 'FRANCE WAREHOUSE', 1]]);
+    // Read again: 52's shortfall is in the draft, said, and never ordered twice (§3.5.6.4); 56 still offers it.
+    await expect
+      .poll(() => p.locator('[data-testid=live-stock-warning]').allTextContents())
+      .toEqual(['52: 2 in stock, 1 will wait for supplier stock. Already ordered: 1 in a draft.', '56: 0 in stock, 1 will wait for supplier stock. Add to supplier order']);
     await shot(p, 'stock-block');
 
     // The question after: the default one, rewritten.
@@ -738,11 +742,25 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     // PUBLISH: the stock checked per size, a warning, published all the same.
     await p.click('[data-testid=live-publish]');
     await expect.poll(() => p.locator('dialog [data-testid=live-feasibility-line]').textContent(), { timeout: 15_000 }).toBe('2 pieces on sale will wait for supplier stock once sold (FRANCE WAREHOUSE).');
+    // Per size, the owner's sentence, what is already ordered, and Add to supplier order where some is still to order.
     expect(await p.locator('dialog [data-testid=live-feasibility-warning]').allTextContents()).toEqual([
-      '52: 2 in stock, 1 will wait for supplier stock.',
-      '56: 0 in stock, 1 will wait for supplier stock.',
+      '52: 2 in stock, 1 will wait for supplier stock. Already ordered: 1 in a draft.',
+      '56: 0 in stock, 1 will wait for supplier stock. Add to supplier order',
     ]);
     await shot(p, 'feasibility');
+    // Added from the PUBLISH dialog (§3.5.4.3): its own dialog over it, then the block read again in place.
+    await p.locator('dialog [data-testid=live-feasibility-warning]', { hasText: '56:' }).locator('[data-testid=live-add-to-order]').click();
+    const adding = p.locator('dialog.dialog').last();
+    await expect.poll(() => adding.locator('[data-testid=live-add-to-order-text]').textContent()).toBe(
+      'Add 1 piece of NOCTURNE · BLUE · 56 to the draft of MAISON NORD, to deliver to FRANCE WAREHOUSE. You confirm the draft before it is sent.',
+    );
+    await adding.locator('[data-testid=dialog-confirm]').click();
+    await p.waitForSelector('.toast:has-text("Added to the draft.")');
+    await expect.poll(() => p.locator('dialog.dialog').count()).toBe(1);
+    await expect
+      .poll(() => p.locator('dialog [data-testid=live-feasibility-warning]').allTextContents())
+      .toEqual(['52: 2 in stock, 1 will wait for supplier stock. Already ordered: 1 in a draft.', '56: 0 in stock, 1 will wait for supplier stock. Already ordered: 1 in a draft.']);
+    expect((await ctx.services.supplierOrders.list({ status: 'DRAFT' })).map((d) => d.pieces.ordered)).toEqual([2]);
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=live-state]').textContent()).toBe('ANNOUNCED');
     const published = await ctx.db.selectFrom('audit_logs').select('details').where('target_id', '=', id).where('action', '=', 'drop.live.publish').executeTakeFirstOrThrow();

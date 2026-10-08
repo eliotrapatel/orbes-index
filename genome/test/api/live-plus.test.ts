@@ -160,6 +160,16 @@ describe('the question after, the stock and the best time over HTTP', () => {
     res = await auditor.get(`/api/admin/live/${created.id}/feasibility`);
     expect(res.statusCode).toBe(200);
     expect(safeJson(res)).toMatchObject({ location: { name: 'FRANCE WAREHOUSE' }, sizes: [{ label: '52', onSale: 2, available: 0, fromStock: 0, short: 2 }], afterRoom: null, short: 2 });
+    // What is already ordered for the size to the location (plan NEXT LOT §3.5.4.3, §3.5.6.4): nothing, then one piece in
+    // its supplier's draft; the console adds only the rest.
+    const sizeLine = () => (safeJson(res) as { sizes: { skuId: string; supplier: { name: string } | null; ordered: { expected: number; inDraft: number } | null }[] }).sizes[0]!;
+    expect(sizeLine()).toMatchObject({ supplier: null, ordered: { expected: 0, inDraft: 0 } });
+    const nord = await h.ctx.services.suppliers.create({ name: 'MAISON NORD', currency: 'EUR' }, f.admin);
+    await h.ctx.services.suppliers.setModelSupplier(f.modelId, { supplierId: nord.id }, f.admin);
+    const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
+    await h.ctx.services.supplierOrders.addToDraft({ skuId: sizeLine().skuId, locationId: france, quantity: 1, from: 'RELEASE' }, f.admin);
+    res = await auditor.get(`/api/admin/live/${created.id}/feasibility`);
+    expect(sizeLine()).toMatchObject({ supplier: { name: 'MAISON NORD' }, ordered: { expected: 0, inDraft: 1 } });
 
     res = await auditor.get(`/api/admin/live/${created.id}/best-time?country=fr`);
     expect(res.statusCode).toBe(200);

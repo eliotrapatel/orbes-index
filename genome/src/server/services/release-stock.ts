@@ -77,6 +77,8 @@ export interface FeasibilityLine {
   /** The size's SKU as the console names it, its variant included: MONOLITHE · BLUE · 52. */
   skuWords?: string | null;
   supplier?: { id: string; name: string } | null;
+  /** What is already ordered for its SKU to the location: still expected on supplier orders on their way, held by a draft. */
+  ordered?: { expected: number; inDraft: number } | null;
 }
 
 export interface Feasibility {
