@@ -20,7 +20,8 @@
  * the Yearly care board, BP-19 T6, read by an AUDITOR, its steps taken by an OPERATOR; THE HOUSE'S GUARANTEE, IN-01,
  * granted, changed and revoked by an OPERATOR, its defaults read by an AUDITOR and set by an ADMIN; a model's Sizes, AC-01,
  * read by an AUDITOR and set by an OPERATOR, its sizes declared, removed and reinstated by an OPERATOR (NEXT LOT §3.3); GROWTH, BP-29, read by an AUDITOR;
- * the suppliers, read by an AUDITOR, added and changed by an OPERATOR, a model's supplier set by an OPERATOR, NEXT LOT §3.5.6.2);
+ * the suppliers, read by an AUDITOR, added and changed by an OPERATOR, a model's supplier set by an OPERATOR, NEXT LOT §3.5.6.2;
+ * the supplier orders, read by an AUDITOR with their PDF, proposed, drafted, sent and settled by an OPERATOR, NEXT LOT §3.5.6.3);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -245,6 +246,22 @@ const PROBES: Probe[] = [
   { group: 'suppliers', method: 'POST', url: '/api/admin/suppliers', body: INVALID, min: 'OPERATOR' },
   { group: 'suppliers', method: 'PATCH', url: `/api/admin/suppliers/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'suppliers', method: 'PUT', url: `/api/admin/models/${UUID}/supplier`, body: INVALID, min: 'OPERATOR' },
+  // NEXT LOT §3.5.6.3: the supplier orders read by an AUDITOR (their PDF too), proposed, drafted, sent and settled by an
+  // OPERATOR; never LOGISTICS (every answer carries prices).
+  { group: 'supplier-orders', method: 'GET', url: '/api/admin/supplier-orders', min: 'AUDITOR' },
+  { group: 'supplier-orders', method: 'GET', url: `/api/admin/supplier-orders?status=SENT&supplierId=${UUID}`, min: 'AUDITOR' },
+  { group: 'supplier-orders', method: 'GET', url: '/api/admin/supplier-orders/proposal', min: 'AUDITOR' },
+  { group: 'supplier-orders', method: 'POST', url: '/api/admin/supplier-orders/draft-lines', body: INVALID, min: 'OPERATOR' },
+  { group: 'supplier-orders', method: 'GET', url: `/api/admin/supplier-orders/${UUID}`, min: 'AUDITOR' },
+  { group: 'supplier-orders', method: 'PATCH', url: `/api/admin/supplier-orders/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'supplier-orders', method: 'DELETE', url: `/api/admin/supplier-orders/${UUID}`, min: 'OPERATOR' },
+  { group: 'supplier-orders', method: 'POST', url: `/api/admin/supplier-orders/${UUID}/send`, min: 'OPERATOR' },
+  { group: 'supplier-orders', method: 'POST', url: `/api/admin/supplier-orders/${UUID}/supplier-confirmed`, body: INVALID, min: 'OPERATOR' },
+  { group: 'supplier-orders', method: 'POST', url: `/api/admin/supplier-orders/${UUID}/cancel-rest`, body: INVALID, min: 'OPERATOR' },
+  { group: 'supplier-orders', method: 'GET', url: `/api/admin/supplier-orders/${UUID}/pdf`, min: 'AUDITOR' },
+  { group: 'supplier-orders', method: 'PUT', url: `/api/admin/supplier-orders/${UUID}/invoice`, body: INVALID, min: 'OPERATOR' },
+  { group: 'supplier-orders', method: 'POST', url: `/api/admin/supplier-orders/${UUID}/invoice/paid`, min: 'OPERATOR' },
+  { group: 'supplier-orders', method: 'POST', url: `/api/admin/supplier-returns/${UUID}/settle`, body: INVALID, min: 'OPERATOR' },
   { group: 'sizes', method: 'GET', url: `/api/admin/models/${UUID}/sizes`, min: 'AUDITOR' },
   { group: 'sizes', method: 'PUT', url: `/api/admin/models/${UUID}/sizes`, body: INVALID, min: 'OPERATOR' },
   // NEXT LOT §3.3: a size taken off a model (removed or set aside) and reinstated, by an OPERATOR.
@@ -418,6 +435,7 @@ describe('admin role enforcement', () => {
       'system',
       'test-entrants',
       'suppliers',
+      'supplier-orders',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
@@ -521,6 +539,9 @@ describe('admin role enforcement', () => {
       ['GET', '/api/admin/carriers'],
       ['GET', '/api/admin/orders/alerts'],
       ['GET', '/api/admin/atelier/stock'],
+      ['GET', '/api/admin/supplier-orders'],
+      ['GET', '/api/admin/supplier-orders/proposal'],
+      ['GET', '/api/admin/suppliers'],
       ['GET', '/api/admin/products'],
       ['GET', '/api/admin/dashboard'],
       ['POST', '/api/admin/products', { categoryCode: 'J', modelId: UUID, material: 'SILVER' }],

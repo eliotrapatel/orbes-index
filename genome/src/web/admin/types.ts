@@ -2609,13 +2609,15 @@ export interface OrderTermsChange {
   shippingMinor?: number | null;
 }
 
-// ── Locations and carriers (routes/admin/logistics.ts) ───────────────────
+// ── Locations and carriers (routes/admin/locations.ts) ───────────────────
 
 export interface StockLocation {
   id: string;
   name: string;
   isDefault: boolean;
   shopifyLocationId: string | null;
+  /** Its postal address (plan NEXT LOT §3.5): the supplier order's « Deliver to », a return's address; null while none. */
+  address: string | null;
 }
 
 export interface Carrier {

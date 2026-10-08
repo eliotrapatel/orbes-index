@@ -632,8 +632,15 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     const deps = Object.keys({ ...pkg.dependencies, ...pkg.devDependencies });
     expect(deps.filter((d) => /stripe|whop|paypal|adyen|braintree|mollie|checkout|payment|billing/i.test(d))).toEqual([]);
     expect(ROUTES.filter((r) => /pay(?:ment)?s?\b|checkout|billing|charge/i.test(r.path))).toEqual([]);
-    // The invoices of the orders paid (plan LIVE RELEASE+, M7) are documents read, never a payment taken.
-    expect(ROUTES.filter((r) => /invoice/i.test(r.path) && r.method !== 'get')).toEqual([]);
+    // The invoices of the orders paid (plan LIVE RELEASE+, M7) are documents read, never a payment taken. A supplier's
+    // invoice (plan NEXT LOT §3.5.6.3) is ORBES's own record of what it owes a supplier, paid outside the service: the
+    // only invoice routes that write are those two.
+    const supplierInvoice = (r: { path: string }) => r.path.startsWith('/api/admin/supplier-orders/:id/invoice');
+    expect(ROUTES.filter((r) => /invoice/i.test(r.path) && r.method !== 'get' && !supplierInvoice(r))).toEqual([]);
+    expect(ROUTES.filter(supplierInvoice)).toEqual([
+      { method: 'put', path: '/api/admin/supplier-orders/:id/invoice' },
+      { method: 'post', path: '/api/admin/supplier-orders/:id/invoice/paid' },
+    ]);
     // The confirmation is a status, and the only one PAY writes.
     expect(ROUTES).toContainEqual({ method: 'post', path: '/api/v1/live/:id/confirm' });
   },

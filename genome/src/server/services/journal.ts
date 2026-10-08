@@ -20,8 +20,8 @@ import type { Db } from '../db/connection.js';
 import { jsonText, type JsonObject, type ProductRow } from '../db/schema.js';
 import { validationError } from '../errors.js';
 
-/** The entities the journal names. */
-export const JOURNAL_ENTITY_TYPES = Object.freeze(['order', 'stock_movement', 'bench_item', 'product', 'invoice'] as const);
+/** The entities the journal names; since plan NEXT LOT §3.5 (step 5.6), a supplier order too (its lines and prices: internal). */
+export const JOURNAL_ENTITY_TYPES = Object.freeze(['order', 'stock_movement', 'bench_item', 'product', 'invoice', 'supplier_order'] as const);
 export type JournalEntityType = (typeof JOURNAL_ENTITY_TYPES)[number];
 
 /** A connection that reads the journal names itself so: lower case, 1 to 32 characters. */

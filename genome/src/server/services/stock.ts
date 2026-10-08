@@ -64,6 +64,8 @@ export const STOCK_MOVE_MAX = 10_000;
 export const STOCK_NOTE_MAX = 500;
 /** A location's name and a carrier's, at most (stock_locations.name, carriers.name). */
 export const LOCATION_NAME_MAX = 60;
+/** A location's postal address, at most (stock_locations.address, migration 0035). */
+export const LOCATION_ADDRESS_MAX = 500;
 export const CARRIER_NAME_MAX = 60;
 /** A carrier's tracking link, at most (carriers.tracking_url): https, `{tracking}` where the number goes. */
 export const TRACKING_URL_MAX = 500;
@@ -153,6 +155,11 @@ export interface StockLocationView {
   /** Where draws and the private salon's orders go when nothing else names a location. */
   isDefault: boolean;
   shopifyLocationId: string | null;
+  /**
+   * Its postal address (plan NEXT LOT §3.5, migration 0035): the « Deliver to » of a supplier order's PDF and a return's
+   * address; null while none is entered.
+   */
+  address: string | null;
 }
 
 /** A carrier as the console reads it. */
@@ -192,12 +199,29 @@ export function checkTrackingUrl(v: unknown): string {
   return s;
 }
 
-const locationView = (r: { id: string; name: string; is_default: boolean; shopify_location_id: string | null }): StockLocationView => ({
+const locationView = (r: { id: string; name: string; is_default: boolean; shopify_location_id: string | null; address: string | null }): StockLocationView => ({
   id: r.id,
   name: r.name,
   isDefault: r.is_default,
   shopifyLocationId: r.shopify_location_id,
+  address: r.address,
 });
+const LOCATION_COLUMNS = ['id', 'name', 'is_default', 'shopify_location_id', 'address'] as const;
+
+/** A location's postal address (plan NEXT LOT §3.5.6.9): 1 to LOCATION_ADDRESS_MAX characters, trimmed, line breaks kept; null (or blank) clears it. */
+export function cleanLocationAddress(v: unknown): string | null {
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) return null;
+  if (typeof v !== 'string') throw validationError('The address must be text.');
+  const s = v
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((l) => l.trim())
+    .join('\n')
+    .trim();
+  if (CONTROL_CHARS.test(s.replace(/\n/g, ''))) throw validationError('The address contains invalid characters.');
+  if (s.length > LOCATION_ADDRESS_MAX) throw validationError(`An address has at most ${LOCATION_ADDRESS_MAX} characters.`);
+  return s;
+}
 const carrierView = (r: { id: string; name: string; tracking_url: string; active: boolean }): CarrierView => ({ id: r.id, name: r.name, trackingUrl: r.tracking_url, active: r.active });
 
 // ── Setup ──────────────────────────────────────────────────────────────────
@@ -575,38 +599,49 @@ export class StockService {
 
   /** Every location, the default first, then by name. */
   async locations(): Promise<StockLocationView[]> {
-    const rows = await this.db.selectFrom('stock_locations').select(['id', 'name', 'is_default', 'shopify_location_id']).orderBy('is_default', 'desc').orderBy('name').execute();
+    const rows = await this.db.selectFrom('stock_locations').select([...LOCATION_COLUMNS]).orderBy('is_default', 'desc').orderBy('name').execute();
     return rows.map(locationView);
   }
 
-  /** A location added (its name unique whatever the case: 409 STOCK_LOCATION_NAME_TAKEN). Audited `stock.location.create`. */
-  async createLocation(input: { name: string }, actor: Actor): Promise<StockLocationView> {
+  /**
+   * A location added (its name unique whatever the case: 409 STOCK_LOCATION_NAME_TAKEN), with its postal address when
+   * given. Audited `stock.location.create` with its name, and `fields: ['address']` for an address, never its words.
+   */
+  async createLocation(input: { name: string; address?: string | null }, actor: Actor): Promise<StockLocationView> {
     const name = cleanName(input?.name, LOCATION_NAME_MAX, 'The name');
+    const address = cleanLocationAddress(input?.address);
     return this.named(locationTaken, () =>
       inTransaction(this.db, async (tx) => {
-        const row = await tx.insertInto('stock_locations').values({ name, created_at: this.clock() }).returning(['id', 'name', 'is_default', 'shopify_location_id']).executeTakeFirstOrThrow();
-        await this.audit.record({ actor, action: 'stock.location.create', targetType: 'stock_location', targetId: row.id, details: { name } }, tx);
+        const row = await tx.insertInto('stock_locations').values({ name, address, created_at: this.clock() }).returning([...LOCATION_COLUMNS]).executeTakeFirstOrThrow();
+        await this.audit.record({ actor, action: 'stock.location.create', targetType: 'stock_location', targetId: row.id, details: { name, ...(address ? { fields: ['address'] } : {}) } }, tx);
         return locationView(row);
       }),
     );
   }
 
   /**
-   * A location renamed, or made the default (`isDefault: true`: the previous default stops being one; there is always
-   * exactly one, so a location stops being the default only when another becomes it). Audited `stock.location.update`.
+   * A location renamed, made the default (`isDefault: true`: the previous default stops being one; there is always
+   * exactly one, so a location stops being the default only when another becomes it), or given its postal address
+   * (`address`, null clearing it; plan NEXT LOT §3.5.6.9). Audited `stock.location.update`: a name's change, the default,
+   * and `fields: ['address']` for the address, never its words.
    */
-  async updateLocation(locationId: string, input: { name?: string; isDefault?: true }, actor: Actor): Promise<StockLocationView> {
+  async updateLocation(locationId: string, input: { name?: string; isDefault?: true; address?: string | null }, actor: Actor): Promise<StockLocationView> {
     const id = await knownLocation(this.db, locationId);
     const name = input?.name === undefined ? undefined : cleanName(input.name, LOCATION_NAME_MAX, 'The name');
     if (input?.isDefault !== undefined && input.isDefault !== true) throw validationError('Make another location the default instead.');
-    if (name === undefined && input?.isDefault === undefined) throw validationError('Nothing to change.');
+    const address = input?.address === undefined ? undefined : cleanLocationAddress(input.address);
+    if (name === undefined && input?.isDefault === undefined && address === undefined) throw validationError('Nothing to change.');
     return this.named(locationTaken, () =>
       inTransaction(this.db, async (tx) => {
-        const before = await tx.selectFrom('stock_locations').select(['name', 'is_default']).where('id', '=', id).forUpdate().executeTakeFirstOrThrow();
+        const before = await tx.selectFrom('stock_locations').select(['name', 'is_default', 'address']).where('id', '=', id).forUpdate().executeTakeFirstOrThrow();
         const details: JsonObject = {};
         if (name !== undefined && name !== before.name) {
           await tx.updateTable('stock_locations').set({ name }).where('id', '=', id).execute();
           details.name = { from: before.name, to: name };
+        }
+        if (address !== undefined && address !== before.address) {
+          await tx.updateTable('stock_locations').set({ address }).where('id', '=', id).execute();
+          details.fields = ['address'];
         }
         if (input.isDefault && !before.is_default) {
           // The current default locked first: two locations made the default at once queue here, and the second one
@@ -618,7 +653,7 @@ export class StockService {
         }
         if (Object.keys(details).length === 0) throw validationError('Nothing to change.');
         await this.audit.record({ actor, action: 'stock.location.update', targetType: 'stock_location', targetId: id, details }, tx);
-        return locationView(await tx.selectFrom('stock_locations').select(['id', 'name', 'is_default', 'shopify_location_id']).where('id', '=', id).executeTakeFirstOrThrow());
+        return locationView(await tx.selectFrom('stock_locations').select([...LOCATION_COLUMNS]).where('id', '=', id).executeTakeFirstOrThrow());
       }),
     );
   }

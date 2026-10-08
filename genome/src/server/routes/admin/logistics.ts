@@ -1,16 +1,6 @@
 /**
- * Locations and carriers, the console's settings (plan LIVE RELEASE+ of 2026-10-04, choices 16 and 17; services/stock.ts):
- * FRANCE WAREHOUSE and LOGISTICS WAREHOUSE created at the first boot, more added, one the default; Colissimo, Chronopost,
- * DHL Express and UPS with their tracking links, editable, more added.
- *
- *   GET    /api/admin/locations         AUDITOR  every location, the default first
- *   POST   /api/admin/locations         ADMIN    a location added
- *   PATCH  /api/admin/locations/:id     ADMIN    renamed, or made the default
- *   GET    /api/admin/carriers          AUDITOR  every carrier, the active ones first
- *   POST   /api/admin/carriers          ADMIN    a carrier added with its tracking link
- *   PATCH  /api/admin/carriers/:id      ADMIN    its name, its tracking link, offered or set aside
- *
- * Audited by StockService (`stock.location.create`, `.update`, `carrier.create`, `carrier.update`).
+ * Logistics (plan NEXT LOT of 2026-10-07, §3.5.6.9): the stock, the receptions, the orders to ship and the order cases of
+ * the agent's locations (steps 5.7 to 5.10). Today's locations and carriers moved to routes/admin/locations.ts (step 5.6).
  *
  * The LOGISTICS role (plan NEXT LOT of 2026-10-07, §3.5.6.1): one login per person at the logistics agent, tied on Team
  * to the locations it works at (admin_user_locations). The Logistics routes name their roles: `LOGISTICS_ACT` (the agent
@@ -22,8 +12,7 @@
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../context.js';
 import type { AdminRole } from '../../db/schema.js';
-import { createCarrierBody, createLocationBody, logisticsParams, parse, updateCarrierBody, updateLocationBody } from '../../http/schemas.js';
-import { adminActor, requireAdmin } from '../../http/sessions.js';
+import { requireAdmin } from '../../http/sessions.js';
 import type { AdminRouteDeps } from './index.js';
 
 /** Who acts on the Logistics routes: the agent (its own locations), OPERATOR and ADMIN; never AUDITOR nor RETAIL. */
@@ -46,38 +35,6 @@ export function inLogisticsScope(scope: LogisticsScope, locationId: string): boo
   return scope === null || scope.has(locationId.toLowerCase());
 }
 
-const ADMIN = { guard: { minRole: 'ADMIN' as const } };
-
-export const adminLogisticsRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { stock } = ctx.services;
-
-  app.get('/api/admin/locations', async () => ({ items: await stock.locations() }));
-
-  app.post('/api/admin/locations', { config: ADMIN }, async (request, reply) => {
-    const b = parse(createLocationBody, request.body);
-    const created = await stock.createLocation(b, adminActor(request));
-    reply.code(201);
-    return created;
-  });
-
-  app.patch('/api/admin/locations/:id', { config: ADMIN }, async (request) => {
-    const { id } = parse(logisticsParams, request.params);
-    const b = parse(updateLocationBody, request.body);
-    return stock.updateLocation(id, { ...(b.name !== undefined ? { name: b.name } : {}), ...(b.isDefault ? { isDefault: true as const } : {}) }, adminActor(request));
-  });
-
-  app.get('/api/admin/carriers', async () => ({ items: await stock.carriers() }));
-
-  app.post('/api/admin/carriers', { config: ADMIN }, async (request, reply) => {
-    const b = parse(createCarrierBody, request.body);
-    const created = await stock.createCarrier(b, adminActor(request));
-    reply.code(201);
-    return created;
-  });
-
-  app.patch('/api/admin/carriers/:id', { config: ADMIN }, async (request) => {
-    const { id } = parse(logisticsParams, request.params);
-    const b = parse(updateCarrierBody, request.body);
-    return stock.updateCarrier(id, Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined)), adminActor(request));
-  });
+export const adminLogisticsRoutes: FastifyPluginAsync<AdminRouteDeps> = async () => {
+  // The Logistics routes come with steps 5.7 to 5.10.
 };

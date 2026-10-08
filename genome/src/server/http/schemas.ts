@@ -43,6 +43,8 @@ import {
   SIZE_KINDS,
   SIZE_TYPES,
   STAFF_ROLES,
+  SUPPLIER_ORDER_STATUSES,
+  SUPPLIER_RETURN_SETTLEMENTS,
   VERIFICATION_STATES,
 } from '../db/schema.js';
 import { ATELIER_MAKE_MAX, BENCH_VIEWS, ISSUE_TEXT_LIMITS, THRESHOLD_MAX, WORK_SHEETS_MAX } from '../services/atelier.js';
@@ -90,8 +92,9 @@ import { CERTIFICATE_MAX_DAYS, CERTIFICATE_MIN_DAYS } from '../services/ownershi
 import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
 import { BOARD_SEARCH_MAX, ORDER_ALERT_LIMITS } from '../services/fulfilment.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, ORDER_TEXT_LIMITS } from '../services/orders.js';
-import { CARRIER_NAME_MAX, LOCATION_NAME_MAX, STOCK_MOVE_MAX, STOCK_NOTE_MAX, TRACKING_URL_MAX } from '../services/stock.js';
+import { CARRIER_NAME_MAX, LOCATION_ADDRESS_MAX, LOCATION_NAME_MAX, STOCK_MOVE_MAX, STOCK_NOTE_MAX, TRACKING_URL_MAX } from '../services/stock.js';
 import { SUPPLIER_LIMITS } from '../services/suppliers.js';
+import { SUPPLIER_ORDER_LIMITS } from '../services/supplier-orders.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -1591,10 +1594,26 @@ export const orderAlertsBody = body({
 
 export const logisticsParams = z.object({ id: uuid });
 
-export const createLocationBody = body({ name: text(LOCATION_NAME_MAX) });
+/**
+ * A location's postal address (plan NEXT LOT §3.5.6.9): 1 to 500 characters, line breaks kept; null or '' clears it
+ * (StockService checks it again, line by line).
+ */
+const locationAddress = z.preprocess(
+  emptyToNull,
+  z
+    .string()
+    .trim()
+    .max(LOCATION_ADDRESS_MAX, `At most ${LOCATION_ADDRESS_MAX} characters`)
+    .refine((s) => !CONTROL_CHARS.test(s), 'Contains invalid characters')
+    .nullable()
+    .optional(),
+);
 
-/** PATCH /api/admin/locations/:id: its name, or made the default (`isDefault: true`). At least one. */
-export const updateLocationBody = body({ name: text(LOCATION_NAME_MAX).optional(), isDefault: z.literal(true).optional() }).refine(
+/** POST /api/admin/locations: its name, and its postal address when given. */
+export const createLocationBody = body({ name: text(LOCATION_NAME_MAX), address: locationAddress });
+
+/** PATCH /api/admin/locations/:id: its name, made the default (`isDefault: true`), its address (null clears it). At least one. */
+export const updateLocationBody = body({ name: text(LOCATION_NAME_MAX).optional(), isDefault: z.literal(true).optional(), address: locationAddress }).refine(
   (b) => Object.values(b).some((v) => v !== undefined),
   'Send at least one field of the location to change',
 );
@@ -1644,6 +1663,56 @@ export const modelSupplierBody = body({
     .refine((r) => Object.keys(r).length <= 200, 'At most 200 sizes')
     .optional(),
 }).refine((b) => b.supplierId !== undefined || b.sizes !== undefined, 'Send the supplier or the sizes\' suppliers');
+
+// ── Admin: the supplier orders (routes/admin/supplier-orders.ts, plan NEXT LOT §3.5.6.3) ─
+
+export const supplierOrderParams = z.object({ id: uuid });
+
+/** GET /api/admin/supplier-orders: one status, one supplier. */
+export const supplierOrdersQuery = z.object({ status: queryOptional(z.enum(SUPPLIER_ORDER_STATUSES)), supplierId: queryOptional(uuid) });
+
+/** GET /api/admin/supplier-orders/proposal: one location, one supplier. */
+export const supplierProposalQuery = z.object({ locationId: queryOptional(uuid), supplierId: queryOptional(uuid) });
+
+const supplierAmount = (max: number) => z.number().int('Must be a whole number of hundredths').min(0, 'At least 0').max(max, `At most ${max} hundredths`);
+
+/** POST /api/admin/supplier-orders/draft-lines: pieces of a size added to its supplier's draft to a location. */
+export const supplierDraftLineBody = body({
+  skuId: uuid,
+  locationId: uuid,
+  quantity: whole(1, SUPPLIER_ORDER_LIMITS.quantity, 'pieces'),
+  from: z.enum(['PROPOSAL', 'RELEASE']).optional(),
+});
+
+/** PATCH /api/admin/supplier-orders/:id: a draft's lines (the list becomes its lines), currency, shipping, expected date, note. At least one. */
+export const updateSupplierOrderBody = body({
+  lines: z
+    .array(z.strictObject({ skuId: uuid, quantity: whole(1, SUPPLIER_ORDER_LIMITS.quantity, 'pieces'), unitPriceMinor: supplierAmount(SUPPLIER_ORDER_LIMITS.amountMinor).nullable().optional() }))
+    .max(SUPPLIER_ORDER_LIMITS.lines, `At most ${SUPPLIER_ORDER_LIMITS.lines} lines`)
+    .optional(),
+  currency: z.preprocess(emptyToNull, z.string().trim().max(3, 'A three-letter code').nullable().optional()),
+  shippingMinor: supplierAmount(SUPPLIER_ORDER_LIMITS.amountMinor).nullable().optional(),
+  expectedOn: z.preprocess(emptyToNull, isoDate.nullable().optional()),
+  note: z.preprocess(emptyToNull, text(SUPPLIER_ORDER_LIMITS.note).nullable().optional()),
+}).refine((b) => Object.values(b).some((v) => v !== undefined), 'Send at least one field of the order to change');
+
+/** POST /api/admin/supplier-orders/:id/supplier-confirmed: the date the supplier confirmed, when it changes. */
+export const supplierConfirmedBody = optionalBody({ expectedOn: z.preprocess(emptyToNull, isoDate.nullable().optional()) });
+
+/** POST /api/admin/supplier-orders/:id/cancel-rest: why the rest stops being expected. */
+export const supplierCancelRestBody = body({ note: text(SUPPLIER_ORDER_LIMITS.note) });
+
+/** PUT /api/admin/supplier-orders/:id/invoice: the supplier's invoice. */
+export const supplierInvoiceBody = body({ number: text(SUPPLIER_ORDER_LIMITS.invoiceNumber), amountMinor: supplierAmount(SUPPLIER_ORDER_LIMITS.invoiceMinor), date: isoDate });
+
+export const supplierReturnParams = z.object({ id: uuid });
+
+/** POST /api/admin/supplier-returns/:id/settle: the supplier's answer to rejected pieces. */
+export const settleSupplierReturnBody = body({
+  settlement: z.enum(SUPPLIER_RETURN_SETTLEMENTS),
+  creditMinor: supplierAmount(SUPPLIER_ORDER_LIMITS.amountMinor).nullable().optional(),
+  note: z.preprocess(emptyToNull, text(SUPPLIER_ORDER_LIMITS.returnNote).nullable().optional()),
+}).refine((b) => (b.settlement === 'CREDIT') === (b.creditMinor !== undefined && b.creditMinor !== null), 'A credit carries its amount; a replacement none');
 
 // ── Admin: the atelier (routes/admin/atelier.ts) ──────────────────────────
 
