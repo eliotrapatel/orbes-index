@@ -118,7 +118,7 @@ Le propriétaire a validé la carte 79t le 2026-10-07 : `CERTIFICATE_LAYOUT_STAT
 | The card goes inside the packaging, with the piece: whoever holds it can register the piece at verify.theorbes.com. The console shows the code once and keeps only its hash. | La carte va dans l'emballage, avec la pièce : qui la détient peut enregistrer la pièce sur verify.theorbes.com. La console montre le code une fois et n'en garde que l'empreinte. |
 | It registers the piece once, at its first registration. Afterwards the piece changes hands with a transfer code (valid 7 days), never with the card; the console refuses to draw a card for a registered piece. | Il enregistre la pièce une seule fois, à sa première inscription. Ensuite la pièce change de mains par un code de transfert (valable 7 jours), jamais par la carte ; la console refuse de dessiner la carte d'une pièce enregistrée. |
 | After 5 wrong attempts within an hour, registration of that piece is paused for up to an hour. | Après 5 essais manqués en une heure, l'enregistrement de cette pièce est suspendu pendant une heure au plus. |
-| A card lost before registration: the customer writes to ORBES Client Services. | Carte perdue avant l'enregistrement : le client écrit à ORBES Client Services. |
+| A card lost before registration: the customer writes to ORBES Client Services, and ORBES Client Services makes a new claim code (NEW CLAIM CODE). | Carte perdue avant l'enregistrement : le client écrit à ORBES Client Services, et ORBES Client Services fait un nouveau claim code (NEW CLAIM CODE). |
 
 ### Verso · Verso
 

@@ -353,6 +353,20 @@ Une pièce perdue en stock ou pendant un transport se déclare de la même faço
 
 Le résultat dit UNUSUAL ACTIVITY DETECTED. Ne dites jamais que la pièce a été déclarée perdue ou que son vol a été déclaré : la phrase est celle du §3. Notez la REF et le lieu d'achat, et prévenez un OPERATOR.
 
+### La carte perdue avant l'enregistrement
+
+Le claim code n'est gardé que sous forme d'empreinte : personne ne peut le relire, ni le client, ni ORBES. Quand une carte certificat est perdue ou abîmée avant que la pièce soit enregistrée (chez le client ou en stock), un OPERATOR fait un nouveau claim code. L'ancien cesse aussitôt d'enregistrer la pièce.
+
+1. `Products` → la pièce : vérifiez qu'elle n'est enregistrée par personne. Une pièce enregistrée ne reçoit pas de nouveau claim code : c'est une question de propriété, traitée avec les outils de §4 et §6.
+2. Section `Actions`, groupe `Claim code` → `New claim code`, avec une raison (`Reason`) : qui l'a demandé, quand, ce qui est arrivé à la carte. La section `New claim codes` en garde l'historique, jamais les codes.
+3. **Une pièce vendue** (sa commande est ouverte) : `Make it for the buyer`. Le code ne s'affiche jamais dans la console : il attend l'acheteur sur sa commande, dans MY PIECES → ORDERS, et ne s'y affiche qu'une fois. Une fois la commande expédiée, le client peut y enregistrer la pièce directement, sans scan. Répondez-lui dans `Messages` :
+
+> Votre nouveau claim code vous attend sur votre commande ORDER OR-…, dans MY PIECES → ORDERS. Il ne s'affiche qu'une fois : enregistrez au même moment votre nouvelle carte (SAVE YOUR NEW CARD).
+
+4. **Une pièce en stock** (sans acheteur) : `Make a new claim code`. Le code s'affiche une seule fois, à vous : `Download certificate card`, imprimez la carte et remplacez celle de la boîte de la pièce.
+
+Une pièce vendue en boutique, sans commande, ne reçoit pas de nouveau claim code : la console le refuse, car son acheteur n'a pas de commande où le recevoir et le personnel ne voit jamais un code dû à un acheteur. Prévenez un ADMIN. Une pièce dont l'ORBES CODE a été révoqué reçoit d'abord un nouvel ORBES CODE (`Re-issue code`), puis son nouveau claim code.
+
 ---
 
 ## 6. Mot de passe oublié
