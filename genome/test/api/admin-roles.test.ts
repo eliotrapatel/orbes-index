@@ -44,7 +44,7 @@ type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; url: string;
 const SELLERS: readonly AdminRole[] = ['RETAIL', 'OPERATOR', 'ADMIN'];
 const allows = (p: Probe, role: AdminRole) => (p.roles ? p.roles.includes(role) : RANK[role] >= RANK[p.min]);
 
-const RANK: Record<AdminRole, number> = { RETAIL: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 };
+const RANK: Record<AdminRole, number> = { RETAIL: 1, LOGISTICS: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 };
 const PID = 'O26-J-00001';
 const UUID = randomUUID();
 const INVALID = { definitelyNotAField: true };

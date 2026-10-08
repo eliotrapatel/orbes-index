@@ -679,6 +679,30 @@ describe('schema', () => {
     await expect(insert({ ...staff, product_id: '00000000-0000-4000-8000-000000000000' })).rejects.toSatisfy((e) => isForeignKeyViolation(e));
   });
 
+  it('LOGISTICS (0035): a login\'s locations once each; a location\'s address; a supplier named once, never deleted, its identity guarded; the supplier of a model and of a size', async () => {
+    const { model } = await seedProduct(t.db);
+    const admin = await t.db.insertInto('admin_users').values({ email: 'team-0035@orbes.test', email_normalized: 'team-0035@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const agent = await t.db.insertInto('admin_users').values({ email: 'agent-0035@orbes.test', email_normalized: 'agent-0035@orbes.test', password_hash: 'scrypt$x', role: 'LOGISTICS' }).returning(['id', 'role']).executeTakeFirstOrThrow();
+    expect(agent.role).toBe('LOGISTICS');
+    const location = await t.db.insertInto('stock_locations').values({ name: 'AGENT 0035', address: '1 quai de Test\n93200 Saint-Denis' }).returning(['id', 'address']).executeTakeFirstOrThrow();
+    expect(location.address).toBe('1 quai de Test\n93200 Saint-Denis');
+    const tie = await t.db.insertInto('admin_user_locations').values({ admin_user_id: agent.id, stock_location_id: location.id, created_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(tie).toEqual({ admin_user_id: agent.id, stock_location_id: location.id, created_by: admin.id, created_at: expect.any(Date) });
+    await expect(t.db.insertInto('admin_user_locations').values({ admin_user_id: agent.id, stock_location_id: location.id }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'admin_user_locations_pkey'));
+    const supplier = await t.db.insertInto('suppliers').values({ name: 'NORD SUPPLY 0035', currency: 'GBP', created_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(supplier).toMatchObject({ name: 'NORD SUPPLY 0035', contact_name: null, email: null, phone: null, address: null, currency: 'GBP', note: null, active: true, created_by: admin.id });
+    await expect(t.db.insertInto('suppliers').values({ name: 'nord supply 0035' }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'suppliers_name_key'));
+    await expect(t.db.insertInto('suppliers').values({ name: 'X', currency: 'gbp' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'suppliers_currency_check'));
+    await t.db.updateTable('suppliers').set({ active: false, note: 'Paused.' }).where('id', '=', supplier.id).execute();
+    await expect(t.db.updateTable('suppliers').set({ created_at: new Date('2026-01-01T00:00:00Z') }).where('id', '=', supplier.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await expect(t.db.deleteFrom('suppliers').where('id', '=', supplier.id).execute()).rejects.toSatisfy(isGuardViolation);
+    await t.db.updateTable('models').set({ supplier_id: supplier.id }).where('id', '=', model.id).execute();
+    const sku = await t.db.insertInto('skus').values({ model_id: model.id, size_label: '54', code: `${model.sku_prefix}-54`, supplier_id: supplier.id }).returning(['supplier_id']).executeTakeFirstOrThrow();
+    expect(sku.supplier_id).toBe(supplier.id);
+    await expect(t.db.deleteFrom('stock_locations').where('id', '=', location.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+    await expect(t.db.deleteFrom('admin_users').where('id', '=', agent.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+  });
+
   it('audit_logs is append-only at the database level', async () => {
     const h = (b: number) => new Uint8Array(32).fill(b);
     await t.db

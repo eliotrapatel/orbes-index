@@ -19,7 +19,7 @@
 import type { AdminRole } from '../types.js';
 
 /** As http/sessions.ts: a role unknown to this table ranks 0 and is refused everywhere. */
-export const ROLE_RANK: Readonly<Record<AdminRole, number>> = Object.freeze({ RETAIL: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 });
+export const ROLE_RANK: Readonly<Record<AdminRole, number>> = Object.freeze({ RETAIL: 1, LOGISTICS: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 });
 
 export const CAPABILITY_MIN_ROLE = Object.freeze({
   /** The sale mode (#/sale): scan the piece, choose the point of sale, start the warranty. Exactly CAPABILITY_ROLES.sell. */

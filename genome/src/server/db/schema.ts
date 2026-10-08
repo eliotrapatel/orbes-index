@@ -47,8 +47,12 @@ export type CodeStatus = (typeof CODE_STATUSES)[number];
 export const ACCOUNT_STATUSES = ['ACTIVE', 'LOCKED', 'DELETED'] as const;
 export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
 
-/** RETAIL (migration 0008): a seller's account, ranked under AUDITOR, limited to the sale mode (A-08). */
-export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR', 'RETAIL'] as const;
+/**
+ * RETAIL (migration 0008): a seller's account, ranked under AUDITOR, limited to the sale mode (A-08). LOGISTICS
+ * (migration 0035, plan NEXT LOT §3.5): a person at the logistics agent, ranked with RETAIL, limited to the Logistics
+ * routes of its own locations (admin_user_locations).
+ */
+export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR', 'RETAIL', 'LOGISTICS'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 /**
  * The roles an ADMIN may give from the console (create a staff account, change a role). ADMIN
@@ -458,6 +462,11 @@ export interface ModelsTable {
    * Once given, `size_kind` is derived from it (`models_size_type_kind`: WATCH the wrist, ONE_SIZE none).
    */
   size_type: ColumnType<SizeType | null, SizeType | null | undefined, SizeType | null>;
+  /**
+   * Migration 0035 (plan NEXT LOT §3.5): the supplier that makes its pieces (suppliers.id); NULL: none, or on a variant
+   * its main model's. A size may name its own (skus.supplier_id).
+   */
+  supplier_id: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: TimestampDefault;
 }
 
@@ -1160,6 +1169,43 @@ export interface StockLocationsTable {
   /** The Shopify location it will be (decimal), unique. */
   shopify_location_id: ColumnType<string | null, string | null | undefined, string | null>;
   created_at: TimestampDefault;
+  /**
+   * Migration 0035 (plan NEXT LOT §3.5): its postal address, 1..500 characters, trimmed, line breaks kept (a supplier
+   * order's « Deliver to », a return address); NULL: none yet.
+   */
+  address: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+/**
+ * The locations a LOGISTICS login works at (migration 0035, plan NEXT LOT §3.5.6.1): one row per login and location,
+ * only for LOGISTICS logins (services/auth.ts keeps the rule: at least one, deleted when the role changes away).
+ */
+export interface AdminUserLocationsTable {
+  admin_user_id: string;
+  stock_location_id: string;
+  created_at: TimestampDefault;
+  /** admin_users.id of the ADMIN who tied it; NULL for the shell. */
+  created_by: string | null;
+}
+
+/**
+ * A supplier ORBES orders its pieces from (migration 0035, plan NEXT LOT §3.5): its name (1..120, unique whatever the
+ * case), its contact, the currency it bills in, a note, `active` (an inactive supplier stays on its orders and is
+ * offered for no new draft). Never deleted. id, created_at and created_by never change.
+ */
+export interface SuppliersTable {
+  id: Generated<string>;
+  name: string;
+  contact_name: ColumnType<string | null, string | null | undefined, string | null>;   // ≤ 120
+  email: ColumnType<string | null, string | null | undefined, string | null>;          // ≤ 254
+  phone: ColumnType<string | null, string | null | undefined, string | null>;          // ≤ 40
+  address: ColumnType<string | null, string | null | undefined, string | null>;        // ≤ 500, line breaks kept
+  /** An ISO 4217 code (^[A-Z]{3}$); the service accepts only those with two decimals. */
+  currency: ColumnType<string | null, string | null | undefined, string | null>;
+  note: ColumnType<string | null, string | null | undefined, string | null>;           // ≤ 1 000
+  active: WithDefault<boolean>;
+  created_at: TimestampDefault;
+  created_by: ColumnType<string | null, string | null | undefined, never>;
 }
 
 /**
@@ -1183,6 +1229,8 @@ export interface SkusTable {
   set_aside_at: TimestampNullable;
   /** Migration 0033: admin_users.id of who set it aside; NULL for a script, never without set_aside_at (`skus_set_aside`). */
   set_aside_by: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0035 (plan NEXT LOT §3.5): the size's own supplier (suppliers.id), over its model's; NULL: its model's. */
+  supplier_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /**
@@ -1813,6 +1861,8 @@ export interface Database {
   live_messages: LiveMessagesTable;
   live_tier_windows: LiveTierWindowsTable;
   stock_locations: StockLocationsTable;
+  admin_user_locations: AdminUserLocationsTable;
+  suppliers: SuppliersTable;
   skus: SkusTable;
   stock_movements: StockMovementsTable;
   sku_thresholds: SkuThresholdsTable;
@@ -1952,6 +2002,7 @@ export type GuaranteeSettingsRow = Selectable<GuaranteeSettingsTable>;
 export type TestEntrantRow = Selectable<TestEntrantsTable>;
 export type TestRunRow = Selectable<TestRunsTable>;
 export type TestRunEntrantRow = Selectable<TestRunEntrantsTable>;
+export type SupplierRow = Selectable<SuppliersTable>;
 export type ClaimCodeRenewalRow = Selectable<ClaimCodeRenewalsTable>;
 export type NewClaimCodeRenewal = Insertable<ClaimCodeRenewalsTable>;
 export type RevocationRow = Selectable<RevocationsTable>;

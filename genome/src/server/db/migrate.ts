@@ -46,6 +46,7 @@ import * as m0031 from './migrations/0031_model_pairs.js';
 import * as m0032 from './migrations/0032_growth_indexes.js';
 import * as m0033 from './migrations/0033_model_sizes.js';
 import * as m0034 from './migrations/0034_claim_code_renewals.js';
+import * as m0035 from './migrations/0035_logistics_access.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
@@ -84,6 +85,7 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0032_growth_indexes': m0032,
   '0033_model_sizes': m0033,
   '0034_claim_code_renewals': m0034,
+  '0035_logistics_access': m0035,
 });
 
 class StaticMigrationProvider implements MigrationProvider {

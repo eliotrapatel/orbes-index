@@ -96,8 +96,12 @@ declare module 'fastify' {
 
 // ── Roles ──────────────────────────────────────────────────────────────────
 
-/** RETAIL (A-08) under AUDITOR: a role unknown to this table ranks 0 and is refused everywhere. */
-export const ROLE_RANK: Readonly<Record<AdminRole, number>> = Object.freeze({ RETAIL: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 });
+/**
+ * RETAIL (A-08) under AUDITOR, and LOGISTICS (plan NEXT LOT §3.5.6.1) with it: the default rule (AUDITOR reads, OPERATOR
+ * writes) refuses both everywhere, and only the routes that name them let them in. A role unknown to this table ranks 0
+ * and is refused everywhere.
+ */
+export const ROLE_RANK: Readonly<Record<AdminRole, number>> = Object.freeze({ RETAIL: 1, LOGISTICS: 1, AUDITOR: 2, OPERATOR: 3, ADMIN: 4 });
 
 export function hasRole(role: AdminRole, min: AdminRole): boolean {
   return (ROLE_RANK[role] ?? 0) >= ROLE_RANK[min];

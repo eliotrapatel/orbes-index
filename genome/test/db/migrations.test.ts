@@ -8,9 +8,10 @@ import { TEST_RUN_STATUSES } from '../../src/server/db/schema.js';
 import * as m0007 from '../../src/server/db/migrations/0007_print_batch_indexes.js';
 import * as m0009 from '../../src/server/db/migrations/0009_scan_daily_stats.js';
 import * as m0011 from '../../src/server/db/migrations/0011_scan_token_transfer_accept.js';
+import * as m0035 from '../../src/server/db/migrations/0035_logistics_access.js';
 
 const EXPECTED_TABLES = [
-  'account_recovery_codes', 'account_sizes', 'accounts', 'activity_hourly', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs',
+  'account_recovery_codes', 'account_sizes', 'accounts', 'activity_hourly', 'admin_user_locations', 'admin_users', 'after_room_guests', 'anomalies', 'audit_logs',
   'authentication_events', 'bench_items', 'care_requests', 'carriers', 'categories', 'circle_daily_visits', 'circle_poll_votes',
   'circle_post_images', 'circle_posts', 'circle_rsvps', 'claim_code_renewals', 'client_conversations', 'client_messages', 'club_program_settings', 'club_tiers', 'codes',
   'collections', 'credit_uses', 'cryptographic_keys', 'drop_entries', 'drop_sizes', 'drops', 'event_journal', 'genomes', 'guarantee_settings',
@@ -18,7 +19,7 @@ const EXPECTED_TABLES = [
   'live_tier_windows', 'media_objects', 'model_images', 'model_pairs', 'models', 'order_alert_settings', 'order_events', 'orders', 'ownership',
   'ownership_certificates', 'ownership_transfers', 'product_status_history', 'products', 'release_answers', 'retailers', 'returns', 'revocations',
   'scan_daily_stats', 'scan_events', 'scan_reports', 'scan_tokens', 'segments', 'service_records', 'sessions', 'shipping_rates', 'shop_requests',
-  'sku_thresholds', 'skus', 'stock_locations', 'stock_movements', 'test_entrants', 'test_run_entrants', 'test_runs', 'tier_grants', 'warranties',
+  'sku_thresholds', 'skus', 'stock_locations', 'stock_movements', 'suppliers', 'test_entrants', 'test_run_entrants', 'test_runs', 'tier_grants', 'warranties',
 ];
 
 describe('migrations', () => {
@@ -270,6 +271,15 @@ describe('migrations', () => {
       const name = c === 'created_by' ? 'created_by' : c.replace('_id', '');
       expect(has(new RegExp(`INDEX claim_code_renewals_${name}_idx ON public\\.claim_code_renewals USING btree \\(${c}\\)$`)), c).toBe(true);
     }
+    // 0035: a LOGISTICS login's locations, by login (its key) and by location; a supplier's name once whatever the case;
+    // each foreign key at the head of an index.
+    expect(has(/UNIQUE INDEX admin_user_locations_pkey ON public\.admin_user_locations USING btree \(admin_user_id, stock_location_id\)$/)).toBe(true);
+    expect(has(/INDEX admin_user_locations_location_idx ON public\.admin_user_locations USING btree \(stock_location_id\)$/)).toBe(true);
+    expect(has(/INDEX admin_user_locations_created_by_idx ON public\.admin_user_locations USING btree \(created_by\)$/)).toBe(true);
+    expect(has(/UNIQUE INDEX suppliers_name_key ON public\.suppliers USING btree \(lower\(name\)\)$/)).toBe(true);
+    expect(has(/INDEX suppliers_created_by_idx ON public\.suppliers USING btree \(created_by\)$/)).toBe(true);
+    expect(has(/INDEX models_supplier_id_idx ON public\.models USING btree \(supplier_id\)$/)).toBe(true);
+    expect(has(/INDEX skus_supplier_id_idx ON public\.skus USING btree \(supplier_id\)$/)).toBe(true);
   });
 
   /**
@@ -529,7 +539,9 @@ describe('migrations', () => {
       // 0005 account_recovery_codes.created_by do on the integration branch: the rollback must not trip on it.
       await sql`CREATE TABLE down_test_ref (admin_id uuid NOT NULL REFERENCES admin_users (id) ON DELETE RESTRICT)`.execute(tx);
       await sql`INSERT INTO down_test_ref (admin_id) VALUES (${admin.id})`.execute(tx);
-      // 0011 (F-03) re-creates the purpose CHECK after 0008: it goes first, as Kysely would take it down first.
+      // 0011 (F-03) re-creates the purpose CHECK after 0008, and 0035 (LOGISTICS) the role CHECK: they go first, as Kysely
+      // would take them down first.
+      await m0035.down(tx);
       await m0011.down(tx);
       await m.down!(tx);
       const seller = (await sql<{ role: string; disabled: boolean }>`SELECT role, disabled_at IS NOT NULL AS disabled FROM admin_users WHERE email_normalized = 'seller@orbes.test'`.execute(tx)).rows;
@@ -545,6 +557,7 @@ describe('migrations', () => {
       expect(await columns('scan_events', tx)).not.toContain('admin_id');
       await m.up(tx);
       await m0011.up(tx);
+      await m0035.up(tx);
     });
     expect(await roleCheck()).toContain("'RETAIL'::text");
     expect(await purposeCheck()).toContain("'TRANSFER_ACCEPT'::text");
@@ -2483,7 +2496,8 @@ describe('migrations', () => {
     await use();
     await expect(run(`DELETE FROM credit_uses WHERE id = '${open}'`)).rejects.toSatisfy(isGuardViolation);
     // The down step refuses while a GIFT order or a credit use exists: neither can be removed, so this database stays at
-    // 0027 (0034, 0033, 0032, 0031, 0030, 0029 and 0028, which hold nothing here, go down first).
+    // 0027 (0035, 0034, 0033, 0032, 0031, 0030, 0029 and 0028, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0035_logistics_access']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0034_claim_code_renewals']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0033_model_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0032_growth_indexes']);
@@ -2498,7 +2512,7 @@ describe('migrations', () => {
     await run(`DELETE FROM credit_uses`);
     await run(`ALTER TABLE credit_uses ENABLE TRIGGER credit_uses_no_delete`);
     await run(`DELETE FROM orders WHERE channel = 'GIFT'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0028_yearly_care', '0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access']);
   });
 
   /** What names an object of 0028 in a snapshot: its table and its objects. */
@@ -2594,7 +2608,8 @@ describe('migrations', () => {
     await run(`UPDATE care_requests SET status = 'CANCELLED', cancelled_at = now(), cancelled_by = 'account' WHERE id = '${other}'`);
     await insert({ year: '2027' });
     // The down step refuses while a request or a YEARLY_CARE record exists: neither can be removed, so this database stays at
-    // 0028 (0034, 0033, 0032, 0031, 0030 and 0029, which hold nothing here, go down first).
+    // 0028 (0035, 0034, 0033, 0032, 0031, 0030 and 0029, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0035_logistics_access']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0034_claim_code_renewals']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0033_model_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0032_growth_indexes']);
@@ -2608,7 +2623,7 @@ describe('migrations', () => {
     await run(`DELETE FROM care_requests`);
     await run(`ALTER TABLE care_requests ENABLE TRIGGER care_requests_no_delete`);
     await run(`DELETE FROM service_records WHERE type = 'YEARLY_CARE'`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0029_house_guarantee', '0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access']);
   });
 
   /** What names an object of 0029 in a snapshot: its two tables, the entries' new columns and constraints, and its indexes. */
@@ -2758,7 +2773,8 @@ describe('migrations', () => {
     const request = (await sql<{ id: string }>`INSERT INTO shop_requests (account_id, model_id, status, handled_at, outcome) VALUES (${account}, ${model}, 'CLOSED', now(), 'ACCEPTED') RETURNING id`.execute(t.db)).rows[0].id;
     await check(order({ channel: `'SALON'`, drop_entry_id: 'NULL', drop_id: 'NULL', shop_request_id: `'${request}'`, piece: '2' }), 'a second piece of a salon order', 'orders_source');
     // The down step refuses while a DRAW order of a second piece exists: it cannot be removed, so this database stays at 0029
-    // (0034, 0033, 0032, 0031 and 0030, which hold nothing here, go down first).
+    // (0035, 0034, 0033, 0032, 0031 and 0030, which hold nothing here, go down first).
+    expect((await migrateDown(t.db)).reverted).toEqual(['0035_logistics_access']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0034_claim_code_renewals']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0033_model_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0032_growth_indexes']);
@@ -2771,7 +2787,7 @@ describe('migrations', () => {
     await run(`DELETE FROM drop_entries WHERE drop_id IN ('${drop}', '${other_drop}')`);
     await run(`DELETE FROM house_guarantees`);
     await run(`DELETE FROM guarantee_settings`);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access']);
   });
 
   /** What names an object of 0030 in a snapshot: its table, the models' size kind, the SKUs' fit and the requests' size. */
@@ -2806,7 +2822,7 @@ describe('migrations', () => {
       expect(added.some((o) => c.test(o)), String(c)).toBe(true);
     }
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access']);
     expect(await snapshot()).toEqual(latest);
     // The trigger of the same name guards the size in 0030 and not in 0029: its function's arguments say so.
     const args = async () =>
@@ -2814,13 +2830,14 @@ describe('migrations', () => {
         await sql<{ args: string }>`SELECT encode(tgargs, 'escape') AS args FROM pg_trigger WHERE tgname = 'shop_requests_immutable_identity'`.execute(t.db)
       ).rows[0]!.args.split('\\000').filter(Boolean);
     expect(await args()).toEqual(['id', 'account_id', 'model_id', 'created_at', 'note', 'size_label']);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0035_logistics_access']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0034_claim_code_renewals']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0033_model_sizes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0032_growth_indexes']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0031_model_pairs']);
     expect((await migrateDown(t.db)).reverted).toEqual(['0030_account_sizes']);
     expect(await args()).toEqual(['id', 'account_id', 'model_id', 'created_at', 'note']);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0030_account_sizes', '0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access']);
   });
 
   it('0030: a size of each kind in its range and step, once per account and kind, cleared by deleting it; a model\'s size kind one of the four; a size\'s fit both or neither, from 1 to 1 000, never reversed; a request\'s size of 1 to 100 characters, trimmed, never changed', async () => {
@@ -2902,7 +2919,7 @@ describe('migrations', () => {
       expect(added.some((o) => c.test(o)), String(c)).toBe(true);
     }
     expect(added.filter((o) => o.startsWith('trigger '))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0031_model_pairs', '0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access']);
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -2946,7 +2963,7 @@ describe('migrations', () => {
       'index CREATE INDEX ownership_account_started_idx ON public.ownership USING btree (account_id, started_at)',
     ]);
     expect(before.filter((o) => !withIt.includes(o))).toEqual([]);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0032_growth_indexes', '0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access']);
     expect(await snapshot()).toEqual(latest);
   });
 
@@ -2981,7 +2998,7 @@ describe('migrations', () => {
     await sql`INSERT INTO categories (id, code, name) VALUES (25, 'Y', 'Sizes before') ON CONFLICT DO NOTHING`.execute(t.db);
     const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix, size_kind) VALUES (25, 'BEFORE', 'SIGNET RING', 'SZB-RG', 'RING') RETURNING id`.execute(t.db)).rows[0].id;
     await sql`INSERT INTO skus (model_id, size_label, code) VALUES (${model}, 'SIZE 52', 'SZB-RG-SIZE-52'), (${model}, '54', 'SZB-RG-54'), (${model}, NULL, 'SZB-RG')`.execute(t.db);
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0033_model_sizes', '0034_claim_code_renewals']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0033_model_sizes', '0034_claim_code_renewals', '0035_logistics_access']);
     expect(await snapshot()).toEqual(latest);
     expect((await sql<{ size_type: string | null; size_kind: string | null }>`SELECT size_type, size_kind FROM models WHERE id = ${model}`.execute(t.db)).rows).toEqual([{ size_type: null, size_kind: 'RING' }]);
     expect(
@@ -3065,9 +3082,120 @@ describe('migrations', () => {
       'trigger claim_code_renewals claim_code_renewals_no_truncate',
     ]);
     // Existing data: no row is written; every piece keeps its hash.
-    expect((await migrateToLatest(t.db)).applied).toEqual(['0034_claim_code_renewals']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0034_claim_code_renewals', '0035_logistics_access']);
     expect(await snapshot()).toEqual(latest);
     expect(Number((await sql<{ n: string }>`SELECT count(*) AS n FROM claim_code_renewals`.execute(t.db)).rows[0].n)).toBe(0);
+  });
+
+  /** What names an object of 0035 in a snapshot: its two tables, the role CHECK, the locations' address, the suppliers of models and sizes. */
+  const of0035 = (o: string) =>
+    /\b(admin_user_locations\w*|suppliers\w*|stock_locations_address_check|models_supplier_id\w*|skus_supplier_id\w*)\b/.test(o) ||
+    /^table (stock_locations address|models supplier_id|skus supplier_id) /.test(o);
+
+  it('0035 adds LOGISTICS, a login\'s locations, a location\'s address, the suppliers and the suppliers of models and sizes, and nothing else; down restores 0034 exactly (0008\'s role CHECK), and up again', async () => {
+    const latest = await snapshot();
+    const { with: withIt, without: before } = await rollBackTo('0035_logistics_access');
+    const added = withIt.filter((o) => !before.includes(o));
+    const removed = before.filter((o) => !withIt.includes(o));
+    // Besides its own objects, 0035 only rebuilds admin_users_role_check (the same name, LOGISTICS added).
+    expect(added.filter((o) => !of0035(o))).toEqual([`constraint admin_users admin_users_role_check CHECK ((role = ANY (ARRAY['ADMIN'::text, 'OPERATOR'::text, 'AUDITOR'::text, 'RETAIL'::text, 'LOGISTICS'::text])))`]);
+    expect(removed).toEqual([`constraint admin_users admin_users_role_check CHECK ((role = ANY (ARRAY['ADMIN'::text, 'OPERATOR'::text, 'AUDITOR'::text, 'RETAIL'::text])))`]);
+    expect(before.filter(of0035)).toEqual([]);
+    const columns = (table: string) => added.filter((o) => o.startsWith(`table ${table} `)).map((o) => o.split(' ')[2]);
+    expect(columns('admin_user_locations')).toEqual(['admin_user_id', 'created_at', 'created_by', 'stock_location_id']);
+    expect(columns('suppliers')).toEqual(['active', 'address', 'contact_name', 'created_at', 'created_by', 'currency', 'email', 'id', 'name', 'note', 'phone']);
+    expect(added.filter((o) => /^table (stock_locations|models|skus) /.test(o))).toEqual([
+      'table models supplier_id uuid YES ',
+      'table skus supplier_id uuid YES ',
+      'table stock_locations address text YES ',
+    ]);
+    for (const c of [
+      /^constraint admin_user_locations admin_user_locations_pkey PRIMARY KEY \(admin_user_id, stock_location_id\)$/,
+      /^constraint admin_user_locations admin_user_locations_admin_user_id_fkey FOREIGN KEY \(admin_user_id\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint admin_user_locations admin_user_locations_stock_location_id_fkey FOREIGN KEY \(stock_location_id\) REFERENCES stock_locations\(id\) ON DELETE RESTRICT$/,
+      /^constraint admin_user_locations admin_user_locations_created_by_fkey FOREIGN KEY \(created_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint stock_locations stock_locations_address_check CHECK /,
+      /^constraint suppliers suppliers_name_check CHECK /,
+      /^constraint suppliers suppliers_currency_check CHECK /,
+      /^constraint suppliers suppliers_created_by_fkey FOREIGN KEY \(created_by\) REFERENCES admin_users\(id\) ON DELETE RESTRICT$/,
+      /^constraint models models_supplier_id_fkey FOREIGN KEY \(supplier_id\) REFERENCES suppliers\(id\) ON DELETE RESTRICT$/,
+      /^constraint skus skus_supplier_id_fkey FOREIGN KEY \(supplier_id\) REFERENCES suppliers\(id\) ON DELETE RESTRICT$/,
+    ]) {
+      expect(added.some((o) => c.test(o)), String(c)).toBe(true);
+    }
+    expect(added.filter((o) => o.startsWith('trigger '))).toEqual([
+      'trigger suppliers suppliers_immutable_identity',
+      'trigger suppliers suppliers_no_delete',
+      'trigger suppliers suppliers_no_truncate',
+    ]);
+    // Existing data: no row is written; every location keeps no address, every model and size no supplier.
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0035_logistics_access']);
+    expect(await snapshot()).toEqual(latest);
+    for (const table of ['admin_user_locations', 'suppliers']) {
+      expect(Number((await sql<{ n: string }>`SELECT count(*) AS n FROM ${sql.table(table)}`.execute(t.db)).rows[0].n), table).toBe(0);
+    }
+  });
+
+  it('0035: LOGISTICS a role; a login tied to a location once, both kept (RESTRICT); an address of 1 to 500 characters, trimmed, line breaks kept; a supplier named once whatever the case, its fields bounded, its currency three capitals, never deleted; down refused while a LOGISTICS login exists', async () => {
+    const run = (q: string) => sql.raw(q).execute(t.db);
+    const check = (p: Promise<unknown>, label: string, constraint?: string) => expect(p, label).rejects.toSatisfy((e) => isCheckViolation(e, constraint));
+    const admin = (await sql<{ id: string }>`INSERT INTO admin_users (email, email_normalized, password_hash, role) VALUES ('boss-0035@orbes.test', 'boss-0035@orbes.test', 'scrypt$x', 'ADMIN') RETURNING id`.execute(t.db)).rows[0].id;
+    const agent = (await sql<{ id: string }>`INSERT INTO admin_users (email, email_normalized, password_hash, role) VALUES ('agent-0035@orbes.test', 'agent-0035@orbes.test', 'scrypt$x', 'LOGISTICS') RETURNING id`.execute(t.db)).rows[0].id;
+    await check(run(`INSERT INTO admin_users (email, email_normalized, password_hash, role) VALUES ('x-0035@orbes.test', 'x-0035@orbes.test', 'scrypt$x', 'AGENT')`), 'an unknown role', 'admin_users_role_check');
+    const location = (await sql<{ id: string }>`INSERT INTO stock_locations (name) VALUES ('AGENT WAREHOUSE 0035') RETURNING id`.execute(t.db)).rows[0].id;
+    // A login's locations: once each, its login, location and author kept.
+    await run(`INSERT INTO admin_user_locations (admin_user_id, stock_location_id, created_by) VALUES ('${agent}', '${location}', '${admin}')`);
+    await expect(run(`INSERT INTO admin_user_locations (admin_user_id, stock_location_id) VALUES ('${agent}', '${location}')`)).rejects.toSatisfy((e) => isUniqueViolation(e, 'admin_user_locations_pkey'));
+    for (const q of [`DELETE FROM admin_users WHERE id = '${agent}'`, `DELETE FROM admin_users WHERE id = '${admin}'`, `DELETE FROM stock_locations WHERE id = '${location}'`]) {
+      await expect(run(q), q).rejects.toSatisfy(isForeignKeyViolation);
+    }
+    // An address: trimmed, 1 to 500 characters, its line breaks kept.
+    await run(`UPDATE stock_locations SET address = E'12 rue de la Paix\\n75002 Paris\\nFrance' WHERE id = '${location}'`);
+    expect((await sql<{ address: string }>`SELECT address FROM stock_locations WHERE id = ${location}`.execute(t.db)).rows[0].address).toBe('12 rue de la Paix\n75002 Paris\nFrance');
+    for (const [v, label] of [[`''`, 'empty'], [`' 12 rue'`, 'untrimmed'], [`'${'x'.repeat(501)}'`, '501 characters']] as const) {
+      await check(run(`UPDATE stock_locations SET address = ${v} WHERE id = '${location}'`), `an address ${label}`, 'stock_locations_address_check');
+    }
+    await run(`UPDATE stock_locations SET address = '${'x'.repeat(500)}' WHERE id = '${location}'`);
+    await run(`UPDATE stock_locations SET address = NULL WHERE id = '${location}'`);
+    // A supplier: named once whatever the case; its fields bounded and trimmed; its currency three capitals.
+    const supplier = (await sql<{ id: string }>`INSERT INTO suppliers (name, currency, created_by) VALUES ('MAISON 0035', 'EUR', ${admin}) RETURNING id`.execute(t.db)).rows[0].id;
+    await expect(run(`INSERT INTO suppliers (name) VALUES ('maison 0035')`)).rejects.toSatisfy((e) => isUniqueViolation(e, 'suppliers_name_key'));
+    for (const [column, v] of [
+      ['name', `'${'n'.repeat(121)}'`],
+      ['name', `' MAISON'`],
+      ['contact_name', `'${'c'.repeat(121)}'`],
+      ['email', `'${'e'.repeat(255)}'`],
+      ['phone', `'${'1'.repeat(41)}'`],
+      ['address', `'${'a'.repeat(501)}'`],
+      ['note', `'${'w'.repeat(1001)}'`],
+      ['note', `''`],
+      ['currency', `'eur'`],
+      ['currency', `'EURO'`],
+    ] as const) {
+      await check(run(`UPDATE suppliers SET ${column} = ${v} WHERE id = '${supplier}'`), `${column} = ${v.slice(0, 12)}`, `suppliers_${column}_check`);
+    }
+    await run(`UPDATE suppliers SET contact_name = 'A. Martin', email = 'orders@maison.example', phone = '+33 1 00 00 00 00', address = E'1 rue\\nParis', currency = 'CHF', note = 'Rings.', active = false WHERE id = '${supplier}'`);
+    await expect(run(`UPDATE suppliers SET created_at = now() - interval '1 day' WHERE id = '${supplier}'`)).rejects.toSatisfy(isGuardViolation);
+    await expect(run(`DELETE FROM suppliers WHERE id = '${supplier}'`)).rejects.toSatisfy(isGuardViolation);
+    // A model's supplier and a size's own: kept while named (RESTRICT).
+    await sql`INSERT INTO categories (id, code, name) VALUES (27, 'Q', 'Supplier checks') ON CONFLICT DO NOTHING`.execute(t.db);
+    const model = (await sql<{ id: string }>`INSERT INTO models (category_id, name, type, sku_prefix, supplier_id) VALUES (27, 'SUPPLIED', 'RING', 'SUP-RG', ${supplier}) RETURNING id`.execute(t.db)).rows[0].id;
+    await run(`INSERT INTO skus (model_id, size_label, code, supplier_id) VALUES ('${model}', '52', 'SUP-RG-52', '${supplier}')`);
+    await expect(run(`UPDATE models SET supplier_id = '00000000-0000-4000-8000-000000000000' WHERE id = '${model}'`)).rejects.toSatisfy(isForeignKeyViolation);
+    // The down step refuses while a LOGISTICS login exists, and names the count.
+    await expect(migrateDown(t.db)).rejects.toThrow(/0035_logistics_access cannot be rolled back: 1 LOGISTICS logins exist/);
+    expect((await migrationStatus(t.db)).find((m) => m.name === '0035_logistics_access')?.executedAt).toBeDefined();
+    // Cleared by hand for the roll-backs that follow (the service never deletes a supplier).
+    await run(`DELETE FROM skus WHERE model_id = '${model}'`);
+    await run(`DELETE FROM models WHERE id = '${model}'`);
+    await run(`ALTER TABLE suppliers DISABLE TRIGGER suppliers_no_delete`);
+    await run(`DELETE FROM suppliers WHERE id = '${supplier}'`);
+    await run(`ALTER TABLE suppliers ENABLE TRIGGER suppliers_no_delete`);
+    await run(`DELETE FROM admin_user_locations`);
+    await run(`DELETE FROM stock_locations WHERE id = '${location}'`);
+    await run(`DELETE FROM admin_users WHERE id IN ('${agent}', '${admin}')`);
+    expect((await migrateDown(t.db)).reverted).toEqual(['0035_logistics_access']);
+    expect((await migrateToLatest(t.db)).applied).toEqual(['0035_logistics_access']);
   });
 
   it('0013 adds ownership_certificates, bound to a piece and an ownership period, and nothing else; down drops it alone, and up again', async () => {
@@ -3142,6 +3270,8 @@ describe('migrations', () => {
       '0033_model_sizes',
       // New claim code.
       '0034_claim_code_renewals',
+      // Deployment H2: LOGISTICS, the agent's access and the suppliers.
+      '0035_logistics_access',
     ]);
     // A fresh database migrated one step at a time: the schema after each migration, as a deployment builds it.
     const built = new Map<string, string[]>();

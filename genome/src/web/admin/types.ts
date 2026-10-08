@@ -23,8 +23,11 @@ export type KeyStatus = (typeof KEY_STATUSES)[number];
 export const CODE_STATUSES = ['ACTIVE', 'SUPERSEDED', 'REVOKED'] as const;
 export type CodeStatus = (typeof CODE_STATUSES)[number];
 
-/** RETAIL (A-08): a seller's account, under AUDITOR, that sees the sale mode only. */
-export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR', 'RETAIL'] as const;
+/**
+ * RETAIL (A-08): a seller's account, under AUDITOR, that sees the sale mode only. LOGISTICS (plan NEXT LOT §3.5): a person
+ * at the logistics agent, ranked with RETAIL, that sees the Logistics page of its own locations only.
+ */
+export const ADMIN_ROLES = ['ADMIN', 'OPERATOR', 'AUDITOR', 'RETAIL', 'LOGISTICS'] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 /** Roles the Team page gives (create, change role); ADMIN is granted from the shell only. */
