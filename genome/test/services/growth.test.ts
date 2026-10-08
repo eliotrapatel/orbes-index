@@ -14,12 +14,14 @@
  *  - COLLECTORS BY VALUE: its order, ties by account id, its pages, the sum of its rows equal to the lifetime value's
  *    total, each row equal to collectorValue (and to the client sheet's);
  *  - the funnel's months, « Buyers » counting a first SALON order as well as LIVE and DRAW, never a GIFT order;
- *  - the revenue of each month equal to the Invoices page's (InvoiceService.list);
+ *  - the revenue of each month equal to the Invoices page's (InvoiceService.list); an order with a supplementary invoice
+ *    (plan NEXT LOT §3.6.C) counted once, its net including both invoices;
  *  - Latest releases without drafts, cancelled releases, after-rooms or releases still ahead.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
+import { jsonText } from '../../src/server/db/schema.js';
 import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { CLUB_TIER_THRESHOLDS } from '../../src/server/services/club.js';
@@ -43,7 +45,7 @@ import {
 } from '../../src/server/services/growth.js';
 import { createManualClock, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { GROWTH_NOW, seedGrowth, type GrowthFixture } from '../support/growth.js';
+import { GROWTH_NOW, GrowthWorld, seedGrowth, type GrowthFixture } from '../support/growth.js';
 
 const d = (iso: string) => new Date(`${iso}T12:00:00.000Z`);
 
@@ -352,5 +354,55 @@ describe('GROWTH: the report on fourteen months (services/growth.ts)', () => {
     expect(after.repeat).toEqual(before.repeat);
     expect(await growth().collectors()).toEqual(collectors);
     expect(await growth().collectorValue(bot)).toEqual([]);
+  });
+});
+
+describe('GROWTH: an order with a supplementary invoice (plan NEXT LOT §3.6.C)', () => {
+  let t: TestDb;
+  let ctx: AppContext;
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    ctx = await createContext(testConfig(), { db: t.db, clock: createManualClock(GROWTH_NOW.toISOString()).now, keyProvider: new MemoryKeyProvider({ env: 'test' }), ensureActiveKey: true });
+  }, 60_000);
+  afterAll(async () => {
+    await ctx?.close();
+    await t?.close();
+  });
+
+  it('counts the order once, on its main invoice, and its net includes both invoices', async () => {
+    const w = await new GrowthWorld(t.db).prepare();
+    const halo = await w.model('HALO', { price: [120_000, 'EUR'] });
+    const a = await w.account('2026-09-01', 'FR');
+    const id = await w.order({ accountId: a, modelId: halo, channel: 'SALON', paid: '2026-10-02', total: 120_000, currency: 'EUR' });
+    // An engraving added after PAID: a supplementary invoice of one line, naming the order's invoice.
+    const main = await t.db.selectFrom('invoices').selectAll().where('order_id', '=', id).executeTakeFirstOrThrow();
+    const top = await t.db.selectFrom('invoices').select((eb) => eb.fn.max('sequence').as('s')).executeTakeFirstOrThrow();
+    await t.db
+      .insertInto('invoices')
+      .values({
+        kind: 'INVOICE',
+        year: 2026,
+        sequence: Number(top.s) + 1,
+        order_id: id,
+        supplements_invoice_id: main.id,
+        issuer: jsonText(main.issuer),
+        buyer: jsonText(main.buyer),
+        lines: jsonText([{ kind: 'ENGRAVING', label: 'Engraving', detail: null, amountMinor: 4_000 }]),
+        currency: 'EUR',
+        subtotal_minor: 4_000,
+        total_minor: 4_000,
+        issued_at: new Date('2026-10-05T12:00:00.000Z'),
+      })
+      .execute();
+    const { revenue } = await ctx.services.growth.report();
+    expect(revenue.total).toEqual({ orders: 1, invoicedMinor: 124_000, creditedMinor: 0, netMinor: 124_000 });
+    expect(revenue.months.find((m) => m.month === '2026-10')).toEqual({ month: '2026-10', orders: 1, invoicedMinor: 124_000, creditedMinor: 0, netMinor: 124_000 });
+    expect(revenue.byChannel.find((g) => g.key === 'SALON')).toMatchObject({ collectors: 1, orders: 1 });
+    expect(revenue.byModel).toEqual([expect.objectContaining({ key: halo, collectors: 1, orders: 1 })]);
+    expect(revenue.byCountry).toEqual([expect.objectContaining({ key: 'FR', collectors: 1, orders: 1 })]);
+    // Each month still equals the Invoices page.
+    const page = (await ctx.services.invoices.list({ month: '2026-10' })).totals.find((x) => x.currency === 'EUR')!;
+    expect([page.invoiced, page.credited, page.net]).toEqual([124_000, 0, 124_000]);
   });
 });

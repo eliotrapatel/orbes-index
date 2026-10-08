@@ -30,7 +30,8 @@
  *     RETURNED: an ordered piece counts once, and a returned order nets to zero. TRANSFER, RESALE and ADMIN pieces never
  *     count. The Shopify store's pieces are ELSEWHERE until the sync (PIECE_SOURCES gains its channel then).
  *   - Revenue is invoices less credit notes, in the UTC month each was issued, app orders only: BP-19's shipping lines
- *     and credits are inside the totals, and a GIFT order (no invoice) adds nothing.
+ *     and credits are inside the totals, and a GIFT order (no invoice) adds nothing. Its orders are counted on their main
+ *     invoice only: a supplementary invoice (an engraving after PAID) adds to the totals, never another order.
  *   - Lifetime value is lifetime to date, whatever the window; its channel and model are those of the collector's first
  *     piece, its tier the one held now. A collector's country is the account's, or none (« Not given »).
  *   - Repeat buying counts every purchase, whatever its currency: the second piece, the time to it, the cohorts by
@@ -584,11 +585,16 @@ export class GrowthService {
     });
   }
 
-  /** Invoices less credit notes in `currency`, per month of `list` and by channel, country and model over it. */
+  /**
+   * Invoices less credit notes in `currency`, per month of `list` and by channel, country and model over it. An order is
+   * counted once, on its main invoice: a supplementary invoice (plan NEXT LOT §3.6.C, an engraving after PAID) adds to
+   * the amounts, never to the orders.
+   */
   private async revenue(db: Db, currency: Currency, list: readonly string[], from: Date, to: Date): Promise<GrowthReport['revenue']> {
     const monthly = (
       await sql<{ month: string; kind: string; n: number; total: number }>`
-        SELECT to_char(issued_at AT TIME ZONE 'UTC', 'YYYY-MM') AS month, kind, count(*)::int AS n, sum(total_minor)::bigint AS total
+        SELECT to_char(issued_at AT TIME ZONE 'UTC', 'YYYY-MM') AS month, kind,
+               (count(*) FILTER (WHERE supplements_invoice_id IS NULL))::int AS n, sum(total_minor)::bigint AS total
           FROM invoices WHERE currency = ${currency} AND issued_at >= ${from} AND issued_at < ${to} GROUP BY 1, 2`.execute(db)
     ).rows;
     const months = [...list].reverse().map((month) => {
@@ -608,7 +614,7 @@ export class GrowthService {
       const rows = (
         await sql<{ key: string | null; label: string | null; collectors: number; orders: number; net: number }>`
           SELECT ${key} AS key, min(${label}) AS label, count(DISTINCT o.account_id)::int AS collectors,
-                 (count(*) FILTER (WHERE i.kind = 'INVOICE'))::int AS orders,
+                 (count(*) FILTER (WHERE i.kind = 'INVOICE' AND i.supplements_invoice_id IS NULL))::int AS orders,
                  sum(CASE WHEN i.kind = 'INVOICE' THEN i.total_minor ELSE -i.total_minor END)::bigint AS net
             FROM invoices i
             JOIN orders o ON o.id = i.order_id

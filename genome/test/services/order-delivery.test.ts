@@ -23,7 +23,7 @@
  *    line, a free one or its words changed issuing nothing; never the words in the audit log, the events nor the journal;
  *  - an order whose release sold the engraving as an add-on (its label holds ENGRAVING): its words only, no second
  *    price, never removed by the collector (409 ORDER_ENGRAVING_INCLUDED); an add-on labelled otherwise offers nothing;
- *  - Client Services' words take the same price; a currency changed reprices or removes a priced engraving;
+ *  - Client Services' words take the same price; a currency changed reprices or removes a priced engraving, a price and currency cleared remove it;
  *  - a LOCKED account changes nothing.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -454,6 +454,19 @@ describe('an order\'s delivery address (plan NEXT LOT §3.6.B)', () => {
         { by: 'staff', priced: 2_500, addon: false, currency: true },
         { by: 'staff', priced: null, addon: false, currency: true, removed: true },
       ]);
+      await prices({});
+    });
+
+    it('removes a priced engraving, with its event, when Client Services clears the price and its currency of a RESERVED order', async () => {
+      await prices({ EUR: 3_000 });
+      const a = await createAccount(t.db);
+      const id = await salonOrder(a.id, '66');
+      await orders().setTerms(id, { engravingText: 'C. S.' }, admin);
+      expect(await row(id)).toMatchObject({ currency: 'EUR', engraving_text: 'C. S.', engraving_minor: 3_000, engraving_by: 'STAFF' });
+      await orders().setTerms(id, { priceMinor: null, currency: null }, admin);
+      expect(await row(id)).toMatchObject({ status: 'RESERVED', price_minor: null, currency: null, engraving_text: null, engraving_minor: null, engraving_by: null });
+      const events = await t.db.selectFrom('order_events').select('details').where('order_id', '=', id).where('action', '=', 'order.engraving').orderBy('id').execute();
+      expect(events.map((e) => e.details)).toEqual([{ by: 'staff', priced: null, addon: false, currency: true, removed: true }]);
       await prices({});
     });
   });

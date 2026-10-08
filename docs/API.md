@@ -4611,7 +4611,7 @@ Plan NEXT-NINE, BP-29 (`genome/src/server/routes/admin/growth.ts`, `services/gro
 - `ltv.perCollector`: the collectors with a counted piece in the currency, their total, average, median, and `topTenthFromMinor`, the value from which the top tenth of them start (the lowest of the ⌈n / 10⌉ highest).
 - `repeat.buckets`: the time from the first piece to the second, before 1, 3, 6 or 12 months after the first (calendar months, UTC), or after a year. `repeat.cohorts`: the months of the window, the newest first, by month of the first piece: its collectors, `within` those with a second piece before 1, 3, 6 and 12 months (`null` while the mark is not reached for the whole cohort) and `toDate`.
 - `funnel.months`, `revenue.months`: the months of the window, the newest first. `funnel.clubNow`: the members of the club now, as Analytics counts them (§16.16, the ACTIVE accounts holding a piece).
-- `revenue.byChannel`, `byCountry` and `byModel` over the window, the highest net first (`byChannel` in the order LIVE, DRAW, SALON); a variant under its main model. `collectors` is the accounts behind a group.
+- `revenue.byChannel`, `byCountry` and `byModel` over the window, the highest net first (`byChannel` in the order LIVE, DRAW, SALON); a variant under its main model. `collectors` is the accounts behind a group. `orders` counts each order once, on its main invoice: a supplementary invoice (an engraving after PAID, plan NEXT LOT §3.6.C) adds to the amounts, never another order.
 
 Errors: `400 VALIDATION_FAILED` (`months` other than 12 or 24; a currency not of the house; `page` not a whole number from 1), `401 UNAUTHORIZED`, `403 FORBIDDEN` (RETAIL).
 

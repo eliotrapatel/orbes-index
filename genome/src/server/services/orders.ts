@@ -2675,7 +2675,13 @@ export class OrderService {
         const credited = await openCreditUses(tx, o.id);
         if (credited.length > 0 && credited.some((u) => u.currency !== currency)) throw creditCurrency();
         if (credited.reduce((n, u) => n + u.amount_minor, 0) > (price ?? 0)) throw creditExceeds();
-        after = await updateOrder(tx, o.id, { price_minor: price, currency });
+        // Plan NEXT LOT §3.6.C: a currency changed on a RESERVED order: an engraving priced from the settings takes the
+        // new currency's price, or is removed (with its event) when that currency has none, a currency cleared included;
+        // the add-on's (no price of its own) is not touched. Worked out first and written with the price in one update,
+        // so the row never holds an engraving price without its currency (0039's orders_engraving_price).
+        const repriced = o.engraving_minor !== null && currency !== o.currency ? await engravingPrice(tx, currency ?? null) : undefined;
+        const engravingFields = repriced === undefined ? {} : repriced === null ? { engraving_text: null, engraving_minor: null, engraving_by: null } : { engraving_minor: repriced };
+        after = await updateOrder(tx, o.id, { price_minor: price, currency, ...engravingFields });
         fields.push('price');
         // Its welcome gift takes 0 in its currency.
         for (const g of await openGifts(tx, o.id, { forUpdate: true })) {
@@ -2683,14 +2689,9 @@ export class OrderService {
           const priced = await updateOrder(tx, g.id, { price_minor: currency === null ? null : 0, currency });
           extra.push(await recordChange(tx, g, priced, 'order.terms', { details: { fields: ['price'], withOrderId: o.id } }, actor, now));
         }
-      }
-      // Plan NEXT LOT §3.6.C: a currency changed on a RESERVED order: an engraving priced from the settings takes the new
-      // currency's price, or is removed (with its event) when that currency has none; the add-on's is not touched.
-      if (priceChange && after.engraving_minor !== null && after.currency !== o.currency && engraving === undefined) {
-        const repriced = await engravingPrice(tx, after.currency);
-        const moved = await updateOrder(tx, o.id, repriced === null ? { engraving_text: null, engraving_minor: null, engraving_by: null } : { engraving_minor: repriced });
-        extra.push(await recordChange(tx, after, moved, 'order.engraving', { details: { by: 'staff', priced: moved.engraving_minor, addon: false, currency: true, ...(repriced === null ? { removed: true } : {}) } }, actor, now));
-        after = moved;
+        if (repriced !== undefined) {
+          extra.push(await recordChange(tx, o, after, 'order.engraving', { details: { by: 'staff', priced: after.engraving_minor, addon: false, currency: true, ...(repriced === null ? { removed: true } : {}) } }, actor, now));
+        }
       }
       if (engraving !== undefined && engraving !== after.engraving_text) {
         // Client Services' words (STAFF). A new engraving without the release's add-on takes its currency's price from the
