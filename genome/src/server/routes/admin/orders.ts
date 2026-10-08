@@ -168,6 +168,8 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     if (b.outcome === 'ARCHIVED' && !hasRole(admin.role, 'ADMIN')) throw forbidden('Only an ADMIN can archive a returned piece.');
     const r = await orders.returnOrder(id, { outcome: b.outcome, locationId: b.locationId ?? null, note: b.note }, adminActor(request));
     reply.header('cache-control', 'no-store');
-    return { ...(await detail(request, id)), productId: r.productId, ...(r.claimCode ? { claimCode: r.claimCode } : {}) };
+    // `claimCode` here is the new card's code (a string), never the order page's block of plan NEXT LOT §3.4, left out.
+    const { claimCode: _block, ...page } = await detail(request, id);
+    return { ...page, productId: r.productId, ...(r.claimCode ? { claimCode: r.claimCode } : {}) };
   });
 };

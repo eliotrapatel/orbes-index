@@ -90,9 +90,11 @@ describe('returns and invoices: the console\'s routes', () => {
       ['INVOICE', 'INV-2026-000001'],
       ['CREDIT_NOTE', 'CN-2026-000001'],
     ]);
-    // Read again: the same, without the claim code.
+    // Read again: the same, without the claim code (its `claimCode` is the page's block of a buyer's new claim code, plan
+    // NEXT LOT §3.4: none here, and never a code).
     const again = safeJson(await auditor.get(`/api/admin/orders/${order}`)) as Json;
-    expect(again.claimCode).toBeUndefined();
+    expect(again.claimCode).toBeNull();
+    expect(JSON.stringify(again)).not.toContain(body.claimCode);
     expect(again.order.return.ownershipReclaimed).toBe(true);
     expect(errorOf(await op.post(`/api/admin/orders/${order}/return`, { outcome: 'RESTOCKED', locationId: france, note: 'Again.' })).code).toBe('ORDER_TRANSITION_NOT_ALLOWED');
   });
