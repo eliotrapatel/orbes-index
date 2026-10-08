@@ -20,6 +20,7 @@ import { LiveEngine } from '../../src/server/services/live-engine.js';
 import { LiveService } from '../../src/server/services/live.js';
 import { createTestDb } from '../support/db.js';
 import { accountOfTier, createLiveRelease, entriesOf, liveFixture, type LiveFixture, type LiveRelease } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
 type Account = Awaited<ReturnType<typeof accountOfTier>>;
@@ -376,8 +377,7 @@ for (const backend of BACKENDS) {
       const start = new Date('2026-12-06T09:00:00.000Z');
       f.clock.set(start);
       const opens = new Date(start.getTime() + 3_600_000);
-      const d = await f.drops.create({ modelId: f.modelId, title: 'A DRAW', quantity: 2, opensAt: opens, closesAt: new Date(opens.getTime() + 3_600_000), earlyAccessHours: 0 }, f.admin);
-      await f.drops.publish(d.id, f.admin);
+      const d = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'A DRAW', quantity: 2, opensAt: opens, closesAt: new Date(opens.getTime() + 3_600_000), earlyAccessHours: 0 }, f.admin);
       const [a, b] = [await accountOfTier(f, 0), await accountOfTier(f, 0)];
       const ga = (await guarantees.grant(a.id, { scope: 'RELEASE', targetId: d.id, pieces: 1, validUntil: '2026-12-31', visible: true }, f.admin)).guarantee;
       const gb = (await guarantees.grant(b.id, { scope: 'RELEASE', targetId: d.id, pieces: 1, validUntil: '2026-12-31', visible: true }, f.admin)).guarantee;

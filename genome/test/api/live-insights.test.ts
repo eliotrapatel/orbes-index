@@ -12,6 +12,7 @@ import { LIVE_ROOM_CAPACITY } from '../../src/server/services/live-insights.js';
 import { createAccount, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { openSse } from '../support/sse.js';
 import { adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
+import { poolDraw } from '../support/draws.js';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -169,7 +170,7 @@ describe('LIVE RELEASES: the console’s intelligence over HTTP', () => {
   });
 
   it('answers 404 for an unknown release and for a draw', async () => {
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'A DRAW', quantity: 3, opensAt: new Date(h.clock.now().getTime() + 3_600_000), closesAt: new Date(h.clock.now().getTime() + 7_200_000), earlyAccessHours: 0 }, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'A DRAW', quantity: 3, opensAt: new Date(h.clock.now().getTime() + 3_600_000), closesAt: new Date(h.clock.now().getTime() + 7_200_000), earlyAccessHours: 0 }, f.admin, { publish: false });
     for (const id of ['00000000-0000-4000-8000-000000000000', draw.id]) {
       for (const path of ['plan', 'forecast', 'radar', 'bots', 'report', 'report.csv', 'collectors', 'comparison']) {
         const res = await auditor.get(`/api/admin/live/${id}/${path}`);

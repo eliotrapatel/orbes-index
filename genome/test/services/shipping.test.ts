@@ -25,6 +25,7 @@ import { orderReference } from '../../src/server/services/orders.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { createAccount, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -207,8 +208,7 @@ describe('the orders\' shipping (BP-19 T4)', () => {
     const [platineOrder] = await liveSale(await accountWith(5), 1);
     expect([platineOrder!.shipping_service, platineOrder!.shipping_minor, platineOrder!.shipping_benefit]).toEqual(['STANDARD', 0, 2]);
     // An unpriced draw's order: the rate when Client Services prices it.
-    const drop = await ctx.services.drops.create({ modelId: f.modelId, title: 'A DRAW', quantity: 1, opensAt: new Date(clock.now().getTime() + HOUR), closesAt: new Date(clock.now().getTime() + 2 * HOUR), earlyAccessHours: 0 }, admin);
-    await ctx.services.drops.publish(drop.id, admin);
+    const drop = await poolDraw(ctx.services.drops, ctx.db, { modelId: f.modelId, title: 'A DRAW', quantity: 1, opensAt: new Date(clock.now().getTime() + HOUR), closesAt: new Date(clock.now().getTime() + 2 * HOUR), earlyAccessHours: 0 }, admin);
     clock.advance(HOUR + MINUTE);
     await ctx.services.drops.enter(titane.id, drop.id, titane.actor);
     clock.advance(HOUR);
@@ -261,8 +261,7 @@ describe('the orders\' shipping (BP-19 T4)', () => {
     await ctx.services.clubProgram.setShippingRates([{ currency: 'EUR', service: 'STANDARD', feeMinor: 1_500 }], admin);
     const a = await accountWith(1);
     const opensAt = new Date(clock.now().getTime() + 2 * HOUR);
-    const drop = await ctx.services.drops.create({ modelId: f.modelId, title: 'A DRAW', quantity: 4, opensAt, closesAt: new Date(opensAt.getTime() + HOUR), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, admin);
-    await ctx.services.drops.publish(drop.id, admin);
+    const drop = await poolDraw(ctx.services.drops, ctx.db, { modelId: f.modelId, title: 'A DRAW', quantity: 4, opensAt, closesAt: new Date(opensAt.getTime() + HOUR), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, admin);
     await ctx.services.guarantees.grant(a.id, { scope: 'RELEASE', targetId: drop.id, pieces: 3, validUntil: '2026-12-31', visible: true }, admin);
     clock.set(new Date(opensAt.getTime() + MINUTE));
     await ctx.services.drops.enter(a.id, drop.id, a.actor);

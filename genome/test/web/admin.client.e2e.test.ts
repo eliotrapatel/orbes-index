@@ -35,6 +35,7 @@ import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, SYSTEM_ACTOR, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { createAccount, createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -171,8 +172,7 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     Object.assign(me, { id: a.id, email: a.email });
 
     // A draw it enters, drawn, confirmed with a note.
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — release I', quantity: 1, opensAt: at(MINUTE), closesAt: at(2 * MINUTE), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(draw.id, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'ECLIPSE — release I', quantity: 1, opensAt: at(MINUTE), closesAt: at(2 * MINUTE), earlyAccessHours: 0 }, f.admin);
     ids.draw = draw.id;
     // A LIVE RELEASE it secures a piece in, with its engraving; one it said I'LL BE THERE to and missed.
     const live = await createLiveRelease(f, { opensAt: at(30 * MINUTE), sizes: [{ label: '54', stock: 1 }], addons: [{ label: 'ENGRAVING', priceMinor: 15_000 }] });
@@ -372,8 +372,7 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
 
   it('grants THE HOUSE’S GUARANTEE from the client sheet (plan NEXT-NINE, IN-01): the Grant dialog, Change and Revoke; the draw’s Guaranteed row, its guarantees and the GUARANTEED mark; the defaults in Orders → Settings, an ADMIN’s', async () => {
     const now = clock.now().getTime();
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — guaranteed', quantity: 4, opensAt: new Date(now - MINUTE), closesAt: new Date(now + 2 * HOUR), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(draw.id, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'ECLIPSE — guaranteed', quantity: 4, opensAt: new Date(now - MINUTE), closesAt: new Date(now + 2 * HOUR), earlyAccessHours: 0 }, f.admin);
     const client = await createAccount(ctx.db);
     // Another collector entered with a guarantee: the entries' GUARANTEED mark.
     const other = await createAccount(ctx.db);

@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { testPhrase } from '../../src/server/services/test-entrants.js';
 import { liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
+import { poolDraw } from '../support/draws.js';
 
 const HOUR = 3_600_000;
 
@@ -38,8 +39,7 @@ describe('admin: test entrants', () => {
     operator = await adminClient(h, 'OPERATOR');
     auditor = await adminClient(h, 'AUDITOR');
     const now = h.clock.now().getTime();
-    const d = await h.ctx.services.drops.create({ modelId: f.modelId, title: 'MONOLITHE · DRAW', quantity: 5, opensAt: new Date(now - HOUR), closesAt: new Date(now + HOUR), earlyAccessHours: 0 }, f.admin);
-    await h.ctx.services.drops.publish(d.id, f.admin);
+    const d = await poolDraw(h.ctx.services.drops, h.ctx.db, { modelId: f.modelId, title: 'MONOLITHE · DRAW', quantity: 5, opensAt: new Date(now - HOUR), closesAt: new Date(now + HOUR), earlyAccessHours: 0 }, f.admin);
     dropId = d.id;
   });
   afterAll(() => h?.close());

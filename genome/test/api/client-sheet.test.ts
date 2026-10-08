@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { orderReference } from '../../src/server/services/orders.js';
 import { createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
+import { poolDraw } from '../support/draws.js';
 
 type Json = Record<string, any>;
 const SECOND = 1000;
@@ -45,8 +46,7 @@ describe('the client sheet and the Shopify exports: the console\'s routes', () =
     const actor = { type: 'account' as const, id };
 
     // A draw: entered, drawn, confirmed by Client Services with a note.
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — release I', quantity: 1, opensAt: at(MINUTE), closesAt: at(2 * MINUTE), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(draw.id, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'ECLIPSE — release I', quantity: 1, opensAt: at(MINUTE), closesAt: at(2 * MINUTE), earlyAccessHours: 0 }, f.admin);
     ids.draw = draw.id;
     // The LIVE RELEASES: one it takes part in and secures a piece with an add-on, one it said I'LL BE THERE to and
     // missed, one still to come it said I'LL BE THERE to.
@@ -263,8 +263,7 @@ describe('THE HOUSE’S GUARANTEE on the client sheet (plan NEXT-NINE, IN-01)', 
   afterAll(() => h?.close());
 
   it('grants, lists, changes and revokes a guarantee from the client sheet; a release lists its guarantees, the emails masked for an AUDITOR; the settings', async () => {
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — guaranteed', quantity: 3, opensAt: at(HOUR), closesAt: at(2 * HOUR), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(draw.id, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'ECLIPSE — guaranteed', quantity: 3, opensAt: at(HOUR), closesAt: at(2 * HOUR), earlyAccessHours: 0 }, f.admin);
     const { email } = await accountClient(h);
     const id = await accountIdOf(email);
     const granted = await op.post(`/api/admin/owners/${id}/guarantees`, { scope: 'MODEL', targetId: f.modelId, pieces: 2, validUntil: '2026-12-31', visible: false, note: NOTE });
@@ -300,8 +299,7 @@ describe('THE HOUSE’S GUARANTEE on the client sheet (plan NEXT-NINE, IN-01)', 
   });
 
   it('a lock unbinds the guarantee of its open entry and never revokes it; a LOCKED account is never granted one; the export carries every guarantee with its notes, at the grant and at a revocation; the audit log neither the email nor the notes', async () => {
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — lock', quantity: 3, opensAt: at(3 * HOUR), closesAt: at(4 * HOUR), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(draw.id, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'ECLIPSE — lock', quantity: 3, opensAt: at(3 * HOUR), closesAt: at(4 * HOUR), earlyAccessHours: 0 }, f.admin);
     const { email } = await accountClient(h);
     const id = await accountIdOf(email);
     const g = (safeJson(await op.post(`/api/admin/owners/${id}/guarantees`, { scope: 'RELEASE', targetId: draw.id, pieces: 2, validUntil: '2026-12-31', visible: false, note: NOTE })) as Json).guarantee;

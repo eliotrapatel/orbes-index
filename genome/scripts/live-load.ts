@@ -589,13 +589,14 @@ async function serve(): Promise<void> {
   // taken part in one release (services/participation.ts). Created ahead, then its times moved so that it is open now,
   // then over, then drawn.
   const hour = 3_600_000;
+  // Its pieces in one size (plan NEXT LOT §3.6.F: a draw's pieces are given per size), each account entered in it.
   const draw = await ctx.services.drops.create(
-    { modelId, title: 'MONOLITHE · THE DRAW BEFORE', quantity: 25, opensAt: new Date(Date.now() + hour), closesAt: new Date(Date.now() + 2 * hour), earlyAccessHours: 0 },
+    { modelId, title: 'MONOLITHE · THE DRAW BEFORE', sizes: [{ label: SIZES[0]!.label, pieces: 25 }], opensAt: new Date(Date.now() + hour), closesAt: new Date(Date.now() + 2 * hour), earlyAccessHours: 0 },
     admin,
   );
   await ctx.services.drops.publish(draw.id, admin);
   await db.updateTable('drops').set({ opens_at: new Date(Date.now() - 2 * hour) }).where('id', '=', draw.id).execute();
-  for (const id of accountIds) await ctx.services.drops.enter(id, draw.id, { type: 'account', id });
+  for (const id of accountIds) await ctx.services.drops.enter(id, draw.id, { type: 'account', id }, { sizeId: draw.sizes[0]!.id });
   await db.updateTable('drops').set({ closes_at: new Date(Date.now() - 1000) }).where('id', '=', draw.id).execute();
   await ctx.services.drops.draw(draw.id, admin);
   // The segment the release admits, read live at each check (services/segments.ts): taken part in a release, and active

@@ -29,6 +29,7 @@ import { jpegPhoto } from '../support/images.js';
 import { createAccount, createCollection, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { openSse } from '../support/sse.js';
 import { accountClient, adminClient, createAdmin, createHarness, errorOf, ORIGIN, safeJson, type Client, type Harness } from './support.js';
+import { poolDraw } from '../support/draws.js';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -264,7 +265,7 @@ describe('LIVE RELEASES: the console', () => {
       expect(errorOf(await auditor.patch(`/api/admin/live/${r.id}`, { title: 'X' })).code).toBe('FORBIDDEN');
       expect(errorOf(await op.patch('/api/admin/live/00000000-0000-4000-8000-000000000000', { title: 'X' })).code).toBe('DROP_NOT_FOUND');
       // A draw is not a LIVE RELEASE here, nor a LIVE RELEASE a draw there.
-      const draw = await f.drops.create({ modelId: f.modelId, title: 'A DRAW', quantity: 3, opensAt: new Date(iso(HOUR)), closesAt: new Date(iso(2 * HOUR)) }, f.admin);
+      const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'A DRAW', quantity: 3, opensAt: new Date(iso(HOUR)), closesAt: new Date(iso(2 * HOUR)) }, f.admin, { publish: false });
       expect(errorOf(await op.get(`/api/admin/live/${draw.id}`)).code).toBe('DROP_NOT_FOUND');
       expect(errorOf(await op.patch(`/api/admin/drops/${r.id}`, { title: 'X' })).code).toBe('DROP_LIVE');
     });

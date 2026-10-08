@@ -20,6 +20,7 @@ import { participatedReleases, participations } from '../../src/server/services/
 import { cleanCriteria, isSegmentMember, SegmentService, type SegmentGroup } from '../../src/server/services/segments.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixture, type LiveFixture } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const START = new Date('2026-11-01T09:00:00.000Z');
 const SECOND = 1000;
@@ -98,19 +99,16 @@ describe('taking part, and the segments', () => {
 
     // A draw, drawn: one entry kept, one withdrawn before the draw.
     const D = new Date(f.clock.now().getTime() + HOUR);
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'DRAWN', quantity: 1, opensAt: D, closesAt: new Date(D.getTime() + HOUR), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(draw.id, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'DRAWN', quantity: 1, opensAt: D, closesAt: new Date(D.getTime() + HOUR), earlyAccessHours: 0 }, f.admin);
     releases.draw = draw.id;
     // A draw with an early access, opened, not drawn yet: a place reserved directly (PLATINE), an entry waiting for the draw.
     const U = new Date(D.getTime() + 30 * MINUTE);
-    const undrawn = await f.drops.create({ modelId: f.modelId, title: 'NOT DRAWN', quantity: 2, opensAt: U, closesAt: new Date(U.getTime() + 10 * DAY), earlyAccessHours: 48 }, f.admin);
-    await f.drops.publish(undrawn.id, f.admin);
+    const undrawn = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'NOT DRAWN', quantity: 2, opensAt: U, closesAt: new Date(U.getTime() + 10 * DAY), earlyAccessHours: 48 }, f.admin);
     releases.undrawn = undrawn.id;
     await holdPieces(t.db, who.reserved.id, 5, f.modelId);
     await f.drops.reserve(who.reserved.id, undrawn.id, who.reserved.actor);
     // A draw cancelled after its opening (before its draw): its entries count for nobody.
-    const cancelled = await f.drops.create({ modelId: f.modelId, title: 'CANCELLED', quantity: 1, opensAt: D, closesAt: new Date(D.getTime() + 20 * DAY), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(cancelled.id, f.admin);
+    const cancelled = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'CANCELLED', quantity: 1, opensAt: D, closesAt: new Date(D.getTime() + 20 * DAY), earlyAccessHours: 0 }, f.admin);
     releases.cancelled = cancelled.id;
     f.clock.set(new Date(D.getTime() + MINUTE));
     await f.drops.enter(who.drawn.id, draw.id, who.drawn.actor);

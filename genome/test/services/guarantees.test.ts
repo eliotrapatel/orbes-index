@@ -17,10 +17,11 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
-import { endOfParisDay, guaranteeState, GuaranteeService, parisDayPlus } from '../../src/server/services/guarantees.js';
+import { endOfParisDay, guaranteeState, GuaranteeService, parisDayPlus, sizeServesGuarantee } from '../../src/server/services/guarantees.js';
 import type { Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixture, type LiveFixture } from '../support/live.js';
+import { poolDraw, oneSizeOf } from '../support/draws.js';
 
 const START = '2026-11-01T09:00:00.000Z';
 const HOUR = 3_600_000;
@@ -57,9 +58,10 @@ describe('the house’s guarantee (IN-01)', () => {
   /** A draw of `modelId`, opening in `days` days for a day, published unless asked otherwise. */
   async function draw(modelId: string, o: { days?: number; quantity?: number; published?: boolean } = {}) {
     const opensAt = inDays(o.days ?? 2);
-    const d = await f.drops.create({ modelId, title: 'A DRAW', quantity: o.quantity ?? 4, opensAt, closesAt: new Date(opensAt.getTime() + DAY), earlyAccessHours: 0 }, f.admin);
-    if (o.published !== false) await f.drops.publish(d.id, f.admin);
-    return d;
+    const input = { modelId, title: 'A DRAW', opensAt, closesAt: new Date(opensAt.getTime() + DAY), earlyAccessHours: 0 };
+    // A draft to publish later has its sizes (plan NEXT LOT §3.6.F); a published draw is one of before, one pool.
+    if (o.published === false) return f.drops.create({ ...input, sizes: [{ label: await oneSizeOf(t.db, modelId), pieces: o.quantity ?? 4 }] }, f.admin);
+    return poolDraw(f.drops, t.db, { ...input, quantity: o.quantity ?? 4 }, f.admin);
   }
   const row = (id: string) => t.db.selectFrom('house_guarantees').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
   const audits = async (action: string) =>
@@ -360,6 +362,34 @@ describe('the house’s guarantee (IN-01)', () => {
     expect(saved).toMatchObject({ validDays: 30, pieces: 2, visible: false, defaultValidUntil: '2026-12-01', updatedBy: { id: f.admin.id } });
     expect((await audits('guarantee.settings')).at(-1)!.details).toEqual({ before: { validDays: 90, pieces: 1, visible: true }, after: { validDays: 30, pieces: 2, visible: false } });
     await g.saveSettings({ validDays: 90, pieces: 1, visible: true }, f.admin);
+  });
+
+  it('serves a guarantee in a draw\'s size (plan NEXT LOT §3.6.F) while its pieces less those held or sold in it and those of the other guaranteed entries waiting in it leave room, in pieces; an entry set aside later binds only where its size serves it', async () => {
+    f.clock.set(START);
+    const opensAt = inDays(1);
+    const created = await f.drops.create({ modelId: f.modelId, title: 'A DRAW IN SIZES', sizes: [{ label: '17', pieces: 4 }, { label: '18', pieces: 1 }], opensAt, closesAt: new Date(opensAt.getTime() + DAY), earlyAccessHours: 0 }, f.admin);
+    const d = await f.drops.publish(created.id, f.admin);
+    const [s17, s18] = [d.sizes[0]!.id, d.sizes[1]!.id];
+    expect(await sizeServesGuarantee(t.db, d.id, s17, 4, null)).toBe(true);
+    expect(await sizeServesGuarantee(t.db, d.id, s17, 5, null)).toBe(false);
+    f.clock.set(new Date(opensAt.getTime() + HOUR));
+    // A guaranteed entry of 2 pieces waiting in 17 takes 2 of its places; the entry itself is left out of its own count.
+    const holder = await createAccount(t.db);
+    const x = await grant(holder.id, { scope: 'RELEASE', targetId: d.id, pieces: 2 });
+    const entry = await f.drops.enter(holder.id, d.id, holder.actor, { sizeId: s17 });
+    expect(entry).toMatchObject({ guaranteed: true, pieces: 2 });
+    expect(await sizeServesGuarantee(t.db, d.id, s17, 2, null)).toBe(true);
+    expect(await sizeServesGuarantee(t.db, d.id, s17, 3, null)).toBe(false);
+    expect(await sizeServesGuarantee(t.db, d.id, s17, 4, entry.id)).toBe(true);
+    // The other size, and a guarantee granted to an account already entered there: 18 cannot serve 2 pieces, so it waits.
+    const later = await createAccount(t.db);
+    await f.drops.enter(later.id, d.id, later.actor, { sizeId: s18 });
+    const y = await grant(later.id, { scope: 'RELEASE', targetId: d.id, pieces: 2 });
+    expect(await stateOf(later.id, y.guarantee.id)).toBe('SET_ASIDE');
+    expect(await stateOf(holder.id, x.guarantee.id)).toBe('ENTERED');
+    // Its holder moves to 17, where 2 pieces are still free: bound there.
+    await f.drops.changeSize(later.id, d.id, { sizeId: s17 }, later.actor);
+    expect(await stateOf(later.id, y.guarantee.id)).toBe('ENTERED');
   });
 
   it('never writes a note’s words, nor an email, in the audit log', async () => {

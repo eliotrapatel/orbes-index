@@ -49,6 +49,7 @@ import { defaultLocationId, ensureSku } from '../../src/server/services/stock.js
 import { createManualClock, SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb } from '../support/db.js';
 import { accountClient, adminClient, createHarness, errorOf, safeJson, seedCatalog, type Catalog, type Client, type Harness } from '../api/support.js';
+import { poolDraw } from '../support/draws.js';
 
 describe('YOUR SIZES (AC-01)', () => {
   let h: Harness;
@@ -413,7 +414,7 @@ describe('DECLARED SIZES (NEXT LOT §3.3)', () => {
     // 52: a piece.
     await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: ring, material: '925 STERLING SILVER', variant: '52' }, SYSTEM_ACTOR);
     // 53: a release's size.
-    const drop = await h.ctx.services.drops.create({ modelId: ring, title: 'DRAW', quantity: 1, opensAt: new Date('2026-11-01T09:00:00Z'), closesAt: new Date('2026-11-02T09:00:00Z'), earlyAccessHours: 0 }, admin);
+    const drop = await poolDraw(h.ctx.services.drops, h.ctx.db, { modelId: ring, title: 'DRAW', quantity: 1, opensAt: new Date('2026-11-01T09:00:00Z'), closesAt: new Date('2026-11-02T09:00:00Z'), earlyAccessHours: 0 }, admin, { publish: false });
     await h.t.db.insertInto('drop_sizes').values({ drop_id: drop.id, label: '53', position: 1, stock: 1, sku_id: await sku('53') }).execute();
     // 54: a minimum; 55: a Shopify id; 56: an open salon request in that size.
     await h.t.db.insertInto('sku_thresholds').values({ sku_id: await sku('54'), location_id: location, minimum: 2 }).execute();
@@ -766,7 +767,7 @@ for (const backend of BACKENDS) {
     for (const first of ['flow', 'removal'] as const) {
       it(`a release saved against the removal (${first} first): set aside, or SIZE_NOT_DECLARED, never a foreign-key failure`, async () => {
         const r = await ring();
-        const drop = await ctx.services.drops.create({ modelId: r.modelId, title: 'DRAW', quantity: 1, opensAt: new Date('2026-11-01T09:00:00Z'), closesAt: new Date('2026-11-02T09:00:00Z'), earlyAccessHours: 0 }, admin);
+        const drop = await poolDraw(ctx.services.drops, ctx.db, { modelId: r.modelId, title: 'DRAW', quantity: 1, opensAt: new Date('2026-11-01T09:00:00Z'), closesAt: new Date('2026-11-02T09:00:00Z'), earlyAccessHours: 0 }, admin, { publish: false });
         const flow = () => outcome(release(r.modelId, drop.id));
         const removal = () => outcome(ctx.services.sizes.removeSize(r.modelId, r.s52, admin));
         const got = first === 'flow' ? await Promise.all([flow(), later(40, removal)]) : (await Promise.all([removal(), later(40, flow)])).reverse();

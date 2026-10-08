@@ -33,6 +33,7 @@ import { jpegPhoto } from '../support/images.js';
 import { createCollection, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture, type LiveRelease, type LiveReleaseOptions } from '../support/live.js';
 import { openSse } from '../support/sse.js';
 import { accountClient, adminClient, createHarness, errorOf, ORIGIN, safeJson, type Client, type Harness } from './support.js';
+import { poolDraw } from '../support/draws.js';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -145,8 +146,7 @@ describe('LIVE RELEASES: the customer API and real time', () => {
       expect((await c.post(`/api/v1/live/${r.id}/board`, { token })).statusCode).toBe(200);
 
       const draft = await release(h, f, { published: false });
-      const draw = await f.drops.create({ modelId: f.modelId, title: 'A DRAW', quantity: 3, opensAt: new Date(h.clock.now().getTime() + HOUR), closesAt: new Date(h.clock.now().getTime() + 2 * HOUR) }, f.admin);
-      await f.drops.publish(draw.id, f.admin);
+      const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'A DRAW', quantity: 3, opensAt: new Date(h.clock.now().getTime() + HOUR), closesAt: new Date(h.clock.now().getTime() + 2 * HOUR) }, f.admin);
       const cancelled = await release(h, f);
       await h.ctx.db.updateTable('drops').set({ cancelled_at: h.clock.now() }).where('id', '=', cancelled.id).execute();
       for (const id of [draft.id, draw.id, cancelled.id, '00000000-0000-4000-8000-000000000000', 'not-an-id']) {

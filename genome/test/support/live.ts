@@ -16,6 +16,7 @@ import { deriveLiveTurnKey, LiveService } from '../../src/server/services/live.j
 import { LiveConsoleService, type AfterRoomInput } from '../../src/server/services/live-console.js';
 import { ensureStockSetup } from '../../src/server/services/stock.js';
 import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
+import { poolDraw } from './draws.js';
 
 export interface LiveFixture {
   db: Db;
@@ -194,7 +195,7 @@ export async function createLiveRelease(f: LiveFixture, o: LiveReleaseOptions): 
   const sizes = o.sizes ?? [{ label: '52', stock: 2 }];
   const quantity = Math.max(1, sizes.reduce((n, s) => n + s.stock, 0));
   const closesAt = o.closesAt ?? new Date(o.opensAt.getTime() + 3_600_000);
-  const created = await f.drops.create({ modelId: o.modelId ?? f.modelId, title: 'LIVE', quantity, opensAt: o.opensAt, closesAt, earlyAccessHours: 0 }, f.admin);
+  const created = await poolDraw(f.drops, f.db, { modelId: o.modelId ?? f.modelId, title: 'LIVE', quantity, opensAt: o.opensAt, closesAt, earlyAccessHours: 0 }, f.admin, { publish: false });
   const id = created.id;
   await f.db
     .updateTable('drops')

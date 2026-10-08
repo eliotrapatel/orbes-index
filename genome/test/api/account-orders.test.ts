@@ -18,6 +18,7 @@ import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 import { countPiecesIn, packAndShip, stockPieces } from '../support/fulfil.js';
+import { poolDraw } from '../support/draws.js';
 
 type Json = Record<string, any>;
 const MINUTE = 60_000;
@@ -83,8 +84,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     // A draw: the account's entry drawn, then confirmed by Client Services; its size and price to be entered.
     h.clock.advance(HOUR);
     const T = new Date(h.clock.now().getTime() + HOUR);
-    const d = await f.drops.create({ modelId: f.modelId, title: 'MONOLITHE — RELEASE I', quantity: 1, opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(d.id, f.admin);
+    const d = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'MONOLITHE — RELEASE I', quantity: 1, opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0 }, f.admin);
     h.clock.set(new Date(T.getTime() + MINUTE));
     await f.drops.enter(mineId, d.id, actor);
     h.clock.set(new Date(T.getTime() + 2 * HOUR));

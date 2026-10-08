@@ -370,7 +370,7 @@ describe('the variants of a model (NOCTURNE N1)', () => {
     const admin = await createAdmin(h.ctx, 'ADMIN');
     const actor: Actor = { type: 'admin', id: admin.id };
     const at = (ms: number) => new Date(h.clock.now().getTime() + ms).toISOString();
-    const body = { modelId: blue.id, title: 'MONOLITHE, THE BLUE DRAW', quantity: 2, opensAt: at(HOUR), closesAt: at(2 * HOUR), earlyAccessHours: 0 };
+    const body = { modelId: blue.id, title: 'MONOLITHE, THE BLUE DRAW', sizes: [{ label: 'ONE SIZE', pieces: 2 }], opensAt: at(HOUR), closesAt: at(2 * HOUR), earlyAccessHours: 0 };
     for (const price of [{ priceMinor: 420_000 }, { currency: 'EUR' }, { priceMinor: 420_000, currency: 'JPY' }, { priceMinor: -1, currency: 'EUR' }, { priceMinor: 100_000_001, currency: 'EUR' }, { priceMinor: 4.5, currency: 'EUR' }]) {
       expect(errorOf(await operator.post('/api/admin/drops', { ...body, ...price })).code, JSON.stringify(price)).toBe('VALIDATION_FAILED');
     }
@@ -393,6 +393,8 @@ describe('the variants of a model (NOCTURNE N1)', () => {
     expect(cleared.priceMinor).toBeNull();
     expect((await operator.patch(`/api/admin/drops/${d.id}`, { priceMinor: 420_000, currency: 'EUR' })).statusCode).toBe(200);
     expect((await operator.post(`/api/admin/drops/${d.id}/publish`)).statusCode).toBe(200);
+    // One pool, as a draw published before the sizes (plan NEXT LOT §3.6.F): its order's size is entered later.
+    await h.ctx.db.deleteFrom('drop_sizes').where('drop_id', '=', d.id).execute();
     // Published: fixed.
     const locked = await operator.patch(`/api/admin/drops/${d.id}`, { priceMinor: 1, currency: 'EUR' });
     expect([locked.statusCode, errorOf(locked).code]).toEqual([409, 'DROP_PUBLISHED']);

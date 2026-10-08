@@ -22,6 +22,7 @@ import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, createModel, entriesOf, holdPieces, liveFixtureOn, type LiveFixture, type LiveReleaseOptions } from '../support/live.js';
 import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
+import { poolDraw } from '../support/draws.js';
 
 const SECOND = 1000;
 const MINUTE = 60 * SECOND;
@@ -86,10 +87,9 @@ describe("THE RELEASES' PAST (GET /api/v1/releases/past) and the account's part 
     const outsider = await collector();
 
     // The draws: one drawn, one still open, one cancelled.
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — release I', quantity: 1, opensAt: at(MINUTE), closesAt: at(2 * MINUTE), earlyAccessHours: 0 }, f.admin);
-    const open = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — release II', quantity: 1, opensAt: at(MINUTE), closesAt: at(10 * 24 * HOUR), earlyAccessHours: 0 }, f.admin);
-    const dropped = await f.drops.create({ modelId: f.modelId, title: 'ECLIPSE — release III', quantity: 1, opensAt: at(3 * MINUTE), closesAt: at(4 * MINUTE), earlyAccessHours: 0 }, f.admin);
-    for (const d of [draw, open, dropped]) await f.drops.publish(d.id, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'ECLIPSE — release I', quantity: 1, opensAt: at(MINUTE), closesAt: at(2 * MINUTE), earlyAccessHours: 0 }, f.admin);
+    const open = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'ECLIPSE — release II', quantity: 1, opensAt: at(MINUTE), closesAt: at(10 * 24 * HOUR), earlyAccessHours: 0 }, f.admin);
+    const dropped = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'ECLIPSE — release III', quantity: 1, opensAt: at(3 * MINUTE), closesAt: at(4 * MINUTE), earlyAccessHours: 0 }, f.admin);
     await f.drops.cancel(dropped.id, f.admin);
     // The LIVE RELEASES: one ended by ORBES after a sale, one sold out with its after-room, one ended before its name
     // was revealed, one still to come, one cancelled, one never published.

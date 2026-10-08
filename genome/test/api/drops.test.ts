@@ -50,6 +50,15 @@ import { createLiveRelease, createModel, holdPieces, liveFixtureOn } from '../su
 import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
 const HOUR = 3_600_000;
+/** Plan NEXT LOT §3.6.F: a draw's pieces are given per size; one size holding them all. */
+const one = (pieces: number) => [{ label: 'ONE SIZE', pieces }];
+/**
+ * The tests written before the sizes mean a draw of one pool: once published, its size is taken away, as a draw published
+ * before this lot reads (test/support/draws.ts says the same of poolDraw).
+ */
+async function asBefore(h: Harness, id: string): Promise<void> {
+  await h.ctx.db.deleteFrom('drop_sizes').where('drop_id', '=', id).execute();
+}
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 interface AdminDropJson {
@@ -200,21 +209,24 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
 
   /** A DRAFT opening in `opensIn` ms for `hours` hours. */
   async function draft(body: Partial<Record<string, unknown>> = {}, opensIn = HOUR, hours = 2): Promise<AdminDropJson> {
+    const { quantity, ...rest } = body;
     const res = await operator.post(adminUrl(), {
       modelId: catalog.modelId,
       title: 'MONOLITHE — the first release',
-      quantity: 2,
+      sizes: one(typeof quantity === 'number' ? quantity : 2),
       opensAt: at(opensIn),
       closesAt: at(opensIn + hours * HOUR),
-      ...body,
+      ...rest,
     });
     expect(res.statusCode, res.body).toBe(201);
     return safeJson(res) as AdminDropJson;
   }
 
+  /** Published, then one pool as a draw of before the sizes (asBefore). */
   const publish = async (id: string) => {
     const res = await operator.post(`${adminUrl(id)}/publish`);
     expect(res.statusCode, res.body).toBe(200);
+    await asBefore(h, id);
     return safeJson(res) as AdminDropJson;
   };
   const enter = (c: Client, id: string) => c.post(`/api/v1/club/drops/${id}/enter`);
@@ -279,19 +291,20 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
   it('creates a DRAFT with its seed committed, edits it freely, and publishes it; then only its description changes', async () => {
     // Refused before anything is written: a window that closes first, no piece, an unknown or inactive model.
     const bad = async (body: Record<string, unknown>, status = 400, code = 'VALIDATION_FAILED') => {
-      const res = await operator.post(adminUrl(), { modelId: catalog.modelId, title: 'X', quantity: 1, opensAt: at(HOUR), closesAt: at(2 * HOUR), ...body });
+      const res = await operator.post(adminUrl(), { modelId: catalog.modelId, title: 'X', sizes: one(1), opensAt: at(HOUR), closesAt: at(2 * HOUR), ...body });
       expect([res.statusCode, errorOf(res).code], JSON.stringify(body)).toEqual([status, code]);
     };
     await bad({ closesAt: at(HOUR) });
-    await bad({ quantity: 0 });
-    await bad({ quantity: 10_001 });
+    await bad({ sizes: one(0) });
+    await bad({ sizes: one(10_001) });
+    await bad({ quantity: 1 });
     await bad({ purchaseWindowHours: 337 });
     await bad({ title: '' });
     await bad({ seed: 'x' });
     await bad({ modelId: '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6' }, 404, 'MODEL_NOT_FOUND');
     const inactive = (await h.ctx.db.insertInto('models').values({ category_id: (await h.ctx.categories.getByCode('J'))!.index, name: 'OLD', type: 'RING', sku_prefix: 'OLD-DROP', active: false }).returning('id').executeTakeFirstOrThrow()).id;
     await bad({ modelId: inactive }, 409, 'MODEL_INACTIVE');
-    expect((await auditor.post(adminUrl(), { modelId: catalog.modelId, title: 'X', quantity: 1, opensAt: at(HOUR), closesAt: at(2 * HOUR) })).statusCode).toBe(403);
+    expect((await auditor.post(adminUrl(), { modelId: catalog.modelId, title: 'X', sizes: one(1), opensAt: at(HOUR), closesAt: at(2 * HOUR) })).statusCode).toBe(403);
 
     const d = await draft({ description: 'Twelve pieces, cast in Paris.' });
     expect(d).toMatchObject({ state: 'DRAFT', quantity: 2, purchaseWindowHours: 48, publishedAt: null, seed: null, entries: { ENTERED: 0, SELECTED: 0 } });
@@ -309,7 +322,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     expect((safeJson(await h.client().get('/api/v1/drops')) as { drops: { id: string }[] }).drops.map((x) => x.id)).not.toContain(d.id);
 
     // A DRAFT changes freely, audited with each value before and after (the description as its length and hash).
-    const changed = safeJson(await operator.patch(adminUrl(d.id), { title: 'MONOLITHE — release I', quantity: 3, purchaseWindowHours: 24, description: '' })) as AdminDropJson;
+    const changed = safeJson(await operator.patch(adminUrl(d.id), { title: 'MONOLITHE — release I', sizes: one(3), purchaseWindowHours: 24, description: '' })) as AdminDropJson;
     expect(changed).toMatchObject({ title: 'MONOLITHE — release I', quantity: 3, purchaseWindowHours: 24, description: null, seedHash: d.seedHash });
     const update = (await audits('drop.update', d.id))[0]!.details as { before: Record<string, unknown>; after: Record<string, unknown> };
     expect(update.after).toMatchObject({ title: 'MONOLITHE — release I', quantity: 3, purchaseWindowHours: 24, description: null });
@@ -431,8 +444,10 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
     expect(page.headers['cache-control']).toBe('public, max-age=60');
     const published = safeJson(page) as { items: { id: string; tier: number; seniority: number; rank: number }[]; total: number };
     expect(published.total).toBe(5);
-    // Each entry by its id, tier, seniority and rank: nothing of its account.
-    for (const e of published.items) expect(Object.keys(e).sort()).toEqual(['id', 'rank', 'seniority', 'tier']);
+    // Each entry by its id, tier, seniority and rank (and its size, plan NEXT LOT §3.6.F: none in a draw without sizes):
+    // nothing of its account.
+    for (const e of published.items) expect(Object.keys(e).sort()).toEqual(['id', 'rank', 'seniority', 'size', 'tier']);
+    for (const e of published.items) expect((e as { size?: unknown }).size).toBeNull();
     // The ranks are the rule's, recomputed here from what the page publishes.
     const recomputed = drawOrder(published.items.map((e) => ({ id: e.id, tier: e.tier as 0, seniority: e.seniority })), new Uint8Array(seed));
     expect(published.items.map((e) => [e.id, e.rank])).toEqual(recomputed.map((e) => [e.id, e.rank]));
@@ -603,7 +618,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       await staff();
       for (const earlyAccessHours of [-1, 337, 1.5, '48']) {
         for (const field of ['earlyAccessHours', 'earlyAccessPlatineHours']) {
-          const res = await operator.post(adminUrl(), { modelId: catalog.modelId, title: 'X', quantity: 1, opensAt: at(HOUR), closesAt: at(2 * HOUR), [field]: earlyAccessHours });
+          const res = await operator.post(adminUrl(), { modelId: catalog.modelId, title: 'X', sizes: one(1), opensAt: at(HOUR), closesAt: at(2 * HOUR), [field]: earlyAccessHours });
           expect([res.statusCode, errorOf(res).code], `${field} ${String(earlyAccessHours)}`).toEqual([400, 'VALIDATION_FAILED']);
         }
       }
@@ -621,7 +636,7 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
       // PALLADIUM's window given alone: PLATINE's from THE PROGRAM, within it.
       expect(await draft({ earlyAccessHours: 1 }, 72 * HOUR)).toMatchObject({ earlyAccessHours: 1, earlyAccessPlatineHours: 1 });
       // PLATINE never before PALLADIUM, at creation or by a change.
-      const before = await operator.post(adminUrl(), { modelId: catalog.modelId, title: 'X', quantity: 1, opensAt: at(72 * HOUR), closesAt: at(74 * HOUR), earlyAccessHours: 2, earlyAccessPlatineHours: 3 });
+      const before = await operator.post(adminUrl(), { modelId: catalog.modelId, title: 'X', sizes: one(1), opensAt: at(72 * HOUR), closesAt: at(74 * HOUR), earlyAccessHours: 2, earlyAccessPlatineHours: 3 });
       expect([before.statusCode, errorOf(before).message]).toEqual([400, 'PALLADIUM’s early access starts no later than PLATINE’s.']);
       // THE PROGRAM's defaults follow its settings.
       await h.ctx.services.clubProgram.update({ ...(await h.ctx.services.clubProgram.read()), earlyAccessPalladiumHours: 12, earlyAccessPlatineHours: 6 }, { type: 'admin', id: (await createAdmin(h.ctx, 'ADMIN')).id });
@@ -918,10 +933,13 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
   }
   async function release(body: Record<string, unknown>, opensIn: number, hours = 2): Promise<AdminDropJson> {
     const { modelId } = await seedCatalog(h.ctx);
-    const res = await operator.post(adminUrl(), { modelId, title: 'MONOLITHE — guaranteed', quantity: 4, opensAt: at(opensIn), closesAt: at(opensIn + hours * HOUR), earlyAccessHours: 0, ...body });
+    const { quantity, ...rest } = body;
+    const res = await operator.post(adminUrl(), { modelId, title: 'MONOLITHE — guaranteed', sizes: one(typeof quantity === 'number' ? quantity : 4), opensAt: at(opensIn), closesAt: at(opensIn + hours * HOUR), earlyAccessHours: 0, ...rest });
     expect(res.statusCode, res.body).toBe(201);
     const d = safeJson(res) as AdminDropJson;
     expect((await operator.post(`${adminUrl(d.id)}/publish`)).statusCode).toBe(200);
+    // One pool, as a draw of before the sizes (asBefore).
+    await asBefore(h, d.id);
     return d;
   }
   const guarantee = async (accountId: string, body: Record<string, unknown>) => {
@@ -944,7 +962,7 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
   });
   afterAll(() => h?.close());
 
-  it('selects the guaranteed places first, without a rank and for their pieces: places = quantity − reserved − guaranteed; the seed proof from the page holds and no guaranteed id is ranked; guaranteed[] is empty before the draw, then exactly {id, pieces} for everyone; a hidden guarantee says guaranteed: false to its holder; CONFIRMED gives one order per piece, the first with the shipping and the welcome gift', async () => {
+  it('selects the guaranteed places first, without a rank and for their pieces: places = quantity − reserved − guaranteed; the seed proof from the page holds and no guaranteed id is ranked; guaranteed[] is empty before the draw, then exactly {id, pieces, size} for everyone (size null in a draw without sizes); a hidden guarantee says guaranteed: false to its holder; CONFIRMED gives one order per piece, the first with the shipping and the welcome gift', async () => {
     const d = await release({ quantity: 4 }, HOUR);
     const shown = await collector(5);
     const hidden = await collector();
@@ -978,15 +996,16 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
     for (const r of rows) expect([r.tier, r.seniority, r.rank]).toEqual([null, null, null]);
     expect((await h.ctx.db.selectFrom('house_guarantees').select('status').where('account_id', 'in', [shown.id, hidden.id]).execute()).map((g) => g.status)).toEqual(['USED', 'USED']);
 
-    // The page: the guaranteed places apart, by entry id and pieces, nothing else, whoever reads it.
+    // The page: the guaranteed places apart, by entry id and pieces (and size, plan NEXT LOT §3.6.F: none in a draw
+    // without sizes), nothing else, whoever reads it.
     const expected = [
-      { id: shownEntry.id, pieces: 2 },
-      { id: hiddenEntry.id, pieces: 1 },
+      { id: shownEntry.id, pieces: 2, size: null },
+      { id: hiddenEntry.id, pieces: 1, size: null },
     ].sort((a, b) => (a.id < b.id ? -1 : 1));
     for (const reader of [h.client(), shown.client, hidden.client, others[0]!.client]) {
       const s = await sheetOf(reader, d.id);
       expect(s.guaranteed).toEqual(expected);
-      for (const item of s.guaranteed) expect(Object.keys(item).sort()).toEqual(['id', 'pieces']);
+      for (const item of s.guaranteed) expect(Object.keys(item).sort()).toEqual(['id', 'pieces', 'size']);
     }
     // The seed proof: the ranks recomputed from the published entries and the revealed seed are exactly the published
     // ones, and no guaranteed id is among them.
@@ -1038,10 +1057,163 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
 
     // A DRAFT whose chosen-release guarantee holds 2 pieces: its quantity never below them.
     const { modelId } = await seedCatalog(h.ctx);
-    const draft = safeJson(await operator.post(adminUrl(), { modelId, title: 'DRAFT', quantity: 4, opensAt: at(20 * HOUR), closesAt: at(22 * HOUR) })) as AdminDropJson;
+    const draft = safeJson(await operator.post(adminUrl(), { modelId, title: 'DRAFT', sizes: one(4), opensAt: at(20 * HOUR), closesAt: at(22 * HOUR) })) as AdminDropJson;
     await guarantee((await collector()).id, { scope: 'RELEASE', targetId: draft.id, pieces: 2 });
-    const low = await operator.patch(adminUrl(draft.id), { quantity: 1 });
+    const low = await operator.patch(adminUrl(draft.id), { sizes: one(1) });
     expect([low.statusCode, errorOf(low).code, errorOf(low).message]).toEqual([409, 'DROP_GUARANTEES_EXCEED', '2 pieces of this release are guaranteed by the house.']);
-    expect((await operator.patch(adminUrl(draft.id), { quantity: 2 })).statusCode).toBe(200);
+    expect((await operator.patch(adminUrl(draft.id), { sizes: one(2) })).statusCode).toBe(200);
+  });
+});
+
+describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
+  let h: Harness;
+  let catalog: Catalog;
+  let operator: Client;
+  let auditor: Client;
+  let admin: Client;
+
+  const adminUrl = (id = '') => `/api/admin/drops${id ? `/${id}` : ''}`;
+  const at = (offsetMs: number) => new Date(h.clock.now().getTime() + offsetMs).toISOString();
+  const accountIdOf = async (email: string) => (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow()).id;
+  type SizedJson = AdminDropJson & { sizes: { id: string; label: string; pieces: number; reserved: number; entered: number; held: number; waitlisted: number }[] };
+  async function staff(): Promise<void> {
+    operator = await adminClient(h, 'OPERATOR');
+    auditor = await adminClient(h, 'AUDITOR');
+    admin = await adminClient(h, 'ADMIN');
+  }
+  async function sized(sizes: { label: string; pieces: number }[], opensIn = HOUR, hours = 2, body: Record<string, unknown> = {}): Promise<SizedJson> {
+    const res = await operator.post(adminUrl(), { modelId: catalog.modelId, title: 'MONOLITHE — IN SIZES', sizes, opensAt: at(opensIn), closesAt: at(opensIn + hours * HOUR), earlyAccessHours: 0, ...body });
+    expect(res.statusCode, res.body).toBe(201);
+    return safeJson(res) as SizedJson;
+  }
+  const publish = async (id: string) => {
+    const res = await operator.post(`${adminUrl(id)}/publish`);
+    expect(res.statusCode, res.body).toBe(200);
+    return safeJson(res) as SizedJson;
+  };
+
+  beforeAll(async () => {
+    h = await createHarness();
+    catalog = await seedCatalog(h.ctx);
+    await staff();
+  });
+  afterAll(() => h?.close());
+
+  it('creates a draw with its sizes, the worded refusals of a quantity, of no size, of 25 sizes with pieces and of 10 000 pieces; never publishes a DRAFT of before without its sizes', async () => {
+    const post = (body: Record<string, unknown>) => operator.post(adminUrl(), { modelId: catalog.modelId, title: 'X', opensAt: at(HOUR), closesAt: at(2 * HOUR), ...body });
+    const refused = async (body: Record<string, unknown>, message: string) => {
+      const res = await post(body);
+      expect([res.statusCode, errorOf(res).code, errorOf(res).message], JSON.stringify(body).slice(0, 80)).toEqual([400, 'VALIDATION_FAILED', message]);
+    };
+    await refused({}, 'A release has 1 to 24 sizes with pieces.');
+    await refused({ quantity: 3, sizes: [{ label: '52', pieces: 3 }] }, 'A draw’s pieces are given per size.');
+    await refused({ sizes: Array.from({ length: 25 }, (_, i) => ({ label: String(40 + i), pieces: 1 })) }, 'A release has 1 to 24 sizes with pieces.');
+    await refused({ sizes: [{ label: '52', pieces: 5_000 }, { label: '54', pieces: 5_001 }] }, 'A release has at most 10 000 pieces.');
+    // The request's own bounds: a label of 1 to 12 characters, whole pieces, at most 200 sizes sent.
+    for (const sizes of [[{ label: '', pieces: 1 }], [{ label: 'X'.repeat(13), pieces: 1 }], [{ label: '52', pieces: 1.5 }], [{ label: '52', pieces: 1, extra: 1 }], Array.from({ length: 201 }, (_, i) => ({ label: `L${i}`, pieces: 0 }))]) {
+      expect((await post({ sizes })).statusCode).toBe(400);
+    }
+    const d = await sized([{ label: '52', pieces: 3 }, { label: '54', pieces: 0 }, { label: '56', pieces: 2 }]);
+    expect(d.quantity).toBe(5);
+    expect(d.sizes.map((s) => [s.label, s.pieces, s.reserved, s.entered, s.held, s.waitlisted])).toEqual([
+      ['52', 3, 0, 0, 0, 0],
+      ['56', 2, 0, 0, 0, 0],
+    ]);
+    const changed = await operator.patch(adminUrl(d.id), { sizes: [{ label: '52', pieces: 4 }] });
+    expect(changed.statusCode, changed.body).toBe(200);
+    expect((safeJson(changed) as SizedJson).quantity).toBe(4);
+    expect(errorOf(await operator.patch(adminUrl(d.id), { quantity: 4 })).message).toBe('A draw’s pieces are given per size.');
+    expect((await auditor.patch(adminUrl(d.id), { sizes: [{ label: '52', pieces: 1 }] })).statusCode).toBe(403);
+    // A DRAFT of before this lot (no sizes) is refused at publication until it has them.
+    await h.ctx.db.deleteFrom('drop_sizes').where('drop_id', '=', d.id).execute();
+    const old = await operator.post(`${adminUrl(d.id)}/publish`);
+    expect([old.statusCode, errorOf(old).code, errorOf(old).message]).toEqual([409, 'DROP_SIZES_REQUIRED', 'Give the release its sizes and their pieces before publishing it.']);
+  });
+
+  it('reads the account\'s entry (no-store), enters in a size, changes it, reserves per size, as a signed-in account with its CSRF token', async () => {
+    const d = await sized([{ label: '52', pieces: 1 }, { label: '54', pieces: 2 }], 10 * HOUR, 2, { earlyAccessHours: 48, earlyAccessPlatineHours: 48 });
+    const draft = await sized([{ label: '52', pieces: 1 }], HOUR);
+    await publish(d.id);
+    const [s52, s54] = [d.sizes[0]!.id, d.sizes[1]!.id];
+    const url = (id: string, what: string) => `/api/v1/club/drops/${id}/${what}`;
+    const me = await accountClient(h);
+    // The entry: signed out 401; an unknown, malformed or unpublished draw 404; none yet.
+    expect((await h.client().get(url(d.id, 'entry'))).statusCode).toBe(401);
+    for (const id of ['nope', '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', draft.id]) expect(errorOf(await me.client.get(url(id, 'entry'))).code, id).toBe('DROP_NOT_FOUND');
+    const empty = await me.client.get(url(d.id, 'entry'));
+    expect(empty.headers['cache-control']).toBe('no-store');
+    expect(safeJson(empty)).toEqual({ entry: null, savedSize: null });
+    // The early access: a PLATINE account reserves in a size.
+    const platine = await accountClient(h);
+    await holdPieces(h.ctx.db, await accountIdOf(platine.email), 5, catalog.modelId);
+    expect(errorOf(await platine.client.post(url(d.id, 'reserve'))).code).toBe('DROP_SIZE_REQUIRED');
+    const reserved = await platine.client.post(url(d.id, 'reserve'), { sizeId: s52 });
+    expect(reserved.statusCode, reserved.body).toBe(200);
+    expect((safeJson(reserved) as { entry: { size: unknown } }).entry.size).toEqual({ id: s52, label: '52' });
+    const palladium = await accountClient(h);
+    await holdPieces(h.ctx.db, await accountIdOf(palladium.email), 10, catalog.modelId);
+    const full = await palladium.client.post(url(d.id, 'reserve'), { sizeId: s52 });
+    expect([full.statusCode, errorOf(full).code, errorOf(full).message]).toEqual([409, 'DROP_SIZE_FULL', 'Every piece in size 52 has been reserved.']);
+    expect((safeJson(await h.client().get(`/api/v1/drops/${d.id}`)) as { sizes: unknown[] }).sizes).toEqual([
+      { id: s52, label: '52', pieces: 1, reserved: 1, full: true },
+      { id: s54, label: '54', pieces: 2, reserved: 0, full: false },
+    ]);
+    // Entries open: ENTER in a size; the size required, known, a UUID.
+    h.clock.advance(10 * HOUR + 60_000);
+    expect(errorOf(await me.client.post(url(d.id, 'enter'))).code).toBe('DROP_SIZE_REQUIRED');
+    expect(errorOf(await me.client.post(url(d.id, 'enter'), { sizeId: 'x' })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await me.client.post(url(d.id, 'enter'), { sizeId: '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6' })).code).toBe('DROP_SIZE_UNKNOWN');
+    expect((await me.client.post(url(d.id, 'enter'), { sizeId: s52 }, { noCsrf: true })).statusCode).toBe(403);
+    const entered = await me.client.post(url(d.id, 'enter'), { sizeId: s52 });
+    expect(entered.statusCode, entered.body).toBe(200);
+    expect((safeJson(entered) as { entry: { status: string; size: unknown } }).entry).toMatchObject({ status: 'ENTERED', size: { id: s52, label: '52' } });
+    // CHANGE SIZE: its body required, CSRF and a session; the account's entry then reads the new size.
+    expect((await h.client().post(url(d.id, 'size'), { sizeId: s54 })).statusCode).toBe(401);
+    expect((await me.client.post(url(d.id, 'size'), { sizeId: s54 }, { noCsrf: true })).statusCode).toBe(403);
+    expect(errorOf(await me.client.post(url(d.id, 'size'))).code).toBe('VALIDATION_FAILED');
+    const moved = await me.client.post(url(d.id, 'size'), { sizeId: s54 });
+    expect(moved.statusCode, moved.body).toBe(200);
+    expect((safeJson(await me.client.get(url(d.id, 'entry'))) as { entry: { size: unknown } }).entry.size).toEqual({ id: s54, label: '54' });
+    expect(errorOf(await platine.client.post(url(d.id, 'size'), { sizeId: s54 })).code).toBe('DROP_SIZE_FIXED');
+    // MY PIECES' status names each entry's size.
+    const status = safeJson(await me.client.get('/api/v1/club/status')) as { entries: { dropId: string; size: unknown }[] };
+    expect(status.entries.find((e) => e.dropId === d.id)!.size).toEqual({ id: s54, label: '54' });
+  });
+
+  it('draws per size, lists each entry\'s size, filters the console\'s entries by size, and offers the next place per size', async () => {
+    await staff();
+    const d = await sized([{ label: '52', pieces: 1 }, { label: '54', pieces: 1 }], HOUR);
+    await publish(d.id);
+    const [s52, s54] = [d.sizes[0]!.id, d.sizes[1]!.id];
+    h.clock.advance(HOUR + 60_000);
+    const who: Client[] = [];
+    for (const s of [s52, s52, s54]) {
+      const a = await accountClient(h);
+      expect((await a.client.post(`/api/v1/club/drops/${d.id}/enter`, { sizeId: s })).statusCode).toBe(200);
+      who.push(a.client);
+    }
+    h.clock.advance(2 * HOUR);
+    await staff();
+    const drawn = await admin.post(`${adminUrl(d.id)}/draw`);
+    expect(drawn.statusCode, drawn.body).toBe(200);
+    expect((safeJson(drawn) as { sizes: unknown[] }).sizes).toEqual([
+      { id: s52, label: '52', places: 1, selected: 1, waitlisted: 1 },
+      { id: s54, label: '54', places: 1, selected: 1, waitlisted: 0 },
+    ]);
+    const list = safeJson(await h.client().get(`/api/v1/drops/${d.id}/entries`)) as { items: { size: { id: string; label: string } }[] };
+    expect(list.items.map((e) => e.size.label).sort()).toEqual(['52', '52', '54']);
+    const in52 = safeJson(await auditor.get(`${adminUrl(d.id)}/entries?sizeId=${s52}`)) as { items: { size: { label: string }; email: string }[]; total: number };
+    expect(in52.total).toBe(2);
+    expect(in52.items.every((e) => e.size.label === '52' && e.email.includes('***'))).toBe(true);
+    expect((await auditor.get(`${adminUrl(d.id)}/entries?sizeId=x`)).statusCode).toBe(400);
+    // OFFER NEXT: the size required in a draw with sizes; per size, while it has a place.
+    expect(errorOf(await operator.post(`${adminUrl(d.id)}/offer-next`)).code).toBe('DROP_SIZE_REQUIRED');
+    expect(errorOf(await operator.post(`${adminUrl(d.id)}/offer-next`, { sizeId: s52 })).code).toBe('DROP_FULL');
+    expect((await auditor.post(`${adminUrl(d.id)}/offer-next`, { sizeId: s52 })).statusCode).toBe(403);
+    const sheet = safeJson(await auditor.get(adminUrl(d.id))) as SizedJson;
+    expect(sheet.sizes.map((s) => [s.label, s.held, s.waitlisted])).toEqual([
+      ['52', 1, 1],
+      ['54', 1, 0],
+    ]);
   });
 });

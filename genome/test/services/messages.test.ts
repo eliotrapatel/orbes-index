@@ -16,6 +16,7 @@ import { purgeScanHistory } from '../../src/server/services/scan-retention.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createAccount, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
@@ -123,8 +124,7 @@ describe('MessageService (CS-01)', () => {
       path: `/verify/releases/${sale.dropId}`,
     });
     // A draw: the place held after the draw, the place reserved directly before it opens to everyone, or no entry.
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'Monolithe in steel', quantity: 3, opensAt: new Date(clock.now().getTime() + HOUR), closesAt: new Date(clock.now().getTime() + 2 * HOUR), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(draw.id, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'Monolithe in steel', quantity: 3, opensAt: new Date(clock.now().getTime() + HOUR), closesAt: new Date(clock.now().getTime() + 2 * HOUR), earlyAccessHours: 0 }, f.admin);
     const b = await createAccount(t.db);
     const c = await createAccount(t.db);
     const respondBy = new Date(clock.now().getTime() + 48 * HOUR);
@@ -178,7 +178,7 @@ describe('MessageService (CS-01)', () => {
     const other = await createAccount(t.db);
     const [theirs] = await holdPieces(t.db, other.id, 1, f.modelId);
     const theirSale = await liveSale(other);
-    const draft = await f.drops.create({ modelId: f.modelId, title: 'Draft', quantity: 3, opensAt: new Date(clock.now().getTime() + HOUR), closesAt: new Date(clock.now().getTime() + 2 * HOUR), earlyAccessHours: 0 }, f.admin);
+    const draft = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'Draft', quantity: 3, opensAt: new Date(clock.now().getTime() + HOUR), closesAt: new Date(clock.now().getTime() + 2 * HOUR), earlyAccessHours: 0 }, f.admin, { publish: false });
     // A LIVE RELEASE announced yesterday whose name is revealed in 5 days, and one published but announced tomorrow.
     const unnamed = await createLiveRelease(f, { opensAt: new Date(clock.now().getTime() + 7 * 24 * HOUR), announceAt: new Date(clock.now().getTime() - 24 * HOUR) });
     await t.db.updateTable('drops').set({ title: 'SECRET MODEL IN BLUE', name_at: new Date(clock.now().getTime() + 5 * 24 * HOUR), photo_at: new Date(clock.now().getTime() + 6 * 24 * HOUR) }).where('id', '=', unnamed.id).execute();
@@ -469,8 +469,7 @@ describe('MessageService (CS-01)', () => {
 
   it('labels the place of a house guarantee not shown, used at the draw, PLACE HELD as the release page says it, never a mark of the guarantee', async () => {
     const opensAt = new Date(clock.now().getTime() + 2 * HOUR);
-    const guaranteed = await f.drops.create({ modelId: f.modelId, title: 'Monolithe in gold', quantity: 3, opensAt, closesAt: new Date(opensAt.getTime() + HOUR), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, f.admin);
-    await f.drops.publish(guaranteed.id, f.admin);
+    const guaranteed = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'Monolithe in gold', quantity: 3, opensAt, closesAt: new Date(opensAt.getTime() + HOUR), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, f.admin);
     const holder = await createAccount(t.db);
     await ctx.services.guarantees.grant(holder.id, { scope: 'RELEASE', targetId: guaranteed.id, pieces: 1, validUntil: '2026-12-31', visible: false }, f.admin);
     clock.set(new Date(opensAt.getTime() + MINUTE));

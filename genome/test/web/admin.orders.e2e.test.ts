@@ -45,6 +45,7 @@ import { stockPieces, type StockedPiece } from '../support/fulfil.js';
 import { writePng } from '../support/image-io.js';
 import { jpegPhoto } from '../support/images.js';
 import { createAccount, holdPieces } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -220,7 +221,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     offset = 0;
 
     // A LIVE RELEASE's piece, confirmed now with its engraving add-on; its surprise as the release would carry it.
-    const drop = await ctx.services.drops.create({ modelId, title: 'THE VAULT RING', quantity: 3, opensAt: new Date(Date.now() + 2 * MINUTE), closesAt: new Date(Date.now() + HOUR), earlyAccessHours: 0 }, admin);
+    const drop = await poolDraw(ctx.services.drops, ctx.db, { modelId, title: 'THE VAULT RING', quantity: 3, opensAt: new Date(Date.now() + 2 * MINUTE), closesAt: new Date(Date.now() + HOUR), earlyAccessHours: 0 }, admin, { publish: false });
     await ctx.db
       .updateTable('drops')
       .set({ mode: 'LIVE', early_access_platine_hours: null, live_min_tier: 0, tier_priority: true, room_opens_minutes: 5, turn_seconds: 30, pay_minutes: 5, per_account: 1, price_minor: 480_000, currency: 'EUR', quantity_line: '3 PIECES', published_at: new Date() })

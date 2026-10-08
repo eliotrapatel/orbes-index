@@ -20,6 +20,7 @@ import { readDoc } from '../docs/lexicon.js';
 import { jpegPhoto, SVG_IMAGE } from '../support/images.js';
 import { createAccount, createCollection, createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
+import { poolDraw } from '../support/draws.js';
 
 interface GalleryImage {
   sha256: string;
@@ -478,8 +479,7 @@ describe('THE RELEASES OF THIS MODEL (plan NEXT-NINE, CO-01): a sheet\'s past re
   /** A draw of `modelId` opening at `opens` (from START), published unless `draft`; drawn once its entries close when `drawn`. */
   async function draw(key: string, modelId: string, opens: number, o: { drawn?: boolean; draft?: boolean; cancel?: boolean; closes?: number } = {}): Promise<string> {
     h.clock.set(new Date(START + opens - HOUR));
-    const d = await f.drops.create({ modelId, title: `DRAW ${key}`, quantity: 2, opensAt: new Date(START + opens), closesAt: new Date(START + (o.closes ?? opens + HOUR)), earlyAccessHours: 0 }, f.admin);
-    if (!o.draft) await f.drops.publish(d.id, f.admin);
+    const d = await poolDraw(f.drops, f.db, { modelId, title: `DRAW ${key}`, quantity: 2, opensAt: new Date(START + opens), closesAt: new Date(START + (o.closes ?? opens + HOUR)), earlyAccessHours: 0 }, f.admin, { publish: !o.draft });
     if (o.cancel) await f.drops.cancel(d.id, f.admin);
     if (o.drawn) {
       h.clock.set(new Date(START + (o.closes ?? opens + HOUR) + MINUTE));

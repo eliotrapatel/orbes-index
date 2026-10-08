@@ -28,6 +28,7 @@ import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto } from '../support/images.js';
 import { holdPieces } from '../support/live.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
+import { oneSizeOf } from '../support/draws.js';
 
 const HOUR = 3_600_000;
 
@@ -367,7 +368,7 @@ describe('the owners\' circle (P-X01)', () => {
   it('shows a post\'s photographs, its links (a published drop, a model shown in the lookbook, the host of an address), and its cover in the feed', async () => {
     const m = await member(1);
     const drop = await h.ctx.services.drops.create(
-      { modelId: catalog.modelId, title: 'MONOLITHE — release II', quantity: 2, opensAt: new Date(h.clock.now().getTime() + HOUR), closesAt: new Date(h.clock.now().getTime() + 3 * HOUR) },
+      { modelId: catalog.modelId, title: 'MONOLITHE — release II', sizes: [{ label: await oneSizeOf(h.ctx.db, catalog.modelId), pieces: 2 }], opensAt: new Date(h.clock.now().getTime() + HOUR), closesAt: new Date(h.clock.now().getTime() + 3 * HOUR) },
       { type: 'admin', id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id },
     );
     const post = await create({ title: 'The new release', dropId: drop.id, modelId: catalog.modelId, externalUrl: 'https://www.youtube.com/watch?v=orbes' });

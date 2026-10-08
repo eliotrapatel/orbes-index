@@ -59,6 +59,7 @@ import {
   type LiveFixture,
   type LiveRelease,
 } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const T0 = new Date('2026-11-02T10:00:00.000Z');
 const at = (ms: number) => new Date(T0.getTime() + ms);
@@ -214,8 +215,7 @@ describe('LiveService', () => {
       await rejects(f.live.enter(a.id, r.id, { sizeId: r.sizes[1]!.id }, a.actor), 'DROP_NOT_FOUND', 404);
       await rejects(f.live.setInterest(a.id, r.id, r.sizes[1]!.id, a.actor), 'DROP_NOT_FOUND', 404);
       await rejects(f.live.enter(a.id, '00000000-0000-4000-8000-000000000000', { sizeId: r.sizes[1]!.id }, a.actor), 'DROP_NOT_FOUND', 404);
-      const draw = await f.drops.create({ modelId: f.modelId, title: 'A draw', quantity: 1, opensAt: T0, closesAt: at(MINUTE) }, f.admin);
-      await f.drops.publish(draw.id, f.admin);
+      const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'A draw', quantity: 1, opensAt: T0, closesAt: at(MINUTE) }, f.admin);
       await rejects(f.live.enter(a.id, draw.id, { sizeId: r.sizes[1]!.id }, a.actor), 'DROP_NOT_FOUND', 404);
       // Announced, the room not open yet.
       f.clock.set(at(-5 * MINUTE - 1));

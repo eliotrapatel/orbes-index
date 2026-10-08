@@ -77,6 +77,7 @@ import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto, SEGMENTS, withJpegSegments } from '../support/images.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { CHROMIUM_PATH, launchChromium, MOBILE_VIEWPORT, mobileContext, startVerifyServer, writeCameraY4m, writeCodePng, type VerifyServer } from './verify.harness.js';
+import { poolDraw } from '../support/draws.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
@@ -2679,11 +2680,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await ctx.services.catalog.updateModel(model.id, { slug: 'eclipse', lookbook: 'PUBLIC' }, SYSTEM_ACTOR);
     const staff = await ctx.services.auth.createAdmin({ email: 'releases@orbes.test', password: 'orbes releases passphrase 2026', role: 'ADMIN' }, SYSTEM_ACTOR);
     const actor = { type: 'admin' as const, id: staff.id };
-    const drop = await ctx.services.drops.create(
+    const drop = await poolDraw(
+      ctx.services.drops,
+      ctx.db,
       { modelId: model.id, title: 'ECLIPSE — release I', description: 'Two pieces, cast in Paris.', quantity: 2, opensAt: new Date(Date.now() - 3_600_000), closesAt: new Date(Date.now() + 86_400_000) },
       actor,
     );
-    await ctx.services.drops.publish(drop.id, actor);
     // The entrant holds a piece (TITANE): the draw ranks it first, before two accounts that hold none.
     const email = 'release.entrant@example.com';
     const entrant = await ctx.services.auth.registerAccount({ email, password: PASSWORD }, {});
@@ -2826,11 +2828,12 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     const staff = await ctx.services.auth.createAdmin({ email: 'early.access@orbes.test', password: 'orbes early access passphrase 2026', role: 'ADMIN' }, SYSTEM_ACTOR);
     const actor = { type: 'admin' as const, id: staff.id };
     // Two pieces, entries open to everyone in a day: published inside its early access of 48 hours for both tiers, which opens with it.
-    const drop = await ctx.services.drops.create(
+    const drop = await poolDraw(
+      ctx.services.drops,
+      ctx.db,
       { modelId: model.id, title: 'SOLSTICE — release I', quantity: 2, opensAt: new Date(Date.now() + 86_400_000), closesAt: new Date(Date.now() + 2 * 86_400_000), earlyAccessHours: 48, earlyAccessPlatineHours: 48 },
       actor,
     );
-    await ctx.services.drops.publish(drop.id, actor);
     // A PLATINE owner (five pieces) and a TITANE one (one piece).
     const platineEmail = 'early.platine@example.com';
     const platine = await ctx.services.auth.registerAccount({ email: platineEmail, password: PASSWORD }, {});
@@ -3102,8 +3105,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // A release of a model of its own, published: the note links its page.
     const category = (await ctx.categories.getByCode('J'))!;
     const model = await ctx.db.insertInto('models').values({ category_id: category.index, name: 'HALO', type: 'RING', sku_prefix: 'HAL-CR' }).returning('id').executeTakeFirstOrThrow();
-    const drop = await ctx.services.drops.create({ modelId: model.id, title: 'HALO — release I', quantity: 1, opensAt: new Date(Date.now() + 3_600_000), closesAt: new Date(Date.now() + 7_200_000) }, actor);
-    await ctx.services.drops.publish(drop.id, actor);
+    const drop = await poolDraw(ctx.services.drops, ctx.db, { modelId: model.id, title: 'HALO — release I', quantity: 1, opensAt: new Date(Date.now() + 3_600_000), closesAt: new Date(Date.now() + 7_200_000) }, actor);
     // Four posts: one kept for PLATINE and up, then a poll, an invitation and a note, published in that order.
     const platine = await circle.create({ kind: 'NOTE', title: 'For PLATINE and up' , minTier: 2 }, actor);
     const poll = await circle.create({ kind: 'POLL', title: 'The next stone', pollOptions: ['Onyx', 'Opal', 'Jade'] }, actor);

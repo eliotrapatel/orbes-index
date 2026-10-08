@@ -25,6 +25,7 @@ import { LiveRoomService } from '../../src/server/services/live-room.js';
 import type { Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createLiveRelease, createModel, entriesOf, liveFixture, type LiveFixture, type LiveRelease } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const T0 = new Date('2026-11-02T10:00:00.000Z');
 const at = (ms: number) => new Date(T0.getTime() + ms);
@@ -463,7 +464,7 @@ describe('the after-room', () => {
     await expect(t.db.updateTable('drops').set({ parent_drop_id: child }).where('id', '=', child).execute()).rejects.toThrow(/check constraint/);
     // A draw has none of it; a release, one after-room at most.
     const lone = await createLiveRelease(f, { opensAt: T0, published: false });
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'A draw', quantity: 1, opensAt: T0, closesAt: at(MINUTE) }, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'A draw', quantity: 1, opensAt: T0, closesAt: at(MINUTE) }, f.admin, { publish: false });
     await expect(sql`UPDATE drops SET parent_drop_id = ${lone.id}, after_room_delay_minutes = 10, after_room_length_minutes = 15 WHERE id = ${draw.id}`.execute(t.db)).rejects.toThrow(/check constraint/);
     await expect(
       sql`UPDATE drops SET parent_drop_id = ${r.id}, after_room_delay_minutes = 10, after_room_length_minutes = 15, surprise_enabled = false, question_enabled = false WHERE id = ${lone.id}`.execute(t.db),

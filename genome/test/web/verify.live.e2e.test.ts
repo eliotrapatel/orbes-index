@@ -48,6 +48,7 @@ import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture, type Li
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { focusRingContrast, keepsVault, screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
+import { poolDraw } from '../support/draws.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
@@ -726,8 +727,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
 
   it('the LIVE RELEASES refused (429): THE RELEASES keeps the draws and says the LIVE half missing; a draw\'s address shows its draw; a LIVE one its failure, then TRY AGAIN', async () => {
     const r = await release({ opensAt: new Date(Date.now() + 2 * 86_400_000) });
-    const draw = await f.drops.create({ modelId: f.modelId, title: 'MONOLITHE — release II', quantity: 2, opensAt: new Date(Date.now() - 3_600_000), closesAt: new Date(Date.now() + 86_400_000), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(draw.id, f.admin);
+    const draw = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'MONOLITHE — release II', quantity: 2, opensAt: new Date(Date.now() - 3_600_000), closesAt: new Date(Date.now() + 86_400_000), earlyAccessHours: 0 }, f.admin);
     const { page, context, problems } = await phone(null);
     // The rate group of the LIVE RELEASES refuses this phone: their list and every release's page.
     const refused = (u: URL) => u.pathname === '/api/v1/live' || /^\/api\/v1\/live\/[0-9a-f-]{36}$/.test(u.pathname);

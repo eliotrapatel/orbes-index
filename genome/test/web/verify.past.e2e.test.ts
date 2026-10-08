@@ -30,6 +30,7 @@ import { createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFix
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { keepsVault, screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
+import { poolDraw } from '../support/draws.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
@@ -94,11 +95,12 @@ describe.skipIf(!HAS_CHROMIUM)("THE RELEASES' LIVE and PAST tabs, a past release
     newcomer = await account();
 
     // A draw of one piece: the collector and another enter; drawn; the other's place concluded, the collector waiting.
-    const d = await ctx.services.drops.create(
+    const d = await poolDraw(
+      ctx.services.drops,
+      ctx.db,
       { modelId: f.modelId, title: 'ECLIPSE — release I', quantity: 1, opensAt: new Date(Date.now() - 2 * HOUR), closesAt: new Date(Date.now() + DAY), earlyAccessHours: 0 },
       f.admin,
     );
-    await ctx.services.drops.publish(d.id, f.admin);
     for (const x of [a, b]) await ctx.services.drops.enter(x.id, d.id, x.actor);
     await ctx.db.updateTable('drops').set({ closes_at: new Date(Date.now() - 1000) }).where('id', '=', d.id).execute();
     await ctx.services.drops.draw(d.id, f.admin);
@@ -125,11 +127,12 @@ describe.skipIf(!HAS_CHROMIUM)("THE RELEASES' LIVE and PAST tabs, a past release
     // Older draws, drawn long ago: PAST shows them a page at a time.
     older = [];
     for (let i = 0; i < PAST_PAGE_SIZE; i++) {
-      const x = await ctx.services.drops.create(
+      const x = await poolDraw(
+        ctx.services.drops,
+        ctx.db,
         { modelId: f.modelId, title: `ARCHIVE — release ${i + 1}`, quantity: 2, opensAt: new Date(Date.now() + HOUR), closesAt: new Date(Date.now() + 2 * HOUR), earlyAccessHours: 0 },
         f.admin,
       );
-      await ctx.services.drops.publish(x.id, f.admin);
       // Its dates moved to the past it stands for (the console publishes a release only ahead of its entries), then drawn.
       await ctx.db
         .updateTable('drops')
@@ -142,8 +145,7 @@ describe.skipIf(!HAS_CHROMIUM)("THE RELEASES' LIVE and PAST tabs, a past release
     // To come: a LIVE RELEASE announced, a draw open.
     coming = await createLiveRelease(f, { opensAt: new Date(Date.now() + 2 * DAY), quantityLine: '12 PIECES' });
     await ctx.db.updateTable('drops').set({ title: 'MONOLITHE — LIVE' }).where('id', '=', coming.id).execute();
-    open = await ctx.services.drops.create({ modelId: f.modelId, title: 'ECLIPSE — release II', quantity: 3, opensAt: new Date(Date.now() - HOUR), closesAt: new Date(Date.now() + DAY), earlyAccessHours: 0 }, f.admin);
-    await ctx.services.drops.publish(open.id, f.admin);
+    open = await poolDraw(ctx.services.drops, ctx.db, { modelId: f.modelId, title: 'ECLIPSE — release II', quantity: 3, opensAt: new Date(Date.now() - HOUR), closesAt: new Date(Date.now() + DAY), earlyAccessHours: 0 }, f.admin);
     browser = await launchChromium();
   }, 180_000);
 

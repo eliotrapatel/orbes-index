@@ -205,6 +205,8 @@ const pieceNotLinked = () => conflict('ORDER_PIECE_NOT_LINKED', 'Link the piece 
 export const orderNotPacked = () => conflict('ORDER_NOT_PACKED', 'Pack the parcel and check it before it ships.');
 const pieceLinked = () => conflict('ORDER_PIECE_LINKED', 'A piece is already linked to this order: transfer the piece instead.');
 const termsFixed = () => conflict('ORDER_TERMS_FIXED', 'The size and the price of a LIVE RELEASE order are those of its release.');
+/** Plan NEXT LOT §3.6.F and §3.6.G: a draw's entry and a salon's request with a size fix it; an exchange goes through an order case. */
+const sizeFixed = () => conflict('ORDER_SIZE_FIXED', 'The size of this order is the one chosen at its entry or request.');
 const orderClosed = () => conflict('ORDER_CLOSED', 'This order can no longer change.');
 const carrierUnknown = () => notFound('Carrier', 'CARRIER_NOT_FOUND');
 const priceMissing = () => conflict('ORDER_PRICE_MISSING', 'Enter the order’s price before it is paid: its invoice is issued then.');
@@ -1124,8 +1126,9 @@ export async function ordersForLiveEntry(tx: Db, entryId: string, actor: Actor, 
  * The orders of an entry of a draw confirmed by Client Services, in the transaction that confirms it (the drop's row and
  * the entry's held): one per piece of the entry (`pieces`: 1, or a house's guarantee's, plan NEXT-NINE IN-01), RESERVED
  * at the drop's location, with the draw's price and currency when it has one (plan NOCTURNE, addition 5: instead of « to
- * be confirmed »), its size (and a price the draw does not give) to be entered (`setTerms`) (`reservedAt`: the time of
- * the sale, for an entry confirmed before its order existed). Following BP-19, the first carries the shipping and any
+ * be confirmed »), and (plan NEXT LOT §3.6.F) the size the entry chose with its SKU, held or waiting for stock at once, a
+ * size set aside since staying its own; an entry of a draw without sizes has its size (and a price the draw does not
+ * give) to be entered (`setTerms`) (`reservedAt`: the time of the sale, for an entry confirmed before its order existed). Following BP-19, the first carries the shipping and any
  * welcome gift; the others travel with it (its service, shipping 0). Idempotent (only the pieces without an order get
  * one; `order` is the first created, null when the entry has its orders).
  */
@@ -1133,10 +1136,21 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
   const e = await tx
     .selectFrom('drop_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
-    .select(['e.id', 'e.account_id', 'e.status', 'e.pieces', 'd.id as drop_id', 'd.model_id', 'd.stock_location_id', 'd.price_minor', 'd.currency'])
+    .leftJoin('drop_sizes as s', 's.id', 'e.size_id')
+    .select(['e.id', 'e.account_id', 'e.status', 'e.pieces', 'd.id as drop_id', 'd.model_id', 'd.stock_location_id', 'd.price_minor', 'd.currency', 'e.size_id', 's.label as size_label', 's.sku_id'])
     .where('e.id', '=', entryId)
     .executeTakeFirst();
   if (!e || e.status !== 'CONFIRMED') throw new Error(`orderForDrawEntry: entry ${entryId} is not CONFIRMED`);
+  // Plan NEXT LOT §3.6.F: the entry's size and its SKU (offered when the draw was made: a size set aside since stays its own).
+  let sized: { label: string | null; skuId: string } | null = null;
+  if (e.size_id !== null && e.size_label !== null && e.size_label !== undefined) {
+    let skuId = e.sku_id ?? null;
+    if (skuId === null) {
+      skuId = (await offeredSku(tx, e.model_id, e.size_label, { allowSetAside: true })).skuId;
+      await tx.updateTable('drop_sizes').set({ sku_id: skuId }).where('id', '=', e.size_id).execute();
+    }
+    sized = { label: sizeLabelOf(e.size_label), skuId };
+  }
   // The draw's price, both or neither (drops_draw_price), within an order's bounds.
   const priced = e.price_minor !== null && e.currency !== null && e.price_minor <= ORDER_AMOUNT_MAX_MINOR;
   const existing = new Set((await tx.selectFrom('orders').select('piece').where('drop_entry_id', '=', e.id).execute()).map((r) => r.piece));
@@ -1157,8 +1171,8 @@ export async function orderForDrawEntry(tx: Db, entryId: string, actor: Actor, n
         dropId: e.drop_id,
         accountId: e.account_id,
         modelId: e.model_id,
-        sizeLabel: null,
-        skuId: null,
+        sizeLabel: sized?.label ?? null,
+        skuId: sized?.skuId ?? null,
         priceMinor: priced ? e.price_minor : null,
         currency: priced ? e.currency : null,
         addons: [],
@@ -1220,6 +1234,23 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
   );
   notes.push(...(await attachGifts(tx, order, actor, now)).notes);
   return { order, notes };
+}
+
+/**
+ * Whether an order's size was chosen by its collector (plan NEXT LOT §3.6.F, §3.6.G): a DRAW order whose entry chose a
+ * size (a draw with sizes), a SALON order whose request named one. NOT SURE YET (no size asked) leaves it to Client
+ * Services, as a draw without sizes does.
+ */
+async function sizeChosen(tx: Db, o: Pick<OrderRow, 'channel' | 'drop_entry_id' | 'shop_request_id'>): Promise<boolean> {
+  if (o.channel === 'DRAW' && o.drop_entry_id !== null) {
+    const e = await tx.selectFrom('drop_entries').select('size_id').where('id', '=', o.drop_entry_id).executeTakeFirst();
+    return (e?.size_id ?? null) !== null;
+  }
+  if (o.channel === 'SALON' && o.shop_request_id !== null) {
+    const r = await tx.selectFrom('shop_requests').select('size_label').where('id', '=', o.shop_request_id).executeTakeFirst();
+    return (r?.size_label ?? null) !== null;
+  }
+  return false;
 }
 
 /** What a step requires, checked before the transaction. */
@@ -2068,8 +2099,9 @@ export class OrderService {
 
   /**
    * What Client Services enters on an order (RESERVED or PAID): a draw's or a salon's size (it then holds a piece of
-   * that size, or waits for one), price and currency (before PAID only; 409 ORDER_TERMS_FIXED for a LIVE order, whose
-   * are its release's), and any order's engraving text. A size changes until a
+   * that size, or waits for one; plan NEXT LOT §3.6.F and §3.6.G: never another size than the one its draw entry or its
+   * salon request chose, 409 ORDER_SIZE_FIXED), price and currency (before PAID only; 409 ORDER_TERMS_FIXED for a LIVE
+   * order, whose are its release's), and any order's engraving text. A size changes until a
    * piece is linked (409 ORDER_PIECE_LINKED). Audited `order.terms` with the fields changed, never the engraving text.
    *
    * Its shipping (plan NEXT-NINE, BP-19 T4), while RESERVED: a service with its fee, or null for both (no shipping); 409
@@ -2115,6 +2147,7 @@ export class OrderService {
       const sizeChange = size !== undefined && o.sku_id !== skuId;
       const priceChange = price !== undefined && (price !== o.price_minor || currency !== o.currency);
       if ((sizeChange || priceChange) && o.channel === 'LIVE') throw termsFixed();
+      if (sizeChange && (await sizeChosen(tx, o))) throw sizeFixed();
       if (priceChange && o.channel === 'GIFT') throw giftTermsFixed();
       if (priceChange) {
         if (o.status !== 'RESERVED') throw conflict('ORDER_PAID', 'The price of an order paid no longer changes.');

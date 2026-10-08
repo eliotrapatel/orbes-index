@@ -29,6 +29,7 @@ import { createContext, type AppContext } from '../../src/server/context.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { poolDraw } from '../support/draws.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -145,8 +146,7 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
 
   it('sends test entrants into a draw, follows them by tier, confirms one by hand, and ends the test with its report', async () => {
     const soon = Date.now() + HOUR;
-    const drop = await ctx.services.drops.create({ modelId, title: 'MONOLITHE — release I', quantity: 20, opensAt: new Date(soon), closesAt: new Date(soon + 2 * HOUR), earlyAccessHours: 0 }, admin);
-    await ctx.services.drops.publish(drop.id, admin);
+    const drop = await poolDraw(ctx.services.drops, ctx.db, { modelId, title: 'MONOLITHE — release I', quantity: 20, opensAt: new Date(soon), closesAt: new Date(soon + 2 * HOUR), earlyAccessHours: 0 }, admin);
     await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - HOUR), closes_at: new Date(Date.now() + 2 * HOUR) }).where('id', '=', drop.id).execute();
     const real = await ctx.services.auth.registerAccount({ email: 'tests.collector@example.com', password: 'tests collector passphrase 2026' }, {});
     await ctx.services.drops.enter(real.account.id, drop.id, { type: 'account', id: real.account.id });

@@ -32,6 +32,7 @@ import { createTestDb, type TestDb } from '../support/db.js';
 import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
 import { jpegPhoto } from '../support/images.js';
 import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
@@ -298,7 +299,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       const open = await asBefore(2, null, 1);
       const concluded = await asBefore(1, 'CONCLUDED', 2);
       const cancelled = await asBefore(1, 'CANCELLED', 3);
-      const draw = await f.drops.create({ modelId: f.modelId, title: 'A draw before the orders', quantity: 1, opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0 }, admin);
+      const draw = await poolDraw(f.drops, t.db, { modelId: f.modelId, title: 'A draw before the orders', quantity: 1, opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0 }, admin, { publish: false });
       const drawer = await createAccount(t.db);
       const drawEntry = (
         await t.db
@@ -384,9 +385,8 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
 
     it('a draw\'s entry confirmed by Client Services: its order, RESERVED at the drop\'s location, held once its size is entered', async () => {
       const T = new Date(clock.now().getTime() + HOUR);
-      const d = await f.drops.create({ modelId: f.modelId, title: 'A draw', quantity: 1, opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0 }, admin);
+      const d = await poolDraw(f.drops, t.db, { modelId: f.modelId, title: 'A draw', quantity: 1, opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0 }, admin);
       await t.db.updateTable('drops').set({ stock_location_id: logistics }).where('id', '=', d.id).execute();
-      await f.drops.publish(d.id, admin);
       const a = await createAccount(t.db);
       clock.set(new Date(T.getTime() + MINUTE));
       await f.drops.enter(a.id, d.id, a.actor);
@@ -402,6 +402,34 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       const view = await orders().setTerms(o!.id, { sizeLabel: '50', priceMinor: 480_000, currency: 'EUR' }, admin);
       expect(view).toMatchObject({ sizeLabel: '50', priceMinor: 480_000, currency: 'EUR', reservation: 'AWAITING', location: { id: logistics, name: 'LOGISTICS WAREHOUSE' } });
       expect((await auditsOf(o!.id, 'order.terms'))[0]!.details).toMatchObject({ fields: ['price', 'size'], reservation: 'AWAITING' });
+    });
+
+    it('a draw\'s entry in a size (plan NEXT LOT §3.6.F): its order takes the size and its SKU at once, a size never changed on it (ORDER_SIZE_FIXED); a salon request\'s size is fixed too, NOT SURE YET leaving it to Client Services (§3.6.G)', async () => {
+      const T = new Date(clock.now().getTime() + HOUR);
+      const created = await f.drops.create({ modelId: f.modelId, title: 'A draw in sizes', sizes: [{ label: '62', pieces: 1 }, { label: '63', pieces: 1 }], opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0 }, admin);
+      const d = await f.drops.publish(created.id, admin);
+      const s62 = d.sizes.find((x) => x.label === '62')!.id;
+      const a = await createAccount(t.db);
+      clock.set(new Date(T.getTime() + MINUTE));
+      await f.drops.enter(a.id, d.id, a.actor, { sizeId: s62 });
+      clock.set(new Date(T.getTime() + 2 * HOUR));
+      await f.drops.draw(d.id, admin);
+      const entryId = (await t.db.selectFrom('drop_entries').select('id').where('drop_id', '=', d.id).executeTakeFirstOrThrow()).id;
+      await f.drops.confirm(d.id, entryId, null, admin);
+      const [o] = await t.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', entryId).execute();
+      expect(o).toMatchObject({ channel: 'DRAW', size_label: '62', sku_id: await skuOf('62'), reservation: 'AWAITING' });
+      const fixed = await rejects(orders().setTerms(o!.id, { sizeLabel: '63' }, admin), 'ORDER_SIZE_FIXED', 409);
+      expect(fixed.publicMessage).toBe('The size of this order is the one chosen at its entry or request.');
+      // Its own size named again is no change; its price still is entered.
+      expect((await orders().setTerms(o!.id, { sizeLabel: '62', priceMinor: 480_000, currency: 'EUR' }, admin)).priceMinor).toBe(480_000);
+      // A salon request with a size: fixed on its order; with NOT SURE YET (no size): Client Services enters it.
+      const sized = await t.db.insertInto('shop_requests').values({ account_id: (await createAccount(t.db)).id, model_id: f.modelId, created_at: clock.now(), size_label: '62' }).returning('id').executeTakeFirstOrThrow();
+      await ctx.services.salon.close(sized.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
+      const salon = await t.db.selectFrom('orders').selectAll().where('shop_request_id', '=', sized.id).executeTakeFirstOrThrow();
+      expect(salon.size_label).toBe('62');
+      await rejects(orders().setTerms(salon.id, { sizeLabel: '63' }, admin), 'ORDER_SIZE_FIXED', 409);
+      const unsure = await salonOrder();
+      expect((await orders().setTerms(unsure.id, { sizeLabel: '63' }, admin)).sizeLabel).toBe('63');
     });
 
     it('a request of the private salon closed as ACCEPTED: its order at the default location; DECLINED: none', async () => {

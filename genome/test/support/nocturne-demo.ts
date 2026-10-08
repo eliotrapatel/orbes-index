@@ -77,6 +77,7 @@ import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 import { packAndShip, stockPieces } from './fulfil.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from './live.js';
+import { poolDraw } from './draws.js';
 
 export type DemoVariant =
   | 'full'
@@ -353,8 +354,7 @@ const titled = async (w: World, id: string, title: string, description?: string)
 async function pastDraw(w: World, o: { model: string; title: string; opens: string; closes: string; quantity: number; who: DemoAccount; confirmAt: string }): Promise<string> {
   const { ctx, admin, clock } = w;
   clock.set(new Date(at(o.opens).getTime() - 2 * DAY));
-  const d = await ctx.services.drops.create({ modelId: w.models[o.model]!, title: o.title, quantity: o.quantity, opensAt: at(o.opens), closesAt: at(o.closes), earlyAccessHours: 0 }, admin);
-  await ctx.services.drops.publish(d.id, admin);
+  const d = await poolDraw(ctx.services.drops, ctx.db, { modelId: w.models[o.model]!, title: o.title, quantity: o.quantity, opensAt: at(o.opens), closesAt: at(o.closes), earlyAccessHours: 0 }, admin);
   clock.set(new Date(at(o.opens).getTime() + HOUR));
   await ctx.services.drops.enter(o.who.id, d.id, o.who.actor);
   clock.set(new Date(at(o.closes).getTime() + MINUTE));
@@ -623,7 +623,10 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
     const platineEarly = variant === 'draw-early' ? 2 : early;
     const drawOpens = variant === 'draw-early' ? at('2026-10-05T18:00:00Z') : opens;
     clock.set(at('2026-10-01T12:30:00Z'));
-    const d = await ctx.services.drops.create(
+    // A draw of before the sizes (plan NEXT LOT §3.6.F: one pool), as every draw of this demo but `draw-sizes`'s.
+    const d = await poolDraw(
+      ctx.services.drops,
+      ctx.db,
       {
         modelId: w.models.steel!,
         title: 'MONOLITHE, THE OCTOBER DRAW',
@@ -640,7 +643,6 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
       },
       admin,
     );
-    await ctx.services.drops.publish(d.id, admin);
     w.demo.releases.draw = d.id;
   }
   w.demo.pieces.gold = goldPiece.productId;
@@ -954,7 +956,9 @@ async function seedDraws(w: World): Promise<void> {
   const entrant = await account(w, 'entrant', 'r.castel@example.com', 1, w.models.gold);
   const draw = async (key: string, o: { model: string; title: string; quantity?: number; created: string; opens: string; closes: string; window?: number; early?: number }) => {
     clock.set(at(o.created));
-    const d = await drops.create(
+    const d = await poolDraw(
+      drops,
+      ctx.db,
       {
         modelId: w.models[o.model]!,
         title: o.title,
@@ -968,7 +972,6 @@ async function seedDraws(w: World): Promise<void> {
       },
       admin,
     );
-    await drops.publish(d.id, admin);
     demo.releases[key] = d.id;
     return d.id;
   };
@@ -1067,8 +1070,7 @@ async function seedGuarantees(w: World, variant: 'full' | 'room' | 'draws'): Pro
   const drops = ctx.services.drops;
   const draw = async (key: string, o: { model: string; title: string; quantity: number; created: string; opens: string; closes: string }) => {
     clock.set(at(o.created));
-    const d = await drops.create({ modelId: w.models[o.model]!, title: o.title, quantity: o.quantity, opensAt: at(o.opens), closesAt: at(o.closes), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, admin);
-    await drops.publish(d.id, admin);
+    const d = await poolDraw(drops, ctx.db, { modelId: w.models[o.model]!, title: o.title, quantity: o.quantity, opensAt: at(o.opens), closesAt: at(o.closes), earlyAccessHours: 0, earlyAccessPlatineHours: 0 }, admin);
     demo.releases[key] = d.id;
     return d.id;
   };
@@ -1374,8 +1376,7 @@ async function seedModelReleases(w: World): Promise<void> {
     const opens = at(`2026-09-${String(r.day).padStart(2, '0')}T10:00:00Z`);
     clock.set(new Date(opens.getTime() - 2 * DAY));
     if (r.kind === 'DRAW') {
-      const d = await ctx.services.drops.create({ modelId: w.models[r.model]!, title: 'MONOLITHE ARCHITECTURALE, A DRAW OF SEPTEMBER', quantity: 4, opensAt: opens, closesAt: new Date(opens.getTime() + 8 * HOUR), earlyAccessHours: 0 }, admin);
-      await ctx.services.drops.publish(d.id, admin);
+      const d = await poolDraw(ctx.services.drops, ctx.db, { modelId: w.models[r.model]!, title: 'MONOLITHE ARCHITECTURALE, A DRAW OF SEPTEMBER', quantity: 4, opensAt: opens, closesAt: new Date(opens.getTime() + 8 * HOUR), earlyAccessHours: 0 }, admin);
       clock.set(new Date(opens.getTime() + 8 * HOUR + MINUTE));
       await ctx.services.drops.draw(d.id, admin);
     } else {

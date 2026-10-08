@@ -8,10 +8,13 @@
  *   POST  /api/admin/drops/:id/publish                      OPERATOR  on /verify/releases, with its seed's SHA-256
  *   POST  /api/admin/drops/:id/cancel                       OPERATOR  before its draw only
  *   POST  /api/admin/drops/:id/draw                         ADMIN     after `closes_at`, once
- *   GET   /api/admin/drops/:id/entries                      AUDITOR   its entries (by rank once drawn)
+ *   GET   /api/admin/drops/:id/entries                      AUDITOR   its entries (by rank once drawn), ?status=, ?sizeId=
  *   POST  /api/admin/drops/:id/entries/:entryId/confirm     OPERATOR  CONFIRMED: the sale concluded
  *   POST  /api/admin/drops/:id/entries/:entryId/lapse       OPERATOR  LAPSED, after `respond_by` only
- *   POST  /api/admin/drops/:id/offer-next                   OPERATOR  the next of the waiting list, SELECTED
+ *   POST  /api/admin/drops/:id/offer-next                   OPERATOR  the next of the waiting list, SELECTED ({ sizeId }: per size)
+ *
+ * Plan NEXT LOT §3.6.F: a draw has its sizes and their pieces (`sizes` on POST and PATCH, its quantity their sum; a
+ * `quantity` sent is refused), each size with its counts (`sizes`), each entry its size, OFFER NEXT per size.
  *
  * A drop and its entries carry THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): `guaranteed` (places and pieces), and each
  * entry's `guaranteed` and `pieces`; the guarantees of a release are GET /api/admin/drops/:id/guarantees (guarantees.ts).
@@ -27,6 +30,7 @@ import {
   dropEntriesQuery,
   dropEntryNoteBody,
   dropEntryParams,
+  dropOfferNextBody,
   dropParams,
   emptyBody,
   pageOf,
@@ -55,7 +59,8 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
         modelId: b.modelId,
         title: b.title,
         description: b.description ?? null,
-        quantity: b.quantity,
+        ...(b.quantity !== undefined ? { quantity: b.quantity } : {}),
+        ...(b.sizes !== undefined ? { sizes: b.sizes } : {}),
         opensAt: b.opensAt,
         closesAt: b.closesAt,
         ...(b.purchaseWindowHours !== undefined ? { purchaseWindowHours: b.purchaseWindowHours } : {}),
@@ -84,6 +89,7 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
         ...(b.title !== undefined ? { title: b.title } : {}),
         ...(b.description !== undefined ? { description: b.description } : {}),
         ...(b.quantity !== undefined ? { quantity: b.quantity } : {}),
+        ...(b.sizes !== undefined ? { sizes: b.sizes } : {}),
         ...(b.opensAt !== undefined ? { opensAt: b.opensAt } : {}),
         ...(b.closesAt !== undefined ? { closesAt: b.closesAt } : {}),
         ...(b.purchaseWindowHours !== undefined ? { purchaseWindowHours: b.purchaseWindowHours } : {}),
@@ -117,7 +123,7 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
   app.get('/api/admin/drops/:id/entries', async (request) => {
     const { id } = parse(dropParams, request.params);
     const q = parse(dropEntriesQuery, request.query);
-    const page = await drops.entries(id, q.status ? { status: q.status } : {}, pageOf(request.query));
+    const page = await drops.entries(id, { ...(q.status ? { status: q.status } : {}), ...(q.sizeId ? { sizeId: q.sizeId } : {}) }, pageOf(request.query));
     const inClear = readsClientEmails(request);
     return { ...page, items: page.items.map((e) => entryJson(e, inClear)) };
   });
@@ -136,7 +142,7 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
 
   app.post('/api/admin/drops/:id/offer-next', async (request) => {
     const { id } = parse(dropParams, request.params);
-    parse(emptyBody, request.body);
-    return entryJson(await drops.offerNext(id, adminActor(request)), readsClientEmails(request));
+    const b = parse(dropOfferNextBody, request.body);
+    return entryJson(await drops.offerNext(id, adminActor(request), { sizeId: b.sizeId ?? null }), readsClientEmails(request));
   });
 };

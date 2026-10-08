@@ -305,11 +305,30 @@ export async function coverNextRelease(
  * IN-01: whether a size of a LIVE RELEASE can still serve a guaranteed entry of `quantity` pieces (LIVE stock is checked
  * per size): its stock less the pieces CONFIRMED in it and those of the other guaranteed entries still open in it
  * (WAITING, QUEUED, TURN, SECURED). `entryId`, the entry itself, is left out of the count. LiveService.enter and
- * changeSize ask it, and so does a guarantee bound to an entry already waiting.
+ * changeSize ask it, and so does a guarantee bound to an entry already waiting. A DRAW's size (plan NEXT LOT §3.6.F):
+ * its pieces less those held or sold in it (SELECTED, CONFIRMED) and those of the other guaranteed entries ENTERED in it
+ * (DropService.enter and changeSize ask it, and so does a guarantee bound to an entry already ENTERED).
  */
 export async function sizeServesGuarantee(tx: Db, dropId: string, sizeId: string, quantity: number, entryId: string | null): Promise<boolean> {
-  const size = await tx.selectFrom('drop_sizes').select('stock').where('drop_id', '=', dropId).where('id', '=', sizeId).executeTakeFirst();
+  const size = await tx
+    .selectFrom('drop_sizes as s')
+    .innerJoin('drops as d', 'd.id', 's.drop_id')
+    .select(['s.stock', 'd.mode'])
+    .where('s.drop_id', '=', dropId)
+    .where('s.id', '=', sizeId)
+    .executeTakeFirst();
   if (!size) return false;
+  if (size.mode === 'DRAW') {
+    const entries = await tx
+      .selectFrom('drop_entries')
+      .select(['id', 'pieces'])
+      .where('drop_id', '=', dropId)
+      .where('size_id', '=', sizeId)
+      .where((eb) => eb.or([eb('status', 'in', ['SELECTED', 'CONFIRMED']), eb.and([eb('guarantee_id', 'is not', null), eb('status', '=', 'ENTERED')])]))
+      .execute();
+    const held = entries.filter((r) => r.id !== entryId).reduce((n, r) => n + r.pieces, 0);
+    return held + quantity <= size.stock;
+  }
   const rows = await tx
     .selectFrom('live_entries')
     .select(['id', 'quantity'])
@@ -323,16 +342,27 @@ export async function sizeServesGuarantee(tx: Db, dropId: string, sizeId: string
 
 /**
  * Bind a guarantee just set aside to its account's entry in that release, when one is waiting (a draw's ENTERED, a LIVE
- * WAITING or QUEUED). A LIVE entry is bound only when its size can still serve the guarantee (sizeServesGuarantee);
- * otherwise it stays an ordinary entry, the guarantee set aside and unused, and a CHANGE SIZE checks again.
+ * WAITING or QUEUED). A LIVE entry, and a draw's entry in a size (plan NEXT LOT §3.6.F), is bound only when its size
+ * can still serve the guarantee (sizeServesGuarantee); otherwise it stays an ordinary entry, the guarantee set aside and
+ * unused, and a CHANGE SIZE checks again.
  */
 async function bindWaitingEntry(tx: Db, g: { id: string; account_id: string; pieces: number }, d: Pick<DropRow, 'id' | 'mode'>): Promise<string | null> {
   if (d.mode === 'DRAW') {
+    const waiting = await tx
+      .selectFrom('drop_entries')
+      .select(['id', 'size_id'])
+      .where('drop_id', '=', d.id)
+      .where('account_id', '=', g.account_id)
+      .where('status', '=', 'ENTERED')
+      .where('guarantee_id', 'is', null)
+      .forUpdate()
+      .executeTakeFirst();
+    if (!waiting) return null;
+    if (waiting.size_id !== null && !(await sizeServesGuarantee(tx, d.id, waiting.size_id, g.pieces, waiting.id))) return null;
     const e = await tx
       .updateTable('drop_entries')
       .set({ guarantee_id: g.id, pieces: g.pieces })
-      .where('drop_id', '=', d.id)
-      .where('account_id', '=', g.account_id)
+      .where('id', '=', waiting.id)
       .where('status', '=', 'ENTERED')
       .where('guarantee_id', 'is', null)
       .returning('id')

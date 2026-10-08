@@ -167,6 +167,7 @@ import { openState, ROOM_SIZE_STATES, stateById, type UiState } from '../test/su
 import { packAndShip, stockPieces } from '../test/support/fulfil.js';
 import { buildWeb } from './build-web.js';
 import { shoot as shootState } from './parity.js';
+import { poolDraw } from '../test/support/draws.js';
 
 const GENOME_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_OUT = resolve(GENOME_DIR, '..', 'docs', 'assets', 'ui');
@@ -1302,8 +1303,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     // Hélène). ORBES Client Services confirms hers: its order, its size and price entered, MONOLITHE in size 54.
     on(9, 12);
     const drawOpens = new Date(past.clock.now().getTime() + HOUR);
-    const draw = await past.drops.create({ modelId: monolithe, title: 'MONOLITHE — THE DRAW', quantity: 2, opensAt: drawOpens, closesAt: new Date(drawOpens.getTime() + DAY), earlyAccessHours: 0 }, admin);
-    await past.drops.publish(draw.id, admin);
+    const draw = await poolDraw(past.drops, past.db, { modelId: monolithe, title: 'MONOLITHE — THE DRAW', quantity: 2, opensAt: drawOpens, closesAt: new Date(drawOpens.getTime() + DAY), earlyAccessHours: 0 }, admin);
     past.clock.set(new Date(drawOpens.getTime() + MINUTE));
     for (const who of [me, rival, payer, canceller]) await past.drops.enter(who.id, draw.id, who.actor);
     past.clock.set(new Date(drawOpens.getTime() + DAY + MINUTE));

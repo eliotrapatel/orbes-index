@@ -15,9 +15,14 @@
  *
  *   GET  /api/v1/club/status                the account's tier, pieces and seniority, its entries, and
  *                                           (P-X04) its tier's benefits and the next tier
- *   POST /api/v1/club/drops/:id/enter       ENTER an open drop (the same entry again after a withdrawal)
+ *   GET  /api/v1/club/drops/:id/entry       plan NEXT LOT §3.6.F: the account's entry in a draw (or null) and the size
+ *                                           YOUR SIZES suggests among its sizes
+ *   POST /api/v1/club/drops/:id/enter       ENTER an open drop (the same entry again after a withdrawal), in a size of a
+ *                                           draw with sizes ({ sizeId })
  *   POST /api/v1/club/drops/:id/withdraw    WITHDRAW, before the draw
  *   POST /api/v1/club/drops/:id/reserve     P-X02: a place held at once, during the early access, PLATINE and PALLADIUM
+ *                                           (in a size of a draw with sizes, { sizeId })
+ *   POST /api/v1/club/drops/:id/size        plan NEXT LOT §3.6.F: CHANGE SIZE of an entry, while entries are open
  *
  * P-X01, the circle (services/circle.ts: an account that holds a piece now,
  * each post from its tier up):
@@ -37,7 +42,7 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { circleRsvpBody, circleVoteBody, emptyBody, lookbookParams, parse, publicCircleParams, publicDropParams, salonRequestBody } from '../http/schemas.js';
+import { circleRsvpBody, circleVoteBody, dropChangeSizeBody, dropSizeBody, emptyBody, lookbookParams, parse, publicCircleParams, publicDropParams, salonRequestBody } from '../http/schemas.js';
 import { accountActor, requireAccount, sessionGuard } from '../http/sessions.js';
 import { circleFeedPage, circleFeedVisit } from '../services/circle.js';
 import type { RouteDeps } from './public.js';
@@ -80,11 +85,26 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
     return club.status(account.id);
   });
 
+  // Plan NEXT LOT §3.6.F: a draw's page reads the account's entry and the size YOUR SIZES suggests.
+  app.get('/api/v1/club/drops/:id/entry', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(publicDropParams, request.params);
+    return drops.entryFor(account.id, id);
+  });
+
   app.post('/api/v1/club/drops/:id/enter', async (request) => {
     const { account } = requireAccount(request);
     const { id } = parse(publicDropParams, request.params);
-    parse(emptyBody, request.body);
-    return { entry: await drops.enter(account.id, id, accountActor(request)) };
+    const b = parse(dropSizeBody, request.body);
+    return { entry: await drops.enter(account.id, id, accountActor(request), { sizeId: b.sizeId ?? null }) };
+  });
+
+  // Plan NEXT LOT §3.6.F: CHANGE SIZE of an entry in a draw with sizes, while entries are open.
+  app.post('/api/v1/club/drops/:id/size', async (request) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(publicDropParams, request.params);
+    const b = parse(dropChangeSizeBody, request.body);
+    return { entry: await drops.changeSize(account.id, id, { sizeId: b.sizeId }, accountActor(request)) };
   });
 
   app.post('/api/v1/club/drops/:id/withdraw', async (request) => {
@@ -98,8 +118,8 @@ export const clubRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limi
   app.post('/api/v1/club/drops/:id/reserve', async (request) => {
     const { account } = requireAccount(request);
     const { id } = parse(publicDropParams, request.params);
-    parse(emptyBody, request.body);
-    return { entry: await drops.reserve(account.id, id, accountActor(request)) };
+    const b = parse(dropSizeBody, request.body);
+    return { entry: await drops.reserve(account.id, id, accountActor(request), { sizeId: b.sizeId ?? null }) };
   });
 
   // P-X01: the circle, for an account that holds a piece now; each post from its tier up.

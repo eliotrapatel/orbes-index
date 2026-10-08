@@ -41,6 +41,7 @@ import type {
   DrawEntriesPage,
   DropCard,
   DropSheet,
+  DrawEntryRead,
   DownloadedFile,
   IncidentReport,
   IncidentResolution,
@@ -332,9 +333,29 @@ export class ApiClient {
     return r;
   }
 
-  /** ENTER THE DRAW of an open release (the same entry again after a withdrawal). */
-  async enterDrop(id: string): Promise<ClubEntry> {
-    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/enter`, undefined, { csrf: true });
+  /**
+   * Plan NEXT LOT §3.6.F: the account's entry in a draw (null when it has none) and the size YOUR SIZES suggests among
+   * its sizes; read afresh (404 DROP_NOT_FOUND for an unknown or unpublished draw).
+   */
+  async drawEntry(id: string): Promise<DrawEntryRead> {
+    const r = await this.request<DrawEntryRead>('GET', `/api/v1/club/drops/${encodeURIComponent(id)}/entry`);
+    if (!r || typeof r !== 'object' || !('entry' in r) || !('savedSize' in r)) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /**
+   * ENTER THE DRAW of an open release (the same entry again after a withdrawal); plan NEXT LOT §3.6.F: in the size chosen
+   * of a draw with sizes (400 DROP_SIZE_REQUIRED without one).
+   */
+  async enterDrop(id: string, sizeId?: string | null): Promise<ClubEntry> {
+    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/enter`, sizeId ? { sizeId } : undefined, { csrf: true });
+    if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.entry;
+  }
+
+  /** Plan NEXT LOT §3.6.F: an entry's size changed, while entries are open (409 DROP_SIZE_FIXED for a place reserved directly). */
+  async changeDrawSize(id: string, sizeId: string): Promise<ClubEntry> {
+    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/size`, { sizeId }, { csrf: true });
     if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.entry;
   }
@@ -348,10 +369,11 @@ export class ApiClient {
 
   /**
    * RESERVE A PLACE (P-X02): during a release's early access, a PLATINE or PALLADIUM account holds a place at once (403
-   * DROP_TIER_REQUIRED below, 409 outside the early access or once every piece is held).
+   * DROP_TIER_REQUIRED below, 409 outside the early access or once every piece is held); plan NEXT LOT §3.6.F: in the
+   * size chosen of a draw with sizes (409 DROP_SIZE_FULL once every piece of it is reserved).
    */
-  async reserveDrop(id: string): Promise<ClubEntry> {
-    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/reserve`, undefined, { csrf: true });
+  async reserveDrop(id: string, sizeId?: string | null): Promise<ClubEntry> {
+    const r = await this.request<{ entry?: ClubEntry }>('POST', `/api/v1/club/drops/${encodeURIComponent(id)}/reserve`, sizeId ? { sizeId } : undefined, { csrf: true });
     if (!r?.entry) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.entry;
   }

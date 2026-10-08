@@ -557,7 +557,22 @@ export interface DropSheet extends DropCard {
    * Plan NEXT-NINE, IN-01: once drawn, the places guaranteed by the house, by entry id and pieces, never an account
    * (empty before the draw); YOURS comes only from the account's own entry (ClubEntry `guaranteed`).
    */
-  guaranteed?: { id: string; pieces: number }[];
+  guaranteed?: { id: string; pieces: number; size?: DrawSizeRef | null }[];
+  /** Plan NEXT LOT §3.6.F: a draw's sizes, each with its pieces, in order; empty for a draw without sizes (one pool). */
+  sizes?: DrawSheetSize[];
+}
+
+/** A size of a draw as an entry and the draw's list name it (plan NEXT LOT §3.6.F). */
+export interface DrawSizeRef {
+  id: string;
+  label: string;
+}
+
+/** A draw's size on its page (plan NEXT LOT §3.6.F): its pieces, those reserved directly, and full before the draw. */
+export interface DrawSheetSize extends DrawSizeRef {
+  pieces: number;
+  reserved: number;
+  full: boolean;
 }
 
 /** One entry of a drawn release (GET /api/v1/drops/:id/entries): never its account. `tier` 0 is no tier. */
@@ -566,6 +581,14 @@ export interface DrawEntry {
   tier: number;
   seniority: number;
   rank: number;
+  /** Plan NEXT LOT §3.6.F: the size it was drawn in; null in a draw without sizes. */
+  size?: DrawSizeRef | null;
+}
+
+/** GET /api/v1/club/drops/:id/entry (plan NEXT LOT §3.6.F): the account's entry, and the size YOUR SIZES suggests. */
+export interface DrawEntryRead {
+  entry: ClubEntry | null;
+  savedSize: DrawSizeRef | null;
 }
 
 /** A release of THE RELEASES' PAST (GET /api/v1/releases/past, plan LIVE RELEASE+ choice 5): what was announced, no end figure. */
@@ -645,6 +668,8 @@ export interface ClubEntry {
   opensAt: string;
   closesAt: string;
   drawnAt: string | null;
+  /** Plan NEXT LOT §3.6.F: the size it chose (kept when withdrawn); null in a draw without sizes. */
+  size?: DrawSizeRef | null;
 }
 
 /**

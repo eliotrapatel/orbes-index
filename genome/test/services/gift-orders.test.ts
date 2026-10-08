@@ -34,6 +34,7 @@ import { createManualClock, type Actor, type ManualClock } from '../../src/serve
 import { createTestDb, type TestDb } from '../support/db.js';
 import { packAndShip, stockPieces } from '../support/fulfil.js';
 import { createAccount, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -288,7 +289,9 @@ describe('the welcome gift (BP-19 T5)', () => {
   /** A draw of one piece won by `account`, unpriced or at `priceMinor` EUR: published, entered, drawn, confirmed. Its order. */
   async function drawOrder(account: { id: string; actor: Actor }, o: { priceMinor?: number } = {}) {
     const opensAt = new Date(clock.now().getTime() + HOUR);
-    const drop = await ctx.services.drops.create(
+    const drop = await poolDraw(
+      ctx.services.drops,
+      ctx.db,
       {
         modelId: f.modelId,
         title: 'A DRAW',
@@ -301,7 +304,6 @@ describe('the welcome gift (BP-19 T5)', () => {
       },
       admin,
     );
-    await ctx.services.drops.publish(drop.id, admin);
     clock.set(new Date(opensAt.getTime() + MINUTE));
     await ctx.services.drops.enter(account.id, drop.id, account.actor);
     clock.advance(HOUR);

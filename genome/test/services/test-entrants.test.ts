@@ -38,6 +38,7 @@ import { shareOf, splitOf, testPhrase, testRunSettings, TEST_RUN_DEFAULTS, TestE
 import { createHarness, type Harness } from '../api/support.js';
 import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
 import { createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -82,7 +83,9 @@ async function world(): Promise<World> {
 /** A draw published now: OPEN (its opening an hour ago) unless told otherwise. */
 async function openDraw(w: World, o: { quantity?: number; opensIn?: number; closesIn?: number; earlyAccessHours?: number; earlyAccessPlatineHours?: number; priceMinor?: number } = {}) {
   const now = w.h.clock.now().getTime();
-  const d = await w.h.ctx.services.drops.create(
+  const d = await poolDraw(
+    w.h.ctx.services.drops,
+    w.h.ctx.db,
     {
       modelId: w.f.modelId,
       title: 'MONOLITHE · TEST DRAW',
@@ -95,7 +98,6 @@ async function openDraw(w: World, o: { quantity?: number; opensIn?: number; clos
     },
     w.f.admin,
   );
-  await w.h.ctx.services.drops.publish(d.id, w.f.admin);
   return d.id;
 }
 

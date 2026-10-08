@@ -21,6 +21,7 @@ import { SegmentService } from '../../src/server/services/segments.js';
 import type { Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createLiveRelease, holdPieces, liveFixture, type LiveFixture } from '../support/live.js';
+import { poolDraw } from '../support/draws.js';
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -91,8 +92,7 @@ describe('a release’s rules, read at each step', () => {
   /** A draw drawn now, every account of `who` entered in it: each has taken part in one more release. */
   async function pastDraw(who: { id: string; actor: Actor }[]): Promise<string> {
     const T = new Date(f.clock.now().getTime() + MINUTE);
-    const d = await f.drops.create({ modelId: f.modelId, title: 'A DRAW', quantity: 1, opensAt: T, closesAt: new Date(T.getTime() + MINUTE), earlyAccessHours: 0 }, f.admin);
-    await f.drops.publish(d.id, f.admin);
+    const d = await poolDraw(f.drops, f.db, { modelId: f.modelId, title: 'A DRAW', quantity: 1, opensAt: T, closesAt: new Date(T.getTime() + MINUTE), earlyAccessHours: 0 }, f.admin);
     f.clock.set(new Date(T.getTime() + 1000));
     for (const a of who) await f.drops.enter(a.id, d.id, a.actor);
     f.clock.set(new Date(T.getTime() + 2 * MINUTE));

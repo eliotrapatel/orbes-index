@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
+import { poolDraw } from '../support/draws.js';
 
 interface MessageJson {
   id: string;
@@ -74,11 +75,12 @@ describe('MESSAGES for the collector (CS-01)', () => {
     const model = await me.client.post('/api/v1/account/messages', { body: 'This model.', context: { kind: 'MODEL', id: catalog.modelId } });
     expect((safeJson(model) as { message: MessageJson }).message.concerning).toEqual({ kind: 'MODEL', label: 'MONOLITHE', path: `/verify/lookbook/${slug}` });
     const admin = await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow();
-    const draw = await h.ctx.services.drops.create(
+    const draw = await poolDraw(
+      h.ctx.services.drops,
+      h.ctx.db,
       { modelId: catalog.modelId, title: 'Monolithe in steel', quantity: 3, opensAt: new Date(h.clock.now().getTime() + 3_600_000), closesAt: new Date(h.clock.now().getTime() + 7_200_000), earlyAccessHours: 0 },
       { type: 'admin', id: admin.id },
     );
-    await h.ctx.services.drops.publish(draw.id, { type: 'admin', id: admin.id });
     const release = await me.client.post('/api/v1/account/messages', { body: 'This release.', context: { kind: 'RELEASE', id: draw.id } });
     expect((safeJson(release) as { message: MessageJson }).message.concerning).toEqual({ kind: 'RELEASE', label: 'MONOLITHE IN STEEL', path: `/verify/releases/${draw.id}` });
     // Refused contexts and words, as the server writes them.

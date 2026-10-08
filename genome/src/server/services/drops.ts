@@ -88,6 +88,18 @@
  * id and pieces, never an account). CONFIRMED creates one order per piece (orderForDrawEntry). Every count of places
  * held is in pieces.
  *
+ * SIZES (plan NEXT LOT §3.6.F, migration 0038: « size selection like in live releases »): a draw is created with its
+ * sizes and their pieces (`drop_sizes`, its `stock` a size's pieces), 1 to 24 with pieces, each one of the model's sizes
+ * (stock.ts linkDropSizes), its `quantity` their sum; a quantity given is refused, and a DRAFT created before this lot,
+ * without sizes, is not published (409 DROP_SIZES_REQUIRED). Each entry chooses its size (`drop_entries.size_id`): ENTER
+ * and RESERVE in a size, CHANGE SIZE while entries are open (a place reserved directly keeps its size), WITHDRAW keeping
+ * it. A reservation counts its size's pieces too (409 DROP_SIZE_FULL). The draw ranks every entry once (`drawOrder`, the
+ * same rule), then fills each size in that order: an entry is SELECTED while its size has a piece left after its
+ * reservations and its guaranteed places, else WAITLISTED in its size, each keeping its rank; OFFER NEXT works per size.
+ * The house's guarantee binds only where its size can serve its pieces (guarantees.ts sizeServesGuarantee). The page
+ * publishes each size's pieces, so anyone checks every status from the seed. A draw published before this lot keeps one
+ * pool, drawn exactly as before.
+ *
  * A LIVE RELEASE (services/live.ts, migration 0021) is a row of the same table, `mode` LIVE: the draw's public pages, its
  * entries (ENTER, WITHDRAW, RESERVE), the console's list, change, publication and cancellation, the draw and OFFER NEXT
  * know only the drops whose `mode` is DRAW: a LIVE one is left out of a list, a 404 or a refusal (409 DROP_LIVE).
@@ -114,11 +126,13 @@ import { makePage, pageOffset, systemClock, type Actor, type Clock, type Page, t
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { CLUB_TIER_THRESHOLDS, clubStandings, tierName, tierOf, type ClubTier } from './club.js';
 import { readProgram } from './club-program.js';
-import { coverOnPublish, guaranteedPieces, holderGuarantee, releaseCovered, releaseGuaranteed, useGuarantees, type ReleaseGuaranteed } from './guarantees.js';
+import { coverOnPublish, guaranteedPieces, holderGuarantee, releaseCovered, releaseGuaranteed, sizeServesGuarantee, useGuarantees, type ReleaseGuaranteed } from './guarantees.js';
 import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, orderForDrawEntry } from './orders.js';
 import { readActingAccount } from './ownership.js';
+import { savedSizeAmong } from './sizes.js';
+import { linkDropSizes } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -155,6 +169,12 @@ export const DRAW_PRICE_MAX_MINOR = 100_000_000;
 export const DROP_LIST_LIMIT = 50;
 /** An account's entries in the club's status: the latest drops first. */
 export const ACCOUNT_ENTRIES_LIMIT = 50;
+/**
+ * A draw's sizes (plan NEXT LOT §3.6.F): at most 24 with pieces, as a LIVE RELEASE (live-console.ts LIVE_SIZES.max:
+ * `drop_sizes.position` is 1 to 24), each a label of 1 to 12 characters and 0 to 10 000 pieces (0: left out). The console
+ * sends one per declared size of the model (a necklace declares 66), at most `sent` of them.
+ */
+export const DRAW_SIZES = Object.freeze({ max: 24, label: 12, sent: 200 });
 
 const HOUR_MS = 3_600_000;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -315,6 +335,23 @@ const guaranteesExceed = (n: number) => conflict('DROP_GUARANTEES_EXCEED', `${n}
 const waitlistEmpty = () => conflict('DROP_WAITLIST_EMPTY', 'No entry is left on the waiting list.');
 const modelInactive = () => conflict('MODEL_INACTIVE', 'This model is no longer offered for new products.');
 const dropLive = () => conflict('DROP_LIVE', 'This release is a LIVE RELEASE: it has no draw and no waiting list.');
+/** Plan NEXT LOT §3.6.F: a draw's sizes. */
+const sizeRequired = (message = 'Choose your size.') => new DomainError('DROP_SIZE_REQUIRED', 400, message);
+const sizeUnknown = () => new DomainError('DROP_SIZE_UNKNOWN', 404, 'This size is not offered in this release.');
+const sizeFixed = () => conflict('DROP_SIZE_FIXED', 'A place reserved directly keeps its size.');
+const sizeFull = (label: string) => conflict('DROP_SIZE_FULL', `Every piece in ${inSize(label)} has been reserved.`);
+const guaranteeSizeFull = () => conflict('DROP_GUARANTEE_SIZE_FULL', 'Your guaranteed place cannot be given in this size: choose another size.');
+const sizesRequired = () => conflict('DROP_SIZES_REQUIRED', 'Give the release its sizes and their pieces before publishing it.');
+const sizesCount = () => validationError(`A release has 1 to ${DRAW_SIZES.max} sizes with pieces.`);
+const quantityPerSize = () => validationError('A draw’s pieces are given per size.');
+
+/**
+ * A size in a sentence: « size 17 », or a label that carries its word as written (« SIZE 52 », « ONE SIZE »), never
+ * « size SIZE 52 » (as services/sizes.ts names a size).
+ */
+export function inSize(label: string): string {
+  return /^(SIZE\b|ONE SIZE$)/i.test(label.trim()) ? label : `size ${label}`;
+}
 const seedUnavailable = (cause: unknown) =>
   new DomainError('DROP_SEED_UNAVAILABLE', 503, 'The seed of this draw cannot be read: the draw cannot run.', { detail: cause instanceof Error ? cause.name : 'unknown' });
 
@@ -334,11 +371,20 @@ function knownId(id: string, missing: () => DomainError): string {
 
 // ── Input ──────────────────────────────────────────────────────────────────
 
+/** A draw's size as the console gives it (plan NEXT LOT §3.6.F): one of the model's sizes and its pieces (0: left out). */
+export interface DrawSizeInput {
+  label: string;
+  pieces: number;
+}
+
 export interface CreateDropInput {
   modelId: string;
   title: string;
   description?: string | null;
-  quantity: number;
+  /** Plan NEXT LOT §3.6.F: refused (400 'A draw’s pieces are given per size.'); a draw's quantity is the sum of its sizes. */
+  quantity?: number;
+  /** Its sizes and their pieces, required: 1 to 24 with pieces, 10 000 pieces at most in all. */
+  sizes?: readonly DrawSizeInput[];
   opensAt: Date;
   closesAt: Date;
   purchaseWindowHours?: number;
@@ -356,7 +402,10 @@ export interface DropChange {
   modelId?: string;
   title?: string;
   description?: string | null;
+  /** Refused, as at the creation: a draw's pieces are given per size. */
   quantity?: number;
+  /** Plan NEXT LOT §3.6.F: its sizes and their pieces, replacing the draft's (a draft of before this lot gets its first). */
+  sizes?: readonly DrawSizeInput[];
   opensAt?: Date;
   closesAt?: Date;
   purchaseWindowHours?: number;
@@ -384,9 +433,30 @@ export function cleanDescription(v: unknown): string | null {
   return s;
 }
 
-function cleanQuantity(v: unknown): number {
-  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > DROP_QUANTITY_MAX) throw validationError(`A release has 1 to ${DROP_QUANTITY_MAX} pieces.`);
-  return v;
+/**
+ * A draw's sizes as given (plan NEXT LOT §3.6.F): each a label of 1 to 12 characters (one line) and 0 to 10 000 pieces;
+ * a size at 0 is left out; 1 to 24 sizes with pieces, 10 000 pieces at most in all; a label given twice (whatever its
+ * case) refused. The labels are then matched to the model's sizes (stock.ts linkDropSizes).
+ */
+export function cleanDrawSizes(v: unknown): { sizes: DrawSizeInput[]; quantity: number } {
+  if (!Array.isArray(v) || v.length > DRAW_SIZES.sent) throw sizesCount();
+  const sizes: DrawSizeInput[] = [];
+  const seen = new Set<string>();
+  for (const x of v as unknown[]) {
+    const raw = (x as { label?: unknown } | null)?.label;
+    const label = typeof raw === 'string' ? raw.trim() : '';
+    if (label.length < 1 || label.length > DRAW_SIZES.label || CONTROL_CHARS.test(label) || /\n/.test(label)) throw validationError(`A size is 1 to ${DRAW_SIZES.label} characters.`);
+    const pieces = (x as { pieces?: unknown }).pieces;
+    if (typeof pieces !== 'number' || !Number.isInteger(pieces) || pieces < 0 || pieces > DROP_QUANTITY_MAX) throw validationError(`A size has 0 to ${DROP_QUANTITY_MAX} pieces.`);
+    const key = label.toUpperCase();
+    if (seen.has(key)) throw validationError(`The size ${label} is listed twice.`);
+    seen.add(key);
+    if (pieces > 0) sizes.push({ label, pieces });
+  }
+  if (sizes.length < 1 || sizes.length > DRAW_SIZES.max) throw sizesCount();
+  const quantity = sizes.reduce((n, x) => n + x.pieces, 0);
+  if (quantity > DROP_QUANTITY_MAX) throw validationError('A release has at most 10 000 pieces.');
+  return { sizes, quantity };
 }
 
 function cleanWindow(v: unknown): number {
@@ -447,6 +517,22 @@ export interface PublicDropModel {
   variant: string | null;
 }
 
+/** A size as an entry, the draw's list and the console name it (plan NEXT LOT §3.6.F). */
+export interface DrawSizeRef {
+  id: string;
+  label: string;
+}
+
+/** A draw's size on its page (plan NEXT LOT §3.6.F): its pieces are public. */
+export interface DrawSheetSize extends DrawSizeRef {
+  /** The size's pieces. */
+  pieces: number;
+  /** The pieces reserved directly in it during the early access (PLATINE and PALLADIUM, the house's guarantee included), held or sold. */
+  reserved: number;
+  /** Before the draw, every piece of the size held or sold, or guaranteed to an entry of it (DROP_SIZE_FULL); false once drawn or cancelled. */
+  full: boolean;
+}
+
 /** One drop of the public list (GET /api/v1/drops). */
 export interface DropCard {
   id: string;
@@ -502,7 +588,9 @@ export interface DropSheet extends DropCard {
    * id, with its pieces, selected first and listed apart without a rank. No account marker of any kind: YOURS comes only
    * from the account's own entry (AccountDropEntry `guaranteed`, true only for a guarantee shown to the client).
    */
-  guaranteed: { id: string; pieces: number }[];
+  guaranteed: { id: string; pieces: number; size: DrawSizeRef | null }[];
+  /** Plan NEXT LOT §3.6.F: its sizes, each with its pieces, in order; empty for a draw without sizes (one pool). */
+  sizes: DrawSheetSize[];
 }
 
 /** An entry as the drawn drop's page lists it (GET /api/v1/drops/:id/entries): never its account. */
@@ -511,6 +599,15 @@ export interface DrawEntry {
   tier: number;
   seniority: number;
   rank: number;
+  /** Plan NEXT LOT §3.6.F: the size it was drawn in; null in a draw without sizes. */
+  size: DrawSizeRef | null;
+}
+
+/** GET /api/v1/club/drops/:id/entry (plan NEXT LOT §3.6.F): the account's entry in a draw, and the size YOUR SIZES suggests. */
+export interface AccountDrawEntry {
+  entry: AccountDropEntry | null;
+  /** Among the draw's sizes with pieces, the one the account's saved size matches (AC-01); null otherwise. */
+  savedSize: DrawSizeRef | null;
 }
 
 /** An entry of the signed-in account (GET /api/v1/club/status): its own id is the one the draw's list publishes. */
@@ -538,10 +635,27 @@ export interface AccountDropEntry {
   opensAt: Date;
   closesAt: Date;
   drawnAt: Date | null;
+  /** Plan NEXT LOT §3.6.F: the size it chose (kept when withdrawn, to preselect it again); null in a draw without sizes. */
+  size: DrawSizeRef | null;
 }
 
 /** The entries of a drop by status (the console). */
 export type DropEntryCounts = Record<DropEntryStatus, number>;
+
+/** A draw's size as the console reads it (plan NEXT LOT §3.6.F): its pieces, then its entries counted. */
+export interface AdminDrawSize extends DrawSizeRef {
+  pieces: number;
+  /** The pieces reserved directly in it, held or sold. */
+  reserved: number;
+  /** The entries waiting for the draw in it. */
+  entered: number;
+  /** The pieces held or sold in it (SELECTED, CONFIRMED). */
+  held: number;
+  /** Its waiting list. */
+  waitlisted: number;
+  /** IN-01: the pieces of the guaranteed entries waiting in it, selected first at the draw. */
+  guaranteedEntered: number;
+}
 
 /** A drop as the console reads it: never its sealed seed, nor the seed itself before the draw. */
 export interface AdminDrop {
@@ -581,6 +695,8 @@ export interface AdminDrop {
   heldPieces: number;
   /** IN-01: the entries waiting for the draw with the house's guarantee: selected first at the draw, for their pieces. */
   guaranteedEntered: ReleaseGuaranteed;
+  /** Plan NEXT LOT §3.6.F: its sizes with their counts, in order; empty for a draw without sizes. */
+  sizes: AdminDrawSize[];
 }
 
 /** An entry as the console lists it; the routes mask the email for an AUDITOR. */
@@ -601,6 +717,8 @@ export interface AdminDropEntry {
   guaranteed: boolean;
   /** IN-01: the pieces of its place (1, or its guarantee's). */
   pieces: number;
+  /** Plan NEXT LOT §3.6.F: its size; null in a draw without sizes. */
+  size: DrawSizeRef | null;
   handledBy: { id: string; email: string } | null;
   handledAt: Date | null;
   note: string | null;
@@ -624,6 +742,8 @@ export interface DrawOutcome {
   /** IN-01: the guaranteed places selected first, and their pieces. */
   guaranteed: number;
   guaranteedPieces: number;
+  /** Plan NEXT LOT §3.6.F: per size, the places it drew, the entries selected and waitlisted; empty for a draw without sizes. */
+  sizes: { id: string; label: string; places: number; selected: number; waitlisted: number }[];
 }
 
 /** A drop's entries counted (the console): by status, the direct reservations, the pieces held or sold, the guaranteed entries waiting for the draw. */
@@ -653,7 +773,12 @@ type EntryRow = {
   note: string | null;
   guarantee_id: string | null;
   pieces: number;
+  size_id: string | null;
+  size_label: string | null;
 };
+
+/** A size as a row names it (its id and label from drop_sizes), or null. */
+const sizeRef = (id: string | null, label: string | null): DrawSizeRef | null => (id !== null && label !== null ? { id, label } : null);
 
 function entryView(r: EntryRow): AdminDropEntry {
   return {
@@ -669,6 +794,7 @@ function entryView(r: EntryRow): AdminDropEntry {
     reserved: isReservation(r),
     guaranteed: r.guarantee_id !== null,
     pieces: r.pieces,
+    size: sizeRef(r.size_id, r.size_label),
     handledBy: r.handled_by && r.handled_email ? { id: r.handled_by, email: r.handled_email } : null,
     handledAt: r.handled_at,
     note: r.note,
@@ -687,6 +813,8 @@ type AccountEntryRow = Pick<DropRow, 'title' | 'opens_at' | 'closes_at' | 'publi
   guarantee_id: string | null;
   guarantee_visible: boolean | null;
   guarantee_used_at: Date | null;
+  size_id: string | null;
+  size_label: string | null;
 };
 
 /**
@@ -717,6 +845,7 @@ function accountEntryView(r: AccountEntryRow, now: Date): AccountDropEntry {
     opensAt: r.opens_at,
     closesAt: r.closes_at,
     drawnAt: r.drawn_at,
+    size: sizeRef(r.size_id, r.size_label),
   };
 }
 
@@ -745,7 +874,7 @@ export async function withdrawAccountEntries(tx: Db, accountId: string): Promise
   const rows = await tx
     .updateTable('drop_entries as e')
     .from('drops as d')
-    // IN-01: a guarantee it used is unbound and stays ACTIVE (a lock does not revoke it).
+    // IN-01: a guarantee it used is unbound and stays ACTIVE (a lock does not revoke it). Its size is kept (NEXT LOT §3.6.F).
     .set({ status: 'WITHDRAWN', guarantee_id: null, pieces: 1 })
     .whereRef('d.id', '=', 'e.drop_id')
     .where('e.account_id', '=', accountId)
@@ -781,6 +910,8 @@ export interface ExportedDropEntry {
   handledAt: Date | null;
   /** The console's note on the conclusion (CONFIRMED, LAPSED); null when none was given. */
   note: string | null;
+  /** Plan NEXT LOT §3.6.F: the size the entry chose; null in a draw without sizes. */
+  size: string | null;
 }
 
 export async function accountDropEntries(db: Db, accountId: string): Promise<ExportedDropEntry[]> {
@@ -788,7 +919,8 @@ export async function accountDropEntries(db: Db, accountId: string): Promise<Exp
   const rows = await db
     .selectFrom('drop_entries as e')
     .innerJoin('drops as d', 'd.id', 'e.drop_id')
-    .select(['e.id', 'e.drop_id', 'd.title', 'e.status', 'e.created_at', 'e.tier', 'e.seniority', 'e.rank', 'e.respond_by', 'e.handled_at', 'e.note'])
+    .leftJoin('drop_sizes as s', 's.id', 'e.size_id')
+    .select(['e.id', 'e.drop_id', 'd.title', 'e.status', 'e.created_at', 'e.tier', 'e.seniority', 'e.rank', 'e.respond_by', 'e.handled_at', 'e.note', 's.label as size_label'])
     .where('e.account_id', '=', accountId)
     .orderBy('e.created_at')
     .orderBy('e.id')
@@ -805,7 +937,111 @@ export async function accountDropEntries(db: Db, accountId: string): Promise<Exp
     respondBy: r.respond_by,
     handledAt: r.handled_at,
     note: r.note,
+    size: r.size_label ?? null,
   }));
+}
+
+// ── Sizes (plan NEXT LOT §3.6.F) ──────────────────────────────────────────
+
+/** A draw's size as stored: its id, label and pieces (`drop_sizes.stock`). */
+type DrawSizeRow = { id: string; label: string; stock: number };
+
+/** A draw's sizes, in order; none for a draw without sizes (one published before this lot keeps one pool). */
+async function drawSizesOf(db: Db, dropId: string): Promise<DrawSizeRow[]> {
+  return db.selectFrom('drop_sizes').select(['id', 'label', 'stock']).where('drop_id', '=', dropId).orderBy('position').execute();
+}
+
+/**
+ * The size an entry, a reservation or OFFER NEXT names in a draw with sizes: one of its sizes with pieces (400
+ * DROP_SIZE_REQUIRED without one, 404 DROP_SIZE_UNKNOWN otherwise); a draw without sizes takes none (404 when one is
+ * named). Null for a draw without sizes.
+ */
+function chosenSize(sizes: readonly DrawSizeRow[], sizeId: string | null | undefined, required = sizeRequired): DrawSizeRow | null {
+  if (sizes.length === 0) {
+    if (sizeId !== undefined && sizeId !== null) throw sizeUnknown();
+    return null;
+  }
+  if (sizeId === undefined || sizeId === null || sizeId === '') throw required();
+  const id = knownId(sizeId, sizeUnknown);
+  const size = sizes.find((x) => x.id === id);
+  if (!size || size.stock < 1) throw sizeUnknown();
+  return size;
+}
+
+/** The pieces of a draw's guaranteed entries waiting for the draw (ENTERED) in a size: selected first there at the draw. */
+async function guaranteedEnteredPieces(db: Db, dropId: string, sizeId: string): Promise<number> {
+  const r = await db
+    .selectFrom('drop_entries')
+    .select((eb) => eb.fn.coalesce(eb.fn.sum<number>('pieces'), sql<number>`0`).as('n'))
+    .where('drop_id', '=', dropId)
+    .where('size_id', '=', sizeId)
+    .where('status', '=', 'ENTERED')
+    .where('guarantee_id', 'is not', null)
+    .executeTakeFirstOrThrow();
+  return Number(r.n);
+}
+
+/**
+ * The sizes of the draws of `ids` with their entries counted, in order (the console's Sizes table, the page's per-size
+ * figures): its pieces, the pieces held or sold, those reserved directly (a direct reservation, or a guarantee used before
+ * the opening: entryReserved), the entries ENTERED and WAITLISTED, the guaranteed pieces ENTERED.
+ */
+async function sizeTallies(db: Db, ids: readonly string[]): Promise<Map<string, AdminDrawSize[]>> {
+  const out = new Map<string, AdminDrawSize[]>();
+  if (ids.length === 0) return out;
+  const rows = await sql<{ drop_id: string; id: string; label: string; stock: number; held: number; reserved: number; entered: number; waitlisted: number; guaranteed_entered: number }>`
+    SELECT s.drop_id, s.id, s.label, s.stock,
+           coalesce(sum(e.pieces) FILTER (WHERE e.status IN ('SELECTED', 'CONFIRMED')), 0)::int AS held,
+           coalesce(sum(e.pieces) FILTER (WHERE e.status IN ('SELECTED', 'CONFIRMED') AND e.rank IS NULL AND (e.tier IS NOT NULL OR g.used_at < d.opens_at)), 0)::int AS reserved,
+           (count(e.id) FILTER (WHERE e.status = 'ENTERED'))::int AS entered,
+           (count(e.id) FILTER (WHERE e.status = 'WAITLISTED'))::int AS waitlisted,
+           coalesce(sum(e.pieces) FILTER (WHERE e.status = 'ENTERED' AND e.guarantee_id IS NOT NULL), 0)::int AS guaranteed_entered
+      FROM drop_sizes s
+      JOIN drops d ON d.id = s.drop_id
+      LEFT JOIN drop_entries e ON e.drop_id = s.drop_id AND e.size_id = s.id
+      LEFT JOIN house_guarantees g ON g.id = e.guarantee_id
+     WHERE s.drop_id IN (${sql.join([...ids])})
+     GROUP BY s.drop_id, s.id, s.label, s.stock, s.position
+     ORDER BY s.drop_id, s.position`.execute(db);
+  for (const r of rows.rows) {
+    const list = out.get(r.drop_id) ?? [];
+    list.push({
+      id: r.id,
+      label: r.label,
+      pieces: Number(r.stock),
+      reserved: Number(r.reserved),
+      entered: Number(r.entered),
+      held: Number(r.held),
+      waitlisted: Number(r.waitlisted),
+      guaranteedEntered: Number(r.guaranteed_entered),
+    });
+    out.set(r.drop_id, list);
+  }
+  return out;
+}
+
+/**
+ * A draw's sizes as given, written again (a DRAFT's: no entry names one yet), a size of the same label keeping its id, and
+ * linked to the model's SKUs.
+ */
+async function writeDrawSizes(tx: Db, dropId: string, modelId: string, sizes: readonly DrawSizeInput[]): Promise<void> {
+  const kept = new Map((await drawSizesOf(tx, dropId)).map((x) => [x.label.toUpperCase(), x.id]));
+  await tx.deleteFrom('drop_sizes').where('drop_id', '=', dropId).execute();
+  await tx
+    .insertInto('drop_sizes')
+    .values(
+      sizes.map((x, i) => {
+        const id = kept.get(x.label.toUpperCase());
+        return { ...(id ? { id } : {}), drop_id: dropId, label: x.label, position: i + 1, stock: x.pieces };
+      }),
+    )
+    .execute();
+  await linkDropSizes(tx, dropId, modelId);
+}
+
+/** A draw's sizes as the audit log records them: each label (as linked) and its pieces. */
+async function auditedSizes(db: Db, dropId: string): Promise<{ label: string; pieces: number }[]> {
+  return (await drawSizesOf(db, dropId)).map((x) => ({ label: x.label, pieces: x.stock }));
 }
 
 // ── Service ────────────────────────────────────────────────────────────────
@@ -875,10 +1111,28 @@ export class DropService {
     const reserved = r.drawn_at ? 0 : await this.reservedPieces(this.db, id);
     // As RESERVE refuses DROP_FULL: the places held or sold, and the pieces the house still guarantees to its holders.
     const full = !r.drawn_at && !r.cancelled_at && (await this.heldPieces(this.db, id)) + (await guaranteedPieces(this.db, id)) >= r.quantity;
-    // IN-01: once drawn, the places the house guaranteed, by entry id and pieces, never their accounts.
+    // IN-01: once drawn, the places the house guaranteed, by entry id and pieces (and size), never their accounts.
     const guaranteed = r.drawn_at
-      ? (await this.db.selectFrom('drop_entries').select(['id', 'pieces']).where('drop_id', '=', id).where('guarantee_id', 'is not', null).orderBy('id').execute()).map((e) => ({ id: e.id, pieces: e.pieces }))
+      ? (
+          await this.db
+            .selectFrom('drop_entries as e')
+            .leftJoin('drop_sizes as s', 's.id', 'e.size_id')
+            .select(['e.id', 'e.pieces', 'e.size_id', 's.label as size_label'])
+            .where('e.drop_id', '=', id)
+            .where('e.guarantee_id', 'is not', null)
+            .orderBy('e.id')
+            .execute()
+        ).map((e) => ({ id: e.id, pieces: e.pieces, size: sizeRef(e.size_id, e.size_label ?? null) }))
       : [];
+    // Plan NEXT LOT §3.6.F: each size's pieces are public; full before the draw as RESERVE refuses DROP_SIZE_FULL.
+    const open = !r.drawn_at && !r.cancelled_at;
+    const sizes = ((await sizeTallies(this.db, [id])).get(id) ?? []).map((x) => ({
+      id: x.id,
+      label: x.label,
+      pieces: x.pieces,
+      reserved: x.reserved,
+      full: open && x.held + x.guaranteedEntered >= x.pieces,
+    }));
     return {
       ...this.card(r, now),
       description: r.description,
@@ -891,6 +1145,7 @@ export class DropService {
       reserved,
       full,
       guaranteed,
+      sizes,
     };
   }
 
@@ -900,11 +1155,19 @@ export class DropService {
     const d = await this.db.selectFrom('drops').select(['id', 'drawn_at']).where('id', '=', id).where('published_at', 'is not', null).where('mode', '=', 'DRAW').executeTakeFirst();
     if (!d) throw dropNotFound();
     if (!d.drawn_at) throw dropNotDrawn();
-    const ranked = this.db.selectFrom('drop_entries').where('drop_id', '=', id).where('rank', 'is not', null);
-    const total = await ranked.select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
-    const rows = await ranked.select(['id', 'tier', 'seniority', 'rank']).orderBy('rank').limit(page.pageSize).offset(pageOffset(page)).execute();
+    const total = await this.db.selectFrom('drop_entries').where('drop_id', '=', id).where('rank', 'is not', null).select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+    const rows = await this.db
+      .selectFrom('drop_entries as e')
+      .leftJoin('drop_sizes as s', 's.id', 'e.size_id')
+      .select(['e.id', 'e.tier', 'e.seniority', 'e.rank', 'e.size_id', 's.label as size_label'])
+      .where('e.drop_id', '=', id)
+      .where('e.rank', 'is not', null)
+      .orderBy('e.rank')
+      .limit(page.pageSize)
+      .offset(pageOffset(page))
+      .execute();
     return makePage(
-      rows.map((r) => ({ id: r.id, tier: r.tier ?? 0, seniority: r.seniority ?? 0, rank: r.rank! })),
+      rows.map((r) => ({ id: r.id, tier: r.tier ?? 0, seniority: r.seniority ?? 0, rank: r.rank!, size: sizeRef(r.size_id, r.size_label ?? null) })),
       Number(total.n),
       page,
     );
@@ -927,12 +1190,44 @@ export class DropService {
   }
 
   /**
+   * The account's entry in a published draw and the size YOUR SIZES suggests among its sizes with pieces (plan NEXT LOT
+   * §3.6.F; AC-01: savedSizeAmong): `entry` null when it has none. An unknown or unpublished draw (a LIVE RELEASE too):
+   * 404 DROP_NOT_FOUND. Reads only.
+   */
+  async entryFor(accountId: string, dropId: string): Promise<AccountDrawEntry> {
+    assertAccount(accountId);
+    const id = knownId(dropId, dropNotFound);
+    const d = await this.db.selectFrom('drops').select(['id', 'model_id']).where('id', '=', id).where('published_at', 'is not', null).where('mode', '=', 'DRAW').executeTakeFirst();
+    if (!d) throw dropNotFound();
+    const r = await this.accountEntryRows(this.db).where('e.drop_id', '=', id).where('e.account_id', '=', accountId).executeTakeFirst();
+    const sizes = await this.db
+      .selectFrom('drop_sizes as s')
+      .leftJoin('skus as k', 'k.id', 's.sku_id')
+      .select(['s.id', 's.label', 's.stock', 'k.fit_min_mm', 'k.fit_max_mm'])
+      .where('s.drop_id', '=', id)
+      .where('s.stock', '>', 0)
+      .orderBy('s.position')
+      .execute();
+    const match = await savedSizeAmong(
+      this.db,
+      accountId,
+      d.model_id,
+      sizes.map((z) => ({ id: z.id, label: z.label, fitMinMm: z.fit_min_mm ?? null, fitMaxMm: z.fit_max_mm ?? null, stock: z.stock })),
+    );
+    return { entry: r ? accountEntryView(r, this.clock()) : null, savedSize: match ? { id: match.id, label: match.label } : null };
+  }
+
+  /**
    * ENTER: the account enters an OPEN drop. A WITHDRAWN entry becomes ENTERED again, the same row and id. Refused: a
    * LOCKED account (403 ACCOUNT_LOCKED), an unknown or unpublished drop (404 DROP_NOT_FOUND), a cancelled or drawn one,
    * one not open (409), an account already entered (409 DROP_ALREADY_ENTERED), or holding a place it reserved directly
-   * during the early access (409 DROP_ALREADY_RESERVED). Audited `drop.enter`.
+   * during the early access (409 DROP_ALREADY_RESERVED). Plan NEXT LOT §3.6.F: in a draw with sizes, the entry chooses
+   * one of its sizes with pieces (400 DROP_SIZE_REQUIRED, 404 DROP_SIZE_UNKNOWN; asked again after a withdrawal), even
+   * one whose pieces are all reserved (the draw ranks a waiting list in each size); with the house's guarantee shown, the
+   * size must still serve its pieces (409 DROP_GUARANTEE_SIZE_FULL; one not shown leaves an ordinary entry). Audited
+   * `drop.enter` with its size.
    */
-  async enter(accountId: string, dropId: string, actor: Actor): Promise<AccountDropEntry> {
+  async enter(accountId: string, dropId: string, actor: Actor, input: { sizeId?: string | null } = {}): Promise<AccountDropEntry> {
     assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     const entryId = await inTransaction(this.db, async (tx) => {
@@ -947,28 +1242,84 @@ export class DropService {
       // A place reserved directly (IN-01: with the house's guarantee too, then without a tier) is not entered again.
       if (existing && (isReservation(existing) || (existing.guarantee_id !== null && existing.status !== 'ENTERED' && existing.status !== 'WITHDRAWN'))) throw alreadyReserved();
       if (existing && existing.status !== 'WITHDRAWN') throw alreadyEntered();
-      // IN-01: the house's guarantee set aside for this release, after the entry's row (the lock order): the entry uses it.
-      const g = await holderGuarantee(tx, accountId, d);
+      const size = chosenSize(await drawSizesOf(tx, id), input.sizeId);
+      // IN-01: the house's guarantee set aside for this release, after the entry's row (the lock order): the entry uses it,
+      // in a draw with sizes when its size can still serve its pieces.
+      const held = await holderGuarantee(tx, accountId, d);
+      const g = held && size ? await this.guaranteeInSize(tx, id, held, size.id, existing?.id ?? null) : held;
       const bound = g ? { guarantee_id: g.id, pieces: g.pieces } : { guarantee_id: null, pieces: 1 };
       let entry: string;
       let again = false;
       if (existing) {
-        await tx.updateTable('drop_entries').set({ status: 'ENTERED', ...bound }).where('id', '=', existing.id).where('status', '=', 'WITHDRAWN').execute();
+        await tx.updateTable('drop_entries').set({ status: 'ENTERED', ...bound, size_id: size?.id ?? null }).where('id', '=', existing.id).where('status', '=', 'WITHDRAWN').execute();
         entry = existing.id;
         again = true;
       } else {
         try {
-          entry = (await tx.insertInto('drop_entries').values({ drop_id: id, account_id: accountId, created_at: now, ...bound }).returning('id').executeTakeFirstOrThrow()).id;
+          entry = (await tx.insertInto('drop_entries').values({ drop_id: id, account_id: accountId, created_at: now, ...bound, size_id: size?.id ?? null }).returning('id').executeTakeFirstOrThrow()).id;
         } catch (e) {
           if (isUniqueViolation(e, 'drop_entries_drop_account_key')) throw alreadyEntered();
           throw e;
         }
       }
       await this.audit.record(
-        { actor, action: 'drop.enter', targetType: 'drop', targetId: id, details: { entryId: entry, ...(again ? { again: true } : {}), ...(g ? { guaranteeId: g.id } : {}) } },
+        {
+          actor,
+          action: 'drop.enter',
+          targetType: 'drop',
+          targetId: id,
+          details: { entryId: entry, ...(size ? { sizeId: size.id } : {}), ...(again ? { again: true } : {}), ...(g ? { guaranteeId: g.id } : {}) },
+        },
         tx,
       );
       return entry;
+    });
+    return this.accountEntry(accountId, entryId);
+  }
+
+  /**
+   * CHANGE SIZE (plan NEXT LOT §3.6.F, as a LIVE RELEASE's while WAITING): the account's ENTERED entry in a draw with sizes
+   * takes another of its sizes with pieces, while its entries are open (409 DROP_NOT_OPEN before and after; a cancelled or
+   * drawn one 409 as ENTER). A place reserved directly keeps its size (409 DROP_SIZE_FIXED); no entry, or one withdrawn:
+   * 409 DROP_NOT_ENTERED; a draw without sizes: 404 DROP_SIZE_UNKNOWN. IN-01: its guarantee (or the one set aside for the
+   * account, when the entry is not bound) is checked again in the new size, bound when it serves, refused when shown and
+   * it cannot (409 DROP_GUARANTEE_SIZE_FULL). The same size again changes nothing. Audited `drop.size` with the size before.
+   */
+  async changeSize(accountId: string, dropId: string, input: { sizeId: string }, actor: Actor): Promise<AccountDropEntry> {
+    assertAccount(accountId);
+    const id = knownId(dropId, dropNotFound);
+    const entryId = await inTransaction(this.db, async (tx) => {
+      const now = this.clock();
+      const account = await readActingAccount(tx, accountId);
+      if (!account || account.status !== 'ACTIVE') throw forbidden('This account cannot perform this action.');
+      const d = await this.lockPublished(tx, id);
+      if (d.cancelled_at) throw dropCancelled();
+      if (d.drawn_at) throw dropDrawn();
+      if (dropState(d, now) !== 'OPEN') throw dropNotOpen();
+      const sizes = await drawSizesOf(tx, id);
+      if (sizes.length === 0) throw sizeUnknown();
+      const e = await tx.selectFrom('drop_entries').select(['id', 'status', 'size_id', 'guarantee_id']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
+      if (!e || e.status === 'WITHDRAWN') throw notEntered();
+      if (e.status !== 'ENTERED') throw sizeFixed();
+      const size = chosenSize(sizes, input?.sizeId)!;
+      if (size.id === e.size_id) return e.id;
+      const held = e.guarantee_id
+        ? await tx.selectFrom('house_guarantees').select(['id', 'pieces', 'visible']).where('id', '=', e.guarantee_id).forUpdate().executeTakeFirst()
+        : await holderGuarantee(tx, accountId, d);
+      const g = held ? await this.guaranteeInSize(tx, id, held, size.id, e.id) : null;
+      const bound = g?.id ?? null;
+      await tx.updateTable('drop_entries').set({ size_id: size.id, guarantee_id: bound, pieces: g?.pieces ?? 1 }).where('id', '=', e.id).where('status', '=', 'ENTERED').execute();
+      await this.audit.record(
+        {
+          actor,
+          action: 'drop.size',
+          targetType: 'drop',
+          targetId: id,
+          details: { entryId: e.id, sizeId: size.id, before: e.size_id, ...(bound !== e.guarantee_id ? { guaranteeId: bound, guaranteeBefore: e.guarantee_id } : {}) },
+        },
+        tx,
+      );
+      return e.id;
     });
     return this.accountEntry(accountId, entryId);
   }
@@ -985,7 +1336,8 @@ export class DropService {
       if (d.cancelled_at) throw dropCancelled();
       const before = await tx.selectFrom('drop_entries').select(['id', 'guarantee_id']).where('drop_id', '=', id).where('account_id', '=', accountId).where('status', '=', 'ENTERED').forUpdate().executeTakeFirst();
       if (!before) throw notEntered();
-      // IN-01: the guarantee it used is unbound and stays ACTIVE: entering again uses it again.
+      // IN-01: the guarantee it used is unbound and stays ACTIVE: entering again uses it again. Its size is kept, so that
+      // the app preselects it when the account enters again (plan NEXT LOT §3.6.F).
       await tx.updateTable('drop_entries').set({ status: 'WITHDRAWN', guarantee_id: null, pieces: 1 }).where('id', '=', before.id).execute();
       await this.audit.record(
         { actor, action: 'drop.withdraw', targetType: 'drop', targetId: id, details: { entryId: before.id, ...(before.guarantee_id ? { guaranteeId: before.guarantee_id } : {}) } },
@@ -1007,9 +1359,12 @@ export class DropService {
    * (409), without an early access or from `opens_at` on (409 DROP_EARLY_ACCESS_CLOSED), a tier below PLATINE (403
    * DROP_TIER_REQUIRED), before its tier's time (409 DROP_EARLY_ACCESS_NOT_OPEN, with that time; none for its tier: 409
    * DROP_EARLY_ACCESS_CLOSED), an account that already holds an entry in
-   * it (409 DROP_ALREADY_RESERVED), a full drop (409 DROP_FULL). Audited `drop.reserve` with the entry and its tier.
+   * it (409 DROP_ALREADY_RESERVED), a full drop (409 DROP_FULL). Plan NEXT LOT §3.6.F: in a draw with sizes, in one of
+   * its sizes with pieces (400 DROP_SIZE_REQUIRED, 404 DROP_SIZE_UNKNOWN), refused once the pieces held or sold in that
+   * size and those of its guaranteed entries waiting leave none (409 DROP_SIZE_FULL, the size named); the place keeps its
+   * size. Audited `drop.reserve` with the entry, its tier and its size.
    */
-  async reserve(accountId: string, dropId: string, actor: Actor): Promise<AccountDropEntry> {
+  async reserve(accountId: string, dropId: string, actor: Actor, input: { sizeId?: string | null } = {}): Promise<AccountDropEntry> {
     assertAccount(accountId);
     const id = knownId(dropId, dropNotFound);
     const entryId = await inTransaction(this.db, async (tx) => {
@@ -1029,16 +1384,19 @@ export class DropService {
       if (now.getTime() < from.getTime()) throw earlyAccessNotOpen(from);
       const existing = await tx.selectFrom('drop_entries').select(['id', 'status']).where('drop_id', '=', id).where('account_id', '=', accountId).forUpdate().executeTakeFirst();
       if (existing && existing.status !== 'WITHDRAWN') throw alreadyReserved();
+      const size = chosenSize(await drawSizesOf(tx, id), input.sizeId);
       // IN-01: a holder's reservation uses the house's guarantee, after the entry's row (the lock order); the pieces the
       // house guarantees to others are never taken by an early access (DROP_FULL counts them).
       const g = await holderGuarantee(tx, accountId, d);
       const held = await this.heldPieces(tx, id);
       const guaranteed = await guaranteedPieces(tx, id, g?.id);
       if (held + guaranteed + (g?.pieces ?? 1) > d.quantity) throw dropFull();
+      // Plan NEXT LOT §3.6.F: within its size too, first come, first served.
+      if (size && (await this.heldPieces(tx, id, size.id)) + (await guaranteedEnteredPieces(tx, id, size.id)) + (g?.pieces ?? 1) > size.stock) throw sizeFull(size.label);
       const respondBy = new Date(now.getTime() + d.purchase_window_hours * HOUR_MS);
       const place = g
-        ? { status: 'SELECTED' as const, tier: null, seniority: null, respond_by: respondBy, guarantee_id: g.id, pieces: g.pieces }
-        : { status: 'SELECTED' as const, tier: standing.tier, seniority: standing.seniority, respond_by: respondBy, guarantee_id: null, pieces: 1 };
+        ? { status: 'SELECTED' as const, tier: null, seniority: null, respond_by: respondBy, guarantee_id: g.id, pieces: g.pieces, size_id: size?.id ?? null }
+        : { status: 'SELECTED' as const, tier: standing.tier, seniority: standing.seniority, respond_by: respondBy, guarantee_id: null, pieces: 1, size_id: size?.id ?? null };
       let entry: string;
       if (existing) {
         // Never a deletion and a new row: a withdrawn entry (none can be before the opening, but the rule holds) is taken up.
@@ -1060,7 +1418,7 @@ export class DropService {
           action: 'drop.reserve',
           targetType: 'drop',
           targetId: id,
-          details: { entryId: entry, tier: standing.tier, respondBy: place.respond_by.toISOString(), ...(g ? { guaranteeId: g.id, pieces: g.pieces } : {}) },
+          details: { entryId: entry, tier: standing.tier, respondBy: place.respond_by.toISOString(), ...(size ? { sizeId: size.id } : {}), ...(g ? { guaranteeId: g.id, pieces: g.pieces } : {}) },
         },
         tx,
       );
@@ -1079,9 +1437,10 @@ export class DropService {
     const tallies = await this.tallies(this.db, rows.map((r) => r.id));
     const creators = await this.staffEmails(this.db, rows.map((r) => r.created_by));
     const guaranteed = await releaseGuaranteed(this.db, rows.map((r) => r.id));
+    const sizes = await sizeTallies(this.db, rows.map((r) => r.id));
     const now = this.clock();
     return makePage(
-      rows.map((r) => this.adminView(r, now, tallies.get(r.id), creators, guaranteed.get(r.id))),
+      rows.map((r) => this.adminView(r, now, tallies.get(r.id), creators, guaranteed.get(r.id), sizes.get(r.id))),
       Number(total.n),
       page,
     );
@@ -1094,13 +1453,17 @@ export class DropService {
 
   /**
    * A new DRAFT, its seed drawn, sealed and committed now; its early access by tier given, or THE PROGRAM's (BP-19 T3:
-   * PLATINE's within PALLADIUM's). OPERATOR; audited `drop.create` with the seed's SHA-256 and both windows.
+   * PLATINE's within PALLADIUM's). Plan NEXT LOT §3.6.F: its sizes and their pieces are required (cleanDrawSizes: 1 to 24
+   * with pieces, 10 000 at most in all), each one of the model's sizes (linkDropSizes); its quantity is their sum, and a
+   * quantity given is refused (400 'A draw’s pieces are given per size.'). OPERATOR; audited `drop.create` with the seed's
+   * SHA-256, both windows and the sizes.
    */
   async create(input: CreateDropInput, actor: Actor): Promise<AdminDrop> {
     assertStaff(actor, 'create a release');
     const title = cleanTitle(input.title);
     const description = cleanDescription(input.description ?? null);
-    const quantity = cleanQuantity(input.quantity);
+    if (input.quantity !== undefined) throw quantityPerSize();
+    const { sizes, quantity } = cleanDrawSizes(input.sizes);
     const opensAt = cleanTime(input.opensAt, 'The opening');
     const closesAt = cleanTime(input.closesAt, 'The close');
     checkWindow(opensAt, closesAt);
@@ -1145,6 +1508,7 @@ export class DropService {
           created_at: now,
         })
         .execute();
+      await writeDrawSizes(tx, id, modelId, sizes);
       await this.audit.record(
         {
           actor,
@@ -1163,6 +1527,7 @@ export class DropService {
             priceMinor: price?.minor ?? null,
             currency: price?.currency ?? null,
             seedHash: toHex(seedHash),
+            sizes: await auditedSizes(tx, id),
           },
         },
         tx,
@@ -1173,8 +1538,10 @@ export class DropService {
 
   /**
    * Change a drop: any field while it is a DRAFT (not cancelled), its early access included (P-X02); once published,
-   * its description only (409 DROP_PUBLISHED). Audited `drop.update` with each value before and after (the description
-   * as its length and SHA-256); nothing changed, nothing audited.
+   * its description only (409 DROP_PUBLISHED). Plan NEXT LOT §3.6.F: its sizes and their pieces replace the draft's (a
+   * draft of before this lot gets its first), its quantity their sum; a quantity given is refused (400); a new model
+   * links the sizes again (its own sizes). Audited `drop.update` with each value before and after (the description as
+   * its length and SHA-256, the sizes as labels and pieces); nothing changed, nothing audited.
    */
   async update(dropId: string, change: DropChange, actor: Actor): Promise<AdminDrop> {
     assertStaff(actor, 'change a release');
@@ -1192,18 +1559,28 @@ export class DropService {
         after[key] = shown(to);
       };
       if (change.description !== undefined) note('description', 'description', d.description, cleanDescription(change.description), (v) => describedAs((v as string | null) ?? null));
-      const structural = (['modelId', 'title', 'quantity', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency'] as const).filter(
+      const structural = (['modelId', 'title', 'quantity', 'sizes', 'opensAt', 'closesAt', 'purchaseWindowHours', 'earlyAccessHours', 'earlyAccessPlatineHours', 'priceMinor', 'currency'] as const).filter(
         (k) => change[k] !== undefined,
       );
+      let resized = false;
       if (structural.length > 0) {
         if (d.cancelled_at) throw dropCancelled();
         if (d.published_at) throw dropPublished();
+        if (change.quantity !== undefined) throw quantityPerSize();
         if (change.title !== undefined) note('title', 'title', d.title, cleanTitle(change.title));
-        if (change.quantity !== undefined) {
-          const quantity = cleanQuantity(change.quantity);
+        if (change.sizes !== undefined) {
+          const { sizes, quantity } = cleanDrawSizes(change.sizes);
           // IN-01: never below the pieces held or guaranteed by the house.
           const floor = (await this.heldPieces(tx, id)) + (await guaranteedPieces(tx, id));
           if (quantity < floor) throw guaranteesExceed(await guaranteedPieces(tx, id));
+          const was = await auditedSizes(tx, id);
+          await writeDrawSizes(tx, id, change.modelId !== undefined ? knownId(change.modelId, () => notFound('Model', 'MODEL_NOT_FOUND')) : d.model_id, sizes);
+          const next = await auditedSizes(tx, id);
+          if (JSON.stringify(was) !== JSON.stringify(next)) {
+            before.sizes = was;
+            after.sizes = next;
+            resized = true;
+          }
           note('quantity', 'quantity', d.quantity, quantity);
         }
         if (change.purchaseWindowHours !== undefined) note('purchaseWindowHours', 'purchase_window_hours', d.purchase_window_hours, cleanWindow(change.purchaseWindowHours));
@@ -1234,10 +1611,12 @@ export class DropService {
             if (!model.active) throw modelInactive();
           }
           note('modelId', 'model_id', d.model_id, modelId);
+          // Its sizes, kept, are the new model's sizes too (400 SIZE_NOT_DECLARED otherwise).
+          if (modelId !== d.model_id && change.sizes === undefined) await linkDropSizes(tx, id, modelId);
         }
       }
-      if (Object.keys(set).length > 0) {
-        await tx.updateTable('drops').set(set).where('id', '=', id).execute();
+      if (Object.keys(set).length > 0 || resized) {
+        if (Object.keys(set).length > 0) await tx.updateTable('drops').set(set).where('id', '=', id).execute();
         await this.audit.record({ actor, action: 'drop.update', targetType: 'drop', targetId: id, details: { before, after } }, tx);
       }
       return this.adminDrop(tx, id);
@@ -1246,8 +1625,10 @@ export class DropService {
 
   /**
    * Publish a DRAFT: it shows on /verify/releases with the SHA-256 of its seed. Refused once published or cancelled,
-   * when its entries would already be closed, and for a model no longer offered (409). Audited `drop.publish`, with the
-   * time its direct reservations open (P-X02: its early access, from the publication at the earliest; null without one).
+   * when its entries would already be closed, for a model no longer offered (409), and (plan NEXT LOT §3.6.F) for a
+   * draft without sizes, one created before this lot (409 DROP_SIZES_REQUIRED). Audited `drop.publish`, with the
+   * time its direct reservations open (P-X02: its early access, from the publication at the earliest; null without one)
+   * and its sizes.
    */
   async publish(dropId: string, actor: Actor): Promise<AdminDrop> {
     assertStaff(actor, 'publish a release');
@@ -1260,6 +1641,8 @@ export class DropService {
       if (now.getTime() >= d.closes_at.getTime()) throw dropWindowPast();
       const model = await tx.selectFrom('models').select('active').where('id', '=', d.model_id).executeTakeFirstOrThrow();
       if (!model.active) throw modelInactive();
+      const sizes = await auditedSizes(tx, id);
+      if (sizes.length === 0) throw sizesRequired();
       await tx.updateTable('drops').set({ published_at: now }).where('id', '=', id).execute();
       const early = earlyAccessOpensAt({ ...d, published_at: now });
       const earlyPlatine = earlyAccessOpensAt({ ...d, published_at: now }, 2);
@@ -1281,6 +1664,7 @@ export class DropService {
             earlyAccessPlatineHours: platineHoursOf(d),
             earlyAccessOpensAt: early ? early.toISOString() : null,
             earlyAccessPlatineOpensAt: earlyPlatine ? earlyPlatine.toISOString() : null,
+            sizes,
           },
         },
         tx,
@@ -1314,8 +1698,11 @@ export class DropService {
    * The draw (ADMIN; see the file header). Under the drop's row lock: refused unless published, closed, neither
    * cancelled nor drawn; the seed opened and checked against its commitment (503 DROP_SEED_UNAVAILABLE otherwise);
    * every ENTERED entry ranked with its account's tier and seniority read now; the places left SELECTED until
-   * `respond_by`, the others WAITLISTED; the seed stored in clear with `drawn_at`. Audited `drop.draw` with the counts
-   * and the seed it reveals.
+   * `respond_by`, the others WAITLISTED; the seed stored in clear with `drawn_at`. Plan NEXT LOT §3.6.F, a draw with
+   * sizes: the guaranteed entries are selected first in their sizes; `drawOrder` ranks every other entry once; each size
+   * has its pieces less those held or sold in it and those its guaranteed entries just took; in rank order an entry is
+   * SELECTED while its size has a place left, else WAITLISTED, each keeping its rank. A draw without sizes (one published
+   * before this lot) draws exactly as before. Audited `drop.draw` with the counts (per size) and the seed it reveals.
    */
   async draw(dropId: string, actor: Actor): Promise<DrawOutcome> {
     assertStaff(actor, 'draw a release');
@@ -1329,7 +1716,7 @@ export class DropService {
       if (!d.published_at) throw dropNotPublished();
       if (now.getTime() < d.closes_at.getTime()) throw dropNotClosed();
       const seed = openDropSeed(this.seedKey, d);
-      const all = await tx.selectFrom('drop_entries').select(['id', 'account_id', 'guarantee_id', 'pieces']).where('drop_id', '=', id).where('status', '=', 'ENTERED').orderBy('id').execute();
+      const all = await tx.selectFrom('drop_entries').select(['id', 'account_id', 'guarantee_id', 'pieces', 'size_id']).where('drop_id', '=', id).where('status', '=', 'ENTERED').orderBy('id').execute();
       // IN-01: the entries with the house's guarantee are selected first, without a rank; the draw ranks the others.
       const guaranteedEntries = all.filter((e) => e.guarantee_id !== null);
       const entered = all.filter((e) => e.guarantee_id === null);
@@ -1341,6 +1728,10 @@ export class DropService {
         }),
         seed,
       );
+      const sizes = await drawSizesOf(tx, id);
+      // Each size's places (plan NEXT LOT §3.6.F), counted before the guaranteed entries are selected.
+      const left = new Map<string, number>();
+      for (const z of sizes) left.set(z.id, z.stock - (await this.heldPieces(tx, id, z.id)));
       const held = await this.heldPieces(tx, id);
       const respondBy = new Date(now.getTime() + d.purchase_window_hours * HOUR_MS);
       const notes: AuditRecordInput[] = [];
@@ -1353,14 +1744,34 @@ export class DropService {
           .where('status', '=', 'ENTERED')
           .execute();
         await useGuarantees(tx, guaranteedEntries.map((e) => e.guarantee_id!), id, now, actor, notes, 'draw');
+        for (const e of guaranteedEntries) if (e.size_id !== null && left.has(e.size_id)) left.set(e.size_id, left.get(e.size_id)! - e.pieces);
       }
-      // The places left: the quantity less the pieces held or sold, and those the house's guarantees just took.
-      const places = Math.max(0, d.quantity - held - guaranteedPieceCount);
+      // The places left: the quantity less the pieces held or sold, and those the house's guarantees just took; with
+      // sizes, each size's.
+      const sizeOf = new Map(entered.map((e) => [e.id.toLowerCase(), e.size_id]));
+      const bySize = new Map(sizes.map((z) => [z.id, { id: z.id, label: z.label, places: Math.max(0, left.get(z.id)!), selected: 0, waitlisted: 0 }]));
+      const selectedIds = new Set<string>();
+      if (sizes.length === 0) {
+        const places = Math.max(0, d.quantity - held - guaranteedPieceCount);
+        for (const e of order) if (e.rank <= places) selectedIds.add(e.id);
+      } else {
+        for (const e of order) {
+          const size = sizeOf.get(e.id) ?? null;
+          const tally = size !== null ? bySize.get(size) : undefined;
+          if (size !== null && tally && left.get(size)! >= 1) {
+            left.set(size, left.get(size)! - 1);
+            selectedIds.add(e.id);
+            tally.selected++;
+          } else if (tally) {
+            tally.waitlisted++;
+          }
+        }
+      }
       for (let i = 0; i < order.length; i += DRAW_CHUNK) {
         const chunk = order.slice(i, i + DRAW_CHUNK);
         const values = sql.join(
           chunk.map((e) => {
-            const selected = e.rank <= places;
+            const selected = selectedIds.has(e.id);
             return sql`(${e.id}::uuid, ${selected ? 'SELECTED' : 'WAITLISTED'}, ${e.tier}::smallint, ${e.seniority}::smallint, ${e.rank}::int, ${selected ? respondBy : null}::timestamptz)`;
           }),
         );
@@ -1373,7 +1784,9 @@ export class DropService {
       await tx.updateTable('drops').set({ seed, drawn_at: now }).where('id', '=', id).execute();
       // IN-01: the guarantees set aside for it and not used: a model's or a collection's carried, a chosen release's expired.
       await releaseCovered(tx, id, 'ENDED', now, actor, notes);
-      const selected = Math.min(places, order.length);
+      const perSize = [...bySize.values()];
+      const places = sizes.length === 0 ? Math.max(0, d.quantity - held - guaranteedPieceCount) : perSize.reduce((n, z) => n + z.places, 0);
+      const selected = selectedIds.size;
       const waitlisted = order.length - selected;
       await this.audit.record(
         {
@@ -1381,7 +1794,16 @@ export class DropService {
           action: 'drop.draw',
           targetType: 'drop',
           targetId: id,
-          details: { entries: order.length, places, selected, waitlisted, guaranteed: guaranteedEntries.length, guaranteedPieces: guaranteedPieceCount, seed: toHex(seed) },
+          details: {
+            entries: order.length,
+            places,
+            selected,
+            waitlisted,
+            guaranteed: guaranteedEntries.length,
+            guaranteedPieces: guaranteedPieceCount,
+            ...(perSize.length > 0 ? { sizes: perSize.map((z) => ({ sizeId: z.id, label: z.label, places: z.places, selected: z.selected, waitlisted: z.waitlisted })) } : {}),
+            seed: toHex(seed),
+          },
         },
         tx,
       );
@@ -1395,24 +1817,32 @@ export class DropService {
         waitlisted,
         guaranteed: guaranteedEntries.length,
         guaranteedPieces: guaranteedPieceCount,
+        sizes: perSize,
       };
     });
   }
 
-  /** A drop's entries for the console: by rank once drawn (the others after), else by entry; `status` narrows them. */
-  async entries(dropId: string, filter: { status?: DropEntryStatus }, page: PageRequest): Promise<Page<AdminDropEntry>> {
+  /**
+   * A drop's entries for the console: by rank once drawn (the others after), else by entry; `status` narrows them, and
+   * (plan NEXT LOT §3.6.F) `sizeId`, one of its sizes (404 DROP_SIZE_UNKNOWN otherwise).
+   */
+  async entries(dropId: string, filter: { status?: DropEntryStatus; sizeId?: string }, page: PageRequest): Promise<Page<AdminDropEntry>> {
     const id = knownId(dropId, dropNotFound);
     const d = await this.db.selectFrom('drops').select('id').where('id', '=', id).executeTakeFirst();
     if (!d) throw dropNotFound();
+    const sizeId = filter.sizeId === undefined ? undefined : knownId(filter.sizeId, sizeUnknown);
+    if (sizeId !== undefined && !(await drawSizesOf(this.db, id)).some((z) => z.id === sizeId)) throw sizeUnknown();
     const total = await this.db
       .selectFrom('drop_entries as e')
       .select((eb) => eb.fn.countAll<number>().as('n'))
       .where('e.drop_id', '=', id)
       .$if(filter.status !== undefined, (qb) => qb.where('e.status', '=', filter.status!))
+      .$if(sizeId !== undefined, (qb) => qb.where('e.size_id', '=', sizeId!))
       .executeTakeFirstOrThrow();
     const rows = await this.entryRows(this.db)
       .where('e.drop_id', '=', id)
       .$if(filter.status !== undefined, (qb) => qb.where('e.status', '=', filter.status!))
+      .$if(sizeId !== undefined, (qb) => qb.where('e.size_id', '=', sizeId!))
       .orderBy(sql`e.rank IS NULL`)
       .orderBy('e.rank')
       .orderBy('e.created_at')
@@ -1444,9 +1874,11 @@ export class DropService {
   /**
    * OFFER NEXT: the first entry of the waiting list by rank is SELECTED, its place held for the drop's window, only
    * while the places held and sold stay under `quantity` (409 DROP_FULL), and while one is left (409
-   * DROP_WAITLIST_EMPTY). Under the drop's row lock. Audited `drop.entry.offer`.
+   * DROP_WAITLIST_EMPTY). Plan NEXT LOT §3.6.F, a draw with sizes: per size (`sizeId` required: 400 DROP_SIZE_REQUIRED;
+   * 404 DROP_SIZE_UNKNOWN), the first of that size's waiting list, while the pieces held or sold in it stay under its
+   * pieces (409 DROP_FULL). Under the drop's row lock. Audited `drop.entry.offer` (with the size).
    */
-  async offerNext(dropId: string, actor: Actor): Promise<AdminDropEntry> {
+  async offerNext(dropId: string, actor: Actor, input: { sizeId?: string | null } = {}): Promise<AdminDropEntry> {
     assertStaff(actor, 'offer a place');
     const id = knownId(dropId, dropNotFound);
     const entryId = await inTransaction(this.db, async (tx) => {
@@ -1454,13 +1886,30 @@ export class DropService {
       const d = await this.lock(tx, id);
       if (d.mode === 'LIVE') throw dropLive();
       if (!d.drawn_at) throw dropNotDrawn();
+      const size = chosenSize(await drawSizesOf(tx, id), input.sizeId, () => sizeRequired('Choose the size whose place to offer.'));
       if ((await this.heldPieces(tx, id)) >= d.quantity) throw dropFull();
-      const next = await tx.selectFrom('drop_entries').select(['id', 'rank']).where('drop_id', '=', id).where('status', '=', 'WAITLISTED').orderBy('rank').limit(1).forUpdate().executeTakeFirst();
+      if (size && (await this.heldPieces(tx, id, size.id)) >= size.stock) throw dropFull();
+      const next = await tx
+        .selectFrom('drop_entries')
+        .select(['id', 'rank'])
+        .where('drop_id', '=', id)
+        .where('status', '=', 'WAITLISTED')
+        .$if(size !== null, (q) => q.where('size_id', '=', size!.id))
+        .orderBy('rank')
+        .limit(1)
+        .forUpdate()
+        .executeTakeFirst();
       if (!next) throw waitlistEmpty();
       const respondBy = new Date(now.getTime() + d.purchase_window_hours * HOUR_MS);
       await tx.updateTable('drop_entries').set({ status: 'SELECTED', respond_by: respondBy }).where('id', '=', next.id).execute();
       await this.audit.record(
-        { actor, action: 'drop.entry.offer', targetType: 'drop', targetId: id, details: { entryId: next.id, rank: next.rank, respondBy: respondBy.toISOString() } },
+        {
+          actor,
+          action: 'drop.entry.offer',
+          targetType: 'drop',
+          targetId: id,
+          details: { entryId: next.id, rank: next.rank, respondBy: respondBy.toISOString(), ...(size ? { sizeId: size.id } : {}) },
+        },
         tx,
       );
       return next.id;
@@ -1508,15 +1957,31 @@ export class DropService {
     return this.adminEntry(id, entry);
   }
 
-  /** The pieces of a drop's places held or sold (SELECTED, CONFIRMED): each entry's pieces (IN-01: a guaranteed place may hold several). */
-  private async heldPieces(db: Db, id: string): Promise<number> {
+  /**
+   * The pieces of a drop's places held or sold (SELECTED, CONFIRMED): each entry's pieces (IN-01: a guaranteed place may
+   * hold several); within one size when named (plan NEXT LOT §3.6.F).
+   */
+  private async heldPieces(db: Db, id: string, sizeId?: string): Promise<number> {
     const r = await db
       .selectFrom('drop_entries')
       .select((eb) => eb.fn.coalesce(eb.fn.sum<number>('pieces'), sql<number>`0`).as('n'))
       .where('drop_id', '=', id)
       .where('status', 'in', ['SELECTED', 'CONFIRMED'])
+      .$if(sizeId !== undefined, (q) => q.where('size_id', '=', sizeId!))
       .executeTakeFirstOrThrow();
     return Number(r.n);
+  }
+
+  /**
+   * IN-01 in a draw with sizes (plan NEXT LOT §3.6.F): the guarantee an entry in a size binds, or null. A size that can
+   * no longer serve its pieces (guarantees.ts sizeServesGuarantee) refuses a guarantee shown to the client (409
+   * DROP_GUARANTEE_SIZE_FULL); one not shown leaves no mark for its holder: an ordinary entry, the guarantee set aside and
+   * unused, as a LIVE RELEASE's.
+   */
+  private async guaranteeInSize<G extends { id: string; pieces: number; visible: boolean }>(tx: Db, dropId: string, g: G, sizeId: string, entryId: string | null): Promise<G | null> {
+    if (await sizeServesGuarantee(tx, dropId, sizeId, g.pieces, entryId)) return g;
+    if (g.visible) throw guaranteeSizeFull();
+    return null;
   }
 
   /** The pieces reserved directly before the draw (SELECTED or CONFIRMED, never ranked): a holder's reservation with the house's guarantee included. */
@@ -1651,6 +2116,7 @@ export class DropService {
     tally: Tally | undefined,
     creators: Map<string, string>,
     guaranteed: ReleaseGuaranteed | undefined,
+    sizes: AdminDrawSize[] | undefined,
   ): AdminDrop {
     return {
       id: r.id,
@@ -1681,6 +2147,7 @@ export class DropService {
       guaranteed: guaranteed ?? { places: 0, pieces: 0 },
       heldPieces: tally?.heldPieces ?? 0,
       guaranteedEntered: tally?.guaranteedEntered ?? { places: 0, pieces: 0 },
+      sizes: sizes ?? [],
     };
   }
 
@@ -1690,7 +2157,8 @@ export class DropService {
     const tallies = await this.tallies(db, [id]);
     const creators = await this.staffEmails(db, [r.created_by]);
     const guaranteed = await releaseGuaranteed(db, [id]);
-    return this.adminView(r, this.clock(), tallies.get(id), creators, guaranteed.get(id));
+    const sizes = await sizeTallies(db, [id]);
+    return this.adminView(r, this.clock(), tallies.get(id), creators, guaranteed.get(id), sizes.get(id));
   }
 
   /** The rows of a drop's entries as the console reads them: the account's email, the console user who concluded it. */
@@ -1699,9 +2167,10 @@ export class DropService {
       .selectFrom('drop_entries as e')
       .innerJoin('accounts as a', 'a.id', 'e.account_id')
       .leftJoin('admin_users as h', 'h.id', 'e.handled_by')
+      .leftJoin('drop_sizes as s', 's.id', 'e.size_id')
       .select([
         'e.id', 'e.account_id', 'a.email', 'e.status', 'e.created_at', 'e.tier', 'e.seniority', 'e.rank', 'e.respond_by', 'e.handled_by', 'h.email as handled_email', 'e.handled_at', 'e.note',
-        'e.guarantee_id', 'e.pieces',
+        'e.guarantee_id', 'e.pieces', 'e.size_id', 's.label as size_label',
       ]);
   }
 
@@ -1717,9 +2186,10 @@ export class DropService {
       .selectFrom('drop_entries as e')
       .innerJoin('drops as d', 'd.id', 'e.drop_id')
       .leftJoin('house_guarantees as g', 'g.id', 'e.guarantee_id')
+      .leftJoin('drop_sizes as s', 's.id', 'e.size_id')
       .select([
         'e.id', 'e.drop_id', 'e.status', 'e.created_at', 'e.tier', 'e.rank', 'e.respond_by', 'e.pieces', 'e.guarantee_id', 'g.visible as guarantee_visible', 'g.used_at as guarantee_used_at',
-        'd.title', 'd.opens_at', 'd.closes_at', 'd.published_at', 'd.cancelled_at', 'd.drawn_at',
+        'd.title', 'd.opens_at', 'd.closes_at', 'd.published_at', 'd.cancelled_at', 'd.drawn_at', 'e.size_id', 's.label as size_label',
       ]);
   }
 
