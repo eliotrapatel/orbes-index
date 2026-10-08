@@ -4,6 +4,7 @@
  *   GET   /api/admin/drops                                  AUDITOR   every drop, the latest created first
  *   POST  /api/admin/drops                                  OPERATOR  a DRAFT, its seed drawn and committed (its price optional)
  *   GET   /api/admin/drops/:id                              AUDITOR   one drop, its entries counted by status
+ *   GET   /api/admin/drops/:id/feasibility                  AUDITOR   per size, its pieces against the stock (a draw with sizes)
  *   PATCH /api/admin/drops/:id                              OPERATOR  any field of a DRAFT; the description after
  *   POST  /api/admin/drops/:id/publish                      OPERATOR  on /verify/releases, with its seed's SHA-256
  *   POST  /api/admin/drops/:id/cancel                       OPERATOR  before its draw only
@@ -14,7 +15,8 @@
  *   POST  /api/admin/drops/:id/offer-next                   OPERATOR  the next of the waiting list, SELECTED ({ sizeId }: per size)
  *
  * Plan NEXT LOT §3.6.F: a draw has its sizes and their pieces (`sizes` on POST and PATCH, its quantity their sum; a
- * `quantity` sent is refused), each size with its counts (`sizes`), each entry its size, OFFER NEXT per size.
+ * `quantity` sent is refused), each size with its counts (`sizes`), each entry its size, OFFER NEXT per size; its stock
+ * check (`feasibility`, §3.5.4.3), as a LIVE RELEASE's.
  *
  * A drop and its entries carry THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): `guaranteed` (places and pieces), and each
  * entry's `guaranteed` and `pieces`; the guarantees of a release are GET /api/admin/drops/:id/guarantees (guarantees.ts).
@@ -77,6 +79,12 @@ export const adminDropRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
   app.get('/api/admin/drops/:id', async (request) => {
     const { id } = parse(dropParams, request.params);
     return drops.get(id);
+  });
+
+  // Plan NEXT LOT §3.5.4.3: a draw's stock check under its sizes and in its PUBLISH dialog (a read, never a refusal).
+  app.get('/api/admin/drops/:id/feasibility', async (request) => {
+    const { id } = parse(dropParams, request.params);
+    return drops.feasibility(id);
   });
 
   app.patch('/api/admin/drops/:id', async (request) => {

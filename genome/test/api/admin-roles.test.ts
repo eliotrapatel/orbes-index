@@ -135,6 +135,8 @@ const PROBES: Probe[] = [
   { group: 'drops', method: 'GET', url: '/api/admin/drops', min: 'AUDITOR' },
   { group: 'drops', method: 'POST', url: '/api/admin/drops', body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'GET', url: `/api/admin/drops/${UUID}`, min: 'AUDITOR' },
+  // Plan NEXT LOT §3.5.4.3: a draw's stock check, a read.
+  { group: 'drops', method: 'GET', url: `/api/admin/drops/${UUID}/feasibility`, min: 'AUDITOR' },
   { group: 'drops', method: 'PATCH', url: `/api/admin/drops/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/publish`, body: INVALID, min: 'OPERATOR' },
   { group: 'drops', method: 'POST', url: `/api/admin/drops/${UUID}/cancel`, body: INVALID, min: 'OPERATOR' },

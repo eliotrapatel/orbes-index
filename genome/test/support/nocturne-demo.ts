@@ -77,7 +77,7 @@ import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
 import { packAndShip, stockPieces } from './fulfil.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from './live.js';
-import { poolDraw } from './draws.js';
+import { poolDraw, withDrawSizes } from './draws.js';
 
 export type DemoVariant =
   | 'full'
@@ -1122,27 +1122,31 @@ async function seedGuarantees(w: World, variant: 'full' | 'room' | 'draws'): Pro
 async function seedDrawSizes(w: World): Promise<void> {
   const { ctx, admin, clock, demo } = w;
   clock.set(at('2026-10-02T09:00:00Z'));
-  const created = await ctx.services.drops.create(
-    {
-      modelId: w.models.steel!,
-      title: 'MONOLITHE, A DRAW IN SIZES',
-      description: 'Nine pieces of MONOLITHE in steel, each in its size, drawn among the entries of October.',
-      sizes: [
-        { label: '16', pieces: 3 },
-        { label: '17', pieces: 5 },
-        { label: '18', pieces: 1 },
-      ],
-      opensAt: at('2026-10-04T10:00:00Z'),
-      closesAt: at('2026-10-09T18:00:00Z'),
-      purchaseWindowHours: 48,
-      earlyAccessHours: 24,
-      earlyAccessPlatineHours: 24,
-      priceMinor: 420_000,
-      currency: 'EUR',
-    },
-    admin,
-  );
-  const d = await ctx.services.drops.publish(created.id, admin);
+  // A draw's sizes are its model's (plan NEXT LOT §5.1 #20): the steel, of no type in the demo, is given its bracelet
+  // sizes for the draw's creation and publication only, nothing a collector reads changed.
+  const d = await withDrawSizes(ctx.db, w.models.steel!, ['16', '17', '18'], async () => {
+    const created = await ctx.services.drops.create(
+      {
+        modelId: w.models.steel!,
+        title: 'MONOLITHE, A DRAW IN SIZES',
+        description: 'Nine pieces of MONOLITHE in steel, each in its size, drawn among the entries of October.',
+        sizes: [
+          { label: '16', pieces: 3 },
+          { label: '17', pieces: 5 },
+          { label: '18', pieces: 1 },
+        ],
+        opensAt: at('2026-10-04T10:00:00Z'),
+        closesAt: at('2026-10-09T18:00:00Z'),
+        purchaseWindowHours: 48,
+        earlyAccessHours: 24,
+        earlyAccessPlatineHours: 24,
+        priceMinor: 420_000,
+        currency: 'EUR',
+      },
+      admin,
+    );
+    return ctx.services.drops.publish(created.id, admin);
+  }, 'BRACELET');
   clock.set(at('2026-10-03T12:00:00Z'));
   const platine = demo.accounts.platine!;
   await ctx.services.drops.reserve(platine.id, d.id, platine.actor, { sizeId: d.sizes.find((z) => z.label === '18')!.id });

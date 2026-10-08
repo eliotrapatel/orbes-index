@@ -80,7 +80,7 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import type { Actor } from '../types.js';
 import { isAfterRoom } from './after-room.js';
 import type { ClubTier } from './club.js';
-import { dropNotFound, dropState, drawOrder, earlyAccessOpensAt, inEarlyAccess } from './drops.js';
+import { dropNotFound, dropState, drawOrder, earlyAccessOpensAt, inEarlyAccess, inSize } from './drops.js';
 import { isAnnounced, LIVE_OPEN_STATUSES, LIVE_PER_ACCOUNT, roomOpensAt } from './live.js';
 import { orderReference } from './orders.js';
 import { sessionCookieName } from './sessions.js';
@@ -1721,7 +1721,7 @@ export class TestEntrantService {
         held > d.quantity
           ? `${count(held, 'place')} held or sold for ${count(d.quantity, 'piece')}.`
           : overSize
-            ? `Size ${overSize.label}: ${count(heldIn(overSize.id), 'place')} held or sold for ${count(overSize.stock, 'piece')}.`
+            ? `${sizeAtStart(overSize.label)}: ${count(heldIn(overSize.id), 'place')} held or sold for ${count(overSize.stock, 'piece')}.`
           : forConfirmed !== confirmedPieces
             ? `${count(confirmed.length, 'place')} confirmed${confirmedPieces !== confirmed.length ? ` for ${count(confirmedPieces, 'piece')}` : ''}, ${count(forConfirmed, 'order')}.`
             : negative > 0
@@ -1834,15 +1834,21 @@ export class TestEntrantService {
  */
 function fillOutOfOrder(ranked: readonly { status: string; rank: number | null; size_id: string | null }[], sizes: readonly { id: string; label: string }[]): string | null {
   for (const z of sizes) {
-    const inSize = ranked.filter((e) => e.size_id === z.id);
-    const given = inSize.filter((e) => e.status === 'SELECTED' || e.status === 'CONFIRMED');
-    const waiting = inSize.filter((e) => e.status === 'WAITLISTED');
+    const ofSize = ranked.filter((e) => e.size_id === z.id);
+    const given = ofSize.filter((e) => e.status === 'SELECTED' || e.status === 'CONFIRMED');
+    const waiting = ofSize.filter((e) => e.status === 'WAITLISTED');
     const lastGiven = given.reduce((m, e) => Math.max(m, e.rank ?? 0), 0);
     const firstWaiting = waiting.reduce((m, e) => Math.min(m, e.rank ?? Infinity), Infinity);
-    if (firstWaiting < lastGiven) return `In size ${z.label}, rank ${firstWaiting} is on the waiting list above rank ${lastGiven}, which was given a place.`;
+    if (firstWaiting < lastGiven) return `In ${inSize(z.label)}, rank ${firstWaiting} is on the waiting list above rank ${lastGiven}, which was given a place.`;
   }
   return null;
 }
+
+/** A size at the start of a sentence: « Size 16 », or a label that carries its word as written (« SIZE 52 »), as drops.ts `inSize`. */
+const sizeAtStart = (label: string): string => {
+  const said = inSize(label);
+  return said.charAt(0).toUpperCase() + said.slice(1);
+};
 
 /** `1 order`, `3 orders`; `1 entry`, `3 entries`. */
 const count = (n: number, word: string, words = `${word}s`): string => `${n} ${n === 1 ? word : words}`;

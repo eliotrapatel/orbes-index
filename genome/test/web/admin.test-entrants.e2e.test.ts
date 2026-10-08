@@ -29,7 +29,7 @@ import { createContext, type AppContext } from '../../src/server/context.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { poolDraw } from '../support/draws.js';
+import { poolDraw, withDrawSizes } from '../support/draws.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -227,11 +227,14 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
   }, STEP_TIMEOUT);
 
   it('sends test entrants into a draw in sizes (plan NEXT LOT §3.6.F): Choices · size as for a LIVE RELEASE, each bot in the size chosen, the report 5/5', async () => {
-    const created = await ctx.services.drops.create(
-      { modelId, title: 'MONOLITHE — release in sizes', sizes: [{ label: '16', pieces: 3 }, { label: '17', pieces: 2 }], opensAt: new Date(Date.now() + HOUR), closesAt: new Date(Date.now() + 2 * HOUR), earlyAccessHours: 0 },
-      admin,
-    );
-    const drop = await ctx.services.drops.publish(created.id, admin);
+    // Its sizes are its model's (§5.1 #20): MONOLITHE, of no type for its other releases here, given 16 and 17 for the draw.
+    const drop = await withDrawSizes(ctx.db, modelId, ['16', '17'], async () => {
+      const created = await ctx.services.drops.create(
+        { modelId, title: 'MONOLITHE — release in sizes', sizes: [{ label: '16', pieces: 3 }, { label: '17', pieces: 2 }], opensAt: new Date(Date.now() + HOUR), closesAt: new Date(Date.now() + 2 * HOUR), earlyAccessHours: 0 },
+        admin,
+      );
+      return ctx.services.drops.publish(created.id, admin);
+    }, 'BRACELET');
     await ctx.db.updateTable('drops').set({ opens_at: new Date(Date.now() - HOUR), closes_at: new Date(Date.now() + 2 * HOUR) }).where('id', '=', drop.id).execute();
     const s17 = drop.sizes.find((z) => z.label === '17')!.id;
     const id8 = drop.id.slice(0, 8).toUpperCase();

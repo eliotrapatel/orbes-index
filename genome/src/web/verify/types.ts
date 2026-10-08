@@ -555,9 +555,10 @@ export interface DropSheet extends DropCard {
   full?: boolean;
   /**
    * Plan NEXT-NINE, IN-01: once drawn, the places guaranteed by the house, by entry id and pieces, never an account
-   * (empty before the draw); YOURS comes only from the account's own entry (ClubEntry `guaranteed`).
+   * (empty before the draw); YOURS comes only from the account's own entry (ClubEntry `guaranteed`). Plan NEXT LOT
+   * §3.6.F: its size, and `reserved`, a place reserved directly with the guarantee, its pieces in its size's `reserved` already.
    */
-  guaranteed?: { id: string; pieces: number; size?: DrawSizeRef | null }[];
+  guaranteed?: { id: string; pieces: number; size?: DrawSizeRef | null; reserved?: boolean }[];
   /** Plan NEXT LOT §3.6.F: a draw's sizes, each with its pieces, in order; empty for a draw without sizes (one pool). */
   sizes?: DrawSheetSize[];
 }

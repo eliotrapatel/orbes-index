@@ -752,9 +752,11 @@ describe('the Club\'s drops (P-R03)', () => {
   it('gives a draw its pieces per size (plan NEXT LOT §3.6.F): one field per offered size, empty is 0, 1 to 24 with pieces and 10 000 in all; the pieces in all, the stock per size, OFFER NEXT and the outcome per size', () => {
     // The model's offered sizes, by their declared labels (ONE SIZE for a size of none), not those set aside.
     const row = (label: string | null, setAsideAt: string | null = null) => ({ skuId: `k${label}`, label, code: `C-${label}`, fitMinMm: null, fitMaxMm: null, setAsideAt, onList: true, sameAs: null, used: false, awaiting: 0 });
-    expect(offeredLabels({ sizes: [row('52'), row('54'), row('58', '2026-10-01T00:00:00.000Z')] })).toEqual(['52', '54']);
-    expect(offeredLabels({ sizes: [row(null)] })).toEqual(['ONE SIZE']);
-    expect(offeredLabels({ sizes: [] })).toEqual([]);
+    expect(offeredLabels({ sizeType: 'RING', sizes: [row('52'), row('54'), row('58', '2026-10-01T00:00:00.000Z')] })).toEqual(['52', '54']);
+    expect(offeredLabels({ sizeType: 'ONE_SIZE', sizes: [row(null)] })).toEqual(['ONE SIZE']);
+    expect(offeredLabels({ sizeType: 'RING', sizes: [] })).toEqual([]);
+    // A model with no size type: its SKUs were never declared, so none (the no-sizes line shows; §5.1 #20).
+    expect(offeredLabels({ sizeType: null, sizes: [row('52'), row('54')] })).toEqual([]);
     expect([sizeFieldLabel('52'), sizeFieldLabel('SIZE 52'), sizeFieldLabel('ONE SIZE')]).toEqual(['Size 52', 'SIZE 52', 'ONE SIZE']);
     expect([sizeInSentence('17'), sizeInSentence('SIZE 52'), sizeInSentence('ONE SIZE')]).toEqual(['size 17', 'SIZE 52', 'ONE SIZE']);
     // A new release's fields are empty; a draft's hold its pieces, 0 in its model's other sizes.

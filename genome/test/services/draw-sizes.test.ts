@@ -17,10 +17,12 @@ import { createContext, type AppContext } from '../../src/server/context.js';
 import { DomainError } from '../../src/server/errors.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { drawOrder, type AdminDrop, type DrawSizeInput } from '../../src/server/services/drops.js';
+import { defaultLocationId } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { poolDraw } from '../support/draws.js';
-import { accountOfTier, createAccount, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { poolDraw, withDrawSizes } from '../support/draws.js';
+import { stockPieces } from '../support/fulfil.js';
+import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
@@ -164,8 +166,50 @@ describe('sizes in draws (plan NEXT LOT §3.6.F)', () => {
     expect(old.sizes).toEqual([]);
     const e = await rejects(drops().publish(old.id, admin), 'DROP_SIZES_REQUIRED', 409);
     expect(e.publicMessage).toBe('Give the release its sizes and their pieces before publishing it.');
-    await drops().update(old.id, { sizes: [{ label: 'ONE SIZE', pieces: 3 }] }, admin);
-    expect((await drops().publish(old.id, admin)).state).toBe('UPCOMING');
+    // Its model has no size type yet: no sizes to give it until the Catalogue gives the model its own (§5.1 #20).
+    await rejects(drops().update(old.id, { sizes: [{ label: 'ONE SIZE', pieces: 3 }] }, admin), 'DROP_MODEL_SIZES_MISSING', 409);
+    await withDrawSizes(t.db, f.modelId, ['ONE SIZE'], async () => {
+      await drops().update(old.id, { sizes: [{ label: 'ONE SIZE', pieces: 3 }] }, admin);
+      expect((await drops().publish(old.id, admin)).state).toBe('UPCOMING');
+    });
+  });
+
+  it('checks a draw\'s stock per size at its location, as a LIVE RELEASE\'s (plan NEXT LOT §3.5.4.3): the pieces in stock, those that will wait for supplier stock, each size\'s SKU; 404 for a LIVE RELEASE', async () => {
+    const ring = await sizedModel(['52', '54']);
+    const d = await sizedDraw(ring, [{ label: '52', pieces: 2 }, { label: '54', pieces: 1 }], { published: false });
+    const sku = async (label: string) => (await t.db.selectFrom('skus').select('id').where('model_id', '=', ring).where('size_label', '=', label).executeTakeFirstOrThrow()).id;
+    const location = await defaultLocationId(t.db);
+    await stockPieces(ctx, { skuId: await sku('54'), locationId: location, count: 1, material: '925 STERLING SILVER' }, admin);
+    const check = await drops().feasibility(d.id);
+    expect(check.location?.id).toBe(location);
+    expect(check.sizes.map((l) => [l.label, l.onSale, l.fromStock, l.short, l.skuId])).toEqual([
+      ['52', 2, 0, 2, await sku('52')],
+      ['54', 1, 1, 0, await sku('54')],
+    ]);
+    expect([check.short, check.afterRoom, check.warnings]).toEqual([2, null, ['52: 0 in stock, 2 will wait for supplier stock.']]);
+    const live = await createLiveRelease(f, { opensAt: at(24 * HOUR) });
+    await rejects(drops().feasibility(live.id), 'DROP_NOT_FOUND', 404);
+    await rejects(drops().feasibility(randomUUID()), 'DROP_NOT_FOUND', 404);
+  });
+
+  it('takes no draw on a model with no size type, whose sizes would be made up: refused at the creation, at a change of model or of sizes, and at the publication (DROP_MODEL_SIZES_MISSING), nothing written', async () => {
+    const typeless = await createModel(t.db, 'NO TYPE');
+    const opensAt = at(HOUR);
+    const base = { title: 'A DRAW', opensAt, closesAt: new Date(opensAt.getTime() + HOUR) };
+    const missing = await rejects(drops().create({ ...base, modelId: typeless, sizes: [{ label: '52', pieces: 2 }] }, admin), 'DROP_MODEL_SIZES_MISSING', 409);
+    expect(missing.publicMessage).toBe('No sizes yet: give this model its size type and its sizes in the Catalogue.');
+    expect(await t.db.selectFrom('drops').select('id').where('model_id', '=', typeless).execute()).toEqual([]);
+    expect(await t.db.selectFrom('skus').select('id').where('model_id', '=', typeless).execute()).toEqual([]);
+    const ring = await sizedModel(['52']);
+    const d = await drops().create({ ...base, modelId: ring, sizes: [{ label: '52', pieces: 2 }] }, admin);
+    await rejects(drops().update(d.id, { modelId: typeless }, admin), 'DROP_MODEL_SIZES_MISSING', 409);
+    await rejects(drops().update(d.id, { modelId: typeless, sizes: [{ label: '52', pieces: 2 }] }, admin), 'DROP_MODEL_SIZES_MISSING', 409);
+    expect((await drops().get(d.id)).model.id).toBe(ring);
+    expect(await t.db.selectFrom('skus').select('id').where('model_id', '=', typeless).execute()).toEqual([]);
+    // A draft whose model has lost its type below the service (a type is never cleared through it): not published.
+    await t.db.updateTable('models').set({ size_type: null }).where('id', '=', ring).execute();
+    await rejects(drops().publish(d.id, admin), 'DROP_MODEL_SIZES_MISSING', 409);
+    expect((await drops().get(d.id)).state).toBe('DRAFT');
   });
 
   it('reads the account\'s entry and the size YOUR SIZES suggests among the draw\'s sizes with pieces; 404 for an unknown or unpublished draw', async () => {
@@ -273,6 +317,11 @@ describe('sizes in draws (plan NEXT LOT §3.6.F)', () => {
       const p = await accountOfTier(f, 2);
       await drops().reserve(p.id, d.id, p.actor, { sizeId: sizes['17'] });
     }
+    // A guarantee of 2 pieces shown to a PLATINE holder, who reserves with it in 16 during the early access: its size's
+    // RESERVED counts it, and the guaranteed list (once drawn) says so, so the page never counts it twice.
+    const reserver = await accountOfTier(f, 2);
+    await ctx.services.guarantees.grant(reserver.id, { scope: 'RELEASE', targetId: d.id, pieces: 2, validUntil: '2026-12-31', visible: true }, admin);
+    expect(await drops().reserve(reserver.id, d.id, reserver.actor, { sizeId: sizes['16'] })).toMatchObject({ status: 'SELECTED', reserved: true, guaranteed: true, pieces: 2, size: { label: '16' } });
     // A guarantee of 3 pieces shown to its holder, entered in 18: it takes 3 of 18's places, not 1.
     const holder = await accountOfTier(f, 1);
     await ctx.services.guarantees.grant(holder.id, { scope: 'RELEASE', targetId: d.id, pieces: 3, validUntil: '2026-12-31', visible: true }, admin);
@@ -289,11 +338,11 @@ describe('sizes in draws (plan NEXT LOT §3.6.F)', () => {
     clock.set(at(2 * HOUR));
     const out = await drops().draw(d.id, admin);
     expect(out.sizes.map((s) => [s.label, s.places, s.selected, s.waitlisted])).toEqual([
-      ['16', 3, 3, 5],
+      ['16', 1, 1, 7],
       ['17', 3, 3, 4],
       ['18', 1, 1, 4],
     ]);
-    expect([out.entries, out.selected, out.waitlisted, out.guaranteed, out.guaranteedPieces]).toEqual([20, 7, 13, 1, 3]);
+    expect([out.entries, out.selected, out.waitlisted, out.guaranteed, out.guaranteedPieces]).toEqual([20, 5, 15, 1, 3]);
     expect((await auditsOf(d.id, 'drop.draw'))[0]!.details).toMatchObject({ sizes: out.sizes.map((s) => ({ sizeId: s.id, label: s.label, places: s.places, selected: s.selected, waitlisted: s.waitlisted })) });
 
     // The seed proof: the page's seed, sizes and entries give every status.
@@ -302,7 +351,14 @@ describe('sizes in draws (plan NEXT LOT §3.6.F)', () => {
     const seed = Uint8Array.from(Buffer.from(sheet.seed!, 'hex'));
     const recomputed = drawOrder(listed.map((e) => ({ id: e.id, tier: e.tier as 0 | 1 | 2 | 3, seniority: e.seniority })), seed);
     expect(recomputed.map((e) => [e.id, e.rank])).toEqual(listed.map((e) => [e.id, e.rank]));
-    const left = new Map(sheet.sizes.map((s) => [s.id, s.pieces - s.reserved - sheet.guaranteed.filter((g) => g.size?.id === s.id).reduce((n, g) => n + g.pieces, 0)]));
+    // A size's places: its pieces, less its places reserved directly, less its guaranteed places not reserved (those its
+    // RESERVED already counts), from the page alone.
+    const left = new Map(sheet.sizes.map((s) => [s.id, s.pieces - s.reserved - sheet.guaranteed.filter((g) => g.size?.id === s.id && !g.reserved).reduce((n, g) => n + g.pieces, 0)]));
+    expect(sheet.sizes.map((s) => [s.label, s.reserved])).toEqual([
+      ['16', 2],
+      ['17', 2],
+      ['18', 0],
+    ]);
     const expected = new Map<string, string>();
     for (const e of listed) {
       const n = left.get(e.size!.id)!;
@@ -311,14 +367,21 @@ describe('sizes in draws (plan NEXT LOT §3.6.F)', () => {
     }
     const statuses = await t.db.selectFrom('drop_entries').select(['id', 'status']).where('id', 'in', listed.map((e) => e.id)).execute();
     for (const s of statuses) expect(s.status, s.id).toBe(expected.get(s.id));
-    expect(sheet.guaranteed).toEqual([{ id: expect.any(String), pieces: 3, size: { id: sizes['18'], label: '18' } }]);
+    const reservedWith = await t.db.selectFrom('drop_entries').select('id').where('drop_id', '=', d.id).where('account_id', '=', reserver.id).executeTakeFirstOrThrow();
+    const drawnWith = await t.db.selectFrom('drop_entries').select('id').where('drop_id', '=', d.id).where('account_id', '=', holder.id).executeTakeFirstOrThrow();
+    expect(sheet.guaranteed).toEqual(
+      [
+        { id: reservedWith.id, pieces: 2, size: { id: sizes['16'], label: '16' }, reserved: true },
+        { id: drawnWith.id, pieces: 3, size: { id: sizes['18'], label: '18' }, reserved: false },
+      ].sort((a, b) => (a.id < b.id ? -1 : 1)),
+    );
     // Each keeps its rank, one ranking across the sizes.
     expect(listed.map((e) => e.rank)).toEqual(listed.map((_, i) => i + 1));
 
     // The console's counts per size, its entries per size.
     const counted = await drops().get(d.id);
     expect(counted.sizes.map((s) => [s.label, s.pieces, s.reserved, s.entered, s.held, s.waitlisted])).toEqual([
-      ['16', 3, 0, 0, 3, 5],
+      ['16', 3, 2, 0, 3, 7],
       ['17', 5, 2, 0, 5, 4],
       ['18', 4, 0, 0, 4, 4],
     ]);
@@ -330,7 +393,9 @@ describe('sizes in draws (plan NEXT LOT §3.6.F)', () => {
     // OFFER NEXT: per size, the size required; a full size has no place to offer; a place lapsed gives one back in its size.
     await rejects(drops().offerNext(d.id, admin), 'DROP_SIZE_REQUIRED', 400);
     await rejects(drops().offerNext(d.id, admin, { sizeId: sizes['16'] }), 'DROP_FULL', 409);
-    const held16 = (await drops().entries(d.id, { sizeId: sizes['16'], status: 'SELECTED' }, { page: 1, pageSize: 50 })).items;
+    // The place drawn in 16 (beside the one reserved there with the guarantee) lapses.
+    const held16 = (await drops().entries(d.id, { sizeId: sizes['16'], status: 'SELECTED' }, { page: 1, pageSize: 50 })).items.filter((e) => e.rank !== null);
+    expect(held16).toHaveLength(1);
     clock.set(at(49 * HOUR));
     await drops().lapse(d.id, held16[0]!.id, null, admin);
     const next16 = (await drops().entries(d.id, { sizeId: sizes['16'], status: 'WAITLISTED' }, { page: 1, pageSize: 50 })).items[0]!;

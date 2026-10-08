@@ -21,7 +21,7 @@ import { endOfParisDay, guaranteeState, GuaranteeService, parisDayPlus, sizeServ
 import type { Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixture, type LiveFixture } from '../support/live.js';
-import { poolDraw, oneSizeOf } from '../support/draws.js';
+import { giveSizes, poolDraw, oneSizeOf, withDrawSizes } from '../support/draws.js';
 
 const START = '2026-11-01T09:00:00.000Z';
 const HOUR = 3_600_000;
@@ -175,6 +175,8 @@ describe('the house’s guarantee (IN-01)', () => {
     expect(now1.setAsideFor).toEqual({ id: ofMain.id, title: 'A DRAW' });
     // In grant order while they fit: the third waits, then takes the next release; the first never switches.
     const other = await createModel(t.db, 'HALO');
+    // A draft to publish later has its model's sizes (plan NEXT LOT §3.6.F): HALO of one size.
+    await giveSizes(t.db, other);
     const r = await draw(other, { days: 10, quantity: 2, published: false });
     const three = [await createAccount(t.db), await createAccount(t.db), await createAccount(t.db)];
     const gs: Awaited<ReturnType<typeof grant>>[] = [];
@@ -367,8 +369,11 @@ describe('the house’s guarantee (IN-01)', () => {
   it('serves a guarantee in a draw\'s size (plan NEXT LOT §3.6.F) while its pieces less those held or sold in it and those of the other guaranteed entries waiting in it leave room, in pieces; an entry set aside later binds only where its size serves it', async () => {
     f.clock.set(START);
     const opensAt = inDays(1);
-    const created = await f.drops.create({ modelId: f.modelId, title: 'A DRAW IN SIZES', sizes: [{ label: '17', pieces: 4 }, { label: '18', pieces: 1 }], opensAt, closesAt: new Date(opensAt.getTime() + DAY), earlyAccessHours: 0 }, f.admin);
-    const d = await f.drops.publish(created.id, f.admin);
+    // Its sizes are its model's (§5.1 #20): the fixture's model given 17 and 18 for the draw.
+    const d = await withDrawSizes(t.db, f.modelId, ['17', '18'], async () => {
+      const created = await f.drops.create({ modelId: f.modelId, title: 'A DRAW IN SIZES', sizes: [{ label: '17', pieces: 4 }, { label: '18', pieces: 1 }], opensAt, closesAt: new Date(opensAt.getTime() + DAY), earlyAccessHours: 0 }, f.admin);
+      return f.drops.publish(created.id, f.admin);
+    }, 'BRACELET');
     const [s17, s18] = [d.sizes[0]!.id, d.sizes[1]!.id];
     expect(await sizeServesGuarantee(t.db, d.id, s17, 4, null)).toBe(true);
     expect(await sizeServesGuarantee(t.db, d.id, s17, 5, null)).toBe(false);

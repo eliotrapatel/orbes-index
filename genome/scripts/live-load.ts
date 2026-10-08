@@ -517,6 +517,7 @@ async function serve(): Promise<void> {
   const { createForwardingLogger, loggerOptions } = await import('../src/server/http/logging.js');
   const { createDbFromPGlite } = await import('../src/server/db/connection.js');
   const { createModel, holdPieces } = await import('../test/support/live.js');
+  const { withDrawSizes } = await import('../test/support/draws.js');
   const { sessionCookieName } = await import('../src/server/services/sessions.js');
   const { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES } = await import('../src/server/services/after-room.js');
   const { defaultLocationId } = await import('../src/server/services/stock.js');
@@ -590,11 +591,14 @@ async function serve(): Promise<void> {
   // then over, then drawn.
   const hour = 3_600_000;
   // Its pieces in one size (plan NEXT LOT §3.6.F: a draw's pieces are given per size), each account entered in it.
-  const draw = await ctx.services.drops.create(
-    { modelId, title: 'MONOLITHE · THE DRAW BEFORE', sizes: [{ label: SIZES[0]!.label, pieces: 25 }], opensAt: new Date(Date.now() + hour), closesAt: new Date(Date.now() + 2 * hour), earlyAccessHours: 0 },
-    admin,
-  );
-  await ctx.services.drops.publish(draw.id, admin);
+  // A draw's sizes are its model's (§5.1 #20): MONOLITHE, of no type for the LIVE RELEASE, given that size for the draw.
+  const draw = await withDrawSizes(db, modelId, [SIZES[0]!.label], async () => {
+    const created = await ctx.services.drops.create(
+      { modelId, title: 'MONOLITHE · THE DRAW BEFORE', sizes: [{ label: SIZES[0]!.label, pieces: 25 }], opensAt: new Date(Date.now() + hour), closesAt: new Date(Date.now() + 2 * hour), earlyAccessHours: 0 },
+      admin,
+    );
+    return ctx.services.drops.publish(created.id, admin);
+  });
   await db.updateTable('drops').set({ opens_at: new Date(Date.now() - 2 * hour) }).where('id', '=', draw.id).execute();
   for (const id of accountIds) await ctx.services.drops.enter(id, draw.id, { type: 'account', id }, { sizeId: draw.sizes[0]!.id });
   await db.updateTable('drops').set({ closes_at: new Date(Date.now() - 1000) }).where('id', '=', draw.id).execute();

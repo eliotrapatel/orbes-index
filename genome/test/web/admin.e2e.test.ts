@@ -77,10 +77,11 @@ import { CLUB_TIER_DEFAULT_BENEFITS } from '../../src/server/services/club.js';
 import type { IssueResult } from '../../src/server/services/issuance.js';
 import { aggregateScanStats, daySpan, lastCompleteDay, utcDay } from '../../src/server/services/scan-stats.js';
 import { inTransaction } from '../../src/server/db/connection.js';
-import { ensureSku } from '../../src/server/services/stock.js';
+import { defaultLocationId, ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
+import { giveSizes } from '../support/draws.js';
+import { countPiecesIn, scanIntoParcel, stockPieces } from '../support/fulfil.js';
 import { seedGrowth } from '../support/growth.js';
 import { jpegPhoto } from '../support/images.js';
 import { svgToGray } from '../support/raster.js';
@@ -2109,6 +2110,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('.side__link.is-active').textContent()).toBe('Club');
     await expect.poll(() => p.locator('[data-testid=club-tab-drops]').getAttribute('aria-current')).toBe('page');
 
+    // A draw's sizes are its model's (plan NEXT LOT §5.1 #20): MONOLITHE, of no type for this file's other flows, is given
+    // its ring size (its sizes 52 and 54 among them) until the draw is published, then its own type and kind back.
+    const kindBefore = (await ctx.db.selectFrom('models').select('size_kind').where('id', '=', modelId).executeTakeFirstOrThrow()).size_kind;
+    await giveSizes(ctx.db, modelId, ['52', '54']);
+
     // A new release, in two dialogs (plan NEXT LOT §3.6.F): its model, then its fields with one field of pieces per
     // offered size of that model, the pieces in all said below; a draft, its seed committed at once.
     await p.click('[data-testid=drop-new]');
@@ -2182,6 +2188,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await expect.poll(() => p.locator('dialog').textContent()).toContain('Direct reservations of PLATINE and PALLADIUM owners: none.');
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('OPEN');
+    await ctx.db.updateTable('models').set({ size_type: null, size_kind: kindBefore }).where('id', '=', modelId).execute();
     await expect.poll(() => p.locator('[data-testid=drop-early-access]').textContent()).toBe('None');
     expect(await p.locator('[data-testid=drop-edit]').count()).toBe(0);
     expect(await p.locator('[data-testid=drop-sizes]').count()).toBe(0);
@@ -3388,6 +3395,74 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       .poll(() => page.locator('[data-testid=order-claim-notice]').textContent())
       .toBe(`No card registers this piece: its claim code was made for the buyer of order ${ref}, which was cancelled. Make a new claim code and put its card in the box before the piece is sold again.`);
     expect(await page.locator('[data-testid=order-claim-code]').count()).toBe(0);
+    await c.close();
+  }, STEP_TIMEOUT);
+
+  it('shows a draw\'s stock under its sizes and in its PUBLISH dialog (plan NEXT LOT §3.5.4.3), as a LIVE RELEASE\'s: a short size\'s sentence and Add to supplier order, read again once added; a covered draw: every piece in stock', async () => {
+    // A ring of 52 and 54 with its supplier, one piece of 54 in stock at the default location, none of 52.
+    const adminId = (await ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow()).id;
+    const staff = { type: 'admin' as const, id: adminId };
+    const ring = (
+      await ctx.db
+        .insertInto('models')
+        .values({ category_id: (await ctx.categories.getByCode('J'))!.index, name: 'HALO', type: 'RING', sku_prefix: 'HAL-RG', default_material: '925 STERLING SILVER' })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    await ctx.services.sizes.declare(ring, { sizeType: 'RING', ticked: ['52', '54'] }, staff);
+    const supplier = await ctx.services.suppliers.create({ name: 'MAISON HALO', currency: 'EUR' }, staff);
+    await ctx.services.suppliers.setModelSupplier(ring, { supplierId: supplier.id }, staff);
+    const france = await defaultLocationId(ctx.db);
+    const sku54 = (await ctx.db.selectFrom('skus').select('id').where('model_id', '=', ring).where('size_label', '=', '54').executeTakeFirstOrThrow()).id;
+    await stockPieces(ctx, { skuId: sku54, locationId: france, count: 1, material: '925 STERLING SILVER' }, staff);
+    const times = { opensAt: new Date(Date.now() + 24 * 3_600_000), closesAt: new Date(Date.now() + 26 * 3_600_000), earlyAccessHours: 0 };
+    const short = await ctx.services.drops.create({ modelId: ring, title: 'HALO — release in sizes', sizes: [{ label: '52', pieces: 2 }, { label: '54', pieces: 1 }], ...times }, staff);
+    const covered = await ctx.services.drops.create({ modelId: ring, title: 'HALO — release in stock', sizes: [{ label: '54', pieces: 1 }], ...times }, staff);
+
+    const c = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const p = await c.newPage();
+    await watch(p);
+    await signIn(p, ADMIN.email, ADMIN.password);
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
+    // Under its Sizes: per size, the owner's sentence; 54 is covered, 52 waits, with Add to supplier order.
+    await go(p, `#/club/drops/${short.id}`, 'HALO — release in sizes');
+    const stock = p.locator('#sizes [data-testid=drop-stock]');
+    await expect.poll(() => stock.locator('[data-testid=drop-stock-line]').textContent(), { timeout: 15_000 }).toBe('2 pieces on sale will wait for supplier stock once sold (FRANCE WAREHOUSE).');
+    expect(await stock.locator('[data-testid=drop-stock-warning]').allTextContents()).toEqual(['52: 0 in stock, 2 will wait for supplier stock. Add to supplier order']);
+    expect(await stock.textContent()).toContain('It does not block publishing: the orders the stock does not cover wait for supplier stock, the oldest first.');
+    await stock.locator('[data-testid=drop-add-to-order]').click();
+    expect(await p.locator('dialog .dialog__eyebrow').textContent()).toBe('HALO · 52');
+    expect(await p.locator('dialog [data-testid=drop-add-to-order-text]').textContent()).toBe(
+      'Add 2 pieces of HALO · 52 to the draft of MAISON HALO, to deliver to FRANCE WAREHOUSE. You confirm the draft before it is sent.',
+    );
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Added to the draft.")');
+    const draft = (await ctx.services.supplierOrders.list({ status: 'DRAFT' })).filter((o) => o.supplier.name === 'MAISON HALO');
+    expect(draft.map((o) => [o.location.name, o.pieces.ordered])).toEqual([['FRANCE WAREHOUSE', 2]]);
+    // Read again: the shortfall is in the draft, said, and never ordered twice.
+    await expect
+      .poll(() => p.locator('#sizes [data-testid=drop-stock-warning]').allTextContents())
+      .toEqual(['52: 0 in stock, 2 will wait for supplier stock. Already ordered: 2 in a draft.']);
+    await shot(p, 'club-drop-stock', { full: true });
+    // PUBLISH reads the check first and shows it, a warning: published all the same.
+    await p.click('[data-testid=drop-publish]');
+    await expect.poll(() => p.locator('dialog [data-testid=drop-feasibility-line]').textContent(), { timeout: 15_000 }).toBe('2 pieces on sale will wait for supplier stock once sold (FRANCE WAREHOUSE).');
+    expect(await p.locator('dialog [data-testid=drop-feasibility-warning]').allTextContents()).toEqual(['52: 0 in stock, 2 will wait for supplier stock. Already ordered: 2 in a draft.']);
+    await shot(p, 'club-drop-publish-stock');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=drop-state]').textContent()).toBe('UPCOMING');
+
+    // A draw the stock covers: every piece on sale is in stock, no size listed, no Add to supplier order.
+    await go(p, `#/club/drops/${covered.id}`, 'HALO — release in stock');
+    await expect.poll(() => p.locator('#sizes [data-testid=drop-stock-line]').textContent(), { timeout: 15_000 }).toBe('Every piece on sale is in stock.');
+    expect(await p.locator('#sizes [data-testid=drop-stock-warning]').count()).toBe(0);
+    expect(await p.locator('[data-testid=drop-add-to-order]').count()).toBe(0);
+    await p.click('[data-testid=drop-publish]');
+    await expect.poll(() => p.locator('dialog [data-testid=drop-feasibility-line]').textContent(), { timeout: 15_000 }).toBe('Every piece on sale is in stock.');
+    expect(await p.locator('dialog').textContent()).not.toContain('It does not block publishing');
+    await p.click('dialog [data-testid=dialog-cancel]');
+    await p.waitForSelector('dialog.dialog', { state: 'detached' });
+    expect(await cspViolations(p)).toEqual([]);
     await c.close();
   }, STEP_TIMEOUT);
 

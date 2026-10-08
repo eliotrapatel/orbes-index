@@ -46,6 +46,7 @@ import { deriveDropSeedKey, drawKey, drawOrder, DropService } from '../../src/se
 import { testConfig } from '../../src/server/config.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { isCheckViolation } from '../../src/server/db/pg-errors.js';
+import { giveSizes } from '../support/draws.js';
 import { createLiveRelease, createModel, holdPieces, liveFixtureOn } from '../support/live.js';
 import { accountClient, adminClient, createAdmin, createHarness, errorOf, issue, PASSWORD, safeJson, scanToReceive, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
@@ -251,6 +252,8 @@ describe('drops on a waiting list, drawn by tier (P-R03)', () => {
   beforeAll(async () => {
     h = await createHarness();
     catalog = await seedCatalog(h.ctx);
+    // A draw's sizes are its model's (plan NEXT LOT §3.6.F): MONOLITHE of one size.
+    await giveSizes(h.ctx.db, catalog.modelId);
     await staff();
   });
   afterAll(() => h?.close());
@@ -933,6 +936,7 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
   }
   async function release(body: Record<string, unknown>, opensIn: number, hours = 2): Promise<AdminDropJson> {
     const { modelId } = await seedCatalog(h.ctx);
+    await giveSizes(h.ctx.db, modelId);
     const { quantity, ...rest } = body;
     const res = await operator.post(adminUrl(), { modelId, title: 'MONOLITHE — guaranteed', sizes: one(typeof quantity === 'number' ? quantity : 4), opensAt: at(opensIn), closesAt: at(opensIn + hours * HOUR), earlyAccessHours: 0, ...rest });
     expect(res.statusCode, res.body).toBe(201);
@@ -962,7 +966,7 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
   });
   afterAll(() => h?.close());
 
-  it('selects the guaranteed places first, without a rank and for their pieces: places = quantity − reserved − guaranteed; the seed proof from the page holds and no guaranteed id is ranked; guaranteed[] is empty before the draw, then exactly {id, pieces, size} for everyone (size null in a draw without sizes); a hidden guarantee says guaranteed: false to its holder; CONFIRMED gives one order per piece, the first with the shipping and the welcome gift', async () => {
+  it('selects the guaranteed places first, without a rank and for their pieces: places = quantity − reserved − guaranteed; the seed proof from the page holds and no guaranteed id is ranked; guaranteed[] is empty before the draw, then exactly {id, pieces, size, reserved} for everyone (size null and reserved false in a draw without sizes); a hidden guarantee says guaranteed: false to its holder; CONFIRMED gives one order per piece, the first with the shipping and the welcome gift', async () => {
     const d = await release({ quantity: 4 }, HOUR);
     const shown = await collector(5);
     const hidden = await collector();
@@ -996,16 +1000,16 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
     for (const r of rows) expect([r.tier, r.seniority, r.rank]).toEqual([null, null, null]);
     expect((await h.ctx.db.selectFrom('house_guarantees').select('status').where('account_id', 'in', [shown.id, hidden.id]).execute()).map((g) => g.status)).toEqual(['USED', 'USED']);
 
-    // The page: the guaranteed places apart, by entry id and pieces (and size, plan NEXT LOT §3.6.F: none in a draw
-    // without sizes), nothing else, whoever reads it.
+    // The page: the guaranteed places apart, by entry id and pieces (and size and reserved, plan NEXT LOT §3.6.F: none
+    // and false in a draw without sizes), nothing else, whoever reads it.
     const expected = [
-      { id: shownEntry.id, pieces: 2, size: null },
-      { id: hiddenEntry.id, pieces: 1, size: null },
+      { id: shownEntry.id, pieces: 2, size: null, reserved: false },
+      { id: hiddenEntry.id, pieces: 1, size: null, reserved: false },
     ].sort((a, b) => (a.id < b.id ? -1 : 1));
     for (const reader of [h.client(), shown.client, hidden.client, others[0]!.client]) {
       const s = await sheetOf(reader, d.id);
       expect(s.guaranteed).toEqual(expected);
-      for (const item of s.guaranteed) expect(Object.keys(item).sort()).toEqual(['id', 'pieces', 'size']);
+      for (const item of s.guaranteed) expect(Object.keys(item).sort()).toEqual(['id', 'pieces', 'reserved', 'size']);
     }
     // The seed proof: the ranks recomputed from the published entries and the revealed seed are exactly the published
     // ones, and no guaranteed id is among them.
@@ -1057,6 +1061,7 @@ describe('the house’s guarantee in a draw (plan NEXT-NINE, IN-01)', () => {
 
     // A DRAFT whose chosen-release guarantee holds 2 pieces: its quantity never below them.
     const { modelId } = await seedCatalog(h.ctx);
+    await giveSizes(h.ctx.db, modelId);
     const draft = safeJson(await operator.post(adminUrl(), { modelId, title: 'DRAFT', sizes: one(4), opensAt: at(20 * HOUR), closesAt: at(22 * HOUR) })) as AdminDropJson;
     await guarantee((await collector()).id, { scope: 'RELEASE', targetId: draft.id, pieces: 2 });
     const low = await operator.patch(adminUrl(draft.id), { sizes: one(1) });
@@ -1095,6 +1100,8 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
   beforeAll(async () => {
     h = await createHarness();
     catalog = await seedCatalog(h.ctx);
+    // A draw's sizes are its model's offered sizes (§3.6.F, §5.1 #20): MONOLITHE, a ring of 52, 54 and 56.
+    await giveSizes(h.ctx.db, catalog.modelId, ['52', '54', '56']);
     await staff();
   });
   afterAll(() => h?.close());
@@ -1128,6 +1135,11 @@ describe('draws in sizes over HTTP (plan NEXT LOT §3.6.F)', () => {
     await h.ctx.db.deleteFrom('drop_sizes').where('drop_id', '=', d.id).execute();
     const old = await operator.post(`${adminUrl(d.id)}/publish`);
     expect([old.statusCode, errorOf(old).code, errorOf(old).message]).toEqual([409, 'DROP_SIZES_REQUIRED', 'Give the release its sizes and their pieces before publishing it.']);
+    // A model with no size type has no sizes to draw in: refused, worded, nothing created.
+    const typeless = await seedCatalog(h.ctx);
+    const none = await operator.post(adminUrl(), { modelId: typeless.modelId, title: 'X', sizes: [{ label: '52', pieces: 1 }], opensAt: at(HOUR), closesAt: at(2 * HOUR) });
+    expect([none.statusCode, errorOf(none).code, errorOf(none).message]).toEqual([409, 'DROP_MODEL_SIZES_MISSING', 'No sizes yet: give this model its size type and its sizes in the Catalogue.']);
+    expect(await h.ctx.db.selectFrom('drops').select('id').where('model_id', '=', typeless.modelId).execute()).toEqual([]);
   });
 
   it('reads the account\'s entry (no-store), enters in a size, changes it, reserves per size, as a signed-in account with its CSRF token', async () => {

@@ -225,8 +225,12 @@ export const NO_DRAW_SIZES = 'No sizes yet: give this model its size type and it
 export const DRAW_SIZES_LEAD = 'The sizes this model declares. Give each size its pieces; 0 leaves it out of the draw.';
 export const DRAW_SIZES_HINT = `Up to ${DROP_LIMITS.sizes} sizes with pieces.`;
 
-/** A model's offered sizes, as a draw names them: its declared labels not set aside, ONE SIZE for a size of none. */
-export function offeredLabels(m: Pick<ModelSizes, 'sizes'>): string[] {
+/**
+ * A model's offered sizes, as a draw names them: its declared labels not set aside, ONE SIZE for a size of none. None for
+ * a model with no size type, whose SKUs were never declared (§5.1 #20: the server refuses its draw, DROP_MODEL_SIZES_MISSING).
+ */
+export function offeredLabels(m: Pick<ModelSizes, 'sizes' | 'sizeType'>): string[] {
+  if (m.sizeType === null) return [];
   return m.sizes.filter((s) => s.setAsideAt === null).map((s) => s.label ?? ONE_SIZE_LABEL);
 }
 

@@ -62,10 +62,6 @@ import {
   livePartValues,
   livePhrase,
   liveStateLabel,
-  feasibilityLine,
-  addToOrderLine,
-  orderedLine,
-  toAddOf,
   locationOptions,
   parseSizes,
   priorityLine,
@@ -79,8 +75,6 @@ import {
   type LivePart,
 } from '../model/live.js';
 import { guaranteedText, stockWarning } from '../model/guarantees.js';
-import { can } from '../model/permissions.js';
-import { noSupplierWords } from '../model/supplier-orders.js';
 import { liveTestStart } from '../model/test-entrants.js';
 import { toneOf } from '../model/tone.js';
 import { modelChoice } from '../model/variants.js';
@@ -96,6 +90,7 @@ import { bestTimePanel } from './best-time.js';
 import { guaranteesSection } from './drop.js';
 import { loadLiveIntelligence, liveIntelligenceSections, liveSignals, sizeSellOut } from './live-intelligence.js';
 import { serverStatusPanel, withServerPanel } from './server-status.js';
+import { feasibilityBlock, stockBlock } from './stock-check.js';
 import { loadTestReads, testEntrantsSection, testTag } from './test-entrants.js';
 
 /** The board read again this often while the stream is refused or lost. */
@@ -924,7 +919,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
       body: [
         h('p', { class: 'dialog__text' }, `It is announced ${r.announceAt ? `on ${formatDateTime(r.announceAt)}` : 'now'}, each stage at its time; the room opens on ${formatDateTime(r.roomOpensAt)}, T0 on ${formatDateTime(r.opensAt)}.`),
         h('p', { class: 'dialog__text' }, 'Its settings still change until the announcement; then only its stock rises (ADD PIECES).'),
-        feasibilityBlock(ctx, r, check),
+        feasibilityBlock(ctx, r, check, () => ctx.api.liveFeasibility(r.id)),
       ],
       fields: [
         {
@@ -1057,88 +1052,6 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
     follower.start(board);
   }
   return root;
-}
-
-/**
- * The feasibility check in the publish dialog: each size not covered, said, with its Add to supplier order (plan NEXT
- * LOT §3.5.4.3), the block read again once added; everything covered, said; unread, said.
- */
-function feasibilityBlock(ctx: ViewContext, r: LiveRelease, check: LiveFeasibility | 'failed'): HTMLElement {
-  if (check === 'failed') return h('p', { class: 'dialog__text soft', data: { testid: 'live-feasibility' } }, 'The stock could not be checked just now: the release can be published all the same.');
-  const block: HTMLElement = h(
-    'div',
-    { class: 'live__feasibility', data: { testid: 'live-feasibility' } },
-    h('p', { class: 'live__feasibility-title' }, 'Stock'),
-    h('p', { class: 'dialog__text', data: { testid: 'live-feasibility-line' } }, feasibilityLine(check)),
-    shortSizesList(ctx, r, check, 'live-feasibility-warning', async () => {
-      const again: LiveFeasibility | 'failed' = await ctx.api.liveFeasibility(r.id).catch(() => 'failed' as const);
-      block.replaceWith(feasibilityBlock(ctx, r, again));
-    }),
-    check.short > 0 ? h('p', { class: 'dialog__text soft' }, 'It does not block publishing: the orders the stock does not cover wait for supplier stock, the oldest first.') : null,
-  );
-  return block;
-}
-
-/**
- * The release's stock under its sizes (plan NEXT LOT §3.5.4.3), from its creation on: each size's sentence, and for a
- * size short of stock with a supplier, Add to supplier order (OPERATOR), into its supplier's draft for ORBES to confirm.
- */
-function stockBlock(ctx: ViewContext, r: LiveRelease, check: LiveFeasibility | 'failed'): HTMLElement {
-  if (check === 'failed') return h('p', { class: 'panel__text soft', data: { testid: 'live-stock' } }, 'The stock could not be checked just now.');
-  return h(
-    'div',
-    { class: 'live__stock', data: { testid: 'live-stock' } },
-    h('p', { class: 'dialog__text', data: { testid: 'live-stock-line' } }, feasibilityLine(check)),
-    shortSizesList(ctx, r, check, 'live-stock-warning', async () => ctx.reload()),
-    check.short > 0 ? h('p', { class: 'dialog__text soft' }, 'It does not block publishing: the orders the stock does not cover wait for supplier stock, the oldest first.') : null,
-  );
-}
-
-/**
- * The sizes short of stock, the release's then its after-room's, each with the owner's sentence (the check's warning),
- * what is already ordered for it, and, for an OPERATOR, Add to supplier order with the pieces still to order (§3.5.6.4:
- * never a shortfall ordered twice); a size without a supplier says where to set one.
- */
-function shortSizesList(ctx: ViewContext, r: LiveRelease, check: LiveFeasibility, testId: string, added: () => Promise<void>): HTMLElement | null {
-  const add = can(ctx.session.admin.role, 'manageSupplierOrders') && check.location !== null;
-  const lines = [...check.sizes.map((l) => ({ l, prefix: '' })), ...(check.afterRoom ?? []).map((l) => ({ l, prefix: 'THE AFTER-ROOM · ' }))].filter((x) => x.l.short > 0);
-  if (!lines.length) return null;
-  return h(
-    'ul',
-    { class: 'live__feasibility-list' },
-    ...lines.map(({ l, prefix }) => {
-      // The SKU's words name the variant: 'MONOLITHE · BLUE · 52' (the release's model and size without one).
-      const sku = l.skuWords ?? `${r.model.name} · ${l.label}`;
-      const ordered = orderedLine(l);
-      const after: Child[] = [];
-      if (ordered) after.push(' ', h('span', { class: 'soft', data: { testid: 'live-ordered' } }, ordered));
-      if (add && l.skuId && !l.supplier) after.push(' ', h('span', { class: 'soft', data: { testid: 'live-no-supplier' } }, noSupplierWords(sku)));
-      if (add && l.skuId && l.supplier && toAddOf(l) > 0) {
-        after.push(
-          ' ',
-          button('Add to supplier order', {
-            kind: 'ghost',
-            testId: 'live-add-to-order',
-            onClick: () =>
-              void openDialog({
-                title: 'Add to supplier order',
-                eyebrow: sku,
-                body: [ordered ? h('p', { class: 'dialog__text soft' }, ordered) : null, h('p', { class: 'dialog__text', data: { testid: 'live-add-to-order-text' } }, addToOrderLine(l, sku, check.location!.name))],
-                confirmLabel: 'Add to supplier order',
-                submit: async () => {
-                  await ctx.api.addToSupplierDraft({ skuId: l.skuId!, locationId: check.location!.id, quantity: toAddOf(l), from: 'RELEASE' });
-                },
-              }).then(async (v) => {
-                if (!v) return;
-                notify('Added to the draft.');
-                await added();
-              }),
-          }),
-        );
-      }
-      return h('li', { data: { testid: testId } }, h('span', null, `${prefix}${l.label}: ${formatCount(l.fromStock)} in stock, ${formatCount(l.short)} will wait for supplier stock.`), ...after);
-    }),
-  );
 }
 
 /**

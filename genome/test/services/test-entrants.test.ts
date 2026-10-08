@@ -38,7 +38,7 @@ import { shareOf, splitOf, testPhrase, testRunSettings, TEST_RUN_DEFAULTS, TestE
 import { createHarness, type Harness } from '../api/support.js';
 import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
 import { createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
-import { poolDraw } from '../support/draws.js';
+import { poolDraw, withDrawSizes } from '../support/draws.js';
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -513,22 +513,25 @@ describe('a draw in sizes (plan NEXT LOT §3.6.F)', () => {
   /** A draw in sizes 16 (2 pieces), 17 (2) and 18 (1), published now, open since an hour. */
   async function sizedDraw(): Promise<{ id: string; sizes: { id: string; label: string }[] }> {
     const now = w.h.clock.now().getTime();
-    const created = await w.h.ctx.services.drops.create(
-      {
-        modelId: w.f.modelId,
-        title: 'MONOLITHE · TEST DRAW IN SIZES',
-        sizes: [
-          { label: '16', pieces: 2 },
-          { label: '17', pieces: 2 },
-          { label: '18', pieces: 1 },
-        ],
-        opensAt: new Date(now - HOUR),
-        closesAt: new Date(now + HOUR),
-        earlyAccessHours: 0,
-      },
-      w.f.admin,
-    );
-    const d = await w.h.ctx.services.drops.publish(created.id, w.f.admin);
+    // Its sizes are its model's (plan NEXT LOT §5.1 #20): the fixture's model given 16, 17 and 18 for the draw.
+    const d = await withDrawSizes(w.h.ctx.db, w.f.modelId, ['16', '17', '18'], async () => {
+      const created = await w.h.ctx.services.drops.create(
+        {
+          modelId: w.f.modelId,
+          title: 'MONOLITHE · TEST DRAW IN SIZES',
+          sizes: [
+            { label: '16', pieces: 2 },
+            { label: '17', pieces: 2 },
+            { label: '18', pieces: 1 },
+          ],
+          opensAt: new Date(now - HOUR),
+          closesAt: new Date(now + HOUR),
+          earlyAccessHours: 0,
+        },
+        w.f.admin,
+      );
+      return w.h.ctx.services.drops.publish(created.id, w.f.admin);
+    }, 'BRACELET');
     return { id: d.id, sizes: d.sizes.map((z) => ({ id: z.id, label: z.label })) };
   }
   const entriesOf = (dropId: string) => w.h.ctx.db.selectFrom('drop_entries').select(['id', 'size_id', 'status', 'rank']).where('drop_id', '=', dropId).execute();

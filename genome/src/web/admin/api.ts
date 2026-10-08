@@ -1476,6 +1476,11 @@ export class AdminApi {
     return this.get(`/api/admin/drops/${encodeURIComponent(id)}`);
   }
 
+  /** Plan NEXT LOT §3.5.4.3: a draw's stock check, each size against the stock at its location (warnings only). */
+  dropFeasibility(id: string): Promise<LiveFeasibility> {
+    return this.get(`/api/admin/drops/${encodeURIComponent(id)}/feasibility`);
+  }
+
   createDrop(input: DropInput): Promise<Drop> {
     return this.post('/api/admin/drops', input);
   }

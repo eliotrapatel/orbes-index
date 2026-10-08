@@ -32,7 +32,7 @@ import { createTestDb, type TestDb } from '../support/db.js';
 import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
 import { jpegPhoto } from '../support/images.js';
 import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
-import { poolDraw } from '../support/draws.js';
+import { poolDraw, withDrawSizes } from '../support/draws.js';
 
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
@@ -406,8 +406,11 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
 
     it('a draw\'s entry in a size (plan NEXT LOT §3.6.F): its order takes the size and its SKU at once, a size never changed on it (ORDER_SIZE_FIXED); a salon request\'s size is fixed too, NOT SURE YET leaving it to Client Services (§3.6.G)', async () => {
       const T = new Date(clock.now().getTime() + HOUR);
-      const created = await f.drops.create({ modelId: f.modelId, title: 'A draw in sizes', sizes: [{ label: '62', pieces: 1 }, { label: '63', pieces: 1 }], opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0 }, admin);
-      const d = await f.drops.publish(created.id, admin);
+      // Its sizes are its model's (§5.1 #20): the fixture's model, of no type for the salon below, given 62 and 63 for the draw.
+      const d = await withDrawSizes(t.db, f.modelId, ['62', '63'], async () => {
+        const created = await f.drops.create({ modelId: f.modelId, title: 'A draw in sizes', sizes: [{ label: '62', pieces: 1 }, { label: '63', pieces: 1 }], opensAt: T, closesAt: new Date(T.getTime() + HOUR), earlyAccessHours: 0 }, admin);
+        return f.drops.publish(created.id, admin);
+      });
       const s62 = d.sizes.find((x) => x.label === '62')!.id;
       const a = await createAccount(t.db);
       clock.set(new Date(T.getTime() + MINUTE));
