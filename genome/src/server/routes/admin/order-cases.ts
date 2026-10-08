@@ -4,7 +4,7 @@
  * reports on scans (`/api/admin/reports`, §16.8). The agent's own routes (report a parcel problem, the parcels to
  * receive, received) are in routes/admin/logistics.ts; Client Services opens a return in routes/admin/orders.ts.
  *
- *   GET    /api/admin/order-cases/:id           AUDITOR   one order case (its note withheld from an AUDITOR)
+ *   GET    /api/admin/order-cases/:id           AUDITOR   one order case (its notes withheld from an AUDITOR)
  *   POST   /api/admin/order-cases/:id/decide    OPERATOR  ORBES's decision (a LOST parcel and the archive: ADMIN, 403
  *                                                         otherwise); the claim code of a piece back to stock, once,
  *                                                         no-store
@@ -18,10 +18,20 @@ import { adminActor, hasRole, requireAdmin } from '../../http/sessions.js';
 import type { OrderCaseRecord } from '../../services/order-cases.js';
 import type { AdminRouteDeps } from './index.js';
 
-/** An order case as the caller may read it: the client's or staff's words withheld from an AUDITOR. */
+/**
+ * An order case as the caller may read it: every note withheld from an AUDITOR (the opening note, the agent's on the
+ * parcel back, ORBES's decision's and the cancellation's, which often quotes the client), the rest as it is.
+ */
 export function orderCaseJson(request: FastifyRequest, c: OrderCaseRecord): OrderCaseRecord {
   const { admin } = requireAdmin(request);
-  return hasRole(admin.role, 'OPERATOR') ? c : { ...c, note: null };
+  if (hasRole(admin.role, 'OPERATOR')) return c;
+  return {
+    ...c,
+    note: null,
+    received: c.received ? { ...c.received, note: null } : null,
+    decision: c.decision ? { ...c.decision, note: null } : null,
+    cancelled: c.cancelled ? { ...c.cancelled, note: null } : null,
+  };
 }
 
 export const adminOrderCaseRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {

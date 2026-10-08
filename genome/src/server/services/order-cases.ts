@@ -18,10 +18,11 @@
  *             ORDER_CASE_NOT_RECEIVED; a LOST parcel from OPEN):
  *               a return or an exchange: the return's core (services/orders.ts returnInTransaction: back to stock with
  *               a new claim code shown once, or to the archive; the ownership taken back; the credit note), then for an
- *               EXCHANGE the EXCHANGE order, PAID at once with its own invoice;
+ *               EXCHANGE the EXCHANGE order, PAID at once with its own invoice, the original's credit carried onto it;
  *               a parcel problem: each order of the parcel SHIPPED → PAID (`order.reship`). BACK_TO_SENDER: its pieces
  *               back in stock (RETURNED +1), still bound, to pack again (RESHIP), or freed (REFUND: the order
- *               cancelled, a credit note). DAMAGED: each piece back to stock (RETURNED +1, unbound) or to the archive
+ *               cancelled, a credit note). DAMAGED: each piece back to stock (RETURNED +1, unbound, at the location
+ *               ORBES chose, the order's by default; a new claim code nobody sees, as a return's) or to the archive
  *               (RETIRED, ADMIN), as ORBES chooses from the agent's record. LOST: each piece REVOKED (ADMIN), unbound.
  *               RESHIP after DAMAGED or LOST holds new pieces ahead of the queue (`queue_first`); REFUND cancels.
  *   cancel    Client Services ends a case with no decision (a request refused or withdrawn; a damaged parcel that never
@@ -89,7 +90,7 @@ const noShippedParcel = () => notFound('Shipment', 'SHIPMENT_NOT_FOUND');
 
 // ── Views ──────────────────────────────────────────────────────────────────
 
-/** An order case as the console reads it (GET /api/admin/order-cases/:id); the route withholds `note` from an AUDITOR. */
+/** An order case as the console reads it (GET /api/admin/order-cases/:id); the route withholds every note from an AUDITOR. */
 export interface OrderCaseRecord {
   id: string;
   order: { id: string; reference: string };
@@ -107,7 +108,8 @@ export interface OrderCaseRecord {
   messageId: string | null;
   received: { at: Date; pieceState: OrderCasePieceState; note: string | null } | null;
   decision: { at: Date; outcome: OrderCaseOutcome; pieceTo: OrderCasePieceDestination | null; exchangeOrder: { id: string; reference: string } | null; note: string | null } | null;
-  cancelled: { at: Date; note: string } | null;
+  /** Its note withheld (null) from an AUDITOR, as every note of the case. */
+  cancelled: { at: Date; note: string | null } | null;
 }
 
 /** A case whose parcel the agent expects back (Logistics → Returns → To receive): no note, no price, no account. */
@@ -431,7 +433,7 @@ export class OrderCaseService {
       if (d.decision === 'EXCHANGE') {
         // The size asked, still one of the model's (in stock or not: the exchange order then waits like any order).
         const sku = await tx.selectFrom('skus').select(['id', 'size_label']).where('id', '=', fresh.exchange_sku_id!).executeTakeFirstOrThrow();
-        exchangeOrderId = (await createExchangeOrder(tx, done.after, { id: sku.id, label: sku.size_label }, actor, now, notes)).id;
+        exchangeOrderId = (await createExchangeOrder(tx, done.after, { id: sku.id, label: sku.size_label }, actor, now, notes, done.credit)).id;
       }
       await tx
         .updateTable('order_cases')
@@ -462,6 +464,13 @@ export class OrderCaseService {
       claimHashes = await peekClaimRenewals(this.db, related.map((r) => r.id));
     }
     const pieceTo: OrderCasePieceDestination = c.kind === 'LOST' ? 'REVOKED' : c.kind === 'DAMAGED' ? d.pieceTo! : 'RESTOCKED';
+    // A damaged parcel reached its collector, who saw the card in it: each piece back to stock takes a new claim code
+    // nobody sees (as a return's), its hash made first, so that card no longer registers it. Staff print its new card
+    // with New claim code (§3.4, a piece in stock).
+    const reissued = new Map<string, string>();
+    if (c.kind === 'DAMAGED' && pieceTo === 'RESTOCKED') {
+      for (const i of items) if (i.product_id !== null && !reissued.has(i.product_id)) reissued.set(i.product_id, await hashClaimCode(generateClaimCode()));
+    }
     await inRetriedTransaction(this.db, async (tx) => {
       // The pieces first (as a return), then the parcel's orders, the case and the shipment.
       if (claimHashes.size) await lockPieces(tx, claimHashes.keys());
@@ -498,15 +507,29 @@ export class OrderCaseService {
           product_id: keep ? o.product_id : null,
           queue_first: !keep && d.decision === 'RESHIP',
         });
-        notes.push(await recordChange(tx, o, after, 'order.reship', { details: { caseId: c.id, shipmentId: shipment.id, reservation: after.reservation, ...(after.queue_first ? { queueFirst: true } : {}) } }, actor, now));
+        notes.push(
+          await recordChange(
+            tx,
+            o,
+            after,
+            'order.reship',
+            { details: { caseId: c.id, shipmentId: shipment.id, reservation: after.reservation, ...(after.queue_first ? { queueFirst: true } : {}), ...(piece && reissued.has(piece.id) ? { claimCodeReissued: true } : {}) } },
+            actor,
+            now,
+          ),
+        );
         if (piece && !keep) {
           // Unbound: a buyer's new claim code waiting on it is withdrawn.
           notes.push(...(await withdrawWaiting(tx, piece.id, 'ORDER_RETURNED', actor, now)));
           if (pieceTo === 'RESTOCKED' && o.sku_id) {
+            // At the location ORBES chose, the order's by default.
+            const at = d.locationId ?? o.location_id;
             await lockSku(tx, o.sku_id);
-            await recordMovement(tx, { skuId: o.sku_id, locationId: o.location_id, delta: 1, reason: 'RETURNED', orderId: o.id, productId: piece.id, note: null }, actor, now);
-            restocked.add(`${o.sku_id}:${o.location_id}`);
+            await recordMovement(tx, { skuId: o.sku_id, locationId: at, delta: 1, reason: 'RETURNED', orderId: o.id, productId: piece.id, note: null }, actor, now);
+            restocked.add(`${o.sku_id}:${at}`);
           }
+          const hash = reissued.get(piece.id);
+          if (hash) await tx.updateTable('products').set({ claim_secret_hash: hash, updated_at: now }).where('id', '=', piece.id).execute();
         }
         if (piece) {
           // Its status: back on sale once it is free in stock again (RESOLD), archived (RETIRED) or revoked (REVOKED).

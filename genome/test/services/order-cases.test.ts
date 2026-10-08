@@ -6,7 +6,8 @@
  *  - back to sender → the agent records it → RESHIP: its pieces back in stock, still bound, packed again; their
  *    warranties kept;
  *  - lost → ADMIN only; the pieces revoked; the reshipment ahead of the queue (`queue_first`);
- *  - damaged → refused before the agent records it back; then back to stock or archived (ADMIN) as ORBES chooses; the
+ *  - damaged → refused before the agent records it back; then back to stock (at the location ORBES chose, with a new
+ *    claim code: the card the collector saw no longer registers it) or archived (ADMIN) as ORBES chooses; the
  *    reshipment ahead of the queue;
  *  - a damaged parcel never back: its order case cancelled, the shipment SHIPPED again, then reported lost;
  *  - refund → a credit note, the piece serving the next order, and a new claim code waiting on its piece replaced
@@ -15,7 +16,10 @@
  * Returns and exchanges opened by Client Services:
  *  - open (one open per order; an exchange's size in stock only; after the 14 days too), received OK or DAMAGED;
  *  - decide refund (back to stock with a new claim code; the archive ADMIN), exchange (an EXCHANGE order PAID with its
- *    invoice naming SIZE EXCHANGE, the original's credit note); the packing photo kept while a return is open;
+ *    invoice naming SIZE EXCHANGE, the original's credit note; the original's credit carried onto it, the balance
+ *    unchanged); the packing photo kept while a return is open;
+ *  - a return on a parcel shipped and never marked delivered: once decided, the parcel DELIVERED, off On its way, its
+ *    photo erased 14 days later;
  *  - cancel the order case.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -24,10 +28,11 @@ import { linesOf } from '../../src/server/services/invoices.js';
 import { REGISTERED_BY_BUYER } from '../../src/server/services/orders.js';
 import { purgePackingPhotos } from '../../src/server/services/parcels.js';
 import { ensureSku } from '../../src/server/services/stock.js';
+import { creditBalances } from '../../src/server/services/tier-grants.js';
 import type { Actor } from '../../src/server/types.js';
 import { createAdmin, createHarness, seedCatalog, type Catalog, type Harness } from '../api/support.js';
 import { packAndShip, stockPieces, type StockedPiece } from '../support/fulfil.js';
-import { createAccount } from '../support/live.js';
+import { createAccount, holdPieces } from '../support/live.js';
 
 const MINUTE = 60_000;
 const DAY = 86_400_000;
@@ -49,6 +54,7 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
   let admin: Actor;
   let agent: Actor;
   let france: string;
+  let warehouse: string;
   let colissimo: string;
   let size = 40;
   const issued = new Map<string, StockedPiece>();
@@ -60,6 +66,7 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
     operator = { type: 'admin', id: (await createAdmin(h.ctx, 'OPERATOR')).id };
     admin = { type: 'admin', id: (await createAdmin(h.ctx, 'ADMIN')).id };
     france = (await h.t.db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
+    warehouse = (await h.t.db.selectFrom('stock_locations').select('id').where('name', '=', 'LOGISTICS WAREHOUSE').executeTakeFirstOrThrow()).id;
     agent = { type: 'admin', id: (await createAdmin(h.ctx, 'LOGISTICS', { stockLocationIds: [france] })).id };
     colissimo = (await h.t.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
   });
@@ -79,14 +86,15 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
     return out;
   };
 
-  /** A salon order of a size, priced; paid when asked. */
-  async function salonOrder(label: string, opts: { paid?: boolean } = {}): Promise<string> {
-    const account = await createAccount(db());
-    const request = await db().insertInto('shop_requests').values({ account_id: account.id, model_id: catalog.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+  /** A salon order of a size, priced (for `accountId`, a new account by default), with credit taken off it; paid when asked. */
+  async function salonOrder(label: string, opts: { paid?: boolean; accountId?: string; creditMinor?: number } = {}): Promise<string> {
+    const accountId = opts.accountId ?? (await createAccount(db())).id;
+    const request = await db().insertInto('shop_requests').values({ account_id: accountId, model_id: catalog.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
     h.clock.advance(MINUTE);
     await h.ctx.services.salon.close(request.id, { note: 'Accepted.', outcome: 'ACCEPTED' }, operator);
     const id = (await db().selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await orders().setTerms(id, { sizeLabel: label, priceMinor: 420_000, currency: 'EUR' }, operator);
+    if (opts.creditMinor) await orders().applyCredit(id, opts.creditMinor, operator);
     if (opts.paid) {
       h.clock.advance(MINUTE);
       await orders().transition(id, { to: 'PAID' }, operator);
@@ -95,9 +103,9 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
   }
 
   /** A paid order of a size of its own, its piece stocked, packed and shipped by the agent's steps. */
-  async function shippedOrder(label = freshSize()): Promise<{ id: string; skuId: string; piece: StockedPiece }> {
+  async function shippedOrder(label = freshSize(), opts: { accountId?: string; creditMinor?: number } = {}): Promise<{ id: string; skuId: string; piece: StockedPiece }> {
     const skuId = await skuOf(label);
-    const id = await salonOrder(label, { paid: true });
+    const id = await salonOrder(label, { paid: true, ...opts });
     await stock(skuId, 1, [id]);
     await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, operator);
     return { id, skuId, piece: issued.get((await row(id)).product_id!)! };
@@ -168,11 +176,24 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       await cases().receive(damaged.id, { pieceState: 'DAMAGED', note: 'Scratched.' }, agent, scope());
       expect(await refusal(cases().decide(damaged.id, { decision: 'RESHIP', pieceTo: 'ARCHIVED' }, operator, { admin: false }))).toMatchObject({ code: 'FORBIDDEN' });
       expect(await refusal(cases().decide(damaged.id, { decision: 'RESHIP' }, operator, { admin: false }))).toMatchObject({ code: 'VALIDATION_FAILED' });
-      // Back to stock, as ORBES chooses: the piece freed (RESOLD), the reshipment takes a piece at once.
-      await cases().decide(damaged.id, { decision: 'RESHIP', pieceTo: 'RESTOCKED', locationId: france }, operator, { admin: false });
+      // Back to stock at the location ORBES chose (not the order's): the piece freed (RESOLD), counted there; the
+      // reshipment, at the order's location, waits first in line.
+      const hashBefore = (await product(piece.uuid)).claim_secret_hash;
+      await cases().decide(damaged.id, { decision: 'RESHIP', pieceTo: 'RESTOCKED', locationId: warehouse }, operator, { admin: false });
       expect(await product(piece.uuid)).toMatchObject({ status: 'RESOLD' });
-      expect(await row(id)).toMatchObject({ status: 'PAID', reservation: 'STOCK', product_id: null, queue_first: true });
-      expect((await h.ctx.services.logistics.stock({ modelId: catalog.modelId })).rows.find((r) => r.sku.id === skuId && r.location.id === france)).toMatchObject({ onHand: 1, reserved: 1 });
+      const back = await db().selectFrom('stock_movements').select(['location_id', 'reason', 'delta']).where('order_id', '=', id).where('reason', '=', 'RETURNED').execute();
+      expect(back).toEqual([{ location_id: warehouse, reason: 'RETURNED', delta: 1 }]);
+      expect(await row(id)).toMatchObject({ status: 'PAID', reservation: 'AWAITING', product_id: null, queue_first: true, location_id: france });
+      const levels = (await h.ctx.services.logistics.stock({ modelId: catalog.modelId })).rows.filter((r) => r.sku.id === skuId);
+      expect(levels.find((r) => r.location.id === warehouse)).toMatchObject({ onHand: 1, reserved: 0 });
+      expect(levels.find((r) => r.location.id === france)).toMatchObject({ onHand: 0, reserved: 0 });
+      // The card the collector saw in the crushed box no longer registers the piece: a new claim code nobody sees.
+      expect((await product(piece.uuid)).claim_secret_hash).not.toBe(hashBefore);
+      const reship = await db().selectFrom('audit_logs').select('details').where('action', '=', 'order.reship').where('target_id', '=', id).executeTakeFirstOrThrow();
+      expect(reship.details).toMatchObject({ claimCodeReissued: true });
+      const buyer = (await row(id)).account_id;
+      const scan = await h.ctx.services.verification.verify({ code: piece.data }, {});
+      expect(await refusal(h.ctx.services.ownership.registerFirst(buyer, { registrationToken: scan.registration!.token, claimCode: piece.claimCode! }, { type: 'account', id: buyer }))).toMatchObject({ code: 'CLAIM_CODE_INVALID' });
       // Another damaged parcel archived by an ADMIN: the piece retired, the reshipment waits first in line.
       const second = await shippedOrder();
       const c2 = await cases().report(second.id, { kind: 'DAMAGED', note: 'Crushed.' }, agent, scope());
@@ -192,9 +213,11 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       const damaged = await shippedOrder();
       const c2 = await cases().report(damaged.id, { kind: 'DAMAGED', note: 'Crushed.' }, agent, scope());
       await cases().receive(c2.id, { pieceState: 'OK' }, agent, scope());
+      const hashBefore = (await product(damaged.piece.uuid)).claim_secret_hash;
       await cases().decide(c2.id, { decision: 'REFUND', pieceTo: 'RESTOCKED' }, operator, { admin: false });
       expect(await row(damaged.id)).toMatchObject({ status: 'CANCELLED', product_id: null });
       expect((await product(damaged.piece.uuid)).status).toBe('RESOLD');
+      expect((await product(damaged.piece.uuid)).claim_secret_hash).not.toBe(hashBefore);
       const level = (await h.ctx.services.logistics.stock({ modelId: catalog.modelId })).rows.find((r) => r.sku.id === damaged.skuId && r.location.id === france)!;
       expect([level.onHand, level.reserved]).toEqual([1, 0]);
     });
@@ -293,6 +316,70 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       expect((await db().selectFrom('invoices').select('kind').where('order_id', '=', id).orderBy('issued_at').orderBy('kind', 'desc').execute()).map((i) => i.kind)).toEqual(['INVOICE', 'CREDIT_NOTE']);
       const audited = await db().selectFrom('audit_logs').select('details').where('action', '=', 'order.exchange').where('target_id', '=', id).executeTakeFirstOrThrow();
       expect(audited.details).toMatchObject({ exchangeOrderId: exchange.id, skuId: otherSku });
+    });
+
+    it('an exchange of an order paid partly with credit: the credit carried onto the EXCHANGE order, the balance unchanged, its invoice the original\'s total', async () => {
+      // An account of 5 pieces (PLATINE), its grants made; 3 000 of its credit taken off the order before it is paid.
+      const a = await createAccount(db());
+      await holdPieces(db(), a.id, 5, catalog.modelId, { year: 2024 });
+      await h.ctx.services.tierGrants.ensure(a.id);
+      const balance = async () => (await creditBalances(db(), a.id)).reduce((n, c) => n + c.balanceMinor, 0);
+      const start = await balance();
+      const { id } = await shippedOrder(freshSize(), { accountId: a.id, creditMinor: 3_000 });
+      expect(await balance()).toBe(start - 3_000);
+      await h.ctx.services.logistics.markDelivered(id, agent, scope());
+      const other = freshSize();
+      const otherSku = await skuOf(other);
+      await stock(otherSku, 1);
+      const opened = await cases().open(id, { kind: 'EXCHANGE', reason: 'SIZE', exchangeSkuId: otherSku, note: 'One size up.' }, operator);
+      await cases().receive(opened.id, { pieceState: 'OK' }, agent, scope());
+      const decided = await cases().decide(opened.id, { decision: 'EXCHANGE', pieceTo: 'RESTOCKED', note: 'Exchanged.' }, operator, { admin: false });
+      const exchange = decided.case.decision!.exchangeOrder!.id;
+      // The balance does not grow: what the return gave back, the exchange took again.
+      expect(await balance()).toBe(start - 3_000);
+      const usesOf = (orderId: string) => db().selectFrom('credit_uses').select(['grant_id', 'amount_minor', 'released_reason']).where('order_id', '=', orderId).orderBy('applied_at').execute();
+      const original = await usesOf(id);
+      expect(original.map((u) => [u.amount_minor, u.released_reason])).toEqual([[3_000, 'RETURNED']]);
+      expect((await usesOf(exchange)).map((u) => [u.grant_id, u.amount_minor, u.released_reason])).toEqual([[original[0]!.grant_id, 3_000, null]]);
+      // Its invoice carries the same CREDIT line and the original's total; the original's credit note mirrors its invoice.
+      const invoiceOf = (orderId: string, kind: 'INVOICE' | 'CREDIT_NOTE') => db().selectFrom('invoices').select(['lines', 'total_minor']).where('order_id', '=', orderId).where('kind', '=', kind).executeTakeFirstOrThrow();
+      const paid = await invoiceOf(id, 'INVOICE');
+      const exchanged = await invoiceOf(exchange, 'INVOICE');
+      expect(paid.total_minor).toBe(420_000 - 3_000);
+      expect(exchanged.total_minor).toBe(paid.total_minor);
+      expect(linesOf(exchanged.lines as unknown[]).filter((l) => l.kind === 'CREDIT')).toEqual(linesOf(paid.lines as unknown[]).filter((l) => l.kind === 'CREDIT'));
+      expect((await invoiceOf(id, 'CREDIT_NOTE')).total_minor).toBe(paid.total_minor);
+      const applied = await db().selectFrom('audit_logs').select('details').where('action', '=', 'order.credit.apply').where('target_id', '=', exchange).executeTakeFirstOrThrow();
+      expect(applied.details).toMatchObject({ amountMinor: 3_000, currency: 'EUR', exchangeOfOrderId: id });
+    });
+
+    it('a return opened on a parcel shipped and never marked delivered: once decided, the parcel DELIVERED, off On its way, its photo erased 14 days later', async () => {
+      const { id } = await shippedOrder();
+      const shippedAt = (await row(id)).shipped_at!;
+      const onItsWay = async () => (await h.ctx.services.logistics.parcels(scope())).onItsWay.map((p) => p.id);
+      expect(await onItsWay()).toContain(id);
+      h.clock.advance(3 * DAY);
+      const opened = await cases().open(id, { kind: 'RETURN', reason: 'SIZE', note: 'Too small, sent back.' }, operator);
+      await cases().receive(opened.id, { pieceState: 'OK' }, agent, scope());
+      await cases().decide(opened.id, { decision: 'REFUND', pieceTo: 'RESTOCKED', note: 'Refunded.' }, operator, { admin: false });
+      const decidedAt = h.clock.now();
+      expect((await row(id)).status).toBe('RETURNED');
+      const shipment = await db().selectFrom('shipments').select(['id', 'status', 'delivered_at', 'photo_sha256']).where('order_id', '=', id).executeTakeFirstOrThrow();
+      expect(shipment.status).toBe('DELIVERED');
+      expect(shipment.photo_sha256).not.toBeNull();
+      expect(new Date(shipment.delivered_at!).getTime()).toBe(decidedAt.getTime());
+      expect(new Date(shipment.delivered_at!).getTime()).toBeGreaterThanOrEqual(new Date(shippedAt).getTime());
+      expect(await onItsWay()).not.toContain(id);
+      // Mark delivered no longer applies to it.
+      expect(await refusal(h.ctx.services.logistics.markDelivered(id, agent, scope()))).toMatchObject({ status: 409 });
+      // The photo follows the delivered parcel's keeping: 14 days after.
+      const photo = () => db().selectFrom('shipments').select('photo_sha256').where('id', '=', shipment.id).executeTakeFirstOrThrow();
+      h.clock.set(new Date(decidedAt.getTime() + 14 * DAY - MINUTE));
+      await purgePackingPhotos(db(), h.clock.now());
+      expect((await photo()).photo_sha256).toBe(shipment.photo_sha256);
+      h.clock.set(new Date(decidedAt.getTime() + 14 * DAY + MINUTE));
+      await purgePackingPhotos(db(), h.clock.now());
+      expect((await photo()).photo_sha256).toBeNull();
     });
 
     it('keeps the packing photo while a return opened in the 14 days is open, then erases it once decided; cancels an order case', async () => {

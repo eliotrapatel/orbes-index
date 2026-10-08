@@ -244,7 +244,7 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
     });
   });
   describe('the order cases (step 5.10)', () => {
-    it('lets the agent report a parcel back to sender and record it; an AUDITOR reads it without its note; an OPERATOR decides it, no-store; Client Services opens a return', async () => {
+    it('lets the agent report a parcel back to sender and record it; an AUDITOR reads it without any of its notes; an OPERATOR decides it, no-store; Client Services opens a return', async () => {
       const catalog = await seedCatalog(h.ctx);
       const sku = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, catalog.modelId, '58'));
       const ops = { type: 'admin' as const, id: (await createAdmin(h.ctx, 'OPERATOR')).id };
@@ -264,13 +264,18 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       const c = safeJson(reported) as Json;
       expect((safeJson(await agent.get('/api/admin/logistics/order-cases')) as Json).items.map((i: Json) => [i.id, i.kind])).toEqual([[c.id, 'BACK_TO_SENDER']]);
       expect(errorOf(await auditor.post(`/api/admin/logistics/order-cases/${c.id}/received`, { pieceState: 'OK' })).code).toBe('FORBIDDEN');
-      expect((safeJson(await agent.post(`/api/admin/logistics/order-cases/${c.id}/received`, { pieceState: 'OK' })) as Json).status).toBe('RECEIVED');
+      expect((safeJson(await agent.post(`/api/admin/logistics/order-cases/${c.id}/received`, { pieceState: 'OK', note: 'The box is intact.' })) as Json).status).toBe('RECEIVED');
       expect(errorOf(await agent.get(`/api/admin/order-cases/${c.id}`)).code).toBe('FORBIDDEN');
       expect((safeJson(await auditor.get(`/api/admin/order-cases/${c.id}`)) as Json).note).toBeNull();
       expect((safeJson(await operator.get(`/api/admin/order-cases/${c.id}`)) as Json).note).toBe('Address unknown.');
-      const decided = await operator.post(`/api/admin/order-cases/${c.id}/decide`, { decision: 'RESHIP' });
+      const decided = await operator.post(`/api/admin/order-cases/${c.id}/decide`, { decision: 'RESHIP', note: 'Shipped again to the corrected address.' });
       expect([decided.statusCode, decided.headers['cache-control']]).toEqual([200, 'no-store']);
       expect((safeJson(decided) as Json).case.status).toBe('CLOSED');
+      // Every note of the case withheld from an AUDITOR: the opening one, the agent's and ORBES's decision's.
+      const read = safeJson(await auditor.get(`/api/admin/order-cases/${c.id}`)) as Json;
+      expect([read.note, read.received.note, read.decision.note, read.received.pieceState, read.decision.outcome]).toEqual([null, null, null, 'OK', 'RESHIP']);
+      const full = safeJson(await operator.get(`/api/admin/order-cases/${c.id}`)) as Json;
+      expect([full.note, full.received.note, full.decision.note]).toEqual(['Address unknown.', 'The box is intact.', 'Shipped again to the corrected address.']);
       // Packed and shipped again, delivered, then a return opened by Client Services.
       await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A00000000002' }, ops);
       await agent.post(`/api/admin/logistics/orders/${id}/delivered`);
@@ -279,6 +284,11 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       expect(opened.statusCode).toBe(201);
       expect(safeJson(opened)).toMatchObject({ kind: 'RETURN', status: 'OPEN', reason: 'SIZE', note: 'Too small.' });
       expect(errorOf(await operator.post(`/api/admin/orders/${id}/case`, { kind: 'EXCHANGE', reason: 'SIZE', note: 'No size named.' })).code).toBe('VALIDATION_FAILED');
+      // Cancelled with a note quoting the client: withheld from an AUDITOR too.
+      const returnId = (safeJson(opened) as Json).id;
+      expect((safeJson(await operator.post(`/api/admin/order-cases/${returnId}/cancel`, { note: 'The client wrote: I keep it.' })) as Json).cancelled.note).toBe('The client wrote: I keep it.');
+      const cancelled = safeJson(await auditor.get(`/api/admin/order-cases/${returnId}`)) as Json;
+      expect([cancelled.status, cancelled.note, cancelled.cancelled.note]).toEqual(['CANCELLED', null, null]);
     });
   });
 });

@@ -1404,9 +1404,11 @@ export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via:
  * The core of a return (choice 20; services/order-cases.ts decides a return or an exchange with it, plan NEXT LOT
  * §3.5.6.7), in the caller's transaction, the piece's row and the order's locked: as `OrderService.returnOrder` says,
  * the piece back to stock at a location with its new claim code (its hash prepared before the transaction), or to the
- * archive; the ownership taken back; the credit given back; the credit note. `expected` is what the caller read before
- * its transaction (409 ORDER_RETURN_CHANGED when it changed). Returns the order after it, the piece's reference and
- * `finish`, the piece's change of status, which the caller runs last (LifecycleService audits at once).
+ * archive; the ownership taken back; the credit given back; the credit note; its parcel, shipped and never marked
+ * delivered, DELIVERED once no order of it is still SHIPPED. `expected` is what the caller read before its transaction
+ * (409 ORDER_RETURN_CHANGED when it changed). Returns the order after it, the piece's reference, the credit given back
+ * (`credit`, which an exchange carries onto its EXCHANGE order) and `finish`, the piece's change of status, which the
+ * caller runs last (LifecycleService audits at once).
  */
 export async function returnInTransaction(
   tx: Db,
@@ -1417,7 +1419,7 @@ export async function returnInTransaction(
   now: Date,
   notes: AuditRecordInput[],
   lifecycle: LifecycleService,
-): Promise<{ after: OrderRow; productId: string; finish: () => Promise<void> }> {
+): Promise<{ after: OrderRow; productId: string; credit: CarriedCredit[]; finish: () => Promise<void> }> {
   const claimHash = expected.claimHash;
   if (!isOrderTransitionAllowed(o.status, 'RETURNED')) throw stepNotAllowed(o.status, 'RETURNED');
   if (o.product_id === null || o.sku_id === null) throw pieceNotLinked();
@@ -1477,6 +1479,9 @@ export async function returnInTransaction(
     .values({ order_id: o.id, outcome: r.outcome, location_id: locationId, note: r.note, ownership_id: owner?.id ?? null, created_by: actor.type === 'admin' ? actor.id! : null, created_at: now })
     .execute();
   const after = await updateOrder(tx, o.id, { status: 'RETURNED', returned_at: now });
+  // Its parcel, shipped and never marked delivered, has reached the collector: once no order of it is still on its way,
+  // DELIVERED, so it leaves the agent's On its way and its packing photo follows the delivered parcel's keeping.
+  await settleShipmentDelivered(tx, o.id, now);
   const details: JsonObject = {
     outcome: r.outcome,
     ...(locationId ? { locationId } : {}),
@@ -1485,7 +1490,9 @@ export async function returnInTransaction(
     ...(to ? { pieceStatus: to } : {}),
   };
   notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.note, details }, actor, now), ...extra, ...withdrawn);
-  // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is.
+  // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is. A size exchange carries it onto its
+  // EXCHANGE order (`createExchangeOrder`), from what is released here.
+  const carried = (await openCreditUses(tx, after.id, { forUpdate: true })).map((u): CarriedCredit => ({ grantId: u.grant_id, tier: u.tier as 2 | 3, amountMinor: u.amount_minor }));
   notes.push(...(await releaseCredit(tx, after, 'RETURNED', actor, now)));
   const credit = await issueCreditNote(tx, after, 'return', actor, now);
   if (credit) notes.push(credit);
@@ -1495,17 +1502,34 @@ export async function returnInTransaction(
       await lifecycle.applyForService(tx, p, to, { reason: `Order ${orderReference(o.id)} returned`, via: 'order.return', ...(owner ? { ownershipState: 'UNREGISTERED' as const } : {}) }, actor);
     }
   };
-  return { after, productId: p.product_id, finish };
+  return { after, productId: p.product_id, credit: carried, finish };
+}
+
+/** A returned order's credit, given back by its return, which its EXCHANGE order takes again (one per grant). */
+export interface CarriedCredit {
+  grantId: string;
+  tier: 2 | 3;
+  amountMinor: number;
 }
 
 /**
  * The EXCHANGE order of a size exchange decided (plan NEXT LOT §3.5.6.7), in the caller's transaction, its original
  * RETURNED: the original's account, release, price, currency, add-ons, surprise, engraving words, shipping and buyer
  * (its delivery address), the new size, at the original's location; it holds a piece in stock or waits like any order,
- * and is PAID at once with its own invoice (SIZE EXCHANGE beneath the piece). Audited `order.create` (EXCHANGE),
- * `order.pay` with `invoice.issue`, and `order.exchange` on the original.
+ * and is PAID at once with its own invoice (SIZE EXCHANGE beneath the piece). `credit`, what the original's return gave
+ * back (`returnInTransaction`), is taken off it again before PAID, so its invoice carries the original's CREDIT lines and
+ * the balance does not grow. Audited `order.create` (EXCHANGE), `order.credit.apply` (with a credit), `order.pay` with
+ * `invoice.issue`, and `order.exchange` on the original.
  */
-export async function createExchangeOrder(tx: Db, original: OrderRow, sku: { id: string; label: string | null }, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+export async function createExchangeOrder(
+  tx: Db,
+  original: OrderRow,
+  sku: { id: string; label: string | null },
+  actor: Actor,
+  now: Date,
+  notes: AuditRecordInput[],
+  credit: readonly CarriedCredit[] = [],
+): Promise<OrderRow> {
   let o = await createOrder(
     tx,
     {
@@ -1530,6 +1554,21 @@ export async function createExchangeOrder(tx: Db, original: OrderRow, sku: { id:
   );
   if (original.engraving_text !== null || original.buyer_name !== null || original.buyer_address !== null) {
     o = await updateOrder(tx, o.id, { engraving_text: original.engraving_text, buyer_name: original.buyer_name, buyer_address: original.buyer_address });
+  }
+  if (credit.length) {
+    // The credit the original's return gave back is taken off the exchange again, before PAID: its invoice carries the
+    // same CREDIT lines, and the collector's balance ends as it was before the exchange. Audited `order.credit.apply`.
+    const uses: JsonObject[] = [];
+    for (const c of credit) {
+      const row = await tx
+        .insertInto('credit_uses')
+        .values({ grant_id: c.grantId, order_id: o.id, amount_minor: c.amountMinor, applied_by: actor.type === 'admin' ? actor.id! : null, applied_at: now })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      uses.push({ useId: row.id, grantId: c.grantId, tier: c.tier, amountMinor: c.amountMinor });
+    }
+    const amountMinor = credit.reduce((n, c) => n + c.amountMinor, 0);
+    notes.push(await recordChange(tx, o, o, 'order.credit.apply', { details: { amountMinor, currency: o.currency, uses, exchangeOfOrderId: original.id } }, actor, now));
   }
   const paid = await step(tx, o, { to: 'PAID', note: null }, actor, now, notes);
   notes.push(await recordChange(tx, original, original, 'order.exchange', { details: { exchangeOrderId: paid.id, skuId: sku.id } }, actor, now));
