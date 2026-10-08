@@ -82,6 +82,38 @@ describe('demo seed', () => {
     );
   });
 
+  it('gives every model its size type (plan NEXT LOT §3.3), NOCTURNE to give, keeping every size the pieces declared, with capture-ui\'s bare sizes', async () => {
+    const rows = await ctx.db
+      .selectFrom('models as m')
+      .leftJoin('skus as k', 'k.model_id', 'm.id')
+      .select(['m.name', 'm.size_type', 'm.size_kind', 'k.code', 'k.set_aside_at'])
+      .orderBy('m.name')
+      .orderBy('k.code')
+      .execute();
+    const byModel: Record<string, [string | null, string | null, string[]]> = {};
+    for (const r of rows) {
+      byModel[r.name] ??= [r.size_type, r.size_kind, []];
+      if (r.code !== null) byModel[r.name]![2].push(r.code);
+      expect(r.set_aside_at, r.code ?? r.name).toBeNull();
+    }
+    expect(byModel).toEqual({
+      APOGEE: ['ONE_SIZE', null, ['APG-BT', 'APG-BT-85-CM-TAN', 'APG-BT-90-CM-BLACK', 'APG-BT-95-CM-BLACK']],
+      ATLAS: ['ONE_SIZE', null, ['ATL-CH', 'ATL-CH-BLACK', 'ATL-CH-TAN']],
+      ECLIPSE: ['NECKLACE', 'NECKLACE', ['ECL-PD']],
+      EQUINOX: ['ONE_SIZE', null, ['EQX-KR']],
+      HORIZON: ['BRACELET', 'BRACELET', ['HRZ-CF']],
+      MONOLITHE: ['RING', 'RING', ['MNL-RG-48', 'MNL-RG-50', 'MNL-RG-52', 'MNL-RG-54', 'MNL-RG-SIZE-50', 'MNL-RG-SIZE-52', 'MNL-RG-SIZE-54', 'MNL-RG-SIZE-56']],
+      NOCTURNE: [null, null, ['NCT-EDP']],
+      ORBITE: ['RING', 'RING', ['ORB-SG-52', 'ORB-SG-54', 'ORB-SG-SIZE-54', 'ORB-SG-SIZE-56', 'ORB-SG-SIZE-58', 'ORB-SG-SIZE-60']],
+      PARALLAX: ['ONE_SIZE', null, ['PLX-CL']],
+      PERIGEE: ['ONE_SIZE', null, ['PRG-WL', 'PRG-WL-BLACK', 'PRG-WL-COGNAC']],
+      SOLSTICE: ['WATCH', 'WRIST', ['SLS-AW', 'SLS-AW-38-MM', 'SLS-AW-39-MM', 'SLS-AW-42-MM']],
+    });
+    // Audited as the console would, the seed as actor.
+    const declared = await ctx.db.selectFrom('audit_logs').select('target_id').where('action', '=', 'model.sizes.declare').execute();
+    expect(declared).toHaveLength(10);
+  });
+
   it('covers the lifecycle with about forty products', async () => {
     expect(result.products).toBe(listDemoProducts().length);
     expect(result.products).toBeGreaterThanOrEqual(38);

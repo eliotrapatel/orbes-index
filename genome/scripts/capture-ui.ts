@@ -109,6 +109,13 @@
  *                 story-preview-*-desk.png; `--only story` writes the phone's and the cards). The console's new screens
  *                 come from its e2e files run with ORBES_SCREENSHOTS=1 (genome/out/admin-*.png, each new one with its
  *                 -phone twin). Not run by default (screens for the owner's review, into --out)
+ *   --only catalogue
+ *                 A model's declared sizes in the console alone (plan NEXT LOT §3.3, step 3.7; catalogue-sizes-*.png): the
+ *                 Catalogue with each model's size line, NOCTURNE (its size type to give), MONOLITHE (Ring size, its
+ *                 bare sizes beside the pieces' SIZE 52 of one measure, SIZE 56 set aside here with SizeService.removeSize:
+ *                 it has pieces), SOLSTICE (a watch), the Size type and Sizes dialogs, and the stock page with every
+ *                 offered size at 0. Also run last on the demo dataset's stage by default (the size set aside would change
+ *                 no capture after it)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -183,7 +190,7 @@ const DESKTOP = { width: 1440, height: 900 } as const;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot' | 'story' | 'growth' | 'handover';
+type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot' | 'story' | 'growth' | 'handover' | 'catalogue';
 
 function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | null } {
   let out = DEFAULT_OUT;
@@ -192,8 +199,8 @@ function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | nu
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot' || argv[i + 1] === 'story' || argv[i + 1] === 'growth' || argv[i + 1] === 'handover')) only = argv[++i] as Only;
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot, --only story, --only growth, --only handover)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot' || argv[i + 1] === 'story' || argv[i + 1] === 'growth' || argv[i + 1] === 'handover' || argv[i + 1] === 'catalogue')) only = argv[++i] as Only;
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot, --only story, --only growth, --only handover, --only catalogue)`);
   }
   return { out, raw, only };
 }
@@ -544,6 +551,69 @@ async function captureVerifyCertificate(stage: Stage, shots: Shots): Promise<voi
 }
 
 // ── Admin console ──────────────────────────────────────────────────────────
+
+/**
+ * A model's declared sizes in the console (plan NEXT LOT §3.3, step 3.7), on the demo dataset: the Catalogue's size
+ * lines, NOCTURNE to give, MONOLITHE with its duplicate measure and SIZE 56 set aside (removeSize: it has pieces),
+ * SOLSTICE a watch, the Size type and Sizes dialogs, the stock page with every offered size at 0.
+ */
+async function captureCatalogueSizes(stage: Stage, shots: Shots): Promise<void> {
+  const { ctx, db } = stage;
+  const admin = { type: 'admin' as const, id: (await db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow()).id };
+  const modelOf = async (prefix: string) => (await db.selectFrom('models').select('id').where('sku_prefix', '=', prefix).executeTakeFirstOrThrow()).id;
+  const monolithe = await modelOf('MNL-RG');
+  const size56 = await db.selectFrom('skus').select('id').where('model_id', '=', monolithe).where('size_label', '=', 'SIZE 56').executeTakeFirstOrThrow();
+  const removed = await ctx.services.sizes.removeSize(monolithe, size56.id, admin);
+  if (removed.outcome !== 'SET_ASIDE') throw new Error(`MONOLITHE SIZE 56 has pieces: it should be set aside, not ${removed.outcome}`);
+  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
+  try {
+    const context = await browser.newContext({ viewport: { ...DESKTOP }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris' });
+    const page = await context.newPage();
+    watchPage(page, 'admin');
+    await page.goto(`${stage.origin}/admin`);
+    await page.waitForSelector('[data-testid=login-form]');
+    await page.fill('input[name=email]', ADMIN.email);
+    await page.fill('input[name=password]', ADMIN.password);
+    await page.click('[data-testid=login-submit]');
+    await page.waitForSelector('.view--dashboard');
+    await page.evaluate(() => document.fonts.ready);
+
+    await page.goto(`${stage.origin}/admin#/catalogue`);
+    await page.waitForSelector('#models [data-testid=model-size-type]');
+    await sleep(600);
+    await shots.region(page, '#models', 'catalogue-sizes-01-catalogue');
+    const model = async (prefix: string, name: string) => {
+      await page.goto(`${stage.origin}/admin#/catalogue/${await modelOf(prefix)}`);
+      await page.waitForSelector('#sizes [data-testid=model-size-kind]');
+      await sleep(600);
+      await shots.region(page, '#sizes', name);
+    };
+    await model('NCT-EDP', 'catalogue-sizes-02-nocturne-to-give');
+    // Its Size type dialog: nothing its kind or Type points to (Choose), then One size and what it does.
+    await page.click('[data-testid=model-size-kind-edit]');
+    await page.waitForSelector('dialog [data-testid=size-type-text]');
+    await page.selectOption('dialog select[name=sizeType]', 'ONE_SIZE');
+    await sleep(400);
+    await shots.viewport(page, 'catalogue-sizes-03-size-type-dialog');
+    await page.click('[data-testid=dialog-cancel]');
+    await model('MNL-RG', 'catalogue-sizes-04-monolithe-ring');
+    await page.click('[data-testid=model-sizes-tick]');
+    await page.waitForSelector('dialog [data-testid=size-grid]');
+    await page.locator('dialog label.ccheck', { hasText: /^56$/ }).click();
+    await page.locator('dialog label.ccheck', { hasText: /^48$/ }).click();
+    await sleep(400);
+    await shots.viewport(page, 'catalogue-sizes-05-sizes-dialog');
+    await page.click('[data-testid=dialog-cancel]');
+    await model('SLS-AW', 'catalogue-sizes-06-solstice-watch');
+    await page.goto(`${stage.origin}/admin#/atelier`);
+    await page.waitForSelector('#atelier-stock tbody tr');
+    await sleep(600);
+    await shots.region(page, '#atelier-stock', 'catalogue-sizes-07-stock');
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+}
 
 async function captureAdmin(stage: Stage, shots: Shots): Promise<void> {
   const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
@@ -2229,13 +2299,18 @@ async function main(): Promise<void> {
       log('legal:');
       await captureLegal(stage, shots);
     }
-    if (only !== 'plus') {
+    if (only !== 'plus' && only !== 'catalogue') {
       log('the LIVE RELEASE:');
       await captureLive(stage, shots);
     }
-    if (only !== 'live') {
+    if (only !== 'live' && only !== 'catalogue') {
       log('LIVE RELEASE+:');
       await capturePlus(stage, shots, workDir);
+    }
+    if (only === null || only === 'catalogue') {
+      // Last on this stage: MONOLITHE's SIZE 56 is set aside here.
+      log('the Catalogue\'s sizes:');
+      await captureCatalogueSizes(stage, shots);
     }
     if (only === null) {
       // On stages of their own (the NOCTURNE demo, a fresh database for each of its variants): this stage is left first.

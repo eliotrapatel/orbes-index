@@ -815,9 +815,12 @@ export class SizeService {
     return this.modelSizes(id);
   }
 
-  /** A console write's model id, checked, by an admin only. */
+  /**
+   * A write's model id, checked: by an admin (the console), or by a script (the system: the demo seed, set_aside_by
+   * then null); never by an account.
+   */
   private knownWrite(modelId: string, actor: Actor): string {
-    if (actor?.type !== 'admin') throw forbidden('Only an ORBES admin can change a model’s sizes.');
+    if (actor?.type !== 'admin' && actor?.type !== 'system') throw forbidden('Only an ORBES admin can change a model’s sizes.');
     if (typeof modelId !== 'string' || !UUID_RE.test(modelId)) throw modelNotFound();
     return modelId.toLowerCase();
   }

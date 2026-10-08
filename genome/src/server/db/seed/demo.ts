@@ -46,6 +46,15 @@
  * dataset has no release, so it waits; the next MONOLITHE draw published in
  * the console sets it aside for him (its account sheet, its draw's box).
  *
+ * SIZES (plan NEXT LOT §3.3, step 3.7): once the pieces are issued, every
+ * model is given its size type (DEMO_SIZE_TYPES: MONOLITHE and ORBITE Ring
+ * size, HORIZON Bracelet size, ECLIPSE Necklace length, SOLSTICE Watch, the
+ * others One size), its sizes kept exactly as the pieces declared them;
+ * NOCTURNE (the fragrance) is left with no type, the console's 'To give'.
+ * First, the bare sizes scripts/capture-ui.ts names (MONOLITHE 48, 50, 52, 54;
+ * ORBITE 52, 54) are declared, so its duplicates of one measure (SIZE 52 and
+ * 52) exist on purpose.
+ *
  * Demo only: emails are @example.com, passwords are random unless supplied,
  * and `seedDemo` refuses a production configuration.
  */
@@ -58,8 +67,9 @@ import { aggregateScanStats } from '../../services/scan-stats.js';
 import type { VerifyOutcome } from '../../services/verification.js';
 import { utcDate } from '../../services/warranty.js';
 import { noopLogger, type Actor, type Logger } from '../../types.js';
-import type { Db } from '../connection.js';
-import type { AnomalyStatus, ProductStatus, ReportChannel, ServiceType, VerificationState } from '../schema.js';
+import { ensureSku } from '../../services/stock.js';
+import { inTransaction, type Db } from '../connection.js';
+import type { AnomalyStatus, ProductStatus, ReportChannel, ServiceType, SizeType, VerificationState } from '../schema.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -1046,12 +1056,54 @@ export async function seedDemo(ctx: AppContext, opts: SeedDemoOptions): Promise<
     }
   }
   opts.clock.set(now);
+  await declareDemoSizes(world);
   await grantDemoGuarantee(world, now);
   // What housekeeping would have done day after day: the complete days counted in the daily statistics.
   const statsRows = await aggregateScanStats(ctx.db, now);
   log.info({ statsRows }, 'demo seed: timeline complete');
 
   return summarise(world, key.keyId, steps.length, now, generated);
+}
+
+/**
+ * Each demo model's size type (plan NEXT LOT §3.3, step 3.7); NOCTURNE, the fragrance, has none: the 'To give' case.
+ */
+export const DEMO_SIZE_TYPES: Readonly<Partial<Record<ModelKey, SizeType>>> = Object.freeze({
+  MONOLITHE: 'RING',
+  ORBITE: 'RING',
+  ECLIPSE: 'NECKLACE',
+  HORIZON: 'BRACELET',
+  ATLAS: 'ONE_SIZE',
+  PERIGEE: 'ONE_SIZE',
+  APOGEE: 'ONE_SIZE',
+  SOLSTICE: 'WATCH',
+  EQUINOX: 'ONE_SIZE',
+  PARALLAX: 'ONE_SIZE',
+});
+
+/** The bare sizes scripts/capture-ui.ts names, declared before the types (their duplicates of one measure on purpose). */
+export const DEMO_BARE_SIZES: Readonly<Partial<Record<ModelKey, readonly string[]>>> = Object.freeze({
+  MONOLITHE: Object.freeze(['48', '50', '52', '54']),
+  ORBITE: Object.freeze(['52', '54']),
+});
+
+/**
+ * Give each demo model its size type as the console would (SizeService.declare, audited `model.sizes.declare`, the seed
+ * as actor), after the bare sizes capture-ui names: its sizes ticked exactly as they are (a type never removes a size),
+ * a watch's and a model of one size's ONE SIZE declared.
+ */
+async function declareDemoSizes(w: World): Promise<void> {
+  for (const [key, labels] of Object.entries(DEMO_BARE_SIZES) as [ModelKey, readonly string[]][]) {
+    const modelId = w.catalogue.models.get(key)!;
+    await inTransaction(w.ctx.db, async (tx) => {
+      for (const label of labels) await ensureSku(tx, modelId, label);
+    });
+  }
+  for (const m of DEMO_MODELS) {
+    const sizeType = DEMO_SIZE_TYPES[m.key];
+    if (!sizeType) continue;
+    await w.ctx.services.sizes.declare(w.catalogue.models.get(m.key)!, { sizeType }, DEMO_SEED_ACTOR);
+  }
 }
 
 /** The demo's guarantee (plan NEXT-NINE, IN-01): Lucas Weber (PLATINE), the next release of MONOLITHE, 1 piece, shown. */

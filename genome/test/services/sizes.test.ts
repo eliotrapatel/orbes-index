@@ -475,6 +475,19 @@ describe('DECLARED SIZES (NEXT LOT §3.3)', () => {
     expect(await refusal(sizes().declare(typeless, { ticked: ['52'] }, admin))).toEqual({ code: 'SIZE_TYPE_REQUIRED', status: 409, message: 'Give the model its size type first.' });
   });
 
+  it('lets a script declare sizes (the system: set aside by no admin), never an account', async () => {
+    const ring = await model('SYS-RG');
+    await sizes().declare(ring, { sizeType: 'RING', ticked: ['50', '52'] }, SYSTEM_ACTOR);
+    await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: ring, material: '925 STERLING SILVER', variant: '52' }, SYSTEM_ACTOR);
+    const s52 = (await h.t.db.selectFrom('skus').select('id').where('code', '=', 'SYS-RG-52').executeTakeFirstOrThrow()).id;
+    expect(await sizes().removeSize(ring, s52, SYSTEM_ACTOR)).toEqual({ outcome: 'SET_ASIDE' });
+    expect(await codes(ring)).toEqual([
+      { code: 'SYS-RG-50', label: '50', offered: true, by: null },
+      { code: 'SYS-RG-52', label: '52', offered: false, by: null },
+    ]);
+    expect(await refusal(sizes().reinstateSize(ring, s52, { type: 'account', id: '00000000-0000-4000-8000-000000000001' }))).toMatchObject({ code: 'FORBIDDEN', status: 403 });
+  });
+
   it('removes one size (deleted when unused, set aside otherwise) and reinstates it; a SKU of another model 404; audited by its code', async () => {
     const ring = await model('ONE-RG', 'RING');
     await sizes().declare(ring, { ticked: ['50', '52', '54'] }, admin);
