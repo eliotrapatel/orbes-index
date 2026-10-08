@@ -578,6 +578,11 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
     expect(await block.locator('.pieces__claim-arrived').count()).toBe(0);
     await textOf(block.locator('.n-pieces__claim-card'), C.card);
     await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-shown-phone.png'), fullPage: true });
+    // The same, at desk size, then back to the phone.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    expect(await noSideways(page)).toBe(true);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-shown-desk.png'), fullPage: true });
+    await page.setViewportSize({ width: 390, height: 844 });
 
     // COPY CODE: the code alone on the clipboard.
     await block.getByRole('button', { name: C.copy, exact: true }).click();
