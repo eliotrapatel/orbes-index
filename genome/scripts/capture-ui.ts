@@ -1315,7 +1315,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     const drawn = (await db.selectFrom('orders').select('id').where('drop_entry_id', '=', myEntry.id).executeTakeFirstOrThrow()).id;
     on(8, 15, 10);
     await orders.setTerms(drawn, { sizeLabel: '54', priceMinor: 480_000, currency: 'EUR' }, admin);
-    await orders.setBuyer(drawn, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
+    await orders.setBuyer(drawn, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance', country: 'FR' }, admin);
 
     // LIVE I, six days ago: four pieces, two of size 54 in stock in advance at FRANCE WAREHOUSE, counted in (test/support/
     // fulfil.ts stockPieces); ENGRAVING, a surprise.
@@ -1358,11 +1358,11 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     const salonOrder = (await db.selectFrom('orders').select('id').where('shop_request_id', '=', request).executeTakeFirstOrThrow()).id;
     on(5, 15, 10);
     await orders.setTerms(salonOrder, { sizeLabel: '54', priceMinor: 190_000, currency: 'EUR' }, admin);
-    await orders.setBuyer(salonOrder, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
+    await orders.setBuyer(salonOrder, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance', country: 'FR' }, admin);
 
     // Four days ago: LIVE I's pieces paid (one cancelled the next morning), Hélène's engraved; her pieces wait for supplier stock.
     on(4, 10);
-    await orders.setBuyer(mine, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
+    await orders.setBuyer(mine, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance', country: 'FR' }, admin);
     await orders.setTerms(mine, { engravingText: 'H. M.' }, admin);
     on(4, 11);
     await orders.transition(mine, { to: 'PAID' }, admin);
@@ -1396,7 +1396,7 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     on(2, 16);
     await orders.transition(drawn, { to: 'PAID' }, admin);
     on(2, 16, 30);
-    await orders.setBuyer(paid, { name: 'Michael Okafor', address: '22 Kensington Church Street\nLondon W8 4EP\nUnited Kingdom' }, admin);
+    await orders.setBuyer(paid, { name: 'Michael Okafor', address: '22 Kensington Church Street\nLondon W8 4EP\nUnited Kingdom', country: 'GB' }, admin);
     await orders.transition(paid, { to: 'PAID' }, admin);
     // Yesterday: the ORBITE counted in from the stock (it waited for it) and shipped by Chronopost; the rival's engraved
     // piece still to be paid.

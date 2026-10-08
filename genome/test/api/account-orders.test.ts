@@ -180,6 +180,10 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       imageUrl: null,
       // Plan NEXT LOT §3.4: no new claim code waits for it.
       claimCode: null,
+      // Plan NEXT LOT §3.6.B: no delivery address yet (the account saved none); its own order, the address open to change.
+      address: null,
+      addressOf: null,
+      editable: { address: true },
     });
     // A draw's: its size and price still to be entered.
     expect(byId.get(ids.draw)).toMatchObject({ channel: 'DRAW', release: 'MONOLITHE — RELEASE I', model: 'MONOLITHE', size: null, priceMinor: null, currency: null, addons: [], status: 'RESERVED', paidAt: null, shipment: null });
@@ -207,6 +211,11 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       documents: { invoice: { number: expect.stringMatching(/^INV-2026-\d{6}$/), issuedAt: delivered.paidAt }, creditNote: null, careGuide: true, certificate: false },
       imageUrl: null,
       claimCode: null,
+      // Plan NEXT LOT §3.6.B: its delivery address, as Client Services entered it (the country added to pack it); no
+      // longer open to change once shipped.
+      address: { name: 'Jane Doe', lines: '1 rue de la Paix\n75002 Paris', country: 'FR', phone: null },
+      addressOf: null,
+      editable: { address: false },
     });
     for (const k of ['reservedAt', 'paidAt', 'shippedAt', 'deliveredAt']) expect(delivered[k], k).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Date.parse(delivered.reservedAt)).toBeLessThan(Date.parse(delivered.paidAt));
@@ -216,18 +225,19 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     expect(byId.get(ids.cancelled)).toMatchObject({ status: 'CANCELLED', priceMinor: 300_000, currency: 'EUR', size: null, paidAt: expect.any(String), cancelledAt: expect.any(String), shippedAt: null, shipment: null });
   });
 
-  it('never says the house\'s side of an order: where it is served from, what it holds, the surprise, the buyer, the engraving\'s words, the value declared, the notes, who handled it', async () => {
+  it('never says the house\'s side of an order: where it is served from, what it holds, the surprise, the engraving\'s words, the value declared, the notes, who handled it (its delivery address is the collector\'s own since plan NEXT LOT §3.6.B)', async () => {
     await h.ctx.db.updateTable('orders').set({ surprise: 'A silk pouch' }).where('id', '=', ids.live1).execute();
     const res = await mine.get('/api/v1/account/orders');
     const list = (safeJson(res) as { orders: Json[] }).orders;
     for (const o of list) {
       expect(Object.keys(o).sort()).toEqual(
-        ['addons', 'cancelledAt', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'documents', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
+        ['addons', 'address', 'addressOf', 'cancelledAt', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'documents', 'editable', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
       );
       expect(Object.keys(o.documents).sort()).toEqual(['careGuide', 'certificate', 'creditNote', 'invoice']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);
     }
-    for (const secret of ['A silk pouch', 'Jane', 'Paix', 'A. & L.', '470123', 'WAREHOUSE', 'transfer', 'withdrew', 'Sold by phone', f.admin.id, 'BENCH', 'STOCK', 'O26-J-']) {
+    // The delivery address is the collector's own (plan NEXT LOT §3.6.B), never who entered it.
+    for (const secret of ['A silk pouch', 'A. & L.', '470123', 'WAREHOUSE', 'transfer', 'withdrew', 'Sold by phone', f.admin.id, 'BENCH', 'STOCK', 'O26-J-', 'STAFF', 'COLLECTOR']) {
       expect(res.body, secret).not.toContain(secret);
     }
   });
@@ -399,5 +409,83 @@ describe('NEW CLAIM CODE on an order (POST /api/v1/account/orders/:id/claim-code
     const audit = JSON.stringify(await h.ctx.db.selectFrom('audit_logs').selectAll().execute());
     expect(audit).not.toContain(code);
     expect(audit).not.toContain(code.replace(/-/g, ''));
+  });
+});
+
+describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT LOT §3.6.B; API §10.21)', () => {
+  let h: Harness;
+  let f: LiveFixture;
+  let mine: Client;
+  let mineId: string;
+  let other: Client;
+  let orderId: string;
+  const PARIS = { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', country: 'FR', phone: '+33 6 12 34 56 78' };
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set('2026-11-10T09:00:00.000Z');
+    f = await liveFixtureOn(h.ctx, h.clock);
+    const a = await accountClient(h);
+    mine = a.client;
+    mineId = (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', a.email.toLowerCase()).executeTakeFirstOrThrow()).id;
+    other = (await accountClient(h)).client;
+    const request = await h.ctx.db.insertInto('shop_requests').values({ account_id: mineId, model_id: f.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+    await h.ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
+    orderId = (await h.ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+  }, 60_000);
+  afterAll(() => h?.close());
+
+  it('needs an account session (401), the CSRF token and the same origin on every write, a strict body; never stored', async () => {
+    for (const [method, url] of [
+      ['GET', '/api/v1/account/addresses'],
+      ['POST', '/api/v1/account/addresses'],
+      ['PUT', `/api/v1/account/orders/${orderId}/address`],
+    ] as const) {
+      expect((await h.client().request(method, url, { body: PARIS })).statusCode, url).toBe(401);
+    }
+    expect(errorOf(await mine.post('/api/v1/account/addresses', PARIS, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await mine.post('/api/v1/account/addresses', PARIS, { origin: 'https://evil.example' })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await mine.request('PUT', `/api/v1/account/orders/${orderId}/address`, { body: { address: PARIS }, noCsrf: true })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await mine.post('/api/v1/account/addresses', { ...PARIS, email: 'x@example.com' })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await mine.request('PUT', `/api/v1/account/orders/${orderId}/address`, { body: { address: PARIS, addressId: orderId } })).code).toBe('VALIDATION_FAILED');
+    const empty = await mine.get('/api/v1/account/addresses');
+    expect(empty.headers['cache-control']).toBe('no-store');
+    expect(safeJson(empty)).toEqual({ addresses: [], defaultCountry: null });
+  });
+
+  it('adds, edits, makes default and removes an address; the server\'s words for a refusal; never another account\'s', async () => {
+    const created = await mine.post('/api/v1/account/addresses', PARIS);
+    expect(created.statusCode).toBe(201);
+    const first = (safeJson(created) as Json).addresses[0];
+    expect(first).toEqual({ id: expect.any(String), ...PARIS, isDefault: true });
+    const refused = await mine.post('/api/v1/account/addresses', { ...PARIS, country: 'XX' });
+    expect([refused.statusCode, errorOf(refused).code, errorOf(refused).message]).toEqual([400, 'VALIDATION_FAILED', 'Choose a country.']);
+    h.clock.advance(1000);
+    const second = ((safeJson(await mine.post('/api/v1/account/addresses', { ...PARIS, name: 'J. Doe', isDefault: true })) as Json).addresses as Json[]).find((x) => x.name === 'J. Doe')!;
+    expect(second.isDefault).toBe(true);
+    const edited = await mine.request('PUT', `/api/v1/account/addresses/${first.id}`, { body: { ...PARIS, phone: '+33 6 00 00 00 00' } });
+    expect(edited.statusCode).toBe(200);
+    expect(((safeJson(edited) as Json).addresses as Json[]).find((x) => x.id === first.id).phone).toBe('+33 6 00 00 00 00');
+    expect((await other.request('PUT', `/api/v1/account/addresses/${first.id}`, { body: PARIS })).statusCode).toBe(404);
+    expect((await other.post(`/api/v1/account/addresses/${first.id}/default`)).statusCode).toBe(404);
+    expect((await other.request('DELETE', `/api/v1/account/addresses/${first.id}`)).statusCode).toBe(404);
+    expect((await mine.post(`/api/v1/account/addresses/${first.id}/default`)).statusCode).toBe(204);
+    expect((await mine.request('DELETE', `/api/v1/account/addresses/${second.id}`)).statusCode).toBe(204);
+    expect(((safeJson(await mine.get('/api/v1/account/addresses')) as Json).addresses as Json[]).map((x) => [x.id, x.isDefault])).toEqual([[first.id, true]]);
+  });
+
+  it('sets an order\'s delivery address from a saved one or a new one, answering the order; another account\'s order 404', async () => {
+    const saved = ((safeJson(await mine.get('/api/v1/account/addresses')) as Json).addresses as Json[])[0];
+    const res = await mine.request('PUT', `/api/v1/account/orders/${orderId}/address`, { body: { addressId: saved.id } });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect((safeJson(res) as Json).order).toMatchObject({ id: orderId, address: { name: saved.name, lines: saved.address, country: 'FR', phone: saved.phone }, addressOf: null, editable: { address: true } });
+    const fresh = await mine.request('PUT', `/api/v1/account/orders/${orderId}/address`, { body: { address: { ...PARIS, name: 'Jane Martin' }, save: true } });
+    expect((safeJson(fresh) as Json).order.address.name).toBe('Jane Martin');
+    expect(((safeJson(await mine.get('/api/v1/account/addresses')) as Json).addresses as Json[]).map((x) => x.name)).toContain('Jane Martin');
+    const theirs = await other.request('PUT', `/api/v1/account/orders/${orderId}/address`, { body: { address: PARIS } });
+    expect([theirs.statusCode, errorOf(theirs).code]).toEqual([404, 'ORDER_NOT_FOUND']);
+    const bad = await mine.request('PUT', `/api/v1/account/orders/${orderId}/address`, { body: { address: { ...PARIS, phone: '0612' } } });
+    expect([bad.statusCode, errorOf(bad).message]).toEqual([400, 'Enter a phone number with its country code.']);
   });
 });

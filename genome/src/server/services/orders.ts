@@ -48,11 +48,17 @@
  *                ownership back is audited `ownership.reclaim` too.
  *   the piece    the one that fulfils the order, bound by the agent's packing scan of its card (`attachPiece` via
  *                `scan`, `order.link`, services/logistics.ts): the order then holds it in stock until it is shipped.
- *   the buyer    name and address, entered by Client Services (decision 31; no form for collectors): kept on the order
- *                only, never in the audit log, the order's events nor the journal (which say they were entered, never
- *                what they are), and exported to the account under the right of access (`accountOrders`); the
- *                console's routes give them masked to an AUDITOR (OrderView carries them as stored, as the emails).
- *                The engraving text likewise stays on the order.
+ *   the buyer    the delivery address: name, address lines, country and phone (plan NEXT LOT §3.6.B; until then
+ *                entered by Client Services only, decision 31). A new order takes the account's default address (YOUR
+ *                ADDRESSES, services/addresses.ts) at its creation; the collector sets or changes it in YOUR ORDERS
+ *                while RESERVED or PAID until packing starts (`setAddress`; 409 ORDER_PACKING_STARTED after), Client
+ *                Services until SHIPPED (`setBuyer`); who entered it and when (`address_by`, `address_at`), and when it
+ *                was replaced after it was first entered (`address_changed_at`: the agent's ADDRESS CHANGED). An order
+ *                travelling with another is delivered with it, to its address (`addressOf`; 409 ORDER_TRAVELS_WITH to
+ *                set its own). Kept on the order only, never in the audit log, the order's events nor the journal (which
+ *                say it was entered, its country and who, never its words), and exported to the account under the right
+ *                of access (`accountOrders`); the console's routes give it masked to an AUDITOR (the name masked, the
+ *                address and the phone withheld, the country shown). The engraving text likewise stays on the order.
  *   MY PIECES    the collector reads their own orders (`forAccount`, choice 6): the steps and their times, the model,
  *                the size, the add-ons and the price, the carrier and the tracking link once shipped, and its documents
  *                (M6): the invoice and the credit note, the model's care guide, the ownership certificate once the piece
@@ -103,6 +109,7 @@ import {
   RETURN_OUTCOMES,
   SHIPPING_SERVICES,
   jsonText,
+  type AddressSource,
   type InvoiceKind,
   type JsonObject,
   type OrderAddonSnapshot,
@@ -117,8 +124,10 @@ import {
   type CreditReleaseReason,
 } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
+import { countryName } from '../../shared/countries.js';
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock, type Logger, noopLogger } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
+import { addressNotFound, checkAddress, checkCountry, checkPhone, defaultAddress, insertAddress, lockAccountAddresses, type DeliveryAddress } from './addresses.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
 import { lockPieces, peekClaimRenewals, waitingClaimCodes, withdrawOnCancel, withdrawWaiting, type AccountOrderClaimCode } from './claim-renewals.js';
 import { issueCreditNote, issueInvoice, orderInvoices, type InvoiceBuyer } from './invoices.js';
@@ -208,6 +217,9 @@ const termsFixed = () => conflict('ORDER_TERMS_FIXED', 'The size and the price o
 /** Plan NEXT LOT §3.6.F and §3.6.G: a draw's entry and a salon's request with a size fix it; an exchange goes through an order case. */
 const sizeFixed = () => conflict('ORDER_SIZE_FIXED', 'The size of this order is the one chosen at its entry or request.');
 const orderClosed = () => conflict('ORDER_CLOSED', 'This order can no longer change.');
+/** Plan NEXT LOT §3.6.B: an order travelling with another is delivered to that order's address. */
+const travelsWith = (parentId: string) => conflict('ORDER_TRAVELS_WITH', `This piece travels with order ${orderReference(parentId)}: its address is that order’s.`);
+const packingStarted = () => conflict('ORDER_PACKING_STARTED', 'Packing has begun: write to ORBES Client Services to change this order.');
 const carrierUnknown = () => notFound('Carrier', 'CARRIER_NOT_FOUND');
 const priceMissing = () => conflict('ORDER_PRICE_MISSING', 'Enter the order’s price before it is paid: its invoice is issued then.');
 const returnChanged = () => conflict('ORDER_RETURN_CHANGED', 'The piece changed during the return. Please try again.');
@@ -273,10 +285,36 @@ export interface OrderShipping {
 /** No shipping: as an order before migration 0027, or below the free tiers without a rate. */
 export const NO_SHIPPING: Readonly<OrderShipping> = Object.freeze({ service: null, minor: null, benefit: null });
 
-/** The buyer's name and address (decision 31); null clears. */
+/**
+ * The buyer's name and address (decision 31) and, since plan NEXT LOT §3.6.B, the delivery address's country and phone;
+ * null clears one; a country or a phone left out (undefined) stays as it is.
+ */
 export interface OrderBuyerInput {
   name: string | null;
   address: string | null;
+  country?: string | null;
+  phone?: string | null;
+}
+
+/**
+ * What the collector puts on an order (PUT /api/v1/account/orders/:id/address, plan NEXT LOT §3.6.B): one of its saved
+ * addresses, or a new one (all four fields), saved to YOUR ADDRESSES too when asked.
+ */
+export type OrderAddressInput = { addressId: string } | { address: DeliveryAddress; save?: boolean };
+
+/**
+ * An order's delivery address (plan NEXT LOT §3.6.B): its own, or, for an order travelling with another, that order's
+ * (`travelsWith`: its id); who entered it and when, and when it was replaced after it was first entered.
+ */
+export interface OrderAddress {
+  name: string | null;
+  address: string | null;
+  country: string | null;
+  phone: string | null;
+  by: AddressSource | null;
+  at: Date | null;
+  changedAt: Date | null;
+  travelsWith: string | null;
 }
 
 /** Text as Client Services types it: trimmed, line breaks as \n (or none), bounded; '' and null are null. */
@@ -326,7 +364,15 @@ export interface OrderView {
   addons: OrderAddonSnapshot[];
   surprise: string | null;
   engravingText: string | null;
-  buyer: { name: string | null; address: string | null };
+  /**
+   * The delivery address (plan NEXT LOT §3.6.B): its own, or the order's it travels with (`addressOf`), as stored; the
+   * routes mask it for an AUDITOR (the name masked, the address and the phone withheld, the country shown).
+   */
+  buyer: { name: string | null; address: string | null; country: string | null; phone: string | null };
+  /** Who entered the delivery address and when (COLLECTOR, STAFF), and when it was replaced after it was first entered. */
+  addressBy: AddressSource | null;
+  addressAt: Date | null;
+  addressChangedAt: Date | null;
   status: OrderStatus;
   reservedAt: Date;
   paidAt: Date | null;
@@ -397,7 +443,8 @@ export interface ExportedOrder {
   /** BP-19 T4: its shipping, all null for none. */
   shipping: OrderShipping;
   engravingText: string | null;
-  buyer: { name: string | null; address: string | null };
+  /** Its delivery address as stored on it (plan NEXT LOT §3.6.B: with its country and phone). */
+  buyer: { name: string | null; address: string | null; country: string | null; phone: string | null };
   status: OrderStatus;
   reservedAt: Date;
   paidAt: Date | null;
@@ -481,6 +528,15 @@ export interface AccountOrder {
    * (POST …/claim-code): its status and when it was made, never the code; null otherwise (and once it is read).
    */
   claimCode: AccountOrderClaimCode | null;
+  /**
+   * Plan NEXT LOT §3.6.B: its delivery address (its own, or the order's it travels with): the name, the lines as typed,
+   * the country (ISO 3166-1 alpha-2) and the phone; null while none is entered. Never who entered it.
+   */
+  address: { name: string; lines: string; country: string | null; phone: string | null } | null;
+  /** The reference of the order it travels with, whose address it is delivered to; null for an order of its own. */
+  addressOf: string | null;
+  /** What the collector may change on it now, as the server reads it: the address (RESERVED or PAID, its own, packing not started). */
+  editable: { address: boolean };
 }
 
 /** The documents of an order in MY PIECES (M6). */
@@ -788,6 +844,32 @@ export async function updateOrder(tx: Db, id: string, set: OrderUpdate): Promise
   return tx.updateTable('orders').set(set).where('id', '=', id).returningAll().executeTakeFirstOrThrow();
 }
 
+type AddressColumns = Pick<OrderRow, 'with_order_id' | 'buyer_name' | 'buyer_address' | 'buyer_country' | 'buyer_phone' | 'address_by' | 'address_at' | 'address_changed_at'>;
+
+/** An order's own delivery address, as its row holds it. */
+function ownAddress(o: AddressColumns, travelsWith: string | null = null): OrderAddress {
+  return { name: o.buyer_name, address: o.buyer_address, country: o.buyer_country, phone: o.buyer_phone, by: o.address_by, at: o.address_at, changedAt: o.address_changed_at, travelsWith };
+}
+
+/**
+ * An order's delivery address (plan NEXT LOT §3.6.B): its own, or, for an order travelling with another (a welcome gift,
+ * a LIVE entry's 2nd to 5th piece, a guaranteed draw place's further pieces), that order's, which it is delivered with
+ * (« an order ships complete »): read by MY PIECES, the order's page, the parcel, SHIP and a travelling order's invoice.
+ * A travelling order's own old name and address (entered before 0039) are never read.
+ */
+export async function addressOf(db: Db, o: AddressColumns): Promise<OrderAddress> {
+  if (o.with_order_id === null) return ownAddress(o);
+  const parent = await db
+    .selectFrom('orders')
+    .select(['with_order_id', 'buyer_name', 'buyer_address', 'buyer_country', 'buyer_phone', 'address_by', 'address_at', 'address_changed_at'])
+    .where('id', '=', o.with_order_id)
+    .executeTakeFirstOrThrow();
+  return ownAddress(parent, o.with_order_id);
+}
+
+/** Whether a delivery address is enough to pack and ship (§1.1 (d)): its name, its lines and its country; the phone may be missing. */
+export const shippable = (a: Pick<OrderAddress, 'name' | 'address' | 'country'>): boolean => a.name !== null && a.address !== null && a.country !== null;
+
 /**
  * Record one change of an order: its event (the status after it), its journal entry (the order as it stands), and the
  * audit entry the caller writes last. The note and the details are Client Services' words and ids, never the buyer's.
@@ -997,6 +1079,14 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
     })
     .returningAll()
     .executeTakeFirstOrThrow();
+  // Plan NEXT LOT §3.6.B: an order of its own (not a welcome gift, not travelling with another, not a size exchange,
+  // which takes its original's) takes the account's default address at its creation, the collector's.
+  if (n.channel !== 'GIFT' && n.channel !== 'EXCHANGE' && o.with_order_id === null) {
+    const saved = await defaultAddress(tx, o.account_id);
+    if (saved) {
+      o = await updateOrder(tx, o.id, { buyer_name: saved.name, buyer_address: saved.address, buyer_country: saved.country, buyer_phone: saved.phone, address_by: 'COLLECTOR', address_at: o.reserved_at });
+    }
+  }
   const holdNotes: AuditRecordInput[] = [];
   if (opts.hold) o = await hold(tx, o, actor, now, holdNotes);
   const source: JsonObject = n.liveEntryId
@@ -1023,6 +1113,8 @@ async function createOrder(tx: Db, n: NewOrder, opts: { hold: boolean }, actor: 
           reservation: o.reservation,
           ...(o.shipping_service ? { shipping: { service: o.shipping_service, minor: o.shipping_minor, benefit: o.shipping_benefit } } : {}),
           ...(o.with_order_id ? { withOrderId: o.with_order_id } : {}),
+          // Its delivery address, the account's default (never its words).
+          ...(o.address_by ? { address: { by: 'collector', country: o.buyer_country } } : {}),
         },
         at: o.reserved_at,
       },
@@ -1620,8 +1712,20 @@ export async function createExchangeOrder(
     now,
     notes,
   );
-  if (original.engraving_text !== null || original.buyer_name !== null || original.buyer_address !== null) {
-    o = await updateOrder(tx, o.id, { engraving_text: original.engraving_text, engraving_by: original.engraving_by, buyer_name: original.buyer_name, buyer_address: original.buyer_address });
+  // The original's delivery address (plan NEXT LOT §3.6.B: where the first piece went, not the account's default),
+  // entered by Client Services at its creation; its engraving's words, already paid (no price of its own).
+  const delivered = await addressOf(tx, original);
+  const hasAddress = delivered.name !== null || delivered.address !== null || delivered.country !== null || delivered.phone !== null;
+  if (original.engraving_text !== null || hasAddress) {
+    o = await updateOrder(tx, o.id, {
+      engraving_text: original.engraving_text,
+      engraving_by: original.engraving_by,
+      buyer_name: delivered.name,
+      buyer_address: delivered.address,
+      buyer_country: delivered.country,
+      buyer_phone: delivered.phone,
+      ...(hasAddress ? { address_by: 'STAFF' as const, address_at: o.reserved_at } : {}),
+    });
   }
   if (credit.length) {
     // The credit the original's return gave back is taken off the exchange again, before PAID: its invoice carries the
@@ -1673,7 +1777,7 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
     addons: r.addons.map((a) => ({ label: a.label, priceMinor: a.priceMinor })),
     shipping: shippingOf(r),
     engravingText: r.engraving_text,
-    buyer: { name: r.buyer_name, address: r.buyer_address },
+    buyer: { name: r.buyer_name, address: r.buyer_address, country: r.buyer_country, phone: r.buyer_phone },
     status: r.status,
     reservedAt: r.reserved_at,
     paidAt: r.paid_at,
@@ -1696,6 +1800,15 @@ export async function accountOrders(db: Db, accountId: string): Promise<Exported
       })),
     history: events.filter((e) => e.order_id === r.id).map((e) => ({ status: e.status, at: e.created_at, note: e.note })),
   }));
+}
+
+/** An order's delivery address as its collector reads it (AccountOrder `address`, `addressOf`, `editable`). */
+function accountDelivery(o: Pick<OrderRow, 'status' | 'with_order_id' | 'packing_started_at'>, a: OrderAddress): Pick<AccountOrder, 'address' | 'addressOf' | 'editable'> {
+  return {
+    address: a.name !== null && a.address !== null ? { name: a.name, lines: a.address, country: a.country, phone: a.phone } : null,
+    addressOf: a.travelsWith ? orderReference(a.travelsWith) : null,
+    editable: { address: o.with_order_id === null && ORDER_HOLDING_STATUSES.includes(o.status) && o.packing_started_at === null },
+  };
 }
 
 // ── Service ────────────────────────────────────────────────────────────────
@@ -1786,6 +1899,7 @@ export class OrderService {
           : [];
       giftOf = { tier: grant.tier as 2 | 3, sizes, savedSize: r.sku_id === null ? await savedSizeHint(this.db, r.account_id, r.model_id) : null };
     }
+    const delivery = await addressOf(this.db, r);
     const now = this.clock();
     const standing = await tierOf(this.db, r.account_id, now);
     const credit: OrderView['credit'] = {
@@ -1818,7 +1932,10 @@ export class OrderService {
       addons: r.addons,
       surprise: r.surprise,
       engravingText: r.engraving_text,
-      buyer: { name: r.buyer_name, address: r.buyer_address },
+      buyer: { name: delivery.name, address: delivery.address, country: delivery.country, phone: delivery.phone },
+      addressBy: delivery.by,
+      addressAt: delivery.at,
+      addressChangedAt: delivery.changedAt,
       status: r.status,
       reservedAt: r.reserved_at,
       paidAt: r.paid_at,
@@ -1862,7 +1979,7 @@ export class OrderService {
    * The account's own orders as MY PIECES shows them (AccountOrder), the latest first (ACCOUNT_ORDERS_LIMIT), the pieces
    * of one sale in their order. Only the account's: the route passes its session's account, never an id it was sent.
    */
-  async forAccount(accountId: string): Promise<AccountOrder[]> {
+  async forAccount(accountId: string, opts: { orderId?: string } = {}): Promise<AccountOrder[]> {
     if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
     const rows = await this.db
       .selectFrom('orders as o')
@@ -1893,6 +2010,14 @@ export class OrderService {
         'o.cancelled_at',
         'o.returned_at',
         'o.tracking_number',
+        'o.buyer_name',
+        'o.buyer_address',
+        'o.buyer_country',
+        'o.buyer_phone',
+        'o.address_by',
+        'o.address_at',
+        'o.address_changed_at',
+        'o.packing_started_at',
         'm.name as model_name',
         'm.variant_label as model_variant',
         'm.image_sha256 as model_image',
@@ -1903,6 +2028,7 @@ export class OrderService {
         'w.id as ownership_id',
       ])
       .where('o.account_id', '=', accountId.toLowerCase())
+      .$if(opts.orderId !== undefined, (q) => q.where('o.id', '=', opts.orderId!))
       .orderBy('o.reserved_at', 'desc')
       .orderBy('o.piece')
       .orderBy('o.id')
@@ -1926,6 +2052,20 @@ export class OrderService {
         : [],
     );
     const claimCodes = await waitingClaimCodes(this.db, accountId.toLowerCase(), rows.map((r) => r.id));
+    // Plan NEXT LOT §3.6.B: each order's delivery address, a travelling order's its parent's.
+    const parentIds = [...new Set(rows.map((r) => r.with_order_id).filter((x): x is string => x !== null))];
+    const parents = new Map(
+      parentIds.length
+        ? (
+            await this.db
+              .selectFrom('orders')
+              .select(['id', 'with_order_id', 'buyer_name', 'buyer_address', 'buyer_country', 'buyer_phone', 'address_by', 'address_at', 'address_changed_at'])
+              .where('id', 'in', parentIds)
+              .execute()
+          ).map((p) => [p.id, p])
+        : [],
+    );
+    const deliveryOf = (r: (typeof rows)[number]): OrderAddress => (r.with_order_id === null ? ownAddress(r) : ownAddress(parents.get(r.with_order_id)!, r.with_order_id));
     const documentOf = (orderId: string, kind: InvoiceKind) => {
       const i = invoices.find((x) => x.order.id === orderId && x.kind === kind);
       return i ? { number: i.number, issuedAt: i.issuedAt } : null;
@@ -1965,7 +2105,73 @@ export class OrderService {
       },
       imageUrl: mediaUrl(r.model_image),
       claimCode: claimCodes.get(r.id) ?? null,
+      ...accountDelivery(r, deliveryOf(r)),
     }));
+  }
+
+  /** One of the account's own orders as MY PIECES shows it (404 ORDER_NOT_FOUND for any other). */
+  async accountOrder(accountId: string, orderId: string): Promise<AccountOrder> {
+    const id = knownOrderId(orderId);
+    const [o] = await this.forAccount(accountId, { orderId: id });
+    if (!o) throw orderNotFound();
+    return o;
+  }
+
+  /**
+   * The collector's delivery address on one of its orders (PUT /api/v1/account/orders/:id/address; plan NEXT LOT §3.6.B:
+   * « enters it on the order and can change it until the agent starts packing; after that, only through Client
+   * Services »): one of its saved addresses (404 ADDRESS_NOT_FOUND for another account's), or a new one, all four fields,
+   * saved to YOUR ADDRESSES too when asked (409 ADDRESS_LIMIT at five). Its own order (404 ORDER_NOT_FOUND), not
+   * travelling with another (409 ORDER_TRAVELS_WITH), RESERVED or PAID (409 ORDER_CLOSED), packing not started (409
+   * ORDER_PACKING_STARTED); the account ACTIVE (403 ACCOUNT_LOCKED). The first address sets `address_at`; any later one
+   * `address_changed_at` (the agent's ADDRESS CHANGED); the same address again changes nothing. Under the account's
+   * lock, then the order's row. Event, journal and audit `order.address` `{ by: 'collector', country, changed }`, with the
+   * account as actor, never the words (`account.address.create` too when saved).
+   */
+  async setAddress(accountId: string, orderId: string, input: OrderAddressInput, actor: Actor): Promise<AccountOrder> {
+    if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw orderNotFound();
+    const account = accountId.toLowerCase();
+    const id = knownOrderId(orderId);
+    if (!input || typeof input !== 'object') throw validationError('Enter the name and the address.');
+    const savedId = 'addressId' in input ? input.addressId : undefined;
+    if (savedId !== undefined && (typeof savedId !== 'string' || !UUID_RE.test(savedId))) throw addressNotFound();
+    const fresh = savedId === undefined ? checkAddress((input as { address: unknown }).address) : null;
+    const save = savedId === undefined && (input as { save?: unknown }).save === true;
+    await inRetriedTransaction(this.db, async (tx) => {
+      await lockAccountAddresses(tx, account);
+      const o = await tx.selectFrom('orders').selectAll().where('id', '=', id).where('account_id', '=', account).forUpdate().executeTakeFirst();
+      if (!o) throw orderNotFound();
+      if (o.with_order_id !== null) throw travelsWith(o.with_order_id);
+      if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
+      if (o.packing_started_at !== null) throw packingStarted();
+      const now = this.clock();
+      const notes: AuditRecordInput[] = [];
+      let a: DeliveryAddress;
+      if (savedId !== undefined) {
+        const row = await tx.selectFrom('account_addresses').select(['name', 'address', 'country', 'phone']).where('id', '=', savedId.toLowerCase()).where('account_id', '=', account).executeTakeFirst();
+        if (!row) throw addressNotFound();
+        a = row;
+      } else {
+        a = fresh!;
+        if (save) notes.push((await insertAddress(tx, account, a, false, actor, now)).note);
+      }
+      const same = o.buyer_name === a.name && o.buyer_address === a.address && o.buyer_country === a.country && o.buyer_phone === a.phone;
+      if (!same) {
+        const changed = o.address_at !== null;
+        const after = await updateOrder(tx, o.id, {
+          buyer_name: a.name,
+          buyer_address: a.address,
+          buyer_country: a.country,
+          buyer_phone: a.phone,
+          address_by: 'COLLECTOR',
+          address_at: o.address_at ?? now,
+          address_changed_at: changed ? (now < o.address_at! ? o.address_at : now) : null,
+        });
+        notes.unshift(await recordChange(tx, o, after, 'order.address', { details: { by: 'collector', country: a.country, changed } }, actor, now));
+      }
+      for (const n of notes) await this.audit.record(n, tx);
+    });
+    return this.accountOrder(account, id);
   }
 
   /**
@@ -2312,8 +2518,15 @@ export class OrderService {
   }
 
   /**
-   * The buyer's name and address (decision 31: entered by Client Services, no form for collectors), at any step; null
-   * clears one. Personal data: audited `order.buyer` with the fields changed only, never their words.
+   * The buyer's delivery address, entered by Client Services (decision 31; plan NEXT LOT §3.6.B): the name and the address
+   * lines, and the country and the phone (null clears one; left out, it stays), while RESERVED or PAID, packing started
+   * or not (409 ORDER_CLOSED once shipped or ended; a cancelled order whose travelling orders are still to ship keeps
+   * their parcel's address, editable); never on an order travelling with another, whose address is its
+   * parent's (409 ORDER_TRAVELS_WITH, a welcome gift included). A country is one of the house's list (400 'Choose a
+   * country.'), a phone with its country code (400 'Enter a phone number with its country code.'). It is STAFF's from
+   * then on (`address_by`); replacing an address entered before sets `address_changed_at` (ADDRESS CHANGED); clearing
+   * every field clears who and when. Personal data: audited `order.buyer` with the fields changed and `changed`, never
+   * their words.
    */
   async setBuyer(orderId: string, input: OrderBuyerInput, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
@@ -2321,11 +2534,36 @@ export class OrderService {
     if (!input || typeof input !== 'object') throw validationError('Enter the buyer’s name and address.');
     const name = cleanText(input.name, ORDER_TEXT_LIMITS.buyerName, 'The name');
     const address = cleanText(input.address, ORDER_TEXT_LIMITS.buyerAddress, 'The address', { multiline: true });
+    const country = input.country === undefined ? undefined : input.country === null || (typeof input.country === 'string' && input.country.trim() === '') ? null : checkCountry(input.country);
+    const phone = input.phone === undefined ? undefined : input.phone === null || (typeof input.phone === 'string' && input.phone.trim() === '') ? null : checkPhone(input.phone);
     await this.change(id, async (tx, o, now, notes) => {
-      const fields = [...(name !== o.buyer_name ? ['name'] : []), ...(address !== o.buyer_address ? ['address'] : [])];
+      if (o.with_order_id !== null) throw travelsWith(o.with_order_id);
+      // A cancelled order whose travelling orders are still to ship keeps the address of their parcel (§3.5.6.6: it
+      // still keys it), which Client Services may still correct.
+      const keysOpenParcel =
+        o.status === 'CANCELLED' &&
+        (await tx.selectFrom('orders').select('id').where('with_order_id', '=', o.id).where('status', 'in', [...ORDER_HOLDING_STATUSES]).executeTakeFirst()) !== undefined;
+      if (!ORDER_HOLDING_STATUSES.includes(o.status) && !keysOpenParcel) throw orderClosed();
+      const next = { name, address, country: country === undefined ? o.buyer_country : country, phone: phone === undefined ? o.buyer_phone : phone };
+      const fields = [
+        ...(next.name !== o.buyer_name ? ['name'] : []),
+        ...(next.address !== o.buyer_address ? ['address'] : []),
+        ...(next.country !== o.buyer_country ? ['country'] : []),
+        ...(next.phone !== o.buyer_phone ? ['phone'] : []),
+      ];
       if (fields.length === 0) throw validationError('Nothing to change.');
-      const after = await updateOrder(tx, o.id, { buyer_name: name, buyer_address: address });
-      notes.push(await recordChange(tx, o, after, 'order.buyer', { details: { fields, cleared: name === null && address === null } }, actor, now));
+      const cleared = next.name === null && next.address === null && next.country === null && next.phone === null;
+      const changed = !cleared && o.address_at !== null;
+      const after = await updateOrder(tx, o.id, {
+        buyer_name: next.name,
+        buyer_address: next.address,
+        buyer_country: next.country,
+        buyer_phone: next.phone,
+        address_by: cleared ? null : 'STAFF',
+        address_at: cleared ? null : (o.address_at ?? now),
+        address_changed_at: cleared ? null : changed ? (now < o.address_at! ? o.address_at : now) : o.address_changed_at,
+      });
+      notes.push(await recordChange(tx, o, after, 'order.buyer', { details: { fields, cleared, changed, ...(next.country ? { country: next.country } : {}) } }, actor, now));
     });
     return this.get(id);
   }

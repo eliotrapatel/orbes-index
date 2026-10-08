@@ -58,7 +58,8 @@ export interface InvoiceDocument {
   credits: string | null;
   issuer: { name: string; address: readonly string[] };
   /** As entered by ORBES Client Services (masked for an AUDITOR by the caller), and the account's email. */
-  buyer: { name: string | null; address: string | null; email: string | null };
+  /** Plan NEXT LOT §3.6.B: the delivery country's English name, the address's last line (none on an invoice of before). */
+  buyer: { name: string | null; address: string | null; email: string | null; country?: string | null };
   lines: readonly InvoiceDocumentLine[];
   currency: string;
   totalMinor: number;
@@ -189,7 +190,7 @@ export function layoutInvoice(d: InvoiceDocument): PdfPage {
   for (const l of [d.issuer.name, ...d.issuer.address]) value(toDocumentText(l), P.x, (y += R.pitch), P.width);
   y += R.pitch * 1.6;
   section(C.billedTo, P.x, y);
-  const buyer = [d.buyer.name, ...addressLines(d.buyer.address), d.buyer.email].map((l) => toDocumentText(l ?? '')).filter((l) => l.length > 0);
+  const buyer = [d.buyer.name, ...addressLines(d.buyer.address), d.buyer.country ?? null, d.buyer.email].map((l) => toDocumentText(l ?? '')).filter((l) => l.length > 0);
   for (const l of buyer) value(l, P.x, (y += R.pitch), P.width);
   if (y > L.ruleParties - 4) throw new CertificateInputError('the parties overflow their block');
   rule(L.ruleParties);

@@ -43,6 +43,7 @@ import { TierGrantService } from './services/tier-grants.js';
 import { CareService, eraseCareLabels } from './services/care.js';
 import { GuaranteeService } from './services/guarantees.js';
 import { SizeService } from './services/sizes.js';
+import { AddressService } from './services/addresses.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -160,6 +161,8 @@ export interface AppServices {
   guarantees: GuaranteeService;
   /** YOUR SIZES (plan NEXT-NINE, AC-01): the sizes a collector saves, which preselect a size it then confirms; a model's size kind and fits. */
   sizes: SizeService;
+  /** YOUR ADDRESSES (plan NEXT LOT §3.6.B): the delivery addresses a collector saves, one of them the default, put on each new order. */
+  addresses: AddressService;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
   suppliers: SupplierService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
@@ -294,6 +297,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const care = new CareService({ db, audit, warranty, clock });
     const guarantees = new GuaranteeService({ db, audit, clock });
     const sizes = new SizeService({ db, audit, clock });
+    const addresses = new AddressService({ db, audit, clock });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });
@@ -344,6 +348,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       care,
       guarantees,
       sizes,
+      addresses,
       suppliers,
       supplierOrders,
       receptions,

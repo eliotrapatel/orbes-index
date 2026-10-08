@@ -796,19 +796,19 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
   // ── the buyer ────────────────────────────────────────────────────────────
 
   describe('the buyer\'s details', () => {
-    it('are entered by Client Services at any step, never in the audit log, the order\'s events nor the journal; exported to the account under the right of access with its orders', async () => {
+    it('are entered by Client Services until the order ships (plan NEXT LOT §3.6.B), never in the audit log, the order\'s events nor the journal; exported to the account under the right of access with its orders', async () => {
       const sale = await liveSale();
       const o = sale.orders[0]!;
       const name = 'Ada Zurbaran-Quill';
       const address = '12 rue Imaginaire\n75003 Paris\nFrance';
       clock.advance(MINUTE);
       const view = await orders().setBuyer(o.id, { name, address }, admin);
-      expect(view.buyer).toEqual({ name, address });
+      expect(view.buyer).toEqual({ name, address, country: null, phone: null });
       await rejects(orders().setBuyer(o.id, { name, address }, admin), 'VALIDATION_FAILED', 400);
       await rejects(orders().setBuyer(o.id, { name: 'x'.repeat(201), address }, admin), 'VALIDATION_FAILED', 400);
       await rejects(orders().setBuyer(o.id, { name: 'Ada\nZ', address }, admin), 'VALIDATION_FAILED', 400);
       const audit = await auditsOf(o.id, 'order.buyer');
-      expect(audit.map((a) => a.details)).toEqual([{ from: 'RESERVED', to: 'RESERVED', fields: ['name', 'address'], cleared: false }]);
+      expect(audit.map((a) => a.details)).toEqual([{ from: 'RESERVED', to: 'RESERVED', fields: ['name', 'address'], cleared: false, changed: false }]);
       const everything = JSON.stringify([
         await t.db.selectFrom('audit_logs').select('details').execute(),
         await t.db.selectFrom('order_events').select(['note', 'details']).execute(),
@@ -828,7 +828,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
           size: '52',
           priceMinor: 505_000,
           currency: 'EUR',
-          buyer: { name, address },
+          buyer: { name, address, country: null, phone: null },
           status: 'RESERVED',
           carrier: null,
           history: [
@@ -851,7 +851,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       const moved = { name: 'Ada Quill', address: '3 rue Neuve\n75004 Paris\nFrance' };
       await orders().setBuyer(o.id, moved, admin);
       const later = (await ctx.services.owners.exportData(sale.account.id, admin)).orders[0]!;
-      expect(later.buyer).toEqual(moved);
+      expect(later.buyer).toEqual({ ...moved, country: null, phone: null });
       expect(later.invoices).toEqual([
         {
           number: expect.stringMatching(/^INV-\d{4}-\d{6}$/),
@@ -868,7 +868,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       expect(later.invoices[0]!.lines.reduce((n, l) => n + l.amountMinor, 0)).toBe(505_000);
       // Cleared: both gone from the order.
       clock.advance(MINUTE);
-      expect((await orders().setBuyer(o.id, { name: null, address: null }, admin)).buyer).toEqual({ name: null, address: null });
+      expect((await orders().setBuyer(o.id, { name: null, address: null }, admin)).buyer).toEqual({ name: null, address: null, country: null, phone: null });
       expect((await auditsOf(o.id, 'order.buyer')).at(-1)!.details).toMatchObject({ cleared: true });
     });
   });

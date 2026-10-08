@@ -8,7 +8,8 @@
  *                  first, LATE past the READY delay; those on their way (`onItsWay`); one parcel (`parcel`, the
  *                  ShippingOrderView: no price, email, account nor release).
  *   start packing  every open order of the parcel PAID and holding STOCK (409 PACKING_NOT_READY), the first order's
- *                  address entered (409 ORDER_ADDRESS_MISSING): a shipment PACKING with one item per order, and
+ *                  delivery address entered, its name, lines and country (409 ORDER_ADDRESS_MISSING; §1.1 (d), the phone
+ *                  may be missing): a shipment PACKING with one item per order, and
  *                  `orders.packing_started_at` set on each (never cleared: the address and the engraving lock there).
  *                  Audited `order.pack.start`.
  *   the scan       the card's ORBES CODE judged as /verify judges it (VerificationService.staffScan, an ADMIN_TEST scan
@@ -25,7 +26,7 @@
  *   ship           PACKED (409 ORDER_NOT_PACKED), its address still entered (409 ORDER_ADDRESS_MISSING): every order of the parcel SHIPPED in one transaction with the parcel's
  *                  carrier and tracking number (an active carrier), and, from ORBES staff only, a declared value per
  *                  order in its currency (403 FORBIDDEN from the agent); each piece's warranty started if it has none
- *                  (question 14: the shipping day, no point of sale, `warranty.activate` via ship).
+ *                  (question 14: the shipping day, no point of sale, the delivery address's country, `warranty.activate` via ship).
  *   delivered      every order SHIPPED → DELIVERED (`order.deliver`); the shipment DELIVERED (also when the last of its
  *                  orders is delivered by a registration, services/orders.ts).
  *
@@ -66,7 +67,7 @@ import { sanitizeImage } from '../media/image.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import type { ImageUpload } from './media.js';
-import { attachPiece, checkStep, lockOrder, ORDER_AMOUNT_MAX_MINOR, orderNotPacked, type CheckedStep, recordChange, serveWaiting, step, updateOrder } from './orders.js';
+import { addressOf, attachPiece, checkStep, lockOrder, ORDER_AMOUNT_MAX_MINOR, orderNotPacked, type CheckedStep, recordChange, serveWaiting, shippable, step, updateOrder } from './orders.js';
 import {
   checklistOf,
   onItsWay,
@@ -624,8 +625,9 @@ export class LogisticsService {
       const shipment = await openShipment(tx, key, { forUpdate: true });
       if (shipment && (shipment.status === 'PACKING' || shipment.status === 'PACKED')) return;
       if (shipment || !parcelReady(open)) throw packingNotReady();
+      // §1.1 (d): the parcel's delivery address, its name, its lines and its country (the phone may be missing).
       const first = all.find((o) => o.id === key)!;
-      if (first.buyer_name === null || first.buyer_address === null) throw addressMissing();
+      if (!shippable(await addressOf(tx, first))) throw addressMissing();
       const now = this.clock();
       const created = await tx
         .insertInto('shipments')
@@ -809,7 +811,8 @@ export class LogisticsService {
       if (!shipment || shipment.status !== 'PACKED') throw notPacked();
       // §1.1 (d): Ship refuses a parcel without its delivery address too (Client Services may have cleared it meanwhile).
       const first = all.find((o) => o.id === key)!;
-      if (first.buyer_name === null || first.buyer_address === null) throw addressMissing();
+      const delivery = await addressOf(tx, first);
+      if (!shippable(delivery)) throw addressMissing();
       const members = await this.itemOrders(tx, shipment, all);
       for (const id of declared.keys()) if (!members.some((o) => o.id === id)) throw validationError('A declared value names an order of the parcel.');
       const carrier = await tx.selectFrom('carriers').select(['id', 'active']).where('id', '=', input.carrierId.toLowerCase()).executeTakeFirst();
@@ -835,11 +838,8 @@ export class LogisticsService {
           const productId = items.find((i) => i.order_id === o.id)!.product_id!;
           const w = await tx.selectFrom('warranties').select(['start_date', 'voided_at']).where('product_id', '=', productId).executeTakeFirst();
           if (w?.start_date || w?.voided_at) continue;
-          // Open point (H2's hand-over): question 14 as built names the delivery address's country (§3.5.6.8b, §5.1).
-          // The order's country arrives with migration <N+6>_order_delivery (step 6.6); from step 6.7, pass the
-          // parcel's delivery country here (`addressOf(first order).country`), asserted in packing.test (the warranty's
-          // country and the `warranty.activate` audit). Until then: null.
-          await this.warranty.activate(productId, { retailerId: null, country: null }, actor, { tx, via: { via: 'ship', orderId: o.id } });
+          // Question 14 as built (§3.5.6.8b, §5.1): no retailer, the parcel's delivery country.
+          await this.warranty.activate(productId, { retailerId: null, country: delivery.country }, actor, { tx, via: { via: 'ship', orderId: o.id } });
         }
       }
     });

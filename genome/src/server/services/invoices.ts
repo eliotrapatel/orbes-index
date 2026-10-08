@@ -32,7 +32,8 @@ import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput } from './audit.js';
 import { writeJournal } from './journal.js';
 import { majorUnits } from './live-console.js';
-import { orderReference } from './orders.js';
+import { addressOf, orderReference } from './orders.js';
+import { countryName } from '../../shared/countries.js';
 
 /**
  * The issuer of every invoice and credit note: the publisher's legal identity, as the legal notice gives it
@@ -86,11 +87,16 @@ export interface InvoiceLine {
   amountMinor: number;
 }
 
-/** The buyer as issued (`invoices.buyer`): personal data, never in the journal nor the audit log. */
+/**
+ * The buyer as issued (`invoices.buyer`): personal data, never in the journal nor the audit log. Since plan NEXT LOT
+ * §3.6.B, the delivery address's country, by its English name, printed as the address's last line (`country`; an
+ * invoice of before has none and reads as before).
+ */
 export interface InvoiceBuyer {
   name: string | null;
   address: string | null;
   email: string | null;
+  country?: string | null;
 }
 
 /** An invoice or a credit note as the console and the account read it. */
@@ -245,7 +251,9 @@ export async function issueInvoice(tx: Db, o: OrderRow, actor: Actor, now: Date)
     lines.push({ kind: 'GIFT', label: `WELCOME GIFT · ${g.name}${g.variant_label ? ` IN ${g.variant_label.toUpperCase()}` : ''}`, detail: `ORDER ${orderReference(g.id)}`, amountMinor: 0 });
   }
   const total = lines.reduce((n, l) => n + l.amountMinor, 0);
-  const buyer: InvoiceBuyer = { name: o.buyer_name, address: o.buyer_address, email: facts.email };
+  // The delivery address (plan NEXT LOT §3.6.B): its own, or the order's it travels with, which it is delivered with.
+  const delivery = await addressOf(tx, o);
+  const buyer: InvoiceBuyer = { name: delivery.name, address: delivery.address, email: facts.email, ...(delivery.country ? { country: countryName(delivery.country) } : {}) };
   const year = now.getUTCFullYear();
   const { sequence, issuedAt } = await nextSequence(tx, 'INVOICE', year, now);
   const row = await tx
@@ -340,7 +348,7 @@ async function readInvoices(db: Db, where: (q: ReturnType<typeof baseQuery>) => 
     credits: r.credits_invoice_id && r.credits_year !== null ? { id: r.credits_invoice_id, number: invoiceNumber('INVOICE', r.credits_year, r.credits_sequence!) } : null,
     creditedBy: r.credited_by_id && r.credited_by_year !== null ? { id: r.credited_by_id, number: invoiceNumber('CREDIT_NOTE', r.credited_by_year, r.credited_by_sequence!) } : null,
     issuer: { name: str(r.issuer.name) ?? INVOICE_ISSUER.name, address: Array.isArray(r.issuer.address) ? r.issuer.address.map(String) : [] },
-    buyer: { name: str(r.buyer.name), address: str(r.buyer.address), email: str(r.buyer.email) },
+    buyer: { name: str(r.buyer.name), address: str(r.buyer.address), email: str(r.buyer.email), ...(str(r.buyer.country) ? { country: str(r.buyer.country) } : {}) },
     lines: linesOf(r.lines),
     currency: r.currency,
     subtotalMinor: r.subtotal_minor,
@@ -511,7 +519,7 @@ export class InvoiceService {
           v.credits?.number ?? '',
           v.issuer.name,
           buyer.name ?? '',
-          buyer.address ?? '',
+          [buyer.address, buyer.country].filter(Boolean).join('\n'),
           buyer.email ?? '',
           v.lines.map((l) => `${l.label} (${majorUnits(l.amountMinor)})`).join('; '),
           v.currency,

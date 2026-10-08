@@ -127,7 +127,7 @@ describe('the packing photos\' keeping (§3.5.6.8)', () => {
     h.clock.advance(MINUTE);
     await h.ctx.services.orders.transition(orderId, { to: 'PAID' }, admin);
     await stockPieces(h.ctx, { skuId, locationId: france, count: 1, forOrderIds: [orderId] }, admin);
-    await h.ctx.services.orders.setBuyer(orderId, { name: 'Ada Martin', address: '4 rue du Bac' }, admin);
+    await h.ctx.services.orders.setBuyer(orderId, { name: 'Ada Martin', address: '4 rue du Bac', country: 'FR' }, admin);
     const view = await h.ctx.services.logistics.startPacking(orderId, admin, null);
     await h.ctx.services.logistics.setPhoto(orderId, { mime: 'image/jpeg', bytes: jpegPhoto(8, 8) }, admin, null);
     h.clock.advance(MINUTE);

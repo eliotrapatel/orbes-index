@@ -173,6 +173,8 @@ export const ADVISORY_LOCK = Object.freeze({
   SHOPIFY_PRODUCT: 0x4f52_0501,
   /** A reception line's identities issued (services/receptions.ts issuePending), with the line id's first 32 bits as its second part. */
   RECEPTION_LINE: 0x4f52_0601,
+  /** An account's saved addresses (services/addresses.ts): its limit and its one default, with the account id's first 32 bits as its second part. */
+  ACCOUNT_ADDRESSES: 0x4f52_0701,
 });
 
 /**

@@ -13,8 +13,9 @@
  *                 shipment's PACKING or PACKED.
  *   on its way    the shipments SHIPPED, the latest first.
  *   the view      `ShippingOrderView`: the parcel's pieces (model, variant, size, add-on labels, engraving words,
- *                 surprise, the piece its scan bound), where it ships (the first order's name and address; the country
- *                 and the phone come with the delivery address, §3.6.B), the checklist, the shipment, its history (who
+ *                 surprise, the piece its scan bound), where it ships (the first order's delivery address: name, lines,
+ *                 country and phone, §3.6.B; ADDRESS CHANGED while it was replaced after it was first entered and the
+ *                 parcel has not shipped), the checklist, the shipment, its history (who
  *                 by their role only) and the active carriers for Ship. No price, no email, no account, no release: what
  *                 the agent may read, which also prints its packing slip.
  *   housekeeping  `purgePackingPhotos`: a parcel's photo erased 14 days after its delivery (RETURN_WINDOW_DAYS), unless a
@@ -38,6 +39,8 @@ export const RETURN_WINDOW_DAYS = 14;
 export const PACKING_PHOTO_MAX_BYTES = 1_048_576;
 /** The shipments still on their way through the agent's hands. */
 export const OPEN_SHIPMENT_STATUSES: readonly ShipmentStatus[] = Object.freeze(['PACKING', 'PACKED', 'SHIPPED']);
+/** A parcel that has left the agent: its ADDRESS CHANGED no longer shows. */
+const SHIPPED_STATUSES: readonly ShipmentStatus[] = Object.freeze(['SHIPPED', 'DELIVERED', 'BACK_TO_SENDER', 'LOST', 'DAMAGED']);
 /** The steps of a parcel on the agent's list. */
 export type ParcelStep = 'NOT_READY' | 'READY_TO_PACK' | Exclude<ShipmentStatus, 'CANCELLED'>;
 /** Who made a change of a parcel, as the agent may read it: never a name. */
@@ -103,7 +106,10 @@ export interface ShippingOrderView {
   late: boolean;
   orders: ParcelPiece[];
   shipTo: { name: string | null; address: string | null; country: string | null; phone: string | null };
-  /** ADDRESS CHANGED (§3.6.B, step 6.7): when and by whom the address was replaced; null until then. */
+  /**
+   * ADDRESS CHANGED (§3.6.B, step 6.7): when and by whom the address was last replaced after it was first entered
+   * (`orders.address_changed_at`, `address_by`); null otherwise, and once the parcel has shipped.
+   */
   addressChanged: { at: Date; by: 'COLLECTOR' | 'STAFF' } | null;
   shipment: {
     id: string;
@@ -137,6 +143,7 @@ export interface ToShipRow {
   engraving: boolean;
   shipTo: { name: string | null; address: string | null; country: string | null };
   step: 'READY_TO_PACK' | 'PACKING' | 'PACKED';
+  /** ADDRESS CHANGED: its address replaced after it was first entered (§3.6.B; none of these parcels has shipped). */
   addressChanged: boolean;
 }
 
@@ -327,8 +334,11 @@ export async function parcelView(db: Db, orderId: string, scope: LocationScope, 
         piece: o.product_id ? { productId: pieceRef.get(o.product_id)!, scanned: scanned.has(o.id) } : null,
       };
     }),
-    shipTo: { name: first.buyer_name, address: first.buyer_address, country: null, phone: null },
-    addressChanged: null,
+    shipTo: { name: first.buyer_name, address: first.buyer_address, country: first.buyer_country, phone: first.buyer_phone },
+    addressChanged:
+      first.address_changed_at !== null && first.address_by !== null && !(shipment && SHIPPED_STATUSES.includes(shipment.status))
+        ? { at: first.address_changed_at, by: first.address_by }
+        : null,
     shipment: shipment
       ? {
           id: shipment.id,
@@ -376,7 +386,7 @@ export async function toShip(db: Db, scope: LocationScope, now: Date, filter: { 
   const times = await readyTimes(db, all);
   const days = await readyDays(db);
   const keys = [...byParcel.keys()];
-  const firsts = await db.selectFrom('orders').select(['id', 'buyer_name', 'buyer_address']).where('id', 'in', keys).execute();
+  const firsts = await db.selectFrom('orders').select(['id', 'buyer_name', 'buyer_address', 'buyer_country', 'address_changed_at']).where('id', 'in', keys).execute();
   const shipTo = new Map(firsts.map((f) => [f.id, f]));
   const shipments = await db.selectFrom('shipments').select(['order_id', 'status']).where('order_id', 'in', keys).where('status', 'in', ['PACKING', 'PACKED']).execute();
   const steps = new Map(shipments.map((s) => [s.order_id, s.status as 'PACKING' | 'PACKED']));
@@ -395,9 +405,9 @@ export async function toShip(db: Db, scope: LocationScope, now: Date, filter: { 
       pieces: orders.map((o) => ({ model: models.get(o.id)!.model, variant: models.get(o.id)!.variant, sizeLabel: o.size_label })),
       addons: orders.flatMap((o) => o.addons.map((a) => a.label)),
       engraving: orders.some((o) => o.engraving_text !== null),
-      shipTo: { name: to?.buyer_name ?? null, address: to?.buyer_address ?? null, country: null },
+      shipTo: { name: to?.buyer_name ?? null, address: to?.buyer_address ?? null, country: to?.buyer_country ?? null },
       step: steps.get(key) ?? 'READY_TO_PACK',
-      addressChanged: false,
+      addressChanged: (to?.address_changed_at ?? null) !== null,
     });
   }
   return out.sort((a, b) => a.readySince.getTime() - b.readySince.getTime() || a.id.localeCompare(b.id));

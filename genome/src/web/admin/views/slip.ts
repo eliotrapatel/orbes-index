@@ -10,11 +10,27 @@
  */
 import { h } from '../../shared/dom.js';
 import { formatDate } from '../format.js';
-import { shippingSlip } from '../model/logistics.js';
+import { shippingSlip, type SlipBuyer } from '../model/logistics.js';
 import { packingSlip } from '../model/orders.js';
 import { href } from '../router.js';
-import { button, linkButton } from '../ui/components.js';
+import { button, linkButton, statusMark } from '../ui/components.js';
 import type { ViewContext } from './context.js';
+
+/**
+ * The For block (plan NEXT LOT §3.6.B, §1.1 (d)): ADDRESS CHANGED with its line while the address was replaced after
+ * it was first entered and the parcel has not shipped; the name, the address lines, the country's English name and the
+ * phone ('Not entered' without one).
+ */
+function forBlock(b: SlipBuyer): (HTMLElement | null)[] {
+  return [
+    h('h2', { class: 'printdoc__heading' }, 'For'),
+    b.changed ? h('p', { class: 'printdoc__text', data: { testid: 'slip-address-changed' } }, statusMark('ADDRESS CHANGED', 'alert'), ' ', b.changed) : null,
+    h('p', { class: 'printdoc__text', data: { testid: 'slip-buyer-name' } }, b.name ?? '—'),
+    b.address ? h('p', { class: ['printdoc__text', 'prewrap'], data: { testid: 'slip-buyer-address' } }, b.address) : null,
+    b.country ? h('p', { class: 'printdoc__text', data: { testid: 'slip-buyer-country' } }, b.country) : null,
+    h('p', { class: 'printdoc__text', data: { testid: 'slip-buyer-phone' } }, `Phone: ${b.phone}`),
+  ];
+}
 
 export async function packingSlipView(ctx: ViewContext): Promise<HTMLElement> {
   const d = await ctx.api.order(ctx.route.params.orderId ?? '');
@@ -50,9 +66,7 @@ export async function packingSlipView(ctx: ViewContext): Promise<HTMLElement> {
       h(
         'section',
         { class: 'printdoc__block' },
-        h('h2', { class: 'printdoc__heading' }, 'For'),
-        h('p', { class: 'printdoc__text', data: { testid: 'slip-buyer-name' } }, s.buyer.name ?? '—'),
-        s.buyer.address ? h('p', { class: ['printdoc__text', 'prewrap'], data: { testid: 'slip-buyer-address' } }, s.buyer.address) : null,
+        ...forBlock(s.buyer),
       ),
       h(
         'section',
@@ -97,9 +111,7 @@ export async function shippingSlipView(ctx: ViewContext): Promise<HTMLElement> {
       h(
         'section',
         { class: 'printdoc__block' },
-        h('h2', { class: 'printdoc__heading' }, 'For'),
-        h('p', { class: 'printdoc__text', data: { testid: 'slip-buyer-name' } }, s.buyer.name ?? '—'),
-        s.buyer.address ? h('p', { class: ['printdoc__text', 'prewrap'], data: { testid: 'slip-buyer-address' } }, s.buyer.address) : null,
+        ...forBlock(s.buyer),
       ),
       ...s.pieces.map((p) =>
         h(

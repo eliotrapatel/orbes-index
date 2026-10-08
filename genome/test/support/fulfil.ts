@@ -9,7 +9,8 @@
  *                older waiting order of the same size overtook.
  *   countPiecesIn (step 5.12) pieces already issued put in stock the same way: counted in, the count corrected up.
  *   scanIntoParcel (step 5.12) an order's parcel started and each order's piece bound by the scan of its card (a fixture
- *                address first when its first order has none: name 'Test buyer', address '1 rue de Test\n75001 Paris';
+ *                address first when its first order has none: name 'Test buyer', address '1 rue de Test\n75001 Paris',
+ *                country FR, or the country FR only when the test entered a name and an address;
  *                the piece already bound to it, the one named in `pieces`, or its size's first piece in stock by
  *                serial): a piece sold to the order's buyer, not shipped. The SHIPPED gate (step 5.12) leaves no other
  *                way to bind a piece to an order once Link a piece is gone (step 5.13).
@@ -126,7 +127,7 @@ export async function countPiecesIn(ctx: AppContext, input: CountPiecesInInput, 
 }
 
 /** The fixture address packAndShip enters when a parcel's first order has none. */
-export const FIXTURE_BUYER = Object.freeze({ name: 'Test buyer', address: '1 rue de Test\n75001 Paris' });
+export const FIXTURE_BUYER = Object.freeze({ name: 'Test buyer', address: '1 rue de Test\n75001 Paris', country: 'FR' });
 
 export interface PackAndShipInput {
   carrierId: string;
@@ -169,8 +170,11 @@ export async function scanIntoParcel(ctx: AppContext, orderId: string, input: Sc
   const lg = input.logistics ?? ctx.services.logistics;
   const key = await parcelKeyOf(ctx.db, orderId);
   if (!key) throw new Error(`scanIntoParcel: no order ${orderId}`);
-  const first = await ctx.db.selectFrom('orders').select(['buyer_name', 'buyer_address']).where('id', '=', key).executeTakeFirstOrThrow();
-  if (first.buyer_name === null || first.buyer_address === null) await ctx.services.orders.setBuyer(key, { ...FIXTURE_BUYER }, actor);
+  // A delivery address to pack (plan NEXT LOT §1.1 (d)): its name, its lines and its country; what the test entered kept.
+  const first = await ctx.db.selectFrom('orders').select(['buyer_name', 'buyer_address', 'buyer_country']).where('id', '=', key).executeTakeFirstOrThrow();
+  if (first.buyer_name === null || first.buyer_address === null || first.buyer_country === null) {
+    await ctx.services.orders.setBuyer(key, { name: first.buyer_name ?? FIXTURE_BUYER.name, address: first.buyer_address ?? FIXTURE_BUYER.address, country: first.buyer_country ?? FIXTURE_BUYER.country }, actor);
+  }
   const view = await lg.startPacking(key, actor, null);
   const taken = new Set<string>();
   for (const o of view.orders) {

@@ -73,9 +73,18 @@ describe('orders, the stock and their settings: the console\'s routes', () => {
 
     // The buyer: in clear for an OPERATOR, masked for an AUDITOR, never in the audit log.
     const buyer = safeJson(await op.request('PUT', `/api/admin/orders/${id}/buyer`, { body: { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris' } })) as Json;
-    expect(buyer.order.buyer).toEqual({ name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris' });
+    expect(buyer.order.buyer).toEqual({ name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', country: null, phone: null });
+    expect(buyer.order).toMatchObject({ addressBy: 'STAFF', addressAt: expect.any(String), addressChangedAt: null });
+    // Plan NEXT LOT §3.6.B: its country and phone; the country checked in the house's list, the phone with its code.
+    expect(errorOf(await op.request('PUT', `/api/admin/orders/${id}/buyer`, { body: { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', country: 'XX' } }))).toMatchObject({ code: 'VALIDATION_FAILED', message: 'Choose a country.' });
+    expect(errorOf(await op.request('PUT', `/api/admin/orders/${id}/buyer`, { body: { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', phone: '0612345678' } }))).toMatchObject({ code: 'VALIDATION_FAILED', message: 'Enter a phone number with its country code.' });
+    const full = safeJson(await op.request('PUT', `/api/admin/orders/${id}/buyer`, { body: { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', country: 'FR', phone: '+33 6 12 34 56 78' } })) as Json;
+    expect(full.order.buyer).toEqual({ name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', country: 'FR', phone: '+33 6 12 34 56 78' });
+    expect(full.order.addressChangedAt).toEqual(expect.any(String));
     const read = safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json;
-    expect(read.order.buyer).toEqual({ name: 'J*** D***', address: '***' });
+    // An AUDITOR: the name masked, the address and the phone withheld, the country shown.
+    expect(read.order.buyer).toEqual({ name: 'J*** D***', address: '***', country: 'FR', phone: null });
+    expect(JSON.stringify(read)).not.toContain('+33');
     expect(read.account.email).toMatch(/^l\*\*\*@example\.com$/);
     expect(read).toMatchObject({ sourceReference: null, timing: { rule: 'RESERVED', late: false }, piece: null, delays: { reservedDays: 2 } });
     const auditRows = await h.ctx.db.selectFrom('audit_logs').select('details').where('target_id', '=', id).execute();

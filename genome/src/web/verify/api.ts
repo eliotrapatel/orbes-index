@@ -21,8 +21,10 @@
  *   board's is a POST (its secret in the body), read as a stream of bytes.
  */
 import type {
+  AccountAddresses,
   AccountMessage,
   AccountSizes,
+  DeliveryAddressInput,
   AccountThread,
   MessageContextInput,
   AccountOrder,
@@ -835,6 +837,40 @@ export class ApiClient {
     return r.sizes;
   }
 
+  // ── YOUR ADDRESSES and an order's delivery address (plan NEXT LOT §3.6.B; API §10.21) ──
+
+  /** YOUR ADDRESSES: the saved addresses and the registration country. */
+  async addresses(): Promise<AccountAddresses> {
+    return checkedAddresses(await this.request<AccountAddresses>('GET', '/api/v1/account/addresses'));
+  }
+
+  /** ADD AN ADDRESS, the default when asked (MY DEFAULT ADDRESS) or when it is the first. */
+  async createAddress(address: DeliveryAddressInput, isDefault: boolean): Promise<AccountAddresses> {
+    return checkedAddresses(await this.request<AccountAddresses>('POST', '/api/v1/account/addresses', { ...address, isDefault }, { csrf: true }));
+  }
+
+  /** EDIT: an address's four fields, whole. */
+  async updateAddress(id: string, address: DeliveryAddressInput): Promise<AccountAddresses> {
+    return checkedAddresses(await this.request<AccountAddresses>('PUT', `/api/v1/account/addresses/${encodeURIComponent(id)}`, address, { csrf: true }));
+  }
+
+  /** REMOVE: the address deleted (the default removed, the oldest left becomes the default). */
+  async removeAddress(id: string): Promise<void> {
+    await this.request('DELETE', `/api/v1/account/addresses/${encodeURIComponent(id)}`, undefined, { csrf: true });
+  }
+
+  /** MAKE DEFAULT. */
+  async makeDefaultAddress(id: string): Promise<void> {
+    await this.request('POST', `/api/v1/account/addresses/${encodeURIComponent(id)}/default`, {}, { csrf: true });
+  }
+
+  /** An order's delivery address: a saved one, or a new one (saved to YOUR ADDRESSES when asked); the order after it. */
+  async setOrderAddress(orderId: string, choice: { addressId: string } | { address: DeliveryAddressInput; save: boolean }): Promise<AccountOrder> {
+    const r = await this.request<{ order?: AccountOrder }>('PUT', `/api/v1/account/orders/${encodeURIComponent(orderId)}/address`, choice, { csrf: true });
+    if (!r?.order || typeof r.order.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r.order;
+  }
+
   /** Whether an answer is unread: NOW's line and the account sheet's NEW. */
   async messagesUnread(): Promise<boolean> {
     const r = await this.request<{ unread?: unknown }>('GET', '/api/v1/account/messages/unread');
@@ -894,6 +930,12 @@ export class ApiClient {
     if (err.status === 401) this.forgetSession();
     throw err;
   }
+}
+
+/** YOUR ADDRESSES as the server answers it, or BAD_RESPONSE. */
+function checkedAddresses(r: AccountAddresses | undefined): AccountAddresses {
+  if (!r || !Array.isArray(r.addresses) || (r.defaultCountry !== null && typeof r.defaultCountry !== 'string')) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+  return r;
 }
 
 async function readJson(res: Response): Promise<unknown> {

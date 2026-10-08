@@ -1127,6 +1127,37 @@ export interface AccountOrder {
    * CODE), with when it was made; never the code itself. null, or absent from a server before it: none waits.
    */
   claimCode?: AccountOrderClaimCode | null;
+  /**
+   * Plan NEXT LOT §3.6.B: its delivery address (its own, or the order's it travels with): the name, the lines as typed,
+   * the country (ISO 3166-1 alpha-2) and the phone; null while none is entered. Absent from a server before it: none.
+   */
+  address?: { name: string; lines: string; country: string | null; phone: string | null } | null;
+  /** The reference of the order it travels with, whose address it is delivered to; null for an order of its own. */
+  addressOf?: string | null;
+  /** What the collector may change on it now, as the server reads it. Absent from a server before it: nothing. */
+  editable?: { address: boolean };
+}
+
+/** A delivery address as the collector types it (plan NEXT LOT §3.6.B): a name, the lines, a country and a phone. */
+export interface DeliveryAddressInput {
+  name: string;
+  address: string;
+  /** ISO 3166-1 alpha-2 (src/shared/countries.ts). */
+  country: string;
+  /** With its country code: +33 6 12 34 56 78. */
+  phone: string;
+}
+
+/** A saved address of YOUR ADDRESSES (API §10.21). */
+export interface SavedAddress extends DeliveryAddressInput {
+  id: string;
+  isDefault: boolean;
+}
+
+/** YOUR ADDRESSES: the saved addresses, the oldest first, and the registration country that preselects COUNTRY. */
+export interface AccountAddresses {
+  addresses: SavedAddress[];
+  defaultCountry: string | null;
 }
 
 /** A new claim code waiting on an order (plan NEXT LOT §3.4; API §10.13): its status and when it was made, never the code. */

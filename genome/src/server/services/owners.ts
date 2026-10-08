@@ -87,6 +87,7 @@ import { accountDropEntries, auditWithdrawnEntries, withdrawAccountEntries, type
 import { accountCareRequests, careThisYear, type CareAllowance, type ExportedCareRequest } from './care.js';
 import { accountGuaranteesForStaff, exportedGuarantees, type AdminGuarantee, type ExportedGuarantee } from './guarantees.js';
 import { exportedSizes, type ExportedSize } from './sizes.js';
+import { exportedAddresses, type ExportedAddress } from './addresses.js';
 import { collectorValue, type LifetimeValue } from './growth.js';
 import { accountGrants, accountTierGrants, creditBalances, type ExportedTierGrant } from './tier-grants.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
@@ -400,7 +401,7 @@ export interface AccountExport {
   releaseAnswers: ExportedReleaseAnswer[];
   /**
    * The account's orders (plan LIVE RELEASE+), oldest first: the channel and release, the model, size, price and
-   * add-ons, the engraving text, the buyer's name and address ORBES Client Services entered, each step with its time and
+   * add-ons, the engraving text, the delivery address (name, lines, country and phone), each step with its time and
    * note, the carrier and the tracking number; never who handled it, nor where the piece is kept.
    */
   orders: ExportedOrder[];
@@ -421,6 +422,11 @@ export interface AccountExport {
   guarantees: ExportedGuarantee[];
   /** The sizes the account saved in YOUR SIZES (plan NEXT-NINE, AC-01): each kind's value in its unit, and when it was saved. */
   sizes: ExportedSize[];
+  /**
+   * The delivery addresses the account saved in YOUR ADDRESSES (plan NEXT LOT §3.6.B), oldest first: each one's name,
+   * lines, country, phone, whether it is the default, and when it was saved and changed.
+   */
+  addresses: ExportedAddress[];
   /**
    * The new claim codes ORBES Client Services made for the account's orders (plan NEXT LOT §3.4), oldest first: the
    * order, when it was made, where it stands and when it was read; never the code, sealed or clear, nor who made it.
@@ -893,6 +899,7 @@ export class OwnerService {
       const careRequests = await accountCareRequests(tx, a.id);
       const guarantees = await exportedGuarantees(tx, a.id);
       const sizes = await exportedSizes(tx, a.id);
+      const addresses = await exportedAddresses(tx, a.id);
       const claimCodes = await accountClaimCodes(tx, a.id);
       const tierGrants = await accountTierGrants(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
@@ -979,6 +986,7 @@ export class OwnerService {
         careRequests,
         guarantees,
         sizes,
+        addresses,
         claimCodes,
         tierGrants,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
@@ -1018,6 +1026,7 @@ export class OwnerService {
             careRequests: out.careRequests.length,
             guarantees: out.guarantees.length,
             sizes: out.sizes.length,
+            addresses: out.addresses.length,
             claimCodes: out.claimCodes.length,
             tierGrants: out.tierGrants.length,
             activity: out.activity.length,

@@ -310,7 +310,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
 
   it('lists a return to receive at the agent\'s location; the agent records the parcel back, and ORBES then decides', async () => {
     const orderId = await salonOrder('52');
-    await h.ctx.services.orders.setBuyer(orderId, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' }, admin);
+    await h.ctx.services.orders.setBuyer(orderId, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR', phone: '+33 6 12 34 56 78' }, admin);
     h.clock.advance(MINUTE);
     await h.ctx.services.orders.transition(orderId, { to: 'PAID' }, admin);
     await packAndShip(h.ctx, orderId, { carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
@@ -349,7 +349,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
 
   it('ships a parcel through the agent\'s steps: start packing, the card scanned (another size refused), the photo, the checklist, packed, shipped, delivered; its slip', async () => {
     const orderId = await salonOrder('54');
-    await h.ctx.services.orders.setBuyer(orderId, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' }, admin);
+    await h.ctx.services.orders.setBuyer(orderId, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR', phone: '+33 6 12 34 56 78' }, admin);
     h.clock.advance(MINUTE);
     await h.ctx.services.orders.transition(orderId, { to: 'PAID' }, admin);
     const [right] = await stockPieces(h.ctx, { skuId: sku54, locationId: france, count: 1, material: '925 STERLING SILVER' }, admin);
@@ -370,7 +370,8 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     const row = g.locator('#logistics-ship tbody tr');
     expect(await row.count()).toBe(1);
     expect(await row.locator('[data-testid=parcel-pieces]').textContent()).toBe('MONOLITHE · 54');
-    expect(await row.locator('td').nth(5).textContent()).toBe('Ada Martin · 75007 Paris');
+    // The country by its English name (plan NEXT LOT §3.6.B).
+    expect(await row.locator('td').nth(5).textContent()).toBe('Ada Martin · 75007 Paris · France');
     expect(await row.locator('[data-testid=parcel-step]').textContent()).toBe('READY TO PACK');
     expect(await g.locator('#logistics-on-its-way .empty__text').textContent()).toBe('No parcel on its way.');
     await shot(g, 'to-ship');

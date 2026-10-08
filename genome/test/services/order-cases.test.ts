@@ -353,14 +353,16 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
         message: 'This size is no longer in stock. Choose another.',
       });
       await stock(otherSku, 1);
-      await orders().setBuyer(id, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' }, operator);
       const opened = await cases().open(id, { kind: 'EXCHANGE', reason: 'SIZE', exchangeSkuId: otherSku, note: 'One size up.' }, operator);
       expect(opened.exchange).toEqual({ skuId: otherSku, sizeLabel: other, available: 1 });
       await cases().receive(opened.id, { pieceState: 'OK' }, agent, scope());
       const decided = await cases().decide(opened.id, { decision: 'EXCHANGE', pieceTo: 'RESTOCKED', note: 'Exchanged.' }, operator, { admin: false });
       const exchange = decided.case.decision!.exchangeOrder!;
       const x = await row(exchange.id);
-      expect(x).toMatchObject({ channel: 'EXCHANGE', exchange_of_order_id: id, status: 'PAID', sku_id: otherSku, size_label: other, price_minor: 420_000, currency: 'EUR', reservation: 'STOCK', buyer_name: 'Ada Martin' });
+      // The original's delivery address (plan NEXT LOT §3.6.B, step 6.7: where the first piece went, entered by Client
+      // Services at its creation; the fixture's, entered before it shipped).
+      expect(x).toMatchObject({ channel: 'EXCHANGE', exchange_of_order_id: id, status: 'PAID', sku_id: otherSku, size_label: other, price_minor: 420_000, currency: 'EUR', reservation: 'STOCK' });
+      expect(x).toMatchObject({ buyer_name: 'Test buyer', buyer_address: '1 rue de Test\n75001 Paris', buyer_country: 'FR', buyer_phone: null, address_by: 'STAFF', address_at: x.reserved_at, address_changed_at: null });
       const invoice = await db().selectFrom('invoices').select(['kind', 'lines']).where('order_id', '=', exchange.id).executeTakeFirstOrThrow();
       expect(linesOf(invoice.lines as unknown[])[0]).toMatchObject({ kind: 'PIECE', label: `MONOLITHE · SIZE ${other}`, detail: 'SIZE EXCHANGE' });
       expect((await db().selectFrom('invoices').select('kind').where('order_id', '=', id).orderBy('issued_at').orderBy('kind', 'desc').execute()).map((i) => i.kind)).toEqual(['INVOICE', 'CREDIT_NOTE']);

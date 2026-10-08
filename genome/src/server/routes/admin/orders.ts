@@ -20,7 +20,9 @@
  *                                                         (routes/admin/logistics.ts), packed and checked
  *   POST   /api/admin/orders/:id/location       OPERATOR  served from another location (what it holds moves)
  *   PATCH  /api/admin/orders/:id/terms          OPERATOR  a draw's or a salon's size, price and currency; any engraving
- *   PUT    /api/admin/orders/:id/buyer          OPERATOR  the buyer's name and address (decision 31)
+ *   PUT    /api/admin/orders/:id/buyer          OPERATOR  the buyer's delivery address (decision 31; plan NEXT LOT §3.6.B: its
+ *                                                         country and phone too), until SHIPPED; never on an order
+ *                                                         travelling with another (409 ORDER_TRAVELS_WITH)
  *   POST   /api/admin/orders/:id/credit         OPERATOR  APPLY CREDIT (plan NEXT-NINE, BP-19 T5): a tier's credit taken off
  *                                                         a RESERVED order's invoice, within its balance and the price
  *   DELETE /api/admin/orders/:id/credit         OPERATOR  REMOVE CREDIT: what was taken off it, given back
@@ -31,7 +33,8 @@
  *                                                         removed in step 5.11e)
  *
  * An AUDITOR reads the collectors' emails masked (`j***@example.com`) and the buyer's name and address masked
- * (`J*** D***`, the address withheld: serialize.ts), on the board, the order and the CSV; OPERATOR and ADMIN in clear.
+ * (`J*** D***`, the address withheld: serialize.ts; the phone withheld, the country shown), on the board, the order and
+ * the CSV; OPERATOR and ADMIN in clear.
  * A return decided from an order case: its note (ORBES's decision's) withheld from an AUDITOR on the order, as on the
  * case (order-cases.ts `orderCaseJson`); the `order.return` event of such a return keeps no words. Every mutation is
  * audited by its service.
@@ -154,7 +157,7 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   app.put('/api/admin/orders/:id/buyer', async (request) => {
     const { id } = parse(orderParams, request.params);
     const b = parse(orderBuyerBody, request.body);
-    await orders.setBuyer(id, { name: b.name, address: b.address }, adminActor(request));
+    await orders.setBuyer(id, { name: b.name, address: b.address, country: b.country, phone: b.phone }, adminActor(request));
     return detail(request, id);
   });
 

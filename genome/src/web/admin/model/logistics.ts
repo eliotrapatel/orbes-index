@@ -9,6 +9,7 @@
  * The server stays the authority (409 STOCK_NOT_AVAILABLE, STOCK_NOT_BACKED, PIECE_NOT_COUNTABLE; 404 outside the
  * login's locations).
  */
+import { countryName } from '../../../shared/countries.js';
 import { formatCount, formatDateTime } from '../format.js';
 import { parseMoney } from './live.js';
 import type { CaseToReceive, LogisticsLocation, LogisticsSku, OrderCaseKind, ParcelActor, ParcelStep, ReceptionInput, ReceptionOrder, ReceptionStatus, ReceptionView, ShippingOrderView, StockCorrectionStatus, SupplierReturnItem, ToShipRow } from '../types.js';
@@ -288,7 +289,7 @@ export function pieceWords(p: { model: string; variant: string | null }): string
 /** Ship to on the list: the name · the city (the address's last line) · the country, what is known of them. */
 export function shipToLine(to: ToShipRow['shipTo']): string {
   const lines = (to.address ?? '').split('\n').map((l) => l.trim()).filter((l) => l !== '');
-  const parts = [to.name, lines.at(-1) ?? null, to.country].filter((x): x is string => !!x);
+  const parts = [to.name, lines.at(-1) ?? null, to.country ? countryName(to.country) : null].filter((x): x is string => !!x);
   return parts.length ? parts.join(' · ') : 'Not entered';
 }
 
@@ -397,16 +398,40 @@ export function reportProblem(v: Record<string, string>): string | null {
 }
 
 /** The agent's packing slip (§3.5.3): ORBES's rows without Channel, Release and Source, one block per piece. */
+/** The For block of a packing slip (plan NEXT LOT §3.6.B, §1.1 (d)). */
+export interface SlipBuyer {
+  name: string | null;
+  address: string | null;
+  /** The country's English name, or null when none is entered. */
+  country: string | null;
+  /** The phone, or 'Not entered'. */
+  phone: string;
+  /** ADDRESS CHANGED's line, while the address was replaced after it was first entered and the parcel has not shipped. */
+  changed: string | null;
+}
+
+/** A slip's For block from a delivery address and its change mark (null once shipped). */
+export function slipBuyer(to: { name: string | null; address: string | null; country?: string | null; phone?: string | null }, changed: { at: string | Date; by: 'COLLECTOR' | 'STAFF' } | null): SlipBuyer {
+  return {
+    name: to.name,
+    address: to.address,
+    country: to.country ? countryName(to.country) : null,
+    phone: to.phone ?? 'Not entered',
+    changed: changed ? addressChangedLine(changed) : null,
+  };
+}
+
 export interface ShippingSlip {
   reference: string;
-  buyer: { name: string | null; address: string | null };
+  /** Where it ships: the country by its English name, the phone ('Not entered' without one), ADDRESS CHANGED's line until it ships. */
+  buyer: SlipBuyer;
   pieces: { reference: string; piece: string; serial: string | null; size: string; addons: string[]; engraving: string | null; surprise: string | null }[];
 }
 
 export function shippingSlip(view: ShippingOrderView): ShippingSlip {
   return {
     reference: view.reference,
-    buyer: { name: view.shipTo.name, address: view.shipTo.address },
+    buyer: slipBuyer(view.shipTo, view.addressChanged),
     pieces: view.orders.map((o) => ({
       reference: o.reference,
       piece: pieceWords(o),

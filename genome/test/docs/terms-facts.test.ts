@@ -594,8 +594,10 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(matches(/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+ownership\b/g).map((m) => m.file)).toEqual([]);
   },
   N4: () => {
-    // Neither the customer's routes nor the console's: no tool deletes an account (counsel note §4, point 3).
-    expect(ROUTES.filter((r) => r.method === 'delete' && (r.path.startsWith('/api/v1/account') || r.path.startsWith('/api/admin/owners')))).toEqual([]);
+    // Neither the customer's routes nor the console's: no tool deletes an account (counsel note §4, point 3). The one
+    // DELETE under the account's routes removes one of its saved delivery addresses (YOUR ADDRESSES, plan NEXT LOT
+    // §3.6.B), never the account.
+    expect(ROUTES.filter((r) => r.method === 'delete' && (r.path.startsWith('/api/v1/account') || r.path.startsWith('/api/admin/owners')))).toEqual([{ method: 'delete', path: '/api/v1/account/addresses/:id' }]);
     expect(matches(/status:\s*'DELETED'|status\s*=\s*'DELETED'/g).map((m) => m.file)).toEqual([]);
     // No row of accounts is deleted, through Kysely or in raw SQL, by the server or a script.
     expect(matches(/deleteFrom\(\s*'accounts'\s*\)|\bDELETE\s+FROM\s+"?accounts\b/gi).map((m) => m.file)).toEqual([]);

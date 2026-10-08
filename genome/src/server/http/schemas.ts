@@ -99,6 +99,7 @@ import { SUPPLIER_ORDER_LIMITS } from '../services/supplier-orders.js';
 import { RECEPTION_LIMITS } from '../services/receptions.js';
 import { LOGISTICS_LIMITS } from '../services/logistics.js';
 import { ORDER_CASE_LIMITS } from '../services/order-cases.js';
+import { ADDRESS_LIMITS } from '../services/addresses.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -1452,10 +1453,17 @@ export const orderTermsBody = body({
     path: ['shippingMinor'],
   });
 
+/** PUT /api/admin/orders/:id/buyer's country and phone (plan NEXT LOT §3.6.B): checked by the service in its own words. */
+const buyerCountry = z.preprocess(emptyToNull, z.string().max(8, 'Choose a country').nullable().optional());
+const buyerPhone = z.preprocess(emptyToNull, z.string().max(60, 'Enter a phone number with its country code').nullable().optional());
+
 /** PUT /api/admin/orders/:id/buyer: the buyer's name and address (decision 31); `null` or '' clears one. */
 export const orderBuyerBody = body({
   name: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.buyerName).nullable()),
   address: z.preprocess(emptyToNull, text(ORDER_TEXT_LIMITS.buyerAddress).nullable()),
+  /** Plan NEXT LOT §3.6.B: the delivery address's country and phone; null or '' clears one, left out it stays. */
+  country: buyerCountry,
+  phone: buyerPhone,
 });
 
 // ── Admin: the invoices (plan LIVE RELEASE+, M7: routes/admin/invoices.ts) ─
@@ -1483,6 +1491,38 @@ export const accountOrderParams = z.object({ id: uuid });
  * body only, never in a URL (the services check its form and its hash).
  */
 export const accountClaimCodeBody = body({ claimCode: z.string().trim().min(1, 'Required').max(32, 'Invalid claim code') });
+
+// ── YOUR ADDRESSES and an order's delivery address (plan NEXT LOT §3.6.B) ─
+
+/**
+ * A delivery address as the collector types it: its four fields, each bounded here and checked in its own words by
+ * services/addresses.ts ('Enter the name and the address.', 'Choose a country.', 'Enter a phone number with its country
+ * code.'), which the app shows as they are.
+ */
+const deliveryAddressShape = {
+  name: z.string().max(ADDRESS_LIMITS.name * 2, `At most ${ADDRESS_LIMITS.name} characters`).nullable().optional(),
+  address: z.string().max(ADDRESS_LIMITS.address * 2, `At most ${ADDRESS_LIMITS.address} characters`).nullable().optional(),
+  country: z.string().max(8, 'Choose a country').nullable().optional(),
+  phone: z.string().max(60, 'Enter a phone number with its country code').nullable().optional(),
+};
+
+/** POST /api/v1/account/addresses: a new address, and whether it becomes the default (MY DEFAULT ADDRESS). */
+export const accountAddressBody = body({ ...deliveryAddressShape, isDefault: z.boolean().optional() });
+
+/** PUT /api/v1/account/addresses/:id: an address's four fields, whole. */
+export const accountAddressUpdateBody = body(deliveryAddressShape);
+
+/** /api/v1/account/addresses/:id: one of the account's addresses. */
+export const accountAddressParams = z.object({ id: uuid });
+
+/**
+ * PUT /api/v1/account/orders/:id/address: one of the account's saved addresses (`addressId`), or a new one, saved to
+ * YOUR ADDRESSES too when `save` is true.
+ */
+export const accountOrderAddressBody = z.union([body({ addressId: uuid }), body({ address: z.strictObject(deliveryAddressShape, { error: 'An address is an object' }), save: z.boolean().optional() })], {
+  error: 'Send a saved address or a new one',
+});
+
 
 // ── MESSAGES (plan NEXT-NINE, CS-01) ─────────────────────────────────────
 

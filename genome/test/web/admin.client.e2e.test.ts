@@ -209,7 +209,7 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     await ctx.services.salon.close(request.id, { note: 'The sale is concluded by phone.', outcome: 'ACCEPTED' }, f.admin);
     ids.salonOrder = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await ctx.services.orders.setTerms(ids.salonOrder, { sizeLabel: '58', priceMinor: 480_000, currency: 'EUR' }, f.admin);
-    await ctx.services.orders.setBuyer(ids.salonOrder, { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris' }, f.admin);
+    await ctx.services.orders.setBuyer(ids.salonOrder, { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', country: 'FR' }, f.admin);
     clock.advance(MINUTE);
     await ctx.services.orders.transition(ids.salonOrder, { to: 'PAID' }, f.admin);
     clock.advance(MINUTE);

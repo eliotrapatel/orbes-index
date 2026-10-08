@@ -19,7 +19,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountClaimCodeBody, accountOrderParams, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountOrderAddressBody, accountOrderParams, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
@@ -34,7 +34,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, care, claimRenewals, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, sizes, warranty } = ctx.services;
+  const { addresses, auth, care, claimRenewals, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, sizes, warranty } = ctx.services;
 
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
@@ -111,6 +111,57 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const { account } = requireAccount(request);
     const b = parse(accountSizesBody, request.body);
     return { sizes: await sizes.set(account.id, b.sizes, accountActor(request)) };
+  });
+
+  // YOUR ADDRESSES (plan NEXT LOT §3.6.B; API §10.21): the delivery addresses the account keeps, at most 5, one of them the
+  // default (put on each new order), with its registration country (`defaultCountry`, which preselects COUNTRY). Never
+  // stored by a cache.
+  app.get('/api/v1/account/addresses', async (request, reply) => {
+    const { account } = requireAccount(request);
+    reply.header('cache-control', 'no-store');
+    return addresses.list(account.id);
+  });
+
+  app.post('/api/v1/account/addresses', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const b = parse(accountAddressBody, request.body);
+    const r = await addresses.create(account.id, b, accountActor(request));
+    reply.header('cache-control', 'no-store');
+    reply.code(201);
+    return r;
+  });
+
+  app.put('/api/v1/account/addresses/:id', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountAddressParams, request.params);
+    const b = parse(accountAddressUpdateBody, request.body);
+    reply.header('cache-control', 'no-store');
+    return addresses.update(account.id, id, b, accountActor(request));
+  });
+
+  app.delete('/api/v1/account/addresses/:id', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountAddressParams, request.params);
+    await addresses.remove(account.id, id, accountActor(request));
+    return reply.code(204).send();
+  });
+
+  app.post('/api/v1/account/addresses/:id/default', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountAddressParams, request.params);
+    parse(emptyBody, request.body);
+    await addresses.makeDefault(account.id, id, accountActor(request));
+    return reply.code(204).send();
+  });
+
+  // An order's delivery address (plan NEXT LOT §3.6.B): one of the account's saved addresses, or a new one, until packing
+  // starts (409 ORDER_PACKING_STARTED after: ORBES Client Services changes it); the order as MY PIECES reads it.
+  app.put('/api/v1/account/orders/:id/address', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    const b = parse(accountOrderAddressBody, request.body);
+    reply.header('cache-control', 'no-store');
+    return { order: await orders.setAddress(account.id, id, b as Parameters<typeof orders.setAddress>[2], accountActor(request)) };
   });
 
   // MY PIECES (plan LIVE RELEASE+, choice 6): the account's own orders, step by step; never another account's.

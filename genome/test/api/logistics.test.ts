@@ -198,22 +198,23 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       expect(board.locations.map((l: Json) => l.name)).toEqual(['LOGISTICS WAREHOUSE']);
       for (const word of ['price', 'Minor', 'email', 'account', 'release']) expect(JSON.stringify(board)).not.toContain(word);
       expect(errorOf(await agent.post(`/api/admin/logistics/orders/${id}/packing`)).code).toBe('ORDER_ADDRESS_MISSING');
-      await operator.request('PUT', `/api/admin/orders/${id}/buyer`, { body: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' } });
+      await operator.request('PUT', `/api/admin/orders/${id}/buyer`, { body: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR', phone: '+33 6 12 34 56 78' } });
       // Ship to: in clear for the agent and an OPERATOR; an AUDITOR reads it as an order's buyer, the name masked, the
-      // address and the phone withheld, on the list and on the parcel (which the order page and the slip read too).
+      // address and the phone withheld, the country shown (§3.6.B), on the list and on the parcel (which the order page
+      // and the slip read too).
       const shipToOf = async (c: Client) => ({
         row: ((safeJson(await c.get('/api/admin/logistics/orders')) as Json).toShip as Json[]).find((r) => r.id === id)!.shipTo,
         parcel: (safeJson(await c.get(`/api/admin/logistics/orders/${id}`)) as Json).shipTo,
       });
       for (const c of [agent, operator]) {
         const to = await shipToOf(c);
-        expect(to.row).toMatchObject({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' });
-        expect(to.parcel).toMatchObject({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' });
+        expect(to.row).toEqual({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR' });
+        expect(to.parcel).toEqual({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR', phone: '+33 6 12 34 56 78' });
       }
       const masked = await shipToOf(auditor);
-      expect(masked.row).toEqual({ name: 'A*** M***', address: '***', country: null });
-      expect(masked.parcel).toEqual({ name: 'A*** M***', address: '***', country: null, phone: null });
-      for (const word of ['Ada', 'Martin', 'rue du Bac', '75007']) expect(JSON.stringify(masked)).not.toContain(word);
+      expect(masked.row).toEqual({ name: 'A*** M***', address: '***', country: 'FR' });
+      expect(masked.parcel).toEqual({ name: 'A*** M***', address: '***', country: 'FR', phone: null });
+      for (const word of ['Ada', 'Martin', 'rue du Bac', '75007', '+33']) expect(JSON.stringify(masked)).not.toContain(word);
       expect(errorOf(await auditor.post(`/api/admin/logistics/orders/${id}/packing`)).code).toBe('FORBIDDEN');
       const started = safeJson(await agent.post(`/api/admin/logistics/orders/${id}/packing`)) as Json;
       expect(started).toMatchObject({ step: 'PACKING', shipTo: { name: 'Ada Martin' }, carriers: expect.arrayContaining([expect.objectContaining({ name: 'Colissimo' })]) });

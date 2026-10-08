@@ -365,6 +365,9 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     const late = await ctx.db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', o.late).executeTakeFirstOrThrow();
     const [made] = await stockPieces(ctx, { skuId: late.sku_id!, locationId: late.location_id, count: 1, material: '925 STERLING SILVER', forOrderIds: [o.late] }, admin);
     lateClaim = made!.claimCode!;
+    // Its delivery country, without which it is not packed (plan NEXT LOT §1.1 (d)); the Buyer dialog's Country and
+    // Phone come with step 6.11, so it is entered through the service here.
+    await ctx.services.orders.setBuyer(o.late, { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris\nFrance', country: 'FR' }, admin);
     await p.reload();
     await expect.poll(() => p.locator('[data-testid=order-holds]').textContent()).toBe('In stock at FRANCE WAREHOUSE');
     expect(await p.locator('[data-testid=order-link]').count()).toBe(0);
@@ -693,7 +696,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
     const parent = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).where('channel', '=', 'SALON').executeTakeFirstOrThrow()).id;
     await ctx.services.orders.setTerms(parent, { sizeLabel: '58', priceMinor: 300_000, currency: 'EUR' }, admin);
-    await ctx.services.orders.setBuyer(parent, { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris\nFrance' }, admin);
+    await ctx.services.orders.setBuyer(parent, { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris\nFrance', country: 'FR' }, admin);
     const giftOrder = (await ctx.db.selectFrom('orders').select('id').where('with_order_id', '=', parent).where('channel', '=', 'GIFT').executeTakeFirstOrThrow()).id;
 
     const p = await open(OPERATOR);

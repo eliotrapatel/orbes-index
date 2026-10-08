@@ -401,8 +401,14 @@ describe('what a role may do with an order', () => {
       addons: ['ENGRAVING'],
       engraving: 'A. & L.',
       surprise: 'A silk pouch',
-      buyer: { name: 'Jane Doe', address: '1 rue de la Paix' },
+      // Plan NEXT LOT §3.6.B, §1.1 (d): its country and phone ('Not entered'), no change.
+      buyer: { name: 'Jane Doe', address: '1 rue de la Paix', country: null, phone: 'Not entered', changed: null },
     });
+    // ADDRESS CHANGED while the order is not shipped, by Client Services; none once shipped.
+    const changedAt = '2026-10-08T07:12:00.000Z';
+    const marked = { ...d, order: { ...d.order, status: 'PAID' as const, buyer: { name: 'Jane Doe', address: '1 rue de la Paix', country: 'FR', phone: '+33 6 12 34 56 78' }, addressBy: 'STAFF' as const, addressChangedAt: changedAt } };
+    expect(packingSlip(marked).buyer).toEqual({ name: 'Jane Doe', address: '1 rue de la Paix', country: 'France', phone: '+33 6 12 34 56 78', changed: expect.stringMatching(/^Changed on 08 OCT 2026 at \d{2}:12 by ORBES Client Services\.$/) });
+    expect(packingSlip({ ...marked, order: { ...marked.order, status: 'SHIPPED' as const } }).buyer.changed).toBeNull();
     expect(JSON.stringify(slip)).not.toMatch(/4800|480000|15000|150/);
     // A variant's piece reads its variant after the model (plan NEXT LOT §3.5.3): the agent picks by model, variant and size.
     expect(packingSlip({ ...d, order: { ...d.order, model: { id: 'm', name: 'MONOLITHE', variant: 'BLUE' } } }).model).toBe('MONOLITHE · BLUE');

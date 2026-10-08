@@ -200,7 +200,8 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
     expect(prepare).toContain("if (entry.resolution === 'CONCLUDED') await step(tx, o, { to: 'PAID'");
     expect(prepare).toContain("if (entry.resolution === 'CANCELLED') await step(tx, o, { to: 'CANCELLED'");
     expect(orders).toContain("const document = s.to === 'PAID' ? await issueInvoice(tx, after, actor, now)");
-    expect(readDoc('genome/src/server/services/invoices.ts')).toContain('const buyer: InvoiceBuyer = { name: o.buyer_name, address: o.buyer_address, email: facts.email };');
+    // Its buyer is the order's delivery address (plan NEXT LOT §3.6.B: its own, or the order's it travels with).
+    expect(readDoc('genome/src/server/services/invoices.ts')).toContain('const buyer: InvoiceBuyer = { name: delivery.name, address: delivery.address, email: facts.email,');
     expect(readDoc('genome/src/server/db/migrations/0022_orders_stock.ts')).toContain('CREATE TRIGGER invoices_immutable BEFORE UPDATE OR DELETE ON invoices');
     // An open one holds a piece (the locations empty: one to make, its identity reserved); a cancelled one holds nothing;
     // a draw's place has no SKU, so holds nothing until its terms are entered; each dated by its sale.

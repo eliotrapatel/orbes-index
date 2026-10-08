@@ -230,7 +230,8 @@ describe('To ship and a parcel', () => {
     expect(othersText(0)).toBeNull();
     expect(pieceWords({ model: 'MONOLITHE', variant: 'BLUE' })).toBe('MONOLITHE · BLUE');
     expect(pieceWords({ model: 'MONOLITHE', variant: null })).toBe('MONOLITHE');
-    expect(shipToLine({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris\n', country: 'FR' })).toBe('Ada Martin · 75007 Paris · FR');
+    // The country by its English name (plan NEXT LOT §3.6.B).
+    expect(shipToLine({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris\n', country: 'FR' })).toBe('Ada Martin · 75007 Paris · France');
     expect(shipToLine({ name: null, address: null, country: null })).toBe('Not entered');
     expect(scanMessage({ productId: 'O26-J-00184', sku: SKU })).toBe('MONOLITHE · BLUE · 52 · O26-J-00184: the right piece.');
   });
@@ -275,13 +276,17 @@ describe('To ship and a parcel', () => {
     const slip = shippingSlip(PARCEL);
     expect(slip).toEqual({
       reference: 'OR-0F0E0D0C',
-      buyer: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' },
+      // Plan NEXT LOT §3.6.B, §1.1 (d): no country nor phone entered yet; no change.
+      buyer: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: null, phone: 'Not entered', changed: null },
       pieces: [
         { reference: 'OR-0F0E0D0C', piece: 'MONOLITHE · BLUE', serial: 'O26-J-00184', size: '52', addons: ['INITIALS'], engraving: 'A. & L.', surprise: null },
         { reference: 'OR-2F0E0D0C', piece: 'ORBITE', serial: null, size: 'ONE SIZE', addons: [], engraving: null, surprise: 'A silk pouch' },
       ],
     });
     expect(Object.keys(slip)).not.toEqual(expect.arrayContaining(['channel', 'release', 'sourceReference']));
+    // With its country (by its English name), its phone, and ADDRESS CHANGED's line while the parcel has not shipped.
+    const changed = shippingSlip({ ...PARCEL, shipTo: { ...PARCEL.shipTo, country: 'GB', phone: '+44 20 7946 0000' }, addressChanged: { at: '2026-10-07T12:02:00.000Z', by: 'COLLECTOR' } });
+    expect(changed.buyer).toEqual({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'United Kingdom', phone: '+44 20 7946 0000', changed: expect.stringMatching(/^Changed on 07 OCT 2026 at \d{2}:02 by the collector\.$/) });
   });
 
   it('scales the packing photo to 1600 px, within the server\'s 1 MiB', () => {

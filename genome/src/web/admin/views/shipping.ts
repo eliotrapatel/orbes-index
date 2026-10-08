@@ -14,6 +14,7 @@
  *  - History: the parcel's steps, who (a role, never a name) and when.
  * Each request is audited by the server; the page is read again.
  */
+import { countryName } from '../../../shared/countries.js';
 import { h, mount, type Child } from '../../shared/dom.js';
 import { buildVerifyInput, defaultZoomLevel } from '../../verify/capture.js';
 import { HINTS, PROBLEMS, SCAN_GUIDE, type ProblemKind } from '../../verify/copy.js';
@@ -121,7 +122,7 @@ export function parcelSections(ctx: ViewContext, view: ShippingOrderView, opts: 
       defList([
         { label: 'Name', value: h('span', { data: { testid: 'parcel-name' } }, view.shipTo.name ?? 'Not entered') },
         { label: 'Address', value: h('span', { class: 'prewrap', data: { testid: 'parcel-address' } }, view.shipTo.address ?? 'Not entered') },
-        { label: 'Country', value: view.shipTo.country ?? 'Not entered' },
+        { label: 'Country', value: view.shipTo.country ? countryName(view.shipTo.country) : 'Not entered' },
         { label: 'Phone', value: view.shipTo.phone ?? 'Not entered' },
       ]),
     ],

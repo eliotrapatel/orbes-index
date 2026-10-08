@@ -560,7 +560,7 @@ describe('legal pages: the privacy policy, written from the code', () => {
     }
     // The export carries the orders with their buyer and invoices, the answers, the places in an after-room.
     const exported = /export interface ExportedOrder \{([\s\S]*?)\n\}/.exec(orders)?.[1] ?? '';
-    expect(exported).toContain('buyer: { name: string | null; address: string | null };');
+    expect(exported).toContain('buyer: { name: string | null; address: string | null; country: string | null; phone: string | null };');
     expect(exported).toContain('invoices:');
     const owners = readDoc('genome/src/server/services/owners.ts');
     for (const key of ['releaseAnswers,', 'orders,']) expect(owners).toContain(`        ${key}`);

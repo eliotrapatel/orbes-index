@@ -46,10 +46,14 @@ export function maskName(name: string): string {
 /** What an AUDITOR reads of an address: that one was entered. */
 export const MASKED_ADDRESS = '***';
 
-/** An order's buyer as the caller may read it: in clear (OPERATOR, ADMIN), masked for an AUDITOR. */
-export function orderBuyer(b: { name: string | null; address: string | null }, inClear: boolean): { name: string | null; address: string | null } {
-  if (inClear) return { name: b.name, address: b.address };
-  return { name: b.name === null ? null : maskName(b.name), address: b.address === null ? null : MASKED_ADDRESS };
+/**
+ * An order's buyer as the caller may read it: in clear (OPERATOR, ADMIN), masked for an AUDITOR: the name masked, the
+ * address withheld and, since plan NEXT LOT §3.6.B, the phone withheld (null) and the country shown (a country alone
+ * names no one).
+ */
+export function orderBuyer<T extends { name: string | null; address: string | null; phone?: string | null }>(b: T, inClear: boolean): T {
+  if (inClear) return b;
+  return { ...b, name: b.name === null ? null : maskName(b.name), address: b.address === null ? null : MASKED_ADDRESS, ...('phone' in b ? { phone: null } : {}) };
 }
 
 /**
@@ -67,7 +71,7 @@ export function readsShipTo(request: FastifyRequest): boolean {
  */
 export function parcelShipTo<T extends { name: string | null; address: string | null; phone?: string | null }>(to: T, inClear: boolean): T {
   if (inClear) return to;
-  return { ...to, ...orderBuyer(to, false), ...('phone' in to ? { phone: null } : {}) };
+  return orderBuyer(to, false);
 }
 
 export function adminJson(a: AdminProfile) {

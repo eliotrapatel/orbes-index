@@ -14,6 +14,7 @@
  */
 import { formatCount, formatDate, humanize } from '../format.js';
 import { can } from './permissions.js';
+import { slipBuyer, type SlipBuyer } from './logistics.js';
 import { formatMoney, moneyField, parseMoney } from './live.js';
 import {
   ORDER_CHANNELS,
@@ -552,7 +553,7 @@ export interface PackingSlip {
   addons: string[];
   engraving: string | null;
   surprise: string | null;
-  buyer: { name: string | null; address: string | null };
+  buyer: SlipBuyer;
 }
 
 export function packingSlip(d: OrderDetail): PackingSlip {
@@ -569,6 +570,10 @@ export function packingSlip(d: OrderDetail): PackingSlip {
     addons: o.addons.map((a) => a.label),
     engraving: o.engravingText,
     surprise: o.surprise,
-    buyer: o.buyer,
+    // ADDRESS CHANGED while the change mark is set and the order is not shipped (plan NEXT LOT §3.6.B).
+    buyer: slipBuyer(
+      o.buyer,
+      o.addressChangedAt && o.addressBy && (o.status === 'RESERVED' || o.status === 'PAID') ? { at: o.addressChangedAt, by: o.addressBy } : null,
+    ),
   };
 }

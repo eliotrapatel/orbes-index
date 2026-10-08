@@ -405,7 +405,7 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   const steelOrder = await pastDraw(w, { model: 'steel', title: 'MONOLITHE IN STEEL', opens: '2026-09-10T10:00:00Z', closes: '2026-09-13T18:00:00Z', quantity: 12, who: you, confirmAt: '2026-09-14T09:00:00Z' });
   clock.set(at('2026-09-14T09:10:00Z'));
   await ctx.services.orders.setTerms(steelOrder, { sizeLabel: '18', priceMinor: 420_000, currency: 'EUR' }, admin);
-  await ctx.services.orders.setBuyer(steelOrder, { name: 'You', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
+  await ctx.services.orders.setBuyer(steelOrder, { name: 'You', address: '14 rue de Turenne\n75004 Paris\nFrance', country: 'FR' }, admin);
   clock.set(at('2026-09-15T10:00:00Z'));
   await ctx.services.orders.transition(steelOrder, { to: 'PAID' }, admin);
   const steelPiece = await make(w, steelOrder, 'returned', '2026-09-16T09:00:00Z');
@@ -427,7 +427,7 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   const goldOrder = await pastDraw(w, { model: 'gold', title: 'MONOLITHE IN GOLD', opens: '2026-09-14T10:00:00Z', closes: '2026-09-14T18:00:00Z', quantity: 12, who: you, confirmAt: '2026-09-15T09:00:00Z' });
   clock.set(at('2026-09-15T09:10:00Z'));
   await ctx.services.orders.setTerms(goldOrder, { sizeLabel: '17', priceMinor: 420_000, currency: 'EUR' }, admin);
-  await ctx.services.orders.setBuyer(goldOrder, { name: 'You', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
+  await ctx.services.orders.setBuyer(goldOrder, { name: 'You', address: '14 rue de Turenne\n75004 Paris\nFrance', country: 'FR' }, admin);
   clock.set(at('2026-09-16T10:00:00Z'));
   await ctx.services.orders.transition(goldOrder, { to: 'PAID' }, admin);
   const goldPiece = await make(w, goldOrder, 'gold', '2026-09-17T16:00:00Z');
@@ -1006,7 +1006,7 @@ async function seedDraws(w: World): Promise<void> {
   const order = await orderOfEntry(w, concludedEntry);
   clock.set(at('2026-09-24T09:10:00Z'));
   await ctx.services.orders.setTerms(order, { sizeLabel: '17', priceMinor: 505_000, currency: 'EUR' }, admin);
-  await ctx.services.orders.setBuyer(order, { name: 'R. Castel', address: '3 place des Vosges\n75004 Paris\nFrance' }, admin);
+  await ctx.services.orders.setBuyer(order, { name: 'R. Castel', address: '3 place des Vosges\n75004 Paris\nFrance', country: 'FR' }, admin);
   clock.set(at('2026-09-25T10:00:00Z'));
   await ctx.services.orders.transition(order, { to: 'PAID' }, admin);
 
@@ -1315,7 +1315,7 @@ async function seedStress(w: World): Promise<void> {
     await ctx.services.salon.close(request.id, { note: 'Accepted.', outcome: 'ACCEPTED' }, admin);
     const order = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await ctx.services.orders.setTerms(order, t, admin);
-    await ctx.services.orders.setBuyer(order, { name: 'You', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
+    await ctx.services.orders.setBuyer(order, { name: 'You', address: '14 rue de Turenne\n75004 Paris\nFrance', country: 'FR' }, admin);
     if (i === 1) {
       await ctx.services.orders.transition(order, { to: 'PAID' }, admin);
       const held = await ctx.db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', order).executeTakeFirstOrThrow();

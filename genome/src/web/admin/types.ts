@@ -2612,7 +2612,12 @@ export interface OrderView {
   addons: { id: string; label: string; priceMinor: number }[];
   surprise: string | null;
   engravingText: string | null;
-  buyer: { name: string | null; address: string | null };
+  /** The delivery address (plan NEXT LOT §3.6.B: with its country, ISO 3166-1 alpha-2, and phone, withheld from an AUDITOR). */
+  buyer: { name: string | null; address: string | null; country?: string | null; phone?: string | null };
+  /** Who entered the delivery address and when, and when it was replaced after it was first entered (ADDRESS CHANGED). */
+  addressBy?: AddressSource | null;
+  addressAt?: Iso | null;
+  addressChangedAt?: Iso | null;
   status: OrderStatus;
   reservedAt: Iso;
   paidAt: Iso | null;

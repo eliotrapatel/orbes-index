@@ -6,7 +6,10 @@
  *    when every order left to ship is paid and holds its piece; LATE after 5 days on the agent's list, counted from the
  *    parcel's latest ready time; on ORBES's board an order ready but waiting for the rest of its parcel is not LATE; a
  *    parcel whose first order was cancelled is still keyed by it, with its address; the agent's own locations only;
- *  - Start packing: refused until paid and in stock, refused without a delivery address (Ship too); `packing_started_at` set;
+ *  - Start packing: refused until paid and in stock, refused without a delivery address, its country included (Ship too);
+ *    `packing_started_at` set;
+ *  - ADDRESS CHANGED (step 6.7): from the order's address columns, by Client Services or by the collector, on the list and
+ *    the parcel, until it ships; the warranty started at SHIP in the delivery country;
  *  - the scan: not ORBES, another model/variant/size, a Generator piece never counted in, a piece in another order, a
  *    piece shipped or registered: refused; success binds the piece to its order; every piece scanned: DONE;
  *  - the photo: its type checked by its bytes, at most 1 MiB, EXIF removed; replaced until packed;
@@ -79,7 +82,7 @@ describe('packing and shipping (plan NEXT LOT §3.5.6.8)', () => {
     h.clock.advance(MINUTE);
     await orders().transition(id, { to: 'PAID' }, admin);
   };
-  const buyer = (id: string) => orders().setBuyer(id, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' }, admin);
+  const buyer = (id: string) => orders().setBuyer(id, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR', phone: '+33 6 12 34 56 78' }, admin);
 
   /** A salon order of the size at FRANCE WAREHOUSE, priced; paid when asked. */
   async function salonOrder(size: string, opts: { paid?: boolean } = {}): Promise<string> {
@@ -197,7 +200,9 @@ describe('packing and shipping (plan NEXT LOT §3.5.6.8)', () => {
     h.clock.advance(MINUTE);
     const started = await lg().startPacking(id, agent, scope());
     expect(started.step).toBe('PACKING');
-    expect(started.shipTo).toEqual({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: null, phone: null });
+    expect(started.shipTo).toEqual({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR', phone: '+33 6 12 34 56 78' });
+    // Its first address: no ADDRESS CHANGED.
+    expect(started.addressChanged).toBeNull();
     expect((await row(id)).packing_started_at).toEqual(h.clock.now());
     // Again: nothing changes.
     expect((await lg().startPacking(id, agent, scope())).shipment!.id).toBe(started.shipment!.id);
@@ -305,9 +310,10 @@ describe('packing and shipping (plan NEXT LOT §3.5.6.8)', () => {
     expect(shipped.step).toBe('SHIPPED');
     expect(shipped.shipment).toMatchObject({ carrier: { id: colissimo, name: 'Colissimo' }, trackingNumber: '6A12345678901', trackingUrl: expect.stringContaining('6A12345678901') });
     expect(await row(id)).toMatchObject({ status: 'SHIPPED', carrier_id: colissimo, tracking_number: '6A12345678901', declared_value_minor: null, reservation: null });
-    // Its warranty started at SHIP, on the shipping day, with no point of sale.
-    const w = await db().selectFrom('warranties').select(['start_date', 'retailer_id', 'retailer']).where('product_id', '=', piece!.uuid).executeTakeFirstOrThrow();
-    expect(w).toEqual({ start_date: h.clock.now().toISOString().slice(0, 10), retailer_id: null, retailer: null });
+    // Its warranty started at SHIP, on the shipping day, with no point of sale, in the delivery address's country
+    // (question 14 as built, §3.5.6.8b).
+    const w = await db().selectFrom('warranties').select(['start_date', 'retailer_id', 'retailer', 'country']).where('product_id', '=', piece!.uuid).executeTakeFirstOrThrow();
+    expect(w).toEqual({ start_date: h.clock.now().toISOString().slice(0, 10), retailer_id: null, retailer: null, country: 'FR' });
     expect((await db().selectFrom('products').select('status').where('id', '=', piece!.uuid).executeTakeFirstOrThrow()).status).toBe('ACTIVATED');
     const activation = await db().selectFrom('audit_logs').select('details').where('action', '=', 'warranty.activate').where('target_id', '=', piece!.productId).execute();
     expect(activation.map((a) => [a.details.via, a.details.orderId])).toEqual([['ship', id]]);
@@ -363,8 +369,8 @@ describe('packing and shipping (plan NEXT LOT §3.5.6.8)', () => {
     const bound = await db().selectFrom('products').select(['id', 'product_id']).where('id', 'in', rows.map((o) => o.product_id!)).execute();
     const started = await db().selectFrom('audit_logs').select(['target_id', 'details']).where('action', '=', 'warranty.activate').where('target_id', 'in', bound.map((p) => p.product_id)).execute();
     expect(started.filter((a) => a.details.via === 'ship').map((a) => a.details.orderId).sort()).toEqual([parcel[0], parcel[2]].sort());
-    // The fixture's address was entered on the parcel's first order.
-    expect(rows[0]).toMatchObject({ buyer_name: 'Test buyer', buyer_address: '1 rue de Test\n75001 Paris' });
+    // The fixture's address was entered on the parcel's first order, with its country (§1.1 (d)).
+    expect(rows[0]).toMatchObject({ buyer_name: 'Test buyer', buyer_address: '1 rue de Test\n75001 Paris', buyer_country: 'FR' });
     // Its buyer registers a piece: that order is delivered; the parcel once all three are.
     const account = rows[0]!.account_id;
     const piece = await pieceOf(rows[0]!.product_id!);
@@ -455,9 +461,48 @@ describe('packing and shipping (plan NEXT LOT §3.5.6.8)', () => {
     const s52 = await skuOf('62');
     await stock(s52, 1, [parcel[1]!]);
     const p = (await listed()).find((r) => r.id === parcel[0])!;
-    expect(p).toMatchObject({ others: 0, shipTo: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: null } });
+    expect(p).toMatchObject({ others: 0, shipTo: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR' } });
     await packAndShip(h.ctx, parcel[1]!, { carrierId: colissimo, trackingNumber: '6A00000000005' }, admin);
     expect((await row(parcel[1]!)).status).toBe('SHIPPED');
     expect((await db().selectFrom('shipments').select(['order_id', 'status']).where('order_id', '=', parcel[0]!).execute()).map((s) => s.status)).toEqual(['SHIPPED']);
+  });
+
+  it('needs the delivery country to pack (§1.1 (d)); shows ADDRESS CHANGED, with when and by whom, once the address is replaced after it was first entered, on the list and the parcel, until it ships (step 6.7)', async () => {
+    const s64 = await skuOf('64');
+    const id = await salonOrder('64', { paid: true });
+    await stock(s64, 1, [id]);
+    const account = (await row(id)).account_id;
+    const collector: Actor = { type: 'account', id: account };
+    // A name and an address of before, without a country: not enough to pack; the phone is not needed.
+    await orders().setBuyer(id, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' }, admin);
+    expect(await refusal(lg().startPacking(id, agent, scope()))).toMatchObject({ code: 'ORDER_ADDRESS_MISSING', status: 409 });
+    expect((await listed(scope())).find((r) => r.id === id)).toMatchObject({ addressChanged: false, shipTo: { country: null } });
+    expect((await lg().parcel(id, scope())).addressChanged).toBeNull();
+    // The country entered by Client Services: the address replaced after it was first entered.
+    h.clock.advance(MINUTE);
+    await orders().setBuyer(id, { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'FR' }, admin);
+    const staffAt = h.clock.now();
+    expect((await listed(scope())).find((r) => r.id === id)).toMatchObject({ addressChanged: true, shipTo: { country: 'FR' } });
+    expect((await lg().parcel(id, scope())).addressChanged).toEqual({ at: staffAt, by: 'STAFF' });
+    // The collector changes it before packing: by the collector now.
+    h.clock.advance(MINUTE);
+    await orders().setAddress(account, id, { address: { name: 'Ada Martin', address: '12 quai de Conti\n75006 Paris', country: 'FR', phone: '+33 6 98 76 54 32' } }, collector);
+    const view = await lg().parcel(id, scope());
+    expect(view.addressChanged).toEqual({ at: h.clock.now(), by: 'COLLECTOR' });
+    expect(view.shipTo).toEqual({ name: 'Ada Martin', address: '12 quai de Conti\n75006 Paris', country: 'FR', phone: '+33 6 98 76 54 32' });
+    // Packing starts: the collector no longer changes it; Client Services still does, and the mark follows.
+    h.clock.advance(MINUTE);
+    await lg().startPacking(id, agent, scope());
+    expect(await refusal(orders().setAddress(account, id, { address: { name: 'Ada Martin', address: '1 rue de Rivoli\n75001 Paris', country: 'FR', phone: '+33 6 98 76 54 32' } }, collector))).toEqual({
+      code: 'ORDER_PACKING_STARTED',
+      status: 409,
+      message: 'Packing has begun: write to ORBES Client Services to change this order.',
+    });
+    h.clock.advance(MINUTE);
+    await orders().setBuyer(id, { name: 'Ada Martin', address: '1 rue de Rivoli\n75001 Paris' }, admin);
+    expect((await lg().parcel(id, scope())).addressChanged).toEqual({ at: h.clock.now(), by: 'STAFF' });
+    // Shipped: the mark no longer shows on the parcel.
+    await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A00000000006' }, admin);
+    expect((await lg().parcel(id, scope())).addressChanged).toBeNull();
   });
 });
