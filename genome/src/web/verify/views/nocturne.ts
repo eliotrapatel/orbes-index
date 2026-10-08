@@ -374,12 +374,27 @@ export function finishDot(swatch: string, label: string): HTMLElement {
   return h('span', { class: 'n-fin__item' }, dot, label);
 }
 
-/** The sizes (16 · 17 · 18), each a 78 × 54 button in the reading face, the selected one doubly ringed. */
-export function sizeButtons(sizes: readonly { id: string; label: string }[], opts: { selected: string | null; label: string; onSelect(id: string): void }): HTMLElement {
+/**
+ * The sizes (16 · 17 · 18), each a 78 × 54 button in the reading face, the selected one doubly ringed. Those of
+ * `unavailable` (by id) are greyed out the way LIVE greys a sold-out size: disabled, `is-gone`, and named for a screen
+ * reader by `unavailableLabel` (plan NEXT LOT §3.6.D, a size not in stock for an exchange).
+ */
+export function sizeButtons(
+  sizes: readonly { id: string; label: string }[],
+  opts: { selected: string | null; label: string; onSelect(id: string): void; unavailable?: ReadonlySet<string>; unavailableLabel?: (label: string) => string },
+): HTMLElement {
   return h(
     'div',
     { class: 'n-sizes', attrs: { role: 'group', 'aria-label': opts.label } },
-    ...sizes.map((z) => h('button', { class: 'n-sizes__option n-num', attrs: { type: 'button', 'aria-pressed': String(z.id === opts.selected) }, on: { click: () => opts.onSelect(z.id) }, text: z.label })),
+    ...sizes.map((z) => {
+      const gone = opts.unavailable?.has(z.id) === true;
+      return h('button', {
+        class: ['n-sizes__option', 'n-num', gone ? 'is-gone' : null],
+        attrs: { type: 'button', 'aria-pressed': String(z.id === opts.selected), disabled: gone, 'aria-label': gone && opts.unavailableLabel ? opts.unavailableLabel(z.label) : null },
+        on: { click: () => opts.onSelect(z.id) },
+        text: z.label,
+      });
+    }),
   );
 }
 
@@ -418,6 +433,10 @@ export function orderSteps(steps: readonly OrderStep[], opts: { label: string; b
   // (`none`); a returned one's runs to the end of the line (`end`, C32: its fifth column).
   const n = Math.max(4, steps.length);
   list.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+  // Five steps and more (plan NEXT LOT §3.6.A: IN PREPARATION; six on an order returned once delivered): their labels
+  // tracked closer where the columns are narrow, six in two rows of three on the narrowest phones (nocturne.css).
+  if (steps.length >= 5) list.classList.add('n-steps--dense');
+  if (steps.length > 5) list.classList.add('n-steps--six');
   list.style.setProperty('--n-steps-last', `${100 / n}%`);
   const mode = opts.bar ?? 'auto';
   if (mode === 'end' && at > 0) bar.style.width = 'calc(100% - 10px)';

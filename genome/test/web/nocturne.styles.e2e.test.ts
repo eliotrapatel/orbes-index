@@ -788,9 +788,9 @@ async function sheet(page: Page): Promise<void> {
   await check(page, '.n-account__benefits', { 'margin-top': 10, 'row-gap': 6 });
   await check(page, '.n-account__benefit', { 'padding-left': 14, 'font-size': 13, color: ASH });
   await check(page, '.n-account__benefit', { content: '"–"', position: 'absolute', left: 0 }, '::before');
-  // The rows: SOUND with its switch, CHANGE PASSWORD, MY PIECES, THE CLUB (BP-19 T9), the legal pages; their hairlines; 10.5 px, 0.22 em words.
+  // The rows: MESSAGES, YOUR SIZES, YOUR ADDRESSES (plan NEXT LOT §3.6.B), SOUND with its switch, CHANGE PASSWORD, MY PIECES, THE CLUB (BP-19 T9), the legal pages; their hairlines; 10.5 px, 0.22 em words.
   await check(page, '.n-account__rows', { 'margin-top': 30, 'border-top-width': 1, 'border-top-color': LINE });
-  expect(await page.locator('.n-account__rows .n-row__label').allInnerTexts()).toEqual(['MESSAGES', 'YOUR SIZES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'THE CLUB', 'PRIVACY · TERMS · LEGAL · HELP']);
+  expect(await page.locator('.n-account__rows .n-row__label').allInnerTexts()).toEqual(['MESSAGES', 'YOUR SIZES', 'YOUR ADDRESSES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'THE CLUB', 'PRIVACY · TERMS · LEGAL · HELP']);
   await check(page, '.n-account__rows .n-row', { display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'column-gap': 14, 'padding-top': 16, 'padding-bottom': 16, 'padding-left': 24, 'padding-right': 24, 'border-bottom-width': 1, 'border-bottom-color': LINE, 'font-size': 15 });
   await check(page, '.n-account__rows .n-row__label', { 'font-size': 10.5, 'letter-spacing': em(10.5, 0.22) });
   await check(page, '.n-account__rows .n-row--lead svg', { width: 16, height: 16, 'stroke-width': '1.4px' });
@@ -1023,11 +1023,14 @@ async function myOrders(page: Page): Promise<void> {
   await check(page, '.n-pieces__order-line', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.28), color: ASH });
   await check(page, '.n-pieces__order-title', { 'margin-top': 10, 'font-size': 16, 'letter-spacing': em(16, 0.14) });
   const steps = await check(page, '.n-pieces__steps', { 'margin-top': 24, display: 'grid' });
-  expect((await read(page, '.n-pieces__steps', ['grid-template-columns']))['grid-template-columns']!.split(' ')).toHaveLength(4);
+  // Plan NEXT LOT §3.6.A: five steps on the way (IN PREPARATION between PAID and SHIPPED).
+  expect((await read(page, '.n-pieces__steps', ['grid-template-columns']))['grid-template-columns']!.split(' ')).toHaveLength(5);
   expect(steps._w).toBeDefined();
-  // The returned order: five columns, the bar to the end of its line (C32); the cancelled one: no bar.
+  // The returned order: a column per step it reached, then RETURNED (six since IN PREPARATION, its labels tracked closer),
+  // the bar to the end of its line (C32); the cancelled one: no bar.
   const returned = '.n-pieces__order[data-status="RETURNED"] .n-pieces__steps';
-  expect((await read(page, returned, ['grid-template-columns']))['grid-template-columns']!.split(' ')).toHaveLength(5);
+  expect((await read(page, returned, ['grid-template-columns']))['grid-template-columns']!.split(' ')).toHaveLength(6);
+  await check(page, `${returned} .n-steps__label`, { 'letter-spacing': em(8.5, 0.08) });
   const bar = await read(page, `${returned} .n-steps__bar`, []);
   expect(Number(bar._w)).toBeCloseTo(Number((await read(page, returned, []))._w) - 10, 0);
   expect(await shown(page, '.n-pieces__order[data-status="CANCELLED"] .n-steps__bar')).toBe(0);
@@ -1039,7 +1042,9 @@ async function myOrders(page: Page): Promise<void> {
   await check(page, '.n-pieces__order-rows .n-kv__row', { 'padding-top': 13, 'padding-bottom': 13, 'font-size': 13.5, 'border-bottom-color': LINE });
   await check(page, '.n-pieces__order-rows .n-kv__label', { 'font-size': 9.5, 'letter-spacing': em(9.5, 0.24), color: ASH, 'padding-top': 2 });
   await check(page, '.n-pieces__order-track', { 'margin-top': 14 });
-  await check(page, '.n-pieces__order-track + .n-pieces__order-reference', { 'margin-top': 16, 'font-size': 9.5 });
+  // Plan NEXT LOT §1.1 (j): DELIVERY ADDRESS (and RETURNS AND EXCHANGES) between the shipment and the reference.
+  await check(page, '.n-pieces__order-track + .n-pieces__address', { 'margin-top': 20 });
+  await check(page, '.n-pieces__address + .n-pieces__order-reference', { 'margin-top': 20, 'font-size': 9.5 });
   await check(page, '.n-pieces__documents-title', { 'margin-top': 26, 'font-size': 11, 'letter-spacing': em(11, 0.26) });
   await check(page, '.n-pieces__document-list', { 'margin-top': 10, 'border-top-width': 1 });
   await check(page, '.n-pieces__document', { 'padding-top': 20, 'padding-bottom': 20, 'border-bottom-color': LINE });

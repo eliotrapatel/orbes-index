@@ -91,6 +91,8 @@ const accountMessages = named('account-write', 'account-messages');
 /** The tier program's states (plan NEXT-NINE, BP-19) in the full demo: a piece's YEARLY CARE, THE CLUB, IN USE. */
 const program = (s: UiState) => full(s) && !s.mutates && named('piece-care', 'club', 'account-sheet-in-use')(s);
 const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroom-ends'];
+/** The stages of MY PIECES' orders that their one state writes (plan NEXT LOT §3.4, §3.6). */
+const ORDER_STAGES: readonly string[] = ['claim-waiting', 'orders-delivery', 'orders-case'];
 
 /**
  * The shards of the content test, each a test file: the `full` demo by screen group (its states that write in one
@@ -101,8 +103,9 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   scan: (s) => full(s) && !s.mutates && named('now', 'scan', 'photo', 'problem')(s),
   results: (s) => full(s) && !s.mutates && named('result')(s),
   // MY PIECES, and the account sheet (C2: its own, over NOW, in the full, draw-leads and stress demos); YOUR NEW CLAIM
-  // CODE waiting on an order (plan NEXT LOT §3.4), on its own stage.
-  pieces: (s) => ((full(s) && !s.mutates && named('pieces', 'piece')(s)) || (named('account')(s) && !accountMessages(s)) || s.variant === 'claim-waiting') && !program(s),
+  // CODE waiting on an order (plan NEXT LOT §3.4), and the collector's side of the orders (§3.6: orders-delivery,
+  // orders-case; YOUR ADDRESSES, an account state), each on its own stage.
+  pieces: (s) => ((full(s) && !s.mutates && named('pieces', 'piece')(s)) || (named('account')(s) && !accountMessages(s)) || ORDER_STAGES.includes(s.variant)) && !program(s),
   // The tier program (plan NEXT-NINE, BP-19), in the full demo: a piece's YEARLY CARE at each step, THE CLUB, IN USE.
   program,
   // The account sheet's MESSAGES and its write sheet (plan NEXT-NINE, CS-01), in the draw-leads demo, in order.
@@ -116,7 +119,7 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   // The draws in every state; a draw in sizes (plan NEXT LOT §3.6.F), on its own stage.
   draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && s.variant !== 'claim-waiting' && !named('account')(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */

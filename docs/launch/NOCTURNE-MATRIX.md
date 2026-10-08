@@ -34,7 +34,12 @@ Words are the app's own (`genome/src/web/verify/copy.ts`, the server's result co
   an entry in each and an order PAID), `stress` (fidelity rule 5) and `empty` (every empty state; an owner of one piece
   of a model kept out of the collection sees the empty circle). Since then, `pairs` (the full story and PAIRS WELL WITH,
   plan NEXT-NINE BP-34) and `claim-waiting` (plan NEXT LOT §3.4: the full story, then its one state writes a shipped
-  order of MONOLITHE in blue for you and a new claim code waiting on it, on its own stage).
+  order of MONOLITHE in blue for you and a new claim code waiting on it, on its own stage), and the collector's side of
+  the orders (plan NEXT LOT §3.6, step 6.10), each the full story, then its one state writing on its own stage:
+  `orders-delivery` (an engraving price in euros, a saved default address put on your reserved LIVE order with its
+  add-on's engraving words, a paid order of MONOLITHE in blue with a priced engraving, packing begun), `orders-case` (a
+  delivered order of MONOLITHE in blue whose return you asked, its location's address the return address) and
+  `account-addresses` (two saved addresses, one the default).
 - **Where the demo differs from the boards** (live data excepted: times, ids, a countdown's digits, the GENOME's glyphs):
   - Since N1, MONOLITHE in steel is a model and gold and blue its variants (ADD A VARIANT; the dots Steel · Gold · Blue):
     the lookbook's list gives them as one entry, which THE COLLECTION shows as one model with its dots since N6.
@@ -215,6 +220,7 @@ ORBES header alone (no rail, no account button, no SCAN ring), as C12 and C17 dr
 |---|---|---|---|
 | `account-sheet` | YOUR ACCOUNT, SIGNED IN AS *email*, YOUR TIER (moved from MY PIECES, decision 10): TITANE, *2 pieces held*, five dots, the benefits, NEXT: PLATINE, *1 more piece …*, what it adds; SOUND (its switch), CHANGE PASSWORD, MY PIECES, PRIVACY · TERMS · LEGAL · HELP (the index, a new tab), SIGN OUT | the account button, signed in (over NOW of the `draw-leads` demo, as C2 draws its page) | C2 |
 | `account-sheet-club` | the same for an account without a piece: THE CLUB, *A piece registered … opens TITANE …*, its benefits; the header's monogram alone | newcomer | C2 |
+| `account-addresses` | (plan NEXT LOT §3.6.B; step 6.10) YOUR ADDRESSES: ‹ YOUR ACCOUNT, its lead, Paris (DEFAULT, first) and London with EDIT · MAKE DEFAULT · REMOVE, ADD AN ADDRESS | YOUR ADDRESSES in the sheet | NEXT LOT §3.6.B |
 | `account-sheet-password` | CHANGE PASSWORD, its sentence, CURRENT PASSWORD, NEW PASSWORD, *At least 12 characters.*, CHANGE PASSWORD, CANCEL | CHANGE PASSWORD in the sheet | C2, C39 (4) |
 | `account-sheet-stress` | PALLADIUM, six pieces: five dots, its benefits, *PALLADIUM is the highest tier of the club.* | the stress demo | same pieces |
 
@@ -377,6 +383,8 @@ THE RELEASES and THE CIRCLE the rail's. The content test looks for what the one 
 | `pieces` | everything above for you: TITANE, two pieces (O26-J-00184 in steel with THIS PIECE and THE MODEL; O26-J-00199 in gold), four orders (LIVE RESERVED; DRAW DELIVERED, its invoice; DRAW RETURNED, its invoice and credit note; THE PRIVATE SALON CANCELLED), three releases; since N5 the tab PIECES | signed in | C3, verify-12 |
 | `pieces-orders` | (N5) the tab ORDERS: the four orders above | ORDERS | C24, C32, plus-12 |
 | `claim-waiting` | (plan NEXT LOT §3.4, step 4.5) the tab ORDERS with a fifth order, THE PRIVATE SALON · MONOLITHE IN BLUE, SHIPPED, unregistered: under its sentence YOUR NEW CLAIM CODE, *ORBES Client Services has made a new claim code for this piece. …*, SHOW THE CODE (never pressed: no code is on screen) | the `claim-waiting` demo: its state writes the order and the new claim code on its own stage | NEXT LOT §3.4 |
+| `orders-delivery` | (plan NEXT LOT §3.6.B, C; step 6.10) the tab ORDERS: the LIVE order RESERVED with ENGRAVING « C.L. » under its add-on, CHANGE THE ENGRAVING, DELIVERY ADDRESS (Camille Laurent, Paris, France, the phone) and CHANGE; a fifth order, THE PRIVATE SALON · MONOLITHE IN BLUE, IN PREPARATION, ENGRAVING « A.R. » · + € 30 in its TOTAL, its two invoices, *Packing has begun. …* under the engraving and the address; the draw's delivered order with RETURNS AND EXCHANGES | ORDERS | NEXT LOT §3.6.B, §3.6.C |
+| `orders-case` | (plan NEXT LOT §3.6.D; step 6.10) the tab ORDERS: a fifth order, MONOLITHE IN BLUE, DELIVERED, with RETURN REQUESTED · 5 OCT 2026, *Send the piece back, …*, RETURN ADDRESS (ORBES LOGISTICS, Saint-Ouen); the draw's delivered order with RETURNS AND EXCHANGES, REQUEST A RETURN and EXCHANGE THE SIZE | ORDERS | NEXT LOT §3.6.D |
 | `pieces-releases` | (N5) the tab RELEASES: the account's entries | RELEASES | C31 |
 | `piece` | (N5) O26-J-00199 in gold: THE MODEL, SIZE 17, WHERE IT COMES FROM (THE DRAW OF 14 SEPTEMBER, ORDER *OR-…* DELIVERED ON 22 SEP 2026), its GENOME, OWNERSHIP | SEE THE PIECE | C4 |
 | `piece-boutique` | (N5) O26-J-00184 in steel, sold at a boutique: no WHERE IT COMES FROM | SEE THE PIECE | C4 |

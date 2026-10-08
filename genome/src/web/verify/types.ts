@@ -1066,12 +1066,11 @@ export interface LiveAccountEntry {
 
 /**
  * The channel an order was sold through (plan LIVE RELEASE+, choice 6): a LIVE RELEASE, a draw, the private salon; a
- * welcome gift; a size exchange (plan NEXT LOT §3.5, the server's since step 5.5). ORDER_CHANNELS lists those YOUR ORDERS
- * shows: EXCHANGE joins it with its words in step 6.10 (§3.6.D).
+ * welcome gift; a size exchange (plan NEXT LOT §3.6.D: the other size, an order of its own, SIZE EXCHANGE).
  */
 export type OrderChannel = 'LIVE' | 'DRAW' | 'SALON' | 'GIFT' | 'EXCHANGE';
 /** The server's order (ORDER_CHANNELS in db/schema.ts). */
-export const ORDER_CHANNELS: readonly OrderChannel[] = ['LIVE', 'DRAW', 'SALON', 'GIFT'];
+export const ORDER_CHANNELS: readonly OrderChannel[] = ['LIVE', 'DRAW', 'SALON', 'GIFT', 'EXCHANGE'];
 
 /** An order's step: RESERVED → PAID → SHIPPED → DELIVERED, or CANCELLED, or RETURNED. */
 export type OrderStatus = 'RESERVED' | 'PAID' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED' | 'RETURNED';

@@ -21,12 +21,22 @@
  *     [ the model's photograph ]                 its cover photograph (addition 3)
  *     LIVE RELEASE · MONOLITHE IN STEEL          where it was sold
  *     MONOLITHE                                  its model
- *     ●──○──○──○ RESERVED PAID SHIPPED DELIVERED its steps and their dates (or CANCELLED, or RETURNED)
- *     Your piece is reserved. …                  what its step means
+ *     ●──○──○──○──○ RESERVED PAID IN PREPARATION its steps and their dates (or CANCELLED, or RETURNED); IN PREPARATION
+ *       SHIPPED DELIVERED                        once paid with its piece assigned (plan NEXT LOT §3.6.A)
+ *     Your piece is reserved. …                  what its step means (or that its delivery is looked into)
  *     YOUR NEW CLAIM CODE                        while a new claim code waits on the order (plan NEXT LOT §3.4):
  *     … [ SHOW THE CODE ]                        shown once on a press, then REGISTER THIS PIECE (once shipped),
  *                                                COPY CODE and SAVE YOUR NEW CARD; kept in memory until the page is left
- *     SIZE · PRICE · ENGRAVING · TOTAL           its terms; once shipped CARRIER and TRACKING NUMBER, TRACK THE SHIPMENT
+ *     EXCHANGE REQUESTED · SIZE 18 · 12 OCT 2026 a return or a size exchange asked (plan NEXT LOT §3.6.D): what to do,
+ *     … RETURN ADDRESS                           where to send the piece; PIECE RECEIVED; EXCHANGED FOR
+ *     SIZE · PRICE · ENGRAVING · TOTAL           its terms (the engraving's words and price, §3.6.C); ADD AN ENGRAVING or
+ *                                                CHANGE THE ENGRAVING (its sheet) until packing begins; once shipped
+ *                                                CARRIER and TRACKING NUMBER, TRACK THE SHIPMENT
+ *     DELIVERY ADDRESS                           its address and CHANGE, or ADD THE DELIVERY ADDRESS (its sheet: a saved
+ *                                                address or a new one, §3.6.B); once packing has begun, through ORBES
+ *                                                Client Services; travelling with another order, that order's
+ *     RETURNS AND EXCHANGES                      on a delivered order for 14 days (§3.6.D): REQUEST A RETURN, EXCHANGE THE
+ *     [ REQUEST A RETURN ] [ EXCHANGE THE SIZE ] SIZE (its sheet: the sizes in stock, a reason, a note)
  *     ORDER OR-3F9A21C4                          its reference, for ORBES Client Services
  *     [ WRITE TO ORBES CLIENT SERVICES ]         the write sheet, the order attached (plan NEXT-NINE, CS-01)
  *     DOCUMENTS                                  INVOICE, CREDIT NOTE (PDFs), CARE GUIDE (opens under it), OWNERSHIP
@@ -54,6 +64,7 @@ import { CLAIM_HELD, DEFAULT_CARE, GUARANTEE, ORDERS, PIECES, QUESTION, RELEASES
 import { orderContext } from '../messages-model.js';
 import { myLiveEntries } from '../live-model.js';
 import { orderModels, type OrderClaimModel, type OrderModel } from '../orders-model.js';
+import { openOrderSheet } from './order-sheet.js';
 import { pieceModel, type PieceModel } from '../pieces-model.js';
 import { myEntries, type MyEntryModel } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
@@ -491,8 +502,26 @@ class PiecesPage {
 
   private ordersPanel(orders: OrderModel[] | null): HTMLElement[] {
     if (orders === null) return [h('div', { class: 'n-px n-pieces__quiet' }, h('p', { class: 'n-sm n-pieces__failed', attrs: { role: 'alert' }, text: ORDERS.loadFailed }))];
-    const deps: OrderDeps = { api: this.deps.api, session: this.deps.session };
+    const deps: OrderDeps = { api: this.deps.api, session: this.deps.session, onChanged: (order, focus) => this.orderChanged(order, focus) };
     return [h('div', { class: 'n-pieces__orders' }, ...orders.map((m) => orderCard(m, deps, this.claimBlockFor(m, deps))))];
+  }
+
+  /**
+   * An order as the server answered a sheet (plan NEXT LOT §3.6: its address, its engraving, a request): put in its
+   * place, the tab drawn again; what takes the keyboard focus then, the control `focus` names on its card, else its title.
+   */
+  private orderChanged(next: AccountOrder, focus: string): HTMLElement | null {
+    if (this.orders) {
+      const at = this.orders.findIndex((o) => o.id === next.id);
+      if (at >= 0) this.orders[at] = next;
+    }
+    this.render();
+    const card = this.root.querySelector<HTMLElement>(`article[data-order="${CSS.escape(next.reference)}"]`);
+    const control = card?.querySelector<HTMLElement>(`[data-focus="${focus}"]`);
+    if (control) return control;
+    const heading = card?.querySelector<HTMLElement>('h2') ?? null;
+    if (heading) heading.tabIndex = -1;
+    return heading;
   }
 
   /** ORDER OR-… opened from a piece's page: its order in view, its heading focused. */
@@ -562,12 +591,16 @@ interface OrderDeps {
    * order's block is given its own by the page).
    */
   onRegistered?(productId: string): void;
+  /** A sheet's answer (plan NEXT LOT §3.6): the order drawn again; what takes the focus (`focus`, a `data-focus` of the card). */
+  onChanged?(order: AccountOrder, focus: string): HTMLElement | null;
 }
 
 /**
  * One order of ORDERS (C24, C32): its model's photograph (addition 3), where it was sold, its model, its steps, what its
- * step means, YOUR NEW CLAIM CODE while one waits (plan NEXT LOT §3.4), its terms, once shipped the carrier, the number
- * and TRACK THE SHIPMENT (the carrier's page in a new tab), its reference, its documents (M6).
+ * step means, YOUR NEW CLAIM CODE while one waits (plan NEXT LOT §3.4), its return or size exchange as asked (§3.6.D),
+ * its terms and its engraving's link (§3.6.C), once shipped the carrier, the number and TRACK THE SHIPMENT (the
+ * carrier's page in a new tab), its DELIVERY ADDRESS (§3.6.B), RETURNS AND EXCHANGES (§3.6.D), its reference, its
+ * documents (M6). In the order of plan NEXT LOT §1.1 (j).
  */
 function orderCard(m: OrderModel, deps: OrderDeps, claim: HTMLElement | null = null): HTMLElement {
   const titleId = `${m.key}-title`;
@@ -585,7 +618,9 @@ function orderCard(m: OrderModel, deps: OrderDeps, claim: HTMLElement | null = n
     steps,
     h('p', { class: 'n-tx n-pieces__order-sentence', text: m.sentence }),
     claim,
+    m.request ? requestBlock(m) : null,
     rows.length > 0 ? h('div', { class: 'n-pieces__order-rows' }, definitionList(rows, { kind: 'kv' })) : null,
+    m.engraving ? engravingBlock(m, deps) : null,
     m.shipment?.href
       ? h(
           'p',
@@ -593,6 +628,8 @@ function orderCard(m: OrderModel, deps: OrderDeps, claim: HTMLElement | null = n
           h('a', { class: 'n-g n-tl pieces__order-track', attrs: { href: m.shipment.href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': m.shipment.label }, text: ORDERS.track }),
         )
       : null,
+    m.address ? addressBlock(m, deps) : null,
+    m.returns ? returnsBlock(m, deps) : null,
     h('p', { class: 'n-g n-lb n-num n-pieces__order-reference' }, ...withNumerals(m.reference)),
     // WRITE TO ORBES CLIENT SERVICES, the order attached (CS-01), under its reference and before its documents.
     writeButton(orderContext({ id: m.id, model: m.title, modelVariant: m.modelVariant })),
@@ -613,6 +650,95 @@ function orderCard(m: OrderModel, deps: OrderDeps, claim: HTMLElement | null = n
   return article;
 }
 
+// ── The collector's side of the order (plan NEXT LOT §3.6) ─────────────────
+
+/** Lines as typed (an address), one under the other in the reading face. */
+function lines(list: readonly string[], extraClass: string): HTMLElement {
+  return h('p', { class: ['n-tx', 'n-pieces__lines', extraClass] }, ...list.flatMap((l, i) => (i === 0 ? [l] : [h('br'), l])));
+}
+
+/** A request (§3.6.D) as the card says it: asked (with where to send the piece), received, exchanged, or answered in MESSAGES. */
+function requestBlock(m: OrderModel): HTMLElement {
+  const r = m.request!;
+  const id = `${m.key}-request`;
+  return h(
+    'section',
+    { class: 'n-pieces__request pieces__request', attrs: { 'aria-labelledby': id } },
+    h('p', { class: 'n-g n-lb n-pieces__request-label', id, attrs: { tabindex: -1 }, data: { focus: 'request' } }, ...withNumerals(r.label)),
+    r.received ? h('p', { class: 'n-g n-lb n-pieces__request-received' }, ...withNumerals(r.received)) : null,
+    ...r.sentences.map((t) => h('p', { class: 'n-tx n-pieces__request-text', text: t })),
+    r.returnAddress
+      ? h('div', { class: 'n-pieces__return-address pieces__return-address' }, h('p', { class: 'n-g n-lb', text: ORDERS.returns.returnAddress }), lines(r.returnAddress, 'n-pieces__return-lines'))
+      : null,
+  );
+}
+
+/** Its engraving under the rows (§3.6.C): ADD AN ENGRAVING, CHANGE THE ENGRAVING or ENTER YOUR ENGRAVING, or the line once packing has begun. */
+function engravingBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
+  const e = m.engraving!;
+  if (!e.action) return h('p', { class: 'n-sm n-pieces__engraving-locked pieces__engraving-locked', text: e.locked ?? '' });
+  const link = textLink(e.action, {
+    extraClass: 'n-pieces__engraving-link pieces__engraving',
+    onOpen: () => openOrderSheet({ kind: 'engraving', order: m, engraving: e, trigger: link, onDone: (o) => deps.onChanged?.(o, 'engraving') ?? null }),
+  });
+  link.dataset.focus = 'engraving';
+  link.setAttribute('aria-haspopup', 'dialog');
+  return h('p', { class: 'n-pieces__engraving' }, link);
+}
+
+/** DELIVERY ADDRESS (§3.6.B): the address and CHANGE, ADD THE DELIVERY ADDRESS, the address once packing has begun, or the order it travels with. */
+function addressBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
+  const a = m.address!;
+  const A = ORDERS.address;
+  const id = `${m.key}-address`;
+  const open = (trigger: HTMLElement) => openOrderSheet({ kind: 'address', order: m, trigger, onDone: (o) => deps.onChanged?.(o, 'address') ?? null });
+  let action: HTMLElement | null = null;
+  if (a.state === 'editable') {
+    const change = textLink(A.change, { extraClass: 'n-pieces__address-change pieces__address-change', onOpen: () => open(change) });
+    change.setAttribute('aria-label', A.changeLabel(m.reference.replace(/^ORDER /, '')));
+    action = change;
+  } else if (a.state === 'empty') {
+    const add: HTMLButtonElement = button(A.add, { outline: true, extraClass: 'n-pieces__address-add pieces__address-add', onClick: () => open(add) });
+    action = add;
+  }
+  if (action) {
+    action.dataset.focus = 'address';
+    action.setAttribute('aria-haspopup', 'dialog');
+  }
+  return h(
+    'section',
+    { class: 'n-pieces__address pieces__address', attrs: { 'aria-labelledby': id }, data: { state: a.state } },
+    h('p', { class: 'n-g n-lb n-pieces__address-label', id, text: A.label }),
+    a.lines.length > 0 ? lines(a.lines, 'n-pieces__address-lines') : null,
+    a.sentence ? h('p', { class: 'n-sm n-pieces__address-sentence', text: a.sentence }) : null,
+    action,
+  );
+}
+
+/** RETURNS AND EXCHANGES (§3.6.D): until when, then REQUEST A RETURN and EXCHANGE THE SIZE (absent for a model of one size). */
+function returnsBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
+  const r = m.returns!;
+  const R = ORDERS.returns;
+  const id = `${m.key}-returns`;
+  const ask = (kind: 'RETURN' | 'EXCHANGE', label: string, cls: string): HTMLButtonElement => {
+    const b: HTMLButtonElement = button(label, {
+      outline: true,
+      extraClass: cls,
+      attrs: { 'aria-haspopup': 'dialog' },
+      onClick: () => openOrderSheet({ kind, order: m, returns: r, trigger: b, onDone: (o) => deps.onChanged?.(o, 'request') ?? null }),
+    });
+    return b;
+  };
+  const buttons = [ask('RETURN', R.requestReturn, 'pieces__return'), ...(r.sizes.length > 0 ? [ask('EXCHANGE', R.exchange, 'pieces__exchange')] : [])];
+  return h(
+    'section',
+    { class: 'n-pieces__returns pieces__returns', attrs: { 'aria-labelledby': id } },
+    h('p', { class: 'n-g n-lb n-pieces__returns-label', id, text: R.label }),
+    h('p', { class: 'n-tx n-pieces__returns-lead', text: r.lead }),
+    h('div', { class: buttons.length > 1 ? 'n-duo n-pieces__returns-actions' : 'n-pieces__returns-actions' }, ...buttons),
+  );
+}
+
 /**
  * An order's DOCUMENTS (M6; C24, C32): rows that lead on (›) for INVOICE and CREDIT NOTE with their numbers and the
  * OWNERSHIP CERTIFICATE, each saving its PDF; CARE GUIDE a row that opens (+ / −) the model's care guide under it (read
@@ -628,12 +754,12 @@ function orderDocumentsBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
     error.textContent = text;
     error.hidden = false;
   };
-  const save = async (b: HTMLButtonElement, file: OrderDocumentKind) => {
+  const save = async (b: HTMLButtonElement, file: OrderDocumentKind | { number: string }) => {
     if (b.getAttribute('aria-busy') === 'true') return;
     b.setAttribute('aria-busy', 'true');
     error.hidden = true;
     try {
-      saveDownload(await deps.api.orderDocument(m.id, file));
+      saveDownload(typeof file === 'string' ? await deps.api.orderDocument(m.id, file) : await deps.api.orderDocumentByNumber(m.id, file.number));
     } catch (e) {
       deps.session.noteError(e);
       fail(D.downloadFailed);
@@ -644,9 +770,10 @@ function orderDocumentsBlock(m: OrderModel, deps: OrderDeps): HTMLElement {
   const row = (d: OrderModel['documents'][number]): HTMLElement => {
     // The label in the display face, the number in the reading face; under it, PDF or what the guide is.
     const title = h('span', { class: 'n-g n-t3 n-ivc n-acc__title' }, d.label, ...(d.number ? [' ', h('span', { class: 'n-pieces__document-number n-num', text: d.number })] : []));
-    const text = h('span', { class: 'n-acc__text' }, title, h('span', { class: 'n-sm n-acc__line', text: d.file === null ? d.ariaLabel : D.pdf }));
-    if (d.file !== null) {
-      const file = d.file;
+    const saves = d.file !== null || (d.byNumber && d.number !== null);
+    const text = h('span', { class: 'n-acc__text' }, title, h('span', { class: 'n-sm n-acc__line', text: saves ? D.pdf : d.ariaLabel }));
+    if (saves) {
+      const file = d.file ?? { number: d.number! };
       const b: HTMLButtonElement = h(
         'button',
         { class: 'n-acc n-pieces__document pieces__order-document', attrs: { type: 'button', 'aria-label': d.ariaLabel }, data: { document: d.kind }, on: { click: () => void save(b, file) } },

@@ -684,6 +684,25 @@ describe('verify app: one button to ORBES Client Services, the email under FORGO
     expect(words).toMatch(/\bpiece\b/);
   });
 
+  it('writes the collector\'s side of an order calmly (ORDERS.address, .addressFields, .engraving, .returns, ACCOUNT_ADDRESSES; plan NEXT LOT §3.6): no exclamation mark, no word of §4.5, a piece and never a product', () => {
+    const said = (v: unknown): string[] =>
+      typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('OR-3F9A21C4', '12 OCT 2026'))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];
+    for (const [name, group] of [
+      ['ORDERS.address', verifyCopy.ORDERS.address],
+      ['ORDERS.addressFields', verifyCopy.ORDERS.addressFields],
+      ['ORDERS.engraving', verifyCopy.ORDERS.engraving],
+      ['ORDERS.returns', verifyCopy.ORDERS.returns],
+      ['ACCOUNT_ADDRESSES', verifyCopy.ACCOUNT_ADDRESSES],
+    ] as const) {
+      const words = said(group).join('\n');
+      expect(words.length, name).toBeGreaterThan(150);
+      expect(words, name).not.toContain('!');
+      expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN]), name).toEqual([]);
+      expect(words, name).not.toMatch(/product|atelier|handmade|craft/i);
+    }
+    expect(said(verifyCopy.ORDERS.returns).join('\n')).toMatch(/\bpiece\b/);
+  });
+
   it('writes THE HOUSE’S GUARANTEE calmly (plan NEXT-NINE, IN-01): no exclamation mark, no word of §4.5, a place and never authenticity', () => {
     const said = (v: unknown): string[] =>
       typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('MONOLITHE', 2))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];

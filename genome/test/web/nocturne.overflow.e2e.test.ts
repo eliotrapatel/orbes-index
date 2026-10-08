@@ -48,6 +48,11 @@ const NARROW_TOO = [
   'releases-how',
   // A draw in sizes (plan NEXT LOT §3.6.F): its SIZES row, YOUR SIZE's picker and YOUR SIZES' lines, at 375, 360 and 320 px too.
   'draw-sizes',
+  // The collector's side of the orders (plan NEXT LOT §3.6): DELIVERY ADDRESS, ENGRAVING, IN PREPARATION, a return asked
+  // with its RETURN ADDRESS, RETURNS AND EXCHANGES' two buttons, YOUR ADDRESSES, at 375, 360 and 320 px too.
+  'orders-delivery',
+  'orders-case',
+  'account-addresses',
 ];
 /** Of NARROW_TOO, opened at the stage's 390 px only: the LIVE room with the guarantee's line. */
 const STAGE_ONLY = ['room-guaranteed'];

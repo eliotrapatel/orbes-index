@@ -509,7 +509,7 @@ describe('the line, the turn and the piece held', () => {
     expect(placeAnnouncement(entry({ status: 'QUEUED', position: 2, ahead: 0, size: one }))).toBe('Your place: 2. You are next in ONE SIZE.');
     expect(placeAnnouncement(entry({ status: 'QUEUED', position: 5, ahead: 3, size: one }))).toBe('Your place: 5. 3 ahead of you in ONE SIZE.');
     expect([LIVE.ahead(0, 'ONE SIZE'), LIVE.ahead(2, 'One size'), LIVE.inSize(4, 'ONE SIZE')]).toEqual(['YOU ARE NEXT IN ONE SIZE', '2 AHEAD OF YOU IN ONE SIZE', '4 IN ONE SIZE']);
-    expect(LIVE.reservedIn('ONE SIZE', 1)).toBe('Your piece is reserved in ONE SIZE. ORBES Client Services will contact you to settle payment and delivery.');
+    expect(LIVE.reservedIn('ONE SIZE', 1)).toBe('Your piece is reserved in ONE SIZE. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.');
     expect(LIVE.securedInPieces('ONE SIZE', 2)).toBe('You secured 2 pieces in ONE SIZE. Their steps follow in YOUR ORDERS.');
     expect([LIVE.edge.soldOut.title('ONE SIZE'), LIVE.edge.soldOut.title('52')]).toEqual(['SOLD OUT', 'SOLD OUT IN SIZE 52']);
     expect([LIVE.size('ONE SIZE'), LIVE.size('52'), LIVE.there.said('ONE SIZE'), LIVE.soldOutSize('ONE SIZE')]).toEqual(['ONE SIZE', 'SIZE 52', 'YOU’LL BE THERE · ONE SIZE', 'One size, no piece left']);

@@ -371,19 +371,32 @@ export const ORDERS = Object.freeze({
   loadFailed: 'Your orders could not be shown just now.',
   /** Accessible name of an order's steps. */
   stepsLabel: 'Steps of this order',
-  step: Object.freeze({ RESERVED: 'RESERVED', PAID: 'PAID', SHIPPED: 'SHIPPED', DELIVERED: 'DELIVERED', CANCELLED: 'CANCELLED', RETURNED: 'RETURNED' }),
-  /** What the order's step means now. */
+  /** Plan NEXT LOT §3.6.A: IN PREPARATION, a step of the card only (paid, its piece assigned), never a status. */
+  step: Object.freeze({ RESERVED: 'RESERVED', PAID: 'PAID', IN_PREPARATION: 'IN PREPARATION', SHIPPED: 'SHIPPED', DELIVERED: 'DELIVERED', CANCELLED: 'CANCELLED', RETURNED: 'RETURNED' }),
+  /**
+   * What the order's step means now. Plan NEXT LOT §3.6.A: the delivery address is the collector's own (RESERVED no
+   * longer says Client Services settles it), and preparing the piece is IN PREPARATION's (PAID says it will be).
+   */
   sentence: Object.freeze({
-    RESERVED: 'Your piece is reserved. ORBES Client Services will contact you to settle payment and delivery.',
-    PAID: 'Your payment is received. ORBES is preparing your piece for shipping.',
+    RESERVED: 'Your piece is reserved. ORBES Client Services will contact you to settle payment.',
+    PAID: 'Your payment is received. Your piece will be prepared for shipping.',
+    IN_PREPARATION: 'Your piece is being prepared for shipping.',
     SHIPPED: 'Your piece is on its way. Once it has arrived, scan its ORBES CODE to register it to your account.',
     DELIVERED: 'Your piece has been delivered.',
     CANCELLED: 'This order has been cancelled.',
     RETURNED: 'This order has been returned to ORBES.',
   }),
-  /** Where the piece was sold; a welcome gift (plan NEXT-NINE, BP-19 T5) travels with an order. */
-  channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT' }),
-  rows: Object.freeze({ size: 'SIZE', price: 'PRICE', shipping: 'SHIPPING', credit: 'CREDIT', total: 'TOTAL', carrier: 'CARRIER', tracking: 'TRACKING NUMBER' }),
+  /**
+   * Plan NEXT LOT §3.6.A: while ORBES Client Services looks into a parcel's delivery (lost, damaged, back to its sender),
+   * in place of the step's sentence; the case itself, the photo and the agent's notes are never shown.
+   */
+  deliveryIssue: 'ORBES Client Services is looking into the delivery of your piece and will write to you in MESSAGES.',
+  /**
+   * Where the piece was sold; a welcome gift (plan NEXT-NINE, BP-19 T5) travels with an order; the other size of a size
+   * exchange is an order of its own (plan NEXT LOT §3.6.D).
+   */
+  channel: Object.freeze({ LIVE: 'LIVE RELEASE', DRAW: 'DRAW', SALON: 'THE PRIVATE SALON', GIFT: 'WELCOME GIFT', EXCHANGE: 'SIZE EXCHANGE' }),
+  rows: Object.freeze({ size: 'SIZE', price: 'PRICE', engraving: 'ENGRAVING', shipping: 'SHIPPING', credit: 'CREDIT', total: 'TOTAL', carrier: 'CARRIER', tracking: 'TRACKING NUMBER' }),
   /**
    * BP-19 T5: a welcome gift, on its own card: its line (WELCOME GIFT · PLATINE), its price (none of its own), and while
    * it waits the order it travels with. The credit taken off an order reads − € 50 (CREDIT).
@@ -411,6 +424,119 @@ export const ORDERS = Object.freeze({
   trackLabel: (trackingNumber: string, carrier: string) => `Track the shipment ${trackingNumber} on the site of ${carrier} (opens in a new tab)`,
   /** The order's reference, for ORBES Client Services. */
   reference: (reference: string) => `ORDER ${reference}`,
+  /**
+   * DELIVERY ADDRESS (plan NEXT LOT §3.6.B): on each order, its delivery address (the name, the lines as typed, the
+   * country's English name, the phone) with CHANGE while it may change; without one, ADD THE DELIVERY ADDRESS; once the
+   * agent has begun packing, only through ORBES Client Services; an order travelling with another, that order's. The
+   * address sheet: a saved address, or A NEW ADDRESS (the four fields), saved to YOUR ADDRESSES when asked.
+   */
+  address: Object.freeze({
+    label: 'DELIVERY ADDRESS',
+    change: 'CHANGE',
+    empty: 'Add the address your piece is to be delivered to.',
+    add: 'ADD THE DELIVERY ADDRESS',
+    locked: 'Packing has begun. To change the address, write to ORBES Client Services.',
+    travels: (reference: string) => `Delivered with order ${reference}, to its address.`,
+    /** An order travelling with one that was cancelled (plan NEXT LOT §3.6, edge cases). */
+    travelsCancelled: 'ORBES Client Services will contact you about the delivery.',
+    /** The sheet's title (and its dialog's name), and what it concerns: `ORDER OR-3F9A21C4 · MONOLITHE IN BLUE`. */
+    title: 'DELIVERY ADDRESS',
+    /** The saved addresses, one choice each; the default one marked. */
+    saved: 'YOUR ADDRESSES',
+    isDefault: 'DEFAULT',
+    newAddress: 'A NEW ADDRESS',
+    save: 'SAVE IT TO YOUR ADDRESSES',
+    confirm: 'CONFIRM',
+    cancel: 'CANCEL',
+    /** A failure, followed by the server's message. */
+    failed: 'The address could not be changed just now.',
+    /** Accessible names: the CHANGE link, with what it changes. */
+    changeLabel: (reference: string) => `Change the delivery address of order ${reference}`,
+  }),
+  /**
+   * The four fields of a delivery address (plan NEXT LOT §3.6.B), on an order and in YOUR ADDRESSES, and what is said
+   * before the server says it, in its words.
+   */
+  addressFields: Object.freeze({
+    name: 'NAME',
+    address: 'ADDRESS',
+    addressHint: 'As it is written on the parcel, one line each.',
+    country: 'COUNTRY',
+    chooseCountry: 'Choose a country',
+    phone: 'PHONE',
+    phoneHint: 'For the carrier, with the country code: +33 6 12 34 56 78.',
+    nameAndAddress: 'Enter the name and the address.',
+    countryMissing: 'Choose a country.',
+    phoneInvalid: 'Enter a phone number with its country code.',
+  }),
+  /**
+   * ENGRAVING (plan NEXT LOT §3.6.C): its row (`« J.M. » · + € 30`, or the words alone when the release's add-on paid for
+   * it), its link under the rows until packing begins, and its sheet. After payment, a Settings-priced engraving added
+   * gets its own invoice and one removed a credit note, both in DOCUMENTS.
+   */
+  engraving: Object.freeze({
+    value: (text: string, price: string | null) => (price ? `« ${text} » · + ${price}` : `« ${text} »`),
+    add: 'ADD AN ENGRAVING',
+    change: 'CHANGE THE ENGRAVING',
+    /** The release's ENGRAVING add-on, its words not entered yet. */
+    enter: 'ENTER YOUR ENGRAVING',
+    locked: 'Packing has begun. The engraving no longer changes.',
+    title: 'ENGRAVING',
+    lead: 'Engraved on your piece before it is shipped.',
+    field: 'YOUR ENGRAVING',
+    hint: 'Up to 20 characters: letters, figures, spaces and . & ’ -',
+    price: (price: string) => `ENGRAVING · + ${price}`,
+    included: 'Your engraving was bought with your order.',
+    paidAdd: 'Your order is paid: the engraving is added to it with its own invoice, in DOCUMENTS.',
+    paidRemove: 'Your order is paid: a credit note for the engraving will be in DOCUMENTS.',
+    save: 'SAVE',
+    remove: 'REMOVE THE ENGRAVING',
+    cancel: 'CANCEL',
+    /** Said before the server says it, in its words. */
+    empty: 'Enter your engraving.',
+    invalid: 'Up to 20 characters: letters, figures, spaces and . & ’ -',
+    /** A failure, followed by the server's message. */
+    failed: 'The engraving could not be saved just now.',
+  }),
+  /**
+   * RETURNS AND EXCHANGES (plan NEXT LOT §3.6.D): on a delivered order for 14 days, REQUEST A RETURN and EXCHANGE THE
+   * SIZE (only the sizes in stock), a reason and a note; the order case opens at once, written into MESSAGES; then what
+   * it is now, on the card: requested, the return address, received, exchanged, or answered in MESSAGES.
+   */
+  returns: Object.freeze({
+    label: 'RETURNS AND EXCHANGES',
+    lead: (until: string) => `You may return this piece or exchange its size until ${until}. It is sent back at your cost, with the carrier of your choice.`,
+    requestReturn: 'REQUEST A RETURN',
+    exchange: 'EXCHANGE THE SIZE',
+    newSize: 'THE NEW SIZE',
+    /** A size not in stock, greyed out, as a screen reader says it. */
+    sizeOut: (label: string) => `Size ${label}, not in stock`,
+    onlyInStock: 'Only the sizes in stock can be chosen.',
+    noneInStock: 'No other size is in stock just now.',
+    reason: 'REASON',
+    chooseReason: 'Choose a reason',
+    reasons: Object.freeze({ SIZE: 'The size does not fit', NOT_AS_EXPECTED: 'The piece is not as I expected', DAMAGED: 'The piece arrived damaged', OTHER: 'Another reason' }),
+    note: 'YOUR NOTE',
+    noteHint: 'Please leave out passwords and card numbers.',
+    decides: 'ORBES Client Services decides once the piece is received. Their answer will appear in your account, under MESSAGES.',
+    send: 'SEND THE REQUEST',
+    cancel: 'CANCEL',
+    /** Said before the server says it. */
+    reasonMissing: 'Choose a reason.',
+    sizeMissing: 'Choose the new size.',
+    /** A failure, followed by the server's message. */
+    failed: 'Your request could not be sent just now.',
+    /** The card, once asked. */
+    returnRequested: (date: string) => `RETURN REQUESTED · ${date}`,
+    exchangeRequested: (size: string, date: string) => `EXCHANGE REQUESTED · ${size} · ${date}`,
+    sendBack: (reference: string) => `Send the piece back, at your cost and with the carrier of your choice, to the address below. Write ORDER ${reference} on the parcel.`,
+    returnAddress: 'RETURN ADDRESS',
+    noReturnAddress: 'ORBES Client Services will send you the return address in MESSAGES.',
+    received: (date: string) => `PIECE RECEIVED · ${date}`,
+    receivedText: 'ORBES has received your piece. ORBES Client Services will write to you in MESSAGES.',
+    exchangedFor: (size: string, reference: string) => `EXCHANGED FOR ${size} · ORDER ${reference}`,
+    answered: 'ORBES Client Services has written to you in MESSAGES.',
+  }),
   /**
    * YOUR NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code ORBES Client Services made for the order's piece (its card
    * lost before registration), shown once on a press of SHOW THE CODE, then never again; REGISTER THIS PIECE once the
@@ -1086,7 +1212,8 @@ export const RELEASES = Object.freeze({
     withdrawnClosed: 'You withdrew from this draw.',
     selected: (until: string) => `Your place is held until ${until} — ORBES Client Services will contact you.`,
     waitlisted: (rank: number) => `You are on the waiting list, rank ${rank}. ORBES Client Services will contact you if a place opens.`,
-    confirmed: 'Your purchase is concluded with ORBES Client Services.',
+    /** Plan NEXT LOT §3.6.B: the delivery address is the collector's own, entered in YOUR ORDERS. */
+    confirmed: 'Your purchase is concluded with ORBES Client Services. Add your delivery address in YOUR ORDERS.',
     lapsed: 'The time to conclude has passed: the place held for you has lapsed.',
     /** P-X02, a PLATINE or PALLADIUM account before its early access, then during it. */
     earlySoon: (tier: string, from: string) => `As a ${tier} owner, you may reserve a place directly from ${from}, before entries open to everyone.`,
@@ -1472,6 +1599,47 @@ export const ACCOUNT_SIZES = Object.freeze({
 });
 
 /**
+ * YOUR ADDRESSES (plan NEXT LOT §3.6.B): a row of the account sheet, after YOUR SIZES, its line how many are saved
+ * (`2 SAVED`, or NOT SET), and its view in the sheet: each address with DEFAULT on the default one, EDIT · MAKE DEFAULT ·
+ * REMOVE (a second tap removes it), ADD AN ADDRESS with MY DEFAULT ADDRESS, up to five. The default one is put on each
+ * new order; an order keeps its own copy. Its states as YOUR SIZES has them.
+ */
+export const ACCOUNT_ADDRESSES = Object.freeze({
+  row: 'YOUR ADDRESSES',
+  count: (n: number) => `${n} SAVED`,
+  notSet: 'NOT SET',
+  title: 'YOUR ADDRESSES',
+  lead: 'Your default address is put on each new order. You may change an order’s address until its packing begins.',
+  isDefault: 'DEFAULT',
+  edit: 'EDIT',
+  makeDefault: 'MAKE DEFAULT',
+  remove: 'REMOVE',
+  /** REMOVE asks for a second tap, as RELEASE MY PLACE does. */
+  removeConfirm: 'TAP AGAIN TO REMOVE',
+  add: 'ADD AN ADDRESS',
+  defaultSwitch: 'MY DEFAULT ADDRESS',
+  save: 'SAVE',
+  cancel: 'CANCEL',
+  empty: 'No address is saved. The first one you add becomes your default.',
+  limit: 'You may keep up to 5 addresses.',
+  /** Said in the view once done. */
+  saved: 'Your address is saved.',
+  removed: 'The address is removed.',
+  /** A failure, followed by the server's message. */
+  failed: 'Your address could not be saved just now.',
+  /** The view while the addresses are read; then, when they cannot be, the sentence, the server's message and TRY AGAIN. */
+  loading: 'ONE MOMENT…',
+  unreadable: 'Your addresses could not be shown just now.',
+  retry: 'TRY AGAIN',
+  /** Accessible names of an address's links, with its name. */
+  editLabel: (name: string) => `Edit the address of ${name}`,
+  makeDefaultLabel: (name: string) => `Make the address of ${name} your default`,
+  removeLabel: (name: string) => `Remove the address of ${name}`,
+  /** The most a collector keeps (services/addresses.ts ADDRESS_LIMITS.saved). */
+  max: 5,
+});
+
+/**
  * The sound signature (P-D07): SOUND ON / OFF, a text link at the foot of the landing. Its accessible name is SOUND,
  * its state is said by aria-pressed (ON or OFF beside the word is for the eye). On by default; kept on this device.
  */
@@ -1637,7 +1805,8 @@ export const LIVE = Object.freeze({
   addonPrice: (price: string) => `+ ${price}`,
   pay: (total: string) => `PAY · ${total}`,
   toConfirm: 'TO CONFIRM',
-  payNote: 'ORBES Client Services will contact you for payment and delivery.',
+  /** Plan NEXT LOT §3.6.B: the delivery address is the collector's own, added in YOUR ORDERS. */
+  payNote: 'ORBES Client Services will contact you for payment. Your delivery address is added in YOUR ORDERS.',
   release: 'RELEASE MY PLACE',
   /** RELEASE MY PLACE gives the piece back at once: a second tap within a few seconds confirms it. */
   releaseConfirm: 'TAP AGAIN TO RELEASE',
@@ -1645,7 +1814,7 @@ export const LIVE = Object.freeze({
   confirmed: 'CONFIRMED',
   confirmedOf: (name: string) => `LIVE RELEASE · ${name}`,
   reservedIn: (size: string, quantity: number) =>
-    `${quantity > 1 ? `Your ${quantity} pieces are reserved ${inSizeWords(size)}.` : isOneSize(size) ? 'Your piece is reserved in ONE SIZE.' : `Your piece is reserved in size ${size}.`} ORBES Client Services will contact you to settle payment and delivery.`,
+    `${quantity > 1 ? `Your ${quantity} pieces are reserved ${inSizeWords(size)}.` : isOneSize(size) ? 'Your piece is reserved in ONE SIZE.' : `Your piece is reserved in size ${size}.`} ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.`,
   /** MY PIECES' YOUR RELEASES (plan LIVE RELEASE+, Interconnection): the piece secured, a past fact true at every step of
    *  its order (paid, shipped, delivered, cancelled or returned); its steps are its order's. */
   securedInPieces: (size: string, quantity: number) =>

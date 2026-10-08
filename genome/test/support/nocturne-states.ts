@@ -289,6 +289,92 @@ async function claimWaiting(run: StateRun): Promise<void> {
   await services.claimRenewals.renew(piece.product.productId, { reason: 'Card lost', expect: 'SOLD', after: null }, admin);
 }
 
+/** The demo's ORBES admin, as an actor. */
+async function demoAdmin(run: StateRun): Promise<{ type: 'admin'; id: string }> {
+  return { type: 'admin' as const, id: (await run.stage.ctx.db.selectFrom('admin_users').select('id').orderBy('created_at').executeTakeFirstOrThrow()).id };
+}
+
+/** The two addresses `you` saves in the states of plan NEXT LOT §3.6 (test values of this demo only). */
+const YOUR_ADDRESSES = [
+  { name: 'Camille Laurent', address: '8 rue Saint-Honoré\n75001 Paris', country: 'FR', phone: '+33 6 12 34 56 78' },
+  { name: 'Camille Laurent', address: '25 Old Bond Street\nLondon W1S 4QB', country: 'GB', phone: '+44 20 7946 0000' },
+] as const;
+
+/**
+ * A salon order of MONOLITHE in blue, size 17, € 4 200, for `you` (closed ACCEPTED by ORBES Client Services), its piece
+ * issued by the Generator and counted in where it is served (test/support/fulfil.ts countPiecesIn), paid: it holds its
+ * piece (IN PREPARATION). Its id and its piece.
+ */
+async function bluePaidOrder(run: StateRun, admin: { type: 'admin'; id: string }): Promise<{ orderId: string; productId: string }> {
+  const { db, services } = run.stage.ctx;
+  const you = run.demo.accounts.you!;
+  const blue = (await db.selectFrom('models').select('id').where('slug', '=', run.demo.slugs.blue!).executeTakeFirstOrThrow()).id;
+  const request = await db.insertInto('shop_requests').values({ account_id: you.id, model_id: blue, created_at: NOCTURNE_NOW }).returning('id').executeTakeFirstOrThrow();
+  await services.salon.close(request.id, { note: 'A MONOLITHE in blue, size 17.', outcome: 'ACCEPTED' }, admin);
+  const order = await db.selectFrom('orders').select(['id', 'location_id']).where('shop_request_id', '=', request.id).executeTakeFirstOrThrow();
+  const sku = (await db.selectFrom('skus').select('id').where('model_id', '=', blue).where('size_label', '=', '17').executeTakeFirstOrThrow()).id;
+  const piece = await services.issuance.issueProduct(
+    { categoryCode: 'J', year: 2026, modelId: blue, variant: '17', material: '925 STERLING SILVER, BLUE LACQUER', productionBatch: 'B-2026-10', productionDate: '2026-10-01', withClaimSecret: true },
+    admin,
+  );
+  await countPiecesIn(run.stage.ctx, { skuId: sku, locationId: order.location_id, productRefs: [piece.product.productId] }, admin);
+  await services.orders.setTerms(order.id, { sizeLabel: '17', priceMinor: 420_000, currency: 'EUR' }, admin);
+  await services.orders.transition(order.id, { to: 'PAID' }, admin);
+  return { orderId: order.id, productId: piece.product.productId };
+}
+
+/**
+ * Plan NEXT LOT §3.6.B and C, the state orders-delivery (its own stage, the full story): ORBES sets an engraving price in
+ * euros (€ 30); you save a default address and put it on your reserved LIVE order, then type its engraving (the release's
+ * ENGRAVING add-on: its words alone); ORBES Client Services sells you a MONOLITHE in blue, paid, holding its piece (your
+ * default address put on it), you add an engraving at the price of the settings (its own invoice), and the agent begins
+ * packing it. Written once per stage.
+ */
+async function ordersDelivery(run: StateRun): Promise<void> {
+  const { db, services } = run.stage.ctx;
+  const you = run.demo.accounts.you!;
+  if (await db.selectFrom('account_addresses').select('id').where('account_id', '=', you.id).executeTakeFirst()) return;
+  const admin = await demoAdmin(run);
+  await services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, admin);
+  const saved = await services.addresses.create(you.id, { ...YOUR_ADDRESSES[0], isDefault: true }, you.actor);
+  const live = await db.selectFrom('orders').select('id').where('account_id', '=', you.id).where('channel', '=', 'LIVE').where('status', '=', 'RESERVED').executeTakeFirstOrThrow();
+  await services.orders.setAddress(you.id, live.id, { addressId: saved.addresses[0]!.id }, you.actor);
+  await services.orders.setEngraving(you.id, live.id, 'C.L.', you.actor);
+  const blue = await bluePaidOrder(run, admin);
+  await services.orders.setEngraving(you.id, blue.orderId, 'A.R.', you.actor);
+  await services.logistics.startPacking(blue.orderId, admin, null);
+}
+
+/**
+ * Plan NEXT LOT §3.6.D, the state orders-case (its own stage, the full story): the order's location is given its postal
+ * address; ORBES Client Services sells you a MONOLITHE in blue, you give its delivery address, it is packed and shipped
+ * through the agent's steps with Colissimo, delivered today; you ask to return it (the size does not fit). The draw's piece delivered on 22 September
+ * still offers RETURNS AND EXCHANGES. Written once per stage.
+ */
+async function ordersCase(run: StateRun): Promise<void> {
+  const { db, services } = run.stage.ctx;
+  const you = run.demo.accounts.you!;
+  if (await db.selectFrom('order_cases').select('id').executeTakeFirst()) return;
+  const admin = await demoAdmin(run);
+  const blue = await bluePaidOrder(run, admin);
+  await services.orders.setAddress(you.id, blue.orderId, { address: YOUR_ADDRESSES[0], save: false }, you.actor);
+  const location = (await db.selectFrom('orders').select('location_id').where('id', '=', blue.orderId).executeTakeFirstOrThrow()).location_id;
+  await services.stock.updateLocation(location, { address: 'ORBES LOGISTICS\n14 rue des Entrepreneurs\n93400 Saint-Ouen\nFrance' }, admin);
+  const colissimo = (await db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
+  await packAndShip(run.stage.ctx, blue.orderId, { carrierId: colissimo, trackingNumber: '6A10000000025', declaredValueMinor: 420_000, pieces: { [blue.orderId]: blue.productId } }, admin);
+  await services.orders.transition(blue.orderId, { to: 'DELIVERED' }, admin);
+  await services.orderCases.request(you.id, blue.orderId, { kind: 'RETURN', reason: 'SIZE', note: 'A size smaller, please.' }, you.actor);
+}
+
+/** Plan NEXT LOT §3.6.B, the state account-addresses (its own stage, the full story): you save two addresses, Paris the default. */
+async function accountAddresses(run: StateRun): Promise<void> {
+  const { db, services } = run.stage.ctx;
+  const you = run.demo.accounts.you!;
+  if (await db.selectFrom('account_addresses').select('id').where('account_id', '=', you.id).executeTakeFirst()) return;
+  await services.addresses.create(you.id, { ...YOUR_ADDRESSES[0], isDefault: true }, you.actor);
+  await services.addresses.create(you.id, { ...YOUR_ADDRESSES[1], isDefault: false }, you.actor);
+}
+
 /**
  * A post's answer as the server sent it, its invitation changed by `change` (and the reader's answer set to `answer`
  * when given): the states of an invitation the demo's clock does not reach (C22: answers closed, every place taken).
@@ -635,6 +721,42 @@ export const UI_STATES: readonly UiState[] = [
     },
     ready: '.view--pieces .pieces__claim',
   },
+  // Plan NEXT LOT §3.6.B, C: DELIVERY ADDRESS and ENGRAVING on the orders, IN PREPARATION, packing begun; on its own stage,
+  // whose state writes them (ordersDelivery).
+  {
+    id: 'orders-delivery',
+    title: 'MY PIECES, ORDERS: DELIVERY ADDRESS with CHANGE and the release\u2019s engraving on the reserved order; a paid order IN PREPARATION, its priced engraving, packing begun',
+    refs: ['NEXT LOT §3.6.B', 'NEXT LOT §3.6.C'],
+    variant: 'orders-delivery',
+    as: you,
+    path: at('/verify/pieces'),
+    mutates: true,
+    act: async (run) => {
+      await ordersDelivery(run);
+      await run.page.reload();
+      await piecesTab(run, 'ORDERS');
+      await run.page.locator('.view--pieces .pieces__address-change').first().waitFor();
+    },
+    ready: '.view--pieces .pieces__engraving-locked',
+  },
+  // Plan NEXT LOT §3.6.D: a return asked on a delivered order (RETURN REQUESTED, RETURN ADDRESS), and RETURNS AND
+  // EXCHANGES on another; on its own stage, whose state writes them (ordersCase).
+  {
+    id: 'orders-case',
+    title: 'MY PIECES, ORDERS: RETURN REQUESTED with its RETURN ADDRESS; RETURNS AND EXCHANGES on a delivered order',
+    refs: ['NEXT LOT §3.6.D'],
+    variant: 'orders-case',
+    as: you,
+    path: at('/verify/pieces'),
+    mutates: true,
+    act: async (run) => {
+      await ordersCase(run);
+      await run.page.reload();
+      await piecesTab(run, 'ORDERS');
+      await run.page.locator('.view--pieces .pieces__request').waitFor();
+    },
+    ready: '.view--pieces .pieces__return-address',
+  },
   {
     id: 'pieces-releases',
     title: 'MY PIECES, RELEASES: the account\u2019s entries, their state, sentence and id',
@@ -881,6 +1003,26 @@ export const UI_STATES: readonly UiState[] = [
     path: at('/verify'),
     act: (run) => openAccountSheet(run),
     ready: '.n-account:not([hidden]) .n-account__in-use',
+    viewport: true,
+  },
+  // Plan NEXT LOT §3.6.B: YOUR ADDRESSES in the account sheet, two saved, one the default; on its own stage
+  // (accountAddresses).
+  {
+    id: 'account-addresses',
+    title: 'The account sheet: YOUR ADDRESSES, two saved (DEFAULT), EDIT · MAKE DEFAULT · REMOVE, ADD AN ADDRESS',
+    refs: ['NEXT LOT §3.6.B'],
+    variant: 'account-addresses',
+    as: you,
+    path: at('/verify'),
+    mutates: true,
+    act: async (run) => {
+      await accountAddresses(run);
+      await openAccountSheet(run);
+      await run.page.locator('.n-account').getByRole('button', { name: /^YOUR ADDRESSES/ }).click();
+      await run.page.locator('.n-account:not([hidden]) .n-account__address').first().waitFor({ timeout: 20_000 });
+      await fitSheet(run.page);
+    },
+    ready: '.n-account:not([hidden]) .n-account__addresses-add',
     viewport: true,
   },
   {

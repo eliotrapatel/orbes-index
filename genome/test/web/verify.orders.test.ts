@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ORDERS } from '../../src/web/verify/copy.js';
-import { ORDER_PATH, orderClaim, orderDate, orderDocuments, orderModel, orderModels, orderRows, orderSteps, shippingValue } from '../../src/web/verify/orders-model.js';
+import { ORDER_PATH, orderAddress, orderClaim, orderDate, orderDocuments, orderEngraving, orderModel, orderModels, orderRequest, orderReturns, orderRows, orderSteps, shippingValue } from '../../src/web/verify/orders-model.js';
 import type { AccountOrder } from '../../src/web/verify/types.js';
 import { brandForbiddenTerms, EXTRA_FORBIDDEN_EN, findForbidden } from '../docs/lexicon.js';
 
@@ -37,19 +37,22 @@ const SHIPMENT = { carrier: 'Colissimo', trackingNumber: '6A 1234 5678 901', tra
 const steps = (o: AccountOrder, offset = 0) => orderSteps(o, offset).map((s) => [s.label, s.date, s.state]);
 
 describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
-  it('reads RESERVED · PAID · SHIPPED · DELIVERED, each reached with its date, the current one marked, those to come without one', () => {
-    expect(ORDER_PATH).toEqual(['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED']);
+  it('reads RESERVED · PAID · IN PREPARATION · SHIPPED · DELIVERED, each reached with its date, the current one marked, those to come without one', () => {
+    // Plan NEXT LOT §3.6.A: IN PREPARATION, a step of the card only, between PAID and SHIPPED.
+    expect(ORDER_PATH).toEqual(['RESERVED', 'PAID', 'IN_PREPARATION', 'SHIPPED', 'DELIVERED']);
     expect(steps(order())).toEqual([
       ['RESERVED', '5 OCT 2026', 'current'],
       ['PAID', '', 'next'],
+      ['IN PREPARATION', '', 'next'],
       ['SHIPPED', '', 'next'],
       ['DELIVERED', '', 'next'],
     ]);
     // Several steps reached in the year of the first: each by its day and month (C24, C32: five columns hold no year).
-    const shipped = order({ status: 'SHIPPED', paidAt: '2026-10-06T09:00:00.000Z', shippedAt: '2026-10-08T15:30:00.000Z', shipment: SHIPMENT });
+    const shipped = order({ status: 'SHIPPED', paidAt: '2026-10-06T09:00:00.000Z', preparingAt: '2026-10-07T09:00:00.000Z', shippedAt: '2026-10-08T15:30:00.000Z', shipment: SHIPMENT });
     expect(steps(shipped)).toEqual([
       ['RESERVED', '5 OCT', 'done'],
       ['PAID', '6 OCT', 'done'],
+      ['IN PREPARATION', '7 OCT', 'done'],
       ['SHIPPED', '8 OCT', 'current'],
       ['DELIVERED', '', 'next'],
     ]);
@@ -58,8 +61,44 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
       ['RESERVED', '30 DEC', 'done'],
       ['PAID', '4 JAN 2027', 'current'],
     ]);
-    const delivered = order({ status: 'DELIVERED', paidAt: '2026-10-06T09:00:00.000Z', shippedAt: '2026-10-08T15:30:00.000Z', deliveredAt: '2026-10-10T10:00:00.000Z', shipment: SHIPMENT });
-    expect(steps(delivered).map((s) => s[2])).toEqual(['done', 'done', 'done', 'current']);
+    const delivered = order({ status: 'DELIVERED', paidAt: '2026-10-06T09:00:00.000Z', preparingAt: '2026-10-06T09:00:00.000Z', shippedAt: '2026-10-08T15:30:00.000Z', deliveredAt: '2026-10-10T10:00:00.000Z', shipment: SHIPMENT });
+    expect(steps(delivered).map((s) => s[2])).toEqual(['done', 'done', 'done', 'done', 'current']);
+  });
+
+  it('IN PREPARATION (plan NEXT LOT §3.6.A): current once paid with its piece assigned, its date the server\'s; never while waiting; kept once reached', () => {
+    // PAID without its piece (waiting for supplier stock, never said): PAID current, its sentence.
+    const waiting = order({ status: 'PAID', paidAt: '2026-10-06T09:00:00.000Z', preparingAt: null });
+    expect(steps(waiting).map((s) => [s[0], s[2]])).toEqual([
+      ['RESERVED', 'done'],
+      ['PAID', 'current'],
+      ['IN PREPARATION', 'next'],
+      ['SHIPPED', 'next'],
+      ['DELIVERED', 'next'],
+    ]);
+    expect(orderModel(waiting, 0)!.sentence).toBe(ORDERS.sentence.PAID);
+    // PAID with its piece: IN PREPARATION current, dated, with its sentence.
+    const preparing = order({ status: 'PAID', paidAt: '2026-10-06T09:00:00.000Z', preparingAt: '2026-10-07T09:00:00.000Z' });
+    expect(steps(preparing)).toEqual([
+      ['RESERVED', '5 OCT', 'done'],
+      ['PAID', '6 OCT', 'done'],
+      ['IN PREPARATION', '7 OCT', 'current'],
+      ['SHIPPED', '', 'next'],
+      ['DELIVERED', '', 'next'],
+    ]);
+    expect(orderModel(preparing, 0)!.sentence).toBe(ORDERS.sentence.IN_PREPARATION);
+    // RESERVED with its piece assigned stays RESERVED until paid (§3.6.A).
+    expect(steps(order({ preparingAt: '2026-10-05T19:00:00.000Z' })).map((s) => s[2])).toEqual(['current', 'next', 'next', 'next', 'next']);
+    // An order shipped before IN PREPARATION existed: the step done, without a date.
+    const before = order({ status: 'SHIPPED', paidAt: '2026-10-06T09:00:00.000Z', shippedAt: '2026-10-08T15:30:00.000Z', shipment: SHIPMENT });
+    expect(steps(before)[2]).toEqual(['IN PREPARATION', '', 'done']);
+    // RETURNED keeps the step it reached; CANCELLED while waiting never shows it.
+    const returned = order({ status: 'RETURNED', paidAt: '2026-10-06T09:00:00.000Z', preparingAt: '2026-10-07T09:00:00.000Z', shippedAt: '2026-10-08T09:00:00.000Z', returnedAt: '2026-10-12T08:00:00.000Z', shipment: SHIPMENT });
+    expect(steps(returned).map((s) => s[0])).toEqual(['RESERVED', 'PAID', 'IN PREPARATION', 'SHIPPED', 'RETURNED']);
+    const cancelled = order({ status: 'CANCELLED', paidAt: '2026-10-06T09:00:00.000Z', preparingAt: null, cancelledAt: '2026-10-07T08:00:00.000Z' });
+    expect(steps(cancelled).map((s) => s[0])).toEqual(['RESERVED', 'PAID', 'CANCELLED']);
+    // A delivery looked into: one sentence in place of the step's.
+    expect(orderModel(order({ status: 'SHIPPED', shipment: SHIPMENT, deliveryIssue: true }), 0)!.sentence).toBe(ORDERS.deliveryIssue);
+    expect(orderModel(order({ status: 'SHIPPED', shipment: SHIPMENT, deliveryIssue: false }), 0)!.sentence).toBe(ORDERS.sentence.SHIPPED);
   });
 
   it('a CANCELLED or RETURNED order: the steps it reached, then that end with its date', () => {
@@ -99,8 +138,8 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
       expect(orderDate('2026-12-14T23:30:00.000Z')).toBe('15 DEC 2026');
       expect(orderDate('not a date')).toBe('');
       const reserved = order({ status: 'PAID', reservedAt: '2026-07-14T22:30:00.000Z', paidAt: '2026-12-14T23:30:00.000Z' });
-      expect(orderSteps(reserved).map((s) => s.date)).toEqual(['15 JUL', '15 DEC', '', '']);
-      expect(orderModels([reserved])[0]!.steps.map((s) => s.date)).toEqual(['15 JUL', '15 DEC', '', '']);
+      expect(orderSteps(reserved).map((s) => s.date)).toEqual(['15 JUL', '15 DEC', '', '', '']);
+      expect(orderModels([reserved])[0]!.steps.map((s) => s.date)).toEqual(['15 JUL', '15 DEC', '', '', '']);
     } finally {
       if (tz === undefined) delete process.env.TZ;
       else process.env.TZ = tz;
@@ -252,10 +291,32 @@ describe('YOUR ORDERS: an order\'s card (orders-model.ts)', () => {
       documents: { invoice: { number: 'INV-2026-000001', issuedAt: '2026-10-06T09:00:00.000Z' }, creditNote: { number: 'CN-2026-000002', issuedAt: '2026-10-09T09:00:00.000Z' }, careGuide: true, certificate: true },
     });
     expect(orderDocuments(all)).toEqual([
-      { kind: 'INVOICE', label: 'INVOICE', number: 'INV-2026-000001', ariaLabel: 'Download the invoice INV-2026-000001 (PDF)', file: 'invoice' },
-      { kind: 'CREDIT_NOTE', label: 'CREDIT NOTE', number: 'CN-2026-000002', ariaLabel: 'Download the credit note CN-2026-000002 (PDF)', file: 'credit-note' },
-      { kind: 'CARE_GUIDE', label: 'CARE GUIDE', number: null, ariaLabel: 'The care guide of MONOLITHE', file: null },
-      { kind: 'CERTIFICATE', label: 'OWNERSHIP CERTIFICATE', number: null, ariaLabel: 'Download the ownership certificate of your MONOLITHE (PDF)', file: 'certificate' },
+      { kind: 'INVOICE', label: 'INVOICE', number: 'INV-2026-000001', ariaLabel: 'Download the invoice INV-2026-000001 (PDF)', file: 'invoice', byNumber: false },
+      { kind: 'CREDIT_NOTE', label: 'CREDIT NOTE', number: 'CN-2026-000002', ariaLabel: 'Download the credit note CN-2026-000002 (PDF)', file: 'credit-note', byNumber: false },
+      { kind: 'CARE_GUIDE', label: 'CARE GUIDE', number: null, ariaLabel: 'The care guide of MONOLITHE', file: null, byNumber: false },
+      { kind: 'CERTIFICATE', label: 'OWNERSHIP CERTIFICATE', number: null, ariaLabel: 'Download the ownership certificate of your MONOLITHE (PDF)', file: 'certificate', byNumber: false },
+    ]);
+    // Plan NEXT LOT §3.6.C: its other documents (an engraving added, then removed, after payment), in order of issue, after
+    // the invoice and the credit note, each saved by its number; a number of the other kind, or none, left out.
+    const others = order({
+      status: 'PAID',
+      documents: {
+        invoice: { number: 'INV-2026-000001', issuedAt: '2026-10-06T09:00:00.000Z' },
+        creditNote: null,
+        others: [
+          { kind: 'INVOICE', number: 'INV-2026-000003', issuedAt: '2026-10-07T09:00:00.000Z' },
+          { kind: 'CREDIT_NOTE', number: 'CN-2026-000004', issuedAt: '2026-10-08T09:00:00.000Z' },
+          { kind: 'INVOICE', number: 'CN-2026-000005', issuedAt: '2026-10-08T09:00:00.000Z' },
+        ],
+        careGuide: true,
+        certificate: false,
+      },
+    });
+    expect(orderDocuments(others).map((d) => [d.label, d.number, d.file, d.byNumber])).toEqual([
+      ['INVOICE', 'INV-2026-000001', 'invoice', false],
+      ['INVOICE', 'INV-2026-000003', null, true],
+      ['CREDIT NOTE', 'CN-2026-000004', null, true],
+      ['CARE GUIDE', null, null, false],
     ]);
     expect(orderModel(all, 0)!.documents).toEqual(orderDocuments(all));
     expect(orderModel(all, 0)!.id).toBe(all.id);
@@ -332,5 +393,130 @@ describe('ORDERS: the model\'s photograph above each order (plan NOCTURNE, addit
     expect(orderModel(order({ imageUrl: null }), 0)!.photo).toBeNull();
     expect(orderModel(order({ imageUrl: ref, modelVariant: 'Steel' }), 0)!.photo).toEqual({ kind: 'model', src: ref, alt: 'The MONOLITHE model in steel, photographed by ORBES', caption: 'THE MODEL' });
     for (const imageUrl of [`${ref}?x`, 'https://example.com/a.webp', 'javascript:alert(1)']) expect(orderModel(order({ imageUrl }), 0)!.photo, imageUrl).toBeNull();
+  });
+});
+
+describe('YOUR ORDERS: the collector\'s side of an order (plan NEXT LOT §3.6)', () => {
+  const ADDRESS = { name: 'Jeanne Martin', lines: '12 rue de la Paix\n75002 Paris', country: 'FR', phone: '+33 6 12 34 56 78' };
+  const editable = { address: true, engraving: true };
+  const offer = { priceMinor: 3_000, included: false, maxLength: 20 };
+
+  it('ENGRAVING (§3.6.C): its words with the price it took, counted in the TOTAL; the release\'s add-on paid for it once, its words alone', () => {
+    // A Settings-priced engraving: « J.M. » · + € 30, in the TOTAL.
+    const priced = order({ addons: [], engraving: { text: 'J.M.', priceMinor: 3_000 } });
+    expect(orderRows(priced)).toEqual([
+      ['SIZE', '52'],
+      ['PRICE', `€${NBSP}4${NBSP}800`],
+      ['ENGRAVING', `« J.M. » · + €${NBSP}30`],
+      ['TOTAL', `€${NBSP}4${NBSP}830`],
+    ]);
+    // The release's ENGRAVING add-on carries the price: the words alone, the TOTAL as before (never counted twice).
+    const included = order({ engraving: { text: 'J.M.', priceMinor: null } });
+    expect(orderRows(included)).toEqual([
+      ['SIZE', '52'],
+      ['PRICE', `€${NBSP}4${NBSP}800`],
+      ['ENGRAVING', `+ €${NBSP}250`],
+      ['ENGRAVING', '« J.M. »'],
+      ['TOTAL', `€${NBSP}5${NBSP}050`],
+    ]);
+    // Words of before, no price: shown, no TOTAL of their own.
+    expect(orderRows(order({ addons: [], engraving: { text: 'A & B', priceMinor: null } }))).toEqual([
+      ['SIZE', '52'],
+      ['PRICE', `€${NBSP}4${NBSP}800`],
+      ['ENGRAVING', '« A & B »'],
+    ]);
+  });
+
+  it('ENGRAVING\'s link and sheet: ADD, CHANGE or ENTER; once paid, the documents it brings; once packing has begun, its line', () => {
+    const E = ORDERS.engraving;
+    expect(orderEngraving(order({ addons: [], editable, engravingOffer: offer }))).toMatchObject({ action: E.add, text: '', included: false, priceLine: E.price(`€${NBSP}30`), addNote: null, removable: false });
+    // Paid: adding one brings its own invoice; removing a priced one, its credit note.
+    expect(orderEngraving(order({ status: 'PAID', addons: [], editable, engravingOffer: offer }))!.addNote).toBe(E.paidAdd);
+    expect(orderEngraving(order({ status: 'PAID', addons: [], editable, engravingOffer: offer, engraving: { text: 'J.M.', priceMinor: 3_000 } }))).toMatchObject({ action: E.change, text: 'J.M.', removable: true, removeNote: E.paidRemove, addNote: null });
+    // A free one issues no document.
+    expect(orderEngraving(order({ status: 'PAID', addons: [], editable, engravingOffer: { ...offer, priceMinor: 0 } }))!.addNote).toBeNull();
+    // The release's add-on: ENTER YOUR ENGRAVING, then CHANGE; no price, no REMOVE.
+    const addon = { priceMinor: null, included: true, maxLength: 20 };
+    expect(orderEngraving(order({ editable, engravingOffer: addon }))).toMatchObject({ action: E.enter, included: true, priceLine: E.included, removable: false, removeNote: null });
+    expect(orderEngraving(order({ status: 'PAID', editable, engravingOffer: addon, engraving: { text: 'J.M.', priceMinor: null } }))).toMatchObject({ action: E.change, removable: false, removeNote: null });
+    // None offered: no link.
+    expect(orderEngraving(order({ addons: [], editable: { address: true, engraving: false }, engravingOffer: null }))).toBeNull();
+    // Packing has begun (its address no longer the collector's): the line in place of the link.
+    const packing = order({ status: 'PAID', address: ADDRESS, editable: { address: false, engraving: false }, engravingOffer: offer, engraving: { text: 'J.M.', priceMinor: 3_000 } });
+    expect(orderEngraving(packing)).toMatchObject({ action: null, locked: E.locked });
+    expect(orderEngraving({ ...packing, engraving: null })).toBeNull();
+  });
+
+  it('DELIVERY ADDRESS (§3.6.B): its lines with CHANGE, ADD THE DELIVERY ADDRESS, packing begun, read once shipped, none once cancelled; the order it travels with', () => {
+    const A = ORDERS.address;
+    expect(orderAddress(order({ address: ADDRESS, editable }))).toEqual({
+      state: 'editable',
+      lines: ['Jeanne Martin', '12 rue de la Paix', '75002 Paris', 'France', '+33 6 12 34 56 78'],
+      sentence: null,
+      current: { name: 'Jeanne Martin', address: ADDRESS.lines, country: 'FR', phone: '+33 6 12 34 56 78' },
+    });
+    expect(orderAddress(order({ address: null, editable }))).toEqual({ state: 'empty', lines: [], sentence: A.empty, current: null });
+    expect(orderAddress(order({ status: 'PAID', address: ADDRESS, editable: { address: false, engraving: false } }))).toMatchObject({ state: 'locked', sentence: A.locked });
+    expect(orderAddress(order({ status: 'SHIPPED', address: ADDRESS, editable: { address: false, engraving: false }, shipment: SHIPMENT }))).toMatchObject({ state: 'read', sentence: null });
+    // An address of before: its country and phone not entered, left out.
+    expect(orderAddress(order({ status: 'DELIVERED', address: { name: 'J. Martin', lines: 'Paris', country: null, phone: null } }))!.lines).toEqual(['J. Martin', 'Paris']);
+    expect(orderAddress(order({ status: 'CANCELLED', address: ADDRESS, cancelledAt: '2026-10-06T08:00:00.000Z' }))).toBeNull();
+    // A welcome gift travels with its order, to its address: no CHANGE; its order cancelled, ORBES Client Services says.
+    const gift = order({ channel: 'GIFT', withOrder: 'OR-3F9A21C4', addressOf: 'OR-3F9A21C4', address: ADDRESS, editable: { address: false, engraving: false } });
+    expect(orderAddress(gift)).toEqual({ state: 'travels', lines: [], sentence: A.travels('OR-3F9A21C4'), current: null });
+    const parent = order({ id: '3f9a21c4-0000-4000-8000-000000000002', reference: 'OR-3F9A21C4', status: 'CANCELLED', cancelledAt: '2026-10-06T08:00:00.000Z' });
+    expect(orderModels([gift, parent], 0)[0]!.address!.sentence).toBe(A.travelsCancelled);
+    // A server before it: nothing said.
+    expect(orderAddress(order())).toBeNull();
+  });
+
+  it('RETURNS AND EXCHANGES (§3.6.D): until when, each other size in stock or not; none on a gift, before delivery, or for a model of one size\'s exchange', () => {
+    const delivered = order({ status: 'DELIVERED', deliveredAt: '2026-10-07T10:00:00.000Z', returnable: { until: '2026-10-21T10:00:00.000Z', sizes: [{ label: '50', available: true }, { label: '54', available: false }] } });
+    expect(orderReturns(delivered, 0)).toEqual({
+      lead: ORDERS.returns.lead('21 OCT 2026'),
+      sizes: [
+        { label: '50', available: true },
+        { label: '54', available: false },
+      ],
+      concerning: 'ORDER OR-1A2B3C4D · MONOLITHE · SIZE 52',
+    });
+    expect(orderReturns({ ...delivered, returnable: { until: '2026-10-21T10:00:00.000Z', sizes: [] } }, 0)!.sizes).toEqual([]);
+    expect(orderReturns({ ...delivered, channel: 'GIFT' }, 0)).toBeNull();
+    expect(orderReturns({ ...delivered, status: 'SHIPPED' }, 0)).toBeNull();
+    expect(orderReturns({ ...delivered, returnable: null }, 0)).toBeNull();
+  });
+
+  it('its request (§3.6.D): asked with the return address (or that it follows in MESSAGES), received, exchanged for its order, answered in MESSAGES', () => {
+    const R = ORDERS.returns;
+    const base = { kind: 'EXCHANGE' as const, status: 'OPEN' as const, openedAt: '2026-10-12T10:00:00.000Z', receivedAt: null, sizeLabel: '18', returnAddress: 'ORBES LOGISTICS\n1 rue du Port\n13002 Marseille', outcome: null, exchangeOrder: null };
+    const o = (c: Partial<typeof base> | Record<string, unknown>) => order({ status: 'DELIVERED', case: { ...base, ...c } as never });
+    expect(orderRequest(o({}), 0)).toEqual({
+      label: 'EXCHANGE REQUESTED · SIZE 18 · 12 OCT 2026',
+      received: null,
+      sentences: [R.sendBack('OR-1A2B3C4D')],
+      returnAddress: ['ORBES LOGISTICS', '1 rue du Port', '13002 Marseille'],
+    });
+    expect(orderRequest(o({ kind: 'RETURN', sizeLabel: null, returnAddress: null }), 0)).toEqual({ label: 'RETURN REQUESTED · 12 OCT 2026', received: null, sentences: [R.noReturnAddress], returnAddress: null });
+    expect(orderRequest(o({ status: 'RECEIVED', receivedAt: '2026-10-15T10:00:00.000Z' }), 0)).toMatchObject({ received: 'PIECE RECEIVED · 15 OCT 2026', sentences: [R.receivedText], returnAddress: null });
+    expect(orderRequest(o({ status: 'CLOSED', outcome: 'EXCHANGE', exchangeOrder: { id: '9b2c0000-0000-4000-8000-000000000003', reference: 'OR-9B2C0000' } }), 0)!.label).toBe('EXCHANGED FOR SIZE 18 · ORDER OR-9B2C0000');
+    // A return decided: the order reads RETURNED, with its credit note; nothing more here.
+    expect(orderRequest(o({ kind: 'RETURN', status: 'CLOSED', outcome: 'REFUND' }), 0)).toBeNull();
+    expect(orderRequest(o({ status: 'CANCELLED' }), 0)).toMatchObject({ sentences: [R.answered] });
+    expect(orderRequest(order(), 0)).toBeNull();
+  });
+
+  it('an EXCHANGE order (§3.6.D) is kept and reads SIZE EXCHANGE, with its model, size and steps like any order', () => {
+    const m = orderModel(order({ channel: 'EXCHANGE', release: null, status: 'PAID', paidAt: '2026-10-16T10:00:00.000Z' }), 0)!;
+    expect(m.line).toBe('SIZE EXCHANGE');
+    expect(m.steps.map((s) => s.label)).toEqual(['RESERVED', 'PAID', 'IN PREPARATION', 'SHIPPED', 'DELIVERED']);
+  });
+
+  it('writes the brand\'s English in its new words: no exclamation, no word of §4.5, a piece and never a product', () => {
+    const said = (v: unknown): string[] =>
+      typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('OR-3F9A21C4', '12 OCT 2026'))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];
+    const words = [ORDERS.address, ORDERS.addressFields, ORDERS.engraving, ORDERS.returns, ORDERS.deliveryIssue, ORDERS.sentence, ORDERS.step].flatMap(said).join('\n');
+    expect(words).not.toContain('!');
+    expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+    expect(words).not.toMatch(/product|atelier|handmade|craft/i);
   });
 });

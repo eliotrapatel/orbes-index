@@ -359,7 +359,7 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
     await textOf(page.locator('h1'), 'CONFIRMED');
     await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(IVORY);
     expect(await page.locator('.view--live').evaluate((el) => [el.classList.contains('vault'), el.classList.contains('is-light')])).toEqual([false, true]);
-    await textOf(page.locator('.live__confirmed-text'), 'Your piece is reserved in size 52. ORBES Client Services will contact you to settle payment and delivery.');
+    await textOf(page.locator('.live__confirmed-text'), 'Your piece is reserved in size 52. ORBES Client Services will contact you to settle payment. Add your delivery address in YOUR ORDERS.');
     const entryId = (await srv.ctx.db.selectFrom('live_entries').select('id').where('drop_id', '=', r.id).where('account_id', '=', me.id).executeTakeFirstOrThrow()).id;
     const reference = `LR-${entryId.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
     await textOf(page.locator('.live__receipt .rows__row').last(), `REFERENCE ${reference}`);

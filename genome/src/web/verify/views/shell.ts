@@ -36,6 +36,7 @@ import { AccountSheet } from './account.js';
 import { CHAPTER_PATHS, showRailLive } from '../../shared/chapters.js';
 import { PIECES_PATH } from './common.js';
 import { appAnchor, CHAPTERS, drawSound, footer, icon, monogram } from './nocturne.js';
+import { OrderSheet, registerOrderSheet } from './order-sheet.js';
 import { registerMessages, registerWriteSheet, WriteSheet } from './write.js';
 import { closeStoryPreview } from './story.js';
 
@@ -96,6 +97,8 @@ export class Shell {
   readonly sheet: AccountSheet;
   /** WRITE TO ORBES CLIENT SERVICES (CS-01). */
   readonly write: WriteSheet;
+  /** An order's sheets in YOUR ORDERS (plan NEXT LOT §3.6): its delivery address, its engraving, a return or an exchange. */
+  readonly orderSheet: OrderSheet;
   private club: ClubStatus | null = null;
   private clubFor: string | null = null;
   private railReadAt = -Infinity;
@@ -177,13 +180,20 @@ export class Shell {
     });
     registerWriteSheet((context, trigger) => {
       if (this.sheet.isOpen) this.sheet.close();
+      if (this.orderSheet.isOpen) this.orderSheet.close();
       this.write.open(context, trigger);
+    });
+    this.orderSheet = new OrderSheet({ api: deps.api, session: deps.session, outside: () => [this.column, this.ring] });
+    registerOrderSheet((request) => {
+      if (this.sheet.isOpen) this.sheet.close();
+      if (this.write.isOpen) this.write.close();
+      this.orderSheet.open(request);
     });
     registerMessages((trigger) => {
       if (this.write.isOpen) this.write.close();
       this.sheet.openMessages(trigger);
     });
-    document.body.append(this.ring, this.sheet.el, this.write.el);
+    document.body.append(this.ring, this.sheet.el, this.write.el, this.orderSheet.el);
 
     deps.session.subscribe(() => this.onSession());
     this.drawAccount();
@@ -201,6 +211,7 @@ export class Shell {
     // Another screen (a chapter, back, a link): the sheets give way to it, and the story card's preview (BP-10).
     if (this.sheet.isOpen) this.sheet.close();
     if (this.write.isOpen) this.write.close();
+    if (this.orderSheet.isOpen) this.orderSheet.close();
     closeStoryPreview();
     const chapter = chapterOf(screen);
     for (const [c, link] of this.links) {

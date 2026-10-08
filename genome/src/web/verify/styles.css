@@ -1344,6 +1344,59 @@ body.nocturne .view--piece {
   cursor: progress;
 }
 
+/* Plan NEXT LOT §3.6: an order's own lines (§1.1 (j)) in the card's rhythm: a return or a size exchange as asked under
+   the claim block; the engraving's link under the rows; DELIVERY ADDRESS and RETURNS AND EXCHANGES before the reference,
+   each a label over its lines, then its link or its hairline buttons. Lines as typed keep their breaks and wrap anywhere. */
+.n-pieces__lines {
+  overflow-wrap: anywhere;
+}
+
+.n-pieces__request,
+.n-pieces__address,
+.n-pieces__returns {
+  margin-top: 20px;
+}
+
+.n-pieces__request-received,
+.n-pieces__request-text,
+.n-pieces__address-lines,
+.n-pieces__address-sentence,
+.n-pieces__returns-lead {
+  margin-top: 8px;
+}
+
+.n-pieces__request-label:focus {
+  outline: none;
+}
+
+.n-pieces__return-address {
+  margin-top: 14px;
+}
+
+.n-pieces__return-address .n-pieces__lines {
+  margin-top: 6px;
+}
+
+.n-pieces__engraving,
+.n-pieces__engraving-locked {
+  margin-top: 14px;
+}
+
+.n-pieces__address .n-tl,
+.n-pieces__engraving .n-tl {
+  margin-top: -12.25px;
+}
+
+.n-pieces__address-add,
+.n-pieces__returns-actions {
+  margin-top: 16px;
+}
+
+.n-pieces__address + .n-pieces__order-reference,
+.n-pieces__returns + .n-pieces__order-reference {
+  margin-top: 20px;
+}
+
 .n-pieces__care[hidden],
 .n-pieces__document-error[hidden] {
   display: none;
@@ -3131,6 +3184,90 @@ body.nocturne[data-screen="live"] {
   margin-top: 26px;
 }
 
+/* An order's sheets (plan NEXT LOT §3.6): the write sheet's plate; its fields, choices and sizes in the column's rhythm. */
+.n-osheet__body {
+  padding-bottom: 28px;
+}
+
+.n-osheet__lead,
+.n-osheet__loading,
+.n-osheet__unreadable {
+  margin-top: 18px;
+}
+
+.n-osheet__choices {
+  min-width: 0;
+  margin: 18px 0 0;
+  padding: 0;
+  border: 0;
+}
+
+.n-osheet__legend {
+  padding: 0;
+}
+
+.n-osheet__choice {
+  justify-content: flex-start;
+  padding: 14px 0;
+}
+
+.n-osheet__choice-words {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.n-osheet__radio {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--vault-ink);
+}
+
+.n-osheet__default {
+  margin-left: auto;
+}
+
+.n-osheet__save {
+  margin-top: 18px;
+  padding: 14px 0;
+}
+
+.n-osheet__price,
+.n-osheet__note,
+.n-osheet__decides,
+.n-osheet__size-note {
+  margin-top: 14px;
+}
+
+.n-osheet__size-label {
+  margin-top: 20px;
+}
+
+.n-osheet__sizes {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.n-osheet__sizes .n-sizes__option.is-gone {
+  color: var(--vault-soft);
+  text-decoration: line-through;
+  cursor: default;
+}
+
+.n-osheet__remove,
+.n-osheet__cancel {
+  margin-top: 14px;
+}
+
+.n-osheet__remove-error {
+  margin-top: 10px;
+}
+
+.n-osheet__remove-error[hidden] {
+  display: none;
+}
+
 /* MESSAGES' row: NEW at its right, before the chevron. */
 .n-row__new {
   margin-left: auto;
@@ -3168,6 +3305,52 @@ body.nocturne[data-screen="live"] {
 
 .n-account__sizes-retry {
   margin-top: 18px;
+}
+
+/* YOUR ADDRESSES (plan NEXT LOT §3.6.B): each address under a hairline, DEFAULT over it, its text links in a row. */
+.n-account__addresses-lead {
+  margin-top: 10px;
+}
+
+.n-account__addresses-loading,
+.n-account__addresses-error,
+.n-account__addresses-retry,
+.n-account__addresses-note,
+.n-account__addresses-empty,
+.n-account__addresses-limit,
+.n-account__addresses-add {
+  margin-top: 18px;
+}
+
+.n-account__addresses-list {
+  margin-top: 18px;
+  border-top: 1px solid var(--vault-hairline);
+  list-style: none;
+}
+
+.n-account__address {
+  padding: 16px 0 18px;
+  border-bottom: 1px solid var(--vault-hairline);
+}
+
+.n-account__address-default {
+  margin-bottom: 6px;
+}
+
+.n-account__address-lines {
+  overflow-wrap: anywhere;
+}
+
+.n-account__address-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 22px;
+  margin-top: 6px;
+}
+
+.n-account__address-switch {
+  margin-top: 18px;
+  padding: 14px 0;
 }
 
 .n-messages__head {

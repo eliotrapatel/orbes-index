@@ -79,10 +79,11 @@ async function openTab(page: Page, name: 'PIECES' | 'ORDERS' | 'RELEASES'): Prom
 const dayMonth = (date: string) => date.replace(/ \d{4}$/, '');
 /**
  * ORDERS' buttons: none but each order's WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01, site 5), exactly one
- * under each order and no other anywhere in MY PIECES; the documents are rows.
+ * under each order, and those plan NEXT LOT §3.6 adds (ADD THE DELIVERY ADDRESS on an order without one, REQUEST A RETURN
+ * and EXCHANGE THE SIZE on a delivered one), no other anywhere in MY PIECES; the documents are rows.
  */
 async function onlyWriteButtons(page: Page): Promise<void> {
-  expect(await page.locator('.view--pieces .n-btn:not(.n-write__open)').count()).toBe(0);
+  expect(await page.locator('.view--pieces .n-btn:not(.n-write__open):not(.pieces__address-add):not(.pieces__return):not(.pieces__exchange)').count()).toBe(0);
   const orders = page.locator('.view--pieces article.n-pieces__order');
   const n = await orders.count();
   expect(n).toBeGreaterThan(0);
@@ -173,13 +174,17 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     return { page, problems };
   }
 
-  /** When the order reached each step, on the phone's calendar: its offset on that date (summer or winter time). */
+  /**
+   * When the order reached each step, on the phone's calendar: its offset on that date (summer or winter time); IN
+   * PREPARATION as the server reads it (plan NEXT LOT §3.6.A).
+   */
   async function datesOf(page: Page, id: string) {
     const o = await srv.ctx.db.selectFrom('orders').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
-    const times = [o.reserved_at, o.paid_at, o.shipped_at, o.delivered_at, o.cancelled_at].map((x) => (x ? x.toISOString() : null));
+    const preparing = (await srv.ctx.services.orders.forAccount(o.account_id)).find((x) => x.id === id)?.preparingAt ?? null;
+    const times = [o.reserved_at, o.paid_at, o.shipped_at, o.delivered_at, o.cancelled_at, preparing].map((x) => (x ? x.toISOString() : null));
     const offsets = await page.evaluate((ts) => ts.map((t) => (t === null ? 0 : -new Date(t).getTimezoneOffset())), times);
-    const [reserved, paid, shipped, delivered, cancelled] = times.map((t, i) => orderDate(t, offsets[i]));
-    return { reserved: reserved!, paid: paid!, shipped: shipped!, delivered: delivered!, cancelled: cancelled! };
+    const [reserved, paid, shipped, delivered, cancelled, preparingAt] = times.map((t, i) => orderDate(t, offsets[i]));
+    return { reserved: reserved!, paid: paid!, shipped: shipped!, delivered: delivered!, cancelled: cancelled!, preparing: preparingAt! };
   }
 
   it('YOUR ORDERS: each order with its steps and their dates, the model, the size, the add-on and the price; shipped, the carrier and the tracking link; delivered, read again', async () => {
@@ -209,9 +214,12 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await textOf(live.locator('.n-pieces__order-line'), 'LIVE RELEASE · MONOLITHE — LIVE');
     await textOf(live.locator('.n-pieces__order-sentence'), ORDERS.sentence.SHIPPED);
     const steps = live.getByRole('list', { name: ORDERS.stepsLabel }).getByRole('listitem');
-    await textsOf(steps, [`RESERVED ${dayMonth(liveDates.reserved)}`, `PAID ${dayMonth(liveDates.paid)}`, `SHIPPED ${dayMonth(liveDates.shipped)}`, 'DELIVERED']);
+    // Plan NEXT LOT §3.6.A: IN PREPARATION, reached once paid with its piece counted in, dated.
+    expect(liveDates.preparing).not.toBe('');
+    await textsOf(steps, [`RESERVED ${dayMonth(liveDates.reserved)}`, `PAID ${dayMonth(liveDates.paid)}`, `IN PREPARATION ${dayMonth(liveDates.preparing)}`, `SHIPPED ${dayMonth(liveDates.shipped)}`, 'DELIVERED']);
     expect(liveDates.reserved).not.toBe(liveDates.paid);
     expect(await steps.evaluateAll((els) => els.map((e) => [e.classList.contains('is-done'), e.getAttribute('aria-current')]))).toEqual([
+      [true, null],
       [true, null],
       [true, null],
       [true, 'step'],
@@ -228,7 +236,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     const salon = cards.nth(0);
     await textOf(salon.locator('.n-pieces__order-line'), 'THE PRIVATE SALON · MONOLITHE');
     await textOf(salon.locator('.n-pieces__order-sentence'), ORDERS.sentence.RESERVED);
-    await textsOf(salon.getByRole('listitem'), [`RESERVED ${(await datesOf(page, ids.salon)).reserved}`, 'PAID', 'SHIPPED', 'DELIVERED']);
+    await textsOf(salon.getByRole('listitem'), [`RESERVED ${(await datesOf(page, ids.salon)).reserved}`, 'PAID', 'IN PREPARATION', 'SHIPPED', 'DELIVERED']);
     await textsOf(salon.locator('.n-pieces__order-rows .n-kv__row'), ['SIZE TO BE CONFIRMED', 'PRICE TO BE CONFIRMED']);
     expect(await salon.locator('.n-pieces__order-track').count()).toBe(0);
 
@@ -270,7 +278,13 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     const again = page.locator('article.n-pieces__order[data-status="DELIVERED"]');
     await visible(again);
     const delivered = await datesOf(page, ids.live);
-    await textsOf(again.getByRole('listitem'), [`RESERVED ${dayMonth(delivered.reserved)}`, `PAID ${dayMonth(delivered.paid)}`, `SHIPPED ${dayMonth(delivered.shipped)}`, `DELIVERED ${dayMonth(delivered.delivered)}`]);
+    await textsOf(again.getByRole('listitem'), [
+      `RESERVED ${dayMonth(delivered.reserved)}`,
+      `PAID ${dayMonth(delivered.paid)}`,
+      `IN PREPARATION ${dayMonth(delivered.preparing)}`,
+      `SHIPPED ${dayMonth(delivered.shipped)}`,
+      `DELIVERED ${dayMonth(delivered.delivered)}`,
+    ]);
     expect(await again.locator('[aria-current="step"]').innerText()).toMatch(/^DELIVERED/);
     await textOf(again.locator('.n-pieces__order-sentence'), ORDERS.sentence.DELIVERED);
     await visible(again.getByRole('link', { name: /^Track the shipment 6A12345678901/ }));
@@ -667,5 +681,280 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
     expect(await card(desk, ids.paid).locator('.pieces__claim').count()).toBe(0);
     expect(problems).toEqual([]);
     await page.context().close();
+  }, 120_000);
+});
+
+describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engraving, return and exchange (plan NEXT LOT §3.6; Chromium, phone)', () => {
+  const A = ORDERS.address;
+  const E = ORDERS.engraving;
+  const R = ORDERS.returns;
+  let srv: VerifyServer;
+  let browser: Browser;
+  let f: LiveFixture;
+  let colissimo: string;
+  let france: string;
+  let me: { id: string; token: string };
+  /** The orders: reserved and priced (address, engraving); paid and holding its piece (packing begins); delivered (a request). */
+  const ids = { reserved: '', packing: '', delivered: '' };
+  const PARIS = { name: 'Camille Laurent', address: '8 rue Saint-Honoré\n75001 Paris', country: 'FR', phone: '+33 6 12 34 56 78' };
+  const LONDON = { name: 'Camille Laurent', address: '25 Old Bond Street\nLondon W1S 4QB', country: 'GB', phone: '+44 20 7946 0000' };
+
+  const ref = (id: string) => `OR-${id.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+  const card = (page: Page, id: string) => page.locator(`article.n-pieces__order[data-order="${ref(id)}"]`);
+  const sheet = (page: Page) => page.locator('.n-osheet:not([hidden])');
+  const noSideways = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+
+  /** A salon order of the fixture's model in `size` for the collector, priced € 4 200 (RESERVED). */
+  async function salonOrder(size: string): Promise<string> {
+    const { services, db } = srv.ctx;
+    await inTransaction(db, (tx) => ensureSku(tx, f.modelId, size));
+    const request = await db.insertInto('shop_requests').values({ account_id: me.id, model_id: f.modelId, created_at: new Date() }).returning('id').executeTakeFirstOrThrow();
+    await services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
+    const orderId = (await db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+    await services.orders.setTerms(orderId, { sizeLabel: size, priceMinor: 420_000, currency: 'EUR' }, f.admin);
+    return orderId;
+  }
+
+  /** A piece of the fixture's model in `size`, issued and counted in at FRANCE WAREHOUSE (serving an order waiting for it). */
+  async function pieceIn(size: string): Promise<string> {
+    const sku = await inTransaction(srv.ctx.db, (tx) => ensureSku(tx, f.modelId, size));
+    const p = await srv.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: size, material: '925 STERLING SILVER', withClaimSecret: true }, f.admin);
+    await countPiecesIn(srv.ctx, { skuId: sku, locationId: france, productRefs: [p.product.productId] }, f.admin);
+    return p.product.productId;
+  }
+
+  beforeAll(async () => {
+    mkdirSync(OUT_DIR, { recursive: true });
+    srv = await startVerifyServer();
+    f = await liveFixture(srv.ctx.db, new Date(Date.now() - DAY).toISOString());
+    const { services, db } = srv.ctx;
+    colissimo = (await db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
+    france = (await db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
+    await services.stock.updateLocation(france, { address: 'ORBES LOGISTICS\n14 rue des Entrepreneurs\n93400 Saint-Ouen\nFrance' }, f.admin);
+    await services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, f.admin);
+    const { account: a, session } = await services.auth.registerAccount({ email: 'delivery.e2e.me@example.com', password: PASSWORD }, {});
+    me = { id: a.id, token: session.token };
+    const actor = { type: 'account' as const, id: me.id };
+    // Delivered, size 52, with its address: the other sizes 50 (one piece in stock) and 54 (none) for an exchange.
+    ids.delivered = await salonOrder('52');
+    await services.orders.setAddress(me.id, ids.delivered, { address: PARIS, save: false }, actor);
+    await services.orders.transition(ids.delivered, { to: 'PAID' }, f.admin);
+    const shipped = await pieceIn('52');
+    await packAndShip(srv.ctx, ids.delivered, { carrierId: colissimo, trackingNumber: '6A12345678901', pieces: { [ids.delivered]: shipped } }, f.admin);
+    await services.orders.transition(ids.delivered, { to: 'DELIVERED' }, f.admin);
+    await pieceIn('50');
+    await inTransaction(db, (tx) => ensureSku(tx, f.modelId, '54'));
+    // Paid and holding its piece, its address given: the agent will begin packing it.
+    ids.packing = await salonOrder('56');
+    await services.orders.setAddress(me.id, ids.packing, { address: PARIS, save: false }, actor);
+    await services.orders.transition(ids.packing, { to: 'PAID' }, f.admin);
+    await pieceIn('56');
+    // Reserved, priced, no address yet (the collector has none saved).
+    ids.reserved = await salonOrder('58');
+    browser = await launchChromium();
+  }, 180_000);
+
+  afterAll(async () => {
+    await browser?.close();
+    await srv?.close();
+  });
+
+  async function phone(width = 390): Promise<{ page: Page; problems: string[] }> {
+    const context = await (width === 1280 ? browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris' }) : mobileContext(browser));
+    await context.addCookies([{ name: sessionCookieName(srv.ctx.config, 'account'), value: me.token, url: srv.origin }]);
+    const page = await context.newPage();
+    if (width !== 390 && width !== 1280) await page.setViewportSize({ width, height: 844 });
+    const problems: string[] = [];
+    page.on('console', (m) => {
+      if (m.type() === 'error' && !/Failed to load resource: the server responded with a status of [45]\d\d/.test(m.text())) problems.push(`console: ${m.text()}`);
+      if (/Content Security Policy/i.test(m.text())) problems.push(`csp: ${m.text()}`);
+    });
+    page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
+    await page.goto(`${srv.origin}/verify/pieces`);
+    await openTab(page, 'ORDERS');
+    return { page, problems };
+  }
+
+  it('DELIVERY ADDRESS: added as a new address saved to YOUR ADDRESSES, then changed to a saved one; packing locks it, and a sheet open meanwhile says so', async () => {
+    const { page, problems } = await phone();
+    const reserved = card(page, ids.reserved);
+    // Without one: the sentence and ADD THE DELIVERY ADDRESS, after the rows and before the reference (§1.1 (j)).
+    const block = reserved.locator('.pieces__address');
+    await textOf(block, `${A.label} ${A.empty} ${A.add}`);
+    expect(await reserved.locator('.n-pieces__order-rows ~ .pieces__address + .n-pieces__order-reference').count()).toBe(1);
+    await block.getByRole('button', { name: A.add }).click();
+    const s = sheet(page);
+    await textOf(s.locator('#order-sheet-title'), A.title);
+    await textOf(s.getByTestId('order-sheet-concerning'), `ORDER ${ref(ids.reserved)} · MONOLITHE`);
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe('order-sheet-title');
+    // No address saved: the four fields at once, SAVE IT TO YOUR ADDRESSES on; checked before the server.
+    await visible(s.getByLabel('NAME', { exact: true }));
+    expect(await s.getByRole('switch', { name: A.save }).isChecked()).toBe(true);
+    await s.getByLabel('NAME', { exact: true }).fill(PARIS.name);
+    await s.getByLabel('ADDRESS', { exact: true }).fill(PARIS.address);
+    await s.getByRole('button', { name: A.confirm }).click();
+    await textOf(s.getByRole('alert'), ORDERS.addressFields.countryMissing);
+    await s.getByLabel('COUNTRY', { exact: true }).selectOption('FR');
+    await s.getByLabel('PHONE', { exact: true }).fill('06 12 34 56 78');
+    await s.getByRole('button', { name: A.confirm }).click();
+    await textOf(s.getByRole('alert'), ORDERS.addressFields.phoneInvalid);
+    expect(await page.evaluate(() => document.activeElement?.getAttribute('name'))).toBe('phone');
+    await s.getByLabel('PHONE', { exact: true }).fill(PARIS.phone);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-order-address-sheet-new.png') });
+    await s.getByRole('button', { name: A.confirm }).click();
+    await expect.poll(() => sheet(page).count(), POLL).toBe(0);
+    await textOf(reserved.locator('.pieces__address .n-pieces__address-lines'), 'Camille Laurent 8 rue Saint-Honoré 75001 Paris France +33 6 12 34 56 78');
+    const change = reserved.getByRole('button', { name: A.changeLabel(ref(ids.reserved)) });
+    await expect.poll(() => change.evaluate((el) => el === document.activeElement), POLL).toBe(true);
+    expect((await srv.ctx.services.addresses.list(me.id)).addresses.map((a) => [a.name, a.country, a.isDefault])).toEqual([['Camille Laurent', 'FR', true]]);
+
+    // A second saved address: CHANGE offers both, the one on the order chosen; the other chosen, CONFIRM.
+    await srv.ctx.services.addresses.create(me.id, { ...LONDON, isDefault: false }, { type: 'account', id: me.id });
+    await change.click();
+    const choices = sheet(page).locator('.n-osheet__choice');
+    await expect.poll(() => choices.count(), POLL).toBe(3);
+    await textsOf(choices, ['Camille Laurent · 8 rue Saint-Honoré · France DEFAULT', 'Camille Laurent · 25 Old Bond Street · United Kingdom', A.newAddress]);
+    expect(await choices.nth(0).locator('input').isChecked()).toBe(true);
+    // No field while a saved address is chosen.
+    expect(await sheet(page).getByLabel('NAME', { exact: true }).count()).toBe(0);
+    await choices.nth(1).locator('input').check();
+    for (const width of [375, 360, 320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      expect(await noSideways(page), `${width} px`).toBe(true);
+    }
+    await page.screenshot({ path: join(OUT_DIR, 'verify-order-address-sheet-saved.png') });
+    await sheet(page).getByRole('button', { name: A.confirm }).click();
+    await expect.poll(() => sheet(page).count(), POLL).toBe(0);
+    await textOf(reserved.locator('.n-pieces__address-lines'), 'Camille Laurent 25 Old Bond Street London W1S 4QB United Kingdom +44 20 7946 0000');
+    // CANCEL and Escape close the sheet unchanged, the focus back on CHANGE.
+    await change.click();
+    await visible(sheet(page).locator('.n-osheet__choice').first());
+    await page.keyboard.press('Escape');
+    await expect.poll(() => sheet(page).count(), POLL).toBe(0);
+    expect(await change.evaluate((el) => el === document.activeElement)).toBe(true);
+
+    // Packing has begun on the paid order: its address read, no CHANGE, the sentence.
+    const packing = card(page, ids.packing);
+    await visible(packing.getByRole('button', { name: A.changeLabel(ref(ids.packing)) }));
+    // A sheet open while the agent begins: CONFIRM says the server's sentence; CANCEL closes it.
+    await packing.getByRole('button', { name: A.changeLabel(ref(ids.packing)) }).click();
+    await visible(sheet(page).locator('.n-osheet__choice').first());
+    await srv.ctx.services.logistics.startPacking(ids.packing, f.admin, null);
+    await sheet(page).locator('.n-osheet__choice').nth(1).locator('input').check();
+    await sheet(page).getByRole('button', { name: A.confirm }).click();
+    await textOf(sheet(page).getByRole('alert'), `${A.failed} Packing has begun: write to ORBES Client Services to change this order.`);
+    await sheet(page).getByRole('button', { name: A.cancel }).click();
+    await expect.poll(() => sheet(page).count(), POLL).toBe(0);
+    await page.reload();
+    await openTab(page, 'ORDERS');
+    await textOf(card(page, ids.packing).locator('.pieces__address'), `${A.label} Camille Laurent 8 rue Saint-Honoré 75001 Paris France +33 6 12 34 56 78 ${A.locked}`);
+    expect(await card(page, ids.packing).locator('.pieces__address-change').count()).toBe(0);
+    // IN PREPARATION: paid, holding its piece.
+    expect(await card(page, ids.packing).locator('[aria-current="step"]').innerText()).toMatch(/^IN PREPARATION/);
+    await textOf(card(page, ids.packing).locator('.n-pieces__order-sentence'), ORDERS.sentence.IN_PREPARATION);
+    expect(problems).toEqual([]);
+    await page.context().close();
+  }, 120_000);
+
+  it('ENGRAVING: added at the price of the settings (in the TOTAL), its words changed, then removed; refused words said before the server', async () => {
+    const { page, problems } = await phone();
+    const reserved = card(page, ids.reserved);
+    const add = reserved.getByRole('button', { name: E.add });
+    await add.click();
+    const s = sheet(page);
+    await textOf(s.locator('#order-sheet-title'), E.title);
+    await textOf(s.locator('.n-osheet__lead'), E.lead);
+    await textOf(s.locator('.n-osheet__price'), E.price('€ 30'));
+    expect(await s.getByRole('button', { name: E.remove }).count()).toBe(0);
+    await s.getByLabel(E.field, { exact: true }).fill('J.M. !');
+    await s.getByRole('button', { name: E.save }).click();
+    await textOf(s.getByRole('alert'), E.invalid);
+    await s.getByLabel(E.field, { exact: true }).fill('J.M.');
+    await page.screenshot({ path: join(OUT_DIR, 'verify-order-engraving-sheet.png') });
+    await s.getByRole('button', { name: E.save }).click();
+    await expect.poll(() => sheet(page).count(), POLL).toBe(0);
+    await textsOf(reserved.locator('.n-pieces__order-rows .n-kv__row'), ['SIZE 58', 'PRICE € 4 200', 'ENGRAVING « J.M. » · + € 30', 'TOTAL € 4 230']);
+    const change = reserved.getByRole('button', { name: E.change });
+    await expect.poll(() => change.evaluate((el) => el === document.activeElement), POLL).toBe(true);
+    // Its words changed: the price kept.
+    await change.click();
+    expect(await sheet(page).getByLabel(E.field, { exact: true }).inputValue()).toBe('J.M.');
+    await sheet(page).getByLabel(E.field, { exact: true }).fill('C & L');
+    await sheet(page).getByRole('button', { name: E.save }).click();
+    await expect.poll(() => sheet(page).count(), POLL).toBe(0);
+    await textOf(reserved.locator('.n-kv__row', { hasText: 'ENGRAVING' }), 'ENGRAVING « C & L » · + € 30');
+    // Removed: the row and the TOTAL go, ADD AN ENGRAVING again.
+    await change.click();
+    await sheet(page).getByRole('button', { name: E.remove }).click();
+    await expect.poll(() => sheet(page).count(), POLL).toBe(0);
+    await textsOf(reserved.locator('.n-pieces__order-rows .n-kv__row'), ['SIZE 58', 'PRICE € 4 200']);
+    await visible(reserved.getByRole('button', { name: E.add }));
+    // Packing begun: the line, no link.
+    await expect.poll(async () => norm(await card(page, ids.packing).innerText()), POLL).not.toContain(E.add);
+    expect(problems).toEqual([]);
+    await page.context().close();
+  }, 120_000);
+
+  it('RETURNS AND EXCHANGES: the two buttons on a delivered order; EXCHANGE THE SIZE with a size not in stock greyed out; the request on the card with its RETURN ADDRESS; nothing scrolls sideways', async () => {
+    const { page, problems } = await phone();
+    const delivered = card(page, ids.delivered);
+    const block = delivered.locator('.pieces__returns');
+    await visible(block);
+    await textOf(block.locator('.n-pieces__returns-label'), R.label);
+    await textOf(block.locator('.n-pieces__returns-lead'), /^You may return this piece or exchange its size until \d{1,2} [A-Z]{3} \d{4}\. It is sent back at your cost, with the carrier of your choice\.$/);
+    // After DELIVERY ADDRESS, before the reference (§1.1 (j)).
+    expect(await delivered.locator('.pieces__address + .pieces__returns + .n-pieces__order-reference').count()).toBe(1);
+    for (const width of [375, 360, 320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      expect(await noSideways(page), `${width} px`).toBe(true);
+    }
+    // REQUEST A RETURN: its sheet, the reason required; CANCEL.
+    await block.getByRole('button', { name: R.requestReturn }).click();
+    await textOf(sheet(page).getByTestId('order-sheet-concerning'), `ORDER ${ref(ids.delivered)} · MONOLITHE · SIZE 52`);
+    await sheet(page).getByRole('button', { name: R.send }).click();
+    await textOf(sheet(page).getByRole('alert'), R.reasonMissing);
+    await page.screenshot({ path: join(OUT_DIR, 'verify-order-return-sheet.png') });
+    await sheet(page).getByRole('button', { name: R.cancel }).click();
+    // EXCHANGE THE SIZE: 50 in stock, 54 greyed out (not in stock), named so.
+    await block.getByRole('button', { name: R.exchange }).click();
+    const sizes = sheet(page).getByRole('group', { name: R.newSize });
+    await textsOf(sizes.locator('button'), ['50', '54', '56', '58']);
+    const out = sizes.getByRole('button', { name: R.sizeOut('54') });
+    expect(await out.isDisabled()).toBe(true);
+    expect(await out.getAttribute('class')).toContain('is-gone');
+    await textOf(sheet(page).locator('.n-osheet__size-note'), R.onlyInStock);
+    await sizes.getByRole('button', { name: '50', exact: true }).click();
+    expect(await sizes.getByRole('button', { name: '50', exact: true }).getAttribute('aria-pressed')).toBe('true');
+    await sheet(page).getByLabel(R.reason, { exact: true }).selectOption('SIZE');
+    await sheet(page).getByLabel(R.note, { exact: true }).fill('One size larger, please.');
+    for (const width of [375, 360, 320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      expect(await noSideways(page), `${width} px`).toBe(true);
+    }
+    await page.screenshot({ path: join(OUT_DIR, 'verify-order-exchange-sheet.png') });
+    await sheet(page).getByRole('button', { name: R.send }).click();
+    await expect.poll(() => sheet(page).count(), POLL).toBe(0);
+    // On the card: EXCHANGE REQUESTED, where to send the piece, the RETURN ADDRESS; RETURNS AND EXCHANGES gone.
+    const request = delivered.locator('.pieces__request');
+    await textOf(request.locator('.n-pieces__request-label'), /^EXCHANGE REQUESTED · SIZE 50 · \d{1,2} [A-Z]{3} \d{4}$/);
+    await textOf(request.locator('.n-pieces__request-text'), R.sendBack(ref(ids.delivered)));
+    await textOf(request.locator('.pieces__return-address'), `${R.returnAddress} ORBES LOGISTICS 14 rue des Entrepreneurs 93400 Saint-Ouen France`);
+    expect(await delivered.locator('.pieces__returns').count()).toBe(0);
+    expect(await delivered.locator('.n-pieces__order-sentence + .pieces__request').count()).toBe(1);
+    // Written into MESSAGES as the collector's own message.
+    const thread = await srv.ctx.services.messages.thread(me.id);
+    expect(thread.messages.some((m) => m.body.startsWith('EXCHANGE REQUESTED: SIZE 50'))).toBe(true);
+    for (const width of [375, 360, 320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      expect(await noSideways(page), `${width} px`).toBe(true);
+    }
+    await page.screenshot({ path: join(OUT_DIR, 'verify-order-exchange-requested-phone.png'), fullPage: true });
+    expect(problems).toEqual([]);
+    await page.context().close();
+    const desk = await phone(1280);
+    await visible(card(desk.page, ids.delivered).locator('.pieces__request'));
+    expect(await noSideways(desk.page)).toBe(true);
+    await desk.page.screenshot({ path: join(OUT_DIR, 'verify-orders-delivery-desk.png'), fullPage: true });
+    await desk.page.context().close();
   }, 120_000);
 });

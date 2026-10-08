@@ -1400,6 +1400,29 @@ body.nocturne .n-column > * {
   font-size: var(--n-fs-step);
 }
 
+/* Five steps and more (plan NEXT LOT §3.6.A: IN PREPARATION; six on an order returned once delivered): the labels
+   tracked closer so each keeps its column, five under 360 px, six always; under 360 px six go in two rows of three
+   dots, without the hairline. */
+.n-steps--six .n-steps__label {
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 359px) {
+  .n-steps--dense .n-steps__label {
+    letter-spacing: 0.08em;
+  }
+
+  .n-steps--six {
+    grid-template-columns: repeat(3, 1fr) !important;
+    row-gap: 18px;
+  }
+
+  .n-steps--six::before,
+  .n-steps--six .n-steps__bar {
+    display: none;
+  }
+}
+
 /* ── The GENOME, the tone marks, the seal (C .tone, .gen, .glow, .seal, .cap2, .bar2) ── */
 
 .n-tone {

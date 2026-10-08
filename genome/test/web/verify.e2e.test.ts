@@ -2993,9 +2993,9 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textOf(tier.locator('.n-account__next-label'), 'NEXT: PALLADIUM');
     await textOf(tier.locator('.n-account__next-way'), '5 more pieces registered to your account open PALLADIUM, from 10 pieces held. It adds:');
     await textsOf(tier.locator('.n-account__benefits--next .n-account__benefit'), [...programLines(DEFAULT_PROGRAM, 3), 'A commission of your own.', 'A yearly visit to the atelier.'].map(norm));
-    // Then MESSAGES (plan NEXT-NINE, CS-01), SOUND, CHANGE PASSWORD, MY PIECES, THE CLUB (BP-19 T9), the legal pages
+    // Then MESSAGES (plan NEXT-NINE, CS-01), YOUR SIZES (AC-01), YOUR ADDRESSES (plan NEXT LOT §3.6.B), SOUND, CHANGE PASSWORD, MY PIECES, THE CLUB (BP-19 T9), the legal pages
     // (their index, a new tab), SIGN OUT.
-    await textsOf(sheet.locator('.n-row__label'), ['MESSAGES', 'YOUR SIZES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'THE CLUB', 'PRIVACY · TERMS · LEGAL · HELP']);
+    await textsOf(sheet.locator('.n-row__label'), ['MESSAGES', 'YOUR SIZES', 'YOUR ADDRESSES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'THE CLUB', 'PRIVACY · TERMS · LEGAL · HELP']);
     await attrOf(sheet.getByRole('link', { name: 'PRIVACY · TERMS · LEGAL · HELP' }), 'href', '/legal');
     await attrOf(sheet.getByRole('link', { name: 'PRIVACY · TERMS · LEGAL · HELP' }), 'target', '_blank');
     await attrOf(sheet.getByRole('link', { name: 'MY PIECES' }), 'href', '/verify/pieces');

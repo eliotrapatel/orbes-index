@@ -24,6 +24,7 @@
  *   MESSAGES                    NEW ›     the conversation with ORBES Client Services (plan NEXT-NINE, CS-01): NEW
  *                                         while an answer is unread; its view in the sheet (below)
  *   YOUR SIZES      RING 52 · WRIST … ›   the sizes saved (plan NEXT-NINE, AC-01), or NOT SET; its view in the sheet
+ *   YOUR ADDRESSES          2 SAVED ›     the delivery addresses saved (plan NEXT LOT §3.6.B), or NOT SET; its view
  *   SOUND                         (●)     the sound signature (P-D07), as the footer's SOUND ON / OFF
  *   CHANGE PASSWORD                 ›     its form in the sheet (C39): the current password, a new one; CANCEL
  *   MY PIECES                       ›
@@ -43,13 +44,20 @@
  * and, when they cannot be read, the sentence with the server's message, TRY AGAIN and CANCEL, and no SAVE (so that a
  * SAVE never clears a size it was not shown).
  *
+ * YOUR ADDRESSES (plan NEXT LOT §3.6.B): ‹ YOUR ACCOUNT, the title and its lead, then each address (its name, lines,
+ * country and phone, DEFAULT on the default one) with EDIT · MAKE DEFAULT · REMOVE (TAP AGAIN TO REMOVE, then it goes);
+ * ADD AN ADDRESS opens the four fields (views/address.ts) with MY DEFAULT ADDRESS, then SAVE and CANCEL; at five, a
+ * sentence in its place. Read as it opens (ONE MOMENT…; unreadable, the sentence, the server's message and TRY AGAIN).
+ * An order keeps its own copy: nothing here changes an order.
+ *
  * A modal dialog: the page under it is inert and holds still; focus goes to its title and comes back to the account
  * button when it closes.
  */
 import { h } from '../../shared/dom.js';
 import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { ACCOUNT, ACCOUNT_PASSWORD, ACCOUNT_SIZES, MESSAGES, PIECES, SOUND, TIER } from '../copy.js';
+import { addressesSummary, addressLines, mayAddAddress } from '../addresses-model.js';
+import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_SIZES, MESSAGES, PIECES, SOUND, TIER } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
 import { messageProblem, threadModel, type ConcerningTarget, type ThreadModel } from '../messages-model.js';
@@ -57,13 +65,17 @@ import type { SessionStore } from '../session.js';
 import { SIZE_FIELDS, sizeFieldValue, sizeOptions, sizesFromForm, sizesSummary } from '../sizes-model.js';
 import type { SoundSwitch } from '../sound.js';
 import { tierModel } from '../tier-model.js';
-import type { AccountSizes, ClubStatus, SizeKind } from '../types.js';
+import type { AccountAddresses, AccountSizes, ClubStatus, SavedAddress, SizeKind } from '../types.js';
+import { addressFields } from './address.js';
 import { FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
 import { button, definitionList, field, icon, leadRow, selectField, switchControl, textLink, tierDots } from './nocturne.js';
 import { PIECES_PATH, withNumerals } from './common.js';
 
 export interface AccountSheetDeps {
-  api: Pick<ApiClient, 'clubStatus' | 'products' | 'changePassword' | 'logout' | 'messages' | 'writeMessage' | 'readMessages' | 'messagesUnread' | 'sizes' | 'saveSizes'>;
+  api: Pick<
+    ApiClient,
+    'clubStatus' | 'products' | 'changePassword' | 'logout' | 'messages' | 'writeMessage' | 'readMessages' | 'messagesUnread' | 'sizes' | 'saveSizes' | 'addresses' | 'createAddress' | 'updateAddress' | 'removeAddress' | 'makeDefaultAddress'
+  >;
   session: SessionStore;
   sound: SoundSwitch;
   /** MY PIECES, in the app. */
@@ -82,7 +94,7 @@ export interface AccountSheetDeps {
   onRead?(): void;
 }
 
-type View = 'account' | 'password' | 'messages' | 'sizes';
+type View = 'account' | 'password' | 'messages' | 'sizes' | 'addresses';
 
 export class AccountSheet {
   readonly el: HTMLElement;
@@ -110,6 +122,21 @@ export class AccountSheet {
   /** The view's own read of the sizes: why it failed (the server's message), null while it reads or once read. */
   private sizesError: string | null = null;
   private sizesGen = 0;
+  /**
+   * YOUR ADDRESSES (plan NEXT LOT §3.6.B): as read for this opening, null until (or unreadable: `addressesError`);
+   * forgotten as the sheet closes, as the sizes are.
+   */
+  private addresses: AccountAddresses | null = null;
+  private addressesError: string | null = null;
+  private addressesGen = 0;
+  /** The address being written: 'new' (ADD AN ADDRESS), an address's id (EDIT), or none. */
+  private editing: string | null = null;
+  /** What the view says once done: saved or removed (a status), or a failure (an alert). */
+  private addressesNote: { text: string; error: boolean } | null = null;
+  /** REMOVE pressed once: the address it would remove, until the second tap or a few seconds. */
+  private removeArmed: string | null = null;
+  private removeTimer: ReturnType<typeof setTimeout> | null = null;
+  private addressBusy = false;
 
   constructor(private readonly deps: AccountSheetDeps) {
     this.panel = h('section', { class: 'n-account__panel', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'account-title' } });
@@ -125,6 +152,7 @@ export class AccountSheet {
       if (s.status !== 'signed-in') {
         if (this.isOpen) this.close();
         this.sizes = null;
+        this.addresses = null;
       }
     });
   }
@@ -165,6 +193,12 @@ export class AccountSheet {
     this.sizesGen++;
     this.sizes = null;
     this.sizesError = null;
+    this.addressesGen++;
+    this.addresses = null;
+    this.addressesError = null;
+    this.editing = null;
+    this.addressesNote = null;
+    this.disarmRemove();
     this.el.hidden = true;
     document.documentElement.classList.remove('n-locked');
     for (const el of this.deps.outside()) el.inert = false;
@@ -186,14 +220,14 @@ export class AccountSheet {
 
   /** The heading of the view open now (MESSAGES, YOUR SIZES): a screen reader says the view changed. */
   private focusView(): void {
-    const id = this.view === 'messages' ? 'account-messages-title' : this.view === 'sizes' ? 'account-sizes-title' : 'account-title';
+    const id = this.view === 'messages' ? 'account-messages-title' : this.view === 'sizes' ? 'account-sizes-title' : this.view === 'addresses' ? 'account-addresses-title' : 'account-title';
     this.panel.querySelector<HTMLElement>(`#${id}`)?.focus({ preventScroll: true });
   }
 
   /** The club's status and the pieces, read afresh: YOUR TIER as it is now. */
   private async read(): Promise<void> {
     const gen = ++this.readGen;
-    const [club, pieces, unread, sizes] = await Promise.all([
+    const [club, pieces, unread, sizes, addresses] = await Promise.all([
       this.deps.api.clubStatus().catch((e: unknown) => {
         this.deps.session.noteError(e);
         return null;
@@ -201,6 +235,7 @@ export class AccountSheet {
       this.deps.api.products().catch(() => null),
       this.deps.api.messagesUnread().catch(() => false),
       this.deps.api.sizes().catch(() => null),
+      this.deps.api.addresses().catch(() => null),
     ]);
     if (gen !== this.readGen || !this.isOpen) return;
     this.club = club;
@@ -208,6 +243,10 @@ export class AccountSheet {
     if (this.sizes === null && sizes !== null) {
       this.sizes = sizes;
       if (this.view === 'sizes') this.showSizes();
+    }
+    if (this.addresses === null && addresses !== null) {
+      this.addresses = addresses;
+      if (this.view === 'addresses') this.showAddresses();
     }
     // MESSAGES opened meanwhile has read it: NEW stays off.
     this.unread = this.view === 'messages' ? false : unread;
@@ -236,7 +275,15 @@ export class AccountSheet {
       h('button', { class: 'n-account__close', attrs: { type: 'button', 'aria-label': ACCOUNT.close }, data: { key: 'close' }, on: { click: () => this.close() } }, icon('close')),
     );
     const body =
-      this.view === 'password' ? this.passwordView() : this.view === 'messages' ? this.messagesView() : this.view === 'sizes' ? this.sizesView() : this.accountView(s.account.email);
+      this.view === 'password'
+        ? this.passwordView()
+        : this.view === 'messages'
+          ? this.messagesView()
+          : this.view === 'sizes'
+            ? this.sizesView()
+            : this.view === 'addresses'
+              ? this.addressesView()
+              : this.accountView(s.account.email);
     this.panel.replaceChildren(h('div', { class: 'n-handle', attrs: { 'aria-hidden': 'true' } }), head, ...body);
   }
 
@@ -260,6 +307,7 @@ export class AccountSheet {
         { class: 'n-account__rows' },
         this.messagesRow(),
         this.sizesRow(),
+        this.addressesRow(),
         h('label', { class: 'n-row n-account__sound' }, h('span', { class: 'n-g n-row__label', text: SOUND.label }), sw.el),
         leadRow(ACCOUNT_PASSWORD.change, { onOpen: () => this.openPassword(), attrs: { 'data-key': 'password' } }),
         leadRow(PIECES.link, {
@@ -592,6 +640,230 @@ export class AccountSheet {
         h('div', { class: 'n-account__sizes-cancel' }, cancel),
       ),
     ];
+  }
+
+  // ── YOUR ADDRESSES (plan NEXT LOT §3.6.B) ────────────────────────────────
+
+  /** The row after YOUR SIZES: YOUR ADDRESSES, its line how many are saved (`2 SAVED`) or NOT SET; nothing while unread. */
+  private addressesRow(): HTMLElement {
+    const row = leadRow(ACCOUNT_ADDRESSES.row, { onOpen: () => this.openAddresses(), attrs: { 'data-key': 'addresses' }, extraClass: 'n-account__sizes n-account__addresses' });
+    if (this.addresses) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__addresses-line' }, ...withNumerals(addressesSummary(this.addresses.addresses))), row.lastChild);
+    return row;
+  }
+
+  private openAddresses(): void {
+    this.view = 'addresses';
+    this.notice = null;
+    this.addressesError = null;
+    this.addressesNote = null;
+    this.editing = null;
+    this.disarmRemove();
+    this.render();
+    this.focusView();
+    if (this.addresses === null) void this.readAddresses();
+  }
+
+  /** The addresses read for the view (again after a change): its list once they are, or the sentence and the server's message. */
+  private async readAddresses(): Promise<void> {
+    const gen = ++this.addressesGen;
+    try {
+      const list = await this.deps.api.addresses();
+      if (gen !== this.addressesGen || !this.isOpen) return;
+      this.addresses = list;
+      this.addressesError = null;
+    } catch (e) {
+      this.deps.session.noteError(e);
+      if (gen !== this.addressesGen || !this.isOpen) return;
+      this.addressesError = messageOf(e);
+    }
+    if (this.view === 'addresses') this.showAddresses();
+  }
+
+  private showAddresses(focus?: string): void {
+    this.render();
+    const at = focus ? this.panel.querySelector<HTMLElement>(focus) : null;
+    if (at) at.focus({ preventScroll: true });
+    else this.focusView();
+  }
+
+  private closeAddresses(): void {
+    this.view = 'account';
+    this.editing = null;
+    this.addressesNote = null;
+    this.disarmRemove();
+    this.render();
+    this.panel.querySelector<HTMLElement>('[data-key="addresses"]')?.focus({ preventScroll: true });
+  }
+
+  private disarmRemove(): void {
+    if (this.removeTimer) clearTimeout(this.removeTimer);
+    this.removeTimer = null;
+    this.removeArmed = null;
+  }
+
+  /** A change done: the list read again (its default as the server made it), the note said. */
+  private async addressesChanged(note: string, focus?: string): Promise<void> {
+    this.editing = null;
+    this.addressesNote = { text: note, error: false };
+    this.addresses = null;
+    this.render();
+    await this.readAddresses();
+    if (focus && this.view === 'addresses') this.panel.querySelector<HTMLElement>(focus)?.focus({ preventScroll: true });
+  }
+
+  private addressesView(): HTMLElement[] {
+    const A = ACCOUNT_ADDRESSES;
+    const back = h('button', { class: 'n-g n-tl n-messages__back', attrs: { type: 'button' }, data: { key: 'addresses-back' }, on: { click: () => this.closeAddresses() } }, icon('back', { small: true }), MESSAGES.back);
+    const head = [
+      h('div', { class: 'n-messages__head' }, back, h('h3', { class: 'n-g n-t3 n-ivc n-messages__title', id: 'account-addresses-title', attrs: { tabindex: -1 }, text: A.title })),
+      h('p', { class: 'n-tx n-account__addresses-lead', text: A.lead }),
+    ];
+    const section = (...children: (HTMLElement | null)[]) =>
+      h('section', { class: 'n-px n-account__addresses-view', attrs: { 'aria-labelledby': 'account-addresses-title' } }, ...head, ...children.filter((c): c is HTMLElement => c !== null));
+    const list = this.addresses;
+    if (list === null) {
+      return [
+        section(
+          ...(this.addressesError
+            ? [
+                h('p', { class: 'n-err n-account__addresses-error', attrs: { role: 'alert' }, text: `${A.unreadable} ${this.addressesError}` }),
+                h('div', { class: 'n-account__addresses-retry' }, button(A.retry, { outline: true, onClick: () => this.openAddresses() })),
+              ]
+            : [h('p', { class: 'n-g n-lb n-account__addresses-loading', attrs: { role: 'status' }, text: A.loading })]),
+        ),
+      ];
+    }
+    if (this.editing !== null) return [section(this.addressForm(list))];
+    const note = this.addressesNote
+      ? h('p', { class: this.addressesNote.error ? 'n-err n-account__addresses-note' : 'n-sm n-ivc n-account__addresses-note', attrs: { role: this.addressesNote.error ? 'alert' : 'status', tabindex: -1 }, text: this.addressesNote.text })
+      : null;
+    // The default one first, then the others as saved, the oldest first.
+    const items = [...list.addresses].sort((a, b) => Number(b.isDefault) - Number(a.isDefault)).map((a) => this.addressItem(a));
+    return [
+      section(
+        note,
+        items.length > 0 ? h('ul', { class: 'n-account__addresses-list', attrs: { 'aria-label': A.title } }, ...items) : h('p', { class: 'n-sm n-account__addresses-empty', text: A.empty }),
+        mayAddAddress(list.addresses)
+          ? h('div', { class: 'n-account__addresses-add' }, button(A.add, { outline: true, attrs: { 'data-key': 'address-add' }, onClick: () => this.editAddress('new') }))
+          : h('p', { class: 'n-sm n-account__addresses-limit', text: A.limit }),
+      ),
+    ];
+  }
+
+  /** One saved address: its lines, DEFAULT on the default one, then EDIT · MAKE DEFAULT · REMOVE. */
+  private addressItem(a: SavedAddress): HTMLElement {
+    const A = ACCOUNT_ADDRESSES;
+    const link = (text: string, label: string, key: string, onOpen: () => void) => {
+      const l = textLink(text, { onOpen, extraClass: 'n-account__address-link' });
+      l.setAttribute('aria-label', label);
+      l.dataset.key = key;
+      if (this.addressBusy && l instanceof HTMLButtonElement) l.disabled = true;
+      return l;
+    };
+    const armed = this.removeArmed === a.id;
+    return h(
+      'li',
+      { class: 'n-account__address', data: { address: a.id } },
+      a.isDefault ? h('p', { class: 'n-g n-lb n-ivc n-account__address-default', text: A.isDefault }) : null,
+      h('p', { class: 'n-tx n-account__address-lines' }, ...addressLines(a).flatMap((l, i) => (i === 0 ? [l] : [h('br'), l]))),
+      h(
+        'p',
+        { class: 'n-account__address-links' },
+        link(A.edit, A.editLabel(a.name), `address-edit-${a.id}`, () => this.editAddress(a.id)),
+        a.isDefault ? null : link(A.makeDefault, A.makeDefaultLabel(a.name), `address-default-${a.id}`, () => void this.makeDefault(a.id)),
+        link(armed ? A.removeConfirm : A.remove, armed ? A.removeConfirm : A.removeLabel(a.name), `address-remove-${a.id}`, () => void this.removeAddress(a.id)),
+      ),
+    );
+  }
+
+  private editAddress(id: string): void {
+    this.editing = id;
+    this.addressesNote = null;
+    this.disarmRemove();
+    this.render();
+    this.panel.querySelector<HTMLElement>('.n-account__addresses-view input')?.focus({ preventScroll: true });
+  }
+
+  /** ADD AN ADDRESS (with MY DEFAULT ADDRESS) or EDIT: the four fields, SAVE, and CANCEL beside it. */
+  private addressForm(list: AccountAddresses): HTMLElement {
+    const A = ACCOUNT_ADDRESSES;
+    const editing = this.editing === 'new' ? null : (list.addresses.find((a) => a.id === this.editing) ?? null);
+    const fields = addressFields('account-address', editing, list.defaultCountry);
+    // The first address becomes the default whatever is asked (services/addresses.ts): the switch says so.
+    const first = list.addresses.length === 0;
+    const isDefault = switchControl({ label: A.defaultSwitch, checked: first, onChange: () => undefined });
+    if (first) isDefault.input.disabled = true;
+    const cancel = button(A.cancel, {
+      outline: true,
+      onClick: () => {
+        const back = this.editing && this.editing !== 'new' ? `[data-key="address-edit-${this.editing}"]` : '[data-key="address-add"]';
+        this.editing = null;
+        this.showAddresses(back);
+      },
+    });
+    return nocturneForm(
+      this.deps.session,
+      'address',
+      [...fields.els, ...(editing ? [] : [h('label', { class: 'n-row n-account__address-switch' }, h('span', { class: 'n-g n-row__label', text: A.defaultSwitch }), isDefault.el)])],
+      A.save,
+      async () => {
+        const address = fields.read();
+        try {
+          if (editing) await this.deps.api.updateAddress(editing.id, address);
+          else await this.deps.api.createAddress(address, isDefault.input.checked);
+        } catch (e) {
+          this.deps.session.noteError(e);
+          throw new FormError(`${A.failed} ${messageOf(e)}`);
+        }
+        await this.addressesChanged(A.saved);
+      },
+      cancel,
+    );
+  }
+
+  private async makeDefault(id: string): Promise<void> {
+    if (this.addressBusy) return;
+    this.addressBusy = true;
+    this.disarmRemove();
+    try {
+      await this.deps.api.makeDefaultAddress(id);
+      this.addressBusy = false;
+      await this.addressesChanged(ACCOUNT_ADDRESSES.saved, `[data-address="${id}"] [data-key="address-edit-${id}"]`);
+    } catch (e) {
+      this.addressBusy = false;
+      this.deps.session.noteError(e);
+      this.addressesNote = { text: `${ACCOUNT_ADDRESSES.failed} ${messageOf(e)}`, error: true };
+      this.showAddresses(`[data-key="address-default-${id}"]`);
+    }
+  }
+
+  /** REMOVE: a first tap asks for a second (TAP AGAIN TO REMOVE, a few seconds), the second removes it. */
+  private async removeAddress(id: string): Promise<void> {
+    if (this.addressBusy) return;
+    if (this.removeArmed !== id) {
+      this.disarmRemove();
+      this.removeArmed = id;
+      this.removeTimer = setTimeout(() => {
+        if (this.removeArmed !== id) return;
+        this.removeArmed = null;
+        if (this.view === 'addresses' && this.editing === null) this.showAddresses(`[data-key="address-remove-${id}"]`);
+      }, 4000);
+      this.addressesNote = null;
+      this.showAddresses(`[data-key="address-remove-${id}"]`);
+      return;
+    }
+    this.disarmRemove();
+    this.addressBusy = true;
+    try {
+      await this.deps.api.removeAddress(id);
+      this.addressBusy = false;
+      await this.addressesChanged(ACCOUNT_ADDRESSES.removed, '.n-account__addresses-note');
+    } catch (e) {
+      this.addressBusy = false;
+      this.deps.session.noteError(e);
+      this.addressesNote = { text: `${ACCOUNT_ADDRESSES.failed} ${messageOf(e)}`, error: true };
+      this.showAddresses(`[data-key="address-remove-${id}"]`);
+    }
   }
 
   // ── CHANGE PASSWORD (C-04, C39) ──────────────────────────────────────────

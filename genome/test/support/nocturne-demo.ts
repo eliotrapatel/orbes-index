@@ -59,6 +59,11 @@
  *   claim-waiting     the full story; its one state (claim-waiting, test/support/nocturne-states.ts) then writes, on its
  *                     own stage, a shipped order of MONOLITHE in blue for you and a new claim code waiting on it (plan
  *                     NEXT LOT §3.4), so no other state sees them
+ *   orders-delivery   the full story; its one state writes (plan NEXT LOT §3.6.B, C): an engraving price in euros, a
+ *   orders-case       saved default address for you, put on the reserved LIVE order with the add-on's words, and a
+ *   account-addresses paid order of MONOLITHE in blue with a priced engraving, packing begun; orders-case's, a delivered
+ *                     order of MONOLITHE in blue whose return you asked for, its location's address the return address
+ *                     (§3.6.D); account-addresses', two saved addresses for you, one the default (§3.6.B)
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.
@@ -95,7 +100,10 @@ export type DemoVariant =
   | 'empty'
   | 'pairs'
   | 'claim-waiting'
-  | 'draw-sizes';
+  | 'draw-sizes'
+  | 'orders-delivery'
+  | 'orders-case'
+  | 'account-addresses';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -114,6 +122,9 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'pairs',
   'claim-waiting',
   'draw-sizes',
+  'orders-delivery',
+  'orders-case',
+  'account-addresses',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -214,8 +225,10 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   };
   // The pairs stage (plan NEXT-NINE, BP-34) tells the full story, then the console picks MONOLITHE's pairs; the
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
-  // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open.
-  const story: Exclude<DemoVariant, 'pairs' | 'claim-waiting' | 'draw-sizes'> = variant === 'pairs' || variant === 'claim-waiting' || variant === 'draw-sizes' ? 'full' : variant;
+  // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open. The stages of the
+  // collector's side of an order (plan NEXT LOT §3.6) tell the full story, their state writing the rest.
+  const OWN_STAGES = ['pairs', 'claim-waiting', 'draw-sizes', 'orders-delivery', 'orders-case', 'account-addresses'] as const;
+  const story = ((OWN_STAGES as readonly DemoVariant[]).includes(variant) ? 'full' : variant) as Exclude<DemoVariant, (typeof OWN_STAGES)[number]>;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);
   else {
