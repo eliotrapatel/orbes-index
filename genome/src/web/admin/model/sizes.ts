@@ -160,7 +160,10 @@ export function sizesCountLine(s: Pick<ModelSizes, 'offered' | 'setAside'>): str
   return `${s.offered} offered${s.setAside > 0 ? ` · ${s.setAside} set aside` : ''}`;
 }
 
-/** A size's State cell: Offered (flagged off its type's list, or of the same measure as another), or Set aside and when. */
+/**
+ * A size's State cell: Offered (flagged off its type's list, or of the same measure as another), or Set aside and when
+ * (the console's formatDate, a UTC day as every console date; declared at the H1 hand-over for the owner to decide).
+ */
 export function sizeState(type: SizeType | null, row: Pick<ModelSizeRow, 'setAsideAt' | 'onList' | 'sameAs'>): string {
   if (row.setAsideAt !== null) return `Set aside · ${formatDate(row.setAsideAt)}`;
   if (type !== null && !row.onList) return `Offered · Not on the ${SIZE_TYPE_WORDS[type]} list`;

@@ -610,8 +610,15 @@ async function giftSku(tx: Db, modelId: string, size: string | null): Promise<st
 /**
  * The SKU an order's size names (Client Services' EDIT): `offeredSku`, so a typed model's offered sizes only (400
  * SIZE_NOT_DECLARED, 409 SIZE_SET_ASIDE), except that the order's current SKU stays accepted though set aside since.
+ * The order's own size named again (whatever its case) is its own SKU, even when another of the model's sizes reads as
+ * the same measure ('SIZE 52' and '52', both made before the model had its type): no change.
  */
 async function termsSku(tx: Db, o: OrderRow, size: string | null): Promise<string> {
+  if (o.sku_id !== null) {
+    const own = await tx.selectFrom('skus').select('size_label').where('id', '=', o.sku_id).executeTakeFirst();
+    const asked = sizeLabelOf(size);
+    if (own && (own.size_label === null ? asked === null : asked !== null && own.size_label.toUpperCase() === asked.toUpperCase())) return o.sku_id;
+  }
   try {
     return (await offeredSku(tx, o.model_id, size)).skuId;
   } catch (e) {

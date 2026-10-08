@@ -1011,6 +1011,22 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       await orders().setTerms(o.id, { sizeLabel: '54 mm' }, admin);
       expect(await orderRow(o.id)).toMatchObject({ size_label: '54', sku_id: await sku('54') });
     });
+
+    it('the order\'s own size named again is no change, though another of its model\'s sizes reads as the same measure (SIZE 52 and 52)', async () => {
+      // Sizes made before the model had its type: 'SIZE 52' (the order's) and '52', both read as 52 once typed.
+      const ring = (await ctx.services.catalog.createModel({ categoryCode: 'J', name: 'ORBITALE', type: 'RING', skuPrefix: 'ORD-OBL' }, admin)).id;
+      const o = await salonOrder({ modelId: ring, size: 'SIZE 52', priceMinor: 300_000 });
+      expect(o.size_label).toBe('SIZE 52');
+      const own = o.sku_id!;
+      const list = await inTransaction(t.db, (tx) => ensureSku(tx, ring, '52'));
+      expect(list).not.toBe(own);
+      await t.db.updateTable('models').set({ size_type: 'RING', size_kind: 'RING' }).where('id', '=', ring).execute();
+      // Named again in another case, with a new engraving: only the engraving changes.
+      await orders().setTerms(o.id, { sizeLabel: 'size 52', engravingText: 'A. & B.' }, admin);
+      expect(await orderRow(o.id)).toMatchObject({ sku_id: own, size_label: 'SIZE 52', engraving_text: 'A. & B.' });
+      const changed = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'order.terms').where('target_id', '=', o.id).orderBy('id', 'desc').limit(1).executeTakeFirstOrThrow();
+      expect((changed.details as { fields?: unknown }).fields).toEqual(['engraving']);
+    });
   });
 });
 

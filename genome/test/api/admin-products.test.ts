@@ -600,6 +600,40 @@ describe('admin products, codes and records', () => {
       }
       const order = safeJson(await auditor.get(`/api/admin/orders/${orderId}`)) as any;
       expect(order.claimCode).toEqual({ status: 'WAITING', madeAt: row.created_at.toISOString(), readAt: null, withdrawnAt: null, withdrawnReason: null, cardNeeded: false, cardNeededOrder: null });
+      expect(order.claimCard).toEqual({ cardNeeded: false, cardNeededOrder: null });
+    });
+
+    it('a sold piece whose order was cancelled with a code waiting, linked from stock to a new order: that order\'s page says no card registers it, with the cancelled order', async () => {
+      const { inTransaction } = await import('../../src/server/db/connection.js');
+      const { ensureSku } = await import('../../src/server/services/stock.js');
+      const { orderReference } = await import('../../src/server/services/orders.js');
+      const actor = await adminActor();
+      const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+      const sku = await inTransaction(h.ctx.db, (tx) => ensureSku(tx, modelId, '56'));
+      await h.ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, actor);
+      const piece = await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, variant: '56', material: '925 STERLING SILVER', withClaimSecret: true }, actor);
+      const salonOrder = async (email: string) => {
+        const account = (await h.ctx.db.insertInto('accounts').values({ email, email_normalized: email, password_hash: 'unused' }).returning('id').executeTakeFirstOrThrow()).id;
+        const request = await h.ctx.db.insertInto('shop_requests').values({ account_id: account, model_id: modelId }).returning('id').executeTakeFirstOrThrow();
+        await h.ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, actor);
+        const id = (await h.ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+        await h.ctx.services.orders.setTerms(id, { sizeLabel: '56', priceMinor: 300_000, currency: 'EUR' }, actor);
+        return id;
+      };
+      const first = await salonOrder('claim-cancelled@example.com');
+      await h.ctx.services.atelier.linkFromStock(first, piece.product.productId, actor);
+      const pid = piece.product.productId;
+      expect((await operator.post(`/api/admin/products/${pid}/claim-code`, { reason: 'The buyer lost the card.', expect: 'SOLD', after: null })).statusCode).toBe(201);
+      await h.ctx.services.orders.transition(first, { to: 'CANCELLED', note: 'The buyer changed their mind.' }, actor);
+      const notice = { cardNeeded: true, cardNeededOrder: { id: first, reference: orderReference(first) } };
+      expect((safeJson(await auditor.get(`/api/admin/orders/${first}`)) as any).claimCard).toEqual(notice);
+      // Sold again: the new order has no new claim code of its own, and still says no card registers its piece.
+      const second = await salonOrder('claim-resold@example.com');
+      await h.ctx.services.atelier.linkFromStock(second, pid, actor);
+      const page = safeJson(await auditor.get(`/api/admin/orders/${second}`)) as any;
+      expect(page.claimCode).toBeNull();
+      expect(page.claimCard).toEqual(notice);
+      expect((safeJson(await auditor.get(`/api/admin/products/${pid}`)) as any).claimCode.cardNeeded).toBe(true);
     });
   });
 });

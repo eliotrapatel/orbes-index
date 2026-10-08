@@ -3215,6 +3215,21 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     } finally {
       page.off('response', record);
     }
+    // Cancelled with the code waiting, then sold again from stock: the new order has no new claim code of its own, and
+    // its page says no card registers its piece, naming the cancelled order (§3.4.3, §3.4.7).
+    await ctx.services.orders.transition(orderId, { to: 'CANCELLED', note: 'The buyer changed their mind.' }, staff);
+    const resoldEmail = 'claim-resold@example.com';
+    const resoldAccount = (await ctx.db.insertInto('accounts').values({ email: resoldEmail, email_normalized: resoldEmail, password_hash: 'unused' }).returning('id').executeTakeFirstOrThrow()).id;
+    const resoldRequest = await ctx.db.insertInto('shop_requests').values({ account_id: resoldAccount, model_id: modelId }).returning('id').executeTakeFirstOrThrow();
+    await ctx.services.salon.close(resoldRequest.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, staff);
+    const resold = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', resoldRequest.id).executeTakeFirstOrThrow()).id;
+    await ctx.services.orders.setTerms(resold, { sizeLabel: '59', priceMinor: 300_000, currency: 'EUR' }, staff);
+    await ctx.services.atelier.linkFromStock(resold, sold.product.productId, staff);
+    await go(page, `#/orders/${resold}`, orderReference(resold));
+    await expect
+      .poll(() => page.locator('[data-testid=order-claim-notice]').textContent())
+      .toBe(`No card registers this piece: its claim code was made for the buyer of order ${ref}, which was cancelled. Make a new claim code and put its card in the box before the piece is sold again.`);
+    expect(await page.locator('[data-testid=order-claim-code]').count()).toBe(0);
     await c.close();
   }, STEP_TIMEOUT);
 

@@ -1007,6 +1007,12 @@ export interface OrderClaimCode {
   cardNeededOrder: { id: string; reference: string } | null;
 }
 
+/** The order page's `claimCard`: no card registers the order's piece (its current code UNSHOWN), and the order it was made for. */
+export interface OrderClaimCard {
+  cardNeeded: boolean;
+  cardNeededOrder: { id: string; reference: string } | null;
+}
+
 // ── Registries ─────────────────────────────────────────────────────────────
 
 export interface ScanRecord {
@@ -2452,6 +2458,8 @@ export interface OrderDetail {
   delays: OrderAlertDelays;
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): the order's newest new claim code made for its buyer, or null; never the code. */
   claimCode: OrderClaimCode | null;
+  /** Whether a card registers the order's piece, read from the piece (with or without a new claim code of the order's own). */
+  claimCard: OrderClaimCard;
 }
 
 /** POST /api/admin/orders/:id/transition. */

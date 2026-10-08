@@ -21,7 +21,8 @@
  *              the key no longer opens it (UNREADABLE); a piece not printable (LOST…) or an order not open leaves it
  *              waiting. The reading is final once the server has answered.
  *   newCard    the buyer's new 79t card (the plan's `buyerCard`; named so that the collector's routes never name a buyer), while the code is read, the order open and the piece unregistered and
- *              printable: through CertificateService, which checks the code against the hash.
+ *              printable with an ACTIVE code: through CertificateService, which checks the code against the hash (its
+ *              staff refusals answered CLAIM_CARD_UNAVAILABLE).
  *   hooks      `withdrawOnCancel` (orders.ts `step()` CANCELLED, every cancellation): a current BUYER code (WAITING or
  *              READ) is replaced by an UNSHOWN code nobody sees, so a code the ex-buyer read stops working too, and the
  *              piece reads "no card registers this piece" (`cardNeeded`); `withdrawWaiting` (a return, a registration).
@@ -119,6 +120,17 @@ export interface OrderClaimCode {
   cardNeededOrder: { id: string; reference: string } | null;
 }
 
+/**
+ * The order page's `claimCard` (GET /api/admin/orders/:id): whether a card registers the order's piece, read from the piece
+ * itself, so an order with no new claim code of its own (a piece linked again after a cancelled sale) shows it too.
+ */
+export interface OrderClaimCard {
+  /** No card registers the piece: its current code is the UNSHOWN one made when an order of it was cancelled. */
+  cardNeeded: boolean;
+  /** The order of that UNSHOWN code, when `cardNeeded`. */
+  cardNeededOrder: { id: string; reference: string } | null;
+}
+
 /** An order's `claimCode` in YOUR ORDERS: status and date only, never the code. */
 export interface AccountOrderClaimCode {
   status: 'WAITING';
@@ -146,6 +158,8 @@ export const claimSituationChanged = () =>
   conflict('CLAIM_CODE_SITUATION_CHANGED', 'This piece changed meanwhile (sold, registered or given a new claim code). Reload its page and try again.');
 export const claimCodeUnavailable = () => conflict('CLAIM_CODE_UNAVAILABLE', 'This claim code can no longer be shown. ORBES Client Services can assist you.');
 export const claimCardUnavailable = () => conflict('CLAIM_CARD_UNAVAILABLE', 'Your new card can no longer be saved here. ORBES Client Services can assist you.');
+/** CertificateService's refusals that `newCard` answers as CLAIM_CARD_UNAVAILABLE (their messages are staff words). */
+const BUYER_CARD_REFUSALS: ReadonlySet<string> = new Set(['NO_ACTIVE_CODE', 'CODE_INTEGRITY', 'PRODUCT_NOT_PRINTABLE', 'ALREADY_REGISTERED', 'NO_CLAIM_SECRET']);
 const soldInStore = () => conflict('CLAIM_CODE_SOLD_IN_STORE', 'This piece was sold at a point of sale: a new claim code is not made for it.');
 export const orderChanged = () => conflict('ORDER_CHANGED', 'The order changed meanwhile. Try again.');
 const orderNotFound = () => notFound('Order', 'ORDER_NOT_FOUND');
@@ -249,9 +263,22 @@ function recordOf(r: ClaimRenewalRow & { email?: string | null }): ClaimRenewalR
   };
 }
 
-/** The order page's `claimCode`: the order's newest BUYER code, and whether no card registers its piece. Null without one. */
-export async function orderClaimCode(db: Db, orderId: string): Promise<OrderClaimCode | null> {
-  const r = await db
+/** Whether no card registers the piece: its current code is an UNSHOWN one, with the order it was made for. */
+async function claimCardOf(db: Db, productUuid: string | null): Promise<OrderClaimCard> {
+  if (productUuid === null) return { cardNeeded: false, cardNeededOrder: null };
+  const current = await db
+    .selectFrom('claim_code_renewals as c')
+    .innerJoin('products as p', (j) => j.onRef('p.id', '=', 'c.product_id').onRef('p.claim_secret_hash', '=', 'c.claim_hash'))
+    .select(['c.kind', 'c.order_id'])
+    .where('c.product_id', '=', productUuid)
+    .executeTakeFirst();
+  const cardNeeded = current?.kind === 'UNSHOWN';
+  return { cardNeeded, cardNeededOrder: cardNeeded && current?.order_id ? { id: current.order_id, reference: orderReference(current.order_id) } : null };
+}
+
+/** The order's newest BUYER renewal, if any. */
+async function newestBuyerRow(db: Db, orderId: string): Promise<ClaimRenewalRow | undefined> {
+  return db
     .selectFrom('claim_code_renewals')
     .selectAll()
     .where('order_id', '=', orderId)
@@ -260,23 +287,30 @@ export async function orderClaimCode(db: Db, orderId: string): Promise<OrderClai
     .orderBy('id', 'desc')
     .limit(1)
     .executeTakeFirst();
+}
+
+/** The order page's `claimCode`: the order's newest BUYER code, and whether no card registers its piece. Null without one. */
+export async function orderClaimCode(db: Db, orderId: string): Promise<OrderClaimCode | null> {
+  const r = await newestBuyerRow(db, orderId);
   if (!r) return null;
-  const current = await db
-    .selectFrom('claim_code_renewals as c')
-    .innerJoin('products as p', (j) => j.onRef('p.id', '=', 'c.product_id').onRef('p.claim_secret_hash', '=', 'c.claim_hash'))
-    .select(['c.kind', 'c.order_id'])
-    .where('c.product_id', '=', r.product_id)
-    .executeTakeFirst();
-  const cardNeeded = current?.kind === 'UNSHOWN';
   return {
     status: r.status,
     madeAt: r.created_at,
     readAt: r.read_at,
     withdrawnAt: r.withdrawn_at,
     withdrawnReason: r.withdrawn_reason,
-    cardNeeded,
-    cardNeededOrder: cardNeeded && current?.order_id ? { id: current.order_id, reference: orderReference(current.order_id) } : null,
+    ...(await claimCardOf(db, r.product_id)),
   };
+}
+
+/**
+ * The order page's `claimCard`: whether a card registers the order's piece (the piece bound to it; an order with none,
+ * the piece of its newest BUYER code), whether or not the order has a new claim code of its own (§3.4.3, §3.4.7: a piece
+ * whose sale was cancelled, linked to another order).
+ */
+export async function orderClaimCard(db: Db, orderId: string): Promise<OrderClaimCard> {
+  const o = await db.selectFrom('orders').select('product_id').where('id', '=', orderId).executeTakeFirst();
+  return claimCardOf(db, o?.product_id ?? (await newestBuyerRow(db, orderId))?.product_id ?? null);
 }
 
 /**
@@ -647,7 +681,8 @@ export class ClaimRenewalService {
    * The buyer's new certificate card (SAVE YOUR NEW CARD): the 79t card, one page, through CertificateService (the code
    * checked against the hash: 422 CLAIM_CODE_MISMATCH; one render at a time per account: 429 RATE_LIMITED), audited
    * `certificate.render` with `{ orderId, by: 'buyer' }`. Only while the order's newest buyer code is READ and still the
-   * piece's, the order open, the piece unregistered and printable: 409 CLAIM_CARD_UNAVAILABLE otherwise.
+   * piece's, the order open, the piece unregistered and printable with an ACTIVE code: 409 CLAIM_CARD_UNAVAILABLE
+   * otherwise, the renderer's own refusals included (never its staff words).
    */
   async newCard(accountId: string, orderId: string, claimCode: unknown, actor: Actor): Promise<RenderedCertificates> {
     assertAccount(accountId);
@@ -670,6 +705,16 @@ export class ClaimRenewalService {
       .limit(1)
       .executeTakeFirst();
     if (!row || row.status !== 'READ' || row.claim_hash !== p.claim_secret_hash || NOT_PRINTABLE.has(p.status) || (await isRegistered(this.db, p.id))) throw claimCardUnavailable();
-    return this.certificates.render([{ productId: p.product_id, claimCode }], { format: 'pdf', layout: 'card', context: { orderId: id, by: 'buyer' } }, actor);
+    // The card draws the piece's ACTIVE code (as `judge`): a code revoked since the reading leaves nothing to print.
+    const active = await this.db.selectFrom('codes').select('id').where('product_id', '=', p.id).where('status', '=', 'ACTIVE').executeTakeFirst();
+    if (!active) throw claimCardUnavailable();
+    try {
+      return await this.certificates.render([{ productId: p.product_id, claimCode }], { format: 'pdf', layout: 'card', context: { orderId: id, by: 'buyer' } }, actor);
+    } catch (e) {
+      // The renderer's refusals speak to staff (a code to re-issue, an integrity check); the buyer reads only that the
+      // card can no longer be saved here. A code that does not match (422) and a render already running (429) pass.
+      if (e instanceof DomainError && BUYER_CARD_REFUSALS.has(e.code)) throw claimCardUnavailable();
+      throw e;
+    }
   }
 }

@@ -14,7 +14,7 @@ Le point de départ de H1 : la production tourne G, le commit `52c1c8c65e0dd4824
 ## 0. Les règles
 
 1. **Ton accord sur les captures d'abord.** Avant la fusion, tu regardes les captures que liste le rapport de Claude : la ligne de la variante (le résultat, l'onglet PRODUCT, la pièce, MY PIECES, la page du certificat partagé), la carte 79t à côté de son `front.png` et une planche A4 de huit, les tailles dans la console (le type, les tailles cochées, une taille mise de côté, le stock à 0), NEW CLAIM CODE dans la console (ses deux fenêtres, la section `New claim codes`) et YOUR NEW CLAIM CODE dans YOUR ORDERS (avant et après SHOW THE CODE, au format téléphone et au format bureau). Sans ton accord, rien n'est fusionné ni déployé.
-2. **Jamais entre 03:00 et 05:30 UTC** : ce sont les sauvegardes de nuit du serveur partagé (05:00–07:30 à Paris jusqu'au 25 octobre 2026, 04:00–06:30 ensuite). **Ni pendant les minutes de sauvegarde du hub** : 01:00–01:10 et 01:45–01:55 UTC jusqu'au 25 octobre 2026, puis 02:00–02:10 et 02:45–02:55 UTC (dans les deux cas 03:00–03:10 et 03:45–03:55 à Paris).
+2. **Jamais entre 05:00 et 07:30 à Paris jusqu'au 25 octobre 2026, 04:00 et 06:30 ensuite** (03:00–05:30 UTC) : ce sont les sauvegardes de nuit du serveur partagé. **Ni pendant les minutes de sauvegarde du hub** : 03:00–03:10 et 03:45–03:55 à Paris (01:00–01:10 et 01:45–01:55 UTC jusqu'au 25 octobre 2026, puis 02:00–02:10 et 02:45–02:55 UTC).
 3. **Aucune heure n'est réservée** (ta règle du 2026-10-07). Une fois les trois conditions réunies, la CI verte sur le commit exact, le diff de `deploy/vps` vide après l'avance rapide, le lancement gardé, tu lances quand tu veux hors des heures de la règle 2, et tu préviens le responsable de l'hôte (ta session de coordination du serveur, « AI Stack Atlas planning ») d'une ligne au lancement, puis des contrôles d'après.
 4. **Rien ne change sur l'hôte** : ni Caddyfile, ni port, ni variable, ni certificat, ni `compose.yaml`, ni limite. Si cela devait changer, le responsable de l'hôte serait consulté d'abord.
 5. **Jamais `restore.sh` sur ce serveur** (`.env` dit `RESTORE_ALLOWED=false`). Après les migrations, on ne revient pas en arrière : on **répare en avant** (§1.5).
@@ -95,7 +95,7 @@ umask 022
 date -u
 ```
 
-Sortie attendue : une heure **hors** de 03:00–05:30 UTC et hors des minutes de sauvegarde du hub (règle 2).
+Sortie attendue : une heure **hors** de 05:00–07:30 à Paris jusqu'au 25 octobre 2026, 04:00–06:30 ensuite (03:00–05:30 UTC, l'heure que `date -u` affiche), et hors des minutes de sauvegarde du hub (règle 2).
 
 **5. Le pré-contrôle.** Note les quatre résultats : tu les compareras avec ceux d'après, et tu les envoies au responsable de l'hôte.
 

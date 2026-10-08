@@ -7,8 +7,8 @@
  *    `db_applied_migrations` and deploy.sh print before, the line `db.ts migrate` prints, those deploy.sh prints after
  *    it, the deployment log and the count `db.ts status` shows;
  *  - every message it expects from deploy.sh, backup.sh, restore.sh, lib.sh and the app is still one they print;
- *  - the plan's §7 and the owner's rules: the captures reviewed first, never 03:00–05:30 UTC nor the hub's backup
- *    minutes, no slot booked since 2026-10-07 and a heads-up at launch, nothing changed on the host (the deploy/vps diff
+ *  - the plan's §7 and the owner's rules: the captures reviewed first, never 05:00–07:30 Paris (03:00–05:30 UTC) nor the
+ *    hub's backup minutes (Paris first, UTC in brackets), no slot booked since 2026-10-07 and a heads-up at launch, nothing changed on the host (the deploy/vps diff
  *    empty), the pre-check before and after, the guarded launch, restore.sh only ever run to watch it refuse, no prune;
  *  - the legal version of H1 (the day after G's), the lost-card procedure told to ORBES Client Services, the owner's
  *    checks before the first customer card, one real check per feature, and the questions still open;
@@ -111,8 +111,10 @@ describe('the runbook of the next lot, part H1 (docs/launch/DEPLOY-NEXT-LOT.md)'
   it('holds the plan\'s §7 and the owner\'s rules: nothing changes on the host', () => {
     const rules = section(runbook, '## 0.');
     expect(rules).toContain('**Ton accord sur les captures d\'abord.**');
-    expect(rules).toContain('**Jamais entre 03:00 et 05:30 UTC**');
-    expect(rules).toContain('01:00–01:10 et 01:45–01:55 UTC jusqu\'au 25 octobre 2026, puis 02:00–02:10 et 02:45–02:55 UTC');
+    // Paris first, UTC in brackets (owner rule §0.12).
+    expect(rules).toContain('**Jamais entre 05:00 et 07:30 à Paris jusqu\'au 25 octobre 2026, 04:00 et 06:30 ensuite** (03:00–05:30 UTC)');
+    expect(rules).toContain('03:00–03:10 et 03:45–03:55 à Paris (01:00–01:10 et 01:45–01:55 UTC jusqu\'au 25 octobre 2026, puis 02:00–02:10 et 02:45–02:55 UTC)');
+    expect(section(runbook, '### 1.1')).toContain('une heure **hors** de 05:00–07:30 à Paris jusqu\'au 25 octobre 2026, 04:00–06:30 ensuite (03:00–05:30 UTC');
     expect(rules).toContain('**Aucune heure n\'est réservée**');
     expect(rules).toContain('la CI verte sur le commit exact, le diff de `deploy/vps` vide après l\'avance rapide, le lancement gardé');
     expect(rules).toContain('**Rien ne change sur l\'hôte**');

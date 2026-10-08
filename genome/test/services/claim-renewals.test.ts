@@ -215,6 +215,38 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
     holdsNot((await allAudit()) + (await allRows()), read.claimCode);
   });
 
+  it("the buyer's card after the ORBES CODE is revoked: 409 CLAIM_CARD_UNAVAILABLE in the collector's words, never the console's; the renderer's staff refusals answered the same", async () => {
+    const piece = await stockPiece();
+    const buyer = await createAccount(t.db);
+    const orderId = await soldOrder(buyer.id, piece);
+    await renewFor(piece, 'SOLD');
+    const { claimCode } = await renewals().reveal(buyer.id, orderId, buyer.actor);
+    await ctx.services.issuance.revokeCode(piece.code.id, 'Label damaged.', admin);
+    const e = await rejects(renewals().newCard(buyer.id, orderId, claimCode, buyer.actor), 'CLAIM_CARD_UNAVAILABLE', 409);
+    expect(e.publicMessage).toBe('Your new card can no longer be saved here. ORBES Client Services can assist you.');
+    // Re-issued: the card is drawn again.
+    await ctx.services.issuance.reissueCode(piece.product.productId, 'New label.', admin);
+    expect((await renewals().newCard(buyer.id, orderId, claimCode, buyer.actor)).contentType).toBe('application/pdf');
+    // A refusal the renderer finds itself (a code revoked meanwhile, an integrity check): the collector's sentence; a
+    // code that does not match and a render already running pass unchanged.
+    const throwing = (err: DomainError) =>
+      new ClaimRenewalService({
+        db: t.db,
+        audit: ctx.audit,
+        certificates: { render: () => Promise.reject(err) } as unknown as AppContext['services']['certificates'],
+        revealKey: deriveClaimRevealKey(testConfig()),
+        clock: clock.now,
+      });
+    for (const code of ['NO_ACTIVE_CODE', 'CODE_INTEGRITY', 'PRODUCT_NOT_PRINTABLE', 'ALREADY_REGISTERED', 'NO_CLAIM_SECRET']) {
+      const staff = new DomainError(code, 409, `Staff words for ${code}.`);
+      const mapped = await rejects(throwing(staff).newCard(buyer.id, orderId, claimCode, buyer.actor), 'CLAIM_CARD_UNAVAILABLE', 409);
+      expect(mapped.publicMessage).not.toContain('Staff words');
+    }
+    await rejects(throwing(new DomainError('CLAIM_CODE_MISMATCH', 422, 'No match.')).newCard(buyer.id, orderId, claimCode, buyer.actor), 'CLAIM_CODE_MISMATCH', 422);
+    await rejects(throwing(new DomainError('RATE_LIMITED', 429, 'Wait.')).newCard(buyer.id, orderId, claimCode, buyer.actor), 'RATE_LIMITED', 429);
+    holdsNot(await allAudit(), claimCode);
+  });
+
   it('REGISTER THIS PIECE: refused on an order not shipped; a wrong code counted under the attempt limit; the right one registers', async () => {
     const piece = await stockPiece();
     const buyer = await createAccount(t.db);

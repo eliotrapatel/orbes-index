@@ -850,7 +850,7 @@ class ClaimBlock {
     this.renderFocus('.pieces__claim-copy');
   }
 
-  /** SAVE YOUR NEW CARD: its PDF saved; the server's words when it no longer draws it here. */
+  /** SAVE YOUR NEW CARD: its PDF saved; the server's words when it no longer draws it here (CLAIM_CARD_UNAVAILABLE). */
   private async save(code: string): Promise<void> {
     if (this.busy !== null || this.state.kind !== 'shown') return;
     this.busy = 'save';
@@ -861,7 +861,8 @@ class ClaimBlock {
       saveDownload(await this.deps.api.newClaimCard(this.orderId, code));
     } catch (e) {
       this.deps.session.noteError(e);
-      error = e instanceof ApiError && e.status === 409 ? e.message : ORDERS.claim.saveFailed;
+      // Only CLAIM_CARD_UNAVAILABLE's words are for the buyer; any other refusal reads as a failed save.
+      error = e instanceof ApiError && e.status === 409 && e.code === 'CLAIM_CARD_UNAVAILABLE' ? e.message : ORDERS.claim.saveFailed;
     }
     this.busy = null;
     if (this.state.kind === 'shown') this.state = { ...this.state, error };

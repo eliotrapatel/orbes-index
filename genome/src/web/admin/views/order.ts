@@ -531,7 +531,8 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     acts.location ? button('Change location', { kind: 'ghost', testId: 'order-location', onClick: moveTo }) : null,
     acts.linkPiece ? button('Link a piece', { kind: 'ghost', testId: 'order-link', onClick: linkPiece }) : null,
   ].filter((b): b is HTMLButtonElement => b !== null);
-  const noCard = d.claimCode?.cardNeeded && d.claimCode.cardNeededOrder ? h('p', { class: 'notice', data: { testid: 'order-claim-notice' } }, noCardNotice(d.claimCode.cardNeededOrder.reference)) : null;
+  // Read from the piece (claimCard), so an order with no new claim code of its own shows it too (§3.4.3, §3.4.7).
+  const noCard = d.claimCard?.cardNeeded && d.claimCard.cardNeededOrder ? h('p', { class: 'notice', data: { testid: 'order-claim-notice' } }, noCardNotice(d.claimCard.cardNeededOrder.reference)) : null;
   const pieceSection = section('Piece', noCard ? [noCard, defList(pieceRows)] : defList(pieceRows), { id: 'order-piece', tools: pieceTools });
 
   // ── The shipment ─────────────────────────────────────────────────────────

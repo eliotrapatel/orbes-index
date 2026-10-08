@@ -601,6 +601,15 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
     await save.click();
     await textOf(block.getByRole('alert'), C.saveFailed);
     await visible(code);
+    // Refused with CLAIM_CARD_UNAVAILABLE: its words; any other refusal's words are never shown, the save reads as failed.
+    const unavailable = 'Your new card can no longer be saved here. ORBES Client Services can assist you.';
+    await page.route('**/claim-card.pdf', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'CLAIM_CARD_UNAVAILABLE', message: unavailable } }) }), { times: 1 });
+    await save.click();
+    await textOf(block.getByRole('alert'), unavailable);
+    await page.route('**/claim-card.pdf', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'NO_ACTIVE_CODE', message: 'No active code for O26-TEST: re-issue its code on the product page first.' } }) }), { times: 1 });
+    await save.click();
+    await textOf(block.getByRole('alert'), C.saveFailed);
+    await visible(code);
 
     // REGISTER THIS PIECE refused: the server's words, the button kept.
     await page.route('**/register', (route) => route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'REGISTRATION_CONFLICT', message: 'This piece changed meanwhile. Try again.' } }) }), { times: 1 });
