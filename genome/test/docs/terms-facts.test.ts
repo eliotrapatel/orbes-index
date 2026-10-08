@@ -80,6 +80,7 @@ import {
   TRANSFERABLE_STATUSES,
 } from '../../src/server/services/ownership.js';
 import { LIVE_QUESTION_OPEN_DAYS } from '../../src/server/services/question.js';
+import { RETURN_WINDOW_DAYS } from '../../src/server/services/parcels.js';
 import { SALE_TOKEN_TTL_MS } from '../../src/server/services/sale.js';
 import { normalizeShopNote, SHOP_NOTE_MAX } from '../../src/server/services/salon.js';
 import { SCAN_TOKEN_TTL_MS, TRANSFER_TOKEN_TTL_MS } from '../../src/server/services/scan-tokens.js';
@@ -186,6 +187,12 @@ const minutes = (ms: number): number => ms / MIN;
 const sameIn = (phrase: string) => ({ fr: [phrase], en: [phrase] });
 
 const CONSTANTS: Record<string, ConstantSpec> = {
+  // R154 (plan NEXT LOT §3.6.D): the collector's return or size exchange, within 14 days of the delivery (fixed, never a setting).
+  RETURN_WINDOW_DAYS: {
+    value: `${RETURN_WINDOW_DAYS} jours`,
+    fr: [`${RETURN_WINDOW_DAYS} jours`],
+    en: [`${RETURN_WINDOW_DAYS} days`],
+  },
   VERIFICATION_COPY: {
     value: '—',
     holds: () => {

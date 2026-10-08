@@ -521,7 +521,7 @@ describe('legal pages: the privacy policy, written from the code', () => {
     }
   });
 
-  it('says what an order records, as the code keeps it: the buyer entered by Client Services, never audited nor journaled, invoiced without VAT', () => {
+  it('says what an order records, as the code keeps it: the buyer entered by the collector or by Client Services (plan NEXT LOT §3.6.B), never audited nor journaled, invoiced without VAT', () => {
     const orders = readDoc('genome/src/server/services/orders.ts');
     // The journal says a buyer was entered, never who (orderPayload); the order's audit entry names no buyer either.
     const payload = /export function orderPayload\(o: OrderRow\): JsonObject \{([\s\S]*?)\n\}/.exec(orders)?.[1] ?? '';
@@ -539,8 +539,8 @@ describe('legal pages: the privacy policy, written from the code', () => {
     // The journal and the Shopify file reach no one: the server sends no request out.
     expect(readDoc('genome/src/server/services/shopify.ts')).not.toMatch(/\bfetch\(|https?\.request\(/);
     for (const [lang, says] of [
-      ['en', ['ORBES Client Services enters the name and the address of the buyer on the order', 'never in the service\'s audit log', `${INVOICE_ISSUER.name} issues its invoice`, 'without VAT', 'never changed nor deleted', 'the service sends these data to no one', 'The service itself sends nothing to Shopify.', 'TRACK THE SHIPMENT opens the carrier\'s own page in a new tab', 'are in the copy of your data']],
-      ['fr', ["ORBES Client Services saisit le nom et l'adresse de l'acheteur sur la commande", "jamais dans le journal d'audit du service", `${INVOICE_ISSUER.name} émet sa facture`, 'sans TVA', 'ne sont jamais modifiés ni supprimés', 'le service ne transmet ces données à personne', "Le service lui-même n'envoie rien à Shopify.", 'TRACK THE SHIPMENT ouvre la page du transporteur dans un nouvel onglet', 'figurent dans la copie de vos données']],
+      ['en', ['You enter the delivery name, address, country and phone on the order, or ORBES Client Services does', 'never in the service\'s audit log', `${INVOICE_ISSUER.name} issues its invoice`, 'without VAT', 'never changed nor deleted', 'the service sends these data to no one', 'The service itself sends nothing to Shopify.', 'TRACK THE SHIPMENT opens the carrier\'s own page in a new tab', 'are in the copy of your data']],
+      ['fr', ["Vous saisissez le nom, l'adresse, le pays et le téléphone de livraison sur la commande, ou ORBES Client Services le fait", "jamais dans le journal d'audit du service", `${INVOICE_ISSUER.name} émet sa facture`, 'sans TVA', 'ne sont jamais modifiés ni supprimés', 'le service ne transmet ces données à personne', "Le service lui-même n'envoie rien à Shopify.", 'TRACK THE SHIPMENT ouvre la page du transporteur dans un nouvel onglet', 'figurent dans la copie de vos données']],
     ] as const) {
       const text = sectionText(DOCUMENTS.privacy[lang], 'orders');
       for (const s of says) expect(text, `${lang}: ${s}`).toContain(s);
@@ -551,9 +551,9 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(readDoc('genome/src/server/services/invoices.ts')).toContain("'buyer name', 'buyer address', 'buyer email'");
     for (const [lang, orders, recipients] of [
       ['en', ["to the carrier it chooses for the shipment and to the logistics partner that keeps and ships pieces for it", 'the invoices and their table of each month to its accountant'],
-        ["- The carrier ORBES chooses for a shipment, and the logistics partner that keeps and ships pieces for ORBES: the buyer's name and address and the contents of the parcel.", "- ORBES's accountant, who receives the invoices, the credit notes and their table of each month, with the buyer's name, address and email address."]],
+        ["- The carrier ORBES chooses for a shipment, and the logistics partner that keeps and ships pieces for ORBES: the buyer's name, address and phone and the contents of the parcel.", "- ORBES's accountant, who receives the invoices, the credit notes and their table of each month, with the buyer's name, address and email address."]],
       ['fr', ["au transporteur qu'il choisit pour l'envoi et au partenaire logistique qui garde et expédie des pièces pour lui", 'les factures et leur tableau de chaque mois à son comptable'],
-        ["- Le transporteur qu'ORBES choisit pour un envoi, et le partenaire logistique qui garde et expédie des pièces pour ORBES : le nom et l'adresse de l'acheteur et le contenu du colis.", "- Le comptable d'ORBES, qui reçoit les factures, les avoirs et leur tableau de chaque mois, avec le nom, l'adresse et l'adresse e-mail de l'acheteur."]],
+        ["- Le transporteur qu'ORBES choisit pour un envoi, et le partenaire logistique qui garde et expédie des pièces pour ORBES : le nom, l'adresse et le téléphone de l'acheteur et le contenu du colis.", "- Le comptable d'ORBES, qui reçoit les factures, les avoirs et leur tableau de chaque mois, avec le nom, l'adresse et l'adresse e-mail de l'acheteur."]],
     ] as const) {
       for (const s of orders) expect(sectionText(DOCUMENTS.privacy[lang], 'orders'), `${lang}: ${s}`).toContain(s);
       for (const s of recipients) expect(sectionText(DOCUMENTS.privacy[lang], 'recipients'), `${lang}: ${s}`).toContain(s);
@@ -756,8 +756,11 @@ describe('legal pages: both languages, links, lexicon', () => {
       // Deployment H2 (§3.5.11, step 5.5): the terms' « Its piece » paragraph (an order waits for supplier stock, served
       // the oldest first) and the privacy policy's engraving clause (no piece is made for an order); step 5.14: the
       // privacy policy's sentence on the packing photo (seen by ORBES only, deleted 14 days after delivery); moved by
-      // step 6.12, then to the date of H2's final commit.
-      '2026-10-10': '3b62c0dec43fc82c',
+      // step 6.12 (plan NEXT LOT §3.6): the privacy policy's orders paragraph (the delivery address entered by the client,
+      // its phone given to the carrier and the logistics partner) and its saved addresses; the terms' article 12 (a size
+      // chosen at entry, each size filled in the draw's order) and article 14 (the delivery address and the engraving on
+      // the order, the 14 days to ask a return or an exchange); then to the date of H2's final commit.
+      '2026-10-10': '0c32bb148a95ae6d',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });
