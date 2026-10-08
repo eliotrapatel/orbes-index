@@ -39,6 +39,7 @@ import {
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { countPiecesIn, packAndShip } from '../support/fulfil.js';
 import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 /**
@@ -526,15 +527,14 @@ describe('the Shopify exports and the ids pasted back (plan LIVE RELEASE+, S9)',
     clock.advance(60_000);
     const shipped = await salon();
     const sku = await skuOf(f.modelId, '56');
-    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, f.admin);
     const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '56', material: '925 STERLING SILVER', withClaimSecret: true }, f.admin);
+    await countPiecesIn(ctx, { skuId: sku, locationId: france, productRefs: [piece.product.productId] }, f.admin);
     await ctx.services.orders.setTerms(shipped.id, { sizeLabel: '56', priceMinor: 480_000, currency: 'EUR' }, f.admin);
     await ctx.services.orders.setBuyer(shipped.id, { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris\nFrance' }, f.admin);
-    await ctx.services.atelier.linkFromStock(shipped.id, piece.product.productId, f.admin);
     clock.advance(60_000);
     await ctx.services.orders.transition(shipped.id, { to: 'PAID' }, f.admin);
     clock.advance(60_000);
-    await ctx.services.orders.transition(shipped.id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
+    await packAndShip(ctx, shipped.id, { carrierId: colissimo, trackingNumber: '6A12345678901', pieces: { [shipped.id]: piece.product.productId } }, f.admin);
     const cancelled = await salon();
     await ctx.services.orders.setTerms(cancelled.id, { sizeLabel: '52', priceMinor: 300_000, currency: 'EUR' }, f.admin);
     await ctx.services.orders.transition(cancelled.id, { to: 'PAID' }, f.admin);

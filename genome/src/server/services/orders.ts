@@ -25,8 +25,10 @@
  *                (services/invoices.ts issueInvoice).
  *                SHIPPED: with an active carrier and the tracking number (the value declared for the insurance
  *                optional), once the piece is in stock at the order's location (409 ORDER_NOT_READY before) and
- *                linked to the order (409 ORDER_PIECE_NOT_LINKED before: the atelier issues it, or picks it from
- *                stock): it leaves the ledger (SHIPPED, −1).
+ *                bound to the order (409 ORDER_PIECE_NOT_LINKED before: the packing scan binds it), and only through
+ *                its parcel's Ship, the parcel PACKED with every card scanned (409 ORDER_NOT_PACKED otherwise, plan
+ *                NEXT LOT §3.5.6.7: services/logistics.ts ships every order of the parcel together): it leaves the
+ *                ledger (SHIPPED, −1).
  *                DELIVERED: by Client Services, or by itself when the buyer registers the piece linked to the order
  *                while it is SHIPPED (`deliverOnRegistration`, OwnershipService.registerFirst).
  *                CANCELLED, with a note: a piece in stock is released, and serves the next order waiting for it; once
@@ -199,6 +201,8 @@ const stepNotAllowed = (from: OrderStatus, to: OrderStatus) =>
   new DomainError('ORDER_TRANSITION_NOT_ALLOWED', 409, 'This order cannot move to that step.', { detail: `${from} → ${to}` });
 const notReady = () => conflict('ORDER_NOT_READY', 'The piece is not in stock at the order’s location yet.');
 const pieceNotLinked = () => conflict('ORDER_PIECE_NOT_LINKED', 'Link the piece that fulfils this order before it ships.');
+/** Plan NEXT LOT §3.5.6.7 (step 5.12): an order ships only through its parcel's Ship, packed and checked. */
+export const orderNotPacked = () => conflict('ORDER_NOT_PACKED', 'Pack the parcel and check it before it ships.');
 const pieceLinked = () => conflict('ORDER_PIECE_LINKED', 'A piece is already linked to this order: transfer the piece instead.');
 const termsFixed = () => conflict('ORDER_TERMS_FIXED', 'The size and the price of a LIVE RELEASE order are those of its release.');
 const orderClosed = () => conflict('ORDER_CLOSED', 'This order can no longer change.');
@@ -1221,7 +1225,18 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
 /** What a step requires, checked before the transaction. */
 export type CheckedStep =
   | { to: 'PAID'; note: string | null }
-  | { to: 'SHIPPED'; carrierId: string; trackingNumber: string; declaredValueMinor: number | null; note: string | null }
+  | {
+      to: 'SHIPPED';
+      carrierId: string;
+      trackingNumber: string;
+      declaredValueMinor: number | null;
+      note: string | null;
+      /**
+       * Plan NEXT LOT §3.5.6.7 (step 5.12): the parcel's shipment, PACKED, that this order ships in. Only the parcel's Ship
+       * names it (LogisticsService.ship), never a request: a SHIPPED step without it answers 409 ORDER_NOT_PACKED.
+       */
+      shipmentId?: string;
+    }
   | { to: 'DELIVERED'; note: string | null; details?: JsonObject }
   | {
       to: 'CANCELLED';
@@ -1288,6 +1303,7 @@ export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, no
     case 'SHIPPED': {
       if (o.reservation !== 'STOCK') throw notReady();
       if (o.product_id === null) throw pieceNotLinked();
+      await assertPacked(tx, o, s.shipmentId);
       const carrier = await tx.selectFrom('carriers').select(['id', 'active']).where('id', '=', s.carrierId).executeTakeFirst();
       if (!carrier || !carrier.active) throw carrierUnknown();
       if (s.declaredValueMinor !== null && o.currency === null) throw validationError('Enter the order’s price and currency before declaring a value.');
@@ -1334,6 +1350,21 @@ export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, no
     }
   }
   return after;
+}
+
+/**
+ * The SHIPPED gate (plan NEXT LOT §3.5.6.7, step 5.12): the order ships in its parcel's open shipment, named by the
+ * parcel's Ship, PACKED, every item of it scanned, this order's item bound to the order's piece. Anything else (a SHIPPED
+ * step from POST /api/admin/orders/:id/transition, a parcel not packed or not checked) answers 409 ORDER_NOT_PACKED: a
+ * parcel ships whole, through Logistics (LogisticsService.ship).
+ */
+async function assertPacked(tx: Db, o: OrderRow, shipmentId: string | undefined): Promise<void> {
+  if (shipmentId === undefined) throw orderNotPacked();
+  const shipment = await tx.selectFrom('shipments').select(['id', 'status']).where('id', '=', shipmentId).executeTakeFirst();
+  if (!shipment || shipment.status !== 'PACKED') throw orderNotPacked();
+  const items = await tx.selectFrom('shipment_items').select(['order_id', 'product_id']).where('shipment_id', '=', shipment.id).execute();
+  const mine = items.find((i) => i.order_id === o.id);
+  if (!mine || mine.product_id !== o.product_id || items.some((i) => i.product_id === null)) throw orderNotPacked();
 }
 
 /**

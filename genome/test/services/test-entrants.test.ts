@@ -36,6 +36,7 @@ import { ensureSku, stockLevel } from '../../src/server/services/stock.js';
 import { creditBalances } from '../../src/server/services/tier-grants.js';
 import { shareOf, splitOf, testPhrase, testRunSettings, TEST_RUN_DEFAULTS, TestEntrantService, type TestRunSettingsInput } from '../../src/server/services/test-entrants.js';
 import { createHarness, type Harness } from '../api/support.js';
+import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
 import { createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
@@ -702,12 +703,14 @@ describe('END TEST and a new claim code (plan NEXT LOT §3.4.8)', () => {
     w.h.clock.advance(61_000);
     expect(await w.tests.sweep()).toBe(1);
     const order = await db.selectFrom('orders').select(['id', 'account_id']).where('drop_id', '=', drop).executeTakeFirstOrThrow();
-    // Client Services enters its size and links a piece from the stock; its card is lost: a new code waits for the buyer.
+    // Client Services enters its size and marks it paid; the packing scan binds a piece of the stock to it; its card is
+    // lost: a new code waits for the buyer.
     const sku = await inTransaction(db, (tx) => ensureSku(tx, w.f.modelId, '52'));
-    await w.h.ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, admin);
     const piece = await w.h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: w.f.modelId, variant: '52', material: '925 STERLING SILVER', withClaimSecret: true }, admin);
+    await countPiecesIn(w.h.ctx, { skuId: sku, locationId: france, productRefs: [piece.product.productId] }, admin);
     await w.h.ctx.services.orders.setTerms(order.id, { sizeLabel: '52' }, admin);
-    await w.h.ctx.services.atelier.linkFromStock(order.id, piece.product.productId, admin);
+    await w.h.ctx.services.orders.transition(order.id, { to: 'PAID' }, admin);
+    await scanIntoParcel(w.h.ctx, order.id, { pieces: { [order.id]: piece.product.productId } }, admin);
     await w.h.ctx.services.claimRenewals.renew(piece.product.productId, { reason: 'Card lost at the warehouse.', expect: 'SOLD', after: null }, admin);
     const hash = (await db.selectFrom('products').select('claim_secret_hash').where('id', '=', piece.product.id).executeTakeFirstOrThrow()).claim_secret_hash;
     // END TEST: through OrderService.transition, the cancellation's hook.

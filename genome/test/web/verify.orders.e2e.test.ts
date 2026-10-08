@@ -50,7 +50,7 @@ import { createLiveRelease, liveFixture, type LiveFixture } from '../support/liv
 import { tapZoneFloors } from '../support/tap-zones.js';
 import { screenChecks } from '../support/vault-checks.js';
 import { CHROMIUM_PATH, launchChromium, mobileContext, startVerifyServer, type VerifyServer } from './verify.harness.js';
-import { stockPiece } from '../support/fulfil.js';
+import { countPiecesIn, packAndShip, scanIntoParcel, stockPieces } from '../support/fulfil.js';
 
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'out');
 const HAS_CHROMIUM = existsSync(CHROMIUM_PATH);
@@ -139,12 +139,14 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
     await f.live.confirm(me.id, r.id, actor);
     ids.live = (await srv.ctx.db.selectFrom('orders').select('id').where('account_id', '=', me.id).where('channel', '=', 'LIVE').executeTakeFirstOrThrow()).id;
 
-    // Today, ORBES Client Services: paid, its piece taken from the stock (test/support/fulfil.ts stockPiece), shipped.
+    // Today, ORBES Client Services marks it paid; a piece counted in serves it (test/support/fulfil.ts stockPieces); the
+    // agent's steps pack and ship it (packAndShip), its warranty started at SHIP.
     const orders = srv.ctx.services.orders;
     await orders.transition(ids.live, { to: 'PAID' }, f.admin);
-    const done = await stockPiece(srv.ctx, { orderId: ids.live, material: '925 STERLING SILVER' }, f.admin);
-    Object.assign(livePiece, { productId: done.productId, codeData: done.data, claimCode: done.claimCode! });
-    await orders.transition(ids.live, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
+    const held = await srv.ctx.db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', ids.live).executeTakeFirstOrThrow();
+    const [done] = await stockPieces(srv.ctx, { skuId: held.sku_id!, locationId: held.location_id, count: 1, material: '925 STERLING SILVER', forOrderIds: [ids.live] }, f.admin);
+    Object.assign(livePiece, { productId: done!.productId, codeData: done!.data, claimCode: done!.claimCode! });
+    await packAndShip(srv.ctx, ids.live, { carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
 
     ids.cancelled = await salonOrder(me.id);
     await orders.transition(ids.cancelled, { to: 'CANCELLED', note: 'The client withdrew.' }, f.admin);
@@ -278,9 +280,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: the orders of a collector (Chromium, 
 
   it('its documents: the invoice and the ownership certificate saved as PDFs, the care guide opened and closed; a document that cannot be read says so', async () => {
     const D = ORDERS.documents;
-    // The collector registers the piece of the LIVE RELEASE (its warranty started at the sale).
-    const uuid = (await srv.ctx.db.selectFrom('products').select('id').where('product_id', '=', livePiece.productId).executeTakeFirstOrThrow()).id;
-    await srv.ctx.services.warranty.activate(uuid, { purchaseDate: new Date().toISOString().slice(0, 10), retailer: 'ORBES PARIS', country: 'FR' }, f.admin);
+    // The collector registers the piece of the LIVE RELEASE (its warranty started at SHIP).
     const scan = await srv.ctx.services.verification.verify({ code: livePiece.codeData }, {});
     await srv.ctx.services.ownership.registerFirst(me.id, { registrationToken: scan.registration!.token, claimCode: livePiece.claimCode }, { type: 'account', id: me.id });
     const invoice = (await srv.ctx.services.orders.forAccount(me.id)).find((o) => o.id === ids.live)!.documents.invoice!.number;
@@ -426,23 +426,24 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
   }
 
   /**
-   * A piece of a fresh size counted in at FRANCE WAREHOUSE, sold to the account through the private salon: priced, linked,
-   * paid, its warranty started, then shipped unless told; then ORBES Client Services makes it a new claim code (SOLD).
+   * A piece of a fresh size counted in at FRANCE WAREHOUSE, sold to the account through the private salon: priced, paid,
+   * its piece bound by the packing scan, its warranty started (by hand; SHIP leaves it), then packed and shipped unless
+   * told; then ORBES Client Services makes it a new claim code (SOLD).
    */
   async function soldWithNewCode(accountId: string, upTo: 'PAID' | 'SHIPPED'): Promise<{ orderId: string; productId: string }> {
     const { services, db } = srv.ctx;
     const size = String(sizeSeq++);
     const sku = await inTransaction(db, (tx) => ensureSku(tx, f.modelId, size));
-    await services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, f.admin);
     const p = await services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: size, material: '925 STERLING SILVER', withClaimSecret: true }, f.admin);
+    await countPiecesIn(srv.ctx, { skuId: sku, locationId: france, productRefs: [p.product.productId] }, f.admin);
     const request = await db.insertInto('shop_requests').values({ account_id: accountId, model_id: f.modelId, created_at: new Date() }).returning('id').executeTakeFirstOrThrow();
     await services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
     const orderId = (await db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await services.orders.setTerms(orderId, { sizeLabel: size, priceMinor: 420_000, currency: 'EUR' }, f.admin);
-    await services.atelier.linkFromStock(orderId, p.product.productId, f.admin);
     await services.orders.transition(orderId, { to: 'PAID' }, f.admin);
+    await scanIntoParcel(srv.ctx, orderId, { pieces: { [orderId]: p.product.productId } }, f.admin);
     await services.warranty.activate(p.product.id, { purchaseDate: new Date().toISOString().slice(0, 10), retailer: 'ORBES PARIS', country: 'FR' }, f.admin);
-    if (upTo === 'SHIPPED') await services.orders.transition(orderId, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
+    if (upTo === 'SHIPPED') await packAndShip(srv.ctx, orderId, { carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
     const situation = await services.claimRenewals.situation(p.product.productId);
     const r = await services.claimRenewals.renew(p.product.productId, { reason: 'Card lost.', expect: 'SOLD', after: situation.lastRenewalId }, f.admin);
     expect(r.claimCode).toBeUndefined();

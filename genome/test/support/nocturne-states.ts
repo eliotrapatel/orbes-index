@@ -17,6 +17,7 @@
 import { PNG } from 'pngjs';
 import type { Browser, BrowserContext, Page, Route } from 'playwright-core';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
+import { countPiecesIn, packAndShip } from './fulfil.js';
 import { NOCTURNE_NOW, type DemoVariant, type NocturneDemo } from './nocturne-demo.js';
 import { codePhoto, gate, hideGrain, mobileContext, sleep, type UiStage } from './ui-stage.js';
 
@@ -245,8 +246,8 @@ async function messageAndAnswer(run: StateRun): Promise<void> {
 
 /**
  * Plan NEXT LOT §3.4, the state claim-waiting (its own stage, the full story): ORBES Client Services sells you a
- * MONOLITHE in blue through THE PRIVATE SALON (size 17, € 4 200), marks it PAID, links a Generator piece to it, starts its
- * warranty (ORBES PARIS) and ships it with Colissimo, unregistered; then the piece's card is lost and New claim code makes
+ * MONOLITHE in blue through THE PRIVATE SALON (size 17, € 4 200), marks it PAID; a Generator piece counted in is packed
+ * and shipped through the agent's steps with Colissimo (its warranty started by hand, ORBES PARIS), unregistered; then the piece's card is lost and New claim code makes
  * it a new claim code for its buyer, waiting on the order. Written once per stage (a second opening finds it there).
  */
 async function claimWaiting(run: StateRun): Promise<void> {
@@ -259,19 +260,32 @@ async function claimWaiting(run: StateRun): Promise<void> {
   const request = await db.insertInto('shop_requests').values({ account_id: you.id, model_id: blue, created_at: NOCTURNE_NOW }).returning('id').executeTakeFirstOrThrow();
   await services.salon.close(request.id, { note: 'A MONOLITHE in blue, size 17.', outcome: 'ACCEPTED' }, admin);
   const order = await db.selectFrom('orders').select(['id', 'location_id']).where('shop_request_id', '=', request.id).executeTakeFirstOrThrow();
-  // Its piece, issued by the Generator and counted in where the order is served, then linked to it (Link a piece).
+  // Its piece, issued by the Generator and counted in where the order is served (test/support/fulfil.ts countPiecesIn);
+  // paid, then packed and shipped through the agent's steps (packAndShip: the packing scan binds it), its warranty
+  // started by hand before SHIP, which leaves it as it is.
   const sku = (await db.selectFrom('skus').select('id').where('model_id', '=', blue).where('size_label', '=', '17').executeTakeFirstOrThrow()).id;
-  await services.stock.adjust({ skuId: sku, locationId: order.location_id, delta: 1, note: 'Counted in.' }, admin);
-  await services.orders.setTerms(order.id, { sizeLabel: '17', priceMinor: 420_000, currency: 'EUR' }, admin);
   const piece = await services.issuance.issueProduct(
     { categoryCode: 'J', year: 2026, modelId: blue, variant: '17', material: '925 STERLING SILVER, BLUE LACQUER', productionBatch: 'B-2026-10', productionDate: '2026-10-01', withClaimSecret: true },
     admin,
   );
-  await services.atelier.linkFromStock(order.id, piece.product.productId, admin);
+  await countPiecesIn(run.stage.ctx, { skuId: sku, locationId: order.location_id, productRefs: [piece.product.productId] }, admin);
+  await services.orders.setTerms(order.id, { sizeLabel: '17', priceMinor: 420_000, currency: 'EUR' }, admin);
   await services.orders.transition(order.id, { to: 'PAID' }, admin);
-  await services.warranty.activate(piece.product.id, { purchaseDate: '2026-10-05', retailer: 'ORBES PARIS', country: 'FR' }, admin);
   const colissimo = (await db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
-  await services.orders.transition(order.id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A10000000017', declaredValueMinor: 420_000 }, admin);
+  await packAndShip(
+    run.stage.ctx,
+    order.id,
+    {
+      carrierId: colissimo,
+      trackingNumber: '6A10000000017',
+      declaredValueMinor: 420_000,
+      pieces: { [order.id]: piece.product.productId },
+      beforeShip: async () => {
+        await services.warranty.activate(piece.product.id, { purchaseDate: '2026-10-05', retailer: 'ORBES PARIS', country: 'FR' }, admin);
+      },
+    },
+    admin,
+  );
   await services.claimRenewals.renew(piece.product.productId, { reason: 'Card lost', expect: 'SOLD', after: null }, admin);
 }
 

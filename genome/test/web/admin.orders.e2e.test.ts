@@ -37,11 +37,11 @@ import { inTransaction } from '../../src/server/db/connection.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { orderReference } from '../../src/server/services/orders.js';
 import { sizesForExchange } from '../../src/server/services/sizes.js';
-import { ensureSku } from '../../src/server/services/stock.js';
+import { ensureSku, recordMovement } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { codeSource, phonePhoto } from '../e2e/support.js';
-import { stockPiece as stockPieceFor, stockPieces, type StockedPiece } from '../support/fulfil.js';
+import { stockPieces, type StockedPiece } from '../support/fulfil.js';
 import { writePng } from '../support/image-io.js';
 import { jpegPhoto } from '../support/images.js';
 import { createAccount, holdPieces } from '../support/live.js';
@@ -758,13 +758,24 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
   }, STEP_TIMEOUT);
 
   it('keeps the Shipment section of an order shipped before Logistics: its carrier, its tracking link and its declared value, never a parcel NOT READY (plan NEXT LOT §3.5.8)', async () => {
-    // Shipped from its order as before H2: no parcel's shipment, the carrier and tracking number on the order.
+    // Shipped from its order as before H2: no parcel's shipment, the carrier and tracking number on the order. Since the
+    // SHIPPED gate (step 5.12) no step ships it so any more: the previous image's SHIPPED step is written as it wrote it
+    // (its piece bound, the order SHIPPED with its carrier, tracking number and declared value, the ledger's SHIPPED −1).
     const legacy = (await salonOrder('60')).id;
     await ctx.services.orders.setTerms(legacy, { priceMinor: 480_000, currency: 'EUR' }, admin);
     await ctx.services.orders.transition(legacy, { to: 'PAID' }, admin);
-    await stockPieceFor(ctx, { orderId: legacy }, admin);
+    const held = await ctx.db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', legacy).executeTakeFirstOrThrow();
+    const [legacyPiece] = await stockPieces(ctx, { skuId: held.sku_id!, locationId: held.location_id, count: 1, forOrderIds: [legacy] }, admin);
     const colissimo = (await ctx.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
-    await ctx.services.orders.transition(legacy, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A98765432109', declaredValueMinor: 480_000 }, admin);
+    await inTransaction(ctx.db, async (tx) => {
+      const now = new Date();
+      await recordMovement(tx, { skuId: held.sku_id!, locationId: held.location_id, delta: -1, reason: 'SHIPPED', orderId: legacy, productId: legacyPiece!.uuid }, admin, now);
+      await tx
+        .updateTable('orders')
+        .set({ product_id: legacyPiece!.uuid, status: 'SHIPPED', shipped_at: now, reservation: null, carrier_id: colissimo, tracking_number: '6A98765432109', declared_value_minor: 480_000 })
+        .where('id', '=', legacy)
+        .execute();
+    });
     expect((await ctx.services.logistics.parcel(legacy, null)).shipment).toBeNull();
 
     const p = await open(OPERATOR);

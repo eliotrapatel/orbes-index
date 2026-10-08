@@ -80,6 +80,7 @@ import { inTransaction } from '../../src/server/db/connection.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
 import { seedGrowth } from '../support/growth.js';
 import { jpegPhoto } from '../support/images.js';
 import { svgToGray } from '../support/raster.js';
@@ -3257,7 +3258,6 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // A sold piece: made for its buyer; the console never has the code.
     const france = (await ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
     const sku = await inTransaction(ctx.db, (tx) => ensureSku(tx, modelId, '59'));
-    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, SYSTEM_ACTOR);
     const sold = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, variant: '59', material: '925 STERLING SILVER', withClaimSecret: true }, SYSTEM_ACTOR);
     const email = 'claim-buyer@example.com';
     const account = (await ctx.db.insertInto('accounts').values({ email, email_normalized: email, password_hash: 'unused' }).returning('id').executeTakeFirstOrThrow()).id;
@@ -3265,8 +3265,11 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     const staff = { type: 'admin' as const, id: (await ctx.db.selectFrom('admin_users').select('id').where('email_normalized', '=', ADMIN.email).executeTakeFirstOrThrow()).id };
     await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, staff);
     const orderId = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+    await countPiecesIn(ctx, { skuId: sku, locationId: france, productRefs: [sold.product.productId] }, staff);
     await ctx.services.orders.setTerms(orderId, { sizeLabel: '59', priceMinor: 300_000, currency: 'EUR' }, staff);
-    await ctx.services.atelier.linkFromStock(orderId, sold.product.productId, staff);
+    // Sold: paid, its piece bound to it by the packing scan.
+    await ctx.services.orders.transition(orderId, { to: 'PAID' }, staff);
+    await scanIntoParcel(ctx, orderId, { pieces: { [orderId]: sold.product.productId } }, staff);
     const ref = orderReference(orderId);
     const answers: string[] = [];
     const record = async (r: import('playwright-core').Response) => {
@@ -3317,7 +3320,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await ctx.services.salon.close(resoldRequest.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, staff);
     const resold = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', resoldRequest.id).executeTakeFirstOrThrow()).id;
     await ctx.services.orders.setTerms(resold, { sizeLabel: '59', priceMinor: 300_000, currency: 'EUR' }, staff);
-    await ctx.services.atelier.linkFromStock(resold, sold.product.productId, staff);
+    await ctx.services.orders.transition(resold, { to: 'PAID' }, staff);
+    await scanIntoParcel(ctx, resold, { pieces: { [resold]: sold.product.productId } }, staff);
     await go(page, `#/orders/${resold}`, orderReference(resold));
     await expect
       .poll(() => page.locator('[data-testid=order-claim-notice]').textContent())

@@ -17,7 +17,7 @@ import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { jpegPhoto } from '../support/images.js';
 import { createLiveRelease, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
-import { stockPiece } from '../support/fulfil.js';
+import { countPiecesIn, packAndShip, stockPieces } from '../support/fulfil.js';
 
 type Json = Record<string, any>;
 const MINUTE = 60_000;
@@ -98,8 +98,10 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     await orders().setTerms(ids.delivered, { sizeLabel: '54', priceMinor: 490_000, currency: 'EUR', engravingText: 'A. & L.' }, f.admin);
     await orders().setBuyer(ids.delivered, { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris' }, f.admin);
     await step(ids.delivered, { to: 'PAID', note: 'Paid by transfer.' });
-    await stockPiece(h.ctx, { orderId: ids.delivered, material: '925 STERLING SILVER' }, f.admin);
-    await step(ids.delivered, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A 1234 5678 901', declaredValueMinor: 470_123 });
+    const held = await h.ctx.db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', ids.delivered).executeTakeFirstOrThrow();
+    await stockPieces(h.ctx, { skuId: held.sku_id!, locationId: held.location_id, count: 1, material: '925 STERLING SILVER', forOrderIds: [ids.delivered] }, f.admin);
+    h.clock.advance(MINUTE);
+    await packAndShip(h.ctx, ids.delivered, { carrierId: colissimo, trackingNumber: '6A 1234 5678 901', declaredValueMinor: 470_123 }, f.admin);
     await step(ids.delivered, { to: 'DELIVERED' });
 
     // Another, paid then cancelled.
@@ -326,18 +328,17 @@ describe('NEW CLAIM CODE on an order (POST /api/v1/account/orders/:id/claim-code
     const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
     const colissimo = (await h.ctx.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
     const sku = await inTransaction(h.ctx.db, (tx) => ensureSku(tx, f.modelId, '52'));
-    await h.ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, f.admin);
     const piece = await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '52', material: '925 STERLING SILVER', withClaimSecret: true }, f.admin);
+    await countPiecesIn(h.ctx, { skuId: sku, locationId: france, productRefs: [piece.product.productId] }, f.admin);
     productId = piece.product.productId;
     productUuid = piece.product.id;
     const request = await h.ctx.db.insertInto('shop_requests').values({ account_id: mineId, model_id: f.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
     await h.ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
     orderId = (await h.ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await h.ctx.services.orders.setTerms(orderId, { sizeLabel: '52', priceMinor: 420_000, currency: 'EUR' }, f.admin);
-    await h.ctx.services.atelier.linkFromStock(orderId, productId, f.admin);
     await h.ctx.services.orders.transition(orderId, { to: 'PAID' }, f.admin);
-    await h.ctx.services.orders.transition(orderId, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
-    await h.ctx.services.warranty.activate(productUuid, { purchaseDate: '2026-11-10', retailer: 'ORBES PARIS', country: 'FR' }, f.admin);
+    // Packed and shipped through the agent's steps: SHIP starts its warranty (question 14).
+    await packAndShip(h.ctx, orderId, { carrierId: colissimo, trackingNumber: '6A12345678901', pieces: { [orderId]: productId } }, f.admin);
     h.clock.advance(MINUTE);
     await h.ctx.services.claimRenewals.renew(productId, { reason: 'Card lost.', expect: 'SOLD', after: null }, f.admin);
   }, 120_000);

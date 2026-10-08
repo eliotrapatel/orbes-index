@@ -13,8 +13,10 @@
  *   GET    /api/admin/orders/:id                AUDITOR   one order: its facts, timing, piece and history; its order cases
  *                                                         (their notes withheld from an AUDITOR) and, once shipped, the
  *                                                         sizes an exchange may take (plan NEXT LOT §3.5.4.4)
- *   POST   /api/admin/orders/:id/transition     OPERATOR  PAID; SHIPPED (its piece linked; carrier, tracking number,
- *                                                         declared value); DELIVERED; CANCELLED (a note)
+ *   POST   /api/admin/orders/:id/transition     OPERATOR  PAID; DELIVERED; CANCELLED (a note); SHIPPED never here since
+ *                                                         the SHIPPED gate (plan NEXT LOT §3.5.6.7, step 5.12): 409
+ *                                                         ORDER_NOT_PACKED, a parcel ships through its Ship
+ *                                                         (routes/admin/logistics.ts), packed and checked
  *   POST   /api/admin/orders/:id/location       OPERATOR  served from another location (what it holds moves)
  *   PATCH  /api/admin/orders/:id/terms          OPERATOR  a draw's or a salon's size, price and currency; any engraving
  *   PUT    /api/admin/orders/:id/buyer          OPERATOR  the buyer's name and address (decision 31)

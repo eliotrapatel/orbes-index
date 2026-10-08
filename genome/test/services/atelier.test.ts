@@ -25,6 +25,7 @@ import { RESERVED_MATERIAL_PENDING } from '../../src/server/services/issuance.js
 import { ensureSku, stockLevel } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { packAndShip } from '../support/fulfil.js';
 import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const HOUR = 3_600_000;
@@ -410,9 +411,9 @@ describe('the atelier (plan LIVE RELEASE+, S2)', () => {
       expect((await auditsOf(o.id, 'order.link'))[0]!.details).toMatchObject({ from: 'PAID', to: 'PAID', productId: p.id, via: 'stock' });
       expect(await stockLevel(t.db, o.sku_id!, o.location_id)).toMatchObject({ reserved: 1 });
       expect((await ctx.services.orders.get(o.id)).productId).toBe(p.product_id);
-      // Shipped now: the piece leaves the ledger.
+      // Packed and shipped through the agent's steps now (the SHIPPED gate, plan NEXT LOT step 5.12): the piece leaves the ledger.
       clock.advance(MINUTE);
-      await ctx.services.orders.transition(o.id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
+      await packAndShip(ctx, o.id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
       expect(await t.db.selectFrom('stock_movements').select(['reason', 'delta']).where('order_id', '=', o.id).orderBy('id').execute()).toEqual([{ reason: 'SHIPPED', delta: -1 }]);
       // A location changed once the piece is linked: refused, the piece is transferred instead.
       const other = await liveSale('66');

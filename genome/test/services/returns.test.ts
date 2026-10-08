@@ -25,6 +25,7 @@ import { verifyClaimCode } from '../../src/server/services/claim-codes.js';
 import { ensureSku, stockLevel } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { countPiecesIn, packAndShip, scanIntoParcel } from '../support/fulfil.js';
 import { createAccount, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
@@ -77,29 +78,29 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
   /** A piece of the size issued in advance with its claim code, counted in stock at FRANCE WAREHOUSE. */
   async function stockPiece(size: string) {
     const sku = await skuOf(size);
-    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted at the atelier.' }, admin);
     const p = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: size, material: '925 STERLING SILVER', withClaimSecret: true }, admin);
+    await countPiecesIn(ctx, { skuId: sku, locationId: france, productRefs: [p.product.productId] }, admin);
     return { sku, ...p };
   }
 
-  /** A private salon's order of `buyer`, priced and sized, its piece picked from the stock, paid and shipped. */
+  /** A private salon's order of `buyer`, priced and sized, paid, its piece packed and shipped through the agent's steps. */
   async function shippedOrder(buyer: string, piece: Awaited<ReturnType<typeof stockPiece>>, size: string) {
     const request = await t.db.insertInto('shop_requests').values({ account_id: buyer, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
     clock.advance(MINUTE);
     await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
     const id = (await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await orders().setTerms(id, { sizeLabel: size, priceMinor: 480_000, currency: 'EUR' }, admin);
-    await ctx.services.atelier.linkFromStock(id, piece.product.productId, admin);
     clock.advance(MINUTE);
     await orders().transition(id, { to: 'PAID' }, admin);
     clock.advance(MINUTE);
-    await orders().transition(id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
+    await packAndShip(ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901', pieces: { [id]: piece.product.productId } }, admin);
     return id;
   }
 
-  /** The buyer scans the piece and registers it with its claim code (its warranty started at the sale). */
+  /** The buyer scans the piece and registers it with its claim code (its warranty started at SHIP, or at the sale). */
   async function register(accountId: string, codeData: string, claimCode: string, productUuid: string, activate = true) {
-    if (activate) await ctx.services.warranty.activate(productUuid, { purchaseDate: '2026-11-02', retailer: 'ORBES PARIS', country: 'FR' }, admin);
+    const started = (await t.db.selectFrom('warranties').select('start_date').where('product_id', '=', productUuid).executeTakeFirst())?.start_date;
+    if (activate && !started) await ctx.services.warranty.activate(productUuid, { purchaseDate: '2026-11-02', retailer: 'ORBES PARIS', country: 'FR' }, admin);
     const scan = await ctx.services.verification.verify({ code: codeData }, {});
     clock.advance(MINUTE);
     return ctx.services.ownership.registerFirst(accountId, { registrationToken: scan.registration!.token, claimCode }, { type: 'account', id: accountId });
@@ -113,10 +114,10 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
     const id = (await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await orders().setTerms(id, { sizeLabel: '60', priceMinor: 480_000, currency: 'EUR' }, admin);
     await rejects(orders().returnOrder(id, { outcome: 'ARCHIVED', note: 'Never shipped.' }, admin), 'ORDER_TRANSITION_NOT_ALLOWED', 409);
-    await ctx.services.atelier.linkFromStock(id, piece.product.productId, admin);
     await orders().transition(id, { to: 'PAID' }, admin);
+    await scanIntoParcel(ctx, id, { pieces: { [id]: piece.product.productId } }, admin);
     await rejects(orders().returnOrder(id, { outcome: 'ARCHIVED', note: 'Never shipped.' }, admin), 'ORDER_TRANSITION_NOT_ALLOWED', 409);
-    await orders().transition(id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
+    await packAndShip(ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
     await rejects(orders().returnOrder(id, { outcome: 'RESTOCKED', note: 'x' }, admin), 'STOCK_LOCATION_NOT_FOUND', 404);
     await rejects(orders().returnOrder(id, { outcome: 'RESTOCKED', locationId: '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', note: 'x' }, admin), 'STOCK_LOCATION_NOT_FOUND', 404);
     await rejects(orders().returnOrder(id, { outcome: 'ARCHIVED', locationId: france, note: 'x' }, admin), 'VALIDATION_FAILED', 400);
@@ -127,7 +128,7 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
     expect(await t.db.selectFrom('returns').select('id').where('order_id', '=', id).execute()).toEqual([]);
   });
 
-  it('back to stock, a piece never registered: counted again where Client Services chose, still ISSUED with a new claim code (the old card no longer registers it), picked again for another order', async () => {
+  it('back to stock, a piece never registered: counted again where Client Services chose, RESOLD (its warranty started at SHIP) with a new claim code (the old card no longer registers it), picked again for another order', async () => {
     const piece = await stockPiece('61');
     const buyer = await createAccount(t.db);
     const id = await shippedOrder(buyer.id, piece, '61');
@@ -143,7 +144,8 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
     const [moved] = await t.db.selectFrom('stock_movements').selectAll().where('order_id', '=', id).where('reason', '=', 'RETURNED').execute();
     expect(moved).toMatchObject({ sku_id: piece.sku, location_id: logistics, delta: 1, product_id: piece.product.id, note: 'Returned unworn, in its box.', actor_id: admin.id });
     const after = await productRow(piece.product.id);
-    expect([after.status, after.ownership_state]).toEqual(['ISSUED', 'UNREGISTERED']);
+    // Shipped, its warranty started (plan NEXT LOT question 14): back in stock, ready to be sold again.
+    expect([before.status, after.status, after.ownership_state]).toEqual(['ACTIVATED', 'RESOLD', 'UNREGISTERED']);
     // Its buyer kept the card that left with it: its code no longer registers it, the new one does.
     expect(after.claim_secret_hash).not.toBe(before.claim_secret_hash);
     expect(await verifyClaimCode(piece.claimCode!, after.claim_secret_hash!)).toBe(false);
@@ -160,9 +162,10 @@ describe('returns (plan LIVE RELEASE+, S4)', () => {
     await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
     const second = (await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await orders().changeLocation(second, logistics, admin);
-    await orders().setTerms(second, { sizeLabel: '61' }, admin);
+    await orders().setTerms(second, { sizeLabel: '61', priceMinor: 480_000, currency: 'EUR' }, admin);
     expect((await orderRow(second)).reservation).toBe('STOCK');
-    await ctx.services.atelier.linkFromStock(second, piece.product.productId, admin);
+    await orders().transition(second, { to: 'PAID' }, admin);
+    await scanIntoParcel(ctx, second, { pieces: { [second]: piece.product.productId } }, admin);
     expect((await orderRow(second)).product_id).toBe(piece.product.id);
   });
 

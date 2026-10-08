@@ -16,6 +16,7 @@ import { inTransaction } from '../../src/server/db/connection.js';
 import { orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { countPiecesIn, packAndShip } from '../support/fulfil.js';
 import { accountClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 
 type Json = Record<string, any>;
@@ -58,16 +59,15 @@ describe('MY PIECES: an order\'s documents', () => {
     mineId = (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', a.email).executeTakeFirstOrThrow()).id;
     other = (await accountClient(h)).client;
 
-    // Delivered: a piece in stock, picked for the order, paid, shipped.
+    // Delivered: a piece in stock, paid, packed and shipped through the agent's steps (its card scanned binds it).
     const sku = await inTransaction(h.ctx.db, (tx) => ensureSku(tx, f.modelId, '57'));
-    await h.ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, f.admin);
     piece = await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '57', material: '925 STERLING SILVER', withClaimSecret: true }, f.admin);
+    await countPiecesIn(h.ctx, { skuId: sku, locationId: france, productRefs: [piece.product.productId] }, f.admin);
     delivered = await salonOrder(mineId, '57', 480_000);
-    await h.ctx.services.atelier.linkFromStock(delivered, piece.product.productId, f.admin);
     h.clock.advance(MINUTE);
     await orders().transition(delivered, { to: 'PAID' }, f.admin);
     h.clock.advance(MINUTE);
-    await orders().transition(delivered, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
+    await packAndShip(h.ctx, delivered, { carrierId: colissimo, trackingNumber: '6A12345678901', pieces: { [delivered]: piece.product.productId } }, f.admin);
 
     cancelled = await salonOrder(mineId, '58', 300_000);
     await orders().transition(cancelled, { to: 'PAID' }, f.admin);
@@ -136,8 +136,7 @@ describe('MY PIECES: an order\'s documents', () => {
   it('gives the ownership certificate once the piece is registered to the account: a new document naming the order, never the claim card; not after a return', async () => {
     const before = await mine.get(`/api/v1/account/orders/${delivered}/certificate.pdf`);
     expect([before.statusCode, errorOf(before).code]).toEqual([409, 'CERTIFICATE_NOT_AVAILABLE']);
-    // The buyer registers the piece: the order is DELIVERED, its certificate offered.
-    await h.ctx.services.warranty.activate(piece.product.id, { purchaseDate: '2026-11-11', retailer: 'ORBES PARIS', country: 'FR' }, f.admin);
+    // The buyer registers the piece (its warranty started at SHIP, question 14): the order is DELIVERED, its certificate offered.
     const scan = await h.ctx.services.verification.verify({ code: piece.code.data }, {});
     await h.ctx.services.ownership.registerFirst(mineId, { registrationToken: scan.registration!.token, claimCode: piece.claimCode! }, { type: 'account', id: mineId });
     const list = await listed(mine);

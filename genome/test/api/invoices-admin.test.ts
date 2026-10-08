@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createAccount, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { countPiecesIn, packParcel } from '../support/fulfil.js';
 import { adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 
 type Json = Record<string, any>;
@@ -41,10 +42,11 @@ describe('returns and invoices: the console\'s routes', () => {
     france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
     colissimo = (await h.ctx.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
 
-    // A piece in stock, a salon's order for it, its buyer entered; paid, shipped, registered by its buyer.
+    // A piece in stock, a salon's order for it, its buyer entered; paid, packed and shipped through the agent's steps,
+    // registered by its buyer.
     const sku = await inTransaction(h.ctx.db, (tx) => ensureSku(tx, f.modelId, '56'));
-    await h.ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, f.admin);
     const piece = await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '56', material: '925 STERLING SILVER', withClaimSecret: true }, f.admin);
+    await countPiecesIn(h.ctx, { skuId: sku, locationId: france, productRefs: [piece.product.productId] }, f.admin);
     productId = piece.product.productId;
     const buyer = await createAccount(h.ctx.db);
     email = buyer.email;
@@ -53,12 +55,12 @@ describe('returns and invoices: the console\'s routes', () => {
     order = (await h.ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await op.patch(`/api/admin/orders/${order}/terms`, { sizeLabel: '56', priceMinor: 480_000, currency: 'EUR' });
     await op.request('PUT', `/api/admin/orders/${order}/buyer`, { body: { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris' } });
-    await op.post(`/api/admin/orders/${order}/piece`, { productId });
     h.clock.advance(MINUTE);
     expect((await op.post(`/api/admin/orders/${order}/transition`, { to: 'PAID' })).statusCode).toBe(200);
     h.clock.advance(MINUTE);
-    await op.post(`/api/admin/orders/${order}/transition`, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' });
-    await h.ctx.services.warranty.activate(piece.product.id, { purchaseDate: '2026-11-10', retailer: 'ORBES PARIS', country: 'FR' }, f.admin);
+    await packParcel(h.ctx, order, { pieces: { [order]: productId } }, f.admin);
+    // Its parcel's Ship (the SHIPPED gate, NEXT LOT step 5.12) starts its warranty (question 14).
+    expect((await op.post(`/api/admin/logistics/orders/${order}/ship`, { carrierId: colissimo, trackingNumber: '6A12345678901' })).statusCode).toBe(200);
     const scan = await h.ctx.services.verification.verify({ code: piece.code.data }, {});
     await h.ctx.services.ownership.registerFirst(buyer.id, { registrationToken: scan.registration!.token, claimCode: piece.claimCode! }, buyer.actor);
   }, 120_000);

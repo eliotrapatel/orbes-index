@@ -32,6 +32,7 @@ import { orderActions as adminOrderActions } from '../../src/web/admin/model/ord
 import type { OrderView as AdminOrderView } from '../../src/web/admin/types.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { packAndShip, stockPieces } from '../support/fulfil.js';
 import { createAccount, createLiveRelease, createModel, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
@@ -264,20 +265,24 @@ describe('the welcome gift (BP-19 T5)', () => {
     await setGift(2, ring);
     const a = await account(5);
     const sku = await inTransaction(t.db, (tx) => ensureSku(tx, f.modelId, '60'));
-    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, admin);
-    const issued = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '60', material: '925 STERLING SILVER' }, admin);
+    await stockPieces(ctx, { skuId: sku, locationId: france, count: 1, material: '925 STERLING SILVER' }, admin);
     const parent = await salonOrder(a.id);
     await orders().setTerms(parent, { sizeLabel: '60', priceMinor: 480_000, currency: 'EUR' }, admin);
-    await ctx.services.atelier.linkFromStock(parent, issued.product.productId, admin);
     await pay(parent);
-    clock.advance(MINUTE);
-    await orders().transition(parent, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
     const [gift] = await giftsOf(parent);
-    // SHIP WITH ITS ORDER: the gift's page reads its order's carrier and tracking number.
+    // Its welcome gift holds one of the pieces counted by hand: the piece on the shelf counted in, so its card scans at
+    // packing; the parcel of both packed and shipped whole.
+    expect(gift!.reservation).toBe('STOCK');
+    const giftPiece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: ring, material: '925 STERLING SILVER' }, admin);
+    await ctx.services.logistics.countIn(gift!.sku_id!, { productRefs: [giftPiece.product.productId], note: 'On the shelf.' }, admin);
+    clock.advance(MINUTE);
+    await packAndShip(ctx, parent, { carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
+    // SHIP WITH ITS ORDER: the gift's page reads its order's carrier and tracking number; the gift went in its parcel.
     expect((await orders().get(gift!.id)).withOrder!.shipment).toEqual({ carrierId: colissimo, trackingNumber: '6A12345678901' });
+    expect(await orderRow(gift!.id)).toMatchObject({ status: 'SHIPPED', product_id: giftPiece.product.id });
     clock.advance(MINUTE);
     await orders().returnOrder(parent, { outcome: 'RESTOCKED', locationId: france, note: 'Returned unworn.' }, admin);
-    expect(await orderRow(gift!.id)).toMatchObject({ status: 'PAID' });
+    expect(await orderRow(gift!.id)).toMatchObject({ status: 'SHIPPED', product_id: giftPiece.product.id });
   });
 
   /** A draw of one piece won by `account`, unpriced or at `priceMinor` EUR: published, entered, drawn, confirmed. Its order. */

@@ -22,6 +22,7 @@ import { ensureSku } from '../../src/server/services/stock.js';
 import { creditBalances } from '../../src/server/services/tier-grants.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { packAndShip, stockPieces } from '../support/fulfil.js';
 import { createAccount, holdPieces, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
@@ -188,14 +189,12 @@ describe('the tiers\' credit (BP-19 T5)', () => {
     ]);
     // Returned: given back.
     const sku = await inTransaction(t.db, (tx) => ensureSku(tx, f.modelId, '62'));
-    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, admin);
-    const issued = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '62', material: '925 STERLING SILVER' }, admin);
+    await stockPieces(ctx, { skuId: sku, locationId: france, count: 1, material: '925 STERLING SILVER' }, admin);
     const returned = await salonOrder(a.id, { priceMinor: 300_000, size: '62' });
-    await ctx.services.atelier.linkFromStock(returned, issued.product.productId, admin);
     await orders().applyCredit(returned, 5_000, admin);
     await pay(returned);
     clock.advance(MINUTE);
-    await orders().transition(returned, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
+    await packAndShip(ctx, returned, { carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
     clock.advance(MINUTE);
     await orders().returnOrder(returned, { outcome: 'RESTOCKED', locationId: france, note: 'Returned unworn.' }, admin);
     expect((await usesOf(returned)).map((u) => u.released_reason)).toEqual(['RETURNED']);

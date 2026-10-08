@@ -25,6 +25,7 @@ import { reserveIdentity } from '../../src/server/services/issuance.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { countPiecesIn, packAndShip, scanIntoParcel } from '../support/fulfil.js';
 import { createAccount, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const MINUTE = 60_000;
@@ -85,32 +86,35 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
   async function stockPiece(opts: { withClaimSecret?: boolean } = {}) {
     const size = String(sizeSeq++);
     const sku = await inTransaction(t.db, (tx) => ensureSku(tx, f.modelId, size));
-    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, admin);
     const p = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: size, material: '925 STERLING SILVER', withClaimSecret: opts.withClaimSecret ?? true }, admin);
+    await countPiecesIn(ctx, { skuId: sku, locationId: france, productRefs: [p.product.productId] }, admin);
     return { size, sku, ...p };
   }
   type Piece = Awaited<ReturnType<typeof stockPiece>>;
 
-  /** A private salon's order of `buyer` for `piece`, priced and sized, the piece linked; PAID, then SHIPPED unless told. */
-  async function soldOrder(buyer: string, piece: Piece, upTo: 'RESERVED' | 'PAID' | 'SHIPPED' = 'SHIPPED') {
+  /**
+   * A private salon's order of `buyer` for `piece`, priced and sized, PAID, the piece bound to it by the packing scan
+   * (sold); then packed and SHIPPED unless told (its warranty started at SHIP, question 14).
+   */
+  async function soldOrder(buyer: string, piece: Piece, upTo: 'PAID' | 'SHIPPED' = 'SHIPPED') {
     const request = await t.db.insertInto('shop_requests').values({ account_id: buyer, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
     clock.advance(MINUTE);
     await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
     const id = (await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
     await orders().setTerms(id, { sizeLabel: piece.size, priceMinor: 420_000, currency: 'EUR' }, admin);
-    await ctx.services.atelier.linkFromStock(id, piece.product.productId, admin);
-    if (upTo === 'RESERVED') return id;
     clock.advance(MINUTE);
     await orders().transition(id, { to: 'PAID' }, admin);
+    await scanIntoParcel(ctx, id, { pieces: { [id]: piece.product.productId } }, admin);
     if (upTo === 'PAID') return id;
     clock.advance(MINUTE);
-    await orders().transition(id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
+    await packAndShip(ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, admin);
     return id;
   }
 
-  /** The buyer's scan, then a registration with `claimCode` (the warranty started first unless told). */
+  /** The buyer's scan, then a registration with `claimCode` (the warranty started first, unless told or already started). */
   async function scanAndRegister(accountId: string, piece: Piece, claimCode: string, activate = false) {
-    if (activate) await ctx.services.warranty.activate(piece.product.id, { purchaseDate: '2026-11-02', retailer: 'ORBES PARIS', country: 'FR' }, admin);
+    const started = (await t.db.selectFrom('warranties').select('start_date').where('product_id', '=', piece.product.id).executeTakeFirst())?.start_date;
+    if (activate && !started) await ctx.services.warranty.activate(piece.product.id, { purchaseDate: '2026-11-02', retailer: 'ORBES PARIS', country: 'FR' }, admin);
     const scan = await ctx.services.verification.verify({ code: piece.code.data }, {});
     clock.advance(MINUTE);
     return ctx.services.ownership.registerFirst(accountId, { registrationToken: scan.registration!.token, claimCode }, { type: 'account', id: accountId });
@@ -199,8 +203,8 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
       ['certificate.render', 'account'],
     ]);
     expect(renders[1]!.details).toMatchObject({ productIds: [piece.product.productId], orderId, by: 'buyer', format: 'pdf', layout: 'card' });
-    // REGISTER THIS PIECE: the code, no scan; the order DELIVERED by itself; audited `via: 'order'`.
-    await ctx.services.warranty.activate(piece.product.id, { purchaseDate: '2026-11-02', retailer: 'ORBES PARIS', country: 'FR' }, admin);
+    // REGISTER THIS PIECE: the code, no scan (its warranty started at SHIP); the order DELIVERED by itself; audited `via: 'order'`.
+    expect((await productRow(piece.product.id)).status).toBe('ACTIVATED');
     await rejects(ctx.services.ownership.registerFromOrder(other.id, orderId, read.claimCode, other.actor), 'ORDER_NOT_FOUND', 404);
     clock.advance(MINUTE);
     const reg = await ctx.services.ownership.registerFromOrder(buyer.id, orderId, read.claimCode, buyer.actor);
@@ -259,7 +263,7 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
     expect(e.internal?.detail).toBe('order PAID');
     await rejects(ctx.services.ownership.registerFromOrder(buyer.id, orderId, '', buyer.actor), 'CLAIM_CODE_REQUIRED', 400);
     clock.advance(MINUTE);
-    await orders().transition(orderId, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678902' }, admin);
+    await packAndShip(ctx, orderId, { carrierId: colissimo, trackingNumber: '6A12345678902' }, admin);
     // Five wrong codes, then the limit, as at a scan.
     for (let i = 0; i < 5; i++) await rejects(ctx.services.ownership.registerFromOrder(buyer.id, orderId, piece.claimCode!, buyer.actor), 'CLAIM_CODE_INVALID', 403);
     await rejects(ctx.services.ownership.registerFromOrder(buyer.id, orderId, claimCode, buyer.actor), 'RATE_LIMITED', 429);
@@ -329,8 +333,8 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
     // Back from a return: no buyer.
     const returned = await stockPiece();
     const buyer = await createAccount(t.db);
+    // Shipped: its warranty started at SHIP (question 14).
     const first = await soldOrder(buyer.id, returned);
-    await ctx.services.warranty.activate(returned.product.id, { purchaseDate: '2026-11-02', retailer: 'ORBES PARIS', country: 'FR' }, admin);
     expect(await situation(returned)).toMatchObject({ renewable: 'SOLD' });
     clock.advance(MINUTE);
     await orders().returnOrder(first, { outcome: 'RESTOCKED', locationId: france, note: 'Returned unworn.' }, admin);
@@ -349,7 +353,7 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
     const piece = await stockPiece();
     const shown = await situation(piece);
     const buyer = await createAccount(t.db);
-    await soldOrder(buyer.id, piece, 'RESERVED');
+    await soldOrder(buyer.id, piece, 'PAID');
     // Sold between the dialog and the press: never shown to staff.
     const e = await rejects(renewals().renew(piece.product.productId, { reason: 'Card lost.', expect: shown.renewable, after: shown.lastRenewalId }, admin), 'CLAIM_CODE_SITUATION_CHANGED', 409);
     expect(e.publicMessage).toBe('This piece changed meanwhile (sold, registered or given a new claim code). Reload its page and try again.');
@@ -408,7 +412,8 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
     expect((await orders().forAccount(buyer.id)).find((o) => o.id === o3)!.claimCode).toBeNull();
     await rejects(renewals().reveal(buyer.id, o3, buyer.actor), 'CLAIM_CODE_UNAVAILABLE', 409);
     expect((await rowsOf(lost.product.id))[0]).toMatchObject({ status: 'WAITING' });
-    await ctx.services.lifecycle.transition(lost.product.id, 'ISSUED', { reason: 'Found.' }, admin);
+    // Found: back to its status before (its warranty started at SHIP).
+    await ctx.services.lifecycle.transition(lost.product.id, 'ACTIVATED', { reason: 'Found.' }, admin);
     expect((await orders().forAccount(buyer.id)).find((o) => o.id === o3)!.claimCode).toMatchObject({ status: 'WAITING' });
     expect((await renewals().reveal(buyer.id, o3, buyer.actor)).claimCode).toMatch(CODE_RE);
     // A changed key: UNREADABLE.
@@ -464,7 +469,7 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
     expect((await situation(piece)).cardNeeded).toBe(false);
     // Waiting, then cancelled: withdrawn ORDER_CANCELLED, its sealed copy wiped.
     const waiting = await stockPiece();
-    const o2 = await soldOrder(buyer.id, waiting, 'RESERVED');
+    const o2 = await soldOrder(buyer.id, waiting, 'PAID');
     await renewFor(waiting, 'SOLD');
     clock.advance(MINUTE);
     await orders().transition(o2, { to: 'CANCELLED', note: 'Cancelled at the buyer’s request.' }, admin);

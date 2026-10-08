@@ -23,6 +23,7 @@ import { orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { countPiecesIn, packAndShip, scanIntoParcel } from '../support/fulfil.js';
 import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const HOUR = 3_600_000;
@@ -204,10 +205,10 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
     await orders().transition(paidReady.id, { to: 'PAID' }, admin);
     const shipped = (await salonOrder('56', model)).order;
     await orders().transition(shipped.id, { to: 'PAID' }, admin);
-    // Its piece, made in advance, picked from the stock before it ships.
+    // Its piece, issued in advance and counted in, packed and shipped through the agent's steps.
     const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: model, variant: '56', material: '925 STERLING SILVER' }, admin);
-    await ctx.services.atelier.linkFromStock(shipped.id, piece.product.productId, admin);
-    await orders().transition(shipped.id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A00000000001' }, admin);
+    await ctx.services.logistics.countIn(sku, { productRefs: [piece.product.productId], note: 'On the shelf.' }, admin);
+    await packAndShip(ctx, shipped.id, { carrierId: colissimo, trackingNumber: '6A00000000001', pieces: { [shipped.id]: piece.product.productId } }, admin);
     const paidMaking = (await salonOrder('57', model)).order;
     await orders().transition(paidMaking.id, { to: 'PAID' }, admin);
     expect(paidMaking.reservation).toBe('AWAITING');
@@ -268,9 +269,12 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
     expect(await all({ q: orderReference(salon.id) })).toEqual([salon.id]);
     expect(await all({ q: orderReference(salon.id).toLowerCase().replace('-', '') })).toEqual([salon.id]);
     expect(await all({ q: liveReference(sale.entryId) })).toEqual([sale.orders[0]!.id]);
-    // A piece's reference finds the order it fulfils (no piece to make carries one any more, plan NEXT LOT §3.5).
+    // A piece's reference finds the order it fulfils (no piece to make carries one any more, plan NEXT LOT §3.5): its
+    // piece counted in where it waits, paid, bound by the packing scan.
     const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '58', material: '925 STERLING SILVER' }, admin);
-    await ctx.services.atelier.linkFromStock(salon.id, piece.product.productId, admin);
+    await countPiecesIn(ctx, { skuId: salon.sku_id!, locationId: logistics, productRefs: [piece.product.productId], forOrderIds: [salon.id] }, admin);
+    await orders().transition(salon.id, { to: 'PAID' }, admin);
+    await scanIntoParcel(ctx, salon.id, {}, admin);
     expect(await all({ q: piece.product.productId })).toEqual([salon.id]);
     expect(await all({ q: 'monolith' })).toEqual(expect.arrayContaining([salon.id, sale.orders[0]!.id]));
     expect(await all({ q: '%' })).toEqual([]);

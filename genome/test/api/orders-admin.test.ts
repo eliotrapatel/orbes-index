@@ -15,7 +15,7 @@ import { orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createAccount, liveFixtureOn, type LiveFixture } from '../support/live.js';
 import { adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
-import { stockPiece } from '../support/fulfil.js';
+import { packParcel, scanIntoParcel, stockPieces } from '../support/fulfil.js';
 
 type Json = Record<string, any>;
 const MINUTE = 60_000;
@@ -99,14 +99,25 @@ describe('orders, the atelier and their settings: the console\'s routes', () => 
     expect(errorOf(await op.post(`/api/admin/orders/${id}/transition`, { ...ship, trackingNumber: '#' })).code).toBe('VALIDATION_FAILED');
     expect(errorOf(await op.post(`/api/admin/orders/${id}/transition`, { to: 'CANCELLED' })).code).toBe('VALIDATION_FAILED');
 
-    // No piece to make is created for it (plan NEXT LOT §3.5): its piece is taken from the stock (test/support/fulfil.ts
-    // stockPiece: a piece issued, bound with Link a piece); then it ships, with its carrier, tracking link and declared value.
+    // No piece to make is created for it (plan NEXT LOT §3.5): a piece counted in where it waits serves it
+    // (test/support/fulfil.ts stockPieces), the packing scan binds it; it ships only through its parcel's Ship, once
+    // packed (the SHIPPED gate, step 5.12), with its carrier, tracking link and declared value.
     expect((safeJson(await auditor.get(`/api/admin/atelier/bench?origin=SALON`)) as Json).groups.flatMap((g: Json) => g.items).find((b: Json) => b.order?.id === id)).toBeUndefined();
-    const piece = await stockPiece(h.ctx, { orderId: id, productionBatch: 'B-2026-11-SALON', material: '925 STERLING SILVER' }, f.admin);
-    expect((safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json).order).toMatchObject({ reservation: 'STOCK', productId: piece.productId });
-    const shipped = safeJson(await op.post(`/api/admin/orders/${id}/transition`, ship)) as Json;
-    expect(shipped.order).toMatchObject({ status: 'SHIPPED', productId: piece.productId, shipment: { carrier: { name: 'Colissimo' }, trackingNumber: '6A12345678901', trackingUrl: 'https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901', declaredValueMinor: 480_000 } });
-    expect(shipped.piece).toEqual({ productId: piece.productId, status: 'ISSUED', registered: false });
+    const [piece] = await stockPieces(h.ctx, { skuId: (safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json).order.skuId, locationId: logistics, count: 1, productionBatch: 'B-2026-11-SALON', material: '925 STERLING SILVER', forOrderIds: [id] }, f.admin);
+    expect((safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json).order).toMatchObject({ reservation: 'STOCK', productId: null });
+    await scanIntoParcel(h.ctx, id, {}, f.admin);
+    expect((safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json).order).toMatchObject({ reservation: 'STOCK', productId: piece!.productId });
+    const unpacked = await op.post(`/api/admin/orders/${id}/transition`, ship);
+    expect([unpacked.statusCode, errorOf(unpacked).code]).toEqual([409, 'ORDER_NOT_PACKED']);
+    await packParcel(h.ctx, id, {}, f.admin);
+    // Packed: still never by a bare step, only by its parcel's Ship.
+    expect(errorOf(await op.post(`/api/admin/orders/${id}/transition`, ship)).code).toBe('ORDER_NOT_PACKED');
+    const sent = await op.post(`/api/admin/logistics/orders/${id}/ship`, { carrierId: carrier.id, trackingNumber: '6A12345678901', declaredValues: [{ orderId: id, minor: 480_000 }] });
+    expect((safeJson(sent) as Json).step).toBe('SHIPPED');
+    const shipped = safeJson(await auditor.get(`/api/admin/orders/${id}`)) as Json;
+    expect(shipped.order).toMatchObject({ status: 'SHIPPED', productId: piece!.productId, shipment: { carrier: { name: 'Colissimo' }, trackingNumber: '6A12345678901', trackingUrl: 'https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901', declaredValueMinor: 480_000 } });
+    // Its warranty started at SHIP (question 14).
+    expect(shipped.piece).toEqual({ productId: piece!.productId, status: 'ACTIVATED', registered: false });
     const delivered = safeJson(await op.post(`/api/admin/orders/${id}/transition`, { to: 'DELIVERED' })) as Json;
     expect(delivered.order.status).toBe('DELIVERED');
     expect(delivered.timing).toMatchObject({ rule: 'UNREGISTERED', late: false });
@@ -128,7 +139,11 @@ describe('orders, the atelier and their settings: the console\'s routes', () => 
     const linked = safeJson(await op.post(`/api/admin/orders/${id}/piece`, { productId: piece.product.productId })) as Json;
     expect(linked.order).toMatchObject({ reservation: 'STOCK', productId: piece.product.productId });
     expect(linked.order.events.at(-1)).toMatchObject({ action: 'order.link' });
-    expect((safeJson(await op.post(`/api/admin/orders/${id}/transition`, ship)) as Json).order).toMatchObject({ status: 'SHIPPED', productId: piece.product.productId });
+    // Linked, not packed: the SHIPPED gate (step 5.12); packed through the agent's steps, its parcel's Ship sends it.
+    expect(errorOf(await op.post(`/api/admin/orders/${id}/transition`, ship)).code).toBe('ORDER_NOT_PACKED');
+    await packParcel(h.ctx, id, {}, f.admin);
+    await op.post(`/api/admin/logistics/orders/${id}/ship`, { carrierId: carrier.id, trackingNumber: '6A12345678902' });
+    expect((safeJson(await op.get(`/api/admin/orders/${id}`)) as Json).order).toMatchObject({ status: 'SHIPPED', productId: piece.product.productId });
   });
 
   it('sets the delays of the alerts (ADMIN), within their bounds, audited', async () => {

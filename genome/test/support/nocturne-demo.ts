@@ -75,7 +75,7 @@ import { deriveDropSeedKey } from '../../src/server/services/drops.js';
 import { deriveLiveTurnKey } from '../../src/server/services/live.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
-import { stockPiece } from './fulfil.js';
+import { packAndShip, stockPieces } from './fulfil.js';
 import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOptions } from './live.js';
 
 export type DemoVariant =
@@ -367,12 +367,15 @@ async function pastDraw(w: World, o: { model: string; title: string; opens: stri
 }
 
 /**
- * The order's piece (plan NEXT LOT §3.5, step 5.5: no more piece to make): a piece issued with the draw's batch when it
- * was finished, taken from the stock for the order (test/support/fulfil.ts stockPiece).
+ * The order's piece (plan NEXT LOT §3.5: no more piece to make): a piece issued with the draw's batch when it was
+ * finished, counted in where the order waits, which it then holds (test/support/fulfil.ts stockPieces, step 5.12); the
+ * packing scan binds it when its parcel is packed (`ship`).
  */
 async function make(w: World, orderId: string, role: string, doneAt: string) {
-  const done = await stockPiece(w.ctx, { orderId, productionBatch: 'B-2026-09-DRAW', at: at(doneAt), clock: w.clock }, w.admin);
-  w.issued[role] = { uuid: '', productId: done.productId, codeId: done.codeId, data: done.data, glyphs: done.glyphs, ...(done.claimCode ? { claimCode: done.claimCode } : {}) };
+  const held = await w.ctx.db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', orderId).executeTakeFirstOrThrow();
+  const [done] = await stockPieces(w.ctx, { skuId: held.sku_id!, locationId: held.location_id, count: 1, productionBatch: 'B-2026-09-DRAW', at: at(doneAt), clock: w.clock, forOrderIds: [orderId] }, w.admin);
+  if (!done) throw new Error('make: no piece');
+  w.issued[role] = { uuid: done.uuid, productId: done.productId, codeId: done.codeId, data: done.data, glyphs: done.glyphs, ...(done.claimCode ? { claimCode: done.claimCode } : {}) };
   w.demo.pieces[role] = done.productId;
   w.demo.codes[role] = { data: fromBase64Url(done.data), glyphs: done.glyphs };
   return w.issued[role]!;
@@ -403,8 +406,16 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   await ctx.services.orders.transition(steelOrder, { to: 'PAID' }, admin);
   const steelPiece = await make(w, steelOrder, 'returned', '2026-09-16T09:00:00Z');
   clock.set(at('2026-09-16T10:00:00Z'));
-  await ctx.services.warranty.activate(steelPiece.productId, { purchaseDate: '2026-09-16', retailer: 'ORBES PARIS', country: 'FR' }, admin);
-  await ctx.services.orders.transition(steelOrder, { to: 'SHIPPED', carrierId: await carrier(w, 'Colissimo'), trackingNumber: '6A10987654321', declaredValueMinor: 420_000 }, admin);
+  // Packed and shipped through the agent's steps (the SHIPPED gate, plan NEXT LOT step 5.12), its warranty started by
+  // hand at ORBES PARIS before SHIP, which leaves it as it is.
+  await packAndShip(ctx, steelOrder, {
+    carrierId: await carrier(w, 'Colissimo'),
+    trackingNumber: '6A10987654321',
+    declaredValueMinor: 420_000,
+    beforeShip: async () => {
+      await ctx.services.warranty.activate(steelPiece.productId, { purchaseDate: '2026-09-16', retailer: 'ORBES PARIS', country: 'FR' }, admin);
+    },
+  }, admin);
   clock.set(at('2026-09-18T15:00:00Z'));
   await register(w, you, steelPiece);
 
@@ -428,8 +439,14 @@ async function seedStory(w: World, variant: DemoVariant): Promise<void> {
   await holdPieces(ctx.db, guest.id, 1, w.models.gold!, { variant: '18', ...since });
   await holdPieces(ctx.db, absent.id, 1, w.models.steel!, { variant: '16', ...since });
   clock.set(at('2026-09-18T09:00:00Z'));
-  await ctx.services.warranty.activate(goldPiece.productId, { purchaseDate: '2026-09-18', retailer: 'ORBES PARIS', country: 'FR' }, admin);
-  await ctx.services.orders.transition(goldOrder, { to: 'SHIPPED', carrierId: await carrier(w, 'Colissimo'), trackingNumber: '6A12345678901', declaredValueMinor: 420_000 }, admin);
+  await packAndShip(ctx, goldOrder, {
+    carrierId: await carrier(w, 'Colissimo'),
+    trackingNumber: '6A12345678901',
+    declaredValueMinor: 420_000,
+    beforeShip: async () => {
+      await ctx.services.warranty.activate(goldPiece.productId, { purchaseDate: '2026-09-18', retailer: 'ORBES PARIS', country: 'FR' }, admin);
+    },
+  }, admin);
 
   // ── ZENITH from THE PRIVATE SALON: requested on 20 Sep, accepted, cancelled on 24 Sep ──
   clock.set(at('2026-09-20T10:00:00Z'));
@@ -1255,8 +1272,9 @@ async function seedStress(w: World): Promise<void> {
     await ctx.services.orders.setBuyer(order, { name: 'You', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
     if (i === 1) {
       await ctx.services.orders.transition(order, { to: 'PAID' }, admin);
-      await stockPiece(ctx, { orderId: order, productionBatch: 'B-2026-09-STRESS' }, admin);
-      await ctx.services.orders.transition(order, { to: 'SHIPPED', carrierId: await carrier(w, 'Chronopost'), trackingNumber: 'XY48291563748201937465012FR', declaredValueMinor: 640_000 }, admin);
+      const held = await ctx.db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', order).executeTakeFirstOrThrow();
+      await stockPieces(ctx, { skuId: held.sku_id!, locationId: held.location_id, count: 1, productionBatch: 'B-2026-09-STRESS', forOrderIds: [order] }, admin);
+      await packAndShip(ctx, order, { carrierId: await carrier(w, 'Chronopost'), trackingNumber: 'XY48291563748201937465012FR', declaredValueMinor: 640_000 }, admin);
     }
   }
   // THE PROGRAM (plan NEXT-NINE, BP-19 T5): the welcome gift of PLATINE and PALLADIUM, a model of one size with one piece
@@ -1264,7 +1282,8 @@ async function seedStress(w: World): Promise<void> {
   // with the first order: the account reached PALLADIUM before it) in use on the last order, RESERVED at € 4 800.
   clock.set(at('2026-09-14T10:00:00Z'));
   const charm = await ctx.services.catalog.createModel({ categoryCode: 'J', collectionId: null, name: 'ORBITAL CHARM', type: 'PENDANT', skuPrefix: 'ORB-CH', defaultMaterial: '925 STERLING SILVER' }, admin);
-  await ctx.services.stock.adjust({ skuId: await ensureSku(ctx.db, charm.id, null), locationId: (await ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id, delta: 1, note: 'Counted at the atelier.' }, admin);
+  // Its one piece in stock, counted in (plan NEXT LOT step 5.12: a piece behind the count, for the packing scan).
+  await stockPieces(ctx, { skuId: await ensureSku(ctx.db, charm.id, null), locationId: (await ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id, count: 1 }, admin);
   const program = await ctx.services.clubProgram.read();
   await ctx.services.clubProgram.update({ ...program, giftPlatineModelId: charm.id, giftPalladiumModelId: charm.id }, admin);
   const last = await ctx.db.selectFrom('orders').select('id').where('account_id', '=', you.id).where('channel', '=', 'SALON').where('status', '=', 'RESERVED').where('price_minor', '=', 480_000).executeTakeFirstOrThrow();

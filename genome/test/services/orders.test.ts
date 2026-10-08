@@ -29,6 +29,8 @@ import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '.
 import { verifyClaimCode } from '../../src/server/services/claim-codes.js';
 import { withdrawOnCancel } from '../../src/server/services/claim-renewals.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { countPiecesIn, scanIntoParcel } from '../support/fulfil.js';
+import { jpegPhoto } from '../support/images.js';
 import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const HOUR = 3_600_000;
@@ -130,31 +132,52 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
   }
 
   /**
-   * The piece that fulfils an order holding one in stock, linked before it ships (step S2): a piece of its SKU issued
-   * in advance, picked from the stock by the atelier. Nothing when the order has its piece, or holds none in stock.
+   * The piece that fulfils a paid order holding one in stock (plan NEXT LOT §3.5.6.8): a piece of its SKU issued in
+   * advance and counted in, bound to the order by the packing scan of its card (test/support/fulfil.ts scanIntoParcel).
+   * Nothing when the order has its piece, holds none in stock, or is not paid (packing starts once it is).
    */
   async function linkPiece(orderId: string) {
     const o = await orderRow(orderId);
-    if (o.product_id !== null || o.reservation !== 'STOCK') return;
+    if (o.product_id !== null || o.reservation !== 'STOCK' || o.status !== 'PAID') return;
     const sku = await t.db.selectFrom('skus').select(['model_id', 'size_label']).where('id', '=', o.sku_id!).executeTakeFirstOrThrow();
     const { product } = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: sku.model_id, ...(sku.size_label !== null ? { variant: sku.size_label } : {}), material: '925 STERLING SILVER' }, admin);
-    await ctx.services.atelier.linkFromStock(orderId, product.productId, admin);
+    await ctx.services.logistics.countIn(o.sku_id!, { productRefs: [product.productId], note: 'On the shelf.' }, admin);
+    await scanIntoParcel(ctx, orderId, { pieces: { [orderId]: product.productId } }, admin);
   }
 
-  /** Move an order through steps (each valid for it), its piece linked before it ships. */
+  /** A paid order holding its piece packed through the agent's steps: its piece bound by the scan, the photo, every line ticked. */
+  async function pack(orderId: string) {
+    const o = await orderRow(orderId);
+    if (o.status !== 'PAID' || o.reservation !== 'STOCK') return;
+    await linkPiece(orderId);
+    await ctx.services.logistics.setPhoto(orderId, { mime: 'image/jpeg', bytes: jpegPhoto(16, 12) }, admin, null);
+    const view = await ctx.services.logistics.parcel(orderId, null);
+    if (view.shipment?.status === 'PACKING') await ctx.services.logistics.checkPacked(orderId, { ticked: view.checklist.filter((l) => !l.byScan).map((l) => l.key) }, admin, null);
+  }
+
+  /** Move an order through steps (each valid for it), packed before it ships. */
   async function walk(orderId: string, steps: OrderStatus[]) {
     for (const s of steps) {
       clock.advance(MINUTE);
-      if (s === 'SHIPPED') await linkPiece(orderId);
+      if (s === 'SHIPPED') await pack(orderId);
       await stepTo(orderId, s);
     }
     return orderRow(orderId);
   }
   const inputFor = (to: OrderStatus): OrderTransitionInput =>
     to === 'SHIPPED' ? { to, carrierId: colissimo, trackingNumber: '6A12345678901' } : to === 'CANCELLED' ? { to, note: 'The client withdrew.' } : ({ to } as OrderTransitionInput);
-  /** One step: a return is opened on its own (archived here), every other step is a transition. */
-  const stepTo = (orderId: string, to: OrderStatus) =>
-    to === 'RETURNED' ? orders().returnOrder(orderId, { outcome: 'ARCHIVED', note: 'Returned to the house.' }, admin).then((r) => r.order) : orders().transition(orderId, inputFor(to), admin);
+  /**
+   * One step: a return is opened on its own (archived here); a paid order ships through its parcel's Ship (the SHIPPED
+   * gate, plan NEXT LOT §3.5.6.7, step 5.12); every other step, and a SHIPPED step not allowed, is a transition.
+   */
+  const stepTo = async (orderId: string, to: OrderStatus) => {
+    if (to === 'RETURNED') return orders().returnOrder(orderId, { outcome: 'ARCHIVED', note: 'Returned to the house.' }, admin).then((r) => r.order);
+    if (to === 'SHIPPED' && (await orderRow(orderId)).status === 'PAID') {
+      await ctx.services.logistics.ship(orderId, { carrierId: colissimo, trackingNumber: '6A12345678901' }, admin, null);
+      return orders().get(orderId);
+    }
+    return orders().transition(orderId, inputFor(to), admin);
+  };
 
   // ── the first boot ───────────────────────────────────────────────────────
 
@@ -577,7 +600,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
           await receive(sku, france, 1);
           const o = await walk((await salonOrder({ size: '72', priceMinor: 480_000 })).id, PATHS[from]);
           expect(o.status).toBe(from);
-          if (to === 'SHIPPED') await linkPiece(o.id);
+          if (to === 'SHIPPED') await pack(o.id);
           const before = { events: (await eventsOf(o.id)).length, journal: (await journalOf(o.id)).length, audit: (await auditsOf(o.id)).length };
           clock.advance(MINUTE);
           if (allowed) {
@@ -602,7 +625,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       }
     }
 
-    it('SHIPPED needs an active carrier, a tracking number and its piece in stock at its location, linked to it: the piece leaves the ledger; the tracking link', async () => {
+    it('SHIPPED needs its piece in stock at its location, bound to it, and its parcel packed (the gate, NEXT LOT step 5.12), an active carrier and a tracking number: the piece leaves the ledger; the tracking link', async () => {
       const sku = await skuOf('74');
       // An order waiting for supplier stock does not ship.
       const toMake = await walk((await salonOrder({ size: '74', priceMinor: 480_000 })).id, ['PAID']);
@@ -615,23 +638,35 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       await orders().setTerms(ready.id, { sizeLabel: '74' }, admin);
       const o = await walk(ready.id, ['PAID']);
       expect(o.reservation).toBe('STOCK');
-      // In stock but not yet linked to its piece: it does not ship (the atelier picks the piece first).
+      // In stock but not yet bound to its piece: it does not ship (the packing scan binds it first).
       await rejects(orders().transition(o.id, inputFor('SHIPPED'), admin), 'ORDER_PIECE_NOT_LINKED', 409);
       expect((await orderRow(o.id)).status).toBe('PAID');
+      // Bound by the scan, not packed: the gate refuses it, through Ship and as a bare step alike.
       await linkPiece(o.id);
       const linked = await orderRow(o.id);
+      expect(linked.product_id).not.toBeNull();
+      const notPacked = await rejects(orders().transition(o.id, inputFor('SHIPPED'), admin), 'ORDER_NOT_PACKED', 409);
+      expect(notPacked.publicMessage).toBe('Pack the parcel and check it before it ships.');
+      await rejects(ctx.services.logistics.ship(o.id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, admin, null), 'ORDER_NOT_PACKED', 409);
+      // Packed and checked: a bare SHIPPED step still never ships it; only its parcel's Ship does, every order of it together.
+      await pack(o.id);
+      await rejects(orders().transition(o.id, inputFor('SHIPPED'), admin), 'ORDER_NOT_PACKED', 409);
+      expect((await orderRow(o.id)).status).toBe('PAID');
+      const shipIt = (input: { carrierId: string; trackingNumber: string; declaredValues?: { orderId: string; minor: number | null }[] }) => ctx.services.logistics.ship(o.id, input, admin, null);
       for (const [input, code] of [
-        [{ to: 'SHIPPED', carrierId: colissimo, trackingNumber: 'x' }, 'VALIDATION_FAILED'],
-        [{ to: 'SHIPPED', carrierId: '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', trackingNumber: '6A12345678901' }, 'CARRIER_NOT_FOUND'],
-        [{ to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901', declaredValueMinor: -1 }, 'VALIDATION_FAILED'],
+        [{ carrierId: colissimo, trackingNumber: 'x' }, 'VALIDATION_FAILED'],
+        [{ carrierId: '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', trackingNumber: '6A12345678901' }, 'CARRIER_NOT_FOUND'],
+        [{ carrierId: colissimo, trackingNumber: '6A12345678901', declaredValues: [{ orderId: o.id, minor: -1 }] }, 'VALIDATION_FAILED'],
       ] as const) {
-        await rejects(orders().transition(o.id, input as OrderTransitionInput, admin), code);
+        await rejects(shipIt(input as Parameters<typeof shipIt>[0]), code);
       }
       await t.db.updateTable('carriers').set({ active: false }).where('id', '=', colissimo).execute();
-      await rejects(orders().transition(o.id, inputFor('SHIPPED'), admin), 'CARRIER_NOT_FOUND', 404);
+      await rejects(shipIt({ carrierId: colissimo, trackingNumber: '6A12345678901' }), 'CARRIER_NOT_FOUND', 404);
       await t.db.updateTable('carriers').set({ active: true }).where('id', '=', colissimo).execute();
       clock.advance(MINUTE);
-      const view = await orders().transition(o.id, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A 1234 5678 901', declaredValueMinor: 480_000 }, admin);
+      await shipIt({ carrierId: colissimo, trackingNumber: '6A 1234 5678 901', declaredValues: [{ orderId: o.id, minor: 480_000 }] });
+      const view = await orders().get(o.id);
+      expect(view.status).toBe('SHIPPED');
       expect(view.shipment).toEqual({
         carrier: { id: colissimo, name: 'Colissimo' },
         trackingNumber: '6A 1234 5678 901',
@@ -642,8 +677,9 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       expect(await stockLevel(t.db, sku, logistics)).toEqual({ onHand: 0, reserved: 0, available: 0 });
       const [moved] = await t.db.selectFrom('stock_movements').selectAll().where('order_id', '=', o.id).execute();
       expect(moved).toMatchObject({ sku_id: sku, location_id: logistics, delta: -1, reason: 'SHIPPED', product_id: linked.product_id, actor_type: 'admin', actor_id: admin.id });
-      expect(linked.product_id).not.toBeNull();
       expect((await auditsOf(o.id, 'order.ship'))[0]!.details).toMatchObject({ from: 'PAID', to: 'SHIPPED', carrierId: colissimo, declaredValueMinor: 480_000 });
+      // Shipped: a bare step is now one the table refuses.
+      await rejects(orders().transition(o.id, inputFor('SHIPPED'), admin), 'ORDER_TRANSITION_NOT_ALLOWED', 409);
       expect(trackingLink('https://track.example/{tracking}?x=1', 'AB 12/3')).toBe('https://track.example/AB12%2F3?x=1');
     });
 
@@ -889,8 +925,8 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
                 const o = await orderRow(id);
                 if (o.status === 'RESERVED') await orders().transition(id, { to: 'PAID' }, admin);
                 else if (o.reservation === 'STOCK') {
-                  await linkPiece(id);
-                  await orders().transition(id, inputFor('SHIPPED'), admin);
+                  await pack(id);
+                  await stepTo(id, 'SHIPPED');
                   open.splice(open.indexOf(id), 1);
                 }
               }
@@ -984,7 +1020,7 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
     });
   });
 
-  // ── after the atelier links a piece (step S2) ────────────────────────────
+  // ── once the packing scan binds a piece (step S2; NEXT LOT §3.5.6.8) ────
 
   describe('once a piece is linked to its order', () => {
     it('DELIVERED by itself when its buyer registers the piece linked to it while SHIPPED; never another account, never before SHIPPED', async () => {
@@ -992,18 +1028,20 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       const sku = await skuOf('76');
       await receive(sku, france, 3);
       const issue = () => ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '76', material: '925 STERLING SILVER', withClaimSecret: true }, admin);
-      // Its warranty activated at the sale, the piece registered by its buyer.
+      // Its warranty started (at SHIP, or by hand for a piece not shipped), the piece registered by its buyer.
       const register = async (accountId: string, p: Awaited<ReturnType<typeof issue>>) => {
-        await ctx.services.warranty.activate(p.product.id, { purchaseDate: '2026-11-01', retailer: 'ORBES PARIS', country: 'FR' }, admin);
+        const w = await t.db.selectFrom('warranties').select('start_date').where('product_id', '=', p.product.id).executeTakeFirst();
+        if (!w?.start_date) await ctx.services.warranty.activate(p.product.id, { purchaseDate: '2026-11-01', retailer: 'ORBES PARIS', country: 'FR' }, admin);
         const scan = await ctx.services.verification.verify({ code: p.code.data }, {});
         return ctx.services.ownership.registerFirst(accountId, { registrationToken: scan.registration!.token, claimCode: p.claimCode! }, { type: 'account', id: accountId });
       };
-      // The atelier picks each order's piece from the stock before it ships. Registered by another account, or before
-      // the order is shipped, nothing changes.
+      // The packing scan binds each order's piece from the stock before it ships. Registered by another account, or
+      // before the order is shipped, nothing changes.
       const [p1, p2, p3] = [await issue(), await issue(), await issue()];
+      await ctx.services.logistics.countIn(sku, { productRefs: [p1, p2, p3].map((p) => p.product.productId), note: 'On the shelf.' }, admin);
       const linkedTo = async (p: Awaited<ReturnType<typeof issue>>, steps: OrderStatus[]) => {
         const o = await walk((await salonOrder({ size: '76', accountId: buyer.id, priceMinor: 480_000 })).id, ['PAID']);
-        await ctx.services.atelier.linkFromStock(o.id, p.product.productId, admin);
+        await scanIntoParcel(ctx, o.id, { pieces: { [o.id]: p.product.productId } }, admin);
         return walk(o.id, steps);
       };
       const shipped = await linkedTo(p1, ['SHIPPED']);
@@ -1099,18 +1137,24 @@ describe('a cancellation and the buyer\'s new claim code (plan NEXT LOT §3.4)',
   /** A piece of `modelId` in `size` (null: one size), issued with its claim code and counted in at FRANCE WAREHOUSE. */
   async function stockPiece(modelId: string, size: string | null) {
     const sku = await inTransaction(t.db, (tx) => ensureSku(tx, modelId, size));
-    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, admin);
-    return ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, ...(size === null ? {} : { variant: size }), material: '925 STERLING SILVER', withClaimSecret: true }, admin);
+    const p = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, ...(size === null ? {} : { variant: size }), material: '925 STERLING SILVER', withClaimSecret: true }, admin);
+    await countPiecesIn(ctx, { skuId: sku, locationId: france, productRefs: [p.product.productId] }, admin);
+    return p;
   }
 
-  /** A salon order of `buyer` for the piece, priced and sized, the piece linked, RESERVED. */
-  async function reservedOrder(buyer: string, size: string, productId: string) {
+  /**
+   * A salon order of `buyer` for the piece, priced and sized, PAID, the piece bound to it by the packing scan (and its
+   * welcome gift's, travelling with it, `gift`): sold, not shipped.
+   */
+  async function soldOrder(buyer: string, size: string, productId: string, gift?: { productId: string }) {
     const request = await t.db.insertInto('shop_requests').values({ account_id: buyer, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
     clock.advance(60_000);
     await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
     const id = (await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).where('channel', '=', 'SALON').executeTakeFirstOrThrow()).id;
     await ctx.services.orders.setTerms(id, { sizeLabel: size, priceMinor: 300_000, currency: 'EUR' }, admin);
-    await ctx.services.atelier.linkFromStock(id, productId, admin);
+    await ctx.services.orders.transition(id, { to: 'PAID' }, admin);
+    const giftOrder = gift ? (await t.db.selectFrom('orders').select('id').where('with_order_id', '=', id).where('channel', '=', 'GIFT').executeTakeFirstOrThrow()).id : null;
+    await scanIntoParcel(ctx, id, { pieces: { [id]: productId, ...(giftOrder ? { [giftOrder]: gift!.productId } : {}) } }, admin);
     return id;
   }
 
@@ -1125,9 +1169,9 @@ describe('a cancellation and the buyer\'s new claim code (plan NEXT LOT §3.4)',
     const giftPiece = await stockPiece(giftModel, null);
     const piece = await stockPiece(f.modelId, '52');
     const buyer = await accountOfTier(f, 2);
-    const parent = await reservedOrder(buyer.id, '52', piece.product.productId);
+    const parent = await soldOrder(buyer.id, '52', piece.product.productId, { productId: giftPiece.product.productId });
     const gift = (await t.db.selectFrom('orders').select('id').where('with_order_id', '=', parent).where('channel', '=', 'GIFT').executeTakeFirstOrThrow()).id;
-    await ctx.services.atelier.linkFromStock(gift, giftPiece.product.productId, admin);
+    expect((await t.db.selectFrom('orders').select('product_id').where('id', '=', gift).executeTakeFirstOrThrow()).product_id).toBe(giftPiece.product.id);
     // The parent's code read by its buyer; the gift's still waiting.
     await renew(piece.product.productId);
     const { claimCode } = await ctx.services.claimRenewals.reveal(buyer.id, parent, buyer.actor);
@@ -1156,7 +1200,7 @@ describe('a cancellation and the buyer\'s new claim code (plan NEXT LOT §3.4)',
   it('a code made after the preparation answers 409 ORDER_CHANGED, and nothing changes; withdrawOnCancel with no hash prepared refuses a current code', async () => {
     const piece = await stockPiece(f.modelId, '53');
     const buyer = await createAccount(t.db);
-    const id = await reservedOrder(buyer.id, '53', piece.product.productId);
+    const id = await soldOrder(buyer.id, '53', piece.product.productId);
     // A press between `transition`'s preparation (it found nothing) and its transaction.
     const orders = ctx.services.orders as unknown as { change: (...a: unknown[]) => Promise<void> };
     const real = orders.change.bind(orders);
@@ -1172,7 +1216,7 @@ describe('a cancellation and the buyer\'s new claim code (plan NEXT LOT §3.4)',
     } finally {
       spy.mockRestore();
     }
-    expect((await t.db.selectFrom('orders').select('status').where('id', '=', id).executeTakeFirstOrThrow()).status).toBe('RESERVED');
+    expect((await t.db.selectFrom('orders').select('status').where('id', '=', id).executeTakeFirstOrThrow()).status).toBe('PAID');
     expect(await kindsOf(piece.product.id)).toEqual([['BUYER', 'WAITING', null]]);
     const order = await t.db.selectFrom('orders').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
     await expect(inTransaction(t.db, (tx) => withdrawOnCancel(tx, order, new Map(), admin, clock.now(), []))).rejects.toMatchObject({ code: 'ORDER_CHANGED' });

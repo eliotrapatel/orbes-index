@@ -66,7 +66,7 @@ import { sanitizeImage } from '../media/image.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import type { ImageUpload } from './media.js';
-import { attachPiece, checkStep, lockOrder, ORDER_AMOUNT_MAX_MINOR, recordChange, serveWaiting, step, updateOrder } from './orders.js';
+import { attachPiece, checkStep, lockOrder, ORDER_AMOUNT_MAX_MINOR, orderNotPacked, type CheckedStep, recordChange, serveWaiting, step, updateOrder } from './orders.js';
 import {
   checklistOf,
   onItsWay,
@@ -123,7 +123,7 @@ const scanNotInStock = (productId: string) =>
 const scanDone = () => conflict('PACKING_SCAN_DONE', 'Every piece of this parcel is already scanned.');
 const packingIncomplete = () => new DomainError('PACKING_INCOMPLETE', 422, 'Tick every line, scan every card and add the photo before it is packed.');
 const photoInvalid = () => new DomainError('PACKING_PHOTO_INVALID', 422, 'The photo could not be read: take it again.');
-const notPacked = () => conflict('ORDER_NOT_PACKED', 'Pack the parcel and check it before it ships.');
+const notPacked = orderNotPacked;
 const notShipped = () => new DomainError('ORDER_TRANSITION_NOT_ALLOWED', 409, 'This order cannot move to that step.', { detail: 'the parcel has not shipped' });
 const carrierUnknown = () => notFound('Carrier', 'CARRIER_NOT_FOUND');
 /** The statuses a piece in stock has (§3.5.6.8): issued, or back on sale. */
@@ -820,7 +820,8 @@ export class LogisticsService {
       const notes: AuditRecordInput[] = [];
       for (const o of members) {
         const s = checkStep({ to: 'SHIPPED', carrierId: carrier.id, trackingNumber: tracking, declaredValueMinor: declared.get(o.id) ?? null });
-        await step(tx, o, s, actor, now, notes);
+        // The SHIPPED gate (step 5.12): the step names the parcel's shipment, PACKED and checked above.
+        await step(tx, o, { ...(s as Extract<CheckedStep, { to: 'SHIPPED' }>), shipmentId: shipment.id }, actor, now, notes);
       }
       await tx
         .updateTable('shipments')

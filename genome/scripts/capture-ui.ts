@@ -153,10 +153,12 @@ import { AuditService } from '../src/server/services/audit.js';
 import { deriveDropSeedKey, DropService } from '../src/server/services/drops.js';
 import { deriveLiveTurnKey, LiveService } from '../src/server/services/live.js';
 import { LiveConsoleService } from '../src/server/services/live-console.js';
+import { LogisticsService } from '../src/server/services/logistics.js';
 import type { LiveEngine } from '../src/server/services/live-engine.js';
 import { OrderService, orderReference } from '../src/server/services/orders.js';
 import { SalonService } from '../src/server/services/salon.js';
 import { sessionCookieName } from '../src/server/services/sessions.js';
+import { WarrantyService } from '../src/server/services/warranty.js';
 import { defaultLocationId, ensureSku, linkDropSizes } from '../src/server/services/stock.js';
 import { createManualClock, noopLogger, SYSTEM_ACTOR, systemActor, type ManualClock } from '../src/server/types.js';
 import { seedGrowth } from '../test/support/growth.js';
@@ -164,7 +166,7 @@ import { createLiveRelease, holdPieces, type LiveFixture, type LiveReleaseOption
 import { CHROMIUM_PATH, cameraClip, codeOf, codePhoto, fullScreenshot, gate, hideGrain, MOBILE, mobileContext, sleep, startUiStage, watchPage as watchPageInto, webpOf } from '../test/support/ui-stage.js';
 import { eachState } from '../test/support/nocturne-stage.js';
 import { openState, ROOM_SIZE_STATES, stateById, type UiState } from '../test/support/nocturne-states.js';
-import { stockPiece } from '../test/support/fulfil.js';
+import { packAndShip, stockPieces } from '../test/support/fulfil.js';
 import { buildWeb } from './build-web.js';
 import { shoot as shootState } from './parity.js';
 
@@ -1272,6 +1274,16 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     const on = (days: number, hour: number, minute = 0) => past.clock.set(new Date(parisAt(-days, hour).getTime() + minute * MINUTE));
     const orders = new OrderService({ db, audit: past.audit, clock: past.clock.now });
     const atelier = new AtelierService({ db, audit: past.audit, issuance: ctx.services.issuance, orders, clock: past.clock.now });
+    // The agent's steps on the past's clock too (plan NEXT LOT §3.5.6.8; the SHIPPED gate, step 5.12): Start packing, the
+    // card's scan, the photo, Packed, Ship (which starts each piece's warranty, question 14).
+    const shipping = new LogisticsService({
+      db,
+      audit: past.audit,
+      stock: ctx.services.stock,
+      verification: ctx.services.verification,
+      warranty: new WarrantyService({ db, audit: past.audit, lifecycle: ctx.services.lifecycle, clock: past.clock.now }),
+      clock: past.clock.now,
+    });
     const salon = new SalonService({ db, audit: past.audit, lookbook: ctx.services.lookbook, club: ctx.services.club, clock: past.clock.now });
     const carrier = async (name: string) => (await db.selectFrom('carriers').select('id').where('name', '=', name).executeTakeFirstOrThrow()).id;
     const titled = async (id: string, title: string) => {
@@ -1308,10 +1320,11 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     await orders.setTerms(drawn, { sizeLabel: '54', priceMinor: 480_000, currency: 'EUR' }, admin);
     await orders.setBuyer(drawn, { name: 'Hélène Morel', address: '14 rue de Turenne\n75004 Paris\nFrance' }, admin);
 
-    // LIVE I, six days ago: four pieces, two of size 54 made in advance at FRANCE WAREHOUSE; ENGRAVING, a surprise.
+    // LIVE I, six days ago: four pieces, two of size 54 in stock in advance at FRANCE WAREHOUSE, counted in (test/support/
+    // fulfil.ts stockPieces); ENGRAVING, a surprise.
     const france = await defaultLocationId(db);
     const sku54 = await ensureSku(db, monolithe, '54');
-    await ctx.services.stock.adjust({ skuId: sku54, locationId: france, delta: 2, note: 'Two pieces of size 54 finished ahead of LIVE I.' }, admin);
+    await stockPieces(ctx, { skuId: sku54, locationId: france, count: 2, productionBatch: 'B-2026-10-LIVE-I', logistics: shipping }, admin);
     on(6, 18);
     const live1 = await createLiveRelease(past, {
       modelId: monolithe,
@@ -1374,22 +1387,27 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     await past.live.enter(me.id, live2.id, { sizeId: live2.sizes[0]!.id }, me.actor);
     await buy(live2.id, newcomer);
 
-    // Two days ago: Hélène's LIVE I piece taken from the stock (plan NEXT LOT §3.5, step 5.5: test/support/fulfil.ts
-    // stockPiece) and shipped by Colissimo; the draw's piece and Michael's paid.
+    // Two days ago: two pieces of size 52 counted in at FRANCE WAREHOUSE, where LIVE I's orders of that size wait (the
+    // rival's, older in the line, takes the first, the oldest first); Hélène's packed through the agent's steps and
+    // shipped by Colissimo (plan NEXT LOT §3.5, step 5.12: test/support/fulfil.ts stockPieces and packAndShip); the
+    // draw's piece and Michael's paid.
     on(2, 11);
-    const done = await stockPiece(ctx, { orderId: mine, productionBatch: 'B-2026-10-LIVE-I', atelier }, admin);
+    const mineHeld = await db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', mine).executeTakeFirstOrThrow();
+    const [, done] = await stockPieces(ctx, { skuId: mineHeld.sku_id!, locationId: mineHeld.location_id, count: 2, productionBatch: 'B-2026-10-LIVE-I', forOrderIds: [rivals, mine], logistics: shipping }, admin);
     on(2, 15);
-    await orders.transition(mine, { to: 'SHIPPED', carrierId: await carrier('Colissimo'), trackingNumber: '6A12345678901', declaredValueMinor: 520_000 }, admin);
+    await packAndShip(ctx, mine, { carrierId: await carrier('Colissimo'), trackingNumber: '6A12345678901', declaredValueMinor: 520_000, pieces: { [mine]: done!.productId }, logistics: shipping }, admin);
     on(2, 16);
     await orders.transition(drawn, { to: 'PAID' }, admin);
     on(2, 16, 30);
     await orders.setBuyer(paid, { name: 'Michael Okafor', address: '22 Kensington Church Street\nLondon W8 4EP\nUnited Kingdom' }, admin);
     await orders.transition(paid, { to: 'PAID' }, admin);
-    // Yesterday: the ORBITE taken from the stock and shipped by Chronopost; the rival's engraved piece still to be paid.
+    // Yesterday: the ORBITE counted in from the stock (it waited for it) and shipped by Chronopost; the rival's engraved
+    // piece still to be paid.
     on(1, 10);
-    await stockPiece(ctx, { orderId: salonOrder, productionBatch: 'B-2026-10-SALON', atelier }, admin);
+    const salonHeld = await db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', salonOrder).executeTakeFirstOrThrow();
+    await stockPieces(ctx, { skuId: salonHeld.sku_id!, locationId: salonHeld.location_id, count: 1, productionBatch: 'B-2026-10-SALON', forOrderIds: [salonOrder], logistics: shipping }, admin);
     on(1, 11);
-    await orders.transition(salonOrder, { to: 'SHIPPED', carrierId: await carrier('Chronopost'), trackingNumber: 'XY482915637FR', declaredValueMinor: 190_000 }, admin);
+    await packAndShip(ctx, salonOrder, { carrierId: await carrier('Chronopost'), trackingNumber: 'XY482915637FR', declaredValueMinor: 190_000, logistics: shipping }, admin);
 
     // LIVE III, yesterday: Hélène said I'LL BE THERE and never came; it closed with a piece left.
     on(1, 18);
@@ -1411,11 +1429,9 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     past.clock.advance(HOUR);
     await past.live.advance(live3.id);
 
-    // ── Today: Hélène receives LIVE I's piece and registers it with its claim code (its warranty started at the sale): DELIVERED ──
-    const piece = (await db.selectFrom('products').select('id').where('product_id', '=', done.productId).executeTakeFirstOrThrow()).id;
-    await ctx.services.warranty.activate(piece, { purchaseDate: new Date().toISOString().slice(0, 10), retailer: 'ORBES PARIS', country: 'FR' }, admin);
-    const scan = await ctx.services.verification.verify({ code: (await ctx.services.issuance.printableCode(done.codeId)).data }, {});
-    await ctx.services.ownership.registerFirst(me.id, { registrationToken: scan.registration!.token, claimCode: done.claimCode! }, me.actor);
+    // ── Today: Hélène receives LIVE I's piece and registers it with its claim code (its warranty started at SHIP): DELIVERED ──
+    const scan = await ctx.services.verification.verify({ code: (await ctx.services.issuance.printableCode(done!.codeId)).data }, {});
+    await ctx.services.ownership.registerFirst(me.id, { registrationToken: scan.registration!.token, claimCode: done!.claimCode! }, me.actor);
     // A minimum for MONOLITHE in size 54 at FRANCE WAREHOUSE: the atelier suggests what to make; one piece to make for
     // the stock, its work sheet printed (an order no longer gets one since plan NEXT LOT §3.5; the atelier goes in 5.13).
     await ctx.services.atelier.setThreshold({ skuId: sku54, locationId: france, minimum: 3 }, admin);
@@ -1482,8 +1498,8 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     // size 50 and part of its 52: the feasibility check warns for the rest.
     await linkDropSizes(db, live6.id, monolithe);
     await linkDropSizes(db, live6.afterRoom!.id, orbite);
-    await ctx.services.stock.adjust({ skuId: await ensureSku(db, monolithe, '50'), locationId: logistics, delta: 8, note: 'Eight pieces of size 50 received from the atelier.' }, admin);
-    await ctx.services.stock.adjust({ skuId: await ensureSku(db, monolithe, '52'), locationId: logistics, delta: 6, note: 'Six pieces of size 52 received from the atelier.' }, admin);
+    await stockPieces(ctx, { skuId: await ensureSku(db, monolithe, '50'), locationId: logistics, count: 8, productionBatch: 'B-2026-10-LIVE-VI' }, admin);
+    await stockPieces(ctx, { skuId: await ensureSku(db, monolithe, '52'), locationId: logistics, count: 6, productionBatch: 'B-2026-10-LIVE-VI' }, admin);
     await ctx.services.liveConsole.update(
       live6.id,
       { stockLocationId: logistics, questionText: 'WHICH SIZE WOULD YOU HAVE CHOSEN?', questionAnswers: ['50', '52', '54', 'ANOTHER SIZE'] },
