@@ -1361,8 +1361,9 @@ export class DropService {
    * DROP_EARLY_ACCESS_CLOSED), an account that already holds an entry in
    * it (409 DROP_ALREADY_RESERVED), a full drop (409 DROP_FULL). Plan NEXT LOT §3.6.F: in a draw with sizes, in one of
    * its sizes with pieces (400 DROP_SIZE_REQUIRED, 404 DROP_SIZE_UNKNOWN), refused once the pieces held or sold in that
-   * size and those of its guaranteed entries waiting leave none (409 DROP_SIZE_FULL, the size named); the place keeps its
-   * size. Audited `drop.reserve` with the entry, its tier and its size.
+   * size and those of its guaranteed entries waiting leave none (409 DROP_SIZE_FULL, the size named); with the house's
+   * guarantee, the size must serve its pieces as for ENTER (guaranteeInSize: 409 DROP_GUARANTEE_SIZE_FULL when shown, an
+   * ordinary place when not); the place keeps its size. Audited `drop.reserve` with the entry, its tier and its size.
    */
   async reserve(accountId: string, dropId: string, actor: Actor, input: { sizeId?: string | null } = {}): Promise<AccountDropEntry> {
     assertAccount(accountId);
@@ -1386,10 +1387,13 @@ export class DropService {
       if (existing && existing.status !== 'WITHDRAWN') throw alreadyReserved();
       const size = chosenSize(await drawSizesOf(tx, id), input.sizeId);
       // IN-01: a holder's reservation uses the house's guarantee, after the entry's row (the lock order); the pieces the
-      // house guarantees to others are never taken by an early access (DROP_FULL counts them).
-      const g = await holderGuarantee(tx, accountId, d);
+      // house guarantees to others are never taken by an early access (DROP_FULL counts them). In a draw with sizes, as
+      // ENTER: only where its size can serve its pieces (one shown refused, 409 DROP_GUARANTEE_SIZE_FULL; one not shown
+      // leaves an ordinary place, no mark for its holder).
+      const own = await holderGuarantee(tx, accountId, d);
+      const g = own && size ? await this.guaranteeInSize(tx, id, own, size.id, existing?.id ?? null) : own;
       const held = await this.heldPieces(tx, id);
-      const guaranteed = await guaranteedPieces(tx, id, g?.id);
+      const guaranteed = await guaranteedPieces(tx, id, own?.id);
       if (held + guaranteed + (g?.pieces ?? 1) > d.quantity) throw dropFull();
       // Plan NEXT LOT §3.6.F: within its size too, first come, first served.
       if (size && (await this.heldPieces(tx, id, size.id)) + (await guaranteedEnteredPieces(tx, id, size.id)) + (g?.pieces ?? 1) > size.stock) throw sizeFull(size.label);

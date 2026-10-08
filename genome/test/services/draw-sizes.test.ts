@@ -245,6 +245,25 @@ describe('sizes in draws (plan NEXT LOT §3.6.F)', () => {
     expect((await drops().enter(p3.id, d.id, p3.actor, { sizeId: sizeId(d, '52') })).status).toBe('ENTERED');
   });
 
+  it('reserves with the house\'s guarantee only where its size can serve its pieces: a shown one refused in a size too small (DROP_GUARANTEE_SIZE_FULL, never DROP_SIZE_FULL), a hidden one given an ordinary place', async () => {
+    const ring = await sizedModel(['52', '54']);
+    const d = await sizedDraw(ring, [{ label: '52', pieces: 2 }, { label: '54', pieces: 6 }], { opensIn: 10 * HOUR, early: 48 });
+    const [shown, hidden] = [await accountOfTier(f, 2), await accountOfTier(f, 3)];
+    await ctx.services.guarantees.grant(shown.id, { scope: 'RELEASE', targetId: d.id, pieces: 3, validUntil: '2026-12-31', visible: true }, admin);
+    await ctx.services.guarantees.grant(hidden.id, { scope: 'RELEASE', targetId: d.id, pieces: 3, validUntil: '2026-12-31', visible: false }, admin);
+    // 52 has its 2 pieces free, the guarantee 3: the size is not full, the guarantee cannot be given there.
+    const e = await rejects(drops().reserve(shown.id, d.id, shown.actor, { sizeId: sizeId(d, '52') }), 'DROP_GUARANTEE_SIZE_FULL', 409);
+    expect(e.publicMessage).toBe('Your guaranteed place cannot be given in this size: choose another size.');
+    expect((await drops().sheet(d.id)).sizes.find((s) => s.label === '52')).toMatchObject({ reserved: 0, full: false });
+    // Hidden: an ordinary place of 1 piece in 52, as any PLATINE or PALLADIUM account's; its guarantee unused.
+    expect(await drops().reserve(hidden.id, d.id, hidden.actor, { sizeId: sizeId(d, '52') })).toMatchObject({ status: 'SELECTED', reserved: true, guaranteed: false, pieces: 1, size: { label: '52' } });
+    const row = await t.db.selectFrom('drop_entries').select(['guarantee_id', 'pieces']).where('account_id', '=', hidden.id).where('drop_id', '=', d.id).executeTakeFirstOrThrow();
+    expect(row).toEqual({ guarantee_id: null, pieces: 1 });
+    expect((await t.db.selectFrom('house_guarantees').select('status').where('account_id', '=', hidden.id).where('covered_drop_id', '=', d.id).executeTakeFirstOrThrow()).status).toBe('ACTIVE');
+    // The shown holder in 54, which serves its 3 pieces.
+    expect(await drops().reserve(shown.id, d.id, shown.actor, { sizeId: sizeId(d, '54') })).toMatchObject({ status: 'SELECTED', guaranteed: true, pieces: 3, size: { label: '54' } });
+  });
+
   it('draws per size, as the page lets anyone check from the seed: ranked once, each size filled in that order after its reservations and its guaranteed places; OFFER NEXT per size; the order takes the size and its SKU', async () => {
     const ring = await sizedModel(['16', '17', '18']);
     const d = await sizedDraw(ring, [{ label: '16', pieces: 3 }, { label: '17', pieces: 5 }, { label: '18', pieces: 4 }], { opensIn: 10 * HOUR, early: 48 });
