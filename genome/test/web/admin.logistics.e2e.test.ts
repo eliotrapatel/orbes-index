@@ -117,9 +117,12 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
         .filter((x) => /[01]/.test(x)),
     );
 
-  async function shot(p: Page, name: string, opts: { dialog?: boolean } = {}): Promise<void> {
+  async function shot(p: Page, name: string, opts: { dialog?: boolean; phone?: boolean } = {}): Promise<void> {
     if (!SCREENSHOTS) return;
     mkdirSync(OUT_DIR, { recursive: true });
+    const desk = p.viewportSize();
+    // At phone size (390 × 844) for the agent's parcel page (plan NEXT LOT step 5.14), then back to the desk.
+    if (opts.phone) await p.setViewportSize({ width: 390, height: 844 });
     await p.evaluate(async () => {
       document.querySelectorAll('.toast').forEach((x) => x.remove());
       window.scrollTo(0, 0);
@@ -127,6 +130,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     });
     await p.waitForTimeout(300);
     await p.screenshot({ path: join(OUT_DIR, `admin-logistics-${name}.png`), fullPage: !opts.dialog });
+    if (opts.phone && desk) await p.setViewportSize(desk);
   }
 
   const tabs = (p: Page) => p.locator('.logistics__tabs .range__tab');
@@ -325,6 +329,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(await row.locator('a').count()).toBe(0);
     expect(await row.locator('[data-testid=case-kind]').textContent()).toBe('RETURN');
     expect(await row.locator('td').nth(2).textContent()).toBe('MONOLITHE · 52');
+    await shot(g, 'returns');
     await row.locator('[data-testid=case-received]').click();
     expect(await g.locator('dialog .dialog__title').textContent()).toBe('The parcel is back');
     expect(await g.locator('dialog .dialog__text').textContent()).toBe('ORBES then decides: back to stock, a refund, or the other size.');
@@ -407,6 +412,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     for (const label of ['The card, its claim code visible', 'The box and the pouch']) await g.locator('[data-testid=parcel-check]', { hasText: label }).click();
     await expect.poll(() => g.locator('[data-testid=parcel-packed]').isDisabled()).toBe(false);
     await shot(g, 'packing');
+    await shot(g, 'packing-phone', { phone: true });
     await g.click('[data-testid=parcel-packed]');
     await g.waitForSelector('.toast:has-text("Packed.")');
     await expect.poll(() => g.locator('[data-testid=parcel-step]').textContent()).toBe('PACKED');
@@ -500,6 +506,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await go(a, '#/logistics?tab=receptions', 'Logistics');
     expect(await a.locator('#logistics-receive').count()).toBe(0);
     await expect.poll(() => a.locator('#logistics-expected tbody tr').filter({ hasText: order.reference }).locator('td').nth(1).textContent()).toBe('MAISON NORD');
+    await shot(a, 'receptions');
     await a.click('[data-testid=reception-confirm]');
     expect(await a.locator('[data-testid=reception-confirm-text]').textContent()).toBe(
       `3 pieces get their ORBES identity now: a serial, a signed ORBES code and a claim code each. They enter the stock at FRANCE WAREHOUSE and go to the orders waiting for them, the oldest first. The agent then prints their cards. 1 rejected piece gets no identity: it is listed TO RETURN on ${order.reference}.`,

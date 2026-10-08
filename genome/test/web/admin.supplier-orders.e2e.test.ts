@@ -236,6 +236,11 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     expect(await a.locator('[data-testid=line-edit]').count()).toBe(0);
     const [pdf] = await Promise.all([a.waitForEvent('download'), a.click('[data-testid=supplier-order-pdf]')]);
     expect(pdf.suggestedFilename()).toBe(`ORBES-${reference}.pdf`);
+    // The PDF itself, kept beside the captures for the owner's review (plan NEXT LOT step 5.14).
+    if (SCREENSHOTS) {
+      mkdirSync(OUT_DIR, { recursive: true });
+      await pdf.saveAs(join(OUT_DIR, 'admin-supplier-orders-order.pdf'));
+    }
 
     // Confirmed by the supplier; the Stock reads what it owes.
     await a.click('[data-testid=supplier-order-confirmed]');

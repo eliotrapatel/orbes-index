@@ -10,7 +10,7 @@ Liens : [LAUNCH](../LAUNCH.md) §4, §7 et §11 · [API](../API.md) §9.3, §11.
 
 - Les mots entre accents graves, comme `Activate warranty`, sont ceux de l'écran, en anglais, tels que la console ou theorbes.com/verify les affichent : un bouton, un champ, un statut, un fichier. Ce sont des mots internes : on ne les lit pas au client (BRAND §4.1).
 - Les phrases en retrait sont à dire au client, telles quelles. Les mots de l'écran y restent en anglais et en capitales, comme le client les lit sur son téléphone.
-- Les rôles de la console (SECURITY-MODEL §3.3) : **RETAIL**, un vendeur, n'a que le mode Boutique ; **AUDITOR** lit ; **OPERATOR** émet les pièces, active les garanties, déclare une perte ou un vol, ouvre les entretiens ; **ADMIN** gère l'équipe, les points de vente et les gestes sensibles sur un compte client (code de récupération, verrouillage, export).
+- Les rôles de la console (SECURITY-MODEL §3.3) : **RETAIL**, un vendeur, n'a que le mode Boutique ; **LOGISTICS**, une personne chez le prestataire logistique, n'a que `Logistics`, pour ses entrepôts ; **AUDITOR** lit ; **OPERATOR** active les garanties, déclare une perte ou un vol, ouvre les entretiens, confirme les réceptions et passe les commandes fournisseur ; **ADMIN** gère l'équipe, les points de vente, le `Generator` (les pièces uniques : échantillons, presse, remplacements) et les gestes sensibles sur un compte client (code de récupération, verrouillage, export).
 - La console : `https://verify.theorbes.com/admin`. Le client : theorbes.com/verify, qu'il tape lui-même.
 
 Ce guide ne décrit que ce que fait le logiciel. Ses sources :
@@ -35,7 +35,7 @@ Ce guide ne décrit que ce que fait le logiciel. Ses sources :
 ## 0. Avant la première pièce
 
 - **Les points de vente.** Un ADMIN les crée dans `Points of sale` (groupe `Clients` de la barre latérale) : chaque boutique, chaque grand magasin et la boutique en ligne, sans pays pour celle-ci. Une boutique fermée est désactivée, jamais supprimée.
-- **Un compte par personne** (§10) : RETAIL pour chaque vendeur, OPERATOR pour l'atelier et ORBES Client Services. Jamais de compte partagé, même sur le téléphone d'un comptoir.
+- **Un compte par personne** (§10) : RETAIL pour chaque vendeur, OPERATOR pour ORBES Client Services, LOGISTICS pour chaque personne du prestataire logistique, rattaché aux entrepôts où elle travaille (`Team`, `Locations`). Jamais de compte partagé, même sur le téléphone d'un comptoir.
 - **Les coordonnées d'ORBES Client Services** sont configurées (`CLIENT_SERVICES_EMAIL`, `CLIENT_SERVICES_PHONE`, `CLIENT_SERVICES_HOURS`, LAUNCH §10). L'application des collectionneurs ne les montre plus : partout où elle renvoie vers ORBES Client Services, elle montre `WRITE TO ORBES CLIENT SERVICES`, dont les messages arrivent dans `Messages` (§3). Seul `FORGOTTEN PASSWORD` garde l'adresse e-mail, pour un client qui a aussi perdu son code de récupération ; les pages légales gardent l'adresse, le téléphone et les horaires.
 - **La carte certificat.** Fait : le propriétaire a validé la carte 79t, MINT CERTIFICATE, le 2026-10-07, et aucune carte ne porte plus la mention PROOF (kit, §2).
 - **Le claim code.** Toute pièce destinée à la vente est émise avec son claim code : dans `Generator`, la case `Issue a one-time claim code (shown once, stored as a hash)` (pour un lot : `Issue a one-time claim code for each piece (shown once, stored as a hash)`) reste cochée, comme par défaut. C'est lui qui prouve, à l'enregistrement, que le client tient la carte. Une pièce émise sans claim code s'enregistre sans preuve : une fois sa garantie activée, le premier compte connecté qui la scanne peut l'enregistrer à son nom. Si une telle pièce est vendue, le client l'enregistre au comptoir, aussitôt la garantie activée ; puis un OPERATOR, la facture vue, confirme la propriété sur la fiche de la pièce (`Actions`, groupe `Ownership` → `Confirm ownership`, API §14.10).
@@ -114,23 +114,41 @@ Le client voit `AUTHENTIC` et, dans l'onglet `OWNERSHIP`, `NOT YET DELIVERED` : 
 
 ## 2. Expédition en ligne
 
-Une vente en ligne s'inscrit **dans la console, avant l'envoi**, pour que le client puisse enregistrer la pièce dès réception. Pas en mode Boutique : il prend le pays du point de vente, et la boutique en ligne n'en a pas.
+Une commande (une sortie LIVE, un tirage, le salon privé) s'expédie par `Logistics`. ORBES Client Services la marque payée (`Mark paid`) ; elle tient alors une pièce de son modèle et de sa taille en stock, ou attend la prochaine livraison d'un fournisseur, les plus anciennes servies d'abord. Le prestataire logistique la prépare et l'expédie ; ORBES Client Services peut faire chaque étape depuis la page de la commande (section `Shipping`). L'expédition (`Ship`) démarre la garantie de chaque pièce : plus rien à activer à la main avant l'envoi.
 
-1. Avant l'emballage, vérifiez que l'identité imprimée sur la carte certificat (`O26-…`) est celle de la pièce : celle de son étiquette, ou le `PRODUCT ID` de l'onglet `PRODUCT` quand vous scannez la pièce depuis le navigateur où la console est ouverte (un scan staff, sans signal, §7).
-2. Console : `Products` → la pièce → `Activate warranty` :
-   - `Purchase date` : la date de la commande ;
-   - `Point of sale` : la boutique en ligne ;
-   - `Country` : le pays de livraison, en deux lettres. Remplissez-le toujours : la boutique en ligne n'a pas de pays par défaut.
-
-   Puis `Activate`, et vérifiez `Warranty` `ACTIVE`.
-3. La carte certificat va **dans le colis, dans l'emballage, avec la pièce**, son claim code imprimé en clair. Le claim code n'apparaît jamais à l'extérieur du colis, sur la facture, dans l'e-mail de confirmation ni dans aucun message.
-4. Le texte d'emballage en trois étapes est celui du [kit](PACKAGING-KIT.md), §1.
+1. `Logistics` → `To ship` : les colis dont toutes les commandes sont payées et ont leur pièce, le plus ancien d'abord. Ouvrez le colis, puis `Start packing` : dès lors, le client ne change plus ni l'adresse ni la gravure ; seul ORBES Client Services le peut.
+2. Prenez sur l'étagère une pièce du bon modèle, de la bonne variante et de la bonne taille, et `Scan the card` : l'ORBES CODE de sa carte certificat lie la pièce à la commande. Une carte d'un autre modèle, d'une autre taille ou d'une pièce hors stock est refusée : mettez-la de côté et prévenez ORBES.
+3. La carte certificat va **dans le colis, dans l'emballage, avec la pièce**, son claim code imprimé en clair. Le claim code n'apparaît jamais à l'extérieur du colis, sur la facture, dans l'e-mail de confirmation ni dans aucun message. Le texte d'emballage en trois étapes est celui du [kit](PACKAGING-KIT.md), §1.
+4. Cochez chaque ligne de la liste, `Add the photo` (vue par ORBES seul, jamais par le client, effacée 14 jours après la livraison), puis `Packed`.
+5. `Ship` : le transporteur et le numéro de suivi ; l'étiquette et les papiers de douane se font avec les outils du transporteur. Le client voit le transporteur et le lien de suivi dans YOUR ORDERS. La valeur déclarée pour l'assurance est saisie par ORBES seul, depuis la page de la commande.
+6. À l'arrivée, `Mark delivered` ; la commande passe aussi d'elle-même à DELIVERED quand le client enregistre la pièce.
 
 Dans l'e-mail d'expédition, ou sur la notice glissée dans le colis :
 
 > Votre pièce voyage avec sa carte certificat. À réception, ouvrez theorbes.com/verify, scannez l'ORBES CODE de la pièce, puis enregistrez-la à votre nom avec le claim code de la carte. Vérifiez uniquement sur theorbes.com/verify.
 
-**Retour d'une commande expédiée.** Rien dans la console n'annule une garantie commencée ni ne remet une pièce en stock : `Void warranty` est définitif, et le mode Boutique refuse ensuite la pièce, avec `ALREADY SOLD` tant que sa garantie court et `WARRANTY VOID` une fois celle-ci annulée. Gardez la pièce à part et signalez-la à un ADMIN ; sa remise en vente se décide au cas par cas (§11).
+### Recevoir une livraison et la confirmer
+
+- **Le prestataire.** `Logistics` → `Receptions` → `Receive a delivery` : la référence de la commande fournisseur (SO-…) lue sur le bon de livraison, puis `Open`. Quand le bon ne la porte pas, demandez-la à ORBES : le prestataire ne voit jamais la liste des commandes fournisseur ni leurs prix. Comptez chaque pièce : une pièce défectueuse va en `Rejected`, une pièce en trop ou hors commande s'accepte avec une note. Puis `Record the reception`.
+- **ORBES** (OPERATOR) : `Logistics` → `Receptions` → `To confirm`, `Confirm the reception` (chaque pièce reçoit alors son identité ORBES, son ORBES CODE et son claim code, puis sert les commandes qui l'attendent) ou `Send back` avec une note, et le prestataire compte de nouveau (`Count again`).
+- **Les cartes.** Une fois les identités émises : `Cards to print`, `Print A4 sheets` ou `Print one per page`, chaque carte avec sa pièce, puis `Cards attached` : les cartes ne s'impriment plus ensuite, et une carte perdue demande un nouveau claim code d'ORBES (§5).
+- **Les pièces rejetées** : `Back to the supplier`, `Sent back` quand elles partent ; ORBES note la réponse du fournisseur (un remplacement ou un avoir) sur la commande fournisseur.
+
+### Compter des pièces : NO PIECE
+
+Le stock compté avant ces écrans, ou une pièce sortie du `Generator`, n'a pas d'identité ORBES derrière son compte : `Logistics` → `Stock` le marque NO PIECE pour ORBES, et une commande qui le tient ne peut pas être préparée. Un OPERATOR nomme les pièces qui sont sur l'étagère (`Count pieces in`, une identité `O26-…` par ligne) ou corrige le compte à la baisse (`Correct`). Le prestataire propose ses corrections (`Propose a correction`) ; un OPERATOR les accepte (`Approve`) ou les refuse (`Decline`) dans `Corrections`.
+
+### Un problème de colis
+
+Le colis revient à l'expéditeur, se perd ou arrive abîmé : le prestataire ou ORBES Client Services le signale (`Report a parcel problem`). Le prestataire enregistre le colis revenu (`Logistics` → `Returns` → `Received`). ORBES décide depuis la page de la commande (`Decide`) : `Ship another piece`, avant les commandes qui attendent, ou `Refund`. Un colis perdu se décide par un ADMIN, et l'identité de la pièce perdue est révoquée. Un colis abîmé qui ne revient jamais au prestataire : annulez son cas (`Cancel the order case`), puis signalez-le perdu.
+
+### Retours et échanges
+
+Le client demande un retour ou un échange de taille dans les 14 jours qui suivent la livraison, ou écrit dans `Messages`. ORBES Client Services peut aussi l'ouvrir depuis la page de la commande (`Open a return`), même après les 14 jours, par geste commercial. Le client renvoie la pièce à ses frais ; le prestataire l'enregistre à l'arrivée (`Received`, la pièce intacte ou abîmée) ; ORBES décide (`Decide`) : remboursement, ou l'autre taille, et la pièce retourne au stock ou à l'archive (un ADMIN). Rien n'annule une garantie commencée : une pièce remise en stock repart avec un nouveau claim code, montré une fois, pour sa nouvelle carte.
+
+### Commandes fournisseur
+
+`Supplier orders` (ORBES seul) → `To order` : la console additionne ce qui manque (les commandes en attente et le stock sous son minimum) par fournisseur et par entrepôt. `Add to the draft`, ajustez quantités, prix, devise, frais de port et date attendue, puis `Mark sent` et envoyez vous-même le `PDF` au fournisseur : la console n'envoie aucun e-mail. Ensuite : `Confirmed by the supplier`, les réceptions, `Cancel the rest` quand le fournisseur ne livrera pas la suite, `Enter the invoice` et `Mark the invoice paid`. Les fournisseurs se créent dans `Suppliers` (`Add a supplier`) ; le fournisseur d'un modèle, ou d'une taille, se règle sur la page du modèle (`Edit supplier`).
 
 ---
 

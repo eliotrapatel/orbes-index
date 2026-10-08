@@ -754,9 +754,10 @@ describe('legal pages: both languages, links, lexicon', () => {
       // three answers on the card.
       '2026-10-09': '5a47d7ed2b57b1c1',
       // Deployment H2 (§3.5.11, step 5.5): the terms' « Its piece » paragraph (an order waits for supplier stock, served
-      // the oldest first) and the privacy policy's engraving clause (no piece is made for an order); moved by steps 5.14
-      // and 6.12, then to the date of H2's final commit.
-      '2026-10-10': '0749c721eaa7c119',
+      // the oldest first) and the privacy policy's engraving clause (no piece is made for an order); step 5.14: the
+      // privacy policy's sentence on the packing photo (seen by ORBES only, deleted 14 days after delivery); moved by
+      // step 6.12, then to the date of H2's final commit.
+      '2026-10-10': '3b62c0dec43fc82c',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });

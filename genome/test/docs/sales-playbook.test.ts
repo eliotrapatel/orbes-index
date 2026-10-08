@@ -456,10 +456,12 @@ describe('sales playbook (docs/launch/SALES-PLAYBOOK.md)', () => {
     expect(shop).toContain('le personnel ne le saisit ni ne le recopie jamais');
     expect(playbook).not.toMatch(/gratt/i);
     expect(quotes(shop).join(' ')).toContain('theorbes.com/verify');
-    // Online, the warranty starts in the console, with a country, before the parcel leaves.
+    // Online, an order ships through Logistics, and its Ship starts the warranty (plan NEXT LOT §3.5.6.8b, question 14):
+    // the step that activated it by hand before the parcel left is gone; the card travels inside the parcel.
     const online = sheet(2);
-    expect(online).toContain('avant l\'envoi');
-    expect(online).toContain('`Country` : le pays de livraison');
+    expect(online).toContain('L\'expédition (`Ship`) démarre la garantie de chaque pièce');
+    expect(online).toContain('plus rien à activer à la main avant l\'envoi');
+    expect(online).not.toContain('`Activate warranty`');
     expect(online).toMatch(/jamais à l'extérieur du colis/);
   });
 
