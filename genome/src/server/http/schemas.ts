@@ -1785,6 +1785,29 @@ export const countInBody = body({
   note: text(LOGISTICS_LIMITS.reason),
 });
 
+// ── Admin: packing and shipping (routes/admin/logistics.ts, plan NEXT LOT §3.5.6.8) ─
+
+/** GET /api/admin/logistics/orders: one location (the agent's own, or any for ORBES staff). */
+export const parcelsQuery = z.object({ locationId: queryOptional(uuid) });
+
+export const shipmentParams = z.object({ id: uuid });
+
+/** POST /api/admin/logistics/orders/:id/packing/scan: what the console's decoder read of the card (the body of /verify). */
+export const packingScanBody = verifyBody;
+
+/** POST /api/admin/logistics/orders/:id/packing/check: the checklist's lines ticked, by key. */
+export const packingCheckBody = body({ ticked: z.array(z.string().trim().min(1, 'Required').max(120, 'At most 120 characters')).max(128, 'At most 128 lines') });
+
+/**
+ * POST /api/admin/logistics/orders/:id/ship: the carrier and the tracking number; ORBES staff may declare a value per
+ * order of the parcel, in its currency (the agent never: 403).
+ */
+export const shipParcelBody = body({
+  carrierId: uuid,
+  trackingNumber: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9 -]{2,39}$/, 'A tracking number has 3 to 40 letters and digits'),
+  declaredValues: z.array(z.strictObject({ orderId: uuid, minor: orderAmount.nullable() })).max(10, 'At most 10 orders').optional(),
+});
+
 // ── Admin: the atelier (routes/admin/atelier.ts) ──────────────────────────
 
 /** GET /api/admin/atelier/stock: one model, one location. */

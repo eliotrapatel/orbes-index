@@ -219,7 +219,7 @@ export class WarrantyService {
     productId: string,
     input: ActivateWarrantyInput,
     actor: Actor,
-    opts: { tx?: Db; saleScanId?: string } = {},
+    opts: { tx?: Db; saleScanId?: string; via?: { via: 'ship'; orderId: string } } = {},
   ): Promise<{ warranty: WarrantyRecord; statusChange: StatusChange | null }> {
     const now = this.clock();
     const today = utcDate(now);
@@ -292,6 +292,8 @@ export class WarrantyService {
             ...(pointOfSale ? { retailerId: pointOfSale.id } : {}),
             country,
             ...(opts.saleScanId ? { saleScanId: opts.saleScanId } : {}),
+            // Plan NEXT LOT §3.5.6.8b: started by the parcel's SHIP, for its order.
+            ...(opts.via ? { via: opts.via.via, orderId: opts.via.orderId } : {}),
           },
         },
         tx,

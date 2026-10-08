@@ -38,6 +38,22 @@
  *   POST   /api/admin/logistics/transfers                       OPERATOR        pieces moved between locations
  *   PUT    /api/admin/logistics/minimums                        OPERATOR        a size's minimum at a location (204)
  *   POST   /api/admin/logistics/count-in                        OPERATOR        named pieces enter the stock with their identity
+ *
+ * Packing and shipping (step 5.9, services/logistics.ts and parcels.ts):
+ *
+ *   GET    /api/admin/logistics/orders                          LOGISTICS_READ  To ship and On its way (?locationId=)
+ *   GET    /api/admin/logistics/orders/:id                      LOGISTICS_READ  one parcel (ShippingOrderView: no price,
+ *                                                                               email, account nor release; its carriers)
+ *   POST   /api/admin/logistics/orders/:id/packing              LOGISTICS_ACT   Start packing
+ *   POST   /api/admin/logistics/orders/:id/packing/scan         LOGISTICS_ACT   a card's ORBES CODE scanned (rate group
+ *                                                                               `verify`, as /api/v1/verify)
+ *   PUT    /api/admin/logistics/orders/:id/packing/photo        LOGISTICS_ACT   the photo: registered in media.ts (its
+ *                                                                               image parsers), rate group `media`
+ *   POST   /api/admin/logistics/orders/:id/packing/check        LOGISTICS_ACT   Packed
+ *   POST   /api/admin/logistics/orders/:id/ship                 LOGISTICS_ACT   Ship (declared values: ORBES staff only,
+ *                                                                               403 from the agent)
+ *   POST   /api/admin/logistics/orders/:id/delivered            LOGISTICS_ACT   Mark delivered
+ *   GET    /api/admin/logistics/shipments/:id/photo             LOGISTICS_READ  the packing photo, no-store
  */
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../context.js';
@@ -50,6 +66,12 @@ import {
   createReceptionBody,
   declineCorrectionBody,
   logisticsStockQuery,
+  orderParams,
+  packingCheckBody,
+  packingScanBody,
+  parcelsQuery,
+  shipmentParams,
+  shipParcelBody,
   stockThresholdBody,
   stockTransferBody,
   emptyBody,
@@ -64,7 +86,9 @@ import {
   supplierReturnSentBody,
   updateReceptionBody,
 } from '../../http/schemas.js';
+import { userAgentFamily, userAgentOf } from '../../http/client.js';
 import { adminActor, requireAdmin } from '../../http/sessions.js';
+import type { ScanMeta } from '../../services/verification.js';
 import { safeFilename } from './codes.js';
 import type { AdminRouteDeps } from './index.js';
 
@@ -205,5 +229,57 @@ export const adminLogisticsRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
     const { id } = parse(supplierReturnParams, request.params);
     const b = parse(supplierReturnSentBody, request.body);
     return receptions.supplierReturnSent(id, { carrierId: b.carrierId ?? null, trackingNumber: b.trackingNumber ?? null }, adminActor(request), await scopeOf(request));
+  });
+
+  // ── Packing and shipping (step 5.9) ──────────────────────────────────────
+  app.get('/api/admin/logistics/orders', { config: READ }, async (request) => {
+    const q = parse(parcelsQuery, request.query);
+    return logistics.parcels(await scopeOf(request), q.locationId ? { locationId: q.locationId } : {});
+  });
+
+  app.get('/api/admin/logistics/orders/:id', { config: READ }, async (request) => {
+    const { id } = parse(orderParams, request.params);
+    return logistics.parcel(id, await scopeOf(request));
+  });
+
+  app.post('/api/admin/logistics/orders/:id/packing', { config: ACT }, async (request) => {
+    const { id } = parse(orderParams, request.params);
+    parse(emptyBody, request.body);
+    return logistics.startPacking(id, adminActor(request), await scopeOf(request));
+  });
+
+  app.post('/api/admin/logistics/orders/:id/packing/scan', { config: { ...ACT, rateGroup: 'verify' } }, async (request) => {
+    const { id } = parse(orderParams, request.params);
+    const input = parse(packingScanBody, request.body);
+    const meta: ScanMeta = { ipHash: request.orbes.ipHash, geo: ctx.geo.resolve(request) };
+    const family = userAgentFamily(userAgentOf(request));
+    if (family) meta.userAgentFamily = family;
+    return logistics.scanCard(id, input, adminActor(request), meta, await scopeOf(request));
+  });
+
+  app.post('/api/admin/logistics/orders/:id/packing/check', { config: ACT }, async (request) => {
+    const { id } = parse(orderParams, request.params);
+    return logistics.checkPacked(id, parse(packingCheckBody, request.body), adminActor(request), await scopeOf(request));
+  });
+
+  app.post('/api/admin/logistics/orders/:id/ship', { config: ACT }, async (request) => {
+    const { id } = parse(orderParams, request.params);
+    const b = parse(shipParcelBody, request.body);
+    return logistics.ship(id, { carrierId: b.carrierId, trackingNumber: b.trackingNumber, ...(b.declaredValues ? { declaredValues: b.declaredValues } : {}) }, adminActor(request), await scopeOf(request));
+  });
+
+  app.post('/api/admin/logistics/orders/:id/delivered', { config: ACT }, async (request) => {
+    const { id } = parse(orderParams, request.params);
+    parse(emptyBody, request.body);
+    return logistics.markDelivered(id, adminActor(request), await scopeOf(request));
+  });
+
+  app.get('/api/admin/logistics/shipments/:id/photo', { config: READ }, async (request, reply) => {
+    const { id } = parse(shipmentParams, request.params);
+    const photo = await logistics.photo(id, await scopeOf(request));
+    reply.header('content-type', photo.mime);
+    reply.header('cache-control', 'no-store');
+    reply.header('x-content-type-options', 'nosniff');
+    return reply.send(Buffer.from(photo.bytes.buffer, photo.bytes.byteOffset, photo.bytes.byteLength));
   });
 };

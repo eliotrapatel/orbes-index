@@ -32,7 +32,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
-import { inTransaction, type Db } from '../db/connection.js';
+import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
 import type { JsonObject, StockMovementReason } from '../db/schema.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
 import { conflict, DomainError, notFound, validationError } from '../errors.js';
@@ -571,7 +571,8 @@ export class StockService {
     const from = await knownLocation(this.db, input.fromLocationId);
     const to = await knownLocation(this.db, input.toLocationId);
     if (from === to) throw validationError('A transfer goes to another location.');
-    return inTransaction(this.db, async (tx) => {
+    // It serves the orders waiting at the destination: retried on a deadlock (plan NEXT LOT §3.5.6.7).
+    return inRetriedTransaction(this.db, async (tx) => {
       await lockSku(tx, skuId);
       const now = this.clock();
       const level = await stockLevel(tx, skuId, from);
@@ -597,7 +598,8 @@ export class StockService {
     if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > STOCK_MOVE_MAX) throw validationError(`Correct the count by 1 to ${STOCK_MOVE_MAX} pieces, up or down.`);
     const note = cleanNote(input.note, true);
     const locationId = await knownLocation(this.db, input.locationId);
-    return inTransaction(this.db, async (tx) => {
+    // Up, it serves the orders waiting there: retried on a deadlock (plan NEXT LOT §3.5.6.7).
+    return inRetriedTransaction(this.db, async (tx) => {
       await lockSku(tx, skuId);
       const now = this.clock();
       const level = await stockLevel(tx, skuId, locationId);

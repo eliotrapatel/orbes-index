@@ -95,7 +95,7 @@
  * return their audit entries for it to write after its own (a return's change of the piece's status, LifecycleService,
  * writes its own, last).
  */
-import { inTransaction, type Db } from '../db/connection.js';
+import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
 import {
   ORDER_STATUSES,
   RETURN_OUTCOMES,
@@ -770,14 +770,14 @@ export function benchPayload(b: {
 // ── The changes (inside a transaction) ─────────────────────────────────────
 
 /** An order's row FOR UPDATE (404 ORDER_NOT_FOUND). */
-async function lockOrder(tx: Db, orderId: string): Promise<OrderRow> {
+export async function lockOrder(tx: Db, orderId: string): Promise<OrderRow> {
   const o = await tx.selectFrom('orders').selectAll().where('id', '=', orderId).forUpdate().executeTakeFirst();
   if (!o) throw orderNotFound();
   return o;
 }
 
 /** Update an order and read it back. */
-async function updateOrder(tx: Db, id: string, set: OrderUpdate): Promise<OrderRow> {
+export async function updateOrder(tx: Db, id: string, set: OrderUpdate): Promise<OrderRow> {
   return tx.updateTable('orders').set(set).where('id', '=', id).returningAll().executeTakeFirstOrThrow();
 }
 
@@ -785,7 +785,7 @@ async function updateOrder(tx: Db, id: string, set: OrderUpdate): Promise<OrderR
  * Record one change of an order: its event (the status after it), its journal entry (the order as it stands), and the
  * audit entry the caller writes last. The note and the details are Client Services' words and ids, never the buyer's.
  */
-async function recordChange(
+export async function recordChange(
   tx: Db,
   before: OrderRow | null,
   after: OrderRow,
@@ -823,11 +823,59 @@ async function recordChange(
  * one is available (STOCK), otherwise it waits for supplier stock (AWAITING: no piece to make, no identity reserved;
  * plan NEXT LOT §3.5). Under the SKU's lock.
  */
-async function hold(tx: Db, o: OrderRow, _actor: Actor, _now: Date, _notes: AuditRecordInput[]): Promise<OrderRow> {
+export async function hold(tx: Db, o: OrderRow, _actor: Actor, _now: Date, _notes: AuditRecordInput[]): Promise<OrderRow> {
   if (o.sku_id === null || o.reservation !== null || !ORDER_HOLDING_STATUSES.includes(o.status)) return o;
   await lockSku(tx, o.sku_id);
   const level = await stockLevel(tx, o.sku_id, o.location_id);
   return updateOrder(tx, o.id, { reservation: level.available >= 1 ? 'STOCK' : 'AWAITING' });
+}
+
+/**
+ * The parcel of an order being packed (a shipment PACKING or PACKED with an item for it), cancelled when the order is
+ * (plan NEXT LOT §3.5.6.7): the shipment CANCELLED, this order's item unbound from its piece. The other items keep the
+ * pieces their scans bound: their orders keep them (`orders.product_id`) for the next shipment. Under the order's lock.
+ */
+async function cancelOpenShipment(tx: Db, orderId: string, now: Date): Promise<void> {
+  const open = await tx
+    .selectFrom('shipment_items as i')
+    .innerJoin('shipments as s', 's.id', 'i.shipment_id')
+    .select('s.id')
+    .where('i.order_id', '=', orderId)
+    .where('s.status', 'in', ['PACKING', 'PACKED'])
+    .executeTakeFirst();
+  if (!open) return;
+  const shipment = await tx.selectFrom('shipments').select(['id', 'status', 'packing_started_at']).where('id', '=', open.id).forUpdate().executeTakeFirstOrThrow();
+  if (shipment.status !== 'PACKING' && shipment.status !== 'PACKED') return;
+  await tx.updateTable('shipment_items').set({ product_id: null, scan_event_id: null, scanned_at: null }).where('shipment_id', '=', shipment.id).where('order_id', '=', orderId).execute();
+  const at = now < shipment.packing_started_at ? shipment.packing_started_at : now;
+  await tx.updateTable('shipments').set({ status: 'CANCELLED', cancelled_at: at }).where('id', '=', shipment.id).execute();
+}
+
+/**
+ * An order delivered (plan NEXT LOT §3.5.6.8): its parcel's shipment SHIPPED becomes DELIVERED once every order of the
+ * parcel is (by the agent, by Client Services, or by a registration: `deliverOnRegistration`). Under the order's lock.
+ */
+async function settleShipmentDelivered(tx: Db, orderId: string, now: Date): Promise<void> {
+  const shipped = await tx
+    .selectFrom('shipment_items as i')
+    .innerJoin('shipments as s', 's.id', 'i.shipment_id')
+    .select('s.id')
+    .where('i.order_id', '=', orderId)
+    .where('s.status', '=', 'SHIPPED')
+    .executeTakeFirst();
+  if (!shipped) return;
+  const pending = await tx
+    .selectFrom('shipment_items as i')
+    .innerJoin('orders as o', 'o.id', 'i.order_id')
+    .select('o.id')
+    .where('i.shipment_id', '=', shipped.id)
+    .where('o.status', '=', 'SHIPPED')
+    .where('o.id', '<>', orderId)
+    .executeTakeFirst();
+  if (pending) return;
+  const s = await tx.selectFrom('shipments').select(['status', 'shipped_at']).where('id', '=', shipped.id).forUpdate().executeTakeFirstOrThrow();
+  if (s.status !== 'SHIPPED') return;
+  await tx.updateTable('shipments').set({ status: 'DELIVERED', delivered_at: s.shipped_at && now < s.shipped_at ? s.shipped_at : now }).where('id', '=', shipped.id).execute();
 }
 
 /**
@@ -837,6 +885,9 @@ async function hold(tx: Db, o: OrderRow, _actor: Actor, _now: Date, _notes: Audi
  * `notes`.
  */
 export async function release(tx: Db, o: OrderRow, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+  // Its parcel being packed (plan NEXT LOT §3.5.6.7): the shipment is cancelled and this order's piece unbound from it;
+  // the other orders of the parcel keep their pieces and their packing start, and Start packing opens a new shipment.
+  await cancelOpenShipment(tx, o.id, now);
   if (o.reservation === null) return o;
   if (o.reservation === 'AWAITING') return updateOrder(tx, o.id, { reservation: null });
   await lockSku(tx, o.sku_id!);
@@ -1162,7 +1213,7 @@ export async function orderForShopRequest(tx: Db, requestId: string, actor: Acto
 }
 
 /** What a step requires, checked before the transaction. */
-type CheckedStep =
+export type CheckedStep =
   | { to: 'PAID'; note: string | null }
   | { to: 'SHIPPED'; carrierId: string; trackingNumber: string; declaredValueMinor: number | null; note: string | null }
   | { to: 'DELIVERED'; note: string | null; details?: JsonObject }
@@ -1177,7 +1228,7 @@ type CheckedStep =
       claimHashes?: ReadonlyMap<string, string>;
     };
 
-function checkStep(input: OrderTransitionInput): CheckedStep {
+export function checkStep(input: OrderTransitionInput): CheckedStep {
   if (!input || typeof input !== 'object' || !(ORDER_STATUSES as readonly string[]).includes((input as { to: unknown }).to as string)) {
     throw validationError('Unknown order step.');
   }
@@ -1215,7 +1266,7 @@ function checkReturn(input: OrderReturnInput): { outcome: ReturnOutcome; locatio
 }
 
 /** Move a locked order one step (the step's own rules); returns the order after it. */
-async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
+export async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date, notes: AuditRecordInput[]): Promise<OrderRow> {
   if (!isOrderTransitionAllowed(o.status, s.to)) throw stepNotAllowed(o.status, s.to);
   const extra: AuditRecordInput[] = [];
   let after: OrderRow;
@@ -1250,6 +1301,7 @@ async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date
     case 'DELIVERED':
       after = await updateOrder(tx, o.id, { status: 'DELIVERED', delivered_at: now });
       details = s.details ?? {};
+      await settleShipmentDelivered(tx, o.id, now);
       break;
     case 'CANCELLED': {
       const released = await release(tx, o, actor, now, extra);
@@ -1300,10 +1352,10 @@ export async function deliverOnRegistration(tx: Db, productUuid: string, account
  * Link the piece that fulfils an order (Interconnection: the atelier issues it, or picks one from stock), in the
  * caller's transaction, the order's row and its SKU locked, the piece issued: the order RESERVED or PAID now holds
  * that piece in stock at its location (`reservation` STOCK, `product_id`); `via` says how (`bench`: its piece to make
- * finished, `stock`: a piece picked from the stock). One event, one journal entry and the audit entry returned for the
+ * finished, `stock`: a piece picked from the stock, `scan`: the packing scan of its card, plan NEXT LOT §3.5.6.8). One event, one journal entry and the audit entry returned for the
  * caller to write last (`order.link`).
  */
-export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via: 'bench' | 'stock', actor: Actor, now: Date): Promise<{ order: OrderRow; note: AuditRecordInput }> {
+export async function attachPiece(tx: Db, o: OrderRow, productUuid: string, via: 'bench' | 'stock' | 'scan', actor: Actor, now: Date): Promise<{ order: OrderRow; note: AuditRecordInput }> {
   if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
   if (o.product_id !== null) throw pieceLinked();
   const after = await updateOrder(tx, o.id, { product_id: productUuid, reservation: 'STOCK' });
@@ -2118,7 +2170,9 @@ export class OrderService {
 
   /** One change of an order in its transaction: the order's row first (after what `first` locks), the audit entries last. */
   private async change(id: string, fn: (tx: Db, o: OrderRow, now: Date, notes: AuditRecordInput[]) => Promise<void>, first?: (tx: Db) => Promise<void>): Promise<void> {
-    await inTransaction(this.db, async (tx) => {
+    // A change may serve the orders waiting for a piece (a cancellation, a location or a size changed, a return): retried
+    // on a deadlock or a serialization failure (plan NEXT LOT §3.5.6.7), from the start.
+    await inRetriedTransaction(this.db, async (tx) => {
       if (first) await first(tx);
       const o = await lockOrder(tx, id);
       const now = this.clock();

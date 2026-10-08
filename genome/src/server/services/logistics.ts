@@ -2,7 +2,35 @@
  * Logistics (plan NEXT LOT of 2026-10-07, §3.5.6.6, step 5.8; API §16.33): the stock of every size at each location as
  * the agent and ORBES read it, the corrections the agent proposes and ORBES approves, the transfers and minimums, and the
  * pieces counted in. It sits beside the atelier (services/atelier.ts), whose routes serve the Atelier page until the
- * console moves to Logistics; the packing comes with step 5.9.
+ * console moves to Logistics. The packing and the shipping (step 5.9, §3.5.6.8; the parcels read in services/parcels.ts):
+ *
+ *   to ship        the parcels whose open orders are all paid and hold their piece in stock (`toShip`), the oldest ready
+ *                  first, LATE past the READY delay; those on their way (`onItsWay`); one parcel (`parcel`, the
+ *                  ShippingOrderView: no price, email, account nor release).
+ *   start packing  every open order of the parcel PAID and holding STOCK (409 PACKING_NOT_READY), the first order's
+ *                  address entered (409 ORDER_ADDRESS_MISSING): a shipment PACKING with one item per order, and
+ *                  `orders.packing_started_at` set on each (never cleared: the address and the engraving lock there).
+ *                  Audited `order.pack.start`.
+ *   the scan       the card's ORBES CODE judged as /verify judges it (VerificationService.staffScan, an ADMIN_TEST scan
+ *                  naming the login); AUTHENTIC only (422 PACKING_SCAN_NOT_ORBES); a piece of an unscanned item's model,
+ *                  variant and size (409 PACKING_SCAN_OTHER_PIECE); a piece in stock (counted in or received:
+ *                  `stock_entered_at`; ISSUED or RESOLD, unregistered, in no open order; 409 PACKING_SCAN_NOT_IN_STOCK),
+ *                  or the piece already bound to that order; bound to the item and its order (`order.link` via scan,
+ *                  `order.pack.scan`). Every item scanned: 409 PACKING_SCAN_DONE.
+ *   the photo      JPEG or WebP, at most 1 MiB, EXIF removed (media/image.ts sanitizeImage; 422 PACKING_PHOTO_INVALID),
+ *                  kept on the shipment (never in media_objects, which /api/v1/media serves), replaced until packed;
+ *                  audited `order.pack.photo` with its SHA-256 and size; served to the agent and AUDITOR+, no-store.
+ *   packed         every line ticked, every card scanned, the photo added (422 PACKING_INCOMPLETE): PACKED, the lines'
+ *                  keys kept. Audited `order.pack.check`.
+ *   ship           PACKED (409 ORDER_NOT_PACKED), its address still entered (409 ORDER_ADDRESS_MISSING): every order of the parcel SHIPPED in one transaction with the parcel's
+ *                  carrier and tracking number (an active carrier), and, from ORBES staff only, a declared value per
+ *                  order in its currency (403 FORBIDDEN from the agent); each piece's warranty started if it has none
+ *                  (question 14: the shipping day, no point of sale, `warranty.activate` via ship).
+ *   delivered      every order SHIPPED → DELIVERED (`order.deliver`); the shipment DELIVERED (also when the last of its
+ *                  orders is delivered by a registration, services/orders.ts).
+ *
+ * The parcel's orders are locked first (its first order, then the oldest), then its shipment, then the pieces' SKUs;
+ * the warranties (which audit at once) last.
  *
  *   stock          every offered size of every active model at each location, 0 included, plus a size set aside or an
  *                  inactive model's that still holds something: on hand, reserved, available, waiting (orders AWAITING
@@ -29,13 +57,33 @@
  * A LOGISTICS login reaches only its own locations (`scope`): any row of another answers 404, never 403. No price,
  * total or supplier ever reaches it from here.
  */
+import { createHash } from 'node:crypto';
 import { sql } from 'kysely';
-import { inTransaction, type Db } from '../db/connection.js';
-import type { StockCorrectionStatus } from '../db/schema.js';
+import { inRetriedTransaction, inTransaction, type Db } from '../db/connection.js';
+import { jsonText, type OrderRow, type ShipmentRow, type StockCorrectionStatus } from '../db/schema.js';
 import { conflict, DomainError, forbidden, notFound, validationError } from '../errors.js';
+import { sanitizeImage } from '../media/image.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
-import { serveWaiting } from './orders.js';
+import type { ImageUpload } from './media.js';
+import { attachPiece, checkStep, lockOrder, ORDER_AMOUNT_MAX_MINOR, recordChange, serveWaiting, step, updateOrder } from './orders.js';
+import {
+  checklistOf,
+  onItsWay,
+  openOrders,
+  openShipment,
+  PACKING_PHOTO_MAX_BYTES,
+  parcelKeyOf,
+  parcelOrders,
+  parcelReady,
+  parcelView,
+  toShip,
+  type OnItsWayRow,
+  type ShippingOrderView,
+  type ToShipRow,
+} from './parcels.js';
+import type { ScanMeta, VerificationService, VerifyInput } from './verification.js';
+import type { WarrantyService } from './warranty.js';
 import { skusOf, type LocationScope } from './receptions.js';
 import { assertSkuOffered } from './sizes.js';
 import { knownLocation, lockSku, notAvailable, recordMovement, STOCK_MOVE_MAX, STOCK_NOTE_MAX, stockLevel, type StockLevel, type StockService } from './stock.js';
@@ -61,6 +109,26 @@ const notPending = () => conflict('CORRECTION_NOT_PENDING', 'This correction has
 const notBacked = (pieces: number, named: string) =>
   conflict('STOCK_NOT_BACKED', `Only ${pieces} ${pieces === 1 ? 'piece' : 'pieces'} of ${named} ${pieces === 1 ? 'exists' : 'exist'} to back this count: count a piece in first.`);
 const notCountable = (productId: string) => conflict('PIECE_NOT_COUNTABLE', `${productId} cannot be counted in: it is registered, in an order, retired, or already in stock.`);
+const orderNotFound = () => notFound('Order', 'ORDER_NOT_FOUND');
+const shipmentNotFound = () => notFound('Shipment', 'SHIPMENT_NOT_FOUND');
+const packingNotReady = () => conflict('PACKING_NOT_READY', 'This parcel is not ready: every order in it must be paid and hold its piece.');
+export const addressMissing = () => conflict('ORDER_ADDRESS_MISSING', 'This order has no delivery address yet.');
+const packingNotStarted = () => conflict('PACKING_NOT_STARTED', 'Start packing first.');
+const packingPacked = () => conflict('PACKING_PACKED', 'The parcel is packed: it no longer changes.');
+const scanNotOrbes = () => new DomainError('PACKING_SCAN_NOT_ORBES', 422, 'This card did not verify as an ORBES code. Put it aside and tell ORBES.');
+const scanOtherPiece = (card: string, needed: string) =>
+  conflict('PACKING_SCAN_OTHER_PIECE', `This card is ${card}. This order needs ${needed}: take a piece of that model, variant and size.`);
+const scanNotInStock = (productId: string) =>
+  conflict('PACKING_SCAN_NOT_IN_STOCK', `${productId} is not a piece in stock (it is registered, shipped, in another order, retired, or not counted in). Put it aside and tell ORBES.`);
+const scanDone = () => conflict('PACKING_SCAN_DONE', 'Every piece of this parcel is already scanned.');
+const packingIncomplete = () => new DomainError('PACKING_INCOMPLETE', 422, 'Tick every line, scan every card and add the photo before it is packed.');
+const photoInvalid = () => new DomainError('PACKING_PHOTO_INVALID', 422, 'The photo could not be read: take it again.');
+const notPacked = () => conflict('ORDER_NOT_PACKED', 'Pack the parcel and check it before it ships.');
+const notShipped = () => new DomainError('ORDER_TRANSITION_NOT_ALLOWED', 409, 'This order cannot move to that step.', { detail: 'the parcel has not shipped' });
+const carrierUnknown = () => notFound('Carrier', 'CARRIER_NOT_FOUND');
+/** The statuses a piece in stock has (§3.5.6.8): issued, or back on sale. */
+const IN_STOCK_STATUSES = ['ISSUED', 'RESOLD'] as const;
+const TRACKING_RE = /^[A-Za-z0-9][A-Za-z0-9 -]{2,39}$/;
 
 // ── Views ──────────────────────────────────────────────────────────────────
 
@@ -174,19 +242,48 @@ export interface LogisticsServiceDeps {
   db: Db;
   audit: AuditService;
   stock: Pick<StockService, 'transfer'>;
+  /** The packing scan (step 5.9): the card judged as /verify judges it. */
+  verification?: Pick<VerificationService, 'staffScan'>;
+  /** The warranty started at SHIP (step 5.9, question 14). */
+  warranty?: Pick<WarrantyService, 'activate'>;
   clock?: Clock;
+}
+
+/** The agent's and ORBES's lists of parcels (GET /api/admin/logistics/orders). */
+export interface ParcelsBoard {
+  toShip: ToShipRow[];
+  onItsWay: OnItsWayRow[];
+  /** The scope's locations, the default first (the Location filter). */
+  locations: { id: string; name: string; isDefault: boolean }[];
+}
+
+/** What Ship takes: the carrier and the tracking number; ORBES staff may declare a value per order (never the agent). */
+export interface ShipInput {
+  carrierId: string;
+  trackingNumber: string;
+  declaredValues?: { orderId: string; minor: number | null }[];
+}
+
+/** A card scanned: the piece it named and the parcel after it. */
+export interface PackingScan {
+  piece: { productId: string; sku: SupplierOrderSku };
+  parcel: ShippingOrderView;
 }
 
 export class LogisticsService {
   private readonly db: Db;
   private readonly audit: AuditService;
   private readonly stockService: Pick<StockService, 'transfer'>;
+  private readonly verification: Pick<VerificationService, 'staffScan'> | undefined;
+  private readonly warranty: Pick<WarrantyService, 'activate'> | undefined;
   private readonly clock: Clock;
 
   constructor(deps: LogisticsServiceDeps) {
     this.db = deps.db;
     this.audit = deps.audit;
     this.stockService = deps.stock;
+    this.verification = deps.verification;
+    this.warranty = deps.warranty;
     this.clock = deps.clock ?? systemClock;
   }
 
@@ -306,7 +403,7 @@ export class LogisticsService {
     const delta = input.delta;
     if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > STOCK_MOVE_MAX) throw validationError(`Correct the count by 1 to ${STOCK_MOVE_MAX} pieces, up or down.`);
     const reason = cleanText(input.reason, LOGISTICS_LIMITS.reason, 'Why');
-    const id = await inTransaction(this.db, async (tx) => {
+    const id = await inRetriedTransaction(this.db, async (tx) => {
       const sku = await tx.selectFrom('skus').select('id').where('id', '=', skuId).executeTakeFirst();
       if (!sku) throw skuNotFound();
       const now = this.clock();
@@ -322,7 +419,7 @@ export class LogisticsService {
   async approveCorrection(correctionId: string, actor: Actor): Promise<CorrectionView> {
     assertStaff(actor);
     const id = known(correctionId, correctionNotFound);
-    await inTransaction(this.db, (tx) => this.apply(tx, id, actor, this.clock()));
+    await inRetriedTransaction(this.db, (tx) => this.apply(tx, id, actor, this.clock()));
     return this.correction(id, null);
   }
 
@@ -488,5 +585,303 @@ export class LogisticsService {
       return out;
     });
     return { skuId: sku, productIds, unbacked: await this.unbacked(sku) };
+  }
+
+  // ── Packing and shipping (step 5.9, §3.5.6.8) ────────────────────────────
+
+  /** The parcels to ship and those on their way, at the scope's locations (?locationId= to narrow). */
+  async parcels(scope: LocationScope, filter: { locationId?: string } = {}): Promise<ParcelsBoard> {
+    const loc = filter.locationId === undefined ? undefined : known(filter.locationId, locationNotFound);
+    if (loc !== undefined && !inScope(scope, loc)) throw locationNotFound();
+    const now = this.clock();
+    const locations = (await this.db.selectFrom('stock_locations').select(['id', 'name', 'is_default']).orderBy('is_default', 'desc').orderBy('name').execute())
+      .filter((l) => inScope(scope, l.id))
+      .map((l) => ({ id: l.id, name: l.name, isDefault: l.is_default }));
+    const narrow = loc ? { locationId: loc } : {};
+    return { toShip: await toShip(this.db, scope, now, narrow), onItsWay: await onItsWay(this.db, scope, narrow), locations };
+  }
+
+  /** One parcel, by any of its orders (404 ORDER_NOT_FOUND, also outside the scope). */
+  async parcel(orderId: string, scope: LocationScope): Promise<ShippingOrderView> {
+    const id = known(orderId, orderNotFound);
+    const view = await parcelView(this.db, id, scope, this.clock());
+    if (!view) throw orderNotFound();
+    return view;
+  }
+
+  /**
+   * Start packing: a shipment PACKING for the parcel's open orders, each PAID and holding its piece in stock, the first
+   * order's address entered; `packing_started_at` set on each (kept when set before). Audited `order.pack.start`.
+   * Pressed again while packing, nothing changes.
+   */
+  async startPacking(orderId: string, actor: Actor, scope: LocationScope): Promise<ShippingOrderView> {
+    assertStaff(actor);
+    const key = await this.parcelKey(orderId);
+    await inTransaction(this.db, async (tx) => {
+      const all = await parcelOrders(tx, key, { forUpdate: true });
+      const open = openOrders(all);
+      this.assertParcelScope(all, undefined, scope);
+      const shipment = await openShipment(tx, key, { forUpdate: true });
+      if (shipment && (shipment.status === 'PACKING' || shipment.status === 'PACKED')) return;
+      if (shipment || !parcelReady(open)) throw packingNotReady();
+      const first = all.find((o) => o.id === key)!;
+      if (first.buyer_name === null || first.buyer_address === null) throw addressMissing();
+      const now = this.clock();
+      const created = await tx
+        .insertInto('shipments')
+        .values({ order_id: key, location_id: open[0]!.location_id, status: 'PACKING', packing_started_at: now, packing_started_by: actor.id!, created_at: now })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+      await tx.insertInto('shipment_items').values(open.map((o) => ({ shipment_id: created.id, order_id: o.id }))).execute();
+      const notes: AuditRecordInput[] = [];
+      for (const o of open) {
+        const after = o.packing_started_at === null ? await updateOrder(tx, o.id, { packing_started_at: now < o.paid_at! ? o.paid_at! : now }) : o;
+        notes.push(await recordChange(tx, o, after, 'order.pack.start', { details: { shipmentId: created.id, parcel: key } }, actor, now));
+      }
+      for (const n of notes) await this.audit.record(n, tx);
+    });
+    return this.parcel(key, scope);
+  }
+
+  /**
+   * The packing scan of a card (`input`: what the console's decoder read, the body of /verify), recorded as one staff scan
+   * naming the login (rate group `verify` on its route). See the header for its refusals.
+   */
+  async scanCard(orderId: string, input: VerifyInput, actor: Actor, meta: ScanMeta, scope: LocationScope): Promise<PackingScan> {
+    assertStaff(actor);
+    if (!this.verification) throw new Error('LogisticsService: the packing scan needs the verification service');
+    const key = await this.parcelKey(orderId);
+    // The parcel's scope and step are checked before the scan is recorded, then again under the locks.
+    const view = await this.parcel(key, scope);
+    if (view.shipment === null || !['PACKING', 'PACKED'].includes(view.shipment.status)) throw packingNotStarted();
+    const scanned = await this.verification.staffScan(input, { adminId: actor.id!, meta }, async (tx, scan) => {
+      if (scan.state !== 'AUTHENTIC' || !scan.piece) throw scanNotOrbes();
+      const now = this.clock();
+      // The piece first (as a return, a registration), then the parcel's orders, then the shipment.
+      const p = await tx
+        .selectFrom('products')
+        .select(['id', 'product_id', 'sku_id', 'status', 'ownership_state', 'stock_entered_at'])
+        .where('id', '=', scan.piece.productUuid)
+        .forUpdate()
+        .executeTakeFirstOrThrow();
+      const all = await parcelOrders(tx, key, { forUpdate: true });
+      const shipment = await openShipment(tx, key, { forUpdate: true });
+      if (!shipment || shipment.status === 'SHIPPED') throw packingNotStarted();
+      const items = await tx.selectFrom('shipment_items').selectAll().where('shipment_id', '=', shipment.id).execute();
+      const already = items.find((i) => i.product_id === p.id);
+      if (already) return { productId: p.product_id, skuId: p.sku_id };
+      const unscanned = items.filter((i) => i.product_id === null).map((i) => all.find((o) => o.id === i.order_id)!);
+      if (unscanned.length === 0) throw scanDone();
+      if (shipment.status === 'PACKED') throw packingPacked();
+      // The order of this size that already holds this piece, else one holding none.
+      const sameSku = unscanned.filter((o) => p.sku_id !== null && o.sku_id === p.sku_id);
+      const target = sameSku.find((o) => o.product_id === p.id) ?? sameSku.find((o) => o.product_id === null);
+      if (!target) {
+        const skus = await skusOf(tx, [...(p.sku_id ? [p.sku_id] : []), ...unscanned.map((o) => o.sku_id!).filter(Boolean)]);
+        const card = p.sku_id ? skuWords(skus.get(p.sku_id)!) : p.product_id;
+        const needed = (sameSku[0] ?? unscanned[0])!;
+        if (sameSku.length > 0) throw scanNotInStock(p.product_id);
+        throw scanOtherPiece(card, skuWords(skus.get(needed.sku_id!)!));
+      }
+      if (target.product_id !== p.id) {
+        const openOrder = await tx.selectFrom('orders').select('id').where('product_id', '=', p.id).where('status', 'not in', ['CANCELLED', 'RETURNED']).executeTakeFirst();
+        const owned = await tx.selectFrom('ownership').select('product_id').where('product_id', '=', p.id).where('ended_at', 'is', null).executeTakeFirst();
+        if (p.stock_entered_at === null || !(IN_STOCK_STATUSES as readonly string[]).includes(p.status) || p.ownership_state !== 'UNREGISTERED' || owned || openOrder) {
+          throw scanNotInStock(p.product_id);
+        }
+      }
+      const notes: AuditRecordInput[] = [];
+      let order = target;
+      if (target.product_id !== p.id) {
+        const linked = await attachPiece(tx, target, p.id, 'scan', actor, now);
+        order = linked.order;
+        notes.push(linked.note);
+      }
+      await tx
+        .updateTable('shipment_items')
+        .set({ product_id: p.id, scan_event_id: scan.scanId, scanned_at: now })
+        .where('shipment_id', '=', shipment.id)
+        .where('order_id', '=', target.id)
+        .execute();
+      notes.push(await recordChange(tx, target, order, 'order.pack.scan', { details: { shipmentId: shipment.id, productId: p.id, scanId: scan.scanId } }, actor, now));
+      for (const n of notes) await this.audit.record(n, tx);
+      return { productId: p.product_id, skuId: p.sku_id };
+    });
+    const sku = scanned.skuId ? (await skusOf(this.db, [scanned.skuId])).get(scanned.skuId)! : null;
+    if (!sku) throw scanNotOrbes();
+    return { piece: { productId: scanned.productId, sku }, parcel: await this.parcel(key, scope) };
+  }
+
+  /**
+   * The photo of the packed parcel (JPEG or WebP, at most 1 MiB, EXIF removed), kept on the shipment until replaced, then
+   * erased 14 days after delivery. Audited `order.pack.photo` with its SHA-256 and size, never the bytes.
+   */
+  async setPhoto(orderId: string, upload: ImageUpload, actor: Actor, scope: LocationScope): Promise<ShippingOrderView> {
+    assertStaff(actor);
+    const key = await this.parcelKey(orderId);
+    let clean: ReturnType<typeof sanitizeImage>;
+    try {
+      if (upload.bytes.length > PACKING_PHOTO_MAX_BYTES) throw photoInvalid();
+      clean = sanitizeImage(upload.bytes, upload.mime);
+    } catch (e) {
+      if (e instanceof DomainError && e.code === 'PAYLOAD_TOO_LARGE') throw e;
+      throw photoInvalid();
+    }
+    const sha256 = createHash('sha256').update(clean.bytes).digest('hex');
+    await inTransaction(this.db, async (tx) => {
+      const all = await parcelOrders(tx, key, { forUpdate: true });
+      const shipment = await openShipment(tx, key, { forUpdate: true });
+      this.assertParcelScope(all, shipment, scope);
+      if (!shipment) throw packingNotStarted();
+      if (shipment.status !== 'PACKING') throw packingPacked();
+      const now = this.clock();
+      await tx.updateTable('shipments').set({ photo: clean.bytes, photo_mime: clean.mime, photo_sha256: sha256 }).where('id', '=', shipment.id).execute();
+      const notes: AuditRecordInput[] = [];
+      for (const o of await this.itemOrders(tx, shipment, all)) notes.push(await recordChange(tx, o, o, 'order.pack.photo', { details: { shipmentId: shipment.id, sha256, bytes: clean.bytes.length } }, actor, now));
+      for (const n of notes) await this.audit.record(n, tx);
+    });
+    return this.parcel(key, scope);
+  }
+
+  /** A parcel's packing photo (404 SHIPMENT_NOT_FOUND without one, erased, or outside the scope): ORBES and the agent only. */
+  async photo(shipmentId: string, scope: LocationScope): Promise<{ mime: string; bytes: Uint8Array; sha256: string }> {
+    const id = known(shipmentId, shipmentNotFound);
+    const s = await this.db.selectFrom('shipments').select(['location_id', 'photo', 'photo_mime', 'photo_sha256']).where('id', '=', id).executeTakeFirst();
+    if (!s || !inScope(scope, s.location_id) || s.photo === null) throw shipmentNotFound();
+    return { mime: s.photo_mime!, bytes: s.photo, sha256: s.photo_sha256! };
+  }
+
+  /**
+   * Packed: every line of the checklist ticked (`ticked`, by key; the scan lines by their scans), every card scanned,
+   * the photo added (422 PACKING_INCOMPLETE). Audited `order.pack.check` with the lines' keys.
+   */
+  async checkPacked(orderId: string, input: { ticked: string[] }, actor: Actor, scope: LocationScope): Promise<ShippingOrderView> {
+    assertStaff(actor);
+    const key = await this.parcelKey(orderId);
+    const ticked = new Set(Array.isArray(input?.ticked) ? input.ticked.filter((k): k is string => typeof k === 'string') : []);
+    await inTransaction(this.db, async (tx) => {
+      const all = await parcelOrders(tx, key, { forUpdate: true });
+      const shipment = await openShipment(tx, key, { forUpdate: true });
+      this.assertParcelScope(all, shipment, scope);
+      if (!shipment) throw packingNotStarted();
+      if (shipment.status !== 'PACKING') throw packingPacked();
+      const items = await tx.selectFrom('shipment_items').selectAll().where('shipment_id', '=', shipment.id).execute();
+      const members = await this.itemOrders(tx, shipment, all);
+      const scanned = new Set(items.filter((i) => i.product_id !== null).map((i) => i.order_id));
+      const lines = checklistOf(members, ticked, scanned);
+      if (lines.some((l) => !l.ticked) || shipment.photo === null) throw packingIncomplete();
+      const now = this.clock();
+      await tx
+        .updateTable('shipments')
+        .set({ status: 'PACKED', packed_at: now < shipment.packing_started_at ? shipment.packing_started_at : now, packed_by: actor.id!, checklist: jsonText(lines.map((l) => ({ key: l.key, label: l.label }))) })
+        .where('id', '=', shipment.id)
+        .execute();
+      const notes: AuditRecordInput[] = [];
+      for (const o of members) notes.push(await recordChange(tx, o, o, 'order.pack.check', { details: { shipmentId: shipment.id, keys: lines.map((l) => l.key) } }, actor, now));
+      for (const n of notes) await this.audit.record(n, tx);
+    });
+    return this.parcel(key, scope);
+  }
+
+  /**
+   * Ship the parcel, PACKED (409 ORDER_NOT_PACKED): every order SHIPPED in one transaction with the carrier (an active
+   * one, 404 CARRIER_NOT_FOUND) and the tracking number; ORBES staff (`scope` null) may declare a value per order, the
+   * agent never (403). Each piece whose warranty has not started gets it now (question 14). Audited `order.ship` per
+   * order, `warranty.activate` via ship.
+   */
+  async ship(orderId: string, input: ShipInput, actor: Actor, scope: LocationScope): Promise<ShippingOrderView> {
+    assertStaff(actor);
+    if (scope !== null && input?.declaredValues !== undefined) throw forbidden('Only ORBES staff declare a value.');
+    const key = await this.parcelKey(orderId);
+    if (typeof input?.carrierId !== 'string' || !UUID_RE.test(input.carrierId)) throw carrierUnknown();
+    const tracking = typeof input.trackingNumber === 'string' ? input.trackingNumber.trim() : '';
+    if (!TRACKING_RE.test(tracking)) throw validationError('A tracking number has 3 to 40 letters and digits.');
+    const declared = new Map<string, number | null>();
+    for (const d of input.declaredValues ?? []) {
+      if (typeof d?.orderId !== 'string' || !UUID_RE.test(d.orderId)) throw validationError('A declared value names an order of the parcel.');
+      if (d.minor !== null && (!Number.isInteger(d.minor) || d.minor < 0 || d.minor > ORDER_AMOUNT_MAX_MINOR)) throw validationError('The declared value must be 0 to 1 000 000.00.');
+      declared.set(d.orderId.toLowerCase(), d.minor);
+    }
+    await inRetriedTransaction(this.db, async (tx) => {
+      const all = await parcelOrders(tx, key, { forUpdate: true });
+      const shipment = await openShipment(tx, key, { forUpdate: true });
+      this.assertParcelScope(all, shipment, scope);
+      if (!shipment || shipment.status !== 'PACKED') throw notPacked();
+      // §1.1 (d): Ship refuses a parcel without its delivery address too (Client Services may have cleared it meanwhile).
+      const first = all.find((o) => o.id === key)!;
+      if (first.buyer_name === null || first.buyer_address === null) throw addressMissing();
+      const members = await this.itemOrders(tx, shipment, all);
+      for (const id of declared.keys()) if (!members.some((o) => o.id === id)) throw validationError('A declared value names an order of the parcel.');
+      const carrier = await tx.selectFrom('carriers').select(['id', 'active']).where('id', '=', input.carrierId.toLowerCase()).executeTakeFirst();
+      if (!carrier || !carrier.active) throw carrierUnknown();
+      const items = await tx.selectFrom('shipment_items').selectAll().where('shipment_id', '=', shipment.id).execute();
+      if (items.some((i) => i.product_id === null)) throw notPacked();
+      const now = this.clock();
+      const notes: AuditRecordInput[] = [];
+      for (const o of members) {
+        const s = checkStep({ to: 'SHIPPED', carrierId: carrier.id, trackingNumber: tracking, declaredValueMinor: declared.get(o.id) ?? null });
+        await step(tx, o, s, actor, now, notes);
+      }
+      await tx
+        .updateTable('shipments')
+        .set({ status: 'SHIPPED', carrier_id: carrier.id, tracking_number: tracking, shipped_at: now < shipment.packed_at! ? shipment.packed_at! : now, shipped_by: actor.id! })
+        .where('id', '=', shipment.id)
+        .execute();
+      for (const n of notes) await this.audit.record(n, tx);
+      // Last (the warranties audit at once): each piece without a started warranty gets it, for its order.
+      if (this.warranty) {
+        for (const o of members) {
+          const productId = items.find((i) => i.order_id === o.id)!.product_id!;
+          const w = await tx.selectFrom('warranties').select(['start_date', 'voided_at']).where('product_id', '=', productId).executeTakeFirst();
+          if (w?.start_date || w?.voided_at) continue;
+          await this.warranty.activate(productId, { retailerId: null, country: null }, actor, { tx, via: { via: 'ship', orderId: o.id } });
+        }
+      }
+    });
+    return this.parcel(key, scope);
+  }
+
+  /** The parcel has reached the collector: every order SHIPPED → DELIVERED, the shipment DELIVERED. Audited `order.deliver`. */
+  async markDelivered(orderId: string, actor: Actor, scope: LocationScope): Promise<ShippingOrderView> {
+    assertStaff(actor);
+    const key = await this.parcelKey(orderId);
+    await inTransaction(this.db, async (tx) => {
+      const all = await parcelOrders(tx, key, { forUpdate: true });
+      const shipment = await openShipment(tx, key, { forUpdate: true });
+      this.assertParcelScope(all, shipment, scope);
+      if (!shipment || shipment.status !== 'SHIPPED') throw notShipped();
+      const members = (await this.itemOrders(tx, shipment, all)).filter((o) => o.status === 'SHIPPED');
+      if (members.length === 0) throw notShipped();
+      const now = this.clock();
+      const notes: AuditRecordInput[] = [];
+      for (const o of members) await step(tx, o, { to: 'DELIVERED', note: null, details: { by: 'logistics' } }, actor, now, notes);
+      for (const n of notes) await this.audit.record(n, tx);
+    });
+    return this.parcel(key, scope);
+  }
+
+  /** The key of the parcel of an order (404 ORDER_NOT_FOUND). */
+  private async parcelKey(orderId: string): Promise<string> {
+    const id = known(orderId, orderNotFound);
+    const key = await parcelKeyOf(this.db, id);
+    if (!key) throw orderNotFound();
+    return key;
+  }
+
+  /** 404 ORDER_NOT_FOUND for a parcel outside the scope: its shipment's location, or its open orders'. */
+  private assertParcelScope(all: readonly OrderRow[], shipment: ShipmentRow | undefined, scope: LocationScope): void {
+    const open = openOrders(all);
+    const location = shipment?.location_id ?? (open[0] ?? all[0])?.location_id;
+    if (!location || !inScope(scope, location)) throw orderNotFound();
+  }
+
+  /** The orders of a shipment, as the parcel's locked rows. */
+  private async itemOrders(tx: Db, shipment: ShipmentRow, all: readonly OrderRow[]): Promise<OrderRow[]> {
+    const items = await tx.selectFrom('shipment_items').select('order_id').where('shipment_id', '=', shipment.id).execute();
+    const ids = new Set(items.map((i) => i.order_id));
+    const members = all.filter((o) => ids.has(o.id));
+    // An item's order is always one of the parcel's (its key's or travelling with it); re-read defensively otherwise.
+    for (const id of ids) if (!members.some((o) => o.id === id)) members.push(await lockOrder(tx, id));
+    return members;
   }
 }

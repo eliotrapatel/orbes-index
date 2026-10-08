@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sql } from 'kysely';
 import { DatabaseUrlError, parseDatabaseUrl, redactDatabaseUrl } from '../../src/server/db/url.js';
-import { advisoryXactLock, closeDb, createDb, inTransaction, parseInt8 } from '../../src/server/db/connection.js';
+import { advisoryXactLock, closeDb, createDb, inRetriedTransaction, inTransaction, parseInt8, RETRIED_TRANSACTION_TRIES } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 
@@ -117,6 +117,31 @@ describe('transactions and advisory locks', () => {
       });
     });
     expect((await t.db.selectFrom('collections').select('name').execute()).map((c) => c.name)).toEqual(['JOINED']);
+  });
+
+  it('inRetriedTransaction runs its work again from the start on a deadlock or a serialization failure, at most 3 times, and never inside a caller\'s transaction', async () => {
+    const pgFailure = (code: string) => Object.assign(new Error(`pg ${code}`), { code });
+    let tries = 0;
+    const name = await inRetriedTransaction(t.db, async (trx) => {
+      tries += 1;
+      await trx.insertInto('collections').values({ name: `RETRIED ${tries}` }).execute();
+      if (tries < 3) throw pgFailure(tries === 1 ? '40P01' : '40001');
+      return `RETRIED ${tries}`;
+    });
+    expect([name, tries]).toEqual(['RETRIED 3', 3]);
+    // Each failed try rolled back: only the last one's row is kept.
+    expect((await t.db.selectFrom('collections').select('name').where('name', 'like', 'RETRIED%').execute()).map((c) => c.name)).toEqual(['RETRIED 3']);
+    // Past its tries, the failure is the caller's; any other error at once.
+    let always = 0;
+    await expect(inRetriedTransaction(t.db, async () => { always += 1; throw pgFailure('40P01'); })).rejects.toMatchObject({ code: '40P01' });
+    expect(always).toBe(RETRIED_TRANSACTION_TRIES);
+    let once = 0;
+    await expect(inRetriedTransaction(t.db, async () => { once += 1; throw new Error('boom'); })).rejects.toThrow('boom');
+    expect(once).toBe(1);
+    // Inside a caller's transaction it joins it: no retry of a part.
+    let inner = 0;
+    await expect(t.db.transaction().execute((outer) => inRetriedTransaction(outer, async () => { inner += 1; throw pgFailure('40001'); }))).rejects.toMatchObject({ code: '40001' });
+    expect(inner).toBe(1);
   });
 
   it('advisoryXactLock requires a transaction and validates keys', async () => {

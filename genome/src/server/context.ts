@@ -79,6 +79,7 @@ import { StockService } from './services/stock.js';
 import { SupplierOrderService } from './services/supplier-orders.js';
 import { deriveCardClaimKey, ReceptionService } from './services/receptions.js';
 import { LogisticsService } from './services/logistics.js';
+import { purgePackingPhotos } from './services/parcels.js';
 import { SupplierService } from './services/suppliers.js';
 import { VerificationService } from './services/verification.js';
 import { WarrantyService } from './services/warranty.js';
@@ -296,7 +297,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const sizes = new SizeService({ db, audit, clock });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
-    const logistics = new LogisticsService({ db, audit, stock, clock });
+    const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });
     const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
     const growth = new GrowthService({ db, clock });
     const claimRenewals = new ClaimRenewalService({ db, audit, certificates, revealKey: deriveClaimRevealKey(config), clock });
@@ -406,7 +407,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
 export interface Housekeeping {
   /** Run every job once now (also what the timer does). Errors are logged, never thrown. */
-  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; activity: number; scanHistory: number; liveNetworks: number; careLabels: number }>;
+  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; activity: number; scanHistory: number; liveNetworks: number; careLabels: number; packingPhotos: number }>;
   /** Stop the timer and wait for a running pass to finish. */
   stop(): Promise<void>;
 }
@@ -419,7 +420,8 @@ export interface Housekeeping {
  * SCAN_RETENTION_DAYS is set, purges scan history older than the retention
  * period, and erases the network hashes of the LIVE RELEASES' entries 30 days
  * after their release ended (services/live.ts), and the prepaid labels of the
- * yearly care 30 days after their request ended (services/care.ts), every
+ * yearly care 30 days after their request ended (services/care.ts), and the
+ * packing photos of the parcels past their keeping (services/parcels.ts), every
  * `intervalMs` (default 10 min).
  *
  * The daily statistics and the hourly activity always run before the purge,
@@ -436,7 +438,7 @@ export function startHousekeeping(
   let running: Promise<unknown> | undefined;
 
   const runOnce = async () => {
-    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, activity: 0, scanHistory: 0, liveNetworks: 0, careLabels: 0 };
+    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, activity: 0, scanHistory: 0, liveNetworks: 0, careLabels: 0, packingPhotos: 0 };
     /** Runs one job; false when it failed (logged). */
     const job = async (name: keyof typeof result, fn: () => Promise<number>): Promise<boolean> => {
       try {
@@ -461,6 +463,8 @@ export function startHousekeeping(
     }
     await job('liveNetworks', () => eraseLiveNetworkHashes(ctx.db, ctx.clock()));
     await job('careLabels', () => eraseCareLabels(ctx.db, ctx.clock()));
+    // Plan NEXT LOT §3.5.6.8: the packing photos, 14 days after delivery (or after a return opened in time is closed).
+    await job('packingPhotos', () => purgePackingPhotos(ctx.db, ctx.clock()));
     if (Object.values(result).some((n) => n > 0)) ctx.log.info(result, 'housekeeping');
     return result;
   };

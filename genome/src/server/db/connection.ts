@@ -16,6 +16,7 @@ import { Kysely, PGliteDialect, PostgresDialect, sql } from 'kysely';
 import pg from 'pg';
 import type { PGlite, PGliteOptions } from '@electric-sql/pglite';
 import type { Database } from './schema.js';
+import { isRetryableTxError } from './pg-errors.js';
 import { parseDatabaseUrl } from './url.js';
 import type { Logger } from '../types.js';
 
@@ -128,6 +129,27 @@ export async function closeDb(db: Kysely<any>): Promise<void> {
 export async function inTransaction<T>(db: Db, fn: (trx: Db) => Promise<T>): Promise<T> {
   if (db.isTransaction) return fn(db);
   return db.transaction().execute((trx) => fn(trx));
+}
+
+/** How many times `inRetriedTransaction` runs its work at most. */
+export const RETRIED_TRANSACTION_TRIES = 3;
+
+/**
+ * `inTransaction`, run again from the start (a fresh transaction) when the database aborted it for a deadlock (40P01)
+ * or a serialization failure (40001), at most RETRIED_TRANSACTION_TRIES times. The paths that serve the orders waiting
+ * for stock run in it (plan NEXT LOT §3.5.6.7: a cancellation and a size changed onto the same SKU can meet in reverse
+ * order). Inside a caller's transaction it only joins it: the caller retries, never a part of it. `fn` must only write
+ * to the database (it may run more than once).
+ */
+export async function inRetriedTransaction<T>(db: Db, fn: (trx: Db) => Promise<T>, tries = RETRIED_TRANSACTION_TRIES): Promise<T> {
+  if (db.isTransaction) return fn(db);
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await db.transaction().execute((trx) => fn(trx));
+    } catch (e) {
+      if (attempt >= tries || !isRetryableTxError(e)) throw e;
+    }
+  }
 }
 
 /**

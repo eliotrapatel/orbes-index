@@ -334,6 +334,17 @@ const PROBES: Probe[] = [
   { group: 'logistics-stock', method: 'POST', url: '/api/admin/logistics/transfers', body: INVALID, min: 'OPERATOR' },
   { group: 'logistics-stock', method: 'PUT', url: '/api/admin/logistics/minimums', body: INVALID, min: 'OPERATOR' },
   { group: 'logistics-stock', method: 'POST', url: '/api/admin/logistics/count-in', body: INVALID, min: 'OPERATOR' },
+  // Packing and shipping (plan NEXT LOT §3.5.6.9, step 5.9): the agent and OPERATOR+ act, AUDITOR reads.
+  { group: 'packing', method: 'GET', url: '/api/admin/logistics/orders', min: 'LOGISTICS', roles: LOGISTICS_READ },
+  { group: 'packing', method: 'GET', url: `/api/admin/logistics/orders?locationId=${UUID}`, min: 'LOGISTICS', roles: LOGISTICS_READ },
+  { group: 'packing', method: 'GET', url: `/api/admin/logistics/orders/${UUID}`, min: 'LOGISTICS', roles: LOGISTICS_READ },
+  { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/packing`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/packing/scan`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'packing', method: 'PUT', url: `/api/admin/logistics/orders/${UUID}/packing/photo`, ...PHOTO, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/packing/check`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/ship`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'packing', method: 'POST', url: `/api/admin/logistics/orders/${UUID}/delivered`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'packing', method: 'GET', url: `/api/admin/logistics/shipments/${UUID}/photo`, min: 'LOGISTICS', roles: LOGISTICS_READ },
   { group: 'logistics', method: 'GET', url: '/api/admin/locations', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/locations', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/locations/${UUID}`, body: INVALID, min: 'ADMIN' },
@@ -463,6 +474,7 @@ describe('admin role enforcement', () => {
       'supplier-orders',
       'receptions',
       'logistics-stock',
+      'packing',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
@@ -596,6 +608,15 @@ describe('admin role enforcement', () => {
         `POST /api/admin/logistics/receptions/${UUID}/cards`,
         `POST /api/admin/logistics/receptions/${UUID}/cards-attached`,
         `POST /api/admin/logistics/supplier-returns/${UUID}/sent`,
+        'GET /api/admin/logistics/orders',
+        `GET /api/admin/logistics/orders/${UUID}`,
+        `POST /api/admin/logistics/orders/${UUID}/packing`,
+        `POST /api/admin/logistics/orders/${UUID}/packing/scan`,
+        `PUT /api/admin/logistics/orders/${UUID}/packing/photo`,
+        `POST /api/admin/logistics/orders/${UUID}/packing/check`,
+        `POST /api/admin/logistics/orders/${UUID}/ship`,
+        `POST /api/admin/logistics/orders/${UUID}/delivered`,
+        `GET /api/admin/logistics/shipments/${UUID}/photo`,
       ].sort(),
     );
     // Its own session: me (its role, never its locations' names), a TOTP enrolment started, sign-out.

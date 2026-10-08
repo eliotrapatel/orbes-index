@@ -187,6 +187,33 @@ for (const backend of BACKENDS) {
       expect([reservation, await stockLevel(handle.db, sku, france)]).toEqual(['STOCK', { onHand: 1, reserved: 1, available: 0 }]);
     });
 
+    it('a cancellation and a size changed onto the same SKU meet in reverse lock order: retried, never a deadlock error, the order served once', async () => {
+      // Plan NEXT LOT §3.5.6.7: A's cancellation holds X and wants B's row (serving the queue), while B's size change holds
+      // B and wants X; every path that serves the waiting orders runs in a transaction retried on 40P01 and 40001.
+      for (let round = 0; round < 4; round++) {
+        const x = await skuOf(`8${round}`);
+        await skuOf(`9${round}`);
+        await receive(x, france, 1);
+        const a = await salonOrder();
+        await ctx.services.orders.setTerms(a, { sizeLabel: `8${round}` }, f.admin);
+        const b = await salonOrder();
+        await ctx.services.orders.setTerms(b, { sizeLabel: `9${round}` }, f.admin);
+        expect(await holdings([a, b])).toEqual(['AWAITING', 'STOCK']);
+        clock.advance(MINUTE);
+        expect(
+          await together([
+            () => ctx.services.orders.transition(a, { to: 'CANCELLED', note: 'The client withdrew.' }, f.admin),
+            () => ctx.services.orders.setTerms(b, { sizeLabel: `8${round}` }, f.admin),
+          ]),
+        ).toEqual(['ok', 'ok']);
+        const after = await handle.db.selectFrom('orders').select(['sku_id', 'reservation']).where('id', '=', b).executeTakeFirstOrThrow();
+        expect(after).toEqual({ sku_id: x, reservation: 'STOCK' });
+        expect(await stockLevel(handle.db, x, france)).toEqual({ onHand: 1, reserved: 1, available: 0 });
+        const served = await handle.db.selectFrom('order_events').select('id').where('action', '=', 'order.serve').where('order_id', '=', b).execute();
+        expect(served.length).toBeLessThanOrEqual(1);
+      }
+    });
+
     it('a count up, a transfer in and a cancellation together serve the orders waiting, one piece each, the oldest first, never twice', async () => {
       const sku = await skuOf('72');
       await receive(sku, france, 1);

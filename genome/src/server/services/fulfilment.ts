@@ -93,6 +93,11 @@ export interface TimedOrder {
   readySince: Date | null;
   /** Its piece registered by its buyer. */
   registered: boolean;
+  /**
+   * Plan NEXT LOT §3.5.6.6: its piece ready, but its parcel waits for another of its orders (« an order ships
+   * complete »): never LATE meanwhile. `readySince` is then its parcel's (the latest ready time of its orders).
+   */
+  waitingForParcel?: boolean;
 }
 
 const plusDays = (d: Date, days: number) => new Date(d.getTime() + days * DAY_MS);
@@ -110,7 +115,7 @@ export function orderTiming(o: TimedOrder, delays: OrderAlertDelays, now: Date):
       break;
     case 'PAID':
       since = o.paidAt!;
-      if (o.reservation === 'STOCK') {
+      if (o.reservation === 'STOCK' && !o.waitingForParcel) {
         const ready = o.readySince && o.readySince > o.paidAt! ? o.readySince : o.paidAt!;
         rule = 'READY';
         dueAt = plusDays(ready, delays.readyDays);
@@ -186,6 +191,8 @@ export interface OrderCard {
   piece: string | null;
   shipment: { carrier: string; trackingNumber: string } | null;
   timing: OrderTiming;
+  /** Its piece ready, its parcel waiting for another of its orders (plan NEXT LOT §3.5.6.6): never LATE meanwhile. */
+  waitingForParcel: boolean;
 }
 
 export interface OrderBoardColumn {
@@ -256,6 +263,7 @@ export interface FulfilmentServiceDeps {
 
 interface BoardRow {
   id: string;
+  with_order_id: string | null;
   channel: OrderChannel;
   live_entry_id: string | null;
   drop_id: string | null;
@@ -514,7 +522,7 @@ export class FulfilmentService {
   }
 
   /** A row as the board's card. */
-  private card(r: BoardRow, timing: OrderTiming): OrderCard {
+  private card(r: BoardRow, timing: OrderTiming & { waitingForParcel?: boolean }): OrderCard {
     return {
       id: r.id,
       reference: orderReference(r.id),
@@ -533,19 +541,47 @@ export class FulfilmentService {
       reservation: r.reservation,
       piece: r.piece_reference,
       shipment: r.carrier_name && r.tracking_number ? { carrier: r.carrier_name, trackingNumber: r.tracking_number } : null,
-      timing,
+      timing: { since: timing.since, dueAt: timing.dueAt, rule: timing.rule, late: timing.late },
+      waitingForParcel: timing.waitingForParcel === true,
     };
   }
 
-  /** Each row with its timing; the history read only for the PAID orders holding a piece in stock (their readiness). */
-  private async timed(rows: BoardRow[], delays: OrderAlertDelays, now: Date): Promise<{ row: BoardRow; timing: OrderTiming }[]> {
-    const ready = rows.filter((r) => r.status === 'PAID' && r.reservation === 'STOCK').map((r) => r.id);
-    const events = ready.length ? await this.db.selectFrom('order_events').select(['order_id', 'created_at', 'details']).where('order_id', 'in', ready).orderBy('id').execute() : [];
+  /**
+   * Each row with its timing; the history read only for the PAID orders holding a piece in stock (their readiness). Plan
+   * NEXT LOT §3.5.6.6: the READY rule is read per parcel (an order and the orders travelling with it, its orders left to
+   * ship): ready since the latest ready time of its orders, and never LATE while one of them waits (not paid, or
+   * without its piece).
+   */
+  private async timed(rows: BoardRow[], delays: OrderAlertDelays, now: Date): Promise<{ row: BoardRow; timing: OrderTiming & { waitingForParcel: boolean } }[]> {
+    const readyRows = rows.filter((r) => r.status === 'PAID' && r.reservation === 'STOCK');
+    const keys = [...new Set(readyRows.map((r) => r.with_order_id ?? r.id))];
+    const members = keys.length
+      ? await this.db
+          .selectFrom('orders')
+          .select(['id', 'with_order_id', 'status', 'reservation', 'paid_at', 'reserved_at'])
+          .where((eb) => eb.or([eb('id', 'in', keys), eb('with_order_id', 'in', keys)]))
+          .where('status', 'in', ['RESERVED', 'PAID'])
+          .execute()
+      : [];
+    const holding = members.filter((m) => m.status === 'PAID' && m.reservation === 'STOCK').map((m) => m.id);
+    const events = holding.length ? await this.db.selectFrom('order_events').select(['order_id', 'created_at', 'details']).where('order_id', 'in', holding).orderBy('id').execute() : [];
     const byOrder = new Map<string, { at: Date; details: JsonObject }[]>();
     for (const e of events) byOrder.set(e.order_id, [...(byOrder.get(e.order_id) ?? []), { at: e.created_at, details: e.details }]);
-    return rows.map((r) => ({
-      row: r,
-      timing: orderTiming(
+    const readyAt = (m: { id: string; paid_at: Date | null; reserved_at: Date }) => {
+      const since = readySince(byOrder.get(m.id) ?? []);
+      const paid = m.paid_at ?? m.reserved_at;
+      return since && since > paid ? since : paid;
+    };
+    const parcels = new Map<string, { waiting: boolean; readySince: Date }>();
+    for (const key of keys) {
+      const own = members.filter((m) => (m.with_order_id ?? m.id) === key);
+      const waiting = own.some((m) => !(m.status === 'PAID' && m.reservation === 'STOCK'));
+      const ready = own.filter((m) => m.status === 'PAID' && m.reservation === 'STOCK');
+      parcels.set(key, { waiting, readySince: new Date(Math.max(...ready.map((m) => readyAt(m).getTime()))) });
+    }
+    return rows.map((r) => {
+      const parcel = r.status === 'PAID' && r.reservation === 'STOCK' ? parcels.get(r.with_order_id ?? r.id) : undefined;
+      const timing = orderTiming(
         {
           status: r.status,
           reservedAt: r.reserved_at,
@@ -555,13 +591,15 @@ export class FulfilmentService {
           cancelledAt: r.cancelled_at,
           returnedAt: r.returned_at,
           reservation: r.reservation,
-          readySince: readySince(byOrder.get(r.id) ?? []),
+          readySince: parcel ? parcel.readySince : readySince(byOrder.get(r.id) ?? []),
           registered: Boolean(r.registered),
+          waitingForParcel: parcel?.waiting ?? false,
         },
         delays,
         now,
-      ),
-    }));
+      );
+      return { row: r, timing: { ...timing, waitingForParcel: parcel?.waiting ?? false } };
+    });
   }
 
   /** The orders the filters keep (but `late`, which needs their timing), with what the board and the CSV show; one collector's. */
@@ -577,7 +615,7 @@ export class FulfilmentService {
       .leftJoin('carriers as c', 'c.id', 'o.carrier_id')
       .leftJoin('products as p', 'p.id', 'o.product_id')
       .select([
-        'o.id', 'o.channel', 'o.live_entry_id', 'o.drop_id', 'o.account_id', 'o.model_id', 'o.size_label', 'o.price_minor', 'o.currency', 'o.addons', 'o.surprise',
+        'o.id', 'o.with_order_id', 'o.channel', 'o.live_entry_id', 'o.drop_id', 'o.account_id', 'o.model_id', 'o.size_label', 'o.price_minor', 'o.currency', 'o.addons', 'o.surprise',
         'o.engraving_text', 'o.buyer_name', 'o.buyer_address', 'o.status', 'o.reserved_at', 'o.paid_at', 'o.shipped_at', 'o.delivered_at', 'o.cancelled_at',
         'o.returned_at', 'o.location_id', 'o.reservation', 'o.tracking_number', 'o.declared_value_minor', 'm.name as model_name', 'a.email',
         'l.name as location_name', 'd.title as release_title', 'k.code as sku_code', 'c.name as carrier_name', 'c.tracking_url',

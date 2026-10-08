@@ -22,11 +22,12 @@
  */
 import type { FastifyPluginAsync } from 'fastify';
 import { DomainError } from '../../errors.js';
-import { catalogParams, circlePhotoOrderBody, circlePhotoParams, circlePostParams, emptyBody, galleryImageParams, galleryOrderBody, liveAdminParams, parse, productParams } from '../../http/schemas.js';
+import { catalogParams, circlePhotoOrderBody, circlePhotoParams, circlePostParams, emptyBody, galleryImageParams, galleryOrderBody, liveAdminParams, orderParams, parse, productParams } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
 import { IMAGE_MIME_TYPES, MAX_IMAGE_BYTES, type ImageMime } from '../../media/image.js';
 import type { ImageUpload } from '../../services/media.js';
 import type { AdminRouteDeps } from './index.js';
+import { LOGISTICS_ACT, logisticsScope } from './logistics.js';
 
 /** The body limit of the image routes: the largest image stored (1 MiB). */
 export const MEDIA_BODY_LIMIT_BYTES = MAX_IMAGE_BYTES;
@@ -39,6 +40,14 @@ export const MEDIA_UPLOAD_ROUTES = Object.freeze([
   '/api/admin/circle/posts/:id/photos',
   '/api/admin/live/:id/silhouette',
 ] as const);
+
+/**
+ * The packing photo (plan NEXT LOT §3.5.6.9): a sixth route taking an image, a PUT for the agent and ORBES staff
+ * (`LOGISTICS_ACT`, the login's locations only). Not in MEDIA_UPLOAD_ROUTES: the edge (deploy/vps/Caddyfile) gives
+ * those five POSTs 1 200 KB and every other request 64 KB, and this lot changes nothing on the host (plan §0.3), so a
+ * photo over 64 KB waits for the edge's exception (listed for the owner's hand-over).
+ */
+export const PACKING_PHOTO_UPLOAD_ROUTE = '/api/admin/logistics/orders/:id/packing/photo';
 
 /** A parsed image body: kept apart from a parsed JSON object, which these routes refuse. */
 class ImageBody implements ImageUpload {
@@ -57,7 +66,7 @@ function imageOf(body: unknown): ImageUpload {
 }
 
 export const adminMediaRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { media, catalog, circle, liveConsole } = ctx.services;
+  const { media, catalog, circle, liveConsole, logistics } = ctx.services;
 
   for (const mime of IMAGE_MIME_TYPES) {
     app.addContentTypeParser(mime, { parseAs: 'buffer', bodyLimit: MEDIA_BODY_LIMIT_BYTES }, (_request, body, done) => {
@@ -156,5 +165,13 @@ export const adminMediaRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const { productId } = parse(productParams, request.params);
     parse(emptyBody, request.body);
     return media.removeProductPhoto(productId, adminActor(request));
+  });
+
+  // ── The photo of a packed parcel (plan NEXT LOT §3.5.6.8) ────────────────
+
+  app.put(PACKING_PHOTO_UPLOAD_ROUTE, { bodyLimit: MEDIA_BODY_LIMIT_BYTES, config: { guard: { roles: LOGISTICS_ACT }, rateGroup: 'media' } }, async (request) => {
+    const { id } = parse(orderParams, request.params);
+    const scope = await logisticsScope(ctx, request);
+    return logistics.setPhoto(id, imageOf(request.body), adminActor(request), scope);
   });
 };

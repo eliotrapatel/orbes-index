@@ -12,10 +12,18 @@
  *  - the stock (step 5.8): the agent's rows of its locations without expected, to order nor NO PIECE, ORBES staff's
  *    with them; a correction proposed by the agent (201), approved by an OPERATOR only; pieces counted in by an
  *    OPERATOR; a minimum (204); a transfer.
+ *  - the packing (step 5.9): the agent's orders to ship (no price, email, account nor release), Start packing refused
+ *    without an address, the photo's upload (an image body only: 415 otherwise; bytes that are no photo 422), the photo
+ *    read no-store by the agent and AUDITOR+, never RETAIL; Ship refused from the agent with a declared value (403);
+ *    the scan drawing from the `verify` rate group, as /api/v1/verify.
  */
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
+import { jpegPhoto } from '../support/images.js';
+import { createAccount } from '../support/live.js';
+import { stockPieces } from '../support/fulfil.js';
 import { adminClient, createAdmin, createHarness, errorOf, safeJson, seedCatalog, type Client, type Harness } from './support.js';
 
 type Json = Record<string, any>;
@@ -165,6 +173,72 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       const moved = safeJson(await operator.post('/api/admin/logistics/transfers', { skuId: sku, fromLocationId: logistics, toLocationId: france, quantity: 1 })) as Json;
       expect(moved).toMatchObject({ from: { onHand: 0 }, to: { onHand: 1 } });
       expect((safeJson(await agent.get(`/api/admin/logistics/stock?modelId=${catalog.modelId}`)) as Json).rows[0]).toMatchObject({ onHand: 0, minimum: 2 });
+    });
+  });
+  describe('the packing (step 5.9)', () => {
+    it('lists the agent\'s orders to ship without a price, packs them with the photo as an image body, reads the photo no-store, refuses the agent a declared value', async () => {
+      const catalog = await seedCatalog(h.ctx);
+      const sku = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, catalog.modelId, '56'));
+      const ops = { type: 'admin' as const, id: (await createAdmin(h.ctx, 'OPERATOR')).id };
+      const account = await createAccount(h.t.db);
+      const request = await h.t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: catalog.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+      await h.ctx.services.salon.close(request.id, { note: 'Accepted.', outcome: 'ACCEPTED' }, ops);
+      const id = (await h.t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+      await h.ctx.services.orders.setTerms(id, { sizeLabel: '56', priceMinor: 420_000, currency: 'EUR' }, ops);
+      await h.ctx.services.orders.changeLocation(id, logistics, ops);
+      h.clock.advance(60_000);
+      await h.ctx.services.orders.transition(id, { to: 'PAID' }, ops);
+      const [piece] = await stockPieces(h.ctx, { skuId: sku, locationId: logistics, count: 1, forOrderIds: [id] }, ops);
+      const board = safeJson(await agent.get('/api/admin/logistics/orders')) as Json;
+      expect(board.toShip.map((r: Json) => r.id)).toContain(id);
+      expect(board.locations.map((l: Json) => l.name)).toEqual(['LOGISTICS WAREHOUSE']);
+      for (const word of ['price', 'Minor', 'email', 'account', 'release']) expect(JSON.stringify(board)).not.toContain(word);
+      expect(errorOf(await agent.post(`/api/admin/logistics/orders/${id}/packing`)).code).toBe('ORDER_ADDRESS_MISSING');
+      await operator.request('PUT', `/api/admin/orders/${id}/buyer`, { body: { name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris' } });
+      expect(errorOf(await auditor.post(`/api/admin/logistics/orders/${id}/packing`)).code).toBe('FORBIDDEN');
+      const started = safeJson(await agent.post(`/api/admin/logistics/orders/${id}/packing`)) as Json;
+      expect(started).toMatchObject({ step: 'PACKING', shipTo: { name: 'Ada Martin' }, carriers: expect.arrayContaining([expect.objectContaining({ name: 'Colissimo' })]) });
+      for (const word of ['price', 'Minor', 'email', 'account', 'release']) expect(JSON.stringify(started)).not.toContain(word);
+      expect((await agent.post(`/api/admin/logistics/orders/${id}/packing/scan`, { code: piece!.data })).statusCode).toBe(200);
+      // The photo: an image body only.
+      const url = `/api/admin/logistics/orders/${id}/packing/photo`;
+      const json = await agent.request('PUT', url, { body: { photo: 'x' } });
+      expect([json.statusCode, errorOf(json).code]).toEqual([415, 'UNSUPPORTED_MEDIA_TYPE']);
+      const png = await agent.request('PUT', url, { body: Buffer.from([0x89, 0x50, 0x4e, 0x47]), headers: { 'content-type': 'image/png' } });
+      expect([png.statusCode, errorOf(png).code]).toEqual([415, 'UNSUPPORTED_MEDIA_TYPE']);
+      const garbage = await agent.request('PUT', url, { body: Buffer.from('not a photo at all'), headers: { 'content-type': 'image/jpeg' } });
+      expect([garbage.statusCode, errorOf(garbage).code]).toEqual([422, 'PACKING_PHOTO_INVALID']);
+      const put = await agent.request('PUT', url, { body: Buffer.from(jpegPhoto(16, 12)), headers: { 'content-type': 'image/jpeg' } });
+      expect(put.statusCode).toBe(200);
+      const shipmentId = (safeJson(put) as Json).shipment.id;
+      for (const c of [agent, auditor]) {
+        const res = await c.get(`/api/admin/logistics/shipments/${shipmentId}/photo`);
+        expect([res.statusCode, res.headers['content-type'], res.headers['cache-control']]).toEqual([200, 'image/jpeg', 'no-store']);
+      }
+      const retail = await adminClient(h, 'RETAIL');
+      expect(errorOf(await retail.get(`/api/admin/logistics/shipments/${shipmentId}/photo`)).code).toBe('FORBIDDEN');
+      const keys = (safeJson(put) as Json).checklist.filter((l: Json) => !l.byScan).map((l: Json) => l.key);
+      expect((safeJson(await agent.post(`/api/admin/logistics/orders/${id}/packing/check`, { ticked: keys })) as Json).step).toBe('PACKED');
+      const colissimo = started.carriers.find((c: Json) => c.name === 'Colissimo').id;
+      const priced = await agent.post(`/api/admin/logistics/orders/${id}/ship`, { carrierId: colissimo, trackingNumber: '6A12345678901', declaredValues: [{ orderId: id, minor: 420_000 }] });
+      expect([priced.statusCode, errorOf(priced).code]).toEqual([403, 'FORBIDDEN']);
+      expect((safeJson(await agent.post(`/api/admin/logistics/orders/${id}/ship`, { carrierId: colissimo, trackingNumber: '6A12345678901' })) as Json).step).toBe('SHIPPED');
+      expect((safeJson(await agent.post(`/api/admin/logistics/orders/${id}/delivered`)) as Json).step).toBe('DELIVERED');
+    });
+
+    it('draws the packing scan from the verify rate group, as /api/v1/verify', async () => {
+      const limited = await createHarness({ config: { rateLimits: { verifyPerMinute: 2 } } });
+      try {
+        const c = await adminClient(limited, 'OPERATOR');
+        const scan = () => c.post(`/api/admin/logistics/orders/${randomUUID()}/packing/scan`, { code: 'AAAA' });
+        expect((await scan()).statusCode).toBe(404);
+        expect((await scan()).statusCode).toBe(404);
+        expect((await scan()).statusCode).toBe(429);
+        // The verify budget, not the console's: the console's other routes still answer.
+        expect((await c.get('/api/admin/logistics/orders')).statusCode).toBe(200);
+      } finally {
+        await limited.close();
+      }
     });
   });
 });

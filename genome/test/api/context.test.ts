@@ -121,6 +121,8 @@ describe('housekeeping', () => {
       expect(first.liveNetworks).toBe(0);
       // The yearly care's labels are erased 30 days after their request ended (services/care.ts): none here.
       expect(first.careLabels).toBe(0);
+      // The packing photos are erased 14 days after delivery (plan NEXT LOT §3.5.6.8, services/parcels.ts): none here.
+      expect(first.packingPhotos).toBe(0);
       clock.advance(ctx.config.sessionTtlHours.account * 3_600_000 + 1);
       const r = await hk.runOnce();
       expect(r.sessions).toBe(1);
