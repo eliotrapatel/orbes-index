@@ -58,7 +58,7 @@ import {
   type RenderedArtifact,
 } from '../render/artifact.js';
 import { noopLogger, systemClock, type Actor, type Clock, type Logger } from '../types.js';
-import type { AuditService } from './audit.js';
+import type { AuditRecordInput, AuditService } from './audit.js';
 import type { CategoryRegistry } from './categories.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
 import { productPayload, writeJournal } from './journal.js';
@@ -1310,6 +1310,117 @@ export async function retireReservedIdentity(trx: Db, productUuid: string, reaso
   }
   await writeJournal(trx, [{ type: 'product.retire', entityType: 'product', entityId: row.id, payload: productPayload(row, now) }], now);
   return true;
+}
+
+/** A piece a reception issues (plan NEXT LOT §3.5.6.5): its model and size, its material, batch, claim hash and reception line. */
+export interface StockIdentityInput {
+  modelId: string;
+  skuId: string;
+  material: string;
+  /** The supplier order's reference (SO-7C21A0B9): Default (mine), the production date left empty. */
+  productionBatch: string;
+  /** The scrypt hash of its claim code, computed before the transaction. */
+  claimHash: string;
+  receptionLineId: string;
+}
+
+/**
+ * Issue the ORBES identity of a piece received from a supplier (plan NEXT LOT §3.5.6.5, `issueStockIdentity`), in the
+ * caller's signing transaction (IssuanceService.inSigningTransaction: the signer held), the path of an issue: the next
+ * serial of the year and of the model's category (`allocateSerial`, never reused), the product ISSUED, unregistered,
+ * in its SKU and size, with its material, batch and claim hash, entering the stock now (`stock_entered_at`) from its
+ * reception line (`reception_line_id`); its status history null → ISSUED; its genome; its first code signed
+ * (`signFirst`, issue 1); its warranty, not started; journaled `product.issue`. Returns the row and the audit entry
+ * `product.issue` (with the reception) for the caller to write last.
+ */
+export async function issueStockIdentity(
+  trx: Db,
+  signFirst: (product: ProductRow, now: Date) => Promise<CodeRecord>,
+  input: StockIdentityInput,
+  ctx: { receptionId: string },
+  actor: Actor,
+  now: Date,
+): Promise<{ product: ProductRow; code: CodeRecord; audit: AuditRecordInput }> {
+  if (!trx.isTransaction) throw new Error('issueStockIdentity must run inside a transaction');
+  const model = await trx
+    .selectFrom('models as m')
+    .innerJoin('categories as c', 'c.id', 'm.category_id')
+    .select(['m.category_id', 'c.code', 'c.warranty_months'])
+    .where('m.id', '=', input.modelId)
+    .executeTakeFirst();
+  if (!model) throw notFound('Model', 'MODEL_NOT_FOUND');
+  const sku = await trx.selectFrom('skus').select(['code', 'size_label']).where('id', '=', input.skuId).where('model_id', '=', input.modelId).executeTakeFirst();
+  if (!sku) throw notFound('SKU', 'SKU_NOT_FOUND');
+  const year = now.getUTCFullYear();
+  const categoryIndex = model.category_id;
+  const serial = await allocateSerial(trx, year, categoryIndex);
+  const identity: ProductIdentity = { year, categoryIndex, serial };
+  const packed = packIdentity(identity);
+  const code = model.code.trim();
+  const productId = formatProductId(identity, { byIndex: (i) => (i === categoryIndex ? { code, index: i, name: code } : undefined), byCode: () => undefined });
+  const row = await trx
+    .insertInto('products')
+    .values({
+      product_id: productId,
+      packed_identity: packed,
+      year,
+      category_id: categoryIndex,
+      serial,
+      sku: sku.code,
+      model_id: input.modelId,
+      variant: sku.size_label,
+      material: input.material,
+      production_batch: input.productionBatch,
+      status: 'ISSUED',
+      ownership_state: 'UNREGISTERED',
+      claim_secret_hash: input.claimHash,
+      sku_id: input.skuId,
+      reception_line_id: input.receptionLineId,
+      stock_entered_at: now,
+      created_at: now,
+      updated_at: now,
+    })
+    .returningAll()
+    .executeTakeFirstOrThrow();
+  await trx
+    .insertInto('product_status_history')
+    .values({ product_id: row.id, from_status: null, to_status: 'ISSUED', reason: 'Product issued', actor_type: actor.type, actor_id: actor.id ?? null, created_at: now })
+    .execute();
+  const genome = computeGenome(packed, GENOME_VERSION);
+  await trx
+    .insertInto('genomes')
+    .values({ product_id: row.id, genome_version: genome.version, genome_id: productId, value: genome.value, glyphs: genome.glyphs, pattern: genome.ids.join('·'), fingerprint: genome.fingerprint, created_at: now })
+    .execute();
+  const signed = await signFirst(row, now);
+  await trx.insertInto('warranties').values({ product_id: row.id, duration_months: model.warranty_months, created_at: now, updated_at: now }).execute();
+  await writeJournal(trx, [{ type: 'product.issue', entityType: 'product', entityId: row.id, payload: productPayload(row, now) }], now);
+  return {
+    product: row,
+    code: signed,
+    audit: {
+      actor,
+      action: 'product.issue',
+      targetType: 'product',
+      targetId: productId,
+      details: {
+        productId,
+        packedIdentity: packed,
+        category: code,
+        year,
+        serial,
+        serialAllocated: true,
+        modelId: input.modelId,
+        sku: sku.code,
+        claimSecret: true,
+        genomeFingerprint: genome.fingerprint,
+        codeId: signed.id,
+        issue: signed.issue,
+        keyId: signed.keyId,
+        receptionId: ctx.receptionId,
+        receptionLineId: input.receptionLineId,
+      },
+    },
+  };
 }
 
 /** What the atelier says of a finished piece when it issues its reserved identity. */

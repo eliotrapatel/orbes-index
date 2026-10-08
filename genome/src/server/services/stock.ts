@@ -460,11 +460,24 @@ export interface MovementInput {
   orderId?: string | null;
   productId?: string | null;
   transferId?: string | null;
+  /** RECEIVED only (migration 0036): the reception line whose pieces enter the stock. */
+  receptionLineId?: string | null;
   note?: string | null;
 }
 
 /** A movement as the journal says it (`stock.move`): the ledger's row, its note aside. */
-export function movementPayload(m: { id: number; sku_id: string; location_id: string; delta: number; reason: StockMovementReason; order_id: string | null; product_id: string | null; transfer_id: string | null; created_at: Date }): JsonObject {
+export function movementPayload(m: {
+  id: number;
+  sku_id: string;
+  location_id: string;
+  delta: number;
+  reason: StockMovementReason;
+  order_id: string | null;
+  product_id: string | null;
+  transfer_id: string | null;
+  reception_line_id?: string | null;
+  created_at: Date;
+}): JsonObject {
   return {
     id: m.id,
     skuId: m.sku_id,
@@ -474,6 +487,7 @@ export function movementPayload(m: { id: number; sku_id: string; location_id: st
     orderId: m.order_id,
     productId: m.product_id,
     transferId: m.transfer_id,
+    ...(m.reception_line_id ? { receptionLineId: m.reception_line_id } : {}),
     at: m.created_at.toISOString(),
   };
 }
@@ -490,12 +504,13 @@ export async function recordMovement(tx: Db, m: MovementInput, actor: Actor, now
       order_id: m.orderId ?? null,
       product_id: m.productId ?? null,
       transfer_id: m.transferId ?? null,
+      reception_line_id: m.receptionLineId ?? null,
       note: m.note ?? null,
       actor_type: actor.type,
       actor_id: actor.id ?? null,
       created_at: now,
     })
-    .returning(['id', 'sku_id', 'location_id', 'delta', 'reason', 'order_id', 'product_id', 'transfer_id', 'created_at'])
+    .returning(['id', 'sku_id', 'location_id', 'delta', 'reason', 'order_id', 'product_id', 'transfer_id', 'reception_line_id', 'created_at'])
     .executeTakeFirstOrThrow();
   const id = Number(row.id);
   await writeJournal(tx, [{ type: 'stock.move', entityType: 'stock_movement', entityId: String(id), payload: movementPayload({ ...row, id }) }], now);

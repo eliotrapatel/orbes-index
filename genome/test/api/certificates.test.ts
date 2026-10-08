@@ -14,6 +14,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { LightMyRequestResponse } from 'fastify';
 import { sql } from 'kysely';
 import { createForwardingLogger, loggerOptions } from '../../src/server/http/logging.js';
+import { openText } from '../../src/server/crypto/secretbox.js';
+import { cardAad, deriveCardClaimKey } from '../../src/server/services/receptions.js';
+import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { accountClient, adminClient, createHarness, errorOf, issue, safeJson, seedCatalog, type Catalog, type Client, type Harness } from './support.js';
 
@@ -422,6 +425,33 @@ describe('certificate cards API', () => {
       (e.details.productIds as string[]).includes(c.product.productId),
     );
     expect(audited.at(0)?.details).toMatchObject({ reason: 'CLAIM_CODE_MISMATCH', refused: [b.product.productId] });
+  });
+
+  it('prints the cards of a reception (plan NEXT LOT §3.5.6.5) from their sealed codes, checked like any other; the claim codes never kept in clear, logs included; the sealed copies erased once attached', { timeout: 60_000 }, async () => {
+    const staff: Actor = { type: 'admin', id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'OPERATOR').executeTakeFirstOrThrow()).id };
+    const nord = await h.ctx.services.suppliers.create({ name: 'Maison Nord', currency: 'EUR' }, staff);
+    await h.ctx.services.suppliers.setModelSupplier(catalog.modelId, { supplierId: nord.id }, staff);
+    const sku = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, catalog.modelId, '52'));
+    const location = (await h.ctx.db.selectFrom('stock_locations').select('id').where('name', '=', 'LOGISTICS WAREHOUSE').executeTakeFirstOrThrow()).id;
+    const draft = await h.ctx.services.supplierOrders.addToDraft({ skuId: sku, locationId: location, quantity: 2 }, staff);
+    await h.ctx.services.supplierOrders.updateDraft(draft.id, { lines: [{ skuId: sku, quantity: 2, unitPriceMinor: 9_000 }], expectedOn: '2026-11-02' }, staff);
+    await h.ctx.services.supplierOrders.send(draft.id, staff);
+    const reception = await h.ctx.services.receptions.record(draft.id, { lines: [{ skuId: sku, accepted: 2, rejected: 0 }] }, staff, null);
+    await h.ctx.services.receptions.confirm(reception.id, staff);
+    await h.ctx.services.receptions.issuePending();
+    const key = deriveCardClaimKey(h.ctx.config);
+    const sealed = await h.ctx.db.selectFrom('card_prints').select(['product_id', 'sealed_claim_code']).where('reception_id', '=', reception.id).execute();
+    const codes = sealed.map((c) => openText(key, c.sealed_claim_code!, cardAad(c.product_id)));
+    expect(codes).toHaveLength(2);
+    const res = await operator.post(`/api/admin/logistics/receptions/${reception.id}/cards`, { layout: 'card' });
+    expectAttachment(res, /^application\/pdf$/, /^attachment; filename="ORBES-certificates-\d{4}-\d{2}-\d{2}-2-card\.pdf"$/);
+    let kept = await everythingTheServerKept();
+    for (const code of codes) for (const s of spellings(code)) expect(kept).not.toContain(s);
+    // Attached: no sealed copy left.
+    expect((await operator.post(`/api/admin/logistics/receptions/${reception.id}/cards-attached`)).statusCode).toBe(200);
+    expect(await h.ctx.db.selectFrom('card_prints').select('product_id').where('reception_id', '=', reception.id).where('sealed_claim_code', 'is not', null).execute()).toEqual([]);
+    kept = await everythingTheServerKept();
+    for (const c of sealed) expect(kept).not.toContain(c.sealed_claim_code!);
   });
 
   it('is OPERATOR-only and CSRF-protected', async () => {

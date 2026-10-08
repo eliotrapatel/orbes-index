@@ -8,11 +8,43 @@
  * role from AUDITOR). `logisticsScope` gives a route the login's locations, a set, for LOGISTICS, and null (every
  * location) otherwise; a row of a location outside the scope answers 404, never 403, so other locations are not even
  * confirmed to exist.
+ *
+ * The receptions (step 5.7, services/receptions.ts; API §16.32):
+ *
+ *   GET    /api/admin/logistics/receptions                      LOGISTICS_READ  To confirm, Cards to print, Back to the
+ *                                                                               supplier; Expected for ORBES staff only
+ *   GET    /api/admin/logistics/receptions/supplier-order       LOGISTICS_ACT   ?reference=SO-…: the agent's one way in, the
+ *                                                                               order's lines without a price (404 otherwise)
+ *   GET    /api/admin/logistics/receptions/lines/:id            LOGISTICS_ACT   an open supplier order's lines, no price
+ *   GET    /api/admin/logistics/receptions/:id                  LOGISTICS_READ  one reception
+ *   POST   /api/admin/logistics/receptions                      LOGISTICS_ACT   a delivery counted (TO_CONFIRM)
+ *   PUT    /api/admin/logistics/receptions/:id                  LOGISTICS_ACT   counted again, until confirmed
+ *   POST   /api/admin/logistics/receptions/:id/send-back        OPERATOR        sent back with ORBES's note
+ *   POST   /api/admin/logistics/receptions/:id/confirm          OPERATOR        confirmed: the identities are issued
+ *   POST   /api/admin/logistics/receptions/:id/cards            LOGISTICS_ACT   a run of cards, PDF (no-store); the pieces
+ *                                                                               skipped in `x-orbes-cards-skipped`
+ *   POST   /api/admin/logistics/receptions/:id/cards-attached   LOGISTICS_ACT   every card is with its piece
+ *   POST   /api/admin/logistics/supplier-returns/:id/sent       LOGISTICS_ACT   rejected pieces sent back to the supplier
  */
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../context.js';
 import type { AdminRole } from '../../db/schema.js';
-import { requireAdmin } from '../../http/sessions.js';
+import {
+  createReceptionBody,
+  emptyBody,
+  parse,
+  receptionCardsBody,
+  receptionParams,
+  receptionReferenceQuery,
+  receptionsQuery,
+  sendBackReceptionBody,
+  supplierOrderParams,
+  supplierReturnParams,
+  supplierReturnSentBody,
+  updateReceptionBody,
+} from '../../http/schemas.js';
+import { adminActor, requireAdmin } from '../../http/sessions.js';
+import { safeFilename } from './codes.js';
 import type { AdminRouteDeps } from './index.js';
 
 /** Who acts on the Logistics routes: the agent (its own locations), OPERATOR and ADMIN; never AUDITOR nor RETAIL. */
@@ -35,6 +67,80 @@ export function inLogisticsScope(scope: LogisticsScope, locationId: string): boo
   return scope === null || scope.has(locationId.toLowerCase());
 }
 
-export const adminLogisticsRoutes: FastifyPluginAsync<AdminRouteDeps> = async () => {
-  // The Logistics routes come with steps 5.7 to 5.10.
+const ACT = { guard: { roles: LOGISTICS_ACT } };
+const READ = { guard: { roles: LOGISTICS_READ } };
+const OPERATOR = { guard: { minRole: 'OPERATOR' as const } };
+
+export const adminLogisticsRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
+  const { receptions } = ctx.services;
+  const scopeOf = (request: FastifyRequest) => logisticsScope(ctx, request);
+
+  // ── The receptions (step 5.7) ────────────────────────────────────────────
+  app.get('/api/admin/logistics/receptions', { config: READ }, async (request) => {
+    const q = parse(receptionsQuery, request.query);
+    return receptions.board(await scopeOf(request), q.locationId ? { locationId: q.locationId } : {});
+  });
+
+  app.get('/api/admin/logistics/receptions/supplier-order', { config: ACT }, async (request) => {
+    const { reference } = parse(receptionReferenceQuery, request.query);
+    return receptions.findForReception(reference, await scopeOf(request));
+  });
+
+  app.get('/api/admin/logistics/receptions/lines/:id', { config: ACT }, async (request) => {
+    const { id } = parse(supplierOrderParams, request.params);
+    return receptions.linesFor(id, await scopeOf(request));
+  });
+
+  app.get('/api/admin/logistics/receptions/:id', { config: READ }, async (request) => {
+    const { id } = parse(receptionParams, request.params);
+    return receptions.view(id, await scopeOf(request));
+  });
+
+  app.post('/api/admin/logistics/receptions', { config: ACT }, async (request, reply) => {
+    const { supplierOrderId, ...input } = parse(createReceptionBody, request.body);
+    const r = await receptions.record(supplierOrderId, input, adminActor(request), await scopeOf(request));
+    return reply.code(201).send(r);
+  });
+
+  app.put('/api/admin/logistics/receptions/:id', { config: ACT }, async (request) => {
+    const { id } = parse(receptionParams, request.params);
+    return receptions.update(id, parse(updateReceptionBody, request.body), adminActor(request), await scopeOf(request));
+  });
+
+  app.post('/api/admin/logistics/receptions/:id/send-back', { config: OPERATOR }, async (request) => {
+    const { id } = parse(receptionParams, request.params);
+    return receptions.sendBack(id, parse(sendBackReceptionBody, request.body), adminActor(request));
+  });
+
+  app.post('/api/admin/logistics/receptions/:id/confirm', { config: OPERATOR }, async (request) => {
+    const { id } = parse(receptionParams, request.params);
+    parse(emptyBody, request.body);
+    return receptions.confirm(id, adminActor(request));
+  });
+
+  app.post('/api/admin/logistics/receptions/:id/cards', { config: ACT }, async (request, reply) => {
+    const { id } = parse(receptionParams, request.params);
+    const b = parse(receptionCardsBody, request.body);
+    const out = await receptions.printCards(id, { layout: b.layout, ...(b.run ? { run: b.run } : {}) }, adminActor(request), await scopeOf(request));
+    const file = out.file;
+    reply.header('content-type', file.contentType);
+    reply.header('content-disposition', `attachment; filename="${safeFilename(file.filename)}"`);
+    reply.header('cache-control', 'no-store');
+    reply.header('x-orbes-cards-printed', String(out.printed.length));
+    if (out.skipped.length > 0) reply.header('x-orbes-cards-skipped', out.skipped.map((s) => `${s.productId}:${s.reason}`).join(','));
+    const body = file.body;
+    return reply.send(typeof body === 'string' ? body : Buffer.from(body.buffer, body.byteOffset, body.byteLength));
+  });
+
+  app.post('/api/admin/logistics/receptions/:id/cards-attached', { config: ACT }, async (request) => {
+    const { id } = parse(receptionParams, request.params);
+    parse(emptyBody, request.body);
+    return receptions.cardsAttached(id, adminActor(request), await scopeOf(request));
+  });
+
+  app.post('/api/admin/logistics/supplier-returns/:id/sent', { config: ACT }, async (request) => {
+    const { id } = parse(supplierReturnParams, request.params);
+    const b = parse(supplierReturnSentBody, request.body);
+    return receptions.supplierReturnSent(id, { carrierId: b.carrierId ?? null, trackingNumber: b.trackingNumber ?? null }, adminActor(request), await scopeOf(request));
+  });
 };

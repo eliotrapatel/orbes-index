@@ -11,8 +11,8 @@ import { DomainError } from '../../src/server/errors.js';
 import { KeyService, MemoryKeyProvider, type KeyProvider } from '../../src/server/keys/index.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { CategoryRegistry } from '../../src/server/services/categories.js';
-import { verifyClaimCode } from '../../src/server/services/claim-codes.js';
-import { deriveSku, ISSUE_BATCH_ACTION, IssuanceService, MAX_ISSUE_BATCH, normalizeAuthPolicy, type IssueProductInput } from '../../src/server/services/issuance.js';
+import { hashClaimCode, verifyClaimCode } from '../../src/server/services/claim-codes.js';
+import { deriveSku, ISSUE_BATCH_ACTION, IssuanceService, issueStockIdentity, MAX_ISSUE_BATCH, normalizeAuthPolicy, type IssueProductInput } from '../../src/server/services/issuance.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -862,6 +862,55 @@ describe('IssuanceService: a model with its size type (plan NEXT LOT §3.3)', ()
       ['50', 'MNL-RG-50'],
       ['52', 'MNL-RG-52'],
     ]);
+  });
+});
+
+describe('issueStockIdentity: a piece received from a supplier (plan NEXT LOT §3.5.6.5)', () => {
+  let w: World;
+  let lineId: string;
+  let receptionId: string;
+  let skuId: string;
+  beforeAll(async () => {
+    w = await world();
+    skuId = await ensureSku(w.t.db, w.modelId, '52');
+    const location = await w.t.db.insertInto('stock_locations').values({ name: 'LOGISTICS WAREHOUSE' }).returning('id').executeTakeFirstOrThrow();
+    const supplier = await w.t.db.insertInto('suppliers').values({ name: 'Maison Nord', currency: 'EUR' }).returning('id').executeTakeFirstOrThrow();
+    const order = await w.t.db
+      .insertInto('supplier_orders')
+      .values({ supplier_id: supplier.id, location_id: location.id, status: 'SENT', sent_at: w.clock.now(), currency: 'EUR', expected_on: '2026-06-01' })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    const orderLine = await w.t.db.insertInto('supplier_order_lines').values({ supplier_order_id: order.id, sku_id: skuId, quantity: 2, unit_price_minor: 12_000 }).returning('id').executeTakeFirstOrThrow();
+    const reception = await w.t.db
+      .insertInto('receptions')
+      .values({ supplier_order_id: order.id, location_id: location.id, status: 'CONFIRMED', confirmed_at: w.clock.now() })
+      .returning('id')
+      .executeTakeFirstOrThrow();
+    receptionId = reception.id;
+    lineId = (await w.t.db.insertInto('reception_lines').values({ reception_id: reception.id, sku_id: skuId, supplier_order_line_id: orderLine.id, accepted: 2 }).returning('id').executeTakeFirstOrThrow()).id;
+  });
+  afterAll(() => w.t.close());
+
+  it('issues an ISSUED piece in the stock: its serial, its signed code, its claim code\'s hash, its reception line, its genome, warranty and history; audited with the reception', async () => {
+    const code = 'ABCD-EFGH-JKMN';
+    const hash = await hashClaimCode(code);
+    const out = await w.issuance.inSigningTransaction((trx, signFirst) =>
+      issueStockIdentity(trx, signFirst, { modelId: w.modelId, skuId, material: '925 STERLING SILVER', productionBatch: 'SO-7C21A0B9', claimHash: hash, receptionLineId: lineId }, { receptionId }, admin, w.clock.now()),
+    );
+    expect(out.product).toMatchObject({ product_id: 'O26-J-00001', status: 'ISSUED', ownership_state: 'UNREGISTERED', sku: 'MNL-RG-52', sku_id: skuId, variant: '52', material: '925 STERLING SILVER', production_batch: 'SO-7C21A0B9', reception_line_id: lineId });
+    expect(out.product.stock_entered_at).toEqual(w.clock.now());
+    expect(await verifyClaimCode(code, out.product.claim_secret_hash!)).toBe(true);
+    expect(out.code).toMatchObject({ productId: 'O26-J-00001' });
+    const id = out.product.id;
+    expect(await w.t.db.selectFrom('product_status_history').select(['from_status', 'to_status']).where('product_id', '=', id).execute()).toEqual([{ from_status: null, to_status: 'ISSUED' }]);
+    expect(await w.t.db.selectFrom('genomes').select('genome_id').where('product_id', '=', id).execute()).toEqual([{ genome_id: 'O26-J-00001' }]);
+    expect(await w.t.db.selectFrom('warranties').select('duration_months').where('product_id', '=', id).execute()).toEqual([{ duration_months: 24 }]);
+    expect(await w.t.db.selectFrom('codes').select(['issue', 'status']).where('product_id', '=', id).execute()).toEqual([{ issue: 1, status: 'ACTIVE' }]);
+    expect(await w.t.db.selectFrom('event_journal').select('type').where('entity_id', '=', id).execute()).toEqual([{ type: 'product.issue' }]);
+    expect(out.audit).toMatchObject({ action: 'product.issue', targetType: 'product', targetId: 'O26-J-00001', details: { productId: 'O26-J-00001', receptionId, serialAllocated: true } });
+    expect(JSON.stringify(out.audit)).not.toContain(code);
+    // Outside a transaction: refused.
+    await expect(issueStockIdentity(w.t.db, async () => out.code, { modelId: w.modelId, skuId, material: 'X', productionBatch: 'X', claimHash: hash, receptionLineId: lineId }, { receptionId }, admin, w.clock.now())).rejects.toThrow(/inside a transaction/);
   });
 });
 

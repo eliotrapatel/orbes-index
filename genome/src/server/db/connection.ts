@@ -149,6 +149,8 @@ export const ADVISORY_LOCK = Object.freeze({
   INVOICE_NUMBER: 0x4f52_0401,
   /** The ids pasted back from Shopify (services/shopify.ts), with the product id's hash as its second part. */
   SHOPIFY_PRODUCT: 0x4f52_0501,
+  /** A reception line's identities issued (services/receptions.ts issuePending), with the line id's first 32 bits as its second part. */
+  RECEPTION_LINE: 0x4f52_0601,
 });
 
 /**

@@ -77,6 +77,7 @@ import { purgeScanTokens } from './services/scan-tokens.js';
 import { SessionService } from './services/sessions.js';
 import { StockService } from './services/stock.js';
 import { SupplierOrderService } from './services/supplier-orders.js';
+import { deriveCardClaimKey, ReceptionService } from './services/receptions.js';
 import { SupplierService } from './services/suppliers.js';
 import { VerificationService } from './services/verification.js';
 import { WarrantyService } from './services/warranty.js';
@@ -163,6 +164,8 @@ export interface AppServices {
   suppliers: SupplierService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
   supplierOrders: SupplierOrderService;
+  /** The receptions (plan NEXT LOT §3.5.6.5): a delivery counted by the agent, confirmed by ORBES, its identities issued by a worker, its cards printed. */
+  receptions: ReceptionService;
   /** GROWTH (plan NEXT-NINE, BP-29): what a collector is worth, repeat buying, the funnel from a scan to PALLADIUM, the revenue; reads only. */
   growth: GrowthService;
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code for a piece not registered yet, shown once to staff or sealed for its buyer. */
@@ -202,6 +205,11 @@ export interface ContextOverrides {
   ensureActiveKey?: boolean;
   /** Replace individual services (tests). */
   services?: Partial<AppServices>;
+  /**
+   * The background workers' timers (the receptions' issuing worker, §3.5.6.5). Default: on, except with ORBES_ENV=test,
+   * where tests drive `issuePending` themselves.
+   */
+  timers?: boolean;
 }
 
 export async function createContext(config: AppConfig, overrides: ContextOverrides = {}): Promise<AppContext> {
@@ -285,6 +293,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const sizes = new SizeService({ db, audit, clock });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
+    const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
     const growth = new GrowthService({ db, clock });
     const claimRenewals = new ClaimRenewalService({ db, audit, certificates, revealKey: deriveClaimRevealKey(config), clock });
 
@@ -333,6 +342,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       sizes,
       suppliers,
       supplierOrders,
+      receptions,
       growth,
       claimRenewals,
       ...overrides.services,
@@ -353,6 +363,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       async close() {
         if (closed) return;
         closed = true;
+        await services.receptions.stop();
         if (ownsDb) await closeDb(db);
       },
     };
@@ -377,6 +388,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     // The tiers' grants of the accounts already at PLATINE or PALLADIUM (plan NEXT-NINE, BP-19 T5).
     const grants = await services.tierGrants.prepare();
     if (grants > 0) log.info({ grants }, 'tier grants ready');
+    // The receptions' issuing worker: what the last process left confirmed is issued, then it polls (§3.5.6.5).
+    if (overrides.timers ?? config.env !== 'test') services.receptions.start();
     return ctx;
   } catch (e) {
     if (ownsDb) await closeDb(db).catch(() => {});

@@ -49,6 +49,9 @@ type Probe = { method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; url: string;
 const SELLERS: readonly AdminRole[] = ['RETAIL', 'OPERATOR', 'ADMIN'];
 /** The points of sale: every role but LOGISTICS, ranked with RETAIL (plan NEXT LOT §3.5.6.1). */
 const RETAILER_READERS: readonly AdminRole[] = ['RETAIL', 'AUDITOR', 'OPERATOR', 'ADMIN'];
+/** The Logistics routes (routes/admin/logistics.ts): the agent and OPERATOR+ act; the agent and AUDITOR+ read. */
+const LOGISTICS_ACT: readonly AdminRole[] = ['LOGISTICS', 'OPERATOR', 'ADMIN'];
+const LOGISTICS_READ: readonly AdminRole[] = ['LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'];
 const ROLES = ['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const;
 const allows = (p: Probe, role: AdminRole) => (p.roles ? p.roles.includes(role) : RANK[role] >= RANK[p.min]);
 
@@ -309,6 +312,18 @@ const PROBES: Probe[] = [
   { group: 'shopify', method: 'GET', url: `/api/admin/models/${UUID}/shopify`, min: 'AUDITOR' },
   { group: 'shopify', method: 'PUT', url: `/api/admin/models/${UUID}/shopify`, body: INVALID, min: 'OPERATOR' },
   { group: 'shopify', method: 'GET', url: '/api/admin/shopify/orders.csv?from=2026-11-30&to=2026-11-01', min: 'AUDITOR' },
+  // The receptions (plan NEXT LOT §3.5.6.9, step 5.7): the agent and OPERATOR+ act, AUDITOR reads, OPERATOR confirms.
+  { group: 'receptions', method: 'GET', url: '/api/admin/logistics/receptions', min: 'LOGISTICS', roles: LOGISTICS_READ },
+  { group: 'receptions', method: 'GET', url: '/api/admin/logistics/receptions/supplier-order', min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'receptions', method: 'GET', url: `/api/admin/logistics/receptions/lines/${UUID}`, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'receptions', method: 'GET', url: `/api/admin/logistics/receptions/${UUID}`, min: 'LOGISTICS', roles: LOGISTICS_READ },
+  { group: 'receptions', method: 'POST', url: '/api/admin/logistics/receptions', body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'receptions', method: 'PUT', url: `/api/admin/logistics/receptions/${UUID}`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'receptions', method: 'POST', url: `/api/admin/logistics/receptions/${UUID}/send-back`, body: INVALID, min: 'OPERATOR' },
+  { group: 'receptions', method: 'POST', url: `/api/admin/logistics/receptions/${UUID}/confirm`, body: INVALID, min: 'OPERATOR' },
+  { group: 'receptions', method: 'POST', url: `/api/admin/logistics/receptions/${UUID}/cards`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'receptions', method: 'POST', url: `/api/admin/logistics/receptions/${UUID}/cards-attached`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'receptions', method: 'POST', url: `/api/admin/logistics/supplier-returns/${UUID}/sent`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
   { group: 'logistics', method: 'GET', url: '/api/admin/locations', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/locations', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/locations/${UUID}`, body: INVALID, min: 'ADMIN' },
@@ -436,6 +451,7 @@ describe('admin role enforcement', () => {
       'test-entrants',
       'suppliers',
       'supplier-orders',
+      'receptions',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
@@ -552,7 +568,22 @@ describe('admin role enforcement', () => {
       expect(errorOf(res).code, `${method} ${url}`).toBe('FORBIDDEN');
     }
     const allowed = PROBES.filter((p) => allows(p, 'LOGISTICS')).map((p) => `${p.method} ${p.url.split('?')[0]}`);
-    expect([...new Set(allowed)].sort()).toEqual(['GET /api/admin/auth/me', 'POST /api/admin/auth/password', 'POST /api/admin/auth/totp/enable'].sort());
+    expect([...new Set(allowed)].sort()).toEqual(
+      [
+        'GET /api/admin/auth/me',
+        'POST /api/admin/auth/password',
+        'POST /api/admin/auth/totp/enable',
+        'GET /api/admin/logistics/receptions',
+        'GET /api/admin/logistics/receptions/supplier-order',
+        `GET /api/admin/logistics/receptions/lines/${UUID}`,
+        `GET /api/admin/logistics/receptions/${UUID}`,
+        'POST /api/admin/logistics/receptions',
+        `PUT /api/admin/logistics/receptions/${UUID}`,
+        `POST /api/admin/logistics/receptions/${UUID}/cards`,
+        `POST /api/admin/logistics/receptions/${UUID}/cards-attached`,
+        `POST /api/admin/logistics/supplier-returns/${UUID}/sent`,
+      ].sort(),
+    );
     // Its own session: me (its role, never its locations' names), a TOTP enrolment started, sign-out.
     const me = await agent.get('/api/admin/auth/me');
     expect(me.statusCode).toBe(200);

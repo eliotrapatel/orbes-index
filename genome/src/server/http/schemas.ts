@@ -95,6 +95,7 @@ import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, ORDER_TEXT_LIMITS } from '../
 import { CARRIER_NAME_MAX, LOCATION_ADDRESS_MAX, LOCATION_NAME_MAX, STOCK_MOVE_MAX, STOCK_NOTE_MAX, TRACKING_URL_MAX } from '../services/stock.js';
 import { SUPPLIER_LIMITS } from '../services/suppliers.js';
 import { SUPPLIER_ORDER_LIMITS } from '../services/supplier-orders.js';
+import { RECEPTION_LIMITS } from '../services/receptions.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -1713,6 +1714,46 @@ export const settleSupplierReturnBody = body({
   creditMinor: supplierAmount(SUPPLIER_ORDER_LIMITS.amountMinor).nullable().optional(),
   note: z.preprocess(emptyToNull, text(SUPPLIER_ORDER_LIMITS.returnNote).nullable().optional()),
 }).refine((b) => (b.settlement === 'CREDIT') === (b.creditMinor !== undefined && b.creditMinor !== null), 'A credit carries its amount; a replacement none');
+
+// ── Admin: the receptions (routes/admin/logistics.ts, plan NEXT LOT §3.5.6.5) ─
+
+export const receptionParams = z.object({ id: uuid });
+
+/** GET /api/admin/logistics/receptions: one location (the agent's own, or any for ORBES staff). */
+export const receptionsQuery = z.object({ locationId: queryOptional(uuid) });
+
+/** GET /api/admin/logistics/receptions/supplier-order: the reference from the delivery note (SO-7C21A0B9). */
+export const receptionReferenceQuery = z.object({ reference: z.string().trim().min(1, 'Required').max(40, 'At most 40 characters') });
+
+/** POST /api/admin/logistics/receptions/:id/cards: A4 sheets or one per page, and the run (1 by default). */
+export const receptionCardsBody = body({ layout: z.enum(['card', 'sheet']), run: z.number().int('A whole number').min(1, 'At least 1').max(10_000, 'At most 10000').optional() });
+
+const receptionLine = z.strictObject({
+  skuId: uuid,
+  accepted: whole(0, RECEPTION_LIMITS.pieces, 'pieces'),
+  rejected: whole(0, RECEPTION_LIMITS.pieces, 'pieces'),
+  note: z.preprocess(emptyToNull, text(RECEPTION_LIMITS.lineNote).nullable().optional()),
+});
+const receptionFields = {
+  lines: z.array(receptionLine).max(RECEPTION_LIMITS.lines, `At most ${RECEPTION_LIMITS.lines} lines`),
+  deliveryNote: z.preprocess(emptyToNull, text(RECEPTION_LIMITS.deliveryNote).nullable().optional()),
+  note: z.preprocess(emptyToNull, text(RECEPTION_LIMITS.note).nullable().optional()),
+};
+
+/** POST /api/admin/logistics/receptions: a delivery counted against its supplier order. */
+export const createReceptionBody = body({ supplierOrderId: uuid, ...receptionFields });
+
+/** PUT /api/admin/logistics/receptions/:id: the count again, until ORBES confirms it. */
+export const updateReceptionBody = body(receptionFields);
+
+/** POST /api/admin/logistics/receptions/:id/send-back: why ORBES sends it back. */
+export const sendBackReceptionBody = body({ note: text(RECEPTION_LIMITS.note) });
+
+/** POST /api/admin/logistics/supplier-returns/:id/sent: the carrier and its tracking number, when there are. */
+export const supplierReturnSentBody = optionalBody({
+  carrierId: z.preprocess(emptyToNull, uuid.nullable().optional()),
+  trackingNumber: z.preprocess(emptyToNull, text(40).nullable().optional()),
+});
 
 // ── Admin: the atelier (routes/admin/atelier.ts) ──────────────────────────
 
