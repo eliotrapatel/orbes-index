@@ -178,7 +178,12 @@ body {
   letter-spacing: 0.06em;
   line-height: 1.5;
   text-align: center;
-  vertical-align: 1px;
+  /* Top of the line, then 1 px lower: the badge (14 px, in --font) never enlarges its link's 15 px line, whatever font
+     the system falls back to for Helvetica Neue (Liberation Sans on Linux pushed it 1 px past the line, the ADMIN's
+     sidebar then 2 px past 900). The relative shift moves the badge without changing the line's height. */
+  vertical-align: top;
+  position: relative;
+  top: 1px;
   font-variant-numeric: tabular-nums;
   color: var(--white);
   background: var(--ink);

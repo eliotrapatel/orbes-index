@@ -8,6 +8,7 @@
  *    once; a returned order nets to zero; TRANSFER, RESALE and ADMIN pieces are not counted; a variant takes its main
  *    model's price; a piece without a price counts and adds nothing; currencies are never mixed;
  *  - DELETED accounts are out of lifetime value, repeat buying and COLLECTORS BY VALUE, and in the funnel and revenue;
+ *  - the test entrants' pool is out of the purchases and of every step of the funnel;
  *  - the tiers follow the constant, and a stub ([1, 3, 5]) moves them;
  *  - a GIFT order is never a purchase, and a credit lowers the revenue;
  *  - COLLECTORS BY VALUE: its order, ties by account id, its pages, the sum of its rows equal to the lifetime value's
@@ -334,5 +335,22 @@ describe('GROWTH: the report on fourteen months (services/growth.ts)', () => {
     expect((await growth().collectors({ page: 3 })).items).toEqual([]);
     expect((await growth().collectors({ page: 3 })).total).toBe(27);
     expect(all.reduce((n, c) => n + c.valueMinor, 0)).toBe((await growth().report()).ltv.perCollector.totalMinor);
+  });
+
+  it('leaves the test entrants\' pool out: a pool account created, owning and buying in the window changes no step of the funnel, no lifetime value, repeat buying or COLLECTORS BY VALUE', async () => {
+    const before = await growth().report();
+    const collectors = await growth().collectors();
+    // A pool account (TEST ENTRANTS: a test_entrants row, its creation moved back into the window by a press), with a
+    // piece from elsewhere and a paid SALON order, and a DRAW order of its own.
+    const bot = await f.world.account('2026-04-02', 'FR');
+    await t.db.insertInto('test_entrants').values({ account_id: bot, tier: 3, seniority: 10 }).execute();
+    await f.world.own(bot, await f.world.piece(f.models.halo), 'FIRST_REGISTRATION', '2026-04-03');
+    await f.world.order({ accountId: bot, modelId: f.models.halo, channel: 'SALON', paid: '2026-04-04', total: 120_000, currency: 'EUR' });
+    const after = await growth().report();
+    expect(after.funnel).toEqual(before.funnel);
+    expect(after.ltv).toEqual(before.ltv);
+    expect(after.repeat).toEqual(before.repeat);
+    expect(await growth().collectors()).toEqual(collectors);
+    expect(await growth().collectorValue(bot)).toEqual([]);
   });
 });

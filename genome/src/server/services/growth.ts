@@ -41,6 +41,10 @@
  *     Scans are Analytics' total per UTC month: counted, not people.
  *   - DELETED accounts are left out of lifetime value, repeat buying and COLLECTORS BY VALUE, and kept in the funnel
  *     and the revenue.
+ *   - The test entrants' pool (services/test-entrants.ts: `test-0001@orbes.test`…, a test_entrants row each, kept
+ *     after END TEST, their accounts' creation dates moved back at each test) is left out of the purchases (lifetime
+ *     value, repeat buying, COLLECTORS BY VALUE, the client sheet's value) and of every step of the funnel: they are
+ *     not sign-ups, owners or buyers (`notTestEntrant`).
  */
 import { sql, type RawBuilder } from 'kysely';
 import type { Db } from '../db/connection.js';
@@ -348,6 +352,9 @@ export type LifetimeValue = { currency: string; valueMinor: number }[];
 
 const EXCLUDED = sql.join([...CLUB_EXCLUDED_STATUSES]);
 
+/** The account in `column` is not one of the test entrants' pool (TEST ENTRANTS: never counted by GROWTH). */
+const notTestEntrant = (column: string): RawBuilder<unknown> => sql`NOT EXISTS (SELECT 1 FROM test_entrants te WHERE te.account_id = ${sql.ref(column)})`;
+
 /**
  * Every purchase (the rule in the file header): its account, when, a reference that orders ties, its source, its main
  * model, its currency and value (both NULL: a piece from elsewhere whose model has no price). `account` narrows it.
@@ -363,7 +370,7 @@ function purchases(account?: string): RawBuilder<unknown> {
       JOIN models m ON m.id = o.model_id
       LEFT JOIN (SELECT i.order_id, min(i.currency) AS currency, sum(CASE WHEN i.kind = 'INVOICE' THEN i.total_minor ELSE -i.total_minor END) AS net
                    FROM invoices i ${inv} GROUP BY i.order_id) iv ON iv.order_id = o.id
-     WHERE o.paid_at IS NOT NULL AND o.channel <> 'GIFT' AND o.status NOT IN ('CANCELLED', 'RETURNED') ${own}
+     WHERE o.paid_at IS NOT NULL AND o.channel <> 'GIFT' AND o.status NOT IN ('CANCELLED', 'RETURNED') ${own} AND ${notTestEntrant('o.account_id')}
     UNION ALL
     SELECT w.account_id, w.started_at, w.id,
            CASE WHEN EXISTS (SELECT 1 FROM warranties wa WHERE wa.product_id = w.product_id AND wa.voided_at IS NULL AND (wa.retailer_id IS NOT NULL OR wa.retailer IS NOT NULL))
@@ -375,7 +382,7 @@ function purchases(account?: string): RawBuilder<unknown> {
       JOIN products p ON p.id = w.product_id
       JOIN models m ON m.id = p.model_id
       LEFT JOIN models mm ON mm.id = m.variant_of
-     WHERE w.acquired_via = 'FIRST_REGISTRATION' ${reg}
+     WHERE w.acquired_via = 'FIRST_REGISTRATION' ${reg} AND ${notTestEntrant('w.account_id')}
        AND NOT EXISTS (SELECT 1 FROM orders x WHERE x.product_id = w.product_id AND x.status <> 'CANCELLED' AND (x.account_id = w.account_id OR x.status <> 'RETURNED'))`;
 }
 
@@ -522,29 +529,31 @@ export class GrowthService {
         ),
       };
 
-      // The funnel: each account in the month it first reached each step (DELETED accounts kept).
+      // The funnel: each account in the month it first reached each step (DELETED accounts kept, the test entrants' pool
+      // left out).
       const [scans, accounts, owners, buyers, intervals, clubNow] = [
         await scanMonths(trx, window.from, window.to),
         (await sql<{ month: string; n: number }>`
           SELECT to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM') AS month, count(*)::int AS n FROM accounts
-           WHERE created_at >= ${from} AND created_at < ${to} GROUP BY 1`.execute(trx)).rows,
+           WHERE created_at >= ${from} AND created_at < ${to} AND ${notTestEntrant('accounts.id')} GROUP BY 1`.execute(trx)).rows,
         (await sql<{ month: string; n: number }>`
           SELECT to_char(f AT TIME ZONE 'UTC', 'YYYY-MM') AS month, count(*)::int AS n
-            FROM (SELECT min(started_at) AS f FROM ownership GROUP BY account_id) x
+            FROM (SELECT min(started_at) AS f FROM ownership WHERE ${notTestEntrant('ownership.account_id')} GROUP BY account_id) x
            WHERE f >= ${from} AND f < ${to} GROUP BY 1`.execute(trx)).rows,
         (await sql<{ month: string; n: number }>`
           SELECT to_char(f AT TIME ZONE 'UTC', 'YYYY-MM') AS month, count(*)::int AS n
             FROM (SELECT min(paid_at) AS f FROM orders
                    WHERE paid_at IS NOT NULL AND channel IN ('LIVE', 'DRAW', 'SALON') AND status NOT IN ('CANCELLED', 'RETURNED')
+                     AND ${notTestEntrant('orders.account_id')}
                    GROUP BY account_id) x
            WHERE f >= ${from} AND f < ${to} GROUP BY 1`.execute(trx)).rows,
         // Only the accounts that held enough pieces at some time can have reached PLATINE: the others are not read.
         (await sql<{ account_id: string; started_at: Date; ended_at: Date | null }>`
           SELECT o.account_id, o.started_at, o.ended_at FROM ownership o JOIN products p ON p.id = o.product_id
-           WHERE p.status NOT IN (${EXCLUDED})
+           WHERE p.status NOT IN (${EXCLUDED}) AND ${notTestEntrant('o.account_id')}
              AND o.account_id IN (SELECT o2.account_id FROM ownership o2 JOIN products p2 ON p2.id = o2.product_id
                                    WHERE p2.status NOT IN (${EXCLUDED}) GROUP BY o2.account_id HAVING count(*) >= ${this.thresholds[1]!})`.execute(trx)).rows,
-        await clubMembersByTier(trx, this.thresholds),
+        await clubMembersByTier(trx, this.thresholds, { withoutTestEntrants: true }),
       ];
       const byAccount = new Map<string, { start: Date; end: Date | null }[]>();
       for (const i of intervals) {

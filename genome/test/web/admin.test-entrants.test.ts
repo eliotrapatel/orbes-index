@@ -246,6 +246,12 @@ describe('a press of SEND TEST ENTRANTS and ADD MORE', () => {
     expect(draw({ reservePct: '0', 'tier:palladium': '10' }, { earlyOnly: true })).toBe(early);
     expect(draw({ reservePct: '50', 'tier:platine': '10' }, { earlyOnly: true })).toBeNull();
     expect(draw({ reservePct: '50', 'tier:titane': '0', 'tier:palladium': '10' }, { earlyOnly: true })).toBeNull();
+    // PALLADIUM's window open, PLATINE's not yet (BP-19 T3): only PALLADIUM can reserve, as the server asks.
+    const palladiumOnly = 'Only PALLADIUM’s early access is open: send PALLADIUM test entrants, with a share that reserves.';
+    expect(draw({ reservePct: '50', 'tier:platine': '10' }, { earlyOnly: true, earlyPlatine: false })).toBe(palladiumOnly);
+    expect(draw({ reservePct: '0', 'tier:palladium': '10' }, { earlyOnly: true, earlyPlatine: false })).toBe(palladiumOnly);
+    expect(draw({ reservePct: '50', 'tier:platine': '10', 'tier:palladium': '1' }, { earlyOnly: true, earlyPlatine: false })).toBeNull();
+    expect(draw({ reservePct: '50', 'tier:platine': '10' }, { earlyOnly: true, earlyPlatine: true })).toBeNull();
     expect(live({ seniorityMin: '5', seniorityMax: '3' })).toBe('Seniority runs from 0 to 50 years, from the lower to the higher.');
     expect(live({ seniorityMax: '51' })).toBe('Seniority runs from 0 to 50 years, from the lower to the higher.');
     expect(live({ ageMax: '3651' })).toBe('An account’s age runs from 0 to 3\u2009650 days, from the lower to the higher.');
@@ -289,6 +295,21 @@ describe('a release’s test', () => {
     expect(drawTestStart(d('UPCOMING', '2026-10-07T11:00:00.000Z'), now)).toMatchObject({ open: true, earlyOnly: true });
     expect(drawTestStart(d('UPCOMING', '2026-10-07T12:30:00.000Z'), now)).toMatchObject({ open: false });
     expect(drawTestStart(d('UPCOMING'), now)).toMatchObject({ open: false });
+    // BP-19 T3: PLATINE's own window, opening after PALLADIUM's.
+    const tiered = (platine: string | null) => ({ ...d('UPCOMING', '2026-10-07T11:00:00.000Z'), earlyAccessPlatineOpensAt: platine }) as Parameters<typeof drawTestStart>[0];
+    expect(drawTestStart(tiered('2026-10-07T11:30:00.000Z'), now)).toEqual({
+      open: true,
+      earlyOnly: true,
+      earlyPlatine: true,
+      line: 'The early access is open: the PLATINE and PALLADIUM test entrants set to reserve do so now; entries open to the others at the time above.',
+    });
+    expect(drawTestStart(tiered('2026-10-07T12:30:00.000Z'), now)).toEqual({
+      open: true,
+      earlyOnly: true,
+      earlyPlatine: false,
+      line: 'PALLADIUM’s early access is open: the PALLADIUM test entrants set to reserve do so now, the PLATINE ones at their own time; entries open to the others at the time above.',
+    });
+    expect(drawTestStart(tiered(null), now)).toMatchObject({ open: true, earlyOnly: true, earlyPlatine: false });
     for (const state of ['DRAFT', 'CLOSED', 'DRAWN', 'CANCELLED']) expect(drawTestStart(d(state), now), state).toEqual({ open: false, earlyOnly: false, line: 'A test starts while the draw is open, or during its early access to reserve.' });
     expect(['ROOM', 'LIVE'].map((phase) => liveTestStart({ phase, endedAt: null } as Parameters<typeof liveTestStart>[0]).open)).toEqual([true, true]);
     for (const phase of ['DRAFT', 'HIDDEN', 'ANNOUNCED', 'ENDED', 'CANCELLED']) expect(liveTestStart({ phase, endedAt: null } as Parameters<typeof liveTestStart>[0]).open, phase).toBe(false);
