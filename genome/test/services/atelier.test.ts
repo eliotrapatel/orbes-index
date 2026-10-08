@@ -137,8 +137,11 @@ describe('the atelier (plan LIVE RELEASE+, S2)', () => {
       await atelier().setThreshold({ skuId: s52, locationId: france, minimum: 5 }, admin);
       await atelier().setThreshold({ skuId: s54, locationId: logistics, minimum: 2 }, admin);
       const before = await atelier().stock({ modelId: model });
+      // Every offered size at every location, 0 included (plan NEXT LOT §3.3, step 3.5).
       expect(before.rows.map((r) => [r.sku.sizeLabel, r.location.name, r.onHand, r.reserved, r.available, r.toMake, r.minimum, r.suggestion])).toEqual([
         ['52', 'FRANCE WAREHOUSE', 3, 1, 2, 0, 5, 3],
+        ['52', 'LOGISTICS WAREHOUSE', 0, 0, 0, 0, null, 0],
+        ['54', 'FRANCE WAREHOUSE', 0, 0, 0, 0, null, 0],
         ['54', 'LOGISTICS WAREHOUSE', 0, 0, 0, 0, 2, 2],
       ]);
       expect(before.skus.filter((k) => k.model.id === model).map((k) => k.sizeLabel)).toEqual(['52', '54']);
@@ -163,14 +166,100 @@ describe('the atelier (plan LIVE RELEASE+, S2)', () => {
         expect(await t.db.selectFrom('codes').select('id').where('product_id', '=', b.piece.id).execute()).toEqual([]);
       }
       const after = await atelier().stock({ modelId: model, locationId: france });
-      expect(after.rows.map((r) => [r.sku.sizeLabel, r.toMake, r.suggestion])).toEqual([['52', 2, 1]]);
+      expect(after.rows.map((r) => [r.sku.sizeLabel, r.toMake, r.suggestion])).toEqual([
+        ['52', 2, 1],
+        ['54', 0, 0],
+      ]);
       await rejects(atelier().makeForStock({ skuId: s52, locationId: france, quantity: 51 }, admin), 'VALIDATION_FAILED', 400);
       await rejects(atelier().makeForStock({ skuId: s52, locationId: '00000000-0000-4000-8000-000000000000', quantity: 1 }, admin), 'STOCK_LOCATION_NOT_FOUND', 404);
 
-      // Removed: the row stays while the SKU moved there, without a minimum.
+      // Removed: the row stays, an offered size at 0, without a minimum.
       await atelier().setThreshold({ skuId: s54, locationId: logistics, minimum: null }, admin);
-      expect((await atelier().stock({ modelId: model })).rows.map((r) => r.sku.sizeLabel)).toEqual(['52']);
+      expect((await atelier().stock({ modelId: model, locationId: logistics })).rows.map((r) => [r.sku.sizeLabel, r.minimum])).toEqual([
+        ['52', null],
+        ['54', null],
+      ]);
       expect((await auditsOf(s54, 'stock.threshold')).at(-1)!.details).toEqual({ locationId: logistics, from: 2, to: null });
+    });
+  });
+
+  describe('declared sizes in the stock (plan NEXT LOT §3.3, step 3.5)', () => {
+    const setAside = (modelId: string, skuId: string) => ctx.services.sizes.removeSize(modelId, skuId, admin);
+    const rowsOf = async (modelId: string) =>
+      (await atelier().stock({ modelId })).rows.map((r) => [r.sku.sizeLabel, r.location.name, r.onHand, r.reserved, r.minimum, r.suggestion, r.sku.setAside]);
+
+    it('lists every offered size of an active model at every location at 0, and offers only those sizes in its choices', async () => {
+      const model = await createModel(t.db, 'ARC');
+      await ctx.services.sizes.declare(model, { sizeType: 'RING', ticked: ['50', '52'] }, admin);
+      expect(await rowsOf(model)).toEqual([
+        ['50', 'FRANCE WAREHOUSE', 0, 0, null, 0, false],
+        ['50', 'LOGISTICS WAREHOUSE', 0, 0, null, 0, false],
+        ['52', 'FRANCE WAREHOUSE', 0, 0, null, 0, false],
+        ['52', 'LOGISTICS WAREHOUSE', 0, 0, null, 0, false],
+      ]);
+      // A model with no type: its sizes, as they are, at 0 too.
+      const typeless = await createModel(t.db, 'BAND');
+      await skuOf('7', typeless);
+      expect(await rowsOf(typeless)).toEqual([
+        ['7', 'FRANCE WAREHOUSE', 0, 0, null, 0, false],
+        ['7', 'LOGISTICS WAREHOUSE', 0, 0, null, 0, false],
+      ]);
+    });
+
+    it('keeps a set-aside size only where something remains, marked setAside; it takes no new minimum nor piece to make, and its minimum suggests nothing', async () => {
+      const model = await createModel(t.db, 'CREST');
+      await ctx.services.sizes.declare(model, { sizeType: 'RING', ticked: ['50', '52', '54'] }, admin);
+      const [s50, s52, s54] = (await t.db.selectFrom('skus').select(['id', 'size_label']).where('model_id', '=', model).execute())
+        .sort((a, b) => a.size_label!.localeCompare(b.size_label!))
+        .map((k) => k.id);
+      // 52: two pieces at FRANCE and a minimum of 4 at LOGISTICS, then set aside.
+      await receive(s52!, france, 2);
+      await atelier().setThreshold({ skuId: s52!, locationId: logistics, minimum: 4 }, admin);
+      // 54: counted in and out again (its movements sum to 0), with nothing else, then set aside.
+      await receive(s54!, france, 1);
+      await ctx.services.stock.adjust({ skuId: s54!, locationId: france, delta: -1, note: 'Counted again.' }, admin);
+      expect((await setAside(model, s52!)).outcome).toBe('SET_ASIDE');
+      expect((await setAside(model, s54!)).outcome).toBe('SET_ASIDE');
+      expect(await rowsOf(model)).toEqual([
+        ['50', 'FRANCE WAREHOUSE', 0, 0, null, 0, false],
+        ['50', 'LOGISTICS WAREHOUSE', 0, 0, null, 0, false],
+        ['52', 'FRANCE WAREHOUSE', 2, 0, null, 0, true],
+        // Its minimum stays shown, and no longer suggests anything.
+        ['52', 'LOGISTICS WAREHOUSE', 0, 0, 4, 0, true],
+      ]);
+      const stock = await atelier().stock({ modelId: model });
+      expect(stock.skus.filter((k) => k.model.id === model).map((k) => [k.sizeLabel, k.setAside])).toEqual([['50', false]]);
+
+      const refused = await rejects(atelier().setThreshold({ skuId: s52!, locationId: france, minimum: 2 }, admin), 'SIZE_SET_ASIDE', 409);
+      expect(refused.message).toBe('Size 52 of CREST is set aside. Reinstate it on the model’s page to offer it again.');
+      await rejects(atelier().makeForStock({ skuId: s52!, locationId: france, quantity: 1 }, admin), 'SIZE_SET_ASIDE', 409);
+      expect(await t.db.selectFrom('bench_items').select('id').where('sku_id', '=', s52!).execute()).toEqual([]);
+      // Its minimum is still removed; the row then goes where nothing else remains.
+      await atelier().setThreshold({ skuId: s52!, locationId: logistics, minimum: null }, admin);
+      expect((await rowsOf(model)).filter((r) => r[0] === '52')).toEqual([['52', 'FRANCE WAREHOUSE', 2, 0, null, 0, true]]);
+      // Still corrected and transferred from its own row.
+      await ctx.services.stock.transfer({ skuId: s52!, fromLocationId: france, toLocationId: logistics, quantity: 1 }, admin);
+      expect((await rowsOf(model)).filter((r) => r[0] === '52')).toEqual([
+        ['52', 'FRANCE WAREHOUSE', 1, 0, null, 0, true],
+        ['52', 'LOGISTICS WAREHOUSE', 1, 0, null, 0, true],
+      ]);
+      // Reinstated: offered again, at every location, and a minimum taken again.
+      await ctx.services.sizes.reinstateSize(model, s54!, admin);
+      expect((await rowsOf(model)).filter((r) => r[0] === '54').map((r) => [r[1], r[2], r[6]])).toEqual([
+        ['FRANCE WAREHOUSE', 0, false],
+        ['LOGISTICS WAREHOUSE', 0, false],
+      ]);
+      await atelier().setThreshold({ skuId: s54!, locationId: france, minimum: 1 }, admin);
+      expect(s50).toBeDefined();
+    });
+
+    it('lists an inactive model\'s sizes only where something remains', async () => {
+      const model = await createModel(t.db, 'DUSK');
+      const s50 = await skuOf('50', model);
+      await skuOf('52', model);
+      await receive(s50, logistics, 1);
+      await t.db.updateTable('models').set({ active: false }).where('id', '=', model).execute();
+      expect(await rowsOf(model)).toEqual([['50', 'LOGISTICS WAREHOUSE', 1, 0, null, 0, false]]);
     });
   });
 

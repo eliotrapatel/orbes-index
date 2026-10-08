@@ -16,7 +16,8 @@
  *  - END TEST and the tier program (the next nine, BP-19 T5): PLATINE test entrants' orders carrying their welcome GIFT
  *    order and a credit taken off them, one paid: every order and GIFT order cancelled (the stock back), every credit
  *    given back (a credit left on a cancelled order too), the report 5/5; the grants stay, their credit whole again;
- *  - a LIVE RELEASE end to end: I'LL BE THERE, the line at T0, PRESS, the hold, SECURE, PAY and RELEASE, END TEST;
+ *  - a LIVE RELEASE end to end: I'LL BE THERE, the line at T0, PRESS, the hold, SECURE, PAY and RELEASE, END TEST; a
+ *    size of the release set aside during the test (plan NEXT LOT §3.3): END TEST puts the stock back on its SKU;
  *  - the report's checks find a fault planted; the sweeper resumes a confirmation due after a restart.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -616,6 +617,40 @@ describe('a LIVE RELEASE end to end', () => {
     const removals = await w.h.ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'drop.live.remove').where('target_id', '=', release.id).execute();
     expect(removals.map((r) => r.details)).toEqual(Array.from({ length: 3 }, () => expect.objectContaining({ from: 'CONFIRMED', reason: 'test_ended' })));
     expect((await w.h.ctx.services.liveRoom.frame(release.id))?.room).toMatchObject({ left: 6, held: 0 });
+  });
+
+  it('a size of the release set aside during the test (plan NEXT LOT §3.3): END TEST cancels the orders, their stock back on that SKU, the report 5/5, the size still there and set aside', async () => {
+    const db = w.h.ctx.db;
+    const model = await createModel(db, 'ECLAT');
+    await w.h.ctx.services.sizes.declare(model, { sizeType: 'RING', ticked: ['52', '54'] }, w.f.admin);
+    const sku52 = (await db.selectFrom('skus').select('id').where('model_id', '=', model).where('size_label', '=', '52').executeTakeFirstOrThrow()).id;
+    const france = (await db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    await w.h.ctx.services.stock.adjust({ skuId: sku52, locationId: france, delta: 3, note: 'Counted.' }, w.f.admin);
+    const t0 = new Date(w.h.clock.now().getTime() + 2 * MINUTE);
+    const release = await createLiveRelease(w.f, { modelId: model, opensAt: t0, sizes: [{ label: '52', stock: 3 }] });
+    const run = await w.tests.start(
+      release.id,
+      press(release.id, { titane: 3 }, { behaviour: { payPct: 100, releasePct: 0, missPct: 0, leavePct: 0, holdSeconds: 1.5 }, choices: { size: '52', quantity: 1, addOnsPct: 0 } }),
+      w.f.admin,
+    );
+    await drive(w, 0, 500, release.id);
+    w.h.clock.set(t0);
+    await drive(w, 20_000, 500, release.id);
+    const orders = await db.selectFrom('orders').select(['status', 'sku_id', 'location_id', 'reservation']).where('drop_id', '=', release.id).execute();
+    expect(orders).toHaveLength(3);
+    expect(orders.every((o) => o.status === 'RESERVED' && o.sku_id === sku52 && o.reservation === 'STOCK')).toBe(true);
+    const location = orders[0]!.location_id;
+    expect((await stockLevel(db, sku52, location)).available).toBe(0);
+    // Set aside while the test's orders hold it: used, so never deleted.
+    expect((await w.h.ctx.services.sizes.removeSize(model, sku52, w.f.admin)).outcome).toBe('SET_ASIDE');
+
+    const ended = await w.tests.end(run.id, testPhrase(release.id, true), w.f.admin);
+    expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([['ONE_ENTRY', true], ['ORDER', true], ['ONE_PLACE', true], ['STOCK', true], ['ORDERS', true]]);
+    expect((await db.selectFrom('orders').select('status').where('drop_id', '=', release.id).execute()).every((o) => o.status === 'CANCELLED')).toBe(true);
+    expect(await stockLevel(db, sku52, location)).toEqual({ onHand: 3, reserved: 0, available: 3 });
+    const sku = await db.selectFrom('skus').select(['id', 'set_aside_at']).where('id', '=', sku52).executeTakeFirstOrThrow();
+    expect(sku.set_aside_at).not.toBeNull();
+    expect(await db.selectFrom('skus').select('id').where('model_id', '=', model).execute()).toHaveLength(2);
   });
 
   it('by hand: a bot on its turn secures and pays now (CONFIRM); RELEASE needs a held piece, and a draw\'s place is never released', async () => {

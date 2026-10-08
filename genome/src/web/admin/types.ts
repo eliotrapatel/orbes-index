@@ -2457,6 +2457,8 @@ export interface SkuRef {
   code: string;
   model: { id: string; name: string };
   sizeLabel: string | null;
+  /** Set aside in the Catalogue (plan NEXT LOT §3.3): no longer offered; listed in the stock only where something remains. */
+  setAside: boolean;
 }
 
 export interface StockLevel {

@@ -7,7 +7,11 @@
  *                  being made for the stock there, its minimum when one is set (`sku_thresholds`, L2) and what that
  *                  minimum suggests: enough pieces to make to reach it (minimum − available − being made), which the
  *                  console confirms (`makeForStock`: pieces to make for the stock, each with its ORBES identity
- *                  reserved at once, L6). Transfers and counts corrected are StockService's.
+ *                  reserved at once, L6). Transfers and counts corrected are StockService's. Since plan NEXT LOT §3.3
+ *                  (step 3.5): every offered size of an active model at every location, 0 included; a size set aside
+ *                  (services/sizes.ts) only where something remains (stock on hand, a reservation, a piece being made,
+ *                  a minimum), marked `setAside`. A set-aside size takes no new minimum and no piece to make (409
+ *                  SIZE_SET_ASIDE), and its minimum suggests nothing; it is still corrected and transferred.
  *   pieces to make each for an order (made to order, services/orders.ts) or for the stock, of a SKU, for a location
  *                  and a release: TO_MAKE → IN_PROGRESS (`start`) → DONE (`done`); a piece to make for the stock may
  *                  be CANCELLED (`cancel`; an order's goes with the order). Listed per release, model and size, with
@@ -45,6 +49,7 @@ import { generateClaimCode, hashClaimCode } from './claim-codes.js';
 import { confirmReservedIdentity, RESERVED_MATERIAL_PENDING, reserveIdentity, retireReservedIdentity, type IssuanceService } from './issuance.js';
 import { writeJournal } from './journal.js';
 import { attachPiece, benchPayload, ORDER_HOLDING_STATUSES, orderReference, release, type OrderService, type OrderView } from './orders.js';
+import { assertSkuOffered } from './sizes.js';
 import { knownLocation, lockSku, recordMovement, STOCK_MOVE_MAX, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -99,6 +104,8 @@ export interface SkuView {
   code: string;
   model: { id: string; name: string };
   sizeLabel: string | null;
+  /** Set aside in the Catalogue (plan NEXT LOT §3.3): no longer offered; listed only where something remains. */
+  setAside: boolean;
 }
 
 /** One row of the stock: a SKU at a location. */
@@ -112,13 +119,13 @@ export interface AtelierStockRow {
   toMake: number;
   /** Its minimum (L2), or null. */
   minimum: number | null;
-  /** What the minimum suggests making (suggestedPieces). */
+  /** What the minimum suggests making (suggestedPieces); 0 for a size set aside, whose minimum no longer counts. */
   suggestion: number;
 }
 
 export interface AtelierStock {
   rows: AtelierStockRow[];
-  /** Every SKU and every location: the choices of a threshold, a transfer, a count. */
+  /** Every offered SKU (a set-aside one is corrected and transferred from its own row) and every location: the choices of a threshold, a transfer, a count. */
   skus: SkuView[];
   locations: { id: string; name: string; isDefault: boolean }[];
 }
@@ -245,6 +252,7 @@ interface BenchRow extends BenchItemRow {
   signed: boolean;
   sku_code: string;
   size_label: string | null;
+  set_aside_at: Date | null;
   model_id: string;
   model_name: string;
   location_name: string;
@@ -272,8 +280,10 @@ export class AtelierService {
   // ── The stock ────────────────────────────────────────────────────────────
 
   /**
-   * The stock per SKU and location: every pair that moved, is reserved, has a minimum or pieces being made for it, by
-   * model, size and location; narrowed to a model or a location.
+   * The stock per SKU and location (plan NEXT LOT §3.3, step 3.5): every offered size of an active model at every
+   * location, 0 included, and every other pair that moved, is reserved, has a minimum or pieces being made for it, kept
+   * only where something remains (on hand other than 0, reserved, being made, a minimum): a size set aside, an inactive
+   * model's. By model, size and location; narrowed to a model or a location.
    */
   async stock(filter: { modelId?: string; locationId?: string } = {}): Promise<AtelierStock> {
     const rows = await sql<{
@@ -287,6 +297,7 @@ export class AtelierService {
       model_id: string;
       model: string;
       size_label: string | null;
+      set_aside: boolean;
       location: string;
     }>`
       WITH moved AS (SELECT sku_id, location_id, sum(delta)::int AS on_hand FROM stock_movements GROUP BY sku_id, location_id),
@@ -294,9 +305,12 @@ export class AtelierService {
            made AS (SELECT sku_id, location_id, count(*)::int AS to_make FROM bench_items
                      WHERE order_id IS NULL AND status IN ('TO_MAKE', 'IN_PROGRESS') GROUP BY sku_id, location_id),
            pairs AS (SELECT sku_id, location_id FROM moved UNION SELECT sku_id, location_id FROM held
-                     UNION SELECT sku_id, location_id FROM sku_thresholds UNION SELECT sku_id, location_id FROM made)
+                     UNION SELECT sku_id, location_id FROM sku_thresholds UNION SELECT sku_id, location_id FROM made
+                     UNION SELECT k.id, l.id FROM skus k JOIN models m ON m.id = k.model_id CROSS JOIN stock_locations l
+                            WHERE k.set_aside_at IS NULL AND m.active)
       SELECT p.sku_id, p.location_id, coalesce(m.on_hand, 0) AS on_hand, coalesce(h.reserved, 0) AS reserved, t.minimum,
-             coalesce(b.to_make, 0) AS to_make, k.code, k.model_id, md.name AS model, k.size_label, l.name AS location
+             coalesce(b.to_make, 0) AS to_make, k.code, k.model_id, md.name AS model, k.size_label,
+             (k.set_aside_at IS NOT NULL) AS set_aside, l.name AS location
         FROM pairs p
         LEFT JOIN moved m ON m.sku_id = p.sku_id AND m.location_id = p.location_id
         LEFT JOIN held h ON h.sku_id = p.sku_id AND h.location_id = p.location_id
@@ -307,11 +321,14 @@ export class AtelierService {
         JOIN stock_locations l ON l.id = p.location_id
        WHERE (${filter.modelId ?? null}::uuid IS NULL OR k.model_id = ${filter.modelId ?? null}::uuid)
          AND (${filter.locationId ?? null}::uuid IS NULL OR p.location_id = ${filter.locationId ?? null}::uuid)
+         AND ((k.set_aside_at IS NULL AND md.active)
+              OR coalesce(m.on_hand, 0) <> 0 OR coalesce(h.reserved, 0) > 0 OR coalesce(b.to_make, 0) > 0 OR t.minimum IS NOT NULL)
        ORDER BY md.name, k.model_id, k.size_label NULLS FIRST, k.code, l.name, l.id`.execute(this.db);
     const skus = await this.db
       .selectFrom('skus as k')
       .innerJoin('models as m', 'm.id', 'k.model_id')
       .select(['k.id', 'k.code', 'k.model_id', 'm.name', 'k.size_label'])
+      .where('k.set_aside_at', 'is', null)
       .orderBy('m.name')
       .orderBy('k.model_id')
       .orderBy(sql`k.size_label NULLS FIRST`)
@@ -324,23 +341,28 @@ export class AtelierService {
         const reserved = Number(r.reserved);
         const toMake = Number(r.to_make);
         const minimum = r.minimum === null ? null : Number(r.minimum);
+        const setAside = r.set_aside === true;
         return {
-          sku: { id: r.sku_id, code: r.code, model: { id: r.model_id, name: r.model }, sizeLabel: r.size_label },
+          sku: { id: r.sku_id, code: r.code, model: { id: r.model_id, name: r.model }, sizeLabel: r.size_label, setAside },
           location: { id: r.location_id, name: r.location },
           onHand,
           reserved,
           available: onHand - reserved,
           toMake,
           minimum,
-          suggestion: suggestedPieces(minimum, onHand - reserved, toMake),
+          // A size set aside: its minimum no longer counts (plan NEXT LOT §3.3).
+          suggestion: setAside ? 0 : suggestedPieces(minimum, onHand - reserved, toMake),
         };
       }),
-      skus: skus.map((k) => ({ id: k.id, code: k.code, model: { id: k.model_id, name: k.name }, sizeLabel: k.size_label })),
+      skus: skus.map((k) => ({ id: k.id, code: k.code, model: { id: k.model_id, name: k.name }, sizeLabel: k.size_label, setAside: false })),
       locations: locations.map((l) => ({ id: l.id, name: l.name, isDefault: l.is_default })),
     };
   }
 
-  /** A SKU's minimum at a location (1 to THRESHOLD_MAX), or none (`null`). Audited `stock.threshold`. */
+  /**
+   * A SKU's minimum at a location (1 to THRESHOLD_MAX), or none (`null`). A size set aside takes no new minimum (409
+   * SIZE_SET_ASIDE); its minimum can still be removed. Audited `stock.threshold`.
+   */
   async setThreshold(input: { skuId: string; locationId: string; minimum: number | null }, actor: Actor): Promise<void> {
     assertStaff(actor);
     const skuId = await this.knownSku(input?.skuId);
@@ -348,6 +370,7 @@ export class AtelierService {
     const minimum = input.minimum;
     if (minimum !== null && (!Number.isInteger(minimum) || minimum < 1 || minimum > THRESHOLD_MAX)) throw validationError(`A minimum is 1 to ${THRESHOLD_MAX} pieces.`);
     await inTransaction(this.db, async (tx) => {
+      if (minimum !== null) await assertSkuOffered(tx, skuId);
       const now = this.clock();
       const before = await tx.selectFrom('sku_thresholds').select('minimum').where('sku_id', '=', skuId).where('location_id', '=', locationId).forUpdate().executeTakeFirst();
       if ((before?.minimum ?? null) === minimum) throw validationError('Nothing to change.');
@@ -365,7 +388,8 @@ export class AtelierService {
 
   /**
    * Pieces to make for the stock (L2: a suggestion confirmed, its count adjustable, 1 to ATELIER_MAKE_MAX): each for the
-   * SKU at the location, its ORBES identity reserved at once (L6). Audited and journaled `bench.create`, each.
+   * SKU at the location, its ORBES identity reserved at once (L6); never for a size set aside (409 SIZE_SET_ASIDE).
+   * Audited and journaled `bench.create`, each.
    */
   async makeForStock(input: { skuId: string; locationId: string; quantity: number }, actor: Actor): Promise<BenchItemView[]> {
     assertStaff(actor);
@@ -375,6 +399,7 @@ export class AtelierService {
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > ATELIER_MAKE_MAX) throw validationError(`Make 1 to ${ATELIER_MAKE_MAX} pieces at a time.`);
     const ids = await inTransaction(this.db, async (tx) => {
       await lockSku(tx, skuId);
+      await assertSkuOffered(tx, skuId);
       const now = this.clock();
       const sku = await tx.selectFrom('skus').select(['model_id', 'size_label']).where('id', '=', skuId).executeTakeFirstOrThrow();
       const created: string[] = [];
@@ -714,7 +739,7 @@ export class AtelierService {
       .leftJoin('orders as o', 'o.id', 'b.order_id')
       .selectAll('b')
       .select([
-        'p.product_id as piece_reference', 'p.status as piece_status', 'p.material', 'k.code as sku_code', 'k.size_label', 'k.model_id', 'm.name as model_name',
+        'p.product_id as piece_reference', 'p.status as piece_status', 'p.material', 'k.code as sku_code', 'k.size_label', 'k.set_aside_at', 'k.model_id', 'm.name as model_name',
         'l.name as location_name', 'd.title as release_title', 'o.status as order_status', 'o.channel as order_channel', 'o.addons as order_addons',
       ])
       .select(sql<boolean>`EXISTS (SELECT 1 FROM codes c WHERE c.product_id = b.product_id)`.as('signed'));
@@ -748,7 +773,7 @@ export class AtelierService {
 const originOf = (r: BenchRow): BenchOrigin =>
   r.drop_id && r.release_title ? { kind: 'RELEASE', release: { id: r.drop_id, title: r.release_title } } : r.order_id ? { kind: 'SALON' } : { kind: 'STOCK' };
 
-const skuOf = (r: BenchRow): SkuView => ({ id: r.sku_id, code: r.sku_code, model: { id: r.model_id, name: r.model_name }, sizeLabel: r.size_label });
+const skuOf = (r: BenchRow): SkuView => ({ id: r.sku_id, code: r.sku_code, model: { id: r.model_id, name: r.model_name }, sizeLabel: r.size_label, setAside: r.set_aside_at !== null });
 
 function benchView(r: BenchRow): BenchItemView {
   return {

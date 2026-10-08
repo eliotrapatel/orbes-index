@@ -339,6 +339,18 @@ async function sizeNotDeclared(db: Db, model: { id: string; named: string }, lab
 export const sizeSetAside = (label: string | null, named: string) =>
   conflict('SIZE_SET_ASIDE', `${sizeName(label)} of ${named} is set aside. Reinstate it on the model’s page to offer it again.`);
 
+/**
+ * A SKU that must be offered (the stock's minimum, a piece to make for the stock: plan NEXT LOT §3.3, step 3.5), read
+ * FOR KEY SHARE in the caller's transaction: 409 SIZE_SET_ASIDE for a size set aside, 404 SKU_NOT_FOUND when it is gone.
+ */
+export async function assertSkuOffered(tx: Db, skuId: string): Promise<void> {
+  const k = await tx.selectFrom('skus').select(['model_id', 'size_label', 'set_aside_at']).where('id', '=', skuId).forKeyShare().executeTakeFirst();
+  if (!k) throw notFound('SKU', 'SKU_NOT_FOUND');
+  if (k.set_aside_at === null) return;
+  const model = await sizedModel(tx, k.model_id);
+  throw sizeSetAside(k.size_label, model?.named ?? 'its model');
+}
+
 /** What offeredSku returns: the SKU, its declared label (null: ONE SIZE), and whether the model has its type (false: as before). */
 export interface OfferedSku {
   skuId: string;

@@ -139,7 +139,7 @@ const bench = (o: Partial<BenchItem> = {}): BenchItem => ({
   piece: { id: 'p', reference: 'O26-J-00184', status: 'RESERVED', material: '925 STERLING SILVER', signed: false },
   order: null,
   origin: { kind: 'STOCK' },
-  sku: { id: 's', code: 'MNL-RG-52', model: { id: 'm', name: 'MONOLITHE' }, sizeLabel: '52' },
+  sku: { id: 's', code: 'MNL-RG-52', model: { id: 'm', name: 'MONOLITHE' }, sizeLabel: '52', setAside: false },
   location: { id: LOC, name: 'FRANCE WAREHOUSE' },
   engravingText: null,
   surprise: null,
@@ -459,7 +459,7 @@ describe('what a role may do with an order', () => {
 describe('the atelier', () => {
   it('names whom pieces are made for and a SKU; reads its filters and the work sheets\' selection', () => {
     expect([originLabel({ kind: 'RELEASE', release: { id: 'd', title: 'THE RING' } }), originLabel({ kind: 'SALON' }), originLabel({ kind: 'STOCK' })]).toEqual(['THE RING', 'PRIVATE SALON', 'FOR STOCK']);
-    expect(skuLabel({ id: 's', code: 'X', model: { id: 'm', name: 'HALO' }, sizeLabel: null })).toBe('HALO · ONE SIZE');
+    expect(skuLabel({ id: 's', code: 'X', model: { id: 'm', name: 'HALO' }, sizeLabel: null, setAside: false })).toBe('HALO · ONE SIZE');
     expect(benchFilters({ view: 'DONE', origin: 'STOCK', skuId: ID, locationId: LOC })).toEqual({ view: 'DONE', origin: 'STOCK', skuId: ID, locationId: LOC });
     expect(benchFilters({ view: 'LATER', origin: 'x', skuId: 'y' })).toEqual({});
     expect(benchFilters({ origin: ID.toUpperCase() })).toEqual({ origin: ID });
