@@ -2239,6 +2239,88 @@ export interface ModelSupplierChange {
   sizes?: Record<string, string | null>;
 }
 
+/** A supplier order's line (ORBES's page; prices in the order's currency, in hundredths). */
+export interface SupplierOrderLine {
+  id: string;
+  sku: LogisticsSku;
+  quantity: number;
+  unitPriceMinor: number | null;
+  lineTotalMinor: number | null;
+  received: number;
+  rejected: number;
+  credited: number;
+  restCancelled: number;
+  expected: number;
+  /** For a draft's line: what the sent orders of this size to this location still owe. */
+  expectedElsewhere: number;
+}
+
+/** GET /api/admin/supplier-orders/:id: a supplier order as ORBES's page reads it. */
+export interface SupplierOrderDetail {
+  id: string;
+  reference: string;
+  status: SupplierOrderStatus;
+  supplier: { id: string; name: string; active: boolean; currency: string | null };
+  location: { id: string; name: string; address: string | null };
+  currency: string | null;
+  shippingMinor: number | null;
+  /** YYYY-MM-DD. */
+  expectedOn: string | null;
+  note: string | null;
+  createdAt: Iso;
+  updatedAt: Iso;
+  sentAt: Iso | null;
+  supplierConfirmedAt: Iso | null;
+  receivedAt: Iso | null;
+  restCancelled: { at: Iso; note: string } | null;
+  invoice: { number: string; amountMinor: number; date: string; paidAt: Iso | null } | null;
+  lines: SupplierOrderLine[];
+  /** The confirmed reception lines with no order line (« Not on the order »). */
+  extras: { sku: LogisticsSku; received: number; rejected: number; notes: string[] }[];
+  receptions: { id: string; status: ReceptionStatus; countedAt: Iso; accepted: number; rejected: number; confirmedAt: Iso | null; confirmedBy: string | null }[];
+  returns: { id: string; sku: LogisticsSku; quantity: number; status: SupplierReturnStatus; returnedAt: Iso | null; settlement: SupplierReturnSettlement | null; creditMinor: number | null; settledAt: Iso | null; note: string | null }[];
+  pieces: { ordered: number; received: number; expected: number };
+  linesTotalMinor: number | null;
+  totalMinor: number | null;
+  history: { action: string; at: Iso; by: string | null }[];
+}
+
+/** GET /api/admin/supplier-orders: a supplier order in the list. */
+export interface SupplierOrderListItem {
+  id: string;
+  reference: string;
+  status: SupplierOrderStatus;
+  supplier: { id: string; name: string };
+  location: { id: string; name: string };
+  pieces: { ordered: number; received: number };
+  currency: string | null;
+  totalMinor: number | null;
+  expectedOn: string | null;
+  invoice: { number: string; paid: boolean } | null;
+  createdAt: Iso;
+}
+
+/** GET /api/admin/supplier-orders/proposal: what is missing, per supplier and location (« The console proposes »). */
+export interface SupplierOrderProposal {
+  groups: {
+    supplier: { id: string; name: string } | null;
+    location: { id: string; name: string };
+    draft: { id: string; reference: string } | null;
+    rows: { sku: LogisticsSku; waiting: number; underMinimum: number; expected: number; inDraft: number; toOrder: number }[];
+    toOrder: number;
+  }[];
+  toOrder: number;
+}
+
+/** PATCH /api/admin/supplier-orders/:id: a draft's lines (the list becomes its lines), currency, shipping, expected date, note. */
+export interface SupplierDraftChange {
+  lines?: { skuId: string; quantity: number; unitPriceMinor?: number | null }[];
+  currency?: string | null;
+  shippingMinor?: number | null;
+  expectedOn?: string | null;
+  note?: string | null;
+}
+
 /** PUT /api/admin/models/:id/sizes: its size type, the sizes ticked, its kind (a model with no type; null: none), its sizes' fits. */
 export interface ModelSizesChange {
   sizeType?: SizeType;

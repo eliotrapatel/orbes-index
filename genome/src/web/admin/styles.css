@@ -3820,6 +3820,40 @@ fieldset.cfield--checks > .cfield__label {
   gap: 6px;
 }
 
+/* Supplier orders (plan NEXT LOT §3.5.4.2): To order, a group per supplier and location. */
+.proposal {
+  margin-top: 26px;
+}
+
+.proposal__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 20px;
+  padding-bottom: 6px;
+}
+
+.proposal__title {
+  font-size: var(--fs-line);
+  font-weight: 400;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.proposal__head .cbtn {
+  margin-left: auto;
+}
+
+.supplier-order__status {
+  margin: 0 0 8px;
+}
+
+.proposal__none {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 /* Receptions (plan NEXT LOT §3.5.3): the cards to print, a reception's count. */
 .cards-to-print {
   display: grid;

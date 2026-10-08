@@ -123,6 +123,11 @@ import type {
   ModelSupplierChange,
   Supplier,
   SupplierInput,
+  SupplierDraftChange,
+  SupplierOrderDetail,
+  SupplierOrderListItem,
+  SupplierOrderProposal,
+  SupplierOrderStatus,
   CaseToReceive,
   LogisticsStock,
   ParcelsBoard,
@@ -600,6 +605,72 @@ export class AdminApi {
   /** OPERATOR. */
   createSupplier(input: SupplierInput): Promise<Supplier> {
     return this.post('/api/admin/suppliers', input);
+  }
+
+  /** AUDITOR: the supplier orders, the newest first (`status`, `supplierId` to narrow). */
+  supplierOrders(f: { status?: SupplierOrderStatus; supplierId?: string } = {}): Promise<Items<SupplierOrderListItem>> {
+    return this.get('/api/admin/supplier-orders', { status: f.status, supplierId: f.supplierId });
+  }
+
+  /** AUDITOR: what is missing, per supplier and location (the orders waiting for stock, the stock under its minimum). */
+  supplierOrderProposal(f: { locationId?: string; supplierId?: string } = {}): Promise<SupplierOrderProposal> {
+    return this.get('/api/admin/supplier-orders/proposal', { locationId: f.locationId, supplierId: f.supplierId });
+  }
+
+  /** OPERATOR: pieces of a size added to its supplier's draft to a location (the draft made when there is none). */
+  addToSupplierDraft(input: { skuId: string; locationId: string; quantity: number; from?: 'PROPOSAL' | 'RELEASE' }): Promise<SupplierOrderDetail> {
+    return this.post('/api/admin/supplier-orders/draft-lines', input);
+  }
+
+  /** AUDITOR: one supplier order, its lines, receptions, returns, invoice and history. */
+  supplierOrder(id: string): Promise<SupplierOrderDetail> {
+    return this.get(`/api/admin/supplier-orders/${encodeURIComponent(id)}`);
+  }
+
+  /** OPERATOR: a draft changed (its lines whole, currency, shipping, expected date, note). */
+  updateSupplierDraft(id: string, change: SupplierDraftChange): Promise<SupplierOrderDetail> {
+    return this.patch(`/api/admin/supplier-orders/${encodeURIComponent(id)}`, change);
+  }
+
+  /** OPERATOR: a draft deleted (it never left ORBES). */
+  discardSupplierDraft(id: string): Promise<void> {
+    return this.request('DELETE', `/api/admin/supplier-orders/${encodeURIComponent(id)}`, { body: {} });
+  }
+
+  /** OPERATOR: DRAFT → SENT; its lines and prices no longer change. */
+  sendSupplierOrder(id: string): Promise<SupplierOrderDetail> {
+    return this.post(`/api/admin/supplier-orders/${encodeURIComponent(id)}/send`, {});
+  }
+
+  /** OPERATOR: SENT → EXPECTED, the date the supplier confirmed. */
+  supplierConfirmed(id: string, expectedOn: string | null): Promise<SupplierOrderDetail> {
+    return this.post(`/api/admin/supplier-orders/${encodeURIComponent(id)}/supplier-confirmed`, expectedOn ? { expectedOn } : {});
+  }
+
+  /** OPERATOR: what has not arrived stops being expected. */
+  cancelSupplierRest(id: string, note: string): Promise<SupplierOrderDetail> {
+    return this.post(`/api/admin/supplier-orders/${encodeURIComponent(id)}/cancel-rest`, { note });
+  }
+
+  /** AUDITOR: the supplier order's PDF, ORBES-SO-7C21A0B9.pdf (ORBES sends it to the supplier itself). */
+  async supplierOrderPdf(id: string): Promise<Download> {
+    const res = await this.request<Response>('GET', `/api/admin/supplier-orders/${encodeURIComponent(id)}/pdf`, { raw: true });
+    return toDownload(res, 'ORBES-supplier-order.pdf');
+  }
+
+  /** OPERATOR: the supplier's invoice (number, amount, date). */
+  setSupplierInvoice(id: string, input: { number: string; amountMinor: number; date: string }): Promise<SupplierOrderDetail> {
+    return this.request('PUT', `/api/admin/supplier-orders/${encodeURIComponent(id)}/invoice`, { body: input });
+  }
+
+  /** OPERATOR: ORBES has paid the supplier's invoice. */
+  markSupplierInvoicePaid(id: string): Promise<SupplierOrderDetail> {
+    return this.post(`/api/admin/supplier-orders/${encodeURIComponent(id)}/invoice/paid`, {});
+  }
+
+  /** OPERATOR: the supplier's answer to rejected pieces: a replacement, or a credit with its amount. */
+  settleSupplierReturn(id: string, input: { settlement: 'REPLACEMENT' | 'CREDIT'; creditMinor?: number | null; note?: string | null }): Promise<SupplierOrderDetail> {
+    return this.post(`/api/admin/supplier-returns/${encodeURIComponent(id)}/settle`, input);
   }
 
   /** OPERATOR: the fields given changed, or the supplier set inactive. */

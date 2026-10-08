@@ -84,7 +84,7 @@ export const STOCK_TEXT = Object.freeze({
   leadAgent:
     'Every size of every model and variant at your locations, 0 included. On hand is what the stock holds; reserved, what orders hold; waiting, the orders without a piece yet.',
   leadStaff:
-    'Every size of every model and variant at each location, 0 included. On hand is what the stock holds; reserved, what orders hold; waiting, the orders without a piece yet.',
+    'Every size of every model and variant at each location, 0 included. On hand is what the stock holds; reserved, what orders hold; waiting, the orders without a piece yet; expected, what the suppliers still owe.',
   emptyAgent: 'No size declared yet: ORBES declares each model’s sizes.',
   emptyStaff: 'No size declared yet: declare a model’s sizes in the Catalogue.',
   setAside: 'Set aside',
@@ -102,11 +102,18 @@ export const STOCK_TEXT = Object.freeze({
   minimum: 'Minimum',
   minimumText: 'Below it, Supplier orders proposes the pieces to order to reach it, for you to confirm. Empty: no minimum.',
   minimumSaved: 'Minimum saved.',
+  addToOrder: 'Add to supplier order',
+  addedToOrder: 'Added to the draft.',
   countIn: 'Count pieces in',
   countInConfirm: 'Count in',
   countedIn: 'Pieces counted in.',
   serialsHint: 'One per line: O26-J-00184.',
 });
+
+/** Add to supplier order, from ORBES's Stock: the size, the pieces and where they go; the draft is confirmed before it is sent. */
+export function addToOrderText(r: { sku: LogisticsSku; location: { name: string } }): string {
+  return `The pieces of ${skuWords(r.sku)} go to the draft of its supplier, to deliver to ${r.location.name}. You confirm the draft before it is sent.`;
+}
 
 /** The text of Count pieces in, for a size. */
 export function countInText(sku: LogisticsSku): string {

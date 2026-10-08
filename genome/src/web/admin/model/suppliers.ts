@@ -1,6 +1,6 @@
 /**
  * The suppliers in the console (plan NEXT LOT of 2026-10-07, §3.5.4.2 and §3.5.4.5): the words of the Supplier orders
- * page (its Suppliers section for now; To order and the supplier orders come with step 5.11d), a supplier's form, and a
+ * page's Suppliers section (To order and the supplier orders are model/supplier-orders.ts'), a supplier's form, and a
  * model's Supplier row and column in its Sizes section. Pure: the views render these; the server stays the authority
  * (409 SUPPLIER_NAME_TAKEN, the currency's decimals, 404 SKU_NOT_FOUND).
  */

@@ -43,6 +43,7 @@ import {
   minimumValue,
   noPieceMark,
   offersLocationFilter,
+  addToOrderText,
   cardsLine,
   expectedEmpty,
   expectedLead,
@@ -73,6 +74,7 @@ import {
   type LogisticsTab,
 } from '../model/logistics.js';
 import { can, logisticsOnly } from '../model/permissions.js';
+import { addQuantityProblem } from '../model/supplier-orders.js';
 import type { Tone } from '../model/tone.js';
 import { href } from '../router.js';
 import type { CaseToReceive, ExpectedSupplierOrder, LogisticsLocation, LogisticsStock, LogisticsStockRow, OnItsWayRow, ReceptionsBoard, ReceptionView, StockCorrection, StockCorrectionStatus, SupplierReturnItem, ToShipRow } from '../types.js';
@@ -426,7 +428,7 @@ function receptionsTab(ctx: ViewContext, board: ReceptionsBoard, locations: read
 function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement {
   const role = ctx.session.admin.role;
   const agent = logisticsOnly(role);
-  const manage = !agent && can(role, 'manageStock');
+  const manage = !agent && (can(role, 'manageStock') || can(role, 'manageSupplierOrders'));
   const propose = agent && can(role, 'logistics');
   const showLocation = !agent || stock.locations.length > 1;
   const locationOptions = stock.locations.map((l) => ({ value: l.id, label: l.name }));
@@ -503,11 +505,25 @@ function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement {
       },
     }).then(after(ctx, STOCK_TEXT.countedIn));
 
+  const order = !agent && can(role, 'manageSupplierOrders');
+  const addToOrder = (r: LogisticsStockRow) =>
+    void openDialog({
+      title: STOCK_TEXT.addToOrder,
+      eyebrow: title(r),
+      body: h('p', { class: 'dialog__text' }, addToOrderText(r)),
+      fields: [{ name: 'quantity', label: 'Pieces', required: true, maxlength: 5, value: String(r.toOrder ?? 1) }],
+      validate: addQuantityProblem,
+      confirmLabel: STOCK_TEXT.addToOrder,
+      submit: async (v) => {
+        await ctx.api.addToSupplierDraft({ skuId: r.sku.id, locationId: r.location.id, quantity: Number(v.quantity), from: 'PROPOSAL' });
+      },
+    }).then(after(ctx, STOCK_TEXT.addedToOrder));
   const actions = (r: LogisticsStockRow): HTMLElement | null => {
     const buttons = propose
       ? [button(STOCK_TEXT.propose, { kind: 'ghost', testId: 'stock-propose', onClick: () => proposeCorrection(r) })]
       : manage
         ? [
+            order && (r.toOrder ?? 0) > 0 && !r.sku.setAside ? button(STOCK_TEXT.addToOrder, { kind: 'secondary', testId: 'stock-add-to-order', onClick: () => addToOrder(r) }) : null,
             noPieceMark(r.unbacked) ? button(STOCK_TEXT.countIn, { kind: 'secondary', testId: 'stock-count-in', onClick: () => countIn(r) }) : null,
             stock.locations.length > 1 && r.available > 0 ? button(STOCK_TEXT.transfer, { kind: 'ghost', testId: 'stock-transfer', onClick: () => transfer(r) }) : null,
             button(STOCK_TEXT.correct, { kind: 'ghost', testId: 'stock-correct', onClick: () => correct(r) }),
@@ -545,6 +561,7 @@ function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement {
     ...(agent
       ? []
       : [
+          { label: 'Expected', cell: (r) => h('span', { data: { testid: 'stock-expected' } }, formatCount(r.expected ?? 0)), kind: ['num'] } satisfies Column<LogisticsStockRow>,
           {
             label: 'To order',
             cell: (r) =>

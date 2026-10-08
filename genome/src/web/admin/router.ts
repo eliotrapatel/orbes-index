@@ -62,8 +62,10 @@ export const ROUTES = [
   /** A reception (plan NEXT LOT §3.5.3): a delivery counted against its supplier order (`?supplierOrder=`), then itself. */
   { name: 'receptionNew', path: '/logistics/receptions/new' },
   { name: 'reception', path: '/logistics/receptions/:receptionId' },
-  /** Supplier orders (plan NEXT LOT §3.5.4.2): ORBES's page, never a LOGISTICS login's; its Suppliers for now. */
+  /** Supplier orders (plan NEXT LOT §3.5.4.2): ORBES's page, never a LOGISTICS login's: To order, the orders, Suppliers. */
   { name: 'supplierOrders', path: '/supplier-orders' },
+  /** A supplier order's page (plan NEXT LOT §3.5.4.2), from the list or To order. */
+  { name: 'supplierOrder', path: '/supplier-orders/:supplierOrderId' },
   /** A model's lookbook (P-R02): reached from the Catalogue's model row, no link of its own in the sidebar. */
   { name: 'model', path: '/catalogue/:modelId' },
   { name: 'retailers', path: '/retailers' },

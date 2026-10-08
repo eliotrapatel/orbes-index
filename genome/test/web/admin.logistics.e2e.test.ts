@@ -234,7 +234,7 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     expect(await tabTexts(a)).toEqual(['To ship (0)', 'Receptions (0)', 'Stock', 'Returns (0)', 'Corrections (2)']);
     await a.click('[data-testid=logistics-tab-stock]');
     await expect.poll(() => a.locator('#logistics-stock thead th').count()).toBeGreaterThan(0);
-    expect(await a.locator('#logistics-stock thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'Location', 'On hand', 'Reserved', 'Available', 'Waiting', 'Minimum', 'To order', '']);
+    expect(await a.locator('#logistics-stock thead th').allTextContents()).toEqual(['Model', 'Variant', 'Size', 'Location', 'On hand', 'Reserved', 'Available', 'Waiting', 'Minimum', 'Expected', 'To order', '']);
     await expect.poll(() => stockRow(a, sku).count()).toBe(2);
     await a.selectOption('[data-testid=logistics-location]', warehouse);
     await expect.poll(() => stockRow(a, sku).count()).toBe(1);

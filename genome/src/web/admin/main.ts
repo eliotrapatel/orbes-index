@@ -76,6 +76,7 @@ import { orderView } from './views/order.js';
 import { ordersView } from './views/orders.js';
 import { invoicesView } from './views/invoices.js';
 import { segmentsView, segmentView } from './views/segments.js';
+import { supplierOrderView } from './views/supplier-order.js';
 import { supplierOrdersView } from './views/supplier-orders.js';
 import { lookbookView } from './views/lookbook.js';
 import { ownerView } from './views/owner.js';
@@ -212,6 +213,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   receptionNew: { view: newReceptionView, title: 'Reception', nav: 'logistics' },
   reception: { view: receptionView, title: 'Reception', nav: 'logistics' },
   supplierOrders: { view: supplierOrdersView, title: 'Supplier orders', nav: 'supplierOrders' },
+  supplierOrder: { view: supplierOrderView, title: 'Supplier order', nav: 'supplierOrders' },
   document: { view: documentView, title: 'Document', nav: 'documents' },
 };
 
