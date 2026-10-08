@@ -3386,6 +3386,7 @@ describe('migrations', () => {
     const ret = (await one<{ id: string }>(`INSERT INTO supplier_returns (supplier_order_id, reception_id, sku_id, quantity) VALUES ('${order}', '${reception}', '${sku}', 2) RETURNING id`)).id;
     await check(run(`UPDATE supplier_returns SET tracking_number = 'XY123456' WHERE id = '${ret}'`), 'a tracking number before it is sent', 'supplier_returns_returned');
     await check(run(`UPDATE supplier_returns SET status = 'RETURNED' WHERE id = '${ret}'`), 'returned without its time', 'supplier_returns_returned');
+    await check(run(`UPDATE supplier_returns SET credit_minor = 100 WHERE id = '${ret}'`), 'an amount without a settlement', 'supplier_returns_settled');
     await check(run(`UPDATE supplier_returns SET settlement = 'CREDIT', settled_at = now() WHERE id = '${ret}'`), 'a credit without its amount', 'supplier_returns_settled');
     await check(run(`UPDATE supplier_returns SET settlement = 'REPLACEMENT', settled_at = now(), credit_minor = 100 WHERE id = '${ret}'`), 'a replacement with an amount', 'supplier_returns_settled');
     await run(`UPDATE supplier_returns SET status = 'RETURNED', returned_at = now(), returned_by = '${admin}', tracking_number = 'XY123456' WHERE id = '${ret}'`);

@@ -255,7 +255,7 @@ export const UP: readonly string[] = [
        AND (returned_at IS NOT NULL OR (carrier_id IS NULL AND tracking_number IS NULL))),
      CONSTRAINT supplier_returns_settled CHECK (
        (settlement IS NULL) = (settled_at IS NULL)
-       AND (credit_minor IS NOT NULL) = (settlement = 'CREDIT')
+       AND (credit_minor IS NOT NULL) = (settlement IS NOT DISTINCT FROM 'CREDIT')
        AND (settled_by IS NULL OR settled_at IS NOT NULL))
    )`,
   `CREATE INDEX supplier_returns_supplier_order_idx ON supplier_returns (supplier_order_id)`,
