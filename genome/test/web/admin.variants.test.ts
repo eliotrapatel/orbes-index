@@ -8,7 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { VARIANT_LABEL_MAX as SERVER_LABEL_MAX } from '../../src/server/services/catalog.js';
 import { DRAW_PRICE_MAX_MINOR } from '../../src/server/services/drops.js';
-import { DROP_LIMITS, drawPriceProblem, drawPriceText, dropChange, dropFormValues, dropInput, dropProblem } from '../../src/web/admin/model/club.js';
+import { DROP_LIMITS, drawPriceProblem, drawPriceText, drawSizeValues, dropChange, dropFormValues, dropInput, dropProblem } from '../../src/web/admin/model/club.js';
 import { formatMoney } from '../../src/web/admin/model/live.js';
 import { productAttributes } from '../../src/web/admin/model/product.js';
 import {
@@ -111,8 +111,9 @@ describe('the console\'s variants (NOCTURNE N1)', () => {
 
 describe('a draw\'s price in the console (NOCTURNE, addition 5)', () => {
   const NOW = new Date('2026-10-05T16:49:00.000Z');
-  const base = { id: 'd1', title: 'MONOLITHE, THE OCTOBER DRAW', description: null, model: { id: 'm1', name: 'MONOLITHE', type: 'BRACELET', active: true, variant: null }, quantity: 12, opensAt: '2026-10-05T10:00:00.000Z', closesAt: '2026-10-11T18:00:00.000Z', purchaseWindowHours: 48, earlyAccessHours: 0, earlyAccessPlatineHours: 0, priceMinor: null, currency: null } as unknown as Drop;
-  const values = (extra: Record<string, string> = {}) => ({ ...dropFormValues(base, NOW), ...extra });
+  const base = { id: 'd1', title: 'MONOLITHE, THE OCTOBER DRAW', description: null, model: { id: 'm1', name: 'MONOLITHE', type: 'BRACELET', active: true, variant: null }, quantity: 12, opensAt: '2026-10-05T10:00:00.000Z', closesAt: '2026-10-11T18:00:00.000Z', purchaseWindowHours: 48, earlyAccessHours: 0, earlyAccessPlatineHours: 0, priceMinor: null, currency: null, sizes: [{ id: 's17', label: '17', pieces: 12, reserved: 0, entered: 0, held: 0, waitlisted: 0, guaranteedEntered: 0 }] } as unknown as Drop;
+  // Plan NEXT LOT §3.6.F: the dialog holds its sizes' pieces (here 12 in size 17).
+  const values = (extra: Record<string, string> = {}) => ({ ...dropFormValues(base, NOW), ...drawSizeValues(['17'], base), ...extra });
 
   it('is typed in units with its currency, optional, in the server\'s bound', () => {
     expect(DROP_LIMITS.priceMax).toBe(DRAW_PRICE_MAX_MINOR);
