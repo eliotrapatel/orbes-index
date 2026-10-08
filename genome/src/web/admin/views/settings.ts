@@ -16,16 +16,19 @@
  *    and PALLADIUM, per currency and service, '—' for none (none preset: the order then carries no shipping, as
  *    before, unless Client Services enters a fee on it). Edit shipping (ADMIN) sets them whole, audited
  *    `order.shipping_rates.update`.
+ *  - Engraving (plan NEXT LOT §3.6.C): what an engraving costs per currency, for the orders without their release's
+ *    ENGRAVING add-on, '—' for none (no engraving offered to clients in that currency; none preset). Edit engraving
+ *    (ADMIN) sets them whole, audited `order.engraving_prices.update`; an order keeps the price it took.
  *  - House guarantee (plan NEXT-NINE, IN-01): the Grant dialog's defaults, valid for 90 days (1 to 730), 1 piece (1 to
  *    5), shown to the client; who set them and when. Changed by an ADMIN, audited `guarantee.settings`.
  */
 import { h } from '../../shared/dom.js';
 import { formatDateTime } from '../format.js';
-import { alertsInput, alertsProblem, ALERT_LIMITS, carrierProblem, LOGISTICS_LIMITS, locationProblem, TRACKING_PLACEHOLDER, trackingLink } from '../model/orders.js';
+import { alertsInput, alertsProblem, ALERT_LIMITS, carrierProblem, engravingPricesInput, engravingPricesProblem, engravingPricesValues, engravingPriceText, LOGISTICS_LIMITS, locationProblem, TRACKING_PLACEHOLDER, trackingLink } from '../model/orders.js';
 import { GUARANTEE_LIMITS, PIECES_OPTIONS, piecesText, settingsInput, settingsProblem, settingsValues } from '../model/guarantees.js';
 import { can } from '../model/permissions.js';
 import { rateField, rateText, ratesChanged, ratesInput, ratesProblem, ratesValues, SHIPPING_SERVICE_LABELS } from '../model/program.js';
-import { HOUSE_CURRENCIES, SHIPPING_SERVICES, type Carrier, type GuaranteeSettings, type HouseCurrency, type OrderAlertSettings, type ShippingRatesSheet, type StockLocation } from '../types.js';
+import { HOUSE_CURRENCIES, SHIPPING_SERVICES, type Carrier, type EngravingPricesSheet, type GuaranteeSettings, type HouseCurrency, type OrderAlertSettings, type ShippingRatesSheet, type StockLocation } from '../types.js';
 import { href } from '../router.js';
 import { button, defList, linkButton, mono, pageHeader, section, statusMark, table } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
@@ -38,7 +41,14 @@ const EXAMPLE_TRACKING = '6A12345678901';
 const days = (n: number) => `${n} ${n === 1 ? 'day' : 'days'}`;
 
 export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
-  const [alerts, locations, carriers, rates, guarantee] = await Promise.all([ctx.api.orderAlerts(), ctx.api.locations(), ctx.api.carriers(), ctx.api.shippingRates(), ctx.api.guaranteeSettings()]);
+  const [alerts, locations, carriers, rates, engraving, guarantee] = await Promise.all([
+    ctx.api.orderAlerts(),
+    ctx.api.locations(),
+    ctx.api.carriers(),
+    ctx.api.shippingRates(),
+    ctx.api.engravingPrices(),
+    ctx.api.guaranteeSettings(),
+  ]);
   const admin = can(ctx.session.admin.role, 'manageLogistics');
   const done = (msg: string) => (v: unknown) => {
     if (!v) return;
@@ -58,7 +68,44 @@ export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
     locationsSection(ctx, locations.items, admin, done),
     carriersSection(ctx, carriers.items, admin, done),
     shippingSection(ctx, rates, admin, done),
+    engravingSection(ctx, engraving, admin, done),
     guaranteeSection(ctx, guarantee, can(ctx.session.admin.role, 'manageGuaranteeSettings'), done),
+  );
+}
+
+/**
+ * ENGRAVING (plan NEXT LOT §3.6.C), beside Shipping and like it: one price per currency for the orders without their
+ * release's ENGRAVING add-on; an ADMIN sets them, an AUDITOR reads them.
+ */
+function engravingSection(ctx: ViewContext, sheet: EngravingPricesSheet, admin: boolean, done: (msg: string) => (v: unknown) => void): HTMLElement {
+  const values = engravingPricesValues(sheet);
+  const edit = () =>
+    void openDialog({
+      title: 'Engraving',
+      eyebrow: 'Settings · Engraving',
+      body: h('p', { class: 'dialog__text' }, 'An amount in units for each currency, or empty for none. An order keeps the price it took.'),
+      fields: HOUSE_CURRENCIES.map((c) => ({ name: c, label: c, maxlength: 12, value: values[c] ?? '' })),
+      validate: (v) => engravingPricesProblem(v) ?? (HOUSE_CURRENCIES.every((c) => (v[c] ?? '').trim() === (values[c] ?? '')) ? 'Nothing has changed.' : null),
+      confirmLabel: 'Save',
+      submit: async (v) => {
+        await ctx.api.setEngravingPrices(engravingPricesInput(v));
+      },
+    }).then(done('Engraving prices saved.'));
+  return section(
+    'Engraving',
+    [
+      h('p', { class: 'notice' }, 'What an engraving costs, per currency. A currency without a price offers no engraving to clients.'),
+      table<HouseCurrency>(
+        [
+          { label: 'Currency', cell: (c) => c, kind: ['nowrap'] },
+          { label: 'Price', cell: (c: HouseCurrency) => h('span', { data: { testid: `engraving-${c}` } }, engravingPriceText(sheet, c)), kind: ['nowrap' as const] },
+        ],
+        [...HOUSE_CURRENCIES],
+        { caption: 'Engraving prices' },
+      ),
+      sheet.updatedAt ? h('p', { class: 'notice' }, `Set ${formatDateTime(sheet.updatedAt)}${sheet.updatedBy ? ` by ${sheet.updatedBy.email}` : ''}.`) : null,
+    ],
+    { id: 'settings-engraving', tools: admin ? [button('Edit engraving', { kind: 'ghost', testId: 'engraving-edit', onClick: edit })] : [] },
   );
 }
 

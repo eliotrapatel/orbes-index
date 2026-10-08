@@ -13,7 +13,10 @@
  *    REMOVE CREDIT (OPERATOR, while RESERVED). A GIFT order says its tier and the order it travels with; its size, To be
  *    confirmed, is chosen among its model's (CHOOSE SIZE). An order travelling with another ships in that order's parcel
  *    (plan NEXT LOT §3.5.6.6): its Shipping section is the parcel's.
- *  - Its buyer: the name and address entered by Client Services (masked for an AUDITOR); EDIT (OPERATOR).
+ *  - Its buyer: the name, the address, the country and the phone, entered by the client or by Client Services, who
+ *    entered it and when, and a highlighted line once the address was replaced after it was first entered, until it
+ *    ships (plan NEXT LOT §3.6.B; masked for an AUDITOR, the phone withheld, the country shown); EDIT (OPERATOR) until
+ *    it ships; an order travelling with another reads that order's, with no EDIT.
  *  - Its piece: the location it is served from (CHANGE: what it holds moves), what it holds (In stock at …, or
  *    Awaiting stock), the piece bound to it by the agent's packing scan (plan NEXT LOT §3.5.4.4).
  *  - Shipping (plan NEXT LOT §3.5.4.4): the agent's steps on its parcel (views/shipping.ts): Start packing, the
@@ -37,6 +40,9 @@ import {
   buyerInput,
   canChooseGiftSize,
   buyerProblem,
+  buyerSection as buyerModel,
+  countryOptions,
+  engravingLine,
   CHANNEL_LABELS,
   creditActions,
   creditAppliedLine,
@@ -329,7 +335,8 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
           { label: 'Credit applied', value: h('span', { data: { testid: 'order-credit-applied' } }, creditAppliedLine(o)) },
         ]
       : []),
-    { label: 'Engraving', value: o.engravingText ?? 'None' },
+    // Plan NEXT LOT §3.6.C: its words and the price it took (`J.M. · € 30`); the words alone when its release's add-on paid for it.
+    { label: 'Engraving', value: h('span', { data: { testid: 'order-engraving' } }, engravingLine(o)) },
     { label: 'Surprise', value: o.surprise ?? 'None' },
   ];
   const termsTool = [
@@ -349,6 +356,9 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       fields: [
         { name: 'name', label: 'Name', maxlength: ORDER_LIMITS.buyerName, value: o.buyer.name ?? '', hint: 'Empty to clear.' },
         { name: 'address', label: 'Address', kind: 'textarea', rows: 4, maxlength: ORDER_LIMITS.buyerAddress, value: o.buyer.address ?? '', hint: 'As it is written on the parcel, one line each. Empty to clear.' },
+        // Plan NEXT LOT §3.6.B: the country and the phone the agent's carrier tools need.
+        { name: 'country', label: 'Country', kind: 'select', options: countryOptions(), value: o.buyer.country ?? '' },
+        { name: 'phone', label: 'Phone', maxlength: 32, value: o.buyer.phone ?? '', hint: 'With the country code: +33 6 12 34 56 78. Empty to clear.' },
       ],
       validate: (v) => buyerProblem(o, v),
       confirmLabel: 'Save',
@@ -356,12 +366,16 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
         await ctx.api.setOrderBuyer(o.id, buyerInput(v));
       },
     }).then(done('Buyer saved.'));
+  const buyer = buyerModel(o, !can(ctx.session.admin.role, 'readClientEmails'));
+  const BUYER_TESTIDS: Record<string, string> = { Name: 'buyer-name', Address: 'buyer-address', Country: 'buyer-country', Phone: 'buyer-phone', 'Entered by': 'buyer-entered-by' };
   const buyerSection = section(
     'Buyer',
-    defList([
-      { label: 'Name', value: h('span', { data: { testid: 'buyer-name' } }, o.buyer.name ?? 'Not entered') },
-      { label: 'Address', value: h('span', { class: 'prewrap', data: { testid: 'buyer-address' } }, o.buyer.address ?? 'Not entered') },
-    ]),
+    [
+      buyer.travels ? h('p', { class: 'notice', data: { testid: 'buyer-travels' } }, buyer.travels) : null,
+      // Highlighted as the agent's screens mark it (ADDRESS CHANGED), until it ships.
+      buyer.changed ? h('p', { class: 'notice', data: { testid: 'buyer-changed' } }, statusMark('ADDRESS CHANGED', 'alert'), ' ', buyer.changed) : null,
+      defList(buyer.rows.map((r) => ({ label: r.label, value: h('span', { class: r.label === 'Address' ? 'prewrap' : undefined, data: { testid: BUYER_TESTIDS[r.label] ?? '' } }, r.value) }))),
+    ],
     { id: 'order-buyer', tools: acts.buyer ? [button('Edit', { kind: 'ghost', testId: 'order-buyer', onClick: editBuyer })] : [] },
   );
 
@@ -672,7 +686,11 @@ function orderCaseSection(ctx: ViewContext, d: OrderDetail, locations: StockLoca
           a.cancel ? button(CASE_TEXT.cancel, { kind: 'ghost', testId: 'order-case-cancel', onClick: () => cancel(c) }) : null,
         ),
       ),
-      defList(caseLines(c).map((l) => ({ label: l.label, value: h('span', { class: 'prewrap' }, l.value) }))),
+      defList([
+        ...caseLines(c).map((l) => ({ label: l.label, value: h('span', { class: 'prewrap' }, l.value) as Child })),
+        // Plan NEXT LOT §3.6.D: the collector's request, written into MESSAGES: its conversation.
+        ...(c.conversationId ? [{ label: 'Conversation', value: h('a', { class: 'idlink', attrs: { href: href('conversation', { conversationId: c.conversationId }) }, data: { testid: 'order-case-conversation' } }, 'Open in Messages') as Child }] : []),
+      ]),
     );
   });
   return section(CASE_TEXT.title, blocks.length ? blocks : h('p', { class: 'panel__text' }, CASE_TEXT.empty), {

@@ -2514,6 +2514,17 @@ export interface ShippingRatesSheet {
   items: (ShippingRate & { updatedAt: Iso; updatedBy: { id: string; email: string } | null })[];
 }
 
+/**
+ * ENGRAVING (plan NEXT LOT §3.6.C; GET /api/admin/orders/engraving-prices): the engraving's price per currency, in minor
+ * units, null where none is set (no engraving offered in that currency), for the orders without their release's
+ * ENGRAVING add-on; who set them last, and when.
+ */
+export interface EngravingPricesSheet {
+  prices: Record<HouseCurrency, number | null>;
+  updatedAt: Iso | null;
+  updatedBy: { id: string; email: string } | null;
+}
+
 // ── Orders (plan LIVE RELEASE+, routes/admin/orders.ts) ───────────────────
 
 /** Why an order stands out (M3): RESERVED too long, READY but not shipped, SHIPPED not delivered, DELIVERED not registered. */
@@ -2700,6 +2711,8 @@ export interface OrderCaseRecord {
   exchange: { skuId: string; sizeLabel: string; available: number } | null;
   shipment: { id: string; orders: { id: string; reference: string }[] } | null;
   messageId: string | null;
+  /** The collector's conversation its request was written into (plan NEXT LOT §3.6.D); null without one. */
+  conversationId?: string | null;
   received: { at: Iso; pieceState: 'OK' | 'DAMAGED'; note: string | null } | null;
   decision: { at: Iso; outcome: 'REFUND' | 'EXCHANGE' | 'RESHIP'; pieceTo: 'RESTOCKED' | 'ARCHIVED' | 'REVOKED' | null; exchangeOrder: { id: string; reference: string } | null; note: string | null } | null;
   cancelled: { at: Iso; note: string | null } | null;

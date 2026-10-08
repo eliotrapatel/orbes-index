@@ -12,7 +12,8 @@
  *  - An order's documents (M7): its invoice and credit note, named.
  *  - The packing slip: the piece, its size, its add-ons, the engraving and the surprise; never a price.
  */
-import { formatCount, formatDate, humanize } from '../format.js';
+import { COUNTRY_CODES, countryName, isCountryCode, PHONE_RE } from '../../../shared/countries.js';
+import { formatCount, formatDate, formatDateTime, humanize } from '../format.js';
 import { can } from './permissions.js';
 import { slipBuyer, type SlipBuyer } from './logistics.js';
 import { formatMoney, moneyField, parseMoney } from './live.js';
@@ -33,6 +34,9 @@ import {
   type OrderTermsChange,
   type OrderTransitionInput,
   type OrderView,
+  HOUSE_CURRENCIES,
+  type EngravingPricesSheet,
+  type HouseCurrency,
 } from '../types.js';
 
 /** The words Client Services enters, at most (services/orders.ts ORDER_TEXT_LIMITS; test/web/admin.orders.test.ts). */
@@ -368,7 +372,9 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
       engraving: ok && holding,
       shipping: ok && o.status === 'RESERVED' && !o.withOrder,
     },
-    buyer: ok,
+    // Plan NEXT LOT §3.6.B: until it ships (packing begun or not); never on an order travelling with another, whose
+    // buyer and address are that order's (its welcome gift's included); a cancelled order still keying its welcome gifts' parcel.
+    buyer: ok && !o.withOrder && (holding || (o.status === 'CANCELLED' && o.gifts.some((g) => HOLDING.includes(g.status)))),
   };
 }
 
@@ -477,15 +483,86 @@ export function termsChange(o: OrderView, v: Record<string, string>, a: OrderAct
 export function buyerProblem(o: OrderView, v: Record<string, string>): string | null {
   const name = (v.name ?? '').trim();
   const address = (v.address ?? '').trim();
+  const country = (v.country ?? '').trim();
+  const phone = (v.phone ?? '').trim();
   if (/[\r\n]/.test(name)) return 'A name is one line.';
   if (name.length > ORDER_LIMITS.buyerName) return `A name has at most ${ORDER_LIMITS.buyerName} characters.`;
   if (address.length > ORDER_LIMITS.buyerAddress) return `An address has at most ${ORDER_LIMITS.buyerAddress} characters.`;
-  if ((name || null) === o.buyer.name && (address || null) === o.buyer.address) return 'Nothing has changed.';
+  // Plan NEXT LOT §3.6.B, in the server's words: the country one of the list, the phone with its country code.
+  if (country && !isCountryCode(country)) return 'Choose a country.';
+  if (phone && !PHONE_RE.test(phone)) return 'Enter a phone number with its country code.';
+  const b = buyerInput(v);
+  if (b.name === o.buyer.name && b.address === o.buyer.address && b.country === (o.buyer.country ?? null) && b.phone === (o.buyer.phone ?? null)) return 'Nothing has changed.';
   return null;
 }
 
-export function buyerInput(v: Record<string, string>): { name: string | null; address: string | null } {
-  return { name: (v.name ?? '').trim() || null, address: (v.address ?? '').replace(/\r\n?/g, '\n').trim() || null };
+/** The Buyer dialog's fields as the server takes them: '' clears one (plan NEXT LOT §3.6.B: the country and the phone too). */
+export function buyerInput(v: Record<string, string>): { name: string | null; address: string | null; country: string | null; phone: string | null } {
+  return {
+    name: (v.name ?? '').trim() || null,
+    address: (v.address ?? '').replace(/\r\n?/g, '\n').trim() || null,
+    country: (v.country ?? '').trim() || null,
+    phone: (v.phone ?? '').trim() || null,
+  };
+}
+
+/** The Buyer dialog's Country: 'Not entered' first, then every country by its English name. */
+export function countryOptions(): { value: string; label: string }[] {
+  return [{ value: '', label: 'Not entered' }, ...COUNTRY_CODES.map((c) => ({ value: c, label: countryName(c) })).sort((a, b) => a.label.localeCompare(b.label, 'en'))];
+}
+
+/**
+ * The Buyer section (plan NEXT LOT §3.6.B): its rows (Name, Address, Country by its English name, Phone, Entered by), the
+ * highlighted line while its address was replaced after it was first entered and it has not shipped, and, for an order
+ * travelling with another, that order's line (its buyer and address are that order's, read only). An AUDITOR reads the
+ * name masked and the address and the phone withheld (`masked`), the country shown.
+ */
+export function buyerSection(o: OrderView, masked: boolean): { rows: { label: string; value: string }[]; changed: string | null; travels: string | null } {
+  const b = o.buyer;
+  const rows = [
+    { label: 'Name', value: b.name ?? 'Not entered' },
+    { label: 'Address', value: b.address ?? 'Not entered' },
+    { label: 'Country', value: b.country ? countryName(b.country) : 'Not entered' },
+    { label: 'Phone', value: b.phone ?? (masked && b.address ? '***' : 'Not entered') },
+  ];
+  if (o.addressBy && o.addressAt) rows.push({ label: 'Entered by', value: `${o.addressBy === 'COLLECTOR' ? 'The client' : 'Client Services'} · ${formatDateTime(o.addressAt)}` });
+  const changed = o.addressChangedAt && HOLDING.includes(o.status) ? `Address changed on ${formatDateTime(o.addressChangedAt)}, after it was first entered: check the parcel’s label.` : null;
+  const travels = o.withOrder ? `Travels with order ${o.withOrder.reference}: its buyer and address are that order’s.` : null;
+  return { rows, changed, travels };
+}
+
+/** The order's engraving (plan NEXT LOT §3.6.C): its words and the price it took (`J.M. · € 30`), the words alone (the release's add-on, or one of before), or None. */
+export function engravingLine(o: Pick<OrderView, 'engravingText' | 'engravingMinor' | 'currency'>): string {
+  if (!o.engravingText) return 'None';
+  return typeof o.engravingMinor === 'number' && o.engravingMinor > 0 && o.currency ? `${o.engravingText} · ${formatMoney(o.engravingMinor, o.currency)}` : o.engravingText;
+}
+
+// ── Settings → Engraving (plan NEXT LOT §3.6.C) ─────────────────────────────
+
+/** A currency's engraving price as Settings shows it: `€ 30`, or — without one (no engraving offered in it). */
+export function engravingPriceText(sheet: EngravingPricesSheet, c: HouseCurrency): string {
+  const p = sheet.prices[c];
+  return typeof p === 'number' ? formatMoney(p, c) : '—';
+}
+
+/** The Engraving dialog's values: each currency's price in units, '' for none. */
+export function engravingPricesValues(sheet: EngravingPricesSheet): Record<string, string> {
+  return Object.fromEntries(HOUSE_CURRENCIES.map((c) => [c, typeof sheet.prices[c] === 'number' ? moneyField(sheet.prices[c]!) : '']));
+}
+
+/** An amount in units, from 0 to the bound (services/club-program.ts PROGRAM_LIMITS.fee), or empty for none. */
+export function engravingPricesProblem(v: Record<string, string>): string | null {
+  for (const c of HOUSE_CURRENCIES) {
+    const t = (v[c] ?? '').trim();
+    if (!t) continue;
+    const minor = parseMoney(t);
+    if (minor === null || minor < 0 || minor > ORDER_AMOUNT_MAX_MINOR) return `${c}: an amount in units, or empty for none.`;
+  }
+  return null;
+}
+
+export function engravingPricesInput(v: Record<string, string>): Record<HouseCurrency, number | null> {
+  return Object.fromEntries(HOUSE_CURRENCIES.map((c) => [c, (v[c] ?? '').trim() ? parseMoney(v[c]!.trim()) : null])) as Record<HouseCurrency, number | null>;
 }
 
 /** The delays' dialog: whole days within their bounds. */

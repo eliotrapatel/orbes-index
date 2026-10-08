@@ -10,6 +10,7 @@ import { ORDER_ALERT_LIMITS, ORDER_LATE_RULES as SERVER_LATE_RULES } from '../..
 import { ORDER_AMOUNT_MAX_MINOR as SERVER_AMOUNT_MAX, ORDER_CURRENCIES as SERVER_CURRENCIES, ORDER_TEXT_LIMITS, trackingLink as serverTrackingLink } from '../../src/server/services/orders.js';
 import { CARRIER_NAME_MAX, checkTrackingUrl, LOCATION_NAME_MAX, STOCK_MOVE_MAX, STOCK_NOTE_MAX, TRACKING_URL_MAX } from '../../src/server/services/stock.js';
 import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
+import { formatMoney } from '../../src/web/admin/model/live.js';
 import { formatCount } from '../../src/web/admin/format.js';
 import { canOpenReturn, caseActions, CASE_REASON_LABELS, decideInput, decideProblem, openCaseInput, openCaseProblem, outcomeOptions, pastReturnWindow } from '../../src/web/admin/model/order-cases.js';
 import { buyerLine, invoiceFilters, invoiceMonths, INVOICE_SEARCH_MAX, KIND_FILTER_LABELS, linkedDocument, monthLabel, signedMoney } from '../../src/web/admin/model/invoices.js';
@@ -20,7 +21,14 @@ import {
   boardFilters,
   buyerInput,
   buyerProblem,
+  buyerSection,
   canChooseGiftSize,
+  countryOptions,
+  engravingLine,
+  engravingPriceText,
+  engravingPricesInput,
+  engravingPricesProblem,
+  engravingPricesValues,
   carrierProblem,
   cardHolds,
   CHANNEL_LABELS,
@@ -327,7 +335,8 @@ describe('what a role may do with an order', () => {
     expect(Object.keys(orderActions(live, 'OPERATOR'))).not.toContain('return');
     const linked = view({ status: 'PAID', paidAt: 'x', skuId: 's', reservation: 'STOCK', productId: 'O26-J-00184' });
     expect(orderActions(linked, 'OPERATOR')).toMatchObject({ location: false, terms: { size: false } });
-    expect(orderActions(view({ status: 'SHIPPED', productId: 'O26-J-00184' }), 'OPERATOR')).toMatchObject({ deliver: true, cancel: false, location: false, buyer: true });
+    // Plan NEXT LOT §3.6.B: the buyer until it ships, as the server takes it (409 ORDER_CLOSED after).
+    expect(orderActions(view({ status: 'SHIPPED', productId: 'O26-J-00184' }), 'OPERATOR')).toMatchObject({ deliver: true, cancel: false, location: false, buyer: false });
     expect(orderActions(view({ status: 'DELIVERED', productId: 'O26-J-00184' }), 'OPERATOR')).toMatchObject({ deliver: false, cancel: false });
     // To the archive (the piece retired): an ADMIN's alone.
     const delivered = view({ status: 'DELIVERED', productId: 'O26-J-00184' });
@@ -368,8 +377,8 @@ describe('what a role may do with an order', () => {
 
     expect(buyerProblem(o, { name: 'Jane\nDoe', address: '' })).toBe('A name is one line.');
     expect(buyerProblem(o, { name: '', address: '' })).toBe('Nothing has changed.');
-    expect(buyerInput({ name: ' Jane Doe ', address: '1 rue de la Paix\r\n75002 Paris ' })).toEqual({ name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris' });
-    expect(buyerInput({ name: '', address: ' ' })).toEqual({ name: null, address: null });
+    expect(buyerInput({ name: ' Jane Doe ', address: '1 rue de la Paix\r\n75002 Paris ' })).toEqual({ name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', country: null, phone: null });
+    expect(buyerInput({ name: '', address: ' ' })).toEqual({ name: null, address: null, country: null, phone: null });
 
     expect(alertsProblem({ reservedDays: '2', readyDays: '3', shippedDays: '10', unregisteredDays: '30' })).toBeNull();
     expect(alertsProblem({ reservedDays: '0', readyDays: '3', shippedDays: '10', unregisteredDays: '30' })).toBe('Reserved: 1 to 90 days.');
@@ -556,5 +565,83 @@ describe('routes and the API client', () => {
     expect(bodies[20]).toEqual({ decision: 'REFUND', pieceTo: 'RESTOCKED', locationId: LOC, note: 'Unworn.' });
     expect(bodies[21]).toEqual({ note: 'Withdrawn.' });
     expect(calls.every((c) => c.init.method === 'GET' || (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
+  });
+});
+
+describe('the Buyer, the engraving and their settings (plan NEXT LOT §3.6.B, C)', () => {
+  /** The space formatMoney sets after the sign. */
+  const NB = formatMoney(100, 'EUR').slice(1, 2);
+  const T = '2026-10-07T12:02:00.000Z';
+  it('says the buyer: name, address, country in English, phone, who entered it and when; the change highlighted until it ships; a travelling order\'s parent', () => {
+    const o = view({ status: 'PAID', buyer: { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', country: 'FR', phone: '+33 6 12 34 56 78' }, addressBy: 'COLLECTOR', addressAt: T, addressChangedAt: '2026-10-08T07:12:00.000Z' });
+    const b = buyerSection(o, false);
+    expect(b.rows).toEqual([
+      { label: 'Name', value: 'Jane Doe' },
+      { label: 'Address', value: '1 rue de la Paix\n75002 Paris' },
+      { label: 'Country', value: 'France' },
+      { label: 'Phone', value: '+33 6 12 34 56 78' },
+      { label: 'Entered by', value: 'The client · 07 OCT 2026 · 12:02 UTC' },
+    ]);
+    expect(b.changed).toBe('Address changed on 08 OCT 2026 · 07:12 UTC, after it was first entered: check the parcel’s label.');
+    expect(b.travels).toBeNull();
+    // Shipped: no highlight any more. Entered by Client Services.
+    expect(buyerSection({ ...o, status: 'SHIPPED', addressBy: 'STAFF' }, false)).toMatchObject({ changed: null, rows: expect.arrayContaining([{ label: 'Entered by', value: 'Client Services · 07 OCT 2026 · 12:02 UTC' }]) });
+    // None entered; an order of before (no country, no phone).
+    expect(buyerSection(view(), false).rows.map((r) => r.value)).toEqual(['Not entered', 'Not entered', 'Not entered', 'Not entered']);
+    // An AUDITOR: the name masked and the address withheld by the server, the phone withheld, the country shown.
+    expect(buyerSection(view({ buyer: { name: 'J*** D***', address: '***', country: 'FR', phone: null } }), true).rows.map((r) => r.value)).toEqual(['J*** D***', '***', 'France', '***']);
+    // Travelling with another: its parent's, read only (no EDIT), its line.
+    const gift = view({ channel: 'GIFT', withOrder: { id: 'p', reference: 'OR-3F9A21C4', shipment: null }, buyer: { name: 'Jane Doe', address: '1 rue', country: 'FR', phone: null } });
+    expect(buyerSection(gift, false).travels).toBe('Travels with order OR-3F9A21C4: its buyer and address are that order’s.');
+    expect(orderActions(gift, 'OPERATOR').buyer).toBe(false);
+    expect(orderActions(view({ status: 'CANCELLED' }), 'OPERATOR').buyer).toBe(false);
+    expect(orderActions(view({ status: 'CANCELLED', gifts: [{ id: 'g', reference: 'OR-1', model: 'M', status: 'RESERVED', sizeToChoose: false, tier: 2 }] }), 'OPERATOR').buyer).toBe(true);
+  });
+
+  it('edits the country and the phone in the server\'s words; empty clears them', () => {
+    const o = view({ buyer: { name: 'Jane Doe', address: '1 rue', country: 'FR', phone: '+33 6 12 34 56 78' } });
+    const same = { name: 'Jane Doe', address: '1 rue', country: 'FR', phone: '+33 6 12 34 56 78' };
+    expect(buyerProblem(o, same)).toBe('Nothing has changed.');
+    expect(buyerProblem(o, { ...same, country: 'XX' })).toBe('Choose a country.');
+    expect(buyerProblem(o, { ...same, phone: '06 12 34 56 78' })).toBe('Enter a phone number with its country code.');
+    expect(buyerProblem(o, { ...same, country: 'BE' })).toBeNull();
+    expect(buyerInput({ ...same, country: '', phone: ' ' })).toEqual({ name: 'Jane Doe', address: '1 rue', country: null, phone: null });
+    const options = countryOptions();
+    expect(options[0]).toEqual({ value: '', label: 'Not entered' });
+    expect(options.find((x) => x.value === 'GB')!.label).toBe('United Kingdom');
+  });
+
+  it('says the engraving with the price it took, or its words alone (the release\'s add-on)', () => {
+    expect(engravingLine({ engravingText: 'J.M.', engravingMinor: 3_000, currency: 'EUR' })).toBe(`J.M. · €${NB}30`);
+    expect(engravingLine({ engravingText: 'J.M.', engravingMinor: null, currency: 'EUR' })).toBe('J.M.');
+    expect(engravingLine({ engravingText: null, engravingMinor: null, currency: 'EUR' })).toBe('None');
+  });
+
+  it('sets the engraving prices per currency: an amount in units, empty for none', () => {
+    const sheet = { prices: { EUR: 3_000, GBP: null, USD: 3_550, CHF: null }, updatedAt: T, updatedBy: { id: 'a', email: 'admin@example.com' } };
+    expect(engravingPriceText(sheet, 'EUR')).toBe(`€${NB}30`);
+    expect(engravingPriceText(sheet, 'GBP')).toBe('—');
+    expect(engravingPricesValues(sheet)).toEqual({ EUR: '30', GBP: '', USD: '35.50', CHF: '' });
+    expect(engravingPricesProblem({ EUR: '30', GBP: '', USD: 'x', CHF: '' })).toBe('USD: an amount in units, or empty for none.');
+    expect(engravingPricesProblem({ EUR: '30', GBP: '', USD: '', CHF: '' })).toBeNull();
+    expect(engravingPricesInput({ EUR: '30', GBP: ' ', USD: '35.50', CHF: '' })).toEqual({ EUR: 3_000, GBP: null, USD: 3_550, CHF: null });
+  });
+
+  it('calls the engraving prices\' routes, the CSRF token on the change', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const api = new AdminApi({
+      fetch: async (url, init = {}) => {
+        calls.push({ url, init });
+        return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
+      },
+    });
+    api.setCsrf('tok');
+    await api.engravingPrices();
+    await api.setEngravingPrices({ EUR: 3_000, GBP: null, USD: null, CHF: null });
+    await api.setOrderBuyer(ID, { name: 'J', address: 'A', country: 'FR', phone: '+33 6 12 34 56 78' });
+    expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual(['GET /api/admin/orders/engraving-prices', 'PUT /api/admin/orders/engraving-prices', `PUT /api/admin/orders/${ID}/buyer`]);
+    expect(JSON.parse(String(calls[1]!.init.body))).toEqual({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } });
+    expect(JSON.parse(String(calls[2]!.init.body))).toEqual({ name: 'J', address: 'A', country: 'FR', phone: '+33 6 12 34 56 78' });
+    expect((calls[1]!.init.headers as Record<string, string>)['x-csrf-token']).toBe('tok');
   });
 });

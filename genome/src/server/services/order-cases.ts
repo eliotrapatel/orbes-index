@@ -132,6 +132,8 @@ export interface OrderCaseRecord {
   /** A parcel problem's shipment, and the orders it carried. */
   shipment: { id: string; orders: { id: string; reference: string }[] } | null;
   messageId: string | null;
+  /** The collector's conversation its request was written into (plan NEXT LOT §3.6.D: the order page links it); null without one. */
+  conversationId: string | null;
   received: { at: Date; pieceState: OrderCasePieceState; note: string | null } | null;
   decision: { at: Date; outcome: OrderCaseOutcome; pieceTo: OrderCasePieceDestination | null; exchangeOrder: { id: string; reference: string } | null; note: string | null } | null;
   /** Its note withheld (null) from an AUDITOR, as every note of the case. */
@@ -262,6 +264,7 @@ export class OrderCaseService {
       exchange = { skuId: c.exchange_sku_id, sizeLabel: c.exchange_size_label, available: sizes.find((s) => s.skuId === c.exchange_sku_id)?.available ?? 0 };
     }
     const items = c.shipment_id ? await db.selectFrom('shipment_items').select('order_id').where('shipment_id', '=', c.shipment_id).orderBy('order_id').execute() : [];
+    const message = c.message_id ? await db.selectFrom('client_messages').select('conversation_id').where('id', '=', c.message_id).executeTakeFirst() : undefined;
     return {
       id: c.id,
       order: { id: order.id, reference: orderReference(order.id) },
@@ -274,6 +277,7 @@ export class OrderCaseService {
       exchange,
       shipment: c.shipment_id ? { id: c.shipment_id, orders: items.map((i) => ({ id: i.order_id, reference: orderReference(i.order_id) })) } : null,
       messageId: c.message_id,
+      conversationId: message?.conversation_id ?? null,
       received: c.received_at && c.piece_state ? { at: c.received_at, pieceState: c.piece_state, note: c.receive_note } : null,
       decision:
         c.closed_at && c.outcome

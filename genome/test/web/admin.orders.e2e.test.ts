@@ -41,7 +41,7 @@ import { ensureSku, recordMovement } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { codeSource, phonePhoto } from '../e2e/support.js';
-import { stockPieces, type StockedPiece } from '../support/fulfil.js';
+import { packAndShip, stockPieces, type StockedPiece } from '../support/fulfil.js';
 import { writePng } from '../support/image-io.js';
 import { jpegPhoto } from '../support/images.js';
 import { createAccount, holdPieces } from '../support/live.js';
@@ -350,8 +350,19 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.click('[data-testid=order-buyer]');
     await p.fill('dialog input[name=name]', 'Jane Doe');
     await p.fill('dialog textarea[name=address]', '1 rue de la Paix\n75002 Paris\nFrance');
+    // Plan NEXT LOT §3.6.B: the country and the phone, in the server's words before it says them.
+    await p.selectOption('dialog select[name=country]', 'FR');
+    await p.fill('dialog input[name=phone]', '01 23 45 67 89');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Enter a phone number with its country code.');
+    await p.fill('dialog input[name=phone]', '+33 1 23 45 67 89');
     await confirmDialog(p);
     await expect.poll(() => p.locator('[data-testid=buyer-name]').textContent()).toBe('Jane Doe');
+    expect(await p.locator('[data-testid=buyer-country]').textContent()).toBe('France');
+    expect(await p.locator('[data-testid=buyer-phone]').textContent()).toBe('+33 1 23 45 67 89');
+    expect(await p.locator('[data-testid=buyer-entered-by]').textContent()).toMatch(/^Client Services · \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
+    // Entered once: no change to highlight yet.
+    expect(await p.locator('[data-testid=buyer-changed]').count()).toBe(0);
     await p.click('[data-testid=order-pay]');
     await p.fill('dialog textarea[name=note]', 'Paid by transfer.');
     expect(await p.locator('dialog [data-testid=pay-no-buyer]').count()).toBe(0);
@@ -365,9 +376,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     const late = await ctx.db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', o.late).executeTakeFirstOrThrow();
     const [made] = await stockPieces(ctx, { skuId: late.sku_id!, locationId: late.location_id, count: 1, material: '925 STERLING SILVER', forOrderIds: [o.late] }, admin);
     lateClaim = made!.claimCode!;
-    // Its delivery country, without which it is not packed (plan NEXT LOT §1.1 (d)); the Buyer dialog's Country and
-    // Phone come with step 6.11, so it is entered through the service here.
-    await ctx.services.orders.setBuyer(o.late, { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris\nFrance', country: 'FR' }, admin);
+    // Its delivery country, without which it is not packed (plan NEXT LOT §1.1 (d)), entered above in the Buyer dialog.
     await p.reload();
     await expect.poll(() => p.locator('[data-testid=order-holds]').textContent()).toBe('In stock at FRANCE WAREHOUSE');
     expect(await p.locator('[data-testid=order-link]').count()).toBe(0);
@@ -628,6 +637,21 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => p.locator('[data-testid="rate-EUR-STANDARD"]').textContent()).toBe('—');
     expect(await ctx.db.selectFrom('shipping_rates').selectAll().execute()).toEqual([]);
 
+    // ENGRAVING (plan NEXT LOT §3.6.C), beside Shipping: none preset; a price set, refused when it is not an amount.
+    const engraving = p.locator('#settings-engraving tbody [data-testid^="engraving-"]');
+    expect(await engraving.allTextContents()).toEqual(['—', '—', '—', '—']);
+    expect(await p.locator('#settings-engraving').textContent()).toContain('What an engraving costs, per currency. A currency without a price offers no engraving to clients.');
+    await p.click('[data-testid=engraving-edit]');
+    await p.fill('dialog input[name=EUR]', 'thirty');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('EUR: an amount in units, or empty for none.');
+    await p.fill('dialog input[name=EUR]', '30');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=engraving-EUR]').textContent()).toBe('€\u00a030');
+    expect(await engraving.allTextContents()).toEqual(['€\u00a030', '—', '—', '—']);
+    expect(await ctx.db.selectFrom('engraving_prices').select(['currency', 'price_minor']).execute()).toEqual([{ currency: 'EUR', price_minor: 3000 }]);
+    await shot(p, 'settings-engraving');
+
     // The board says the new delay: the order of three days ago is no longer late.
     await go(p, '#/orders', 'Orders');
     expect(await p.locator('[data-testid=orders-summary]').textContent()).toContain('Reserved 5 days');
@@ -644,6 +668,9 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await go(a, `#/orders/${o.late}`, orderReference(o.late));
     expect(await a.locator('[data-testid=buyer-name]').textContent()).toBe('J*** D***');
     expect(await a.locator('[data-testid=buyer-address]').textContent()).toBe('***');
+    // Plan NEXT LOT §3.6.B: the phone withheld, the country shown (a country alone names no one).
+    expect(await a.locator('[data-testid=buyer-phone]').textContent()).toBe('***');
+    expect(await a.locator('[data-testid=buyer-country]').textContent()).toBe('France');
     for (const action of ['order-pay', 'order-ship', 'order-deliver', 'order-cancel', 'order-return', 'order-terms', 'order-buyer', 'order-location', 'order-link']) {
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
@@ -666,7 +693,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
     await go(a, '#/settings', 'Settings');
-    for (const action of ['alerts-edit', 'carrier-add', 'carrier-edit', 'location-add', 'location-rename', 'shipping-edit']) {
+    for (const action of ['alerts-edit', 'carrier-add', 'carrier-edit', 'location-add', 'location-rename', 'shipping-edit', 'engraving-edit']) {
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
     expect(await figuresInDisplayFace(a)).toEqual([]);
@@ -723,6 +750,9 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(orderReference(giftOrder));
     expect(await p.locator('.page-head').textContent()).toContain(`Welcome gift · PLATINE · travels with ${orderReference(parent)}`);
     expect(await p.locator('[data-testid=order-pay]').count()).toBe(0);
+    // Plan NEXT LOT §3.6.B: it travels with its order, whose buyer and address are its own: read only, no EDIT.
+    expect(await p.locator('[data-testid=buyer-travels]').textContent()).toBe(`Travels with order ${orderReference(parent)}: its buyer and address are that order’s.`);
+    expect(await p.locator('[data-testid=order-buyer]').count()).toBe(0);
     expect(await p.locator('#order-step').textContent()).toContain('Its size is to be chosen.');
     expect(await p.locator('[data-testid=order-size]').textContent()).toBe('To be confirmed');
     // CHOOSE SIZE, its own dialog; EDIT holds no size.
@@ -800,5 +830,76 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await csp(p)).toEqual([]);
     await shot(p, 'order-shipped-before-logistics');
     await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('reads the collector\'s side of an order (plan NEXT LOT §3.6): the address the client entered and changed, highlighted; the engraving at its price with its own invoice; the exchange the client asked in Order case with its conversation; the SIZE EXCHANGE order', async () => {
+    const { services, db } = ctx;
+    const france = (await db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    const colissimo = (await db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
+    // The engraving's price in euros, as Settings set it (above).
+    await services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, admin);
+    const sale = await salonOrder('60');
+    const account = (await db.selectFrom('orders').select('account_id').where('id', '=', sale.id).executeTakeFirstOrThrow()).account_id;
+    const client = { type: 'account' as const, id: account };
+    await services.orders.setTerms(sale.id, { sizeLabel: '60', priceMinor: 420_000, currency: 'EUR' }, admin);
+    await services.orders.setAddress(account, sale.id, { address: { name: 'Camille Laurent', address: '8 rue Saint-Honoré\n75001 Paris', country: 'FR', phone: '+33 6 12 34 56 78' }, save: false }, client);
+    await services.orders.transition(sale.id, { to: 'PAID' }, admin);
+    const sku60 = await inTransaction(db, (tx) => ensureSku(tx, modelId, '60'));
+    await stockPieces(ctx, { skuId: sku60, locationId: france, count: 1, material: '925 STERLING SILVER', forOrderIds: [sale.id] }, admin);
+    // After payment: the client's engraving at the settings' price (its own invoice), then the address changed.
+    await services.orders.setEngraving(account, sale.id, 'J.M.', client);
+    await services.orders.setAddress(account, sale.id, { address: { name: 'Camille Laurent', address: '25 Old Bond Street\nLondon W1S 4QB', country: 'GB', phone: '+44 20 7946 0000' }, save: false }, client);
+
+    const p = await open(OPERATOR);
+    await go(p, `#/orders/${sale.id}`, orderReference(sale.id));
+    expect(await p.locator('[data-testid=buyer-country]').textContent()).toBe('United Kingdom');
+    expect(await p.locator('[data-testid=buyer-phone]').textContent()).toBe('+44 20 7946 0000');
+    expect(await p.locator('[data-testid=buyer-entered-by]').textContent()).toMatch(/^The client · \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC$/);
+    expect(await p.locator('[data-testid=buyer-changed]').textContent()).toMatch(/^ADDRESS CHANGED Address changed on \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} UTC, after it was first entered: check the parcel’s label\.$/);
+    expect(await p.locator('[data-testid=order-engraving]').textContent()).toBe('J.M. · €\u00a030');
+    // Its invoice and the engraving's own (a supplementary invoice).
+    await expect.poll(() => p.locator('#order-documents tbody tr').count()).toBe(2);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'order-buyer-engraving');
+
+    // Shipped and delivered; the client asks to exchange the size for 62, in stock.
+    await packAndShip(ctx, sale.id, { carrierId: colissimo, trackingNumber: '6A12345678960' }, admin);
+    expect(await p.locator('[data-testid=buyer-changed]').count()).toBe(1);
+    await services.orders.transition(sale.id, { to: 'DELIVERED' }, admin);
+    const sku62 = await inTransaction(db, (tx) => ensureSku(tx, modelId, '62'));
+    await stockPieces(ctx, { skuId: sku62, locationId: france, count: 1, material: '925 STERLING SILVER' }, admin);
+    await services.orderCases.request(account, sale.id, { kind: 'EXCHANGE', reason: 'SIZE', note: 'One size larger, please.', sizeLabel: '62' }, client);
+    await p.reload();
+    await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(orderReference(sale.id));
+    // Shipped: the change no longer highlighted.
+    expect(await p.locator('[data-testid=buyer-changed]').count()).toBe(0);
+    const c = p.locator('#order-case [data-testid=order-case]');
+    await expect.poll(() => c.locator('[data-testid=order-case-kind]').textContent()).toBe('SIZE EXCHANGE');
+    const lines = (await c.locator('dd').allTextContents()).join(' | ');
+    expect(lines).toMatch(/by the collector/);
+    expect(lines).toContain('The size does not fit');
+    expect(lines).toContain('62 · 1 in stock');
+    expect(lines).toContain('One size larger, please.');
+    const conversation = (await db.selectFrom('client_conversations').select('id').where('account_id', '=', account).executeTakeFirstOrThrow()).id;
+    expect(await c.locator('[data-testid=order-case-conversation]').getAttribute('href')).toBe(`#/messages/${conversation}`);
+    await shot(p, 'order-case-collector');
+
+    // ORBES decides once the agent has the piece back: the other size as an order of its own, SIZE EXCHANGE.
+    const caseId = (await db.selectFrom('order_cases').select('id').where('order_id', '=', sale.id).executeTakeFirstOrThrow()).id;
+    await services.orderCases.receive(caseId, { pieceState: 'OK' }, admin, null);
+    const decided = await services.orderCases.decide(caseId, { decision: 'EXCHANGE', pieceTo: 'RESTOCKED', locationId: france, note: 'Unworn.' }, admin, { admin: false });
+    const exchange = decided.case.decision!.exchangeOrder!.id;
+    await go(p, `#/orders/${exchange}`, orderReference(exchange));
+    expect(await p.locator('#order-facts').textContent()).toContain('SIZE EXCHANGE');
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+
+    // An AUDITOR: the client's note withheld; the conversation still linked.
+    const a = await open(AUDITOR);
+    await go(a, `#/orders/${sale.id}`, orderReference(sale.id));
+    await expect.poll(() => a.locator('#order-case [data-testid=order-case]').count()).toBe(1);
+    expect(await a.locator('#order-case').textContent()).not.toContain('One size larger, please.');
+    expect(await a.locator('[data-testid=buyer-phone]').textContent()).toBe('***');
+    await a.context().close();
   }, STEP_TIMEOUT);
 });

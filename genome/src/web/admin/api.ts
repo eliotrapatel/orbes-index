@@ -140,6 +140,8 @@ import type {
   OwnerList,
   ShippingRate,
   ShippingRatesSheet,
+  EngravingPricesSheet,
+  HouseCurrency,
   ShopifyLink,
   ShopifyProduct,
   OwnerLock,
@@ -1110,8 +1112,8 @@ export class AdminApi {
     return this.request('DELETE', `/api/admin/orders/${encodeURIComponent(id)}/credit`);
   }
 
-  /** OPERATOR: the buyer's name and address (null clears one). */
-  setOrderBuyer(id: string, buyer: { name: string | null; address: string | null }): Promise<OrderDetail> {
+  /** OPERATOR: the buyer's name and address (null clears one); plan NEXT LOT §3.6.B: its country and phone (null clears one, left out kept). */
+  setOrderBuyer(id: string, buyer: { name: string | null; address: string | null; country?: string | null; phone?: string | null }): Promise<OrderDetail> {
     return this.request('PUT', `/api/admin/orders/${encodeURIComponent(id)}/buyer`, { body: buyer });
   }
 
@@ -1215,6 +1217,16 @@ export class AdminApi {
   /** ADMIN: the rates set whole; a rate left out is cleared. */
   setShippingRates(rates: ShippingRate[]): Promise<ShippingRatesSheet> {
     return this.request('PUT', '/api/admin/orders/shipping-rates', { body: { rates } });
+  }
+
+  /** ENGRAVING (plan NEXT LOT §3.6.C): the engraving's price per currency. */
+  engravingPrices(): Promise<EngravingPricesSheet> {
+    return this.get('/api/admin/orders/engraving-prices');
+  }
+
+  /** ADMIN: the engraving's prices set whole; null: no engraving in that currency. */
+  setEngravingPrices(prices: Record<HouseCurrency, number | null>): Promise<EngravingPricesSheet> {
+    return this.request('PUT', '/api/admin/orders/engraving-prices', { body: { prices } });
   }
 
   // ── Locations and carriers ───────────────────────────────────────────────
