@@ -94,7 +94,8 @@ export type DemoVariant =
   | 'stress'
   | 'empty'
   | 'pairs'
-  | 'claim-waiting';
+  | 'claim-waiting'
+  | 'draw-sizes';
 
 export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'full',
@@ -112,6 +113,7 @@ export const DEMO_VARIANTS: readonly DemoVariant[] = Object.freeze([
   'empty',
   'pairs',
   'claim-waiting',
+  'draw-sizes',
 ]);
 
 /** NOW: Monday 5 October 2026, 18:49 in Paris (16:49 UTC), the boards' afternoon. Every clock of the stage is fixed here. */
@@ -212,7 +214,8 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
   };
   // The pairs stage (plan NEXT-NINE, BP-34) tells the full story, then the console picks MONOLITHE's pairs; the
   // claim-waiting stage (plan NEXT LOT §3.4) tells the full story, its state writing the rest.
-  const story: Exclude<DemoVariant, 'pairs' | 'claim-waiting'> = variant === 'pairs' || variant === 'claim-waiting' ? 'full' : variant;
+  // The draw-sizes stage (plan NEXT LOT §3.6.F) tells the full story, then adds a draw in sizes, open.
+  const story: Exclude<DemoVariant, 'pairs' | 'claim-waiting' | 'draw-sizes'> = variant === 'pairs' || variant === 'claim-waiting' || variant === 'draw-sizes' ? 'full' : variant;
   if (story === 'empty') await seedEmpty(w);
   else if (story === 'stress') await seedStress(w);
   else {
@@ -228,6 +231,7 @@ export async function seedNocturne(ctx: AppContext, clock: ManualClock, variant:
     if (story === 'full' || story === 'room' || story === 'draws') await seedGuarantees(w, story);
     if (story === 'full' || story === 'room') await seedSizes(w, story);
     if (variant === 'pairs') await seedPairs(w);
+    if (variant === 'draw-sizes') await seedDrawSizes(w);
   }
   clock.set(NOCTURNE_NOW);
   // Every account's session opened now: a capture signs in with its cookie.
@@ -1109,6 +1113,42 @@ async function seedGuarantees(w: World, variant: 'full' | 'room' | 'draws'): Pro
  * HALO in size 54; `sizer`, without a piece, who saves and clears its sizes in the writes. In the room: `sized`, TITANE,
  * a bracelet of 17 cm saved and no I'LL BE THERE (its room preselects 17, TO CONFIRM).
  */
+/**
+ * Plan NEXT LOT §3.6.F, the draw-sizes stage: MONOLITHE in steel drawn in its sizes, 16 (3 pieces), 17 (5) and 18 (1),
+ * published on 2 October with an early access of 24 hours for both tiers, in which the PLATINE account reserved the one
+ * piece of 18 (FULL, 1 RESERVED DIRECTLY); entries open since 4 October 10:00 UTC, closing on 9 October 18:00 UTC. The
+ * account with its sizes saved (BRACELET 17) reads it with its size preselected from YOUR SIZES.
+ */
+async function seedDrawSizes(w: World): Promise<void> {
+  const { ctx, admin, clock, demo } = w;
+  clock.set(at('2026-10-02T09:00:00Z'));
+  const created = await ctx.services.drops.create(
+    {
+      modelId: w.models.steel!,
+      title: 'MONOLITHE, A DRAW IN SIZES',
+      description: 'Nine pieces of MONOLITHE in steel, each in its size, drawn among the entries of October.',
+      sizes: [
+        { label: '16', pieces: 3 },
+        { label: '17', pieces: 5 },
+        { label: '18', pieces: 1 },
+      ],
+      opensAt: at('2026-10-04T10:00:00Z'),
+      closesAt: at('2026-10-09T18:00:00Z'),
+      purchaseWindowHours: 48,
+      earlyAccessHours: 24,
+      earlyAccessPlatineHours: 24,
+      priceMinor: 420_000,
+      currency: 'EUR',
+    },
+    admin,
+  );
+  const d = await ctx.services.drops.publish(created.id, admin);
+  clock.set(at('2026-10-03T12:00:00Z'));
+  const platine = demo.accounts.platine!;
+  await ctx.services.drops.reserve(platine.id, d.id, platine.actor, { sizeId: d.sizes.find((z) => z.label === '18')!.id });
+  demo.releases.drawSizes = d.id;
+}
+
 async function seedSizes(w: World, variant: 'full' | 'room'): Promise<void> {
   const { ctx, admin, clock } = w;
   clock.set(at('2026-10-05T12:00:00Z'));

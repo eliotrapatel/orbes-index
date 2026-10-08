@@ -46,6 +46,8 @@ const NARROW_TOO = [
   'sizes-view', 'model-salon-sizes', 'model-salon-size-requested', 'live-announced-from-yours',
   // HOW RELEASES WORK (plan NEXT-NINE, FT-01): its terms and THE TIERS' rows at 375, 360 and 320 px too.
   'releases-how',
+  // A draw in sizes (plan NEXT LOT §3.6.F): its SIZES row, YOUR SIZE's picker and YOUR SIZES' lines, at 375, 360 and 320 px too.
+  'draw-sizes',
 ];
 /** Of NARROW_TOO, opened at the stage's 390 px only: the LIVE room with the guarantee's line. */
 const STAGE_ONLY = ['room-guaranteed'];

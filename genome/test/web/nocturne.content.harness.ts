@@ -113,9 +113,10 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   circle: (s) => full(s) && !s.mutates && named('circle', 'post', 'legal', 'certificate')(s),
   writes: (s) => full(s) && !!s.mutates,
   room: (s) => ROOM_VARIANTS.includes(s.variant),
-  draws: (s) => s.variant === 'draws',
+  // The draws in every state; a draw in sizes (plan NEXT LOT §3.6.F), on its own stage.
+  draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'stress' && s.variant !== 'pairs' && s.variant !== 'claim-waiting' && !named('account')(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && s.variant !== 'claim-waiting' && !named('account')(s),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */

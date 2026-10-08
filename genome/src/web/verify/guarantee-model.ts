@@ -5,7 +5,7 @@
  * app (the server leaves out the others): one not shown leaves no mark for its holder anywhere. Every word is
  * copy.ts GUARANTEE's.
  */
-import { GUARANTEE } from './copy.js';
+import { GUARANTEE, RELEASES } from './copy.js';
 import { releasePath } from './releases-model.js';
 import type { ClubEntry, ClubGuarantee, ClubStatus, DropState } from './types.js';
 import { formatDateLong } from './view-model.js';
@@ -91,8 +91,13 @@ export interface GuaranteedLine {
  * GUARANTEED BY THE HOUSE: the release's guaranteed places (the page's `guaranteed`, by entry id), YOURS only from the
  * account's own entry when it says `guaranteed: true` (a guarantee shown to it); never from the list itself.
  */
-export function guaranteedLines(items: readonly { id: string; pieces: number }[] | undefined, own: Pick<ClubEntry, 'id'> & { guaranteed?: boolean } | null): GuaranteedLine[] {
+export function guaranteedLines(items: readonly { id: string; pieces: number; size?: { id: string; label: string } | null }[] | undefined, own: Pick<ClubEntry, 'id'> & { guaranteed?: boolean } | null): GuaranteedLine[] {
   return (Array.isArray(items) ? items : [])
     .filter((x) => x && typeof x.id === 'string' && UUID.test(x.id))
-    .map((x) => ({ id: x.id, line: GUARANTEE.list.line(piecesOf(x.pieces)), yours: own !== null && own.guaranteed === true && own.id === x.id }));
+    .map((x) => {
+      const line = GUARANTEE.list.line(piecesOf(x.pieces));
+      // Plan NEXT LOT §3.6.F: in a draw with sizes, each place's size (`GUARANTEED · 2 PIECES · SIZE 17`).
+      const size = x.size && typeof x.size.label === 'string' && x.size.label.trim() ? x.size.label : null;
+      return { id: x.id, line: size ? RELEASES.entryLineIn(line, size) : line, yours: own !== null && own.guaranteed === true && own.id === x.id };
+    });
 }

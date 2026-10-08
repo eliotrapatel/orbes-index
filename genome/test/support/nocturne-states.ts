@@ -1068,6 +1068,16 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'draw-full', title: 'A draw in its early access, every piece reserved: EVERY PIECE RESERVED, the waiting list after', refs: ['C42'], variant: 'draws', as: you, path: release('full'), ready: '.view--release .release__status' },
   { id: 'draw-place-reserved', title: 'A PLATINE account’s direct reservation: PLACE RESERVED, held until …, ORBES Client Services', refs: ['C42', 'C31'], variant: 'draws', as: 'platine', path: release('full'), ready: '.view--release:has(.release__status) .n-story__open:not([hidden])' },
   { id: 'draw-open-full', title: 'A draw open, every piece reserved: you may still enter, the waiting list', refs: ['C19'], variant: 'draws', as: you, path: release('openFull'), ready: '.view--release .release__status' },
+  // Plan NEXT LOT §3.6.F: a draw in sizes, open, its SIZES row, its own rule, YOUR SIZE preselected from YOUR SIZES.
+  {
+    id: 'draw-sizes',
+    title: 'A draw in sizes, entries open: SIZES (18 FULL, reserved directly), YOUR SIZE preselected from YOUR SIZES, ENTER THE DRAW',
+    refs: ['NEXT LOT §3.6.F'],
+    variant: 'draw-sizes',
+    as: 'sized',
+    path: release('drawSizes'),
+    ready: '.view--release .release__sizes',
+  },
   {
     id: 'pieces-draws',
     title: 'MY PIECES of a collector with a draw in each state (PLACE HELD, WAITING LIST, LAPSED, CONCLUDED, ENTERED, WITHDRAWN, CANCELLED) and an order PAID',

@@ -21,13 +21,19 @@
  *    opens, the places reserved directly), and, for an account PLATINE or
  *    PALLADIUM while it lasts, RESERVE A PLACE; a release whose every piece
  *    is reserved says so.
+ *  - Sizes in a draw (plan NEXT LOT §3.6.F): its SIZES row (each size's
+ *    pieces, the places reserved directly in it, FULL), its own rule, the
+ *    list's size of each entry, YOUR SIZE's picker preselected (the entry's
+ *    size, YOUR SIZES', the only one) with the sizes full greyed out during
+ *    the early access, and every label and sentence of an entry with its
+ *    size. A draw without sizes reads as before.
  *
  * Nothing the server did not send: a photograph is taken from this origin's
  * media route only, an address only if it is one.
  */
 import { isLookbookSlug } from '../shared/lookbook.js';
 import { RELEASES } from './copy.js';
-import type { ClubEntry, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease } from './types.js';
+import type { ClubEntry, DrawSizeRef, DropCard, DropEntryStatus, DropSheet, DropState, DrawEntry, Participation, PastRelease } from './types.js';
 import { formatDate, formatDateTime, formatDateTimeLong, formatMoney, modelWithVariant, upper, utcOffsetLabel } from './view-model.js';
 import { releaseContext, type WriteContext } from './messages-model.js';
 import { storyCardModel, type StoryCardModel } from './story-card.js';
@@ -194,6 +200,17 @@ export interface ReleaseRow {
   label: string;
   value: string;
   local?: string | null;
+  /** Plan NEXT LOT §3.6.F: the SIZES row's further lines, one per size after the first (`value`). */
+  more?: string[];
+}
+
+/** A draw's size on its page (plan NEXT LOT §3.6.F): its pieces, those reserved directly in it, full before the draw. */
+export interface DrawSizeModel {
+  id: string;
+  label: string;
+  pieces: number;
+  reserved: number;
+  full: boolean;
 }
 
 export interface ReleaseSheetModel {
@@ -229,8 +246,12 @@ export interface ReleaseSheetModel {
   seedHex: string | null;
   seedHashHex: string;
   drawn: boolean;
-  /** IN-01: once drawn, the places guaranteed by the house, by entry id and pieces (never an account). */
-  guaranteed: { id: string; pieces: number }[];
+  /** IN-01: once drawn, the places guaranteed by the house, by entry id and pieces (never an account); their size (§3.6.F). */
+  guaranteed: { id: string; pieces: number; size?: DrawSizeRef | null }[];
+  /** Plan NEXT LOT §3.6.F: its sizes with pieces, in order; empty for a draw without sizes (one published before). */
+  sizes: DrawSizeModel[];
+  /** The rule of its draw, word for word: a draw with sizes has its own. */
+  rule: string;
 }
 
 /** Hexadecimal in groups of four, for reading and comparing by eye. */
@@ -247,6 +268,14 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
   const reserved = Number.isInteger(s.reserved) && s.reserved > 0 ? s.reserved : 0;
   const price = drawPrice(s);
   const rows: ReleaseRow[] = [...(price ? [{ label: RELEASES.rows.price, value: price }] : []), { label: RELEASES.rows.pieces, value: String(quantity) }];
+  // Plan NEXT LOT §3.6.F: each size's pieces, public; the places reserved directly in it from the early access on (and
+  // once drawn), FULL before the draw. A one-size draw has no SIZES row.
+  const sizes = drawSizes(s);
+  const reservedShown = early !== null && (early.open || state !== 'UPCOMING');
+  if (sizes.length > 1) {
+    const lines = sizes.map((z) => RELEASES.sizes.line(z.label, z.pieces, reservedShown ? z.reserved : 0, z.full));
+    rows.push({ label: RELEASES.rows.sizes, value: lines[0]!, more: lines.slice(1) });
+  }
   const earlyAt = early ? twoClocks(early.opensAt, offsetMinutes) : null;
   const platineAt = early?.platineOpensAt ? twoClocks(early.platineOpensAt, offsetMinutes) : null;
   // BP-19 T3: the EARLY ACCESS row gives each tier's hours; the line under the state gives their times.
@@ -291,7 +320,50 @@ export function releaseSheet(s: DropSheet, offsetMinutes: number): ReleaseSheetM
     seedHex,
     drawn: state === 'DRAWN',
     guaranteed: state === 'DRAWN' && Array.isArray(s.guaranteed) ? s.guaranteed.filter((x) => x && isReleaseId(x.id) && Number.isInteger(x.pieces)) : [],
+    sizes,
+    rule: sizes.length > 0 ? RELEASES.ruleSizes : RELEASES.rule,
   };
+}
+
+/** A draw's sizes with pieces, as the server sent them (plan NEXT LOT §3.6.F); none for a draw without sizes. */
+export function drawSizes(s: Pick<DropSheet, 'sizes' | 'state'>): DrawSizeModel[] {
+  const open = stateOf(s.state) !== 'DRAWN' && stateOf(s.state) !== 'CANCELLED';
+  return (Array.isArray(s.sizes) ? s.sizes : [])
+    .filter((z) => z && typeof z.id === 'string' && typeof z.label === 'string' && z.label.trim() !== '' && Number.isInteger(z.pieces) && z.pieces > 0)
+    .map((z) => ({ id: z.id, label: z.label.trim(), pieces: z.pieces, reserved: Number.isInteger(z.reserved) && z.reserved > 0 ? z.reserved : 0, full: open && z.full === true }));
+}
+
+/** Where YOUR SIZE's first size comes from: the entry's, YOUR SIZES' (to be confirmed), the only one. */
+export type DrawPickFrom = 'entry' | 'saved' | 'only';
+
+/**
+ * The size preselected in a draw's picker, in this order (plan NEXT LOT §3.6.F): the entry's (one withdrawn included:
+ * its size is asked again, preselected), the one YOUR SIZES suggests (the server's `savedSize`), the only size; null
+ * otherwise (the collector picks one). A size no longer among the draw's is never preselected.
+ */
+export function drawPick(sizes: readonly DrawSizeModel[], entry: { size?: DrawSizeRef | null } | null, savedSize: DrawSizeRef | null): { sizeId: string | null; from: DrawPickFrom | null } {
+  const known = (id: string | undefined | null) => typeof id === 'string' && sizes.some((z) => z.id === id);
+  if (entry?.size && known(entry.size.id)) return { sizeId: entry.size.id, from: 'entry' };
+  if (savedSize && known(savedSize.id)) return { sizeId: savedSize.id, from: 'saved' };
+  return sizes.length === 1 ? { sizeId: sizes[0]!.id, from: 'only' } : { sizeId: null, from: null };
+}
+
+/**
+ * YOUR SIZE's buttons: each size with pieces, the one picked; during the early access (RESERVE A PLACE) a size whose
+ * pieces are all reserved cannot be picked (`unavailable`, its aria-label saying so); while entries are open it stays
+ * open to an entry.
+ */
+export function drawSizeChoices(sizes: readonly DrawSizeModel[], picked: string | null, mode: 'enter' | 'reserve'): { id: string; label: string; selected: boolean; unavailable: boolean; aria: string | null }[] {
+  return sizes.map((z) => {
+    const unavailable = mode === 'reserve' && z.full;
+    return { id: z.id, label: z.label, selected: z.id === picked, unavailable, aria: unavailable ? RELEASES.sizes.full(z.label) : null };
+  });
+}
+
+/** Under YOUR SIZE while entries are open: a size picked whose pieces are all reserved, said with its waiting list; else null. */
+export function drawPickNote(sizes: readonly DrawSizeModel[], picked: string | null, state: DropState): string | null {
+  const z = sizes.find((x) => x.id === picked);
+  return z && z.full && state === 'OPEN' ? RELEASES.sizes.openFull(z.label) : null;
 }
 
 /** The name of a tier as the draw's list says it: 0 is no tier. */
@@ -307,11 +379,15 @@ export interface DrawLine {
   yours: boolean;
 }
 
-/** The draw's list as the page shows it: one line per entry, the account's own marked. */
+/** The draw's list as the page shows it: one line per entry, the account's own marked; its size (plan NEXT LOT §3.6.F). */
 export function drawLines(entries: readonly DrawEntry[], yours: string | null): DrawLine[] {
   return entries
     .filter((e) => isReleaseId(e?.id) && Number.isInteger(e.rank) && e.rank >= 1)
-    .map((e) => ({ id: e.id, rank: e.rank, line: RELEASES.entryLine(e.rank, tierLabel(e.tier), Math.max(0, Math.trunc(e.seniority) || 0)), yours: e.id === yours }));
+    .map((e) => {
+      const line = RELEASES.entryLine(e.rank, tierLabel(e.tier), Math.max(0, Math.trunc(e.seniority) || 0));
+      const size = e.size && typeof e.size.label === 'string' && e.size.label.trim() ? e.size.label.trim() : null;
+      return { id: e.id, rank: e.rank, line: size ? RELEASES.entryLineIn(line, size) : line, yours: e.id === yours };
+    });
 }
 
 /** What the account's entry (or none) means now, and what it may do: ENTER THE DRAW, WITHDRAW, RESERVE A PLACE, or nothing. */
@@ -351,7 +427,7 @@ function reservingTier(tier: number | undefined): string | null {
  */
 export function entryModel(
   release: { id: string; title: string; state: DropState; opensAt: string; earlyAccess?: EarlyAccess | null; full?: boolean },
-  entry: (Pick<ClubEntry, 'id' | 'status' | 'rank' | 'respondBy'> & { reserved?: boolean }) | null,
+  entry: (Pick<ClubEntry, 'id' | 'status' | 'rank' | 'respondBy'> & { reserved?: boolean; size?: DrawSizeRef | null }) | null,
   opts: { offsetMinutes: number; tier?: number },
 ): EntryModel {
   const st = RELEASES.status;
@@ -389,24 +465,27 @@ export function entryModel(
     }
   }
   const reserved = entry.reserved === true && entry.status === 'SELECTED';
-  const label = reserved ? RELEASES.reservedLabel : (RELEASES.statusLabel[entry.status as DropEntryStatus] ?? null);
+  const status = reserved ? RELEASES.reservedLabel : (RELEASES.statusLabel[entry.status as DropEntryStatus] ?? null);
+  // Plan NEXT LOT §3.6.F: an entry in a draw with sizes says its size, on its label line and in its sentence.
+  const size = entry.size && typeof entry.size.label === 'string' && entry.size.label.trim() ? entry.size.label.trim() : null;
+  const label = status && size ? RELEASES.sizes.label(status, size) : status;
   const base = { label, entryId: isReleaseId(entry.id) ? entry.id : null, canEnter: false, canWithdraw: false, canReserve: false, write: null };
   if (release.state === 'CANCELLED') return { ...base, sentence: st.cancelled };
   switch (entry.status) {
     case 'ENTERED':
-      return { ...base, sentence: open ? st.entered : st.enteredClosed, canWithdraw: release.state === 'OPEN' || release.state === 'CLOSED' };
+      return { ...base, sentence: open ? (size ? st.enteredIn(size) : st.entered) : st.enteredClosed, canWithdraw: release.state === 'OPEN' || release.state === 'CLOSED' };
     case 'WITHDRAWN':
       return { ...base, sentence: open ? st.withdrawn : st.withdrawnClosed, canEnter: open };
     case 'SELECTED': {
       const until = entry.respondBy ? inSentence(entry.respondBy, opts.offsetMinutes) : '';
       return {
         ...base,
-        sentence: reserved ? st.reserved(until) : st.selected(until),
+        sentence: reserved ? (size ? st.reservedIn(size, until) : st.reserved(until)) : size ? st.selectedIn(size, until) : st.selected(until),
         write: releaseContext(release.id, release.title, label),
       };
     }
     case 'WAITLISTED':
-      return { ...base, sentence: st.waitlisted(entry.rank ?? 0) };
+      return { ...base, sentence: size ? st.waitlistedIn(size, entry.rank ?? 0) : st.waitlisted(entry.rank ?? 0) };
     case 'CONFIRMED':
       return { ...base, sentence: st.confirmed, write: releaseContext(release.id, release.title, label) };
     default:

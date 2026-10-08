@@ -1047,7 +1047,21 @@ export const RELEASES = Object.freeze({
   opensLine: (pieces: string, time: string) => `${pieces} · ENTRIES OPEN ${time} UTC`,
   closesLine: (pieces: string, time: string) => `${pieces} · ENTRIES CLOSE ${time} UTC`,
   section: Object.freeze({ release: 'THE RELEASE', entry: 'YOUR ENTRY', draw: 'THE DRAW', entries: 'THE ENTRIES' }),
-  rows: Object.freeze({ model: 'MODEL', price: 'PRICE', pieces: 'PIECES', early: 'EARLY ACCESS', opens: 'ENTRIES OPEN', closes: 'ENTRIES CLOSE', held: 'PLACE HELD', reserved: 'RESERVED DIRECTLY', drawn: 'DRAWN' }),
+  rows: Object.freeze({ model: 'MODEL', price: 'PRICE', pieces: 'PIECES', sizes: 'SIZES', early: 'EARLY ACCESS', opens: 'ENTRIES OPEN', closes: 'ENTRIES CLOSE', held: 'PLACE HELD', reserved: 'RESERVED DIRECTLY', drawn: 'DRAWN' }),
+  /**
+   * Plan NEXT LOT §3.6.F, a draw with sizes: THE RELEASE's SIZES row, one line per size (`SIZE 16 · 3 PIECES`, then the
+   * places reserved directly in it and FULL once every piece of it is held before the draw); YOUR SIZE over the picker;
+   * an entry's label with its size (`ENTERED · SIZE 17`); a size whose pieces are all reserved, said to assistive
+   * technologies during the early access and under the picker while entries are open.
+   */
+  sizes: Object.freeze({
+    line: (size: string, pieces: number, reserved: number, full: boolean) =>
+      [`${drawSizeName(size)} · ${pieces === 1 ? '1 PIECE' : `${pieces} PIECES`}`, reserved > 0 ? `${reserved} RESERVED DIRECTLY` : null, full ? 'FULL' : null].filter((x) => x !== null).join(' · '),
+    yourSize: 'YOUR SIZE',
+    label: (status: string, size: string) => `${status} · ${drawSizeName(size)}`,
+    full: (size: string) => (isOneSize(size) ? 'One size, every piece reserved' : `Size ${bareSize(size)}, every piece reserved`),
+    openFull: (size: string) => `Every piece ${drawInSize(size)} has been reserved. You may still enter: the draw ranks a waiting list in each size.`,
+  }),
   /** P-X02: the places reserved directly, of the release's pieces (`1 OF 3 PIECES`). */
   reservedOf: (n: number, quantity: number) => `${n} OF ${quantity === 1 ? '1 PIECE' : `${quantity} PIECES`}`,
   photosLabel: (title: string) => `The model of ${title}, photographed by ORBES`,
@@ -1088,6 +1102,11 @@ export const RELEASES = Object.freeze({
     openFull: 'Every piece of this release has been reserved. You may still enter: the draw ranks a waiting list, and ORBES Client Services contacts its first ranks should a place open.',
     /** P-X02, the account's own direct reservation. */
     reserved: (until: string) => `You reserved a place directly. It is held until ${until} — ORBES Client Services will contact you.`,
+    /** Plan NEXT LOT §3.6.F, an entry in a draw with sizes: its size said. */
+    enteredIn: (size: string) => `You are entered in the draw, ${drawInSize(size)}. You may change your size until entries close, and withdraw until the draw.`,
+    selectedIn: (size: string, until: string) => `Your place ${drawInSize(size)} is held until ${until} — ORBES Client Services will contact you.`,
+    waitlistedIn: (size: string, rank: number) => `You are on the waiting list of ${drawSizeWords(size)}, rank ${rank}. ORBES Client Services will contact you if a place opens.`,
+    reservedIn: (size: string, until: string) => `You reserved a place directly ${drawInSize(size)}. It is held until ${until} — ORBES Client Services will contact you.`,
   }),
   /** The status of an entry, as MY PIECES and a release's page name it. */
   statusLabel: Object.freeze({ ENTERED: 'ENTERED', SELECTED: 'PLACE HELD', WAITLISTED: 'WAITING LIST', CONFIRMED: 'CONCLUDED', LAPSED: 'LAPSED', WITHDRAWN: 'WITHDRAWN' }),
@@ -1098,6 +1117,9 @@ export const RELEASES = Object.freeze({
   /** The rule of the draw, exactly as the server applies it (services/drops.ts drawOrder). */
   rule:
     'The entries are ranked by tier, from PALLADIUM to PLATINE to TITANE, then the accounts that hold no piece; then by seniority, the full years since the account’s first piece, the most first; then by the SHA-256 of the 32 bytes of the seed followed by the entry’s identifier in lower-case letters, in increasing hexadecimal order. The tier and the seniority are those of the moment of the draw. The first ranks, as many as there are pieces left after the direct reservations of PLATINE and PALLADIUM owners, are selected; the next are on the waiting list, in that order. Places guaranteed by ORBES are selected first, for the pieces they cover, and listed apart without a rank.',
+  /** Plan NEXT LOT §3.6.F: the rule of a draw with sizes, exactly as the server applies it (services/drops.ts draw). */
+  ruleSizes:
+    'Each entry is in the size it chose. The entries are ranked by tier, from PALLADIUM to PLATINE to TITANE, then the accounts that hold no piece; then by seniority, the full years since the account’s first piece, the most first; then by the SHA-256 of the 32 bytes of the seed followed by the entry’s identifier in lower-case letters, in increasing hexadecimal order. The tier and the seniority are those of the moment of the draw. In that order, an entry is selected while its size has a piece left after the direct reservations of PLATINE and PALLADIUM owners; the others form the waiting list of their size, in that order. Places guaranteed by ORBES are selected first, in their size, for the pieces they cover, and listed apart without a rank.',
   commitment: 'The seed was drawn when the release was created, and its fingerprint published with it. Once the draw has taken place, the seed is published here: its SHA-256 is that fingerprint, and anyone can rank the entries below again.',
   /** Labels in the display face, so no figure: the commitment's sentence names SHA-256. */
   seedHash: 'SEED FINGERPRINT',
@@ -1109,6 +1131,8 @@ export const RELEASES = Object.freeze({
   entriesLead: 'Every entry the draw ranked, in its order: its rank, its tier and its seniority at the draw, then its identifier.',
   /** One entry of the draw's list: its rank, its tier and its seniority. */
   entryLine: (rank: number, tier: string, years: number) => `${rank} · ${tier} · ${years === 1 ? '1 YEAR' : `${years} YEARS`}`,
+  /** Plan NEXT LOT §3.6.F: a list's line with the size the entry was drawn in, `12 · PLATINE · 2 YEARS · SIZE 17`. */
+  entryLineIn: (line: string, size: string) => `${line} · ${drawSizeName(size)}`,
   noTier: 'NO TIER',
   yours: 'YOURS',
   more: 'SHOW MORE',
@@ -1218,7 +1242,7 @@ export const HOW = Object.freeze({
     }),
     draw: Object.freeze({
       term: 'IN A DRAW',
-      text: 'Places guaranteed by ORBES are selected first, for the pieces they cover, and listed apart without a rank. The other entries are ranked by tier, the highest first, then the accounts that hold no piece; then by seniority, the full years since your first piece, the most first; then by a seed drawn when the release was created. The seed’s fingerprint is published with the release and the seed itself after the draw, so anyone can rank the entries again. The tier and the seniority are those of the moment of the draw.',
+      text: 'Places guaranteed by ORBES are selected first, for the pieces they cover, and listed apart without a rank. The other entries are ranked by tier, the highest first, then the accounts that hold no piece; then by seniority, the full years since your first piece, the most first; then by a seed drawn when the release was created. In a release with sizes, each size is filled in that order. The seed’s fingerprint is published with the release and the seed itself after the draw, so anyone can rank the entries again. The tier and the seniority are those of the moment of the draw.',
     }),
     live: Object.freeze({
       term: 'IN A LIVE RELEASE',
@@ -1465,6 +1489,14 @@ const inSizeWords = (size: string) => (isOneSize(size) ? 'in ONE SIZE' : `in siz
 const inSizeLabel = (size: string) => (isOneSize(size) ? 'IN ONE SIZE' : `IN SIZE ${size}`);
 /** A size named alone: `SIZE 52`, or `ONE SIZE`. */
 const sizeName = (size: string) => (isOneSize(size) ? 'ONE SIZE' : `SIZE ${size}`);
+/**
+ * Plan NEXT LOT §3.6.F, a draw's size: its label without the word a label may already carry (`SIZE 52` is 52), so that
+ * a draw names it `SIZE 52`, `size 52` or `ONE SIZE`, never `SIZE SIZE 52`.
+ */
+const bareSize = (size: string) => String(size).trim().replace(/^SIZE\s+/i, '');
+const drawSizeName = (size: string) => (isOneSize(size) ? 'ONE SIZE' : `SIZE ${bareSize(size)}`);
+const drawSizeWords = (size: string) => (isOneSize(size) ? 'ONE SIZE' : `size ${bareSize(size)}`);
+const drawInSize = (size: string) => (isOneSize(size) ? 'in ONE SIZE' : `in size ${bareSize(size)}`);
 
 /**
  * The LIVE RELEASE (plan of 2026-10-04, The experience): its card in THE RELEASES, its page at /verify/releases/<id>

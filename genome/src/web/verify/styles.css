@@ -2283,6 +2283,36 @@ body.nocturne .view--release.n-release {
   box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
 }
 
+/*
+ * Plan NEXT LOT §3.6.F: YOUR SIZE in a draw with sizes, above the actions it serves: the salon's wrapped picker
+ * (.n-model__size-picker), YOUR SIZES' two lines as the LIVE room's, a size whose pieces are all reserved greyed out
+ * during the early access.
+ */
+.release__size-label {
+  margin-top: 22px;
+}
+
+.release__sizes {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+
+.release__sizes .n-sizes__option.is-gone {
+  color: var(--vault-soft);
+  text-decoration: line-through;
+  cursor: default;
+}
+
+.release__yours,
+.release__size-note {
+  margin-top: 14px;
+}
+
+.release__yours-check {
+  margin-top: 6px;
+}
+
 .n-release__action {
   margin-top: 22px;
 }

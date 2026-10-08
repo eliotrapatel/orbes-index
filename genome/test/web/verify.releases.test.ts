@@ -10,9 +10,14 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { dropNotFound, drawOrder } from '../../src/server/services/drops.js';
-import { RELEASES } from '../../src/web/verify/copy.js';
+import { HOW, RELEASES } from '../../src/web/verify/copy.js';
+import { guaranteedLines } from '../../src/web/verify/guarantee-model.js';
 import {
   drawLines,
+  drawPick,
+  drawPickNote,
+  drawSizeChoices,
+  drawSizes,
   drawStoryModel,
   earlyAccessOf,
   entryModel,
@@ -492,6 +497,95 @@ describe('THE RELEASES\' PAST (plan LIVE RELEASE+, choice 5)', () => {
     ]);
     expect(participationModel({ count: 1, releases: [{ id: ID, secured: false }] }).taken).toBe('You have taken part in 1 release.');
     expect(participationModel({ count: 0, releases: [] }).taken).toBe('You have taken part in 0 releases.');
+  });
+});
+
+describe('a draw with sizes (plan NEXT LOT §3.6.F)', () => {
+  const S16 = '16000000-0000-4000-8000-000000000016';
+  const S17 = '17000000-0000-4000-8000-000000000017';
+  const S18 = '18000000-0000-4000-8000-000000000018';
+  const SIZES = [
+    { id: S16, label: '16', pieces: 3, reserved: 0, full: false },
+    { id: S17, label: '17', pieces: 5, reserved: 1, full: false },
+    { id: S18, label: '18', pieces: 4, reserved: 4, full: true },
+  ];
+  const opts = { offsetMinutes: 120 };
+
+  it('says each size\'s pieces in THE RELEASE\'s SIZES row, the places reserved directly from the early access on, FULL before the draw; none for one size; its own rule', () => {
+    const before = releaseSheet(sheet({ quantity: 12, sizes: SIZES }), 120);
+    expect(before.rows.find((r) => r.label === 'SIZES')).toEqual({ label: 'SIZES', value: 'SIZE 16 · 3 PIECES', more: ['SIZE 17 · 5 PIECES', 'SIZE 18 · 4 PIECES · FULL'] });
+    expect(before.rule).toBe(RELEASES.ruleSizes);
+    // From the early access on, the places reserved directly in each size.
+    const early = releaseSheet(sheet({ ...EARLY, state: 'UPCOMING', earlyAccessOpen: true, quantity: 12, sizes: SIZES }), 120);
+    expect(early.rows.find((r) => r.label === 'SIZES')).toMatchObject({ value: 'SIZE 16 · 3 PIECES', more: ['SIZE 17 · 5 PIECES · 1 RESERVED DIRECTLY', 'SIZE 18 · 4 PIECES · 4 RESERVED DIRECTLY · FULL'] });
+    // Drawn: no FULL (the server says so), the reservations still said.
+    const drawn = releaseSheet(sheet({ ...EARLY, state: 'DRAWN', drawnAt: '2026-10-14T11:00:00.000Z', quantity: 12, sizes: SIZES.map((z) => ({ ...z, full: false })) }), 120);
+    expect(drawn.rows.find((r) => r.label === 'SIZES')?.more).toEqual(['SIZE 17 · 5 PIECES · 1 RESERVED DIRECTLY', 'SIZE 18 · 4 PIECES · 4 RESERVED DIRECTLY']);
+    // One size: no SIZES row; a draw without sizes reads as before, today's rule.
+    expect(releaseSheet(sheet({ sizes: [{ id: S17, label: 'ONE SIZE', pieces: 3, reserved: 0, full: false }] }), 120).rows.some((r) => r.label === 'SIZES')).toBe(false);
+    const pool = releaseSheet(sheet(), 120);
+    expect([pool.sizes, pool.rule, pool.rows.some((r) => r.label === 'SIZES')]).toEqual([[], RELEASES.rule, false]);
+    // A size without pieces, or not readable, is left out.
+    expect(drawSizes({ state: 'OPEN', sizes: [...SIZES, { id: 'x', label: '19', pieces: 0, reserved: 0, full: false }] }).map((z) => z.label)).toEqual(['16', '17', '18']);
+    // The rule of a draw with sizes, word for word as the server applies it.
+    for (const part of ['Each entry is in the size it chose.', 'an entry is selected while its size has a piece left after the direct reservations of PLATINE and PALLADIUM owners', 'the others form the waiting list of their size, in that order', 'Places guaranteed by ORBES are selected first, in their size']) {
+      expect(RELEASES.ruleSizes, part).toContain(part);
+    }
+  });
+
+  it('preselects YOUR SIZE in this order: the entry\'s, YOUR SIZES\', the only size; greys out a full size during the early access only, and says it under the picker while entries are open', () => {
+    const sizes = drawSizes({ state: 'OPEN', sizes: SIZES });
+    expect(drawPick(sizes, { size: { id: S18, label: '18' } }, { id: S17, label: '17' })).toEqual({ sizeId: S18, from: 'entry' });
+    expect(drawPick(sizes, null, { id: S17, label: '17' })).toEqual({ sizeId: S17, from: 'saved' });
+    expect(drawPick(sizes, { size: null }, { id: 'gone', label: '19' })).toEqual({ sizeId: null, from: null });
+    expect(drawPick(sizes.slice(0, 1), null, null)).toEqual({ sizeId: S16, from: 'only' });
+    expect(drawSizeChoices(sizes, S17, 'reserve')).toEqual([
+      { id: S16, label: '16', selected: false, unavailable: false, aria: null },
+      { id: S17, label: '17', selected: true, unavailable: false, aria: null },
+      { id: S18, label: '18', selected: false, unavailable: true, aria: 'Size 18, every piece reserved' },
+    ]);
+    expect(drawSizeChoices(sizes, S18, 'enter').every((c) => !c.unavailable)).toBe(true);
+    expect(drawPickNote(sizes, S18, 'OPEN')).toBe('Every piece in size 18 has been reserved. You may still enter: the draw ranks a waiting list in each size.');
+    expect(drawPickNote(sizes, S17, 'OPEN')).toBeNull();
+    expect(drawPickNote(sizes, S18, 'UPCOMING')).toBeNull();
+  });
+
+  it('says each entry\'s size on its label line and in its sentence; MY PIECES the same; the draw\'s list and its guaranteed places with their sizes', () => {
+    const release = { id: ID, title: 'MONOLITHE — RELEASE I', state: 'OPEN' as const, opensAt: '2026-10-12T10:00:00.000Z' };
+    const in17 = { size: { id: S17, label: '17' } };
+    const m = entryModel(release, entry(in17), opts);
+    expect([m.label, m.sentence]).toEqual(['ENTERED · SIZE 17', 'You are entered in the draw, in size 17. You may change your size until entries close, and withdraw until the draw.']);
+    expect(entryModel({ ...release, state: 'CLOSED' }, entry(in17), opts).sentence).toBe(RELEASES.status.enteredClosed);
+    const until = '2026-10-16T12:00:00.000Z';
+    expect(entryModel({ ...release, state: 'DRAWN' }, entry({ ...in17, status: 'SELECTED', rank: 4, respondBy: until }), opts)).toMatchObject({
+      label: 'PLACE HELD · SIZE 17',
+      sentence: 'Your place in size 17 is held until 16 October 2026, 14:00 (UTC+02:00) — ORBES Client Services will contact you.',
+    });
+    expect(entryModel({ ...release, state: 'UPCOMING' }, entry({ ...in17, status: 'SELECTED', reserved: true, respondBy: until }), opts)).toMatchObject({
+      label: 'PLACE RESERVED · SIZE 17',
+      sentence: 'You reserved a place directly in size 17. It is held until 16 October 2026, 14:00 (UTC+02:00) — ORBES Client Services will contact you.',
+    });
+    expect(entryModel({ ...release, state: 'DRAWN' }, entry({ ...in17, status: 'WAITLISTED', rank: 12 }), opts)).toMatchObject({
+      label: 'WAITING LIST · SIZE 17',
+      sentence: 'You are on the waiting list of size 17, rank 12. ORBES Client Services will contact you if a place opens.',
+    });
+    for (const [status, label] of [['CONFIRMED', 'CONCLUDED · SIZE 17'], ['LAPSED', 'LAPSED · SIZE 17'], ['WITHDRAWN', 'WITHDRAWN · SIZE 17']] as const) {
+      expect(entryModel({ ...release, state: 'DRAWN' }, entry({ ...in17, status, respondBy: until }), opts).label, status).toBe(label);
+    }
+    // ONE SIZE and a label that carries its word, never « SIZE SIZE 52 ».
+    expect(entryModel(release, entry({ size: { id: S16, label: 'ONE SIZE' } }), opts).sentence).toBe('You are entered in the draw, in ONE SIZE. You may change your size until entries close, and withdraw until the draw.');
+    expect(entryModel(release, entry({ size: { id: S16, label: 'SIZE 52' } }), opts).label).toBe('ENTERED · SIZE 52');
+    // A draw without sizes: as before.
+    expect(entryModel(release, entry(), opts)).toMatchObject({ label: 'ENTERED', sentence: RELEASES.status.entered });
+    // MY PIECES: each draw entry's label line ends with its size.
+    expect(myEntries([entry({ ...in17, state: 'DRAWN', status: 'WAITLISTED', rank: 3 })], opts)[0]!.entry.label).toBe('WAITING LIST · SIZE 17');
+    // The draw's list: each line its size.
+    expect(drawLines([{ id: ENTRY, tier: 2, seniority: 2, rank: 12, size: { id: S17, label: '17' } }], null)[0]!.line).toBe('12 · PLATINE · 2 YEARS · SIZE 17');
+    expect(drawLines([{ id: ENTRY, tier: 2, seniority: 2, rank: 12, size: null }], null)[0]!.line).toBe('12 · PLATINE · 2 YEARS');
+    expect(guaranteedLines([{ id: ENTRY, pieces: 2, size: { id: S17, label: '17' } }], null)[0]!.line).toBe('GUARANTEED · 2 PIECES · SIZE 17');
+    expect(guaranteedLines([{ id: ENTRY, pieces: 2, size: null }], null)[0]!.line).toBe('GUARANTEED · 2 PIECES');
+    // HOW RELEASES WORK: one sentence after the ranking.
+    expect(HOW.order.draw.text).toContain('then by a seed drawn when the release was created. In a release with sizes, each size is filled in that order. The seed’s fingerprint');
   });
 });
 

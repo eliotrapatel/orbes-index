@@ -35,7 +35,11 @@
  * signed out the sign-in and CREATE ACCOUNT of the OWNERSHIP panel (any account may enter); signed in what the entry
  * means now, ENTER THE DRAW (the page's filled button) or RESERVE A PLACE (PLATINE and PALLADIUM during the early
  * access), WITHDRAW, for a place held, reserved or concluded SHARE TO STORIES (plan NEXT-NINE, BP-10: the SELECTED story
- * card) and WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01). THE DRAW: what a place drawn obliges to,
+ * card) and WRITE TO ORBES CLIENT SERVICES (plan NEXT-NINE, CS-01). A draw with sizes (plan NEXT LOT §3.6.F): THE
+ * RELEASE's SIZES row; YOUR SIZE over the sizes, right above the actions it serves, preselected (the entry's size, YOUR
+ * SIZES' with its two lines, the only one), ENTER THE DRAW waiting for a size, a size tapped changing an entry's at once
+ * while entries are open, the sizes full greyed out during the early access; every label and sentence with the size;
+ * its own rule; the list's size of each entry. THE DRAW: what a place drawn obliges to,
  * its rule word for word, its commitment, the seed's fingerprint; once drawn the seed, checked on this phone against the
  * fingerprint, and the entries by rank, the account's own marked, a hundred at a time, never said how many. Its last
  * line, HOW RELEASES WORK (plan NEXT-NINE, FT-01). After a reservation the page is read again: its places. The scan is the SCAN ring's, THE RELEASES the crumb's and the rail's.
@@ -53,6 +57,9 @@ import { guaranteeBox, guaranteedLines, guaranteeFor } from '../guarantee-model.
 import { CHANGE_RETRY_MS, countdown as countdownGroups, liveCards, measureClock, nextChange, type LiveCardModel } from '../live-model.js';
 import {
   drawLines,
+  drawPick,
+  drawPickNote,
+  drawSizeChoices,
   drawStoryModel,
   entryModel,
   participationModel,
@@ -69,10 +76,10 @@ import {
   type ReleaseSheetModel,
 } from '../releases-model.js';
 import type { SessionStore } from '../session.js';
-import type { ClubEntry, ClubGuarantee, DrawEntry } from '../types.js';
+import type { ClubEntry, ClubGuarantee, DrawEntry, DrawSizeRef } from '../types.js';
 import { lookbookSheetPath } from '../lookbook-model.js';
 import { dayAndHour, RELEASES_PATH, viewRoot, withNumerals } from './common.js';
-import { appAnchor, button, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, quietLine, textLink } from './nocturne.js';
+import { appAnchor, button, countdown, fadedPhoto, failedState, icon, loadingState, modelTitle, monogram, quietLine, sizeButtons, textLink } from './nocturne.js';
 import { writeButton } from './write.js';
 import { storyButton } from './story.js';
 import { StoryCards } from '../story-card.js';
@@ -719,7 +726,15 @@ function releaseRows(rows: readonly ReleaseRow[]): HTMLDListElement {
         'div',
         { class: 'n-kv__row n-release__row release__row' },
         h('dt', { class: 'n-g n-kv__label n-release__label release__label', text: r.label }),
-        h('dd', { class: 'n-kv__value n-release__value' }, h('span', { class: 'n-num release__utc', text: r.value }), r.local ? h('br') : null, r.local ? h('span', { class: 'n-sm n-num release__local', text: r.local }) : null),
+        h(
+          'dd',
+          { class: 'n-kv__value n-release__value' },
+          h('span', { class: 'n-num release__utc', text: r.value }),
+          r.local ? h('br') : null,
+          r.local ? h('span', { class: 'n-sm n-num release__local', text: r.local }) : null,
+          // Plan NEXT LOT §3.6.F: the SIZES row's further lines, one per size.
+          ...(r.more ?? []).flatMap((line) => [h('br'), h('span', { class: 'n-num release__utc', text: line })]),
+        ),
       ),
     ),
   );
@@ -754,6 +769,11 @@ class ReleasePage {
   private part: string | null = null;
   /** What the hero was drawn from: drawn again only when it changes (the photograph is not loaded again). */
   private heroKey = '';
+  /** Plan NEXT LOT §3.6.F: the size YOUR SIZES suggests in this draw (the server's), read with the entry. */
+  private savedSize: DrawSizeRef | null = null;
+  /** The size picked in YOUR SIZE (preselected, or tapped), and where a preselection came from. */
+  private picked: string | null = null;
+  private pickedFrom: 'entry' | 'saved' | 'only' | 'hand' | null = null;
 
   constructor(private readonly deps: ReleaseDeps) {
     this.root = viewRoot('release', 'release-title');
@@ -818,6 +838,9 @@ class ReleasePage {
       this.guarantee = null;
       this.part = null;
       this.actionError = null;
+      this.savedSize = null;
+      this.picked = null;
+      this.pickedFrom = null;
     }
     this.render();
   }
@@ -829,13 +852,22 @@ class ReleasePage {
     this.entry = { kind: 'loading' };
     this.render();
     try {
-      // Drawn, the release is over: the account's part in it too (left unsaid should it not be read).
-      const [status, part] = await Promise.all([this.deps.api.clubStatus(), this.load.sheet.drawn ? this.deps.api.participation().catch(() => null) : null]);
+      // Drawn, the release is over: the account's part in it too (left unsaid should it not be read). Plan NEXT LOT §3.6.F:
+      // a draw with sizes open to an entry, the size YOUR SIZES suggests (left out should it not be read).
+      const sized = this.load.sheet.sizes.length > 0 && !this.load.sheet.drawn;
+      const [status, part, read] = await Promise.all([
+        this.deps.api.clubStatus(),
+        this.load.sheet.drawn ? this.deps.api.participation().catch(() => null) : null,
+        sized ? this.deps.api.drawEntry(id).catch(() => null) : null,
+      ]);
       if (gen !== this.entryGen || this.disposed) return;
       this.part = part ? (participationModel(part).marks.get(id) ?? null) : null;
       this.tier = Number(status.tier?.level) || 0;
       this.guarantee = guaranteeFor(status, id);
-      this.entry = { kind: 'ready', entry: status.entries.find((e) => e.dropId === id) ?? null };
+      this.savedSize = read?.savedSize ?? null;
+      const entry = status.entries.find((e) => e.dropId === id) ?? null;
+      this.entry = { kind: 'ready', entry };
+      this.preselect(entry);
     } catch (e) {
       if (gen !== this.entryGen || this.disposed) return;
       this.deps.session.noteError(e);
@@ -878,6 +910,56 @@ class ReleasePage {
     this.renderDraw();
   }
 
+  /** YOUR SIZE's preselection (plan NEXT LOT §3.6.F), unless the collector tapped a size: the entry's, YOUR SIZES', the only one. */
+  private preselect(entry: ClubEntry | null): void {
+    if (this.load.kind !== 'ready' || this.pickedFrom === 'hand') return;
+    const pick = drawPick(this.load.sheet.sizes, entry, this.savedSize);
+    this.picked = pick.sizeId;
+    this.pickedFrom = pick.from;
+  }
+
+  /**
+   * A size tapped in YOUR SIZE: an entry in the draw changes its size at once (as I'LL BE THERE does), while entries are
+   * open; otherwise the size is the one ENTER THE DRAW or RESERVE A PLACE will send. YOUR SIZES' lines then go.
+   */
+  private pick(sizeId: string): void {
+    if (this.busy || this.load.kind !== 'ready') return;
+    const entry = this.entry.kind === 'ready' ? this.entry.entry : null;
+    if (entry && entry.status === 'ENTERED' && this.load.sheet.state === 'OPEN') {
+      if (entry.size?.id !== sizeId) void this.changeSize(sizeId);
+      return;
+    }
+    this.picked = sizeId;
+    this.pickedFrom = 'hand';
+    this.actionError = null;
+    this.renderEntry();
+  }
+
+  /** CHANGE SIZE of the account's entry; a refusal reads as the server wrote it, the size kept as it was. */
+  private async changeSize(sizeId: string): Promise<void> {
+    if (this.load.kind !== 'ready') return;
+    const id = this.load.sheet.id;
+    this.busy = true;
+    this.actionError = null;
+    this.renderEntry();
+    try {
+      const entry = await this.deps.api.changeDrawSize(id, sizeId);
+      if (this.disposed) return;
+      this.entry = { kind: 'ready', entry };
+      this.picked = entry.size?.id ?? sizeId;
+      this.pickedFrom = 'entry';
+    } catch (e) {
+      if (this.disposed) return;
+      this.deps.session.noteError(e);
+      this.actionError = messageOf(e);
+    } finally {
+      this.busy = false;
+    }
+    if (this.disposed) return;
+    this.renderEntry();
+    this.entrySection.querySelector<HTMLElement>('.release__sizes button[aria-pressed="true"]')?.focus({ preventScroll: true });
+  }
+
   private async act(kind: 'enter' | 'withdraw' | 'reserve'): Promise<void> {
     if (this.busy || this.load.kind !== 'ready') return;
     const id = this.load.sheet.id;
@@ -886,9 +968,15 @@ class ReleasePage {
     this.renderEntry();
     try {
       const api = this.deps.api;
-      const entry = kind === 'enter' ? await api.enterDrop(id) : kind === 'withdraw' ? await api.withdrawDrop(id) : await api.reserveDrop(id);
+      // Plan NEXT LOT §3.6.F: ENTER and RESERVE in the size picked (a draw without sizes takes none).
+      const size = this.load.sheet.sizes.length > 0 ? this.picked : null;
+      const entry = kind === 'enter' ? await api.enterDrop(id, size) : kind === 'withdraw' ? await api.withdrawDrop(id) : await api.reserveDrop(id, size);
       if (this.disposed) return;
       this.entry = { kind: 'ready', entry };
+      if (entry.size) {
+        this.picked = entry.size.id;
+        this.pickedFrom = 'entry';
+      }
     } catch (e) {
       if (this.disposed) return;
       this.deps.session.noteError(e);
@@ -1042,17 +1130,25 @@ class ReleasePage {
           ),
         );
       }
+      // Plan NEXT LOT §3.6.F: YOUR SIZE and its picker, right above the actions it serves.
+      const entered = this.entry.entry?.status === 'ENTERED' && s.state === 'OPEN';
+      const sized = s.sizes.length > 0 && (m.canEnter || m.canReserve || entered);
+      const mode = m.canReserve && !m.canEnter ? 'reserve' : 'enter';
+      const choices = sized ? drawSizeChoices(s.sizes, this.picked, mode) : [];
+      if (sized) out.push(...this.sizePicker(s, choices));
       if (this.actionError) out.push(h('p', { class: 'n-sm n-ivc n-release__error form__error', attrs: { role: 'alert' }, text: this.actionError }));
       // The one filled button of the page: ENTER THE DRAW, or RESERVE A PLACE (P-X02, a PLATINE or PALLADIUM account
-      // during the early access); should both be offered, the second is a hairline button.
+      // during the early access); should both be offered, the second is a hairline button. In a draw with sizes, each
+      // waits for a size (one that can still be reserved, for RESERVE A PLACE).
       let filled = true;
-      const action = (label: string, cls: string, run: () => void, outline = false) => {
-        const b = button(label, { outline: outline || !filled, extraClass: `n-release__action ${cls}`, onClick: run, attrs: { disabled: this.busy, 'aria-busy': this.busy ? 'true' : 'false' } });
+      const action = (label: string, cls: string, run: () => void, outline = false, waits = false) => {
+        const b = button(label, { outline: outline || !filled, extraClass: `n-release__action ${cls}`, onClick: run, attrs: { disabled: this.busy || waits, 'aria-busy': this.busy ? 'true' : 'false' } });
         if (!outline) filled = false;
         return b;
       };
-      if (m.canEnter) out.push(action(RELEASES.enter, 'release__enter', () => void this.act('enter')));
-      if (m.canReserve) out.push(action(RELEASES.reserve, 'release__reserve', () => void this.act('reserve')));
+      const picked = choices.find((c) => c.selected) ?? null;
+      if (m.canEnter) out.push(action(RELEASES.enter, 'release__enter', () => void this.act('enter'), false, sized && picked === null));
+      if (m.canReserve) out.push(action(RELEASES.reserve, 'release__reserve', () => void this.act('reserve'), false, sized && (picked === null || drawSizeChoices(s.sizes, this.picked, 'reserve').some((c) => c.selected && c.unavailable))));
       if (m.canWithdraw) out.push(action(RELEASES.withdraw, 'release__withdraw', () => void this.act('withdraw'), true));
       // BP-10: a place selected (drawn, reserved directly, concluded): SHARE TO STORIES, its card SELECTED.
       out.push(this.storyOpen(s, this.entry.entry));
@@ -1061,6 +1157,42 @@ class ReleasePage {
     }
     this.entrySection.replaceChildren(...out.filter((x): x is HTMLElement => x !== null));
     if (hadFocus && !this.entrySection.contains(document.activeElement)) (this.entrySection.querySelector<HTMLElement>('input, button:not([disabled])') ?? heading).focus({ preventScroll: true });
+  }
+
+  /**
+   * YOUR SIZE (plan NEXT LOT §3.6.F): its label, the draw's sizes with pieces in NOCTURNE's buttons (the one picked
+   * doubly ringed; during the early access a size whose pieces are all reserved greyed out, said so to assistive
+   * technologies), then YOUR SIZES' two lines while its preselection stands, or the sentence of a size picked whose
+   * pieces are all reserved while entries are open.
+   */
+  private sizePicker(s: ReleaseSheetModel, choices: ReturnType<typeof drawSizeChoices>): HTMLElement[] {
+    const group = sizeButtons(
+      choices.map((c) => ({ id: c.id, label: c.label })),
+      { selected: this.picked, label: RELEASES.sizes.yourSize, onSelect: (id) => this.pick(id) },
+    );
+    group.classList.add('release__sizes');
+    [...group.querySelectorAll<HTMLButtonElement>('button')].forEach((b, i) => {
+      const c = choices[i];
+      if (!c) return;
+      b.disabled = this.busy || (c.unavailable && !c.selected);
+      b.classList.toggle('is-gone', c.unavailable);
+      if (c.aria) b.setAttribute('aria-label', c.aria);
+    });
+    const out: HTMLElement[] = [h('p', { class: 'n-g n-lb release__size-label', text: RELEASES.sizes.yourSize }), group];
+    const saved = this.pickedFrom === 'saved' ? s.sizes.find((z) => z.id === this.picked) : undefined;
+    if (saved) {
+      out.push(
+        h(
+          'div',
+          { class: 'release__yours' },
+          h('p', { class: 'n-g n-lb release__yours-size' }, ...withNumerals(LIVE.there.fromYours(saved.label))),
+          h('p', { class: 'n-sm release__yours-check', text: LIVE.there.checkSize }),
+        ),
+      );
+    }
+    const note = drawPickNote(s.sizes, this.picked, s.state);
+    if (note) out.push(h('p', { class: 'n-sm release__size-note', text: note }));
+    return out;
   }
 
   /**
@@ -1075,7 +1207,8 @@ class ReleasePage {
 
   /** What the entry means now: its status (ENTERED, PLACE HELD…) in ivory capitals, then its sentence. */
   private sentence(m: EntryModel): HTMLElement {
-    return h('div', { class: 'n-release__status release__status' }, m.label ? h('p', { class: 'n-g n-t3 n-ivc n-release__status-label ownership__status', text: m.label }) : null, h('p', { class: 'n-tx n-release__sentence release__sentence', text: m.sentence }));
+    // A label with its size (plan NEXT LOT §3.6.F: ENTERED · SIZE 17) sets its figures in the reading face.
+    return h('div', { class: 'n-release__status release__status' }, m.label ? h('p', { class: 'n-g n-t3 n-ivc n-release__status-label ownership__status' }, ...withNumerals(m.label)) : null, h('p', { class: 'n-tx n-release__sentence release__sentence', text: m.sentence }));
   }
 
   private releaseOf(s: ReleaseSheetModel) {
@@ -1098,7 +1231,7 @@ class ReleasePage {
     const out: (HTMLElement | null)[] = [
       h('h2', { class: 'n-g n-t3', id: 'release-draw', text: RELEASES.section.draw }),
       h('p', { class: 'n-sm n-release__para release__obligation', text: RELEASES.noObligation }),
-      h('p', { class: 'n-sm n-release__para release__rule', text: RELEASES.rule }),
+      h('p', { class: 'n-sm n-release__para release__rule', text: s.rule }),
       h('p', { class: 'n-sm n-release__para release__commitment', text: RELEASES.commitment }),
       h(
         'dl',
