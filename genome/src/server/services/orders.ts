@@ -1778,9 +1778,10 @@ export interface CarriedCredit {
 
 /**
  * The EXCHANGE order of a size exchange decided (plan NEXT LOT §3.5.6.7), in the caller's transaction, its original
- * RETURNED: the original's account, release, price, currency, add-ons, surprise, engraving words, shipping and buyer
- * (its delivery address), the new size, at the original's location; it holds a piece in stock or waits like any order,
- * and is PAID at once with its own invoice (SIZE EXCHANGE beneath the piece). `credit`, what the original's return gave
+ * RETURNED: the original's account, release, price, currency, add-ons, surprise, engraving (its words and price),
+ * shipping and buyer (its delivery address), the new size, at the original's location; it holds a piece in stock or
+ * waits like any order, and is PAID at once with its own invoice (SIZE EXCHANGE beneath the piece, ENGRAVING as the
+ * original's invoice had it, which its return credits). `credit`, what the original's return gave
  * back (`returnInTransaction`), is taken off it again before PAID, so its invoice carries the original's CREDIT lines and
  * the balance does not grow. Audited `order.create` (EXCHANGE), `order.credit.apply` (with a credit), `order.pay` with
  * `invoice.issue`, and `order.exchange` on the original.
@@ -1817,12 +1818,15 @@ export async function createExchangeOrder(
     notes,
   );
   // The original's delivery address (plan NEXT LOT §3.6.B: where the first piece went, not the account's default),
-  // entered by Client Services at its creation; its engraving's words, already paid (no price of its own).
+  // entered by Client Services at its creation; its engraving, its words, author and price: the original's return credits
+  // its ENGRAVING line with the rest, so the exchange's invoice bills it again as it bills the add-ons, and the two
+  // documents net to nothing (an add-on's engraving has no price of its own: its ADDON line).
   const delivered = await addressOf(tx, original);
   const hasAddress = delivered.name !== null || delivered.address !== null || delivered.country !== null || delivered.phone !== null;
   if (original.engraving_text !== null || hasAddress) {
     o = await updateOrder(tx, o.id, {
       engraving_text: original.engraving_text,
+      engraving_minor: original.engraving_minor,
       engraving_by: original.engraving_by,
       buyer_name: delivered.name,
       buyer_address: delivered.address,
@@ -1979,10 +1983,12 @@ function engravingOfferOf(o: Pick<OrderRow, 'channel' | 'currency' | 'addons' | 
 /**
  * An engraving's price changing on an order already invoiced (plan NEXT LOT §3.6.C), in its transaction: added after
  * PAID at a price above 0, a supplementary invoice with its ENGRAVING line; removed after PAID, a credit note for that
- * line (a free one, or one bought as an add-on, issues no document). The invoice already issued never changes.
+ * line (a free one, one bought as an add-on, or a welcome gift's, issues no document). The invoice already issued never
+ * changes.
  */
 async function engravingDocuments(tx: Db, before: OrderRow, after: OrderRow, actor: Actor, now: Date): Promise<AuditRecordInput[]> {
-  if (before.status !== 'PAID') return [];
+  // A welcome gift has no invoice of its own (its line is on its parent's) and its engraving no price: no document.
+  if (before.status !== 'PAID' || after.channel === 'GIFT') return [];
   const notes: AuditRecordInput[] = [];
   if (before.engraving_minor !== null && before.engraving_minor > 0 && after.engraving_minor === null) {
     const n = await issueLineCreditNote(tx, after, 'ENGRAVING', actor, now);
@@ -2695,9 +2701,10 @@ export class OrderService {
       }
       if (engraving !== undefined && engraving !== after.engraving_text) {
         // Client Services' words (STAFF). A new engraving without the release's add-on takes its currency's price from the
-        // settings, as the collector's would (none set: no price); its words changed keep their price; removed, none.
+        // settings, as the collector's would (none set: no price); its words changed keep their price; removed, none. A
+        // welcome gift takes none: it has no price of its own (plan NEXT LOT §3.6.C), its words only.
         const addon = hasEngravingAddon(after.addons);
-        const minor = engraving === null || addon ? null : after.engraving_text !== null ? after.engraving_minor : await engravingPrice(tx, after.currency);
+        const minor = engraving === null || addon || after.channel === 'GIFT' ? null : after.engraving_text !== null ? after.engraving_minor : await engravingPrice(tx, after.currency);
         const before = after;
         after = await updateOrder(tx, o.id, { engraving_text: engraving, engraving_minor: minor, engraving_by: engraving === null ? null : 'STAFF' });
         fields.push('engraving');

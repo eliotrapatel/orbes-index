@@ -36,11 +36,12 @@
  * Existing data: orders keep their buyer's name and address; an order that does not travel with another and has an
  * address reads entered by STAFF at its latest `order.buyer` event (its reservation when none is found); its country and
  * phone stay empty ('Not entered'). Orders keep their engraving words (STAFF, no price). No saved address, no engraving
- * price. Every foreign key leads an index; ON DELETE RESTRICT like every other. Compatible with the previous image: a
- * table it never reads, nullable columns it never names (it inserts orders and invoices without them; its one-invoice
- * rule still holds: it issues no supplementary invoice). `down` refuses while a supplementary invoice or a credit note
- * for single lines exists, naming the counts; otherwise it drops the rest and restores 0022's invoice keys: the schema of
- * 0038 exactly (nothing is rolled back in production). One statement per array entry (PGlite's extended protocol);
+ * price. Every foreign key leads an index; ON DELETE RESTRICT like every other. Not for the previous image: it inserts
+ * orders without the new columns, but a credit note it issued would name no `credit_scope` and break
+ * `invoices_credit_scope`; `scripts/deploy.sh` stops the app before migrating and never runs the previous image on this
+ * schema (docs/DEPLOYMENT.md §15.7). `down` refuses while a supplementary invoice or a credit note for single lines
+ * exists, naming the counts; otherwise it drops the rest and restores 0022's invoice keys: the schema of 0038 exactly
+ * (nothing is rolled back in production). One statement per array entry (PGlite's extended protocol);
  * Kysely's Migrator applies the migration inside a transaction.
  */
 import { sql, type Kysely } from 'kysely';

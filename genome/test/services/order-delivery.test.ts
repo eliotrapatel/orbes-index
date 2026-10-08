@@ -24,6 +24,7 @@
  *  - an order whose release sold the engraving as an add-on (its label holds ENGRAVING): its words only, no second
  *    price, never removed by the collector (409 ORDER_ENGRAVING_INCLUDED); an add-on labelled otherwise offers nothing;
  *  - Client Services' words take the same price; a currency changed reprices or removes a priced engraving, a price and currency cleared remove it;
+ *  - a welcome gift's words (Client Services') take no price, RESERVED or PAID: no invoice line and no document;
  *  - a LOCKED account changes nothing.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -467,6 +468,40 @@ describe('an order\'s delivery address (plan NEXT LOT §3.6.B)', () => {
       expect(await row(id)).toMatchObject({ status: 'RESERVED', price_minor: null, currency: null, engraving_text: null, engraving_minor: null, engraving_by: null });
       const events = await t.db.selectFrom('order_events').select('details').where('order_id', '=', id).where('action', '=', 'order.engraving').orderBy('id').execute();
       expect(events.map((e) => e.details)).toEqual([{ by: 'staff', priced: null, addon: false, currency: true, removed: true }]);
+      await prices({});
+    });
+
+    it('gives a welcome gift Client Services\' words with no price, RESERVED or PAID: no TOTAL, no invoice line, no document', async () => {
+      await prices({ EUR: 3_000 });
+      const gift = await createModel(t.db, 'GIFT TORQUE');
+      await inTransaction(t.db, (tx) => ensureSku(tx, gift, null));
+      const program = await ctx.services.clubProgram.read();
+      await ctx.services.clubProgram.update({ ...program, giftPlatineModelId: gift }, admin);
+      const platine = await createAccount(t.db);
+      await holdPieces(t.db, platine.id, 5, f.modelId);
+      const parent = await salonOrder(platine.id);
+      const giftId = (await t.db.selectFrom('orders').select('id').where('with_order_id', '=', parent).where('channel', '=', 'GIFT').executeTakeFirstOrThrow()).id;
+      // RESERVED: the words only, no price; YOUR ORDERS shows them with none (TOTAL unchanged), and offers nothing.
+      await orders().setTerms(giftId, { engravingText: 'J.M.' }, admin);
+      expect(await row(giftId)).toMatchObject({ status: 'RESERVED', currency: 'EUR', engraving_text: 'J.M.', engraving_minor: null, engraving_by: 'STAFF' });
+      expect(await mine(platine.id, giftId)).toMatchObject({ engraving: { text: 'J.M.', priceMinor: null }, engravingOffer: null, editable: { engraving: false } });
+      // Paid with its parent: the parent's invoice carries no ENGRAVING line; the gift has no document of its own.
+      await pay(parent);
+      expect((await row(giftId)).status).toBe('PAID');
+      const [invoice] = await docsOf(parent);
+      expect((invoice!.lines as { kind: string }[]).map((l) => l.kind)).not.toContain('ENGRAVING');
+      // PAID: its words cleared, then typed again, then changed: still no price, no document, never a 500.
+      clock.advance(MINUTE);
+      await orders().setTerms(giftId, { engravingText: null }, admin);
+      expect(await row(giftId)).toMatchObject({ engraving_text: null, engraving_minor: null, engraving_by: null });
+      clock.advance(MINUTE);
+      await orders().setTerms(giftId, { engravingText: 'A.B.' }, admin);
+      clock.advance(MINUTE);
+      await orders().setTerms(giftId, { engravingText: 'A. B.' }, admin);
+      expect(await row(giftId)).toMatchObject({ engraving_text: 'A. B.', engraving_minor: null, engraving_by: 'STAFF' });
+      expect(await docsOf(giftId)).toEqual([]);
+      expect((await docsOf(parent)).map((d) => d.kind)).toEqual(['INVOICE']);
+      await ctx.services.clubProgram.update({ ...program, giftPlatineModelId: null }, admin);
       await prices({});
     });
   });

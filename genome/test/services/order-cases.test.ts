@@ -19,7 +19,8 @@
  *  - open (one open per order; an exchange's size in stock only; after the 14 days too), received OK or DAMAGED;
  *  - decide refund (back to stock with a new claim code; the archive ADMIN), exchange (an EXCHANGE order PAID with its
  *    invoice naming SIZE EXCHANGE, the original's credit note; the original's credit carried onto it, the balance
- *    unchanged); the packing photo kept while a return is open;
+ *    unchanged; a priced engraving's words, author and price carried onto it, its invoice billing the ENGRAVING line
+ *    the original's credit note credits); the packing photo kept while a return is open;
  *  - a return on a parcel shipped and never marked delivered: once decided, the parcel DELIVERED, off On its way, its
  *    photo erased 14 days later;
  *  - cancel the order case.
@@ -413,6 +414,46 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       expect(applied.details).toMatchObject({ amountMinor: 3_000, currency: 'EUR', exchangeOfOrderId: id });
     });
 
+    it('an exchange of an order with a priced engraving: its words, author and price carried onto the EXCHANGE order, whose invoice bills the ENGRAVING line the original\'s credit note credits', async () => {
+      const prices = (EUR: number | null) => h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR, GBP: null, USD: null, CHF: null } }, admin);
+      await prices(3_000);
+      const label = freshSize();
+      const skuId = await skuOf(label);
+      const id = await salonOrder(label);
+      await orders().setTerms(id, { engravingText: 'J. M.' }, operator);
+      expect(await row(id)).toMatchObject({ engraving_text: 'J. M.', engraving_minor: 3_000, engraving_by: 'STAFF' });
+      h.clock.advance(MINUTE);
+      await orders().transition(id, { to: 'PAID' }, operator);
+      await stock(skuId, 1, [id]);
+      await packAndShip(h.ctx, id, { carrierId: colissimo, trackingNumber: '6A12345678901' }, operator);
+      // The setting changes meanwhile: the exchange keeps the price the original was billed.
+      await prices(4_000);
+      const other = freshSize();
+      const otherSku = await skuOf(other);
+      await stock(otherSku, 1);
+      const opened = await cases().open(id, { kind: 'EXCHANGE', reason: 'SIZE', exchangeSkuId: otherSku, note: 'One size up.' }, operator);
+      await cases().receive(opened.id, { pieceState: 'OK' }, agent, scope());
+      const decided = await cases().decide(opened.id, { decision: 'EXCHANGE', pieceTo: 'RESTOCKED', note: 'Exchanged.' }, operator, { admin: false });
+      const exchange = decided.case.decision!.exchangeOrder!.id;
+      expect(await row(exchange)).toMatchObject({ channel: 'EXCHANGE', status: 'PAID', engraving_text: 'J. M.', engraving_minor: 3_000, engraving_by: 'STAFF' });
+      const docOf = (orderId: string, kind: 'INVOICE' | 'CREDIT_NOTE') => db().selectFrom('invoices').select(['lines', 'total_minor']).where('order_id', '=', orderId).where('kind', '=', kind).executeTakeFirstOrThrow();
+      const engravingOf = (doc: { lines: unknown }) => linesOf(doc.lines as unknown[]).filter((l) => l.kind === 'ENGRAVING').map((l) => [l.label, l.amountMinor]);
+      const paid = await docOf(id, 'INVOICE');
+      const credited = await docOf(id, 'CREDIT_NOTE');
+      const exchanged = await docOf(exchange, 'INVOICE');
+      expect(engravingOf(paid)).toEqual([['Engraving', 3_000]]);
+      expect(engravingOf(credited)).toEqual([['Engraving', 3_000]]);
+      expect(engravingOf(exchanged)).toEqual([['Engraving', 3_000]]);
+      // The original's credit note and the exchange's invoice net to nothing: the collector owes and is owed the same.
+      expect(credited.total_minor).toBe(paid.total_minor);
+      expect(exchanged.total_minor).toBe(paid.total_minor);
+      expect(paid.total_minor).toBe(420_000 + 3_000);
+      // YOUR ORDERS: the exchange's engraving, its price as invoiced.
+      const accountId = (await row(id)).account_id!;
+      expect((await orders().accountOrder(accountId, exchange)).engraving).toEqual({ text: 'J. M.', priceMinor: 3_000 });
+      await prices(null);
+    });
+
     it('a return opened on a parcel shipped and never marked delivered: once decided, the parcel DELIVERED, off On its way, its photo erased 14 days later', async () => {
       const { id } = await shippedOrder();
       const shippedAt = (await row(id)).shipped_at!;
@@ -565,13 +606,34 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       await h.ctx.services.stock.updateLocation(france, { address: null }, admin);
     });
 
-    it('opens a return at the message limit (no rate), rolls the message back with a refused request, and gives one order case to two requests at once', async () => {
+    it('opens a return at the message limit (no rate), rolls the message back with a refused request or a failure after it is written, and gives one order case to two requests at once', async () => {
       const { id, accountId, collector } = await delivered();
       for (let i = 0; i < MESSAGE_RATE.messages; i++) await h.ctx.services.messages.write(accountId, { body: `Message ${i}` }, collector);
       expect(await refusal(h.ctx.services.messages.write(accountId, { body: 'One more.' }, collector))).toMatchObject({ code: 'MESSAGE_LIMIT', status: 429 });
       // At the limit, the request still opens; its message written beside it.
       const opened = await cases().request(accountId, id, { kind: 'RETURN', reason: 'DAMAGED' }, collector);
       expect((await db().selectFrom('order_cases').select('message_id').where('id', '=', opened).executeTakeFirstOrThrow()).message_id).not.toBeNull();
+      // A failure after its message is written (here, MessageService.writeIn throwing once it has written) rolls both
+      // back: no message, no conversation, no order case, nothing audited.
+      const failing = await delivered();
+      const messages = h.ctx.services.messages;
+      const writeIn = messages.writeIn;
+      messages.writeIn = async (...args: Parameters<typeof writeIn>) => {
+        const written = await writeIn.apply(messages, args);
+        expect(written.message.id).toBeTruthy();
+        throw new Error('A failure after the message.');
+      };
+      try {
+        await expect(cases().request(failing.accountId, failing.id, { kind: 'RETURN', reason: 'SIZE', note: 'Rolled back.' }, failing.collector)).rejects.toThrow('A failure after the message.');
+      } finally {
+        messages.writeIn = writeIn;
+      }
+      expect(await db().selectFrom('order_cases').select('id').where('order_id', '=', failing.id).execute()).toEqual([]);
+      expect(await db().selectFrom('client_conversations').select('id').where('account_id', '=', failing.accountId).execute()).toEqual([]);
+      expect(await db().selectFrom('client_messages').select('id').where('order_id', '=', failing.id).execute()).toEqual([]);
+      expect(await db().selectFrom('audit_logs').select('id').where('action', '=', 'order.case.open').where('target_id', '=', failing.id).execute()).toEqual([]);
+      // Then asked again, it opens.
+      expect(await cases().request(failing.accountId, failing.id, { kind: 'RETURN', reason: 'SIZE' }, failing.collector)).toBeTruthy();
       // Two requests at once on another order: one order case, one message.
       const twice = await delivered();
       const results = await Promise.allSettled([
@@ -581,8 +643,8 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
       expect(((results.find((r) => r.status === 'rejected') as PromiseRejectedResult).reason as DomainError).code).toBe('ORDER_CASE_OPEN');
       expect(await db().selectFrom('order_cases').select('id').where('order_id', '=', twice.id).execute()).toHaveLength(1);
-      const messages = await db().selectFrom('client_messages as m').innerJoin('client_conversations as c', 'c.id', 'm.conversation_id').select('m.id').where('c.account_id', '=', twice.accountId).execute();
-      expect(messages).toHaveLength(1);
+      const written = await db().selectFrom('client_messages as m').innerJoin('client_conversations as c', 'c.id', 'm.conversation_id').select('m.id').where('c.account_id', '=', twice.accountId).execute();
+      expect(written).toHaveLength(1);
       // A welcome gift, delivered with its order: never from here (it is never refunded), and RETURNS AND EXCHANGES not offered.
       const giftModel = await createModel(db(), 'GIFT CUFF');
       const giftSku = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, giftModel, null));
