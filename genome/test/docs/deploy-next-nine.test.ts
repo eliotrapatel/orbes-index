@@ -213,7 +213,6 @@ describe('the runbook of the next nine (docs/launch/DEPLOY-NEXT-NINE.md)', () =>
       ['House guarantee', 'views/settings.ts'],
       ['Apply credit', 'views/order.ts'],
       ['Choose size', 'views/order.ts'],
-      ['Ship with its order', 'views/order.ts'],
       ['Grant a guarantee', 'views/owner.ts'],
       ['Revoke', 'views/owner.ts'],
       ['Lifetime value', 'views/owner.ts'],
@@ -229,6 +228,10 @@ describe('the runbook of the next nine (docs/launch/DEPLOY-NEXT-NINE.md)', () =>
       expect(runbook, label).toContain(`\`${label}\``);
       expect(admin(file), `${label}: not in ${file}`).toMatch(new RegExp(`['\`]${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['\`]`));
     }
+    // Deployment G's record keeps SHIP WITH ITS ORDER, which plan NEXT LOT (step 5.11e) retires: a travelling order ships
+    // in its parent's parcel, from the Shipping section; its label is the runbook's, no longer the order page's.
+    expect(runbook).toContain('`Ship with its order`');
+    expect(admin('views/order.ts')).not.toContain('Ship with its order');
     const copy = readDoc('genome/src/web/verify/copy.ts');
     for (const words of ['WRITE TO ORBES CLIENT SERVICES', 'MESSAGES', 'YOUR SIZES', 'THE CLUB', 'HOW RELEASES WORK', 'SHARE TO STORIES', 'SAVE IMAGE', 'PAIRS WELL WITH', 'THE RELEASES OF THIS MODEL', 'IN USE', 'REQUEST YEARLY CARE', 'TO CONFIRM', 'NOT SET']) {
       expect(runbook, words).toContain(words);

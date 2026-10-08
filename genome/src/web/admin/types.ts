@@ -1601,6 +1601,9 @@ export interface LiveFeasibilityLine {
   available: number;
   fromStock: number;
   short: number;
+  /** Its SKU and supplier (plan NEXT LOT §3.5.4.3), for Add to supplier order. */
+  skuId?: string | null;
+  supplier?: { id: string; name: string } | null;
 }
 
 /** The feasibility check before publishing (plan LIVE RELEASE+, choice 12): warnings, never a refusal. */
@@ -2509,6 +2512,8 @@ export interface OrderCard {
   piece: string | null;
   shipment: { carrier: string; trackingNumber: string } | null;
   timing: OrderTiming;
+  /** Its piece is ready but its parcel waits for another order's (plan NEXT LOT §3.5.6.6): never LATE meanwhile. */
+  waitingForParcel?: boolean;
 }
 
 export interface OrderBoardColumn {
@@ -2626,6 +2631,36 @@ export interface OrderDetail {
   claimCode: OrderClaimCode | null;
   /** Whether a card registers the order's piece, read from the piece (with or without a new claim code of the order's own). */
   claimCard: OrderClaimCard;
+  /** Its order cases, the newest first (plan NEXT LOT §3.5.4.4; every note withheld from an AUDITOR). */
+  orderCases: OrderCaseRecord[];
+  /** Once shipped: the model's other sizes an exchange may take, those in stock at its location selectable. */
+  exchangeSizes: { skuId: string; label: string; available: number; selectable: boolean }[];
+}
+
+/** An order case (plan NEXT LOT §1.1 (b)): a return, a size exchange, a parcel problem. */
+export interface OrderCaseRecord {
+  id: string;
+  order: { id: string; reference: string };
+  kind: OrderCaseKind;
+  status: OrderCaseStatus;
+  openedBy: 'COLLECTOR' | 'CLIENT_SERVICES';
+  openedAt: Iso;
+  reason: OrderCaseReason | null;
+  note: string | null;
+  exchange: { skuId: string; sizeLabel: string; available: number } | null;
+  shipment: { id: string; orders: { id: string; reference: string }[] } | null;
+  messageId: string | null;
+  received: { at: Iso; pieceState: 'OK' | 'DAMAGED'; note: string | null } | null;
+  decision: { at: Iso; outcome: 'REFUND' | 'EXCHANGE' | 'RESHIP'; pieceTo: 'RESTOCKED' | 'ARCHIVED' | 'REVOKED' | null; exchangeOrder: { id: string; reference: string } | null; note: string | null } | null;
+  cancelled: { at: Iso; note: string | null } | null;
+}
+
+/** POST /api/admin/order-cases/:id/decide: the case, and the claim code of a piece back to stock (shown once). */
+export interface OrderCaseDecided {
+  case: OrderCaseRecord;
+  productId?: string;
+  claimCode?: string;
+  claimCodes?: { productId: string; claimCode: string }[];
 }
 
 /** POST /api/admin/orders/:id/transition. */
@@ -2635,14 +2670,6 @@ export type OrderTransitionInput =
   | { to: 'DELIVERED'; note?: string }
   | { to: 'CANCELLED'; note: string };
 
-/** POST /api/admin/orders/:id/return (choice 20): back to stock at a location, or to the archive, with a note. */
-export type OrderReturnInput = { outcome: 'RESTOCKED'; locationId: string; note: string } | { outcome: 'ARCHIVED'; note: string };
-
-/** The order after its return, and the claim code of its piece's new card when it went back to stock (shown once). */
-export interface OrderReturned extends Omit<OrderDetail, 'claimCode'> {
-  productId: string;
-  claimCode?: string;
-}
 
 // ── Invoices (routes/admin/invoices.ts) ───────────────────────────────────
 

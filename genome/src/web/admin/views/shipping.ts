@@ -41,7 +41,7 @@ import {
 import { can } from '../model/permissions.js';
 import { href } from '../router.js';
 import type { ShippingOrderView } from '../types.js';
-import { button, checkbox, defList, linkButton, pageHeader, section, statusMark, table } from '../ui/components.js';
+import { button, checkbox, defList, linkButton, pageHeader, section, statusMark, table, type DefRow } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { reencodePhoto } from '../ui/photo.js';
 import { notify, notifyError } from '../ui/toast.js';
@@ -76,8 +76,10 @@ export async function shippingView(ctx: ViewContext): Promise<HTMLElement> {
 export interface ParcelSectionOptions {
   /** ORBES staff on the order page: one declared value per order of the parcel, in its currency (never the agent). */
   declared?: { orderId: string; reference: string; currency: string | null }[];
-  /** Leave out what the order page already shows (its pieces, its buyer). */
+  /** The order page: one Shipping section, without what the page already shows (its pieces, its buyer). */
   only?: 'shipping';
+  /** Rows the order page adds to the shipment's (its declared value, ORBES's only). */
+  rows?: DefRow[];
 }
 
 /** The parcel's sections: Parcel, Ship to, Packing, Shipment, History (the order page keeps Packing to History). */
@@ -300,25 +302,38 @@ export function parcelSections(ctx: ViewContext, view: ShippingOrderView, opts: 
     acts.deliver ? button(PACKING_TEXT.deliveredTitle, { kind: 'primary', testId: 'parcel-delivered', onClick: deliver }) : null,
     acts.report ? button(PACKING_TEXT.reportTitle, { kind: 'ghost', testId: 'parcel-report', onClick: report }) : null,
   ].filter((b): b is HTMLButtonElement => b !== null);
-  const shipment = section('Shipment', shipmentRows.length ? defList(shipmentRows) : h('p', { class: 'panel__text' }, PACKING_TEXT.notShipped), { id: 'parcel-shipment', tools: shipmentTools });
+  const shipmentBody = shipmentRows.length || opts.rows?.length ? defList([...shipmentRows, ...(opts.rows ?? [])]) : h('p', { class: 'panel__text' }, PACKING_TEXT.notShipped);
+  const shipment = section('Shipment', shipmentBody, { id: 'parcel-shipment', tools: shipmentTools });
 
   // ── History ──────────────────────────────────────────────────────────────
-  const history = section(
-    'History',
-    table(
-      [
-        { label: 'When', cell: (e) => formatDateTime(e.at), kind: ['nowrap'] },
-        { label: 'Step', cell: (e) => HISTORY_LABELS[e.action] ?? e.action },
-        ...(several ? [{ label: 'Order', cell: (e: ShippingOrderView['history'][number]) => h('span', { class: 'mono' }, e.order), kind: ['nowrap' as const] }] : []),
-        { label: 'By', cell: (e) => HISTORY_BY[e.by], kind: ['nowrap'] },
-      ],
-      [...view.history].reverse(),
-      { caption: 'History', empty: 'No step yet.' },
-    ),
-    { id: 'parcel-history' },
+  const historyTable = table(
+    [
+      { label: 'When', cell: (e) => formatDateTime(e.at), kind: ['nowrap'] },
+      { label: 'Step', cell: (e) => HISTORY_LABELS[e.action] ?? e.action },
+      ...(several ? [{ label: 'Order', cell: (e: ShippingOrderView['history'][number]) => h('span', { class: 'mono' }, e.order), kind: ['nowrap' as const] }] : []),
+      { label: 'By', cell: (e) => HISTORY_BY[e.by], kind: ['nowrap'] },
+    ],
+    [...view.history].reverse(),
+    { caption: 'History', empty: 'No step yet.' },
   );
+  const history = section('History', historyTable, { id: 'parcel-history' });
 
-  return opts.only === 'shipping' ? [packing, shipment, history] : [parcel, shipTo, packing, shipment, history];
+  // The order page's one Shipping section (§3.5.4.4): the same steps and words, its tools together.
+  if (opts.only === 'shipping') {
+    return [
+      section(
+        'Shipping',
+        [
+          ...packingBody,
+          shipmentBody,
+          h('h3', { class: 'panel__subtitle' }, 'The parcel’s steps'),
+          historyTable,
+        ],
+        { id: 'order-shipping', tools: [...packingTools, ...shipmentTools] },
+      ),
+    ];
+  }
+  return [parcel, shipTo, packing, shipment, history];
 }
 
 /**

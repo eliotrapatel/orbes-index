@@ -211,11 +211,11 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     expect(await p.locator('#sizes [data-testid=model-sizes-count]').textContent()).toBe('3 offered');
     expect(await figuresInDisplayFace(p)).toEqual([]);
 
-    // The stock page: each size at every location, at 0.
-    await go(p, '#/atelier', 'Atelier');
-    const stock = p.locator('#atelier-stock tbody tr', { hasText: 'HAL-RG-' });
+    // The stock page (Logistics → Stock, in the Atelier's place, plan NEXT LOT §3.5.4.1): each size at every location, at 0.
+    await go(p, '#/logistics?tab=stock', 'Logistics');
+    const stock = p.locator('#logistics-stock tbody tr', { hasText: 'HAL-RG-' });
     await expect.poll(() => stock.count()).toBe(6);
-    expect(await stock.evaluateAll((trs) => trs.map((tr) => [tr.querySelector('.cell-sub.mono')?.textContent, tr.children[1]?.textContent, tr.children[2]?.textContent]))).toEqual([
+    expect(await stock.evaluateAll((trs) => trs.map((tr) => [tr.querySelector('.cell-sub.mono')?.textContent, tr.children[3]?.textContent, tr.children[4]?.textContent]))).toEqual([
       ['HAL-RG-50', 'FRANCE WAREHOUSE', '0'],
       ['HAL-RG-50', 'LOGISTICS WAREHOUSE', '0'],
       ['HAL-RG-52', 'FRANCE WAREHOUSE', '0'],
@@ -262,16 +262,16 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     expect(await sizeRow(p, '52').locator('[data-testid=model-size-reinstate]').count()).toBe(1);
     await shot(p, 'set-aside');
 
-    // The stock page: 52 only where it has stock, marked Set aside; the selects offer 50 only.
-    await go(p, '#/atelier', 'Atelier');
-    const stock = p.locator('#atelier-stock tbody tr', { hasText: 'HAL-RG-52' });
+    // The stock page (Logistics → Stock): 52 only where it has stock, marked Set aside; the sizes offered (what a supplier
+    // order's line or a correction may name) 50 only.
+    await go(p, '#/logistics?tab=stock', 'Logistics');
+    const stock = p.locator('#logistics-stock tbody tr', { hasText: 'HAL-RG-52' });
     await expect.poll(() => stock.count()).toBe(1);
-    expect(await stock.locator('td').nth(1).textContent()).toBe('FRANCE WAREHOUSE');
+    expect(await stock.locator('td').nth(3).textContent()).toBe('FRANCE WAREHOUSE');
     expect(await stock.locator('[data-testid=stock-set-aside]').textContent()).toBe('Set aside');
-    await p.click('[data-testid=stock-correct]');
-    const options = await p.locator('dialog select[name=skuId] option').allTextContents();
-    expect(options.filter((o) => o.includes('HAL-RG'))).toEqual(['HALO · 50 · HAL-RG-50']);
-    await p.click('[data-testid=dialog-cancel]');
+    expect(await stock.locator('[data-testid=stock-add-to-order]').count()).toBe(0);
+    const offered = await p.evaluate(async () => ((await (await fetch('/api/admin/logistics/stock')).json()) as { skus: { code: string }[] }).skus.map((k) => k.code));
+    expect(offered.filter((c) => c.startsWith('HAL-RG'))).toEqual(['HAL-RG-50']);
 
     // Reinstated: offered again.
     await go(p, `#/catalogue/${modelId}`, 'HALO');

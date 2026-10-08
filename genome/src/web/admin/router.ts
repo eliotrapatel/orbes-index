@@ -51,7 +51,7 @@ export const ROUTES = [
   { name: 'audit', path: '/audit' },
   { name: 'team', path: '/team' },
   { name: 'catalogue', path: '/catalogue' },
-  /** The atelier (plan LIVE RELEASE+): the stock, the pieces to make; their work sheets printed from it, no link of their own. */
+  /** The Atelier and its work sheets, gone (plan NEXT LOT §3.5.4.5): kept so an old bookmark is led to Logistics. */
   { name: 'atelier', path: '/atelier' },
   { name: 'workSheets', path: '/atelier/sheets' },
   /** Logistics (plan NEXT LOT §3.5.3): the agent's page (LOGISTICS), its only one, and ORBES staff's in the Atelier's place; its tabs by `?tab=`. */

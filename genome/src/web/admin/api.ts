@@ -40,8 +40,9 @@ import type {
   OrderBoard,
   OrderBoardFilters,
   OrderDetail,
-  OrderReturned,
-  OrderReturnInput,
+  OrderCaseDecided,
+  OrderCaseRecord,
+  OrderCaseReason,
   OrderTermsChange,
   OrderTransitionInput,
   StockLevel,
@@ -1126,9 +1127,24 @@ export class AdminApi {
     return this.post(`/api/admin/orders/${encodeURIComponent(id)}/piece`, { productId });
   }
 
-  /** OPERATOR: RETURNED, back to stock at a location or to the archive; the new card's claim code when the piece went back to stock. */
-  returnOrder(id: string, input: OrderReturnInput): Promise<OrderReturned> {
-    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/return`, input);
+  /** OPERATOR: Open a return (plan NEXT LOT §3.5.4.4): a return or a size exchange, its reason and Client Services' note. */
+  openOrderCase(id: string, input: { kind: 'RETURN' | 'EXCHANGE'; reason: OrderCaseReason; exchangeSkuId?: string | null; note: string }): Promise<OrderCaseRecord> {
+    return this.post(`/api/admin/orders/${encodeURIComponent(id)}/case`, input);
+  }
+
+  /** AUDITOR: one order case (its notes withheld from an AUDITOR). */
+  orderCase(id: string): Promise<OrderCaseRecord> {
+    return this.get(`/api/admin/order-cases/${encodeURIComponent(id)}`);
+  }
+
+  /** OPERATOR (a lost parcel and the archive: ADMIN): ORBES's decision; a piece back to stock's new claim code, once. */
+  decideOrderCase(id: string, input: { decision: 'REFUND' | 'EXCHANGE' | 'RESHIP'; pieceTo?: 'RESTOCKED' | 'ARCHIVED' | null; locationId?: string | null; note?: string | null }): Promise<OrderCaseDecided> {
+    return this.post(`/api/admin/order-cases/${encodeURIComponent(id)}/decide`, input);
+  }
+
+  /** OPERATOR: the order case ended with no decision, with a note. */
+  cancelOrderCase(id: string, note: string): Promise<OrderCaseRecord> {
+    return this.post(`/api/admin/order-cases/${encodeURIComponent(id)}/cancel`, { note });
   }
 
   // ── Invoices (plan LIVE RELEASE+, M7) ────────────────────────────────────
@@ -1224,8 +1240,8 @@ export class AdminApi {
     return this.post('/api/admin/locations', { name });
   }
 
-  /** ADMIN: renamed, or made the default. */
-  updateLocation(id: string, change: { name?: string; isDefault?: true }): Promise<StockLocation> {
+  /** ADMIN: renamed, made the default, or its postal address (null clears it; plan NEXT LOT §3.5.4.5). */
+  updateLocation(id: string, change: { name?: string; isDefault?: true; address?: string | null }): Promise<StockLocation> {
     return this.patch(`/api/admin/locations/${encodeURIComponent(id)}`, change);
   }
 

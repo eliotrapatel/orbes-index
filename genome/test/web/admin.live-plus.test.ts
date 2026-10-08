@@ -28,6 +28,7 @@ import {
 } from '../../src/web/admin/model/best-time.js';
 import {
   feasibilityLine,
+  addToOrderLine,
   LIVE_LIMITS,
   LIVE_QUESTION_DEFAULT,
   livePartChange,
@@ -173,9 +174,13 @@ describe('the release and the stock in the console', () => {
   });
 
   it('says the feasibility check in one line', () => {
-    expect(feasibilityLine({ short: 0, location: { id: 'l1', name: 'FRANCE WAREHOUSE' } })).toBe('Every piece on sale is covered at FRANCE WAREHOUSE.');
-    expect(feasibilityLine({ short: 1, location: { id: 'l1', name: 'FRANCE WAREHOUSE' } })).toBe('1 piece on sale would be made to order once sold (FRANCE WAREHOUSE).');
-    expect(feasibilityLine({ short: 5, location: null })).toBe('5 pieces on sale would be made to order once sold (no location).');
+    // Plan NEXT LOT §3.5.4.3: no piece is made any more; what the stock does not cover waits for supplier stock.
+    expect(feasibilityLine({ short: 0, location: { id: 'l1', name: 'FRANCE WAREHOUSE' } })).toBe('Every piece on sale is in stock.');
+    expect(feasibilityLine({ short: 1, location: { id: 'l1', name: 'FRANCE WAREHOUSE' } })).toBe('1 piece on sale will wait for supplier stock once sold (FRANCE WAREHOUSE).');
+    expect(addToOrderLine({ short: 13, supplier: { name: 'MAISON NORD' } }, 'MONOLITHE · 52', 'LOGISTICS WAREHOUSE')).toBe(
+      'Add 13 pieces of MONOLITHE · 52 to the draft of MAISON NORD, to deliver to LOGISTICS WAREHOUSE. You confirm the draft before it is sent.',
+    );
+    expect(feasibilityLine({ short: 5, location: null })).toBe('5 pieces on sale will wait for supplier stock once sold (no location).');
   });
 });
 

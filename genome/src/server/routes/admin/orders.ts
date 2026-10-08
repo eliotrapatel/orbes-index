@@ -10,7 +10,9 @@
  *   GET    /api/admin/orders/shipping-rates     AUDITOR   SHIPPING (plan NEXT-NINE, BP-19 T2): the optional rates below the
  *                                                         free shipping of PLATINE and PALLADIUM, per currency and service
  *   PUT    /api/admin/orders/shipping-rates     ADMIN     those rates, set whole (services/club-program.ts)
- *   GET    /api/admin/orders/:id                AUDITOR   one order: its facts, timing, piece and history
+ *   GET    /api/admin/orders/:id                AUDITOR   one order: its facts, timing, piece and history; its order cases
+ *                                                         (their notes withheld from an AUDITOR) and, once shipped, the
+ *                                                         sizes an exchange may take (plan NEXT LOT §3.5.4.4)
  *   POST   /api/admin/orders/:id/transition     OPERATOR  PAID; SHIPPED (its piece linked; carrier, tracking number,
  *                                                         declared value); DELIVERED; CANCELLED (a note)
  *   POST   /api/admin/orders/:id/location       OPERATOR  served from another location (what it holds moves)
@@ -22,13 +24,9 @@
  *   DELETE /api/admin/orders/:id/credit         OPERATOR  REMOVE CREDIT: what was taken off it, given back
  *   POST   /api/admin/orders/:id/case           OPERATOR  Open a return (plan NEXT LOT §3.5.4.4, step 5.10): a RETURN or a
  *                                                         size EXCHANGE opened by Client Services, with its reason and
- *                                                         note (201 the order case, services/order-cases.ts); kept
- *                                                         beside /return until the console moves to it (step 5.11e)
- *   POST   /api/admin/orders/:id/return         OPERATOR  RETURNED (choice 20): back to stock at a location, with a
- *                                                         note; the claim code of the piece's new card when ORBES took
- *                                                         its buyer's ownership back (shown once, no-store)
- *                                               ADMIN     to the archive (its piece RETIRED: revocation-class, as on the
- *                                                         products' routes; 403 for an OPERATOR)
+ *                                                         note (201 the order case, services/order-cases.ts); ORBES
+ *                                                         decides it in routes/admin/order-cases.ts (the old /return,
+ *                                                         removed in step 5.11e)
  *
  * An AUDITOR reads the collectors' emails masked (`j***@example.com`) and the buyer's name and address masked
  * (`J*** D***`, the address withheld: serialize.ts), on the board, the order and the CSV; OPERATOR and ADMIN in clear.
@@ -37,7 +35,6 @@
  * audited by its service.
  */
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
-import { forbidden } from '../../errors.js';
 import {
   orderAlertsBody,
   orderBoardQuery,
@@ -46,17 +43,17 @@ import {
   orderParams,
   openOrderCaseBody,
   orderPieceBody,
-  orderReturnBody,
   orderTermsBody,
   orderCreditBody,
   orderTransitionBody,
   parse,
   shippingRatesBody,
 } from '../../http/schemas.js';
-import { adminActor, hasRole, requireAdmin } from '../../http/sessions.js';
+import { adminActor } from '../../http/sessions.js';
 import type { OrderBoard, OrderBoardFilter, OrderDetail } from '../../services/fulfilment.js';
 import type { OrderTransitionInput, OrderView } from '../../services/orders.js';
 import type { AdminRouteDeps } from './index.js';
+import { sizesForExchange } from '../../services/sizes.js';
 import { orderCaseJson } from './order-cases.js';
 import { clientEmail, orderBuyer, readsClientEmails } from './serialize.js';
 
@@ -90,11 +87,16 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
   const detail = async (request: FastifyRequest, id: string) => {
     const inClear = readsClientEmails(request);
     const d = orderDetailJson(await fulfilment.detail(id), inClear);
+    // Plan NEXT LOT §3.5.4.4: the order's cases (the Order case section, every note withheld from an AUDITOR), and once
+    // it is shipped the sizes an exchange may take (§3.3's sizesForExchange: the others' availability at its location).
+    const cases = await ctx.services.orderCases.forOrder(d.order.id);
+    const orderCases = cases.map((c) => orderCaseJson(request, c)).reverse();
+    const exchangeSizes = d.order.status === 'SHIPPED' || d.order.status === 'DELIVERED' ? await sizesForExchange(ctx.db, d.order.id) : [];
     // A return decided from an order case carries ORBES's decision's note: never read by an AUDITOR.
-    if (!inClear && d.order.return && (await ctx.services.orderCases.forOrder(d.order.id)).some((c) => c.decision !== null && (c.kind === 'RETURN' || c.kind === 'EXCHANGE'))) {
-      return { ...d, order: { ...d.order, return: { ...d.order.return, note: null } } };
+    if (!inClear && d.order.return && cases.some((c) => c.decision !== null && (c.kind === 'RETURN' || c.kind === 'EXCHANGE'))) {
+      return { ...d, order: { ...d.order, return: { ...d.order.return, note: null } }, orderCases, exchangeSizes };
     }
-    return d;
+    return { ...d, orderCases, exchangeSizes };
   };
 
   app.get('/api/admin/orders', async (request) => orderBoardJson(await fulfilment.board(boardFilter(request.query)), readsClientEmails(request)));
@@ -173,20 +175,6 @@ export const adminOrderRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const { id } = parse(orderParams, request.params);
     await orders.removeCredit(id, adminActor(request));
     return detail(request, id);
-  });
-
-  // The answer may carry a claim code (only its hash is kept): never stored by a cache.
-  app.post('/api/admin/orders/:id/return', async (request, reply) => {
-    const { id } = parse(orderParams, request.params);
-    const b = parse(orderReturnBody, request.body);
-    const { admin } = requireAdmin(request);
-    // The archive retires the piece: revocation-class, ADMIN's alone (routes/admin/products.ts ADMIN_ONLY_TARGETS).
-    if (b.outcome === 'ARCHIVED' && !hasRole(admin.role, 'ADMIN')) throw forbidden('Only an ADMIN can archive a returned piece.');
-    const r = await orders.returnOrder(id, { outcome: b.outcome, locationId: b.locationId ?? null, note: b.note }, adminActor(request));
-    reply.header('cache-control', 'no-store');
-    // `claimCode` here is the new card's code (a string), never the order page's block of plan NEXT LOT §3.4, left out.
-    const { claimCode: _block, ...page } = await detail(request, id);
-    return { ...page, productId: r.productId, ...(r.claimCode ? { claimCode: r.claimCode } : {}) };
   });
 
   // Plan NEXT LOT §3.5.4.4 (step 5.10): Open a return, as an order case; ORBES decides it once the agent has the parcel.

@@ -1,35 +1,17 @@
 /**
- * The console's orders, atelier and settings (plan LIVE RELEASE+, step S2), its returns and invoices (step S4) — the
- * pure models and the API client: model/orders.ts, model/atelier.ts and model/invoices.ts against the server's rules
- * (their bounds mirrored and compared), the board's, the atelier's and the invoices' filters, what each role may do, the
+ * The console's orders and settings (plan LIVE RELEASE+, step S2), its returns and invoices (step S4) — the pure models
+ * and the API client: model/orders.ts, model/order-cases.ts and model/invoices.ts against the server's rules (their
+ * bounds mirrored and compared), the board's and the invoices' filters, what each role may do, the
  * dialogs' checks and what they send (a return included), the packing slip without a price; AdminApi's paths, methods
  * and bodies.
  */
 import { describe, expect, it } from 'vitest';
-import { ATELIER_MAKE_MAX, BENCH_VIEWS as SERVER_BENCH_VIEWS, ISSUE_TEXT_LIMITS, suggestedPieces, THRESHOLD_MAX, WORK_SHEETS_MAX } from '../../src/server/services/atelier.js';
 import { ORDER_ALERT_LIMITS, ORDER_LATE_RULES as SERVER_LATE_RULES } from '../../src/server/services/fulfilment.js';
-import { RESERVED_MATERIAL_PENDING as SERVER_PENDING } from '../../src/server/services/issuance.js';
 import { ORDER_AMOUNT_MAX_MINOR as SERVER_AMOUNT_MAX, ORDER_CURRENCIES as SERVER_CURRENCIES, ORDER_TEXT_LIMITS, trackingLink as serverTrackingLink } from '../../src/server/services/orders.js';
 import { CARRIER_NAME_MAX, checkTrackingUrl, LOCATION_NAME_MAX, STOCK_MOVE_MAX, STOCK_NOTE_MAX, TRACKING_URL_MAX } from '../../src/server/services/stock.js';
 import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
 import { formatCount } from '../../src/web/admin/format.js';
-import {
-  adjustProblem,
-  ATELIER_LIMITS,
-  benchActions,
-  benchFilters,
-  issueInput,
-  issueProblem,
-  issueValues,
-  makeProblem,
-  originLabel,
-  RESERVED_MATERIAL_PENDING,
-  sheetsSelection,
-  skuLabel,
-  thresholdProblem,
-  thresholdValue,
-  transferProblem,
-} from '../../src/web/admin/model/atelier.js';
+import { canOpenReturn, caseActions, CASE_REASON_LABELS, decideInput, decideProblem, openCaseInput, openCaseProblem, outcomeOptions, pastReturnWindow } from '../../src/web/admin/model/order-cases.js';
 import { buyerLine, invoiceFilters, invoiceMonths, INVOICE_SEARCH_MAX, KIND_FILTER_LABELS, linkedDocument, monthLabel, signedMoney } from '../../src/web/admin/model/invoices.js';
 import {
   ALERT_LIMITS,
@@ -67,10 +49,6 @@ import {
   orderActions,
   packingSlip,
   RETURN_LABELS,
-  returnInput,
-  returnProblem,
-  shipInput,
-  shipProblem,
   shipWaitsFor,
   shippingLine,
   sizeText,
@@ -154,9 +132,6 @@ describe('the mirrors of the server', () => {
     expect([...ORDER_LATE_RULES]).toEqual([...SERVER_LATE_RULES]);
     expect(ALERT_LIMITS).toEqual(JSON.parse(JSON.stringify(ORDER_ALERT_LIMITS)));
     expect(LOGISTICS_LIMITS).toEqual({ locationName: LOCATION_NAME_MAX, carrierName: CARRIER_NAME_MAX, trackingUrl: TRACKING_URL_MAX });
-    expect(ATELIER_LIMITS).toEqual({ make: ATELIER_MAKE_MAX, sheets: WORK_SHEETS_MAX, threshold: THRESHOLD_MAX, move: STOCK_MOVE_MAX, note: STOCK_NOTE_MAX, material: ISSUE_TEXT_LIMITS.material, batch: ISSUE_TEXT_LIMITS.productionBatch });
-    expect([...BENCH_VIEWS]).toEqual([...SERVER_BENCH_VIEWS]);
-    expect(RESERVED_MATERIAL_PENDING).toBe(SERVER_PENDING);
     expect(trackingLink('https://t.example/?n={tracking}', '6A 1234 5678')).toBe(serverTrackingLink('https://t.example/?n={tracking}', '6A 1234 5678'));
   });
 
@@ -208,8 +183,11 @@ describe('the board', () => {
     expect(cardHolds(card({ skuCode: 'MNL', reservation: 'AWAITING' }))).toBe('Awaiting stock');
     expect(cardHolds(card({ status: 'SHIPPED', piece: 'O26-J-00184' }))).toBe('Piece O26-J-00184');
     expect(cardHolds(card({ status: 'CANCELLED' }))).toBe('—');
+    // Its piece ready while its parcel waits for another order's (plan NEXT LOT §3.5.6.6): never LATE meanwhile.
+    expect(cardHolds(card({ status: 'PAID', skuCode: 'MNL', reservation: 'STOCK', waitingForParcel: true }))).toBe('Waiting for the rest of its parcel');
     expect(viewHolds(view({ skuId: 's', reservation: 'STOCK' }))).toBe('In stock at FRANCE WAREHOUSE');
     expect(['order.create', 'order.pay', 'order.ship', 'order.deliver', 'order.cancel', 'order.return', 'order.location', 'order.terms', 'order.buyer', 'order.link'].every((a) => EVENT_LABELS[a])).toBe(true);
+    expect(['order.serve', 'order.pack.start', 'order.pack.scan', 'order.pack.photo', 'order.pack.check', 'order.reship', 'order.exchange', 'order.case.open', 'order.case.receive', 'order.case.decide', 'order.case.cancel'].every((a) => EVENT_LABELS[a])).toBe(true);
     const e = (type: string, id: string | null) => ({ action: 'order.pay', status: 'PAID' as const, note: null, at: '', actor: { type, id } });
     expect([eventActor(e('admin', 'x'), { x: 'op@orbes.test' }), eventActor(e('admin', 'y'), {}), eventActor(e('system', null), {}), eventActor(e('account', 'a'), {})]).toEqual([
       'op@orbes.test',
@@ -348,56 +326,50 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
 describe('what a role may do with an order', () => {
   it('offers each step only where the server takes it, to an OPERATOR', () => {
     const reserved = view();
-    expect(orderActions(reserved, 'AUDITOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: false, return: false, archive: false, location: false, terms: { size: false, price: false, engraving: false, shipping: false }, buyer: false, linkPiece: false });
+    expect(orderActions(reserved, 'AUDITOR')).toEqual({ pay: false, deliver: false, cancel: false, archive: false, location: false, terms: { size: false, price: false, engraving: false, shipping: false }, buyer: false });
     // Not priced yet: not paid (its invoice needs its price, step S4).
-    expect(orderActions(reserved, 'OPERATOR')).toEqual({ pay: false, ship: false, deliver: false, cancel: true, return: false, archive: false, location: true, terms: { size: true, price: true, engraving: true, shipping: true }, buyer: true, linkPiece: false });
+    expect(orderActions(reserved, 'OPERATOR')).toEqual({ pay: false, deliver: false, cancel: true, archive: false, location: true, terms: { size: true, price: true, engraving: true, shipping: true }, buyer: true });
     expect(orderActions(view({ priceMinor: 480_000, currency: 'EUR' }), 'OPERATOR').pay).toBe(true);
     const paidStock = view({ status: 'PAID', paidAt: 'x', skuId: 's', reservation: 'STOCK' });
-    expect(orderActions(paidStock, 'OPERATOR')).toMatchObject({ pay: false, ship: false, cancel: true, terms: { size: true, price: false, engraving: true }, linkPiece: true });
+    expect(orderActions(paidStock, 'OPERATOR')).toMatchObject({ pay: false, cancel: true, terms: { size: true, price: false, engraving: true } });
     const live = view({ channel: 'LIVE', skuId: 's', reservation: 'AWAITING', sizeLabel: '52', priceMinor: 1, currency: 'EUR' });
     // A LIVE RELEASE's order: its size and price are its release's; its shipping is entered while RESERVED (BP-19 T4).
     expect(orderActions(live, 'ADMIN').terms).toEqual({ size: false, price: false, engraving: true, shipping: true });
     // The shipping: RESERVED only, and never on an order travelling with another (its parent's).
     expect(orderActions(paidStock, 'OPERATOR').terms.shipping).toBe(false);
     expect(orderActions(view({ withOrder: { id: 'p', reference: 'OR-12345678', shipment: null } }), 'OPERATOR').terms.shipping).toBe(false);
-    // A piece from the stock for an order waiting for supplier stock (plan NEXT LOT §3.5); an AUDITOR never links one.
-    expect([orderActions(live, 'OPERATOR').linkPiece, orderActions(live, 'AUDITOR').linkPiece]).toEqual([true, false]);
-    expect(orderActions(view({ ...live, status: 'CANCELLED', reservation: null }), 'OPERATOR').linkPiece).toBe(false);
+    // No Link a piece any more (plan NEXT LOT §3.5.4.4, step 5.11e): the agent's packing scan binds it; Ship and Open a
+    // return moved to the Shipping and Order case sections.
+    expect(Object.keys(orderActions(live, 'OPERATOR'))).not.toEqual(expect.arrayContaining(['linkPiece']));
+    expect(Object.keys(orderActions(live, 'OPERATOR'))).not.toContain('ship');
+    expect(Object.keys(orderActions(live, 'OPERATOR'))).not.toContain('return');
     const linked = view({ status: 'PAID', paidAt: 'x', skuId: 's', reservation: 'STOCK', productId: 'O26-J-00184' });
-    expect(orderActions(linked, 'OPERATOR')).toMatchObject({ location: false, linkPiece: false, ship: true, terms: { size: false } });
-    expect(orderActions(view({ status: 'SHIPPED', productId: 'O26-J-00184' }), 'OPERATOR')).toMatchObject({ deliver: true, cancel: false, return: true, location: false, buyer: true });
-    expect(orderActions(view({ status: 'DELIVERED', productId: 'O26-J-00184' }), 'OPERATOR')).toMatchObject({ deliver: false, cancel: false, return: true });
-    // A return (choice 20): shipped or delivered, by an OPERATOR; never twice, never before shipping.
-    expect(orderActions(view({ status: 'DELIVERED', productId: 'O26-J-00184' }), 'AUDITOR').return).toBe(false);
+    expect(orderActions(linked, 'OPERATOR')).toMatchObject({ location: false, terms: { size: false } });
+    expect(orderActions(view({ status: 'SHIPPED', productId: 'O26-J-00184' }), 'OPERATOR')).toMatchObject({ deliver: true, cancel: false, location: false, buyer: true });
+    expect(orderActions(view({ status: 'DELIVERED', productId: 'O26-J-00184' }), 'OPERATOR')).toMatchObject({ deliver: false, cancel: false });
     // To the archive (the piece retired): an ADMIN's alone.
     const delivered = view({ status: 'DELIVERED', productId: 'O26-J-00184' });
     expect([orderActions(delivered, 'OPERATOR').archive, orderActions(delivered, 'ADMIN').archive, orderActions(reserved, 'ADMIN').archive]).toEqual([false, true, false]);
-    expect([orderActions(view({ status: 'RETURNED', productId: 'O26-J-00184' }), 'ADMIN').return, orderActions(linked, 'OPERATOR').return]).toEqual([false, false]);
-    expect([can('OPERATOR', 'manageOrders'), can('AUDITOR', 'manageOrders'), can('OPERATOR', 'manageLogistics'), can('ADMIN', 'manageLogistics'), can('OPERATOR', 'printWorkSheets'), can('AUDITOR', 'printWorkSheets')]).toEqual([
+    // The work sheets went with the Atelier (plan NEXT LOT §3.5.4.5); deciding a lost parcel is ADMIN's.
+    expect([can('OPERATOR', 'manageOrders'), can('AUDITOR', 'manageOrders'), can('OPERATOR', 'manageLogistics'), can('ADMIN', 'manageLogistics'), can('OPERATOR', 'decideLostParcel'), can('ADMIN', 'decideLostParcel')]).toEqual([
       true,
       false,
       false,
       true,
-      true,
       false,
+      true,
     ]);
     expect(shipWaitsFor(view())).toBe('Its size is to be entered.');
     expect(shipWaitsFor(view({ skuId: 's', reservation: 'AWAITING', priceMinor: 480_000, currency: 'EUR' }))).toBe('It waits for supplier stock.');
     expect(shipWaitsFor(view({ skuId: 's', reservation: 'AWAITING' }))).toBe('It waits for supplier stock; its price is to be entered.');
     expect(shipWaitsFor(view({ skuId: 's', reservation: 'STOCK', priceMinor: 480_000, currency: 'EUR' }))).toBe('It ships once paid.');
     expect(shipWaitsFor(view({ skuId: 's', reservation: 'STOCK' }))).toBe('Its price is to be entered: it is paid once priced, and its invoice issued then.');
-    expect(shipWaitsFor(paidStock)).toBe('Link its piece from the stock.');
+    expect(shipWaitsFor(paidStock)).toBe('It ships with its parcel: the agent packs it and scans its card (Shipping).');
     expect(shipWaitsFor(linked)).toBeNull();
   });
 
   it('checks the dialogs and sends what the server takes', () => {
-    expect(shipProblem({ carrierId: '', trackingNumber: '6A1234' }, 'EUR')).toBe('Choose the carrier.');
-    expect(shipProblem({ carrierId: LOC, trackingNumber: '#' }, 'EUR')).toMatch(/^A tracking number/);
-    expect(shipProblem({ carrierId: LOC, trackingNumber: '6A1234', declaredValue: '4800' }, null)).toMatch(/price and currency/);
-    expect(shipProblem({ carrierId: LOC, trackingNumber: '6A1234', declaredValue: 'abc' }, 'EUR')).toMatch(/declared value/);
-    expect(shipProblem({ carrierId: LOC, trackingNumber: ' 6A 1234 ', declaredValue: '4 800.50' }, 'EUR')).toBeNull();
-    expect(shipInput({ carrierId: LOC, trackingNumber: ' 6A 1234 ', declaredValue: '4 800.50', note: '' })).toEqual({ to: 'SHIPPED', carrierId: LOC, trackingNumber: '6A 1234', declaredValueMinor: 480_050 });
-    expect(shipInput({ carrierId: LOC, trackingNumber: '6A1234', declaredValue: '', note: ' Fragile ' })).toEqual({ to: 'SHIPPED', carrierId: LOC, trackingNumber: '6A1234', note: 'Fragile' });
+    // Ship and its declared values are the Shipping section's (model/logistics.ts shipProblem, admin.logistics.test.ts).
     expect([noteProblem('', true), noteProblem('', false), noteProblem('x'.repeat(501), false)]).toEqual(['Say in the note why.', null, 'A note has at most 500 characters.']);
 
     const o = view();
@@ -455,66 +427,46 @@ describe('what a role may do with an order', () => {
   });
 });
 
-describe('the atelier', () => {
-  it('names whom pieces are made for and a SKU; reads its filters and the work sheets\' selection', () => {
-    expect([originLabel({ kind: 'RELEASE', release: { id: 'd', title: 'THE RING' } }), originLabel({ kind: 'SALON' }), originLabel({ kind: 'STOCK' })]).toEqual(['THE RING', 'PRIVATE SALON', 'FOR STOCK']);
-    expect(skuLabel({ id: 's', code: 'X', model: { id: 'm', name: 'HALO' }, sizeLabel: null, setAside: false })).toBe('HALO · ONE SIZE');
-    expect(benchFilters({ view: 'DONE', origin: 'STOCK', skuId: ID, locationId: LOC })).toEqual({ view: 'DONE', origin: 'STOCK', skuId: ID, locationId: LOC });
-    expect(benchFilters({ view: 'LATER', origin: 'x', skuId: 'y' })).toEqual({});
-    expect(benchFilters({ origin: ID.toUpperCase() })).toEqual({ origin: ID });
-    expect(sheetsSelection({ id: ID, origin: 'STOCK' })).toEqual({ benchItemIds: [ID] });
-    expect(sheetsSelection({ origin: 'SALON', skuId: ID })).toEqual({ origin: 'SALON', skuId: ID });
-    expect(suggestedPieces(5, 1, 1)).toBe(3);
-  });
-
-  it('offers each step only where the server takes it', () => {
-    expect(benchActions(bench(), 'OPERATOR')).toEqual({ start: true, done: false, cancel: true, sheet: true });
-    expect(benchActions(bench({ status: 'IN_PROGRESS' }), 'OPERATOR')).toEqual({ start: false, done: true, cancel: true, sheet: true });
-    expect(benchActions(bench({ order: { id: ID, reference: 'OR-1', status: 'PAID', channel: 'LIVE' } }), 'OPERATOR')).toMatchObject({ cancel: false });
-    expect(benchActions(bench({ status: 'DONE' }), 'ADMIN')).toEqual({ start: false, done: false, cancel: false, sheet: false });
-    expect(benchActions(bench(), 'AUDITOR')).toEqual({ start: false, done: false, cancel: false, sheet: false });
-    expect([toneOf('bench', 'TO_MAKE'), toneOf('bench', 'IN_PROGRESS'), toneOf('bench', 'DONE'), toneOf('order', 'RESERVED'), toneOf('order', 'PAID'), toneOf('order', 'CANCELLED')]).toEqual([
-      'outline',
-      'solid',
-      'muted',
-      'outline',
-      'solid',
-      'muted',
-    ]);
-  });
-
-  it('checks the dialogs: a piece finished, a transfer, a count, a minimum, pieces to make', () => {
-    const now = new Date('2026-11-05T12:00:00.000Z');
-    const pending = bench({ piece: { id: 'p', reference: 'O26-J-00184', status: 'RESERVED', material: RESERVED_MATERIAL_PENDING, signed: true } });
-    expect(issueValues(pending, now)).toEqual({ material: '', productionBatch: '', productionDate: '2026-11-05', withClaimSecret: 'true' });
-    expect(issueProblem(pending, { material: '' }, now)).toBe('Confirm the material of the piece.');
-    expect(issueProblem(bench(), { material: '', productionDate: '2026-11-07' }, now)).toBe('The production date cannot be in the future.');
-    expect(issueProblem(bench(), { material: '', productionDate: '2026-02-30' }, now)).toBe('The production date is a day.');
-    expect(issueProblem(bench(), { material: '', productionDate: '2026-11-06' }, now)).toBeNull();
-    expect(issueInput({ material: ' 925 ', productionBatch: '', productionDate: '2026-11-05', withClaimSecret: '' })).toEqual({ material: '925', productionDate: '2026-11-05', withClaimSecret: false });
-    expect(transferProblem({ fromLocationId: LOC, toLocationId: LOC, quantity: '1' })).toBe('A transfer goes to another location.');
-    expect(transferProblem({ fromLocationId: LOC, toLocationId: ID, quantity: '0' })).toMatch(/^Move 1 to/);
-    expect(transferProblem({ fromLocationId: LOC, toLocationId: ID, quantity: '3' })).toBeNull();
-    expect(adjustProblem({ delta: '0', note: 'x' })).toMatch(/^Correct the count/);
-    expect(adjustProblem({ delta: '-2', note: '' })).toBe('Say in the note why the count changes.');
-    expect(adjustProblem({ delta: '-2', note: 'Damaged.' })).toBeNull();
-    expect([thresholdProblem({ minimum: '' }), thresholdProblem({ minimum: '0' }), thresholdProblem({ minimum: '12' })]).toEqual([null, `A minimum is 1 to ${formatCount(10_000)} pieces, or none.`, null]);
-    expect([thresholdValue({ minimum: '' }), thresholdValue({ minimum: '12' })]).toEqual([null, 12]);
-    expect([makeProblem({ quantity: '51' }), makeProblem({ quantity: '3' })]).toEqual(['Make 1 to 50 pieces at a time.', null]);
-  });
-});
-
 describe('a return and the invoices (step S4)', () => {
-  it('opens a return with where the piece goes (a location back to stock) and a note, as the server takes it', () => {
-    expect(returnProblem({ outcome: '', note: 'x' })).toBe('Choose where the piece goes.');
-    expect(returnProblem({ outcome: 'LOST', note: 'x' })).toBe('Choose where the piece goes.');
-    expect(returnProblem({ outcome: 'RESTOCKED', locationId: '', note: 'x' })).toBe('Choose the location the piece goes back to.');
-    expect(returnProblem({ outcome: 'RESTOCKED', locationId: LOC, note: ' ' })).toBe('Say in the note why.');
-    expect(returnProblem({ outcome: 'ARCHIVED', locationId: '', note: 'x'.repeat(501) })).toBe('A note has at most 500 characters.');
-    expect(returnProblem({ outcome: 'RESTOCKED', locationId: LOC, note: 'Returned unworn.' })).toBeNull();
-    // The location chosen before switching to the archive is not sent.
-    expect(returnInput({ outcome: 'RESTOCKED', locationId: LOC, note: ' Returned unworn. ' })).toEqual({ outcome: 'RESTOCKED', locationId: LOC, note: 'Returned unworn.' });
-    expect(returnInput({ outcome: 'ARCHIVED', locationId: LOC, note: 'Damaged.' })).toEqual({ outcome: 'ARCHIVED', note: 'Damaged.' });
+  it('opens a return or a size exchange as an order case, and decides it, as the server takes it (plan NEXT LOT §3.5.4.4)', () => {
+    const sizes = [
+      { skuId: ID, selectable: true },
+      { skuId: LOC, selectable: false },
+    ];
+    expect(openCaseProblem({ kind: '', reason: 'SIZE', note: 'x' }, sizes)).toBe('Choose a return or a size exchange.');
+    expect(openCaseProblem({ kind: 'EXCHANGE', exchangeSkuId: LOC, reason: 'SIZE', note: 'x' }, sizes)).toBe('Choose the new size among those in stock.');
+    expect(openCaseProblem({ kind: 'RETURN', reason: '', note: 'x' }, sizes)).toBe('Choose the reason.');
+    expect(openCaseProblem({ kind: 'RETURN', reason: 'SIZE', note: ' ' }, sizes)).toBe('Say in the note what the collector asked.');
+    expect(openCaseProblem({ kind: 'EXCHANGE', exchangeSkuId: ID, reason: 'SIZE', note: 'x' }, sizes)).toBeNull();
+    // A size chosen before switching to a return is not sent.
+    expect(openCaseInput({ kind: 'RETURN', exchangeSkuId: ID, reason: 'OTHER', note: ' Changed her mind. ' })).toEqual({ kind: 'RETURN', reason: 'OTHER', exchangeSkuId: null, note: 'Changed her mind.' });
+    expect(Object.values(CASE_REASON_LABELS)).toEqual(['The size does not fit', 'The piece is not as I expected', 'The piece arrived damaged', 'Another reason']);
+    expect(pastReturnWindow('2026-10-01T09:00:00.000Z', new Date('2026-10-15T09:00:01.000Z'))).toBe(true);
+    expect(pastReturnWindow('2026-10-01T09:00:00.000Z', new Date('2026-10-15T09:00:00.000Z'))).toBe(false);
+    expect(pastReturnWindow(null, new Date())).toBe(false);
+
+    expect(outcomeOptions('RETURN').map((o) => o.label)).toEqual(['Refund']);
+    expect(outcomeOptions('EXCHANGE').map((o) => o.label)).toEqual(['Ship the other size', 'Refund']);
+    expect(outcomeOptions('LOST').map((o) => o.label)).toEqual(['Ship another piece', 'Refund']);
+    expect(decideProblem({ kind: 'RETURN' }, { decision: 'RESHIP', pieceTo: 'RESTOCKED', locationId: LOC, note: 'x' })).toBe('Choose the outcome.');
+    expect(decideProblem({ kind: 'RETURN' }, { decision: 'REFUND', pieceTo: '', note: 'x' })).toBe('Say where the piece goes.');
+    expect(decideProblem({ kind: 'RETURN' }, { decision: 'REFUND', pieceTo: 'RESTOCKED', locationId: '', note: 'x' })).toBe('Choose the location the piece goes back to.');
+    expect(decideProblem({ kind: 'RETURN' }, { decision: 'REFUND', pieceTo: 'ARCHIVED', note: '' })).toBe('Say in the note why.');
+    expect(decideProblem({ kind: 'LOST' }, { decision: 'RESHIP', note: '' })).toBeNull();
+    expect(decideInput({ kind: 'RETURN' }, { decision: 'REFUND', pieceTo: 'ARCHIVED', locationId: LOC, note: ' Damaged. ' })).toEqual({ decision: 'REFUND', pieceTo: 'ARCHIVED', locationId: null, note: 'Damaged.' });
+    expect(decideInput({ kind: 'BACK_TO_SENDER' }, { decision: 'RESHIP', pieceTo: 'RESTOCKED', locationId: LOC, note: '' })).toEqual({ decision: 'RESHIP', pieceTo: null, locationId: null, note: null });
+
+    // Decide once the parcel is back (a lost one by an ADMIN, as it stands); Cancel while open; Open a return once shipped.
+    const c = { kind: 'RETURN' as const, status: 'OPEN' as const };
+    expect(caseActions(c, 'OPERATOR')).toEqual({ decide: false, cancel: true });
+    expect(caseActions({ ...c, status: 'RECEIVED' }, 'OPERATOR')).toEqual({ decide: true, cancel: true });
+    expect(caseActions({ ...c, status: 'RECEIVED' }, 'AUDITOR')).toEqual({ decide: false, cancel: false });
+    expect([caseActions({ kind: 'LOST', status: 'OPEN' }, 'OPERATOR').decide, caseActions({ kind: 'LOST', status: 'OPEN' }, 'ADMIN').decide]).toEqual([false, true]);
+    expect(caseActions({ ...c, status: 'CLOSED' }, 'ADMIN')).toEqual({ decide: false, cancel: false });
+    expect(canOpenReturn({ status: 'DELIVERED' }, [], 'OPERATOR')).toBe(true);
+    expect(canOpenReturn({ status: 'DELIVERED' }, [{ status: 'RECEIVED' }], 'OPERATOR')).toBe(false);
+    expect(canOpenReturn({ status: 'PAID' }, [], 'OPERATOR')).toBe(false);
+    expect(canOpenReturn({ status: 'DELIVERED' }, [], 'AUDITOR')).toBe(false);
     expect(RETURN_LABELS).toEqual({ RESTOCKED: 'Back to stock', ARCHIVED: 'To the archive' });
     expect(DOCUMENT_LABELS).toEqual({ INVOICE: 'Invoice', CREDIT_NOTE: 'Credit note' });
   });
@@ -588,10 +540,13 @@ describe('routes and the API client', () => {
     await api.finishBench(ID, { withClaimSecret: true });
     await api.cancelBench(ID);
     await api.workSheets({ benchItemIds: [ID] });
-    await api.returnOrder(ID, { outcome: 'RESTOCKED', locationId: LOC, note: 'Returned.' });
+    await api.openOrderCase(ID, { kind: 'RETURN', reason: 'SIZE', note: 'Returned.' });
     await api.invoices({ month: '2026-11', kind: 'INVOICE' });
     const month = await api.invoicesCsv('2026-11');
     await api.invoicePdf(ID);
+    await api.orderCase(ID);
+    await api.decideOrderCase(ID, { decision: 'REFUND', pieceTo: 'RESTOCKED', locationId: LOC, note: 'Unworn.' });
+    await api.cancelOrderCase(ID, 'Withdrawn.');
     expect(calls.map((c) => `${c.init.method} ${c.url}`)).toEqual([
       'GET /api/admin/orders?channel=LIVE&late=true&q=OR-1',
       `GET /api/admin/orders.csv?dropId=${ID}`,
@@ -620,10 +575,13 @@ describe('routes and the API client', () => {
       `POST /api/admin/atelier/bench/${ID}/done`,
       `POST /api/admin/atelier/bench/${ID}/cancel`,
       'POST /api/admin/atelier/sheets',
-      `POST /api/admin/orders/${ID}/return`,
+      `POST /api/admin/orders/${ID}/case`,
       'GET /api/admin/invoices?month=2026-11&kind=INVOICE',
       'GET /api/admin/invoices.csv?month=2026-11',
       `GET /api/admin/invoices/${ID}/pdf`,
+      `GET /api/admin/order-cases/${ID}`,
+      `POST /api/admin/order-cases/${ID}/decide`,
+      `POST /api/admin/order-cases/${ID}/cancel`,
     ]);
     expect(csv.filename).toBe('ORBES-orders-2026-11-10.csv');
     expect(month.filename).toBe('ORBES-orders-2026-11-10.csv');
@@ -632,7 +590,9 @@ describe('routes and the API client', () => {
     expect(bodies[9]).toEqual({ reservedDays: 2, readyDays: 3, shippedDays: 10, unregisteredDays: 30 });
     expect(bodies[19]).toEqual({ skuId: ID, locationId: LOC, minimum: null });
     expect(bodies[26]).toEqual({ benchItemIds: [ID] });
-    expect(bodies[27]).toEqual({ outcome: 'RESTOCKED', locationId: LOC, note: 'Returned.' });
+    expect(bodies[27]).toEqual({ kind: 'RETURN', reason: 'SIZE', note: 'Returned.' });
+    expect(bodies[32]).toEqual({ decision: 'REFUND', pieceTo: 'RESTOCKED', locationId: LOC, note: 'Unworn.' });
+    expect(bodies[33]).toEqual({ note: 'Withdrawn.' });
     expect(calls.every((c) => c.init.method === 'GET' || (c.init.headers as Record<string, string>)['x-csrf-token'] === 'tok')).toBe(true);
   });
 });

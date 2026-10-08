@@ -1,9 +1,11 @@
 /**
  * Returns and invoices in the console (plan LIVE RELEASE+, step S4), over HTTP with real sessions (OPERATOR, AUDITOR):
  *
- *  - POST /api/admin/orders/:id/return: back to stock at a location, or to the archive, with a note; the claim code of
- *    the piece's new card once (no-store) when ORBES took its buyer's ownership back; validated; the order's page then
- *    says where the piece went, and lists the invoice and its credit note;
+ *  - a return, as an order case (plan NEXT LOT §3.5.4.4; the old POST …/return removed in step 5.11e): opened by Client
+ *    Services (POST /api/admin/orders/:id/case), the parcel received, then decided (POST /api/admin/order-cases/:id/
+ *    decide): back to stock at a location, or to the archive (an ADMIN's), with a note; the claim code of the piece's new
+ *    card once (no-store) when ORBES took its buyer's ownership back; validated; the order's page then says where the
+ *    piece went, and lists the invoice and its credit note;
  *  - GET /api/admin/invoices (a month's documents and totals), /invoices.csv (the accountant's), /invoices/:id/pdf:
  *    the buyer in clear for an OPERATOR, masked for an AUDITOR (on the page, in the CSV and in the PDF); attachments
  *    never stored by a cache.
@@ -70,23 +72,33 @@ describe('returns and invoices: the console\'s routes', () => {
   });
 
   it('opens a return: validated; back to stock, the ownership taken back and the claim code of the new card once, never stored', async () => {
-    expect(errorOf(await op.post(`/api/admin/orders/${order}/return`, { outcome: 'RESTOCKED', note: 'x' })).code).toBe('VALIDATION_FAILED');
-    expect(errorOf(await op.post(`/api/admin/orders/${order}/return`, { outcome: 'ARCHIVED', locationId: france, note: 'x' })).code).toBe('VALIDATION_FAILED');
-    expect(errorOf(await op.post(`/api/admin/orders/${order}/return`, { outcome: 'ARCHIVED' })).code).toBe('VALIDATION_FAILED');
-    expect(errorOf(await op.post(`/api/admin/orders/${order}/return`, { outcome: 'ARCHIVED', note: 'x', extra: true })).code).toBe('VALIDATION_FAILED');
-    expect((await auditor.post(`/api/admin/orders/${order}/return`, { outcome: 'ARCHIVED', note: 'x' })).statusCode).toBe(403);
+    const opened = await op.post(`/api/admin/orders/${order}/case`, { kind: 'RETURN', reason: 'SIZE', note: 'Returned within the delay.' });
+    expect(opened.statusCode).toBe(201);
+    const caseId = (safeJson(opened) as Json).id as string;
+    // The order's page lists it, its note withheld from an AUDITOR.
+    expect((safeJson(await op.get(`/api/admin/orders/${order}`)) as Json).orderCases).toMatchObject([{ id: caseId, kind: 'RETURN', status: 'OPEN', note: 'Returned within the delay.' }]);
+    expect((safeJson(await auditor.get(`/api/admin/orders/${order}`)) as Json).orderCases).toMatchObject([{ id: caseId, note: null }]);
+    expect((await op.post(`/api/admin/logistics/order-cases/${caseId}/received`, { pieceState: 'OK' })).statusCode).toBe(200);
+    const decide = `/api/admin/order-cases/${caseId}/decide`;
+    expect(errorOf(await op.post(decide, { decision: 'REFUND', note: 'x' })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await op.post(decide, { decision: 'REFUND', pieceTo: 'ARCHIVED', locationId: france, note: 'x' })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await op.post(decide, { decision: 'REFUND', pieceTo: 'ARCHIVED' })).code).toBe('VALIDATION_FAILED');
+    expect(errorOf(await op.post(decide, { decision: 'REFUND', pieceTo: 'ARCHIVED', note: 'x', extra: true })).code).toBe('VALIDATION_FAILED');
+    expect((await auditor.post(decide, { decision: 'REFUND', pieceTo: 'ARCHIVED', note: 'x' })).statusCode).toBe(403);
     // The archive retires the piece: an ADMIN's alone.
-    const archived = await op.post(`/api/admin/orders/${order}/return`, { outcome: 'ARCHIVED', note: 'Returned damaged.' });
+    const archived = await op.post(decide, { decision: 'REFUND', pieceTo: 'ARCHIVED', note: 'Returned damaged.' });
     expect([archived.statusCode, errorOf(archived).code]).toEqual([403, 'FORBIDDEN']);
     h.clock.advance(MINUTE);
-    const res = await op.post(`/api/admin/orders/${order}/return`, { outcome: 'RESTOCKED', locationId: france, note: 'Returned within the delay.' });
+    const res = await op.post(decide, { decision: 'REFUND', pieceTo: 'RESTOCKED', locationId: france, note: 'Returned within the delay.' });
     expect(res.statusCode).toBe(200);
     expect(res.headers['cache-control']).toBe('no-store');
     const body = safeJson(res) as Json;
     expect(body.productId).toBe(productId);
     expect(body.claimCode).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
-    expect(body.order).toMatchObject({ status: 'RETURNED', return: { outcome: 'RESTOCKED', location: { id: france, name: 'FRANCE WAREHOUSE' }, note: 'Returned within the delay.', ownershipReclaimed: true } });
-    expect(body.order.invoices.map((i: Json) => [i.kind, i.number])).toEqual([
+    expect(body.case).toMatchObject({ status: 'CLOSED', decision: { outcome: 'REFUND', pieceTo: 'RESTOCKED' } });
+    const page = safeJson(await op.get(`/api/admin/orders/${order}`)) as Json;
+    expect(page.order).toMatchObject({ status: 'RETURNED', return: { outcome: 'RESTOCKED', location: { id: france, name: 'FRANCE WAREHOUSE' }, note: 'Returned within the delay.', ownershipReclaimed: true } });
+    expect(page.order.invoices.map((i: Json) => [i.kind, i.number])).toEqual([
       ['INVOICE', 'INV-2026-000001'],
       ['CREDIT_NOTE', 'CN-2026-000001'],
     ]);
@@ -96,7 +108,8 @@ describe('returns and invoices: the console\'s routes', () => {
     expect(again.claimCode).toBeNull();
     expect(JSON.stringify(again)).not.toContain(body.claimCode);
     expect(again.order.return.ownershipReclaimed).toBe(true);
-    expect(errorOf(await op.post(`/api/admin/orders/${order}/return`, { outcome: 'RESTOCKED', locationId: france, note: 'Again.' })).code).toBe('ORDER_TRANSITION_NOT_ALLOWED');
+    expect(errorOf(await op.post(decide, { decision: 'REFUND', pieceTo: 'RESTOCKED', locationId: france, note: 'Again.' })).code).toBe('ORDER_CASE_CLOSED');
+    expect(errorOf(await op.post(`/api/admin/orders/${order}/case`, { kind: 'RETURN', reason: 'SIZE', note: 'Again.' })).code).toBe('ORDER_TRANSITION_NOT_ALLOWED');
   });
 
   it('lists a month\'s invoices and credit notes with their totals: the buyer in clear for an OPERATOR, masked for an AUDITOR', async () => {

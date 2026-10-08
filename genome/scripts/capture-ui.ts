@@ -606,10 +606,11 @@ async function captureCatalogueSizes(stage: Stage, shots: Shots): Promise<void> 
     await shots.viewport(page, 'catalogue-sizes-05-sizes-dialog');
     await page.click('[data-testid=dialog-cancel]');
     await model('SLS-AW', 'catalogue-sizes-06-solstice-watch');
-    await page.goto(`${stage.origin}/admin#/atelier`);
-    await page.waitForSelector('#atelier-stock tbody tr');
+    // The stock page: Logistics → Stock, in the Atelier's place (plan NEXT LOT §3.5.4.1, step 5.11e).
+    await page.goto(`${stage.origin}/admin#/logistics?tab=stock`);
+    await page.waitForSelector('#logistics-stock tbody tr');
     await sleep(600);
-    await shots.region(page, '#atelier-stock', 'catalogue-sizes-07-stock');
+    await shots.region(page, '#logistics-stock', 'catalogue-sizes-07-stock');
     await context.close();
   } finally {
     await browser.close();
@@ -1660,8 +1661,9 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     await shots.full(console_, 'plus-15-console-orders');
     await go(`#/orders/${mine}`, orderReference(mine), '#order-history');
     await shots.full(console_, 'plus-16-console-order');
-    await go('#/atelier', 'Atelier', '[data-testid=bench-group]');
-    await shots.full(console_, 'plus-17-console-atelier');
+    // Logistics, in the Atelier's place (plan NEXT LOT §3.5.4.1, step 5.11e).
+    await go('#/logistics?tab=stock', 'Logistics', '[data-testid=stock-size]');
+    await shots.full(console_, 'plus-17-console-logistics');
     await go('#/invoices', 'Invoices', '[data-testid=invoice-pdf]');
     await shots.full(console_, 'plus-18-console-invoices');
     await go('#/segments', 'Segments', '[data-testid=segment-row-count]');
@@ -1701,7 +1703,6 @@ async function capturePlus(stage: Stage, shots: Shots, workDir: string): Promise
     const print = await signIn(paper, 'plus-print');
     await print.emulateMedia({ media: 'print' });
     for (const [hash, testid, name] of [
-      [`#/atelier/sheets?id=${stockBench!.id}`, 'work-sheet', 'plus-27-work-sheet'],
       [`#/orders/${mine}/slip`, 'packing-slip', 'plus-28-packing-slip'],
     ] as const) {
       await print.evaluate((h) => (location.hash = h), hash);

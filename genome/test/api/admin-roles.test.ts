@@ -292,7 +292,6 @@ const PROBES: Probe[] = [
   { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/credit`, body: INVALID, min: 'OPERATOR' },
   { group: 'orders', method: 'DELETE', url: `/api/admin/orders/${UUID}/credit`, min: 'OPERATOR' },
   // Step S4: a return opened by an OPERATOR (to the archive by an ADMIN only: the case below); the invoices and credit notes read by an AUDITOR (the buyer masked).
-  { group: 'orders', method: 'POST', url: `/api/admin/orders/${UUID}/return`, body: INVALID, min: 'OPERATOR' },
   { group: 'invoices', method: 'GET', url: '/api/admin/invoices', min: 'AUDITOR' },
   { group: 'invoices', method: 'GET', url: '/api/admin/invoices?month=2026-11&kind=CREDIT_NOTE&q=INV-2026', min: 'AUDITOR' },
   { group: 'invoices', method: 'GET', url: '/api/admin/invoices.csv?month=2026-11', min: 'AUDITOR' },
@@ -664,13 +663,12 @@ describe('admin role enforcement', () => {
     expect((await clients.ADMIN.post(`/api/admin/products/${PID}/transitions`, { to: 'REVOKED', reason: 'x' })).statusCode).toBe(404);
   });
 
-  it('OPERATOR may take a return back to stock but not archive it: the archive retires the piece', async () => {
-    const url = `/api/admin/orders/${UUID}/return`;
-    const res = await clients.OPERATOR.post(url, { outcome: 'ARCHIVED', note: 'Returned damaged.' });
-    expect(res.statusCode).toBe(403);
-    expect(errorOf(res).code).toBe('FORBIDDEN');
-    // Back to stock, the OPERATOR gets past the role check; so does an ADMIN archiving (the order does not exist here).
-    expect((await clients.OPERATOR.post(url, { outcome: 'RESTOCKED', locationId: UUID, note: 'Returned unworn.' })).statusCode).toBe(404);
-    expect((await clients.ADMIN.post(url, { outcome: 'ARCHIVED', note: 'Returned damaged.' })).statusCode).toBe(404);
+  it('OPERATOR and ADMIN decide a return from its order case (the old /return is gone, plan NEXT LOT step 5.11e); the archive stays ADMIN\'s (test/api/invoices-admin.test.ts)', async () => {
+    expect((await clients.ADMIN.post(`/api/admin/orders/${UUID}/return`, { outcome: 'ARCHIVED', note: 'Returned damaged.' })).statusCode).toBe(404);
+    const url = `/api/admin/order-cases/${UUID}/decide`;
+    // Past the role check, both (the case does not exist here); an AUDITOR never.
+    expect((await clients.OPERATOR.post(url, { decision: 'REFUND', pieceTo: 'RESTOCKED', note: 'Returned unworn.' })).statusCode).toBe(404);
+    expect((await clients.ADMIN.post(url, { decision: 'REFUND', pieceTo: 'ARCHIVED', note: 'Returned damaged.' })).statusCode).toBe(404);
+    expect((await clients.AUDITOR.post(url, { decision: 'REFUND', pieceTo: 'RESTOCKED', note: 'x' })).statusCode).toBe(403);
   });
 });

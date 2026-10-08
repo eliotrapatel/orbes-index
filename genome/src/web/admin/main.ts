@@ -49,7 +49,6 @@ import { confirmLeave, heldMessage, releasePage } from './ui/leave-guard.js';
 import { stopRefreshes } from './ui/refresh.js';
 import { notify, notifyError } from './ui/toast.js';
 import { analyticsView } from './views/analytics.js';
-import { atelierView } from './views/atelier.js';
 import { documentsView, documentView } from './views/documents.js';
 import { anomaliesView } from './views/anomalies.js';
 import { auditView } from './views/audit.js';
@@ -90,7 +89,6 @@ import { disposeSaleView, saleView } from './views/sale.js';
 import { scansView } from './views/scans.js';
 import { securityView } from './views/security.js';
 import { settingsView } from './views/settings.js';
-import { workSheetsView } from './views/sheets.js';
 import { packingSlipView, shippingSlipView } from './views/slip.js';
 import { teamView } from './views/team.js';
 import { warrantiesView } from './views/warranties.js';
@@ -205,8 +203,6 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   segments: { view: segmentsView, title: 'Segments', nav: 'segments' },
   segmentNew: { view: segmentView, title: 'New segment', nav: 'segments' },
   segment: { view: segmentView, title: 'Segment', nav: 'segments' },
-  atelier: { view: atelierView, title: 'Atelier', nav: 'logistics' },
-  workSheets: { view: workSheetsView, title: 'Work sheets', nav: 'logistics' },
   logistics: { view: logisticsView, title: 'Logistics', nav: 'logistics' },
   logisticsOrder: { view: shippingView, title: 'Parcel', nav: 'logistics' },
   logisticsSlip: { view: shippingSlipView, title: 'Packing slip', nav: 'logistics' },
@@ -638,6 +634,11 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
 
   if (r.name === 'login') {
     goTo(home(s));
+    return;
+  }
+  // The Atelier and its work sheets are gone (plan NEXT LOT §3.5.4.5): an old bookmark opens Logistics.
+  if (r.name === 'atelier' || r.name === 'workSheets') {
+    goTo(href('logistics'));
     return;
   }
   // Nothing of the registry for a seller (the server refuses it anyway): any other address leads to the sale mode.

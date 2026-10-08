@@ -93,10 +93,6 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   manageOrders: 'OPERATOR',
   /** A return to the archive: its piece RETIRED, which verifies as REVOKED (revocation-class, as revokeProduct). */
   archiveReturn: 'ADMIN',
-  /** The atelier: transfers, counts, minimums, pieces to make confirmed, started, finished (issued) or cancelled. */
-  manageAtelier: 'OPERATOR',
-  /** The work sheets: each carries its piece's ORBES code at print size (signed for it), as a code's download. */
-  printWorkSheets: 'OPERATOR',
   /** The settings of the orders: the delays after which an order is late, the locations, the carriers and their tracking links, the shipping rates. */
   manageLogistics: 'ADMIN',
   /** Supplier orders (plan NEXT LOT §3.5.4.2): the suppliers added and changed, a model's supplier set; never LOGISTICS. */
@@ -114,6 +110,12 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   approveCorrections: 'OPERATOR',
   /** Logistics: transfer, minimum, a count corrected at once, pieces counted in (ORBES is the approver). */
   manageStock: 'OPERATOR',
+  /** Order cases (plan NEXT LOT §3.5.4.4): a parcel problem decided (ship another piece, or refund). */
+  decideParcels: 'OPERATOR',
+  /** Order cases: a return or a size exchange decided (refund, or ship the other size). */
+  decideReturns: 'OPERATOR',
+  /** Order cases: a lost parcel decided, its pieces revoked: ADMIN, as revoking anywhere in the console. */
+  decideLostParcel: 'ADMIN',
   /** The segments (plan LIVE RELEASE+, choice 27): built, renamed, changed and deleted; an AUDITOR reads them and their CSV, masked. */
   manageSegments: 'OPERATOR',
   /** Discontinue a model (P-R06: inactive, said DISCONTINUED on its pieces' results) and reinstate it: ADMIN, with a phrase to type. */

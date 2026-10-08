@@ -3381,6 +3381,24 @@ fieldset.cfield--checks > .cfield__label {
   line-height: 1.6;
 }
 
+/* The release's stock under its sizes (plan NEXT LOT §3.5.4.3): each size's sentence, its button under it. */
+.live__stock .live__feasibility-list {
+  padding-left: 0;
+  list-style: none;
+}
+
+.live__stock .live__feasibility-list li {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+
+.live__stock .cbtn {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+}
+
 .live__feasibility-list li + li {
   margin-top: 4px;
 }
@@ -3841,6 +3859,14 @@ fieldset.cfield--checks > .cfield__label {
 }
 
 .proposal__head .cbtn {
+  margin-left: auto;
+}
+
+.order-case + .order-case {
+  margin-top: 30px;
+}
+
+.order-case .proposal__head .row-actions {
   margin-left: auto;
 }
 

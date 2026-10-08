@@ -3,23 +3,27 @@
  *
  *  - Its step: RESERVED → PAID → SHIPPED → DELIVERED with the time each was reached (or CANCELLED, or RETURNED), its
  *    time in its step, and whether it is late (M3) and why; the next steps (OPERATOR): MARK PAID (once priced: its
- *    invoice is issued), SHIP (a carrier of the settings, the tracking number, the value declared for the insurance),
- *    MARK DELIVERED, CANCEL (with a note; a credit note once paid), OPEN A RETURN (choice 20: back to stock at a
- *    location, or, by an ADMIN, to the archive, with a note; ORBES takes back its buyer's ownership if they registered
- *    it; back to stock, the claim code of the piece's new card is shown once, with its card to download).
+ *    invoice is issued), MARK DELIVERED (an order shipped before Logistics packed its parcel), CANCEL (with a note; a
+ *    credit note once paid).
  *  - The order: its channel, release, the collector (the email masked for an AUDITOR) and the reference they hold, the
  *    model, size, price, add-ons, surprise and engraving text; EDIT (OPERATOR): a draw's or a salon's size, price and
  *    currency, any order's engraving text (decision 31).
  *  - Its welcome gifts and its credit (plan NEXT-NINE, BP-19 T5): the GIFT orders travelling with it, one row each (a
  *    size to choose: MARK PAID waits for it), the client's credit usable now and the credit taken off it; APPLY CREDIT and
  *    REMOVE CREDIT (OPERATOR, while RESERVED). A GIFT order says its tier and the order it travels with; its size, To be
- *    confirmed, is chosen among its model's (CHOOSE SIZE). An order travelling with another ships with SHIP WITH ITS
- *    ORDER, prefilled with that order's carrier and tracking number.
+ *    confirmed, is chosen among its model's (CHOOSE SIZE). An order travelling with another ships in that order's parcel
+ *    (plan NEXT LOT §3.5.6.6): its Shipping section is the parcel's.
  *  - Its buyer: the name and address entered by Client Services (masked for an AUDITOR); EDIT (OPERATOR).
- *  - Its piece: the location it is served from (CHANGE: what it holds moves), what it holds (a piece in stock, a piece
- *    being made at the atelier), the piece that fulfils it (LINK A PIECE picked from the stock, also in place of a
- *    piece to make still being made: that piece to make is then cancelled).
- *  - Its shipment: the carrier, the tracking number and its link, the declared value.
+ *  - Its piece: the location it is served from (CHANGE: what it holds moves), what it holds (In stock at …, or
+ *    Awaiting stock), the piece bound to it by the agent's packing scan (plan NEXT LOT §3.5.4.4).
+ *  - Shipping (plan NEXT LOT §3.5.4.4): the agent's steps on its parcel (views/shipping.ts): Start packing, the
+ *    checklist, the card's scan, the photo (View the photo), Packed, Ship with a declared value per order of the parcel
+ *    (ORBES only), Mark delivered, Report a parcel problem, the parcel's steps; the declared value kept.
+ *  - Order case (§3.5.4.4, §3.6.D): its returns, size exchanges and parcel problems; OPEN A RETURN (a return or a size
+ *    exchange, sizes in stock only, a reason and a note); DECIDE once the agent has the parcel back (a lost parcel by an
+ *    ADMIN as it stands): refund, ship the other size or another piece, the piece back to stock at a location or, by an
+ *    ADMIN, to the archive; back to stock, the claim code of the piece's new card shown once, with its card to
+ *    download; CANCEL THE ORDER CASE with a note.
  *  - Its return: where the piece went, the note, whether ORBES took the ownership back.
  *  - Its documents (M7): the invoice and the credit note, each with its PDF.
  *  - Its history: each change, its note, who made it.
@@ -54,10 +58,6 @@ import {
   orderActions,
   priceLine,
   RETURN_LABELS,
-  returnInput,
-  returnProblem,
-  shipInput,
-  shipProblem,
   shipWaitsFor,
   sizeText,
   shippingLine,
@@ -66,16 +66,35 @@ import {
   termsValues,
   viewHolds,
 } from '../model/orders.js';
+import {
+  canOpenReturn,
+  CASE_REASON_LABELS,
+  CASE_STATUS_LABELS,
+  CASE_TEXT,
+  caseActions,
+  caseLines,
+  decideInput,
+  decideProblem,
+  decidesPiece,
+  openCaseInput,
+  openCaseProblem,
+  ORDER_CASE_LIMITS,
+  outcomeOptions,
+  pastReturnWindow,
+} from '../model/order-cases.js';
+import { CASE_KIND_LABELS } from '../model/logistics.js';
+import { can } from '../model/permissions.js';
 import { noCardNotice, orderClaimCodeRow } from '../model/product.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
-import { ORDER_CURRENCIES, type OrderDocument, type OrderReturned, type OrderStatus, type OrderTransitionInput } from '../types.js';
+import { ORDER_CURRENCIES, type OrderCaseRecord, type OrderDetail, type OrderDocument, type OrderStatus, type OrderTransitionInput, type ShippingOrderView, type StockLocation } from '../types.js';
 import { button, defList, linkButton, mono, pageHeader, section, statusMark, table, type DefRow } from '../ui/components.js';
 import { openDialog, type DialogField } from '../ui/dialog.js';
 import { claimCodeDialog } from '../ui/claim-code.js';
 import { saveDownload } from '../ui/download.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
+import { parcelSections } from './shipping.js';
 
 /** A return's new claim code, as its dialog has always said it (ui/claim-code.ts; plan NEXT LOT §3.4 keeps it unchanged). */
 export const RETURN_CLAIM_TEXT = 'The piece’s next buyer registers it with this code; the card that left with it no longer does. Shown once: download its certificate card now. Only its hash is kept.';
@@ -85,7 +104,7 @@ const STEPS: readonly OrderStatus[] = ['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED
 
 export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.orderId ?? '';
-  const [d, carriers, locations] = await Promise.all([ctx.api.order(id), ctx.api.carriers(), ctx.api.locations()]);
+  const [d, locations, parcel] = await Promise.all([ctx.api.order(id), ctx.api.locations(), ctx.api.parcel(id)]);
   const o = d.order;
   const now = ctx.now();
   const acts = orderActions(o, ctx.session.admin.role);
@@ -115,44 +134,6 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       confirmLabel: 'Mark paid',
       submit: async (v) => step({ to: 'PAID', ...(v.note.trim() ? { note: v.note.trim() } : {}) }),
     }).then(done('Order paid.'));
-  const active = carriers.items.filter((c) => c.active);
-  // SHIP WITH ITS ORDER (BP-19 T5): an order travelling with another (a welcome gift, a LIVE entry's next pieces).
-  const shipLabel = o.withOrder ? 'Ship with its order' : 'Ship';
-  const ship = () =>
-    void openDialog({
-      title: shipLabel,
-      eyebrow,
-      body: h('p', { class: 'dialog__text' }, `The piece leaves ${o.location.name}: the order reads SHIPPED, with its carrier and tracking number, which the collector reads with its link.`),
-      // SHIP WITH ITS ORDER (BP-19 T5): an order travelling with another, prefilled with that order's carrier and tracking number.
-      fields: [
-        {
-          name: 'carrierId',
-          label: 'Carrier',
-          kind: 'select',
-          required: true,
-          options: [{ value: '', label: 'Choose a carrier' }, ...active.map((c) => ({ value: c.id, label: c.name }))],
-          value: o.withOrder?.shipment && active.some((c) => c.id === o.withOrder!.shipment!.carrierId) ? o.withOrder.shipment.carrierId : '',
-        },
-        {
-          name: 'trackingNumber',
-          label: 'Tracking number',
-          required: true,
-          maxlength: 40,
-          value: o.withOrder?.shipment?.trackingNumber ?? '',
-          ...(o.withOrder?.shipment ? { hint: `As ${o.withOrder.reference} shipped: it travels with it.` } : {}),
-        },
-        {
-          name: 'declaredValue',
-          label: 'Declared value',
-          maxlength: 12,
-          hint: o.currency ? `For the insurance, in ${o.currency}: 4800, or 4800.50. Kept on the shipment, never on the packing slip. Optional.` : 'Enter the order’s price first to declare a value.',
-        },
-        noteField(false, 'Optional.'),
-      ],
-      validate: (v) => shipProblem(v, o.currency),
-      confirmLabel: shipLabel,
-      submit: async (v) => step(shipInput(v)),
-    }).then(done('Order shipped.'));
   const deliver = () =>
     void openDialog({
       title: 'Mark delivered',
@@ -181,63 +162,11 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       confirmLabel: 'Cancel the order',
       submit: async (v) => step({ to: 'CANCELLED', note: v.note.trim() }),
     }).then(done('Order cancelled.'));
-  const returned = () => {
-    let result: OrderReturned | null = null;
-    void openDialog({
-      title: 'Open a return',
-      eyebrow,
-      danger: (v) => v.outcome === 'ARCHIVED',
-      phrase: (v) => (v.outcome === 'ARCHIVED' ? 'ARCHIVE' : null),
-      body: h('p', { class: 'dialog__text' }, `The piece ${o.productId ?? ''} came back to ORBES: the order reads RETURNED, and a credit note cancels its invoice.`),
-      fields: [
-        {
-          name: 'outcome',
-          label: 'The piece goes',
-          kind: 'select',
-          required: true,
-          // The archive retires the piece: ADMIN's alone (an OPERATOR takes it back to stock).
-          options: [{ value: '', label: 'Choose' }, { value: 'RESTOCKED', label: RETURN_LABELS.RESTOCKED }, ...(acts.archive ? [{ value: 'ARCHIVED', label: RETURN_LABELS.ARCHIVED }] : [])],
-          value: '',
-        },
-        {
-          name: 'locationId',
-          label: 'Location',
-          kind: 'select',
-          options: [{ value: '', label: 'Choose a location' }, ...locations.items.map((l) => ({ value: l.id, label: l.name }))],
-          value: '',
-          hint: 'Back to stock: where it is counted again.',
-        },
-        noteField(true, 'Why, and the state of the piece: kept in the order’s history.'),
-      ],
-      validate: returnProblem,
-      live: (v) =>
-        v.outcome === 'RESTOCKED'
-          ? h(
-              'p',
-              { class: 'dialog__text' },
-              'The piece is counted again in stock, ready to be sold, with a new claim code for its new certificate card, shown once: the card that left with it no longer registers it. If its buyer registered it, ORBES takes the ownership back.',
-            )
-          : v.outcome === 'ARCHIVED'
-            ? h('p', { class: 'dialog__text' }, 'The piece leaves circulation: it is retired, and its code answers as a retired piece. If its buyer registered it, ORBES takes the ownership back.')
-            : [],
-      confirmLabel: 'Open the return',
-      submit: async (v) => {
-        result = await ctx.api.returnOrder(o.id, returnInput(v));
-      },
-    }).then((v) => {
-      const r = result as OrderReturned | null;
-      if (!v || !r) return;
-      // The new card's claim code, shown once (only its hash is kept), with the card to download (ui/claim-code.ts).
-      if (r.claimCode) void claimCodeDialog(ctx, { productId: r.productId, code: r.claimCode, text: RETURN_CLAIM_TEXT, testId: 'return-card' }).then(() => done('Order returned.')(true));
-      else done('Order returned.')(true);
-    });
-  };
   const stepTools = [
     acts.pay ? button('Mark paid', { kind: 'primary', testId: 'order-pay', onClick: pay }) : null,
-    acts.ship ? button(shipLabel, { kind: 'primary', testId: 'order-ship', onClick: ship }) : null,
-    acts.deliver ? button('Mark delivered', { kind: 'primary', testId: 'order-deliver', onClick: deliver }) : null,
+    // Shipped before Logistics packed its parcel: delivered from here; a parcel's own Mark delivered is in Shipping.
+    acts.deliver && !parcel.shipment ? button('Mark delivered', { kind: 'primary', testId: 'order-deliver', onClick: deliver }) : null,
     acts.cancel ? button('Cancel', { kind: 'danger', testId: 'order-cancel', onClick: cancel }) : null,
-    acts.return ? button('Open a return', { kind: 'secondary', testId: 'order-return', onClick: returned }) : null,
   ].filter((b): b is HTMLButtonElement => b !== null);
 
   const reachedAt: Record<OrderStatus, string | null> = {
@@ -314,7 +243,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
       );
     }
     if (acts.terms.engraving) {
-      fields.push({ name: 'engraving', label: 'Engraving text', maxlength: ORDER_LIMITS.engraving, value: v.engraving, hint: 'As it is to be engraved, on one line; empty for none. Its piece to make carries it to the atelier.' });
+      fields.push({ name: 'engraving', label: 'Engraving text', maxlength: ORDER_LIMITS.engraving, value: v.engraving, hint: 'As it is to be engraved, on one line; empty for none. The agent engraves it at packing, as the packing slip says.' });
     }
     void openDialog({
       title: 'The order’s terms',
@@ -466,23 +395,6 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
         await ctx.api.changeOrderLocation(o.id, v.locationId);
       },
     }).then(done('Location changed.'));
-  const linkPiece = () =>
-    void openDialog({
-      title: 'Link a piece from stock',
-      eyebrow,
-      body: [
-        h('p', { class: 'dialog__text' }, `A piece issued of ${o.model.name} in ${sizeText({ sizeLabel: o.sizeLabel, skuKnown: true })}, at ${o.location.name}, never registered: it fulfils this order, which then holds it until it ships.`),
-        o.reservation === 'AWAITING'
-          ? h('p', { class: 'dialog__text', data: { testid: 'link-awaiting' } }, 'The order waits for supplier stock: a piece never counted in the stock is counted in with this order.')
-          : null,
-      ],
-      fields: [{ name: 'productId', label: 'Piece reference', required: true, maxlength: 20, hint: 'As engraved and printed: O26-J-00184.' }],
-      validate: (v) => (/^O\d{2}-[A-Z]-\d{5,6}$/i.test(v.productId.trim()) ? null : 'A piece reference reads O26-J-00184.'),
-      confirmLabel: 'Link the piece',
-      submit: async (v) => {
-        await ctx.api.linkOrderPiece(o.id, v.productId.trim().toUpperCase());
-      },
-    }).then(done('Piece linked.'));
   const pieceRows: DefRow[] = [
     { label: 'Location', value: o.location.name },
     ...(o.status === 'RESERVED' || o.status === 'PAID' ? [{ label: 'Holds', value: h('span', { data: { testid: 'order-holds' } }, viewHolds(o)) }] : []),
@@ -514,27 +426,25 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
   ];
   const pieceTools = [
     acts.location ? button('Change location', { kind: 'ghost', testId: 'order-location', onClick: moveTo }) : null,
-    acts.linkPiece ? button('Link a piece', { kind: 'ghost', testId: 'order-link', onClick: linkPiece }) : null,
   ].filter((b): b is HTMLButtonElement => b !== null);
   // Read from the piece (claimCard), so an order with no new claim code of its own shows it too (§3.4.3, §3.4.7).
   const noCard = d.claimCard?.cardNeeded && d.claimCard.cardNeededOrder ? h('p', { class: 'notice', data: { testid: 'order-claim-notice' } }, noCardNotice(d.claimCard.cardNeededOrder.reference)) : null;
   const pieceSection = section('Piece', noCard ? [noCard, defList(pieceRows)] : defList(pieceRows), { id: 'order-piece', tools: pieceTools });
 
-  // ── The shipment ─────────────────────────────────────────────────────────
-  const shipmentSection = o.shipment
-    ? section(
-        'Shipment',
-        defList([
-          { label: 'Carrier', value: o.shipment.carrier.name },
-          {
-            label: 'Tracking number',
-            value: h('a', { class: 'idlink', attrs: { href: o.shipment.trackingUrl, target: '_blank', rel: 'noopener noreferrer' }, data: { testid: 'order-tracking' } }, o.shipment.trackingNumber),
-          },
-          { label: 'Declared value', value: o.shipment.declaredValueMinor !== null && o.currency ? formatMoney(o.shipment.declaredValueMinor, o.currency) : 'None' },
-        ]),
-        { id: 'order-shipment' },
-      )
-    : null;
+  // ── Shipping (plan NEXT LOT §3.5.4.4) ───────────────────────────────────
+  // The agent's steps on the order's parcel, from here for ORBES; a declared value per order of the parcel, in its currency.
+  const declared = await declaredOf(ctx, o, parcel);
+  const shippingSections =
+    parcel.shipment || parcel.step === 'READY_TO_PACK' || o.status === 'SHIPPED' || o.status === 'DELIVERED'
+      ? parcelSections(ctx, parcel, {
+          only: 'shipping',
+          ...(can(ctx.session.admin.role, 'manageOrders') ? { declared } : {}),
+          rows: o.shipment ? [{ label: 'Declared value', value: h('span', { data: { testid: 'order-declared' } }, o.shipment.declaredValueMinor !== null && o.currency ? formatMoney(o.shipment.declaredValueMinor, o.currency) : 'None') }] : [],
+        })
+      : [];
+
+  // ── Order case (§3.5.4.4, §3.6.D) ───────────────────────────────────────
+  const caseSection = orderCaseSection(ctx, d, locations.items, eyebrow);
 
   // ── The return ───────────────────────────────────────────────────────────
   const r = o.return;
@@ -601,7 +511,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     { id: 'order-history' },
   );
 
-  const sections: Child[] = [stepSection, orderSection, buyerSection, pieceSection, shipmentSection, returnSection, documentsSection, historySection];
+  const sections: Child[] = [stepSection, orderSection, buyerSection, pieceSection, ...shippingSections, caseSection, returnSection, documentsSection, historySection];
   return h(
     'div',
     { class: 'view view--order' },
@@ -614,4 +524,143 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     }),
     ...sections,
   );
+}
+
+/** The declared value's fields of Ship: one per order of the parcel, each in its own order's currency (ORBES only). */
+async function declaredOf(ctx: ViewContext, o: OrderDetail['order'], parcel: ShippingOrderView): Promise<{ orderId: string; reference: string; currency: string | null }[]> {
+  if (parcel.shipment?.status !== 'PACKED') return [];
+  const others = await Promise.all(parcel.orders.filter((x) => x.orderId !== o.id).map((x) => ctx.api.order(x.orderId)));
+  const byId = new Map([[o.id, o.currency], ...others.map((x) => [x.order.id, x.order.currency] as const)]);
+  return parcel.orders.map((x) => ({ orderId: x.orderId, reference: x.reference, currency: byId.get(x.orderId) ?? null }));
+}
+
+/** The Order case section: each case of the order, the newest first, with Decide and Cancel; Open a return. */
+function orderCaseSection(ctx: ViewContext, d: OrderDetail, locations: StockLocation[], eyebrow: string): HTMLElement {
+  const role = ctx.session.admin.role;
+  const o = d.order;
+  const done = (msg: string) => (v: unknown) => {
+    if (!v) return;
+    notify(msg);
+    ctx.reload();
+  };
+  const locationOptions = [{ value: '', label: 'Choose a location' }, ...locations.map((l) => ({ value: l.id, label: l.name }))];
+  const open = () =>
+    void openDialog({
+      title: CASE_TEXT.open,
+      eyebrow,
+      body: [
+        h('p', { class: 'dialog__text' }, CASE_TEXT.openText),
+        pastReturnWindow(o.deliveredAt, ctx.now()) ? h('p', { class: 'dialog__text', data: { testid: 'case-late' } }, CASE_TEXT.late) : null,
+      ],
+      fields: [
+        {
+          name: 'kind',
+          label: 'Kind',
+          kind: 'select',
+          required: true,
+          options: [
+            { value: 'RETURN', label: 'Return' },
+            ...(d.exchangeSizes.length ? [{ value: 'EXCHANGE', label: 'Size exchange' }] : []),
+          ],
+          value: 'RETURN',
+        },
+        {
+          name: 'exchangeSkuId',
+          label: 'New size',
+          kind: 'select',
+          options: [{ value: '', label: 'Choose a size' }, ...d.exchangeSizes.map((x) => ({ value: x.skuId, label: x.selectable ? `${x.label} · ${x.available} in stock` : `${x.label} · ${CASE_TEXT.sizeOut}` }))],
+          value: '',
+          hint: 'Only the sizes in stock can be chosen.',
+          shown: (v) => v.kind === 'EXCHANGE',
+        },
+        { name: 'reason', label: 'Reason', kind: 'select', required: true, options: [{ value: '', label: 'Choose' }, ...Object.entries(CASE_REASON_LABELS).map(([value, label]) => ({ value, label }))], value: '' },
+        { name: 'note', label: 'Note', kind: 'textarea', required: true, maxlength: ORDER_CASE_LIMITS.note, hint: 'Client Services’ words: what the collector asked.' },
+      ],
+      validate: (v) => openCaseProblem(v, d.exchangeSizes),
+      confirmLabel: CASE_TEXT.open,
+      submit: async (v) => {
+        await ctx.api.openOrderCase(o.id, openCaseInput(v));
+      },
+    }).then(done(CASE_TEXT.opened));
+  // The sizes out of stock stay listed, never chosen.
+  const decide = (c: OrderCaseRecord) => {
+    let result: Awaited<ReturnType<typeof ctx.api.decideOrderCase>> | null = null;
+    const archive = can(role, 'archiveReturn');
+    void openDialog({
+      title: CASE_TEXT.decide,
+      eyebrow: `${eyebrow} · ${CASE_KIND_LABELS[c.kind]}`,
+      body: [
+        c.received ? h('p', { class: 'dialog__text', data: { testid: 'case-received-state' } }, `The agent recorded the piece: ${c.received.pieceState === 'OK' ? 'OK' : 'Damaged'}.${c.received.note ? ` ${c.received.note}` : ''}`) : null,
+        c.kind === 'LOST' ? h('p', { class: 'dialog__text' }, CASE_TEXT.lostText) : null,
+      ],
+      fields: [
+        { name: 'decision', label: 'Outcome', kind: 'select', required: true, options: [{ value: '', label: 'Choose' }, ...outcomeOptions(c.kind)], value: '' },
+        ...(decidesPiece(c.kind)
+          ? [
+              {
+                name: 'pieceTo',
+                label: 'The piece',
+                kind: 'select' as const,
+                required: true,
+                options: [{ value: '', label: 'Choose' }, { value: 'RESTOCKED', label: RETURN_LABELS.RESTOCKED }, ...(archive ? [{ value: 'ARCHIVED', label: RETURN_LABELS.ARCHIVED }] : [])],
+                value: '',
+              },
+              { name: 'locationId', label: 'Location', kind: 'select' as const, options: locationOptions, value: o.location.id, hint: 'Back to stock: where it is counted again.', shown: (v: Record<string, string>) => v.pieceTo === 'RESTOCKED' },
+            ]
+          : []),
+        { name: 'note', label: 'Note', kind: 'textarea', maxlength: ORDER_CASE_LIMITS.decisionNote, required: c.kind === 'RETURN' || c.kind === 'EXCHANGE' },
+      ],
+      live: (v) => (v.decision === 'RESHIP' && (c.kind === 'LOST' || c.kind === 'DAMAGED') ? h('p', { class: 'dialog__text' }, CASE_TEXT.reshipText) : []),
+      danger: (v) => v.pieceTo === 'ARCHIVED' || c.kind === 'LOST',
+      phrase: (v) => (v.pieceTo === 'ARCHIVED' ? 'ARCHIVE' : null),
+      validate: (v) => decideProblem(c, v),
+      confirmLabel: CASE_TEXT.decide,
+      submit: async (v) => {
+        result = await ctx.api.decideOrderCase(c.id, decideInput(c, v));
+      },
+    }).then(async (v) => {
+      const r = result as Awaited<ReturnType<typeof ctx.api.decideOrderCase>> | null;
+      if (!v || !r) return;
+      // Back to stock: each piece's new claim code, once (only its hash is kept), with its card to download.
+      const codes = r.claimCode && r.productId ? [{ productId: r.productId, claimCode: r.claimCode }] : (r.claimCodes ?? []);
+      for (const x of codes) await claimCodeDialog(ctx, { productId: x.productId, code: x.claimCode, text: RETURN_CLAIM_TEXT, testId: 'return-card' });
+      done(CASE_TEXT.decided)(true);
+    });
+  };
+  const cancel = (c: OrderCaseRecord) =>
+    void openDialog({
+      title: CASE_TEXT.cancel,
+      eyebrow: `${eyebrow} · ${CASE_KIND_LABELS[c.kind]}`,
+      body: h('p', { class: 'dialog__text' }, CASE_TEXT.cancelText),
+      fields: [{ name: 'note', label: 'Note', kind: 'textarea', required: true, maxlength: ORDER_CASE_LIMITS.cancelNote }],
+      validate: (v) => noteProblem(v.note, true),
+      confirmLabel: CASE_TEXT.cancel,
+      submit: async (v) => {
+        await ctx.api.cancelOrderCase(c.id, v.note.trim());
+      },
+    }).then(done(CASE_TEXT.cancelled));
+  const blocks = d.orderCases.map((c) => {
+    const a = caseActions(c, role);
+    return h(
+      'div',
+      { class: 'order-case', data: { testid: 'order-case' } },
+      h(
+        'div',
+        { class: 'proposal__head' },
+        h('span', { data: { testid: 'order-case-kind' } }, statusMark(CASE_KIND_LABELS[c.kind], c.kind === 'LOST' || c.kind === 'DAMAGED' || c.kind === 'BACK_TO_SENDER' ? 'alert' : 'outline')),
+        h('span', { data: { testid: 'order-case-status' } }, statusMark(CASE_STATUS_LABELS[c.status], c.status === 'CLOSED' || c.status === 'CANCELLED' ? 'muted' : 'solid')),
+        h(
+          'span',
+          { class: 'row-actions' },
+          a.decide ? button(CASE_TEXT.decide, { kind: 'primary', testId: 'order-case-decide', onClick: () => decide(c) }) : null,
+          a.cancel ? button(CASE_TEXT.cancel, { kind: 'ghost', testId: 'order-case-cancel', onClick: () => cancel(c) }) : null,
+        ),
+      ),
+      defList(caseLines(c).map((l) => ({ label: l.label, value: h('span', { class: 'prewrap' }, l.value) }))),
+    );
+  });
+  return section(CASE_TEXT.title, blocks.length ? blocks : h('p', { class: 'panel__text' }, CASE_TEXT.empty), {
+    id: 'order-case',
+    tools: canOpenReturn(o, d.orderCases, role) ? [button(CASE_TEXT.open, { kind: 'secondary', testId: 'order-return', onClick: open })] : [],
+  });
 }

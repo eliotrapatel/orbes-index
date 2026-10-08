@@ -665,6 +665,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
       ])
       .execute();
     const [frHour, usHour] = [paris(at), paris(new Date(at.getTime() + HOUR))];
+    // Its supplier (plan NEXT LOT §3.5.4.5), for the release's Add to supplier order.
+    const nord = await ctx.services.suppliers.create({ name: 'MAISON NORD', currency: 'EUR' }, admin);
+    await ctx.services.suppliers.setModelSupplier(nocturne, { supplierId: nord.id }, admin);
 
     const p = await open(ADMIN);
     await go(p, '#/club?tab=drops', 'Club');
@@ -689,6 +692,19 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
     const id = decodeURIComponent(new URL(p.url()).hash.split('/').pop()!);
     await expect.poll(() => p.locator('[data-testid=live-sizes]').textContent()).toBe('52 × 3 · 54 × 1 · 56 × 1');
     expect(await p.locator('[data-testid=live-location]').textContent()).toBe('FRANCE WAREHOUSE');
+    // Its stock under its sizes from its creation on (plan NEXT LOT §3.5.4.3): per size, the owner's sentence; a size of a
+    // model with its supplier, Add to supplier order, into that supplier's draft for ORBES to confirm.
+    await expect.poll(() => p.locator('[data-testid=live-stock-line]').textContent(), { timeout: 15_000 }).toBe('2 pieces on sale will wait for supplier stock once sold (FRANCE WAREHOUSE).');
+    expect(await p.locator('[data-testid=live-stock-warning]').allTextContents()).toEqual(['52: 2 in stock, 1 will wait for supplier stock. Add to supplier order', '56: 0 in stock, 1 will wait for supplier stock. Add to supplier order']);
+    await p.locator('[data-testid=live-stock-warning]', { hasText: '52:' }).locator('[data-testid=live-add-to-order]').click();
+    expect(await p.locator('dialog [data-testid=live-add-to-order-text]').textContent()).toBe(
+      'Add 1 piece of NOCTURNE · 52 to the draft of MAISON NORD, to deliver to FRANCE WAREHOUSE. You confirm the draft before it is sent.',
+    );
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Added to the draft.")');
+    const drafts = await ctx.services.supplierOrders.list({ status: 'DRAFT' });
+    expect(drafts.map((d) => [d.supplier.name, d.location.name, d.pieces.ordered])).toEqual([['MAISON NORD', 'FRANCE WAREHOUSE', 1]]);
+    await shot(p, 'stock-block');
 
     // The question after: the default one, rewritten.
     expect(await p.locator('[data-testid=live-question]').textContent()).toBe('WHAT WOULD YOU HAVE WANTED? · ANOTHER SIZE · ANOTHER FINISH · ANOTHER PRICE BAND (the default question)');
@@ -714,7 +730,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console of the LIVE RELEASES (E2E, Chromium)
 
     // PUBLISH: the stock checked per size, a warning, published all the same.
     await p.click('[data-testid=live-publish]');
-    await expect.poll(() => p.locator('dialog [data-testid=live-feasibility-line]').textContent(), { timeout: 15_000 }).toBe('2 pieces on sale would be made to order once sold (FRANCE WAREHOUSE).');
+    await expect.poll(() => p.locator('dialog [data-testid=live-feasibility-line]').textContent(), { timeout: 15_000 }).toBe('2 pieces on sale will wait for supplier stock once sold (FRANCE WAREHOUSE).');
     expect(await p.locator('dialog [data-testid=live-feasibility-warning]').allTextContents()).toEqual([
       '52: 2 in stock, 1 will wait for supplier stock.',
       '56: 0 in stock, 1 will wait for supplier stock.',

@@ -106,6 +106,11 @@ const VERIFY_LABELS = [
 ] as const;
 /** The words §1.7 quotes that the server writes (the public rule, the refusal, the default question and its answers). */
 const SERVER_LABELS = ['selected collectors', 'This release is for selected collectors.', 'WHAT WOULD YOU HAVE WANTED?', 'ANOTHER SIZE', 'ANOTHER FINISH', 'You have taken part in '] as const;
+/**
+ * Labels of deployment E's checks the console no longer shows (plan NEXT LOT §3.5.4.5, step 5.11e): the Atelier, its
+ * work sheets and its pieces issued, the order page's own Ship and its return dialog, gone with Logistics and order cases.
+ */
+const RETIRED_CONSOLE_LABELS = ['Print work sheets', 'Issue the piece', 'Piece issued.', 'Its claim code', 'Order shipped.', 'The piece goes', 'Open the return', 'Order returned.', 'Set a minimum'] as const;
 /** The labels §1.7 quotes, as the console (`web/admin`) shows them. */
 const CONSOLE_LABELS = [
   'Orders', 'Settings', 'DEFAULT', 'OFFERED', 'Tracking link', 'Late orders', 'Catalogue', 'Edit', 'Base price', 'Care guide', 'Price · Shopify',
@@ -113,11 +118,11 @@ const CONSOLE_LABELS = [
   'Opening (UTC)', 'End of the sales (UTC)', 'Price of a piece', 'Currency', 'Stock location', 'Sizes', 'Access', 'Segment', 'Surprise',
   'A surprise in every box', 'What it is (internal)', 'After-room', 'An after-room after a sell-out', 'Opens (minutes after the sell-out)',
   'Open (minutes)', 'Publish the release', 'Best time to open', 'Analytics', 'Stock', 'Question after', 'Every release', 'Atelier',
-  'Print work sheets', 'The buyer', 'Name', 'Address', 'Buyer saved.', 'Mark paid', 'Order paid.', 'Documents', 'PDF', 'Start', 'Done', 'Material',
-  'Production batch', 'Production date', 'Issue the piece', 'Piece issued.', 'Its claim code', 'Packing slip', 'Print', 'Ship', 'Carrier',
-  'Tracking number', 'Declared value', 'Order shipped.', 'Mark delivered', 'Order delivered.', 'Open a return', 'The piece goes', 'Note', 'ARCHIVE',
-  'Open the return', 'Order returned.', 'Invoices', 'Totals of the month', 'Download the month (CSV)', 'Owners', 'First day', 'Last day',
-  'Set a minimum', 'Minimum', 'Suggested', 'Warranties',
+  'The buyer', 'Name', 'Address', 'Buyer saved.', 'Mark paid', 'Order paid.', 'Documents', 'PDF', 'Start', 'Done', 'Material',
+  'Production batch', 'Production date', 'Packing slip', 'Print', 'Ship', 'Carrier',
+  'Tracking number', 'Declared value', 'Mark delivered', 'Order delivered.', 'Open a return', 'Note', 'ARCHIVE',
+  'Invoices', 'Totals of the month', 'Download the month (CSV)', 'Owners', 'First day', 'Last day',
+  'Minimum', 'Suggested', 'Warranties',
 ] as const;
 
 function sources(dir: string): string {
@@ -320,6 +325,12 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
       expect(admin, label).toContain(label);
       expect(runbook, label).toContain(`\`${label}\``);
     }
+    // Deployment E's record keeps its checks of the Atelier and of the order page's own Ship and return, which plan NEXT
+    // LOT retires (step 5.11e): their labels are the runbook's, no longer the console's.
+    for (const label of RETIRED_CONSOLE_LABELS) {
+      expect(runbook, label).toContain(`\`${label}\``);
+      expect(admin, label).not.toContain(label);
+    }
     // GET /api/v1/live lists every release announced, whatever its access rule: the trial is seen by all, entered only by its segment.
     expect(checks).toContain('visible **de tous** dans THE RELEASES et la bannière');
     expect(checks).toContain('seuls les membres du segment d\'essai peuvent y entrer');
@@ -328,8 +339,10 @@ describe('the LIVE RELEASE+ runbook (docs/launch/DEPLOY-LIVE-RELEASE-PLUS.md)', 
     expect(1).toBeGreaterThanOrEqual(AFTER_ROOM_DELAY_MINUTES.min);
     expect(5).toBeGreaterThanOrEqual(AFTER_ROOM_LENGTH_MINUTES.min);
     expect(checks).toContain('`Opens (minutes after the sell-out)` `1`, `Open (minutes)` `5`');
-    // The feasibility check as the console words it for the trial's two pieces to make.
-    expect(admin).toContain('on sale would be made to order once sold (${where}).');
+    // The feasibility check as the console worded it for the trial's two pieces to make, then, with plan NEXT LOT
+    // (§3.5.4.3, step 5.11e), as pieces that wait for supplier stock: no piece is made any more.
+    expect(admin).not.toContain('on sale would be made to order once sold (${where}).');
+    expect(admin).toContain('on sale will wait for supplier stock once sold (${where}).');
     // What the trial leaves out says why, and names the tests that cover it.
     const left = checks.split('\n').find((l) => l.startsWith('Restent hors de l\'essai'));
     expect(left).toBeDefined();

@@ -72,6 +72,9 @@ export interface FeasibilityLine {
   /** Of the pieces on sale: from the stock, and those that will wait for supplier stock. */
   fromStock: number;
   short: number;
+  /** The console's reply only (live-console.ts): the size's SKU and its supplier, for Add to supplier order (§3.5.4.3). */
+  skuId?: string | null;
+  supplier?: { id: string; name: string } | null;
 }
 
 export interface Feasibility {

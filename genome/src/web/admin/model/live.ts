@@ -687,10 +687,18 @@ export function questionTallyRows(q: Pick<LiveQuestion, 'tally' | 'answered'>): 
   }));
 }
 
-/** The feasibility check in one line: everything covered, or how many pieces would be made to order, and where. */
+/**
+ * The stock check in one line (plan NEXT LOT §3.5.4.3): every piece in stock, or how many will wait for supplier stock
+ * once sold, and where; the sizes' own sentences follow it.
+ */
 export function feasibilityLine(f: Pick<LiveFeasibility, 'short' | 'location'>): string {
   const where = f.location?.name ?? 'no location';
-  return f.short === 0 ? `Every piece on sale is covered at ${where}.` : `${formatCount(f.short)} ${f.short === 1 ? 'piece' : 'pieces'} on sale would be made to order once sold (${where}).`;
+  return f.short === 0 ? 'Every piece on sale is in stock.' : `${formatCount(f.short)} ${f.short === 1 ? 'piece' : 'pieces'} on sale will wait for supplier stock once sold (${where}).`;
+}
+
+/** Add to supplier order from a release (§3.5.4.3): the pieces, the size, the supplier's draft and where it delivers. */
+export function addToOrderLine(l: { short: number; supplier?: { name: string } | null }, sku: string, location: string): string {
+  return `Add ${formatCount(l.short)} ${l.short === 1 ? 'piece' : 'pieces'} of ${sku} to the draft of ${l.supplier?.name ?? 'its supplier'}, to deliver to ${location}. You confirm the draft before it is sent.`;
 }
 
 /** The surprise as the release's page in the console says it: `In every box · A silk pouch`, or `None`. */

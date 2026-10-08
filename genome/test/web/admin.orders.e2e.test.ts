@@ -6,23 +6,21 @@
  *  1. The board: six columns, the cards of every channel (a private-salon order reserved three days ago stands out as
  *     late, a LIVE RELEASE's piece with its add-on, the collector's LR- reference and the surprise), the filters (late
  *     only, a channel, a search), the CSV.
- *  2. An order's page: its terms and its buyer entered, MARK PAID; waiting for supplier stock (plan NEXT LOT §3.5), it
- *     takes a piece from the stock with LINK A PIECE; SHIP with a carrier, the tracking number and its link, a declared value; MARK
- *     DELIVERED; its history. Its packing slip: the piece, its size, add-ons, engraving and surprise, never a price; in
- *     print, the slip alone. A piece picked from the stock for an order holding one, paid: no SHIP until it is linked.
- *  3. The atelier: no piece to make for an order any more; a minimum set, its suggestion confirmed into pieces to make
- *     for the stock; their work sheets, each
- *     with its reference and its ORBES code drawn at 30 mm (in print too); the CSV of what to make.
+ *  2. An order's page: its terms and its buyer entered, MARK PAID; waiting for supplier stock (plan NEXT LOT §3.5), a
+ *     piece received in stock serves it; its Shipping section (§3.5.4.4): Start packing, the card scanned by its photo,
+ *     the packing photo, the checklist, Packed, Ship with a carrier, the tracking number and its link, a declared value;
+ *     Mark delivered; its history. Its packing slip: the piece, its size, add-ons, engraving and surprise, never a
+ *     price; in print, the slip alone. An order holding a piece in stock, paid: it ships with its parcel, no Link a piece.
+ *  3. The Atelier's old addresses (#/atelier, its work sheets) lead to Logistics (§3.5.4.5).
  *  4. Returns and invoices (step S4): the delivered order's invoice on its page (its PDF); its piece registered by its
- *     buyer, a return opened back to stock: the new claim code shown once with its card to download, the return and
- *     the credit note on the page; the Invoices page (Clients): the month's documents, their totals, a PDF, the CSV.
+ *     buyer, a return opened as an order case (§3.5.4.4), the parcel back at the agent, decided back to stock: the new
+ *     claim code shown once with its card to download, the return and the credit note on the page; the Invoices page (Clients): the month's documents, their totals, a PDF, the CSV.
  *  5. The settings (ADMIN): the delays of the alerts, a carrier added with its tracking link's example, a location
  *     renamed.
- *  6. An AUDITOR reads the board, an order and the invoices, the emails and the buyer masked, without one action; no
- *     work sheet.
+ *  6. An AUDITOR reads the board, an order and the invoices, the emails and the buyer masked, without one action.
  * No CSP violation, no page error, no figure in the display face.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -31,6 +29,7 @@ import type { FastifyInstance } from 'fastify';
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildWeb } from '../../scripts/build-web.js';
+import { fromBase64Url } from '../../src/core/bytes.js';
 import { buildApp } from '../../src/server/app.js';
 import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
@@ -40,6 +39,10 @@ import { orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { codeSource, phonePhoto } from '../e2e/support.js';
+import { stockPieces, type StockedPiece } from '../support/fulfil.js';
+import { writePng } from '../support/image-io.js';
+import { jpegPhoto } from '../support/images.js';
 import { createAccount, holdPieces } from '../support/live.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -166,6 +169,13 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.waitForTimeout(300);
     await p.screenshot({ path: join(OUT_DIR, `admin-orders-${name}.png`), fullPage: true });
     if (opts.phone) await phoneTwin(p, `admin-orders-${name}-phone.png`);
+  }
+
+  /** A photo of a piece's card, its ORBES CODE as printed (the scan's photo fallback). */
+  function cardPhoto(piece: StockedPiece, name: string): string {
+    const file = join(workDir, name);
+    writePng(file, phonePhoto(codeSource({ data: fromBase64Url(piece.data), genomeGlyphs: piece.glyphs })));
+    return file;
   }
 
   /** A request of the private salon closed as ACCEPTED: its order, its size entered. */
@@ -310,7 +320,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.context().close();
   }, STEP_TIMEOUT);
 
-  it('takes an order through its steps: terms, buyer, paid; waiting for supplier stock, a piece linked from the stock; shipped and delivered; its packing slip without a price; a piece picked from the stock before it ships', async () => {
+  it('takes an order through its steps: terms, buyer, paid; waiting for supplier stock, then served from stock; packed, shipped and delivered from its Shipping section; its packing slip without a price', async () => {
     const p = await open(OPERATOR);
     await go(p, `#/orders/${o.late}`, orderReference(o.late));
     expect(await p.locator('[data-testid=order-late]').textContent()).toContain('Reserved for over 2 days, not paid yet.');
@@ -349,31 +359,44 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('#order-history tbody tr').first().textContent()).toContain('Paid by transfer.');
     await shot(p, 'order-paid');
 
-    // No piece is made for it any more (plan NEXT LOT §3.5): the atelier lists none. A piece issued for it (its claim
-    // code kept for the return below) is linked from the stock, counted in with the order.
-    await go(p, '#/atelier', 'Atelier');
-    expect(await p.locator('[data-testid=bench-group]', { hasText: 'PRIVATE SALON · MONOLITHE · 52' }).count()).toBe(0);
-    const made = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, variant: '52', material: '925 STERLING SILVER', withClaimSecret: true }, admin);
-    lateClaim = made.claimCode!;
-    await go(p, `#/orders/${o.late}`, orderReference(o.late));
-    await p.click('[data-testid=order-link]');
-    expect(await p.locator('dialog [data-testid=link-awaiting]').textContent()).toBe('The order waits for supplier stock: a piece never counted in the stock is counted in with this order.');
-    await p.fill('dialog input[name=productId]', made.product.productId);
-    await confirmDialog(p);
+    // No piece is made for it (plan NEXT LOT §3.5): a piece of its size received in stock at its location serves it.
+    const late = await ctx.db.selectFrom('orders').select(['sku_id', 'location_id']).where('id', '=', o.late).executeTakeFirstOrThrow();
+    const [made] = await stockPieces(ctx, { skuId: late.sku_id!, locationId: late.location_id, count: 1, material: '925 STERLING SILVER', forOrderIds: [o.late] }, admin);
+    lateClaim = made!.claimCode!;
+    await p.reload();
+    await expect.poll(() => p.locator('[data-testid=order-holds]').textContent()).toBe('In stock at FRANCE WAREHOUSE');
+    expect(await p.locator('[data-testid=order-link]').count()).toBe(0);
+    expect(await p.locator('#order-step').textContent()).toContain('It ships with its parcel: the agent packs it and scans its card (Shipping).');
 
-    // Linked to its order, which ships: a carrier, the tracking number with its link, a declared value.
-    await expect.poll(() => p.locator('[data-testid=order-holds]').textContent()).toMatch(/^Piece O26-J-\d{5}$/);
-    await p.click('[data-testid=order-ship]');
+    // Its Shipping section: the agent's steps, from here (plan NEXT LOT §3.5.4.4).
+    await p.click('[data-testid=parcel-start]');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=parcel-step]').textContent()).toBe('PACKING');
+    await p.setInputFiles('[data-testid=parcel-scan-photo]', cardPhoto(made!, 'late-card.png'));
+    await p.waitForSelector(`.toast:has-text("${made!.productId}: the right piece.")`, { timeout: 30_000 });
+    await expect.poll(() => p.locator('[data-testid=order-holds]').textContent()).toBe(`Piece ${made!.productId}`);
+    const photo = join(workDir, 'parcel.jpg');
+    writeFileSync(photo, jpegPhoto(1200, 900));
+    await p.setInputFiles('[data-testid=parcel-photo-file]', photo);
+    await p.waitForSelector('.toast:has-text("Photo added.")');
+    await expect.poll(() => p.locator('[data-testid=parcel-photo-view]').count()).toBe(1);
+    for (const line of await p.locator('[data-testid=parcel-check]').all()) await line.click();
+    await p.click('[data-testid=parcel-packed]');
+    await expect.poll(() => p.locator('[data-testid=parcel-step]').textContent()).toBe('PACKED');
+    // Ship: a carrier, the tracking number with its link, a declared value (ORBES's, in the order's currency).
+    await p.click('[data-testid=parcel-ship]');
     await p.selectOption('dialog select[name=carrierId]', { label: 'Colissimo' });
     await p.fill('dialog input[name=trackingNumber]', '6A12345678901');
-    await p.fill('dialog input[name=declaredValue]', '4800');
+    await p.fill(`dialog input[name=declared_${o.late}]`, '4800');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=order-tracking]').getAttribute('href')).toBe('https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901');
-    expect(await p.locator('#order-shipment').textContent()).toMatch(/€\s4\s800/u);
-    await p.click('[data-testid=order-deliver]');
+    await expect.poll(() => p.locator('[data-testid=parcel-tracking]').getAttribute('href')).toBe('https://www.laposte.fr/outils/suivre-vos-envois?code=6A12345678901');
+    expect(await p.locator('[data-testid=order-declared]').textContent()).toMatch(/€\s4\s800/u);
+    await shot(p, 'order-shipping');
+    await p.click('#order-shipping [data-testid=parcel-delivered]');
     await confirmDialog(p);
     await expect.poll(() => p.locator('#order-step .osteps__step.is-current .osteps__label').textContent()).toBe('DELIVERED');
-    expect(await p.locator('#order-history tbody tr').allTextContents()).toHaveLength(8);
+    const history = (await p.locator('#order-history tbody tr').allTextContents()).join('\n');
+    for (const step of ['Piece held in stock', 'Packing started', 'Card scanned', 'Photo added', 'Packed', 'Shipped', 'Delivered']) expect(history, step).toContain(step);
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'order-delivered');
 
@@ -401,75 +424,41 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(await p.locator('[data-testid=slip-surprise]').textContent()).toBe('A silk pouch');
     expect(await p.locator('[data-testid=slip-source]').textContent()).toMatch(/^LR-/);
 
-    // A piece picked from the stock for the order holding one, priced and paid: it ships only once its piece is linked.
+    // The order holding a piece in stock, priced and paid: it ships with its parcel; no Link a piece any more.
     await ctx.services.orders.setTerms(o.stock, { priceMinor: 300_000, currency: 'EUR' }, admin);
     await ctx.services.orders.transition(o.stock, { to: 'PAID' }, admin);
     await go(p, `#/orders/${o.stock}`, orderReference(o.stock));
-    expect(await p.locator('#order-step').textContent()).toContain('Link its piece from the stock.');
-    expect(await p.locator('[data-testid=order-ship]').count()).toBe(0);
-    await p.click('[data-testid=order-link]');
-    await p.fill('dialog input[name=productId]', stockPiece.toLowerCase());
-    await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=order-holds]').textContent()).toBe(`Piece ${stockPiece}`);
+    expect(await p.locator('#order-step').textContent()).toContain('It ships with its parcel: the agent packs it and scans its card (Shipping).');
     expect(await p.locator('[data-testid=order-link]').count()).toBe(0);
-    expect(await p.locator('[data-testid=order-ship]').count()).toBe(1);
-    expect(await p.locator('#order-step').textContent()).not.toContain('Link its piece from the stock.');
+    expect(await p.locator('[data-testid=parcel-step]').textContent()).toBe('READY TO PACK');
+    expect(await p.locator('[data-testid=parcel-start]').count()).toBe(1);
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);
 
-  it('sets a minimum and confirms its suggestion; prints the work sheets, each code at 30 mm; the CSV of what to make', async () => {
+  it('leads the Atelier\'s old addresses to Logistics, where a minimum is set (plan NEXT LOT §3.5.4.5)', async () => {
     const p = await open(OPERATOR);
-    await go(p, '#/atelier', 'Atelier');
-    // The LIVE order waits for supplier stock (plan NEXT LOT §3.5): no piece to make for it.
-    expect(await p.locator('[data-testid=bench-group]', { hasText: 'THE VAULT RING · MONOLITHE · 54' }).count()).toBe(0);
-    await p.click('[data-testid=stock-minimum]');
-    await p.selectOption('dialog select[name=skuId]', { label: 'MONOLITHE · 54 · MNL-RG-54' });
-    await p.selectOption('dialog select[name=locationId]', { label: 'LOGISTICS WAREHOUSE' });
+    expect(await p.locator('.side__link', { hasText: /^Atelier$/ }).count()).toBe(0);
+    for (const old of ['#/atelier', '#/atelier/sheets?origin=STOCK']) {
+      await p.evaluate((x) => (location.hash = x), old);
+      await expect.poll(() => p.evaluate(() => location.hash)).toBe('#/logistics');
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Logistics');
+    }
+    await p.click('[data-testid=logistics-tab-stock]');
+    const row = p.locator('#logistics-stock tbody tr', { hasText: 'MNL-RG-54' }).filter({ hasText: 'LOGISTICS WAREHOUSE' });
+    await row.locator('[data-testid=stock-minimum]').click();
     await p.fill('dialog input[name=minimum]', '2');
     await confirmDialog(p);
-    await expect.poll(() => p.locator('[data-testid=stock-suggestions]').textContent()).toMatch(/^1 minimum is not reached/);
-    const row = p.locator('#atelier-stock tbody tr', { has: p.locator('[data-testid=stock-suggestion]') });
-    expect(await row.textContent()).toContain('LOGISTICS WAREHOUSE');
-    await row.locator('[data-testid=stock-make]').click();
-    expect(await p.inputValue('dialog input[name=quantity]')).toBe('2');
-    await confirmDialog(p);
-    const stockGroup = p.locator('[data-testid=bench-group]', { hasText: 'FOR STOCK · MONOLITHE · 54' });
-    await expect.poll(() => stockGroup.locator('tbody tr').count()).toBe(2);
-    expect(await stockGroup.locator('.bench__counts').textContent()).toBe('2 to make');
-    expect(await p.locator('[data-testid=stock-suggestions]').count()).toBe(0);
+    await expect.poll(() => row.locator('[data-testid=stock-to-order]').textContent()).toBe('TO ORDER2');
     expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'atelier');
-
-    const [download] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=atelier-csv]')]);
-    expect(download.suggestedFilename()).toMatch(/^ORBES-atelier-\d{4}-\d{2}-\d{2}\.csv$/);
-    expect(readFileSync((await download.path())!, 'utf8')).toContain('"FOR STOCK","MONOLITHE","54"');
-
-    // Their work sheets: the reference and the ORBES code, drawn at 30 mm.
-    await stockGroup.locator('a.cbtn', { hasText: 'Work sheets' }).click();
-    await p.waitForSelector('[data-testid=work-sheet]');
-    expect(await p.locator('[data-testid=work-sheet]').count()).toBe(2);
-    const references = await p.locator('[data-testid=sheet-reference]').allTextContents();
-    expect(references.every((r) => /^O26-J-\d{5}$/.test(r))).toBe(true);
-    expect(await p.locator('[data-testid=sheet-for]').first().textContent()).toBe('The stock');
-    const width = await p.locator('[data-testid=sheet-code] svg').first().evaluate((el) => el.getBoundingClientRect().width);
-    expect(width).toBeCloseTo((30 / 25.4) * 96, 0);
-    expect(await figuresInDisplayFace(p)).toEqual([]);
-    await shot(p, 'sheets');
-    await p.emulateMedia({ media: 'print' });
-    expect(await p.locator('.printbar').isVisible()).toBe(false);
-    expect(Number.parseFloat(await p.locator('[data-testid=sheet-code] svg').first().evaluate((el) => getComputedStyle(el).width))).toBeCloseTo((30 / 25.4) * 96, 1);
-    expect(await p.locator('[data-testid=work-sheet]').first().evaluate((el) => getComputedStyle(el).breakAfter)).toBe('page');
-    await p.emulateMedia({ media: 'screen' });
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);
 
   it('returns and invoices: the invoice on the order\'s page; a return back to stock, the new claim code once with its card; the Invoices page, its PDFs and its CSV', async () => {
-    // The late order, delivered, its piece registered by its buyer (its warranty started at the sale).
+    // The late order, delivered, its piece registered by its buyer (its warranty started when it shipped).
     const piece = await ctx.db.selectFrom('orders as o').innerJoin('products as p', 'p.id', 'o.product_id').select(['p.id', 'p.product_id', 'o.account_id']).where('o.id', '=', o.late).executeTakeFirstOrThrow();
     const code = await ctx.db.selectFrom('codes').select('id').where('product_id', '=', piece.id).where('status', '=', 'ACTIVE').executeTakeFirstOrThrow();
-    await ctx.services.warranty.activate(piece.id, { purchaseDate: new Date().toISOString().slice(0, 10), retailer: 'ORBES PARIS', country: 'FR' }, admin);
     const scan = await ctx.services.verification.verify({ code: (await ctx.services.issuance.printableCode(code.id)).data }, {});
     await ctx.services.ownership.registerFirst(piece.account_id, { registrationToken: scan.registration!.token, claimCode: lateClaim }, { type: 'account', id: piece.account_id });
 
@@ -484,16 +473,30 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     expect(invoicePdf.suggestedFilename()).toMatch(/^ORBES-invoice-INV-\d{4}-000001\.pdf$/);
     expect(readFileSync((await invoicePdf.path())!).subarray(0, 5).toString()).toBe('%PDF-');
 
-    // A return back to stock: where, and why.
+    // A return, as an order case (plan NEXT LOT §3.5.4.4): opened by Client Services, the parcel back at the agent.
     await p.click('[data-testid=order-return]');
+    expect(await p.locator('dialog .dialog__text').first().textContent()).toBe('The collector sends the piece back at their cost. The agent records it when it arrives; you then decide.');
     await p.click('[data-testid=dialog-confirm]');
     await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Complete the required fields.');
-    await p.selectOption('dialog select[name=outcome]', 'RESTOCKED');
-    await expect.poll(() => p.locator('dialog').textContent()).toContain('with a new claim code for its new certificate card');
+    await p.selectOption('dialog select[name=reason]', 'SIZE');
     await p.fill('dialog textarea[name=note]', 'Returned unworn within the delay.');
-    await p.click('[data-testid=dialog-confirm]');
-    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Choose the location the piece goes back to.');
-    await p.selectOption('dialog select[name=locationId]', { label: 'FRANCE WAREHOUSE' });
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Return opened.")');
+    await expect.poll(() => p.locator('[data-testid=order-case-status]').textContent()).toBe('OPEN');
+    expect(await p.locator('[data-testid=order-case-kind]').textContent()).toBe('RETURN');
+    expect(await p.locator('[data-testid=order-case-decide]').count()).toBe(0);
+    expect(await p.locator('[data-testid=order-return]').count()).toBe(0);
+    const opened = (await ctx.services.orderCases.forOrder(o.late))[0]!;
+    await ctx.services.orderCases.receive(opened.id, { pieceState: 'OK', note: 'Unworn, in its box.' }, admin, null);
+    await p.reload();
+    await expect.poll(() => p.locator('[data-testid=order-case-status]').textContent()).toBe('RECEIVED');
+    // Decided back to stock: where, and why.
+    await p.click('[data-testid=order-case-decide]');
+    expect(await p.locator('dialog [data-testid=case-received-state]').textContent()).toBe('The agent recorded the piece: OK. Unworn, in its box.');
+    await p.selectOption('dialog select[name=decision]', 'REFUND');
+    await p.selectOption('dialog select[name=pieceTo]', 'RESTOCKED');
+    expect(await p.locator('dialog select[name=locationId]').inputValue()).not.toBe('');
+    await p.fill('dialog textarea[name=note]', 'Returned unworn within the delay.');
     await p.click('[data-testid=dialog-confirm]');
     // Back to stock: the new claim code, once, with its card (ORBES took the ownership back).
     await expect.poll(() => p.locator('dialog [data-testid=claim-code]').textContent()).toMatch(/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
@@ -620,7 +623,7 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await p.context().close();
   }, STEP_TIMEOUT);
 
-  it('lets an AUDITOR read the board and an order, the emails and the buyer masked, without one action; no work sheet', async () => {
+  it('lets an AUDITOR read the board and an order, the emails and the buyer masked, without one action', async () => {
     const a = await open(AUDITOR);
     await go(a, '#/orders', 'Orders');
     await expect.poll(() => a.locator('[data-testid=order-card]').count()).toBe(3);
@@ -642,13 +645,14 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await a.click('a.cbtn:has-text("Packing slip")');
     await a.waitForSelector('[data-testid=packing-slip]');
     expect(await a.locator('[data-testid=slip-buyer-name]').textContent()).toBe('J*** D***');
-    await go(a, '#/atelier', 'Atelier');
-    for (const action of ['bench-start', 'bench-done', 'bench-cancel', 'stock-make', 'stock-minimum', 'stock-correct']) {
+    // Its Order case and Shipping read, without one action.
+    for (const action of ['order-case-decide', 'order-case-cancel', 'parcel-start', 'parcel-ship', 'parcel-delivered', 'parcel-report']) {
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
     }
-    expect(await a.locator('a.cbtn', { hasText: /Work sheet/ }).count()).toBe(0);
-    await go(a, '#/atelier/sheets?origin=STOCK', 'Work sheets');
-    expect(await a.locator('.empty__text').textContent()).toBe('A work sheet carries the piece’s ORBES code: an OPERATOR prints it.');
+    await go(a, '#/logistics?tab=stock', 'Logistics');
+    for (const action of ['stock-transfer', 'stock-minimum', 'stock-correct', 'stock-count-in', 'stock-add-to-order']) {
+      expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
+    }
     await go(a, '#/settings', 'Settings');
     for (const action of ['alerts-edit', 'carrier-add', 'carrier-edit', 'location-add', 'location-rename', 'shipping-edit']) {
       expect(await a.locator(`[data-testid=${action}]`).count(), action).toBe(0);
@@ -734,15 +738,12 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => p.locator('#order-documents tbody tr').first().textContent()).toMatch(/€\s2\s950/u);
     expect(await p.locator('#order-history').textContent()).toContain('Credit applied');
     await shot(p, 'credit-paid', { phone: true });
-    // SHIP WITH ITS ORDER: the gift, paid with its order, its piece linked from the stock.
-    const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: gift, variant: '52', material: '925 STERLING SILVER' }, admin);
-    await ctx.services.atelier.linkFromStock(giftOrder, piece.product.productId, admin);
+    // The gift, paid with its order, ships in its order's parcel (plan NEXT LOT §3.5.6.6): its Shipping section is that
+    // parcel's, keyed by its order; no Ship of its own any more.
     await go(p, `#/orders/${giftOrder}`, orderReference(giftOrder));
-    expect(await p.locator('[data-testid=order-ship]').textContent()).toBe('Ship with its order');
-    await p.click('[data-testid=order-ship]');
-    expect(await p.locator('dialog.dialog .dialog__title').textContent()).toBe('Ship with its order');
-    await p.click('[data-testid=dialog-cancel]');
-    await p.waitForSelector('dialog.dialog', { state: 'detached' });
+    expect(await p.locator('[data-testid=order-ship]').count()).toBe(0);
+    expect((await ctx.services.logistics.parcel(giftOrder, null)).id).toBe(parent);
+    expect((await ctx.services.logistics.parcel(giftOrder, null)).orders.map((x) => x.orderId)).toEqual([parent, giftOrder]);
     expect(await csp(p)).toEqual([]);
     await p.context().close();
     await ctx.db.deleteFrom('club_program_settings').execute();

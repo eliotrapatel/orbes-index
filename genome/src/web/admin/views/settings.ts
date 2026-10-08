@@ -1,13 +1,14 @@
 /**
  * The settings of the orders, `#/settings` (plan LIVE RELEASE+: choices 16, 17 and 19, The console → Locations and
- * carriers), reached from the Orders board and the Atelier: everyone who reads the console sees them; an ADMIN
+ * carriers), reached from the Orders board and Logistics: everyone who reads the console sees them; an ADMIN
  * changes them, each change audited.
  *
  *  - Late orders (M3; the order alerts of the API and the audit, a word the console never shows): the delays after
- *    which an order stands out on the board (RESERVED 2 days, paid and ready 3, shipped 10, delivered and not
- *    registered 30 by default), and who set them.
+ *    which an order stands out on the board (RESERVED 2 days, paid and ready 5 (plan NEXT LOT §3.5.4.5), shipped 10,
+ *    delivered and not registered 30 by default), and who set them.
  *  - Locations: FRANCE WAREHOUSE and LOGISTICS WAREHOUSE from the first boot, more added; renamed; one is the default,
- *    where the orders of draws and of the private salon go.
+ *    where the orders of draws and of the private salon go; each with its postal address (plan NEXT LOT §3.5.4.5), the
+ *    Deliver to of its supplier orders' PDF.
  *  - Carriers: Colissimo, Chronopost, DHL Express and UPS from the first boot, more added; each with its tracking link,
  *    `{tracking}` where the number goes (an example shown); set aside (never offered for a shipment again) or offered
  *    again.
@@ -51,7 +52,7 @@ export async function settingsView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow: 'Clients · Orders',
       title: 'Settings',
       lead: 'How the orders are followed: when one stands out as late, where pieces are kept, which carriers ship them. Everyone reads these settings; an ADMIN changes them.',
-      actions: [linkButton('Orders', href('orders'), 'ghost'), linkButton('Atelier', href('atelier'), 'ghost')],
+      actions: [linkButton('Orders', href('orders'), 'ghost'), linkButton('Logistics', href('logistics'), 'ghost')],
     }),
     alertsSection(ctx, alerts, admin, done),
     locationsSection(ctx, locations.items, admin, done),
@@ -148,6 +149,18 @@ function locationsSection(ctx: ViewContext, items: StockLocation[], admin: boole
         await submit(v.name.trim());
       },
     }).then(done(msg));
+  const addressDialog = (l: StockLocation) =>
+    void openDialog({
+      title: 'The location’s address',
+      eyebrow: l.name,
+      body: h('p', { class: 'dialog__text' }, 'Its postal address: printed as Deliver to on the PDF of its supplier orders.'),
+      fields: [{ name: 'address', label: 'Address', kind: 'textarea', rows: 4, maxlength: 500, value: l.address ?? '', hint: 'As it is written on a parcel, one line each. Empty to clear.' }],
+      validate: (v) => ((v.address.trim() || null) === (l.address ?? null) ? 'Nothing has changed.' : null),
+      confirmLabel: 'Save',
+      submit: async (v) => {
+        await ctx.api.updateLocation(l.id, { address: v.address.trim() || null });
+      },
+    }).then(done('Address saved.'));
   const makeDefault = (l: StockLocation) =>
     void openDialog({
       title: 'Make it the default',
@@ -163,6 +176,7 @@ function locationsSection(ctx: ViewContext, items: StockLocation[], admin: boole
     table<StockLocation>(
       [
         { label: 'Location', cell: (l) => h('span', { data: { testid: 'location-name' } }, l.name), kind: ['wide'] },
+        { label: 'Address', cell: (l) => h('span', { class: 'prewrap', data: { testid: 'location-address' } }, l.address ?? '—') },
         { label: 'Default', cell: (l) => (l.isDefault ? statusMark('DEFAULT', 'solid') : '—'), kind: ['nowrap'] },
         { label: 'Shopify', cell: (l) => (l.shopifyLocationId ? mono(l.shopifyLocationId) : '—'), kind: ['nowrap'] },
         {
@@ -173,6 +187,7 @@ function locationsSection(ctx: ViewContext, items: StockLocation[], admin: boole
                   'span',
                   { class: 'row-actions' },
                   button('Rename', { kind: 'ghost', testId: 'location-rename', onClick: () => nameDialog('Rename the location', l.name, (name) => ctx.api.updateLocation(l.id, { name }), 'Location renamed.') }),
+                  button('Address', { kind: 'ghost', testId: 'location-address-edit', onClick: () => addressDialog(l) }),
                   l.isDefault ? null : button('Make default', { kind: 'ghost', testId: 'location-default', onClick: () => makeDefault(l) }),
                 )
               : null,

@@ -84,7 +84,8 @@ import { storyFingerprint } from './lookbook.js';
 import { mediaUrl } from './media.js';
 import { knownLocation, linkDropSizes } from './stock.js';
 import { cleanQuestionWords, QuestionService, type AdminQuestion } from './question.js';
-import { feasibilityCheck, stockSupply, type Feasibility, type FeasibilitySize } from './release-stock.js';
+import { feasibilityCheck, stockSupply, type Feasibility, type FeasibilityLine, type FeasibilitySize } from './release-stock.js';
+import { supplierOf } from './suppliers.js';
 import { AFTER_ROOM_DELAY_MINUTES, AFTER_ROOM_LENGTH_MINUTES, afterRoomTimes, afterRoomTitle, cancelAfterRoom, type AfterRoomSkip } from './after-room.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -1660,7 +1661,20 @@ export class LiveConsoleService {
     const child = d.parent_drop_id ? undefined : await db.selectFrom('drops').select('id').where('parent_drop_id', '=', d.id).where('cancelled_at', 'is', null).executeTakeFirst();
     const [sizes, afterRoom] = await Promise.all([this.sizesOnSale(db, d.id), child ? this.sizesOnSale(db, child.id) : Promise.resolve(null)]);
     const skus = [...sizes, ...(afterRoom ?? [])].map((x) => x.skuId).filter((x): x is string => x !== null);
-    return feasibilityCheck({ location, sizes, afterRoom, supply: location ? await stockSupply(db, skus, location.id) : new Map() });
+    const f = feasibilityCheck({ location, sizes, afterRoom, supply: location ? await stockSupply(db, skus, location.id) : new Map() });
+    // Plan NEXT LOT §3.5.4.3: each size's SKU and supplier, for its Add to supplier order.
+    const skuOf = new Map([...sizes, ...(afterRoom ?? [])].map((x) => [x.sizeId, x.skuId]));
+    const suppliers = new Map<string, { id: string; name: string } | null>();
+    for (const k of new Set(skus)) {
+      const id = await supplierOf(db, k);
+      const row = id ? await db.selectFrom('suppliers').select(['id', 'name']).where('id', '=', id).executeTakeFirst() : undefined;
+      suppliers.set(k, row ?? null);
+    }
+    const withSupplier = (l: FeasibilityLine): FeasibilityLine => {
+      const skuId = skuOf.get(l.sizeId) ?? null;
+      return { ...l, skuId, supplier: skuId ? (suppliers.get(skuId) ?? null) : null };
+    };
+    return { ...f, sizes: f.sizes.map(withSupplier), afterRoom: f.afterRoom ? f.afterRoom.map(withSupplier) : null };
   }
 
   private async release(db: Db, id: string): Promise<AdminLiveRelease> {

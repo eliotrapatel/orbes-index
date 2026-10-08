@@ -35,7 +35,6 @@ import {
   PRODUCT_STATUSES,
   REPORT_CHANNELS,
   REPORT_STATUSES,
-  RETURN_OUTCOMES,
   REVOCATION_TARGET_TYPES,
   SERVICE_TYPES,
   SHOP_REQUEST_OUTCOMES,
@@ -1439,16 +1438,6 @@ export const orderBuyerBody = body({
 
 /** POST /api/admin/orders/:id/piece: the piece picked from the stock to fulfil the order, by its reference. */
 export const orderPieceBody = body({ productId: productRef });
-
-/**
- * POST /api/admin/orders/:id/return (choice 20): where the piece goes, back to stock at a location (RESTOCKED) or to
- * the archive (ARCHIVED, no location), and a note.
- */
-export const orderReturnBody = body({
-  outcome: z.enum(RETURN_OUTCOMES),
-  locationId: uuid.nullable().optional(),
-  note: text(ORDER_TEXT_LIMITS.note),
-}).refine((b) => (b.outcome === 'RESTOCKED') === Boolean(b.locationId), { message: 'A piece back to stock goes to a location; one archived, to none', path: ['locationId'] });
 
 // ── Admin: the invoices (plan LIVE RELEASE+, M7: routes/admin/invoices.ts) ─
 

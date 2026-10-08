@@ -63,6 +63,7 @@ import {
   livePhrase,
   liveStateLabel,
   feasibilityLine,
+  addToOrderLine,
   locationOptions,
   parseSizes,
   priorityLine,
@@ -180,11 +181,13 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
   const published = hasBoard(r.phase);
   // The best time to open while T0 may still move (its settings change); the after-room has none of its own.
   const timing = r.editable && !r.afterRoomOf;
-  const [boardRead, entries, intelligence, bestTime, guarantees, tests] = await Promise.all([
+  const [boardRead, entries, intelligence, bestTime, stockCheck, guarantees, tests] = await Promise.all([
     published ? ctx.api.liveBoard(id) : Promise.resolve(null),
     published && status ? ctx.api.liveEntries(id, { status, page: entriesPage, pageSize: 50 }) : Promise.resolve(null),
     loadLiveIntelligence(ctx.api, r),
     timing ? ctx.api.liveBestTime(id).catch(() => 'failed' as const) : Promise.resolve(null),
+    // Plan NEXT LOT §3.5.4.3: the stock under its sizes, from its creation on.
+    ctx.api.liveFeasibility(id).catch(() => 'failed' as const),
     // IN-01: the release's guarantees (an after-room has none).
     r.afterRoomOf ? Promise.resolve({ items: [] }) : ctx.api.releaseGuarantees(id),
     // An after-room is tested through its release.
@@ -550,7 +553,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
           kind: 'select',
           options: locationOptions(locations.items, v.locationId, r.locationId ? r.location?.name : undefined),
           value: v.locationId,
-          hint: 'Where its orders hold a piece in stock, or have one made: the feasibility check reads its stock there. ORBES Client Services may move an order elsewhere.',
+          hint: 'Where its orders hold a piece in stock, or wait for one: the stock check reads its stock there. ORBES Client Services may move an order elsewhere.',
         },
       ],
       {
@@ -770,6 +773,7 @@ export async function liveReleaseView(ctx: ViewContext): Promise<HTMLElement> {
         // IN-01: the places the house guarantees, first in line in their size.
         ...(r.guaranteed.places > 0 ? [{ label: 'Guaranteed', value: h('span', { data: { testid: 'live-guaranteed' } }, guaranteedText(r.guaranteed)), note: 'First in line in their size, listed first.' }] : []),
         { label: 'Stock location', value: h('span', { data: { testid: 'live-location' } }, r.location?.name ?? 'None yet'), note: r.locationId ? undefined : 'The default location' },
+        { label: 'Stock', value: stockBlock(ctx, r, stockCheck) },
       ]),
       { id: 'live-part-sizes', tools: edit('Edit', 'live-edit-sizes', sizesPart) },
     ),
@@ -1061,7 +1065,54 @@ function feasibilityBlock(check: LiveFeasibility | 'failed'): HTMLElement {
     h('p', { class: 'live__feasibility-title' }, 'Stock'),
     h('p', { class: 'dialog__text', data: { testid: 'live-feasibility-line' } }, feasibilityLine(check)),
     check.warnings.length ? h('ul', { class: 'live__feasibility-list' }, ...check.warnings.map((w) => h('li', { data: { testid: 'live-feasibility-warning' } }, w))) : null,
-    check.short > 0 ? h('p', { class: 'dialog__text soft' }, 'It does not block publishing: what the stock does not cover is made to order once sold, at the atelier.') : null,
+    check.short > 0 ? h('p', { class: 'dialog__text soft' }, 'It does not block publishing: the orders the stock does not cover wait for supplier stock, the oldest first.') : null,
+  );
+}
+
+/**
+ * The release's stock under its sizes (plan NEXT LOT §3.5.4.3), from its creation on: each size's sentence, and for a
+ * size short of stock with a supplier, Add to supplier order (OPERATOR), into its supplier's draft for ORBES to confirm.
+ */
+function stockBlock(ctx: ViewContext, r: LiveRelease, check: LiveFeasibility | 'failed'): HTMLElement {
+  if (check === 'failed') return h('p', { class: 'panel__text soft', data: { testid: 'live-stock' } }, 'The stock could not be checked just now.');
+  const add = can(ctx.session.admin.role, 'manageSupplierOrders') && check.location !== null;
+  const lines = [...check.sizes, ...(check.afterRoom ?? [])].filter((l) => l.short > 0);
+  return h(
+    'div',
+    { class: 'live__stock', data: { testid: 'live-stock' } },
+    h('p', { class: 'dialog__text', data: { testid: 'live-stock-line' } }, feasibilityLine(check)),
+    lines.length
+      ? h(
+          'ul',
+          { class: 'live__feasibility-list' },
+          ...lines.map((l) => {
+            const sku = `${r.model.name} · ${l.label}`;
+            const button_ =
+              add && l.skuId && l.supplier
+                ? button('Add to supplier order', {
+                    kind: 'ghost',
+                    testId: 'live-add-to-order',
+                    onClick: () =>
+                      void openDialog({
+                        title: 'Add to supplier order',
+                        eyebrow: sku,
+                        body: h('p', { class: 'dialog__text', data: { testid: 'live-add-to-order-text' } }, addToOrderLine(l, sku, check.location!.name)),
+                        confirmLabel: 'Add to supplier order',
+                        submit: async () => {
+                          await ctx.api.addToSupplierDraft({ skuId: l.skuId!, locationId: check.location!.id, quantity: l.short, from: 'RELEASE' });
+                        },
+                      }).then((v) => {
+                        if (!v) return;
+                        notify('Added to the draft.');
+                        ctx.reload();
+                      }),
+                  })
+                : null;
+            return h('li', { data: { testid: 'live-stock-warning' } }, h('span', null, `${l.label}: ${formatCount(l.fromStock)} in stock, ${formatCount(l.short)} will wait for supplier stock.`), button_ ? ' ' : null, button_);
+          }),
+        )
+      : null,
+    check.short > 0 ? h('p', { class: 'dialog__text soft' }, 'It does not block publishing: the orders the stock does not cover wait for supplier stock, the oldest first.') : null,
   );
 }
 
@@ -1084,7 +1135,7 @@ export function newLiveFields(models: readonly Model[], values: Record<string, s
       kind: 'select',
       options: locationOptions(locations, values.locationId ?? ''),
       value: values.locationId ?? '',
-      hint: 'Where its orders hold a piece in stock or have one made; the sizes are proposed from its stock.',
+      hint: 'Where its orders hold a piece in stock, or wait for one; the sizes are proposed from its stock.',
     },
     { name: 'sizes', label: 'Sizes', kind: 'textarea', rows: 4, required: true, value: values.sizes, hint: 'One size per line, its label then its stock: 52 = 3. Proposed from the stock, then the planner, once the model is chosen: yours to change.' },
   ];

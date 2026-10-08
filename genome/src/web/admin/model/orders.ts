@@ -4,11 +4,11 @@
  *
  *  - The words of the board: a channel, a step, why an order is late (M3) and since when, what it holds, the delays.
  *  - The board's filters read from the page's query, kept to the values the server takes.
- *  - What each role may do with an order now (OPERATOR: its steps, a return, its location, its terms, its buyer, a piece
- *    picked from the stock), mirroring services/orders.ts so that nobody is offered a button that will answer 409 or 403.
- *  - The dialogs: shipping (carrier, tracking number, declared value), a return (back to stock at a location, or to the
- *    archive, with a note), the terms, the buyer, the delays, a location, a carrier: what the server would refuse before
- *    anything is sent, and what to send.
+ *  - What each role may do with an order now (OPERATOR: its steps, its location, its terms, its buyer; its shipping and
+ *    its order cases are model/logistics.ts' and model/order-cases.ts', plan NEXT LOT §3.5.4.4), mirroring
+ *    services/orders.ts so that nobody is offered a button that will answer 409 or 403.
+ *  - The dialogs: the terms, the buyer, the delays, a location, a carrier: what the server would refuse before anything
+ *    is sent, and what to send.
  *  - An order's documents (M7): its invoice and credit note, named.
  *  - The packing slip: the piece, its size, its add-ons, the engraving and the surprise; never a price.
  */
@@ -28,7 +28,6 @@ import {
   type OrderCurrency,
   type OrderDetail,
   type OrderLateRule,
-  type OrderReturnInput,
   type OrderStatus,
   type OrderTermsChange,
   type OrderTransitionInput,
@@ -112,8 +111,12 @@ export function holdsLine(o: Pick<OrderCard, 'status' | 'reservation' | 'piece' 
   return '—';
 }
 
+/** The hold of an order whose piece is ready while its parcel waits for another order's (plan NEXT LOT §3.5.6.6). */
+export const WAITING_FOR_PARCEL = 'Waiting for the rest of its parcel';
+
 /** A card's holds line (its SKU known when it has a SKU code). */
 export function cardHolds(c: OrderCard): string {
+  if (c.waitingForParcel && !c.piece) return WAITING_FOR_PARCEL;
   return holdsLine({ ...c, skuKnown: c.skuCode !== null });
 }
 
@@ -296,6 +299,18 @@ export const EVENT_LABELS: Readonly<Record<string, string>> = Object.freeze({
   'order.credit.apply': 'Credit applied',
   'order.credit.remove': 'Credit removed',
   'order.credit.release': 'Credit given back',
+  // Plan NEXT LOT §3.5: the stock that serves it, the agent's packing, its order cases.
+  'order.serve': 'Piece held in stock',
+  'order.pack.start': 'Packing started',
+  'order.pack.scan': 'Card scanned',
+  'order.pack.photo': 'Photo added',
+  'order.pack.check': 'Packed',
+  'order.reship': 'To ship again',
+  'order.exchange': 'Size exchange',
+  'order.case.open': 'Request opened',
+  'order.case.receive': 'Parcel back',
+  'order.case.decide': 'Decided by ORBES',
+  'order.case.cancel': 'Request cancelled',
 });
 
 /** Who made a change of an order: a console user by email, the collector, or ORBES itself. */
@@ -323,19 +338,15 @@ export function boardFilters(query: Record<string, string>): OrderBoardFilters {
 
 export interface OrderActions {
   pay: boolean;
-  ship: boolean;
+  /** MARK DELIVERED from the step (an order shipped before its parcel was packed through Logistics). */
   deliver: boolean;
   cancel: boolean;
-  /** RETURNED (choice 20): shipped or delivered. */
-  return: boolean;
   /** A return to the archive (its piece RETIRED): ADMIN only, as the server. */
   archive: boolean;
   location: boolean;
   /** The size, the price and the currency (a draw's or a salon's), the engraving text (any order), the shipping (RESERVED, its own). */
   terms: { size: boolean; price: boolean; engraving: boolean; shipping: boolean };
   buyer: boolean;
-  /** A piece picked from the stock: an order holding one, or a piece to make still being made; none linked yet. */
-  linkPiece: boolean;
 }
 
 /** What `role` may do with the order now (the server holds the same rules: services/orders.ts). */
@@ -346,10 +357,8 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
   return {
     // A welcome gift is paid with its order; an order waits for its gift's size (BP-19 T5).
     pay: ok && o.status === 'RESERVED' && o.priceMinor !== null && o.channel !== 'GIFT' && !giftsWaitForSize(o),
-    ship: ok && o.status === 'PAID' && o.reservation === 'STOCK' && o.productId !== null,
     deliver: ok && o.status === 'SHIPPED',
     cancel: ok && holding,
-    return: ok && (o.status === 'SHIPPED' || o.status === 'DELIVERED') && o.productId !== null,
     archive: can(role, 'archiveReturn') && (o.status === 'SHIPPED' || o.status === 'DELIVERED') && o.productId !== null,
     location: ok && holding && o.productId === null,
     terms: {
@@ -359,7 +368,6 @@ export function orderActions(o: OrderView, role: AdminRole | null | undefined): 
       shipping: ok && o.status === 'RESERVED' && !o.withOrder,
     },
     buyer: ok,
-    linkPiece: ok && holding && o.productId === null && (o.reservation === 'STOCK' || o.reservation === 'AWAITING'),
   };
 }
 
@@ -374,49 +382,11 @@ export function shipWaitsFor(o: OrderView): string | null {
   if (o.status === 'RESERVED' && o.priceMinor !== null && giftsWaitForSize(o)) return 'Choose the welcome gift’s size first.';
   if (o.reservation === 'AWAITING') return o.status === 'RESERVED' && o.priceMinor === null ? 'It waits for supplier stock; its price is to be entered.' : 'It waits for supplier stock.';
   if (o.status === 'RESERVED') return o.priceMinor === null ? 'Its price is to be entered: it is paid once priced, and its invoice issued then.' : 'It ships once paid.';
-  if (o.reservation === 'STOCK' && o.productId === null) return 'Link its piece from the stock.';
+  if (o.reservation === 'STOCK' && o.productId === null) return 'It ships with its parcel: the agent packs it and scans its card (Shipping).';
   return null;
 }
 
 // ── The dialogs ────────────────────────────────────────────────────────────
-
-/** SHIP: a carrier, the tracking number, the value declared for the insurance (optional, in the order's currency). */
-export function shipProblem(v: Record<string, string>, currency: OrderCurrency | null): string | null {
-  if (!UUID_RE.test(v.carrierId ?? '')) return 'Choose the carrier.';
-  if (!TRACKING_RE.test((v.trackingNumber ?? '').trim())) return 'A tracking number has 3 to 40 letters and digits.';
-  const declared = (v.declaredValue ?? '').trim();
-  if (declared) {
-    if (currency === null) return 'Enter the order’s price and currency before declaring a value.';
-    const minor = parseMoney(declared);
-    if (minor === null || minor > ORDER_AMOUNT_MAX_MINOR) return 'The declared value is an amount in units: 4800, or 4800.50.';
-  }
-  if ((v.note ?? '').trim().length > ORDER_LIMITS.note) return `A note has at most ${ORDER_LIMITS.note} characters.`;
-  return null;
-}
-
-export function shipInput(v: Record<string, string>): OrderTransitionInput {
-  const declared = (v.declaredValue ?? '').trim();
-  const note = (v.note ?? '').trim();
-  return {
-    to: 'SHIPPED',
-    carrierId: v.carrierId!,
-    trackingNumber: v.trackingNumber!.trim(),
-    ...(declared ? { declaredValueMinor: parseMoney(declared) } : {}),
-    ...(note ? { note } : {}),
-  };
-}
-
-/** A return: where the piece goes (a location when back to stock), and a note. */
-export function returnProblem(v: Record<string, string>): string | null {
-  if (!(RETURN_OUTCOMES as readonly string[]).includes(v.outcome ?? '')) return 'Choose where the piece goes.';
-  if (v.outcome === 'RESTOCKED' && !UUID_RE.test(v.locationId ?? '')) return 'Choose the location the piece goes back to.';
-  return noteProblem(v.note, true);
-}
-
-export function returnInput(v: Record<string, string>): OrderReturnInput {
-  const note = (v.note ?? '').trim();
-  return v.outcome === 'RESTOCKED' ? { outcome: 'RESTOCKED', locationId: v.locationId!, note } : { outcome: 'ARCHIVED', note };
-}
 
 /** A note, required (a cancellation, a return) or not (a payment, a delivery). */
 export function noteProblem(note: string | undefined, required: boolean): string | null {

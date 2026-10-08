@@ -169,7 +169,9 @@ function after(ctx: ViewContext, message: string): (v: unknown) => void {
 function shipTab(ctx: ViewContext, toShip: ToShipRow[], onItsWay: OnItsWayRow[], locations: readonly LogisticsLocation[]): HTMLElement[] {
   const act = can(ctx.session.admin.role, 'logistics');
   const several = locations.length > 1;
-  const parcelLink = (id: string, reference: string) => h('a', { class: 'idlink mono', attrs: { href: href('logisticsOrder', { orderId: id }) }, data: { testid: 'parcel-link' } }, reference);
+  // The agent packs on the parcel's page; ORBES staff take every step from the order's page (§3.5.4.1).
+  const target = (id: string) => (logisticsOnly(ctx.session.admin.role) ? href('logisticsOrder', { orderId: id }) : href('order', { orderId: id }));
+  const parcelLink = (id: string, reference: string) => h('a', { class: 'idlink mono', attrs: { href: target(id) }, data: { testid: 'parcel-link' } }, reference);
   const deliver = (r: OnItsWayRow) =>
     void openDialog({
       title: PACKING_TEXT.deliveredTitle,
