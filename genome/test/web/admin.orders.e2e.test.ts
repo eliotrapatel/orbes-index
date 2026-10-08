@@ -259,7 +259,8 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     const p = await open(OPERATOR);
     // Its links in the sidebar: Orders and Invoices (Clients), Atelier (Registry), the settings from both; SIGN OUT still
     // within 900 px.
-    for (const label of ['Orders', 'Invoices', 'Atelier']) expect(await p.locator('.side__link', { hasText: new RegExp(`^${label}$`) }).count(), label).toBe(1);
+    // Logistics in the Atelier's place (plan NEXT LOT §3.5.4.1, step 5.11a).
+    for (const label of ['Orders', 'Invoices', 'Logistics']) expect(await p.locator('.side__link', { hasText: new RegExp(`^${label}$`) }).count(), label).toBe(1);
     expect(await p.locator('.side__link', { hasText: /^Settings$/ }).count()).toBe(0);
     for (const id of ['sign-out', 'change-password']) {
       const box = (await p.locator(`[data-testid=${id}]`).boundingBox())!;
