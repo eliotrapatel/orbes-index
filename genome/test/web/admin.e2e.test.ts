@@ -2126,6 +2126,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.fill('dialog input[name="size:52"]', '2');
     await p.fill('dialog input[name="size:54"]', '1');
     await expect.poll(() => p.locator('dialog [data-testid=draw-pieces-in-all]').textContent()).toBe('3 pieces in all');
+    await shot(p, 'club-drop-new-sizes');
     const opens = new Date(Date.now() - 3_600_000);
     const closes = new Date(Date.now() + 3_600_000);
     const local = (d: Date) => d.toISOString().slice(0, 16);
@@ -2166,6 +2167,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.click('[data-testid=drop-sizes]');
     await p.waitForSelector('dialog input[name="size:52"]');
     expect(await p.locator('dialog .dialog__title, dialog h2').first().textContent()).toContain('Sizes and pieces');
+    await shot(p, 'club-drop-sizes-dialog');
     await p.fill('dialog input[name="size:54"]', '0');
     await expect.poll(() => p.locator('dialog [data-testid=draw-pieces-in-all]').textContent()).toBe('1 piece in all');
     await p.fill('dialog input[name="size:54"]', '1');
