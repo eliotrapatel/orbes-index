@@ -748,6 +748,28 @@ describe('schema', () => {
     await expect(t.db.deleteFrom('stock_corrections').where('id', '=', correction.id).execute()).rejects.toSatisfy(isGuardViolation);
   });
 
+  it('draw sizes (0038): the mirror at work: a draw\'s sizes, an entry in one of them, none in a draw without sizes; another drop\'s size refused; a size chosen kept', async () => {
+    const { model } = await seedProduct(t.db);
+    const admin = await t.db.insertInto('admin_users').values({ email: 'draw-0038@orbes.test', email_normalized: 'draw-0038@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
+    const account = await t.db.insertInto('accounts').values({ email: 'draw-0038@example.com', email_normalized: 'draw-0038@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const draw = (title: string) =>
+      t.db
+        .insertInto('drops')
+        .values({ model_id: model.id, title, quantity: 8, opens_at: new Date('2026-11-01T10:00:00Z'), closes_at: new Date('2026-11-02T10:00:00Z'), seed_enc: `v1.${'A'.repeat(16)}.${'B'.repeat(64)}`, seed_hash: new Uint8Array(32), created_by: admin.id })
+        .returning('id')
+        .executeTakeFirstOrThrow();
+    const sized = await draw('SIZED 0038');
+    const pooled = await draw('POOLED 0038');
+    const size = await t.db.insertInto('drop_sizes').values({ drop_id: sized.id, label: '17', position: 1, stock: 5 }).returning(['id', 'stock', 'sku_id']).executeTakeFirstOrThrow();
+    expect(size).toEqual({ id: expect.any(String), stock: 5, sku_id: null });
+    const entry = await t.db.insertInto('drop_entries').values({ drop_id: sized.id, account_id: account.id, size_id: size.id }).returning(['size_id', 'status']).executeTakeFirstOrThrow();
+    expect(entry).toEqual({ size_id: size.id, status: 'ENTERED' });
+    const none = await t.db.insertInto('drop_entries').values({ drop_id: pooled.id, account_id: account.id }).returning('size_id').executeTakeFirstOrThrow();
+    expect(none.size_id).toBeNull();
+    await expect(t.db.updateTable('drop_entries').set({ size_id: size.id }).where('drop_id', '=', pooled.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e, 'drop_entries_size_fkey'));
+    await expect(t.db.deleteFrom('drop_sizes').where('id', '=', size.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+  });
+
   it('audit_logs is append-only at the database level', async () => {
     const h = (b: number) => new Uint8Array(32).fill(b);
     await t.db

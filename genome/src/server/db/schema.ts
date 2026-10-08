@@ -1021,6 +1021,11 @@ export interface DropEntriesTable {
   guarantee_id: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0029: the pieces of its place, 1..5; above 1 only with a guarantee. */
   pieces: WithDefault<number>;
+  /**
+   * Migration 0038 (plan NEXT LOT §3.6.F): the size the entry chose, a drop_sizes row of the same drop; NULL in a draw
+   * without sizes (one published before this lot keeps one pool). The service requires one in a draw that has sizes.
+   */
+  size_id: ColumnType<string | null, string | null | undefined, string | null>;
 }
 
 /**
@@ -1123,8 +1128,9 @@ export interface ShopRequestsTable {
 }
 
 /**
- * A size of a LIVE RELEASE (migration 0021): 1 to 24 per drop (`position`), a `label` of 1..12 characters unique per
- * drop, its `stock` (≥ 0). The release's quantity is the sum of its stock. id and drop_id never change.
+ * A size of a LIVE RELEASE (migration 0021), and since 0038 of a DRAW (plan NEXT LOT §3.6.F): 1 to 24 per drop
+ * (`position`), a `label` of 1..12 characters unique per drop, its `stock` (≥ 0; a draw's size: its pieces). The
+ * release's quantity is the sum of its stock. id and drop_id never change.
  */
 export interface DropSizesTable {
   id: Generated<string>;
