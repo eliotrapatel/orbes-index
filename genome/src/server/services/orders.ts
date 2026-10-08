@@ -116,6 +116,7 @@ import { conflict, DomainError, forbidden, notFound, validationError } from '../
 import { systemClock, SYSTEM_ACTOR, type Actor, type Clock, type Logger, noopLogger } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { generateClaimCode, hashClaimCode } from './claim-codes.js';
+import { lockPieces, peekClaimRenewals, waitingClaimCodes, withdrawOnCancel, withdrawWaiting, type AccountOrderClaimCode } from './claim-renewals.js';
 import { issueCreditNote, issueInvoice, orderInvoices, type InvoiceBuyer } from './invoices.js';
 import { reserveIdentity, retireReservedIdentity } from './issuance.js';
 import { mediaUrl } from './media.js';
@@ -151,6 +152,10 @@ export const ORDER_STEP_ACTIONS: Readonly<Record<Exclude<OrderStatus, 'RESERVED'
 
 /** The statuses in which an order holds a piece (STOCK) or a piece to make (BENCH). */
 export const ORDER_HOLDING_STATUSES: readonly OrderStatus[] = Object.freeze(['RESERVED', 'PAID']);
+/** The steps in which an order holds its piece for its buyer (orders_product_key): neither CANCELLED nor RETURNED. */
+const OPEN_STATUSES: readonly OrderStatus[] = Object.freeze(['RESERVED', 'PAID', 'SHIPPED', 'DELIVERED']);
+/** No hash prepared for a cancellation (plan NEXT LOT §3.4): its orders hold no buyer's new claim code. */
+const NO_CLAIM_HASHES: ReadonlyMap<string, string> = new Map();
 /**
  * The statuses in which an order offers its piece's ownership certificate (M6): paid and not cancelled nor returned. A
  * piece its account later buys again through a new order is certified by that order only.
@@ -465,6 +470,11 @@ export interface AccountOrder {
    * NOCTURNE, addition 3). Never a piece's own photograph (decision 9).
    */
   imageUrl: string | null;
+  /**
+   * Plan NEXT LOT §3.4: a new claim code ORBES Client Services made for its piece, waiting for this account's one reading
+   * (POST …/claim-code): its status and when it was made, never the code; null otherwise (and once it is read).
+   */
+  claimCode: AccountOrderClaimCode | null;
 }
 
 /** The documents of an order in MY PIECES (M6). */
@@ -1150,7 +1160,16 @@ type CheckedStep =
   | { to: 'PAID'; note: string | null }
   | { to: 'SHIPPED'; carrierId: string; trackingNumber: string; declaredValueMinor: number | null; note: string | null }
   | { to: 'DELIVERED'; note: string | null; details?: JsonObject }
-  | { to: 'CANCELLED'; note: string };
+  | {
+      to: 'CANCELLED';
+      note: string;
+      /**
+       * Plan NEXT LOT §3.4: the fresh hash of a code nobody sees, per piece (products.id) whose current claim code is its
+       * buyer's new one (WAITING or READ), prepared before the transaction (`peekClaimRenewals`: scrypt never runs under
+       * the locks); `withdrawOnCancel` writes it. Empty when none is given: such a piece then answers 409 ORDER_CHANGED.
+       */
+      claimHashes?: ReadonlyMap<string, string>;
+    };
 
 function checkStep(input: OrderTransitionInput): CheckedStep {
   if (!input || typeof input !== 'object' || !(ORDER_STATUSES as readonly string[]).includes((input as { to: unknown }).to as string)) {
@@ -1230,6 +1249,8 @@ async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date
       const released = await release(tx, o, 'Reserved identity retired: its order was cancelled', actor, now, extra);
       after = await updateOrder(tx, released.id, { status: 'CANCELLED', cancelled_at: now });
       details = { released: o.reservation };
+      // Plan NEXT LOT §3.4: a buyer's new claim code withdrawn, and the piece given a code nobody sees.
+      await withdrawOnCancel(tx, after, s.claimHashes ?? NO_CLAIM_HASHES, actor, now, extra);
       // BP-19 T5: the credit taken off it given back, its expiry unchanged.
       extra.push(...(await releaseCredit(tx, after, 'CANCELLED', actor, now)));
       break;
@@ -1243,7 +1264,7 @@ async function step(tx: Db, o: OrderRow, s: CheckedStep, actor: Actor, now: Date
   if (o.channel !== 'GIFT' && (s.to === 'PAID' || s.to === 'CANCELLED')) {
     for (const g of await openGifts(tx, o.id, { forUpdate: true })) {
       if (s.to === 'PAID' && g.status === 'RESERVED') await step(tx, g, { to: 'PAID', note: null }, actor, now, notes);
-      if (s.to === 'CANCELLED' && (g.status === 'RESERVED' || g.status === 'PAID')) await step(tx, g, { to: 'CANCELLED', note: 'Its order was cancelled.' }, actor, now, notes);
+      if (s.to === 'CANCELLED' && (g.status === 'RESERVED' || g.status === 'PAID')) await step(tx, g, { to: 'CANCELLED', note: 'Its order was cancelled.', claimHashes: s.claimHashes }, actor, now, notes);
     }
   }
   return after;
@@ -1574,6 +1595,7 @@ export class OrderService {
           ).map((c) => [c.order_id, Number(c.n)])
         : [],
     );
+    const claimCodes = await waitingClaimCodes(this.db, accountId.toLowerCase(), rows.map((r) => r.id));
     const documentOf = (orderId: string, kind: InvoiceKind) => {
       const i = invoices.find((x) => x.order.id === orderId && x.kind === kind);
       return i ? { number: i.number, issuedAt: i.issuedAt } : null;
@@ -1612,6 +1634,7 @@ export class OrderService {
         certificate: ORDER_CERTIFICATE_STATUSES.includes(r.status) && r.ownership_id !== null && r.piece_status !== null && !CERTIFICATE_ENDING_STATUSES.includes(r.piece_status),
       },
       imageUrl: mediaUrl(r.model_image),
+      claimCode: claimCodes.get(r.id) ?? null,
     }));
   }
 
@@ -1643,12 +1666,32 @@ export class OrderService {
   async transition(orderId: string, input: OrderTransitionInput, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
     const id = knownOrderId(orderId);
-    const s = checkStep(input);
-    await this.change(id, async (tx, o, now, notes) => {
-      // A welcome gift is paid with its order (BP-19 T5), never alone.
-      if (o.channel === 'GIFT' && s.to === 'PAID') throw stepNotAllowed(o.status, s.to);
-      await step(tx, o, s, actor, now, notes);
-    });
+    let s = checkStep(input);
+    // Plan NEXT LOT §3.4: a cancellation replaces a buyer's new claim code (WAITING or READ) on the order, its welcome
+    // gifts and the orders travelling with it by a code nobody sees: its hashes made before the transaction, its pieces
+    // locked first (the piece before the order, as returns and registrations).
+    let first: ((tx: Db) => Promise<void>) | undefined;
+    if (s.to === 'CANCELLED') {
+      const related = await this.db
+        .selectFrom('orders')
+        .select('id')
+        .where((eb) => eb.or([eb('id', '=', id), eb('with_order_id', '=', id)]))
+        .where('status', 'in', OPEN_STATUSES)
+        .execute();
+      const claimHashes = await peekClaimRenewals(this.db, related.map((r) => r.id));
+      s = { ...s, claimHashes };
+      if (claimHashes.size) first = (tx) => lockPieces(tx, claimHashes.keys());
+    }
+    const checked = s;
+    await this.change(
+      id,
+      async (tx, o, now, notes) => {
+        // A welcome gift is paid with its order (BP-19 T5), never alone.
+        if (o.channel === 'GIFT' && checked.to === 'PAID') throw stepNotAllowed(o.status, checked.to);
+        await step(tx, o, checked, actor, now, notes);
+      },
+      first,
+    );
     return this.get(id);
   }
 
@@ -1693,6 +1736,9 @@ export class OrderService {
       const p = await tx.selectFrom('products').selectAll().where('id', '=', o.product_id).forUpdate().executeTakeFirstOrThrow();
       const owner = await tx.selectFrom('ownership').selectAll().where('product_id', '=', p.id).where('ended_at', 'is', null).forUpdate().executeTakeFirst();
       if ((owner !== undefined) !== reclaim) throw returnChanged();
+      // Plan NEXT LOT §3.4: a buyer's new claim code still waiting is withdrawn (RESTOCKED writes its own new code, shown
+      // to staff; ARCHIVED retires the piece).
+      const withdrawn = await withdrawWaiting(tx, p.id, 'ORDER_RETURNED', actor, now);
       // The piece's status once back: ready to be sold again (RESOLD; ISSUED if it never was), or retired.
       let to: ProductStatus | null;
       if (r.outcome === 'ARCHIVED') to = p.status === 'RETIRED' || p.status === 'REVOKED' ? null : 'RETIRED';
@@ -1745,7 +1791,7 @@ export class OrderService {
         ...(claimHash ? { claimCodeReissued: true } : {}),
         ...(to ? { pieceStatus: to } : {}),
       };
-      notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.note, details }, actor, now), ...extra);
+      notes.push(await recordChange(tx, o, after, ORDER_STEP_ACTIONS.RETURNED, { note: r.note, details }, actor, now), ...extra, ...withdrawn);
       // BP-19 T5: the credit taken off it given back; its welcome gift stays as it is.
       notes.push(...(await releaseCredit(tx, after, 'RETURNED', actor, now)));
       const credit = await issueCreditNote(tx, after, 'return', actor, now);
@@ -2060,7 +2106,8 @@ export class OrderService {
         notes.push(...created.notes);
         for (const o of created.orders) {
           if (entry.resolution === 'CONCLUDED') await step(tx, o, { to: 'PAID', note: entry.resolution_note }, SYSTEM_ACTOR, now, notes);
-          if (entry.resolution === 'CANCELLED') await step(tx, o, { to: 'CANCELLED', note: entry.resolution_note ?? 'Cancelled by ORBES Client Services.' }, SYSTEM_ACTOR, now, notes);
+          // Its orders are new: none can hold a new claim code (plan NEXT LOT §3.4), so no hash is prepared.
+          if (entry.resolution === 'CANCELLED') await step(tx, o, { to: 'CANCELLED', note: entry.resolution_note ?? 'Cancelled by ORBES Client Services.', claimHashes: NO_CLAIM_HASHES }, SYSTEM_ACTOR, now, notes);
         }
         return created.orders.length;
       });

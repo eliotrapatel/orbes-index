@@ -212,7 +212,7 @@ All configuration comes from environment variables. It is parsed **once at start
 |---|---|---|
 | `KEY_PROVIDER` | `local` in production, `memory` otherwise | `local` or `memory`. **Production refuses `memory`** (keys would vanish on restart). |
 | `KEY_DIR` | none (image/compose: `/var/lib/orbes/keys`) | Required when `KEY_PROVIDER=local`. Absolute path. Created with mode `0700`; group/world bits on an existing directory are removed (with a warning). |
-| `KEY_ENCRYPTION_KEY` | none | Required when `KEY_PROVIDER=local`. base64url **without padding** of **exactly 32 bytes** (43 characters). Production refuses a key whose bytes are all identical. The AES-256-GCM key-encryption key for every key file. The admin TOTP sealing key and the key that seals the seeds of the releases' draws (P-R03, [DATABASE §5.29](DATABASE.md#529-drops)) are also derived from it (HKDF), see §7.7. |
+| `KEY_ENCRYPTION_KEY` | none | Required when `KEY_PROVIDER=local`. base64url **without padding** of **exactly 32 bytes** (43 characters). Production refuses a key whose bytes are all identical. The AES-256-GCM key-encryption key for every key file. The admin TOTP sealing key, the key that seals the seeds of the releases' draws (P-R03, [DATABASE §5.29](DATABASE.md#529-drops)) and the key that seals a buyer's new claim code while it waits (plan NEXT LOT §3.4, [DATABASE §5.76](DATABASE.md#576-claim_code_renewals)) are also derived from it (HKDF), see §7.7. |
 
 **First admin**
 
@@ -432,9 +432,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 | Secret | Effect of changing it | Procedure |
 |---|---|---|
-| `COOKIE_SECRET` | Device cookies are re-issued, so devices look new to the anomaly rules for a while (session cookies are not signed and survive). Pending ownership transfer codes stop working (their lookup key is derived from it): owners start a new transfer. When `KEY_ENCRYPTION_KEY` is unset, enrolled admin TOTP secrets and the sealed seeds of releases not drawn yet (P-R03) can no longer be opened either. | Change and restart. Schedule a quiet period. |
+| `COOKIE_SECRET` | Device cookies are re-issued, so devices look new to the anomaly rules for a while (session cookies are not signed and survive). Pending ownership transfer codes stop working (their lookup key is derived from it): owners start a new transfer. When `KEY_ENCRYPTION_KEY` is unset, enrolled admin TOTP secrets, the sealed seeds of releases not drawn yet (P-R03) and the buyers' new claim codes still waiting (withdrawn as unreadable at their reading: staff make a new one) can no longer be opened either. | Change and restart. Schedule a quiet period. |
 | `IP_HASH_PEPPER` | New IP, device and session pseudonyms cannot be linked to older scans. Anomaly scoring (device, IP and geo diversity) starts again from scratch. | Change and restart. Rotate only when it may have leaked or on a planned schedule. |
-| `KEY_ENCRYPTION_KEY` | Existing key files can no longer be decrypted, enrolled admin TOTP secrets can no longer be opened, and neither can the sealed seeds of the releases not drawn yet (their draw fails closed, `503 DROP_SEED_UNAVAILABLE`). | Follow §7.7. Never just swap it. |
+| `KEY_ENCRYPTION_KEY` | Existing key files can no longer be decrypted, enrolled admin TOTP secrets can no longer be opened, and neither can the sealed seeds of the releases not drawn yet (their draw fails closed, `503 DROP_SEED_UNAVAILABLE`) nor the buyers' new claim codes still waiting (withdrawn as unreadable at their reading: staff make a new one). | Follow §7.7. Never just swap it. |
 | `POSTGRES_PASSWORD` | The app cannot connect until `DATABASE_URL` matches. | `ALTER ROLE … PASSWORD …`, update the env file, restart. With compose, the `POSTGRES_PASSWORD` variable only applies when the data volume is first created. |
 | `BOOTSTRAP_ADMIN_PASSWORD` | None after the first admin exists. | Remove it from the environment after the first start. |
 

@@ -177,6 +177,8 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       documents: { invoice: null, creditNote: null, careGuide: true, certificate: false },
       // NOCTURNE, addition 3: its model's photograph; none taken yet.
       imageUrl: null,
+      // Plan NEXT LOT §3.4: no new claim code waits for it.
+      claimCode: null,
     });
     // A draw's: its size and price still to be entered.
     expect(byId.get(ids.draw)).toMatchObject({ channel: 'DRAW', release: 'MONOLITHE — RELEASE I', model: 'MONOLITHE', size: null, priceMinor: null, currency: null, addons: [], status: 'RESERVED', paidAt: null, shipment: null });
@@ -203,6 +205,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       // Paid: its invoice (step S4, M6); its piece not registered by the account: no certificate yet.
       documents: { invoice: { number: expect.stringMatching(/^INV-2026-\d{6}$/), issuedAt: delivered.paidAt }, creditNote: null, careGuide: true, certificate: false },
       imageUrl: null,
+      claimCode: null,
     });
     for (const k of ['reservedAt', 'paidAt', 'shippedAt', 'deliveredAt']) expect(delivered[k], k).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(Date.parse(delivered.reservedAt)).toBeLessThan(Date.parse(delivered.paidAt));
@@ -218,7 +221,7 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     const list = (safeJson(res) as { orders: Json[] }).orders;
     for (const o of list) {
       expect(Object.keys(o).sort()).toEqual(
-        ['addons', 'cancelledAt', 'channel', 'creditMinor', 'currency', 'deliveredAt', 'documents', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
+        ['addons', 'cancelledAt', 'channel', 'claimCode', 'creditMinor', 'currency', 'deliveredAt', 'documents', 'giftTier', 'id', 'imageUrl', 'model', 'modelVariant', 'paidAt', 'priceMinor', 'reference', 'release', 'reservedAt', 'returnedAt', 'shipment', 'shippedAt', 'shipping', 'size', 'status', 'withOrder'].sort(),
       );
       expect(Object.keys(o.documents).sort()).toEqual(['careGuide', 'certificate', 'creditNote', 'invoice']);
       for (const a of o.addons) expect(Object.keys(a).sort()).toEqual(['label', 'priceMinor']);

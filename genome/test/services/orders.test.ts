@@ -14,7 +14,7 @@
  *  - the buyer's details: never in the audit log, the events nor the journal, exported to the account.
  * The race for a SKU's last piece is test/services/orders-concurrency.test.ts.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import { inTransaction } from '../../src/server/db/connection.js';
@@ -26,8 +26,10 @@ import { ORDER_CURRENCIES, ORDER_TRANSITIONS, benchPayload, orderPayload, orderR
 import { LIVE_CURRENCIES } from '../../src/server/services/live-console.js';
 import { CARRIER_PRESETS, ensureSku, stockBalances, stockLevel } from '../../src/server/services/stock.js';
 import { createManualClock, SYSTEM_ACTOR, type Actor, type ManualClock } from '../../src/server/types.js';
+import { verifyClaimCode } from '../../src/server/services/claim-codes.js';
+import { withdrawOnCancel } from '../../src/server/services/claim-renewals.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { accountOfTier, createAccount, createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
+import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const HOUR = 3_600_000;
 const MINUTE = 60_000;
@@ -298,6 +300,8 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
         ['order.create', 'RESERVED', null],
         ['order.cancel', 'CANCELLED', 'The client withdrew.'],
       ]);
+      // Its orders are new: the cancellation prepares no hash (plan NEXT LOT §3.4), and no claim code is touched.
+      expect(await t.db.selectFrom('claim_code_renewals').select('id').execute()).toEqual([]);
       const [drawn] = await t.db.selectFrom('orders').selectAll().where('drop_entry_id', '=', drawEntry).execute();
       expect(drawn).toMatchObject({ channel: 'DRAW', drop_id: draw.id, account_id: drawer.id, status: 'RESERVED', sku_id: null, reservation: null });
       // RESERVED when the sale was made (the entry's confirmation, the draw's handling), in their history too; the
@@ -1007,5 +1011,126 @@ describe('orders, the stock and the journal (plan LIVE RELEASE+, S1)', () => {
       await orders().setTerms(o.id, { sizeLabel: '54 mm' }, admin);
       expect(await orderRow(o.id)).toMatchObject({ size_label: '54', sku_id: await sku('54') });
     });
+  });
+});
+
+/**
+ * NEW CLAIM CODE's hook in every cancellation (plan NEXT LOT of 2026-10-07, §3.4, step 4.2): `step()` CANCELLED replaces a
+ * buyer's new claim code (WAITING or READ) by one nobody sees, with the hashes `transition` prepared before its
+ * transaction, for the order and the welcome gift cancelled with it; a code made after the preparation answers 409
+ * ORDER_CHANGED, and nothing changes.
+ */
+describe('a cancellation and the buyer\'s new claim code (plan NEXT LOT §3.4)', () => {
+  let t: TestDb;
+  let ctx: AppContext;
+  let clock: ManualClock;
+  let f: LiveFixture;
+  let admin: Actor;
+  let france: string;
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    clock = createManualClock('2026-11-04T09:00:00.000Z');
+    ctx = await createContext(testConfig(), { db: t.db, clock: clock.now, keyProvider: new MemoryKeyProvider({ env: 'test' }), ensureActiveKey: true });
+    f = await liveFixtureOn(ctx, clock);
+    admin = f.admin;
+    france = (await t.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+  });
+  afterAll(async () => {
+    await ctx.close();
+    await t.close();
+  });
+
+  const productRow = (id: string) => t.db.selectFrom('products').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
+  const kindsOf = async (productUuid: string) =>
+    (await t.db.selectFrom('claim_code_renewals').select(['kind', 'status', 'withdrawn_reason']).where('product_id', '=', productUuid).orderBy('created_at').orderBy('id').execute()).map((r) => [r.kind, r.status, r.withdrawn_reason]);
+
+  /** A piece of `modelId` in `size` (null: one size), issued with its claim code and counted in at FRANCE WAREHOUSE. */
+  async function stockPiece(modelId: string, size: string | null) {
+    const sku = await inTransaction(t.db, (tx) => ensureSku(tx, modelId, size));
+    await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, admin);
+    return ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, ...(size === null ? {} : { variant: size }), material: '925 STERLING SILVER', withClaimSecret: true }, admin);
+  }
+
+  /** A salon order of `buyer` for the piece, priced and sized, the piece linked, RESERVED. */
+  async function reservedOrder(buyer: string, size: string, productId: string) {
+    const request = await t.db.insertInto('shop_requests').values({ account_id: buyer, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
+    clock.advance(60_000);
+    await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
+    const id = (await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).where('channel', '=', 'SALON').executeTakeFirstOrThrow()).id;
+    await ctx.services.orders.setTerms(id, { sizeLabel: size, priceMinor: 300_000, currency: 'EUR' }, admin);
+    await ctx.services.atelier.linkFromStock(id, productId, admin);
+    return id;
+  }
+
+  const renew = async (productId: string) =>
+    ctx.services.claimRenewals.renew(productId, { reason: 'Card lost.', expect: 'SOLD', after: (await ctx.services.claimRenewals.situation(productId)).lastRenewalId }, admin);
+
+  it('a cancellation with a code read rotates the hash; its welcome gift, cancelled with it, rotates its own piece\'s hash too', async () => {
+    // The welcome gift of PLATINE: a model of one size, in stock.
+    const giftModel = await createModel(t.db, 'ANNEAU');
+    const program = await ctx.services.clubProgram.read();
+    await ctx.services.clubProgram.update({ ...program, giftPlatineModelId: giftModel }, admin);
+    const giftPiece = await stockPiece(giftModel, null);
+    const piece = await stockPiece(f.modelId, '52');
+    const buyer = await accountOfTier(f, 2);
+    const parent = await reservedOrder(buyer.id, '52', piece.product.productId);
+    const gift = (await t.db.selectFrom('orders').select('id').where('with_order_id', '=', parent).where('channel', '=', 'GIFT').executeTakeFirstOrThrow()).id;
+    await ctx.services.atelier.linkFromStock(gift, giftPiece.product.productId, admin);
+    // The parent's code read by its buyer; the gift's still waiting.
+    await renew(piece.product.productId);
+    const { claimCode } = await ctx.services.claimRenewals.reveal(buyer.id, parent, buyer.actor);
+    await renew(giftPiece.product.productId);
+    const giftHash = (await productRow(giftPiece.product.id)).claim_secret_hash;
+    clock.advance(60_000);
+    await ctx.services.orders.transition(parent, { to: 'CANCELLED', note: 'The buyer withdrew.' }, admin);
+    expect((await t.db.selectFrom('orders').select('status').where('id', '=', gift).executeTakeFirstOrThrow()).status).toBe('CANCELLED');
+    // The code read no longer registers the piece; the gift's piece has a new hash too.
+    expect(await verifyClaimCode(claimCode, (await productRow(piece.product.id)).claim_secret_hash!)).toBe(false);
+    expect((await productRow(giftPiece.product.id)).claim_secret_hash).not.toBe(giftHash);
+    expect(await kindsOf(piece.product.id)).toEqual([
+      ['BUYER', 'READ', null],
+      ['UNSHOWN', 'UNSHOWN', null],
+    ]);
+    expect(await kindsOf(giftPiece.product.id)).toEqual([
+      ['BUYER', 'WITHDRAWN', 'ORDER_CANCELLED'],
+      ['UNSHOWN', 'UNSHOWN', null],
+    ]);
+    const unshown = await t.db.selectFrom('claim_code_renewals').select(['order_id', 'claim_hash', 'product_id']).where('kind', '=', 'UNSHOWN').where('product_id', 'in', [piece.product.id, giftPiece.product.id]).execute();
+    expect(new Set(unshown.map((u) => u.order_id))).toEqual(new Set([parent, gift]));
+    for (const u of unshown) expect(u.claim_hash).toBe((await productRow(u.product_id)).claim_secret_hash);
+    expect((await ctx.services.claimRenewals.situation(giftPiece.product.productId)).cardNeeded).toBe(true);
+  });
+
+  it('a code made after the preparation answers 409 ORDER_CHANGED, and nothing changes; withdrawOnCancel with no hash prepared refuses a current code', async () => {
+    const piece = await stockPiece(f.modelId, '53');
+    const buyer = await createAccount(t.db);
+    const id = await reservedOrder(buyer.id, '53', piece.product.productId);
+    // A press between `transition`'s preparation (it found nothing) and its transaction.
+    const orders = ctx.services.orders as unknown as { change: (...a: unknown[]) => Promise<void> };
+    const real = orders.change.bind(orders);
+    const spy = vi.spyOn(orders, 'change').mockImplementationOnce(async (...args: unknown[]) => {
+      await renew(piece.product.productId);
+      return real(...args);
+    });
+    try {
+      const e = await ctx.services.orders.transition(id, { to: 'CANCELLED', note: 'The buyer withdrew.' }, admin).catch((x: unknown) => x);
+      expect(e).toBeInstanceOf(DomainError);
+      expect((e as DomainError).code).toBe('ORDER_CHANGED');
+      expect((e as DomainError).httpStatus).toBe(409);
+    } finally {
+      spy.mockRestore();
+    }
+    expect((await t.db.selectFrom('orders').select('status').where('id', '=', id).executeTakeFirstOrThrow()).status).toBe('RESERVED');
+    expect(await kindsOf(piece.product.id)).toEqual([['BUYER', 'WAITING', null]]);
+    const order = await t.db.selectFrom('orders').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
+    await expect(inTransaction(t.db, (tx) => withdrawOnCancel(tx, order, new Map(), admin, clock.now(), []))).rejects.toMatchObject({ code: 'ORDER_CHANGED' });
+    // Tried again: prepared this time.
+    clock.advance(60_000);
+    await ctx.services.orders.transition(id, { to: 'CANCELLED', note: 'The buyer withdrew.' }, admin);
+    expect(await kindsOf(piece.product.id)).toEqual([
+      ['BUYER', 'WITHDRAWN', 'ORDER_CANCELLED'],
+      ['UNSHOWN', 'UNSHOWN', null],
+    ]);
   });
 });

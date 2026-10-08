@@ -568,6 +568,49 @@ describe('END TEST and the tier program', () => {
   });
 });
 
+describe('END TEST and a new claim code (plan NEXT LOT §3.4.8)', () => {
+  let w: World;
+  beforeAll(async () => {
+    w = await world();
+  });
+  afterAll(() => w?.h.close());
+
+  it('END TEST cancels an order whose piece has a waiting code: the code withdrawn, an UNSHOWN code nobody sees, the piece needing a card; the report 5/5', async () => {
+    const admin = w.f.admin;
+    const db = w.h.ctx.db;
+    const france = (await db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    const drop = await openDraw(w, { quantity: 2, opensIn: HOUR, closesIn: 2 * HOUR, earlyAccessHours: 48, priceMinor: 120_000 });
+    const run = await w.tests.start(drop, press(drop, { platine: 1 }, { behaviour: { reservePct: 100, confirmPct: 100 } }), admin);
+    await drive(w, 0);
+    await w.tests.sweep();
+    w.h.clock.advance(61_000);
+    expect(await w.tests.sweep()).toBe(1);
+    const order = await db.selectFrom('orders').select(['id', 'account_id']).where('drop_id', '=', drop).executeTakeFirstOrThrow();
+    // Client Services enters its size and links a piece from the stock; its card is lost: a new code waits for the buyer.
+    const sku = await inTransaction(db, (tx) => ensureSku(tx, w.f.modelId, '52'));
+    await w.h.ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted.' }, admin);
+    const piece = await w.h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: w.f.modelId, variant: '52', material: '925 STERLING SILVER', withClaimSecret: true }, admin);
+    await w.h.ctx.services.orders.setTerms(order.id, { sizeLabel: '52' }, admin);
+    await w.h.ctx.services.atelier.linkFromStock(order.id, piece.product.productId, admin);
+    await w.h.ctx.services.claimRenewals.renew(piece.product.productId, { reason: 'Card lost at the warehouse.', expect: 'SOLD', after: null }, admin);
+    const hash = (await db.selectFrom('products').select('claim_secret_hash').where('id', '=', piece.product.id).executeTakeFirstOrThrow()).claim_secret_hash;
+    // END TEST: through OrderService.transition, the cancellation's hook.
+    w.h.clock.advance(MINUTE);
+    const ended = await w.tests.end(run.id, testPhrase(drop, true), admin);
+    expect(ended.report?.checks.map((c) => [c.id, c.pass])).toEqual([['ONE_ENTRY', true], ['ORDER', true], ['ONE_PLACE', true], ['STOCK', true], ['ORDERS', true]]);
+    expect((await db.selectFrom('orders').select('status').where('id', '=', order.id).executeTakeFirstOrThrow()).status).toBe('CANCELLED');
+    const rows = await db.selectFrom('claim_code_renewals').select(['kind', 'status', 'withdrawn_reason', 'order_id', 'claim_hash']).where('product_id', '=', piece.product.id).orderBy('created_at').orderBy('id').execute();
+    expect(rows.map((r) => [r.kind, r.status, r.withdrawn_reason, r.order_id])).toEqual([
+      ['BUYER', 'WITHDRAWN', 'ORDER_CANCELLED', order.id],
+      ['UNSHOWN', 'UNSHOWN', null, order.id],
+    ]);
+    const after = (await db.selectFrom('products').select('claim_secret_hash').where('id', '=', piece.product.id).executeTakeFirstOrThrow()).claim_secret_hash;
+    expect(after).not.toBe(hash);
+    expect(rows[1]!.claim_hash).toBe(after);
+    expect((await w.h.ctx.services.claimRenewals.situation(piece.product.productId)).cardNeeded).toBe(true);
+  });
+});
+
 describe('a LIVE RELEASE end to end', () => {
   let w: World;
   beforeAll(async () => {

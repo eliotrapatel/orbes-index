@@ -52,6 +52,7 @@ import { formatGrouped, normalizeClaimCode, normalizeCrockford, randomCrockford,
 import { findProduct, loadStatusHistory, requireProduct, returnTargetOf, TRANSITIONS, type LifecycleService, type StatusChange } from './lifecycle.js';
 import { mediaUrl } from './media.js';
 import { deliverOnRegistration, orderReference } from './orders.js';
+import { latestRenewalAt, withdrawWaiting } from './claim-renewals.js';
 import { ensureGrants } from './tier-grants.js';
 import { consumeScanToken, inspectScanToken, TRANSFER_TOKEN_TTL_MS, type ScanTokenFailure, type ScanTokenResult } from './scan-tokens.js';
 import { computeWarrantyStatus, utcDate, type WarrantySummary } from './warranty.js';
@@ -369,6 +370,11 @@ export const transfersPaused = (until: Date) => {
   );
 };
 
+const orderNotFound = () => notFound('Order', 'ORDER_NOT_FOUND');
+/** The steps of an order whose piece its buyer may register from YOUR ORDERS (REGISTER THIS PIECE): shipped or delivered. */
+const REGISTRABLE_ORDER_STATUSES: readonly OrderStatus[] = Object.freeze(['SHIPPED', 'DELIVERED']);
+/** REGISTER THIS PIECE on an order not shipped (its piece not received yet), or not open: the scan's refusal, its detail the order's step. */
+const orderNotRegistrable = (status: OrderStatus) => new DomainError('REGISTRATION_NOT_ALLOWED', 409, 'This product cannot be registered at this time.', { detail: `order ${status}` });
 const alreadyRegistered = () => new DomainError('ALREADY_REGISTERED', 409, 'This product is already registered to an owner.');
 const registrationNotAllowed = (status: ProductStatus) =>
   new DomainError('REGISTRATION_NOT_ALLOWED', 409, 'This product cannot be registered at this time.', { detail: `status ${status}` });
@@ -488,37 +494,95 @@ export class OwnershipService {
       if (!consumed.ok) throw tokenError(consumed.reason);
       if (await this.currentOwnership(tx, p.id)) throw alreadyRegistered();
       if (!(await this.registrable(tx, p))) throw registrationNotAllowed(p.status);
-
-      await tx
-        .insertInto('ownership')
-        .values({ product_id: p.id, account_id: accountId, acquired_via: 'FIRST_REGISTRATION', verified, started_at: now })
-        .execute();
-      // The piece of an order shipped to this buyer, registered by them: the order is DELIVERED (services/orders.ts),
-      // its row locked before any audit entry of this transaction.
-      const delivered = await deliverOnRegistration(tx, p.id, accountId, actor, now);
-      // The tiers' grants this piece may open (plan NEXT-NINE, BP-19 T5), before any audit entry.
-      const granted = await ensureGrants(tx, accountId, now);
-      const ownershipState = ownershipStateFor({ verified }, false);
-      const statusChange = await this.lifecycle.applyForService(
-        tx,
-        p,
-        verified ? 'OWNED' : 'REGISTERED',
-        { reason: 'first registration', via: 'ownership.registerFirst', ownershipState, registrationFromService: true },
-        actor,
-      );
-      await this.audit.record(
-        {
-          actor,
-          action: 'ownership.register',
-          targetType: 'product',
-          targetId: p.product_id,
-          details: { accountId, verified, acquiredVia: 'FIRST_REGISTRATION', scanEventId: consumed.scanEventId },
-        },
-        tx,
-      );
-      for (const n of [...delivered, ...granted]) await this.audit.record(n, tx);
-      return { productId: p.product_id, accountId, acquiredVia: 'FIRST_REGISTRATION', verified, ownershipState, since: now, statusChange };
+      return this.completeFirstRegistration(tx, p, accountId, verified, { scanEventId: consumed.scanEventId }, actor, now);
     });
+  }
+
+  /**
+   * REGISTER THIS PIECE (plan NEXT LOT §3.4, question 10): the buyer registers the piece bound to their order, SHIPPED or
+   * DELIVERED, with the new claim code ORBES Client Services made for it, without a scan (the 79t card carries both
+   * codes: a lost card leaves nothing to scan). As `registerFirst`, the order's piece in place of a scan token: 404
+   * ORDER_NOT_FOUND for another account's order or an unknown one; 409 REGISTRATION_NOT_ALLOWED for an order not shipped
+   * (or not open) and a piece not registrable (its warranty not started, …); 409 ALREADY_REGISTERED; the claim code
+   * checked under the per-piece attempt limit (403 CLAIM_CODE_INVALID, 429). The order goes DELIVERED by itself when it was
+   * SHIPPED. Audited `ownership.register` with `{ via: 'order', orderId }`. The code travels in the request's body only.
+   */
+  async registerFromOrder(accountId: string, orderId: string, claimCode: unknown, actor: Actor): Promise<OwnershipResult> {
+    assertAccountId(accountId);
+    if (typeof orderId !== 'string' || !UUID_RE.test(orderId)) throw orderNotFound();
+    const id = orderId.toLowerCase();
+    if (claimCode !== undefined && claimCode !== null && typeof claimCode !== 'string') throw validationError('Invalid claim code.');
+    if (typeof claimCode !== 'string' || claimCode.trim() === '') throw new DomainError('CLAIM_CODE_REQUIRED', 400, 'This product requires the claim code supplied with it.');
+    await this.requireActiveAccount(this.db, accountId);
+    const order = await this.db.selectFrom('orders').select(['id', 'status', 'product_id']).where('id', '=', id).where('account_id', '=', accountId).executeTakeFirst();
+    if (!order) throw orderNotFound();
+    if (order.product_id === null || !REGISTRABLE_ORDER_STATUSES.includes(order.status)) throw orderNotRegistrable(order.status);
+    const product = await requireProduct(this.db, order.product_id);
+    if (await this.currentOwnership(this.db, product.id)) throw alreadyRegistered();
+    if (!(await this.registrable(this.db, product)) || product.claim_secret_hash === null) throw registrationNotAllowed(product.status);
+    await this.checkClaimCode(product, claimCode, actor);
+
+    return inTransaction(this.db, async (tx) => {
+      const now = this.clock();
+      await this.readActiveAccount(tx, accountId);
+      // The piece before its order (as registerFirst, then deliverOnRegistration).
+      const p = await requireProduct(tx, product.id, { forUpdate: true });
+      if (p.claim_secret_hash !== product.claim_secret_hash) {
+        throw new DomainError('REGISTRATION_CONFLICT', 409, 'The product changed during registration. Please try again.');
+      }
+      const o = await tx.selectFrom('orders').select(['id', 'status', 'product_id', 'account_id']).where('id', '=', id).forUpdate().executeTakeFirst();
+      if (!o || o.account_id !== accountId) throw orderNotFound();
+      if (o.product_id !== p.id || !REGISTRABLE_ORDER_STATUSES.includes(o.status)) throw orderNotRegistrable(o.status);
+      if (await this.currentOwnership(tx, p.id)) throw alreadyRegistered();
+      if (!(await this.registrable(tx, p))) throw registrationNotAllowed(p.status);
+      return this.completeFirstRegistration(tx, p, accountId, true, { via: 'order', orderId: id }, actor, now);
+    });
+  }
+
+  /**
+   * The first registration's writes, in its transaction, the piece held and checked: the ownership, its order DELIVERED
+   * (when SHIPPED), a buyer's new claim code still waiting withdrawn (plan NEXT LOT §3.4: REGISTERED, a safety net), the
+   * tiers' grants, the piece's status, and its audit entries last.
+   */
+  private async completeFirstRegistration(
+    tx: Db,
+    p: ProductRow,
+    accountId: string,
+    verified: boolean,
+    via: { scanEventId: string } | { via: 'order'; orderId: string },
+    actor: Actor,
+    now: Date,
+  ): Promise<OwnershipResult> {
+    await tx
+      .insertInto('ownership')
+      .values({ product_id: p.id, account_id: accountId, acquired_via: 'FIRST_REGISTRATION', verified, started_at: now })
+      .execute();
+    // The piece of an order shipped to this buyer, registered by them: the order is DELIVERED (services/orders.ts),
+    // its row locked before any audit entry of this transaction.
+    const delivered = await deliverOnRegistration(tx, p.id, accountId, actor, now);
+    const withdrawn = await withdrawWaiting(tx, p.id, 'REGISTERED', actor, now);
+    // The tiers' grants this piece may open (plan NEXT-NINE, BP-19 T5), before any audit entry.
+    const granted = await ensureGrants(tx, accountId, now);
+    const ownershipState = ownershipStateFor({ verified }, false);
+    const statusChange = await this.lifecycle.applyForService(
+      tx,
+      p,
+      verified ? 'OWNED' : 'REGISTERED',
+      { reason: 'first registration', via: 'ownership.registerFirst', ownershipState, registrationFromService: true },
+      actor,
+    );
+    await this.audit.record(
+      {
+        actor,
+        action: 'ownership.register',
+        targetType: 'product',
+        targetId: p.product_id,
+        details: { accountId, verified, acquiredVia: 'FIRST_REGISTRATION', ...via },
+      },
+      tx,
+    );
+    for (const n of [...delivered, ...withdrawn, ...granted]) await this.audit.record(n, tx);
+    return { productId: p.product_id, accountId, acquiredVia: 'FIRST_REGISTRATION', verified, ownershipState, since: now, statusChange };
   }
 
   /**
@@ -1067,7 +1131,10 @@ export class OwnershipService {
     const failed = await inTransaction(this.db, async (tx) => {
       const p = await requireProduct(tx, product.id, { forUpdate: true });
       const now = this.clock();
-      const since = new Date(now.getTime() - CLAIM_ATTEMPT_WINDOW_MS);
+      // Plan NEXT LOT §3.4: a new claim code starts with fresh attempts; the failures before it no longer count.
+      const window = new Date(now.getTime() - CLAIM_ATTEMPT_WINDOW_MS);
+      const renewed = await latestRenewalAt(tx, p.id);
+      const since = renewed && renewed > window ? renewed : window;
       const recent = await tx
         .selectFrom('audit_logs')
         .select((eb) => eb.fn.countAll<number>().as('n'))

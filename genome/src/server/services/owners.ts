@@ -75,7 +75,7 @@
  */
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { AccountStatus, AcquiredVia, ClientConversationStatus, JsonObject, OwnershipState, ProductStatus, ReportChannel, TransferStatus } from '../db/schema.js';
+import type { AccountStatus, AcquiredVia, ClaimRenewalStatus, ClientConversationStatus, JsonObject, OwnershipState, ProductStatus, ReportChannel, TransferStatus } from '../db/schema.js';
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import { makePage, pageOffset, systemClock, type Actor, type ActorType, type Clock, type Page, type PageRequest } from '../types.js';
 import { recoveryThrottledUntil } from './account-recovery.js';
@@ -95,6 +95,7 @@ import { participatedReleases, releasesTakenPart } from './participation.js';
 import { accountReleaseAnswers, type ExportedReleaseAnswer } from './question.js';
 import { memberSegments } from './segments.js';
 import { accountOrders, orderReference, type ExportedOrder } from './orders.js';
+import { accountClaimCodes } from './claim-renewals.js';
 import type { OwnershipService } from './ownership.js';
 import { accountShopRequests, auditClosedShopRequests, closeAccountShopRequests, type ExportedShopRequest } from './salon.js';
 import { accountCertificates, auditWithdrawnCertificates, withdrawAccountCertificates, type AccountCertificate } from './ownership-certificates.js';
@@ -420,6 +421,11 @@ export interface AccountExport {
   guarantees: ExportedGuarantee[];
   /** The sizes the account saved in YOUR SIZES (plan NEXT-NINE, AC-01): each kind's value in its unit, and when it was saved. */
   sizes: ExportedSize[];
+  /**
+   * The new claim codes ORBES Client Services made for the account's orders (plan NEXT LOT §3.4), oldest first: the
+   * order, when it was made, where it stands and when it was read; never the code, sealed or clear, nor who made it.
+   */
+  claimCodes: { order: string; madeAt: Date; status: ClaimRenewalStatus; readAt: Date | null }[];
   /**
    * The tiers' grants of the account (plan NEXT-NINE, BP-19 T5), oldest first: each welcome GIFT (its model once an
    * order carries it) and each CREDIT with its amount, currency, expiry, balance and uses (the order, the amount, when
@@ -887,6 +893,7 @@ export class OwnerService {
       const careRequests = await accountCareRequests(tx, a.id);
       const guarantees = await exportedGuarantees(tx, a.id);
       const sizes = await exportedSizes(tx, a.id);
+      const claimCodes = await accountClaimCodes(tx, a.id);
       const tierGrants = await accountTierGrants(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
       // declared, transfers, reports on scans). audit_logs has no index on the actor, so this reads the whole log:
@@ -972,6 +979,7 @@ export class OwnerService {
         careRequests,
         guarantees,
         sizes,
+        claimCodes,
         tierGrants,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
           occurredAt: e.occurred_at,
@@ -1010,6 +1018,7 @@ export class OwnerService {
             careRequests: out.careRequests.length,
             guarantees: out.guarantees.length,
             sizes: out.sizes.length,
+            claimCodes: out.claimCodes.length,
             tierGrants: out.tierGrants.length,
             activity: out.activity.length,
             ...(truncated.length ? { truncated } : {}),

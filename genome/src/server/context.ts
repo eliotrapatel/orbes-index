@@ -35,6 +35,7 @@ import { AuthService, deriveTotpEncryptionKey } from './services/auth.js';
 import { CatalogService } from './services/catalog.js';
 import { CategoryRegistry } from './services/categories.js';
 import { CertificateService } from './services/certificates.js';
+import { ClaimRenewalService, deriveClaimRevealKey } from './services/claim-renewals.js';
 import { CircleService } from './services/circle.js';
 import { ClubService } from './services/club.js';
 import { ClubProgramService } from './services/club-program.js';
@@ -158,6 +159,8 @@ export interface AppServices {
   sizes: SizeService;
   /** GROWTH (plan NEXT-NINE, BP-29): what a collector is worth, repeat buying, the funnel from a scan to PALLADIUM, the revenue; reads only. */
   growth: GrowthService;
+  /** NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code for a piece not registered yet, shown once to staff or sealed for its buyer. */
+  claimRenewals: ClaimRenewalService;
 }
 
 export interface AppContext {
@@ -275,6 +278,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const guarantees = new GuaranteeService({ db, audit, clock });
     const sizes = new SizeService({ db, audit, clock });
     const growth = new GrowthService({ db, clock });
+    const claimRenewals = new ClaimRenewalService({ db, audit, certificates, revealKey: deriveClaimRevealKey(config), clock });
 
     const services: AppServices = {
       issuance,
@@ -320,6 +324,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       guarantees,
       sizes,
       growth,
+      claimRenewals,
       ...overrides.services,
     };
 

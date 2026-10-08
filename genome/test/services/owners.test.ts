@@ -503,3 +503,50 @@ describe('OwnerService', () => {
     expect(byRef.items).toHaveLength(1);
   });
 });
+
+/**
+ * The right of access and NEW CLAIM CODE (plan NEXT LOT of 2026-10-07, §3.4): the export lists the new claim codes made
+ * for the account's orders (the order, when, the status, when read), and the reading in its activity; never the code.
+ */
+describe('the export and the new claim codes (plan NEXT LOT §3.4)', () => {
+  it('lists each new claim code of the account\'s orders, its reading in the activity, never the code', async () => {
+    const { createContext } = await import('../../src/server/context.js');
+    const { MemoryKeyProvider } = await import('../../src/server/keys/memory-provider.js');
+    const { inTransaction } = await import('../../src/server/db/connection.js');
+    const { ensureSku } = await import('../../src/server/services/stock.js');
+    const { orderReference } = await import('../../src/server/services/orders.js');
+    const { createAccount, liveFixtureOn } = await import('../support/live.js');
+    const t = await createTestDb();
+    const clock = createManualClock('2026-11-05T09:00:00.000Z');
+    const ctx = await createContext(testConfig(), { db: t.db, clock: clock.now, keyProvider: new MemoryKeyProvider({ env: 'test' }), ensureActiveKey: true });
+    try {
+      const f = await liveFixtureOn(ctx, clock);
+      const france = (await t.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+      const sku = await inTransaction(t.db, (tx) => ensureSku(tx, f.modelId, '52'));
+      await ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, f.admin);
+      const piece = await ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '52', material: '925 STERLING SILVER', withClaimSecret: true }, f.admin);
+      const buyer = await createAccount(t.db);
+      const request = await t.db.insertInto('shop_requests').values({ account_id: buyer.id, model_id: f.modelId, created_at: clock.now() }).returning('id').executeTakeFirstOrThrow();
+      await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
+      const orderId = (await t.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+      await ctx.services.orders.setTerms(orderId, { sizeLabel: '52', priceMinor: 300_000, currency: 'EUR' }, f.admin);
+      await ctx.services.atelier.linkFromStock(orderId, piece.product.productId, f.admin);
+      clock.advance(60_000);
+      const made = clock.now();
+      await ctx.services.claimRenewals.renew(piece.product.productId, { reason: 'Card lost.', expect: 'SOLD', after: null }, f.admin);
+      clock.advance(60_000);
+      const { claimCode } = await ctx.services.claimRenewals.reveal(buyer.id, orderId, buyer.actor);
+      const x = await ctx.services.owners.exportData(buyer.id, f.admin);
+      expect(x.claimCodes).toEqual([{ order: orderReference(orderId), madeAt: made, status: 'READ', readAt: clock.now() }]);
+      expect(x.activity.filter((a) => a.action === 'claim_code.read')).toEqual([{ occurredAt: clock.now(), action: 'claim_code.read', by: 'account', productId: piece.product.productId, reference: null, status: null }]);
+      const text = JSON.stringify(x);
+      expect(text).not.toContain(claimCode);
+      expect(text).not.toContain(claimCode.replace(/-/g, ''));
+      const audit = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'account.export').executeTakeFirstOrThrow();
+      expect(audit.details).toMatchObject({ claimCodes: 1 });
+    } finally {
+      await ctx.close();
+      await t.close();
+    }
+  });
+});

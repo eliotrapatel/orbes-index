@@ -69,6 +69,11 @@ export interface CertificateRenderOptions {
   format?: CertificateFormat;
   /** PDF only: 'card' (default, one 95 × 62 mm page per card) or 'sheet' (A4, eight cards). */
   layout?: CertificateLayout;
+  /**
+   * A buyer's new card (plan NEXT LOT §3.4, ClaimRenewalService.buyerCard): its order, written with `by: 'buyer'` into the
+   * audit entries (`certificate.render`, `certificate.render_refused`).
+   */
+  context?: { orderId: string; by: 'buyer' };
 }
 
 export interface CertificateServiceDeps {
@@ -131,7 +136,7 @@ export class CertificateService {
         throw validationError('Each item needs a productId and a claimCode.');
       }
     }
-    const shape = format === 'pdf' ? { format, layout } : { format };
+    const shape = { ...(format === 'pdf' ? { format, layout } : { format }), ...(opts.context ? { orderId: opts.context.orderId, by: opts.context.by } : {}) };
 
     // Claimed before the first await, so two concurrent requests of one admin cannot both pass.
     const key = actorKey(actor);
@@ -148,7 +153,7 @@ export class CertificateService {
     items: readonly CertificateRequestItem[],
     format: CertificateFormat,
     layout: CertificateLayout,
-    shape: { format: CertificateFormat; layout?: CertificateLayout },
+    shape: { format: CertificateFormat; layout?: CertificateLayout; orderId?: string; by?: 'buyer' },
     actor: Actor,
   ): Promise<RenderedCertificates> {
     const found: string[] = [];
