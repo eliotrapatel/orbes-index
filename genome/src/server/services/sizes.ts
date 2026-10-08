@@ -53,6 +53,7 @@ import { badRequest, conflict, forbidden, notFound, validationError } from '../e
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { compareSizes, ensureSku, ONE_SIZE_LABEL, sizeLabelOf, stockLevel } from './stock.js';
+import { modelSupplier, type ModelSupplier } from './suppliers.js';
 
 export { SIZE_KINDS, SIZE_TYPES, type SizeKind, type SizeType };
 
@@ -138,6 +139,8 @@ export interface ModelSizes {
   /** How many are offered, and how many set aside. */
   offered: number;
   setAside: number;
+  /** Its supplier, a variant's main model's when it has none, and its sizes' own (plan NEXT LOT §3.5.4.5). */
+  supplier: ModelSupplier;
 }
 
 /** A model's offered size (offeredSizes): its SKU, its label (null: ONE SIZE) and its code. */
@@ -642,7 +645,7 @@ export class SizeService {
       .where('m.id', '=', id)
       .executeTakeFirst();
     if (!m) throw modelNotFound();
-    const sizes = await declaredSizes(this.db, id);
+    const [sizes, supplier] = await Promise.all([declaredSizes(this.db, id), modelSupplier(this.db, id)]);
     const setAside = sizes.filter((z) => z.setAsideAt !== null).length;
     return {
       modelId: m.id,
@@ -653,6 +656,7 @@ export class SizeService {
       sizes,
       offered: sizes.length - setAside,
       setAside,
+      supplier,
     };
   }
 

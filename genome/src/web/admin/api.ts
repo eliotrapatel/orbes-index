@@ -120,6 +120,9 @@ import type {
   ModelSizeRemoved,
   ModelSizes,
   ModelSizesChange,
+  ModelSupplierChange,
+  Supplier,
+  SupplierInput,
   SizeType,
   VariantInput,
   OwnerList,
@@ -567,6 +570,28 @@ export class AdminApi {
   /** Plan NEXT LOT §3.3, OPERATOR: one size taken off a model: removed when nothing uses it, otherwise set aside. */
   removeModelSize(id: string, skuId: string): Promise<ModelSizeRemoved> {
     return this.post(`/api/admin/models/${encodeURIComponent(id)}/sizes/${encodeURIComponent(skuId)}/remove`, {});
+  }
+
+  /** Plan NEXT LOT §3.5.4.5, OPERATOR: a model's supplier and its sizes' own; answers its Sizes section. */
+  setModelSupplier(id: string, change: ModelSupplierChange): Promise<ModelSizes> {
+    return this.request('PUT', `/api/admin/models/${encodeURIComponent(id)}/supplier`, { body: change });
+  }
+
+  // ── Suppliers (plan NEXT LOT §3.5.6.2) ───────────────────────────────────
+
+  /** AUDITOR: every supplier, by name. */
+  suppliers(): Promise<Items<Supplier>> {
+    return this.get('/api/admin/suppliers');
+  }
+
+  /** OPERATOR. */
+  createSupplier(input: SupplierInput): Promise<Supplier> {
+    return this.post('/api/admin/suppliers', input);
+  }
+
+  /** OPERATOR: the fields given changed, or the supplier set inactive. */
+  updateSupplier(id: string, change: SupplierInput): Promise<Supplier> {
+    return this.patch(`/api/admin/suppliers/${encodeURIComponent(id)}`, change);
   }
 
   /** Plan NEXT LOT §3.3, OPERATOR: a set-aside size offered again. */

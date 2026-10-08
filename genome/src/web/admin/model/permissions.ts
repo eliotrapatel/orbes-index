@@ -99,6 +99,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   printWorkSheets: 'OPERATOR',
   /** The settings of the orders: the delays after which an order is late, the locations, the carriers and their tracking links, the shipping rates. */
   manageLogistics: 'ADMIN',
+  /** Supplier orders (plan NEXT LOT §3.5.4.2): the suppliers added and changed, a model's supplier set; never LOGISTICS. */
+  manageSupplierOrders: 'OPERATOR',
   /**
    * Logistics (plan NEXT LOT §3.5.6.1): act on the receptions, the packing and shipping, the returns received. Exactly
    * CAPABILITY_ROLES.logistics: the agent (LOGISTICS), OPERATOR and ADMIN.

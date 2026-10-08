@@ -102,6 +102,7 @@ import {
   variantSizesLine,
   VARIANT_IMPACT,
 } from '../model/sizes.js';
+import { MODEL_SUPPLIER_TEXT, modelSupplierChange, sizeSupplierField, sizeSupplierText, supplierLine, supplierOptions } from '../model/suppliers.js';
 import { toneOf } from '../model/tone.js';
 import { dotChange, dotFormValues, dotProblem, keepsLabel, proposeVariantPrefix, VARIANT_LABEL_MAX, variantFormValues, variantInput, variantProblem } from '../model/variants.js';
 import { href } from '../router.js';
@@ -400,10 +401,44 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
     }
     return h('span', { class: 'row-actions' }, ...buttons);
   };
+  // The supplier of the model and of each size (plan NEXT LOT §3.5.4.5): a size without its own uses the model's.
+  const canSupply = can(role, 'manageSupplierOrders');
+  const editSupplier = async () => {
+    let suppliers;
+    try {
+      suppliers = (await ctx.api.suppliers()).items;
+    } catch (e) {
+      notifyError(e, 'The suppliers could not be loaded.');
+      return;
+    }
+    const chosen = [sizing.supplier.own?.id, ...Object.values(sizing.supplier.sizes).map((x) => x.id)];
+    void openDialog({
+      title: MODEL_SUPPLIER_TEXT.title,
+      eyebrow,
+      body: h('p', { class: 'dialog__text' }, MODEL_SUPPLIER_TEXT.text),
+      fields: [
+        { name: 'supplier', label: 'Supplier', kind: 'select', options: supplierOptions(suppliers, chosen, MODEL_SUPPLIER_TEXT.modelOption), value: sizing.supplier.own?.id ?? '' },
+        ...sizing.sizes.map((r) => ({
+          name: sizeSupplierField(r.skuId),
+          label: `${sizeText(r.label)} · ${r.code}`,
+          kind: 'select' as const,
+          options: supplierOptions(suppliers, chosen, MODEL_SUPPLIER_TEXT.sizeOption),
+          value: sizing.supplier.sizes[r.skuId]?.id ?? '',
+        })),
+      ],
+      validate: (v) => (modelSupplierChange(sizing, v) ? null : MODEL_SUPPLIER_TEXT.unchanged),
+      confirmLabel: 'Save supplier',
+      submit: async (v) => {
+        await ctx.api.setModelSupplier(m.id, modelSupplierChange(sizing, v)!);
+      },
+    }).then(done(MODEL_SUPPLIER_TEXT.saved));
+  };
+  const supplierRow = supplierLine(sizing.supplier);
   const sizeColumns: Column<ModelSizeRow>[] = [
     { label: 'Size', cell: (r) => h('span', { data: { testid: 'model-size-label' } }, sizeText(r.label)), kind: ['nowrap'] },
     { label: 'SKU', cell: (r) => mono(r.code), kind: ['nowrap'] },
     { label: 'Fits', cell: (r) => h('span', { data: { testid: 'model-size-fits' } }, fitsText(kind, r)) },
+    { label: 'Supplier', cell: (r) => h('span', { data: { testid: 'model-size-supplier' } }, sizeSupplierText(sizing.supplier, r)) },
     { label: 'State', cell: (r) => h('span', { data: { testid: 'model-size-state' } }, sizeState(type, r)) },
     { label: 'Actions', kind: ['actions'], cell: sizeActions },
   ];
@@ -425,6 +460,15 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
           ),
         },
         ...(sizing.sizes.length ? [{ label: 'Sizes', value: h('span', { data: { testid: 'model-sizes-count' } }, sizesCountLine(sizing)) } as const] : []),
+        {
+          label: 'Supplier',
+          value: h(
+            'span',
+            null,
+            h('span', { data: { testid: 'model-supplier' } }, supplierRow.value),
+            supplierRow.note ? h('span', { class: 'deflist__note', data: { testid: 'model-supplier-note' } }, supplierRow.note) : null,
+          ),
+        },
       ]),
       warning ? h('p', { class: 'panel__text', data: { testid: 'model-sizes-off-list' } }, warning) : null,
       sizing.sizes.length
@@ -437,6 +481,7 @@ export async function lookbookView(ctx: ViewContext): Promise<HTMLElement> {
         ? [
             button('Edit size type', { kind: 'ghost', testId: 'model-size-kind-edit', onClick: editType }),
             ...(canTick(sizing) ? [button('Tick sizes', { kind: 'ghost', testId: 'model-sizes-tick', onClick: tickSizes })] : []),
+            ...(canSupply ? [button('Edit supplier', { kind: 'ghost', testId: 'model-supplier-edit', onClick: () => void editSupplier() })] : []),
           ]
         : [],
     },

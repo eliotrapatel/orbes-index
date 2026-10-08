@@ -91,6 +91,7 @@ import { ANALYTICS_MAX_DAYS, daySpan } from '../services/scan-stats.js';
 import { BOARD_SEARCH_MAX, ORDER_ALERT_LIMITS } from '../services/fulfilment.js';
 import { ORDER_AMOUNT_MAX_MINOR, ORDER_CURRENCIES, ORDER_TEXT_LIMITS } from '../services/orders.js';
 import { CARRIER_NAME_MAX, LOCATION_NAME_MAX, STOCK_MOVE_MAX, STOCK_NOTE_MAX, TRACKING_URL_MAX } from '../services/stock.js';
+import { SUPPLIER_LIMITS } from '../services/suppliers.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -1605,6 +1606,44 @@ export const updateCarrierBody = body({ name: text(CARRIER_NAME_MAX).optional(),
   (b) => Object.values(b).some((v) => v !== undefined),
   'Send at least one field of the carrier to change',
 );
+
+// ── Admin: the suppliers (routes/admin/supplier-orders.ts, plan NEXT LOT §3.5.6.2) ─
+
+export const supplierParams = z.object({ id: uuid });
+
+/** A supplier's optional field: '' or null clears it (SupplierService checks its bounds again, and the currency's decimals). */
+const supplierText = (max: number) => z.preprocess(emptyToNull, text(max).nullable().optional());
+
+const supplierFields = {
+  contactName: supplierText(SUPPLIER_LIMITS.contactName),
+  email: supplierText(SUPPLIER_LIMITS.email),
+  phone: supplierText(SUPPLIER_LIMITS.phone),
+  address: supplierText(SUPPLIER_LIMITS.address),
+  currency: z.preprocess(emptyToNull, z.string().trim().max(3, 'A three-letter code, such as EUR').nullable().optional()),
+  note: supplierText(SUPPLIER_LIMITS.note),
+  active: z.boolean().optional(),
+};
+
+/** POST /api/admin/suppliers: its name, and its contact, currency, note and state when given. */
+export const createSupplierBody = body({ name: text(SUPPLIER_LIMITS.name), ...supplierFields });
+
+/** PATCH /api/admin/suppliers/:id: the fields to change (null or '' clears an optional one). At least one. */
+export const updateSupplierBody = body({ name: text(SUPPLIER_LIMITS.name).optional(), ...supplierFields }).refine(
+  (b) => Object.values(b).some((v) => v !== undefined),
+  'Send at least one field of the supplier to change',
+);
+
+/**
+ * PUT /api/admin/models/:id/supplier: the model's supplier (null: none) and its sizes' own, by SKU id (null: the
+ * model's); a size not listed is left as it is. At least one.
+ */
+export const modelSupplierBody = body({
+  supplierId: uuid.nullable().optional(),
+  sizes: z
+    .record(z.string(), uuid.nullable())
+    .refine((r) => Object.keys(r).length <= 200, 'At most 200 sizes')
+    .optional(),
+}).refine((b) => b.supplierId !== undefined || b.sizes !== undefined, 'Send the supplier or the sizes\' suppliers');
 
 // ── Admin: the atelier (routes/admin/atelier.ts) ──────────────────────────
 

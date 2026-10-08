@@ -11,7 +11,9 @@
  *  3. ADD A VARIANT says which sizes it copies, and the variant's page has them under its own prefix.
  *  4. A LIVE RELEASE's sizes (the variant's, nothing in stock): the size mix names the model's sizes, and an undeclared
  *     size is refused with them.
- *  5. An AUDITOR reads the section, without one action.
+ *  5. The suppliers added on Supplier orders (plan NEXT LOT §3.5.4.2), a currency without cents refused; the model's
+ *     supplier and a size's own set from its Sizes section (§3.5.4.5).
+ *  6. An AUDITOR reads the section, without one action.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -323,6 +325,55 @@ describe.skipIf(!HAS_CHROMIUM)('a model\'s declared sizes in the console (plan N
     await expect.poll(() => p.locator('dialog .dialog__error').textContent(), { timeout: 15_000 }).toBe('Size 53 is not one of HALO · BLUE’s sizes (50, 52). Add it on the model’s page, in the Catalogue.');
     await shot(p, 'live-refused', { dialog: true });
     await p.click('[data-testid=dialog-cancel]');
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('adds the suppliers on Supplier orders (plan NEXT LOT §3.5.4.2), then gives the model its supplier and a size its own (§3.5.4.5)', async () => {
+    const p = await open(ADMIN);
+    await p.locator('.side__link', { hasText: 'Supplier orders' }).click();
+    await expect.poll(async () => (await p.locator('h1.page-head__title').textContent())?.trim()).toBe('Supplier orders');
+    expect(await p.locator('#suppliers .empty').textContent()).toContain('No supplier yet: add the first one.');
+    await shot(p, 'suppliers-empty');
+    // A currency without cents is refused, in the dialog.
+    await p.click('[data-testid=supplier-create]');
+    await p.fill('dialog input[name=name]', 'NORD RINGS');
+    await p.fill('dialog input[name=contactName]', 'A. Martin');
+    await p.fill('dialog input[name=email]', 'orders@nord.example');
+    await p.fill('dialog input[name=currency]', 'jpy');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('This currency is not supported: choose one with cents.');
+    await p.fill('dialog input[name=currency]', 'eur');
+    await shot(p, 'supplier-dialog', { dialog: true });
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Supplier added.")');
+    await p.click('[data-testid=supplier-create]');
+    await p.fill('dialog input[name=name]', 'SOUTH SETTINGS');
+    await p.fill('dialog input[name=currency]', 'GBP');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('#suppliers tbody tr').count()).toBe(2);
+    expect(await p.locator('#suppliers tbody tr').first().textContent()).toContain('orders@nord.example');
+
+    // The model's Sizes section: no supplier yet; the model's and one size's own set in one dialog.
+    await go(p, `#/catalogue/${modelId}`, 'HALO · SILVER');
+    expect(await p.locator('#sizes [data-testid=model-supplier]').textContent()).toBe('No supplier yet.');
+    expect(await p.locator('#sizes [data-testid=model-size-supplier]').allTextContents()).toEqual(['', '']);
+    await p.click('[data-testid=model-supplier-edit]');
+    const size52 = (await ctx.db.selectFrom('skus').select('id').where('code', '=', 'HAL-RG-52').executeTakeFirstOrThrow()).id;
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('Nothing has changed.');
+    await p.selectOption('dialog select[name=supplier]', { label: 'NORD RINGS' });
+    await p.selectOption(`dialog select[name=size_${size52}]`, { label: 'SOUTH SETTINGS' });
+    await shot(p, 'model-supplier-dialog', { dialog: true });
+    await confirmDialog(p);
+    await p.waitForSelector('.toast:has-text("Supplier saved.")');
+    await expect.poll(() => p.locator('#sizes [data-testid=model-supplier]').textContent()).toBe('NORD RINGS');
+    expect(await p.locator('#sizes [data-testid=model-size-supplier]').allTextContents()).toEqual(['', 'SOUTH SETTINGS']);
+    await shot(p, 'model-supplier');
+    await go(p, '#/supplier-orders', 'Supplier orders');
+    expect(await p.locator('#suppliers tbody tr', { hasText: 'NORD RINGS' }).locator('td:nth-child(4)').textContent()).toBe('1');
+    await shot(p, 'suppliers');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
     expect(await csp(p)).toEqual([]);
     await p.context().close();
   }, STEP_TIMEOUT);

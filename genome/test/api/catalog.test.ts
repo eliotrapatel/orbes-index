@@ -255,4 +255,24 @@ describe('the editable catalogue (A-10)', () => {
     const created = (await h.ctx.audit.list({ action: 'model.create', targetId: ring.id })).items[0]!;
     expect(created.details).toMatchObject({ skuPrefix: 'API-RG', sizeType: 'RING' });
   });
+
+  it('a model\'s Sizes section names its supplier (plan NEXT LOT §3.5.4.5): none at first; set by an OPERATOR with a size\'s own; a variant without its own reads its main model\'s', async () => {
+    const main = (safeJson(await operator.post('/api/admin/models', { categoryCode: 'J', name: 'HALO', type: 'RING', skuPrefix: 'SUP-HALO', sizeType: 'RING' })) as ModelJson).id;
+    expect((await operator.request('PUT', `/api/admin/models/${main}/sizes`, { body: { ticked: ['52', '54'] } })).statusCode).toBe(200);
+    const sizes = (id: string) => auditor.get(`/api/admin/models/${id}/sizes`).then((r) => safeJson(r) as { sizes: { skuId: string; label: string }[]; supplier: unknown });
+    expect((await sizes(main)).supplier).toEqual({ own: null, inherited: null, sizes: {} });
+    const supplier = safeJson(await operator.post('/api/admin/suppliers', { name: 'Halo Works', currency: 'EUR' })) as { id: string };
+    const other = safeJson(await operator.post('/api/admin/suppliers', { name: 'Halo Settings', currency: 'EUR' })) as { id: string };
+    const size54 = (await sizes(main)).sizes.find((z) => z.label === '54')!.skuId;
+    const put = await operator.request('PUT', `/api/admin/models/${main}/supplier`, { body: { supplierId: supplier.id, sizes: { [size54]: other.id } } });
+    expect(put.statusCode, put.body).toBe(200);
+    expect((safeJson(put) as { supplier: unknown }).supplier).toEqual({
+      own: { id: supplier.id, name: 'Halo Works', active: true },
+      inherited: null,
+      sizes: { [size54]: { id: other.id, name: 'Halo Settings', active: true } },
+    });
+    const variant = safeJson(await operator.post(`/api/admin/models/${main}/variants`, { label: 'Blue', swatch: '#1F3A6B', skuPrefix: 'SUP-HALO-BL', mainLabel: 'Steel', mainSwatch: '#C9CCD1' })) as { id: string };
+    expect((await sizes(variant.id)).supplier).toEqual({ own: null, inherited: { id: supplier.id, name: 'Halo Works', active: true, from: 'HALO' }, sizes: {} });
+    expect((await auditor.request('PUT', `/api/admin/models/${main}/supplier`, { body: { supplierId: null } })).statusCode).toBe(403);
+  });
 });

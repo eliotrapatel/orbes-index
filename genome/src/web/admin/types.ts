@@ -2158,6 +2158,57 @@ export interface ModelSizes {
   sizes: ModelSizeRow[];
   offered: number;
   setAside: number;
+  /** Its supplier, a variant's main model's when it has none, and its sizes' own (plan NEXT LOT §3.5.4.5). */
+  supplier: ModelSupplier;
+}
+
+// ── SUPPLIERS (plan NEXT LOT §3.5.6.2) ─────────────────────────────────────
+
+/** A supplier named on a model's page. */
+export interface SupplierRef {
+  id: string;
+  name: string;
+  active: boolean;
+}
+
+/** A model's supplier: its own, or a variant's main model's; and each size's own, by SKU id (absent: the model's). */
+export interface ModelSupplier {
+  own: SupplierRef | null;
+  inherited: (SupplierRef & { from: string }) | null;
+  sizes: Record<string, SupplierRef>;
+}
+
+/** GET /api/admin/suppliers: a supplier, with how many models name it. */
+export interface Supplier {
+  id: string;
+  name: string;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  address: string | null;
+  currency: string | null;
+  note: string | null;
+  active: boolean;
+  models: number;
+  createdAt: Iso;
+}
+
+/** POST /api/admin/suppliers and PATCH …/:id: the fields given (null or '' clears an optional one). */
+export interface SupplierInput {
+  name?: string;
+  contactName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  currency?: string | null;
+  note?: string | null;
+  active?: boolean;
+}
+
+/** PUT /api/admin/models/:id/supplier: the model's supplier (null: none) and its sizes' own by SKU id (null: the model's). */
+export interface ModelSupplierChange {
+  supplierId?: string | null;
+  sizes?: Record<string, string | null>;
 }
 
 /** PUT /api/admin/models/:id/sizes: its size type, the sizes ticked, its kind (a model with no type; null: none), its sizes' fits. */

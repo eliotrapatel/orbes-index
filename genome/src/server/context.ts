@@ -76,6 +76,7 @@ import { aggregateScanStats } from './services/scan-stats.js';
 import { purgeScanTokens } from './services/scan-tokens.js';
 import { SessionService } from './services/sessions.js';
 import { StockService } from './services/stock.js';
+import { SupplierService } from './services/suppliers.js';
 import { VerificationService } from './services/verification.js';
 import { WarrantyService } from './services/warranty.js';
 import { noopLogger, SYSTEM_ACTOR, systemClock, type Clock, type Logger } from './types.js';
@@ -157,6 +158,8 @@ export interface AppServices {
   guarantees: GuaranteeService;
   /** YOUR SIZES (plan NEXT-NINE, AC-01): the sizes a collector saves, which preselect a size it then confirms; a model's size kind and fits. */
   sizes: SizeService;
+  /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
+  suppliers: SupplierService;
   /** GROWTH (plan NEXT-NINE, BP-29): what a collector is worth, repeat buying, the funnel from a scan to PALLADIUM, the revenue; reads only. */
   growth: GrowthService;
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code for a piece not registered yet, shown once to staff or sealed for its buyer. */
@@ -277,6 +280,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const care = new CareService({ db, audit, warranty, clock });
     const guarantees = new GuaranteeService({ db, audit, clock });
     const sizes = new SizeService({ db, audit, clock });
+    const suppliers = new SupplierService({ db, audit, clock });
     const growth = new GrowthService({ db, clock });
     const claimRenewals = new ClaimRenewalService({ db, audit, certificates, revealKey: deriveClaimRevealKey(config), clock });
 
@@ -323,6 +327,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       care,
       guarantees,
       sizes,
+      suppliers,
       growth,
       claimRenewals,
       ...overrides.services,

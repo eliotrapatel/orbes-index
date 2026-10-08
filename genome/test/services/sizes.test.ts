@@ -224,6 +224,8 @@ describe('YOUR SIZES (AC-01)', () => {
       sizes: [row(expect.any(String), null), row(sku52, '52'), row(sku54, '54')],
       offered: 3,
       setAside: 0,
+      // Plan NEXT LOT §3.5.4.5: no supplier yet, nor any size's own.
+      supplier: { own: null, inherited: null, sizes: {} },
     });
     const save = (body: unknown) => operator.request('PUT', `/api/admin/models/${other.modelId}/sizes`, { body });
     let res = await save({ sizeKind: 'RING', fits: [{ skuId: sku54, fitMinMm: 53, fitMaxMm: 55 }] });

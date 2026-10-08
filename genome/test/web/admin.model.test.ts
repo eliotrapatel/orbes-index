@@ -333,6 +333,7 @@ import {
   scanReference,
   triageMoves,
 } from '../../src/web/admin/model/registry.js';
+import { contactLines, MODEL_SUPPLIER_TEXT, modelSupplierChange, sizeSupplierField, sizeSupplierText, SUPPLIER_ORDERS_TEXT, supplierFormValues, supplierInputOf, supplierLine, supplierOptions } from '../../src/web/admin/model/suppliers.js';
 import { adminState, deviceLabel, initialLocations, LOCATIONS_REQUIRED, locationNames, locationsProblem, newPasswordProblem, PASSWORD_MIN_LENGTH, teamActions } from '../../src/web/admin/model/team.js';
 import { toneOf } from '../../src/web/admin/model/tone.js';
 import { PASSWORD_MIN_LENGTH as SERVER_PASSWORD_MIN_LENGTH } from '../../src/server/services/auth.js';
@@ -2729,6 +2730,77 @@ describe('analytics view model', () => {
   });
 });
 
+describe('the suppliers (plan NEXT LOT §3.5.4.2, §3.5.4.5)', () => {
+  const supplier = (over: Partial<web.Supplier> & Pick<web.Supplier, 'id' | 'name'>): web.Supplier => ({
+    contactName: null,
+    email: null,
+    phone: null,
+    address: null,
+    currency: 'EUR',
+    note: null,
+    active: true,
+    models: 0,
+    createdAt: '2026-10-08T09:00:00.000Z',
+    ...over,
+  });
+  const nord = supplier({ id: 'n', name: 'Nord Rings' });
+  const old = supplier({ id: 'o', name: 'Old Cases', active: false });
+  const south = supplier({ id: 's', name: 'South Rings' });
+  const row = (skuId: string, label: string | null): web.ModelSizeRow => ({ skuId, label, code: `MNL-${label}`, fitMinMm: null, fitMaxMm: null, setAsideAt: null, onList: true, sameAs: null, used: false, awaiting: 0 });
+
+  it('reads a model\'s Supplier row: none, its own, or a variant\'s main model\'s with where it comes from; a size\'s own in its column, empty for the model\'s', () => {
+    expect(supplierLine({ own: null, inherited: null, sizes: {} })).toEqual({ value: 'No supplier yet.', note: null });
+    expect(supplierLine({ own: { id: 'n', name: 'Nord Rings', active: true }, inherited: null, sizes: {} })).toEqual({ value: 'Nord Rings', note: null });
+    expect(supplierLine({ own: null, inherited: { id: 'n', name: 'Nord Rings', active: true, from: 'MONOLITHE' }, sizes: {} })).toEqual({ value: 'Nord Rings', note: 'Reads its supplier from MONOLITHE.' });
+    expect(supplierLine({ own: { id: 'o', name: 'Old Cases', active: false }, inherited: null, sizes: {} }).value).toBe('Old Cases · INACTIVE');
+    const s: web.ModelSupplier = { own: { id: 'n', name: 'Nord Rings', active: true }, inherited: null, sizes: { b: { id: 's', name: 'South Rings', active: true } } };
+    expect(sizeSupplierText(s, { skuId: 'a' })).toBe('');
+    expect(sizeSupplierText(s, { skuId: 'b' })).toBe('South Rings');
+  });
+
+  it('offers the active suppliers and those already chosen, and sends only what changed', () => {
+    expect(supplierOptions([nord, old, south], [], 'None')).toEqual([
+      { value: '', label: 'None' },
+      { value: 'n', label: 'Nord Rings' },
+      { value: 's', label: 'South Rings' },
+    ]);
+    expect(supplierOptions([nord, old, south], ['o', null], 'The model\u2019s').map((o) => o.label)).toEqual(['The model\u2019s', 'Nord Rings', 'Old Cases · INACTIVE', 'South Rings']);
+    const sizing = { sizes: [row('a', '52'), row('b', '54')], supplier: { own: { id: 'n', name: 'Nord Rings', active: true }, inherited: null, sizes: { b: { id: 's', name: 'South Rings', active: true } } } };
+    const values = (over: Record<string, string>) => ({ supplier: 'n', [sizeSupplierField('a')]: '', [sizeSupplierField('b')]: 's', ...over });
+    expect(modelSupplierChange(sizing, values({}))).toBeNull();
+    expect(modelSupplierChange(sizing, values({ supplier: '' }))).toEqual({ supplierId: null });
+    expect(modelSupplierChange(sizing, values({ [sizeSupplierField('a')]: 'o', [sizeSupplierField('b')]: '' }))).toEqual({ sizes: { a: 'o', b: null } });
+    expect(MODEL_SUPPLIER_TEXT.none).toBe('No supplier yet.');
+  });
+
+  it('fills and reads a supplier\'s form: every field sent, an empty one cleared, the currency in capitals; its contact on two lines', () => {
+    expect(supplierFormValues(null)).toEqual({ name: '', contactName: '', email: '', phone: '', address: '', currency: '', note: '', active: 'true' });
+    expect(supplierFormValues(old)).toMatchObject({ name: 'Old Cases', currency: 'EUR', active: '' });
+    expect(supplierInputOf({ name: ' Nord ', contactName: '', email: 'o@nord.example', phone: ' ', address: '1 rue\nLille', currency: 'gbp', note: '', active: 'true' })).toEqual({
+      name: 'Nord',
+      contactName: null,
+      email: 'o@nord.example',
+      phone: null,
+      address: '1 rue\nLille',
+      currency: 'GBP',
+      note: null,
+      active: true,
+    });
+    expect(supplierInputOf({ name: 'Nord', active: '' }).active).toBe(false);
+    expect(contactLines({ contactName: 'A. Martin', email: 'o@nord.example', phone: '+33 1' })).toEqual({ main: 'A. Martin', sub: 'o@nord.example · +33 1' });
+    expect(contactLines({ contactName: null, email: null, phone: null })).toEqual({ main: '—', sub: '' });
+    expect(SUPPLIER_ORDERS_TEXT.suppliersEmpty).toBe('No supplier yet: add the first one.');
+    expect(SUPPLIER_ORDERS_TEXT.lead).toBe(
+      'What ORBES orders from its suppliers. The console adds up what is missing (the orders waiting for stock and the stock under its minimum) into a draft per supplier; you adjust it, mark it sent, and send its PDF to the supplier yourself: the console sends no email.',
+    );
+  });
+
+  it('lets an OPERATOR and an ADMIN manage the suppliers, an AUDITOR read them, never LOGISTICS nor RETAIL', () => {
+    expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).filter((r) => can(r, 'manageSupplierOrders'))).toEqual(['OPERATOR', 'ADMIN']);
+    expect((['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR', 'ADMIN'] as const).filter((r) => can(r, 'read'))).toEqual(['AUDITOR', 'OPERATOR', 'ADMIN']);
+  });
+});
+
 describe('a model\'s Sizes and a salon request\'s size (plan NEXT-NINE, AC-01; plan NEXT LOT §3.3)', () => {
   const row = (over: Partial<web.ModelSizeRow> & Pick<web.ModelSizeRow, 'skuId' | 'label' | 'code'>): web.ModelSizeRow => ({
     fitMinMm: null,
@@ -2749,6 +2821,7 @@ describe('a model\'s Sizes and a salon request\'s size (plan NEXT-NINE, AC-01; p
     sizes: [row({ skuId: 'a', label: '52', code: 'MNL-52' }), row({ skuId: 'b', label: '54', code: 'MNL-54', fitMinMm: 53, fitMaxMm: 55 })],
     offered: 2,
     setAside: 0,
+    supplier: { own: null, inherited: null, sizes: {} },
   };
   /** MONOLITHE as §3.3 draws it: 50, 52, SIZE 52 (same measure), ONE SIZE (off the list), 58 set aside. */
   const monolithe: web.ModelSizes = {
@@ -2767,6 +2840,7 @@ describe('a model\'s Sizes and a salon request\'s size (plan NEXT-NINE, AC-01; p
     ],
     offered: 5,
     setAside: 1,
+    supplier: { own: null, inherited: null, sizes: {} },
   };
 
   it('names the size type, To give until it is given, and what a variant without one reads from its main model', () => {

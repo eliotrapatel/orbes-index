@@ -56,6 +56,8 @@ export const ROUTES = [
   { name: 'workSheets', path: '/atelier/sheets' },
   /** Logistics (plan NEXT LOT §3.5.3): the agent's page (LOGISTICS), its only one; its tabs come with step 5.11. */
   { name: 'logistics', path: '/logistics' },
+  /** Supplier orders (plan NEXT LOT §3.5.4.2): ORBES's page, never a LOGISTICS login's; its Suppliers for now. */
+  { name: 'supplierOrders', path: '/supplier-orders' },
   /** A model's lookbook (P-R02): reached from the Catalogue's model row, no link of its own in the sidebar. */
   { name: 'model', path: '/catalogue/:modelId' },
   { name: 'retailers', path: '/retailers' },

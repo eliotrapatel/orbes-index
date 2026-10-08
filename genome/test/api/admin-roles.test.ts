@@ -19,7 +19,8 @@
  * ADMIN; THE PROGRAM of the club's tiers and the orders' shipping rates, BP-19 T2, read by an AUDITOR, set by an ADMIN;
  * the Yearly care board, BP-19 T6, read by an AUDITOR, its steps taken by an OPERATOR; THE HOUSE'S GUARANTEE, IN-01,
  * granted, changed and revoked by an OPERATOR, its defaults read by an AUDITOR and set by an ADMIN; a model's Sizes, AC-01,
- * read by an AUDITOR and set by an OPERATOR, its sizes declared, removed and reinstated by an OPERATOR (NEXT LOT §3.3); GROWTH, BP-29, read by an AUDITOR);
+ * read by an AUDITOR and set by an OPERATOR, its sizes declared, removed and reinstated by an OPERATOR (NEXT LOT §3.3); GROWTH, BP-29, read by an AUDITOR;
+ * the suppliers, read by an AUDITOR, added and changed by an OPERATOR, a model's supplier set by an OPERATOR, NEXT LOT §3.5.6.2);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -238,6 +239,12 @@ const PROBES: Probe[] = [
   { group: 'guarantees', method: 'GET', url: '/api/admin/settings/guarantees', min: 'AUDITOR' },
   { group: 'guarantees', method: 'PUT', url: '/api/admin/settings/guarantees', body: INVALID, min: 'ADMIN' },
   // AC-01: a model's Sizes (its size kind and its sizes' fits) read by an AUDITOR, set by an OPERATOR.
+  // NEXT LOT §3.5.6.2: the suppliers read by an AUDITOR, added and changed by an OPERATOR, a model's supplier set by an
+  // OPERATOR; never LOGISTICS (ranked with RETAIL).
+  { group: 'suppliers', method: 'GET', url: '/api/admin/suppliers', min: 'AUDITOR' },
+  { group: 'suppliers', method: 'POST', url: '/api/admin/suppliers', body: INVALID, min: 'OPERATOR' },
+  { group: 'suppliers', method: 'PATCH', url: `/api/admin/suppliers/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'suppliers', method: 'PUT', url: `/api/admin/models/${UUID}/supplier`, body: INVALID, min: 'OPERATOR' },
   { group: 'sizes', method: 'GET', url: `/api/admin/models/${UUID}/sizes`, min: 'AUDITOR' },
   { group: 'sizes', method: 'PUT', url: `/api/admin/models/${UUID}/sizes`, body: INVALID, min: 'OPERATOR' },
   // NEXT LOT §3.3: a size taken off a model (removed or set aside) and reinstated, by an OPERATOR.
@@ -410,6 +417,7 @@ describe('admin role enforcement', () => {
       'growth',
       'system',
       'test-entrants',
+      'suppliers',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

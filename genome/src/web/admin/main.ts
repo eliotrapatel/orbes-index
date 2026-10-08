@@ -74,6 +74,7 @@ import { orderView } from './views/order.js';
 import { ordersView } from './views/orders.js';
 import { invoicesView } from './views/invoices.js';
 import { segmentsView, segmentView } from './views/segments.js';
+import { supplierOrdersView } from './views/supplier-orders.js';
 import { lookbookView } from './views/lookbook.js';
 import { ownerView } from './views/owner.js';
 import { ownersView } from './views/owners.js';
@@ -116,6 +117,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'codes', label: 'Codes' },
       { route: 'catalogue', label: 'Catalogue' },
       { route: 'atelier', label: 'Atelier' },
+      // Plan NEXT LOT §3.5.4.2: under the Atelier's place (Logistics from step 5.11); never a LOGISTICS login's sidebar.
+      { route: 'supplierOrders', label: 'Supplier orders' },
     ],
   },
   {
@@ -199,6 +202,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   atelier: { view: atelierView, title: 'Atelier', nav: 'atelier' },
   workSheets: { view: workSheetsView, title: 'Work sheets', nav: 'atelier' },
   logistics: { view: logisticsView, title: 'Logistics', nav: 'logistics' },
+  supplierOrders: { view: supplierOrdersView, title: 'Supplier orders', nav: 'supplierOrders' },
   document: { view: documentView, title: 'Document', nav: 'documents' },
 };
 
