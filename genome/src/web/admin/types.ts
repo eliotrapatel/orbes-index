@@ -182,7 +182,7 @@ export const ORDER_RESERVATIONS = ['STOCK', 'BENCH'] as const;
 export type OrderReservation = (typeof ORDER_RESERVATIONS)[number];
 
 /** Why the stock moved (stock_movements.reason). */
-export const STOCK_MOVEMENT_REASONS = ['PRODUCED', 'ADJUSTED', 'TRANSFER_OUT', 'TRANSFER_IN', 'SHIPPED', 'RETURNED'] as const;
+export const STOCK_MOVEMENT_REASONS = ['PRODUCED', 'ADJUSTED', 'TRANSFER_OUT', 'TRANSFER_IN', 'SHIPPED', 'RETURNED', 'RECEIVED'] as const;
 export type StockMovementReason = (typeof STOCK_MOVEMENT_REASONS)[number];
 
 /** A piece to make at the atelier (bench_items.status). */
@@ -2163,6 +2163,20 @@ export interface ModelSizes {
 }
 
 // ── SUPPLIERS (plan NEXT LOT §3.5.6.2) ─────────────────────────────────────
+
+/** Migration 0036 (plan NEXT LOT §3.5): a supplier order's steps, a reception's, a card's erasure, a return to a supplier, a proposed count. */
+export const SUPPLIER_ORDER_STATUSES = ['DRAFT', 'SENT', 'EXPECTED', 'PARTLY_RECEIVED', 'RECEIVED', 'CANCELLED'] as const;
+export type SupplierOrderStatus = (typeof SUPPLIER_ORDER_STATUSES)[number];
+export const RECEPTION_STATUSES = ['TO_CONFIRM', 'SENT_BACK', 'CONFIRMED'] as const;
+export type ReceptionStatus = (typeof RECEPTION_STATUSES)[number];
+export const CARD_ERASED_REASONS = ['ATTACHED', 'REPLACED', 'REGISTERED', 'UNREADABLE'] as const;
+export type CardErasedReason = (typeof CARD_ERASED_REASONS)[number];
+export const SUPPLIER_RETURN_STATUSES = ['TO_RETURN', 'RETURNED'] as const;
+export type SupplierReturnStatus = (typeof SUPPLIER_RETURN_STATUSES)[number];
+export const SUPPLIER_RETURN_SETTLEMENTS = ['REPLACEMENT', 'CREDIT'] as const;
+export type SupplierReturnSettlement = (typeof SUPPLIER_RETURN_SETTLEMENTS)[number];
+export const STOCK_CORRECTION_STATUSES = ['TO_APPROVE', 'APPROVED', 'DECLINED'] as const;
+export type StockCorrectionStatus = (typeof STOCK_CORRECTION_STATUSES)[number];
 
 /** A supplier named on a model's page. */
 export interface SupplierRef {

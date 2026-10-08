@@ -143,6 +143,12 @@ describe('schema', () => {
       ['claim_code_renewals', 'kind', S.CLAIM_RENEWAL_KINDS],
       ['claim_code_renewals', 'status', S.CLAIM_RENEWAL_STATUSES],
       ['claim_code_renewals', 'withdrawn_reason', S.CLAIM_RENEWAL_WITHDRAWN_REASONS],
+      ['supplier_orders', 'status', S.SUPPLIER_ORDER_STATUSES],
+      ['receptions', 'status', S.RECEPTION_STATUSES],
+      ['card_prints', 'erased_reason', S.CARD_ERASED_REASONS],
+      ['supplier_returns', 'status', S.SUPPLIER_RETURN_STATUSES],
+      ['supplier_returns', 'settlement', S.SUPPLIER_RETURN_SETTLEMENTS],
+      ['stock_corrections', 'status', S.STOCK_CORRECTION_STATUSES],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -701,6 +707,36 @@ describe('schema', () => {
     expect(sku.supplier_id).toBe(supplier.id);
     await expect(t.db.deleteFrom('stock_locations').where('id', '=', location.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
     await expect(t.db.deleteFrom('admin_users').where('id', '=', agent.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+  });
+
+  it('supplier orders (0036): the mirror at work: a draft, its line, a reception and its line, a RECEIVED movement, the piece it issued, its card, a correction', async () => {
+    const { model } = await seedProduct(t.db);
+    const admin = await t.db.insertInto('admin_users').values({ email: 'so-0036@orbes.test', email_normalized: 'so-0036@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
+    const location = await t.db.insertInto('stock_locations').values({ name: 'SO MIRROR 0036' }).returning('id').executeTakeFirstOrThrow();
+    const supplier = await t.db.insertInto('suppliers').values({ name: 'MIRROR SUPPLY 0036', currency: 'EUR' }).returning('id').executeTakeFirstOrThrow();
+    const sku = await t.db.insertInto('skus').values({ model_id: model.id, size_label: '56', code: `${model.sku_prefix}-56` }).returning('id').executeTakeFirstOrThrow();
+    const order = await t.db.insertInto('supplier_orders').values({ supplier_id: supplier.id, location_id: location.id, created_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(order).toMatchObject({ status: 'DRAFT', currency: null, shipping_minor: null, expected_on: null, sent_at: null, invoice_minor: null });
+    await t.db.updateTable('supplier_orders').set({ status: 'SENT', sent_at: new Date(), currency: 'EUR', expected_on: '2026-11-02', shipping_minor: 1500 }).where('id', '=', order.id).execute();
+    expect((await t.db.selectFrom('supplier_orders').select(['expected_on', 'shipping_minor']).where('id', '=', order.id).executeTakeFirstOrThrow())).toEqual({ expected_on: '2026-11-02', shipping_minor: 1500 });
+    const line = await t.db.insertInto('supplier_order_lines').values({ supplier_order_id: order.id, sku_id: sku.id, quantity: 4, unit_price_minor: 4200 }).returningAll().executeTakeFirstOrThrow();
+    expect(line).toMatchObject({ accepted_quantity: 0, rejected_quantity: 0, credited_quantity: 0, rest_cancelled_quantity: 0 });
+    const reception = await t.db.insertInto('receptions').values({ supplier_order_id: order.id, location_id: location.id, counted_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(reception.status).toBe('TO_CONFIRM');
+    const rline = await t.db.insertInto('reception_lines').values({ reception_id: reception.id, sku_id: sku.id, supplier_order_line_id: line.id, accepted: 4 }).returningAll().executeTakeFirstOrThrow();
+    expect(rline).toMatchObject({ rejected: 0, issued: 0, note: null });
+    const movement = await t.db
+      .insertInto('stock_movements')
+      .values({ sku_id: sku.id, location_id: location.id, delta: 4, reason: 'RECEIVED', reception_line_id: rline.id, actor_type: 'system' })
+      .returning(['id', 'reason', 'reception_line_id'])
+      .executeTakeFirstOrThrow();
+    expect(movement).toMatchObject({ reason: 'RECEIVED', reception_line_id: rline.id });
+    const { product } = await seedProduct(t.db, { reception_line_id: rline.id, stock_entered_at: new Date('2026-10-08T10:00:00Z') });
+    expect((await t.db.selectFrom('products').select(['reception_line_id', 'stock_entered_at']).where('id', '=', product.id).executeTakeFirstOrThrow())).toEqual({ reception_line_id: rline.id, stock_entered_at: new Date('2026-10-08T10:00:00Z') });
+    await t.db.insertInto('card_prints').values({ product_id: product.id, reception_id: reception.id, sealed_claim_code: 'v1.iv.sealed' }).execute();
+    const correction = await t.db.insertInto('stock_corrections').values({ sku_id: sku.id, location_id: location.id, delta: -1, reason: 'A piece found damaged.', proposed_by: admin.id }).returningAll().executeTakeFirstOrThrow();
+    expect(correction).toMatchObject({ status: 'TO_APPROVE', decided_at: null, movement_id: null });
+    await expect(t.db.deleteFrom('stock_corrections').where('id', '=', correction.id).execute()).rejects.toSatisfy(isGuardViolation);
   });
 
   it('audit_logs is append-only at the database level', async () => {

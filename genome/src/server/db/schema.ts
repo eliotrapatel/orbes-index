@@ -207,9 +207,10 @@ export type OrderReservation = (typeof ORDER_RESERVATIONS)[number];
 
 /**
  * Why the stock of a SKU moved at a location (stock_movements.reason, migration 0022): a piece finished by the atelier
- * (+1), a count corrected (±), the two halves of a transfer, an order shipped (−1) or returned to stock (+1).
+ * (+1), a count corrected (±), the two halves of a transfer, an order shipped (−1) or returned to stock (+1); since
+ * migration 0036 (plan NEXT LOT §3.5) RECEIVED (+n, a reception line's pieces, issued and entering the stock).
  */
-export const STOCK_MOVEMENT_REASONS = ['PRODUCED', 'ADJUSTED', 'TRANSFER_OUT', 'TRANSFER_IN', 'SHIPPED', 'RETURNED'] as const;
+export const STOCK_MOVEMENT_REASONS = ['PRODUCED', 'ADJUSTED', 'TRANSFER_OUT', 'TRANSFER_IN', 'SHIPPED', 'RETURNED', 'RECEIVED'] as const;
 export type StockMovementReason = (typeof STOCK_MOVEMENT_REASONS)[number];
 
 /** A piece to make at the atelier (bench_items.status, migration 0022): TO_MAKE → IN_PROGRESS → DONE, or CANCELLED. */
@@ -343,6 +344,33 @@ export type ClaimRenewalStatus = (typeof CLAIM_RENEWAL_STATUSES)[number];
  */
 export const CLAIM_RENEWAL_WITHDRAWN_REASONS = ['RENEWED_AGAIN', 'ORDER_CANCELLED', 'ORDER_RETURNED', 'REGISTERED', 'UNREADABLE', 'SUPERSEDED'] as const;
 export type ClaimRenewalWithdrawnReason = (typeof CLAIM_RENEWAL_WITHDRAWN_REASONS)[number];
+
+/**
+ * A supplier order (supplier_orders.status, migration 0036, plan NEXT LOT §3.5): DRAFT → SENT → EXPECTED (the supplier
+ * confirmed it, optional) → PARTLY_RECEIVED → RECEIVED; CANCELLED when the rest is cancelled with nothing accepted.
+ */
+export const SUPPLIER_ORDER_STATUSES = ['DRAFT', 'SENT', 'EXPECTED', 'PARTLY_RECEIVED', 'RECEIVED', 'CANCELLED'] as const;
+export type SupplierOrderStatus = (typeof SUPPLIER_ORDER_STATUSES)[number];
+
+/** A reception (receptions.status, migration 0036): counted, waiting for ORBES; sent back to be counted again; confirmed. */
+export const RECEPTION_STATUSES = ['TO_CONFIRM', 'SENT_BACK', 'CONFIRMED'] as const;
+export type ReceptionStatus = (typeof RECEPTION_STATUSES)[number];
+
+/** Why a card's sealed claim code was erased (card_prints.erased_reason, migration 0036). */
+export const CARD_ERASED_REASONS = ['ATTACHED', 'REPLACED', 'REGISTERED', 'UNREADABLE'] as const;
+export type CardErasedReason = (typeof CARD_ERASED_REASONS)[number];
+
+/** Rejected pieces of a reception (supplier_returns.status, migration 0036): to send back, then sent back. */
+export const SUPPLIER_RETURN_STATUSES = ['TO_RETURN', 'RETURNED'] as const;
+export type SupplierReturnStatus = (typeof SUPPLIER_RETURN_STATUSES)[number];
+
+/** The supplier's answer to pieces sent back (supplier_returns.settlement, migration 0036): new pieces, or a credit. */
+export const SUPPLIER_RETURN_SETTLEMENTS = ['REPLACEMENT', 'CREDIT'] as const;
+export type SupplierReturnSettlement = (typeof SUPPLIER_RETURN_SETTLEMENTS)[number];
+
+/** A count proposed by the agent (stock_corrections.status, migration 0036): until ORBES approves or declines it. */
+export const STOCK_CORRECTION_STATUSES = ['TO_APPROVE', 'APPROVED', 'DECLINED'] as const;
+export type StockCorrectionStatus = (typeof STOCK_CORRECTION_STATUSES)[number];
 
 /** Why a credit taken off an order was given back (credit_uses.released_reason, migration 0027): removed, the order cancelled or returned. */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
@@ -509,6 +537,10 @@ export interface ProductsTable {
   photo_sha256: ColumnType<string | null, string | null | undefined, string | null>;
   /** Migration 0022: its SKU (skus.id, of its model); NULL until linked. */
   sku_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0036 (plan NEXT LOT §3.5): the reception line that issued it (reception_lines.id); NULL otherwise. */
+  reception_line_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Migration 0036: when it first entered the stock (a reception, or its PRODUCED movement, backfilled); never cleared. */
+  stock_entered_at: TimestampNullable;
   created_at: TimestampDefault;
   updated_at: TimestampDefault;
 }
@@ -1208,6 +1240,146 @@ export interface SuppliersTable {
   created_by: ColumnType<string | null, string | null | undefined, never>;
 }
 
+type NullableText = ColumnType<string | null, string | null | undefined, string | null>;
+type NullableAdmin = ColumnType<string | null, string | null | undefined, string | null>;
+
+/**
+ * A supplier order (migration 0036, plan NEXT LOT §3.5.5.2): what ORBES orders from a supplier, delivered to a location.
+ * Each status with its times (the `supplier_orders_*` CHECKs); its reference `SO-` + the id's first eight hex figures.
+ * id, supplier_id, location_id, created_at and created_by never change.
+ */
+export interface SupplierOrdersTable {
+  id: Generated<string>;
+  supplier_id: string;
+  location_id: string;
+  status: WithDefault<SupplierOrderStatus>;
+  /** Three capitals; required once SENT. */
+  currency: NullableText;
+  /** Hundredths, 0..100 000 000; NULL: no shipping cost. */
+  shipping_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  /** 'YYYY-MM-DD'; required once SENT. */
+  expected_on: DateNullable;
+  note: NullableText;
+  sent_at: TimestampNullable;
+  sent_by: NullableAdmin;
+  supplier_confirmed_at: TimestampNullable;
+  supplier_confirmed_by: NullableAdmin;
+  received_at: TimestampNullable;
+  rest_cancelled_at: TimestampNullable;
+  rest_cancelled_by: NullableAdmin;
+  rest_cancelled_note: NullableText;
+  /** The supplier's invoice: number, amount and date, all three or none. */
+  invoice_number: NullableText;
+  invoice_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  invoice_date: DateNullable;
+  invoice_paid_at: TimestampNullable;
+  invoice_paid_by: NullableAdmin;
+  created_at: TimestampDefault;
+  created_by: ColumnType<string | null, string | null | undefined, never>;
+  updated_at: TimestampDefault;
+}
+
+/** A line of a supplier order (migration 0036): a SKU once per order, its quantity and price, and what came of it. */
+export interface SupplierOrderLinesTable {
+  id: Generated<string>;
+  supplier_order_id: string;
+  sku_id: string;
+  quantity: number;                    // 1..10 000
+  /** Hundredths; NULL until set (required to send). */
+  unit_price_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  accepted_quantity: WithDefault<number>;
+  rejected_quantity: WithDefault<number>;
+  credited_quantity: WithDefault<number>;
+  rest_cancelled_quantity: WithDefault<number>;
+  created_at: TimestampDefault;
+}
+
+/** A delivery counted against its supplier order (migration 0036): TO_CONFIRM, SENT_BACK, CONFIRMED; one open per order. */
+export interface ReceptionsTable {
+  id: Generated<string>;
+  supplier_order_id: string;
+  location_id: string;
+  status: WithDefault<ReceptionStatus>;
+  delivery_note: NullableText;         // ≤ 60
+  note: NullableText;                  // ≤ 1 000
+  counted_at: TimestampDefault;
+  counted_by: NullableAdmin;
+  sent_back_at: TimestampNullable;
+  sent_back_by: NullableAdmin;
+  sent_back_note: NullableText;
+  confirmed_at: TimestampNullable;
+  confirmed_by: NullableAdmin;
+  /** Every identity of the reception issued. */
+  issued_at: TimestampNullable;
+  cards_attached_at: TimestampNullable;
+  cards_attached_by: NullableAdmin;
+  created_at: TimestampDefault;
+}
+
+/** A SKU of a reception (migration 0036): pieces accepted and rejected, the identities issued so far, the agent's note. */
+export interface ReceptionLinesTable {
+  id: Generated<string>;
+  reception_id: string;
+  sku_id: string;
+  /** NULL: a piece not on the supplier order. */
+  supplier_order_line_id: ColumnType<string | null, string | null | undefined, never>;
+  accepted: WithDefault<number>;
+  rejected: WithDefault<number>;
+  /** 0..accepted. */
+  issued: WithDefault<number>;
+  note: NullableText;                  // ≤ 500
+}
+
+/** A piece issued by a reception and its claim code, sealed until its card is attached (migration 0036). */
+export interface CardPrintsTable {
+  product_id: string;
+  reception_id: string;
+  /** AES-256-GCM, HKDF info 'orbes/card-claim-codes/v1', AAD 'card:<product id>'; NULL exactly once erased. */
+  sealed_claim_code: NullableText;
+  printed_count: WithDefault<number>;
+  last_printed_at: TimestampNullable;
+  erased_at: TimestampNullable;
+  erased_reason: ColumnType<CardErasedReason | null, CardErasedReason | null | undefined, CardErasedReason | null>;
+}
+
+/** Rejected pieces of a reception, sent back to their supplier, and its answer (migration 0036). */
+export interface SupplierReturnsTable {
+  id: Generated<string>;
+  supplier_order_id: string;
+  reception_id: string;
+  sku_id: string;
+  quantity: number;                    // 1..10 000
+  status: WithDefault<SupplierReturnStatus>;
+  returned_at: TimestampNullable;
+  returned_by: NullableAdmin;
+  carrier_id: NullableText;
+  tracking_number: NullableText;
+  settlement: ColumnType<SupplierReturnSettlement | null, SupplierReturnSettlement | null | undefined, SupplierReturnSettlement | null>;
+  /** Hundredths, with a CREDIT only. */
+  credit_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  settled_at: TimestampNullable;
+  settled_by: NullableAdmin;
+  note: NullableText;                  // ≤ 500
+  created_at: TimestampDefault;
+}
+
+/** A count proposed by the agent, applied once ORBES approves it (migration 0036). Never deleted. */
+export interface StockCorrectionsTable {
+  id: Generated<string>;
+  sku_id: string;
+  location_id: string;
+  delta: number;                       // ±1..10 000, never 0
+  reason: string;                      // 1..500
+  status: WithDefault<StockCorrectionStatus>;
+  proposed_by: ColumnType<string | null, string | null | undefined, never>;
+  proposed_at: TimestampDefault;
+  decided_by: NullableAdmin;
+  decided_at: TimestampNullable;
+  decision_note: NullableText;         // ≤ 500; required when DECLINED
+  /** The ledger's movement, exactly when APPROVED. */
+  movement_id: ColumnType<number | null, number | null | undefined, number | null>;
+}
+
 /**
  * A model in one size (migration 0022): one per model and size label (NULL: one size), its code and its future Shopify
  * ids. No stock column: the stock is the ledger's (stock_movements). id, model_id, size_label and created_at never change.
@@ -1276,6 +1448,8 @@ export interface StockMovementsTable {
   actor_type: ActorType;
   actor_id: string | null;
   created_at: TimestampDefault;
+  /** Migration 0036: the reception line a RECEIVED movement brings in, exactly for RECEIVED (`stock_movements_received`). */
+  reception_line_id: ColumnType<string | null, string | null | undefined, never>;
 }
 
 /** A minimum of a SKU at a location (migration 0022, L2): below it, the atelier is told what to make. */
@@ -1863,6 +2037,13 @@ export interface Database {
   stock_locations: StockLocationsTable;
   admin_user_locations: AdminUserLocationsTable;
   suppliers: SuppliersTable;
+  supplier_orders: SupplierOrdersTable;
+  supplier_order_lines: SupplierOrderLinesTable;
+  receptions: ReceptionsTable;
+  reception_lines: ReceptionLinesTable;
+  card_prints: CardPrintsTable;
+  supplier_returns: SupplierReturnsTable;
+  stock_corrections: StockCorrectionsTable;
   skus: SkusTable;
   stock_movements: StockMovementsTable;
   sku_thresholds: SkuThresholdsTable;
@@ -2003,6 +2184,13 @@ export type TestEntrantRow = Selectable<TestEntrantsTable>;
 export type TestRunRow = Selectable<TestRunsTable>;
 export type TestRunEntrantRow = Selectable<TestRunEntrantsTable>;
 export type SupplierRow = Selectable<SuppliersTable>;
+export type SupplierOrderRow = Selectable<SupplierOrdersTable>;
+export type SupplierOrderLineRow = Selectable<SupplierOrderLinesTable>;
+export type ReceptionRow = Selectable<ReceptionsTable>;
+export type ReceptionLineRow = Selectable<ReceptionLinesTable>;
+export type CardPrintRow = Selectable<CardPrintsTable>;
+export type SupplierReturnRow = Selectable<SupplierReturnsTable>;
+export type StockCorrectionRow = Selectable<StockCorrectionsTable>;
 export type ClaimCodeRenewalRow = Selectable<ClaimCodeRenewalsTable>;
 export type NewClaimCodeRenewal = Insertable<ClaimCodeRenewalsTable>;
 export type RevocationRow = Selectable<RevocationsTable>;

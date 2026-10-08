@@ -232,6 +232,11 @@ export const SKU_USES = Object.freeze({
     Object.freeze({ table: 'drop_sizes', column: 'sku_id' }),
     Object.freeze({ table: 'sku_thresholds', column: 'sku_id' }),
     Object.freeze({ table: 'bench_items', column: 'sku_id' }),
+    // Plan NEXT LOT §3.5 (migration 0036): a supplier-order line, a reception line, a return to a supplier, a correction.
+    Object.freeze({ table: 'supplier_order_lines', column: 'sku_id' }),
+    Object.freeze({ table: 'reception_lines', column: 'sku_id' }),
+    Object.freeze({ table: 'supplier_returns', column: 'sku_id' }),
+    Object.freeze({ table: 'stock_corrections', column: 'sku_id' }),
   ]),
   others: Object.freeze([
     'an OPEN salon request (shop_requests) of the model in the same size, whatever its case',

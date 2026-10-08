@@ -394,6 +394,12 @@ describe('admin enums mirror the server', () => {
       'CLAIM_RENEWAL_KINDS',
       'CLAIM_RENEWAL_STATUSES',
       'CLAIM_RENEWAL_WITHDRAWN_REASONS',
+      'SUPPLIER_ORDER_STATUSES',
+      'RECEPTION_STATUSES',
+      'CARD_ERASED_REASONS',
+      'SUPPLIER_RETURN_STATUSES',
+      'SUPPLIER_RETURN_SETTLEMENTS',
+      'STOCK_CORRECTION_STATUSES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }
