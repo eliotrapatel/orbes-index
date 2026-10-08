@@ -316,6 +316,9 @@ export const EVENT_LABELS: Readonly<Record<string, string>> = Object.freeze({
   'order.case.receive': 'Parcel back',
   'order.case.decide': 'Decided by ORBES',
   'order.case.cancel': 'Request cancelled',
+  // Plan NEXT LOT §3.6.B, C: the delivery address and the engraving the client entered on the order.
+  'order.address': 'Delivery address entered',
+  'order.engraving': 'Engraving entered',
 });
 
 /** Who made a change of an order: a console user by email, the collector, or ORBES itself. */

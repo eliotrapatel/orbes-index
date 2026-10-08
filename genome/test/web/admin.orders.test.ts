@@ -615,6 +615,8 @@ describe('the Buyer, the engraving and their settings (plan NEXT LOT §3.6.B, C)
     expect(engravingLine({ engravingText: 'J.M.', engravingMinor: 3_000, currency: 'EUR' })).toBe(`J.M. · €${NB}30`);
     expect(engravingLine({ engravingText: 'J.M.', engravingMinor: null, currency: 'EUR' })).toBe('J.M.');
     expect(engravingLine({ engravingText: null, engravingMinor: null, currency: 'EUR' })).toBe('None');
+    // The history names the client's own changes (plan NEXT LOT §3.6.B, C), never by their action's code.
+    expect([EVENT_LABELS['order.address'], EVENT_LABELS['order.engraving']]).toEqual(['Delivery address entered', 'Engraving entered']);
   });
 
   it('sets the engraving prices per currency: an amount in units, empty for none', () => {
