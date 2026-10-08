@@ -20,7 +20,7 @@
  *              row withdrawn when the piece's code changed since (SUPERSEDED), the piece was registered (REGISTERED) or
  *              the key no longer opens it (UNREADABLE); a piece not printable (LOST…) or an order not open leaves it
  *              waiting. The reading is final once the server has answered.
- *   buyerCard  the buyer's new 79t card, while the code is read, the order open and the piece unregistered and
+ *   newCard    the buyer's new 79t card (the plan's `buyerCard`; named so that the collector's routes never name a buyer), while the code is read, the order open and the piece unregistered and
  *              printable: through CertificateService, which checks the code against the hash.
  *   hooks      `withdrawOnCancel` (orders.ts `step()` CANCELLED, every cancellation): a current BUYER code (WAITING or
  *              READ) is replaced by an UNSHOWN code nobody sees, so a code the ex-buyer read stops working too, and the
@@ -649,7 +649,7 @@ export class ClaimRenewalService {
    * `certificate.render` with `{ orderId, by: 'buyer' }`. Only while the order's newest buyer code is READ and still the
    * piece's, the order open, the piece unregistered and printable: 409 CLAIM_CARD_UNAVAILABLE otherwise.
    */
-  async buyerCard(accountId: string, orderId: string, claimCode: unknown, actor: Actor): Promise<RenderedCertificates> {
+  async newCard(accountId: string, orderId: string, claimCode: unknown, actor: Actor): Promise<RenderedCertificates> {
     assertAccount(accountId);
     const account = accountId.toLowerCase();
     const id = knownOrder(orderId);

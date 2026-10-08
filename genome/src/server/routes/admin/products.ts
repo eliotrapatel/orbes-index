@@ -1,6 +1,8 @@
 /**
  * Products: list, issue (the generator: one product, or a batch of up to 50
- * sharing a template), full detail, lifecycle moves, code re-issue, warranty
+ * sharing a template), full detail, lifecycle moves, code re-issue, a new
+ * claim code (NEW CLAIM CODE, plan NEXT LOT §3.4: shown once for a piece in
+ * stock, sealed for the buyer of a sold one, never answered then), warranty
  * and service records, ownership confirmation. A piece's photograph has its
  * own routes (media.ts: an image body, not JSON).
  *
@@ -22,6 +24,7 @@ import type { CodeRow, ProductOverviewRow } from '../../db/schema.js';
 import { DomainError, forbidden } from '../../errors.js';
 import { isKeyTrustedAt } from '../../keys/key-service.js';
 import {
+  claimCodeRenewBody,
   completeServiceBody,
   emptyBody,
   issueBatchBody,
@@ -121,7 +124,7 @@ export async function liveCodeCheck(ctx: AppContext, row: CodeRow, packedIdentit
 
 export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { db } = ctx;
-  const { issuance, lifecycle, warranty, ownership, anomaly } = ctx.services;
+  const { issuance, lifecycle, warranty, ownership, anomaly, claimRenewals } = ctx.services;
 
   /** The current owner, every ownership period and transfer; owners' emails masked for an AUDITOR (A-06). */
   const ownershipJson = async (productId: string, inClear: boolean) => {
@@ -219,6 +222,8 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
       anomalies: (await anomaly.list({ productId: product.id }, { page: 1, pageSize: 100 })).items,
       statusHistory: await lifecycle.history(product.id),
       lifecycle: await lifecycle.snapshot(product.id),
+      // NEW CLAIM CODE (plan NEXT LOT §3.4): what it may do for this piece, and its new claim codes; never a code.
+      claimCode: await claimRenewals.situation(product.id),
     };
   });
 
@@ -270,6 +275,17 @@ export const adminProductRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app
     const code = await issuance.reissueCode(productId, b.reason, adminActor(request));
     reply.code(201);
     return { code: issuedCodeJson(code) };
+  });
+
+  // NEW CLAIM CODE (plan NEXT LOT §3.4; API §15.10): a lost card's code replaced for a piece not registered yet. In stock,
+  // the code is answered here once (with its card to print); sold, it is sealed for its buyer and never answered here.
+  app.post('/api/admin/products/:productId/claim-code', { config: { guard: { minRole: 'OPERATOR' } } }, async (request, reply) => {
+    const { productId } = parse(productParams, request.params);
+    const b = parse(claimCodeRenewBody, request.body);
+    const r = await claimRenewals.renew(productId, { reason: b.reason, expect: b.expect, after: b.after }, adminActor(request));
+    reply.code(201);
+    reply.header('cache-control', 'no-store');
+    return r;
   });
 
   // ── Warranty & services ──────────────────────────────────────────────────

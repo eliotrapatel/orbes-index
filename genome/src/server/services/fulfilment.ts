@@ -25,6 +25,7 @@
  *              an AUDITOR by the route) and never a price hidden: the CSV is Client Services' own (the packing slip is
  *              the document without prices).
  */
+import { orderClaimCode, type OrderClaimCode } from './claim-renewals.js';
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import type { BenchItemStatus, JsonObject, OrderChannel, OrderReservation, OrderStatus } from '../db/schema.js';
@@ -231,6 +232,12 @@ export interface OrderDetail {
   /** Who made each change of its history (the console users by email). */
   actors: Record<string, string>;
   delays: OrderAlertDelays;
+  /**
+   * NEW CLAIM CODE (plan NEXT LOT §3.4): the order's newest new claim code made for its buyer (its status and dates, and
+   * whether no card registers its piece), for Client Services who answers the buyer from here; null without one. Never
+   * the code.
+   */
+  claimCode: OrderClaimCode | null;
 }
 
 // ── Service ────────────────────────────────────────────────────────────────
@@ -489,6 +496,7 @@ export class FulfilmentService {
       piece: order.productId ? { productId: order.productId, status: row.piece_status!, registered: Boolean(row.registered) } : null,
       actors: Object.fromEntries(admins.map((a) => [a.id, a.email])),
       delays: { reservedDays: delays.reservedDays, readyDays: delays.readyDays, shippedDays: delays.shippedDays, unregisteredDays: delays.unregisteredDays },
+      claimCode: await orderClaimCode(this.db, order.id),
     };
   }
 

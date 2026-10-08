@@ -70,7 +70,7 @@ export interface CertificateRenderOptions {
   /** PDF only: 'card' (default, one 95 × 62 mm page per card) or 'sheet' (A4, eight cards). */
   layout?: CertificateLayout;
   /**
-   * A buyer's new card (plan NEXT LOT §3.4, ClaimRenewalService.buyerCard): its order, written with `by: 'buyer'` into the
+   * A buyer's new card (plan NEXT LOT §3.4, ClaimRenewalService.newCard): its order, written with `by: 'buyer'` into the
    * audit entries (`certificate.render`, `certificate.render_refused`).
    */
   context?: { orderId: string; by: 'buyer' };

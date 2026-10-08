@@ -50,6 +50,7 @@ import { BASE_PRICE_MAX_MINOR, CARE_GUIDE_MAX, MODEL_IDENTITY_MESSAGE, VARIANT_L
 import { ANOMALY_SORTS, ANOMALY_TYPES } from '../services/anomaly.js';
 import { CIRCLE_BODY_MAX, CIRCLE_CAPACITY_MAX, CIRCLE_PLACE_MAX, CIRCLE_POLL_OPTION_MAX, CIRCLE_POLL_OPTIONS, CIRCLE_TITLE_MAX, CIRCLE_URL_MAX } from '../services/circle.js';
 import { CARE_ADDRESS_LIMITS } from '../services/care.js';
+import { CLAIM_RENEWAL_REASON_MAX, CLAIM_SITUATIONS } from '../services/claim-renewals.js';
 import { GUARANTEE_NOTE_MAX, GUARANTEE_PIECES, GUARANTEE_VALID_DAYS } from '../services/guarantees.js';
 import { CLUB_TIER_BENEFITS_MAX } from '../services/club.js';
 import { PRIORITY_TIERS, PROGRAM_LIMITS } from '../services/club-program.js';
@@ -1089,6 +1090,12 @@ export const optionalReasonBody = optionalBody({
 export const requiredReasonBody = body({ reason: text(500) });
 
 /**
+ * POST /api/admin/products/:productId/claim-code (NEW CLAIM CODE, plan NEXT LOT §3.4): the reason (kept in the audit
+ * log), the situation the dialog showed (`expect`) and the newest new claim code it saw (`after`, null for none).
+ */
+export const claimCodeRenewBody = body({ reason: text(CLAIM_RENEWAL_REASON_MAX), expect: z.enum(CLAIM_SITUATIONS), after: uuid.nullable() });
+
+/**
  * `retailerId` (A-08): a point of sale of the register, whose country is the default purchase country.
  * The free-text `retailer` stays accepted (history, API callers); the console sends `retailerId` only.
  */
@@ -1450,6 +1457,12 @@ export const invoiceParams = z.object({ id: uuid });
 
 /** GET /api/v1/account/orders/:id/…: one of the account's orders (MY PIECES, M6). */
 export const accountOrderParams = z.object({ id: uuid });
+
+/**
+ * POST /api/v1/account/orders/:id/claim-card.pdf and …/register (plan NEXT LOT §3.4): the buyer's new claim code, in the
+ * body only, never in a URL (the services check its form and its hash).
+ */
+export const accountClaimCodeBody = body({ claimCode: z.string().trim().min(1, 'Required').max(32, 'Invalid claim code') });
 
 // ── MESSAGES (plan NEXT-NINE, CS-01) ─────────────────────────────────────
 

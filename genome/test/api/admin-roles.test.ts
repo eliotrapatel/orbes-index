@@ -92,6 +92,8 @@ const PROBES: Probe[] = [
   { group: 'lifecycle', method: 'POST', url: `/api/admin/products/${PID}/transitions`, body: INVALID, min: 'OPERATOR' },
   { group: 'lifecycle', method: 'POST', url: `/api/admin/products/${PID}/reinstate`, body: INVALID, min: 'ADMIN' },
   { group: 'codes', method: 'POST', url: `/api/admin/products/${PID}/codes/reissue`, body: INVALID, min: 'OPERATOR' },
+  // NEW CLAIM CODE (plan NEXT LOT §3.4): OPERATOR and ADMIN; an AUDITOR reads its history on the product page.
+  { group: 'codes', method: 'POST', url: `/api/admin/products/${PID}/claim-code`, body: INVALID, min: 'OPERATOR' },
   { group: 'warranty', method: 'POST', url: `/api/admin/products/${PID}/warranty/activate`, body: INVALID, min: 'OPERATOR' },
   { group: 'warranty', method: 'POST', url: `/api/admin/products/${PID}/warranty/void`, body: INVALID, min: 'OPERATOR' },
   { group: 'warranty', method: 'POST', url: `/api/admin/products/${PID}/warranty/extend`, body: INVALID, min: 'OPERATOR' },

@@ -19,7 +19,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountOrderParams, accountSizesBody, careParams, careRequestBody, changePasswordBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountClaimCodeBody, accountOrderParams, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
@@ -34,7 +34,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { auth, care, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, sizes, warranty } = ctx.services;
+  const { auth, care, claimRenewals, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, sizes, warranty } = ctx.services;
 
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
@@ -160,6 +160,34 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const { account } = requireAccount(request);
     const { id } = parse(accountOrderParams, request.params);
     return sendPdf(reply, await ownershipCertificates.orderCertificatePdf(account.id, id));
+  });
+
+  // NEW CLAIM CODE (plan NEXT LOT §3.4; API §10.20): a new claim code ORBES Client Services made for the piece of one of the
+  // account's orders, read once (SHOW THE CODE: a POST, never on a page load); its new card (the code in the body, never
+  // in a URL); REGISTER THIS PIECE with it, without a scan, once the order is shipped. Never stored by a cache.
+  app.post('/api/v1/account/orders/:id/claim-code', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    parse(emptyBody, request.body);
+    reply.header('cache-control', 'no-store');
+    return claimRenewals.reveal(account.id, id, accountActor(request));
+  });
+
+  app.post('/api/v1/account/orders/:id/claim-card.pdf', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    const b = parse(accountClaimCodeBody, request.body);
+    return sendPdf(reply, await claimRenewals.newCard(account.id, id, b.claimCode, accountActor(request)));
+  });
+
+  app.post('/api/v1/account/orders/:id/register', { config: { rateGroup: 'auth' } }, async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { id } = parse(accountOrderParams, request.params);
+    const b = parse(accountClaimCodeBody, request.body);
+    const r = await ownership.registerFromOrder(account.id, id, b.claimCode, accountActor(request));
+    reply.code(201);
+    reply.header('cache-control', 'no-store');
+    return { productId: r.productId, verified: r.verified, since: r.since };
   });
 
   app.get('/api/v1/account/orders/:id/care-guide', async (request) => {

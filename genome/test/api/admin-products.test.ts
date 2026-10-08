@@ -520,4 +520,86 @@ describe('admin products, codes and records', () => {
       expect(actions.has(a), a).toBe(true);
     }
   });
+
+  // After the audit check above: the sold piece's set-up below goes through the services, with no IP to hash.
+  describe('NEW CLAIM CODE (plan NEXT LOT §3.4; API §15.10)', () => {
+    const adminActor = async () => ({ type: 'admin' as const, id: (await h.ctx.db.selectFrom('admin_users').select('id').where('role', '=', 'ADMIN').executeTakeFirstOrThrow()).id });
+
+    it('a piece in stock: OPERATOR and ADMIN make it (201, never stored), the code answered once; CSRF and a stale situation refused', async () => {
+      const r = await issueViaApi({ withClaimSecret: true, variant: 'Size 54' });
+      const pid = r.product.productId as string;
+      const page = safeJson(await auditor.get(`/api/admin/products/${pid}`)) as any;
+      expect(page.claimCode).toEqual({ renewable: 'IN_STOCK', refusal: null, order: null, lastRenewalId: null, cardNeeded: false, renewals: [] });
+      const url = `/api/admin/products/${pid}/claim-code`;
+      expect((await operator.post(url, { reason: 'Card damaged.', expect: 'IN_STOCK', after: null }, { noCsrf: true })).statusCode).toBe(403);
+      expect((await auditor.post(url, { reason: 'Card damaged.', expect: 'IN_STOCK', after: null })).statusCode).toBe(403);
+      expect((await operator.post(url, { reason: '', expect: 'IN_STOCK', after: null })).statusCode).toBe(400);
+      expect((await operator.post(url, { reason: 'Card damaged.', expect: 'LOST', after: null })).statusCode).toBe(400);
+      const made = await operator.post(url, { reason: 'Card damaged.', expect: 'IN_STOCK', after: null });
+      expect(made.statusCode, made.body).toBe(201);
+      expect(made.headers['cache-control']).toBe('no-store');
+      const first = safeJson(made) as any;
+      expect(first.claimCode).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+      expect(first.renewal).toMatchObject({ kind: 'STAFF', status: 'SHOWN', reason: 'Card damaged.', order: null });
+      // The same dialog pressed again: the piece changed meanwhile.
+      const stale = await admin.post(url, { reason: 'Card damaged.', expect: 'IN_STOCK', after: null });
+      expect([stale.statusCode, errorOf(stale).code]).toEqual([409, 'CLAIM_CODE_SITUATION_CHANGED']);
+      h.clock.advance(60_000);
+      const second = await admin.post(url, { reason: 'Card lost again.', expect: 'IN_STOCK', after: first.renewal.id });
+      expect(second.statusCode).toBe(201);
+      const after = safeJson(await auditor.get(`/api/admin/products/${pid}`)) as any;
+      expect(after.claimCode.renewals.map((x: any) => [x.kind, x.status, x.reason])).toEqual([
+        ['STAFF', 'SHOWN', 'Card lost again.'],
+        ['STAFF', 'SHOWN', 'Card damaged.'],
+      ]);
+      expect(after.claimCode.lastRenewalId).toBe((safeJson(second) as any).renewal.id);
+      // The codes shown were never kept: not in the page, not in the audit log.
+      const text = JSON.stringify(after) + JSON.stringify(await h.ctx.db.selectFrom('audit_logs').selectAll().execute());
+      for (const c of [first.claimCode, (safeJson(second) as any).claimCode]) {
+        expect(text).not.toContain(c);
+        expect(text).not.toContain(c.replace(/-/g, ''));
+      }
+    });
+
+    it('a sold piece: the code is never in the console\'s answers, the product page or the order page (searched)', async () => {
+      const { inTransaction } = await import('../../src/server/db/connection.js');
+      const { ensureSku } = await import('../../src/server/services/stock.js');
+      const { openText } = await import('../../src/server/crypto/secretbox.js');
+      const { claimRevealAad, deriveClaimRevealKey } = await import('../../src/server/services/claim-renewals.js');
+      const actor = await adminActor();
+      const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+      const sku = await inTransaction(h.ctx.db, (tx) => ensureSku(tx, modelId, '56'));
+      await h.ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, actor);
+      const piece = await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId, variant: '56', material: '925 STERLING SILVER', withClaimSecret: true }, actor);
+      const email = 'claim-buyer@example.com';
+      const account = (await h.ctx.db.insertInto('accounts').values({ email, email_normalized: email, password_hash: 'unused' }).returning('id').executeTakeFirstOrThrow()).id;
+      const request = await h.ctx.db.insertInto('shop_requests').values({ account_id: account, model_id: modelId }).returning('id').executeTakeFirstOrThrow();
+      await h.ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, actor);
+      const orderId = (await h.ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+      await h.ctx.services.orders.setTerms(orderId, { sizeLabel: '56', priceMinor: 300_000, currency: 'EUR' }, actor);
+      await h.ctx.services.atelier.linkFromStock(orderId, piece.product.productId, actor);
+      const pid = piece.product.productId;
+      const page = safeJson(await operator.get(`/api/admin/products/${pid}`)) as any;
+      expect(page.claimCode).toMatchObject({ renewable: 'SOLD', refusal: null, order: { id: orderId } });
+      const res = await operator.post(`/api/admin/products/${pid}/claim-code`, { reason: 'The buyer lost the card.', expect: 'SOLD', after: null });
+      expect(res.statusCode).toBe(201);
+      expect(res.headers['cache-control']).toBe('no-store');
+      const made = safeJson(res) as any;
+      expect(Object.keys(made)).toEqual(['renewal']);
+      expect(made.renewal).toMatchObject({ kind: 'BUYER', status: 'WAITING', order: { id: orderId } });
+      const row = await h.ctx.db.selectFrom('claim_code_renewals').selectAll().where('id', '=', made.renewal.id).executeTakeFirstOrThrow();
+      const code = openText(deriveClaimRevealKey(h.ctx.config), row.sealed_code!, claimRevealAad(row));
+      const answers = [res.body];
+      for (const c of [operator, auditor, admin]) {
+        answers.push((await c.get(`/api/admin/products/${pid}`)).body, (await c.get(`/api/admin/orders/${orderId}`)).body);
+      }
+      for (const text of answers) {
+        expect(text).not.toContain(code);
+        expect(text).not.toContain(code.replace(/-/g, ''));
+        expect(text).not.toContain(row.sealed_code!);
+      }
+      const order = safeJson(await auditor.get(`/api/admin/orders/${orderId}`)) as any;
+      expect(order.claimCode).toEqual({ status: 'WAITING', madeAt: row.created_at.toISOString(), readAt: null, withdrawnAt: null, withdrawnReason: null, cardNeeded: false, cardNeededOrder: null });
+    });
+  });
 });

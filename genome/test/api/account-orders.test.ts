@@ -298,3 +298,106 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
     expect(JSON.stringify(products)).not.toContain(orderReference(ids.delivered));
   });
 });
+
+/**
+ * NEW CLAIM CODE on an order (plan NEXT LOT of 2026-10-07, §3.4, step 4.3; API §10.20), with real sessions: the order's
+ * `claimCode` (status and date only); the one reading (POST, no-store, CSRF, 401 signed out, 404 for another account's
+ * order); the buyer's new card (the code in the body, its refusals); REGISTER THIS PIECE (no-store, rate group `auth`).
+ */
+describe('NEW CLAIM CODE on an order (POST /api/v1/account/orders/:id/claim-code, …/claim-card.pdf, …/register)', () => {
+  let h: Harness;
+  let f: LiveFixture;
+  let mine: Client;
+  let mineId: string;
+  let other: Client;
+  let orderId: string;
+  let productId: string;
+  let productUuid: string;
+
+  beforeAll(async () => {
+    const { inTransaction } = await import('../../src/server/db/connection.js');
+    const { ensureSku } = await import('../../src/server/services/stock.js');
+    h = await createHarness();
+    h.clock.set('2026-11-10T09:00:00.000Z');
+    f = await liveFixtureOn(h.ctx, h.clock);
+    const a = await accountClient(h);
+    mine = a.client;
+    mineId = (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', a.email).executeTakeFirstOrThrow()).id;
+    other = (await accountClient(h)).client;
+    const france = (await h.ctx.db.selectFrom('stock_locations').select('id').where('is_default', '=', true).executeTakeFirstOrThrow()).id;
+    const colissimo = (await h.ctx.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
+    const sku = await inTransaction(h.ctx.db, (tx) => ensureSku(tx, f.modelId, '52'));
+    await h.ctx.services.stock.adjust({ skuId: sku, locationId: france, delta: 1, note: 'Counted in.' }, f.admin);
+    const piece = await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: '52', material: '925 STERLING SILVER', withClaimSecret: true }, f.admin);
+    productId = piece.product.productId;
+    productUuid = piece.product.id;
+    const request = await h.ctx.db.insertInto('shop_requests').values({ account_id: mineId, model_id: f.modelId, created_at: h.clock.now() }).returning('id').executeTakeFirstOrThrow();
+    await h.ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
+    orderId = (await h.ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).executeTakeFirstOrThrow()).id;
+    await h.ctx.services.orders.setTerms(orderId, { sizeLabel: '52', priceMinor: 420_000, currency: 'EUR' }, f.admin);
+    await h.ctx.services.atelier.linkFromStock(orderId, productId, f.admin);
+    await h.ctx.services.orders.transition(orderId, { to: 'PAID' }, f.admin);
+    await h.ctx.services.orders.transition(orderId, { to: 'SHIPPED', carrierId: colissimo, trackingNumber: '6A12345678901' }, f.admin);
+    await h.ctx.services.warranty.activate(productUuid, { purchaseDate: '2026-11-10', retailer: 'ORBES PARIS', country: 'FR' }, f.admin);
+    h.clock.advance(MINUTE);
+    await h.ctx.services.claimRenewals.renew(productId, { reason: 'Card lost.', expect: 'SOLD', after: null }, f.admin);
+  }, 120_000);
+  afterAll(() => h?.close());
+
+  const url = (what: string, id = orderId) => `/api/v1/account/orders/${id}/${what}`;
+  let code = '';
+
+  it('says on the order that a new claim code waits, with its date only', async () => {
+    const list = (safeJson(await mine.get('/api/v1/account/orders')) as { orders: Json[] }).orders;
+    const o = list.find((x) => x.id === orderId)!;
+    expect(o.claimCode).toEqual({ status: 'WAITING', madeAt: h.clock.now().toISOString() });
+    expect(Object.keys(o.claimCode).sort()).toEqual(['madeAt', 'status']);
+  });
+
+  it('reads it once: signed out 401, without its CSRF token 403, another account\'s order 404; then 200, never stored; then 409', async () => {
+    const signedOut = await h.client().post(url('claim-code'));
+    expect(signedOut.statusCode).toBe(401);
+    expect((await mine.post(url('claim-code'), undefined, { noCsrf: true })).statusCode).toBe(403);
+    const theirs = await other.post(url('claim-code'));
+    expect([theirs.statusCode, errorOf(theirs).code]).toEqual([404, 'ORDER_NOT_FOUND']);
+    expect((await mine.post(url('claim-code'), { x: 1 })).statusCode).toBe(400);
+    const res = await mine.post(url('claim-code'));
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    const body = safeJson(res) as { claimCode: string; productId: string };
+    expect(body).toEqual({ claimCode: expect.stringMatching(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/), productId });
+    code = body.claimCode;
+    const again = await mine.post(url('claim-code'));
+    expect([again.statusCode, errorOf(again)]).toEqual([409, { code: 'CLAIM_CODE_UNAVAILABLE', message: 'This claim code can no longer be shown. ORBES Client Services can assist you.' }]);
+    expect((safeJson(await mine.get('/api/v1/account/orders')) as { orders: Json[] }).orders.find((x) => x.id === orderId)!.claimCode).toBeNull();
+  });
+
+  it('saves the new card with the code in the body: refused without it, with a wrong one, for another account; a PDF never stored', async () => {
+    expect((await mine.post(url('claim-card.pdf'), {})).statusCode).toBe(400);
+    const wrong = await mine.post(url('claim-card.pdf'), { claimCode: 'AAAA-AAAA-AAAA' });
+    expect([wrong.statusCode, errorOf(wrong).code]).toEqual([422, 'CLAIM_CODE_MISMATCH']);
+    expect((await other.post(url('claim-card.pdf'), { claimCode: code })).statusCode).toBe(404);
+    const res = await mine.post(url('claim-card.pdf'), { claimCode: code });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('application/pdf');
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.headers['content-disposition']).toMatch(/^attachment; filename="/);
+    expect(res.rawPayload.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  });
+
+  it('REGISTER THIS PIECE: another account\'s order 404; the code registers the piece, never stored; the card no longer offered', async () => {
+    expect((await other.post(url('register'), { claimCode: code })).statusCode).toBe(404);
+    expect((await mine.post(url('register'), { claimCode: code }, { noCsrf: true })).statusCode).toBe(403);
+    const res = await mine.post(url('register'), { claimCode: code });
+    expect(res.statusCode, res.body).toBe(201);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(safeJson(res)).toEqual({ productId, verified: true, since: h.clock.now().toISOString() });
+    expect((await h.ctx.db.selectFrom('orders').select('status').where('id', '=', orderId).executeTakeFirstOrThrow()).status).toBe('DELIVERED');
+    const card = await mine.post(url('claim-card.pdf'), { claimCode: code });
+    expect([card.statusCode, errorOf(card).code]).toEqual([409, 'CLAIM_CARD_UNAVAILABLE']);
+    // The code is never in an audit entry, nor in any URL the app calls (they carry the order's id only).
+    const audit = JSON.stringify(await h.ctx.db.selectFrom('audit_logs').selectAll().execute());
+    expect(audit).not.toContain(code);
+    expect(audit).not.toContain(code.replace(/-/g, ''));
+  });
+});

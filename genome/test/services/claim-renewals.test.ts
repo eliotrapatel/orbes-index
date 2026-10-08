@@ -189,9 +189,9 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
     await rejects(renewals().reveal(buyer.id, orderId, buyer.actor), 'CLAIM_CODE_UNAVAILABLE', 409);
     expect((await orders().forAccount(buyer.id)).find((o) => o.id === orderId)!.claimCode).toBeNull();
     // Its new card, with the code read: the 79t card, audited as the buyer's.
-    await rejects(renewals().buyerCard(other.id, orderId, read.claimCode, other.actor), 'ORDER_NOT_FOUND', 404);
-    await rejects(renewals().buyerCard(buyer.id, orderId, piece.claimCode!, buyer.actor), 'CLAIM_CODE_MISMATCH', 422);
-    const card = await renewals().buyerCard(buyer.id, orderId, read.claimCode, buyer.actor);
+    await rejects(renewals().newCard(other.id, orderId, read.claimCode, other.actor), 'ORDER_NOT_FOUND', 404);
+    await rejects(renewals().newCard(buyer.id, orderId, piece.claimCode!, buyer.actor), 'CLAIM_CODE_MISMATCH', 422);
+    const card = await renewals().newCard(buyer.id, orderId, read.claimCode, buyer.actor);
     expect(card.contentType).toBe('application/pdf');
     const renders = await t.db.selectFrom('audit_logs').select(['action', 'actor_type', 'details']).where('action', 'like', 'certificate.render%').where('actor_id', '=', buyer.id).orderBy('id').execute();
     expect(renders.map((a) => [a.action, a.actor_type])).toEqual([
@@ -209,7 +209,7 @@ describe('NEW CLAIM CODE (plan NEXT LOT §3.4)', () => {
     const registered = await t.db.selectFrom('audit_logs').select('details').where('action', '=', 'ownership.register').where('target_id', '=', piece.product.productId).executeTakeFirstOrThrow();
     expect(registered.details).toEqual({ accountId: buyer.id, verified: true, acquiredVia: 'FIRST_REGISTRATION', via: 'order', orderId });
     // Registered: no card and no new code any more.
-    await rejects(renewals().buyerCard(buyer.id, orderId, read.claimCode, buyer.actor), 'CLAIM_CARD_UNAVAILABLE', 409);
+    await rejects(renewals().newCard(buyer.id, orderId, read.claimCode, buyer.actor), 'CLAIM_CARD_UNAVAILABLE', 409);
     expect(await situation(piece)).toMatchObject({ renewable: null, refusal: 'REGISTERED' });
     await rejects(renewFor(piece, 'SOLD'), 'ALREADY_REGISTERED', 409);
     holdsNot((await allAudit()) + (await allRows()), read.claimCode);
