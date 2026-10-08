@@ -213,6 +213,14 @@ export type ReturnOutcome = (typeof RETURN_OUTCOMES)[number];
 export const INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
 export type InvoiceKind = (typeof INVOICE_KINDS)[number];
 
+/** What a credit note credits (invoices.credit_scope, plan NEXT LOT §3.6.C): what remains of its invoice, or single lines. */
+export const CREDIT_SCOPES = ['FULL', 'LINES'] as const;
+export type CreditScope = (typeof CREDIT_SCOPES)[number];
+
+/** Who entered an order's delivery address or engraving (orders.address_by, engraving_by, plan NEXT LOT §3.6.B): the collector or Client Services. */
+export const ADDRESS_SOURCES = ['COLLECTOR', 'STAFF'] as const;
+export type AddressSource = (typeof ADDRESS_SOURCES)[number];
+
 /** The kind of a drop (drops.mode): a DRAW (P-R03) or a LIVE RELEASE, lived in real time. */
 export const DROP_MODES = ['DRAW', 'LIVE'] as const;
 export type DropMode = (typeof DROP_MODES)[number];

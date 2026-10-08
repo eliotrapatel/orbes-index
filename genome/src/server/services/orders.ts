@@ -1621,7 +1621,7 @@ export async function createExchangeOrder(
     notes,
   );
   if (original.engraving_text !== null || original.buyer_name !== null || original.buyer_address !== null) {
-    o = await updateOrder(tx, o.id, { engraving_text: original.engraving_text, buyer_name: original.buyer_name, buyer_address: original.buyer_address });
+    o = await updateOrder(tx, o.id, { engraving_text: original.engraving_text, engraving_by: original.engraving_by, buyer_name: original.buyer_name, buyer_address: original.buyer_address });
   }
   if (credit.length) {
     // The credit the original's return gave back is taken off the exchange again, before PAID: its invoice carries the
@@ -2165,7 +2165,8 @@ export class OrderService {
         }
       }
       if (engraving !== undefined && engraving !== o.engraving_text) {
-        after = await updateOrder(tx, o.id, { engraving_text: engraving });
+        // Migration 0039: Client Services' words (STAFF).
+        after = await updateOrder(tx, o.id, { engraving_text: engraving, engraving_by: engraving === null ? null : 'STAFF' });
         fields.push('engraving');
       }
       if (sizeChange) {

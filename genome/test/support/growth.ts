@@ -293,6 +293,7 @@ export class GrowthWorld {
           sequence: ++this.invoiceSeq,
           order_id: orderId,
           credits_invoice_id: credits,
+          credit_scope: kind === 'CREDIT_NOTE' ? 'FULL' : null,
           issuer: jsonText({ name: 'CONGLOMERAT LLC', address: ['30 N Gould St, Ste N', 'Sheridan, WY 82801', 'United States'] }),
           buyer: jsonText({ name: null, address: null, email: null }),
           lines: jsonText(lines),
@@ -496,8 +497,8 @@ export async function seedGrowthHouse(db: Db, o: { modelId: string; accounts: nu
            currency, price_minor, price_minor, paid_at
       FROM orders WHERE channel = 'SALON' AND paid_at IS NOT NULL`.execute(db);
   await sql`
-    INSERT INTO invoices (kind, year, sequence, order_id, credits_invoice_id, issuer, buyer, lines, currency, subtotal_minor, total_minor, issued_at)
-    SELECT 'CREDIT_NOTE', extract(year FROM o.cancelled_at AT TIME ZONE 'UTC')::int, row_number() OVER (ORDER BY o.id), o.id, i.id, i.issuer, i.buyer, i.lines,
+    INSERT INTO invoices (kind, year, sequence, order_id, credits_invoice_id, credit_scope, issuer, buyer, lines, currency, subtotal_minor, total_minor, issued_at)
+    SELECT 'CREDIT_NOTE', extract(year FROM o.cancelled_at AT TIME ZONE 'UTC')::int, row_number() OVER (ORDER BY o.id), o.id, i.id, 'FULL', i.issuer, i.buyer, i.lines,
            i.currency, i.subtotal_minor, i.total_minor, o.cancelled_at
       FROM orders o JOIN invoices i ON i.order_id = o.id AND i.kind = 'INVOICE' WHERE o.status = 'CANCELLED'`.execute(db);
   await sql`

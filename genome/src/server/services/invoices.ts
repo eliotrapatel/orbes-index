@@ -289,6 +289,8 @@ export async function issueCreditNote(tx: Db, o: OrderRow, reason: 'cancel' | 'r
       sequence,
       order_id: o.id,
       credits_invoice_id: invoice.id,
+      // Migration 0039: a credit note says what it credits; this one, the whole invoice.
+      credit_scope: 'FULL',
       issuer: jsonText({ name: INVOICE_ISSUER.name, address: [...INVOICE_ISSUER.address] }),
       buyer: jsonText(invoice.buyer),
       lines: jsonText(invoice.lines),

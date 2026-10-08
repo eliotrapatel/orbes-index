@@ -423,6 +423,8 @@ describe('admin enums mirror the server', () => {
       'ORDER_CASE_PIECE_STATES',
       'ORDER_CASE_OUTCOMES',
       'ORDER_CASE_PIECE_DESTINATIONS',
+      'CREDIT_SCOPES',
+      'ADDRESS_SOURCES',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }

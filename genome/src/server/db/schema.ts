@@ -266,6 +266,20 @@ export const INVOICE_KINDS = ['INVOICE', 'CREDIT_NOTE'] as const;
 export type InvoiceKind = (typeof INVOICE_KINDS)[number];
 
 /**
+ * What a credit note credits (invoices.credit_scope, migration 0039, plan NEXT LOT §3.6.C): FULL, what remains of its
+ * invoice (every credit note of before), or LINES, single lines (an engraving removed after PAID).
+ */
+export const CREDIT_SCOPES = ['FULL', 'LINES'] as const;
+export type CreditScope = (typeof CREDIT_SCOPES)[number];
+
+/**
+ * Who entered an order's delivery address or its engraving (orders.address_by, orders.engraving_by, migration 0039, plan
+ * NEXT LOT §3.6.B and §3.6.C): the COLLECTOR, in YOUR ORDERS, or ORBES Client Services (STAFF).
+ */
+export const ADDRESS_SOURCES = ['COLLECTOR', 'STAFF'] as const;
+export type AddressSource = (typeof ADDRESS_SOURCES)[number];
+
+/**
  * How the access rules of a LIVE RELEASE combine (drops.access_combine, migration 0023): every rule met (AND), or any
  * one of them (OR). NULL on a LIVE drop: AND.
  */
@@ -1464,6 +1478,25 @@ export interface AccountSizesTable {
 }
 
 /**
+ * YOUR ADDRESSES (migration 0039, plan NEXT LOT §3.6.B): a collector's saved delivery addresses, at most 5, one of them
+ * the default (put on each new order). The collector's own data: a removed address is a deleted row.
+ */
+export interface AccountAddressesTable {
+  id: Generated<string>;
+  account_id: string;
+  name: string;
+  /** The lines as typed, line breaks kept. */
+  address: string;
+  /** ISO 3166-1 alpha-2. */
+  country: string;
+  /** With its country code: +33 6 12 34 56 78. */
+  phone: string;
+  is_default: WithDefault<boolean>;
+  created_at: TimestampDefault;
+  updated_at: TimestampDefault;
+}
+
+/**
  * A model's pairs (migration 0031, plan NEXT-NINE BP-34, PAIRS WELL WITH): the models its sheet shows at its very end,
  * in their order (`position` 1..3), each once, never itself. Set on a main model or a model alone (services/catalog.ts
  * setPairs: 0, 2 or 3 rows, never a model of its own variant group).
@@ -1586,6 +1619,22 @@ export interface OrdersTable {
   exchange_of_order_id: ColumnType<string | null, string | null | undefined, string | null>;
   /** Start packing: set on every order of a parcel, never cleared (the collector's address and engraving lock). */
   packing_started_at: TimestampNullable;
+  /**
+   * Migration 0039 (plan NEXT LOT §3.6.B): the delivery address's country (ISO 3166-1 alpha-2) and phone, who entered it
+   * (both or neither with `address_at`) and when it was replaced after it was first entered (ADDRESS CHANGED). Never on
+   * an order travelling with another: it is delivered to that order's address.
+   */
+  buyer_country: ColumnType<string | null, string | null | undefined, string | null>;
+  buyer_phone: ColumnType<string | null, string | null | undefined, string | null>;
+  address_by: ColumnType<AddressSource | null, AddressSource | null | undefined, AddressSource | null>;
+  address_at: TimestampNullable;
+  address_changed_at: TimestampNullable;
+  /**
+   * Migration 0039 (§3.6.C): the price an engraving was taken at (the setting's then; NULL for the release's add-on and
+   * for one of before), and who typed its words (present exactly with them).
+   */
+  engraving_minor: ColumnType<number | null, number | null | undefined, number | null>;
+  engraving_by: ColumnType<AddressSource | null, AddressSource | null | undefined, AddressSource | null>;
 }
 
 /**
@@ -1724,6 +1773,10 @@ export interface InvoicesTable {
   vat_minor: ColumnType<number | null, number | null | undefined, number | null>;
   total_minor: number;
   issued_at: TimestampDefault;
+  /** Migration 0039 (plan NEXT LOT §3.6.C): a supplementary INVOICE's main invoice (an engraving added after PAID). */
+  supplements_invoice_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** A credit note's scope: FULL (what remains) or LINES (single lines); NULL on an invoice. */
+  credit_scope: ColumnType<CreditScope | null, CreditScope | null | undefined, CreditScope | null>;
 }
 
 /**
@@ -1896,6 +1949,17 @@ export interface ShippingRatesTable {
   currency: HouseCurrency;
   service: ShippingService;
   fee_minor: number;                   // 0..100 000 000
+  updated_by: string | null;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * The engraving's price per currency (migration 0039, plan NEXT LOT §3.6.C; Orders → Settings, Engraving, ADMIN), for an
+ * order whose release did not sell the engraving as an add-on; no row: no engraving offered in that currency.
+ */
+export interface EngravingPricesTable {
+  currency: HouseCurrency;
+  price_minor: number;                 // 0..100 000 000
   updated_by: string | null;
   updated_at: TimestampDefault;
 }
@@ -2183,12 +2247,14 @@ export interface Database {
   order_alert_settings: OrderAlertSettingsTable;
   club_program_settings: ClubProgramSettingsTable;
   shipping_rates: ShippingRatesTable;
+  engraving_prices: EngravingPricesTable;
   tier_grants: TierGrantsTable;
   credit_uses: CreditUsesTable;
   care_requests: CareRequestsTable;
   house_guarantees: HouseGuaranteesTable;
   guarantee_settings: GuaranteeSettingsTable;
   account_sizes: AccountSizesTable;
+  account_addresses: AccountAddressesTable;
   model_pairs: ModelPairsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
@@ -2304,6 +2370,8 @@ export type ClientConversationRow = Selectable<ClientConversationsTable>;
 export type ClientMessageRow = Selectable<ClientMessagesTable>;
 export type ClubProgramSettingsRow = Selectable<ClubProgramSettingsTable>;
 export type ShippingRateRow = Selectable<ShippingRatesTable>;
+export type EngravingPriceRow = Selectable<EngravingPricesTable>;
+export type AccountAddressRow = Selectable<AccountAddressesTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
 export type CareRequestRow = Selectable<CareRequestsTable>;

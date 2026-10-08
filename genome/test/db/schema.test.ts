@@ -158,6 +158,10 @@ describe('schema', () => {
       ['order_cases', 'piece_state', S.ORDER_CASE_PIECE_STATES],
       ['order_cases', 'outcome', S.ORDER_CASE_OUTCOMES],
       ['order_cases', 'piece_to', S.ORDER_CASE_PIECE_DESTINATIONS],
+      ['orders', 'address_by', S.ADDRESS_SOURCES],
+      ['orders', 'engraving_by', S.ADDRESS_SOURCES],
+      ['engraving_prices', 'currency', S.HOUSE_CURRENCIES],
+      ['invoices', 'credit_scope', S.CREDIT_SCOPES],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -768,6 +772,46 @@ describe('schema', () => {
     expect(none.size_id).toBeNull();
     await expect(t.db.updateTable('drop_entries').set({ size_id: size.id }).where('drop_id', '=', pooled.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e, 'drop_entries_size_fkey'));
     await expect(t.db.deleteFrom('drop_sizes').where('id', '=', size.id).execute()).rejects.toSatisfy((e) => isForeignKeyViolation(e));
+  });
+
+  it('order delivery (0039): the mirror at work: a saved address, the default of one; an order\'s country, phone and author; an engraving\'s price and author; an engraving price; a supplementary invoice and credit notes for single lines then one in full', async () => {
+    const admin = await t.db.insertInto('admin_users').values({ email: 'delivery-0039@orbes.test', email_normalized: 'delivery-0039@orbes.test', password_hash: 'scrypt$x', role: 'ADMIN' }).returning('id').executeTakeFirstOrThrow();
+    const account = await t.db.insertInto('accounts').values({ email: 'delivery-0039@example.com', email_normalized: 'delivery-0039@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const saved = await t.db
+      .insertInto('account_addresses')
+      .values({ account_id: account.id, name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', country: 'FR', phone: '+33 6 12 34 56 78', is_default: true })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(saved).toMatchObject({ id: expect.any(String), is_default: true, created_at: expect.any(Date), updated_at: expect.any(Date) });
+    await expect(t.db.insertInto('account_addresses').values({ account_id: account.id, name: 'Jane Doe', address: '2 rue', country: 'GB', phone: '+44 20 7946 0000', is_default: true }).execute()).rejects.toSatisfy((e) =>
+      isUniqueViolation(e, 'account_addresses_one_default'),
+    );
+    const { model } = await seedProduct(t.db);
+    const location = await t.db.insertInto('stock_locations').values({ name: 'DELIVERY 0039' }).returning('id').executeTakeFirstOrThrow();
+    const request = await t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const order = await t.db
+      .insertInto('orders')
+      .values({
+        channel: 'SALON', shop_request_id: request.id, account_id: account.id, model_id: model.id, location_id: location.id, price_minor: 1000, currency: 'EUR',
+        buyer_name: 'Jane Doe', buyer_address: '1 rue de la Paix', buyer_country: 'FR', buyer_phone: '+33 6 12 34 56 78', address_by: 'COLLECTOR', address_at: new Date('2026-10-08T10:00:00Z'),
+        engraving_text: 'J.M.', engraving_by: 'COLLECTOR', engraving_minor: 3000,
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(order).toMatchObject({ buyer_country: 'FR', buyer_phone: '+33 6 12 34 56 78', address_by: 'COLLECTOR', address_changed_at: null, engraving_minor: 3000, engraving_by: 'COLLECTOR' });
+    await t.db.insertInto('engraving_prices').values({ currency: 'EUR', price_minor: 3000, updated_by: admin.id }).execute();
+    const doc = (kind: 'INVOICE' | 'CREDIT_NOTE', sequence: number, more: { supplements_invoice_id?: string; credits_invoice_id?: string; credit_scope?: S.CreditScope } = {}) =>
+      t.db
+        .insertInto('invoices')
+        .values({ kind, year: 2026, sequence, order_id: order.id, issuer: '{}', buyer: '{}', lines: '[{"kind":"ENGRAVING","label":"Engraving","amountMinor":3000}]', currency: 'EUR', subtotal_minor: 3000, total_minor: 3000, ...more })
+        .returningAll()
+        .executeTakeFirstOrThrow();
+    const main = await doc('INVOICE', 980001);
+    const supplement = await doc('INVOICE', 980002, { supplements_invoice_id: main.id });
+    expect(supplement).toMatchObject({ supplements_invoice_id: main.id, credit_scope: null });
+    expect(await doc('CREDIT_NOTE', 980001, { credits_invoice_id: supplement.id, credit_scope: 'LINES' })).toMatchObject({ credit_scope: 'LINES' });
+    expect(await doc('CREDIT_NOTE', 980002, { credits_invoice_id: main.id, credit_scope: 'FULL' })).toMatchObject({ credit_scope: 'FULL' });
+    await expect(doc('CREDIT_NOTE', 980003, { credits_invoice_id: main.id, credit_scope: 'FULL' })).rejects.toSatisfy((e) => isUniqueViolation(e, 'invoices_full_credit_key'));
   });
 
   it('audit_logs is append-only at the database level', async () => {
