@@ -275,7 +275,7 @@ const dateOf = (d: Date | string | null): string | null => (d === null ? null : 
 const lockKey = (uuid: string) => Number.parseInt(uuid.replace(/-/g, '').slice(0, 8), 16) | 0;
 
 /** The SKUs named, as the supplier orders name them. */
-async function skusOf(db: Db, ids: readonly string[]): Promise<Map<string, SupplierOrderSku>> {
+export async function skusOf(db: Db, ids: readonly string[]): Promise<Map<string, SupplierOrderSku>> {
   if (ids.length === 0) return new Map();
   const rows = await db
     .selectFrom('skus as k')

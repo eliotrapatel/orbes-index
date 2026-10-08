@@ -9,10 +9,13 @@
  *    price, counts, counts again; an AUDITOR reads the board, never counts; ORBES staff see the orders on their way,
  *    never the agent; an OPERATOR sends back and confirms; the cards come as a PDF, no-store, the skipped pieces in a
  *    header; Cards attached; the rejected pieces sent back; another location's rows 404.
+ *  - the stock (step 5.8): the agent's rows of its locations without expected, to order nor NO PIECE, ORBES staff's
+ *    with them; a correction proposed by the agent (201), approved by an OPERATOR only; pieces counted in by an
+ *    OPERATOR; a minimum (204); a transfer.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ensureSku } from '../../src/server/services/stock.js';
-import type { Actor } from '../../src/server/types.js';
+import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { adminClient, createAdmin, createHarness, errorOf, safeJson, seedCatalog, type Client, type Harness } from './support.js';
 
 type Json = Record<string, any>;
@@ -130,6 +133,38 @@ describe('Logistics over HTTP (plan NEXT LOT §3.5.6.9)', () => {
       expect(errorOf(await auditor.post(`/api/admin/logistics/supplier-returns/${ret.id}/sent`, {})).code).toBe('FORBIDDEN');
       expect((safeJson(await agent.post(`/api/admin/logistics/supplier-returns/${ret.id}/sent`, {})) as Json).status).toBe('RETURNED');
       expect(JSON.stringify(board)).not.toMatch(/price|Minor|Maison Nord/i);
+    });
+  });
+  describe('the stock (step 5.8)', () => {
+    it('gives the agent its locations without expected, to order nor NO PIECE; takes its correction for an OPERATOR to approve; counts pieces in; sets a minimum; transfers', async () => {
+      const catalog = await seedCatalog(h.ctx);
+      const sku = await h.ctx.db.transaction().execute((tx) => ensureSku(tx, catalog.modelId, '54'));
+      const mine = safeJson(await agent.get(`/api/admin/logistics/stock?modelId=${catalog.modelId}`)) as Json;
+      expect(mine.rows.map((r: Json) => [r.sku.sizeLabel, r.location.name])).toEqual([['54', 'LOGISTICS WAREHOUSE']]);
+      expect(Object.keys(mine.rows[0]).sort()).toEqual(['available', 'location', 'minimum', 'onHand', 'reserved', 'sku', 'waiting']);
+      expect(Object.keys(mine).sort()).toEqual(['locations', 'rows', 'skus']);
+      const france = (await h.t.db.selectFrom('stock_locations').select('id').where('name', '=', 'FRANCE WAREHOUSE').executeTakeFirstOrThrow()).id;
+      expect(errorOf(await agent.get(`/api/admin/logistics/stock?locationId=${france}`)).code).toBe('STOCK_LOCATION_NOT_FOUND');
+      const staff = safeJson(await auditor.get(`/api/admin/logistics/stock?modelId=${catalog.modelId}`)) as Json;
+      expect(staff.rows.map((r: Json) => r.location.name)).toEqual(['FRANCE WAREHOUSE', 'LOGISTICS WAREHOUSE', 'NORTH HUB']);
+      expect(staff.rows[0]).toMatchObject({ expected: 0, toOrder: 0, unbacked: 0 });
+      // A piece counted in by an OPERATOR, then the agent's correction up approved by an OPERATOR.
+      const made = await h.ctx.services.issuance.issueProduct({ categoryCode: 'J', modelId: catalog.modelId, material: '925 STERLING SILVER', variant: '54' }, SYSTEM_ACTOR);
+      expect(errorOf(await agent.post('/api/admin/logistics/count-in', { skuId: sku, productIds: [made.product.productId], note: 'On the shelf.' })).code).toBe('FORBIDDEN');
+      expect(safeJson(await operator.post('/api/admin/logistics/count-in', { skuId: sku, productIds: [made.product.productId], note: 'On the shelf.' }))).toEqual({ skuId: sku, productIds: [made.product.productId], unbacked: 0 });
+      const proposed = await agent.post('/api/admin/logistics/corrections', { skuId: sku, locationId: logistics, delta: 1, reason: 'Found on the shelf.' });
+      expect(proposed.statusCode).toBe(201);
+      const c = safeJson(proposed) as Json;
+      expect(c).toMatchObject({ status: 'TO_APPROVE', delta: 1, sku: { id: sku }, location: { id: logistics } });
+      expect((safeJson(await agent.get('/api/admin/logistics/corrections')) as Json).toApprove).toBe(1);
+      expect(errorOf(await agent.post(`/api/admin/logistics/corrections/${c.id}/approve`)).code).toBe('FORBIDDEN');
+      expect((safeJson(await operator.post(`/api/admin/logistics/corrections/${c.id}/approve`)) as Json).status).toBe('APPROVED');
+      expect(errorOf(await operator.post(`/api/admin/logistics/corrections/${c.id}/decline`, { note: 'No.' })).code).toBe('CORRECTION_NOT_PENDING');
+      // A minimum, then a transfer.
+      expect((await operator.request('PUT', '/api/admin/logistics/minimums', { body: { skuId: sku, locationId: logistics, minimum: 2 } })).statusCode).toBe(204);
+      const moved = safeJson(await operator.post('/api/admin/logistics/transfers', { skuId: sku, fromLocationId: logistics, toLocationId: france, quantity: 1 })) as Json;
+      expect(moved).toMatchObject({ from: { onHand: 0 }, to: { onHand: 1 } });
+      expect((safeJson(await agent.get(`/api/admin/logistics/stock?modelId=${catalog.modelId}`)) as Json).rows[0]).toMatchObject({ onHand: 0, minimum: 2 });
     });
   });
 });

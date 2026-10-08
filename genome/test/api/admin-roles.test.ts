@@ -324,6 +324,16 @@ const PROBES: Probe[] = [
   { group: 'receptions', method: 'POST', url: `/api/admin/logistics/receptions/${UUID}/cards`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
   { group: 'receptions', method: 'POST', url: `/api/admin/logistics/receptions/${UUID}/cards-attached`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
   { group: 'receptions', method: 'POST', url: `/api/admin/logistics/supplier-returns/${UUID}/sent`, body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  // Logistics' stock (step 5.8): the agent reads and proposes; OPERATOR approves, transfers, sets minimums, counts in.
+  { group: 'logistics-stock', method: 'GET', url: '/api/admin/logistics/stock', min: 'LOGISTICS', roles: LOGISTICS_READ },
+  { group: 'logistics-stock', method: 'GET', url: `/api/admin/logistics/stock?locationId=${UUID}`, min: 'LOGISTICS', roles: LOGISTICS_READ },
+  { group: 'logistics-stock', method: 'GET', url: '/api/admin/logistics/corrections', min: 'LOGISTICS', roles: LOGISTICS_READ },
+  { group: 'logistics-stock', method: 'POST', url: '/api/admin/logistics/corrections', body: INVALID, min: 'LOGISTICS', roles: LOGISTICS_ACT },
+  { group: 'logistics-stock', method: 'POST', url: `/api/admin/logistics/corrections/${UUID}/approve`, body: INVALID, min: 'OPERATOR' },
+  { group: 'logistics-stock', method: 'POST', url: `/api/admin/logistics/corrections/${UUID}/decline`, body: INVALID, min: 'OPERATOR' },
+  { group: 'logistics-stock', method: 'POST', url: '/api/admin/logistics/transfers', body: INVALID, min: 'OPERATOR' },
+  { group: 'logistics-stock', method: 'PUT', url: '/api/admin/logistics/minimums', body: INVALID, min: 'OPERATOR' },
+  { group: 'logistics-stock', method: 'POST', url: '/api/admin/logistics/count-in', body: INVALID, min: 'OPERATOR' },
   { group: 'logistics', method: 'GET', url: '/api/admin/locations', min: 'AUDITOR' },
   { group: 'logistics', method: 'POST', url: '/api/admin/locations', body: INVALID, min: 'ADMIN' },
   { group: 'logistics', method: 'PATCH', url: `/api/admin/locations/${UUID}`, body: INVALID, min: 'ADMIN' },
@@ -452,6 +462,7 @@ describe('admin role enforcement', () => {
       'suppliers',
       'supplier-orders',
       'receptions',
+      'logistics-stock',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
@@ -573,6 +584,9 @@ describe('admin role enforcement', () => {
         'GET /api/admin/auth/me',
         'POST /api/admin/auth/password',
         'POST /api/admin/auth/totp/enable',
+        'GET /api/admin/logistics/stock',
+        'GET /api/admin/logistics/corrections',
+        'POST /api/admin/logistics/corrections',
         'GET /api/admin/logistics/receptions',
         'GET /api/admin/logistics/receptions/supplier-order',
         `GET /api/admin/logistics/receptions/lines/${UUID}`,

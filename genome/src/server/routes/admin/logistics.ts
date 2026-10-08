@@ -25,12 +25,33 @@
  *                                                                               skipped in `x-orbes-cards-skipped`
  *   POST   /api/admin/logistics/receptions/:id/cards-attached   LOGISTICS_ACT   every card is with its piece
  *   POST   /api/admin/logistics/supplier-returns/:id/sent       LOGISTICS_ACT   rejected pieces sent back to the supplier
+ *
+ * The stock (step 5.8, services/logistics.ts):
+ *
+ *   GET    /api/admin/logistics/stock                           LOGISTICS_READ  every size at each location (?locationId=
+ *                                                                               &modelId=); expected, to order and the
+ *                                                                               pieces without an identity for ORBES staff
+ *   GET    /api/admin/logistics/corrections                     LOGISTICS_READ  the corrections (?status=), the newest first
+ *   POST   /api/admin/logistics/corrections                     LOGISTICS_ACT   proposed by the agent; ORBES staff's applied
+ *   POST   /api/admin/logistics/corrections/:id/approve         OPERATOR        the count moves
+ *   POST   /api/admin/logistics/corrections/:id/decline         OPERATOR        with ORBES's note
+ *   POST   /api/admin/logistics/transfers                       OPERATOR        pieces moved between locations
+ *   PUT    /api/admin/logistics/minimums                        OPERATOR        a size's minimum at a location (204)
+ *   POST   /api/admin/logistics/count-in                        OPERATOR        named pieces enter the stock with their identity
  */
 import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
 import type { AppContext } from '../../context.js';
 import type { AdminRole } from '../../db/schema.js';
 import {
+  correctionBody,
+  correctionParams,
+  correctionsQuery,
+  countInBody,
   createReceptionBody,
+  declineCorrectionBody,
+  logisticsStockQuery,
+  stockThresholdBody,
+  stockTransferBody,
   emptyBody,
   parse,
   receptionCardsBody,
@@ -72,8 +93,50 @@ const READ = { guard: { roles: LOGISTICS_READ } };
 const OPERATOR = { guard: { minRole: 'OPERATOR' as const } };
 
 export const adminLogisticsRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { receptions } = ctx.services;
+  const { receptions, logistics } = ctx.services;
   const scopeOf = (request: FastifyRequest) => logisticsScope(ctx, request);
+
+  // ── The stock (step 5.8) ─────────────────────────────────────────────────
+  app.get('/api/admin/logistics/stock', { config: READ }, async (request) => {
+    const q = parse(logisticsStockQuery, request.query);
+    return logistics.stock({ ...(q.locationId ? { locationId: q.locationId } : {}), ...(q.modelId ? { modelId: q.modelId } : {}) }, await scopeOf(request));
+  });
+
+  app.get('/api/admin/logistics/corrections', { config: READ }, async (request) => {
+    const q = parse(correctionsQuery, request.query);
+    return logistics.corrections(await scopeOf(request), q.status ? { status: q.status } : {});
+  });
+
+  app.post('/api/admin/logistics/corrections', { config: ACT }, async (request, reply) => {
+    const b = parse(correctionBody, request.body);
+    return reply.code(201).send(await logistics.proposeCorrection(b, adminActor(request), await scopeOf(request)));
+  });
+
+  app.post('/api/admin/logistics/corrections/:id/approve', { config: OPERATOR }, async (request) => {
+    const { id } = parse(correctionParams, request.params);
+    parse(emptyBody, request.body);
+    return logistics.approveCorrection(id, adminActor(request));
+  });
+
+  app.post('/api/admin/logistics/corrections/:id/decline', { config: OPERATOR }, async (request) => {
+    const { id } = parse(correctionParams, request.params);
+    return logistics.declineCorrection(id, parse(declineCorrectionBody, request.body), adminActor(request));
+  });
+
+  app.post('/api/admin/logistics/transfers', { config: OPERATOR }, async (request) => {
+    const b = parse(stockTransferBody, request.body);
+    return logistics.transfer({ ...b, note: b.note ?? null }, adminActor(request));
+  });
+
+  app.put('/api/admin/logistics/minimums', { config: OPERATOR }, async (request, reply) => {
+    await logistics.setMinimum(parse(stockThresholdBody, request.body), adminActor(request));
+    return reply.code(204).send();
+  });
+
+  app.post('/api/admin/logistics/count-in', { config: OPERATOR }, async (request) => {
+    const b = parse(countInBody, request.body);
+    return logistics.countIn(b.skuId, { productRefs: b.productIds, note: b.note }, adminActor(request));
+  });
 
   // ── The receptions (step 5.7) ────────────────────────────────────────────
   app.get('/api/admin/logistics/receptions', { config: READ }, async (request) => {

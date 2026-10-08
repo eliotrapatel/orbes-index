@@ -145,7 +145,7 @@ const skuNotFound = () => notFound('SKU', 'SKU_NOT_FOUND');
 const locationNotFound = () => notFound('Location', 'STOCK_LOCATION_NOT_FOUND');
 const locationTaken = () => conflict('STOCK_LOCATION_NAME_TAKEN', 'Another location has this name.');
 const carrierTaken = () => conflict('CARRIER_NAME_TAKEN', 'Another carrier has this name.');
-const notAvailable = (available: number) =>
+export const notAvailable = (available: number) =>
   conflict('STOCK_NOT_AVAILABLE', available === 1 ? 'Only 1 piece is available there: the others are reserved by orders.' : `Only ${available} pieces are available there: the others are reserved by orders.`);
 
 /** A location as the console reads it. */

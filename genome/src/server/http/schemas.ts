@@ -43,6 +43,7 @@ import {
   SIZE_KINDS,
   SIZE_TYPES,
   STAFF_ROLES,
+  STOCK_CORRECTION_STATUSES,
   SUPPLIER_ORDER_STATUSES,
   SUPPLIER_RETURN_SETTLEMENTS,
   VERIFICATION_STATES,
@@ -96,6 +97,7 @@ import { CARRIER_NAME_MAX, LOCATION_ADDRESS_MAX, LOCATION_NAME_MAX, STOCK_MOVE_M
 import { SUPPLIER_LIMITS } from '../services/suppliers.js';
 import { SUPPLIER_ORDER_LIMITS } from '../services/supplier-orders.js';
 import { RECEPTION_LIMITS } from '../services/receptions.js';
+import { LOGISTICS_LIMITS } from '../services/logistics.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -1753,6 +1755,34 @@ export const sendBackReceptionBody = body({ note: text(RECEPTION_LIMITS.note) })
 export const supplierReturnSentBody = optionalBody({
   carrierId: z.preprocess(emptyToNull, uuid.nullable().optional()),
   trackingNumber: z.preprocess(emptyToNull, text(40).nullable().optional()),
+});
+
+// ── Admin: logistics' stock (routes/admin/logistics.ts, plan NEXT LOT §3.5.6.6) ─
+
+/** GET /api/admin/logistics/stock: one location, one model. */
+export const logisticsStockQuery = z.object({ locationId: queryOptional(uuid), modelId: queryOptional(uuid) });
+
+/** GET /api/admin/logistics/corrections: one status. */
+export const correctionsQuery = z.object({ status: queryOptional(z.enum(STOCK_CORRECTION_STATUSES)) });
+
+export const correctionParams = z.object({ id: uuid });
+
+/** POST /api/admin/logistics/corrections: a count corrected, up or down, with why. */
+export const correctionBody = body({
+  skuId: uuid,
+  locationId: uuid,
+  delta: z.number().int('Must be a whole number of pieces').min(-STOCK_MOVE_MAX, `At least -${STOCK_MOVE_MAX}`).max(STOCK_MOVE_MAX, `At most ${STOCK_MOVE_MAX}`).refine((n) => n !== 0, 'Not 0'),
+  reason: text(LOGISTICS_LIMITS.reason),
+});
+
+/** POST /api/admin/logistics/corrections/:id/decline: ORBES's note. */
+export const declineCorrectionBody = body({ note: text(LOGISTICS_LIMITS.decisionNote) });
+
+/** POST /api/admin/logistics/count-in: the pieces of a size on the shelf, by serial, and why. */
+export const countInBody = body({
+  skuId: uuid,
+  productIds: z.array(z.string().trim().min(1, 'Required').max(64, 'At most 64 characters')).min(1, 'At least one piece').max(LOGISTICS_LIMITS.countIn, `At most ${LOGISTICS_LIMITS.countIn} pieces`),
+  note: text(LOGISTICS_LIMITS.reason),
 });
 
 // ── Admin: the atelier (routes/admin/atelier.ts) ──────────────────────────

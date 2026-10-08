@@ -78,6 +78,7 @@ import { SessionService } from './services/sessions.js';
 import { StockService } from './services/stock.js';
 import { SupplierOrderService } from './services/supplier-orders.js';
 import { deriveCardClaimKey, ReceptionService } from './services/receptions.js';
+import { LogisticsService } from './services/logistics.js';
 import { SupplierService } from './services/suppliers.js';
 import { VerificationService } from './services/verification.js';
 import { WarrantyService } from './services/warranty.js';
@@ -166,6 +167,8 @@ export interface AppServices {
   supplierOrders: SupplierOrderService;
   /** The receptions (plan NEXT LOT §3.5.6.5): a delivery counted by the agent, confirmed by ORBES, its identities issued by a worker, its cards printed. */
   receptions: ReceptionService;
+  /** Logistics (plan NEXT LOT §3.5.6.6): the stock as the agent and ORBES read it, corrections, transfers, minimums, pieces counted in. */
+  logistics: LogisticsService;
   /** GROWTH (plan NEXT-NINE, BP-29): what a collector is worth, repeat buying, the funnel from a scan to PALLADIUM, the revenue; reads only. */
   growth: GrowthService;
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code for a piece not registered yet, shown once to staff or sealed for its buyer. */
@@ -293,6 +296,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const sizes = new SizeService({ db, audit, clock });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
+    const logistics = new LogisticsService({ db, audit, stock, clock });
     const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
     const growth = new GrowthService({ db, clock });
     const claimRenewals = new ClaimRenewalService({ db, audit, certificates, revealKey: deriveClaimRevealKey(config), clock });
@@ -343,6 +347,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       suppliers,
       supplierOrders,
       receptions,
+      logistics,
       growth,
       claimRenewals,
       ...overrides.services,
