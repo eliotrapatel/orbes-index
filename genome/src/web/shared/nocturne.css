@@ -1439,7 +1439,9 @@ body.nocturne .n-column > * {
 /* Five steps and more (plan NEXT LOT §3.6.A: IN PREPARATION; six on an order returned once delivered): the labels
    tracked closer at every width, a 4 px gutter before the next step and each date on one line, so each keeps its
    column (IN PREPARATION on two lines where it is narrow; at 320 px five hold even with the widest dates, 28 MAR);
-   under 375 px six go in two rows of three dots, without the hairline. */
+   under 420 px six go in two rows of three dots, without the hairline: one row of six barely holds at 375 px with
+   the Mac's Helvetica Neue and spills where the words are set wider (Linux's renderer in CI, an Android's fonts), so
+   a row of six is kept for the wider screens. */
 .n-steps--dense .n-steps__label {
   letter-spacing: 0.08em;
 }
@@ -1452,7 +1454,7 @@ body.nocturne .n-column > * {
   white-space: nowrap;
 }
 
-@media (max-width: 374px) {
+@media (max-width: 419px) {
   .n-steps--six {
     grid-template-columns: repeat(3, 1fr) !important;
     row-gap: 18px;

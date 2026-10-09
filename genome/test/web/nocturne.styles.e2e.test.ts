@@ -1029,13 +1029,22 @@ async function myOrders(page: Page): Promise<void> {
   // Plan NEXT LOT §3.6.A: five steps on the way (IN PREPARATION between PAID and SHIPPED).
   expect((await read(page, '.n-pieces__steps', ['grid-template-columns']))['grid-template-columns']!.split(' ')).toHaveLength(5);
   expect(steps._w).toBeDefined();
-  // The returned order: a column per step it reached, then RETURNED (six since IN PREPARATION, its labels tracked closer),
-  // the bar to the end of its line (C32); the cancelled one: no bar.
+  // The returned order: a column per step it reached, then RETURNED (six since IN PREPARATION, its labels tracked closer):
+  // on this 390 px phone two rows of three, without the hairline or the bar; from 420 px one row, the bar to the end of
+  // its line (C32); the cancelled one: no bar.
   const returned = '.n-pieces__order[data-status="RETURNED"] .n-pieces__steps';
-  expect((await read(page, returned, ['grid-template-columns']))['grid-template-columns']!.split(' ')).toHaveLength(6);
+  expect((await read(page, returned, ['grid-template-columns']))['grid-template-columns']!.split(' ')).toHaveLength(3);
+  expect(await shown(page, `${returned} .n-steps__bar`)).toBe(0);
   await check(page, `${returned} .n-steps__label`, { 'letter-spacing': em(8.5, 0.08) });
-  const bar = await read(page, `${returned} .n-steps__bar`, []);
-  expect(Number(bar._w)).toBeCloseTo(Number((await read(page, returned, []))._w) - 10, 0);
+  const phone = page.viewportSize()!;
+  await page.setViewportSize({ width: 430, height: phone.height });
+  try {
+    expect((await read(page, returned, ['grid-template-columns']))['grid-template-columns']!.split(' ')).toHaveLength(6);
+    const bar = await read(page, `${returned} .n-steps__bar`, []);
+    expect(Number(bar._w)).toBeCloseTo(Number((await read(page, returned, []))._w) - 10, 0);
+  } finally {
+    await page.setViewportSize(phone);
+  }
   expect(await shown(page, '.n-pieces__order[data-status="CANCELLED"] .n-steps__bar')).toBe(0);
   await check(page, '.n-steps__step.is-done .n-steps__dot', { width: 11, height: 11, 'background-color': IV });
   await check(page, '.n-steps:not(.n-steps--dense) .n-steps__label', { 'margin-top': 12, 'font-size': 8.5, 'letter-spacing': em(8.5, 0.2) });
@@ -1061,8 +1070,8 @@ async function myOrders(page: Page): Promise<void> {
  * Plan NEXT LOT §3.6.A: five steps on a card, at every phone width: their labels tracked closer (0.08 em), each label
  * and date ending at least its 4 px gutter before the next step's column (IN PREPARATION on two lines where it must;
  * the glyphs within a fiftieth of a pixel of the gutter), each date on one line, and the bar ending on the reached dot's
- * centre (within a pixel), whatever widths the columns take; six (a returned order) the same from 375 px, where they hold
- * one row.
+ * centre (within a pixel), whatever widths the columns take; six (a returned order) the same from 420 px, where they hold
+ * one row (under it, two rows of three).
  */
 async function fiveStepsKeepTheirColumns(page: Page): Promise<void> {
   const five = '.n-pieces__steps.n-steps--dense:not(.n-steps--six)';
@@ -1071,9 +1080,9 @@ async function fiveStepsKeepTheirColumns(page: Page): Promise<void> {
   await check(page, `${five} .n-steps__label`, { 'margin-top': 12, 'font-size': 8.5, 'letter-spacing': em(8.5, 0.08) });
   const size = page.viewportSize()!;
   try {
-    for (const width of [320, 360, 375, 390]) {
+    for (const width of [320, 360, 375, 390, 430]) {
       await page.setViewportSize({ width, height: size.height });
-      const lists = await page.locator(width < 375 ? five : '.n-pieces__steps.n-steps--dense').evaluateAll((els) =>
+      const lists = await page.locator(width < 420 ? five : '.n-pieces__steps.n-steps--dense').evaluateAll((els) =>
         els.map((list) => {
           const steps = [...list.querySelectorAll<HTMLElement>('.n-steps__step')];
           const rects = (el: Element | null) => {
