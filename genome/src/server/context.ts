@@ -70,6 +70,7 @@ import { OwnerService } from './services/owners.js';
 import { PastReleaseService } from './services/past-releases.js';
 import { PlaceService } from './services/places.js';
 import { AcquisitionService } from './services/acquisition.js';
+import { AcquisitionReportService } from './services/acquisition-report.js';
 import { LinkService } from './services/links.js';
 import { TrackingService } from './services/tracking.js';
 import { SalonService } from './services/salon.js';
@@ -186,6 +187,8 @@ export interface AppServices {
   acquisition: AcquisitionService;
   /** The console's links (plan CUSTOMER INTELLIGENCE §3.4 A.7.1): short ORBES addresses by channel, /go/<code>'s destinations. */
   links: LinkService;
+  /** What the links, tags and sites brought in, first and last link (plan CUSTOMER INTELLIGENCE §3.4 A.7.1, A.10): reads only. */
+  acquisitionReport: AcquisitionReportService;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
   suppliers: SupplierService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
@@ -328,6 +331,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     // The recording's writes wait while the pool has requests waiting (§3.3 T.8.3): the collectors come first.
     const acquisition = new AcquisitionService({ db, publicOrigin: config.publicOrigin, clock, log });
     const links = new LinkService({ db, audit, publicOrigin: config.publicOrigin, clock });
+    const acquisitionReport = new AcquisitionReportService({ db, links });
     // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
     // The link attaches the device's visits in its own transaction (§3.3 T.8.4 step 7, §3.4 A.4).
     const tracking = new TrackingService({
@@ -399,6 +403,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       tracking,
       acquisition,
       links,
+      acquisitionReport,
       suppliers,
       supplierOrders,
       receptions,

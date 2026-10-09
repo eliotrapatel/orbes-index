@@ -435,8 +435,11 @@ const byName = (a: string | null, b: string | null): number => (a === b ? 0 : a 
 const dateOf = (v: Date | string | null): Date | null => (v === null ? null : v instanceof Date ? v : new Date(v));
 const country = (c: string | null): string | null => (c ? c.trim() || null : null);
 
-/** The currencies that appear (invoices, priced models) and the one shown: `requested`, else the most invoiced, else EUR. */
-async function currenciesOf(db: Db, requested: Currency | undefined): Promise<{ currency: Currency; currencies: Currency[] }> {
+/**
+ * The currencies that appear (invoices, priced models) and the one shown: `requested`, else the most invoiced, else EUR.
+ * Shared with the Links reports (services/acquisition-report.ts), so the console has one default currency.
+ */
+export async function currenciesOf(db: Db, requested: Currency | undefined): Promise<{ currency: Currency; currencies: Currency[] }> {
   const [invoiced, priced] = await Promise.all([
     sql<{ currency: string; n: number }>`SELECT currency, count(*)::int AS n FROM invoices WHERE kind = 'INVOICE' GROUP BY currency`.execute(db),
     sql<{ currency: string }>`SELECT DISTINCT base_currency AS currency FROM models WHERE base_currency IS NOT NULL`.execute(db),

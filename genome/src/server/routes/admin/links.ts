@@ -1,7 +1,13 @@
 /**
  * The console's links and their channels (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.4 A.7.2, step 4.3; API §16.35):
- * the routes that make and change them, and what the New link dialog offers. The reports (`GET /api/admin/links` with
- * its period, one link's figures, the collectors behind a figure) come with step 4.6.
+ * the routes that make and change them, and what the New link dialog offers; and their reports (step 4.6,
+ * services/acquisition-report.ts): what each link, campaign and site brought in, first and last link.
+ *
+ *   GET    /api/admin/links                        AUDITOR   the report: ?from&to (Paris days, both or neither), currency,
+ *                                                           view (links | campaigns | sites), archived
+ *   GET    /api/admin/links/:id                    AUDITOR   one link: its figures, its days, its return (?from&to&currency)
+ *   GET    /api/admin/acquisition/collectors       AUDITOR   the collectors behind a figure: ?source&attribution&measure
+ *                                                           &from&to&currency&page; emails masked for an AUDITOR
  *
  *   GET    /api/admin/link-channels                AUDITOR   the channels in their order, each with its links
  *   POST   /api/admin/link-channels                OPERATOR  a channel added (201)          link_channel.create
@@ -17,12 +23,26 @@
  * get 403. Every write needs the CSRF token and a same-origin request, and is audited by LinkService.
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { emptyBody, linkBody, linkChannelBody, linkChannelParams, linkChannelUpdateBody, linkParams, linkUpdateBody, parse } from '../../http/schemas.js';
+import {
+  acquisitionCollectorsQuery,
+  emptyBody,
+  linkBody,
+  linkChannelBody,
+  linkChannelParams,
+  linkChannelUpdateBody,
+  linkParams,
+  linkReportQuery,
+  linksQuery,
+  linkUpdateBody,
+  parse,
+} from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
+import { parseSourceSpec } from '../../services/acquisition-report.js';
+import { clientEmail, readsClientEmails } from './serialize.js';
 import type { AdminRouteDeps } from './index.js';
 
 export const adminLinkRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { links } = ctx.services;
+  const { links, acquisitionReport } = ctx.services;
 
   app.get('/api/admin/link-channels', async () => ({ channels: await links.channels() }));
 
@@ -46,6 +66,32 @@ export const adminLinkRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, {
   });
 
   app.get('/api/admin/links/destinations', async () => links.destinations());
+
+  app.get('/api/admin/links', async (request) => {
+    const q = parse(linksQuery, request.query);
+    return acquisitionReport.report({ from: q.from, to: q.to, currency: q.currency, view: q.view, archived: q.archived });
+  });
+
+  app.get('/api/admin/links/:id', async (request) => {
+    const { id } = parse(linkParams, request.params);
+    const q = parse(linkReportQuery, request.query);
+    return acquisitionReport.link(id, { from: q.from, to: q.to, currency: q.currency });
+  });
+
+  app.get('/api/admin/acquisition/collectors', async (request) => {
+    const q = parse(acquisitionCollectorsQuery, request.query);
+    const inClear = readsClientEmails(request);
+    const page = await acquisitionReport.collectors({
+      source: parseSourceSpec(q.source),
+      attribution: q.attribution,
+      measure: q.measure,
+      from: q.from,
+      to: q.to,
+      currency: q.currency,
+      page: q.page,
+    });
+    return { ...page, items: page.items.map((c) => ({ ...c, email: clientEmail(c.email, inClear) })) };
+  });
 
   app.post('/api/admin/links', async (request, reply) => {
     const b = parse(linkBody, request.body);

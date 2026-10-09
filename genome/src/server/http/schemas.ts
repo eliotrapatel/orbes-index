@@ -101,6 +101,7 @@ import { LOGISTICS_LIMITS } from '../services/logistics.js';
 import { ORDER_CASE_LIMITS } from '../services/order-cases.js';
 import { ADDRESS_LIMITS } from '../services/addresses.js';
 import { BATCH_MAX_EVENTS, SEEN_PAGES } from '../services/tracking.js';
+import { ATTRIBUTIONS, MEASURES, REPORT_MAX_DAYS, REPORT_VIEWS } from '../services/acquisition-report.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -1455,6 +1456,50 @@ export const linkParams = z.object({ id: uuid });
 export const linkChannelBody = body({ name: z.string().max(200, 'At most 200 characters'), position: z.number().optional() });
 export const linkChannelUpdateBody = body({ name: z.string().max(200, 'At most 200 characters').optional(), position: z.number().optional() });
 export const linkChannelParams = z.object({ id: uuid });
+
+/**
+ * The Links reports (§16.35, plan CUSTOMER INTELLIGENCE §3.4 A.7.2): a period of Paris days `from` and `to`
+ * (YYYY-MM-DD), both or neither (all time), `to` not before `from`, at most REPORT_MAX_DAYS apart; a currency of the
+ * house (default: the one with the most invoices, as GROWTH).
+ */
+const reportPeriod = {
+  from: queryOptional(isoDate),
+  to: queryOptional(isoDate),
+  currency: queryOptional(z.enum(HOUSE_CURRENCIES, { message: `Must be one of ${HOUSE_CURRENCIES.join(', ')}` })),
+};
+type ReportPeriod = { from?: string; to?: string };
+const periodChecks = <T extends z.ZodType<ReportPeriod>>(schema: T) =>
+  schema
+    .refine((q) => (q.from === undefined) === (q.to === undefined), { message: 'Give both from and to, or neither', path: ['to'] })
+    .refine((q) => !q.from || !q.to || q.from <= q.to, { message: 'to must not be before from', path: ['to'] })
+    .refine((q) => !q.from || !q.to || daySpan(q.from, q.to) - 1 <= REPORT_MAX_DAYS, { message: `At most ${REPORT_MAX_DAYS} days apart`, path: ['to'] });
+
+/** GET /api/admin/links: the period, the currency, the view (LINKS by default), the archived links shown or not. */
+export const linksQuery = periodChecks(
+  z.object({
+    ...reportPeriod,
+    view: queryOptional(z.enum(REPORT_VIEWS, { message: `Must be one of ${REPORT_VIEWS.join(', ')}` })),
+    archived: queryBool,
+  }),
+);
+
+/** GET /api/admin/links/:id: the period and the currency. */
+export const linkReportQuery = periodChecks(z.object(reportPeriod));
+
+/**
+ * GET /api/admin/acquisition/collectors: the figure's source (`total`, `link:<uuid>`, `channel:<uuid>`,
+ * `source:<id>[,<id>…]`, `kind:<kind>`; services/acquisition-report.ts parseSourceSpec), its attribution and measure,
+ * the period, the currency, a page from 1.
+ */
+export const acquisitionCollectorsQuery = periodChecks(
+  z.object({
+    ...reportPeriod,
+    source: z.string().trim().min(1, 'Required').max(2_400, 'At most 2400 characters'),
+    attribution: z.enum(ATTRIBUTIONS, { message: `Must be one of ${ATTRIBUTIONS.join(', ')}` }),
+    measure: z.enum(MEASURES, { message: `Must be one of ${MEASURES.join(', ')}` }),
+    page: queryOptional(z.preprocess((v) => (typeof v === 'string' && /^\s*\d{1,6}\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a whole page number').min(1, 'At least 1').max(100_000, 'At most 100000'))),
+  }),
+);
 
 /**
  * The owners list (§16.2): every account, or one exact email (normalised by the service, as at sign-in), or the

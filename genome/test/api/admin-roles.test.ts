@@ -22,8 +22,8 @@
  * read by an AUDITOR and set by an OPERATOR, its sizes declared, removed and reinstated by an OPERATOR (NEXT LOT §3.3); GROWTH, BP-29, read by an AUDITOR;
  * the suppliers, read by an AUDITOR, added and changed by an OPERATOR, a model's supplier set by an OPERATOR, NEXT LOT §3.5.6.2;
  * the supplier orders, read by an AUDITOR with their PDF, proposed, drafted, sent and settled by an OPERATOR, NEXT LOT §3.5.6.3;
- * the console's links and their channels, read by an AUDITOR, made, changed, archived and removed by an OPERATOR,
- * CUSTOMER INTELLIGENCE §3.4 A.7.2);
+ * the console's links and their channels, read by an AUDITOR, made, changed, archived and removed by an OPERATOR, their
+ * reports and the collectors behind a figure read by an AUDITOR, CUSTOMER INTELLIGENCE §3.4 A.7.2);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -424,6 +424,10 @@ const PROBES: Probe[] = [
   { group: 'links', method: 'PATCH', url: `/api/admin/link-channels/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'links', method: 'DELETE', url: `/api/admin/link-channels/${UUID}`, min: 'OPERATOR' },
   { group: 'links', method: 'GET', url: '/api/admin/links/destinations', min: 'AUDITOR' },
+  // The reports (step 4.6): read from AUDITOR, emails masked for an AUDITOR (acquisition-report.test.ts).
+  { group: 'links', method: 'GET', url: '/api/admin/links?view=campaigns', min: 'AUDITOR' },
+  { group: 'links', method: 'GET', url: `/api/admin/links/${UUID}`, min: 'AUDITOR' },
+  { group: 'links', method: 'GET', url: '/api/admin/acquisition/collectors?source=total&attribution=first&measure=signups', min: 'AUDITOR' },
   { group: 'links', method: 'POST', url: '/api/admin/links', body: INVALID, min: 'OPERATOR' },
   { group: 'links', method: 'PATCH', url: `/api/admin/links/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'links', method: 'POST', url: `/api/admin/links/${UUID}/archive`, min: 'OPERATOR' },
