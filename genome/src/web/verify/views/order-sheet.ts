@@ -13,8 +13,10 @@
  *   ENGRAVING          'Engraved on your piece before it is shipped.', YOUR ENGRAVING (up to 20 characters), its price
  *                      line (or that the release's add-on paid for it), once paid what the documents will say; SAVE,
  *                      REMOVE THE ENGRAVING (a priced one), CANCEL.
- *   A REQUEST          for an exchange THE NEW SIZE (the sizes in stock; the others greyed out), REASON (one of four),
- *                      YOUR NOTE (500 characters); who decides; SEND THE REQUEST, CANCEL.
+ *   A REQUEST          for an exchange THE NEW SIZE (the sizes in stock; the others greyed out; the size YOUR SIZES
+ *                      suggests preselected with SIZE 52 · FROM YOUR SIZES and the sentence to check it, until another is
+ *                      tapped: plan CUSTOMER INTELLIGENCE §3.7), REASON (one of four), YOUR NOTE (500 characters); who
+ *                      decides; SEND THE REQUEST, CANCEL.
  *
  * Each sends one request at a time (its filled button disabled and busy meanwhile); a failure is said under the fields,
  * the sheet's sentence then the server's own words. Done: the sheet closes and its order's card is drawn again from the
@@ -23,7 +25,7 @@
 import { h } from '../../shared/dom.js';
 import type { ApiClient } from '../api.js';
 import { mayAddAddress, sameAddress, savedChoice } from '../addresses-model.js';
-import { ACCOUNT_ADDRESSES, MESSAGES, ORDERS } from '../copy.js';
+import { ACCOUNT_ADDRESSES, LIVE, MESSAGES, ORDERS } from '../copy.js';
 import type { OrderEngravingModel, OrderModel, OrderReturnsModel } from '../orders-model.js';
 import type { SessionStore } from '../session.js';
 import type { AccountAddresses, AccountOrder, OrderCaseRequest } from '../types.js';
@@ -71,8 +73,10 @@ export class OrderSheet {
   private readGen = 0;
   /** The address chosen: a saved one's id, or 'new'. */
   private choice: string = 'new';
-  /** The new size of an exchange. */
+  /** The new size of an exchange: YOUR SIZES' preselected as it opens (plan CUSTOMER INTELLIGENCE §3.7), then the one tapped. */
   private size: string | null = null;
+  /** A size tapped in THE NEW SIZE: YOUR SIZES' lines go. */
+  private sizeTapped = false;
   private busy = false;
   private unsubscribe: (() => void) | null = null;
 
@@ -95,7 +99,9 @@ export class OrderSheet {
     this.req = req;
     this.saved = null;
     this.savedError = null;
-    this.size = null;
+    // EXCHANGE THE SIZE opens on the size YOUR SIZES suggests, in stock (none: nothing chosen); the sheet keeps what it read.
+    this.size = req.kind === 'EXCHANGE' ? req.returns.savedSize : null;
+    this.sizeTapped = false;
     this.busy = false;
     this.choice = 'new';
     this.el.hidden = false;
@@ -344,14 +350,28 @@ export class OrderSheet {
           unavailableLabel: R.sizeOut,
           onSelect: (id) => {
             this.size = id;
+            this.sizeTapped = true;
             for (const b of group.querySelectorAll<HTMLButtonElement>('button')) b.setAttribute('aria-pressed', String(b.textContent === id));
+            // Chosen by the collector now: YOUR SIZES' lines go, as in the LIVE room and the salon.
+            yours?.remove();
           },
         },
       );
       group.classList.add('n-osheet__sizes');
+      // Plan CUSTOMER INTELLIGENCE §3.7: the size YOUR SIZES suggests, preselected while it stands untapped.
+      const yours =
+        !this.sizeTapped && m.savedSize !== null && this.size === m.savedSize
+          ? h(
+              'div',
+              { class: 'n-osheet__yours' },
+              h('p', { class: 'n-g n-lb n-osheet__yours-size' }, ...withNumerals(LIVE.there.fromYours(m.savedSize))),
+              h('p', { class: 'n-sm n-osheet__yours-check', text: LIVE.there.checkSize }),
+            )
+          : null;
       sizes.push(
         h('p', { class: 'n-g n-lab n-osheet__size-label', text: R.newSize }),
         group,
+        ...(yours ? [yours] : []),
         h('p', { class: 'n-sm n-osheet__size-note', text: inStock.length > 0 ? R.onlyInStock : R.noneInStock }),
       );
       // No size in stock: nothing to send.

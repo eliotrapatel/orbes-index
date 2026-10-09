@@ -3354,6 +3354,15 @@ body.nocturne[data-screen="live"] {
   justify-content: flex-start;
 }
 
+/* Plan CUSTOMER INTELLIGENCE §3.7: the size YOUR SIZES suggests, under the sizes, as the salon's and the room's. */
+.n-osheet__yours {
+  margin-top: 14px;
+}
+
+.n-osheet__yours-check {
+  margin-top: 6px;
+}
+
 .n-osheet__sizes .n-sizes__option.is-gone {
   color: var(--vault-soft);
   text-decoration: line-through;

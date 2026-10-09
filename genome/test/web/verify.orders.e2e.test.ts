@@ -44,7 +44,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { ensureSku } from '../../src/server/services/stock.js';
-import { ACCOUNT_ADDRESSES, DEFAULT_CARE, ORDERS } from '../../src/web/verify/copy.js';
+import { ACCOUNT_ADDRESSES, DEFAULT_CARE, LIVE, ORDERS } from '../../src/web/verify/copy.js';
 import { orderDate } from '../../src/web/verify/orders-model.js';
 import { createLiveRelease, liveFixture, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -931,8 +931,27 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
     await sheet(page).getByRole('button', { name: R.send }).click();
     await textOf(sheet(page).getByRole('alert'), R.sizeMissing);
     await expect.poll(() => sizes.getByRole('button', { name: '50', exact: true }).evaluate((el) => el === document.activeElement), POLL).toBe(true);
+    // Plan CUSTOMER INTELLIGENCE §3.7: a ring of 50 saved in YOUR SIZES (the model reading ring sizes), the next reading
+    // of the order preselects 50, in stock, with YOUR SIZES' two lines; a tap clears them.
+    await sheet(page).getByRole('button', { name: R.cancel }).click();
+    await srv.ctx.db.updateTable('models').set({ size_kind: 'RING' }).where('id', '=', f.modelId).execute();
+    await srv.ctx.services.sizes.set(me.id, { RING: 50 }, { type: 'account', id: me.id });
+    await page.reload();
+    await openTab(page, 'ORDERS');
+    await block.getByRole('button', { name: R.exchange }).click();
+    expect(await sizes.getByRole('button', { name: '50', exact: true }).getAttribute('aria-pressed')).toBe('true');
+    await textOf(sheet(page).locator('.n-osheet__yours-size'), LIVE.there.fromYours('50'));
+    await textOf(sheet(page).locator('.n-osheet__yours-check'), LIVE.there.checkSize);
+    expect(await sheet(page).locator('.n-osheet__sizes + .n-osheet__yours + .n-osheet__size-note').count()).toBe(1);
+    for (const width of [320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      expect(await noSideways(page), `${width} px`).toBe(true);
+    }
+    await page.screenshot({ path: join(OUT_DIR, 'verify-order-exchange-preselected.png') });
+    await srv.ctx.db.updateTable('models').set({ size_kind: null }).where('id', '=', f.modelId).execute();
     await sizes.getByRole('button', { name: '50', exact: true }).click();
     expect(await sizes.getByRole('button', { name: '50', exact: true }).getAttribute('aria-pressed')).toBe('true');
+    expect(await sheet(page).locator('.n-osheet__yours').count()).toBe(0);
     await sheet(page).getByLabel(R.reason, { exact: true }).selectOption('SIZE');
     await sheet(page).getByLabel(R.note, { exact: true }).fill('One size larger, please.');
     for (const width of [375, 360, 320, 390]) {

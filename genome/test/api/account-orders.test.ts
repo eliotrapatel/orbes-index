@@ -232,7 +232,8 @@ describe('MY PIECES: the account\'s orders (GET /api/v1/account/orders)', () => 
       // shipped and delivered; §3.6.D: delivered, a return or an exchange may be asked for 14 days.
       preparingAt: (await h.ctx.db.selectFrom('order_events').select('created_at').where('order_id', '=', ids.delivered).where('action', '=', 'order.serve').executeTakeFirstOrThrow()).created_at.toISOString(),
       deliveryIssue: false,
-      returnable: { until: new Date(Date.parse(delivered.deliveredAt) + 14 * 24 * HOUR).toISOString(), sizes: expect.any(Array) },
+      // Plan CUSTOMER INTELLIGENCE §3.7: no size saved in YOUR SIZES, none preselected in EXCHANGE THE SIZE.
+      returnable: { until: new Date(Date.parse(delivered.deliveredAt) + 14 * 24 * HOUR).toISOString(), sizes: expect.any(Array), savedSize: null },
       case: null,
     });
     for (const k of ['reservedAt', 'paidAt', 'shippedAt', 'deliveredAt']) expect(delivered[k], k).toMatch(/^\d{4}-\d{2}-\d{2}T/);

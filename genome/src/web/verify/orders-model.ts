@@ -388,6 +388,11 @@ export interface OrderReturnsModel {
   sizes: { label: string; available: boolean }[];
   /** What the request's sheet names: `ORDER OR-3F9A21C4 · MONOLITHE IN BLUE · SIZE 17`. */
   concerning: string;
+  /**
+   * Plan CUSTOMER INTELLIGENCE §3.7: the size YOUR SIZES preselects in EXCHANGE THE SIZE (SIZE 52 · FROM YOUR SIZES),
+   * one of `sizes` in stock; null for none.
+   */
+  savedSize: string | null;
 }
 
 /** RETURNS AND EXCHANGES while the server says they may be asked (DELIVERED, not a welcome gift, 14 days, none asked). */
@@ -399,7 +404,9 @@ export function orderReturns(o: AccountOrder, offsetMinutes?: number): OrderRetu
   const sizes = Array.isArray(r.sizes) ? r.sizes.filter((z) => z && typeof z.label === 'string' && z.label.trim() !== '').map((z) => ({ label: z.label.trim(), available: z.available === true })) : [];
   const size = o.size?.label ? sizeName(o.size.label) : null;
   const concerning = [orderContext({ id: o.id, model: o.model, modelVariant: o.modelVariant }).label, size].filter(Boolean).join(' · ');
-  return { lead: ORDERS.returns.lead(until), sizes, concerning };
+  const saved = r.savedSize && typeof r.savedSize.label === 'string' ? r.savedSize.label.trim() : null;
+  const savedSize = saved && sizes.some((z) => z.available && z.label === saved) ? saved : null;
+  return { lead: ORDERS.returns.lead(until), sizes, concerning, savedSize };
 }
 
 /** A return or a size exchange as asked (plan NEXT LOT §3.6.D): what the card says of it now. */

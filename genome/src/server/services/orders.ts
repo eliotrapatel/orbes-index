@@ -149,7 +149,7 @@ import { CERTIFICATE_ENDING_STATUSES } from './ownership.js';
 import { tierOf } from './club.js';
 import { engravingPrice, engravingPrices, giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, ensureGrants } from './tier-grants.js';
-import { offeredSku, savedSizeHint, sizesForExchange } from './sizes.js';
+import { modelSizeCandidates, offeredSku, savedSizeAmong, savedSizeHint, sizesForExchange } from './sizes.js';
 import { parcelOrders, RETURN_WINDOW_DAYS } from './parcels.js';
 import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockBalances, stockLevel } from './stock.js';
 
@@ -617,9 +617,11 @@ export interface AccountOrder {
   /**
    * Plan NEXT LOT §3.6.D: RETURNS AND EXCHANGES, while it may be asked: DELIVERED, not a welcome gift, within 14 days of
    * its delivery (`until`), no order case not ended; each other size of its model and whether it is in stock at the
-   * order's location now (none for a model of one size). null otherwise.
+   * order's location now (none for a model of one size). null otherwise. `savedSize` (plan CUSTOMER INTELLIGENCE §3.7):
+   * the size YOUR SIZES preselects among those in stock, by label; null without a saved size of the model's kind, when it
+   * matches none in stock, or only the order's own size.
    */
-  returnable: { until: Date; sizes: { label: string; available: boolean }[] } | null;
+  returnable: { until: Date; sizes: { label: string; available: boolean }[]; savedSize: { label: string } | null } | null;
   /**
    * Its latest return or size exchange (asked by the collector or opened by Client Services): its kind, status, when it
    * was opened and the parcel received, the size asked, the address to send the piece back to (its location's; null
@@ -2187,6 +2189,7 @@ export class OrderService {
         'o.id',
         'o.channel',
         'o.sku_id',
+        'o.model_id',
         'o.size_label',
         'o.price_minor',
         'o.currency',
@@ -2262,7 +2265,7 @@ export class OrderService {
         : [],
     );
     const prices = await engravingPrices(this.db);
-    const care = await this.accountCases(rows);
+    const care = await this.accountCases(accountId.toLowerCase(), rows);
     const deliveryOf = (r: (typeof rows)[number]): OrderAddress => (r.with_order_id === null ? ownAddress(r) : ownAddress(parents.get(r.with_order_id)!, r.with_order_id));
     // The order's own invoice and the credit note that cancels it; the others (plan NEXT LOT §3.6.C) listed apart.
     const mainOf = (orderId: string) => invoices.find((x) => x.order.id === orderId && x.kind === 'INVOICE' && x.supplements === null);
@@ -2317,11 +2320,25 @@ export class OrderService {
   }
 
   /**
+   * Plan CUSTOMER INTELLIGENCE §3.7: the size YOUR SIZES preselects in EXCHANGE THE SIZE, among the order's other sizes in
+   * stock (`sizesForExchange`: the order's own left out), by the model's kind and each size's fit (`savedSizeAmong`);
+   * null when none or several match, or without a saved size of that kind.
+   */
+  private async savedExchangeSize(accountId: string, modelId: string, sizes: readonly { skuId: string; label: string | null; selectable: boolean }[]): Promise<{ label: string } | null> {
+    const inStock = new Set(sizes.filter((x) => x.selectable && x.label !== null).map((x) => x.skuId));
+    if (inStock.size === 0) return null;
+    const candidates = (await modelSizeCandidates(this.db, modelId, { offered: true })).filter((c) => inStock.has(c.id));
+    const saved = await savedSizeAmong(this.db, accountId, modelId, candidates);
+    return saved ? { label: saved.label } : null;
+  }
+
+  /**
    * The steps and cases of the account's orders as MY PIECES reads them (plan NEXT LOT §3.6.A, §3.6.D): `preparingAt`,
    * `deliveryIssue`, `returnable` and `case`, per order.
    */
   private async accountCases(
-    rows: readonly Pick<OrderRow, 'id' | 'channel' | 'status' | 'paid_at' | 'delivered_at' | 'sku_id'>[],
+    accountId: string,
+    rows: readonly Pick<OrderRow, 'id' | 'channel' | 'status' | 'paid_at' | 'delivered_at' | 'sku_id' | 'model_id'>[],
   ): Promise<Map<string, Pick<AccountOrder, 'preparingAt' | 'deliveryIssue' | 'returnable' | 'case'>>> {
     const out = new Map<string, Pick<AccountOrder, 'preparingAt' | 'deliveryIssue' | 'returnable' | 'case'>>();
     if (rows.length === 0) return out;
@@ -2352,7 +2369,7 @@ export class OrderService {
         const until = new Date(r.delivered_at.getTime() + RETURN_WINDOW_DAYS * 24 * 60 * 60_000);
         if (now.getTime() < until.getTime()) {
           const sizes = r.sku_id === null ? [] : await sizesForExchange(this.db, r.id);
-          returnable = { until, sizes: sizes.filter((x) => x.label !== null).map((x) => ({ label: x.label!, available: x.selectable })) };
+          returnable = { until, sizes: sizes.filter((x) => x.label !== null).map((x) => ({ label: x.label!, available: x.selectable })), savedSize: await this.savedExchangeSize(accountId, r.model_id, sizes) };
         }
       }
       out.set(r.id, {

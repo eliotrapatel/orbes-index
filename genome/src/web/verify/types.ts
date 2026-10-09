@@ -1149,8 +1149,12 @@ export interface AccountOrder {
   preparingAt?: string | null;
   /** A delivery problem ORBES Client Services is looking into: one sentence replaces the step's. */
   deliveryIssue?: boolean;
-  /** Plan NEXT LOT §3.6.D: RETURNS AND EXCHANGES while it may be asked, until when, each other size and whether it is in stock. */
-  returnable?: { until: string; sizes: { label: string; available: boolean }[] } | null;
+  /**
+   * Plan NEXT LOT §3.6.D: RETURNS AND EXCHANGES while it may be asked, until when, each other size and whether it is in
+   * stock; `savedSize` (plan CUSTOMER INTELLIGENCE §3.7), the size YOUR SIZES preselects in EXCHANGE THE SIZE, or null
+   * (absent from a server before it: none).
+   */
+  returnable?: { until: string; sizes: { label: string; available: boolean }[]; savedSize?: { label: string } | null } | null;
   /** Its latest return or size exchange: never a note nor who handled it. */
   case?: {
     kind: 'RETURN' | 'EXCHANGE';

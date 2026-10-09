@@ -30,7 +30,9 @@
  *  - the request written into MESSAGES as the collector's own message in the same transaction (a failure rolls both
  *    back), even at the message limit; audited without the note;
  *  - the return address: the order's location's, or none;
- *  - two requests at once give one order case.
+ *  - two requests at once give one order case;
+ *  - EXCHANGE THE SIZE's size preselected from YOUR SIZES (plan CUSTOMER INTELLIGENCE §3.7): offered, in stock and not the
+ *    order's own; none without a saved size, of another kind, for a size not offered or not in stock, or the order's own.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -525,7 +527,8 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       expect(await refusal(cases().request(accountId, id, { kind: 'RETURN', reason: 'SIZE', note: 'x'.repeat(501) }, collector))).toMatchObject({ code: 'VALIDATION_FAILED' });
       // RETURNS AND EXCHANGES offered until the 14th day.
       const mine = await orders().accountOrder(accountId, id);
-      expect(mine.returnable).toEqual({ until: new Date(deliveredAt.getTime() + 14 * DAY), sizes: expect.any(Array) });
+      // No size saved in YOUR SIZES: none preselected (plan CUSTOMER INTELLIGENCE §3.7).
+      expect(mine.returnable).toEqual({ until: new Date(deliveredAt.getTime() + 14 * DAY), sizes: expect.any(Array), savedSize: null });
       // One millisecond before the 14 days: asked; at the 14 days: closed (on another order).
       h.clock.set(new Date(deliveredAt.getTime() + 14 * DAY - 1));
       const opened = await cases().request(accountId, id, { kind: 'RETURN', reason: 'SIZE', note: 'Too large on my finger.' }, collector);
@@ -611,6 +614,53 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       const wordedCase = await cases().request(worded.accountId, worded.id, { kind: 'EXCHANGE', reason: 'SIZE', sizeLabel: sizeWorded }, worded.collector);
       const wordedMessage = await db().selectFrom('client_messages as m').innerJoin('order_cases as c', 'c.message_id', 'm.id').select('m.body').where('c.id', '=', wordedCase).executeTakeFirstOrThrow();
       expect(wordedMessage.body).toBe(`EXCHANGE REQUESTED: ${sizeWorded} — The size does not fit.`);
+    });
+
+    it("preselects YOUR SIZES' size in EXCHANGE THE SIZE (plan CUSTOMER INTELLIGENCE §3.7): offered, in stock and not the order's own; none otherwise", async () => {
+      // The model reads a ring size (YOUR SIZES' kind), for this case only; odd sizes, which no other case of this file uses.
+      await db().updateTable('models').set({ size_kind: 'RING' }).where('id', '=', catalog.modelId).execute();
+      try {
+        const a = await delivered('41');
+        const actor = { type: 'account' as const, id: a.accountId };
+        const returnable = async () => (await orders().accountOrder(a.accountId, a.id)).returnable!;
+        await stock(await skuOf('43'), 1);
+        // No size saved: none preselected.
+        expect((await returnable()).savedSize).toBeNull();
+        // A ring of 43 saved, 43 offered and in stock at the order's location, another size than the order's: preselected.
+        await h.ctx.services.sizes.set(a.accountId, { RING: 43 }, actor);
+        expect((await returnable()).savedSize).toEqual({ label: '43' });
+        // The saved size is the order's own (the one that did not fit): none, the collector chooses.
+        await h.ctx.services.sizes.set(a.accountId, { RING: 41 }, actor);
+        expect((await returnable()).savedSize).toBeNull();
+        // Offered but not in stock: none, the size greyed out as before.
+        await skuOf('45');
+        await h.ctx.services.sizes.set(a.accountId, { RING: 45 }, actor);
+        const out = await returnable();
+        expect(out.sizes.find((x) => x.label === '45')).toEqual({ label: '45', available: false });
+        expect(out.savedSize).toBeNull();
+        // A size the model does not offer: none.
+        await h.ctx.services.sizes.set(a.accountId, { RING: 47 }, actor);
+        expect((await returnable()).savedSize).toBeNull();
+        // Another kind saved (a bracelet), none of the model's: none.
+        await h.ctx.services.sizes.set(a.accountId, { BRACELET: 17 }, actor);
+        expect((await returnable()).savedSize).toBeNull();
+        // The collector changes YOUR SIZES: the next reading follows (a sheet open keeps what it read).
+        await h.ctx.services.sizes.set(a.accountId, { RING: 43 }, actor);
+        expect((await returnable()).savedSize).toEqual({ label: '43' });
+        // Another account's saved size never preselects this one's.
+        const other = await createAccount(db());
+        await h.ctx.services.sizes.set(other.id, { RING: 45 }, other.actor);
+        expect((await returnable()).savedSize).toEqual({ label: '43' });
+        // A model without a size kind: none, whatever is saved.
+        await db().updateTable('models').set({ size_kind: null }).where('id', '=', catalog.modelId).execute();
+        expect((await returnable()).savedSize).toBeNull();
+        // Once the request is open, no RETURNS AND EXCHANGES, so nothing to preselect.
+        await db().updateTable('models').set({ size_kind: 'RING' }).where('id', '=', catalog.modelId).execute();
+        await cases().request(a.accountId, a.id, { kind: 'EXCHANGE', reason: 'SIZE', sizeLabel: '43' }, a.collector);
+        expect((await orders().accountOrder(a.accountId, a.id)).returnable).toBeNull();
+      } finally {
+        await db().updateTable('models').set({ size_kind: null }).where('id', '=', catalog.modelId).execute();
+      }
     });
 
     it('opens a return at the message limit (no rate), rolls the message back with a refused request or a failure after it is written, and gives one order case to two requests at once', async () => {
