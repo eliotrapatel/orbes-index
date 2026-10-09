@@ -1179,7 +1179,6 @@ export class AccountSheet {
 
   // ── YOUR ADDRESSES (plan NEXT LOT §3.6.B) ────────────────────────────────
 
-  /** The row after YOUR SIZES: YOUR ADDRESSES, its line how many are saved (`2 SAVED`) or NOT SET; nothing while unread. */
   /** YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2): its count at its right, then its page (the sheet closes first). */
   private wishlistRow(): HTMLElement {
     const row = leadRow(WISHLIST.row, {
@@ -1195,6 +1194,7 @@ export class AccountSheet {
     return row;
   }
 
+  /** The row after YOUR SIZES: YOUR ADDRESSES, its line how many are saved (`2 SAVED`) or NOT SET; nothing while unread. */
   private addressesRow(): HTMLElement {
     const row = leadRow(ACCOUNT_ADDRESSES.row, { onOpen: () => this.openAddresses(), attrs: { 'data-key': 'addresses' }, extraClass: 'n-account__sizes n-account__addresses' });
     if (this.addresses) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__addresses-line' }, ...withNumerals(addressesSummary(this.addresses.addresses))), row.lastChild);

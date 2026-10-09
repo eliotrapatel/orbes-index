@@ -209,6 +209,11 @@ const CASES: { state: UiState; check: Check }[] = [
       await page.route('**/api/v1/account/wishlist', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items, max: 200 }) }));
       await page.goto(`${stage.origin}/verify/wishlist`);
       await expect.poll(() => cardsOf(page).count(), POLL).toBe(200);
+      // A wish not shown now with a variant: its name alone as the heading, its variant once, on the line under it.
+      const hiddenBlue = cardsOf(page).nth(1);
+      expect(norm(await hiddenBlue.locator('.n-wishlist__name').innerText())).toBe('MODEL 0');
+      expect(norm(await hiddenBlue.locator('.n-wishlist__line').innerText())).toBe(`${LOOKBOOK.releases.variant('Blue')} · ${WISHLIST.notShown}`);
+      expect(norm(await hiddenBlue.innerText()).split('BLUE')).toHaveLength(2);
       await fitsPhoneAndDesk(page, 'YOUR WISHLIST, 200 wishes', failures);
       await page.unroute('**/api/v1/account/wishlist');
     },

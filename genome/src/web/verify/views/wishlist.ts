@@ -184,7 +184,7 @@ class WishlistPage {
       remove.setAttribute('aria-busy', 'true');
       (remove as HTMLButtonElement).disabled = true;
     }
-    const name = h('h2', { class: 'n-g n-t2 lookbook-card__name n-wishlist__name', id: `${id}-name` }, ...withNumerals(c.kind === 'shown' ? c.name : c.title));
+    const name = h('h2', { class: 'n-g n-t2 lookbook-card__name n-wishlist__name', id: `${id}-name` }, ...withNumerals(c.name));
     if (c.kind === 'hidden') {
       return modelCard({
         id,
