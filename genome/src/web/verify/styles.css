@@ -2418,9 +2418,11 @@ body.nocturne .view--release.n-release {
   border-bottom: 1px solid var(--vault-hairline);
 }
 
+/* The entry's identifier keeps 10 figures' width at least: beside a long line (a size, plan NEXT LOT §3.6.F) and
+   YOURS, it goes under them rather than down to a figure a line. */
 .n-release__item-id {
   flex: 1;
-  min-width: 0;
+  min-width: 10ch;
   text-align: right;
   overflow-wrap: anywhere;
 }

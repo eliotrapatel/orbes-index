@@ -125,11 +125,13 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     const desk = p.viewportSize();
     // At phone size (390 × 844) for the agent's parcel page (plan NEXT LOT step 5.14), then back to the desk.
     if (opts.phone) await p.setViewportSize({ width: 390, height: 844 });
-    await p.evaluate(async () => {
+    await p.evaluate(async (dialog) => {
       document.querySelectorAll('.toast').forEach((x) => x.remove());
+      // A dialog is captured as it is sent: a refusal it showed before its fields were corrected is not kept on it.
+      if (dialog) document.querySelectorAll('dialog .dialog__error').forEach((x) => (x.textContent = ''));
       window.scrollTo(0, 0);
       await document.fonts.ready;
-    });
+    }, !!opts.dialog);
     await p.waitForTimeout(300);
     await p.screenshot({ path: join(OUT_DIR, `admin-logistics-${name}.png`), fullPage: !opts.dialog });
     if (opts.phone && desk) await p.setViewportSize(desk);
@@ -549,11 +551,14 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     // Three OK for two ordered: a note is asked for.
     await g.fill(`input[name=accepted_${sku52}]`, '3');
     await g.fill(`input[name=rejected_${sku52}]`, '1');
-    await g.click('[data-testid=reception-record]');
-    await expect.poll(() => g.locator('[data-testid=reception-error]').textContent()).toBe('Say in a note why more pieces than expected, or a piece not on the order, came in.');
+    // Captured counted as the agent records it, before the refusal below shows its error.
     await g.fill(`input[name=note_${sku52}]`, 'One more in the box.');
     await g.fill('input[name=deliveryNote]', 'BL-2207');
     await shot(g, 'reception-count');
+    await g.fill(`input[name=note_${sku52}]`, '');
+    await g.click('[data-testid=reception-record]');
+    await expect.poll(() => g.locator('[data-testid=reception-error]').textContent()).toBe('Say in a note why more pieces than expected, or a piece not on the order, came in.');
+    await g.fill(`input[name=note_${sku52}]`, 'One more in the box.');
     await g.click('[data-testid=reception-record]');
     await g.waitForSelector('.toast:has-text("Reception recorded: ORBES confirms it.")');
     await expect.poll(() => g.locator('[data-testid=reception-summary]').textContent()).toBe(`${order.reference} · 3 OK · 1 rejected · waiting for ORBES`);

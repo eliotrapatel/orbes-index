@@ -270,6 +270,8 @@ async function claimWaiting(run: StateRun): Promise<void> {
   );
   await countPiecesIn(run.stage.ctx, { skuId: sku, locationId: order.location_id, productRefs: [piece.product.productId] }, admin);
   await services.orders.setTerms(order.id, { sizeLabel: '17', priceMinor: 420_000, currency: 'EUR' }, admin);
+  // Its buyer entered by ORBES Client Services as the demo's other orders are (packAndShip's fixture buyer otherwise).
+  await services.orders.setBuyer(order.id, { name: 'Camille Laurent', address: '14 rue de Turenne\n75004 Paris\nFrance', country: 'FR' }, admin);
   await services.orders.transition(order.id, { to: 'PAID' }, admin);
   const colissimo = (await db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
   await packAndShip(

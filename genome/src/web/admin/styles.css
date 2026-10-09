@@ -3399,6 +3399,15 @@ fieldset.cfield--checks > .cfield__label {
   text-align: left;
 }
 
+/* Add to supplier order in the release's narrow column: on two lines where it must, each line with room for its
+   underline, its words on the sentence's edge. */
+.live__stock .cbtn--ghost {
+  height: auto;
+  min-height: 30px;
+  padding: 4px 0;
+  line-height: 2;
+}
+
 .live__feasibility-list li + li {
   margin-top: 4px;
 }
@@ -3789,6 +3798,11 @@ fieldset.cfield--checks > .cfield__label {
   font-family: var(--font);
 }
 
+/* An identifier inside a page title of words (Reception · SO-7C21A0B9 · NORD RINGS) reads in --font too. */
+.page-head__id {
+  font-family: var(--font);
+}
+
 /* The phrase a confirmation asks to type (REVOKE O26-J-00184) reads in --font inside its display-face label. */
 .cfield__phrase {
   font-family: var(--font);
@@ -3933,6 +3947,15 @@ fieldset.cfield--checks > .cfield__label {
   align-items: flex-end;
   gap: 18px;
   margin: 26px 0 0;
+}
+
+/* As in .filters: the size's field without its empty hint, so Add a piece not on this order sits on the select's line. */
+.reception__extra .cfield {
+  margin: 0;
+}
+
+.reception__extra .cfield__hint {
+  display: none;
 }
 
 .reception__fields {

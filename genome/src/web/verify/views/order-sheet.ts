@@ -28,6 +28,7 @@ import type { OrderEngravingModel, OrderModel, OrderReturnsModel } from '../orde
 import type { SessionStore } from '../session.js';
 import type { AccountAddresses, AccountOrder, OrderCaseRequest } from '../types.js';
 import { addressFields } from './address.js';
+import { withNumerals } from './common.js';
 import { FormError, messageOf, nocturneForm } from './forms.js';
 import { icon, selectField, sizeButtons, switchControl, textLink } from './nocturne.js';
 
@@ -147,7 +148,7 @@ export class OrderSheet {
       h('h2', { class: 'n-g n-lb n-write__title', id: 'order-sheet-title', attrs: { tabindex: -1 }, text: title }),
       h('button', { class: 'n-account__close', attrs: { type: 'button', 'aria-label': MESSAGES.close }, on: { click: () => this.close() } }, icon('close')),
     );
-    const about = h('div', { class: 'n-px n-write__concerning' }, h('p', { class: 'n-g n-ivc n-write__label n-osheet__concerning', attrs: { 'data-testid': 'order-sheet-concerning' }, text: concerning }));
+    const about = h('div', { class: 'n-px n-write__concerning' }, h('p', { class: 'n-g n-ivc n-write__label n-osheet__concerning', attrs: { 'data-testid': 'order-sheet-concerning' } }, ...withNumerals(concerning)));
     const body = req.kind === 'address' ? this.addressView() : req.kind === 'engraving' ? this.engravingView(req.engraving) : this.requestView(req.kind, req.returns);
     this.panel.replaceChildren(h('div', { class: 'n-handle', attrs: { 'aria-hidden': 'true' } }), head, about, h('div', { class: 'n-px n-osheet__body' }, ...body));
   }

@@ -45,7 +45,7 @@ export function micro(text: string, extra?: string): HTMLElement {
  * Page header: eyebrow (section), title, optional lead text and actions on the right.
  * `identifier`: the title is a record id (a product id), set in the reading face, not the display face.
  */
-export function pageHeader(opts: { eyebrow: string; title: string; identifier?: boolean; lead?: string; actions?: Child[] }): HTMLElement {
+export function pageHeader(opts: { eyebrow: string; title: string | HTMLElement; identifier?: boolean; lead?: string; actions?: Child[] }): HTMLElement {
   return h(
     'header',
     { class: 'page-head' },

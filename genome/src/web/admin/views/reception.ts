@@ -81,9 +81,12 @@ export async function receptionView(ctx: ViewContext): Promise<HTMLElement> {
   );
 }
 
-/** 'Reception · SO-7C21A0B9 · NORD RINGS' (the supplier's name when it is known to the reader). */
-function receptionTitle(reference: string, supplier: string | null): string {
-  return ['Reception', reference, supplier].filter((x): x is string => !!x).join(' · ');
+/**
+ * 'Reception · SO-7C21A0B9 · NORD RINGS' (the supplier's name when it is known to the reader); the reference, an
+ * identifier, reads in --font inside the display-face title, as the console's identifiers do.
+ */
+function receptionTitle(reference: string, supplier: string | null): HTMLElement {
+  return h('span', null, 'Reception · ', h('span', { class: 'page-head__id' }, reference), supplier ? ` · ${supplier}` : '');
 }
 
 /** Confirm the reception (OPERATOR): the identities issued, the pieces in stock, the rejected listed TO RETURN. */

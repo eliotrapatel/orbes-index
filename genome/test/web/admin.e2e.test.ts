@@ -261,7 +261,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     }
   }
 
-  async function shot(p: Page, name: string, opts: { full?: boolean; phone?: boolean } = {}): Promise<void> {
+  async function shot(p: Page, name: string, opts: { full?: boolean; phone?: boolean; dialog?: boolean } = {}): Promise<void> {
     if (!SCREENSHOTS) return;
     mkdirSync(OUT_DIR, { recursive: true });
     // Top of the page, without transient notices.
@@ -270,8 +270,20 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
       window.scrollTo(0, 0);
       await document.fonts.ready;
     });
+    // A dialog taller than the screen (a field per size) is captured whole, from its head: the screen grown to it.
+    const size = p.viewportSize();
+    if (opts.dialog && size) {
+      const tall = await p.evaluate(() => {
+        const d = document.querySelector<HTMLElement>('dialog[open]');
+        if (!d) return 0;
+        d.scrollTop = 0;
+        return d.scrollHeight;
+      });
+      if (tall + 120 > size.height) await p.setViewportSize({ width: size.width, height: tall + 120 });
+    }
     await p.waitForTimeout(400); // let the entrance fade settle
     await p.screenshot({ path: join(OUT_DIR, `admin-${name}.png`) });
+    if (opts.dialog && size) await p.setViewportSize(size);
     if (opts.full) await p.screenshot({ path: join(OUT_DIR, `admin-${name}-full.png`), fullPage: true });
     if (opts.phone) await phoneTwin(p, `admin-${name}-phone.png`);
   }
@@ -2132,7 +2144,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.fill('dialog input[name="size:52"]', '2');
     await p.fill('dialog input[name="size:54"]', '1');
     await expect.poll(() => p.locator('dialog [data-testid=draw-pieces-in-all]').textContent()).toBe('3 pieces in all');
-    await shot(p, 'club-drop-new-sizes');
+    await shot(p, 'club-drop-new-sizes', { dialog: true });
     const opens = new Date(Date.now() - 3_600_000);
     const closes = new Date(Date.now() + 3_600_000);
     const local = (d: Date) => d.toISOString().slice(0, 16);
@@ -2173,7 +2185,7 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await p.click('[data-testid=drop-sizes]');
     await p.waitForSelector('dialog input[name="size:52"]');
     expect(await p.locator('dialog .dialog__title, dialog h2').first().textContent()).toContain('Sizes and pieces');
-    await shot(p, 'club-drop-sizes-dialog');
+    await shot(p, 'club-drop-sizes-dialog', { dialog: true });
     await p.fill('dialog input[name="size:54"]', '0');
     await expect.poll(() => p.locator('dialog [data-testid=draw-pieces-in-all]').textContent()).toBe('1 piece in all');
     await p.fill('dialog input[name="size:54"]', '1');

@@ -665,7 +665,7 @@ function correctionsTab(ctx: ViewContext, items: StockCorrection[], locations: r
     }).then(after(ctx, CORRECTIONS_TEXT.declined));
   const columns: Column<StockCorrection>[] = [
     { label: 'Proposed', cell: (c) => formatDate(c.proposedAt), kind: ['nowrap'] },
-    { label: 'Size', cell: (c) => h('span', null, skuWords(c.sku), h('span', { class: 'cell-sub mono' }, c.sku.code)) },
+    { label: 'Size', cell: (c) => h('span', null, skuWords(c.sku), h('span', { class: 'cell-sub mono' }, c.sku.code)), kind: ['nowrap'] },
     ...(locations.length > 1 ? [{ label: 'Location', cell: (c) => c.location.name, kind: ['nowrap'] } satisfies Column<StockCorrection>] : []),
     { label: 'Pieces', cell: (c) => h('span', { data: { testid: 'correction-delta' } }, deltaText(c.delta)), kind: ['num'] },
     { label: 'Why', cell: (c) => h('span', { class: 'prewrap' }, c.reason), kind: ['wide'] },
