@@ -39,7 +39,7 @@ const state = (id: string, extra: Partial<UiState> & Pick<UiState, 'path' | 'rea
   id,
   title: 'YOUR WISHLIST, end to end',
   refs: ['CUSTOMER INTELLIGENCE §3.2 W.10'],
-  variant: 'wishlist',
+  variant: 'wishes',
   ...extra,
 });
 const sheetOf = (key: string) => (d: NocturneDemo) => `/verify/lookbook/${d.slugs[key]}`;

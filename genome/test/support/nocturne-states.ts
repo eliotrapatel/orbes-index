@@ -411,7 +411,7 @@ async function yourProfile(run: StateRun, tastes: boolean): Promise<void> {
 }
 
 /**
- * Plan CUSTOMER INTELLIGENCE §3.2 W.10.2, the state wishlist (the wishlist stage): your three wishes, the latest first:
+ * Plan CUSTOMER INTELLIGENCE §3.2 W.10.2, the state wishlist (the stage wishes): your three wishes, the latest first:
  * MONOLITHE in blue (shown; the heart of sheet-wished, or written here), MONOLITHE in gold wished two days before and
  * discontinued since (shown, DISCONTINUED · 2026), ZENITH wished five days before and hidden since (NOT IN THE
  * COLLECTION NOW). Written once.
@@ -1257,12 +1257,12 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'collection-stress', title: 'THE COLLECTION with a 24-character name, no photograph', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__group', stress: true },
   { id: 'model-stress', title: 'A model of 24 characters without a photograph, € 125 400 in the salon', refs: ['same pieces'], variant: 'stress', as: you, path: sheet('long'), ready: '.view--sheet .sheet__body section', stress: true },
   // Plan CUSTOMER INTELLIGENCE §3.2 W.10.1: the heart on MONOLITHE in blue, tapped: pressed, In your wishlist. (its own
-  // stage, wishlist, so no other sheet sees the wish).
+  // stage, wishes, so no other sheet sees the wish).
   {
     id: 'sheet-wished',
     title: 'A model’s sheet: MONOLITHE in blue, the heart pressed: WISHLIST, In your wishlist.',
     refs: ['CUSTOMER INTELLIGENCE §3.2 W.10.1'],
-    variant: 'wishlist',
+    variant: 'wishes',
     as: you,
     path: sheet('blue'),
     mutates: true,
@@ -1278,7 +1278,7 @@ export const UI_STATES: readonly UiState[] = [
     id: 'wishlist-empty',
     title: 'YOUR WISHLIST, empty: its sentence and THE COLLECTION',
     refs: ['CUSTOMER INTELLIGENCE §3.2 W.10.2'],
-    variant: 'wishlist',
+    variant: 'wishes',
     as: you,
     path: at('/verify/wishlist'),
     ready: '.view--wishlist[data-state="empty"] .n-wishlist__empty',
@@ -1287,7 +1287,7 @@ export const UI_STATES: readonly UiState[] = [
     id: 'wishlist',
     title: 'YOUR WISHLIST: MONOLITHE in blue, in gold (DISCONTINUED · 2026), ZENITH (NOT IN THE COLLECTION NOW); SEE THE MODEL, REMOVE',
     refs: ['CUSTOMER INTELLIGENCE §3.2 W.10.2'],
-    variant: 'wishlist',
+    variant: 'wishes',
     as: you,
     path: at('/verify/wishlist'),
     mutates: true,
