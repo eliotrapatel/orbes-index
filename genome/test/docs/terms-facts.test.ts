@@ -603,11 +603,14 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
   N4: () => {
     // Neither the customer's routes nor the console's: no tool deletes an account (counsel note §4, point 3). The DELETEs
     // under the account's routes remove one of its saved delivery addresses (YOUR ADDRESSES, plan NEXT LOT §3.6.B) and an
-    // order's engraving (§3.6.C), never the account.
+    // order's engraving (§3.6.C), never the account; those under the console's owner routes remove one of the client
+    // sheet's tags or hide one of its private notes (plan CUSTOMER INTELLIGENCE §3.6 C.4.3), never the account.
     expect(ROUTES.filter((r) => r.method === 'delete' && (r.path.startsWith('/api/v1/account') || r.path.startsWith('/api/admin/owners')))).toEqual([
       { method: 'delete', path: '/api/v1/account/wishlist/:slug' },
       { method: 'delete', path: '/api/v1/account/addresses/:id' },
       { method: 'delete', path: '/api/v1/account/orders/:id/engraving' },
+      { method: 'delete', path: '/api/admin/owners/:id/tags/:tag' },
+      { method: 'delete', path: '/api/admin/owners/:id/notes/:noteId' },
     ]);
     expect(matches(/status:\s*'DELETED'|status\s*=\s*'DELETED'/g).map((m) => m.file)).toEqual([]);
     // No row of accounts is deleted, through Kysely or in raw SQL, by the server or a script.

@@ -23,7 +23,8 @@
  * the suppliers, read by an AUDITOR, added and changed by an OPERATOR, a model's supplier set by an OPERATOR, NEXT LOT §3.5.6.2;
  * the supplier orders, read by an AUDITOR with their PDF, proposed, drafted, sent and settled by an OPERATOR, NEXT LOT §3.5.6.3;
  * the console's links and their channels, read by an AUDITOR, made, changed, archived and removed by an OPERATOR, their
- * reports and the collectors behind a figure read by an AUDITOR, CUSTOMER INTELLIGENCE §3.4 A.7.2);
+ * reports and the collectors behind a figure read by an AUDITOR, CUSTOMER INTELLIGENCE §3.4 A.7.2; the client sheet's
+ * tags and private notes, read by an AUDITOR, written by an OPERATOR, CUSTOMER INTELLIGENCE §3.6 C.9);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -432,6 +433,14 @@ const PROBES: Probe[] = [
   { group: 'links', method: 'PATCH', url: `/api/admin/links/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'links', method: 'POST', url: `/api/admin/links/${UUID}/archive`, min: 'OPERATOR' },
   { group: 'links', method: 'POST', url: `/api/admin/links/${UUID}/unarchive`, min: 'OPERATOR' },
+  // The client sheet's tags and private notes (plan CUSTOMER INTELLIGENCE §3.6 C.9): read from AUDITOR, written by an
+  // OPERATOR (a note removed by its writer or an ADMIN: the service's rule, test/api/client-sheet.test.ts).
+  { group: 'client-sheet', method: 'GET', url: '/api/admin/tags', min: 'AUDITOR' },
+  { group: 'client-sheet', method: 'GET', url: `/api/admin/owners/${UUID}/notes?all=1`, min: 'AUDITOR' },
+  { group: 'client-sheet', method: 'POST', url: `/api/admin/owners/${UUID}/tags`, body: INVALID, min: 'OPERATOR' },
+  { group: 'client-sheet', method: 'DELETE', url: `/api/admin/owners/${UUID}/tags/VIP`, min: 'OPERATOR' },
+  { group: 'client-sheet', method: 'POST', url: `/api/admin/owners/${UUID}/notes`, body: INVALID, min: 'OPERATOR' },
+  { group: 'client-sheet', method: 'DELETE', url: `/api/admin/owners/${UUID}/notes/${UUID}`, min: 'OPERATOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];
@@ -504,6 +513,7 @@ describe('admin role enforcement', () => {
       'order-cases',
       'sign-up',
       'links',
+      'client-sheet',
     ]) {
       expect(groups.has(g)).toBe(true);
     }

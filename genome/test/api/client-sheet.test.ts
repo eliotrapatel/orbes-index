@@ -10,8 +10,11 @@
  *  - GET /api/admin/shopify/products.csv, GET and PUT /api/admin/models/:id/shopify, GET /api/admin/shopify/orders.csv:
  *    attachments never stored by a cache, the order CSV's collectors and buyers masked for an AUDITOR, the refusals.
  *  - the sheet's Lifetime value (plan NEXT-NINE, BP-29): GROWTH's rule (services/growth.ts collectorValue).
+ *  - the client sheet's tags and private notes (plan CUSTOMER INTELLIGENCE §3.6 C.4.3, C.9): GET /api/admin/tags, GET, POST
+ *    and DELETE …/notes, POST and DELETE …/tags, by role, with the CSRF token and the same origin, and their audits.
  * Which role reaches which route is test/api/admin-roles.test.ts; the files' contents test/services/shopify.test.ts.
  */
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { orderReference } from '../../src/server/services/orders.js';
 import { createLiveRelease, liveFixtureOn, type LiveFixture } from '../support/live.js';
@@ -325,5 +328,97 @@ describe('THE HOUSE’S GUARANTEE on the client sheet (plan NEXT-NINE, IN-01)', 
     const logged = JSON.stringify(await h.ctx.db.selectFrom('audit_logs').select('details').where('action', 'like', 'guarantee.%').execute());
     expect(logged).not.toContain(email);
     expect(logged).not.toContain('Waited at the boutique');
+  });
+});
+
+describe('Tags and private notes on the client sheet (plan CUSTOMER INTELLIGENCE §3.6 C.4.3, C.9)', () => {
+  let h: Harness;
+  let op: Client;
+  let other: Client;
+  let admin: Client;
+  let auditor: Client;
+  let id = '';
+  const accountIdOf = async (email: string) => (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow()).id;
+  const del = (c: Client, url: string, opts = {}) => c.request('DELETE', url, opts);
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set(at(0));
+    op = await adminClient(h, 'OPERATOR');
+    other = await adminClient(h, 'OPERATOR');
+    admin = await adminClient(h, 'ADMIN');
+    auditor = await adminClient(h, 'AUDITOR');
+    id = await accountIdOf((await accountClient(h)).email);
+  });
+  afterAll(() => h?.close());
+
+  it('GET /api/admin/tags suggests VIP, PRESS and FRIEND OF THE HOUSE while no tag is used, then the tags in use; an AUDITOR reads them', async () => {
+    const first = await auditor.get('/api/admin/tags');
+    expect(first.statusCode).toBe(200);
+    expect(first.headers['cache-control']).toBe('no-store');
+    expect(safeJson(first)).toEqual({ items: [{ tag: 'VIP', accounts: 0 }, { tag: 'PRESS', accounts: 0 }, { tag: 'FRIEND OF THE HOUSE', accounts: 0 }] });
+    const added = await op.post(`/api/admin/owners/${id}/tags`, { tag: 'friend  of the house' });
+    expect(added.statusCode, added.body).toBe(201);
+    expect(safeJson(added)).toEqual({ tags: ['FRIEND OF THE HOUSE'] });
+    // Already carried: 200 with the tags, nothing added.
+    const again = await other.post(`/api/admin/owners/${id}/tags`, { tag: 'Friend of the House' });
+    expect([again.statusCode, safeJson(again)]).toEqual([200, { tags: ['FRIEND OF THE HOUSE'] }]);
+    expect(safeJson(await auditor.get('/api/admin/tags'))).toEqual({ items: [{ tag: 'FRIEND OF THE HOUSE', accounts: 1 }] });
+    const removed = await del(op, `/api/admin/owners/${id}/tags/${encodeURIComponent('FRIEND OF THE HOUSE')}`);
+    expect([removed.statusCode, removed.body]).toEqual([204, '']);
+    // A tag it does not carry: 204 all the same.
+    expect((await del(op, `/api/admin/owners/${id}/tags/press`)).statusCode).toBe(204);
+    const audits = await h.ctx.db.selectFrom('audit_logs').select(['action', 'details']).where('target_id', '=', id).where('action', 'like', 'account.tag.%').orderBy('id').execute();
+    expect(audits).toEqual([
+      { action: 'account.tag.add', details: { tag: 'FRIEND OF THE HOUSE' } },
+      { action: 'account.tag.remove', details: { tag: 'FRIEND OF THE HOUSE' } },
+    ]);
+  });
+
+  it('refuses a tag in other words (400), the 21st (409 TAG_LIMIT), an unknown account (404), an AUDITOR (403), a write without the CSRF token or from another origin', async () => {
+    const bad = await op.post(`/api/admin/owners/${id}/tags`, { tag: 'VIP!' });
+    expect([bad.statusCode, errorOf(bad)]).toEqual([400, { code: 'VALIDATION_FAILED', message: 'A tag is 1 to 32 letters, digits or spaces (and & ’ - .).' }]);
+    expect((await op.post(`/api/admin/owners/${id}/tags`, { tag: 'VIP', more: 1 })).statusCode).toBe(400);
+    expect(errorOf(await op.post(`/api/admin/owners/${randomUUID()}/tags`, { tag: 'VIP' })).code).toBe('ACCOUNT_NOT_FOUND');
+    expect(errorOf(await auditor.post(`/api/admin/owners/${id}/tags`, { tag: 'VIP' })).code).toBe('FORBIDDEN');
+    expect(errorOf(await op.post(`/api/admin/owners/${id}/tags`, { tag: 'VIP' }, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await op.post(`/api/admin/owners/${id}/tags`, { tag: 'VIP' }, { origin: 'https://evil.example' })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await del(op, `/api/admin/owners/${id}/tags/VIP`, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    for (let i = 1; i <= 20; i++) expect((await op.post(`/api/admin/owners/${id}/tags`, { tag: `tag ${i}` })).statusCode).toBe(201);
+    const full = await op.post(`/api/admin/owners/${id}/tags`, { tag: 'one more' });
+    expect([full.statusCode, errorOf(full)]).toEqual([409, { code: 'TAG_LIMIT', message: 'A client carries at most 20 tags.' }]);
+    for (let i = 1; i <= 20; i++) await del(op, `/api/admin/owners/${id}/tags/${encodeURIComponent(`TAG ${i}`)}`);
+  });
+
+  it('adds a private note (201 the note), lists the notes the newest first, removes one by its writer or an ADMIN only; an AUDITOR reads them', async () => {
+    const res = await op.post(`/api/admin/owners/${id}/notes`, { text: '  Prefers to be called in the evening.  ' });
+    expect(res.statusCode, res.body).toBe(201);
+    const note = safeJson(res) as Json;
+    expect(note).toEqual({ id: expect.any(String), text: 'Prefers to be called in the evening.', at: expect.any(String), by: expect.stringMatching(/^operator-.*@orbes\.test$/), byId: expect.any(String) });
+    h.clock.advance(MINUTE);
+    const second = safeJson(await other.post(`/api/admin/owners/${id}/notes`, { text: 'Asked for the cuff in 54.' })) as Json;
+    const read = await auditor.get(`/api/admin/owners/${id}/notes?all=1`);
+    expect(read.statusCode).toBe(200);
+    expect(safeJson(read)).toEqual({ items: [second, note], total: 2 });
+    expect(errorOf(await auditor.request('DELETE', `/api/admin/owners/${id}/notes/${note.id}`)).code).toBe('FORBIDDEN');
+    const notYours = await other.request('DELETE', `/api/admin/owners/${id}/notes/${note.id}`);
+    expect([notYours.statusCode, errorOf(notYours)]).toEqual([403, { code: 'NOTE_NOT_YOURS', message: 'Only the note’s writer or an ADMIN removes it.' }]);
+    expect((await op.request('DELETE', `/api/admin/owners/${id}/notes/${note.id}`)).statusCode).toBe(204);
+    expect((await admin.request('DELETE', `/api/admin/owners/${id}/notes/${second.id}`)).statusCode).toBe(204);
+    // Twice: 204, nothing more.
+    expect((await op.request('DELETE', `/api/admin/owners/${id}/notes/${note.id}`)).statusCode).toBe(204);
+    expect(safeJson(await auditor.get(`/api/admin/owners/${id}/notes`))).toEqual({ items: [], total: 0 });
+    expect(errorOf(await op.request('DELETE', `/api/admin/owners/${id}/notes/${randomUUID()}`)).code).toBe('NOTE_NOT_FOUND');
+    const long = await op.post(`/api/admin/owners/${id}/notes`, { text: 'x'.repeat(2001) });
+    expect([long.statusCode, errorOf(long)]).toEqual([400, { code: 'VALIDATION_FAILED', message: 'A note is 1 to 2,000 characters.' }]);
+    expect(errorOf(await op.post(`/api/admin/owners/${id}/notes`, { text: 'Hi.' }, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    const audits = await h.ctx.db.selectFrom('audit_logs').select(['action', 'details']).where('target_id', '=', id).where('action', 'like', 'account.note.%').orderBy('id').execute();
+    expect(audits).toEqual([
+      { action: 'account.note.add', details: { noteId: note.id, length: 36 } },
+      { action: 'account.note.add', details: { noteId: second.id, length: 25 } },
+      { action: 'account.note.remove', details: { noteId: note.id } },
+      { action: 'account.note.remove', details: { noteId: second.id } },
+    ]);
+    expect(JSON.stringify(audits)).not.toContain('evening');
   });
 });

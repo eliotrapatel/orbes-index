@@ -50,6 +50,7 @@ import { adminMessageRoutes } from './messages.js';
 import { adminOrderCaseRoutes } from './order-cases.js';
 import { adminOrderRoutes } from './orders.js';
 import { adminOwnerRoutes } from './owners.js';
+import { adminClientSheetRoutes } from './client-sheet.js';
 import { adminProductRoutes } from './products.js';
 import { adminRecordRoutes } from './records.js';
 import { adminReportRoutes } from './reports.js';
@@ -85,6 +86,7 @@ export const adminRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, deps)
   await app.register(adminCertificateRoutes, deps);
   await app.register(adminRecordRoutes, deps);
   await app.register(adminOwnerRoutes, deps);
+  await app.register(adminClientSheetRoutes, deps);
   await app.register(adminMessageRoutes, deps);
   await app.register(adminCareRoutes, deps);
   await app.register(adminGuaranteeRoutes, deps);

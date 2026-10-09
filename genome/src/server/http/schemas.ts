@@ -100,6 +100,7 @@ import { RECEPTION_LIMITS } from '../services/receptions.js';
 import { LOGISTICS_LIMITS } from '../services/logistics.js';
 import { ORDER_CASE_LIMITS } from '../services/order-cases.js';
 import { ADDRESS_LIMITS } from '../services/addresses.js';
+import { NOTE_MAX } from '../services/client-notes.js';
 import { BATCH_MAX_EVENTS, SEEN_PAGES } from '../services/tracking.js';
 import { ATTRIBUTIONS, MEASURES, REPORT_MAX_DAYS, REPORT_VIEWS } from '../services/acquisition-report.js';
 import { pageRequest, type PageRequest } from '../types.js';
@@ -1413,6 +1414,19 @@ export const anomalyParams = z.object({ id: uuid });
 
 /** A customer account (`accounts.id`): its sheet, recovery code, lock and export (§16.10–16.13). */
 export const ownerParams = z.object({ id: uuid });
+
+/**
+ * The client sheet's tags and private notes (§16.36, plan CUSTOMER INTELLIGENCE §3.6 C.4.3, C.9): a tag added or removed,
+ * a note added or removed, every note read. The outer wall only (types and sizes): a tag's words (capitals, 1 to 32
+ * letters, digits, spaces and & ’ - .) and a note's (1 to 2,000 characters) are services/client-notes.ts's `cleanTag`
+ * and `cleanNote`; a tag in the address arrives decoded and goes through `cleanTag` there too.
+ */
+export const tagBody = body({ tag: z.string().max(200, 'At most 200 characters') });
+export const tagParams = z.object({ id: uuid, tag: z.string().max(200, 'At most 200 characters') });
+export const noteBody = body({ text: z.string().max(NOTE_MAX * 4, `At most ${NOTE_MAX} characters`) });
+export const noteParams = z.object({ id: uuid, noteId: uuid });
+/** GET /api/admin/owners/:id/notes: `all=1` reads every note not removed, not only the newest. */
+export const ownerNotesQuery = z.object({ all: queryBool });
 
 /**
  * The answers to « How did you hear about ORBES? » (§16.38, plan CUSTOMER INTELLIGENCE §3.1 P.10): an answer added, one
