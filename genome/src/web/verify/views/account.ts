@@ -23,6 +23,8 @@
  *   ─────────────────────────────────
  *   MESSAGES                    NEW ›     the conversation with ORBES Client Services (plan NEXT-NINE, CS-01): NEW
  *                                         while an answer is unread; its view in the sheet (below)
+ *   YOUR PROFILE        60% COMPLETE ›    the profile (plan CUSTOMER INTELLIGENCE §3.1 P.8), how complete it is, or
+ *                                         COMPLETE; its view in the sheet (below)
  *   YOUR SIZES      RING 52 · WRIST … ›   the sizes saved (plan NEXT-NINE, AC-01), or NOT SET; its view in the sheet
  *   YOUR ADDRESSES          2 SAVED ›     the delivery addresses saved (plan NEXT LOT §3.6.B), or NOT SET; its view
  *   SOUND                         (●)     the sound signature (P-D07), as the footer's SOUND ON / OFF
@@ -44,7 +46,17 @@
  * and, when they cannot be read, the sentence with the server's message, TRY AGAIN and CANCEL, and no SAVE (so that a
  * SAVE never clears a size it was not shown).
  *
- * YOUR ADDRESSES (plan NEXT LOT §3.6.B): ‹ YOUR ACCOUNT, the title and its lead, then each address (its name, lines,
+ * YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8, §3.2 W.10.3): ‹ YOUR ACCOUNT, the title, its lead and how complete
+ * the profile is (what is missing), then five groups: YOU (FIRST NAME, LAST NAME, DATE OF BIRTH: three selects, entered
+ * once with a second press, CONFIRM YOUR DATE OF BIRTH, then read only with WRITE TO ORBES CLIENT SERVICES, which opens
+ * MESSAGES), WHERE YOU ARE (COUNTRY, CITY, the default address of YOUR ADDRESSES and the way there and back, ‹ YOUR
+ * PROFILE, what was typed kept), CONTACT (COUNTRY CODE, which follows COUNTRY, PHONE NUMBER, INSTAGRAM), YOUR TASTES
+ * (FAVOURITE PIECES and FAVOURITE FINISHES two by two, a choice no longer in the collection pressed at the end, NO LONGER
+ * IN THE COLLECTION under it) and HOW YOU FOUND ORBES; SAVE saves it whole with the version read, CANCEL goes back.
+ * Read as it opens (ONE MOMENT…; unreadable, the sentence, the server's message and TRY AGAIN, no field); changed
+ * meanwhile (409), it is read again and drawn as it is now, with the sentence.
+ *
+ * YOUR ADDRESSES (plan NEXT LOT §3.6.B): ‹ YOUR ACCOUNT (‹ YOUR PROFILE when opened from it), the title and its lead, then each address (its name, lines,
  * country and phone, DEFAULT on the default one) with EDIT · MAKE DEFAULT · REMOVE (TAP AGAIN TO REMOVE, then it goes);
  * ADD AN ADDRESS opens the four fields (views/address.ts) with MY DEFAULT ADDRESS, then SAVE and CANCEL; at five, a
  * sentence in its place. Read as it opens (ONE MOMENT…; unreadable, the sentence, the server's message and TRY AGAIN).
@@ -57,24 +69,69 @@ import { h } from '../../shared/dom.js';
 import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { addressesSummary, addressLines, mayAddAddress } from '../addresses-model.js';
-import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_SIZES, MESSAGES, PIECES, SOUND, TIER } from '../copy.js';
+import { countryName } from '../../../shared/countries.js';
+import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, MESSAGES, PIECES, SIGN_UP, SOUND, TASTES, TIER } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
+import { countryOptions } from '../addresses-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
+import {
+  birthDateOf,
+  birthDateWords,
+  codeOptions,
+  completionLine,
+  completionRow,
+  dobOptions,
+  draftOf,
+  followCountry,
+  heardIsOther,
+  profileFromForm,
+  refusalField,
+  tasteGroups,
+  tasteToggle,
+  type Option,
+  type ProfileDraft,
+  type TasteChoice,
+} from '../profile-model.js';
 import { messageProblem, threadModel, type ConcerningTarget, type ThreadModel } from '../messages-model.js';
 import type { SessionStore } from '../session.js';
 import { SIZE_FIELDS, sizeFieldValue, sizeOptions, sizesFromForm, sizesSummary } from '../sizes-model.js';
 import type { SoundSwitch } from '../sound.js';
 import { tierModel } from '../tier-model.js';
-import type { AccountAddresses, AccountSizes, ClubStatus, SavedAddress, SizeKind } from '../types.js';
+import type { AccountAddresses, AccountProfileView, AccountSizes, ClubStatus, SavedAddress, SizeKind } from '../types.js';
 import { addressFields } from './address.js';
 import { FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
-import { button, definitionList, field, icon, leadRow, selectField, switchControl, textLink, tierDots } from './nocturne.js';
+import { button, definitionList, field, finishDot, icon, leadRow, selectField, switchControl, textLink, tierDots } from './nocturne.js';
 import { PIECES_PATH, withNumerals } from './common.js';
+
+/** Today in Paris, 'YYYY-MM-DD' (YEAR's latest choice is 13 years before it; the server is the judge). */
+function parisToday(): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Paris', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
 
 export interface AccountSheetDeps {
   api: Pick<
     ApiClient,
-    'clubStatus' | 'products' | 'changePassword' | 'logout' | 'messages' | 'writeMessage' | 'readMessages' | 'messagesUnread' | 'sizes' | 'saveSizes' | 'addresses' | 'createAddress' | 'updateAddress' | 'removeAddress' | 'makeDefaultAddress'
+    | 'clubStatus'
+    | 'products'
+    | 'changePassword'
+    | 'logout'
+    | 'messages'
+    | 'writeMessage'
+    | 'readMessages'
+    | 'messagesUnread'
+    | 'sizes'
+    | 'saveSizes'
+    | 'addresses'
+    | 'createAddress'
+    | 'updateAddress'
+    | 'removeAddress'
+    | 'makeDefaultAddress'
+    | 'profile'
+    | 'saveProfile'
   >;
   session: SessionStore;
   sound: SoundSwitch;
@@ -94,7 +151,7 @@ export interface AccountSheetDeps {
   onRead?(): void;
 }
 
-type View = 'account' | 'password' | 'messages' | 'sizes' | 'addresses';
+type View = 'account' | 'password' | 'messages' | 'sizes' | 'addresses' | 'profile';
 
 export class AccountSheet {
   readonly el: HTMLElement;
@@ -137,6 +194,23 @@ export class AccountSheet {
   private removeArmed: string | null = null;
   private removeTimer: ReturnType<typeof setTimeout> | null = null;
   private addressBusy = false;
+  /** YOUR ADDRESSES opened from YOUR PROFILE: its back link reads ‹ YOUR PROFILE and goes back there. */
+  private addressesFromProfile = false;
+  /** YOUR ADDRESSES opened on ADD AN ADDRESS (YOUR PROFILE without an address): its form, once the list is read. */
+  private addAddressNext = false;
+  /**
+   * YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8): as read for this opening, null until (or unreadable:
+   * `profileError`); forgotten as the sheet closes, as the sizes are.
+   */
+  private profile: AccountProfileView | null = null;
+  private profileError: string | null = null;
+  private profileGen = 0;
+  /** What the view's fields hold while the sheet is open (as `replyDraft` keeps a reply); forgotten at close and CANCEL. */
+  private profileDraft: ProfileDraft | null = null;
+  /** A sentence said over the form drawn again (changed meanwhile, the date's refusals): an alert. */
+  private profileNote: string | null = null;
+  /** SAVE pressed once with a date of birth to enter: CONFIRM YOUR DATE OF BIRTH, until it is pressed again or the date changes. */
+  private profileConfirm = false;
 
   constructor(private readonly deps: AccountSheetDeps) {
     this.panel = h('section', { class: 'n-account__panel', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'account-title' } });
@@ -153,6 +227,8 @@ export class AccountSheet {
         if (this.isOpen) this.close();
         this.sizes = null;
         this.addresses = null;
+        this.profile = null;
+        this.profileDraft = null;
       }
     });
   }
@@ -198,7 +274,15 @@ export class AccountSheet {
     this.addressesError = null;
     this.editing = null;
     this.addressesNote = null;
+    this.addressesFromProfile = false;
+    this.addAddressNext = false;
     this.disarmRemove();
+    this.profileGen++;
+    this.profile = null;
+    this.profileError = null;
+    this.profileDraft = null;
+    this.profileNote = null;
+    this.profileConfirm = false;
     this.el.hidden = true;
     document.documentElement.classList.remove('n-locked');
     for (const el of this.deps.outside()) el.inert = false;
@@ -220,14 +304,23 @@ export class AccountSheet {
 
   /** The heading of the view open now (MESSAGES, YOUR SIZES): a screen reader says the view changed. */
   private focusView(): void {
-    const id = this.view === 'messages' ? 'account-messages-title' : this.view === 'sizes' ? 'account-sizes-title' : this.view === 'addresses' ? 'account-addresses-title' : 'account-title';
+    const id =
+      this.view === 'messages'
+        ? 'account-messages-title'
+        : this.view === 'sizes'
+          ? 'account-sizes-title'
+          : this.view === 'addresses'
+            ? 'account-addresses-title'
+            : this.view === 'profile'
+              ? 'account-profile-title'
+              : 'account-title';
     this.panel.querySelector<HTMLElement>(`#${id}`)?.focus({ preventScroll: true });
   }
 
   /** The club's status and the pieces, read afresh: YOUR TIER as it is now. */
   private async read(): Promise<void> {
     const gen = ++this.readGen;
-    const [club, pieces, unread, sizes, addresses] = await Promise.all([
+    const [club, pieces, unread, sizes, addresses, profile] = await Promise.all([
       this.deps.api.clubStatus().catch((e: unknown) => {
         this.deps.session.noteError(e);
         return null;
@@ -236,6 +329,7 @@ export class AccountSheet {
       this.deps.api.messagesUnread().catch(() => false),
       this.deps.api.sizes().catch(() => null),
       this.deps.api.addresses().catch(() => null),
+      this.deps.api.profile().catch(() => null),
     ]);
     if (gen !== this.readGen || !this.isOpen) return;
     this.club = club;
@@ -247,6 +341,10 @@ export class AccountSheet {
     if (this.addresses === null && addresses !== null) {
       this.addresses = addresses;
       if (this.view === 'addresses') this.showAddresses();
+    }
+    if (this.profile === null && profile !== null) {
+      this.profile = profile;
+      if (this.view === 'profile') this.showProfile();
     }
     // MESSAGES opened meanwhile has read it: NEW stays off.
     this.unread = this.view === 'messages' ? false : unread;
@@ -283,7 +381,9 @@ export class AccountSheet {
             ? this.sizesView()
             : this.view === 'addresses'
               ? this.addressesView()
-              : this.accountView(s.account.email);
+              : this.view === 'profile'
+                ? this.profileView()
+                : this.accountView(s.account.email);
     this.panel.replaceChildren(h('div', { class: 'n-handle', attrs: { 'aria-hidden': 'true' } }), head, ...body);
   }
 
@@ -306,6 +406,7 @@ export class AccountSheet {
         'div',
         { class: 'n-account__rows' },
         this.messagesRow(),
+        this.profileRow(),
         this.sizesRow(),
         this.addressesRow(),
         h('label', { class: 'n-row n-account__sound' }, h('span', { class: 'n-g n-row__label', text: SOUND.label }), sw.el),
@@ -539,6 +640,428 @@ export class AccountSheet {
     return h('div', { class: 'n-px n-messages__reply' }, form);
   }
 
+  // ── YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8) ──────────────────
+
+  /** The row after MESSAGES: YOUR PROFILE, its line how complete it is (`60% COMPLETE`, or COMPLETE); nothing while unread. */
+  private profileRow(): HTMLElement {
+    const row = leadRow(ACCOUNT_PROFILE.row, { onOpen: () => this.openProfile(), attrs: { 'data-key': 'profile' }, extraClass: 'n-account__sizes n-account__profile' });
+    if (this.profile) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__profile-line' }, ...withNumerals(completionRow(this.profile.completion))), row.lastChild);
+    return row;
+  }
+
+  private openProfile(): void {
+    this.view = 'profile';
+    this.notice = null;
+    this.profileError = null;
+    this.profileNote = null;
+    this.profileConfirm = false;
+    this.render();
+    this.focusView();
+    // Not read yet (or unreadable): read it before the fields show, ONE MOMENT… meanwhile.
+    if (this.profile === null) void this.readProfile();
+  }
+
+  /** The profile read for the view: its fields once it is, or the sentence and the server's message. */
+  private async readProfile(): Promise<void> {
+    const gen = ++this.profileGen;
+    try {
+      const profile = await this.deps.api.profile();
+      if (gen !== this.profileGen || !this.isOpen) return;
+      this.profile = profile;
+      this.profileError = null;
+    } catch (e) {
+      this.deps.session.noteError(e);
+      if (gen !== this.profileGen || !this.isOpen) return;
+      this.profileError = messageOf(e);
+    }
+    if (this.view === 'profile') this.showProfile();
+  }
+
+  /** The view drawn again (its profile read, or not), the focus on `focus` when given, else on its title. */
+  private showProfile(focus?: string): void {
+    this.render();
+    const at = focus ? this.panel.querySelector<HTMLElement>(focus) : null;
+    if (at) at.focus({ preventScroll: true });
+    else this.focusView();
+  }
+
+  /** Back to the account view (`notice` said there), the focus on YOUR PROFILE's row. */
+  private closeProfile(notice: string | null): void {
+    this.view = 'account';
+    this.notice = notice;
+    this.profileNote = null;
+    this.profileConfirm = false;
+    this.render();
+    this.panel.querySelector<HTMLElement>('[data-key="profile"]')?.focus({ preventScroll: true });
+  }
+
+  /**
+   * Back from YOUR ADDRESSES to YOUR PROFILE: what was typed is kept (the draft), the address block read again (the
+   * default address, how many are saved, how complete the profile is), never the fields.
+   */
+  private backToProfile(): void {
+    this.view = 'profile';
+    this.addressesFromProfile = false;
+    this.addAddressNext = false;
+    this.editing = null;
+    this.addressesNote = null;
+    this.disarmRemove();
+    this.profileNote = null;
+    this.profileConfirm = false;
+    this.showProfile('[data-key="profile-addresses"]');
+    const gen = ++this.profileGen;
+    void this.deps.api.profile().then(
+      (read) => {
+        if (gen !== this.profileGen || !this.isOpen || !this.profile) return;
+        this.profile = { ...this.profile, address: read.address, addresses: read.addresses, completion: read.completion };
+        if (this.view !== 'profile') return;
+        const key = this.panel.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.key : undefined;
+        this.showProfile(key ? `[data-key="${key}"]` : undefined);
+      },
+      (e: unknown) => this.deps.session.noteError(e),
+    );
+  }
+
+  /**
+   * YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8.2, P.8.3): the title, its lead, how complete it is, then the five
+   * groups and SAVE, CANCEL under it. Until the profile is read, ONE MOMENT…; when it cannot be, the sentence and TRY
+   * AGAIN, no field, no SAVE.
+   */
+  private profileView(): HTMLElement[] {
+    const P = ACCOUNT_PROFILE;
+    const back = h(
+      'button',
+      { class: 'n-g n-tl n-messages__back', attrs: { type: 'button' }, data: { key: 'profile-back' }, on: { click: () => this.closeProfile(null) } },
+      icon('back', { small: true }),
+      MESSAGES.back,
+    );
+    const cancel = button(P.cancel, {
+      outline: true,
+      onClick: () => {
+        // CANCEL goes back unchanged: what was typed is dropped.
+        this.profileDraft = null;
+        this.closeProfile(null);
+      },
+    });
+    const head = [
+      h('div', { class: 'n-messages__head' }, back, h('h3', { class: 'n-g n-t3 n-ivc n-messages__title', id: 'account-profile-title', attrs: { tabindex: -1 }, text: P.title })),
+      h('p', { class: 'n-tx n-profile__lead', text: P.lead }),
+    ];
+    const section = (...children: (HTMLElement | null)[]) =>
+      h('section', { class: 'n-px n-profile', attrs: { 'aria-labelledby': 'account-profile-title' } }, ...head, ...children.filter((c): c is HTMLElement => c !== null));
+    const view = this.profile;
+    if (view === null) {
+      return [
+        section(
+          ...(this.profileError
+            ? [
+                h('p', { class: 'n-err n-profile__error', attrs: { role: 'alert' }, text: `${P.unreadable} ${this.profileError}` }),
+                h('div', { class: 'n-profile__retry' }, button(P.retry, { outline: true, onClick: () => this.openProfile() })),
+              ]
+            : [h('p', { class: 'n-g n-lb n-profile__loading', attrs: { role: 'status' }, text: P.loading })]),
+          h('div', { class: 'n-profile__cancel' }, cancel),
+        ),
+      ];
+    }
+    const d = (this.profileDraft ??= draftOf(view));
+    return [
+      section(
+        h('p', { class: 'n-sm n-ivc n-profile__completion', attrs: { role: 'status' } }, ...withNumerals(completionLine(view.completion))),
+        this.profileNote ? h('p', { class: 'n-err n-profile__note', attrs: { role: 'alert', tabindex: -1 }, text: this.profileNote }) : null,
+        this.profileForm(view, d),
+        h('div', { class: 'n-profile__cancel' }, cancel),
+      ),
+    ];
+  }
+
+  /** A group's label (YOU, WHERE YOU ARE, …): the label face, a hairline over it. */
+  private profileGroup(id: string, label: string, ...children: (HTMLElement | null)[]): HTMLElement {
+    return h(
+      'div',
+      { class: 'n-profile__group', attrs: { role: 'group', 'aria-labelledby': id } },
+      h('p', { class: 'n-g n-lb n-profile__group-label', id, text: label }),
+      ...children.filter((c): c is HTMLElement => c !== null),
+    );
+  }
+
+  /** A text field of the view, its value the draft's, the draft following what is typed. */
+  private profileInput(id: string, label: string, value: string, attrs: Record<string, string | number | boolean>, onInput: (v: string) => void, hint?: string): { el: HTMLElement; input: HTMLInputElement } {
+    const input = h('input', { attrs: { type: 'text', ...attrs } });
+    input.value = value;
+    input.addEventListener('input', () => onInput(input.value));
+    return { el: field(id, label, input, hint), input };
+  }
+
+  /** A select of the view, the draft following what is chosen. */
+  private profileSelect(id: string, label: string, options: readonly Option[], value: string, onChange: (v: string) => void, hint?: string): { el: HTMLElement; select: HTMLSelectElement } {
+    const f = selectField(id, label, options, value, hint);
+    f.select.addEventListener('change', () => onChange(f.select.value));
+    return f;
+  }
+
+  private profileForm(view: AccountProfileView, d: ProfileDraft): HTMLFormElement {
+    const P = ACCOUNT_PROFILE;
+    const p = view.profile;
+    const armed = birthDateOf(d.day, d.month, d.year);
+    if (armed.kind !== 'date' || p.birthDate !== null || p.birthDateLocked) this.profileConfirm = false;
+    const first = this.profileInput('profile-first-name', P.firstName, d.firstName, { name: 'given-name', autocomplete: 'given-name', autocapitalize: 'words', maxlength: 50 }, (v) => (d.firstName = v));
+    const last = this.profileInput('profile-last-name', P.lastName, d.lastName, { name: 'family-name', autocomplete: 'family-name', autocapitalize: 'words', maxlength: 50 }, (v) => (d.lastName = v));
+
+    // DATE OF BIRTH: entered once (three selects, then CONFIRM YOUR DATE OF BIRTH), else read only.
+    const confirmLine = h('p', { class: 'n-sm n-ivc n-profile__confirm', attrs: { role: 'status', hidden: true } });
+    let submit: HTMLButtonElement | null = null;
+    const disarm = () => {
+      if (!this.profileConfirm) return;
+      this.profileConfirm = false;
+      confirmLine.hidden = true;
+      confirmLine.textContent = '';
+      if (submit) submit.textContent = P.save;
+    };
+    const dobSelects: HTMLSelectElement[] = [];
+    let dob: HTMLElement;
+    const writeLink = () => {
+      const l = textLink(P.write, { onOpen: () => this.openThread(), extraClass: 'n-profile__write' });
+      l.dataset.key = 'profile-write';
+      return l;
+    };
+    if (p.birthDate !== null || p.birthDateLocked) {
+      dob = h(
+        'div',
+        { class: 'n-fld-group n-profile__dob-set' },
+        h('p', { class: 'n-fld' }, h('span', { class: 'n-g n-lab', id: 'profile-dob-label', text: P.birthDate })),
+        p.birthDate !== null ? h('p', { class: 'n-tx n-ivc n-profile__dob-date' }, ...withNumerals(birthDateWords(p.birthDate))) : null,
+        h('p', { class: 'n-sm n-fld__hint', text: p.birthDate !== null ? P.birthSet : P.birthCleared }),
+        h('p', { class: 'n-profile__write-line' }, writeLink()),
+      );
+    } else {
+      const o = dobOptions(parisToday());
+      const part = (id: string, label: string, options: readonly Option[], key: 'day' | 'month' | 'year') => {
+        const select = h('select', { class: 'n-fld__input n-fld__select-input n-num', id, attrs: { name: id, 'aria-label': label } }, ...options.map((x) => h('option', { attrs: { value: x.value }, text: x.label })));
+        select.value = d[key];
+        select.addEventListener('change', () => {
+          d[key] = select.value;
+          // Any change to the date goes back to SAVE.
+          disarm();
+        });
+        const chevron = icon('chev', { small: true });
+        chevron.classList.add('n-fld__chev');
+        dobSelects.push(select);
+        return h('div', { class: 'n-fld__select' }, select, chevron);
+      };
+      dob = h(
+        'div',
+        { class: 'n-fld-group n-profile__dob-group', attrs: { role: 'group', 'aria-labelledby': 'profile-dob-label', 'aria-describedby': 'profile-dob-hint' } },
+        h('p', { class: 'n-fld' }, h('span', { class: 'n-g n-lab', id: 'profile-dob-label', text: P.birthDate })),
+        h('div', { class: 'n-profile__dob' }, part('profile-dob-day', P.day, o.days, 'day'), part('profile-dob-month', P.month, o.months, 'month'), part('profile-dob-year', P.year, o.years, 'year')),
+        h('p', { class: 'n-sm n-fld__hint', id: 'profile-dob-hint', text: P.birthHint }),
+      );
+    }
+
+    // WHERE YOU ARE: COUNTRY (no empty choice once set), CITY, the default address of YOUR ADDRESSES.
+    const countries = countryOptions(SIGN_UP.chooseCountry).filter((o) => !(p.country && o.value === ''));
+    const code = this.profileSelect('profile-phone-code', P.phoneCode, codeOptions(), d.phoneCode, (v) => {
+      d.phoneCode = v;
+      d.codeChanged = true;
+    });
+    const country = this.profileSelect('profile-country', P.country, countries, d.country, (v) => {
+      d.country = v;
+      // The phone's code follows the country, while the number is empty or the code was never changed by hand.
+      d.phoneCode = followCountry({ code: d.phoneCode, codeChanged: d.codeChanged, number: d.phoneNumber }, v);
+      code.select.value = d.phoneCode;
+    });
+    const city = this.profileInput('profile-city', P.city, d.city, { name: 'city', autocomplete: 'address-level2', maxlength: 80 }, (v) => (d.city = v));
+    const address = view.address
+      ? h(
+          'div',
+          { class: 'n-fld-group n-profile__address' },
+          h('p', { class: 'n-fld' }, h('span', { class: 'n-g n-lab', text: P.address })),
+          h(
+            'p',
+            { class: 'n-tx n-ivc n-profile__address-line' },
+            [view.address.name, view.address.firstLine, countryName(view.address.country)].filter(Boolean).join(' · '),
+            ' ',
+            h('span', { class: 'n-g n-lb n-profile__address-default', text: P.isDefault }),
+          ),
+          h('p', { class: 'n-sm n-fld__hint', text: P.addressHint }),
+          h('p', { class: 'n-profile__write-line' }, this.profileAddressesLink()),
+        )
+      : h(
+          'div',
+          { class: 'n-fld-group n-profile__address' },
+          h('p', { class: 'n-fld' }, h('span', { class: 'n-g n-lab', text: P.address })),
+          h('p', { class: 'n-sm n-profile__address-none', text: P.addressNone }),
+          h(
+            'div',
+            { class: 'n-profile__address-add' },
+            button(P.addressAdd, { outline: true, attrs: { 'data-key': 'profile-addresses' }, onClick: () => this.openAddresses({ fromProfile: true, add: true }) }),
+          ),
+        );
+
+    // CONTACT: COUNTRY CODE, then PHONE NUMBER, stacked; INSTAGRAM after its fixed @.
+    const number = h('input', { attrs: { type: 'tel', name: 'tel-national', inputmode: 'tel', autocomplete: 'tel-national', maxlength: 20 } });
+    number.value = d.phoneNumber;
+    number.addEventListener('input', () => (d.phoneNumber = number.value));
+    const instagram = h('input', { class: 'n-profile__ig-input', attrs: { type: 'text', name: 'instagram', autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', maxlength: 60 } });
+    instagram.value = d.instagram;
+    instagram.addEventListener('input', () => (d.instagram = instagram.value));
+    instagram.id = 'profile-instagram';
+    instagram.classList.add('n-fld__input');
+    instagram.setAttribute('aria-describedby', 'profile-instagram-hint');
+    const instagramField = h(
+      'div',
+      { class: 'n-fld-group' },
+      h('label', { class: 'n-fld', attrs: { for: 'profile-instagram' } }, h('span', { class: 'n-g n-lab', text: P.instagram })),
+      h('div', { class: 'n-profile__ig' }, h('span', { class: 'n-profile__at', attrs: { 'aria-hidden': 'true' }, text: '@' }), instagram),
+      h('p', { class: 'n-sm n-fld__hint', id: 'profile-instagram-hint', text: P.instagramHint }),
+    );
+
+    // HOW YOU FOUND ORBES: the answers offered (the saved one kept when set aside), IN A FEW WORDS with Other only.
+    const other = this.profileInput('profile-heard-other', P.other, d.heardOther, { name: 'heard-other', autocomplete: 'off', maxlength: 100 }, (v) => (d.heardOther = v));
+    other.el.hidden = !heardIsOther(view, d.heardId);
+    const heard = this.profileSelect('profile-heard', P.heard, [{ value: '', label: P.choose }, ...view.options.heard.map((o) => ({ value: o.id, label: o.label }))], d.heardId, (v) => {
+      d.heardId = v;
+      other.el.hidden = !heardIsOther(view, v);
+    });
+
+    const tastes = this.tastesBlock(view, d);
+    const byField: Record<string, HTMLElement | undefined> = {
+      firstName: first.input,
+      lastName: last.input,
+      country: country.select,
+      city: city.input,
+      phoneCode: code.select,
+      phoneNumber: number,
+      birthDate: dobSelects[0],
+      instagram,
+      heard: heard.select,
+      tastes: tastes?.querySelector<HTMLElement>('.n-opt2__option') ?? undefined,
+    };
+    const form = nocturneForm(
+      this.deps.session,
+      'profile',
+      [
+        this.profileGroup('profile-group-you', P.groups.you, first.el, last.el, dob),
+        this.profileGroup('profile-group-where', P.groups.where, country.el, city.el, address),
+        this.profileGroup('profile-group-contact', P.groups.contact, code.el, field('profile-phone-number', P.phoneNumber, number, P.phoneHint), instagramField),
+        tastes,
+        this.profileGroup('profile-group-found', P.groups.found, heard.el, other.el),
+        confirmLine,
+      ].filter((x): x is HTMLElement => x !== null),
+      this.profileConfirm ? P.birthConfirm : P.save,
+      async () => {
+        const date = birthDateOf(d.day, d.month, d.year);
+        if (date.kind === 'partial') {
+          dobSelects.find((x) => x.value === '')?.setAttribute('aria-invalid', 'true');
+          throw new FormError(P.birthPartial);
+        }
+        // Entering the date of birth asks a second press: CONFIRM YOUR DATE OF BIRTH.
+        if (date.kind === 'date' && p.birthDate === null && !p.birthDateLocked && !this.profileConfirm) {
+          this.profileConfirm = true;
+          confirmLine.textContent = P.birthConfirmLine(birthDateWords(date.date));
+          confirmLine.hidden = false;
+          if (submit) submit.textContent = P.birthConfirm;
+          return;
+        }
+        try {
+          this.profile = await this.deps.api.saveProfile(profileFromForm(d, view));
+        } catch (e) {
+          this.deps.session.noteError(e);
+          if (e instanceof ApiError && (e.code === 'PROFILE_CHANGED' || e.code === 'BIRTH_DATE_SET' || e.code === 'BIRTH_DATE_ENTERED')) {
+            // Read again and drawn as it is now; what was typed is not kept (it may conflict with the change).
+            this.profileDraft = null;
+            this.profileConfirm = false;
+            this.profileNote = e.code === 'PROFILE_CHANGED' ? P.changed : e.message;
+            this.profile = null;
+            await this.readProfile();
+            this.panel.querySelector<HTMLElement>('.n-profile__note')?.focus({ preventScroll: true });
+            return;
+          }
+          if (e instanceof ApiError && e.code === 'HEARD_UNAVAILABLE') {
+            // The answer was set aside meanwhile: the answers read again, the saved one put back, what was typed kept.
+            const read = await this.deps.api.profile().catch(() => null);
+            if (read && this.profile) this.profile = { ...this.profile, options: read.options };
+            d.heardId = this.profile?.profile.heard?.optionId ?? '';
+            this.profileConfirm = false;
+            this.profileNote = `${P.failed} ${e.message}`;
+            this.showProfile('#profile-heard');
+            return;
+          }
+          const named = e instanceof ApiError ? refusalField(e.code, e.message) : null;
+          if (named) byField[named]?.setAttribute('aria-invalid', 'true');
+          throw new FormError(`${P.failed} ${messageOf(e)}`);
+        }
+        this.profileDraft = null;
+        this.closeProfile(P.saved);
+      },
+    );
+    submit = form.querySelector<HTMLButtonElement>('button[type="submit"]');
+    // Drawn again while CONFIRM YOUR DATE OF BIRTH is asked (after YOUR ADDRESSES and back): its line with it.
+    if (armed.kind === 'date' && this.profileConfirm) {
+      confirmLine.textContent = P.birthConfirmLine(birthDateWords(armed.date));
+      confirmLine.hidden = false;
+    }
+    return form;
+  }
+
+  /** YOUR ADDRESSES › from YOUR PROFILE: its view, its back link ‹ YOUR PROFILE. */
+  private profileAddressesLink(): HTMLElement {
+    const l = textLink(ACCOUNT_PROFILE.addresses, { onOpen: () => this.openAddresses({ fromProfile: true }), extraClass: 'n-profile__addresses' });
+    l.dataset.key = 'profile-addresses';
+    return l;
+  }
+
+  /**
+   * YOUR TASTES (plan CUSTOMER INTELLIGENCE §3.2 W.10.3): FAVOURITE PIECES and FAVOURITE FINISHES, two by two, each
+   * choice a button pressed or not (a finish with its dot), a choice no longer in the collection at the end with NO LONGER
+   * IN THE COLLECTION under it; up to 30 of each ('Up to 30.'). A group with nothing to choose is not shown; neither is
+   * the block when both are empty.
+   */
+  private tastesBlock(view: AccountProfileView, d: ProfileDraft): HTMLElement | null {
+    const groups = tasteGroups(view, d);
+    if (groups.pieces.length === 0 && groups.finishes.length === 0) return null;
+    const group = (kind: 'pieces' | 'finishes', label: string, choices: TasteChoice[]) => {
+      if (choices.length === 0) return null;
+      const id = `profile-tastes-${kind}`;
+      const max = h('p', { class: 'n-sm n-ivc n-profile__tastes-max', attrs: { role: 'status', hidden: true }, text: TASTES.max });
+      const cell = (c: TasteChoice) => {
+        const retiredId = c.retired ? `profile-taste-${kind}-${c.key.replace(/[^A-Z0-9]+/g, '-').toLowerCase()}-retired` : null;
+        const b = h(
+          'button',
+          {
+            class: 'n-g n-opt2__option n-profile__taste',
+            attrs: { type: 'button', 'aria-pressed': String(c.pressed), 'aria-describedby': retiredId },
+            data: { key: `taste-${kind}-${c.key}` },
+            on: {
+              click: () => {
+                const r = tasteToggle(d[kind], c.key);
+                max.hidden = !r.refused;
+                d[kind] = r.keys;
+                b.setAttribute('aria-pressed', String(r.keys.includes(c.key)));
+              },
+            },
+          },
+          kind === 'finishes' && c.swatch ? finishDot(c.swatch, c.label) : c.label,
+        );
+        return h('div', { class: 'n-profile__taste-cell' }, b, retiredId ? h('p', { class: 'n-sm n-profile__taste-retired', id: retiredId, text: TASTES.retired }) : null);
+      };
+      return h(
+        'div',
+        { class: 'n-profile__tastes-group' },
+        h('p', { class: 'n-fld' }, h('span', { class: 'n-g n-lab', id, text: label })),
+        h('p', { class: 'n-sm n-fld__hint', text: TASTES.hint }),
+        h('div', { class: 'n-opt2 n-profile__tastes', attrs: { role: 'group', 'aria-labelledby': id } }, ...choices.map(cell)),
+        max,
+      );
+    };
+    return this.profileGroup(
+      'profile-group-tastes',
+      ACCOUNT_PROFILE.groups.tastes,
+      h('p', { class: 'n-sm n-profile__tastes-lead', text: TASTES.lead }),
+      group('pieces', TASTES.pieces, groups.pieces),
+      group('finishes', TASTES.finishes, groups.finishes),
+    );
+  }
+
   // ── YOUR SIZES (plan NEXT-NINE, AC-01) ───────────────────────────────────
 
   /** The second row: YOUR SIZES, its line the sizes saved (`RING 52 · WRIST 16.5 CM`) or NOT SET; nothing while unread. */
@@ -651,16 +1174,21 @@ export class AccountSheet {
     return row;
   }
 
-  private openAddresses(): void {
+  /** YOUR ADDRESSES; from YOUR PROFILE (`fromProfile`) its back link goes back there, and `add` opens ADD AN ADDRESS. */
+  private openAddresses(opts: { fromProfile?: boolean; add?: boolean } = {}): void {
     this.view = 'addresses';
     this.notice = null;
     this.addressesError = null;
     this.addressesNote = null;
     this.editing = null;
+    this.addressesFromProfile = opts.fromProfile === true;
+    this.addAddressNext = opts.add === true;
     this.disarmRemove();
-    this.render();
-    this.focusView();
-    if (this.addresses === null) void this.readAddresses();
+    if (this.addresses === null) {
+      this.render();
+      this.focusView();
+      void this.readAddresses();
+    } else this.showAddresses();
   }
 
   /** The addresses read for the view (again after a change): its list once they are, or the sentence and the server's message. */
@@ -680,6 +1208,14 @@ export class AccountSheet {
   }
 
   private showAddresses(focus?: string): void {
+    // Opened on ADD AN ADDRESS (YOUR PROFILE without an address): its form once the list is read.
+    if (this.addAddressNext && this.addresses !== null) {
+      this.addAddressNext = false;
+      this.editing = 'new';
+      this.render();
+      this.panel.querySelector<HTMLElement>('.n-account__addresses-view input')?.focus({ preventScroll: true });
+      return;
+    }
     this.render();
     const at = focus ? this.panel.querySelector<HTMLElement>(focus) : null;
     if (at) at.focus({ preventScroll: true });
@@ -688,6 +1224,8 @@ export class AccountSheet {
 
   private closeAddresses(): void {
     this.view = 'account';
+    this.addressesFromProfile = false;
+    this.addAddressNext = false;
     this.editing = null;
     this.addressesNote = null;
     this.disarmRemove();
@@ -713,7 +1251,14 @@ export class AccountSheet {
 
   private addressesView(): HTMLElement[] {
     const A = ACCOUNT_ADDRESSES;
-    const back = h('button', { class: 'n-g n-tl n-messages__back', attrs: { type: 'button' }, data: { key: 'addresses-back' }, on: { click: () => this.closeAddresses() } }, icon('back', { small: true }), MESSAGES.back);
+    // ‹ YOUR PROFILE when opened from YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.14), else ‹ YOUR ACCOUNT.
+    const fromProfile = this.addressesFromProfile;
+    const back = h(
+      'button',
+      { class: 'n-g n-tl n-messages__back', attrs: { type: 'button' }, data: { key: 'addresses-back' }, on: { click: () => (fromProfile ? this.backToProfile() : this.closeAddresses()) } },
+      icon('back', { small: true }),
+      fromProfile ? ACCOUNT_PROFILE.backToProfile : MESSAGES.back,
+    );
     const head = [
       h('div', { class: 'n-messages__head' }, back, h('h3', { class: 'n-g n-t3 n-ivc n-messages__title', id: 'account-addresses-title', attrs: { tabindex: -1 }, text: A.title })),
       h('p', { class: 'n-tx n-account__addresses-lead', text: A.lead }),
@@ -727,7 +1272,7 @@ export class AccountSheet {
           ...(this.addressesError
             ? [
                 h('p', { class: 'n-err n-account__addresses-error', attrs: { role: 'alert' }, text: `${A.unreadable} ${this.addressesError}` }),
-                h('div', { class: 'n-account__addresses-retry' }, button(A.retry, { outline: true, onClick: () => this.openAddresses() })),
+                h('div', { class: 'n-account__addresses-retry' }, button(A.retry, { outline: true, onClick: () => this.openAddresses({ fromProfile: this.addressesFromProfile, add: this.addAddressNext }) })),
               ]
             : [h('p', { class: 'n-g n-lb n-account__addresses-loading', attrs: { role: 'status' }, text: A.loading })]),
         ),

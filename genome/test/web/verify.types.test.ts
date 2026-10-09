@@ -47,6 +47,7 @@ import type { LookbookCard as ServerLookbookCard, LookbookSheet as ServerLookboo
 import type { SalonSheet as ServerSalonSheet, ShopRequestView as ServerShopRequest } from '../../src/server/services/salon.js';
 import type { AccountOrder as ServerAccountOrder, OrderCareGuide as ServerOrderCareGuide } from '../../src/server/services/orders.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
+import type { CollectorProfileView as ServerProfileView, HeardChoice as ServerHeardChoice } from '../../src/server/services/profiles.js';
 import {
   CIRCLE_ANSWERS,
   CIRCLE_POST_KINDS,
@@ -60,6 +61,8 @@ import {
   REPORT_CHANNELS,
   VERIFICATION_STATES,
   type AccountOrder,
+  type AccountProfileView,
+  type HeardOption,
   type OrderCareGuide,
   type ClubEntry,
   type ClubStatus,
@@ -101,6 +104,10 @@ type Json<T> = T extends Date ? string : T extends readonly (infer U)[] ? Json<U
 // Compile-time: every server outcome is a valid web outcome, every web request a valid server input.
 export const outcomeFits = (o: ServerVerifyOutcome): VerifyOutcome => o;
 export const inputFits = (i: VerifyInput): ServerVerifyInput => i;
+// …and YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.6.2), both ways, and an answer to « How did you hear about ORBES? ».
+export const profileFits = (v: Json<ServerProfileView>): AccountProfileView => v;
+export const profileBack = (v: AccountProfileView): Json<ServerProfileView> => v;
+export const heardFits = (o: Json<ServerHeardChoice>): HeardOption => o;
 // …and every piece of GET /api/v1/account/products, once serialised, a valid piece of MY PIECES (F-01).
 export const pieceFits = (p: Json<OwnedProduct>): OwnedPiece => p;
 // …and the ownership certificate's answers (F-06): the lookup, the owner's links, a new link.

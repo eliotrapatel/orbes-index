@@ -3531,3 +3531,119 @@ body.nocturne[data-screen="live"] {
   transform: translateY(-75%) rotate(45deg);
   pointer-events: none;
 }
+
+/* YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8, §3.2 W.10.3): the sheet's own width, one column at every width but
+   the date of birth's three selects; five groups, each under a hairline; YOUR TASTES two by two. */
+.n-profile {
+  margin-top: 20px;
+}
+
+.n-profile [hidden] {
+  display: none;
+}
+
+.n-profile__lead,
+.n-profile__completion {
+  margin-top: 10px;
+}
+
+.n-profile__loading,
+.n-profile__error,
+.n-profile__retry,
+.n-profile__note {
+  margin-top: 18px;
+}
+
+.n-profile__cancel {
+  margin-top: 10px;
+}
+
+.n-profile__group {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid var(--vault-hairline);
+}
+
+.n-profile__dob {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.n-profile__dob .n-fld__select-input {
+  min-width: 0;
+}
+
+.n-profile__dob-date,
+.n-profile__address-line {
+  overflow-wrap: anywhere;
+}
+
+.n-profile__address-default {
+  white-space: nowrap;
+}
+
+.n-profile__write-line {
+  margin-top: 4px;
+}
+
+.n-profile__address-none {
+  margin-top: 4px;
+}
+
+.n-profile__address-add {
+  margin-top: 12px;
+}
+
+/* INSTAGRAM: a fixed @ before the username, on the field's line. */
+.n-profile__ig {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-bottom: 1px solid var(--vault-hairline-strong);
+}
+
+.n-profile__at {
+  color: var(--vault-soft);
+}
+
+.n-profile__ig .n-fld__input {
+  flex: 1;
+  min-width: 0;
+  border-bottom: 0;
+}
+
+.n-profile__tastes-lead {
+  margin-top: 4px;
+}
+
+.n-profile__tastes-group {
+  margin-top: 20px;
+}
+
+.n-profile__tastes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+/* A choice keeps the canvas's 48 px, room for a name on two lines. */
+.n-profile__taste {
+  width: 100%;
+  padding: 0 10px;
+  overflow-wrap: anywhere;
+}
+
+.n-profile__taste .n-fin__item {
+  justify-content: center;
+}
+
+.n-profile__taste-retired {
+  margin-top: 6px;
+  text-align: center;
+}
+
+.n-profile__tastes-max,
+.n-profile__confirm {
+  margin-top: 10px;
+}

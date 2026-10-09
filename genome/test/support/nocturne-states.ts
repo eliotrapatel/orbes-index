@@ -378,6 +378,47 @@ async function accountAddresses(run: StateRun): Promise<void> {
 }
 
 /**
+ * Plan CUSTOMER INTELLIGENCE §3.1 P.8, the states account-profile and profile-tastes (their own stage): you, Camille
+ * Laurent, give your names, country, city and how you heard of ORBES, with your Paris address the default; with
+ * `tastes`, your favourite piece (BRACELET) and finish (Gold), and a finish the collection no longer shows (Silver, held
+ * from before: NO LONGER IN THE COLLECTION). Written once, whichever state comes first.
+ */
+async function yourProfile(run: StateRun, tastes: boolean): Promise<void> {
+  const { db, services } = run.stage.ctx;
+  const you = run.demo.accounts.you!;
+  if (!(await db.selectFrom('account_addresses').select('id').where('account_id', '=', you.id).executeTakeFirst())) {
+    await services.addresses.create(you.id, { ...YOUR_ADDRESSES[0], isDefault: true }, you.actor);
+  }
+  const read = await services.profiles.forCollector(you.id);
+  if (read.profile.version === 0) {
+    const friend = read.options.heard.find((o) => o.label === 'A friend')!;
+    await services.profiles.save(
+      you.id,
+      { version: 0, firstName: 'Camille', lastName: 'Laurent', country: 'FR', city: 'Paris', phone: null, instagram: null, heard: { optionId: friend.id }, tastes: { pieces: [], finishes: [] } },
+      you.actor,
+    );
+  }
+  if (tastes && !(await db.selectFrom('account_tastes').select('value_key').where('account_id', '=', you.id).executeTakeFirst())) {
+    const now = await services.profiles.forCollector(you.id);
+    await services.profiles.save(
+      you.id,
+      { version: now.profile.version, firstName: 'Camille', lastName: 'Laurent', country: 'FR', city: 'Paris', phone: null, instagram: null, heard: { optionId: now.profile.heard!.optionId }, tastes: { pieces: ['BRACELET'], finishes: ['GOLD'] } },
+      you.actor,
+    );
+    // A finish chosen when the collection showed it, which it no longer does (no model of THE COLLECTION reads Silver).
+    await db.insertInto('account_tastes').values({ account_id: you.id, kind: 'FINISH', value_key: 'SILVER', label: 'Silver' }).execute();
+  }
+}
+
+/** The account sheet opened on YOUR PROFILE, its form drawn, the phone grown to it. */
+async function openProfile(run: StateRun): Promise<void> {
+  await openAccountSheet(run);
+  await run.page.locator('.n-account').getByRole('button', { name: /^YOUR PROFILE/ }).click();
+  await run.page.locator('.n-account:not([hidden]) form.form--profile').waitFor({ timeout: 20_000 });
+  await fitSheet(run.page);
+}
+
+/**
  * A post's answer as the server sent it, its invitation changed by `change` (and the reader's answer set to `answer`
  * when given): the states of an invitation the demo's clock does not reach (C22: answers closed, every place taken).
  */
@@ -1042,6 +1083,39 @@ export const UI_STATES: readonly UiState[] = [
       await fitSheet(run.page);
     },
     ready: '.n-account:not([hidden]) .n-account__addresses-add',
+    viewport: true,
+  },
+  // Plan CUSTOMER INTELLIGENCE §3.1 P.8: YOUR PROFILE in the account sheet, its row after MESSAGES; on its own stage
+  // (account-profile), first without favourites, then with YOUR TASTES chosen and a finish no longer in the collection.
+  {
+    id: 'account-profile',
+    title: 'The account sheet: YOUR PROFILE, 50% complete: YOU, WHERE YOU ARE (the default address), CONTACT, YOUR TASTES, HOW YOU FOUND ORBES, SAVE, CANCEL',
+    refs: ['CUSTOMER INTELLIGENCE §3.1 P.8'],
+    variant: 'account-profile',
+    as: you,
+    path: at('/verify'),
+    mutates: true,
+    act: async (run) => {
+      await yourProfile(run, false);
+      await openProfile(run);
+    },
+    ready: '.n-account:not([hidden]) form.form--profile',
+    viewport: true,
+  },
+  {
+    id: 'profile-tastes',
+    title: 'YOUR PROFILE: YOUR TASTES chosen (BRACELET, Gold), Silver held: NO LONGER IN THE COLLECTION',
+    refs: ['CUSTOMER INTELLIGENCE §3.2 W.10.3'],
+    variant: 'account-profile',
+    as: you,
+    path: at('/verify'),
+    mutates: true,
+    act: async (run) => {
+      await yourProfile(run, true);
+      await openProfile(run);
+      await run.page.locator('.n-account:not([hidden]) #profile-group-tastes').scrollIntoViewIfNeeded();
+    },
+    ready: '.n-account:not([hidden]) .n-profile__taste-retired',
     viewport: true,
   },
   {

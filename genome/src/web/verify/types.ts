@@ -1286,3 +1286,56 @@ export interface SignUpInput {
   country: string;
   heard?: { optionId: string; other?: string };
 }
+
+/** A favourite piece or finish an account holds (`retired`: the collection no longer shows it; NO LONGER IN THE COLLECTION). */
+export interface ProfileTaste {
+  key: string;
+  label: string;
+  swatch?: string;
+  retired: boolean;
+}
+
+/** The items of a profile's completion (src/shared/profile-rules.ts COMPLETION_KEYS), in the order they are named. */
+export type ProfileCompletionKey = 'NAME' | 'COUNTRY' | 'BIRTH_DATE' | 'CITY' | 'ADDRESS' | 'PHONE' | 'INSTAGRAM' | 'PIECES' | 'FINISHES' | 'HEARD';
+
+/** GET and PUT /api/v1/account/profile (API §10.25, plan CUSTOMER INTELLIGENCE §3.1 P.6.2): YOUR PROFILE as the server keeps it. */
+export interface AccountProfileView {
+  profile: {
+    firstName: string | null;
+    lastName: string | null;
+    country: string | null;
+    city: string | null;
+    /** The country picked for the code, and the number in E.164. */
+    phone: { country: string; number: string } | null;
+    /** 'YYYY-MM-DD'. */
+    birthDate: string | null;
+    /** True once a date is set or the collector has entered one: only ORBES Client Services sets it then. */
+    birthDateLocked: boolean;
+    instagram: string | null;
+    heard: { optionId: string; label: string; other: string | null } | null;
+    tastes: { pieces: ProfileTaste[]; finishes: ProfileTaste[] };
+    /** 0 while nothing was ever saved. */
+    version: number;
+  };
+  /** What may be chosen now: the collection's pieces and finishes, and the answers offered (the saved one kept when set aside). */
+  options: { pieces: { key: string; label: string }[]; finishes: { key: string; label: string; swatch: string }[]; heard: HeardOption[] };
+  /** The default address of YOUR ADDRESSES, in short. */
+  address: { name: string; firstLine: string; country: string } | null;
+  /** How many addresses are saved. */
+  addresses: number;
+  completion: { percent: number; missing: ProfileCompletionKey[] };
+}
+
+/** PUT /api/v1/account/profile: the whole profile, with the version read; `birthDate` only when it is entered. */
+export interface AccountProfileInput {
+  version: number;
+  firstName: string | null;
+  lastName: string | null;
+  country: string | null;
+  city: string | null;
+  phone: { country: string; number: string } | null;
+  birthDate?: string;
+  instagram: string | null;
+  heard: { optionId: string; other?: string | null } | null;
+  tastes: { pieces: string[]; finishes: string[] };
+}

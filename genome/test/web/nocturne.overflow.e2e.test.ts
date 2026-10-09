@@ -56,6 +56,10 @@ const NARROW_TOO = [
   // CREATE ACCOUNT's names, COUNTRY and the optional question with IN A FEW WORDS (plan CUSTOMER INTELLIGENCE §3.1 P.4.1),
   // at 375, 360 and 320 px too.
   'sign-up',
+  // YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8): its five groups, the date's three selects, YOUR TASTES two by two
+  // with NO LONGER IN THE COLLECTION, at 375, 360 and 320 px too.
+  'account-profile',
+  'profile-tastes',
 ];
 /** Of NARROW_TOO, opened at the stage's 390 px only: the LIVE room with the guarantee's line. */
 const STAGE_ONLY = ['room-guaranteed'];

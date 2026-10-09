@@ -1959,3 +1959,95 @@ export const SIGN_UP = Object.freeze({
   noLastName: 'Enter your last name.',
   noCountry: 'Choose your country.',
 });
+
+/** Words in a sentence's list: « a », « a and b », « a, b and c ». */
+const wordsList = (items: readonly string[] | string) => {
+  const list = typeof items === 'string' ? [items] : [...items];
+  return list.length <= 1 ? (list[0] ?? '') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
+};
+
+/**
+ * YOUR TASTES, a block of YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.2 W.10.3, W.10.4): FAVOURITE PIECES and FAVOURITE
+ * FINISHES, chosen among what THE COLLECTION shows, two by two; a choice the collection no longer shows stays, pressed,
+ * NO LONGER IN THE COLLECTION under it.
+ */
+export const TASTES = Object.freeze({
+  title: 'YOUR TASTES',
+  lead: 'The pieces and finishes you prefer in the ORBES collection.',
+  pieces: 'FAVOURITE PIECES',
+  finishes: 'FAVOURITE FINISHES',
+  hint: 'Choose as many as you like.',
+  max: 'Up to 30.',
+  retired: 'NO LONGER IN THE COLLECTION',
+});
+
+/**
+ * YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8): a row of the account sheet, right after MESSAGES, its line how
+ * complete the profile is (`60% COMPLETE`, or COMPLETE), and its view in the sheet: the fields in five groups (YOU,
+ * WHERE YOU ARE, CONTACT, YOUR TASTES, HOW YOU FOUND ORBES), the date of birth entered once (CONFIRM YOUR DATE OF BIRTH,
+ * then only ORBES Client Services changes it), the default address of YOUR ADDRESSES, SAVE and CANCEL. Never blocking.
+ */
+export const ACCOUNT_PROFILE = Object.freeze({
+  row: 'YOUR PROFILE',
+  complete: 'COMPLETE',
+  percentRow: (n: number) => `${n}% COMPLETE`,
+  title: 'YOUR PROFILE',
+  lead: 'Your details, as ORBES keeps them. You may change them at any time, except your date of birth once it is saved.',
+  percent: (n: number) => `Your profile is ${n}% complete.`,
+  done: 'Your profile is complete.',
+  /** What is missing, its items in the words of `item`: 'Missing: your phone, your date of birth and your Instagram.' */
+  missing: (items: readonly string[]) => `Missing: ${wordsList(items)}.`,
+  item: Object.freeze({
+    NAME: 'your name',
+    COUNTRY: 'your country',
+    BIRTH_DATE: 'your date of birth',
+    CITY: 'your city',
+    ADDRESS: 'your address',
+    PHONE: 'your phone',
+    INSTAGRAM: 'your Instagram',
+    PIECES: 'your favourite pieces',
+    FINISHES: 'your favourite finishes',
+    HEARD: 'how you heard about ORBES',
+  }),
+  groups: Object.freeze({ you: 'YOU', where: 'WHERE YOU ARE', contact: 'CONTACT', tastes: TASTES.title, found: 'HOW YOU FOUND ORBES' }),
+  firstName: 'FIRST NAME',
+  lastName: 'LAST NAME',
+  birthDate: 'DATE OF BIRTH',
+  day: 'DAY',
+  month: 'MONTH',
+  year: 'YEAR',
+  birthHint: 'Entered once. After that, ORBES Client Services can change it.',
+  birthSet: 'To change it, write to ORBES Client Services.',
+  birthCleared: 'Not saved. To give it, write to ORBES Client Services.',
+  /** The text link under a date set or removed: the sheet's MESSAGES. */
+  write: MESSAGES.write,
+  birthConfirm: 'CONFIRM YOUR DATE OF BIRTH',
+  birthConfirmLine: (date: string) => `${date}. Once saved, only ORBES Client Services can change it.`,
+  birthPartial: 'Choose the day, the month and the year.',
+  country: 'COUNTRY',
+  city: 'CITY',
+  address: 'ADDRESS',
+  addressHint: 'Your default delivery address. It is put on each new order.',
+  addressNone: 'No address is saved.',
+  addressAdd: 'ADD AN ADDRESS',
+  addresses: 'YOUR ADDRESSES',
+  isDefault: 'DEFAULT',
+  phoneCode: 'COUNTRY CODE',
+  phoneNumber: 'PHONE NUMBER',
+  phoneHint: 'Not checked by text message.',
+  instagram: 'INSTAGRAM',
+  instagramHint: 'Your username only.',
+  heard: 'HOW DID YOU HEAR ABOUT ORBES?',
+  choose: 'Choose',
+  other: 'IN A FEW WORDS',
+  save: 'SAVE',
+  cancel: 'CANCEL',
+  retry: 'TRY AGAIN',
+  loading: 'ONE MOMENT…',
+  saved: 'Your profile is saved.',
+  failed: 'Your profile could not be saved just now.',
+  unreadable: 'Your profile could not be shown just now.',
+  changed: 'Your profile was changed meanwhile. It is shown again as it is now.',
+  /** YOUR ADDRESSES' back link when it was opened from YOUR PROFILE (otherwise MESSAGES.back, YOUR ACCOUNT). */
+  backToProfile: 'YOUR PROFILE',
+});

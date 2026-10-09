@@ -721,6 +721,36 @@ describe('verify app: one button to ORBES Client Services, the email under FORGO
     });
   });
 
+  it('writes YOUR PROFILE and YOUR TASTES calmly (ACCOUNT_PROFILE, TASTES; plan CUSTOMER INTELLIGENCE §3.1 P.8.3, §3.2 W.10.4): no exclamation mark, no word of §4.5, a piece and never a product', () => {
+    const said = (v: unknown): string[] =>
+      typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)(['your phone', 'your date of birth', 'your Instagram']))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];
+    for (const [name, group] of [
+      ['ACCOUNT_PROFILE', verifyCopy.ACCOUNT_PROFILE],
+      ['TASTES', verifyCopy.TASTES],
+    ] as const) {
+      const words = said(group).join('\n');
+      expect(words.length, name).toBeGreaterThan(150);
+      expect(words, name).not.toContain('!');
+      expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN]), name).toEqual([]);
+      expect(words, name).not.toMatch(/product|atelier|handmade|craft/i);
+    }
+    // 'piece' is the collector's word: FAVOURITE PIECES.
+    expect(said(verifyCopy.TASTES).join('\n')).toMatch(/\bPIECES\b/);
+    expect(verifyCopy.ACCOUNT_PROFILE.missing(['your phone', 'your date of birth', 'your Instagram'])).toBe('Missing: your phone, your date of birth and your Instagram.');
+    expect(verifyCopy.ACCOUNT_PROFILE.percent(60)).toBe('Your profile is 60% complete.');
+    expect(verifyCopy.ACCOUNT_PROFILE.birthConfirmLine('14 MARCH 1994')).toBe('14 MARCH 1994. Once saved, only ORBES Client Services can change it.');
+    expect(verifyCopy.ACCOUNT_PROFILE.groups).toEqual({ you: 'YOU', where: 'WHERE YOU ARE', contact: 'CONTACT', tastes: 'YOUR TASTES', found: 'HOW YOU FOUND ORBES' });
+    expect(verifyCopy.TASTES).toEqual({
+      title: 'YOUR TASTES',
+      lead: 'The pieces and finishes you prefer in the ORBES collection.',
+      pieces: 'FAVOURITE PIECES',
+      finishes: 'FAVOURITE FINISHES',
+      hint: 'Choose as many as you like.',
+      max: 'Up to 30.',
+      retired: 'NO LONGER IN THE COLLECTION',
+    });
+  });
+
   it('writes THE HOUSE’S GUARANTEE calmly (plan NEXT-NINE, IN-01): no exclamation mark, no word of §4.5, a place and never authenticity', () => {
     const said = (v: unknown): string[] =>
       typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('MONOLITHE', 2))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];

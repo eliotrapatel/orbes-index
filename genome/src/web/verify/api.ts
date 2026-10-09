@@ -22,6 +22,8 @@
  */
 import type {
   AccountAddresses,
+  AccountProfileInput,
+  AccountProfileView,
   AccountMessage,
   AccountSizes,
   DeliveryAddressInput,
@@ -877,6 +879,18 @@ export class ApiClient {
     return r.sizes;
   }
 
+  // ── YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.6.2, P.6.3; API §10.25) ──
+
+  /** YOUR PROFILE: the profile, what may be chosen, the default address in short, how complete it is. */
+  async profile(): Promise<AccountProfileView> {
+    return checkedProfile(await this.request<AccountProfileView>('GET', '/api/v1/account/profile'));
+  }
+
+  /** YOUR PROFILE saved whole, with the version read (409 PROFILE_CHANGED when it changed meanwhile); the profile after it. */
+  async saveProfile(input: AccountProfileInput): Promise<AccountProfileView> {
+    return checkedProfile(await this.request<AccountProfileView>('PUT', '/api/v1/account/profile', input, { csrf: true }));
+  }
+
   // ── YOUR ADDRESSES and an order's delivery address (plan NEXT LOT §3.6.B; API §10.21) ──
 
   /** YOUR ADDRESSES: the saved addresses and the registration country. */
@@ -973,6 +987,14 @@ export class ApiClient {
 }
 
 /** YOUR ADDRESSES as the server answers it, or BAD_RESPONSE. */
+/** YOUR PROFILE as the server answers it, or BAD_RESPONSE. */
+function checkedProfile(r: AccountProfileView | null | undefined): AccountProfileView {
+  if (!r || !r.profile || typeof r.profile.version !== 'number' || !r.options || !Array.isArray(r.options.heard) || !r.completion || typeof r.completion.percent !== 'number') {
+    throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+  }
+  return r;
+}
+
 function checkedAddresses(r: AccountAddresses | undefined): AccountAddresses {
   if (!r || !Array.isArray(r.addresses) || (r.defaultCountry !== null && typeof r.defaultCountry !== 'string')) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
   return r;
