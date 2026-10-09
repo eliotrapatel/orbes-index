@@ -24,6 +24,8 @@ export const ROUTES = [
   { name: 'messages', path: '/messages' },
   { name: 'conversation', path: '/messages/:conversationId' },
   { name: 'owner', path: '/owners/:accountId' },
+  /** The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10): from the Owners page's header, no link of its own in the sidebar. */
+  { name: 'signUp', path: '/sign-up' },
   /** The Club (P-R03): its tabs (Drops, Circle) by `?tab=`; a drop's page, a post's (P-X01), from its row, no link of their own in the sidebar. */
   { name: 'club', path: '/club' },
   { name: 'drop', path: '/club/drops/:dropId' },

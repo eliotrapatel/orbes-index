@@ -140,6 +140,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   lockAccount: 'ADMIN',
   /** Everything held about a client's account, for a request under the right of access. */
   exportAccount: 'ADMIN',
+  /** The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10): the answers to « How did you hear about ORBES? » added, renamed, moved, set aside. */
+  manageHeardOptions: 'ADMIN',
 } as const satisfies Record<string, AdminRole>);
 
 export type Capability = keyof typeof CAPABILITY_MIN_ROLE;

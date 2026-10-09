@@ -3431,3 +3431,16 @@ export interface SystemStatus {
   latest: SystemSample | null;
   history: SystemSample[];
 }
+
+/**
+ * An answer to « How did you hear about ORBES? » (plan CUSTOMER INTELLIGENCE §3.1 P.10; GET /api/admin/heard-options,
+ * API §16.38): its words, Other or not, offered (`active`) or set aside, its place, and how many counted collectors gave it.
+ */
+export interface HeardOptionView {
+  id: string;
+  label: string;
+  other: boolean;
+  active: boolean;
+  position: number;
+  given?: number;
+}

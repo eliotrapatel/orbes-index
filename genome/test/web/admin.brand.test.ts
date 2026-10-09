@@ -15,6 +15,7 @@ import { computeGenome } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { MONOGRAM_PATHS } from '../../src/core/render/monogram.js';
 import { dashboardKpis } from '../../src/web/admin/model/dashboard.js';
+import { SIGN_UP_COPY } from '../../src/web/admin/model/sign-up.js';
 import { genomeFigureMarkup } from '../../src/web/admin/ui/figures.js';
 import type { DashboardData } from '../../src/web/admin/types.js';
 
@@ -160,6 +161,16 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
       const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
       expect(code, f).not.toMatch(/atelier|handmade|hand-made|craft/i);
     }
+  });
+
+  it('writes the Sign-up page calmly (plan CUSTOMER INTELLIGENCE §3.1 P.10): no atelier, handmade or craft, no exclamation mark', () => {
+    for (const f of ['admin/model/sign-up.ts', 'admin/views/sign-up.ts']) {
+      const code = readFileSync(join(WEB, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+      expect(code, f).not.toMatch(/atelier|handmade|hand-made|craft/i);
+    }
+    const words = JSON.stringify(SIGN_UP_COPY);
+    expect(words).not.toContain('!');
+    expect(words).not.toMatch(/atelier|handmade|craft|product/i);
   });
 
   it('sets type from brand.css tokens wherever a token has the same value', () => {

@@ -89,6 +89,7 @@ import { disposeSaleView, saleView } from './views/sale.js';
 import { scansView } from './views/scans.js';
 import { securityView } from './views/security.js';
 import { settingsView } from './views/settings.js';
+import { signUpView } from './views/sign-up.js';
 import { packingSlipView, shippingSlipView } from './views/slip.js';
 import { teamView } from './views/team.js';
 import { warrantiesView } from './views/warranties.js';
@@ -181,6 +182,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   conversation: { view: conversationView, title: 'Conversation', nav: 'messages' },
   owners: { view: ownersView, title: 'Owners', nav: 'owners' },
   owner: { view: ownerView, title: 'Owner', nav: 'owners' },
+  signUp: { view: signUpView, title: 'Sign-up', nav: 'owners' },
   club: { view: clubView, title: 'Club', nav: 'club' },
   drop: { view: dropView, title: 'Drop', nav: 'club' },
   liveRelease: { view: liveReleaseView, title: 'Live release', nav: 'club' },

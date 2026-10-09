@@ -25,7 +25,7 @@ import { can } from '../model/permissions.js';
 import { toneOf } from '../model/tone.js';
 import { href, productHref } from '../router.js';
 import type { OwnerList, OwnerRecord, RecoveryCode, ReferenceMatch } from '../types.js';
-import { button, copyButton, field, filterBar, input, mono, narrowedTo, pageHeader, pager, section, statusMark, table, type Column } from '../ui/components.js';
+import { button, copyButton, field, filterBar, input, linkButton, mono, narrowedTo, pageHeader, pager, section, statusMark, table, type Column } from '../ui/components.js';
 import { openDialog } from '../ui/dialog.js';
 import { notifyError } from '../ui/toast.js';
 import { pageParam, type ViewContext } from './context.js';
@@ -114,7 +114,8 @@ export async function ownersView(ctx: ViewContext): Promise<HTMLElement> {
   return h(
     'div',
     { class: 'view view--owners' },
-    pageHeader({ eyebrow: 'Clients', title: 'Owners', lead }),
+    // The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10): what a new account is asked, from the header.
+    pageHeader({ eyebrow: 'Clients', title: 'Owners', lead, actions: [linkButton('Sign-up', href('signUp'), 'ghost')] }),
     form,
     search?.kind === 'ref' && list.scans ? referencePanel(search.ref, list.scans, list.items) : null,
     slot,

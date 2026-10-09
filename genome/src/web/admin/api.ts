@@ -27,6 +27,7 @@ import type {
   LiveFeasibility,
   LiveSizeMix,
   Carrier,
+  HeardOptionView,
   InvoiceFilters,
   InvoiceList,
   OrderAlertDelays,
@@ -1257,6 +1258,28 @@ export class AdminApi {
   /** ADMIN: its name, its tracking link, offered or set aside. */
   updateCarrier(id: string, change: { name?: string; trackingUrl?: string; active?: boolean }): Promise<Carrier> {
     return this.patch(`/api/admin/carriers/${encodeURIComponent(id)}`, change);
+  }
+
+  // ── The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10; API §16.38) ──
+
+  /** AUDITOR+: the answers to « How did you hear about ORBES? », each with how many counted collectors gave it. */
+  heardOptions(): Promise<{ options: HeardOptionView[] }> {
+    return this.get('/api/admin/heard-options');
+  }
+
+  /** ADMIN: a new answer, offered, last before Other. */
+  createHeardOption(label: string): Promise<{ options: HeardOptionView[] }> {
+    return this.post('/api/admin/heard-options', { label });
+  }
+
+  /** ADMIN: renamed, set aside or offered again. */
+  updateHeardOption(id: string, change: { label?: string; active?: boolean }): Promise<{ options: HeardOptionView[] }> {
+    return this.patch(`/api/admin/heard-options/${encodeURIComponent(id)}`, change);
+  }
+
+  /** ADMIN: every answer but Other, in its new order (Other stays last). */
+  orderHeardOptions(ids: string[]): Promise<{ options: HeardOptionView[] }> {
+    return this.request('PUT', '/api/admin/heard-options/order', { body: { ids } });
   }
 
   // ── Logistics (plan NEXT LOT §3.5.6.9; the agent's locations only, for a LOGISTICS login) ──

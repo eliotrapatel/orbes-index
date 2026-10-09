@@ -353,7 +353,8 @@ import { adminState, deviceLabel, initialLocations, LOCATIONS_REQUIRED, location
 import { toneOf } from '../../src/web/admin/model/tone.js';
 import { PASSWORD_MIN_LENGTH as SERVER_PASSWORD_MIN_LENGTH } from '../../src/server/services/auth.js';
 import * as web from '../../src/web/admin/types.js';
-import type { AnalyticsData, AnomalyContext, DashboardData, Model, ProductDetail, VerificationState } from '../../src/web/admin/types.js';
+import type { AnalyticsData, AnomalyContext, DashboardData, HeardOptionView, Model, ProductDetail, VerificationState } from '../../src/web/admin/types.js';
+import { heardInOrder, heardLabelProblem, mayOfferMore, movedOrder, SIGN_UP_COPY } from '../../src/web/admin/model/sign-up.js';
 import { ApiError } from '../../src/web/admin/api.js';
 import { ATTENTION_INTERVAL_MS, startAttentionPoll, type VisibilitySource } from '../../src/web/admin/ui/attention.js';
 
@@ -3390,5 +3391,41 @@ describe('the Growth page (plan NEXT-NINE, BP-29: model/growth.ts)', () => {
     expect(can('ADMIN', 'readGrowth')).toBe(true);
     expect(can('RETAIL', 'readGrowth')).toBe(false);
     expect(parseHash('#/growth?months=24').name).toBe('growth');
+  });
+});
+
+describe('the Sign-up page\'s answers (plan CUSTOMER INTELLIGENCE §3.1 P.10; model/sign-up.ts)', () => {
+  const o = (id: string, position: number, over: Partial<HeardOptionView> = {}): HeardOptionView => ({ id, label: id, other: false, active: true, position, ...over });
+  const list = [o('b', 2), o('other', 9, { other: true, label: 'Other' }), o('a', 1), o('c', 3, { active: false })];
+
+  it('lists them by position, Other last', () => {
+    expect(heardInOrder(list).map((x) => x.id)).toEqual(['a', 'b', 'c', 'other']);
+  });
+
+  it('moves one up or down among the others, Other never moved', () => {
+    expect(movedOrder(list, 'b', -1)).toEqual(['b', 'a', 'c']);
+    expect(movedOrder(list, 'b', 1)).toEqual(['a', 'c', 'b']);
+    expect(movedOrder(list, 'a', -1)).toBeNull();
+    expect(movedOrder(list, 'c', 1)).toBeNull();
+    expect(movedOrder(list, 'other', -1)).toBeNull();
+  });
+
+  it('refuses an empty, a long or a taken label (whatever the case), as the server does', () => {
+    expect(heardLabelProblem('  ', list)).toBe(SIGN_UP_COPY.noLabel);
+    expect(heardLabelProblem('x'.repeat(41), list)).toBe(SIGN_UP_COPY.tooLong);
+    expect(heardLabelProblem('x'.repeat(40), list)).toBeNull();
+    expect(heardLabelProblem('OTHER', list)).toBe(SIGN_UP_COPY.taken);
+    expect(heardLabelProblem('Other', list, 'other')).toBeNull();
+  });
+
+  it('offers at most 12 at once, Other counted', () => {
+    expect(mayOfferMore(list)).toBe(true);
+    expect(mayOfferMore(Array.from({ length: 12 }, (_, i) => o(`k${i}`, i + 1)))).toBe(false);
+    expect(mayOfferMore([...Array.from({ length: 11 }, (_, i) => o(`k${i}`, i + 1)), o('z', 20, { active: false })])).toBe(true);
+  });
+
+  it('lets an ADMIN manage them, an AUDITOR read them (the server\'s heard-options routes)', () => {
+    expect(CAPABILITY_MIN_ROLE.manageHeardOptions).toBe('ADMIN');
+    expect(can('OPERATOR', 'manageHeardOptions')).toBe(false);
   });
 });
