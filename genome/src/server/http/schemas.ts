@@ -100,6 +100,7 @@ import { RECEPTION_LIMITS } from '../services/receptions.js';
 import { LOGISTICS_LIMITS } from '../services/logistics.js';
 import { ORDER_CASE_LIMITS } from '../services/order-cases.js';
 import { ADDRESS_LIMITS } from '../services/addresses.js';
+import { BATCH_MAX_EVENTS, SEEN_PAGES } from '../services/tracking.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { fromZod } from './errors.js';
 
@@ -246,6 +247,33 @@ export const reportBody = body({
   channel: z.enum(REPORT_CHANNELS),
   where: optionalText(200),
   note: optionalText(500),
+});
+
+/**
+ * POST /api/v1/seen (plan CUSTOMER INTELLIGENCE §3.3 T.8.7): the collector app's views, `v` 1. `d` is the device (`s`
+ * standalone on the home screen, `t` touch points, `w` the screen's short side in CSS pixels); `e` holds 1 to
+ * BATCH_MAX_EVENTS views, each a page the app may name (any but SCAN, which only the server writes), its subject (a
+ * slug, a release or post id, a serial), its milliseconds and how long ago it began (up to 24 hours). Strict, like
+ * every body.
+ */
+export const seenBody = body({
+  v: z.literal(1),
+  d: z.strictObject({
+    s: z.boolean(),
+    t: z.number().int('A whole number').min(0, 'From 0').max(20, 'At most 20'),
+    w: z.number().int('A whole number').min(0, 'From 0').max(10_000, 'At most 10000'),
+  }),
+  e: z
+    .array(
+      z.strictObject({
+        p: z.enum(SEEN_PAGES),
+        s: z.string().min(1, 'Required').max(80, 'At most 80 characters').optional(),
+        ms: z.number().int('A whole number').min(0, 'From 0').max(10_800_000, 'At most 10800000'),
+        ago: z.number().int('A whole number').min(0, 'From 0').max(86_400_000, 'At most 86400000'),
+      }),
+    )
+    .min(1, 'At least one view')
+    .max(BATCH_MAX_EVENTS, `At most ${BATCH_MAX_EVENTS} views`),
 });
 
 /** A stored photograph's name: the hex SHA-256 of its bytes, any case. */

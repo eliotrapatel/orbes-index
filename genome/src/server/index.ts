@@ -7,7 +7,8 @@
  *      engine (services/live-engine.ts), listen;
  *   4. on SIGTERM/SIGINT: stop accepting connections, let in-flight requests
  *      finish (bounded by SHUTDOWN_GRACE_MS), stop the engine (its lock goes
- *      back to the next process) and housekeeping, close the database, exit.
+ *      back to the next process) and housekeeping, write the views still in
+ *      memory, close the database, exit.
  *      An unhandled error triggers the same shutdown with exit code 1 so the
  *      orchestrator restarts a clean process.
  *
@@ -61,6 +62,7 @@ async function shutdown(reason: string, exitCode: number): Promise<void> {
     await app?.close(); // stops accepting, answers 503 to new requests, waits for in-flight ones
     await liveEngine?.stop(); // the pass under way finishes, the engine's lock goes back
     await housekeeping?.stop();
+    await ctx?.services.tracking.stop(); // the views still in memory are written (CUSTOMER INTELLIGENCE §3.3 T.8.3)
     await ctx?.close();
     log.info({}, 'shutdown complete');
   } catch (e) {

@@ -6,11 +6,13 @@
  *    disabled) and DELETED accounts, and keeps LOCKED ones;
  *  - houseAccount names exactly the team's own accounts, whatever their status;
  *  - notTestEntrant is GROWTH's SQL, moved: the same text, the same rows (growth.test.ts is unchanged and still passes);
- *  - HouseAccounts keeps the console logins' emails for 5 minutes, then reads them again; a failed read is not kept.
+ *  - HouseAccounts keeps the console logins' emails for 5 minutes, then reads them again; a failed read is not kept;
+ *  - TestEntrantAccounts keeps the test entrants' ids for 5 minutes, at most 5 000, the same way (the recording's
+ *    ingestion, §3.3 T.8.3 item 2).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
-import { countedCollector, HOUSE_ACCOUNTS_CACHE_MS, houseAccount, HouseAccounts, notTestEntrant } from '../../src/server/services/population.js';
+import { countedCollector, HOUSE_ACCOUNTS_CACHE_MS, houseAccount, HouseAccounts, notTestEntrant, TEST_ENTRANTS_CACHE_MAX, TEST_ENTRANTS_CACHE_MS, TestEntrantAccounts } from '../../src/server/services/population.js';
 import { createManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 
@@ -126,6 +128,55 @@ describe('HouseAccounts: the team emails, kept 5 minutes', () => {
     expect(a).toBe(b);
     expect(reads).toBe(2);
     expect(await house.isHouseEmail('team@population.test')).toBe(true);
+    expect(reads).toBe(2);
+  });
+});
+
+describe('TestEntrantAccounts: the test entrants, kept 5 minutes', () => {
+  it('reads once, keeps the set for 5 minutes, then reads again; invalidate() forgets it', async () => {
+    const clock = createManualClock('2026-10-09T10:00:00Z');
+    const entrants = new TestEntrantAccounts(t.db, clock.now);
+    expect(TEST_ENTRANTS_CACHE_MS).toBe(5 * 60_000);
+    expect(TEST_ENTRANTS_CACHE_MAX).toBe(5_000);
+    expect(await entrants.has(ids.entrant!)).toBe(true);
+    expect(await entrants.has(ids.active!)).toBe(false);
+    await t.db.insertInto('test_entrants').values({ account_id: ids.locked! }).execute();
+    clock.advance(TEST_ENTRANTS_CACHE_MS - 1);
+    expect(await entrants.has(ids.locked!)).toBe(false);
+    clock.advance(1);
+    expect(await entrants.has(ids.locked!)).toBe(true);
+    await t.db.deleteFrom('test_entrants').where('account_id', '=', ids.locked!).execute();
+    expect(await entrants.has(ids.locked!)).toBe(true);
+    entrants.invalidate();
+    expect(await entrants.has(ids.locked!)).toBe(false);
+  });
+
+  it('two calls during a read share it, a failed read is not kept, and it asks for 5 000 ids at most', async () => {
+    let reads = 0;
+    let fail = true;
+    let limit = 0;
+    const db = {
+      selectFrom: () => ({
+        select: () => ({
+          limit: (n: number) => ({
+            execute: async () => {
+              reads += 1;
+              limit = n;
+              if (fail) throw new Error('database unavailable');
+              return [{ account_id: 'a1' }];
+            },
+          }),
+        }),
+      }),
+    } as unknown as ConstructorParameters<typeof TestEntrantAccounts>[0];
+    const entrants = new TestEntrantAccounts(db, createManualClock('2026-10-09T10:00:00Z').now);
+    await expect(entrants.all()).rejects.toThrow('database unavailable');
+    fail = false;
+    const [a, b] = await Promise.all([entrants.all(), entrants.all()]);
+    expect(a).toBe(b);
+    expect(reads).toBe(2);
+    expect(limit).toBe(TEST_ENTRANTS_CACHE_MAX);
+    expect(await entrants.has('a1')).toBe(true);
     expect(reads).toBe(2);
   });
 });

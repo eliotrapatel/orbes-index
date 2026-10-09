@@ -13,12 +13,16 @@
  *   media   GET /api/v1/media/:sha256 (the photographs)     apiPerMinute × MEDIA_RATE_FACTOR
  *   live    the LIVE RELEASES (/api/v1/live…), per network  apiPerMinute × LIVE_NETWORK_RATE_FACTOR
  *           and, for a signed-in account, per account too   apiPerMinute (`liveAccount`)
+ *   seen    POST /api/v1/seen (the views the app records)    apiPerMinute × SEEN_RATE_FACTOR
  *
  * The photographs have their own, higher budget (P-R02): a lookbook sheet
  * shows up to nine of them, and the customers of a boutique share its wifi
  * (one address): drawn from the `api` budget, a few sheets would refuse the
  * next lookup. It follows RATE_LIMIT_API_PER_MINUTE (no variable of its own:
  * the configuration has four files to keep in step, deploy/vps included).
+ *
+ * The views (plan CUSTOMER INTELLIGENCE §3.3 T.8.7) have their own budget too: the customers of a boutique share one
+ * address, and views drawn from `api` would refuse their other requests. It follows RATE_LIMIT_API_PER_MINUTE.
  *
  * The LIVE RELEASES (routes/live.ts) draw on two budgets at once: their
  * network's, before anything else, wide enough for the collectors of a
@@ -41,7 +45,7 @@ import type { AppConfig } from '../config.js';
 import { tooManyRequests } from '../errors.js';
 import { pseudonymize, rateLimitKeyOf } from './client.js';
 
-export const RATE_GROUPS = ['verify', 'auth', 'admin', 'api', 'media', 'live'] as const;
+export const RATE_GROUPS = ['verify', 'auth', 'admin', 'api', 'media', 'live', 'seen'] as const;
 export type RateGroup = (typeof RATE_GROUPS)[number];
 
 /** The `media` group's budget, as a multiple of the `api` one (120 → 600 photographs a minute per client). */
@@ -49,6 +53,9 @@ export const MEDIA_RATE_FACTOR = 5;
 
 /** The `live` group's budget per network, as a multiple of the `api` one (120 → 1 200 requests a minute per network). */
 export const LIVE_NETWORK_RATE_FACTOR = 10;
+
+/** The `seen` group's budget, as a multiple of the `api` one (120 → 240 batches of views a minute per client). */
+export const SEEN_RATE_FACTOR = 2;
 
 const WINDOW_MS = 60_000;
 /** Clients tracked per group (LRU). Larger than the plugin default so a wide botnet cannot evict counters cheaply. */
@@ -74,6 +81,7 @@ export function groupLimits(config: Pick<AppConfig, 'rateLimits'>): Record<RateG
     api: config.rateLimits.apiPerMinute,
     media: config.rateLimits.apiPerMinute * MEDIA_RATE_FACTOR,
     live: config.rateLimits.apiPerMinute * LIVE_NETWORK_RATE_FACTOR,
+    seen: config.rateLimits.apiPerMinute * SEEN_RATE_FACTOR,
   };
 }
 

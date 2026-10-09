@@ -9,6 +9,9 @@
  *               time (the recording's ingestion).
  *   countedCollector(column) a counted collector: not DELETED, not a test entrant, not a team account. LOCKED accounts
  *               are counted (they are still collectors, as GROWTH counts them).
+ *   TestEntrantAccounts      the test entrants' account ids in memory, read again every 5 minutes (at most
+ *               TEST_ENTRANTS_CACHE_MAX), for the recording's ingestion (§3.3 T.8.3 item 2), which drops their requests
+ *               without reading the database each time.
  *
  * Every figure of the lot reads `countedCollector`. Segments keep today's rule (ACTIVE accounts, test entrants and
  * team accounts included: a segment is not a figure), a client sheet shows everything, and GROWTH is unchanged (it
@@ -22,6 +25,11 @@ import { systemClock, type Clock } from '../types.js';
 
 /** How long `HouseAccounts` keeps the console logins' emails before reading them again. */
 export const HOUSE_ACCOUNTS_CACHE_MS = 5 * 60_000;
+
+/** How long `TestEntrantAccounts` keeps the test entrants' ids before reading them again. */
+export const TEST_ENTRANTS_CACHE_MS = 5 * 60_000;
+/** The most test entrants' ids it holds: the pool's size (TEST ENTRANTS, up to 5 000 accounts). */
+export const TEST_ENTRANTS_CACHE_MAX = 5_000;
 
 /** The account in `column` is not one of the test entrants' pool (TEST ENTRANTS: never counted by GROWTH). */
 export const notTestEntrant = (column: string): RawBuilder<unknown> => sql`NOT EXISTS (SELECT 1 FROM test_entrants te WHERE te.account_id = ${sql.ref(column)})`;
@@ -73,5 +81,48 @@ export class HouseAccounts {
     this.emails = new Set(rows.map((r) => r.email_normalized));
     this.readAt = at;
     return this.emails;
+  }
+}
+
+/**
+ * The test entrants' account ids (`test_entrants`), read at most once every TEST_ENTRANTS_CACHE_MS, at most
+ * TEST_ENTRANTS_CACHE_MAX of them (the pool's size). A failed read is not kept: the next call reads again. Two calls
+ * while a read runs share it. For the recording's ingestion (plan CUSTOMER INTELLIGENCE §3.3 T.8.3 item 2).
+ */
+export class TestEntrantAccounts {
+  private ids: ReadonlySet<string> | null = null;
+  private readAt = 0;
+  private reading: Promise<ReadonlySet<string>> | null = null;
+
+  constructor(
+    private readonly db: Db,
+    private readonly clock: Clock = systemClock,
+  ) {}
+
+  /** The set, read again once it is TEST_ENTRANTS_CACHE_MS old. */
+  async all(): Promise<ReadonlySet<string>> {
+    if (this.ids && this.clock().getTime() - this.readAt < TEST_ENTRANTS_CACHE_MS) return this.ids;
+    this.reading ??= this.read().finally(() => {
+      this.reading = null;
+    });
+    return this.reading;
+  }
+
+  /** Whether an account is one of the test entrants' pool. */
+  async has(accountId: string): Promise<boolean> {
+    return (await this.all()).has(accountId);
+  }
+
+  /** Forget the set: the next call reads it again. */
+  invalidate(): void {
+    this.ids = null;
+  }
+
+  private async read(): Promise<ReadonlySet<string>> {
+    const at = this.clock().getTime();
+    const rows = await this.db.selectFrom('test_entrants').select('account_id').limit(TEST_ENTRANTS_CACHE_MAX).execute();
+    this.ids = new Set(rows.map((r) => r.account_id));
+    this.readAt = at;
+    return this.ids;
   }
 }

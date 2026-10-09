@@ -21,7 +21,7 @@
  *      accounts at PLATINE or PALLADIUM (plan NEXT-NINE, BP-19 T5:
  *      TierGrantService.prepare, idempotent).
  */
-import { closeDb, createDb, type Db } from './db/connection.js';
+import { closeDb, createDb, poolOf, type Db } from './db/connection.js';
 import { parseDatabaseUrl } from './db/url.js';
 import { migrateToLatest, migrationStatus } from './db/migrate.js';
 import type { AppConfig } from './config.js';
@@ -68,6 +68,7 @@ import { GrowthService } from './services/growth.js';
 import { OwnerService } from './services/owners.js';
 import { PastReleaseService } from './services/past-releases.js';
 import { PlaceService } from './services/places.js';
+import { TrackingService } from './services/tracking.js';
 import { SalonService } from './services/salon.js';
 import { ShopifyExportService } from './services/shopify.js';
 import { ScanReportService } from './services/scan-reports.js';
@@ -176,6 +177,8 @@ export interface AppServices {
   wishlist: WishlistService;
   /** The places from the connection (plan CUSTOMER INTELLIGENCE §3.3 T.8.2): a country with or without its city, once each, by an integer id, cached. */
   places: PlaceService;
+  /** What collectors look at, from which device and place (plan CUSTOMER INTELLIGENCE §3.3 T.8.3): POST /api/v1/seen's views, buffered and written every 2 s. */
+  tracking: TrackingService;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
   suppliers: SupplierService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
@@ -315,6 +318,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const profiles = new ProfileService({ db, audit, tastes, clock });
     const wishlist = new WishlistService({ db, clock });
     const places = new PlaceService({ db });
+    // The recording's writes wait while the pool has requests waiting (§3.3 T.8.3): the collectors come first.
+    const tracking = new TrackingService({ db, places, clock, log, waiting: () => (poolOf(db)?.waitingCount ?? 0) > 0 });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });
@@ -370,6 +375,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       profiles,
       wishlist,
       places,
+      tracking,
       suppliers,
       supplierOrders,
       receptions,
@@ -396,6 +402,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
         if (closed) return;
         closed = true;
         await services.receptions.stop();
+        // The views still in memory are written before the database closes (§3.3 T.8.3).
+        await services.tracking.stop();
         if (ownsDb) await closeDb(db);
       },
     };
@@ -425,6 +433,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     if (heard.length > 0) log.info({ heard }, 'sign-up answers ready');
     // The receptions' issuing worker: what the last process left confirmed is issued, then it polls (§3.5.6.5).
     if (overrides.timers ?? config.env !== 'test') services.receptions.start();
+    // The views' buffer writes every 2 s on its own unref'd interval (§3.0 (f)); tests flush it themselves.
+    if (overrides.timers ?? config.env !== 'test') services.tracking.start();
     return ctx;
   } catch (e) {
     if (ownsDb) await closeDb(db).catch(() => {});
