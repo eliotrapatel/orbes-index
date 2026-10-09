@@ -146,6 +146,11 @@ export interface StaffProfileView {
   withheld: StaffWithheld[];
   /** The account's email is a console login's: left out of the Collectors page and the export (§3.0 (d)). */
   teamAccount: boolean;
+  /**
+   * The choices offered now, as the collector's view carries them (§3.1 P.6.2, P.9.2): the collection's pieces and
+   * finishes (TasteService.options) and the answers offered, Other last. Edit the profile opens on them (§3.6 C.4.2).
+   */
+  options: TasteOptions & { heard: HeardChoice[] };
 }
 
 /** The fields a save carries; a field left out is unchanged. */
@@ -377,8 +382,8 @@ export class ProfileService {
   }
 
   /**
-   * The client sheet's Profile (plan §3.6 C.4.2): the collector's view, who set the date of birth and when, who saved
-   * last, the default address whole and how many others are saved. With `inClear` false (an AUDITOR: §3.0 (h)) the
+   * The client sheet's Profile (plan §3.6 C.4.2): the collector's view with its choices offered now, who set the date of
+   * birth and when, who saved last, the default address whole and how many others are saved. With `inClear` false (an AUDITOR: §3.0 (h)) the
    * date of birth, the age, the phone, the city, the Instagram and the address are null and named in `withheld`; the
    * age band is given to everyone.
    */
@@ -411,6 +416,7 @@ export class ProfileService {
       updatedAt: r?.updated_at ?? null,
       withheld: inClear ? [] : [...STAFF_WITHHELD],
       teamAccount: !!team.rows[0]?.team,
+      options: { pieces: g.options.pieces, finishes: g.options.finishes, heard: g.options.heard },
     };
   }
 

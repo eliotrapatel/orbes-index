@@ -7,7 +7,7 @@
  *      page on Links.
  *   3. Wishlist (§3.2 W.9): the client's open wishes, each model opening its Catalogue page.
  *   4. What they look at, 5. Devices, 6. Places (§3.3 T.4.1): the rows, then Most viewed models (with « Show all », 50 a
- *      page, C.11), Releases viewed, the devices and the places with DB-IP's attribution; an AUDITOR reads no city.
+ *      page from the same answer, C.11), Releases viewed, the devices and the places with DB-IP's attribution; an AUDITOR reads no city.
  * Block 1, the engagement score, ships with I2: absent until then. The words are model/owner-intelligence.ts.
  */
 import { h, mount, type Child } from '../../shared/dom.js';
@@ -24,13 +24,13 @@ import {
   originRows,
   placeText,
   releaseTimeText,
-  showAllModels,
+  moreModels,
+  shownModels,
   wishMark,
 } from '../model/owner-intelligence.js';
 import { href } from '../router.js';
 import type { CollectorBrowsing, FailedBlock, OwnerOrigin, OwnerSheet, StaffWish, ViewedModel } from '../types.js';
 import { button, defList, loading, section, table } from '../ui/components.js';
-import { notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 
 const failedBlock = <T extends object>(b: T | FailedBlock): b is FailedBlock => (b as FailedBlock).failed === true;
@@ -97,31 +97,22 @@ function modelsTable(models: ViewedModel[]): HTMLElement {
 }
 
 /** Most viewed models: the five most, then « Show all », 50 a page, with « Show 50 more » while more are left (C.11). */
-function mostViewed(ctx: ViewContext, accountId: string, b: CollectorBrowsing): HTMLElement {
+function mostViewed(b: CollectorBrowsing): HTMLElement {
   const box = h('div', { data: { testid: 'intelligence-models' } });
-  let shown: ViewedModel[] = [];
-  let page = 0;
-  const draw = (all: boolean, total: number) => {
-    const more = all ? shown.length < total : showAllModels(b);
-    const next = button(all ? I.showMore : I.showAll, { kind: 'ghost', testId: 'intelligence-models-more' });
+  let pages = 0;
+  const draw = () => {
+    const next = button(pages === 0 ? I.showAll : I.showMore, { kind: 'ghost', testId: 'intelligence-models-more' });
     next.addEventListener('click', () => {
-      next.disabled = true;
-      void ctx.api.viewedModels(accountId, page + 1).then((r) => {
-        page = r.page;
-        shown = [...shown, ...r.items];
-        draw(true, r.total);
-      }, (e) => {
-        next.disabled = false;
-        notifyError(e);
-      });
+      pages += 1;
+      draw();
     });
-    mount(box, modelsTable(all ? shown : b.models), more ? next : null);
+    mount(box, modelsTable(shownModels(b, pages)), moreModels(b, pages) ? next : null);
   };
-  draw(false, b.modelsViewed);
+  draw();
   return box;
 }
 
-function browsingBlocks(ctx: ViewContext, accountId: string, b: CollectorBrowsing): Child[] {
+function browsingBlocks(b: CollectorBrowsing): Child[] {
   if (nothingRecorded(b)) return [subtitle(I.looks), h('p', { class: 'soft', data: { testid: 'intelligence-browsing' } }, I.nothing)];
   return [
     subtitle(I.looks),
@@ -130,7 +121,7 @@ function browsingBlocks(ctx: ViewContext, accountId: string, b: CollectorBrowsin
       { data: { testid: 'intelligence-browsing' } },
       defList(browsingRows(b).map((r) => ({ label: r.label, value: r.text, note: r.note }))),
       h('h4', { class: 'intelligence__table-title' }, I.models),
-      mostViewed(ctx, accountId, b),
+      mostViewed(b),
       h('h4', { class: 'intelligence__table-title' }, I.releases),
       h(
         'div',
@@ -203,7 +194,7 @@ export function intelligenceSection(ctx: ViewContext, sheet: OwnerSheet): HTMLEl
           failedBlock(i.origin) ? blockFailure(I.originFailed, I.tryAgain, read) : originBlock(i.origin),
           subtitle(I.wishlist),
           failedBlock(i.wishlist) ? blockFailure(I.wishlistFailed, I.tryAgain, read) : wishlistBlock(i.wishlist),
-          ...(failedBlock(i.browsing) ? [subtitle(I.looks), blockFailure(I.browsingFailed, I.retry, read)] : browsingBlocks(ctx, accountId, i.browsing)),
+          ...(failedBlock(i.browsing) ? [subtitle(I.looks), blockFailure(I.browsingFailed, I.retry, read)] : browsingBlocks(i.browsing)),
         );
       },
       () => {

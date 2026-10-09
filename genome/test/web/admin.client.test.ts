@@ -67,7 +67,7 @@ import {
 } from '../../src/web/admin/model/client-notes.js';
 import { cleanTag, NOTE_MAX, NOTES_SHOWN, TAG_LIMIT, TAG_MAX, type TagSuggestion as ServerTagSuggestion } from '../../src/server/services/client-notes.js';
 import type { OwnerIntelligence as ServerOwnerIntelligence } from '../../src/server/services/owner-intelligence.js';
-import { deviceWords, openedInWords, type ViewedModelsPage as ServerViewedModelsPage } from '../../src/server/services/tracking-reads.js';
+import { deviceWords, openedInWords } from '../../src/server/services/tracking-reads.js';
 import {
   beforeAccountText,
   browsingRows,
@@ -82,7 +82,10 @@ import {
   PAGE_WORDS,
   placeText,
   releaseTimeText,
-  showAllModels,
+  moreModels,
+  MODELS_PAGE,
+  SHEET_MODELS,
+  shownModels,
   sourceText,
   wishMark,
 } from '../../src/web/admin/model/owner-intelligence.js';
@@ -105,8 +108,7 @@ export const tagSuggestionFits = (t: ServerTagSuggestion): web.TagSuggestion => 
 // Step 5.7: the Intelligence the console reads is the server's, both ways.
 export const intelligenceFits = (i: Json<ServerOwnerIntelligence>): web.OwnerIntelligence => i;
 export const intelligenceBack = (i: web.OwnerIntelligence): Json<ServerOwnerIntelligence> => i;
-export const viewedModelsFits = (p: Json<ServerViewedModelsPage>): web.ViewedModelsPage => p;
-// Step 5.5: what Edit the profile opens on (GET /api/admin/owners/:id/profile) is the server's profile and options.
+// Step 5.5: what Edit the profile opens on (the sheet's Profile, GET /api/admin/owners/:id) carries the server's options.
 export const clientProfileEditFits = (e: { profile: Json<StaffProfileView>; options: Json<Awaited<ReturnType<ProfileService['options']>>> }): web.ClientProfileEdit => e;
 
 describe('the Catalogue\'s base price and Shopify product (N2)', () => {
@@ -368,19 +370,18 @@ describe('the client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.6 C.4.1, C
     updatedAt: '2026-10-08T12:02:00.000Z',
     withheld: [],
     teamAccount: false,
-    ...extra,
-  });
-  const masked = (p: web.ClientProfile): web.ClientProfile => ({ ...p, birthDate: null, age: null, phone: null, city: null, instagram: null, address: null, withheld: ['birthDate', 'phone', 'city', 'address', 'instagram'] });
-  const values = (p: web.ClientProfile) => Object.fromEntries(profileRows(p).map((r) => [r.label, r.value]));
-  const notes = (p: web.ClientProfile) => Object.fromEntries(profileRows(p).map((r) => [r.label, r.note]));
-  const edit = (p: web.ClientProfile = profile()): web.ClientProfileEdit => ({
-    profile: p,
     options: {
       pieces: [{ key: 'cuff', label: 'CUFF' }, { key: 'ring', label: 'RING' }],
       finishes: [{ key: 'gold', label: 'Gold', swatch: '#c9a227' }],
       heard: [{ id: 'h-friend', label: 'A friend', other: false }, { id: 'h-other', label: 'Other', other: true }],
     },
+    ...extra,
   });
+  const masked = (p: web.ClientProfile): web.ClientProfile => ({ ...p, birthDate: null, age: null, phone: null, city: null, instagram: null, address: null, withheld: ['birthDate', 'phone', 'city', 'address', 'instagram'] });
+  const values = (p: web.ClientProfile) => Object.fromEntries(profileRows(p).map((r) => [r.label, r.value]));
+  const notes = (p: web.ClientProfile) => Object.fromEntries(profileRows(p).map((r) => [r.label, r.note]));
+  // Edit the profile opens on the sheet's Profile and the choices it carries.
+  const edit = (p: web.ClientProfile = profile()): web.ClientProfileEdit => ({ profile: p, options: p.options });
 
   it('changes the header\'s lead, the one existing text of the sheet that changes; an AUDITOR\'s keeps its ending and names what is withheld; a team account\'s line', () => {
     expect(OWNER_LEAD).toBe('The client’s account and tier, profile, tags and private notes, intelligence, pieces, orders, releases, answers, interest, segments and notes, transfers in progress and latest verifications.');
@@ -586,7 +587,7 @@ describe('the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4
     expect(intelligenceNote('2026-08-01T10:00:00.000Z', '2026-10-12T08:00:00.000Z')).toBe('Recorded on verify.theorbes.com. Staff only. Recording started on 12 OCT 2026.');
     expect(intelligenceNote('2026-10-13T10:00:00.000Z', '2026-10-12T08:00:00.000Z')).toBe('Recorded on verify.theorbes.com. Staff only.');
     expect(intelligenceNote('2026-08-01T10:00:00.000Z', null)).toBe('Recorded on verify.theorbes.com. Staff only.');
-    expect([typeof intelligenceFits, typeof intelligenceBack, typeof viewedModelsFits]).toEqual(['function', 'function', 'function']);
+    expect([typeof intelligenceFits, typeof intelligenceBack]).toEqual(['function', 'function']);
   });
 
   it('says the origin: the first visit with its time and source, a link with its channel, Before tracking, the latest order with its reference, or No purchase', () => {
@@ -657,7 +658,17 @@ describe('the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4
     expect(releaseTimeText({ seconds: 2400, live: true, liveSeconds: 2280 })).toBe('40 min · LIVE room 38 min');
     expect(releaseTimeText({ seconds: 2400, live: false, liveSeconds: 0 })).toBe('40 min');
     const m = { modelId: 'm', name: 'MONOLITHE', variant: 'Blue', views: 1, seconds: 10, lastAt: '2026-10-08T10:00:00.000Z' };
-    expect(showAllModels({ models: [m], modelsViewed: 1 })).toBe(false);
-    expect(showAllModels({ models: [m, m, m, m, m], modelsViewed: 1_000 })).toBe(true);
+    // Most viewed models: five, then « Show all » 50, then « Show 50 more », from the one answer that carries them all (C.11).
+    expect([SHEET_MODELS, MODELS_PAGE]).toEqual([5, 50]);
+    expect([shownModels({ models: [m] }, 0).length, moreModels({ models: [m] }, 0)]).toEqual([1, false]);
+    const thousand = { models: Array.from({ length: 1_000 }, (_, i) => ({ ...m, modelId: `m${i}` })) };
+    expect([0, 1, 2, 19, 20].map((pages) => [shownModels(thousand, pages).length, moreModels(thousand, pages)])).toEqual([
+      [5, true],
+      [50, true],
+      [100, true],
+      [950, true],
+      [1_000, false],
+    ]);
+    expect(shownModels(thousand, 1).map((x) => x.modelId)).toEqual(thousand.models.slice(0, 50).map((x) => x.modelId));
   });
 });

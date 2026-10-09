@@ -428,7 +428,7 @@ export class AcquisitionReportService {
       };
       const lines = (kinds: SourceKind[]) => kinds.map((kind) => ({ kind, figures: kindSum(kind) }));
       if (view === 'links') {
-        report.channels = await this.channelGroups(tx, basis, sources, of, currency, q.archived ?? false);
+        report.channels = await this.channelGroups(tx, sources, of, currency, q.archived ?? false);
         report.without = lines(['CAMPAIGN', 'SITE', 'DIRECT', 'BEFORE', 'STAFF']);
       } else if (view === 'campaigns') {
         report.campaigns = campaignGroups(sources, of);
@@ -454,7 +454,7 @@ export class AcquisitionReportService {
       const basis = await this.basis(tx);
       const source = await tx.selectFrom('acquisition_sources').select('id').where('link_id', '=', link.id).executeTakeFirst();
       const figures = source ? ((await this.figuresBySource(tx, basis, p, currency, source.id)).get(source.id) ?? zeroFigures()) : zeroFigures();
-      const returns = link.cost && source ? ((await this.returns(tx, basis, link.id)).get(link.id) ?? null) : null;
+      const returns = link.cost && source ? ((await this.returns(tx, link.id)).get(link.id) ?? null) : null;
       const gone =
         link.destination === 'RELEASE'
           ? !(await tx.selectFrom('drops').select('id').where('id', '=', link.dropId!).where('cancelled_at', 'is', null).executeTakeFirst())
@@ -707,39 +707,45 @@ export class AcquisitionReportService {
 
   /**
    * Each costed link's RETURN, SINCE MADE, both attributions (see the file header), or one link's when `linkId` is given.
-   * The invoices meet the links through two equality joins added together (first, then last), never one OR join, so
-   * PostgreSQL hashes on the source and the reading stays linear in links and invoices.
+   * It starts from the costed links' sources (read first, a few rows), then by index from them to the buyers: first, the
+   * accounts whose first source it is (`account_sources_first_idx`), last, the orders whose conversion names it
+   * (`acquisition_conversions_last_idx`); then their orders and invoices. The Before tracking and Direct fallbacks are
+   * never a link, so a buyer without a row is never one of a link's. The counted collectors are checked for those
+   * buyers only, never built over every account (§3.4 A.14: under 300 ms at the 1,000-a-day level, step 4.13's bench).
    */
-  private async returns(tx: Db, basis: Basis, linkId?: string): Promise<Map<string, { first: LinkReturn; last: LinkReturn }>> {
-    const onlyLink = linkId === undefined ? sql`` : sql`AND l.id = ${linkId}`;
-    const side = (col: 'first_src' | 'last_src', w: 'first' | 'last') => sql`
-        SELECT s.id AS src, inv.amount, ${w}::text AS w
-          FROM inv JOIN acquisition_sources s ON s.id = inv.${sql.raw(col)} JOIN links l ON l.id = s.link_id
-         WHERE l.cost_minor IS NOT NULL AND inv.currency = l.cost_currency AND inv.issued_at >= l.created_at ${onlyLink}`;
-    const rows = await sql<{ link_id: string; cost_minor: number; cost_currency: HouseCurrency; first: number; last: number }>`
-      WITH fs AS (
-        SELECT a.id AS account_id, a.created_at, coalesce(s.first_source_id, ${fallback(basis, sql`a.created_at`)}) AS src
-          FROM accounts a LEFT JOIN account_sources s ON s.account_id = a.id
-         WHERE ${countedCollector('a.id')}),
-      inv AS (
-        SELECT i.currency, i.issued_at, (CASE WHEN i.kind = 'INVOICE' THEN i.total_minor ELSE -i.total_minor END)::bigint AS amount,
-               fs.src AS first_src, coalesce(c.last_source_id, ${fallback(basis, sql`o.reserved_at`)}) AS last_src
-          FROM invoices i JOIN orders o ON o.id = i.order_id JOIN fs ON fs.account_id = o.account_id
-          LEFT JOIN acquisition_conversions c ON c.kind = 'ORDER' AND c.ref_id = o.id),
-      x AS (${side('first_src', 'first')}
-        UNION ALL ${side('last_src', 'last')})
-      SELECT l.id AS link_id, l.cost_minor, l.cost_currency,
-             coalesce(sum(x.amount) FILTER (WHERE x.w = 'first'), 0)::bigint AS first,
-             coalesce(sum(x.amount) FILTER (WHERE x.w = 'last'), 0)::bigint AS last
-        FROM links l JOIN acquisition_sources s ON s.link_id = l.id
-        LEFT JOIN x ON x.src = s.id
-       WHERE l.cost_minor IS NOT NULL ${onlyLink}
-       GROUP BY l.id, l.cost_minor, l.cost_currency`.execute(tx);
+  private async returns(tx: Db, linkId?: string): Promise<Map<string, { first: LinkReturn; last: LinkReturn }>> {
     const out = new Map<string, { first: LinkReturn; last: LinkReturn }>();
-    for (const r of rows.rows) {
-      const cost = Number(r.cost_minor);
-      const one = (revenue: number): LinkReturn => ({ revenueMinor: revenue, costMinor: cost, currency: r.cost_currency, ratio: ratio(revenue, cost) });
-      out.set(r.link_id, { first: one(Number(r.first)), last: one(Number(r.last)) });
+    let costed = tx
+      .selectFrom('links as l')
+      .innerJoin('acquisition_sources as s', 's.link_id', 'l.id')
+      .select(['l.id as link_id', 's.id as source_id', 'l.cost_minor', 'l.cost_currency'])
+      .where('l.cost_minor', 'is not', null);
+    if (linkId !== undefined) costed = costed.where('l.id', '=', linkId);
+    const links = await costed.execute();
+    if (links.length === 0) return out;
+    const ids = sql.join(links.map((l) => sql`${l.source_id}::integer`));
+    const amount = sql`(CASE WHEN i.kind = 'INVOICE' THEN i.total_minor ELSE -i.total_minor END)::bigint`;
+    const sinceMade = sql`l.cost_minor IS NOT NULL AND i.currency = l.cost_currency AND i.issued_at >= l.created_at AND ${countedCollector('o.account_id')}`;
+    const rows = await sql<{ source_id: number; first: number; last: number }>`
+      SELECT x.source_id, coalesce(sum(x.amount) FILTER (WHERE x.w = 'first'), 0)::bigint AS first,
+             coalesce(sum(x.amount) FILTER (WHERE x.w = 'last'), 0)::bigint AS last
+        FROM (SELECT fs.first_source_id AS source_id, ${amount} AS amount, 'first'::text AS w
+                FROM account_sources fs JOIN acquisition_sources k ON k.id = fs.first_source_id JOIN links l ON l.id = k.link_id
+                JOIN orders o ON o.account_id = fs.account_id JOIN invoices i ON i.order_id = o.id
+               WHERE fs.first_source_id IN (${ids}) AND ${sinceMade}
+              UNION ALL
+              SELECT c.last_source_id, ${amount}, 'last'
+                FROM acquisition_conversions c JOIN acquisition_sources k ON k.id = c.last_source_id JOIN links l ON l.id = k.link_id
+                JOIN orders o ON o.id = c.ref_id JOIN invoices i ON i.order_id = o.id
+               WHERE c.kind = 'ORDER' AND c.last_source_id IN (${ids}) AND ${sinceMade}) x
+       GROUP BY x.source_id`.execute(tx);
+    const sums = new Map(rows.rows.map((r) => [Number(r.source_id), r]));
+    for (const l of links) {
+      const cost = Number(l.cost_minor);
+      const currency = l.cost_currency as HouseCurrency;
+      const one = (revenue: number): LinkReturn => ({ revenueMinor: revenue, costMinor: cost, currency, ratio: ratio(revenue, cost) });
+      const r = sums.get(l.source_id);
+      out.set(l.link_id, { first: one(Number(r?.first ?? 0)), last: one(Number(r?.last ?? 0)) });
     }
     return out;
   }
@@ -747,7 +753,6 @@ export class AcquisitionReportService {
   /** LINKS: the channels in their order, each with its links (see the file header). */
   private async channelGroups(
     tx: Db,
-    basis: ReportBasis,
     sources: SourceMeta[],
     of: (id: number | null | undefined) => Figures,
     currency: HouseCurrency,
@@ -755,7 +760,7 @@ export class AcquisitionReportService {
   ): Promise<ChannelGroup[]> {
     const all = await this.links.list({ archived: true }, tx);
     const channels = await this.links.channels(tx);
-    const returns = await this.returns(tx, basis);
+    const returns = await this.returns(tx);
     const sourceOf = new Map(sources.filter((s) => s.link_id).map((s) => [s.link_id!, s.id]));
     const groups: ChannelGroup[] = [];
     for (const c of channels) {

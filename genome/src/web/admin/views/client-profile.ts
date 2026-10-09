@@ -3,9 +3,10 @@
  * client gave in YOUR PROFILE and what Client Services changed, as the role reads it (an AUDITOR: the date of birth as an
  * age band; the phone, the city, the address and the Instagram withheld), and, for an OPERATOR or an ADMIN while the
  * account is not DELETED, its three dialogs:
- *   - Edit the profile: every field but the date of birth, opened on the profile as it is now and the choices offered
- *     now (GET /api/admin/owners/:id/profile), sent whole with the version read; a refusal of the server is said under
- *     its field; after 409 PROFILE_CHANGED (the client saved meanwhile) the dialog is filled again and stays open;
+ *   - Edit the profile: every field but the date of birth, opened on the sheet's Profile and the choices it carries
+ *     (GET /api/admin/owners/:id), sent whole with the version read; a refusal of the server is said under its field;
+ *     after 409 PROFILE_CHANGED (the client saved meanwhile) the sheet is read again, the dialog filled again and stays
+ *     open;
  *   - Change the date of birth: a date (empty removes it) and why, kept as a private note on the sheet;
  *   - Edit the address (Add an address while none is saved): the default address of YOUR ADDRESSES, H2's four fields.
  * Each change is audited by the server by its fields' names, never their values. The words are model/client-profile.ts.
@@ -78,7 +79,7 @@ export function profileSection(ctx: ViewContext, sheet: OwnerSheet): HTMLElement
     if (r) ctx.reload();
   };
   const buttons: HTMLElement[] = [];
-  if (tools.edit) buttons.push(button(P.edit, { kind: 'ghost', testId: 'profile-edit', onClick: () => void editProfile(ctx, o.id, o.email).then(done, notifyError) }));
+  if (tools.edit) buttons.push(button(P.edit, { kind: 'ghost', testId: 'profile-edit', onClick: () => void editProfile(ctx, o.id, o.email, p).then(done, notifyError) }));
   if (tools.birthDate) buttons.push(button(P.changeBirthDate, { kind: 'ghost', testId: 'profile-birth-date', onClick: () => void changeBirthDate(ctx, o.id, o.email, p).then(done, notifyError) }));
   if (tools.address) {
     buttons.push(
@@ -90,6 +91,12 @@ export function profileSection(ctx: ViewContext, sheet: OwnerSheet): HTMLElement
 }
 
 // ── Edit the profile ─────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The client's Profile as it is now, with the choices it carries: the sheet read again (after 409 PROFILE_CHANGED). */
+async function readProfile(ctx: ViewContext, accountId: string): Promise<ClientProfileEdit> {
+  const p = (await ctx.api.owner(accountId)).profile;
+  return { profile: p, options: p.options };
+}
 
 /** A group of tick boxes under one label, laid out as a wide field (its hint carries a refusal). */
 function tasteField(name: 'pieces' | 'finishes', label: string, edit: ClientProfileEdit, ticked: readonly string[]): HTMLElement {
@@ -118,8 +125,8 @@ function tasteField(name: 'pieces' | 'finishes', label: string, edit: ClientProf
 }
 
 /** Edit the profile (C.4.2): resolves true once saved, false when cancelled. */
-async function editProfile(ctx: ViewContext, accountId: string, email: string): Promise<boolean> {
-  let edit = await ctx.api.clientProfile(accountId);
+async function editProfile(ctx: ViewContext, accountId: string, email: string, profile: ClientProfile): Promise<boolean> {
+  let edit: ClientProfileEdit = { profile, options: profile.options };
   return new Promise((resolve) => {
     const previous = document.activeElement as HTMLElement | null;
     const error = h('p', { class: 'dialog__error', attrs: { role: 'alert', 'aria-live': 'assertive' } });
@@ -241,7 +248,7 @@ async function editProfile(ctx: ViewContext, accountId: string, email: string): 
         if (e instanceof ApiError && e.code === 'PROFILE_CHANGED') {
           // The client saved meanwhile: read it again, fill the dialog with it, and say so.
           try {
-            edit = await ctx.api.clientProfile(accountId);
+            edit = await readProfile(ctx, accountId);
             draw();
           } catch {
             /* the words below still stand */
@@ -289,7 +296,7 @@ async function changeBirthDate(ctx: ViewContext, accountId: string, email: strin
         await ctx.api.setClientBirthDate(accountId, birthDateInput({ birthDate: v.birthDate, why: v.why }, p.version));
       } catch (e) {
         // The client saved meanwhile: the next Change sends the version read again.
-        if (e instanceof ApiError && e.code === 'PROFILE_CHANGED') p = (await ctx.api.clientProfile(accountId).catch(() => ({ profile: p }))).profile;
+        if (e instanceof ApiError && e.code === 'PROFILE_CHANGED') p = (await readProfile(ctx, accountId).catch(() => ({ profile: p }))).profile;
         throw e;
       }
     },

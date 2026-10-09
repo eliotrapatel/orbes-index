@@ -14,7 +14,7 @@
  *    and column.
  * The right-of-access `browsing` is in test/api/owners.test.ts.
  */
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { VIEW_PAGE_CODES, type DeviceBrowser, type DeviceKind, type DeviceSystem, type InApp, type OpenedIn } from '../../src/server/db/schema.js';
@@ -208,17 +208,27 @@ describe('the recording\'s reads (plan CUSTOMER INTELLIGENCE §3.3 T.8.6)', () =
       expect((await tracking().collectorBrowsing(acc.d!, { withCities: true })).beforeAccount).toEqual({ kind: 'OLDER', startedAt: new Date('2026-09-01T00:00:00Z') });
     });
 
-    it('pages every model viewed for « Show all » (plan §3.6 C.11), the most time first, 50 a page; 400 for a bad page, 404 for an unknown account', async () => {
-      const first = await tracking().viewedModels(acc.a!, 1);
-      expect(first).toMatchObject({ total: 3, page: 1, pageSize: 50 });
-      expect(first.items.map((m) => [m.name, m.variant, m.seconds])).toEqual([
+    it('gives every model viewed for « Show all » (plan §3.6 C.11), the most time first, in its one answer: the sheet pages it 50 at a time', async () => {
+      expect((await tracking().collectorBrowsing(acc.a!, { withCities: true })).models.map((m) => [m.name, m.variant, m.seconds])).toEqual([
         ['ORBITE', null, 900],
         ['MONOLITHE', 'Blue', 100],
         ['MONOLITHE', 'Steel', 60],
       ]);
-      expect(await tracking().viewedModels(acc.a!, 2)).toEqual({ items: [], total: 3, page: 2, pageSize: 50 });
-      await expect(tracking().viewedModels(acc.a!, 0)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
-      await expect(tracking().viewedModels('5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', 1)).rejects.toMatchObject({ code: 'ACCOUNT_NOT_FOUND' });
+      // A collector with 60 models viewed (models since withdrawn: no name), all of them, more than five and than a page.
+      const many = await account('2026-09-02T09:00:00Z', 'FR');
+      const subjects = Array.from({ length: 60 }, () => randomUUID());
+      await db()
+        .insertInto('collector_view_totals')
+        .values(subjects.map((subject, i) => ({ account_id: many, page: VIEW_PAGE_CODES.MODEL, subject, views: 1, seconds: 1_000 - i, first_at: new Date('2025-01-01T10:00:00Z'), last_at: new Date('2025-01-01T10:00:00Z') })))
+        .execute();
+      try {
+        const b = await tracking().collectorBrowsing(many, { withCities: true });
+        expect(b.modelsViewed).toBe(60);
+        expect(b.models.map((m) => m.modelId)).toEqual(subjects);
+        expect(b.models.every((m) => m.name === null)).toBe(true);
+      } finally {
+        await db().deleteFrom('collector_view_totals').where('account_id', '=', many).execute();
+      }
     });
 
     it('reads nothing for an account with nothing recorded, and 404 for an unknown one', async () => {

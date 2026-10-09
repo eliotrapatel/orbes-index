@@ -9,7 +9,7 @@ import { countryName } from '../../../shared/countries.js';
 import { formatCount } from '../format.js';
 import { parisDateTime } from './links.js';
 import { parisDayText, dayText } from './client-profile.js';
-import type { CollectorBrowsing, DeviceClassView, OriginSource, OwnerOrigin, StaffWish, ViewPageName } from '../types.js';
+import type { CollectorBrowsing, DeviceClassView, OriginSource, OwnerOrigin, StaffWish, ViewedModel, ViewPageName } from '../types.js';
 
 export const INTELLIGENCE_COPY = Object.freeze({
   title: 'Intelligence',
@@ -221,7 +221,19 @@ export function releaseTimeText(r: { seconds: number; live: boolean; liveSeconds
   return r.live && r.liveSeconds > 0 ? `${durationText(r.seconds)} · LIVE room ${durationText(r.liveSeconds)}` : durationText(r.seconds);
 }
 
-/** « Show all » under the five most viewed: shown while more models were viewed than the sheet lists. */
-export function showAllModels(b: Pick<CollectorBrowsing, 'models' | 'modelsViewed'>): boolean {
-  return b.modelsViewed > b.models.length;
+/** The most viewed models the sheet lists first (T.4.1), then « Show all » 50 at a time (§3.6 C.11). */
+export const SHEET_MODELS = 5;
+export const MODELS_PAGE = 50;
+
+/**
+ * The models shown after « Show all » and « Show 50 more » were pressed `pages` times: the five most viewed, then 50,
+ * 100… The Intelligence answer carries every model viewed; nothing more is read.
+ */
+export function shownModels(b: Pick<CollectorBrowsing, 'models'>, pages: number): ViewedModel[] {
+  return b.models.slice(0, pages === 0 ? SHEET_MODELS : pages * MODELS_PAGE);
+}
+
+/** « Show all » (none pressed yet) or « Show 50 more »: shown while some model viewed is not listed. */
+export function moreModels(b: Pick<CollectorBrowsing, 'models'>, pages: number): boolean {
+  return shownModels(b, pages).length < b.models.length;
 }

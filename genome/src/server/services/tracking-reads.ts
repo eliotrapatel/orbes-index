@@ -7,14 +7,13 @@
  *
  *   collectorBrowsing  the client sheet's blocks What they look at, Devices and Places (T.4.1): last seen, active days,
  *               views over the 13 months and the summary older than them, « Before the account » in its four forms,
- *               scans, the pages' shares of time, the most viewed models and releases (the summary's figures added), the
- *               devices and the places. `withCities: false` (an AUDITOR, §3.0 (h)) withholds every city.
+ *               scans, the pages' shares of time, every model viewed and the most viewed releases (the summary's
+ *               figures added), the devices and the places. `withCities: false` (an AUDITOR, §3.0 (h)) withholds every city.
  *   viewsReport, devicesReport, placesReport  the Collectors page's figures (T.4.2): with no filter, or only the
  *               connection's countries, they read the daily totals kept for good (`view_daily_stats`,
  *               `device_daily_stats`); with the collectors the other filters select (`accounts`), the 13 months of
  *               detail, counted collectors only, a period reaching further back counted from the first day kept
  *               (`reachesBackTo`). The previous period on request.
- *   viewedModels  the client sheet's « Show all » of the models viewed (§3.6 C.11), a page of 50 at a time.
  *   collectorsFor  the click-through: the collectors behind one figure, a page at a time.
  *   activityOf  views, seconds, active Paris days and visits (a device's views more than 30 minutes apart) per account.
  *   browsingCondition  the four BROWSING criteria of Segments (T.4.3) as one condition on an account (the `not` is the
@@ -58,13 +57,10 @@ import { nextParisDay, NIL_UUID, viewHistoryCutoff, viewsCountedThrough } from '
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** The client sheet's tables at most (T.4.1). */
-export const SHEET_MODELS = 5;
+/** The client sheet's tables at most (T.4.1); the models are all given, for « Show all » (§3.6 C.11). */
 export const SHEET_RELEASES = 5;
 export const SHEET_DEVICES = 6;
 export const SHEET_PLACES = 5;
-/** A page of the client sheet's « Show all » of the models viewed (§3.6 C.11). */
-export const VIEWED_MODELS_PAGE = 50;
 /** The pages named on the sheet before 'Other' (T.4.1). */
 export const SHEET_PAGES = 4;
 /** Two views of one device further apart than this begin a new visit (T.8.6). */
@@ -284,14 +280,6 @@ export interface ViewedRelease {
   lastAt: Date;
 }
 
-/** The client sheet's « Show all » of the models viewed (§3.6 C.11): a page of VIEWED_MODELS_PAGE, the most time first. */
-export interface ViewedModelsPage {
-  items: ViewedModel[];
-  total: number;
-  page: number;
-  pageSize: number;
-}
-
 export interface BrowsingDevice extends DeviceClassView {
   firstSeenAt: Date;
   lastSeenAt: Date;
@@ -328,8 +316,12 @@ export interface CollectorBrowsing {
   scans: { count: number; beforeAccount: number; firstAt: Date | null };
   /** The share of time per page over the 13 months: the SHEET_PAGES largest, then 'OTHER'. */
   pages: { page: ViewPage | 'OTHER'; seconds: number; share: number }[];
+  /**
+   * Every model viewed (the 13 months and the summary), the most time first: the sheet shows the first five (T.4.1),
+   * then « Show all », 50 more at a time (§3.6 C.11), from this one answer.
+   */
   models: ViewedModel[];
-  /** How many models were viewed (the 13 months and the summary): more than `models` shows « Show all ». */
+  /** How many models were viewed: more than five shows « Show all ». */
   modelsViewed: number;
   releases: ViewedRelease[];
   devices: BrowsingDevice[];
@@ -457,9 +449,8 @@ async function topSubjects(
   db: Db,
   ids: readonly string[],
   pages: readonly number[],
-  limit: number,
+  limit: number | null,
   now: Date,
-  offset = 0,
 ): Promise<Map<string, { subject: string; views: number; seconds: number; live: number; lastAt: Date; total: number }[]>> {
   const p = sql.join([...pages]);
   const r = await sql<{ account_id: string; subject: string; views: unknown; seconds: unknown; live: unknown; last_at: Date; total: unknown }>`
@@ -476,7 +467,7 @@ async function topSubjects(
     g AS (SELECT account_id, subject, sum(views) AS views, sum(seconds) AS seconds, sum(live) AS live, max(last_at) AS last_at FROM s GROUP BY account_id, subject),
     r AS (SELECT g.*, row_number() OVER (PARTITION BY account_id ORDER BY seconds DESC, views DESC, last_at DESC, subject) AS n,
                  count(*) OVER (PARTITION BY account_id) AS total FROM g)
-    SELECT account_id, subject, views, seconds, live, last_at, total FROM r WHERE n > ${offset} AND n <= ${offset + limit} ORDER BY account_id, n`.execute(db);
+    SELECT account_id, subject, views, seconds, live, last_at, total FROM r ${limit === null ? sql`` : sql`WHERE n <= ${limit}`} ORDER BY account_id, n`.execute(db);
   const out = new Map<string, { subject: string; views: number; seconds: number; live: number; lastAt: Date; total: number }[]>();
   for (const x of r.rows) {
     const list = out.get(x.account_id) ?? [];
@@ -571,7 +562,7 @@ export async function collectorBrowsing(db: Db, accountId: string, opts: { withC
   const raw = (await rawTotals(db, ids, now)).get(id);
   const summary = (await summaryTotals(db, ids)).get(id);
   const oneVisit = (await oneVisitBefore(db, ids, now)).get(id) ?? false;
-  const topModels = (await topSubjects(db, ids, [MODEL], SHEET_MODELS, now)).get(id) ?? [];
+  const topModels = (await topSubjects(db, ids, [MODEL], null, now)).get(id) ?? [];
   const topReleases = (await topSubjects(db, ids, RELEASE_PAGES, SHEET_RELEASES, now)).get(id) ?? [];
   const devices = ((await devicesOf(db, ids)).get(id) ?? []).slice(0, SHEET_DEVICES);
   const places = (await placesOf(db, ids)).get(id) ?? [];
@@ -626,28 +617,6 @@ export async function collectorBrowsing(db: Db, accountId: string, opts: { withC
     devices,
     places: withCities ? places.slice(0, SHEET_PLACES).map((p) => ({ country: p.country, city: p.city, days: p.days, lastDay: dayText(p.lastDay) })) : byCountry(places).slice(0, SHEET_PLACES),
     citiesWithheld: !withCities,
-  };
-}
-
-/**
- * The client sheet's « Show all » of the models viewed (§3.6 C.11, for a collector with many): every model viewed over
- * the 13 months and in the summary, the most time first, VIEWED_MODELS_PAGE a page (1 to 2,000). Cities are never in
- * it, so every role reads it. 404 ACCOUNT_NOT_FOUND for an unknown account.
- */
-export async function viewedModels(db: Db, accountId: string, opts: { page: number; now: Date }): Promise<ViewedModelsPage> {
-  if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
-  const id = accountId.toLowerCase();
-  if (!Number.isInteger(opts.page) || opts.page < 1 || opts.page > 2_000) throw validationError('page: a whole number from 1 to 2000.');
-  const account = await db.selectFrom('accounts').select('id').where('id', '=', id).executeTakeFirst();
-  if (!account) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
-  const rows = (await topSubjects(db, [id], [MODEL], VIEWED_MODELS_PAGE, opts.now, (opts.page - 1) * VIEWED_MODELS_PAGE)).get(id) ?? [];
-  const total = rows[0]?.total ?? (opts.page > 1 ? ((await topSubjects(db, [id], [MODEL], 1, opts.now)).get(id)?.[0]?.total ?? 0) : 0);
-  const names = await modelNames(db, rows.map((m) => m.subject));
-  return {
-    items: rows.map((m) => ({ modelId: m.subject, name: names.get(m.subject)?.name ?? null, variant: names.get(m.subject)?.variant ?? null, views: m.views, seconds: m.seconds, lastAt: m.lastAt })),
-    total,
-    page: opts.page,
-    pageSize: VIEWED_MODELS_PAGE,
   };
 }
 

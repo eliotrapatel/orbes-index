@@ -437,12 +437,10 @@ const PROBES: Probe[] = [
   // The client sheet's Profile, tags and private notes (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, §3.6 C.9): read from
   // AUDITOR, edited and written by an OPERATOR (a note removed by its writer or an ADMIN: the service's rule,
   // test/api/client-sheet.test.ts).
-  { group: 'client-sheet', method: 'GET', url: `/api/admin/owners/${UUID}/profile`, min: 'AUDITOR' },
   { group: 'client-sheet', method: 'PUT', url: `/api/admin/owners/${UUID}/profile`, body: INVALID, min: 'OPERATOR' },
   { group: 'client-sheet', method: 'PUT', url: `/api/admin/owners/${UUID}/birth-date`, body: INVALID, min: 'OPERATOR' },
   { group: 'client-sheet', method: 'PUT', url: `/api/admin/owners/${UUID}/default-address`, body: INVALID, min: 'OPERATOR' },
   { group: 'client-sheet', method: 'GET', url: `/api/admin/owners/${UUID}/intelligence`, min: 'AUDITOR' },
-  { group: 'client-sheet', method: 'GET', url: `/api/admin/owners/${UUID}/intelligence/models?page=2`, min: 'AUDITOR' },
   { group: 'client-sheet', method: 'GET', url: '/api/admin/tags', min: 'AUDITOR' },
   { group: 'client-sheet', method: 'GET', url: `/api/admin/owners/${UUID}/notes?all=1`, min: 'AUDITOR' },
   { group: 'client-sheet', method: 'POST', url: `/api/admin/owners/${UUID}/tags`, body: INVALID, min: 'OPERATOR' },

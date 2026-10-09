@@ -168,13 +168,11 @@ import type {
   ShopRequestStatus,
   OwnerSheet,
   ClientProfile,
-  ClientProfileEdit,
   ClientProfileInput,
   PrivateNote,
   PrivateNotes,
   TagSuggestion,
   OwnerIntelligence,
-  ViewedModelsPage,
   Paged,
   RecoveryCode,
   ProductDetail,
@@ -1280,11 +1278,6 @@ export class AdminApi {
 
   // ── The client sheet's Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P.6.6, P.9.2; API §16.36) ──
 
-  /** AUDITOR+: what Edit the profile opens on: the Profile as it is now and the choices offered now. */
-  clientProfile(accountId: string): Promise<ClientProfileEdit> {
-    return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}/profile`);
-  }
-
   /** OPERATOR+: Edit the profile, with the `version` read (409 PROFILE_CHANGED when the client saved in between). */
   saveClientProfile(accountId: string, input: ClientProfileInput): Promise<{ profile: ClientProfile }> {
     return this.request('PUT', `/api/admin/owners/${encodeURIComponent(accountId)}/profile`, { body: input });
@@ -1305,11 +1298,6 @@ export class AdminApi {
   /** AUDITOR+: the client sheet's Intelligence, read after the sheet; the cities withheld for an AUDITOR. */
   ownerIntelligence(accountId: string): Promise<OwnerIntelligence> {
     return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}/intelligence`);
-  }
-
-  /** AUDITOR+: « Show all » the models the client viewed, a page of 50, the most time first. */
-  viewedModels(accountId: string, page: number): Promise<ViewedModelsPage> {
-    return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}/intelligence/models`, { page });
   }
 
   /** AUDITOR+: the tags in use, the most used first (50 at most), or VIP, PRESS and FRIEND OF THE HOUSE while none is. */

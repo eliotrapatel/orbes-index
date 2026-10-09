@@ -1445,14 +1445,6 @@ export const noteParams = z.object({ id: uuid, noteId: uuid });
 export const ownerNotesQuery = z.object({ all: queryBool });
 
 /**
- * GET /api/admin/owners/:id/intelligence/models (§16.36, plan CUSTOMER INTELLIGENCE §3.6 C.11): the page of « Show all »
- * the models viewed, 1 to 2,000 (50 a page); the first when left out.
- */
-export const viewedModelsQuery = z.object({
-  page: queryOptional(z.preprocess((v) => (typeof v === 'string' && /^\s*\d{1,4}\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a whole page number').min(1, 'At least 1').max(2_000, 'At most 2000'))),
-});
-
-/**
  * The answers to « How did you hear about ORBES? » (§16.38, plan CUSTOMER INTELLIGENCE §3.1 P.10): an answer added, one
  * renamed, set aside or offered again, and the order of every answer but Other. The outer wall only: the label's rules
  * (1 to 40 characters, unique whatever the case), the 12 offered and the whole order are ProfileService's.

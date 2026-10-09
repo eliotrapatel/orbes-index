@@ -42,7 +42,7 @@
  *               the arrivals' p95 (target under 20 ms) and every LIVE engine
  *               pass, with and without (none slower); then the Links report
  *               (AcquisitionReportService.report, ALL TIME, its three views) on 13
- *               months at 1 000 visits a day (scripts/acquisition-fill.ts), target
+ *               months at 1 000 visits a day (fillAcquisition in bench-arrivals.ts), target
  *               under 300 ms. scripts/bench-arrivals.ts.
  *
  * Prints markdown tables and writes every number to genome/out/bench/results.json

@@ -14,9 +14,10 @@
  *    and DELETE …/notes, POST and DELETE …/tags, by role, with the CSRF token and the same origin, and their audits;
  *  - the client sheet's Profile (§3.1 P.6.5, P.6.6, P.9.2, §3.6 C.4.2): in clear for an OPERATOR, withheld for an AUDITOR
  *    with the age band; PUT …/profile, …/birth-date (the reason a private note) and …/default-address for an OPERATOR,
- *    the version's 409 on both sides, an AUDITOR 403; GET …/profile, what Edit the profile opens on (step 5.5);
+ *    the version's 409 on both sides, an AUDITOR 403; the sheet's Profile carries the choices Edit the profile opens on
+ *    (step 5.5), with no route of its own;
  *  - the client sheet's Intelligence (§3.6 C.4.4, step 5.7): GET …/intelligence by role, the cities withheld for an
- *    AUDITOR, and GET …/intelligence/models (« Show all », C.11).
+ *    AUDITOR, every model viewed in its one answer (« Show all », C.11), with no route of its own.
  * Which role reaches which route is test/api/admin-roles.test.ts; the files' contents test/services/shopify.test.ts.
  */
 import { randomUUID } from 'node:crypto';
@@ -489,18 +490,15 @@ describe('The client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P
     expect(p).toEqual(JSON.parse(JSON.stringify(await h.ctx.services.profiles.forStaff(me.id, { inClear: false }))));
   });
 
-  it('GET …/profile (step 5.5): Edit the profile opens on the profile as it is now and the choices offered now; withheld for an AUDITOR; an unknown account 404', async () => {
-    const res = await op.get(`/api/admin/owners/${me.id}/profile`);
-    expect(res.statusCode, res.body).toBe(200);
-    expect(res.headers['cache-control']).toBe('no-store');
-    const read = safeJson(res) as Json;
-    expect(read.profile).toEqual((await sheetOf(op)).profile);
-    expect(read.options).toEqual(JSON.parse(JSON.stringify(await h.ctx.services.profiles.options())));
-    expect(read.options.heard.map((x: Json) => x.label)).toEqual(['Instagram', 'TikTok', 'A friend', 'The press', 'A shop', 'A web search', 'An influencer', 'Other']);
-    const masked = safeJson(await auditor.get(`/api/admin/owners/${me.id}/profile`)) as Json;
+  it('the sheet (step 5.5): Edit the profile opens on the sheet\'s Profile and the choices offered now it carries (P.9.2), for every role; no GET …/profile route', async () => {
+    const read = await sheetOf(op);
+    expect(read.profile.options).toEqual(JSON.parse(JSON.stringify(await h.ctx.services.profiles.options())));
+    expect(read.profile.options.heard.map((x: Json) => x.label)).toEqual(['Instagram', 'TikTok', 'A friend', 'The press', 'A shop', 'A web search', 'An influencer', 'Other']);
+    const masked = safeJson(await auditor.get(`/api/admin/owners/${me.id}`)) as Json;
+    expect(masked.profile.options).toEqual(read.profile.options);
     expect(masked.profile).toMatchObject({ birthDate: null, phone: null, city: null, instagram: null, address: null, ageBand: '25-34' });
-    for (const word of ['1994-03-14', '612345678', 'camille.dl', 'rue de la Paix']) expect(JSON.stringify(masked), word).not.toContain(word);
-    expect(errorOf(await op.get(`/api/admin/owners/${randomUUID()}/profile`)).code).toBe('ACCOUNT_NOT_FOUND');
+    // The plan's routes read the profile from the sheet only (P.6.7, C.9).
+    expect((await op.get(`/api/admin/owners/${me.id}/profile`)).statusCode).toBe(404);
   });
 
   it('GET …/intelligence (step 5.7): the origin, the wishlist and the browsing for every role, the cities withheld for an AUDITOR; no engagement before I2; « Show all » the models viewed; 404', async () => {
@@ -519,9 +517,9 @@ describe('The client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P
     expect(masked.statusCode).toBe(200);
     expect((safeJson(masked) as Json).browsing).toMatchObject({ places: [{ country: 'FR', city: null }], citiesWithheld: true });
     expect(masked.body).not.toContain('Paris');
-    const models = await op.get(`/api/admin/owners/${me.id}/intelligence/models?page=1`);
-    expect([models.statusCode, safeJson(models)]).toEqual([200, { items: [], total: 0, page: 1, pageSize: 50 }]);
-    expect((await op.get(`/api/admin/owners/${me.id}/intelligence/models?page=0`)).statusCode).toBe(400);
+    // « Show all » pages the models of this one answer (C.11): no route of its own.
+    expect(i.browsing).toMatchObject({ models: [], modelsViewed: 0 });
+    expect((await op.get(`/api/admin/owners/${me.id}/intelligence/models?page=1`)).statusCode).toBe(404);
     expect(errorOf(await op.get(`/api/admin/owners/${randomUUID()}/intelligence`)).code).toBe('ACCOUNT_NOT_FOUND');
   });
 

@@ -1370,6 +1370,12 @@ export interface ClientProfile {
   updatedAt: Iso | null;
   withheld: ClientProfileWithheld[];
   teamAccount: boolean;
+  /** The choices offered now (services/profiles.ts `options`): the collection's pieces and finishes, the answers offered. */
+  options: {
+    pieces: { key: string; label: string }[];
+    finishes: { key: string; label: string; swatch: string }[];
+    heard: { id: string; label: string; other: boolean }[];
+  };
 }
 
 /** PUT /api/admin/owners/:id/profile: the profile without the date of birth, with the `version` read. */
@@ -1386,16 +1392,12 @@ export interface ClientProfileInput {
 }
 
 /**
- * GET /api/admin/owners/:id/profile: what Edit the profile opens on (plan CUSTOMER INTELLIGENCE §3.6 C.4.2): the Profile
- * and the choices offered now (services/profiles.ts `options`): the collection's pieces and finishes, the answers offered.
+ * What Edit the profile opens on (plan CUSTOMER INTELLIGENCE §3.6 C.4.2): the sheet's Profile (GET /api/admin/owners/:id)
+ * and the choices it carries.
  */
 export interface ClientProfileEdit {
   profile: ClientProfile;
-  options: {
-    pieces: { key: string; label: string }[];
-    finishes: { key: string; label: string; swatch: string }[];
-    heard: { id: string; label: string; other: boolean }[];
-  };
+  options: ClientProfile['options'];
 }
 
 /** A private note of ORBES Client Services on the client sheet (services/client-notes.ts). */
@@ -1477,6 +1479,7 @@ export interface CollectorBrowsing {
   beforeAccount: { kind: 'BROWSED'; days: number; from: Iso; views: number; scans: number } | { kind: 'FIRST_VISIT' } | { kind: 'NOTHING' } | { kind: 'OLDER'; startedAt: Iso };
   scans: { count: number; beforeAccount: number; firstAt: Iso | null };
   pages: { page: ViewPageName | 'OTHER'; seconds: number; share: number }[];
+  /** Every model viewed, the most time first: the sheet shows five, then « Show all », 50 more at a time (§3.6 C.11). */
   models: ViewedModel[];
   modelsViewed: number;
   releases: { dropId: string; title: string | null; live: boolean; views: number; seconds: number; liveSeconds: number; lastAt: Iso }[];
@@ -1492,14 +1495,6 @@ export interface OwnerIntelligence {
   wishlist: StaffWish[] | FailedBlock;
   browsing: CollectorBrowsing | FailedBlock;
   recordingSince: Iso | null;
-}
-
-/** GET /api/admin/owners/:id/intelligence/models: « Show all » the models viewed, a page of 50. */
-export interface ViewedModelsPage {
-  items: ViewedModel[];
-  total: number;
-  page: number;
-  pageSize: number;
 }
 
 /** GET /api/admin/tags: a tag in use and how many clients carry it (the three starting examples with 0 while none is). */
