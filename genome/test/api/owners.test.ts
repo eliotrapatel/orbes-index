@@ -408,7 +408,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, claimCodes: 0, tierGrants: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, wishlist: 0, claimCodes: 0, tierGrants: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 
@@ -495,6 +495,49 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(none.profile).toBeNull();
       expect(none.tastes).toEqual({ pieces: [], finishes: [] });
       expect((await h.ctx.audit.list({ action: 'account.export', targetId: bare.account.id })).items[0]!.details).toMatchObject({ profile: 0, tastes: 0 });
+    });
+
+    it('holds the wishlist: every wish still held, open or removed within its 13 months, by the model\'s name and variant, oldest first; its count in account.export (plan CUSTOMER INTELLIGENCE §3.2 W.9)', async () => {
+      const category = (await h.ctx.db.selectFrom('models').select('category_id').executeTakeFirstOrThrow()).category_id;
+      const model = async (name: string, label: string | null, variantOf: string | null, lookbook: 'PUBLIC' | 'HIDDEN' = 'PUBLIC') => {
+        const id = randomUUID();
+        await h.ctx.db
+          .insertInto('models')
+          .values({ id, category_id: category, name, type: 'RING', sku_prefix: `W-${id.slice(0, 8)}`, slug: `wish-${id.slice(0, 8)}`, lookbook, published_at: '2026-01-01T00:00:00Z', variant_of: variantOf, variant_label: label, variant_swatch: label ? '#1F3A93' : null })
+          .execute();
+        return { id, slug: `wish-${id.slice(0, 8)}` };
+      };
+      const main = await model('MONOLITHE', 'Steel', null);
+      const blue = await model('MONOLITHE', 'Blue', main.id);
+      const solo = await model('ORBITE', null, null);
+      const owner = await accountClient(h);
+      const id = await accountIdOf(owner.email);
+      const start = h.clock.now();
+      const wish = (slug: string) => owner.client.request('PUT', `/api/v1/account/wishlist/${slug}`);
+      expect((await wish(blue.slug)).statusCode).toBe(200);
+      h.clock.advance(60_000);
+      expect((await wish(solo.slug)).statusCode).toBe(200);
+      h.clock.advance(60_000);
+      expect((await owner.client.request('DELETE', `/api/v1/account/wishlist/${solo.slug}`)).statusCode).toBe(200);
+      // Hidden since: still the collector's data.
+      await h.ctx.db.updateTable('models').set({ lookbook: 'HIDDEN' }).where('id', '=', blue.id).execute();
+      // Another account's wish is never in this file.
+      const other = await accountClient(h);
+      expect((await other.client.request('PUT', `/api/v1/account/wishlist/${main.slug}`)).statusCode).toBe(200);
+
+      const res = await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${id}/export`);
+      const x = safeJson(res) as Record<string, any>;
+      const at = (ms: number) => new Date(start.getTime() + ms).toISOString();
+      expect(x.wishlist).toEqual([
+        { model: 'MONOLITHE', variant: 'Blue', addedAt: at(0), removedAt: null },
+        { model: 'ORBITE', variant: null, addedAt: at(60_000), removedAt: at(120_000) },
+      ]);
+      const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
+      expect(audit[0]!.details).toMatchObject({ wishlist: 2 });
+      expect(JSON.stringify(audit[0]!.details)).not.toMatch(/MONOLITHE|ORBITE|wish-/);
+      // An account that never wished: an empty list.
+      const none = safeJson(await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${await accountIdOf((await accountClient(h)).email)}/export`)) as Record<string, any>;
+      expect(none.wishlist).toEqual([]);
     });
 
     it('holds the tiers\' grants: each GIFT and CREDIT, a credit\'s balance and its uses by order, never who applied them (BP-19 T5)', async () => {

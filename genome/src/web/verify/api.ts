@@ -82,6 +82,9 @@ import type {
   TransferOffer,
   VerifyInput,
   VerifyOutcome,
+  WishAdded,
+  Wishlist,
+  WishRemoved,
 } from './types.js';
 
 export type TransportCode = 'NETWORK' | 'TIMEOUT' | 'BAD_RESPONSE';
@@ -923,6 +926,29 @@ export class ApiClient {
     const r = await this.request<{ order?: AccountOrder }>('PUT', `/api/v1/account/orders/${encodeURIComponent(orderId)}/address`, choice, { csrf: true });
     if (!r?.order || typeof r.order.id !== 'string') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r.order;
+  }
+
+  // ── YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.4; API §10.26) ──
+
+  /** YOUR WISHLIST: the open wishes, the latest first, and the most it holds. */
+  async wishlist(): Promise<Wishlist> {
+    const r = await this.request<Wishlist>('GET', '/api/v1/account/wishlist');
+    if (!r || !Array.isArray(r.items) || typeof r.max !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** The heart pressed: the model at `slug` kept in the wishlist (the same answer when it already is). */
+  async wish(slug: string): Promise<WishAdded> {
+    const r = await this.request<WishAdded>('PUT', `/api/v1/account/wishlist/${encodeURIComponent(slug)}`, undefined, { csrf: true });
+    if (!r || r.wished !== true || !r.item || typeof r.count !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
+  }
+
+  /** The heart released, or REMOVE: the model at `slug` out of the wishlist (the same answer when it already is). */
+  async unwish(slug: string): Promise<WishRemoved> {
+    const r = await this.request<WishRemoved>('DELETE', `/api/v1/account/wishlist/${encodeURIComponent(slug)}`, undefined, { csrf: true });
+    if (!r || r.wished !== false || typeof r.count !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return r;
   }
 
   /** Whether an answer is unread: NOW's line and the account sheet's NEW. */

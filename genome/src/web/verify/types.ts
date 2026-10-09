@@ -1339,3 +1339,55 @@ export interface AccountProfileInput {
   heard: { optionId: string; other?: string | null } | null;
   tastes: { pieces: string[]; finishes: string[] };
 }
+
+/** A wished model's dot (plan CUSTOMER INTELLIGENCE §3.2 W.4): its label and colour, or null for a model alone. */
+export interface WishVariant {
+  label: string;
+  swatch: string;
+}
+
+/** A wish whose sheet the reader may open now: the model's facts, as THE COLLECTION's card shows them. */
+export interface ShownWish {
+  state: 'SHOWN';
+  slug: string;
+  name: string;
+  variant: WishVariant | null;
+  type: string;
+  collection: string | null;
+  imageUrl: string | null;
+  discontinuedYear: number | null;
+  /** A model of THE PRIVATE SALON. */
+  reserved: boolean;
+  addedAt: string;
+}
+
+/** A wish the reader may not open now (NOT IN THE COLLECTION NOW): no photograph, type or collection. */
+export interface NotShownWish {
+  state: 'NOT_SHOWN';
+  slug: string;
+  name: string;
+  variant: WishVariant | null;
+  addedAt: string;
+}
+
+/** An item of YOUR WISHLIST (GET /api/v1/account/wishlist, API §10.26), the latest added first. */
+export type WishlistItem = ShownWish | NotShownWish;
+
+/** GET /api/v1/account/wishlist: the open wishes and how many the wishlist holds at most. */
+export interface Wishlist {
+  items: WishlistItem[];
+  max: number;
+}
+
+/** PUT /api/v1/account/wishlist/:slug: the wish kept, and how many the wishlist holds now. */
+export interface WishAdded {
+  wished: true;
+  item: WishlistItem;
+  count: number;
+}
+
+/** DELETE /api/v1/account/wishlist/:slug: no open wish for the model, and how many the wishlist holds now. */
+export interface WishRemoved {
+  wished: false;
+  count: number;
+}

@@ -605,6 +605,7 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     // under the account's routes remove one of its saved delivery addresses (YOUR ADDRESSES, plan NEXT LOT §3.6.B) and an
     // order's engraving (§3.6.C), never the account.
     expect(ROUTES.filter((r) => r.method === 'delete' && (r.path.startsWith('/api/v1/account') || r.path.startsWith('/api/admin/owners')))).toEqual([
+      { method: 'delete', path: '/api/v1/account/wishlist/:slug' },
       { method: 'delete', path: '/api/v1/account/addresses/:id' },
       { method: 'delete', path: '/api/v1/account/orders/:id/engraving' },
     ]);

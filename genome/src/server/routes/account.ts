@@ -19,11 +19,12 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
 import { requireSignUp } from '../services/sign-up.js';
+import { WISHLIST_MAX } from '../services/wishlist.js';
 import { isCountryCode } from '../../shared/countries.js';
 import { safeFilename } from './admin/codes.js';
 import type { RouteDeps } from './public.js';
@@ -36,7 +37,7 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { addresses, auth, care, claimRenewals, invoices, orders, ownership, ownershipCertificates, pastReleases, profiles, questions, recovery, sizes, warranty } = ctx.services;
+  const { addresses, auth, care, claimRenewals, invoices, orders, ownership, ownershipCertificates, pastReleases, profiles, questions, recovery, sizes, warranty, wishlist } = ctx.services;
 
   // CREATE ACCOUNT (plan CUSTOMER INTELLIGENCE §3.1 P.4.2): the first and last name and the country required here, in the
   // collector's words; the optional answer to « How did you hear about ORBES? » never refuses a sign-up.
@@ -141,6 +142,31 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const b = parse(accountProfileBody, request.body);
     reply.header('cache-control', 'no-store');
     return profiles.save(account.id, b, accountActor(request));
+  });
+
+  // YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.4; API §10.26): the models the account keeps with the heart on their
+  // sheet, the latest first; PUT and DELETE on the model's address, both idempotent (a repeated tap lands in the same
+  // state), DELETE never saying whether the address exists. Private: never stored by a cache.
+  app.get('/api/v1/account/wishlist', async (request, reply) => {
+    const { account } = requireAccount(request);
+    reply.header('cache-control', 'no-store');
+    return { items: await wishlist.list(account.id), max: WISHLIST_MAX };
+  });
+
+  app.put('/api/v1/account/wishlist/:slug', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { slug } = parse(lookbookParams, request.params);
+    parse(emptyBody, request.body);
+    reply.header('cache-control', 'no-store');
+    return wishlist.add(account.id, slug);
+  });
+
+  app.delete('/api/v1/account/wishlist/:slug', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const { slug } = parse(lookbookParams, request.params);
+    parse(emptyBody, request.body);
+    reply.header('cache-control', 'no-store');
+    return wishlist.remove(account.id, slug);
   });
 
   // YOUR ADDRESSES (plan NEXT LOT §3.6.B; API §10.21): the delivery addresses the account keeps, at most 5, one of them the

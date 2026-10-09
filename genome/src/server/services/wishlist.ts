@@ -20,6 +20,8 @@
  *            (terms article 12, as THE PRIVATE SALON's teaser).
  *   ofAccount  staff: every open wish with the model's id and its state (SHOWN, HIDDEN, DISCONTINUED, RESERVED), for
  *            the client sheet; read only, staff never edit a wishlist.
+ *   exportedWishes  the right of access (OwnerService.exportData, step 2.3): every row still held, removed ones within
+ *            their 13 months included, by the model's name and variant, oldest first.
  *
  * No audit entry: a heart can be tapped thousands of times a day, and the audit log is permanent and hash-chained; the
  * row is its own record (who, what, when added, when removed). A removed row stays for the figures over time.
@@ -262,4 +264,25 @@ export class WishlistService {
       state: r.slug === null || r.lookbook === 'HIDDEN' ? 'HIDDEN' : r.discontinued_at !== null ? 'DISCONTINUED' : r.lookbook === 'RESERVED' ? 'RESERVED' : 'SHOWN',
     }));
   }
+}
+
+/** A wish in the right-of-access file: the model's name and variant label, when added, and when removed (or null). */
+export interface ExportedWish {
+  model: string;
+  variant: string | null;
+  addedAt: Date;
+  removedAt: Date | null;
+}
+
+/** Every wish row still held for the account, open or removed, oldest first (the right of access, in its transaction). */
+export async function exportedWishes(db: Db, accountId: string): Promise<ExportedWish[]> {
+  const rows = await db
+    .selectFrom('account_wishes as w')
+    .innerJoin('models as m', 'm.id', 'w.model_id')
+    .select(['m.name', 'm.variant_label', 'w.added_at', 'w.removed_at'])
+    .where('w.account_id', '=', accountId)
+    .orderBy('w.added_at')
+    .orderBy('m.id')
+    .execute();
+  return rows.map((r) => ({ model: r.name, variant: r.variant_label, addedAt: r.added_at, removedAt: r.removed_at }));
 }

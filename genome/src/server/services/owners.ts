@@ -91,6 +91,7 @@ import { accountGuaranteesForStaff, exportedGuarantees, type AdminGuarantee, typ
 import { exportedSizes, type ExportedSize } from './sizes.js';
 import { exportedAddresses, type ExportedAddress } from './addresses.js';
 import { exportedProfile, type ExportedProfile, type ExportedTastes } from './profiles.js';
+import { exportedWishes, type ExportedWish } from './wishlist.js';
 import { collectorValue, type LifetimeValue } from './growth.js';
 import { accountGrants, accountTierGrants, creditBalances, type ExportedTierGrant } from './tier-grants.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
@@ -438,6 +439,11 @@ export interface AccountExport {
   profile: ExportedProfile | null;
   /** Its favourite pieces and finishes by their words; one the collection no longer offers says so. */
   tastes: ExportedTastes;
+  /**
+   * YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.9), oldest first: each model wished by its name and variant, when it
+   * was added and when it was removed (null while it is in the wishlist); removed ones are held 13 months.
+   */
+  wishlist: ExportedWish[];
   /**
    * The new claim codes ORBES Client Services made for the account's orders (plan NEXT LOT §3.4), oldest first: the
    * order, when it was made, where it stands and when it was read; never the code, sealed or clear, nor who made it.
@@ -912,6 +918,7 @@ export class OwnerService {
       const sizes = await exportedSizes(tx, a.id);
       const addresses = await exportedAddresses(tx, a.id);
       const { profile, tastes } = await exportedProfile(tx, a.id, a.country?.trim() ?? null);
+      const wishlist = await exportedWishes(tx, a.id);
       const claimCodes = await accountClaimCodes(tx, a.id);
       const tierGrants = await accountTierGrants(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
@@ -1001,6 +1008,7 @@ export class OwnerService {
         addresses,
         profile,
         tastes,
+        wishlist,
         claimCodes,
         tierGrants,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
@@ -1043,6 +1051,7 @@ export class OwnerService {
             addresses: out.addresses.length,
             profile: out.profile ? 1 : 0,
             tastes: out.tastes.pieces.length + out.tastes.finishes.length,
+            wishlist: out.wishlist.length,
             claimCodes: out.claimCodes.length,
             tierGrants: out.tierGrants.length,
             activity: out.activity.length,

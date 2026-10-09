@@ -48,6 +48,7 @@ import type { SalonSheet as ServerSalonSheet, ShopRequestView as ServerShopReque
 import type { AccountOrder as ServerAccountOrder, OrderCareGuide as ServerOrderCareGuide } from '../../src/server/services/orders.js';
 import type { VerifyInput as ServerVerifyInput, VerifyOutcome as ServerVerifyOutcome } from '../../src/server/services/verification.js';
 import type { CollectorProfileView as ServerProfileView, HeardChoice as ServerHeardChoice } from '../../src/server/services/profiles.js';
+import type { WishlistItem as ServerWishlistItem } from '../../src/server/services/wishlist.js';
 import {
   CIRCLE_ANSWERS,
   CIRCLE_POST_KINDS,
@@ -63,6 +64,7 @@ import {
   type AccountOrder,
   type AccountProfileView,
   type HeardOption,
+  type WishlistItem,
   type OrderCareGuide,
   type ClubEntry,
   type ClubStatus,
@@ -108,6 +110,9 @@ export const inputFits = (i: VerifyInput): ServerVerifyInput => i;
 export const profileFits = (v: Json<ServerProfileView>): AccountProfileView => v;
 export const profileBack = (v: AccountProfileView): Json<ServerProfileView> => v;
 export const heardFits = (o: Json<ServerHeardChoice>): HeardOption => o;
+// …and YOUR WISHLIST's items (plan CUSTOMER INTELLIGENCE §3.2 W.4), both ways: a NOT_SHOWN item names nothing more.
+export const wishFits = (w: Json<ServerWishlistItem>): WishlistItem => w;
+export const wishBack = (w: WishlistItem): Json<ServerWishlistItem> => w;
 // …and every piece of GET /api/v1/account/products, once serialised, a valid piece of MY PIECES (F-01).
 export const pieceFits = (p: Json<OwnedProduct>): OwnedPiece => p;
 // …and the ownership certificate's answers (F-06): the lookup, the owner's links, a new link.

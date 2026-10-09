@@ -518,6 +518,36 @@ describe('ApiClient', () => {
     expect(f.calls.map((c) => `${c.method} ${c.url}`)).toEqual(Array(3).fill('GET /api/v1/account/sign-up'));
   });
 
+  it('reads YOUR WISHLIST and keeps or removes a model by its address encoded, with the CSRF token, and refuses an answer of another shape (plan CUSTOMER INTELLIGENCE §3.2 W.4)', async () => {
+    const item = { state: 'SHOWN', slug: 'monolithe-blue', name: 'MONOLITHE', variant: { label: 'Blue', swatch: '#1F3A93' }, type: 'RING', collection: 'ORBITAL', imageUrl: null, discontinuedYear: null, reserved: false, addedAt: '2026-10-09T09:00:00.000Z' };
+    const hidden = { state: 'NOT_SHOWN', slug: 'orbite', name: 'ORBITE', variant: null, addedAt: '2026-10-08T09:00:00.000Z' };
+    const f = fakeFetch([
+      () => json(200, SESSION('t1')),
+      () => json(200, { items: [item, hidden], max: 200 }),
+      () => json(200, { wished: true, item, count: 2 }),
+      () => json(200, { wished: false, count: 1 }),
+      () => json(200, { items: 'none' }),
+      () => json(200, { wished: true, count: 2 }),
+      () => json(200, { wished: true, count: 1 }),
+      () => json(409, { error: { code: 'WISHLIST_FULL', message: 'Your wishlist holds up to 200 models. Remove one to add another.' } }),
+    ]);
+    const api = new ApiClient({ fetch: f.impl });
+    await api.me();
+    expect(await api.wishlist()).toEqual({ items: [item, hidden], max: 200 });
+    expect(await api.wish('monolithe-blue')).toEqual({ wished: true, item, count: 2 });
+    expect(await api.unwish('a b/c')).toEqual({ wished: false, count: 1 });
+    await expect(api.wishlist()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.wish('x')).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.unwish('x')).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(api.wish('x')).rejects.toMatchObject({ status: 409, code: 'WISHLIST_FULL', message: 'Your wishlist holds up to 200 models. Remove one to add another.' });
+    expect(f.calls.slice(1, 4).map((c) => `${c.method} ${c.url}`)).toEqual(['GET /api/v1/account/wishlist', 'PUT /api/v1/account/wishlist/monolithe-blue', 'DELETE /api/v1/account/wishlist/a%20b%2Fc']);
+    expect(f.calls[1]!.headers['x-csrf-token']).toBeUndefined();
+    expect(f.calls[2]!.headers['x-csrf-token']).toBe('t1');
+    expect(f.calls[3]!.headers['x-csrf-token']).toBe('t1');
+    expect(f.calls[2]!.body).toBeUndefined();
+    expect(f.calls[3]!.body).toBeUndefined();
+  });
+
   it('probes the session without a 401 when signed out (200 { account: null })', async () => {
     const f = fakeFetch([() => json(200, { account: null })]);
     const api = new ApiClient({ fetch: f.impl });
