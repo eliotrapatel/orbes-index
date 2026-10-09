@@ -294,6 +294,74 @@ export const TASTE_KINDS = ['PIECE', 'FINISH'] as const;
 export type TasteKind = (typeof TASTE_KINDS)[number];
 
 /**
+ * The page codes of a view (collector_views.page, migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6), code → name.
+ * Permanent: a code is never reused nor renumbered; the migration's CHECK takes the range 1..VIEW_PAGE_MAX. SCAN (1) is
+ * written by the server at each scan, never sent by the app. Never recorded: the scan screens themselves, a LIVE
+ * RELEASE's boutique board, the password screen.
+ */
+export const VIEW_PAGES = {
+  1: 'SCAN',
+  2: 'NOW',
+  3: 'RESULT',
+  4: 'MY_PIECES',
+  5: 'MY_ORDERS',
+  6: 'MY_RELEASES',
+  7: 'PIECE',
+  8: 'CERTIFICATE',
+  9: 'COLLECTION',
+  10: 'MODEL',
+  11: 'CLUB',
+  12: 'RELEASES',
+  13: 'RELEASE',
+  14: 'LIVE',
+  15: 'AFTER_ROOM',
+  16: 'HOW',
+  17: 'CIRCLE',
+  18: 'POST',
+  19: 'ACCOUNT',
+  20: 'MESSAGES',
+  21: 'SIGN_IN',
+  22: 'SIGN_UP',
+  23: 'SIZES',
+  24: 'ADDRESSES',
+  25: 'PROFILE',
+  26: 'WISHLIST',
+} as const;
+export type ViewPageCode = keyof typeof VIEW_PAGES;
+export type ViewPage = (typeof VIEW_PAGES)[ViewPageCode];
+/** The highest page code the migration's CHECK takes (collector_views.page, collector_view_totals.page 1..60; view_daily_stats.page 0..60, 0 the day's marker). */
+export const VIEW_PAGE_MAX = 60;
+/** name → code, the inverse of VIEW_PAGES. */
+export const VIEW_PAGE_CODES = Object.freeze(
+  Object.fromEntries(Object.entries(VIEW_PAGES).map(([code, name]) => [name, Number(code)])),
+) as { readonly [P in ViewPage]: ViewPageCode };
+
+/**
+ * A remembered device's class (tracking_devices, device_daily_stats, migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6
+ * and T.8.1, http/device-class.ts): its kind, its system, its browser, where the page was opened (a browser, an app's
+ * built-in browser, the home screen) and that app.
+ */
+export const DEVICE_KINDS = ['PHONE', 'TABLET', 'COMPUTER', 'UNKNOWN'] as const;
+export type DeviceKind = (typeof DEVICE_KINDS)[number];
+export const DEVICE_SYSTEMS = ['IOS', 'ANDROID', 'MACOS', 'WINDOWS', 'CHROMEOS', 'LINUX', 'OTHER'] as const;
+export type DeviceSystem = (typeof DEVICE_SYSTEMS)[number];
+export const DEVICE_BROWSERS = ['SAFARI', 'CHROME', 'FIREFOX', 'EDGE', 'SAMSUNG', 'OPERA', 'WEBVIEW', 'OTHER'] as const;
+export type DeviceBrowser = (typeof DEVICE_BROWSERS)[number];
+export const OPENED_IN = ['BROWSER', 'IN_APP', 'HOME_SCREEN'] as const;
+export type OpenedIn = (typeof OPENED_IN)[number];
+export const IN_APPS = ['INSTAGRAM', 'TIKTOK', 'FACEBOOK', 'THREADS', 'SNAPCHAT', 'PINTEREST', 'LINKEDIN', 'GOOGLE', 'WECHAT', 'LINE', 'OTHER'] as const;
+export type InApp = (typeof IN_APPS)[number];
+/** device_daily_stats.in_app: an app of IN_APPS, or NONE (opened outside an app). */
+export type InAppOrNone = InApp | 'NONE';
+
+/**
+ * How a device was first linked to an account (tracking_device_accounts.first_via, migration 0042, plan CUSTOMER
+ * INTELLIGENCE §3.3 T.8.4): at a sign-up, at a sign-in, or on a visit already signed in (SESSION).
+ */
+export const LINK_VIAS = ['SIGN_UP', 'SIGN_IN', 'SESSION'] as const;
+export type LinkVia = (typeof LINK_VIAS)[number];
+
+/**
  * How the access rules of a LIVE RELEASE combine (drops.access_combine, migration 0023): every rule met (AND), or any
  * one of them (OR). NULL on a LIVE drop: AND.
  */
@@ -1613,6 +1681,137 @@ export interface WishMonthsCountedTable {
 }
 
 /**
+ * A place from the connection (migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6): a country, with or without a city,
+ * once each (`geo_places_key`, NULLS NOT DISTINCT). Never deleted. Written by PlaceService.idOf only.
+ */
+export interface GeoPlacesTable {
+  id: Generated<number>;               // integer identity (GENERATED ALWAYS)
+  country: string;                     // char(2), ISO 3166-1 alpha-2
+  city: string | null;                 // 1..80 characters, trimmed; NULL: the country alone
+}
+
+/**
+ * A remembered device (migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6, §3.0 (b)): one row per `__Host-orbes_device`
+ * cookie, by its pseudonym (never the id). Its class, the account last linked (with when, both or neither), its last
+ * place, its console mark, its first and last sight. `id`, `device_hash` and `first_seen_at` never change.
+ */
+export interface TrackingDevicesTable {
+  id: Generated<number>;               // integer identity (GENERATED ALWAYS)
+  device_hash: string;                 // 43 characters, pseudonymize(IP_HASH_PEPPER, 'device', id), as scan_events.device_hash
+  kind: WithDefault<DeviceKind>;
+  os: WithDefault<DeviceSystem>;
+  browser: WithDefault<DeviceBrowser>;
+  opened_in: WithDefault<OpenedIn>;
+  /** The app whose built-in browser opened the page; set exactly when opened_in is IN_APP. */
+  in_app: ColumnType<InApp | null, InApp | null | undefined, InApp | null>;
+  account_id: ColumnType<string | null, string | null | undefined, string | null>;
+  linked_at: TimestampNullable;
+  last_place_id: ColumnType<number | null, number | null | undefined, number | null>;
+  /** Set once a console session is seen on the device: its views are never recorded. */
+  staff_at: TimestampNullable;
+  first_seen_at: TimestampDefault;
+  last_seen_at: TimestampDefault;
+}
+
+/** Every account a device was linked to (migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6), kept for good. */
+export interface TrackingDeviceAccountsTable {
+  device_id: number;
+  account_id: string;
+  first_via: LinkVia;
+  first_linked_at: Timestamp;
+  last_linked_at: Timestamp;
+  links: WithDefault<number>;          // integer >= 1
+}
+
+/**
+ * The raw views and scans (migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6), kept 13 months then folded into
+ * collector_view_totals. `page` is a code of VIEW_PAGES (1 = SCAN, with no duration); `subject` a model, a release or a
+ * post, and `place_id` a geo_places id, neither with a foreign key (a log).
+ */
+export interface CollectorViewsTable {
+  id: Generated<number>;               // bigint identity (GENERATED ALWAYS)
+  at: Timestamp;                       // when the view began (server clock)
+  device_id: number;
+  account_id: string | null;
+  page: number;                        // smallint 1..60, VIEW_PAGES
+  subject: string | null;
+  seconds: number;                     // smallint 0..10 800; 1 or more but for a SCAN
+  place_id: number | null;
+}
+
+/**
+ * The anonymous daily totals of the views (migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6), by Paris day, page,
+ * subject (the nil uuid: none) and country ('ZZ' unknown), kept for good. Page 0 is the day's marker row, all counts 0.
+ */
+export interface ViewDailyStatsTable {
+  day: string;                         // date 'YYYY-MM-DD' (a Paris day)
+  page: number;                        // smallint 0..60
+  subject: WithDefault<string>;        // uuid, '00000000-0000-0000-0000-000000000000' for none
+  country: string;                     // char(2)
+  views: number;
+  seconds: number;
+  devices: number;                     // distinct devices that day for that row
+  signed_in_views: number;             // 0..views
+}
+
+/** The devices of each Paris day (migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6), anonymous, kept for good. */
+export interface DeviceDailyStatsTable {
+  day: string;                         // date 'YYYY-MM-DD' (a Paris day)
+  country: string;                     // char(2)
+  kind: DeviceKind;
+  os: DeviceSystem;
+  browser: DeviceBrowser;
+  opened_in: OpenedIn;
+  in_app: InAppOrNone;
+  devices: number;
+  new_devices: number;                 // 0..devices
+  signed_in_devices: number;           // 0..devices
+}
+
+/** A collector's places from the connection (migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6), by Paris days, kept for good. */
+export interface CollectorPlacesTable {
+  account_id: string;
+  place_id: number;
+  days: number;                        // Paris days with at least one view or scan from there, >= 1
+  first_day: string;                   // date 'YYYY-MM-DD'
+  last_day: string;                    // date 'YYYY-MM-DD', >= first_day
+}
+
+/** The per-collector summary of what is past 13 months (migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6, T.10). */
+export interface CollectorViewTotalsTable {
+  account_id: string;
+  page: number;                        // smallint 1..60
+  subject: WithDefault<string>;        // uuid, the nil uuid for none
+  views: number;
+  seconds: number;                     // bigint
+  first_at: Timestamp;
+  last_at: Timestamp;
+}
+
+/** The per-collector summary by Paris month (migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6, T.10). */
+export interface CollectorViewMonthsTable {
+  account_id: string;
+  month: string;                       // date 'YYYY-MM-DD', the first day of a Paris month
+  views: number;
+  seconds: number;                     // bigint
+  scans: number;
+  active_days: number;                 // smallint 0..31
+}
+
+/**
+ * One row (id 1, migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6 table 10, T.11): the recording's start and the
+ * past scans' backfill keyset watermark (both or neither) and its end. Inserted by TrackingService.prepare at the first
+ * boot, never by the migration.
+ */
+export interface TrackingStateTable {
+  id: WithDefault<number>;             // smallint, always 1
+  started_at: Timestamp;
+  scans_after_at: TimestampNullable;
+  scans_after_id: ColumnType<string | null, string | null | undefined, string | null>;
+  scans_backfilled_at: TimestampNullable;
+}
+
+/**
  * A model's pairs (migration 0031, plan NEXT-NINE BP-34, PAIRS WELL WITH): the models its sheet shows at its very end,
  * in their order (`position` 1..3), each once, never itself. Set on a main model or a model alone (services/catalog.ts
  * setPairs: 0, 2 or 3 rows, never a model of its own variant group).
@@ -2377,6 +2576,16 @@ export interface Database {
   account_wishes: AccountWishesTable;
   model_wish_months: ModelWishMonthsTable;
   wish_months_counted: WishMonthsCountedTable;
+  geo_places: GeoPlacesTable;
+  tracking_devices: TrackingDevicesTable;
+  tracking_device_accounts: TrackingDeviceAccountsTable;
+  collector_views: CollectorViewsTable;
+  view_daily_stats: ViewDailyStatsTable;
+  device_daily_stats: DeviceDailyStatsTable;
+  collector_places: CollectorPlacesTable;
+  collector_view_totals: CollectorViewTotalsTable;
+  collector_view_months: CollectorViewMonthsTable;
+  tracking_state: TrackingStateTable;
   model_pairs: ModelPairsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
@@ -2499,6 +2708,17 @@ export type AccountProfileRow = Selectable<AccountProfilesTable>;
 export type AccountTasteRow = Selectable<AccountTastesTable>;
 export type AccountWishRow = Selectable<AccountWishesTable>;
 export type ModelWishMonthRow = Selectable<ModelWishMonthsTable>;
+export type GeoPlaceRow = Selectable<GeoPlacesTable>;
+export type TrackingDeviceRow = Selectable<TrackingDevicesTable>;
+export type TrackingDeviceAccountRow = Selectable<TrackingDeviceAccountsTable>;
+export type CollectorViewRow = Selectable<CollectorViewsTable>;
+export type NewCollectorView = Insertable<CollectorViewsTable>;
+export type ViewDailyStatsRow = Selectable<ViewDailyStatsTable>;
+export type DeviceDailyStatsRow = Selectable<DeviceDailyStatsTable>;
+export type CollectorPlaceRow = Selectable<CollectorPlacesTable>;
+export type CollectorViewTotalRow = Selectable<CollectorViewTotalsTable>;
+export type CollectorViewMonthRow = Selectable<CollectorViewMonthsTable>;
+export type TrackingStateRow = Selectable<TrackingStateTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
 export type CareRequestRow = Selectable<CareRequestsTable>;

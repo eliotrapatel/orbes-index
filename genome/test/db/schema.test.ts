@@ -165,6 +165,17 @@ describe('schema', () => {
       ['account_profiles', 'birth_date_by', S.PROFILE_SOURCES],
       ['account_profiles', 'updated_by', S.PROFILE_SOURCES],
       ['account_tastes', 'kind', S.TASTE_KINDS],
+      ['tracking_devices', 'kind', S.DEVICE_KINDS],
+      ['tracking_devices', 'os', S.DEVICE_SYSTEMS],
+      ['tracking_devices', 'browser', S.DEVICE_BROWSERS],
+      ['tracking_devices', 'opened_in', S.OPENED_IN],
+      ['tracking_devices', 'in_app', S.IN_APPS],
+      ['tracking_device_accounts', 'first_via', S.LINK_VIAS],
+      ['device_daily_stats', 'kind', S.DEVICE_KINDS],
+      ['device_daily_stats', 'os', S.DEVICE_SYSTEMS],
+      ['device_daily_stats', 'browser', S.DEVICE_BROWSERS],
+      ['device_daily_stats', 'opened_in', S.OPENED_IN],
+      ['device_daily_stats', 'in_app', [...S.IN_APPS, 'NONE']],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -859,6 +870,47 @@ describe('schema', () => {
     await expect(t.db.insertInto('model_wish_months').values({ month: '2026-10-09', model_id: model.id, added: 0, removed: 0, wished_end: 0 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'model_wish_months_month_check'));
     const counted = await t.db.insertInto('wish_months_counted').values({ month: '2026-10-01' }).returningAll().executeTakeFirstOrThrow();
     expect(counted).toMatchObject({ month: '2026-10-01', counted_at: expect.any(Date) });
+  });
+
+  it('the views (0042): the mirror at work: a place and a country alone; a device with its defaults, its class and its app; a link; a view and a SCAN; the daily totals, a collector\'s place and summaries; the one state row', async () => {
+    const account = await t.db.insertInto('accounts').values({ email: 'views-0042@example.com', email_normalized: 'views-0042@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const lyon = await t.db.insertInto('geo_places').values({ country: 'FR', city: 'Lyon' }).returningAll().executeTakeFirstOrThrow();
+    expect(lyon).toEqual({ id: expect.any(Number), country: 'FR', city: 'Lyon' });
+    const france = await t.db.insertInto('geo_places').values({ country: 'FR', city: null }).returningAll().executeTakeFirstOrThrow();
+    await expect(t.db.insertInto('geo_places').values({ country: 'FR', city: null }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'geo_places_key'));
+    const fresh = await t.db.insertInto('tracking_devices').values({ device_hash: 'D'.repeat(43) }).returningAll().executeTakeFirstOrThrow();
+    expect(fresh).toMatchObject({ id: expect.any(Number), kind: 'UNKNOWN', os: 'OTHER', browser: 'OTHER', opened_in: 'BROWSER', in_app: null, account_id: null, linked_at: null, last_place_id: null, staff_at: null, first_seen_at: expect.any(Date), last_seen_at: expect.any(Date) });
+    const at = new Date('2026-10-09T08:00:00.000Z');
+    const phone = await t.db
+      .insertInto('tracking_devices')
+      .values({ device_hash: 'P'.repeat(43), kind: 'PHONE', os: 'IOS', browser: 'WEBVIEW', opened_in: 'IN_APP', in_app: 'INSTAGRAM', account_id: account.id, linked_at: at, last_place_id: lyon.id, first_seen_at: at, last_seen_at: at })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(phone).toMatchObject({ kind: 'PHONE', in_app: 'INSTAGRAM', account_id: account.id, linked_at: at, last_place_id: lyon.id });
+    await expect(t.db.updateTable('tracking_devices').set({ opened_in: 'BROWSER' }).where('id', '=', phone.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'tracking_devices_app'));
+    const link = await t.db.insertInto('tracking_device_accounts').values({ device_id: phone.id, account_id: account.id, first_via: 'SIGN_UP', first_linked_at: at, last_linked_at: at }).returningAll().executeTakeFirstOrThrow();
+    expect(link).toMatchObject({ first_via: 'SIGN_UP', links: 1 });
+    const view = await t.db.insertInto('collector_views').values({ at, device_id: phone.id, account_id: account.id, page: S.VIEW_PAGE_CODES.MODEL, subject: account.id, seconds: 42, place_id: lyon.id }).returningAll().executeTakeFirstOrThrow();
+    expect(view).toEqual({ id: expect.any(Number), at, device_id: phone.id, account_id: account.id, page: 10, subject: account.id, seconds: 42, place_id: lyon.id });
+    await t.db.insertInto('collector_views').values({ at, device_id: fresh.id, account_id: null, page: S.VIEW_PAGE_CODES.SCAN, subject: null, seconds: 0, place_id: france.id }).execute();
+    await expect(t.db.insertInto('collector_views').values({ at, device_id: fresh.id, account_id: null, page: S.VIEW_PAGE_CODES.NOW, subject: null, seconds: 0, place_id: null }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'collector_views_timed'));
+    const daily = await t.db.insertInto('view_daily_stats').values({ day: '2026-10-08', page: 0, country: 'ZZ', views: 0, seconds: 0, devices: 0, signed_in_views: 0 }).returningAll().executeTakeFirstOrThrow();
+    expect(daily).toEqual({ day: '2026-10-08', page: 0, subject: '00000000-0000-0000-0000-000000000000', country: 'ZZ', views: 0, seconds: 0, devices: 0, signed_in_views: 0 });
+    const kinds = await t.db
+      .insertInto('device_daily_stats')
+      .values({ day: '2026-10-08', country: 'FR', kind: 'PHONE', os: 'IOS', browser: 'WEBVIEW', opened_in: 'IN_APP', in_app: 'INSTAGRAM', devices: 2, new_devices: 1, signed_in_devices: 1 })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(kinds).toMatchObject({ day: '2026-10-08', in_app: 'INSTAGRAM', devices: 2 });
+    const place = await t.db.insertInto('collector_places').values({ account_id: account.id, place_id: lyon.id, days: 1, first_day: '2026-10-08', last_day: '2026-10-08' }).returningAll().executeTakeFirstOrThrow();
+    expect(place).toEqual({ account_id: account.id, place_id: lyon.id, days: 1, first_day: '2026-10-08', last_day: '2026-10-08' });
+    const total = await t.db.insertInto('collector_view_totals').values({ account_id: account.id, page: 10, views: 3, seconds: 5_000_000_000, first_at: at, last_at: at }).returningAll().executeTakeFirstOrThrow();
+    expect(total).toEqual({ account_id: account.id, page: 10, subject: '00000000-0000-0000-0000-000000000000', views: 3, seconds: 5_000_000_000, first_at: at, last_at: at });
+    const month = await t.db.insertInto('collector_view_months').values({ account_id: account.id, month: '2026-09-01', views: 3, seconds: 90, scans: 1, active_days: 2 }).returningAll().executeTakeFirstOrThrow();
+    expect(month).toEqual({ account_id: account.id, month: '2026-09-01', views: 3, seconds: 90, scans: 1, active_days: 2 });
+    const state = await t.db.insertInto('tracking_state').values({ started_at: at }).returningAll().executeTakeFirstOrThrow();
+    expect(state).toEqual({ id: 1, started_at: at, scans_after_at: null, scans_after_id: null, scans_backfilled_at: null });
+    await expect(t.db.insertInto('tracking_state').values({ started_at: at }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'tracking_state_pkey'));
   });
 
   it('audit_logs is append-only at the database level', async () => {
