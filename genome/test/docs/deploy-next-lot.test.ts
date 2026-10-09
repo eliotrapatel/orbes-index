@@ -19,8 +19,9 @@
  *
  *  - it starts from H1 (1651df1, 0001 to 0034) and applies exactly 0035 to 0039, after which H1's image no longer runs
  *    on the schema; its deploy/vps diff is against H1's commit, never G's;
- *  - the packing photo's edge limit as the blocking point before it (the route the console uploads to, which the
- *    Caddyfile does not yet let through over 64 KB), the console's allowlist checked for the agent, the procedures told
+ *  - the packing photo under the edge's limit, with nothing changed on the host (the route the console uploads to,
+ *    which the Caddyfile holds at 64 KB, and the console's photo at 64 KB at most), the console's allowlist checked for
+ *    the agent, the procedures told
  *    to ORBES Client Services and to the agent, the plan's checks after H2 and what to set before the first supplier
  *    order, its legal version (the day after H1's), and the questions of §5.2 still open for it, with the answer built.
  */
@@ -29,6 +30,7 @@ import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../../src/server/db/migrate.js';
 import { PACKING_PHOTO_UPLOAD_ROUTE } from '../../src/server/routes/admin/media.js';
+import { PACKING_PHOTO_EDGE_BYTES, PACKING_PHOTO_LIMITS } from '../../src/web/admin/model/logistics.js';
 import { LEGAL_VERSION } from '../../src/web/legal/content/index.js';
 import { REPO, readDoc, section } from './lexicon.js';
 import { anchors, fenced } from './runbook.js';
@@ -251,18 +253,30 @@ describe('the runbook of the next lot, part H2 (docs/launch/DEPLOY-NEXT-LOT.md �
     expect(h2).toContain(`- **Le commit final** (règle 7) : la branche \`orbes-next-lot\``);
   });
 
-  it('diffs deploy/vps against H1, never G, and names the packing photo\'s edge limit as the point that blocks it', () => {
+  it('diffs deploy/vps against H1, never G, and sends the packing photo under the edge\'s 64 KB, with nothing changed on the host', () => {
     expect(h2Commands).toContain(`git -C /opt/orbes/orbes-index diff --stat ${H1_COMMIT} HEAD -- deploy/vps`);
     expect(h2Commands.join('\n')).not.toContain(PREV_COMMIT);
     expect(h2).toContain('jamais contre G');
-    // The blocking point: the route the console uploads the photo to, which the edge still holds at 64 KB.
+    // The packing photo: the route the console uploads it to, which the edge holds at 64 KB (no exception, nothing
+    // changed on the host), and the console's photo at that limit at most, from 1 600 px down to 1 024 px.
     const before = section(runbook, '### 2.1');
     const route = PACKING_PHOTO_UPLOAD_ROUTE;
     expect(before).toContain(`\`PUT ${route}\``);
-    expect(before).toContain('Sans l\'un des deux, ne déploie pas H2');
+    expect(before).toContain('**1. La photo d\'emballage : rien à faire.**');
+    expect(before).toContain('La console envoie donc la photo en JPEG de 64 Ko au plus : elle baisse d\'abord sa qualité à 1 600 px, puis sa taille, jusqu\'à 1 024 px.');
+    expect(before).toContain(`l'agent lit « ${PACKING_PHOTO_LIMITS.tooLarge} »`);
+    expect(before).not.toContain('point bloquant');
+    expect(h2).toContain('- **Caddy** : rien ne change. La photo d\'emballage passe sous sa limite de 64 Ko (§2.1).');
     const caddy = readDoc('deploy/vps/Caddyfile');
     expect(caddy).not.toContain('packing/photo');
-    expect(caddy).toContain('max_size 64KB');
+    const edge = /request_body @not_upload \{\s*max_size (\d+)KB\s*\}/.exec(caddy);
+    expect(edge?.[1]).toBe('64');
+    expect(Number(edge![1]) * 1000).toBe(PACKING_PHOTO_EDGE_BYTES);
+    expect(PACKING_PHOTO_LIMITS.maxBytes).toBe(PACKING_PHOTO_EDGE_BYTES);
+    expect(PACKING_PHOTO_LIMITS.sides[0]).toBe(1600);
+    expect(PACKING_PHOTO_LIMITS.sides.at(-1)).toBe(1024);
+    expect(PACKING_PHOTO_LIMITS.tooLarge).toBe('This photo stays over 64 KB, even at 1 024 px. Take it again, closer to the parcel.');
+    expect(readDoc('docs/DEPLOYMENT.md')).toContain('**The packing photo (plan NEXT LOT §3.5.6.8, deployment H2): under the edge\'s 64 KB.**');
     expect(readDoc('genome/src/server/services/logistics.ts')).toContain('add the photo before it is packed.');
     // The console's allowlist, read for the agent's logins.
     expect(h2Commands).toContain("grep '^ADMIN_ALLOWED_IPS=' .env");

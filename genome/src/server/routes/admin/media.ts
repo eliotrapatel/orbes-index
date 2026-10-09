@@ -44,8 +44,9 @@ export const MEDIA_UPLOAD_ROUTES = Object.freeze([
 /**
  * The packing photo (plan NEXT LOT §3.5.6.9): a sixth route taking an image, a PUT for the agent and ORBES staff
  * (`LOGISTICS_ACT`, the login's locations only). Not in MEDIA_UPLOAD_ROUTES: the edge (deploy/vps/Caddyfile) gives
- * those five POSTs 1 200 KB and every other request 64 KB, and this lot changes nothing on the host (plan §0.3), so a
- * photo over 64 KB waits for the edge's exception (listed for the owner's hand-over).
+ * those five POSTs 1 200 KB and every other request 64 KB, and this lot changes nothing on the host (plan §0.3), so the
+ * console sends this photo at 64 KB at most (web/admin/model/logistics.ts PACKING_PHOTO_LIMITS: its quality, then its
+ * side, stepped down from 1 600 px to 1 024 px). The app itself still takes up to 1 MiB here.
  */
 export const PACKING_PHOTO_UPLOAD_ROUTE = '/api/admin/logistics/orders/:id/packing/photo';
 

@@ -9,7 +9,7 @@ import { LOGISTICS_LIMITS as SERVER_LOGISTICS_LIMITS } from '../../src/server/se
 import { ORDER_CASE_LIMITS } from '../../src/server/services/order-cases.js';
 import { PACKING_PHOTO_MAX_BYTES, PARCEL_HISTORY_ACTIONS } from '../../src/server/services/parcels.js';
 import { RECEPTION_LIMITS as SERVER_RECEPTION_LIMITS, RECEPTION_RUNS } from '../../src/server/services/receptions.js';
-import { PHOTO_MAX_BYTES } from '../../src/web/admin/model/photo.js';
+import { encodeAttempts, PHOTO_LIMITS, PHOTO_MAX_BYTES, PHOTO_QUALITIES } from '../../src/web/admin/model/photo.js';
 import { STOCK_MOVE_MAX, STOCK_NOTE_MAX } from '../../src/server/services/stock.js';
 import { AdminApi, type FetchLike } from '../../src/web/admin/api.js';
 import {
@@ -43,7 +43,10 @@ import {
   HISTORY_BY,
   HISTORY_LABELS,
   othersText,
+  PACKING_PHOTO_EDGE_BYTES,
+  PACKING_PHOTO_LIMITS,
   PACKING_PHOTO_MAX_SIDE,
+  PACKING_PHOTO_MIN_SIDE,
   PARCEL_STEP_LABELS,
   parcelActions,
   pieceWords,
@@ -289,9 +292,29 @@ describe('To ship and a parcel', () => {
     expect(changed.buyer).toEqual({ name: 'Ada Martin', address: '4 rue du Bac\n75007 Paris', country: 'United Kingdom', phone: '+44 20 7946 0000', changed: expect.stringMatching(/^Changed on 07 OCT 2026 at \d{2}:02 by the collector\.$/) });
   });
 
-  it('scales the packing photo to 1600 px, within the server\'s 1 MiB', () => {
+  it('scales the packing photo to 1600 px at most and sends it under the edge\'s 64 KB: its quality, then its side, stepped down to 1024 px', () => {
     expect(PACKING_PHOTO_MAX_SIDE).toBe(1600);
+    expect(PACKING_PHOTO_MIN_SIDE).toBe(1024);
+    // The server still takes 1 MiB; the edge in front of it, 64 KB on this path (Caddy's 64KB, 1 000 bytes a KB).
     expect(PHOTO_MAX_BYTES).toBe(PACKING_PHOTO_MAX_BYTES);
+    expect(PACKING_PHOTO_EDGE_BYTES).toBe(64_000);
+    expect(PACKING_PHOTO_LIMITS.maxBytes).toBe(PACKING_PHOTO_EDGE_BYTES);
+    expect(PACKING_PHOTO_LIMITS.maxBytes).toBeLessThan(PACKING_PHOTO_MAX_BYTES);
+    // A phone's 4032 × 3024: every quality at 1600 px first, then each smaller side, down to 1024 px.
+    const tried = encodeAttempts(4032, 3024, PACKING_PHOTO_LIMITS);
+    expect(tried).toHaveLength(PACKING_PHOTO_LIMITS.sides.length * PACKING_PHOTO_LIMITS.qualities.length);
+    expect(tried.slice(0, 6)).toEqual(PACKING_PHOTO_LIMITS.qualities.map((quality) => ({ width: 1600, height: 1200, quality })));
+    expect([...new Set(tried.map((t) => `${t.width}x${t.height}`))]).toEqual(['1600x1200', '1400x1050', '1200x900', '1024x768']);
+    expect(tried.at(-1)).toEqual({ width: 1024, height: 768, quality: 0.36 });
+    for (let i = 1; i < 6; i++) expect(tried[i]!.quality).toBeLessThan(tried[i - 1]!.quality);
+    // A photo already within a side is drawn once at its own size, and stepped down from there.
+    expect([...new Set(encodeAttempts(1300, 975, PACKING_PHOTO_LIMITS).map((t) => `${t.width}x${t.height}`))]).toEqual(['1300x975', '1200x900', '1024x768']);
+    expect(encodeAttempts(0, 0, PACKING_PHOTO_LIMITS)).toEqual([]);
+    // Said in the console, calm and factual; nothing is sent.
+    expect(PACKING_PHOTO_LIMITS.tooLarge).toBe('This photo stays over 64 KB, even at 1 024 px. Take it again, closer to the parcel.');
+    // Every other photograph of the console keeps its 2000 px within the server's 1 MiB.
+    expect(encodeAttempts(4032, 3024, PHOTO_LIMITS)).toEqual(PHOTO_QUALITIES.map((quality) => ({ width: 2000, height: 1500, quality })));
+    expect(PHOTO_LIMITS.maxBytes).toBe(PHOTO_MAX_BYTES);
   });
 });
 

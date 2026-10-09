@@ -7,8 +7,9 @@
  *  - Parcel: per order, the piece (MONOLITHE · BLUE), its size, add-ons, engraving and surprise.
  *  - Ship to: the name, the address, the country and the phone; ADDRESS CHANGED when the address was replaced.
  *  - Packing: Start packing (the address and the engraving lock for the collector); the checklist, each card ticked by
- *    its scan only; Scan the card (the sale mode's camera and photo reader, verify/scanner.ts); Add the photo (scaled
- *    to 1600 px as a JPEG of at most 1 MiB, seen by ORBES only); Packed, once every line is ticked, every card scanned
+ *    its scan only; Scan the card (the sale mode's camera and photo reader, verify/scanner.ts); Add the photo (a JPEG
+ *    of at most 64 KB, the edge's limit on its path: its quality, then its side, stepped down from 1 600 px to
+ *    1 024 px, PACKING_PHOTO_LIMITS; seen by ORBES only); Packed, once every line is ticked, every card scanned
  *    and the photo added.
  *  - Shipment: Ship (a carrier of the parcel's reply, the tracking number), Mark delivered, Report a parcel problem.
  *  - History: the parcel's steps, who (a role, never a name) and when.
@@ -28,7 +29,7 @@ import {
   checklistComplete,
   HISTORY_BY,
   HISTORY_LABELS,
-  PACKING_PHOTO_MAX_SIDE,
+  PACKING_PHOTO_LIMITS,
   PACKING_TEXT,
   PARCEL_PROBLEM_LABELS,
   PARCEL_STEP_LABELS,
@@ -184,7 +185,7 @@ export function parcelSections(ctx: ViewContext, view: ShippingOrderView, opts: 
     if (!file) return;
     photoButton.disabled = true;
     try {
-      const p = await reencodePhoto(file, PACKING_PHOTO_MAX_SIDE);
+      const p = await reencodePhoto(file, PACKING_PHOTO_LIMITS);
       await ctx.api.setPackingPhoto(view.id, p.blob);
       notify(PACKING_TEXT.photoAdded);
       ctx.reload();

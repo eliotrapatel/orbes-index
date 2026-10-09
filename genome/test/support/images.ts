@@ -4,6 +4,7 @@
  * containers built chunk by chunk (still, extended, animated).
  *
  *   jpegPhoto(w, h)              a small gradient photograph, JFIF header only
+ *   texturedPhoto(w, h, grain)   a busy photograph (stripes and grain) that compresses badly, for the packing photo's 64 KB
  *   withJpegSegments(jpeg, …)    the same with EXIF / XMP / ICC / … segments after SOI
  *   webp(chunks)                 a RIFF/WEBP container of the given chunks
  *
@@ -32,6 +33,35 @@ export function jpegPhoto(width = 48, height = 32, quality = 85): Uint8Array {
     }
   }
   return new Uint8Array(jpeg.encode({ width, height, data }, quality).data);
+}
+
+/**
+ * A width × height photograph full of detail: fine stripes over a gradient, plus a seeded grain of `grain` (0–255)
+ * levels. Encoded at quality 92, it compresses badly: the packing photo's step-down (web/admin/model/logistics.ts
+ * PACKING_PHOTO_LIMITS) needs its smaller sides for a little grain, and no side fits 64 KB with the full grain.
+ */
+export function texturedPhoto(width: number, height: number, grain: number, seed = 1): Uint8Array {
+  const data = new Uint8Array(width * height * 4);
+  let s = seed >>> 0;
+  const rnd = () => {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+  const byte = (v: number) => Math.max(0, Math.min(255, Math.round(v)));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const fx = x / width;
+      const fy = y / height;
+      const stripes = 24 * Math.sin(x / 7 + y / 23) + 16 * Math.sin(y / 5);
+      const n = (rnd() - 0.5) * grain;
+      data[i] = byte(150 + 60 * fx + stripes + n);
+      data[i + 1] = byte(110 + 50 * fy + stripes * 0.8 + n);
+      data[i + 2] = byte(70 + 40 * fx * fy + stripes * 0.5 + n);
+      data[i + 3] = 255;
+    }
+  }
+  return new Uint8Array(jpeg.encode({ width, height, data }, 92).data);
 }
 
 /** Decoded RGBA of a JPEG, to compare the picture before and after stripping. */

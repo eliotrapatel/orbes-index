@@ -10,7 +10,8 @@
  *  2. Returns: a delivered order's return opened by Client Services is to receive at the agent's location; the agent
  *     records the parcel back, the piece OK, and the order case reads RECEIVED for ORBES to decide.
  *  3. To ship (step 5.11b): a paid order holding its piece is listed; on its parcel's page the agent starts packing,
- *     scans a card of another size (refused) then the right one (photo fallback), adds the photo, ticks the checklist,
+ *     scans a card of another size (refused) then the right one (photo fallback), adds the photo (a busy one refused in
+ *     the browser, a detailed one sent under the edge's 64 KB), ticks the checklist,
  *     packs and ships it; On its way, Mark delivered; the agent's packing slip, without a channel or a price.
  *  4. Receptions (step 5.11c): the agent types the supplier order's reference from its delivery note (a wrong one
  *     refused), counts the delivery (more than ordered with a note, a rejected piece); ORBES reads it Expected, then
@@ -30,11 +31,12 @@ import { fromBase64Url } from '../../src/core/bytes.js';
 import { orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import type { Actor } from '../../src/server/types.js';
+import { PACKING_PHOTO_EDGE_BYTES } from '../../src/web/admin/model/logistics.js';
 import { createAdmin, createHarness, seedCatalog, type Catalog, type Harness } from '../api/support.js';
 import { codeSource, phonePhoto } from '../e2e/support.js';
 import { packAndShip, stockPieces, type StockedPiece } from '../support/fulfil.js';
 import { writePng } from '../support/image-io.js';
-import { jpegPhoto } from '../support/images.js';
+import { jpegPixels, texturedPhoto } from '../support/images.js';
 import { createAccount } from '../support/live.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -402,14 +404,43 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await g.waitForSelector(`.toast:has-text("MONOLITHE · 54 · ${right!.productId}: the right piece.")`, { timeout: 30_000 });
     await expect.poll(() => g.locator('[data-testid=parcel-check-scan] input').isChecked()).toBe(true);
 
-    // The photo, scaled in the browser; then every line ticked: Packed.
+    // The photo, scaled in the browser under the edge's 64 KB on its path (deploy/vps/Caddyfile, nothing changed on the
+    // host): its quality, then its side, stepped down from 1600 px to 1024 px. Every body the console sends to the
+    // photo's path is counted in the page (Chromium reports no size for a Blob body).
+    await g.evaluate(() => {
+      const w = window as unknown as { photoBodies: number[] };
+      w.photoBodies = [];
+      const send = window.fetch.bind(window);
+      window.fetch = (input, init) => {
+        if (String(input).endsWith('/packing/photo') && init?.method === 'PUT') w.photoBodies.push(init.body instanceof Blob ? init.body.size : -1);
+        return send(input, init);
+      };
+    });
+    const photoBodies = () => g.evaluate(() => (window as unknown as { photoBodies: number[] }).photoBodies);
+    // A photo no side fits in 64 KB is refused in the browser, and nothing is sent.
+    const busy = join(workDir, 'parcel-busy.jpg');
+    writeFileSync(busy, texturedPhoto(2400, 1800, 255));
+    await g.setInputFiles('[data-testid=parcel-photo-file]', busy);
+    await g.waitForSelector('.toast:has-text("This photo stays over 64 KB, even at 1 024 px. Take it again, closer to the parcel.")', { timeout: 30_000 });
+    expect(await photoBodies()).toEqual([]);
+    expect(await g.locator('[data-testid=parcel-photo-view]').count()).toBe(0);
+    await expect.poll(() => g.locator('[data-testid=parcel-photo]').isDisabled()).toBe(false);
+    // A detailed photo, over 64 KB at 1600 px, goes once stepped down; then every line ticked: Packed.
     const photo = join(workDir, 'parcel.jpg');
-    writeFileSync(photo, jpegPhoto(2400, 1800));
+    writeFileSync(photo, texturedPhoto(2400, 1800, 20));
     await g.setInputFiles('[data-testid=parcel-photo-file]', photo);
-    await g.waitForSelector('.toast:has-text("Photo added.")');
+    await g.waitForSelector('.toast:has-text("Photo added.")', { timeout: 30_000 });
     await expect.poll(() => g.locator('[data-testid=parcel-photo-view]').count()).toBe(1);
-    const stored = await h.t.db.selectFrom('shipments').select(['photo_mime']).where('order_id', '=', orderId).executeTakeFirstOrThrow();
+    const [sentBytes, ...more] = await photoBodies();
+    expect(more).toEqual([]);
+    expect(sentBytes).toBeGreaterThan(0);
+    expect(sentBytes).toBeLessThanOrEqual(PACKING_PHOTO_EDGE_BYTES);
+    const stored = await h.t.db.selectFrom('shipments').select(['photo_mime', 'photo']).where('order_id', '=', orderId).executeTakeFirstOrThrow();
     expect(stored.photo_mime).toBe('image/jpeg');
+    expect(stored.photo!.byteLength).toBeLessThanOrEqual(sentBytes!);
+    const sent = jpegPixels(new Uint8Array(stored.photo!));
+    expect(Math.max(sent.width, sent.height)).toBeLessThan(1600);
+    expect(Math.max(sent.width, sent.height)).toBeGreaterThanOrEqual(1024);
     for (const label of ['The card, its claim code visible', 'The box and the pouch']) await g.locator('[data-testid=parcel-check]', { hasText: label }).click();
     await expect.poll(() => g.locator('[data-testid=parcel-packed]').isDisabled()).toBe(false);
     await shot(g, 'packing');

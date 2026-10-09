@@ -12,6 +12,7 @@
 import { countryName } from '../../../shared/countries.js';
 import { formatCount, formatDateTime } from '../format.js';
 import { parseMoney } from './live.js';
+import type { PhotoLimits } from './photo.js';
 import type { CaseToReceive, LogisticsLocation, LogisticsSku, OrderCaseKind, ParcelActor, ParcelStep, ReceptionInput, ReceptionOrder, ReceptionStatus, ReceptionView, ShippingOrderView, StockCorrectionStatus, SupplierReturnItem, ToShipRow } from '../types.js';
 
 /** The bounds of services/logistics.ts and services/stock.ts (LOGISTICS_LIMITS, STOCK_MOVE_MAX, THRESHOLD_MAX). */
@@ -252,8 +253,24 @@ export function receiveProblem(v: Record<string, string>): string | null {
 
 // ── To ship and a parcel (step 5.11b) ──────────────────────────────────────
 
-/** The packing photo's longer side, at most, as the console scales it before sending (≤ 1 MiB as a JPEG). */
+/** The packing photo's longer side, at most, as the console scales it before sending (plan NEXT LOT §3.5.3). */
 export const PACKING_PHOTO_MAX_SIDE = 1600;
+/** The smallest longer side it is stepped down to (about 1 024 px) before it is refused. */
+export const PACKING_PHOTO_MIN_SIDE = 1024;
+/**
+ * The edge's limit on the photo's path, `PUT /api/admin/logistics/orders/:id/packing/photo`: deploy/vps/Caddyfile gives
+ * it the `max_size 64KB` of every request but the photographs' and the label's POSTs (Caddy counts 1 000 bytes a KB).
+ * This lot changes nothing on the host (plan §0.3), so the console sends the photo at 64 KB at most.
+ */
+export const PACKING_PHOTO_EDGE_BYTES = 64_000;
+
+/** The packing photo: the quality steps down at 1 600 px, then the side, down to 1 024 px, until it fits 64 KB. */
+export const PACKING_PHOTO_LIMITS: PhotoLimits = Object.freeze({
+  sides: Object.freeze([PACKING_PHOTO_MAX_SIDE, 1400, 1200, PACKING_PHOTO_MIN_SIDE]),
+  qualities: Object.freeze([0.82, 0.72, 0.62, 0.52, 0.44, 0.36]),
+  maxBytes: PACKING_PHOTO_EDGE_BYTES,
+  tooLarge: 'This photo stays over 64 KB, even at 1 024 px. Take it again, closer to the parcel.',
+});
 
 export const TO_SHIP_TEXT = Object.freeze({
   title: 'To ship',

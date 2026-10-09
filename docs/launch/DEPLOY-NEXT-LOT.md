@@ -7,7 +7,7 @@ Le lot suivant (plan du 2026-10-07) part en production en **deux déploiements**
 | Déploiement | Éléments | Migrations | Changement de l'hôte | État |
 |---|---|---|---|---|
 | H1 | La ligne de la variante, la carte 79t, les tailles par modèle, NEW CLAIM CODE (plan §3.1 à §3.4) | `0033` et `0034` | aucun | **À faire** |
-| H2 | LOGISTICS, les commandes aux fournisseurs, les réceptions, l'agent, et le côté du collectionneur (plan §3.5 et §3.6) | `0035` à `0039` | aucun (un point bloquant au §2.1) | **À faire, après H1** (§2) |
+| H2 | LOGISTICS, les commandes aux fournisseurs, les réceptions, l'agent, et le côté du collectionneur (plan §3.5 et §3.6) | `0035` à `0039` | aucun | **À faire, après H1** (§2) |
 
 Le point de départ de H1 : la production tourne G, le commit `52c1c8c65e0dd482480030197ec6e250887ab251` (image `orbes-genome:52c1c8c65e0d`, mise en service le 2026-10-07 à 23:26 à Paris, 21:26 UTC), avec les trente-trois migrations de `0001_initial` à `0032_growth_indexes`. La branche du lot est partie du dernier commit des neuf suivants remis avant G (`a68a9af`) ; le commit de G (`52c1c8c`, les trois défauts de la fusion et les deux échecs de la CI) y est fusionné avant la remise de H1, sans autre changement. Si un autre déploiement a eu lieu depuis, ce document ne s'applique pas tel quel : demande à Claude de le recaler avant de commencer. Le détail technique de `deploy.sh` est dans [DEPLOYMENT §15.7](../DEPLOYMENT.md#157-updates-and-rollback-deploysh).
 
@@ -479,7 +479,7 @@ Les règles du §0 valent pour H2, avec ces trois différences :
   | `0039_order_delivery` | §3.6.B, §3.6.C | YOUR ADDRESSES, le pays et le téléphone de la livraison, le prix de la gravure, la facture complémentaire et l'avoir d'une ligne |
 
 - **Ce que les migrations écrivent** : la date d'entrée en stock des pièces finies par l'atelier (`0036`) ; les commandes qui attendaient une pièce à fabriquer attendent désormais le stock, et les pièces à fabriquer encore ouvertes sont annulées, leurs identités réservées laissées telles quelles (« forget those », `0037`) ; LATE passe de 3 à 5 jours (`0037`) ; une adresse déjà saisie est notée saisie par le personnel, ses pays et téléphone vides (« Not entered »), et chaque avoir existant crédite toute sa facture (`0039`).
-- **Caddy** : rien ne change (voir le point bloquant du §2.1, la photo d'emballage).
+- **Caddy** : rien ne change. La photo d'emballage passe sous sa limite de 64 Ko (§2.1).
 - **Les variables** : rien ne change. Le claim code d'une carte à imprimer est scellé avec une clé dérivée de `KEY_ENCRYPTION_KEY` (ou de `COOKIE_SECRET` sans elle), déjà en place.
 - **Les pages légales** : la version `2026-10-10`.
 - **Une coupure courte** : l'application est arrêtée pendant les migrations, puis redémarrée. En général, moins d'une minute.
@@ -487,14 +487,9 @@ Les règles du §0 valent pour H2, avec ces trois différences :
 
 Dans la suite, `<SHA_H2>` est le commit final (40 caractères) que donne le rapport de Claude, `<TAG_H2>` ses 12 premiers caractères (le tag de la nouvelle image).
 
-### 2.1 Avant : le point bloquant, ORBES Client Services, l'agent, la CI, l'heure, le pré-contrôle
+### 2.1 Avant : la photo d'emballage, ORBES Client Services, l'agent, la CI, l'heure, le pré-contrôle
 
-**1. Le point bloquant : la photo d'emballage.** `Packed` exige la photo du colis, que la console envoie jusqu'à 1 Mo (réduite à 1 600 px). Le bord du serveur (Caddy) refuse aujourd'hui tout corps de plus de 64 Ko sur ce chemin (`PUT /api/admin/logistics/orders/:id/packing/photo`), et ce lot ne change rien sur l'hôte ([DEPLOYMENT §15.7](../DEPLOYMENT.md#157-updates-and-rollback-deploysh)). Avant H2, choisis l'un des deux :
-
-- **une exception de Caddy pour ce chemin**, comme celle des photos : un changement du bord du serveur partagé, à annoncer d'abord au responsable de l'hôte ; Claude l'écrit alors dans un commit, avec sa CI, et recale ce paragraphe (le diff de `deploy/vps` n'est plus vide, Caddy est recréé) ;
-- **ou une photo réduite à 64 Ko au plus** dans la console : un commit de Claude, avec sa CI ; rien ne change sur l'hôte.
-
-Sans l'un des deux, ne déploie pas H2 : aucun colis ne pourrait être marqué `Packed`.
+**1. La photo d'emballage : rien à faire.** `Packed` exige la photo du colis. Le bord du serveur (Caddy) refuse tout corps de plus de 64 Ko sur son chemin (`PUT /api/admin/logistics/orders/:id/packing/photo`), et ce lot ne change rien sur l'hôte ([DEPLOYMENT §15.7](../DEPLOYMENT.md#157-updates-and-rollback-deploysh)). La console envoie donc la photo en JPEG de 64 Ko au plus : elle baisse d'abord sa qualité à 1 600 px, puis sa taille, jusqu'à 1 024 px. Une photo qui dépasse encore 64 Ko n'est pas envoyée : l'agent lit « This photo stays over 64 KB, even at 1 024 px. Take it again, closer to the parcel. » et la reprend. Le premier vrai colis le vérifie : `Photo added.`, puis `Packed`.
 
 **2. Ce qui doit être réglé avant le jour** (dans la console, sur ton ordinateur) :
 

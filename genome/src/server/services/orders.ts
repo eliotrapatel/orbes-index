@@ -531,8 +531,11 @@ export const ACCOUNT_ORDERS_LIMIT = 100;
 /**
  * An order as its collector reads it in MY PIECES (choice 6; GET /api/v1/account/orders): its steps and their times,
  * the model, the size, the add-ons and the price as sold, and once shipped the carrier and the tracking number with
- * its link. Never where it is served from, what it holds, the surprise, the buyer's details nor the engraving's words
- * (entered by Client Services), the value declared, the notes, nor who handled it.
+ * its link. Plan NEXT LOT §3.6: also their own delivery address (the name, the lines, the country, the phone), the
+ * engraving's words and the price it was taken at, the engraving offered and what they may still change, and, for an
+ * open return or size exchange, the address to send the piece back to. Never where it is served from (its location),
+ * what it holds (its piece, whether it is reserved or waiting for supplier stock), the surprise, the value declared,
+ * the notes, the packing photo, nor who handled it (who entered the address, who opened or decided its case).
  */
 export interface AccountOrder {
   id: string;

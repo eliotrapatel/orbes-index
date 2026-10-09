@@ -7,13 +7,14 @@
  * Re-encoding: the chosen file is decoded by the browser (createImageBitmap,
  * EXIF orientation applied), drawn on white at most PHOTO_MAX_SIDE pixels on
  * its longer side, and sent as a JPEG whose quality steps down until it fits
- * the server's 1 MiB. What is sent is previewed, with its size, before it is
- * saved. CSP-safe: the preview is a blob: URL (img-src allows it), released
- * when the dialog closes.
+ * the server's 1 MiB (the packing photo: smaller sides in turn too, until it
+ * fits the edge's 64 KB, model/logistics.ts PACKING_PHOTO_LIMITS). What is
+ * sent is previewed, with its size, before it is saved. CSP-safe: the
+ * preview is a blob: URL (img-src allows it), released when the dialog closes.
  */
 import { h, mount, type Child } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
-import { fitWithin, PHOTO_MAX_BYTES, PHOTO_MAX_SIDE, PHOTO_QUALITIES, PHOTO_SENT_AS, photoFacts } from '../model/photo.js';
+import { encodeAttempts, PHOTO_LIMITS, PHOTO_SENT_AS, photoFacts, type PhotoLimits } from '../model/photo.js';
 import { button } from './components.js';
 import { openDialog } from './dialog.js';
 
@@ -24,10 +25,11 @@ export interface EncodedPhoto {
 }
 
 /**
- * Decode `file`, scale it to PHOTO_MAX_SIDE at most (`maxSide`: the packing photo's 1600 px, plan NEXT LOT §3.5.3) and
- * encode it as a JPEG of at most PHOTO_MAX_BYTES.
+ * Decode `file`, draw it at each longer side of `limits` in turn (by default PHOTO_MAX_SIDE; the packing photo's
+ * 1 600 px down to 1 024 px, plan NEXT LOT §3.5.3) and encode it as a JPEG whose quality steps down at each side,
+ * until it fits `limits.maxBytes`; refused with `limits.tooLarge` otherwise, before anything is sent.
  */
-export async function reencodePhoto(file: Blob, maxSide: number = PHOTO_MAX_SIDE): Promise<EncodedPhoto> {
+export async function reencodePhoto(file: Blob, limits: PhotoLimits = PHOTO_LIMITS): Promise<EncodedPhoto> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -35,24 +37,28 @@ export async function reencodePhoto(file: Blob, maxSide: number = PHOTO_MAX_SIDE
     throw new ApiError(0, 'PHOTO_UNREADABLE', 'This file could not be opened as a photograph. Choose a JPEG, PNG or WebP image.');
   }
   try {
-    const { width, height } = fitWithin(bitmap.width, bitmap.height, maxSide);
-    if (width === 0) throw new ApiError(0, 'PHOTO_UNREADABLE', 'This photograph is empty.');
+    const attempts = encodeAttempts(bitmap.width, bitmap.height, limits);
+    if (attempts.length === 0) throw new ApiError(0, 'PHOTO_UNREADABLE', 'This photograph is empty.');
     const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
     const g = canvas.getContext('2d');
     if (!g) throw new ApiError(0, 'PHOTO_UNREADABLE', 'This browser cannot prepare the photograph.');
-    // A JPEG has no transparency: a cut-out piece sits on white paper.
-    g.fillStyle = '#ffffff';
-    g.fillRect(0, 0, width, height);
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = 'high';
-    g.drawImage(bitmap, 0, 0, width, height);
-    for (const quality of PHOTO_QUALITIES) {
+    let drawn = '';
+    for (const { width, height, quality } of attempts) {
+      if (drawn !== `${width}x${height}`) {
+        drawn = `${width}x${height}`;
+        canvas.width = width;
+        canvas.height = height;
+        // A JPEG has no transparency: a cut-out piece sits on white paper.
+        g.fillStyle = '#ffffff';
+        g.fillRect(0, 0, width, height);
+        g.imageSmoothingEnabled = true;
+        g.imageSmoothingQuality = 'high';
+        g.drawImage(bitmap, 0, 0, width, height);
+      }
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
-      if (blob && blob.size <= PHOTO_MAX_BYTES) return { blob, width, height };
+      if (blob && blob.size <= limits.maxBytes) return { blob, width, height };
     }
-    throw new ApiError(0, 'PHOTO_TOO_LARGE', 'This photograph stays over 1 MB once compressed. Choose a simpler or smaller one.');
+    throw new ApiError(0, 'PHOTO_TOO_LARGE', limits.tooLarge);
   } finally {
     bitmap.close();
   }

@@ -35,7 +35,7 @@ import type { LocationScope } from './receptions.js';
 
 /** The return window and the packing photo's keeping, in days (the owner's « fixed 14 days after delivery »). */
 export const RETURN_WINDOW_DAYS = 14;
-/** The packing photo, at most (the console scales it to 1600 px as JPEG first). */
+/** The packing photo, at most (the console sends it as a JPEG of 64 KB at most, the edge's limit on its path). */
 export const PACKING_PHOTO_MAX_BYTES = 1_048_576;
 /** The shipments still on their way through the agent's hands. */
 export const OPEN_SHIPMENT_STATUSES: readonly ShipmentStatus[] = Object.freeze(['PACKING', 'PACKED', 'SHIPPED']);
