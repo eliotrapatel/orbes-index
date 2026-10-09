@@ -1,10 +1,11 @@
 /**
  * ORBES GENOME CODE performance benchmarks.
  *
- *   npx tsx scripts/bench.ts [--only decoder,api,issuance,bundles,growth] [--quick]
+ *   npx tsx scripts/bench.ts [--only decoder,api,issuance,bundles,growth,arrivals] [--quick]
  *                            [--frames N] [--free N] [--reps N] [--requests N]
  *                            [--issue N] [--concurrency N] [--no-chromium]
- *                            [--json PATH]
+ *                            [--arrivals] [--arrival-minutes N] [--arrivals-per-minute N]
+ *                            [--room-entrants N] [--json PATH]
  *
  *   ORBES_TEST_POSTGRES_URL=postgres://user:pass@127.0.0.1:5432/postgres \
  *     npx tsx scripts/bench.ts          # adds the real PostgreSQL 16 runs
@@ -32,6 +33,17 @@
  *               has no VPS profile: the VPS figure is the p95 × 2 (the factor of
  *               scripts/live-load.ts `--vps-factor 2`), the target under 1 s
  *               (docs/reports/performance.md, « GROWTH at 100 000 pieces »).
+ * (f) arrivals  (plan CUSTOMER INTELLIGENCE §3.4 A.14, A.15, step 4.13), only with
+ *               `--arrivals` (or `--only arrivals`): a LIVE room of 200 test
+ *               entrants (services/test-entrants.ts) in the app's own process,
+ *               PGlite in a process of its own as scripts/live-load.ts runs them,
+ *               once without arrivals and once with 1 000 arrivals a minute for 5
+ *               minutes (`POST /api/v1/seen` with the page load's `a`, over HTTP):
+ *               the arrivals' p95 (target under 20 ms) and every LIVE engine
+ *               pass, with and without (none slower); then the Links report
+ *               (AcquisitionReportService.report, ALL TIME, its three views) on 13
+ *               months at 1 000 visits a day (scripts/acquisition-fill.ts), target
+ *               under 300 ms. scripts/bench-arrivals.ts.
  *
  * Prints markdown tables and writes every number to genome/out/bench/results.json
  * (or --json PATH). Frames and request mixes are seeded: same arguments → same
@@ -67,6 +79,7 @@ import { Prng } from '../test/support/prng.js';
 import { grayToRgba, type GrayImage } from '../test/support/raster.js';
 import { seedGrowthHouse } from '../test/support/growth.js';
 import { BROWSER_TARGETS, buildWeb } from './build-web.js';
+import { benchArrivals } from './bench-arrivals.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CHROMIUM_PATH = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -74,7 +87,7 @@ const ORIGIN = 'https://verify.orbes.bench';
 
 // ── Options ────────────────────────────────────────────────────────────────
 
-type Section = 'decoder' | 'api' | 'issuance' | 'bundles' | 'growth';
+type Section = 'decoder' | 'api' | 'issuance' | 'bundles' | 'growth' | 'arrivals';
 
 interface Options {
   only: Set<Section>;
@@ -87,6 +100,10 @@ interface Options {
   concurrency: number;
   chromium: boolean;
   json: string;
+  /** (f) The minutes of arrivals, their pace a minute, the test entrants in the room. */
+  arrivalMinutes: number;
+  arrivalsPerMinute: number;
+  roomEntrants: number;
 }
 
 function parseArgs(argv: string[]): Options {
@@ -101,6 +118,9 @@ function parseArgs(argv: string[]): Options {
     concurrency: 8,
     chromium: true,
     json: join(ROOT, 'out', 'bench', 'results.json'),
+    arrivalMinutes: 5,
+    arrivalsPerMinute: 1000,
+    roomEntrants: 200,
   };
   const num = (v: string | undefined, name: string): number => {
     const n = Number(v);
@@ -111,8 +131,16 @@ function parseArgs(argv: string[]): Options {
     const a = argv[i];
     if (a === '--only') {
       const list = (argv[++i] ?? '').split(',').map((s) => s.trim()) as Section[];
-      for (const s of list) if (!['decoder', 'api', 'issuance', 'bundles', 'growth'].includes(s)) throw new Error(`unknown section ${s}`);
+      for (const s of list) if (!['decoder', 'api', 'issuance', 'bundles', 'growth', 'arrivals'].includes(s)) throw new Error(`unknown section ${s}`);
       o.only = new Set(list);
+    } else if (a === '--arrivals') {
+      o.only = new Set(['arrivals']);
+    } else if (a === '--arrival-minutes') {
+      o.arrivalMinutes = num(argv[++i], a);
+    } else if (a === '--arrivals-per-minute') {
+      o.arrivalsPerMinute = num(argv[++i], a);
+    } else if (a === '--room-entrants') {
+      o.roomEntrants = num(argv[++i], a);
     } else if (a === '--quick') Object.assign(o, { frames: 6, free: 4, reps: 1, warmup: 2, requests: 200, issue: 40 });
     else if (a === '--frames') o.frames = num(argv[++i], a);
     else if (a === '--free') o.free = num(argv[++i], a);
@@ -885,6 +913,12 @@ async function main(): Promise<void> {
   if (o.only.has('api') || o.only.has('issuance')) results.databases = await benchDatabases(o);
   if (o.only.has('bundles')) results.bundles = await benchBundles();
   if (o.only.has('growth')) results.growth = await benchGrowthDatabases(o);
+  if (o.only.has('arrivals')) {
+    results.arrivals = await benchArrivals(
+      { minutes: o.arrivalMinutes, perMinute: o.arrivalsPerMinute, entrants: o.roomEntrants, reps: Math.max(10, o.reps * 5), warmup: 2, outDir: dirname(o.json) },
+      log,
+    );
+  }
   (results.machine as Record<string, unknown>).loadAverageAtEnd = loadavg().map((x) => Math.round(x * 100) / 100);
   results.durationS = Math.round((Date.now() - started.getTime()) / 100) / 10;
   mkdirSync(dirname(o.json), { recursive: true });

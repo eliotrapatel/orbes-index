@@ -613,12 +613,13 @@ export class AcquisitionReportService {
       f.firstVisits += v.firstVisits;
     }
     const restrict = only === undefined ? sql`` : sql`WHERE first_src = ${only}::integer OR last_src = ${only}::integer`;
+    // Both attributions in one pass over the facts (grouping sets): the facts are never written out to be read twice.
     const rows = await sql<{ measure: Measure; attribution: Attribution; source_id: number; n: number; amount: number }>`
-      WITH ${factsWith(basis, p.start, p.end, currency)},
-      chosen AS (SELECT * FROM facts ${restrict})
-      SELECT measure, 'first' AS attribution, first_src AS source_id, sum(n)::int AS n, sum(amount)::bigint AS amount FROM chosen GROUP BY measure, first_src
-      UNION ALL
-      SELECT measure, 'last', last_src, sum(n)::int, sum(amount)::bigint FROM chosen GROUP BY measure, last_src`.execute(tx);
+      WITH ${factsWith(basis, p.start, p.end, currency)}
+      SELECT measure, CASE WHEN GROUPING(first_src) = 0 THEN 'first' ELSE 'last' END AS attribution,
+             coalesce(first_src, last_src) AS source_id, sum(n)::int AS n, sum(amount)::bigint AS amount
+        FROM facts ${restrict}
+       GROUP BY GROUPING SETS ((measure, first_src), (measure, last_src))`.execute(tx);
     for (const r of rows.rows) {
       const id = Number(r.source_id);
       if (only !== undefined && id !== only) continue;
@@ -657,7 +658,7 @@ export class AcquisitionReportService {
          WHERE first_source_id IS NOT NULL AND ${these(sql`first_source_id`)}
            ${lower ? sql`AND first_seen_at >= ${lower}::timestamptz` : sql``} ${p.end ? sql`AND first_seen_at < ${p.end}::timestamptz` : sql``}`
       : sql`SELECT NULL::integer AS source_id, NULL::date AS day, 0 AS visits, 0 AS first_visits, NULL::timestamptz AS seen WHERE FALSE`;
-    const rows = await sql<{ source_id: number; day: string | null; visits: number; first_visits: number; seen: Date | null }>`
+    const parts = sql`
       SELECT source_id, day, visits, first_visits, NULL::timestamptz AS seen FROM acquisition_daily
        WHERE ${until ? sql`day <= ${until}::date` : sql`FALSE`} ${dayFrom} ${dayTo} AND ${these(sql`source_id`)}
       UNION ALL
@@ -665,7 +666,14 @@ export class AcquisitionReportService {
        WHERE ${until ? sql`day > ${until}::date` : sql`TRUE`} ${dayFrom} ${dayTo} AND ${these(sql`source_id`)}
        GROUP BY source_id, day
       UNION ALL
-      ${deviceRows}`.execute(tx);
+      ${deviceRows}`;
+    // By source, added up in the database: one row a source, never a row a source and day (13 months of days).
+    const rows = await sql<{ source_id: number; day: string | null; visits: number; first_visits: number; seen: Date | null }>`${
+      by === 'source'
+        ? sql`SELECT u.source_id, NULL::date AS day, sum(u.visits)::int AS visits, sum(u.first_visits)::int AS first_visits, NULL::timestamptz AS seen
+                FROM (${parts}) u GROUP BY u.source_id`
+        : parts
+    }`.execute(tx);
     for (const r of rows.rows) {
       const key = by === 'source' ? String(r.source_id) : (r.day ?? parisDay(new Date(r.seen!)));
       const e = out.get(key) ?? { key, visits: 0, firstVisits: 0 };

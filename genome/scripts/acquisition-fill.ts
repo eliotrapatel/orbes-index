@@ -52,6 +52,8 @@ export async function fillAcquisition(db: Db, end: Date, log: (m: string) => voi
   for (let day = firstDay, d = 0; day <= lastDay; day = nextParisDay(day), d++) days.push({ d, day, start: parisDayStart(day) });
   const start = days[0]!.start;
   await new AcquisitionService({ db, publicOrigin: 'https://verify.orbes.bench', clock: () => start }).prepare();
+  // The recording started with the fill's first day, whether this boot or an earlier one wrote the state row.
+  await db.updateTable('acquisition_state').set({ tracking_started_at: start, conversions_until: start, daily_until: null, catch_up_on: null }).where('id', '=', 1).execute();
   const w = await new GrowthWorld(db).prepare();
   const model = await w.model('MONOLITHE', { price: [25_000, 'EUR'] });
   await sql`CREATE TEMP TABLE fill_days (d int PRIMARY KEY, day date NOT NULL, start timestamptz NOT NULL)`.execute(db);

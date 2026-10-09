@@ -2644,6 +2644,32 @@ Plan CUSTOMER INTELLIGENCE §3.4 A.6 and §8, step 4.12. Measured on 9 October 2
 
 To measure again on PostgreSQL: `ORBES_TEST_POSTGRES_URL=postgres://… npx tsx scripts/acquisition-size.ts` (a throwaway database, dropped at the end). The real `pg_dump -Fc -Z6` of the box and the morning's `intelligence sizes` line are the figures to compare (§11).
 
+### 11.3 The arrivals beside a LIVE room, and the Links report, timed
+
+Plan CUSTOMER INTELLIGENCE §3.4 A.14 and A.15, step 4.13. Measured on 9 October 2026 with `npx tsx scripts/bench.ts --arrivals` (`scripts/bench-arrivals.ts`) on an Apple M2 Pro (10 cores, Node 24, the machine otherwise loaded: load average about 6), **PGlite** 0.5.8 (PostgreSQL 18.3 compiled to WASM, one connection that every transaction holds in turn, where the box's PostgreSQL 17 has a pool of ten).
+
+- **The room.** Three processes, as `scripts/live-load.ts` runs them: the app (its own `createContext`, `buildApp` and LIVE engine, the production rate limits), PGlite alone in its own process over a socket, and the driver. A LIVE RELEASE of 60 pieces, T0 a minute in, 200 test entrants sent by `services/test-entrants.ts` (200 TITANE over 30 s; both runs sold out, DONE, no runner error). Five minutes once without arrivals, once with **1,000 arrivals a minute** (5,001 `POST /api/v1/seen` with the page load's `a` and no view over HTTP: half new devices, a third through a console link, a third with campaign tags, a third from a site or direct; every answer 204; 3,684 visits and 2,501 first sources recorded).
+
+| Measure (5 minutes) | n | p50 ms | p95 ms | p99 ms | max ms |
+|---|---|---|---|---|---|
+| An arrival, request sent → answer read (the arrival written inside) | 5,001 | 5.9 | **12.7** | 33.0 | 74.3 |
+| A LIVE engine pass, without arrivals | 1,194 | 3.1 | 26.1 | 42.0 | 60.7 |
+| A LIVE engine pass, with arrivals | 1,194 | 2.3 | 9.1 | 13.5 | 82.0 |
+| … from T0 (the line and the turns), without | 956 | 3.3 | 30.5 | 42.5 | 60.7 |
+| … from T0, with | 956 | 2.6 | 9.5 | 14.1 | 82.0 |
+
+The arrivals' p95 is under the 20 ms target. No percentile of the engine's passes is slower with the arrivals (the two runs' rooms differ by their test entrants' random choices: 23 places released without, 13 with); a single pass reached 82 ms against 61 ms without. The database's process used 0.083 of a core without the arrivals and 0.136 with them (+0.05 core for 1,000 arrivals a minute); the app's, 8.3 s and 17.7 s of CPU over the five minutes.
+
+- **The Links report** (`AcquisitionReportService.report`, ALL TIME, its three views; 15 readings each after 2 to warm up), on 13 months at the unit (`scripts/acquisition-fill.ts`: 395,960 visits, 20,147 daily rows, 39,600 accounts, 77,738 conversions, 22,298 entries, 15,840 orders, 16,681 invoices and credit notes; today's visits raw), PGlite in memory **in the bench's own process**:
+
+| View | p50 ms | p95 ms | max ms |
+|---|---|---|---|
+| LINKS (with each costed link's RETURN, SINCE MADE) | 294.6 | **307.7** | 307.7 |
+| CAMPAIGN TAGS | 231.0 | 234.8 | 234.8 |
+| REFERRING SITES | 230.1 | 239.4 | 239.4 |
+
+The target is 300 ms: CAMPAIGN TAGS and REFERRING SITES are under it; LINKS is 8 ms over it on PGlite in one process (the facts of every counted collector, about 200 ms, then the returns' pass over every invoice, about 60 ms, in WASM on one thread). Two causes were fixed on the way, neither changing a figure: both attributions are now added up in one pass (grouping sets, where the facts were written out to disk and read twice), and the visits by source are added up in the database (one row a source, not 20,000 rows of days carried to the app): together from about 390 ms to about 300 ms. The re-run on PostgreSQL is the hand-over's: `ORBES_TEST_POSTGRES_URL=postgres://… npx tsx scripts/bench.ts --arrivals` times the report on a throwaway PostgreSQL database (dropped at the end); the room stays on PGlite in its own process.
+
 ---
 
 ## 12. Mapping of the specification's product fields
