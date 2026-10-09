@@ -36,7 +36,7 @@
  *                  addition 3), never a piece's own (decision 9); none when the model has none.
  * An order the app cannot read (an unknown step or channel, a reference that is not one) is left out, never guessed.
  */
-import { ORDERS } from './copy.js';
+import { LIVE, ORDERS } from './copy.js';
 import { formatMoney } from './live-model.js';
 import type { OrderDocumentKind } from './api.js';
 import { orderContext } from './messages-model.js';
@@ -393,6 +393,15 @@ export interface OrderReturnsModel {
    * one of `sizes` in stock; null for none.
    */
   savedSize: string | null;
+}
+
+/**
+ * The line under EXCHANGE THE SIZE's sizes while YOUR SIZES' size stands preselected: the LIVE room's words as they
+ * are, given the size without the word its label may already carry, so `SIZE 52` reads `SIZE 52 · FROM YOUR SIZES`,
+ * never `SIZE SIZE 52`.
+ */
+export function savedSizeLine(label: string): string {
+  return LIVE.there.fromYours(String(label).trim().replace(/^SIZE\s+/i, ''));
 }
 
 /** RETURNS AND EXCHANGES while the server says they may be asked (DELIVERED, not a welcome gift, 14 days, none asked). */

@@ -26,7 +26,7 @@ import { h } from '../../shared/dom.js';
 import type { ApiClient } from '../api.js';
 import { mayAddAddress, sameAddress, savedChoice } from '../addresses-model.js';
 import { ACCOUNT_ADDRESSES, LIVE, MESSAGES, ORDERS } from '../copy.js';
-import type { OrderEngravingModel, OrderModel, OrderReturnsModel } from '../orders-model.js';
+import { savedSizeLine, type OrderEngravingModel, type OrderModel, type OrderReturnsModel } from '../orders-model.js';
 import type { SessionStore } from '../session.js';
 import type { AccountAddresses, AccountOrder, OrderCaseRequest } from '../types.js';
 import { addressFields } from './address.js';
@@ -364,7 +364,7 @@ export class OrderSheet {
           ? h(
               'div',
               { class: 'n-osheet__yours' },
-              h('p', { class: 'n-g n-lb n-osheet__yours-size' }, ...withNumerals(LIVE.there.fromYours(m.savedSize))),
+              h('p', { class: 'n-g n-lb n-osheet__yours-size' }, ...withNumerals(savedSizeLine(m.savedSize))),
               h('p', { class: 'n-sm n-osheet__yours-check', text: LIVE.there.checkSize }),
             )
           : null;

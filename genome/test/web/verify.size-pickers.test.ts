@@ -15,7 +15,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { LIVE } from '../../src/web/verify/copy.js';
-import { orderReturns } from '../../src/web/verify/orders-model.js';
+import { orderReturns, savedSizeLine } from '../../src/web/verify/orders-model.js';
 import type { AccountOrder } from '../../src/web/verify/types.js';
 
 const VIEWS = join(dirname(fileURLToPath(import.meta.url)), '../../src/web/verify/views');
@@ -71,5 +71,26 @@ describe('the size preselected everywhere (plan CUSTOMER INTELLIGENCE §3.7)', (
     // The words are the LIVE room's and the salon's, none new.
     expect(LIVE.there.fromYours('52')).toBe('SIZE 52 · FROM YOUR SIZES');
     expect(LIVE.there.checkSize).toBe('Check it is right for this model before you confirm.');
+    expect(savedSizeLine('52')).toBe('SIZE 52 · FROM YOUR SIZES');
+  });
+
+  it('names a size whose label already carries its word once in EXCHANGE THE SIZE (SIZE 52, never SIZE SIZE 52)', () => {
+    const order = {
+      id: '1a2b3c4d-0000-4000-8000-000000000000',
+      reference: 'OR-1A2B3C4D',
+      channel: 'SALON',
+      model: 'MONOLITHE',
+      modelVariant: null,
+      size: { label: 'SIZE 50' },
+      status: 'DELIVERED',
+      deliveredAt: '2026-10-07T10:00:00.000Z',
+      returnable: { until: '2026-10-21T10:00:00.000Z', sizes: [{ label: 'SIZE 52', available: true }], savedSize: { label: 'SIZE 52' } },
+    } as unknown as AccountOrder;
+    const m = orderReturns(order, 0)!;
+    // The raw label stays the preselection, so its size button stays pressed.
+    expect(m.savedSize).toBe('SIZE 52');
+    expect(savedSizeLine(m.savedSize!)).toBe('SIZE 52 · FROM YOUR SIZES');
+    expect(savedSizeLine(m.savedSize!)).not.toMatch(/SIZE SIZE/);
+    expect(m.concerning).not.toMatch(/SIZE SIZE/);
   });
 });
