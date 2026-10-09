@@ -46,6 +46,7 @@ import { SizeService } from './services/sizes.js';
 import { AddressService } from './services/addresses.js';
 import { TasteService } from './services/tastes.js';
 import { ProfileService } from './services/profiles.js';
+import { WishlistService } from './services/wishlist.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -169,6 +170,8 @@ export interface AppServices {
   tastes: TasteService;
   /** YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1): the names, country, city, phone, date of birth, Instagram, tastes and how they heard of ORBES; the console's answers to that question. */
   profiles: ProfileService;
+  /** YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2): the models a collector keeps with the heart on their sheet; private, never audited per tap. */
+  wishlist: WishlistService;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
   suppliers: SupplierService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
@@ -306,6 +309,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const addresses = new AddressService({ db, audit, clock });
     const tastes = new TasteService({ db, clock });
     const profiles = new ProfileService({ db, audit, tastes, clock });
+    const wishlist = new WishlistService({ db, clock });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });
@@ -359,6 +363,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       addresses,
       tastes,
       profiles,
+      wishlist,
       suppliers,
       supplierOrders,
       receptions,
