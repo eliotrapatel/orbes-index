@@ -332,15 +332,27 @@ export function wishHistoryCutoff(now: Date): Date {
   return parisDayStart(`${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`);
 }
 
+/** The month before `YYYY-MM`. */
+function previousMonth(month: string): string {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  return m === 1 ? `${String(y - 1).padStart(4, '0')}-12` : `${String(y).padStart(4, '0')}-${String(m - 1).padStart(2, '0')}`;
+}
+
 /**
  * Job `wishMonths`: each complete Paris month not yet counted, from the month of the first wish up to the month before
  * `now`'s, into `model_wish_months` (counted collectors, ACTIVE accounts) and `wish_months_counted`, one transaction per
  * month. Returns how many months it counted (0 almost every pass: one primary-key read).
+ *
+ * The months are counted in order, one transaction each, and a pass stops at the first that fails, so the counted
+ * months always run unbroken up to the newest one counted: once the last complete month is counted there is nothing to
+ * do, and the pass ends on that one primary-key read of `wish_months_counted`, before `account_wishes` is read at all.
  */
 export async function aggregateWishMonths(db: Db, now: Date): Promise<number> {
+  const current = monthOf(now);
+  const done = await db.selectFrom('wish_months_counted').select('month').where('month', '=', `${previousMonth(current)}-01`).executeTakeFirst();
+  if (done) return 0;
   const first = await db.selectFrom('account_wishes').select((eb) => eb.fn.min('added_at').as('first')).executeTakeFirst();
   if (!first?.first) return 0;
-  const current = monthOf(now);
   let month = monthOf(new Date(first.first as Date | string));
   const counted = new Set((await db.selectFrom('wish_months_counted').select('month').execute()).map((r) => String(r.month).slice(0, 7)));
   let n = 0;

@@ -10,7 +10,8 @@
  *  - `ofAccount`: the staff's states;
  *  - no audit entry for a heart;
  *  - the jobs (§3.2 W.7, step 2.4): `aggregateWishMonths` counts each complete Paris month once (adds, removes and a
- *    reopening; test entrants, team accounts and LOCKED accounts left out), a second run does nothing; `purgeWishHistory`
+ *    reopening; test entrants, team accounts and LOCKED accounts left out), a second run does nothing, and once the last
+ *    complete month is counted a pass ends before account_wishes is read (an earlier wish is not even found); `purgeWishHistory`
  *    deletes only removed rows older than 13 months in counted months, never an open one, in batches; the housekeeping
  *    runs both in the morning window only, returns both, and purges nothing in a pass where the count failed.
  */
@@ -329,6 +330,21 @@ describe('YOUR WISHLIST\'s jobs (plan CUSTOMER INTELLIGENCE §3.2 W.7): the mont
     const before = await months();
     expect(await aggregateWishMonths(h.t.db, new Date('2026-12-10T09:00:00.000Z'))).toBe(0);
     expect(await months()).toEqual(before);
+  });
+
+  it('ends a pass on one read of wish_months_counted once the last complete month is counted, before account_wishes is read', async () => {
+    // November 2026 (the month before 10 December's) is counted: a wish added in August, never counted, is not even
+    // looked for, so the pass counts nothing and changes nothing (a min(added_at) read would have found August).
+    const before = await months();
+    const marked = await counted();
+    await h.t.db.insertInto('account_wishes').values({ account_id: ids.c1!, model_id: ids.C!, added_at: '2026-08-15T10:00:00Z', removed_at: null }).execute();
+    try {
+      expect(await aggregateWishMonths(h.t.db, new Date('2026-12-10T09:00:00.000Z'))).toBe(0);
+      expect(await months()).toEqual(before);
+      expect(await counted()).toEqual(marked);
+    } finally {
+      await h.t.db.deleteFrom('account_wishes').where('account_id', '=', ids.c1!).where('model_id', '=', ids.C!).where('added_at', '=', new Date('2026-08-15T10:00:00Z')).execute();
+    }
   });
 
   it('purges only removed wishes older than 13 Paris months whose month is counted, never an open one, in batches', async () => {
