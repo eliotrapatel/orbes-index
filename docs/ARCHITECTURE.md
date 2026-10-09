@@ -120,7 +120,10 @@ genome/
                          activity, release-stock: the releases' and collectors' settings; shopify: the exports);
                          growth (GROWTH, plan NEXT-NINE BP-29: lifetime value, repeat buying, the funnel, the revenue; reads only);
                          the supply chain (plan NEXT LOT §3.5, B.11: suppliers, supplier-orders, receptions, logistics,
-                         parcels, order-cases; the atelier and its pieces to make removed)
+                         parcels, order-cases; the atelier and its pieces to make removed);
+                         the tastes and the wishlist (plan CUSTOMER INTELLIGENCE §3.2: tastes, TasteService, the
+                         favourite pieces and finishes read live from THE COLLECTION; wishlist, WishlistService, the
+                         heart's wishes, their monthly counts and their 13-month purge)
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     http/                sessions, CSRF, rate limiting, security headers, validation, static files; the LIVE
