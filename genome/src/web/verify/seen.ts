@@ -14,11 +14,15 @@
  *   Device   `d`, read once: standalone (`display-mode: standalone` or `navigator.standalone`), the touch points, the
  *            screen's short side in CSS pixels.
  *
- * Nothing is drawn, no word added, no storage written; the request is same-origin (ApiClient.seen), and its failure is
- * never shown.
+ *   Arrival  the page load's arrival (arrival.ts, plan §3.4 A.9, step 4.7), handed over once (`arrive`) after the first
+ *            screen is drawn: sent at once in the first batch, alone when no view has finished (never during a LIVE
+ *            room but on a hide or a close); kept until the recorder starts (a prerendered page), never sent while off.
+ *
+ * Nothing is drawn, no word added, no storage written here (the arrival's one tab flag is arrival.ts's); the request is
+ * same-origin (ApiClient.seen), and its failure is never shown.
  */
 import type { ApiClient } from './api.js';
-import { pageOf, SeenQueue, ViewClock, type SeenAppState, type SeenPageName, type SeenScreen, type SeenView } from './seen-model.js';
+import { pageOf, SeenQueue, ViewClock, type SeenAppState, type SeenArrival, type SeenPageName, type SeenScreen, type SeenView } from './seen-model.js';
 
 /** How often the recorder looks at the clock (the timer's send, the idle limit). */
 const TICK_MS = 1_000;
@@ -32,6 +36,8 @@ export class SeenRecorder {
   private timer: ReturnType<typeof setInterval> | null = null;
   /** The last screen told before the recorder started (a prerendered page that becomes visible). */
   private pending: SeenView | null = null;
+  /** The page load's arrival handed over before the recorder started. */
+  private pendingArrival: SeenArrival | null = null;
 
   /** Whether it records (tests). */
   get on(): boolean {
@@ -55,6 +61,8 @@ export class SeenRecorder {
     if (document.visibilityState === 'hidden') clock.visibility(false, now());
     if (this.pending) clock.show(this.pending, now());
     this.pending = null;
+    if (this.pendingArrival) queue.arrive(this.pendingArrival, now());
+    this.pendingArrival = null;
     const input = () => clock.input(now());
     for (const type of ['pointerdown', 'keydown', 'touchstart', 'wheel']) window.addEventListener(type, input, { capture: true, passive: true });
     window.addEventListener('scroll', input, { capture: true, passive: true });
@@ -83,6 +91,17 @@ export class SeenRecorder {
       return;
     }
     this.clock.show(view, nowMs());
+  }
+
+  /** The page load's arrival (arrival.ts sendArrival): sent at once unless a LIVE room is in front; once per page load. */
+  arrive(a: SeenArrival): void {
+    if (!this.clock || !this.queue) {
+      this.pendingArrival ??= a;
+      return;
+    }
+    const now = nowMs();
+    this.queue.arrive(a, now);
+    void this.queue.tick(now, this.clock.front());
   }
 
   /** `owner` covers the screen with `page` while `live()` holds (null: it pauses the screen and records nothing). */

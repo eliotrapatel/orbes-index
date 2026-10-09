@@ -16,7 +16,8 @@
  *               merged, at most QUEUE_MAX (the oldest dropped first); sent every 30 s ± 10 s while it holds some, at once
  *               when the page is hidden or closed, and never during a LIVE room but on hide or close (5 000 phones in a
  *               room at T0 send nothing). A batch refused for the rate (429), or not answered, is kept for the next
- *               send; one refused as malformed (400) is dropped.
+ *               send; one refused as malformed (400) is dropped. The page load's arrival (arrival.ts, step 4.7) rides
+ *               in the first batch sent after it is handed over, alone with `e: []` when no view has finished yet.
  */
 
 /** Every page the app names (the server's VIEW_PAGES but SCAN, which only the server writes; checked by test/web/seen-model.test.ts). */
@@ -350,10 +351,23 @@ export class ViewClock {
 
 // ── SeenQueue ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-/** POST /api/v1/seen's body (http/schemas.ts seenBody; the arrival `a` comes with plan step 4.7). */
+/**
+ * The page load's arrival (plan CUSTOMER INTELLIGENCE §3.4 A.9, step 4.7; http/schemas.ts arrivalShape), read by
+ * arrival.ts: the address it landed on, the console link's code from `o`, the five `utm_` tags and the referring page.
+ * Every field optional: what the address and the page did not give is left out.
+ */
+export interface SeenArrival {
+  path?: string;
+  link?: string;
+  utm?: { source?: string; medium?: string; campaign?: string; content?: string; term?: string };
+  referrer?: string;
+}
+
+/** POST /api/v1/seen's body (http/schemas.ts seenBody): the device, the arrival once per page load, the views. */
 export interface SeenBatchBody {
   v: 1;
   d: { s: boolean; t: number; w: number };
+  a?: SeenArrival;
   e: { p: SeenPageName; s?: string; ms: number; ago: number }[];
 }
 
@@ -379,6 +393,9 @@ export class SeenQueue {
   private inFlight = new Set<FinishedView>();
   private due: number | null = null;
   private sending: Promise<void> | null = null;
+  /** The page load's arrival, until a batch carries it (`a`); taken once per page load. */
+  private arrival: SeenArrival | null = null;
+  private arrivalTaken = false;
   private readonly device: SeenBatchBody['d'];
   private readonly random: () => number;
 
@@ -411,6 +428,24 @@ export class SeenQueue {
     this.due ??= this.nextDue(now);
   }
 
+  /** Whether the page load's arrival still waits to be sent (tests). */
+  get arriving(): boolean {
+    return this.arrival !== null;
+  }
+
+  /**
+   * The page load's arrival (arrival.ts, plan CUSTOMER INTELLIGENCE §3.4 A.9): taken once per page load (a second one is
+   * ignored), and due at once, so the next turn sends it in the first batch, alone with `e: []` when no view has finished
+   * yet; never during a LIVE room but on a hide or a close. A batch kept (429, no answer) keeps it; one refused as
+   * malformed (400) drops it with the views.
+   */
+  arrive(a: SeenArrival, now: number): void {
+    if (this.arrivalTaken) return;
+    this.arrivalTaken = true;
+    this.arrival = { ...a };
+    this.due = now;
+  }
+
   /** The timer's turn: sends when due, unless the view in front is a LIVE room (it waits for a hide or a close). */
   tick(now: number, front: SeenView | null): Promise<void> | null {
     if (this.due === null || now < this.due || front?.page === 'LIVE') return null;
@@ -431,11 +466,13 @@ export class SeenQueue {
 
   private async run(now: number): Promise<void> {
     this.items = this.items.filter((v) => now - v.began < VIEW_MAX_AGE_MS);
-    while (this.items.length > 0) {
+    while (this.items.length > 0 || this.arrival !== null) {
       const batch = this.items.slice(0, BATCH_MAX);
+      const arrival = this.arrival;
       const body: SeenBatchBody = {
         v: 1,
         d: this.device,
+        ...(arrival ? { a: arrival } : {}),
         e: batch.map((v) => {
           const e: SeenBatchBody['e'][number] = { p: v.page, ms: clampInt(v.ms, 0, VIEW_MAX_MS_LIVE), ago: clampInt(now - v.began, 0, VIEW_MAX_AGE_MS - 1) };
           if (v.subject !== null && v.subject.length <= SUBJECT_MAX) e.s = v.subject;
@@ -452,10 +489,11 @@ export class SeenQueue {
         this.inFlight = new Set();
       }
       if (result === 'retry') {
-        this.due = this.items.length > 0 ? this.nextDue(now) : null;
+        this.due = this.items.length > 0 || this.arrival !== null ? this.nextDue(now) : null;
         return;
       }
-      // Sent, or refused as malformed: those views go (views pushed meanwhile stay).
+      // Sent, or refused as malformed: those views go (views pushed meanwhile stay), and the arrival with them.
+      if (arrival) this.arrival = null;
       const sent = new Set(batch);
       this.items = this.items.filter((v) => !sent.has(v));
       now = Math.max(now, this.deps.now?.() ?? now);

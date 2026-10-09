@@ -106,6 +106,7 @@ import { releasesView, releaseView, type ReleasesTab } from './views/releases.js
 import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { Shell } from './views/shell.js';
+import { readArrival, sendArrival, tabStorage } from './arrival.js';
 import { seen } from './seen.js';
 import type { SeenAppState } from './seen-model.js';
 import { verifyingView } from './views/verifying.js';
@@ -282,6 +283,9 @@ class App {
   private liveRoom = false;
 
   start(): void {
+    // Where the visit comes from (plan CUSTOMER INTELLIGENCE §3.4 A.9): `o` and the `utm_` tags read and taken out of the
+    // address before the router's first replaceEntry, the referring page on the tab's first load; sent below.
+    const arrival = readArrival(location, document, tabStorage(), history);
     // What the collector looks at (plan CUSTOMER INTELLIGENCE §3.3 T.9): off in an automated browser, nothing drawn.
     seen.start(this.api);
     this.photoInput.addEventListener('change', () => {
@@ -457,8 +461,15 @@ class App {
       void this.showLanding(false);
     }
     // Boot the decoder worker and warm the decoder (one synthetic decode) while the visitor reads the landing screen; a
-    // boutique board never scans.
+    // boutique board never scans, and is never recorded: its arrival is not sent.
     if (route === 'board') return;
+    // The arrival, once the first screen is drawn, in the recording's first batch (plan CUSTOMER INTELLIGENCE §3.4 A.9).
+    const w = window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number };
+    sendArrival(seen, arrival.arrival, {
+      document: document as Document & { prerendering?: boolean },
+      requestIdleCallback: w.requestIdleCallback ? (cb, opts) => w.requestIdleCallback!.call(window, cb, opts) : undefined,
+      setTimeout: (cb, ms) => window.setTimeout(cb, ms),
+    });
     const warm = () => void this.decoderClient()?.warm();
     const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback;
     if (idle) idle.call(window, warm);
