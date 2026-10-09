@@ -1035,7 +1035,6 @@ export class ApiClient {
   }
 }
 
-/** YOUR ADDRESSES as the server answers it, or BAD_RESPONSE. */
 /** YOUR PROFILE as the server answers it, or BAD_RESPONSE. */
 function checkedProfile(r: AccountProfileView | null | undefined): AccountProfileView {
   if (!r || !r.profile || typeof r.profile.version !== 'number' || !r.options || !Array.isArray(r.options.heard) || !r.completion || typeof r.completion.percent !== 'number') {
@@ -1044,6 +1043,7 @@ function checkedProfile(r: AccountProfileView | null | undefined): AccountProfil
   return r;
 }
 
+/** YOUR ADDRESSES as the server answers it, or BAD_RESPONSE. */
 function checkedAddresses(r: AccountAddresses | undefined): AccountAddresses {
   if (!r || !Array.isArray(r.addresses) || (r.defaultCountry !== null && typeof r.defaultCountry !== 'string')) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
   return r;

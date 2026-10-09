@@ -625,7 +625,13 @@ export function startHousekeeping(
     const viewsCounted =
       morning &&
       (await job('viewStats', async () => {
-        const r = await aggregateViews(ctx.db, ctx.clock());
+        // The past scans not all recorded yet: nothing is counted; a backfill that failed starts again (§3.3 T.11).
+        const r = await aggregateViews(ctx.db, ctx.clock(), {
+          onBackfillPending: () => {
+            ctx.services.tracking.resumeBackfill();
+            ctx.log.warn({ job: 'viewStats' }, 'views not counted: past scans still being recorded');
+          },
+        });
         viewMonths = r.months;
         return r.days;
       }));
@@ -645,8 +651,8 @@ export function startHousekeeping(
     if (visitsSummarised) await job('acquisitionPurge', () => ctx.services.acquisition.purge(ctx.clock()));
     // A pass where the months failed purges no wish: none leaves before its month is counted.
     if (wishesCounted) await job('wishHistory', () => purgeWishHistory(ctx.db, ctx.clock()));
-    // After both purges: a device a view or a visit still names is kept.
-    if (morning) await job('devicePurge', () => ctx.services.tracking.purgeDevices(ctx.clock()));
+    // After both purges: a device a view or a visit still names is kept. A pass where a count failed purges no device.
+    if (viewsCounted && visitsSummarised) await job('devicePurge', () => ctx.services.tracking.purgeDevices(ctx.clock()));
     await job('liveNetworks', () => eraseLiveNetworkHashes(ctx.db, ctx.clock()));
     await job('careLabels', () => eraseCareLabels(ctx.db, ctx.clock()));
     // Plan NEXT LOT §3.5.6.8: the packing photos, 14 days after delivery (or after a return opened in time is closed).

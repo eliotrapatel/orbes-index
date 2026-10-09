@@ -48,7 +48,8 @@
  *            before `started_at` become devices and SCAN rows, by keyset on (occurred_at, id) from the state's
  *            watermark, BACKFILL_BATCH scans a transaction that also moves the watermark, so a crash resumes after the
  *            last batch with no scan written twice or skipped; a short batch marks it done (`scans_backfilled_at`),
- *            and a later boot does nothing. Their class from `user_agent_family` (kind UNKNOWN until a visit), their
+ *            and a later boot does nothing. A backfill that failed is started again by the next morning pass's
+ *            viewStats (resumeBackfill). Their class from `user_agent_family` (kind UNKNOWN until a visit), their
  *            place the scan's country, their account `scan_events.account_id` as recorded. Left out as the live scans
  *            are: ADMIN_TEST, a `Bot/` family, a test entrant's account, the team's own account (houseAccount) and a
  *            browser marked staff (before the batch is read, or while it is written).
@@ -190,10 +191,23 @@ export function inTestNetwork(ip: string | undefined): boolean {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(c) && TEST_NETWORKS.check(c, 'ipv4');
 }
 
-/** Take the advisory lock VIEWS_DAILY_LOCK for the rest of the transaction `tx`. */
-export async function lockViewsDaily(tx: Db): Promise<void> {
+/**
+ * How long a link waits for VIEWS_DAILY_LOCK: the morning pass may hold it for a few seconds (a month's grouped read on
+ * the day after a month ends), and a sign-in never holds a pool connection behind it. A link that times out is logged
+ * like any failed link; the next signed-in /seen batch's SESSION link catches it up.
+ */
+export const LINK_LOCK_WAIT_MS = 2_000;
+
+/**
+ * Take the advisory lock VIEWS_DAILY_LOCK for the rest of the transaction `tx`. With `waitMs`, wait at most that long
+ * (lock_timeout, for this wait only: reset to the session's default once the lock is held); else wait for it.
+ */
+export async function lockViewsDaily(tx: Db, opts: { waitMs?: number } = {}): Promise<void> {
   if (!tx.isTransaction) throw new Error('lockViewsDaily must be called inside a transaction');
+  const wait = opts.waitMs === undefined ? null : Math.max(1, Math.floor(opts.waitMs));
+  if (wait !== null) await sql.raw(`SET LOCAL lock_timeout = '${wait}ms'`).execute(tx);
   await sql`SELECT pg_advisory_xact_lock(hashtext(${VIEWS_DAILY_LOCK}))`.execute(tx);
+  if (wait !== null) await sql.raw('SET LOCAL lock_timeout TO DEFAULT').execute(tx);
 }
 
 /** The Paris day after `YYYY-MM-DD`. */
@@ -756,7 +770,9 @@ export class TrackingService {
   private stopped = false;
   /** The scans being recorded (after their answer), awaited by idle() and the shutdown. */
   private readonly scans = new Set<Promise<void>>();
+  /** The past scans' backfill (start(), resumeBackfill()), and whether the latest one failed. */
   private backfilling: Promise<unknown> | null = null;
+  private backfillFailed = false;
 
   constructor(deps: TrackingServiceDeps) {
     this.db = deps.db;
@@ -777,11 +793,33 @@ export class TrackingService {
     this.timer = setInterval(() => void this.buffer.flush(), BUFFER_FLUSH_MS);
     this.timer.unref();
     // The past scans, in the background: the boot never waits for them (§3.3 T.11).
-    this.backfilling ??= this.backfillScans()
-      .then((r) => {
+    this.backfilling ??= this.runBackfill();
+  }
+
+  /** backfillScans in the background: what it wrote is logged; a failure is logged and left to resumeBackfill. */
+  private runBackfill(): Promise<void> {
+    this.backfillFailed = false;
+    return this.backfillScans().then(
+      (r) => {
         if (r.scans > 0) this.log.info(r, 'past scans recorded');
-      })
-      .catch((e: unknown) => this.log.error({ err: errText(e) }, 'past scans not recorded; the next boot resumes'));
+      },
+      (e: unknown) => {
+        this.backfillFailed = true;
+        this.log.error({ err: errText(e) }, 'past scans not recorded; the next morning pass resumes');
+      },
+    );
+  }
+
+  /**
+   * The viewStats job, while the past scans are not all recorded (aggregateViews' onBackfillPending): a backfill started
+   * by start() that failed (a timeout, a connection dropped in the deploy's first minutes) starts again in the
+   * background, resumed from its watermark in `tracking_state` (backfillScans is idempotent); one still running is left
+   * to end; none after stop(), nor in a process that never started one. Returns whether a backfill is running now.
+   */
+  resumeBackfill(): boolean {
+    if (this.stopped || this.backfilling === null) return false;
+    if (this.backfillFailed) this.backfilling = this.runBackfill();
+    return !this.backfillFailed;
   }
 
   /** Resolves once the scans being recorded and the flush under way have ended (the shutdown, the tests). */
@@ -1119,8 +1157,9 @@ export class TrackingService {
     this.buffer.claim(device.id, accountId);
     await this.buffer.flush();
     const r = await inTransaction(this.db, async (tx) => {
-      // 2. The daily job's lock, then the device row: a link and a day's count never cross; two links of one device wait.
-      await lockViewsDaily(tx);
+      // 2. The daily job's lock (waited for LINK_LOCK_WAIT_MS at most), then the device row: a link and a day's count
+      // never cross; two links of one device wait.
+      await lockViewsDaily(tx, { waitMs: LINK_LOCK_WAIT_MS });
       const d = await tx.selectFrom('tracking_devices').select(['id', 'account_id', 'linked_at']).where('id', '=', device.id).forUpdate().executeTakeFirstOrThrow();
       if (via === 'SESSION' && d.account_id === accountId) return { attached: 0, since: undefined, linkedAt: d.linked_at, skipped: true };
       // 3. Since its previous link, or its whole 13 months when it was never linked. 4. The anonymous rows, scans included.
@@ -1159,7 +1198,7 @@ export class TrackingService {
 
   /**
    * Job `devicePurge` (§3.3 T.10; the housekeeping runs it after `viewPurge` and `acquisitionPurge`, in the morning
-   * window): the devices never linked (no account, no row in `tracking_device_accounts`), not marked staff (the mark is
+   * window, in a pass whose `viewStats` and `acquisitionDaily` succeeded): the devices never linked (no account, no row in `tracking_device_accounts`), not marked staff (the mark is
    * kept), unseen since the first day the views keep (viewHistoryCutoff), with no row left in `collector_views` and no
    * visit left in `acquisition_touches` (§3.4 A.8: a visit not purged yet keeps its device), the longest unseen first,
    * at most `max` a pass. The buffer is written first, so a device with views or a sight still in memory is kept; a

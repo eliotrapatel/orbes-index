@@ -12,13 +12,15 @@
  *    anonymous rows deleted without a fold; at most its days a pass;
  *  - unlinked old devices purged, linked, staff, recent ones, those with rows and those a visit still names
  *    (`acquisition_touches`, step 4.5) kept;
- *  - housekeeping's order and `result` keys; no purge in a pass where the count failed; the `intelligence sizes` line
- *    once a Paris day.
+ *  - housekeeping's order and `result` keys; no purge in a pass where the count failed (a failed count purges no
+ *    device either); the `intelligence sizes` line once a Paris day;
+ *  - a past-scan backfill that failed once is started again by a later morning pass (logged), and the pass after it
+ *    has ended counts the days.
  * The link's recount cases (the link plus the daily job equal a recount from scratch) are in test/api/tracking-link.test.ts.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { startHousekeeping } from '../../src/server/context.js';
 import { VIEW_PAGE_CODES, type DeviceKind } from '../../src/server/db/schema.js';
 import { aggregateViews, intelligenceSizes, purgeViews } from '../../src/server/services/tracking-jobs.js';
@@ -341,6 +343,8 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
   it('runs in the order of §3.0 (f), returns every key, purges nothing in a pass where the count failed, and logs the sizes once a Paris day', async () => {
     const e = await x.device({ firstSeen: '2025-01-01T08:00:00Z' });
     await x.view(e, '2025-09-01T10:00:00Z');
+    // A device devicePurge would delete (never linked, unseen for 13 months, no row): a failed count purges no device.
+    const old = await x.device({ firstSeen: '2025-06-01T08:00:00Z' });
     await h.t.db.deleteFrom('view_daily_stats').where('day', '>=', '2026-10-01').execute();
     await sql`CREATE FUNCTION view_stats_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'the count failed'; END $$`.execute(h.t.db);
     await sql`CREATE TRIGGER view_stats_fail BEFORE INSERT ON view_daily_stats FOR EACH ROW EXECUTE FUNCTION view_stats_fail()`.execute(h.t.db);
@@ -352,7 +356,8 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
       expect(Object.keys(failed)).toEqual([
         'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'acquisitionConversions', 'viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'scanHistory', 'viewPurge', 'acquisitionPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'sizes',
       ]);
-      expect(failed).toMatchObject({ viewStats: 0, viewPurge: 0 });
+      expect(failed).toMatchObject({ viewStats: 0, viewPurge: 0, devicePurge: 0 });
+      expect(await h.t.db.selectFrom('tracking_devices').select('id').where('id', '=', old).execute()).toHaveLength(1);
       expect(lines.some((l) => l.level === 'error' && (l.o as { job?: string }).job === 'viewStats')).toBe(true);
       // The row of 1 September 2025 is past 13 months and its day counted, yet stays: nothing is purged in this pass.
       expect(await h.t.db.selectFrom('collector_views').select('id').where('device_id', '=', e).execute()).toHaveLength(1);
@@ -366,6 +371,8 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
       const pass = await hk.runOnce();
       expect(pass.viewStats).toBeGreaterThan(0);
       expect(pass.viewPurge).toBe(1);
+      expect(pass.devicePurge).toBeGreaterThanOrEqual(1);
+      expect(await h.t.db.selectFrom('tracking_devices').select('id').where('id', '=', old).execute()).toEqual([]);
       // The sizes are written once a Paris day.
       expect(pass.sizes).toBe(0);
       expect(lines.filter((l) => l.msg === 'intelligence sizes')).toHaveLength(0);
@@ -380,5 +387,45 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
     const sizes = await intelligenceSizes(h.t.db);
     expect(Object.keys(sizes)).toEqual(['collector_views', 'tracking_devices', 'view_daily_stats', 'acquisition_touches', 'acquisition_conversions', 'account_wishes', 'account_profiles', 'account_tastes']);
     expect(Object.values(sizes).every((n) => Number.isInteger(n) && n > 0)).toBe(true);
+  });
+});
+
+describe('viewStats and a past-scan backfill that failed (plan CUSTOMER INTELLIGENCE §3.3 T.10, T.11)', () => {
+  let h: Harness;
+  let lines: Line[];
+  let x: ReturnType<typeof helpers>;
+  beforeAll(async () => {
+    ({ h, lines } = await setUp());
+    x = helpers(h);
+  });
+  afterAll(() => h?.close());
+
+  it('starts the backfill again at a later morning pass, which logs it, and the pass after it has ended counts the days', async () => {
+    await x.state('2026-10-05T07:00:00Z', false);
+    const d = await x.device({ firstSeen: '2026-10-05T07:00:00Z' });
+    await x.view(d, '2026-10-06T10:00:00Z');
+    // The first boot's backfill fails (its write of tracking_state is refused, as a dropped connection would be).
+    await sql`CREATE FUNCTION backfill_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'connection dropped'; END $$`.execute(h.t.db);
+    await sql`CREATE TRIGGER backfill_fail BEFORE UPDATE ON tracking_state FOR EACH ROW EXECUTE FUNCTION backfill_fail()`.execute(h.t.db);
+    const tracking = h.ctx.services.tracking;
+    lines.length = 0;
+    tracking.start();
+    await vi.waitFor(() => expect(lines.some((l) => l.level === 'error' && l.msg === 'past scans not recorded; the next morning pass resumes')).toBe(true));
+    await sql`DROP TRIGGER backfill_fail ON tracking_state`.execute(h.t.db);
+    await sql`DROP FUNCTION backfill_fail()`.execute(h.t.db);
+    const hk = startHousekeeping(h.ctx, { intervalMs: 3_600_000 });
+    try {
+      h.clock.set('2026-10-09T07:30:00.000Z');
+      lines.length = 0;
+      // This pass finds the past scans not all recorded: nothing counted, the backfill started again, one line said.
+      expect((await hk.runOnce()).viewStats).toBe(0);
+      expect(lines.filter((l) => l.level === 'warn' && l.msg === 'views not counted: past scans still being recorded')).toHaveLength(1);
+      await vi.waitFor(async () => expect((await h.t.db.selectFrom('tracking_state').select('scans_backfilled_at').executeTakeFirstOrThrow()).scans_backfilled_at).not.toBeNull());
+      // The next pass counts 5 to 8 October.
+      expect((await hk.runOnce()).viewStats).toBe(4);
+      expect(await viewsCountedThrough(h.t.db)).toBe('2026-10-08');
+    } finally {
+      await hk.stop();
+    }
   });
 });

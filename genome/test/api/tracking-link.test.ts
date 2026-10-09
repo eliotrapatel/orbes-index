@@ -13,23 +13,26 @@
  *    rows still buffered leaves none in the table;
  *  - the acquisition's attach hook runs in the link's transaction, and its failure rolls the link back;
  *  - the 13 months are calendar months in Paris (viewHistoryCutoff);
+ *  - a link waits LINK_LOCK_WAIT_MS at most for the daily job's lock, and only for that lock (lock_timeout back to its
+ *    default once held);
  *  - the recount cases (step 3.7, T.8.4 step 5): `collector_places` gains the days already counted and not the others,
  *    a written month gains the attached rows and a month not written does not; the daily job then counts the rest;
  *    the total equals a recount from scratch; a test entrant's link counts nothing.
  * The sign-up's and sign-in's own tests (account.test.ts, auth.test.ts) are unchanged.
  *
- * Two PostgreSQL halves run in genome-ci with ORBES_TEST_POSTGRES_URL: two links of one device racing on a real pool,
- * and links racing the daily job (the advisory lock), equal to a recount from scratch.
+ * Three PostgreSQL halves run in genome-ci with ORBES_TEST_POSTGRES_URL: two links of one device racing on a real pool,
+ * links racing the daily job (the advisory lock), equal to a recount from scratch, and a link racing a long month write
+ * (the lock held past LINK_LOCK_WAIT_MS) ending within its wait, the recount then equal to one from scratch.
  */
 import { randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
+import { closeDb, createDb, inTransaction, type Db } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
 import { pseudonymize } from '../../src/server/http/client.js';
 import { parisDayStart } from '../../src/server/services/schedule.js';
-import { TrackingService, viewHistoryCutoff, type SeenBatch } from '../../src/server/services/tracking.js';
+import { LINK_LOCK_WAIT_MS, lockViewsDaily, TrackingService, VIEWS_DAILY_LOCK, viewHistoryCutoff, type SeenBatch } from '../../src/server/services/tracking.js';
 import { aggregateViews } from '../../src/server/services/tracking-jobs.js';
 import { PlaceService } from '../../src/server/services/places.js';
 import { PASSWORD, type Client, type Harness, createHarness } from './support.js';
@@ -280,6 +283,17 @@ describe('TrackingService.link (plan CUSTOMER INTELLIGENCE §3.3 T.8.4)', () => 
     expect((await linksOf(c)).map((l) => l.account_id)).toEqual([me.id]);
   });
 
+  it('waits for the daily job’s lock with lock_timeout, then puts lock_timeout back to its default', async () => {
+    const timeouts = await inTransaction(h.t.db, async (tx) => {
+      const before = (await sql<{ lock_timeout: string }>`SHOW lock_timeout`.execute(tx)).rows[0]!.lock_timeout;
+      await lockViewsDaily(tx, { waitMs: LINK_LOCK_WAIT_MS });
+      const after = (await sql<{ lock_timeout: string }>`SHOW lock_timeout`.execute(tx)).rows[0]!.lock_timeout;
+      return { before, after };
+    });
+    expect(timeouts.after).toBe(timeouts.before);
+    expect(LINK_LOCK_WAIT_MS).toBeLessThanOrEqual(2_000);
+  });
+
   it('counts the 13 months in Paris calendar months', () => {
     expect(viewHistoryCutoff(new Date('2026-10-08T10:00:00Z'))).toEqual(parisDayStart('2025-09-08'));
     // 23:30 UTC on 8 October is 9 October in Paris.
@@ -455,4 +469,40 @@ describe.skipIf(!adminUrl)('TrackingService.link on PostgreSQL', () => {
     expect(raced.places.filter((p) => accounts.includes(p.account_id))).toHaveLength(6);
     expect(await recount(db, now)).toEqual(raced);
   });
+
+  it('ends a link racing a long month write within its wait, and the recount then equals one from scratch', async () => {
+    await db.insertInto('tracking_state').values({ id: 1, started_at: new Date('2026-09-01T06:00:00Z'), scans_backfilled_at: new Date('2026-09-01T06:00:00Z') }).onConflict((oc) => oc.doNothing()).execute();
+    const place = (await new PlaceService({ db }).idOf('FR', 'Paris'))!;
+    const account = (await db.insertInto('accounts').values({ email: 'month-race@example.com', email_normalized: 'month-race@example.com', password_hash: 'unused' }).returning('id').executeTakeFirstOrThrow()).id;
+    const hash = 'M'.repeat(43);
+    const d = await db.insertInto('tracking_devices').values({ device_hash: hash, first_seen_at: new Date('2026-09-01T06:00:00Z'), last_seen_at: new Date('2026-09-01T06:00:00Z') }).returning('id').executeTakeFirstOrThrow();
+    await db
+      .insertInto('collector_views')
+      .values(Array.from({ length: 10 }, (_, k) => ({ at: new Date(Date.parse('2026-10-21T10:00:00Z') + k * 86_400_000), device_id: d.id, account_id: null, page: VIEW_PAGE_CODES.NOW, subject: null, seconds: 5, place_id: place })))
+      .execute();
+    // After the days the race above counted (through 19 October): October's last day is in this pass.
+    const now = new Date('2026-11-02T08:00:00Z');
+    // The morning pass's month write, held well past the link's wait (as a month's grouped read may be).
+    let held!: () => void;
+    const holding = new Promise<void>((r) => (held = r));
+    const month = inTransaction(db, async (tx) => {
+      await sql`SELECT pg_advisory_xact_lock(hashtext(${VIEWS_DAILY_LOCK}))`.execute(tx);
+      held();
+      await sql`SELECT pg_sleep(${(LINK_LOCK_WAIT_MS + 2_000) / 1_000})`.execute(tx);
+    });
+    await holding;
+    const started = Date.now();
+    const tracking = new TrackingService({ db, places: new PlaceService({ db }) });
+    await expect(tracking.link(hash, account, 'SIGN_IN', now)).rejects.toThrow(/lock timeout/i);
+    expect(Date.now() - started).toBeLessThan(LINK_LOCK_WAIT_MS + 1_500);
+    // Nothing attached: the link rolled back whole.
+    expect(Number((await db.selectFrom('collector_views').select((eb) => eb.fn.countAll().as('n')).where('account_id', '=', account).executeTakeFirstOrThrow()).n)).toBe(0);
+    await month;
+    // The job counts October with its last day; the next link (the next signed-in batch's SESSION) catches up.
+    await aggregateViews(db, now, { maxDays: 1_000 });
+    expect(await tracking.link(hash, account, 'SESSION', now)).toEqual({ attached: 10 });
+    const linked = await counted(db);
+    expect(linked.months.filter((m) => m.account_id === account)).toEqual([{ account_id: account, month: '2026-10-01', views: 10, seconds: 50, scans: 0, active_days: 10 }]);
+    expect(await recount(db, now)).toEqual(linked);
+  }, 30_000);
 });

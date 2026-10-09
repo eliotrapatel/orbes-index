@@ -30,7 +30,7 @@ import type { SessionStore } from '../session.js';
 import { wishlistCards, type WishlistCard } from '../wishlist-model.js';
 import { LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
-import { modelCard } from './lookbook.js';
+import { modelCard, quietly } from './lookbook.js';
 import { failedState, icon, loadingState, textLink } from './nocturne.js';
 
 type Session = Pick<SessionStore, 'ensure' | 'noteError' | 'subscribe'>;
@@ -216,12 +216,13 @@ class WishlistPage {
   /**
    * REMOVE: one tap (the heart puts it back), busy while it runs; done, the card goes, the status line names the model
    * and the focus goes to the next card's first link, else to the title; refused, the card stays and the line says why.
+   * Each redraw is quiet (the list's live region off while it changes): the status line is the only announcement.
    */
   private async remove(c: WishlistCard): Promise<void> {
     if (this.removing !== null || this.load.kind !== 'ready') return;
     this.removing = c.slug;
     this.say(null);
-    this.render();
+    quietly(this.body, () => this.render());
     try {
       await this.deps.api.unwish(c.slug);
     } catch (e) {
@@ -229,7 +230,7 @@ class WishlistPage {
       if (this.disposed) return;
       this.deps.session.noteError(e);
       this.say(`${WISHLIST.failed} ${messageOf(e)}`, true);
-      this.render();
+      quietly(this.body, () => this.render());
       this.body.querySelector<HTMLElement>(`[data-wish="${CSS.escape(c.slug)}"] .n-wishlist__remove`)?.focus({ preventScroll: true });
       return;
     }
@@ -238,7 +239,7 @@ class WishlistPage {
     const at = this.load.cards.findIndex((x) => x.slug === c.slug);
     this.load = { kind: 'ready', cards: this.load.cards.filter((x) => x.slug !== c.slug) };
     this.say(WISHLIST.removedNamed(c.title));
-    this.render();
+    quietly(this.body, () => this.render());
     const next = this.body.querySelectorAll<HTMLElement>('.n-wishlist__card')[at];
     const target = next?.querySelector<HTMLElement>('.n-wishlist__see, .n-wishlist__remove') ?? this.title;
     target.focus({ preventScroll: next === undefined });

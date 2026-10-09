@@ -196,9 +196,10 @@ function hideWhenBroken(box: HTMLElement): HTMLElement {
 
 /**
  * A dot chosen re-draws a card or the sheet inside its live region: silent while it changes (the pressed dot, which
- * keeps the focus, says what changed), polite again on the next frame for loads, failures and REQUESTED.
+ * keeps the focus, says what changed), polite again on the next frame for loads, failures and REQUESTED. YOUR WISHLIST's
+ * REMOVE redraws its list the same way (its status line says what changed).
  */
-function quietly(region: HTMLElement, change: () => void): void {
+export function quietly(region: HTMLElement, change: () => void): void {
   region.setAttribute('aria-live', 'off');
   change();
   requestAnimationFrame(() => region.setAttribute('aria-live', 'polite'));

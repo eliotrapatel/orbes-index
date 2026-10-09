@@ -580,6 +580,8 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     expect(await p.locator('[data-testid=client-tag-remove]').first().getAttribute('aria-label')).toBe('Remove the tag PRESS');
     await p.locator('[data-testid=client-tag-remove]').first().click();
     await expect.poll(async () => p.locator('[data-testid=client-tag] .status__text').allTextContents(), POLL).toEqual(['FRIEND OF THE HOUSE']);
+    // The focus goes to the × now at the removed tag's place (never to the page).
+    expect(await p.evaluate(() => document.activeElement?.getAttribute('aria-label'))).toBe('Remove the tag FRIEND OF THE HOUSE');
 
     // A note: Add note waits for words; added at the top with when and who.
     expect(await p.locator('[data-testid=client-note-add]').isDisabled()).toBe(true);

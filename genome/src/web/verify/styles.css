@@ -3728,6 +3728,12 @@ body.nocturne[data-screen="live"] {
   border-bottom: 0;
 }
 
+/* Its line turns ivory on focus and when refused, as every other field's does (shared/nocturne.css .n-fld__input). */
+.n-profile__ig:focus-within,
+.n-profile__ig:has(.n-fld__input[aria-invalid="true"]) {
+  border-bottom-color: var(--vault-ink);
+}
+
 .n-profile__tastes-lead {
   margin-top: 4px;
 }

@@ -67,8 +67,12 @@ export function tagsNotesSection(ctx: ViewContext, sheet: OwnerSheet): HTMLEleme
   const removeTag = async (tag: string) => {
     try {
       await ctx.api.removeClientTag(accountId, tag);
+      const at = tags.indexOf(tag);
       tags = tags.filter((t) => t !== tag);
       drawTags();
+      // The × that had the focus is gone: the focus goes to the × now at its place, else the one before, else Add a tag.
+      const xs = tagLine.querySelectorAll<HTMLButtonElement>('.client-tag__remove');
+      (xs[Math.min(Math.max(at, 0), xs.length - 1)] ?? tagInput).focus();
       notify(T.tagRemoved);
     } catch (e) {
       notifyError(e);

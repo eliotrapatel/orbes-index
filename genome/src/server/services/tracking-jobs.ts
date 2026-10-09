@@ -16,7 +16,8 @@
  *               team's own accounts are left out (services/tracking.ts countedViewRow). The first day counted is the
  *               earliest of the oldest row's Paris day and the recording's start; nothing is counted until the past
  *               scans' backfill is done (`tracking_state.scans_backfilled_at`), since it writes rows of days already
- *               past.
+ *               past; meanwhile each pass calls `onBackfillPending` (the housekeeping resumes a backfill that failed,
+ *               TrackingService.resumeBackfill, and logs that the views are not counted yet).
  *   viewMonths  in the same transaction as the count of a month's last Paris day (on Paris day 1, the month just
  *               ended): every collector with rows that month gets its row in `collector_view_months` (views, seconds,
  *               scans, active Paris days), INSERT … ON CONFLICT DO NOTHING. So a month is written exactly when its last
@@ -179,7 +180,7 @@ async function countDay(db: Db, day: string): Promise<{ month: boolean } | null>
  * before `now`'s, at most `maxDays` a pass, and writes each month whose last day it counts. Returns how many days and
  * months (0 and 0 almost every pass).
  */
-export async function aggregateViews(db: Db, now: Date, opts: { maxDays?: number } = {}): Promise<{ days: number; months: number }> {
+export async function aggregateViews(db: Db, now: Date, opts: { maxDays?: number; onBackfillPending?: () => void } = {}): Promise<{ days: number; months: number }> {
   const maxDays = Math.max(1, Math.floor(opts.maxDays ?? VIEW_STATS_MAX_DAYS));
   const yesterday = previousParisDay(parisDay(now));
   const counted = await viewsCountedThrough(db);
@@ -189,7 +190,10 @@ export async function aggregateViews(db: Db, now: Date, opts: { maxDays?: number
   } else {
     const state = await db.selectFrom('tracking_state').select(['started_at', 'scans_backfilled_at']).where('id', '=', 1).executeTakeFirst();
     // The past scans are written as rows of days already past: count nothing before they are all there.
-    if (!state?.scans_backfilled_at) return { days: 0, months: 0 };
+    if (!state?.scans_backfilled_at) {
+      opts.onBackfillPending?.();
+      return { days: 0, months: 0 };
+    }
     const oldest = await oldestRowAt(db);
     const startDay = parisDay(state.started_at);
     day = oldest && parisDay(oldest) < startDay ? parisDay(oldest) : startDay;
