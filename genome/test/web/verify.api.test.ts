@@ -492,13 +492,30 @@ describe('ApiClient', () => {
     expect(f.calls[0].url).toBe('/api/v1/products/a%2F..%2Fb%3Fc/service-history');
   });
 
-  it('omits an empty claim code and display name', async () => {
-    const f = fakeFetch([() => json(201, SESSION('t')), () => json(201, { productId: 'p', verified: false, since: 's' })]);
+  it('omits an empty claim code, and an answer to « How did you hear about ORBES? » not given (plan CUSTOMER INTELLIGENCE §3.1 P.7)', async () => {
+    const f = fakeFetch([() => json(201, SESSION('t')), () => json(201, { productId: 'p', verified: false, since: 's' }), () => json(201, SESSION('u')), () => json(201, SESSION('v'))]);
     const api = new ApiClient({ fetch: f.impl });
-    await api.register('a@example.com', 'correct horse battery', '   ');
+    const who = { email: 'a@example.com', password: 'correct horse battery', firstName: 'Camille', lastName: 'Laurent', country: 'FR' };
+    await api.register(who);
     await api.registerProduct('tok', '');
-    expect(f.calls[0].body).toEqual({ email: 'a@example.com', password: 'correct horse battery' });
+    await api.register({ ...who, heard: { optionId: 'h1' } });
+    await api.register({ ...who, heard: { optionId: 'h8', other: 'A dinner in Lyon' } });
+    // The names and the country always; no displayName any more (CREATE ACCOUNT's single name field is gone).
+    expect(f.calls[0].body).toEqual(who);
     expect(f.calls[1].body).toEqual({ registrationToken: 'tok' });
+    expect(f.calls[2].body).toEqual({ ...who, heard: { optionId: 'h1' } });
+    expect(f.calls[3].body).toEqual({ ...who, heard: { optionId: 'h8', other: 'A dinner in Lyon' } });
+    expect(f.calls.map((c) => `${c.method} ${c.url}`)).toEqual(['POST /api/v1/account/register', 'POST /api/v1/ownership/register', 'POST /api/v1/account/register', 'POST /api/v1/account/register']);
+  });
+
+  it('reads what CREATE ACCOUNT offers (GET /api/v1/account/sign-up), and refuses an answer of another shape', async () => {
+    const heard = [{ id: 'h1', label: 'Instagram', other: false }, { id: 'h8', label: 'Other', other: true }];
+    const f = fakeFetch([() => json(200, { country: 'FR', heard }), () => json(200, { country: null, heard: [] }), () => json(200, { country: 'FR' })]);
+    const api = new ApiClient({ fetch: f.impl });
+    expect(await api.signUpOptions()).toEqual({ country: 'FR', heard });
+    expect(await api.signUpOptions()).toEqual({ country: null, heard: [] });
+    await expect(api.signUpOptions()).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    expect(f.calls.map((c) => `${c.method} ${c.url}`)).toEqual(Array(3).fill('GET /api/v1/account/sign-up'));
   });
 
   it('probes the session without a 401 when signed out (200 { account: null })', async () => {

@@ -703,6 +703,24 @@ describe('verify app: one button to ORBES Client Services, the email under FORGO
     expect(said(verifyCopy.ORDERS.returns).join('\n')).toMatch(/\bpiece\b/);
   });
 
+  it('writes CREATE ACCOUNT\'s new words calmly (SIGN_UP; plan CUSTOMER INTELLIGENCE §3.1 P.7): English, no exclamation mark, no word of §4.5, no atelier, handmade or craft', () => {
+    const words = Object.values(verifyCopy.SIGN_UP).join('\n');
+    expect(words.length).toBeGreaterThan(150);
+    expect(words).not.toContain('!');
+    expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+    expect(words).not.toMatch(/product|atelier|handmade|craft/i);
+    expect(verifyCopy.SIGN_UP).toMatchObject({
+      firstName: 'FIRST NAME',
+      lastName: 'LAST NAME',
+      country: 'COUNTRY',
+      countryHint: 'Where you live. You may change it in YOUR PROFILE.',
+      chooseCountry: 'Choose your country',
+      heard: 'HOW DID YOU HEAR ABOUT ORBES? (OPTIONAL)',
+      choose: 'Choose',
+      other: 'IN A FEW WORDS (OPTIONAL)',
+    });
+  });
+
   it('writes THE HOUSE’S GUARANTEE calmly (plan NEXT-NINE, IN-01): no exclamation mark, no word of §4.5, a place and never authenticity', () => {
     const said = (v: unknown): string[] =>
       typeof v === 'string' ? [v] : typeof v === 'function' ? [String((v as (...a: unknown[]) => unknown)('MONOLITHE', 2))] : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];

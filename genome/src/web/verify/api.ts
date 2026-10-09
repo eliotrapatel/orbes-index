@@ -73,7 +73,10 @@ import type {
   SalonOpening,
   ServiceRecord,
   SessionInfo,
+  HeardOption,
   ShopRequest,
+  SignUpInput,
+  SignUpOptions,
   TransferOffer,
   VerifyInput,
   VerifyOutcome,
@@ -586,12 +589,23 @@ export class ApiClient {
     return s;
   }
 
-  async register(email: string, password: string, displayName?: string): Promise<SessionInfo> {
-    const body: Record<string, string> = { email, password };
-    if (displayName && displayName.trim()) body.displayName = displayName.trim();
+  /**
+   * CREATE ACCOUNT (plan CUSTOMER INTELLIGENCE §3.1 P.7): the names and the country, and the answer to « How did you
+   * hear about ORBES? » when one is chosen (Other's words only with Other); the session it opens.
+   */
+  async register(input: SignUpInput): Promise<SessionInfo> {
+    const body: Record<string, unknown> = { email: input.email, password: input.password, firstName: input.firstName, lastName: input.lastName, country: input.country };
+    if (input.heard) body.heard = input.heard.other ? { optionId: input.heard.optionId, other: input.heard.other } : { optionId: input.heard.optionId };
     const s = await this.request<SessionInfo>('POST', '/api/v1/account/register', body);
     this.remember(s);
     return s;
+  }
+
+  /** What CREATE ACCOUNT offers (GET /api/v1/account/sign-up): the connection's country to preselect, the answers. */
+  async signUpOptions(): Promise<SignUpOptions> {
+    const r = await this.request<Partial<SignUpOptions>>('GET', '/api/v1/account/sign-up');
+    if (!r || !Array.isArray(r.heard) || (r.country !== null && typeof r.country !== 'string')) throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
+    return { country: r.country ?? null, heard: r.heard.filter((o): o is HeardOption => !!o && typeof o.id === 'string' && typeof o.label === 'string' && typeof o.other === 'boolean') };
   }
 
   /**

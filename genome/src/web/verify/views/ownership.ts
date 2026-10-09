@@ -47,12 +47,13 @@
 import { h, prefersReducedMotion } from '../../shared/dom.js';
 import { ApiError, type ApiClient } from '../api.js';
 import type { SessionStore, SessionState } from '../session.js';
-import type { OwnershipConfirmation, TransferOffer } from '../types.js';
+import { countryOptions } from '../addresses-model.js';
+import type { OwnershipConfirmation, SignUpOptions, TransferOffer } from '../types.js';
 import { formatDate, formatDateTime, formatDateTimeLong, normalizeCodeInput, registrationOpen, registrationStatus, type ContactModel, type OwnershipMode } from '../view-model.js';
-import { ACCOUNT_PASSWORD, CLAIM_HELD, CONTACT, NOT_DELIVERED_NOTE, PIECES, RECEIVING, STAFF_SCAN_NOTE, YEARLY_CARE } from '../copy.js';
+import { ACCOUNT_PASSWORD, CLAIM_HELD, CONTACT, NOT_DELIVERED_NOTE, PIECES, RECEIVING, SIGN_UP, STAFF_SCAN_NOTE, YEARLY_CARE } from '../copy.js';
 import { contactBlock, PIECES_PATH, piecesLink, sectionLabel, termsNote, withNumerals } from './common.js';
-import { accountForm, field as vaultField, FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
-import { appAnchor, button, contactLines, field, textLink } from './nocturne.js';
+import { accountForm, field as vaultField, FormError, messageOf, MIN_PASSWORD, nocturneForm, selectField as vaultSelectField, signUpProblem } from './forms.js';
+import { appAnchor, button, contactLines, field, selectField, textLink } from './nocturne.js';
 
 export { MIN_PASSWORD } from './forms.js';
 
@@ -121,6 +122,16 @@ export class OwnershipPanel {
   private windowAccount: string | null = null;
   /** The vault's look (deps.look): the panel's sign-in as lot E built it. */
   private readonly vault: boolean;
+  /**
+   * What CREATE ACCOUNT offers (plan CUSTOMER INTELLIGENCE §3.1 P.4.1): the connection's country to preselect and the
+   * answers to « How did you hear about ORBES? », read once by the panel when the form first shows (`signUpRead`). The
+   * form never waits on it: read, its selects are filled in place, what was typed staying; unreadable, the form works
+   * without a preselection and without the optional question.
+   */
+  private signUp: SignUpOptions | null = null;
+  private signUpRead: 'idle' | 'reading' | 'done' | 'failed' = 'idle';
+  /** The selects of the CREATE ACCOUNT drawn now, filled in place when the options arrive. */
+  private signUpForm: { country: HTMLSelectElement; heard: HTMLSelectElement; heardGroup: HTMLElement; otherGroup: HTMLElement; other: HTMLInputElement; countryChosen: boolean } | null = null;
 
   constructor(
     mode: OwnershipMode,
@@ -600,29 +611,123 @@ export class OwnershipPanel {
     );
   }
 
+  /**
+   * CREATE ACCOUNT (plan CUSTOMER INTELLIGENCE §3.1 P.4.1, P.7): FIRST NAME, LAST NAME, EMAIL, PASSWORD, COUNTRY
+   * (preselected from where the person connects, when the server knows it), then HOW DID YOU HEAR ABOUT ORBES?
+   * (OPTIONAL), with IN A FEW WORDS (OPTIONAL) under Other only. Checked before sending in that order (signUpProblem).
+   */
   private createForm(): HTMLFormElement {
-    const name = h('input', { attrs: { type: 'text', name: 'name', autocomplete: 'name', maxlength: 80 } });
+    const first = h('input', { attrs: { type: 'text', name: 'given-name', autocomplete: 'given-name', autocapitalize: 'words', required: true, maxlength: 50 } });
+    const last = h('input', { attrs: { type: 'text', name: 'family-name', autocomplete: 'family-name', autocapitalize: 'words', required: true, maxlength: 50 } });
     const email = h('input', { attrs: { type: 'email', name: 'email', autocomplete: 'email', inputmode: 'email', required: true, maxlength: 254, spellcheck: 'false', autocapitalize: 'none' } });
     const password = h('input', { attrs: { type: 'password', name: 'new-password', autocomplete: 'new-password', required: true, minlength: MIN_PASSWORD, maxlength: 1024 } });
+    const country = this.select('auth-country', SIGN_UP.country, countryOptions(SIGN_UP.chooseCountry), '', SIGN_UP.countryHint);
+    country.select.required = true;
+    const heard = this.select('auth-heard', SIGN_UP.heard, [{ value: '', label: SIGN_UP.choose }], '');
+    const other = h('input', { attrs: { type: 'text', name: 'heard-other', autocomplete: 'off', maxlength: 100 } });
+    const otherGroup = this.field('auth-heard-other', SIGN_UP.other, other);
+    otherGroup.hidden = true;
+    const form = { country: country.select, heard: heard.select, heardGroup: heard.el, otherGroup, other, countryChosen: false };
+    this.signUpForm = form;
+    country.select.addEventListener('change', () => {
+      form.countryChosen = true;
+    });
+    // IN A FEW WORDS shows under Other only; another answer drops its words.
+    heard.select.addEventListener('change', () => this.showOther());
+    this.fillSignUp();
+    if (this.signUpRead === 'idle') void this.readSignUp();
+    const by = { firstName: first, lastName: last, email, password, country: country.select } as const;
     return this.form(
       'create',
       [
-        this.field('auth-name', 'NAME (OPTIONAL)', name),
+        this.field('auth-first-name', SIGN_UP.firstName, first),
+        this.field('auth-last-name', SIGN_UP.lastName, last),
         this.field('auth-email', 'EMAIL', email),
         this.field('auth-password', 'PASSWORD', password, `At least ${MIN_PASSWORD} characters.`),
+        country.el,
+        heard.el,
+        otherGroup,
       ],
       'CREATE ACCOUNT',
       async () => {
-        if (!email.value.trim()) throw new FormError('Enter your email address.');
-        if (password.value.length < MIN_PASSWORD) {
-          password.setAttribute('aria-invalid', 'true');
-          throw new FormError(`Choose a password of at least ${MIN_PASSWORD} characters.`);
+        const problem = signUpProblem({ firstName: first.value, lastName: last.value, email: email.value, password: password.value, country: country.select.value });
+        if (problem) {
+          by[problem.field].setAttribute('aria-invalid', 'true');
+          throw new FormError(problem.message);
         }
-        const s = await this.deps.api.register(email.value.trim(), password.value, name.value);
+        const answer = this.heardAnswer();
+        const s = await this.deps.api.register({
+          email: email.value.trim(),
+          password: password.value,
+          firstName: first.value.trim(),
+          lastName: last.value.trim(),
+          country: country.select.value,
+          ...(answer ? { heard: answer } : {}),
+        });
         password.value = '';
         this.deps.session.signedIn(s);
       },
     );
+  }
+
+  /** The answer chosen to « How did you hear about ORBES? », with Other's words when Other is chosen; none when none is. */
+  private heardAnswer(): { optionId: string; other?: string } | undefined {
+    const f = this.signUpForm;
+    if (!f || f.heardGroup.hidden || !f.heard.value) return undefined;
+    const option = this.signUp?.heard.find((o) => o.id === f.heard.value);
+    if (!option) return undefined;
+    const words = option.other ? f.other.value.trim() : '';
+    return words ? { optionId: option.id, other: words } : { optionId: option.id };
+  }
+
+  /** IN A FEW WORDS (OPTIONAL) shown under Other only; hidden, its words are dropped. */
+  private showOther(): void {
+    const f = this.signUpForm;
+    if (!f) return;
+    const isOther = !!this.signUp?.heard.find((o) => o.id === f.heard.value)?.other;
+    f.otherGroup.hidden = !isOther;
+    if (!isOther) f.other.value = '';
+  }
+
+  /** CREATE ACCOUNT's options, read once; the form drawn now has its selects filled in place when they arrive. */
+  private async readSignUp(): Promise<void> {
+    this.signUpRead = 'reading';
+    try {
+      this.signUp = await this.deps.api.signUpOptions();
+      this.signUpRead = 'done';
+    } catch {
+      // The question is optional, and a sign-up never waits on it: the form works without it, and without a preselection.
+      this.signUpRead = 'failed';
+    }
+    this.fillSignUp();
+  }
+
+  /**
+   * The form's selects as the options allow: COUNTRY on the connection's country unless the person chose one, the
+   * answers in the console's order (Other last); the question hidden when the options could not be read.
+   */
+  private fillSignUp(): void {
+    // The form last drawn (a form no longer shown is filled harmlessly: the next one is drawn from the options).
+    const f = this.signUpForm;
+    if (!f) return;
+    if (this.signUpRead === 'failed' || (this.signUpRead === 'done' && (this.signUp?.heard.length ?? 0) === 0)) {
+      f.heardGroup.hidden = true;
+      f.otherGroup.hidden = true;
+      return;
+    }
+    const o = this.signUp;
+    if (!o) return;
+    if (!f.countryChosen && !f.country.value && o.country && Array.from(f.country.options).some((x) => x.value === o.country)) f.country.value = o.country;
+    if (f.heard.options.length !== o.heard.length + 1) {
+      const chosen = f.heard.value;
+      f.heard.replaceChildren(h('option', { attrs: { value: '' }, text: SIGN_UP.choose }), ...o.heard.map((a) => h('option', { attrs: { value: a.id }, text: a.label })));
+      f.heard.value = o.heard.some((a) => a.id === chosen) ? chosen : '';
+    }
+    this.showOther();
+  }
+
+  private select(id: string, label: string, options: readonly { value: string; label: string }[], value: string, hint?: string): { el: HTMLElement; select: HTMLSelectElement } {
+    return this.vault ? vaultSelectField(id, label, options, value, hint) : selectField(id, label, options, value, hint);
   }
 
   private codeInput(name: string): HTMLInputElement {

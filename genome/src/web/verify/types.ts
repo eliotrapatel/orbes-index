@@ -1260,3 +1260,29 @@ export interface AccountThread {
 /** YOUR SIZES (AC-01; GET and PUT /api/v1/account/sizes): a ring size, and centimetres for the others; null: not set. */
 export type SizeKind = 'RING' | 'BRACELET' | 'WRIST' | 'NECKLACE';
 export type AccountSizes = Record<SizeKind, number | null>;
+
+/** An answer to « How did you hear about ORBES? », as CREATE ACCOUNT and YOUR PROFILE offer it (Other last, with its words). */
+export interface HeardOption {
+  id: string;
+  label: string;
+  other: boolean;
+}
+
+/**
+ * GET /api/v1/account/sign-up (API §10.24, plan CUSTOMER INTELLIGENCE §3.1 P.4.2): the connection's country, only to
+ * preselect COUNTRY (null when unknown), and the answers offered to « How did you hear about ORBES? ».
+ */
+export interface SignUpOptions {
+  country: string | null;
+  heard: HeardOption[];
+}
+
+/** CREATE ACCOUNT's request (POST /api/v1/account/register): the names and the country required, the answer optional. */
+export interface SignUpInput {
+  email: string;
+  password: string;
+  firstName: string;
+  lastName: string;
+  country: string;
+  heard?: { optionId: string; other?: string };
+}

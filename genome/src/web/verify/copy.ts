@@ -1940,3 +1940,22 @@ export const STORY = Object.freeze({
   /** The file, shared or saved. */
   filename: 'ORBES-STORY.png',
 });
+
+/**
+ * CREATE ACCOUNT's new words (plan CUSTOMER INTELLIGENCE §3.1 P.4.1, P.7): FIRST NAME and LAST NAME in place of
+ * NAME (OPTIONAL), COUNTRY (preselected from where the person connects), then the one optional question, HOW DID YOU
+ * HEAR ABOUT ORBES?, with IN A FEW WORDS under Other. EMAIL, PASSWORD and CREATE ACCOUNT keep their words where they are.
+ */
+export const SIGN_UP = Object.freeze({
+  firstName: 'FIRST NAME',
+  lastName: 'LAST NAME',
+  country: 'COUNTRY',
+  countryHint: 'Where you live. You may change it in YOUR PROFILE.',
+  chooseCountry: 'Choose your country',
+  heard: 'HOW DID YOU HEAR ABOUT ORBES? (OPTIONAL)',
+  choose: 'Choose',
+  other: 'IN A FEW WORDS (OPTIONAL)',
+  noFirstName: 'Enter your first name.',
+  noLastName: 'Enter your last name.',
+  noCountry: 'Choose your country.',
+});

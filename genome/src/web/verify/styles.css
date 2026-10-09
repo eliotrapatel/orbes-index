@@ -3503,3 +3503,31 @@ body.nocturne[data-screen="live"] {
   color: var(--vault-soft);
   text-align: center;
 }
+
+/* CREATE ACCOUNT (plan CUSTOMER INTELLIGENCE §3.1 P.4.1): HOW DID YOU HEAR ABOUT ORBES? hidden when its answers cannot be
+   read, IN A FEW WORDS shown under Other only, in both looks. */
+.form--create [hidden] {
+  display: none;
+}
+
+/* The vault's select (forms.ts selectField): its field's line, room kept at its right for a chevron of its own. */
+.field__select {
+  position: relative;
+}
+
+.field__select-input {
+  padding-right: 24px;
+}
+
+.field__select::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-75%) rotate(45deg);
+  pointer-events: none;
+}

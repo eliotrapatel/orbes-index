@@ -36,10 +36,13 @@ export function savedChoice(a: SavedAddress): string {
   return [a.name.trim(), first, countryName(a.country)].filter(Boolean).join(' · ');
 }
 
-/** COUNTRY's options: 'Choose a country' first, then every country by its English name, in that name's order. */
-export function countryOptions(): { value: string; label: string }[] {
+/**
+ * COUNTRY's options: 'Choose a country' first (or `first`: CREATE ACCOUNT's 'Choose your country'), then every country
+ * by its English name, in that name's order.
+ */
+export function countryOptions(first: string = ORDERS.addressFields.chooseCountry): { value: string; label: string }[] {
   const named = COUNTRY_CODES.map((code) => ({ value: code, label: countryName(code) })).sort((a, b) => a.label.localeCompare(b.label, 'en'));
-  return [{ value: '', label: ORDERS.addressFields.chooseCountry }, ...named];
+  return [{ value: '', label: first }, ...named];
 }
 
 /** The country COUNTRY opens on: the address's own, else the account's registration country, else none (''). */

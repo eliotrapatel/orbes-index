@@ -8,9 +8,10 @@
  * Server messages are shown as they come: they are written for customers and
  * never carry internal detail. Typed secrets stay in the fields only.
  */
+import { isCountryCode } from '../../../shared/countries.js';
 import { h } from '../../shared/dom.js';
 import { ApiError } from '../api.js';
-import { REQUEST_ERRORS } from '../copy.js';
+import { REQUEST_ERRORS, SIGN_UP } from '../copy.js';
 import type { SessionStore } from '../session.js';
 
 /** Minimum password length (PLATFORM-CONTRACTS §2.9). */
@@ -41,6 +42,45 @@ export function field(id: string, label: string, input: HTMLInputElement, hint?:
   const hintEl = hint ? h('span', { class: 'field__hint', id: `${id}-hint`, text: hint }) : null;
   if (hintEl) input.setAttribute('aria-describedby', hintEl.id);
   return h('div', { class: 'field' }, h('label', { class: 'field__label', attrs: { for: id }, text: label }), input, hintEl);
+}
+
+/**
+ * A select in the vault's field style (CREATE ACCOUNT on a LIVE RELEASE's pages, plan CUSTOMER INTELLIGENCE §3.1 P.4.1):
+ * its label, the native select with the line beneath and a chevron of its own at its right, and the hint it is
+ * described by. Its own classes: nothing of NOCTURNE's select reaches the vault's look.
+ */
+export function selectField(id: string, label: string, options: readonly { value: string; label: string }[], value: string, hint?: string): { el: HTMLElement; select: HTMLSelectElement } {
+  const select = h('select', { class: 'field__input field__select-input', id, attrs: { name: id } }, ...options.map((o) => h('option', { attrs: { value: o.value }, text: o.label })));
+  select.value = value;
+  const hintEl = hint ? h('span', { class: 'field__hint', id: `${id}-hint`, text: hint }) : null;
+  if (hintEl) select.setAttribute('aria-describedby', hintEl.id);
+  return {
+    el: h('div', { class: 'field' }, h('label', { class: 'field__label', attrs: { for: id }, text: label }), h('div', { class: 'field__select' }, select), hintEl),
+    select,
+  };
+}
+
+/** What CREATE ACCOUNT holds when it is sent (plan CUSTOMER INTELLIGENCE §3.1 P.7). */
+export interface SignUpValues {
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  country: string;
+}
+
+/**
+ * CREATE ACCOUNT's checks before it is sent, in the form's order (§3.1 P.7): the first name, the last name, the email,
+ * the password's length, then the country; the first that fails, with the field it names, else null. The server checks
+ * the same and says the rest (a name too long, an email taken).
+ */
+export function signUpProblem(v: SignUpValues): { message: string; field: keyof SignUpValues } | null {
+  if (!v.firstName.trim()) return { message: SIGN_UP.noFirstName, field: 'firstName' };
+  if (!v.lastName.trim()) return { message: SIGN_UP.noLastName, field: 'lastName' };
+  if (!v.email.trim()) return { message: 'Enter your email address.', field: 'email' };
+  if (v.password.length < MIN_PASSWORD) return { message: `Choose a password of at least ${MIN_PASSWORD} characters.`, field: 'password' };
+  if (!isCountryCode(v.country)) return { message: SIGN_UP.noCountry, field: 'country' };
+  return null;
 }
 
 /**

@@ -53,6 +53,9 @@ const NARROW_TOO = [
   'orders-delivery',
   'orders-case',
   'account-addresses',
+  // CREATE ACCOUNT's names, COUNTRY and the optional question with IN A FEW WORDS (plan CUSTOMER INTELLIGENCE §3.1 P.4.1),
+  // at 375, 360 and 320 px too.
+  'sign-up',
 ];
 /** Of NARROW_TOO, opened at the stage's 390 px only: the LIVE room with the guarantee's line. */
 const STAGE_ONLY = ['room-guaranteed'];

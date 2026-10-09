@@ -645,6 +645,30 @@ describe.skipIf(!HAS_CHROMIUM)('a LIVE RELEASE in /verify, the vault (Chromium, 
       else expect(await page.getByRole('link', { name: 'THE RELEASES', exact: true }).count(), c.name).toBe(1);
       if (c.name === 'past') await textOf(page.locator('.live__past-status'), RELEASES.over);
       await page.screenshot({ path: join(OUT_DIR, `verify-live-edge-${c.name}.png`), fullPage: true });
+      if (c.name === 'signed-out') {
+        // CREATE ACCOUNT in the vault's look (plan CUSTOMER INTELLIGENCE §3.1 P.4.1): the names, COUNTRY and the optional
+        // question in the vault's own fields and selects, nothing of NOCTURNE's; IN A FEW WORDS under Other only.
+        await page.locator('.live__edge').getByRole('button', { name: 'CREATE ACCOUNT', exact: true }).first().click();
+        const create = page.locator('.live__edge form.form--create');
+        await expect.poll(async () => (await create.locator('.field__label:visible').allInnerTexts()).map((t) => t.trim()), POLL).toEqual([
+          'FIRST NAME',
+          'LAST NAME',
+          'EMAIL',
+          'PASSWORD',
+          'COUNTRY',
+          'HOW DID YOU HEAR ABOUT ORBES? (OPTIONAL)',
+        ]);
+        expect(await create.locator('select.field__select-input').count()).toBe(2);
+        expect(await create.locator('.n-fld, .n-fld__select-input').count()).toBe(0);
+        await expect.poll(() => create.locator('#auth-heard option').allInnerTexts(), POLL).toEqual(['Choose', 'Instagram', 'TikTok', 'A friend', 'The press', 'A shop', 'A web search', 'An influencer', 'Other']);
+        expect(await create.getByLabel('IN A FEW WORDS (OPTIONAL)').isVisible()).toBe(false);
+        await create.locator('#auth-heard').selectOption({ label: 'Other' });
+        await visible(create.getByLabel('IN A FEW WORDS (OPTIONAL)'));
+        await create.locator('#auth-heard').selectOption({ label: 'A friend' });
+        expect(await create.getByLabel('IN A FEW WORDS (OPTIONAL)').isVisible()).toBe(false);
+        await keepsVault(page, null, ['SIGN IN', 'CREATE ACCOUNT']);
+        await page.screenshot({ path: join(OUT_DIR, 'verify-live-edge-create-account.png'), fullPage: true });
+      }
       expect(problems, c.name).toEqual([]);
       await context.close();
     }

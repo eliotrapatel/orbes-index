@@ -101,7 +101,8 @@ const ORDER_STAGES: readonly string[] = ['claim-waiting', 'orders-delivery', 'or
  */
 export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> = Object.freeze({
   scan: (s) => full(s) && !s.mutates && named('now', 'scan', 'photo', 'problem')(s),
-  results: (s) => full(s) && !s.mutates && named('result')(s),
+  // The results, and CREATE ACCOUNT on its own (plan CUSTOMER INTELLIGENCE §3.1 P.4.1: sign-up), beside the result's.
+  results: (s) => full(s) && !s.mutates && named('result', 'sign-up')(s),
   // MY PIECES, and the account sheet (C2: its own, over NOW, in the full, draw-leads and stress demos); YOUR NEW CLAIM
   // CODE waiting on an order (plan NEXT LOT §3.4), and the collector's side of the orders (§3.6: orders-delivery,
   // orders-case; YOUR ADDRESSES, an account state), each on its own stage.

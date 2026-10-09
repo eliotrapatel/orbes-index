@@ -102,6 +102,13 @@ async function attrOf(loc: Locator, name: string, expected: string | RegExp): Pr
 async function countOf(loc: Locator, n: number): Promise<void> {
   await expect.poll(() => loc.count(), POLL).toBe(n);
 }
+/** CREATE ACCOUNT's names and country (plan CUSTOMER INTELLIGENCE §3.1 P.4.1), required since its step 1.8. */
+async function namesAndCountry(scope: Page | Locator, first = 'Camille', last = 'Laurent', country = 'FR'): Promise<void> {
+  await scope.getByLabel('FIRST NAME', { exact: true }).fill(first);
+  await scope.getByLabel('LAST NAME', { exact: true }).fill(last);
+  await scope.getByLabel('COUNTRY', { exact: true }).selectOption(country);
+}
+
 async function valueOf(loc: Locator, expected: string): Promise<void> {
   await expect.poll(() => loc.inputValue(), POLL).toBe(expected);
 }
@@ -662,13 +669,26 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await page.setViewportSize(MOBILE_VIEWPORT);
     // An ordinary address, longer than the line has room for beside SIGN OUT on a small phone.
     const email = 'marie-claire.dupont@example.com';
+    // CREATE ACCOUNT asks the names and the country (plan CUSTOMER INTELLIGENCE §3.1 P.4.1), checked in the form's
+    // order: the names, the email, the password, then the country; NAME (OPTIONAL) is gone.
+    await countOf(page.getByLabel('NAME (OPTIONAL)'), 0);
+    await textsOf(page.locator('form.form--create .n-lab:visible'), ['FIRST NAME', 'LAST NAME', 'EMAIL', 'PASSWORD', 'COUNTRY', 'HOW DID YOU HEAR ABOUT ORBES? (OPTIONAL)']);
     await page.getByLabel('EMAIL').fill(email);
     await page.getByLabel('PASSWORD').fill('too short');
+    await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
+    await textOf(page.getByRole('alert'), 'Enter your first name.');
+    await page.getByLabel('FIRST NAME', { exact: true }).fill('Marie-Claire');
+    await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
+    await textOf(page.getByRole('alert'), 'Enter your last name.');
+    await page.getByLabel('LAST NAME', { exact: true }).fill('Dupont');
     await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
     await textOf(page.getByRole('alert'), /at least 12 characters/);
     // The typed email survives a failed attempt.
     await valueOf(page.getByLabel('EMAIL'), email);
     await page.getByLabel('PASSWORD').fill(PASSWORD);
+    await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
+    await textOf(page.getByRole('alert'), 'Choose your country.');
+    await page.getByLabel('COUNTRY', { exact: true }).selectOption('FR');
     await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
 
     // Signed in (session cookie + CSRF token): the claim form appears.
@@ -751,6 +771,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // The scan itself is no ceremony.
     await countOf(page.locator('.n-ceremony'), 0);
     await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await namesAndCountry(page);
     await page.getByLabel('EMAIL').fill('ceremony.p-d01@example.com');
     await page.getByLabel('PASSWORD').fill(PASSWORD);
     await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
@@ -809,6 +830,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     // The scan itself offers no story card.
     await countOf(page.getByRole('button', { name: STORY.button }), 0);
     await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await namesAndCountry(page);
     await page.getByLabel('EMAIL').fill('story.bp-10@example.com');
     await page.getByLabel('PASSWORD').fill(PASSWORD);
     await page.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
@@ -948,6 +970,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
 
     // Signed in after the scan: this scan carries no transfer window, so the panel asks to verify the piece again.
     await page.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
+    await namesAndCountry(panel);
     await panel.getByLabel('EMAIL').fill('buyer.f03@example.com');
     await panel.getByLabel('PASSWORD').fill(PASSWORD);
     await panel.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();
@@ -1985,6 +2008,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await countOf(page.getByLabel('CLAIM CODE'), 0);
     await card.getByRole('button', { name: 'CREATE ACCOUNT' }).first().click();
     await countOf(page.getByLabel('CLAIM CODE'), 0);
+    await namesAndCountry(card);
     await page.getByLabel('EMAIL').fill('card-holder@example.com');
     await page.getByLabel('PASSWORD').fill(PASSWORD);
     await card.locator('form').getByRole('button', { name: 'CREATE ACCOUNT' }).click();

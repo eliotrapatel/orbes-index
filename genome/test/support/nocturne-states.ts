@@ -694,6 +694,23 @@ export const UI_STATES: readonly UiState[] = [
     },
     ready: '.view--pieces .form__error',
   },
+  // Plan CUSTOMER INTELLIGENCE §3.1 P.4.1: CREATE ACCOUNT asks the names and the country, then the one optional
+  // question, its answers read from the server (the console's list); Other chosen, IN A FEW WORDS shows under it.
+  {
+    id: 'sign-up',
+    title: 'CREATE ACCOUNT, signed out in MY PIECES: FIRST NAME, LAST NAME, EMAIL, PASSWORD, COUNTRY, HOW DID YOU HEAR ABOUT ORBES? (Other: IN A FEW WORDS)',
+    refs: ['CUSTOMER INTELLIGENCE §3.1 P.4.1'],
+    variant: 'full',
+    path: at('/verify/pieces'),
+    act: async (run) => {
+      await run.page.locator('.view--pieces form').first().waitFor();
+      await run.page.locator('.view--pieces').getByRole('button', { name: 'CREATE ACCOUNT', exact: true }).first().click();
+      // The answers arrive after the form: Other is chosen once they are there.
+      await run.page.locator('.view--pieces #auth-heard option', { hasText: 'Other' }).waitFor({ state: 'attached' });
+      await run.page.locator('.view--pieces #auth-heard').selectOption({ label: 'Other' });
+    },
+    ready: '.view--pieces form.form--create #auth-heard-other',
+  },
   { id: 'pieces', title: 'MY PIECES, PIECES: each piece on its model\u2019s photograph, its size, its state, SEE THE PIECE; ADD A PIECE', refs: ['C3'], variant: 'full', as: you, path: at('/verify/pieces'), ready: '.view--pieces article.n-pieces__piece' },
   {
     id: 'pieces-orders',
