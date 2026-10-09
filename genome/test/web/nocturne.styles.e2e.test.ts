@@ -790,7 +790,7 @@ async function sheet(page: Page): Promise<void> {
   await check(page, '.n-account__benefit', { content: '"–"', position: 'absolute', left: 0 }, '::before');
   // The rows: MESSAGES, YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8.1), YOUR SIZES, YOUR ADDRESSES (plan NEXT LOT §3.6.B), SOUND with its switch, CHANGE PASSWORD, MY PIECES, THE CLUB (BP-19 T9), the legal pages; their hairlines; 10.5 px, 0.22 em words.
   await check(page, '.n-account__rows', { 'margin-top': 30, 'border-top-width': 1, 'border-top-color': LINE });
-  expect(await page.locator('.n-account__rows .n-row__label').allInnerTexts()).toEqual(['MESSAGES', 'YOUR PROFILE', 'YOUR SIZES', 'YOUR ADDRESSES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'THE CLUB', 'PRIVACY · TERMS · LEGAL · HELP']);
+  expect(await page.locator('.n-account__rows .n-row__label').allInnerTexts()).toEqual(['MESSAGES', 'YOUR PROFILE', 'YOUR SIZES', 'YOUR ADDRESSES', 'YOUR WISHLIST', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'THE CLUB', 'PRIVACY · TERMS · LEGAL · HELP']);
   await check(page, '.n-account__rows .n-row', { display: 'flex', 'justify-content': 'space-between', 'align-items': 'center', 'column-gap': 14, 'padding-top': 16, 'padding-bottom': 16, 'padding-left': 24, 'padding-right': 24, 'border-bottom-width': 1, 'border-bottom-color': LINE, 'font-size': 15 });
   await check(page, '.n-account__rows .n-row__label', { 'font-size': 10.5, 'letter-spacing': em(10.5, 0.22) });
   await check(page, '.n-account__rows .n-row--lead svg', { width: 16, height: 16, 'stroke-width': '1.4px' });

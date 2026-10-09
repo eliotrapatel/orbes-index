@@ -11,6 +11,14 @@
  *  - signed out: shown, not pressed; a tap sends nothing and says the wishlist is kept in the account, with SIGN IN to
  *    MY PIECES' sign-in;
  *  - at 390 and 320 px: no sideways scroll, every control's 44 px zone and 10 px type.
+ * YOUR WISHLIST, its row and its page (step 2.6):
+ *  - the account sheet's row after YOUR ADDRESSES, NONE YET, then 3 MODELS; it opens /verify/wishlist (the sheet closed);
+ *  - the page: ‹ YOUR ACCOUNT (the sheet again), the title and its sentence, the cards the latest first (MONOLITHE in
+ *    blue, in gold DISCONTINUED · 2026, ZENITH hidden since: NOT IN THE COLLECTION NOW, no photograph, no link); REMOVE
+ *    refused (the card stays, the sentence and the server's words), then done (the card goes, the line names it, the
+ *    focus on the next card's SEE THE MODEL); SEE THE MODEL opens its sheet, that dot;
+ *  - its states: unreadable (TRY AGAIN, then read), empty (THE COLLECTION), signed out (SIGN IN);
+ *  - at 320, 390 and 1280 px, with the 200-wish stress list and a 60-character name: no sideways scroll.
  * No CSP violation, no page error.
  */
 import { existsSync } from 'node:fs';
@@ -37,6 +45,21 @@ const state = (id: string, extra: Partial<UiState> & Pick<UiState, 'path' | 'rea
 const sheetOf = (key: string) => (d: NocturneDemo) => `/verify/lookbook/${d.slugs[key]}`;
 
 const heart = (page: Page) => page.locator('.view--sheet .n-heart');
+const wishPage = (page: Page) => page.locator('.view--wishlist');
+const cardsOf = (page: Page) => page.locator('.view--wishlist .n-wishlist__card');
+const accountSheet = (page: Page) => page.locator('.n-account:not([hidden])');
+
+/** No sideways scroll at a phone's 320 and 390 px and a desk's 1280 px; the phone's controls at their floors. */
+async function fitsPhoneAndDesk(page: Page, where: string, failures: string[]): Promise<void> {
+  const before = page.viewportSize()!;
+  for (const width of [320, 390, 1280]) {
+    await page.setViewportSize({ width, height: width === 1280 ? 900 : before.height });
+    await settle(page, 150);
+    if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)) failures.push(`${where} at ${width} px: sideways scroll`);
+    if (width < 1280) for (const p of (await tapZoneFloors(page)).problems) failures.push(`${where} at ${width} px: ${p}`);
+  }
+  await page.setViewportSize(before);
+}
 const line = (page: Page) => page.locator('.view--sheet .n-model__heart-line');
 const norm = (t: string) => t.replace(/\s+/g, ' ').trim();
 
@@ -72,6 +95,124 @@ async function adminActor(stage: UiStage): Promise<{ type: 'admin'; id: string }
 type Check = (opened: OpenedState, demo: NocturneDemo, failures: string[]) => Promise<void>;
 
 const CASES: { state: UiState; check: Check }[] = [
+  {
+    // YOUR WISHLIST signed out: kept in the account, SIGN IN.
+    state: state('wishlist-e2e-page-signed-out', { path: () => '/verify/wishlist', ready: '.view--wishlist .n-wishlist__signed-out' }),
+    check: async ({ page }, _demo, failures) => {
+      expect(norm(await wishPage(page).locator('.n-wishlist__signed-out').innerText())).toBe(`${WISHLIST.signedOut} ${WISHLIST.signIn}`);
+      await fitsPhoneAndDesk(page, 'YOUR WISHLIST signed out', failures);
+      await wishPage(page).getByRole('link', { name: WISHLIST.signIn, exact: true }).click();
+      await page.waitForURL(/\/verify\/pieces$/);
+    },
+  },
+  {
+    // Unreadable: the sentence, the server's words, TRY AGAIN; read again, empty: its sentence and THE COLLECTION.
+    state: state('wishlist-e2e-page-unreadable', {
+      as: 'you',
+      path: () => '/verify/wishlist',
+      routes: async (page) => page.route('**/api/v1/account/wishlist', (r: Route) => r.abort('internetdisconnected')),
+      ready: '.view--wishlist .n-wishlist__failed',
+    }),
+    check: async ({ page }, _demo, failures) => {
+      const failed = wishPage(page).locator('.n-wishlist__failed');
+      expect(norm(await failed.innerText())).toBe(`${WISHLIST.unreadable} ${REQUEST_ERRORS.network} ${WISHLIST.retry}`);
+      await page.unroute('**/api/v1/account/wishlist');
+      await failed.getByRole('button', { name: WISHLIST.retry }).click();
+      const empty = wishPage(page).locator('.n-wishlist__empty');
+      await empty.waitFor({ timeout: 20_000 });
+      expect(norm(await empty.innerText())).toBe(`${WISHLIST.empty} ${WISHLIST.collection}`);
+      expect(await wishPage(page).getAttribute('data-state')).toBe('empty');
+      await fitsPhoneAndDesk(page, 'YOUR WISHLIST empty', failures);
+      await empty.getByRole('link', { name: WISHLIST.collection, exact: true }).click();
+      await page.waitForURL(/\/verify\/lookbook$/);
+    },
+  },
+  {
+    // The row, then the page with three wishes: REMOVE refused and done, SEE THE MODEL, the crumb; then the stress list.
+    state: state('wishlist-e2e-page', { as: 'you', path: () => '/verify', mutates: true, ready: '.view--now[data-ready]' }),
+    check: async ({ page, stage }, demo, failures) => {
+      const you = demo.accounts.you!;
+      const { db, services } = stage.ctx;
+      // The row, after YOUR ADDRESSES: NONE YET.
+      await page.locator('.n-hd button.n-acct').click();
+      await accountSheet(page).locator('.n-account__wishlist-line').waitFor({ timeout: 20_000 });
+      const rows = (await accountSheet(page).locator('.n-account__rows .n-row__label').allInnerTexts()).map(norm);
+      expect(rows.slice(rows.indexOf('YOUR ADDRESSES'), rows.indexOf('YOUR ADDRESSES') + 3)).toEqual(['YOUR ADDRESSES', 'YOUR WISHLIST', 'SOUND']);
+      expect(norm(await accountSheet(page).locator('.n-account__wishlist-line').innerText())).toBe('NONE YET');
+      await page.keyboard.press('Escape');
+      // Three wishes: MONOLITHE in blue now, in gold two days before (discontinued since), ZENITH five days before (hidden since).
+      const id = async (slug: string) => (await db.selectFrom('models').select('id').where('slug', '=', slug).executeTakeFirstOrThrow()).id;
+      const admin = await adminActor(stage);
+      const [gold, zenith] = [await id('monolithe-gold'), await id('zenith')];
+      await services.wishlist.add(you.id, 'monolithe-blue');
+      await db
+        .insertInto('account_wishes')
+        .values([
+          { account_id: you.id, model_id: gold, added_at: new Date(Date.parse('2026-10-03T16:49:00Z')) },
+          { account_id: you.id, model_id: zenith, added_at: new Date(Date.parse('2026-09-30T16:49:00Z')) },
+        ])
+        .execute();
+      await services.catalog.discontinueModel(gold, admin);
+      await services.catalog.updateModel(zenith, { lookbook: 'HIDDEN' }, admin);
+      await page.locator('.n-hd button.n-acct').click();
+      await expect.poll(async () => norm(await accountSheet(page).locator('.n-account__wishlist-line').innerText()), POLL).toBe('3 MODELS');
+      // The row opens the page, the sheet closed.
+      await accountSheet(page).getByRole('link', { name: /^YOUR WISHLIST/ }).click();
+      await page.waitForURL(/\/verify\/wishlist$/);
+      await cardsOf(page).first().waitFor({ timeout: 20_000 });
+      expect(await accountSheet(page).count()).toBe(0);
+      expect(norm(await page.locator('#wishlist-title').innerText())).toBe(WISHLIST.title);
+      expect(norm(await wishPage(page).locator('.n-wishlist__lead').innerText())).toBe(WISHLIST.lead);
+      expect(await cardsOf(page).count()).toBe(3);
+      const lines = (await cardsOf(page).locator('.n-wishlist__line').allInnerTexts()).map(norm);
+      expect(lines).toEqual(['BRACELET · IN BLUE', 'BRACELET · IN GOLD · DISCONTINUED · 2026', WISHLIST.notShown]);
+      expect((await cardsOf(page).locator('.n-wishlist__name').allInnerTexts()).map(norm)).toEqual(['MONOLITHE', 'MONOLITHE', 'ZENITH']);
+      // The model not shown now: no photograph, no link, REMOVE.
+      const hidden = cardsOf(page).nth(2);
+      expect(await hidden.locator('img').count()).toBe(0);
+      expect(await hidden.getByRole('link').count()).toBe(0);
+      expect((await hidden.getByRole('button').allInnerTexts()).map(norm)).toEqual([WISHLIST.remove]);
+      // The photographs: whole and faded, the first two eager.
+      expect(await cardsOf(page).locator('img').evaluateAll((imgs) => imgs.map((i) => i.getAttribute('loading')))).toEqual(['eager', 'eager']);
+      await fitsPhoneAndDesk(page, 'YOUR WISHLIST', failures);
+      // ‹ YOUR ACCOUNT: the account sheet again.
+      await wishPage(page).getByRole('button', { name: WISHLIST.back }).click();
+      await accountSheet(page).waitFor({ timeout: 20_000 });
+      await page.keyboard.press('Escape');
+      await expect.poll(() => accountSheet(page).count(), POLL).toBe(0);
+      // REMOVE refused: the card stays, the sentence and the server's words.
+      await page.route(WISH, (r) => (r.request().method() === 'DELETE' ? r.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'CONFLICT', message: 'Try again in a moment.' } }) }) : r.continue()));
+      await cardsOf(page).first().getByRole('button', { name: WISHLIST.remove }).click();
+      await expect.poll(async () => norm(await wishPage(page).locator('.n-wishlist__status').innerText()), POLL).toBe(`${WISHLIST.failed} Try again in a moment.`);
+      expect(await cardsOf(page).count()).toBe(3);
+      await page.unroute(WISH);
+      // REMOVE: the card goes, the line names it, the focus on the next card's SEE THE MODEL.
+      await cardsOf(page).first().getByRole('button', { name: WISHLIST.remove }).click();
+      await expect.poll(() => cardsOf(page).count(), POLL).toBe(2);
+      expect(norm(await wishPage(page).locator('.n-wishlist__status').innerText())).toBe(WISHLIST.removedNamed('MONOLITHE IN BLUE'));
+      expect(await wishPage(page).locator('.n-wishlist__status').getAttribute('role')).toBe('status');
+      expect(await page.evaluate(() => document.activeElement?.closest('[data-wish]')?.getAttribute('data-wish'))).toBe('monolithe-gold');
+      expect(await page.evaluate(() => document.activeElement?.textContent)).toBe(WISHLIST.seeModel);
+      expect(await db.selectFrom('account_wishes').select('model_id').where('account_id', '=', you.id).where('removed_at', 'is', null).execute()).toHaveLength(2);
+      // SEE THE MODEL: its sheet, that dot.
+      await cardsOf(page).first().getByRole('link', { name: WISHLIST.seeModel }).click();
+      await page.waitForURL(/\/verify\/lookbook\/monolithe-gold$/);
+      await page.locator('.view--sheet .n-model__dots [aria-pressed="true"]').waitFor({ timeout: 20_000 });
+      expect(norm(await page.locator('.view--sheet .n-model__dots [aria-pressed="true"]').innerText())).toBe('Gold');
+      // The stress list: 200 wishes, a 60-character name, every one but the first not shown now.
+      const long = 'MONOLITHE ARCHITECTURALE DU SOIR AUX REFLETS DE LAQUES BLEUE';
+      expect(long).toHaveLength(60);
+      const items = [
+        { state: 'SHOWN', slug: 'monolithe', name: long, variant: { label: 'Steel', swatch: '#9D9B96' }, type: 'BRACELET', collection: 'ORBITAL', imageUrl: null, discontinuedYear: 2026, reserved: true, addedAt: '2026-10-05T16:49:00.000Z' },
+        ...Array.from({ length: 199 }, (_, i) => ({ state: 'NOT_SHOWN', slug: `wish-${i}`, name: i % 2 ? long : `MODEL ${i}`, variant: i % 3 ? null : { label: 'Blue', swatch: '#16224A' }, addedAt: '2026-10-01T16:49:00.000Z' })),
+      ];
+      await page.route('**/api/v1/account/wishlist', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items, max: 200 }) }));
+      await page.goto(`${stage.origin}/verify/wishlist`);
+      await expect.poll(() => cardsOf(page).count(), POLL).toBe(200);
+      await fitsPhoneAndDesk(page, 'YOUR WISHLIST, 200 wishes', failures);
+      await page.unroute('**/api/v1/account/wishlist');
+    },
+  },
   {
     // Signed out: the heart shown, not pressed; a tap sends nothing.
     state: state('wishlist-e2e-heart-signed-out', { path: sheetOf('steel'), ready: '.view--sheet .n-heart' }),
@@ -148,7 +289,8 @@ const CASES: { state: UiState; check: Check }[] = [
       await expect.poll(() => heart(page).getAttribute('aria-pressed'), POLL).toBe('false');
       expect(norm(await line(page).innerText())).toBe(WISHLIST.removed);
       expect(sent.at(-1)).toBe('DELETE /api/v1/account/wishlist/monolithe-blue');
-      expect(await stage.ctx.db.selectFrom('account_wishes').select('model_id').where('removed_at', 'is', null).execute()).toEqual([]);
+      const blueId = (await stage.ctx.db.selectFrom('models').select('id').where('slug', '=', 'monolithe-blue').executeTakeFirstOrThrow()).id;
+      expect(await stage.ctx.db.selectFrom('account_wishes').select('model_id').where('model_id', '=', blueId).where('removed_at', 'is', null).execute()).toEqual([]);
       // Refused (the 201st): the server's words after the sentence, nothing flipped.
       const full = 'Your wishlist holds up to 200 models. Remove one to add another.';
       await page.route(WISH, (r) => r.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: { code: 'WISHLIST_FULL', message: full } }) }));
@@ -163,8 +305,7 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(await heart(page).getAttribute('aria-pressed')).toBe('false');
       await page.unroute(WISH);
       // The model hidden meanwhile: the PUT answers 404, the sheet is read again and says it is not in the collection.
-      const blue = await stage.ctx.db.selectFrom('models').select('id').where('slug', '=', 'monolithe-blue').executeTakeFirstOrThrow();
-      await stage.ctx.services.catalog.updateModel(blue.id, { lookbook: 'HIDDEN' }, await adminActor(stage));
+      await stage.ctx.services.catalog.updateModel(blueId, { lookbook: 'HIDDEN' }, await adminActor(stage));
       await heart(page).click();
       await page.locator('.view--sheet[data-state="missing"]').waitFor({ timeout: 20_000 });
       expect(norm(await page.locator('#sheet-title').innerText())).toBe(LOOKBOOK.notFound);

@@ -338,6 +338,14 @@ export function pairCards(list: unknown): PairCard[] {
   return out;
 }
 
+/**
+ * A model's photograph by its address (plan CUSTOMER INTELLIGENCE §3.2 W.10.2: YOUR WISHLIST's cards), with the words
+ * every photograph of a model says; null for anything but this origin's media route.
+ */
+export function modelPhoto(imageUrl: unknown, name: string, type: string, variant?: string | null): LookbookPhoto | null {
+  return typeof imageUrl === 'string' && MEDIA_SRC.test(imageUrl) ? { src: imageUrl, alt: modelAlt(name, type, variant) } : null;
+}
+
 /** CO-01: the rows THE RELEASES OF THIS MODEL shows before SHOW ALL N RELEASES unfolds the rest. */
 export const RELEASES_SHOWN = 6;
 

@@ -33,6 +33,8 @@
  * its page, the six newest then SHOW ALL N RELEASES; and, last, PAIRS WELL WITH (plan NEXT-NINE, BP-34), one row of
  * cards that scrolls sideways, each another model's photograph, name and type, opening its sheet in this history entry.
  *
+ * The grid's card (modelCard) is YOUR WISHLIST's too (plan CUSTOMER INTELLIGENCE §3.2 W.10.2, views/wishlist.ts).
+ *
  * The grid reads GET /api/v1/lookbook (the same for everyone) and, for a signed-in account, the club's reserved models
  * (a 403 for an account that holds no piece: the teaser; none of its tier: what opens the salon, `opensAt`) and its
  * pieces (You own N). A sheet reads, signed in, the
@@ -62,6 +64,7 @@ import {
   withRequest,
   type CardModel,
   type CollectionGroup,
+  type LookbookPhoto,
   type PairCard,
   type SheetModel,
 } from '../lookbook-model.js';
@@ -156,6 +159,33 @@ function nameWithChevron(name: string): (Node | string)[] {
   const at = name.lastIndexOf(' ');
   const last = h('span', { class: 'n-nw' }, ...withNumerals(name.slice(at + 1)), '\u00a0', icon('chev', { small: true }));
   return at < 0 ? [last] : [...withNumerals(name.slice(0, at + 1)), last];
+}
+
+/**
+ * A model as THE COLLECTION's card shows it, full width (shared with YOUR WISHLIST, plan CUSTOMER INTELLIGENCE §3.2
+ * W.10.2): its photograph whole and faded (lazy unless `eager`; none: its words open where it would be), then its words
+ * lifted onto its foot, centred. Named by its `${id}-name` heading.
+ */
+export function modelCard(opts: {
+  id: string;
+  image: LookbookPhoto | null;
+  eager?: boolean;
+  following: boolean;
+  words: (Node | null)[];
+  extraClass?: string;
+  data?: Record<string, string>;
+}): HTMLElement {
+  const photo = opts.image ? hideWhenBroken(fadedPhoto(opts.image.src, opts.image.alt, { eager: opts.eager, extraClass: 'n-lookbook__photo lookbook-card__frame' })) : null;
+  return h(
+    'article',
+    {
+      class: ['lookbook-card', 'n-lookbook__model', opts.following ? 'n-sec' : null, photo ? null : 'n-lookbook__model--bare', opts.extraClass],
+      attrs: { 'aria-labelledby': `${opts.id}-name` },
+      data: opts.data,
+    },
+    photo,
+    lift(opts.words, { center: true, extraClass: photo ? undefined : 'n-lookbook__bare' }),
+  );
 }
 
 /** A photograph removed meanwhile takes its frame with it: never a broken image. */
@@ -304,42 +334,38 @@ class GridPage {
   private card(c: CardModel, id: string, pieces: readonly OwnedPiece[], opts: { following: boolean; salon: boolean }): HTMLElement {
     const selected = c.dots.some((d) => d.slug === this.selected.get(c.slug)) ? this.selected.get(c.slug)! : c.slug;
     const face = cardFace(c, selected);
-    const photo = face.image ? hideWhenBroken(fadedPhoto(face.image.src, face.image.alt, { extraClass: 'n-lookbook__photo lookbook-card__frame' })) : null;
     const see = textLink(LOOKBOOK.seeModel, { href: face.href, onOpen: () => this.deps.onSheet(face.slug), extraClass: 'lookbook-card__link' });
     // SEE THE MODEL, of which model: its name and type, for a screen reader moving from link to link.
     see.setAttribute('aria-describedby', `${id}-name`);
     const price = face.price ? h('p', { class: 'n-num n-lookbook__price lookbook-card__price', text: face.price }) : null;
     const owned = ownedLine(c.slug, c.dots, pieces);
-    const article = h(
-      'article',
-      { class: ['lookbook-card', 'n-lookbook__model', opts.following ? 'n-sec' : null, photo ? null : 'n-lookbook__model--bare'], attrs: { 'aria-labelledby': `${id}-name` } },
-      photo,
-      lift(
-        [
-          h('h3', { class: 'n-g n-t2 lookbook-card__name', id: `${id}-name` }, ...withNumerals(face.name)),
-          h('p', { class: 'n-g n-lb n-lookbook__type lookbook-card__type' }, ...withNumerals(face.type)),
-          c.dots.length > 0
-            ? variantDots(
-                c.dots.map((d) => ({ id: d.slug, label: d.label, swatch: d.swatch })),
-                {
-                  selected,
-                  label: LOOKBOOK.variants,
-                  onSelect: (slug) => {
-                    this.selected.set(c.slug, slug);
-                    const next = this.card(c, id, pieces, opts);
-                    quietly(this.body, () => article.replaceWith(next));
-                    next.querySelector<HTMLElement>('.n-vsel [aria-pressed="true"]')?.focus();
-                  },
+    const article = modelCard({
+      id,
+      image: face.image,
+      following: opts.following,
+      words: [
+        h('h3', { class: 'n-g n-t2 lookbook-card__name', id: `${id}-name` }, ...withNumerals(face.name)),
+        h('p', { class: 'n-g n-lb n-lookbook__type lookbook-card__type' }, ...withNumerals(face.type)),
+        c.dots.length > 0
+          ? variantDots(
+              c.dots.map((d) => ({ id: d.slug, label: d.label, swatch: d.swatch })),
+              {
+                selected,
+                label: LOOKBOOK.variants,
+                onSelect: (slug) => {
+                  this.selected.set(c.slug, slug);
+                  const next = this.card(c, id, pieces, opts);
+                  quietly(this.body, () => article.replaceWith(next));
+                  next.querySelector<HTMLElement>('.n-vsel [aria-pressed="true"]')?.focus();
                 },
-              )
-            : null,
-          owned ? h('p', { class: 'n-state n-lookbook__owned' }, icon('check', { small: true }), owned) : null,
-          price,
-          h('p', { class: opts.salon ? 'n-lookbook__see n-lookbook__see--salon' : 'n-lookbook__see' }, see),
-        ],
-        { center: true, extraClass: photo ? undefined : 'n-lookbook__bare' },
-      ),
-    );
+              },
+            )
+          : null,
+        owned ? h('p', { class: 'n-state n-lookbook__owned' }, icon('check', { small: true }), owned) : null,
+        price,
+        h('p', { class: opts.salon ? 'n-lookbook__see n-lookbook__see--salon' : 'n-lookbook__see' }, see),
+      ],
+    });
     article.querySelector('.n-vsel')?.classList.add('n-lookbook__dots');
     return article;
   }

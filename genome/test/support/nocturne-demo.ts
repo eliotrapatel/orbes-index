@@ -68,7 +68,8 @@
  *                     (plan CUSTOMER INTELLIGENCE §3.1 P.8): your names, country, city, how you heard of ORBES and a
  *                     default address; then your favourite piece and finish, and a finish no longer in the collection
  *   wishlist          the full story; its states write YOUR WISHLIST for you (plan CUSTOMER INTELLIGENCE §3.2 W.10): the
- *                     heart pressed on MONOLITHE in blue (sheet-wished)
+ *                     heart pressed on MONOLITHE in blue (sheet-wished); YOUR WISHLIST empty, then with three wishes,
+ *                     MONOLITHE in gold discontinued and ZENITH hidden since (wishlist-empty, wishlist)
  *
  * Ids written by the server (scan references, order and entry references, genomes, invoice numbers) are the server's;
  * the parity tool's comparisons treat them as live data.

@@ -3019,7 +3019,7 @@ describe.skipIf(!HAS_CHROMIUM)('verify web app (Chromium, mobile)', () => {
     await textsOf(tier.locator('.n-account__benefits--next .n-account__benefit'), [...programLines(DEFAULT_PROGRAM, 3), 'A commission of your own.', 'A yearly visit to the atelier.'].map(norm));
     // Then MESSAGES (plan NEXT-NINE, CS-01), YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8.1), YOUR SIZES (AC-01), YOUR ADDRESSES (plan NEXT LOT §3.6.B), SOUND, CHANGE PASSWORD, MY PIECES, THE CLUB (BP-19 T9), the legal pages
     // (their index, a new tab), SIGN OUT.
-    await textsOf(sheet.locator('.n-row__label'), ['MESSAGES', 'YOUR PROFILE', 'YOUR SIZES', 'YOUR ADDRESSES', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'THE CLUB', 'PRIVACY · TERMS · LEGAL · HELP']);
+    await textsOf(sheet.locator('.n-row__label'), ['MESSAGES', 'YOUR PROFILE', 'YOUR SIZES', 'YOUR ADDRESSES', 'YOUR WISHLIST', 'SOUND', 'CHANGE PASSWORD', 'MY PIECES', 'THE CLUB', 'PRIVACY · TERMS · LEGAL · HELP']);
     await attrOf(sheet.getByRole('link', { name: 'PRIVACY · TERMS · LEGAL · HELP' }), 'href', '/legal');
     await attrOf(sheet.getByRole('link', { name: 'PRIVACY · TERMS · LEGAL · HELP' }), 'target', '_blank');
     await attrOf(sheet.getByRole('link', { name: 'MY PIECES' }), 'href', '/verify/pieces');

@@ -1868,6 +1868,73 @@ body.nocturne .view--sheet.n-model {
   margin-top: 6px;
 }
 
+/* ── YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2) ──
+   /verify/wishlist, opened from the account sheet's row: the crumb ‹ YOUR ACCOUNT, the title and its sentence, the status
+   line of REMOVE, then each wish as THE COLLECTION's card (the photograph whole at full width, faded; its words lifted
+   onto its foot), 76 px apart, a model not shown now as its words alone. Every value is THE COLLECTION's. */
+
+body.nocturne .view--wishlist.n-wishlist {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* The crumb is a button (it opens the account sheet, not a page): the link's look, no button chrome. */
+.n-wishlist__crumb {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: var(--n-fs-micro);
+  text-transform: uppercase;
+}
+
+.n-wishlist__head {
+  padding-top: 14px;
+}
+
+.n-wishlist__lead {
+  margin-top: 12px;
+}
+
+.n-wishlist__status {
+  margin-top: 16px;
+  color: var(--vault-ink);
+}
+
+.n-wishlist__body > .n-loading,
+.n-wishlist__list,
+.n-wishlist__empty,
+.n-wishlist__failed {
+  margin-top: 36px;
+}
+
+.n-wishlist__collection {
+  margin-bottom: 8px;
+}
+
+.n-wishlist__name {
+  overflow-wrap: anywhere;
+}
+
+.n-wishlist__line {
+  overflow-wrap: anywhere;
+}
+
+/* SEE THE MODEL and REMOVE side by side, wrapping on the narrowest phones. */
+.n-wishlist__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: 32px;
+}
+
+.n-wishlist__links {
+  margin-top: 20px;
+}
+
 /* Its next release (C6): a plate row 34 px under the words, a link to the release's page. */
 .n-model__next {
   margin-top: 34px;

@@ -410,6 +410,32 @@ async function yourProfile(run: StateRun, tastes: boolean): Promise<void> {
   }
 }
 
+/**
+ * Plan CUSTOMER INTELLIGENCE §3.2 W.10.2, the state wishlist (the wishlist stage): your three wishes, the latest first:
+ * MONOLITHE in blue (shown; the heart of sheet-wished, or written here), MONOLITHE in gold wished two days before and
+ * discontinued since (shown, DISCONTINUED · 2026), ZENITH wished five days before and hidden since (NOT IN THE
+ * COLLECTION NOW). Written once.
+ */
+async function yourWishes(run: StateRun): Promise<void> {
+  const { db, services } = run.stage.ctx;
+  const you = run.demo.accounts.you!;
+  const model = async (key: string) => (await db.selectFrom('models').select('id').where('slug', '=', run.demo.slugs[key]!).executeTakeFirstOrThrow()).id;
+  const [gold, zenith] = [await model('gold'), await model('zenith')];
+  if (await db.selectFrom('account_wishes').select('model_id').where('account_id', '=', you.id).where('model_id', '=', zenith).executeTakeFirst()) return;
+  const admin = await demoAdmin(run);
+  await services.wishlist.add(you.id, run.demo.slugs.blue!);
+  const DAY_MS = 86_400_000;
+  await db
+    .insertInto('account_wishes')
+    .values([
+      { account_id: you.id, model_id: gold, added_at: new Date(NOCTURNE_NOW.getTime() - 2 * DAY_MS) },
+      { account_id: you.id, model_id: zenith, added_at: new Date(NOCTURNE_NOW.getTime() - 5 * DAY_MS) },
+    ])
+    .execute();
+  await services.catalog.discontinueModel(gold, admin);
+  await services.catalog.updateModel(zenith, { lookbook: 'HIDDEN' }, admin);
+}
+
 /** The account sheet opened on YOUR PROFILE, its form drawn, the phone grown to it. */
 async function openProfile(run: StateRun): Promise<void> {
   await openAccountSheet(run);
@@ -1246,6 +1272,30 @@ export const UI_STATES: readonly UiState[] = [
       await run.page.locator('.view--sheet .n-heart[aria-pressed="true"]').waitFor({ timeout: 20_000 });
     },
     ready: '.view--sheet .n-model__heart-line',
+  },
+  // Plan CUSTOMER INTELLIGENCE §3.2 W.10.2: YOUR WISHLIST's page, empty (before the stage's wishes), then with your three.
+  {
+    id: 'wishlist-empty',
+    title: 'YOUR WISHLIST, empty: its sentence and THE COLLECTION',
+    refs: ['CUSTOMER INTELLIGENCE §3.2 W.10.2'],
+    variant: 'wishlist',
+    as: you,
+    path: at('/verify/wishlist'),
+    ready: '.view--wishlist[data-state="empty"] .n-wishlist__empty',
+  },
+  {
+    id: 'wishlist',
+    title: 'YOUR WISHLIST: MONOLITHE in blue, in gold (DISCONTINUED · 2026), ZENITH (NOT IN THE COLLECTION NOW); SEE THE MODEL, REMOVE',
+    refs: ['CUSTOMER INTELLIGENCE §3.2 W.10.2'],
+    variant: 'wishlist',
+    as: you,
+    path: at('/verify/wishlist'),
+    mutates: true,
+    act: async (run) => {
+      await yourWishes(run);
+      await run.page.reload();
+    },
+    ready: '.view--wishlist[data-state="ready"] .n-wishlist__card--hidden',
   },
   // Plan NEXT-NINE, BP-34: PAIRS WELL WITH as the console picked it on MONOLITHE (the pairs stage), read by a TITANE owner:
   // ZENITH of THE PRIVATE SALON, then MONOLITHE ARCHITECTURALE (24 characters, no photograph); the C6 foot, picked.

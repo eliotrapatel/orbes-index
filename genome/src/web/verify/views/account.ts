@@ -27,6 +27,8 @@
  *                                         COMPLETE; its view in the sheet (below)
  *   YOUR SIZES      RING 52 · WRIST … ›   the sizes saved (plan NEXT-NINE, AC-01), or NOT SET; its view in the sheet
  *   YOUR ADDRESSES          2 SAVED ›     the delivery addresses saved (plan NEXT LOT §3.6.B), or NOT SET; its view
+ *   YOUR WISHLIST          3 MODELS ›     the models marked with the heart (plan CUSTOMER INTELLIGENCE §3.2 W.10.2), or
+ *                                         NONE YET (nothing when unreadable); it opens its page, /verify/wishlist
  *   SOUND                         (●)     the sound signature (P-D07), as the footer's SOUND ON / OFF
  *   CHANGE PASSWORD                 ›     its form in the sheet (C39): the current password, a new one; CANCEL
  *   MY PIECES                       ›
@@ -70,7 +72,7 @@ import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { addressesSummary, addressLines, mayAddAddress } from '../addresses-model.js';
 import { countryName } from '../../../shared/countries.js';
-import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, MESSAGES, PIECES, SIGN_UP, SOUND, TASTES, TIER } from '../copy.js';
+import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, MESSAGES, PIECES, SIGN_UP, SOUND, TASTES, TIER, WISHLIST } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
 import { countryOptions } from '../addresses-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
@@ -97,6 +99,7 @@ import type { SessionStore } from '../session.js';
 import { SIZE_FIELDS, sizeFieldValue, sizeOptions, sizesFromForm, sizesSummary } from '../sizes-model.js';
 import type { SoundSwitch } from '../sound.js';
 import { tierModel } from '../tier-model.js';
+import { WISHLIST_PATH, wishlistCount } from '../wishlist-model.js';
 import type { AccountAddresses, AccountProfileView, AccountSizes, ClubStatus, SavedAddress, SizeKind } from '../types.js';
 import { addressFields } from './address.js';
 import { FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
@@ -132,6 +135,7 @@ export interface AccountSheetDeps {
     | 'makeDefaultAddress'
     | 'profile'
     | 'saveProfile'
+    | 'wishlist'
   >;
   session: SessionStore;
   sound: SoundSwitch;
@@ -139,6 +143,8 @@ export interface AccountSheetDeps {
   onPieces(): void;
   /** THE CLUB's page, in the app (plan NEXT-NINE, BP-19 T9). */
   onTheClub(): void;
+  /** YOUR WISHLIST's page, in the app (plan CUSTOMER INTELLIGENCE §3.2 W.10.2). */
+  onWishlist(): void;
   /** The sound was switched here: the footer's SOUND says it too. */
   onSound(): void;
   /** The club's status was read here: the header's tier follows it. */
@@ -211,6 +217,8 @@ export class AccountSheet {
   private profileNote: string | null = null;
   /** SAVE pressed once with a date of birth to enter: CONFIRM YOUR DATE OF BIRTH, until it is pressed again or the date changes. */
   private profileConfirm = false;
+  /** YOUR WISHLIST's line (3 MODELS, NONE YET), read as the sheet opens; null until read, or unreadable (no line). */
+  private wishCount: string | null = null;
 
   constructor(private readonly deps: AccountSheetDeps) {
     this.panel = h('section', { class: 'n-account__panel', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'account-title' } });
@@ -283,6 +291,7 @@ export class AccountSheet {
     this.profileDraft = null;
     this.profileNote = null;
     this.profileConfirm = false;
+    this.wishCount = null;
     this.el.hidden = true;
     document.documentElement.classList.remove('n-locked');
     for (const el of this.deps.outside()) el.inert = false;
@@ -320,7 +329,7 @@ export class AccountSheet {
   /** The club's status and the pieces, read afresh: YOUR TIER as it is now. */
   private async read(): Promise<void> {
     const gen = ++this.readGen;
-    const [club, pieces, unread, sizes, addresses, profile] = await Promise.all([
+    const [club, pieces, unread, sizes, addresses, profile, wishlist] = await Promise.all([
       this.deps.api.clubStatus().catch((e: unknown) => {
         this.deps.session.noteError(e);
         return null;
@@ -330,6 +339,7 @@ export class AccountSheet {
       this.deps.api.sizes().catch(() => null),
       this.deps.api.addresses().catch(() => null),
       this.deps.api.profile().catch(() => null),
+      this.deps.api.wishlist().catch(() => null),
     ]);
     if (gen !== this.readGen || !this.isOpen) return;
     this.club = club;
@@ -349,6 +359,7 @@ export class AccountSheet {
     // MESSAGES opened meanwhile has read it: NEW stays off.
     this.unread = this.view === 'messages' ? false : unread;
     this.listed = pieces?.length ?? 0;
+    this.wishCount = wishlistCount(wishlist);
     this.deps.onClub(club);
     if (this.view === 'account') {
       const focused = this.panel.contains(document.activeElement) ? (document.activeElement as HTMLElement) : null;
@@ -409,6 +420,7 @@ export class AccountSheet {
         this.profileRow(),
         this.sizesRow(),
         this.addressesRow(),
+        this.wishlistRow(),
         h('label', { class: 'n-row n-account__sound' }, h('span', { class: 'n-g n-row__label', text: SOUND.label }), sw.el),
         leadRow(ACCOUNT_PASSWORD.change, { onOpen: () => this.openPassword(), attrs: { 'data-key': 'password' } }),
         leadRow(PIECES.link, {
@@ -1168,6 +1180,21 @@ export class AccountSheet {
   // ── YOUR ADDRESSES (plan NEXT LOT §3.6.B) ────────────────────────────────
 
   /** The row after YOUR SIZES: YOUR ADDRESSES, its line how many are saved (`2 SAVED`) or NOT SET; nothing while unread. */
+  /** YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2): its count at its right, then its page (the sheet closes first). */
+  private wishlistRow(): HTMLElement {
+    const row = leadRow(WISHLIST.row, {
+      href: WISHLIST_PATH,
+      onOpen: () => {
+        this.close();
+        this.deps.onWishlist();
+      },
+      attrs: { 'data-key': 'wishlist' },
+      extraClass: 'n-account__sizes n-account__wishlist',
+    });
+    if (this.wishCount) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__wishlist-line' }, ...withNumerals(this.wishCount)), row.lastChild);
+    return row;
+  }
+
   private addressesRow(): HTMLElement {
     const row = leadRow(ACCOUNT_ADDRESSES.row, { onOpen: () => this.openAddresses(), attrs: { 'data-key': 'addresses' }, extraClass: 'n-account__sizes n-account__addresses' });
     if (this.addresses) row.insertBefore(h('span', { class: 'n-g n-lb n-row__value n-account__addresses-line' }, ...withNumerals(addressesSummary(this.addresses.addresses))), row.lastChild);

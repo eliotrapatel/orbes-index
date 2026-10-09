@@ -93,7 +93,7 @@ const program = (s: UiState) => full(s) && !s.mutates && named('piece-care', 'cl
 const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroom-ends'];
 /** YOUR PROFILE's stage (plan CUSTOMER INTELLIGENCE §3.1 P.8): account-profile, then profile-tastes. */
 const profile = (s: UiState) => s.variant === 'account-profile';
-/** YOUR WISHLIST's stage (plan CUSTOMER INTELLIGENCE §3.2 W.10): the heart pressed on a sheet. */
+/** YOUR WISHLIST's stage (plan CUSTOMER INTELLIGENCE §3.2 W.10): the heart pressed on a sheet; the page, empty then with three. */
 const wishlist = (s: UiState) => s.variant === 'wishlist';
 /** The stages of MY PIECES' orders that their one state writes (plan NEXT LOT §3.4, §3.6). */
 const ORDER_STAGES: readonly string[] = ['claim-waiting', 'orders-delivery', 'orders-case'];

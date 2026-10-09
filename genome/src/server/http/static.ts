@@ -10,6 +10,8 @@
  *                                                     P-R03; /verify/circle THE CIRCLE and /verify/circle/<id> a
  *                                                     post, P-X01; /verify/club THE CLUB, BP-19;
  *                                                     /verify/releases/how HOW RELEASES WORK, FT-01;
+ *                                                     /verify/wishlist YOUR WISHLIST, plan CUSTOMER
+ *                                                     INTELLIGENCE §3.2 W.10.2;
  *                                                     /verify/releases/<id>/board#… a LIVE RELEASE's
  *                                                     boutique board, its secret in the fragment, never indexed)
  *   /VERIFY/C and any other spelling of /verify/c → 301 /verify/c   (the certificate's PDF letters it in capitals)

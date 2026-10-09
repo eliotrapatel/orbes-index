@@ -50,6 +50,8 @@ export interface ShellDeps {
   onSignIn(): void;
   /** THE CLUB (plan NEXT-NINE, BP-19 T9): the footer's line and the account sheet's row, in the app. */
   onTheClub(): void;
+  /** YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2): the account sheet's row, its page in the app. */
+  onWishlist(): void;
   /** The SCAN ring: the scanner (a tap: the sound signature's context is created in it). */
   onScan(): void;
   /** MESSAGES' CONCERNING link: the place a message concerned, in the app. */
@@ -64,7 +66,7 @@ export interface ShellDeps {
  * The screens drawn in NOCTURNE with its chrome; the others of NOCTURNE (the scanner, VERIFYING…, a problem of the
  * scan: C11, C12, C17) keep the whole screen, without the rail and the ring.
  */
-const CHROME_SCREENS: readonly string[] = ['landing', 'result', 'pieces', 'piece', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how'];
+const CHROME_SCREENS: readonly string[] = ['landing', 'result', 'pieces', 'piece', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist'];
 const NOCTURNE_SCREENS: readonly string[] = [...CHROME_SCREENS, 'scan', 'verifying', 'message'];
 
 /** Safari's bars (addition 13): the ink of NOCTURNE, and the light of the shared certificate, kept as it is. */
@@ -162,6 +164,7 @@ export class Shell {
       sound: deps.sound,
       onPieces: () => deps.onChapter('pieces'),
       onTheClub: () => deps.onTheClub(),
+      onWishlist: () => deps.onWishlist(),
       onSound: () => this.drawSound(),
       onClub: (club) => {
         this.club = club;

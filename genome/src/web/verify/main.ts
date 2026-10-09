@@ -100,29 +100,31 @@ import { messageView } from './views/message.js';
 import { nowView, type NowView } from './views/now.js';
 import { pieceView } from './views/piece.js';
 import { piecePath, piecesView, type PiecesTab } from './views/pieces.js';
+import { wishlistView } from './views/wishlist.js';
+import { isWishlistPath, WISHLIST_PATH } from './wishlist-model.js';
 import { releasesView, releaseView, type ReleasesTab } from './views/releases.js';
 import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { Shell } from './views/shell.js';
 import { verifyingView } from './views/verifying.js';
 
-type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how';
+type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist';
 
 /**
  * What a history entry of the app holds: the landing, a screen of a scan, MY PIECES, a certificate, the lookbook or a
- * sheet, the releases or a release's page, the circle or a post, THE CLUB, HOW RELEASES WORK.
+ * sheet, the releases or a release's page, the circle or a post, THE CLUB, HOW RELEASES WORK, YOUR WISHLIST.
  */
-type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club' | 'how';
+type Entry = 'landing' | 'app' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist';
 
 /** The entries above the landing that a scan, MY PIECES or a list takes the place of (their own address goes with them). */
-const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how'];
+const REPLACEABLE: readonly Entry[] = ['app', 'pieces', 'piece', 'certificate', 'lookbook', 'sheet', 'releases', 'release', 'circle', 'circlePost', 'club', 'how', 'wishlist'];
 
 /**
  * The route of a path under /verify: MY PIECES, a certificate, the lookbook, a model's sheet, the releases, a
  * release's page, the circle, a post, or the landing (also for a path the app does not know). In any case: the
  * certificate's PDF letters its address in capitals (the server redirects those to /verify/c).
  */
-function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' {
+function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist' {
   const path = pathname.replace(/\/+$/, '').toLowerCase();
   if (path === PIECES_PATH) return 'pieces';
   // A piece of MY PIECES; under /verify/pieces, an address that is none is MY PIECES.
@@ -135,6 +137,8 @@ function routeOf(pathname: string): 'landing' | 'pieces' | 'piece' | 'certificat
   if (circle) return circle.post ? 'circlePost' : 'circle';
   // THE CLUB (plan NEXT-NINE, BP-19 T9), built like the lookbook.
   if (isClubPath(path)) return 'club';
+  // YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2), opened from the account sheet.
+  if (isWishlistPath(path)) return 'wishlist';
   return path === CERTIFICATE_PATH ? 'certificate' : 'landing';
 }
 
@@ -314,6 +318,8 @@ class App {
         if (this.screen !== 'circle') void this.showCircle();
       } else if (entry === 'club' || route === 'club') {
         if (this.screen !== 'club') void this.showClub();
+      } else if (entry === 'wishlist' || route === 'wishlist') {
+        if (this.screen !== 'wishlist') void this.showWishlist();
       } else if (this.screen !== 'landing') void this.showLanding();
     });
     // A certificate's fragment changed in place (pasted, edited): the certificate of the new one.
@@ -341,6 +347,7 @@ class App {
         },
         onSignIn: () => this.openPieces(),
         onTheClub: () => this.openClub(),
+        onWishlist: () => this.openWishlist(),
         onScan: () => void this.startScan(),
         onConcerning: (target) => this.openConcerning(target),
         onMessagesRead: () => {
@@ -432,6 +439,13 @@ class App {
         pushEntry({ screen: 'club' }, CLUB_PATH);
       } else if (location.pathname !== CLUB_PATH) replaceEntry({ screen: 'club' }, CLUB_PATH);
       void this.showClub(false);
+    } else if (route === 'wishlist') {
+      // YOUR WISHLIST over the landing, as THE CLUB: its own address put back.
+      if (entryOf(history.state) !== 'wishlist') {
+        replaceEntry({ screen: 'landing' }, LANDING_PATH);
+        pushEntry({ screen: 'wishlist' }, WISHLIST_PATH);
+      } else if (location.pathname !== WISHLIST_PATH) replaceEntry({ screen: 'wishlist' }, WISHLIST_PATH);
+      void this.showWishlist(false);
     } else {
       replaceEntry({ screen: 'landing' }, location.pathname === LANDING_PATH ? undefined : LANDING_PATH);
       void this.showLanding(false);
@@ -587,6 +601,17 @@ class App {
     if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle' || entry === 'club') replaceEntry({ screen: 'club' }, CLUB_PATH);
     else pushEntry({ screen: 'club' }, CLUB_PATH);
     void this.showClub();
+  }
+
+  /**
+   * YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2), from the account sheet's row: over the current entry, or in
+   * the place of a chapter's, as THE CLUB.
+   */
+  private openWishlist(): void {
+    const entry = entryOf(history.state);
+    if (entry === 'app' || entry === 'pieces' || entry === 'certificate' || entry === 'lookbook' || entry === 'releases' || entry === 'circle' || entry === 'club' || entry === 'wishlist') replaceEntry({ screen: 'wishlist' }, WISHLIST_PATH);
+    else pushEntry({ screen: 'wishlist' }, WISHLIST_PATH);
+    void this.showWishlist();
   }
 
   /** A post of the circle, over the feed's entry (from a post of the feed). Back from it returns to the feed. */
@@ -808,6 +833,22 @@ class App {
       onPieces: () => this.openPieces(),
     });
     if (await this.swap(view.root, 'club', focus)) this.live = view;
+    else view.dispose();
+  }
+
+  /** YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.2): the models the account marked with the heart. */
+  private async showWishlist(focus = true): Promise<void> {
+    this.generation++;
+    this.stopCamera();
+    const view = wishlistView({
+      api: this.api,
+      session: this.session,
+      onAccount: (trigger) => this.shell?.sheet.open(trigger),
+      onSheet: (slug) => this.openSheet(slug),
+      onCollection: () => this.openLookbook(),
+      onSignIn: () => this.openPieces(),
+    });
+    if (await this.swap(view.root, 'wishlist', focus)) this.live = view;
     else view.dispose();
   }
 
