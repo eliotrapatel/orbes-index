@@ -69,6 +69,7 @@ import { GrowthService } from './services/growth.js';
 import { OwnerService } from './services/owners.js';
 import { PastReleaseService } from './services/past-releases.js';
 import { PlaceService } from './services/places.js';
+import { AcquisitionService } from './services/acquisition.js';
 import { TrackingService } from './services/tracking.js';
 import { SalonService } from './services/salon.js';
 import { ShopifyExportService } from './services/shopify.js';
@@ -180,6 +181,8 @@ export interface AppServices {
   places: PlaceService;
   /** What collectors look at, from which device and place (plan CUSTOMER INTELLIGENCE §3.3 T.8.3): POST /api/v1/seen's views, buffered and written every 2 s. */
   tracking: TrackingService;
+  /** Where collectors come from (plan CUSTOMER INTELLIGENCE §3.4): the console's links, the sources, the visits on the device and their attribution. */
+  acquisition: AcquisitionService;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
   suppliers: SupplierService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
@@ -321,6 +324,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const places = new PlaceService({ db });
     // The recording's writes wait while the pool has requests waiting (§3.3 T.8.3): the collectors come first.
     const tracking = new TrackingService({ db, places, clock, log, waiting: () => (poolOf(db)?.waitingCount ?? 0) > 0 });
+    const acquisition = new AcquisitionService({ db, publicOrigin: config.publicOrigin, clock, log });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });
@@ -377,6 +381,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       wishlist,
       places,
       tracking,
+      acquisition,
       suppliers,
       supplierOrders,
       receptions,
@@ -434,6 +439,9 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     if (heard.length > 0) log.info({ heard }, 'sign-up answers ready');
     // The recording's start, once (plan CUSTOMER INTELLIGENCE §3.3 T.6 table 10); the past scans follow in the background (start()).
     await services.tracking.prepare();
+    // The links' channels, the fixed sources and the visits' start, once (plan CUSTOMER INTELLIGENCE §3.4 A.6, A.12).
+    const acquired = await services.acquisition.prepare();
+    if (acquired.channels.length + acquired.sources.length > 0 || acquired.started) log.info(acquired, 'visit sources ready');
     // The receptions' issuing worker: what the last process left confirmed is issued, then it polls (§3.5.6.5).
     if (overrides.timers ?? config.env !== 'test') services.receptions.start();
     // The views' buffer writes every 2 s on its own unref'd interval (§3.0 (f)), and the past scans are recorded in the

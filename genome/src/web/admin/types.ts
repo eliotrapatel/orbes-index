@@ -229,6 +229,14 @@ export type ProfileSource = (typeof PROFILE_SOURCES)[number];
 export const TASTE_KINDS = ['PIECE', 'FINISH'] as const;
 export type TasteKind = (typeof TASTE_KINDS)[number];
 
+/** Where a console link leads in the app (links.destination, plan CUSTOMER INTELLIGENCE §3.4 A.6): a release and a model's sheet name theirs. */
+export const LINK_DESTINATIONS = ['NOW', 'RELEASES', 'RELEASE', 'COLLECTION', 'MODEL', 'CLUB', 'HOW'] as const;
+export type LinkDestination = (typeof LINK_DESTINATIONS)[number];
+
+/** A source of visits (acquisition_sources.kind, plan CUSTOMER INTELLIGENCE §3.4 A.5): BEFORE reads « Before tracking », STAFF « Console device ». */
+export const SOURCE_KINDS = ['LINK', 'CAMPAIGN', 'SITE', 'DIRECT', 'BEFORE', 'STAFF'] as const;
+export type SourceKind = (typeof SOURCE_KINDS)[number];
+
 /** The kind of a drop (drops.mode): a DRAW (P-R03) or a LIVE RELEASE, lived in real time. */
 export const DROP_MODES = ['DRAW', 'LIVE'] as const;
 export type DropMode = (typeof DROP_MODES)[number];

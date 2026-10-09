@@ -428,6 +428,8 @@ describe('admin enums mirror the server', () => {
       'ADDRESS_SOURCES',
       'PROFILE_SOURCES',
       'TASTE_KINDS',
+      'LINK_DESTINATIONS',
+      'SOURCE_KINDS',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }

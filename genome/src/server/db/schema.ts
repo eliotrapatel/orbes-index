@@ -362,6 +362,35 @@ export const LINK_VIAS = ['SIGN_UP', 'SIGN_IN', 'SESSION'] as const;
 export type LinkVia = (typeof LINK_VIAS)[number];
 
 /**
+ * Where a console link leads in the app (links.destination, migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6): NOW,
+ * THE RELEASES, a release (links.drop_id), THE COLLECTION, a model's sheet (links.model_id), THE CLUB, HOW RELEASES WORK.
+ */
+export const LINK_DESTINATIONS = ['NOW', 'RELEASES', 'RELEASE', 'COLLECTION', 'MODEL', 'CLUB', 'HOW'] as const;
+export type LinkDestination = (typeof LINK_DESTINATIONS)[number];
+
+/**
+ * A source of visits (acquisition_sources.kind, migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.5): a console link, a
+ * campaign's utm_ tags, a referring site, a direct arrival; BEFORE (« Before tracking ») and STAFF (« Console device »)
+ * are never the result of an arrival.
+ */
+export const SOURCE_KINDS = ['LINK', 'CAMPAIGN', 'SITE', 'DIRECT', 'BEFORE', 'STAFF'] as const;
+export type SourceKind = (typeof SOURCE_KINDS)[number];
+
+/**
+ * Who wrote a collector's first source (account_sources.set_by, migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.4,
+ * A.8): the sign-up's attach, the sign-in's check, or the job's safety net.
+ */
+export const SOURCE_SET_BY = ['SIGN_UP', 'SIGN_IN', 'JOB'] as const;
+export type SourceSetBy = (typeof SOURCE_SET_BY)[number];
+
+/**
+ * What a conversion records (acquisition_conversions.kind, migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.5): a
+ * sign-up (ref_id the account), a draw entry, a LIVE RELEASE entry, an order.
+ */
+export const CONVERSION_KINDS = ['SIGNUP', 'DRAW_ENTRY', 'LIVE_ENTRY', 'ORDER'] as const;
+export type ConversionKind = (typeof CONVERSION_KINDS)[number];
+
+/**
  * How the access rules of a LIVE RELEASE combine (drops.access_combine, migration 0023): every rule met (AND), or any
  * one of them (OR). NULL on a LIVE drop: AND.
  */
@@ -1711,6 +1740,11 @@ export interface TrackingDevicesTable {
   staff_at: TimestampNullable;
   first_seen_at: TimestampDefault;
   last_seen_at: TimestampDefault;
+  /**
+   * Migration 0043 (plan CUSTOMER INTELLIGENCE §3.4 A.6 item 4): the source of the device's first arrival
+   * (acquisition_sources.id), set once; NULL while it made none (a device seen only through a scan), read as Direct.
+   */
+  first_source_id: ColumnType<number | null, number | null | undefined, number | null>;
 }
 
 /** Every account a device was linked to (migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6), kept for good. */
@@ -1809,6 +1843,116 @@ export interface TrackingStateTable {
   scans_after_at: TimestampNullable;
   scans_after_id: ColumnType<string | null, string | null | undefined, string | null>;
   scans_backfilled_at: TimestampNullable;
+}
+
+/** A channel the console's links are grouped by (migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6 item 1). */
+export interface LinkChannelsTable {
+  id: Generated<string>;
+  name: string;                        // 1..40 characters, trimmed; unique whatever its case
+  position: WithDefault<number>;       // smallint 0..999
+  created_by: ColumnType<string | null, string | null | undefined, string | null>; // admin_users.id; NULL for a preset
+  created_at: TimestampDefault;
+}
+
+/**
+ * A console link, `verify.theorbes.com/go/<code>` (migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6 item 2). `id`,
+ * `code`, `created_by` and `created_at` never change (`links_immutable`); a release or a model is named exactly when
+ * the destination is one; the cost and its currency both or neither; archived with who did it, both or neither.
+ */
+export interface LinksTable {
+  id: Generated<string>;
+  code: string;                        // 3..32: lower-case letters, figures, dashes, no dash at either end
+  name: string;                        // 1..80 characters, trimmed
+  channel_id: string;
+  destination: LinkDestination;
+  drop_id: ColumnType<string | null, string | null | undefined, string | null>;
+  model_id: ColumnType<string | null, string | null | undefined, string | null>;
+  cost_minor: ColumnType<number | null, number | null | undefined, number | null>; // bigint 0..100 000 000 000
+  cost_currency: ColumnType<HouseCurrency | null, HouseCurrency | null | undefined, HouseCurrency | null>;
+  note: ColumnType<string | null, string | null | undefined, string | null>; // ≤ 500 characters
+  archived_at: TimestampNullable;
+  archived_by: ColumnType<string | null, string | null | undefined, string | null>;
+  created_by: string;
+  created_at: TimestampDefault;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * Each distinct source of visits once (migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6 item 3), by its key: `L:<link
+ * id>`, `C:<source>␟<medium>␟<campaign>␟<content>␟<term>` (␟ U+001F), `S:<host>`, `DIRECT`, `BEFORE`, `STAFF`. Exactly
+ * the columns of its kind; the tags trimmed and in lower case.
+ */
+export interface AcquisitionSourcesTable {
+  id: Generated<number>;               // integer identity (GENERATED ALWAYS)
+  kind: SourceKind;
+  link_id: ColumnType<string | null, string | null | undefined, string | null>;
+  utm_source: ColumnType<string | null, string | null | undefined, string | null>;
+  utm_medium: ColumnType<string | null, string | null | undefined, string | null>;
+  utm_campaign: ColumnType<string | null, string | null | undefined, string | null>;
+  utm_content: ColumnType<string | null, string | null | undefined, string | null>;
+  utm_term: ColumnType<string | null, string | null | undefined, string | null>;
+  site: ColumnType<string | null, string | null | undefined, string | null>;
+  key: string;                         // ≤ 600 characters, unique
+  created_at: TimestampDefault;
+}
+
+/**
+ * A visit (migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6 item 5): one device from one source on one Paris day,
+ * its repeats in `arrivals`; never a DIRECT source. Kept 13 months, then summarised in acquisition_daily.
+ */
+export interface AcquisitionTouchesTable {
+  id: Generated<number>;               // bigint identity (GENERATED ALWAYS)
+  device_id: number;
+  source_id: number;
+  day: string;                         // date 'YYYY-MM-DD' (a Paris day)
+  first_at: Timestamp;
+  last_at: Timestamp;                  // >= first_at
+  arrivals: WithDefault<number>;       // integer >= 1
+  account_id: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+/** A collector's first source, kept for good (migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6 item 6). */
+export interface AccountSourcesTable {
+  account_id: string;
+  first_source_id: number;
+  first_seen_at: Timestamp;
+  set_at: Timestamp;
+  set_by: SourceSetBy;
+}
+
+/**
+ * A sign-up, draw entry, LIVE entry or order with its last link (migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6
+ * item 7), written once and never changed; `ref_id` names the account or the row of its table (no foreign key).
+ */
+export interface AcquisitionConversionsTable {
+  id: Generated<number>;               // bigint identity (GENERATED ALWAYS)
+  kind: ConversionKind;
+  ref_id: string;
+  account_id: string;
+  at: Timestamp;                       // the act's moment (§3.4 A.5)
+  last_source_id: number;
+  created_at: TimestampDefault;
+}
+
+/** The visits by source and Paris day once the raw rows are gone, kept for good (migration 0043, §3.4 A.6 item 8). */
+export interface AcquisitionDailyTable {
+  source_id: number;
+  day: string;                         // date 'YYYY-MM-DD' (a Paris day)
+  visits: number;
+  first_visits: number;
+  arrivals: number;
+}
+
+/**
+ * One row (id 1, migration 0043, plan CUSTOMER INTELLIGENCE §3.4 A.6 item 9): the recording's start (« Before tracking »
+ * before it) and the job's watermarks. Inserted by AcquisitionService.prepare at the first boot, never by the migration.
+ */
+export interface AcquisitionStateTable {
+  id: WithDefault<number>;             // smallint, always 1
+  tracking_started_at: Timestamp;
+  conversions_until: Timestamp;
+  catch_up_on: DateNullable;           // the last Paris day the daily catch-up ran
+  daily_until: DateNullable;           // the last Paris day summarised
 }
 
 /**
@@ -2586,6 +2730,14 @@ export interface Database {
   collector_view_totals: CollectorViewTotalsTable;
   collector_view_months: CollectorViewMonthsTable;
   tracking_state: TrackingStateTable;
+  link_channels: LinkChannelsTable;
+  links: LinksTable;
+  acquisition_sources: AcquisitionSourcesTable;
+  acquisition_touches: AcquisitionTouchesTable;
+  account_sources: AccountSourcesTable;
+  acquisition_conversions: AcquisitionConversionsTable;
+  acquisition_daily: AcquisitionDailyTable;
+  acquisition_state: AcquisitionStateTable;
   model_pairs: ModelPairsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
@@ -2719,6 +2871,14 @@ export type CollectorPlaceRow = Selectable<CollectorPlacesTable>;
 export type CollectorViewTotalRow = Selectable<CollectorViewTotalsTable>;
 export type CollectorViewMonthRow = Selectable<CollectorViewMonthsTable>;
 export type TrackingStateRow = Selectable<TrackingStateTable>;
+export type LinkChannelRow = Selectable<LinkChannelsTable>;
+export type LinkRow = Selectable<LinksTable>;
+export type AcquisitionSourceRow = Selectable<AcquisitionSourcesTable>;
+export type AcquisitionTouchRow = Selectable<AcquisitionTouchesTable>;
+export type AccountSourceRow = Selectable<AccountSourcesTable>;
+export type AcquisitionConversionRow = Selectable<AcquisitionConversionsTable>;
+export type AcquisitionDailyRow = Selectable<AcquisitionDailyTable>;
+export type AcquisitionStateRow = Selectable<AcquisitionStateTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
 export type CareRequestRow = Selectable<CareRequestsTable>;

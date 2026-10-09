@@ -54,8 +54,8 @@ export const VIEW_STATS_MAX_DAYS = 31;
 export const VIEW_PURGE_MAX_DAYS = 7;
 
 /**
- * The lot's growing tables (§3.3 T.10): the `intelligence sizes` line measures those that exist (the acquisition's come
- * with its own step).
+ * The lot's growing tables (§3.3 T.10): the `intelligence sizes` line measures those that exist (the acquisition's since
+ * migration 0043).
  */
 export const INTELLIGENCE_TABLES = [
   'collector_views',

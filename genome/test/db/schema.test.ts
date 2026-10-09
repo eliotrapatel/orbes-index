@@ -176,6 +176,11 @@ describe('schema', () => {
       ['device_daily_stats', 'browser', S.DEVICE_BROWSERS],
       ['device_daily_stats', 'opened_in', S.OPENED_IN],
       ['device_daily_stats', 'in_app', [...S.IN_APPS, 'NONE']],
+      ['links', 'destination', S.LINK_DESTINATIONS],
+      ['links', 'cost_currency', S.HOUSE_CURRENCIES],
+      ['acquisition_sources', 'kind', S.SOURCE_KINDS],
+      ['account_sources', 'set_by', S.SOURCE_SET_BY],
+      ['acquisition_conversions', 'kind', S.CONVERSION_KINDS],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -911,6 +916,54 @@ describe('schema', () => {
     const state = await t.db.insertInto('tracking_state').values({ started_at: at }).returningAll().executeTakeFirstOrThrow();
     expect(state).toEqual({ id: 1, started_at: at, scans_after_at: null, scans_after_id: null, scans_backfilled_at: null });
     await expect(t.db.insertInto('tracking_state').values({ started_at: at }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'tracking_state_pkey'));
+  });
+
+  it('the acquisition (0043): the mirror at work: a channel and a link with its cost; a link\'s, a campaign\'s, a site\'s and the direct source; a device\'s first source; a visit and its repeat; a first source; a conversion; a day\'s visits; the one state row', async () => {
+    const admin = await t.db.insertInto('admin_users').values({ email: 'links-0043@orbes.test', email_normalized: 'links-0043@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
+    const account = await t.db.insertInto('accounts').values({ email: 'acq-0043@example.com', email_normalized: 'acq-0043@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const channel = await t.db.insertInto('link_channels').values({ name: 'Influencers', position: 30 }).returningAll().executeTakeFirstOrThrow();
+    expect(channel).toEqual({ id: expect.any(String), name: 'Influencers', position: 30, created_by: null, created_at: expect.any(Date) });
+    const at = new Date('2026-10-09T08:00:00.000Z');
+    const link = await t.db
+      .insertInto('links')
+      .values({ code: 'lea-tiktok', name: 'Léa — TikTok', channel_id: channel.id, destination: 'NOW', cost_minor: 200_000, cost_currency: 'EUR', created_by: admin.id, created_at: at, updated_at: at })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(link).toEqual({
+      id: expect.any(String), code: 'lea-tiktok', name: 'Léa — TikTok', channel_id: channel.id, destination: 'NOW', drop_id: null, model_id: null, cost_minor: 200_000, cost_currency: 'EUR',
+      note: null, archived_at: null, archived_by: null, created_by: admin.id, created_at: at, updated_at: at,
+    });
+    await expect(t.db.updateTable('links').set({ code: 'lea' }).where('id', '=', link.id).execute()).rejects.toSatisfy(isGuardViolation);
+    const viaLink = await t.db.insertInto('acquisition_sources').values({ kind: 'LINK', link_id: link.id, key: `L:${link.id}` }).returningAll().executeTakeFirstOrThrow();
+    expect(viaLink).toEqual({ id: expect.any(Number), kind: 'LINK', link_id: link.id, utm_source: null, utm_medium: null, utm_campaign: null, utm_content: null, utm_term: null, site: null, key: `L:${link.id}`, created_at: expect.any(Date) });
+    const campaign = await t.db.insertInto('acquisition_sources').values({ kind: 'CAMPAIGN', utm_source: 'ig', utm_campaign: 'drop-14', key: 'C:ig\u001f\u001fdrop-14\u001f\u001f' }).returningAll().executeTakeFirstOrThrow();
+    expect(campaign).toMatchObject({ kind: 'CAMPAIGN', utm_source: 'ig', utm_medium: null, utm_campaign: 'drop-14' });
+    await t.db.insertInto('acquisition_sources').values({ kind: 'SITE', site: 'theorbes.com', key: 'S:theorbes.com' }).execute();
+    await expect(t.db.insertInto('acquisition_sources').values({ kind: 'SITE', key: 'S:x' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'acquisition_sources_shape'));
+    const direct = await t.db.insertInto('acquisition_sources').values({ kind: 'DIRECT', key: 'DIRECT' }).returning('id').executeTakeFirstOrThrow();
+    const device = await t.db.insertInto('tracking_devices').values({ device_hash: 'A'.repeat(43), first_source_id: viaLink.id, first_seen_at: at, last_seen_at: at }).returningAll().executeTakeFirstOrThrow();
+    expect(device.first_source_id).toBe(viaLink.id);
+    const fresh = await t.db.insertInto('tracking_devices').values({ device_hash: 'B'.repeat(43) }).returningAll().executeTakeFirstOrThrow();
+    expect(fresh.first_source_id).toBeNull();
+    const touch = await t.db.insertInto('acquisition_touches').values({ device_id: device.id, source_id: viaLink.id, day: '2026-10-09', first_at: at, last_at: at }).returningAll().executeTakeFirstOrThrow();
+    expect(touch).toEqual({ id: expect.any(Number), device_id: device.id, source_id: viaLink.id, day: '2026-10-09', first_at: at, last_at: at, arrivals: 1, account_id: null });
+    const later = new Date('2026-10-09T09:30:00.000Z');
+    const repeat = await t.db
+      .insertInto('acquisition_touches')
+      .values({ device_id: device.id, source_id: viaLink.id, day: '2026-10-09', first_at: later, last_at: later, account_id: account.id })
+      .onConflict((oc) => oc.columns(['device_id', 'source_id', 'day']).doUpdateSet({ last_at: sql`excluded.last_at`, arrivals: sql`acquisition_touches.arrivals + 1`, account_id: sql`coalesce(acquisition_touches.account_id, excluded.account_id)` }))
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(repeat).toMatchObject({ id: touch.id, first_at: at, last_at: later, arrivals: 2, account_id: account.id });
+    const first = await t.db.insertInto('account_sources').values({ account_id: account.id, first_source_id: viaLink.id, first_seen_at: at, set_at: later, set_by: 'SIGN_UP' }).returningAll().executeTakeFirstOrThrow();
+    expect(first).toEqual({ account_id: account.id, first_source_id: viaLink.id, first_seen_at: at, set_at: later, set_by: 'SIGN_UP' });
+    const conversion = await t.db.insertInto('acquisition_conversions').values({ kind: 'SIGNUP', ref_id: account.id, account_id: account.id, at: later, last_source_id: viaLink.id }).returningAll().executeTakeFirstOrThrow();
+    expect(conversion).toEqual({ id: expect.any(Number), kind: 'SIGNUP', ref_id: account.id, account_id: account.id, at: later, last_source_id: viaLink.id, created_at: expect.any(Date) });
+    const daily = await t.db.insertInto('acquisition_daily').values({ source_id: direct.id, day: '2026-10-08', visits: 0, first_visits: 3, arrivals: 0 }).returningAll().executeTakeFirstOrThrow();
+    expect(daily).toEqual({ source_id: direct.id, day: '2026-10-08', visits: 0, first_visits: 3, arrivals: 0 });
+    const state = await t.db.insertInto('acquisition_state').values({ tracking_started_at: at, conversions_until: at }).returningAll().executeTakeFirstOrThrow();
+    expect(state).toEqual({ id: 1, tracking_started_at: at, conversions_until: at, catch_up_on: null, daily_until: null });
+    await expect(t.db.insertInto('acquisition_state').values({ tracking_started_at: at, conversions_until: at }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'acquisition_state_pkey'));
   });
 
   it('audit_logs is append-only at the database level', async () => {
