@@ -77,6 +77,7 @@ import { invoicesView } from './views/invoices.js';
 import { segmentsView, segmentView } from './views/segments.js';
 import { supplierOrderView } from './views/supplier-order.js';
 import { supplierOrdersView } from './views/supplier-orders.js';
+import { linksView } from './views/links.js';
 import { lookbookView } from './views/lookbook.js';
 import { ownerView } from './views/owner.js';
 import { ownersView } from './views/owners.js';
@@ -139,6 +140,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
       { route: 'owners', label: 'Owners' },
       { route: 'club', label: 'Club' },
       { route: 'segments', label: 'Segments' },
+      // Plan CUSTOMER INTELLIGENCE §3.4 A.10: Links under Segments.
+      { route: 'links', label: 'Links', cap: 'readLinks' },
       { route: 'orders', label: 'Orders' },
       { route: 'invoices', label: 'Invoices' },
       { route: 'warranties', label: 'Warranties' },
@@ -205,6 +208,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   segments: { view: segmentsView, title: 'Segments', nav: 'segments' },
   segmentNew: { view: segmentView, title: 'New segment', nav: 'segments' },
   segment: { view: segmentView, title: 'Segment', nav: 'segments' },
+  links: { view: linksView, title: 'Links', nav: 'links' },
   logistics: { view: logisticsView, title: 'Logistics', nav: 'logistics' },
   logisticsOrder: { view: shippingView, title: 'Parcel', nav: 'logistics' },
   logisticsSlip: { view: shippingSlipView, title: 'Packing slip', nav: 'logistics' },

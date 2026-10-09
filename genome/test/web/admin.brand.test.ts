@@ -173,6 +173,23 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect(words).not.toMatch(/atelier|handmade|craft|product/i);
   });
 
+  it('writes the Links pages calmly (plan CUSTOMER INTELLIGENCE §3.4 A.10): no atelier, handmade or craft, no exclamation mark, never « product »', () => {
+    const files = ['model', 'views'].flatMap((dir) =>
+      readdirSync(join(WEB, 'admin', dir))
+        .filter((f) => /^link/.test(f))
+        .map((f) => join(WEB, 'admin', dir, f)),
+    );
+    expect(files.map((f) => f.slice(WEB.length))).toEqual(expect.arrayContaining(['/admin/model/links.ts', '/admin/views/links.ts']));
+    for (const f of files) {
+      const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+      expect(code, f).not.toMatch(/atelier|handmade|hand-made|craft/i);
+      // Every word between quotes: no exclamation mark, never « product » (a piece, a model, a link).
+      const words = [...code.matchAll(/'([^'\n]*)'|`([^`\n]*)`/g)].map((m) => m[1] ?? m[2] ?? '').join('\n');
+      expect(words, f).not.toMatch(/!(?!==?)/);
+      expect(words, f).not.toMatch(/\bproducts?\b/i);
+    }
+  });
+
   it('sets type from brand.css tokens wherever a token has the same value', () => {
     const bySize: Record<string, string> = {};
     const byTrack: Record<string, string> = {};

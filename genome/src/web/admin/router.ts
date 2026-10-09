@@ -42,6 +42,13 @@ export const ROUTES = [
   { name: 'segments', path: '/segments' },
   { name: 'segmentNew', path: '/segments/new' },
   { name: 'segment', path: '/segments/:segmentId' },
+  /**
+   * Links (plan CUSTOMER INTELLIGENCE §3.4 A.10): the page under Segments; the collectors behind a figure (before a
+   * link's page, so its path is never read as a link's id) and a link's page, from their rows.
+   */
+  { name: 'links', path: '/links' },
+  { name: 'linkCollectors', path: '/links/collectors' },
+  { name: 'link', path: '/links/:linkId' },
   { name: 'warranties', path: '/warranties' },
   /** The Yearly care board (BP-19 T6): the requests by step; a request's page from its row, or from a client's Messages row. */
   { name: 'care', path: '/care' },

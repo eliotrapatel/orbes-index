@@ -77,16 +77,17 @@ body {
   display: block;
   /* 24 and 20 px: the room the Segments link of an ADMIN's sidebar needed (plan LIVE RELEASE+), then Growth under
      Overview (plan NEXT-NINE, BP-29), with the foot's and the monogram's; 20 and 14 px for Supplier orders under
-     Registry (plan NEXT LOT §3.5.4.2). */
-  padding: 20px 32px 14px;
+     Registry (plan NEXT LOT §3.5.4.2); 14 and 8 px for Links under Segments (plan CUSTOMER INTELLIGENCE §3.4 A.10). */
+  padding: 14px 32px 8px;
   text-decoration: none;
   border-bottom: 1px solid var(--hairline);
 }
 
-/* The monogram over the word, left-aligned with it (brand.css .monogram). */
+/* The monogram over the word, left-aligned with it (brand.css .monogram); 10 px under it since Links (plan CUSTOMER
+   INTELLIGENCE §3.4 A.10), so an ADMIN's sidebar still fits a 900 px screen. */
 .side__monogram {
   width: 44px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 /* The shared .wordmark spec (brand.css: --track-wordmark), at sidebar size; left-aligned, so no centring indent. */
@@ -5322,4 +5323,330 @@ fieldset.cfield--checks > .cfield__label {
     padding-left: 0;
     border-left: 0;
   }
+}
+
+/* ── Links (plan CUSTOMER INTELLIGENCE §3.4 A.10) ─────────────────────────
+   The first link and the last link side by side, a hairline between the groups; under 600 px one block per row,
+   hairlines between, no cards, the period and the view as two selects. */
+
+.links__controls {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.links__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+}
+
+.links__bar > .cinput--select {
+  width: auto;
+  min-width: 96px;
+}
+
+.links__bar--phone,
+.links__phone {
+  display: none;
+}
+
+.links__custom {
+  padding-bottom: 0;
+}
+
+.links__custom .cfield {
+  margin-bottom: 0;
+}
+
+.links__problem {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--critical);
+}
+
+.links__table th,
+.links__table td {
+  padding-right: 10px;
+}
+
+/* Fourteen columns at a desk's width: the headings on two lines rather than past the page. */
+.links__table th {
+  white-space: normal;
+  letter-spacing: 0.14em;
+  vertical-align: bottom;
+}
+
+.links__table .col--wide {
+  width: auto;
+  min-width: 190px;
+}
+
+.links__table .links__address .mono {
+  overflow-wrap: anywhere;
+}
+
+.links__groups th {
+  padding-bottom: 8px;
+  text-align: center;
+  color: var(--ink);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.links__table .links__split {
+  padding-left: 10px;
+  border-left: 1px solid var(--hairline);
+}
+
+.links__mark {
+  color: var(--ink-soft);
+  cursor: help;
+}
+
+.links__figure {
+  white-space: nowrap;
+}
+
+.links__return {
+  display: inline-block;
+  max-width: 110px;
+  white-space: normal;
+}
+
+.links__name {
+  display: block;
+}
+
+.links__name-line {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.links__row--channel .links__name-line {
+  letter-spacing: 0.12em;
+}
+
+.links__row--link .links__name,
+.links__row--campaign .links__name {
+  padding-left: 16px;
+}
+
+.links__archived {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.2em;
+  color: var(--ink-soft);
+}
+
+.links__address {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+  font-size: var(--fs-micro);
+  overflow-wrap: anywhere;
+}
+
+.links__heading-row td {
+  height: auto;
+  padding-top: 24px;
+}
+
+.links__heading {
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.links__row--total td {
+  font-weight: 700;
+  border-top: 1px solid var(--ink);
+}
+
+.links__notes {
+  display: grid;
+  gap: 6px;
+  margin: 22px 0 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.links__note {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+
+.links__note dt {
+  color: var(--ink);
+}
+
+.links__note dd {
+  margin: 0;
+}
+
+.links__empty,
+.links__failed {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.links__block {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.links__block--total {
+  font-weight: 700;
+  border-top: 1px solid var(--ink);
+}
+
+.links__heading--phone {
+  margin: 22px 0 0;
+}
+
+.links__visits,
+.links__cost {
+  margin: 8px 0 0;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.links__cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 10px;
+}
+
+.links__col {
+  margin: 0;
+}
+
+.links__col-title {
+  margin-bottom: 6px;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  color: var(--ink-soft);
+}
+
+.links__col-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: var(--fs-line);
+  font-variant-numeric: tabular-nums;
+}
+
+.links__col-label {
+  color: var(--ink-soft);
+}
+
+.links__col-line .links__return {
+  text-align: right;
+  white-space: normal;
+}
+
+@media (max-width: 599px) {
+  .links__bar--desk,
+  .links__desk {
+    display: none;
+  }
+  .links__bar--phone {
+    display: flex;
+  }
+  .links__phone {
+    display: block;
+  }
+  .links__bar--phone .cinput--select {
+    flex: 1 1 140px;
+    width: auto;
+  }
+}
+
+/* The New link dialog: the address after its fixed start, the cost beside its currency, a new channel's Add. */
+.links__code {
+  display: flex;
+  align-items: baseline;
+}
+
+.links__prefix {
+  font-size: var(--fs-line);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.links__code .cinput {
+  flex: 1;
+  min-width: 0;
+}
+
+.links__cost-field {
+  display: flex;
+  gap: 12px;
+}
+
+.links__cost-field .cinput:first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.links__cost-field .cinput--select {
+  flex: 0 0 96px;
+  width: 96px;
+}
+
+.links__inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.links__inline .cinput {
+  flex: 1 1 160px;
+  width: auto;
+  min-width: 0;
+}
+
+.links__ready-address {
+  margin: 10px 0;
+  font-size: var(--fs-heading);
+  overflow-wrap: anywhere;
+}
+
+.links__ready-direct {
+  margin: 10px 0;
+  font-size: var(--fs-micro);
+  overflow-wrap: anywhere;
+}
+
+.links__channels {
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--hairline);
+}
+
+.links__channel {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.links__channel-add {
+  margin-top: 22px;
 }

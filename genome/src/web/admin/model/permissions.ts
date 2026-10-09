@@ -142,6 +142,10 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   exportAccount: 'ADMIN',
   /** The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10): the answers to « How did you hear about ORBES? » added, renamed, moved, set aside. */
   manageHeardOptions: 'ADMIN',
+  /** Links (plan CUSTOMER INTELLIGENCE §3.4 A.10): the page, a link's page and the collectors behind a figure, emails masked for an AUDITOR. */
+  readLinks: 'AUDITOR',
+  /** Links: New link, Edit, Archive and Unarchive, the Channels (added, renamed, moved, removed while unused). */
+  manageLinks: 'OPERATOR',
 } as const satisfies Record<string, AdminRole>);
 
 export type Capability = keyof typeof CAPABILITY_MIN_ROLE;

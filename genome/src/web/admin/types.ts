@@ -3452,3 +3452,185 @@ export interface HeardOptionView {
   position: number;
   given?: number;
 }
+
+// ── Links (plan CUSTOMER INTELLIGENCE §3.4 A.10; API §16.35; services/links.ts, services/acquisition-report.ts) ──
+
+/** A channel of links (GET /api/admin/link-channels): its name, its place, how many links name it (archived ones included). */
+export interface LinkChannelView {
+  id: string;
+  name: string;
+  position: number;
+  links: number;
+}
+
+/** A console link (services/links.ts LinkView): its short address and the direct one, where it leads, its cost. */
+export interface LinkView {
+  id: string;
+  code: string;
+  name: string;
+  channel: { id: string; name: string };
+  destination: LinkDestination;
+  dropId: string | null;
+  modelId: string | null;
+  cost: { minor: number; currency: HouseCurrency } | null;
+  note: string | null;
+  address: string;
+  directAddress: string;
+  archivedAt: Iso | null;
+  createdBy: { id: string; email: string };
+  createdAt: Iso;
+  updatedAt: Iso;
+}
+
+/** What the New link dialog offers (GET /api/admin/links/destinations). */
+export interface LinkDestinations {
+  releases: { id: string; title: string; mode: 'DRAW' | 'LIVE'; opensAt: Iso; model: string }[];
+  models: { id: string; name: string; variantLabel: string | null; variantOf: string | null; slug: string | null }[];
+}
+
+/** What a source brought in under one attribution. */
+export interface LinkResults {
+  signups: number;
+  entries: number;
+  purchases: number;
+  revenueMinor: number;
+}
+
+/** A row's figures: visits once, then the first link (discovery) and the last link (conversion) side by side. */
+export interface LinkFigures {
+  visits: number;
+  firstVisits: number;
+  first: LinkResults;
+  last: LinkResults;
+}
+
+/** RETURN, SINCE MADE: revenue in the cost's currency since the link was made, divided by its cost. */
+export interface LinkReturn {
+  revenueMinor: number;
+  costMinor: number;
+  currency: HouseCurrency;
+  ratio: number | null;
+}
+
+export interface LinkReturns {
+  first: LinkReturn;
+  last: LinkReturn;
+}
+
+export interface LinkReportRow {
+  link: LinkView;
+  sourceId: number | null;
+  figures: LinkFigures;
+  returns: LinkReturns | null;
+}
+
+export interface LinkChannelGroup {
+  channel: { id: string; name: string; position: number };
+  figures: LinkFigures;
+  cost: { minor: number; currency: HouseCurrency } | null;
+  returns: LinkReturns | null;
+  links: LinkReportRow[];
+}
+
+export interface LinkCampaignRow {
+  source: string | null;
+  medium: string | null;
+  campaign: string | null;
+  sourceIds: number[];
+  variants: number;
+  content: string | null;
+  term: string | null;
+  figures: LinkFigures;
+}
+
+export interface LinkCampaignGroup {
+  utmSource: string | null;
+  figures: LinkFigures;
+  rows: LinkCampaignRow[];
+}
+
+export interface LinkSiteRow {
+  site: string;
+  sourceId: number;
+  figures: LinkFigures;
+}
+
+export interface LinkSourceLine {
+  kind: SourceKind;
+  figures: LinkFigures;
+}
+
+export const LINKS_VIEWS = ['links', 'campaigns', 'sites'] as const;
+export type LinksView = (typeof LINKS_VIEWS)[number];
+
+/** GET /api/admin/links: the period's figures on one of the three views, the lines without one, the TOTAL. */
+export interface LinksReport {
+  view: LinksView;
+  period: { from: string | null; to: string | null };
+  currency: HouseCurrency;
+  currencies: HouseCurrency[];
+  archived: boolean;
+  trackingStartedAt: Iso | null;
+  channels: LinkChannelGroup[];
+  campaigns: LinkCampaignGroup[];
+  sites: LinkSiteRow[];
+  without: LinkSourceLine[];
+  total: LinkFigures;
+}
+
+/** A day of one link: its visits, first visits, and sign-ups as the first link and as the last. */
+export interface LinkDay {
+  day: string;
+  visits: number;
+  firstVisits: number;
+  signupsFirst: number;
+  signupsLast: number;
+}
+
+/** GET /api/admin/links/:id: one link, its figures, its days and its return. */
+export interface LinkReport {
+  link: LinkView;
+  destinationGone: boolean;
+  period: { from: string | null; to: string | null };
+  currency: HouseCurrency;
+  currencies: HouseCurrency[];
+  figures: LinkFigures;
+  returns: LinkReturns | null;
+  days: LinkDay[];
+}
+
+export const LINK_ATTRIBUTIONS = ['first', 'last'] as const;
+export type LinkAttribution = (typeof LINK_ATTRIBUTIONS)[number];
+export const LINK_MEASURES = ['signups', 'entries', 'purchases', 'revenue'] as const;
+export type LinkMeasure = (typeof LINK_MEASURES)[number];
+
+/** A collector behind a figure (GET /api/admin/acquisition/collectors), the email masked for an AUDITOR. */
+export interface LinkFigureCollector {
+  accountId: string;
+  email: string;
+  country: string | null;
+  signedUpAt: Iso;
+  entries: number;
+  purchases: number;
+  revenueMinor: number;
+}
+
+export interface LinkFigureCollectors {
+  items: LinkFigureCollector[];
+  total: number;
+  page: number;
+  pageSize: number;
+  currency: HouseCurrency;
+}
+
+/** POST /api/admin/links (PATCH takes the same fields but `code`): what the New link and Edit dialogs send. */
+export interface LinkInput {
+  name: string;
+  channelId: string;
+  destination: LinkDestination;
+  dropId?: string | null;
+  modelId?: string | null;
+  code?: string | null;
+  cost?: { minor: number; currency: HouseCurrency } | null;
+  note?: string | null;
+}

@@ -28,6 +28,16 @@ import type {
   LiveSizeMix,
   Carrier,
   HeardOptionView,
+  LinkAttribution,
+  LinkChannelView,
+  LinkDestinations,
+  LinkFigureCollectors,
+  LinkInput,
+  LinkMeasure,
+  LinkReport,
+  LinksReport,
+  LinksView,
+  LinkView,
   InvoiceFilters,
   InvoiceList,
   OrderAlertDelays,
@@ -1280,6 +1290,71 @@ export class AdminApi {
   /** ADMIN: every answer but Other, in its new order (Other stays last). */
   orderHeardOptions(ids: string[]): Promise<{ options: HeardOptionView[] }> {
     return this.request('PUT', '/api/admin/heard-options/order', { body: { ids } });
+  }
+
+  // ── Links (plan CUSTOMER INTELLIGENCE §3.4 A.7.2, A.10; API §16.35) ──
+
+  /** AUDITOR+: the report of a period of Paris days (both or neither), on one view, the archived links listed or not. */
+  linksReport(q: { from?: string | null; to?: string | null; currency?: string | null; view?: LinksView; archived?: boolean } = {}): Promise<LinksReport> {
+    return this.get('/api/admin/links', { from: q.from, to: q.to, currency: q.currency, view: q.view, archived: q.archived ? 'true' : undefined });
+  }
+
+  /** AUDITOR+: one link, its figures, its days and its return, for a period of Paris days. */
+  linkReport(id: string, q: { from?: string | null; to?: string | null; currency?: string | null } = {}): Promise<LinkReport> {
+    return this.get(`/api/admin/links/${encodeURIComponent(id)}`, { from: q.from, to: q.to, currency: q.currency });
+  }
+
+  /** AUDITOR+: the collectors behind a figure, 25 a page; their emails masked for an AUDITOR. */
+  linkCollectors(q: {
+    source: string;
+    attribution: LinkAttribution;
+    measure: LinkMeasure;
+    from?: string | null;
+    to?: string | null;
+    currency?: string | null;
+    page?: number;
+  }): Promise<LinkFigureCollectors> {
+    return this.get('/api/admin/acquisition/collectors', { ...q, page: q.page && q.page > 1 ? q.page : undefined });
+  }
+
+  /** AUDITOR+: the releases and models the New link dialog offers. */
+  linkDestinations(): Promise<LinkDestinations> {
+    return this.get('/api/admin/links/destinations');
+  }
+
+  /** OPERATOR+: a link made (and its LINK source); 409 LINK_CODE_TAKEN when its address is taken. */
+  async createLink(input: LinkInput): Promise<LinkView> {
+    return (await this.post<{ link: LinkView }>('/api/admin/links', input)).link;
+  }
+
+  /** OPERATOR+: its name, channel, destination, cost and note; never its address. */
+  async updateLink(id: string, change: Partial<Omit<LinkInput, 'code'>>): Promise<LinkView> {
+    return (await this.patch<{ link: LinkView }>(`/api/admin/links/${encodeURIComponent(id)}`, change)).link;
+  }
+
+  /** OPERATOR+: out of the list's default view (it keeps redirecting and counting), or back. */
+  async archiveLink(id: string, archived: boolean): Promise<LinkView> {
+    return (await this.post<{ link: LinkView }>(`/api/admin/links/${encodeURIComponent(id)}/${archived ? 'archive' : 'unarchive'}`)).link;
+  }
+
+  /** AUDITOR+: the channels in their order, each with how many links name it. */
+  async linkChannels(): Promise<LinkChannelView[]> {
+    return (await this.get<{ channels: LinkChannelView[] }>('/api/admin/link-channels')).channels;
+  }
+
+  /** OPERATOR+: a channel added, last unless a place is given. */
+  async createLinkChannel(input: { name: string; position?: number }): Promise<LinkChannelView> {
+    return (await this.post<{ channel: LinkChannelView }>('/api/admin/link-channels', input)).channel;
+  }
+
+  /** OPERATOR+: renamed or moved. */
+  async updateLinkChannel(id: string, change: { name?: string; position?: number }): Promise<LinkChannelView> {
+    return (await this.patch<{ channel: LinkChannelView }>(`/api/admin/link-channels/${encodeURIComponent(id)}`, change)).channel;
+  }
+
+  /** OPERATOR+: removed while no link names it (409 CHANNEL_IN_USE otherwise). */
+  async deleteLinkChannel(id: string): Promise<void> {
+    await this.del(`/api/admin/link-channels/${encodeURIComponent(id)}`);
   }
 
   // ── Logistics (plan NEXT LOT §3.5.6.9; the agent's locations only, for a LOGISTICS login) ──

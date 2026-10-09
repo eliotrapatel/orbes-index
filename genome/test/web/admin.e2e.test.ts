@@ -2101,16 +2101,17 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     await signIn(p, ADMIN.email, ADMIN.password);
     await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Dashboard');
     // Club in the Clients group after Owners, then Segments, Orders and Invoices (plan LIVE RELEASE+), Messages first
-    // (plan NEXT-NINE, CS-01), Yearly care after Warranties (BP-19 T6); the ADMIN's sidebar, twenty-eight links with
+    // (plan NEXT-NINE, CS-01), Yearly care after Warranties (BP-19 T6), Links after Segments; the ADMIN's sidebar, twenty-nine links with
     // Growth under Overview (BP-29), Logistics in the Atelier's place and Supplier orders under it (plan NEXT LOT
     // §3.5.4.1, no Atelier), still fits a 900 px screen.
     const registry = p.locator('.side__group', { hasText: 'Registry' }).locator('.side__link');
     expect(await registry.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['products', 'genomes', 'codes', 'catalogue', 'logistics', 'supplierOrders']);
     expect(await registry.allTextContents()).not.toContain('Atelier');
     const clients = p.locator('.side__group', { hasText: 'Clients' }).locator('.side__link');
-    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['messages', 'owners', 'club', 'segments', 'orders', 'invoices', 'warranties', 'care', 'retailers', 'sale']);
-    // 28 with Supplier orders under Registry (plan NEXT LOT §3.5.4.2).
-    expect(await p.locator('.side__link').count()).toBe(28);
+    // Links under Segments (plan CUSTOMER INTELLIGENCE §3.4 A.10).
+    expect(await clients.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['messages', 'owners', 'club', 'segments', 'links', 'orders', 'invoices', 'warranties', 'care', 'retailers', 'sale']);
+    // 28 with Supplier orders under Registry (plan NEXT LOT §3.5.4.2), 29 with Links (plan CUSTOMER INTELLIGENCE §3.4 A.10).
+    expect(await p.locator('.side__link').count()).toBe(29);
     // Every link one height, its count badges (Anomalies, Messages) shown or not, whatever font the system falls back to.
     expect(new Set(await p.locator('.side__link').evaluateAll((links) => links.map((a) => a.getBoundingClientRect().height))).size).toBe(1);
     for (const id of ['sign-out', 'change-password']) {
@@ -3146,8 +3147,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     // Overview: Dashboard, Growth, …; the ADMIN's sidebar with Growth, Messages and Yearly care still fits 1 440 × 900.
     const overview = p.locator('.side__group', { hasText: 'Overview' }).locator('.side__link');
     expect(await overview.evaluateAll((links) => links.map((a) => a.getAttribute('data-route')))).toEqual(['dashboard', 'growth', 'generator', 'documents']);
-    // 28 with Supplier orders under Registry (plan NEXT LOT §3.5.4.2).
-    expect(await p.locator('.side__link').count()).toBe(28);
+    // 28 with Supplier orders under Registry (plan NEXT LOT §3.5.4.2), 29 with Links (plan CUSTOMER INTELLIGENCE §3.4 A.10).
+    expect(await p.locator('.side__link').count()).toBe(29);
     // Every link one height, its count badges (Anomalies, Messages) shown or not, whatever font the system falls back to.
     expect(new Set(await p.locator('.side__link').evaluateAll((links) => links.map((a) => a.getBoundingClientRect().height))).size).toBe(1);
     for (const id of ['sign-out', 'change-password']) {
