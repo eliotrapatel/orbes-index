@@ -3,6 +3,8 @@ export { EARTH_RADIUS_KM, haversineKm, isValidLatLon } from './haversine.js';
 export { MMDB_CHECK_INTERVAL_MS, MmdbGeoDatabase, geoFromRecord, openMmdb, publicAddress, type MmdbGeoOptions, type MmdbStatus } from './mmdb.js';
 export {
   GeoResolver,
+  MAX_CITY_LENGTH,
+  normalizeCity,
   normalizeCountry,
   normalizeLatLon,
   roundCoord,

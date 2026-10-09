@@ -1,5 +1,5 @@
 /**
- * Local GeoIP lookups (GEO_MODE=mmdb): client IP → { country, lat, lon } from
+ * Local GeoIP lookups (GEO_MODE=mmdb): client IP → { country, city, lat, lon } from
  * a MaxMind-format database file (DB-IP "IP to City Lite" by default, CC BY
  * 4.0; GeoLite2-City has the same layout), so anomaly scoring (impossible
  * travel, geographic dispersion) works without an edge such as Cloudflare.
@@ -30,7 +30,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { BlockList, isIP } from 'node:net';
 import { Reader, type Response } from 'mmdb-lib';
 import { systemClock, type Clock, type Logger } from '../types.js';
-import { normalizeCountry, roundCoord, type GeoInfo } from './resolver.js';
+import { normalizeCity, normalizeCountry, roundCoord, type GeoInfo } from './resolver.js';
 
 /** How often (at most) the file is stat()ed for changes. */
 export const MMDB_CHECK_INTERVAL_MS = 10 * 60 * 1000;
@@ -58,6 +58,7 @@ export interface MmdbStatus {
 
 /** Shape of the record fields read here (MaxMind City / DB-IP City layout). */
 interface RecordShape {
+  city?: { names?: { en?: unknown } };
   country?: { iso_code?: unknown };
   registered_country?: { iso_code?: unknown };
   location?: { latitude?: unknown; longitude?: unknown };
@@ -139,7 +140,7 @@ export function publicAddress(ip: unknown): { address: string; family: 4 | 6 } |
   return undefined;
 }
 
-/** Country and rounded point of one database record; {} when nothing usable. */
+/** Country, city (`city.names.en`, plan CUSTOMER INTELLIGENCE §3.3 T.8.2) and rounded point of one database record; {} when nothing usable. */
 export function geoFromRecord(record: unknown): GeoInfo {
   if (!record || typeof record !== 'object') return {};
   const r = record as RecordShape;
@@ -147,6 +148,8 @@ export function geoFromRecord(record: unknown): GeoInfo {
   const iso = r.country?.iso_code ?? r.registered_country?.iso_code;
   const country = typeof iso === 'string' ? normalizeCountry(iso) : undefined;
   if (country) out.country = country;
+  const city = normalizeCity(r.city?.names?.en);
+  if (city) out.city = city;
   const lat = r.location?.latitude;
   const lon = r.location?.longitude;
   if (

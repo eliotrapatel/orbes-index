@@ -102,6 +102,16 @@ describe('GeoResolver', () => {
     expect(r.resolve(req({ 'cf-region': 'x'.repeat(65) }))).toEqual({});
   });
 
+  it('cloudflare mode reads cf-ipcity by the region\'s rule, trimmed, 1 to 80 characters (plan CUSTOMER INTELLIGENCE §3.3 T.8.2)', () => {
+    const r = new GeoResolver({ mode: 'cloudflare' });
+    expect(r.resolve(req({ 'cf-ipcountry': 'FR', 'cf-ipcity': ' Saint-Étienne ' }))).toEqual({ country: 'FR', city: 'Saint-Étienne' });
+    expect(r.resolve(req({ 'cf-ipcountry': 'FR', 'cf-ipcity': 'x'.repeat(80) }))).toEqual({ country: 'FR', city: 'x'.repeat(80) });
+    for (const bad of ['x'.repeat(81), '<script>', 'Paris;Lyon', '   ', '']) expect(r.resolve(req({ 'cf-ipcountry': 'FR', 'cf-ipcity': bad })), bad).toEqual({ country: 'FR' });
+    // Headers mode has no city name: an x-geo-city header is never read.
+    const h = new GeoResolver({ mode: 'headers', countryHeader: 'x-geo-country' });
+    expect(h.resolve(req({ 'x-geo-country': 'FR', 'cf-ipcity': 'Paris' }))).toEqual({ country: 'FR' });
+  });
+
   it('headers mode reads the configured names (case-insensitive) and takes the first of repeated headers', () => {
     const r = new GeoResolver({ mode: 'headers', countryHeader: 'X-Geo-Country', latHeader: 'x-geo-lat', lonHeader: 'x-geo-lon' });
     expect(r.resolve(req({ 'x-geo-country': ['US', 'FR'], 'x-geo-lat': '40.71', 'x-geo-lon': '-74.01' }))).toEqual({

@@ -91,6 +91,22 @@ describe('geoFromRecord', () => {
     expect(geoFromRecord({ location: { latitude: -0.04, longitude: 0.04 } })).toEqual({ lat: 0, lon: 0 }); // never -0
   });
 
+  it('reads the city from city.names.en, trimmed, by the region\'s rule (plan CUSTOMER INTELLIGENCE §3.3 T.8.2)', () => {
+    const gb = { country: { iso_code: 'GB' }, location: { latitude: 51.5142, longitude: -0.0931 } };
+    expect(geoFromRecord({ ...gb, city: { names: { en: 'London', fr: 'Londres' } } })).toEqual({ country: 'GB', city: 'London', lat: 51.5, lon: -0.1 });
+    expect(geoFromRecord({ country: { iso_code: 'FR' }, city: { names: { en: '  Saint-Étienne ' } } })).toEqual({ country: 'FR', city: 'Saint-Étienne' });
+    expect(geoFromRecord({ country: { iso_code: 'US' }, city: { names: { en: "St. John's (Old Town)" } } })).toEqual({ country: 'US', city: "St. John's (Old Town)" });
+    expect(geoFromRecord({ country: { iso_code: 'JP' }, city: { names: { en: '東京' } } })).toEqual({ country: 'JP', city: '東京' });
+    expect(geoFromRecord({ country: { iso_code: 'FR' }, city: { names: { en: 'a'.repeat(80) } } }).city).toBe('a'.repeat(80));
+    // Refused, never guessed: over 80 characters, odd characters, empty, not a string; the rest of the record is kept.
+    for (const en of ['a'.repeat(81), 'Paris<script>', 'Paris/Île', 'Paris\nLyon', '   ', '', 42, null, ['Paris'], { x: 1 }]) {
+      expect(geoFromRecord({ ...gb, city: { names: { en } } }), String(en)).toEqual({ country: 'GB', lat: 51.5, lon: -0.1 });
+    }
+    for (const city of [undefined, null, 'London', { names: null }, { names: { fr: 'Londres' } }]) {
+      expect(geoFromRecord({ ...gb, city }), JSON.stringify(city)).toEqual({ country: 'GB', lat: 51.5, lon: -0.1 });
+    }
+  });
+
   it('drops unknown countries, out-of-range or non-numeric coordinates and junk', () => {
     expect(geoFromRecord({ country: { iso_code: 'ZZ' }, location: { latitude: 200, longitude: 0 } })).toEqual({});
     expect(geoFromRecord({ country: { iso_code: 42 }, location: { latitude: '48.8', longitude: 2.3 } })).toEqual({});
@@ -120,7 +136,7 @@ describe('openMmdb', () => {
 });
 
 describe('MmdbGeoDatabase', () => {
-  it('resolves fixture addresses to { country, lat, lon } rounded to 1 decimal', () => {
+  it('resolves fixture addresses to { country, city, lat, lon }, the point rounded to 1 decimal', () => {
     const path = fresh();
     writeFileSync(path, buildMmdb(FIXTURE));
     const log = tracked();
@@ -129,11 +145,11 @@ describe('MmdbGeoDatabase', () => {
     expect(log.lines).toHaveLength(1);
     expect(log.lines[0]).toMatchObject({ level: 'info', m: 'geoip database loaded' });
 
-    expect(db.lookup('81.2.69.160')).toEqual({ country: 'GB', lat: 51.5, lon: -0.1 });
-    expect(db.lookup('::ffff:81.2.69.160')).toEqual({ country: 'GB', lat: 51.5, lon: -0.1 });
-    expect(db.lookup('90.12.34.56')).toEqual({ country: 'FR', lat: 48.9, lon: 2.4 });
-    expect(db.lookup('1.0.17.1')).toEqual({ country: 'JP', lat: 35.7, lon: 139.7 });
-    expect(db.lookup('2a01:cb00:1234::1')).toEqual({ country: 'FR', lat: 48.9, lon: 2.4 });
+    expect(db.lookup('81.2.69.160')).toEqual({ country: 'GB', city: 'London', lat: 51.5, lon: -0.1 });
+    expect(db.lookup('::ffff:81.2.69.160')).toEqual({ country: 'GB', city: 'London', lat: 51.5, lon: -0.1 });
+    expect(db.lookup('90.12.34.56')).toEqual({ country: 'FR', city: 'Paris', lat: 48.9, lon: 2.4 });
+    expect(db.lookup('1.0.17.1')).toEqual({ country: 'JP', city: 'Tokyo', lat: 35.7, lon: 139.7 });
+    expect(db.lookup('2a01:cb00:1234::1')).toEqual({ country: 'FR', city: 'Paris', lat: 48.9, lon: 2.4 });
     expect(db.lookup('8.8.8.8')).toEqual({ country: 'US' }); // country-only record
     expect(db.lookup('5.5.5.5')).toEqual({}); // bogus record values are dropped
     expect(db.lookup('9.9.9.9')).toEqual({}); // not in the database
@@ -176,7 +192,7 @@ describe('MmdbGeoDatabase', () => {
     clock.advance(1);
     db.lookup('81.2.69.160'); // triggers the background check
     await db.settled();
-    expect(db.lookup('81.2.69.160')).toEqual({ country: 'GB', lat: 51.5, lon: -0.1 });
+    expect(db.lookup('81.2.69.160')).toEqual({ country: 'GB', city: 'London', lat: 51.5, lon: -0.1 });
     expect(log.lines.at(-1)).toMatchObject({ level: 'info', m: 'geoip database loaded' });
   });
 
@@ -215,7 +231,7 @@ describe('MmdbGeoDatabase', () => {
     // The lookup that starts the check is answered from the copy in memory.
     expect(db.lookup('81.2.69.160').country).toBe('GB');
     await db.settled();
-    expect(db.lookup('81.2.69.160')).toEqual({ country: 'DE', lat: 52.5, lon: 13.4 });
+    expect(db.lookup('81.2.69.160')).toEqual({ country: 'DE', city: 'Berlin', lat: 52.5, lon: 13.4 });
     expect(log.lines.at(-1)).toMatchObject({ level: 'info', m: 'geoip database reloaded' });
     expect(db.status().buildEpoch).toBe(new Date(1_792_000_000 * 1000).toISOString());
 

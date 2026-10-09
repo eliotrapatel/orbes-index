@@ -13,6 +13,10 @@
  * is why `headers` mode is only allowed with TRUST_PROXY (enforced by config)
  * and every value is strictly validated: anything odd is dropped, never
  * guessed. Location only feeds anomaly scoring, so a missing value is safe.
+ *
+ * The city (plan CUSTOMER INTELLIGENCE §3.3 T.8.2) is read too, from the GeoIP record (`city.names.en`) or Cloudflare's
+ * `cf-ipcity`, by the same rule as the region. It feeds only the customer intelligence's places (geo/place.ts):
+ * VerificationService reads the geo fields one by one, so a city never reaches `scan_events` nor anomaly scoring.
  */
 import type { AppConfig } from '../config.js';
 import type { Clock, Logger } from '../types.js';
@@ -23,6 +27,8 @@ export interface GeoInfo {
   /** ISO 3166-1 alpha-2, upper case. */
   country?: string;
   region?: string;
+  /** The connection's city, approximate (1 to 80 characters, trimmed): only for the customer intelligence's places, never stored with a scan. */
+  city?: string;
   /** Rounded to 1 decimal. Present only together with `lon`. */
   lat?: number;
   lon?: number;
@@ -45,15 +51,17 @@ export interface GeoResolverOptions {
 
 export type GeoConfig = AppConfig['geo'];
 
-const CLOUDFLARE = { country: 'cf-ipcountry', lat: 'cf-iplatitude', lon: 'cf-iplongitude', region: 'cf-region' } as const;
+const CLOUDFLARE = { country: 'cf-ipcountry', lat: 'cf-iplatitude', lon: 'cf-iplongitude', region: 'cf-region', city: 'cf-ipcity' } as const;
 const DECIMAL_RE = /^[+-]?\d{1,3}(?:\.\d{1,12})?$/;
 const MAX_REGION_LENGTH = 64;
+/** A city's longest name kept (geo_places.city, migration 0042). */
+export const MAX_CITY_LENGTH = 80;
 // Letters (any script), digits, spaces and common punctuation of region names ("Île-de-France", "St. John's").
 const REGION_RE = /^[\p{L}\p{M}\p{N} .,'()\-]+$/u;
 
 export class GeoResolver {
   private readonly mode: GeoConfig['mode'];
-  private readonly names: { country?: string; lat?: string; lon?: string; region?: string };
+  private readonly names: { country?: string; lat?: string; lon?: string; region?: string; city?: string };
   /** The GeoIP database (mmdb mode only). */
   readonly mmdb: MmdbGeoDatabase | undefined;
 
@@ -87,6 +95,8 @@ export class GeoResolver {
     }
     const region = normalizeRegion(header(request, this.names.region));
     if (region) out.region = region;
+    const city = normalizeCity(header(request, this.names.city));
+    if (city) out.city = city;
     return out;
   }
 }
@@ -124,6 +134,17 @@ function normalizeRegion(v: string | undefined): string | undefined {
   const r = v.trim();
   if (r.length === 0 || r.length > MAX_REGION_LENGTH || !REGION_RE.test(r)) return undefined;
   return r;
+}
+
+/**
+ * A city's name as the region's (letters of any script, digits, spaces, `.,'()-`), trimmed, 1 to 80 characters, else
+ * undefined: anything odd is dropped, never guessed.
+ */
+export function normalizeCity(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const c = v.trim();
+  if (c.length === 0 || c.length > MAX_CITY_LENGTH || !REGION_RE.test(c)) return undefined;
+  return c;
 }
 
 function header(request: GeoRequest, name: string | undefined): string | undefined {

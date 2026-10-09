@@ -30,7 +30,7 @@ describe('createContext', () => {
       expect(admins).toEqual([{ email: 'root@orbes.test', role: 'ADMIN' }]);
       expect((await ctx.keys.list()).filter((k) => k.status === 'ACTIVE')).toHaveLength(1);
       expect(Object.keys(ctx.services).sort()).toEqual(
-        ['activity', 'addresses', 'anomaly', 'auth', 'authenticators', 'care', 'catalog', 'certificates', 'circle', 'claimRenewals', 'club', 'clubProgram', 'drops', 'fulfilment', 'growth', 'guarantees', 'invoices', 'issuance', 'lifecycle', 'live', 'liveConsole', 'liveInsights', 'liveRoom', 'logistics', 'lookbook', 'media', 'messages', 'orderCases', 'orders', 'owners', 'ownership', 'ownershipCertificates', 'pastReleases', 'profiles', 'questions', 'recovery', 'reports', 'retailers', 'sale', 'salon', 'segments', 'shopify', 'sizes', 'receptions', 'stock', 'supplierOrders', 'suppliers', 'tastes', 'tierGrants', 'verification', 'warranty', 'wishlist'].sort(),
+        ['activity', 'addresses', 'anomaly', 'auth', 'authenticators', 'care', 'catalog', 'certificates', 'circle', 'claimRenewals', 'club', 'clubProgram', 'drops', 'fulfilment', 'growth', 'guarantees', 'invoices', 'issuance', 'lifecycle', 'live', 'liveConsole', 'liveInsights', 'liveRoom', 'logistics', 'lookbook', 'media', 'messages', 'orderCases', 'orders', 'owners', 'ownership', 'ownershipCertificates', 'pastReleases', 'places', 'profiles', 'questions', 'recovery', 'reports', 'retailers', 'sale', 'salon', 'segments', 'shopify', 'sizes', 'receptions', 'stock', 'supplierOrders', 'suppliers', 'tastes', 'tierGrants', 'verification', 'warranty', 'wishlist'].sort(),
       );
       // Nothing secret in the startup log.
       const text = JSON.stringify(log.lines);

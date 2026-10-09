@@ -67,6 +67,7 @@ import { FulfilmentService } from './services/fulfilment.js';
 import { GrowthService } from './services/growth.js';
 import { OwnerService } from './services/owners.js';
 import { PastReleaseService } from './services/past-releases.js';
+import { PlaceService } from './services/places.js';
 import { SalonService } from './services/salon.js';
 import { ShopifyExportService } from './services/shopify.js';
 import { ScanReportService } from './services/scan-reports.js';
@@ -173,6 +174,8 @@ export interface AppServices {
   profiles: ProfileService;
   /** YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2): the models a collector keeps with the heart on their sheet; private, never audited per tap. */
   wishlist: WishlistService;
+  /** The places from the connection (plan CUSTOMER INTELLIGENCE §3.3 T.8.2): a country with or without its city, once each, by an integer id, cached. */
+  places: PlaceService;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
   suppliers: SupplierService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
@@ -311,6 +314,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const tastes = new TasteService({ db, clock });
     const profiles = new ProfileService({ db, audit, tastes, clock });
     const wishlist = new WishlistService({ db, clock });
+    const places = new PlaceService({ db });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });
@@ -365,6 +369,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       tastes,
       profiles,
       wishlist,
+      places,
       suppliers,
       supplierOrders,
       receptions,

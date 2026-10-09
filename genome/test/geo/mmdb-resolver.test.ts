@@ -40,10 +40,10 @@ describe('GeoResolver (mmdb mode)', () => {
   it('locates request.ip and ignores client-supplied geo headers', () => {
     const r = new GeoResolver({ mode: 'mmdb', mmdbPath: dbPath }, { log: captureLog() });
     const forged = { 'cf-ipcountry': 'JP', 'cf-iplatitude': '35.6', 'cf-iplongitude': '139.7', 'x-geo-country': 'JP' };
-    expect(r.resolve({ headers: forged, ip: '81.2.69.160' })).toEqual({ country: 'GB', lat: 51.5, lon: -0.1 });
+    expect(r.resolve({ headers: forged, ip: '81.2.69.160' })).toEqual({ country: 'GB', city: 'London', lat: 51.5, lon: -0.1 });
     expect(r.resolve({ headers: forged, ip: '203.0.113.10' })).toEqual({});
     expect(r.resolve({ headers: forged })).toEqual({});
-    expect(r.resolve({ headers: {}, ip: '::ffff:90.1.2.3' })).toEqual({ country: 'FR', lat: 48.9, lon: 2.4 });
+    expect(r.resolve({ headers: {}, ip: '::ffff:90.1.2.3' })).toEqual({ country: 'FR', city: 'Paris', lat: 48.9, lon: 2.4 });
     expect(r.mmdb?.status().loaded).toBe(true);
   });
 
@@ -105,6 +105,10 @@ describe('verification with GEO_MODE=mmdb behind a trusted proxy', () => {
     expect(scan).toMatchObject({ country: 'GB', lat: 51.5, lon: -0.1 });
     // Only the pseudonym of the IP is stored, never the address.
     expect(JSON.stringify(scan)).not.toContain('81.2.69');
+    // The city the database knows never reaches the scan (plan CUSTOMER INTELLIGENCE §3.3 T.8.2): scan_events has no
+    // city, and nothing of it is written in any column.
+    expect(Object.keys(scan)).not.toContain('city');
+    expect(JSON.stringify(scan)).not.toContain('London');
 
     // A forged left-most entry is ignored: the proxy appended the real client (FR).
     const forged = await scanFrom('90.1.2.3', p.code.data, '1.0.17.1');
