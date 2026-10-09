@@ -49,6 +49,23 @@ import {
   tasteChoices,
   TEAM_ACCOUNT_LINE,
 } from '../../src/web/admin/model/client-profile.js';
+import {
+  canRemoveNote,
+  noteCounter,
+  noteLine,
+  noteProblem,
+  olderNotesLabel,
+  removeTagLabel,
+  NOTE_MAX as WEB_NOTE_MAX,
+  NOTES_SHOWN as WEB_NOTES_SHOWN,
+  TAG_LIMIT as WEB_TAG_LIMIT,
+  TAG_MAX as WEB_TAG_MAX,
+  TAGS_NOTES_COPY,
+  tagProblem,
+  tagSuggestionsFor,
+  tagValue,
+} from '../../src/web/admin/model/client-notes.js';
+import { cleanTag, NOTE_MAX, NOTES_SHOWN, TAG_LIMIT, TAG_MAX, type TagSuggestion as ServerTagSuggestion } from '../../src/server/services/client-notes.js';
 
 /** A server value as JSON carries it: dates become ISO strings. */
 type Json<T> = T extends Date ? string : T extends readonly (infer U)[] ? Json<U>[] : T extends object ? { [K in keyof T]: Json<T[K]> } : T;
@@ -61,6 +78,7 @@ export const clientProfileFits = (p: Json<StaffProfileView>): web.ClientProfile 
 export const clientProfileBack = (p: web.ClientProfile): Json<StaffProfileView> => p;
 export const clientProfileInputFits = (b: web.ClientProfileInput): z.infer<typeof ownerProfileBody> => b;
 export const privateNotesFit = (n: Json<ServerPrivateNotes>): web.PrivateNotes => n;
+export const tagSuggestionFits = (t: ServerTagSuggestion): web.TagSuggestion => t;
 // Step 5.5: what Edit the profile opens on (GET /api/admin/owners/:id/profile) is the server's profile and options.
 export const clientProfileEditFits = (e: { profile: Json<StaffProfileView>; options: Json<Awaited<ReturnType<ProfileService['options']>>> }): web.ClientProfileEdit => e;
 
@@ -464,5 +482,47 @@ describe('the client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.6 C.4.1, C
     expect(addressProblem({ ...addressFormOf(p), phone: ' ' }, p)).toBe('Enter a phone number with its country code.');
     expect(addressProblem({ ...addressFormOf(p), name: 'C. Durand' }, p)).toBeNull();
     expect(typeof clientProfileEditFits).toBe('function');
+  });
+});
+
+describe('the client sheet\'s Tags and private notes (plan CUSTOMER INTELLIGENCE §3.6 C.4.3, C.11, step 5.6)', () => {
+  it('holds the server\'s bounds and words', () => {
+    expect([WEB_TAG_LIMIT, WEB_TAG_MAX, WEB_NOTE_MAX, WEB_NOTES_SHOWN]).toEqual([TAG_LIMIT, TAG_MAX, NOTE_MAX, NOTES_SHOWN]);
+    expect(TAGS_NOTES_COPY).toMatchObject({ title: 'Tags and private notes', note: 'Never shown to the client.', noTag: 'No tag.', noNote: 'No private note.', addTag: 'Add a tag', addNote: 'Add a private note', addNoteButton: 'Add note', tagAdded: 'Tag added.', tagRemoved: 'Tag removed.' });
+    expect(TAGS_NOTES_COPY.removeBody).toBe('Remove this note? It disappears from the sheet; the audit log keeps that it was removed.');
+    expect(typeof tagSuggestionFits).toBe('function');
+  });
+
+  it('keeps a tag as the server does: in capitals, its spaces collapsed, the typographic apostrophe accepted; refuses the rest and the 21st in the server\'s words', () => {
+    for (const typed of ['friend  of the house', ' vip ', 'Friend of the house’s', 'café & co.', 'A-1']) expect(tagValue(typed), typed).toBe(cleanTag(typed));
+    expect(tagValue('friend  of the house')).toBe('FRIEND OF THE HOUSE');
+    expect(tagProblem('FRIEND OF THE HOUSE’S', [])).toBeNull();
+    for (const bad of ['', '   ', 'x'.repeat(33), 'VIP!', 'a/b']) expect(tagProblem(bad, []), bad).toBe('A tag is 1 to 32 letters, digits or spaces (and & ’ - .).');
+    const twenty = Array.from({ length: 20 }, (_, i) => `T${i}`);
+    expect(tagProblem('NEW', twenty)).toBe('A client carries at most 20 tags.');
+    expect(tagProblem('t3', twenty)).toBeNull();
+    expect(tagSuggestionsFor([{ tag: 'VIP', accounts: 12 }, { tag: 'PRESS', accounts: 3 }], ['VIP'])).toEqual(['PRESS']);
+    expect(removeTagLabel('VIP')).toBe('Remove the tag VIP');
+  });
+
+  it('checks a note (1 to 2,000 characters), counts what is left near the end, writes its line, offers Remove to its writer or an ADMIN, and the older notes', () => {
+    expect(noteProblem('  ')).toBe('A note is 1 to 2,000 characters.');
+    expect(noteProblem('x'.repeat(2001))).toBe('A note is 1 to 2,000 characters.');
+    expect(noteProblem('Prefers a call after 18:00.\r\nNo email.')).toBeNull();
+    expect(noteCounter('x'.repeat(1600))).toBe('');
+    expect(noteCounter('x'.repeat(1601))).toBe('399 left');
+    expect(noteCounter('x'.repeat(2000))).toBe('0 left');
+    expect(noteLine({ at: '2026-10-08T12:02:00.000Z', by: 'camille@orbes.com' })).toBe('08 OCT 2026 · 14:02 Paris · camille@orbes.com');
+    expect(noteLine({ at: '2026-10-08T12:02:00.000Z', by: null })).toBe('08 OCT 2026 · 14:02 Paris · ORBES');
+    const n = { byId: 'a1' };
+    expect(canRemoveNote(n, { id: 'a1', role: 'OPERATOR' })).toBe(true);
+    expect(canRemoveNote(n, { id: 'a2', role: 'OPERATOR' })).toBe(false);
+    expect(canRemoveNote(n, { id: 'a2', role: 'ADMIN' })).toBe(true);
+    expect(canRemoveNote({ byId: null }, { id: 'a2', role: 'ADMIN' })).toBe(true);
+    expect(canRemoveNote(n, { id: 'a1', role: 'AUDITOR' })).toBe(false);
+    expect(olderNotesLabel(170, 50)).toBe('Show the 120 older notes');
+    expect(olderNotesLabel(51, 50)).toBe('Show the 1 older note');
+    expect(olderNotesLabel(50, 50)).toBeNull();
+    expect(olderNotesLabel(1_200, 50)).toBe('Show the 1,150 older notes');
   });
 });

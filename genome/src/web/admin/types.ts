@@ -1394,6 +1394,12 @@ export interface PrivateNotes {
   total: number;
 }
 
+/** GET /api/admin/tags: a tag in use and how many clients carry it (the three starting examples with 0 while none is). */
+export interface TagSuggestion {
+  tag: string;
+  accounts: number;
+}
+
 /** POST /api/admin/owners/:id/lock. */
 export interface OwnerLock {
   status: 'LOCKED';

@@ -170,6 +170,9 @@ import type {
   ClientProfile,
   ClientProfileEdit,
   ClientProfileInput,
+  PrivateNote,
+  PrivateNotes,
+  TagSuggestion,
   Paged,
   RecoveryCode,
   ProductDetail,
@@ -1293,6 +1296,38 @@ export class AdminApi {
   /** OPERATOR+: Edit the address: the default address changed, or the first one added as the default. */
   saveClientAddress(accountId: string, input: { name: string; address: string; country: string; phone: string }): Promise<{ profile: ClientProfile }> {
     return this.request('PUT', `/api/admin/owners/${encodeURIComponent(accountId)}/default-address`, { body: input });
+  }
+
+  // ── The client sheet's tags and private notes (plan CUSTOMER INTELLIGENCE §3.6 C.4.3, C.9; API §16.36) ──
+
+  /** AUDITOR+: the tags in use, the most used first (50 at most), or VIP, PRESS and FRIEND OF THE HOUSE while none is. */
+  tagSuggestions(): Promise<{ items: TagSuggestion[] }> {
+    return this.get('/api/admin/tags');
+  }
+
+  /** OPERATOR+: a tag added (in capitals by the server); the client's tags after it. */
+  addClientTag(accountId: string, tag: string): Promise<{ tags: string[] }> {
+    return this.post(`/api/admin/owners/${encodeURIComponent(accountId)}/tags`, { tag });
+  }
+
+  /** OPERATOR+: a tag removed. */
+  removeClientTag(accountId: string, tag: string): Promise<void> {
+    return this.del(`/api/admin/owners/${encodeURIComponent(accountId)}/tags/${encodeURIComponent(tag)}`);
+  }
+
+  /** AUDITOR+: every private note not removed, the newest first. */
+  clientNotes(accountId: string): Promise<PrivateNotes> {
+    return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}/notes`, { all: 1 });
+  }
+
+  /** OPERATOR+: a private note added. */
+  addClientNote(accountId: string, text: string): Promise<PrivateNote> {
+    return this.post(`/api/admin/owners/${encodeURIComponent(accountId)}/notes`, { text });
+  }
+
+  /** OPERATOR+ (its writer) or ADMIN: a private note removed from the sheet. */
+  removeClientNote(accountId: string, noteId: string): Promise<void> {
+    return this.del(`/api/admin/owners/${encodeURIComponent(accountId)}/notes/${encodeURIComponent(noteId)}`);
   }
 
   // ── The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10; API §16.38) ──

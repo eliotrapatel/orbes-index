@@ -16,6 +16,8 @@
  *  6. (plan CUSTOMER INTELLIGENCE §3.6 C.4.2, step 5.5) The Profile: its rows, Edit the profile (a refusal under its
  *     field, the client saving meanwhile), Change the date of birth, Add an address; an AUDITOR's withheld rows; a team
  *     account's line under Status.
+ *  7. (step 5.6) Tags and private notes: a tag from a suggestion, the server's capitals, removed; a note added and
+ *     removed by its writer, another's by an ADMIN only, the date of birth's reason as a note; an AUDITOR reads them.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -545,6 +547,92 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     expect(await text(t2, '#account .deflist__row:first-child .deflist__note')).toBe('This account’s email is a console login’s: it is left out of the Collectors page and the export.');
     expect(problems).toEqual([]);
     await t2.context().close();
+  }, STEP_TIMEOUT);
+
+  it('keeps tags and private notes on the client sheet (plan CUSTOMER INTELLIGENCE §3.6 C.4.3, step 5.6): a tag added from a suggestion and removed, a note added and removed, the date of birth\'s reason a note, another\'s note removed by an ADMIN only; an AUDITOR reads them', async () => {
+    const client = await createAccount(ctx.db);
+    await ctx.services.profiles.save(client.id, { version: 0, firstName: 'Hugo', lastName: 'Bernard', country: 'FR', birthDate: '1990-05-02' }, client.actor);
+    // A tag in use elsewhere: the first suggestion.
+    const other = await createAccount(ctx.db);
+    await ctx.services.clientNotes.addTag(other.id, 'Press', f.admin);
+    // The ADMIN's note: an OPERATOR may not remove it.
+    await ctx.services.clientNotes.addNote(client.id, 'Met at the Paris boutique opening.', f.admin);
+
+    const p = await open(OPERATOR);
+    await go(p, `#/owners/${client.id}`, client.email);
+    expect(await p.locator('main section.panel').evaluateAll((els) => els.slice(0, 3).map((e) => e.id))).toEqual(['account', 'profile', 'tags-notes']);
+    expect(await text(p, '#tags-notes .panel__note')).toBe('Never shown to the client.');
+    expect(await text(p, '[data-testid=client-tags]')).toBe('No tag.');
+    await expect.poll(async () => p.locator('#tags-notes datalist option').evaluateAll((os) => os.map((o) => (o as HTMLOptionElement).value)), POLL).toEqual(['PRESS']);
+    // A tag in other words, then from the suggestion, typed in lower case.
+    await p.fill('[data-testid=client-tag-input]', 'vip!');
+    await p.click('[data-testid=client-tag-add]');
+    expect(await text(p, '#tags-notes .client-notes__error')).toBe('A tag is 1 to 32 letters, digits or spaces (and & ’ - .).');
+    await p.fill('[data-testid=client-tag-input]', 'press');
+    await p.click('[data-testid=client-tag-add]');
+    await expect.poll(async () => p.locator('[data-testid=client-tag]').allInnerTexts(), POLL).toEqual([expect.stringMatching(/^PRESS\s*×$/)]);
+    clock.advance(SECOND);
+    await p.fill('[data-testid=client-tag-input]', 'friend  of the house');
+    await p.press('[data-testid=client-tag-input]', 'Enter');
+    await expect.poll(async () => p.locator('[data-testid=client-tag] .status__text').allTextContents(), POLL).toEqual(['PRESS', 'FRIEND OF THE HOUSE']);
+    expect(await p.locator('[data-testid=client-tag-remove]').first().getAttribute('aria-label')).toBe('Remove the tag PRESS');
+    await p.locator('[data-testid=client-tag-remove]').first().click();
+    await expect.poll(async () => p.locator('[data-testid=client-tag] .status__text').allTextContents(), POLL).toEqual(['FRIEND OF THE HOUSE']);
+
+    // A note: Add note waits for words; added at the top with when and who.
+    expect(await p.locator('[data-testid=client-note-add]').isDisabled()).toBe(true);
+    clock.advance(SECOND);
+    await p.fill('[data-testid=client-note-input]', 'Prefers a call after 18:00.\nNever on Sundays.');
+    await p.click('[data-testid=client-note-add]');
+    await expect.poll(async () => p.locator('[data-testid=client-private-note]').count(), POLL).toBe(2);
+    const first = p.locator('[data-testid=client-private-note]').first();
+    expect(await first.locator('.client-private-note__text').innerText()).toBe('Prefers a call after 18:00.\nNever on Sundays.');
+    expect(await first.locator('.client-private-note__line').innerText()).toMatch(new RegExp(`· ${OPERATOR.email.replace('.', '\\.')}`));
+    // The ADMIN's note offers no Remove to an OPERATOR; its own does.
+    expect(await p.locator('[data-testid=client-private-note]').nth(1).locator('[data-testid=client-note-remove]').count()).toBe(0);
+    // The date of birth's reason becomes a note, the newest.
+    clock.advance(SECOND);
+    await p.click('[data-testid=profile-birth-date]');
+    await p.waitForSelector('dialog.dialog');
+    await p.fill('dialog [name=birthDate]', '1990-02-05');
+    await p.fill('dialog [name=why]', 'Day and month swapped.');
+    await confirmDialog(p);
+    await expect.poll(async () => text(p, '[data-testid=client-private-note] .client-private-note__text'), POLL).toBe('Date of birth changed: Day and month swapped.');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'tags-notes', { phone: true });
+    // Remove its own note, asked first.
+    const mine = p.locator('[data-testid=client-private-note]').filter({ hasText: 'Prefers a call' });
+    await mine.locator('[data-testid=client-note-remove]').click();
+    await p.waitForSelector('dialog.dialog');
+    expect(await text(p, 'dialog .dialog__text')).toBe('Remove this note? It disappears from the sheet; the audit log keeps that it was removed.');
+    expect(await text(p, '[data-testid=dialog-cancel]')).toBe('Keep it');
+    await confirmDialog(p);
+    await expect.poll(async () => p.locator('[data-testid=client-private-note]').count(), POLL).toBe(2);
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+
+    // An ADMIN removes another's note.
+    const a = await open(ADMIN);
+    await go(a, `#/owners/${client.id}`, client.email);
+    const admins = a.locator('[data-testid=client-private-note]').filter({ hasText: 'Met at the Paris boutique' });
+    await admins.locator('[data-testid=client-note-remove]').click();
+    await a.waitForSelector('dialog.dialog');
+    await confirmDialog(a);
+    await expect.poll(async () => a.locator('[data-testid=client-private-note]').count(), POLL).toBe(1);
+    await a.context().close();
+
+    // An AUDITOR reads the tags and the notes, without the controls.
+    const r = await open(AUDITOR);
+    await go(r, `#/owners/${client.id}`, `${client.email[0]}***${client.email.slice(client.email.indexOf('@'))}`);
+    expect(await r.locator('[data-testid=client-tag] .status__text').allTextContents()).toEqual(['FRIEND OF THE HOUSE']);
+    expect(await r.locator('[data-testid=client-private-note]').count()).toBe(1);
+    expect(await r.locator('[data-testid=client-tag-input], [data-testid=client-tag-remove], [data-testid=client-note-input], [data-testid=client-note-remove]').count()).toBe(0);
+    await shot(r, 'tags-notes-auditor');
+    expect(problems).toEqual([]);
+    await r.context().close();
+    // Nothing of it in the audit log but the tag, the note's id and length.
+    const audits = await ctx.db.selectFrom('audit_logs').select('details').where('target_id', '=', client.id).where('action', 'like', 'account.note.%').execute();
+    expect(JSON.stringify(audits)).not.toMatch(/Prefers a call|Day and month|boutique/);
   }, STEP_TIMEOUT);
 
   it('picks a model\'s Pairs well with on its Lookbook page (plan NEXT-NINE, BP-34): none picked and what the sheet shows, Edit pairs and its checks, the table, a variant\'s page, an AUDITOR reading', async () => {
