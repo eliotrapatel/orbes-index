@@ -11,6 +11,9 @@
  *    `/verify?utm_…` with the same header, `GET /` → `/verify` as before, a query over 2 000 characters dropped.
  *  - the console's link routes (step 4.3): 201 and the link, the channel; the errors in their words; 204 for a channel
  *    removed; the audit entries (the roles: admin-roles.test.ts).
+ *  - the attach through the real routes (step 4.4): CREATE ACCOUNT gives the account its visits, its first source and
+ *    its SIGNUP conversion; SIGN IN on a device first seen earlier gives it its visits and makes it the discovery; a
+ *    sign-up on a browser signed into the console reads Console device; a failing attach answers the sign-up as before.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,7 +21,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { pseudonymize } from '../../src/server/http/client.js';
-import { adminClient, createAdmin, createHarness, errorOf, safeJson, seedCatalog, type Client, type Harness } from './support.js';
+import { adminClient, createAdmin, createHarness, errorOf, PASSWORD, safeJson, seedCatalog, type Client, type Harness } from './support.js';
 
 const DEVICE = { s: false, t: 5, w: 390 };
 
@@ -101,6 +104,88 @@ describe('POST /api/v1/seen with the arrival (§3.4 A.7.2, step 4.2)', () => {
     expect(device.staff_at).toEqual(expect.any(Date));
     expect(device.first_source_id).toBeNull();
     expect(await touchesOf(device.id)).toEqual([]);
+  });
+});
+
+describe('the attach at CREATE ACCOUNT and SIGN IN, through the real routes (§3.4 A.4, step 4.4)', () => {
+  let h: Harness;
+  let linkSource: number;
+  let n = 0;
+
+  beforeAll(async () => {
+    h = await createHarness({ config: { rateLimits: { apiPerMinute: 1_000 } } });
+    h.clock.set('2026-10-12T08:00:00.000Z');
+    const admin = (await createAdmin(h.ctx, 'OPERATOR')).id;
+    const channel = (await h.ctx.db.selectFrom('link_channels').select('id').where('name', '=', 'Instagram').executeTakeFirstOrThrow()).id;
+    const link = await h.ctx.db.insertInto('links').values({ code: 'ig-bio', name: 'Instagram bio', channel_id: channel, destination: 'NOW', created_by: admin }).returning('id').executeTakeFirstOrThrow();
+    linkSource = (await h.ctx.db.selectFrom('acquisition_sources').select('id').where('key', '=', `L:${link.id}`).executeTakeFirst())?.id
+      ?? (await h.ctx.db.insertInto('acquisition_sources').values({ kind: 'LINK', link_id: link.id, key: `L:${link.id}` }).returning('id').executeTakeFirstOrThrow()).id;
+  });
+  afterAll(() => h?.close());
+
+  const arrive = (c: Client, a: Record<string, unknown>) => c.request('POST', '/api/v1/seen', { body: { v: 1, d: DEVICE, a, e: [] } });
+  const register = async (c: Client) => {
+    const email = `attach-${++n}-${randomUUID().slice(0, 6)}@example.com`;
+    const res = await c.post('/api/v1/account/register', { email, password: PASSWORD, firstName: 'Attach', lastName: 'Test', country: 'FR' });
+    expect(res.statusCode).toBe(201);
+    return { email, id: (await h.ctx.db.selectFrom('accounts').select('id').where('email', '=', email).executeTakeFirstOrThrow()).id };
+  };
+  const deviceOf = async (c: Client) => {
+    const id = h.app.unsignCookie(c.cookies.get('orbes_device')!).value!;
+    return h.ctx.db.selectFrom('tracking_devices').selectAll().where('device_hash', '=', pseudonymize(h.ctx.config.ipHashPepper, 'device', id)).executeTakeFirstOrThrow();
+  };
+  const firstOf = (accountId: string) => h.ctx.db.selectFrom('account_sources').select(['first_source_id', 'set_by']).where('account_id', '=', accountId).executeTakeFirst();
+  const signupOf = (accountId: string) => h.ctx.db.selectFrom('acquisition_conversions').select('last_source_id').where('kind', '=', 'SIGNUP').where('ref_id', '=', accountId).executeTakeFirst();
+  const fixed = async (key: string) => (await h.ctx.db.selectFrom('acquisition_sources').select('id').where('key', '=', key).executeTakeFirstOrThrow()).id;
+
+  it('CREATE ACCOUNT: the device\'s visits take the account, its first source and its SIGNUP conversion name the link; SIGN IN on an earlier device makes it the discovery', async () => {
+    // A phone arrives from a magazine on day 1; the collector's own phone through the link on day 2, and signs up there.
+    const earlier = h.client({ ip: '198.51.100.80' });
+    expect((await arrive(earlier, { referrer: 'https://www.vogue.fr/article' })).statusCode).toBe(204);
+    h.clock.advance(86_400_000);
+    const c = h.client({ ip: '198.51.100.81' });
+    expect((await arrive(c, { link: 'ig-bio' })).statusCode).toBe(204);
+    h.clock.advance(3_600_000);
+    const { email, id } = await register(c);
+    const phone = await deviceOf(c);
+    expect(await h.ctx.db.selectFrom('acquisition_touches').select(['source_id', 'account_id']).where('device_id', '=', phone.id).execute()).toEqual([{ source_id: linkSource, account_id: id }]);
+    expect(await firstOf(id)).toEqual({ first_source_id: linkSource, set_by: 'SIGN_UP' });
+    expect(await signupOf(id)).toEqual({ last_source_id: linkSource });
+    // SIGN IN on the magazine's phone, first seen the day before: its visit is the account's, and it is the discovery.
+    h.clock.advance(3_600_000);
+    expect((await earlier.post('/api/v1/account/login', { email, password: PASSWORD })).statusCode).toBe(200);
+    const other = await deviceOf(earlier);
+    expect((await h.ctx.db.selectFrom('acquisition_touches').select('account_id').where('device_id', '=', other.id).execute()).map((r) => r.account_id)).toEqual([id]);
+    const vogue = (await h.ctx.db.selectFrom('acquisition_sources').select('id').where('key', '=', 'S:vogue.fr').executeTakeFirstOrThrow()).id;
+    expect(await firstOf(id)).toEqual({ first_source_id: vogue, set_by: 'SIGN_IN' });
+    // The sign-up's last link is written once.
+    expect(await signupOf(id)).toEqual({ last_source_id: linkSource });
+  });
+
+  it('a sign-up on a browser signed into the console reads Console device', async () => {
+    const staff = await adminClient(h, 'OPERATOR', { ip: '198.51.100.82' });
+    expect((await arrive(staff, { link: 'ig-bio' })).statusCode).toBe(204);
+    const { id } = await register(staff);
+    expect(await firstOf(id)).toEqual({ first_source_id: await fixed('STAFF'), set_by: 'SIGN_UP' });
+    expect(await signupOf(id)).toEqual({ last_source_id: await fixed('DIRECT') });
+  });
+
+  it('a failing attach answers the sign-up as before, and writes nothing of the device\'s', async () => {
+    const c = h.client({ ip: '198.51.100.83' });
+    expect((await arrive(c, { link: 'ig-bio' })).statusCode).toBe(204);
+    const acquisition = h.ctx.services.acquisition;
+    const original = acquisition.attach;
+    acquisition.attach = async () => {
+      throw new Error('forced');
+    };
+    try {
+      const { id } = await register(c);
+      expect(await firstOf(id)).toBeUndefined();
+      expect(await signupOf(id)).toBeUndefined();
+      expect((await deviceOf(c)).account_id).toBeNull();
+    } finally {
+      acquisition.attach = original;
+    }
   });
 });
 

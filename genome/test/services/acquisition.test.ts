@@ -9,13 +9,20 @@
  *    writes no visit; a first arrival sets the device's first source once; the account kept once known; the cap of 100
  *    new sources a Paris day (the 101st falls back to its site, then Direct); through TrackingService.ingest, a
  *    console session records nothing and marks the device, a robot records nothing, a failing arrival leaves the views.
+ *  - attach (step 4.4), through TrackingService.link as context.ts wires it: at a sign-up, the device's visits take the
+ *    account, its first source is the device's first visit (Console device on a device marked staff's, Direct on a
+ *    device that made no arrival), its SIGNUP conversion names the last non-direct visit within 90 days (a Direct
+ *    return keeps the link; a link 91 days old gives Direct); lastSourceAt's rule; at a sign-in, the anonymous visits
+ *    since take the account and the first source is checked again (an earlier device wins; a later one, one another
+ *    account uses or one marked staff's never does; an account made before the recording never gets one); a failing
+ *    attach rolls the link back, is logged, and leaves the account.
  */
 import { randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
-import { AcquisitionService, CHANNEL_PRESETS, classify, FIXED_SOURCES, SOURCES_PER_DAY, TAG_SEPARATOR } from '../../src/server/services/acquisition.js';
+import { AcquisitionService, CHANNEL_PRESETS, classify, FIXED_SOURCES, LAST_LINK_DAYS, SOURCES_PER_DAY, TAG_SEPARATOR } from '../../src/server/services/acquisition.js';
 import { PlaceService } from '../../src/server/services/places.js';
 import { TrackingService, type SeenBatch, type SeenMeta } from '../../src/server/services/tracking.js';
 import { createTestDb, type TestDb } from '../support/db.js';
@@ -271,6 +278,184 @@ describe('AcquisitionService.arrive (§3.4 A.7.1, step 4.2)', () => {
     expect(lines).toEqual([{ level: 'error', msg: 'arrival not recorded' }]);
     await failing.buffer.flush();
     await tracking.buffer.flush();
+  });
+});
+
+describe('AcquisitionService.attach (§3.4 A.4, A.5, step 4.4)', () => {
+  let t: TestDb;
+  let acquisition: AcquisitionService;
+  let tracking: TrackingService;
+  let admin: string;
+  let channel: string;
+  let seq = 0;
+  const lines: string[] = [];
+  const log = { info: () => undefined, warn: () => undefined, error: (_o: unknown, msg?: string) => void lines.push(msg ?? '') };
+  const START = new Date('2026-06-01T08:00:00.000Z');
+  const day = (n: number) => new Date(START.getTime() + n * 86_400_000);
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    acquisition = new AcquisitionService({ db: t.db, publicOrigin: ORIGIN, clock: () => START, log });
+    await acquisition.prepare();
+    // As context.ts wires it: the link runs the attach in its transaction.
+    tracking = new TrackingService({
+      db: t.db,
+      places: new PlaceService({ db: t.db }),
+      clock: () => START,
+      houseAccounts: { isHouseEmail: async () => false },
+      testEntrants: { has: async () => false },
+      attach: async (tx, deviceId, accountId, via, now) => void (await acquisition.attach(tx, deviceId, accountId, via, now)),
+    });
+    admin = (await t.db.insertInto('admin_users').values({ email: 'attach@orbes.test', email_normalized: 'attach@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow()).id;
+    channel = (await t.db.selectFrom('link_channels').select('id').where('name', '=', 'Influencers').executeTakeFirstOrThrow()).id;
+  });
+  afterAll(() => t?.close());
+
+  const hash = () => `${String(++seq).padStart(4, '0')}${'a'.repeat(39)}`;
+  const device = async (h: string, firstSeen: Date) =>
+    (await t.db.insertInto('tracking_devices').values({ device_hash: h, first_seen_at: firstSeen, last_seen_at: firstSeen }).returning('id').executeTakeFirstOrThrow()).id;
+  const account = async (created: Date) => {
+    const email = `attach-${++seq}@example.com`;
+    return (await t.db.insertInto('accounts').values({ email, email_normalized: email, password_hash: 'scrypt$x', created_at: created }).returning('id').executeTakeFirstOrThrow()).id;
+  };
+  const link = async (code: string) => {
+    const l = await t.db.insertInto('links').values({ code, name: code, channel_id: channel, destination: 'NOW', created_by: admin }).returning('id').executeTakeFirstOrThrow();
+    return (await t.db.insertInto('acquisition_sources').values({ kind: 'LINK', link_id: l.id, key: `L:${l.id}` }).returning('id').executeTakeFirstOrThrow()).id;
+  };
+  const fixed = async (key: string) => (await t.db.selectFrom('acquisition_sources').select('id').where('key', '=', key).executeTakeFirstOrThrow()).id;
+  const firstOf = (accountId: string) => t.db.selectFrom('account_sources').select(['first_source_id', 'first_seen_at', 'set_at', 'set_by']).where('account_id', '=', accountId).executeTakeFirst();
+  const signupOf = (accountId: string) => t.db.selectFrom('acquisition_conversions').select(['kind', 'ref_id', 'account_id', 'at', 'last_source_id']).where('kind', '=', 'SIGNUP').where('ref_id', '=', accountId).executeTakeFirst();
+  const touchAccounts = async (deviceId: number) => (await t.db.selectFrom('acquisition_touches').select('account_id').where('device_id', '=', deviceId).orderBy('id').execute()).map((r) => r.account_id);
+
+  it('at a sign-up: the visits take the account, the first source is the device\'s first visit, the SIGNUP names the last non-direct visit', async () => {
+    const bio = await link('attach-bio');
+    const story = await link('attach-story');
+    const h = hash();
+    const d = await device(h, day(1));
+    await acquisition.arrive({ deviceId: d, accountId: null, link: 'attach-bio', now: day(1) });
+    await acquisition.arrive({ deviceId: d, accountId: null, link: 'attach-story', now: day(5) });
+    // A direct return after the link: no visit, so the link stays the last one.
+    await acquisition.arrive({ deviceId: d, accountId: null, now: day(6) });
+    const a = await account(day(7));
+    await tracking.link(h, a, 'SIGN_UP', day(7));
+    expect(await touchAccounts(d)).toEqual([a, a]);
+    expect(await firstOf(a)).toEqual({ first_source_id: bio, first_seen_at: day(1), set_at: day(7), set_by: 'SIGN_UP' });
+    expect(await signupOf(a)).toEqual({ kind: 'SIGNUP', ref_id: a, account_id: a, at: day(7), last_source_id: story });
+    expect(await acquisition.lastSourceAt(t.db, a, day(7))).toBe(story);
+    // Judged at a moment: before the second link, the first; before any visit, Direct.
+    expect(await acquisition.lastSourceAt(t.db, a, day(3))).toBe(bio);
+    expect(await acquisition.lastSourceAt(t.db, a, new Date(day(1).getTime() - 1))).toBe(await fixed('DIRECT'));
+  });
+
+  it('a link more than 90 days before the sign-up gives Direct as its last link, and stays the first source', async () => {
+    const old = await link('attach-old');
+    const h = hash();
+    const d = await device(h, day(0));
+    await acquisition.arrive({ deviceId: d, accountId: null, link: 'attach-old', now: day(0) });
+    const late = await account(day(LAST_LINK_DAYS + 1));
+    await tracking.link(h, late, 'SIGN_UP', day(LAST_LINK_DAYS + 1));
+    expect((await signupOf(late))?.last_source_id).toBe(await fixed('DIRECT'));
+    expect((await firstOf(late))?.first_source_id).toBe(old);
+    // Exactly 90 days before still counts.
+    expect(await acquisition.lastSourceAt(t.db, late, day(LAST_LINK_DAYS))).toBe(old);
+  });
+
+  it('a sign-up on a device that made no arrival reads Direct; on a device marked staff\'s, Console device', async () => {
+    const plain = hash();
+    await device(plain, day(2));
+    const a = await account(day(2));
+    await tracking.link(plain, a, 'SIGN_UP', day(2));
+    expect((await firstOf(a))?.first_source_id).toBe(await fixed('DIRECT'));
+    const staffHash = hash();
+    await tracking.markStaff(staffHash, day(2));
+    const b = await account(day(2));
+    await tracking.link(staffHash, b, 'SIGN_UP', day(2));
+    expect((await firstOf(b))?.first_source_id).toBe(await fixed('STAFF'));
+    expect((await signupOf(b))?.last_source_id).toBe(await fixed('DIRECT'));
+  });
+
+  it('at a sign-in: the anonymous visits since take the account; an earlier device becomes the discovery, never a later one, one another account uses or one marked staff\'s', async () => {
+    const tiktok = await link('attach-tiktok');
+    // The account signs up on its phone on day 20, first seen there on day 18 (Direct).
+    const phone = hash();
+    const p = await device(phone, day(18));
+    await acquisition.arrive({ deviceId: p, accountId: null, now: day(18) });
+    const a = await account(day(20));
+    await tracking.link(phone, a, 'SIGN_UP', day(20));
+    expect((await firstOf(a))?.first_source_id).toBe(await fixed('DIRECT'));
+    // Instagram's own browser, first seen on day 10 through the link, signs in on day 25: the earlier discovery wins.
+    const inApp = hash();
+    const i = await device(inApp, day(10));
+    await acquisition.arrive({ deviceId: i, accountId: null, link: 'attach-tiktok', now: day(10) });
+    await acquisition.arrive({ deviceId: i, accountId: null, link: 'attach-tiktok', now: day(24) });
+    await tracking.link(inApp, a, 'SIGN_IN', day(25));
+    expect(await touchAccounts(i)).toEqual([a, a]);
+    expect(await firstOf(a)).toEqual({ first_source_id: tiktok, first_seen_at: day(10), set_at: day(25), set_by: 'SIGN_IN' });
+    // The SIGNUP conversion is written once and never changed.
+    expect((await signupOf(a))?.last_source_id).toBe(await fixed('DIRECT'));
+    // A device first seen later never rewrites it.
+    const later = hash();
+    const l = await device(later, day(12));
+    await acquisition.arrive({ deviceId: l, accountId: null, referrer: 'https://www.vogue.fr/', now: day(12) });
+    await tracking.link(later, a, 'SIGN_IN', day(26));
+    expect((await firstOf(a))?.first_source_id).toBe(tiktok);
+    // A family tablet another account already uses, first seen earliest of all: never the discovery.
+    const tablet = hash();
+    const tb = await device(tablet, day(3));
+    await acquisition.arrive({ deviceId: tb, accountId: null, referrer: 'https://www.google.com/', now: day(3) });
+    const other = await account(day(4));
+    await tracking.link(tablet, other, 'SIGN_UP', day(4));
+    await tracking.link(tablet, a, 'SIGN_IN', day(27));
+    expect((await firstOf(a))?.first_source_id).toBe(tiktok);
+    // A device marked staff's, first seen early: never the discovery either.
+    const desk = hash();
+    await tracking.markStaff(desk, day(1));
+    await tracking.link(desk, a, 'SESSION', day(28));
+    expect((await firstOf(a))?.first_source_id).toBe(tiktok);
+    // A signed-in visit's link (SESSION) checks it again too.
+    const tab = hash();
+    const tbb = await device(tab, day(2));
+    await acquisition.arrive({ deviceId: tbb, accountId: null, referrer: 'https://www.vogue.fr/', now: day(2) });
+    await tracking.link(tab, a, 'SESSION', day(29));
+    expect(await firstOf(a)).toMatchObject({ first_seen_at: day(2), set_by: 'SIGN_IN' });
+  });
+
+  it('an account made before the recording started reads Before tracking: a sign-in writes it no first source', async () => {
+    const before = await account(new Date(START.getTime() - 86_400_000));
+    const h = hash();
+    // A device known from a scan before the account was made (the past scans' backfill).
+    const d = await device(h, new Date(START.getTime() - 2 * 86_400_000));
+    await acquisition.arrive({ deviceId: d, accountId: null, referrer: 'https://www.vogue.fr/', now: day(1) });
+    await tracking.link(h, before, 'SIGN_IN', day(1));
+    expect(await firstOf(before)).toBeUndefined();
+    expect(await touchAccounts(d)).toEqual([before]);
+  });
+
+  it('a failing attach rolls the link back and is logged; the account stays', async () => {
+    const h = hash();
+    const d = await device(h, day(30));
+    await acquisition.arrive({ deviceId: d, accountId: null, link: 'attach-bio', now: day(30) });
+    const a = await account(day(30));
+    const original = acquisition.attach.bind(acquisition);
+    acquisition.attach = async (tx, ...rest) => {
+      await original(tx, ...rest);
+      throw new Error('forced');
+    };
+    try {
+      await expect(tracking.link(h, a, 'SIGN_UP', day(30))).rejects.toThrow('forced');
+    } finally {
+      acquisition.attach = original;
+    }
+    expect(await firstOf(a)).toBeUndefined();
+    expect(await signupOf(a)).toBeUndefined();
+    expect(await touchAccounts(d)).toEqual([null]);
+    expect((await t.db.selectFrom('tracking_devices').select('account_id').where('id', '=', d).executeTakeFirstOrThrow()).account_id).toBeNull();
+    expect(await t.db.selectFrom('accounts').select('id').where('id', '=', a).execute()).toEqual([{ id: a }]);
+    // A failure inside the attach itself is logged in its words.
+    lines.length = 0;
+    const broken = new AcquisitionService({ db: t.db, publicOrigin: ORIGIN, log });
+    await expect(t.db.transaction().execute((tx) => broken.attach(tx, d, '00000000-0000-0000-0000-000000000000', 'SIGN_UP', day(30)))).rejects.toThrow();
+    expect(lines).toEqual(['acquisition attach failed']);
   });
 });
 

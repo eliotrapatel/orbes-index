@@ -30,11 +30,11 @@
  *            `orbes/views-daily` (the daily job's, so a link and a day's count never cross) and the device row FOR
  *            UPDATE (two sign-ins at once on one device wait for each other): the rows attached, the device's link
  *            (`tracking_device_accounts`, `tracking_devices.account_id`, `linked_at`), then the acquisition's attach
- *            (a hook, a no-op until the acquisition is built). In the same transaction, the attached rows whose Paris
- *            day the daily job already counted add their new days to `collector_places`, and those of a Paris month
- *            already written (with its last day's count) add to `collector_view_months` (catchUpCounted, §3.3 T.8.4
- *            step 5); the days and months
- *            not counted yet are counted by the jobs (services/tracking-jobs.ts), so the two never cross and never
+ *            (AcquisitionService.attach, §3.4 A.4: the visits, the first source, the SIGNUP conversion). In the same
+ *            transaction, the attached rows whose Paris day the daily job already counted add their new days to
+ *            `collector_places`, and those of a Paris month already written (with its last day's count) add to
+ *            `collector_view_months` (catchUpCounted, §3.3 T.8.4 step 5); the days and months not counted yet are
+ *            counted by the jobs (services/tracking-jobs.ts), so the two never cross and never
  *            count a row twice. A late row (a batch in flight at the sign-in, sent without the session) from before
  *            the link and after the previous one takes the account too. Never audited: no person acts, and the
  *            sign-up and sign-in are audited already.
@@ -710,8 +710,9 @@ export interface TrackingServiceDeps {
    */
   arrive?: ArrivalHook;
   /**
-   * The acquisition's attach (§3.4 A.4), run inside the link's transaction: the device's visits take the account, and
-   * at a sign-up its first source and SIGNUP conversion are written. A no-op until the acquisition is built (step 4.4).
+   * The acquisition's attach (§3.4 A.4, AcquisitionService.attach; context.ts wires it), run inside the link's
+   * transaction: the device's visits take the account, and at a sign-up its first source and SIGNUP conversion are
+   * written. Without it (tests of the views alone) nothing is attributed.
    */
   attach?: LinkAttach;
 }

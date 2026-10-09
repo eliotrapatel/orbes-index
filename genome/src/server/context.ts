@@ -329,7 +329,18 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const acquisition = new AcquisitionService({ db, publicOrigin: config.publicOrigin, clock, log });
     const links = new LinkService({ db, audit, publicOrigin: config.publicOrigin, clock });
     // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
-    const tracking = new TrackingService({ db, places, clock, log, waiting: () => (poolOf(db)?.waitingCount ?? 0) > 0, arrive: (input) => acquisition.arrive(input) });
+    // The link attaches the device's visits in its own transaction (§3.3 T.8.4 step 7, §3.4 A.4).
+    const tracking = new TrackingService({
+      db,
+      places,
+      clock,
+      log,
+      waiting: () => (poolOf(db)?.waitingCount ?? 0) > 0,
+      arrive: (input) => acquisition.arrive(input),
+      attach: async (tx, deviceId, accountId, via, now) => {
+        await acquisition.attach(tx, deviceId, accountId, via, now);
+      },
+    });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });

@@ -21,13 +21,27 @@
  *            once (DIRECT included), and, unless DIRECT, the visit: one row per device, source and Paris day, its
  *            repeats counted (`arrivals`), its last arrival moved, the account kept once known. A visit is data, not
  *            an act: never audited.
+ *   attach   (§3.4 A.4, A.7.1, step 4.4) inside TrackingService.link's transaction (§3.3 T.8.4 step 7), at a sign-up
+ *            (SIGN_UP), a sign-in (SIGN_IN) and a signed-in visit whose device was not linked to the account (SESSION):
+ *            the device's visits still without an account take it. At a sign-up, the account's first source
+ *            (`account_sources`, set by SIGN_UP: the device's first visit and its source, STAFF on a device marked
+ *            staff's, DIRECT when the device made no arrival) and its SIGNUP conversion, judged at the account's
+ *            creation by `lastSourceAt`. At a sign-in or a signed-in visit, the first source checked again: a device
+ *            first seen before the account's recorded first visit and before the account was made (made since the
+ *            recording started), not marked staff's and linked to no other account, becomes the account's first source
+ *            (set by SIGN_IN). A failure is logged (`acquisition attach failed`) and rolls the link back; the
+ *            collector is answered as before, and the conversions job writes a missing SIGNUP afterwards.
+ *   lastSourceAt (§3.4 A.5) the last link of an act: the account's latest visit begun at or before the moment, whose
+ *            latest arrival up to the moment falls within LAST_LINK_DAYS of it, else DIRECT. A visit is never DIRECT,
+ *            so a direct return never replaces the link that brought them. `lastTouch` is the same rule in SQL, for the
+ *            conversions job.
  *
  * Nothing here is audited at boot: the presets are the house's words, written once, as the stock's are. No third party:
  * nothing leaves this database.
  */
-import { sql } from 'kysely';
+import { sql, type RawBuilder } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { SourceKind } from '../db/schema.js';
+import type { LinkVia, SourceKind } from '../db/schema.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 import { referrerHost, SITE_RE } from './referrers.js';
 import { parisDay, parisDayStart } from './schedule.js';
@@ -55,6 +69,40 @@ export const SOURCES_PER_DAY = 100;
 export const SOURCE_CACHE_SIZE = 1_000;
 /** U+001F, between the five tags of a campaign's key. */
 export const TAG_SEPARATOR = '\u001f';
+/** The last link of an act is a visit within this many days before it (§3.4 A.5, question 6). */
+export const LAST_LINK_DAYS = 90;
+
+/** The sources no arrival makes, by kind (made by `prepare`). */
+export type FixedSourceIds = Record<(typeof FIXED_SOURCES)[number], number>;
+
+/** The ids of the DIRECT, BEFORE and STAFF sources; throws when `prepare` has not run. */
+export async function fixedSourceIds(db: Db): Promise<FixedSourceIds> {
+  const rows = await db.selectFrom('acquisition_sources').select(['key', 'id']).where('key', 'in', [...FIXED_SOURCES]).execute();
+  const ids = Object.fromEntries(rows.map((r) => [r.key, r.id])) as Partial<FixedSourceIds>;
+  for (const k of FIXED_SOURCES) if (ids[k] === undefined) throw new Error(`the ${k} source is missing`);
+  return ids as FixedSourceIds;
+}
+
+/**
+ * The last link of an act (§3.4 A.5), in SQL: the source of the account's latest visit begun at or before `at` whose
+ * latest arrival up to `at` is within LAST_LINK_DAYS of it (on `acquisition_touches_account`), or NULL (read as
+ * DIRECT). A visit updated later the same day still counts from its first arrival.
+ */
+export const lastTouch = (account: RawBuilder<unknown>, at: RawBuilder<unknown>): RawBuilder<number | null> => sql<number | null>`(
+  SELECT lt.source_id FROM acquisition_touches lt
+   WHERE lt.account_id = ${account} AND lt.first_at <= ${at}
+     AND least(lt.last_at, ${at}) >= ${at} - ${sql.raw(`interval '${LAST_LINK_DAYS} days'`)}
+   ORDER BY least(lt.last_at, ${at}) DESC, lt.id DESC LIMIT 1)`;
+
+/** What `attach` wrote (the tests). */
+export interface AttachOutcome {
+  /** The device's visits that took the account. */
+  touches: number;
+  /** The account's first source was written (a sign-up) or replaced by an earlier device (a sign-in). */
+  firstSource: boolean;
+  /** The SIGNUP conversion was written. */
+  signup: boolean;
+}
 
 /** The five campaign tags of an arrival, as the app read them from the address (`utm_source` … `utm_term`). */
 export interface ArrivalTags {
@@ -285,6 +333,73 @@ export class AcquisitionService {
     this.sourceIds.delete(key);
     this.sourceIds.set(key, id);
     while (this.sourceIds.size > SOURCE_CACHE_SIZE) this.sourceIds.delete(this.sourceIds.keys().next().value as string);
+  }
+
+  /**
+   * The device linked to the account (see the header), inside TrackingService.link's transaction `tx`. Throws on a
+   * failure, logged here: the link rolls back and its caller logs it too.
+   */
+  async attach(tx: Db, deviceId: number, accountId: string, via: LinkVia, now: Date): Promise<AttachOutcome> {
+    try {
+      // The device's visits still without an account: since its previous link, they are this account's.
+      const touched = await sql`UPDATE acquisition_touches SET account_id = ${accountId}::uuid WHERE device_id = ${deviceId}::integer AND account_id IS NULL`.execute(tx);
+      const touches = Number(touched.numAffectedRows ?? 0);
+      const started = await this.trackingStartedAt(tx);
+      // Before `prepare` (never in the app: it runs at boot), nothing is attributed.
+      if (!started) return { touches, firstSource: false, signup: false };
+      const ids = await this.fixed(tx);
+      if (via === 'SIGN_UP') {
+        const first = await sql`
+          INSERT INTO account_sources (account_id, first_source_id, first_seen_at, set_at, set_by)
+          SELECT a.id, CASE WHEN d.staff_at IS NOT NULL THEN ${ids.STAFF}::integer ELSE coalesce(d.first_source_id, ${ids.DIRECT}::integer) END,
+                 least(d.first_seen_at, a.created_at), ${now}::timestamptz, 'SIGN_UP'
+            FROM accounts a JOIN tracking_devices d ON d.id = ${deviceId}::integer
+           WHERE a.id = ${accountId}::uuid
+          ON CONFLICT (account_id) DO NOTHING`.execute(tx);
+        const signup = await sql`
+          INSERT INTO acquisition_conversions (kind, ref_id, account_id, at, last_source_id, created_at)
+          SELECT 'SIGNUP', a.id, a.id, a.created_at,
+                 CASE WHEN a.created_at < ${started}::timestamptz THEN ${ids.BEFORE}::integer
+                      ELSE coalesce(${lastTouch(sql`a.id`, sql`a.created_at`)}, ${ids.DIRECT}::integer) END,
+                 ${now}::timestamptz
+            FROM accounts a WHERE a.id = ${accountId}::uuid
+          ON CONFLICT (kind, ref_id) DO NOTHING`.execute(tx);
+        return { touches, firstSource: Number(first.numAffectedRows ?? 0) > 0, signup: Number(signup.numAffectedRows ?? 0) > 0 };
+      }
+      // A sign-in or a signed-in visit: an earlier device of this account is the discovery (never one another account uses).
+      const rechecked = await sql`
+        INSERT INTO account_sources (account_id, first_source_id, first_seen_at, set_at, set_by)
+        SELECT a.id, coalesce(d.first_source_id, ${ids.DIRECT}::integer), d.first_seen_at, ${now}::timestamptz, 'SIGN_IN'
+          FROM accounts a JOIN tracking_devices d ON d.id = ${deviceId}::integer
+         WHERE a.id = ${accountId}::uuid
+           AND d.staff_at IS NULL
+           AND d.first_seen_at < a.created_at
+           AND a.created_at >= ${started}::timestamptz
+           AND NOT EXISTS (SELECT 1 FROM tracking_device_accounts x WHERE x.device_id = d.id AND x.account_id <> a.id)
+        ON CONFLICT (account_id) DO UPDATE SET
+          first_source_id = EXCLUDED.first_source_id, first_seen_at = EXCLUDED.first_seen_at, set_at = EXCLUDED.set_at, set_by = EXCLUDED.set_by
+         WHERE EXCLUDED.first_seen_at < account_sources.first_seen_at`.execute(tx);
+      return { touches, firstSource: Number(rechecked.numAffectedRows ?? 0) > 0, signup: false };
+    } catch (e) {
+      this.log.error({ err: { message: (e as Error)?.message }, via }, 'acquisition attach failed');
+      throw e;
+    }
+  }
+
+  /** The last link of the account's act at `at` (§3.4 A.5): its source id, DIRECT when none. */
+  async lastSourceAt(db: Db, accountId: string, at: Date): Promise<number> {
+    const ids = await this.fixed(db);
+    const row = await sql<{ id: number }>`SELECT coalesce(${lastTouch(sql`${accountId}::uuid`, sql`${at}::timestamptz`)}, ${ids.DIRECT}::integer) AS id`.execute(db);
+    return Number(row.rows[0]!.id);
+  }
+
+  /** The DIRECT, BEFORE and STAFF sources' ids, kept once read (a source is never deleted nor changed). */
+  private async fixed(db: Db): Promise<FixedSourceIds> {
+    const known = FIXED_SOURCES.map((k) => this.sourceIds.get(k));
+    if (known.every((id) => id !== undefined)) return Object.fromEntries(FIXED_SOURCES.map((k, i) => [k, known[i]])) as FixedSourceIds;
+    const ids = await fixedSourceIds(db);
+    for (const k of FIXED_SOURCES) this.remember(k, ids[k]);
+    return ids;
   }
 
   /** The recording's start (`acquisition_state.tracking_started_at`), or null before `prepare` ran. */
