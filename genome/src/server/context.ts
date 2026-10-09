@@ -47,7 +47,8 @@ import { AddressService } from './services/addresses.js';
 import { TasteService } from './services/tastes.js';
 import { ProfileService } from './services/profiles.js';
 import { aggregateWishMonths, purgeWishHistory, WishlistService } from './services/wishlist.js';
-import { morningWindowOpen } from './services/schedule.js';
+import { morningWindowOpen, parisDay } from './services/schedule.js';
+import { aggregateViews, intelligenceSizes, purgeViews } from './services/tracking-jobs.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -449,7 +450,24 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
 export interface Housekeeping {
   /** Run every job once now (also what the timer does). Errors are logged, never thrown. */
-  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; activity: number; wishMonths: number; scanHistory: number; wishHistory: number; liveNetworks: number; careLabels: number; packingPhotos: number }>;
+  runOnce(): Promise<{
+    sessions: number;
+    transfers: number;
+    scanTokens: number;
+    scanStats: number;
+    activity: number;
+    viewStats: number;
+    viewMonths: number;
+    wishMonths: number;
+    scanHistory: number;
+    viewPurge: number;
+    wishHistory: number;
+    devicePurge: number;
+    liveNetworks: number;
+    careLabels: number;
+    packingPhotos: number;
+    sizes: number;
+  }>;
   /** Stop the timer and wait for a running pass to finish. */
   stop(): Promise<void>;
 }
@@ -473,10 +491,24 @@ export interface Housekeeping {
  * The customer intelligence lot's jobs (plan CUSTOMER INTELLIGENCE §3.0 (f)) run
  * only in its morning window (services/schedule.ts morningWindowOpen: from
  * 07:30 UTC until the Paris day ends), in the order of §3.0 (f):
+ *   viewStats    each complete Paris day of the views not yet counted, into
+ *                view_daily_stats, device_daily_stats and collector_places
+ *                (services/tracking-jobs.ts, §3.3 T.10);
+ *   viewMonths   the month whose last Paris day viewStats counts, into
+ *                collector_view_months, in that day's transaction;
  *   wishMonths   each complete Paris month of YOUR WISHLIST not yet counted,
  *                into model_wish_months (services/wishlist.ts, §3.2 W.7);
- *   wishHistory  then, only when wishMonths succeeded in this pass, the removed
- *                wishes past their 13 months whose month is counted.
+ *   (scanHistory, as above)
+ *   viewPurge    only when viewStats succeeded in this pass, the raw views past
+ *                their 13 months, folded per collector, a whole counted Paris
+ *                day per transaction;
+ *   wishHistory  only when wishMonths succeeded in this pass, the removed
+ *                wishes past their 13 months whose month is counted;
+ *   devicePurge  the devices never linked, unseen for 13 months, with no view
+ *                left (TrackingService.purgeDevices);
+ *   (liveNetworks, careLabels, packingPhotos, as above)
+ *   sizes        once a Paris day, the `intelligence sizes` log line: the bytes
+ *                of the lot's growing tables (the 50 MB backup watch, §8).
  */
 export function startHousekeeping(
   ctx: AppContext,
@@ -486,9 +518,29 @@ export function startHousekeeping(
   // Keep expired scan tokens a while so "expired" (410) stays distinguishable from "unknown" (400).
   const graceMs = opts.scanTokenGraceMs ?? 24 * 60 * 60_000;
   let running: Promise<unknown> | undefined;
+  /** The Paris day the `intelligence sizes` line was last written (once a day, §3.3 T.10). */
+  let sizesDay: string | null = null;
 
   const runOnce = async () => {
-    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, activity: 0, wishMonths: 0, scanHistory: 0, wishHistory: 0, liveNetworks: 0, careLabels: 0, packingPhotos: 0 };
+    // In the order the jobs run (§3.0 (f)).
+    const result = {
+      sessions: 0,
+      transfers: 0,
+      scanTokens: 0,
+      scanStats: 0,
+      activity: 0,
+      viewStats: 0,
+      viewMonths: 0,
+      wishMonths: 0,
+      scanHistory: 0,
+      viewPurge: 0,
+      wishHistory: 0,
+      devicePurge: 0,
+      liveNetworks: 0,
+      careLabels: 0,
+      packingPhotos: 0,
+      sizes: 0,
+    };
     /** Runs one job; false when it failed (logged). */
     const job = async (name: keyof typeof result, fn: () => Promise<number>): Promise<boolean> => {
       try {
@@ -505,8 +557,19 @@ export function startHousekeeping(
     // Count the complete days first: the purge below must never take a scan that is not counted yet.
     const counted = await job('scanStats', () => aggregateScanStats(ctx.db, ctx.clock()));
     const hourly = await job('activity', () => aggregateActivity(ctx.db, ctx.clock()));
-    // The lot's morning window (plan CUSTOMER INTELLIGENCE §3.0 (f)): YOUR WISHLIST's months are counted before their purge.
+    // The lot's morning window (plan CUSTOMER INTELLIGENCE §3.0 (f)): the views' days and months, then YOUR WISHLIST's
+    // months, each counted before its purge.
     const morning = morningWindowOpen(ctx.clock());
+    // viewMonths: a month is written in the transaction of its last day's count, so a pass's months are its days'.
+    let viewMonths = 0;
+    const viewsCounted =
+      morning &&
+      (await job('viewStats', async () => {
+        const r = await aggregateViews(ctx.db, ctx.clock());
+        viewMonths = r.months;
+        return r.days;
+      }));
+    result.viewMonths = viewMonths;
     const wishesCounted = morning && (await job('wishMonths', () => aggregateWishMonths(ctx.db, ctx.clock())));
     const retentionDays = ctx.config.scanRetentionDays;
     if (counted && hourly && retentionDays !== null && retentionDays !== undefined) {
@@ -514,12 +577,26 @@ export function startHousekeeping(
         purgeScanHistory(ctx.db, new Date(ctx.clock().getTime() - retentionDays * 86_400_000), { batchSize: opts.scanHistoryBatchSize }),
       );
     }
+    // A pass where the days failed purges no view: none leaves before its day is counted (§3.3 T.10).
+    if (viewsCounted) await job('viewPurge', () => purgeViews(ctx.db, ctx.clock()));
     // A pass where the months failed purges no wish: none leaves before its month is counted.
     if (wishesCounted) await job('wishHistory', () => purgeWishHistory(ctx.db, ctx.clock()));
+    if (morning) await job('devicePurge', () => ctx.services.tracking.purgeDevices(ctx.clock()));
     await job('liveNetworks', () => eraseLiveNetworkHashes(ctx.db, ctx.clock()));
     await job('careLabels', () => eraseCareLabels(ctx.db, ctx.clock()));
     // Plan NEXT LOT §3.5.6.8: the packing photos, 14 days after delivery (or after a return opened in time is closed).
     await job('packingPhotos', () => purgePackingPhotos(ctx.db, ctx.clock()));
+    // Once a Paris day in the window: the bytes of the lot's growing tables, for the 50 MB backup watch (§3.3 T.10, §8).
+    const today = parisDay(ctx.clock());
+    if (morning && sizesDay !== today) {
+      const measured = await job('sizes', async () => {
+        const tables = await intelligenceSizes(ctx.db);
+        const total = Object.values(tables).reduce((a, b) => a + b, 0);
+        ctx.log.info({ tables, total }, 'intelligence sizes');
+        return Object.keys(tables).length;
+      });
+      if (measured) sizesDay = today;
+    }
     if (Object.values(result).some((n) => n > 0)) ctx.log.info(result, 'housekeeping');
     return result;
   };

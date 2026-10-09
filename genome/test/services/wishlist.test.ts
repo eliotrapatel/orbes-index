@@ -311,7 +311,9 @@ describe('YOUR WISHLIST\'s jobs (plan CUSTOMER INTELLIGENCE §3.2 W.7): the mont
       h.clock.set('2026-12-10T07:30:00.000Z');
       const pass = await hk.runOnce();
       expect(pass).toMatchObject({ wishMonths: 2, wishHistory: 0 });
-      expect(Object.keys(pass)).toEqual(['sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'wishMonths', 'scanHistory', 'wishHistory', 'liveNetworks', 'careLabels', 'packingPhotos']);
+      expect(Object.keys(pass)).toEqual([
+        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'viewStats', 'viewMonths', 'wishMonths', 'scanHistory', 'viewPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'sizes',
+      ]);
     } finally {
       await hk.stop();
     }

@@ -1,7 +1,6 @@
 /**
  * Linking a device to an account (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.3 T.8.3, T.8.4 and T.14
- * « tracking-link.test.ts », step 3.5, without its recount cases, which need step 3.7's daily job; the plan's
- * test/server/ folder is test/api/ here):
+ * « tracking-link.test.ts », steps 3.5 and 3.7; the plan's test/server/ folder is test/api/ here):
  *
  *  - CREATE ACCOUNT (SIGN_UP) attaches the device's anonymous views and scans (SCAN rows), and SIGN IN (SIGN_IN) its
  *    anonymous rows since; rows older than 13 months stay anonymous; the device cookie is set when there was none;
@@ -13,10 +12,14 @@
  *    carrying the account; a batch from before the link sent after it takes the account; a device marked staff with
  *    rows still buffered leaves none in the table;
  *  - the acquisition's attach hook runs in the link's transaction, and its failure rolls the link back;
- *  - the 13 months are calendar months in Paris (viewHistoryCutoff).
+ *  - the 13 months are calendar months in Paris (viewHistoryCutoff);
+ *  - the recount cases (step 3.7, T.8.4 step 5): `collector_places` gains the days already counted and not the others,
+ *    a written month gains the attached rows and a month not written does not; the daily job then counts the rest;
+ *    the total equals a recount from scratch; a test entrant's link counts nothing.
  * The sign-up's and sign-in's own tests (account.test.ts, auth.test.ts) are unchanged.
  *
- * A PostgreSQL half (two links of one device racing on a real pool) runs in genome-ci with ORBES_TEST_POSTGRES_URL.
+ * Two PostgreSQL halves run in genome-ci with ORBES_TEST_POSTGRES_URL: two links of one device racing on a real pool,
+ * and links racing the daily job (the advisory lock), equal to a recount from scratch.
  */
 import { randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
@@ -27,6 +30,7 @@ import { VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
 import { pseudonymize } from '../../src/server/http/client.js';
 import { parisDayStart } from '../../src/server/services/schedule.js';
 import { TrackingService, viewHistoryCutoff, type SeenBatch } from '../../src/server/services/tracking.js';
+import { aggregateViews } from '../../src/server/services/tracking-jobs.js';
 import { PlaceService } from '../../src/server/services/places.js';
 import { PASSWORD, type Client, type Harness, createHarness } from './support.js';
 
@@ -285,6 +289,107 @@ describe('TrackingService.link (plan CUSTOMER INTELLIGENCE §3.3 T.8.4)', () => 
   });
 });
 
+// ── The recount cases (step 3.7): the link's catch-up of the days and months already counted ─────────────────────
+
+/** The per-collector figures the link and the daily job write, sorted (the recount's comparison). */
+async function counted(db: Db) {
+  const places = await db.selectFrom('collector_places').select(['account_id', 'place_id', 'days', 'first_day', 'last_day']).orderBy('account_id').orderBy('place_id').execute();
+  const months = await db.selectFrom('collector_view_months').select(['account_id', 'month', 'views', 'seconds', 'scans', 'active_days']).orderBy('account_id').orderBy('month').execute();
+  const days = await db.selectFrom('view_daily_stats').select(['day', 'page', 'subject', 'country', 'views', 'seconds', 'devices']).orderBy('day').orderBy('page').orderBy('subject').orderBy('country').execute();
+  return { places, months, days };
+}
+
+/** Everything the daily job wrote, counted again from the raw rows as they are now. */
+async function recount(db: Db, now: Date) {
+  await db.deleteFrom('collector_places').execute();
+  await db.deleteFrom('collector_view_months').execute();
+  await db.deleteFrom('view_daily_stats').execute();
+  await db.deleteFrom('device_daily_stats').execute();
+  await aggregateViews(db, now, { maxDays: 1_000 });
+  return counted(db);
+}
+
+describe('TrackingService.link and the daily job (plan CUSTOMER INTELLIGENCE §3.3 T.8.4 step 5, T.10)', () => {
+  let h: Harness;
+  beforeAll(async () => {
+    h = await createHarness();
+    await h.t.db.updateTable('tracking_state').set({ started_at: new Date('2026-09-01T06:00:00Z'), scans_backfilled_at: new Date('2026-09-01T06:00:00Z') }).where('id', '=', 1).execute();
+  });
+  afterAll(() => h?.close());
+
+  const account = async () => (await h.t.db.insertInto('accounts').values({ email: `${randomBytes(6).toString('hex')}@example.com`, email_normalized: `${randomBytes(6).toString('hex')}@example.com`, password_hash: 'unused' }).returning('id').executeTakeFirstOrThrow()).id;
+  const device = async (hash: string) => (await h.t.db.insertInto('tracking_devices').values({ device_hash: hash, first_seen_at: new Date('2026-09-01T06:00:00Z'), last_seen_at: new Date('2026-09-01T06:00:00Z') }).returning('id').executeTakeFirstOrThrow()).id;
+  const view = (deviceId: number, at: string, accountId: string | null, placeId: number | null, page: keyof typeof VIEW_PAGE_CODES = 'NOW') =>
+    h.t.db.insertInto('collector_views').values({ at: new Date(at), device_id: deviceId, account_id: accountId, page: VIEW_PAGE_CODES[page], subject: null, seconds: page === 'SCAN' ? 0 : 10, place_id: placeId }).execute();
+
+  it('adds the attached rows of the days already counted and of the months written, leaves the others to the job, and equals a recount from scratch', async () => {
+    const a = await account();
+    const paris = (await h.ctx.services.places.idOf('FR', 'Paris'))!;
+    const lyon = (await h.ctx.services.places.idOf('FR', 'Lyon'))!;
+    const hash = 'L'.repeat(43);
+    const anon = await device(hash);
+    const own = await device('O'.repeat(43));
+    // The device, anonymous: 10 and 20 September (Paris, Lyon), a scan on 2 October, 6 October in Paris.
+    await view(anon, '2026-09-10T10:00:00Z', null, paris);
+    await view(anon, '2026-09-20T10:00:00Z', null, lyon);
+    await view(anon, '2026-10-02T10:00:00Z', null, paris, 'SCAN');
+    await view(anon, '2026-10-06T10:00:00Z', null, paris);
+    // The collector's own device, signed in: 10 September and 3 October in Paris.
+    await view(own, '2026-09-10T12:00:00Z', a, paris);
+    await view(own, '2026-10-03T12:00:00Z', a, paris);
+    // 5 October, 08:00 UTC: counted through 4 October; September written (its last day counted), October not.
+    expect(await aggregateViews(h.t.db, new Date('2026-10-05T08:00:00Z'), { maxDays: 1_000 })).toEqual({ days: 34, months: 1 });
+    expect((await counted(h.t.db)).places).toEqual([{ account_id: a, place_id: paris, days: 2, first_day: '2026-09-10', last_day: '2026-10-03' }]);
+    expect((await counted(h.t.db)).months).toEqual([{ account_id: a, month: '2026-09-01', views: 1, seconds: 10, scans: 0, active_days: 1 }]);
+
+    // The sign-in on the device, the same morning: its anonymous rows (13 months) take the account.
+    h.clock.set('2026-10-05T09:00:00.000Z');
+    expect(await h.ctx.services.tracking.link(hash, a, 'SIGN_IN')).toEqual({ attached: 4 });
+    const after = await counted(h.t.db);
+    // Paris: 10 September was already the collector's, 2 October is new; 6 October is not counted yet. Lyon: 20 September.
+    expect(after.places).toEqual(
+      [
+        { account_id: a, place_id: paris, days: 3, first_day: '2026-09-10', last_day: '2026-10-03' },
+        { account_id: a, place_id: lyon, days: 1, first_day: '2026-09-20', last_day: '2026-09-20' },
+      ].sort((p, q) => p.place_id - q.place_id),
+    );
+    // September gains the two views and one new active day (20 September); October is not written: nothing there yet.
+    expect(after.months).toEqual([{ account_id: a, month: '2026-09-01', views: 3, seconds: 30, scans: 0, active_days: 2 }]);
+    // The daily totals are anonymous: the link changes none.
+    expect(after.days).toEqual((await counted(h.t.db)).days);
+
+    // The job then counts the rest: 6 October to 1 November, and October with its last day.
+    await view(own, '2026-10-20T12:00:00Z', a, lyon);
+    const now = new Date('2026-11-02T08:00:00Z');
+    expect(await aggregateViews(h.t.db, now, { maxDays: 1_000 })).toEqual({ days: 28, months: 1 });
+    const total = await counted(h.t.db);
+    expect(total.places).toEqual(
+      [
+        { account_id: a, place_id: paris, days: 4, first_day: '2026-09-10', last_day: '2026-10-06' },
+        { account_id: a, place_id: lyon, days: 2, first_day: '2026-09-20', last_day: '2026-10-20' },
+      ].sort((p, q) => p.place_id - q.place_id),
+    );
+    expect(total.months).toEqual([
+      { account_id: a, month: '2026-09-01', views: 3, seconds: 30, scans: 0, active_days: 2 },
+      { account_id: a, month: '2026-10-01', views: 3, seconds: 30, scans: 1, active_days: 4 },
+    ]);
+    // A recount from scratch of the same rows gives the same figures.
+    expect(await recount(h.t.db, now)).toEqual(total);
+  });
+
+  it('counts nothing for a test entrant’s link', async () => {
+    const t = await account();
+    await h.t.db.insertInto('test_entrants').values({ account_id: t }).execute();
+    const hash = 'T'.repeat(43);
+    const d = await device(hash);
+    const paris = (await h.ctx.services.places.idOf('FR', 'Paris'))!;
+    await view(d, '2026-09-15T10:00:00Z', null, paris);
+    const before = await counted(h.t.db);
+    await h.ctx.services.tracking.link(hash, t, 'SIGN_IN', new Date('2026-11-03T09:00:00Z'));
+    expect(await counted(h.t.db)).toEqual(before);
+  });
+});
+
 // ── PostgreSQL: two links of one device racing on a real pool ─────────────────────────────────────────────────────
 const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
 
@@ -322,5 +427,32 @@ describe.skipIf(!adminUrl)('TrackingService.link on PostgreSQL', () => {
     expect(results.reduce((sum, r) => sum + r.attached, 0)).toBe(20);
     expect(await db.selectFrom('tracking_device_accounts').select(['links', 'first_via']).execute()).toEqual([{ links: 6, first_via: 'SIGN_IN' }]);
     expect(Number((await db.selectFrom('collector_views').select((eb) => eb.fn.countAll().as('n')).where('account_id', '=', account.id).executeTakeFirstOrThrow()).n)).toBe(20);
+  });
+
+  it('counts every row once when links race the daily job: the advisory lock, equal to a recount from scratch', async () => {
+    await db.insertInto('tracking_state').values({ id: 1, started_at: new Date('2026-09-01T06:00:00Z'), scans_backfilled_at: new Date('2026-09-01T06:00:00Z') }).onConflict((oc) => oc.doNothing()).execute();
+    const place = (await new PlaceService({ db }).idOf('FR', 'Paris'))!;
+    const accounts = await Promise.all(
+      Array.from({ length: 6 }, async (_, i) => (await db.insertInto('accounts').values({ email: `racer-${i}@example.com`, email_normalized: `racer-${i}@example.com`, password_hash: 'unused' }).returning('id').executeTakeFirstOrThrow()).id),
+    );
+    const hashes = accounts.map((_, i) => `${String.fromCharCode(65 + i)}`.repeat(43));
+    for (const hash of hashes) {
+      const d = await db.insertInto('tracking_devices').values({ device_hash: hash, first_seen_at: new Date('2026-09-01T06:00:00Z'), last_seen_at: new Date('2026-09-01T06:00:00Z') }).returning('id').executeTakeFirstOrThrow();
+      await db
+        .insertInto('collector_views')
+        .values(Array.from({ length: 40 }, (_, k) => ({ at: new Date(Date.parse('2026-09-02T10:00:00Z') + k * 86_400_000), device_id: d.id, account_id: null, page: VIEW_PAGE_CODES.NOW, subject: null, seconds: 5, place_id: place })))
+        .execute();
+    }
+    const now = new Date('2026-10-20T08:00:00Z');
+    // Half the days counted first, then the links and the rest of the count at once.
+    await aggregateViews(db, new Date('2026-09-25T08:00:00Z'), { maxDays: 1_000 });
+    await Promise.all([
+      ...accounts.map((a, i) => new TrackingService({ db, places: new PlaceService({ db }) }).link(hashes[i]!, a, 'SIGN_IN', now)),
+      aggregateViews(db, now, { maxDays: 1_000 }),
+    ]);
+    await aggregateViews(db, now, { maxDays: 1_000 });
+    const raced = await counted(db);
+    expect(raced.places.filter((p) => accounts.includes(p.account_id))).toHaveLength(6);
+    expect(await recount(db, now)).toEqual(raced);
   });
 });

@@ -2409,6 +2409,34 @@ Recommendations:
 6. **Use separate roles.** Let a migration role own the schema and give the application role only `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the tables, `USAGE` on the sequences and `SELECT` on `kysely_migration` (the production start-up check reads it). The guard triggers stop the application role, but a table owner or superuser can disable them.
 7. **Test restores** on a schedule: restore, start a server against the copy (it refuses to start if migrations are missing), verify the audit chain and verify a known code end to end.
 
+### 11.1 The views' sizes, measured
+
+Plan CUSTOMER INTELLIGENCE §3.3 T.7 and §8, step 3.7. Measured on 9 October 2026 with `genome/scripts/views-size.ts` (dev only; `npx tsx scripts/views-size.ts --dir <new directory>`, or on a throwaway PostgreSQL database with `ORBES_TEST_POSTGRES_URL`) on PGlite 0.5.8 (PostgreSQL 18.3 compiled to WASM, the same pages and tuples), its data directory on disk:
+
+- **The fill.** 1,000,000 synthetic rows of `collector_views` spread over 13 Paris calendar months in time order (visits of 8 rows of one device, 30 % of the devices signed in, 1 row in 80 a SCAN, a model or a release as subject of 45 % of the rows), 240,000 `tracking_devices` (600 a day; their pseudonyms 43 base64url characters of a SHA-256), 72,000 `tracking_device_accounts`, 10,000 accounts and 300 places; then the daily job over every day (395 days, 13 months).
+- **The cycle.** One month later, `purgeViews` folded and deleted the oldest month (75,949 rows, 30 Paris days, one day per transaction), `VACUUM` freed its pages (autovacuum's work), a month of new rows (78,398) was written and counted. The table kept its size (69.1 → 69.3 MB): the new rows went into the freed pages.
+- **Disk:** `pg_relation_size` (the table), `pg_indexes_size`, `pg_total_relation_size`, after the cycle, divided by the rows.
+- **Backup, an estimate:** each table's COPY text compressed with zlib level 6, which is what `pg_dump --format=custom --compress=6` writes for a table's data (indexes are not in a dump). Synthetic rows compress a little better than real ones; the real nightly `pg_dump` is the figure to trust once the recording runs (the morning's `intelligence sizes` log line, §10).
+
+| Table | Rows measured | Table, B/row | Indexes, B/row | Disk, B/row | Backup, B/row (estimate) |
+|---|---|---|---|---|---|
+| `collector_views` | 1,002,449 | 72.5 | 139.2 (primary key 24.2, `at` 24.2, device 52.5, account 38.3) | **211.8** | **17.7** |
+| `tracking_devices` | 240,000 | 134.3 | 144.9 (the unique pseudonym 86.9) | **279.4** | **46.6** |
+| `tracking_device_accounts` | 72,000 | 84.5 | 50.4 | 135.5 | 31.4 |
+| `view_daily_stats` | 44,730 | 76.7 | 50.0 | 127.5 | 6.8 |
+| `device_daily_stats` | 8,520 | 87.5 | 70.2 | 162.5 | 3.4 |
+| `collector_places` | 9,000 | 115.6 | 79.2 | 198.4 | 24.1 |
+| `collector_view_totals` | 18,044 | 93.5 | 76.7 | 171.6 | 23.5 |
+| `collector_view_months` | 39,780 | 68.4 | 52.7 | 121.9 | 24.4 |
+| `geo_places` | 300 | — | — | 0.1 MB in all | — |
+| `tracking_state` | 1 | — | — | 56 KB in all (its pages) | — |
+
+**At the plan's unit** (1,000 visitors a day: 8,000 rows and 600 new devices a day), from these bytes: `collector_views` 1.7 MB of disk and 0.14 MB of backup a day, ≈ 670 MB and ≈ 56 MB once its 13 months are full (≈ 3.2 M rows); `tracking_devices` 0.17 MB and 0.03 MB a day, ≈ 67 MB and ≈ 11 MB at 240,000 unlinked devices. A nightly backup of today's ≈ 8 MB passes 50 MB after about 8 months for the views and devices alone (5½ months with the whole lot's tables, plan §8) and settles near 75 MB (105 MB for the whole lot). At today's ≈ 50 visitors a day, divide by 20.
+
+**The day query after the cycle.** `EXPLAIN (ANALYZE, BUFFERS)` of the daily count's `SELECT` for a refilled Paris day (2,525 rows): a Bitmap Index Scan on `collector_views_at_idx` (9 index pages), then a Bitmap Heap Scan of 23 heap pages of 8,869, about 6 ms; no sequential scan of `collector_views`. The day's rows sit together in the pages the purge freed, and the b-tree on `at` finds them whatever pages they reuse (a BRIN range would have widened to the whole 13 months; plan §3.3 T.6).
+
+To measure again on PostgreSQL: `ORBES_TEST_POSTGRES_URL=postgres://… npx tsx scripts/views-size.ts` (a throwaway database, dropped at the end; its backup estimate rebuilds COPY's text column by column, the driver having no COPY stream). The real `pg_dump -Fc -Z6` of a filled database is the hand-over's.
+
 ---
 
 ## 12. Mapping of the specification's product fields

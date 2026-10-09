@@ -28,9 +28,14 @@
  *            `orbes/views-daily` (the daily job's, so a link and a day's count never cross) and the device row FOR
  *            UPDATE (two sign-ins at once on one device wait for each other): the rows attached, the device's link
  *            (`tracking_device_accounts`, `tracking_devices.account_id`, `linked_at`), then the acquisition's attach
- *            (a hook, a no-op until the acquisition is built). A late row (a batch in flight at the sign-in, sent
- *            without the session) from before the link and after the previous one takes the account too. Never
- *            audited: no person acts, and the sign-up and sign-in are audited already.
+ *            (a hook, a no-op until the acquisition is built). In the same transaction, the attached rows whose Paris
+ *            day the daily job already counted add their new days to `collector_places`, and those of a Paris month
+ *            already written (with its last day's count) add to `collector_view_months` (catchUpCounted, §3.3 T.8.4
+ *            step 5); the days and months
+ *            not counted yet are counted by the jobs (services/tracking-jobs.ts), so the two never cross and never
+ *            count a row twice. A late row (a batch in flight at the sign-in, sent without the session) from before
+ *            the link and after the previous one takes the account too. Never audited: no person acts, and the
+ *            sign-up and sign-in are audited already.
  *   recordScan (§3.3 T.8.3, §3.0 (c)) after `POST /api/v1/verify` has answered (routes/public.ts, onResponse): the scan's
  *            SCAN row (page 1, its piece's model, no duration) for its device, in one INSERT … SELECT from
  *            `scan_events`, so an anonymous scan is attached with the browsing at a later sign-up or sign-in. The same
@@ -48,6 +53,9 @@
  *   markStaff  a browser that opened the console is staff's from its first view: its buffered rows go, `staff_at` is
  *            set once, its rows are deleted in batches of STAFF_DELETE_BATCH; the daily totals already counted keep
  *            their few views.
+ *   purgeDevices  the housekeeping's job `devicePurge` (§3.3 T.10, after `viewPurge`): the devices never linked, not
+ *            marked staff, unseen for 13 months and with no row left, DEVICE_PURGE_MAX a pass, after the buffer is
+ *            written; their cache entries go with them.
  *
  * Nothing here is audited (§3.0 (m)): views are data, not decisions. Nothing reaches the collector: no word, no
  * screen, and the route answers 204 whatever happened. No third party: the rows stay in this database.
@@ -64,7 +72,7 @@ import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 import { normalizeEmail } from './auth.js';
 import { SLUG_RE } from './lookbook.js';
 import type { PlaceService } from './places.js';
-import { houseAccount, HouseAccounts, TestEntrantAccounts } from './population.js';
+import { houseAccount, HouseAccounts, notTestEntrant, TestEntrantAccounts } from './population.js';
 import { parisDay, parisDayStart } from './schedule.js';
 
 // ── Constants (in code: no new environment variable, §3.3 T.8.3) ─────────────────────────────────────────────────
@@ -108,6 +116,12 @@ export const BACKFILL_BATCH = 1_000;
  * one bad row never holds the others back. Any other failure (the database down, restarting, slow) keeps the rows.
  */
 export const FLUSH_MAX_ATTEMPTS = 5;
+/** The devices `purgeDevices` deletes at most a pass (§3.3 T.10). */
+export const DEVICE_PURGE_MAX = 5_000;
+/** The nil uuid: « no subject » in the daily totals' and the summaries' keys (migration 0042). */
+export const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+/** The advisory lock the link and the daily jobs share (§3.3 T.8.4, T.10): a link and a day's count never cross. */
+export const VIEWS_DAILY_LOCK = 'orbes/views-daily';
 
 /** Every page the collector app may name: VIEW_PAGES but SCAN, which only the server writes at a scan. */
 export const SEEN_PAGES = Object.values(VIEW_PAGES).filter((p): p is Exclude<ViewPage, 'SCAN'> => p !== 'SCAN') as [Exclude<ViewPage, 'SCAN'>, ...Exclude<ViewPage, 'SCAN'>[]];
@@ -142,6 +156,142 @@ export function viewHistoryCutoff(now: Date): Date {
 export function inTestNetwork(ip: string | undefined): boolean {
   const c = canonicalIp(ip);
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(c) && TEST_NETWORKS.check(c, 'ipv4');
+}
+
+/** Take the advisory lock VIEWS_DAILY_LOCK for the rest of the transaction `tx`. */
+export async function lockViewsDaily(tx: Db): Promise<void> {
+  if (!tx.isTransaction) throw new Error('lockViewsDaily must be called inside a transaction');
+  await sql`SELECT pg_advisory_xact_lock(hashtext(${VIEWS_DAILY_LOCK}))`.execute(tx);
+}
+
+/** The Paris day after `YYYY-MM-DD`. */
+export function nextParisDay(day: string): string {
+  const [y, m, d] = day.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+}
+
+/** The first day of the Paris month of `YYYY-MM-DD`, as `collector_view_months.month` holds it. */
+export const monthOfDay = (day: string): string => `${day.slice(0, 7)}-01`;
+
+/**
+ * The last Paris day the daily totals count (`max(day)` of `view_daily_stats`, read on its primary key), or null before
+ * the first count (§3.3 T.8.6, T.10): the console's « Figures through … ».
+ */
+export async function viewsCountedThrough(db: Db): Promise<string | null> {
+  const r = await db.selectFrom('view_daily_stats').select((eb) => eb.fn.max('day').as('day')).executeTakeFirst();
+  return (r?.day as string | null | undefined) ?? null;
+}
+
+/** The last Paris day of the month of `YYYY-MM-DD`. */
+export function lastDayOfMonth(day: string): string {
+  const [y, m] = day.split('-').map(Number) as [number, number];
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+
+/**
+ * Whether the Paris month of `day` is written into `collector_view_months`: the daily job writes a month in the same
+ * transaction as its last day's count (services/tracking-jobs.ts), so a month is written exactly when its last day is
+ * counted (`counted`, viewsCountedThrough).
+ */
+export const monthWritten = (day: string, counted: string | null): boolean => counted !== null && lastDayOfMonth(day) <= counted;
+
+/**
+ * The rows the daily jobs count for a collector (§3.0 (d), §3.3 T.10): an anonymous row, or an account that is neither a
+ * test entrant nor one of the team's own (their rows never reach the table; this keeps them out whatever came before).
+ */
+export const countedViewRow = (column: string) => sql<boolean>`(${sql.ref(column)} IS NULL OR (${notTestEntrant(column)} AND NOT ${houseAccount(column)}))`;
+
+/** A row the link attached, as its UPDATE returns it. */
+interface AttachedRow {
+  id: number;
+  at: Date;
+  page: number;
+  seconds: number;
+  place_id: number | null;
+}
+
+/**
+ * T.8.4 step 5, inside the link's transaction (after the advisory lock): the attached rows of the Paris days the daily
+ * job already counted give `collector_places` their new days (a day the collector already had at that place is not
+ * counted again), and those of the Paris months already written (their last day counted: monthWritten) add their
+ * views, seconds, scans and new active days to `collector_view_months`. The days and months not counted yet are left to the jobs, which count every row with
+ * an account. A test entrant or one of the team's own is never counted, as the jobs never count them.
+ */
+async function catchUpCounted(tx: Db, accountId: string, rows: readonly AttachedRow[]): Promise<void> {
+  if (rows.length === 0) return;
+  const counted = await viewsCountedThrough(tx);
+  if (counted === null) return;
+  // A month is written with its last day's count, so every row of a written month is of a counted day.
+  const relevant = rows.map((r) => ({ ...r, day: parisDay(r.at) })).filter((r) => r.day <= counted);
+  if (relevant.length === 0) return;
+  const excluded = await sql<{ x: boolean }>`SELECT (NOT ${notTestEntrant('a.id')} OR ${houseAccount('a.id')}) AS x FROM accounts a WHERE a.id = ${accountId}::uuid`.execute(tx);
+  if (excluded.rows[0]?.x !== false) return;
+  // What the collector already had in those days, before this link (its other rows): those days are counted already.
+  const days = relevant.map((r) => r.day).sort();
+  const attached = new Set(rows.map((r) => Number(r.id)));
+  const other = (
+    await tx
+      .selectFrom('collector_views')
+      .select(['id', 'at', 'place_id'])
+      .where('account_id', '=', accountId)
+      .where('at', '>=', parisDayStart(days[0]!))
+      .where('at', '<', parisDayStart(nextParisDay(days[days.length - 1]!)))
+      .execute()
+  ).filter((r) => !attached.has(Number(r.id)));
+  const hadPlaceDay = new Set(other.filter((r) => r.place_id !== null).map((r) => `${r.place_id}|${parisDay(r.at)}`));
+  const hadDay = new Set(other.map((r) => parisDay(r.at)));
+
+  // collector_places: per place, the new days of the counted days.
+  const places = new Map<number, { days: Set<string>; fresh: Set<string> }>();
+  for (const r of relevant) {
+    if (r.place_id === null) continue;
+    const p = places.get(r.place_id) ?? { days: new Set<string>(), fresh: new Set<string>() };
+    p.days.add(r.day);
+    if (!hadPlaceDay.has(`${r.place_id}|${r.day}`)) p.fresh.add(r.day);
+    places.set(r.place_id, p);
+  }
+  for (const [placeId, p] of places) {
+    if (p.fresh.size === 0) continue;
+    const sorted = [...p.days].sort();
+    await tx
+      .insertInto('collector_places')
+      .values({ account_id: accountId, place_id: placeId, days: p.fresh.size, first_day: sorted[0]!, last_day: sorted[sorted.length - 1]! })
+      .onConflict((oc) =>
+        oc.columns(['account_id', 'place_id']).doUpdateSet({
+          days: sql`collector_places.days + excluded.days`,
+          first_day: sql`least(collector_places.first_day, excluded.first_day)`,
+          last_day: sql`greatest(collector_places.last_day, excluded.last_day)`,
+        }),
+      )
+      .execute();
+  }
+
+  // collector_view_months: per written month, the attached rows and their new active days.
+  const months = new Map<string, { views: number; seconds: number; scans: number; fresh: Set<string> }>();
+  for (const r of relevant) {
+    if (!monthWritten(r.day, counted)) continue;
+    const month = monthOfDay(r.day);
+    const m = months.get(month) ?? { views: 0, seconds: 0, scans: 0, fresh: new Set<string>() };
+    if (r.page === VIEW_PAGE_CODES.SCAN) m.scans += 1;
+    else m.views += 1;
+    m.seconds += r.seconds;
+    if (!hadDay.has(r.day)) m.fresh.add(r.day);
+    months.set(month, m);
+  }
+  for (const [month, m] of months) {
+    await tx
+      .insertInto('collector_view_months')
+      .values({ account_id: accountId, month, views: m.views, seconds: m.seconds, scans: m.scans, active_days: m.fresh.size })
+      .onConflict((oc) =>
+        oc.columns(['account_id', 'month']).doUpdateSet({
+          views: sql`collector_view_months.views + excluded.views`,
+          seconds: sql`collector_view_months.seconds + excluded.seconds`,
+          scans: sql`collector_view_months.scans + excluded.scans`,
+          active_days: sql`least(31, collector_view_months.active_days + excluded.active_days)`,
+        }),
+      )
+      .execute();
+  }
 }
 
 // ── Shapes ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -896,19 +1046,22 @@ export class TrackingService {
     await this.buffer.flush();
     const r = await inTransaction(this.db, async (tx) => {
       // 2. The daily job's lock, then the device row: a link and a day's count never cross; two links of one device wait.
-      await sql`SELECT pg_advisory_xact_lock(hashtext('orbes/views-daily'))`.execute(tx);
+      await lockViewsDaily(tx);
       const d = await tx.selectFrom('tracking_devices').select(['id', 'account_id', 'linked_at']).where('id', '=', device.id).forUpdate().executeTakeFirstOrThrow();
       if (via === 'SESSION' && d.account_id === accountId) return { attached: 0, since: undefined, linkedAt: d.linked_at, skipped: true };
       // 3. Since its previous link, or its whole 13 months when it was never linked. 4. The anonymous rows, scans included.
       const since = d.linked_at;
       const from = since ?? viewHistoryCutoff(now);
-      const u = await tx
+      const attached = await tx
         .updateTable('collector_views')
         .set({ account_id: accountId })
         .where('device_id', '=', device.id)
         .where('account_id', 'is', null)
         .where('at', '>=', from)
-        .executeTakeFirst();
+        .returning(['id', 'at', 'page', 'seconds', 'place_id'])
+        .execute();
+      // 5. The places and months already counted take the attached rows of their days (the jobs count the others).
+      await catchUpCounted(tx, accountId, attached);
       // 6. The device's link.
       await tx
         .insertInto('tracking_device_accounts')
@@ -923,11 +1076,37 @@ export class TrackingService {
       await tx.updateTable('tracking_devices').set({ account_id: accountId, linked_at: now }).where('id', '=', device.id).execute();
       // 7. The acquisition's attach, in the same transaction.
       await this.attach(tx, device.id, accountId, via, now);
-      return { attached: Number(u.numUpdatedRows ?? 0), since, linkedAt: now, skipped: false };
+      return { attached: attached.length, since, linkedAt: now, skipped: false };
     });
     const entry = this.devices.get(deviceHash) ?? device;
     this.remember(deviceHash, { ...entry, accountId, linkedAt: r.linkedAt, ...(r.skipped ? {} : { previousLinkedAt: r.since ?? null }) });
     return { attached: r.attached };
+  }
+
+  /**
+   * Job `devicePurge` (§3.3 T.10; the housekeeping runs it after `viewPurge`, in the morning window): the devices never
+   * linked (no account, no row in `tracking_device_accounts`), not marked staff (the mark is kept), unseen since the
+   * first day the views keep (viewHistoryCutoff) and with no row left in `collector_views`, the longest unseen first,
+   * at most `max` a pass. The buffer is written first, so a device with views or a sight still in memory is kept; a
+   * flush put off (the pool waiting) or failed purges nothing this pass. The deleted devices leave the cache. Returns how
+   * many were deleted.
+   */
+  async purgeDevices(now: Date = this.clock(), opts: { max?: number } = {}): Promise<number> {
+    const max = Math.max(1, Math.floor(opts.max ?? DEVICE_PURGE_MAX));
+    const flushed = await this.buffer.flush();
+    if (flushed.deferred || flushed.failed) return 0;
+    const cutoff = viewHistoryCutoff(now);
+    const r = await sql<{ device_hash: string }>`
+      DELETE FROM tracking_devices WHERE id IN (
+        SELECT d.id FROM tracking_devices d
+         WHERE d.account_id IS NULL AND d.staff_at IS NULL AND d.last_seen_at < ${cutoff}
+           AND NOT EXISTS (SELECT 1 FROM tracking_device_accounts a WHERE a.device_id = d.id)
+           AND NOT EXISTS (SELECT 1 FROM collector_views v WHERE v.device_id = d.id)
+         ORDER BY d.last_seen_at
+         LIMIT ${max})
+      RETURNING device_hash`.execute(this.db);
+    for (const row of r.rows) this.devices.delete(row.device_hash);
+    return r.rows.length;
   }
 
   /**
