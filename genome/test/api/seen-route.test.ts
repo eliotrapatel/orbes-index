@@ -5,7 +5,9 @@
  *  - 204 and the device cookie set on a first request; the rows in `collector_views` after flush(), with the device,
  *    its class and its place;
  *  - 403 from another origin (and from a client that names none, as `curl` does); 400 for an unknown key, 51 events, a
- *    SCAN page, a negative `ago`;
+ *    SCAN page, a negative `ago`, no view without an arrival;
+ *  - the page load's arrival `a` (plan §3.4 A.7.2, step 4.2): alone with `e: []`, or with views, 204; its views
+ *    recorded either way;
  *  - the `seen` budget separate from `api`;
  *  - the 30-second session cache: one session read for two batches 10 s apart; a revoked session leaves the recording
  *    within 30 s; at most 5 000 entries;
@@ -131,6 +133,19 @@ describe('POST /api/v1/seen (plan CUSTOMER INTELLIGENCE §3.3 T.8.7)', () => {
       expect(res.statusCode, JSON.stringify(body).slice(0, 80)).toBe(400);
       expect(errorOf(res).code).toBe('VALIDATION_FAILED');
     }
+  });
+
+  it('takes the page load\'s arrival, `a`: alone with no view yet (`e: []`) or with views, 204; `e: []` without it is still refused', async () => {
+    const c = h.client({ ip: '198.51.100.32' });
+    expect((await seen(c, { ...batch([]), a: { path: '/verify', referrer: 'https://www.instagram.com/' } })).statusCode).toBe(204);
+    expect((await rowsOf(c)).rows).toEqual([]);
+    expect((await seen(c, { ...batch([view('NOW')]), a: { link: 'no-such-link' } })).statusCode).toBe(204);
+    const { device, rows } = await rowsOf(c);
+    expect(rows.map((r) => r.page)).toEqual([VIEW_PAGE_CODES.NOW]);
+    expect(device?.first_source_id).toEqual(expect.any(Number));
+    const refused = await seen(c, batch([]));
+    expect(refused.statusCode).toBe(400);
+    expect(errorOf(refused).code).toBe('VALIDATION_FAILED');
   });
 
   it('draws on its own budget, `seen`, twice the `api` one and separate from it', async () => {

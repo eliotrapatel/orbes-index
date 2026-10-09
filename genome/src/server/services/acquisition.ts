@@ -10,6 +10,17 @@
  *            DIRECT, BEFORE and STAFF sources, and the one `acquisition_state` row whose `tracking_started_at` is this
  *            first boot (before it, « Before tracking »). Each `ON CONFLICT DO NOTHING` / `WHERE NOT EXISTS`, so a
  *            second boot, or two processes at once, create one set; a second boot never moves the start.
+ *   arrive   (§3.4 A.5, A.7.1, step 4.2) the page load's arrival, the `a` of its first `POST /api/v1/seen` batch, handed
+ *            over by TrackingService.ingest once the pipeline's exclusions passed (staff, the team's own accounts, test
+ *            entrants and their networks, automated agents, the device's daily cap; §3.3 T.8.3). Classified once, the
+ *            most deliberate signal winning (`classify`): a console link named by `o` (archived ones included; its tags
+ *            and site then ignored), then campaign tags (utm_source or utm_campaign), then a referring site
+ *            (services/referrers.ts), then DIRECT. Its source row found by its key, or made: a new CAMPAIGN or SITE
+ *            source past SOURCES_PER_DAY made this Paris day falls back to the next class down (its site, then
+ *            DIRECT), so junk tags never fill the disk. Then, in one short transaction: the device's first source, set
+ *            once (DIRECT included), and, unless DIRECT, the visit: one row per device, source and Paris day, its
+ *            repeats counted (`arrivals`), its last arrival moved, the account kept once known. A visit is data, not
+ *            an act: never audited.
  *
  * Nothing here is audited at boot: the presets are the house's words, written once, as the stock's are. No third party:
  * nothing leaves this database.
@@ -18,6 +29,8 @@ import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import type { SourceKind } from '../db/schema.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
+import { referrerHost, SITE_RE } from './referrers.js';
+import { parisDay, parisDayStart } from './schedule.js';
 
 /**
  * The channels made at the first boot, in their order (§3.4 A.6 item 1): the words of « How did you hear about ORBES? »
@@ -35,6 +48,83 @@ export const CHANNEL_PRESETS: readonly (readonly [name: string, position: number
 
 /** The sources no arrival creates, made at boot, each its kind as its key (§3.4 A.6 item 3). */
 export const FIXED_SOURCES = ['DIRECT', 'BEFORE', 'STAFF'] as const satisfies readonly SourceKind[];
+
+/** New CAMPAIGN and SITE sources made per Paris day at most (§3.4 A.6): past it, an arrival falls back a class. */
+export const SOURCES_PER_DAY = 100;
+/** The source rows' ids kept in memory, by key (a source is never deleted nor changed). */
+export const SOURCE_CACHE_SIZE = 1_000;
+/** U+001F, between the five tags of a campaign's key. */
+export const TAG_SEPARATOR = '\u001f';
+
+/** The five campaign tags of an arrival, as the app read them from the address (`utm_source` … `utm_term`). */
+export interface ArrivalTags {
+  source?: string;
+  medium?: string;
+  campaign?: string;
+  content?: string;
+  term?: string;
+}
+
+/** What an arrival says (http/schemas.ts arrivalShape, every field optional, an invalid one already dropped). */
+export interface ArrivalSignals {
+  /** The console link's code from `o` (any case). */
+  link?: string | null;
+  utm?: ArrivalTags | null;
+  /** `document.referrer`: only its host is ever kept. */
+  referrer?: string | null;
+}
+
+/** `arrive`'s input (§3.4 A.7.1). */
+export interface ArrivalInput extends ArrivalSignals {
+  deviceId: number;
+  /** The account signed in on the request, if any: its visit is the account's at once. */
+  accountId: string | null;
+  now: Date;
+}
+
+/** One candidate source of an arrival, in the order they are tried. */
+export type SourceCandidate =
+  | { kind: 'LINK'; code: string }
+  | { kind: 'CAMPAIGN'; key: string; tags: Required<{ [K in keyof ArrivalTags]: string | null }> }
+  | { kind: 'SITE'; key: string; site: string }
+  | { kind: 'DIRECT'; key: 'DIRECT' };
+
+/** What `arrive` recorded (the tests and the logs; the route answers 204 whatever it is). */
+export interface ArrivalOutcome {
+  sourceId: number;
+  kind: Exclude<SourceKind, 'BEFORE' | 'STAFF'>;
+  /** The device's first source was set by this arrival. */
+  firstSource: boolean;
+  /** A visit was written (a new one or a repeat); never for DIRECT. */
+  touch: boolean;
+}
+
+const TAG_KEYS = ['source', 'medium', 'campaign', 'content', 'term'] as const;
+const LINK_CODE_RE = /^[a-z0-9-]{3,32}$/;
+
+/** A tag as it is kept: trimmed, in lower case, 1 to 100 characters; anything else is no tag. */
+function tagOf(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const t = v.trim().toLowerCase();
+  return t.length >= 1 && t.length <= 100 && !/\p{C}/u.test(t) ? t : null;
+}
+
+/**
+ * The candidate sources of an arrival, most deliberate first (§3.4 A.5): the link named by `o`, the campaign of its
+ * tags, the referring site, then DIRECT, always last. Pure: whether the link exists, and the day's cap, are the
+ * caller's to check.
+ */
+export function classify(input: ArrivalSignals, publicHost: string): SourceCandidate[] {
+  const out: SourceCandidate[] = [];
+  const code = typeof input.link === 'string' ? input.link.trim().toLowerCase() : '';
+  if (LINK_CODE_RE.test(code)) out.push({ kind: 'LINK', code });
+  const tags = Object.fromEntries(TAG_KEYS.map((k) => [k, tagOf(input.utm?.[k])])) as Required<{ [K in keyof ArrivalTags]: string | null }>;
+  if (tags.source !== null || tags.campaign !== null) out.push({ kind: 'CAMPAIGN', key: `C:${TAG_KEYS.map((k) => tags[k] ?? '').join(TAG_SEPARATOR)}`, tags });
+  const site = referrerHost(input.referrer, publicHost);
+  if (site !== null && SITE_RE.test(site)) out.push({ kind: 'SITE', key: `S:${site}`, site });
+  out.push({ kind: 'DIRECT', key: 'DIRECT' });
+  return out;
+}
 
 export interface AcquisitionServiceDeps {
   db: Db;
@@ -95,6 +185,106 @@ export class AcquisitionService {
         started: state.rows[0]?.tracking_started_at ?? null,
       };
     });
+  }
+
+  private readonly sourceIds = new Map<string, number>();
+
+  /**
+   * The page load's arrival (see the header): its source, the device's first source, the visit. Throws on a database
+   * failure; TrackingService.ingest logs it and the views go on.
+   */
+  async arrive(input: ArrivalInput): Promise<ArrivalOutcome> {
+    const day = parisDay(input.now);
+    // Source ids are kept in memory only once their transaction committed: a row rolled back is never remembered.
+    const learnt = new Map<string, number>();
+    const outcome = await inTransaction(this.db, async (tx) => {
+      let chosen: { id: number; kind: ArrivalOutcome['kind'] } | null = null;
+      for (const candidate of classify(input, this.publicHost)) {
+        const id = await this.sourceOf(tx, candidate, input.now, learnt);
+        if (id !== null) {
+          chosen = { id, kind: candidate.kind };
+          break;
+        }
+      }
+      if (!chosen) throw new Error('the DIRECT source is missing');
+      const first = await sql`UPDATE tracking_devices SET first_source_id = ${chosen.id}::integer WHERE id = ${input.deviceId}::integer AND first_source_id IS NULL`.execute(tx);
+      let touch = false;
+      if (chosen.kind !== 'DIRECT') {
+        await sql`
+          INSERT INTO acquisition_touches (device_id, source_id, day, first_at, last_at, account_id)
+          VALUES (${input.deviceId}::integer, ${chosen.id}::integer, ${day}::date, ${input.now}::timestamptz, ${input.now}::timestamptz, ${input.accountId}::uuid)
+          ON CONFLICT (device_id, source_id, day) DO UPDATE SET
+            last_at = greatest(acquisition_touches.last_at, EXCLUDED.last_at),
+            arrivals = acquisition_touches.arrivals + 1,
+            account_id = coalesce(acquisition_touches.account_id, EXCLUDED.account_id)`.execute(tx);
+        touch = true;
+      }
+      return { sourceId: chosen.id, kind: chosen.kind, firstSource: Number(first.numAffectedRows ?? 0) > 0, touch };
+    });
+    for (const [key, id] of learnt) this.remember(key, id);
+    return outcome;
+  }
+
+  /**
+   * The id of a candidate's source row, or null when it cannot be used: a link code no link has, a new campaign or site
+   * past the day's cap. A link's source is made with the link (LinkService.create); one found missing is made here.
+   */
+  private async sourceOf(tx: Db, c: SourceCandidate, now: Date, learnt: Map<string, number>): Promise<number | null> {
+    if (c.kind === 'LINK') {
+      const cached = this.sourceIds.get(`O:${c.code}`);
+      if (cached !== undefined) return cached;
+      const link = await tx.selectFrom('links').select('id').where('code', '=', c.code).executeTakeFirst();
+      if (!link) return null;
+      const id = await this.ensureSource(tx, `L:${link.id}`, { kind: 'LINK', link_id: link.id }, now);
+      learnt.set(`O:${c.code}`, id);
+      return id;
+    }
+    const cached = this.sourceIds.get(c.key);
+    if (cached !== undefined) return cached;
+    const found = await tx.selectFrom('acquisition_sources').select('id').where('key', '=', c.key).executeTakeFirst();
+    if (found) {
+      learnt.set(c.key, found.id);
+      return found.id;
+    }
+    if (c.kind === 'DIRECT') {
+      const id = await this.ensureSource(tx, 'DIRECT', { kind: 'DIRECT' }, now);
+      learnt.set(c.key, id);
+      return id;
+    }
+    // A new campaign or site: within the day's cap only.
+    const made = await sql<{ n: number }>`
+      SELECT count(*)::int AS n FROM acquisition_sources
+       WHERE created_at >= ${parisDayStart(parisDay(now))}::timestamptz AND kind IN ('CAMPAIGN', 'SITE')`.execute(tx);
+    if ((made.rows[0]?.n ?? 0) >= SOURCES_PER_DAY) return null;
+    const cols =
+      c.kind === 'CAMPAIGN'
+        ? { kind: 'CAMPAIGN' as const, utm_source: c.tags.source, utm_medium: c.tags.medium, utm_campaign: c.tags.campaign, utm_content: c.tags.content, utm_term: c.tags.term }
+        : { kind: 'SITE' as const, site: c.site };
+    const id = await this.ensureSource(tx, c.key, cols, now);
+    learnt.set(c.key, id);
+    return id;
+  }
+
+  /** The source row of `key`, made when missing (`ON CONFLICT (key) DO NOTHING`, then read: safe under concurrency). */
+  private async ensureSource(
+    tx: Db,
+    key: string,
+    cols: { kind: SourceKind; link_id?: string; utm_source?: string | null; utm_medium?: string | null; utm_campaign?: string | null; utm_content?: string | null; utm_term?: string | null; site?: string },
+    now: Date,
+  ): Promise<number> {
+    const inserted = await tx
+      .insertInto('acquisition_sources')
+      .values({ ...cols, key, created_at: now })
+      .onConflict((oc) => oc.column('key').doNothing())
+      .returning('id')
+      .executeTakeFirst();
+    return inserted?.id ?? (await tx.selectFrom('acquisition_sources').select('id').where('key', '=', key).executeTakeFirstOrThrow()).id;
+  }
+
+  private remember(key: string, id: number): void {
+    this.sourceIds.delete(key);
+    this.sourceIds.set(key, id);
+    while (this.sourceIds.size > SOURCE_CACHE_SIZE) this.sourceIds.delete(this.sourceIds.keys().next().value as string);
   }
 
   /** The recording's start (`acquisition_state.tracking_started_at`), or null before `prepare` ran. */

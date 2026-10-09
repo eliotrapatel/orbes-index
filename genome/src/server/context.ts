@@ -323,8 +323,9 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const wishlist = new WishlistService({ db, clock });
     const places = new PlaceService({ db });
     // The recording's writes wait while the pool has requests waiting (§3.3 T.8.3): the collectors come first.
-    const tracking = new TrackingService({ db, places, clock, log, waiting: () => (poolOf(db)?.waitingCount ?? 0) > 0 });
     const acquisition = new AcquisitionService({ db, publicOrigin: config.publicOrigin, clock, log });
+    // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
+    const tracking = new TrackingService({ db, places, clock, log, waiting: () => (poolOf(db)?.waitingCount ?? 0) > 0, arrive: (input) => acquisition.arrive(input) });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });

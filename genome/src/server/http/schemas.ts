@@ -250,11 +250,53 @@ export const reportBody = body({
 });
 
 /**
- * POST /api/v1/seen (plan CUSTOMER INTELLIGENCE §3.3 T.8.7): the collector app's views, `v` 1. `d` is the device (`s`
- * standalone on the home screen, `t` touch points, `w` the screen's short side in CSS pixels); `e` holds 1 to
- * BATCH_MAX_EVENTS views, each a page the app may name (any but SCAN, which only the server writes), its subject (a
- * slug, a release or post id, a serial), its milliseconds and how long ago it began (up to 24 hours). Strict, like
- * every body.
+ * The page load's arrival (plan CUSTOMER INTELLIGENCE §3.4 A.7.2, A.9; §3.3 T.8.7), the `a` of the first
+ * `POST /api/v1/seen` batch: the address it landed on (`path`), the console link's code from `o` (`link`), the five
+ * `utm_` tags and `document.referrer`. Every field optional, and each invalid one dropped rather than refused, so a
+ * beacon never fails on a junk address: a path that is not the app's, a code that is not 3 to 32 letters, figures or
+ * dashes, a tag empty or over 100 printable characters once trimmed, a referrer over 500 characters or not an
+ * `http:`, `https:` or `android-app:` address. Strict about its keys, like every body. Only the referrer's host is
+ * ever kept (services/referrers.ts), and the path is read, never stored.
+ */
+const lenient = <T extends z.ZodType>(schema: T) => schema.optional().catch(undefined);
+/** A campaign tag: trimmed, then 1 to 100 characters with no control or format character. */
+const arrivalTag = lenient(
+  z
+    .string()
+    .max(1_000)
+    .transform((v) => v.trim())
+    .pipe(z.string().min(1).max(100).regex(/^[^\p{C}]+$/u)),
+);
+export const arrivalShape = z.strictObject({
+  path: lenient(z.string().regex(/^\/verify(\/[^?#]{0,200})?$/)),
+  link: lenient(
+    z
+      .string()
+      .regex(/^[a-z0-9-]{3,32}$/i)
+      .transform((v) => v.toLowerCase()),
+  ),
+  utm: lenient(z.strictObject({ source: arrivalTag, medium: arrivalTag, campaign: arrivalTag, content: arrivalTag, term: arrivalTag })),
+  referrer: lenient(
+    z
+      .string()
+      .max(500)
+      .refine((v) => {
+        try {
+          return ['http:', 'https:', 'android-app:'].includes(new URL(v).protocol);
+        } catch {
+          return false;
+        }
+      }),
+  ),
+});
+export type ArrivalBody = z.infer<typeof arrivalShape>;
+
+/**
+ * POST /api/v1/seen (plan CUSTOMER INTELLIGENCE §3.3 T.8.7, §3.4 A.7.2): the collector app's views, `v` 1. `d` is the
+ * device (`s` standalone on the home screen, `t` touch points, `w` the screen's short side in CSS pixels); `a`, once
+ * per page load in its first batch, the arrival (arrivalShape); `e` holds 0 to BATCH_MAX_EVENTS views, at least one
+ * when `a` is absent, each a page the app may name (any but SCAN, which only the server writes), its subject (a slug, a
+ * release or post id, a serial), its milliseconds and how long ago it began (up to 24 hours). Strict, like every body.
  */
 export const seenBody = body({
   v: z.literal(1),
@@ -263,6 +305,7 @@ export const seenBody = body({
     t: z.number().int('A whole number').min(0, 'From 0').max(20, 'At most 20'),
     w: z.number().int('A whole number').min(0, 'From 0').max(10_000, 'At most 10000'),
   }),
+  a: arrivalShape.optional(),
   e: z
     .array(
       z.strictObject({
@@ -272,8 +315,9 @@ export const seenBody = body({
         ago: z.number().int('A whole number').min(0, 'From 0').max(86_400_000, 'At most 86400000'),
       }),
     )
-    .min(1, 'At least one view')
     .max(BATCH_MAX_EVENTS, `At most ${BATCH_MAX_EVENTS} views`),
+}).superRefine((b, ctx) => {
+  if (b.a === undefined && b.e.length === 0) ctx.addIssue({ code: 'custom', path: ['e'], message: 'At least one view' });
 });
 
 /** A stored photograph's name: the hex SHA-256 of its bytes, any case. */

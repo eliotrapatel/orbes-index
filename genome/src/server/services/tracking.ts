@@ -11,7 +11,9 @@
  *            (http/device-class.ts isAutomated) → dropped; past DEVICE_DAILY_CAP rows a device a Paris day → the rest
  *            dropped. Then the device (one upsert, then an LRU of DEVICE_CACHE_SIZE), the place (PlaceService), and
  *            each event's row (its page code, its subject resolved, `at` = now − ago on the server's clock, its
- *            seconds capped) into the buffer.
+ *            seconds capped) into the buffer. Last, the page load's arrival when the batch carries one (`a`, §3.4
+ *            A.9): handed to the acquisition's `arrive` (AcquisitionService.arrive, §3.4 A.7.1) after the same
+ *            exclusions, in its own short transaction; a failure is logged and the views go on.
  *   buffer   ViewBuffer: the rows wait in memory and are written every BUFFER_FLUSH_MS (at once past
  *            BUFFER_FLUSH_AT rows) in one multi-row INSERT, with one batched UPDATE of the devices' last sight and
  *            place, at most every DEVICE_SEEN_EVERY_MS a device. A flush is put off while the database pool has
@@ -75,6 +77,7 @@ import { classifyDevice, clientHintsOf, isAutomated, type DeviceClass } from '..
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 import { normalizeEmail } from './auth.js';
 import { SLUG_RE } from './lookbook.js';
+import type { ArrivalInput, ArrivalTags } from './acquisition.js';
 import type { PlaceService } from './places.js';
 import { houseAccount, HouseAccounts, notTestEntrant, TestEntrantAccounts } from './population.js';
 import { parisDay, parisDayStart } from './schedule.js';
@@ -330,11 +333,21 @@ export interface SeenEvent {
   ago: number;
 }
 
-/** `POST /api/v1/seen`'s body (http/schemas.ts seenBody): the device's own words and the views. */
+/** The page load's arrival (http/schemas.ts arrivalShape, §3.4 A.7.2): every field optional, an invalid one dropped. */
+export interface SeenArrival {
+  path?: string | undefined;
+  link?: string | undefined;
+  utm?: ArrivalTags | undefined;
+  referrer?: string | undefined;
+}
+
+/** `POST /api/v1/seen`'s body (http/schemas.ts seenBody): the device's own words, the page load's arrival and the views. */
 export interface SeenBatch {
   v: 1;
   /** The device: standalone (home screen), touch points, the screen's short side in CSS pixels. */
   d: { s: boolean; t: number; w: number };
+  /** The page load's arrival, in its first batch only (§3.4 A.9). */
+  a?: SeenArrival;
   e: readonly SeenEvent[];
 }
 
@@ -361,6 +374,8 @@ export interface IngestOutcome {
   /** Rows put into the buffer. */
   recorded: number;
   dropped?: DropReason;
+  /** The batch's arrival was recorded (false: it failed, and was logged). Absent without an arrival. */
+  arrived?: boolean;
 }
 
 /** A row waiting in the buffer, `collector_views` as it will be written. */
@@ -690,11 +705,19 @@ export interface TrackingServiceDeps {
   /** The buffer's bound (tests). */
   bufferMaxRows?: number;
   /**
+   * The acquisition's arrival (§3.4 A.7.1 AcquisitionService.arrive): the page load's visit, recorded after the
+   * pipeline's exclusions. Without it (tests of the views alone) an arrival is not recorded.
+   */
+  arrive?: ArrivalHook;
+  /**
    * The acquisition's attach (§3.4 A.4), run inside the link's transaction: the device's visits take the account, and
    * at a sign-up its first source and SIGNUP conversion are written. A no-op until the acquisition is built (step 4.4).
    */
   attach?: LinkAttach;
 }
+
+/** The arrival's hook (§3.4 A.7.1 `AcquisitionService.arrive`), in its own transaction; a failure is logged. */
+export type ArrivalHook = (input: ArrivalInput) => Promise<unknown>;
 
 /** The hook the link runs in its transaction (§3.4 A.7.1 `AcquisitionService.attach`); a failure rolls the link back. */
 export type LinkAttach = (tx: Db, deviceId: number, accountId: string, via: LinkVia, now: Date) => Promise<void>;
@@ -722,6 +745,7 @@ export class TrackingService {
   private readonly houseAccounts: Pick<HouseAccounts, 'isHouseEmail'>;
   private readonly testEntrants: Pick<TestEntrantAccounts, 'has'>;
   private readonly attach: LinkAttach;
+  private readonly arrive: ArrivalHook | null;
   private readonly devices = new Map<string, DeviceEntry>();
   private readonly daily = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
@@ -738,6 +762,7 @@ export class TrackingService {
     this.houseAccounts = deps.houseAccounts ?? new HouseAccounts(deps.db, this.clock);
     this.testEntrants = deps.testEntrants ?? new TestEntrantAccounts(deps.db, this.clock);
     this.attach = deps.attach ?? (async () => {});
+    this.arrive = deps.arrive ?? null;
     this.buffer = new ViewBuffer({ db: deps.db, clock: this.clock, log: this.log, waiting: deps.waiting ?? (() => false), ...(deps.bufferMaxRows ? { maxRows: deps.bufferMaxRows } : {}) });
     this.subjects = new SubjectResolver(deps.db, this.clock);
   }
@@ -815,9 +840,9 @@ export class TrackingService {
     const { now } = meta;
     const dropped = await this.excluded(meta);
     if (dropped) return { recorded: 0, dropped };
-    // 4. The per-device daily cap.
+    // 4. The per-device daily cap (an arrival alone is dropped too once the device reached it).
     const events = this.underCap(meta.deviceHash, batch.e, now);
-    if (events.length === 0 && batch.e.length > 0) return { recorded: 0, dropped: 'CAP' };
+    if (events.length === 0 && (batch.e.length > 0 || this.capReached(meta.deviceHash, now))) return { recorded: 0, dropped: 'CAP' };
     // 5. The device, with its place (7).
     const placeId = meta.place ? await this.places.idOf(meta.place.country, meta.place.city) : null;
     const cls = classifyDevice({ userAgent: meta.userAgent, hints: clientHintsOf(meta.headers), client: { standalone: batch.d.s, touchPoints: batch.d.t, shortSide: batch.d.w } });
@@ -834,7 +859,26 @@ export class TrackingService {
     }
     this.buffer.push(rows);
     if (this.buffer.size >= BUFFER_FLUSH_AT) void this.buffer.flush();
+    // 9. The arrival (§3.4 A.9): the page load's visit, in its own short transaction; the views stay in the buffer
+    // either way.
+    if (batch.a && this.arrive) return { recorded: rows.length, arrived: await this.recordArrival(batch.a, device, meta) };
     return { recorded: rows.length };
+  }
+
+  /** Step 9: AcquisitionService.arrive, never thrown (a failure is logged and the batch goes on). */
+  private async recordArrival(a: SeenArrival, device: DeviceEntry, meta: SeenMeta): Promise<boolean> {
+    try {
+      await this.arrive!({ deviceId: device.id, accountId: meta.account?.id ?? null, link: a.link ?? null, utm: a.utm ?? null, referrer: a.referrer ?? null, now: meta.now });
+      return true;
+    } catch (e) {
+      this.log.error({ err: errText(e) }, 'arrival not recorded');
+      return false;
+    }
+  }
+
+  /** Whether the device has used its whole daily cap this Paris day. */
+  private capReached(deviceHash: string, now: Date): boolean {
+    return (this.daily.get(`${deviceHash}|${parisDay(now)}`) ?? 0) >= DEVICE_DAILY_CAP;
   }
 
   /** The events within the device's daily cap, counted per Paris day in an LRU as large as the device cache. */
