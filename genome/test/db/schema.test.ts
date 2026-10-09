@@ -842,6 +842,25 @@ describe('schema', () => {
     await expect(t.db.insertInto('account_tastes').values({ account_id: account.id, kind: 'PIECE', value_key: 'RING', label: 'CUFF' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'account_tastes_label'));
   });
 
+  it('the wishlist (0041): the mirror at work: a wish with its defaults, removed and reopened; a model\'s month and its counts; a month counted', async () => {
+    const account = await t.db.insertInto('accounts').values({ email: 'wishes-0041@example.com', email_normalized: 'wishes-0041@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    await t.db.insertInto('categories').values({ id: 26, code: 'Z', name: 'CAT Z' }).onConflict((oc) => oc.doNothing()).execute();
+    const category = await t.db.selectFrom('categories').select('id').where('id', '=', 26).executeTakeFirstOrThrow();
+    const model = await t.db.insertInto('models').values({ category_id: category.id, name: 'WISHED (0041)', type: 'RING', sku_prefix: 'WSH-WL' }).returning('id').executeTakeFirstOrThrow();
+    const wish = await t.db.insertInto('account_wishes').values({ account_id: account.id, model_id: model.id }).returningAll().executeTakeFirstOrThrow();
+    expect(wish).toMatchObject({ account_id: account.id, model_id: model.id, added_at: expect.any(Date), removed_at: null });
+    const at = new Date(wish.added_at.getTime() + 60_000);
+    const removed = await t.db.updateTable('account_wishes').set({ removed_at: at }).where('account_id', '=', account.id).where('model_id', '=', model.id).returningAll().executeTakeFirstOrThrow();
+    expect(removed.removed_at).toEqual(at);
+    await t.db.updateTable('account_wishes').set({ removed_at: null }).where('account_id', '=', account.id).where('model_id', '=', model.id).execute();
+    await expect(t.db.insertInto('account_wishes').values({ account_id: account.id, model_id: model.id, added_at: at }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'account_wishes_open'));
+    const month = await t.db.insertInto('model_wish_months').values({ month: '2026-10-01', model_id: model.id, added: 3, removed: 1, wished_end: 2 }).returningAll().executeTakeFirstOrThrow();
+    expect(month).toMatchObject({ month: '2026-10-01', added: 3, removed: 1, wished_end: 2, counted_at: expect.any(Date) });
+    await expect(t.db.insertInto('model_wish_months').values({ month: '2026-10-09', model_id: model.id, added: 0, removed: 0, wished_end: 0 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'model_wish_months_month_check'));
+    const counted = await t.db.insertInto('wish_months_counted').values({ month: '2026-10-01' }).returningAll().executeTakeFirstOrThrow();
+    expect(counted).toMatchObject({ month: '2026-10-01', counted_at: expect.any(Date) });
+  });
+
   it('audit_logs is append-only at the database level', async () => {
     const h = (b: number) => new Uint8Array(32).fill(b);
     await t.db

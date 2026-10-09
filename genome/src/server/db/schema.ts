@@ -1576,6 +1576,43 @@ export interface AccountTastesTable {
 }
 
 /**
+ * A collector's wish (migration 0041, plan CUSTOMER INTELLIGENCE §3.2 W.3): the heart on one model's sheet, that dot (a
+ * main model or a variant). Open while `removed_at` is NULL; one open wish per account and model. Never edited but for
+ * `removed_at` (set on removal, cleared by the 10-minute re-add); removed rows are purged 13 months later, once their
+ * Paris month is counted. Written by WishlistService only.
+ */
+export interface AccountWishesTable {
+  account_id: string;
+  model_id: string;
+  added_at: TimestampDefault;
+  removed_at: TimestampNullable;
+}
+
+/**
+ * The wishes of one model in one Paris month (migration 0041, plan CUSTOMER INTELLIGENCE §3.2 W.7), counted collectors
+ * only, kept for good: what outlives the 13 months of raw rows.
+ */
+export interface ModelWishMonthsTable {
+  /** 'YYYY-MM-DD', the first day of a Paris month. */
+  month: string;
+  model_id: string;
+  /** Wishes added that month. */
+  added: number;
+  /** Wishes removed that month. */
+  removed: number;
+  /** Wishes open at the month's last instant. */
+  wished_end: number;
+  counted_at: TimestampDefault;
+}
+
+/** A Paris month the wish summary holds (migration 0041, plan CUSTOMER INTELLIGENCE §3.2 W.7), with or without a row. */
+export interface WishMonthsCountedTable {
+  /** 'YYYY-MM-DD', the first day of a Paris month. */
+  month: string;
+  counted_at: TimestampDefault;
+}
+
+/**
  * A model's pairs (migration 0031, plan NEXT-NINE BP-34, PAIRS WELL WITH): the models its sheet shows at its very end,
  * in their order (`position` 1..3), each once, never itself. Set on a main model or a model alone (services/catalog.ts
  * setPairs: 0, 2 or 3 rows, never a model of its own variant group).
@@ -2337,6 +2374,9 @@ export interface Database {
   heard_options: HeardOptionsTable;
   account_profiles: AccountProfilesTable;
   account_tastes: AccountTastesTable;
+  account_wishes: AccountWishesTable;
+  model_wish_months: ModelWishMonthsTable;
+  wish_months_counted: WishMonthsCountedTable;
   model_pairs: ModelPairsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
@@ -2457,6 +2497,8 @@ export type AccountAddressRow = Selectable<AccountAddressesTable>;
 export type HeardOptionRow = Selectable<HeardOptionsTable>;
 export type AccountProfileRow = Selectable<AccountProfilesTable>;
 export type AccountTasteRow = Selectable<AccountTastesTable>;
+export type AccountWishRow = Selectable<AccountWishesTable>;
+export type ModelWishMonthRow = Selectable<ModelWishMonthsTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
 export type CareRequestRow = Selectable<CareRequestsTable>;
