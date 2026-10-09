@@ -441,7 +441,8 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
   const PARIS = { name: 'Jane Doe', address: '1 rue de la Paix\n75002 Paris', country: 'FR', phone: '+33 6 12 34 56 78' };
 
   beforeAll(async () => {
-    h = await createHarness();
+    // A distinct budget per group, so x-ratelimit-limit names the group a route draws on.
+    h = await createHarness({ config: { rateLimits: { verifyPerMinute: 9_001, authPerMinute: 9_002, adminPerMinute: 9_003, apiPerMinute: 9_004 } } });
     h.clock.set('2026-11-10T09:00:00.000Z');
     f = await liveFixtureOn(h.ctx, h.clock);
     const a = await accountClient(h);
@@ -498,6 +499,7 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     const res = await mine.request('PUT', `/api/v1/account/orders/${orderId}/address`, { body: { addressId: saved.id } });
     expect(res.statusCode).toBe(200);
     expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.headers['x-ratelimit-limit']).toBe('9004');
     expect((safeJson(res) as Json).order).toMatchObject({ id: orderId, address: { name: saved.name, lines: saved.address, country: 'FR', phone: saved.phone }, addressOf: null, editable: { address: true } });
     const fresh = await mine.request('PUT', `/api/v1/account/orders/${orderId}/address`, { body: { address: { ...PARIS, name: 'Jane Martin' }, save: true } });
     expect((safeJson(fresh) as Json).order.address.name).toBe('Jane Martin');
@@ -508,7 +510,7 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     expect([bad.statusCode, errorOf(bad).message]).toEqual([400, 'Enter a phone number with its country code.']);
   });
 
-  it('sets and removes an order\'s engraving (plan NEXT LOT §3.6.C; API §10.22): the CSRF token, the server\'s words, the order back; its other documents by their number', async () => {
+  it('sets and removes an order\'s engraving (plan NEXT LOT §3.6.C; API §10.22): the CSRF token, rate group auth, the server\'s words, the order back; its other documents by their number', async () => {
     const op = { type: 'admin' as const, id: f.admin.id };
     await h.ctx.services.clubProgram.setEngravingPrices({ prices: { EUR: 3_000, GBP: null, USD: null, CHF: null } }, op);
     await h.ctx.services.orders.setTerms(orderId, { sizeLabel: '58', priceMinor: 420_000, currency: 'EUR' }, op);
@@ -522,6 +524,8 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     const set = await mine.request('PUT', url, { body: { text: 'J.M.' } });
     expect(set.statusCode).toBe(200);
     expect(set.headers['cache-control']).toBe('no-store');
+    // Rate group auth (as REGISTER THIS PIECE): each priced addition or removal after PAID issues a legal document.
+    expect(set.headers['x-ratelimit-limit']).toBe('9002');
     expect((safeJson(set) as Json).order).toMatchObject({ id: orderId, engraving: { text: 'J.M.', priceMinor: 3_000 }, engravingOffer: { priceMinor: 3_000, included: false, maxLength: 20 } });
     expect((await other.request('PUT', url, { body: { text: 'J.M.' } })).statusCode).toBe(404);
     // Paid, then removed: a credit note for its line, listed and read by its number.
@@ -529,6 +533,7 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     await h.ctx.services.orders.transition(orderId, { to: 'PAID' }, op);
     const removed = await mine.request('DELETE', url);
     expect(removed.statusCode).toBe(200);
+    expect(removed.headers['x-ratelimit-limit']).toBe('9002');
     const order = (safeJson(removed) as Json).order;
     expect(order.engraving).toBeNull();
     expect(order.documents.others).toEqual([{ kind: 'CREDIT_NOTE', number: expect.stringMatching(/^CN-2026-\d{6}$/), issuedAt: expect.any(String) }]);

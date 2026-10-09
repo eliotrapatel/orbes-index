@@ -22,7 +22,7 @@
  */
 import { h } from '../../shared/dom.js';
 import type { ApiClient } from '../api.js';
-import { sameAddress, savedChoice } from '../addresses-model.js';
+import { mayAddAddress, sameAddress, savedChoice } from '../addresses-model.js';
 import { ACCOUNT_ADDRESSES, MESSAGES, ORDERS } from '../copy.js';
 import type { OrderEngravingModel, OrderModel, OrderReturnsModel } from '../orders-model.js';
 import type { SessionStore } from '../session.js';
@@ -187,7 +187,14 @@ export class OrderSheet {
     const current = req.order.address?.current ?? null;
     // A NEW ADDRESS is filled with the order's own address when it is none of the saved ones.
     const fields = addressFields('order-address', this.choice === 'new' && current && !list.some((a) => sameAddress(a, current)) ? current : null, this.saved?.defaultCountry ?? null);
-    const save = switchControl({ label: A.save, checked: list.length === 0 && this.savedError === null, onChange: () => undefined });
+    // SAVE IT TO YOUR ADDRESSES only once the saved ones are read and another may be kept; at the limit, the limit's
+    // sentence in its place and nothing saved.
+    const save = this.saved !== null && mayAddAddress(list) ? switchControl({ label: A.save, checked: list.length === 0, onChange: () => undefined }) : null;
+    const saveLine = save
+      ? h('label', { class: 'n-row n-osheet__save' }, h('span', { class: 'n-g n-row__label', text: A.save }), save.el)
+      : this.saved !== null
+        ? h('p', { class: 'n-sm n-osheet__save-limit', text: ACCOUNT_ADDRESSES.limit })
+        : null;
     const choices =
       list.length > 0
         ? h(
@@ -195,7 +202,9 @@ export class OrderSheet {
             { class: 'n-osheet__choices' },
             h('legend', { class: 'n-g n-lab n-osheet__legend', text: A.saved }),
             ...[...list.map((a) => ({ id: a.id, words: savedChoice(a), isDefault: a.isDefault })), { id: 'new', words: A.newAddress, isDefault: false }].map((c) => {
-              const radio = h('input', { class: 'n-osheet__radio', attrs: { type: 'radio', name: 'order-address-choice', value: c.id } });
+              // NOCTURNE's option row (.n-opt): the radio itself kept for its name, value, arrows and checked state, out of
+              // sight; its hairline ring drawn by .n-opt__mark.
+              const radio = h('input', { class: 'n-opt__input', attrs: { type: 'radio', name: 'order-address-choice', value: c.id } });
               radio.checked = this.choice === c.id;
               radio.addEventListener('change', () => {
                 if (!radio.checked) return;
@@ -205,8 +214,9 @@ export class OrderSheet {
               });
               return h(
                 'label',
-                { class: ['n-row', 'n-osheet__choice', c.id === 'new' ? 'n-osheet__choice--new' : null], data: { address: c.id } },
+                { class: ['n-opt', 'n-osheet__choice', c.id === 'new' ? 'n-osheet__choice--new' : null], data: { address: c.id } },
                 radio,
+                h('i', { class: 'n-opt__mark', attrs: { 'aria-hidden': 'true' } }),
                 h('span', { class: c.id === 'new' ? 'n-g n-row__label' : 'n-sm n-osheet__choice-words' }, c.words),
                 c.isDefault ? h('span', { class: 'n-g n-lb n-ivc n-osheet__default', text: A.isDefault }) : null,
               );
@@ -220,11 +230,11 @@ export class OrderSheet {
       'order-address',
       [
         ...(choices ? [choices] : []),
-        ...(typing ? [...fields.els, h('label', { class: 'n-row n-osheet__save' }, h('span', { class: 'n-g n-row__label', text: A.save }), save.el)] : []),
+        ...(typing ? [...fields.els, ...(saveLine ? [saveLine] : [])] : []),
       ],
       A.confirm,
       async () => {
-        const choice = typing ? { address: fields.read(), save: save.input.checked } : { addressId: this.choice };
+        const choice = typing ? { address: fields.read(), save: save?.input.checked ?? false } : { addressId: this.choice };
         let order: AccountOrder;
         try {
           order = await this.deps.api.setOrderAddress(req.order.id, choice);
@@ -361,7 +371,11 @@ export class OrderSheet {
       [...sizes, reason.el, noteField, h('p', { class: 'n-sm n-osheet__decides', text: R.decides })],
       R.send,
       async () => {
-        if (kind === 'EXCHANGE' && (this.size === null || !inStock.some((z) => z.label === this.size))) throw new FormError(R.sizeMissing);
+        if (kind === 'EXCHANGE' && (this.size === null || !inStock.some((z) => z.label === this.size))) {
+          // The focus goes to the sizes the message is about: their first one in stock.
+          this.panel.querySelector<HTMLElement>('.n-osheet__sizes button:not(:disabled)')?.setAttribute('aria-invalid', 'true');
+          throw new FormError(R.sizeMissing);
+        }
         const why = reason.select.value as OrderCaseRequest['reason'] | '';
         if (!why) {
           reason.select.setAttribute('aria-invalid', 'true');

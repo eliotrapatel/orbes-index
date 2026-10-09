@@ -30,6 +30,7 @@ import {
   engravingPricesProblem,
   engravingPricesValues,
   carrierProblem,
+  cardCase,
   cardHolds,
   CHANNEL_LABELS,
   creditActions,
@@ -175,6 +176,14 @@ describe('the board', () => {
     expect(cardHolds(card({ status: 'CANCELLED' }))).toBe('—');
     // Its piece ready while its parcel waits for another order's (plan NEXT LOT §3.5.6.6): never LATE meanwhile.
     expect(cardHolds(card({ status: 'PAID', skuCode: 'MNL', reservation: 'STOCK', waitingForParcel: true }))).toBe('Waiting for the rest of its parcel');
+    // An order case not ended (plan NEXT LOT §3.6.D): marked in the console's kind words.
+    expect([cardCase(card({})), cardCase(card({ orderCase: null })), cardCase(card({ orderCase: { kind: 'RETURN' } })), cardCase(card({ orderCase: { kind: 'EXCHANGE' } })), cardCase(card({ orderCase: { kind: 'BACK_TO_SENDER' } }))]).toEqual([
+      null,
+      null,
+      'RETURN',
+      'SIZE EXCHANGE',
+      'BACK TO SENDER',
+    ]);
     expect(viewHolds(view({ skuId: 's', reservation: 'STOCK' }))).toBe('In stock at FRANCE WAREHOUSE');
     expect(['order.create', 'order.pay', 'order.ship', 'order.deliver', 'order.cancel', 'order.return', 'order.location', 'order.terms', 'order.buyer', 'order.link'].every((a) => EVENT_LABELS[a])).toBe(true);
     expect(['order.serve', 'order.pack.start', 'order.pack.scan', 'order.pack.photo', 'order.pack.check', 'order.reship', 'order.exchange', 'order.case.open', 'order.case.receive', 'order.case.decide', 'order.case.cancel'].every((a) => EVENT_LABELS[a])).toBe(true);

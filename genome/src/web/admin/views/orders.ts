@@ -6,7 +6,7 @@
  * Each card: its reference (and the collector's LR- for a LIVE RELEASE), its channel and release, the collector (the
  * email masked for an AUDITOR), the model and size, the add-ons, the surprise, whether an engraving is to be done, what
  * it holds (in stock, being made, the size to enter, its piece) and its time in its step; a late one stands out (M3:
- * the delays of the console's settings) with why. A card opens the order's page (views/order.ts), where its steps are
+ * the delays of the console's settings) with why; an order case not ended is marked with its kind (plan NEXT LOT §3.6.D). A card opens the order's page (views/order.ts), where its steps are
  * taken. The filters (`?channel=&dropId=&locationId=&late=true&q=`) narrow the board and its CSV.
  *
  * SHOPIFY EXPORT (plan LIVE RELEASE+, N3): the priced orders reserved in a period, in Shopify's order format, each
@@ -15,7 +15,7 @@
  */
 import { h, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
-import { boardFilters, cardHolds, CHANNEL_LABELS, delaysLine, durationText, LATE_LABELS, lateSentence } from '../model/orders.js';
+import { boardFilters, cardCase, cardHolds, CHANNEL_LABELS, delaysLine, durationText, LATE_LABELS, lateSentence } from '../model/orders.js';
 import { defaultPeriod, periodProblem, SHOPIFY_PERIOD_MAX_DAYS } from '../model/shopify.js';
 import { href } from '../router.js';
 import { ORDER_CHANNELS, type OrderBoard, type OrderBoardColumn, type OrderCard } from '../types.js';
@@ -137,12 +137,13 @@ function wrappableEmail(email: string): Child[] {
 
 function card(x: OrderCard, board: OrderBoard, now: Date): HTMLElement {
   const origin = x.release?.title ?? CHANNEL_LABELS[x.channel];
+  const orderCase = cardCase(x);
   const size = x.sizeLabel ?? (x.skuCode ? 'ONE SIZE' : 'Size to enter');
   return h(
     'a',
     {
       class: ['ocard', x.timing.late ? 'ocard--late' : null],
-      attrs: { href: href('order', { orderId: x.id }), 'aria-label': `${x.reference}, ${origin}, ${x.model.name}${x.timing.late ? ', late' : ''}` },
+      attrs: { href: href('order', { orderId: x.id }), 'aria-label': `${x.reference}, ${origin}, ${x.model.name}${x.timing.late ? ', late' : ''}${orderCase ? `, order case ${orderCase}` : ''}` },
       data: { testid: 'order-card', order: x.id },
     },
     h(
@@ -152,6 +153,8 @@ function card(x: OrderCard, board: OrderBoard, now: Date): HTMLElement {
       h('span', { class: 'ocard__channel' }, CHANNEL_LABELS[x.channel]),
     ),
     x.timing.late && x.timing.rule ? h('span', { class: 'ocard__late', attrs: { title: lateSentence(x.timing.rule, board.delays) } }, statusMark(LATE_LABELS[x.timing.rule], 'alert')) : null,
+    // Plan NEXT LOT §3.6.D: an order case not ended (a return, a size exchange, a parcel problem), in the console's kind words.
+    orderCase ? h('span', { class: 'ocard__case', attrs: { title: 'An order case is open: see the order’s page.' }, data: { testid: 'order-card-case' } }, statusMark(orderCase, 'outline')) : null,
     // The dash of a release's name keeps to the word before it: a balanced line never opens on it.
     x.release ? h('span', { class: 'ocard__origin' }, x.release.title.replace(/ ([—–]) /g, '\u00a0$1 ')) : null,
     h('span', { class: 'ocard__piece' }, `${x.model.name} · ${size}`),

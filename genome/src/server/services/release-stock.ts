@@ -279,7 +279,7 @@ export function sizeMix(input: {
     if (extra === 0) {
       why.push(`The planner expects ${pieces(input.planned)}: the stock covers ${input.planned === inStock ? 'it' : 'it and more'}, so the sizes are the stock's.`);
     } else if (over.length === 0) {
-      why.push(`The planner expects ${pieces(input.planned)}, ${count(extra)} more than the stock, but tells no size apart for this model yet: set the sizes to make by hand.`);
+      why.push(`The planner expects ${pieces(input.planned)}, ${count(extra)} more than the stock, but tells no size apart for this model yet: set the sizes by hand.`);
     } else {
       const shares = apportion(extra, over.map((x) => x.excess));
       over.forEach((x, i) => {
@@ -292,7 +292,7 @@ export function sizeMix(input: {
           .map((x) => ({ l: name(x.k), excess: x.excess }))
           .sort((a, b) => natural(a.l, b.l))
           .map((x) => `${x.l}: ${count(x.excess)}`)
-          .join(', ')}), the largest remainders rounded up; made to order once sold.`,
+          .join(', ')}), the largest remainders rounded up; what the stock does not cover waits for supplier stock once sold.`,
       );
     }
   }

@@ -604,6 +604,13 @@ describe('order cases (plan NEXT LOT §3.5.6.7)', () => {
       // The EXCHANGE order is the collector's, with its delivery address and its steps.
       expect((await orders().accountOrder(accountId, exchange.id)).channel).toBe('EXCHANGE');
       await h.ctx.services.stock.updateLocation(france, { address: null }, admin);
+      // A size whose label already carries its word (as the demo's SIZE 52) is named as written, never « SIZE SIZE 52 ».
+      const worded = await delivered();
+      const sizeWorded = `SIZE ${freshSize()}`;
+      await stock(await skuOf(sizeWorded), 1);
+      const wordedCase = await cases().request(worded.accountId, worded.id, { kind: 'EXCHANGE', reason: 'SIZE', sizeLabel: sizeWorded }, worded.collector);
+      const wordedMessage = await db().selectFrom('client_messages as m').innerJoin('order_cases as c', 'c.message_id', 'm.id').select('m.body').where('c.id', '=', wordedCase).executeTakeFirstOrThrow();
+      expect(wordedMessage.body).toBe(`EXCHANGE REQUESTED: ${sizeWorded} — The size does not fit.`);
     });
 
     it('opens a return at the message limit (no rate), rolls the message back with a refused request or a failure after it is written, and gives one order case to two requests at once', async () => {

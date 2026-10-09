@@ -17,7 +17,9 @@
  *    order from ORBES staff (refused from the agent); the warranty started at SHIP once (question 14), a warranty started
  *    by hand left as it is; Mark delivered; delivered by a registration;
  *  - one order of a parcel cancelled while packing: the shipment cancelled, the others keep their pieces and their
- *    packing start, a new shipment opens and the scan accepts the piece already bound.
+ *    packing start, a new shipment opens and the scan accepts the piece already bound;
+ *  - a parcel moves whole when one of its orders changes location, refused once a piece is bound; a parcel left split
+ *    across locations is not listed and Start packing answers PACKING_LOCATIONS_SPLIT.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -465,6 +467,52 @@ describe('packing and shipping (plan NEXT LOT §3.5.6.8)', () => {
     await packAndShip(h.ctx, parcel[1]!, { carrierId: colissimo, trackingNumber: '6A00000000005' }, admin);
     expect((await row(parcel[1]!)).status).toBe('SHIPPED');
     expect((await db().selectFrom('shipments').select(['order_id', 'status']).where('order_id', '=', parcel[0]!).execute()).map((s) => s.status)).toEqual(['SHIPPED']);
+  });
+
+  it('moves a parcel whole when one of its orders changes location (§3.5.6.6), so it is listed and packed there; refuses once a piece is bound; Start packing names a parcel split across locations', async () => {
+    const parcel = await liveSale(2, '64');
+    for (const id of parcel) await pay(id);
+    const s64 = await skuOf('64');
+    await stock(s64, 2, parcel);
+    await buyer(parcel[0]!);
+    expect((await listed()).find((r) => r.id === parcel[0])).toMatchObject({ location: { id: france } });
+    // The follower moved to LOGISTICS WAREHOUSE: its first order goes with it, both waiting there for stock.
+    h.clock.advance(MINUTE);
+    const moved = await orders().changeLocation(parcel[1]!, logistics, admin);
+    expect(moved.location.id).toBe(logistics);
+    expect((await Promise.all(parcel.map(row))).map((o) => [o.location_id, o.reservation, o.status])).toEqual([
+      [logistics, 'AWAITING', 'PAID'],
+      [logistics, 'AWAITING', 'PAID'],
+    ]);
+    const audits = await db().selectFrom('audit_logs').select(['target_id', 'details']).where('action', '=', 'order.location').where('target_id', 'in', parcel).execute();
+    expect(audits.map((a) => a.target_id).sort()).toEqual([...parcel].sort());
+    expect(audits.find((a) => a.target_id === parcel[0])!.details).toMatchObject({ fromLocationId: france, toLocationId: logistics, movedWith: parcel[1] });
+    expect((await listed()).map((r) => r.id)).not.toContain(parcel[0]);
+    // Stock arrives at LOGISTICS WAREHOUSE: the parcel is listed there, never split.
+    const there = await stockPieces(h.ctx, { skuId: s64, locationId: logistics, count: 2, material: '925 STERLING SILVER', forOrderIds: parcel }, admin);
+    expect((await listed()).find((r) => r.id === parcel[0])).toMatchObject({ others: 1, step: 'READY_TO_PACK', location: { id: logistics } });
+    // A parcel left split across two locations (written before this rule): not listed, and Start packing says why.
+    await db().updateTable('orders').set({ location_id: france }).where('id', '=', parcel[1]!).execute();
+    expect((await listed()).map((r) => r.id)).not.toContain(parcel[0]);
+    expect(await refusal(lg().startPacking(parcel[0]!, admin, null))).toEqual({
+      code: 'PACKING_LOCATIONS_SPLIT',
+      status: 409,
+      message: 'The orders of this parcel are served from different locations: ORBES serves them from one location before it is packed.',
+    });
+    // ORBES serves it from one location again: only the order elsewhere moves.
+    h.clock.advance(MINUTE);
+    await orders().changeLocation(parcel[0]!, logistics, admin);
+    expect((await Promise.all(parcel.map(row))).map((o) => [o.location_id, o.reservation])).toEqual([
+      [logistics, 'STOCK'],
+      [logistics, 'STOCK'],
+    ]);
+    await expect(orders().changeLocation(parcel[1]!, logistics, admin)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    const started = await lg().startPacking(parcel[0]!, admin, null);
+    expect(started.step).toBe('PACKING');
+    await lg().scanCard(parcel[0]!, scanOf(there[0]!), admin, {}, null);
+    // A piece bound to one order: neither order of the parcel moves.
+    for (const id of parcel) expect(await refusal(orders().changeLocation(id, france, admin))).toMatchObject({ code: 'ORDER_PIECE_LINKED', status: 409 });
+    for (const id of [...parcel].reverse()) await orders().transition(id, { to: 'CANCELLED', note: 'Test over.' }, admin);
   });
 
   it('needs the delivery country to pack (§1.1 (d)); shows ADDRESS CHANGED, with when and by whom, once the address is replaced after it was first entered, on the list and the parcel, until it ships (step 6.7)', async () => {

@@ -1135,7 +1135,7 @@ class ReleasePage {
       const sized = s.sizes.length > 0 && (m.canEnter || m.canReserve || entered);
       const mode = m.canReserve && !m.canEnter ? 'reserve' : 'enter';
       const choices = sized ? drawSizeChoices(s.sizes, this.picked, mode) : [];
-      if (sized) out.push(...this.sizePicker(s, choices));
+      if (sized) out.push(...this.sizePicker(s, choices, entered ? (this.entry.entry?.size?.label ?? null) : null));
       if (this.actionError) out.push(h('p', { class: 'n-sm n-ivc n-release__error form__error', attrs: { role: 'alert' }, text: this.actionError }));
       // The one filled button of the page: ENTER THE DRAW, or RESERVE A PLACE (P-X02, a PLATINE or PALLADIUM account
       // during the early access); should both be offered, the second is a hairline button. In a draw with sizes, each
@@ -1160,12 +1160,13 @@ class ReleasePage {
   }
 
   /**
-   * YOUR SIZE (plan NEXT LOT §3.6.F): its label, the draw's sizes with pieces in NOCTURNE's buttons (the one picked
-   * doubly ringed; during the early access a size whose pieces are all reserved greyed out, said so to assistive
-   * technologies), then YOUR SIZES' two lines while its preselection stands, or the sentence of a size picked whose
-   * pieces are all reserved while entries are open.
+   * YOUR SIZE (plan NEXT LOT §3.6.F): its label (once entered and while entries are open, ENTERED · SIZE 17, the size
+   * the entry holds), the draw's sizes with pieces in NOCTURNE's buttons (the one picked doubly ringed; during the early
+   * access a size whose pieces are all reserved greyed out, said so to assistive technologies), then YOUR SIZES' two
+   * lines while its preselection stands, or the sentence of a size picked whose pieces are all reserved while entries
+   * are open.
    */
-  private sizePicker(s: ReleaseSheetModel, choices: ReturnType<typeof drawSizeChoices>): HTMLElement[] {
+  private sizePicker(s: ReleaseSheetModel, choices: ReturnType<typeof drawSizeChoices>, enteredIn: string | null): HTMLElement[] {
     const group = sizeButtons(
       choices.map((c) => ({ id: c.id, label: c.label })),
       { selected: this.picked, label: RELEASES.sizes.yourSize, onSelect: (id) => this.pick(id) },
@@ -1178,7 +1179,8 @@ class ReleasePage {
       b.classList.toggle('is-gone', c.unavailable);
       if (c.aria) b.setAttribute('aria-label', c.aria);
     });
-    const out: HTMLElement[] = [h('p', { class: 'n-g n-lb release__size-label', text: RELEASES.sizes.yourSize }), group];
+    const said = enteredIn && enteredIn.trim() ? RELEASES.sizes.label(RELEASES.statusLabel.ENTERED, enteredIn.trim()) : RELEASES.sizes.yourSize;
+    const out: HTMLElement[] = [h('p', { class: 'n-g n-lb release__size-label' }, ...withNumerals(said)), group];
     const saved = this.pickedFrom === 'saved' ? s.sizes.find((z) => z.id === this.picked) : undefined;
     if (saved) {
       out.push(

@@ -23,7 +23,7 @@ import { orderReference } from '../../src/server/services/orders.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { createManualClock, type Actor, type ManualClock } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
-import { countPiecesIn, packAndShip, scanIntoParcel } from '../support/fulfil.js';
+import { countPiecesIn, packAndShip, scanIntoParcel, stockPieces } from '../support/fulfil.js';
 import { accountOfTier, createAccount, createLiveRelease, createModel, liveFixtureOn, type LiveFixture } from '../support/live.js';
 
 const HOUR = 3_600_000;
@@ -254,6 +254,29 @@ describe('the fulfilment board (plan LIVE RELEASE+, S2)', () => {
     await rejects(ctx.services.fulfilment.setDelays({ reservedDays: 2, readyDays: 3, shippedDays: 91, unregisteredDays: 30 }, admin), 'VALIDATION_FAILED', 400);
     await rejects(ctx.services.fulfilment.setDelays({ reservedDays: 2, readyDays: 3, shippedDays: 10, unregisteredDays: 366 }, admin), 'VALIDATION_FAILED', 400);
     await ctx.services.fulfilment.setDelays({ ...ORDER_ALERT_DEFAULTS }, admin);
+  });
+
+  it('marks an order with an order case not ended (plan NEXT LOT §3.6.D): a parcel problem on every order of its parcel, a return on its own order; none once the case ends', async () => {
+    const sale = await liveSale('60', 2);
+    const [first, second] = sale.orders;
+    for (const o of sale.orders) await orders().transition(o.id, { to: 'PAID' }, admin);
+    await stockPieces(ctx, { skuId: (await skuOf('60'))!, locationId: france, count: 2, material: '925 STERLING SILVER', forOrderIds: sale.orders.map((o) => o.id) }, admin);
+    await packAndShip(ctx, first!.id, { carrierId: colissimo, trackingNumber: '6A00000000060' }, admin);
+    expect((await card(first!.id))!.orderCase).toBeNull();
+    // A parcel reported lost: both orders of the parcel carry it, the follower through the shipment that holds it.
+    const lost = await ctx.services.orderCases.report(first!.id, { kind: 'LOST', note: 'The carrier lost track of it.' }, admin, null);
+    expect((await card(first!.id))!.orderCase).toEqual({ kind: 'LOST' });
+    expect((await card(second!.id))!.orderCase).toEqual({ kind: 'LOST' });
+    expect((await ctx.services.fulfilment.forAccount(sale.account.id)).map((o) => o.orderCase)).toEqual([{ kind: 'LOST' }, { kind: 'LOST' }]);
+    // Cancelled (found again): no mark.
+    await ctx.services.orderCases.cancel(lost.id, { note: 'Found by the carrier.' }, admin);
+    expect((await card(first!.id))!.orderCase).toBeNull();
+    expect((await card(second!.id))!.orderCase).toBeNull();
+    // Delivered, then a return of one piece: its own order only.
+    for (const o of sale.orders) await orders().transition(o.id, { to: 'DELIVERED' }, admin);
+    await ctx.services.orderCases.open(second!.id, { kind: 'RETURN', reason: 'SIZE', note: 'Too small.' }, admin);
+    expect((await card(second!.id))!.orderCase).toEqual({ kind: 'RETURN' });
+    expect((await card(first!.id))!.orderCase).toBeNull();
   });
 
   it('narrows by channel, release, location and a search: an order\'s reference, a LIVE reservation\'s, a piece\'s, words of the model or the release', async () => {

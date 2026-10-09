@@ -323,7 +323,7 @@ describe('receptions', () => {
     expect(runLabel('sheet', 1, 1)).toBe('Print A4 sheets');
     expect(runLabel('card', 2, 3)).toBe('Print one per page · run 2');
     expect(skippedLine([])).toBeNull();
-    expect(skippedLine([{ productId: 'O26-J-00184', reason: 'REGISTERED' }])).toBe('Not printed: O26-J-00184 (registered, replaced or no longer readable). Tell ORBES.');
+    expect(skippedLine([{ productId: 'O26-J-00184', reason: 'REGISTERED' }])).toBe('Not printed: O26-J-00184 (registered, packed for an order, replaced or no longer readable). Tell ORBES.');
   });
 
   it('reads a reference as the server does', () => {

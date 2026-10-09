@@ -771,7 +771,7 @@ export class AccountSheet {
         { class: 'n-account__address-links' },
         link(A.edit, A.editLabel(a.name), `address-edit-${a.id}`, () => this.editAddress(a.id)),
         a.isDefault ? null : link(A.makeDefault, A.makeDefaultLabel(a.name), `address-default-${a.id}`, () => void this.makeDefault(a.id)),
-        link(armed ? A.removeConfirm : A.remove, armed ? A.removeConfirm : A.removeLabel(a.name), `address-remove-${a.id}`, () => void this.removeAddress(a.id)),
+        link(armed ? A.removeConfirm : A.remove, armed ? A.removeConfirmLabel(a.name) : A.removeLabel(a.name), `address-remove-${a.id}`, () => void this.removeAddress(a.id)),
       ),
     );
   }
@@ -837,19 +837,38 @@ export class AccountSheet {
     }
   }
 
+  /**
+   * REMOVE armed or not, written into its link in place: no render and no focus moved, so a keyboard or a screen reader
+   * stays where it is; its accessible name keeps the address.
+   */
+  private paintRemove(id: string, armed: boolean): void {
+    const link = this.panel.querySelector<HTMLElement>(`[data-key="address-remove-${id}"]`);
+    const name = this.addresses?.addresses.find((a) => a.id === id)?.name;
+    if (!link || name === undefined) return;
+    const A = ACCOUNT_ADDRESSES;
+    link.textContent = armed ? A.removeConfirm : A.remove;
+    link.setAttribute('aria-label', armed ? A.removeConfirmLabel(name) : A.removeLabel(name));
+  }
+
   /** REMOVE: a first tap asks for a second (TAP AGAIN TO REMOVE, a few seconds), the second removes it. */
   private async removeAddress(id: string): Promise<void> {
     if (this.addressBusy) return;
     if (this.removeArmed !== id) {
+      const before = this.removeArmed;
       this.disarmRemove();
+      if (before) this.paintRemove(before, false);
       this.removeArmed = id;
       this.removeTimer = setTimeout(() => {
         if (this.removeArmed !== id) return;
         this.removeArmed = null;
-        if (this.view === 'addresses' && this.editing === null) this.showAddresses(`[data-key="address-remove-${id}"]`);
+        this.removeTimer = null;
+        this.paintRemove(id, false);
       }, 4000);
-      this.addressesNote = null;
-      this.showAddresses(`[data-key="address-remove-${id}"]`);
+      if (this.addressesNote) {
+        this.addressesNote = null;
+        this.panel.querySelector('.n-account__addresses-note')?.remove();
+      }
+      this.paintRemove(id, true);
       return;
     }
     this.disarmRemove();

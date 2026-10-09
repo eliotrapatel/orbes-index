@@ -3216,14 +3216,6 @@ body.nocturne[data-screen="live"] {
   overflow-wrap: anywhere;
 }
 
-.n-osheet__radio {
-  flex: none;
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--vault-ink);
-}
-
 .n-osheet__default {
   margin-left: auto;
 }
@@ -3231,6 +3223,11 @@ body.nocturne[data-screen="live"] {
 .n-osheet__save {
   margin-top: 18px;
   padding: 14px 0;
+}
+
+/* At the five addresses kept: the limit's sentence where SAVE IT TO YOUR ADDRESSES would be. */
+.n-osheet__save-limit {
+  margin-top: 18px;
 }
 
 .n-osheet__price,

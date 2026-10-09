@@ -30,7 +30,7 @@
 import { orderClaimCard, orderClaimCode, type OrderClaimCard, type OrderClaimCode } from './claim-renewals.js';
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
-import type { JsonObject, OrderChannel, OrderReservation, OrderStatus } from '../db/schema.js';
+import type { JsonObject, OrderCaseKind, OrderChannel, OrderReservation, OrderStatus } from '../db/schema.js';
 import { ORDER_STATUSES } from '../db/schema.js';
 import { validationError } from '../errors.js';
 import { csvDocument, CSV_CONTENT_TYPE } from '../render/csv.js';
@@ -193,6 +193,11 @@ export interface OrderCard {
   timing: OrderTiming;
   /** Its piece ready, its parcel waiting for another of its orders (plan NEXT LOT §3.5.6.6): never LATE meanwhile. */
   waitingForParcel: boolean;
+  /**
+   * Its order case not ended (OPEN or RECEIVED; plan NEXT LOT §3.6.D, §1.1 (b)): its own return or size exchange, or a
+   * parcel problem of the shipment that holds it; null without one.
+   */
+  orderCase: { kind: OrderCaseKind } | null;
 }
 
 export interface OrderBoardColumn {
@@ -457,9 +462,10 @@ export class FulfilmentService {
     const delays = await this.delays();
     const rows = await this.rows({}, accountId.toLowerCase());
     const timed = await this.timed(rows, delays, now);
+    const cases = await this.openCases();
     timed.sort((a, b) => b.row.reserved_at.getTime() - a.row.reserved_at.getTime() || a.row.id.localeCompare(b.row.id));
     return timed.map(({ row: r, timing }) => {
-      const { account: _account, ...card } = this.card(r, timing);
+      const { account: _account, ...card } = this.card(r, timing, cases);
       return {
         ...card,
         priceMinor: r.price_minor,
@@ -518,11 +524,30 @@ export class FulfilmentService {
   /** The cards the filters keep, timed. */
   private async cards(filter: OrderBoardFilter, delays: OrderAlertDelays, now: Date): Promise<OrderCard[]> {
     const timed = await this.timed(await this.rows(filter), delays, now);
-    return timed.filter((t) => !filter.late || t.timing.late).map(({ row, timing }) => this.card(row, timing));
+    const cases = await this.openCases();
+    return timed.filter((t) => !filter.late || t.timing.late).map(({ row, timing }) => this.card(row, timing, cases));
+  }
+
+  /**
+   * The orders with an order case not ended (OPEN or RECEIVED), by order: its own case (a return, a size exchange, or a
+   * parcel problem keyed by it), else a parcel problem of a shipment that holds it (`shipment_items`). Few at a time.
+   */
+  private async openCases(): Promise<Map<string, OrderCaseKind>> {
+    const own = await this.db.selectFrom('order_cases').select(['order_id', 'kind']).where('status', 'in', ['OPEN', 'RECEIVED']).execute();
+    const held = await this.db
+      .selectFrom('order_cases as c')
+      .innerJoin('shipment_items as i', 'i.shipment_id', 'c.shipment_id')
+      .select(['i.order_id', 'c.kind'])
+      .where('c.status', 'in', ['OPEN', 'RECEIVED'])
+      .execute();
+    const out = new Map<string, OrderCaseKind>();
+    for (const c of held) out.set(c.order_id, c.kind);
+    for (const c of own) out.set(c.order_id, c.kind);
+    return out;
   }
 
   /** A row as the board's card. */
-  private card(r: BoardRow, timing: OrderTiming & { waitingForParcel?: boolean }): OrderCard {
+  private card(r: BoardRow, timing: OrderTiming & { waitingForParcel?: boolean }, cases: ReadonlyMap<string, OrderCaseKind>): OrderCard {
     return {
       id: r.id,
       reference: orderReference(r.id),
@@ -543,6 +568,7 @@ export class FulfilmentService {
       shipment: r.carrier_name && r.tracking_number ? { carrier: r.carrier_name, trackingNumber: r.tracking_number } : null,
       timing: { since: timing.since, dueAt: timing.dueAt, rule: timing.rule, late: timing.late },
       waitingForParcel: timing.waitingForParcel === true,
+      orderCase: cases.has(r.id) ? { kind: cases.get(r.id)! } : null,
     };
   }
 

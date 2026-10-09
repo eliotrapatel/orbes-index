@@ -817,7 +817,11 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
     expect(await choices.nth(0).locator('input').isChecked()).toBe(true);
     // No field while a saved address is chosen.
     expect(await sheet(page).getByLabel('NAME', { exact: true }).count()).toBe(0);
-    await choices.nth(1).locator('input').check();
+    // NOCTURNE's option row: the radio out of sight, its ring the mark; the row chosen, its radio checked and the ring filled.
+    expect(await choices.nth(0).locator('.n-opt__mark').evaluate((el) => getComputedStyle(el, '::after').content)).not.toBe('none');
+    await choices.nth(1).click();
+    expect(await choices.nth(1).locator('input').isChecked()).toBe(true);
+    expect(await choices.nth(0).locator('.n-opt__mark').evaluate((el) => getComputedStyle(el, '::after').content)).toBe('none');
     for (const width of [375, 360, 320, 390]) {
       await page.setViewportSize({ width, height: 844 });
       expect(await noSideways(page), `${width} px`).toBe(true);
@@ -840,7 +844,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
     await packing.getByRole('button', { name: A.changeLabel(ref(ids.packing)) }).click();
     await visible(sheet(page).locator('.n-osheet__choice').first());
     await srv.ctx.services.logistics.startPacking(ids.packing, f.admin, null);
-    await sheet(page).locator('.n-osheet__choice').nth(1).locator('input').check();
+    await sheet(page).locator('.n-osheet__choice').nth(1).click();
     await sheet(page).getByRole('button', { name: A.confirm }).click();
     await textOf(sheet(page).getByRole('alert'), `${A.failed} Packing has begun: write to ORBES Client Services to change this order.`);
     await sheet(page).getByRole('button', { name: A.cancel }).click();
@@ -923,6 +927,10 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
     expect(await out.isDisabled()).toBe(true);
     expect(await out.getAttribute('class')).toContain('is-gone');
     await textOf(sheet(page).locator('.n-osheet__size-note'), R.onlyInStock);
+    // SEND with no size: the message, and the focus on the sizes it is about (their first in stock).
+    await sheet(page).getByRole('button', { name: R.send }).click();
+    await textOf(sheet(page).getByRole('alert'), R.sizeMissing);
+    await expect.poll(() => sizes.getByRole('button', { name: '50', exact: true }).evaluate((el) => el === document.activeElement), POLL).toBe(true);
     await sizes.getByRole('button', { name: '50', exact: true }).click();
     expect(await sizes.getByRole('button', { name: '50', exact: true }).getAttribute('aria-pressed')).toBe('true');
     await sheet(page).getByLabel(R.reason, { exact: true }).selectOption('SIZE');
@@ -998,11 +1006,16 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
     await visible(item(paris.id).locator(`[data-key="address-default-${paris.id}"]`));
     expect((await srv.ctx.services.addresses.list(me.id)).addresses.filter((a) => a.isDefault).map((a) => a.id)).toEqual([london.id]);
 
-    // REMOVE: a first tap arms it (TAP AGAIN TO REMOVE), which goes back to REMOVE after 4 s, nothing removed.
+    // REMOVE: a first tap arms it (TAP AGAIN TO REMOVE, its accessible name still naming the address), which goes back to
+    // REMOVE after 4 s, nothing removed; both in place, the focus left where the collector moved it.
     const remove = view.locator(`[data-key="address-remove-${paris.id}"]`);
     await remove.click();
     await textOf(remove, Y.removeConfirm);
+    expect(await remove.getAttribute('aria-label')).toBe(Y.removeConfirmLabel(paris.name));
+    await view.locator(`[data-key="address-edit-${paris.id}"]`).focus();
     await textOf(remove, Y.remove);
+    expect(await remove.getAttribute('aria-label')).toBe(Y.removeLabel(paris.name));
+    expect(await page.evaluate(() => (document.activeElement as HTMLElement | null)?.dataset.key ?? null)).toBe(`address-edit-${paris.id}`);
     expect((await srv.ctx.services.addresses.list(me.id)).addresses).toHaveLength(2);
     // Tapped twice: removed, the note said, one address left.
     await remove.click();
@@ -1032,6 +1045,36 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
       expect(await noSideways(page), `${width} px`).toBe(true);
     }
     await page.screenshot({ path: join(OUT_DIR, 'verify-account-addresses-five.png'), fullPage: true });
+    expect(problems).toEqual([]);
+    await page.context().close();
+  }, 120_000);
+
+  it('the address sheet at five addresses kept: A NEW ADDRESS without SAVE IT TO YOUR ADDRESSES, the limit said in its place; the order takes it, nothing saved', async () => {
+    const { page, problems } = await phone();
+    expect((await srv.ctx.services.addresses.list(me.id)).addresses).toHaveLength(ACCOUNT_ADDRESSES.max);
+    const reserved = card(page, ids.reserved);
+    await reserved.getByRole('button', { name: A.changeLabel(ref(ids.reserved)) }).click();
+    const choices = sheet(page).locator('.n-osheet__choice');
+    await expect.poll(() => choices.count(), POLL).toBe(ACCOUNT_ADDRESSES.max + 1);
+    await choices.last().click();
+    const s = sheet(page);
+    await visible(s.getByLabel('NAME', { exact: true }));
+    expect(await s.getByRole('switch', { name: A.save }).count()).toBe(0);
+    await textOf(s.locator('.n-osheet__save-limit'), ACCOUNT_ADDRESSES.limit);
+    await s.getByLabel('NAME', { exact: true }).fill('Camille Laurent');
+    await s.getByLabel('ADDRESS', { exact: true }).fill('3 place Vendôme\n75001 Paris');
+    await s.getByLabel('COUNTRY', { exact: true }).selectOption('FR');
+    await s.getByLabel('PHONE', { exact: true }).fill('+33 6 12 34 56 79');
+    for (const width of [375, 360, 320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      expect(await noSideways(page), `${width} px`).toBe(true);
+    }
+    await s.locator('.n-osheet__save-limit').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: join(OUT_DIR, 'verify-order-address-sheet-limit.png') });
+    await s.getByRole('button', { name: A.confirm }).click();
+    await expect.poll(() => sheet(page).count(), POLL).toBe(0);
+    await textOf(reserved.locator('.n-pieces__address-lines'), 'Camille Laurent 3 place Vendôme 75001 Paris France +33 6 12 34 56 79');
+    expect((await srv.ctx.services.addresses.list(me.id)).addresses).toHaveLength(ACCOUNT_ADDRESSES.max);
     expect(problems).toEqual([]);
     await page.context().close();
   }, 120_000);

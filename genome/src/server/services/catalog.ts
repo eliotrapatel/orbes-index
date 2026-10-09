@@ -855,6 +855,19 @@ export class CatalogService {
             throw conflict('VARIANT_LABEL_REQUIRED', 'A variant, and a model with variants, keep their label and colour: each is one of the model’s dots.');
           }
         }
+        // Plan NEXT LOT §3.5.6.5: a model keeps its material while a confirmed reception still owes identities of it (or of
+        // a variant of it that takes the main model's): the issuing worker writes it on each piece.
+        if (changed.includes('defaultMaterial') && after.defaultMaterial === null) {
+          const owed = await sql<{ id: string }>`
+            SELECT rl.id FROM reception_lines rl
+              JOIN receptions r ON r.id = rl.reception_id
+              JOIN skus k ON k.id = rl.sku_id
+              JOIN models m ON m.id = k.model_id
+             WHERE r.status = 'CONFIRMED' AND rl.issued < rl.accepted
+               AND (m.id = ${id} OR (m.variant_of = ${id} AND nullif(btrim(m.default_material), '') IS NULL))
+             LIMIT 1`.execute(tx);
+          if (owed.rows.length > 0) throw conflict('MODEL_MATERIAL_IN_USE', `The identities of a confirmed reception of ${row.name} are still being issued: its material stays until they are.`);
+        }
         // P-R06: a discontinued model is offered again only by reinstating it (an ADMIN's, audited as such).
         if (changed.includes('active') && after.active === true && row.discontinued_at !== null) throw modelDiscontinued();
         if (changed.includes('collectionId') && after.collectionId) {

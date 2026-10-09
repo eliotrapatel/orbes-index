@@ -3819,6 +3819,27 @@ fieldset.cfield--checks > .cfield__label {
   border-style: dashed;
 }
 
+/*
+ * The agent packs on a phone (the photo's capture=environment): on a touch screen each checklist line takes its whole
+ * width and 44 px of height, and the page's text-link actions 44 px too, so a thumb never ticks the wrong line. The look
+ * is unchanged; only the target grows.
+ */
+@media (pointer: coarse) {
+  .checklist {
+    gap: 0;
+  }
+
+  .checklist .ccheck {
+    display: flex;
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .view--shipping .cbtn--ghost {
+    height: 44px;
+  }
+}
+
 .parcel__scanner,
 .parcel__photo {
   display: grid;

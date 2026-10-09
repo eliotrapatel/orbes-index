@@ -172,7 +172,7 @@ describe('the release and the stock in the console', () => {
       ],
     };
     expect(sizeMixText(mix)).toBe('52 = 4\n54 = 5\n56 = 3');
-    expect(sizeMixLine(mix)).toBe('52 = 4 (4 in stock) · 54 = 5 (1 in stock, 4 to make) · 56 = 3 (3 to make)');
+    expect(sizeMixLine(mix)).toBe('52 = 4 (4 in stock) · 54 = 5 (1 in stock, 4 to order) · 56 = 3 (3 to order)');
     expect(sizeMixText({ sizes: [] })).toBeNull();
   });
 

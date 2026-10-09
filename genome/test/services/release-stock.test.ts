@@ -84,7 +84,7 @@ describe('the arithmetic (pure)', () => {
     expect(r).toMatchObject({ quantity: 12, inStock: 5, planned: 12 });
     expect(r.reasoning.slice(0, 3)).toEqual([
       'In stock at FRANCE WAREHOUSE: 52: 4, 54: 1, offered first.',
-      'The planner expects 12 pieces, 7 more than the stock: shared by how far its demand exceeds the stock in each size (54: 4, 56: 4), the largest remainders rounded up; made to order once sold.',
+      'The planner expects 12 pieces, 7 more than the stock: shared by how far its demand exceeds the stock in each size (54: 4, 56: 4), the largest remainders rounded up; what the stock does not cover waits for supplier stock once sold.',
       'Proposed: 52 = 4, 54 = 5, 56 = 3 (12 pieces). You keep the last word.',
     ]);
     // The stock covers the planner: the stock as it is.
@@ -118,7 +118,7 @@ describe('the arithmetic (pure)', () => {
     ]);
     expect(r.reasoning.slice(0, 3)).toEqual([
       'In stock at FRANCE WAREHOUSE: Small: 2, offered first.',
-      'The planner expects 6 pieces, 4 more than the stock: shared by how far its demand exceeds the stock in each size (medium: 2, Small: 2), the largest remainders rounded up; made to order once sold.',
+      'The planner expects 6 pieces, 4 more than the stock: shared by how far its demand exceeds the stock in each size (medium: 2, Small: 2), the largest remainders rounded up; what the stock does not cover waits for supplier stock once sold.',
       'Proposed: medium = 2, Small = 4 (6 pieces). You keep the last word.',
     ]);
   });

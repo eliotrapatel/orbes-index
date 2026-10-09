@@ -1635,6 +1635,8 @@ export const ACCOUNT_ADDRESSES = Object.freeze({
   editLabel: (name: string) => `Edit the address of ${name}`,
   makeDefaultLabel: (name: string) => `Make the address of ${name} your default`,
   removeLabel: (name: string) => `Remove the address of ${name}`,
+  /** REMOVE once armed: the second tap, still naming the address. */
+  removeConfirmLabel: (name: string) => `Tap again to remove the address of ${name}`,
   /** The most a collector keeps (services/addresses.ts ADDRESS_LIMITS.saved). */
   max: 5,
 });

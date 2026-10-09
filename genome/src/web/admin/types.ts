@@ -2567,6 +2567,8 @@ export interface OrderCard {
   timing: OrderTiming;
   /** Its piece is ready but its parcel waits for another order's (plan NEXT LOT §3.5.6.6): never LATE meanwhile. */
   waitingForParcel?: boolean;
+  /** Its order case not ended (plan NEXT LOT §3.6.D): its return or size exchange, or its parcel's problem; null without one. */
+  orderCase?: { kind: OrderCaseKind } | null;
 }
 
 export interface OrderBoardColumn {

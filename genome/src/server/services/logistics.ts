@@ -7,7 +7,8 @@
  *   to ship        the parcels whose open orders are all paid and hold their piece in stock (`toShip`), the oldest ready
  *                  first, LATE past the READY delay; those on their way (`onItsWay`); one parcel (`parcel`, the
  *                  ShippingOrderView: no price, email, account nor release).
- *   start packing  every open order of the parcel PAID and holding STOCK (409 PACKING_NOT_READY), the first order's
+ *   start packing  every open order of the parcel PAID and holding STOCK (409 PACKING_NOT_READY), at one location
+ *                  (409 PACKING_LOCATIONS_SPLIT: ORBES moves them first; Change location moves a parcel whole), the first order's
  *                  delivery address entered, its name, lines and country (409 ORDER_ADDRESS_MISSING; §1.1 (d), the phone
  *                  may be missing): a shipment PACKING with one item per order, and
  *                  `orders.packing_started_at` set on each (never cleared: the address and the engraving lock there).
@@ -17,7 +18,8 @@
  *                  variant and size (409 PACKING_SCAN_OTHER_PIECE); a piece in stock (counted in or received:
  *                  `stock_entered_at`; ISSUED or RESOLD, unregistered, in no open order; 409 PACKING_SCAN_NOT_IN_STOCK),
  *                  or the piece already bound to that order; bound to the item and its order (`order.link` via scan,
- *                  `order.pack.scan`). Every item scanned: 409 PACKING_SCAN_DONE.
+ *                  `order.pack.scan`), the sealed copy of its reception's claim code erased (`card_prints` ATTACHED:
+ *                  a sold piece's card is never printed again). Every item scanned: 409 PACKING_SCAN_DONE.
  *   the photo      JPEG or WebP, at most 1 MiB, EXIF removed (media/image.ts sanitizeImage; 422 PACKING_PHOTO_INVALID),
  *                  kept on the shipment (never in media_objects, which /api/v1/media serves), replaced until packed;
  *                  audited `order.pack.photo` with its SHA-256 and size; served to the agent and AUDITOR+, no-store.
@@ -113,6 +115,8 @@ const notCountable = (productId: string) => conflict('PIECE_NOT_COUNTABLE', `${p
 const orderNotFound = () => notFound('Order', 'ORDER_NOT_FOUND');
 const shipmentNotFound = () => notFound('Shipment', 'SHIPMENT_NOT_FOUND');
 const packingNotReady = () => conflict('PACKING_NOT_READY', 'This parcel is not ready: every order in it must be paid and hold its piece.');
+/** A parcel ships from one location (§3.5.6.6): its orders served from two are moved to one by ORBES first (Change location). */
+const packingSplit = () => conflict('PACKING_LOCATIONS_SPLIT', 'The orders of this parcel are served from different locations: ORBES serves them from one location before it is packed.');
 export const addressMissing = () => conflict('ORDER_ADDRESS_MISSING', 'This order has no delivery address yet.');
 const packingNotStarted = () => conflict('PACKING_NOT_STARTED', 'Start packing first.');
 const packingPacked = () => conflict('PACKING_PACKED', 'The parcel is packed: it no longer changes.');
@@ -624,7 +628,11 @@ export class LogisticsService {
       this.assertParcelScope(all, undefined, scope);
       const shipment = await openShipment(tx, key, { forUpdate: true });
       if (shipment && (shipment.status === 'PACKING' || shipment.status === 'PACKED')) return;
-      if (shipment || !parcelReady(open)) throw packingNotReady();
+      if (shipment) throw packingNotReady();
+      if (!parcelReady(open)) {
+        const held = open.length > 0 && open.every((o) => o.status === 'PAID' && o.reservation === 'STOCK');
+        throw held ? packingSplit() : packingNotReady();
+      }
       // §1.1 (d): the parcel's delivery address, its name, its lines and its country (the phone may be missing).
       const first = all.find((o) => o.id === key)!;
       if (!shippable(await addressOf(tx, first))) throw addressMissing();
@@ -699,6 +707,14 @@ export class LogisticsService {
         order = linked.order;
         notes.push(linked.note);
       }
+      // The scan proves its card went with the piece (plan NEXT LOT §3.4, §3.5.6.5): the sealed copy of a reception's
+      // claim code is erased (ATTACHED), so the reception's runs never print a sold piece's card again.
+      await tx
+        .updateTable('card_prints')
+        .set({ sealed_claim_code: null, erased_at: now, erased_reason: 'ATTACHED' })
+        .where('product_id', '=', p.id)
+        .where('erased_at', 'is', null)
+        .execute();
       await tx
         .updateTable('shipment_items')
         .set({ product_id: p.id, scan_event_id: scan.scanId, scanned_at: now })

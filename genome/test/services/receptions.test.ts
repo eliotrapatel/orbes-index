@@ -8,14 +8,16 @@
  *    their way for ORBES staff only;
  *  - the count: at least one piece, a note beyond the expected or for a size not on the order, one open reception per
  *    order, counted again, sent back, counted again; SUPPLIER_ORDER_CLOSED on a closed order, also at confirmation;
- *    the material of every model before confirming; the order's lines, the rejected pieces to send back, its status;
+ *    the material of every model before confirming, kept by the Catalogue while identities of it are owed, a line
+ *    whose model lost it anyway passed over by the worker; the order's lines, the rejected pieces to send back, its status;
  *  - the issuing: no timer in tests (nothing issued until `issuePending`); identities ISSUED with their reception line,
  *    their codes signed and their claim codes sealed for the cards; one RECEIVED movement per chunk; the waiting
  *    orders served strictly oldest first, a reshipment (`queue_first`) first; a crash between chunks resumed without a
  *    piece issued twice; 500 pieces in chunks of 50; the worker's own timer when started;
  *  - the cards: RECEPTION_ISSUING until every identity is issued; runs fixed by serial (48 and 50) that never shift; a
  *    code replaced (NEW CLAIM CODE or a hash no longer matching), a piece registered, a sealed copy that no longer
- *    opens: skipped and erased; Cards attached erases the rest, then CARDS_ATTACHED;
+ *    opens: skipped and erased; a sold piece's card never printed (its copy erased by the packing scan, or at printing
+ *    without being opened); Cards attached erases the rest, then CARDS_ATTACHED;
  *  - the rejected pieces sent back by the agent; every row of another location 404 for the agent;
  *  - no claim code in an audit, the journal or a log.
  */
@@ -31,6 +33,7 @@ import { ensureSku } from '../../src/server/services/stock.js';
 import { supplierOrderReference } from '../../src/server/services/supplier-orders.js';
 import type { Actor } from '../../src/server/types.js';
 import { createAdmin, createHarness, seedCatalog, type Catalog, type Harness } from '../api/support.js';
+import { packAndShip } from '../support/fulfil.js';
 import { createAccount } from '../support/live.js';
 
 async function refusal(p: Promise<unknown>): Promise<{ code: string; status: number; message: string }> {
@@ -264,6 +267,38 @@ describe('ReceptionService (plan NEXT LOT §3.5.6.5)', () => {
     }
   });
 
+  it('keeps a model\'s material while a confirmed reception owes identities of it; a line whose model lost it anyway is passed over and the other receptions keep issuing', async () => {
+    const velum = (
+      await h.ctx.db
+        .insertInto('models')
+        .values({ category_id: (await h.ctx.categories.getByCode('J'))!.index, name: 'VELUM', type: 'RING', sku_prefix: 'VEL-RG', default_material: '750 YELLOW GOLD', supplier_id: (await h.t.db.selectFrom('suppliers').select('id').where('name', '=', 'Maison Nord').executeTakeFirstOrThrow()).id })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    const kv = await skuOf('52', velum);
+    const first = await received(logistics, [[kv, 2]], { issue: false });
+    h.clock.advance(1000);
+    const second = await received(logistics, [[k52, 2]], { issue: false });
+    // The Catalogue keeps the material while its identities are owed.
+    expect(await refusal(h.ctx.services.catalog.updateModel(velum, { defaultMaterial: null }, admin))).toEqual({
+      code: 'MODEL_MATERIAL_IN_USE',
+      status: 409,
+      message: 'The identities of a confirmed reception of VELUM are still being issued: its material stays until they are.',
+    });
+    expect(await refusal(h.ctx.services.catalog.updateModel(velum, { defaultMaterial: '  ' }, admin))).toMatchObject({ code: 'MODEL_MATERIAL_IN_USE' });
+    // Lost anyway (written by hand): the first reception's line is passed over, the second is issued.
+    await h.t.db.updateTable('models').set({ default_material: null }).where('id', '=', velum).execute();
+    expect(await rs.issuePending()).toBe(2);
+    expect((await rs.view(first.reception.id, null)).issuing).toEqual({ issued: 0, accepted: 2, done: false });
+    expect((await rs.view(second.reception.id, null)).issuing).toEqual({ issued: 2, accepted: 2, done: true });
+    expect(await h.t.db.selectFrom('card_prints').select('product_id').where('reception_id', '=', first.reception.id).execute()).toEqual([]);
+    // Its material entered again: the first reception is issued too; once nothing is owed, the material may be cleared.
+    await h.ctx.services.catalog.updateModel(velum, { defaultMaterial: '750 YELLOW GOLD' }, admin);
+    expect(await rs.issuePending()).toBe(2);
+    expect((await rs.view(first.reception.id, null)).issuing).toEqual({ issued: 2, accepted: 2, done: true });
+    expect((await h.ctx.services.catalog.updateModel(velum, { defaultMaterial: null }, admin)).defaultMaterial).toBeNull();
+  });
+
   it('issues the identities: ISSUED in the stock with their reception line, signed, their claim codes sealed for the cards; one RECEIVED movement per chunk; nothing without the worker; no claim code in an audit or the journal', async () => {
     const { order, reception } = await received(logistics, [[k52, 3], [k54, 2]], { issue: false });
     expect(reception.issuing).toEqual({ issued: 0, accepted: 5, done: false });
@@ -422,6 +457,40 @@ describe('ReceptionService (plan NEXT LOT §3.5.6.5)', () => {
       ['card.attached', null, null],
     ]);
     expect(printAudits[3]!.details).toEqual({ receptionId: reception.id, cards: 56 });
+  });
+
+  it('never prints a sold piece\'s card: the packing scan erases its sealed copy (ATTACHED), and a copy left is erased at printing without being opened', { timeout: 120_000 }, async () => {
+    const k56 = await skuOf('56');
+    const order = await salonOrder('56');
+    await h.ctx.services.orders.setTerms(order, { priceMinor: 420_000, currency: 'EUR' }, admin);
+    await h.ctx.services.orders.transition(order, { to: 'PAID' }, admin);
+    const { reception } = await received(france, [[k56, 3]]);
+    expect((await h.t.db.selectFrom('orders').select('reservation').where('id', '=', order).executeTakeFirstOrThrow()).reservation).toBe('STOCK');
+    const before = await h.t.db.selectFrom('card_prints').select(['product_id', 'sealed_claim_code']).where('reception_id', '=', reception.id).execute();
+    const colissimo = (await h.t.db.selectFrom('carriers').select('id').where('name', '=', 'Colissimo').executeTakeFirstOrThrow()).id;
+    // Served, packed and shipped before Cards attached: the scan erased its sealed copy.
+    await packAndShip(h.ctx, order, { carrierId: colissimo, trackingNumber: '6A00000000056' }, admin);
+    const sold = (await h.t.db.selectFrom('orders as o').innerJoin('products as p', 'p.id', 'o.product_id').select(['p.id', 'p.product_id', 'o.status']).where('o.id', '=', order).executeTakeFirstOrThrow());
+    expect(sold.status).toBe('SHIPPED');
+    const row = () => h.t.db.selectFrom('card_prints').select(['sealed_claim_code', 'erased_reason']).where('product_id', '=', sold.id).executeTakeFirstOrThrow();
+    expect(await row()).toEqual({ sealed_claim_code: null, erased_reason: 'ATTACHED' });
+    const others = (await productsOf(reception.id)).filter((p) => p.id !== sold.id).map((p) => p.product_id);
+    const run = await rs.printCards(reception.id, { layout: 'card', run: 1 }, agent, new Set([france]));
+    expect(run.printed).toEqual(others);
+    expect(run.skipped).toEqual([]);
+    // A sealed copy left on a sold piece (written before the scan erased it): erased at printing, its code never opened.
+    await h.t.db
+      .updateTable('card_prints')
+      .set({ sealed_claim_code: before.find((c) => c.product_id === sold.id)!.sealed_claim_code, erased_at: null, erased_reason: null })
+      .where('product_id', '=', sold.id)
+      .execute();
+    h.clock.advance(1000);
+    const again = await rs.printCards(reception.id, { layout: 'card', run: 1 }, agent, new Set([france]));
+    expect(again.printed).toEqual(others);
+    expect(again.skipped).toEqual([{ productId: sold.product_id, reason: 'ATTACHED' }]);
+    expect(await row()).toEqual({ sealed_claim_code: null, erased_reason: 'ATTACHED' });
+    const audit = await h.t.db.selectFrom('audit_logs').select('details').where('action', '=', 'card.print').where('target_id', '=', reception.id).orderBy('id').execute();
+    expect(audit.map((a) => (a.details as { productIds: string[] }).productIds)).toEqual([others, others]);
   });
 
   it('cuts the runs in one order when two categories share their serial numbers: every card in exactly one run, before and after printing', { timeout: 120_000 }, async () => {

@@ -150,7 +150,7 @@ import { tierOf } from './club.js';
 import { engravingPrice, engravingPrices, giftModelOf, readProgram, shippingRate } from './club-program.js';
 import { creditBalances, ensureGrants } from './tier-grants.js';
 import { offeredSku, savedSizeHint, sizesForExchange } from './sizes.js';
-import { RETURN_WINDOW_DAYS } from './parcels.js';
+import { parcelOrders, RETURN_WINDOW_DAYS } from './parcels.js';
 import { defaultLocationId, ensureSku, ensureStockSetup, knownLocation, linkSkus, lockSku, recordMovement, sizeLabelOf, stockBalances, stockLevel } from './stock.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
@@ -2599,27 +2599,57 @@ export class OrderService {
   /**
    * Change where an order is served from (RESERVED or PAID; 409 ORDER_CLOSED after): what it holds moves with it, a
    * piece in stock released (serving the next order waiting for it) and taken again there, or the order waits there;
-   * refused once a piece is linked to it (409 ORDER_PIECE_LINKED: the piece is transferred instead). Audited
-   * `order.location`.
+   * refused once a piece is linked to it (409 ORDER_PIECE_LINKED: the piece is transferred instead). A parcel ships
+   * complete from one location (plan NEXT LOT §3.5.6.6), so the orders travelling together move together: every open
+   * order of its parcel (its first order and the orders travelling with it) moves in the same transaction, refused while
+   * any of them has a piece linked. Each order moved is audited `order.location`.
    */
   async changeLocation(orderId: string, locationId: string, actor: Actor): Promise<OrderView> {
     assertOperator(actor);
     const id = knownOrderId(orderId);
     const to = await knownLocation(this.db, locationId);
-    await this.change(id, async (tx, o, now, notes) => {
-      if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
-      if (o.product_id !== null) throw pieceLinked();
-      if (o.location_id === to) throw validationError('The order is already served from there.');
-      const extra: AuditRecordInput[] = [];
-      let after: OrderRow;
-      if (o.reservation !== null) {
-        const released = await release(tx, o, actor, now, extra);
-        after = await hold(tx, await updateOrder(tx, released.id, { location_id: to }), actor, now, extra);
-      } else {
-        after = await updateOrder(tx, o.id, { location_id: to });
-      }
-      notes.push(await recordChange(tx, o, after, 'order.location', { details: { fromLocationId: o.location_id, toLocationId: to, reservation: after.reservation } }, actor, now), ...extra);
-    });
+    const peek = await this.db.selectFrom('orders').select('with_order_id').where('id', '=', id).executeTakeFirst();
+    if (!peek) throw orderNotFound();
+    const key = peek.with_order_id ?? id;
+    // The parcel's rows first, in the order every parcel path locks them (its first order, then the oldest).
+    const parcelFirst = async (tx: Db) => {
+      await parcelOrders(tx, key, { forUpdate: true });
+    };
+    await this.change(
+      id,
+      async (tx, o, now, notes) => {
+        if (!ORDER_HOLDING_STATUSES.includes(o.status)) throw orderClosed();
+        const open = (await parcelOrders(tx, key)).filter((p) => ORDER_HOLDING_STATUSES.includes(p.status));
+        if (open.some((p) => p.product_id !== null)) throw pieceLinked();
+        const moving = open.filter((p) => p.location_id !== to);
+        if (moving.length === 0) throw validationError('The order is already served from there.');
+        // What they hold is given back first, the orders waiting first, so a piece freed never serves an order of the
+        // same parcel about to move; then each is held at its new location.
+        const extra: AuditRecordInput[] = [];
+        const released: OrderRow[] = [];
+        for (const m of [...moving].sort((a, b) => Number(b.reservation === 'AWAITING') - Number(a.reservation === 'AWAITING'))) {
+          const cur = await lockOrder(tx, m.id);
+          released.push(cur.reservation !== null ? await release(tx, cur, actor, now, extra) : cur);
+        }
+        for (const m of moving) {
+          const r = released.find((x) => x.id === m.id)!;
+          const after = await hold(tx, await updateOrder(tx, r.id, { location_id: to }), actor, now, extra);
+          notes.push(
+            await recordChange(
+              tx,
+              m,
+              after,
+              'order.location',
+              { details: { fromLocationId: m.location_id, toLocationId: to, reservation: after.reservation, ...(m.id === o.id ? {} : { movedWith: o.id }) } },
+              actor,
+              now,
+            ),
+          );
+        }
+        notes.push(...extra);
+      },
+      parcelFirst,
+    );
     return this.get(id);
   }
 

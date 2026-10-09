@@ -71,6 +71,9 @@ import { customerAccountLocked } from './auth.js';
 import { RETURN_WINDOW_DAYS } from './parcels.js';
 import { knownLocation, lockSku, recordMovement } from './stock.js';
 
+/** A size as the request names it: SIZE 18, or a label that already carries its word as written (SIZE 52, ONE SIZE), as the app's sizeName and drops.ts inSize do. */
+const sizeWords = (label: string) => (/^(SIZE\b|ONE SIZE$)/i.test(label.trim()) ? label : `SIZE ${label}`);
+
 // ── Rules ──────────────────────────────────────────────────────────────────
 
 /** The words of an order case, at most (the CHECKs of migration 0037). */
@@ -399,7 +402,7 @@ export class OrderCaseService {
         exchange = { skuId: size.skuId, label: size.label! };
       }
       // The request, as the collector's own message in MESSAGES: its reason, then its note.
-      const head = exchange ? `EXCHANGE REQUESTED: SIZE ${exchange.label} — ${ORDER_CASE_REASON_WORDS[input.reason]}.` : `RETURN REQUESTED — ${ORDER_CASE_REASON_WORDS[input.reason]}.`;
+      const head = exchange ? `EXCHANGE REQUESTED: ${sizeWords(exchange.label)} — ${ORDER_CASE_REASON_WORDS[input.reason]}.` : `RETURN REQUESTED — ${ORDER_CASE_REASON_WORDS[input.reason]}.`;
       const { message } = await messages.writeIn(tx, account, { body: note ? `${head}\n\n${note}` : head, context: { kind: 'ORDER', orderId: o.id } }, actor, { rate: false });
       const c = await tx
         .insertInto('order_cases')

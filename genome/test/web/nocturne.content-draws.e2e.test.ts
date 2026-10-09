@@ -82,7 +82,7 @@ describe.skipIf(!HAS_CHROMIUM)('SHARE TO STORIES on a draw\'s page (BP-10, Chrom
 });
 
 // Plan NEXT LOT §3.6.F: a draw in sizes, on its own stage. YOUR SIZE preselected from YOUR SIZES: ENTER THE DRAW enters
-// in it; a size tapped then changes the entry's at once; WITHDRAW keeps it, preselected for the entry again. Nothing
+// in it, the label over the sizes then ENTERED · SIZE 17; a size tapped then changes the entry's at once; WITHDRAW keeps it, preselected for the entry again. Nothing
 // sideways at 320 px. The state writes, after its baseline's read.
 describe.skipIf(!HAS_CHROMIUM)('a draw in sizes: enter in a size, change it, withdraw (NEXT LOT §3.6.F, Chromium)', () => {
   it(
@@ -97,10 +97,14 @@ describe.skipIf(!HAS_CHROMIUM)('a draw in sizes: enter in a size, change it, wit
             const page = opened.page;
             const label = () => page.locator('.n-release__status-label').innerText().then((t) => t.trim());
             const pressed = () => page.locator('.release__sizes button[aria-pressed="true"]').innerText().then((t) => t.trim());
+            // The label over the sizes: YOUR SIZE, then ENTERED · SIZE 17 once entered, while entries are open.
+            const over = () => page.locator('.release__size-label').innerText().then((t) => t.trim());
             if ((await pressed()) !== '17') found.push(`preselected ${await pressed()}`);
+            if ((await over()) !== 'YOUR SIZE') found.push(`over the sizes before entering: ${await over()}`);
             await page.getByRole('button', { name: 'ENTER THE DRAW' }).click();
             await page.locator('.n-release__status-label').waitFor({ state: 'visible' });
             if ((await label()) !== 'ENTERED · SIZE 17') found.push(`entered: ${await label()}`);
+            if ((await over()) !== 'ENTERED · SIZE 17') found.push(`over the sizes once entered: ${await over()}`);
             const sentence = (await page.locator('.release__sentence').innerText()).trim();
             if (sentence !== 'You are entered in the draw, in size 17. You may change your size until entries close, and withdraw until the draw.') found.push(`sentence: ${sentence}`);
             // YOUR SIZES' lines go once the entry has its size; a tap changes it at once.
@@ -108,6 +112,7 @@ describe.skipIf(!HAS_CHROMIUM)('a draw in sizes: enter in a size, change it, wit
             await page.locator('.release__sizes button', { hasText: '16' }).click();
             await page.waitForFunction(() => document.querySelector('.n-release__status-label')?.textContent?.trim() === 'ENTERED · SIZE 16', null, { timeout: 15_000 });
             if ((await pressed()) !== '16') found.push(`after the change ${await pressed()}`);
+            if ((await over()) !== 'ENTERED · SIZE 16') found.push(`over the sizes after the change: ${await over()}`);
             // 18 is full (reserved by PLATINE): still open to an entry, the waiting list said under the sizes.
             await page.locator('.release__sizes button', { hasText: '18' }).click();
             await page.waitForFunction(() => document.querySelector('.n-release__status-label')?.textContent?.trim() === 'ENTERED · SIZE 18', null, { timeout: 15_000 });
@@ -116,6 +121,7 @@ describe.skipIf(!HAS_CHROMIUM)('a draw in sizes: enter in a size, change it, wit
             await page.getByRole('button', { name: 'WITHDRAW' }).click();
             await page.waitForFunction(() => document.querySelector('.n-release__status-label')?.textContent?.trim() === 'WITHDRAWN · SIZE 18', null, { timeout: 15_000 });
             if ((await pressed()) !== '18') found.push(`withdrawn, preselected ${await pressed()}`);
+            if ((await over()) !== 'YOUR SIZE') found.push(`over the sizes once withdrawn: ${await over()}`);
             if (await page.getByRole('button', { name: 'ENTER THE DRAW' }).isDisabled()) found.push('ENTER THE DRAW disabled with a size picked');
             await page.setViewportSize({ width: 320, height: 800 });
             const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

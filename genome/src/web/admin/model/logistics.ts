@@ -580,7 +580,7 @@ export function runLabel(layout: 'sheet' | 'card', run: number, runs: number): s
 /** What a printed run skipped, said after it: null when nothing was. */
 export function skippedLine(skipped: readonly { productId: string; reason: string }[]): string | null {
   if (skipped.length === 0) return null;
-  return `Not printed: ${skipped.map((x) => x.productId).join(', ')} (registered, replaced or no longer readable). Tell ORBES.`;
+  return `Not printed: ${skipped.map((x) => x.productId).join(', ')} (registered, packed for an order, replaced or no longer readable). Tell ORBES.`;
 }
 
 /** Sent back to the supplier: a tracking number comes with its carrier, as the server takes it. */

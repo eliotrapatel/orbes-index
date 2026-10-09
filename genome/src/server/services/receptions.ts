@@ -15,11 +15,13 @@
  *                  SENT_BACK: counted again, then TO_CONFIRM anew).
  *   confirmation   `confirm` (OPERATOR): the supplier order locked first (lock order: supplier_orders → receptions →
  *                  lines), so a reception is never confirmed onto an order closed meanwhile; every model with its
- *                  material (409 RECEPTION_MATERIAL_MISSING); CONFIRMED; the order's lines counted (accepted, rejected),
+ *                  material (409 RECEPTION_MATERIAL_MISSING; the models held FOR SHARE, and the Catalogue keeps a
+ *                  material while identities of it are owed, 409 MODEL_MATERIAL_IN_USE); CONFIRMED; the order's lines counted (accepted, rejected),
  *                  the rejected pieces listed TO_RETURN (`supplier_returns`), the order's status settled; then the
  *                  issuing worker is woken.
  *   issuing        `issuePending`, restart-safe and driven by the database: while a CONFIRMED reception has a line with
- *                  identities to issue, up to RECEPTION_ISSUE_CHUNK pieces of it, their claim codes generated and hashed
+ *                  identities to issue (a line whose model has no material is passed over, so the others go on), up
+ *                  to RECEPTION_ISSUE_CHUNK pieces of it, their claim codes generated and hashed
  *                  one at a time outside the transaction (scrypt), then one signing transaction (IssuanceService
  *                  .inSigningTransaction) under the line's advisory lock: each piece issued (`issueStockIdentity`:
  *                  serial, ISSUED, its code signed, `stock_entered_at`, its reception line; audited `product.issue`
@@ -36,8 +38,10 @@
  *                  50 (one per page); a card erased leaves a gap in its block and never shifts the next run. A
  *                  reception of rejected pieces only has no card to print. Each sealed code opened and drawn
  *                  through CertificateService.render (the 79t card, checked against the stored hash); a piece whose code
- *                  was replaced (a new claim code), which is registered, or whose sealed copy no longer opens is
- *                  skipped and its sealed copy erased (REPLACED, REGISTERED, UNREADABLE). Audited `card.print`.
+ *                  was replaced (a new claim code), which is registered, which is sold (bound to an order by the
+ *                  packing scan, which erases its copy itself: services/logistics.ts), or whose sealed copy no longer
+ *                  opens is skipped and its sealed copy erased (REPLACED, REGISTERED, ATTACHED, UNREADABLE). Audited
+ *                  `card.print`.
  *                  `cardsAttached` erases every sealed copy left (ATTACHED): from then on a lost card needs a new claim
  *                  code (409 CARDS_ATTACHED).
  *   back to the    the rejected pieces sent back by the agent (`supplierReturnSent`: TO_RETURN → RETURNED, an optional
@@ -392,7 +396,9 @@ export class ReceptionService {
    * `issued_at` here.
    */
   async issueChunk(): Promise<number> {
-    const next = await sql<{ id: string; reception_id: string; sku_id: string; accepted: number; issued: number; model_id: string; material: string | null; reference_id: string }>`
+    // A line whose model has lost its material since the confirmation (the Catalogue refuses it while identities are
+    // owed, MODEL_MATERIAL_IN_USE) is passed over, before any claim code is hashed, so the other receptions keep issuing.
+    const next = await sql<{ id: string; reception_id: string; sku_id: string; accepted: number; issued: number; model_id: string; material: string; reference_id: string }>`
       SELECT rl.id, rl.reception_id, rl.sku_id, rl.accepted, rl.issued, k.model_id,
              coalesce(nullif(btrim(m.default_material), ''), nullif(btrim(main.default_material), '')) AS material,
              r.supplier_order_id AS reference_id
@@ -402,6 +408,7 @@ export class ReceptionService {
         JOIN models m ON m.id = k.model_id
         LEFT JOIN models main ON main.id = m.variant_of
        WHERE r.status = 'CONFIRMED' AND rl.issued < rl.accepted
+         AND coalesce(nullif(btrim(m.default_material), ''), nullif(btrim(main.default_material), '')) IS NOT NULL
        ORDER BY r.confirmed_at, r.id, rl.id
        LIMIT 1`.execute(this.db);
     const line = next.rows[0];
@@ -423,7 +430,6 @@ export class ReceptionService {
       const r = await trx.selectFrom('receptions').selectAll().where('id', '=', l.reception_id).executeTakeFirstOrThrow();
       const n = Math.min(codes.length, l.accepted - l.issued);
       if (r.status !== 'CONFIRMED' || n <= 0) return 0;
-      if (!line.material) throw conflict('RECEPTION_MATERIAL_MISSING', 'The material of a model of this reception is missing.');
       const now = this.clock();
       const actor: Actor = r.confirmed_by ? { type: 'admin', id: r.confirmed_by } : SYSTEM_ACTOR;
       await lockSku(trx, l.sku_id);
@@ -654,7 +660,12 @@ export class ReceptionService {
       if (r.status === 'SENT_BACK') throw receptionNotToConfirm();
       if (!SUPPLIER_ORDER_OPEN.includes(o.status)) throw supplierOrderClosed();
       const lines = await tx.selectFrom('reception_lines').selectAll().where('reception_id', '=', r.id).forUpdate().execute();
-      // Every model of the pieces to issue has its material (the main model's for a variant without one).
+      // Every model of the pieces to issue has its material (the main model's for a variant without one), its row and its
+      // main model's held FOR SHARE so the Catalogue cannot clear it meanwhile (CatalogService.updateModel).
+      await sql`SELECT m.id FROM models m
+                 WHERE m.id IN (SELECT k.model_id FROM skus k WHERE k.id IN (${sql.join(lines.map((l) => sql`${l.sku_id}::uuid`))}))
+                    OR m.id IN (SELECT v.variant_of FROM skus k JOIN models v ON v.id = k.model_id WHERE k.id IN (${sql.join(lines.map((l) => sql`${l.sku_id}::uuid`))}))
+                 ORDER BY m.id FOR SHARE`.execute(tx);
       const materials = await sql<{ sku_id: string; material: string | null }>`
         SELECT k.id AS sku_id, coalesce(nullif(btrim(m.default_material), ''), nullif(btrim(main.default_material), '')) AS material
           FROM skus k JOIN models m ON m.id = k.model_id LEFT JOIN models main ON main.id = m.variant_of
@@ -692,9 +703,10 @@ export class ReceptionService {
   /**
    * A run of a reception's cards (`layout` 'sheet': blocks of 48, A4 sheets of eight; 'card': blocks of 50, one per
    * page), once every identity is issued (409 RECEPTION_ISSUING) and before the cards are attached (409 CARDS_ATTACHED).
-   * Each sealed code opened and drawn through CertificateService.render; a code replaced, a piece registered or a sealed
-   * copy that no longer opens is skipped and erased (REPLACED, REGISTERED, UNREADABLE); a piece not printable (lost,
-   * retired…) is skipped. Audited `card.print`.
+   * Each sealed code opened and drawn through CertificateService.render; a code replaced, a piece registered, a piece
+   * sold (bound to an order by the packing scan, which erases its copy) or a sealed copy that no longer opens is
+   * skipped and erased, its code never opened for a sold piece (REPLACED, REGISTERED, ATTACHED, UNREADABLE); a piece not
+   * printable (lost, retired…) is skipped. Audited `card.print`.
    */
   async printCards(receptionId: string, input: { layout: CertificateLayout; run?: number }, actor: Actor, scope: LocationScope): Promise<PrintedCards> {
     assertStaff(actor);
@@ -729,6 +741,12 @@ export class ReceptionService {
       if (b.registered) {
         await erase(b.product_id, 'REGISTERED');
         skipped.push({ productId: b.reference, reason: 'REGISTERED' });
+        continue;
+      }
+      // Sold: bound to an order by the packing scan, which erases its copy; a copy left is erased here, never opened.
+      if (b.sold) {
+        await erase(b.product_id, 'ATTACHED');
+        skipped.push({ productId: b.reference, reason: 'ATTACHED' });
         continue;
       }
       if (renewed.has(b.product_id)) {
@@ -985,6 +1003,8 @@ export class ReceptionService {
       .innerJoin('products as p', 'p.id', 'cp.product_id')
       .select(['cp.product_id', 'cp.sealed_claim_code', 'cp.printed_count', 'cp.erased_reason', 'p.product_id as reference', 'p.status', 'p.serial', 'p.year'])
       .select(sql<boolean>`(p.ownership_state <> 'UNREGISTERED' OR EXISTS (SELECT 1 FROM ownership w WHERE w.product_id = p.id AND w.ended_at IS NULL))`.as('registered'))
+      // Bound to an order not ended (the packing scan): sold, its card with it in the parcel.
+      .select(sql<boolean>`EXISTS (SELECT 1 FROM orders o WHERE o.product_id = p.id AND o.status NOT IN ('CANCELLED', 'RETURNED'))`.as('sold'))
       .where('cp.reception_id', '=', receptionId)
       .orderBy('p.year')
       .orderBy('p.category_id')

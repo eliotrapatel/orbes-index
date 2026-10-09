@@ -166,7 +166,9 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
 
   // An order's engraving (plan NEXT LOT §3.6.C): typed until packing starts, with its price from the settings, or its
   // words only when the release sold it as an add-on; removed (DELETE) except then. The order as MY PIECES reads it.
-  app.put('/api/v1/account/orders/:id/engraving', async (request, reply) => {
+  // Rate group `auth`, as REGISTER THIS PIECE: after PAID each priced addition and removal issues a legal document (a
+  // supplementary invoice, a credit note), so the cycle is bounded by the stricter budget.
+  app.put('/api/v1/account/orders/:id/engraving', { config: { rateGroup: 'auth' } }, async (request, reply) => {
     const { account } = requireAccount(request);
     const { id } = parse(accountOrderParams, request.params);
     const b = parse(accountEngravingBody, request.body);
@@ -174,7 +176,7 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     return { order: await orders.setEngraving(account.id, id, b.text, accountActor(request)) };
   });
 
-  app.delete('/api/v1/account/orders/:id/engraving', async (request, reply) => {
+  app.delete('/api/v1/account/orders/:id/engraving', { config: { rateGroup: 'auth' } }, async (request, reply) => {
     const { account } = requireAccount(request);
     const { id } = parse(accountOrderParams, request.params);
     reply.header('cache-control', 'no-store');

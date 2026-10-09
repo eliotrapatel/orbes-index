@@ -342,10 +342,10 @@ export function sizeMixText(mix: Pick<LiveSizeMix, 'sizes'>): string | null {
   return mix.sizes.length ? mix.sizes.map((s) => `${s.label} = ${s.stock}`).join('\n') : null;
 }
 
-/** The size mix in one line: `52 = 4 (in stock 4), 54 = 5 (in stock 1, 4 to make)`. */
+/** The size mix in one line: `52 = 4 (4 in stock) · 54 = 5 (1 in stock, 4 to order)`: what the stock does not cover is ordered from the suppliers. */
 export function sizeMixLine(mix: Pick<LiveSizeMix, 'sizes'>): string {
   return mix.sizes
-    .map((s) => `${s.label} = ${formatCount(s.stock)} (${[s.fromStock ? `${formatCount(s.fromStock)} in stock` : null, s.fromDemand ? `${formatCount(s.fromDemand)} to make` : null].filter(Boolean).join(', ')})`)
+    .map((s) => `${s.label} = ${formatCount(s.stock)} (${[s.fromStock ? `${formatCount(s.fromStock)} in stock` : null, s.fromDemand ? `${formatCount(s.fromDemand)} to order` : null].filter(Boolean).join(', ')})`)
     .join(' · ');
 }
 

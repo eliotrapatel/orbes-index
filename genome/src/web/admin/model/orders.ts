@@ -15,7 +15,7 @@
 import { COUNTRY_CODES, countryName, isCountryCode, PHONE_RE } from '../../../shared/countries.js';
 import { formatCount, formatDate, formatDateTime, humanize } from '../format.js';
 import { can } from './permissions.js';
-import { slipBuyer, type SlipBuyer } from './logistics.js';
+import { CASE_KIND_LABELS, slipBuyer, type SlipBuyer } from './logistics.js';
 import { formatMoney, moneyField, parseMoney } from './live.js';
 import {
   ORDER_CHANNELS,
@@ -118,6 +118,11 @@ export function holdsLine(o: Pick<OrderCard, 'status' | 'reservation' | 'piece' 
 
 /** The hold of an order whose piece is ready while its parcel waits for another order's (plan NEXT LOT §3.5.6.6). */
 export const WAITING_FOR_PARCEL = 'Waiting for the rest of its parcel';
+
+/** A card's mark for its order case not ended (plan NEXT LOT §3.6.D), in the console's kind words; null without one. */
+export function cardCase(c: Pick<OrderCard, 'orderCase'>): string | null {
+  return c.orderCase ? CASE_KIND_LABELS[c.orderCase.kind] : null;
+}
 
 /** A card's holds line (its SKU known when it has a SKU code). */
 export function cardHolds(c: OrderCard): string {

@@ -414,6 +414,28 @@ describe.skipIf(!HAS_CHROMIUM)('Logistics in the console (plan NEXT LOT §3.5.3,
     await expect.poll(() => g.locator('[data-testid=parcel-packed]').isDisabled()).toBe(false);
     await shot(g, 'packing');
     await shot(g, 'packing-phone', { phone: true });
+    // On a touch screen (the agent's phone): each checklist line spans the column at 44 px at least, the text links 44 px
+    // too; the look is the desk's.
+    const deskSize = g.viewportSize()!;
+    const cdp = await g.context().newCDPSession(g);
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+    await g.setViewportSize({ width: 390, height: 844 });
+    expect(await g.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+    const targets = await g.evaluate(() => ({
+      lines: [...document.querySelectorAll('[data-testid=parcel-checklist] .ccheck')].map((el) => {
+        const r = el.getBoundingClientRect();
+        const list = el.closest('ul')!.getBoundingClientRect();
+        return [Math.round(r.height), Math.round(list.width - r.width)];
+      }),
+      links: [...document.querySelectorAll('.view--shipping .cbtn--ghost')].map((el) => Math.round(el.getBoundingClientRect().height)),
+    }));
+    expect(targets.lines.length).toBe(3);
+    for (const [height, short] of targets.lines) expect([height! >= 44, short]).toEqual([true, 0]);
+    expect(targets.links.length).toBeGreaterThan(0);
+    expect(targets.links.every((x) => x >= 44)).toBe(true);
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await g.setViewportSize(deskSize);
+    await cdp.detach();
     await g.click('[data-testid=parcel-packed]');
     await g.waitForSelector('.toast:has-text("Packed.")');
     await expect.poll(() => g.locator('[data-testid=parcel-step]').textContent()).toBe('PACKED');
