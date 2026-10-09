@@ -17,6 +17,7 @@
  */
 import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
+import { connectionPlace } from '../geo/place.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
 import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, lookbookParams, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
@@ -53,10 +54,9 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     return { account: accountJson(account), csrfToken: session.csrfToken };
   });
 
-  // What CREATE ACCOUNT offers (plan CUSTOMER INTELLIGENCE §3.1 P.4.2): the connection's country, only to preselect COUNTRY
-  // (null when unknown or not a country), and the answers offered to « How did you hear about ORBES? ». Nothing recorded.
+  // What CREATE ACCOUNT offers (plan CUSTOMER INTELLIGENCE §3.1 P.4.2, §3.3 T.8.2): the connection's country (connectionPlace), only to preselect COUNTRY (null when unknown or not a country), and the answers offered to « How did you hear about ORBES? ». Nothing recorded.
   app.get('/api/v1/account/sign-up', { config: { guard: { session: 'none' } } }, async (request, reply) => {
-    const country = ctx.geo.resolve(request).country;
+    const country = connectionPlace(ctx, request)?.country;
     reply.header('cache-control', 'no-store');
     return { country: isCountryCode(country) ? country : null, heard: await profiles.offeredHeard() };
   });

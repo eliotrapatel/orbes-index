@@ -3,10 +3,14 @@
  * the country and city of a request's connection or null, and PlaceService (services/places.ts, `ctx.services.places`),
  * a place's id in `geo_places` (migration 0042), created once, cached in an LRU of 5 000.
  */
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { closeDb, createDb, type Db } from '../../src/server/db/connection.js';
+import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { connectionPlace } from '../../src/server/geo/place.js';
 import { GeoResolver } from '../../src/server/geo/resolver.js';
 import { PLACE_CACHE_SIZE, PlaceService } from '../../src/server/services/places.js';
@@ -138,5 +142,56 @@ describe('PlaceService', () => {
     } finally {
       await h.close();
     }
+  });
+});
+
+// ── PostgreSQL: true parallelism (T.8.2 « Both are idempotent under concurrency ») ────────────────────────────────
+// PGlite above runs on one connection; here a pool of 8 lets the services' INSERT … ON CONFLICT (country, city) DO
+// NOTHING then SELECT race for real, a country alone (the NULLS NOT DISTINCT key) included. Runs in genome-ci with
+// ORBES_TEST_POSTGRES_URL; skipped without it.
+const adminUrl = process.env.ORBES_TEST_POSTGRES_URL;
+
+describe.skipIf(!adminUrl)('PlaceService on PostgreSQL', () => {
+  let admin: Db;
+  let db: Db;
+  const name = `orbes_places_${randomBytes(6).toString('hex')}`;
+  beforeAll(async () => {
+    admin = createDb(adminUrl!);
+    await sql`CREATE DATABASE ${sql.id(name)}`.execute(admin);
+    const u = new URL(adminUrl!);
+    u.pathname = `/${name}`;
+    db = createDb(u.toString(), { poolMax: 8 });
+    await migrateToLatest(db);
+  }, 120_000);
+  afterAll(async () => {
+    if (db) await closeDb(db);
+    if (admin) {
+      await sql`DROP DATABASE IF EXISTS ${sql.id(name)} WITH (FORCE)`.execute(admin);
+      await closeDb(admin);
+    }
+  });
+
+  it('gives one id and one row per place when several services race on a new place and on a country alone', async () => {
+    for (const [country, city] of [
+      ['ES', 'Madrid'],
+      ['ES', null],
+    ] as const) {
+      // Fresh services (empty caches, as many processes would be), each asking twice, all at once.
+      const services = Array.from({ length: 8 }, () => new PlaceService({ db }));
+      const ids = await Promise.all(services.flatMap((p) => [p.idOf(country, city), p.idOf(country, city)]));
+      expect(new Set(ids).size, String(city)).toBe(1);
+      expect(ids[0]).toEqual(expect.any(Number));
+      const rows = await db
+        .selectFrom('geo_places')
+        .select('id')
+        .where('country', '=', country)
+        .where('city', city === null ? 'is' : '=', city)
+        .execute();
+      expect(rows.map((r) => r.id), String(city)).toEqual([ids[0]]);
+    }
+    expect(await db.selectFrom('geo_places').select(['country', 'city']).where('country', '=', 'ES').orderBy('id').execute()).toEqual([
+      { country: 'ES', city: 'Madrid' },
+      { country: 'ES', city: null },
+    ]);
   });
 });
