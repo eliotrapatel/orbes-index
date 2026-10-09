@@ -26,6 +26,12 @@
  * null without a cost); the WITHOUT lines; Paris days (25 October 2026); archived links on and off; the visits from
  * the daily summary and the raw visits never both for one day; the collectors behind a figure match it; one link's
  * figures and days; the overview and sourceFilter; the routes' query checks and the AUDITOR's masked emails.
+ *
+ * Then H2's orders and invoices (step 4.11), on a story of their own: an EXCHANGE order counts on its original's last
+ * link (a size exchange moves nothing between links), the original returned no purchase, its credit note and the
+ * exchange's invoice netting on that link; an engraving added after PAID (a supplementary invoice) and removed (a credit
+ * note for its line) count in revenue on their order's links by their issue dates, never as a purchase; the TOTAL and
+ * the return follow.
  */
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
@@ -513,5 +519,141 @@ describe('AcquisitionReportService (§3.4 A.5, A.10, step 4.6)', () => {
     // 800 days apart is the most.
     expect((await auditor.get('/api/admin/links?from=2024-08-22&to=2026-10-31')).statusCode).toBe(200);
     expect((await auditor.get('/api/admin/links?from=2024-08-21&to=2026-10-31')).statusCode).toBe(400);
+  });
+});
+
+describe('AcquisitionReportService and H2\'s orders and invoices: EXCHANGE, the engraving after PAID (§3.4 A.5, step 4.11)', () => {
+  let h: Harness;
+  let w: GrowthWorld;
+  let seq = 0;
+  let invoiceSeq = 5_000;
+  const acc: Record<string, string> = {};
+  const link: Record<string, string> = {};
+  const ord: Record<string, string> = {};
+  const svc = () => h.ctx.services.acquisitionReport;
+
+  const invoice = async (orderId: string, kind: 'INVOICE' | 'CREDIT_NOTE', issued: Date, total: number, more: { supplements?: string; credits?: string; scope?: 'FULL' | 'LINES' } = {}) =>
+    (
+      await h.t.db
+        .insertInto('invoices')
+        .values({
+          kind,
+          year: issued.getUTCFullYear(),
+          sequence: ++invoiceSeq,
+          order_id: orderId,
+          supplements_invoice_id: more.supplements ?? null,
+          credits_invoice_id: more.credits ?? null,
+          credit_scope: kind === 'CREDIT_NOTE' ? (more.scope ?? 'FULL') : null,
+          issuer: jsonText({ name: 'CONGLOMERAT LLC' }),
+          buyer: jsonText({ name: null }),
+          lines: jsonText([{ kind: more.supplements || more.scope === 'LINES' ? 'ENGRAVING' : 'PIECE', label: 'LINE', detail: null, amountMinor: total }]),
+          currency: 'EUR',
+          subtotal_minor: total,
+          total_minor: total,
+          issued_at: issued,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+  /** A salon order of A: its request, paid an hour after its reservation, its invoice; returned with its credit note. */
+  const salon = async (requested: Date, reserved: Date, total: number, returned?: Date): Promise<{ id: string; invoice: string }> => {
+    const request = await h.t.db.insertInto('shop_requests').values({ account_id: acc.A!, model_id: acc.model!, status: 'CLOSED', created_at: requested, handled_at: reserved, outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const paid = new Date(reserved.getTime() + 3_600_000);
+    const id = (
+      await h.t.db
+        .insertInto('orders')
+        .values({
+          channel: 'SALON', account_id: acc.A!, model_id: acc.model!, shop_request_id: request.id, price_minor: total, currency: 'EUR', status: returned ? 'RETURNED' : 'PAID', reserved_at: reserved, paid_at: paid, location_id: w.location,
+          shipped_at: returned ? new Date(paid.getTime() + 3_600_000) : null, carrier_id: returned ? w.carrier : null, tracking_number: returned ? 'EX-2' : null, returned_at: returned ?? null,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    const inv = await invoice(id, 'INVOICE', paid, total);
+    if (returned) await invoice(id, 'CREDIT_NOTE', returned, total, { credits: inv });
+    return { id, invoice: inv };
+  };
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set('2026-10-01T09:00:00Z');
+    await h.t.db.updateTable('acquisition_state').set({ tracking_started_at: START, conversions_until: START }).execute();
+    w = await new GrowthWorld(h.t.db).prepare();
+    acc.model = await w.model('ORBITE', { price: [20_000, 'EUR'] });
+    const admin = await createAdmin(h.ctx, 'OPERATOR');
+    const actor: Actor = { type: 'admin', id: admin.id };
+    const channels = await h.ctx.services.links.channels();
+    h.clock.advance(60_000);
+    const l1 = await h.ctx.services.links.create({ name: 'Instagram bio', channelId: channels.find((c) => c.name === 'Instagram')!.id, destination: 'NOW', cost: { minor: 10_000, currency: 'EUR' } }, actor);
+    const l2 = await h.ctx.services.links.create({ name: 'Press piece', channelId: channels.find((c) => c.name === 'Press')!.id, destination: 'NOW', cost: { minor: 5_000, currency: 'EUR' } }, actor);
+    link.L1 = l1.id;
+    link.L2 = l2.id;
+    // A: through L1 (2 Oct), signs up (3 Oct), then through L2, signed in (5 Oct).
+    const hash = `H2______${String(++seq).padStart(4, '0')}${'e'.repeat(31)}`;
+    const device = (await h.t.db.insertInto('tracking_devices').values({ device_hash: hash, first_seen_at: z('2026-10-02T10:00:00Z'), last_seen_at: z('2026-10-02T10:00:00Z') }).returning('id').executeTakeFirstOrThrow()).id;
+    await h.ctx.services.acquisition.arrive({ deviceId: device, accountId: null, now: z('2026-10-02T10:00:00Z'), link: l1.code });
+    const email = `h2-${randomUUID().slice(0, 6)}@example.com`;
+    acc.A = (await h.t.db.insertInto('accounts').values({ email, email_normalized: email, password_hash: 'x', country: 'FR', created_at: z('2026-10-03T10:00:00Z') }).returning('id').executeTakeFirstOrThrow()).id;
+    await h.ctx.services.tracking.link(hash, acc.A, 'SIGN_UP', z('2026-10-03T10:00:00Z'));
+    await h.ctx.services.acquisition.arrive({ deviceId: device, accountId: acc.A, now: z('2026-10-05T10:00:00Z'), link: l2.code });
+    // O1: a salon order, request 6 Oct, paid 7 Oct, €200; an engraving added after PAID on 10 Oct (€30, a supplementary
+    // invoice), removed on 20 Oct (a credit note for its line).
+    const o1 = await salon(z('2026-10-06T10:00:00Z'), z('2026-10-07T10:00:00Z'), 20_000);
+    ord.O1 = o1.id;
+    const supplement = await invoice(o1.id, 'INVOICE', z('2026-10-10T10:00:00Z'), 3_000, { supplements: o1.invoice });
+    await invoice(o1.id, 'CREDIT_NOTE', z('2026-10-20T10:00:00Z'), 3_000, { credits: supplement, scope: 'LINES' });
+    // O2: a salon order, request 8 Oct, paid 9 Oct, €150, returned on 14 Oct for another size: O3, its EXCHANGE, paid
+    // at once on 14 Oct with its own invoice (€150).
+    const o2 = await salon(z('2026-10-08T10:00:00Z'), z('2026-10-09T10:00:00Z'), 15_000, z('2026-10-14T10:00:00Z'));
+    ord.O2 = o2.id;
+    ord.O3 = (
+      await h.t.db
+        .insertInto('orders')
+        .values({ channel: 'EXCHANGE', exchange_of_order_id: o2.id, account_id: acc.A, model_id: acc.model, price_minor: 15_000, currency: 'EUR', status: 'PAID', reserved_at: z('2026-10-14T10:05:00Z'), paid_at: z('2026-10-14T10:05:00Z'), location_id: w.location })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    await invoice(ord.O3, 'INVOICE', z('2026-10-14T10:05:00Z'), 15_000);
+    await h.ctx.services.acquisition.recordConversions(z('2026-10-31T22:30:00Z'));
+  }, 60_000);
+  afterAll(() => h?.close());
+
+  const F = (visits: number, firstVisits: number, first: [number, number, number, number], last: [number, number, number, number]): Figures => ({
+    visits,
+    firstVisits,
+    first: { signups: first[0], entries: first[1], purchases: first[2], revenueMinor: first[3] },
+    last: { signups: last[0], entries: last[1], purchases: last[2], revenueMinor: last[3] },
+  });
+  const linkRow = (r: AcquisitionReport, id: string) => r.channels.flatMap((c) => c.links).find((l) => l.link.id === id)!;
+
+  it('the EXCHANGE order\'s conversion copies its original\'s last link: L2, as the original\'s', async () => {
+    const c = await h.t.db.selectFrom('acquisition_conversions').select(['ref_id', 'last_source_id', 'at']).where('kind', '=', 'ORDER').where('ref_id', 'in', [ord.O2!, ord.O3!]).execute();
+    const l2Source = (await h.t.db.selectFrom('acquisition_sources').select('id').where('link_id', '=', link.L2!).executeTakeFirstOrThrow()).id;
+    expect(c.map((r) => [r.ref_id === ord.O2 ? 'O2' : 'O3', r.last_source_id, r.at.toISOString()]).sort()).toEqual([
+      ['O2', l2Source, '2026-10-08T10:00:00.000Z'],
+      ['O3', l2Source, '2026-10-08T10:00:00.000Z'],
+    ]);
+  });
+
+  it('counts the exchange as the purchase on its original\'s links, the engraving after PAID in revenue only, each by its issue date; the TOTAL follows', async () => {
+    // October: O1 and O3 are purchases (O2 was returned); revenue €200 + €30 − €30 + €150 − €150 + €150 = €350, the
+    // first link L1's (A came first through it), the last link L2's (every order after 5 Oct, the exchange as its
+    // original). The sign-up: L1 both ways.
+    const r = await svc().report({ ...OCT, currency: 'EUR' });
+    expect(linkRow(r, link.L1!).figures).toEqual(F(1, 1, [1, 0, 2, 35_000], [1, 0, 0, 0]));
+    expect(linkRow(r, link.L2!).figures).toEqual(F(1, 0, [0, 0, 0, 0], [0, 0, 2, 35_000]));
+    expect(r.total).toEqual(F(2, 1, [1, 0, 2, 35_000], [1, 0, 2, 35_000]));
+    // By issue date: until 12 Oct, O1's invoice, its engraving and O2's invoice (€380); after, the engraving's credit,
+    // O2's credit note and O3's invoice (−€30).
+    const early = await svc().report({ from: '2026-10-01', to: '2026-10-12', currency: 'EUR' });
+    expect(linkRow(early, link.L2!).figures.last).toEqual({ signups: 0, entries: 0, purchases: 1, revenueMinor: 38_000 });
+    const late = await svc().report({ from: '2026-10-13', to: '2026-10-31', currency: 'EUR' });
+    expect(linkRow(late, link.L2!).figures.last).toEqual({ signups: 0, entries: 0, purchases: 1, revenueMinor: -3_000 });
+    expect(late.total.first.revenueMinor).toBe(-3_000);
+    // The return since L2 was made: €350 for €50.
+    expect(linkRow(r, link.L2!).returns?.last).toEqual({ revenueMinor: 35_000, costMinor: 5_000, currency: 'EUR', ratio: 7 });
+    // The collectors behind L2's last-link revenue: A, €350.
+    const list = await svc().collectors({ source: { link: link.L2! }, attribution: 'last', measure: 'revenue', ...OCT, currency: 'EUR' });
+    expect(list.items).toEqual([expect.objectContaining({ accountId: acc.A, purchases: 2, revenueMinor: 35_000 })]);
   });
 });

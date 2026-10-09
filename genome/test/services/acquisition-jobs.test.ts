@@ -16,10 +16,16 @@
  *    repeated giving the same figures; a visit past 13 months purged only once its day is summarised; the devices
  *    purged only after their visits;
  *  - the housekeeping: its keys in the order of §3.0 (f), the jobs' counts, and no purge in a pass whose summary failed.
- * The EXCHANGE order's last link and the supplementary invoices are step 4.11's cases.
+ *  - H2's orders and invoices (step 4.11): an EXCHANGE order takes its original's last link and moment, whatever came
+ *    between (a size exchange moves nothing between links); an exchange of an order reserved before the recording
+ *    reads BEFORE; an exchange meets its original's conversion written in the same pass, and one whose original waits
+ *    in a backlog waits with it (the next pass), never BEFORE; an
+ *    engraving added then removed after PAID (a supplementary invoice, a credit note for its line) writes no
+ *    conversion of its own: the order keeps its one.
  */
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { jsonText } from '../../src/server/db/schema.js';
 import { startHousekeeping } from '../../src/server/context.js';
 import type { Db } from '../../src/server/db/connection.js';
 import { CONVERSIONS_BATCH, DAILY_MAX_DAYS, recordConversions, summariseDays, purgeTouches } from '../../src/server/services/acquisition-jobs.js';
@@ -231,6 +237,146 @@ describe('acquisitionConversions (§3.4 A.5, A.8 item 1)', () => {
     } finally {
       await b.close();
     }
+  });
+});
+
+describe('H2\'s orders and invoices: the EXCHANGE order and the engraving after PAID (§3.4 A.5, A.8 item 1, step 4.11)', () => {
+  let t: TestDb;
+  let w: GrowthWorld;
+  const x = fixtures(() => t.db);
+  const ids: Record<string, string> = {};
+  const src: Record<string, number> = {};
+  let seq = 50_000;
+
+  const invoice = async (orderId: string, kind: 'INVOICE' | 'CREDIT_NOTE', issued: Date, total: number, more: { supplements?: string; credits?: string; scope?: 'FULL' | 'LINES' } = {}) =>
+    (
+      await t.db
+        .insertInto('invoices')
+        .values({
+          kind,
+          year: issued.getUTCFullYear(),
+          sequence: ++seq,
+          order_id: orderId,
+          supplements_invoice_id: more.supplements ?? null,
+          credits_invoice_id: more.credits ?? null,
+          credit_scope: kind === 'CREDIT_NOTE' ? (more.scope ?? 'FULL') : null,
+          issuer: jsonText({ name: 'CONGLOMERAT LLC' }),
+          buyer: jsonText({ name: null }),
+          lines: jsonText([{ kind: more.supplements || more.scope === 'LINES' ? 'ENGRAVING' : 'PIECE', label: 'LINE', detail: null, amountMinor: total }]),
+          currency: 'EUR',
+          subtotal_minor: total,
+          total_minor: total,
+          issued_at: issued,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+  /** The EXCHANGE order of `original` (as OrderCaseService.decide makes it), reserved and paid at `at`, with its invoice. */
+  const exchange = async (original: string, at: Date): Promise<string> => {
+    const o = await t.db.selectFrom('orders').selectAll().where('id', '=', original).executeTakeFirstOrThrow();
+    const id = (
+      await t.db
+        .insertInto('orders')
+        .values({ channel: 'EXCHANGE', exchange_of_order_id: o.id, drop_id: o.drop_id, account_id: o.account_id, model_id: o.model_id, price_minor: o.price_minor, currency: o.currency, status: 'PAID', reserved_at: at, paid_at: at, location_id: o.location_id })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    await invoice(id, 'INVOICE', at, o.price_minor ?? 0);
+    return id;
+  };
+  const salon = async (account: string, requested: Date, reserved: Date, status: 'PAID' | 'RETURNED' = 'PAID'): Promise<string> => {
+    const request = await t.db.insertInto('shop_requests').values({ account_id: account, model_id: ids.model!, status: 'CLOSED', created_at: requested, handled_at: reserved, outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const paidAt = new Date(reserved.getTime() + 3_600_000);
+    const returned = status === 'RETURNED' ? new Date(paidAt.getTime() + 2 * 86_400_000) : null;
+    const id = (
+      await t.db
+        .insertInto('orders')
+        .values({
+          channel: 'SALON', account_id: account, model_id: ids.model!, shop_request_id: request.id, price_minor: 12_000, currency: 'EUR', status, reserved_at: reserved, paid_at: paidAt, location_id: w.location,
+          shipped_at: returned ? new Date(paidAt.getTime() + 86_400_000) : null, carrier_id: returned ? w.carrier : null, tracking_number: returned ? 'EX-1' : null, returned_at: returned,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    const main = await invoice(id, 'INVOICE', paidAt, 12_000);
+    if (returned) await invoice(id, 'CREDIT_NOTE', returned, 12_000, { credits: main });
+    return id;
+  };
+  const conversions = async (ref: string) =>
+    t.db.selectFrom('acquisition_conversions').select(['account_id', 'at', 'last_source_id']).where('kind', '=', 'ORDER').where('ref_id', '=', ref).execute();
+
+  beforeAll(async () => {
+    t = await createTestDb();
+    await new AcquisitionService({ db: t.db, publicOrigin: ORIGIN, clock: () => START }).prepare();
+    w = await new GrowthWorld(t.db).prepare();
+    const admin = await x.admin();
+    src.bio = await x.link('h2-bio', admin);
+    src.story = await x.link('h2-story', admin);
+    src.vogue = await x.site('vogue.com');
+    src.before = await x.fixed('BEFORE');
+    ids.model = await w.model('MONOLITHE', { price: [12_000, 'EUR'] });
+    // A: the link on 2 June, Vogue on 4 June, the story on 9 June.
+    ids.a = await w.account('2026-06-02', 'FR');
+    const phone = await x.device(z('2026-06-02T09:00:00Z'), src.bio);
+    await x.touch(phone, src.bio, '2026-06-02', z('2026-06-02T09:00:00Z'), ids.a);
+    await x.touch(phone, src.vogue, '2026-06-04', z('2026-06-04T12:00:00Z'), ids.a);
+    await x.touch(phone, src.story, '2026-06-09', z('2026-06-09T09:00:00Z'), ids.a);
+    // Its LIVE order (room entered 5 June, after Vogue), returned, and exchanged on 12 June, after the story.
+    const live = await w.drop({ mode: 'LIVE', modelId: ids.model, title: 'LIVE', opens: '2026-06-05', quantity: 3 });
+    ids.liveEntry = await w.liveEntry(live, ids.a, '2026-06-05');
+    ids.liveOrder = await w.order({ accountId: ids.a, modelId: ids.model, channel: 'LIVE', dropId: live.id, liveEntryId: ids.liveEntry, paid: '2026-06-05', total: 12_000, currency: 'EUR', status: 'RETURNED', ended: '2026-06-11' });
+    ids.liveExchange = await exchange(ids.liveOrder, z('2026-06-12T13:00:00Z'));
+    // Its salon order (request 7 June, after Vogue, paid 8 June): an engraving added on 15 June, removed on 16 June.
+    ids.salon = await salon(ids.a, z('2026-06-07T12:00:00Z'), z('2026-06-08T10:00:00Z'));
+    // E: a salon order requested and reserved before the recording, exchanged since.
+    ids.e = await w.account('2026-05-20', 'FR');
+    ids.eOrder = await salon(ids.e, z('2026-05-30T12:00:00Z'), z('2026-05-31T11:00:00Z'), 'RETURNED');
+    ids.eExchange = await exchange(ids.eOrder, z('2026-06-10T10:00:00Z'));
+  });
+  afterAll(() => t?.close());
+
+  it('an EXCHANGE order takes its original\'s last link and moment, whatever came between; before the recording, BEFORE', async () => {
+    // 22:30 UTC on 12 June: 00:30 in Paris, outside the morning window (no catch-up).
+    await recordConversions(t.db, z('2026-06-12T22:30:00Z'));
+    expect(await conversions(ids.liveOrder!)).toEqual([{ account_id: ids.a, at: z('2026-06-05T11:50:00Z'), last_source_id: src.vogue }]);
+    // Reserved on 12 June, after the story: still Vogue, at the room entry.
+    expect(await conversions(ids.liveExchange!)).toEqual([{ account_id: ids.a, at: z('2026-06-05T11:50:00Z'), last_source_id: src.vogue }]);
+    // Its original was reserved before the recording (no conversion): BEFORE, at the original's request.
+    expect(await conversions(ids.eOrder!)).toEqual([]);
+    expect(await conversions(ids.eExchange!)).toEqual([{ account_id: ids.e, at: z('2026-05-30T12:00:00Z'), last_source_id: src.before }]);
+  });
+
+  it('an EXCHANGE order meets its original\'s conversion written in the same pass; one whose original waits in a backlog waits with it, never BEFORE', async () => {
+    const b = await w.account('2026-06-19', 'FR');
+    const device = await x.device(z('2026-06-19T09:00:00Z'), src.vogue);
+    await x.touch(device, src.vogue, '2026-06-19', z('2026-06-19T09:00:00Z'), b);
+    // Written within the same minutes (in a test: a case is decided days later, but a backlog of the job meets them in
+    // one pass all the same): an earlier order at 21:45, the original requested at 21:40 and reserved at 21:50, its
+    // exchange at 22:00. A pass of one row a part: the earlier order fills the batch, the original waits, so does its
+    // exchange.
+    const earlier = await salon(b, z('2026-06-20T21:30:00Z'), z('2026-06-20T21:45:00Z'));
+    const original = await salon(b, z('2026-06-20T21:40:00Z'), z('2026-06-20T21:50:00Z'));
+    const swapped = await exchange(original, z('2026-06-20T22:00:00Z'));
+    await recordConversions(t.db, z('2026-06-20T22:30:00Z'), { batch: 1 });
+    expect(await conversions(earlier)).toHaveLength(1);
+    expect(await conversions(original)).toEqual([]);
+    expect(await conversions(swapped)).toEqual([]);
+    // The next pass writes the original, then its exchange with the original's link and moment.
+    await recordConversions(t.db, z('2026-06-20T22:40:00Z'), { batch: 1 });
+    expect(await conversions(original)).toEqual([{ account_id: b, at: z('2026-06-20T21:40:00Z'), last_source_id: src.vogue }]);
+    expect(await conversions(swapped)).toEqual([{ account_id: b, at: z('2026-06-20T21:40:00Z'), last_source_id: src.vogue }]);
+  });
+
+  it('an engraving added then removed after PAID writes no conversion of its own: the order keeps its one', async () => {
+    expect(await conversions(ids.salon!)).toEqual([{ account_id: ids.a, at: z('2026-06-07T12:00:00Z'), last_source_id: src.vogue }]);
+    const main = (await t.db.selectFrom('invoices').select('id').where('order_id', '=', ids.salon!).where('kind', '=', 'INVOICE').executeTakeFirstOrThrow()).id;
+    const supplement = await invoice(ids.salon!, 'INVOICE', z('2026-06-15T10:00:00Z'), 3_000, { supplements: main });
+    await invoice(ids.salon!, 'CREDIT_NOTE', z('2026-06-16T10:00:00Z'), 3_000, { credits: supplement, scope: 'LINES' });
+    const pass = await recordConversions(t.db, z('2026-06-16T22:30:00Z'));
+    expect(pass.written).toBe(0);
+    expect(await conversions(ids.salon!)).toEqual([{ account_id: ids.a, at: z('2026-06-07T12:00:00Z'), last_source_id: src.vogue }]);
+    // The LIVE order and its exchange, the salon order, E's exchange, then B's three orders: one conversion each.
+    expect(Number((await t.db.selectFrom('acquisition_conversions').select((eb) => eb.fn.countAll().as('n')).where('kind', '=', 'ORDER').executeTakeFirstOrThrow()).n)).toBe(7);
   });
 });
 

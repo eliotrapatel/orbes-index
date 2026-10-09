@@ -9,7 +9,11 @@
  *               when its row was written: a sign-up at its creation, an entry when made, an order of a draw at its
  *               entry, of a LIVE RELEASE at its room entry, of the private salon at its request, an order travelling with
  *               another at that order's moment, any other at its reservation; a moment before the recording's start
- *               names BEFORE (« Before tracking »). A GIFT order is never one. The CANDIDATES are found by when their row
+ *               names BEFORE (« Before tracking »). A GIFT order is never one. An EXCHANGE order (H2's size exchange)
+ *               copies its original's last link and moment, by a statement of its own after the other orders, once the
+ *               original has its conversion (BEFORE when the original can have none: reserved before the start, or a
+ *               GIFT); its revenue nets on that link with the original's credit note. Supplementary invoices and line credit notes (an engraving added or removed
+ *               after PAID) belong to their order: no conversion of their own. The CANDIDATES are found by when their row
  *               was written (`accounts.created_at`, `drop_entries.created_at`, `live_entries.joined_at`,
  *               `orders.reserved_at`, on their indexes), from CONVERSIONS_OVERLAP_MS before the watermark
  *               (`acquisition_state.conversions_until`) to CONVERSIONS_LAG_MS before now, at most CONVERSIONS_BATCH a
@@ -87,12 +91,20 @@ interface KindOutcome {
 /** A bound in SQL, or no bound. */
 const atLeast = (column: RawBuilder<unknown>, bound: Date | null) => (bound ? sql`AND ${column} >= ${bound}::timestamptz` : sql``);
 
-/** The insert of one kind's conversions over `w` (see the header); its candidates, their latest written time, the rows written. */
-async function convertKind(tx: Db, kind: ConversionKind, w: Window, started: Date, ids: FixedSourceIds, now: Date): Promise<KindOutcome> {
+/**
+ * What one statement converts: a kind, or the EXCHANGE orders apart (kind ORDER), after the other orders, so that an
+ * exchange meets its original's conversion written by the statement before it in the same transaction.
+ */
+type Part = ConversionKind | 'EXCHANGE';
+
+/** The insert of one part's conversions over `w` (see the header); its candidates, their latest written time, the rows written. */
+async function convertKind(tx: Db, part: Part, w: Window, started: Date, ids: FixedSourceIds, now: Date): Promise<KindOutcome> {
+  const kind: ConversionKind = part === 'EXCHANGE' ? 'ORDER' : part;
   const last = (account: RawBuilder<unknown>, at: RawBuilder<unknown>) =>
     sql`CASE WHEN ${at} < ${started}::timestamptz THEN ${ids.BEFORE}::integer ELSE coalesce(${lastTouch(account, at)}, ${ids.DIRECT}::integer) END`;
   let cand: RawBuilder<unknown>;
   let extra = sql``;
+  let lastOf = last(sql`cand.account_id`, sql`cand.at`);
   if (kind === 'SIGNUP') {
     const net = new Date(Math.min(w.to.getTime(), now.getTime() - SIGNUP_NET_DELAY_MS));
     cand = sql`
@@ -123,9 +135,9 @@ async function convertKind(tx: Db, kind: ConversionKind, w: Window, started: Dat
          AND NOT EXISTS (SELECT 1 FROM acquisition_conversions x WHERE x.kind = 'LIVE_ENTRY' AND x.ref_id = e.id)
          AND ${notTestEntrant('e.account_id')}
        ORDER BY e.joined_at, e.id LIMIT ${w.limit}`;
-  } else {
+  } else if (part === 'ORDER') {
     // An order's moment is the collector's act (§3.4 A.5): its draw entry, its room entry, its salon request; an order
-    // travelling with another, that order's; else its reservation.
+    // travelling with another, that order's; else its reservation. Not an EXCHANGE order (below).
     cand = sql`
       SELECT o.id AS ref_id, o.account_id, o.reserved_at AS written,
              coalesce(de.created_at, le.joined_at, sr.created_at, pde.created_at, ple.joined_at, psr.created_at, p.reserved_at, o.reserved_at) AS at
@@ -138,23 +150,44 @@ async function convertKind(tx: Db, kind: ConversionKind, w: Window, started: Dat
         LEFT JOIN live_entries ple ON ple.id = p.live_entry_id
         LEFT JOIN shop_requests psr ON psr.id = p.shop_request_id
        WHERE o.reserved_at >= ${started}::timestamptz ${atLeast(sql`o.reserved_at`, w.from)} AND o.reserved_at < ${w.to}::timestamptz
-         AND o.channel <> 'GIFT'
+         AND o.channel <> 'GIFT' AND o.exchange_of_order_id IS NULL
          AND NOT EXISTS (SELECT 1 FROM acquisition_conversions x WHERE x.kind = 'ORDER' AND x.ref_id = o.id)
          AND ${notTestEntrant('o.account_id')}
        ORDER BY o.reserved_at, o.id LIMIT ${w.limit}`;
+  } else {
+    // An EXCHANGE order (plan NEXT LOT §3.5.6.7, step 4.11) takes its original's last link and moment: a size exchange
+    // moves nothing between links. Converted after the other orders, it meets its original's conversion written in the
+    // same pass; one whose original has none yet waits for it (a later pass, or the daily catch-up), unless the original
+    // can have none (reserved before the recording started, or a GIFT): then BEFORE, at the original's moment.
+    cand = sql`
+      SELECT o.id AS ref_id, o.account_id, o.reserved_at AS written,
+             coalesce(xc.at, xde.created_at, xle.joined_at, xsr.created_at, xo.reserved_at) AS at, xc.last_source_id AS copied
+        FROM orders o
+        JOIN orders xo ON xo.id = o.exchange_of_order_id
+        LEFT JOIN acquisition_conversions xc ON xc.kind = 'ORDER' AND xc.ref_id = xo.id
+        LEFT JOIN drop_entries xde ON xde.id = xo.drop_entry_id
+        LEFT JOIN live_entries xle ON xle.id = xo.live_entry_id
+        LEFT JOIN shop_requests xsr ON xsr.id = xo.shop_request_id
+       WHERE o.reserved_at >= ${started}::timestamptz ${atLeast(sql`o.reserved_at`, w.from)} AND o.reserved_at < ${w.to}::timestamptz
+         AND (xc.id IS NOT NULL OR xo.reserved_at < ${started}::timestamptz OR xo.channel = 'GIFT')
+         AND NOT EXISTS (SELECT 1 FROM acquisition_conversions x WHERE x.kind = 'ORDER' AND x.ref_id = o.id)
+         AND ${notTestEntrant('o.account_id')}
+       ORDER BY o.reserved_at, o.id LIMIT ${w.limit}`;
+    lastOf = sql`coalesce(cand.copied, ${ids.BEFORE}::integer)`;
   }
   const r = await sql<{ candidates: number; last_written: Date | null; written: number }>`
     WITH cand AS (${cand}),
     ins AS (
       INSERT INTO acquisition_conversions (kind, ref_id, account_id, at, last_source_id, created_at)
-      SELECT ${kind}, cand.ref_id, cand.account_id, cand.at, ${last(sql`cand.account_id`, sql`cand.at`)}, ${now}::timestamptz FROM cand
+      SELECT ${kind}, cand.ref_id, cand.account_id, cand.at, ${lastOf}, ${now}::timestamptz FROM cand
       ON CONFLICT (kind, ref_id) DO NOTHING RETURNING 1)${extra}
     SELECT (SELECT count(*) FROM cand)::int AS candidates, (SELECT max(written) FROM cand) AS last_written, (SELECT count(*) FROM ins)::int AS written`.execute(tx);
   const row = r.rows[0]!;
   return { candidates: Number(row.candidates), lastWritten: row.last_written ? new Date(row.last_written) : null, written: Number(row.written) };
 }
 
-const KINDS: readonly ConversionKind[] = ['SIGNUP', 'DRAW_ENTRY', 'LIVE_ENTRY', 'ORDER'];
+/** The parts in their order: the EXCHANGE orders after the other orders (their originals' conversions first). */
+const KINDS: readonly Part[] = ['SIGNUP', 'DRAW_ENTRY', 'LIVE_ENTRY', 'ORDER', 'EXCHANGE'];
 
 /** Job `acquisitionConversions` (see the header). Nothing before AcquisitionService.prepare wrote the state row. */
 export async function recordConversions(db: Db, now: Date, opts: { batch?: number; catchUpBatch?: number } = {}): Promise<ConversionsOutcome> {
