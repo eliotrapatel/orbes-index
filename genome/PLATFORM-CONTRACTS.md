@@ -385,7 +385,7 @@ Request bodies are JSON validated with zod (strict objects, unknown keys rejecte
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/api/v1/account/register` | Body `{ email, password, displayName?, country? }`. Creates the account and logs in. |
+| POST | `/api/v1/account/register` | Body `{ email, password, firstName, lastName, country, heard?: { optionId, other? } \| null, displayName? }` (the names and country required by the route, displayName ignored once they are given). Creates the account with its profile and logs in. |
 | POST | `/api/v1/account/login` | Body `{ email, password }`. |
 | POST | `/api/v1/account/logout` | — |
 | GET | `/api/v1/account/session` | Session probe: `{ account: null }` (200) when signed out, else the `me` body. Never 401. |
