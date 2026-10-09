@@ -1364,6 +1364,19 @@ export interface ClientProfileInput {
   tastes: { pieces: string[]; finishes: string[] };
 }
 
+/**
+ * GET /api/admin/owners/:id/profile: what Edit the profile opens on (plan CUSTOMER INTELLIGENCE §3.6 C.4.2): the Profile
+ * and the choices offered now (services/profiles.ts `options`): the collection's pieces and finishes, the answers offered.
+ */
+export interface ClientProfileEdit {
+  profile: ClientProfile;
+  options: {
+    pieces: { key: string; label: string }[];
+    finishes: { key: string; label: string; swatch: string }[];
+    heard: { id: string; label: string; other: boolean }[];
+  };
+}
+
 /** A private note of ORBES Client Services on the client sheet (services/client-notes.ts). */
 export interface PrivateNote {
   id: string;

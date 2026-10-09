@@ -9,7 +9,7 @@ import type { z } from 'zod';
 import type { ownerProfileBody } from '../../src/server/http/schemas.js';
 import type { PrivateNotes as ServerPrivateNotes } from '../../src/server/services/client-notes.js';
 import type { OwnerSheet as ServerOwnerSheet } from '../../src/server/services/owners.js';
-import type { StaffProfileView } from '../../src/server/services/profiles.js';
+import type { ProfileService, StaffProfileView } from '../../src/server/services/profiles.js';
 import type { ClientOrder as ServerClientOrder } from '../../src/server/services/fulfilment.js';
 import { SHOPIFY_PERIOD_MAX_DAYS as SERVER_PERIOD_MAX, shopifyIdOf, type ShopifyProduct as ServerShopifyProduct } from '../../src/server/services/shopify.js';
 import { formatMoney } from '../../src/web/admin/model/live.js';
@@ -29,6 +29,26 @@ import {
   variantField,
 } from '../../src/web/admin/model/shopify.js';
 import type * as web from '../../src/web/admin/types.js';
+import {
+  addressFormOf,
+  addressProblem,
+  birthDateInput,
+  birthDateProblem,
+  heardSelectOptions,
+  isOtherAnswer,
+  OWNER_LEAD,
+  OWNER_LEAD_MASKED,
+  phoneText,
+  profileErrorField,
+  profileFormOf,
+  profileFormProblem,
+  profileInput,
+  profileRows,
+  profileTools,
+  profileUnchanged,
+  tasteChoices,
+  TEAM_ACCOUNT_LINE,
+} from '../../src/web/admin/model/client-profile.js';
 
 /** A server value as JSON carries it: dates become ISO strings. */
 type Json<T> = T extends Date ? string : T extends readonly (infer U)[] ? Json<U>[] : T extends object ? { [K in keyof T]: Json<T[K]> } : T;
@@ -41,6 +61,8 @@ export const clientProfileFits = (p: Json<StaffProfileView>): web.ClientProfile 
 export const clientProfileBack = (p: web.ClientProfile): Json<StaffProfileView> => p;
 export const clientProfileInputFits = (b: web.ClientProfileInput): z.infer<typeof ownerProfileBody> => b;
 export const privateNotesFit = (n: Json<ServerPrivateNotes>): web.PrivateNotes => n;
+// Step 5.5: what Edit the profile opens on (GET /api/admin/owners/:id/profile) is the server's profile and options.
+export const clientProfileEditFits = (e: { profile: Json<StaffProfileView>; options: Json<Awaited<ReturnType<ProfileService['options']>>> }): web.ClientProfileEdit => e;
 
 describe('the Catalogue\'s base price and Shopify product (N2)', () => {
   const m = (extra: Partial<web.Model> = {}) => ({ basePriceMinor: null, baseCurrency: null, shopify: { productId: null, variants: 3, linked: 0 }, ...extra }) as web.Model;
@@ -274,5 +296,173 @@ describe('the client sheet\'s Profile, tags and private notes: who may do what (
     }
     expect(can('OPERATOR', 'removeAnyClientNote')).toBe(false);
     expect([typeof clientProfileFits, typeof clientProfileBack, typeof clientProfileInputFits, typeof privateNotesFit]).toEqual(['function', 'function', 'function', 'function']);
+  });
+});
+
+describe('the client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.6 C.4.1, C.4.2, §3.0 (h), step 5.5)', () => {
+  const profile = (extra: Partial<web.ClientProfile> = {}): web.ClientProfile => ({
+    firstName: 'Camille',
+    lastName: 'Durand',
+    country: 'FR',
+    birthDate: '1994-03-14',
+    ageBand: '25-34',
+    age: 32,
+    birthDateBy: 'COLLECTOR',
+    birthDateAt: '2026-10-09T08:00:00.000Z',
+    birthDateCollectorAt: '2026-10-09T08:00:00.000Z',
+    phone: { country: 'FR', number: '+33612345678' },
+    city: 'Lyon',
+    instagram: 'camille.dl',
+    heard: { optionId: 'h-friend', label: 'A friend', other: null, setAside: false, at: '2026-10-08T12:00:00.000Z' },
+    tastes: { pieces: [{ key: 'ring', label: 'RING', retired: false }, { key: 'cuff', label: 'CUFF', retired: false }], finishes: [{ key: 'gold', label: 'Gold', swatch: '#c9a227', retired: false }, { key: 'silver', label: 'Silver', swatch: '#c0c0c0', retired: true }] },
+    address: { name: 'Camille Durand', lines: '12 rue de la République\n69002 Lyon', country: 'FR', phone: '+33 6 12 34 56 78' },
+    otherAddresses: 2,
+    completion: { percent: 90, missing: ['INSTAGRAM'] },
+    version: 4,
+    updatedBy: 'STAFF',
+    updatedAt: '2026-10-08T12:02:00.000Z',
+    withheld: [],
+    teamAccount: false,
+    ...extra,
+  });
+  const masked = (p: web.ClientProfile): web.ClientProfile => ({ ...p, birthDate: null, age: null, phone: null, city: null, instagram: null, address: null, withheld: ['birthDate', 'phone', 'city', 'address', 'instagram'] });
+  const values = (p: web.ClientProfile) => Object.fromEntries(profileRows(p).map((r) => [r.label, r.value]));
+  const notes = (p: web.ClientProfile) => Object.fromEntries(profileRows(p).map((r) => [r.label, r.note]));
+  const edit = (p: web.ClientProfile = profile()): web.ClientProfileEdit => ({
+    profile: p,
+    options: {
+      pieces: [{ key: 'cuff', label: 'CUFF' }, { key: 'ring', label: 'RING' }],
+      finishes: [{ key: 'gold', label: 'Gold', swatch: '#c9a227' }],
+      heard: [{ id: 'h-friend', label: 'A friend', other: false }, { id: 'h-other', label: 'Other', other: true }],
+    },
+  });
+
+  it('changes the header\'s lead, the one existing text of the sheet that changes; an AUDITOR\'s keeps its ending and names what is withheld; a team account\'s line', () => {
+    expect(OWNER_LEAD).toBe('The client’s account and tier, profile, tags and private notes, intelligence, pieces, orders, releases, answers, interest, segments and notes, transfers in progress and latest verifications.');
+    expect(OWNER_LEAD_MASKED).toBe(`${OWNER_LEAD} Emails are masked for your role. Phone, date of birth, address, Instagram and cities are withheld.`);
+    expect(TEAM_ACCOUNT_LINE).toBe('This account’s email is a console login’s: it is left out of the Collectors page and the export.');
+  });
+
+  it('draws the Profile\'s rows in C.4.2\'s order, in clear for an OPERATOR', () => {
+    const p = profile();
+    expect(profileRows(p).map((r) => r.label)).toEqual(['First name', 'Last name', 'Date of birth', 'Phone', 'City', 'Address', 'Instagram', 'How they heard', 'Favourite pieces', 'Favourite finishes', 'Profile', 'Last changed']);
+    expect(values(p)).toMatchObject({
+      'First name': 'Camille',
+      'Date of birth': '14 MAR 1994 · 32 years',
+      Phone: '+33 6 12 34 56 78',
+      City: 'Lyon',
+      Address: ['Camille Durand', '12 rue de la République, 69002 Lyon', 'France · +33 6 12 34 56 78'],
+      Instagram: '@camille.dl',
+      'How they heard': 'A friend',
+      'Favourite pieces': 'RING · CUFF',
+      'Favourite finishes': 'Gold · Silver (no longer in the collection)',
+      Profile: '90% complete',
+      'Last changed': '08 OCT 2026 · 14:02 Paris · by Client Services',
+    });
+    expect(notes(p)).toMatchObject({
+      'Date of birth': 'Entered by the client on 09 OCT 2026',
+      Phone: 'As typed, not verified',
+      City: 'As typed by the client',
+      Address: 'The default delivery address, from YOUR ADDRESSES · 2 more saved',
+      'How they heard': 'Answered on 08 OCT 2026',
+      'Favourite pieces': 'From the collection’s types',
+      Profile: 'Missing: Instagram',
+    });
+    expect(profileRows(p).find((r) => r.label === 'Instagram')!.kind).toBe('instagram');
+    expect(phoneText({ country: 'US', number: '+14155550123' })).toBe('+1 4 155 550 123');
+  });
+
+  it('withholds the date of birth (the age band only), the phone, the city, the address and the Instagram for an AUDITOR; the rest reads the same', () => {
+    const p = masked(profile());
+    expect(values(p)).toMatchObject({ 'First name': 'Camille', 'Last name': 'Durand', 'Date of birth': 'Withheld · 25–34', Phone: 'Withheld', City: 'Withheld', Address: 'Withheld', Instagram: 'Withheld', 'How they heard': 'A friend', Profile: '90% complete' });
+    expect(profileRows(p).some((r) => r.kind === 'instagram' || r.kind === 'address')).toBe(false);
+    expect(values(masked(profile({ ageBand: null, birthDate: null, age: null })))['Date of birth']).toBe('—');
+    expect(profileTools(p, { canEdit: false, status: 'ACTIVE' })).toEqual({ edit: false, birthDate: false, address: null });
+  });
+
+  it('says each date of birth\'s story, an empty profile\'s lines, Other\'s words, the tools while the account is not DELETED', () => {
+    expect(notes(profile({ birthDateBy: 'STAFF', birthDateAt: '2026-10-12T10:00:00.000Z' }))['Date of birth']).toBe('Changed by Client Services on 12 OCT 2026');
+    expect(notes(profile({ birthDate: null, age: null, ageBand: null, birthDateBy: null, birthDateAt: null }))['Date of birth']).toBe('Removed by Client Services. The client entered it once and cannot enter it again: set it here.');
+    const empty = profile({ firstName: null, lastName: null, birthDate: null, age: null, ageBand: null, birthDateBy: null, birthDateAt: null, birthDateCollectorAt: null, phone: null, city: null, instagram: null, heard: null, tastes: { pieces: [], finishes: [] }, address: null, otherAddresses: 0, completion: { percent: 10, missing: ['NAME', 'BIRTH_DATE', 'CITY', 'ADDRESS', 'PHONE', 'INSTAGRAM', 'PIECES', 'FINISHES', 'HEARD'] }, version: 0, updatedBy: null, updatedAt: null });
+    expect(values(empty)).toMatchObject({ 'First name': '—', 'Date of birth': '—', Phone: '—', Address: '—', 'How they heard': 'Not answered', 'Favourite pieces': 'None chosen', 'Last changed': '—' });
+    expect(notes(empty)).toMatchObject({ 'Date of birth': 'Not entered yet: the client enters it once in YOUR PROFILE.', Address: 'No address saved.', Profile: 'Missing: name, date of birth, city, address, phone, Instagram, favourite pieces, favourite finishes, how they heard' });
+    expect(values(profile({ heard: { optionId: 'h-other', label: 'Other', other: 'Saw it at a shop in Milan', setAside: false, at: '2026-10-08T12:00:00.000Z' } }))['How they heard']).toBe('Other: “Saw it at a shop in Milan”');
+    expect(notes(profile({ completion: { percent: 100, missing: [] } })).Profile).toBe('Every field is given');
+    expect(profileTools(profile(), { canEdit: true, status: 'LOCKED' })).toEqual({ edit: true, birthDate: true, address: 'edit' });
+    expect(profileTools(profile({ address: null }), { canEdit: true, status: 'ACTIVE' }).address).toBe('add');
+    expect(profileTools(profile(), { canEdit: true, status: 'DELETED' })).toEqual({ edit: false, birthDate: false, address: null });
+  });
+
+  it('opens Edit the profile on the profile as it is, offers the answers and the client\'s set-aside one, the collection\'s choices then the retired ones', () => {
+    const e = edit();
+    expect(profileFormOf(e.profile)).toEqual({ firstName: 'Camille', lastName: 'Durand', country: 'FR', city: 'Lyon', phoneCountry: 'FR', phoneNumber: '612345678', instagram: 'camille.dl', heard: 'h-friend', heardOther: '', pieces: ['ring', 'cuff'], finishes: ['gold', 'silver'] });
+    expect(heardSelectOptions(e).map((o) => o.label)).toEqual(['Not answered', 'A friend', 'Other']);
+    const aside = edit(profile({ heard: { optionId: 'h-press', label: 'The press', other: null, setAside: true, at: '2026-10-08T12:00:00.000Z' } }));
+    expect(heardSelectOptions(aside).at(-1)).toEqual({ value: 'h-press', label: 'The press (set aside)' });
+    expect([isOtherAnswer(e, 'h-other'), isOtherAnswer(e, 'h-friend')]).toEqual([true, false]);
+    expect(tasteChoices('finishes', e).map((c) => c.label)).toEqual(['Gold', 'Silver (no longer in the collection)']);
+    expect(tasteChoices('pieces', e).map((c) => c.key)).toEqual(['cuff', 'ring']);
+  });
+
+  it('checks Edit the profile before sending it (a name or the country never cleared once given, the phone, Instagram, 30 choices), says « Nothing has changed. », sends the whole profile with the version read', () => {
+    const e = edit();
+    const f = profileFormOf(e.profile);
+    expect(profileUnchanged(f, e)).toBe(true);
+    expect(profileUnchanged({ ...f, phoneNumber: '06 12 34 56 78' }, e)).toBe(true);
+    expect(profileUnchanged({ ...f, instagram: '@Camille.DL' }, e)).toBe(true);
+    expect(profileUnchanged({ ...f, city: 'Paris' }, e)).toBe(false);
+    expect(profileFormProblem({ ...f, firstName: '' }, e.profile, false)).toEqual({ field: 'firstName', message: 'Enter the first name: once given, it is changed, never cleared.' });
+    expect(profileFormProblem({ ...f, lastName: 'x'.repeat(51) }, e.profile, false)?.field).toBe('lastName');
+    expect(profileFormProblem({ ...f, country: '' }, e.profile, false)?.field).toBe('country');
+    expect(profileFormProblem({ ...f, phoneCountry: '' }, e.profile, false)).toEqual({ field: 'phoneCountry', message: 'Choose the phone’s country code.' });
+    expect(profileFormProblem({ ...f, phoneNumber: '06 12 ab' }, e.profile, false)?.field).toBe('phoneNumber');
+    expect(profileFormProblem({ ...f, instagram: 'not a username' }, e.profile, false)?.field).toBe('instagram');
+    expect(profileFormProblem({ ...f, heardOther: 'x'.repeat(101) }, e.profile, true)?.field).toBe('heardOther');
+    expect(profileFormProblem({ ...f, pieces: Array.from({ length: 31 }, (_, i) => `p${i}`) }, e.profile, false)?.message).toBe('Choose up to 30 favourite pieces and 30 favourite finishes.');
+    expect(profileFormProblem(f, e.profile, false)).toBeNull();
+    expect(profileInput({ ...f, city: '  Paris ', heard: 'h-other', heardOther: ' A colleague ' }, 4, true)).toEqual({
+      version: 4,
+      firstName: 'Camille',
+      lastName: 'Durand',
+      country: 'FR',
+      city: 'Paris',
+      phone: { country: 'FR', number: '612345678' },
+      instagram: 'camille.dl',
+      heard: { optionId: 'h-other', other: 'A colleague' },
+      tastes: { pieces: ['cuff', 'ring'], finishes: ['gold', 'silver'] },
+    });
+    expect(profileInput({ ...f, phoneNumber: '', heard: '', instagram: '' }, 4, false)).toMatchObject({ phone: null, heard: null, instagram: null });
+  });
+
+  it('puts a refusal of the server under the field it names, else under the dialog', () => {
+    expect(profileErrorField('VALIDATION_FAILED', 'Your first name is 50 characters at most.')).toBe('firstName');
+    expect(profileErrorField('VALIDATION_FAILED', 'Choose the country code of your phone.')).toBe('phoneCountry');
+    expect(profileErrorField('VALIDATION_FAILED', 'This phone number is too short or too long.')).toBe('phoneNumber');
+    expect(profileErrorField('VALIDATION_FAILED', 'Choose your country.')).toBe('country');
+    expect(profileErrorField('VALIDATION_FAILED', 'Your city is 80 characters at most.')).toBe('city');
+    expect(profileErrorField('VALIDATION_FAILED', 'Enter your Instagram username: letters, numbers, full stops and underscores, 30 at most.')).toBe('instagram');
+    expect(profileErrorField('VALIDATION_FAILED', 'Your words are 100 characters at most.')).toBe('heardOther');
+    expect(profileErrorField('HEARD_UNAVAILABLE', 'This answer is no longer offered. Choose another.')).toBe('heard');
+    expect(profileErrorField('TASTE_UNKNOWN', 'Choose among the pieces and finishes of the collection.')).toBe('pieces');
+    expect(profileErrorField('PROFILE_CHANGED', 'The client changed the profile meanwhile. It has been read again: check and save.')).toBeNull();
+    expect(profileErrorField('ACCOUNT_DELETED', 'This account is deleted.')).toBeNull();
+  });
+
+  it('checks Change the date of birth (a reason, 500 at most, nothing changed) and Edit the address (H2\'s words), and sends them', () => {
+    const p = profile();
+    expect(birthDateProblem({ birthDate: '1994-03-14', why: 'x' }, p)).toBe('Nothing has changed.');
+    expect(birthDateProblem({ birthDate: '1994-03-15', why: ' ' }, p)).toBe('Give the reason.');
+    expect(birthDateProblem({ birthDate: '1994-03-15', why: 'x'.repeat(501) }, p)).toBe('Give the reason in 500 characters at most.');
+    expect(birthDateProblem({ birthDate: '', why: 'A typo, said on the phone.' }, p)).toBeNull();
+    expect(birthDateInput({ birthDate: '', why: ' A typo. ' }, 4)).toEqual({ version: 4, birthDate: null, why: 'A typo.' });
+    expect(birthDateInput({ birthDate: '1994-03-15', why: 'A typo.' }, 4)).toEqual({ version: 4, birthDate: '1994-03-15', why: 'A typo.' });
+    expect(addressFormOf(p)).toEqual({ name: 'Camille Durand', address: '12 rue de la République\n69002 Lyon', country: 'FR', phone: '+33 6 12 34 56 78' });
+    expect(addressFormOf(profile({ address: null }))).toEqual({ name: 'Camille Durand', address: '', country: 'FR', phone: '+33 6 12 34 56 78' });
+    expect(addressProblem(addressFormOf(p), p)).toBe('Nothing has changed.');
+    expect(addressProblem({ ...addressFormOf(p), address: '' }, p)).toBe('Enter the name and the address.');
+    expect(addressProblem({ ...addressFormOf(p), country: '' }, p)).toBe('Choose a country.');
+    expect(addressProblem({ ...addressFormOf(p), phone: ' ' }, p)).toBe('Enter a phone number with its country code.');
+    expect(addressProblem({ ...addressFormOf(p), name: 'C. Durand' }, p)).toBeNull();
+    expect(typeof clientProfileEditFits).toBe('function');
   });
 });

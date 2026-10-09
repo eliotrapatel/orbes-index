@@ -14,7 +14,7 @@
  *    and DELETE …/notes, POST and DELETE …/tags, by role, with the CSRF token and the same origin, and their audits;
  *  - the client sheet's Profile (§3.1 P.6.5, P.6.6, P.9.2, §3.6 C.4.2): in clear for an OPERATOR, withheld for an AUDITOR
  *    with the age band; PUT …/profile, …/birth-date (the reason a private note) and …/default-address for an OPERATOR,
- *    the version's 409 on both sides, an AUDITOR 403.
+ *    the version's 409 on both sides, an AUDITOR 403; GET …/profile, what Edit the profile opens on (step 5.5).
  * Which role reaches which route is test/api/admin-roles.test.ts; the files' contents test/services/shopify.test.ts.
  */
 import { randomUUID } from 'node:crypto';
@@ -485,6 +485,20 @@ describe('The client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P
     for (const word of ['1994-03-14', '612345678', 'Lyon', 'camille.dl', 'rue de la Paix']) expect(masked.body, word).not.toContain(word);
     // The route's mask is the service's AUDITOR view.
     expect(p).toEqual(JSON.parse(JSON.stringify(await h.ctx.services.profiles.forStaff(me.id, { inClear: false }))));
+  });
+
+  it('GET …/profile (step 5.5): Edit the profile opens on the profile as it is now and the choices offered now; withheld for an AUDITOR; an unknown account 404', async () => {
+    const res = await op.get(`/api/admin/owners/${me.id}/profile`);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    const read = safeJson(res) as Json;
+    expect(read.profile).toEqual((await sheetOf(op)).profile);
+    expect(read.options).toEqual(JSON.parse(JSON.stringify(await h.ctx.services.profiles.options())));
+    expect(read.options.heard.map((x: Json) => x.label)).toEqual(['Instagram', 'TikTok', 'A friend', 'The press', 'A shop', 'A web search', 'An influencer', 'Other']);
+    const masked = safeJson(await auditor.get(`/api/admin/owners/${me.id}/profile`)) as Json;
+    expect(masked.profile).toMatchObject({ birthDate: null, phone: null, city: null, instagram: null, address: null, ageBand: '25-34' });
+    for (const word of ['1994-03-14', '612345678', 'camille.dl', 'rue de la Paix']) expect(JSON.stringify(masked), word).not.toContain(word);
+    expect(errorOf(await op.get(`/api/admin/owners/${randomUUID()}/profile`)).code).toBe('ACCOUNT_NOT_FOUND');
   });
 
   it('PUT …/profile: an OPERATOR edits the profile with the version read (409 PROFILE_CHANGED after the client saved); never the date of birth; an AUDITOR 403; the CSRF token and the same origin', async () => {

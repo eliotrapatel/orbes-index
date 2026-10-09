@@ -168,6 +168,7 @@ import type {
   ShopRequestStatus,
   OwnerSheet,
   ClientProfile,
+  ClientProfileEdit,
   ClientProfileInput,
   Paged,
   RecoveryCode,
@@ -1273,6 +1274,11 @@ export class AdminApi {
   }
 
   // ── The client sheet's Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P.6.6, P.9.2; API §16.36) ──
+
+  /** AUDITOR+: what Edit the profile opens on: the Profile as it is now and the choices offered now. */
+  clientProfile(accountId: string): Promise<ClientProfileEdit> {
+    return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}/profile`);
+  }
 
   /** OPERATOR+: Edit the profile, with the `version` read (409 PROFILE_CHANGED when the client saved in between). */
   saveClientProfile(accountId: string, input: ClientProfileInput): Promise<{ profile: ClientProfile }> {

@@ -5110,6 +5110,36 @@ fieldset.cfield--checks > .cfield__label {
   overflow-wrap: break-word;
 }
 
+/* The client sheet's Profile (plan CUSTOMER INTELLIGENCE §3.6 C.4.2): the default address on its lines, the finishes
+   with their dots, and Edit the profile's tick boxes two by two. */
+.client-profile__lines {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.client-profile__finishes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.client-profile__choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
+.client-profile__choices .ccheck__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.client-profile__dialog {
+  width: min(620px, calc(100vw - 48px));
+}
+
 /* ── Yearly care (BP-19 T6) ─────────────────────────────────────────────── */
 
 /* The name and the address a piece returns to, their lines as the client wrote them. */

@@ -3,6 +3,10 @@
  * C.4.2, C.4.3 and C.9, steps 5.3 and 5.4; API §16.36): what the client gave in YOUR PROFILE, which Client Services may
  * correct, and what Client Services keeps about the client, never shown to the client (services/client-notes.ts).
  *
+ *   GET    /api/admin/owners/:id/profile            AUDITOR   what Edit the profile opens on: the Profile (withheld in
+ *                                                             part for an AUDITOR) and the choices offered now, the
+ *                                                             collection's pieces and finishes and the answers offered:
+ *                                                             { profile, options }
  *   PUT    /api/admin/owners/:id/profile            OPERATOR  Edit the profile: the collector's body without the date of
  *                                                             birth, with the version read: { profile }
  *                                                             account.profile.update { by: 'staff', fields }
@@ -33,9 +37,19 @@ import type { FastifyPluginAsync } from 'fastify';
 import { birthDateBody, defaultAddressBody, emptyBody, noteBody, noteParams, ownerNotesQuery, ownerParams, ownerProfileBody, parse, tagBody, tagParams } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
 import type { AdminRouteDeps } from './index.js';
+import { ownerProfile, readsClientEmails } from './serialize.js';
 
 export const adminClientSheetRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
   const { clientNotes, profiles, addresses } = ctx.services;
+
+  // Edit the profile's dialog opens on the profile as it is now (its version) and the choices offered now; read again
+  // after a 409 PROFILE_CHANGED. Step 5.5: the console's three dialogs.
+  app.get('/api/admin/owners/:id/profile', async (request) => {
+    const { id } = parse(ownerParams, request.params);
+    const profile = await profiles.forStaff(id, { inClear: true });
+    const options = await profiles.options();
+    return { profile: ownerProfile(profile, readsClientEmails(request)), options };
+  });
 
   app.put('/api/admin/owners/:id/profile', async (request) => {
     const { id } = parse(ownerParams, request.params);

@@ -13,6 +13,9 @@
  *  4. An AUDITOR reads the sheet with the email masked, offered no Shopify ids to paste; its order export masked.
  *  5. (plan NEXT-NINE, BP-34) A model's Pairs well with on its Lookbook page: none picked and what the sheet shows, Edit
  *     pairs and its checks, the table, a variant's page, an AUDITOR reading.
+ *  6. (plan CUSTOMER INTELLIGENCE §3.6 C.4.2, step 5.5) The Profile: its rows, Edit the profile (a refusal under its
+ *     field, the client saving meanwhile), Change the date of birth, Add an address; an AUDITOR's withheld rows; a team
+ *     account's line under Status.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -439,6 +442,109 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     expect(await csp(a)).toEqual([]);
     expect(problems).toEqual([]);
     await a.context().close();
+  }, STEP_TIMEOUT);
+
+  it('reads and edits the client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.6 C.4.2, step 5.5): Edit the profile (the client saving meanwhile: 409, read again), Change the date of birth, Add an address; an AUDITOR reads it withheld; a team account\'s line', async () => {
+    const client = await createAccount(ctx.db);
+    await ctx.services.profiles.save(
+      client.id,
+      { version: 0, firstName: 'Camille', lastName: 'Durand', country: 'FR', city: 'Lyon', phone: { country: 'FR', number: '06 12 34 56 78' }, birthDate: '1994-03-14', instagram: 'camille.dl', heard: null, tastes: { pieces: [], finishes: [] } },
+      client.actor,
+    );
+    const row = (p: Page, label: string) => p.locator('#profile .deflist__row').filter({ has: p.locator('.deflist__label', { hasText: new RegExp(`^${label}$`) }) });
+    const value = async (p: Page, label: string) => (await row(p, label).locator('.deflist__value').innerText()).replace(/\s+/g, ' ').trim();
+
+    const p = await open(OPERATOR);
+    await go(p, `#/owners/${client.id}`, client.email);
+    expect(await text(p, '.page-head__lead')).toBe('The client’s account and tier, profile, tags and private notes, intelligence, pieces, orders, releases, answers, interest, segments and notes, transfers in progress and latest verifications.');
+    // Right after Account.
+    expect(await p.locator('main section.panel').evaluateAll((els) => els.slice(0, 2).map((e) => e.id))).toEqual(['account', 'profile']);
+    expect(await value(p, 'First name')).toBe('Camille');
+    expect(await value(p, 'Date of birth')).toMatch(/^14 MAR 1994 · \d+ years Entered by the client on \d{2} [A-Z]{3} \d{4}$/);
+    expect(await value(p, 'Phone')).toBe('+33 6 12 34 56 78 As typed, not verified');
+    expect(await value(p, 'Address')).toBe('— No address saved.');
+    expect(await p.locator('[data-testid=profile-instagram]').getAttribute('href')).toBe('https://www.instagram.com/camille.dl/');
+    expect(await p.locator('[data-testid=profile-instagram]').getAttribute('rel')).toBe('noopener noreferrer');
+    expect(await text(p, '[data-testid=profile-address]')).toBe('Add an address');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'profile', { phone: true });
+
+    // Edit the profile: the city, Other with its words.
+    await p.click('[data-testid=profile-edit]');
+    await p.waitForSelector('dialog [data-testid=profile-pieces]');
+    expect(await p.inputValue('dialog [name=phoneNumber]')).toBe('612345678');
+    await p.click('[data-testid=dialog-confirm]');
+    expect(await text(p, 'dialog .dialog__error')).toBe('Nothing has changed.');
+    await p.fill('dialog [name=city]', 'Paris');
+    await p.selectOption('dialog [name=heard]', { label: 'Other' });
+    await p.fill('dialog [name=heardOther]', 'A colleague in Lyon');
+    await p.fill('dialog [name=instagram]', 'not a username');
+    await p.click('[data-testid=dialog-confirm]');
+    expect(await text(p, 'dialog .cfield[data-field=instagram] .cfield__hint')).toBe('Enter an Instagram username: letters, numbers, full stops and underscores, 30 at most.');
+    await p.fill('dialog [name=instagram]', '@Camille.DL');
+    await shot(p, 'profile-edit');
+    await confirmDialog(p);
+    await expect.poll(async () => text(p, '.toast'), POLL).toContain('Profile saved.');
+    await expect.poll(async () => value(p, 'City'), POLL).toBe('Paris As typed by the client');
+    expect(await value(p, 'How they heard')).toMatch(/^Other: “A colleague in Lyon” Answered on /);
+    expect(await value(p, 'Last changed')).toMatch(/· by Client Services$/);
+
+    // The client saves meanwhile: 409, the dialog filled again with the client's words, then saved.
+    await p.click('[data-testid=profile-edit]');
+    await p.waitForSelector('dialog [data-testid=profile-pieces]');
+    const now = await ctx.services.profiles.forCollector(client.id);
+    await ctx.services.profiles.save(client.id, { version: now.profile.version, city: 'Nice' }, client.actor);
+    await p.fill('dialog [name=city]', 'Marseille');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(async () => text(p, 'dialog .dialog__error'), POLL).toBe('The client changed the profile meanwhile. It has been read again: check and save.');
+    expect(await p.inputValue('dialog [name=city]')).toBe('Nice');
+    await p.fill('dialog [name=city]', 'Marseille');
+    await confirmDialog(p);
+    await expect.poll(async () => value(p, 'City'), POLL).toBe('Marseille As typed by the client');
+
+    // Change the date of birth, with a reason.
+    await p.click('[data-testid=profile-birth-date]');
+    await p.waitForSelector('dialog.dialog');
+    expect(await text(p, 'dialog .dialog__text')).toContain('only for a birthday the date was saved before');
+    await p.fill('dialog [name=birthDate]', '1994-04-13');
+    await p.click('[data-testid=dialog-confirm]');
+    expect(await text(p, 'dialog .dialog__error')).toBe('Complete the required fields.');
+    await p.fill('dialog [name=why]', 'Day and month swapped, said on the phone.');
+    await confirmDialog(p);
+    await expect.poll(async () => value(p, 'Date of birth'), POLL).toMatch(/^13 APR 1994 · \d+ years Changed by Client Services on /);
+
+    // Add an address: the first, the default.
+    await p.click('[data-testid=profile-address]');
+    await p.waitForSelector('dialog.dialog');
+    expect(await text(p, 'dialog .dialog__title')).toBe('Add an address');
+    expect(await p.inputValue('dialog [name=name]')).toBe('Camille Durand');
+    await p.fill('dialog [name=address]', '12 rue de la République\n13002 Marseille');
+    await confirmDialog(p);
+    await expect.poll(async () => value(p, 'Address'), POLL).toBe('Camille Durand 12 rue de la République, 13002 Marseille France · +33 6 12 34 56 78 The default delivery address, from YOUR ADDRESSES');
+    expect(await text(p, '[data-testid=profile-address]')).toBe('Edit the address');
+    await shot(p, 'profile-edited', { phone: true });
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+
+    // An AUDITOR: the date of birth as an age band, the phone, the city, the address and the Instagram withheld; no tool.
+    const a = await open(AUDITOR);
+    const masked = `${client.email[0]}***${client.email.slice(client.email.indexOf('@'))}`;
+    await go(a, `#/owners/${client.id}`, masked);
+    expect(await text(a, '.page-head__lead')).toMatch(/Emails are masked for your role\. Phone, date of birth, address, Instagram and cities are withheld\.$/);
+    expect(await value(a, 'Date of birth')).toMatch(/^Withheld · \d{2}–\d{2} Changed by Client Services on /);
+    for (const label of ['Phone', 'City', 'Address', 'Instagram']) expect(await value(a, label), label).toMatch(/^Withheld/);
+    expect(await a.locator('#profile .panel__tools button').count()).toBe(0);
+    for (const word of ['Marseille', '612345678', 'camille.dl', '1994']) expect(await a.locator('main').textContent(), word).not.toContain(word);
+    await shot(a, 'profile-auditor');
+    await a.context().close();
+
+    // A team account: its email is a console login's.
+    const team = await ctx.db.insertInto('accounts').values({ email: OPERATOR.email, email_normalized: OPERATOR.email, password_hash: 'unused' }).returning('id').executeTakeFirstOrThrow();
+    const t2 = await open(OPERATOR);
+    await go(t2, `#/owners/${team.id}`, OPERATOR.email);
+    expect(await text(t2, '#account .deflist__row:first-child .deflist__note')).toBe('This account’s email is a console login’s: it is left out of the Collectors page and the export.');
+    expect(problems).toEqual([]);
+    await t2.context().close();
   }, STEP_TIMEOUT);
 
   it('picks a model\'s Pairs well with on its Lookbook page (plan NEXT-NINE, BP-34): none picked and what the sheet shows, Edit pairs and its checks, the table, a variant\'s page, an AUDITOR reading', async () => {

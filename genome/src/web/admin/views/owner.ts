@@ -27,6 +27,10 @@
  * (CS-01), gives the status of its conversation with ORBES Client Services
  * and opens it. One line, Lifetime value (plan NEXT-NINE, BP-29), what the
  * client is worth by GROWTH's rule, after the tier and its Club block.
+ *
+ * Right after Account (plan CUSTOMER INTELLIGENCE §3.6 C.4.1): the Profile (views/client-profile.ts), what the client
+ * gave in YOUR PROFILE as the role reads it, with Edit the profile, Change the date of birth and Edit the address for an
+ * OPERATOR. A team account (its email a console login's) says so under Status.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, formatDateTime, humanize, shortHash } from '../format.js';
@@ -68,6 +72,14 @@ import { saveDownload } from '../ui/download.js';
 import { notify, notifyError } from '../ui/toast.js';
 import type { ViewContext } from './context.js';
 import { issueRecoveryCode, ownerStatus } from './owners.js';
+import { profileSection } from './client-profile.js';
+import { OWNER_LEAD, OWNER_LEAD_MASKED, TEAM_ACCOUNT_LINE } from '../model/client-profile.js';
+
+/** Under Status: a lock's consequence, and the team account's line (§3.0 (d)). */
+function statusNote(status: string, teamAccount: boolean): string | undefined {
+  const lines = [status === 'LOCKED' ? 'Cannot sign in or use a recovery code until unlocked' : null, teamAccount ? TEAM_ACCOUNT_LINE : null].filter((x): x is string => x !== null);
+  return lines.length ? lines.join('. ') : undefined;
+}
 
 export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
   const id = ctx.route.params.accountId;
@@ -151,16 +163,14 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
       eyebrow: 'Owner',
       title: o.email,
       identifier: true,
-      lead: can(role, 'readClientEmails')
-        ? 'The client’s account and tier, pieces, orders, releases, answers, interest, segments and notes, transfers in progress and latest verifications.'
-        : 'The client’s account and tier, pieces, orders, releases, answers, interest, segments and notes, transfers in progress and latest verifications. Emails are masked for your role.',
+      lead: can(role, 'readClientEmails') ? OWNER_LEAD : OWNER_LEAD_MASKED,
       actions,
     }),
     slot,
     section(
       'Account',
       defList([
-        { label: 'Status', value: ownerStatus(o), note: o.status === 'LOCKED' ? 'Cannot sign in or use a recovery code until unlocked' : undefined },
+        { label: 'Status', value: ownerStatus(o), note: statusNote(o.status, sheet.teamAccount) },
         { label: 'Email', value: o.email },
         { label: 'Name', value: o.displayName ?? '—' },
         { label: 'Country', value: o.country ?? '—' },
@@ -194,6 +204,8 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
       ]),
       { id: 'account' },
     ),
+    // Plan CUSTOMER INTELLIGENCE §3.6 C.4.1: Profile, Tags and private notes and Intelligence, right after Account.
+    profileSection(ctx, sheet),
     section(
       'Pieces',
       table(
