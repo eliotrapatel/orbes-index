@@ -46,6 +46,7 @@ import { SizeService } from './services/sizes.js';
 import { AddressService } from './services/addresses.js';
 import { TasteService } from './services/tastes.js';
 import { ProfileService } from './services/profiles.js';
+import { ClientNoteService } from './services/client-notes.js';
 import { aggregateWishMonths, purgeWishHistory, WishlistService } from './services/wishlist.js';
 import { morningWindowOpen, parisDay } from './services/schedule.js';
 import { aggregateViews, IntelligenceSizes, purgeViews } from './services/tracking-jobs.js';
@@ -179,6 +180,8 @@ export interface AppServices {
   profiles: ProfileService;
   /** YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2): the models a collector keeps with the heart on their sheet; private, never audited per tap. */
   wishlist: WishlistService;
+  /** The client sheet's tags and private notes (plan CUSTOMER INTELLIGENCE §3.6 C.4.3): Client Services' own, never shown to the client. */
+  clientNotes: ClientNoteService;
   /** The places from the connection (plan CUSTOMER INTELLIGENCE §3.3 T.8.2): a country with or without its city, once each, by an integer id, cached. */
   places: PlaceService;
   /** What collectors look at, from which device and place (plan CUSTOMER INTELLIGENCE §3.3 T.8.3): POST /api/v1/seen's views, buffered and written every 2 s. */
@@ -328,6 +331,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const addresses = new AddressService({ db, audit, clock });
     const tastes = new TasteService({ db, clock });
     const profiles = new ProfileService({ db, audit, tastes, clock });
+    const clientNotes = new ClientNoteService({ db, audit, clock });
     const wishlist = new WishlistService({ db, clock });
     const places = new PlaceService({ db });
     // The recording's writes wait while the pool has requests waiting (§3.3 T.8.3): the collectors come first.
@@ -402,6 +406,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       tastes,
       profiles,
       wishlist,
+      clientNotes,
       places,
       tracking,
       acquisition,
