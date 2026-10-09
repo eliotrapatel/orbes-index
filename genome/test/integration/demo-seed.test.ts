@@ -11,6 +11,7 @@ import { testConfig } from '../../src/server/config.js';
 import { createContext, type AppContext } from '../../src/server/context.js';
 import {
   DEMO_ACCOUNTS,
+  DEMO_PROFILES,
   DEMO_CATEGORIES,
   DEMO_FIRST_REGISTRATION_PRODUCT_ID,
   DEMO_GUARANTEE,
@@ -300,6 +301,69 @@ describe('demo seed', () => {
     expect(status.guarantees).toEqual([expect.objectContaining({ scope: 'MODEL', target: 'MONOLITHE', pieces: 1, release: null })]);
     const audit = await ctx.db.selectFrom('audit_logs').select(['action', 'actor_type']).where('action', '=', 'guarantee.grant').execute();
     expect(audit).toEqual([{ action: 'guarantee.grant', actor_type: 'system' }]);
+  });
+
+  it('gives the demo collectors full, partial and empty profiles: a date set by Client Services, Other, a retired finish (plan CUSTOMER INTELLIGENCE §3.1, step 1.11)', async () => {
+    const idOf = async (email: string) => (await ctx.db.selectFrom('accounts').select('id').where('email', '=', email).executeTakeFirstOrThrow()).id;
+    const view = async (email: string) => ctx.services.profiles.forCollector(await idOf(email));
+
+    // Full: every item counted (the demo's collection offers no piece or finish), the default address of YOUR ADDRESSES.
+    const camille = await view('camille.martin@example.com');
+    expect(camille.completion).toEqual({ percent: 100, missing: [] });
+    expect(camille.profile).toMatchObject({ firstName: 'Camille', lastName: 'Martin', country: 'FR', city: 'Paris', phone: { country: 'FR', number: '+33639981234' }, birthDate: '1991-04-12', birthDateLocked: true, instagram: 'camille.martin.demo', heard: { label: 'Instagram', other: null } });
+    expect(camille.address).toMatchObject({ name: 'Camille Martin', country: 'FR' });
+    expect(camille.options).toMatchObject({ pieces: [], finishes: [] });
+
+    // Partial.
+    const hugo = await view('hugo.bernard@example.com');
+    expect(hugo.completion.percent).toBeGreaterThan(0);
+    expect(hugo.completion.percent).toBeLessThan(100);
+    expect(hugo.completion.missing).toEqual(['BIRTH_DATE', 'ADDRESS', 'PHONE', 'INSTAGRAM']);
+
+    // Other, with its words.
+    const amelia = await view('amelia.clarke@example.com');
+    expect(amelia.profile.heard).toMatchObject({ label: 'Other', other: 'A colleague in London' });
+    expect(amelia.profile.phone).toEqual({ country: 'GB', number: '+447700900123' });
+
+    // A date of birth set by ORBES Client Services: the collector reads it locked, never having entered one.
+    const sofiaId = await idOf('sofia.rossi@example.com');
+    const sofia = await ctx.db.selectFrom('account_profiles').selectAll().where('account_id', '=', sofiaId).executeTakeFirstOrThrow();
+    expect(sofia).toMatchObject({ birth_date: '1987-09-23', birth_date_by: 'STAFF', birth_date_collector_at: null, updated_by: 'STAFF', version: 2 });
+    expect((await ctx.services.profiles.forCollector(sofiaId)).profile).toMatchObject({ birthDate: '1987-09-23', birthDateLocked: true });
+
+    // A favourite finish the collection no longer shows.
+    const lucas = await view('lucas.weber@example.com');
+    expect(lucas.profile.tastes).toEqual({ pieces: [], finishes: [{ key: 'ROSE GOLD', label: 'Rose gold', retired: true }] });
+
+    // Empty: the accounts made before the lot, left as they are.
+    for (const email of ['elena.garcia@example.com', 'kenji.tanaka@example.com', 'noor.haddad@example.com']) {
+      const empty = await view(email);
+      expect(empty.profile.version).toBe(0);
+      expect(empty.profile.firstName).toBeNull();
+    }
+    expect(await ctx.db.selectFrom('account_profiles').select('account_id').execute()).toHaveLength(DEMO_PROFILES.length);
+    // The names follow onto the account; the countries are unchanged.
+    const accounts = await ctx.db.selectFrom('accounts').select(['email', 'display_name', 'country']).orderBy('email').execute();
+    expect(accounts.map((a) => [a.display_name, a.country])).toEqual(
+      DEMO_ACCOUNTS.slice()
+        .sort((a, b) => (a.email < b.email ? -1 : 1))
+        .map((a) => [a.displayName, a.country]),
+    );
+
+    // Audited by field names only: the collectors' saves and Client Services' date, never a value.
+    const audits = await ctx.db.selectFrom('audit_logs').select(['actor_type', 'actor_id', 'details']).where('action', '=', 'account.profile.update').orderBy('id').execute();
+    expect(audits.map((a) => [a.actor_type, (a.details as { by: string }).by])).toEqual([
+      ...DEMO_PROFILES.slice(0, 4).map(() => ['account', 'collector']),
+      ['system', 'staff'],
+      ['account', 'collector'],
+    ]);
+    expect(audits[4]).toMatchObject({ actor_id: 'demo-seed', details: { by: 'staff', fields: ['birthDate'], birthDate: 'set' } });
+    const json = JSON.stringify(audits);
+    for (const typed of ['Camille', 'Paris', '1991-04-12', '1987-09-23', '639981234', 'camille.martin.demo', 'colleague']) expect(json).not.toContain(typed);
+
+    // The console's Sign-up page counts them.
+    const given = Object.fromEntries((await ctx.services.profiles.heardOptions({ withCounts: true })).map((o) => [o.label, o.given]));
+    expect(given).toMatchObject({ Instagram: 1, 'A friend': 1, Other: 1, 'A shop': 1, 'The press': 1, TikTok: 0 });
   });
 
   it('describes the products without secrets', () => {

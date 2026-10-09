@@ -55,6 +55,13 @@
  * ORBITE 52, 54) are declared, so its duplicates of one measure (SIZE 52 and
  * 52) exist on purpose.
  *
+ * YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1, step 1.11; DEMO_PROFILES): Camille Martin's is full (100% COMPLETE,
+ * her default address in YOUR ADDRESSES), Hugo Bernard's and Amelia Clarke's partial (Amelia answered Other, « A
+ * colleague in London »), Sofia Rossi's date of birth was set by ORBES Client Services, Lucas Weber holds a favourite
+ * finish the collection no longer shows (Rose gold: NO LONGER IN THE COLLECTION); Elena García, Kenji Tanaka and Noor
+ * Haddad have none, as the accounts made before the lot. The demo's collection shows no model, so there is no piece or
+ * finish to choose.
+ *
  * Demo only: emails are @example.com, passwords are random unless supplied,
  * and `seedDemo` refuses a production configuration.
  */
@@ -68,6 +75,7 @@ import type { VerifyOutcome } from '../../services/verification.js';
 import { utcDate } from '../../services/warranty.js';
 import { noopLogger, type Actor, type Logger } from '../../types.js';
 import { ensureSku } from '../../services/stock.js';
+import { tasteKey } from '../../../shared/profile-rules.js';
 import { inTransaction, type Db } from '../connection.js';
 import type { AnomalyStatus, ProductStatus, ReportChannel, ServiceType, SizeType, VerificationState } from '../schema.js';
 
@@ -227,6 +235,58 @@ export const DEMO_ACCOUNTS: readonly DemoAccount[] = Object.freeze([
   { key: 'elena', email: 'elena.garcia@example.com', displayName: 'Elena García', country: 'ES', home: 'MADRID', since: '2025-02-09T10:02', device: 'Chrome/Android' },
   { key: 'kenji', email: 'kenji.tanaka@example.com', displayName: 'Kenji Tanaka', country: 'JP', home: 'TOKYO', since: '2025-02-14T03:25', device: 'Safari/iOS' },
   { key: 'noor', email: 'noor.haddad@example.com', displayName: 'Noor Haddad', country: 'AE', home: 'DUBAI', since: '2025-02-18T15:10', device: 'Safari/iOS' },
+]);
+
+/**
+ * YOUR PROFILE of the demo's collectors (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.1, step 1.11). Each was saved by
+ * the collector through ProfileService.save `days` (and `hours`) before `now`, as YOUR PROFILE sends it; `staffBirthDate`
+ * is a date of birth ORBES Client Services set afterwards, `retiredFinish` a favourite finish chosen when the collection
+ * showed it, which it no longer does. The accounts not listed (Elena García, Kenji Tanaka, Noor Haddad) were created
+ * before the lot and left as they are: no profile. The phone numbers are in the ranges kept for fiction (ARCEP's
+ * 06 39 98, Ofcom's 07700 900).
+ */
+export interface DemoProfile {
+  account: AccountKey;
+  ago: { days: number; hours: number };
+  firstName: string;
+  lastName: string;
+  city?: string;
+  phone?: { country: string; number: string };
+  birthDate?: string;
+  instagram?: string;
+  /** The answer to « How did you hear about ORBES? », by its label; Other with its words. */
+  heard?: string;
+  heardOther?: string;
+  /** The default address of YOUR ADDRESSES, saved with the profile. */
+  address?: { name: string; address: string; country: string; phone: string };
+  /** Set by Client Services `days` before `now`, after the collector's save. */
+  staffBirthDate?: { date: string; days: number };
+  /** A finish saved when the collection showed it (its label as it read). */
+  retiredFinish?: string;
+}
+
+export const DEMO_PROFILES: readonly DemoProfile[] = Object.freeze([
+  // Full: every item of the completion line (no piece or finish to choose in the demo's collection).
+  {
+    account: 'camille',
+    ago: { days: 26, hours: 3 },
+    firstName: 'Camille',
+    lastName: 'Martin',
+    city: 'Paris',
+    phone: { country: 'FR', number: '06 39 98 12 34' },
+    birthDate: '1991-04-12',
+    instagram: 'camille.martin.demo',
+    heard: 'Instagram',
+    address: { name: 'Camille Martin', address: '8 rue Saint-Honoré\n75001 Paris', country: 'FR', phone: '+33 6 39 98 12 34' },
+  },
+  // Partial: the names, the city and the answer.
+  { account: 'hugo', ago: { days: 19, hours: 5 }, firstName: 'Hugo', lastName: 'Bernard', city: 'Lyon', heard: 'A friend' },
+  // Partial, Other with its words.
+  { account: 'amelia', ago: { days: 14, hours: 2 }, firstName: 'Amelia', lastName: 'Clarke', phone: { country: 'GB', number: '07700 900123' }, heard: 'Other', heardOther: 'A colleague in London' },
+  // A date of birth set by ORBES Client Services.
+  { account: 'sofia', ago: { days: 11, hours: 4 }, firstName: 'Sofia', lastName: 'Rossi', city: 'Milan', heard: 'A shop', staffBirthDate: { date: '1987-09-23', days: 9 } },
+  // A favourite finish the collection no longer shows.
+  { account: 'lucas', ago: { days: 7, hours: 1 }, firstName: 'Lucas', lastName: 'Weber', city: 'Berlin', heard: 'The press', retiredFinish: 'Rose gold' },
 ]);
 
 // ── Products ───────────────────────────────────────────────────────────────
@@ -1165,6 +1225,11 @@ function buildTimeline(now: Date): Step[] {
   for (const a of DEMO_ACCOUNTS) {
     steps.push({ at: at(a.since), order: order++, label: `account ${a.email}`, run: (w) => createAccount(w, a) });
   }
+  for (const p of DEMO_PROFILES) {
+    steps.push({ at: time.ago(p.ago.days, p.ago.hours), order: order++, label: `profile of ${p.account}`, run: (w) => saveProfile(w, p) });
+    const staff = p.staffBirthDate;
+    if (staff) steps.push({ at: time.ago(staff.days), order: order++, label: `date of birth of ${p.account} by Client Services`, run: (w) => setStaffBirthDate(w, p.account, staff.date) });
+  }
 
   for (const p of PRODUCTS) {
     const own: Step[] = [];
@@ -1370,6 +1435,62 @@ async function createAccount(w: World, a: DemoAccount): Promise<void> {
   // The sign-up session is not kept: it would be a live bearer token nobody holds.
   await w.ctx.sessions.revoke(session.token);
   w.accounts.set(a.key, account.id);
+}
+
+/**
+ * The collector's YOUR PROFILE, saved through ProfileService.save as YOUR PROFILE sends it (audited
+ * `account.profile.update` by the collector), with its default address through H2's AddressService first; then the
+ * retired finish, written as it was kept when the collection still showed it (TasteService offers only what it shows now).
+ */
+async function saveProfile(w: World, p: DemoProfile): Promise<void> {
+  const id = accountId(w, p.account);
+  const actor = accountActor(w, p.account);
+  if (p.address) await w.ctx.services.addresses.create(id, { ...p.address, isDefault: true }, actor);
+  const { profile, options } = await w.ctx.services.profiles.forCollector(id);
+  const heard = p.heard === undefined ? undefined : options.heard.find((o) => o.label === p.heard);
+  if (p.heard !== undefined && !heard) throw new DemoSeedError(`internal: no answer « ${p.heard} » is offered`);
+  await w.ctx.services.profiles.save(
+    id,
+    {
+      version: profile.version,
+      firstName: p.firstName,
+      lastName: p.lastName,
+      country: accountDef(p.account).country,
+      ...(p.city !== undefined ? { city: p.city } : {}),
+      ...(p.phone !== undefined ? { phone: p.phone } : {}),
+      ...(p.birthDate !== undefined ? { birthDate: p.birthDate } : {}),
+      ...(p.instagram !== undefined ? { instagram: p.instagram } : {}),
+      ...(heard ? { heard: { optionId: heard.id, ...(p.heardOther !== undefined ? { other: p.heardOther } : {}) } } : {}),
+    },
+    actor,
+  );
+  if (p.retiredFinish !== undefined) {
+    const key = tasteKey(p.retiredFinish);
+    if (key === null) throw new DemoSeedError(`internal: « ${p.retiredFinish} » is no finish`);
+    await w.ctx.db.insertInto('account_tastes').values({ account_id: id, kind: 'FINISH', value_key: key, label: p.retiredFinish, created_at: w.ctx.clock() }).execute();
+  }
+}
+
+/**
+ * A date of birth set by ORBES Client Services on a profile (the client sheet's Change the date of birth, plan §3.6
+ * C.4.2): `birth_date_by` STAFF, the profile's version moved on, audited `account.profile.update` by staff with the
+ * field's name only, the seed as actor (no console user sets it).
+ */
+async function setStaffBirthDate(w: World, key: AccountKey, date: string): Promise<void> {
+  const id = accountId(w, key);
+  const now = w.ctx.clock();
+  await inTransaction(w.ctx.db, async (tx) => {
+    const row = await tx.selectFrom('account_profiles').select(['version', 'birth_date']).where('account_id', '=', id).forUpdate().executeTakeFirstOrThrow();
+    await tx
+      .updateTable('account_profiles')
+      .set({ birth_date: date, birth_date_by: 'STAFF', birth_date_at: now, version: row.version + 1, updated_by: 'STAFF', updated_at: now })
+      .where('account_id', '=', id)
+      .execute();
+    await w.ctx.audit.record(
+      { actor: DEMO_SEED_ACTOR, action: 'account.profile.update', targetType: 'account', targetId: id, details: { by: 'staff', fields: ['birthDate'], birthDate: row.birth_date ? 'changed' : 'set' } },
+      tx,
+    );
+  });
 }
 
 async function issue(w: World, p: ProductDef): Promise<void> {

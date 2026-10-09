@@ -115,6 +115,13 @@
  *                 it has pieces), SOLSTICE (a watch), the Size type and Sizes dialogs, and the stock page with every
  *                 offered size at 0. Also run last on the demo dataset's stage by default (the size set aside would change
  *                 no capture after it)
+ *   --only profile
+ *                 YOUR PROFILE alone (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.1, step 1.11; profile-*.png): CREATE
+ *                 ACCOUNT with its names, country and HOW DID YOU HEAR ABOUT ORBES?, YOUR PROFILE and its YOUR TASTES with a
+ *                 retired finish (PROFILE_SHOTS, states of the parity tool on the NOCTURNE demo), then, on the demo dataset,
+ *                 Camille Martin's full YOUR PROFILE (DEMO_PROFILES) and the console's Sign-up page with each answer's
+ *                 Given count; each at a phone's size (390 × 844) and a desk's (1440 × 900). Not run by default (screens
+ *                 for the owner's review, into --out)
  *
  * Nothing is mocked. Two network holds make transient states capturable:
  * the decoder worker script is held until the scanner has been
@@ -192,7 +199,7 @@ const DESKTOP = { width: 1440, height: 900 } as const;
 
 // ── CLI ────────────────────────────────────────────────────────────────────
 
-type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot' | 'story' | 'growth' | 'handover' | 'catalogue';
+type Only = 'live' | 'plus' | 'nocturne' | 'messages' | 'sizes' | 'how' | 'foot' | 'story' | 'growth' | 'handover' | 'catalogue' | 'profile';
 
 function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | null } {
   let out = DEFAULT_OUT;
@@ -201,8 +208,8 @@ function parseArgs(argv: string[]): { out: string; raw: boolean; only: Only | nu
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--out') out = resolve(argv[++i] ?? '');
     else if (argv[i] === '--raw') raw = true;
-    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot' || argv[i + 1] === 'story' || argv[i + 1] === 'growth' || argv[i + 1] === 'handover' || argv[i + 1] === 'catalogue')) only = argv[++i] as Only;
-    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot, --only story, --only growth, --only handover, --only catalogue)`);
+    else if (argv[i] === '--only' && (argv[i + 1] === 'live' || argv[i + 1] === 'plus' || argv[i + 1] === 'nocturne' || argv[i + 1] === 'messages' || argv[i + 1] === 'sizes' || argv[i + 1] === 'how' || argv[i + 1] === 'foot' || argv[i + 1] === 'story' || argv[i + 1] === 'growth' || argv[i + 1] === 'handover' || argv[i + 1] === 'catalogue' || argv[i + 1] === 'profile')) only = argv[++i] as Only;
+    else throw new Error(`unknown argument ${argv[i]} (use --out DIR, --raw, --only live, --only plus, --only nocturne, --only messages, --only sizes, --only how, --only foot, --only story, --only growth, --only handover, --only catalogue, --only profile)`);
   }
   return { out, raw, only };
 }
@@ -2172,6 +2179,92 @@ async function captureHandover(out: string, shots: Shots): Promise<void> {
   await captureStory(out, shots, true);
 }
 
+// ── YOUR PROFILE (plan CUSTOMER INTELLIGENCE, §3.1) ──────────────────────
+
+/**
+ * YOUR PROFILE (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.1, steps 1.8, 1.9 and 1.11): CREATE ACCOUNT with FIRST NAME,
+ * LAST NAME, COUNTRY and HOW DID YOU HEAR ABOUT ORBES? (Other: IN A FEW WORDS), the account sheet's YOUR PROFILE, and its
+ * YOUR TASTES with a finish NO LONGER IN THE COLLECTION, each at a phone's size and a desk's, as the states of the parity
+ * tool reach them on the NOCTURNE demo. `--only profile`, with captureProfileDemo.
+ */
+export const PROFILE_SHOTS: readonly { state: string; name: string }[] = Object.freeze([
+  { state: 'sign-up', name: 'profile-01-sign-up' },
+  { state: 'account-profile', name: 'profile-02-your-profile' },
+  { state: 'profile-tastes', name: 'profile-03-your-tastes' },
+]);
+
+async function captureProfileStates(shots: Shots): Promise<void> {
+  await capturePhonesAndDesks(shots, PROFILE_SHOTS, 'YOUR PROFILE', stateById);
+}
+
+/**
+ * On the demo dataset (DEMO_PROFILES of src/server/db/seed/demo.ts): Camille Martin's YOUR PROFILE, full (COMPLETE, her
+ * default address), signed in through the account API, the phone or the desk grown to the sheet; then the console's
+ * Sign-up page (#/sign-up) with each answer's Given count of the demo's collectors, at a desk's size and a phone's.
+ */
+async function captureProfileDemo(stage: Stage, shots: Shots): Promise<void> {
+  const browser = await chromium.launch({ executablePath: CHROMIUM_PATH, headless: true, args: ['--no-sandbox'] });
+  try {
+    for (const desk of [false, true]) {
+      const context = desk
+        ? await browser.newContext({ viewport: { ...DESK }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' })
+        : await mobileContext(browser, { reducedMotion: 'reduce' });
+      const page = await context.newPage();
+      watchPage(page, `verify-profile-${desk ? 'desk' : 'phone'}`);
+      await page.goto(`${stage.origin}/verify`);
+      await page.waitForSelector('.n-hd');
+      const status = await page.evaluate(
+        async (c) => (await fetch('/api/v1/account/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(c) })).status,
+        OWNER,
+      );
+      if (status !== 200) throw new Error(`${OWNER.email} could not sign in (${status})`);
+      await page.goto(`${stage.origin}/verify`);
+      await page.click('.n-hd button.n-acct');
+      await page.locator('.n-account:not([hidden]) .n-account__tier').waitFor({ timeout: 20_000 });
+      await page.locator('.n-account').getByRole('button', { name: /^YOUR PROFILE/ }).click();
+      await page.locator('.n-account:not([hidden]) form.form--profile').waitFor({ timeout: 20_000 });
+      await page.evaluate(() => document.fonts.ready);
+      await hideGrain(page);
+      await sleep(900);
+      // The page grown to the sheet's content, as the parity tool's states are.
+      const height = await page.evaluate(() => {
+        const panel = [...document.querySelectorAll<HTMLElement>('.n-account__panel')].find((p) => p.closest('[hidden]') === null);
+        if (!panel) return 0;
+        const bottom = Math.max(...[...panel.children].map((c) => c.getBoundingClientRect().bottom + panel.scrollTop));
+        return Math.ceil(bottom + Number.parseFloat(getComputedStyle(panel).paddingBottom));
+      });
+      const size = page.viewportSize()!;
+      if (height > size.height) {
+        await page.setViewportSize({ width: size.width, height });
+        await sleep(400);
+      }
+      await shots.viewport(page, `profile-04-demo-full-${desk ? 'desk' : 'phone'}`);
+      await context.close();
+    }
+
+    const context = await browser.newContext({ viewport: { ...DESKTOP }, deviceScaleFactor: 1, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    watchPage(page, 'admin-sign-up');
+    await page.goto(`${stage.origin}/admin`);
+    await page.waitForSelector('[data-testid=login-form]');
+    await page.fill('input[name=email]', ADMIN.email);
+    await page.fill('input[name=password]', ADMIN.password);
+    await page.click('[data-testid=login-submit]');
+    await page.waitForSelector('.view--dashboard');
+    for (const desk of [true, false]) {
+      if (!desk) await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${stage.origin}/admin#/sign-up`);
+      await page.waitForSelector('.view--sign-up #sign-up-heard tbody tr');
+      await page.evaluate(() => document.fonts.ready);
+      await sleep(600);
+      await shots.full(page, `profile-05-console-sign-up-${desk ? 'desk' : 'phone'}`);
+    }
+    await context.close();
+  } finally {
+    await browser.close();
+  }
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 // ── GROWTH (plan NEXT-NINE, BP-29) ─────────────────────────────────────────
@@ -2219,6 +2312,22 @@ async function captureGrowth(stage: Stage, shots: Shots): Promise<void> {
 
 async function main(): Promise<void> {
   const { out, raw, only } = parseArgs(process.argv.slice(2));
+  if (only === 'profile') {
+    const shots = new Shots(out, raw);
+    log('YOUR PROFILE:');
+    await captureProfileStates(shots);
+    const workDir = mkdtempSync(join(tmpdir(), 'orbes-capture-ui-'));
+    const stage = await startStage(workDir);
+    try {
+      log('YOUR PROFILE and the Sign-up page, on the demo dataset:');
+      await captureProfileDemo(stage, shots);
+    } finally {
+      await stage.close().catch(() => {});
+      rmSync(workDir, { recursive: true, force: true });
+    }
+    log(`${shots.written.length} screenshots in ${relative(process.cwd(), out) || '.'}`);
+    return;
+  }
   if (only === 'growth') {
     const workDir = mkdtempSync(join(tmpdir(), 'orbes-capture-ui-'));
     const stage = await startStage(workDir);
