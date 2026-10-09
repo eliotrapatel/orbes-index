@@ -235,10 +235,10 @@ describe('YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.4)', () => {
     await h.t.db.updateTable('models').set({ lookbook: 'HIDDEN' }).where('id', '=', hidden.id).execute();
     const at = (m: number) => new Date(Date.parse('2026-10-09T09:00:00.000Z') + m * MINUTE);
     expect(await svc().ofAccount(a.id)).toEqual([
-      { modelId: salon.id, name: 'SALON', variant: null, addedAt: at(3), state: 'RESERVED' },
-      { modelId: old.id, name: 'OLD', variant: null, addedAt: at(2), state: 'DISCONTINUED' },
-      { modelId: hidden.id, name: 'HIDDEN ONE', variant: null, addedAt: at(1), state: 'HIDDEN' },
-      { modelId: shown.id, name: 'SHOWN', variant: { label: 'Blue', swatch: '#1F3A93' }, addedAt: at(0), state: 'SHOWN' },
+      { modelId: salon.id, name: 'SALON', variant: null, collection: null, addedAt: at(3), state: 'RESERVED' },
+      { modelId: old.id, name: 'OLD', variant: null, collection: null, addedAt: at(2), state: 'DISCONTINUED' },
+      { modelId: hidden.id, name: 'HIDDEN ONE', variant: null, collection: null, addedAt: at(1), state: 'HIDDEN' },
+      { modelId: shown.id, name: 'SHOWN', variant: { label: 'Blue', swatch: '#1F3A93' }, collection: null, addedAt: at(0), state: 'SHOWN' },
     ]);
     // A wished model later bought or registered stays wished (question 12).
     await holdPieces(h.t.db, a.id, 1, shown.id);

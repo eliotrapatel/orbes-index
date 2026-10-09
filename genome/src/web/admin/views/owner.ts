@@ -30,8 +30,9 @@
  *
  * Right after Account (plan CUSTOMER INTELLIGENCE §3.6 C.4.1): the Profile (views/client-profile.ts), what the client
  * gave in YOUR PROFILE as the role reads it, with Edit the profile, Change the date of birth and Edit the address for an
- * OPERATOR; Tags and private notes (views/client-notes.ts), never shown to the client. A team account (its email a
- * console login's) says so under Status.
+ * OPERATOR; Tags and private notes (views/client-notes.ts), never shown to the client; Intelligence
+ * (views/owner-intelligence.ts), read after the sheet: origin, wishlist, what they look at, devices and places. A team
+ * account (its email a console login's) says so under Status.
  */
 import { h } from '../../shared/dom.js';
 import { formatCount, formatDate, formatDateTime, humanize, shortHash } from '../format.js';
@@ -75,6 +76,7 @@ import type { ViewContext } from './context.js';
 import { issueRecoveryCode, ownerStatus } from './owners.js';
 import { profileSection } from './client-profile.js';
 import { tagsNotesSection } from './client-notes.js';
+import { intelligenceSection } from './owner-intelligence.js';
 import { OWNER_LEAD, OWNER_LEAD_MASKED, TEAM_ACCOUNT_LINE } from '../model/client-profile.js';
 
 /** Under Status: a lock's consequence, and the team account's line (§3.0 (d)). */
@@ -209,6 +211,7 @@ export async function ownerView(ctx: ViewContext): Promise<HTMLElement> {
     // Plan CUSTOMER INTELLIGENCE §3.6 C.4.1: Profile, Tags and private notes and Intelligence, right after Account.
     profileSection(ctx, sheet),
     tagsNotesSection(ctx, sheet),
+    intelligenceSection(ctx, sheet),
     section(
       'Pieces',
       table(

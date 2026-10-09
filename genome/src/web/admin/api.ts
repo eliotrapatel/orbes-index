@@ -173,6 +173,8 @@ import type {
   PrivateNote,
   PrivateNotes,
   TagSuggestion,
+  OwnerIntelligence,
+  ViewedModelsPage,
   Paged,
   RecoveryCode,
   ProductDetail,
@@ -1299,6 +1301,16 @@ export class AdminApi {
   }
 
   // ── The client sheet's tags and private notes (plan CUSTOMER INTELLIGENCE §3.6 C.4.3, C.9; API §16.36) ──
+
+  /** AUDITOR+: the client sheet's Intelligence, read after the sheet; the cities withheld for an AUDITOR. */
+  ownerIntelligence(accountId: string): Promise<OwnerIntelligence> {
+    return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}/intelligence`);
+  }
+
+  /** AUDITOR+: « Show all » the models the client viewed, a page of 50, the most time first. */
+  viewedModels(accountId: string, page: number): Promise<ViewedModelsPage> {
+    return this.get(`/api/admin/owners/${encodeURIComponent(accountId)}/intelligence/models`, { page });
+  }
 
   /** AUDITOR+: the tags in use, the most used first (50 at most), or VIP, PRESS and FRIEND OF THE HOUSE while none is. */
   tagSuggestions(): Promise<{ items: TagSuggestion[] }> {

@@ -87,6 +87,7 @@ import {
   browsingCondition,
   collectorBrowsing,
   collectorsFor,
+  viewedModels,
   devicesReport,
   exportColumns,
   placesReport,
@@ -94,6 +95,7 @@ import {
   type Activity,
   type BrowsingRule,
   type CollectorBrowsing,
+  type ViewedModelsPage,
   type CollectorsFigure,
   type CollectorsPage,
   type DayWindow,
@@ -1219,6 +1221,11 @@ export class TrackingService {
   /** The client sheet's What they look at, Devices and Places (T.4.1); `withCities: false` for an AUDITOR. */
   collectorBrowsing(accountId: string, opts: { withCities: boolean }): Promise<CollectorBrowsing> {
     return collectorBrowsing(this.db, accountId, { ...opts, now: this.clock() });
+  }
+
+  /** The client sheet's « Show all » of the models viewed (§3.6 C.11), a page of 50. */
+  viewedModels(accountId: string, page: number): Promise<ViewedModelsPage> {
+    return viewedModels(this.db, accountId, { page, now: this.clock() });
   }
 
   /** What they look at, for the Collectors page (T.4.2). */

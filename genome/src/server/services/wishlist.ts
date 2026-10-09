@@ -98,6 +98,8 @@ export interface StaffWish {
   modelId: string;
   name: string;
   variant: WishVariant | null;
+  /** The model's collection's name, or null (the client sheet's Collection column, §3.6 C.4.4). */
+  collection: string | null;
   addedAt: Date;
   state: WishModelState;
 }
@@ -277,6 +279,7 @@ export class WishlistService {
       modelId: r.id,
       name: r.name,
       variant: variantOf(r),
+      collection: r.collection,
       addedAt: r.added_at,
       state: r.slug === null || r.lookbook === 'HIDDEN' ? 'HIDDEN' : r.discontinued_at !== null ? 'DISCONTINUED' : r.lookbook === 'RESERVED' ? 'RESERVED' : 'SHOWN',
     }));

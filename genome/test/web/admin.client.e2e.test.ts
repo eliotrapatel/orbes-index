@@ -18,6 +18,8 @@
  *     account's line under Status.
  *  7. (step 5.6) Tags and private notes: a tag from a suggestion, the server's capitals, removed; a note added and
  *     removed by its writer, another's by an ADMIN only, the date of birth's reason as a note; an AUDITOR reads them.
+ *  8. (step 5.7) The Intelligence: origin, wishlist, what they look at with « Show all », devices, places with DB-IP's
+ *     attribution; an AUDITOR without cities.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -633,6 +635,88 @@ describe.skipIf(!HAS_CHROMIUM)('the client sheet and the Shopify exports in the 
     // Nothing of it in the audit log but the tag, the note's id and length.
     const audits = await ctx.db.selectFrom('audit_logs').select('details').where('target_id', '=', client.id).where('action', 'like', 'account.note.%').execute();
     expect(JSON.stringify(audits)).not.toMatch(/Prefers a call|Day and month|boutique/);
+  }, STEP_TIMEOUT);
+
+  it('reads the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4.4, step 5.7): the origin, the wishlist, what they look at with « Show all », devices and places with DB-IP; an AUDITOR without cities', async () => {
+    const client = await createAccount(ctx.db);
+    const model = await ctx.db.selectFrom('models').select(['id', 'name']).where('id', '=', f.modelId).executeTakeFirstOrThrow();
+    const site =
+      (await ctx.db.selectFrom('acquisition_sources').select('id').where('key', '=', 'S:instagram.com').executeTakeFirst())?.id ??
+      (await ctx.db.insertInto('acquisition_sources').values({ kind: 'SITE', site: 'instagram.com', key: 'S:instagram.com' }).returning('id').executeTakeFirstOrThrow()).id;
+    const now = clock.now().getTime();
+    // Signed up three hours ago, after its first visit; everything else after it.
+    await ctx.db.updateTable('accounts').set({ created_at: new Date(now - 3 * HOUR) }).where('id', '=', client.id).execute();
+    await ctx.db.insertInto('account_sources').values({ account_id: client.id, first_source_id: site, first_seen_at: new Date(now - 4 * HOUR), set_at: new Date(now - 3 * HOUR), set_by: 'SIGN_UP' }).execute();
+    await ctx.db.insertInto('account_wishes').values({ account_id: client.id, model_id: f.modelId, added_at: new Date(now - HOUR) }).execute();
+    const device = (
+      await ctx.db
+        .insertInto('tracking_devices')
+        .values({ device_hash: `e2e${client.id.replace(/-/g, '')}`.slice(0, 43).padEnd(43, 'x'), kind: 'PHONE', os: 'IOS', browser: 'SAFARI', opened_in: 'BROWSER', in_app: null, account_id: client.id, linked_at: new Date(now - HOUR), first_seen_at: new Date(now - 2 * HOUR), last_seen_at: new Date(now - MINUTE) })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+    ).id;
+    await ctx.db.insertInto('tracking_device_accounts').values({ device_id: device, account_id: client.id, first_via: 'SIGN_UP', first_linked_at: new Date(now - HOUR), last_linked_at: new Date(now - HOUR) }).execute();
+    const paris = (await ctx.services.places.idOf('FR', 'Paris'))!;
+    const view = (at: number, page: number, subject: string | null, seconds: number) => ({ at: new Date(at), device_id: device, account_id: client.id, page, subject, seconds, place_id: paris });
+    await ctx.db
+      .insertInto('collector_views')
+      .values([
+        view(now - 30 * MINUTE, 10, f.modelId, 120),
+        ...Array.from({ length: 6 }, (_, i) => view(now - (20 - i) * MINUTE, 10, crypto.randomUUID(), 10 + i)),
+        view(now - 10 * MINUTE, 14, ids.live, 300),
+        view(now - 5 * MINUTE, 1, f.modelId, 0),
+      ])
+      .execute();
+    await ctx.db.insertInto('collector_places').values({ account_id: client.id, place_id: paris, days: 2, first_day: '2026-10-01', last_day: '2026-10-08' }).execute();
+
+    const p = await open(OPERATOR);
+    await go(p, `#/owners/${client.id}`, client.email);
+    expect(await p.locator('main section.panel').evaluateAll((els) => els.slice(0, 4).map((e) => e.id))).toEqual(['account', 'profile', 'tags-notes', 'intelligence']);
+    await p.waitForSelector('[data-testid=intelligence-browsing]');
+    expect(await text(p, '#intelligence .panel__note')).toBe('Recorded on verify.theorbes.com. Staff only.');
+    expect(await p.locator('#intelligence .panel__subtitle').allTextContents()).toEqual(['Origin', 'Wishlist', 'What they look at', 'Devices', 'Places']);
+    expect((await p.locator('[data-testid=intelligence-origin] .deflist__row').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim())).toEqual([
+      expect.stringMatching(/^FIRST VISIT \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} Paris · instagram\.com$/),
+      'SIGNED UP THROUGH Direct',
+      'LATEST ORDER THROUGH No purchase',
+    ]);
+    const wish = p.locator('[data-testid=intelligence-wishlist] tbody tr');
+    expect(await wish.count()).toBe(1);
+    expect(await wish.locator('a').getAttribute('href')).toBe(`#/catalogue/${f.modelId}`);
+    expect(await text(p, '[data-testid=intelligence-wishlist] .intelligence__note')).toBe('Private to the client and the team. No count is shown on the model’s sheet.');
+    const rows = (await p.locator('[data-testid=intelligence-browsing] > .deflist .deflist__row').allInnerTexts()).map((x) => x.replace(/\s+/g, ' ').trim());
+    expect(rows[0]).toMatch(/^LAST SEEN \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} Paris · iPhone · Paris, France$/);
+    expect(rows[2]).toBe('VIEWS 8 in the last 13 months · 8 min');
+    expect(rows[3]).toBe('BEFORE THE ACCOUNT Nothing recorded before the account.');
+    expect(rows[4]).toMatch(/^SCANS 1 scan · first on /);
+    // The five most viewed, then « Show all »: the seven, the withdrawn ones named so.
+    const models = p.locator('[data-testid=intelligence-models] tbody tr');
+    expect(await models.count()).toBe(5);
+    expect(await models.first().innerText()).toContain(model.name);
+    await p.click('[data-testid=intelligence-models-more]');
+    await expect.poll(async () => models.count(), POLL).toBe(7);
+    expect(await p.locator('[data-testid=intelligence-models-more]').count()).toBe(0);
+    expect((await p.locator('[data-testid=intelligence-releases] tbody tr').first().innerText()).replace(/\s+/g, ' ')).toMatch(/^MONOLITHE — LIVE I 1 5 min · LIVE room 5 min /);
+    expect((await p.locator('[data-testid=intelligence-devices] tbody tr').first().innerText()).replace(/\s+/g, ' ')).toMatch(/^iPhone · Safari Browser /);
+    expect((await p.locator('[data-testid=intelligence-places] tbody tr').first().innerText()).replace(/\s+/g, ' ')).toBe('Paris, France 2 08 OCT 2026');
+    expect(await text(p, '[data-testid=intelligence-places-foot]')).toBe('City and country from the connection, approximate. IP geolocation by DB-IP.');
+    expect(await p.locator('[data-testid=intelligence-places-foot] a').getAttribute('href')).toBe('https://db-ip.com');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'intelligence', { phone: true });
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+
+    // An AUDITOR: everything but the cities.
+    const a = await open(AUDITOR);
+    await go(a, `#/owners/${client.id}`, `${client.email[0]}***${client.email.slice(client.email.indexOf('@'))}`);
+    await a.waitForSelector('[data-testid=intelligence-browsing]');
+    expect((await a.locator('[data-testid=intelligence-places] tbody tr').first().innerText()).replace(/\s+/g, ' ')).toBe('France 2 08 OCT 2026');
+    expect(await text(a, '[data-testid=intelligence-places-foot]')).toBe('Cities are withheld.');
+    expect(await a.locator('#intelligence').innerText()).not.toContain('Paris, France');
+    expect(await a.locator('[data-testid=intelligence-wishlist] tbody tr').count()).toBe(1);
+    await shot(a, 'intelligence-auditor');
+    expect(problems).toEqual([]);
+    await a.context().close();
   }, STEP_TIMEOUT);
 
   it('picks a model\'s Pairs well with on its Lookbook page (plan NEXT-NINE, BP-34): none picked and what the sheet shows, Edit pairs and its checks, the table, a variant\'s page, an AUDITOR reading', async () => {

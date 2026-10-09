@@ -17,6 +17,12 @@
  *   PUT    /api/admin/owners/:id/default-address    OPERATOR  Edit the address: the default address changed, or created
  *                                                             as the default: { profile }
  *                                                             account.address.update / .create { by: 'staff', … }
+ *   GET    /api/admin/owners/:id/intelligence       AUDITOR   the Intelligence (step 5.7, services/owner-intelligence.ts):
+ *                                                             { engagement: null until I2, origin, wishlist, browsing,
+ *                                                             recordingSince }, each block `{ failed: true }` alone when
+ *                                                             it cannot be read; the cities withheld for an AUDITOR
+ *   GET    /api/admin/owners/:id/intelligence/models?page=   AUDITOR   « Show all » the models viewed, 50 a page
+ *                                                             (§3.6 C.11): { items, total, page, pageSize }
  *   GET    /api/admin/tags                          AUDITOR   the tags in use, the most used first (50 at most), or
  *                                                             VIP, PRESS and FRIEND OF THE HOUSE while none is: { items }
  *   GET    /api/admin/owners/:id/notes?all=1        AUDITOR   every note not removed, the newest first: { items, total }
@@ -34,13 +40,14 @@
  * `no-store`, as every API answer (http/security.ts).
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { birthDateBody, defaultAddressBody, emptyBody, noteBody, noteParams, ownerNotesQuery, ownerParams, ownerProfileBody, parse, tagBody, tagParams } from '../../http/schemas.js';
+import { birthDateBody, defaultAddressBody, emptyBody, noteBody, noteParams, ownerNotesQuery, ownerParams, ownerProfileBody, parse, tagBody, tagParams, viewedModelsQuery } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
+import { ownerIntelligence } from '../../services/owner-intelligence.js';
 import type { AdminRouteDeps } from './index.js';
 import { ownerProfile, readsClientEmails } from './serialize.js';
 
 export const adminClientSheetRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { clientNotes, profiles, addresses } = ctx.services;
+  const { clientNotes, profiles, addresses, acquisition, wishlist, tracking } = ctx.services;
 
   // Edit the profile's dialog opens on the profile as it is now (its version) and the choices offered now; read again
   // after a 409 PROFILE_CHANGED. Step 5.5: the console's three dialogs.
@@ -69,6 +76,18 @@ export const adminClientSheetRoutes: FastifyPluginAsync<AdminRouteDeps> = async 
     const actor = adminActor(request);
     await addresses.setDefaultByStaff(id, b, actor);
     return { profile: await profiles.forStaff(id, { inClear: true }) };
+  });
+
+  // Step 5.7: the Intelligence, read after the sheet; one block failing marks only itself.
+  app.get('/api/admin/owners/:id/intelligence', async (request) => {
+    const { id } = parse(ownerParams, request.params);
+    return ownerIntelligence({ db: ctx.db, acquisition, wishlist, tracking, warn: (detail, message) => request.log.warn(detail, message) }, id, { inClear: readsClientEmails(request) });
+  });
+
+  app.get('/api/admin/owners/:id/intelligence/models', async (request) => {
+    const { id } = parse(ownerParams, request.params);
+    const { page } = parse(viewedModelsQuery, request.query);
+    return tracking.viewedModels(id, page ?? 1);
   });
 
   app.get('/api/admin/tags', async () => ({ items: await clientNotes.suggestions() }));

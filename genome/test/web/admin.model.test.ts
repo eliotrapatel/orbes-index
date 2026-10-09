@@ -430,6 +430,12 @@ describe('admin enums mirror the server', () => {
       'TASTE_KINDS',
       'LINK_DESTINATIONS',
       'SOURCE_KINDS',
+      'DEVICE_KINDS',
+      'DEVICE_SYSTEMS',
+      'DEVICE_BROWSERS',
+      'OPENED_IN',
+      'IN_APPS',
+      'LINK_VIAS',
     ] as const) {
       expect([...web[name]], name).toEqual([...serverSchema[name]]);
     }

@@ -14,6 +14,7 @@
  *               `device_daily_stats`); with the collectors the other filters select (`accounts`), the 13 months of
  *               detail, counted collectors only, a period reaching further back counted from the first day kept
  *               (`reachesBackTo`). The previous period on request.
+ *   viewedModels  the client sheet's « Show all » of the models viewed (§3.6 C.11), a page of 50 at a time.
  *   collectorsFor  the click-through: the collectors behind one figure, a page at a time.
  *   activityOf  views, seconds, active Paris days and visits (a device's views more than 30 minutes apart) per account.
  *   browsingCondition  the four BROWSING criteria of Segments (T.4.3) as one condition on an account (the `not` is the
@@ -62,6 +63,8 @@ export const SHEET_MODELS = 5;
 export const SHEET_RELEASES = 5;
 export const SHEET_DEVICES = 6;
 export const SHEET_PLACES = 5;
+/** A page of the client sheet's « Show all » of the models viewed (§3.6 C.11). */
+export const VIEWED_MODELS_PAGE = 50;
 /** The pages named on the sheet before 'Other' (T.4.1). */
 export const SHEET_PAGES = 4;
 /** Two views of one device further apart than this begin a new visit (T.8.6). */
@@ -272,11 +275,21 @@ export interface ViewedModel {
 export interface ViewedRelease {
   dropId: string;
   title: string | null;
+  /** A LIVE RELEASE (its console page is the LIVE one), else a draw; false for a release no longer found. */
+  live: boolean;
   views: number;
   seconds: number;
   /** The seconds in its LIVE room. */
   liveSeconds: number;
   lastAt: Date;
+}
+
+/** The client sheet's « Show all » of the models viewed (§3.6 C.11): a page of VIEWED_MODELS_PAGE, the most time first. */
+export interface ViewedModelsPage {
+  items: ViewedModel[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 export interface BrowsingDevice extends DeviceClassView {
@@ -316,6 +329,8 @@ export interface CollectorBrowsing {
   /** The share of time per page over the 13 months: the SHEET_PAGES largest, then 'OTHER'. */
   pages: { page: ViewPage | 'OTHER'; seconds: number; share: number }[];
   models: ViewedModel[];
+  /** How many models were viewed (the 13 months and the summary): more than `models` shows « Show all ». */
+  modelsViewed: number;
   releases: ViewedRelease[];
   devices: BrowsingDevice[];
   places: BrowsingPlace[];
@@ -444,9 +459,10 @@ async function topSubjects(
   pages: readonly number[],
   limit: number,
   now: Date,
-): Promise<Map<string, { subject: string; views: number; seconds: number; live: number; lastAt: Date }[]>> {
+  offset = 0,
+): Promise<Map<string, { subject: string; views: number; seconds: number; live: number; lastAt: Date; total: number }[]>> {
   const p = sql.join([...pages]);
-  const r = await sql<{ account_id: string; subject: string; views: unknown; seconds: unknown; live: unknown; last_at: Date }>`
+  const r = await sql<{ account_id: string; subject: string; views: unknown; seconds: unknown; live: unknown; last_at: Date; total: unknown }>`
     WITH s AS (
       SELECT v.account_id, v.subject, count(*) AS views, sum(v.seconds) AS seconds,
              coalesce(sum(v.seconds) FILTER (WHERE v.page = ${LIVE}), 0) AS live, max(v.at) AS last_at
@@ -458,12 +474,13 @@ async function topSubjects(
         FROM collector_view_totals t
        WHERE t.account_id IN (${sql.join([...ids])}) AND t.page IN (${p}) AND t.subject <> ${nil()}),
     g AS (SELECT account_id, subject, sum(views) AS views, sum(seconds) AS seconds, sum(live) AS live, max(last_at) AS last_at FROM s GROUP BY account_id, subject),
-    r AS (SELECT g.*, row_number() OVER (PARTITION BY account_id ORDER BY seconds DESC, views DESC, last_at DESC, subject) AS n FROM g)
-    SELECT account_id, subject, views, seconds, live, last_at FROM r WHERE n <= ${limit} ORDER BY account_id, n`.execute(db);
-  const out = new Map<string, { subject: string; views: number; seconds: number; live: number; lastAt: Date }[]>();
+    r AS (SELECT g.*, row_number() OVER (PARTITION BY account_id ORDER BY seconds DESC, views DESC, last_at DESC, subject) AS n,
+                 count(*) OVER (PARTITION BY account_id) AS total FROM g)
+    SELECT account_id, subject, views, seconds, live, last_at, total FROM r WHERE n > ${offset} AND n <= ${offset + limit} ORDER BY account_id, n`.execute(db);
+  const out = new Map<string, { subject: string; views: number; seconds: number; live: number; lastAt: Date; total: number }[]>();
   for (const x of r.rows) {
     const list = out.get(x.account_id) ?? [];
-    list.push({ subject: x.subject, views: asNumber(x.views), seconds: asNumber(x.seconds), live: asNumber(x.live), lastAt: x.last_at });
+    list.push({ subject: x.subject, views: asNumber(x.views), seconds: asNumber(x.seconds), live: asNumber(x.live), lastAt: x.last_at, total: asNumber(x.total) });
     out.set(x.account_id, list);
   }
   return out;
@@ -474,6 +491,13 @@ async function modelNames(db: Db, ids: readonly string[]): Promise<Map<string, {
   if (ids.length === 0) return new Map();
   const rows = await db.selectFrom('models').select(['id', 'name', 'variant_label']).where('id', 'in', [...new Set(ids)]).execute();
   return new Map(rows.map((m) => [m.id, { name: m.name, variant: m.variant_label }]));
+}
+
+/** Releases by id: their title and whether each is a LIVE RELEASE (the console's page differs). */
+async function dropFacts(db: Db, ids: readonly string[]): Promise<Map<string, { title: string; live: boolean }>> {
+  if (ids.length === 0) return new Map();
+  const rows = await db.selectFrom('drops').select(['id', 'title', 'mode']).where('id', 'in', [...new Set(ids)]).execute();
+  return new Map(rows.map((d) => [d.id, { title: d.title, live: d.mode === 'LIVE' }]));
 }
 
 async function dropTitles(db: Db, ids: readonly string[]): Promise<Map<string, string>> {
@@ -571,7 +595,7 @@ export async function collectorBrowsing(db: Db, accountId: string, opts: { withC
     .limit(1)
     .executeTakeFirst();
   const models = await modelNames(db, topModels.map((m) => m.subject));
-  const titles = await dropTitles(db, topReleases.map((r) => r.subject));
+  const releases = await dropFacts(db, topReleases.map((r) => r.subject));
 
   const startedAt = state?.started_at ?? null;
   let beforeAccount: BeforeAccount;
@@ -597,10 +621,33 @@ export async function collectorBrowsing(db: Db, accountId: string, opts: { withC
     },
     pages: pageShares(pageRows.map((p) => ({ page: p.page, seconds: Number(p.seconds ?? 0) }))),
     models: topModels.map((m) => ({ modelId: m.subject, name: models.get(m.subject)?.name ?? null, variant: models.get(m.subject)?.variant ?? null, views: m.views, seconds: m.seconds, lastAt: m.lastAt })),
-    releases: topReleases.map((r) => ({ dropId: r.subject, title: titles.get(r.subject) ?? null, views: r.views, seconds: r.seconds, liveSeconds: r.live, lastAt: r.lastAt })),
+    modelsViewed: topModels[0]?.total ?? 0,
+    releases: topReleases.map((r) => ({ dropId: r.subject, title: releases.get(r.subject)?.title ?? null, live: releases.get(r.subject)?.live ?? false, views: r.views, seconds: r.seconds, liveSeconds: r.live, lastAt: r.lastAt })),
     devices,
     places: withCities ? places.slice(0, SHEET_PLACES).map((p) => ({ country: p.country, city: p.city, days: p.days, lastDay: dayText(p.lastDay) })) : byCountry(places).slice(0, SHEET_PLACES),
     citiesWithheld: !withCities,
+  };
+}
+
+/**
+ * The client sheet's « Show all » of the models viewed (§3.6 C.11, for a collector with many): every model viewed over
+ * the 13 months and in the summary, the most time first, VIEWED_MODELS_PAGE a page (1 to 2,000). Cities are never in
+ * it, so every role reads it. 404 ACCOUNT_NOT_FOUND for an unknown account.
+ */
+export async function viewedModels(db: Db, accountId: string, opts: { page: number; now: Date }): Promise<ViewedModelsPage> {
+  if (typeof accountId !== 'string' || !UUID_RE.test(accountId)) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+  const id = accountId.toLowerCase();
+  if (!Number.isInteger(opts.page) || opts.page < 1 || opts.page > 2_000) throw validationError('page: a whole number from 1 to 2000.');
+  const account = await db.selectFrom('accounts').select('id').where('id', '=', id).executeTakeFirst();
+  if (!account) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+  const rows = (await topSubjects(db, [id], [MODEL], VIEWED_MODELS_PAGE, opts.now, (opts.page - 1) * VIEWED_MODELS_PAGE)).get(id) ?? [];
+  const total = rows[0]?.total ?? (opts.page > 1 ? ((await topSubjects(db, [id], [MODEL], 1, opts.now)).get(id)?.[0]?.total ?? 0) : 0);
+  const names = await modelNames(db, rows.map((m) => m.subject));
+  return {
+    items: rows.map((m) => ({ modelId: m.subject, name: names.get(m.subject)?.name ?? null, variant: names.get(m.subject)?.variant ?? null, views: m.views, seconds: m.seconds, lastAt: m.lastAt })),
+    total,
+    page: opts.page,
+    pageSize: VIEWED_MODELS_PAGE,
   };
 }
 

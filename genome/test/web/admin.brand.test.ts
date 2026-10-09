@@ -196,7 +196,7 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
         .filter((f) => /^(client-profile|client-notes|owner-intelligence)\./.test(f))
         .map((f) => join(WEB, 'admin', dir, f)),
     );
-    expect(files.map((f) => f.slice(WEB.length))).toEqual(expect.arrayContaining(['/admin/model/client-profile.ts', '/admin/views/client-profile.ts', '/admin/model/client-notes.ts', '/admin/views/client-notes.ts']));
+    expect(files.map((f) => f.slice(WEB.length))).toEqual(expect.arrayContaining(['/admin/model/client-profile.ts', '/admin/views/client-profile.ts', '/admin/model/client-notes.ts', '/admin/views/client-notes.ts', '/admin/model/owner-intelligence.ts', '/admin/views/owner-intelligence.ts']));
     for (const f of files) {
       const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
       expect(code, f).not.toMatch(/atelier|handmade|hand-made|craft/i);

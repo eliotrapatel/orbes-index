@@ -66,6 +66,29 @@ import {
   tagValue,
 } from '../../src/web/admin/model/client-notes.js';
 import { cleanTag, NOTE_MAX, NOTES_SHOWN, TAG_LIMIT, TAG_MAX, type TagSuggestion as ServerTagSuggestion } from '../../src/server/services/client-notes.js';
+import type { OwnerIntelligence as ServerOwnerIntelligence } from '../../src/server/services/owner-intelligence.js';
+import { deviceWords, openedInWords, type ViewedModelsPage as ServerViewedModelsPage } from '../../src/server/services/tracking-reads.js';
+import {
+  beforeAccountText,
+  browsingRows,
+  deviceName,
+  deviceText,
+  durationText,
+  INTELLIGENCE_COPY,
+  intelligenceNote,
+  nothingRecorded,
+  openedInText,
+  originRows,
+  PAGE_WORDS,
+  placeText,
+  releaseTimeText,
+  showAllModels,
+  sourceText,
+  wishMark,
+} from '../../src/web/admin/model/owner-intelligence.js';
+import { VIEW_PAGES } from '../../src/server/db/schema.js';
+import { formatCount } from '../../src/web/admin/format.js';
+import { VIEW_PAGE_NAMES } from '../../src/web/admin/types.js';
 
 /** A server value as JSON carries it: dates become ISO strings. */
 type Json<T> = T extends Date ? string : T extends readonly (infer U)[] ? Json<U>[] : T extends object ? { [K in keyof T]: Json<T[K]> } : T;
@@ -79,6 +102,10 @@ export const clientProfileBack = (p: web.ClientProfile): Json<StaffProfileView> 
 export const clientProfileInputFits = (b: web.ClientProfileInput): z.infer<typeof ownerProfileBody> => b;
 export const privateNotesFit = (n: Json<ServerPrivateNotes>): web.PrivateNotes => n;
 export const tagSuggestionFits = (t: ServerTagSuggestion): web.TagSuggestion => t;
+// Step 5.7: the Intelligence the console reads is the server's, both ways.
+export const intelligenceFits = (i: Json<ServerOwnerIntelligence>): web.OwnerIntelligence => i;
+export const intelligenceBack = (i: web.OwnerIntelligence): Json<ServerOwnerIntelligence> => i;
+export const viewedModelsFits = (p: Json<ServerViewedModelsPage>): web.ViewedModelsPage => p;
 // Step 5.5: what Edit the profile opens on (GET /api/admin/owners/:id/profile) is the server's profile and options.
 export const clientProfileEditFits = (e: { profile: Json<StaffProfileView>; options: Json<Awaited<ReturnType<ProfileService['options']>>> }): web.ClientProfileEdit => e;
 
@@ -524,5 +551,113 @@ describe('the client sheet\'s Tags and private notes (plan CUSTOMER INTELLIGENCE
     expect(olderNotesLabel(51, 50)).toBe('Show the 1 older note');
     expect(olderNotesLabel(50, 50)).toBeNull();
     expect(olderNotesLabel(1_200, 50)).toBe('Show the 1,150 older notes');
+  });
+});
+
+describe('the client sheet\'s Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4.4, §3.4 A.10.5, §3.2 W.9, §3.3 T.4.1, step 5.7)', () => {
+  const browsing = (extra: Partial<web.CollectorBrowsing> = {}): web.CollectorBrowsing => ({
+    recordingSince: '2026-09-01T00:00:00.000Z',
+    keptFrom: '2025-09-09',
+    lastSeen: { at: '2026-10-07T12:02:00.000Z', device: { kind: 'PHONE', system: 'IOS', browser: 'SAFARI', openedIn: 'BROWSER', app: null }, place: { country: 'FR', city: 'Paris' } },
+    activeDays: { last30: 14, last90: 41 },
+    views: { count: 312, seconds: 11_520 },
+    older: { before: '2025-09-08', views: 1_240, seconds: 22_200 },
+    beforeAccount: { kind: 'BROWSED', days: 9, from: '2026-09-02T08:00:00.000Z', views: 46, scans: 2 },
+    scans: { count: 5, beforeAccount: 2, firstAt: '2026-09-12T08:00:00.000Z' },
+    pages: [
+      { page: 'NOW', seconds: 41, share: 41 },
+      { page: 'COLLECTION', seconds: 22, share: 22 },
+      { page: 'RELEASES', seconds: 14, share: 14 },
+      { page: 'MY_PIECES', seconds: 12, share: 12 },
+      { page: 'OTHER', seconds: 11, share: 11 },
+    ],
+    models: [],
+    modelsViewed: 0,
+    releases: [],
+    devices: [],
+    places: [],
+    citiesWithheld: false,
+    ...extra,
+  });
+
+  it('holds its words and its note: an account older than the recording says when it started', () => {
+    expect(INTELLIGENCE_COPY).toMatchObject({ title: 'Intelligence', note: 'Recorded on verify.theorbes.com. Staff only.', loading: 'Reading the intelligence', failed: 'The intelligence could not be read just now.', tryAgain: 'Try again', browsingFailed: 'Browsing could not be read just now.', retry: 'Retry', nothing: 'Nothing recorded yet.', wishlistEmpty: 'No model wished.' });
+    expect(INTELLIGENCE_COPY.wishlistNote).toBe('Private to the client and the team. No count is shown on the model’s sheet.');
+    expect(intelligenceNote('2026-08-01T10:00:00.000Z', '2026-10-12T08:00:00.000Z')).toBe('Recorded on verify.theorbes.com. Staff only. Recording started on 12 OCT 2026.');
+    expect(intelligenceNote('2026-10-13T10:00:00.000Z', '2026-10-12T08:00:00.000Z')).toBe('Recorded on verify.theorbes.com. Staff only.');
+    expect(intelligenceNote('2026-08-01T10:00:00.000Z', null)).toBe('Recorded on verify.theorbes.com. Staff only.');
+    expect([typeof intelligenceFits, typeof intelligenceBack, typeof viewedModelsFits]).toEqual(['function', 'function', 'function']);
+  });
+
+  it('says the origin: the first visit with its time and source, a link with its channel, Before tracking, the latest order with its reference, or No purchase', () => {
+    const link = { kind: 'LINK' as const, label: 'Instagram bio', channel: 'Instagram', linkId: 'l1' };
+    const o: web.OwnerOrigin = {
+      firstVisit: { at: '2026-10-12T19:04:00.000Z', source: link },
+      signUp: { at: '2026-10-13T10:00:00.000Z', source: { kind: 'LINK', label: 'Léa — TikTok', channel: 'Influencers', linkId: 'l2' } },
+      lastOrder: { orderId: 'o1', reference: 'OR-3F9A21C4', paidAt: '2026-10-14T10:00:00.000Z', source: { kind: 'SITE', label: 'instagram.com', channel: null, linkId: null } },
+    };
+    expect(originRows(o)).toEqual([
+      { label: 'First visit', text: '12 OCT 2026 · 21:04 Paris · Instagram bio (Instagram)', linkId: 'l1' },
+      { label: 'Signed up through', text: 'Léa — TikTok (Influencers)', linkId: 'l2' },
+      { label: 'Latest order through', text: 'instagram.com · OR-3F9A21C4', linkId: null },
+    ]);
+    const before: web.OwnerOrigin = { firstVisit: { at: null, source: { kind: 'BEFORE', label: 'Before tracking', channel: null, linkId: null } }, signUp: { at: '2026-08-01T10:00:00.000Z', source: { kind: 'BEFORE', label: 'Before tracking', channel: null, linkId: null } }, lastOrder: null };
+    expect(originRows(before).map((r) => r.text)).toEqual(['Before tracking', 'Before tracking', 'No purchase']);
+    expect(sourceText({ kind: 'CAMPAIGN', label: 'instagram / story / drop-14', channel: null, linkId: null })).toBe('instagram / story / drop-14');
+    expect(sourceText({ kind: 'STAFF', label: 'Console device', channel: null, linkId: null })).toBe('Console device');
+  });
+
+  it('marks a wished model not shown now', () => {
+    expect([wishMark({ state: 'HIDDEN' }), wishMark({ state: 'DISCONTINUED' }), wishMark({ state: 'SHOWN' }), wishMark({ state: 'RESERVED' })]).toEqual(['(hidden)', '(discontinued)', null, null]);
+  });
+
+  it('writes What they look at in T.4.1\'s words, the summary older than 13 months under Views', () => {
+    expect(browsingRows(browsing())).toEqual([
+      { label: 'Last seen', text: '07 OCT 2026 · 14:02 Paris · iPhone · Paris, France' },
+      { label: 'Active days', text: '14 of the last 30 days · 41 of the last 90' },
+      { label: 'Views', text: '312 in the last 13 months · 3 h 12 min', note: `Before 08 SEP 2025: ${formatCount(1_240)} views, 6 h 10 min (summary).` },
+      { label: 'Before the account', text: 'Browsed 9 days before signing up, from 02 SEP 2026: 46 views, 2 scans.' },
+      { label: 'Scans', text: '5 scans · 2 before the account · first on 12 SEP 2026' },
+      { label: 'Pages', text: 'NOW 41 % · The collection 22 % · Releases 14 % · My pieces 12 % · Other 11 %' },
+    ]);
+    expect(beforeAccountText({ kind: 'FIRST_VISIT' })).toBe('Signed up on the first visit.');
+    expect(beforeAccountText({ kind: 'NOTHING' })).toBe('Nothing recorded before the account.');
+    expect(beforeAccountText({ kind: 'OLDER', startedAt: '2026-10-12T08:00:00.000Z' })).toBe('The account is older than the recording, which started on 12 OCT 2026.');
+    // An AUDITOR: the country only.
+    expect(browsingRows(browsing({ lastSeen: { at: '2026-10-07T12:02:00.000Z', device: { kind: 'PHONE', system: 'IOS', browser: 'SAFARI', openedIn: 'BROWSER', app: null }, place: { country: 'FR', city: null } }, older: null }))[0]!.text).toBe('07 OCT 2026 · 14:02 Paris · iPhone · France');
+    expect(nothingRecorded(browsing())).toBe(false);
+    expect(nothingRecorded(browsing({ lastSeen: null, views: { count: 0, seconds: 0 }, scans: { count: 0, beforeAccount: 0, firstAt: null }, older: null }))).toBe(true);
+    // Every page the app records has its words; the console's list is the server's.
+    expect([...VIEW_PAGE_NAMES]).toEqual(Object.values(VIEW_PAGES));
+    for (const page of Object.values(VIEW_PAGES)) expect(PAGE_WORDS[page], page).toBeTruthy();
+  });
+
+  it('names devices, where they were opened and the places as the server\'s words do; times; LIVE rooms; « Show all » while more were viewed', () => {
+    const devices: web.DeviceClassView[] = [
+      { kind: 'PHONE', system: 'IOS', browser: 'SAFARI', openedIn: 'BROWSER', app: null },
+      { kind: 'PHONE', system: 'IOS', browser: 'WEBVIEW', openedIn: 'IN_APP', app: 'INSTAGRAM' },
+      { kind: 'COMPUTER', system: 'MACOS', browser: 'CHROME', openedIn: 'BROWSER', app: null },
+      { kind: 'PHONE', system: 'ANDROID', browser: 'CHROME', openedIn: 'HOME_SCREEN', app: null },
+      { kind: 'UNKNOWN', system: 'OTHER', browser: 'OTHER', openedIn: 'BROWSER', app: null },
+    ];
+    expect(devices.map((d) => [deviceText(d), openedInText(d)])).toEqual([
+      ['iPhone · Safari', 'Browser'],
+      ['iPhone', 'Instagram'],
+      ['Computer · macOS · Chrome', 'Browser'],
+      ['Android phone · Chrome', 'Home screen'],
+      ['Device', 'Browser'],
+    ]);
+    for (const d of devices) {
+      expect(deviceText(d), JSON.stringify(d)).toBe(deviceWords(d, ' · '));
+      expect(openedInText(d)).toBe(openedInWords(d));
+    }
+    expect(deviceName({ kind: 'TABLET', system: 'IOS' })).toBe('iPad');
+    expect([placeText({ country: 'FR', city: 'Paris' }), placeText({ country: 'IT', city: null }), placeText({ country: 'ZZ', city: null })]).toEqual(['Paris, France', 'Italy', 'Unknown country']);
+    expect([durationText(45), durationText(38 * 60), durationText(3 * 3600 + 12 * 60), durationText(7200)]).toEqual(['45 s', '38 min', '3 h 12 min', '2 h']);
+    expect(releaseTimeText({ seconds: 2400, live: true, liveSeconds: 2280 })).toBe('40 min · LIVE room 38 min');
+    expect(releaseTimeText({ seconds: 2400, live: false, liveSeconds: 0 })).toBe('40 min');
+    const m = { modelId: 'm', name: 'MONOLITHE', variant: 'Blue', views: 1, seconds: 10, lastAt: '2026-10-08T10:00:00.000Z' };
+    expect(showAllModels({ models: [m], modelsViewed: 1 })).toBe(false);
+    expect(showAllModels({ models: [m, m, m, m, m], modelsViewed: 1_000 })).toBe(true);
   });
 });

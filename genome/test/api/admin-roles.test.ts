@@ -441,6 +441,8 @@ const PROBES: Probe[] = [
   { group: 'client-sheet', method: 'PUT', url: `/api/admin/owners/${UUID}/profile`, body: INVALID, min: 'OPERATOR' },
   { group: 'client-sheet', method: 'PUT', url: `/api/admin/owners/${UUID}/birth-date`, body: INVALID, min: 'OPERATOR' },
   { group: 'client-sheet', method: 'PUT', url: `/api/admin/owners/${UUID}/default-address`, body: INVALID, min: 'OPERATOR' },
+  { group: 'client-sheet', method: 'GET', url: `/api/admin/owners/${UUID}/intelligence`, min: 'AUDITOR' },
+  { group: 'client-sheet', method: 'GET', url: `/api/admin/owners/${UUID}/intelligence/models?page=2`, min: 'AUDITOR' },
   { group: 'client-sheet', method: 'GET', url: '/api/admin/tags', min: 'AUDITOR' },
   { group: 'client-sheet', method: 'GET', url: `/api/admin/owners/${UUID}/notes?all=1`, min: 'AUDITOR' },
   { group: 'client-sheet', method: 'POST', url: `/api/admin/owners/${UUID}/tags`, body: INVALID, min: 'OPERATOR' },

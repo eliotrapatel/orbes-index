@@ -237,6 +237,27 @@ export type LinkDestination = (typeof LINK_DESTINATIONS)[number];
 export const SOURCE_KINDS = ['LINK', 'CAMPAIGN', 'SITE', 'DIRECT', 'BEFORE', 'STAFF'] as const;
 export type SourceKind = (typeof SOURCE_KINDS)[number];
 
+/**
+ * A remembered device's class (tracking_devices, migration 0042, plan CUSTOMER INTELLIGENCE §3.3 T.6): its kind, its
+ * system, its browser, where the page was opened and that app; how it was first linked to an account. The client sheet's
+ * Devices block (§3.6 C.4.4) names them.
+ */
+export const DEVICE_KINDS = ['PHONE', 'TABLET', 'COMPUTER', 'UNKNOWN'] as const;
+export type DeviceKind = (typeof DEVICE_KINDS)[number];
+export const DEVICE_SYSTEMS = ['IOS', 'ANDROID', 'MACOS', 'WINDOWS', 'CHROMEOS', 'LINUX', 'OTHER'] as const;
+export type DeviceSystem = (typeof DEVICE_SYSTEMS)[number];
+export const DEVICE_BROWSERS = ['SAFARI', 'CHROME', 'FIREFOX', 'EDGE', 'SAMSUNG', 'OPERA', 'WEBVIEW', 'OTHER'] as const;
+export type DeviceBrowser = (typeof DEVICE_BROWSERS)[number];
+export const OPENED_IN = ['BROWSER', 'IN_APP', 'HOME_SCREEN'] as const;
+export type OpenedIn = (typeof OPENED_IN)[number];
+export const IN_APPS = ['INSTAGRAM', 'TIKTOK', 'FACEBOOK', 'THREADS', 'SNAPCHAT', 'PINTEREST', 'LINKEDIN', 'GOOGLE', 'WECHAT', 'LINE', 'OTHER'] as const;
+export type InApp = (typeof IN_APPS)[number];
+export const LINK_VIAS = ['SIGN_UP', 'SIGN_IN', 'SESSION'] as const;
+export type LinkVia = (typeof LINK_VIAS)[number];
+/** The app's screens a view records (schema.ts VIEW_PAGES, in their codes' order). */
+export const VIEW_PAGE_NAMES = ['SCAN', 'NOW', 'RESULT', 'MY_PIECES', 'MY_ORDERS', 'MY_RELEASES', 'PIECE', 'CERTIFICATE', 'COLLECTION', 'MODEL', 'CLUB', 'RELEASES', 'RELEASE', 'LIVE', 'AFTER_ROOM', 'HOW', 'CIRCLE', 'POST', 'ACCOUNT', 'MESSAGES', 'SIGN_IN', 'SIGN_UP', 'SIZES', 'ADDRESSES', 'PROFILE', 'WISHLIST'] as const;
+export type ViewPageName = (typeof VIEW_PAGE_NAMES)[number];
+
 /** The kind of a drop (drops.mode): a DRAW (P-R03) or a LIVE RELEASE, lived in real time. */
 export const DROP_MODES = ['DRAW', 'LIVE'] as const;
 export type DropMode = (typeof DROP_MODES)[number];
@@ -1392,6 +1413,93 @@ export interface PrivateNote {
 export interface PrivateNotes {
   items: PrivateNote[];
   total: number;
+}
+
+// ── The client sheet's Intelligence (plan CUSTOMER INTELLIGENCE §3.6 C.4.4; GET /api/admin/owners/:id/intelligence) ──
+
+/** A block that could not be read: its heading, then its failure line with Try again. */
+export interface FailedBlock {
+  failed: true;
+}
+
+/** A source of visits in words (services/acquisition-reads.ts OriginSource): a link's name and its channel, a campaign, a site, Direct… */
+export interface OriginSource {
+  kind: SourceKind;
+  label: string;
+  channel: string | null;
+  linkId: string | null;
+}
+
+/** The Origin block (§3.4 A.10.5): the first visit, the sign-up's last link, the latest purchase's. */
+export interface OwnerOrigin {
+  firstVisit: { at: Iso | null; source: OriginSource };
+  signUp: { at: Iso; source: OriginSource };
+  lastOrder: { orderId: string; reference: string; paidAt: Iso; source: OriginSource } | null;
+}
+
+/** An open wish as staff read it (services/wishlist.ts StaffWish), the latest first. */
+export interface StaffWish {
+  modelId: string;
+  name: string;
+  variant: { label: string; swatch: string } | null;
+  collection: string | null;
+  addedAt: Iso;
+  state: 'SHOWN' | 'HIDDEN' | 'DISCONTINUED' | 'RESERVED';
+}
+
+/** A device's class, as the reads return it. */
+export interface DeviceClassView {
+  kind: DeviceKind;
+  system: DeviceSystem;
+  browser: DeviceBrowser;
+  openedIn: OpenedIn;
+  app: InApp | null;
+}
+
+/** A model viewed: its name and variant (null names a model no longer found), its views and time, its last view. */
+export interface ViewedModel {
+  modelId: string;
+  name: string | null;
+  variant: string | null;
+  views: number;
+  seconds: number;
+  lastAt: Iso;
+}
+
+/** What they look at, Devices and Places (§3.3 T.4.1; services/tracking-reads.ts CollectorBrowsing). */
+export interface CollectorBrowsing {
+  recordingSince: Iso | null;
+  keptFrom: string;
+  lastSeen: { at: Iso; device: DeviceClassView | null; place: { country: string; city: string | null } | null } | null;
+  activeDays: { last30: number; last90: number };
+  views: { count: number; seconds: number };
+  older: { before: string; views: number; seconds: number } | null;
+  beforeAccount: { kind: 'BROWSED'; days: number; from: Iso; views: number; scans: number } | { kind: 'FIRST_VISIT' } | { kind: 'NOTHING' } | { kind: 'OLDER'; startedAt: Iso };
+  scans: { count: number; beforeAccount: number; firstAt: Iso | null };
+  pages: { page: ViewPageName | 'OTHER'; seconds: number; share: number }[];
+  models: ViewedModel[];
+  modelsViewed: number;
+  releases: { dropId: string; title: string | null; live: boolean; views: number; seconds: number; liveSeconds: number; lastAt: Iso }[];
+  devices: (DeviceClassView & { firstSeenAt: Iso; lastSeenAt: Iso; firstVia: LinkVia })[];
+  places: { country: string; city: string | null; days: number; lastDay: string }[];
+  citiesWithheld: boolean;
+}
+
+/** GET /api/admin/owners/:id/intelligence: four blocks, each failing alone; the engagement null until I2. */
+export interface OwnerIntelligence {
+  engagement: null;
+  origin: OwnerOrigin | FailedBlock;
+  wishlist: StaffWish[] | FailedBlock;
+  browsing: CollectorBrowsing | FailedBlock;
+  recordingSince: Iso | null;
+}
+
+/** GET /api/admin/owners/:id/intelligence/models: « Show all » the models viewed, a page of 50. */
+export interface ViewedModelsPage {
+  items: ViewedModel[];
+  total: number;
+  page: number;
+  pageSize: number;
 }
 
 /** GET /api/admin/tags: a tag in use and how many clients carry it (the three starting examples with 0 while none is). */

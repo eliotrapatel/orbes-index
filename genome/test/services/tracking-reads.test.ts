@@ -178,7 +178,8 @@ describe('the recording\'s reads (plan CUSTOMER INTELLIGENCE §3.3 T.8.6)', () =
         ['MONOLITHE', 'Blue', 1, 100],
         ['MONOLITHE', 'Steel', 1, 60],
       ]);
-      expect(b.releases).toEqual([{ dropId: drop, title: 'MONOLITHE NOIR', views: 2, seconds: 340, liveSeconds: 300, lastAt: new Date('2026-10-08T19:00:00Z') }]);
+      expect(b.modelsViewed).toBe(3);
+      expect(b.releases).toEqual([{ dropId: drop, title: 'MONOLITHE NOIR', live: true, views: 2, seconds: 340, liveSeconds: 300, lastAt: new Date('2026-10-08T19:00:00Z') }]);
       // The device that opened the console is never listed; the latest first.
       expect(b.devices.map((d) => [deviceWords(d, ' · '), d.openedIn, d.app, d.firstVia])).toEqual([
         ['iPhone', 'IN_APP', 'INSTAGRAM', 'SIGN_IN'],
@@ -205,6 +206,19 @@ describe('the recording\'s reads (plan CUSTOMER INTELLIGENCE §3.3 T.8.6)', () =
       expect((await tracking().collectorBrowsing(acc.b!, { withCities: true })).beforeAccount).toEqual({ kind: 'FIRST_VISIT' });
       expect((await tracking().collectorBrowsing(acc.c!, { withCities: true })).beforeAccount).toEqual({ kind: 'NOTHING' });
       expect((await tracking().collectorBrowsing(acc.d!, { withCities: true })).beforeAccount).toEqual({ kind: 'OLDER', startedAt: new Date('2026-09-01T00:00:00Z') });
+    });
+
+    it('pages every model viewed for « Show all » (plan §3.6 C.11), the most time first, 50 a page; 400 for a bad page, 404 for an unknown account', async () => {
+      const first = await tracking().viewedModels(acc.a!, 1);
+      expect(first).toMatchObject({ total: 3, page: 1, pageSize: 50 });
+      expect(first.items.map((m) => [m.name, m.variant, m.seconds])).toEqual([
+        ['ORBITE', null, 900],
+        ['MONOLITHE', 'Blue', 100],
+        ['MONOLITHE', 'Steel', 60],
+      ]);
+      expect(await tracking().viewedModels(acc.a!, 2)).toEqual({ items: [], total: 3, page: 2, pageSize: 50 });
+      await expect(tracking().viewedModels(acc.a!, 0)).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      await expect(tracking().viewedModels('5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6', 1)).rejects.toMatchObject({ code: 'ACCOUNT_NOT_FOUND' });
     });
 
     it('reads nothing for an account with nothing recorded, and 404 for an unknown one', async () => {

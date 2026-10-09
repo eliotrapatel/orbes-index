@@ -5234,6 +5234,27 @@ fieldset.cfield--checks > .cfield__label {
   color: var(--ink-soft);
 }
 
+/* The client sheet's Intelligence (§3.6 C.4.4): a block's note, its tables' titles, the places' foot line. */
+.intelligence__note,
+.intelligence__foot {
+  margin: 0 0 12px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+}
+
+.intelligence__foot {
+  margin: 10px 0 0;
+}
+
+.intelligence__table-title {
+  margin: 22px 0 8px;
+  font-size: var(--fs-nano);
+  font-weight: 400;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
 /* ── Yearly care (BP-19 T6) ─────────────────────────────────────────────── */
 
 /* The name and the address a piece returns to, their lines as the client wrote them. */

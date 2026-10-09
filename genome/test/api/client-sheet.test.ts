@@ -14,7 +14,9 @@
  *    and DELETE …/notes, POST and DELETE …/tags, by role, with the CSRF token and the same origin, and their audits;
  *  - the client sheet's Profile (§3.1 P.6.5, P.6.6, P.9.2, §3.6 C.4.2): in clear for an OPERATOR, withheld for an AUDITOR
  *    with the age band; PUT …/profile, …/birth-date (the reason a private note) and …/default-address for an OPERATOR,
- *    the version's 409 on both sides, an AUDITOR 403; GET …/profile, what Edit the profile opens on (step 5.5).
+ *    the version's 409 on both sides, an AUDITOR 403; GET …/profile, what Edit the profile opens on (step 5.5);
+ *  - the client sheet's Intelligence (§3.6 C.4.4, step 5.7): GET …/intelligence by role, the cities withheld for an
+ *    AUDITOR, and GET …/intelligence/models (« Show all », C.11).
  * Which role reaches which route is test/api/admin-roles.test.ts; the files' contents test/services/shopify.test.ts.
  */
 import { randomUUID } from 'node:crypto';
@@ -499,6 +501,28 @@ describe('The client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P
     expect(masked.profile).toMatchObject({ birthDate: null, phone: null, city: null, instagram: null, address: null, ageBand: '25-34' });
     for (const word of ['1994-03-14', '612345678', 'camille.dl', 'rue de la Paix']) expect(JSON.stringify(masked), word).not.toContain(word);
     expect(errorOf(await op.get(`/api/admin/owners/${randomUUID()}/profile`)).code).toBe('ACCOUNT_NOT_FOUND');
+  });
+
+  it('GET …/intelligence (step 5.7): the origin, the wishlist and the browsing for every role, the cities withheld for an AUDITOR; no engagement before I2; « Show all » the models viewed; 404', async () => {
+    const paris = (await h.ctx.services.places.idOf('FR', 'Paris'))!;
+    await h.ctx.db.insertInto('collector_places').values({ account_id: me.id, place_id: paris, days: 3, first_day: '2026-10-01', last_day: '2026-10-08' }).onConflict((oc) => oc.doNothing()).execute();
+    const res = await op.get(`/api/admin/owners/${me.id}/intelligence`);
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    const i = safeJson(res) as Json;
+    expect(Object.keys(i).sort()).toEqual(['browsing', 'engagement', 'origin', 'recordingSince', 'wishlist']);
+    expect(i.engagement).toBeNull();
+    expect(i.wishlist).toEqual([]);
+    expect(i.origin).toMatchObject({ firstVisit: { source: { kind: expect.any(String) } }, signUp: { source: { kind: expect.any(String) } }, lastOrder: null });
+    expect(i.browsing).toMatchObject({ places: [{ country: 'FR', city: 'Paris', days: 3 }], citiesWithheld: false });
+    const masked = await auditor.get(`/api/admin/owners/${me.id}/intelligence`);
+    expect(masked.statusCode).toBe(200);
+    expect((safeJson(masked) as Json).browsing).toMatchObject({ places: [{ country: 'FR', city: null }], citiesWithheld: true });
+    expect(masked.body).not.toContain('Paris');
+    const models = await op.get(`/api/admin/owners/${me.id}/intelligence/models?page=1`);
+    expect([models.statusCode, safeJson(models)]).toEqual([200, { items: [], total: 0, page: 1, pageSize: 50 }]);
+    expect((await op.get(`/api/admin/owners/${me.id}/intelligence/models?page=0`)).statusCode).toBe(400);
+    expect(errorOf(await op.get(`/api/admin/owners/${randomUUID()}/intelligence`)).code).toBe('ACCOUNT_NOT_FOUND');
   });
 
   it('PUT …/profile: an OPERATOR edits the profile with the version read (409 PROFILE_CHANGED after the client saved); never the date of birth; an AUDITOR 403; the CSRF token and the same origin', async () => {
