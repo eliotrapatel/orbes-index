@@ -56,12 +56,16 @@
  *   purgeDevices  the housekeeping's job `devicePurge` (§3.3 T.10, after `viewPurge`): the devices never linked, not
  *            marked staff, unseen for 13 months and with no row left, DEVICE_PURGE_MAX a pass, after the buffer is
  *            written; their cache entries go with them.
+ *   reads    (§3.3 T.8.6, step 3.9) collectorBrowsing, viewsReport, devicesReport, placesReport, collectorsFor,
+ *            activityOf, segmentCondition and exportColumns: the console's and the export's readings, written in
+ *            services/tracking-reads.ts (with the right of access's `exportedBrowsing`), offered here on this service's
+ *            database and clock. They only read.
  *
  * Nothing here is audited (§3.0 (m)): views are data, not decisions. Nothing reaches the collector: no word, no
  * screen, and the route answers 204 whatever happened. No third party: the rows stay in this database.
  */
 import { BlockList } from 'node:net';
-import { sql } from 'kysely';
+import { sql, type Expression, type SqlBool } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { pgError } from '../db/pg-errors.js';
 import { VIEW_PAGE_CODES, VIEW_PAGES, type LinkVia, type ViewPage } from '../db/schema.js';
@@ -74,6 +78,28 @@ import { SLUG_RE } from './lookbook.js';
 import type { PlaceService } from './places.js';
 import { houseAccount, HouseAccounts, notTestEntrant, TestEntrantAccounts } from './population.js';
 import { parisDay, parisDayStart } from './schedule.js';
+import {
+  activityOf,
+  browsingCondition,
+  collectorBrowsing,
+  collectorsFor,
+  devicesReport,
+  exportColumns,
+  placesReport,
+  viewsReport,
+  type Activity,
+  type BrowsingRule,
+  type CollectorBrowsing,
+  type CollectorsFigure,
+  type CollectorsPage,
+  type DayWindow,
+  type DevicesBy,
+  type DevicesReport,
+  type PlacesReport,
+  type TrackingExportRow,
+  type ViewFilters,
+  type ViewsReport,
+} from './tracking-reads.js';
 
 // ── Constants (in code: no new environment variable, §3.3 T.8.3) ─────────────────────────────────────────────────
 
@@ -1138,6 +1164,53 @@ export class TrackingService {
     }
     this.buffer.dropDevice(id);
     this.remember(deviceHash, { id, staff: true, accountId: known?.account_id ?? null, linkedAt: known?.linked_at ?? null, cls: null, seenAt: now.getTime() });
+  }
+
+  // ── Reads (§3.3 T.8.6; services/tracking-reads.ts) ──────────────────────────────────────────────────────────────
+
+  /** The client sheet's What they look at, Devices and Places (T.4.1); `withCities: false` for an AUDITOR. */
+  collectorBrowsing(accountId: string, opts: { withCities: boolean }): Promise<CollectorBrowsing> {
+    return collectorBrowsing(this.db, accountId, { ...opts, now: this.clock() });
+  }
+
+  /** What they look at, for the Collectors page (T.4.2). */
+  viewsReport(window: DayWindow, filters?: ViewFilters, opts: { compare?: boolean } = {}): Promise<ViewsReport> {
+    return viewsReport(this.db, window, filters, { ...opts, now: this.clock() });
+  }
+
+  /** The Devices panel (T.4.2): every device, the collectors' main devices, or their visits. */
+  devicesReport(window: DayWindow, filters?: ViewFilters, opts: { by?: DevicesBy; compare?: boolean } = {}): Promise<DevicesReport> {
+    return devicesReport(this.db, window, filters, { ...opts, now: this.clock() });
+  }
+
+  /** Counted collectors by their usual place from the connection (T.4.2). */
+  placesReport(filters?: ViewFilters): Promise<PlacesReport> {
+    return placesReport(this.db, filters);
+  }
+
+  /** The collectors behind one figure, a page at a time (the click-through). */
+  collectorsFor(
+    figure: CollectorsFigure,
+    window: DayWindow,
+    filters: ViewFilters | undefined,
+    opts: { page?: number; pageSize?: number; order?: 'TIME' | 'EMAIL'; withCities: boolean },
+  ): Promise<CollectorsPage> {
+    return collectorsFor(this.db, figure, window, filters, { ...opts, now: this.clock() });
+  }
+
+  /** Views, seconds, active Paris days and visits per account in a window. */
+  activityOf(accountIds: readonly string[], window: DayWindow): Promise<{ byAccount: Map<string, Activity>; reachesBackTo: string | null }> {
+    return activityOf(this.db, accountIds, window, { now: this.clock() });
+  }
+
+  /** A BROWSING criterion of Segments (T.4.3) as a condition on `account`, for services/segments.ts. */
+  segmentCondition(rule: BrowsingRule, account: Expression<string>): Expression<SqlBool> {
+    return browsingCondition(rule, account, this.clock());
+  }
+
+  /** The Collectors export's tracking columns per counted collector (T.4.4). */
+  exportColumns(accountIds: readonly string[]): Promise<Map<string, TrackingExportRow>> {
+    return exportColumns(this.db, accountIds, { now: this.clock() });
   }
 }
 

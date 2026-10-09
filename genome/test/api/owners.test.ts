@@ -408,7 +408,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, wishlist: 0, claimCodes: 0, tierGrants: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, wishlist: 0, browsing: 3, claimCodes: 0, tierGrants: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 
@@ -538,6 +538,76 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       // An account that never wished: an empty list.
       const none = safeJson(await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${await accountIdOf((await accountClient(h)).email)}/export`)) as Record<string, any>;
       expect(none.wishlist).toEqual([]);
+    });
+
+    it('holds what the account looked at: its devices in words, its places from the connection, 13 months of views by page and subject, the monthly summaries and the summary before them; its count in account.export (plan CUSTOMER INTELLIGENCE §3.0 (k))', async () => {
+      const category = (await h.ctx.db.selectFrom('models').select('category_id').executeTakeFirstOrThrow()).category_id;
+      const modelId = randomUUID();
+      await h.ctx.db.insertInto('models').values({ id: modelId, category_id: category, name: 'ORBITE', type: 'RING', sku_prefix: `B-${modelId.slice(0, 8)}`, variant_label: 'Blue', variant_swatch: '#1F3A93' }).execute();
+      const owner = await accountClient(h);
+      const id = await accountIdOf(owner.email);
+      const other = await accountIdOf((await accountClient(h)).email);
+      const now = h.clock.now();
+      const ago = (days: number) => new Date(now.getTime() - days * 86_400_000);
+      const hash = () => randomUUID().replace(/-/g, '').padEnd(43, 'x');
+      const device = async (o: { staff?: boolean; app?: boolean } = {}) =>
+        (
+          await h.ctx.db
+            .insertInto('tracking_devices')
+            .values({ device_hash: hash(), kind: 'PHONE', os: 'IOS', browser: o.app ? 'WEBVIEW' : 'SAFARI', opened_in: o.app ? 'IN_APP' : 'BROWSER', in_app: o.app ? 'INSTAGRAM' : null, staff_at: o.staff ? ago(3) : null, first_seen_at: ago(10), last_seen_at: ago(1) })
+            .returning(['id', 'device_hash'])
+            .executeTakeFirstOrThrow()
+        );
+      const phone = await device();
+      const insta = await device({ app: true });
+      const staff = await device({ staff: true });
+      // The latest first: the Instagram browser was last linked a day ago, the phone two.
+      for (const [d, via, last] of [[phone, 'SIGN_UP', 2], [insta, 'SIGN_IN', 1], [staff, 'SIGN_IN', 1]] as const) {
+        await h.ctx.db.insertInto('tracking_device_accounts').values({ device_id: d.id, account_id: id, first_via: via, first_linked_at: ago(9), last_linked_at: ago(last) }).execute();
+      }
+      const paris = (await h.ctx.services.places.idOf('FR', 'Paris'))!;
+      await h.ctx.db.insertInto('collector_places').values({ account_id: id, place_id: paris, days: 4, first_day: '2026-09-01', last_day: '2026-09-20' }).execute();
+      await h.ctx.db
+        .insertInto('collector_views')
+        .values([
+          { at: ago(5), device_id: phone.id, account_id: id, page: 10, subject: modelId, seconds: 30, place_id: paris },
+          { at: ago(4), device_id: phone.id, account_id: id, page: 10, subject: modelId, seconds: 20, place_id: paris },
+          { at: ago(4), device_id: insta.id, account_id: id, page: 2, subject: null, seconds: 12, place_id: null },
+          // Older than 13 months: in the summary only, never read raw.
+          { at: ago(500), device_id: phone.id, account_id: id, page: 2, subject: null, seconds: 99, place_id: null },
+          // Another account's view on the same phone.
+          { at: ago(4), device_id: phone.id, account_id: other, page: 9, subject: null, seconds: 40, place_id: null },
+        ])
+        .execute();
+      await h.ctx.db.insertInto('collector_view_months').values({ account_id: id, month: '2026-09-01', views: 3, seconds: 62, scans: 0, active_days: 2 }).execute();
+      await h.ctx.db.insertInto('collector_view_totals').values({ account_id: id, page: 10, subject: modelId, views: 7, seconds: 300, first_at: new Date('2025-01-01T10:00:00Z'), last_at: new Date('2025-02-01T10:00:00Z') }).execute();
+
+      const res = await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${id}/export`);
+      expect(res.statusCode).toBe(200);
+      const x = safeJson(res) as Record<string, any>;
+      // The browser the account was created on (linked at its sign-up), then the two written here, the latest first.
+      expect(x.browsing.devices.map((d: any) => [d.device, d.openedIn, d.linkedAt])).toEqual([
+        ['iPhone Safari', 'Browser', 'SIGN_UP'],
+        ['iPhone', 'Instagram', 'SIGN_IN'],
+        ['iPhone Safari', 'Browser', 'SIGN_UP'],
+      ]);
+      expect(x.browsing.places).toEqual([{ country: 'FR', city: 'Paris', days: 4, firstDay: '2026-09-01', lastDay: '2026-09-20' }]);
+      expect(x.browsing.views.map((v: any) => [v.page, v.about, v.views, v.seconds])).toEqual([
+        ['NOW', null, 1, 12],
+        ['MODEL', 'ORBITE · Blue', 2, 50],
+      ]);
+      expect(x.browsing.months).toEqual([{ month: '2026-09', views: 3, seconds: 62, scans: 0, activeDays: 2 }]);
+      expect(x.browsing.before).toEqual([{ page: 'MODEL', about: 'ORBITE · Blue', views: 7, seconds: 300, firstAt: '2025-01-01T10:00:00.000Z', lastAt: '2025-02-01T10:00:00.000Z' }]);
+      // No pseudonym, no id of a device, no staff device, no other account's view.
+      for (const d of [phone, insta, staff]) expect(res.body).not.toContain(d.device_hash);
+      expect(res.body).not.toMatch(/"(deviceId|device_id|placeId|place_id|staff_at|staffAt)"/);
+      expect(x.browsing.views.find((v: any) => v.page === 'COLLECTION')).toBeUndefined();
+      const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
+      expect(audit[0]!.details).toMatchObject({ browsing: 8 });
+      expect(JSON.stringify(audit[0]!.details)).not.toMatch(/ORBITE|Paris|iPhone/);
+      // An account with nothing recorded but its sign-up: only the browser it was created on.
+      const none = safeJson(await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${await accountIdOf((await accountClient(h)).email)}/export`)) as Record<string, any>;
+      expect(none.browsing).toEqual({ devices: [expect.objectContaining({ device: 'iPhone Safari', linkedAt: 'SIGN_UP' })], places: [], views: [], months: [], before: [] });
     });
 
     it('holds the tiers\' grants: each GIFT and CREDIT, a credit\'s balance and its uses by order, never who applied them (BP-19 T5)', async () => {
