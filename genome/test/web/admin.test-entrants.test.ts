@@ -80,7 +80,10 @@ function sample(at = '2026-10-07T12:00:02.000Z'): SystemSample {
   };
 }
 
-const status = (latest: SystemSample, history: SystemSample[] = [latest]): SystemStatus => ({ now: latest.at, latest, history });
+/** The visitor data as last measured (plan CUSTOMER INTELLIGENCE §3.4 A.10.7): 12.4 MB, the plan's own line. */
+const VISITOR_DATA = { at: '2026-10-07T07:40:00.000Z', totalBytes: 12.4 * MB, viewsBytes: 7.1 * MB, devicesBytes: 2.2 * MB, visitsBytes: 1 * MB, conversionsBytes: 0.4 * MB, wishesBytes: 0.1 * MB, profilesBytes: 1.6 * MB };
+
+const status = (latest: SystemSample, history: SystemSample[] = [latest], visitorData: SystemStatus['visitorData'] = VISITOR_DATA): SystemStatus => ({ now: latest.at, latest, history, visitorData });
 
 describe('the server’s status: its rows and their states', () => {
   it('says each row as the panel shows it, in its order, every state normal', () => {
@@ -96,6 +99,7 @@ describe('the server’s status: its rows and their states', () => {
       ['ERRORS AND REFUSALS', '0 · 0', 'ERRORS (5XX) · REFUSED (429), LAST MINUTE', 'normal'],
       ['LIVE CONNECTIONS', '1\u2009024', '412 ACCOUNTS · 1 RELEASE', 'normal'],
       ['DATABASE', '12 / 100 · 12 %', 'POOL 8 OF 10 IN USE · 0 WAITING', 'normal'],
+      ['VISITOR DATA', '12.4 MB', 'VIEWS 7.1 · DEVICES 2.2 · VISITS 1.0 · CONVERSIONS 0.4 · WISHES 0.1 · PROFILES 1.6', 'normal'],
       ['EVENT LOOP DELAY p99', '14 ms', 'p50 2 ms · BUSY 12 %', 'normal'],
       ['HEAP', '100 MB / 2.0 GB · 5 %', 'RESIDENT 300 MB', 'normal'],
     ]);
@@ -154,8 +158,14 @@ describe('the server’s status: its rows and their states', () => {
     }
     expect(rows.find((r) => r.id === 'heap')?.state).toBe('normal');
     expect(strainBanner(rows)).toBeNull();
+    // The visitor data not read: unknown, never a strain; read, never a strain whatever its size, and no sparkline
+    // (measured once a day, plan CUSTOMER INTELLIGENCE §3.4 A.10.7).
+    const unread = statusRows(status(s, [s], null)).find((r) => r.id === 'visitor-data')!;
+    expect([unread.value, unread.note, unread.state]).toEqual(['—', 'NOT READ ON THIS SERVER', 'unknown']);
+    const big = statusRows(status(s, [s, s], { ...VISITOR_DATA, totalBytes: 900 * MB })).find((r) => r.id === 'visitor-data')!;
+    expect([big.value, big.state, big.series]).toEqual(['900.0 MB', 'normal', [null, null]]);
     // Before the first sample, nothing is known.
-    const none = statusRows({ now: s.at, latest: null, history: [] });
+    const none = statusRows({ now: s.at, latest: null, history: [], visitorData: null });
     expect(none.every((r) => r.state === 'unknown')).toBe(true);
     expect(statusSummary(none, null)).toBe('NOT READ YET');
   });

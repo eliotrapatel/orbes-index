@@ -13,6 +13,10 @@
  *   http  the responses of the last 60 s (the app's onResponse hook, app.ts): per second their count, their 5xx and 429
  *         and a histogram of their times, for the requests per second and the p95.
  *
+ * Beside the samples, `visitorData`: the bytes of the customer intelligence lot's growing tables as last measured (plan
+ * CUSTOMER INTELLIGENCE §3.4 A.10.7, the daily `intelligence sizes` figures, services/tracking-jobs.ts
+ * IntelligenceSizes), for the 50 MB backup watch: Server status's « Visitor data » line; null when not read.
+ *
  * A value that cannot be read is null (macOS has no /proc nor cgroup, PGlite no pool nor other connections, a file is
  * missing): a sample never throws. Its cost is a few small files, one statfs and one query every 2 s; the query is
  * skipped (its fields null) while the previous one still waits, so a pool at its limit never piles the sampler's reads
@@ -30,6 +34,7 @@ import { getHeapStatistics } from 'node:v8';
 import { sql } from 'kysely';
 import { poolOf, type Db } from '../db/connection.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
+import type { VisitorData } from './tracking-jobs.js';
 
 /** A sample every 2 s… */
 export const SYSTEM_SAMPLE_MS = 2000;
@@ -85,11 +90,15 @@ export interface SystemSample {
   http: { rps: number | null; p95Ms: number | null; errors5xx: number | null; refused429: number | null };
 }
 
-/** GET /api/admin/system/status: the server's time, the newest sample, the last 10 minutes oldest first (the newest included). */
+/**
+ * GET /api/admin/system/status: the server's time, the newest sample, the last 10 minutes oldest first (the newest
+ * included), and the visitor data's bytes as last measured (null: not read).
+ */
 export interface SystemStatusView {
   now: string;
   latest: SystemSample;
   history: SystemSample[];
+  visitorData: VisitorData | null;
 }
 
 /** A test's running maxima while it runs; the 5xx and 429 are the responses counted since it started. */
@@ -306,6 +315,8 @@ export interface SystemStatusDeps {
   /** The samples' `at` and the view's `now` (the app's clock). */
   clock?: Clock;
   log?: Logger;
+  /** The visitor data's bytes as last measured (IntelligenceSizes.visitorData; never throws). Without it, null. */
+  visitorData?: () => Promise<VisitorData | null>;
   /** The sample's period; 0: no timer (tests call `sample()`). */
   intervalMs?: number;
   /** The samples kept. */
@@ -331,6 +342,7 @@ export class SystemStatus {
   readonly http: HttpWindow;
   private readonly db: Db | undefined;
   private readonly live: LiveStreamCounts | undefined;
+  private readonly visitorData: () => Promise<VisitorData | null>;
   private readonly clock: Clock;
   private readonly log: Logger;
   private readonly intervalMs: number;
@@ -352,6 +364,7 @@ export class SystemStatus {
   constructor(deps: SystemStatusDeps = {}) {
     this.db = deps.db;
     this.live = deps.live;
+    this.visitorData = deps.visitorData ?? (async () => null);
     this.clock = deps.clock ?? systemClock;
     this.log = deps.log ?? noopLogger;
     this.intervalMs = deps.intervalMs ?? SYSTEM_SAMPLE_MS;
@@ -389,10 +402,11 @@ export class SystemStatus {
     await this.sampling?.catch(() => undefined);
   }
 
-  /** The newest sample and the last 10 minutes; a first sample taken now when there is none yet. */
+  /** The newest sample and the last 10 minutes; a first sample taken now when there is none yet; the visitor data. */
   async status(): Promise<SystemStatusView> {
     const latest = this.ring.at(-1) ?? (await this.sample());
-    return { now: this.clock().toISOString(), latest, history: [...this.ring] };
+    const visitorData = await this.visitorData().catch(() => null);
+    return { now: this.clock().toISOString(), latest, history: [...this.ring], visitorData };
   }
 
   /** Take a sample (one at a time: a call while one is under way gets that one), keep it, raise the tests' peaks. */

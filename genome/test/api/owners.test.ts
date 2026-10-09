@@ -408,7 +408,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, wishlist: 0, browsing: 3, claimCodes: 0, tierGrants: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, wishlist: 0, browsing: 3, origin: 2, claimCodes: 0, tierGrants: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 
@@ -608,6 +608,66 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       // An account with nothing recorded but its sign-up: only the browser it was created on.
       const none = safeJson(await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${await accountIdOf((await accountClient(h)).email)}/export`)) as Record<string, any>;
       expect(none.browsing).toEqual({ devices: [expect.objectContaining({ device: 'iPhone Safari', linkedAt: 'SIGN_UP' })], places: [], views: [], months: [], before: [] });
+    });
+
+    it('holds where the account came from: its first visit and source, its sign-up\'s and each order\'s last link, in words, never who made a link; its count in account.export (plan CUSTOMER INTELLIGENCE §3.4, §3.0 (k))', async () => {
+      const owner = await accountClient(h);
+      const id = await accountIdOf(owner.email);
+      const maker = await createAdmin(h.ctx, 'OPERATOR');
+      const channel = (await h.ctx.services.links.channels()).find((c) => c.name === 'Instagram')!;
+      const link = await h.ctx.services.links.create({ name: 'Instagram bio', channelId: channel.id, destination: 'NOW' }, { type: 'admin', id: maker.id });
+      const linkSource = (await h.ctx.db.selectFrom('acquisition_sources').select('id').where('link_id', '=', link.id).executeTakeFirstOrThrow()).id;
+      const campaign = (
+        await h.ctx.db.insertInto('acquisition_sources').values({ kind: 'CAMPAIGN', utm_source: 'ig', utm_medium: 'story', utm_campaign: 'drop-14', key: `C:ig\u001fstory\u001fdrop-14\u001f\u001f-${id}` }).returning('id').executeTakeFirstOrThrow()
+      ).id;
+      // The sign-up (through the routes) wrote its first source, Direct, and its SIGNUP conversion; a sign-in on an earlier
+      // device moved the first source to the link, as the attach does.
+      const signedUp = await h.ctx.db.selectFrom('account_sources').select(['first_seen_at', 'set_by']).where('account_id', '=', id).executeTakeFirstOrThrow();
+      expect(signedUp.set_by).toBe('SIGN_UP');
+      const firstSeen = new Date(signedUp.first_seen_at.getTime() - 86_400_000);
+      await h.ctx.db.updateTable('account_sources').set({ first_source_id: linkSource, first_seen_at: firstSeen, set_by: 'SIGN_IN' }).where('account_id', '=', id).execute();
+      const order1 = randomUUID();
+      const order2 = randomUUID();
+      const at = (hours: number) => new Date(h.clock.now().getTime() + hours * 3_600_000);
+      await h.ctx.db
+        .insertInto('acquisition_conversions')
+        .values([
+          { kind: 'ORDER', ref_id: order2, account_id: id, at: at(2), last_source_id: campaign },
+          { kind: 'ORDER', ref_id: order1, account_id: id, at: at(1), last_source_id: linkSource },
+        ])
+        .execute();
+      const signupAt = (await h.ctx.db.selectFrom('acquisition_conversions').select('at').where('kind', '=', 'SIGNUP').where('ref_id', '=', id).executeTakeFirstOrThrow()).at;
+
+      const res = await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${id}/export`);
+      expect(res.statusCode).toBe(200);
+      const x = safeJson(res) as Record<string, any>;
+      expect(x.origin).toEqual({
+        firstVisit: { at: firstSeen.toISOString(), kind: 'LINK', source: 'Instagram bio', channel: 'Instagram' },
+        signUp: { at: signupAt.toISOString(), kind: 'DIRECT', source: 'Direct', channel: null },
+        orders: [
+          { order: `OR-${order1.replace(/-/g, '').slice(0, 8).toUpperCase()}`, at: at(1).toISOString(), kind: 'LINK', source: 'Instagram bio', channel: 'Instagram' },
+          { order: `OR-${order2.replace(/-/g, '').slice(0, 8).toUpperCase()}`, at: at(2).toISOString(), kind: 'CAMPAIGN', source: 'ig / story / drop-14', channel: null },
+        ],
+      });
+      // Never who made the link, nor a source's id, nor the link's id.
+      expect(res.body).not.toContain(maker.email);
+      expect(res.body).not.toContain(maker.id);
+      expect(res.body).not.toContain(link.id);
+      expect(JSON.stringify(x.origin)).not.toMatch(/"(sourceId|source_id|linkId|link_id|createdBy|created_by)"/);
+      const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
+      expect(audit[0]!.details).toMatchObject({ origin: 4 });
+      expect(JSON.stringify(audit[0]!.details)).not.toMatch(/Instagram|drop-14/);
+      // An account made before the recording started: Before tracking, nothing recorded.
+      const started = (await h.ctx.db.selectFrom('acquisition_state').select('tracking_started_at').executeTakeFirstOrThrow()).tracking_started_at;
+      const email = `before-${randomUUID().slice(0, 8)}@example.com`;
+      const before = (await h.ctx.db.insertInto('accounts').values({ email, email_normalized: email, password_hash: 'x', created_at: new Date(started.getTime() - 86_400_000) }).returning('id').executeTakeFirstOrThrow()).id;
+      const old = safeJson(await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${before}/export`)) as Record<string, any>;
+      expect(old.origin).toEqual({
+        firstVisit: { at: null, kind: 'BEFORE', source: 'Before tracking', channel: null },
+        signUp: { at: null, kind: 'BEFORE', source: 'Before tracking', channel: null },
+        orders: [],
+      });
+      expect((await h.ctx.audit.list({ action: 'account.export', targetId: before })).items[0]!.details).toMatchObject({ origin: 0 });
     });
 
     it('holds the tiers\' grants: each GIFT and CREDIT, a credit\'s balance and its uses by order, never who applied them (BP-19 T5)', async () => {

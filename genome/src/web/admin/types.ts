@@ -3433,11 +3433,30 @@ export interface SystemSample {
   http: { rps: number | null; p95Ms: number | null; errors5xx: number | null; refused429: number | null };
 }
 
-/** GET /api/admin/system/status (AUDITOR): the latest sample and the last 10 minutes (300 samples, oldest first). */
+/**
+ * The recorded visitor data's bytes as last measured (plan CUSTOMER INTELLIGENCE §3.4 A.10.7, the daily `intelligence
+ * sizes` figures): in all, then views, devices, visits, conversions, wishes and profiles.
+ */
+export interface VisitorData {
+  at: Iso;
+  totalBytes: number;
+  viewsBytes: number;
+  devicesBytes: number;
+  visitsBytes: number;
+  conversionsBytes: number;
+  wishesBytes: number;
+  profilesBytes: number;
+}
+
+/**
+ * GET /api/admin/system/status (AUDITOR): the latest sample and the last 10 minutes (300 samples, oldest first); the
+ * visitor data as last measured (null: not read).
+ */
 export interface SystemStatus {
   now: Iso;
   latest: SystemSample | null;
   history: SystemSample[];
+  visitorData: VisitorData | null;
 }
 
 /**

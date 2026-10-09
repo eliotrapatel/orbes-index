@@ -1,10 +1,13 @@
 /**
  * GET /api/admin/system/status (test entrants §7): read by every console role from AUDITOR, `{ now, latest, history }`
  * with the sample's fields exactly as the console reads them; the app's sampler times every response, feeds a test's
- * peaks, starts with the app and stops when it closes.
+ * peaks, starts with the app and stops when it closes; `visitorData`, Server status's « Visitor data » line (plan
+ * CUSTOMER INTELLIGENCE §3.4 A.10.7, step 4.10): the daily `intelligence sizes` figures, read once on demand while
+ * the process has none, a failed read tried again after 10 minutes and never an error of the route.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { currentRunPeaks, startRunPeaks, stopRunPeaks, type SystemSample, type SystemStatusView } from '../../src/server/services/system-status.js';
+import { INTELLIGENCE_TABLES, intelligenceSizes, IntelligenceSizes, visitorDataOf } from '../../src/server/services/tracking-jobs.js';
 import { adminClient, createHarness, errorOf, type Client, type Harness } from './support.js';
 
 const URL = '/api/admin/system/status';
@@ -33,7 +36,7 @@ describe('GET /api/admin/system/status', () => {
     const res = await auditor.get(URL);
     expect(res.statusCode).toBe(200);
     const body = res.json() as SystemStatusView;
-    expect(Object.keys(body).sort()).toEqual(['history', 'latest', 'now']);
+    expect(Object.keys(body).sort()).toEqual(['history', 'latest', 'now', 'visitorData']);
     expect(new Date(body.now).toISOString()).toBe(body.now);
     expect(body.history.length).toBeGreaterThanOrEqual(1);
     expect(body.history.length).toBeLessThanOrEqual(300);
@@ -52,6 +55,45 @@ describe('GET /api/admin/system/status', () => {
     expect(s.node.rssBytes).toBeGreaterThan(0);
     for (const v of Object.values(s.db)) expect(v).toBeNull();
     expect(s.live).toEqual({ streams: 0, releases: 0, accounts: 0 });
+  });
+
+  it('carries the visitor data as last measured: in all and by part, measured once on demand, then the daily figures', async () => {
+    // Plan CUSTOMER INTELLIGENCE §3.4 A.10.7: the bytes of the lot's growing tables (the `intelligence sizes` figures).
+    const first = ((await auditor.get(URL)).json() as SystemStatusView).visitorData!;
+    expect(Object.keys(first).sort()).toEqual(['at', 'conversionsBytes', 'devicesBytes', 'profilesBytes', 'totalBytes', 'viewsBytes', 'visitsBytes', 'wishesBytes']);
+    const tables = await intelligenceSizes(h.t.db);
+    expect(Object.keys(tables).sort()).toEqual([...INTELLIGENCE_TABLES].sort());
+    expect(first).toEqual(visitorDataOf(tables, new Date(first.at)));
+    expect(first.totalBytes).toBe(first.viewsBytes + first.devicesBytes + first.visitsBytes + first.conversionsBytes + first.wishesBytes + first.profilesBytes);
+    expect(first.viewsBytes).toBe(tables.collector_views! + tables.view_daily_stats!);
+    expect(first.profilesBytes).toBe(tables.account_profiles! + tables.account_tastes!);
+    // Kept: the next read is the same measure, until the daily job measures again.
+    expect(((await auditor.get(URL)).json() as SystemStatusView).visitorData).toEqual(first);
+    h.clock.advance(60_000);
+    await h.ctx.services.intelligenceSizes.measure();
+    expect(((await auditor.get(URL)).json() as SystemStatusView).visitorData!.at).toBe(new Date(h.clock.now()).toISOString());
+  });
+
+  it('says null when the visitor data cannot be read, tries again 10 minutes later, and the status still answers', async () => {
+    let now = Date.parse('2026-10-09T07:40:00Z');
+    let broken = true;
+    const db = new Proxy(h.t.db, {
+      get: (target, key) => {
+        if (broken && key === 'getExecutor') return () => { throw new Error('database unavailable'); };
+        const v = Reflect.get(target, key) as unknown;
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    });
+    const sizes = new IntelligenceSizes(db, () => new Date(now));
+    expect(await sizes.visitorData()).toBeNull();
+    broken = false;
+    now += 9 * 60_000;
+    expect(await sizes.visitorData()).toBeNull();
+    now += 60_000;
+    expect((await sizes.visitorData())?.at).toBe('2026-10-09T07:50:00.000Z');
+    const { SystemStatus } = await import('../../src/server/services/system-status.js');
+    const failing = new SystemStatus({ intervalMs: 0, visitorData: () => Promise.reject(new Error('no')) });
+    expect((await failing.status()).visitorData).toBeNull();
   });
 
   it("times every response: the requests per second and the p95 of the last 60 s", async () => {

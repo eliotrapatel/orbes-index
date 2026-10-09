@@ -14,9 +14,12 @@
  *    server cannot read here (macOS, PGlite) is unknown, never a strain.
  *  - The banner when a row is red, THE SERVER IS STRAINED: <its rows>, so the owner knows when to STOP a test; the
  *    panel's line when it is folded.
+ *  - Under the database's row, VISITOR DATA (plan CUSTOMER INTELLIGENCE §3.4 A.10.7): the bytes of the recorded visitor
+ *    data as last measured (the daily `intelligence sizes` figures), in all and by part, in MB, for the 50 MB backup
+ *    watch; never a strain, unknown while not read; no sparkline (measured once a day).
  */
 import { formatCount, formatDateTime } from '../format.js';
-import type { SystemSample, SystemStatus } from '../types.js';
+import type { SystemSample, SystemStatus, VisitorData } from '../types.js';
 import type { Point } from './analytics.js';
 import type { Tone } from './tone.js';
 
@@ -134,6 +137,18 @@ export function ceilingOf(series: readonly (number | null)[], limit?: number | n
   return top > 0 ? top : 1;
 }
 
+const MIB = 1024 ** 2;
+/** `7.1`: bytes in MB (1 024-based, as formatBytes), one decimal. */
+const inMb = (n: number): string => (n / MIB).toFixed(1);
+
+/** The VISITOR DATA row's value and note: `12.4 MB`, `VIEWS 7.1 · DEVICES 2.2 · VISITS 1.0 · CONVERSIONS 0.4 · WISHES 0.1 · PROFILES 1.6`. */
+export function visitorDataWords(v: VisitorData): { value: string; note: string } {
+  return {
+    value: `${inMb(v.totalBytes)} MB`,
+    note: `VIEWS ${inMb(v.viewsBytes)} · DEVICES ${inMb(v.devicesBytes)} · VISITS ${inMb(v.visitsBytes)} · CONVERSIONS ${inMb(v.conversionsBytes)} · WISHES ${inMb(v.wishesBytes)} · PROFILES ${inMb(v.profilesBytes)}`,
+  };
+}
+
 /** The rows of the panel from the server's answer (its latest sample; the history for the sparklines). */
 export function statusRows(s: SystemStatus): StatusRow[] {
   const l: SystemSample | null = s.latest;
@@ -234,6 +249,10 @@ export function statusRows(s: SystemStatus): StatusRow[] {
       series((x) => x.db.connections),
       maxConns,
     ),
+    (() => {
+      const v = s.visitorData ? visitorDataWords(s.visitorData) : null;
+      return row('visitor-data', 'VISITOR DATA', v?.value ?? '—', v?.note ?? '', v ? 'normal' : 'unknown', hist.map(() => null));
+    })(),
     row(
       'loop',
       'EVENT LOOP DELAY p99',

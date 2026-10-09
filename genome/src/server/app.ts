@@ -144,7 +144,7 @@ export async function buildApp(ctx: AppContext, opts: BuildAppOptions = {}): Pro
   // The server's status (services/system-status.ts, `app.systemStatus`): a sample every 2 s for the console's panel and
   // a test's peaks, every response timed into its last 60 s (a LIVE stream served, open for minutes, is not a response
   // time; a stream refused is counted); started when the app is ready, stopped when it closes.
-  const systemStatus = new SystemStatus({ db: ctx.db, live: liveHub, clock: ctx.clock, log: ctx.log });
+  const systemStatus = new SystemStatus({ db: ctx.db, live: liveHub, clock: ctx.clock, log: ctx.log, visitorData: () => ctx.services.intelligenceSizes.visitorData() });
   app.decorate('systemStatus', systemStatus);
   app.addHook('onResponse', async (request, reply) => {
     if (reply.statusCode === 200 && (LIVE_STREAM_ROUTES as readonly string[]).includes(request.routeOptions.url ?? '')) return;

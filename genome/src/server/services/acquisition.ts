@@ -37,6 +37,9 @@
  *            conversions job.
  *   jobs     (§3.4 A.8, step 4.5; services/acquisition-jobs.ts) recordConversions, summariseDays and purge, run by the
  *            housekeeping (context.ts) in the lot's order (§3.0 (f)).
+ *   reads    (§3.4 A.10.5, A.10.6, §3.0 (k), step 4.10; services/acquisition-reads.ts) originOf, the client sheet's
+ *            Origin block; exportColumns, the Collectors export's columns; the right of access's `origin` is
+ *            `exportedOrigin`, read in the export's own transaction (services/owners.ts).
  *
  * Nothing here is audited at boot: the presets are the house's words, written once, as the stock's are. No third party:
  * nothing leaves this database.
@@ -46,6 +49,7 @@ import { inTransaction, type Db } from '../db/connection.js';
 import type { LinkVia, SourceKind } from '../db/schema.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 import { purgeTouches, recordConversions, summariseDays, type ConversionsOutcome } from './acquisition-jobs.js';
+import { exportColumns, originOf, type AcquisitionExportRow, type OriginOf } from './acquisition-reads.js';
 import { referrerHost, SITE_RE } from './referrers.js';
 import { parisDay, parisDayStart } from './schedule.js';
 
@@ -418,6 +422,16 @@ export class AcquisitionService {
   /** Job `acquisitionPurge` (§3.4 A.8 item 3): the visits past their 13 months, once summarised; the rows deleted. */
   purge(now: Date = this.clock()): Promise<number> {
     return purgeTouches(this.db, now);
+  }
+
+  /** The client sheet's Origin block (§3.4 A.10.5): see services/acquisition-reads.ts. 404 ACCOUNT_NOT_FOUND. */
+  originOf(accountId: string): Promise<OriginOf> {
+    return originOf(this.db, accountId);
+  }
+
+  /** The Collectors export's acquisition columns (§3.4 A.10.6), counted collectors only: see services/acquisition-reads.ts. */
+  exportColumns(accountIds: readonly string[]): Promise<Map<string, AcquisitionExportRow>> {
+    return exportColumns(this.db, accountIds);
   }
 
   /** The recording's start (`acquisition_state.tracking_started_at`), or null before `prepare` ran. */

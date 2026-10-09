@@ -154,9 +154,9 @@ describe.skipIf(!HAS_CHROMIUM)('test entrants and the server’s status in the c
 
     const p = await open(ADMIN);
     await go(p, `#/club/drops/${drop.id}`, 'MONOLITHE — release I');
-    // The Server panel on the right: its twelve rows, read from the server.
+    // The Server panel on the right: its thirteen rows (VISITOR DATA under the database), read from the server.
     await p.waitForSelector('[data-testid=server-rows]');
-    expect(await p.locator('[data-testid=server-rows] .sstatus__row').count()).toBe(12);
+    expect(await p.locator('[data-testid=server-rows] .sstatus__row').count()).toBe(13);
     const [main, aside] = await Promise.all([p.locator('.with-server__main').boundingBox(), p.locator('.with-server__aside').boundingBox()]);
     expect(aside!.x).toBeGreaterThan(main!.x + main!.width);
     expect(await p.locator('[data-testid=server-toggle]').isVisible()).toBe(false);

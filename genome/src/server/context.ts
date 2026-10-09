@@ -48,7 +48,7 @@ import { TasteService } from './services/tastes.js';
 import { ProfileService } from './services/profiles.js';
 import { aggregateWishMonths, purgeWishHistory, WishlistService } from './services/wishlist.js';
 import { morningWindowOpen, parisDay } from './services/schedule.js';
-import { aggregateViews, intelligenceSizes, purgeViews } from './services/tracking-jobs.js';
+import { aggregateViews, IntelligenceSizes, purgeViews } from './services/tracking-jobs.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -189,6 +189,8 @@ export interface AppServices {
   links: LinkService;
   /** What the links, tags and sites brought in, first and last link (plan CUSTOMER INTELLIGENCE §3.4 A.7.1, A.10): reads only. */
   acquisitionReport: AcquisitionReportService;
+  /** The lot's growing tables' bytes as last measured (plan CUSTOMER INTELLIGENCE §3.3 T.10, §3.4 A.10.7): the `intelligence sizes` line and Server status's « Visitor data ». */
+  intelligenceSizes: IntelligenceSizes;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
   suppliers: SupplierService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
@@ -332,6 +334,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const acquisition = new AcquisitionService({ db, publicOrigin: config.publicOrigin, clock, log });
     const links = new LinkService({ db, audit, publicOrigin: config.publicOrigin, clock });
     const acquisitionReport = new AcquisitionReportService({ db, links });
+    const intelligenceSizes = new IntelligenceSizes(db, clock, log);
     // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
     // The link attaches the device's visits in its own transaction (§3.3 T.8.4 step 7, §3.4 A.4).
     const tracking = new TrackingService({
@@ -404,6 +407,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       acquisition,
       links,
       acquisitionReport,
+      intelligenceSizes,
       suppliers,
       supplierOrders,
       receptions,
@@ -645,7 +649,7 @@ export function startHousekeeping(
     const today = parisDay(ctx.clock());
     if (morning && sizesDay !== today) {
       const measured = await job('sizes', async () => {
-        const tables = await intelligenceSizes(ctx.db);
+        const tables = await ctx.services.intelligenceSizes.measure();
         const total = Object.values(tables).reduce((a, b) => a + b, 0);
         ctx.log.info({ tables, total }, 'intelligence sizes');
         return Object.keys(tables).length;

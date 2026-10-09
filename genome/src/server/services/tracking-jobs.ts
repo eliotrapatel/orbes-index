@@ -32,7 +32,9 @@
  *               fold: the daily totals keep them.
  *   devicePurge TrackingService.purgeDevices (services/tracking.ts), after viewPurge.
  *   sizes       intelligenceSizes: once a Paris day in the window, `pg_total_relation_size` of the lot's growing
- *               tables (those that exist), for the `intelligence sizes` log line (the 50 MB backup watch, §8).
+ *               tables (those that exist), for the `intelligence sizes` log line (the 50 MB backup watch, §8), kept by
+ *               IntelligenceSizes (`ctx.services.intelligenceSizes`) for Server status's « Visitor data » line (§3.4
+ *               A.10.7, step 4.10): the last figures measured, read once on demand while this process has none.
  *
  * Every bound is a Paris day or month computed here in JavaScript (services/schedule.ts) and passed to SQL as
  * timestamptz, so PostgreSQL and PGlite agree whatever time-zone data they carry (§3.0 (e)).
@@ -40,6 +42,7 @@
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { VIEW_PAGE_CODES } from '../db/schema.js';
+import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 import { UNKNOWN_COUNTRY } from './scan-stats.js';
 import { parisDay, parisDayStart, parisMonthStart } from './schedule.js';
 import { countedViewRow, lastDayOfMonth, lockViewsDaily, monthWritten, nextParisDay, NIL_UUID, viewHistoryCutoff, viewsCountedThrough } from './tracking.js';
@@ -252,4 +255,82 @@ export async function intelligenceSizes(db: Db): Promise<Record<string, number>>
      WHERE to_regclass(t.name) IS NOT NULL
      ORDER BY t.n`.execute(db);
   return Object.fromEntries(r.rows.map((row) => [row.name, Number(row.bytes)]));
+}
+
+/**
+ * Server status's « Visitor data » line (§3.4 A.10.7): the bytes of the lot's growing tables (the `intelligence sizes`
+ * figures), in all and by part: views (`collector_views` and `view_daily_stats`), devices, visits
+ * (`acquisition_touches`), conversions, wishes, profiles (`account_profiles` and `account_tastes`). `at`: when measured.
+ */
+export interface VisitorData {
+  at: string;
+  totalBytes: number;
+  viewsBytes: number;
+  devicesBytes: number;
+  visitsBytes: number;
+  conversionsBytes: number;
+  wishesBytes: number;
+  profilesBytes: number;
+}
+
+/** The « Visitor data » parts of an `intelligence sizes` measure (a table not there yet counts 0). */
+export function visitorDataOf(tables: Readonly<Record<string, number>>, at: Date): VisitorData {
+  const of = (...names: (typeof INTELLIGENCE_TABLES)[number][]) => names.reduce((n, t) => n + (tables[t] ?? 0), 0);
+  return {
+    at: at.toISOString(),
+    totalBytes: Object.values(tables).reduce((a, b) => a + b, 0),
+    viewsBytes: of('collector_views', 'view_daily_stats'),
+    devicesBytes: of('tracking_devices'),
+    visitsBytes: of('acquisition_touches'),
+    conversionsBytes: of('acquisition_conversions'),
+    wishesBytes: of('account_wishes'),
+    profilesBytes: of('account_profiles', 'account_tastes'),
+  };
+}
+
+/** A failed on-demand read is tried again after this long (Server status asks every 2 s). */
+export const VISITOR_DATA_RETRY_MS = 10 * 60_000;
+
+/**
+ * The last `intelligence sizes` figures of this process (`ctx.services.intelligenceSizes`): the housekeeping's `sizes`
+ * job measures them once a Paris day in the morning window; Server status reads them (`visitorData`), and while this
+ * process has measured none yet (a boot outside the window) reads them once on demand, a failure tried again after
+ * VISITOR_DATA_RETRY_MS. One query; never two at once.
+ */
+export class IntelligenceSizes {
+  private latest: VisitorData | null = null;
+  private measuring: Promise<Record<string, number>> | null = null;
+  private failedAt = -Infinity;
+
+  constructor(
+    private readonly db: Db,
+    private readonly clock: Clock = systemClock,
+    private readonly log: Logger = noopLogger,
+  ) {}
+
+  /** Measure now (the daily job): the tables' bytes, kept for Server status. Throws on a database failure. */
+  measure(): Promise<Record<string, number>> {
+    this.measuring ??= intelligenceSizes(this.db)
+      .then((tables) => {
+        this.latest = visitorDataOf(tables, this.clock());
+        return tables;
+      })
+      .finally(() => {
+        this.measuring = null;
+      });
+    return this.measuring;
+  }
+
+  /** The last figures; measured now when this process has none. Never throws: null when they cannot be read. */
+  async visitorData(): Promise<VisitorData | null> {
+    if (this.latest) return this.latest;
+    if (this.clock().getTime() - this.failedAt < VISITOR_DATA_RETRY_MS) return null;
+    try {
+      await this.measure();
+    } catch (e) {
+      this.failedAt = this.clock().getTime();
+      this.log.warn({ err: { message: (e as Error)?.message } }, 'visitor data not measured');
+    }
+    return this.latest;
+  }
 }
