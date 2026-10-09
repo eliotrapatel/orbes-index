@@ -7,6 +7,8 @@
  *    carry, ties to the earliest published; a main model's own label offered; a model without variants offers none;
  *  - `write` saves the whole set: a key kept keeps its `created_at`, a retired one may be kept and never newly added, 31
  *    of a kind refused; it returns the counts;
+ *  - the counts `write` returns go into YOUR PROFILE's one `account.profile.update`, under the staff member when Client
+ *    Services edit them, never the words;
  *  - `read` marks `retired` a choice whose variant was renamed, whose model was discontinued, hidden or moved to the
  *    salon, and takes the catalogue's words for the others.
  */
@@ -15,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { inTransaction } from '../../src/server/db/connection.js';
 import type { LookbookState } from '../../src/server/db/schema.js';
 import { DomainError } from '../../src/server/errors.js';
-import { createHarness, type Harness } from '../api/support.js';
+import { createAdmin, createHarness, type Harness } from '../api/support.js';
 import { createAccount } from '../support/live.js';
 
 async function refusal(p: Promise<unknown>): Promise<{ code: string; status: number; message: string }> {
@@ -219,5 +221,24 @@ describe('YOUR TASTES (plan CUSTOMER INTELLIGENCE §3.2 W.5)', () => {
     // Shown again: the same key is current again, by itself.
     await h.t.db.updateTable('models').set({ lookbook: 'PUBLIC' }).where('id', '=', cuff).execute();
     expect((await svc().read(h.t.db, a.id)).finishes.find((f) => f.key === 'ROSE GOLD')).toEqual({ key: 'ROSE GOLD', label: 'Rose gold', swatch: '#B76E79', retired: false });
+  });
+  it('puts the counts write returns in the profile\'s one account.profile.update, under the staff member when Client Services edit them, never the words', async () => {
+    await clearModels();
+    const main = await model({ type: 'RING', label: 'Steel', swatch: '#888888' });
+    await model({ type: 'RING', variantOf: main, label: 'Gold', swatch: '#C9A227' });
+    await model({ type: 'CUFF' });
+    const a = await createAccount(h.t.db);
+    const staff = { type: 'admin' as const, id: (await createAdmin(h.ctx, 'OPERATOR')).id };
+    await h.ctx.services.profiles.save(a.id, { version: 0, tastes: { pieces: ['RING'], finishes: ['GOLD'] } }, a.actor);
+    await h.ctx.services.profiles.saveByStaff(a.id, { version: 1, tastes: { pieces: ['RING', 'CUFF'], finishes: ['STEEL'] } }, staff);
+    const entries = await h.t.db.selectFrom('audit_logs').select(['actor_type', 'actor_id', 'details']).where('target_id', '=', a.id).where('action', '=', 'account.profile.update').orderBy('id').execute();
+    expect(entries).toEqual([
+      { actor_type: 'account', actor_id: a.id, details: { by: 'collector', fields: ['tastes'], tastes: { pieces: 1, finishes: 1, added: 2, removed: 0 } } },
+      { actor_type: 'admin', actor_id: staff.id, details: { by: 'staff', fields: ['tastes'], tastes: { pieces: 2, finishes: 1, added: 2, removed: 1 } } },
+    ]);
+    // No audit entry of the tastes' own.
+    expect(await h.t.db.selectFrom('audit_logs').select('id').where('action', 'like', '%taste%').execute()).toEqual([]);
+    const text = JSON.stringify(entries);
+    for (const w of ['RING', 'CUFF', 'GOLD', 'Gold', 'STEEL', 'Steel']) expect(text, w).not.toContain(w);
   });
 });

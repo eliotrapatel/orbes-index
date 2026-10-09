@@ -11,10 +11,14 @@
  *   remove      a deleted row (the collector's own data, as YOUR SIZES); the default removed, the oldest left becomes the
  *               default. An order keeps its own copy: removing an address never changes an order.
  *   makeDefault one default per account (`account_addresses_one_default`).
+ *   setDefaultByStaff  Client Services' Edit the address on the client sheet (plan CUSTOMER INTELLIGENCE §3.1 P.6.6):
+ *               the default address changed in place, or created as the default when there is none; a LOCKED account
+ *               included, a DELETED one refused (409 ACCOUNT_DELETED). The other saved addresses are never touched.
  *
  * Each write takes the account FOR SHARE (403 ACCOUNT_LOCKED for a locked account) and then the account's addresses
  * lock (ADVISORY_LOCK.ACCOUNT_ADDRESSES), so two writes at once keep the limit and the one default. Audited
- * `account.address.create`, `.update`, `.remove`, `.default` with the address's id and country only, never its words.
+ * `account.address.create`, `.update`, `.remove`, `.default` with the address's id and country only, never its words
+ * (`by: 'staff'` added when Client Services wrote it).
  * The order's own address is OrderService.setAddress's (services/orders.ts), which may save a new address here too.
  */
 import { advisoryXactLock, ADVISORY_LOCK, inTransaction, type Db } from '../db/connection.js';
@@ -24,6 +28,7 @@ import { isCountryCode, PHONE_RE } from '../../shared/countries.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditRecordInput, AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
+import { accountDeleted } from './profiles.js';
 
 /** The bounds of a saved address (migration 0039's CHECKs) and how many an account keeps. */
 export const ADDRESS_LIMITS = Object.freeze({ saved: 5, name: 200, address: 1000 });
@@ -241,6 +246,35 @@ export class AddressService {
         tx,
       );
     });
+  }
+
+  /**
+   * Client Services' Edit the address (PUT /api/admin/owners/:id/default-address, OPERATOR): the account's default
+   * address takes the four fields in place, or, without one, a new address is saved as the default (409 ADDRESS_LIMIT
+   * stays as a guard at five). The account FOR SHARE whatever its status but DELETED (409 ACCOUNT_DELETED), then its
+   * addresses' lock. Audited `account.address.update` / `.create` as the collector's, with `by: 'staff'`; the same
+   * fields again change nothing.
+   */
+  async setDefaultByStaff(accountId: string, input: unknown, actor: Actor): Promise<AccountAddresses> {
+    const id = knownAccount(accountId);
+    const a = checkAddress(input);
+    await inTransaction(this.db, async (tx) => {
+      const account = await tx.selectFrom('accounts').select('status').where('id', '=', id).forShare().executeTakeFirst();
+      if (!account) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+      if (account.status === 'DELETED') throw accountDeleted();
+      await lockAddresses(tx, id);
+      const row = await tx.selectFrom('account_addresses').selectAll().where('account_id', '=', id).where('is_default', '=', true).forUpdate().executeTakeFirst();
+      if (!row) {
+        const { note } = await insertAddress(tx, id, a, true, actor, this.clock());
+        await this.audit.record({ ...note, details: { ...note.details, by: 'staff' } }, tx);
+        return;
+      }
+      const fields = (['name', 'address', 'country', 'phone'] as const).filter((k) => row[k] !== a[k]);
+      if (fields.length === 0) return;
+      await tx.updateTable('account_addresses').set({ ...a, updated_at: this.clock() }).where('id', '=', row.id).execute();
+      await this.audit.record({ actor, action: 'account.address.update', targetType: 'account', targetId: id, details: { addressId: row.id, country: a.country, fields, by: 'staff' } }, tx);
+    });
+    return this.list(id);
   }
 
   /** MAKE DEFAULT: one default per account. Audited `account.address.default`; already the default, nothing changes. */

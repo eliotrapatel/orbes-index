@@ -45,6 +45,7 @@ import { GuaranteeService } from './services/guarantees.js';
 import { SizeService } from './services/sizes.js';
 import { AddressService } from './services/addresses.js';
 import { TasteService } from './services/tastes.js';
+import { ProfileService } from './services/profiles.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -166,6 +167,8 @@ export interface AppServices {
   addresses: AddressService;
   /** YOUR TASTES (plan CUSTOMER INTELLIGENCE §3.2 W.5): the favourite pieces and finishes, chosen from what THE COLLECTION shows. */
   tastes: TasteService;
+  /** YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1): the names, country, city, phone, date of birth, Instagram, tastes and how they heard of ORBES; the console's answers to that question. */
+  profiles: ProfileService;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
   suppliers: SupplierService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
@@ -302,6 +305,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const sizes = new SizeService({ db, audit, clock });
     const addresses = new AddressService({ db, audit, clock });
     const tastes = new TasteService({ db, clock });
+    const profiles = new ProfileService({ db, audit, tastes, clock });
     const suppliers = new SupplierService({ db, audit, clock });
     const supplierOrders = new SupplierOrderService({ db, audit, clock });
     const logistics = new LogisticsService({ db, audit, stock, verification, warranty, clock });
@@ -354,6 +358,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       sizes,
       addresses,
       tastes,
+      profiles,
       suppliers,
       supplierOrders,
       receptions,
@@ -404,6 +409,9 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     // The tiers' grants of the accounts already at PLATINE or PALLADIUM (plan NEXT-NINE, BP-19 T5).
     const grants = await services.tierGrants.prepare();
     if (grants > 0) log.info({ grants }, 'tier grants ready');
+    // The first boot's answers to « How did you hear about ORBES? » (plan CUSTOMER INTELLIGENCE §3.1 P.3.4).
+    const heard = await services.profiles.prepare();
+    if (heard.length > 0) log.info({ heard }, 'sign-up answers ready');
     // The receptions' issuing worker: what the last process left confirmed is issued, then it polls (§3.5.6.5).
     if (overrides.timers ?? config.env !== 'test') services.receptions.start();
     return ctx;

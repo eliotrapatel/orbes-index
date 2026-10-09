@@ -11,8 +11,12 @@
  *  - a LOCKED account changes nothing (403 ACCOUNT_LOCKED);
  *  - two creations at once keep the limit and the one default;
  *  - audited `account.address.create`, `.update`, `.remove`, `.default` with the address's id and country, never its words;
- *  - exported to its account under the right of access; the registration country preselects COUNTRY.
+ *  - exported to its account under the right of access; the registration country preselects COUNTRY;
+ *  - Client Services' Edit the address (plan CUSTOMER INTELLIGENCE §3.1 P.6.6, `setDefaultByStaff`): the default
+ *    changed in place, or created as the default; a LOCKED account included, a DELETED one refused; the other
+ *    addresses untouched; audited with `by: 'staff'`, never the words.
  */
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
 import type { Actor } from '../../src/server/types.js';
@@ -158,5 +162,41 @@ describe('YOUR ADDRESSES (plan NEXT LOT §3.6.B)', () => {
     expect(await refusal(svc().remove(a.id, second, a.actor))).toEqual(locked);
     expect(await refusal(svc().makeDefault(a.id, second, a.actor))).toEqual(locked);
     expect((await svc().list(a.id)).addresses).toHaveLength(1);
+  });
+  it('lets Client Services edit the default address in place, or save the first one as the default; a LOCKED account included, a DELETED one refused; the other addresses untouched; audited by: staff, never the words', async () => {
+    const operator: Actor = { type: 'admin', id: (await createAdmin(h.ctx, 'OPERATOR')).id };
+    const a = await createAccount(h.t.db);
+    // None saved: the first is created as the default.
+    const created = await svc().setDefaultByStaff(a.id, PARIS, operator);
+    expect(created.addresses).toEqual([{ id: expect.any(String), ...PARIS, isDefault: true }]);
+    const first = created.addresses[0]!.id;
+    h.clock.advance(1000);
+    await svc().create(a.id, LONDON, a.actor);
+    // The default changed in place, the other one untouched; the same words again change nothing.
+    const edited = await svc().setDefaultByStaff(a.id, { ...PARIS, address: '3 rue de la Paix\n75002 Paris', phone: ' +33 6 98 76 54 32 ' }, operator);
+    expect(edited.addresses).toEqual([
+      { id: first, ...PARIS, address: '3 rue de la Paix\n75002 Paris', phone: '+33 6 98 76 54 32', isDefault: true },
+      { id: expect.any(String), ...LONDON, isDefault: false },
+    ]);
+    await svc().setDefaultByStaff(a.id, { ...PARIS, address: '3 rue de la Paix\n75002 Paris', phone: '+33 6 98 76 54 32' }, operator);
+    // H2's words refuse a bad address.
+    expect(await refusal(svc().setDefaultByStaff(a.id, { ...PARIS, name: '' }, operator))).toEqual({ code: 'VALIDATION_FAILED', status: 400, message: 'Enter the name and the address.' });
+    expect(await refusal(svc().setDefaultByStaff(a.id, { ...PARIS, country: 'XX' }, operator))).toMatchObject({ message: 'Choose a country.' });
+    expect(await refusal(svc().setDefaultByStaff(a.id, { ...PARIS, phone: '06 12' }, operator))).toMatchObject({ message: 'Enter a phone number with its country code.' });
+    // A LOCKED account: Client Services still edit it; a DELETED one: 409.
+    await h.t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', a.id).execute();
+    expect((await svc().setDefaultByStaff(a.id, LONDON, operator)).addresses[0]).toMatchObject({ id: first, country: 'GB', isDefault: true });
+    await h.t.db.updateTable('accounts').set({ status: 'DELETED' }).where('id', '=', a.id).execute();
+    expect(await refusal(svc().setDefaultByStaff(a.id, PARIS, operator))).toEqual({ code: 'ACCOUNT_DELETED', status: 409, message: 'This account is deleted.' });
+    expect(await refusal(svc().setDefaultByStaff(randomUUID(), PARIS, operator))).toMatchObject({ code: 'ACCOUNT_NOT_FOUND', status: 404 });
+    const rows = await audits(a.id);
+    expect(rows.map((r) => [r.action, r.actor_type, r.details])).toEqual([
+      ['account.address.create', 'admin', { addressId: first, country: 'FR', isDefault: true, by: 'staff' }],
+      ['account.address.create', 'account', expect.objectContaining({ country: 'GB', isDefault: false })],
+      ['account.address.update', 'admin', { addressId: first, country: 'FR', fields: ['address', 'phone'], by: 'staff' }],
+      ['account.address.update', 'admin', { addressId: first, country: 'GB', fields: ['address', 'country', 'phone'], by: 'staff' }],
+    ]);
+    const words = JSON.stringify(rows.map((r) => r.details));
+    for (const w of ['Jane', 'Paix', 'Kensington', '+33', '+44']) expect(words, w).not.toContain(w);
   });
 });
