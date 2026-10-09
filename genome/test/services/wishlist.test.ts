@@ -312,7 +312,7 @@ describe('YOUR WISHLIST\'s jobs (plan CUSTOMER INTELLIGENCE §3.2 W.7): the mont
       const pass = await hk.runOnce();
       expect(pass).toMatchObject({ wishMonths: 2, wishHistory: 0 });
       expect(Object.keys(pass)).toEqual([
-        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'viewStats', 'viewMonths', 'wishMonths', 'scanHistory', 'viewPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'sizes',
+        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'acquisitionConversions', 'viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'scanHistory', 'viewPurge', 'acquisitionPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'sizes',
       ]);
     } finally {
       await hk.stop();

@@ -35,6 +35,8 @@
  *            latest arrival up to the moment falls within LAST_LINK_DAYS of it, else DIRECT. A visit is never DIRECT,
  *            so a direct return never replaces the link that brought them. `lastTouch` is the same rule in SQL, for the
  *            conversions job.
+ *   jobs     (§3.4 A.8, step 4.5; services/acquisition-jobs.ts) recordConversions, summariseDays and purge, run by the
+ *            housekeeping (context.ts) in the lot's order (§3.0 (f)).
  *
  * Nothing here is audited at boot: the presets are the house's words, written once, as the stock's are. No third party:
  * nothing leaves this database.
@@ -43,6 +45,7 @@ import { sql, type RawBuilder } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import type { LinkVia, SourceKind } from '../db/schema.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
+import { purgeTouches, recordConversions, summariseDays, type ConversionsOutcome } from './acquisition-jobs.js';
 import { referrerHost, SITE_RE } from './referrers.js';
 import { parisDay, parisDayStart } from './schedule.js';
 
@@ -400,6 +403,21 @@ export class AcquisitionService {
     const ids = await fixedSourceIds(db);
     for (const k of FIXED_SOURCES) this.remember(k, ids[k]);
     return ids;
+  }
+
+  /** Job `acquisitionConversions` (§3.4 A.8 item 1): see services/acquisition-jobs.ts. */
+  recordConversions(now: Date = this.clock()): Promise<ConversionsOutcome> {
+    return recordConversions(this.db, now);
+  }
+
+  /** Job `acquisitionDaily` (§3.4 A.8 item 2): the complete Paris days' visits; the days summarised. */
+  summariseDays(now: Date = this.clock()): Promise<number> {
+    return summariseDays(this.db, now);
+  }
+
+  /** Job `acquisitionPurge` (§3.4 A.8 item 3): the visits past their 13 months, once summarised; the rows deleted. */
+  purge(now: Date = this.clock()): Promise<number> {
+    return purgeTouches(this.db, now);
   }
 
   /** The recording's start (`acquisition_state.tracking_started_at`), or null before `prepare` ran. */

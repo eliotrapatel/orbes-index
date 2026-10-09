@@ -481,11 +481,14 @@ export interface Housekeeping {
     scanTokens: number;
     scanStats: number;
     activity: number;
+    acquisitionConversions: number;
     viewStats: number;
     viewMonths: number;
+    acquisitionDaily: number;
     wishMonths: number;
     scanHistory: number;
     viewPurge: number;
+    acquisitionPurge: number;
     wishHistory: number;
     devicePurge: number;
     liveNetworks: number;
@@ -514,23 +517,32 @@ export interface Housekeeping {
  * before it is counted (DATABASE §10).
  *
  * The customer intelligence lot's jobs (plan CUSTOMER INTELLIGENCE §3.0 (f)) run
- * only in its morning window (services/schedule.ts morningWindowOpen: from
- * 07:30 UTC until the Paris day ends), in the order of §3.0 (f):
+ * in the order of §3.0 (f), all but the first only in its morning window
+ * (services/schedule.ts morningWindowOpen: from 07:30 UTC until the Paris day
+ * ends):
+ *   acquisitionConversions  every pass: each sign-up, entry and order written
+ *                since the recording started gets its conversion with its
+ *                last link; once a Paris day in the window, its catch-up
+ *                (services/acquisition-jobs.ts, §3.4 A.8);
  *   viewStats    each complete Paris day of the views not yet counted, into
  *                view_daily_stats, device_daily_stats and collector_places
  *                (services/tracking-jobs.ts, §3.3 T.10);
  *   viewMonths   the month whose last Paris day viewStats counts, into
  *                collector_view_months, in that day's transaction;
+ *   acquisitionDaily  each complete Paris day of the visits not yet
+ *                summarised, into acquisition_daily;
  *   wishMonths   each complete Paris month of YOUR WISHLIST not yet counted,
  *                into model_wish_months (services/wishlist.ts, §3.2 W.7);
  *   (scanHistory, as above)
  *   viewPurge    only when viewStats succeeded in this pass, the raw views past
  *                their 13 months, folded per collector, a whole counted Paris
  *                day per transaction;
+ *   acquisitionPurge  only when acquisitionDaily succeeded in this pass, the
+ *                visits past their 13 months whose day is summarised;
  *   wishHistory  only when wishMonths succeeded in this pass, the removed
  *                wishes past their 13 months whose month is counted;
  *   devicePurge  the devices never linked, unseen for 13 months, with no view
- *                left (TrackingService.purgeDevices);
+ *                and no visit left (TrackingService.purgeDevices);
  *   (liveNetworks, careLabels, packingPhotos, as above)
  *   sizes        once a Paris day, the `intelligence sizes` log line: the bytes
  *                of the lot's growing tables (the 50 MB backup watch, §8).
@@ -554,11 +566,14 @@ export function startHousekeeping(
       scanTokens: 0,
       scanStats: 0,
       activity: 0,
+      acquisitionConversions: 0,
       viewStats: 0,
       viewMonths: 0,
+      acquisitionDaily: 0,
       wishMonths: 0,
       scanHistory: 0,
       viewPurge: 0,
+      acquisitionPurge: 0,
       wishHistory: 0,
       devicePurge: 0,
       liveNetworks: 0,
@@ -582,6 +597,11 @@ export function startHousekeeping(
     // Count the complete days first: the purge below must never take a scan that is not counted yet.
     const counted = await job('scanStats', () => aggregateScanStats(ctx.db, ctx.clock()));
     const hourly = await job('activity', () => aggregateActivity(ctx.db, ctx.clock()));
+    // Every pass: the conversions with their last link (its daily catch-up in the morning window, §3.4 A.8).
+    await job('acquisitionConversions', async () => {
+      const r = await ctx.services.acquisition.recordConversions(ctx.clock());
+      return r.written + r.caughtUp;
+    });
     // The lot's morning window (plan CUSTOMER INTELLIGENCE §3.0 (f)): the views' days and months, then YOUR WISHLIST's
     // months, each counted before its purge.
     const morning = morningWindowOpen(ctx.clock());
@@ -595,6 +615,8 @@ export function startHousekeeping(
         return r.days;
       }));
     result.viewMonths = viewMonths;
+    // The visits' complete Paris days, summarised before any visit is purged (§3.4 A.8).
+    const visitsSummarised = morning && (await job('acquisitionDaily', () => ctx.services.acquisition.summariseDays(ctx.clock())));
     const wishesCounted = morning && (await job('wishMonths', () => aggregateWishMonths(ctx.db, ctx.clock())));
     const retentionDays = ctx.config.scanRetentionDays;
     if (counted && hourly && retentionDays !== null && retentionDays !== undefined) {
@@ -604,8 +626,11 @@ export function startHousekeeping(
     }
     // A pass where the days failed purges no view: none leaves before its day is counted (§3.3 T.10).
     if (viewsCounted) await job('viewPurge', () => purgeViews(ctx.db, ctx.clock()));
+    // A pass where the visits' days failed purges no visit: none leaves before its day is summarised.
+    if (visitsSummarised) await job('acquisitionPurge', () => ctx.services.acquisition.purge(ctx.clock()));
     // A pass where the months failed purges no wish: none leaves before its month is counted.
     if (wishesCounted) await job('wishHistory', () => purgeWishHistory(ctx.db, ctx.clock()));
+    // After both purges: a device a view or a visit still names is kept.
     if (morning) await job('devicePurge', () => ctx.services.tracking.purgeDevices(ctx.clock()));
     await job('liveNetworks', () => eraseLiveNetworkHashes(ctx.db, ctx.clock()));
     await job('careLabels', () => eraseCareLabels(ctx.db, ctx.clock()));

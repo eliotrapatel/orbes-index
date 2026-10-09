@@ -10,8 +10,8 @@
  *  - the purge waits for the count and for the month; the 13-month cut-off on calendar months (on 8 Oct 2026 the
  *    first day kept is 8 Sep 2025, Paris and UTC around midnight); the fold equals the sum of the deleted rows;
  *    anonymous rows deleted without a fold; at most its days a pass;
- *  - unlinked old devices purged, linked, staff, recent ones and those with rows kept (the acquisition's touches join
- *    the rule with step 4.x);
+ *  - unlinked old devices purged, linked, staff, recent ones, those with rows and those a visit still names
+ *    (`acquisition_touches`, step 4.5) kept;
  *  - housekeeping's order and `result` keys; no purge in a pass where the count failed; the `intelligence sizes` line
  *    once a Paris day.
  * The link's recount cases (the link plus the daily job equal a recount from scratch) are in test/api/tracking-link.test.ts.
@@ -314,7 +314,7 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
     expect(await purgeViews(h.t.db, NOW, { maxDays: 2 })).toBe(1);
   });
 
-  it('deletes the devices never linked, unseen for 13 months and with no row; keeps the linked, the staff’s, the recent and those with rows', async () => {
+  it('deletes the devices never linked, unseen for 13 months and with no row; keeps the linked, the staff’s, the recent, those with rows and those a visit names', async () => {
     const gone = await x.device({ firstSeen: '2025-06-01T08:00:00Z' });
     const goneToo = await x.device({ firstSeen: '2025-07-01T08:00:00Z', lastSeen: '2025-09-07T21:59:59Z' });
     const linked = await x.device({ firstSeen: '2025-06-01T08:00:00Z', account: a });
@@ -324,12 +324,18 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
     await x.view(withRows, '2026-01-10T10:00:00Z');
     const once = await x.device({ firstSeen: '2025-06-01T08:00:00Z' });
     await h.t.db.insertInto('tracking_device_accounts').values({ device_id: once, account_id: b, first_via: 'SIGN_IN', first_linked_at: new Date('2025-06-01T08:00:00Z'), last_linked_at: new Date('2025-06-01T08:00:00Z') }).execute();
+    // None while a visit names it (§3.4 A.8): the acquisition's purge takes the visit first, then the device may go.
+    const visited = await x.device({ firstSeen: '2025-06-01T08:00:00Z' });
+    const site = (await h.t.db.insertInto('acquisition_sources').values({ kind: 'SITE', site: 'purge.example', key: 'S:purge.example' }).returning('id').executeTakeFirstOrThrow()).id;
+    await h.t.db.insertInto('acquisition_touches').values({ device_id: visited, source_id: site, day: '2025-06-01', first_at: new Date('2025-06-01T08:00:00Z'), last_at: new Date('2025-06-01T08:00:00Z') }).execute();
     expect(await h.ctx.services.tracking.purgeDevices(NOW, { max: 1 })).toBe(1);
     expect(await h.ctx.services.tracking.purgeDevices(NOW)).toBeGreaterThanOrEqual(1);
     const left = new Set((await h.t.db.selectFrom('tracking_devices').select('id').execute()).map((r) => r.id));
     expect([gone, goneToo].filter((id) => left.has(id))).toEqual([]);
-    expect([linked, staff, recent, withRows, once, d].every((id) => left.has(id))).toBe(true);
+    expect([linked, staff, recent, withRows, once, visited, d].every((id) => left.has(id))).toBe(true);
     expect(await h.ctx.services.tracking.purgeDevices(NOW)).toBe(0);
+    await h.t.db.deleteFrom('acquisition_touches').where('device_id', '=', visited).execute();
+    expect(await h.ctx.services.tracking.purgeDevices(NOW)).toBe(1);
   });
 
   it('runs in the order of §3.0 (f), returns every key, purges nothing in a pass where the count failed, and logs the sizes once a Paris day', async () => {
@@ -344,7 +350,7 @@ describe('viewMonths, viewPurge and devicePurge (plan CUSTOMER INTELLIGENCE §3.
       lines.length = 0;
       const failed = await hk.runOnce();
       expect(Object.keys(failed)).toEqual([
-        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'viewStats', 'viewMonths', 'wishMonths', 'scanHistory', 'viewPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'sizes',
+        'sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'acquisitionConversions', 'viewStats', 'viewMonths', 'acquisitionDaily', 'wishMonths', 'scanHistory', 'viewPurge', 'acquisitionPurge', 'wishHistory', 'devicePurge', 'liveNetworks', 'careLabels', 'packingPhotos', 'sizes',
       ]);
       expect(failed).toMatchObject({ viewStats: 0, viewPurge: 0 });
       expect(lines.some((l) => l.level === 'error' && (l.o as { job?: string }).job === 'viewStats')).toBe(true);
