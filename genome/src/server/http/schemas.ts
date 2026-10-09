@@ -1342,6 +1342,16 @@ export const anomalyParams = z.object({ id: uuid });
 export const ownerParams = z.object({ id: uuid });
 
 /**
+ * The answers to « How did you hear about ORBES? » (§16.38, plan CUSTOMER INTELLIGENCE §3.1 P.10): an answer added, one
+ * renamed, set aside or offered again, and the order of every answer but Other. The outer wall only: the label's rules
+ * (1 to 40 characters, unique whatever the case), the 12 offered and the whole order are ProfileService's.
+ */
+export const heardOptionBody = body({ label: z.string().max(200, 'At most 200 characters') });
+export const heardOptionUpdateBody = body({ label: z.string().max(200, 'At most 200 characters').optional(), active: z.boolean().optional() });
+export const heardOptionParams = z.object({ id: uuid });
+export const heardOrderBody = body({ ids: z.array(z.string().max(64, 'At most 64 characters')).max(200, 'At most 200 answers') });
+
+/**
  * The owners list (§16.2): every account, or one exact email (normalised by the service, as at sign-in), or the
  * REF printed under a result (`REF 1A2B3C4D`, any case, or a whole scan id; parsed by the service). One or none.
  */

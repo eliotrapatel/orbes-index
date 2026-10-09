@@ -409,6 +409,12 @@ const PROBES: Probe[] = [
   { group: 'retailers', method: 'PATCH', url: `/api/admin/retailers/${UUID}`, body: INVALID, min: 'ADMIN' },
   { group: 'sale', method: 'POST', url: '/api/admin/sale/lookup', body: INVALID, min: 'RETAIL', roles: SELLERS },
   { group: 'sale', method: 'POST', url: '/api/admin/sale/activate', body: INVALID, min: 'RETAIL', roles: SELLERS },
+  // The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10): the answers to « How did you hear about ORBES? », read
+  // from AUDITOR, changed by an ADMIN.
+  { group: 'sign-up', method: 'GET', url: '/api/admin/heard-options', min: 'AUDITOR' },
+  { group: 'sign-up', method: 'POST', url: '/api/admin/heard-options', body: INVALID, min: 'ADMIN' },
+  { group: 'sign-up', method: 'PATCH', url: `/api/admin/heard-options/${UUID}`, body: INVALID, min: 'ADMIN' },
+  { group: 'sign-up', method: 'PUT', url: '/api/admin/heard-options/order', body: INVALID, min: 'ADMIN' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];
@@ -479,6 +485,7 @@ describe('admin role enforcement', () => {
       'logistics-stock',
       'packing',
       'order-cases',
+      'sign-up',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
