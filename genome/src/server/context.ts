@@ -46,7 +46,8 @@ import { SizeService } from './services/sizes.js';
 import { AddressService } from './services/addresses.js';
 import { TasteService } from './services/tastes.js';
 import { ProfileService } from './services/profiles.js';
-import { WishlistService } from './services/wishlist.js';
+import { aggregateWishMonths, purgeWishHistory, WishlistService } from './services/wishlist.js';
+import { morningWindowOpen } from './services/schedule.js';
 import { deriveDropSeedKey, DropService } from './services/drops.js';
 import { deriveLiveTurnKey, eraseLiveNetworkHashes, LiveService } from './services/live.js';
 import { LiveConsoleService } from './services/live-console.js';
@@ -430,7 +431,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
 
 export interface Housekeeping {
   /** Run every job once now (also what the timer does). Errors are logged, never thrown. */
-  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; activity: number; scanHistory: number; liveNetworks: number; careLabels: number; packingPhotos: number }>;
+  runOnce(): Promise<{ sessions: number; transfers: number; scanTokens: number; scanStats: number; activity: number; wishMonths: number; scanHistory: number; wishHistory: number; liveNetworks: number; careLabels: number; packingPhotos: number }>;
   /** Stop the timer and wait for a running pass to finish. */
   stop(): Promise<void>;
 }
@@ -450,6 +451,14 @@ export interface Housekeeping {
  * The daily statistics and the hourly activity always run before the purge,
  * and a pass where either failed purges nothing: no scan leaves the history
  * before it is counted (DATABASE §10).
+ *
+ * The customer intelligence lot's jobs (plan CUSTOMER INTELLIGENCE §3.0 (f)) run
+ * only in its morning window (services/schedule.ts morningWindowOpen: from
+ * 07:30 UTC until the Paris day ends), in the order of §3.0 (f):
+ *   wishMonths   each complete Paris month of YOUR WISHLIST not yet counted,
+ *                into model_wish_months (services/wishlist.ts, §3.2 W.7);
+ *   wishHistory  then, only when wishMonths succeeded in this pass, the removed
+ *                wishes past their 13 months whose month is counted.
  */
 export function startHousekeeping(
   ctx: AppContext,
@@ -461,7 +470,7 @@ export function startHousekeeping(
   let running: Promise<unknown> | undefined;
 
   const runOnce = async () => {
-    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, activity: 0, scanHistory: 0, liveNetworks: 0, careLabels: 0, packingPhotos: 0 };
+    const result = { sessions: 0, transfers: 0, scanTokens: 0, scanStats: 0, activity: 0, wishMonths: 0, scanHistory: 0, wishHistory: 0, liveNetworks: 0, careLabels: 0, packingPhotos: 0 };
     /** Runs one job; false when it failed (logged). */
     const job = async (name: keyof typeof result, fn: () => Promise<number>): Promise<boolean> => {
       try {
@@ -478,12 +487,17 @@ export function startHousekeeping(
     // Count the complete days first: the purge below must never take a scan that is not counted yet.
     const counted = await job('scanStats', () => aggregateScanStats(ctx.db, ctx.clock()));
     const hourly = await job('activity', () => aggregateActivity(ctx.db, ctx.clock()));
+    // The lot's morning window (plan CUSTOMER INTELLIGENCE §3.0 (f)): YOUR WISHLIST's months are counted before their purge.
+    const morning = morningWindowOpen(ctx.clock());
+    const wishesCounted = morning && (await job('wishMonths', () => aggregateWishMonths(ctx.db, ctx.clock())));
     const retentionDays = ctx.config.scanRetentionDays;
     if (counted && hourly && retentionDays !== null && retentionDays !== undefined) {
       await job('scanHistory', () =>
         purgeScanHistory(ctx.db, new Date(ctx.clock().getTime() - retentionDays * 86_400_000), { batchSize: opts.scanHistoryBatchSize }),
       );
     }
+    // A pass where the months failed purges no wish: none leaves before its month is counted.
+    if (wishesCounted) await job('wishHistory', () => purgeWishHistory(ctx.db, ctx.clock()));
     await job('liveNetworks', () => eraseLiveNetworkHashes(ctx.db, ctx.clock()));
     await job('careLabels', () => eraseCareLabels(ctx.db, ctx.clock()));
     // Plan NEXT LOT §3.5.6.8: the packing photos, 14 days after delivery (or after a return opened in time is closed).

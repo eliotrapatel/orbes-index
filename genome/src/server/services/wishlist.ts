@@ -23,9 +23,21 @@
  *   exportedWishes  the right of access (OwnerService.exportData, step 2.3): every row still held, removed ones within
  *            their 13 months included, by the model's name and variant, oldest first.
  *
+ * The jobs (§3.2 W.7, step 2.4), run by the app's housekeeping in the lot's morning window (services/schedule.ts):
+ *
+ *   wishMonths   aggregateWishMonths: each complete Paris month not yet in `wish_months_counted`, from the month of the
+ *            first wish, one transaction per month: per model with a wish open at some point in it, the wishes added,
+ *            removed, and open at its last instant, of ACTIVE counted collectors (services/population.ts: no test
+ *            entrant, no team account); then the month is marked counted. A month is counted once; one left
+ *            uncommitted by a restart is counted on the next pass.
+ *   wishHistory  purgeWishHistory, only when wishMonths succeeded in the same pass: removed wishes older than
+ *            WISH_HISTORY_MONTHS Paris months whose month of removal is counted, in batches of 1 000, at most 20 a
+ *            pass, each its own short transaction. Open wishes are never purged.
+ *
  * No audit entry: a heart can be tapped thousands of times a day, and the audit log is permanent and hash-chained; the
  * row is its own record (who, what, when added, when removed). A removed row stays for the figures over time.
  */
+import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { conflict, notFound } from '../errors.js';
 import { systemClock, type Clock } from '../types.js';
@@ -33,6 +45,8 @@ import { customerAccountLocked } from './auth.js';
 import { tierOf } from './club.js';
 import { lookbookNotFound, SLUG_MAX, SLUG_RE } from './lookbook.js';
 import { mediaUrl } from './media.js';
+import { countedCollector } from './population.js';
+import { parisDay, parisDayStart, parisMonthStart } from './schedule.js';
 
 /** The open wishes of one account at most: a bound for the page, the payload and the table. */
 export const WISHLIST_MAX = 200;
@@ -200,7 +214,10 @@ export class WishlistService {
         .executeTakeFirst();
       let addedAt: Date;
       if (latest?.removed_at && now.getTime() - latest.removed_at.getTime() < WISH_READD_MS && latest.removed_at.getTime() <= now.getTime()) {
-        await tx.updateTable('account_wishes').set({ removed_at: null }).where('account_id', '=', id).where('model_id', '=', m.id).where('added_at', '=', latest.added_at).execute();
+        // The latest row, matched in the database (a timestamp read back loses its microseconds).
+        await sql`UPDATE account_wishes SET removed_at = NULL
+          WHERE account_id = ${id} AND model_id = ${m.id}
+            AND added_at = (SELECT max(l.added_at) FROM account_wishes l WHERE l.account_id = ${id} AND l.model_id = ${m.id})`.execute(tx);
         addedAt = latest.added_at;
       } else {
         await tx
@@ -285,4 +302,113 @@ export async function exportedWishes(db: Db, accountId: string): Promise<Exporte
     .orderBy('m.id')
     .execute();
   return rows.map((r) => ({ model: r.name, variant: r.variant_label, addedAt: r.added_at, removedAt: r.removed_at }));
+}
+
+// ── The jobs (§3.2 W.7): the monthly summary, then the purge ────────────────
+
+/** The purge's batch and the most batches a pass deletes. */
+export const WISH_PURGE_BATCH = 1_000;
+export const WISH_PURGE_MAX_BATCHES = 20;
+
+/** The Paris month of an instant, `YYYY-MM`. */
+const monthOf = (at: Date): string => parisDay(at).slice(0, 7);
+
+/** The month after `YYYY-MM`. */
+function nextMonth(month: string): string {
+  const [y, m] = month.split('-').map(Number) as [number, number];
+  return m === 12 ? `${String(y + 1).padStart(4, '0')}-01` : `${String(y).padStart(4, '0')}-${String(m + 1).padStart(2, '0')}`;
+}
+
+/**
+ * The first instant a removed wish is kept from: 00:00 Paris on the same Paris day WISH_HISTORY_MONTHS months before
+ * `now` (the 31st becomes the month's last day).
+ */
+export function wishHistoryCutoff(now: Date): Date {
+  const [y, m, d] = parisDay(now).split('-').map(Number) as [number, number, number];
+  const back = y * 12 + (m - 1) - WISH_HISTORY_MONTHS;
+  const year = Math.floor(back / 12);
+  const month = (back % 12) + 1;
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return parisDayStart(`${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`);
+}
+
+/**
+ * Job `wishMonths`: each complete Paris month not yet counted, from the month of the first wish up to the month before
+ * `now`'s, into `model_wish_months` (counted collectors, ACTIVE accounts) and `wish_months_counted`, one transaction per
+ * month. Returns how many months it counted (0 almost every pass: one primary-key read).
+ */
+export async function aggregateWishMonths(db: Db, now: Date): Promise<number> {
+  const first = await db.selectFrom('account_wishes').select((eb) => eb.fn.min('added_at').as('first')).executeTakeFirst();
+  if (!first?.first) return 0;
+  const current = monthOf(now);
+  let month = monthOf(new Date(first.first as Date | string));
+  const counted = new Set((await db.selectFrom('wish_months_counted').select('month').execute()).map((r) => String(r.month).slice(0, 7)));
+  let n = 0;
+  for (; month < current; month = nextMonth(month)) {
+    if (counted.has(month)) continue;
+    const day = `${month}-01`;
+    const start = parisMonthStart(month);
+    const end = parisMonthStart(nextMonth(month));
+    await inTransaction(db, async (tx) => {
+      await sql`
+        INSERT INTO model_wish_months (month, model_id, added, removed, wished_end, counted_at)
+        SELECT ${day}::date, w.model_id,
+               (count(*) FILTER (WHERE w.added_at >= ${start} AND w.added_at < ${end}))::int,
+               (count(*) FILTER (WHERE w.removed_at >= ${start} AND w.removed_at < ${end}))::int,
+               (count(*) FILTER (WHERE w.removed_at IS NULL OR w.removed_at >= ${end}))::int,
+               ${now}::timestamptz
+          FROM account_wishes w
+          JOIN accounts a ON a.id = w.account_id
+         WHERE w.added_at < ${end}
+           AND (w.removed_at IS NULL OR w.removed_at >= ${start})
+           AND a.status = 'ACTIVE'
+           AND ${countedCollector('w.account_id')}
+         GROUP BY w.model_id
+        ON CONFLICT (month, model_id) DO UPDATE SET added = EXCLUDED.added, removed = EXCLUDED.removed, wished_end = EXCLUDED.wished_end, counted_at = EXCLUDED.counted_at`.execute(tx);
+      await tx.insertInto('wish_months_counted').values({ month: day, counted_at: now }).onConflict((oc) => oc.column('month').doNothing()).execute();
+    });
+    n++;
+  }
+  return n;
+}
+
+/**
+ * Job `wishHistory` (run only after `wishMonths` succeeded in the same pass): the removed wishes older than
+ * wishHistoryCutoff whose Paris month of removal is counted, the oldest first, in batches of `batchSize`, at most
+ * `maxBatches` a pass, each its own transaction. Open wishes are never touched. Returns how many rows it deleted.
+ */
+export async function purgeWishHistory(db: Db, now: Date, opts: { batchSize?: number; maxBatches?: number } = {}): Promise<number> {
+  const batchSize = Math.max(1, Math.floor(opts.batchSize ?? WISH_PURGE_BATCH));
+  const maxBatches = Math.max(1, Math.floor(opts.maxBatches ?? WISH_PURGE_MAX_BATCHES));
+  const cutoff = wishHistoryCutoff(now);
+  // The counted months before the cut-off, each bounded by it, joined where they follow each other.
+  const months = (await db.selectFrom('wish_months_counted').select('month').orderBy('month').execute()).map((r) => String(r.month).slice(0, 7));
+  const ranges: { start: Date; end: Date }[] = [];
+  for (const month of months) {
+    const start = parisMonthStart(month);
+    if (start.getTime() >= cutoff.getTime()) break;
+    const end = new Date(Math.min(parisMonthStart(nextMonth(month)).getTime(), cutoff.getTime()));
+    const last = ranges.at(-1);
+    if (last && last.end.getTime() === start.getTime()) last.end = end;
+    else ranges.push({ start, end });
+  }
+  if (ranges.length === 0) return 0;
+  const removedIn = sql.join(ranges.map((r) => sql`(removed_at >= ${r.start} AND removed_at < ${r.end})`), sql` OR `);
+  let deleted = 0;
+  for (let batch = 0; batch < maxBatches; batch++) {
+    const n = await db.transaction().execute(async (trx) => {
+      const r = await sql<{ x: number }>`
+        DELETE FROM account_wishes
+         WHERE (account_id, model_id, added_at) IN (
+           SELECT account_id, model_id, added_at FROM account_wishes
+            WHERE removed_at IS NOT NULL AND (${removedIn})
+            ORDER BY removed_at
+            LIMIT ${batchSize})
+        RETURNING 1 AS x`.execute(trx);
+      return r.rows.length;
+    });
+    deleted += n;
+    if (n < batchSize) break;
+  }
+  return deleted;
 }

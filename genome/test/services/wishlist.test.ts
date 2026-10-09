@@ -8,13 +8,20 @@
  *  - HIDDEN 404; RESERVED below the tier 404 and from the tier 200; discontinued 200; a LOCKED account 403;
  *  - `list`: SHOWN and NOT_SHOWN, the fields a NOT_SHOWN item leaves out, the latest first; a tier fallen and back;
  *  - `ofAccount`: the staff's states;
- *  - no audit entry for a heart.
+ *  - no audit entry for a heart;
+ *  - the jobs (§3.2 W.7, step 2.4): `aggregateWishMonths` counts each complete Paris month once (adds, removes and a
+ *    reopening; test entrants, team accounts and LOCKED accounts left out), a second run does nothing; `purgeWishHistory`
+ *    deletes only removed rows older than 13 months in counted months, never an open one, in batches; the housekeeping
+ *    runs both in the morning window only, returns both, and purges nothing in a pass where the count failed.
  */
 import { createHash, randomUUID } from 'node:crypto';
+import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { LookbookState } from '../../src/server/db/schema.js';
 import { DomainError } from '../../src/server/errors.js';
-import { WISHLIST_MAX } from '../../src/server/services/wishlist.js';
+import { startHousekeeping } from '../../src/server/context.js';
+import { aggregateWishMonths, purgeWishHistory, wishHistoryCutoff, WISHLIST_MAX } from '../../src/server/services/wishlist.js';
+import type { Logger } from '../../src/server/types.js';
 import { createHarness, type Harness } from '../api/support.js';
 import { createAccount, holdPieces } from '../support/live.js';
 
@@ -235,5 +242,150 @@ describe('YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.4)', () => {
     // A wished model later bought or registered stays wished (question 12).
     await holdPieces(h.t.db, a.id, 1, shown.id);
     expect((await svc().ofAccount(a.id)).map((w) => w.modelId)).toContain(shown.id);
+  });
+});
+
+describe('YOUR WISHLIST\'s jobs (plan CUSTOMER INTELLIGENCE §3.2 W.7): the monthly summary, then the purge', () => {
+  let h: Harness;
+  const lines: { level: string; o: unknown }[] = [];
+  const log: Logger = { info: (o) => lines.push({ level: 'info', o }), warn: (o) => lines.push({ level: 'warn', o }), error: (o) => lines.push({ level: 'error', o }) };
+  const ids: Record<string, string> = {};
+
+  beforeAll(async () => {
+    h = await createHarness({ context: { log } });
+    await h.t.db.insertInto('categories').values({ id: 1, code: 'J', name: 'Jewelry' }).onConflict((oc) => oc.doNothing()).execute();
+    for (const name of ['A', 'B', 'C']) {
+      const id = randomUUID();
+      await h.t.db.insertInto('models').values({ id, category_id: 1, name, type: 'RING', sku_prefix: `WJ-${id.slice(0, 8)}`, slug: `wj-${name.toLowerCase()}`, lookbook: 'PUBLIC', published_at: '2026-01-01T00:00:00Z' }).execute();
+      ids[name] = id;
+    }
+    for (const who of ['c1', 'c2', 'te', 'team', 'locked']) ids[who] = (await createAccount(h.t.db)).id;
+    await h.t.db.insertInto('test_entrants').values({ account_id: ids.te! }).execute();
+    const team = await h.t.db.selectFrom('accounts').select('email_normalized').where('id', '=', ids.team!).executeTakeFirstOrThrow();
+    await h.t.db.insertInto('admin_users').values({ email: team.email_normalized, email_normalized: team.email_normalized, password_hash: 'scrypt$x', role: 'OPERATOR' }).execute();
+    await h.t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', ids.locked!).execute();
+    const row = (who: string, model: string, added: string, removed: string | null = null) => ({ account_id: ids[who]!, model_id: ids[model]!, added_at: added, removed_at: removed });
+    await h.t.db
+      .insertInto('account_wishes')
+      .values([
+        // 00:30 Paris on 1 October: an October wish, though it is still 30 September in UTC.
+        row('c1', 'A', '2026-09-30T22:30:00Z'),
+        row('c1', 'B', '2026-10-05T10:00:00Z', '2026-10-20T10:00:00Z'),
+        row('c2', 'A', '2026-10-10T10:00:00Z', '2026-11-03T10:00:00Z'),
+        // 00:30 Paris on 1 December: the month in progress on 10 December, counted with it.
+        row('c2', 'B', '2026-11-30T23:30:00Z'),
+        row('te', 'A', '2026-10-02T10:00:00Z'),
+        row('team', 'A', '2026-10-02T10:00:00Z'),
+        row('locked', 'A', '2026-10-02T10:00:00Z'),
+      ])
+      .execute();
+    // A reopening: removed and added again within 10 minutes is the same row, counted once.
+    h.clock.set('2026-10-03T10:00:00.000Z');
+    await h.ctx.services.wishlist.add(ids.c2!, 'wj-c');
+    h.clock.advance(60_000);
+    await h.ctx.services.wishlist.remove(ids.c2!, 'wj-c');
+    h.clock.advance(60_000);
+    await h.ctx.services.wishlist.add(ids.c2!, 'wj-c');
+  });
+  afterAll(() => h?.close());
+
+  const months = async () =>
+    (await h.t.db.selectFrom('model_wish_months').select(['month', 'model_id', 'added', 'removed', 'wished_end']).orderBy('month').orderBy('model_id').execute()).map((r) => ({
+      month: r.month,
+      model: Object.keys(ids).find((k) => ids[k] === r.model_id),
+      added: r.added,
+      removed: r.removed,
+      wishedEnd: r.wished_end,
+    }));
+  const counted = async () => (await h.t.db.selectFrom('wish_months_counted').select('month').orderBy('month').execute()).map((r) => r.month);
+  const wishes = async () => Number((await h.t.db.selectFrom('account_wishes').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow()).n);
+
+  it('waits for the morning window: a pass at 07:29 UTC counts nothing, the one at 07:30 counts each complete Paris month once, and returns both jobs', async () => {
+    const hk = startHousekeeping(h.ctx, { intervalMs: 3_600_000 });
+    try {
+      h.clock.set('2026-12-10T07:29:00.000Z');
+      const early = await hk.runOnce();
+      expect(early).toMatchObject({ wishMonths: 0, wishHistory: 0 });
+      expect(await counted()).toEqual([]);
+      h.clock.set('2026-12-10T07:30:00.000Z');
+      const pass = await hk.runOnce();
+      expect(pass).toMatchObject({ wishMonths: 2, wishHistory: 0 });
+      expect(Object.keys(pass)).toEqual(['sessions', 'transfers', 'scanTokens', 'scanStats', 'activity', 'wishMonths', 'scanHistory', 'wishHistory', 'liveNetworks', 'careLabels', 'packingPhotos']);
+    } finally {
+      await hk.stop();
+    }
+    // October and November (Paris), not December in progress; test entrants, the team's accounts and LOCKED ones left out.
+    expect(await counted()).toEqual(['2026-10-01', '2026-11-01']);
+    expect(await months()).toEqual(
+      [
+        { month: '2026-10-01', model: 'A', added: 2, removed: 0, wishedEnd: 2 },
+        { month: '2026-10-01', model: 'B', added: 1, removed: 1, wishedEnd: 0 },
+        { month: '2026-10-01', model: 'C', added: 1, removed: 0, wishedEnd: 1 },
+        { month: '2026-11-01', model: 'A', added: 0, removed: 1, wishedEnd: 1 },
+        { month: '2026-11-01', model: 'C', added: 0, removed: 0, wishedEnd: 1 },
+      ].sort((a, b) => (a.month === b.month ? ids[a.model]!.localeCompare(ids[b.model]!) : a.month.localeCompare(b.month))),
+    );
+    // A second run does nothing.
+    const before = await months();
+    expect(await aggregateWishMonths(h.t.db, new Date('2026-12-10T09:00:00.000Z'))).toBe(0);
+    expect(await months()).toEqual(before);
+  });
+
+  it('purges only removed wishes older than 13 Paris months whose month is counted, never an open one, in batches', async () => {
+    expect(wishHistoryCutoff(new Date('2027-12-15T08:00:00.000Z'))).toEqual(new Date('2026-11-14T23:00:00.000Z'));
+    expect(wishHistoryCutoff(new Date('2027-03-31T08:00:00.000Z'))).toEqual(new Date('2026-02-27T23:00:00.000Z'));
+    const total = await wishes();
+    // Before 13 months: nothing.
+    expect(await purgeWishHistory(h.t.db, new Date('2027-11-20T08:00:00.000Z'))).toBe(0);
+    // October not counted: its removal (20 October) stays; November's (3 November) goes once 13 months have passed.
+    await h.t.db.deleteFrom('wish_months_counted').where('month', '=', '2026-10-01').execute();
+    expect(await purgeWishHistory(h.t.db, new Date('2027-12-15T08:00:00.000Z'))).toBe(1);
+    expect(await h.t.db.selectFrom('account_wishes').select('removed_at').where('account_id', '=', ids.c2!).where('model_id', '=', ids.A!).execute()).toEqual([]);
+    await h.t.db.insertInto('wish_months_counted').values({ month: '2026-10-01' }).execute();
+    expect(await purgeWishHistory(h.t.db, new Date('2027-12-15T08:00:00.000Z'), { batchSize: 1, maxBatches: 5 })).toBe(1);
+    expect(await wishes()).toBe(total - 2);
+    // Open wishes are never purged, however old.
+    expect(await h.t.db.selectFrom('account_wishes').select('removed_at').where('removed_at', 'is not', null).execute()).toEqual([]);
+    expect(await purgeWishHistory(h.t.db, new Date('2030-01-01T08:00:00.000Z'))).toBe(0);
+    expect(await wishes()).toBe(total - 2);
+  });
+
+  it('deletes at most its batches a pass', async () => {
+    const id = (await createAccount(h.t.db)).id;
+    await h.t.db
+      .insertInto('account_wishes')
+      .values(Array.from({ length: 5 }, (_, i) => ({ account_id: id, model_id: ids.A!, added_at: `2026-10-0${i + 1}T08:00:00Z`, removed_at: `2026-10-0${i + 1}T09:00:00Z` })))
+      .execute();
+    expect(await purgeWishHistory(h.t.db, new Date('2027-12-15T08:00:00.000Z'), { batchSize: 2, maxBatches: 2 })).toBe(4);
+    expect(await purgeWishHistory(h.t.db, new Date('2027-12-15T08:00:00.000Z'), { batchSize: 2, maxBatches: 2 })).toBe(1);
+  });
+
+  it('purges no wish in a pass where the count failed, and the next pass counts, then purges', async () => {
+    // A removal in December 2026 and a month not counted yet: the count fails (a test trigger) when it marks one.
+    const id = (await createAccount(h.t.db)).id;
+    await h.t.db.insertInto('account_wishes').values({ account_id: id, model_id: ids.B!, added_at: '2026-12-02T08:00:00Z', removed_at: '2026-12-03T08:00:00Z' }).execute();
+    await h.t.db.insertInto('account_wishes').values({ account_id: id, model_id: ids.C!, added_at: '2026-10-02T08:00:00Z', removed_at: '2026-10-03T08:00:00Z' }).execute();
+    await sql`CREATE FUNCTION wish_months_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'the count failed'; END $$`.execute(h.t.db);
+    await sql`CREATE TRIGGER wish_months_fail BEFORE INSERT ON wish_months_counted FOR EACH ROW EXECUTE FUNCTION wish_months_fail()`.execute(h.t.db);
+    const hk = startHousekeeping(h.ctx, { intervalMs: 3_600_000 });
+    try {
+      h.clock.set('2028-01-20T08:00:00.000Z');
+      lines.length = 0;
+      const failed = await hk.runOnce();
+      expect(failed).toMatchObject({ wishMonths: 0, wishHistory: 0 });
+      expect(lines.some((l) => l.level === 'error' && (l.o as { job?: string }).job === 'wishMonths')).toBe(true);
+      // October 2026's removal is counted and past 13 months, yet stays: nothing is purged in this pass.
+      expect(await h.t.db.selectFrom('account_wishes').select('model_id').where('account_id', '=', id).orderBy('added_at').execute()).toEqual([{ model_id: ids.C! }, { model_id: ids.B! }]);
+      await sql`DROP TRIGGER wish_months_fail ON wish_months_counted`.execute(h.t.db);
+      await sql`DROP FUNCTION wish_months_fail()`.execute(h.t.db);
+      const pass = await hk.runOnce();
+      expect(pass.wishMonths).toBe(13);
+      expect(pass.wishHistory).toBe(2);
+      expect(await h.t.db.selectFrom('account_wishes').select('model_id').where('account_id', '=', id).execute()).toEqual([]);
+      expect((await counted()).at(-1)).toBe('2027-12-01');
+      expect((await hk.runOnce())).toMatchObject({ wishMonths: 0, wishHistory: 0 });
+    } finally {
+      await hk.stop();
+    }
   });
 });
