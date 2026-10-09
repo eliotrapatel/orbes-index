@@ -45,7 +45,7 @@
  *   - The test entrants' pool (services/test-entrants.ts: `test-0001@orbes.test`…, a test_entrants row each, kept
  *     after END TEST, their accounts' creation dates moved back at each test) is left out of the purchases (lifetime
  *     value, repeat buying, COLLECTORS BY VALUE, the client sheet's value) and of every step of the funnel: they are
- *     not sign-ups, owners or buyers (`notTestEntrant`).
+ *     not sign-ups, owners or buyers (`notTestEntrant`, services/population.ts).
  */
 import { sql, type RawBuilder } from 'kysely';
 import type { Db } from '../db/connection.js';
@@ -54,6 +54,7 @@ import { notFound, validationError } from '../errors.js';
 import { systemClock, type Clock } from '../types.js';
 import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_NAMES, CLUB_TIER_THRESHOLDS, clubMembersByTier, tierName, type ClubMembers, type ClubTier, type ClubTierName } from './club.js';
 import { LiveInsightsService } from './live-insights.js';
+import { notTestEntrant } from './population.js';
 import { scanMonths } from './scan-stats.js';
 import { addUtcMonths } from './tier-grants.js';
 
@@ -352,9 +353,6 @@ export type LifetimeValue = { currency: string; valueMinor: number }[];
 // ── Reads ──────────────────────────────────────────────────────────────────
 
 const EXCLUDED = sql.join([...CLUB_EXCLUDED_STATUSES]);
-
-/** The account in `column` is not one of the test entrants' pool (TEST ENTRANTS: never counted by GROWTH). */
-const notTestEntrant = (column: string): RawBuilder<unknown> => sql`NOT EXISTS (SELECT 1 FROM test_entrants te WHERE te.account_id = ${sql.ref(column)})`;
 
 /**
  * Every purchase (the rule in the file header): its account, when, a reference that orders ties, its source, its main
