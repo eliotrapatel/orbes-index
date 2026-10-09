@@ -54,6 +54,7 @@ import { ACCOUNT_PASSWORD, CLAIM_HELD, CONTACT, NOT_DELIVERED_NOTE, PIECES, RECE
 import { contactBlock, PIECES_PATH, piecesLink, sectionLabel, termsNote, withNumerals } from './common.js';
 import { accountForm, field as vaultField, FormError, messageOf, MIN_PASSWORD, nocturneForm, selectField as vaultSelectField, signUpProblem } from './forms.js';
 import { appAnchor, button, contactLines, field, selectField, textLink } from './nocturne.js';
+import { seen } from '../seen.js';
 
 export { MIN_PASSWORD } from './forms.js';
 
@@ -132,6 +133,13 @@ export class OwnershipPanel {
   private signUpRead: 'idle' | 'reading' | 'done' | 'failed' = 'idle';
   /** The selects of the CREATE ACCOUNT drawn now, filled in place when the options arrive. */
   private signUpForm: { country: HTMLSelectElement; heard: HTMLSelectElement; heardGroup: HTMLElement; otherGroup: HTMLElement; other: HTMLInputElement; countryChosen: boolean } | null = null;
+  /**
+   * The recording (plan CUSTOMER INTELLIGENCE §3.3 T.9): which of the account forms the panel draws now (SIGN IN, CREATE
+   * ACCOUNT, or the steps of FORGOTTEN PASSWORD?), and whether the collector has used them (a tap or the focus in the
+   * panel). Used, they cover the page they stand on: SIGN_IN or SIGN_UP (the password steps pause it, recorded as nothing).
+   */
+  private authShown: AuthTab | 'recover' | null = null;
+  private authUsed = false;
 
   constructor(
     mode: OwnershipMode,
@@ -142,6 +150,13 @@ export class OwnershipPanel {
     // No live region on the whole panel (a re-render would read it all out); status and alert lines carry their own roles.
     this.vault = deps.look === 'vault';
     this.root = h('div', { class: this.vault ? 'ownership' : 'n-own' });
+    const used = () => {
+      if (this.authShown === null || this.authUsed) return;
+      this.authUsed = true;
+      this.syncSeen();
+    };
+    this.root.addEventListener('pointerdown', used);
+    this.root.addEventListener('focusin', used);
     this.unsubscribe = deps.session.subscribe(() => this.render());
     this.render();
     if (deps.session.state.status === 'unknown') {
@@ -156,6 +171,17 @@ export class OwnershipPanel {
   dispose(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    seen.release(this);
+  }
+
+  /** The account forms, once used, cover the page while the panel is on it; otherwise the page counts (§3.3 T.9). */
+  private syncSeen(): void {
+    if (this.authShown === null) {
+      this.authUsed = false;
+      seen.release(this);
+    } else if (this.authUsed) {
+      seen.claim(this, this.authShown === 'create' ? 'SIGN_UP' : this.authShown === 'signin' ? 'SIGN_IN' : null, () => this.root.isConnected);
+    }
   }
 
   /**
@@ -189,6 +215,7 @@ export class OwnershipPanel {
     // A heading focused on purpose (RECEIVING THIS PIECE, FORGOTTEN PASSWORD) keeps the focus if the re-render shows it again.
     const focusedHeading = hadFocus && document.activeElement instanceof HTMLElement && document.activeElement.classList.contains(this.vault ? 'section-label' : 'n-own__heading') ? document.activeElement.id : '';
     const children: (HTMLElement | null)[] = [];
+    this.authShown = null;
     if (this.state.confirmation) children.push(...this.confirmationBlock());
     else {
       const m = this.state.mode;
@@ -217,6 +244,7 @@ export class OwnershipPanel {
     if (this.state.notice) children.push(h('p', { class: this.vault ? 'form__notice' : 'n-err n-own__notice', attrs: { role: 'status' }, text: this.state.notice }));
     if (s.status === 'signed-in' && this.state.mode.kind !== 'account') children.push(this.accountLine(s.account.email));
     this.root.replaceChildren(...children.filter((c): c is HTMLElement => c !== null));
+    this.syncSeen();
     // A re-render replaces the focused control; keep keyboard and screen-reader users in the panel.
     if (hadFocus) {
       const heading = focusedHeading ? this.root.querySelector<HTMLElement>(`#${focusedHeading}`) : null;
@@ -458,7 +486,11 @@ export class OwnershipPanel {
       // Still asking the server who is signed in: no flash of sign-in forms for an owner.
       return [h('p', { class: this.vault ? 'ownership__meta micro soft' : 'n-g n-lb n-own__waiting', attrs: { 'aria-busy': 'true' }, text: 'ONE MOMENT…' })];
     }
-    if (this.state.recover) return this.recoverBlock(this.state.recover);
+    if (this.state.recover) {
+      this.authShown = 'recover';
+      return this.recoverBlock(this.state.recover);
+    }
+    this.authShown = this.state.authTab;
     if (this.vault) return this.vaultAuthBlock(lead);
     const tab = this.state.authTab;
     // C9: SIGN IN · CREATE ACCOUNT, underlined (`.switch2`), the chosen one pressed.

@@ -86,6 +86,7 @@ import type {
   Wishlist,
   WishRemoved,
 } from './types.js';
+import type { SeenBatchBody, SeenSendResult } from './seen-model.js';
 
 export type TransportCode = 'NETWORK' | 'TIMEOUT' | 'BAD_RESPONSE';
 
@@ -949,6 +950,28 @@ export class ApiClient {
     const r = await this.request<WishRemoved>('DELETE', `/api/v1/account/wishlist/${encodeURIComponent(slug)}`, undefined, { csrf: true });
     if (!r || r.wished !== false || typeof r.count !== 'number') throw new ApiError(200, 'BAD_RESPONSE', 'Unexpected response.');
     return r;
+  }
+
+  /**
+   * What the collector looked at (plan CUSTOMER INTELLIGENCE §3.3 T.9; POST /api/v1/seen, API §8.14): one batch, sent with
+   * `keepalive` so it survives the page closing, same origin with its cookies, no CSRF token (the server checks the
+   * origin). Never thrown, never shown: 'sent' (204), 'retry' (429, a server error, no answer: kept for the next send),
+   * 'drop' (refused as malformed).
+   */
+  async seen(batch: SeenBatchBody): Promise<SeenSendResult> {
+    try {
+      const res = await this.fetchImpl(`${this.base}/api/v1/seen`, {
+        method: 'POST',
+        keepalive: true,
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(batch),
+      });
+      if (res.ok) return 'sent';
+      return res.status === 429 || res.status >= 500 ? 'retry' : 'drop';
+    } catch {
+      return 'retry';
+    }
   }
 
   /** Whether an answer is unread: NOW's line and the account sheet's NEW. */

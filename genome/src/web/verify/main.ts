@@ -106,6 +106,8 @@ import { releasesView, releaseView, type ReleasesTab } from './views/releases.js
 import { resultView } from './views/result.js';
 import { scanView, type ScanView } from './views/scanning.js';
 import { Shell } from './views/shell.js';
+import { seen } from './seen.js';
+import type { SeenAppState } from './seen-model.js';
 import { verifyingView } from './views/verifying.js';
 
 type Screen = 'landing' | 'scan' | 'verifying' | 'result' | 'message' | 'pieces' | 'piece' | 'certificate' | 'lookbook' | 'sheet' | 'releases' | 'release' | 'live' | 'board' | 'circle' | 'circlePost' | 'club' | 'how' | 'wishlist';
@@ -276,8 +278,12 @@ class App {
   private readonly banner = liveBannerView({ api: this.api, onRelease: (id) => this.openRelease(id) });
   /** NOCTURNE's chrome round the screen: the header and its account sheet, the rail, the footer, the SCAN ring. */
   private shell: Shell | null = null;
+  /** The LIVE RELEASE's page on show shows its room (its own chrome): the recording's LIVE (plan CUSTOMER INTELLIGENCE §3.3 T.9). */
+  private liveRoom = false;
 
   start(): void {
+    // What the collector looks at (plan CUSTOMER INTELLIGENCE §3.3 T.9): off in an automated browser, nothing drawn.
+    seen.start(this.api);
     this.photoInput.addEventListener('change', () => {
       const file = this.photoInput.files?.[0];
       this.photoInput.value = '';
@@ -693,11 +699,25 @@ class App {
     this.shell?.show(screen);
     this.host.replaceChildren(next);
     this.screen = screen;
+    seen.screen(screen, this.seenState());
     // On NOW, the LIVE RELEASE the banner would name leads the page itself (C1): the banner is MY PIECES' PIECES tab's (C3).
     this.banner.show(screen === 'pieces' && this.piecesTab === 'pieces');
     window.scrollTo(0, 0);
     if (focus) focusFirst(next);
     return true;
+  }
+
+  /** What the recording reads beside the screen (seen-model.ts pageOf): the subject on show. */
+  private seenState(): SeenAppState {
+    return {
+      piecesTab: this.piecesTab,
+      pieceId: this.pieceId,
+      sheetSlug: this.sheetSlug,
+      releaseId: this.releaseId,
+      releaseAfterRoom: this.releaseAfterRoom,
+      liveRoom: this.liveRoom,
+      postId: this.postId,
+    };
   }
 
   /**
@@ -747,7 +767,10 @@ class App {
       onTab: (tab) => {
         this.piecesTab = tab;
         if (entryOf(history.state) === 'pieces') replaceEntry({ ...(history.state as object), tab });
-        if (this.screen === 'pieces') this.banner.show(tab === 'pieces');
+        if (this.screen === 'pieces') {
+          this.banner.show(tab === 'pieces');
+          seen.screen('pieces', this.seenState());
+        }
       },
       localZone: localZone(),
     });
@@ -886,6 +909,7 @@ class App {
         if (this.screen !== 'sheet' || entryOf(history.state) !== 'sheet') return;
         this.sheetSlug = variant;
         replaceEntry(history.state, lookbookSheetPath(variant));
+        seen.show({ page: 'MODEL', subject: variant });
       },
       onRelease: (id) => this.openRelease(id),
       // BP-34: a card of PAIRS WELL WITH opens that model's sheet in this sheet's history entry (back: THE COLLECTION).
@@ -1011,11 +1035,17 @@ class App {
       // its own while it fades out, and keeps it should this one be given up), then followed while it is shown.
       onChrome: (shown) => {
         chrome = shown;
-        if (mounted && view.root.isConnected) this.shell?.liveChrome(shown);
+        if (mounted && view.root.isConnected) {
+          this.shell?.liveChrome(shown);
+          // Into the room or out of it: the recording's LIVE, or the release's page.
+          this.liveRoom = !shown;
+          if (this.screen === 'live') seen.screen('live', this.seenState());
+        }
       },
     });
     const beforeShow = (): void => {
       mounted = true;
+      this.liveRoom = chrome === false;
       if (chrome !== null) this.shell?.liveChrome(chrome);
     };
     if (await this.swap(view.root, 'live', focus, beforeShow)) this.live = view;

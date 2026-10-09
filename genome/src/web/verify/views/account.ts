@@ -100,6 +100,8 @@ import { SIZE_FIELDS, sizeFieldValue, sizeOptions, sizesFromForm, sizesSummary }
 import type { SoundSwitch } from '../sound.js';
 import { tierModel } from '../tier-model.js';
 import { WISHLIST_PATH, wishlistCount } from '../wishlist-model.js';
+import { seen } from '../seen.js';
+import { accountPageOf } from '../seen-model.js';
 import type { AccountAddresses, AccountProfileView, AccountSizes, ClubStatus, SavedAddress, SizeKind } from '../types.js';
 import { addressFields } from './address.js';
 import { FormError, messageOf, MIN_PASSWORD, nocturneForm } from './forms.js';
@@ -292,6 +294,8 @@ export class AccountSheet {
     this.profileNote = null;
     this.profileConfirm = false;
     this.wishCount = null;
+    // The sheet's view ends as it closes; the page under it counts again.
+    seen.release(this);
     this.el.hidden = true;
     document.documentElement.classList.remove('n-locked');
     for (const el of this.deps.outside()) el.inert = false;
@@ -377,6 +381,9 @@ export class AccountSheet {
   private render(): void {
     const s = this.deps.session.state;
     if (s.status !== 'signed-in') return;
+    // The recording (plan CUSTOMER INTELLIGENCE §3.3 T.9): the sheet and its view cover the page while it is open; the
+    // password screen pauses it and records nothing.
+    seen.claim(this, accountPageOf(this.view), () => this.isOpen);
     const head = h(
       'div',
       { class: 'n-px n-sb n-account__head' },
