@@ -25,6 +25,9 @@
  * and device, coarse geo and user agent family) to the verification service.
  * The response is the service's public outcome as is: it is built from an
  * allow-list there and never carries risk scores, thresholds or raw statuses.
+ * Once it is sent (onResponse), the scan's SCAN row is recorded for its device
+ * (TrackingService.recordScan, plan CUSTOMER INTELLIGENCE §3.3 T.8.3): best-effort,
+ * it never fails or slows the answer.
  *
  * /reports needs no session either, but it writes: a cross-site form must
  * not reach it (same-origin check, as for registration and login), and it
@@ -47,6 +50,7 @@ import { assertSameOrigin, loadAccount, loadStaff } from '../http/sessions.js';
 import { notFound } from '../errors.js';
 import type { Actor } from '../types.js';
 import type { ScanMeta } from '../services/verification.js';
+import type { SeenMeta } from '../services/tracking.js';
 import { releaseRules } from '../services/release-rules.js';
 import { safeFilename } from './admin/codes.js';
 
@@ -93,6 +97,12 @@ function matchesEtag(header: string | string[] | undefined, etag: string): boole
 
 export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { ctx, limiters, requireAdminMfa }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
+  // A scan answered: its SCAN row, after the answer (CUSTOMER INTELLIGENCE §3.3 T.8.3), never awaited by it.
+  const scansToRecord = new WeakMap<FastifyRequest, { scanId: string; meta: SeenMeta }>();
+  app.addHook('onResponse', async (request) => {
+    const scan = scansToRecord.get(request);
+    if (scan) void ctx.services.tracking.recordScan(scan.scanId, scan.meta);
+  });
 
   app.get('/api/v1/health', async (_request, reply) => {
     // Liveness plus a cheap database round trip; never says WHY it is down (that goes to the log).
@@ -240,7 +250,23 @@ export const publicRoutes: FastifyPluginAsync<PublicRouteDeps> = async (app, { c
     // A browser signed in to the console scans as staff (S-07): ADMIN_TEST, under that console user.
     const staff = await loadStaff(ctx, request, { requireMfa: requireAdminMfa });
     if (staff) meta.adminId = staff.admin.id;
-    return ctx.services.verification.verify(input, meta);
+    const outcome = await ctx.services.verification.verify(input, meta);
+    const agent = request.headers['user-agent'];
+    scansToRecord.set(request, {
+      scanId: outcome.scanId,
+      meta: {
+        deviceHash: meta.deviceHash!,
+        account: viewer ? { id: viewer.account.id, email: viewer.account.email } : null,
+        // Any console session marks the device (§3.0 (d)), as on /api/v1/seen.
+        staff: request.orbes.admin != null,
+        ip: request.ip,
+        userAgent: typeof agent === 'string' ? agent : null,
+        headers: request.headers,
+        place: meta.geo?.country ? { country: meta.geo.country, city: meta.geo.city ?? null } : null,
+        now: ctx.clock(),
+      },
+    });
+    return outcome;
   });
 
   // Where the customer saw or bought the piece of a scan that was not authentic (§8.5): one report per

@@ -29,6 +29,18 @@
  *            (a hook, a no-op until the acquisition is built). A late row (a batch in flight at the sign-in, sent
  *            without the session) from before the link and after the previous one takes the account too. Never
  *            audited: no person acts, and the sign-up and sign-in are audited already.
+ *   recordScan (§3.3 T.8.3, §3.0 (c)) after `POST /api/v1/verify` has answered (routes/public.ts, onResponse): the scan's
+ *            SCAN row (page 1, its piece's model, no duration) for its device, in one INSERT … SELECT from
+ *            `scan_events`, so an anonymous scan is attached with the browsing at a later sign-up or sign-in. The same
+ *            exclusions as the views (a staff scan, ADMIN_TEST, never), best-effort: logged, never thrown, never slowing
+ *            the scan's answer. `scan_events`, anomaly scoring and SCAN_RETENTION_DAYS do not change.
+ *   prepare  at boot (context.ts): the one `tracking_state` row, the recording's start (`started_at`, the first boot on
+ *            this schema), inserted once. Then backfillScans, in the background (start()): the scans of the 13 months
+ *            before `started_at` become devices and SCAN rows, by keyset on (occurred_at, id) from the state's
+ *            watermark, BACKFILL_BATCH scans a transaction that also moves the watermark, so a crash resumes after the
+ *            last batch with no scan written twice or skipped; a short batch marks it done (`scans_backfilled_at`),
+ *            and a later boot does nothing. Their class from `user_agent_family` (kind UNKNOWN until a visit), their
+ *            place the scan's country, their account `scan_events.account_id` as recorded.
  *   markStaff  a browser that opened the console is staff's from its first view: its buffered rows go, `staff_at` is
  *            set once, its rows are deleted in batches of STAFF_DELETE_BATCH; the daily totals already counted keep
  *            their few views.
@@ -84,6 +96,8 @@ export const STAFF_DELETE_BATCH = 5_000;
 export const SUBJECT_REFRESH_MS = 5 * 60_000;
 /** The pieces' serials the cache holds (serial → model). */
 export const PIECE_CACHE_SIZE = 2_000;
+/** The past scans turned into devices and SCAN rows per transaction at boot (§3.3 T.11). */
+export const BACKFILL_BATCH = 1_000;
 /** A chunk that failed this many flushes in a row is dropped (logged), so one bad row never holds the others back. */
 export const FLUSH_MAX_ATTEMPTS = 5;
 
@@ -512,6 +526,9 @@ export class TrackingService {
   private readonly daily = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
+  /** The scans being recorded (after their answer), awaited by idle() and the shutdown. */
+  private readonly scans = new Set<Promise<void>>();
+  private backfilling: Promise<unknown> | null = null;
 
   constructor(deps: TrackingServiceDeps) {
     this.db = deps.db;
@@ -530,6 +547,18 @@ export class TrackingService {
     if (this.timer || this.stopped) return;
     this.timer = setInterval(() => void this.buffer.flush(), BUFFER_FLUSH_MS);
     this.timer.unref();
+    // The past scans, in the background: the boot never waits for them (§3.3 T.11).
+    this.backfilling ??= this.backfillScans()
+      .then((r) => {
+        if (r.scans > 0) this.log.info(r, 'past scans recorded');
+      })
+      .catch((e: unknown) => this.log.error({ err: errText(e) }, 'past scans not recorded; the next boot resumes'));
+  }
+
+  /** Resolves once the scans being recorded and the flush under way have ended (the shutdown, the tests). */
+  async idle(): Promise<void> {
+    await Promise.all([...this.scans]);
+    await this.buffer.settled();
   }
 
   /** Stop the interval and write what is left (the shutdown, before the database closes). Idempotent. */
@@ -538,6 +567,8 @@ export class TrackingService {
     this.timer = null;
     if (this.stopped) return;
     this.stopped = true;
+    await Promise.all([...this.scans]);
+    await this.backfilling;
     const r = await this.buffer.flush({ force: true });
     if (r.failed) this.log.warn({ held: this.buffer.size }, 'views left unwritten at shutdown');
   }
@@ -552,20 +583,38 @@ export class TrackingService {
     }
   }
 
-  private async admit(batch: SeenBatch, meta: SeenMeta): Promise<IngestOutcome> {
-    const { now } = meta;
+  /** Steps 1 to 3 of ingest (§3.0 (d)), the same for a scan: why the request is never recorded, or null. */
+  private async excluded(meta: SeenMeta): Promise<DropReason | null> {
     // 1. Staff: a console session marks the device; a device marked, or one of the team's own accounts, is staff's.
     if (meta.staff) {
-      await this.markStaff(meta.deviceHash, now);
-      return { recorded: 0, dropped: 'STAFF' };
+      await this.markStaff(meta.deviceHash, meta.now);
+      return 'STAFF';
     }
-    if (this.devices.get(meta.deviceHash)?.staff) return { recorded: 0, dropped: 'STAFF' };
-    if (meta.account && (await this.houseAccounts.isHouseEmail(emailKey(meta.account.email)))) return { recorded: 0, dropped: 'TEAM' };
+    if (this.devices.get(meta.deviceHash)?.staff) return 'STAFF';
+    if (meta.account && (await this.houseAccounts.isHouseEmail(emailKey(meta.account.email)))) return 'TEAM';
     // 2. Test entrants: their accounts, their networks.
-    if (meta.account && (await this.testEntrants.has(meta.account.id))) return { recorded: 0, dropped: 'TEST_ENTRANT' };
-    if (inTestNetwork(meta.ip)) return { recorded: 0, dropped: 'TEST_NETWORK' };
+    if (meta.account && (await this.testEntrants.has(meta.account.id))) return 'TEST_ENTRANT';
+    if (inTestNetwork(meta.ip)) return 'TEST_NETWORK';
     // 3. Robots, headless browsers, prefetches.
-    if (isAutomated(meta.userAgent, meta.headers)) return { recorded: 0, dropped: 'AUTOMATED' };
+    if (isAutomated(meta.userAgent, meta.headers)) return 'AUTOMATED';
+    return null;
+  }
+
+  /** Step 6: a signed-in request on a device not linked to its account links it (SESSION); a failure is only logged. */
+  private async sessionLink(meta: SeenMeta, device: DeviceEntry): Promise<DeviceEntry> {
+    if (!meta.account || device.accountId === meta.account.id) return device;
+    try {
+      await this.link(meta.deviceHash, meta.account.id, 'SESSION', meta.now);
+    } catch (e) {
+      this.log.warn({ err: errText(e) }, 'views session link failed');
+    }
+    return this.devices.get(meta.deviceHash) ?? device;
+  }
+
+  private async admit(batch: SeenBatch, meta: SeenMeta): Promise<IngestOutcome> {
+    const { now } = meta;
+    const dropped = await this.excluded(meta);
+    if (dropped) return { recorded: 0, dropped };
     // 4. The per-device daily cap.
     const events = this.underCap(meta.deviceHash, batch.e, now);
     if (events.length === 0 && batch.e.length > 0) return { recorded: 0, dropped: 'CAP' };
@@ -576,14 +625,7 @@ export class TrackingService {
     if (device.staff) return { recorded: 0, dropped: 'STAFF' };
     // 6. The session link: a collector signed in before this device was linked to them (a 30-day session) is linked
     // now. A failure is logged and the batch goes on; the next batch tries again.
-    if (meta.account && device.accountId !== meta.account.id) {
-      try {
-        await this.link(meta.deviceHash, meta.account.id, 'SESSION', now);
-      } catch (e) {
-        this.log.warn({ err: errText(e) }, 'views session link failed');
-      }
-      device = this.devices.get(meta.deviceHash) ?? device;
-    }
+    device = await this.sessionLink(meta, device);
     // 8. The rows.
     const rows: BufferedView[] = [];
     for (const e of events) {
@@ -672,6 +714,126 @@ export class TrackingService {
     this.devices.delete(deviceHash);
     this.devices.set(deviceHash, entry);
     while (this.devices.size > DEVICE_CACHE_SIZE) this.devices.delete(this.devices.keys().next().value as string);
+  }
+
+  /**
+   * A scan's SCAN row (see the header), once `POST /api/v1/verify` has answered. Never thrown, never awaited by the
+   * scan's answer; idle() and the shutdown wait for it.
+   */
+  recordScan(scanId: string, meta: SeenMeta): Promise<void> {
+    const run = this.writeScan(scanId, meta).catch((e: unknown) => this.log.error({ err: errText(e) }, 'scan view not recorded'));
+    this.scans.add(run);
+    void run.finally(() => this.scans.delete(run));
+    return run;
+  }
+
+  private async writeScan(scanId: string, meta: SeenMeta): Promise<void> {
+    if (await this.excluded(meta)) return;
+    const placeId = meta.place ? await this.places.idOf(meta.place.country, meta.place.city) : null;
+    const cls = classifyDevice({ userAgent: meta.userAgent, hints: clientHintsOf(meta.headers) });
+    let device = await this.deviceOf(meta.deviceHash, cls, placeId, meta.now, { classOnInsert: true });
+    if (device.staff) return;
+    device = await this.sessionLink(meta, device);
+    await sql`INSERT INTO collector_views (at, device_id, account_id, page, subject, seconds, place_id)
+      SELECT s.occurred_at, ${device.id}::integer, s.account_id, ${VIEW_PAGE_CODES.SCAN}::smallint, p.model_id, 0, ${placeId}::integer
+      FROM scan_events s LEFT JOIN products p ON p.id = s.product_id
+      WHERE s.id = ${scanId}::uuid AND s.event_type <> 'ADMIN_TEST'`.execute(this.db);
+  }
+
+  /** The one `tracking_state` row, inserted at the first boot on this schema (never by the migration). Returns the recording's start. */
+  async prepare(now: Date = this.clock()): Promise<{ startedAt: Date }> {
+    await this.db.insertInto('tracking_state').values({ id: 1, started_at: now }).onConflict((oc) => oc.column('id').doNothing()).execute();
+    const row = await this.db.selectFrom('tracking_state').select('started_at').where('id', '=', 1).executeTakeFirstOrThrow();
+    return { startedAt: row.started_at };
+  }
+
+  /**
+   * The scans of the 13 months before the recording's start, as devices and SCAN rows (§3.3 T.11; see the header).
+   * Resumable and idempotent through `tracking_state`; two processes at once take turns on its row. Stops between
+   * batches at shutdown. Returns what it wrote.
+   */
+  async backfillScans(opts: { batchSize?: number } = {}): Promise<{ batches: number; scans: number; done: boolean }> {
+    const size = Math.max(1, Math.floor(opts.batchSize ?? BACKFILL_BATCH));
+    const out = { batches: 0, scans: 0, done: false };
+    for (;;) {
+      const state = await this.db.selectFrom('tracking_state').selectAll().where('id', '=', 1).executeTakeFirst();
+      if (!state) throw new Error('tracking_state has no row: prepare() runs first');
+      if (state.scans_backfilled_at) return { ...out, done: true };
+      if (this.stopped) return out;
+      const from = viewHistoryCutoff(state.started_at);
+      let q = this.db
+        .selectFrom('scan_events as s')
+        .leftJoin('products as p', 'p.id', 's.product_id')
+        .select(['s.id', 's.occurred_at', 's.device_hash', 's.account_id', 's.country', 's.user_agent_family', 'p.model_id'])
+        .where('s.occurred_at', '>=', from)
+        .where('s.occurred_at', '<', state.started_at)
+        .where('s.device_hash', 'is not', null)
+        .where('s.event_type', '<>', 'ADMIN_TEST')
+        .where((eb) => eb.or([eb('s.user_agent_family', 'is', null), eb('s.user_agent_family', 'not like', 'Bot/%')]))
+        .where(sql<boolean>`NOT EXISTS (SELECT 1 FROM test_entrants te WHERE te.account_id = s.account_id)`);
+      if (state.scans_after_id) {
+        // The watermark is compared in SQL, at the database's own precision (microseconds), never through a JS Date.
+        q = q.where(sql<boolean>`(s.occurred_at, s.id) > (SELECT ts.scans_after_at, ts.scans_after_id FROM tracking_state ts WHERE ts.id = 1)`);
+      }
+      const scans = await q.orderBy('s.occurred_at').orderBy('s.id').limit(size).execute();
+      // The places first, outside the transaction (PlaceService reads on its own connection).
+      const placeOf = new Map<string, number | null>();
+      for (const sc of scans) {
+        const country = sc.country?.trim() ?? '';
+        if (!placeOf.has(country)) placeOf.set(country, await this.places.idOf(country || null, null));
+      }
+      const last = scans[scans.length - 1];
+      const moved = await inTransaction(this.db, async (tx) => {
+        // The watermark read above must still be the row's: another process may have taken this batch meanwhile.
+        const now = await tx.selectFrom('tracking_state').selectAll().where('id', '=', 1).forUpdate().executeTakeFirstOrThrow();
+        if (now.scans_backfilled_at || now.scans_after_id !== state.scans_after_id) return false;
+        if (scans.length > 0) {
+          const byDevice = new Map<string, { first: Date; last: Date; family: string | null }>();
+          for (const sc of scans) {
+            const d = byDevice.get(sc.device_hash!);
+            if (!d) byDevice.set(sc.device_hash!, { first: sc.occurred_at, last: sc.occurred_at, family: sc.user_agent_family });
+            else {
+              d.last = sc.occurred_at;
+              d.family = sc.user_agent_family ?? d.family;
+            }
+          }
+          const devices = await tx
+            .insertInto('tracking_devices')
+            .values([...byDevice].map(([hash, d]) => ({ device_hash: hash, ...familyClass(d.family), first_seen_at: d.first, last_seen_at: d.last })))
+            .onConflict((oc) => oc.column('device_hash').doUpdateSet({ last_seen_at: sql`greatest(tracking_devices.last_seen_at, excluded.last_seen_at)` }))
+            .returning(['id', 'device_hash'])
+            .execute();
+          const idOf = new Map(devices.map((d) => [d.device_hash, d.id]));
+          await tx
+            .insertInto('collector_views')
+            .values(
+              scans.map((sc) => ({
+                at: sc.occurred_at,
+                device_id: idOf.get(sc.device_hash!)!,
+                account_id: sc.account_id,
+                page: VIEW_PAGE_CODES.SCAN,
+                subject: sc.model_id,
+                seconds: 0,
+                place_id: placeOf.get(sc.country?.trim() ?? '') ?? null,
+              })),
+            )
+            .execute();
+        }
+        await tx
+          .updateTable('tracking_state')
+          .set({
+            ...(last ? { scans_after_at: sql`(SELECT occurred_at FROM scan_events WHERE id = ${last.id}::uuid)`, scans_after_id: last.id } : {}),
+            ...(scans.length < size ? { scans_backfilled_at: this.clock() } : {}),
+          })
+          .where('id', '=', 1)
+          .execute();
+        return true;
+      });
+      if (!moved) continue;
+      out.batches += 1;
+      out.scans += scans.length;
+      if (scans.length < size) return { ...out, done: true };
+    }
   }
 
   /**
@@ -778,6 +940,14 @@ function lateAccount(device: DeviceEntry, at: Date): string | null {
   if (at.getTime() >= device.linkedAt.getTime()) return null;
   const from = device.previousLinkedAt ?? viewHistoryCutoff(device.linkedAt);
   return at.getTime() >= from.getTime() ? device.accountId : null;
+}
+
+/** A past scan's device class from its `user_agent_family` (« Safari/iOS »): its system and browser, its kind UNKNOWN until a visit. */
+function familyClass(family: string | null): { kind: 'UNKNOWN'; os: DeviceClass['os']; browser: DeviceClass['browser'] } {
+  const [browser, os] = (family ?? '').split('/');
+  const browsers: Record<string, DeviceClass['browser']> = { Safari: 'SAFARI', Chrome: 'CHROME', Firefox: 'FIREFOX', Edge: 'EDGE', Samsung: 'SAMSUNG', Opera: 'OPERA', WebView: 'WEBVIEW' };
+  const systems: Record<string, DeviceClass['os']> = { iOS: 'IOS', Android: 'ANDROID', macOS: 'MACOS', Windows: 'WINDOWS', ChromeOS: 'CHROMEOS', Linux: 'LINUX' };
+  return { kind: 'UNKNOWN', os: systems[os ?? ''] ?? 'OTHER', browser: browsers[browser ?? ''] ?? 'OTHER' };
 }
 
 /** An account's email as `accounts.email_normalized` holds it. */

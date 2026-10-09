@@ -431,9 +431,12 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     // The first boot's answers to « How did you hear about ORBES? » (plan CUSTOMER INTELLIGENCE §3.1 P.3.4).
     const heard = await services.profiles.prepare();
     if (heard.length > 0) log.info({ heard }, 'sign-up answers ready');
+    // The recording's start, once (plan CUSTOMER INTELLIGENCE §3.3 T.6 table 10); the past scans follow in the background (start()).
+    await services.tracking.prepare();
     // The receptions' issuing worker: what the last process left confirmed is issued, then it polls (§3.5.6.5).
     if (overrides.timers ?? config.env !== 'test') services.receptions.start();
-    // The views' buffer writes every 2 s on its own unref'd interval (§3.0 (f)); tests flush it themselves.
+    // The views' buffer writes every 2 s on its own unref'd interval (§3.0 (f)), and the past scans are recorded in the
+    // background (§3.3 T.11); tests drive both themselves.
     if (overrides.timers ?? config.env !== 'test') services.tracking.start();
     return ctx;
   } catch (e) {
