@@ -4,7 +4,7 @@
  * C_CSS), its classes the rulebook's own names under `n-` (`.btn` → `.n-btn`, `.rail` → `.n-rail`).
  *
  *   type          n-g (Gravesend capitals) · n-t1 n-t2 n-t3 · n-lb · n-lead n-tx n-sm · n-ivc · n-num · n-nw · n-keep
- *   icon()        the canvas's line icons (22 px, 1.25 stroke; `small`: 16 px)
+ *   icon()        the canvas's line icons (22 px, 1.25 stroke; `small`: 16 px), and the heart of a model's sheet
  *   monogram()    the ORBES monogram on its master artboard, in ivory (28 px in the header, 38 px at the foot…)
  *   button()      an ivory filled button (54 px), the one primary action; `outline`: the hairline button
  *   textLink()    a text link underlined at 5 px (`.tl`)
@@ -60,6 +60,8 @@ const ICONS = Object.freeze({
   lock: [['path', { d: 'M5.5 10h11v9h-11zM8 10V7a3 3 0 0 1 6 0v3' }]],
   key: [['circle', { cx: 7.5, cy: 11, r: 3.5 }], ['path', { d: 'M11 11h8M16 11v3M18.5 11v2' }]],
   mail: [['path', { d: 'M3 5.5h16v11H3z' }], ['path', { d: 'M3.5 6l7.5 6 7.5-6' }]],
+  // The heart of a model's sheet (plan CUSTOMER INTELLIGENCE §3.2 W.10.1), in the line style of the others; filled once pressed.
+  heart: [['path', { d: 'M11 18.4c-3.9-2.7-6.6-5.2-6.6-8.3A3.5 3.5 0 0 1 11 7.9a3.5 3.5 0 0 1 6.6 2.2c0 3.1-2.7 5.6-6.6 8.3z' }]],
 } as const satisfies Record<string, readonly (readonly ['path' | 'circle', Record<string, string | number>])[]>);
 
 export type IconName = keyof typeof ICONS;

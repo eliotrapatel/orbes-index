@@ -838,6 +838,8 @@ class App {
       session: this.session,
       slug,
       onCollection: () => this.openLookbook(),
+      // The heart's SIGN IN, signed out (plan CUSTOMER INTELLIGENCE §3.2 W.10.1): MY PIECES' sign-in.
+      onSignIn: () => this.openPieces(),
       // A dot chosen (N6): the sheet's address becomes that variant's, in the same history entry.
       onVariant: (variant) => {
         if (this.screen !== 'sheet' || entryOf(history.state) !== 'sheet') return;

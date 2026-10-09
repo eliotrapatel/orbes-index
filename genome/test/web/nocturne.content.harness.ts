@@ -93,6 +93,8 @@ const program = (s: UiState) => full(s) && !s.mutates && named('piece-care', 'cl
 const ROOM_VARIANTS: readonly string[] = ['room', 'live', 'afterroom', 'afterroom-ends'];
 /** YOUR PROFILE's stage (plan CUSTOMER INTELLIGENCE §3.1 P.8): account-profile, then profile-tastes. */
 const profile = (s: UiState) => s.variant === 'account-profile';
+/** YOUR WISHLIST's stage (plan CUSTOMER INTELLIGENCE §3.2 W.10): the heart pressed on a sheet. */
+const wishlist = (s: UiState) => s.variant === 'wishlist';
 /** The stages of MY PIECES' orders that their one state writes (plan NEXT LOT §3.4, §3.6). */
 const ORDER_STAGES: readonly string[] = ['claim-waiting', 'orders-delivery', 'orders-case'];
 
@@ -113,6 +115,8 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   program,
   // YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.8), on its own stage, its two states in order.
   profile,
+  // YOUR WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10), on its own stage, its states in order.
+  wishlist,
   // The account sheet's MESSAGES and its write sheet (plan NEXT-NINE, CS-01), in the draw-leads demo, in order.
   messages: accountMessages,
   // THE COLLECTION and a model's sheet, with PAIRS WELL WITH as picked (plan NEXT-NINE, BP-34: the pairs stage).
@@ -124,7 +128,7 @@ export const CONTENT_SHARDS: Readonly<Record<string, (s: UiState) => boolean>> =
   // The draws in every state; a draw in sizes (plan NEXT LOT §3.6.F), on its own stage.
   draws: (s) => s.variant === 'draws' || s.variant === 'draw-sizes',
   stress: (s) => s.variant === 'stress' && !named('account')(s),
-  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s),
+  variants: (s) => !full(s) && !ROOM_VARIANTS.includes(s.variant) && s.variant !== 'draws' && s.variant !== 'draw-sizes' && s.variant !== 'stress' && s.variant !== 'pairs' && !ORDER_STAGES.includes(s.variant) && !named('account')(s) && !profile(s) && !wishlist(s),
 });
 
 /** The states of shard `name`, in the order of UI_STATES. */

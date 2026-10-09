@@ -1232,6 +1232,16 @@ async function aModel(page: Page): Promise<void> {
   await check(page, '.n-model__dots', { 'margin-top': 22 });
   await check(page, '.n-model__owned', { 'margin-top': 18, 'font-size': 14, color: IV });
   expect(await page.locator('.n-model__owned').innerText()).toBe('You own two: steel and gold');
+  // The heart (plan CUSTOMER INTELLIGENCE §3.2 W.10.1), last in the words, centred: a 44 px target, the line icon (22 px)
+  // then WISHLIST in Gravesend at the text link's size with the label's tracking, ivory; its heart not filled.
+  await check(page, '.n-model__heart', { 'margin-top': 14, 'text-align': 'center' });
+  const theHeart = await check(page, '.n-heart', { 'min-height': 44, 'min-width': 44, 'font-size': 10.5, 'letter-spacing': em(10.5, 0.28), color: IV, 'background-color': NONE, 'column-gap': 10 });
+  expect(Number(theHeart._h)).toBeGreaterThanOrEqual(44);
+  expect(Math.abs(Number(theHeart._left) + Number(theHeart._right) - 390)).toBeLessThan(1);
+  expect(isGravesend((await read(page, '.n-heart', ['font-family']))['font-family']!)).toBe(true);
+  await check(page, '.n-heart .n-ic', { width: 22, height: 22, 'stroke-width': '1.25px' });
+  await check(page, '.n-heart .n-ic path', { fill: 'none' });
+  expect(await page.locator('.n-heart').getAttribute('aria-pressed')).toBe('false');
   // Its next release: a plate row 34 px under, the live dot, LIVE RELEASE, IN BLUE, THURSDAY 21:00 PARIS, its page.
   await check(page, '.n-model__next', { 'margin-top': 34, display: 'flex', 'column-gap': 16, 'padding-top': 20, 'padding-left': 24, 'background-color': PLATE });
   await check(page, '.n-model__next .n-live', { width: 7, height: 7, 'background-color': IV });
@@ -1304,6 +1314,11 @@ async function aModel(page: Page): Promise<void> {
   );
   expect(gravesendDigits).toEqual([]);
   await page.unroute('**/api/v1/live');
+  // The heart pressed (plan CUSTOMER INTELLIGENCE §3.2 W.10.1): its path filled in ivory, its status line under it in ash.
+  await page.locator('.n-heart').click();
+  await expect.poll(() => page.locator('.n-heart').getAttribute('aria-pressed')).toBe('true');
+  await check(page, '.n-heart .n-ic path', { fill: IV });
+  await check(page, '.n-model__heart-line', { 'margin-top': 6, 'font-size': 13, color: ASH });
 }
 
 /** C33: a model of THE PRIVATE SALON: its facts, its sentence, the note, REQUEST THIS PIECE, the screen's one filled button. */

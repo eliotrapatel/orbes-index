@@ -21,7 +21,9 @@
  * The sheet: ‹ THE COLLECTION; the photograph whole, faded; its collection, name, line (type, THE PRIVATE SALON,
  * DISCONTINUED · <year>), SIZES 16 · 17 · 18 (addition 8), the dots (each switches the sheet: its photographs, story,
  * facts, care, the salon's price and request; the address follows, so a variant's own address opens it selected), You
- * own N; the model's next release as a plate row (its day and hour, no countdown); for a model of the salon its price,
+ * own N, then the heart and WISHLIST (plan CUSTOMER INTELLIGENCE §3.2 W.10.1: the dot shown kept in YOUR WISHLIST, pressed
+ * once it is; signed out, a tap says the wishlist is kept in the account, with SIGN IN; its status line under it after a
+ * tap); the model's next release as a plate row (its day and hour, no countdown); for a model of the salon its price,
  * the tier it is offered from, its sentence, for a model of two sizes or more YOUR SIZE (its sizes and NOT SURE YET, the
  * one YOUR SIZES suggests preselected with SIZE 52 · FROM YOUR SIZES, else NOT SURE YET; plan NEXT-NINE, AC-01), a note
  * and REQUEST THIS PIECE (the sheet's one primary action), or once requested REQUESTED (and SIZE 52 when one was asked)
@@ -43,7 +45,7 @@
 import { h } from '../../shared/dom.js';
 import { storyBlock } from '../../shared/lookbook.js';
 import { ApiError, type ApiClient } from '../api.js';
-import { LIVE, LOOKBOOK } from '../copy.js';
+import { LIVE, LOOKBOOK, WISHLIST } from '../copy.js';
 import { modelContext } from '../messages-model.js';
 import {
   cardFace,
@@ -66,6 +68,7 @@ import {
 import { nextRelease, type NextReleaseModel } from '../next-release-model.js';
 import type { SessionStore } from '../session.js';
 import type { ClubLookbook, DropCard, LiveCard, OwnedPiece, SalonOpening } from '../types.js';
+import { heartState, wishedSlugs } from '../wishlist-model.js';
 import { LOOKBOOK_PATH, PIECES_PATH, viewRoot, withNumerals } from './common.js';
 import { messageOf } from './forms.js';
 import { accLink, appAnchor, button, definitionList, failedState, fadedPhoto, icon, lift, loadingState, plateCard, quietLine, sizeButtons, textLink, variantDots } from './nocturne.js';
@@ -90,8 +93,10 @@ export interface LookbookDeps {
 }
 
 export interface SheetDeps {
-  api: Pick<ApiClient, 'lookbookSheet' | 'clubLookbookSheet' | 'requestPiece' | 'products' | 'liveReleases' | 'drops'>;
+  api: Pick<ApiClient, 'lookbookSheet' | 'clubLookbookSheet' | 'requestPiece' | 'products' | 'liveReleases' | 'drops' | 'wishlist' | 'wish' | 'unwish'>;
   session: Session;
+  /** The heart's SIGN IN, signed out (plan CUSTOMER INTELLIGENCE §3.2 W.10.1): MY PIECES' sign-in, as the header's SIGN IN. */
+  onSignIn(): void;
   /** The address of the sheet; null when the path names none (the page says the model is not in the collection). */
   slug: string | null;
   /** ‹ THE COLLECTION: back to the grid. */
@@ -411,6 +416,15 @@ class SheetPage {
   private slug: string | null;
   /** CO-01: SHOW ALL N RELEASES pressed (every row of THE RELEASES OF THIS MODEL shown), kept across a render. */
   private releasesUnfolded = false;
+  /**
+   * The heart (plan CUSTOMER INTELLIGENCE §3.2 W.10.1): the addresses of the account's wished models it may open now,
+   * read with the sheet; null signed out, or when the wishlist could not be read (the heart is then not shown).
+   */
+  private wished: Set<string> | null = null;
+  /** A wish or its removal under way: the heart disabled and busy meanwhile. */
+  private heartBusy = false;
+  /** The heart's status line after a tap, until the next tap, a dot chosen or the sheet left. */
+  private heartLine: { text: string; signIn?: boolean } | null = null;
 
   constructor(private readonly deps: SheetDeps) {
     this.focusPending = deps.focus === true;
@@ -454,6 +468,13 @@ class SheetPage {
       ownPieces(this.deps.api, this.deps.session, signedIn === true),
       this.deps.api.liveReleases().catch((): LiveCard[] => []),
       this.deps.api.drops().catch((): DropCard[] => []),
+      // The heart's state: the account's wishlist, read once with the sheet; unreadable, no heart (never a wrong state).
+      signedIn === true
+        ? this.deps.api.wishlist().then(wishedSlugs, (e: unknown) => {
+            this.deps.session.noteError(e);
+            return null;
+          })
+        : Promise.resolve(null),
     ]);
     let load: SheetLoad | null = null;
     if (slug !== null && signedIn === true) {
@@ -470,10 +491,12 @@ class SheetPage {
         load = e instanceof ApiError && e.status === 404 ? { kind: 'missing' } : { kind: 'failed', message: messageOf(e) };
       }
     }
-    const [pieces, live, drops] = await extras;
+    const [pieces, live, drops, wished] = await extras;
     if (stale()) return;
     this.signedIn = signedIn;
     this.pieces = pieces;
+    this.wished = wished;
+    this.heartLine = null;
     this.releases = { live, drops };
     this.load = load;
     this.render();
@@ -535,6 +558,7 @@ class SheetPage {
           s.sizes ? h('p', { class: 'n-g n-lb n-ivc n-num n-model__sizes' }, ...withNumerals(s.sizes)) : null,
           s.dots.length > 0 ? this.dots(s) : null,
           owned ? h('p', { class: 'n-state n-model__owned' }, icon('check', { small: true }), owned) : null,
+          this.heart(s.slug),
         ],
         { center: true, extraClass: photo ? 'n-model__words' : 'n-model__words n-model__bare' },
       ),
@@ -601,6 +625,8 @@ class SheetPage {
         onSelect: (slug) => {
           if (this.load.kind !== 'ready' || slug === this.load.sheet.slug) return;
           this.requestError = null;
+          // The heart's line goes with the dot it was about; the heart is drawn for the dot now shown (no request).
+          this.heartLine = null;
           this.load = { kind: 'ready', sheet: selectDot(this.load.sheet, slug) };
           // A sign-in or sign-out meanwhile reads the sheet again: of the dot chosen, the address's.
           this.slug = slug;
@@ -612,6 +638,99 @@ class SheetPage {
     );
     el.classList.add('n-model__dots');
     return el;
+  }
+
+  /**
+   * The heart (plan CUSTOMER INTELLIGENCE §3.2 W.10.1), last in the words: the line icon and WISHLIST, pressed when the dot
+   * shown is wished; signed out, not pressed; not shown when the wishlist could not be read. Its status line under it
+   * after a tap. Null when not shown.
+   */
+  private heart(slug: string): HTMLElement | null {
+    const st = heartState(this.signedIn, this.wished, slug);
+    if (!st.shown) return null;
+    const line = this.heartLine;
+    return h(
+      'div',
+      { class: 'n-model__heart' },
+      h(
+        'button',
+        {
+          class: 'n-g n-ivc n-heart',
+          attrs: { type: 'button', 'aria-pressed': String(st.pressed), 'aria-busy': this.heartBusy ? 'true' : 'false', disabled: this.heartBusy },
+          on: { click: () => void this.toggleWish(slug) },
+        },
+        icon('heart'),
+        WISHLIST.heart,
+      ),
+      line
+        ? h(
+            'p',
+            { class: 'n-sm n-model__heart-line', attrs: { role: 'status' } },
+            line.text,
+            ...(line.signIn ? [' ', textLink(WISHLIST.signIn, { href: PIECES_PATH, onOpen: () => this.deps.onSignIn(), extraClass: 'n-model__heart-sign-in' })] : []),
+          )
+        : null,
+    );
+  }
+
+  /**
+   * The heart drawn again in place (its state, its line); the focus back on it when it had it, or when `focus` (it was
+   * tapped, and the focus has gone nowhere else while it was busy).
+   */
+  private redrawHeart(slug: string, focus = false): void {
+    const old = this.body.querySelector<HTMLElement>('.n-model__heart');
+    if (!old) return;
+    const active = document.activeElement;
+    const back = old.contains(active) || (focus && (active === null || active === document.body));
+    const next = this.heart(slug);
+    if (next) old.replaceWith(next);
+    else old.remove();
+    if (back) next?.querySelector<HTMLElement>('.n-heart')?.focus({ preventScroll: true });
+  }
+
+  /**
+   * A tap on the heart: signed out, nothing is sent and the line says the wishlist is kept in the account (SIGN IN);
+   * signed in, the dot shown kept or removed (PUT or DELETE), the heart busy meanwhile, then pressed or not with its line;
+   * a failure says so with the server's words and nothing flips; a model no longer in the collection (404): the sheet is
+   * read again.
+   */
+  private async toggleWish(slug: string): Promise<void> {
+    if (this.heartBusy) return;
+    if (this.signedIn !== true || this.wished === null) {
+      this.heartLine = { text: WISHLIST.signedOut, signIn: true };
+      this.redrawHeart(slug);
+      return;
+    }
+    const wished = this.wished.has(slug);
+    // Tapped (or pressed from the keyboard): the focus comes back to it once it is no longer busy.
+    const focus = document.activeElement?.closest('.n-model__heart') != null;
+    this.heartBusy = true;
+    this.heartLine = null;
+    this.redrawHeart(slug);
+    try {
+      if (wished) await this.deps.api.unwish(slug);
+      else await this.deps.api.wish(slug);
+      if (this.disposed) return;
+      if (wished) this.wished?.delete(slug);
+      else this.wished?.add(slug);
+      this.heartLine = { text: wished ? WISHLIST.removed : WISHLIST.added };
+    } catch (e) {
+      if (this.disposed) return;
+      this.deps.session.noteError(e);
+      if (e instanceof ApiError && !e.isNetwork && e.status === 404) {
+        // The model left the collection meanwhile: the sheet read again says so.
+        this.heartBusy = false;
+        void this.fetch();
+        return;
+      }
+      this.heartLine = { text: `${WISHLIST.failed} ${messageOf(e)}` };
+    } finally {
+      this.heartBusy = false;
+    }
+    if (this.disposed || this.load.kind !== 'ready') return;
+    // Another dot chosen meanwhile: its heart, without the line of the one tapped.
+    if (this.load.sheet.slug !== slug) this.heartLine = null;
+    this.redrawHeart(this.load.sheet.slug, focus);
   }
 
   /**

@@ -205,6 +205,8 @@ describe('verify app: floors of 10 px for what is acted on and 44 px for what is
     // YOUR SIZES' selects (plan NEXT-NINE, AC-01): a field's line, its reading face at the input's size.
     '.n-fld__select-input',
     '.n-foot__club-link',
+    // The heart of a model's sheet (plan CUSTOMER INTELLIGENCE §3.2 W.10.1): WISHLIST at the text link's size.
+    '.n-heart',
     '.n-opt2__option',
     '.n-own__link',
     '.n-own__terms-link',
@@ -749,6 +751,30 @@ describe('verify app: one button to ORBES Client Services, the email under FORGO
       max: 'Up to 30.',
       retired: 'NO LONGER IN THE COLLECTION',
     });
+  });
+
+  it('writes YOUR WISHLIST calmly (WISHLIST; plan CUSTOMER INTELLIGENCE §3.2 W.10.4): no exclamation mark, no word of §4.5, no atelier, handmade or craft, a piece and never a product, no count but its own row', () => {
+    const said = (v: unknown): string[] =>
+      typeof v === 'string' ? [v] : typeof v === 'function' ? [0, 1, 3].map((n) => String((v as (...a: unknown[]) => unknown)(n === 0 ? 'MONOLITHE IN BLUE' : n))) : v && typeof v === 'object' ? Object.values(v).flatMap(said) : [];
+    const words = said(verifyCopy.WISHLIST).join('\n');
+    expect(words.length).toBeGreaterThan(300);
+    expect(words).not.toContain('!');
+    expect(findForbidden(words, [...brandForbiddenTerms(), ...EXTRA_FORBIDDEN_EN])).toEqual([]);
+    expect(words).not.toMatch(/product|atelier|handmade|craft/i);
+    expect(verifyCopy.WISHLIST).toMatchObject({
+      heart: 'WISHLIST',
+      added: 'In your wishlist.',
+      removed: 'Removed from your wishlist.',
+      failed: 'Your wishlist could not be changed just now.',
+      signedOut: 'Your wishlist is kept in your ORBES account.',
+      row: 'YOUR WISHLIST',
+      title: 'YOUR WISHLIST',
+      lead: 'The models you marked with the heart on their page, the latest first.',
+      empty: 'Your wishlist is empty. Mark a model with the heart on its page to keep it here.',
+      notShown: 'NOT IN THE COLLECTION NOW',
+    });
+    expect(verifyCopy.WISHLIST.removedNamed('MONOLITHE IN BLUE')).toBe('MONOLITHE IN BLUE is removed from your wishlist.');
+    expect(verifyCopy.WISHLIST.discontinued(2026)).toBe('DISCONTINUED · 2026');
   });
 
   it('writes THE HOUSE’S GUARANTEE calmly (plan NEXT-NINE, IN-01): no exclamation mark, no word of §4.5, a place and never authenticity', () => {

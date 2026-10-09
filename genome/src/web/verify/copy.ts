@@ -2051,3 +2051,29 @@ export const ACCOUNT_PROFILE = Object.freeze({
   /** YOUR ADDRESSES' back link when it was opened from YOUR PROFILE (otherwise MESSAGES.back, YOUR ACCOUNT). */
   backToProfile: 'YOUR PROFILE',
 });
+
+/** The wishlist (CUSTOMER INTELLIGENCE, W.10): the heart on a model's sheet, YOUR WISHLIST's row and page. Private: no count is shown. */
+export const WISHLIST = Object.freeze({
+  heart: 'WISHLIST',
+  added: 'In your wishlist.',
+  removed: 'Removed from your wishlist.',
+  failed: 'Your wishlist could not be changed just now.',
+  signedOut: 'Your wishlist is kept in your ORBES account.',
+  signIn: 'SIGN IN',
+  row: 'YOUR WISHLIST',
+  count: (n: number) => (n === 0 ? 'NONE YET' : n === 1 ? '1 MODEL' : `${n} MODELS`),
+  back: 'YOUR ACCOUNT',
+  title: 'YOUR WISHLIST',
+  lead: 'The models you marked with the heart on their page, the latest first.',
+  loading: 'ONE MOMENT…',
+  unreadable: 'Your wishlist could not be shown just now.',
+  retry: 'TRY AGAIN',
+  empty: 'Your wishlist is empty. Mark a model with the heart on its page to keep it here.',
+  collection: 'THE COLLECTION',
+  seeModel: 'SEE THE MODEL',
+  remove: 'REMOVE',
+  removedNamed: (name: string) => `${name} is removed from your wishlist.`,
+  notShown: 'NOT IN THE COLLECTION NOW',
+  discontinued: (year: number) => `DISCONTINUED · ${year}`,
+  salon: 'THE PRIVATE SALON',
+});

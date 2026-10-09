@@ -1230,6 +1230,23 @@ export const UI_STATES: readonly UiState[] = [
   { id: 'collection-empty', title: 'THE COLLECTION with no model', refs: ['C40'], variant: 'empty', path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__empty', stress: true },
   { id: 'collection-stress', title: 'THE COLLECTION with a 24-character name, no photograph', refs: ['same pieces'], variant: 'stress', as: you, path: at('/verify/lookbook'), ready: '.view--lookbook[data-state="ready"] .lookbook__group', stress: true },
   { id: 'model-stress', title: 'A model of 24 characters without a photograph, € 125 400 in the salon', refs: ['same pieces'], variant: 'stress', as: you, path: sheet('long'), ready: '.view--sheet .sheet__body section', stress: true },
+  // Plan CUSTOMER INTELLIGENCE §3.2 W.10.1: the heart on MONOLITHE in blue, tapped: pressed, In your wishlist. (its own
+  // stage, wishlist, so no other sheet sees the wish).
+  {
+    id: 'sheet-wished',
+    title: 'A model’s sheet: MONOLITHE in blue, the heart pressed: WISHLIST, In your wishlist.',
+    refs: ['CUSTOMER INTELLIGENCE §3.2 W.10.1'],
+    variant: 'wishlist',
+    as: you,
+    path: sheet('blue'),
+    mutates: true,
+    act: async (run) => {
+      await run.page.locator('.view--sheet .n-heart').waitFor({ timeout: 20_000 });
+      await button(run, 'WISHLIST').click();
+      await run.page.locator('.view--sheet .n-heart[aria-pressed="true"]').waitFor({ timeout: 20_000 });
+    },
+    ready: '.view--sheet .n-model__heart-line',
+  },
   // Plan NEXT-NINE, BP-34: PAIRS WELL WITH as the console picked it on MONOLITHE (the pairs stage), read by a TITANE owner:
   // ZENITH of THE PRIVATE SALON, then MONOLITHE ARCHITECTURALE (24 characters, no photograph); the C6 foot, picked.
   { id: 'model-pairs', title: 'A model’s sheet: PAIRS WELL WITH as picked, ZENITH and MONOLITHE ARCHITECTURALE', refs: ['C6', 'BP-34'], variant: 'pairs', as: you, path: sheet('steel'), ready: '.view--sheet .n-model__pairs', stress: true },

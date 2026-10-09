@@ -1829,6 +1829,45 @@ body.nocturne .view--sheet.n-model {
   margin-top: 18px;
 }
 
+/* The heart (plan CUSTOMER INTELLIGENCE §3.2 W.10.1): last in the words, centred, a 44 px target; the line icon, then
+   WISHLIST in Gravesend capitals at the text link's size (the 10 px floor of what is tapped) and the label's tracking,
+   ivory as the words above it; its heart filled in ivory once pressed. Its status line under it after a tap. */
+.n-model__heart {
+  margin-top: 14px;
+}
+
+.n-heart {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 0;
+  background: none;
+  font-size: var(--n-fs-tl);
+  letter-spacing: var(--n-track-lb);
+  cursor: pointer;
+}
+
+.n-heart[aria-pressed="true"] .n-ic path {
+  fill: currentColor;
+}
+
+.n-heart:disabled {
+  cursor: progress;
+}
+
+.n-heart:focus-visible {
+  outline: 2px solid var(--vault-ink);
+  outline-offset: 2px;
+}
+
+.n-model__heart-line {
+  margin-top: 6px;
+}
+
 /* Its next release (C6): a plate row 34 px under the words, a link to the release's page. */
 .n-model__next {
   margin-top: 34px;
