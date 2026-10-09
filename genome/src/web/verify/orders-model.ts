@@ -295,11 +295,6 @@ export function sizeName(label: string): string {
   return /^(SIZE|ONE SIZE)\b/.test(l) ? l : `SIZE ${l}`;
 }
 
-/** Whether the agent has begun packing the order, as its card can tell: on its way, its own address no longer the collector's to change. */
-function packingStarted(o: AccountOrder): boolean {
-  return (o.status === 'RESERVED' || o.status === 'PAID') && !!o.editable && !o.editable.address && !o.addressOf && !!o.address;
-}
-
 /** DELIVERY ADDRESS (plan NEXT LOT §3.6.B), on an order's card. */
 export interface OrderAddressModel {
   /**
@@ -360,7 +355,10 @@ export function orderEngraving(o: AccountOrder): OrderEngravingModel | null {
   const current = engravingOf(o);
   const offer = o.engravingOffer && typeof o.engravingOffer === 'object' ? o.engravingOffer : null;
   if (!o.editable?.engraving || !offer) {
-    return current && packingStarted(o) ? { action: null, locked: E.locked, text: current.text, maxLength: 0, included: false, priceLine: null, addNote: null, removable: false, removeNote: null } : null;
+    // The server offers an engraving on every order that carries one (a welcome gift aside), so on a holding order
+    // with an offer its engraving stops being editable only once packing has begun, the order travelling or not.
+    const locked = !!current && (o.status === 'RESERVED' || o.status === 'PAID') && offer !== null && o.editable?.engraving === false;
+    return locked ? { action: null, locked: E.locked, text: current.text, maxLength: 0, included: false, priceLine: null, addNote: null, removable: false, removeNote: null } : null;
   }
   const included = offer.included === true;
   const priceMinor = !included && typeof offer.priceMinor === 'number' && offer.priceMinor >= 0 ? offer.priceMinor : null;

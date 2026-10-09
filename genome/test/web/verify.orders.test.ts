@@ -445,6 +445,16 @@ describe('YOUR ORDERS: the collector\'s side of an order (plan NEXT LOT §3.6)',
     const packing = order({ status: 'PAID', address: ADDRESS, editable: { address: false, engraving: false }, engravingOffer: offer, engraving: { text: 'J.M.', priceMinor: 3_000 } });
     expect(orderEngraving(packing)).toMatchObject({ action: null, locked: E.locked });
     expect(orderEngraving({ ...packing, engraving: null })).toBeNull();
+    // An order travelling with another (a LIVE entry's second piece, the release's ENGRAVING add-on): packing begun, the
+    // same line in place of the link, though its address is its parent's.
+    const travelling = order({ status: 'PAID', withOrder: 'OR-3F9A21C4', addressOf: 'OR-3F9A21C4', editable: { address: false, engraving: false }, engravingOffer: addon, engraving: { text: 'C.L.', priceMinor: null } });
+    expect(orderEngraving(travelling)).toMatchObject({ action: null, locked: E.locked, text: 'C.L.' });
+    expect(orderEngraving(travelling)!.locked).toBe(ORDERS.engraving.locked);
+    expect(orderEngraving(travelling)!.action).toBeNull();
+    // Still the collector's to change while packing has not begun.
+    expect(orderEngraving({ ...travelling, editable: { address: false, engraving: true } })).toMatchObject({ action: E.change, locked: null });
+    // Shipped: neither link nor line.
+    expect(orderEngraving({ ...travelling, status: 'SHIPPED', shipment: SHIPMENT })).toBeNull();
   });
 
   it('DELIVERY ADDRESS (§3.6.B): its lines with CHANGE, ADD THE DELIVERY ADDRESS, packing begun, read once shipped, none once cancelled; the order it travels with', () => {

@@ -788,7 +788,7 @@ describe('schema', () => {
     );
     const { model } = await seedProduct(t.db);
     const location = await t.db.insertInto('stock_locations').values({ name: 'DELIVERY 0039' }).returning('id').executeTakeFirstOrThrow();
-    const request = await t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', handled_at: new Date(), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
+    const request = await t.db.insertInto('shop_requests').values({ account_id: account.id, model_id: model.id, status: 'CLOSED', created_at: new Date('2026-10-08T09:00:00Z'), handled_at: new Date('2026-10-08T09:30:00Z'), outcome: 'ACCEPTED' }).returning('id').executeTakeFirstOrThrow();
     const order = await t.db
       .insertInto('orders')
       .values({
