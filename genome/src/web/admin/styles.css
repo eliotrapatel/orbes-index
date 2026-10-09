@@ -5140,6 +5140,29 @@ fieldset.cfield--checks > .cfield__label {
   width: min(620px, calc(100vw - 48px));
 }
 
+/* On a phone, the Profile's head wraps: its note under the title, then its three tools on their own line, so nothing
+   runs past the screen's edge (390 px). */
+@media (max-width: 599px) {
+  #profile > .panel__head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  #profile > .panel__head .panel__tools {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin-left: 0;
+  }
+
+  /* The client sheet's actions (Recovery code, Lock account, Export data) wrap under the lead rather than run past it. */
+  .view--owner .page-head__actions {
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    max-width: 100%;
+  }
+}
+
 /* Tags and private notes (§3.6 C.4.3): the tags on one line, each with its ×; Add a tag; the notes, newest first, their
    line breaks kept. */
 .client-tags {
@@ -5878,5 +5901,23 @@ fieldset.cfield--checks > .cfield__label {
   }
   .link__col + .link__col {
     padding-left: 16px;
+  }
+  /* Both titles two lines high (1.5 each), with their 10 px padding and hairline, so the two columns' rows stay level
+     when LAST LINK · CONVERSION wraps. */
+  .link__col-title {
+    display: flex;
+    align-items: flex-end;
+    min-height: calc(3em + 11px);
+  }
+}
+
+/* By day on a phone: the sign-ups (first · last) stay beside each day's visits, the date and the bar narrower. */
+@media (max-width: 860px) {
+  .link__bars .bar {
+    grid-template-columns: 88px minmax(0, 1fr) 36px 56px;
+    gap: 10px;
+  }
+  .link__bars .bar__share {
+    display: block;
   }
 }
