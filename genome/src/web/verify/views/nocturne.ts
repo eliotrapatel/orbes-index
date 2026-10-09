@@ -438,7 +438,7 @@ export function orderSteps(steps: readonly OrderStep[], opts: { label: string; b
   const n = Math.max(4, steps.length);
   list.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
   // Five steps and more (plan NEXT LOT §3.6.A: IN PREPARATION; six on an order returned once delivered): their labels
-  // tracked closer with a gutter before the next step, their dates on one line, six in two rows of three under 375 px
+  // tracked closer with a gutter before the next step, their dates on one line, six in two rows of three under 420 px
   // (nocturne.css).
   if (steps.length >= 5) list.classList.add('n-steps--dense');
   if (steps.length > 5) list.classList.add('n-steps--six');
