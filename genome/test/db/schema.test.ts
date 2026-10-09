@@ -966,6 +966,24 @@ describe('schema', () => {
     await expect(t.db.insertInto('acquisition_state').values({ tracking_started_at: at, conversions_until: at }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'acquisition_state_pkey'));
   });
 
+  it('the client sheet (0044): the mirror at work: a private note written, read and removed; a tag; the cities folded by orbes_fold', async () => {
+    const admin = await t.db.insertInto('admin_users').values({ email: 'notes-s0044@orbes.test', email_normalized: 'notes-s0044@orbes.test', password_hash: 'scrypt$x', role: 'OPERATOR' }).returning('id').executeTakeFirstOrThrow();
+    const account = await t.db.insertInto('accounts').values({ email: 'n-s0044@example.com', email_normalized: 'n-s0044@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const at = new Date('2026-10-09T08:00:00.000Z');
+    const note = await t.db.insertInto('account_notes').values({ account_id: account.id, body: 'Prefers to be called in the evening.', created_by: admin.id, created_at: at }).returningAll().executeTakeFirstOrThrow();
+    expect(note).toEqual({ id: expect.any(String), account_id: account.id, body: 'Prefers to be called in the evening.', created_by: admin.id, created_at: at, removed_at: null, removed_by: null });
+    const later = new Date('2026-10-09T09:00:00.000Z');
+    const removed = await t.db.updateTable('account_notes').set({ removed_at: later, removed_by: admin.id }).where('id', '=', note.id).where('removed_at', 'is', null).returningAll().executeTakeFirstOrThrow();
+    expect(removed).toMatchObject({ removed_at: later, removed_by: admin.id });
+    await expect(t.db.updateTable('account_notes').set({ body: 'Changed.' }).where('id', '=', note.id).execute()).rejects.toSatisfy(isGuardViolation);
+    const tag = await t.db.insertInto('account_tags').values({ account_id: account.id, tag: 'FRIEND OF THE HOUSE', created_by: admin.id, created_at: at }).returningAll().executeTakeFirstOrThrow();
+    expect(tag).toEqual({ account_id: account.id, tag: 'FRIEND OF THE HOUSE', created_by: admin.id, created_at: at });
+    await expect(t.db.insertInto('account_tags').values({ account_id: account.id, tag: 'vip' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'account_tags_tag'));
+    await t.db.insertInto('account_profiles').values({ account_id: account.id, city: 'Saint-Étienne', updated_by: 'COLLECTOR' }).execute();
+    const found = await t.db.selectFrom('account_profiles').select('account_id').where(sql<string>`orbes_fold(city)`, '=', sql<string>`orbes_fold(${'SAINT-ETIENNE'})`).where('city', 'is not', null).execute();
+    expect(found).toEqual([{ account_id: account.id }]);
+  });
+
   it('audit_logs is append-only at the database level', async () => {
     const h = (b: number) => new Uint8Array(32).fill(b);
     await t.db

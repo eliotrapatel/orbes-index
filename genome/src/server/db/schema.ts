@@ -1956,6 +1956,33 @@ export interface AcquisitionStateTable {
 }
 
 /**
+ * A private note of ORBES Client Services on a client (migration 0044, plan CUSTOMER INTELLIGENCE §3.6 C.8 item 1),
+ * never shown to the client and never in the right-of-access export. Never edited: only its removal (`removed_at` with
+ * `removed_by`, once) changes it. `created_by` NULL: written by a script. Written by ClientNoteService only, and by
+ * ProfileService.setBirthDateByStaff for the reason of a date of birth changed.
+ */
+export interface AccountNotesTable {
+  id: Generated<string>;
+  account_id: string;
+  body: string;
+  created_by: string | null;
+  created_at: TimestampDefault;
+  removed_at: TimestampNullable;
+  removed_by: string | null;
+}
+
+/**
+ * A tag of ORBES Client Services on a client (migration 0044, plan CUSTOMER INTELLIGENCE §3.6 C.8 item 2): in capitals,
+ * 1 to 32 characters, once per account; a removed tag is a deleted row. At most 20 per account (ClientNoteService).
+ */
+export interface AccountTagsTable {
+  account_id: string;
+  tag: string;
+  created_by: string | null;
+  created_at: TimestampDefault;
+}
+
+/**
  * A model's pairs (migration 0031, plan NEXT-NINE BP-34, PAIRS WELL WITH): the models its sheet shows at its very end,
  * in their order (`position` 1..3), each once, never itself. Set on a main model or a model alone (services/catalog.ts
  * setPairs: 0, 2 or 3 rows, never a model of its own variant group).
@@ -2738,6 +2765,8 @@ export interface Database {
   acquisition_conversions: AcquisitionConversionsTable;
   acquisition_daily: AcquisitionDailyTable;
   acquisition_state: AcquisitionStateTable;
+  account_notes: AccountNotesTable;
+  account_tags: AccountTagsTable;
   model_pairs: ModelPairsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
@@ -2879,6 +2908,8 @@ export type AccountSourceRow = Selectable<AccountSourcesTable>;
 export type AcquisitionConversionRow = Selectable<AcquisitionConversionsTable>;
 export type AcquisitionDailyRow = Selectable<AcquisitionDailyTable>;
 export type AcquisitionStateRow = Selectable<AcquisitionStateTable>;
+export type AccountNoteRow = Selectable<AccountNotesTable>;
+export type AccountTagRow = Selectable<AccountTagsTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
 export type CareRequestRow = Selectable<CareRequestsTable>;

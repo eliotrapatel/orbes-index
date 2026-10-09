@@ -55,6 +55,7 @@ import * as m0040 from './migrations/0040_account_profiles.js';
 import * as m0041 from './migrations/0041_account_wishes.js';
 import * as m0042 from './migrations/0042_collector_views.js';
 import * as m0043 from './migrations/0043_acquisition.js';
+import * as m0044 from './migrations/0044_client_notes.js';
 
 /** Ordered by name; append new migrations here. Never edit an applied one. */
 export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
@@ -102,6 +103,7 @@ export const MIGRATIONS: Readonly<Record<string, Migration>> = Object.freeze({
   '0041_account_wishes': m0041,
   '0042_collector_views': m0042,
   '0043_acquisition': m0043,
+  '0044_client_notes': m0044,
 });
 
 class StaticMigrationProvider implements MigrationProvider {
