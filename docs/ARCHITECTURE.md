@@ -79,6 +79,15 @@ VERIFICATION
             ─► product / code registry ─► revocation ─► lifecycle
             ─► anomaly scoring (scan history) ─► authenticator policy
             ─► public verification state (9 states) + scan/auth events
+            ─► after the answer (onResponse): the scan's SCAN row for its device (B.12)
+
+WHAT COLLECTORS LOOK AT (plan CUSTOMER INTELLIGENCE §3.3, B.12)
+  verify app (swap / account sheet / sign-in panel) ─► ViewClock + SeenQueue (seen-model.ts)
+            ─► POST /api/v1/seen every 30 ± 10 s, at once on hide (never in a LIVE room until then)
+  server  ─► device cookie ─► staff / team / test entrant / robot dropped ─► device and place
+            ─► ViewBuffer (memory, one INSERT every 2 s) ─► collector_views (13 months raw)
+            ─► morning window: daily totals, places, monthly summaries ─► 13-month fold, then delete
+  sign-up / sign-in / signed-in view ─► link: the device's anonymous views and scans take the account
 ```
 
 ### B.3 Components
@@ -123,13 +132,18 @@ genome/
                          parcels, order-cases; the atelier and its pieces to make removed);
                          the tastes and the wishlist (plan CUSTOMER INTELLIGENCE §3.2: tastes, TasteService, the
                          favourite pieces and finishes read live from THE COLLECTION; wishlist, WishlistService, the
-                         heart's wishes, their monthly counts and their 13-month purge)
+                         heart's wishes, their monthly counts and their 13-month purge);
+                         the device and the views (plan CUSTOMER INTELLIGENCE §3.3, B.12: tracking, TrackingService,
+                         the views' pipeline, the link and the scans' rows; tracking-jobs, the morning's counts and
+                         purges; tracking-reads, the console's and the export's readings; places, PlaceService)
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     http/                sessions, CSRF, rate limiting, security headers, validation, static files; the LIVE
-                         RELEASES' streams (live-stream.ts: LiveHub, Server-Sent Events fanned out once a second)
-    routes/              public, account, ownership, club, live (the LIVE RELEASES), admin
-    geo/                 location resolver (none | cloudflare | headers | mmdb), haversine
+                         RELEASES' streams (live-stream.ts: LiveHub, Server-Sent Events fanned out once a second);
+                         the device cookie (device.ts) and the device's class (device-class.ts)
+    routes/              public, account, ownership, club, live (the LIVE RELEASES), seen (the views), admin
+    geo/                 location resolver (none | cloudflare | headers | mmdb), haversine; the connection's
+                         country and city (place.ts)
     render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards,
                          the ownership certificate's PDF, the invoices' and credit notes' PDFs (invoice.ts), CSV
   src/web/             browser apps (vanilla TypeScript, bundled by esbuild)
@@ -142,7 +156,8 @@ genome/
                          signature (sound.ts); the scan as a ritual (the seal signal of capture.ts and scanner.ts); a LIVE
                          RELEASE's vault (/verify/releases/<id>, views/live.ts) and its boutique board (/verify/releases/<id>/board#secret);
                          THE RELEASES' LIVE and PAST tabs, the after-room (/verify/releases/<id>/after-room), the question
-                         after (views/question.ts), YOUR ORDERS and their documents in MY PIECES (orders-model.ts)
+                         after (views/question.ts), YOUR ORDERS and their documents in MY PIECES (orders-model.ts);
+                         the recording of what is looked at (seen.ts, seen-model.ts: no word, no screen, B.12)
     admin/               admin console: catalogue (Discontinue and Reinstate), generator, keys, anomalies, analytics, audit, the Club
                          (Drops, Circle, Tiers, Requests; a LIVE RELEASE's page, #/club/live/:dropId); the sale mode (decoder worker of verify/);
                          Orders (#/orders, an order's page, the packing slip), Logistics (#/logistics, B.11; #/atelier leads
@@ -154,7 +169,8 @@ genome/
     shared/              brand CSS, display font, monogram, DOM helpers; what verify/ and legal/ share (the legal pages' paths,
                          the second-hand sentence, the contact of ORBES Client Services and where SUBSCRIBE of ORBES Care leads);
                          the preferences kept on the device (prefs.ts: the sound)
-  scripts/             CLIs and studies (db, keys, admin, POC, benchmarks, scan matrix, test sheets, …)
+  scripts/             CLIs and studies (db, keys, admin, POC, benchmarks, scan matrix, test sheets, the views'
+                         sizes (views-size.ts), …)
   test/                Vitest suites by area (core, ecc, decoder, api, db, services, e2e, web, …)
 docs/                  specifications (this folder)
 ```
@@ -247,6 +263,16 @@ ORBES does not make its pieces: suppliers do, an agent's warehouse keeps and shi
 - **`LogisticsService`** (`services/logistics.ts`, the parcels read in `services/parcels.ts`): the stock of every size at each location, corrections (proposed by the agent, approved by ORBES), transfers, minimums, pieces counted in; the parcels to ship and on their way; Start packing, the card's scan (`VerificationService.staffScan` binds the piece), the packing photo (in the database, erased 14 days after delivery by housekeeping), Packed, Ship (every order of the parcel at once; the only way an order ships since step 5.12; each piece's warranty started), delivered. **`OrderCaseService`** (`services/order-cases.ts`): returns, size exchanges and parcel problems, received by the agent, decided by ORBES.
 - **Orders** (`services/orders.ts`): an order holds a piece in stock or waits for supplier stock (AWAITING, `serveWaiting`, `queue_first` for a reshipment); no piece is made for an order any more.
 - **The web side**: in `web/admin/`, `views/logistics.ts` (its tabs), `shipping.ts` (a parcel's page), `reception.ts`, `supplier-orders.ts`, `supplier-order.ts`, with their models in `model/`; the order page's Shipping and Order case sections; Team's LOGISTICS role and its locations.
+
+### B.12 What collectors look at, the device and the place (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.3)
+
+One device, one cookie, one pipeline. The device is the existing `__Host-orbes_device` cookie (`http/device.ts`), now also set by `POST /api/v1/seen` and before a sign-up or a sign-in is linked; the database only sees its pseudonym, as `scan_events` does, so the scans made before join the same device. Migration `0042_collector_views` (DATABASE §5.97 to §5.105). No host change, no new timer, no third party.
+
+- **The app** (`web/verify/seen-model.ts`, `seen.ts`, `ApiClient.seen`): `pageOf` maps each screen to its page; `ViewClock` counts the time a view is in front (paused when hidden, and after 120 s idle except in a LIVE room and on a result; the account sheet and the sign-in panel pause the page under them); `SeenQueue` sends every 30 ± 10 s with `keepalive`, at once on hide or close, nothing during a LIVE room until then. Off in an automated browser. No word, no screen, no storage written.
+- **The route** (`routes/seen.ts`): same origin, no CSRF token, its own rate group `seen`, 204 whatever happened; a signed-in batch's session kept 30 s in memory.
+- **`TrackingService`** (`services/tracking.ts`): `ingest` drops a console session (and marks the device staff's, its rows deleted), the team's own accounts (`population.ts` `HouseAccounts`), test entrants (`TestEntrantAccounts`, 100.64.0.0/10), robots and prefetches (`http/device-class.ts` `isAutomated`), past 2 000 rows a device a Paris day; then the device (one upsert, an LRU of 20 000), its class (`classifyDevice`), the place (`geo/place.ts` `connectionPlace`, `PlaceService`) and each row with its subject into the `ViewBuffer` (one INSERT every 2 s, put off while the pool has requests waiting, 5 000 rows at most, written out at shutdown). `recordScan` writes each scan's row after `/api/v1/verify` has answered. `link`, at sign-up, sign-in and a signed-in view, gives the device's anonymous rows since its previous link to the account, in one transaction under the advisory lock `orbes/views-daily`; the acquisition's attach will run in it. At the first boot, `prepare` writes `tracking_state` and `backfillScans` turns the 13 months of past scans into devices and rows, by keyset batches, in the background.
+- **The jobs** (`services/tracking-jobs.ts`, in `startHousekeeping`'s morning window, DATABASE §10): the daily totals, the collectors' places and the monthly summaries, one Paris day per transaction under the same lock; the 13-month purge folds each collector's rows first; unlinked old devices go; the `intelligence sizes` log line once a day.
+- **The reads** (`services/tracking-reads.ts`, offered by `TrackingService`): the client sheet's browsing, the Collectors page's reports (the daily totals, or 13 months of detail with a collector filter) and click-through, activity, Segments' BROWSING criteria, the export's columns, and the right of access's `browsing`. Counted collectors only (`population.ts` `countedCollector`); never audited.
 
 ---
 

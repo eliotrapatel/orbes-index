@@ -1,7 +1,15 @@
 /**
  * The `orbes_device` cookie (contract §3): a random 128-bit id the server
- * sets on the first verification, used only to count distinct devices in
- * anomaly scoring.
+ * sets on the first verification (POST /api/v1/verify), on the first batch
+ * of views (POST /api/v1/seen) and before a sign-up or a sign-in is linked
+ * to the device (routes/seen.ts linkDevice). It serves two things (API §4):
+ * - anomaly scoring, which counts distinct devices (unchanged);
+ * - the one device the views and scans are recorded for (plan CUSTOMER
+ *   INTELLIGENCE §3.0 (b), §3.3: tracking_devices.device_hash,
+ *   services/tracking.ts), anonymous until it is linked to an account at a
+ *   sign-up, a sign-in or a signed-in view. Nothing is recorded for a
+ *   console session, the team's own accounts, a test entrant or an
+ *   automated agent; no third party reads it.
  *
  * - The cookie is httpOnly, SameSite=Lax, two years, Secure and `__Host-`
  *   prefixed (`__Host-orbes_device`, Path=/, no Domain) in production, and

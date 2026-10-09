@@ -9,6 +9,10 @@ The ORBES GENOME CODE verification service (`genome/`), when configured with
 location (country and coordinates rounded to about 10 km) from the client IP
 address of a scan. The location is used only for internal anomaly scoring
 (impossible travel, geographic dispersion); raw IP addresses are never stored.
+The same lookup now also gives the connection's country and city
+(`city.names.en`) for the console's customer intelligence: where a
+collector's views come from, approximate, never written with a scan. Where
+the console shows those places, it shows this attribution too.
 
 - Data: DB-IP.com "IP to City Lite", <https://db-ip.com/db/download/ip-to-city-lite>
 - Copyright: © DB-IP.com

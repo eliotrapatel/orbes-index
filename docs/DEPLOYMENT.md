@@ -1512,6 +1512,35 @@ du -sh /var/backups/orbes; df -h /
 
 Before and after each deployment, the pre-check of §15.7 (`free -h`, `docker stats --no-stream`, `df -h /`, `du -sh /var/backups/orbes`) keeps the before and after figures.
 
+#### Disk used by what collectors look at (plan CUSTOMER INTELLIGENCE §3.3)
+
+**No host change.** The recording of the views, devices and places on verify.theorbes.com ([API §8.14](API.md#814-post-apiv1seen-the-views-the-collector-app-records-extension-of-the-contract), [DATABASE §5.97 to §5.105](DATABASE.md#597-geo_places)) adds no container, port, Caddy rule, compose change, volume, timer or variable: the views wait in the app's memory and are written every 2 s, its jobs run in the app's housekeeping in the morning window (from 07:30 UTC, [DATABASE §10](DATABASE.md)), and the city comes from the DB-IP City Lite file §3.4 and §15.6 already install and refresh. Its rows are in the database, so in every `pg_dump` and every archive.
+
+**The daily line.** Once a Paris day, in the morning window, the app logs `intelligence sizes`: the bytes on disk (`pg_total_relation_size`, indexes included) of each of the lot's growing tables that exist, and their total:
+
+```bash
+docker compose logs --since 48h app | grep 'intelligence sizes'     # this morning's and yesterday's
+docker compose logs app | grep 'intelligence sizes' | tail -n 30    # the trend, as far as the capped logs reach
+```
+
+**The query** (from `deploy/vps`, as `orbes`, read only): each table's rows, its size on disk and its data alone (a backup holds the data, never the indexes):
+
+```bash
+docker compose exec -T postgres sh -c 'exec psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+SELECT relname AS table, n_live_tup AS rows,
+       pg_size_pretty(pg_total_relation_size(relid)) AS on_disk,
+       pg_size_pretty(pg_relation_size(relid)) AS data
+  FROM pg_stat_user_tables
+ WHERE relname IN ('collector_views', 'tracking_devices', 'tracking_device_accounts', 'view_daily_stats', 'device_daily_stats',
+                   'collector_places', 'collector_view_totals', 'collector_view_months', 'geo_places',
+                   'account_wishes', 'account_profiles', 'account_tastes')
+ ORDER BY pg_total_relation_size(relid) DESC;
+SQL
+ls -lt /var/backups/orbes/daily/ | head -n 4
+```
+
+**The rule** ([DATABASE §11](DATABASE.md), the owner's rule of 7 October 2026): once one nightly backup passes **50 MB**, the decision on what to keep goes back to the owner with these figures; until then every view is kept 13 months. The measured sizes per row are in DATABASE §11.1. The thresholds on `/` above apply unchanged.
+
 ### 15.13 How this stack was validated
 
 Last full run: 2026-10-01, in a sandbox (Docker 29.6, Compose 5.3, `caddy:2` = 2.11.4, `postgres:17`, `node:22-slim`; the VPS itself simulated by `ubuntu:26.04` = 26.04.1 "resolute" containers). Not exercised there: a real Let's Encrypt issuance (no public DNS), arm64 hardware, and `geoip-update.sh` downloading by itself (the sandbox containers have no direct internet; the same file was fetched on the host and installed with `--from-file`, which runs the same validation).
