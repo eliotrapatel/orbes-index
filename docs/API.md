@@ -686,6 +686,7 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/v1/certificates/lookup` | — | — | verify | 8.7 |
 | POST | `/api/v1/certificates/pdf` | — | — | verify | 8.7 |
 | POST | `/api/v1/account/register` | — | origin only | auth | 10.1 |
+| GET | `/api/v1/account/sign-up` | — | — | api | 10.24 |
 | POST | `/api/v1/account/login` | — | origin only | auth | 10.2 |
 | POST | `/api/v1/account/logout` | Account (optional) | yes | api | 10.3 |
 | POST | `/api/v1/account/password` | Account | yes | auth | 10.7 |
@@ -715,6 +716,8 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | PUT | `/api/v1/account/addresses/:id` | Account | yes | api | 10.21 |
 | DELETE | `/api/v1/account/addresses/:id` | Account | yes | api | 10.21 |
 | POST | `/api/v1/account/addresses/:id/default` | Account | yes | api | 10.21 |
+| GET | `/api/v1/account/profile` | Account | — | api | 10.25 |
+| PUT | `/api/v1/account/profile` | Account | yes | api | 10.25 |
 | PUT | `/api/v1/account/orders/:id/address` | Account | yes | api | 10.21 |
 | PUT | `/api/v1/account/orders/:id/engraving` | Account | yes | auth | 10.22 |
 | DELETE | `/api/v1/account/orders/:id/engraving` | Account | yes | auth | 10.22 |
@@ -874,6 +877,10 @@ Auth: **—** none; **Account** `orbes_session`; **RETAIL / AUDITOR / OPERATOR /
 | POST | `/api/admin/owners/:id/lock` | **ADMIN** | yes | admin | 16.12 |
 | POST | `/api/admin/owners/:id/unlock` | **ADMIN** | yes | admin | 16.12 |
 | GET | `/api/admin/owners/:id/export` | **ADMIN** | — | admin | 16.13 |
+| GET | `/api/admin/heard-options` | AUDITOR | — | admin | 16.38 |
+| POST | `/api/admin/heard-options` | **ADMIN** | yes | admin | 16.38 |
+| PATCH | `/api/admin/heard-options/:id` | **ADMIN** | yes | admin | 16.38 |
+| PUT | `/api/admin/heard-options/order` | **ADMIN** | yes | admin | 16.38 |
 | GET | `/api/admin/warranties` | AUDITOR | — | admin | 16.3 |
 | GET | `/api/admin/anomalies` | AUDITOR | — | admin | 16.4 |
 | GET | `/api/admin/anomalies/summary` | AUDITOR | — | admin | 16.14 |
@@ -1895,14 +1902,19 @@ Customer accounts use the `orbes_session` cookie (`__Host-orbes_session` in prod
 
 ### 10.1 `POST /api/v1/account/register`
 
-Creates an account and logs it in. Session-less: the origin rule applies, no CSRF token. Rate group `auth`.
+Creates an account and logs it in. Session-less: the origin rule applies, no CSRF token. Rate group `auth`. CREATE ACCOUNT's body since plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.1 (what the app offers for it: §10.24).
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
 | `email` | string | yes | 3–254 characters after trimming; must look like an email address. Unique, case-insensitive. |
 | `password` | string | yes | At most 1 024 characters. At least 12 characters after Unicode NFKC normalisation, at most 1 024 bytes in UTF-8, at least 3 distinct characters, not only whitespace, not equal to the email. |
-| `displayName` | string \| null | no | At most 80 characters; no control characters, `<` or `>`. `""` means none. |
-| `country` | string \| null | no | ISO 3166-1 alpha-2 code, any case (`fr` is stored as `FR`). `""` means none. Stored on the account; never shown to other people. |
+| `firstName` | string | yes | 1–50 characters after trimming (NFC); no control characters, `<` or `>`; any script. Refused empty: *Enter your first name.*; too long: *Your first name is 50 characters at most.* |
+| `lastName` | string | yes | The same rules: *Enter your last name.*, *Your last name is 50 characters at most.* |
+| `country` | string | yes | ISO 3166-1 alpha-2, one of `src/shared/countries.ts`, any case (`fr` is stored as `FR`). Missing or unknown: *Choose your country.* Stored on the account; never shown to other people. |
+| `heard` | object \| null | no | The answer to « How did you hear about ORBES? »: `{ "optionId": uuid, "other"?: string \| null }`, one of the answers offered (§10.24). Never a reason to refuse: an unknown or set-aside answer is dropped; `other` (IN A FEW WORDS, 1–100 characters) is kept with Other only. |
+| `displayName` | string \| null | no | Accepted for older callers and ignored once both names are given: the account's name becomes « First Last ». A body with `displayName` and no names is refused (*Enter your first name.*). |
+
+The names are checked first, then the country, each a `400 VALIDATION_FAILED` in its own words (the app's SIGN_UP copy reads the same). The account and its profile (§10.25: the names and the answer; DATABASE §5.92) are written in one transaction; audited `account.register` with `{ profile: true, heardOptionId }`, never the names. Internal callers (the demo seed, the tests) may create an account without names: it then has no profile row.
 
 **201** — sets `orbes_session`:
 
@@ -2563,6 +2575,69 @@ Plan NEXT LOT of 2026-10-07, §3.6.D (`routes/account.ts`, `OrderCaseService.req
 - Then as every order case (§16.34): the agent records the parcel back (`case.receivedAt`), ORBES decides (a return: RETURNED with its credit note; an exchange: an EXCHANGE order, `case.exchangeOrder`) or Client Services cancels it, answering in MESSAGES. After the 14 days, Client Services may still open a return or an exchange (§16.34, question 20 as built).
 
 Errors: `400 VALIDATION_FAILED`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 ACCOUNT_LOCKED`, `404 ORDER_NOT_FOUND`, `409 RETURN_NOT_ALLOWED`, `409 RETURN_WINDOW_CLOSED`, `409 ORDER_CASE_OPEN`, `409 EXCHANGE_SIZE_NOT_IN_STOCK`, `429 RATE_LIMITED`.
+
+### 10.24 CREATE ACCOUNT: what the sign-up asks (extension of the contract)
+
+Plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.1 P.4 (`routes/account.ts`, `services/sign-up.ts`, `ProfileService.offeredHeard`; DATABASE §5.91, §5.92). CREATE ACCOUNT asks FIRST NAME and LAST NAME (both required), EMAIL, PASSWORD, COUNTRY (required, preselected from the connection, which the person can change) and, optional, HOW DID YOU HEAR ABOUT ORBES?, with IN A FEW WORDS under Other; it sends them to `POST /api/v1/account/register` (§10.1).
+
+**`GET /api/v1/account/sign-up`** (no session, rate group `api`, `Cache-Control: no-store`) → **200**
+
+```json
+{ "country": "FR", "heard": [ { "id": "…", "label": "Instagram", "other": false }, { "id": "…", "label": "Other", "other": true } ] }
+```
+
+- `country`: the connection's country (§4's geolocation, `GEO_MODE`) when it is one of `src/shared/countries.ts`, else `null`. It only preselects COUNTRY: nothing about the connection is stored by the sign-up.
+- `heard`: the answers offered now, in their order, Other last (set aside ones left out; the console's Sign-up page, §16.38). Empty or unreadable, the app hides the question.
+- Nothing is recorded.
+
+Errors: `429 RATE_LIMITED`.
+
+### 10.25 YOUR PROFILE: `GET` and `PUT /api/v1/account/profile` (extension of the contract)
+
+Plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.1 P.6 (`routes/account.ts`, `services/profiles.ts` `ProfileService.forCollector` and `save`, `services/tastes.ts`, `src/shared/profile-rules.ts`; DATABASE §5.92, §5.93). What a collector tells ORBES about themselves: the first and last name, the country (`accounts.country`), the city, the phone with its country code (**not checked by text message**), the date of birth (entered **once**, then changed only by ORBES Client Services), the Instagram username, the favourite pieces and finishes (YOUR TASTES), the answer to « How did you hear about ORBES? »; the address is the default of YOUR ADDRESSES (§10.21). An account session is required (`401`); the PUT needs the CSRF token and a same-origin request; both answer `Cache-Control: no-store`. No staff name, author or audit data in either answer.
+
+**`GET /api/v1/account/profile`** → **200**
+
+```json
+{
+  "profile": {
+    "firstName": "Camille", "lastName": "Martin", "country": "FR", "city": "Paris",
+    "phone": { "country": "FR", "number": "+33639981234" },
+    "birthDate": "1991-04-12", "birthDateLocked": true, "instagram": "camille.martin",
+    "heard": { "optionId": "…", "label": "Instagram", "other": null },
+    "tastes": { "pieces": [ { "key": "RING", "label": "RING", "retired": false } ], "finishes": [ { "key": "SILVER", "label": "Silver", "retired": true } ] },
+    "version": 3
+  },
+  "options": { "pieces": [ { "key": "RING", "label": "RING" } ], "finishes": [ { "key": "GOLD", "label": "Gold", "swatch": "#C9A54A" } ], "heard": [ { "id": "…", "label": "Instagram", "other": false } ] },
+  "address": { "name": "Camille Martin", "firstLine": "8 rue Saint-Honoré", "country": "FR" },
+  "addresses": 1,
+  "completion": { "percent": 90, "missing": ["PIECES"] }
+}
+```
+
+- `profile.version`: 0 while the account has no profile (the accounts made before the lot, left as they are); `birthDateLocked` once a date is set or the collector has entered one.
+- `tastes`: the current choices in the collection's words, then the **retired** ones in their own (`retired: true`: the collection no longer shows them; NO LONGER IN THE COLLECTION). `options.pieces` are the types of THE COLLECTION's models (PUBLIC, active, not discontinued, a variant through its main model), `options.finishes` the variants' labels with the colour most of their models carry; read live, so the choices follow the collection. `options.heard`: the answers offered, and the collector's own answer when it was set aside since.
+- `address`: the default address in short (its name, first line and country), or `null`; `addresses`: how many are saved.
+- `completion`: ten items of equal weight (`NAME`, `COUNTRY`, `BIRTH_DATE`, `CITY`, `ADDRESS`, `PHONE`, `INSTAGRAM`, `PIECES`, `FINISHES`, `HEARD`), `percent` rounded (100 only when every counted item is done), `missing` in that order; `PIECES` and `FINISHES` are left out of the count when the collection offers none and the account holds none. It never blocks anything.
+
+**`PUT /api/v1/account/profile`** with the whole profile → **200**, the profile as `GET` reads it.
+
+```json
+{ "version": 3, "firstName": "Camille", "lastName": "Martin", "country": "FR", "city": "Paris",
+  "phone": { "country": "FR", "number": "06 39 98 12 34" }, "birthDate": "1991-04-12", "instagram": "@Camille.Martin",
+  "heard": { "optionId": "…", "other": null }, "tastes": { "pieces": ["RING"], "finishes": ["GOLD", "SILVER"] } }
+```
+
+- A strict body: every field but `birthDate` is required (`null` for none); `birthDate` left out is unchanged. `version` is the one read: another save meanwhile (the collector's own, or Client Services'), **`409 PROFILE_CHANGED`** *Your profile was changed meanwhile.*, and nothing is written; the app reads the profile again.
+- Each field cleaned by the shared rules (`src/shared/profile-rules.ts`), each refusal a `400 VALIDATION_FAILED` in its words: the names as §10.1 (changed, never cleared once given: *Enter your first name.*); `country` one of `countries.ts` (*Choose your country.*, never cleared); `city` 1–80 characters; `phone` a number after `country`'s calling code, kept in E.164 (`06 12 34 56 78` in FR → `+33612345678`; Italy, San Marino and the Vatican keep their 0; a number typed with its own `+code` kept as typed): *Choose the country code of your phone.*, *Enter your phone number with digits only.*, *This phone number is too short or too long.*; `instagram` the username only, an `@`, capitals or a pasted profile link cleaned (*Enter your Instagram username: letters, numbers, full stops and underscores, 30 at most.*); `heard` one of the answers offered (`400 HEARD_UNAVAILABLE` *This answer is no longer offered. Choose another.*; the collector's own answer set aside since may be kept), Other's words with Other only.
+- **The date of birth**, `YYYY-MM-DD`, from 1900-01-01 and 13 years at least before the Paris day (*Enter your date of birth.*; a day that does not exist, *This date does not exist.*), entered once: a different date once one is set, **`409 BIRTH_DATE_SET`** *Your date of birth is saved. ORBES Client Services can change it.*; after Client Services removed the one the collector entered, **`409 BIRTH_DATE_ENTERED`** *You have entered your date of birth once. ORBES Client Services can set it.*; `null`, *Only ORBES Client Services can remove a date of birth.* The same date again changes nothing.
+- **The tastes**, the whole set of keys of each kind, saved in the same transaction: a new choice only among `options` (`400 TASTE_UNKNOWN` *Choose among the pieces and finishes of the collection.*), a retired one kept, at most 30 of each (`400 TASTES_TOO_MANY` *Choose up to 30 favourite pieces and 30 favourite finishes.*). A bad taste refuses the whole save.
+- `accounts.display_name` becomes « First Last », `accounts.country` the country, in the same transaction. Nothing changed: nothing written, nothing audited. Otherwise audited `account.profile.update` `{ by: 'collector', fields, tastes?, birthDate? }`: the names of the fields changed, the tastes' counts, `birthDate: 'set'`, **never a value**.
+- An account not ACTIVE: `403 ACCOUNT_LOCKED`.
+
+The account's export holds the profile and the tastes (§16.13, `profile`, `tastes`).
+
+Errors: `400 VALIDATION_FAILED`, `400 HEARD_UNAVAILABLE`, `400 TASTE_UNKNOWN`, `400 TASTES_TOO_MANY`, `401 UNAUTHORIZED`, `403 CSRF_FAILED`, `403 ACCOUNT_LOCKED`, `409 PROFILE_CHANGED`, `409 BIRTH_DATE_SET`, `409 BIRTH_DATE_ENTERED`, `429 RATE_LIMITED`.
 
 ## 11. Ownership endpoints
 
@@ -3972,6 +4047,8 @@ In the console: *Lock account* and *Unlock account* on the owner's sheet, each b
 | `careRequests` | (plan NEXT-NINE, BP-19 T6) Every yearly care request of the account (§10.18), oldest first: `id`, `productId`, `year`, `tier`, `status`, `requestedAt`, `returnName`, `returnAddress` (as the collector gave them), `labelAt`, `receivedAt`, `returnShippedAt`, `doneAt`, `cancelledAt`. Never the label itself nor who handled it. |
 | `sizes` | (plan NEXT-NINE, AC-01) The sizes the account saved in YOUR SIZES (§10.19), in the order ring, bracelet, wrist, necklace: `kind`, `value` (a French ring size, or centimetres), `unit` (`FR` or `CM`), `updatedAt`. `account.export` counts them (`sizes`). |
 | `addresses` | (plan NEXT LOT §3.6.B) The delivery addresses the account saved in YOUR ADDRESSES (§10.21), oldest first: `id`, `name`, `address`, `country`, `phone`, `isDefault`, `createdAt`, `updatedAt`. `account.export` counts them (`addresses`). |
+| `profile` | (plan CUSTOMER INTELLIGENCE §3.1 P.5) The account's YOUR PROFILE (§10.25), or `null` while it has given nothing: `firstName`, `lastName`, `country`, `city`, `phone` (E.164) and `phoneCountry`, `birthDate`, `birthDateEnteredBy` (`YOU` or `ORBES_CLIENT_SERVICES`), `instagram`, `heardAboutOrbes` (`answer`, the answer's words at export time, `other`, `at`, when first given) or `null`, `lastChangedBy` (`YOU` or `ORBES_CLIENT_SERVICES`; never a staff member), `updatedAt`. `account.export` counts it (`profile`, 0 or 1). |
+| `tastes` | (plan CUSTOMER INTELLIGENCE §3.1 P.5) The favourite pieces and finishes, by their words (`pieces`, `finishes`); one the collection no longer shows reads « (no longer in the collection) » after its words. `account.export` counts them (`tastes`). |
 | `claimCodes` | (plan NEXT LOT §3.4) Every new claim code ORBES Client Services made for one of the account's orders (§10.20), oldest first: `order` (its reference), `madeAt`, `status` (`WAITING`, `READ`, `WITHDRAWN`), `readAt`. Never the code, sealed or clear, nor who made it. Its reading is in `activity` (`claim_code.read`, made by the account). `account.export` counts them (`claimCodes`). |
 | `guarantees` | (plan NEXT-NINE, IN-01) Every house's guarantee granted to the account, oldest first, shown to it or not: `id`, `scope`, `target` (the model's or the collection's name, or the release's title), `pieces`, `validUntil`, `visible`, `note`, `revokeNote` (Client Services' note at a revocation, or `null`), `status`, `releaseId`, `grantedAt`, `usedAt`, `closedAt`. Never who granted or revoked it. `account.export` counts them (`guarantees`). |
 | `tierGrants` | (plan NEXT-NINE, BP-19 T5) Every grant of a tier the account received (DATABASE §5.66), oldest first: `tier` (`PLATINE` or `PALLADIUM`), `kind` (`GIFT` or `CREDIT`), `grantedAt`; a CREDIT's `amountMinor`, `currency`, `expiresAt`, `balanceMinor` (its amount less its open uses) and `uses`, oldest first (DATABASE §5.67): `orderReference`, `amountMinor`, `appliedAt`, `releasedAt` and `reason` (`REMOVED`, `CANCELLED`, `RETURNED`) or `null`; a GIFT's `model` (`name`, `variant`) once an order carries it, else `null` (`null` amounts, `uses: []`). Never who applied or released a use. `account.export` counts them (`tierGrants`). |
@@ -4790,6 +4867,19 @@ Plan NEXT LOT of 2026-10-07, §1.1 (b) and §3.5.6.7 (deployment H2; migration `
 | POST | `/api/admin/order-cases/:id/cancel` | OPERATOR | `Cancel the order case`. Body `{ "note": 1–1 000 }`. CANCELLED with no decision (a request refused or withdrawn; a damaged parcel that never came back, to report it lost); a parcel problem's shipment SHIPPED again. Client Services answers the collector in MESSAGES. Ended already: `409 ORDER_CASE_CLOSED`. **200** the order case. Audited `order.case.cancel` `{ caseId, kind }`. |
 
 A parcel reported lost, damaged or back to sender, whose piece its buyer registers while the case is OPEN, arrived: the registration cancels the case ('Registered by its buyer.', `order.case.cancel` `{ caseId, kind, by: 'registration' }`), its shipment SHIPPED then DELIVERED with the order; its pieces are never revoked. The return's own route, the order page's Order case section and the console's dialogs come with step 5.11e; the EXCHANGE channel reads `SIZE EXCHANGE` on the Orders board (`CHANNEL_LABELS`) and on its invoice (`CHANNEL_WORDS`).
+
+### 16.38 The Sign-up page's answers (extension of the contract)
+
+Plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.1 P.10 (`routes/admin/sign-up.ts`, `ProfileService.heardOptions`, `createHeard`, `updateHeard`, `orderHeard`; DATABASE §5.91). The answers to « How did you hear about ORBES? », asked at sign-up (§10.24) and in YOUR PROFILE (§10.25). The console's **Sign-up** page (`#/sign-up`, reached from the Owners page's header) shows what a new account is asked and these answers. Each route answers `{ "options": [ { "id", "label", "other", "active", "position", "given" } ] }`, every answer, offered or set aside, in its order, Other last; `given` is how many collectors gave it, **counted collectors** only (not DELETED, test entrants and the team's own accounts left out). An answer is never deleted, only **set aside**, so the answers given keep their meaning.
+
+| Method | Path | Role | |
+|---|---|---|---|
+| GET | `/api/admin/heard-options` | AUDITOR | The list. |
+| POST | `/api/admin/heard-options` | **ADMIN** | `Add an answer`. Body `{ "label" }`: 1–40 characters, trimmed (*Enter the answer.*, *An answer is 40 characters at most.*); last before Other. **201**. A label already used, whatever the case: `409 HEARD_LABEL_TAKEN` *This answer exists already.* At most 12 offered at once, Other counted: `409 HEARD_LIMIT` *At most 12 answers are offered at once. Set one aside first.* Audited `heard_option.create` `{ label }`. |
+| PATCH | `/api/admin/heard-options/:id` | **ADMIN** | `Edit`, `Set aside`, `Offer again`. Body `{ "label"?, "active"? }`. Other is never set aside (`409 HEARD_OTHER_STAYS` *Other stays offered.*); offering again keeps 12 at most (`409 HEARD_LIMIT`); `409 HEARD_LABEL_TAKEN`; unknown: `404 HEARD_OPTION_NOT_FOUND`. Nothing changed, nothing audited; otherwise `heard_option.update` `{ before, after }` (`{ label, active }`). |
+| PUT | `/api/admin/heard-options/order` | **ADMIN** | `Move up`, `Move down`. Body `{ "ids": [ … ] }`: exactly every answer but Other, offered or set aside (`400 VALIDATION_FAILED` *Reorder every answer at once.*); Other stays last. The same order again changes nothing; otherwise audited `heard_option.order` `{ labels }`. |
+
+The first boot of a database creates Instagram, TikTok, A friend, The press, A shop, A web search, An influencer and Other once (`ProfileService.prepare`, audited `heard_option.setup` by the system), only while the list is empty, so an answer renamed is never created again. The labels are house words, not personal data: their audits carry them. RETAIL and LOGISTICS are refused (`403 FORBIDDEN`).
 
 ## 17. Admin: keys, audit log and console users
 
