@@ -454,7 +454,7 @@ export class AcquisitionReportService {
       const basis = await this.basis(tx);
       const source = await tx.selectFrom('acquisition_sources').select('id').where('link_id', '=', link.id).executeTakeFirst();
       const figures = source ? ((await this.figuresBySource(tx, basis, p, currency, source.id)).get(source.id) ?? zeroFigures()) : zeroFigures();
-      const returns = link.cost && source ? ((await this.returns(tx, basis)).get(link.id) ?? null) : null;
+      const returns = link.cost && source ? ((await this.returns(tx, basis, link.id)).get(link.id) ?? null) : null;
       const gone =
         link.destination === 'RELEASE'
           ? !(await tx.selectFrom('drops').select('id').where('id', '=', link.dropId!).where('cancelled_at', 'is', null).executeTakeFirst())
@@ -697,8 +697,17 @@ export class AcquisitionReportService {
     return rows.map((r) => r.id);
   }
 
-  /** Each costed link's RETURN, SINCE MADE, both attributions (see the file header). */
-  private async returns(tx: Db, basis: Basis): Promise<Map<string, { first: LinkReturn; last: LinkReturn }>> {
+  /**
+   * Each costed link's RETURN, SINCE MADE, both attributions (see the file header), or one link's when `linkId` is given.
+   * The invoices meet the links through two equality joins added together (first, then last), never one OR join, so
+   * PostgreSQL hashes on the source and the reading stays linear in links and invoices.
+   */
+  private async returns(tx: Db, basis: Basis, linkId?: string): Promise<Map<string, { first: LinkReturn; last: LinkReturn }>> {
+    const onlyLink = linkId === undefined ? sql`` : sql`AND l.id = ${linkId}`;
+    const side = (col: 'first_src' | 'last_src', w: 'first' | 'last') => sql`
+        SELECT s.id AS src, inv.amount, ${w}::text AS w
+          FROM inv JOIN acquisition_sources s ON s.id = inv.${sql.raw(col)} JOIN links l ON l.id = s.link_id
+         WHERE l.cost_minor IS NOT NULL AND inv.currency = l.cost_currency AND inv.issued_at >= l.created_at ${onlyLink}`;
     const rows = await sql<{ link_id: string; cost_minor: number; cost_currency: HouseCurrency; first: number; last: number }>`
       WITH fs AS (
         SELECT a.id AS account_id, a.created_at, coalesce(s.first_source_id, ${fallback(basis, sql`a.created_at`)}) AS src
@@ -708,13 +717,15 @@ export class AcquisitionReportService {
         SELECT i.currency, i.issued_at, (CASE WHEN i.kind = 'INVOICE' THEN i.total_minor ELSE -i.total_minor END)::bigint AS amount,
                fs.src AS first_src, coalesce(c.last_source_id, ${fallback(basis, sql`o.reserved_at`)}) AS last_src
           FROM invoices i JOIN orders o ON o.id = i.order_id JOIN fs ON fs.account_id = o.account_id
-          LEFT JOIN acquisition_conversions c ON c.kind = 'ORDER' AND c.ref_id = o.id)
+          LEFT JOIN acquisition_conversions c ON c.kind = 'ORDER' AND c.ref_id = o.id),
+      x AS (${side('first_src', 'first')}
+        UNION ALL ${side('last_src', 'last')})
       SELECT l.id AS link_id, l.cost_minor, l.cost_currency,
-             coalesce(sum(inv.amount) FILTER (WHERE inv.first_src = s.id), 0)::bigint AS first,
-             coalesce(sum(inv.amount) FILTER (WHERE inv.last_src = s.id), 0)::bigint AS last
+             coalesce(sum(x.amount) FILTER (WHERE x.w = 'first'), 0)::bigint AS first,
+             coalesce(sum(x.amount) FILTER (WHERE x.w = 'last'), 0)::bigint AS last
         FROM links l JOIN acquisition_sources s ON s.link_id = l.id
-        LEFT JOIN inv ON (inv.first_src = s.id OR inv.last_src = s.id) AND inv.currency = l.cost_currency AND inv.issued_at >= l.created_at
-       WHERE l.cost_minor IS NOT NULL
+        LEFT JOIN x ON x.src = s.id
+       WHERE l.cost_minor IS NOT NULL ${onlyLink}
        GROUP BY l.id, l.cost_minor, l.cost_currency`.execute(tx);
     const out = new Map<string, { first: LinkReturn; last: LinkReturn }>();
     for (const r of rows.rows) {
