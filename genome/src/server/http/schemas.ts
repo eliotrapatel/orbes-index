@@ -377,6 +377,32 @@ export const registerAccountBody = body({
     .optional(),
 });
 
+/**
+ * PUT /api/v1/account/profile (§10.25, plan CUSTOMER INTELLIGENCE §3.1 P.6.3): the whole profile with the `version` read,
+ * its tastes as the whole set of keys; `birthDate` left out is unchanged. The outer wall only: every field's rules and
+ * refusals are ProfileService's (src/shared/profile-rules.ts).
+ */
+export const accountProfileBody = body({
+  version: z.number().int('Must be a whole number').min(0, 'Must be 0 or more').max(2_147_483_647, 'Too large'),
+  firstName: z.string().max(200, 'At most 200 characters').nullable(),
+  lastName: z.string().max(200, 'At most 200 characters').nullable(),
+  country: z.string().max(8, 'At most 8 characters').nullable(),
+  city: z.string().max(400, 'At most 400 characters').nullable(),
+  phone: z.strictObject({ country: z.string().max(8, 'At most 8 characters'), number: z.string().max(100, 'At most 100 characters') }, { error: 'The phone is an object' }).nullable(),
+  birthDate: z.string().max(20, 'At most 20 characters').nullable().optional(),
+  instagram: z.string().max(400, 'At most 400 characters').nullable(),
+  heard: z
+    .strictObject({ optionId: z.string().max(64, 'At most 64 characters'), other: z.string().max(1000, 'At most 1000 characters').nullable().optional() }, { error: 'The answer is an object' })
+    .nullable(),
+  tastes: z.strictObject(
+    {
+      pieces: z.array(z.string().max(200, 'At most 200 characters')).max(200, 'At most 200 choices'),
+      finishes: z.array(z.string().max(200, 'At most 200 characters')).max(200, 'At most 200 choices'),
+    },
+    { error: 'The tastes are an object' },
+  ),
+});
+
 export const loginBody = body({ email, password });
 
 /** POST /api/v1/account/password (§10.7): the policy of `newPassword` is the service's (≥ 12 characters…). */

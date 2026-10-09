@@ -19,7 +19,7 @@ import type { FastifyPluginAsync, FastifyReply } from 'fastify';
 import { forbidden } from '../errors.js';
 import { userAgentOf } from '../http/client.js';
 import { rateLimitHook } from '../http/rate-limit.js';
-import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
+import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, accountClaimCodeBody, accountDocumentParams, accountEngravingBody, accountOrderCaseBody, accountOrderAddressBody, accountOrderParams, accountProfileBody, accountSizesBody, careParams, careRequestBody, changePasswordBody, emptyBody, loginBody, parse, productParams, recoverAccountBody, registerAccountBody } from '../http/schemas.js';
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
@@ -124,6 +124,23 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const { account } = requireAccount(request);
     const b = parse(accountSizesBody, request.body);
     return { sizes: await sizes.set(account.id, b.sizes, accountActor(request)) };
+  });
+
+  // YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.6.2, P.6.3; API §10.25): the account's own profile with its tastes,
+  // the catalogue's choices, the default address of YOUR ADDRESSES in short and how complete it is; saved whole with the
+  // version read (409 PROFILE_CHANGED after another save), the tastes in the same transaction. No staff name, no author,
+  // no audit data. Never stored by a cache.
+  app.get('/api/v1/account/profile', async (request, reply) => {
+    const { account } = requireAccount(request);
+    reply.header('cache-control', 'no-store');
+    return profiles.forCollector(account.id);
+  });
+
+  app.put('/api/v1/account/profile', async (request, reply) => {
+    const { account } = requireAccount(request);
+    const b = parse(accountProfileBody, request.body);
+    reply.header('cache-control', 'no-store');
+    return profiles.save(account.id, b, accountActor(request));
   });
 
   // YOUR ADDRESSES (plan NEXT LOT §3.6.B; API §10.21): the delivery addresses the account keeps, at most 5, one of them the

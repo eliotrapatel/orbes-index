@@ -17,6 +17,7 @@
  *                  AUDITOR) the date of birth, the phone, the city, the Instagram and the address are withheld, the age
  *                  band given instead.
  *   heardOptions, createHeard, updateHeard, orderHeard   the console's Sign-up page (ADMIN edits, everyone reads).
+ *   exportedProfile   the right-of-access export's `profile` and `tastes` (P.5): who saved named YOU or ORBES_CLIENT_SERVICES only.
  *
  * A save, collector or staff: the account FOR NO KEY UPDATE (as a sign-in), then its profile FOR UPDATE, then its
  * tastes FOR UPDATE: the same order everywhere (H2's addresses take the account FOR SHARE first), so nothing deadlocks.
@@ -51,7 +52,7 @@ import { customerAccountLocked } from './auth.js';
 import { countedCollector, houseAccount } from './population.js';
 import { profileName } from './sign-up.js';
 import { parisDay } from './schedule.js';
-import { TasteService, type AccountTastes, type FinishOption, type TasteCounts, type TasteOption, type TasteOptions } from './tastes.js';
+import { accountTastes, TasteService, type AccountTastes, type FinishOption, type Taste, type TasteCounts, type TasteOption, type TasteOptions } from './tastes.js';
 
 // ── Shapes ─────────────────────────────────────────────────────────────────
 
@@ -680,4 +681,66 @@ export class ProfileService {
     });
     return this.heardOptions({ withCounts: true });
   }
+}
+
+// ── The right of access (plan §3.1 P.5) ────────────────────────────────────
+
+/** Who entered the date of birth, or saved last, as the collector's own file names it: never a staff member. */
+export type ExportedAuthor = 'YOU' | 'ORBES_CLIENT_SERVICES';
+
+/** The profile in the right-of-access export (`AccountExport.profile`), null while the account has given nothing. */
+export interface ExportedProfile {
+  firstName: string | null;
+  lastName: string | null;
+  country: string | null;
+  city: string | null;
+  /** E.164, with the country picked for its code. */
+  phone: string | null;
+  phoneCountry: string | null;
+  /** 'YYYY-MM-DD'. */
+  birthDate: string | null;
+  birthDateEnteredBy: ExportedAuthor | null;
+  instagram: string | null;
+  /** The answer's label at export time, Other's words, and when it was first given. */
+  heardAboutOrbes: { answer: string; other: string | null; at: Date } | null;
+  lastChangedBy: ExportedAuthor;
+  updatedAt: Date;
+}
+
+/** The favourite pieces and finishes by their words; one no longer in the collection says so. */
+export interface ExportedTastes {
+  pieces: string[];
+  finishes: string[];
+}
+
+/** How the export marks a favourite the collection no longer offers. */
+export const RETIRED_TASTE_NOTE = ' (no longer in the collection)';
+
+const author = (s: ProfileSource): ExportedAuthor => (s === 'STAFF' ? 'ORBES_CLIENT_SERVICES' : 'YOU');
+
+/** The account's profile and tastes for the right-of-access export, read in its transaction. */
+export async function exportedProfile(tx: Db, accountId: string, country: string | null): Promise<{ profile: ExportedProfile | null; tastes: ExportedTastes }> {
+  const row = await tx.selectFrom('account_profiles').selectAll().where('account_id', '=', accountId).executeTakeFirst();
+  const heard = row?.heard_option_id ? await tx.selectFrom('heard_options').select('label').where('id', '=', row.heard_option_id).executeTakeFirst() : undefined;
+  const held = await accountTastes(tx, accountId);
+  const words = (list: Taste[]) => list.map((t) => (t.retired ? `${t.label}${RETIRED_TASTE_NOTE}` : t.label));
+  return {
+    profile: row
+      ? {
+          firstName: row.first_name,
+          lastName: row.last_name,
+          country,
+          city: row.city,
+          phone: row.phone,
+          phoneCountry: row.phone_country,
+          birthDate: row.birth_date,
+          birthDateEnteredBy: row.birth_date_by ? author(row.birth_date_by) : null,
+          instagram: row.instagram,
+          heardAboutOrbes: heard && row.heard_at ? { answer: heard.label, other: row.heard_other, at: row.heard_at } : null,
+          lastChangedBy: author(row.updated_by),
+          updatedAt: row.updated_at,
+        }
+      : null,
+    tastes: { pieces: words(held.pieces), finishes: words(held.finishes) },
+  };
 }

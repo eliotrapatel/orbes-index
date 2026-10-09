@@ -154,6 +154,30 @@ function keysOf(v: unknown): string[] {
   return [...keys];
 }
 
+// ── An account's tastes ────────────────────────────────────────────────────
+
+/**
+ * An account's tastes, each current one in the catalogue's words, the retired ones after them in their own
+ * (TasteService.read; also read by the right-of-access export in its own transaction).
+ */
+export async function accountTastes(db: Db, accountId: string, options?: TasteOptions): Promise<AccountTastes> {
+  const offered = options ?? (await tasteOptions(db));
+  const rows = await db.selectFrom('account_tastes').select(['kind', 'value_key', 'label']).where('account_id', '=', accountId).orderBy('value_key').execute();
+  const out: AccountTastes = { pieces: [], finishes: [] };
+  for (const kind of ['PIECE', 'FINISH'] as const) {
+    const choices = choicesOf(offered, kind);
+    const current: Taste[] = [];
+    const retired: Taste[] = [];
+    for (const row of rows.filter((x) => x.kind === kind)) {
+      const o = choices.get(tasteKey(row.value_key) ?? row.value_key);
+      if (o) current.push({ key: row.value_key, label: o.label, ...(o.swatch !== undefined ? { swatch: o.swatch } : {}), retired: false });
+      else retired.push({ key: row.value_key, label: row.label, retired: true });
+    }
+    out[kind === 'PIECE' ? 'pieces' : 'finishes'] = [...current.sort(byKey), ...retired.sort(byKey)];
+  }
+  return out;
+}
+
 // ── Service ────────────────────────────────────────────────────────────────
 
 export interface TasteServiceDeps {
@@ -176,22 +200,8 @@ export class TasteService {
   }
 
   /** An account's tastes, each current one in the catalogue's words, the retired ones after them in their own. */
-  async read(db: Db, accountId: string, options?: TasteOptions): Promise<AccountTastes> {
-    const offered = options ?? (await tasteOptions(db));
-    const rows = await db.selectFrom('account_tastes').select(['kind', 'value_key', 'label']).where('account_id', '=', accountId).orderBy('value_key').execute();
-    const out: AccountTastes = { pieces: [], finishes: [] };
-    for (const kind of ['PIECE', 'FINISH'] as const) {
-      const choices = choicesOf(offered, kind);
-      const current: Taste[] = [];
-      const retired: Taste[] = [];
-      for (const row of rows.filter((x) => x.kind === kind)) {
-        const o = choices.get(tasteKey(row.value_key) ?? row.value_key);
-        if (o) current.push({ key: row.value_key, label: o.label, ...(o.swatch !== undefined ? { swatch: o.swatch } : {}), retired: false });
-        else retired.push({ key: row.value_key, label: row.label, retired: true });
-      }
-      out[kind === 'PIECE' ? 'pieces' : 'finishes'] = [...current.sort(byKey), ...retired.sort(byKey)];
-    }
-    return out;
+  read(db: Db, accountId: string, options?: TasteOptions): Promise<AccountTastes> {
+    return accountTastes(db, accountId, options);
   }
 
   /**

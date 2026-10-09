@@ -44,8 +44,10 @@
  *            with their steps, the buyer's name and address Client Services
  *            entered and the engraving text (plan LIVE RELEASE+), its messages
  *            with ORBES Client Services and their answers (plan NEXT-NINE,
- *            CS-01: never who answered), and every audit entry that names it,
- *            as target or as actor. Audited `account.export` with counts only.
+ *            CS-01: never who answered), its profile and its favourite pieces
+ *            and finishes (plan CUSTOMER INTELLIGENCE §3.1 P.5: never who on
+ *            staff changed them), and every audit entry that names it, as
+ *            target or as actor. Audited `account.export` with counts only.
  *
  * The sheet links the account's conversation with ORBES Client Services
  * (`messages`, plan NEXT-NINE CS-01): its id and status, null when it never
@@ -88,6 +90,7 @@ import { accountCareRequests, careThisYear, type CareAllowance, type ExportedCar
 import { accountGuaranteesForStaff, exportedGuarantees, type AdminGuarantee, type ExportedGuarantee } from './guarantees.js';
 import { exportedSizes, type ExportedSize } from './sizes.js';
 import { exportedAddresses, type ExportedAddress } from './addresses.js';
+import { exportedProfile, type ExportedProfile, type ExportedTastes } from './profiles.js';
 import { collectorValue, type LifetimeValue } from './growth.js';
 import { accountGrants, accountTierGrants, creditBalances, type ExportedTierGrant } from './tier-grants.js';
 import { accountConversation, accountMessages, type ExportedMessage } from './messages.js';
@@ -427,6 +430,14 @@ export interface AccountExport {
    * lines, country, phone, whether it is the default, and when it was saved and changed.
    */
   addresses: ExportedAddress[];
+  /**
+   * The profile the account gave in CREATE ACCOUNT and YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1 P.5): names,
+   * country, city, phone, date of birth and who entered it, Instagram, the answer to « How did you hear about ORBES? »,
+   * who saved last (YOU or ORBES_CLIENT_SERVICES, never who on staff) and when; null while it gave nothing.
+   */
+  profile: ExportedProfile | null;
+  /** Its favourite pieces and finishes by their words; one the collection no longer offers says so. */
+  tastes: ExportedTastes;
   /**
    * The new claim codes ORBES Client Services made for the account's orders (plan NEXT LOT §3.4), oldest first: the
    * order, when it was made, where it stands and when it was read; never the code, sealed or clear, nor who made it.
@@ -900,6 +911,7 @@ export class OwnerService {
       const guarantees = await exportedGuarantees(tx, a.id);
       const sizes = await exportedSizes(tx, a.id);
       const addresses = await exportedAddresses(tx, a.id);
+      const { profile, tastes } = await exportedProfile(tx, a.id, a.country?.trim() ?? null);
       const claimCodes = await accountClaimCodes(tx, a.id);
       const tierGrants = await accountTierGrants(tx, a.id);
       // Every entry that names the account: about it (target), or made by it (actor: claim codes tried, incidents
@@ -987,6 +999,8 @@ export class OwnerService {
         guarantees,
         sizes,
         addresses,
+        profile,
+        tastes,
         claimCodes,
         tierGrants,
         activity: activity.slice(0, EXPORT_LIST_LIMIT).map((e) => ({
@@ -1027,6 +1041,8 @@ export class OwnerService {
             guarantees: out.guarantees.length,
             sizes: out.sizes.length,
             addresses: out.addresses.length,
+            profile: out.profile ? 1 : 0,
+            tastes: out.tastes.pieces.length + out.tastes.finishes.length,
             claimCodes: out.claimCodes.length,
             tierGrants: out.tierGrants.length,
             activity: out.activity.length,

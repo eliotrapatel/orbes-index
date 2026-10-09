@@ -10,6 +10,7 @@
  * flag), emails masked for an AUDITOR everywhere, and the
  * recovery code of C-04 refused once expired or used.
  */
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { holdPieces } from '../support/live.js';
@@ -407,7 +408,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
 
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit).toEqual([
-        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, addresses: 0, claimCodes: 0, tierGrants: 0, activity: 10 } }),
+        expect.objectContaining({ actorType: 'admin', targetType: 'account', details: { pieces: 1, transfers: 1, scans: 3, sessions: 1, recoveryCodes: 1, certificates: 0, dropEntries: 0, circleAnswers: 0, circleVotes: 0, shopRequests: 0, liveEntries: 0, liveInterest: 0, releaseAnswers: 0, orders: 0, messages: 0, careRequests: 0, guarantees: 0, sizes: 0, addresses: 0, profile: 1, tastes: 0, claimCodes: 0, tierGrants: 0, activity: 10 } }),
       ]);
       expect(JSON.stringify(audit)).not.toContain(owner.email);
 
@@ -430,6 +431,70 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(x.activity.map((e: any) => e.action)).toContain('account.sizes.update');
       const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
       expect(audit[0]!.details).toMatchObject({ sizes: 2 });
+    });
+
+    it('holds the profile and the favourite pieces and finishes, who saved them as YOU or ORBES_CLIENT_SERVICES only; a bad taste refuses the whole SAVE; never a score, a tag or a private note (plan CUSTOMER INTELLIGENCE §3.1 P.5, §3.0 (k))', async () => {
+      // THE COLLECTION: a BANGLE in Silver and Rose, its variant later renamed (the finish then leaves the collection).
+      const category = (await h.ctx.db.selectFrom('models').select('category_id').executeTakeFirstOrThrow()).category_id;
+      const model = async (label: string, variantOf: string | null) => {
+        const id = randomUUID();
+        await h.ctx.db
+          .insertInto('models')
+          .values({ id, category_id: category, name: 'BANGLE', type: 'BANGLE', sku_prefix: `X-${id.slice(0, 8)}`, slug: `bangle-${id.slice(0, 8)}`, lookbook: 'PUBLIC', published_at: '2026-01-01T00:00:00Z', active: true, variant_of: variantOf, variant_label: label, variant_swatch: '#C0C0C0' })
+          .execute();
+        return id;
+      };
+      const silver = await model('Silver', null);
+      const rose = await model('Rose', silver);
+      const owner = await accountClient(h);
+      const id = await accountIdOf(owner.email);
+      const put = (body: unknown) => owner.client.request('PUT', '/api/v1/account/profile', { body });
+      const read = safeJson(await owner.client.get('/api/v1/account/profile')) as any;
+      const other = (await h.ctx.db.selectFrom('heard_options').select('id').where('is_other', '=', true).executeTakeFirstOrThrow()).id;
+      const body = {
+        version: read.profile.version, firstName: 'Owner', lastName: 'Test', country: 'FR', city: 'Lyon', phone: { country: 'FR', number: '06 12 34 56 78' },
+        birthDate: '1990-04-12', instagram: 'owner.test', heard: { optionId: other, other: 'A friend of a friend' }, tastes: { pieces: ['BANGLE'], finishes: ['SILVER', 'ROSE'] },
+      };
+      expect((await put(body)).statusCode).toBe(200);
+      // A taste the collection does not offer refuses the whole SAVE: the city typed with it is not kept either.
+      const refused = await put({ ...body, version: read.profile.version + 1, city: 'Paris', tastes: { pieces: ['BANGLE', 'TIARA'], finishes: ['SILVER'] } });
+      expect(refused.statusCode).toBe(400);
+      expect(errorOf(refused).code).toBe('TASTE_UNKNOWN');
+      // Client Services correct the city (step 5.4's sheet): the export says ORBES_CLIENT_SERVICES, never who.
+      const staff = await createAdmin(h.ctx, 'OPERATOR');
+      await h.ctx.services.profiles.saveByStaff(id, { version: read.profile.version + 1, city: 'Lyon 2e' }, { type: 'admin', id: staff.id });
+      await h.ctx.db.updateTable('models').set({ variant_label: 'Rosé' }).where('id', '=', rose).execute();
+
+      const res = await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${id}/export`);
+      const x = safeJson(res) as Record<string, any>;
+      expect(x.profile).toEqual({
+        firstName: 'Owner',
+        lastName: 'Test',
+        country: 'FR',
+        city: 'Lyon 2e',
+        phone: '+33612345678',
+        phoneCountry: 'FR',
+        birthDate: '1990-04-12',
+        birthDateEnteredBy: 'YOU',
+        instagram: 'owner.test',
+        heardAboutOrbes: { answer: 'Other', other: 'A friend of a friend', at: expect.any(String) },
+        lastChangedBy: 'ORBES_CLIENT_SERVICES',
+        updatedAt: expect.any(String),
+      });
+      expect(x.tastes).toEqual({ pieces: ['BANGLE'], finishes: ['Silver', 'Rose (no longer in the collection)'] });
+      expect(res.body).not.toContain(staff.id);
+      expect(res.body).not.toContain(staff.email);
+      // The score, tags and private notes stay out of the collector's file (§3.0 (k), question 17).
+      expect(res.body).not.toMatch(/"(engagement|score|tags|privateNotes)"/);
+      const audit = (await h.ctx.audit.list({ action: 'account.export', targetId: id })).items;
+      expect(audit[0]!.details).toMatchObject({ profile: 1, tastes: 3 });
+      expect(JSON.stringify(audit)).not.toMatch(/Lyon|owner\.test|1990|612345678/);
+      // An account that never gave anything: no profile, no tastes.
+      const bare = await h.ctx.services.auth.registerAccount({ email: `bare-${randomUUID().slice(0, 8)}@example.com`, password: PASSWORD }, {});
+      const none = safeJson(await (await adminClient(h, 'ADMIN')).get(`/api/admin/owners/${bare.account.id}/export`)) as Record<string, any>;
+      expect(none.profile).toBeNull();
+      expect(none.tastes).toEqual({ pieces: [], finishes: [] });
+      expect((await h.ctx.audit.list({ action: 'account.export', targetId: bare.account.id })).items[0]!.details).toMatchObject({ profile: 0, tastes: 0 });
     });
 
     it('holds the tiers\' grants: each GIFT and CREDIT, a credit\'s balance and its uses by order, never who applied them (BP-19 T5)', async () => {
