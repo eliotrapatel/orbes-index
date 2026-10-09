@@ -984,6 +984,32 @@ describe('schema', () => {
     expect(found).toEqual([{ account_id: account.id }]);
   });
 
+  it('the birthday credit (0045): the mirror at work: THE PROGRAM\'s three columns and their defaults; a BIRTHDAY grant with no tier and its birthday, once per birthday, its birthday fixed; a tier\'s credit beside it', async () => {
+    const account = await t.db.insertInto('accounts').values({ email: 'b-s0045@example.com', email_normalized: 'b-s0045@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const had = await t.db.selectFrom('club_program_settings').select('id').executeTakeFirst();
+    if (!had) await t.db.insertInto('club_program_settings').values({ id: 1 }).execute();
+    expect(await t.db.selectFrom('club_program_settings').select(['birthday_credit_on', 'birthday_credit_minor', 'birthday_credit_days']).executeTakeFirstOrThrow()).toEqual({ birthday_credit_on: true, birthday_credit_minor: 2000, birthday_credit_days: 30 });
+    if (!had) await t.db.deleteFrom('club_program_settings').execute();
+    const at = new Date('2027-03-13T23:00:00.000Z');
+    const expires = new Date('2027-04-12T21:59:59.999Z');
+    const birthday = await t.db
+      .insertInto('tier_grants')
+      .values({ account_id: account.id, tier: null, kind: 'BIRTHDAY', granted_at: at, amount_minor: 2000, currency: 'EUR', expires_at: expires, birthday_on: '2027-03-14' })
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(birthday).toEqual({ id: expect.any(String), account_id: account.id, tier: null, kind: 'BIRTHDAY', granted_at: at, amount_minor: 2000, currency: 'EUR', expires_at: expires, model_id: null, birthday_on: '2027-03-14' });
+    await expect(
+      t.db.insertInto('tier_grants').values({ account_id: account.id, tier: null, kind: 'BIRTHDAY', granted_at: at, amount_minor: 2000, currency: 'EUR', expires_at: expires, birthday_on: '2027-03-14' }).execute(),
+    ).rejects.toSatisfy((e) => isUniqueViolation(e, 'tier_grants_birthday_key'));
+    await expect(t.db.updateTable('tier_grants').set({ birthday_on: '2027-03-15' }).where('id', '=', birthday.id).execute()).rejects.toSatisfy(isGuardViolation);
+    const credit = await t.db
+      .insertInto('tier_grants')
+      .values({ account_id: account.id, tier: 2, kind: 'CREDIT', granted_at: at, amount_minor: 5000, currency: 'EUR', expires_at: new Date('2028-03-13T23:00:00.000Z') })
+      .returning(['tier', 'birthday_on'])
+      .executeTakeFirstOrThrow();
+    expect(credit).toEqual({ tier: 2, birthday_on: null });
+  });
+
   it('audit_logs is append-only at the database level', async () => {
     const h = (b: number) => new Uint8Array(32).fill(b);
     await t.db

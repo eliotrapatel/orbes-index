@@ -444,8 +444,11 @@ export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
 export const CIRCLE_EXPERIENCES = ['MEMBERS_EVENING', 'LAUNCH_PREVIEW', 'PARTNER_EXPERIENCE'] as const;
 export type CircleExperience = (typeof CIRCLE_EXPERIENCES)[number];
 
-/** What an account received on reaching a tier (tier_grants.kind, migration 0027, BP-19 T5): its welcome gift, its credit. */
-export const TIER_GRANT_KINDS = ['GIFT', 'CREDIT'] as const;
+/**
+ * What an account received on reaching a tier (tier_grants.kind, migration 0027, BP-19 T5): its welcome gift, its credit;
+ * and, with no tier, its birthday credit (BIRTHDAY, migration 0045, plan CUSTOMER INTELLIGENCE §3.5 SB.4).
+ */
+export const TIER_GRANT_KINDS = ['GIFT', 'CREDIT', 'BIRTHDAY'] as const;
 export type TierGrantKind = (typeof TIER_GRANT_KINDS)[number];
 
 /**
@@ -2319,26 +2322,33 @@ export interface ClubProgramSettingsTable {
   experience_members_evening_min_tier: WithDefault<number>;
   experience_launch_preview_min_tier: WithDefault<number>;
   experience_partner_min_tier: WithDefault<number>;
+  /** The birthday credit (migration 0045, §3.5 SB.4): given or not (true), its amount in minor units of `credit_currency` (2000, 1..100 000 000), its days from the birthday (30, 1..365). */
+  birthday_credit_on: WithDefault<boolean>;
+  birthday_credit_minor: WithDefault<number>;
+  birthday_credit_days: WithDefault<number>;
   updated_by: string | null;
   updated_at: TimestampDefault;
 }
 
 /**
  * What an account received on reaching a tier (migration 0027, BP-19 T5): its welcome gift and its credit, once per tier
- * and per account, ever (`tier_grants_once`); never deleted, its identity and amount never changed.
+ * and per account, ever (`tier_grants_once`); and its birthday credits (BIRTHDAY, no tier, migration 0045), once per
+ * birthday (`tier_grants_birthday_key`). Never deleted, its identity and amount never changed.
  */
 export interface TierGrantsTable {
   id: Generated<string>;
   account_id: string;
-  tier: number;                        // 2 PLATINE, 3 PALLADIUM
+  tier: ColumnType<number | null, number | null | undefined, number | null>;   // 2 PLATINE, 3 PALLADIUM; NULL on a BIRTHDAY grant
   kind: TierGrantKind;
   granted_at: TimestampDefault;
-  /** A CREDIT's amount (1..100 000 000 minor units), currency and expiry; NULL on a GIFT. */
+  /** A CREDIT's or a BIRTHDAY grant's amount (1..100 000 000 minor units), currency and expiry; NULL on a GIFT. */
   amount_minor: ColumnType<number | null, number | null | undefined, number | null>;
   currency: ColumnType<string | null, string | null | undefined, string | null>;
   expires_at: TimestampNullable;
   /** A GIFT's model as given, set each time it is attached to an order; NULL on a CREDIT. */
   model_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** A BIRTHDAY grant's birthday, the Paris day 'YYYY-MM-DD' it was given for; NULL on every other kind (migration 0045). */
+  birthday_on: DateNullable;
 }
 
 /** A credit taken off an order (migration 0027): released (removed, cancelled, returned) or open; never deleted. */

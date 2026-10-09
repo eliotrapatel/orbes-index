@@ -453,7 +453,7 @@ export class ClubService {
         gifts.push({ tier: name, model, state: 'WITH_ORDER', orderReference: g.with_order_id ? orderReference(g.with_order_id) : null });
       } else {
         const a = active[g.tier as 2 | 3];
-        if (g.tier <= tier && a) gifts.push({ tier: name, model: a.name, state: 'PENDING', orderReference: null });
+        if (g.tier !== null && g.tier <= tier && a) gifts.push({ tier: name, model: a.name, state: 'PENDING', orderReference: null });
       }
     }
     return { credit, care, gifts, creditChannels: [...p.creditChannels] };

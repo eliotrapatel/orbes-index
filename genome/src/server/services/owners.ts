@@ -586,7 +586,7 @@ export class OwnerService {
     return {
       tier: tierName(tier),
       grants: grants
-        .slice()
+        .filter((g): g is typeof g & { kind: 'GIFT' | 'CREDIT'; tier: number } => g.kind !== 'BIRTHDAY' && g.tier !== null) // the tiers' (0045's BIRTHDAY: none)
         .sort((a, b) => a.tier - b.tier || (a.kind < b.kind ? 1 : -1))
         .map((g) => {
           const balance = balances.find((b) => b.grantId === g.id);
