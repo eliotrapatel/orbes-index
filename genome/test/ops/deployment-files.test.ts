@@ -8,8 +8,8 @@
  * (docker build / docker compose up); this guards the text against drift.
  */
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, normalize, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ConfigError, DEFAULT_ANOMALY_CONFIG, loadConfig } from '../../src/server/config.js';
@@ -113,6 +113,25 @@ describe('Dockerfile, docker-compose.yml, .dockerignore', () => {
     expect(dockerfile).toMatch(/^CMD \["node", "--import", "tsx", "src\/server\/index\.ts"\]$/m);
     // No secret ever baked into an image layer.
     for (const s of [...SECRETS, 'DATABASE_URL']) expect(dockerfile, s).not.toMatch(new RegExp(`^(ENV|ARG)\\b.*\\b${s}\\b`, 'm'));
+  });
+
+  it('copies into the runtime image every folder of src/ that the server and the shipped CLIs import', () => {
+    // H2's first deploy (2026-10-09) stopped at its migrations: src/shared/countries.ts was imported by the server
+    // but not copied into the image (ERR_MODULE_NOT_FOUND), and the stack rolled back.
+    const files = (dir: string): string[] =>
+      readdirSync(join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? files(join(dir, e.name)) : e.name.endsWith('.ts') ? [join(dir, e.name)] : [],
+      );
+    const sources = [...files('src/server'), 'scripts/db.ts', 'scripts/keys.ts', 'scripts/admin.ts', 'scripts/geoip-update.ts'];
+    const folders = new Set<string>();
+    for (const file of sources) {
+      for (const m of read(file).matchAll(/(?:from|import\()\s*['"](\.{1,2}\/[^'"]+)['"]/g)) {
+        const target = relative(ROOT, normalize(join(ROOT, dirname(file), m[1]!))).split('/');
+        if (target[0] === 'src') folders.add(target.slice(0, 2).join('/'));
+      }
+    }
+    expect([...folders]).toContain('src/shared');
+    for (const folder of folders) expect(dockerfile, folder).toMatch(new RegExp(`^COPY ${folder} \\./${folder}$`, 'm'));
   });
 
   it('keeps the root-owned sources readable by the node user whatever the modes of the build context', () => {
