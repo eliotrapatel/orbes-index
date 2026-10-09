@@ -2,7 +2,7 @@
  * docs/launch/DEPLOY-CUSTOMER-INTELLIGENCE.md, the owner's runbook for deployments I1 and I2, the customer intelligence
  * (plan of 2026-10-08, §9 and Finish I1), against the scripts, the migrations and the app it quotes. Part I1:
  *
- *  - it starts from the production of H2 (0001 to 0039, H2's final commit 074fce1, the lot's base) and applies exactly
+ *  - it starts from the production of H2 (0001 to 0039, H2 as deployed, e7f72e1: the lot's base 074fce1 with H2's two fixes merged) and applies exactly
  *    0040 to 0044, as the scripts print them: the table of §1.0, the lines `db_applied_migrations` and deploy.sh print
  *    before, the line `db.ts migrate` prints, those deploy.sh prints after it, the deployment log and the count
  *    `db.ts status` shows; H2's image no longer runs on the schema after it;
@@ -34,7 +34,7 @@ const commands = fenced(i1, 'bash');
 const outputs = fenced(i1, 'text');
 
 /** The production I1 starts from: H2, its final commit (the lot's base, plan §4 step 0); the main session confirms it against deploys.log. */
-const H2_COMMIT = '074fce1a828470721402b179b55f565e2471d394';
+const H2_COMMIT = 'e7f72e1fff7e14ba461d59b8fbc88daa12eca62f';
 const H2_TAG = H2_COMMIT.slice(0, 12);
 /** H1's image, as H2's deployment log line names it (DEPLOY-NEXT-LOT §2.6). */
 const H1_TAG = '1651df1dd669';

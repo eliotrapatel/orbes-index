@@ -9,7 +9,7 @@ La connaissance client (plan du 2026-10-08) part en production en **deux déploi
 | I1, « recueillir » | L'inscription et YOUR PROFILE, YOUR WISHLIST, ce que les collectionneurs regardent (l'appareil, la ville), d'où ils viennent (`Links`), la fiche client (`Profile`, `Tags and private notes`, `Intelligence`), la taille présélectionnée (plan §3.1 à §3.4, §3.6 pour la fiche, §3.7) | `0040` à `0044` | aucun | **À faire** |
 | I2, « utiliser » | Le crédit d'anniversaire, le score d'engagement, les nouveaux critères des segments, la page `Collectors`, l'historique mensuel et l'export (plan §3.5, §3.6) | `0045` à `0047` | aucun | **Après I1** (§2) |
 
-Le point de départ de I1 : la production tourne H2, le commit `074fce1a828470721402b179b55f565e2471d394` (image `orbes-genome:074fce1a8284`), avec les quarante migrations de `0001_initial` à `0039_order_delivery`. La branche du lot est partie de ce commit, le dernier de H2. Si la dernière ligne OK de `.state/deploys.log` nomme une autre image (un correctif après H2), ce document ne s'applique pas tel quel : demande à Claude de le recaler avant de commencer (la branche de déploiement est alors fusionnée dans celle du lot, et la CI repasse). Le détail technique de `deploy.sh` est dans [DEPLOYMENT §15.7](../DEPLOYMENT.md#157-updates-and-rollback-deploysh).
+Le point de départ de I1 : la production tourne H2, le commit `e7f72e1fff7e14ba461d59b8fbc88daa12eca62f` (image `orbes-genome:e7f72e1fff7e`), avec les quarante migrations de `0001_initial` à `0039_order_delivery`. La branche du lot est partie de `074fce1`, le dernier commit du build de H2, et contient les deux correctifs déployés ensuite avec H2 le 2026-10-09 (`2a2ca08` : les six étapes sur deux lignes sous 420 px ; `e7f72e1` : l'image copie `src/shared`). La remise à zéro des données du 2026-10-09 n'a pas changé le schéma ni le code. Si la dernière ligne OK de `.state/deploys.log` nomme une autre image (un correctif après H2), ce document ne s'applique pas tel quel : demande à Claude de le recaler avant de commencer (la branche de déploiement est alors fusionnée dans celle du lot, et la CI repasse). Le détail technique de `deploy.sh` est dans [DEPLOYMENT §15.7](../DEPLOYMENT.md#157-updates-and-rollback-deploysh).
 
 ## 0. Les règles
 
@@ -46,7 +46,7 @@ Le point de départ de I1 : la production tourne H2, le commit `074fce1a82847072
 - **L'état du serveur** gagne la ligne `VISITOR DATA` : la taille des données enregistrées, pour la règle des 50 Mo de la sauvegarde.
 - Les entrants de test et les comptes de l'équipe sont hors de chaque chiffre et de chaque liste.
 
-**Les migrations**, appliquées dans **une seule transaction** : si elles échouent, rien n'est appliqué et le site revient tout seul sur `074fce1a8284`.
+**Les migrations**, appliquées dans **une seule transaction** : si elles échouent, rien n'est appliqué et le site revient tout seul sur `e7f72e1fff7e`.
 
   | Migration | Élément | Contenu |
   |---|---|---|
@@ -56,7 +56,7 @@ Le point de départ de I1 : la production tourne H2, le commit `074fce1a82847072
   | `0043_acquisition` | §3.4 | les liens et leurs canaux, les sources, les visites, la première source de chaque collectionneur, le dernier lien de chaque acte |
   | `0044_client_notes` | §3.6 | les notes privées et les tags de la fiche client, deux index |
 
-  Elles ne cassent pas l'image `074fce1a8284` pendant le déploiement (des tables qu'elle ignore, une colonne nullable et des index qu'elle ne nomme pas). Une fois appliquées, on ne revient plus en arrière (ci-dessous).
+  Elles ne cassent pas l'image `e7f72e1fff7e` pendant le déploiement (des tables qu'elle ignore, une colonne nullable et des index qu'elle ne nomme pas). Une fois appliquées, on ne revient plus en arrière (ci-dessous).
 
 - **Aucune ligne n'est écrite** par les migrations. Au premier démarrage, l'application crée les huit réponses d'origine (Instagram, TikTok, A friend, The press, A shop, A web search, An influencer, Other), les sept canaux des liens et le point de départ de l'enregistrement ; puis, en arrière-plan, par petits lots, elle reprend les scans des 13 derniers mois comme appareils et lignes de scan. Les index sur `audit_logs`, `drop_entries`, `live_entries` et `orders` prennent quelques secondes à la taille de la maison.
 - **Caddy** : rien ne change.
@@ -64,7 +64,7 @@ Le point de départ de I1 : la production tourne H2, le commit `074fce1a82847072
 - **La base des villes** : le fichier DB-IP déjà installé (règle 4) ; l'application en lit un champ de plus, la ville.
 - **Les pages légales** : rien ne change (règle 10).
 - **Une coupure courte** : l'application est arrêtée pendant les migrations, puis redémarrée. En général, moins d'une minute.
-- **Pas de retour en arrière** : une fois les migrations faites, l'image `074fce1a8284` ne peut plus tourner sur ce schéma. `deploy.sh --image 074fce1a8284` la refuse.
+- **Pas de retour en arrière** : une fois les migrations faites, l'image `e7f72e1fff7e` ne peut plus tourner sur ce schéma. `deploy.sh --image e7f72e1fff7e` la refuse.
 
 Dans la suite, `<SHA_I1>` est le commit final (40 caractères) que donne le rapport de Claude, `<TAG_I1>` ses 12 premiers caractères (le tag de la nouvelle image).
 
@@ -72,7 +72,7 @@ Dans la suite, `<SHA_I1>` est le commit final (40 caractères) que donne le rapp
 
 **1. Ce qui doit être réglé avant le jour** (dans la console, sur ton ordinateur) :
 
-- **H2 est en production**, au commit `074fce1a828470721402b179b55f565e2471d394` (§1.2 le vérifie).
+- **H2 est en production**, au commit `e7f72e1fff7e14ba461d59b8fbc88daa12eca62f` (§1.2 le vérifie).
 - **Aucune LIVE RELEASE** ouverte ni prévue pendant la fenêtre, de préférence pas dans l'heure qui précède l'ouverture d'une sortie (les premières visites après un déploiement écrivent de nouveaux appareils), et aucun tirage tiré pendant elle.
 - **Aucun test de TEST ENTRANTS en cours** : le redémarrage l'arrêterait. Un test fini se nettoie avec END TEST avant, comme d'habitude.
 - **Préviens ORBES Client Services** des nouvelles procédures ([le playbook](SALES-PLAYBOOK.md), §6, aussi dans `Documents`) : « Corriger la date de naissance ou le profil d'un client » (après avoir vérifié que c'est bien le client ; la raison de `Change the date of birth` devient une note privée ; une date mal saisie se corrige directement, car retirée, le client ne peut plus la saisir), les tags et les notes privées (jamais montrés au client), et ce que lit le rôle AUDITOR.
@@ -170,7 +170,7 @@ Sortie attendue : **rien**. Si une ligne s'affiche : `unset ORBES_IMAGE_TAG COMP
 git -C /opt/orbes/orbes-index log -1 --format='%H %s'
 ```
 
-Sortie attendue : `074fce1a828470721402b179b55f565e2471d394` au début de la ligne (le commit de H2).
+Sortie attendue : `e7f72e1fff7e14ba461d59b8fbc88daa12eca62f` au début de la ligne (le commit de H2).
 
 ```bash
 git -C /opt/orbes/orbes-index status --short
@@ -184,7 +184,7 @@ Sortie attendue : **rien**. Si des fichiers s'affichent, arrête-toi.
 grep '^ORBES_IMAGE_TAG=' .env
 ```
 
-Sortie attendue : `ORBES_IMAGE_TAG=074fce1a8284`.
+Sortie attendue : `ORBES_IMAGE_TAG=e7f72e1fff7e`.
 
 ```bash
 docker compose ps
@@ -196,7 +196,7 @@ Sortie attendue : `caddy`, `app` et `postgres`, chacun `Up … (healthy)`.
 tail -n 1 .state/deploys.log
 ```
 
-Sortie attendue : `… deploy 074fce1a8284 OK (previous 1651df1dd669; migrations 0035_logistics_access, 0036_supplier_orders, 0037_fulfilment, 0038_draw_sizes, 0039_order_delivery)` : H2 est bien le dernier déploiement réussi. Une autre ligne : arrête-toi et demande à Claude.
+Sortie attendue : `… deploy e7f72e1fff7e OK (previous 1651df1dd669; migrations 0035_logistics_access, 0036_supplier_orders, 0037_fulfilment, 0038_draw_sizes, 0039_order_delivery)` : H2 est bien le dernier déploiement réussi. Une autre ligne : arrête-toi et demande à Claude.
 
 **4. `RESTORE_ALLOWED=false`** :
 
@@ -224,7 +224,7 @@ Sortie attendue : **exactement `<SHA_I1>`** au début de la ligne. Un autre comm
 git -C /opt/orbes/orbes-index merge --ff-only origin/claude/orbes-genome-code-system-o8bmnk
 ```
 
-Sortie attendue : `Updating 074fce1..<7 caractères de SHA_I1>`, puis `Fast-forward` et la liste des fichiers. Si tu lis `Not possible to fast-forward, aborting.`, rien n'a changé : arrête-toi.
+Sortie attendue : `Updating e7f72e1..<7 caractères de SHA_I1>`, puis `Fast-forward` et la liste des fichiers. Si tu lis `Not possible to fast-forward, aborting.`, rien n'a changé : arrête-toi.
 
 ```bash
 git -C /opt/orbes/orbes-index log -1 --format='%H'
@@ -235,7 +235,7 @@ Sortie attendue : `<SHA_I1>`.
 **Rien ne change dans la pile du serveur** (deuxième condition ; règle 4), contre le commit de H2 alors en production, celui que nomme la dernière ligne OK de `.state/deploys.log` :
 
 ```bash
-git -C /opt/orbes/orbes-index diff --stat 074fce1a828470721402b179b55f565e2471d394 HEAD -- deploy/vps
+git -C /opt/orbes/orbes-index diff --stat e7f72e1fff7e14ba461d59b8fbc88daa12eca62f HEAD -- deploy/vps
 ```
 
 Sortie attendue : **rien**. Une ligne de `deploy/vps` : arrête-toi et demande à Claude.
@@ -290,7 +290,7 @@ Sortie attendue, dans l'ordre (les heures sont remplacées par `…`) :
    … [deploy.sh] ── build orbes-genome:<TAG_I1>
    … [deploy.sh] ── Caddy configuration
    … [deploy.sh] Caddy configuration valid (TLS_MODE=acme, EDGE_MODE=direct)
-   … [deploy.sh] previous image tag: 074fce1a8284
+   … [deploy.sh] previous image tag: e7f72e1fff7e
    ```
 
 3. **Le schéma** :
@@ -300,7 +300,7 @@ Sortie attendue, dans l'ordre (les heures sont remplacées par `…`) :
    … [deploy.sh] schema: 40 migration(s) applied, all known to orbes-genome:<TAG_I1>
    ```
 
-   **Il faut lire `40 migration(s)`.** Un `ERROR: … nothing was changed` à la place : le site tourne toujours sur `074fce1a8284`, colle la sortie à Claude et ne relance pas.
+   **Il faut lire `40 migration(s)`.** Un `ERROR: … nothing was changed` à la place : le site tourne toujours sur `e7f72e1fff7e`, colle la sortie à Claude et ne relance pas.
 
 4. **La sauvegarde pré-déploiement** :
 
@@ -346,8 +346,8 @@ Sortie attendue, dans l'ordre (les heures sont remplacées par `…`) :
 7. **La fin** :
 
    ```text
-   … [deploy.sh] deployed orbes-genome:<TAG_I1> (previous: 074fce1a8284). This release applied the migration(s) 0040_account_profiles, 0041_account_wishes, 0042_collector_views, 0043_acquisition, 0044_client_notes:
-   … [deploy.sh] orbes-genome:074fce1a8284 cannot run on this schema any more (scripts/deploy.sh --image 074fce1a8284 refuses it). If anything goes wrong, repair forward: scripts/deploy.sh --image <TAG_I1> after a transient incident, otherwise a corrective commit (docs/DEPLOYMENT.md §15.7).
+   … [deploy.sh] deployed orbes-genome:<TAG_I1> (previous: e7f72e1fff7e). This release applied the migration(s) 0040_account_profiles, 0041_account_wishes, 0042_collector_views, 0043_acquisition, 0044_client_notes:
+   … [deploy.sh] orbes-genome:e7f72e1fff7e cannot run on this schema any more (scripts/deploy.sh --image e7f72e1fff7e refuses it). If anything goes wrong, repair forward: scripts/deploy.sh --image <TAG_I1> after a transient incident, otherwise a corrective commit (docs/DEPLOYMENT.md §15.7).
    ```
 
    Puis :
@@ -365,12 +365,12 @@ Ne lance rien d'autre que les commandes de ce paragraphe, et colle à Claude la 
 | Ce que tu lis | Ce que ça veut dire | Ce que tu fais |
 |---|---|---|
 | Une ligne `<numéro> pg_dump …`, et rien de `deploy.sh` | Une sauvegarde tournait : rien n'a démarré. | Attends sa fin (`pgrep -a pg_dump` ne répond plus rien), puis relance la commande gardée du §1.4. |
-| Un `ERROR: …` **avant** la ligne `── roll out`, avec `nothing was changed` ou `nothing else was changed` | Le déploiement s'est arrêté seul. Le site tourne toujours sur `074fce1a8284`, le schéma n'a pas bougé. | Rien. Colle la sortie, attends la réponse. |
-| Une erreur (par exemple de `db migrate`), puis `── rollback to orbes-genome:074fce1a8284` et `rolled back to 074fce1a8284; the stack is healthy` | Les migrations n'ont pas été appliquées (une seule transaction), et le site est revenu tout seul sur `074fce1a8284`. | Rien. Colle la sortie, attends un commit correctif. |
-| `rollback to 074fce1a8284 is NOT healthy either` | Le retour en arrière n'a pas pris : le site est en panne. | Tout de suite : `docker compose ps`, puis `docker compose logs --tail 100 app`, et colle les sorties à Claude. Préviens le responsable de l'hôte. |
-| `── no rollback: repair forward`, puis `WARNING: deployment of <TAG_I1> failed (…) and is KEPT` et `Repair forward:` | Les migrations sont faites, puis quelque chose a échoué (santé, clé, tests de fumée). La nouvelle version reste : on ne peut plus revenir à `074fce1a8284`. | `docker compose ps`, puis `docker compose logs --tail 100 app`, et colle les sorties. Cause passagère (réseau, disque plein, un service tombé un instant) : corrige-la, puis `scripts/deploy.sh --image <TAG_I1>`. Sinon, Claude prépare un commit correctif ; CI verte, tu refais le §1.3 avec ce commit, puis la commande gardée du §1.4. |
+| Un `ERROR: …` **avant** la ligne `── roll out`, avec `nothing was changed` ou `nothing else was changed` | Le déploiement s'est arrêté seul. Le site tourne toujours sur `e7f72e1fff7e`, le schéma n'a pas bougé. | Rien. Colle la sortie, attends la réponse. |
+| Une erreur (par exemple de `db migrate`), puis `── rollback to orbes-genome:e7f72e1fff7e` et `rolled back to e7f72e1fff7e; the stack is healthy` | Les migrations n'ont pas été appliquées (une seule transaction), et le site est revenu tout seul sur `e7f72e1fff7e`. | Rien. Colle la sortie, attends un commit correctif. |
+| `rollback to e7f72e1fff7e is NOT healthy either` | Le retour en arrière n'a pas pris : le site est en panne. | Tout de suite : `docker compose ps`, puis `docker compose logs --tail 100 app`, et colle les sorties à Claude. Préviens le responsable de l'hôte. |
+| `── no rollback: repair forward`, puis `WARNING: deployment of <TAG_I1> failed (…) and is KEPT` et `Repair forward:` | Les migrations sont faites, puis quelque chose a échoué (santé, clé, tests de fumée). La nouvelle version reste : on ne peut plus revenir à `e7f72e1fff7e`. | `docker compose ps`, puis `docker compose logs --tail 100 app`, et colle les sorties. Cause passagère (réseau, disque plein, un service tombé un instant) : corrige-la, puis `scripts/deploy.sh --image <TAG_I1>`. Sinon, Claude prépare un commit correctif ; CI verte, tu refais le §1.3 avec ce commit, puis la commande gardée du §1.4. |
 
-Dans tous les cas : **jamais `restore.sh`**, **jamais `scripts/deploy.sh --image 074fce1a8284`** (refusé : `this image cannot run on this schema: repair forward`), jamais de `prune`.
+Dans tous les cas : **jamais `restore.sh`**, **jamais `scripts/deploy.sh --image e7f72e1fff7e`** (refusé : `this image cannot run on this schema: repair forward`), jamais de `prune`.
 
 ### 1.6 Juste après : contrôles de base
 
@@ -380,7 +380,7 @@ Sur le serveur, toujours en `orbes` dans `deploy/vps` :
 tail -n 1 .state/deploys.log
 ```
 
-Sortie attendue : `… deploy <TAG_I1> OK (previous 074fce1a8284; migrations 0040_account_profiles, 0041_account_wishes, 0042_collector_views, 0043_acquisition, 0044_client_notes)`.
+Sortie attendue : `… deploy <TAG_I1> OK (previous e7f72e1fff7e; migrations 0040_account_profiles, 0041_account_wishes, 0042_collector_views, 0043_acquisition, 0044_client_notes)`.
 
 ```bash
 docker compose ps
@@ -495,7 +495,7 @@ Sortie attendue : l'archive de la nuit, `orbes-<date>T03…Z.tar.age` (sans `-pr
 
 - **Les premiers vrais liens** dans `Links` : la bio d'Instagram, chaque influenceur, avec leur coût si tu veux voir leur retour.
 - **La règle des 50 Mo** : la ligne `VISITOR DATA` de l'état du serveur et la ligne `intelligence sizes` du matin montrent la croissance. Une sauvegarde de nuit au-dessus de 50 Mo te revient avec les chiffres par table (ta réponse à la question 4 : décider à ce moment-là).
-- **Les anciennes images (facultatif).** Une fois I1 stable, `074fce1a8284` et les images d'avant ne peuvent plus servir. Retire-les une par une, par leur tag exact (jamais `<TAG_I1>`), la liste d'abord :
+- **Les anciennes images (facultatif).** Une fois I1 stable, `e7f72e1fff7e` et les images d'avant ne peuvent plus servir. Retire-les une par une, par leur tag exact (jamais `<TAG_I1>`), la liste d'abord :
 
   ```bash
   docker images orbes-genome
