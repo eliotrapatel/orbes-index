@@ -1424,6 +1424,39 @@ export const heardOptionParams = z.object({ id: uuid });
 export const heardOrderBody = body({ ids: z.array(z.string().max(64, 'At most 64 characters')).max(200, 'At most 200 answers') });
 
 /**
+ * The console's links and their channels (§16.35, plan CUSTOMER INTELLIGENCE §3.4 A.7.2): a link made or changed, a
+ * channel added, renamed, moved or removed. The outer wall only (types and sizes): the rules and their words (« Give
+ * the link a name. », « Choose where the link goes. », the address's pattern, the cost « with cents, in one
+ * currency », an address that never changes, a channel's name once) are services/links.ts's.
+ */
+const linkCost = z.strictObject({ minor: z.number(), currency: z.string().max(8, 'At most 8 characters') }).nullable();
+export const linkBody = body({
+  name: z.string().max(200, 'At most 200 characters'),
+  channelId: z.string().max(64, 'At most 64 characters'),
+  destination: z.string().max(20, 'At most 20 characters'),
+  dropId: z.string().max(64, 'At most 64 characters').nullable().optional(),
+  modelId: z.string().max(64, 'At most 64 characters').nullable().optional(),
+  code: z.string().max(64, 'At most 64 characters').nullable().optional(),
+  cost: linkCost.optional(),
+  note: z.string().max(2_000, 'At most 2000 characters').nullable().optional(),
+});
+export const linkUpdateBody = body({
+  name: z.string().max(200, 'At most 200 characters').optional(),
+  channelId: z.string().max(64, 'At most 64 characters').optional(),
+  destination: z.string().max(20, 'At most 20 characters').optional(),
+  dropId: z.string().max(64, 'At most 64 characters').nullable().optional(),
+  modelId: z.string().max(64, 'At most 64 characters').nullable().optional(),
+  /** Refused by the service in its words: a link's address never changes. */
+  code: z.string().max(64, 'At most 64 characters').optional(),
+  cost: linkCost.optional(),
+  note: z.string().max(2_000, 'At most 2000 characters').nullable().optional(),
+});
+export const linkParams = z.object({ id: uuid });
+export const linkChannelBody = body({ name: z.string().max(200, 'At most 200 characters'), position: z.number().optional() });
+export const linkChannelUpdateBody = body({ name: z.string().max(200, 'At most 200 characters').optional(), position: z.number().optional() });
+export const linkChannelParams = z.object({ id: uuid });
+
+/**
  * The owners list (§16.2): every account, or one exact email (normalised by the service, as at sign-in), or the
  * REF printed under a result (`REF 1A2B3C4D`, any case, or a whole scan id; parsed by the service). One or none.
  */

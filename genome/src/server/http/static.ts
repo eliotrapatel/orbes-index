@@ -2,7 +2,10 @@
  * Static web apps (contract §3 "Static web"), served from the esbuild output
  * of scripts/build-web.ts:
  *
- *   /                → 302 /verify
+ *   /                → 302 /verify, its query string kept (≤ 2 000 characters, else dropped), so the `utm_` tags of an
+ *                      address shared as https://verify.theorbes.com/?utm_source=… reach the app; this 302 alone carries
+ *                      Referrer-Policy: strict-origin-when-cross-origin (plan CUSTOMER INTELLIGENCE §3.4 A.3; the
+ *                      console links' /go/<code> is routes/acquisition.ts's, served without the web build)
  *   /verify, /verify/*  → dist/web/verify/index.html   (client-side routes: /verify/pieces is MY PIECES,
  *                                                     /verify/c#… an ownership certificate, its token in the fragment,
  *                                                     /verify/lookbook THE COLLECTION and /verify/lookbook/<slug> a
@@ -29,6 +32,7 @@ import { basename, join } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { CERTIFICATE_PATH } from '../services/ownership-certificates.js';
+import { REDIRECT_REFERRER_POLICY } from './security.js';
 
 /** esbuild's default `[name]-[hash]` naming: an 8+ character base32-ish hash before the extension. */
 export const HASHED_ASSET_RE = /-[A-Z0-9]{8,}\.[a-z0-9]+$/;
@@ -41,6 +45,8 @@ const CERTIFICATE_ADDRESS_RE = /^\/verify\/c\/?$/i;
 /** A LIVE RELEASE's boutique board (plan of 2026-10-04, choice 31): unlisted, its page never indexed nor followed. */
 export const BOARD_ADDRESS_RE = /^\/verify\/releases\/[^/?#]+\/board\/?$/i;
 export const NOINDEX = 'noindex, nofollow';
+/** The longest query string `/` carries over to `/verify`; a longer one is dropped. */
+export const ROOT_QUERY_MAX = 2_000;
 
 export function cacheControlFor(path: string): string {
   return HASHED_ASSET_RE.test(basename(path)) ? IMMUTABLE_CACHE : REVALIDATE_CACHE;
@@ -98,7 +104,12 @@ export async function registerStatic(app: FastifyInstance, dir: string): Promise
     const path = request.url.split('?', 1)[0];
     if (path !== CERTIFICATE_PATH && path !== `${CERTIFICATE_PATH}/` && CERTIFICATE_ADDRESS_RE.test(path)) return reply.redirect(CERTIFICATE_PATH, 301);
   });
-  app.get('/', async (_request, reply) => reply.redirect('/verify', 302));
+  app.get('/', async (request, reply) => {
+    const at = request.url.indexOf('?');
+    const search = at < 0 ? '' : request.url.slice(at);
+    reply.header('referrer-policy', REDIRECT_REFERRER_POLICY);
+    return reply.redirect(search.length > 1 && search.length <= ROOT_QUERY_MAX ? `/verify${search}` : '/verify', 302);
+  });
   app.get('/verify', verify);
   app.get('/verify/*', verify);
   app.get('/admin', admin);

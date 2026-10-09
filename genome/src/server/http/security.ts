@@ -19,6 +19,14 @@ export const CONTENT_SECURITY_POLICY =
 
 export const PERMISSIONS_POLICY = 'camera=(self)';
 
+/**
+ * The Referrer-Policy of the two redirects into the app, `/` and `/go/<code>` (plan CUSTOMER INTELLIGENCE §3.4 A.3), over
+ * helmet's `no-referrer`: a redirect's own policy applies to the redirected request, so the site that sent the visitor
+ * reaches the app's `document.referrer`, its origin only, never its path (the browsers' own default). Every other
+ * response keeps `no-referrer`: ORBES's pages send nothing out.
+ */
+export const REDIRECT_REFERRER_POLICY = 'strict-origin-when-cross-origin';
+
 /** HSTS lifetime in production: two years, subdomains included (preload is an operator decision). */
 export const HSTS_MAX_AGE_S = 63_072_000;
 

@@ -70,6 +70,7 @@ import { OwnerService } from './services/owners.js';
 import { PastReleaseService } from './services/past-releases.js';
 import { PlaceService } from './services/places.js';
 import { AcquisitionService } from './services/acquisition.js';
+import { LinkService } from './services/links.js';
 import { TrackingService } from './services/tracking.js';
 import { SalonService } from './services/salon.js';
 import { ShopifyExportService } from './services/shopify.js';
@@ -183,6 +184,8 @@ export interface AppServices {
   tracking: TrackingService;
   /** Where collectors come from (plan CUSTOMER INTELLIGENCE §3.4): the console's links, the sources, the visits on the device and their attribution. */
   acquisition: AcquisitionService;
+  /** The console's links (plan CUSTOMER INTELLIGENCE §3.4 A.7.1): short ORBES addresses by channel, /go/<code>'s destinations. */
+  links: LinkService;
   /** The suppliers (plan NEXT LOT §3.5.6.2): who makes ORBES's pieces, and the supplier of each model and size. */
   suppliers: SupplierService;
   /** The supplier orders (plan NEXT LOT §3.5.6.3): the proposal, the drafts, their steps, invoices and PDFs; ORBES's only. */
@@ -324,6 +327,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const places = new PlaceService({ db });
     // The recording's writes wait while the pool has requests waiting (§3.3 T.8.3): the collectors come first.
     const acquisition = new AcquisitionService({ db, publicOrigin: config.publicOrigin, clock, log });
+    const links = new LinkService({ db, audit, publicOrigin: config.publicOrigin, clock });
     // The page load's arrival rides in the views' batches (§3.0 (c), §3.4 A.7.2): the same route, the same exclusions.
     const tracking = new TrackingService({ db, places, clock, log, waiting: () => (poolOf(db)?.waitingCount ?? 0) > 0, arrive: (input) => acquisition.arrive(input) });
     const suppliers = new SupplierService({ db, audit, clock });
@@ -383,6 +387,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       places,
       tracking,
       acquisition,
+      links,
       suppliers,
       supplierOrders,
       receptions,

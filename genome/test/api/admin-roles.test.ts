@@ -21,7 +21,9 @@
  * granted, changed and revoked by an OPERATOR, its defaults read by an AUDITOR and set by an ADMIN; a model's Sizes, AC-01,
  * read by an AUDITOR and set by an OPERATOR, its sizes declared, removed and reinstated by an OPERATOR (NEXT LOT §3.3); GROWTH, BP-29, read by an AUDITOR;
  * the suppliers, read by an AUDITOR, added and changed by an OPERATOR, a model's supplier set by an OPERATOR, NEXT LOT §3.5.6.2;
- * the supplier orders, read by an AUDITOR with their PDF, proposed, drafted, sent and settled by an OPERATOR, NEXT LOT §3.5.6.3);
+ * the supplier orders, read by an AUDITOR with their PDF, proposed, drafted, sent and settled by an OPERATOR, NEXT LOT §3.5.6.3;
+ * the console's links and their channels, read by an AUDITOR, made, changed, archived and removed by an OPERATOR,
+ * CUSTOMER INTELLIGENCE §3.4 A.7.2);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -415,6 +417,17 @@ const PROBES: Probe[] = [
   { group: 'sign-up', method: 'POST', url: '/api/admin/heard-options', body: INVALID, min: 'ADMIN' },
   { group: 'sign-up', method: 'PATCH', url: `/api/admin/heard-options/${UUID}`, body: INVALID, min: 'ADMIN' },
   { group: 'sign-up', method: 'PUT', url: '/api/admin/heard-options/order', body: INVALID, min: 'ADMIN' },
+  // Links (plan CUSTOMER INTELLIGENCE §3.4 A.7.2): the channels and what the dialog offers read from AUDITOR; links and
+  // channels made, changed, archived and removed by an OPERATOR.
+  { group: 'links', method: 'GET', url: '/api/admin/link-channels', min: 'AUDITOR' },
+  { group: 'links', method: 'POST', url: '/api/admin/link-channels', body: INVALID, min: 'OPERATOR' },
+  { group: 'links', method: 'PATCH', url: `/api/admin/link-channels/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'links', method: 'DELETE', url: `/api/admin/link-channels/${UUID}`, min: 'OPERATOR' },
+  { group: 'links', method: 'GET', url: '/api/admin/links/destinations', min: 'AUDITOR' },
+  { group: 'links', method: 'POST', url: '/api/admin/links', body: INVALID, min: 'OPERATOR' },
+  { group: 'links', method: 'PATCH', url: `/api/admin/links/${UUID}`, body: INVALID, min: 'OPERATOR' },
+  { group: 'links', method: 'POST', url: `/api/admin/links/${UUID}/archive`, min: 'OPERATOR' },
+  { group: 'links', method: 'POST', url: `/api/admin/links/${UUID}/unarchive`, min: 'OPERATOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];
@@ -486,6 +499,7 @@ describe('admin role enforcement', () => {
       'packing',
       'order-cases',
       'sign-up',
+      'links',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
