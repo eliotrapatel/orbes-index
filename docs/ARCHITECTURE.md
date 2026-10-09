@@ -88,6 +88,16 @@ WHAT COLLECTORS LOOK AT (plan CUSTOMER INTELLIGENCE §3.3, B.12)
             ─► ViewBuffer (memory, one INSERT every 2 s) ─► collector_views (13 months raw)
             ─► morning window: daily totals, places, monthly summaries ─► 13-month fold, then delete
   sign-up / sign-in / signed-in view ─► link: the device's anonymous views and scans take the account
+
+WHERE THEY COME FROM (plan CUSTOMER INTELLIGENCE §3.4, B.13)
+  verify.theorbes.com/go/<code> ─► 302 to the link's page with ?o=<code> (no write)   / ─► 302 /verify?<query kept>
+  verify app (App.start, arrival.ts) ─► reads o and utm_, removes them; the referrer once a tab
+            ─► after the first screen: `a` in the next POST /api/v1/seen
+  server  ─► the views' exclusions ─► classify: link > campaign tags > site > Direct ─► the device's first source,
+             one visit per device, source and Paris day
+  link (sign-up / sign-in / signed-in view) ─► attach: the visits take the account, its first source, the SIGNUP's last link
+  housekeeping ─► every pass: each entry and order's conversion, judged at the act ─► morning: visits by day, 13-month purge
+  console ─► Links (#/links): each link, campaign and site, first link and last link side by side, the return
 ```
 
 ### B.3 Components
@@ -135,13 +145,19 @@ genome/
                          heart's wishes, their monthly counts and their 13-month purge);
                          the device and the views (plan CUSTOMER INTELLIGENCE §3.3, B.12: tracking, TrackingService,
                          the views' pipeline, the link and the scans' rows; tracking-jobs, the morning's counts and
-                         purges; tracking-reads, the console's and the export's readings; places, PlaceService)
+                         purges; tracking-reads, the console's and the export's readings; places, PlaceService);
+                         where they come from (plan CUSTOMER INTELLIGENCE §3.4, B.13: acquisition, AcquisitionService,
+                         the arrival, the attach, the first source and the last link; acquisition-jobs, the conversions,
+                         the visits by day and their purge; acquisition-report, the Links page's readings; acquisition-reads,
+                         the client sheet's origin, the export's columns and the right of access's `origin`; links,
+                         LinkService, the console's links and channels; referrers, the referring sites' families)
     media/               uploaded photographs: type by magic bytes, EXIF/XMP stripped by hand, dimensions
     authenticators/      PhysicalAuthenticator registry (printed code today; hardware later)
     http/                sessions, CSRF, rate limiting, security headers, validation, static files; the LIVE
                          RELEASES' streams (live-stream.ts: LiveHub, Server-Sent Events fanned out once a second);
                          the device cookie (device.ts) and the device's class (device-class.ts)
-    routes/              public, account, ownership, club, live (the LIVE RELEASES), seen (the views), admin
+    routes/              public, account, ownership, club, live (the LIVE RELEASES), seen (the views), acquisition
+                         (GET /go/:code, a console link's short address), admin
     geo/                 location resolver (none | cloudflare | headers | mmdb), haversine; the connection's
                          country and city (place.ts)
     render/              artifacts: SVG, PNG (resvg), vector PDF (pdfkit), print sheets, certificate cards,
@@ -157,7 +173,8 @@ genome/
                          RELEASE's vault (/verify/releases/<id>, views/live.ts) and its boutique board (/verify/releases/<id>/board#secret);
                          THE RELEASES' LIVE and PAST tabs, the after-room (/verify/releases/<id>/after-room), the question
                          after (views/question.ts), YOUR ORDERS and their documents in MY PIECES (orders-model.ts);
-                         the recording of what is looked at (seen.ts, seen-model.ts: no word, no screen, B.12)
+                         the recording of what is looked at (seen.ts, seen-model.ts: no word, no screen, B.12); the page
+                         load's arrival (arrival.ts, read in App.start: o and utm_ removed from the address, B.13)
     admin/               admin console: catalogue (Discontinue and Reinstate), generator, keys, anomalies, analytics, audit, the Club
                          (Drops, Circle, Tiers, Requests; a LIVE RELEASE's page, #/club/live/:dropId); the sale mode (decoder worker of verify/);
                          Orders (#/orders, an order's page, the packing slip), Logistics (#/logistics, B.11; #/atelier leads
@@ -270,9 +287,20 @@ One device, one cookie, one pipeline. The device is the existing `__Host-orbes_d
 
 - **The app** (`web/verify/seen-model.ts`, `seen.ts`, `ApiClient.seen`): `pageOf` maps each screen to its page; `ViewClock` counts the time a view is in front (paused when hidden, and after 120 s idle except in a LIVE room and on a result; the account sheet and the sign-in panel pause the page under them); `SeenQueue` sends every 30 ± 10 s with `keepalive`, at once on hide or close, nothing during a LIVE room until then. Off in an automated browser. No word, no screen, no storage written.
 - **The route** (`routes/seen.ts`): same origin, no CSRF token, its own rate group `seen`, 204 whatever happened; a signed-in batch's session kept 30 s in memory.
-- **`TrackingService`** (`services/tracking.ts`): `ingest` drops a console session (and marks the device staff's, its rows deleted), the team's own accounts (`population.ts` `HouseAccounts`), test entrants (`TestEntrantAccounts`, 100.64.0.0/10), robots and prefetches (`http/device-class.ts` `isAutomated`), past 2 000 rows a device a Paris day; then the device (one upsert, an LRU of 20 000), its class (`classifyDevice`), the place (`geo/place.ts` `connectionPlace`, `PlaceService`) and each row with its subject into the `ViewBuffer` (one INSERT every 2 s, put off while the pool has requests waiting, 5 000 rows at most, written out at shutdown). `recordScan` writes each scan's row after `/api/v1/verify` has answered. `link`, at sign-up, sign-in and a signed-in view, gives the device's anonymous rows since its previous link to the account, in one transaction under the advisory lock `orbes/views-daily`; the acquisition's attach will run in it. At the first boot, `prepare` writes `tracking_state` and `backfillScans` turns the 13 months of past scans into devices and rows, by keyset batches, in the background.
+- **`TrackingService`** (`services/tracking.ts`): `ingest` drops a console session (and marks the device staff's, its rows deleted), the team's own accounts (`population.ts` `HouseAccounts`), test entrants (`TestEntrantAccounts`, 100.64.0.0/10), robots and prefetches (`http/device-class.ts` `isAutomated`), past 2 000 rows a device a Paris day; then the device (one upsert, an LRU of 20 000), its class (`classifyDevice`), the place (`geo/place.ts` `connectionPlace`, `PlaceService`) and each row with its subject into the `ViewBuffer` (one INSERT every 2 s, put off while the pool has requests waiting, 5 000 rows at most, written out at shutdown). `recordScan` writes each scan's row after `/api/v1/verify` has answered. `link`, at sign-up, sign-in and a signed-in view, gives the device's anonymous rows since its previous link to the account, in one transaction under the advisory lock `orbes/views-daily`; the acquisition's attach runs in it (B.13). At the first boot, `prepare` writes `tracking_state` and `backfillScans` turns the 13 months of past scans into devices and rows, by keyset batches, in the background.
 - **The jobs** (`services/tracking-jobs.ts`, in `startHousekeeping`'s morning window, DATABASE §10): the daily totals, the collectors' places and the monthly summaries, one Paris day per transaction under the same lock; the 13-month purge folds each collector's rows first; unlinked old devices go; the `intelligence sizes` log line once a day.
 - **The reads** (`services/tracking-reads.ts`, offered by `TrackingService`): the client sheet's browsing, the Collectors page's reports (the daily totals, or 13 months of detail with a collector filter) and click-through, activity, Segments' BROWSING criteria, the export's columns, and the right of access's `browsing`. Counted collectors only (`population.ts` `countedCollector`); never audited.
+
+### B.13 Where they come from: links, campaign tags, first and last link (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.4)
+
+No second cookie and no route of its own: the visitor is B.12's device, and the page load's **arrival** rides in its first `POST /api/v1/seen` batch (`a`). Migration `0043_acquisition` (DATABASE §5.106 to §5.113; `tracking_devices.first_source_id`). No host change, no new timer, no third party: nothing is sent to an ad platform, no pixel.
+
+- **The short address** (`routes/acquisition.ts`, `LinkService.resolve`): `GET /go/<code>` answers 302 to the link's page with `?o=<code>` and writes nothing (a visit is counted by the app's arrival, so link-preview robots count nothing); `GET /` keeps its query string. Those two 302s alone carry `Referrer-Policy: strict-origin-when-cross-origin`, so the referring site's origin reaches the app; every other response keeps `no-referrer`. Destinations are ORBES pages only.
+- **The app** (`web/verify/arrival.ts`): `App.start` reads `o` and the `utm_` tags first and removes them from the address (`history.replaceState`, path and fragment kept); the referrer once per tab (`sessionStorage['orbes.arrived']`, the lot's only script-written storage); handed to the `SeenQueue` after the first screen. Nothing drawn, no word.
+- **`AcquisitionService`** (`services/acquisition.ts`): `arrive`, called by `TrackingService.ingest` after its exclusions, classifies the arrival (`classify`: link > tags > site > Direct; `services/referrers.ts` folds the sites' families), finds or makes its source (100 new campaigns and sites a Paris day at most), sets the device's first source once and writes the visit. `attach`, inside `TrackingService.link`'s transaction, gives the device's visits to the account and writes the account's first source and its SIGNUP conversion at a sign-up (STAFF on a console device's); at a sign-in, an earlier device of this account becomes the discovery. `lastSourceAt` / `lastTouch`: the last non-direct visit within 90 days. `prepare` at boot: the channels, the fixed sources, the recording's start.
+- **The jobs** (`services/acquisition-jobs.ts`, in `startHousekeeping`, DATABASE §10): every pass, each sign-up, entry and order's conversion, found by when its row was written and judged at the collector's act (an EXCHANGE order copies its original's), with a daily catch-up; in the morning window, the visits by Paris day, then their 13-month purge; `devicePurge` keeps a device a visit names.
+- **The readings**: `AcquisitionReportService` (`services/acquisition-report.ts`, one REPEATABLE READ, READ ONLY transaction a reading, no cache) for the Links page and its click-through, each figure first and last link side by side, GROWTH's purchase and revenue rules, a TOTAL every view adds up to; `services/acquisition-reads.ts` for the client sheet's Origin (`originOf`), the Collectors export's columns (`exportColumns`) and the right of access's `origin`. Counted collectors only (`countedCollector`). Server status's VISITOR DATA line reads the daily `intelligence sizes` figures (`IntelligenceSizes`).
+- **The console** (`web/admin/views/links.ts`, `link.ts`, `link-collectors.ts`, `model/links.ts`): Links under Clients after Segments (`readLinks` AUDITOR, `manageLinks` OPERATOR), New link and Edit, Channels, a link's page, the collectors behind a figure; `src/shared/link-code.ts`, the address's rule and suggestion, shared with the server.
 
 ---
 
