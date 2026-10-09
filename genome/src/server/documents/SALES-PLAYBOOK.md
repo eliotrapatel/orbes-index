@@ -434,10 +434,15 @@ Un client connecté qui veut seulement changer son mot de passe le fait lui-mêm
 Le client tient lui-même son profil : `YOUR PROFILE`, dans la feuille de son compte (son nom, son pays, sa ville, son téléphone, son Instagram, ses goûts, comment il a connu ORBES ; son adresse est celle par défaut de `YOUR ADDRESSES`). Sa date de naissance (`DATE OF BIRTH`), il ne la saisit qu'une fois ; ensuite, seul ORBES Client Services la change. Pour une correction, il vous écrit depuis `YOUR PROFILE` (`WRITE TO ORBES CLIENT SERVICES`, qui ouvre `MESSAGES`), ou vous appelle.
 
 1. Vérifiez d'abord que c'est bien le client, comme pour un code de récupération (la vérification d'identité ci-dessus).
-2. Dans la console : `Owners` → l'adresse exacte → `Search` → la fiche du client → sa section `Profile`, puis `Edit the profile` (les noms, le pays, la ville, le téléphone, l'Instagram, la réponse, les goûts), `Change the date of birth` (avec la raison, gardée en note privée) ou `Edit the address` (son adresse par défaut).
-3. Chaque changement est inscrit au journal d'audit : les noms des champs changés, jamais leurs valeurs.
-4. Une date mal saisie : inscrivez directement la bonne date. Ne la retirez pas : retirée, le client ne peut pas la saisir de nouveau, car il l'a déjà saisie une fois ; il repasserait par vous.
-5. Si le client a changé son profil pendant que vous l'éditiez, la console le relit et vous le dit : `The client changed the profile meanwhile. It has been read again: check and save.` Vérifiez, puis enregistrez de nouveau.
+2. Dans la console : `Owners` → l'adresse exacte → `Search` → la fiche du client → sa section `Profile`, puis `Edit the profile` (les noms, le pays, la ville, le téléphone, l'Instagram, la réponse, les goûts), `Change the date of birth` ou `Edit the address` (son adresse par défaut ; `Add an address` s'il n'en a pas).
+3. `Change the date of birth` : la nouvelle date dans `Date of birth`, et la raison dans `Why` (par exemple : « Date mal saisie, vérifiée au téléphone avec le client »), puis `Change`. La raison devient une note privée de la fiche (`Private notes`, « Date of birth changed: … »), dans la même opération que la date : jamais montrée au client.
+4. Chaque changement est inscrit au journal d'audit : les noms des champs changés, jamais leurs valeurs ; ni la date, ni la raison.
+5. Une date mal saisie : inscrivez directement la bonne date. Ne la retirez pas : retirée, le client ne peut pas la saisir de nouveau, car il l'a déjà saisie une fois ; il repasserait par vous.
+6. Si le client a changé son profil pendant que vous l'éditiez, la console le relit et vous le dit : `The client changed the profile meanwhile. It has been read again: check and save.` Vérifiez, puis enregistrez de nouveau.
+
+**Les tags et les notes privées** (`Tags and private notes`, sous `Profile`) : `Add a tag` (en capitales, 20 au plus par client ; la console propose ceux déjà utilisés), `Add a private note` (datée, à votre nom, jamais modifiée ; `Remove` pour celui qui l'a écrite ou un ADMIN). Ils ne sont **jamais montrés au client** : ni dans l'application, ni dans l'export de ses données. N'y écrivez que ce que vous pourriez lui dire.
+
+**Le rôle AUDITOR** lit la fiche sans rien changer : la date de naissance (seulement la tranche d'âge), le téléphone, la ville, l'adresse et l'Instagram du profil, et les villes de `Intelligence`, lui arrivent `Withheld` ; l'adresse e-mail du client lui arrive masquée, comme ailleurs.
 
 > Votre date de naissance ne se saisit qu'une fois dans votre profil, pour que personne d'autre ne puisse la changer à votre place. Je la corrige pour vous : la bonne date apparaît dès que vous rouvrez votre profil.
 
