@@ -26,7 +26,15 @@ import {
   channelMoves,
   channelNameProblem,
   CHANNELS_COPY,
+  collectorRow,
   collectorsHref,
+  collectorsParams,
+  collectorsTitle,
+  COLLECTORS_COPY,
+  dayBars,
+  destinationText,
+  LINK_PAGE,
+  linkUnused,
   costText,
   customProblem,
   DESTINATION_LABELS,
@@ -498,8 +506,92 @@ describe('who reads and who acts, and where (plan CUSTOMER INTELLIGENCE §3.4 A.
   });
 
   it('writes calmly: no exclamation mark, no atelier, handmade or craft, never « product »', () => {
-    const words = JSON.stringify([LINKS_COPY, LINK_DIALOG, LINK_ERRORS, CHANNELS_COPY, HEADING_NOTES, LINE_LABELS, VIEW_LABELS, WITHOUT_HEADING, DESTINATION_LABELS]) + Object.values(LINKS_COPY).filter((x) => typeof x === 'function').map((f) => (f as (...a: string[]) => string)('1', '2')).join(' ');
+    const words = JSON.stringify([LINKS_COPY, LINK_DIALOG, LINK_ERRORS, CHANNELS_COPY, HEADING_NOTES, LINE_LABELS, VIEW_LABELS, WITHOUT_HEADING, DESTINATION_LABELS, COLLECTORS_COPY]) + [LINKS_COPY, LINK_PAGE].flatMap((o) => Object.values(o)).filter((x) => typeof x === 'function').map((f) => (f as (...a: string[]) => string)('1', '2')).join(' ');
     expect(words).not.toContain('!');
     expect(words).not.toMatch(/atelier|handmade|hand-made|craft|product/i);
+  });
+});
+
+describe('a link\'s page and the collectors behind a figure (plan CUSTOMER INTELLIGENCE §3.4 A.10.3, A.10.4; step 4.9)', () => {
+  const destinations: LinkDestinations = {
+    releases: [{ id: 'd1', title: 'MONOLITHE', mode: 'LIVE', opensAt: '2026-10-14T18:00:00.000Z', model: 'MONOLITHE' }],
+    models: [{ id: 'm1', name: 'MONOLITHE', variantLabel: 'Blue', variantOf: 'm0', slug: 'monolithe-blue' }],
+  };
+
+  it('says where the link goes: a page, a release with its opening, a model\'s variant', () => {
+    const ig = { id: IG, name: 'Instagram' };
+    expect(destinationText(link(L1, 'x', 'xyz', ig, { destination: 'RELEASE', dropId: 'd1' }), destinations)).toBe('MONOLITHE — LIVE · 14 OCT 2026 · 20:00 Paris');
+    expect(destinationText(link(L1, 'x', 'xyz', ig, { destination: 'MODEL', modelId: 'm1' }), destinations)).toBe('MONOLITHE · BLUE');
+    expect(destinationText(link(L1, 'x', 'xyz', ig, { destination: 'CLUB' }), null)).toBe('THE CLUB');
+    expect(destinationText(link(L1, 'x', 'xyz', ig, { destination: 'RELEASE', dropId: 'gone' }), destinations)).toBe('A release');
+    expect(LINK_PAGE.goesTo('THE CLUB')).toBe('Goes to THE CLUB');
+    expect(LINK_PAGE.gone).toBe('Goes to a release that no longer exists: it opens THE RELEASES.');
+    expect(LINK_PAGE.made('camille@orbes.test', parisDateTime('2026-10-09T09:20:00.000Z'))).toBe('Made by camille@orbes.test on 09 OCT 2026 · 11:20 Paris');
+    expect(LINK_PAGE.crumb('Instagram bio')).toBe('Clients · Links · Instagram bio');
+  });
+
+  it('opens a figure of a link\'s page on its collectors, the way back to the link kept', () => {
+    const href = collectorsHref({ source: `link:${L1}`, name: 'Instagram bio' }, 'last', 'purchases', params({ period: '7' }), { linkId: L1 });
+    expect(href).toBe(`#/links/collectors?source=link%3A${L1}&name=Instagram%20bio&attribution=last&measure=purchases&period=7&from=2026-10-03&to=2026-10-09&link=${L1}`);
+    const q = collectorsParams(parseHash(href!).query, NOW)!;
+    expect(q).toEqual({ source: `link:${L1}`, name: 'Instagram bio', attribution: 'last', measure: 'purchases', period: '7', from: '2026-10-03', to: '2026-10-09', currency: null, page: 1, linkId: L1 });
+    expect(collectorsTitle(q)).toBe('Purchases through Instagram bio · last link · 7 days');
+    expect(collectorsParams({}, NOW)).toBeNull();
+    expect(collectorsParams({ source: 'total', attribution: 'x', measure: 'y', page: '3', link: 'nope' }, NOW)).toMatchObject({ attribution: 'first', measure: 'signups', page: 3, linkId: null, period: 'all' });
+  });
+
+  it('titles a list by its figure: through a link, a site or a tag; a line; the TOTAL; a CUSTOM period', () => {
+    const base = { attribution: 'first' as const, measure: 'signups' as const, period: '30' as const, from: '2026-09-10', to: '2026-10-09' };
+    expect(collectorsTitle({ ...base, source: `link:${L1}`, name: 'Instagram bio' })).toBe('Sign-ups through Instagram bio · first link · 30 days');
+    expect(collectorsTitle({ ...base, source: 'source:21', name: 'instagram.com', measure: 'purchases' })).toBe('Purchases through instagram.com · first link · 30 days');
+    expect(collectorsTitle({ ...base, source: 'kind:DIRECT', name: 'Direct' })).toBe('Sign-ups · Direct · first link · 30 days');
+    expect(collectorsTitle({ ...base, source: 'kind:CAMPAIGN', name: 'Campaign tags' })).toBe('Sign-ups through Campaign tags · first link · 30 days');
+    expect(collectorsTitle({ ...base, source: 'total', name: 'all', attribution: 'last', measure: 'revenue', period: 'all' })).toBe('Revenue · All · last link · all time');
+    expect(collectorsTitle({ ...base, source: 'total', name: 'all', period: 'custom', from: '2026-10-01', to: '2026-10-31' })).toBe('Sign-ups · All · first link · 01 OCT 2026 – 31 OCT 2026');
+  });
+
+  it('lists a collector with its country, its sign-up day and its figures in the period, opening the client sheet', () => {
+    expect(plain(collectorRow({ accountId: 'a1', email: 'c***@example.com', country: null, signedUpAt: '2026-10-02T10:00:00.000Z', entries: 2, purchases: 1, revenueMinor: -32_000 }, 'EUR'))).toEqual({
+      link: '#/owners/a1',
+      email: 'c***@example.com',
+      country: '—',
+      signedUp: '02 OCT 2026',
+      entries: '2',
+      purchases: '1',
+      revenue: '−€ 320',
+    });
+    expect(COLLECTORS_COPY.empty).toBe('No collector for this figure in these days.');
+  });
+
+  it('knows a link that has brought nothing yet', () => {
+    expect(linkUnused({ figures: zero() })).toBe(true);
+    expect(linkUnused({ figures: figs(1, 0, [0, 0, 0, 0], [0, 0, 0, 0]) })).toBe(false);
+    expect(linkUnused({ figures: figs(0, 0, [0, 0, 0, 0], [0, 0, 0, -1]) })).toBe(false);
+  });
+
+  it('draws By day: every Paris day of the period, 0 included, its sign-ups first and last; weeks from their Monday beyond 90 days', () => {
+    const days = [
+      { day: '2026-10-07', visits: 4, firstVisits: 3, signupsFirst: 1, signupsLast: 0 },
+      { day: '2026-10-09', visits: 2, firstVisits: 1, signupsFirst: 0, signupsLast: 1 },
+    ];
+    const week = dayBars(days, { from: '2026-10-03', to: '2026-10-09' }, '2026-10-09');
+    expect(week.weeks).toBe(false);
+    expect(week.bars.map((b) => [b.label, b.value, b.share, b.fraction])).toEqual([
+      ['03 OCT 2026', 0, '0 · 0', 0],
+      ['04 OCT 2026', 0, '0 · 0', 0],
+      ['05 OCT 2026', 0, '0 · 0', 0],
+      ['06 OCT 2026', 0, '0 · 0', 0],
+      ['07 OCT 2026', 4, '1 · 0', 1],
+      ['08 OCT 2026', 0, '0 · 0', 0],
+      ['09 OCT 2026', 2, '0 · 1', 0.5],
+    ]);
+    // All time: from the first day with any, to today.
+    expect(dayBars(days, { from: null, to: null }, '2026-10-10').bars.map((b) => b.key)).toEqual(['2026-10-07', '2026-10-08', '2026-10-09', '2026-10-10']);
+    expect(dayBars([], { from: null, to: null }, '2026-10-10').bars.map((b) => b.value)).toEqual([0]);
+    // 12 months: weeks, each from its Monday (5 October 2026 is a Monday).
+    const year = dayBars(days, { from: '2025-10-10', to: '2026-10-09' }, '2026-10-09');
+    expect(year.weeks).toBe(true);
+    expect(year.bars.length).toBeLessThanOrEqual(54);
+    expect(year.bars.at(-1)).toMatchObject({ key: '2026-10-05', label: 'Week of 05 OCT 2026', value: 6, share: '1 · 1' });
   });
 });

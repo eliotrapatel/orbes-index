@@ -304,12 +304,19 @@ export function measureText(f: LinkFigures, attribution: LinkAttribution, measur
 }
 
 /** The four figures of one attribution, each opening its collectors unless it is 0. */
-export function attributionCells(f: LinkFigures, attribution: LinkAttribution, ref: SourceRef | null, p: Pick<LinksParams, 'period' | 'from' | 'to' | 'currency'>, currency: HouseCurrency): Record<LinkMeasure, FigureCell> {
+export function attributionCells(
+  f: LinkFigures,
+  attribution: LinkAttribution,
+  ref: SourceRef | null,
+  p: Pick<LinksParams, 'period' | 'from' | 'to' | 'currency'>,
+  currency: HouseCurrency,
+  extra: { linkId?: string } = {},
+): Record<LinkMeasure, FigureCell> {
   const out = {} as Record<LinkMeasure, FigureCell>;
   for (const m of MEASURES) {
     const r = f[attribution];
     const value = m === 'revenue' ? r.revenueMinor : r[m];
-    out[m] = { text: measureText(f, attribution, m, currency), href: value === 0 ? null : collectorsHref(ref, attribution, m, { ...p, currency: p.currency ?? currency }) };
+    out[m] = { text: measureText(f, attribution, m, currency), href: value === 0 ? null : collectorsHref(ref, attribution, m, { ...p, currency: p.currency ?? currency }, extra) };
   }
   return out;
 }
@@ -711,4 +718,152 @@ export function channelMoves(channels: readonly { id: string; position: number }
   const order = [...channels];
   [order[i], order[j]] = [order[j]!, order[i]!];
   return order.map((c, k) => ({ id: c.id, position: Math.min(999, (k + 1) * 10), was: c.position })).filter((c) => c.position !== c.was).map(({ id: cid, position }) => ({ id: cid, position }));
+}
+/** Where a link goes, in words (its page's « Goes to … »); a release or a model no longer offered reads as gone. */
+export function destinationText(link: Pick<LinkView, 'destination' | 'dropId' | 'modelId'>, d: LinkDestinations | null): string {
+  if (link.destination === 'RELEASE') {
+    const r = d?.releases.find((x) => x.id === link.dropId);
+    return r ? releaseLabel(r) : 'A release';
+  }
+  if (link.destination === 'MODEL') {
+    const m = d?.models.find((x) => x.id === link.modelId);
+    return m ? modelLabel(m) : 'A model’s sheet';
+  }
+  return DESTINATION_LABELS[link.destination];
+}
+
+
+// ── A link's page and the collectors behind a figure (step 4.9) ─────────────────────────────────────────────────
+
+export const LINK_PAGE = Object.freeze({
+  crumb: (name: string) => `Clients · Links · ${name}`,
+  goesTo: (where: string) => `Goes to ${where}`,
+  gone: 'Goes to a release that no longer exists: it opens THE RELEASES.',
+  goneModel: 'Goes to a model no longer in the collection: it opens THE COLLECTION.',
+  made: (by: string, at: string) => `Made by ${by} on ${at}`,
+  archivedOn: (at: string) => `ARCHIVED on ${at}`,
+  edit: 'Edit',
+  archive: 'Archive',
+  unarchive: 'Unarchive',
+  archiveTitle: 'Archive this link?',
+  archiveText: 'It keeps working where it is posted; it only leaves the list.',
+  archived: 'Archived.',
+  unarchived: 'Back in the list.',
+  figures: 'Figures',
+  byDay: 'By day',
+  byDayNote: 'Visits each Paris day · Sign-ups (first) · Sign-ups (last)',
+  byWeekNote: 'Visits each week from its Monday · Sign-ups (first) · Sign-ups (last)',
+  collectors: 'Collectors',
+  nothingYet: 'No visit yet. The figures appear as people use the link.',
+  noDay: 'No visit in these days.',
+});
+
+export const COLLECTORS_COPY = Object.freeze({
+  eyebrow: 'Clients · Links',
+  columns: { collector: 'COLLECTOR', country: 'COUNTRY', signedUp: 'SIGNED UP', entries: 'ENTRIES', purchases: 'PURCHASES', revenue: 'REVENUE' },
+  empty: 'No collector for this figure in these days.',
+  back: 'Links',
+  firstLink: 'first link',
+  lastLink: 'last link',
+  tabs: { first: 'FIRST LINK', last: 'LAST LINK' },
+  measure: 'Measure',
+});
+
+/** The list's title: « Sign-ups through Instagram bio · first link · 30 days », « Sign-ups · Direct · … », « Sign-ups · All · … ». */
+export function collectorsTitle(q: { source: string; name: string; attribution: LinkAttribution; measure: LinkMeasure; period: LinkPeriod; from: string | null; to: string | null }): string {
+  const m = MEASURE_LABELS[q.measure];
+  const kind = /^kind:(DIRECT|BEFORE|STAFF)$/.test(q.source);
+  const who = q.source === 'total' ? `${m} · All` : kind ? `${m} · ${q.name}` : `${m} through ${q.name}`;
+  return `${who} · ${q.attribution === 'first' ? COLLECTORS_COPY.firstLink : COLLECTORS_COPY.lastLink} · ${periodWords(q.period, q.from, q.to)}`;
+}
+
+/** The click-through's state from its address; null when the address names no figure. */
+export function collectorsParams(
+  query: Readonly<Record<string, string | undefined>>,
+  now: Date,
+): { source: string; name: string; attribution: LinkAttribution; measure: LinkMeasure; period: LinkPeriod; from: string | null; to: string | null; currency: HouseCurrency | null; page: number; linkId: string | null } | null {
+  const source = (query.source ?? '').trim();
+  if (!source) return null;
+  const attribution: LinkAttribution = query.attribution === 'last' ? 'last' : 'first';
+  const measure = (MEASURES as readonly string[]).includes(query.measure ?? '') ? (query.measure as LinkMeasure) : 'signups';
+  const p = linksParams({ period: query.period, from: query.from, to: query.to, currency: query.currency }, now);
+  const page = Number(query.page);
+  return {
+    source,
+    name: (query.name ?? '').trim() || source,
+    attribution,
+    measure,
+    period: p.period,
+    from: p.from,
+    to: p.to,
+    currency: p.currency,
+    page: Number.isInteger(page) && page > 0 ? page : 1,
+    linkId: query.link && /^[0-9a-f-]{36}$/i.test(query.link) ? query.link : null,
+  };
+}
+
+/** A collector's row: the email (masked for an AUDITOR by the server), the country, the sign-up day and the figures. */
+export function collectorRow(c: { accountId: string; email: string; country: string | null; signedUpAt: string; entries: number; purchases: number; revenueMinor: number }, currency: HouseCurrency): { link: string; email: string; country: string; signedUp: string; entries: string; purchases: string; revenue: string } {
+  return {
+    link: href('owner', { accountId: c.accountId }),
+    email: c.email,
+    country: c.country ?? '—',
+    signedUp: formatDate(c.signedUpAt),
+    entries: formatCount(c.entries),
+    purchases: formatCount(c.purchases),
+    revenue: money(c.revenueMinor, currency),
+  };
+}
+
+/** Whether a link has brought nothing yet (its page says so). */
+export function linkUnused(r: Pick<LinkReport, 'figures'>): boolean {
+  const f = r.figures;
+  return f.visits === 0 && f.firstVisits === 0 && MEASURES.every((m) => (m === 'revenue' ? f.first.revenueMinor === 0 && f.last.revenueMinor === 0 : f.first[m] === 0 && f.last[m] === 0));
+}
+
+/** At most this many bars by day; beyond, weeks (from their Monday). */
+export const MAX_DAY_BARS = 90;
+
+/**
+ * The By day bars: visits per Paris day of the period (every day, 0 included, from the first day with any when the
+ * period is all time), or per week beyond 90 days; each with « Sign-ups (first) · Sign-ups (last) » as its figures.
+ */
+export function dayBars(days: readonly LinkReport['days'][number][], range: { from: string | null; to: string | null }, today: string): { weeks: boolean; bars: BarRow[] } {
+  const by = new Map(days.map((d) => [d.day, d]));
+  const sorted = [...days].map((d) => d.day).sort();
+  const from = range.from ?? sorted[0] ?? today;
+  const to = range.to ?? today;
+  if (to < from) return { weeks: false, bars: [] };
+  const all: { day: string; visits: number; first: number; last: number }[] = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    const x = by.get(d);
+    all.push({ day: d, visits: x?.visits ?? 0, first: x?.signupsFirst ?? 0, last: x?.signupsLast ?? 0 });
+  }
+  const weeks = all.length > MAX_DAY_BARS;
+  let rows = all;
+  if (weeks) {
+    const byWeek = new Map<string, { day: string; visits: number; first: number; last: number }>();
+    for (const x of all) {
+      const dow = (new Date(`${x.day}T00:00:00.000Z`).getUTCDay() + 6) % 7;
+      const monday = addDays(x.day, -dow);
+      const w = byWeek.get(monday) ?? { day: monday, visits: 0, first: 0, last: 0 };
+      w.visits += x.visits;
+      w.first += x.first;
+      w.last += x.last;
+      byWeek.set(monday, w);
+    }
+    rows = [...byWeek.values()];
+  }
+  const max = Math.max(0, ...rows.map((x) => x.visits));
+  return {
+    weeks,
+    bars: rows.map((x) => ({
+      key: x.day,
+      label: weeks ? `Week of ${formatDate(x.day)}` : formatDate(x.day),
+      value: x.visits,
+      fraction: max > 0 ? x.visits / max : 0,
+      share: `${formatCount(x.first)} · ${formatCount(x.last)}`,
+      tone: 'solid',
+    })),
+  };
 }

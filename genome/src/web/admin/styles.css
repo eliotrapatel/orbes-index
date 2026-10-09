@@ -5650,3 +5650,88 @@ fieldset.cfield--checks > .cfield__label {
 .links__channel-add {
   margin-top: 22px;
 }
+
+/* A link's page (plan CUSTOMER INTELLIGENCE §3.4 A.10.3): its facts, then its figures in two columns side by side. */
+.link__facts {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 26px;
+}
+
+.link__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+  overflow-wrap: anywhere;
+}
+
+.link__soft {
+  color: var(--ink-soft);
+}
+
+.link__channel {
+  letter-spacing: 0.16em;
+}
+
+.link__visits {
+  margin: 0 0 14px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.link__cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 40px;
+}
+
+.link__col {
+  margin: 0;
+}
+
+.link__col + .link__col {
+  padding-left: 40px;
+  border-left: 1px solid var(--hairline);
+}
+
+.link__col-title {
+  padding-bottom: 10px;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.3em;
+  border-bottom: 1px solid var(--hairline-strong);
+  cursor: help;
+}
+
+.link__fig {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0;
+  padding: 10px 0;
+  font-size: var(--fs-line);
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.link__fig-label {
+  color: var(--ink-soft);
+}
+
+.link__fig .links__return {
+  max-width: none;
+  text-align: right;
+}
+
+@media (max-width: 599px) {
+  .link__cols {
+    gap: 0 16px;
+  }
+  .link__col + .link__col {
+    padding-left: 16px;
+  }
+}

@@ -1,5 +1,5 @@
 /**
- * The console's Links page, end to end (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.4 A.10, step 4.8): the production
+ * The console's Links pages, end to end (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.4 A.10, steps 4.8 and 4.9): the production
  * web build of the console served by the real Fastify app (in-memory PGlite, bootstrap ADMIN, memory key provider) and
  * driven in Chromium (playwright-core), at a desk's 1 440 px and a phone's 390 px.
  *
@@ -12,7 +12,10 @@
  *     links, both attributions side by side, the return, the lines and the TOTAL; the period, the views and the
  *     archived links kept in the address; each figure a link to its collectors, a zero none; a failed read says so with
  *     Try again; the phone's blocks (no table, no sideways scroll).
- *  4. An AUDITOR reads it all, without New link nor Channels; RETAIL has no Links.
+ *  4. A link's page (step 4.9): where it goes, who made it, its figures first and last, By day, its collectors; a
+ *     figure's collectors (#/links/collectors) to the client sheet; Edit (the address never changes), Archive
+ *     confirmed and Unarchive; a link that brought nothing yet; the phone.
+ *  5. An AUDITOR reads it all, without New link, Channels, Edit nor Archive, the emails masked; RETAIL has no Links.
  * Screens with ORBES_SCREENSHOTS=1 (genome/out/admin-links-*.png). No CSP violation, no page error.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -376,6 +379,88 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Links page (plan CUSTOMER INTELLI
   );
 
   it(
+    'opens a link\'s page (step 4.9): where it goes, its figures first and last, by day, its collectors; a figure\'s collectors to the client sheet; Edit, Archive and Unarchive; the phone',
+    async () => {
+      const p = await open(ADMIN);
+      await go(p, '#/links', 'Links');
+      await p.locator('[data-testid=links-table] [data-testid=link-name]', { hasText: /^Instagram bio$/ }).click();
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Instagram bio');
+      expect(await p.locator('.page-head__eyebrow').textContent()).toBe('Clients · Links · Instagram bio');
+      expect(await p.locator('[data-testid=link-goes-to]').textContent()).toBe('Goes to THE COLLECTION');
+      expect(await p.locator('[data-testid=link-note]').textContent()).toBe('The bio from 9 October.');
+      expect(await p.locator('[data-testid=link-facts]').textContent()).toMatch(/Made by console@orbes\.test on \d{2} [A-Z]{3} \d{4} · \d{2}:\d{2} Paris/);
+      expect((await p.locator('[data-testid=link-visits]').textContent())?.replace(/[\u2009\u00a0]/g, ' ')).toBe('Visits 6 · First visits 6');
+      const first = p.locator('[data-testid=link-first] .link__fig');
+      expect((await first.allTextContents()).map((x) => x.replace(/[\u2009\u00a0]/g, ' '))).toEqual(['Sign-ups1', 'Entries0', 'Purchases1', 'Revenue€ 640', 'Return×0.3Revenue € 640 for € 2 000']);
+      expect(await p.locator('[data-testid=link-days] .bar').count()).toBeGreaterThanOrEqual(2);
+      expect(await p.locator('#link-collectors [data-testid=link-collector]').allTextContents()).toEqual(['camille@example.com']);
+      await p.locator('#link-collectors select[name=linkMeasure]').selectOption('purchases');
+      await expect.poll(() => p.evaluate(() => location.hash)).toMatch(/measure=purchases/);
+      expect(await p.locator('#link-collectors [data-testid=link-collector]').allTextContents()).toEqual(['camille@example.com']);
+      await p.click('[data-testid=link-collectors-last]');
+      await expect.poll(() => p.evaluate(() => location.hash)).toMatch(/attribution=last/);
+      await shot(p, 'link');
+
+      // A figure: its collectors, then the client sheet.
+      await p.click('[data-testid=link-figure-first-signups]');
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Sign-ups through Instagram bio · first link · all time');
+      expect(await p.locator('[data-testid=link-collector]').allTextContents()).toEqual(['camille@example.com']);
+      expect(await p.locator('.page-head__actions a', { hasText: 'Instagram bio' }).count()).toBe(1);
+      await shot(p, 'collectors');
+      await p.locator('[data-testid=link-collector]').first().click();
+      await expect.poll(() => p.evaluate(() => location.hash)).toMatch(/^#\/owners\/[0-9a-f-]{36}$/);
+      // From the Links page too: the TOTAL's sign-ups, every counted collector.
+      await go(p, '#/links', 'Links');
+      await p.locator('[data-testid=links-table] tr.links__row--total [data-testid=figure-first-signups]').click();
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Sign-ups · All · first link · all time');
+      expect((await p.locator('[data-testid=link-collector]').allTextContents()).sort()).toEqual(['amelia@example.com', 'camille@example.com', 'hugo@example.com']);
+
+      // Edit: renamed; the address never changes; nothing changed says so.
+      const id = (await ctx.db.selectFrom('links').select('id').where('code', '=', 'instagram-bio').executeTakeFirstOrThrow()).id;
+      await p.evaluate((h) => (location.hash = h), `#/links/${id}`);
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Instagram bio');
+      await p.click('[data-testid=link-edit]');
+      const dlg = p.locator('[data-testid=link-dialog]');
+      await dlg.waitFor();
+      expect(await dlg.locator('input[name=code]').count()).toBe(0);
+      expect(await dlg.locator('.cfield[data-field=address] .mono').textContent()).toBe(`${new URL(origin).host}/go/instagram-bio`);
+      await p.click('[data-testid=dialog-confirm]');
+      expect(await dlg.locator('.dialog__error').textContent()).toBe('Nothing has changed.');
+      await dlg.locator('input[name=name]').fill('Instagram bio — October');
+      await p.click('[data-testid=dialog-confirm]');
+      await toast(p, 'Saved.');
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Instagram bio — October');
+      // Archive, confirmed; Unarchive.
+      await p.click('[data-testid=link-archive]');
+      await p.locator('dialog.dialog', { hasText: 'It keeps working where it is posted; it only leaves the list.' }).waitFor();
+      await p.click('[data-testid=dialog-confirm]');
+      await toast(p, 'Archived.');
+      await expect.poll(() => p.locator('[data-testid=link-archived-on]').count()).toBe(1);
+      expect(await p.locator('[data-testid=link-archive]').textContent()).toBe('Unarchive');
+      await p.click('[data-testid=link-archive]');
+      await toast(p, 'Back in the list.');
+      await expect.poll(() => p.locator('[data-testid=link-archived-on]').count()).toBe(0);
+      const audits = await ctx.db.selectFrom('audit_logs').select('action').where('action', 'in', ['link.update', 'link.archive', 'link.unarchive']).orderBy('id').execute();
+      expect(audits.map((a) => a.action).slice(-3)).toEqual(['link.update', 'link.archive', 'link.unarchive']);
+      // A link that has brought nothing yet.
+      const story = (await ctx.db.selectFrom('links').select('id').where('code', '=', 'story-14-oct').executeTakeFirstOrThrow()).id;
+      await p.evaluate((h) => (location.hash = h), `#/links/${story}`);
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Story 14 Oct');
+      expect(await p.locator('#link-figures .empty__text').textContent()).toBe('No visit yet. The figures appear as people use the link.');
+      expect(await p.locator('#link-collectors .empty__text').textContent()).toBe('No collector for this figure in these days.');
+      await p.context().close();
+
+      const phone = await open(ADMIN, 390);
+      await phone.evaluate((h) => (location.hash = h), `#/links/${id}`);
+      await expect.poll(async () => (await title(phone).textContent())?.trim()).toBe('Instagram bio — October');
+      await fits(phone);
+      await shot(phone, 'link-phone');
+      await phone.context().close();
+    },
+    STEP_TIMEOUT,
+  );
+
+  it(
     'lets an AUDITOR read every figure without New link nor Channels; RETAIL has no Links',
     async () => {
       const p = await open(AUDITOR);
@@ -383,6 +468,12 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Links page (plan CUSTOMER INTELLI
       expect(await p.locator('[data-testid=links-new], [data-testid=links-channels]').count()).toBe(0);
       expect(await p.locator('[data-testid=links-table] tr.links__row--link').count()).toBeGreaterThan(0);
       await shot(p, 'auditor');
+      // A link's page: no Edit nor Archive; the collectors' emails masked.
+      await p.locator('[data-testid=links-table] [data-testid=link-name]', { hasText: /^Instagram bio — October$/ }).click();
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Instagram bio — October');
+      expect(await p.locator('[data-testid=link-edit], [data-testid=link-archive]').count()).toBe(0);
+      expect(await p.locator('#link-collectors [data-testid=link-collector]').allTextContents()).toEqual([expect.stringMatching(/^c\*+@example\.com$/)]);
+      await shot(p, 'link-auditor');
       await p.context().close();
       const phone = await open(AUDITOR, 390);
       await go(phone, '#/links', 'Links');

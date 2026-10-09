@@ -234,29 +234,7 @@ function controls(ctx: ViewContext, p: LinksParams, r: LinksReport | null): HTML
     extra.push(box);
   }
 
-  let custom: HTMLElement | null = null;
-  if (p.period === 'custom') {
-    const from = input('from', { type: 'date', value: p.customFrom ?? '' });
-    const to = input('to', { type: 'date', value: p.customTo ?? '' });
-    const problem = h('p', { class: 'links__problem', attrs: { role: 'alert' } }, p.customFrom && p.customTo ? (customProblem(p.customFrom, p.customTo) ?? '') : '');
-    custom = h(
-      'form',
-      { class: ['filters', 'links__custom'], attrs: { novalidate: true, 'data-testid': 'links-custom' } },
-      field(C.from, from),
-      field(C.to, to),
-      button(C.apply, { kind: 'secondary', type: 'submit' }),
-      problem,
-    );
-    custom.addEventListener('submit', (ev) => {
-      ev.preventDefault();
-      const bad = customProblem(from.value, to.value);
-      if (bad) {
-        problem.textContent = bad;
-        return;
-      }
-      ctx.navigate(go({ period: 'custom', from: from.value, to: to.value }));
-    });
-  }
+  const custom = p.period === 'custom' ? customPeriodForm(p, (from, to) => ctx.navigate(go({ period: 'custom', from, to }))) : null;
 
   return h(
     'div',
@@ -267,6 +245,31 @@ function controls(ctx: ViewContext, p: LinksParams, r: LinksReport | null): HTML
     h('div', { class: 'links__bar links__bar--desk' }, viewTabs),
     extra.length ? h('div', { class: 'links__bar' }, ...extra) : null,
   );
+}
+
+/** CUSTOM's From and To (Paris days), checked as the server checks them before `apply` (the Links page, a link's page). */
+export function customPeriodForm(p: Pick<LinksParams, 'customFrom' | 'customTo'>, apply: (from: string, to: string) => void): HTMLElement {
+  const from = input('from', { type: 'date', value: p.customFrom ?? '' });
+  const to = input('to', { type: 'date', value: p.customTo ?? '' });
+  const problem = h('p', { class: 'links__problem', attrs: { role: 'alert' } }, p.customFrom && p.customTo ? (customProblem(p.customFrom, p.customTo) ?? '') : '');
+  const form = h(
+    'form',
+    { class: ['filters', 'links__custom'], attrs: { novalidate: true, 'data-testid': 'links-custom' } },
+    field(C.from, from),
+    field(C.to, to),
+    button(C.apply, { kind: 'secondary', type: 'submit' }),
+    problem,
+  );
+  form.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const bad = customProblem(from.value, to.value);
+    if (bad) {
+      problem.textContent = bad;
+      return;
+    }
+    apply(from.value, to.value);
+  });
+  return form;
 }
 
 // ── The page ─────────────────────────────────────────────────────────────────────────────────────────────────────
