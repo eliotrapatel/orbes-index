@@ -221,6 +221,14 @@ export type CreditScope = (typeof CREDIT_SCOPES)[number];
 export const ADDRESS_SOURCES = ['COLLECTOR', 'STAFF'] as const;
 export type AddressSource = (typeof ADDRESS_SOURCES)[number];
 
+/** Who set a profile's date of birth, or saved it last (account_profiles.birth_date_by, updated_by, plan CUSTOMER INTELLIGENCE §3.1): the collector or Client Services. */
+export const PROFILE_SOURCES = ['COLLECTOR', 'STAFF'] as const;
+export type ProfileSource = (typeof PROFILE_SOURCES)[number];
+
+/** A collector's tastes (account_tastes.kind, plan CUSTOMER INTELLIGENCE §3.2): a favourite piece (a type) or finish (a variant's label). */
+export const TASTE_KINDS = ['PIECE', 'FINISH'] as const;
+export type TasteKind = (typeof TASTE_KINDS)[number];
+
 /** The kind of a drop (drops.mode): a DRAW (P-R03) or a LIVE RELEASE, lived in real time. */
 export const DROP_MODES = ['DRAW', 'LIVE'] as const;
 export type DropMode = (typeof DROP_MODES)[number];

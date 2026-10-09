@@ -78,9 +78,10 @@ describe('the NOCTURNE runbook (docs/launch/DEPLOY-NOCTURNE.md)', () => {
     expect(DEPLOY_F).toEqual(['0024_model_variants']);
     // A later name has its own lot and runbook: 0024_z is TEST ENTRANTS' (2026-10-07), on the code F deployed; a later
     // number belongs to the next nine (plan of 2026-10-06, 0025 to 0032), which ships as deployment G after F, or to the
-    // next lot (plan of 2026-10-07, 0033 to 0039), which ships as deployments H1 and H2 after G.
+    // next lot (plan of 2026-10-07, 0033 to 0039), which ships as deployments H1 and H2 after G, or to the customer
+    // intelligence lot (plan of 2026-10-08, 0040 to 0047), which ships as deployments I1 and I2 after H2.
     expect(NAMES.filter((n) => n > '0024_model_variants')[0]).toBe('0024_z_test_entrants');
-    expect(NAMES.filter((n) => n > '0024_z_test_entrants').every((n) => numberOf(n) >= 25 && numberOf(n) <= 39)).toBe(true);
+    expect(NAMES.filter((n) => n > '0024_z_test_entrants').every((n) => numberOf(n) >= 25 && numberOf(n) <= 47)).toBe(true);
     expect(runbook).toContain('[le runbook précédent](DEPLOY-LIVE-RELEASE-PLUS.md)');
     expect(outputs.join('\n')).toContain(AFTER_E.slice(-2).join('\n'));
     expect(runbook).toContain(`schema: ${AFTER_E.length} migration(s) applied, all known to orbes-genome:<TAG_F>`);

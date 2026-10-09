@@ -162,6 +162,9 @@ describe('schema', () => {
       ['orders', 'engraving_by', S.ADDRESS_SOURCES],
       ['engraving_prices', 'currency', S.HOUSE_CURRENCIES],
       ['invoices', 'credit_scope', S.CREDIT_SCOPES],
+      ['account_profiles', 'birth_date_by', S.PROFILE_SOURCES],
+      ['account_profiles', 'updated_by', S.PROFILE_SOURCES],
+      ['account_tastes', 'kind', S.TASTE_KINDS],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -812,6 +815,31 @@ describe('schema', () => {
     expect(await doc('CREDIT_NOTE', 980001, { credits_invoice_id: supplement.id, credit_scope: 'LINES' })).toMatchObject({ credit_scope: 'LINES' });
     expect(await doc('CREDIT_NOTE', 980002, { credits_invoice_id: main.id, credit_scope: 'FULL' })).toMatchObject({ credit_scope: 'FULL' });
     await expect(doc('CREDIT_NOTE', 980003, { credits_invoice_id: main.id, credit_scope: 'FULL' })).rejects.toSatisfy((e) => isUniqueViolation(e, 'invoices_full_credit_key'));
+  });
+
+  it('the profile (0040): the mirror at work: a heard answer and its one Other; a profile with its defaults, its date of birth with who and when, its heard answer; a taste by its key and label', async () => {
+    const account = await t.db.insertInto('accounts').values({ email: 'profile-0040@example.com', email_normalized: 'profile-0040@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const friend = await t.db.insertInto('heard_options').values({ label: 'A friend (0040)', position: 3 }).returningAll().executeTakeFirstOrThrow();
+    expect(friend).toMatchObject({ id: expect.any(String), is_other: false, active: true, created_at: expect.any(Date), updated_at: expect.any(Date) });
+    const otherId = (await t.db.insertInto('heard_options').values({ label: 'Other (0040)', is_other: true, position: 8 }).returning('id').executeTakeFirstOrThrow()).id;
+    await expect(t.db.insertInto('heard_options').values({ label: 'Else (0040)', is_other: true, position: 9 }).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'heard_options_one_other'));
+    const empty = await t.db.insertInto('account_profiles').values({ account_id: account.id }).returningAll().executeTakeFirstOrThrow();
+    expect(empty).toMatchObject({ first_name: null, phone: null, birth_date: null, birth_date_by: null, heard_option_id: null, version: 1, updated_by: 'COLLECTOR' });
+    const at = new Date('2026-10-09T08:00:00.000Z');
+    const saved = await t.db
+      .updateTable('account_profiles')
+      .set({
+        first_name: 'Camille', last_name: 'Durand', phone: '+33612345678', phone_country: 'FR', birth_date: '1994-03-14', birth_date_by: 'STAFF', birth_date_at: at, birth_date_collector_at: at,
+        city: 'Lyon', instagram: 'camille.dl', heard_option_id: otherId, heard_other: 'Saw it in Milan', heard_at: at, version: 2, updated_by: 'STAFF',
+      })
+      .where('account_id', '=', account.id)
+      .returningAll()
+      .executeTakeFirstOrThrow();
+    expect(saved).toMatchObject({ birth_date: '1994-03-14', birth_date_by: 'STAFF', birth_date_at: at, birth_date_collector_at: at, heard_at: at, version: 2, updated_by: 'STAFF' });
+    await expect(t.db.updateTable('account_profiles').set({ heard_option_id: friend.id, heard_at: null }).where('account_id', '=', account.id).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'account_profiles_heard_at'));
+    const taste = await t.db.insertInto('account_tastes').values({ account_id: account.id, kind: 'FINISH', value_key: 'ROSE GOLD', label: 'Rose gold' }).returningAll().executeTakeFirstOrThrow();
+    expect(taste).toMatchObject({ kind: 'FINISH', value_key: 'ROSE GOLD', label: 'Rose gold', created_at: expect.any(Date) });
+    await expect(t.db.insertInto('account_tastes').values({ account_id: account.id, kind: 'PIECE', value_key: 'RING', label: 'CUFF' }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'account_tastes_label'));
   });
 
   it('audit_logs is append-only at the database level', async () => {

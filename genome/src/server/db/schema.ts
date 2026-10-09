@@ -280,6 +280,20 @@ export const ADDRESS_SOURCES = ['COLLECTOR', 'STAFF'] as const;
 export type AddressSource = (typeof ADDRESS_SOURCES)[number];
 
 /**
+ * Who set a profile's date of birth, or saved it last (account_profiles.birth_date_by, updated_by, migration 0040, plan
+ * CUSTOMER INTELLIGENCE §3.1 P.3.2): the COLLECTOR, in YOUR PROFILE, or ORBES Client Services (STAFF).
+ */
+export const PROFILE_SOURCES = ['COLLECTOR', 'STAFF'] as const;
+export type ProfileSource = (typeof PROFILE_SOURCES)[number];
+
+/**
+ * A collector's tastes (account_tastes.kind, migration 0040, plan CUSTOMER INTELLIGENCE §3.2 W.3): a favourite piece (a
+ * type of the catalogue, « RING ») or a favourite finish (a variant's label, « Gold »).
+ */
+export const TASTE_KINDS = ['PIECE', 'FINISH'] as const;
+export type TasteKind = (typeof TASTE_KINDS)[number];
+
+/**
  * How the access rules of a LIVE RELEASE combine (drops.access_combine, migration 0023): every rule met (AND), or any
  * one of them (OR). NULL on a LIVE drop: AND.
  */
@@ -1497,6 +1511,71 @@ export interface AccountAddressesTable {
 }
 
 /**
+ * An answer to « How did you hear about ORBES? » (migration 0040, plan CUSTOMER INTELLIGENCE §3.1 P.3.2), edited by an
+ * ADMIN on the console's Sign-up page: never deleted, only set aside (`active` false); exactly one Other, with its text
+ * field. Its id and Other mark never change.
+ */
+export interface HeardOptionsTable {
+  id: Generated<string>;
+  /** 1 to 40 characters, trimmed, unique whatever the case. */
+  label: string;
+  is_other: WithDefault<boolean>;
+  /** 1 to 100, the order offered; Other last. */
+  position: number;
+  /** Offered at sign-up and in YOUR PROFILE; false once set aside. */
+  active: WithDefault<boolean>;
+  created_at: TimestampDefault;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A collector's profile (migration 0040, plan CUSTOMER INTELLIGENCE §3.1 P.3.2): one row per account that has given
+ * anything, beside `accounts` (whose `country` stays the profile's country and `display_name` « First Last »). Written by
+ * ProfileService only.
+ */
+export interface AccountProfilesTable {
+  account_id: string;
+  first_name: ColumnType<string | null, string | null | undefined, string | null>;
+  last_name: ColumnType<string | null, string | null | undefined, string | null>;
+  /** E.164: + and 7 to 15 digits; with `phone_country`, or neither. */
+  phone: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The country picked for the phone's code (+1 and +44 are shared). */
+  phone_country: ColumnType<string | null, string | null | undefined, string | null>;
+  /** 'YYYY-MM-DD', from 1900-01-01; with `birth_date_by` and `birth_date_at`, or none of them. */
+  birth_date: DateNullable;
+  birth_date_by: ColumnType<ProfileSource | null, ProfileSource | null | undefined, ProfileSource | null>;
+  birth_date_at: TimestampNullable;
+  /** When the collector entered a date of birth, its one time: written once, never cleared. */
+  birth_date_collector_at: TimestampNullable;
+  city: ColumnType<string | null, string | null | undefined, string | null>;
+  /** The username, lower case, no @. */
+  instagram: ColumnType<string | null, string | null | undefined, string | null>;
+  heard_option_id: ColumnType<string | null, string | null | undefined, string | null>;
+  /** Other's words, only with an option. */
+  heard_other: ColumnType<string | null, string | null | undefined, string | null>;
+  /** When the question was first answered. */
+  heard_at: TimestampNullable;
+  /** +1 on every save (the 409 PROFILE_CHANGED of two saves at once). */
+  version: WithDefault<number>;
+  updated_by: WithDefault<ProfileSource>;
+  created_at: TimestampDefault;
+  updated_at: TimestampDefault;
+}
+
+/**
+ * A collector's favourite piece or finish (migration 0040, plan CUSTOMER INTELLIGENCE §3.2 W.3), chosen in YOUR PROFILE
+ * from the catalogue: its key (trimmed, single spaces, in capitals) and its label as it read when chosen. An unticked
+ * choice is a deleted row.
+ */
+export interface AccountTastesTable {
+  account_id: string;
+  kind: TasteKind;
+  value_key: string;
+  label: string;
+  created_at: TimestampDefault;
+}
+
+/**
  * A model's pairs (migration 0031, plan NEXT-NINE BP-34, PAIRS WELL WITH): the models its sheet shows at its very end,
  * in their order (`position` 1..3), each once, never itself. Set on a main model or a model alone (services/catalog.ts
  * setPairs: 0, 2 or 3 rows, never a model of its own variant group).
@@ -2255,6 +2334,9 @@ export interface Database {
   guarantee_settings: GuaranteeSettingsTable;
   account_sizes: AccountSizesTable;
   account_addresses: AccountAddressesTable;
+  heard_options: HeardOptionsTable;
+  account_profiles: AccountProfilesTable;
+  account_tastes: AccountTastesTable;
   model_pairs: ModelPairsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
@@ -2372,6 +2454,9 @@ export type ClubProgramSettingsRow = Selectable<ClubProgramSettingsTable>;
 export type ShippingRateRow = Selectable<ShippingRatesTable>;
 export type EngravingPriceRow = Selectable<EngravingPricesTable>;
 export type AccountAddressRow = Selectable<AccountAddressesTable>;
+export type HeardOptionRow = Selectable<HeardOptionsTable>;
+export type AccountProfileRow = Selectable<AccountProfilesTable>;
+export type AccountTasteRow = Selectable<AccountTastesTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
 export type CareRequestRow = Selectable<CareRequestsTable>;

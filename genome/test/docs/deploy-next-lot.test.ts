@@ -232,7 +232,9 @@ describe('the runbook of the next lot, part H2 (docs/launch/DEPLOY-NEXT-LOT.md �
 
   it('starts from H1, 0001 to 0034, and applies exactly 0035 to 0039, as the scripts print them', () => {
     expect(DEPLOY_H2).toEqual(['0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery']);
-    expect(NAMES).toEqual(AFTER_H2);
+    // The customer intelligence lot's migrations (0040 on) come after H2's, in build order.
+    expect(NAMES.slice(0, AFTER_H2.length)).toEqual(AFTER_H2);
+    expect(NAMES.filter((n) => numberOf(n) > 39).every((n) => n > DEPLOY_H2.at(-1)!)).toBe(true);
     expect(AFTER_H1).toHaveLength(35);
     expect(h2).toContain(`le commit \`${H1_COMMIT}\` (image \`orbes-genome:${H1_TAG}\`), avec les trente-cinq migrations de \`${AFTER_H1[0]}\` à \`${AFTER_H1.at(-1)}\``);
     expect(h2).toContain(`Sortie attendue : trente-cinq lignes, de \`${AFTER_H1[0]}\` à \`${AFTER_H1.at(-1)}\``);
