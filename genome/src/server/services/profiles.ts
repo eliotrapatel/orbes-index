@@ -36,12 +36,10 @@ import {
   ageBand,
   ageOn,
   birthDateProblem,
-  cleanName,
   cleanWords,
   CITY_MAX,
   completion,
   HEARD_OTHER_MAX,
-  NAME_MAX,
   toE164,
   toInstagram,
   type AgeBand,
@@ -51,6 +49,7 @@ import { SYSTEM_ACTOR, systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { countedCollector, houseAccount } from './population.js';
+import { profileName } from './sign-up.js';
 import { parisDay } from './schedule.js';
 import { TasteService, type AccountTastes, type FinishOption, type TasteCounts, type TasteOption, type TasteOptions } from './tastes.js';
 
@@ -207,21 +206,14 @@ interface CleanInput {
 
 const has = (x: Record<string, unknown>, k: string) => Object.prototype.hasOwnProperty.call(x, k) && x[k] !== undefined;
 
-function nameOf(v: unknown, which: 'first' | 'last'): string | null {
-  const r = cleanName(v);
-  if (r.ok) return r.value;
-  if (r.problem === 'TOO_LONG') throw validationError(`Your ${which} name is ${NAME_MAX} characters at most.`);
-  throw validationError(`Your ${which} name contains characters that cannot be kept.`);
-}
-
 /** The fields of a save, cleaned by the shared rules (src/shared/profile-rules.ts), before anything is read. */
 function cleanInput(input: unknown, withBirthDate: boolean): CleanInput {
   if (!input || typeof input !== 'object') throw validationError('The profile is invalid.');
   const x = input as Record<string, unknown>;
   if (!Number.isInteger(x.version) || (x.version as number) < 0) throw validationError('The profile is invalid.');
   const out: CleanInput = { version: x.version as number };
-  if (has(x, 'firstName')) out.firstName = nameOf(x.firstName, 'first');
-  if (has(x, 'lastName')) out.lastName = nameOf(x.lastName, 'last');
+  if (has(x, 'firstName')) out.firstName = profileName(x.firstName, 'first');
+  if (has(x, 'lastName')) out.lastName = profileName(x.lastName, 'last');
   if (has(x, 'country')) {
     if (x.country === null || x.country === '') out.country = null;
     else if (!isCountryCode(x.country)) throw validationError('Choose your country.');

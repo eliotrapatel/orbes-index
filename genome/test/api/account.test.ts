@@ -11,14 +11,16 @@ describe('account API', () => {
   afterAll(() => h?.close());
 
   const uniqueEmail = (tag: string) => `${tag}-${Math.random().toString(36).slice(2, 10)}@example.com`;
+  /** What CREATE ACCOUNT requires besides the email and the password (plan CUSTOMER INTELLIGENCE §3.1 P.4.2). */
+  const SIGN_UP = { firstName: 'Ada', lastName: 'Lovelace', country: 'GB' };
 
   it('registers, reads /me, logs out and in again', async () => {
     const c = h.client();
     const email = uniqueEmail('reg');
-    const reg = await c.post('/api/v1/account/register', { email, password: PASSWORD, displayName: 'Ada' });
+    const reg = await c.post('/api/v1/account/register', { email, password: PASSWORD, ...SIGN_UP });
     expect(reg.statusCode).toBe(201);
     const body = safeJson(reg) as { account: Record<string, unknown>; csrfToken: string };
-    expect(body.account).toEqual({ email, displayName: 'Ada' });
+    expect(body.account).toEqual({ email, displayName: 'Ada Lovelace' });
     expect(body.csrfToken).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
     const cookie = reg.cookies.find((x) => x.name === 'orbes_session')!;
@@ -33,7 +35,7 @@ describe('account API', () => {
 
     const me = await c.get('/api/v1/account/me');
     expect(me.statusCode).toBe(200);
-    expect(safeJson(me)).toEqual({ account: { email, displayName: 'Ada' }, csrfToken: body.csrfToken });
+    expect(safeJson(me)).toEqual({ account: { email, displayName: 'Ada Lovelace' }, csrfToken: body.csrfToken });
 
     const out = await c.post('/api/v1/account/logout');
     expect(out.statusCode).toBe(200);
@@ -50,7 +52,7 @@ describe('account API', () => {
   it('rotates the session id on login and kills the old token', async () => {
     const c = h.client();
     const email = uniqueEmail('rot');
-    await c.post('/api/v1/account/register', { email, password: PASSWORD });
+    await c.post('/api/v1/account/register', { email, password: PASSWORD, ...SIGN_UP });
     const before = c.cookies.get('orbes_session')!;
     const login = await c.post('/api/v1/account/login', { email, password: PASSWORD });
     expect(login.statusCode).toBe(200);
@@ -67,11 +69,11 @@ describe('account API', () => {
   it('refuses a duplicate email (409), a weak password (400) and bad credentials (401)', async () => {
     const c = h.client();
     const email = uniqueEmail('dup');
-    expect((await c.post('/api/v1/account/register', { email, password: PASSWORD })).statusCode).toBe(201);
-    const dup = await h.client().post('/api/v1/account/register', { email: email.toUpperCase(), password: PASSWORD });
+    expect((await c.post('/api/v1/account/register', { email, password: PASSWORD, ...SIGN_UP })).statusCode).toBe(201);
+    const dup = await h.client().post('/api/v1/account/register', { email: email.toUpperCase(), password: PASSWORD, ...SIGN_UP });
     expect(dup.statusCode).toBe(409);
     expect(errorOf(dup).code).toBe('EMAIL_TAKEN');
-    const weak = await h.client().post('/api/v1/account/register', { email: uniqueEmail('weak'), password: 'short' });
+    const weak = await h.client().post('/api/v1/account/register', { email: uniqueEmail('weak'), password: 'short', ...SIGN_UP });
     expect(weak.statusCode).toBe(400);
     const wrong = await h.client().post('/api/v1/account/login', { email, password: 'not the right password' });
     expect(wrong.statusCode).toBe(401);
@@ -82,7 +84,7 @@ describe('account API', () => {
   });
 
   it('validates bodies strictly', async () => {
-    const extra = await h.client().post('/api/v1/account/register', { email: uniqueEmail('x'), password: PASSWORD, role: 'ADMIN' });
+    const extra = await h.client().post('/api/v1/account/register', { email: uniqueEmail('x'), password: PASSWORD, ...SIGN_UP, role: 'ADMIN' });
     expect(extra.statusCode).toBe(400);
     expect(errorOf(extra).message).toMatch(/unknown fields/);
     const typed = await h.client().post('/api/v1/account/login', { email: 42, password: PASSWORD });
@@ -109,7 +111,7 @@ describe('account API', () => {
 
   it('lists the caller’s products (empty for a new account)', async () => {
     const c = h.client();
-    await c.post('/api/v1/account/register', { email: uniqueEmail('list'), password: PASSWORD });
+    await c.post('/api/v1/account/register', { email: uniqueEmail('list'), password: PASSWORD, ...SIGN_UP });
     const res = await c.get('/api/v1/account/products');
     expect(res.statusCode).toBe(200);
     expect(safeJson(res)).toEqual({ products: [] });
@@ -374,5 +376,165 @@ describe('password change and assisted recovery (C-04)', () => {
     expect(shown[0]).toEqual({ id: sooner, scope: 'MODEL', target: 'MONOLITHE', pieces: 1, validUntil: '2027-03-31T21:59:59.999Z', release: null });
     expect(JSON.stringify(shown)).not.toContain(hiddenId);
     expect(JSON.stringify(shown)).not.toContain('Internal.');
+  });
+});
+
+describe('CREATE ACCOUNT with its profile (plan CUSTOMER INTELLIGENCE §3.1 P.4.2, step 1.5)', () => {
+  const COUNTRY_HEADER = 'x-orbes-geo-country';
+  let h: Harness;
+  beforeAll(async () => {
+    // The edge reports the client's country in a header (GEO_MODE=headers behind TRUST_PROXY), as in production.
+    h = await createHarness({ config: { trustProxy: true, geo: { mode: 'headers', countryHeader: COUNTRY_HEADER } } });
+  });
+  afterAll(() => h?.close());
+
+  const uniqueEmail = (tag: string) => `${tag}-${Math.random().toString(36).slice(2, 10)}@example.com`;
+  const accountOf = (email: string) => h.ctx.db.selectFrom('accounts').selectAll().where('email_normalized', '=', email).executeTakeFirst();
+  const profileOf = (accountId: string) => h.ctx.db.selectFrom('account_profiles').selectAll().where('account_id', '=', accountId).executeTakeFirst();
+  const heardByLabel = async () => new Map((await h.ctx.db.selectFrom('heard_options').select(['id', 'label']).execute()).map((r) => [r.label, r.id]));
+
+  it('requires the first name, the last name and the country, each refused in the collector’s words; nothing is created', async () => {
+    const email = uniqueEmail('required');
+    const full = { email, password: PASSWORD, firstName: 'Ada', lastName: 'Lovelace', country: 'GB' };
+    const cases: [Record<string, unknown>, string][] = [
+      [{ ...full, firstName: undefined }, 'Enter your first name.'],
+      [{ ...full, firstName: '   ' }, 'Enter your first name.'],
+      [{ ...full, firstName: null }, 'Enter your first name.'],
+      [{ ...full, lastName: undefined }, 'Enter your last name.'],
+      [{ ...full, lastName: '' }, 'Enter your last name.'],
+      [{ ...full, country: undefined }, 'Choose your country.'],
+      [{ ...full, country: '' }, 'Choose your country.'],
+      [{ ...full, country: 'ZZ' }, 'Choose your country.'],
+      // The first name first, as the form checks it.
+      [{ email, password: PASSWORD }, 'Enter your first name.'],
+      [{ ...full, firstName: 'A'.repeat(51) }, 'Your first name is 50 characters at most.'],
+      [{ ...full, lastName: 'L'.repeat(51) }, 'Your last name is 50 characters at most.'],
+      [{ ...full, firstName: 'Ada <b>' }, 'Your first name contains characters that cannot be kept.'],
+    ];
+    for (const [body, message] of cases) {
+      const res = await h.client().post('/api/v1/account/register', JSON.parse(JSON.stringify(body)));
+      expect(res.statusCode, message).toBe(400);
+      expect(errorOf(res), JSON.stringify(body)).toEqual({ code: 'VALIDATION_FAILED', message });
+    }
+    expect(await accountOf(email)).toBeUndefined();
+  });
+
+  it('refuses the body of an app page loaded before the deploy (displayName only) on the first name', async () => {
+    const email = uniqueEmail('old');
+    const res = await h.client().post('/api/v1/account/register', { email, password: PASSWORD, displayName: 'Ada' });
+    expect(res.statusCode).toBe(400);
+    expect(errorOf(res)).toEqual({ code: 'VALIDATION_FAILED', message: 'Enter your first name.' });
+    expect(await accountOf(email)).toBeUndefined();
+  });
+
+  it('writes the profile with the account, « First Last » as its name and the country on the account; displayName is then ignored', async () => {
+    const email = uniqueEmail('profile');
+    const res = await h.client().post('/api/v1/account/register', { email, password: PASSWORD, firstName: '  Zoë ', lastName: 'Le Gall', country: 'fr', displayName: 'Ignored' });
+    expect(res.statusCode).toBe(201);
+    expect((safeJson(res) as { account: unknown }).account).toEqual({ email, displayName: 'Zoë Le Gall' });
+    const account = (await accountOf(email))!;
+    expect(account).toMatchObject({ display_name: 'Zoë Le Gall', country: 'FR', status: 'ACTIVE' });
+    const profile = await profileOf(account.id);
+    expect(profile).toMatchObject({
+      first_name: 'Zoë',
+      last_name: 'Le Gall',
+      phone: null,
+      birth_date: null,
+      city: null,
+      instagram: null,
+      heard_option_id: null,
+      heard_other: null,
+      heard_at: null,
+      version: 1,
+      updated_by: 'COLLECTOR',
+    });
+  });
+
+  it('keeps an offered answer to « How did you hear about ORBES? », Other’s words only with Other, and drops an unknown or set-aside one', async () => {
+    const heard = await heardByLabel();
+    const other = heard.get('Other')!;
+    const instagram = heard.get('Instagram')!;
+    const tiktok = heard.get('TikTok')!;
+    await h.ctx.db.updateTable('heard_options').set({ active: false }).where('id', '=', tiktok).execute();
+    const signUp = async (tag: string, answer: unknown) => {
+      const email = uniqueEmail(tag);
+      const res = await h.client().post('/api/v1/account/register', { email, password: PASSWORD, firstName: 'Ada', lastName: 'Lovelace', country: 'GB', heard: answer });
+      expect(res.statusCode, `${tag} ${res.body}`).toBe(201);
+      const account = (await accountOf(email))!;
+      return { account, profile: (await profileOf(account.id))! };
+    };
+    const withOther = await signUp('other', { optionId: other.toUpperCase(), other: '  A pop-up in Lyon ' });
+    expect(withOther.profile).toMatchObject({ heard_option_id: other, heard_other: 'A pop-up in Lyon', heard_at: expect.any(Date) });
+    const plain = await signUp('instagram', { optionId: instagram, other: 'dropped' });
+    expect(plain.profile).toMatchObject({ heard_option_id: instagram, heard_other: null, heard_at: expect.any(Date) });
+    for (const [tag, answer] of [
+      ['aside', { optionId: tiktok }],
+      ['unknown', { optionId: '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6' }],
+      ['malformed', { optionId: 'not-an-id', other: 'words' }],
+      ['none', null],
+    ] as const) {
+      const r = await signUp(tag, answer);
+      expect(r.profile, tag).toMatchObject({ first_name: 'Ada', heard_option_id: null, heard_other: null, heard_at: null });
+    }
+    // Other's words that cannot be kept are dropped, never a refusal.
+    const words = await signUp('words', { optionId: other, other: 'x'.repeat(101) });
+    expect(words.profile).toMatchObject({ heard_option_id: other, heard_other: null });
+    await h.ctx.db.updateTable('heard_options').set({ active: true }).where('id', '=', tiktok).execute();
+  });
+
+  it('audits account.register with { profile, heardOptionId }, never the names nor the country', async () => {
+    const heard = await heardByLabel();
+    const email = uniqueEmail('audit');
+    const res = await h.client().post('/api/v1/account/register', { email, password: PASSWORD, firstName: 'Grace', lastName: 'Hopperton', country: 'US', heard: { optionId: heard.get('The press') } });
+    expect(res.statusCode).toBe(201);
+    const account = (await accountOf(email))!;
+    const entries = (await h.ctx.audit.list({ action: 'account.register', targetId: account.id })).items;
+    expect(entries).toEqual([expect.objectContaining({ actorType: 'account', details: { profile: true, heardOptionId: heard.get('The press') } })]);
+    expect(JSON.stringify(entries)).not.toMatch(/Grace|Hopperton|"US"/);
+  });
+
+  it('creates the profile in the account’s transaction: a failing profile insert leaves no account and no session', async () => {
+    const { sql } = await import('kysely');
+    await sql`CREATE FUNCTION test_refuse_profile() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.first_name = 'Rollback' THEN RAISE EXCEPTION 'refused by the test'; END IF; RETURN NEW; END $$`.execute(h.ctx.db);
+    await sql`CREATE TRIGGER test_refuse_profile BEFORE INSERT ON account_profiles FOR EACH ROW EXECUTE FUNCTION test_refuse_profile()`.execute(h.ctx.db);
+    try {
+      const email = uniqueEmail('rollback');
+      const c = h.client();
+      const res = await c.post('/api/v1/account/register', { email, password: PASSWORD, firstName: 'Rollback', lastName: 'Test', country: 'FR' });
+      expect(res.statusCode).toBe(500);
+      expect(await accountOf(email)).toBeUndefined();
+      expect(res.cookies.find((x) => x.name === 'orbes_session')?.value ?? '').toBe('');
+    } finally {
+      await sql`DROP TRIGGER test_refuse_profile ON account_profiles`.execute(h.ctx.db);
+      await sql`DROP FUNCTION test_refuse_profile()`.execute(h.ctx.db);
+    }
+  });
+
+  it('GET /api/v1/account/sign-up: the connection’s country when it is one, and the answers offered in their order, Other last; no session, no-store, nothing recorded', async () => {
+    const before = await h.ctx.db.selectFrom('audit_logs').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+    const c = h.client();
+    const fr = await c.get('/api/v1/account/sign-up', { headers: { [COUNTRY_HEADER]: 'FR' } });
+    expect(fr.statusCode).toBe(200);
+    expect(fr.headers['cache-control']).toBe('no-store');
+    expect(fr.cookies).toEqual([]);
+    const body = safeJson(fr) as { country: string | null; heard: { id: string; label: string; other: boolean }[] };
+    expect(body.country).toBe('FR');
+    expect(body.heard.map((x) => x.label)).toEqual(['Instagram', 'TikTok', 'A friend', 'The press', 'A shop', 'A web search', 'An influencer', 'Other']);
+    expect(body.heard.map((x) => x.other)).toEqual([false, false, false, false, false, false, false, true]);
+    expect(Object.keys(body).sort()).toEqual(['country', 'heard']);
+    for (const header of [undefined, 'ZZ', 'EU', 'XX', 'T1']) {
+      const res = await c.get('/api/v1/account/sign-up', header ? { headers: { [COUNTRY_HEADER]: header } } : {});
+      expect((safeJson(res) as { country: unknown }).country, String(header)).toBeNull();
+    }
+    // A set-aside answer is no longer offered; a reordered list reads in its new order, Other still last.
+    const heard = await heardByLabel();
+    await h.ctx.db.updateTable('heard_options').set({ active: false }).where('id', '=', heard.get('A shop')!).execute();
+    await h.ctx.db.updateTable('heard_options').set({ position: 20 }).where('id', '=', heard.get('Instagram')!).execute();
+    const after = safeJson(await c.get('/api/v1/account/sign-up')) as typeof body;
+    expect(after.heard.map((x) => x.label)).toEqual(['TikTok', 'A friend', 'The press', 'A web search', 'An influencer', 'Instagram', 'Other']);
+    await h.ctx.db.updateTable('heard_options').set({ active: true }).where('id', '=', heard.get('A shop')!).execute();
+    await h.ctx.db.updateTable('heard_options').set({ position: 1 }).where('id', '=', heard.get('Instagram')!).execute();
+    const now = await h.ctx.db.selectFrom('audit_logs').select((eb) => eb.fn.countAll<number>().as('n')).executeTakeFirstOrThrow();
+    expect(Number(now.n)).toBe(Number(before.n));
   });
 });

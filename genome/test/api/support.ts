@@ -195,7 +195,7 @@ export async function adminClient(h: Harness, role: AdminRole, clientOpts: Clien
 export async function accountClient(h: Harness, clientOpts: ClientOptions = {}): Promise<{ client: Client; email: string }> {
   const c = h.client(clientOpts);
   const email = `owner-${randomUUID().slice(0, 8)}@example.com`;
-  const res = await c.post('/api/v1/account/register', { email, password: PASSWORD, displayName: 'Owner' });
+  const res = await c.post('/api/v1/account/register', { email, password: PASSWORD, firstName: 'Owner', lastName: 'Test', country: 'FR' });
   if (res.statusCode !== 201) throw new Error(`register failed: ${res.statusCode} ${res.body}`);
   return { client: c, email };
 }

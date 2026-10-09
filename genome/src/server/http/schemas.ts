@@ -358,11 +358,23 @@ export const liveAnswerBody = body({
 const email = z.string().trim().min(3, 'Required').max(254, 'At most 254 characters');
 const password = z.string().min(1, 'Required').max(1024, 'At most 1024 characters');
 
+/**
+ * POST /api/v1/account/register (§10.1, plan CUSTOMER INTELLIGENCE §3.1 P.4.2): the first and last name and the country
+ * are required by the route in the collector's words (services/sign-up.ts `requireSignUp`), so they are optional here;
+ * `displayName` is still accepted and ignored once the names are given; `heard` is the optional answer to « How did you
+ * hear about ORBES? », never a reason to refuse (an unknown or set-aside option is dropped by the service).
+ */
 export const registerAccountBody = body({
   email,
   password,
+  firstName: z.string().max(200, 'At most 200 characters').nullable().optional(),
+  lastName: z.string().max(200, 'At most 200 characters').nullable().optional(),
   displayName: z.preprocess((v) => (v === '' ? null : v), z.string().max(80, 'At most 80 characters').nullable().optional()),
   country: z.preprocess((v) => (v === '' ? null : v), country.nullable().optional()),
+  heard: z
+    .strictObject({ optionId: z.string().max(64, 'At most 64 characters'), other: z.string().max(1000, 'At most 1000 characters').nullable().optional() }, { error: 'The answer is an object' })
+    .nullable()
+    .optional(),
 });
 
 export const loginBody = body({ email, password });

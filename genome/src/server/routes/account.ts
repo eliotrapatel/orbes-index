@@ -23,6 +23,8 @@ import { accountAddressBody, accountAddressParams, accountAddressUpdateBody, acc
 import { accountActor, clearSessionCookie, clientMeta, requireAccount, sessionGuard, sessionToken, setSessionCookie } from '../http/sessions.js';
 import type { AccountProfile } from '../services/auth.js';
 import { findProduct } from '../services/lifecycle.js';
+import { requireSignUp } from '../services/sign-up.js';
+import { isCountryCode } from '../../shared/countries.js';
 import { safeFilename } from './admin/codes.js';
 import type { RouteDeps } from './public.js';
 
@@ -34,17 +36,28 @@ export function accountJson(a: AccountProfile): { email: string; displayName: st
 export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {
   app.addHook('onRequest', rateLimitHook(limiters, 'api'));
   app.addHook('onRequest', sessionGuard(ctx, { kind: 'account' }));
-  const { addresses, auth, care, claimRenewals, invoices, orders, ownership, ownershipCertificates, pastReleases, questions, recovery, sizes, warranty } = ctx.services;
+  const { addresses, auth, care, claimRenewals, invoices, orders, ownership, ownershipCertificates, pastReleases, profiles, questions, recovery, sizes, warranty } = ctx.services;
 
+  // CREATE ACCOUNT (plan CUSTOMER INTELLIGENCE §3.1 P.4.2): the first and last name and the country required here, in the
+  // collector's words; the optional answer to « How did you hear about ORBES? » never refuses a sign-up.
   app.post('/api/v1/account/register', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {
     const b = parse(registerAccountBody, request.body);
+    requireSignUp(b);
     const { account, session } = await auth.registerAccount(
-      { email: b.email, password: b.password, displayName: b.displayName ?? null, country: b.country ?? null },
+      { email: b.email, password: b.password, displayName: b.displayName ?? null, country: b.country ?? null, firstName: b.firstName, lastName: b.lastName, heard: b.heard ?? null },
       clientMeta(request, ctx.config, 'account', userAgentOf(request)),
     );
     setSessionCookie(reply, ctx.config, 'account', session);
     reply.code(201);
     return { account: accountJson(account), csrfToken: session.csrfToken };
+  });
+
+  // What CREATE ACCOUNT offers (plan CUSTOMER INTELLIGENCE §3.1 P.4.2): the connection's country, only to preselect COUNTRY
+  // (null when unknown or not a country), and the answers offered to « How did you hear about ORBES? ». Nothing recorded.
+  app.get('/api/v1/account/sign-up', { config: { guard: { session: 'none' } } }, async (request, reply) => {
+    const country = ctx.geo.resolve(request).country;
+    reply.header('cache-control', 'no-store');
+    return { country: isCountryCode(country) ? country : null, heard: await profiles.offeredHeard() };
   });
 
   app.post('/api/v1/account/login', { config: { guard: { session: 'none' }, rateGroup: 'auth' } }, async (request, reply) => {

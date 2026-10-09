@@ -35,8 +35,8 @@ import { rgbaToGray } from '../support/raster.js';
 
 const START = new Date('2026-09-14T08:00:00.000Z');
 const ADMIN = { email: 'admin@example.com', password: 'integration-admin-password' };
-const ALICE = { email: 'alice.integration@example.com', password: 'alice-integration-password', displayName: 'Alice' };
-const BOB = { email: 'bob.integration@example.com', password: 'bob-integration-password', displayName: 'Bob' };
+const ALICE = { email: 'alice.integration@example.com', password: 'alice-integration-password', firstName: 'Alice', lastName: 'Integration', country: 'FR' };
+const BOB = { email: 'bob.integration@example.com', password: 'bob-integration-password', firstName: 'Bob', lastName: 'Integration', country: 'FR' };
 const GEO = { country: 'x-orbes-country', lat: 'x-orbes-lat', lon: 'x-orbes-lon' };
 const PLACES = {
   paris: { [GEO.country]: 'FR', [GEO.lat]: '48.86', [GEO.lon]: '2.35' },

@@ -653,7 +653,7 @@ export class Lab {
     const n = ++this.devices;
     const client = new Client(this.app, { ip: `172.16.${(n >> 8) & 255}.${n & 255}` });
     const email = `${name.toLowerCase().replace(/[^a-z0-9]/g, '-')}-${n}@example.com`;
-    const res = await client.post('/api/v1/account/register', { email, password: PASSWORD, displayName: name });
+    const res = await client.post('/api/v1/account/register', { email, password: PASSWORD, firstName: name, lastName: 'Lab', country: place.country });
     if (res.statusCode !== 201) throw new Error(`account register failed: ${res.statusCode} ${res.body}`);
     const row = await this.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email).executeTakeFirstOrThrow();
     this.secrets.add(row.id);

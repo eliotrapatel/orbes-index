@@ -510,7 +510,7 @@ describe('admin role enforcement', () => {
 
   it('a customer session is not an admin session', async () => {
     const c = h.client();
-    await c.post('/api/v1/account/register', { email: `cust-${randomUUID().slice(0, 6)}@example.com`, password: 'correct horse battery staple' });
+    await c.post('/api/v1/account/register', { email: `cust-${randomUUID().slice(0, 6)}@example.com`, password: 'correct horse battery staple', firstName: 'Customer', lastName: 'Test', country: 'FR' });
     expect((await c.get('/api/admin/dashboard')).statusCode).toBe(401);
   });
 

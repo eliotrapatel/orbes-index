@@ -91,7 +91,7 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
 
     // ── Customer: scan, register with the claim code ──
     const owner = client();
-    expect((await owner.post('/api/v1/account/register', { email: 'owner@example.com', password: PASSWORD })).statusCode).toBe(201);
+    expect((await owner.post('/api/v1/account/register', { email: 'owner@example.com', password: PASSWORD, firstName: 'Owner', lastName: 'Test', country: 'FR' })).statusCode).toBe(201);
     const scan = safeJson(await owner.post('/api/v1/verify', { code: p.code.data, genome: { glyphs: p.genome.glyphs } })) as any;
     expect(scan.state).toBe('AUTHENTIC_FIRST_REGISTRATION');
     const reg = await owner.post('/api/v1/ownership/register', { registrationToken: scan.registration.token, claimCode: p.claimCode });
@@ -110,7 +110,7 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     // ── Transfer to a second customer ──
     const offer = safeJson(await owner.post('/api/v1/ownership/transfers', { productId: p.product.productId })) as any;
     const buyer = client();
-    await buyer.post('/api/v1/account/register', { email: 'buyer@example.com', password: PASSWORD });
+    await buyer.post('/api/v1/account/register', { email: 'buyer@example.com', password: PASSWORD, firstName: 'Buyer', lastName: 'Test', country: 'FR' });
     // F-03: the buyer scans the piece signed in, then enters the code with that scan (the TRANSFER_ACCEPT purpose of 0011).
     const toReceive = safeJson(await buyer.post('/api/v1/verify', { code: p.code.data })) as any;
     expect(toReceive.transfer?.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -256,7 +256,7 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     // Concurrent sign-ins of one account after a wrong password: each resets the throttle under the account's row
     // lock, so they run one after the other; with a share lock they would deadlock (40P01, a 500).
     expect((await client().post('/api/v1/account/login', { email: 'buyer@example.com', password: 'not the password at all' })).statusCode).toBe(401);
-    const logins = await Promise.all(Array.from({ length: 6 }, () => client().post('/api/v1/account/login', { email: 'buyer@example.com', password: PASSWORD })));
+    const logins = await Promise.all(Array.from({ length: 6 }, () => client().post('/api/v1/account/login', { email: 'buyer@example.com', password: PASSWORD, firstName: 'Buyer', lastName: 'Test', country: 'FR' })));
     for (const r of logins) expect(r.statusCode, r.body).toBe(200);
     // A lock of an account with two pending transfers while it signs in: the products are locked first, the audit last.
     expect((await op.patch(`/api/admin/models/${model.id}`, { active: true })).statusCode).toBe(200);
@@ -271,12 +271,12 @@ describe.skipIf(!adminUrl)('API on PostgreSQL (production configuration)', () =>
     const buyerId = (safeJson(await op.get('/api/admin/owners?email=buyer%40example.com')) as any).items[0].id;
     const [locked, ...during] = await Promise.all([
       op.post(`/api/admin/owners/${buyerId}/lock`),
-      ...Array.from({ length: 4 }, () => client().post('/api/v1/account/login', { email: 'buyer@example.com', password: PASSWORD })),
+      ...Array.from({ length: 4 }, () => client().post('/api/v1/account/login', { email: 'buyer@example.com', password: PASSWORD, firstName: 'Buyer', lastName: 'Test', country: 'FR' })),
     ]);
     expect(locked.statusCode, locked.body).toBe(200);
     expect(safeJson(locked)).toMatchObject({ status: 'LOCKED', transfersCancelled: 2 });
     for (const r of during) expect([200, 403], r.body).toContain(r.statusCode);
-    expect((await client().post('/api/v1/account/login', { email: 'buyer@example.com', password: PASSWORD })).statusCode).toBe(403);
+    expect((await client().post('/api/v1/account/login', { email: 'buyer@example.com', password: PASSWORD, firstName: 'Buyer', lastName: 'Test', country: 'FR' })).statusCode).toBe(403);
     expect((safeJson(await op.get('/api/admin/audit/verify')) as any).ok).toBe(true);
   });
 });

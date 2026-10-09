@@ -126,7 +126,7 @@ describe('CSRF protection', () => {
   });
 
   it('session-less mutations (register/login) still need a same-origin request', async () => {
-    const res = await h.client({ origin: 'https://evil.example' }).post('/api/v1/account/register', { email: 'csrf@example.com', password: PASSWORD });
+    const res = await h.client({ origin: 'https://evil.example' }).post('/api/v1/account/register', { email: 'csrf@example.com', password: PASSWORD, firstName: 'Csrf', lastName: 'Test', country: 'FR' });
     expect(res.statusCode).toBe(403);
     expect(res.cookies.find((x) => x.name === 'orbes_session')).toBeUndefined();
   });
@@ -164,7 +164,7 @@ describe('rate limiting', () => {
     const ip = '198.51.100.3';
     const c = h.client({ ip });
     expect((await c.post('/api/v1/account/login', { email: 'a@example.com', password: 'whatever-whatever' })).statusCode).toBe(401);
-    expect((await c.post('/api/v1/account/register', { email: 'b@example.com', password: 'short' })).statusCode).toBe(400);
+    expect((await c.post('/api/v1/account/register', { email: 'b@example.com', password: 'short', firstName: 'B', lastName: 'Test', country: 'FR' })).statusCode).toBe(400);
     expect((await c.post('/api/admin/auth/login', { email: 'c@example.com', password: 'whatever-whatever' })).statusCode).toBe(401);
     const limited = await c.post('/api/admin/auth/login', { email: 'c@example.com', password: 'whatever-whatever' });
     expect(limited.statusCode).toBe(429);
@@ -251,7 +251,7 @@ describe('pagination and error hygiene', () => {
   });
 
   it('validation errors name the field, never echo the value', async () => {
-    const res = await h.client().post('/api/v1/account/register', { email: 'x@example.com', password: PASSWORD, displayName: 'y'.repeat(81) });
+    const res = await h.client().post('/api/v1/account/register', { email: 'x@example.com', password: PASSWORD, firstName: 'X', lastName: 'Test', country: 'FR', displayName: 'y'.repeat(81) });
     expect(res.statusCode).toBe(400);
     const e = errorOf(res);
     expect(e.message).toMatch(/displayName/);

@@ -140,6 +140,27 @@ describe('AuthService', () => {
       await expectDomainError(auth.registerAccount({ email: email(), password: PASSWORD, displayName: '<script>' }, {}), 'VALIDATION_FAILED', 400);
     });
 
+    // Plan CUSTOMER INTELLIGENCE §3.1 P.4.2: the names and the country are required by the public route only; seeds,
+    // fixtures and tests that create an account without them keep working, with no profile row.
+    it('creates an account without names (an internal caller) with no profile row, its displayName as today', async () => {
+      const { account } = await auth.registerAccount({ email: email('internal'), password: PASSWORD, displayName: 'Ada' }, {});
+      expect(account).toMatchObject({ displayName: 'Ada', country: null });
+      expect(await t.db.selectFrom('account_profiles').select('account_id').where('account_id', '=', account.id).executeTakeFirst()).toBeUndefined();
+      const entry = (await audit.list({ action: 'account.register', targetId: account.id })).items[0];
+      expect(entry?.details).toEqual({});
+    });
+
+    it('writes the profile row with the names given, « First Last » as the account’s name, and refuses one name without the other', async () => {
+      const { account } = await auth.registerAccount({ email: email('named'), password: PASSWORD, firstName: ' Ada ', lastName: 'Lovelace', country: 'gb', displayName: 'Ignored' }, {});
+      expect(account).toMatchObject({ displayName: 'Ada Lovelace', country: 'GB' });
+      const profile = await t.db.selectFrom('account_profiles').selectAll().where('account_id', '=', account.id).executeTakeFirstOrThrow();
+      expect(profile).toMatchObject({ first_name: 'Ada', last_name: 'Lovelace', heard_option_id: null, version: 1, updated_by: 'COLLECTOR' });
+      const entry = (await audit.list({ action: 'account.register', targetId: account.id })).items[0];
+      expect(entry?.details).toEqual({ profile: true, heardOptionId: null });
+      await expect(auth.registerAccount({ email: email('half'), password: PASSWORD, firstName: 'Ada' }, {})).rejects.toMatchObject({ code: 'VALIDATION_FAILED', message: 'Enter your last name.' });
+      await expect(auth.registerAccount({ email: email('half'), password: PASSWORD, lastName: 'Lovelace' }, {})).rejects.toMatchObject({ code: 'VALIDATION_FAILED', message: 'Enter your first name.' });
+    });
+
     it('logs in with the right password only, with one generic error', async () => {
       const addr = email();
       await auth.registerAccount({ email: addr, password: PASSWORD }, {});

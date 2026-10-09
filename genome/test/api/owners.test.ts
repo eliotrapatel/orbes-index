@@ -344,7 +344,7 @@ describe('owner sheet for ORBES Client Services (A-06)', () => {
       expect(res.headers['content-disposition']).toBe(`attachment; filename="orbes-account-${id.slice(0, 8)}-${h.clock.now().toISOString().slice(0, 10)}.json"`);
       const x = safeJson(res) as Record<string, any>;
       expect(x).toMatchObject({ format: 'orbes.account-export', version: 1, truncated: [] });
-      expect(x.account).toMatchObject({ id, email: owner.email, displayName: 'Owner', status: 'ACTIVE', transfersPausedUntil: null });
+      expect(x.account).toMatchObject({ id, email: owner.email, displayName: 'Owner Test', status: 'ACTIVE', transfersPausedUntil: null });
       expect(x.pieces).toEqual([expect.objectContaining({ productId, until: null, acquiredVia: 'FIRST_REGISTRATION', status: 'STOLEN' })]);
       expect(x.transfers).toEqual([expect.objectContaining({ productId, direction: 'OUT', status: 'CANCELLED' })]);
       expect(x.scans.map((s: any) => s.state)).toEqual(['AUTHENTIC_FIRST_REGISTRATION', 'AUTHENTIC_FIRST_REGISTRATION', 'MALFORMED_CODE']);

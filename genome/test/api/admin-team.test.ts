@@ -238,7 +238,7 @@ describe('Team: staff accounts (A-02)', () => {
     expect(system.items.length).toBeGreaterThan(0);
     expect(system.items.every((e) => e.actorEmail === null)).toBe(true);
     // Customers stay ids, as actors and as targets.
-    await h.client().post('/api/v1/account/register', { email: 'customer-audit@example.com', password: PASSWORD });
+    await h.client().post('/api/v1/account/register', { email: 'customer-audit@example.com', password: PASSWORD, firstName: 'Customer', lastName: 'Audit', country: 'FR' });
     const customers = safeJson(await boss.get('/api/admin/audit?actorType=account')) as { items: Entry[] };
     expect(customers.items.length).toBeGreaterThan(0);
     expect(customers.items.every((e) => e.actorEmail === null && e.targetEmail === null)).toBe(true);

@@ -49,6 +49,7 @@ import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { randomCrockford } from './claim-codes.js';
 import type { IssuedSession, SessionInfo, SessionService } from './sessions.js';
+import { insertSignUpProfile, signUpNames, type SignUpHeard } from './sign-up.js';
 import { knownLocation } from './stock.js';
 
 export const PASSWORD_MIN_LENGTH = 12;
@@ -139,8 +140,13 @@ export interface AdminSessionSummary {
 export interface RegisterAccountInput {
   email: string;
   password: string;
+  /** Ignored when the first and last name are given: the account's name is then « First Last ». */
   displayName?: string | null;
   country?: string | null;
+  /** The sign-up's profile (services/sign-up.ts): required by the public route only, optional here for seeds and tests. */
+  firstName?: string | null;
+  lastName?: string | null;
+  heard?: SignUpHeard | null;
 }
 
 export interface CreateAdminInput {
@@ -275,7 +281,8 @@ export class AuthService {
     const email = normalizeEmail(input?.email);
     if (!email) throw validationError('A valid email address is required.');
     const password = checkPasswordPolicy(input.password, email.email);
-    const displayName = cleanDisplayName(input.displayName);
+    const names = signUpNames(input);
+    const displayName = names ? `${names.first} ${names.last}` : cleanDisplayName(input.displayName);
     const country = cleanCountry(input.country);
     const passwordHash = await hashSecret(password);
     const now = this.clock();
@@ -299,7 +306,8 @@ export class AuthService {
           { subjectType: 'account', subjectId: row.id, ipHash: meta.ipHash, userAgent: meta.userAgent, replaceToken: meta.previousToken },
           tx,
         );
-        await this.audit.record({ actor: accountActor(row.id, meta), action: 'account.register', targetType: 'account', targetId: row.id }, tx);
+        const profile = names ? await insertSignUpProfile(tx, row.id, names, input.heard, now) : null;
+        await this.audit.record({ actor: accountActor(row.id, meta), action: 'account.register', targetType: 'account', targetId: row.id, ...(profile ? { details: { profile: true, heardOptionId: profile.heardOptionId } } : {}) }, tx);
         return { account: accountProfile(row), session };
       });
     } catch (e) {

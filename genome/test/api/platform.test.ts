@@ -112,7 +112,7 @@ describe('account session probe and registration', () => {
     const { client, email } = await accountClient(h);
     const signed = await client.get('/api/v1/account/session');
     expect(signed.statusCode).toBe(200);
-    expect(safeJson(signed)).toEqual({ account: { email, displayName: 'Owner' }, csrfToken: expect.any(String) });
+    expect(safeJson(signed)).toEqual({ account: { email, displayName: 'Owner Test' }, csrfToken: expect.any(String) });
 
     // A dead cookie reads as anonymous and is cleared.
     const stale = h.client();
@@ -122,17 +122,23 @@ describe('account session probe and registration', () => {
     expect(res.cookies.find((x) => x.name === 'orbes_session')?.value).toBe('');
   });
 
-  it('registration accepts an optional ISO 3166-1 country', async () => {
+  // The country is required at sign-up since the customer intelligence lot (plan §3.1 P.4.2): an ISO 3166-1 code of H2's list.
+  it('registration requires an ISO 3166-1 country', async () => {
+    const names = { firstName: 'Ada', lastName: 'Lovelace' };
     const c = h.client();
-    const res = await c.post('/api/v1/account/register', { email: 'country@example.com', password: PASSWORD, country: 'fr' });
+    const res = await c.post('/api/v1/account/register', { email: 'country@example.com', password: PASSWORD, ...names, country: 'fr' });
     expect(res.statusCode).toBe(201);
     const row = await h.ctx.db.selectFrom('accounts').select('country').where('email_normalized', '=', 'country@example.com').executeTakeFirstOrThrow();
     expect(row.country).toBe('FR');
-    const bad = await h.client().post('/api/v1/account/register', { email: 'country2@example.com', password: PASSWORD, country: 'FRA' });
+    const bad = await h.client().post('/api/v1/account/register', { email: 'country2@example.com', password: PASSWORD, ...names, country: 'FRA' });
     expect(bad.statusCode).toBe(400);
     expect(errorOf(bad).message).toMatch(/^country: /);
-    const none = await h.client().post('/api/v1/account/register', { email: 'country3@example.com', password: PASSWORD, country: '' });
-    expect(none.statusCode).toBe(201);
+    for (const country of ['', null, undefined, 'ZZ']) {
+      const none = await h.client().post('/api/v1/account/register', { email: 'country3@example.com', password: PASSWORD, ...names, ...(country === undefined ? {} : { country }) });
+      expect(none.statusCode, String(country)).toBe(400);
+      expect(errorOf(none)).toEqual({ code: 'VALIDATION_FAILED', message: 'Choose your country.' });
+    }
+    expect(await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', 'country3@example.com').executeTakeFirst()).toBeUndefined();
   });
 });
 

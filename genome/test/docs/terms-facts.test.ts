@@ -613,7 +613,9 @@ const ABSENCE_CHECKS: Readonly<Record<string, () => void>> = {
     expect(matches(/deleteFrom\(\s*'accounts'\s*\)|\bDELETE\s+FROM\s+"?accounts\b/gi).map((m) => m.file)).toEqual([]);
   },
   N5: () => {
-    expect(Object.keys(registerAccountBody.shape).sort()).toEqual(['country', 'displayName', 'email', 'password']);
+    // The first and last name and the country are required by the route since the customer intelligence lot (plan §3.1
+    // P.4.2), `heard` optional, `displayName` still accepted and ignored with the names: no date of birth, no identity.
+    expect(Object.keys(registerAccountBody.shape).sort()).toEqual(['country', 'displayName', 'email', 'firstName', 'heard', 'lastName', 'password']);
   },
   N6: () => {
     // The vote of the circle (P-X01) writes its row and nothing in the audit log; no audit action names a vote.

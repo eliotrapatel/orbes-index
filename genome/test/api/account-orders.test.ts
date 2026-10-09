@@ -470,7 +470,8 @@ describe('YOUR ADDRESSES and an order\'s delivery address over HTTP (plan NEXT L
     expect(errorOf(await mine.request('PUT', `/api/v1/account/orders/${orderId}/address`, { body: { address: PARIS, addressId: orderId } })).code).toBe('VALIDATION_FAILED');
     const empty = await mine.get('/api/v1/account/addresses');
     expect(empty.headers['cache-control']).toBe('no-store');
-    expect(safeJson(empty)).toEqual({ addresses: [], defaultCountry: null });
+    // The registration country preselects COUNTRY: the sign-up's (accountClient signs up in FR, plan CUSTOMER INTELLIGENCE §3.1 P.4.2).
+    expect(safeJson(empty)).toEqual({ addresses: [], defaultCountry: 'FR' });
   });
 
   it('adds, edits, makes default and removes an address; the server\'s words for a refusal; never another account\'s', async () => {
