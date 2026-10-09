@@ -19,6 +19,16 @@
  *            Past BUFFER_MAX_ROWS the oldest rows are dropped, with one warning a minute. A failed flush keeps its
  *            rows for the next try (a chunk failing FLUSH_MAX_ATTEMPTS times in a row is dropped, logged, so one bad
  *            row never holds the others back). `stop()` writes what is left at shutdown.
+ *   link     (§3.3 T.8.4) at sign-up (SIGN_UP), sign-in (SIGN_IN) and on a signed-in visit whose device is not linked to
+ *            that account yet (SESSION): the device's anonymous rows since its previous link (all of its last 13 months
+ *            when it was never linked) take the account. First in memory (`buffer.claim`, so a flush put off during a
+ *            release peak never leaves them anonymous), then in one transaction holding the advisory lock
+ *            `orbes/views-daily` (the daily job's, so a link and a day's count never cross) and the device row FOR
+ *            UPDATE (two sign-ins at once on one device wait for each other): the rows attached, the device's link
+ *            (`tracking_device_accounts`, `tracking_devices.account_id`, `linked_at`), then the acquisition's attach
+ *            (a hook, a no-op until the acquisition is built). A late row (a batch in flight at the sign-in, sent
+ *            without the session) from before the link and after the previous one takes the account too. Never
+ *            audited: no person acts, and the sign-up and sign-in are audited already.
  *   markStaff  a browser that opened the console is staff's from its first view: its buffered rows go, `staff_at` is
  *            set once, its rows are deleted in batches of STAFF_DELETE_BATCH; the daily totals already counted keep
  *            their few views.
@@ -28,8 +38,8 @@
  */
 import { BlockList } from 'node:net';
 import { sql } from 'kysely';
-import type { Db } from '../db/connection.js';
-import { VIEW_PAGE_CODES, VIEW_PAGES, type ViewPage } from '../db/schema.js';
+import { inTransaction, type Db } from '../db/connection.js';
+import { VIEW_PAGE_CODES, VIEW_PAGES, type LinkVia, type ViewPage } from '../db/schema.js';
 import type { ConnectionPlace } from '../geo/place.js';
 import { canonicalIp } from '../http/client.js';
 import { classifyDevice, clientHintsOf, isAutomated, type DeviceClass } from '../http/device-class.js';
@@ -38,7 +48,7 @@ import { normalizeEmail } from './auth.js';
 import { SLUG_RE } from './lookbook.js';
 import type { PlaceService } from './places.js';
 import { HouseAccounts, TestEntrantAccounts } from './population.js';
-import { parisDay } from './schedule.js';
+import { parisDay, parisDayStart } from './schedule.js';
 
 // ── Constants (in code: no new environment variable, §3.3 T.8.3) ─────────────────────────────────────────────────
 
@@ -92,6 +102,19 @@ const TEST_NETWORKS = (() => {
   b.addSubnet('100.64.0.0', 10, 'ipv4');
   return b;
 })();
+
+/**
+ * The start of the oldest Paris day still kept raw: the same day VIEW_RETENTION_MONTHS calendar months before `now`'s
+ * Paris day (the month's last day when it is shorter). On 8 October 2026 the first day kept is 8 September 2025.
+ */
+export function viewHistoryCutoff(now: Date): Date {
+  const [y, m, d] = parisDay(now).split('-').map(Number) as [number, number, number];
+  const back = y * 12 + (m - 1) - VIEW_RETENTION_MONTHS;
+  const year = Math.floor(back / 12);
+  const month = (back % 12) + 1;
+  const last = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return parisDayStart(`${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`);
+}
 
 /** Whether an address is in 100.64.0.0/10 (an IPv4-mapped IPv6 address read as its IPv4). */
 export function inTestNetwork(ip: string | undefined): boolean {
@@ -428,6 +451,11 @@ interface DeviceEntry {
   staff: boolean;
   accountId: string | null;
   linkedAt: Date | null;
+  /**
+   * The link before `linkedAt`, when this process made the link (null: the device was never linked before; undefined:
+   * not known, the entry was read from the row). The late-row rule needs it.
+   */
+  previousLinkedAt?: Date | null;
   /** The class last written, as a key. */
   cls: string | null;
   /** When `last_seen_at` was last written (ms). */
@@ -447,6 +475,25 @@ export interface TrackingServiceDeps {
   waiting?: () => boolean;
   /** The buffer's bound (tests). */
   bufferMaxRows?: number;
+  /**
+   * The acquisition's attach (§3.4 A.4), run inside the link's transaction: the device's visits take the account, and
+   * at a sign-up its first source and SIGNUP conversion are written. A no-op until the acquisition is built (step 4.4).
+   */
+  attach?: LinkAttach;
+}
+
+/** The hook the link runs in its transaction (§3.4 A.7.1 `AcquisitionService.attach`); a failure rolls the link back. */
+export type LinkAttach = (tx: Db, deviceId: number, accountId: string, via: LinkVia, now: Date) => Promise<void>;
+
+/** What a sign-up or sign-in knows of its request, for `linkVisit`. */
+export interface LinkVisit {
+  deviceHash: string;
+  accountId: string;
+  via: Exclude<LinkVia, 'SESSION'>;
+  ip: string | undefined;
+  userAgent: string | null;
+  headers: Record<string, string | string[] | undefined>;
+  now: Date;
 }
 
 const classKey = (c: DeviceClass) => `${c.kind}/${c.os}/${c.browser}/${c.openedIn}/${c.inApp ?? ''}`;
@@ -460,6 +507,7 @@ export class TrackingService {
   private readonly log: Logger;
   private readonly houseAccounts: Pick<HouseAccounts, 'isHouseEmail'>;
   private readonly testEntrants: Pick<TestEntrantAccounts, 'has'>;
+  private readonly attach: LinkAttach;
   private readonly devices = new Map<string, DeviceEntry>();
   private readonly daily = new Map<string, number>();
   private timer: NodeJS.Timeout | null = null;
@@ -472,6 +520,7 @@ export class TrackingService {
     this.log = deps.log ?? noopLogger;
     this.houseAccounts = deps.houseAccounts ?? new HouseAccounts(deps.db, this.clock);
     this.testEntrants = deps.testEntrants ?? new TestEntrantAccounts(deps.db, this.clock);
+    this.attach = deps.attach ?? (async () => {});
     this.buffer = new ViewBuffer({ db: deps.db, clock: this.clock, log: this.log, waiting: deps.waiting ?? (() => false), ...(deps.bufferMaxRows ? { maxRows: deps.bufferMaxRows } : {}) });
     this.subjects = new SubjectResolver(deps.db, this.clock);
   }
@@ -523,8 +572,18 @@ export class TrackingService {
     // 5. The device, with its place (7).
     const placeId = meta.place ? await this.places.idOf(meta.place.country, meta.place.city) : null;
     const cls = classifyDevice({ userAgent: meta.userAgent, hints: clientHintsOf(meta.headers), client: { standalone: batch.d.s, touchPoints: batch.d.t, shortSide: batch.d.w } });
-    const device = await this.deviceOf(meta.deviceHash, cls, placeId, now);
+    let device = await this.deviceOf(meta.deviceHash, cls, placeId, now);
     if (device.staff) return { recorded: 0, dropped: 'STAFF' };
+    // 6. The session link: a collector signed in before this device was linked to them (a 30-day session) is linked
+    // now. A failure is logged and the batch goes on; the next batch tries again.
+    if (meta.account && device.accountId !== meta.account.id) {
+      try {
+        await this.link(meta.deviceHash, meta.account.id, 'SESSION', now);
+      } catch (e) {
+        this.log.warn({ err: errText(e) }, 'views session link failed');
+      }
+      device = this.devices.get(meta.deviceHash) ?? device;
+    }
     // 8. The rows.
     const rows: BufferedView[] = [];
     for (const e of events) {
@@ -553,10 +612,11 @@ export class TrackingService {
     if (!(e.ago >= 0) || e.ago >= VIEW_MAX_AGE_MS) return null;
     if (!(e.ms >= VIEW_MIN_SECONDS * 1000)) return null;
     const seconds = Math.min(Math.round(e.ms / 1000), page === 'LIVE' ? VIEW_MAX_SECONDS_LIVE : VIEW_MAX_SECONDS);
+    const at = new Date(meta.now.getTime() - e.ago);
     return {
-      at: new Date(meta.now.getTime() - e.ago),
+      at,
       deviceId: device.id,
-      accountId: meta.account?.id ?? null,
+      accountId: meta.account?.id ?? lateAccount(device, at),
       page: VIEW_PAGE_CODES[page as SeenPage],
       subject: await this.subjects.resolve(page, e.s),
       seconds,
@@ -569,9 +629,9 @@ export class TrackingService {
    * UPDATE`, safe under concurrency) that also writes a class read differently (an updated system) and the place. A
    * cached device's last sight is written by the buffer, at most every DEVICE_SEEN_EVERY_MS.
    */
-  private async deviceOf(deviceHash: string, cls: DeviceClass | null, placeId: number | null, now: Date): Promise<DeviceEntry> {
+  private async deviceOf(deviceHash: string, cls: DeviceClass | null, placeId: number | null, now: Date, opts: { classOnInsert?: boolean } = {}): Promise<DeviceEntry> {
     const hit = this.devices.get(deviceHash);
-    if (hit && (cls === null || hit.cls === classKey(cls))) {
+    if (hit && (cls === null || opts.classOnInsert || hit.cls === classKey(cls))) {
       this.devices.delete(deviceHash);
       this.devices.set(deviceHash, hit);
       if (now.getTime() - hit.seenAt >= DEVICE_SEEN_EVERY_MS) {
@@ -588,7 +648,7 @@ export class TrackingService {
         oc.column('device_hash').doUpdateSet({
           last_seen_at: sql`greatest(tracking_devices.last_seen_at, excluded.last_seen_at)`,
           last_place_id: sql`coalesce(excluded.last_place_id, tracking_devices.last_place_id)`,
-          ...(cls
+          ...(cls && !opts.classOnInsert
             ? { kind: sql`excluded.kind`, os: sql`excluded.os`, browser: sql`excluded.browser`, opened_in: sql`excluded.opened_in`, in_app: sql`excluded.in_app` }
             : {}),
         }),
@@ -600,8 +660,9 @@ export class TrackingService {
       staff: row.staff_at !== null,
       accountId: row.account_id,
       linkedAt: row.linked_at,
-      cls: cls ? classKey(cls) : (hit?.cls ?? null),
+      cls: cls && !opts.classOnInsert ? classKey(cls) : (hit?.cls ?? null),
       seenAt: now.getTime(),
+      ...(hit?.previousLinkedAt !== undefined && hit.accountId === row.account_id ? { previousLinkedAt: hit.previousLinkedAt } : {}),
     };
     this.remember(deviceHash, entry);
     return entry;
@@ -611,6 +672,68 @@ export class TrackingService {
     this.devices.delete(deviceHash);
     this.devices.set(deviceHash, entry);
     while (this.devices.size > DEVICE_CACHE_SIZE) this.devices.delete(this.devices.keys().next().value as string);
+  }
+
+  /**
+   * A sign-up or a sign-in (routes/account.ts, after the account's own transaction): the device linked to the account,
+   * unless the request is a test entrant's (its network or its account) or an automated agent's. Awaited by the route,
+   * never thrown: a failure is logged and the collector is answered as before; the next signed-in visit links it.
+   */
+  async linkVisit(v: LinkVisit): Promise<void> {
+    try {
+      if (inTestNetwork(v.ip) || isAutomated(v.userAgent, v.headers) || (await this.testEntrants.has(v.accountId))) return;
+      const cls = classifyDevice({ userAgent: v.userAgent, hints: clientHintsOf(v.headers) });
+      await this.link(v.deviceHash, v.accountId, v.via, v.now, cls);
+    } catch (e) {
+      this.log.error({ err: errText(e), via: v.via }, 'device link failed');
+    }
+  }
+
+  /**
+   * Link the device to the account (see the header, §3.3 T.8.4). `cls` is the request's class, written only when the
+   * device is new (a sign-in reads no page, so it never rewrites what the app said). Returns the rows attached. A
+   * SESSION link of a device already linked to that account (another batch got there first) changes nothing.
+   */
+  async link(deviceHash: string, accountId: string, via: LinkVia, now: Date = this.clock(), cls: DeviceClass | null = null): Promise<{ attached: number }> {
+    const device = await this.deviceOf(deviceHash, cls, null, now, { classOnInsert: true });
+    // 1. The rows still in memory take the account at once; then a best-effort flush (put off while the pool waits:
+    // the claimed rows reach the table later already carrying the account, and the sign-in never waits on the pool).
+    this.buffer.claim(device.id, accountId);
+    await this.buffer.flush();
+    const r = await inTransaction(this.db, async (tx) => {
+      // 2. The daily job's lock, then the device row: a link and a day's count never cross; two links of one device wait.
+      await sql`SELECT pg_advisory_xact_lock(hashtext('orbes/views-daily'))`.execute(tx);
+      const d = await tx.selectFrom('tracking_devices').select(['id', 'account_id', 'linked_at']).where('id', '=', device.id).forUpdate().executeTakeFirstOrThrow();
+      if (via === 'SESSION' && d.account_id === accountId) return { attached: 0, since: undefined, linkedAt: d.linked_at, skipped: true };
+      // 3. Since its previous link, or its whole 13 months when it was never linked. 4. The anonymous rows, scans included.
+      const since = d.linked_at;
+      const from = since ?? viewHistoryCutoff(now);
+      const u = await tx
+        .updateTable('collector_views')
+        .set({ account_id: accountId })
+        .where('device_id', '=', device.id)
+        .where('account_id', 'is', null)
+        .where('at', '>=', from)
+        .executeTakeFirst();
+      // 6. The device's link.
+      await tx
+        .insertInto('tracking_device_accounts')
+        .values({ device_id: device.id, account_id: accountId, first_via: via, first_linked_at: now, last_linked_at: now })
+        .onConflict((oc) =>
+          oc.columns(['device_id', 'account_id']).doUpdateSet({
+            links: sql`tracking_device_accounts.links + 1`,
+            last_linked_at: sql`greatest(tracking_device_accounts.last_linked_at, excluded.last_linked_at)`,
+          }),
+        )
+        .execute();
+      await tx.updateTable('tracking_devices').set({ account_id: accountId, linked_at: now }).where('id', '=', device.id).execute();
+      // 7. The acquisition's attach, in the same transaction.
+      await this.attach(tx, device.id, accountId, via, now);
+      return { attached: Number(u.numUpdatedRows ?? 0), since, linkedAt: now, skipped: false };
+    });
+    const entry = this.devices.get(deviceHash) ?? device;
+    this.remember(deviceHash, { ...entry, accountId, linkedAt: r.linkedAt, ...(r.skipped ? {} : { previousLinkedAt: r.since ?? null }) });
+    return { attached: r.attached };
   }
 
   /**
@@ -643,6 +766,18 @@ export class TrackingService {
     this.buffer.dropDevice(id);
     this.remember(deviceHash, { id, staff: true, accountId: known?.account_id ?? null, linkedAt: known?.linked_at ?? null, cls: null, seenAt: now.getTime() });
   }
+}
+
+/**
+ * The late-row rule (§3.3 T.8.3): a row sent without a session, from before the device's link made by this process and
+ * after its previous one (within its 13 months when it had none), is the linked account's: a batch in flight at the
+ * sign-in.
+ */
+function lateAccount(device: DeviceEntry, at: Date): string | null {
+  if (!device.accountId || !device.linkedAt || device.previousLinkedAt === undefined) return null;
+  if (at.getTime() >= device.linkedAt.getTime()) return null;
+  const from = device.previousLinkedAt ?? viewHistoryCutoff(device.linkedAt);
+  return at.getTime() >= from.getTime() ? device.accountId : null;
 }
 
 /** An account's email as `accounts.email_normalized` holds it. */

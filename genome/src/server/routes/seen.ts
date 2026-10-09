@@ -14,20 +14,24 @@
  *     origin, 429 RATE_LIMITED.
  *   - The path is `seen`, not `track` or `collect`: content blockers drop requests to those names.
  *
+ * linkDevice is the sign-up's and the sign-in's one call (routes/account.ts, §3.3 T.8.4): the device cookie set when
+ * there is none (a new device has nothing to attach), then TrackingService.linkVisit, awaited after the account's own
+ * transaction and never thrown.
+ *
  * The sessions (SeenSessions): a phone sends a batch every 30 ± 10 s, so the resolved session (its account, or a
  * console session) is kept SEEN_SESSION_CACHE_MS in memory, keyed by the token's hash, at most SEEN_SESSION_CACHE_MAX
  * entries: about one session read a minute per signed-in phone instead of one per batch. A session signed out or
  * revoked can record views for at most those 30 seconds; nothing else reads this cache.
  */
 import { createHash } from 'node:crypto';
-import type { FastifyPluginAsync, FastifyRequest } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { AppContext } from '../context.js';
 import { connectionPlace } from '../geo/place.js';
 import { ensureDevice } from '../http/device.js';
 import { rateLimitHook } from '../http/rate-limit.js';
 import { parse, seenBody } from '../http/schemas.js';
 import { assertSameOrigin, loadAccount, loadAdmin, sessionToken } from '../http/sessions.js';
-import type { SeenBatch, SeenMeta } from '../services/tracking.js';
+import type { LinkVisit, SeenBatch, SeenMeta } from '../services/tracking.js';
 import type { RouteDeps } from './public.js';
 
 /** How long a resolved session is kept for /api/v1/seen. */
@@ -77,6 +81,20 @@ export class SeenSessions {
     while (this.cache.size > SEEN_SESSION_CACHE_MAX) this.cache.delete(this.cache.keys().next().value as string);
     return value;
   }
+}
+
+/** At a sign-up or a sign-in, once the account and its session exist: the device linked to the account (never thrown). */
+export async function linkDevice(ctx: AppContext, request: FastifyRequest, reply: FastifyReply, accountId: string, via: LinkVisit['via']): Promise<void> {
+  const agent = request.headers['user-agent'];
+  await ctx.services.tracking.linkVisit({
+    deviceHash: ensureDevice(request, reply, ctx.config),
+    accountId,
+    via,
+    ip: request.ip,
+    userAgent: typeof agent === 'string' ? agent : null,
+    headers: request.headers,
+    now: ctx.clock(),
+  });
 }
 
 export const seenRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, limiters }) => {

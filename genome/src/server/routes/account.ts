@@ -29,6 +29,7 @@ import { WISHLIST_MAX } from '../services/wishlist.js';
 import { isCountryCode } from '../../shared/countries.js';
 import { safeFilename } from './admin/codes.js';
 import type { RouteDeps } from './public.js';
+import { linkDevice } from './seen.js';
 
 /** The public view of an account (contract: `{ email, displayName }`). */
 export function accountJson(a: AccountProfile): { email: string; displayName: string | null } {
@@ -50,6 +51,7 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
       clientMeta(request, ctx.config, 'account', userAgentOf(request)),
     );
     setSessionCookie(reply, ctx.config, 'account', session);
+    await linkDevice(ctx, request, reply, account.id, 'SIGN_UP'); // CUSTOMER INTELLIGENCE §3.3 T.8.4: what the device did before is the account's
     reply.code(201);
     return { account: accountJson(account), csrfToken: session.csrfToken };
   });
@@ -65,6 +67,7 @@ export const accountRoutes: FastifyPluginAsync<RouteDeps> = async (app, { ctx, l
     const b = parse(loginBody, request.body);
     const { account, session } = await auth.login({ email: b.email, password: b.password }, clientMeta(request, ctx.config, 'account', userAgentOf(request)));
     setSessionCookie(reply, ctx.config, 'account', session);
+    await linkDevice(ctx, request, reply, account.id, 'SIGN_IN');
     return { account: accountJson(account), csrfToken: session.csrfToken };
   });
 
