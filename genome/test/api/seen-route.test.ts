@@ -15,13 +15,16 @@
  *  - subjects: a slug → its model, a variant's slug → the variant, an unknown slug → null, a serial → its model, a
  *    release's id → itself and a random uuid → null;
  *  - the daily cap of 2 000 rows a device; a full buffer drops the oldest with one warning a minute; a flush put off
- *    while the pool has requests waiting, then written; the shutdown writes what is left.
+ *    while the pool has requests waiting, then written; the shutdown writes what is left; a flush failing for the
+ *    database down keeps every row however many times it fails, and only rows PostgreSQL refuses for their data are
+ *    dropped after FLUSH_MAX_ATTEMPTS failures in a row.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { FastifyRequest } from 'fastify';
 import { SEEN_SESSION_CACHE_MAX, SEEN_SESSION_CACHE_MS, SeenSessions } from '../../src/server/routes/seen.js';
-import { BUFFER_FLUSH_AT, DEVICE_DAILY_CAP, inTestNetwork, TrackingService, type SeenBatch, type SeenMeta } from '../../src/server/services/tracking.js';
+import { BUFFER_FLUSH_AT, DEVICE_DAILY_CAP, FLUSH_MAX_ATTEMPTS, inTestNetwork, isDataRejection, TrackingService, ViewBuffer, type BufferedView, type SeenBatch, type SeenMeta } from '../../src/server/services/tracking.js';
+import type { Db } from '../../src/server/db/connection.js';
 import { VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
 import { pseudonymize } from '../../src/server/http/client.js';
 import type { AppContext } from '../../src/server/context.js';
@@ -340,6 +343,68 @@ describe('POST /api/v1/seen (plan CUSTOMER INTELLIGENCE §3.3 T.8.7)', () => {
     await tracking.stop();
     expect(await count()).toEqual([4, 5, 6, 7]);
     expect(BUFFER_FLUSH_AT).toBe(500);
+  });
+
+  it('keeps every row through a database that is down, however many flushes fail, and drops only rows PostgreSQL refuses for their data', async () => {
+    const tracking = new TrackingService({ db: h.ctx.db, places: h.ctx.services.places, clock: h.clock.now });
+    await tracking.ingest(batch([view('NOW')]), metaOf('E'.repeat(43)));
+    await tracking.stop();
+    const device = await h.ctx.db.selectFrom('tracking_devices').select('id').where('device_hash', '=', 'E'.repeat(43)).executeTakeFirstOrThrow();
+    // The INSERT of `collector_views` throws `fail()` while `failing` is above 0; everything else is the real database.
+    let failing = 0;
+    let fail: () => Error = () => new Error('unset');
+    const db = new Proxy(h.ctx.db, {
+      get(target, prop) {
+        if (prop === 'insertInto')
+          return (table: 'collector_views') => {
+            const qb = target.insertInto(table);
+            return {
+              values: (v: Parameters<typeof qb.values>[0]) => {
+                const q = qb.values(v);
+                return { execute: async () => (failing-- > 0 ? Promise.reject(fail()) : q.execute()) };
+              },
+            };
+          };
+        const v = Reflect.get(target, prop, target) as unknown;
+        return typeof v === 'function' ? (v as (...a: unknown[]) => unknown).bind(target) : v;
+      },
+    }) as Db;
+    const errors: string[] = [];
+    const log: Logger = { info: () => {}, warn: () => {}, error: (_o, msg) => void errors.push(String(msg)) };
+    const buffer = new ViewBuffer({ db, clock: h.clock.now, log, waiting: () => false });
+    const row = (seconds: number): BufferedView => ({ at: h.clock.now(), deviceId: device.id, accountId: null, page: VIEW_PAGE_CODES.NOW, subject: null, seconds, placeId: null });
+    const written = async () => (await h.ctx.db.selectFrom('collector_views').select('seconds').where('device_id', '=', device.id).where('seconds', '>=', 100).orderBy('seconds').execute()).map((r) => r.seconds);
+
+    // The database down (a refused connection, as pg throws it) six times in a row: every row is kept, then written.
+    fail = () => Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), { code: 'ECONNREFUSED' });
+    buffer.push([row(101), row(102), row(103)]);
+    failing = FLUSH_MAX_ATTEMPTS + 1;
+    for (let i = 0; i < FLUSH_MAX_ATTEMPTS + 1; i++) expect(await buffer.flush()).toEqual({ written: 0, deferred: false, failed: true });
+    expect(buffer.size).toBe(3);
+    // An administrator's shutdown of the server (57P01) is not the rows' fault either.
+    fail = () => Object.assign(new Error('terminating connection due to administrator command'), { code: '57P01' });
+    failing = FLUSH_MAX_ATTEMPTS;
+    for (let i = 0; i < FLUSH_MAX_ATTEMPTS; i++) await buffer.flush();
+    expect(buffer.size).toBe(3);
+    expect(await buffer.flush()).toEqual({ written: 3, deferred: false, failed: false });
+    expect(await written()).toEqual([101, 102, 103]);
+    expect(errors).toEqual([]);
+
+    // Rows PostgreSQL refuses (a foreign key violation, 23503): kept FLUSH_MAX_ATTEMPTS − 1 times, then dropped, logged.
+    fail = () => Object.assign(new Error('insert or update on table "collector_views" violates foreign key constraint'), { code: '23503' });
+    buffer.push([row(104)]);
+    failing = FLUSH_MAX_ATTEMPTS;
+    for (let i = 0; i < FLUSH_MAX_ATTEMPTS - 1; i++) await buffer.flush();
+    expect(buffer.size).toBe(1);
+    await buffer.flush();
+    expect(buffer.size).toBe(0);
+    expect(errors).toEqual(['views flush failed; rows dropped']);
+    expect(await written()).toEqual([101, 102, 103]);
+
+    // Which errors count as the rows' own: SQLSTATE classes 22 and 23 only.
+    expect(['22001', '22P02', '23505', '23514'].map((code) => isDataRejection({ code }))).toEqual([true, true, true, true]);
+    expect(['57P01', '08006', '53300', 'ECONNREFUSED', 'ETIMEDOUT'].map((code) => isDataRejection({ code }))).toEqual([false, false, false, false, false]);
+    expect(isDataRejection(new Error('Connection terminated unexpectedly'))).toBe(false);
   });
 
   /** A request's meta for TrackingService.ingest called directly: an iPhone in Paris, no session. */

@@ -9,7 +9,8 @@
  *  - prepare() creates the one `tracking_state` row once; backfillScans() turns the 13 months of scans before it into
  *    devices and SCAN rows by keyset batches: run twice, the same counts and the second does nothing; a failure after
  *    the first batch resumes after it on the next boot, with no scan written twice or skipped; scans from the start on
- *    are left to recordScan; staff scans, robots, scans without a device and scans older than 13 months are left out.
+ *    are left to recordScan; staff scans, robots, scans without a device, scans older than 13 months, the team's own
+ *    account's scans and a browser marked staff's (before the batch is read, or while it is written) are left out.
  * The verify route's own tests (public.test.ts, verification/) are unchanged.
  */
 import { randomUUID } from 'node:crypto';
@@ -115,10 +116,11 @@ describe('recordScan and the past scans (plan CUSTOMER INTELLIGENCE §3.3 T.8.3,
   describe('prepare() and the past scans', () => {
     const START = new Date('2026-10-09T08:00:00.000Z');
     let accountId: string;
+    let teamId: string;
     let productId: string;
     const ids: Record<string, string> = {};
 
-    async function past(key: string, o: { at: string; device?: string | null; type?: 'VERIFY' | 'ADMIN_TEST'; family?: string | null; country?: string | null; account?: boolean }) {
+    async function past(key: string, o: { at: string; device?: string | null; type?: 'VERIFY' | 'ADMIN_TEST'; family?: string | null; country?: string | null; account?: boolean | string }) {
       ids[key] = (
         await h.ctx.db
           .insertInto('scan_events')
@@ -127,7 +129,7 @@ describe('recordScan and the past scans (plan CUSTOMER INTELLIGENCE §3.3 T.8.3,
             product_id: productId,
             event_type: o.type ?? 'VERIFY',
             device_hash: o.device === undefined ? `${key.toUpperCase().padEnd(43, 'x')}`.slice(0, 43) : o.device,
-            account_id: o.account ? accountId : null,
+            account_id: typeof o.account === 'string' ? o.account : o.account ? accountId : null,
             country: o.country === undefined ? 'FR' : o.country,
             user_agent_family: o.family === undefined ? 'Safari/iOS' : o.family,
             result_state: 'AUTHENTIC',
@@ -151,6 +153,12 @@ describe('recordScan and the past scans (plan CUSTOMER INTELLIGENCE §3.3 T.8.3,
       const { email } = await accountClient(h, { ip: '198.51.100.85' });
       accountId = (await h.ctx.db.selectFrom('accounts').select('id').where('email', '=', email).executeTakeFirstOrThrow()).id;
       productId = (await issue(h.ctx, catalog)).product.id;
+      // The team's own account: its email is a console login's.
+      const team = await accountClient(h, { ip: '198.51.100.86' });
+      await h.ctx.db.insertInto('admin_users').values({ email: team.email, email_normalized: team.email.toLowerCase(), password_hash: 'scrypt$x', role: 'AUDITOR' }).execute();
+      teamId = (await h.ctx.db.selectFrom('accounts').select('id').where('email', '=', team.email).executeTakeFirstOrThrow()).id;
+      // A browser already marked staff (it opened the console).
+      await tracking().markStaff('MARKED'.padEnd(43, 'x'), new Date('2026-10-08T10:00:00.000Z'));
       // The harness's boot (createContext) wrote the row at its own start; the recording here starts at START instead.
       expect(await h.ctx.db.selectFrom('tracking_state').select(['id', 'scans_backfilled_at']).execute()).toEqual([{ id: 1, scans_backfilled_at: null }]);
       await h.ctx.db.deleteFrom('tracking_state').execute();
@@ -164,6 +172,9 @@ describe('recordScan and the past scans (plan CUSTOMER INTELLIGENCE §3.3 T.8.3,
       await past('nodevice', { at: '2026-10-03T12:00:00.000Z', device: null });
       await past('old', { at: '2025-09-08T21:00:00.000Z' }); // 23:00 Paris on 8 Sep 2025: before the 13 months
       await past('after', { at: '2026-10-09T09:00:00.000Z' }); // after the start: recordScan's
+      await past('team', { at: '2026-10-04T10:00:00.000Z', account: teamId }); // the team's own account
+      await past('marked', { at: '2026-10-04T11:00:00.000Z', device: 'MARKED'.padEnd(43, 'x') }); // a browser marked staff
+      await past('late', { at: '2026-10-05T10:00:00.000Z', country: 'NL' }); // marked staff while its batch is written
     });
 
     it('creates the one tracking_state row once, at the first boot', async () => {
@@ -178,6 +189,8 @@ describe('recordScan and the past scans (plan CUSTOMER INTELLIGENCE §3.3 T.8.3,
       const places = {
         idOf: async (country: string | null | undefined, city?: string | null) => {
           if (country === 'DE' && failDe) throw new Error('database unavailable');
+          // Between the batch's read and its transaction, the browser of « late » opens the console.
+          if (country === 'NL') await tracking().markStaff('LATE'.padEnd(43, 'x'));
           return h.ctx.services.places.idOf(country, city);
         },
       };
@@ -192,7 +205,8 @@ describe('recordScan and the past scans (plan CUSTOMER INTELLIGENCE §3.3 T.8.3,
       // The next boot resumes after it.
       failDe = false;
       const nextBoot = new TrackingService({ db: h.ctx.db, places, clock: h.clock.now });
-      expect(await nextBoot.backfillScans({ batchSize: 2 })).toEqual({ batches: 2, scans: 3, done: true });
+      // b1 and a1, then a2 and « late » (read, then left out), then an empty batch: done.
+      expect(await nextBoot.backfillScans({ batchSize: 2 })).toEqual({ batches: 3, scans: 4, done: true });
       const rows = await pastRows();
       expect(rows.map((r) => ({ at: r.at.toISOString(), account: r.account_id, subject: r.subject, seconds: r.seconds, country: r.country, city: r.city, device: r.device_hash.slice(0, 2), class: [r.kind, r.os, r.browser] }))).toEqual([
         { at: '2025-09-09T10:00:00.000Z', account: null, subject: catalog.modelId, seconds: 0, country: null, city: null, device: 'C1', class: ['UNKNOWN', 'OTHER', 'OTHER'] },
@@ -209,7 +223,16 @@ describe('recordScan and the past scans (plan CUSTOMER INTELLIGENCE §3.3 T.8.3,
       // The scan after the start is recordScan's: never backfilled.
       expect((await h.ctx.db.selectFrom('collector_views').select('id').where('at', '=', new Date('2026-10-09T09:00:00.000Z')).execute())).toEqual([]);
       const done = await h.ctx.db.selectFrom('tracking_state').selectAll().executeTakeFirstOrThrow();
-      expect(done.scans_after_id).toBe(ids.a2);
+      expect(done.scans_after_id).toBe(ids.late);
+      // The team's own account, a browser marked staff before and one marked while its batch was written: no row.
+      const left = await h.ctx.db
+        .selectFrom('collector_views as v')
+        .innerJoin('tracking_devices as d', 'd.id', 'v.device_id')
+        .select('d.device_hash')
+        .where((eb) => eb.or([eb('v.account_id', '=', teamId), eb('d.device_hash', 'in', ['TEAM'.padEnd(43, 'x'), 'MARKED'.padEnd(43, 'x'), 'LATE'.padEnd(43, 'x')])]))
+        .execute();
+      expect(left).toEqual([]);
+      expect((await h.ctx.db.selectFrom('tracking_devices').select('staff_at').where('device_hash', '=', 'LATE'.padEnd(43, 'x')).executeTakeFirstOrThrow()).staff_at).not.toBeNull();
       expect(done.scans_backfilled_at).toEqual(h.clock.now());
 
       // A later boot does nothing.

@@ -17,8 +17,10 @@
  *            place, at most every DEVICE_SEEN_EVERY_MS a device. A flush is put off while the database pool has
  *            requests waiting, so the recording never queues ahead of a collector's request on the shared server.
  *            Past BUFFER_MAX_ROWS the oldest rows are dropped, with one warning a minute. A failed flush keeps its
- *            rows for the next try (a chunk failing FLUSH_MAX_ATTEMPTS times in a row is dropped, logged, so one bad
- *            row never holds the others back). `stop()` writes what is left at shutdown.
+ *            rows for the next try, within the same bound: the database down, restarting or slow never drops a row
+ *            by itself. Only a chunk PostgreSQL refuses for its data (SQLSTATE class 22 or 23) FLUSH_MAX_ATTEMPTS times
+ *            in a row is dropped, logged, so one bad row never holds the others back. `stop()` writes what is left at
+ *            shutdown.
  *   link     (§3.3 T.8.4) at sign-up (SIGN_UP), sign-in (SIGN_IN) and on a signed-in visit whose device is not linked to
  *            that account yet (SESSION): the device's anonymous rows since its previous link (all of its last 13 months
  *            when it was never linked) take the account. First in memory (`buffer.claim`, so a flush put off during a
@@ -40,7 +42,9 @@
  *            watermark, BACKFILL_BATCH scans a transaction that also moves the watermark, so a crash resumes after the
  *            last batch with no scan written twice or skipped; a short batch marks it done (`scans_backfilled_at`),
  *            and a later boot does nothing. Their class from `user_agent_family` (kind UNKNOWN until a visit), their
- *            place the scan's country, their account `scan_events.account_id` as recorded.
+ *            place the scan's country, their account `scan_events.account_id` as recorded. Left out as the live scans
+ *            are: ADMIN_TEST, a `Bot/` family, a test entrant's account, the team's own account (houseAccount) and a
+ *            browser marked staff (before the batch is read, or while it is written).
  *   markStaff  a browser that opened the console is staff's from its first view: its buffered rows go, `staff_at` is
  *            set once, its rows are deleted in batches of STAFF_DELETE_BATCH; the daily totals already counted keep
  *            their few views.
@@ -51,6 +55,7 @@
 import { BlockList } from 'node:net';
 import { sql } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
+import { pgError } from '../db/pg-errors.js';
 import { VIEW_PAGE_CODES, VIEW_PAGES, type LinkVia, type ViewPage } from '../db/schema.js';
 import type { ConnectionPlace } from '../geo/place.js';
 import { canonicalIp } from '../http/client.js';
@@ -59,7 +64,7 @@ import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 import { normalizeEmail } from './auth.js';
 import { SLUG_RE } from './lookbook.js';
 import type { PlaceService } from './places.js';
-import { HouseAccounts, TestEntrantAccounts } from './population.js';
+import { houseAccount, HouseAccounts, TestEntrantAccounts } from './population.js';
 import { parisDay, parisDayStart } from './schedule.js';
 
 // ── Constants (in code: no new environment variable, §3.3 T.8.3) ─────────────────────────────────────────────────
@@ -98,7 +103,10 @@ export const SUBJECT_REFRESH_MS = 5 * 60_000;
 export const PIECE_CACHE_SIZE = 2_000;
 /** The past scans turned into devices and SCAN rows per transaction at boot (§3.3 T.11). */
 export const BACKFILL_BATCH = 1_000;
-/** A chunk that failed this many flushes in a row is dropped (logged), so one bad row never holds the others back. */
+/**
+ * A chunk PostgreSQL refused for its data (SQLSTATE class 22 or 23) this many flushes in a row is dropped (logged), so
+ * one bad row never holds the others back. Any other failure (the database down, restarting, slow) keeps the rows.
+ */
 export const FLUSH_MAX_ATTEMPTS = 5;
 
 /** Every page the collector app may name: VIEW_PAGES but SCAN, which only the server writes at a scan. */
@@ -302,8 +310,15 @@ export class ViewBuffer {
           .values(chunk.map((r) => ({ at: r.at, device_id: r.deviceId, account_id: r.accountId, page: r.page, subject: r.subject, seconds: r.seconds, place_id: r.placeId })))
           .execute();
       } catch (e) {
-        this.failures += 1;
         out.failed = true;
+        // Only PostgreSQL refusing the rows themselves counts toward dropping them. The database down, restarting or
+        // slow keeps every row for the next try, within BUFFER_MAX_ROWS (§3.3 T.8.3, T.12).
+        if (!isDataRejection(e)) {
+          this.failures = 0;
+          this.warnFailure(e);
+          return out;
+        }
+        this.failures += 1;
         if (this.failures >= FLUSH_MAX_ATTEMPTS) {
           // One bad row would otherwise hold every later one back for good.
           this.remove(chunk);
@@ -361,6 +376,15 @@ export class ViewBuffer {
     this.lastFailWarn = now;
     this.deps.log.warn({ err: errText(e), held: this.rows.length }, 'views flush failed; rows kept for the next try');
   }
+}
+
+/**
+ * Whether PostgreSQL refused the rows themselves: SQLSTATE class 22 (data exception) or 23 (integrity constraint). A
+ * connection refused, a timeout or a shutdown is not: those rows are kept for the next try.
+ */
+export function isDataRejection(e: unknown): boolean {
+  const code = pgError(e)?.code;
+  return code !== undefined && (code.startsWith('22') || code.startsWith('23'));
 }
 
 function errText(e: unknown): { message: string } {
@@ -770,7 +794,10 @@ export class TrackingService {
         .where('s.device_hash', 'is not', null)
         .where('s.event_type', '<>', 'ADMIN_TEST')
         .where((eb) => eb.or([eb('s.user_agent_family', 'is', null), eb('s.user_agent_family', 'not like', 'Bot/%')]))
-        .where(sql<boolean>`NOT EXISTS (SELECT 1 FROM test_entrants te WHERE te.account_id = s.account_id)`);
+        .where(sql<boolean>`NOT EXISTS (SELECT 1 FROM test_entrants te WHERE te.account_id = s.account_id)`)
+        // The team's own (§3.0 (d)): its accounts, and a browser already marked staff's, as ingest and recordScan drop them.
+        .where(sql<boolean>`(s.account_id IS NULL OR NOT (${houseAccount('s.account_id')}))`)
+        .where(sql<boolean>`NOT EXISTS (SELECT 1 FROM tracking_devices td WHERE td.device_hash = s.device_hash AND td.staff_at IS NOT NULL)`);
       if (state.scans_after_id) {
         // The watermark is compared in SQL, at the database's own precision (microseconds), never through a JS Date.
         q = q.where(sql<boolean>`(s.occurred_at, s.id) > (SELECT ts.scans_after_at, ts.scans_after_id FROM tracking_state ts WHERE ts.id = 1)`);
@@ -801,23 +828,28 @@ export class TrackingService {
             .insertInto('tracking_devices')
             .values([...byDevice].map(([hash, d]) => ({ device_hash: hash, ...familyClass(d.family), first_seen_at: d.first, last_seen_at: d.last })))
             .onConflict((oc) => oc.column('device_hash').doUpdateSet({ last_seen_at: sql`greatest(tracking_devices.last_seen_at, excluded.last_seen_at)` }))
-            .returning(['id', 'device_hash'])
+            .returning(['id', 'device_hash', 'staff_at'])
             .execute();
-          const idOf = new Map(devices.map((d) => [d.device_hash, d.id]));
-          await tx
-            .insertInto('collector_views')
-            .values(
-              scans.map((sc) => ({
-                at: sc.occurred_at,
-                device_id: idOf.get(sc.device_hash!)!,
-                account_id: sc.account_id,
-                page: VIEW_PAGE_CODES.SCAN,
-                subject: sc.model_id,
-                seconds: 0,
-                place_id: placeOf.get(sc.country?.trim() ?? '') ?? null,
-              })),
-            )
-            .execute();
+          // A browser marked staff since the batch was read (its row is locked by the upsert above, so a marking either
+          // came first and shows here, or waits and then deletes these rows) gets none.
+          const idOf = new Map(devices.filter((d) => d.staff_at === null).map((d) => [d.device_hash, d.id]));
+          const kept = scans.filter((sc) => idOf.has(sc.device_hash!));
+          if (kept.length > 0) {
+            await tx
+              .insertInto('collector_views')
+              .values(
+                kept.map((sc) => ({
+                  at: sc.occurred_at,
+                  device_id: idOf.get(sc.device_hash!)!,
+                  account_id: sc.account_id,
+                  page: VIEW_PAGE_CODES.SCAN,
+                  subject: sc.model_id,
+                  seconds: 0,
+                  place_id: placeOf.get(sc.country?.trim() ?? '') ?? null,
+                })),
+              )
+              .execute();
+          }
         }
         await tx
           .updateTable('tracking_state')
