@@ -39,6 +39,11 @@ export const NOTE_MAX = 2000;
 export const NOTES_SHOWN = 50;
 /** The suggestions offered at most. */
 export const SUGGESTIONS_MAX = 50;
+/**
+ * The audit actions of tags and private notes: staff-only, so the right-of-access export's activity leaves them out
+ * (§3.0 (k): no tag and no note in the file that goes to the client, not even that one was written).
+ */
+export const CLIENT_NOTE_ACTIONS: readonly string[] = Object.freeze(['account.tag.add', 'account.tag.remove', 'account.note.add', 'account.note.remove']);
 /** Suggested while no tag is used anywhere: the owner's three examples. */
 export const STARTING_TAGS: readonly string[] = Object.freeze(['VIP', 'PRESS', 'FRIEND OF THE HOUSE']);
 
@@ -163,20 +168,7 @@ export class ClientNoteService {
   async notes(accountId: string, { all = false }: { all?: boolean } = {}, db: Db = this.db): Promise<PrivateNotes> {
     const id = knownAccount(accountId);
     await this.exists(db, id);
-    let q = db
-      .selectFrom('account_notes as n')
-      .leftJoin('admin_users as u', 'u.id', 'n.created_by')
-      .select(['n.id', 'n.body', 'n.created_at', 'n.created_by', 'u.email'])
-      .where('n.account_id', '=', id)
-      .where('n.removed_at', 'is', null)
-      .orderBy('n.created_at', 'desc')
-      .orderBy('n.id', 'desc');
-    if (!all) q = q.limit(NOTES_SHOWN);
-    const [rows, count] = await Promise.all([
-      q.execute(),
-      db.selectFrom('account_notes').select((eb) => eb.fn.countAll<number>().as('n')).where('account_id', '=', id).where('removed_at', 'is', null).executeTakeFirstOrThrow(),
-    ]);
-    return { items: rows.map((r) => ({ id: r.id, text: r.body, at: r.created_at, by: r.email ?? null, byId: r.created_by })), total: Number(count.n) };
+    return accountPrivateNotes(db, id, { all });
   }
 
   /** Add a private note (OPERATOR, ADMIN): see `cleanNote`; a DELETED account 409. Answers the note. */
@@ -282,6 +274,24 @@ export class ClientNoteService {
     if (rows.rows.length === 0) return STARTING_TAGS.map((tag) => ({ tag, accounts: 0 }));
     return rows.rows.map((r) => ({ tag: r.tag, accounts: Number(r.accounts) }));
   }
+}
+
+/** An account's private notes not removed, the newest first: the NOTES_SHOWN newest (every one with `all`), and how many. */
+export async function accountPrivateNotes(db: Db, accountId: string, { all = false }: { all?: boolean } = {}): Promise<PrivateNotes> {
+  let q = db
+    .selectFrom('account_notes as n')
+    .leftJoin('admin_users as u', 'u.id', 'n.created_by')
+    .select(['n.id', 'n.body', 'n.created_at', 'n.created_by', 'u.email'])
+    .where('n.account_id', '=', accountId)
+    .where('n.removed_at', 'is', null)
+    .orderBy('n.created_at', 'desc')
+    .orderBy('n.id', 'desc');
+  if (!all) q = q.limit(NOTES_SHOWN);
+  const [rows, count] = await Promise.all([
+    q.execute(),
+    db.selectFrom('account_notes').select((eb) => eb.fn.countAll<number>().as('n')).where('account_id', '=', accountId).where('removed_at', 'is', null).executeTakeFirstOrThrow(),
+  ]);
+  return { items: rows.map((r) => ({ id: r.id, text: r.body, at: r.created_at, by: r.email ?? null, byId: r.created_by })), total: Number(count.n) };
 }
 
 /** An account's tags, in the order they were added (then by their words). */

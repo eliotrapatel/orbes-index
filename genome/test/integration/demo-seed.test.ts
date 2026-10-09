@@ -357,7 +357,11 @@ describe('demo seed', () => {
       ['system', 'staff'],
       ['account', 'collector'],
     ]);
-    expect(audits[4]).toMatchObject({ actor_id: 'demo-seed', details: { by: 'staff', fields: ['birthDate'], birthDate: 'set' } });
+    expect(audits[4]).toMatchObject({ actor_id: 'demo-seed', details: { by: 'staff', fields: ['birthDate'], birthDate: 'set', noteId: expect.any(String) } });
+    // Its reason, a private note of the client sheet written in the same transaction (step 5.4), by the seed: no one.
+    const reason = await ctx.db.selectFrom('account_notes').select(['id', 'body', 'created_by']).where('account_id', '=', sofiaId).execute();
+    expect(reason).toEqual([{ id: (audits[4]!.details as { noteId: string }).noteId, body: 'Date of birth changed: The client gave it on the phone to ORBES Client Services.', created_by: null }]);
+    expect(JSON.stringify(audits)).not.toContain('on the phone');
     const json = JSON.stringify(audits);
     for (const typed of ['Camille', 'Paris', '1991-04-12', '1987-09-23', '639981234', 'camille.martin.demo', 'colleague']) expect(json).not.toContain(typed);
 

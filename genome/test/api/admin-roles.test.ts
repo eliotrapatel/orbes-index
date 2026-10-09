@@ -24,6 +24,7 @@
  * the supplier orders, read by an AUDITOR with their PDF, proposed, drafted, sent and settled by an OPERATOR, NEXT LOT §3.5.6.3;
  * the console's links and their channels, read by an AUDITOR, made, changed, archived and removed by an OPERATOR, their
  * reports and the collectors behind a figure read by an AUDITOR, CUSTOMER INTELLIGENCE §3.4 A.7.2; the client sheet's
+ * profile, its date of birth and default address edited by an OPERATOR, CUSTOMER INTELLIGENCE §3.1 P.6.5, P.6.6, and its
  * tags and private notes, read by an AUDITOR, written by an OPERATOR, CUSTOMER INTELLIGENCE §3.6 C.9);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
@@ -433,8 +434,12 @@ const PROBES: Probe[] = [
   { group: 'links', method: 'PATCH', url: `/api/admin/links/${UUID}`, body: INVALID, min: 'OPERATOR' },
   { group: 'links', method: 'POST', url: `/api/admin/links/${UUID}/archive`, min: 'OPERATOR' },
   { group: 'links', method: 'POST', url: `/api/admin/links/${UUID}/unarchive`, min: 'OPERATOR' },
-  // The client sheet's tags and private notes (plan CUSTOMER INTELLIGENCE §3.6 C.9): read from AUDITOR, written by an
-  // OPERATOR (a note removed by its writer or an ADMIN: the service's rule, test/api/client-sheet.test.ts).
+  // The client sheet's Profile, tags and private notes (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, §3.6 C.9): read from
+  // AUDITOR, edited and written by an OPERATOR (a note removed by its writer or an ADMIN: the service's rule,
+  // test/api/client-sheet.test.ts).
+  { group: 'client-sheet', method: 'PUT', url: `/api/admin/owners/${UUID}/profile`, body: INVALID, min: 'OPERATOR' },
+  { group: 'client-sheet', method: 'PUT', url: `/api/admin/owners/${UUID}/birth-date`, body: INVALID, min: 'OPERATOR' },
+  { group: 'client-sheet', method: 'PUT', url: `/api/admin/owners/${UUID}/default-address`, body: INVALID, min: 'OPERATOR' },
   { group: 'client-sheet', method: 'GET', url: '/api/admin/tags', min: 'AUDITOR' },
   { group: 'client-sheet', method: 'GET', url: `/api/admin/owners/${UUID}/notes?all=1`, min: 'AUDITOR' },
   { group: 'client-sheet', method: 'POST', url: `/api/admin/owners/${UUID}/tags`, body: INVALID, min: 'OPERATOR' },

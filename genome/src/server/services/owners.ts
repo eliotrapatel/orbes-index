@@ -20,7 +20,13 @@
  *            ORBES Client Services wrote on its orders, draw entries, requests
  *            of the private salon and LIVE reservations; its orders and their
  *            steps are the fulfilment's (services/fulfilment.ts `forAccount`,
- *            joined by the route).
+ *            joined by the route). The customer intelligence lot (plan of
+ *            2026-10-08, §3.6 C.4) adds the client's profile (ProfileService
+ *            forStaff, read in clear: the route withholds for an AUDITOR),
+ *            Client Services' tags and 50 newest private notes
+ *            (services/client-notes.ts), and whether the email is a console
+ *            login's (`teamAccount`). The export carries none of the tags and
+ *            notes, nor their audit entries (§3.0 (k)).
  *   lock     POST /api/admin/owners/:id/lock (ADMIN): status LOCKED, in one
  *            transaction with every session of the account revoked, its
  *            pending transfers cancelled, its open links to ownership
@@ -90,7 +96,9 @@ import { accountCareRequests, careThisYear, type CareAllowance, type ExportedCar
 import { accountGuaranteesForStaff, exportedGuarantees, type AdminGuarantee, type ExportedGuarantee } from './guarantees.js';
 import { exportedSizes, type ExportedSize } from './sizes.js';
 import { exportedAddresses, type ExportedAddress } from './addresses.js';
-import { exportedProfile, type ExportedProfile, type ExportedTastes } from './profiles.js';
+import { exportedProfile, ProfileService, type ExportedProfile, type ExportedTastes, type StaffProfileView } from './profiles.js';
+import { accountPrivateNotes, accountTags, CLIENT_NOTE_ACTIONS, type PrivateNotes } from './client-notes.js';
+import { TasteService } from './tastes.js';
 import { exportedOrigin, exportedOriginCount, type ExportedOrigin } from './acquisition-reads.js';
 import { exportedBrowsing, exportedBrowsingCount, type ExportedBrowsing } from './tracking-reads.js';
 import { exportedWishes, type ExportedWish } from './wishlist.js';
@@ -288,6 +296,18 @@ export interface OwnerSheet {
    * Empty: no priced piece.
    */
   lifetimeValue: LifetimeValue;
+  /**
+   * Plan CUSTOMER INTELLIGENCE §3.6 C.4.2: the client's profile (ProfileService.forStaff), read in clear; the route
+   * withholds the date of birth, the phone, the city, the Instagram and the address for an AUDITOR (serialize.ts
+   * `ownerProfile`, §3.0 (h)).
+   */
+  profile: StaffProfileView;
+  /** §3.6 C.4.3: ORBES Client Services' tags on the client, in the order they were added. Never in the export. */
+  tags: string[];
+  /** §3.6 C.4.3: ORBES Client Services' private notes, the 50 newest, and how many there are. Never in the export. */
+  privateNotes: PrivateNotes;
+  /** §3.0 (d): the account's email is a console login's, so it is left out of the Collectors page and the export. */
+  teamAccount: boolean;
 }
 
 /** BP-19 T10: what the tier program gave the account and what is in use (the console's Club block). */
@@ -472,7 +492,8 @@ export interface AccountExport {
   tierGrants: ExportedTierGrant[];
   /**
    * Every audit entry that names the account, oldest first: those about it (sign-ins, password changes, recovery,
-   * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans).
+   * lock) and those it made (pieces registered, claim codes tried, transfers, incidents declared, reports on scans);
+   * never Client Services' tags and private notes (plan CUSTOMER INTELLIGENCE §3.0 (k), CLIENT_NOTE_ACTIONS).
    */
   activity: {
     occurredAt: Date;
@@ -503,6 +524,8 @@ export interface OwnerServiceDeps {
   audit: AuditService;
   sessions: SessionService;
   ownership: OwnershipService;
+  /** The client sheet's Profile (plan CUSTOMER INTELLIGENCE §3.6 C.4.2); its own over the same database when not given. */
+  profiles?: ProfileService;
   clock?: Clock;
 }
 
@@ -521,6 +544,7 @@ export class OwnerService {
   private readonly audit: AuditService;
   private readonly sessions: SessionService;
   private readonly ownership: OwnershipService;
+  private readonly profiles: ProfileService;
   private readonly clock: Clock;
 
   constructor(deps: OwnerServiceDeps) {
@@ -529,6 +553,7 @@ export class OwnerService {
     this.sessions = deps.sessions;
     this.ownership = deps.ownership;
     this.clock = deps.clock ?? systemClock;
+    this.profiles = deps.profiles ?? new ProfileService({ db: deps.db, audit: deps.audit, tastes: new TasteService({ db: deps.db, clock: this.clock }), clock: this.clock });
   }
 
   // ── Search ───────────────────────────────────────────────────────────────
@@ -622,6 +647,8 @@ export class OwnerService {
     const club = await this.ownerClub(owner.id, standing.tier, now);
     const guarantees = await accountGuaranteesForStaff(this.db, owner.id, now);
     const lifetimeValue = await collectorValue(this.db, owner.id);
+    // Plan CUSTOMER INTELLIGENCE §3.6 C.4: the Profile, the tags and the 50 newest private notes.
+    const [profile, tags, privateNotes] = await Promise.all([this.profiles.forStaff(owner.id, { inClear: true }, this.db), accountTags(this.db, owner.id), accountPrivateNotes(this.db, owner.id)]);
     return {
       ...client,
       owner,
@@ -641,6 +668,10 @@ export class OwnerService {
       messages: conversation,
       guarantees,
       lifetimeValue,
+      profile,
+      tags,
+      privateNotes,
+      teamAccount: profile.teamAccount,
     };
   }
 
@@ -962,6 +993,8 @@ export class OwnerService {
             eb.and([eb('actor_type', '=', 'account'), eb('actor_id', '=', a.id)]),
           ]),
         )
+        // Client Services' tags and private notes stay out, even that one was written (§3.0 (k)).
+        .where('action', 'not in', [...CLIENT_NOTE_ACTIONS])
         .orderBy('id')
         .limit(EXPORT_LIST_LIMIT + 1)
         .execute();

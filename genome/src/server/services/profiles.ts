@@ -13,6 +13,8 @@
  *                  saved, and how complete it is. No staff name, no author, no audit data.
  *   save           PUT /api/v1/account/profile: the whole profile with its tastes, in one transaction (below).
  *   saveByStaff    Client Services' Edit the profile: the same without the date of birth; a LOCKED account included.
+ *   setBirthDateByStaff  Client Services' Change the date of birth (step 5.4): set, changed or removed, with the reason
+ *                  kept as a private note (services/client-notes.ts) in the same transaction; never the collector's once.
  *   forStaff       the client sheet's Profile: the collector's view and who changed what when; with `inClear` false (an
  *                  AUDITOR) the date of birth, the phone, the city, the Instagram and the address are withheld, the age
  *                  band given instead.
@@ -50,6 +52,7 @@ import { SYSTEM_ACTOR, systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
 import { customerAccountLocked } from './auth.js';
 import { countedCollector, houseAccount } from './population.js';
+import { insertNote } from './client-notes.js';
 import { profileName } from './sign-up.js';
 import { parisDay } from './schedule.js';
 import { accountTastes, TasteService, type AccountTastes, type FinishOption, type Taste, type TasteCounts, type TasteOption, type TasteOptions } from './tastes.js';
@@ -166,6 +169,8 @@ export const HEARD_PRESETS: readonly string[] = ['Instagram', 'TikTok', 'A frien
 export const HEARD_LABEL_MAX = 40;
 /** The answers offered at once, Other included. */
 export const HEARD_OFFERED_MAX = 12;
+/** The reason of a date of birth changed by Client Services, kept as a private note: 1 to 500 characters. */
+export const BIRTH_DATE_WHY_MAX = 500;
 
 // ── Errors ─────────────────────────────────────────────────────────────────
 
@@ -432,6 +437,63 @@ export class ProfileService {
   async saveByStaff(accountId: string, input: unknown, actor: Actor): Promise<StaffProfileView> {
     const id = knownAccount(accountId);
     await this.write(id, cleanInput(input, false), actor, 'staff');
+    return this.forStaff(id, { inClear: true });
+  }
+
+  /**
+   * Client Services' Change the date of birth (PUT /api/admin/owners/:id/birth-date, OPERATOR; plan §3.1 P.6.5, §3.6
+   * C.4.2): the same lock order and version as a save; any real day from 1900 to 13 years before today in Paris, or null
+   * to remove it; `birth_date_by` STAFF and `birth_date_at` now (both null with the date removed). A LOCKED account
+   * included, a DELETED one refused (409 ACCOUNT_DELETED). `birth_date_collector_at` is never written: a date removed
+   * after the collector's one entry does not give a second one (P.6.3's 409 BIRTH_DATE_ENTERED), and a date only staff
+   * set never uses it up. `why` (1 to 500 characters) becomes a private note in the same transaction, 'Date of birth
+   * changed: <why>' or 'Date of birth removed: <why>' (audited `account.note.add`); the profile is audited
+   * `account.profile.update` `{ by: 'staff', fields: ['birthDate'], birthDate: 'set' | 'changed' | 'cleared', noteId }`,
+   * never the date, and the reason never reaches the audit log. The same date again changes nothing (no note, no
+   * audit). Answers the client sheet's Profile, in clear.
+   */
+  async setBirthDateByStaff(accountId: string, input: { version: unknown; birthDate: unknown; why: unknown }, actor: Actor): Promise<StaffProfileView> {
+    const id = knownAccount(accountId);
+    if (!Number.isInteger(input?.version) || (input.version as number) < 0) throw validationError('The profile is invalid.');
+    const version = input.version as number;
+    // As a note keeps it (services/client-notes.ts cleanNote): line breaks kept, trimmed.
+    const reason = typeof input?.why === 'string' ? input.why.normalize('NFC').replace(/\r\n?/g, '\n').trim() : '';
+    if (reason === '') throw validationError('Give the reason.');
+    if ([...reason].length > BIRTH_DATE_WHY_MAX) throw validationError(`Give the reason in ${BIRTH_DATE_WHY_MAX} characters at most.`);
+    if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(reason)) throw validationError('The reason contains characters that cannot be kept.');
+    const date = input?.birthDate === null ? null : input?.birthDate;
+    const now = this.clock();
+    if (date !== null) {
+      const problem = birthDateProblem(date, parisDay(now));
+      if (problem === 'NOT_A_DATE') throw validationError('This date does not exist.');
+      if (problem !== null) throw validationError('Enter a date of birth from 1900, 13 years ago at least.');
+    }
+    const next = date as string | null;
+    await inTransaction(this.db, async (tx) => {
+      const account = await tx.selectFrom('accounts').select('status').where('id', '=', id).forNoKeyUpdate().executeTakeFirst();
+      if (!account) throw notFound('Account', 'ACCOUNT_NOT_FOUND');
+      if (account.status === 'DELETED') throw accountDeleted();
+      const row = await tx.selectFrom('account_profiles').select(['version', 'birth_date']).where('account_id', '=', id).forUpdate().executeTakeFirst();
+      if (version !== (row?.version ?? 0)) throw profileChanged('staff');
+      const current = row?.birth_date ?? null;
+      if (next === current) return;
+      const change: 'set' | 'changed' | 'cleared' = next === null ? 'cleared' : current === null ? 'set' : 'changed';
+      const columns = {
+        birth_date: next,
+        birth_date_by: next === null ? null : ('STAFF' as const),
+        birth_date_at: next === null ? null : now,
+        version: (row?.version ?? 0) + 1,
+        updated_by: 'STAFF' as const,
+        updated_at: now,
+      };
+      if (row) await tx.updateTable('account_profiles').set(columns).where('account_id', '=', id).execute();
+      else await tx.insertInto('account_profiles').values({ account_id: id, ...columns, created_at: now }).execute();
+      const noteId = await insertNote(tx, this.audit, id, `${next === null ? 'Date of birth removed' : 'Date of birth changed'}: ${reason}`, actor, now);
+      await this.audit.record(
+        { actor, action: 'account.profile.update', targetType: 'account', targetId: id, details: { by: 'staff', fields: ['birthDate'], birthDate: change, noteId } },
+        tx,
+      );
+    });
     return this.forStaff(id, { inClear: true });
   }
 

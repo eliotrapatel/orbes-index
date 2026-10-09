@@ -260,7 +260,7 @@ export interface DemoProfile {
   /** The default address of YOUR ADDRESSES, saved with the profile. */
   address?: { name: string; address: string; country: string; phone: string };
   /** Set by Client Services `days` before `now`, after the collector's save. */
-  staffBirthDate?: { date: string; days: number };
+  staffBirthDate?: { date: string; days: number; why: string };
   /** A finish saved when the collection showed it (its label as it read). */
   retiredFinish?: string;
 }
@@ -284,7 +284,7 @@ export const DEMO_PROFILES: readonly DemoProfile[] = Object.freeze([
   // Partial, Other with its words.
   { account: 'amelia', ago: { days: 14, hours: 2 }, firstName: 'Amelia', lastName: 'Clarke', phone: { country: 'GB', number: '07700 900123' }, heard: 'Other', heardOther: 'A colleague in London' },
   // A date of birth set by ORBES Client Services.
-  { account: 'sofia', ago: { days: 11, hours: 4 }, firstName: 'Sofia', lastName: 'Rossi', city: 'Milan', heard: 'A shop', staffBirthDate: { date: '1987-09-23', days: 9 } },
+  { account: 'sofia', ago: { days: 11, hours: 4 }, firstName: 'Sofia', lastName: 'Rossi', city: 'Milan', heard: 'A shop', staffBirthDate: { date: '1987-09-23', days: 9, why: 'The client gave it on the phone to ORBES Client Services.' } },
   // A favourite finish the collection no longer shows.
   { account: 'lucas', ago: { days: 7, hours: 1 }, firstName: 'Lucas', lastName: 'Weber', city: 'Berlin', heard: 'The press', retiredFinish: 'Rose gold' },
 ]);
@@ -1228,7 +1228,7 @@ function buildTimeline(now: Date): Step[] {
   for (const p of DEMO_PROFILES) {
     steps.push({ at: time.ago(p.ago.days, p.ago.hours), order: order++, label: `profile of ${p.account}`, run: (w) => saveProfile(w, p) });
     const staff = p.staffBirthDate;
-    if (staff) steps.push({ at: time.ago(staff.days), order: order++, label: `date of birth of ${p.account} by Client Services`, run: (w) => setStaffBirthDate(w, p.account, staff.date) });
+    if (staff) steps.push({ at: time.ago(staff.days), order: order++, label: `date of birth of ${p.account} by Client Services`, run: (w) => setStaffBirthDate(w, p.account, staff.date, staff.why) });
   }
 
   for (const p of PRODUCTS) {
@@ -1472,25 +1472,15 @@ async function saveProfile(w: World, p: DemoProfile): Promise<void> {
 }
 
 /**
- * A date of birth set by ORBES Client Services on a profile (the client sheet's Change the date of birth, plan §3.6
- * C.4.2): `birth_date_by` STAFF, the profile's version moved on, audited `account.profile.update` by staff with the
- * field's name only, the seed as actor (no console user sets it).
+ * A date of birth set by ORBES Client Services on a profile, through the client sheet's Change the date of birth
+ * (ProfileService.setBirthDateByStaff, plan §3.6 C.4.2): `birth_date_by` STAFF, the profile's version moved on, the
+ * reason kept as a private note in the same transaction, audited `account.profile.update` by staff with the field's name
+ * and the note's id only, the seed as actor (no console user sets it).
  */
-async function setStaffBirthDate(w: World, key: AccountKey, date: string): Promise<void> {
+async function setStaffBirthDate(w: World, key: AccountKey, date: string, why: string): Promise<void> {
   const id = accountId(w, key);
-  const now = w.ctx.clock();
-  await inTransaction(w.ctx.db, async (tx) => {
-    const row = await tx.selectFrom('account_profiles').select(['version', 'birth_date']).where('account_id', '=', id).forUpdate().executeTakeFirstOrThrow();
-    await tx
-      .updateTable('account_profiles')
-      .set({ birth_date: date, birth_date_by: 'STAFF', birth_date_at: now, version: row.version + 1, updated_by: 'STAFF', updated_at: now })
-      .where('account_id', '=', id)
-      .execute();
-    await w.ctx.audit.record(
-      { actor: DEMO_SEED_ACTOR, action: 'account.profile.update', targetType: 'account', targetId: id, details: { by: 'staff', fields: ['birthDate'], birthDate: row.birth_date ? 'changed' : 'set' } },
-      tx,
-    );
-  });
+  const row = await w.ctx.db.selectFrom('account_profiles').select('version').where('account_id', '=', id).executeTakeFirstOrThrow();
+  await w.ctx.services.profiles.setBirthDateByStaff(id, { version: row.version, birthDate: date, why }, DEMO_SEED_ACTOR);
 }
 
 async function issue(w: World, p: ProductDef): Promise<void> {

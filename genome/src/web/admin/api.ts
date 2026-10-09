@@ -167,6 +167,8 @@ import type {
   MessagesSummary,
   ShopRequestStatus,
   OwnerSheet,
+  ClientProfile,
+  ClientProfileInput,
   Paged,
   RecoveryCode,
   ProductDetail,
@@ -1268,6 +1270,23 @@ export class AdminApi {
   /** ADMIN: its name, its tracking link, offered or set aside. */
   updateCarrier(id: string, change: { name?: string; trackingUrl?: string; active?: boolean }): Promise<Carrier> {
     return this.patch(`/api/admin/carriers/${encodeURIComponent(id)}`, change);
+  }
+
+  // ── The client sheet's Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P.6.6, P.9.2; API §16.36) ──
+
+  /** OPERATOR+: Edit the profile, with the `version` read (409 PROFILE_CHANGED when the client saved in between). */
+  saveClientProfile(accountId: string, input: ClientProfileInput): Promise<{ profile: ClientProfile }> {
+    return this.request('PUT', `/api/admin/owners/${encodeURIComponent(accountId)}/profile`, { body: input });
+  }
+
+  /** OPERATOR+: Change the date of birth (null removes it), with the `version` read; `why` is kept as a private note. */
+  setClientBirthDate(accountId: string, input: { version: number; birthDate: string | null; why: string }): Promise<{ profile: ClientProfile }> {
+    return this.request('PUT', `/api/admin/owners/${encodeURIComponent(accountId)}/birth-date`, { body: input });
+  }
+
+  /** OPERATOR+: Edit the address: the default address changed, or the first one added as the default. */
+  saveClientAddress(accountId: string, input: { name: string; address: string; country: string; phone: string }): Promise<{ profile: ClientProfile }> {
+    return this.request('PUT', `/api/admin/owners/${encodeURIComponent(accountId)}/default-address`, { body: input });
   }
 
   // ── The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10; API §16.38) ──

@@ -297,7 +297,6 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const anomaly = new AnomalyService({ db, config: config.anomaly, audit, clock, log });
     const reports = new ScanReportService({ db, audit, clock, log });
     const recovery = new AccountRecoveryService({ db, audit, sessions, ownership, clock });
-    const owners = new OwnerService({ db, audit, sessions, ownership, clock });
     const authenticators = AuthenticatorRegistry.withDefaults();
     const verification = new VerificationService({ db, keys, anomaly, config, authenticators, clock, log });
     const retailers = new RetailerService({ db, audit, clock });
@@ -332,6 +331,8 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const tastes = new TasteService({ db, clock });
     const profiles = new ProfileService({ db, audit, tastes, clock });
     const clientNotes = new ClientNoteService({ db, audit, clock });
+    // The client sheet reads the profile (plan CUSTOMER INTELLIGENCE §3.6 C.4).
+    const owners = new OwnerService({ db, audit, sessions, ownership, profiles, clock });
     const wishlist = new WishlistService({ db, clock });
     const places = new PlaceService({ db });
     // The recording's writes wait while the pool has requests waiting (§3.3 T.8.3): the collectors come first.

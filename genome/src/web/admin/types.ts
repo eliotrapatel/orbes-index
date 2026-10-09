@@ -1172,6 +1172,14 @@ export interface OwnerSheet {
   guarantees: Guarantee[];
   /** BP-29: the client's lifetime value per currency, by GROWTH's rule; empty when no priced piece is counted. */
   lifetimeValue: LifetimeValue;
+  /** CUSTOMER INTELLIGENCE §3.6 C.4.2: what the client gave in YOUR PROFILE; withheld in part for an AUDITOR. */
+  profile: ClientProfile;
+  /** §3.6 C.4.3: ORBES Client Services' tags on the client, in the order they were added. */
+  tags: string[];
+  /** §3.6 C.4.3: ORBES Client Services' private notes, the 50 newest, and how many there are. */
+  privateNotes: PrivateNotes;
+  /** §3.0 (d): the client's email is a console login's: left out of the Collectors page and the export. */
+  teamAccount: boolean;
 }
 
 /** IN-01: a guarantee's state, computed by the server (never stored). */
@@ -1293,6 +1301,84 @@ export interface ClientNote {
   orderId: string | null;
   text: string;
   by: string | null;
+}
+
+/** CUSTOMER INTELLIGENCE §3.0 (h): what the role does not read of the client's Profile (an AUDITOR: all five). */
+export type ClientProfileWithheld = 'birthDate' | 'phone' | 'city' | 'address' | 'instagram';
+/** The age bands staff read (src/shared/profile-rules.ts AGE_BANDS). */
+export type ClientAgeBand = 'under18' | '18-24' | '25-34' | '35-44' | '45-54' | '55-64' | '65plus';
+/** A favourite piece or finish; one the collection no longer offers is `retired`. */
+export interface ClientTaste {
+  key: string;
+  label: string;
+  swatch?: string;
+  retired: boolean;
+}
+
+/**
+ * The client sheet's Profile (GET /api/admin/owners/:id `profile`, and the answer of PUT …/profile, …/birth-date and
+ * …/default-address; services/profiles.ts StaffProfileView). For an AUDITOR the date of birth, the age, the phone, the
+ * city, the Instagram and the address are null and named in `withheld`; the age band is given to every role.
+ */
+export interface ClientProfile {
+  firstName: string | null;
+  lastName: string | null;
+  country: string | null;
+  /** 'YYYY-MM-DD'. */
+  birthDate: string | null;
+  ageBand: ClientAgeBand | null;
+  age: number | null;
+  birthDateBy: 'COLLECTOR' | 'STAFF' | null;
+  birthDateAt: Iso | null;
+  /** The client's one entry, kept after Client Services removed the date. */
+  birthDateCollectorAt: Iso | null;
+  /** The country picked for its code, and the number in E.164. */
+  phone: { country: string; number: string } | null;
+  city: string | null;
+  instagram: string | null;
+  heard: { optionId: string; label: string; other: string | null; setAside: boolean; at: Iso } | null;
+  tastes: { pieces: ClientTaste[]; finishes: ClientTaste[] };
+  /** The default address of YOUR ADDRESSES: its name, its lines as typed, its country and phone. */
+  address: { name: string; lines: string; country: string; phone: string } | null;
+  /** The saved addresses besides the default. */
+  otherAddresses: number;
+  completion: { percent: number; missing: ('NAME' | 'COUNTRY' | 'BIRTH_DATE' | 'CITY' | 'ADDRESS' | 'PHONE' | 'INSTAGRAM' | 'PIECES' | 'FINISHES' | 'HEARD')[] };
+  /** Sent back with each edit: 409 PROFILE_CHANGED when the client saved in between. */
+  version: number;
+  updatedBy: 'COLLECTOR' | 'STAFF' | null;
+  updatedAt: Iso | null;
+  withheld: ClientProfileWithheld[];
+  teamAccount: boolean;
+}
+
+/** PUT /api/admin/owners/:id/profile: the profile without the date of birth, with the `version` read. */
+export interface ClientProfileInput {
+  version: number;
+  firstName: string | null;
+  lastName: string | null;
+  country: string | null;
+  city: string | null;
+  phone: { country: string; number: string } | null;
+  instagram: string | null;
+  heard: { optionId: string; other?: string | null } | null;
+  tastes: { pieces: string[]; finishes: string[] };
+}
+
+/** A private note of ORBES Client Services on the client sheet (services/client-notes.ts). */
+export interface PrivateNote {
+  id: string;
+  text: string;
+  at: Iso;
+  /** The writer's console email; null for a script. */
+  by: string | null;
+  /** The writer's console id: its writer or an ADMIN removes it. */
+  byId: string | null;
+}
+
+/** The private notes not removed, the newest first, and how many there are. */
+export interface PrivateNotes {
+  items: PrivateNote[];
+  total: number;
 }
 
 /** POST /api/admin/owners/:id/lock. */

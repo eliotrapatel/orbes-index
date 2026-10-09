@@ -3,7 +3,9 @@
  * result, the email mask of an AUDITOR, the lock (staff only, sessions and
  * pending transfers ended, links to ownership certificates withdrawn and the
  * open recovery code revoked in one transaction, a transfer or a sign-in
- * begun before the lock refused) and the unlock.
+ * begun before the lock refused) and the unlock; the client sheet's profile,
+ * tags, private notes and team account (plan CUSTOMER INTELLIGENCE §3.6 C.4),
+ * none of which reaches the right-of-access export (§3.0 (k)).
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { testConfig } from '../../src/server/config.js';
@@ -12,6 +14,7 @@ import { clientEmail, maskEmail } from '../../src/server/routes/admin/serialize.
 import { AccountRecoveryService, RECOVERY_CODE_TTL_MS } from '../../src/server/services/account-recovery.js';
 import { AuditService } from '../../src/server/services/audit.js';
 import { AuthService, deriveTotpEncryptionKey } from '../../src/server/services/auth.js';
+import { ClientNoteService, NOTES_SHOWN } from '../../src/server/services/client-notes.js';
 import { LifecycleService } from '../../src/server/services/lifecycle.js';
 import { OwnershipCertificateService } from '../../src/server/services/ownership-certificates.js';
 import { OwnershipService } from '../../src/server/services/ownership.js';
@@ -501,6 +504,40 @@ describe('OwnerService', () => {
     const byRef = await owners.list({ ref: scanReference(scan.id) }, { page: 1, pageSize: 50 });
     expect(byRef.scans).toEqual([expect.objectContaining({ scanId: scan.id, reference: scanReference(scan.id) })]);
     expect(byRef.items).toHaveLength(1);
+  });
+
+  it('carries the client sheet\'s profile in clear, the tags, the 50 newest private notes with how many, and whether the email is a console login\'s; the export carries no tag, no note and none of their audit entries (plan CUSTOMER INTELLIGENCE §3.6 C.4, §3.0 (k))', async () => {
+    const c = await customer();
+    const email = `client.${n}@example.com`;
+    const notes = new ClientNoteService({ db: t.db, audit, clock: clock.now });
+    const empty = await owners.sheet(c.id);
+    expect(empty).toMatchObject({ tags: [], privateNotes: { items: [], total: 0 }, teamAccount: false });
+    expect(empty.profile).toMatchObject({ firstName: null, version: 0, withheld: [], teamAccount: false, completion: { percent: expect.any(Number) } });
+    await t.db.insertInto('account_profiles').values({ account_id: c.id, first_name: 'Camille', city: 'Lyon', birth_date: '1994-03-14', birth_date_by: 'COLLECTOR', birth_date_at: clock.now(), birth_date_collector_at: clock.now() }).execute();
+    await notes.addTag(c.id, 'vip', admin);
+    clock.advance(1000);
+    await notes.addTag(c.id, 'press', admin);
+    for (let i = 1; i <= NOTES_SHOWN + 2; i++) {
+      clock.advance(1000);
+      await notes.addNote(c.id, `Called the client, note ${i}.`, admin);
+    }
+    const sheet = await owners.sheet(c.id);
+    expect(sheet.tags).toEqual(['VIP', 'PRESS']);
+    expect(sheet.privateNotes.total).toBe(NOTES_SHOWN + 2);
+    expect(sheet.privateNotes.items).toHaveLength(NOTES_SHOWN);
+    expect(sheet.privateNotes.items[0]).toEqual({ id: expect.any(String), text: `Called the client, note ${NOTES_SHOWN + 2}.`, at: clock.now(), by: 'cs@orbes.test', byId: admin.id });
+    // In clear: the route withholds for an AUDITOR (serialize.ts ownerProfile).
+    expect(sheet.profile).toMatchObject({ firstName: 'Camille', city: 'Lyon', birthDate: '1994-03-14', age: 32, ageBand: '25-34', withheld: [] });
+    // A console login with the same email: a team account.
+    await auth.createAdmin({ email: email.toUpperCase(), password: PASSWORD, role: 'AUDITOR' }, SYSTEM_ACTOR);
+    expect(await owners.sheet(c.id)).toMatchObject({ teamAccount: true, profile: { teamAccount: true } });
+    // The right of access: no key and no word of them, and not even their audit entries.
+    const x = await owners.exportData(c.id, admin);
+    const text = JSON.stringify(x);
+    for (const key of ['tags', 'privateNotes', 'engagement', 'score']) expect(Object.keys(x), key).not.toContain(key);
+    for (const word of ['VIP', 'PRESS', 'Called the client', 'account.tag', 'account.note']) expect(text, word).not.toContain(word);
+    expect(x.activity.map((e) => e.action)).toEqual(['account.register']);
+    expect(x.profile).toMatchObject({ firstName: 'Camille', city: 'Lyon' });
   });
 });
 

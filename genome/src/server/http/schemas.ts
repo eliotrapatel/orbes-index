@@ -477,6 +477,22 @@ export const accountProfileBody = body({
   ),
 });
 
+/**
+ * PUT /api/admin/owners/:id/profile (§16.36, plan CUSTOMER INTELLIGENCE §3.1 P.6.5): Client Services' Edit the profile,
+ * the collector's body without the date of birth (its own route), with the `version` read.
+ */
+export const ownerProfileBody = accountProfileBody.omit({ birthDate: true });
+
+/**
+ * PUT /api/admin/owners/:id/birth-date (§16.36, plan §3.1 P.6.5, §3.6 C.4.2): the date of birth set, changed or removed
+ * (null), the `version` read, and why (kept as a private note; 1 to 500 characters, services/profiles.ts).
+ */
+export const birthDateBody = body({
+  version: z.number().int('Must be a whole number').min(0, 'Must be 0 or more').max(2_147_483_647, 'Too large'),
+  birthDate: z.string().max(20, 'At most 20 characters').nullable(),
+  why: z.string().max(2000, 'At most 500 characters'),
+});
+
 export const loginBody = body({ email, password });
 
 /** POST /api/v1/account/password (§10.7): the policy of `newPassword` is the service's (≥ 12 characters…). */
@@ -1746,6 +1762,12 @@ export const accountAddressBody = body({ ...deliveryAddressShape, isDefault: z.b
 
 /** PUT /api/v1/account/addresses/:id: an address's four fields, whole. */
 export const accountAddressUpdateBody = body(deliveryAddressShape);
+
+/**
+ * PUT /api/admin/owners/:id/default-address (§16.36, plan CUSTOMER INTELLIGENCE §3.1 P.6.6): Client Services' Edit the
+ * address, the default address's four fields, whole; checked in H2's words by services/addresses.ts.
+ */
+export const defaultAddressBody = body(deliveryAddressShape);
 
 /** /api/v1/account/addresses/:id: one of the account's addresses. */
 export const accountAddressParams = z.object({ id: uuid });

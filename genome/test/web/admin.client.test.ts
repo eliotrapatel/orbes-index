@@ -5,7 +5,11 @@
  * time, that the console reads exactly what the server sends.
  */
 import { describe, expect, it } from 'vitest';
+import type { z } from 'zod';
+import type { ownerProfileBody } from '../../src/server/http/schemas.js';
+import type { PrivateNotes as ServerPrivateNotes } from '../../src/server/services/client-notes.js';
 import type { OwnerSheet as ServerOwnerSheet } from '../../src/server/services/owners.js';
+import type { StaffProfileView } from '../../src/server/services/profiles.js';
 import type { ClientOrder as ServerClientOrder } from '../../src/server/services/fulfilment.js';
 import { SHOPIFY_PERIOD_MAX_DAYS as SERVER_PERIOD_MAX, shopifyIdOf, type ShopifyProduct as ServerShopifyProduct } from '../../src/server/services/shopify.js';
 import { formatMoney } from '../../src/web/admin/model/live.js';
@@ -31,6 +35,12 @@ type Json<T> = T extends Date ? string : T extends readonly (infer U)[] ? Json<U
 /** The client sheet as the route sends it: the owner's sheet and the collector's orders (routes/admin/owners.ts). */
 export const clientSheetFits = (s: Json<Omit<ServerOwnerSheet, 'owner'>> & { orders: Json<ServerClientOrder>[] }): Omit<web.OwnerSheet, 'owner'> => s;
 export const shopifyProductFits = (p: Json<ServerShopifyProduct>): web.ShopifyProduct => p;
+// Plan CUSTOMER INTELLIGENCE §3.1 P.9.2: the console's ClientProfile is the server's StaffProfileView, both ways; Edit
+// the profile's body is what the route parses; a private note is the server's.
+export const clientProfileFits = (p: Json<StaffProfileView>): web.ClientProfile => p;
+export const clientProfileBack = (p: web.ClientProfile): Json<StaffProfileView> => p;
+export const clientProfileInputFits = (b: web.ClientProfileInput): z.infer<typeof ownerProfileBody> => b;
+export const privateNotesFit = (n: Json<ServerPrivateNotes>): web.PrivateNotes => n;
 
 describe('the Catalogue\'s base price and Shopify product (N2)', () => {
   const m = (extra: Partial<web.Model> = {}) => ({ basePriceMinor: null, baseCurrency: null, shopify: { productId: null, variants: 3, linked: 0 }, ...extra }) as web.Model;
@@ -161,7 +171,7 @@ import {
   settingsProblem,
   stockWarning,
 } from '../../src/web/admin/model/guarantees.js';
-import { CAPABILITY_MIN_ROLE } from '../../src/web/admin/model/permissions.js';
+import { CAPABILITY_MIN_ROLE, can } from '../../src/web/admin/model/permissions.js';
 import { toneOf } from '../../src/web/admin/model/tone.js';
 import { GUARANTEE_STATES as WEB_STATES } from '../../src/web/admin/types.js';
 import { GUARANTEE_STATES as SERVER_STATES } from '../../src/server/services/guarantees.js';
@@ -252,5 +262,17 @@ describe('THE HOUSE’S GUARANTEE in the console (IN-01)', () => {
     expect(settingsProblem({ validDays: '731', pieces: '1' })).toBe('Valid for is 1 to 730 days.');
     expect(settingsProblem({ validDays: '90', pieces: '6' })).toBe('A guarantee covers 1 to 5 pieces.');
     expect(settingsInput({ validDays: '90', pieces: '2', visible: '' })).toEqual({ validDays: 90, pieces: 2, visible: false });
+  });
+});
+
+describe('the client sheet\'s Profile, tags and private notes: who may do what (plan CUSTOMER INTELLIGENCE §3.6 C.9)', () => {
+  it('lets an OPERATOR edit the profile, tag and write notes, an ADMIN remove another\'s note; an AUDITOR only reads, RETAIL and LOGISTICS never reach the sheet', () => {
+    expect(CAPABILITY_MIN_ROLE).toMatchObject({ editClientProfile: 'OPERATOR', tagClients: 'OPERATOR', writeClientNotes: 'OPERATOR', removeAnyClientNote: 'ADMIN' });
+    for (const c of ['editClientProfile', 'tagClients', 'writeClientNotes', 'removeAnyClientNote'] as const) {
+      for (const role of ['RETAIL', 'LOGISTICS', 'AUDITOR'] as const) expect(can(role, c), `${role} ${c}`).toBe(false);
+      expect(can('ADMIN', c), c).toBe(true);
+    }
+    expect(can('OPERATOR', 'removeAnyClientNote')).toBe(false);
+    expect([typeof clientProfileFits, typeof clientProfileBack, typeof clientProfileInputFits, typeof privateNotesFit]).toEqual(['function', 'function', 'function', 'function']);
   });
 });

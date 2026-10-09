@@ -35,7 +35,7 @@ import { emptyBody, ownerListQuery, ownerParams, pageOf, parse } from '../../htt
 import { adminActor } from '../../http/sessions.js';
 import type { OwnerSummary } from '../../services/owners.js';
 import type { AdminRouteDeps } from './index.js';
-import { clientEmail, readsClientEmails } from './serialize.js';
+import { clientEmail, ownerProfile, readsClientEmails } from './serialize.js';
 
 function ownerJson(o: OwnerSummary, inClear: boolean) {
   return {
@@ -69,7 +69,7 @@ export const adminOwnerRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, 
     const sheet = await owners.sheet(id);
     // N4: the orders are the fulfilment's, read once the account is known (an unknown one is 404 above).
     const orders = await fulfilment.forAccount(sheet.owner.id);
-    return { ...sheet, owner: ownerJson(sheet.owner, readsClientEmails(request)), orders };
+    return { ...sheet, owner: ownerJson(sheet.owner, readsClientEmails(request)), orders, profile: ownerProfile(sheet.profile, readsClientEmails(request)) };
   });
 
   app.post('/api/admin/owners/:id/recovery-code', { config: ADMIN }, async (request, reply) => {

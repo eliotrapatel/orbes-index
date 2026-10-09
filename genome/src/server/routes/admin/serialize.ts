@@ -16,6 +16,7 @@ import { hasRole, requireAdmin } from '../../http/sessions.js';
 import type { KeyRecord } from '../../keys/key-service.js';
 import type { AdminProfile } from '../../services/auth.js';
 import type { CodeRecord, GenomeRecord, IssueBatchLine, ProductRecord } from '../../services/issuance.js';
+import { STAFF_WITHHELD, type StaffProfileView } from '../../services/profiles.js';
 
 /** `jane@example.com` → `j***@example.com`: the first character of the local part, then the domain. */
 export function maskEmail(email: string): string {
@@ -72,6 +73,18 @@ export function readsShipTo(request: FastifyRequest): boolean {
 export function parcelShipTo<T extends { name: string | null; address: string | null; phone?: string | null }>(to: T, inClear: boolean): T {
   if (inClear) return to;
   return orderBuyer(to, false);
+}
+
+/**
+ * The client sheet's Profile as the caller may read it (plan CUSTOMER INTELLIGENCE §3.0 (h), §3.6 C.4.2): in clear for
+ * OPERATOR and ADMIN (`readsClientEmails`); for an AUDITOR the date of birth and the age, the phone, the city, the
+ * Instagram and the default address withheld (null, and named in `withheld`), the age band, the names, the country, the
+ * tastes, the answer to « How did you hear about ORBES? », the completion and who changed it when still read. The same
+ * as ProfileService.forStaff with `inClear` false.
+ */
+export function ownerProfile(p: StaffProfileView, inClear: boolean): StaffProfileView {
+  if (inClear) return p;
+  return { ...p, birthDate: null, age: null, phone: null, city: null, instagram: null, address: null, withheld: [...STAFF_WITHHELD] };
 }
 
 export function adminJson(a: AdminProfile) {

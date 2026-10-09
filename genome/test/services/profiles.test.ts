@@ -15,8 +15,10 @@
  *  - two saves at once give one 409, a collector's save and a staff save at once never deadlock (PGlite always;
  *    PostgreSQL with ORBES_TEST_POSTGRES_URL, a pool of 8: true parallelism).
  *
- * `setBirthDateByStaff` (Change the date of birth, its private note in the same transaction) comes with the client
- * sheet (step 5.4): here a removal by Client Services is written as that route will write it.
+ * `setBirthDateByStaff` (Change the date of birth, step 5.4): set, changed and removed by Client Services with
+ * `birth_date_by` STAFF and the collector's one entry kept; the reason a private note in the same transaction (a
+ * failing note leaves the date as it was); the version, LOCKED and DELETED; the audit with the note's id, never the date
+ * or the reason.
  */
 import { randomBytes, randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
@@ -228,17 +230,17 @@ describe('YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1)', () => {
     expect(await save(1, '2013-10-09')).toMatchObject({ profile: { version: 1 } });
     expect(await refusal(save(1, '2013-10-08'))).toEqual({ code: 'BIRTH_DATE_SET', status: 409, message: 'Your date of birth is saved. ORBES Client Services can change it.' });
     expect(await refusal(save(1, null))).toMatchObject({ code: 'VALIDATION_FAILED' });
-    // Client Services removes it (as Change the date of birth writes it, step 5.4): the collector's one entry is used.
+    // Client Services removes it (Change the date of birth, step 5.4): the collector's one entry is used.
     const entered = (await h.t.db.selectFrom('account_profiles').select('birth_date_collector_at').where('account_id', '=', a.id).executeTakeFirstOrThrow()).birth_date_collector_at;
-    await h.t.db.updateTable('account_profiles').set({ birth_date: null, birth_date_by: null, birth_date_at: null, version: 2, updated_by: 'STAFF' }).where('account_id', '=', a.id).execute();
+    await svc().setBirthDateByStaff(a.id, { version: 1, birthDate: null, why: 'Typed by mistake, the client says.' }, staff);
     expect((await svc().forCollector(a.id)).profile).toMatchObject({ birthDate: null, birthDateLocked: true, version: 2 });
     expect(await refusal(save(2, '1994-03-14'))).toEqual({ code: 'BIRTH_DATE_ENTERED', status: 409, message: 'You have entered your date of birth once. ORBES Client Services can set it.' });
     expect((await h.t.db.selectFrom('account_profiles').select('birth_date_collector_at').where('account_id', '=', a.id).executeTakeFirstOrThrow()).birth_date_collector_at).toEqual(entered);
     // A date only Client Services set, then removed: the collector's entry is still unused.
     const b = await createAccount(h.t.db);
-    await h.t.db.insertInto('account_profiles').values({ account_id: b.id, birth_date: '1990-01-01', birth_date_by: 'STAFF', birth_date_at: h.clock.now(), updated_by: 'STAFF' }).execute();
+    await svc().setBirthDateByStaff(b.id, { version: 0, birthDate: '1990-01-01', why: 'Given on the phone.' }, staff);
     expect((await svc().forCollector(b.id)).profile).toMatchObject({ birthDate: '1990-01-01', birthDateLocked: true, version: 1 });
-    await h.t.db.updateTable('account_profiles').set({ birth_date: null, birth_date_by: null, birth_date_at: null, version: 2 }).where('account_id', '=', b.id).execute();
+    await svc().setBirthDateByStaff(b.id, { version: 1, birthDate: null, why: 'Not the client\'s own.' }, staff);
     expect((await svc().forCollector(b.id)).profile.birthDateLocked).toBe(false);
     expect((await svc().save(b.id, { version: 2, birthDate: '1991-05-06' }, b.actor)).profile).toMatchObject({ birthDate: '1991-05-06', birthDateLocked: true, version: 3 });
   });
@@ -325,6 +327,72 @@ describe('YOUR PROFILE (plan CUSTOMER INTELLIGENCE §3.1)', () => {
     expect(await refusal(svc().saveByStaff(a.id, { version: 2, city: 'Paris' }, staff))).toEqual({ code: 'ACCOUNT_DELETED', status: 409, message: 'This account is deleted.' });
     // The sheet still reads.
     expect((await svc().forStaff(a.id, { inClear: true })).city).toBe('Lyon');
+  });
+
+  it('lets Client Services set, change and remove the date of birth (birth_date_by STAFF, never the collector\'s once), the reason a private note in the same transaction; the version, LOCKED allowed, DELETED refused; the audit holds the note\'s id, never the date or the reason', async () => {
+    const a = await createAccount(h.t.db);
+    const notes = () => h.t.db.selectFrom('account_notes').select(['id', 'body', 'created_by']).where('account_id', '=', a.id).orderBy('created_at').orderBy('body').execute();
+    // Set: none before, a profile row made for it.
+    h.clock.advance(60_000);
+    const set = await svc().setBirthDateByStaff(a.id, { version: 0, birthDate: '1994-03-14', why: '  The client gave it on the phone.  ' }, staff);
+    expect(set).toMatchObject({ birthDate: '1994-03-14', age: 32, ageBand: '25-34', birthDateBy: 'STAFF', birthDateAt: h.clock.now(), birthDateCollectorAt: null, version: 1, updatedBy: 'STAFF' });
+    // The collector never entered one: theirs is still unused, but the date is set, so YOUR PROFILE reads it locked.
+    expect((await svc().forCollector(a.id)).profile).toMatchObject({ birthDate: '1994-03-14', birthDateLocked: true });
+    const [first] = await notes();
+    expect(first).toEqual({ id: expect.any(String), body: 'Date of birth changed: The client gave it on the phone.', created_by: staff.id });
+    // The same date again: nothing written, no note.
+    expect(await svc().setBirthDateByStaff(a.id, { version: 1, birthDate: '1994-03-14', why: 'Checked again.' }, staff)).toMatchObject({ version: 1 });
+    expect(await notes()).toHaveLength(1);
+    // Changed, on a LOCKED account.
+    await h.t.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', a.id).execute();
+    h.clock.advance(60_000);
+    expect(await svc().setBirthDateByStaff(a.id, { version: 1, birthDate: '1994-04-13', why: 'Day and month swapped.' }, staff)).toMatchObject({ birthDate: '1994-04-13', version: 2 });
+    // Removed: the date and who set it go together.
+    h.clock.advance(60_000);
+    expect(await svc().setBirthDateByStaff(a.id, { version: 2, birthDate: null, why: 'Not the client\'s own.' }, staff)).toMatchObject({ birthDate: null, birthDateBy: null, birthDateAt: null, age: null, ageBand: null, version: 3 });
+    expect((await notes()).map((n) => n.body)).toEqual(['Date of birth changed: The client gave it on the phone.', 'Date of birth changed: Day and month swapped.', 'Date of birth removed: Not the client\'s own.']);
+    // Audited: the field, what happened and the note, never the date or the reason; and the note's own entry.
+    const entries = await audits(a.id);
+    const ids = (await notes()).map((n) => n.id);
+    expect(entries.map((e) => e.details)).toEqual([
+      { by: 'staff', fields: ['birthDate'], birthDate: 'set', noteId: ids[0] },
+      { by: 'staff', fields: ['birthDate'], birthDate: 'changed', noteId: ids[1] },
+      { by: 'staff', fields: ['birthDate'], birthDate: 'cleared', noteId: ids[2] },
+    ]);
+    expect(entries.every((e) => e.actor_type === 'admin' && e.actor_id === staff.id)).toBe(true);
+    const noteAudits = await h.t.db.selectFrom('audit_logs').select('details').where('target_id', '=', a.id).where('action', '=', 'account.note.add').orderBy('id').execute();
+    expect(noteAudits.map((e) => (e.details as { noteId: string }).noteId)).toEqual(ids);
+    const logged = JSON.stringify(await h.t.db.selectFrom('audit_logs').select('details').where('target_id', '=', a.id).execute());
+    for (const typed of ['1994', 'phone', 'swapped', 'own']) expect(logged).not.toContain(typed);
+    // Refusals, nothing written: the version, the date's words, the reason, an unknown or DELETED account.
+    expect(await refusal(svc().setBirthDateByStaff(a.id, { version: 2, birthDate: '1990-01-01', why: 'Late.' }, staff))).toEqual({
+      code: 'PROFILE_CHANGED', status: 409, message: 'The client changed the profile meanwhile. It has been read again: check and save.',
+    });
+    expect(await refusal(svc().setBirthDateByStaff(a.id, { version: 3, birthDate: '1990-02-30', why: 'Typo.' }, staff))).toEqual({ code: 'VALIDATION_FAILED', status: 400, message: 'This date does not exist.' });
+    expect(await refusal(svc().setBirthDateByStaff(a.id, { version: 3, birthDate: '1899-12-31', why: 'Typo.' }, staff))).toMatchObject({ message: 'Enter a date of birth from 1900, 13 years ago at least.' });
+    expect(await refusal(svc().setBirthDateByStaff(a.id, { version: 3, birthDate: '2013-10-10', why: 'Typo.' }, staff))).toMatchObject({ message: 'Enter a date of birth from 1900, 13 years ago at least.' });
+    expect(await refusal(svc().setBirthDateByStaff(a.id, { version: 3, birthDate: '1990-01-01', why: '   ' }, staff))).toEqual({ code: 'VALIDATION_FAILED', status: 400, message: 'Give the reason.' });
+    expect(await refusal(svc().setBirthDateByStaff(a.id, { version: 3, birthDate: '1990-01-01', why: 'x'.repeat(501) }, staff))).toMatchObject({ message: 'Give the reason in 500 characters at most.' });
+    expect(await refusal(svc().setBirthDateByStaff(randomUUID(), { version: 0, birthDate: '1990-01-01', why: 'Typo.' }, staff))).toMatchObject({ code: 'ACCOUNT_NOT_FOUND', status: 404 });
+    await h.t.db.updateTable('accounts').set({ status: 'DELETED' }).where('id', '=', a.id).execute();
+    expect(await refusal(svc().setBirthDateByStaff(a.id, { version: 3, birthDate: '1990-01-01', why: 'Typo.' }, staff))).toEqual({ code: 'ACCOUNT_DELETED', status: 409, message: 'This account is deleted.' });
+    expect(await notes()).toHaveLength(3);
+    expect((await svc().forStaff(a.id, { inClear: true })).version).toBe(3);
+  });
+
+  it('writes the date of birth and its note in one transaction: a note that cannot be written leaves the date as it was', async () => {
+    const a = await createAccount(h.t.db);
+    await svc().setBirthDateByStaff(a.id, { version: 0, birthDate: '1990-01-01', why: 'Given on the phone.' }, staff);
+    await sql.raw(`CREATE FUNCTION test_refuse_note() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'no note'; END $$`).execute(h.t.db);
+    await sql.raw(`CREATE TRIGGER test_refuse_note BEFORE INSERT ON account_notes FOR EACH ROW EXECUTE FUNCTION test_refuse_note()`).execute(h.t.db);
+    try {
+      await expect(svc().setBirthDateByStaff(a.id, { version: 1, birthDate: '1991-01-01', why: 'A correction.' }, staff)).rejects.toThrow(/no note/);
+    } finally {
+      await sql.raw(`DROP TRIGGER test_refuse_note ON account_notes`).execute(h.t.db);
+      await sql.raw(`DROP FUNCTION test_refuse_note()`).execute(h.t.db);
+    }
+    expect(await svc().forStaff(a.id, { inClear: true })).toMatchObject({ birthDate: '1990-01-01', version: 1 });
+    expect(await audits(a.id)).toHaveLength(1);
   });
 
   it('reads the client sheet\'s Profile in clear, and withheld for an AUDITOR with the age band only; a team account named', async () => {

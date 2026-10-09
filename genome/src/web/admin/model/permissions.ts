@@ -140,6 +140,17 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   lockAccount: 'ADMIN',
   /** Everything held about a client's account, for a request under the right of access. */
   exportAccount: 'ADMIN',
+  /**
+   * The client sheet (plan CUSTOMER INTELLIGENCE §3.6 C.4, C.9): Edit the profile, Change the date of birth, Edit the
+   * address (an AUDITOR reads the Profile with the date of birth, phone, city, Instagram and address withheld).
+   */
+  editClientProfile: 'OPERATOR',
+  /** The client sheet's tags: added and removed (an AUDITOR reads them). */
+  tagClients: 'OPERATOR',
+  /** The client sheet's private notes: added, and removed by their writer (an AUDITOR reads them). */
+  writeClientNotes: 'OPERATOR',
+  /** A private note of another console user removed. */
+  removeAnyClientNote: 'ADMIN',
   /** The Sign-up page (plan CUSTOMER INTELLIGENCE §3.1 P.10): the answers to « How did you hear about ORBES? » added, renamed, moved, set aside. */
   manageHeardOptions: 'ADMIN',
   /** Links (plan CUSTOMER INTELLIGENCE §3.4 A.10): the page, a link's page and the collectors behind a figure, emails masked for an AUDITOR. */

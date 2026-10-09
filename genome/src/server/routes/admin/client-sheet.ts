@@ -1,7 +1,18 @@
 /**
- * The client sheet's tags and private notes (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.6 C.4.3 and C.9, step 5.3;
- * API §16.36): what ORBES Client Services keeps about a client, never shown to the client (services/client-notes.ts).
+ * The client sheet's Profile, tags and private notes (plan CUSTOMER INTELLIGENCE of 2026-10-08, §3.1 P.6.5, P.6.6, §3.6
+ * C.4.2, C.4.3 and C.9, steps 5.3 and 5.4; API §16.36): what the client gave in YOUR PROFILE, which Client Services may
+ * correct, and what Client Services keeps about the client, never shown to the client (services/client-notes.ts).
  *
+ *   PUT    /api/admin/owners/:id/profile            OPERATOR  Edit the profile: the collector's body without the date of
+ *                                                             birth, with the version read: { profile }
+ *                                                             account.profile.update { by: 'staff', fields }
+ *   PUT    /api/admin/owners/:id/birth-date         OPERATOR  Change the date of birth: { version, birthDate | null, why },
+ *                                                             the reason kept as a private note: { profile }
+ *                                                             account.profile.update { by: 'staff', fields, birthDate,
+ *                                                             noteId } and account.note.add
+ *   PUT    /api/admin/owners/:id/default-address    OPERATOR  Edit the address: the default address changed, or created
+ *                                                             as the default: { profile }
+ *                                                             account.address.update / .create { by: 'staff', … }
  *   GET    /api/admin/tags                          AUDITOR   the tags in use, the most used first (50 at most), or
  *                                                             VIP, PRESS and FRIEND OF THE HOUSE while none is: { items }
  *   GET    /api/admin/owners/:id/notes?all=1        AUDITOR   every note not removed, the newest first: { items, total }
@@ -11,18 +22,40 @@
  *   POST   /api/admin/owners/:id/notes              OPERATOR  { text }: 201 the note          account.note.add
  *   DELETE /api/admin/owners/:id/notes/:noteId      OPERATOR  204; its writer or an ADMIN     account.note.remove
  *
- * The sheet itself (GET /api/admin/owners/:id) carries the tags and the 50 newest notes (routes/admin/owners.ts). A
- * DELETED account is never written (409 ACCOUNT_DELETED), a LOCKED one is. Reads need AUDITOR and writes OPERATOR, the
- * scope's guard (routes/admin/index.ts), with the CSRF token and a same-origin request; every answer `no-store`, as every
- * API answer (http/security.ts).
+ * The sheet itself (GET /api/admin/owners/:id) carries the Profile, the tags and the 50 newest notes
+ * (routes/admin/owners.ts). Each PUT answers the Profile as an OPERATOR reads it, in clear. A version other than the
+ * profile's answers 409 PROFILE_CHANGED ('The client changed the profile meanwhile. It has been read again: check and
+ * save.'). A DELETED account is never written (409 ACCOUNT_DELETED), a LOCKED one is. Reads need AUDITOR and writes
+ * OPERATOR, the scope's guard (routes/admin/index.ts), with the CSRF token and a same-origin request; every answer
+ * `no-store`, as every API answer (http/security.ts).
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { emptyBody, noteBody, noteParams, ownerNotesQuery, ownerParams, parse, tagBody, tagParams } from '../../http/schemas.js';
+import { birthDateBody, defaultAddressBody, emptyBody, noteBody, noteParams, ownerNotesQuery, ownerParams, ownerProfileBody, parse, tagBody, tagParams } from '../../http/schemas.js';
 import { adminActor } from '../../http/sessions.js';
 import type { AdminRouteDeps } from './index.js';
 
 export const adminClientSheetRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
-  const { clientNotes } = ctx.services;
+  const { clientNotes, profiles, addresses } = ctx.services;
+
+  app.put('/api/admin/owners/:id/profile', async (request) => {
+    const { id } = parse(ownerParams, request.params);
+    const b = parse(ownerProfileBody, request.body);
+    return { profile: await profiles.saveByStaff(id, b, adminActor(request)) };
+  });
+
+  app.put('/api/admin/owners/:id/birth-date', async (request) => {
+    const { id } = parse(ownerParams, request.params);
+    const b = parse(birthDateBody, request.body);
+    return { profile: await profiles.setBirthDateByStaff(id, b, adminActor(request)) };
+  });
+
+  app.put('/api/admin/owners/:id/default-address', async (request) => {
+    const { id } = parse(ownerParams, request.params);
+    const b = parse(defaultAddressBody, request.body);
+    const actor = adminActor(request);
+    await addresses.setDefaultByStaff(id, b, actor);
+    return { profile: await profiles.forStaff(id, { inClear: true }) };
+  });
 
   app.get('/api/admin/tags', async () => ({ items: await clientNotes.suggestions() }));
 

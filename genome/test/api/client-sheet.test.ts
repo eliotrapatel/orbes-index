@@ -11,7 +11,10 @@
  *    attachments never stored by a cache, the order CSV's collectors and buyers masked for an AUDITOR, the refusals.
  *  - the sheet's Lifetime value (plan NEXT-NINE, BP-29): GROWTH's rule (services/growth.ts collectorValue).
  *  - the client sheet's tags and private notes (plan CUSTOMER INTELLIGENCE §3.6 C.4.3, C.9): GET /api/admin/tags, GET, POST
- *    and DELETE …/notes, POST and DELETE …/tags, by role, with the CSRF token and the same origin, and their audits.
+ *    and DELETE …/notes, POST and DELETE …/tags, by role, with the CSRF token and the same origin, and their audits;
+ *  - the client sheet's Profile (§3.1 P.6.5, P.6.6, P.9.2, §3.6 C.4.2): in clear for an OPERATOR, withheld for an AUDITOR
+ *    with the age band; PUT …/profile, …/birth-date (the reason a private note) and …/default-address for an OPERATOR,
+ *    the version's 409 on both sides, an AUDITOR 403.
  * Which role reaches which route is test/api/admin-roles.test.ts; the files' contents test/services/shopify.test.ts.
  */
 import { randomUUID } from 'node:crypto';
@@ -155,13 +158,14 @@ describe('the client sheet and the Shopify exports: the console\'s routes', () =
     expect(res.body).not.toContain('rue de la Paix');
   });
 
-  it('masks the collector\'s email for an AUDITOR, as the console does; the rest reads the same', async () => {
+  it('masks the collector\'s email for an AUDITOR, as the console does, and withholds the profile\'s date of birth, phone, city, Instagram and address (plan CUSTOMER INTELLIGENCE §3.0 (h)); the rest reads the same', async () => {
     const [clear, masked] = await Promise.all([op.get(`/api/admin/owners/${me.id}`), auditor.get(`/api/admin/owners/${me.id}`)]);
     const a = safeJson(clear) as Json;
     const b = safeJson(masked) as Json;
     expect(b.owner.email).toBe(`${me.email[0]}***${me.email.slice(me.email.indexOf('@'))}`);
     expect(masked.body).not.toContain(me.email);
-    expect({ ...b, owner: null }).toEqual({ ...a, owner: null });
+    expect(b.profile).toEqual({ ...a.profile, birthDate: null, age: null, phone: null, city: null, instagram: null, address: null, withheld: ['birthDate', 'phone', 'city', 'address', 'instagram'] });
+    expect({ ...b, owner: null, profile: null }).toEqual({ ...a, owner: null, profile: null });
     const unknown = await op.get('/api/admin/owners/00000000-0000-4000-8000-000000000000');
     expect([unknown.statusCode, errorOf(unknown).code]).toEqual([404, 'ACCOUNT_NOT_FOUND']);
   });
@@ -420,5 +424,142 @@ describe('Tags and private notes on the client sheet (plan CUSTOMER INTELLIGENCE
       { action: 'account.note.remove', details: { noteId: second.id } },
     ]);
     expect(JSON.stringify(audits)).not.toContain('evening');
+  });
+});
+
+describe('The client sheet\'s Profile (plan CUSTOMER INTELLIGENCE §3.1 P.6.5, P.6.6, P.9.2, §3.6 C.4.2)', () => {
+  let h: Harness;
+  let op: Client;
+  let auditor: Client;
+  let me: { id: string; client: Client };
+  const accountIdOf = async (email: string) => (await h.ctx.db.selectFrom('accounts').select('id').where('email_normalized', '=', email.toLowerCase()).executeTakeFirstOrThrow()).id;
+  const put = (c: Client, path: string, body: unknown, opts = {}) => c.request('PUT', `/api/admin/owners/${me.id}/${path}`, { body, ...opts });
+  /** Edit the profile's body: the profile as the dialog read it, with the changes. */
+  const whole = (p: Json, changes: Json = {}) => ({
+    version: p.version,
+    firstName: p.firstName,
+    lastName: p.lastName,
+    country: p.country,
+    city: p.city,
+    phone: p.phone,
+    instagram: p.instagram,
+    heard: p.heard ? { optionId: p.heard.optionId, other: p.heard.other } : null,
+    tastes: { pieces: p.tastes.pieces.map((t: Json) => t.key), finishes: p.tastes.finishes.map((t: Json) => t.key) },
+    ...changes,
+  });
+  const sheetOf = async (c: Client) => safeJson(await c.get(`/api/admin/owners/${me.id}`)) as Json;
+
+  beforeAll(async () => {
+    h = await createHarness();
+    h.clock.set('2026-10-09T09:00:00.000Z');
+    op = await adminClient(h, 'OPERATOR');
+    auditor = await adminClient(h, 'AUDITOR');
+    const { client, email } = await accountClient(h);
+    me = { id: await accountIdOf(email), client };
+    const read = safeJson(await client.get('/api/v1/account/profile')) as Json;
+    const saved = await client.request('PUT', '/api/v1/account/profile', {
+      body: {
+        version: read.profile.version, firstName: 'Camille', lastName: 'Durand', country: 'FR', city: 'Lyon', phone: { country: 'FR', number: '06 12 34 56 78' },
+        birthDate: '1994-03-14', instagram: 'camille.dl', heard: null, tastes: { pieces: [], finishes: [] },
+      },
+    });
+    expect(saved.statusCode, saved.body).toBe(200);
+    await h.ctx.services.addresses.create(me.id, { name: 'Camille Durand', address: '12 rue de la Paix\n75002 Paris', country: 'FR', phone: '+33 6 12 34 56 78' }, { type: 'account', id: me.id });
+  });
+  afterAll(() => h?.close());
+
+  it('GET /api/admin/owners/:id carries the profile in clear for an OPERATOR, withheld for an AUDITOR with the age band; the tags, the private notes and the team account', async () => {
+    const sheet = await sheetOf(op);
+    expect(sheet.profile).toMatchObject({
+      firstName: 'Camille', lastName: 'Durand', country: 'FR', birthDate: '1994-03-14', age: 32, ageBand: '25-34', birthDateBy: 'COLLECTOR',
+      phone: { country: 'FR', number: '+33612345678' }, city: 'Lyon', instagram: 'camille.dl',
+      address: { name: 'Camille Durand', lines: '12 rue de la Paix\n75002 Paris', country: 'FR', phone: '+33 6 12 34 56 78' }, otherAddresses: 0,
+      version: 2, updatedBy: 'COLLECTOR', withheld: [], teamAccount: false,
+    });
+    expect(sheet).toMatchObject({ tags: [], privateNotes: { items: [], total: 0 }, teamAccount: false });
+    const masked = await auditor.get(`/api/admin/owners/${me.id}`);
+    expect(masked.statusCode).toBe(200);
+    const p = (safeJson(masked) as Json).profile;
+    expect(p).toMatchObject({ firstName: 'Camille', lastName: 'Durand', country: 'FR', birthDate: null, age: null, ageBand: '25-34', phone: null, city: null, instagram: null, address: null, withheld: ['birthDate', 'phone', 'city', 'address', 'instagram'] });
+    // Nothing withheld leaks elsewhere in the AUDITOR's sheet.
+    for (const word of ['1994-03-14', '612345678', 'Lyon', 'camille.dl', 'rue de la Paix']) expect(masked.body, word).not.toContain(word);
+    // The route's mask is the service's AUDITOR view.
+    expect(p).toEqual(JSON.parse(JSON.stringify(await h.ctx.services.profiles.forStaff(me.id, { inClear: false }))));
+  });
+
+  it('PUT …/profile: an OPERATOR edits the profile with the version read (409 PROFILE_CHANGED after the client saved); never the date of birth; an AUDITOR 403; the CSRF token and the same origin', async () => {
+    const p = (await sheetOf(op)).profile;
+    expect(errorOf(await put(auditor, 'profile', whole(p, { city: 'Paris' }))).code).toBe('FORBIDDEN');
+    expect(errorOf(await put(op, 'profile', whole(p, { city: 'Paris' }), { noCsrf: true })).code).toBe('CSRF_FAILED');
+    expect(errorOf(await put(op, 'profile', whole(p, { city: 'Paris' }), { origin: 'https://evil.example' })).code).toBe('CSRF_FAILED');
+    // The date of birth has its own route; an unknown key is refused.
+    expect((await put(op, 'profile', whole(p, { birthDate: '1990-01-01' }))).statusCode).toBe(400);
+    expect((await put(op, 'profile', whole(p, { note: 'x' }))).statusCode).toBe(400);
+    const res = await put(op, 'profile', whole(p, { city: 'Paris', instagram: 'https://www.instagram.com/Camille.DL/' }));
+    expect(res.statusCode, res.body).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect((safeJson(res) as Json).profile).toMatchObject({ city: 'Paris', instagram: 'camille.dl', version: p.version + 1, updatedBy: 'STAFF', birthDate: '1994-03-14' });
+    const audit = await h.ctx.db.selectFrom('audit_logs').select(['actor_type', 'details']).where('target_id', '=', me.id).where('action', '=', 'account.profile.update').orderBy('id', 'desc').executeTakeFirstOrThrow();
+    expect(audit).toEqual({ actor_type: 'admin', details: { by: 'staff', fields: ['city'] } });
+    // The collector's YOUR PROFILE, read before, is now behind: 409 for the collector, in its own words.
+    const late = await me.client.request('PUT', '/api/v1/account/profile', { body: { ...whole(p, { city: 'Nice' }), birthDate: undefined } });
+    expect([late.statusCode, errorOf(late)]).toEqual([409, { code: 'PROFILE_CHANGED', message: 'Your profile was changed meanwhile.' }]);
+    // And Client Services', read before the collector's next save, 409 in the console's words.
+    const now = safeJson(await me.client.get('/api/v1/account/profile')) as Json;
+    expect((await me.client.request('PUT', '/api/v1/account/profile', { body: { ...whole({ ...now.profile, heard: null }, { city: 'Lyon' }) } })).statusCode).toBe(200);
+    const stale = await put(op, 'profile', whole(p, { version: p.version + 1, city: 'Marseille' }));
+    expect([stale.statusCode, errorOf(stale)]).toEqual([409, { code: 'PROFILE_CHANGED', message: 'The client changed the profile meanwhile. It has been read again: check and save.' }]);
+    expect(errorOf(await op.request('PUT', `/api/admin/owners/${randomUUID()}/profile`, { body: whole(p) })).code).toBe('ACCOUNT_NOT_FOUND');
+  });
+
+  it('PUT …/birth-date: an OPERATOR changes or removes the date with a reason, kept as a private note in the same transaction; the version; an AUDITOR 403', async () => {
+    const p = (await sheetOf(op)).profile;
+    expect(errorOf(await put(auditor, 'birth-date', { version: p.version, birthDate: '1994-04-13', why: 'Day and month swapped.' })).code).toBe('FORBIDDEN');
+    expect(errorOf(await put(op, 'birth-date', { version: p.version, birthDate: '1994-04-13', why: 'Day and month swapped.' }, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    const noWhy = await put(op, 'birth-date', { version: p.version, birthDate: '1994-04-13', why: '' });
+    expect([noWhy.statusCode, errorOf(noWhy)]).toEqual([400, { code: 'VALIDATION_FAILED', message: 'Give the reason.' }]);
+    expect((await put(op, 'birth-date', { version: p.version, birthDate: '1994-04-13' })).statusCode).toBe(400);
+    const stale = await put(op, 'birth-date', { version: p.version - 1, birthDate: '1994-04-13', why: 'Day and month swapped.' });
+    expect(errorOf(stale).code).toBe('PROFILE_CHANGED');
+    const res = await put(op, 'birth-date', { version: p.version, birthDate: '1994-04-13', why: 'Day and month swapped.' });
+    expect(res.statusCode, res.body).toBe(200);
+    expect((safeJson(res) as Json).profile).toMatchObject({ birthDate: '1994-04-13', birthDateBy: 'STAFF', version: p.version + 1 });
+    const sheet = await sheetOf(op);
+    expect(sheet.privateNotes).toEqual({ items: [expect.objectContaining({ text: 'Date of birth changed: Day and month swapped.' })], total: 1 });
+    const removed = await put(op, 'birth-date', { version: p.version + 1, birthDate: null, why: 'Not the client\'s own.' });
+    expect((safeJson(removed) as Json).profile).toMatchObject({ birthDate: null, birthDateBy: null, version: p.version + 2 });
+    // The collector entered it once: theirs is used, only Client Services sets it now.
+    const read = safeJson(await me.client.get('/api/v1/account/profile')) as Json;
+    expect(read.profile).toMatchObject({ birthDate: null, birthDateLocked: true });
+    const again = await me.client.request('PUT', '/api/v1/account/profile', { body: { ...whole({ ...read.profile, heard: null }), birthDate: '1994-04-13' } });
+    expect(errorOf(again).code).toBe('BIRTH_DATE_ENTERED');
+    const audits = await h.ctx.db.selectFrom('audit_logs').select(['action', 'details']).where('target_id', '=', me.id).where('action', 'in', ['account.profile.update', 'account.note.add']).orderBy('id', 'desc').limit(4).execute();
+    expect(audits.reverse().map((a) => [a.action, (a.details as Json).birthDate ?? null])).toEqual([
+      ['account.note.add', null],
+      ['account.profile.update', 'changed'],
+      ['account.note.add', null],
+      ['account.profile.update', 'cleared'],
+    ]);
+    expect(JSON.stringify(audits)).not.toMatch(/1994|swapped/);
+  });
+
+  it('PUT …/default-address: an OPERATOR edits the default address in place, or adds the first as the default; audited by staff with the id and country only; an AUDITOR 403', async () => {
+    const before = (await sheetOf(op)).profile;
+    const body = { name: 'Camille Durand', address: '3 rue de la République\n69001 Lyon', country: 'FR', phone: '+33 6 12 34 56 78' };
+    expect(errorOf(await put(auditor, 'default-address', body)).code).toBe('FORBIDDEN');
+    expect(errorOf(await put(op, 'default-address', body, { noCsrf: true })).code).toBe('CSRF_FAILED');
+    const bad = await put(op, 'default-address', { ...body, country: 'XX' });
+    expect([bad.statusCode, errorOf(bad)]).toEqual([400, { code: 'VALIDATION_FAILED', message: 'Choose a country.' }]);
+    const res = await put(op, 'default-address', body);
+    expect(res.statusCode, res.body).toBe(200);
+    expect((safeJson(res) as Json).profile).toMatchObject({ address: { name: 'Camille Durand', lines: '3 rue de la République\n69001 Lyon', country: 'FR' }, otherAddresses: 0, version: before.version });
+    const audit = await h.ctx.db.selectFrom('audit_logs').select(['action', 'details']).where('target_id', '=', me.id).where('action', 'like', 'account.address.%').orderBy('id', 'desc').executeTakeFirstOrThrow();
+    expect(audit).toMatchObject({ action: 'account.address.update', details: { by: 'staff', country: 'FR' } });
+    expect(JSON.stringify(audit)).not.toContain('République');
+    // An account with no address: the first, made the default.
+    const other = await accountIdOf((await accountClient(h)).email);
+    const created = await op.request('PUT', `/api/admin/owners/${other}/default-address`, { body: { ...body, country: 'IT', address: 'Via Roma 1\n20121 Milano' } });
+    expect((safeJson(created) as Json).profile).toMatchObject({ address: { country: 'IT' }, otherAddresses: 0 });
+    expect(await h.ctx.db.selectFrom('account_addresses').select(['is_default', 'country']).where('account_id', '=', other).execute()).toEqual([{ is_default: true, country: 'IT' }]);
   });
 });
