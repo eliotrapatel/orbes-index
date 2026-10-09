@@ -1,6 +1,6 @@
 /**
- * docs/launch/DEPLOY-NEXT-LOT.md, the owner's runbook for deployments H1 and H2, the next lot (plan of 2026-10-07, §7
- * and step 4.7), part H1, against the scripts, the migrations and the app it quotes:
+ * docs/launch/DEPLOY-NEXT-LOT.md, the owner's runbook for deployments H1 and H2, the next lot (plan of 2026-10-07, §7,
+ * step 4.7 and Finish H2), against the scripts, the migrations and the app it quotes. Part H1:
  *
  *  - it starts from the production of G (2026-10-07: 0001 to 0032, the commit 52c1c8c, merged into this branch before
  *    H1) and applies exactly 0033 and 0034, as the scripts print them: the table of §1.0, the lines
@@ -14,11 +14,21 @@
  *    checks before the first customer card, one real check per feature, and the questions still open;
  *  - the console's and the app's words as they show them; one command per shell block, relative links that resolve,
  *    and the runbook linked from DEPLOYMENT and COMPLIANCE.
+ *
+ * Part H2 (§2), written at H2's finish:
+ *
+ *  - it starts from H1 (1651df1, 0001 to 0034) and applies exactly 0035 to 0039, after which H1's image no longer runs
+ *    on the schema; its deploy/vps diff is against H1's commit, never G's;
+ *  - the packing photo's edge limit as the blocking point before it (the route the console uploads to, which the
+ *    Caddyfile does not yet let through over 64 KB), the console's allowlist checked for the agent, the procedures told
+ *    to ORBES Client Services and to the agent, the plan's checks after H2 and what to set before the first supplier
+ *    order, its legal version (the day after H1's), and the questions of §5.2 still open for it, with the answer built.
  */
 import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { MIGRATIONS } from '../../src/server/db/migrate.js';
+import { PACKING_PHOTO_UPLOAD_ROUTE } from '../../src/server/routes/admin/media.js';
 import { LEGAL_VERSION } from '../../src/web/legal/content/index.js';
 import { REPO, readDoc, section } from './lexicon.js';
 import { anchors, fenced } from './runbook.js';
@@ -39,6 +49,14 @@ const numberOf = (name: string): number => Number(name.slice(0, 4));
 const BEFORE_H1 = NAMES.filter((n) => numberOf(n) <= 32);
 const DEPLOY_H1 = NAMES.filter((n) => numberOf(n) === 33 || numberOf(n) === 34);
 const AFTER_H1 = [...BEFORE_H1, ...DEPLOY_H1];
+
+/** The production H2 starts from: H1, its handed-over commit (CI green, merged into the deployment branch). */
+const H1_COMMIT = '1651df1dd669381395cfa464bf0d59264c677f5a';
+const H1_TAG = H1_COMMIT.slice(0, 12);
+/** The legal version of H2: the day after H1's 2026-10-09 (H2's final commit is dated 2026-10-09, not later). */
+const H2_LEGAL_VERSION = '2026-10-10';
+const DEPLOY_H2 = NAMES.filter((n) => numberOf(n) >= 35 && numberOf(n) <= 39);
+const AFTER_H2 = [...AFTER_H1, ...DEPLOY_H2];
 
 /** What the runbook expects from the scripts, each printed word for word by its source. */
 const MESSAGES: ReadonlyArray<readonly [message: string, source: string]> = [
@@ -148,7 +166,8 @@ describe('the runbook of the next lot, part H1 (docs/launch/DEPLOY-NEXT-LOT.md)'
     const checks = section(runbook, '### 1.7');
     for (const what of ['§3.1', '§3.2', '§3.3', '§3.4, en stock', '§3.4, vendue']) expect(checks, what).toContain(`| ${what} |`);
     const open = section(runbook, '## 3.');
-    expect([...open.matchAll(/^\d+\. \*\*/gm)]).toHaveLength(10);
+    // Questions 1 to 10 open for H1, then 11 to 20 for H2 (the plan's numbers).
+    expect([...open.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]))).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));
     expect(section(runbook, '## 2.')).toContain('jamais contre G');
   });
 
@@ -201,5 +220,129 @@ describe('the runbook of the next lot, part H1 (docs/launch/DEPLOY-NEXT-LOT.md)'
     }
     expect(readDoc('docs/DEPLOYMENT.md')).toContain('(launch/DEPLOY-NEXT-LOT.md)');
     expect(readDoc('docs/COMPLIANCE.md')).toContain('(launch/DEPLOY-NEXT-LOT.md)');
+  });
+});
+
+describe('the runbook of the next lot, part H2 (docs/launch/DEPLOY-NEXT-LOT.md §2)', () => {
+  const h2 = section(runbook, '## 2.');
+  const h2Commands = fenced(h2, 'bash');
+  const h2Outputs = fenced(h2, 'text');
+
+  it('starts from H1, 0001 to 0034, and applies exactly 0035 to 0039, as the scripts print them', () => {
+    expect(DEPLOY_H2).toEqual(['0035_logistics_access', '0036_supplier_orders', '0037_fulfilment', '0038_draw_sizes', '0039_order_delivery']);
+    expect(NAMES).toEqual(AFTER_H2);
+    expect(AFTER_H1).toHaveLength(35);
+    expect(h2).toContain(`le commit \`${H1_COMMIT}\` (image \`orbes-genome:${H1_TAG}\`), avec les trente-cinq migrations de \`${AFTER_H1[0]}\` à \`${AFTER_H1.at(-1)}\``);
+    expect(h2).toContain(`Sortie attendue : trente-cinq lignes, de \`${AFTER_H1[0]}\` à \`${AFTER_H1.at(-1)}\``);
+    expect(h2Outputs.join('\n')).toContain(AFTER_H1.slice(-2).join('\n'));
+    expect(h2).toContain(`schema: ${AFTER_H1.length} migration(s) applied, all known to orbes-genome:<TAG_H2>`);
+    const rows = [...section(runbook, '### 2.0').matchAll(/^ *\| `(\d{4}_[a-z0-9_]+)` \|/gm)].map((m) => m[1]);
+    expect(rows).toEqual(DEPLOY_H2);
+    expect(h2).toContain(`Applied ${DEPLOY_H2.length} migration(s): ${DEPLOY_H2.join(', ')}`);
+    expect(h2).toContain(`(previous: ${H1_TAG}). This release applied the migration(s) ${DEPLOY_H2.join(', ')}:`);
+    expect(h2).toContain(`orbes-genome:${H1_TAG} cannot run on this schema any more (scripts/deploy.sh --image ${H1_TAG} refuses it).`);
+    expect(h2).toContain(`deploy <TAG_H2> OK (previous ${H1_TAG}; migrations ${DEPLOY_H2.join(', ')})`);
+    expect(h2).toContain(`les ${AFTER_H2.length} lignes \`applied\`, de \`${AFTER_H2[0]}\` à \`${AFTER_H2.at(-1)}\``);
+    // H1 as the last deployment: its log line exactly as part H1 expects it after H1.
+    expect(h2).toContain(`\`… deploy ${H1_TAG} OK (previous ${PREV_TAG}; migrations ${DEPLOY_H1.join(', ')})\``);
+    expect(h2).toContain(`Sortie attendue : \`${H1_COMMIT}\` au début de la ligne`);
+    expect(h2).toContain(`Sortie attendue : \`ORBES_IMAGE_TAG=${H1_TAG}\`.`);
+    expect(h2).toContain(`\`Updating ${H1_COMMIT.slice(0, 7)}..<7 caractères de SHA_H2>\``);
+    expect(h2).toContain(`- **Le commit final** (règle 7) : la branche \`orbes-next-lot\``);
+  });
+
+  it('diffs deploy/vps against H1, never G, and names the packing photo\'s edge limit as the point that blocks it', () => {
+    expect(h2Commands).toContain(`git -C /opt/orbes/orbes-index diff --stat ${H1_COMMIT} HEAD -- deploy/vps`);
+    expect(h2Commands.join('\n')).not.toContain(PREV_COMMIT);
+    expect(h2).toContain('jamais contre G');
+    // The blocking point: the route the console uploads the photo to, which the edge still holds at 64 KB.
+    const before = section(runbook, '### 2.1');
+    const route = PACKING_PHOTO_UPLOAD_ROUTE;
+    expect(before).toContain(`\`PUT ${route}\``);
+    expect(before).toContain('Sans l\'un des deux, ne déploie pas H2');
+    const caddy = readDoc('deploy/vps/Caddyfile');
+    expect(caddy).not.toContain('packing/photo');
+    expect(caddy).toContain('max_size 64KB');
+    expect(readDoc('genome/src/server/services/logistics.ts')).toContain('add the photo before it is packed.');
+    // The console's allowlist, read for the agent's logins.
+    expect(h2Commands).toContain("grep '^ADMIN_ALLOWED_IPS=' .env");
+    expect(readDoc('deploy/vps/.env.example')).toContain('ADMIN_ALLOWED_IPS=0.0.0.0/0 ::/0');
+    expect(h2).toContain('`ADMIN_ALLOWED_IPS=0.0.0.0/0 ::/0`');
+    // The guarded launch, the heads-up at launch and after, restore.sh only to watch it refuse, no prune.
+    expect(h2Commands).toContain('pgrep -a pg_dump || scripts/deploy.sh');
+    expect(section(runbook, '### 2.4')).toContain('« ORBES H2 : déploiement lancé à 14:05 Paris (12:05 UTC), image orbes-genome:<TAG_H2>, 5 migrations, rien ne change sur l\'hôte.');
+    expect(section(runbook, '### 2.6')).toContain('**Préviens le responsable de l\'hôte**');
+    expect(section(runbook, '### 2.1')).toContain('une heure **hors** de 05:00–07:30 à Paris jusqu\'au 25 octobre 2026, 04:00–06:30 ensuite (03:00–05:30 UTC');
+    for (const c of h2Commands.filter((x) => x.includes('restore.sh'))) expect(c).toContain('--dry-run');
+    expect(h2Commands.filter((c) => /\bprune\b/.test(c))).toEqual([]);
+    expect(section(runbook, '### 2.5')).toContain(`**jamais \`scripts/deploy.sh --image ${H1_TAG}\`**`);
+  });
+
+  it('carries H2\'s legal version, what to tell before, one real check per feature, what to set after, and the questions still open', () => {
+    expect(LEGAL_VERSION >= H2_LEGAL_VERSION).toBe(true);
+    expect(readDoc('genome/test/web/legal.content.test.ts')).toContain(`'${H2_LEGAL_VERSION}': '`);
+    expect(h2).toContain(`Sortie attendue : \`export const LEGAL_VERSION = '${H2_LEGAL_VERSION}';\`.`);
+    expect(h2).toContain(`une seule nouvelle version, \`${H2_LEGAL_VERSION}\` (le lendemain de \`${H1_LEGAL_VERSION}\`, celle de H1)`);
+    const before = section(runbook, '### 2.1');
+    for (const what of ['**H1 est en production**', '**Aucune LIVE RELEASE**', '**Aucun test de TEST ENTRANTS en cours**', '**Les pièces à fabriquer encore ouvertes**', '**Préviens ORBES Client Services**', '**Préviens l\'agent logistique**']) expect(before, what).toContain(what);
+    // The playbook's procedures, as both copies name them.
+    const playbook = readDoc('docs/launch/SALES-PLAYBOOK.md');
+    for (const title of ['Recevoir une livraison et la confirmer', 'Un problème de colis', 'Retours et échanges', 'Commandes fournisseur', 'L\'adresse et la gravure du client']) {
+      expect(before, title).toContain(`« ${title} »`);
+      expect(playbook, title).toContain(`### ${title}`);
+    }
+    const checks = section(runbook, '### 2.7');
+    for (const what of ['§3.5, la console', '§3.5, l\'agent', '§3.5, une commande fournisseur', '§3.6.A', '§3.6.B', '§3.6.C', '§3.6.F']) expect(checks, what).toContain(`| ${what} |`);
+    expect(checks).toContain('« No supplier order … is expected here. »');
+    expect(readDoc('genome/src/server/services/receptions.ts')).toContain('`No supplier order ${ref} is expected here.');
+    const after = section(runbook, '### 2.8');
+    for (const what of ['**`Settings` → `Locations`, d\'abord.**', '**`Team`**', '`NO PIECE`', '**`Orders` → `Settings`**', '**`Supplier orders` → `Suppliers`**', '**`Catalogue`**']) expect(after, what).toContain(what);
+    const open = section(runbook, '## 3.');
+    expect(open).toContain('Et pour H2 (les numéros du plan)');
+  });
+
+  it('names the console and the app as they show themselves', () => {
+    const admin = (file: string): string => readDoc(`genome/src/web/admin/${file}`);
+    const labels: ReadonlyArray<readonly [label: string, file: string]> = [
+      ['Logistics', 'main.ts'],
+      ['Supplier orders', 'main.ts'],
+      ['To ship', 'model/logistics.ts'],
+      ['On its way', 'model/logistics.ts'],
+      ['Receptions', 'model/logistics.ts'],
+      ['Stock', 'model/logistics.ts'],
+      ['Returns', 'model/logistics.ts'],
+      ['Corrections', 'model/logistics.ts'],
+      ['Count pieces in', 'model/logistics.ts'],
+      ['Locations', 'views/team.ts'],
+      ['To order', 'views/logistics.ts'],
+      ['Suppliers', 'views/supplier-orders.ts'],
+      ['Add a supplier', 'model/suppliers.ts'],
+      ['Edit supplier', 'views/lookbook.ts'],
+      ['PDF', 'views/supplier-order.ts'],
+      ['Discard the draft', 'model/supplier-orders.ts'],
+      ['Confirmed by the supplier', 'model/supplier-orders.ts'],
+      ['Shipping', 'views/order.ts'],
+      ['Order case', 'model/order-cases.ts'],
+      ['Open a return', 'model/order-cases.ts'],
+      ['Ship', 'views/shipping.ts'],
+      ['Link a piece', 'views/order.ts'],
+      ['Address', 'views/settings.ts'],
+      ['Make default', 'views/settings.ts'],
+      ['Engraving', 'views/settings.ts'],
+      ['Add to supplier order', 'views/stock-check.ts'],
+      ['Sizes and pieces', 'views/drop.ts'],
+      ['Offer next', 'views/drop.ts'],
+    ];
+    for (const [label, file] of labels) {
+      expect(label === 'Confirmed by the supplier' ? section(runbook, '## 3.') : h2, label).toContain(`\`${label}\``);
+      if (label === 'Link a piece') continue; // removed from the console by H2: named as gone, and gone
+      expect(admin(file), `${label}: not in ${file}`).toMatch(new RegExp(`['\`]${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    }
+    expect(admin('views/order.ts')).not.toContain("'Link a piece'");
+    const copy = readDoc('genome/src/web/verify/copy.ts');
+    for (const words of ['IN PREPARATION', 'DELIVERY ADDRESS', 'YOUR ADDRESSES', 'MAKE DEFAULT', 'ENGRAVING', 'RETURNS AND EXCHANGES', 'REQUEST A RETURN', 'EXCHANGE THE SIZE', 'YOUR SIZE', 'ENTER THE DRAW']) {
+      expect(h2, words).toContain(words);
+      expect(copy, words).toContain(`'${words}'`);
+    }
   });
 });

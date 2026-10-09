@@ -766,6 +766,8 @@ describe('legal pages: both languages, links, lexicon', () => {
       // the order, the 14 days to ask a return or an exchange); then to the date of H2's final commit.
       // The review of 6.12 (step P6c): the orders paragraph's buyer also kept in YOUR ADDRESSES when saved there, the
       // audit log and the order's history keeping its country only.
+      // Finish H2: H2's final commit is dated 2026-10-09 (Paris), not later than H1's published 2026-10-09, so the
+      // plan's rule (§4) keeps the day after, 2026-10-10.
       '2026-10-10': '53025a555a7cf244',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);

@@ -7,7 +7,7 @@ Le lot suivant (plan du 2026-10-07) part en production en **deux déploiements**
 | Déploiement | Éléments | Migrations | Changement de l'hôte | État |
 |---|---|---|---|---|
 | H1 | La ligne de la variante, la carte 79t, les tailles par modèle, NEW CLAIM CODE (plan §3.1 à §3.4) | `0033` et `0034` | aucun | **À faire** |
-| H2 | LOGISTICS, les commandes aux fournisseurs, les réceptions, l'agent, et le côté du collectionneur (plan §3.5 et §3.6) | `0035` à `0039` | aucun | écrit à la fin de H2 (§2) |
+| H2 | LOGISTICS, les commandes aux fournisseurs, les réceptions, l'agent, et le côté du collectionneur (plan §3.5 et §3.6) | `0035` à `0039` | aucun (un point bloquant au §2.1) | **À faire, après H1** (§2) |
 
 Le point de départ de H1 : la production tourne G, le commit `52c1c8c65e0dd482480030197ec6e250887ab251` (image `orbes-genome:52c1c8c65e0d`, mise en service le 2026-10-07 à 23:26 à Paris, 21:26 UTC), avec les trente-trois migrations de `0001_initial` à `0032_growth_indexes`. La branche du lot est partie du dernier commit des neuf suivants remis avant G (`a68a9af`) ; le commit de G (`52c1c8c`, les trois défauts de la fusion et les deux échecs de la CI) y est fusionné avant la remise de H1, sans autre changement. Si un autre déploiement a eu lieu depuis, ce document ne s'applique pas tel quel : demande à Claude de le recaler avant de commencer. Le détail technique de `deploy.sh` est dans [DEPLOYMENT §15.7](../DEPLOYMENT.md#157-updates-and-rollback-deploysh).
 
@@ -439,11 +439,307 @@ Sur ton téléphone (Safari), avec le compte d'essai de la maison, puis l'ordina
 
 ## 2. Déploiement H2
 
-Écrit à la fin de H2 (plan §4, « Finish H2 »), avec les mêmes parties. Son diff de `deploy/vps` se fera contre le commit de H1 alors en production, tel que le nomme la dernière ligne OK de `.state/deploys.log`, jamais contre G.
+H2 part **après H1**, jamais avant : sa branche contient H1. Son point de départ : la production tourne H1, le commit `1651df1dd669381395cfa464bf0d59264c677f5a` (image `orbes-genome:1651df1dd669`), avec les trente-cinq migrations de `0001_initial` à `0034_claim_code_renewals`. Si la dernière ligne OK de `.state/deploys.log` nomme une autre image, ce paragraphe ne s'applique pas tel quel : demande à Claude de le recaler avant de commencer.
 
-Point ouvert déjà noté pour la remise de H2 :
+Les règles du §0 valent pour H2, avec ces trois différences :
 
-- **Le pays de la garantie démarrée à l'expédition** (question 14, plan §3.5.6.8b) : `ship()` démarre aujourd'hui chaque garantie sans pays. L'étape 6.7 lui passe le pays de l'adresse de livraison du colis, vérifié dans `packing.test` (la garantie et l'audit `warranty.activate`).
+- **Les captures d'abord** (règle 1) : celles de H2, que liste le rapport de Claude : `Logistics` (ses cinq onglets, la page d'un colis au format téléphone, la page d'une réception), `Supplier orders` (la proposition, une commande fournisseur et son PDF), le bloc de stock d'une sortie, la page d'une commande (`Shipping`, `Order case`, `Buyer`), `Team` avec LOGISTICS ; côté collectionneur, les cinq étapes de YOUR ORDERS, DELIVERY ADDRESS, YOUR ADDRESSES, ENGRAVING, RETURNS AND EXCHANGES et YOUR SIZE d'un tirage, au format téléphone et au format bureau.
+- **Le commit final** (règle 7) : la branche `orbes-next-lot`, sa CI verte, fusionnée dans `claude/orbes-genome-code-system-o8bmnk` en avance rapide jusqu'à ce commit exact.
+- **Les pages légales** (règle 10) : une seule nouvelle version, `2026-10-10` (le lendemain de `2026-10-09`, celle de H1) : dans les conditions, le paragraphe « Its piece » (une commande attend le stock du fournisseur, la plus ancienne servie d'abord), l'article 12 (une taille choisie à l'inscription d'un tirage) et l'article 14 (l'adresse et la gravure sur la commande, les 14 jours pour demander un retour ou un échange) ; dans la politique de confidentialité, la gravure (aucune pièce n'est plus fabriquée pour une commande), la photo d'emballage, l'adresse de livraison saisie par le client, son téléphone donné au transporteur et au prestataire logistique, et la durée de YOUR ADDRESSES (EN et FR). Sa date ne retient jamais le déploiement.
+
+### 2.0 Ce qui change
+
+**Pour les collectionneurs (/verify)**
+
+- **Une commande attend le stock du fournisseur** (§3.5). Plus aucune pièce n'est fabriquée pour une commande : une commande sans pièce en stock attend la prochaine livraison, les plus anciennes servies d'abord.
+- **YOUR ORDERS en cinq étapes** (§3.6.A) : RESERVED · PAID · IN PREPARATION · SHIPPED · DELIVERED. IN PREPARATION dès que la commande payée tient sa pièce.
+- **DELIVERY ADDRESS et YOUR ADDRESSES** (§3.6.B). Le client saisit l'adresse de livraison sur sa commande (le nom, les lignes, le pays, le téléphone) et la change jusqu'au début de l'emballage. Il garde jusqu'à cinq adresses dans YOUR ADDRESSES, dont une par défaut, mise sur chaque nouvelle commande.
+- **ENGRAVING sur la commande** (§3.6.C), jusqu'au début de l'emballage. Une sortie qui vend la gravure en option : ses mots seulement, sans second prix. Sinon, le prix réglé dans `Settings` → `Engraving` ; sans prix pour la devise, aucune gravure n'est offerte. Après le paiement, une facture complémentaire ou un avoir pour sa ligne.
+- **RETURNS AND EXCHANGES** (§3.6.D) : REQUEST A RETURN et EXCHANGE THE SIZE, dans les 14 jours qui suivent la livraison. La demande arrive aussi dans `Messages`.
+- **Les tailles dans un tirage** (§3.6.F) : YOUR SIZE avant ENTER THE DRAW ; chaque taille est remplie dans l'ordre du tirage. Un tirage publié avant H2 garde un seul lot de pièces.
+
+**Pour le personnel (la console)**
+
+- `Logistics` prend la place de l'Atelier (`#/atelier` y mène) : `To ship` (puis `On its way`), `Receptions`, `Stock`, `Returns`, `Corrections`. Le stock montre chaque taille proposée, à 0 compris, et la marque NO PIECE (un compte sans identité ORBES derrière).
+- Le rôle LOGISTICS dans `Team` : une connexion par personne de l'agent logistique, liée à ses entrepôts (`Locations`). Elle ne voit que `Logistics`, sans aucun prix ni la liste des commandes fournisseur.
+- `Supplier orders` (ORBES seul) : `To order`, la proposition, les commandes fournisseur et leur `PDF`, les `Suppliers` ; le fournisseur d'un modèle ou d'une taille sur la page du modèle (`Edit supplier`).
+- La page d'une commande : les sections `Shipping` et `Order case` (`Open a return`, `Decide`) ; `Buyer` avec le pays, le téléphone et ADDRESS CHANGED ; la gravure avec son prix. `Link a piece` disparaît.
+- **L'expédition (`Ship`) démarre la garantie de chaque pièce** (question 14), avec le pays de l'adresse de livraison : plus rien à activer à la main avant l'envoi.
+- `Settings` : l'adresse de chaque entrepôt (`Address`) ; `Orders` → `Settings` : LATE après 5 jours, et `Engraving` (un prix par devise).
+- Le `Generator` est réservé à ADMIN. Une sortie montre son bloc de stock, avec `Add to supplier order`. Un tirage a ses `Sizes and pieces` et `Offer next` par taille.
+
+**Les migrations**, appliquées dans **une seule transaction** : si elles échouent, rien n'est appliqué et le site revient tout seul sur `1651df1dd669`.
+
+  | Migration | Élément | Contenu |
+  |---|---|---|
+  | `0035_logistics_access` | §3.5 | le rôle LOGISTICS et ses entrepôts, l'adresse d'un entrepôt, les fournisseurs |
+  | `0036_supplier_orders` | §3.5 | les commandes fournisseur, les réceptions, les cartes à imprimer, les retours au fournisseur, les corrections de stock |
+  | `0037_fulfilment` | §3.5 | les commandes qui attendent le stock, l'échange de taille, les colis, les cas de commande |
+  | `0038_draw_sizes` | §3.6.F | la taille d'une inscription à un tirage |
+  | `0039_order_delivery` | §3.6.B, §3.6.C | YOUR ADDRESSES, le pays et le téléphone de la livraison, le prix de la gravure, la facture complémentaire et l'avoir d'une ligne |
+
+- **Ce que les migrations écrivent** : la date d'entrée en stock des pièces finies par l'atelier (`0036`) ; les commandes qui attendaient une pièce à fabriquer attendent désormais le stock, et les pièces à fabriquer encore ouvertes sont annulées, leurs identités réservées laissées telles quelles (« forget those », `0037`) ; LATE passe de 3 à 5 jours (`0037`) ; une adresse déjà saisie est notée saisie par le personnel, ses pays et téléphone vides (« Not entered »), et chaque avoir existant crédite toute sa facture (`0039`).
+- **Caddy** : rien ne change (voir le point bloquant du §2.1, la photo d'emballage).
+- **Les variables** : rien ne change. Le claim code d'une carte à imprimer est scellé avec une clé dérivée de `KEY_ENCRYPTION_KEY` (ou de `COOKIE_SECRET` sans elle), déjà en place.
+- **Les pages légales** : la version `2026-10-10`.
+- **Une coupure courte** : l'application est arrêtée pendant les migrations, puis redémarrée. En général, moins d'une minute.
+- **Pas de retour en arrière** : `0037_fulfilment` et `0039_order_delivery` ne conviennent pas à l'image `1651df1dd669`, qui ne peut plus tourner sur ce schéma. `deploy.sh` arrête l'application avant de migrer, et `deploy.sh --image 1651df1dd669` la refuse ensuite.
+
+Dans la suite, `<SHA_H2>` est le commit final (40 caractères) que donne le rapport de Claude, `<TAG_H2>` ses 12 premiers caractères (le tag de la nouvelle image).
+
+### 2.1 Avant : le point bloquant, ORBES Client Services, l'agent, la CI, l'heure, le pré-contrôle
+
+**1. Le point bloquant : la photo d'emballage.** `Packed` exige la photo du colis, que la console envoie jusqu'à 1 Mo (réduite à 1 600 px). Le bord du serveur (Caddy) refuse aujourd'hui tout corps de plus de 64 Ko sur ce chemin (`PUT /api/admin/logistics/orders/:id/packing/photo`), et ce lot ne change rien sur l'hôte ([DEPLOYMENT §15.7](../DEPLOYMENT.md#157-updates-and-rollback-deploysh)). Avant H2, choisis l'un des deux :
+
+- **une exception de Caddy pour ce chemin**, comme celle des photos : un changement du bord du serveur partagé, à annoncer d'abord au responsable de l'hôte ; Claude l'écrit alors dans un commit, avec sa CI, et recale ce paragraphe (le diff de `deploy/vps` n'est plus vide, Caddy est recréé) ;
+- **ou une photo réduite à 64 Ko au plus** dans la console : un commit de Claude, avec sa CI ; rien ne change sur l'hôte.
+
+Sans l'un des deux, ne déploie pas H2 : aucun colis ne pourrait être marqué `Packed`.
+
+**2. Ce qui doit être réglé avant le jour** (dans la console, sur ton ordinateur) :
+
+- **H1 est en production**, et chaque modèle a son type de taille et ses tailles dans `Catalogue` (§1.8) : le stock et les commandes fournisseur de H2 les lisent.
+- **Aucune LIVE RELEASE** prévue pendant la fenêtre, et aucun tirage tiré pendant elle.
+- **Aucun test de TEST ENTRANTS en cours** : le redémarrage l'arrêterait. Un test fini se nettoie avec END TEST avant, comme d'habitude.
+- **Les pièces à fabriquer encore ouvertes** sont annulées par la migration, leurs identités réservées laissées telles quelles : rien à faire.
+- **Préviens ORBES Client Services** des nouvelles procédures ([le playbook](SALES-PLAYBOOK.md), §2, aussi dans `Documents`) : « Recevoir une livraison et la confirmer », l'expédition par `Logistics`, « Un problème de colis », « Retours et échanges », « Commandes fournisseur », « L'adresse et la gravure du client » (une adresse après le début de l'emballage, le prix de la gravure).
+- **Préviens l'agent logistique** : une connexion par personne, la vérification en deux étapes à la première connexion, et les procédures du playbook (§2).
+
+**3. Le commit et sa CI (sur ton Mac)** (première condition). Ouvre <https://github.com/eliotrapatel/orbes-index/actions?query=branch%3Aclaude%2Forbes-genome-code-system-o8bmnk>. Le dernier passage de `genome-ci` doit être celui de `<SHA_H2>`, avec une coche verte. Sinon, n'avance pas.
+
+**4. Connecte-toi au serveur**, comme au §1.1 : `sudo -iu orbes`, `cd /opt/orbes/orbes-index/deploy/vps`, `umask 022`.
+
+**5. L'heure.**
+
+```bash
+date -u
+```
+
+Sortie attendue : une heure **hors** de 05:00–07:30 à Paris jusqu'au 25 octobre 2026, 04:00–06:30 ensuite (03:00–05:30 UTC, l'heure que `date -u` affiche), et hors des minutes de sauvegarde du hub (règle 2).
+
+**6. Le pré-contrôle**, comme au §1.1 : note les quatre résultats (`free -h`, `docker stats --no-stream`, `df -h /`, `du -sh /var/backups/orbes`). `Use%` de `df -h /` **sous 75 %**.
+
+**7. Aucune sauvegarde en cours** : `pgrep -a pg_dump`, sortie attendue **rien**.
+
+### 2.2 Préparer le serveur
+
+**1. Rien d'égaré dans le shell** : `env | grep -E '^(ORBES_IMAGE_TAG|COMPOSE_PROJECT_NAME)='`, sortie attendue **rien** (sinon `unset ORBES_IMAGE_TAG COMPOSE_PROJECT_NAME`).
+
+**2. Où en est le checkout.**
+
+```bash
+git -C /opt/orbes/orbes-index log -1 --format='%H %s'
+```
+
+Sortie attendue : `1651df1dd669381395cfa464bf0d59264c677f5a` au début de la ligne (le commit de H1).
+
+```bash
+git -C /opt/orbes/orbes-index status --short
+```
+
+Sortie attendue : **rien**. Si des fichiers s'affichent, arrête-toi.
+
+**3. Ce qui tourne.**
+
+```bash
+grep '^ORBES_IMAGE_TAG=' .env
+```
+
+Sortie attendue : `ORBES_IMAGE_TAG=1651df1dd669`.
+
+```bash
+docker compose ps
+```
+
+Sortie attendue : `caddy`, `app` et `postgres`, chacun `Up … (healthy)`.
+
+```bash
+tail -n 1 .state/deploys.log
+```
+
+Sortie attendue : `… deploy 1651df1dd669 OK (previous 52c1c8c65e0d; migrations 0033_model_sizes, 0034_claim_code_renewals)` : H1 est bien le dernier déploiement réussi. Une autre ligne : arrête-toi et demande à Claude.
+
+**4. La console de l'agent n'est pas filtrée par adresse.**
+
+```bash
+grep '^ADMIN_ALLOWED_IPS=' .env
+```
+
+Sortie attendue : `ADMIN_ALLOWED_IPS=0.0.0.0/0 ::/0`, ou rien (la liste d'adresses de la console est ouverte, réglage par défaut). Une autre liste : la console ne répond qu'à ces adresses, et l'agent, depuis son entrepôt, lirait `Forbidden` ; arrête-toi et demande à Claude.
+
+**5. `RESTORE_ALLOWED=false`** : `grep -n '^RESTORE_ALLOWED=' .env`, sortie attendue une seule ligne, `<numéro>:RESTORE_ALLOWED=false`.
+
+### 2.3 Récupérer le commit final
+
+```bash
+git -C /opt/orbes/orbes-index fetch origin
+```
+
+Sortie attendue : une ligne qui se termine par `-> origin/claude/orbes-genome-code-system-o8bmnk`, ou rien.
+
+```bash
+git -C /opt/orbes/orbes-index log -1 --format='%H %s' origin/claude/orbes-genome-code-system-o8bmnk
+```
+
+Sortie attendue : **exactement `<SHA_H2>`** au début de la ligne. Un autre commit : arrête-toi et demande à Claude.
+
+```bash
+git -C /opt/orbes/orbes-index merge --ff-only origin/claude/orbes-genome-code-system-o8bmnk
+```
+
+Sortie attendue : `Updating 1651df1..<7 caractères de SHA_H2>`, puis `Fast-forward` et la liste des fichiers. Si tu lis `Not possible to fast-forward, aborting.`, rien n'a changé : arrête-toi.
+
+```bash
+git -C /opt/orbes/orbes-index log -1 --format='%H'
+```
+
+Sortie attendue : `<SHA_H2>`.
+
+**Rien ne change dans la pile du serveur** (deuxième condition), contre le commit de H1 alors en production, jamais contre G :
+
+```bash
+git -C /opt/orbes/orbes-index diff --stat 1651df1dd669381395cfa464bf0d59264c677f5a HEAD -- deploy/vps
+```
+
+Sortie attendue : **rien**. Une ligne de `deploy/vps` : arrête-toi et demande à Claude (sauf si tu as choisi l'exception de Caddy au §2.1, et alors Claude t'a donné la ligne attendue).
+
+**La version des pages légales** :
+
+```bash
+git -C /opt/orbes/orbes-index grep -h '^export const LEGAL_VERSION' HEAD -- genome/src/web/legal/content/index.ts
+```
+
+Sortie attendue : `export const LEGAL_VERSION = '2026-10-10';`.
+
+**Une lecture sans risque** :
+
+```bash
+bash -c 'set -Eeuo pipefail; source scripts/lib.sh; db_applied_migrations'
+```
+
+Sortie attendue : trente-cinq lignes, de `0001_initial` à `0034_claim_code_renewals` ; les deux dernières :
+
+```text
+0033_model_sizes
+0034_claim_code_renewals
+```
+
+### 2.4 Déployer
+
+Hors des heures de la règle 2. Envoie au responsable de l'hôte une ligne au lancement, par exemple : « ORBES H2 : déploiement lancé à 14:05 Paris (12:05 UTC), image orbes-genome:<TAG_H2>, 5 migrations, rien ne change sur l'hôte. Pré-contrôle : <les quatre résultats>. »
+
+Le lancement est gardé (troisième condition), comme au §1.4 :
+
+```bash
+pgrep -a pg_dump || scripts/deploy.sh
+```
+
+Sortie attendue, dans l'ordre, celle du §1.4 avec ces lignes-ci :
+
+1. **La source** : `… [deploy.sh] ref HEAD = commit <SHA_H2> (tag <TAG_H2>)`. Un autre commit : Ctrl-C immédiatement.
+2. **La construction** : `… [deploy.sh] previous image tag: 1651df1dd669`.
+3. **Le schéma** :
+
+   ```text
+   … [deploy.sh] ── schema
+   … [deploy.sh] schema: 35 migration(s) applied, all known to orbes-genome:<TAG_H2>
+   ```
+
+   **Il faut lire `35 migration(s)`.** Un `ERROR: … nothing was changed` à la place : le site tourne toujours sur `1651df1dd669`, colle la sortie à Claude et ne relance pas.
+
+4. **La sauvegarde pré-déploiement** : **note le nom de l'archive**, `orbes-<date>T<heure>Z-pre-deploy-<TAG_H2>.tar.age`.
+5. **Les migrations et le redémarrage** (la coupure courte commence ici) :
+
+   ```text
+   … [deploy.sh] stopping the running app before migrating to <TAG_H2>
+   Applied 5 migration(s): 0035_logistics_access, 0036_supplier_orders, 0037_fulfilment, 0038_draw_sizes, 0039_order_delivery
+   … [deploy.sh] database ready: migrations applied, app role orbes_app has DML rights only
+   … [deploy.sh] app is healthy
+   … [deploy.sh] caddy is healthy
+   ```
+
+6. **La clé de signature et les tests de fumée**, comme au §1.4.
+7. **La fin** :
+
+   ```text
+   … [deploy.sh] deployed orbes-genome:<TAG_H2> (previous: 1651df1dd669). This release applied the migration(s) 0035_logistics_access, 0036_supplier_orders, 0037_fulfilment, 0038_draw_sizes, 0039_order_delivery:
+   … [deploy.sh] orbes-genome:1651df1dd669 cannot run on this schema any more (scripts/deploy.sh --image 1651df1dd669 refuses it). If anything goes wrong, repair forward: scripts/deploy.sh --image <TAG_H2> after a transient incident, otherwise a corrective commit (docs/DEPLOYMENT.md §15.7).
+   ```
+
+   Puis `echo $?` : sortie attendue `0`.
+
+### 2.5 Si quelque chose ne va pas
+
+Le tableau du §1.5, avec `1651df1dd669` à la place de `52c1c8c65e0d` et `<TAG_H2>` à la place de `<TAG_H1>`. Dans tous les cas : **jamais `restore.sh`**, **jamais `scripts/deploy.sh --image 1651df1dd669`** (refusé : `this image cannot run on this schema: repair forward`), jamais de `prune`.
+
+### 2.6 Juste après : contrôles de base
+
+Sur le serveur, toujours en `orbes` dans `deploy/vps` :
+
+```bash
+tail -n 1 .state/deploys.log
+```
+
+Sortie attendue : `… deploy <TAG_H2> OK (previous 1651df1dd669; migrations 0035_logistics_access, 0036_supplier_orders, 0037_fulfilment, 0038_draw_sizes, 0039_order_delivery)`.
+
+```bash
+docker compose ps
+```
+
+Sortie attendue : `caddy`, `app`, `postgres`, chacun `Up … (healthy)`.
+
+```bash
+docker compose exec app node --import tsx scripts/db.ts status
+```
+
+Sortie attendue : `Database: postgres://orbes_app:***@postgres:5432/orbes`, puis les 40 lignes `applied`, de `0001_initial` à `0039_order_delivery`, aucune `PENDING`.
+
+```bash
+docker compose logs app | grep -c 'live engine: leading'
+```
+
+Sortie attendue : `1`.
+
+```bash
+scripts/restore.sh --identity /dev/null --latest --dry-run
+```
+
+Sortie attendue : `… ERROR: restore.sh is disabled on this server (RESTORE_ALLOWED=false in …)`, qui se termine par `Nothing was done.`
+
+**Le disque, après** : les quatre mêmes commandes qu'au §1.6 (`free -h`, `docker stats --no-stream`, `df -h /`, `du -sh /var/backups/orbes`).
+
+**Depuis ton Mac** : `curl -s https://verify.theorbes.com/api/v1/health` → `{"ok":true,"version":"0.1.0"}`, et `/verify/pieces` → `200`, comme au §1.6.
+
+**Préviens le responsable de l'hôte** : « ORBES H2 fait à <heure> Paris (<heure> UTC), 5 migrations, rien n'a changé sur l'hôte, tout est healthy. Avant / après : <les chiffres>. »
+
+### 2.7 Une vérification réelle par élément
+
+Sur ton ordinateur pour la console, puis ton téléphone (Safari) avec le compte d'essai de la maison.
+
+| Élément | Où | Geste | Ce que tu dois voir |
+|---|---|---|---|
+| §3.5, la console | Console | `Logistics` ; l'ancienne adresse `#/atelier` ; `Supplier orders` ; la page d'une commande ; `Team` ; le `Generator` en OPERATOR | `Logistics` et ses cinq onglets, son stock avec chaque taille proposée à 0 ; `#/atelier` ouvre `Logistics` ; la proposition dans `To order` ; les sections `Shipping` et `Order case` ; LOGISTICS proposé dans `Team` ; le `Generator` réservé à ADMIN |
+| §3.5, l'agent | Console | Une connexion LOGISTICS de test (désactivée ensuite) ; dans `Receptions`, une référence inconnue | Seulement `Logistics` et ses entrepôts, aucun prix, aucune liste de commandes fournisseur ni colonne `Expected` ; « No supplier order … is expected here. » |
+| §3.5, une commande fournisseur | Console | Un brouillon pour un modèle de test, son `PDF`, puis `Discard the draft` | Le PDF se télécharge ; le brouillon disparaît. La première vraie livraison, faite avec l'agent selon le playbook, est la vérification des réceptions (elle émet de vraies identités) |
+| §3.6.A | Téléphone | MY PIECES → ORDERS, une commande | Les cinq étapes, RESERVED · PAID · IN PREPARATION · SHIPPED · DELIVERED |
+| §3.6.B | Téléphone | YOUR ADDRESSES : ajoute une adresse, `MAKE DEFAULT`, retire-en une ; sur une commande, DELIVERY ADDRESS : ajoute-la, puis change-la | Chaque geste pris ; l'adresse sur la commande |
+| §3.6.C | Téléphone, console | Une commande sans l'option ENGRAVING, avant et après un prix dans `Orders` → `Settings` → `Engraving` ; une commande LIVE avec l'option | ENGRAVING offert seulement une fois le prix réglé ; sur la commande LIVE, les mots se saisissent sans second prix |
+| §3.6.F | Console | Un tirage de test en brouillon : `Sizes and pieces` ; le publier sans tailles | Ses tailles et leurs pièces ; la publication sans tailles refusée |
+
+### 2.8 Ensuite
+
+**Juste après H2, avant la première commande fournisseur :**
+
+- **`Settings` → `Locations`, d'abord.** L'entrepôt de l'agent est le stock d'ORBES. Avant la première réception, fais de l'entrepôt de l'agent le lieu par défaut (`Make default`), ou renomme le lieu par défaut à son nom : les tirages sans lieu et chaque commande du salon vont au lieu par défaut. Chaque lieu qui tient des commandes (celui de chaque sortie, et le lieu par défaut) doit être lié aux connexions de l'agent ; un lieu qu'aucun agent ne tient ne tient aucune commande. Vérification : `Settings` → `Locations` montre l'entrepôt de l'agent en premier, marqué par défaut.
+- **`Team`** : crée les connexions LOGISTICS de l'agent, une par personne, chacune avec le ou les entrepôts où elle travaille, le lieu par défaut compris. Chacune enrôle sa vérification en deux étapes à sa première connexion.
+- **`Logistics` → `Stock`** : cherche la marque `NO PIECE` (un stock compté avant H2 sans identité ORBES derrière). Nomme les pièces de chaque taille par leur numéro (`Count pieces in`), ou corrige le compte à la baisse, avant que l'agent emballe une commande qui en dépend.
+- **`Orders` → `Settings`** : l'adresse postale de chaque entrepôt (le PDF d'une commande fournisseur et l'adresse de retour) ; LATE lit 5 jours ; les prix de la gravure par devise, si tu veux l'offrir aux commandes sans l'option ENGRAVING d'une LIVE RELEASE (sans prix, pas de gravure sur celles-ci ; une commande avec l'option se voit offrir ses mots de toute façon).
+- **`Supplier orders` → `Suppliers`** : ajoute tes fournisseurs (`Add a supplier`).
+- **`Catalogue`** : le fournisseur de chaque modèle, et celui d'une taille là où il diffère (`Edit supplier`).
+
+**Ensuite**, les premières vraies commandes suivent le playbook : ORBES Client Services marque payé ; l'agent emballe, scanne, photographie et expédie ; le client voit IN PREPARATION, puis SHIPPED avec son suivi.
+
+**Les anciennes images (facultatif).** Une fois H2 stable, `1651df1dd669` et les images d'avant ne peuvent plus servir. Retire-les une par une, par leur tag exact (jamais `<TAG_H2>`), la liste d'abord : `docker images orbes-genome`.
 
 ## 3. Ce qui reste à ta décision (sans bloquer)
 
@@ -459,3 +755,16 @@ Le plan (§5.2) garde ces questions ouvertes pour H1 ; sans réponse, la répons
 8. **Une pièce vendue en boutique, sans commande** : `New claim code` la refuse (réponse b), pour que le personnel ne voie jamais un code dû à un acheteur.
 9. **NEW CLAIM CODE et l'ORBES CODE** restent séparés : `Re-issue code` reste à côté.
 10. **REGISTER THIS PIECE sans scan**, une fois la commande expédiée : oui.
+
+Et pour H2 (les numéros du plan) ; sans réponse, la réponse bâtie reste :
+
+11. **EXPECTED** est une étape à part, facultative : `Confirmed by the supplier`, avec sa date si le fournisseur en donne une.
+12. **La liste d'emballage** : une ligne par pièce pour la carte (son claim code visible), la carte 79t portant les deux codes.
+13. **« ORBES atelier » ailleurs** (le soin annuel, les avantages par défaut de PALLADIUM, le paragraphe ORBES Care des conditions) : inchangé dans ce lot ; donne tes mots et c'est une petite correction directe.
+14. **La garantie démarre à l'expédition** (`Ship`), avec le pays de l'adresse de livraison du colis.
+15. **Les étapes de YOUR ORDERS** gardent RESERVED et PAID.
+16. **NOT SURE YET** reste dans la demande du salon ; une taille choisie sur la demande est fixée sur la commande.
+17. **La taille d'une inscription à un tirage** se change jusqu'à la clôture des inscriptions ; une place réservée en accès anticipé garde la sienne.
+18. **Le prix de la gravure**, pour une commande sans l'option ENGRAVING : un prix par devise dans `Orders` → `Settings` → `Engraving`, le même pour chaque modèle.
+19. **Une pièce gravée** se retourne ou s'échange comme une autre, avec le même bouton.
+20. **ORBES Client Services ouvre un retour ou un échange même après les 14 jours** (`Open a return`), sans limite.

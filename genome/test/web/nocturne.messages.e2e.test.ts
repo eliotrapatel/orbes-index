@@ -58,13 +58,19 @@ async function fitsEveryWidth(page: Page, what: string): Promise<void> {
 }
 
 /**
+ * The write sheet. The order sheets of YOUR ORDERS (views/order-sheet.ts, plan NEXT LOT §3.6) sit on the same plate
+ * (`n-write`) with their own class, `n-osheet`, and stay in the page, hidden, beside it.
+ */
+const WRITE_SHEET = '.n-write:not(.n-osheet)';
+
+/**
  * WRITE TO ORBES CLIENT SERVICES opened from `button` and sent, signed in: the label the sheet showed under CONCERNING
  * and the one the server stored (client_messages.context_label), which must be the same. The sheet closed again.
  */
 async function sendFrom(page: Page, stage: UiStage, button: Locator, body: string): Promise<{ sheet: string; stored: string | null }> {
   await button.scrollIntoViewIfNeeded();
   await button.click();
-  const sheet = page.locator('.n-write');
+  const sheet = page.locator(WRITE_SHEET);
   await sheet.locator('textarea').waitFor({ timeout: 15_000 });
   const label = (await sheet.locator('[data-testid=write-concerning]').innerText()).trim();
   await sheet.locator('textarea').fill(body);
@@ -80,7 +86,7 @@ async function sendFrom(page: Page, stage: UiStage, button: Locator, body: strin
 async function concerningOf(page: Page, button: Locator): Promise<string> {
   await button.scrollIntoViewIfNeeded();
   await button.click();
-  const sheet = page.locator('.n-write');
+  const sheet = page.locator(WRITE_SHEET);
   await sheet.locator('[data-testid=write-concerning]').waitFor({ timeout: 15_000 });
   const label = (await sheet.locator('[data-testid=write-concerning]').innerText()).trim();
   await page.keyboard.press('Escape');
@@ -114,7 +120,7 @@ const CASES: { state: UiState; check: Check }[] = [
 
       // Signed out: the sentence, then the sign-in; once signed in, the form, its context kept.
       await help.getByRole('button', { name: WRITE }).click();
-      const sheet = page.locator('.n-write');
+      const sheet = page.locator(WRITE_SHEET);
       await sheet.locator('#write-title').waitFor();
       expect(await page.evaluate(() => document.activeElement?.id)).toBe('write-title');
       expect(await sheet.innerText()).toContain('Sign in or create an ORBES account to write to ORBES Client Services. Their answer will appear in your account.');
@@ -261,9 +267,9 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(b[0]!.id).toMatch(/^[0-9a-f-]{36}$/);
       // Opened, the sheet names the request.
       await page.locator('.view--sheet').getByRole('button', { name: WRITE }).click();
-      expect(await page.locator('.n-write [data-testid=write-concerning]').innerText()).toMatch(/· PRIVATE SALON REQUEST$/);
+      expect(await page.locator(WRITE_SHEET).locator('[data-testid=write-concerning]').innerText()).toMatch(/· PRIVATE SALON REQUEST$/);
       await page.keyboard.press('Escape');
-      await expect.poll(() => page.locator('.n-write').isHidden()).toBe(true);
+      await expect.poll(() => page.locator(WRITE_SHEET).isHidden()).toBe(true);
       await fitsEveryWidth(page, 'the salon');
       const sent = await sendFrom(page, stage, page.locator('.view--sheet').getByRole('button', { name: WRITE }), 'About my salon request.');
       expect(sent.stored).toBe(sent.sheet);
@@ -299,7 +305,7 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(b).toEqual([expect.objectContaining({ kind: 'SCAN', about: 'WARRANTY' })]);
       await page.locator('.n-result__panel').getByRole('button', { name: WRITE }).click();
       // Signed out: the sign-in first.
-      expect(await page.locator('.n-write').innerText()).toContain('Sign in or create an ORBES account');
+      expect(await page.locator(WRITE_SHEET).innerText()).toContain('Sign in or create an ORBES account');
       await page.keyboard.press('Escape');
     },
   },
@@ -318,7 +324,7 @@ const CASES: { state: UiState; check: Check }[] = [
       expect(order[title + 1]).toContain('btn');
       expect(await confirmed.locator('.contact').count()).toBe(0);
       await confirmed.getByRole('button', { name: WRITE }).click();
-      expect(await page.locator('.n-write [data-testid=write-concerning]').innerText()).toMatch(/· CONFIRMED · REFERENCE LR-[0-9A-F]{8}$/);
+      expect(await page.locator(WRITE_SHEET).locator('[data-testid=write-concerning]').innerText()).toMatch(/· CONFIRMED · REFERENCE LR-[0-9A-F]{8}$/);
       await page.keyboard.press('Escape');
       await fitsEveryWidth(page, 'CONFIRMED');
       // The release by its title (MONOLITHE IN BLUE), as the server stores it.
