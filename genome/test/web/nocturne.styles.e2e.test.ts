@@ -969,8 +969,11 @@ async function pieces(page: Page, script: string): Promise<void> {
   await check(page, at('steps', '.n-steps'), { top: 5, left: 5, height: 1, 'background-color': LINE2 }, '::before');
   const steps = await read(page, at('steps', '.n-steps'), ['grid-template-columns']);
   expect(steps['grid-template-columns']!.split(' ')).toHaveLength(4);
-  const before = await read(page, at('steps', '.n-steps'), ['right'], '::before');
-  expect(Number.parseFloat(before.right!)).toBeCloseTo(Number(steps._w) * 0.25, 1);
+  // The hairline ends at the last column's start (its dot's left edge), set on the grid's lines.
+  const before = await read(page, at('steps', '.n-steps'), ['width'], '::before');
+  const lastStep = await read(page, at('steps', '.n-steps__step:last-child'), []);
+  expect(Number(steps._left) + 5 + Number.parseFloat(before.width!)).toBeCloseTo(Number(lastStep._left), 1);
+  expect(Number(steps._left) + 5 + Number.parseFloat(before.width!)).toBeCloseTo(Number(steps._left) + Number(steps._w) * 0.75, 1);
   const bar = await check(page, at('steps', '.n-steps__bar'), { top: 5, left: 5, height: 1, 'background-color': IV });
   expect(Number(bar._w)).toBeCloseTo(Number(steps._w) * 0.25, 1);
   await check(page, at('steps', '.n-steps__step:not(.is-done) .n-steps__dot'), { width: 11, height: 11, 'border-radius': '50%', 'background-color': GROUND, 'box-shadow': 'rgba(246, 242, 234, 0.34) 0px 0px 0px 1px inset' });
@@ -1035,8 +1038,9 @@ async function myOrders(page: Page): Promise<void> {
   expect(Number(bar._w)).toBeCloseTo(Number((await read(page, returned, []))._w) - 10, 0);
   expect(await shown(page, '.n-pieces__order[data-status="CANCELLED"] .n-steps__bar')).toBe(0);
   await check(page, '.n-steps__step.is-done .n-steps__dot', { width: 11, height: 11, 'background-color': IV });
-  await check(page, '.n-steps__label', { 'margin-top': 12, 'font-size': 8.5, 'letter-spacing': em(8.5, 0.2) });
+  await check(page, '.n-steps:not(.n-steps--dense) .n-steps__label', { 'margin-top': 12, 'font-size': 8.5, 'letter-spacing': em(8.5, 0.2) });
   await check(page, '.n-steps__date', { 'margin-top': 4, 'font-size': 12, color: ASH });
+  await fiveStepsKeepTheirColumns(page);
   await check(page, '.n-pieces__order-sentence', { 'margin-top': 20, 'font-size': 15, color: ASH });
   await check(page, '.n-pieces__order-rows', { 'margin-top': 16, 'border-top-width': 1, 'border-top-color': LINE });
   await check(page, '.n-pieces__order-rows .n-kv__row', { 'padding-top': 13, 'padding-bottom': 13, 'font-size': 13.5, 'border-bottom-color': LINE });
@@ -1051,6 +1055,56 @@ async function myOrders(page: Page): Promise<void> {
   await check(page, '.n-pieces__document .n-acc__title', { 'font-size': 11, color: IV });
   await check(page, '.n-pieces__document .n-acc__line', { 'margin-top': 4, 'font-size': 13, color: ASH });
   expect(isHelvetica((await read(page, '.n-pieces__document-number', ['font-family']))['font-family']!)).toBe(true);
+}
+
+/**
+ * Plan NEXT LOT §3.6.A: five steps on a card, at every phone width: their labels tracked closer (0.08 em), each label
+ * and date ending at least its 4 px gutter before the next step's column (IN PREPARATION on two lines where it must;
+ * the glyphs within a fiftieth of a pixel of the gutter), each date on one line, and the bar ending on the reached dot's
+ * centre (within a pixel), whatever widths the columns take; six (a returned order) the same from 375 px, where they hold
+ * one row.
+ */
+async function fiveStepsKeepTheirColumns(page: Page): Promise<void> {
+  const five = '.n-pieces__steps.n-steps--dense:not(.n-steps--six)';
+  expect(await page.locator(five).count()).toBeGreaterThan(0);
+  expect(await page.locator('.n-pieces__steps.n-steps--six').count()).toBeGreaterThan(0);
+  await check(page, `${five} .n-steps__label`, { 'margin-top': 12, 'font-size': 8.5, 'letter-spacing': em(8.5, 0.08) });
+  const size = page.viewportSize()!;
+  try {
+    for (const width of [320, 360, 375, 390]) {
+      await page.setViewportSize({ width, height: size.height });
+      const lists = await page.locator(width < 375 ? five : '.n-pieces__steps.n-steps--dense').evaluateAll((els) =>
+        els.map((list) => {
+          const steps = [...list.querySelectorAll<HTMLElement>('.n-steps__step')];
+          const rects = (el: Element | null) => {
+            if (!el) return [];
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            return [...range.getClientRects()];
+          };
+          const gaps = steps.slice(0, -1).map((step, i) => {
+            const right = Math.max(...[step.querySelector('.n-steps__label'), step.querySelector('.n-steps__date')].flatMap(rects).map((r) => r.right));
+            return { label: step.textContent ?? '', gap: steps[i + 1]!.getBoundingClientRect().left - right };
+          });
+          const dateLines = steps.map((step) => new Set(rects(step.querySelector('.n-steps__date')).map((r) => Math.round(r.top))).size);
+          const bar = list.querySelector<HTMLElement>('.n-steps__bar')!;
+          const reached = steps.filter((s) => s.classList.contains('is-done')).at(-1)!.querySelector('.n-steps__dot')!.getBoundingClientRect();
+          // A returned order's bar runs to the end of its line (C32), checked in myOrders.
+          const toEnd = list.closest('[data-status]')?.getAttribute('data-status') === 'RETURNED';
+          const barEnd = bar.hidden || toEnd ? null : bar.getBoundingClientRect().right - (reached.left + reached.width / 2);
+          return { gaps, dateLines, barEnd, spills: list.scrollWidth > list.clientWidth };
+        }),
+      );
+      for (const { gaps, dateLines, barEnd, spills } of lists) {
+        for (const { label, gap } of gaps) expect(gap, `${width} px: ${label}`).toBeGreaterThanOrEqual(3.95);
+        expect(Math.max(...dateLines), `${width} px: a date on one line`).toBeLessThanOrEqual(1);
+        expect(spills, `${width} px: inside its column`).toBe(false);
+        if (barEnd !== null) expect(Math.abs(barEnd), `${width} px: the bar's end`).toBeLessThanOrEqual(1);
+      }
+    }
+  } finally {
+    await page.setViewportSize(size);
+  }
 }
 
 /** C31: the tab RELEASES: each entry a row, its title a link underlined, its lines 8 px apart. */

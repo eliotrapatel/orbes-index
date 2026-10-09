@@ -505,6 +505,13 @@ describe('YOUR ORDERS: the collector\'s side of an order (plan NEXT LOT §3.6)',
     expect(orderRequest(order(), 0)).toBeNull();
   });
 
+  it('names a size not in stock in the exchange sheet as a screen reader says it, a label that carries its word as written (§3.6.D)', () => {
+    const R = ORDERS.returns;
+    expect(R.sizeOut('54')).toBe('Size 54, not in stock');
+    expect(R.sizeOut('SIZE 58')).toBe('SIZE 58, not in stock');
+    expect(R.sizeOut('ONE SIZE')).toBe('ONE SIZE, not in stock');
+  });
+
   it('an EXCHANGE order (§3.6.D) is kept and reads SIZE EXCHANGE, with its model, size and steps like any order', () => {
     const m = orderModel(order({ channel: 'EXCHANGE', release: null, status: 'PAID', paidAt: '2026-10-16T10:00:00.000Z' }), 0)!;
     expect(m.line).toBe('SIZE EXCHANGE');

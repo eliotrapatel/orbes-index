@@ -44,7 +44,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { ensureSku } from '../../src/server/services/stock.js';
-import { DEFAULT_CARE, ORDERS } from '../../src/web/verify/copy.js';
+import { ACCOUNT_ADDRESSES, DEFAULT_CARE, ORDERS } from '../../src/web/verify/copy.js';
 import { orderDate } from '../../src/web/verify/orders-model.js';
 import { createLiveRelease, liveFixture, type LiveFixture } from '../support/live.js';
 import { tapZoneFloors } from '../support/tap-zones.js';
@@ -956,5 +956,83 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: an order\'s delivery address, engravi
     expect(await noSideways(desk.page)).toBe(true);
     await desk.page.screenshot({ path: join(OUT_DIR, 'verify-orders-delivery-desk.png'), fullPage: true });
     await desk.page.context().close();
+  }, 120_000);
+
+  it('YOUR ADDRESSES: an address edited, the other made the default (DEFAULT moves), one removed at the second tap (TAP AGAIN TO REMOVE disarmed after 4 s), then five kept: ADD AN ADDRESS gives way to the limit', async () => {
+    const Y = ACCOUNT_ADDRESSES;
+    const { page, problems } = await phone();
+    // The two saved by DELIVERY ADDRESS above: Paris, the default, and London.
+    const saved = (await srv.ctx.services.addresses.list(me.id)).addresses;
+    const paris = saved.find((a) => a.country === 'FR')!;
+    const london = saved.find((a) => a.country === 'GB')!;
+    expect([paris.isDefault, london.isDefault]).toEqual([true, false]);
+    await page.locator('.n-hd button.n-acct').click();
+    await page.locator('.n-account:not([hidden]) .n-account__tier').waitFor();
+    await textOf(page.locator('.n-account__addresses-line'), Y.count(2));
+    await page.locator('[data-key="addresses"]').click();
+    const view = page.locator('.n-account__addresses-view');
+    const items = view.locator('.n-account__address');
+    const item = (id: string) => view.locator(`.n-account__address[data-address="${id}"]`);
+    await expect.poll(() => items.count(), POLL).toBe(2);
+    // The default first, with DEFAULT; no MAKE DEFAULT on it.
+    expect(await items.first().getAttribute('data-address')).toBe(paris.id);
+    await textOf(item(paris.id).locator('.n-account__address-default'), Y.isDefault);
+    expect(await item(paris.id).locator(`[data-key="address-default-${paris.id}"]`).count()).toBe(0);
+    expect(await item(london.id).locator('.n-account__address-default').count()).toBe(0);
+
+    // EDIT: the form holds the address; its line changed, SAVE; the note, the list read again.
+    await item(london.id).locator(`[data-key="address-edit-${london.id}"]`).click();
+    const area = view.getByLabel('ADDRESS', { exact: true });
+    expect(await area.inputValue()).toBe(LONDON.address);
+    await area.fill('30 Old Bond Street\nLondon W1S 4QB');
+    await view.getByRole('button', { name: Y.save }).click();
+    await textOf(view.locator('.n-account__addresses-note'), Y.saved);
+    await textOf(item(london.id).locator('.n-account__address-lines'), 'Camille Laurent 30 Old Bond Street London W1S 4QB United Kingdom +44 20 7946 0000');
+    expect((await srv.ctx.services.addresses.list(me.id)).addresses.find((a) => a.id === london.id)!.address).toBe('30 Old Bond Street\nLondon W1S 4QB');
+
+    // MAKE DEFAULT: DEFAULT moves to London, listed first; Paris gets its MAKE DEFAULT.
+    await item(london.id).locator(`[data-key="address-default-${london.id}"]`).click();
+    await expect.poll(() => items.first().getAttribute('data-address'), POLL).toBe(london.id);
+    await textOf(item(london.id).locator('.n-account__address-default'), Y.isDefault);
+    expect(await item(paris.id).locator('.n-account__address-default').count()).toBe(0);
+    await visible(item(paris.id).locator(`[data-key="address-default-${paris.id}"]`));
+    expect((await srv.ctx.services.addresses.list(me.id)).addresses.filter((a) => a.isDefault).map((a) => a.id)).toEqual([london.id]);
+
+    // REMOVE: a first tap arms it (TAP AGAIN TO REMOVE), which goes back to REMOVE after 4 s, nothing removed.
+    const remove = view.locator(`[data-key="address-remove-${paris.id}"]`);
+    await remove.click();
+    await textOf(remove, Y.removeConfirm);
+    await textOf(remove, Y.remove);
+    expect((await srv.ctx.services.addresses.list(me.id)).addresses).toHaveLength(2);
+    // Tapped twice: removed, the note said, one address left.
+    await remove.click();
+    await textOf(remove, Y.removeConfirm);
+    await remove.click();
+    await textOf(view.locator('.n-account__addresses-note'), Y.removed);
+    await expect.poll(() => items.count(), POLL).toBe(1);
+    expect((await srv.ctx.services.addresses.list(me.id)).addresses.map((a) => a.id)).toEqual([london.id]);
+
+    // ADD AN ADDRESS up to five: then the limit's sentence in its place.
+    for (let n = 2; n <= Y.max; n++) {
+      await view.locator('[data-key="address-add"]').click();
+      await view.getByLabel('NAME', { exact: true }).fill(`Camille Laurent ${n}`);
+      await view.getByLabel('ADDRESS', { exact: true }).fill(`${n} rue Saint-Honoré\n75001 Paris`);
+      await view.getByLabel('COUNTRY', { exact: true }).selectOption('FR');
+      await view.getByLabel('PHONE', { exact: true }).fill(`+33 6 12 34 56 7${n}`);
+      await view.getByRole('button', { name: Y.save }).click();
+      await textOf(view.locator('.n-account__addresses-note'), Y.saved);
+      await expect.poll(() => items.count(), POLL).toBe(n);
+    }
+    expect(await view.locator('[data-key="address-add"]').count()).toBe(0);
+    await textOf(view.locator('.n-account__addresses-limit'), Y.limit);
+    // London still the default, first.
+    expect(await items.first().getAttribute('data-address')).toBe(london.id);
+    for (const width of [375, 360, 320, 390]) {
+      await page.setViewportSize({ width, height: 844 });
+      expect(await noSideways(page), `${width} px`).toBe(true);
+    }
+    await page.screenshot({ path: join(OUT_DIR, 'verify-account-addresses-five.png'), fullPage: true });
+    expect(problems).toEqual([]);
+    await page.context().close();
   }, 120_000);
 });

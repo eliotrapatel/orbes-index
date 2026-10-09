@@ -529,6 +529,10 @@ describe('legal pages: the privacy policy, written from the code', () => {
     expect(payload).toContain('engraving: o.engraving_text !== null,');
     expect(payload).not.toMatch(/o\.buyer_name,|o\.buyer_address,|o\.engraving_text,/);
     expect(orders).not.toMatch(/details: \{[^}]*buyer(?:Name|Address|_name|_address)/);
+    // The order's history and its audit entry keep the delivery country only (order.address, order.buyer), never the
+    // name, the address or the phone; YOUR ADDRESSES keeps what the collector saves there (account_addresses).
+    expect(orders).toContain("'order.address', { details: { by: 'collector', country: a.country, changed } }");
+    expect(orders).not.toMatch(/details: \{[^}]*(?:phone|name: |address: )/);
     // No route of the collector writes the buyer: only the console's, OPERATOR.
     expect(readDoc('genome/src/server/routes/account.ts')).not.toMatch(/buyer/i);
     expect(readDoc('genome/src/server/routes/admin/orders.ts')).toContain("app.put('/api/admin/orders/:id/buyer'");
@@ -539,8 +543,8 @@ describe('legal pages: the privacy policy, written from the code', () => {
     // The journal and the Shopify file reach no one: the server sends no request out.
     expect(readDoc('genome/src/server/services/shopify.ts')).not.toMatch(/\bfetch\(|https?\.request\(/);
     for (const [lang, says] of [
-      ['en', ['You enter the delivery name, address, country and phone on the order, or ORBES Client Services does', 'never in the service\'s audit log', `${INVOICE_ISSUER.name} issues its invoice`, 'without VAT', 'never changed nor deleted', 'the service sends these data to no one', 'The service itself sends nothing to Shopify.', 'TRACK THE SHIPMENT opens the carrier\'s own page in a new tab', 'are in the copy of your data']],
-      ['fr', ["Vous saisissez le nom, l'adresse, le pays et le téléphone de livraison sur la commande, ou ORBES Client Services le fait", "jamais dans le journal d'audit du service", `${INVOICE_ISSUER.name} émet sa facture`, 'sans TVA', 'ne sont jamais modifiés ni supprimés', 'le service ne transmet ces données à personne', "Le service lui-même n'envoie rien à Shopify.", 'TRACK THE SHIPMENT ouvre la page du transporteur dans un nouvel onglet', 'figurent dans la copie de vos données']],
+      ['en', ['You enter the delivery name, address, country and phone on the order, or ORBES Client Services does', 'and in YOUR ADDRESSES when you save them there', 'the service\'s audit log and the order\'s history keep only the country, never the name, the address or the phone', `${INVOICE_ISSUER.name} issues its invoice`, 'without VAT', 'never changed nor deleted', 'the service sends these data to no one', 'The service itself sends nothing to Shopify.', 'TRACK THE SHIPMENT opens the carrier\'s own page in a new tab', 'are in the copy of your data']],
+      ['fr', ["Vous saisissez le nom, l'adresse, le pays et le téléphone de livraison sur la commande, ou ORBES Client Services le fait", 'et dans YOUR ADDRESSES quand vous les y enregistrez', "le journal d'audit du service et l'historique de la commande n'en gardent que le pays, jamais le nom, l'adresse ni le téléphone", `${INVOICE_ISSUER.name} émet sa facture`, 'sans TVA', 'ne sont jamais modifiés ni supprimés', 'le service ne transmet ces données à personne', "Le service lui-même n'envoie rien à Shopify.", 'TRACK THE SHIPMENT ouvre la page du transporteur dans un nouvel onglet', 'figurent dans la copie de vos données']],
     ] as const) {
       const text = sectionText(DOCUMENTS.privacy[lang], 'orders');
       for (const s of says) expect(text, `${lang}: ${s}`).toContain(s);
@@ -760,7 +764,9 @@ describe('legal pages: both languages, links, lexicon', () => {
       // its phone given to the carrier and the logistics partner) and its saved addresses; the terms' article 12 (a size
       // chosen at entry, each size filled in the draw's order) and article 14 (the delivery address and the engraving on
       // the order, the 14 days to ask a return or an exchange); then to the date of H2's final commit.
-      '2026-10-10': '0c32bb148a95ae6d',
+      // The review of 6.12 (step P6c): the orders paragraph's buyer also kept in YOUR ADDRESSES when saved there, the
+      // audit log and the order's history keeping its country only.
+      '2026-10-10': '53025a555a7cf244',
     };
     const fingerprint = createHash('sha256').update(JSON.stringify(DOCUMENTS)).digest('hex').slice(0, 16);
     expect({ version: LEGAL_VERSION, fingerprint }).toEqual({ version: LEGAL_VERSION, fingerprint: PUBLISHED[LEGAL_VERSION] });

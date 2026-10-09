@@ -1342,11 +1342,14 @@ body.nocturne .n-column > * {
   grid-template-columns: repeat(4, 1fr);
 }
 
+/* The hairline from the first dot to the last column, set on the grid's lines (from line 1 to the last column's start),
+   so it meets the last dot whatever width its column takes. */
 .n-steps::before {
   content: "";
   position: absolute;
+  grid-column: 1 / -2;
   top: 5px;
-  right: var(--n-steps-last, 25%);
+  right: 0;
   left: 5px;
   height: 1px;
   background: var(--vault-hairline-strong);
@@ -1401,17 +1404,22 @@ body.nocturne .n-column > * {
 }
 
 /* Five steps and more (plan NEXT LOT §3.6.A: IN PREPARATION; six on an order returned once delivered): the labels
-   tracked closer so each keeps its column, five under 360 px, six always; under 360 px six go in two rows of three
-   dots, without the hairline. */
-.n-steps--six .n-steps__label {
+   tracked closer at every width, a 4 px gutter before the next step and each date on one line, so each keeps its
+   column (IN PREPARATION on two lines where it is narrow; at 320 px five hold even with the widest dates, 28 MAR);
+   under 375 px six go in two rows of three dots, without the hairline. */
+.n-steps--dense .n-steps__label {
   letter-spacing: 0.08em;
 }
 
-@media (max-width: 359px) {
-  .n-steps--dense .n-steps__label {
-    letter-spacing: 0.08em;
-  }
+.n-steps--dense .n-steps__step:not(:last-child) {
+  padding-right: 4px;
+}
 
+.n-steps--dense .n-steps__date {
+  white-space: nowrap;
+}
+
+@media (max-width: 374px) {
   .n-steps--six {
     grid-template-columns: repeat(3, 1fr) !important;
     row-gap: 18px;

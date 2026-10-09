@@ -509,8 +509,8 @@ export const ORDERS = Object.freeze({
     requestReturn: 'REQUEST A RETURN',
     exchange: 'EXCHANGE THE SIZE',
     newSize: 'THE NEW SIZE',
-    /** A size not in stock, greyed out, as a screen reader says it. */
-    sizeOut: (label: string) => `Size ${label}, not in stock`,
+    /** A size not in stock, greyed out, as a screen reader says it; a label that already carries its word as written. */
+    sizeOut: (label: string) => `${/^(SIZE\b|ONE SIZE$)/i.test(label.trim()) ? label : `Size ${label}`}, not in stock`,
     onlyInStock: 'Only the sizes in stock can be chosen.',
     noneInStock: 'No other size is in stock just now.',
     reason: 'REASON',

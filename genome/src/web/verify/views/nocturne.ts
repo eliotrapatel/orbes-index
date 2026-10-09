@@ -430,18 +430,24 @@ export function orderSteps(steps: readonly OrderStep[], opts: { label: string; b
   );
   // A column per step, four at least (C32: a cancelled order's two steps in the four columns of the way); the hairline
   // runs from the first dot to the last column, the bar to the step reached (`auto`). A cancelled order has no bar
-  // (`none`); a returned one's runs to the end of the line (`end`, C32: its fifth column).
+  // (`none`); a returned one's runs to the end of the line (`end`, C32: its fifth column). A column is never narrower
+  // than its longest word (1fr: PREPARATION at 320 px is wider than a fifth of the line), so the columns may differ: the
+  // bar is set on the grid's lines, from the first dot's centre to the reached dot's, and meets it whatever the widths.
   const n = Math.max(4, steps.length);
   list.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
   // Five steps and more (plan NEXT LOT §3.6.A: IN PREPARATION; six on an order returned once delivered): their labels
-  // tracked closer where the columns are narrow, six in two rows of three on the narrowest phones (nocturne.css).
+  // tracked closer with a gutter before the next step, their dates on one line, six in two rows of three under 375 px
+  // (nocturne.css).
   if (steps.length >= 5) list.classList.add('n-steps--dense');
   if (steps.length > 5) list.classList.add('n-steps--six');
-  list.style.setProperty('--n-steps-last', `${100 / n}%`);
   const mode = opts.bar ?? 'auto';
-  if (mode === 'end' && at > 0) bar.style.width = 'calc(100% - 10px)';
-  else if (mode === 'auto' && at > 0) bar.style.width = `${(at / n) * 100}%`;
-  else bar.hidden = true;
+  if (mode === 'end' && at > 0) {
+    bar.style.gridColumn = '1 / -1';
+    bar.style.right = '5px';
+  } else if (mode === 'auto' && at > 0) {
+    bar.style.gridColumn = `1 / ${at + 1}`;
+    bar.style.right = '-5px';
+  } else bar.hidden = true;
   return list;
 }
 
