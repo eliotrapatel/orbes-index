@@ -300,6 +300,8 @@ import { can, CAPABILITY_MIN_ROLE, logisticsOnly, ROLE_RANK, saleOnly } from '..
 import { LOGISTICS_ACT as SERVER_LOGISTICS_ACT, LOGISTICS_READ as SERVER_LOGISTICS_READ } from '../../src/server/routes/admin/logistics.js';
 import { LOGISTICS_LOCATIONS_REQUIRED as SERVER_LOCATIONS_REQUIRED } from '../../src/server/services/auth.js';
 import {
+  BIRTHDAY_NOTE,
+  birthdayText,
   careText,
   changedText,
   channelsText,
@@ -943,6 +945,11 @@ describe('THE PROGRAM and SHIPPING (plan NEXT-NINE, BP-19 T2)', () => {
       { value: 'm1', label: 'ECLIPSE · 3 sizes · 4 available' },
       { value: 'm2', label: 'HALO · discontinued' },
     ]);
+    // The birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6): its amount and days, or Off; its note.
+    expect(birthdayText(defaults())).toBe('€\u00a020 · valid 30 days');
+    expect(birthdayText({ ...defaults(), birthdayCreditMinor: 2050, birthdayCreditDays: 1, creditCurrency: 'GBP' })).toBe('£\u00a020.50 · valid 1 day');
+    expect(birthdayText({ ...defaults(), birthdayCreditOn: false })).toBe('Off');
+    expect(BIRTHDAY_NOTE).toBe('Every account with a date of birth, piece or not, on its birthday (Paris), once per 12 months; in the credit’s currency, on the orders above.');
     expect(changedText({ updatedAt: null, updatedBy: null })).toBe('The defaults');
     expect(changedText({ updatedAt: '2026-10-06T14:02:00.000Z', updatedBy: { id: 'a', email: 'a@orbes.test' } })).toBe('Changed by a@orbes.test on 06 OCT 2026 · 14:02 UTC');
   });
@@ -958,6 +965,18 @@ describe('THE PROGRAM and SHIPPING (plan NEXT-NINE, BP-19 T2)', () => {
     expect(programProblem({ ...v, creditPlatine: 'fifty' })).toBe('A credit is an amount in units: 50, or 50.50 (0 for none).');
     expect(programProblem({ ...v, creditValidityMonths: '0' })).toBe('A credit is valid 1 to 60 months.');
     expect(programProblem({ ...v, creditDraw: '', creditLive: '', creditSalon: '' })).toBe('The credit is taken off at least one kind of order.');
+    // The birthday credit: on, 20 for 30 days in the dialog; an amount above 0 and 1 to 365 days, refused first.
+    expect([v.birthdayOn, v.birthdayCredit, v.birthdayDays]).toEqual(['true', '20', '30']);
+    for (const amount of ['0', '', 'twenty', '-5', '1000001']) expect(programProblem({ ...v, birthdayCredit: amount }), amount).toBe('A birthday credit is an amount above 0: 20, or 20.50.');
+    for (const days of ['0', '366', '', '1.5']) expect(programProblem({ ...v, birthdayDays: days }), days).toBe('A birthday credit is valid 1 to 365 days.');
+    expect(programProblem({ ...v, birthdayCredit: '0.01', birthdayDays: '1' })).toBeNull();
+    expect(programProblem({ ...v, birthdayCredit: '1000000', birthdayDays: '365' })).toBeNull();
+    const off = programInput({ ...v, birthdayOn: '', birthdayCredit: '20.50', birthdayDays: '15' });
+    expect(off).toMatchObject({ birthdayCreditOn: false, birthdayCreditMinor: 2050, birthdayCreditDays: 15 });
+    expect(checkProgram(off)).toEqual(off);
+    expect(programChanged(defaults(), off)).toBe(true);
+    expect(programChanged(defaults(), { ...defaults(), birthdayCreditOn: false })).toBe(true);
+    expect(programChanged(defaults(), { ...defaults(), birthdayCreditDays: 31 })).toBe(true);
     const next = programInput({ ...v, carePiecesPalladium: '2', creditPalladium: '120.50', creditLive: '', giftPlatineModelId: 'm1', messagesPriorityMinTier: '0' });
     expect(next).toMatchObject({ carePiecesPalladium: 2, creditPalladiumMinor: 12050, creditChannels: ['DRAW', 'SALON'], giftPlatineModelId: 'm1', messagesPriorityMinTier: 0 });
     expect(programChanged(defaults(), next)).toBe(true);

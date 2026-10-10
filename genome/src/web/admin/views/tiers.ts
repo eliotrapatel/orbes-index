@@ -22,6 +22,8 @@ import { formatDateTime } from '../format.js';
 import { benefitLines, TIER_LIMITS, tierBenefitsChange, tierBenefitsProblem, tierThreshold } from '../model/club.js';
 import { can } from '../model/permissions.js';
 import {
+  BIRTHDAY_NOTE,
+  birthdayText,
   careOptions,
   careText,
   changedText,
@@ -206,6 +208,9 @@ function programSection(ctx: ViewContext, p: ClubProgramSheet, admin: boolean, d
         { name: 'creditDraw', label: 'Credit usable on a draw', kind: 'checkbox', value: programValues(p).creditDraw },
         { name: 'creditLive', label: 'Credit usable on a LIVE RELEASE', kind: 'checkbox', value: programValues(p).creditLive },
         { name: 'creditSalon', label: 'Credit usable on the private salon', kind: 'checkbox', value: programValues(p).creditSalon },
+        { name: 'birthdayOn', label: 'Birthday credit given', kind: 'checkbox', value: programValues(p).birthdayOn, hint: 'Off: no new birthday credit is given; those given stay usable until they expire.' },
+        { name: 'birthdayCredit', label: 'Birthday credit', required: true, maxlength: 12, value: programValues(p).birthdayCredit, hint: 'An amount in units: 20, or 20.50. In the credit currency above.' },
+        { name: 'birthdayDays', label: 'Birthday credit valid (days)', required: true, maxlength: 3, value: programValues(p).birthdayDays, hint: 'From the birthday, Paris time: 30 by default.' },
         { name: 'experienceMembersEveningMinTier', label: 'Members’ evening, from', kind: 'select', options: TIER_OPTIONS, value: String(p.experienceMembersEveningMinTier) },
         { name: 'experienceLaunchPreviewMinTier', label: 'Launch previews, from', kind: 'select', options: TIER_OPTIONS, value: String(p.experienceLaunchPreviewMinTier) },
         { name: 'experiencePartnerMinTier', label: 'Partner experiences, from', kind: 'select', options: TIER_OPTIONS, value: String(p.experiencePartnerMinTier) },
@@ -230,6 +235,7 @@ function programSection(ctx: ViewContext, p: ClubProgramSheet, admin: boolean, d
         row('Credit, PLATINE', creditText(p.creditPlatineMinor, p), 'program-credit-platine'),
         row('Credit, PALLADIUM', creditText(p.creditPalladiumMinor, p), 'program-credit-palladium'),
         row('Credit usable on', channelsText(p.creditChannels.filter((c) => CREDIT_CHANNELS.includes(c))), 'program-credit-channels', `Orders in ${p.creditCurrency} only.`),
+        row('Birthday credit', birthdayText(p), 'program-birthday', BIRTHDAY_NOTE),
         row('Members’ evening', fromTier(p.experienceMembersEveningMinTier), 'program-evening'),
         row('Launch previews', fromTier(p.experienceLaunchPreviewMinTier), 'program-previews'),
         row('Partner experiences', fromTier(p.experiencePartnerMinTier), 'program-partner'),

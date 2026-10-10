@@ -9,9 +9,11 @@
  *                 the free shipping of PLATINE (standard) and PALLADIUM (express), the yearly care (PLATINE 1 piece,
  *                 PALLADIUM every piece), the Messages board's priority (from PLATINE), the welcome gift of each tier
  *                 (a model of the catalogue, none by default), the credit (€ 50 and € 100, in one currency, valid 12
- *                 months, on a draw, a LIVE RELEASE or the private salon), and the tier each experience of the circle
+ *                 months, on a draw, a LIVE RELEASE or the private salon), the tier each experience of the circle
  *                 invites from (the members' evening PLATINE, the launch previews and the partner experiences
- *                 PALLADIUM). Changed whole (`update`), each value within its bounds (PROGRAM_LIMITS), a gift's model
+ *                 PALLADIUM), and the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4, migration 0045: given or
+ *                 not, € 20 valid 30 days by default, in the credit's currency, on the credit's orders; no tier's
+ *                 benefit, so no program line says it). Changed whole (`update`), each value within its bounds (PROGRAM_LIMITS), a gift's model
  *                 existing (404 MODEL_NOT_FOUND) and active (409 MODEL_INACTIVE). Audited `club.program.update`, before
  *                 and after.
  *   the lines     what each tier's program says, in English, as /verify shows it in YOUR TIER and THE CLUB and the
@@ -62,6 +64,10 @@ export const PROGRAM_LIMITS = Object.freeze({
   validity: Object.freeze({ min: 1, max: 60 }),
   /** A shipping fee, in minor units. */
   fee: Object.freeze({ min: 0, max: 100_000_000 }),
+  /** The birthday credit, in minor units (never 0: its switch turns it off, plan CUSTOMER INTELLIGENCE §3.5 SB.4.2). */
+  birthdayCredit: Object.freeze({ min: 1, max: 100_000_000 }),
+  /** The birthday credit's validity, in days from the birthday (the birthday is day 1). */
+  birthdayDays: Object.freeze({ min: 1, max: 365 }),
 });
 
 /** The tiers the Messages board's priority may start from: 0 (off), 2 PLATINE, 3 PALLADIUM. */
@@ -94,9 +100,17 @@ export interface ClubProgram {
   experienceMembersEveningMinTier: 1 | 2 | 3;
   experienceLaunchPreviewMinTier: 1 | 2 | 3;
   experiencePartnerMinTier: 1 | 2 | 3;
+  /**
+   * The birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4): whether it is given on each account's birthday, its
+   * amount in minor units of `creditCurrency`, and its validity in days from the birthday; taken off the orders of
+   * `creditChannels`, like the tiers' credits. Switched off, none is given; those given stay usable until they expire.
+   */
+  birthdayCreditOn: boolean;
+  birthdayCreditMinor: number;
+  birthdayCreditDays: number;
 }
 
-/** THE PROGRAM by default: the columns' defaults of migration 0026. */
+/** THE PROGRAM by default: the columns' defaults of migrations 0026 and 0045. */
 export const DEFAULT_PROGRAM: Readonly<ClubProgram> = Object.freeze({
   earlyAccessPalladiumHours: 4,
   earlyAccessPlatineHours: 2,
@@ -115,6 +129,9 @@ export const DEFAULT_PROGRAM: Readonly<ClubProgram> = Object.freeze({
   experienceMembersEveningMinTier: 2,
   experienceLaunchPreviewMinTier: 3,
   experiencePartnerMinTier: 3,
+  birthdayCreditOn: true,
+  birthdayCreditMinor: 2000,
+  birthdayCreditDays: 30,
 } satisfies ClubProgram);
 
 /** The tier each experience invites from (circle_posts.experience). */
@@ -196,6 +213,9 @@ export async function readProgram(db: Db): Promise<ClubProgram> {
     experienceMembersEveningMinTier: r.experience_members_evening_min_tier as 1 | 2 | 3,
     experienceLaunchPreviewMinTier: r.experience_launch_preview_min_tier as 1 | 2 | 3,
     experiencePartnerMinTier: r.experience_partner_min_tier as 1 | 2 | 3,
+    birthdayCreditOn: r.birthday_credit_on,
+    birthdayCreditMinor: r.birthday_credit_minor,
+    birthdayCreditDays: r.birthday_credit_days,
   };
 }
 
@@ -372,7 +392,7 @@ function oneOf<T extends string | number>(v: unknown, values: readonly T[], labe
   return v as T;
 }
 
-/** THE PROGRAM as sent, checked value by value (its bounds, PALLADIUM's early access at least PLATINE's); the gift models are checked in the transaction. */
+/** THE PROGRAM as sent, checked value by value (its bounds, PALLADIUM's early access at least PLATINE's, the birthday credit's switch a boolean); the gift models are checked in the transaction. */
 export function checkProgram(input: unknown): ClubProgram {
   if (!input || typeof input !== 'object') throw validationError('Send the whole program.');
   const v = input as Record<string, unknown>;
@@ -386,6 +406,7 @@ export function checkProgram(input: unknown): ClubProgram {
   if (!Array.isArray(channels) || channels.length === 0 || channels.some((c) => !(CREDIT_CHANNELS as readonly unknown[]).includes(c))) {
     throw validationError(`The credit is taken off at least one of ${CREDIT_CHANNELS.join(', ')}.`);
   }
+  if (typeof v.birthdayCreditOn !== 'boolean') throw validationError('The birthday credit is given or not: true or false.');
   const p: ClubProgram = {
     earlyAccessPalladiumHours: whole(v.earlyAccessPalladiumHours, PROGRAM_LIMITS.hours, 'PALLADIUM’s early access, in hours,'),
     earlyAccessPlatineHours: whole(v.earlyAccessPlatineHours, PROGRAM_LIMITS.hours, 'PLATINE’s early access, in hours,'),
@@ -404,6 +425,9 @@ export function checkProgram(input: unknown): ClubProgram {
     experienceMembersEveningMinTier: tier(v.experienceMembersEveningMinTier, 'The members’ evening tier'),
     experienceLaunchPreviewMinTier: tier(v.experienceLaunchPreviewMinTier, 'The launch previews tier'),
     experiencePartnerMinTier: tier(v.experiencePartnerMinTier, 'The partner experiences tier'),
+    birthdayCreditOn: v.birthdayCreditOn,
+    birthdayCreditMinor: whole(v.birthdayCreditMinor, PROGRAM_LIMITS.birthdayCredit, 'The birthday credit, in minor units,'),
+    birthdayCreditDays: whole(v.birthdayCreditDays, PROGRAM_LIMITS.birthdayDays, 'The birthday credit’s validity, in days,'),
   };
   if (p.earlyAccessPalladiumHours < p.earlyAccessPlatineHours) throw earlyAccessOrder();
   return p;
@@ -503,6 +527,9 @@ export class ClubProgramService {
         experience_members_evening_min_tier: next.experienceMembersEveningMinTier,
         experience_launch_preview_min_tier: next.experienceLaunchPreviewMinTier,
         experience_partner_min_tier: next.experiencePartnerMinTier,
+        birthday_credit_on: next.birthdayCreditOn,
+        birthday_credit_minor: next.birthdayCreditMinor,
+        birthday_credit_days: next.birthdayCreditDays,
         updated_by: actor.id!,
         updated_at: now,
       };

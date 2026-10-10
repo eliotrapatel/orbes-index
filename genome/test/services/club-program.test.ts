@@ -7,7 +7,9 @@
  *    active (409; one chosen before and discontinued since may stay);
  *  - ADMIN only changes them, an OPERATOR and an AUDITOR read; each change audited before and after;
  *  - the program lines of each tier, as /verify will show them, from the settings;
- *  - the shipping rates set whole, each currency and service once, a rate left out cleared.
+ *  - the shipping rates set whole, each currency and service once, a rate left out cleared;
+ *  - the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3, migration 0045): on, € 20 for 30 days by default, its
+ *    switch a boolean, 1 to 100 000 000 minor units and 1 to 365 days, saved and audited with the rest; no program line.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -61,7 +63,7 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
   const audits = (action: string) => h.ctx.db.selectFrom('audit_logs').select(['actor_type', 'actor_id', 'details']).where('action', '=', action).orderBy('id').execute();
   const program = (over: Partial<ClubProgram> = {}): ClubProgram => ({ ...DEFAULT_PROGRAM, creditChannels: [...DEFAULT_PROGRAM.creditChannels], ...over });
 
-  it('reads the defaults without a row: 4 h and 2 h, free standard and express shipping, care 1 and every piece, priority from PLATINE, no gift, € 50 and € 100 for 12 months on every channel', async () => {
+  it('reads the defaults without a row: 4 h and 2 h, free standard and express shipping, care 1 and every piece, priority from PLATINE, no gift, € 50 and € 100 for 12 months on every channel, the birthday credit on at € 20 for 30 days', async () => {
     expect(await h.ctx.db.selectFrom('club_program_settings').selectAll().execute()).toEqual([]);
     expect(await svc().read()).toEqual({
       earlyAccessPalladiumHours: 4,
@@ -81,8 +83,11 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
       experienceMembersEveningMinTier: 2,
       experienceLaunchPreviewMinTier: 3,
       experiencePartnerMinTier: 3,
+      birthdayCreditOn: true,
+      birthdayCreditMinor: 2000,
+      birthdayCreditDays: 30,
     });
-    // The column defaults of migration 0026 are DEFAULT_PROGRAM's: a row inserted with none reads the same.
+    // The column defaults of migrations 0026 and 0045 are DEFAULT_PROGRAM's: a row inserted with none reads the same.
     await h.ctx.db.insertInto('club_program_settings').values({ id: 1 }).execute();
     expect(await svc().read()).toEqual(program());
     await h.ctx.db.deleteFrom('club_program_settings').execute();
@@ -115,6 +120,11 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
       'A credit of €\u00a0100, valid 12 months, on a piece from a draw, a LIVE RELEASE or THE PRIVATE SALON.',
       'Launch previews and partner experiences, by invitation in THE CIRCLE.',
     ]);
+    // The birthday credit is no tier's benefit: on or off, at any amount, no line of any tier changes.
+    for (const t of [1, 2, 3] as const) {
+      expect(programLines(program({ birthdayCreditOn: false }), t)).toEqual(programLines(p, t));
+      expect(programLines(program({ birthdayCreditMinor: 5_000, birthdayCreditDays: 7 }), t)).toEqual(programLines(p, t));
+    }
     // Nothing given, nothing said: no early access, no shipping, no care, priority off, no credit; one hour, one month.
     const bare = program({
       earlyAccessPalladiumHours: 1,
@@ -157,9 +167,21 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
       [{ creditChannels: [] }, 'no channel'],
       [{ creditChannels: ['STORE'] }, 'an unknown channel'],
       [{ experiencePartnerMinTier: 0 }, 'an experience for no tier'],
+      [{ birthdayCreditOn: 'yes' }, 'a birthday switch not a boolean'],
+      [{ birthdayCreditOn: undefined }, 'no birthday switch'],
+      [{ birthdayCreditMinor: 0 }, 'a birthday credit of 0'],
+      [{ birthdayCreditMinor: 2000.5 }, 'a fraction of a minor unit'],
+      [{ birthdayCreditDays: 0 }, 'a birthday credit valid no day'],
+      [{ birthdayCreditDays: 366 }, 'a birthday credit valid 366 days'],
     ] as [Record<string, unknown>, string][]) {
       expect(() => checkProgram({ ...program(), ...over }), what).toThrow(DomainError);
     }
+    // The birthday credit's words (§3.5 SB.4.3), and its bounds reached.
+    expect(() => checkProgram({ ...program(), birthdayCreditMinor: 100_000_001 })).toThrow('The birthday credit, in minor units, is 1 to 100000000.');
+    expect(() => checkProgram({ ...program(), birthdayCreditDays: 366 })).toThrow('The birthday credit’s validity, in days, is 1 to 365.');
+    expect(() => checkProgram({ ...program(), birthdayCreditOn: 1 })).toThrow('The birthday credit is given or not: true or false.');
+    expect(checkProgram(program({ birthdayCreditOn: false, birthdayCreditMinor: 100_000_000, birthdayCreditDays: 365 }))).toMatchObject({ birthdayCreditOn: false, birthdayCreditMinor: 100_000_000, birthdayCreditDays: 365 });
+    expect(checkProgram(program({ birthdayCreditMinor: 1, birthdayCreditDays: 1 }))).toMatchObject({ birthdayCreditOn: true, birthdayCreditMinor: 1, birthdayCreditDays: 1 });
     await rejects(svc().update(program({ earlyAccessPalladiumHours: 2, earlyAccessPlatineHours: 3 }), admin), 'PROGRAM_EARLY_ACCESS', 422);
     // Equal windows are allowed: PLATINE and PALLADIUM from the same time.
     expect(checkProgram(program({ earlyAccessPalladiumHours: 3, earlyAccessPlatineHours: 3 })).earlyAccessPlatineHours).toBe(3);
@@ -189,13 +211,31 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
 
   it('saves THE PROGRAM whole for an ADMIN, audited before and after; read back as set', async () => {
     const before = await svc().read();
-    const next = program({ earlyAccessPalladiumHours: 6, earlyAccessPlatineHours: 3, shippingFreePlatine: 'NONE', carePiecesPalladium: 2, messagesPriorityMinTier: 3, giftPalladiumModelId: gift, creditCurrency: 'CHF', creditChannels: ['LIVE', 'DRAW'] });
+    const next = program({
+      earlyAccessPalladiumHours: 6,
+      earlyAccessPlatineHours: 3,
+      shippingFreePlatine: 'NONE',
+      carePiecesPalladium: 2,
+      messagesPriorityMinTier: 3,
+      giftPalladiumModelId: gift,
+      creditCurrency: 'CHF',
+      creditChannels: ['LIVE', 'DRAW'],
+      birthdayCreditMinor: 2550,
+      birthdayCreditDays: 15,
+    });
     const sheet = await svc().update(next, admin);
     expect(await svc().read()).toEqual({ ...next, creditChannels: ['DRAW', 'LIVE'] });
     expect(sheet.updatedBy?.id).toBe(admin.id);
     expect(sheet.updatedAt).toEqual(h.clock.now());
     const [last] = (await audits('club.program.update')).slice(-1);
     expect(last).toMatchObject({ actor_type: 'admin', actor_id: admin.id, details: { before: { ...before }, after: { ...next, creditChannels: ['DRAW', 'LIVE'] } } });
+    // The birthday credit in the before and the after, as every figure (§3.5 SB.4.3: no new code).
+    expect(last!.details).toMatchObject({ before: { birthdayCreditOn: true, birthdayCreditMinor: 2000, birthdayCreditDays: 30 }, after: { birthdayCreditOn: true, birthdayCreditMinor: 2550, birthdayCreditDays: 15 } });
+    expect(await h.ctx.db.selectFrom('club_program_settings').select(['birthday_credit_on', 'birthday_credit_minor', 'birthday_credit_days']).executeTakeFirstOrThrow()).toEqual({ birthday_credit_on: true, birthday_credit_minor: 2550, birthday_credit_days: 15 });
+    // Switched off: the amount and the days kept for when it comes back.
+    await svc().update({ ...next, birthdayCreditOn: false }, admin);
+    expect(await svc().read()).toMatchObject({ birthdayCreditOn: false, birthdayCreditMinor: 2550, birthdayCreditDays: 15 });
+    expect((await audits('club.program.update')).slice(-1)[0]!.details).toMatchObject({ before: { birthdayCreditOn: true }, after: { birthdayCreditOn: false, birthdayCreditMinor: 2550, birthdayCreditDays: 15 } });
     // Only a console user changes it.
     await rejects(svc().update(next, SYSTEM_ACTOR), 'FORBIDDEN', 403);
   });
@@ -216,6 +256,11 @@ describe('THE PROGRAM and SHIPPING (BP-19 T2)', () => {
     expect(errorOf(bad)).toEqual({ code: 'PROGRAM_EARLY_ACCESS', message: 'PALLADIUM’s early access starts no later than PLATINE’s.' });
     const missing = await clients.ADMIN.request('PUT', '/api/admin/club/program', { body: { earlyAccessPalladiumHours: 4 } });
     expect(missing.statusCode).toBe(400);
+    // The birthday credit is part of the program sent whole: without it, or out of its bounds, refused.
+    const { birthdayCreditOn: _on, ...withoutBirthday } = body;
+    expect((await clients.ADMIN.request('PUT', '/api/admin/club/program', { body: withoutBirthday })).statusCode).toBe(400);
+    expect((await clients.ADMIN.request('PUT', '/api/admin/club/program', { body: { ...body, birthdayCreditDays: 366 } })).statusCode).toBe(400);
+    expect((await clients.ADMIN.request('PUT', '/api/admin/club/program', { body: { ...body, birthdayCreditMinor: 0 } })).statusCode).toBe(400);
     const ok = await clients.ADMIN.request('PUT', '/api/admin/club/program', { body });
     expect(ok.statusCode).toBe(200);
     expect(await svc().read()).toEqual(body);

@@ -2705,6 +2705,10 @@ export interface ClubProgram {
   experienceMembersEveningMinTier: 1 | 2 | 3;
   experienceLaunchPreviewMinTier: 1 | 2 | 3;
   experiencePartnerMinTier: 1 | 2 | 3;
+  /** The birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4): given or not, its amount in minor units of `creditCurrency`, its days from the birthday. */
+  birthdayCreditOn: boolean;
+  birthdayCreditMinor: number;
+  birthdayCreditDays: number;
 }
 
 /** A model a welcome gift may be. */

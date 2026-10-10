@@ -4,8 +4,9 @@
  *  - THE PROGRAM (Club → Tiers, ADMIN): every figure of the tiers' benefits the owner called configurable, as the
  *    section lists it and the Edit program dialog holds it: the early access by default (PALLADIUM's window at least
  *    PLATINE's), the free shipping, the yearly care, the Messages priority, the welcome gift of each tier (an active
- *    model of the catalogue), the credit (its amounts, currency, validity and channels), the experiences' tiers; what
- *    the server would refuse before anything is sent (services/club-program.ts), and what to send.
+ *    model of the catalogue), the credit (its amounts, currency, validity and channels), the experiences' tiers, the
+ *    birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6: given or not, its amount and days); what the server would
+ *    refuse before anything is sent (services/club-program.ts), and what to send.
  *  - SHIPPING (Orders → Settings, ADMIN): the optional rates, per currency and service, '—' for none.
  */
 import { formatDateTime } from '../format.js';
@@ -32,6 +33,8 @@ export const PROGRAM_LIMITS = Object.freeze({
   credit: Object.freeze({ min: 0, max: 100_000_000 }),
   validity: Object.freeze({ min: 1, max: 60 }),
   fee: Object.freeze({ min: 0, max: 100_000_000 }),
+  birthdayCredit: Object.freeze({ min: 1, max: 100_000_000 }),
+  birthdayDays: Object.freeze({ min: 1, max: 365 }),
 });
 
 const TIER_WORDS: Readonly<Record<1 | 2 | 3, string>> = Object.freeze({ 1: 'TITANE', 2: 'PLATINE', 3: 'PALLADIUM' });
@@ -86,6 +89,16 @@ export function creditText(minor: number, p: Pick<ClubProgram, 'creditCurrency' 
   return `${formatMoney(minor, p.creditCurrency)} · valid ${m} ${m === 1 ? 'month' : 'months'}`;
 }
 
+/** The birthday credit: `€ 20 · valid 30 days`, or `Off` when it is not given. */
+export function birthdayText(p: Pick<ClubProgram, 'birthdayCreditOn' | 'birthdayCreditMinor' | 'birthdayCreditDays' | 'creditCurrency'>): string {
+  if (!p.birthdayCreditOn) return 'Off';
+  const d = p.birthdayCreditDays;
+  return `${formatMoney(p.birthdayCreditMinor, p.creditCurrency)} · valid ${d} ${d === 1 ? 'day' : 'days'}`;
+}
+
+/** What the birthday credit row says under its value. */
+export const BIRTHDAY_NOTE = 'Every account with a date of birth, piece or not, on its birthday (Paris), once per 12 months; in the credit’s currency, on the orders above.';
+
 /** The channels a credit is taken off: `Draw, LIVE RELEASE, The private salon`. */
 export function channelsText(channels: readonly CreditChannel[]): string {
   return CREDIT_CHANNELS.filter((c) => channels.includes(c)).map((c) => CREDIT_CHANNEL_LABELS[c]).join(', ');
@@ -134,6 +147,9 @@ export function programValues(p: ClubProgram): Record<string, string> {
     experienceMembersEveningMinTier: String(p.experienceMembersEveningMinTier),
     experienceLaunchPreviewMinTier: String(p.experienceLaunchPreviewMinTier),
     experiencePartnerMinTier: String(p.experiencePartnerMinTier),
+    birthdayOn: p.birthdayCreditOn ? 'true' : '',
+    birthdayCredit: moneyField(p.birthdayCreditMinor),
+    birthdayDays: String(p.birthdayCreditDays),
   };
 }
 
@@ -157,6 +173,9 @@ export function programProblem(v: Record<string, string>): string | null {
   if (!(HOUSE_CURRENCIES as readonly string[]).includes(v.creditCurrency ?? '')) return 'Choose the credit’s currency.';
   if (wholeIn(v.creditValidityMonths, PROGRAM_LIMITS.validity) === null) return `A credit is valid ${PROGRAM_LIMITS.validity.min} to ${PROGRAM_LIMITS.validity.max} months.`;
   if (v.creditDraw !== 'true' && v.creditLive !== 'true' && v.creditSalon !== 'true') return 'The credit is taken off at least one kind of order.';
+  const birthday = parseMoney(v.birthdayCredit);
+  if (birthday === null || birthday < PROGRAM_LIMITS.birthdayCredit.min || birthday > PROGRAM_LIMITS.birthdayCredit.max) return 'A birthday credit is an amount above 0: 20, or 20.50.';
+  if (wholeIn(v.birthdayDays, PROGRAM_LIMITS.birthdayDays) === null) return `A birthday credit is valid ${PROGRAM_LIMITS.birthdayDays.min} to ${PROGRAM_LIMITS.birthdayDays.max} days.`;
   return null;
 }
 
@@ -181,6 +200,9 @@ export function programInput(v: Record<string, string>): ClubProgram {
     experienceMembersEveningMinTier: tier(v.experienceMembersEveningMinTier),
     experienceLaunchPreviewMinTier: tier(v.experienceLaunchPreviewMinTier),
     experiencePartnerMinTier: tier(v.experiencePartnerMinTier),
+    birthdayCreditOn: v.birthdayOn === 'true',
+    birthdayCreditMinor: parseMoney(v.birthdayCredit) ?? 0,
+    birthdayCreditDays: Number((v.birthdayDays ?? '').trim()),
   };
 }
 
@@ -207,6 +229,9 @@ const programValuesKeys: Record<keyof ClubProgram, true> = {
   experienceMembersEveningMinTier: true,
   experienceLaunchPreviewMinTier: true,
   experiencePartnerMinTier: true,
+  birthdayCreditOn: true,
+  birthdayCreditMinor: true,
+  birthdayCreditDays: true,
 };
 
 /** Whether the dialog changes THE PROGRAM. */

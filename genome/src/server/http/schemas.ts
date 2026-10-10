@@ -1142,7 +1142,8 @@ const optionalModel = z.preprocess((v) => (v === '' ? null : v), uuid.nullable()
 
 /**
  * PUT /api/admin/club/program (ADMIN): THE PROGRAM whole, each value within its bounds (services/club-program.ts holds
- * PALLADIUM's early access at least PLATINE's, and a gift's model existing and active).
+ * PALLADIUM's early access at least PLATINE's, and a gift's model existing and active), the birthday credit included
+ * (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3: its switch, 1 to 100 000 000 minor units, 1 to 365 days).
  */
 export const clubProgramBody = body({
   earlyAccessPalladiumHours: whole(PROGRAM_LIMITS.hours.min, PROGRAM_LIMITS.hours.max, 'hours'),
@@ -1162,6 +1163,9 @@ export const clubProgramBody = body({
   experienceMembersEveningMinTier: programTier,
   experienceLaunchPreviewMinTier: programTier,
   experiencePartnerMinTier: programTier,
+  birthdayCreditOn: z.boolean(),
+  birthdayCreditMinor: whole(PROGRAM_LIMITS.birthdayCredit.min, PROGRAM_LIMITS.birthdayCredit.max, 'minor units'),
+  birthdayCreditDays: whole(PROGRAM_LIMITS.birthdayDays.min, PROGRAM_LIMITS.birthdayDays.max, 'days'),
 });
 
 /** PUT /api/admin/orders/shipping-rates (ADMIN): the rates set, each currency and service once; a rate left out is cleared. */

@@ -2568,6 +2568,8 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=program-gift-platine]').textContent()).toBe('None');
     expect(await p.locator('[data-testid=program-credit-platine]').textContent()).toBe('€\u00a050 · valid 12 months');
     expect(await p.locator('[data-testid=program-credit-channels]').textContent()).toBe('Draw, LIVE RELEASE, The private salon');
+    // The birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6), after the credit's orders.
+    expect(await p.locator('[data-testid=program-birthday]').textContent()).toBe('€\u00a020 · valid 30 days');
     expect(await p.locator('[data-testid=program-changed]').textContent()).toBe('The defaults');
     // Each tier lists its program's lines as /verify will show them, above its words.
     expect(await p.locator('[data-testid=tier-program-TITANE]').textContent()).toBe('None');
@@ -2602,6 +2604,24 @@ describe.skipIf(!HAS_CHROMIUM)('admin console (E2E, Chromium)', () => {
     expect(await p.locator('[data-testid=tier-program-PLATINE] li').allTextContents()).toContain('Free express shipping on every order.');
     const row = await ctx.db.selectFrom('club_program_settings').selectAll().executeTakeFirstOrThrow();
     expect(row).toMatchObject({ early_access_palladium_hours: 6, early_access_platine_hours: 3, shipping_free_platine: 'EXPRESS', gift_palladium_model_id: modelId, credit_platine_minor: 7500 });
+    // An ADMIN switches the birthday credit off: the row says Off, its amount and days kept; refused first out of its bounds.
+    await p.click('[data-testid=program-edit]');
+    expect(await p.locator('dialog input[name=birthdayOn]').isChecked()).toBe(true);
+    expect(await p.locator('dialog input[name=birthdayCredit]').inputValue()).toBe('20');
+    expect(await p.locator('dialog input[name=birthdayDays]').inputValue()).toBe('30');
+    await p.fill('dialog input[name=birthdayDays]', '366');
+    await p.click('[data-testid=dialog-confirm]');
+    await expect.poll(() => p.locator('dialog .dialog__error').textContent()).toBe('A birthday credit is valid 1 to 365 days.');
+    await p.fill('dialog input[name=birthdayDays]', '30');
+    await p.locator('dialog label.ccheck', { hasText: 'Birthday credit given' }).click();
+    expect(await p.locator('dialog input[name=birthdayOn]').isChecked()).toBe(false);
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=program-birthday]').textContent()).toBe('Off');
+    expect(await ctx.db.selectFrom('club_program_settings').select(['birthday_credit_on', 'birthday_credit_minor', 'birthday_credit_days']).executeTakeFirstOrThrow()).toEqual({
+      birthday_credit_on: false,
+      birthday_credit_minor: 2000,
+      birthday_credit_days: 30,
+    });
     expect(await figuresInDisplayFace(p)).toEqual([]);
     await shot(p, 'club-program', { full: true, phone: true });
     expect(await cspViolations(p)).toEqual([]);
