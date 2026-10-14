@@ -421,12 +421,16 @@ export class CollectorInsightsService {
   /**
    * The collectors behind one figure (§3.6 C.6.5): the page's query with `slice` and `page` (1 by default), a page of
    * COLLECTORS_LIST_PAGE ordered by email, never cached, read under the load guard in one read-only transaction (503
-   * INSIGHTS_BUSY or INSIGHTS_TIMEOUT as a panel). `withCities` false (an AUDITOR) withholds every city.
+   * INSIGHTS_BUSY or INSIGHTS_TIMEOUT as a panel). `withCities` false (an AUDITOR) withholds every city, and refuses
+   * (403 FORBIDDEN, before any reading) the collectors of a city, as given (`city:`) or from the connection
+   * (`conncity:`): a list of named people living in a named city ties each one to it (§3.0 (h)), so an AUDITOR's city
+   * bars are not links.
    */
   async list(req: Omit<InsightsRequest, 'panel' | 'fresh'> & { slice: string; page?: number }, opts: { withCities: boolean }): Promise<CollectorsList> {
     const now = this.clock();
     const q = this.query({ ...req, panel: 'overview' }, now);
     const slice = parseSlice(req.slice);
+    if (!opts.withCities && (slice.dim === 'city' || slice.dim === 'conncity')) throw new DomainError('FORBIDDEN', 403, 'An AUDITOR does not open the collectors of a city.');
     const page = req.page ?? 1;
     if (!Number.isInteger(page) || page < 1 || page > COLLECTORS_LIST_PAGES_MAX) throw validationError(`page: a whole number from 1 to ${COLLECTORS_LIST_PAGES_MAX}.`);
     try {
@@ -1865,7 +1869,7 @@ export function parseSlice(raw: string): Slice {
     case 'status':
       return one((ENGAGEMENT_STATUSES as readonly string[]).includes(value));
     case 'cohort':
-      return one(/^\d{4}-\d{2}:(all|(1|3|6|12):(active|inactive))$/.test(value));
+      return one(/^\d{4}-(0[1-9]|1[0-2]):(all|(1|3|6|12):(active|inactive))$/.test(value));
   }
 }
 

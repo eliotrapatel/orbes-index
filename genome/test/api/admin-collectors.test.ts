@@ -157,8 +157,20 @@ describe('GET /api/admin/collectors/… (§3.6 C.9)', () => {
     expect((await get('AUDITOR', '/api/admin/collectors/list?slice=score:50-59')).total).toBe(2);
     expect((await get('AUDITOR', '/api/admin/collectors/list?slice=part:recency')).total).toBe(2);
     expect((await get('ADMIN', '/api/admin/collectors/list?slice=all&page=2')).rows).toEqual([]);
+    // The collectors of a city, as given or from the connection: an OPERATOR opens them; an AUDITOR gets 403 (§3.0 (h)).
+    const lyon = await get('OPERATOR', '/api/admin/collectors/list?slice=city:lyon');
+    expect(lyon.total).toBe(3);
+    expect(lyon.rows.map((r: { city: string }) => r.city)).toEqual(['Lyon', 'Lyon', 'Lyon']);
+    expect((await get('ADMIN', '/api/admin/collectors/list?slice=city:lyon')).rows).toEqual(lyon.rows);
+    const unknown = await get('OPERATOR', '/api/admin/collectors/list?slice=conncity:unknown');
+    expect((await get('ADMIN', '/api/admin/collectors/list?slice=conncity:unknown')).rows).toEqual(unknown.rows);
+    for (const slice of ['city:lyon', 'conncity:1', 'conncity:unknown']) {
+      const res = await clients.AUDITOR.get(`/api/admin/collectors/list?slice=${encodeURIComponent(slice)}`);
+      expect(res.statusCode, slice).toBe(403);
+      expect(errorOf(res), slice).toEqual({ code: 'FORBIDDEN', message: 'An AUDITOR does not open the collectors of a city.' });
+    }
     // The query, the slice and the page checked: 400 VALIDATION_FAILED.
-    for (const bad of ['', '?slice=all&panel=overview', '?slice=everyone', '?slice=all&page=0', '?slice=all&page=x', '?slice=score:5-9', '?slice=all&fresh=1', `?slice=${'a'.repeat(301)}`]) {
+    for (const bad of ['', '?slice=all&panel=overview', '?slice=everyone', '?slice=all&page=0', '?slice=all&page=x', '?slice=score:5-9', '?slice=cohort:2026-13:all', '?slice=cohort:2026-00:1:active', '?slice=all&fresh=1', `?slice=${'a'.repeat(301)}`]) {
       const res = await clients.AUDITOR.get(`/api/admin/collectors/list${bad}`);
       expect(res.statusCode, `${bad} → ${res.body.slice(0, 200)}`).toBe(400);
       expect(errorOf(res).code).toBe('VALIDATION_FAILED');

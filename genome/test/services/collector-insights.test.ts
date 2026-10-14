@@ -1088,10 +1088,16 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     });
 
     it('refuses a slice outside its dimension’s values, a page out of bounds (400), before any reading', async () => {
-      for (const slice of ['everyone', 'all:1', 'age:30-40', 'country:fra', 'source:instagram', 'score:5-9', 'part:luck', 'status:asleep', 'cohort:2026-03:2:active', 'device:WATCH', 'viewed:r:1', 'city:Lyon', 'bucket:week:2026-W40']) {
+      for (const slice of ['everyone', 'all:1', 'age:30-40', 'country:fra', 'source:instagram', 'score:5-9', 'part:luck', 'status:asleep', 'cohort:2026-03:2:active', 'cohort:2026-13:all', 'cohort:2026-00:1:active', 'device:WATCH', 'viewed:r:1', 'city:Lyon', 'bucket:week:2026-W40']) {
         await expect(svc.list({ slice }, { withCities: true }), slice).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
       }
       await expect(svc.list({ slice: 'all', page: 0 }, { withCities: true })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      // An AUDITOR (no cities) does not open the collectors of a city, as given or from the connection (403, §3.0 (h)).
+      for (const slice of ['city:lyon', 'conncity:1', 'conncity:unknown']) {
+        await expect(svc.list({ slice }, { withCities: false }), slice).rejects.toMatchObject({ code: 'FORBIDDEN', httpStatus: 403 });
+      }
+      // A bad value is still a 400 for an AUDITOR.
+      await expect(svc.list({ slice: 'city:Lyon' }, { withCities: false })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
     });
   });
 
