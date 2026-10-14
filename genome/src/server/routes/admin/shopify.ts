@@ -5,7 +5,8 @@
  *   GET  /api/admin/shopify/products.csv   AUDITOR   the product CSV of the models priced in a currency (?currency=)
  *   GET  /api/admin/models/:id/shopify     AUDITOR   a model's Shopify product: its handle, its sizes, their ids
  *   PUT  /api/admin/models/:id/shopify     OPERATOR  the product's and the variants' ids pasted back from Shopify
- *   GET  /api/admin/shopify/orders.csv     AUDITOR   the order CSV of a period (?from=YYYY-MM-DD&to=YYYY-MM-DD)
+ *   GET  /api/admin/shopify/orders.csv     AUDITOR   the order CSV of a period (?from=YYYY-MM-DD&to=YYYY-MM-DD), never
+ *                                                    an order of a test account
  *
  * The product CSV holds no personal data. The order CSV names the collectors by email and their buyers' details: an
  * AUDITOR reads them masked (`j***@example.com`, `J*** D***`, the address withheld: serialize.ts), OPERATOR and ADMIN

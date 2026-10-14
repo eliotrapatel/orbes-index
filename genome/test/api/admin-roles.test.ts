@@ -287,7 +287,7 @@ const PROBES: Probe[] = [
   // locations and carriers read by an AUDITOR, set by an ADMIN (the atelier's routes, and Link a piece, removed: plan NEXT
   // LOT step 5.13; its stock is Logistics', below).
   { group: 'orders', method: 'GET', url: '/api/admin/orders', min: 'AUDITOR' },
-  { group: 'orders', method: 'GET', url: `/api/admin/orders?channel=LIVE&dropId=${UUID}&locationId=${UUID}&late=true&q=OR-1`, min: 'AUDITOR' },
+  { group: 'orders', method: 'GET', url: `/api/admin/orders?channel=LIVE&dropId=${UUID}&locationId=${UUID}&late=true&q=OR-1&test=true`, min: 'AUDITOR' },
   { group: 'orders', method: 'GET', url: '/api/admin/orders.csv', min: 'AUDITOR' },
   { group: 'orders', method: 'GET', url: '/api/admin/orders/alerts', min: 'AUDITOR' },
   { group: 'orders', method: 'PUT', url: '/api/admin/orders/alerts', body: INVALID, min: 'ADMIN' },

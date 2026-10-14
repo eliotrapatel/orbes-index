@@ -76,6 +76,7 @@ import type { DecodeReply } from './protocol.js';
 import { Camera, CameraError, DecoderClient, DecoderUnavailableError, PhotoError, readPhoto, ScanSession, workerUrl } from './scanner.js';
 import { SessionStore } from './session.js';
 import { SoundSignature } from './sound.js';
+import { DeviceMode } from '../shared/mode.js';
 import type { ClientServices, LiveEndedSheet, LiveSheet, VerifyInput } from './types.js';
 import { certificateTokenOf } from './certificate-model.js';
 import { CIRCLE_PATH, circlePostPath, circleRouteOf } from './circle-model.js';
@@ -240,6 +241,8 @@ class App {
   private readonly camera = new Camera();
   /** The sound signature of an authentic result (P-D07), on unless turned off on this device. */
   private readonly sound = new SoundSignature();
+  /** The light mode (shared/mode.ts), off unless turned on on this device; a switch redraws the browser's bar. */
+  private readonly mode = new DeviceMode(undefined, () => this.shell?.modeChanged());
   private decoder: DecoderClient | null = null;
   private scan: { view: ScanView; session: ScanSession } | null = null;
   /** The screen on show that holds listeners (a result, MY PIECES): released when another takes its place. */
@@ -348,6 +351,7 @@ class App {
         api: this.api,
         session: this.session,
         sound: this.sound,
+        mode: this.mode,
         onChapter: (c) => {
           if (c === 'now') this.openNow();
           else if (c === 'releases') this.openReleases();

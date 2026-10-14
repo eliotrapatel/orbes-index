@@ -30,6 +30,7 @@
  *   YOUR WISHLIST          3 MODELS ›     the models marked with the heart (plan CUSTOMER INTELLIGENCE §3.2 W.10.2), or
  *                                         NONE YET (nothing when unreadable); it opens its page, /verify/wishlist
  *   SOUND                         (●)     the sound signature (P-D07), as the footer's SOUND ON / OFF
+ *   LIGHT MODE                    (○)     the light mode (shared/mode.ts), kept on the device; off is NOCTURNE's dark
  *   CHANGE PASSWORD                 ›     its form in the sheet (C39): the current password, a new one; CANCEL
  *   MY PIECES                       ›
  *   THE CLUB                        ›     the tiers and what each gives (BP-19 T9), in the app
@@ -72,7 +73,7 @@ import { LEGAL_PATH } from '../../shared/legal.js';
 import { ApiError, type ApiClient } from '../api.js';
 import { addressesSummary, addressLines, mayAddAddress } from '../addresses-model.js';
 import { countryName } from '../../../shared/countries.js';
-import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, MESSAGES, PIECES, SIGN_UP, SOUND, TASTES, TIER, WISHLIST } from '../copy.js';
+import { ACCOUNT, ACCOUNT_ADDRESSES, ACCOUNT_PASSWORD, ACCOUNT_PROFILE, ACCOUNT_SIZES, MESSAGES, MODE, PIECES, SIGN_UP, SOUND, TASTES, TIER, WISHLIST } from '../copy.js';
 import { CLUB_PATH } from '../club-model.js';
 import { countryOptions } from '../addresses-model.js';
 import { guaranteeBlocks } from '../guarantee-model.js';
@@ -99,6 +100,7 @@ import { messageProblem, threadModel, type ConcerningTarget, type ThreadModel } 
 import type { SessionStore } from '../session.js';
 import { SIZE_FIELDS, sizeFieldValue, sizeOptions, sizesFromForm, sizesSummary } from '../sizes-model.js';
 import type { SoundSwitch } from '../sound.js';
+import type { ModeSwitch } from '../../shared/mode.js';
 import { tierModel } from '../tier-model.js';
 import { WISHLIST_PATH, wishlistCount } from '../wishlist-model.js';
 import { seen } from '../seen.js';
@@ -142,6 +144,8 @@ export interface AccountSheetDeps {
   >;
   session: SessionStore;
   sound: SoundSwitch;
+  /** The light mode (shared/mode.ts): LIGHT MODE, under SOUND. */
+  mode: ModeSwitch;
   /** MY PIECES, in the app. */
   onPieces(): void;
   /** THE CLUB's page, in the app (plan NEXT-NINE, BP-19 T9). */
@@ -417,6 +421,8 @@ export class AccountSheet {
     });
     sw.input.dataset.key = 'sound';
     this.soundInput = sw.input;
+    const mode = switchControl({ label: MODE.label, checked: this.deps.mode.light, onChange: (light) => this.deps.mode.set(light) });
+    mode.input.dataset.key = 'mode';
     const out: (HTMLElement | null)[] = [
       h('div', { class: 'n-px' }, h('p', { class: 'n-g n-lb', text: ACCOUNT.signedInAs }), h('p', { class: 'n-account__email', text: email })),
       this.tierBlock(),
@@ -430,6 +436,7 @@ export class AccountSheet {
         this.addressesRow(),
         this.wishlistRow(),
         h('label', { class: 'n-row n-account__sound' }, h('span', { class: 'n-g n-row__label', text: SOUND.label }), sw.el),
+        h('label', { class: 'n-row n-account__mode' }, h('span', { class: 'n-g n-row__label', text: MODE.label }), mode.el),
         leadRow(ACCOUNT_PASSWORD.change, { onOpen: () => this.openPassword(), attrs: { 'data-key': 'password' } }),
         leadRow(PIECES.link, {
           href: PIECES_PATH,

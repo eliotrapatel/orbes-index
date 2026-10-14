@@ -8,8 +8,10 @@
  *
  * Discovery: every directory under src/web/ (except `shared`) with an
  * index.html and a main.ts is an app. Its entries are main.ts (→ <app>.js),
- * worker.ts (→ <app>-worker.js) and styles.css (→ <app>.css) when present.
- * index.html refers to them by their source names (`./main.ts`,
+ * worker.ts (→ <app>-worker.js), mode.ts (→ <app>-mode.js: the light mode
+ * before the first paint, a plain script of the shell's head) and styles.css
+ * (→ <app>.css) when present.
+ * index.html refers to them by their source names (`./main.ts`, `./mode.ts`,
  * `./styles.css`, `<meta name="orbes-worker" content="./worker.ts">`); any
  * other local file it references (favicon.svg) is copied with a content hash.
  * A file the stylesheets already load (the display font of shared/fonts/,
@@ -87,7 +89,7 @@ export class WebBuildError extends Error {
 
 // ── Discovery ──────────────────────────────────────────────────────────────
 
-const ENTRY_FILES = ['main.ts', 'worker.ts', 'styles.css'] as const;
+const ENTRY_FILES = ['main.ts', 'worker.ts', 'mode.ts', 'styles.css'] as const;
 
 export function discoverApps(srcDir: string = DEFAULT_SRC_DIR): WebApp[] {
   if (!existsSync(srcDir)) return [];
@@ -106,9 +108,10 @@ export function discoverApps(srcDir: string = DEFAULT_SRC_DIR): WebApp[] {
   return apps;
 }
 
-/** Output base name of an entry: main.ts → <app>, worker.ts → <app>-worker, styles.css → <app>. */
+/** Output base name of an entry: main.ts → <app>, worker.ts → <app>-worker, mode.ts → <app>-mode, styles.css → <app>. */
 export function entryOutName(app: string, entry: string): string {
   if (entry === 'worker.ts') return `${app}-worker`;
+  if (entry === 'mode.ts') return `${app}-mode`;
   return app;
 }
 

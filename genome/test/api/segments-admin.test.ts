@@ -100,6 +100,26 @@ describe('segments and the access rules: the console’s and the public routes',
     expect(masked.body).toContain(`"${member.email[0]}***@${member.email.split('@')[1]}"`);
   });
 
+  it('never reads a test account among a segment’s members: not in the list’s count, the live count nor the CSV', async () => {
+    const s = (safeJson(await auditor.get('/api/admin/segments')) as Json).items[0];
+    const test = await signedIn();
+    await holdPieces(h.ctx.db, test.id, 1, f.modelId, { variant: '58' });
+    expect((safeJson(await auditor.get(`/api/admin/segments/${s.id}`)) as Json).count).toBe(2);
+    await h.ctx.db.insertInto('test_entrants').values({ account_id: test.id }).execute();
+    try {
+      expect((safeJson(await auditor.get(`/api/admin/segments/${s.id}`)) as Json).count).toBe(1);
+      expect((safeJson(await auditor.get('/api/admin/segments')) as Json).items.map((x: Json) => [x.name, x.count])).toEqual([['Size 58', 1]]);
+      expect(safeJson(await op.post('/api/admin/segments/count', { criteria: SIZE_58 }))).toEqual({ count: 1 });
+      const csv = await op.get(`/api/admin/segments/${s.id}/members.csv`);
+      expect(csv.body).toContain(`"${member.email}"`);
+      expect(csv.body).not.toContain(test.email);
+    } finally {
+      // The pieces it held end with it: the scenes after read the segment as they did.
+      await h.ctx.db.deleteFrom('test_entrants').where('account_id', '=', test.id).execute();
+      await h.ctx.db.updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', test.id).execute();
+    }
+  });
+
   it('a release for the segment and for those who took part: the page says it in words, the 403 says what lacks', async () => {
     const s = (safeJson(await auditor.get('/api/admin/segments')) as Json).items[0];
     const opensAt = new Date(h.clock.now().getTime() + 2 * HOUR);

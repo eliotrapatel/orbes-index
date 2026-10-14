@@ -118,6 +118,14 @@ export function addToOrderText(r: { sku: LogisticsSku; location: { name: string 
   return `The pieces of ${skuWords(r.sku)} go to the draft of its supplier, to deliver to ${r.location.name}. You confirm the draft before it is sent.`;
 }
 
+/**
+ * The pieces Add to supplier order opens with: the proposal's figure where the size has one, none otherwise (a size
+ * ordered in advance: its pieces are typed).
+ */
+export function addToOrderQuantity(toOrder: number | undefined): string {
+  return (toOrder ?? 0) > 0 ? String(toOrder) : '';
+}
+
 /** The text of Count pieces in, for a size. */
 export function countInText(sku: LogisticsSku): string {
   return `Name the pieces of ${skuWords(sku)} that are on the shelf: they enter the stock with their ORBES identity. The count does not move.`;

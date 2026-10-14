@@ -4662,6 +4662,7 @@
         "YOUR WISHLIST",
         "NONE YET",
         "SOUND",
+        "LIGHT MODE",
         "CHANGE PASSWORD",
         "PRIVACY · TERMS · LEGAL · HELP",
         "SIGN OUT"
@@ -4737,6 +4738,7 @@
         "YOUR WISHLIST",
         "NONE YET",
         "SOUND",
+        "LIGHT MODE",
         "CHANGE PASSWORD",
         "PRIVACY · TERMS · LEGAL · HELP",
         "SIGN OUT"
@@ -4837,6 +4839,7 @@
         "YOUR WISHLIST",
         "NONE YET",
         "SOUND",
+        "LIGHT MODE",
         "CHANGE PASSWORD",
         "PRIVACY · TERMS · LEGAL · HELP",
         "SIGN OUT"
@@ -4945,6 +4948,7 @@
         "YOUR WISHLIST",
         "NONE YET",
         "SOUND",
+        "LIGHT MODE",
         "CHANGE PASSWORD",
         "PRIVACY · TERMS · LEGAL · HELP",
         "SIGN OUT"
@@ -8514,6 +8518,7 @@
         "YOUR WISHLIST",
         "NONE YET",
         "SOUND",
+        "LIGHT MODE",
         "CHANGE PASSWORD",
         "PRIVACY · TERMS · LEGAL · HELP",
         "SIGN OUT"
@@ -12136,11 +12141,6 @@
         "3 OCT 2026",
         "OWNERSHIP CERTIFICATE",
         "Share a link to a certificate of this piece with a buyer or an insurer: its GENOME, your ownership and its date, the warranty, and that no loss or theft is reported. It never shows your name or your email, and it stops being valid if the piece changes hands or is reported lost or stolen.",
-        "CERTIFICATE LINK · VALID UNTIL 4 NOV 2026",
-        "«link»",
-        "This link is shown once: copy it now. ORBES cannot show it again.",
-        "COPY LINK",
-        "OPEN LINK",
         "CREATED 5 OCT 2026 · VALID UNTIL 4 NOV 2026",
         "WITHDRAW",
         "CREATE CERTIFICATE",
@@ -12560,6 +12560,7 @@
         "YOUR WISHLIST",
         "NONE YET",
         "SOUND",
+        "LIGHT MODE",
         "CHANGE PASSWORD",
         "PRIVACY · TERMS · LEGAL · HELP",
         "Your sizes are saved.",
@@ -12704,6 +12705,7 @@
         "YOUR WISHLIST",
         "NONE YET",
         "SOUND",
+        "LIGHT MODE",
         "CHANGE PASSWORD",
         "PRIVACY · TERMS · LEGAL · HELP",
         "Your sizes are saved.",

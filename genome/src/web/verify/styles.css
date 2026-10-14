@@ -7,6 +7,7 @@
 @import "../shared/brand.css";
 @import "./house.css";
 @import "../shared/nocturne.css";
+@import "../shared/light.css";
 
 /* ── NOW (plan NOCTURNE, screen 1, step N3; C1, C10, C42, C43): /verify, in place of the landing ──
    What leads (views/now.ts) as the canvas sets it: the hero's photograph whole at the column's width, faded, its words

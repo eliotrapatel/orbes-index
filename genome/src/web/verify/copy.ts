@@ -1653,6 +1653,11 @@ export const SOUND = Object.freeze({
   off: 'OFF',
 });
 
+/** YOUR ACCOUNT's LIGHT MODE switch (shared/mode.ts): off is NOCTURNE's dark, the default. */
+export const MODE = Object.freeze({
+  label: 'LIGHT MODE',
+});
+
 /** A release's label for a model in one size (services/release-stock.ts releaseSizeLabel), whatever its case. */
 const isOneSize = (size: string) => typeof size === 'string' && size.trim().toUpperCase() === 'ONE SIZE';
 /** A size in reading text: `in size 52`, or `in ONE SIZE` (never `in size ONE SIZE`). */

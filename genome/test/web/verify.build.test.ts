@@ -24,8 +24,17 @@ describe('build-web: production build of the real apps', () => {
 
   it('publishes the verify shell, main bundle, worker bundle, stylesheet, favicon and preloaded font', () => {
     const app = result.apps.find((a) => a.name === 'verify')!;
-    expect(Object.keys(app.assets).sort()).toEqual([FONT_REF, 'favicon.svg', 'main.ts', 'styles.css', 'worker.ts']);
+    expect(Object.keys(app.assets).sort()).toEqual([FONT_REF, 'favicon.svg', 'main.ts', 'mode.ts', 'styles.css', 'worker.ts']);
     expect(app.assets['main.ts']).toMatch(/^\/assets\/verify-[A-Z0-9]{8}\.js$/);
+    // The light mode before the first paint (shared/mode-early.ts): its own small file, a plain script of the head
+    // before the stylesheet, with nothing a plain script cannot run and no name left on the page.
+    expect(app.assets['mode.ts']).toMatch(/^\/assets\/verify-mode-[A-Z0-9]{8}\.js$/);
+    const mode = readFileSync(asset(app.assets['mode.ts']!), 'utf8');
+    expect(mode).not.toMatch(/\b(import|export)\b/);
+    expect(mode.trim()).toMatch(/^\(\(\)=>\{.*\}\)\(\);$/s);
+    const shell = readFileSync(join(result.outDir, 'verify', 'index.html'), 'utf8');
+    expect(shell.indexOf(`<script src="${app.assets['mode.ts']}"></script>`)).toBeGreaterThan(-1);
+    expect(shell.indexOf(`<script src="${app.assets['mode.ts']}"></script>`)).toBeLessThan(shell.indexOf('rel="stylesheet"'));
     expect(app.assets['worker.ts']).toMatch(/^\/assets\/verify-worker-[A-Z0-9]{8}\.js$/);
     expect(app.assets['styles.css']).toMatch(/^\/assets\/verify-[A-Z0-9]{8}\.css$/);
     for (const url of Object.values(app.assets)) {
@@ -147,7 +156,8 @@ describe('build-web: the display font, preloaded by both shells', () => {
 
   it('builds the legal pages (J-06), discovered like the others: shell, bundle, stylesheet, tab icon, preloaded font, no decoder', () => {
     const legal = result.apps.find((a) => a.name === 'legal')!;
-    expect(Object.keys(legal.assets).sort()).toEqual([FONT_REF, 'favicon.svg', 'main.ts', 'styles.css']);
+    expect(Object.keys(legal.assets).sort()).toEqual([FONT_REF, 'favicon.svg', 'main.ts', 'mode.ts', 'styles.css']);
+    expect(legal.assets['mode.ts']).toMatch(/^\/assets\/legal-mode-[A-Z0-9]{8}\.js$/);
     expect(legal.assets['main.ts']).toMatch(/^\/assets\/legal-[A-Z0-9]{8}\.js$/);
     expect(legal.assets['styles.css']).toMatch(/^\/assets\/legal-[A-Z0-9]{8}\.css$/);
     for (const url of Object.values(legal.assets)) expect(HASHED_ASSET_RE.test(url), url).toBe(true);

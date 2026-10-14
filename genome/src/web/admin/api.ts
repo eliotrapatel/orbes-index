@@ -1131,16 +1131,16 @@ export class AdminApi {
 
   // ── Orders (plan LIVE RELEASE+) ──────────────────────────────────────────
 
-  /** The fulfilment board: every order the filters keep, by step (the emails masked for an AUDITOR). */
+  /** The fulfilment board: every order the filters keep, by step (the emails masked for an AUDITOR); the test accounts' orders only with `test`. */
   orderBoard(f: OrderBoardFilters = {}): Promise<OrderBoard> {
-    return this.get('/api/admin/orders', { channel: f.channel, dropId: f.dropId, locationId: f.locationId, late: f.late ? 'true' : undefined, q: f.q });
+    return this.get('/api/admin/orders', { channel: f.channel, dropId: f.dropId, locationId: f.locationId, late: f.late ? 'true' : undefined, q: f.q, test: f.test ? 'true' : undefined });
   }
 
   /** Every order the same filters keep, as a CSV (the emails and the buyers masked for an AUDITOR). */
   async ordersCsv(f: OrderBoardFilters = {}): Promise<Download> {
     const res = await this.request<Response>('GET', '/api/admin/orders.csv', {
       raw: true,
-      query: { channel: f.channel, dropId: f.dropId, locationId: f.locationId, late: f.late ? 'true' : undefined, q: f.q },
+      query: { channel: f.channel, dropId: f.dropId, locationId: f.locationId, late: f.late ? 'true' : undefined, q: f.q, test: f.test ? 'true' : undefined },
     });
     return toDownload(res, 'orbes-orders.csv');
   }

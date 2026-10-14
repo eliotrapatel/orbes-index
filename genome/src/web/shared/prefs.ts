@@ -1,10 +1,11 @@
 /**
- * Preferences kept on this device, in the browser's local storage: today only
- * the sound signature of the verify app (P-D07), SOUND ON / OFF at the foot of
- * its landing.
+ * Preferences kept on this device, in the browser's local storage: the sound
+ * signature of the verify app (P-D07), SOUND ON / OFF at the foot of its
+ * landing, and the light mode (LIGHT MODE in YOUR ACCOUNT, shared/light.css).
  *
  *   key           value                     absent (the default)
  *   orbes.sound   "off" once turned off     the sound is on
+ *   orbes.mode    "light" once turned on    NOCTURNE's dark
  *
  * Nothing here is sent to ORBES: a preference stays on the device that set it
  * (the privacy policy says so). Local storage can be missing or refuse every
@@ -24,6 +25,12 @@ export interface PrefStorage {
 export const SOUND_PREF_KEY = 'orbes.sound';
 /** Its one stored value: the sound was turned off. Turned back on, the key is removed (the default). */
 export const SOUND_OFF = 'off';
+
+/** The key of the light mode's preference: shared/mode-early.ts reads it by name (the privacy policy's sentence on
+ *  the device's preferences names it from its next version on). */
+export const MODE_PREF_KEY = 'orbes.mode';
+/** Its one stored value: the light mode was turned on. Turned back off, the key is removed (the default, dark). */
+export const MODE_LIGHT = 'light';
 
 /** This browser's local storage, or null where it cannot be reached (reading `localStorage` itself may throw). */
 export function deviceStorage(): PrefStorage | null {
@@ -63,4 +70,14 @@ export function soundPref(storage: PrefStorage | null = deviceStorage()): boolea
 /** Keep the sound preference: off is stored, on removes the key (the default). */
 export function setSoundPref(on: boolean, storage: PrefStorage | null = deviceStorage()): boolean {
   return writePref(SOUND_PREF_KEY, on ? null : SOUND_OFF, storage);
+}
+
+/** Whether the light mode is on: off (NOCTURNE's dark) unless it was turned on on this device. */
+export function lightPref(storage: PrefStorage | null = deviceStorage()): boolean {
+  return readPref(MODE_PREF_KEY, storage) === MODE_LIGHT;
+}
+
+/** Keep the light mode's preference: light is stored, dark removes the key (the default). */
+export function setLightPref(light: boolean, storage: PrefStorage | null = deviceStorage()): boolean {
+  return writePref(MODE_PREF_KEY, light ? MODE_LIGHT : null, storage);
 }

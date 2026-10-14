@@ -4,7 +4,9 @@
  * Services list. An order's piece is bound by the agent's packing scan (routes/admin/logistics.ts): Link a piece,
  * `POST /api/admin/orders/:id/piece`, is removed with the atelier (plan NEXT LOT step 5.13).
  *
- *   GET    /api/admin/orders                    AUDITOR   the board by step (?channel=&dropId=&locationId=&late=&q=)
+ *   GET    /api/admin/orders                    AUDITOR   the board by step (?channel=&dropId=&locationId=&late=&q=&test=):
+ *                                                         the test accounts' orders left out unless `test=true`
+ *                                                         (Show test orders), each then marked `test`
  *   GET    /api/admin/orders.csv                AUDITOR   every order the same filters keep, as a CSV
  *   GET    /api/admin/orders/alerts             AUDITOR   the delays after which an order stands out (M3)
  *   PUT    /api/admin/orders/alerts             ADMIN     those delays, changed (the console's settings)

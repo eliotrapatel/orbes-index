@@ -31,6 +31,7 @@ import { CHROME } from '../copy.js';
 import { accountButton, chapterOf, railLive, type ChapterId } from '../nocturne-model.js';
 import type { SessionStore } from '../session.js';
 import type { SoundSwitch } from '../sound.js';
+import { isLight, MODE_THEME_COLOURS, type ModeSwitch } from '../../shared/mode.js';
 import type { ClubStatus } from '../types.js';
 import { AccountSheet } from './account.js';
 import { CHAPTER_PATHS, showRailLive } from '../../shared/chapters.js';
@@ -44,6 +45,8 @@ export interface ShellDeps {
   api: ApiClient;
   session: SessionStore;
   sound: SoundSwitch;
+  /** The light mode (YOUR ACCOUNT's LIGHT MODE). */
+  mode: ModeSwitch;
   /** A chapter of the rail, in the app (its history entry the router's). */
   onChapter(chapter: ChapterId): void;
   /** Signed out, the account button: MY PIECES and its sign-in. */
@@ -71,6 +74,8 @@ const NOCTURNE_SCREENS: readonly string[] = [...CHROME_SCREENS, 'scan', 'verifyi
 
 /** Safari's bars (addition 13): the ink of NOCTURNE, and the light of the shared certificate, kept as it is. */
 export const THEME_COLOURS = Object.freeze({ nocturne: '#0a0a0a', certificate: '#ffffff' });
+/** The one NOCTURNE screen the light mode leaves dark: the camera (shared/light.css names it the same way). */
+const LIGHT_EXCEPT = 'scan';
 
 /** The rail's dot is read again no sooner than this (the banner's own cadence). */
 const RAIL_REFRESH_MS = 60_000;
@@ -162,6 +167,7 @@ export class Shell {
       api: deps.api,
       session: deps.session,
       sound: deps.sound,
+      mode: deps.mode,
       onPieces: () => deps.onChapter('pieces'),
       onTheClub: () => deps.onTheClub(),
       onWishlist: () => deps.onWishlist(),
@@ -221,12 +227,27 @@ export class Shell {
       if (c === chapter) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     }
-    const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
-    if (meta) meta.content = screen === 'certificate' ? THEME_COLOURS.certificate : THEME_COLOURS.nocturne;
+    this.drawThemeColour();
     if (chrome) {
       this.drawSound();
       if (Date.now() - this.railReadAt >= RAIL_REFRESH_MS) void this.readRail();
     }
+  }
+
+  /** The light mode was switched (YOUR ACCOUNT): the browser's bars follow the ground. */
+  modeChanged(): void {
+    this.drawThemeColour();
+  }
+
+  /**
+   * Safari's bars: the certificate's paper, the light ground on a NOCTURNE screen drawn light (shared/light.css: every
+   * NOCTURNE screen but the camera), NOCTURNE's ground everywhere else (the LIVE RELEASE's room too).
+   */
+  private drawThemeColour(): void {
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+    if (!meta) return;
+    const light = isLight() && document.body.classList.contains('nocturne') && this.screen !== LIGHT_EXCEPT;
+    meta.content = this.screen === 'certificate' ? THEME_COLOURS.certificate : light ? MODE_THEME_COLOURS.light : THEME_COLOURS.nocturne;
   }
 
   /**

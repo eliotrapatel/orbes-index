@@ -348,6 +348,14 @@ export function eventActor(e: OrderView['events'][number], actors: Record<string
 
 // ── The board's filters ────────────────────────────────────────────────────
 
+/** The test accounts' orders on the board: its switch, and the mark of each one shown. */
+export const TEST_ORDERS_TEXT = Object.freeze({
+  show: 'Show test orders',
+  mark: 'TEST',
+  spoken: 'test order',
+  title: 'An order of a test account.',
+});
+
 /** The board's filters from the page's query: only the values the server takes. */
 export function boardFilters(query: Record<string, string>): OrderBoardFilters {
   const f: OrderBoardFilters = {};
@@ -355,6 +363,7 @@ export function boardFilters(query: Record<string, string>): OrderBoardFilters {
   if (UUID_RE.test(query.dropId ?? '')) f.dropId = query.dropId!.toLowerCase();
   if (UUID_RE.test(query.locationId ?? '')) f.locationId = query.locationId!.toLowerCase();
   if (query.late === 'true') f.late = true;
+  if (query.test === 'true') f.test = true;
   const q = (query.q ?? '').trim().slice(0, 100);
   if (q) f.q = q;
   return f;

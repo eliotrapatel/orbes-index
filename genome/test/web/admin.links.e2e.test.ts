@@ -393,10 +393,11 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Links page (plan CUSTOMER INTELLI
       const first = p.locator('[data-testid=link-first] .link__fig');
       expect((await first.allTextContents()).map((x) => x.replace(/[\u2009\u00a0]/g, ' '))).toEqual(['Sign-ups1', 'Entries0', 'Purchases1', 'Revenue€ 640', 'Return×0.3Revenue € 640 for € 2 000']);
       expect(await p.locator('[data-testid=link-days] .bar').count()).toBeGreaterThanOrEqual(2);
-      expect(await p.locator('#link-collectors [data-testid=link-collector]').allTextContents()).toEqual(['camille@example.com']);
+      await expect.poll(() => p.locator('#link-collectors [data-testid=link-collector]').allTextContents()).toEqual(['camille@example.com']);
       await p.locator('#link-collectors select[name=linkMeasure]').selectOption('purchases');
       await expect.poll(() => p.evaluate(() => location.hash)).toMatch(/measure=purchases/);
-      expect(await p.locator('#link-collectors [data-testid=link-collector]').allTextContents()).toEqual(['camille@example.com']);
+      // The list is read again for the new measure: wait for it rather than read it while it reloads (genome-ci).
+      await expect.poll(() => p.locator('#link-collectors [data-testid=link-collector]').allTextContents()).toEqual(['camille@example.com']);
       await p.click('[data-testid=link-collectors-last]');
       await expect.poll(() => p.evaluate(() => location.hash)).toMatch(/attribution=last/);
       await shot(p, 'link');
@@ -404,7 +405,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Links page (plan CUSTOMER INTELLI
       // A figure: its collectors, then the client sheet.
       await p.click('[data-testid=link-figure-first-signups]');
       await expect.poll(async () => (await title(p).textContent())?.trim()).toBe('Sign-ups through Instagram bio · first link · all time');
-      expect(await p.locator('[data-testid=link-collector]').allTextContents()).toEqual(['camille@example.com']);
+      await expect.poll(() => p.locator('[data-testid=link-collector]').allTextContents()).toEqual(['camille@example.com']);
       expect(await p.locator('.page-head__actions a', { hasText: 'Instagram bio' }).count()).toBe(1);
       await shot(p, 'collectors');
       await p.locator('[data-testid=link-collector]').first().click();

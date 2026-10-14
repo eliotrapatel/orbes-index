@@ -7,15 +7,17 @@
  * email masked for an AUDITOR), the model and size, the add-ons, the surprise, whether an engraving is to be done, what
  * it holds (in stock, being made, the size to enter, its piece) and its time in its step; a late one stands out (M3:
  * the delays of the console's settings) with why; an order case not ended is marked with its kind (plan NEXT LOT §3.6.D). A card opens the order's page (views/order.ts), where its steps are
- * taken. The filters (`?channel=&dropId=&locationId=&late=true&q=`) narrow the board and its CSV.
+ * taken. The filters (`?channel=&dropId=&locationId=&late=true&q=`) narrow the board and its CSV. The orders of the
+ * test accounts are left out of the board, its counts and its CSV unless « Show test orders » is on (`?test=true`);
+ * shown, each is marked TEST under its reference.
  *
  * SHOPIFY EXPORT (plan LIVE RELEASE+, N3): the priced orders reserved in a period, in Shopify's order format, each
  * collector by email (how the store will match its customers to the accounts); masked for an AUDITOR. Nothing is sent
- * to Shopify.
+ * to Shopify. It never holds an order of a test account.
  */
 import { h, type Child } from '../../shared/dom.js';
 import { formatCount, formatDateTime, humanize } from '../format.js';
-import { boardFilters, cardCase, cardHolds, CHANNEL_LABELS, delaysLine, durationText, LATE_LABELS, lateSentence } from '../model/orders.js';
+import { boardFilters, cardCase, cardHolds, CHANNEL_LABELS, delaysLine, durationText, LATE_LABELS, lateSentence, TEST_ORDERS_TEXT } from '../model/orders.js';
 import { defaultPeriod, periodProblem, SHOPIFY_PERIOD_MAX_DAYS } from '../model/shopify.js';
 import { href } from '../router.js';
 import { ORDER_CHANNELS, type OrderBoard, type OrderBoardColumn, type OrderCard } from '../types.js';
@@ -41,6 +43,9 @@ export async function ordersView(ctx: ViewContext): Promise<HTMLElement> {
   location.addEventListener('change', () => ctx.setQuery({ locationId: location.value }));
   const late = checkbox('late', 'Late only', filters.late === true);
   (late.querySelector('input') as HTMLInputElement).addEventListener('change', (e) => ctx.setQuery({ late: (e.target as HTMLInputElement).checked ? 'true' : undefined }));
+  // The test accounts' orders: left out of the board, its counts and its CSV unless this is on.
+  const test = checkbox('test', TEST_ORDERS_TEXT.show, filters.test === true);
+  (test.querySelector('input') as HTMLInputElement).addEventListener('change', (e) => ctx.setQuery({ test: (e.target as HTMLInputElement).checked ? 'true' : undefined }));
   const search = input('q', { value: filters.q ?? '', placeholder: 'OR-…, LR-…, a piece, a model', maxlength: 100 });
   const searchFor = () => ctx.setQuery({ q: search.value.trim() });
   search.addEventListener('change', searchFor);
@@ -70,7 +75,7 @@ export async function ordersView(ctx: ViewContext): Promise<HTMLElement> {
       body: h(
         'p',
         { class: 'dialog__text' },
-        `A file in Shopify’s order format: every order reserved in the period and priced, its piece and its add-ons as line items, its steps as Shopify’s statuses, its buyer, and the collector’s email, by which the store will match its customers to the accounts. At most ${SHOPIFY_PERIOD_MAX_DAYS} days, in UTC. Nothing is sent to Shopify.`,
+        `A file in Shopify’s order format: every order reserved in the period and priced, its piece and its add-ons as line items, its steps as Shopify’s statuses, its buyer, and the collector’s email, by which the store will match its customers to the accounts. Never an order of a test account. At most ${SHOPIFY_PERIOD_MAX_DAYS} days, in UTC. Nothing is sent to Shopify.`,
       ),
       fields: [
         { name: 'from', label: 'First day', kind: 'date', required: true, value: period.from },
@@ -91,7 +96,7 @@ export async function ordersView(ctx: ViewContext): Promise<HTMLElement> {
     'div',
     { class: 'view view--orders' },
     pageHeader({ eyebrow: 'Clients', title: 'Orders', lead: LEAD, actions: [linkButton('Settings', href('settings'), 'ghost'), shopify, csv] }),
-    filterBar(field('Channel', channel), field('Release', release), field('Location', location), field('Search', search), h('div', { class: 'cfield cfield--checks' }, late)),
+    filterBar(field('Channel', channel), field('Release', release), field('Location', location), field('Search', search), h('div', { class: 'cfield cfield--checks' }, late, test)),
     h(
       'p',
       { class: 'board__summary', data: { testid: 'orders-summary' } },
@@ -143,7 +148,7 @@ function card(x: OrderCard, board: OrderBoard, now: Date): HTMLElement {
     'a',
     {
       class: ['ocard', x.timing.late ? 'ocard--late' : null],
-      attrs: { href: href('order', { orderId: x.id }), 'aria-label': `${x.reference}, ${origin}, ${x.model.name}${x.timing.late ? ', late' : ''}${orderCase ? `, order case ${orderCase}` : ''}` },
+      attrs: { href: href('order', { orderId: x.id }), 'aria-label': `${x.reference}${x.test ? `, ${TEST_ORDERS_TEXT.spoken}` : ''}, ${origin}, ${x.model.name}${x.timing.late ? ', late' : ''}${orderCase ? `, order case ${orderCase}` : ''}` },
       data: { testid: 'order-card', order: x.id },
     },
     h(
@@ -152,6 +157,7 @@ function card(x: OrderCard, board: OrderBoard, now: Date): HTMLElement {
       h('span', { class: 'ocard__ref mono' }, x.reference),
       h('span', { class: 'ocard__channel' }, CHANNEL_LABELS[x.channel]),
     ),
+    x.test ? h('span', { class: 'ocard__test', attrs: { title: TEST_ORDERS_TEXT.title }, data: { testid: 'order-card-test' } }, statusMark(TEST_ORDERS_TEXT.mark, 'muted')) : null,
     x.timing.late && x.timing.rule ? h('span', { class: 'ocard__late', attrs: { title: lateSentence(x.timing.rule, board.delays) } }, statusMark(LATE_LABELS[x.timing.rule], 'alert')) : null,
     // Plan NEXT LOT §3.6.D: an order case not ended (a return, a size exchange, a parcel problem), in the console's kind words.
     orderCase ? h('span', { class: 'ocard__case', attrs: { title: 'An order case is open: see the order’s page.' }, data: { testid: 'order-card-case' } }, statusMark(orderCase, 'outline')) : null,
