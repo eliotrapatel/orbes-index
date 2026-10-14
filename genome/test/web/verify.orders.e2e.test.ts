@@ -43,6 +43,8 @@ import type { Browser, Locator, Page } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sessionCookieName } from '../../src/server/services/sessions.js';
 import { inTransaction } from '../../src/server/db/connection.js';
+import { openText } from '../../src/server/crypto/secretbox.js';
+import { claimRevealAad, deriveClaimRevealKey } from '../../src/server/services/claim-renewals.js';
 import { ensureSku } from '../../src/server/services/stock.js';
 import { ACCOUNT_ADDRESSES, DEFAULT_CARE, LIVE, ORDERS } from '../../src/web/verify/copy.js';
 import { orderDate } from '../../src/web/verify/orders-model.js';
@@ -433,6 +435,8 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
   /** The orders: shipped (REGISTER THIS PIECE), paid and still to ship, and one whose reading fails then is refused. */
   const ids = { shipped: '', paid: '', refused: '' };
   const pieces = { shipped: '', paid: '' };
+  /** The pieces' first claim codes (their card at issue), which the new ones replace: never shown either. */
+  const firstCodes: string[] = [];
 
   async function account(tag: string) {
     const { account: a, session } = await srv.ctx.services.auth.registerAccount({ email: `claim.e2e.${tag}@example.com`, password: PASSWORD }, {});
@@ -449,6 +453,7 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
     const size = String(sizeSeq++);
     const sku = await inTransaction(db, (tx) => ensureSku(tx, f.modelId, size));
     const p = await services.issuance.issueProduct({ categoryCode: 'J', modelId: f.modelId, variant: size, material: '925 STERLING SILVER', withClaimSecret: true }, f.admin);
+    firstCodes.push(p.claimCode!);
     await countPiecesIn(srv.ctx, { skuId: sku, locationId: france, productRefs: [p.product.productId] }, f.admin);
     const request = await db.insertInto('shop_requests').values({ account_id: accountId, model_id: f.modelId, created_at: new Date() }).returning('id').executeTakeFirstOrThrow();
     await services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, f.admin);
@@ -462,6 +467,15 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
     const r = await services.claimRenewals.renew(p.product.productId, { reason: 'Card lost.', expect: 'SOLD', after: situation.lastRenewalId }, f.admin);
     expect(r.claimCode).toBeUndefined();
     return { orderId, productId: p.product.productId };
+  }
+
+  /**
+   * An order's new claim code as the server keeps it for its one reading, opened here with the server's key without
+   * spending it (the row stays WAITING), so a check can look for that code itself.
+   */
+  async function waitingCode(orderId: string): Promise<string> {
+    const row = await srv.ctx.db.selectFrom('claim_code_renewals').selectAll().where('order_id', '=', orderId).where('status', '=', 'WAITING').executeTakeFirstOrThrow();
+    return openText(deriveClaimRevealKey(srv.ctx.config), row.sealed_code!, claimRevealAad(row));
   }
 
   beforeAll(async () => {
@@ -512,8 +526,15 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
   const noSideways = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 
   it('before SHOW THE CODE: the block under the order\'s sentence, the code nowhere; nothing scrolls sideways at 390, 375, 360 and 320 px', async () => {
+    // The three orders' codes themselves, the new ones and the first ones they replace, with and without their hyphens:
+    // never in the page nor in what the server sent. (Not any string of the code's shape: an order's id, in each WRITE
+    // button's data-context-id, has one about once in 25 runs.)
+    const codes = [...(await Promise.all([ids.shipped, ids.paid, ids.refused].map(waitingCode))), ...firstCodes];
+    expect(codes).toHaveLength(6);
+    for (const c of codes) expect(c).toMatch(new RegExp(`^${CODE.source}$`));
+    const secrets = codes.flatMap((c) => [c, c.replace(/-/g, '')]);
     for (const width of [390, 375, 360, 320]) {
-      const { page, problems } = await phone(width);
+      const { page, problems, answers } = await phone(width);
       const shipped = card(page, ids.shipped);
       await visible(shipped.locator('.pieces__claim'));
       // Right after the order's sentence, before its rows.
@@ -522,7 +543,10 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
       await textOf(shipped.locator('.pieces__claim'), `${C.label} ${C.lead} ${C.show}`);
       expect(await shipped.getByRole('button', { name: C.show, exact: true }).getAttribute('class')).toContain('n-btn--ol');
       expect(await page.locator('.pieces__claim').count()).toBe(3);
-      expect(await page.content()).not.toMatch(CODE);
+      const html = await page.content();
+      for (const s of secrets) expect(html, `${width} px`).not.toContain(s);
+      expect(answers.length).toBeGreaterThan(0);
+      for (const a of answers) for (const s of secrets) expect(a).not.toContain(s);
       expect(await noSideways(page), `${width} px`).toBe(true);
       if (width === 390) await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-waiting-phone.png'), fullPage: true });
       expect(problems).toEqual([]);
