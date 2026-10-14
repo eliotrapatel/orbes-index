@@ -27,6 +27,9 @@ import { fold } from '../../src/shared/fold.js';
 import {
   CollectorInsightsService,
   INSIGHTS_CACHE_SIZE,
+  SCORE_SLICES,
+  type DevicesPanelFigures,
+  type EngagementFigures,
   type BarRow,
   type CollectorsReport,
   type InsightsRequest,
@@ -36,7 +39,9 @@ import {
   type WhoFigures,
 } from '../../src/server/services/collector-insights.js';
 import { median } from '../../src/server/services/growth.js';
+import { VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
 import type { LikesFigures } from '../../src/server/services/likes.js';
+import type { DevicesFigures } from '../../src/server/services/tracking-reads.js';
 import { AGE_SLICES, parisPeriod, previousPeriod, type Period } from '../../src/server/services/insights-scope.js';
 import { parisDay, parisDayStart } from '../../src/server/services/schedule.js';
 import { createManualClock, type Logger } from '../../src/server/types.js';
@@ -64,6 +69,8 @@ interface Seed {
   wishAt: Date | null;
   loginAt: Date | null;
   firstSeenAt: Date | null;
+  /** Its place in the house's series (the history's and the devices' patterns follow it). */
+  i: number;
   id?: string;
 }
 
@@ -89,6 +96,7 @@ function house(): Seed[] {
       wishAt: i % 7 === 0 ? new Date(created.getTime() + 86_400_000) : null,
       loginAt: i % 4 === 0 ? new Date(created.getTime() + 2 * 86_400_000) : null,
       firstSeenAt: i % 10 === 0 ? new Date(created.getTime() - 3_600_000) : null,
+      i,
     };
   };
   for (let i = 0; i < 200; i++) out.push(one(i, i % 25 === 3 ? 'LOCKED' : 'COLLECTOR'));
@@ -100,6 +108,47 @@ function house(): Seed[] {
 
 const HOUSE = house();
 const COUNTED = HOUSE.filter((s) => s.kind === 'COLLECTOR' || s.kind === 'LOCKED');
+
+/**
+ * The devices of the accounts that signed in (step 9.6): each viewed MONOLITHE at its sign-in's instant from its own
+ * device, twice ten minutes apart, then two hours later (two visits); every second one also from a Windows computer, a
+ * shorter view five minutes after (one visit), which never is its main device. Views only at the sign-in's instant, so
+ * the activity of the house is unchanged.
+ */
+type DeviceClass = { kind: 'PHONE' | 'TABLET' | 'COMPUTER'; os: 'IOS' | 'ANDROID' | 'MACOS' | 'WINDOWS'; browser: 'SAFARI' | 'CHROME' | 'EDGE'; opened_in: 'BROWSER' | 'IN_APP' | 'HOME_SCREEN'; in_app: 'INSTAGRAM' | null };
+const MAIN_DEVICES: DeviceClass[] = [
+  { kind: 'PHONE', os: 'IOS', browser: 'SAFARI', opened_in: 'BROWSER', in_app: null },
+  { kind: 'COMPUTER', os: 'MACOS', browser: 'CHROME', opened_in: 'BROWSER', in_app: null },
+  { kind: 'TABLET', os: 'IOS', browser: 'SAFARI', opened_in: 'IN_APP', in_app: 'INSTAGRAM' },
+  { kind: 'PHONE', os: 'ANDROID', browser: 'CHROME', opened_in: 'HOME_SCREEN', in_app: null },
+];
+const SECOND_DEVICE: DeviceClass = { kind: 'COMPUTER', os: 'WINDOWS', browser: 'EDGE', opened_in: 'BROWSER', in_app: null };
+const mainDevice = (s: Seed): DeviceClass | null => (s.loginAt ? MAIN_DEVICES[(s.i / 4) % 4]! : null);
+const secondDevice = (s: Seed): boolean => s.loginAt !== null && s.i % 8 === 0;
+
+/**
+ * The monthly history (step 9.6): every counted collector and test entrant made by September has a row from April (or
+ * its month of sign-up) to September 2026, element k's score (i·3 + k·11) mod 101, not measured when (i + k) is a
+ * multiple of 6, tier (i + k) mod 4, active when (i + k) is a multiple of 3.
+ */
+const HISTORY_FROM = '2026-04-01';
+const HISTORY_TO = '2026-09-01';
+const monthOfDay = (d: string) => `${d.slice(0, 7)}-01`;
+const monthIndex = (a: string, b: string) => (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7));
+const addMonths = (m: string, n: number) => {
+  const k = +m.slice(0, 4) * 12 + (+m.slice(5, 7) - 1) + n;
+  return `${Math.floor(k / 12)}-${String((k % 12) + 1).padStart(2, '0')}-01`;
+};
+const historyFirst = (s: Seed): string | null => {
+  const m = monthOfDay(parisDay(s.created));
+  return m > HISTORY_TO ? null : m > HISTORY_FROM ? m : HISTORY_FROM;
+};
+const historyAt = (s: Seed, month: string): { score: number | null; tier: number; active: boolean } | null => {
+  const first = historyFirst(s);
+  if (first === null || month < first || month > HISTORY_TO) return null;
+  const k = monthIndex(first, month);
+  return { score: (s.i + k) % 6 === 0 ? null : (s.i * 3 + k * 11) % 101, tier: (s.i + k) % 4, active: (s.i + k) % 3 === 0 };
+};
 
 describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
   let h: Harness;
@@ -230,6 +279,48 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     for (let i = 0; i < 12; i++) await addDevice(atParis(day(TODAY, -i * 2), 9), ++n, i < 4 ? fr[i]! : i === 4 ? testEntrant : null);
     for (let i = 0; i < 5; i++) await addDevice(atParis(day(B30.from, i * 3), 9), ++n, i < 4 ? fr[10 + i]! : null);
     await addDevice(atParis(TODAY, 8), ++n, fr[0]!, true);
+    // The devices behind the views (step 9.6), first seen long before both periods (no first visit of theirs).
+    const longAgo = new Date('2026-01-05T10:00:00Z');
+    const viewDevice = async (c: DeviceClass) =>
+      (
+        await db
+          .insertInto('tracking_devices')
+          .values({ device_hash: `cv${String(++n).padStart(6, '0')}${'v'.repeat(35)}`, ...c, first_seen_at: longAgo, last_seen_at: longAgo })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+    const view = (deviceId: number, s: Seed, at: Date, seconds: number) =>
+      db.insertInto('collector_views').values({ at, device_id: deviceId, account_id: s.id!, page: VIEW_PAGE_CODES.MODEL, subject: model, seconds, place_id: null }).execute();
+    for (const s of HOUSE) {
+      const main = mainDevice(s);
+      if (!main) continue;
+      const d = await viewDevice(main);
+      await view(d, s, s.loginAt!, 60);
+      await view(d, s, new Date(s.loginAt!.getTime() + 10 * 60_000), 60);
+      await view(d, s, new Date(s.loginAt!.getTime() + 2 * 3_600_000), 60);
+      if (secondDevice(s)) await view(await viewDevice(SECOND_DEVICE), s, new Date(s.loginAt!.getTime() + 5 * 60_000), 10);
+    }
+    // Every device of two days of the period and one of the previous period, from the daily totals.
+    for (const [d, country, c, devices] of [
+      [day(TODAY, -3), 'FR', MAIN_DEVICES[0]!, 5],
+      [day(TODAY, -3), 'IT', MAIN_DEVICES[1]!, 3],
+      [day(TODAY, -40), 'FR', MAIN_DEVICES[2]!, 4],
+    ] as const) {
+      await db
+        .insertInto('device_daily_stats')
+        .values({ day: d, country, kind: c.kind, os: c.os, browser: c.browser, opened_in: c.opened_in, in_app: c.in_app ?? 'NONE', devices, new_devices: 0, signed_in_devices: 0 })
+        .execute();
+    }
+    // The monthly history (counted collectors and test entrants; neither a team account nor a DELETED one ever has a row).
+    for (const s of HOUSE.filter((x) => x.kind !== 'TEAM' && x.kind !== 'DELETED')) {
+      const first = historyFirst(s);
+      if (first === null) continue;
+      const months = Array.from({ length: monthIndex(first, HISTORY_TO) + 1 }, (_, k) => historyAt(s, addMonths(first, k))!);
+      await db
+        .insertInto('collector_history')
+        .values({ account_id: s.id!, first_month: first, last_month: HISTORY_TO, scores: months.map((m) => m.score), tiers: months.map((m) => m.tier), active: months.map((m) => m.active) })
+        .execute();
+    }
     await db
       .updateTable('acquisition_state')
       .set({
@@ -263,6 +354,11 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     const v = list.filter((s) => s.score !== null).map((s) => s.score!);
     return v.length >= 3 ? median(v) : null;
   };
+  const PREVIOUS_MONTH = '2026-08-01';
+  const keptMedian = (list: Seed[], month: string) => {
+    const v = list.map((s) => historyAt(s, month)?.score ?? null).filter((x): x is number => x !== null);
+    return v.length >= 3 ? median(v) : null;
+  };
   const visits = (p: Period, f?: Pick) => devices.filter((d) => within(d.at, p) && (!f || (d.linkedTo !== null && d.linkedTo.kind !== 'TEST' && f(d.linkedTo)))).length;
   const handOverview = (scope: 'all' | 'active' | 'new', f: Pick = () => true, narrowed = false): OverviewFigures => {
     const now = inScope(scope, P30, f);
@@ -287,7 +383,8 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
       },
       medianScore: {
         value: scoreMedian(now),
-        previous: null,
+        // The scores the history kept for August, the month that ended by the previous period's end (14 Sep).
+        previous: keptMedian(before.filter((s) => s.created < B30.end), PREVIOUS_MONTH),
         scored: now.filter((s) => s.score !== null).length,
         scoresOn: null,
       },
@@ -498,6 +595,164 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     });
   });
 
+  describe('devices (Devices, step 9.6)', () => {
+    const devicesOf = async (req: Omit<InsightsRequest, 'panel'> = {}) => {
+      svc.clearCache();
+      const r = await svc.report({ panel: 'devices', ...req });
+      expect(r.panel).toBe('devices');
+      return r.figures as DevicesPanelFigures;
+    };
+    /** The hand's figures of a set of devices (each counted `weight` times). */
+    const fold = (items: { c: DeviceClass; weight: number }[]) => {
+      const out = { total: 0, kinds: {} as Record<string, number>, systems: {} as Record<string, number>, openedIn: {} as Record<string, number>, apps: {} as Record<string, number> };
+      const add = (m: Record<string, number>, k: string, n: number) => (m[k] = (m[k] ?? 0) + n);
+      for (const { c, weight } of items) {
+        out.total += weight;
+        add(out.kinds, c.kind, weight);
+        add(out.systems, c.os === 'IOS' && c.kind === 'TABLET' ? 'IPAD' : c.os, weight);
+        add(out.openedIn, c.opened_in, weight);
+        if (c.in_app) add(out.apps, c.in_app, weight);
+      }
+      return out;
+    };
+    const nonZero = (m: Record<string, number>) => Object.fromEntries(Object.entries(m).filter(([, n]) => n > 0));
+    const asHand = (f: DevicesFigures) => ({ total: f.total, kinds: nonZero(f.kinds), systems: nonZero(f.systems), openedIn: nonZero(f.openedIn), apps: nonZero(f.apps) });
+    const viewersIn = (list: Seed[], p: Period) => list.filter((s) => within(s.loginAt, p));
+
+    it('BY COLLECTORS: each collector once under its main device; BY VISITS: every visit; counted collectors only, with the previous period', async () => {
+      const f = await devicesOf();
+      expect(f.total).toBe(200);
+      const now = viewersIn(COUNTED, P30);
+      const before = viewersIn(COUNTED, B30);
+      expect(now.length).toBeGreaterThan(5);
+      expect(asHand(f.byCollectors.current)).toEqual(fold(now.map((s) => ({ c: mainDevice(s)!, weight: 1 }))));
+      expect(asHand(f.byCollectors.previous!)).toEqual(fold(before.map((s) => ({ c: mainDevice(s)!, weight: 1 }))));
+      const visitsOf = (list: Seed[]) => list.flatMap((s) => [{ c: mainDevice(s)!, weight: 2 }, ...(secondDevice(s) ? [{ c: SECOND_DEVICE, weight: 1 }] : [])]);
+      expect(asHand(f.byVisits.current)).toEqual(fold(visitsOf(now)));
+      expect(asHand(f.byVisits.previous!)).toEqual(fold(visitsOf(before)));
+      // An iPad on its own line, inside Instagram; the browsers, the top six at most, the most first.
+      expect(f.byCollectors.current.systems.IPAD).toBe(now.filter((s) => mainDevice(s)!.kind === 'TABLET').length);
+      expect(f.byCollectors.current.browsers.length).toBeLessThanOrEqual(6);
+      expect(f.byVisits.current.browsers.map((b) => b.browser)).toContain('EDGE');
+      expect(f.reachesBackTo).toBeNull();
+    });
+
+    it('ALL DEVICES: the daily totals, anonymous included, the country filter applied to the connection’s country', async () => {
+      const f = await devicesOf();
+      expect(f.allDevices.current.total).toBe(8);
+      expect(f.allDevices.current.kinds).toMatchObject({ PHONE: 5, COMPUTER: 3 });
+      expect(f.allDevices.previous!.total).toBe(4);
+      expect(f.allDevices.previous!.systems.IPAD).toBe(4);
+      const fr = await devicesOf({ c: 'FR' });
+      expect(fr.allDevices.current.total).toBe(5);
+      // The collectors' tabs follow the collectors of France (the account's country).
+      expect(fr.byCollectors.current.total).toBe(viewersIn(COUNTED.filter((s) => s.country === 'FR'), P30).length);
+    });
+
+    it('the scope and the filters narrow the collectors’ tabs; without the comparison, no previous figures', async () => {
+      const fresh = await devicesOf({ scope: 'new', cmp: false });
+      expect(fresh.byCollectors.previous).toBeNull();
+      expect(fresh.allDevices.previous).toBeNull();
+      expect(fresh.total).toBe(inScope('new', P30).length);
+      expect(fresh.byCollectors.current.total).toBe(viewersIn(inScope('new', P30), P30).length);
+      const scored = await devicesOf({ sc: '0-50' });
+      expect(scored.byCollectors.current.total).toBe(viewersIn(COUNTED.filter((s) => s.score !== null && s.score <= 50), P30).length);
+    });
+  });
+
+  describe('engagement (Engagement, step 9.6)', () => {
+    const engagement = async (req: Omit<InsightsRequest, 'panel'> = {}) => {
+      svc.clearCache();
+      const r = await svc.report({ panel: 'engagement', ...req });
+      expect(r.panel).toBe('engagement');
+      return r.figures as EngagementFigures;
+    };
+    const slice = (score: number | null) => (score === null ? 'none' : SCORE_SLICES[Math.min(9, Math.floor(score / 10))]!);
+    const spread = (scores: (number | null)[]) => {
+      const m = new Map<string, number>([...SCORE_SLICES, 'none'].map((k) => [k, 0]));
+      for (const v of scores) m.set(slice(v), m.get(slice(v))! + 1);
+      return m;
+    };
+    /** ACTIVE AND DORMANT by hand: the house's acts are its sign-ins and the views at their instant. */
+    const status = (s: Seed, p: Period): string => {
+      const firstEnd = parisDayStart(day(parisDay(s.created), 1));
+      const last = s.loginAt && s.loginAt < p.end ? s.loginAt : null;
+      if (last === null || last < firstEnd) return 'never';
+      const windowStart = parisDayStart(day(p.to, -89));
+      return last >= (firstEnd > windowStart ? firstEnd : windowStart) ? 'active' : 'dormant';
+    };
+
+    it('SCORE SPREAD: ten bands and Not measured, the median; the spread of August from the history beside it', async () => {
+      const f = await engagement();
+      expect(f.total).toBe(200);
+      const now = spread(COUNTED.map((s) => s.score));
+      const before = spread(COUNTED.filter((s) => s.created < B30.end).map((s) => historyAt(s, PREVIOUS_MONTH)?.score ?? null));
+      expect(f.spread.rows).toEqual([...SCORE_SLICES, 'none'].map((key) => ({ key, collectors: now.get(key)!, previous: before.get(key)! })));
+      expect(f.spread.previousMonth).toBe(PREVIOUS_MONTH);
+      expect(f.spread.scored).toBe(COUNTED.filter((s) => s.score !== null).length);
+      expect(f.spread.median).toBe(scoreMedian(COUNTED));
+      // LAST 12 MONTHS: the previous period ended in October 2025, which the history does not hold.
+      const year = await engagement({ p: '12m' });
+      expect(year.spread.previousMonth).toBeNull();
+      expect(year.spread.rows.every((r) => r.previous === null)).toBe(true);
+    });
+
+    it('THE FIVE PARTS: the averages of the scored collectors, each out of its maximum, withheld under 3', async () => {
+      const f = await engagement();
+      const scored = COUNTED.filter((s) => s.score !== null).map((s) => s.score!);
+      const maxima = [25, 20, 25, 10, 20];
+      const partsOf = (score: number) => {
+        let left = score;
+        return maxima.map((m) => {
+          const p = Math.min(m, left);
+          left -= p;
+          return p;
+        });
+      };
+      const avg = (k: number) => Math.round((scored.reduce((a, v) => a + partsOf(v)[k]!, 0) / scored.length) * 10) / 10;
+      expect(f.parts).toEqual(['recency', 'frequency', 'spend', 'speed', 'attendance'].map((key, k) => ({ key, max: maxima[k], average: avg(k), collectors: scored.length })));
+      const few = await engagement({ sc: '100-100' });
+      expect(few.parts.every((p) => p.average === null && p.collectors < 3)).toBe(true);
+    });
+
+    it('ACTIVE AND DORMANT as of the period’s last day: active in the 90 days, dormant before, never after the first day; and as of the previous period’s', async () => {
+      const f = await engagement();
+      const count = (list: Seed[], p: Period) => {
+        const m = new Map<string, number>([['active', 0], ['dormant', 0], ['never', 0]]);
+        for (const s of list.filter((x) => x.created < p.end)) m.set(status(s, p), m.get(status(s, p))! + 1);
+        return m;
+      };
+      const now = count(COUNTED, P30);
+      const before = count(COUNTED, B30);
+      expect(f.status).toEqual({ asOf: TODAY, previousAsOf: B30.to, rows: ['active', 'dormant', 'never'].map((key) => ({ key, collectors: now.get(key)!, previous: before.get(key)! })) });
+      for (const k of ['active', 'dormant', 'never']) expect(now.get(k), k).toBeGreaterThan(0);
+      // The scope NEW: the collectors made in the period, as of its end.
+      const fresh = await engagement({ scope: 'new' });
+      const freshNow = count(inScope('new', P30), P30);
+      expect(fresh.status.rows.map((r) => r.collectors)).toEqual(['active', 'dormant', 'never'].map((k) => freshNow.get(k)!));
+    });
+
+    it('MONTHLY COHORTS: the 12 months to October, the newest first, each mark from the history’s activity, « — » past September', async () => {
+      const f = await engagement();
+      expect(f.cohorts.through).toBe('2026-09');
+      expect(f.cohorts.rows.map((r) => r.month)).toEqual(Array.from({ length: 12 }, (_, i) => addMonths('2026-10-01', -i).slice(0, 7)));
+      for (const row of f.cohorts.rows) {
+        const cohort = COUNTED.filter((s) => parisDay(s.created).slice(0, 7) === row.month);
+        expect(row.collectors, row.month).toBe(cohort.length);
+        for (const mark of row.marks) {
+          const target = addMonths(`${row.month}-01`, mark.after);
+          if (target > HISTORY_TO) {
+            expect(mark, `${row.month} +${mark.after}`).toEqual({ after: mark.after, active: null, share: null });
+            continue;
+          }
+          const active = cohort.filter((s) => historyAt(s, target)?.active === true).length;
+          expect(mark, `${row.month} +${mark.after}`).toEqual({ after: mark.after, active, share: cohort.length ? Math.round((active * 100) / cohort.length) : null });
+        }
+      }
+      expect(f.cohorts.rows.find((r) => r.month === '2026-07')!.marks[0]!.active).toBeGreaterThan(0);
+    });
+  });
+
   describe('the cache, the load guard and the timeout', () => {
     const quiet: Logger = { info: () => {}, warn: () => {}, error: () => {} };
     const make = (
@@ -672,7 +927,11 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     expect(o).toMatchObject({
       currency: 'EUR',
       currencies: ['EUR'],
-      snapshotsSince: null,
+      // The history's first month: the earliest row's (the house's first accounts were made in June).
+      snapshotsSince: HOUSE.filter((x) => x.kind !== 'TEAM' && x.kind !== 'DELETED')
+        .map(historyFirst)
+        .filter((m): m is string => m !== null)
+        .sort()[0],
     });
     expect(o.recordingSince).toBeInstanceOf(Date);
     expect(parisDay(NOW)).toBe(TODAY);

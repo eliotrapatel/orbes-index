@@ -15,7 +15,10 @@
  *             SITES, FIRST VISITS; §3.4 A.10.6's block: the first source by kind and channel, the links and campaigns,
  *             the first visits over time, the collectors whose first and last link differ) and `likes` (What they
  *             like: FAVOURITE PIECES, FINISHES, MOST WISHED models and collections, MOST VIEWED by the collectors and by
- *             every visitor, PIECES HELD; read by likes.ts `readLikes`, §3.2 W.8).
+ *             every visitor, PIECES HELD; read by likes.ts `readLikes`, §3.2 W.8), `devices` (Devices: DEVICE, SYSTEM,
+ *             OPENED IN and BROWSERS by collectors, by visits and for all devices; tracking-reads.ts devicesReport, §3.3
+ *             T.4.2) and `engagement` (Engagement: SCORE SPREAD with the month the history kept beside it, THE FIVE
+ *             PARTS, ACTIVE AND DORMANT as of the period's last day, MONTHLY COHORTS from collector_history).
  *
  * How a reading runs (§3.6 C.6.4, §5.1 console 25):
  *   - one REPEATABLE READ, READ ONLY transaction per panel, `work_mem` 32 MB (several panels run at once on the shared
@@ -43,6 +46,8 @@ import { ageOn } from '../../shared/profile-rules.js';
 import { fold } from '../../shared/fold.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 import { AcquisitionReportService } from './acquisition-report.js';
+import { plusMonths } from './collector-history.js';
+import { band, ENGAGEMENT_PARTS, PART_MAX, type EngagementPart } from './engagement-formula.js';
 import { currenciesOf, GROWTH_MIN_GROUP, median } from './growth.js';
 import {
   AGE_SLICES,
@@ -50,6 +55,7 @@ import {
   activeIn,
   bucketUnit,
   filtersKey,
+  hasFilters,
   narrowsCollectors,
   parseFilters,
   parisPeriod,
@@ -68,13 +74,14 @@ import {
 import { readLikes, type LikesFigures } from './likes.js';
 import type { LinkService } from './links.js';
 import { countedCollector } from './population.js';
-import { parisDay, parisDayStart } from './schedule.js';
+import { parisDay, parisDayStart, parisMonthStart } from './schedule.js';
 import { tasteOptions } from './tastes.js';
+import { devicesReport, type DevicesBy, type DevicesFigures, type ViewFilters } from './tracking-reads.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The panels the page reads, top to bottom (§3.6 C.6.3); the others come with their steps. */
-export const COLLECTOR_PANELS = ['overview', 'who', 'origin', 'likes'] as const;
+export const COLLECTOR_PANELS = ['overview', 'who', 'origin', 'likes', 'devices', 'engagement'] as const;
 export type CollectorPanel = (typeof COLLECTOR_PANELS)[number];
 
 /** The cache: results kept, for how long, and the age under which Read again keeps the cached one. */
@@ -91,6 +98,18 @@ export const INSIGHTS_WORK_MEM = '32MB';
 export const INSIGHTS_MIN_GROUP = GROWTH_MIN_GROUP;
 /** Who they are, CITIES: the groups given at most (the page shows the top 20, then Show all). */
 export const WHO_CITIES_MAX = 500;
+/** Devices, BROWSERS: the browsers given (§3.6 C.6.3 item 5: the top 6). */
+export const DEVICE_BROWSERS_TOP = 6;
+/** Engagement, ACTIVE AND DORMANT: active with an act in the Paris days before the period's end, its last day included. */
+export const ENGAGEMENT_ACTIVE_DAYS = 90;
+/** Engagement, MONTHLY COHORTS: the months of sign-up shown (the latest first), and the marks after them, in months. */
+export const COHORT_MONTHS = 12;
+export const COHORT_MARKS = [1, 3, 6, 12] as const;
+/** Engagement, SCORE SPREAD: the ten bands of ten, then the collectors with no score (`none`, Not measured). */
+export const SCORE_SLICES = ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100'] as const;
+/** Engagement, ACTIVE AND DORMANT, in the page's order. */
+export const ENGAGEMENT_STATUSES = ['active', 'dormant', 'never'] as const;
+export type EngagementStatus = (typeof ENGAGEMENT_STATUSES)[number];
 
 export const insightsBusy = (): DomainError => new DomainError('INSIGHTS_BUSY', 503, 'The figures are being read for someone else. Try again in a moment.');
 export const insightsTimeout = (): DomainError =>
@@ -151,7 +170,10 @@ export interface OverviewFigures {
   /** Devices first seen in the period; `becameCollectors`: collectors whose first visit fell in it (its list). */
   firstVisits: Kpi & { becameCollectors: number };
   active: Kpi;
-  /** The median of the scores now, withheld under INSIGHTS_MIN_GROUP; no previous value (the scores are of this morning). */
+  /**
+   * The median of the scores now, withheld under INSIGHTS_MIN_GROUP; the previous value is the median of the scores the
+   * monthly history kept for the month that ended by the previous period's end (null while the history does not hold it).
+   */
   medianScore: Kpi & { scored: number; scoresOn: string | null };
   /** Wishes added in the period, and by how many collectors. */
   wishesAdded: Kpi & { collectors: number; previousCollectors: number | null };
@@ -191,7 +213,9 @@ export type CollectorsReport =
   | (ReportHead & { panel: 'overview'; figures: OverviewFigures })
   | (ReportHead & { panel: 'who'; figures: WhoFigures })
   | (ReportHead & { panel: 'origin'; figures: OriginFigures })
-  | (ReportHead & { panel: 'likes'; figures: LikesFigures });
+  | (ReportHead & { panel: 'likes'; figures: LikesFigures })
+  | (ReportHead & { panel: 'devices'; figures: DevicesPanelFigures })
+  | (ReportHead & { panel: 'engagement'; figures: EngagementFigures });
 
 export interface CollectorsOptions {
   /** The accounts' countries among the counted collectors. */
@@ -303,7 +327,7 @@ export class CollectorInsightsService {
     this.cacheSize = l.cacheSize ?? INSIGHTS_CACHE_SIZE;
     this.cacheMs = l.cacheMs ?? INSIGHTS_CACHE_MS;
     this.freshMs = l.freshMs ?? INSIGHTS_FRESH_MS;
-    this.panels = { overview: overviewPanel, who: whoPanel, origin: originPanel, likes: likesPanel, ...deps.panels };
+    this.panels = { overview: overviewPanel, who: whoPanel, origin: originPanel, likes: likesPanel, devices: devicesPanel, engagement: engagementPanel, ...deps.panels };
   }
 
   /** The filters' choices and the earliest dates with data (see the file header). */
@@ -560,13 +584,21 @@ async function overviewPanel(tx: Db, x: Reading): Promise<OverviewFigures> {
   const scores = await sql<{ score: number }>`WITH ${scopeCte('col', q, q.period)} SELECT score FROM col WHERE score IS NOT NULL`.execute(tx);
   const scoresOn = await sql<{ day: string | null }>`SELECT max(day)::text AS day FROM engagement_runs WHERE finished_at IS NOT NULL`.execute(tx);
   const scored = scores.rows.map((r) => Number(r.score));
+  // The previous value: the scores the monthly history kept for the month that ended by the previous period's end (§3.6 C.6.6).
+  const before_ = q.previous ? await scoresAtPreviousEnd(tx, x, q.previous) : null;
+  const previousScored = before_ ? before_.scores.filter((s): s is number => s !== null) : [];
   return {
     // ALL: the collectors whose account existed at the previous period's end; ACTIVE, NEW: the previous period's.
     collectors: { value: now.collectors, previous: before ? (q.scope === 'all' ? before.existed : before.collectors) : null },
     newCollectors: { value: now.fresh, previous: before?.fresh ?? null },
     firstVisits: { value: visitsNow, previous: visitsBefore, becameCollectors: now.became },
     active: { value: now.active, previous: before?.active ?? null },
-    medianScore: { value: scored.length >= INSIGHTS_MIN_GROUP ? median(scored) : null, previous: null, scored: scored.length, scoresOn: scoresOn.rows[0]?.day ?? null },
+    medianScore: {
+      value: scored.length >= INSIGHTS_MIN_GROUP ? median(scored) : null,
+      previous: before_ && previousScored.length >= INSIGHTS_MIN_GROUP ? median(previousScored) : null,
+      scored: scored.length,
+      scoresOn: scoresOn.rows[0]?.day ?? null,
+    },
     wishesAdded: { value: now.wishes, previous: before?.wishes ?? null, collectors: now.wishers, previousCollectors: before?.wishers ?? null },
   };
 }
@@ -962,4 +994,277 @@ async function likesPanel(tx: Db, x: Reading): Promise<LikesFigures> {
     countries: q.filters.countries,
     now: x.now,
   });
+}
+
+// ── Devices (`devices`) ────────────────────────────────────────────────────────────────────────────────────────
+
+/** One switch of the Devices panel: the period's figures and, with the comparison, the previous period's. */
+export interface DevicesTab {
+  current: DevicesFigures;
+  previous: DevicesFigures | null;
+}
+
+export interface DevicesPanelFigures {
+  /** The collectors in scope. */
+  total: number;
+  /** BY COLLECTORS: each collector once, under the device used most in the period (the 13 months of detail). */
+  byCollectors: DevicesTab;
+  /** BY VISITS: every visit of the collectors (a device's views more than 30 minutes apart begin one; the detail). */
+  byVisits: DevicesTab;
+  /** ALL DEVICES: every device seen, anonymous included, from the daily totals; only the country filter applies. */
+  allDevices: DevicesTab;
+  /** The last Paris day the daily totals count (« Figures through … »). */
+  through: string | null;
+  /** BY COLLECTORS and BY VISITS: the first day kept when the period reaches past the 13 months (« … reach back 13 months, to … »). */
+  reachesBackTo: string | null;
+}
+
+/** The page's collectors for `p` as a condition on an account column (null: every counted collector, nothing narrowing them). */
+function collectorsOf(x: Reading, p: Period): ViewFilters | undefined {
+  const { q } = x;
+  if (q.scope === 'all' && !hasFilters(q.filters)) return undefined;
+  return { accounts: (column: string) => sql`${sql.ref(column)} IN (WITH ${scopeCte('dcol', q, p)} SELECT dcol.account_id FROM dcol)` };
+}
+
+const topBrowsers = (f: DevicesFigures): DevicesFigures => ({ ...f, browsers: f.browsers.slice(0, DEVICE_BROWSERS_TOP) });
+
+/**
+ * DEVICE, SYSTEM, OPENED IN and BROWSERS by collectors, by visits and for all devices (§3.6 C.6.3 item 5; §3.3 T.4.2),
+ * read by tracking-reads.ts devicesReport: BY COLLECTORS and BY VISITS over the page's collectors of each period (the
+ * scope and the five filters), ALL DEVICES from the daily totals with the page's countries as the connection's (the only
+ * country they hold). The comparison is the same figure over the previous period and its collectors.
+ */
+async function devicesPanel(tx: Db, x: Reading): Promise<DevicesPanelFigures> {
+  const { q } = x;
+  const read = async (p: Period, by: DevicesBy) => {
+    const filters = by === 'DEVICES' ? (q.filters.countries.length ? { countries: q.filters.countries } : undefined) : collectorsOf(x, p);
+    return devicesReport(tx, { from: p.from, to: p.to }, filters, { now: x.now, by });
+  };
+  const tab = async (by: DevicesBy) => {
+    const now = await read(q.period, by);
+    const before = q.previous ? await read(q.previous, by) : null;
+    return { report: now, tab: { current: topBrowsers(now.current), previous: before ? topBrowsers(before.current) : null } };
+  };
+  const collectors = await tab('COLLECTORS');
+  const visits = await tab('VISITS');
+  const all = await tab('DEVICES');
+  const total = await sql<{ n: number }>`WITH ${scopeCte('col', q, q.period)} SELECT count(*)::int AS n FROM col`.execute(tx);
+  return {
+    total: Number(total.rows[0]?.n ?? 0),
+    byCollectors: collectors.tab,
+    byVisits: visits.tab,
+    allDevices: all.tab,
+    through: all.report.through,
+    reachesBackTo: collectors.report.reachesBackTo,
+  };
+}
+
+// ── Engagement (`engagement`) ──────────────────────────────────────────────────────────────────────────────────
+
+/** A bar of SCORE SPREAD or of ACTIVE AND DORMANT: its collectors, and the previous period's end's (null: off or not held). */
+export interface SpreadRow {
+  key: string;
+  collectors: number;
+  previous: number | null;
+}
+
+export interface CohortRow {
+  /** The Paris month of sign-up, `YYYY-MM`. */
+  month: string;
+  collectors: number;
+  /** COHORT_MARKS in order: the collectors active in the month that many months after; null (« — ») while not written yet. */
+  marks: { after: number; active: number | null; share: number | null }[];
+}
+
+export interface EngagementFigures {
+  /** The collectors in scope. */
+  total: number;
+  /** The day of the latest finished morning run (« Scores of … » when it is not today's). */
+  scoresOn: string | null;
+  spread: {
+    /** SCORE_SLICES in order, then `none` (Not measured). */
+    rows: SpreadRow[];
+    /** Withheld under INSIGHTS_MIN_GROUP. */
+    median: number | null;
+    scored: number;
+    /** The month whose kept scores make the previous spread (`YYYY-MM-01`), null without one. */
+    previousMonth: string | null;
+  };
+  /** THE FIVE PARTS: each part's average points of the scored collectors (one decimal), withheld under INSIGHTS_MIN_GROUP. */
+  parts: { key: EngagementPart; max: number; average: number | null; collectors: number }[];
+  /** ACTIVE AND DORMANT as of the period's last day (and the previous period's last day). */
+  status: { asOf: string; previousAsOf: string | null; rows: SpreadRow[] };
+  /** MONTHLY COHORTS: the COHORT_MONTHS months up to the period's last month, the newest first; `through` the last month written. */
+  cohorts: { through: string | null; rows: CohortRow[] };
+}
+
+/** The month (`YYYY-MM-01`) that ended by a period's last day: its own month when that day is the month's last, else the one before. */
+export function monthEndedBy(day: string): string {
+  const month = `${day.slice(0, 7)}-01`;
+  return plusDays(plusMonths(month, 1), -1) === day ? month : plusMonths(month, -1);
+}
+
+/** The months collector_history holds, from the first row's first month to the latest written; null while it is empty. */
+async function historySpan(tx: Db): Promise<{ first: string; last: string } | null> {
+  const r = await sql<{ first: string | null; last: string | null }>`SELECT min(first_month)::text AS first, max(last_month)::text AS last FROM collector_history`.execute(tx);
+  const row = r.rows[0];
+  return row?.first && row.last ? { first: String(row.first).slice(0, 10), last: String(row.last).slice(0, 10) } : null;
+}
+
+/** The 1-based index of month `month` (a `YYYY-MM-01` date, or an SQL date) in a history row's arrays: past its last element, NULL. */
+export const historyIndex = (month: RawBuilder<unknown>, row = 'h'): RawBuilder<number> =>
+  sql<number>`((extract(year FROM ${month}) - extract(year FROM ${sql.ref(`${row}.first_month`)})) * 12 + extract(month FROM ${month}) - extract(month FROM ${sql.ref(`${row}.first_month`)}) + 1)::int`;
+
+/**
+ * The scores the monthly history kept, for the month that ended by the previous period's end, of the previous period's
+ * collectors whose account existed then (null elements: not measured); null when the history does not hold that month.
+ */
+async function scoresAtPreviousEnd(tx: Db, x: Reading, B: Period): Promise<{ month: string; scores: (number | null)[] } | null> {
+  const span = await historySpan(tx);
+  const month = monthEndedBy(B.to);
+  if (!span || month < span.first || month > span.last) return null;
+  const r = await sql<{ s: number | null }>`
+    WITH ${scopeCte('colp', x.q, B)}
+    SELECT h.scores[${historyIndex(sql`${month}::date`)}] AS s
+      FROM colp c LEFT JOIN collector_history h ON h.account_id = c.account_id
+     WHERE c.created_at < ${B.end}::timestamptz`.execute(tx);
+  return { month, scores: r.rows.map((row) => (row.s === null || row.s === undefined ? null : Number(row.s))) };
+}
+
+/** A score's slice of SCORE SPREAD. */
+export const scoreSlice = (score: number | null): string => (score === null ? 'none' : SCORE_SLICES[band(score)]!);
+
+/** Counts per slice in SCORE_SLICES' order, then `none`. */
+function spreadOf(scores: readonly (number | null)[]): Map<string, number> {
+  const out = new Map<string, number>([...SCORE_SLICES, 'none'].map((k) => [k, 0]));
+  for (const s of scores) out.set(scoreSlice(s), out.get(scoreSlice(s))! + 1);
+  return out;
+}
+
+/** The Paris day starts from the day of `first` to the day after `to`: a row's day by width_bucket, the day after it at +1. */
+export function dayStarts(first: Date, to: string): RawBuilder<unknown> {
+  const days: string[] = [];
+  for (let d = parisDay(first); d <= plusDays(to, 1); d = plusDays(d, 1)) days.push(d);
+  return sql`ARRAY[${sql.join(days.map((d) => sql`${parisDayStart(d)}::timestamptz`))}]::timestamptz[]`;
+}
+
+/** The latest act (activeIn's: a sign-in, a scan, a view, a draw entry, a LIVE entry or an order) of `c` before `end`. */
+const lastActBefore = (end: Date) => {
+  const e = sql`${end}::timestamptz`;
+  return sql`greatest(
+    (SELECT max(ail.occurred_at) FROM audit_logs ail WHERE ail.action = 'account.login' AND ail.target_id = c.account_id::text AND ail.occurred_at < ${e}),
+    (SELECT max(ais.occurred_at) FROM scan_events ais WHERE ais.account_id = c.account_id AND ais.occurred_at < ${e}),
+    (SELECT max(aiv.at) FROM collector_views aiv WHERE aiv.account_id = c.account_id AND aiv.at < ${e}),
+    (SELECT max(aid.created_at) FROM drop_entries aid WHERE aid.account_id = c.account_id AND aid.created_at < ${e}),
+    (SELECT max(aie.joined_at) FROM live_entries aie WHERE aie.account_id = c.account_id AND aie.joined_at < ${e}),
+    (SELECT max(aio.reserved_at) FROM orders aio WHERE aio.account_id = c.account_id AND aio.reserved_at < ${e}))`;
+};
+
+/**
+ * ACTIVE AND DORMANT of the collector `c` (its `account_id`, `created_at`) as of period `p`'s last day, over the day
+ * starts `starts` (dayStarts): `never` with no act after the account's first Paris day; `active` with one in the
+ * ENGAGEMENT_ACTIVE_DAYS Paris days up to the period's end; `dormant` otherwise. Accounts made after the period are
+ * the caller's to leave out.
+ */
+export function statusSql(p: Pick<Period, 'to' | 'end'>, starts: RawBuilder<unknown>): RawBuilder<EngagementStatus> {
+  const windowStart = parisDayStart(plusDays(p.to, -(ENGAGEMENT_ACTIVE_DAYS - 1)));
+  const firstDayEnd = sql`(${starts})[width_bucket(c.created_at, ${starts}) + 1]`;
+  return sql<EngagementStatus>`(SELECT CASE WHEN st.la IS NULL OR st.la < st.fe THEN 'never' WHEN st.la >= greatest(st.fe, ${windowStart}::timestamptz) THEN 'active' ELSE 'dormant' END
+      FROM (SELECT ${lastActBefore(p.end)} AS la, ${firstDayEnd} AS fe) st)`;
+}
+
+/** The collectors of a scope CTE by ACTIVE AND DORMANT as of the period's last day (those made by its end). */
+async function statusCounts(tx: Db, x: Reading, p: Period, cte: string): Promise<Map<string, number>> {
+  const first = await sql<{ m: Date | null }>`WITH ${scopeCte(cte, x.q, p)} SELECT min(created_at) AS m FROM ${sql.table(cte)} WHERE created_at < ${p.end}::timestamptz`.execute(tx);
+  const out = new Map<string, number>(ENGAGEMENT_STATUSES.map((k) => [k, 0]));
+  const min = first.rows[0]?.m;
+  if (!min) return out;
+  const starts = dayStarts(new Date(min), p.to);
+  const r = await sql<{ st: string; n: number }>`
+    WITH ${scopeCte(cte, x.q, p)}
+    SELECT ${statusSql(p, starts)} AS st, count(*)::int AS n FROM ${sql.table(cte)} c WHERE c.created_at < ${p.end}::timestamptz GROUP BY 1`.execute(tx);
+  for (const row of r.rows) out.set(row.st, Number(row.n));
+  return out;
+}
+
+/**
+ * SCORE SPREAD, THE FIVE PARTS, ACTIVE AND DORMANT and MONTHLY COHORTS (§3.6 C.6.3 item 6) over the page's collectors:
+ * the spread of the scores now (account_scores, this morning's run) with, beside it, the scores the monthly history kept
+ * for the month that ended by the previous period's end; the parts' averages of the scored collectors; the statuses as
+ * of the period's last day and the previous period's; the cohorts of the COHORT_MONTHS months up to the period's last
+ * month, each mark read from collector_history.active (a month not written yet: null).
+ */
+async function engagementPanel(tx: Db, x: Reading): Promise<EngagementFigures> {
+  const { q } = x;
+  const P = q.period;
+  const B = q.previous;
+  const scores = await sql<{ score: number | null }>`WITH ${scopeCte('col', q, P)} SELECT score FROM col`.execute(tx);
+  const now = scores.rows.map((r) => (r.score === null ? null : Number(r.score)));
+  const scored = now.filter((s): s is number => s !== null);
+  const before = B ? await scoresAtPreviousEnd(tx, x, B) : null;
+  const spreadNow = spreadOf(now);
+  const spreadBefore = before ? spreadOf(before.scores) : null;
+  const scoresOn = await sql<{ day: string | null }>`SELECT max(day)::text AS day FROM engagement_runs WHERE finished_at IS NOT NULL`.execute(tx);
+
+  // THE FIVE PARTS: the averages of the scored collectors.
+  const parts = await sql<Record<string, unknown>>`
+    WITH ${scopeCte('col', q, P)}
+    SELECT count(*)::int AS n, ${sql.join(ENGAGEMENT_PARTS.map((k) => sql`avg(s.${sql.ref(`${k}_points`)})::float8 AS ${sql.ref(k)}`))}
+      FROM col c JOIN account_scores s ON s.account_id = c.account_id`.execute(tx);
+  const pr = parts.rows[0] ?? {};
+  const partsScored = Number(pr.n ?? 0);
+
+  // ACTIVE AND DORMANT.
+  const statusNow = await statusCounts(tx, x, P, 'col');
+  const statusBefore = B ? await statusCounts(tx, x, B, 'colp') : null;
+
+  // MONTHLY COHORTS.
+  const span = await historySpan(tx);
+  const lastMonth = `${P.to.slice(0, 7)}-01`;
+  const months = Array.from({ length: COHORT_MONTHS }, (_, i) => plusMonths(lastMonth, -i));
+  const cm = sql.join(months.map((m) => sql`(${m}::date, ${parisMonthStart(m.slice(0, 7))}::timestamptz, ${parisMonthStart(plusMonths(m, 1).slice(0, 7))}::timestamptz)`));
+  const cohortRows = await sql<Record<string, unknown>>`
+    WITH ${scopeCte('col', q, P)}, cm(m, s, e) AS (VALUES ${cm})
+    SELECT cm.m::text AS month, count(*)::int AS n,
+           ${sql.join(COHORT_MARKS.map((k) => sql`(count(*) FILTER (WHERE h.active[${historyIndex(sql`(cm.m + ${sql.raw(`interval '${k} months'`)})::date`)}]))::int AS ${sql.ref(`a${k}`)}`))}
+      FROM col c JOIN cm ON c.created_at >= cm.s AND c.created_at < cm.e
+      LEFT JOIN collector_history h ON h.account_id = c.account_id
+     GROUP BY cm.m`.execute(tx);
+  const byMonth = new Map(cohortRows.rows.map((r) => [String(r.month).slice(0, 10), r]));
+  const cohorts: CohortRow[] = months.map((m) => {
+    const r = byMonth.get(m);
+    const n = Number(r?.n ?? 0);
+    return {
+      month: m.slice(0, 7),
+      collectors: n,
+      marks: COHORT_MARKS.map((k) => {
+        const reached = span !== null && plusMonths(m, k) <= span.last;
+        const active = reached ? Number(r?.[`a${k}`] ?? 0) : null;
+        return { after: k, active, share: active !== null && n > 0 ? Math.round((active * 100) / n) : null };
+      }),
+    };
+  });
+
+  return {
+    total: now.length,
+    scoresOn: scoresOn.rows[0]?.day ?? null,
+    spread: {
+      rows: [...SCORE_SLICES, 'none'].map((key) => ({ key, collectors: spreadNow.get(key)!, previous: spreadBefore ? spreadBefore.get(key)! : null })),
+      median: scored.length >= INSIGHTS_MIN_GROUP ? median(scored) : null,
+      scored: scored.length,
+      previousMonth: before?.month ?? null,
+    },
+    parts: ENGAGEMENT_PARTS.map((key) => ({
+      key,
+      max: PART_MAX[key],
+      average: partsScored >= INSIGHTS_MIN_GROUP && pr[key] !== null && pr[key] !== undefined ? Math.round(Number(pr[key]) * 10) / 10 : null,
+      collectors: partsScored,
+    })),
+    status: {
+      asOf: P.to,
+      previousAsOf: B ? B.to : null,
+      rows: ENGAGEMENT_STATUSES.map((key) => ({ key, collectors: statusNow.get(key)!, previous: statusBefore ? statusBefore.get(key)! : null })),
+    },
+    cohorts: { through: span ? span.last.slice(0, 7) : null, rows: cohorts },
+  };
 }
