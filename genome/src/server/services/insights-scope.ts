@@ -190,12 +190,13 @@ export function bucketOf(buckets: readonly Bucket[], day: string): Bucket | null
 /**
  * The account in `column` was active in [start, end): a sign-in, a scan, a view, a draw entry, a LIVE entry or an order
  * (§3.6 C.6.8). Each part is an EXISTS on the account's own index (audit_logs_account_login_idx, scan_events_account_id_idx,
- * collector_views_account_idx, drop_entries_account_idx, live_entries_account_idx, orders_account_idx).
+ * collector_views_account_idx, drop_entries_account_idx, live_entries_account_idx, orders_account_idx). A bound is an
+ * instant, or a timestamptz expression of the row read (ACTIVE AND DORMANT's end of the account's first day).
  */
-export function activeIn(column: string, start: Date, end: Date): RawBuilder<SqlBool> {
+export function activeIn(column: string, start: Date | RawBuilder<unknown>, end: Date | RawBuilder<unknown>): RawBuilder<SqlBool> {
   const a = sql.ref(column);
-  const s = sql`${start}::timestamptz`;
-  const e = sql`${end}::timestamptz`;
+  const s = start instanceof Date ? sql`${start}::timestamptz` : start;
+  const e = end instanceof Date ? sql`${end}::timestamptz` : end;
   return sql<SqlBool>`(
     EXISTS (SELECT 1 FROM audit_logs ail WHERE ail.action = 'account.login' AND ail.target_id = ${a}::text AND ail.occurred_at >= ${s} AND ail.occurred_at < ${e})
     OR EXISTS (SELECT 1 FROM scan_events ais WHERE ais.account_id = ${a} AND ais.occurred_at >= ${s} AND ais.occurred_at < ${e})

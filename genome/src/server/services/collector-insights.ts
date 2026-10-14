@@ -51,7 +51,7 @@
  * Counts are always given; an average or a median of fewer than INSIGHTS_MIN_GROUP collectors is withheld (null), as
  * GROWTH withholds its amounts (`GROWTH_MIN_GROUP`).
  */
-import { sql, type RawBuilder } from 'kysely';
+import { sql, type RawBuilder, type SqlBool } from 'kysely';
 import { jitOff, type Db } from '../db/connection.js';
 import { CSV_CONTENT_TYPE } from '../render/csv.js';
 import type { AuditService } from './audit.js';
@@ -1323,30 +1323,50 @@ export function dayStarts(first: Date, to: string): RawBuilder<unknown> {
   return sql`ARRAY[${sql.join(days.map((d) => sql`${parisDayStart(d)}::timestamptz`))}]::timestamptz[]`;
 }
 
-/** The latest act (activeIn's: a sign-in, a scan, a view, a draw entry, a LIVE entry or an order) of `c` before `end`. */
-const lastActBefore = (end: Date) => {
-  const e = sql`${end}::timestamptz`;
-  return sql`greatest(
-    (SELECT max(ail.occurred_at) FROM audit_logs ail WHERE ail.action = 'account.login' AND ail.target_id = c.account_id::text AND ail.occurred_at < ${e}),
-    (SELECT max(ais.occurred_at) FROM scan_events ais WHERE ais.account_id = c.account_id AND ais.occurred_at < ${e}),
-    (SELECT max(aiv.at) FROM collector_views aiv WHERE aiv.account_id = c.account_id AND aiv.at < ${e}),
-    (SELECT max(aid.created_at) FROM drop_entries aid WHERE aid.account_id = c.account_id AND aid.created_at < ${e}),
-    (SELECT max(aie.joined_at) FROM live_entries aie WHERE aie.account_id = c.account_id AND aie.joined_at < ${e}),
-    (SELECT max(aio.reserved_at) FROM orders aio WHERE aio.account_id = c.account_id AND aio.reserved_at < ${e}))`;
-};
+/**
+ * ACTIVE AND DORMANT's parts for the collector `c` (its `account_id`, `created_at`) as of period `p`'s last day, over the
+ * day starts `starts` (dayStarts); every act is activeIn's (a sign-in, a scan, a view, a draw entry, a LIVE entry, an
+ * order) before the period's end:
+ *   before    the account was made before the window of ENGAGEMENT_ACTIVE_DAYS Paris days up to the period's end (so
+ *             its first Paris day ends by the window's start);
+ *   inWindow  made before the window, with an act in it. Its bounds are the same for every collector, so PostgreSQL
+ *             reads each kind of act in the window once, hashed, and not once per collector;
+ *   since     an act from the end of the account's first Paris day: the account's own index read per collector, the end
+ *             of its first day computed once (OFFSET 0). It decides where inWindow does not: for an account made before
+ *             the window with no act in it, an act since its first day is one before the window (dormant).
+ * Accounts made after the period are the caller's to leave out (`starts` begins on the earliest account's first day).
+ */
+function statusParts(p: Pick<Period, 'to' | 'end'>, starts: RawBuilder<unknown>) {
+  const windowStart = parisDayStart(plusDays(p.to, -(ENGAGEMENT_ACTIVE_DAYS - 1)));
+  const before = sql<SqlBool>`c.created_at < ${windowStart}::timestamptz`;
+  const windowActs = activeIn('c.account_id', windowStart, p.end);
+  const since = sql<SqlBool>`(SELECT ${activeIn('c.account_id', sql`st.fe`, p.end)}
+      FROM (SELECT (${starts})[width_bucket(c.created_at, ${starts}) + 1] AS fe OFFSET 0) st)`;
+  return { before, windowActs, inWindow: sql<SqlBool>`(${before} AND ${windowActs})`, since };
+}
 
 /**
- * ACTIVE AND DORMANT of the collector `c` (its `account_id`, `created_at`) as of period `p`'s last day, over the day
- * starts `starts` (dayStarts): `never` with no act after the account's first Paris day; `active` with one in the
- * ENGAGEMENT_ACTIVE_DAYS Paris days up to the period's end; `dormant` otherwise. Accounts made after the period are
- * the caller's to leave out. `OFFSET 0` keeps the latest act a value read once per collector: inlined, the CASE would
- * read its six indexes again for each of its three tests (the perf test's EXPLAIN, step 9.14).
+ * ACTIVE AND DORMANT of the collector `c` as of period `p`'s last day (statusParts): `never` with no act after the
+ * account's first Paris day; `active` with one in the ENGAGEMENT_ACTIVE_DAYS Paris days up to the period's end;
+ * `dormant` otherwise. Read with EXISTS (an act found ends the reading of its kind), never the latest act of each kind:
+ * six max() per collector read six indexes for every collector (at 20,000 collectors on PGlite, the same counts: the
+ * engagement panel over LAST 30 DAYS 840 → 336 ms, the *dormant* list 412 → 122 ms).
  */
 export function statusSql(p: Pick<Period, 'to' | 'end'>, starts: RawBuilder<unknown>): RawBuilder<EngagementStatus> {
-  const windowStart = parisDayStart(plusDays(p.to, -(ENGAGEMENT_ACTIVE_DAYS - 1)));
-  const firstDayEnd = sql`(${starts})[width_bucket(c.created_at, ${starts}) + 1]`;
-  return sql<EngagementStatus>`(SELECT CASE WHEN st.la IS NULL OR st.la < st.fe THEN 'never' WHEN st.la >= greatest(st.fe, ${windowStart}::timestamptz) THEN 'active' ELSE 'dormant' END
-      FROM (SELECT ${lastActBefore(p.end)} AS la, ${firstDayEnd} AS fe OFFSET 0) st)`;
+  const { before, inWindow, since } = statusParts(p, starts);
+  return sql<EngagementStatus>`(CASE WHEN ${inWindow} THEN 'active' WHEN ${since} THEN (CASE WHEN ${before} THEN 'dormant' ELSE 'active' END) ELSE 'never' END)`;
+}
+
+/**
+ * The collector `c` is `status` (statusSql's) as of period `p`'s last day, as a condition: a list reads its slice with
+ * it, never with `statusSql(…) = status`, which PostgreSQL estimates at one collector in two hundred whatever the status
+ * (a trial of the EXISTS form planned the test entrants' join for so few, and read *active*, 19,000 collectors, in 7.8 s).
+ */
+export function statusIs(p: Pick<Period, 'to' | 'end'>, starts: RawBuilder<unknown>, status: EngagementStatus): RawBuilder<SqlBool> {
+  const { before, windowActs, inWindow, since } = statusParts(p, starts);
+  if (status === 'active') return sql<SqlBool>`(${inWindow} OR (NOT ${before} AND ${since}))`;
+  if (status === 'dormant') return sql<SqlBool>`(${before} AND NOT ${windowActs} AND ${since})`;
+  return sql<SqlBool>`NOT (${inWindow} OR ${since})`;
 }
 
 /** The collectors of a scope CTE by ACTIVE AND DORMANT as of the period's last day (those made by its end). */
@@ -2147,7 +2167,7 @@ async function sliceSql(tx: Db, x: Reading, s: Slice): Promise<SliceSql> {
       const first = await sql<{ m: Date | null }>`WITH ${scopeCte('col', q, P)} SELECT min(created_at) AS m FROM col`.execute(tx);
       const min = first.rows[0]?.m;
       if (!min) return at(sql`FALSE`);
-      return at(sql`c.created_at < ${P.end}::timestamptz AND ${statusSql(P, dayStarts(new Date(min), P.to))} = ${v}`);
+      return at(sql`c.created_at < ${P.end}::timestamptz AND ${statusIs(P, dayStarts(new Date(min), P.to), v as EngagementStatus)}`);
     }
     case 'cohort': {
       const [month, mark, side] = v.split(':') as [string, string, string | undefined];
