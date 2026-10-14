@@ -181,6 +181,8 @@ describe('schema', () => {
       ['acquisition_sources', 'kind', S.SOURCE_KINDS],
       ['account_sources', 'set_by', S.SOURCE_SET_BY],
       ['acquisition_conversions', 'kind', S.CONVERSION_KINDS],
+      ['account_scores', 'last_act_kind', S.SCORE_ACT_KINDS],
+      ['account_scores', 'other_currencies', S.SCORE_OTHER_CURRENCIES],
     ];
     for (const [table, column, values] of cases) {
       expect(await checkValues(t.db, table, column), `${table}.${column}`).toEqual(sorted(values));
@@ -1008,6 +1010,37 @@ describe('schema', () => {
       .returning(['tier', 'birthday_on'])
       .executeTakeFirstOrThrow();
     expect(credit).toEqual({ tier: 2, birthday_on: null });
+  });
+
+  it('the engagement score (0046): the mirror at work: a score with its five parts and the figures behind them, the sum refused when it does not add up, one per account; a run claimed, then finished with its ten bands, nine refused', async () => {
+    const account = await t.db.insertInto('accounts').values({ email: 'e-s0046@example.com', email_normalized: 'e-s0046@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const at = new Date('2026-11-02T08:02:00.000Z');
+    const lastAct = new Date('2026-10-21T17:30:00.000Z');
+    const row = {
+      account_id: account.id, formula: 1, score: 72, recency_points: 20, frequency_points: 12, spend_points: 18, speed_points: 9, attendance_points: 13,
+      last_act_at: lastAct, last_act_kind: 'DRAW' as const, active_days: 6, spend_eur_minor: 41_000, purchases: 2, unpriced: 0, other_currencies: ['GBP' as const],
+      speed_minutes: 4, speed_releases: 5, releases_taken: 3, releases_open: 8, changed_at: at,
+    };
+    await expect(t.db.insertInto('account_scores').values({ ...row, score: 71 }).execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'account_scores_sum'));
+    expect(await t.db.insertInto('account_scores').values(row).returningAll().executeTakeFirstOrThrow()).toEqual(row);
+    await expect(t.db.insertInto('account_scores').values(row).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'account_scores_pkey'));
+    // No act, no release: the kind and the median left out, the other currencies empty by default.
+    const none = await t.db
+      .updateTable('account_scores')
+      .set({ score: 0, recency_points: 0, frequency_points: 0, spend_points: 0, speed_points: 0, attendance_points: 0, last_act_at: null, last_act_kind: null, active_days: 0, spend_eur_minor: 0, purchases: 0, other_currencies: [], speed_minutes: null, speed_releases: 0, releases_taken: 0, releases_open: 0 })
+      .where('account_id', '=', account.id)
+      .returning(['score', 'last_act_kind', 'other_currencies', 'speed_minutes'])
+      .executeTakeFirstOrThrow();
+    expect(none).toEqual({ score: 0, last_act_kind: null, other_currencies: [], speed_minutes: null });
+    await t.db.deleteFrom('account_scores').where('account_id', '=', account.id).execute();
+
+    const run = await t.db.insertInto('engagement_runs').values({ day: '2026-11-02', formula: 1, started_at: at }).returningAll().executeTakeFirstOrThrow();
+    expect(run).toEqual({ day: '2026-11-02', formula: 1, started_at: at, finished_at: null, accounts: null, changed: null, bands: null, duration_ms: null });
+    const done = { finished_at: new Date(at.getTime() + 412), accounts: 8, changed: 3, duration_ms: 412 };
+    await expect(t.db.updateTable('engagement_runs').set({ ...done, bands: [4, 0, 1, 0, 0, 2, 0, 0, 1] }).where('day', '=', '2026-11-02').execute()).rejects.toSatisfy((e) => isCheckViolation(e, 'engagement_runs_bands_check'));
+    const finished = await t.db.updateTable('engagement_runs').set({ ...done, bands: [4, 0, 1, 0, 0, 2, 0, 0, 0, 1] }).where('day', '=', '2026-11-02').returningAll().executeTakeFirstOrThrow();
+    expect(finished).toEqual({ day: '2026-11-02', formula: 1, started_at: at, ...done, bands: [4, 0, 1, 0, 0, 2, 0, 0, 0, 1] });
+    await t.db.deleteFrom('engagement_runs').execute();
   });
 
   it('audit_logs is append-only at the database level', async () => {

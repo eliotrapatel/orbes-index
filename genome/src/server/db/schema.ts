@@ -452,6 +452,18 @@ export const TIER_GRANT_KINDS = ['GIFT', 'CREDIT', 'BIRTHDAY'] as const;
 export type TierGrantKind = (typeof TIER_GRANT_KINDS)[number];
 
 /**
+ * The acts of a collector the engagement score reads (account_scores.last_act_kind, migration 0046, plan CUSTOMER
+ * INTELLIGENCE §3.5 SB.3.1), in the order that settles two acts at the same instant: a scan of an ORBES CODE, a draw
+ * entry, a LIVE RELEASE entry, I'LL BE THERE, an order, a piece registered.
+ */
+export const SCORE_ACT_KINDS = ['SCAN', 'DRAW', 'LIVE', 'INTEREST', 'ORDER', 'REGISTRATION'] as const;
+export type ScoreActKind = (typeof SCORE_ACT_KINDS)[number];
+
+/** The house's currencies the score converts to euros (account_scores.other_currencies): every one but EUR. */
+export const SCORE_OTHER_CURRENCIES = ['GBP', 'USD', 'CHF'] as const;
+export type ScoreOtherCurrency = (typeof SCORE_OTHER_CURRENCIES)[number];
+
+/**
  * The steps of a yearly care (care_requests.status, migration 0028, BP-19 T6): asked for, its prepaid label sent, the
  * piece at the atelier, on its way back, done; or cancelled before it is shipped back.
  */
@@ -1986,6 +1998,56 @@ export interface AccountTagsTable {
 }
 
 /**
+ * The engagement score of an account (migration 0046, plan CUSTOMER INTELLIGENCE §3.5 SB.3.2): the current one only,
+ * staff only, never shown to the collector nor in the right-of-access export. The score is the sum of its five parts;
+ * each part is kept with the figure behind it. Written by the daily job alone (services/engagement.ts), which rewrites
+ * a row only when a value changed (`changed_at`) and removes a DELETED account's.
+ */
+export interface AccountScoresTable {
+  account_id: string;
+  /** The version of the code's formula that made the row (ENGAGEMENT_FORMULA), 1 or more. */
+  formula: number;
+  score: number;                       // smallint 0..100, the sum of the five parts
+  recency_points: number;              // 0..25
+  frequency_points: number;            // 0..20
+  spend_points: number;                // 0..25
+  speed_points: number;                // 0..10
+  attendance_points: number;           // 0..20
+  /** The latest act in the 12 months and its kind, both or neither. */
+  last_act_at: TimestampNullable;
+  last_act_kind: ColumnType<ScoreActKind | null, ScoreActKind | null | undefined, ScoreActKind | null>;
+  active_days: number;                 // 0..366 Paris days with an act
+  spend_eur_minor: number;             // bigint ≥ 0, the purchases of the 12 months in euro cents
+  purchases: number;                   // the purchases in the 12 months
+  unpriced: number;                    // of which without a known price, ≤ purchases
+  /** The currencies converted to euros at the code's rates, among GBP, USD, CHF. */
+  other_currencies: WithDefault<ScoreOtherCurrency[]>;
+  /** The median minutes from a release's opening to the entry; NULL exactly when `speed_releases` is 0. */
+  speed_minutes: ColumnType<number | null, number | null | undefined, number | null>;
+  speed_releases: number;
+  releases_taken: number;              // ≤ releases_open
+  releases_open: number;
+  changed_at: Timestamp;
+}
+
+/**
+ * A day's run of the engagement score (migration 0046, §3.5 SB.3.2), one row per Paris day: the job's claim, then, once
+ * finished, the accounts scored, the rows changed and the counted collectors per band of ten (0–9 … 90–100), kept for
+ * good as the history of the score spread.
+ */
+export interface EngagementRunsTable {
+  day: string;                         // date 'YYYY-MM-DD' (a Paris day)
+  formula: number;
+  started_at: Timestamp;
+  finished_at: TimestampNullable;
+  accounts: ColumnType<number | null, number | null | undefined, number | null>;
+  changed: ColumnType<number | null, number | null | undefined, number | null>;
+  /** Ten counts, the bands 0–9 to 90–100; NULL until the run is finished. */
+  bands: ColumnType<number[] | null, number[] | null | undefined, number[] | null>;
+  duration_ms: ColumnType<number | null, number | null | undefined, number | null>;
+}
+
+/**
  * A model's pairs (migration 0031, plan NEXT-NINE BP-34, PAIRS WELL WITH): the models its sheet shows at its very end,
  * in their order (`position` 1..3), each once, never itself. Set on a main model or a model alone (services/catalog.ts
  * setPairs: 0, 2 or 3 rows, never a model of its own variant group).
@@ -2777,6 +2839,8 @@ export interface Database {
   acquisition_state: AcquisitionStateTable;
   account_notes: AccountNotesTable;
   account_tags: AccountTagsTable;
+  account_scores: AccountScoresTable;
+  engagement_runs: EngagementRunsTable;
   model_pairs: ModelPairsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
@@ -2920,6 +2984,8 @@ export type AcquisitionDailyRow = Selectable<AcquisitionDailyTable>;
 export type AcquisitionStateRow = Selectable<AcquisitionStateTable>;
 export type AccountNoteRow = Selectable<AccountNotesTable>;
 export type AccountTagRow = Selectable<AccountTagsTable>;
+export type AccountScoreRow = Selectable<AccountScoresTable>;
+export type EngagementRunRow = Selectable<EngagementRunsTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
 export type CareRequestRow = Selectable<CareRequestsTable>;
