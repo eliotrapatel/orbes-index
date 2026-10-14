@@ -176,6 +176,7 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     await go(a, `#/logistics?tab=stock&locationId=${france}`, 'Logistics');
     const row54 = a.locator('#logistics-stock tbody tr', { has: a.locator('.cell-sub.mono', { hasText: new RegExp(`^${code54}$`) }) });
     await expect.poll(() => row54.locator('[data-testid=stock-to-order]').textContent()).toBe('TO ORDER2');
+    expect(await row54.locator('[data-testid=stock-add-to-order]').getAttribute('class')).toBe('cbtn cbtn--secondary');
     await row54.locator('[data-testid=stock-add-to-order]').click();
     expect(await a.locator('dialog .dialog__text').textContent()).toBe('The pieces of MONOLITHE · 54 go to the draft of its supplier, to deliver to FRANCE WAREHOUSE. You confirm the draft before it is sent.');
     expect(await a.locator('dialog input[name=quantity]').inputValue()).toBe('2');
@@ -290,6 +291,8 @@ describe.skipIf(!HAS_CHROMIUM)('Supplier orders in the console (plan NEXT LOT §
     // keeps Add to supplier order; its pieces are typed, and go to a new draft of its supplier. The AUDITOR and the
     // agent read the Stock without it.
     expect(await row54.locator('[data-testid=stock-to-order]').count()).toBe(0);
+    // The button is emphasised only where the console suggests it (TO ORDER): quiet here.
+    expect(await row54.locator('[data-testid=stock-add-to-order]').getAttribute('class')).toBe('cbtn cbtn--ghost');
     await row54.locator('[data-testid=stock-add-to-order]').click();
     expect(await a.locator('dialog input[name=quantity]').inputValue()).toBe('');
     await a.click('[data-testid=dialog-confirm]');

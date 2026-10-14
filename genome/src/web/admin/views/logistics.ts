@@ -527,7 +527,8 @@ function stockTab(ctx: ViewContext, stock: LogisticsStock): HTMLElement {
       ? [button(STOCK_TEXT.propose, { kind: 'ghost', testId: 'stock-propose', onClick: () => proposeCorrection(r) })]
       : manage
         ? [
-            order && !r.sku.setAside ? button(STOCK_TEXT.addToOrder, { kind: 'secondary', testId: 'stock-add-to-order', onClick: () => addToOrder(r) }) : null,
+            // Emphasised only where the console suggests it (TO ORDER); quiet on a size ordered in advance.
+            order && !r.sku.setAside ? button(STOCK_TEXT.addToOrder, { kind: (r.toOrder ?? 0) > 0 ? 'secondary' : 'ghost', testId: 'stock-add-to-order', onClick: () => addToOrder(r) }) : null,
             noPieceMark(r.unbacked) ? button(STOCK_TEXT.countIn, { kind: 'secondary', testId: 'stock-count-in', onClick: () => countIn(r) }) : null,
             stock.locations.length > 1 && r.available > 0 ? button(STOCK_TEXT.transfer, { kind: 'ghost', testId: 'stock-transfer', onClick: () => transfer(r) }) : null,
             button(STOCK_TEXT.correct, { kind: 'ghost', testId: 'stock-correct', onClick: () => correct(r) }),

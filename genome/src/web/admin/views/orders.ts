@@ -75,7 +75,7 @@ export async function ordersView(ctx: ViewContext): Promise<HTMLElement> {
       body: h(
         'p',
         { class: 'dialog__text' },
-        `A file in Shopify’s order format: every order reserved in the period and priced, its piece and its add-ons as line items, its steps as Shopify’s statuses, its buyer, and the collector’s email, by which the store will match its customers to the accounts. At most ${SHOPIFY_PERIOD_MAX_DAYS} days, in UTC. Nothing is sent to Shopify.`,
+        `A file in Shopify’s order format: every order reserved in the period and priced, its piece and its add-ons as line items, its steps as Shopify’s statuses, its buyer, and the collector’s email, by which the store will match its customers to the accounts. Never an order of a test account. At most ${SHOPIFY_PERIOD_MAX_DAYS} days, in UTC. Nothing is sent to Shopify.`,
       ),
       fields: [
         { name: 'from', label: 'First day', kind: 'date', required: true, value: period.from },
