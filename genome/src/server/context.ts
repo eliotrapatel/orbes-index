@@ -40,6 +40,7 @@ import { CircleService } from './services/circle.js';
 import { ClubService } from './services/club.js';
 import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
+import { BirthdayCreditService } from './services/birthday-credits.js';
 import { CareService, eraseCareLabels } from './services/care.js';
 import { GuaranteeService } from './services/guarantees.js';
 import { SizeService } from './services/sizes.js';
@@ -166,6 +167,8 @@ export interface AppServices {
   clubProgram: ClubProgramService;
   /** The tiers' grants (plan NEXT-NINE, BP-19 T5): the welcome gift and the credit, once per tier and per account, ever. */
   tierGrants: TierGrantService;
+  /** Plan CUSTOMER INTELLIGENCE §3.5 SB.4.4: the birthday credits, given at each housekeeping pass. */
+  birthdayCredits: BirthdayCreditService;
   /** The yearly care (plan NEXT-NINE, BP-19 T6): asked for from the piece, a prepaid label both ways, recorded as YEARLY CARE. */
   care: CareService;
   /** THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): a guaranteed place at a coming release, granted by Client Services. */
@@ -324,6 +327,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const messages = new MessageService({ db, audit, lookbook, clock });
     const clubProgram = new ClubProgramService({ db, audit, clock });
     const tierGrants = new TierGrantService({ db, audit, clock, log });
+    const birthdayCredits = new BirthdayCreditService({ db, audit, clock, log });
     const care = new CareService({ db, audit, warranty, clock });
     const guarantees = new GuaranteeService({ db, audit, clock });
     const sizes = new SizeService({ db, audit, clock });
@@ -400,6 +404,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       messages,
       clubProgram,
       tierGrants,
+      birthdayCredits,
       care,
       guarantees,
       sizes,
@@ -496,6 +501,7 @@ export interface Housekeeping {
     scanTokens: number;
     scanStats: number;
     activity: number;
+    birthdayCredits: number;
     acquisitionConversions: number;
     viewStats: number;
     viewMonths: number;
@@ -532,9 +538,13 @@ export interface Housekeeping {
  * before it is counted (DATABASE §10).
  *
  * The customer intelligence lot's jobs (plan CUSTOMER INTELLIGENCE §3.0 (f)) run
- * in the order of §3.0 (f), all but the first only in its morning window
+ * in the order of §3.0 (f), all but the first two only in its morning window
  * (services/schedule.ts morningWindowOpen: from 07:30 UTC until the Paris day
  * ends):
+ *   birthdayCredits  every pass: the birthday credit of each account whose
+ *                birthday (a Paris day) is today, or passed within the
+ *                credit's days and not given yet, while THE PROGRAM's switch
+ *                is on (services/birthday-credits.ts, §3.5 SB.4.4);
  *   acquisitionConversions  every pass: each sign-up, entry and order written
  *                since the recording started gets its conversion with its
  *                last link; once a Paris day in the window, its catch-up
@@ -581,6 +591,7 @@ export function startHousekeeping(
       scanTokens: 0,
       scanStats: 0,
       activity: 0,
+      birthdayCredits: 0,
       acquisitionConversions: 0,
       viewStats: 0,
       viewMonths: 0,
@@ -612,6 +623,9 @@ export function startHousekeeping(
     // Count the complete days first: the purge below must never take a scan that is not counted yet.
     const counted = await job('scanStats', () => aggregateScanStats(ctx.db, ctx.clock()));
     const hourly = await job('activity', () => aggregateActivity(ctx.db, ctx.clock()));
+    // Every pass: the birthday credits due (plan CUSTOMER INTELLIGENCE §3.5 SB.4.4), within 10 minutes after midnight
+    // Paris; nothing while THE PROGRAM's switch is off.
+    await job('birthdayCredits', () => ctx.services.birthdayCredits.grantDue(ctx.clock()));
     // Every pass: the conversions with their last link (its daily catch-up in the morning window, §3.4 A.8).
     await job('acquisitionConversions', async () => {
       const r = await ctx.services.acquisition.recordConversions(ctx.clock());
