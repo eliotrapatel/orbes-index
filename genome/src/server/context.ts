@@ -512,6 +512,7 @@ export interface Housekeeping {
     viewMonths: number;
     acquisitionDaily: number;
     wishMonths: number;
+    engagement: number;
     scanHistory: number;
     viewPurge: number;
     acquisitionPurge: number;
@@ -563,6 +564,12 @@ export interface Housekeeping {
  *                summarised, into acquisition_daily;
  *   wishMonths   each complete Paris month of YOUR WISHLIST not yet counted,
  *                into model_wish_months (services/wishlist.ts, §3.2 W.7);
+ *   engagement   once a Paris day, after that pass's viewStats and before any
+ *                purge: the engagement score of every ACTIVE account that is
+ *                not a test entrant, in batches; it waits while a LIVE
+ *                RELEASE's room is open or a test of test entrants is RUNNING
+ *                (services/engagement.ts runIfDue, §3.5 SB.3.3). Its figure
+ *                is the rows changed, 0 when it is not due;
  *   (scanHistory, as above)
  *   viewPurge    only when viewStats succeeded in this pass, the raw views past
  *                their 13 months, folded per collector, a whole counted Paris
@@ -602,6 +609,7 @@ export function startHousekeeping(
       viewMonths: 0,
       acquisitionDaily: 0,
       wishMonths: 0,
+      engagement: 0,
       scanHistory: 0,
       viewPurge: 0,
       acquisitionPurge: 0,
@@ -658,6 +666,9 @@ export function startHousekeeping(
     // The visits' complete Paris days, summarised before any visit is purged (§3.4 A.8).
     const visitsSummarised = morning && (await job('acquisitionDaily', () => ctx.services.acquisition.summariseDays(ctx.clock())));
     const wishesCounted = morning && (await job('wishMonths', () => aggregateWishMonths(ctx.db, ctx.clock())));
+    // Once a Paris day in the window, after the views' days and before any purge: the engagement scores, unless a LIVE
+    // RELEASE's room is open or a test is RUNNING, when they wait for a later pass (§3.5 SB.3.3).
+    if (morning) await job('engagement', async () => (await ctx.services.engagement.runIfDue(ctx.clock()))?.changed ?? 0);
     const retentionDays = ctx.config.scanRetentionDays;
     if (counted && hourly && retentionDays !== null && retentionDays !== undefined) {
       await job('scanHistory', () =>

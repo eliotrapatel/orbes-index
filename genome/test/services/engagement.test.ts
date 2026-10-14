@@ -19,6 +19,7 @@
  * The daily job (`runIfDue`: the claim, the clean-up, the bands) is test/services/engagement-job.test.ts.
  */
 import { createHash, randomBytes } from 'node:crypto';
+import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { jsonText, VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
 import { ENGAGEMENT_FORMULA, scoreOf, type EngagementInputs } from '../../src/server/services/engagement-formula.js';
@@ -444,6 +445,103 @@ describe('the engagement score\'s figures (plan CUSTOMER INTELLIGENCE §3.5 SB.3
       expect(rows.filter((x) => x.score === 0)).toHaveLength(229);
       expect(rows.find((x) => x.account_id === ids[229])!.score).toBe(29);
       expect((await svc.scoreBatch(ids, NOW)).changed).toBe(0);
+    });
+  });
+
+  describe('the daily run (§3.5 SB.3.3 steps 3 to 6, SB.3.5)', () => {
+    const rowOf = (id: string) => db().selectFrom('account_scores').selectAll().where('account_id', '=', id).executeTakeFirst();
+    const population = async () =>
+      Number((await sql<{ n: number }>`SELECT count(*)::int AS n FROM accounts a WHERE a.status = 'ACTIVE' AND NOT EXISTS (SELECT 1 FROM test_entrants te WHERE te.account_id = a.id)`.execute(db())).rows[0]!.n);
+    const rows = async () => Number((await db().selectFrom('account_scores').select((eb) => eb.fn.countAll().as('n')).executeTakeFirstOrThrow()).n);
+    const DAY = 86_400_000;
+    const who: Record<string, string> = {};
+    /** Every row as it stands, by account. */
+    const snapshot = async () => new Map((await db().selectFrom('account_scores').selectAll().execute()).map((r) => [r.account_id, JSON.stringify(r)]));
+    /** The rows inserted, rewritten or removed between two snapshots. */
+    const differences = (before: Map<string, string>, after: Map<string, string>) =>
+      [...after].filter(([id, row]) => before.get(id) !== row).length + [...before.keys()].filter((id) => !after.has(id)).length;
+
+    beforeAll(async () => {
+      // The LIVE RELEASES of this file are over: no room holds the job.
+      await db().updateTable('drops').set({ ended_at: at('2026-09-01T00:00:00Z'), ended_reason: 'CLOSED' }).where('mode', '=', 'LIVE').where('published_at', 'is not', null).execute();
+      for (const k of ['plain', 'gone', 'entrant', 'locked', 'team', 'newcomer']) who[k] = await account();
+      for (const k of ['gone', 'entrant', 'locked', 'team']) await scan(who[k]!, '2026-10-31T10:00:00Z');
+      // Each had a score before: one is since deleted, one became a test entrant (never expected: the guard), one is locked.
+      await svc.scoreBatch([who.gone!, who.entrant!, who.locked!], at('2026-11-01T08:00:00Z'));
+      await db().updateTable('accounts').set({ status: 'DELETED' }).where('id', '=', who.gone!).execute();
+      await db().insertInto('test_entrants').values({ account_id: who.entrant! }).execute();
+      await db().updateTable('accounts').set({ status: 'LOCKED' }).where('id', '=', who.locked!).execute();
+      await scan(who.locked!, '2026-11-02T07:00:00Z'); // would raise its frequency, were it recalculated
+      // One of the team's own accounts: its email is a console login's.
+      const team = await db().selectFrom('accounts').select('email_normalized').where('id', '=', who.team!).executeTakeFirstOrThrow();
+      await db().insertInto('admin_users').values({ email: team.email_normalized, email_normalized: team.email_normalized, password_hash: 'scrypt$x', role: 'OPERATOR' }).execute();
+    });
+
+    it('scores every ACTIVE account that is not a test entrant, removes a DELETED account\'s row, leaves a LOCKED one as it was, and counts the bands over the counted collectors', async () => {
+      const before = await snapshot();
+      const lockedBefore = await rowOf(who.locked!);
+      expect(lockedBefore).toMatchObject({ score: 29, active_days: 1, changed_at: at('2026-11-01T08:00:00Z') });
+      const expected = await population();
+      const run = await svc.runIfDue(NOW);
+      expect(run).toMatchObject({ day: '2026-11-02', accounts: expected });
+      // One row per scored account, and the LOCKED account's: nothing for a DELETED account or a test entrant.
+      expect(await rowOf(who.gone!)).toBeUndefined();
+      expect(await rowOf(who.entrant!)).toBeUndefined();
+      expect(await rowOf(who.locked!)).toEqual(lockedBefore);
+      expect(await rowOf(who.plain!)).toMatchObject({ score: 0, formula: ENGAGEMENT_FORMULA, changed_at: NOW });
+      expect(await rowOf(who.team!)).toMatchObject({ score: 29, last_act_kind: 'SCAN' });
+      const stray = await sql<{ n: number }>`
+        SELECT count(*)::int AS n FROM account_scores s JOIN accounts a ON a.id = s.account_id
+         WHERE a.status = 'DELETED' OR EXISTS (SELECT 1 FROM test_entrants te WHERE te.account_id = a.id)`.execute(db());
+      expect(stray.rows[0]!.n).toBe(0);
+      const locked = Number((await sql<{ n: number }>`SELECT count(*)::int AS n FROM account_scores s JOIN accounts a ON a.id = s.account_id WHERE a.status = 'LOCKED'`.execute(db())).rows[0]!.n);
+      expect(await rows()).toBe(expected + locked);
+      // The rows changed: those inserted or rewritten, and the two removed.
+      expect(run!.changed).toBe(differences(before, await snapshot()));
+      expect(run!.changed).toBeGreaterThanOrEqual(5);
+      // The bands: ten counts over the ACTIVE counted collectors, so the accounts scored less the team's own.
+      expect(run!.bands).toHaveLength(10);
+      expect(run!.bands.reduce((x, y) => x + y, 0)).toBe(expected - 1);
+      const spread = await sql<{ band: number; n: number }>`
+        SELECT least(9, s.score / 10)::int AS band, count(*)::int AS n FROM account_scores s JOIN accounts a ON a.id = s.account_id
+         WHERE a.status = 'ACTIVE' AND a.id <> ${who.team!} GROUP BY 1 ORDER BY 1`.execute(db());
+      expect(spread.rows.map((r) => [r.band, r.n])).toEqual(run!.bands.map((n, band) => [band, n]).filter(([, n]) => n! > 0));
+      expect(await db().selectFrom('engagement_runs').selectAll().where('day', '=', '2026-11-02').executeTakeFirstOrThrow()).toEqual({
+        day: '2026-11-02', formula: ENGAGEMENT_FORMULA, started_at: NOW, finished_at: NOW, accounts: expected, changed: run!.changed, bands: run!.bands, duration_ms: run!.ms,
+      });
+    });
+
+    it('does nothing at a second pass the same day, and the next day rewrites only the rows whose values changed', async () => {
+      const before = await snapshot();
+      expect(await svc.runIfDue(new Date(NOW.getTime() + 600_000))).toBeNull();
+      expect(await snapshot()).toEqual(before);
+      // The next morning: an account with nothing new keeps its row and its changed_at; the newcomer's first scan rewrites its own.
+      await scan(who.newcomer!, '2026-11-02T20:00:00Z');
+      const tomorrow = new Date(NOW.getTime() + DAY);
+      const run = await svc.runIfDue(tomorrow);
+      expect(run).toMatchObject({ day: '2026-11-03' });
+      expect((await rowOf(who.plain!))!.changed_at).toEqual(NOW);
+      expect(await rowOf(who.newcomer!)).toMatchObject({ score: 29, changed_at: tomorrow });
+      expect(run!.changed).toBe(differences(before, await snapshot()));
+      expect(run!.changed).toBeGreaterThanOrEqual(1);
+      expect(run!.changed).toBeLessThan(run!.accounts);
+    });
+
+    it('rewrites every row when the formula\'s number changes', async () => {
+      // Every row as another formula left it: each differs from what this formula writes.
+      await db().updateTable('account_scores').set({ formula: ENGAGEMENT_FORMULA + 1 }).execute();
+      const third = new Date(NOW.getTime() + 2 * DAY);
+      const run = await svc.runIfDue(third);
+      expect(run).toMatchObject({ day: '2026-11-04' });
+      expect(run!.changed).toBe(run!.accounts);
+      const left = await sql<{ status: string; n: number }>`
+        SELECT a.status, count(*)::int AS n FROM account_scores s JOIN accounts a ON a.id = s.account_id
+         WHERE s.formula <> ${ENGAGEMENT_FORMULA} OR s.changed_at <> ${third} GROUP BY a.status`.execute(db());
+      // Only the LOCKED accounts keep their row as it was.
+      expect(left.rows.map((r) => r.status)).toEqual(['LOCKED']);
+      // The day after, nothing is rewritten for it.
+      const fourth = await svc.runIfDue(new Date(NOW.getTime() + 3 * DAY));
+      expect(fourth!.changed).toBeLessThan(fourth!.accounts);
     });
   });
 });

@@ -32,6 +32,23 @@
  *   `scoreBatch` writes a batch in one transaction: a row is inserted, or rewritten only when one of its values (the
  *   formula's number included) differs, so an unchanged score keeps its `changed_at` and costs no write.
  *
+ *   The daily job, `runIfDue`, is called at each housekeeping pass (every 10 minutes) and runs once per Paris day:
+ *     1. due?    the pass is in the lot's morning window (services/schedule.ts: from 07:30 UTC until the Paris day ends),
+ *                no run of that Paris day is finished, no LIVE RELEASE's room is open and no test of test entrants is
+ *                RUNNING (the box has 2 vCPU: a release or a load test never shares them with a batch job). Otherwise
+ *                it waits for a later pass; a day when nothing clears before midnight has no run.
+ *     2. claim   one row of `engagement_runs` per Paris day: a second process, or a second pass, gets no row back and
+ *                stops. A run cut short (a restart) is taken over ENGAGEMENT_STALE_MINUTES later, from the start: each
+ *                batch is idempotent.
+ *     3. score   the ACTIVE accounts that are not test entrants, in `id` order, ENGAGEMENT_BATCH at a time, a pause
+ *                of ENGAGEMENT_PAUSE_MS between two batches so requests get the CPU.
+ *     4. clean   the rows of DELETED accounts and of test entrants are removed; a LOCKED account's is left as it was.
+ *     5. finish  the run's row takes its end, the accounts scored, the rows changed, how long it took, and the bands:
+ *                the scores of the ACTIVE counted collectors (no test entrant, no team account, §3.0 (d)) per band of
+ *                ten. One log line, `{ job: 'engagement', day, accounts, changed, ms }`.
+ *   A failed batch fails the whole run: the error is thrown to the housekeeping pass, which logs it; the run's row
+ *   stays unfinished and is claimed again once stale.
+ *
  * Nothing here is audited: a score is derived by the system and holds no decision (SB.3.3); the runs' table and the
  * job's log line are its trace. Nothing here is ever sent to a collector.
  */
@@ -42,14 +59,18 @@ import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 import { ENGAGEMENT_FORMULA, ENGAGEMENT_WINDOW_DAYS, isOtherCurrency, scoreOf, toEurMinor, type EngagementInputs, type EngagementScore } from './engagement-formula.js';
 import { median, purchaseRows } from './growth.js';
 import { releaseEntries } from './participation.js';
-import { notTestEntrant } from './population.js';
-import { parisDay, parisDayStart } from './schedule.js';
+import { countedCollector, notTestEntrant } from './population.js';
+import { morningWindowOpen, parisDay, parisDayStart } from './schedule.js';
 import { nextParisDay } from './tracking.js';
 
 /** The accounts scored in one transaction. */
 export const ENGAGEMENT_BATCH = 500;
 /** The rows of one upsert statement (a batch is written in a few of them, in its one transaction). */
 const UPSERT_ROWS = 100;
+/** The pause between two batches of a run, in milliseconds. */
+export const ENGAGEMENT_PAUSE_MS = 100;
+/** An unfinished run is taken over once its claim is older than this many minutes. */
+export const ENGAGEMENT_STALE_MINUTES = 20;
 
 const DAY_MS = 86_400_000;
 const SMALLINT_MAX = 32_767;
@@ -71,10 +92,26 @@ export interface ScoredBatch {
   changed: number;
 }
 
+/** A finished run of the daily job. */
+export interface EngagementRun {
+  /** The Paris day, `YYYY-MM-DD`. */
+  day: string;
+  /** The accounts scored. */
+  accounts: number;
+  /** The rows inserted, rewritten or removed. */
+  changed: number;
+  /** The ACTIVE counted collectors per band of ten: 0–9 … 90–100. */
+  bands: number[];
+  /** How long the run took, in milliseconds. */
+  ms: number;
+}
+
 export interface EngagementServiceDeps {
   db: Db;
   clock?: Clock;
   log?: Logger;
+  /** The pause between two batches (a test passes its own). */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const small = (n: number): number => Math.max(0, Math.min(SMALLINT_MAX, Math.trunc(n)));
@@ -92,10 +129,101 @@ export class EngagementService {
   private readonly clock: Clock;
   private readonly log: Logger;
 
+  private readonly sleep: (ms: number) => Promise<void>;
+
   constructor(deps: EngagementServiceDeps) {
     this.db = deps.db;
     this.clock = deps.clock ?? systemClock;
     this.log = deps.log ?? noopLogger;
+    this.sleep = deps.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  }
+
+  /**
+   * The daily job (see the header): run the Paris day of `now` when it is due, and return the finished run; null when
+   * it is not due, or when another pass or process holds the day. Throws when a batch fails (the housekeeping pass
+   * logs it): the day's row stays unfinished and is claimed again ENGAGEMENT_STALE_MINUTES later.
+   */
+  async runIfDue(now: Date = this.clock()): Promise<EngagementRun | null> {
+    // 1. Due?
+    if (!morningWindowOpen(now)) return null;
+    const day = parisDay(now);
+    const done = await this.db.selectFrom('engagement_runs').select('day').where('day', '=', day).where('finished_at', 'is not', null).executeTakeFirst();
+    if (done) return null;
+    if (await this.busy(now)) return null;
+    // 2. Claim the day: no row back means another pass or process holds it, or it is finished.
+    const stale = new Date(now.getTime() - ENGAGEMENT_STALE_MINUTES * 60_000);
+    const claimed = await sql<{ day: string }>`
+      INSERT INTO engagement_runs (day, formula, started_at) VALUES (${day}::date, ${ENGAGEMENT_FORMULA}::smallint, ${now}::timestamptz)
+      ON CONFLICT (day) DO UPDATE SET started_at = excluded.started_at, formula = excluded.formula
+       WHERE engagement_runs.finished_at IS NULL AND engagement_runs.started_at < ${stale}::timestamptz
+      RETURNING day`.execute(this.db);
+    if (claimed.rows.length === 0) return null;
+    const began = performance.now();
+
+    // 3. Score: every ACTIVE account that is not a test entrant, in id order.
+    const open = await this.openReleases(this.db, now);
+    let accounts = 0;
+    let changed = 0;
+    for (let after: string | null = null; ; ) {
+      const batch: { id: string }[] = (
+        await sql<{ id: string }>`
+          SELECT a.id FROM accounts a
+           WHERE a.status = 'ACTIVE' AND ${notTestEntrant('a.id')} ${after === null ? sql`` : sql`AND a.id > ${after}::uuid`}
+           ORDER BY a.id LIMIT ${ENGAGEMENT_BATCH}`.execute(this.db)
+      ).rows;
+      if (batch.length === 0) break;
+      const r = await this.scoreBatch(batch.map((b) => b.id), now, open);
+      accounts += r.scores.size;
+      changed += r.changed;
+      if (batch.length < ENGAGEMENT_BATCH) break;
+      after = batch[batch.length - 1]!.id;
+      await this.sleep(ENGAGEMENT_PAUSE_MS);
+    }
+
+    // 4. Clean: the row of an account neither ACTIVE nor LOCKED (a DELETED one), and a test entrant's (never expected: a
+    // guard). LOCKED accounts are left.
+    const removed = await sql<{ account_id: string }>`
+      DELETE FROM account_scores s USING accounts a
+       WHERE a.id = s.account_id AND (a.status NOT IN ('ACTIVE', 'LOCKED') OR NOT ${notTestEntrant('a.id')})
+      RETURNING s.account_id`.execute(this.db);
+    changed += removed.rows.length;
+
+    // 5. Finish: the bands over the ACTIVE counted collectors, then the run's row, while this pass still holds it.
+    const counts = await sql<{ band: number; n: number }>`
+      SELECT least(9, s.score / 10)::int AS band, count(*)::int AS n
+        FROM account_scores s
+        JOIN accounts a ON a.id = s.account_id
+       WHERE a.status = 'ACTIVE' AND ${countedCollector('s.account_id')}
+       GROUP BY 1`.execute(this.db);
+    const bands = Array.from({ length: 10 }, () => 0);
+    for (const c of counts.rows) bands[c.band] = c.n;
+    const ms = Math.max(0, Math.round(performance.now() - began));
+    const ended = this.clock();
+    const finished = await this.db
+      .updateTable('engagement_runs')
+      .set({ finished_at: ended.getTime() < now.getTime() ? now : ended, accounts, changed, bands, duration_ms: ms })
+      .where('day', '=', day)
+      .where('finished_at', 'is', null)
+      .where('started_at', '=', now)
+      .returning('day')
+      .executeTakeFirst();
+    if (!finished) {
+      // The claim was taken over meanwhile (this run outlived ENGAGEMENT_STALE_MINUTES): the other run finishes the day.
+      this.log.warn({ job: 'engagement', day }, 'engagement run not recorded: the day was taken over');
+      return null;
+    }
+    this.log.info({ job: 'engagement', day, accounts, changed, ms }, 'engagement scores calculated');
+    return { day, accounts, changed, bands, ms };
+  }
+
+  /** Whether the job must wait at `now`: a LIVE RELEASE's room is open, or a test of test entrants is RUNNING. */
+  private async busy(now: Date): Promise<boolean> {
+    const r = await sql<{ room: boolean; test: boolean }>`
+      SELECT EXISTS (SELECT 1 FROM drops d
+                      WHERE d.mode = 'LIVE' AND d.published_at IS NOT NULL AND d.cancelled_at IS NULL AND d.ended_at IS NULL
+                        AND d.opens_at <= ${now}::timestamptz + coalesce(d.room_opens_minutes, 0) * interval '1 minute') AS room,
+             EXISTS (SELECT 1 FROM test_runs tr WHERE tr.status = 'RUNNING') AS test`.execute(this.db);
+    return Boolean(r.rows[0]?.room || r.rows[0]?.test);
   }
 
   /**
