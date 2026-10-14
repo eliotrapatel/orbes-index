@@ -41,6 +41,7 @@ import { ClubService } from './services/club.js';
 import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
 import { BirthdayCreditService } from './services/birthday-credits.js';
+import { EngagementService } from './services/engagement.js';
 import { CareService, eraseCareLabels } from './services/care.js';
 import { GuaranteeService } from './services/guarantees.js';
 import { SizeService } from './services/sizes.js';
@@ -169,6 +170,8 @@ export interface AppServices {
   tierGrants: TierGrantService;
   /** Plan CUSTOMER INTELLIGENCE §3.5 SB.4.4: the birthday credits, given at each housekeeping pass. */
   birthdayCredits: BirthdayCreditService;
+  /** The engagement score (plan CUSTOMER INTELLIGENCE §3.5 SB.3): staff only, calculated each morning. */
+  engagement: EngagementService;
   /** The yearly care (plan NEXT-NINE, BP-19 T6): asked for from the piece, a prepaid label both ways, recorded as YEARLY CARE. */
   care: CareService;
   /** THE HOUSE'S GUARANTEE (plan NEXT-NINE, IN-01): a guaranteed place at a coming release, granted by Client Services. */
@@ -328,6 +331,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const clubProgram = new ClubProgramService({ db, audit, clock });
     const tierGrants = new TierGrantService({ db, audit, clock, log });
     const birthdayCredits = new BirthdayCreditService({ db, audit, clock, log });
+    const engagement = new EngagementService({ db, clock, log });
     const care = new CareService({ db, audit, warranty, clock });
     const guarantees = new GuaranteeService({ db, audit, clock });
     const sizes = new SizeService({ db, audit, clock });
@@ -405,6 +409,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       clubProgram,
       tierGrants,
       birthdayCredits,
+      engagement,
       care,
       guarantees,
       sizes,

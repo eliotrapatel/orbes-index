@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sql } from 'kysely';
 import { DatabaseUrlError, parseDatabaseUrl, redactDatabaseUrl } from '../../src/server/db/url.js';
-import { advisoryXactLock, closeDb, createDb, inRetriedTransaction, inTransaction, parseInt8, RETRIED_TRANSACTION_TRIES } from '../../src/server/db/connection.js';
+import { advisoryXactLock, closeDb, createDb, inRetriedTransaction, inTransaction, parseInt8, RETRIED_TRANSACTION_TRIES, uuidArray } from '../../src/server/db/connection.js';
 import { migrateToLatest } from '../../src/server/db/migrate.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 
@@ -142,6 +142,22 @@ describe('transactions and advisory locks', () => {
     let inner = 0;
     await expect(t.db.transaction().execute((outer) => inRetriedTransaction(outer, async () => { inner += 1; throw pgFailure('40001'); }))).rejects.toMatchObject({ code: '40001' });
     expect(inner).toBe(1);
+  });
+
+  it('uuidArray passes a list of uuids as one parameter: = ANY matches its members, an empty list nothing, and anything but a uuid is refused', async () => {
+    const a = '5a8f0f8e-1b2c-4d3e-8f90-a1b2c3d4e5f6';
+    const b = '0b1c2d3e-4f50-4a61-8b72-c3d4e5f6a7b8';
+    const among = async (ids: string[]) => {
+      const q = sql<{ a: boolean; b: boolean; n: number }>`SELECT ${a}::uuid = ANY(${uuidArray(ids)}) AS a, ${b}::uuid = ANY(${uuidArray(ids)}) AS b, cardinality(${uuidArray(ids)}) AS n`;
+      return (await q.execute(t.db)).rows[0];
+    };
+    expect(await among([a, b])).toEqual({ a: true, b: true, n: 2 });
+    expect(await among([b])).toEqual({ a: false, b: true, n: 1 });
+    expect(await among([])).toEqual({ a: false, b: false, n: 0 });
+    // One parameter per list, whatever its length.
+    expect(sql`SELECT ${uuidArray([a, b])}`.compile(t.db).parameters).toEqual([`${a},${b}`]);
+    await expect(among(['not-a-uuid'])).rejects.toThrow();
+    await expect(among([`${a}') OR true --`])).rejects.toThrow();
   });
 
   it('advisoryXactLock requires a transaction and validates keys', async () => {

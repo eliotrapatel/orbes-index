@@ -17,7 +17,7 @@
  * entry CONFIRMED by ORBES Client Services.
  */
 import { sql, type Expression, type RawBuilder, type SqlBool } from 'kysely';
-import type { Db } from '../db/connection.js';
+import { uuidArray, type Db } from '../db/connection.js';
 
 /** The statuses of a draw's entry that only a place reserved directly can have before the draw (drops.ts, P-X02). */
 const RESERVED_DIRECTLY = ['SELECTED', 'CONFIRMED', 'LAPSED'] as const;
@@ -48,6 +48,52 @@ export function participationRows(db: Db, now: Date, accountId?: string) {
     .where((eb) => eb.or([eb('dd.drawn_at', 'is not', null), eb('de.status', 'in', [...RESERVED_DIRECTLY])]))
     .$if(accountId !== undefined, (q) => q.where('de.account_id', '=', accountId!));
   return live.union(draw);
+}
+
+/** A release an account took part in, with when the collector entered it (the engagement score, services/engagement.ts). */
+export interface ReleaseEntry {
+  account_id: string;
+  /** The release itself (an after-room's parent). */
+  release_id: string;
+  /** When the release opened (an after-room's: when the release it follows opened): what places it in a period. */
+  release_opens_at: Date;
+  /** T0 of what the collector entered, for the speed of entering: the release's, or the after-room's own. */
+  opens_at: Date;
+  /** The collector's entry: a draw entry's creation, the earliest counted LIVE entry's `joined_at` (the room or its after-room). */
+  entered_at: Date;
+}
+
+/**
+ * Every (account, release) the accounts `accountIds` took part in at `now`, among the releases opened after `from`,
+ * each once, with the opening and the entry: by the very rules of `participationRows` (a LIVE entry with a place in
+ * the line that was not REMOVED, an after-room's counting as the release it follows; a draw's entry not WITHDRAWN once
+ * drawn, or a place reserved directly; a cancelled release for nobody; T0 passed). test/services/engagement.test.ts
+ * holds the two to the same pairs. For a LIVE RELEASE entered in its room and in its after-room, the earliest entry
+ * is the one kept.
+ */
+export async function releaseEntries(db: Db, accountIds: readonly string[], from: Date, now: Date): Promise<ReleaseEntry[]> {
+  if (accountIds.length === 0) return [];
+  const ids = uuidArray(accountIds);
+  const r = await sql<ReleaseEntry>`
+    SELECT DISTINCT ON (e.account_id, e.release_id) e.account_id, e.release_id, e.release_opens_at, e.opens_at, e.entered_at
+      FROM (
+        SELECT le.account_id, coalesce(ld.parent_drop_id, ld.id) AS release_id, coalesce(lp.opens_at, ld.opens_at) AS release_opens_at,
+               ld.opens_at, le.joined_at AS entered_at
+          FROM live_entries le
+          JOIN drops ld ON ld.id = le.drop_id
+          LEFT JOIN drops lp ON lp.id = ld.parent_drop_id
+         WHERE le.account_id = ANY(${ids}) AND ld.mode = 'LIVE' AND ld.cancelled_at IS NULL AND ld.opens_at <= ${now}
+           AND le.position IS NOT NULL AND le.status <> 'REMOVED'
+        UNION ALL
+        SELECT de.account_id, dd.id, dd.opens_at, dd.opens_at, de.created_at
+          FROM drop_entries de
+          JOIN drops dd ON dd.id = de.drop_id
+         WHERE de.account_id = ANY(${ids}) AND dd.mode = 'DRAW' AND dd.cancelled_at IS NULL AND dd.opens_at <= ${now}
+           AND de.status <> 'WITHDRAWN' AND (dd.drawn_at IS NOT NULL OR de.status IN (${sql.join([...RESERVED_DIRECTLY])}))
+      ) e
+     WHERE e.release_opens_at > ${from}
+     ORDER BY e.account_id, e.release_id, e.entered_at, e.opens_at`.execute(db);
+  return r.rows;
 }
 
 /**

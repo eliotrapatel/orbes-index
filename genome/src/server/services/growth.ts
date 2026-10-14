@@ -48,7 +48,7 @@
  *     not sign-ups, owners or buyers (`notTestEntrant`, services/population.ts).
  */
 import { sql, type RawBuilder } from 'kysely';
-import type { Db } from '../db/connection.js';
+import { uuidArray, type Db } from '../db/connection.js';
 import { HOUSE_CURRENCIES, type DropMode } from '../db/schema.js';
 import { notFound, validationError } from '../errors.js';
 import { systemClock, type Clock } from '../types.js';
@@ -356,12 +356,15 @@ const EXCLUDED = sql.join([...CLUB_EXCLUDED_STATUSES]);
 
 /**
  * Every purchase (the rule in the file header): its account, when, a reference that orders ties, its source, its main
- * model, its currency and value (both NULL: a piece from elsewhere whose model has no price). `account` narrows it.
+ * model, its currency and value (both NULL: a piece from elsewhere whose model has no price). `account` narrows it to
+ * one account, or to a batch of accounts (the engagement score's spend, services/engagement.ts: the same rule, one
+ * meaning of « a purchase » in the whole console).
  */
-function purchases(account?: string): RawBuilder<unknown> {
-  const own = account ? sql`AND o.account_id = ${account}` : sql``;
-  const reg = account ? sql`AND w.account_id = ${account}` : sql``;
-  const inv = account ? sql`JOIN orders io ON io.id = i.order_id AND io.account_id = ${account}` : sql``;
+export function purchaseRows(account?: string | readonly string[]): RawBuilder<unknown> {
+  const of = (column: string) => (typeof account === 'string' ? sql`${sql.ref(column)} = ${account}` : sql`${sql.ref(column)} = ANY(${uuidArray(account ?? [])})`);
+  const own = account !== undefined ? sql`AND ${of('o.account_id')}` : sql``;
+  const reg = account !== undefined ? sql`AND ${of('w.account_id')}` : sql``;
+  const inv = account !== undefined ? sql`JOIN orders io ON io.id = i.order_id AND ${of('io.account_id')}` : sql``;
   return sql`
     SELECT o.account_id, o.paid_at AS at, o.id AS ref, o.channel AS source, coalesce(m.variant_of, m.id) AS model_id,
            coalesce(iv.currency, o.currency) AS currency, coalesce(iv.net, 0)::bigint AS value
@@ -406,7 +409,7 @@ interface CollectorRow {
  */
 function collectorRows(currency: Currency): RawBuilder<CollectorRow> {
   return sql<CollectorRow>`
-    WITH pur AS (${purchases()}),
+    WITH pur AS (${purchaseRows()}),
          r AS (SELECT pur.*, row_number() OVER (PARTITION BY pur.account_id ORDER BY pur.at, pur.ref) AS rn FROM pur),
          agg AS (
            SELECT r.account_id,
@@ -748,7 +751,7 @@ export class GrowthService {
 export async function collectorValue(db: Db, accountId: string): Promise<LifetimeValue> {
   const rows = (
     await sql<{ currency: string; value: number }>`
-      SELECT p.currency, sum(p.value)::bigint AS value FROM (${purchases(accountId)}) p
+      SELECT p.currency, sum(p.value)::bigint AS value FROM (${purchaseRows(accountId)}) p
        WHERE p.value IS NOT NULL GROUP BY p.currency ORDER BY p.currency`.execute(db)
   ).rows;
   return rows.map((r) => ({ currency: r.currency, valueMinor: Number(r.value) }));

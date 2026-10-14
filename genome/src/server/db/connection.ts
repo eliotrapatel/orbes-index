@@ -12,7 +12,7 @@
  * a transaction ALWAYS query through the transaction object — a query on
  * the outer `db` would wait for the transaction to finish and deadlock.
  */
-import { Kysely, PGliteDialect, PostgresDialect, sql } from 'kysely';
+import { Kysely, PGliteDialect, PostgresDialect, sql, type RawBuilder } from 'kysely';
 import pg from 'pg';
 import type { PGlite, PGliteOptions } from '@electric-sql/pglite';
 import type { Database } from './schema.js';
@@ -129,6 +129,15 @@ export async function closeDb(db: Kysely<any>): Promise<void> {
 export async function inTransaction<T>(db: Db, fn: (trx: Db) => Promise<T>): Promise<T> {
   if (db.isTransaction) return fn(db);
   return db.transaction().execute((trx) => fn(trx));
+}
+
+/**
+ * A list of uuids as ONE parameter, to read with `column = ANY(${uuidArray(ids)})`: a batch of several hundred ids costs
+ * one parameter instead of one each, on both drivers alike (no array serialisation involved). An empty list matches
+ * nothing. Every id must be a uuid: the cast refuses anything else.
+ */
+export function uuidArray(ids: readonly string[]): RawBuilder<string[]> {
+  return sql<string[]>`string_to_array(${ids.join(',')}::text, ',')::uuid[]`;
 }
 
 /** How many times `inRetriedTransaction` runs its work at most. */
