@@ -22,6 +22,10 @@ import {
   CLIENT_MESSAGE_CONTEXTS,
   CLUB_TIER_NAMES,
   CODE_STATUSES,
+  DEVICE_KINDS,
+  DEVICE_SYSTEMS,
+  IN_APPS,
+  OPENED_IN,
   CREDIT_CHANNELS,
   HOUSE_CURRENCIES,
   SHIPPING_FREE_LEVELS,
@@ -1073,6 +1077,8 @@ export const segmentParams = z.object({ id: uuid });
 const segmentCount = whole(SEGMENT_LIMITS.count.min, SEGMENT_LIMITS.count.max, 'releases or pieces');
 const segmentItems = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'Name at least one').max(SEGMENT_LIMITS.items, `At most ${SEGMENT_LIMITS.items}`);
 const negated = { not: z.boolean().optional() };
+const segmentViewMin = whole(SEGMENT_LIMITS.viewMin.min, SEGMENT_LIMITS.viewMin.max, 'views');
+const segmentViewDays = whole(SEGMENT_LIMITS.viewDays.min, SEGMENT_LIMITS.viewDays.max, 'days');
 /** A criterion of a segment, by its kind (services/segments.ts holds the rest: the ids named exist, an answer is one of its release's). */
 const segmentRule = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('PARTICIPATIONS'), min: segmentCount, ...negated }),
@@ -1097,6 +1103,24 @@ const segmentRule = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('WISHES_COLLECTION'), collectionIds: segmentItems(uuid), ...negated }),
   z.strictObject({ kind: z.literal('FAVOURITE_PIECE'), pieces: segmentItems(text(TASTE_KEY_MAX)), ...negated }),
   z.strictObject({ kind: z.literal('FAVOURITE_FINISH'), finishes: segmentItems(text(TASTE_KEY_MAX)), ...negated }),
+  z.strictObject({ kind: z.literal('VIEWED_MODEL'), modelIds: segmentItems(uuid), min: segmentViewMin, days: segmentViewDays, ...negated }),
+  z.strictObject({ kind: z.literal('VIEWED_RELEASE'), dropId: uuid, min: segmentViewMin, ...negated }),
+  z.strictObject({
+    kind: z.literal('DEVICE'),
+    kinds: segmentItems(z.enum(DEVICE_KINDS)).optional(),
+    systems: segmentItems(z.enum(DEVICE_SYSTEMS)).optional(),
+    openedIn: segmentItems(z.enum(OPENED_IN)).optional(),
+    apps: segmentItems(z.enum(IN_APPS)).optional(),
+    days: segmentViewDays,
+    ...negated,
+  }),
+  z.strictObject({
+    kind: z.literal('PLACE'),
+    countries: segmentItems(z.string().trim().regex(/^[A-Za-z]{2}$/, 'Two letters')).optional(),
+    placeIds: segmentItems(z.number().int('Must be a place').min(1, 'At least 1').max(2_147_483_647, 'Too large')).optional(),
+    days: segmentViewDays,
+    ...negated,
+  }),
 ]);
 const segmentRules = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'At least one rule').max(SEGMENT_LIMITS.rules, `At most ${SEGMENT_LIMITS.rules} rules`);
 /** A segment's rule tree: a group of criteria and of groups of criteria (one level down). */

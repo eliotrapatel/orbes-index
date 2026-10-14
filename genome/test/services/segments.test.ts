@@ -15,7 +15,8 @@
  *  - the customer intelligence lot's criteria (plan CUSTOMER INTELLIGENCE §3.0 (g), §3.6 C.5.1, steps 8.1 to 8.4), each
  *    matched and negated, their bounds and refusals, the names they check: PERSON (the city given, folded; the age
  *    today in Paris; how they heard; a tag), TASTES (a wish for a model, a main model with its variants, or for a model
- *    of a collection; a favourite piece or finish). A test entrant matches none but through a NOT.
+ *    of a collection; a favourite piece or finish), BROWSING (a model or a release viewed, a device, a place from the
+ *    connection, within the 395 days). A test entrant matches none but through a NOT.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -24,6 +25,9 @@ import { participatedReleases, participations } from '../../src/server/services/
 import { cleanCriteria, isSegmentMember, SEGMENT_LIMITS, segmentMembers, SegmentService, type SegmentGroup } from '../../src/server/services/segments.js';
 import { TAG_MAX } from '../../src/server/services/client-notes.js';
 import { CITY_MAX } from '../../src/shared/profile-rules.js';
+import { randomBytes } from 'node:crypto';
+import { VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
+import { VIEW_RULE_DAYS, VIEW_RULE_MIN } from '../../src/server/services/tracking-reads.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { accountOfTier, createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixture, type LiveFixture } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
@@ -385,7 +389,8 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
   /** The accounts of the scenario, by name; `entrant` is a test entrant, which has no profile, wish, view nor source. */
   const p = {} as Record<'one' | 'two' | 'three' | 'four' | 'entrant', string>;
   const heard = {} as Record<'instagram' | 'friend', string>;
-  const m = {} as Record<'main' | 'blue' | 'orbit' | 'nocturne' | 'noir', string>;
+  const m = {} as Record<'main' | 'blue' | 'orbit' | 'nocturne' | 'noir' | 'release', string>;
+  const place = {} as Record<'paris' | 'milan', number>;
 
   const all = (...rules: unknown[]): SegmentGroup => cleanCriteria({ match: 'ALL', rules });
   /** The accounts of the scenario a tree matches now, by name. */
@@ -449,6 +454,71 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
         { account_id: p.one, kind: 'FINISH', value_key: 'BLUE', label: 'Blue' },
         { account_id: p.two, kind: 'PIECE', value_key: 'CUFF', label: 'Cuff' },
         { account_id: p.two, kind: 'FINISH', value_key: 'ROSE GOLD', label: 'Rose gold' },
+      ])
+      .execute();
+
+    // What they looked at (now: 28 February 2027). The first, on an iPhone inside Instagram, from Paris: MONOLITHE Blue
+    // twice and the release this month. The second, on a Windows computer a year ago from Milan: MONOLITHE 383 days ago.
+    // The third: a view of MONOLITHE 454 days ago, past the 395 days, on a device no longer linked.
+    m.release = (await createLiveRelease(f, { opensAt: new Date('2027-03-10T18:00:00.000Z'), modelId: m.main })).id;
+    const places = await t.db.insertInto('geo_places').values([{ country: 'FR', city: 'Paris' }, { country: 'IT', city: 'Milan' }]).returning(['id', 'city']).execute();
+    place.paris = places.find((x) => x.city === 'Paris')!.id;
+    place.milan = places.find((x) => x.city === 'Milan')!.id;
+    const device = async (o: { kind: 'PHONE' | 'COMPUTER'; os: 'IOS' | 'WINDOWS'; browser: 'WEBVIEW' | 'EDGE'; app: 'INSTAGRAM' | null; account: string; at: string }) =>
+      (
+        await t.db
+          .insertInto('tracking_devices')
+          .values({
+            device_hash: randomBytes(32).toString('base64url').slice(0, 43),
+            kind: o.kind,
+            os: o.os,
+            browser: o.browser,
+            opened_in: o.app ? 'IN_APP' : 'BROWSER',
+            in_app: o.app,
+            account_id: o.account,
+            linked_at: new Date(o.at),
+            first_seen_at: new Date(o.at),
+            last_seen_at: new Date(o.at),
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+    const phone = await device({ kind: 'PHONE', os: 'IOS', browser: 'WEBVIEW', app: 'INSTAGRAM', account: p.one, at: '2027-02-20T10:00:00.000Z' });
+    const computer = await device({ kind: 'COMPUTER', os: 'WINDOWS', browser: 'EDGE', app: null, account: p.two, at: '2026-02-10T10:00:00.000Z' });
+    const old = await device({ kind: 'PHONE', os: 'IOS', browser: 'WEBVIEW', app: 'INSTAGRAM', account: p.three, at: '2025-12-01T10:00:00.000Z' });
+    await t.db.updateTable('tracking_devices').set({ account_id: null, linked_at: null }).where('id', '=', old).execute();
+    await t.db
+      .insertInto('tracking_device_accounts')
+      .values([
+        { device_id: phone, account_id: p.one, first_via: 'SIGN_IN', first_linked_at: new Date('2027-02-20T10:00:00.000Z'), last_linked_at: new Date('2027-02-20T10:00:00.000Z') },
+        { device_id: computer, account_id: p.two, first_via: 'SIGN_UP', first_linked_at: new Date('2026-02-10T10:00:00.000Z'), last_linked_at: new Date('2026-02-10T10:00:00.000Z') },
+        { device_id: old, account_id: p.three, first_via: 'SIGN_UP', first_linked_at: new Date('2025-12-01T10:00:00.000Z'), last_linked_at: new Date('2025-12-01T10:00:00.000Z') },
+      ])
+      .execute();
+    const view = (device_id: number, account_id: string, at: string, page: 'MODEL' | 'RELEASE', subject: string, place_id: number | null) => ({
+      at: new Date(at),
+      device_id,
+      account_id,
+      page: VIEW_PAGE_CODES[page],
+      subject,
+      seconds: 20,
+      place_id,
+    });
+    await t.db
+      .insertInto('collector_views')
+      .values([
+        view(phone, p.one, '2027-02-20T10:00:00.000Z', 'MODEL', m.blue, place.paris),
+        view(phone, p.one, '2027-02-27T10:00:00.000Z', 'MODEL', m.blue, place.paris),
+        view(phone, p.one, '2027-02-27T10:05:00.000Z', 'RELEASE', m.release, place.paris),
+        view(computer, p.two, '2026-02-10T10:00:00.000Z', 'MODEL', m.main, place.milan),
+        view(old, p.three, '2025-12-01T10:00:00.000Z', 'MODEL', m.main, null),
+      ])
+      .execute();
+    await t.db
+      .insertInto('collector_places')
+      .values([
+        { account_id: p.one, place_id: place.paris, days: 2, first_day: '2027-02-20', last_day: '2027-02-27' },
+        { account_id: p.two, place_id: place.milan, days: 1, first_day: '2026-02-10', last_day: '2026-02-10' },
       ])
       .execute();
   });
@@ -573,6 +643,72 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
       await rejects(segments.count({ match: 'ALL', rules: [{ kind: 'WISHES_COLLECTION', collectionIds: [unknown] }] }), 'COLLECTION_NOT_FOUND', 404);
       expect(await segments.count({ match: 'ALL', rules: [{ kind: 'FAVOURITE_FINISH', finishes: ['NEVER OFFERED'] }] })).toEqual({ count: 0 });
       expect(await segments.count({ match: 'ALL', rules: [{ kind: 'WISHES_MODEL', modelIds: [m.main] }] })).toEqual({ count: 2 });
+    });
+  });
+
+  describe('BROWSING (step 8.3)', () => {
+    it('VIEWED_MODEL: at least N views in the last N days, a main model with its variants; the 395 days; negated', async () => {
+      expect(await matched(all({ kind: 'VIEWED_MODEL', modelIds: [m.main], min: 1, days: 30 }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'VIEWED_MODEL', modelIds: [m.blue], min: 2, days: 30 }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'VIEWED_MODEL', modelIds: [m.blue], min: 3, days: 395 }))).toEqual([]);
+      expect(await matched(all({ kind: 'VIEWED_MODEL', modelIds: [m.blue], min: 1, days: 2 }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'VIEWED_MODEL', modelIds: [m.blue], min: 2, days: 2 }))).toEqual([]);
+      // 383 days ago is within the 395, 454 days ago never is.
+      expect(await matched(all({ kind: 'VIEWED_MODEL', modelIds: [m.main], min: 1, days: 395 }))).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'VIEWED_MODEL', modelIds: [m.main], min: 1, days: 395, not: true }))).toEqual(['entrant', 'four', 'three']);
+      bad({ kind: 'VIEWED_MODEL', modelIds: [m.main], min: 1, days: 396 });
+      expect(() => cleanCriteria({ match: 'ALL', rules: [{ kind: 'VIEWED_MODEL', modelIds: [m.main], min: 1, days: 396 }] })).toThrow('Viewed a model in the last N days is a whole number from 1 to 395.');
+    });
+
+    it('VIEWED_RELEASE: at least N views of the release over the 13 months; negated', async () => {
+      expect(await matched(all({ kind: 'VIEWED_RELEASE', dropId: m.release, min: 1 }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'VIEWED_RELEASE', dropId: m.release, min: 2 }))).toEqual([]);
+      expect(await matched(all({ kind: 'VIEWED_RELEASE', dropId: m.release, min: 1, not: true }))).toEqual(['entrant', 'four', 'three', 'two']);
+    });
+
+    it('DEVICE: a device used in the last N days matching every list given, with one, two and three lists; negated', async () => {
+      expect(await matched(all({ kind: 'DEVICE', kinds: ['PHONE'], days: 90 }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'DEVICE', kinds: ['PHONE'], openedIn: ['IN_APP'], days: 90 }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'DEVICE', systems: ['IOS'], openedIn: ['IN_APP'], apps: ['INSTAGRAM'], days: 90 }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'DEVICE', kinds: ['PHONE'], apps: ['TIKTOK'], days: 90 }))).toEqual([]);
+      expect(await matched(all({ kind: 'DEVICE', systems: ['WINDOWS'], days: 30 }))).toEqual([]);
+      expect(await matched(all({ kind: 'DEVICE', systems: ['WINDOWS', 'IOS'], days: 395 }))).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'DEVICE', kinds: ['PHONE'], days: 90, not: true }))).toEqual(['entrant', 'four', 'three', 'two']);
+      // Only the lists given, each sorted and once.
+      expect(all({ kind: 'DEVICE', systems: ['IOS', 'ANDROID', 'IOS'], days: 30 }).rules).toEqual([{ kind: 'DEVICE', systems: ['ANDROID', 'IOS'], days: 30 }]);
+    });
+
+    it('PLACE: a country or a place it was seen from by the connection in the last N days; negated', async () => {
+      expect(await matched(all({ kind: 'PLACE', countries: ['it'], days: 395 }))).toEqual(['two']);
+      expect(await matched(all({ kind: 'PLACE', countries: ['IT'], days: 30 }))).toEqual([]);
+      expect(await matched(all({ kind: 'PLACE', placeIds: [place.paris], days: 30 }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'PLACE', countries: ['FR'], placeIds: [place.milan], days: 395 }))).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'PLACE', countries: ['FR'], days: 30, not: true }))).toEqual(['entrant', 'four', 'three', 'two']);
+      // The city given in YOUR PROFILE is CITY's, never PLACE's: the third gave Saint-Étienne and was never seen from it.
+      expect(await matched(all({ kind: 'CITY', cities: ['saint-etienne'] }, { kind: 'PLACE', countries: ['FR'], days: 395 }))).toEqual(['one']);
+    });
+
+    it('refuses a rule out of its bounds; checks the models and the release named, never the places; its bounds are the recording\'s', async () => {
+      bad({ kind: 'VIEWED_MODEL', modelIds: [m.main], min: 0, days: 30 });
+      bad({ kind: 'VIEWED_MODEL', modelIds: [m.main], min: 101, days: 30 });
+      bad({ kind: 'VIEWED_MODEL', modelIds: [], min: 1, days: 30 });
+      bad({ kind: 'VIEWED_MODEL', modelIds: [m.main], min: 1 });
+      bad({ kind: 'VIEWED_RELEASE', dropId: m.release, min: 101 });
+      bad({ kind: 'VIEWED_RELEASE', dropId: 'MONOLITHE', min: 1 });
+      bad({ kind: 'DEVICE', days: 30 });
+      bad({ kind: 'DEVICE', kinds: [], days: 30 });
+      bad({ kind: 'DEVICE', kinds: ['WATCH'], days: 30 });
+      bad({ kind: 'DEVICE', apps: ['INSTAGRAM'], days: 0 });
+      bad({ kind: 'PLACE', days: 30 });
+      bad({ kind: 'PLACE', placeIds: [0], days: 30 });
+      bad({ kind: 'PLACE', countries: ['FRA'], days: 30 });
+      bad({ kind: 'PLACE', countries: ['FR'], days: 396 });
+      expect(() => cleanCriteria({ match: 'ALL', rules: [{ kind: 'DEVICE', days: 30 }] })).toThrow('Device: tick at least one.');
+      const unknown = '00000000-0000-4000-8000-000000000000';
+      await rejects(segments.count({ match: 'ALL', rules: [{ kind: 'VIEWED_MODEL', modelIds: [unknown], min: 1, days: 30 }] }), 'MODEL_NOT_FOUND', 404);
+      await rejects(segments.count({ match: 'ALL', rules: [{ kind: 'VIEWED_RELEASE', dropId: unknown, min: 1 }] }), 'DROP_NOT_FOUND', 404);
+      expect(await segments.count({ match: 'ALL', rules: [{ kind: 'PLACE', placeIds: [999_999], days: 30 }] })).toEqual({ count: 0 });
+      expect([SEGMENT_LIMITS.viewDays, SEGMENT_LIMITS.viewMin]).toEqual([VIEW_RULE_DAYS, VIEW_RULE_MIN]);
     });
   });
 });

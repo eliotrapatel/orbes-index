@@ -18,7 +18,12 @@
  *              date of birth, the answer to « How did you hear about ORBES? », a staff tag;
  *   tastes     an open wish for a model (a main model named includes its variants, a variant only itself) or for a model
  *              of a collection, a favourite piece or finish chosen in YOUR PROFILE (its key; one no longer in the
- *              collection still matches: keys are never checked against the catalogue).
+ *              collection still matches: keys are never checked against the catalogue);
+ *   browsing   (§3.3 T.4.3: services/tracking-reads.ts browsingCondition, TrackingService.segmentCondition's SQL) a
+ *              model viewed at least N times in the last N days (a main model with its variants), a release viewed at
+ *              least N times over the 13 months, a device used in the last N days (its kind, system, way it was opened
+ *              and app), a place it was seen from by the connection in the last N days. N days is at most 395: the
+ *              views' detail is kept 13 months.
  *
  * A new criterion reads what a test entrant never has (a profile, a wish, a view, a source, a score): a test entrant
  * matches one only through a NOT (§3.0 (d)), as today's members rule (ACTIVE accounts, test entrants and the team's own
@@ -39,7 +44,20 @@
 import { sql, type Expression, type ExpressionBuilder, type RawBuilder, type SqlBool } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
 import { isUniqueViolation } from '../db/pg-errors.js';
-import { jsonText, type Database, type JsonObject, type SegmentRow } from '../db/schema.js';
+import {
+  DEVICE_KINDS,
+  DEVICE_SYSTEMS,
+  IN_APPS,
+  jsonText,
+  OPENED_IN,
+  type Database,
+  type DeviceKind,
+  type DeviceSystem,
+  type InApp,
+  type JsonObject,
+  type OpenedIn,
+  type SegmentRow,
+} from '../db/schema.js';
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
 import type { AuditService } from './audit.js';
@@ -51,6 +69,7 @@ import { fold } from '../../shared/fold.js';
 import { cleanWords, latestBirthDateForAge, TASTE_KEY_MAX, tasteKey } from '../../shared/profile-rules.js';
 import { cleanTag } from './client-notes.js';
 import { parisDay } from './schedule.js';
+import { browsingCondition } from './tracking-reads.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -62,6 +81,7 @@ export const SEGMENT_CRITERIA = Object.freeze({
   SIGNALS: Object.freeze(['INTEREST', 'ANSWER', 'ACTIVE'] as const),
   PERSON: Object.freeze(['CITY', 'AGE', 'HEARD_FROM', 'TAGGED'] as const),
   TASTES: Object.freeze(['WISHES_MODEL', 'WISHES_COLLECTION', 'FAVOURITE_PIECE', 'FAVOURITE_FINISH'] as const),
+  BROWSING: Object.freeze(['VIEWED_MODEL', 'VIEWED_RELEASE', 'DEVICE', 'PLACE'] as const),
 });
 export type SegmentCriterionGroup = keyof typeof SEGMENT_CRITERIA;
 export const SEGMENT_RULE_KINDS = Object.freeze([
@@ -71,6 +91,7 @@ export const SEGMENT_RULE_KINDS = Object.freeze([
   ...SEGMENT_CRITERIA.SIGNALS,
   ...SEGMENT_CRITERIA.PERSON,
   ...SEGMENT_CRITERIA.TASTES,
+  ...SEGMENT_CRITERIA.BROWSING,
 ] as const);
 export type SegmentRuleKind = (typeof SEGMENT_RULE_KINDS)[number];
 export const SEGMENT_MATCHES = Object.freeze(['ALL', 'ANY'] as const);
@@ -96,6 +117,10 @@ export const SEGMENT_LIMITS = Object.freeze({
   city: 80,
   /** A tag named by TAGGED, in characters (services/client-notes.ts TAG_MAX). */
   tag: 32,
+  /** The last N days of VIEWED_MODEL, DEVICE and PLACE (services/tracking-reads.ts VIEW_RULE_DAYS: the 13 months). */
+  viewDays: Object.freeze({ min: 1, max: 395 }),
+  /** Viewed at least N times (VIEW_RULE_MIN). */
+  viewMin: Object.freeze({ min: 1, max: 100 }),
 });
 
 /** A criterion of a segment; `not`: the accounts it does not match. */
@@ -120,6 +145,10 @@ export type SegmentRule = { not?: boolean } & (
   | { kind: 'WISHES_COLLECTION'; collectionIds: string[] }
   | { kind: 'FAVOURITE_PIECE'; pieces: string[] }
   | { kind: 'FAVOURITE_FINISH'; finishes: string[] }
+  | { kind: 'VIEWED_MODEL'; modelIds: string[]; min: number; days: number }
+  | { kind: 'VIEWED_RELEASE'; dropId: string; min: number }
+  | { kind: 'DEVICE'; kinds?: DeviceKind[]; systems?: DeviceSystem[]; openedIn?: OpenedIn[]; apps?: InApp[]; days: number }
+  | { kind: 'PLACE'; countries?: string[]; placeIds?: number[]; days: number }
 );
 
 /** A group of rules: ALL of them, or ANY. */
@@ -161,6 +190,28 @@ function country(v: unknown): string {
   const s = typeof v === 'string' ? v.trim().toUpperCase() : '';
   if (!/^[A-Z]{2}$/.test(s)) throw validationError('A country is its two letters (FR, IT, US).');
   return s;
+}
+
+/** One of `values`, as given. */
+function oneOf<T extends string>(values: readonly T[], what: string): (v: unknown) => T {
+  return (v) => {
+    if (typeof v !== 'string' || !(values as readonly string[]).includes(v)) throw validationError(`${what} is one of ${values.join(', ')}.`);
+    return v as T;
+  };
+}
+
+/** A place seen from (geo_places.id): a whole number from 1. Places are never checked: one no longer seen matches nobody. */
+function placeId(v: unknown): number {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 2_147_483_647) throw validationError('A place is unknown.');
+  return v;
+}
+
+/** The lists of DEVICE or PLACE given (at least one), each of 1 to 50 items; a list left out stays out. */
+function someLists<K extends string>(r: Record<string, unknown>, keys: { [k in K]: (x: unknown) => string | number }, what: string): Partial<Record<K, (string | number)[]>> {
+  const out: Partial<Record<K, (string | number)[]>> = {};
+  for (const k of Object.keys(keys) as K[]) if (r[k] !== undefined) out[k] = list(r[k], what, keys[k]);
+  if (Object.keys(out).length === 0) throw validationError(`${what}: tick at least one.`);
+  return out;
 }
 
 /** A favourite piece's or finish's key, as YOUR PROFILE keeps one (shared/profile-rules.ts tasteKey). */
@@ -225,6 +276,24 @@ function cleanRule(v: unknown): SegmentRule {
       return { kind: 'FAVOURITE_PIECE', pieces: list(r.pieces, 'The favourite pieces', taste), ...not };
     case 'FAVOURITE_FINISH':
       return { kind: 'FAVOURITE_FINISH', finishes: list(r.finishes, 'The favourite finishes', taste), ...not };
+    case 'VIEWED_MODEL':
+      return {
+        kind: 'VIEWED_MODEL',
+        modelIds: list(r.modelIds, 'The models', (m) => id(m, 'A model')),
+        min: whole(r.min, SEGMENT_LIMITS.viewMin, 'Viewed at least N times'),
+        days: whole(r.days, SEGMENT_LIMITS.viewDays, 'Viewed a model in the last N days'),
+        ...not,
+      };
+    case 'VIEWED_RELEASE':
+      return { kind: 'VIEWED_RELEASE', dropId: id(r.dropId, 'The release'), min: whole(r.min, SEGMENT_LIMITS.viewMin, 'Viewed at least N times'), ...not };
+    case 'DEVICE': {
+      const lists = someLists(r, { kinds: oneOf(DEVICE_KINDS, 'A device'), systems: oneOf(DEVICE_SYSTEMS, 'A system'), openedIn: oneOf(OPENED_IN, 'A way it was opened'), apps: oneOf(IN_APPS, 'An app') }, 'Device');
+      return { kind: 'DEVICE', ...(lists as Pick<Extract<SegmentRule, { kind: 'DEVICE' }>, 'kinds' | 'systems' | 'openedIn' | 'apps'>), days: whole(r.days, SEGMENT_LIMITS.viewDays, 'Device: in the last N days'), ...not };
+    }
+    case 'PLACE': {
+      const lists = someLists(r, { countries: country, placeIds: placeId }, 'Seen from');
+      return { kind: 'PLACE', ...(lists as Pick<Extract<SegmentRule, { kind: 'PLACE' }>, 'countries' | 'placeIds'>), days: whole(r.days, SEGMENT_LIMITS.viewDays, 'Seen from: in the last N days'), ...not };
+    }
     default:
       throw validationError(`A criterion is one of ${SEGMENT_RULE_KINDS.join(', ')}.`);
   }
@@ -410,6 +479,13 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
       x = sql<SqlBool>`exists (select 1 from account_tastes as ft where ft.account_id = ${account} and ft.kind = ${kind} and ft.value_key in (${sql.join(keys)}))`;
       break;
     }
+    case 'VIEWED_MODEL':
+    case 'VIEWED_RELEASE':
+    case 'DEVICE':
+    case 'PLACE':
+      // Each on an index that leads with the account (collector_views_account_idx, tracking_device_accounts, collector_places).
+      x = browsingCondition(r, account, now);
+      break;
   }
   return r.not ? sql<SqlBool>`not (${x})` : x;
 }
@@ -721,12 +797,13 @@ export class SegmentService {
   /**
    * The releases, models, collections and answers of « How did you hear about ORBES? » the criteria name exist (404
    * otherwise); an answer to the question after is one of its release's. Tags are free, and favourite pieces and
-   * finishes are never checked against the catalogue of the day: a segment on a key no longer offered still runs.
+   * finishes are never checked against the catalogue of the day: a segment on a key no longer offered still runs; nor
+   * are the places seen from (one no longer seen matches nobody).
    */
   private async checkNames(db: Db, criteria: SegmentGroup): Promise<void> {
     const rules = segmentRules(criteria);
     const drops = [...new Set(rules.flatMap((r) => ('dropId' in r && r.dropId ? [r.dropId] : [])))];
-    const models = [...new Set(rules.flatMap((r) => (r.kind === 'OWNS_MODEL' || r.kind === 'WISHES_MODEL' ? r.modelIds : [])))];
+    const models = [...new Set(rules.flatMap((r) => (r.kind === 'OWNS_MODEL' || r.kind === 'WISHES_MODEL' || r.kind === 'VIEWED_MODEL' ? r.modelIds : [])))];
     const collections = [...new Set(rules.flatMap((r) => (r.kind === 'OWNS_COLLECTION' || r.kind === 'WISHES_COLLECTION' ? r.collectionIds : [])))];
     if (drops.length) {
       const found = await db.selectFrom('drops').select(['id', 'mode', 'question_enabled', 'question_answers']).where('id', 'in', drops).where('parent_drop_id', 'is', null).execute();

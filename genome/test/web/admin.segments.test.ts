@@ -50,7 +50,7 @@ describe('the Segments page mirrors the server', () => {
     // The customer intelligence lot's groups reach the server first (plan CUSTOMER INTELLIGENCE §4, steps 8.1 to 8.5)
     // and the builder at step 8.7, which empties BUILDER_LATER: until then the server holds exactly these groups more,
     // after the ones the builder mirrors.
-    const BUILDER_LATER = ['PERSON', 'TASTES'];
+    const BUILDER_LATER = ['PERSON', 'TASTES', 'BROWSING'];
     const serverGroups = Object.keys(SERVER_CRITERIA);
     expect(serverGroups).toEqual([...Object.keys(SEGMENT_CRITERIA), ...BUILDER_LATER]);
     const mirrored = Object.fromEntries(Object.entries(SERVER_CRITERIA).filter(([g]) => !BUILDER_LATER.includes(g)));

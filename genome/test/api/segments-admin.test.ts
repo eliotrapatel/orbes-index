@@ -220,5 +220,16 @@ describe('segments and the access rules: the console’s and the public routes',
     expect(safeJson(await op.post('/api/admin/segments/count', { criteria: { match: 'ALL', rules: [{ kind: 'FAVOURITE_FINISH', finishes: ['ROSE GOLD'] }] } }))).toEqual({ count: 0 });
     await refused({ kind: 'WISHES_COLLECTION', collectionIds: ['00000000-0000-4000-8000-000000000000'] }, 404, 'COLLECTION_NOT_FOUND');
     await refused({ kind: 'FAVOURITE_FINISH', finishes: ['x'.repeat(61)] }, 400, 'VALIDATION_FAILED');
+
+    // BROWSING (step 8.3): the member signed up on an iPhone's browser (the harness's), and looked at nothing yet.
+    const browsing = { match: 'ANY', rules: [{ kind: 'VIEWED_MODEL', modelIds: [f.modelId], min: 1, days: 395 }, { kind: 'DEVICE', kinds: ['PHONE'], apps: ['INSTAGRAM'], days: 90 }, { kind: 'PLACE', countries: ['FR'], days: 30 }] };
+    expect(safeJson(await op.post('/api/admin/segments/count', { criteria: browsing }))).toEqual({ count: 0 });
+    const iphone = (not: boolean) => ({ match: 'ALL', rules: [{ kind: 'DEVICE', kinds: ['PHONE'], systems: ['IOS'], days: 90, not }, { kind: 'TAGGED', tags: ['VIP'] }] });
+    expect(safeJson(await op.post('/api/admin/segments/count', { criteria: iphone(false) }))).toEqual({ count: 1 });
+    expect(safeJson(await op.post('/api/admin/segments/count', { criteria: iphone(true) }))).toEqual({ count: 0 });
+    await refused({ kind: 'VIEWED_MODEL', modelIds: [f.modelId], min: 1, days: 396 }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'DEVICE', days: 30 }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'DEVICE', kinds: ['WATCH'], days: 30 }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'VIEWED_RELEASE', dropId: '00000000-0000-4000-8000-000000000000', min: 1 }, 404, 'DROP_NOT_FOUND');
   });
 });
