@@ -44,6 +44,7 @@ import {
   countryOptions,
   engravingLine,
   CHANNEL_LABELS,
+  APPLY_CREDIT_TEXT,
   creditActions,
   creditAppliedLine,
   creditAvailableLine,
@@ -297,7 +298,7 @@ export async function orderView(ctx: ViewContext): Promise<HTMLElement> {
     void openDialog({
       title: 'Apply credit',
       eyebrow,
-      body: h('p', { class: 'dialog__text' }, 'A tier’s credit taken off this order’s invoice, in its currency. It is given back if the order is cancelled or returned, with its expiry unchanged.'),
+      body: h('p', { class: 'dialog__text' }, APPLY_CREDIT_TEXT),
       fields: [{ name: 'amount', label: 'Amount', maxlength: 12, value: creditValue(o), hint: `In ${o.currency ?? 'its currency'}, in units: 50, or 50.50. Available: ${creditAvailableLine(o)}.` }],
       validate: (v) => creditProblem(o, v),
       confirmLabel: 'Apply credit',

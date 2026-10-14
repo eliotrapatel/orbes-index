@@ -237,6 +237,8 @@ import {
   tierBenefitsProblem,
   tierName,
   tierStanding,
+  BIRTHDAY_CREDIT_LABEL,
+  birthdayNextLine,
   clubBlockLines,
   tierThreshold,
   utcInstant,
@@ -908,8 +910,65 @@ describe('the Club\'s tiers (P-X04)', () => {
       { label: 'Welcome gift PLATINE', value: 'with OR-7C21A9F0', link: { kind: 'order', id: 'o1' } },
       { label: 'Welcome gift PALLADIUM', value: 'pending', link: null },
       { label: 'Yearly care', value: '2026: 0 of 1 · open: O26-J-00184', link: { kind: 'care', id: 'c1' } },
+      // Plan CUSTOMER INTELLIGENCE §3.5 SB.4.6: the birthday credit's line, last.
+      { label: 'Birthday credit', value: 'No date of birth', link: null },
     ]);
-    expect(clubBlockLines({ tier: 'PALLADIUM', grants: [], careThisYear: { year: 2026, used: 2, allowance: 'ALL', open: null }, birthdayNext: { state: 'NO_DATE' } })).toEqual([{ label: 'Yearly care', value: '2026: 2 · every piece', link: null }]);
+    expect(clubBlockLines({ tier: 'PALLADIUM', grants: [], careThisYear: { year: 2026, used: 2, allowance: 'ALL', open: null }, birthdayNext: { state: 'NO_DATE' } })).toEqual([
+      { label: 'Yearly care', value: '2026: 2 · every piece', link: null },
+      { label: 'Birthday credit', value: 'No date of birth', link: null },
+    ]);
+  });
+
+  it('says the birthday credit in an owner\'s Club block (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6): each one given, and when none is open, when the next comes or why none does', () => {
+    type Club = NonNullable<Parameters<typeof clubBlockLines>[0]>;
+    const now = new Date('2027-03-20T10:00:00.000Z');
+    /** € 20 given for 14 March 2027, until the end of 12 April (Paris). */
+    const given = (over: Partial<Club['grants'][number]> = {}): Club['grants'][number] => ({
+      tier: null, kind: 'BIRTHDAY', birthdayOn: '2027-03-14', grantedAt: '2027-03-13T23:00:00.000Z', amountMinor: 2000, balanceMinor: 2000, currency: 'EUR', expiresAt: '2027-04-12T21:59:59.999Z', gift: null, ...over,
+    });
+    const club = (grants: Club['grants'], birthdayNext: Club['birthdayNext'], tier: Club['tier'] = null): Club => ({ tier, grants, careThisYear: null, birthdayNext });
+    const birthdayLines = (c: Club, at = now) => clubBlockLines(c, at).filter((l) => l.label === 'Birthday credit').map((l) => l.value);
+    expect(BIRTHDAY_CREDIT_LABEL).toBe('Birthday credit');
+    // The label carries no figure: the display face takes none.
+    expect(BIRTHDAY_CREDIT_LABEL).not.toMatch(/\d/);
+
+    // No birthday credit: one line, for each state of the next one. A client without a tier has it too.
+    expect(clubBlockLines(club([], { state: 'NEXT', on: '2027-03-14' }), now)).toEqual([{ label: 'Birthday credit', value: 'Next on 14 MAR 2027', link: null }]);
+    expect(birthdayLines(club([], { state: 'NO_DATE' }))).toEqual(['No date of birth']);
+    expect(birthdayLines(club([], { state: 'OFF' }))).toEqual(['Off in THE PROGRAM']);
+    expect(birthdayLines(club([], { state: 'TEST_ENTRANT' }))).toEqual(['Not given to test entrants']);
+    expect(birthdayNextLine({ state: 'NEXT', on: '2028-02-29' })).toBe('Next on 29 FEB 2028');
+    expect(birthdayNextLine(undefined)).toBeNull();
+    // A server before it (no birthdayNext): no line, never a wrong one.
+    expect(clubBlockLines({ tier: null, grants: [], careThisYear: null } as unknown as Club, now)).toEqual([]);
+
+    // One open (a balance, not expired): its line alone, with what is left, until when and its birthday.
+    expect(clubBlockLines(club([given()], { state: 'NEXT', on: '2028-03-14' }), now)).toEqual([{ label: 'Birthday credit', value: '€\u00a020, €\u00a020 left, until 12 APR 2027 · birthday 14 MAR 2027', link: null }]);
+    expect(birthdayLines(club([given({ balanceMinor: 550 })], { state: 'NEXT', on: '2028-03-14' }))).toEqual(['€\u00a020, €\u00a05.50 left, until 12 APR 2027 · birthday 14 MAR 2027']);
+    // Open to its last instant, 23:59:59.999 Paris on 12 April.
+    expect(birthdayLines(club([given()], { state: 'NEXT', on: '2028-03-14' }), new Date('2027-04-12T21:59:59.998Z'))).toHaveLength(1);
+    // Used up, or expired: still listed, and the next one said.
+    expect(birthdayLines(club([given({ balanceMinor: 0 })], { state: 'NEXT', on: '2028-03-14' }))).toEqual(['€\u00a020, €\u00a00 left, until 12 APR 2027 · birthday 14 MAR 2027', 'Next on 14 MAR 2028']);
+    expect(birthdayLines(club([given()], { state: 'NEXT', on: '2028-03-14' }), new Date('2027-04-12T22:00:00.000Z'))).toEqual(['€\u00a020, €\u00a020 left, until 12 APR 2027 · birthday 14 MAR 2027', 'Next on 14 MAR 2028']);
+    // Given, then switched off in THE PROGRAM once it expired: why none comes.
+    expect(birthdayLines(club([given()], { state: 'OFF' }), new Date('2027-05-01T10:00:00.000Z'))).toEqual(['€\u00a020, €\u00a020 left, until 12 APR 2027 · birthday 14 MAR 2027', 'Off in THE PROGRAM']);
+    // The last two the sheet lists, newest first as the server sends them, after the tiers' lines and the yearly care.
+    const full: Club = {
+      tier: 'PLATINE',
+      grants: [
+        { tier: 'PLATINE', kind: 'CREDIT', birthdayOn: null, grantedAt: '2026-10-06T09:00:00Z', amountMinor: 5000, balanceMinor: 5000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00Z', gift: null },
+        given({ birthdayOn: '2028-03-14', expiresAt: '2028-04-12T21:59:59.999Z', amountMinor: 2500, balanceMinor: 2500 }),
+        given({ balanceMinor: 0 }),
+      ],
+      careThisYear: { year: 2028, used: 0, allowance: 1, open: null },
+      birthdayNext: { state: 'NEXT', on: '2029-03-14' },
+    };
+    expect(clubBlockLines(full, new Date('2028-03-20T10:00:00.000Z'))).toEqual([
+      { label: 'Credit PLATINE', value: '€\u00a050, €\u00a050 left, until 06 OCT 2027', link: null },
+      { label: 'Yearly care', value: '2028: 0 of 1', link: null },
+      { label: 'Birthday credit', value: '€\u00a025, €\u00a025 left, until 12 APR 2028 · birthday 14 MAR 2028', link: null },
+      { label: 'Birthday credit', value: '€\u00a020, €\u00a00 left, until 12 APR 2027 · birthday 14 MAR 2027', link: null },
+    ]);
   });
 
   it('lets OPERATOR change the words, an AUDITOR read them', () => {

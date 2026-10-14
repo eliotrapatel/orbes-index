@@ -477,6 +477,9 @@ export function tierThreshold(t: Pick<ClubTierSheet, 'pieces'>): string {
   return `From ${t.pieces} ${t.pieces === 1 ? 'piece' : 'pieces'} held`;
 }
 
+/** The birthday credit's label in an owner's Club block (§3.5 SB.4.6). */
+export const BIRTHDAY_CREDIT_LABEL = 'Birthday credit';
+
 /** One line of an owner's Club block (BP-19 T10), and where it leads. */
 export interface ClubBlockLine {
   label: string;
@@ -485,11 +488,26 @@ export interface ClubBlockLine {
   link: { kind: 'order'; id: string } | { kind: 'care'; id: string } | null;
 }
 
+/** Why no birthday credit comes, or when the next does (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6), for Client Services to answer the client. */
+export function birthdayNextLine(next: NonNullable<OwnerSheet['club']>['birthdayNext'] | null | undefined): string | null {
+  if (!next) return null;
+  if (next.state === 'NEXT') return `Next on ${formatDate(next.on)}`;
+  if (next.state === 'NO_DATE') return 'No date of birth';
+  if (next.state === 'OFF') return 'Off in THE PROGRAM';
+  if (next.state === 'TEST_ENTRANT') return 'Not given to test entrants';
+  return null;
+}
+
 /**
  * An owner's Club block, under the tier line: `Credit PLATINE € 50, € 50 left, until 06 OCT 2027`, `Welcome gift
  * PLATINE: pending` (`with OR-…`, `delivered`), `Yearly care: 2026: 0 of 1` (a link to an open request).
+ *
+ * Then the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6): each one the sheet lists, `Birthday credit € 20,
+ * € 20 left, until 12 APR 2027 · birthday 14 MAR 2027`; and, when none is open at `now` (a balance, not expired), one
+ * line `Birthday credit` saying when the next comes (`Next on 14 MAR 2027`) or why none does (`No date of birth`,
+ * `Off in THE PROGRAM`, `Not given to test entrants`). The label carries no figure: the display face takes none.
  */
-export function clubBlockLines(c: OwnerSheet['club'] | null | undefined): ClubBlockLine[] {
+export function clubBlockLines(c: OwnerSheet['club'] | null | undefined, now: Date = new Date()): ClubBlockLine[] {
   if (!c) return [];
   const out: ClubBlockLine[] = [];
   for (const g of c.grants) {
@@ -511,6 +529,20 @@ export function clubBlockLines(c: OwnerSheet['club'] | null | undefined): ClubBl
     const of = care.allowance === 'ALL' ? `${care.year}: ${care.used} · every piece` : `${care.year}: ${care.used} of ${care.allowance}`;
     out.push({ label: 'Yearly care', value: care.open ? `${of} · open: ${care.open.productId}` : of, link: care.open ? { kind: 'care', id: care.open.id } : null });
   }
+  let open = false;
+  for (const g of c.grants) {
+    if (g.kind !== 'BIRTHDAY' || g.amountMinor === null || !g.currency) continue;
+    const left = g.balanceMinor ?? 0;
+    const expires = g.expiresAt ? Date.parse(g.expiresAt) : NaN;
+    if (left > 0 && Number.isFinite(expires) && expires > now.getTime()) open = true;
+    out.push({
+      label: BIRTHDAY_CREDIT_LABEL,
+      value: `${formatMoney(g.amountMinor, g.currency)}, ${formatMoney(left, g.currency)} left, until ${formatDate(g.expiresAt)}${g.birthdayOn ? ` · birthday ${formatDate(g.birthdayOn)}` : ''}`,
+      link: null,
+    });
+  }
+  const next = open ? null : birthdayNextLine(c.birthdayNext);
+  if (next !== null) out.push({ label: BIRTHDAY_CREDIT_LABEL, value: next, link: null });
   return out;
 }
 

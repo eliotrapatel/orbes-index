@@ -18,6 +18,10 @@
  *  5. The settings (ADMIN): the delays of the alerts, a carrier added with its tracking link's example, a location
  *     renamed.
  *  6. An AUDITOR reads the board, an order and the invoices, the emails and the buyer masked, without one action.
+ *  7. The birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6, step 6.6; the plan's admin.e2e, the order's credit
+ *     being driven here): given by the daily grant, read before the tier's on the order's page, Apply credit's sentence,
+ *     taken first, given back by Remove credit; the client sheet's Club block: each birthday credit, and when none is
+ *     open, Next on …, No date of birth, Off in THE PROGRAM.
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -36,6 +40,7 @@ import { createContext, type AppContext } from '../../src/server/context.js';
 import { inTransaction } from '../../src/server/db/connection.js';
 import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { orderReference } from '../../src/server/services/orders.js';
+import { parisDay } from '../../src/server/services/schedule.js';
 import { sizesForExchange } from '../../src/server/services/sizes.js';
 import { ensureSku, recordMovement } from '../../src/server/services/stock.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
@@ -900,6 +905,88 @@ describe.skipIf(!HAS_CHROMIUM)('the orders and the atelier in the console (E2E, 
     await expect.poll(() => a.locator('#order-case [data-testid=order-case]').count()).toBe(1);
     expect(await a.locator('#order-case').textContent()).not.toContain('One size larger, please.');
     expect(await a.locator('[data-testid=buyer-phone]').textContent()).toBe('***');
+    await a.context().close();
+  }, STEP_TIMEOUT);
+
+  it('takes the birthday credit first, then the tier\'s, off an order, and says the birthday credit in the client sheet\'s Club block (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6)', async () => {
+    // A PLATINE client whose birthday is today (Paris), the date of birth on the account for a month: the daily grant
+    // gives the € 20. (1992 is a leap year: every day of the calendar is a date of birth in it.)
+    const account = await createAccount(ctx.db);
+    await holdPieces(ctx.db, account.id, 5, modelId);
+    const today = parisDay(ctx.clock());
+    const entered = new Date(ctx.clock().getTime() - 30 * DAY);
+    await ctx.db.insertInto('account_profiles').values({ account_id: account.id, birth_date: `1992-${today.slice(5)}`, birth_date_by: 'COLLECTOR', birth_date_at: entered, birth_date_collector_at: entered }).execute();
+    expect(await ctx.services.birthdayCredits.grantDue()).toBe(1);
+    // Its salon order, priced: PLATINE's credit comes with it.
+    const request = await ctx.db.insertInto('shop_requests').values({ account_id: account.id, model_id: modelId, created_at: ctx.clock() }).returning('id').executeTakeFirstOrThrow();
+    await ctx.services.salon.close(request.id, { note: 'The sale is concluded.', outcome: 'ACCEPTED' }, admin);
+    const order = (await ctx.db.selectFrom('orders').select('id').where('shop_request_id', '=', request.id).where('channel', '=', 'SALON').executeTakeFirstOrThrow()).id;
+    await ctx.services.orders.setTerms(order, { sizeLabel: '58', priceMinor: 300_000, currency: 'EUR' }, admin);
+
+    const p = await open(OPERATOR);
+    await go(p, `#/orders/${order}`, orderReference(order));
+    // The birthday credit before the tier's.
+    expect(await p.locator('[data-testid=order-credit-available]').textContent()).toMatch(/^Birthday €\s20 until \d{2} [A-Z]{3} \d{4} · PLATINE €\s50 until \d{2} [A-Z]{3} \d{4}$/u);
+    expect(await p.locator('[data-testid=order-credit-applied]').textContent()).toBe('None');
+    // APPLY CREDIT: its sentence, both credits offered (€ 70); € 30 takes the birthday's € 20 first, then € 10 of PLATINE's.
+    await p.click('[data-testid=order-credit-apply]');
+    expect(await p.locator('dialog .dialog__text').textContent()).toBe(
+      'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.',
+    );
+    expect(await p.locator('dialog input[name=amount]').inputValue()).toBe('70');
+    expect(await p.locator('dialog').textContent()).toMatch(/Available: Birthday €\s20 until/u);
+    await p.fill('dialog input[name=amount]', '30');
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=order-credit-applied]').textContent()).toMatch(/^\u2212 €\s20 \(BIRTHDAY\) · \u2212 €\s10 \(PLATINE\)$/u);
+    expect(await p.locator('[data-testid=order-credit-available]').textContent()).toMatch(/^PLATINE €\s40 until \d{2} [A-Z]{3} \d{4}$/u);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'birthday-credit-applied', { phone: true });
+
+    // The client sheet's Club block: PLATINE's credit, then the birthday credit, used up, and the next one.
+    const club = async () => {
+      const rows = p.locator('#account .deflist__row').filter({ has: p.locator('[data-testid=owner-club]') });
+      return Promise.all((await rows.all()).map(async (r) => `${(await r.locator('dt').textContent())?.trim()}: ${(await r.locator('[data-testid=owner-club]').textContent())?.trim()}`));
+    };
+    await go(p, `#/owners/${account.id}`, account.email);
+    await expect.poll(async () => (await club()).filter((l) => l.startsWith('Birthday credit: ')).length).toBe(2);
+    const used = await club();
+    expect(used.find((l) => l.startsWith('Credit PLATINE: '))).toMatch(/^Credit PLATINE: €\s50, €\s40 left, until \d{2} [A-Z]{3} \d{4}$/u);
+    expect(used.at(-2)).toMatch(/^Birthday credit: €\s20, €\s0 left, until \d{2} [A-Z]{3} \d{4} · birthday \d{2} [A-Z]{3} \d{4}$/u);
+    expect(used.at(-1)).toMatch(/^Birthday credit: Next on \d{2} [A-Z]{3} \d{4}$/u);
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'birthday-credit-client', { phone: true });
+
+    // REMOVE CREDIT gives both back, their expiry unchanged: the birthday credit is open again, its line alone.
+    await go(p, `#/orders/${order}`, orderReference(order));
+    await p.click('[data-testid=order-credit-remove]');
+    expect(await p.locator('dialog .dialog__text').textContent()).toMatch(/\(\u2212 €\s20 \(BIRTHDAY\) · \u2212 €\s10 \(PLATINE\)\)/u);
+    await confirmDialog(p);
+    await expect.poll(() => p.locator('[data-testid=order-credit-applied]').textContent()).toBe('None');
+    await go(p, `#/owners/${account.id}`, account.email);
+    await expect.poll(async () => (await club()).filter((l) => l.startsWith('Birthday credit: '))).toHaveLength(1);
+    expect((await club()).at(-1)).toMatch(/^Birthday credit: €\s20, €\s20 left, until \d{2} [A-Z]{3} \d{4} · birthday \d{2} [A-Z]{3} \d{4}$/u);
+
+    // A client without a date of birth, then THE PROGRAM switched off: why none comes.
+    const other = await createAccount(ctx.db);
+    await go(p, `#/owners/${other.id}`, other.email);
+    await expect.poll(club).toEqual(['Birthday credit: No date of birth']);
+    const program = await ctx.services.clubProgram.read();
+    try {
+      await ctx.services.clubProgram.update({ ...program, birthdayCreditOn: false }, admin);
+      await p.reload();
+      await expect.poll(async () => (await title(p).textContent())?.trim()).toBe(other.email);
+      await expect.poll(club).toEqual(['Birthday credit: Off in THE PROGRAM']);
+    } finally {
+      await ctx.services.clubProgram.update(program, admin);
+    }
+    expect(await csp(p)).toEqual([]);
+    await p.context().close();
+
+    // An AUDITOR reads the same lines and takes no credit off.
+    const a = await open(AUDITOR);
+    await go(a, `#/orders/${order}`, orderReference(order));
+    expect(await a.locator('[data-testid=order-credit-available]').textContent()).toMatch(/^Birthday €\s20 until/u);
+    expect(await a.locator('[data-testid=order-credit-apply]').count()).toBe(0);
     await a.context().close();
   }, STEP_TIMEOUT);
 });

@@ -14,7 +14,10 @@ import { ORBES_CODE_STYLES } from '../../src/core/code/styles.js';
 import { computeGenome } from '../../src/core/genome/index.js';
 import { packIdentity } from '../../src/core/identity.js';
 import { MONOGRAM_PATHS } from '../../src/core/render/monogram.js';
+import { BIRTHDAY_CREDIT_LABEL, clubBlockLines } from '../../src/web/admin/model/club.js';
 import { dashboardKpis } from '../../src/web/admin/model/dashboard.js';
+import { APPLY_CREDIT_TEXT, creditAppliedLine, creditAvailableLine } from '../../src/web/admin/model/orders.js';
+import { BIRTHDAY_NOTE } from '../../src/web/admin/model/program.js';
 import { SIGN_UP_COPY } from '../../src/web/admin/model/sign-up.js';
 import { genomeFigureMarkup } from '../../src/web/admin/ui/figures.js';
 import type { DashboardData } from '../../src/web/admin/types.js';
@@ -203,6 +206,34 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
       const words = [...code.matchAll(/'([^'\n]*)'|`([^`\n]*)`/g)].map((m) => m[1] ?? m[2] ?? '').join('\n');
       expect(words, f).not.toMatch(/!(?!==?)/);
       expect(words, f).not.toMatch(/\bproducts?\b/i);
+    }
+  });
+
+  it('writes the birthday credit calmly in the console (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6, §0.7): no atelier, handmade or craft, no exclamation mark, never « product » nor « gift », no figure in a label', () => {
+    const club = { tier: null, careThisYear: null };
+    const given = { tier: null, kind: 'BIRTHDAY' as const, birthdayOn: '2027-03-14', grantedAt: '2027-03-13T23:00:00.000Z', amountMinor: 2000, balanceMinor: 2000, currency: 'EUR', expiresAt: '2027-04-12T21:59:59.999Z', gift: null };
+    const lines = (['OFF', 'NO_DATE', 'TEST_ENTRANT'] as const).flatMap((state) => clubBlockLines({ ...club, grants: [], birthdayNext: { state } }));
+    lines.push(...clubBlockLines({ ...club, grants: [], birthdayNext: { state: 'NEXT', on: '2027-03-14' } }), ...clubBlockLines({ ...club, grants: [given], birthdayNext: { state: 'NEXT', on: '2028-03-14' } }, new Date('2027-03-20T10:00:00.000Z')));
+    expect(lines).toHaveLength(5);
+    // A label is set in the display face, which takes no figure.
+    for (const l of lines) expect(l.label).toBe(BIRTHDAY_CREDIT_LABEL);
+    expect(BIRTHDAY_CREDIT_LABEL).not.toMatch(/\d/);
+    const credit = {
+      available: [{ grantId: 'gb', kind: 'BIRTHDAY' as const, tier: null, balanceMinor: 2000, currency: 'EUR', expiresAt: '2027-04-12T21:59:59.999Z' }],
+      applied: [{ id: 'u', grantId: 'gb', kind: 'BIRTHDAY' as const, tier: null, amountMinor: 2000, appliedAt: '2027-03-20T10:00:00.000Z', releasedAt: null, releasedReason: null }],
+    };
+    const words = [APPLY_CREDIT_TEXT, BIRTHDAY_CREDIT_LABEL, ...lines.map((l) => l.value), creditAvailableLine({ credit }), creditAppliedLine({ credit, currency: 'EUR' }), BIRTHDAY_NOTE].join('\n');
+    expect(words).not.toContain('!');
+    expect(words).not.toMatch(/atelier|handmade|hand-made|craft|product|gift/i);
+    expect(words).toContain('Birthday €\u00a020 until 12 APR 2027');
+    expect(words).toContain('\u2212 €\u00a020 (BIRTHDAY)');
+    // The words of the two files that say it, their comments aside.
+    for (const f of ['admin/model/club.ts', 'admin/model/orders.ts']) {
+      const code = readFileSync(join(WEB, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+      const said = [...code.matchAll(/'([^'\n]*[Bb]irthday[^'\n]*)'|`([^`\n]*[Bb]irthday[^`\n]*)`/g)].map((m) => m[1] ?? m[2] ?? '').join('\n');
+      expect(said.length, f).toBeGreaterThan(0);
+      expect(said, f).not.toMatch(/!(?!==?)/);
+      expect(said, f).not.toMatch(/atelier|handmade|hand-made|craft|\bproducts?\b|\bgift\b/i);
     }
   });
 

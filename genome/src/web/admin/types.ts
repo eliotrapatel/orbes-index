@@ -133,6 +133,9 @@ export type HouseCurrency = (typeof HOUSE_CURRENCIES)[number];
 export const CREDIT_CHANNELS = ['DRAW', 'LIVE', 'SALON'] as const;
 export type CreditChannel = (typeof CREDIT_CHANNELS)[number];
 
+/** A credit taken off an order: a tier's, or the birthday credit (tier_grants.kind, plan CUSTOMER INTELLIGENCE §3.5 SB.4.3). */
+export type CreditKind = 'CREDIT' | 'BIRTHDAY';
+
 /** Why a credit taken off an order was given back (credit_uses.released_reason, BP-19 T5). */
 export const CREDIT_RELEASE_REASONS = ['REMOVED', 'CANCELLED', 'RETURNED'] as const;
 export type CreditReleaseReason = (typeof CREDIT_RELEASE_REASONS)[number];
@@ -2886,10 +2889,14 @@ export interface OrderView {
   /** BP-19 T5, on a GIFT order: its tier, and while its size is to be chosen, its model's sizes with the pieces available. */
   /** …and (AC-01) the client's saved size, a hint only: the matching size's label or the saved measure; null without one. */
   giftOf: { tier: 2 | 3; sizes: { skuId: string; label: string | null; available: number }[]; savedSize: string | null } | null;
-  /** BP-19 T5: the client's credit usable now, and the credit taken off this order (released or not). */
+  /**
+   * BP-19 T5: the client's credit usable now, and the credit taken off this order (released or not). Each is a tier's
+   * credit (CREDIT, its tier) or the birthday credit (BIRTHDAY, no tier; plan CUSTOMER INTELLIGENCE §3.5 SB.4.3), the
+   * birthday credit first: it is taken first.
+   */
   credit: {
-    available: { grantId: string; tier: 2 | 3; balanceMinor: number; currency: string; expiresAt: Iso }[];
-    applied: { id: string; grantId: string; tier: 2 | 3; amountMinor: number; appliedAt: Iso; releasedAt: Iso | null; releasedReason: CreditReleaseReason | null }[];
+    available: { grantId: string; kind: CreditKind; tier: 2 | 3 | null; balanceMinor: number; currency: string; expiresAt: Iso }[];
+    applied: { id: string; grantId: string; kind: CreditKind; tier: 2 | 3 | null; amountMinor: number; appliedAt: Iso; releasedAt: Iso | null; releasedReason: CreditReleaseReason | null }[];
   };
   /** Its return (RETURNED): where the piece went, the note, whether ORBES took its buyer's ownership back. */
   /** Its note null for an AUDITOR when the return was decided from an order case (ORBES's decision's words). */

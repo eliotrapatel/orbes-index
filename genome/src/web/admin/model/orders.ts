@@ -235,24 +235,37 @@ export function creditTaken(o: Pick<OrderView, 'credit'>): number {
   return (o.credit?.applied ?? []).filter((u) => u.releasedAt === null).reduce((n, u) => n + u.amountMinor, 0);
 }
 
-/** The client's credit usable now: `PLATINE € 50 until 06 OCT 2027`, several joined by ` · `, or None. */
+/** Whether a credit of an order is the birthday credit (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6): its kind, or no tier. */
+const isBirthdayCredit = (c: { kind?: string; tier: 2 | 3 | null }): boolean => c.kind === 'BIRTHDAY' || c.tier === null;
+
+/**
+ * The client's credit usable now: `PLATINE € 50 until 06 OCT 2027`, several joined by ` · `, or None. The birthday
+ * credit reads `Birthday € 20 until 12 APR 2027`, before the tiers': it is taken first.
+ */
 export function creditAvailableLine(o: Pick<OrderView, 'credit'>): string {
   const a = o.credit?.available ?? [];
   if (a.length === 0) return 'None';
-  return a.map((c) => `${TIER_NAMES[c.tier]} ${formatMoney(c.balanceMinor, c.currency)} until ${formatDate(c.expiresAt)}`).join(' · ');
+  const line = (c: (typeof a)[number]) => `${isBirthdayCredit(c) ? 'Birthday' : TIER_NAMES[c.tier as 2 | 3]} ${formatMoney(c.balanceMinor, c.currency)} until ${formatDate(c.expiresAt)}`;
+  return [...a.filter(isBirthdayCredit), ...a.filter((c) => !isBirthdayCredit(c))].map(line).join(' · ');
 }
 
-/** The credit taken off this order, per tier: `− € 50 (PLATINE)`, or None. */
+/** The credit taken off this order, the birthday credit first, then per tier: `− € 20 (BIRTHDAY) · − € 30 (PLATINE)`, or None. */
 export function creditAppliedLine(o: Pick<OrderView, 'credit' | 'currency'>): string {
   const open = (o.credit?.applied ?? []).filter((u) => u.releasedAt === null);
   if (open.length === 0 || !o.currency) return 'None';
+  const said = (minor: number, of: string) => `\u2212 ${formatMoney(minor, o.currency!)} (${of})`;
+  const birthday = open.filter(isBirthdayCredit).reduce((n, u) => n + u.amountMinor, 0);
   const byTier = new Map<2 | 3, number>();
-  for (const u of open) byTier.set(u.tier, (byTier.get(u.tier) ?? 0) + u.amountMinor);
-  return [...byTier.entries()]
-    .sort((x, y) => y[0] - x[0])
-    .map(([tier, minor]) => `\u2212 ${formatMoney(minor, o.currency!)} (${TIER_NAMES[tier]})`)
-    .join(' · ');
+  for (const u of open) if (!isBirthdayCredit(u)) byTier.set(u.tier as 2 | 3, (byTier.get(u.tier as 2 | 3) ?? 0) + u.amountMinor);
+  return [
+    ...(birthday > 0 ? [said(birthday, 'BIRTHDAY')] : []),
+    ...[...byTier.entries()].sort((x, y) => y[0] - x[0]).map(([tier, minor]) => said(minor, TIER_NAMES[tier])),
+  ].join(' · ');
 }
+
+/** APPLY CREDIT's sentence (§3.5 SB.4.6): the birthday credit is taken first, then the tiers'. */
+export const APPLY_CREDIT_TEXT =
+  'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.';
 
 /** The credit usable on this order: the balances in its currency, and what its price leaves (null before it is priced). */
 export function creditRoom(o: Pick<OrderView, 'credit' | 'currency' | 'priceMinor'>): number {

@@ -15,6 +15,7 @@ import { formatCount } from '../../src/web/admin/format.js';
 import { canOpenReturn, caseActions, CASE_REASON_LABELS, decideInput, decideProblem, openCaseInput, openCaseProblem, outcomeOptions, pastReturnWindow } from '../../src/web/admin/model/order-cases.js';
 import { buyerLine, invoiceFilters, invoiceMonths, INVOICE_SEARCH_MAX, KIND_FILTER_LABELS, linkedDocument, monthLabel, signedMoney } from '../../src/web/admin/model/invoices.js';
 import {
+  APPLY_CREDIT_TEXT,
   ALERT_LIMITS,
   alertsInput,
   alertsProblem,
@@ -225,7 +226,9 @@ describe('an order\'s shipping (plan NEXT-NINE, BP-19 T4)', () => {
 });
 
 describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () => {
-  const grant = { grantId: 'g3', tier: 3 as const, balanceMinor: 5_000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' };
+  const grant = { grantId: 'g3', kind: 'CREDIT' as const, tier: 3 as const, balanceMinor: 5_000, currency: 'EUR', expiresAt: '2027-10-06T09:00:00.000Z' };
+  /** A birthday credit as the order's page receives it (plan CUSTOMER INTELLIGENCE §3.5 SB.4.3): no tier; € 20 until the end of 12 April 2027, Paris. */
+  const birthday = { grantId: 'gb', kind: 'BIRTHDAY' as const, tier: null, balanceMinor: 2_000, currency: 'EUR', expiresAt: '2027-04-12T21:59:59.999Z' };
   const platineGift = { id: 'x', reference: 'OR-AAAA0001', model: 'ANNEAU', status: 'RESERVED' as const, sizeToChoose: false, tier: 2 as const };
   const palladiumGift = { id: 'y', reference: 'OR-BBBB0002', model: 'JONC', status: 'RESERVED' as const, sizeToChoose: true, tier: 3 as const };
   it('says the gift travelling with an order, and a GIFT order\'s tier and parent', () => {
@@ -312,13 +315,56 @@ describe('an order\'s welcome gift and credit (plan NEXT-NINE, BP-19 T5)', () =>
       credit: {
         available: [],
         applied: [
-          { id: 'u1', grantId: 'g2', tier: 2, amountMinor: 2_000, appliedAt: 'x', releasedAt: 'y', releasedReason: 'REMOVED' },
-          { id: 'u2', grantId: 'g2', tier: 2, amountMinor: 5_000, appliedAt: 'x', releasedAt: null, releasedReason: null },
+          { id: 'u1', grantId: 'g2', kind: 'CREDIT', tier: 2, amountMinor: 2_000, appliedAt: 'x', releasedAt: 'y', releasedReason: 'REMOVED' },
+          { id: 'u2', grantId: 'g2', kind: 'CREDIT', tier: 2, amountMinor: 5_000, appliedAt: 'x', releasedAt: null, releasedReason: null },
         ],
       },
     });
     expect(creditAppliedLine(applied)).toBe('\u2212 €\u00a050 (PLATINE)');
     expect(creditActions(applied, 'OPERATOR')).toEqual({ apply: false, remove: true });
+  });
+
+  it('says the birthday credit before the tiers\', available and applied, and APPLY CREDIT\'s sentence (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6)', () => {
+    const platine = { ...grant, grantId: 'g2', tier: 2 as const };
+    // Alone, for a client without a tier.
+    const alone = view({ priceMinor: 15_000, currency: 'EUR', credit: { available: [birthday], applied: [] } });
+    expect(creditAvailableLine(alone)).toBe('Birthday €\u00a020 until 12 APR 2027');
+    expect(creditActions(alone, 'OPERATOR')).toEqual({ apply: true, remove: false });
+    expect(creditValue(alone)).toBe('20');
+    // Before the tiers', whatever the order they come in.
+    for (const available of [[birthday, grant, platine], [grant, platine, birthday], [platine, birthday, grant]]) {
+      expect(creditAvailableLine(view({ credit: { available, applied: [] } }))).toBe(
+        `Birthday €\u00a020 until 12 APR 2027 · ${available.filter((c) => c.kind === 'CREDIT').map((c) => `${c.tier === 3 ? 'PALLADIUM' : 'PLATINE'} €\u00a050 until 06 OCT 2027`).join(' · ')}`,
+      );
+    }
+    // The room and the refusal read every balance, whatever its kind: € 20 + € 50 within a price of € 60.
+    const both = view({ priceMinor: 6_000, currency: 'EUR', credit: { available: [birthday, grant], applied: [] } });
+    expect(creditValue(both)).toBe('60');
+    expect(creditProblem(both, { amount: '61' })).toBe('At most €\u00a060: the credit left in EUR, within the piece’s price.');
+    expect(creditProblem(view({ priceMinor: 300_000, currency: 'EUR', credit: { available: [birthday, grant], applied: [] } }), { amount: '70' })).toBeNull();
+    // Applied: the birthday credit first, then PALLADIUM's, then PLATINE's; a use given back is not counted.
+    const applied = view({
+      priceMinor: 300_000,
+      currency: 'EUR',
+      credit: {
+        available: [],
+        applied: [
+          { id: 'u1', grantId: 'g2', kind: 'CREDIT', tier: 2, amountMinor: 3_000, appliedAt: 'x', releasedAt: null, releasedReason: null },
+          { id: 'u2', grantId: 'gb', kind: 'BIRTHDAY', tier: null, amountMinor: 2_000, appliedAt: 'x', releasedAt: null, releasedReason: null },
+          { id: 'u3', grantId: 'gb', kind: 'BIRTHDAY', tier: null, amountMinor: 500, appliedAt: 'x', releasedAt: 'y', releasedReason: 'REMOVED' },
+        ],
+      },
+    });
+    expect(creditAppliedLine(applied)).toBe('\u2212 €\u00a020 (BIRTHDAY) · \u2212 €\u00a030 (PLATINE)');
+    expect(creditAppliedLine({ ...applied, credit: { available: [], applied: [...applied.credit.applied, { id: 'u4', grantId: 'g3', kind: 'CREDIT', tier: 3, amountMinor: 10_000, appliedAt: 'x', releasedAt: null, releasedReason: null }] } })).toBe(
+      '\u2212 €\u00a020 (BIRTHDAY) · \u2212 €\u00a0100 (PALLADIUM) · \u2212 €\u00a030 (PLATINE)',
+    );
+    expect(creditAppliedLine(view({ currency: 'EUR', credit: { available: [], applied: [applied.credit.applied[1]!] } }))).toBe('\u2212 €\u00a020 (BIRTHDAY)');
+    expect(creditActions(applied, 'OPERATOR')).toEqual({ apply: false, remove: true });
+    // The one sentence changed in the console: the old one would be untrue.
+    expect(APPLY_CREDIT_TEXT).toBe(
+      'A credit taken off this order’s invoice, in its currency: the birthday credit first, then the tiers’. It is given back if the order is cancelled or returned, with its expiry unchanged.',
+    );
   });
 });
 
