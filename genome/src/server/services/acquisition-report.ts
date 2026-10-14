@@ -21,6 +21,8 @@
  *   overview    the Collectors page's « Where they come from » block (§3.4 A.10.6; the page is phase 9's): sign-ups by
  *               first source kind and channel, the top links and campaigns by first-link sign-ups, first visits by
  *               Paris day, the collectors whose first and last link differ.
+ *   firstVisits the first visits of a period by Paris day or by source, the sources a filter names only: what the
+ *               Collectors page's FIRST VISITS and CAMPAIGNS read when no filter narrows the collectors (step 9.3).
  *   sourceFilter  the SQL condition « the account's first source is in these channels, links or kinds », exported for the
  *               Collectors page's other queries and Segments' FIRST_SOURCE; it and Segments' LAST_SOURCE condition,
  *               lastSourceFilter, live in services/acquisition-filters.ts (no import of the services, so Segments read
@@ -544,6 +546,22 @@ export class AcquisitionReportService {
           .sort((a, b) => a.day.localeCompare(b.day)),
         firstLastDiffer: { collectors: signups.rows.length, differ },
       };
+    });
+  }
+
+  /**
+   * First visits in a period by Paris day or by source (§3.4 A.10.6, the Collectors page's FIRST VISITS and CAMPAIGNS,
+   * services/collector-insights.ts): the Links reports' rule (`acquisition_daily.first_visits` for the days summarised,
+   * the devices' first sight after them), the sources a filter names only. Only the keys with any.
+   */
+  async firstVisits(q: PeriodInput & { sources?: SourceFilter }, by: 'day' | 'source'): Promise<Map<string, number>> {
+    const p = periodOf(q);
+    return this.readOnly(async (tx) => {
+      const basis = await this.basis(tx);
+      const ids = await this.filteredSourceIds(tx, q.sources ?? {});
+      const out = new Map<string, number>();
+      for (const v of (await this.visitsBy(tx, basis, p, ids, by)).values()) if (v.firstVisits > 0) out.set(v.key, v.firstVisits);
+      return out;
     });
   }
 

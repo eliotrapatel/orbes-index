@@ -69,6 +69,7 @@ import { OrderService } from './services/orders.js';
 import { InvoiceService } from './services/invoices.js';
 import { FulfilmentService } from './services/fulfilment.js';
 import { GrowthService } from './services/growth.js';
+import { CollectorInsightsService } from './services/collector-insights.js';
 import { OwnerService } from './services/owners.js';
 import { PastReleaseService } from './services/past-releases.js';
 import { PlaceService } from './services/places.js';
@@ -212,6 +213,8 @@ export interface AppServices {
   orderCases: OrderCaseService;
   /** GROWTH (plan NEXT-NINE, BP-29): what a collector is worth, repeat buying, the funnel from a scan to PALLADIUM, the revenue; reads only. */
   growth: GrowthService;
+  /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6): the counted collectors' figures over a period, cached, two readings at once; reads only. */
+  collectorInsights: CollectorInsightsService;
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code for a piece not registered yet, shown once to staff or sealed for its buyer. */
   claimRenewals: ClaimRenewalService;
 }
@@ -367,6 +370,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const orderCases = new OrderCaseService({ db, audit, lifecycle, clock, messages });
     const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
     const growth = new GrowthService({ db, clock });
+    const collectorInsights = new CollectorInsightsService({ db, links, clock, log });
     const claimRenewals = new ClaimRenewalService({ db, audit, certificates, revealKey: deriveClaimRevealKey(config), clock });
 
     const services: AppServices = {
@@ -430,6 +434,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       logistics,
       orderCases,
       growth,
+      collectorInsights,
       claimRenewals,
       ...overrides.services,
     };

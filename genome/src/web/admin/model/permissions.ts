@@ -157,6 +157,8 @@ export const CAPABILITY_MIN_ROLE = Object.freeze({
   readLinks: 'AUDITOR',
   /** Links: New link, Edit, Archive and Unarchive, the Channels (added, renamed, moved, removed while unused). */
   manageLinks: 'OPERATOR',
+  /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6.1, C.9): the counted collectors' figures over a period. */
+  readCollectors: 'AUDITOR',
 } as const satisfies Record<string, AdminRole>);
 
 export type Capability = keyof typeof CAPABILITY_MIN_ROLE;

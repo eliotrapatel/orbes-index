@@ -63,6 +63,7 @@ import { dropView } from './views/drop.js';
 import { generatorView } from './views/generator.js';
 import { genomesView } from './views/genomes.js';
 import { growthView } from './views/growth.js';
+import { collectorsView } from './views/collectors.js';
 import { keysView } from './views/keys.js';
 import { disposeLiveView, liveReleaseView } from './views/live.js';
 import { loginView } from './views/login.js';
@@ -140,6 +141,8 @@ const NAV: { group: string; items: NavItem[] }[] = [
     items: [
       { route: 'messages', label: 'Messages' },
       { route: 'owners', label: 'Owners' },
+      // Plan CUSTOMER INTELLIGENCE §3.6 C.6.1: Collectors right after Owners.
+      { route: 'collectors', label: 'Collectors', cap: 'readCollectors' },
       { route: 'club', label: 'Club' },
       { route: 'segments', label: 'Segments' },
       // Plan CUSTOMER INTELLIGENCE §3.4 A.10: Links under Segments.
@@ -188,6 +191,7 @@ const VIEWS: Partial<Record<RouteName, { view: View; title: string; nav: RouteNa
   owners: { view: ownersView, title: 'Owners', nav: 'owners' },
   owner: { view: ownerView, title: 'Owner', nav: 'owners' },
   signUp: { view: signUpView, title: 'Sign-up', nav: 'owners' },
+  collectors: { view: collectorsView, title: 'Collectors', nav: 'collectors' },
   club: { view: clubView, title: 'Club', nav: 'club' },
   drop: { view: dropView, title: 'Drop', nav: 'club' },
   liveRelease: { view: liveReleaseView, title: 'Live release', nav: 'club' },

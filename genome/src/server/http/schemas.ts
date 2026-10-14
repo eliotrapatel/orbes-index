@@ -108,6 +108,7 @@ import { ADDRESS_LIMITS } from '../services/addresses.js';
 import { NOTE_MAX } from '../services/client-notes.js';
 import { BATCH_MAX_EVENTS, SEEN_PAGES } from '../services/tracking.js';
 import { ATTRIBUTIONS, MEASURES, REPORT_MAX_DAYS, REPORT_VIEWS } from '../services/acquisition-report.js';
+import { PERIOD_KEYS, SCOPES } from '../services/insights-scope.js';
 import { LAST_SOURCE_AT } from '../services/acquisition-filters.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { TASTE_KEY_MAX } from '../../shared/profile-rules.js';
@@ -1646,6 +1647,37 @@ export const growthQuery = z.object({
 export const growthCollectorsQuery = z.object({
   currency: growthCurrency,
   page: queryOptional(z.preprocess((v) => (typeof v === 'string' && /^\s*\d{1,6}\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a whole page number').min(1, 'At least 1').max(100_000, 'At most 100000'))),
+});
+
+/**
+ * The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6.2, C.9; API §16.37): the period (`p`, CUSTOM's `from` and
+ * `to`), the comparison (`cmp`, on by default), the scope and the five filters as the route's query holds them
+ * (`c=FR,IT`, `s=<channel id>,kind:SITE`, `t=0,2,3`, `sc=40-100`, `ft=RING,CUFF`), a currency. The values are checked by
+ * the service (services/insights-scope.ts parseFilters, parisPeriod): here only their form and length. Unknown keys are
+ * refused.
+ */
+const collectorsFilter = (max: number) => queryOptional(z.string().max(max, `At most ${max} characters`));
+const collectorsQueryShape = {
+  p: queryOptional(z.enum(PERIOD_KEYS, { message: `Must be one of ${PERIOD_KEYS.join(', ')}` })),
+  from: queryOptional(isoDate),
+  to: queryOptional(isoDate),
+  cmp: queryBool,
+  scope: queryOptional(z.enum(SCOPES, { message: `Must be one of ${SCOPES.join(', ')}` })),
+  c: collectorsFilter(400),
+  s: collectorsFilter(2_000),
+  t: collectorsFilter(20),
+  sc: collectorsFilter(10),
+  ft: collectorsFilter(1_000),
+  currency: queryOptional(z.enum(HOUSE_CURRENCIES, { message: `Must be one of ${HOUSE_CURRENCIES.join(', ')}` })),
+};
+export const collectorsQuery = z.strictObject(collectorsQueryShape);
+/** GET /api/admin/collectors/options: no query. */
+export const collectorsOptionsQuery = z.strictObject({});
+/** GET /api/admin/collectors/report: the page's query, the panel, and `fresh` (Read again). */
+export const collectorsReportQuery = z.strictObject({
+  ...collectorsQueryShape,
+  panel: z.string().trim().min(1, 'Required').max(20, 'At most 20 characters'),
+  fresh: queryBool,
 });
 
 export const warrantyListQuery = z.object({

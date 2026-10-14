@@ -25,7 +25,8 @@
  * the console's links and their channels, read by an AUDITOR, made, changed, archived and removed by an OPERATOR, their
  * reports and the collectors behind a figure read by an AUDITOR, CUSTOMER INTELLIGENCE §3.4 A.7.2; the client sheet's
  * profile, its date of birth and default address edited by an OPERATOR, CUSTOMER INTELLIGENCE §3.1 P.6.5, P.6.6, and its
- * tags and private notes, read by an AUDITOR, written by an OPERATOR, CUSTOMER INTELLIGENCE §3.6 C.9);
+ * tags and private notes, read by an AUDITOR, written by an OPERATOR, CUSTOMER INTELLIGENCE §3.6 C.9; the Collectors page's
+ * options and panels read by an AUDITOR, CUSTOMER INTELLIGENCE §3.6 C.9);
  * every role changes its own password. RETAIL (A-08) ranks under AUDITOR: it
  * reaches the sale mode, the list of points of sale and its own session,
  * password and second factor, nothing else. LOGISTICS (plan NEXT LOT §3.5.6.1),
@@ -447,6 +448,9 @@ const PROBES: Probe[] = [
   { group: 'client-sheet', method: 'DELETE', url: `/api/admin/owners/${UUID}/tags/VIP`, min: 'OPERATOR' },
   { group: 'client-sheet', method: 'POST', url: `/api/admin/owners/${UUID}/notes`, body: INVALID, min: 'OPERATOR' },
   { group: 'client-sheet', method: 'DELETE', url: `/api/admin/owners/${UUID}/notes/${UUID}`, min: 'OPERATOR' },
+  // The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.9): read from AUDITOR.
+  { group: 'collectors', method: 'GET', url: '/api/admin/collectors/options', min: 'AUDITOR' },
+  { group: 'collectors', method: 'GET', url: '/api/admin/collectors/report?panel=nothing', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];
@@ -520,6 +524,7 @@ describe('admin role enforcement', () => {
       'sign-up',
       'links',
       'client-sheet',
+      'collectors',
     ]) {
       expect(groups.has(g)).toBe(true);
     }
