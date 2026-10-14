@@ -231,5 +231,16 @@ describe('segments and the access rules: the console’s and the public routes',
     await refused({ kind: 'DEVICE', days: 30 }, 400, 'VALIDATION_FAILED');
     await refused({ kind: 'DEVICE', kinds: ['WATCH'], days: 30 }, 400, 'VALIDATION_FAILED');
     await refused({ kind: 'VIEWED_RELEASE', dropId: '00000000-0000-4000-8000-000000000000', min: 1 }, 404, 'DROP_NOT_FOUND');
+
+    // ORIGIN (step 8.4): the harness's accounts were made after the recording started, through no link: Direct.
+    const direct = (kind: string) => ({ match: 'ALL', rules: [{ kind, kinds: ['DIRECT'], ...(kind === 'LAST_SOURCE' ? { at: 'SIGNUP' } : {}) }, { kind: 'TAGGED', tags: ['VIP'] }] });
+    expect(safeJson(await op.post('/api/admin/segments/count', { criteria: direct('FIRST_SOURCE') }))).toEqual({ count: 1 });
+    expect(safeJson(await op.post('/api/admin/segments/count', { criteria: direct('LAST_SOURCE') }))).toEqual({ count: 1 });
+    expect(safeJson(await op.post('/api/admin/segments/count', { criteria: { match: 'ALL', rules: [{ kind: 'LAST_SOURCE', kinds: ['LINK'], at: 'EITHER' }] } }))).toEqual({ count: 0 });
+    await refused({ kind: 'LAST_SOURCE', kinds: ['DIRECT'] }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'LAST_SOURCE', kinds: ['DIRECT'], at: 'ORDER' }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'FIRST_SOURCE' }, 400, 'VALIDATION_FAILED');
+    await refused({ kind: 'FIRST_SOURCE', linkIds: ['00000000-0000-4000-8000-000000000000'] }, 404, 'LINK_NOT_FOUND');
+    await refused({ kind: 'FIRST_SOURCE', channelIds: ['00000000-0000-4000-8000-000000000000'] }, 404, 'CHANNEL_NOT_FOUND');
   });
 });

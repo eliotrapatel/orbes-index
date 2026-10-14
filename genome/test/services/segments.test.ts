@@ -16,7 +16,8 @@
  *    matched and negated, their bounds and refusals, the names they check: PERSON (the city given, folded; the age
  *    today in Paris; how they heard; a tag), TASTES (a wish for a model, a main model with its variants, or for a model
  *    of a collection; a favourite piece or finish), BROWSING (a model or a release viewed, a device, a place from the
- *    connection, within the 395 days). A test entrant matches none but through a NOT.
+ *    connection, within the 395 days), ORIGIN (the first source; the last link before the sign-up, a purchase or
+ *    either; an archived link still matching; the reports' fallbacks). A test entrant matches none but through a NOT.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -29,6 +30,7 @@ import { randomBytes } from 'node:crypto';
 import { VIEW_PAGE_CODES } from '../../src/server/db/schema.js';
 import { VIEW_RULE_DAYS, VIEW_RULE_MIN } from '../../src/server/services/tracking-reads.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { GrowthWorld } from '../support/growth.js';
 import { accountOfTier, createAccount, createCollection, createLiveRelease, createModel, holdPieces, liveFixture, type LiveFixture } from '../support/live.js';
 import { poolDraw } from '../support/draws.js';
 
@@ -710,5 +712,126 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
       expect(await segments.count({ match: 'ALL', rules: [{ kind: 'PLACE', placeIds: [999_999], days: 30 }] })).toEqual({ count: 0 });
       expect([SEGMENT_LIMITS.viewDays, SEGMENT_LIMITS.viewMin]).toEqual([VIEW_RULE_DAYS, VIEW_RULE_MIN]);
     });
+  });
+
+  describe('ORIGIN (step 8.4)', () => {
+    const src = {} as Record<'direct' | 'before' | 'staff' | 'bio' | 'press' | 'campaign' | 'google', number>;
+    const lk = {} as Record<'instagram' | 'pressChannel' | 'bio' | 'press', string>;
+
+    beforeAll(async () => {
+      // The recording started on 1 January 2027: the third's account is older, so it reads Before tracking.
+      const made = { one: '2027-01-15', two: '2027-01-16', three: '2026-12-01', four: '2027-02-01', entrant: '2027-02-01' } as const;
+      for (const k of Object.keys(made) as (keyof typeof made)[]) await t.db.updateTable('accounts').set({ created_at: new Date(`${made[k]}T10:00:00.000Z`) }).where('id', '=', p[k]).execute();
+      await t.db.insertInto('acquisition_state').values({ id: 1, tracking_started_at: new Date('2027-01-01T00:00:00.000Z'), conversions_until: new Date('2027-01-01T00:00:00.000Z') }).execute();
+      lk.instagram = (await t.db.insertInto('link_channels').values({ name: 'Instagram', position: 10 }).returning('id').executeTakeFirstOrThrow()).id;
+      lk.pressChannel = (await t.db.insertInto('link_channels').values({ name: 'Press', position: 40 }).returning('id').executeTakeFirstOrThrow()).id;
+      lk.bio = (await t.db.insertInto('links').values({ code: 'instagram-bio', name: 'Instagram bio', channel_id: lk.instagram, destination: 'NOW', created_by: f.admin.id }).returning('id').executeTakeFirstOrThrow()).id;
+      // A press link archived since: its segments keep matching.
+      lk.press = (
+        await t.db
+          .insertInto('links')
+          .values({ code: 'press-feature', name: 'Press feature', channel_id: lk.pressChannel, destination: 'NOW', created_by: f.admin.id, archived_at: f.clock.now(), archived_by: f.admin.id })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      const source = async (v: { kind: 'DIRECT' | 'BEFORE' | 'STAFF' | 'LINK' | 'CAMPAIGN' | 'SITE'; key: string; link_id?: string; utm_source?: string; utm_campaign?: string; site?: string }) =>
+        (await t.db.insertInto('acquisition_sources').values(v).returning('id').executeTakeFirstOrThrow()).id;
+      src.direct = await source({ kind: 'DIRECT', key: 'DIRECT' });
+      src.before = await source({ kind: 'BEFORE', key: 'BEFORE' });
+      src.staff = await source({ kind: 'STAFF', key: 'STAFF' });
+      src.bio = await source({ kind: 'LINK', key: `L:${lk.bio}`, link_id: lk.bio });
+      src.press = await source({ kind: 'LINK', key: `L:${lk.press}`, link_id: lk.press });
+      src.campaign = await source({ kind: 'CAMPAIGN', key: 'C:ig\u001f\u001fdrop\u001f\u001f', utm_source: 'ig', utm_campaign: 'drop' });
+      src.google = await source({ kind: 'SITE', key: 'S:google.com', site: 'google.com' });
+      const first = (account: string, source: number) => ({ account_id: account, first_source_id: source, first_seen_at: new Date('2027-01-14T10:00:00.000Z'), set_at: new Date('2027-01-15T10:00:00.000Z'), set_by: 'SIGN_UP' as const });
+      // First sources: the first through the Instagram bio, the second through campaign tags; the third (Before tracking)
+      // and the fourth (Direct) have none recorded.
+      await t.db.insertInto('account_sources').values([first(p.one, src.bio), first(p.two, src.campaign)]).execute();
+      // Orders: the first paid one through a site; the second paid one with no conversion yet (Direct, by its
+      // reservation), and a welcome gift whose stray conversion names the bio (a GIFT order is never a purchase).
+      const w = await new GrowthWorld(t.db).prepare();
+      const oneOrder = await w.order({ accountId: p.one, modelId: m.main, channel: 'SALON', paid: '2027-02-10', total: 15000, currency: 'EUR' });
+      const twoOrder = await w.order({ accountId: p.two, modelId: m.main, channel: 'SALON', paid: '2027-02-11', total: 15000, currency: 'EUR' });
+      const gift = await w.order({ accountId: p.two, modelId: m.main, channel: 'GIFT', withOrderId: twoOrder, paid: '2027-02-12', total: 0, currency: 'EUR', giftGrantId: await w.giftGrant(p.two, m.main, '2027-02-12') });
+      const conversion = (kind: 'SIGNUP' | 'ORDER', ref: string, account: string, source: number) => ({ kind, ref_id: ref, account_id: account, at: new Date('2027-01-15T10:00:00.000Z'), last_source_id: source });
+      // Last links: the first signed up through the press link (archived since), the second through campaign tags, the
+      // fourth through the bio.
+      await t.db
+        .insertInto('acquisition_conversions')
+        .values([
+          conversion('SIGNUP', p.one, p.one, src.press),
+          conversion('ORDER', oneOrder, p.one, src.google),
+          conversion('SIGNUP', p.two, p.two, src.campaign),
+          conversion('ORDER', gift, p.two, src.bio),
+          conversion('SIGNUP', p.four, p.four, src.bio),
+        ])
+        .execute();
+    });
+
+    it('FIRST_SOURCE: a channel, a link or a kind; Before tracking and Direct for accounts without one; negated', async () => {
+      expect(await matched(all({ kind: 'FIRST_SOURCE', linkIds: [lk.bio] }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'FIRST_SOURCE', channelIds: [lk.instagram] }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'FIRST_SOURCE', kinds: ['CAMPAIGN'] }))).toEqual(['two']);
+      expect(await matched(all({ kind: 'FIRST_SOURCE', kinds: ['LINK', 'CAMPAIGN'] }))).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'FIRST_SOURCE', kinds: ['BEFORE'] }))).toEqual(['three']);
+      // The test entrant would read Direct too: it never matches.
+      expect(await matched(all({ kind: 'FIRST_SOURCE', kinds: ['DIRECT'] }))).toEqual(['four']);
+      expect(await matched(all({ kind: 'FIRST_SOURCE', kinds: ['DIRECT'], not: true }))).toEqual(['entrant', 'one', 'three', 'two']);
+    });
+
+    it('LAST_SOURCE at the sign-up: its conversion, an archived link still matching; Before tracking and Direct without one; negated', async () => {
+      expect(await matched(all({ kind: 'LAST_SOURCE', linkIds: [lk.press], at: 'SIGNUP' }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'LAST_SOURCE', channelIds: [lk.pressChannel], at: 'SIGNUP' }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'LAST_SOURCE', linkIds: [lk.bio], at: 'SIGNUP' }))).toEqual(['four']);
+      expect(await matched(all({ kind: 'LAST_SOURCE', kinds: ['BEFORE'], at: 'SIGNUP' }))).toEqual(['three']);
+      expect(await matched(all({ kind: 'LAST_SOURCE', kinds: ['DIRECT'], at: 'SIGNUP' }))).toEqual([]);
+      expect(await matched(all({ kind: 'LAST_SOURCE', linkIds: [lk.press], at: 'SIGNUP', not: true }))).toEqual(['entrant', 'four', 'three', 'two']);
+    });
+
+    it('LAST_SOURCE at a purchase (a paid order, never GIFT) and at either', async () => {
+      expect(await matched(all({ kind: 'LAST_SOURCE', kinds: ['SITE'], at: 'PURCHASE' }))).toEqual(['one']);
+      expect(await matched(all({ kind: 'LAST_SOURCE', kinds: ['SITE'], at: 'SIGNUP' }))).toEqual([]);
+      expect(await matched(all({ kind: 'LAST_SOURCE', kinds: ['DIRECT'], at: 'PURCHASE' }))).toEqual(['two']);
+      expect(await matched(all({ kind: 'LAST_SOURCE', linkIds: [lk.bio], at: 'PURCHASE' }))).toEqual([]);
+      expect(await matched(all({ kind: 'LAST_SOURCE', kinds: ['SITE', 'CAMPAIGN'], at: 'EITHER' }))).toEqual(['one', 'two']);
+      expect(await matched(all({ kind: 'LAST_SOURCE', linkIds: [lk.bio], at: 'EITHER' }))).toEqual(['four']);
+      expect(await matched(all({ kind: 'LAST_SOURCE', kinds: ['BEFORE'], at: 'EITHER' }))).toEqual(['three']);
+      expect(await matched(all({ kind: 'LAST_SOURCE', kinds: ['SITE'], at: 'PURCHASE', not: true }))).toEqual(['entrant', 'four', 'three', 'two']);
+      // First and last side by side: came first through the bio, signed up through the press link.
+      expect(await matched(all({ kind: 'FIRST_SOURCE', linkIds: [lk.bio] }, { kind: 'LAST_SOURCE', channelIds: [lk.pressChannel], at: 'SIGNUP' }))).toEqual(['one']);
+    });
+
+    it('refuses a rule it cannot read; checks the links and channels named, an archived link accepted', async () => {
+      bad({ kind: 'FIRST_SOURCE' });
+      bad({ kind: 'FIRST_SOURCE', kinds: [] });
+      bad({ kind: 'FIRST_SOURCE', kinds: ['EMAIL'] });
+      bad({ kind: 'FIRST_SOURCE', linkIds: ['instagram-bio'] });
+      bad({ kind: 'LAST_SOURCE', kinds: ['LINK'] });
+      bad({ kind: 'LAST_SOURCE', kinds: ['LINK'], at: 'ORDER' });
+      expect(() => cleanCriteria({ match: 'ALL', rules: [{ kind: 'FIRST_SOURCE' }] })).toThrow('Came first through: tick at least one.');
+      expect(all({ kind: 'LAST_SOURCE', kinds: ['SITE', 'CAMPAIGN', 'SITE'], at: 'EITHER' }).rules).toEqual([{ kind: 'LAST_SOURCE', kinds: ['CAMPAIGN', 'SITE'], at: 'EITHER' }]);
+      const unknown = '00000000-0000-4000-8000-000000000000';
+      await rejects(segments.count({ match: 'ALL', rules: [{ kind: 'FIRST_SOURCE', linkIds: [lk.bio, unknown] }] }), 'LINK_NOT_FOUND', 404);
+      await rejects(segments.count({ match: 'ALL', rules: [{ kind: 'LAST_SOURCE', channelIds: [unknown], at: 'SIGNUP' }] }), 'CHANNEL_NOT_FOUND', 404);
+      expect(await segments.count({ match: 'ALL', rules: [{ kind: 'LAST_SOURCE', linkIds: [lk.press], at: 'SIGNUP' }] })).toEqual({ count: 1 });
+    });
+  });
+
+  it('saves a segment of every new group once: the same criteria again, written in another order, change nothing (§3.6 C.11)', async () => {
+    const criteria = (order: 'ab' | 'ba') => ({
+      match: 'ANY',
+      rules: [
+        { kind: 'CITY', cities: order === 'ab' ? ['Lyon', 'Saint-Étienne'] : ['SAINT-ETIENNE', 'lyon'] },
+        { kind: 'TAGGED', tags: order === 'ab' ? ['PRESS', 'vip'] : ['VIP', 'press', 'VIP'] },
+        { match: 'ALL', rules: [{ kind: 'WISHES_MODEL', modelIds: order === 'ab' ? [m.main, m.orbit] : [m.orbit, m.main] }, { kind: 'DEVICE', apps: ['TIKTOK', 'INSTAGRAM'], kinds: ['PHONE'], days: 90 }] },
+        { kind: 'LAST_SOURCE', kinds: order === 'ab' ? ['CAMPAIGN', 'SITE'] : ['SITE', 'CAMPAIGN'], at: 'EITHER', not: true },
+      ],
+    });
+    const s = await segments.create({ name: 'Every new group', criteria: criteria('ab') }, f.admin);
+    f.clock.advance(1000);
+    const again = await segments.update(s.id, { criteria: criteria('ba') }, f.admin);
+    expect(again.updatedAt).toEqual(s.updatedAt);
+    expect((await t.db.selectFrom('audit_logs').select('action').where('target_id', '=', s.id).execute()).map((a) => a.action)).toEqual(['segment.create']);
+    expect(again.count).toBe(s.count);
   });
 });

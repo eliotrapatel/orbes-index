@@ -22,7 +22,9 @@
  *               first source kind and channel, the top links and campaigns by first-link sign-ups, first visits by
  *               Paris day, the collectors whose first and last link differ.
  *   sourceFilter  the SQL condition « the account's first source is in these channels, links or kinds », exported for the
- *               Collectors page's other queries and Segments' FIRST_SOURCE.
+ *               Collectors page's other queries and Segments' FIRST_SOURCE; it and Segments' LAST_SOURCE condition,
+ *               lastSourceFilter, live in services/acquisition-filters.ts (no import of the services, so Segments read
+ *               them without loading this file's) and are exported from here too.
  *
  * The rules (§3.4 A.5, §3.0 (d)):
  *   - Who is counted: `countedCollector` (services/population.ts): no test entrant, no team account, no DELETED account,
@@ -53,6 +55,9 @@ import type { LinkService, LinkView } from './links.js';
 import { countedCollector } from './population.js';
 import { parisDay, parisDayStart } from './schedule.js';
 import { nextParisDay } from './tracking.js';
+import { sourceFilter, type SourceFilter } from './acquisition-filters.js';
+
+export { LAST_SOURCE_AT, lastSourceFilter, sourceFilter, type LastSourceAt, type SourceFilter } from './acquisition-filters.js';
 
 /** A period's days apart at most (to − from). */
 export const REPORT_MAX_DAYS = 800;
@@ -218,13 +223,6 @@ export interface FigureCollectors {
   currency: HouseCurrency;
 }
 
-/** « The account's first source is in these channels, links or kinds » (Segments' FIRST_SOURCE shape). */
-export interface SourceFilter {
-  channelIds?: readonly string[];
-  linkIds?: readonly string[];
-  kinds?: readonly SourceKind[];
-}
-
 export interface AcquisitionOverview {
   period: { from: string | null; to: string | null };
   /** Sign-ups in the period by first source: a kind, a LINK split by its channel. */
@@ -347,31 +345,6 @@ function specCondition(spec: SourceSpec, column: RawBuilder<unknown>): RawBuilde
   if ('link' in spec) return sql<SqlBool>`${column} IN (SELECT id FROM acquisition_sources WHERE link_id = ${spec.link}::uuid)`;
   if ('channel' in spec) return sql<SqlBool>`${column} IN (SELECT s.id FROM acquisition_sources s JOIN links l ON l.id = s.link_id WHERE l.channel_id = ${spec.channel}::uuid)`;
   return sql<SqlBool>`${column} IN (SELECT id FROM acquisition_sources WHERE kind = ${spec.kind})`;
-}
-
-/**
- * The account in `accountColumn` came first through one of these channels, links or kinds (§3.4 A.10.6, §3.6 C.6.2):
- * its `account_sources` row, else Before tracking for an account made before the recording started (or with no
- * recording), else Direct. A filter naming nothing matches every account.
- */
-export function sourceFilter(accountColumn: string, f: SourceFilter): RawBuilder<SqlBool> {
-  const channels = [...(f.channelIds ?? [])];
-  const links = [...(f.linkIds ?? [])];
-  const kinds = [...(f.kinds ?? [])];
-  if (channels.length + links.length + kinds.length === 0) return sql<SqlBool>`TRUE`;
-  const any: RawBuilder<SqlBool>[] = [];
-  if (kinds.length) any.push(sql<SqlBool>`sfk.kind IN (${sql.join(kinds)})`);
-  if (channels.length) any.push(sql<SqlBool>`sfl.channel_id IN (${sql.join(channels.map((c) => sql`${c}::uuid`))})`);
-  if (links.length) any.push(sql<SqlBool>`sfk.link_id IN (${sql.join(links.map((l) => sql`${l}::uuid`))})`);
-  return sql<SqlBool>`EXISTS (
-    SELECT 1 FROM accounts sfa
-      LEFT JOIN account_sources sfs ON sfs.account_id = sfa.id
-      JOIN acquisition_sources sfk ON sfk.id = coalesce(sfs.first_source_id, (
-        SELECT sfx.id FROM acquisition_sources sfx
-         WHERE sfx.key = CASE WHEN EXISTS (SELECT 1 FROM acquisition_state sfst WHERE sfst.id = 1 AND sfst.tracking_started_at <= sfa.created_at)
-                              THEN 'DIRECT' ELSE 'BEFORE' END))
-      LEFT JOIN links sfl ON sfl.id = sfk.link_id
-     WHERE sfa.id = ${sql.ref(accountColumn)} AND (${sql.join(any, sql` OR `)}))`;
 }
 
 interface SourceMeta {

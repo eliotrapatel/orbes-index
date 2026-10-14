@@ -44,6 +44,7 @@ import {
   SHOP_REQUEST_OUTCOMES,
   SHOP_REQUEST_STATUSES,
   SIZE_KINDS,
+  SOURCE_KINDS,
   SIZE_TYPES,
   STAFF_ROLES,
   STOCK_CORRECTION_STATUSES,
@@ -107,6 +108,7 @@ import { ADDRESS_LIMITS } from '../services/addresses.js';
 import { NOTE_MAX } from '../services/client-notes.js';
 import { BATCH_MAX_EVENTS, SEEN_PAGES } from '../services/tracking.js';
 import { ATTRIBUTIONS, MEASURES, REPORT_MAX_DAYS, REPORT_VIEWS } from '../services/acquisition-report.js';
+import { LAST_SOURCE_AT } from '../services/acquisition-filters.js';
 import { pageRequest, type PageRequest } from '../types.js';
 import { TASTE_KEY_MAX } from '../../shared/profile-rules.js';
 import { fromZod } from './errors.js';
@@ -1079,6 +1081,7 @@ const segmentItems = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'Nam
 const negated = { not: z.boolean().optional() };
 const segmentViewMin = whole(SEGMENT_LIMITS.viewMin.min, SEGMENT_LIMITS.viewMin.max, 'views');
 const segmentViewDays = whole(SEGMENT_LIMITS.viewDays.min, SEGMENT_LIMITS.viewDays.max, 'days');
+const segmentSources = { channelIds: segmentItems(uuid).optional(), linkIds: segmentItems(uuid).optional(), kinds: segmentItems(z.enum(SOURCE_KINDS)).optional() };
 /** A criterion of a segment, by its kind (services/segments.ts holds the rest: the ids named exist, an answer is one of its release's). */
 const segmentRule = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('PARTICIPATIONS'), min: segmentCount, ...negated }),
@@ -1121,6 +1124,8 @@ const segmentRule = z.discriminatedUnion('kind', [
     days: segmentViewDays,
     ...negated,
   }),
+  z.strictObject({ kind: z.literal('FIRST_SOURCE'), ...segmentSources, ...negated }),
+  z.strictObject({ kind: z.literal('LAST_SOURCE'), ...segmentSources, at: z.enum(LAST_SOURCE_AT), ...negated }),
 ]);
 const segmentRules = <T extends z.ZodType>(item: T) => z.array(item).min(1, 'At least one rule').max(SEGMENT_LIMITS.rules, `At most ${SEGMENT_LIMITS.rules} rules`);
 /** A segment's rule tree: a group of criteria and of groups of criteria (one level down). */

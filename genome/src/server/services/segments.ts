@@ -23,7 +23,11 @@
  *              model viewed at least N times in the last N days (a main model with its variants), a release viewed at
  *              least N times over the 13 months, a device used in the last N days (its kind, system, way it was opened
  *              and app), a place it was seen from by the connection in the last N days. N days is at most 395: the
- *              views' detail is kept 13 months.
+ *              views' detail is kept 13 months;
+ *   origin     (§3.4 A.5, A.10.6: services/acquisition-report.ts) the first source, or the last link before the sign-up,
+ *              before a paid order that is not GIFT, or either, in some channels, links (archived ones too) or kinds of
+ *              source, with the reports' fallbacks (Before tracking, Direct). A test entrant never matches one: it
+ *              makes no visit and no conversion, and the fallbacks would read it Direct.
  *
  * A new criterion reads what a test entrant never has (a profile, a wish, a view, a source, a score): a test entrant
  * matches one only through a NOT (§3.0 (d)), as today's members rule (ACTIVE accounts, test entrants and the team's own
@@ -50,6 +54,7 @@ import {
   IN_APPS,
   jsonText,
   OPENED_IN,
+  SOURCE_KINDS,
   type Database,
   type DeviceKind,
   type DeviceSystem,
@@ -57,6 +62,7 @@ import {
   type JsonObject,
   type OpenedIn,
   type SegmentRow,
+  type SourceKind,
 } from '../db/schema.js';
 import { conflict, forbidden, notFound, validationError } from '../errors.js';
 import { systemClock, type Actor, type Clock } from '../types.js';
@@ -70,6 +76,8 @@ import { cleanWords, latestBirthDateForAge, TASTE_KEY_MAX, tasteKey } from '../.
 import { cleanTag } from './client-notes.js';
 import { parisDay } from './schedule.js';
 import { browsingCondition } from './tracking-reads.js';
+import { LAST_SOURCE_AT, lastSourceFilter, sourceFilter, type LastSourceAt } from './acquisition-filters.js';
+import { notTestEntrant } from './population.js';
 
 // ── Rules ──────────────────────────────────────────────────────────────────
 
@@ -82,6 +90,7 @@ export const SEGMENT_CRITERIA = Object.freeze({
   PERSON: Object.freeze(['CITY', 'AGE', 'HEARD_FROM', 'TAGGED'] as const),
   TASTES: Object.freeze(['WISHES_MODEL', 'WISHES_COLLECTION', 'FAVOURITE_PIECE', 'FAVOURITE_FINISH'] as const),
   BROWSING: Object.freeze(['VIEWED_MODEL', 'VIEWED_RELEASE', 'DEVICE', 'PLACE'] as const),
+  ORIGIN: Object.freeze(['FIRST_SOURCE', 'LAST_SOURCE'] as const),
 });
 export type SegmentCriterionGroup = keyof typeof SEGMENT_CRITERIA;
 export const SEGMENT_RULE_KINDS = Object.freeze([
@@ -92,6 +101,7 @@ export const SEGMENT_RULE_KINDS = Object.freeze([
   ...SEGMENT_CRITERIA.PERSON,
   ...SEGMENT_CRITERIA.TASTES,
   ...SEGMENT_CRITERIA.BROWSING,
+  ...SEGMENT_CRITERIA.ORIGIN,
 ] as const);
 export type SegmentRuleKind = (typeof SEGMENT_RULE_KINDS)[number];
 export const SEGMENT_MATCHES = Object.freeze(['ALL', 'ANY'] as const);
@@ -149,6 +159,8 @@ export type SegmentRule = { not?: boolean } & (
   | { kind: 'VIEWED_RELEASE'; dropId: string; min: number }
   | { kind: 'DEVICE'; kinds?: DeviceKind[]; systems?: DeviceSystem[]; openedIn?: OpenedIn[]; apps?: InApp[]; days: number }
   | { kind: 'PLACE'; countries?: string[]; placeIds?: number[]; days: number }
+  | { kind: 'FIRST_SOURCE'; channelIds?: string[]; linkIds?: string[]; kinds?: SourceKind[] }
+  | { kind: 'LAST_SOURCE'; channelIds?: string[]; linkIds?: string[]; kinds?: SourceKind[]; at: LastSourceAt }
 );
 
 /** A group of rules: ALL of them, or ANY. */
@@ -289,6 +301,16 @@ function cleanRule(v: unknown): SegmentRule {
     case 'DEVICE': {
       const lists = someLists(r, { kinds: oneOf(DEVICE_KINDS, 'A device'), systems: oneOf(DEVICE_SYSTEMS, 'A system'), openedIn: oneOf(OPENED_IN, 'A way it was opened'), apps: oneOf(IN_APPS, 'An app') }, 'Device');
       return { kind: 'DEVICE', ...(lists as Pick<Extract<SegmentRule, { kind: 'DEVICE' }>, 'kinds' | 'systems' | 'openedIn' | 'apps'>), days: whole(r.days, SEGMENT_LIMITS.viewDays, 'Device: in the last N days'), ...not };
+    }
+    case 'FIRST_SOURCE':
+    case 'LAST_SOURCE': {
+      const what = r.kind === 'FIRST_SOURCE' ? 'Came first through' : 'Came last through';
+      const lists = someLists(r, { channelIds: (c) => id(c, 'A channel'), linkIds: (l) => id(l, 'A link'), kinds: oneOf(SOURCE_KINDS, 'A source') }, what) as Pick<
+        Extract<SegmentRule, { kind: 'FIRST_SOURCE' }>,
+        'channelIds' | 'linkIds' | 'kinds'
+      >;
+      if (r.kind === 'FIRST_SOURCE') return { kind: 'FIRST_SOURCE', ...lists, ...not };
+      return { kind: 'LAST_SOURCE', ...lists, at: oneOf(LAST_SOURCE_AT, 'Came last through: before')(r.at), ...not };
     }
     case 'PLACE': {
       const lists = someLists(r, { countries: country, placeIds: placeId }, 'Seen from');
@@ -485,6 +507,13 @@ function ruleSql(db: Db, eb: Accounts, r: SegmentRule, now: Date): Expression<Sq
     case 'PLACE':
       // Each on an index that leads with the account (collector_views_account_idx, tracking_device_accounts, collector_places).
       x = browsingCondition(r, account, now);
+      break;
+    case 'FIRST_SOURCE':
+      // account_sources by its key, else the reports' fallback (Before tracking, Direct); never a test entrant.
+      x = sql<SqlBool>`(${sourceFilter('a.id', r)} and ${notTestEntrant('a.id')})`;
+      break;
+    case 'LAST_SOURCE':
+      x = sql<SqlBool>`(${lastSourceFilter('a.id', r, r.at)} and ${notTestEntrant('a.id')})`;
       break;
   }
   return r.not ? sql<SqlBool>`not (${x})` : x;
@@ -795,7 +824,7 @@ export class SegmentService {
   }
 
   /**
-   * The releases, models, collections and answers of « How did you hear about ORBES? » the criteria name exist (404
+   * The releases, models, collections, links, channels and answers of « How did you hear about ORBES? » the criteria name exist (404
    * otherwise); an answer to the question after is one of its release's. Tags are free, and favourite pieces and
    * finishes are never checked against the catalogue of the day: a segment on a key no longer offered still runs; nor
    * are the places seen from (one no longer seen matches nobody).
@@ -823,6 +852,11 @@ export class SegmentService {
     if (collections.length && (await db.selectFrom('collections').select('id').where('id', 'in', collections).execute()).length !== collections.length) {
       throw notFound('Collection', 'COLLECTION_NOT_FOUND');
     }
+    // A link archived and a channel still exist: a segment naming one keeps matching.
+    const links = [...new Set(rules.flatMap((r) => ((r.kind === 'FIRST_SOURCE' || r.kind === 'LAST_SOURCE') && r.linkIds ? r.linkIds : [])))];
+    if (links.length && (await db.selectFrom('links').select('id').where('id', 'in', links).execute()).length !== links.length) throw notFound('Link', 'LINK_NOT_FOUND');
+    const channels = [...new Set(rules.flatMap((r) => ((r.kind === 'FIRST_SOURCE' || r.kind === 'LAST_SOURCE') && r.channelIds ? r.channelIds : [])))];
+    if (channels.length && (await db.selectFrom('link_channels').select('id').where('id', 'in', channels).execute()).length !== channels.length) throw notFound('Channel', 'CHANNEL_NOT_FOUND');
     // An answer set aside still exists: a segment on it keeps matching those who gave it.
     const heard = [...new Set(rules.flatMap((r) => (r.kind === 'HEARD_FROM' ? r.optionIds : [])))];
     if (heard.length && (await db.selectFrom('heard_options').select('id').where('id', 'in', heard).execute()).length !== heard.length) throw notFound('Answer', 'HEARD_OPTION_NOT_FOUND');
