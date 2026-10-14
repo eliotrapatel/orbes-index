@@ -6280,6 +6280,17 @@ a.collectors__kpi-link:focus-visible {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+/* MOST VIEWED's What they look at under ALL VISITORS (§3.3 T.4.2): four across, two by two on a phone. */
+.collectors__kpis--four {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 860px) {
+  .collectors__kpis--four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .collectors__ghost {
   opacity: 0.45;
 }

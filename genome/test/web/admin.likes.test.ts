@@ -4,7 +4,8 @@
  * against the previous period, the share, the retired mark, the withheld median, the links' labels (question 16: a most
  * wished model or collection opens who wishes for it), the slices each figure opens, which figures are links (each most
  * wished row, models and collections, and 'Collectors with a wishlist'; none on 'Added', the wishes added or removed,
- * nor anything when `raw` is false), and MOST VIEWED's note past the 13 months of detail.
+ * nor anything when `raw` is false), MOST VIEWED's note past the 13 months of detail, and What they look at under ALL
+ * VISITORS (§3.3 T.4.2): its words, Time spent's comparison and the table beside Views by day.
  */
 import { describe, expect, it } from 'vitest';
 import * as model from '../../src/web/admin/model/likes.js';
@@ -12,12 +13,15 @@ import {
   changeWords,
   LIKES_COPY,
   LIKES_SLICES,
+  lookDayRows,
   medianWords,
   modelWords,
   reachWords,
+  seenFromWords,
   shareWords,
   tasteLabel,
   tasteWords,
+  timeCompareWords,
   wishedCollectionLabel,
   wishedModelLabel,
   wishedLink,
@@ -122,5 +126,54 @@ describe('What they like (§3.2 W.8, §3.6 C.6.3 item 4)', () => {
     expect(reachWords('2025-09-08')).toBe('Filters other than the country reach back 13 months, to 08 SEP 2025.');
     expect(reachWords('2025-09-14')).toBe('Filters other than the country reach back 13 months, to 14 SEP 2025.');
     expect(reachWords(null)).toBeNull();
+  });
+
+  it('writes What they look at under ALL VISITORS (§3.3 T.4.2): its four figures, Views by day and Pages', () => {
+    expect(LIKES_COPY.look).toMatchObject({
+      title: 'What they look at',
+      views: 'Views',
+      timeSpent: 'Time spent',
+      visitors: 'Visitors',
+      collectorsSeen: 'Collectors seen',
+      viewsByDay: 'Views by day',
+      pages: 'Pages',
+      shareOfTime: 'Share of time',
+      previous: 'The previous period',
+    });
+    expect(seenFromWords('2025-09-14')).toBe('Counted from 14 SEP 2025.');
+    expect(seenFromWords(null)).toBeNull();
+  });
+
+  it('compares Time spent with the previous period as a count is compared: the change in time and in per cent, the time before', () => {
+    expect(timeCompareWords(3 * 3600 + 720, 3 * 3600)).toEqual({ change: '+12 min (+7%)', before: '3 h before' });
+    expect(timeCompareWords(1800, 3600)).toEqual({ change: '−30 min (−50%)', before: '1 h before' });
+    expect(timeCompareWords(60, 0)).toEqual({ change: 'new', before: null });
+    expect(timeCompareWords(0, 0)).toEqual({ change: '—', before: null });
+    expect(timeCompareWords(60, 60)).toEqual({ change: '0 (0%)', before: '1 min before' });
+    expect(timeCompareWords(60, null)).toBeNull();
+  });
+
+  it('groups the table beside Views by day as Over time does: by day up to 31 days, by week up to 120, by month beyond, the previous period at the same rank', () => {
+    const days = (from: string, n: number, views = (i: number) => i) => {
+      const out: { day: string; views: number }[] = [];
+      const d = new Date(`${from}T12:00:00Z`);
+      for (let i = 0; i < n; i++, d.setUTCDate(d.getUTCDate() + 1)) out.push({ day: d.toISOString().slice(0, 10), views: views(i) });
+      return out;
+    };
+    const month = lookDayRows(days('2026-09-15', 30), days('2026-08-16', 30, () => 2));
+    expect(month.unit).toBe('day');
+    expect(month.rows).toHaveLength(30);
+    expect(month.rows[0]).toEqual({ from: '2026-09-15', to: '2026-09-15', views: 0, previous: { from: '2026-08-16', to: '2026-08-16', views: 2 } });
+    const quarter = lookDayRows(days('2026-07-17', 90, () => 1), null);
+    expect(quarter.unit).toBe('week');
+    expect(quarter.rows).toHaveLength(13);
+    expect(quarter.rows[0]).toEqual({ from: '2026-07-17', to: '2026-07-23', views: 7, previous: null });
+    expect(quarter.rows[12]).toEqual({ from: '2026-10-09', to: '2026-10-14', views: 6, previous: null }); // the last six days
+    const year = lookDayRows(days('2025-10-15', 365, () => 1), null);
+    expect(year.unit).toBe('month');
+    expect(year.rows).toHaveLength(13);
+    expect(year.rows[0]).toEqual({ from: '2025-10-15', to: '2025-10-31', views: 17, previous: null });
+    expect(year.rows[12]).toEqual({ from: '2026-10-01', to: '2026-10-14', views: 14, previous: null });
+    expect(year.rows.reduce((s, r) => s + r.views, 0)).toBe(365);
   });
 });

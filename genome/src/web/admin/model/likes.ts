@@ -68,7 +68,71 @@ export const LIKES_COPY = Object.freeze({
   withheld: 'Fewer than 3 collectors',
   /** MOST VIEWED's note when the period reaches past the 13 months of detail (§3.6 C.6.3 item 4): `reachWords`. */
   reach: 'Filters other than the country reach back 13 months, to',
+  /** MOST VIEWED, ALL VISITORS: What they look at (§3.3 T.4.2), its figures, its line by day and its pages. */
+  look: Object.freeze({
+    title: 'What they look at',
+    views: 'Views',
+    timeSpent: 'Time spent',
+    visitors: 'Visitors',
+    collectorsSeen: 'Collectors seen',
+    viewsByDay: 'Views by day',
+    /** The table beside the line, by day up to 31 days, by week up to 120, by month beyond (as Over time). */
+    byUnit: Object.freeze({ day: 'Views by day', week: 'Views by week', month: 'Views by month' }),
+    period: 'Period',
+    previous: 'The previous period',
+    pages: 'Pages',
+    page: 'Page',
+    shareOfTime: 'Share of time',
+  }),
 });
+
+/**
+ * Time spent against the previous period's, as compareWords writes a count: `+1 h 12 min (+7%)` with `3 h before`;
+ * 'new' when there was none and now some; '—' when both are 0; null without the comparison.
+ */
+export function timeCompareWords(now: number, before: number | null): { change: string; before: string | null } | null {
+  if (before === null) return null;
+  if (now === 0 && before === 0) return { change: '—', before: null };
+  if (before === 0) return { change: 'new', before: null };
+  const d = now - before;
+  const pct = Math.round((d / before) * 100);
+  const sign = (n: number) => (n > 0 ? '+' : n < 0 ? '−' : '');
+  return { change: d === 0 ? '0 (0%)' : `${sign(d)}${durationText(Math.abs(d))} (${sign(pct)}${formatCount(Math.abs(pct))}%)`, before: `${durationText(before)} before` };
+}
+
+/** Collectors seen's note when the period reaches past the 13 months of detail: `Counted from 14 SEP 2025.`; else null. */
+export function seenFromWords(day: string | null): string | null {
+  return day === null ? null : `Counted from ${formatDate(day)}.`;
+}
+
+/** A row of the table beside Views by day: a day, a week or a month of the period, and the previous period's at its rank. */
+export interface LookDayRow {
+  from: string;
+  to: string;
+  views: number;
+  previous: { from: string; to: string; views: number } | null;
+}
+
+/** The days grouped as Over time groups them: by day up to 31 days, by week (7 days from the first) up to 120, else by month. */
+function lookBuckets(days: readonly { day: string; views: number }[], unit: 'day' | 'week' | 'month'): { from: string; to: string; views: number }[] {
+  const out: { from: string; to: string; views: number }[] = [];
+  days.forEach((d, i) => {
+    const last = out[out.length - 1];
+    const same = unit === 'day' ? false : unit === 'week' ? i % 7 !== 0 : last !== undefined && last.from.slice(0, 7) === d.day.slice(0, 7);
+    if (same && last) {
+      last.to = d.day;
+      last.views += d.views;
+    } else out.push({ from: d.day, to: d.day, views: d.views });
+  });
+  return out;
+}
+
+/** The table beside Views by day (§3.3 T.4.2): its unit and its rows, each with the previous period's at the same rank. */
+export function lookDayRows(byDay: readonly { day: string; views: number }[], previous: readonly { day: string; views: number }[] | null): { unit: 'day' | 'week' | 'month'; rows: LookDayRow[] } {
+  const unit = byDay.length <= 31 ? 'day' : byDay.length <= 120 ? 'week' : 'month';
+  const before = previous ? lookBuckets(previous, unit) : null;
+  return { unit, rows: lookBuckets(byDay, unit).map((b, i) => ({ ...b, previous: before?.[i] ?? null })) };
+}
 
 /**
  * MOST VIEWED's note under COLLECTORS when the period reaches further back than the 13 months of detail (the answer's

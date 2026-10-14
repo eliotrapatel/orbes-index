@@ -4188,6 +4188,23 @@ export interface CollectorHeldRow {
   pieces: number;
 }
 
+/** What they look at's totals for a period (services/likes.ts LookTotals). */
+export interface CollectorsLookTotals {
+  views: number;
+  seconds: number;
+  visitors: number;
+  collectors: number | null;
+}
+
+/** MOST VIEWED, ALL VISITORS: What they look at (services/likes.ts LookFigures, §3.3 T.4.2). */
+export interface CollectorsLook extends CollectorsLookTotals {
+  collectorsFrom: string | null;
+  previous: CollectorsLookTotals | null;
+  byDay: { day: string; views: number }[];
+  previousByDay: { day: string; views: number }[] | null;
+  pages: { page: ViewPageName; views: number; seconds: number; share: number }[];
+}
+
 /** The panel `likes` (services/likes.ts LikesFigures). */
 export interface CollectorsLikes {
   raw: boolean;
@@ -4205,7 +4222,7 @@ export interface CollectorsLikes {
   finishes: { rows: (CollectorTaste & { swatch: string | null })[]; none: number };
   viewed: {
     collectors: { models: (CollectorViewedRow & { variants: CollectorViewedRow[] })[]; releases: CollectorViewedRelease[]; groups: number; reachesBackTo: string | null };
-    visitors: { models: (CollectorViewedRow & { variants: CollectorViewedRow[] })[]; releases: CollectorViewedRelease[]; groups: number; through: string | null };
+    visitors: { models: (CollectorViewedRow & { variants: CollectorViewedRow[] })[]; releases: CollectorViewedRelease[]; groups: number; through: string | null; look: CollectorsLook };
   };
   held: { rows: (CollectorHeldRow & { variants: CollectorHeldRow[] })[]; groups: number };
 }

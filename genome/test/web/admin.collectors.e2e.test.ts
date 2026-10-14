@@ -12,7 +12,8 @@
  *       opened as a sheet, no sideways scroll.
  *  9.10 Each panel and tab: Where they come from (SOURCES, HOW THEY HEARD, LINKS, CAMPAIGNS, REFERRING SITES, FIRST
  *       VISITS), What they like (the Wishlists figures, FAVOURITE PIECES, FINISHES, MOST WISHED models and collections,
- *       MOST VIEWED by collectors and by every visitor, PIECES HELD), Devices (BY COLLECTORS, BY VISITS, ALL DEVICES),
+ *       MOST VIEWED by collectors and by every visitor with What they look at's figures, Views by day and Pages,
+ *       §3.3 T.4.2, PIECES HELD), Devices (BY COLLECTORS, BY VISITS, ALL DEVICES),
  *       Engagement (SCORE SPREAD, THE FIVE PARTS, ACTIVE AND DORMANT, MONTHLY COHORTS), Over time (a figure and a split);
  *       a most wished model's row opens the collectors who wish for it (question 16).
  *  9.11 Figure → list → sheet: a KPI, a country, a most wished row open the list (#/collectors/list), its title naming the
@@ -319,6 +320,8 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
     };
     await device(ids.a!, 'PHONE', 'IOS', 'SAFARI');
     await device(ids.b!, 'COMPUTER', 'MACOS', 'CHROME');
+    // Every visitor's daily totals (What they look at, §3.3 T.4.2): NOW only, so ALL VISITORS' models stay empty.
+    await ctx.db.insertInto('view_daily_stats').values({ day: parisDay(new Date(now - DAY)), page: 2, subject: '00000000-0000-0000-0000-000000000000', country: 'FR', views: 5, seconds: 300, devices: 3, signed_in_views: 2 }).execute();
     const site = (await ctx.db.insertInto('acquisition_sources').values({ kind: 'SITE', site: 'instagram.com', key: 'S:instagram.com' }).returning('id').executeTakeFirstOrThrow()).id;
     await ctx.db.insertInto('account_sources').values({ account_id: ids.a!, first_source_id: site, first_seen_at: new Date(now - 3 * DAY - 3_600_000), set_at: new Date(now - 3 * DAY), set_by: 'SIGN_UP' }).execute();
 
@@ -556,8 +559,27 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       await p.click(`${likes} [data-testid=collectors-likes-tabs] [data-key=viewed]`);
       expect(await rowsOf(p, likes)).toEqual(['MONOLITHE · Silver | 2 | 4 | 2 min | Fewer than 3 collectors', 'MONOLITHE · Blue | 2 | 2 | 40 s | Fewer than 3 collectors']);
       await p.click(`${likes} [data-testid=collectors-viewed-who] [data-key=visitors]`);
-      // Every visitor's figures come from the daily totals, not counted yet for these days.
+      // Every visitor's figures come from the daily totals, which hold no model for these days.
       expect(await text(p, `${likes} .empty__text`)).toBe('No model looked at in this period.');
+      // What they look at (§3.3 T.4.2): Views, Time spent, Visitors (devices), Collectors seen (A and B, signed in), each
+      // compared; no figure opens a list; Views by day, the line with the previous period's pale and its table; Pages.
+      const look = `${likes} [data-testid=collectors-look]`;
+      expect(await p.locator(`${look} .kpi`).evaluateAll((els) => els.map((e) => `${e.querySelector('.kpi__label')?.textContent}: ${e.querySelector('.kpi__value')?.textContent} · ${e.querySelector('.collectors__change')?.textContent}`))).toEqual([
+        'Views: 5 · new',
+        'Time spent: 5 min · new',
+        'Visitors: 0 · —',
+        'Collectors seen: 2 · new',
+      ]);
+      expect(await p.locator(`${look} a`).count()).toBe(0);
+      expect(await p.locator(look).getAttribute('aria-label')).toBe('What they look at');
+      expect(await p.locator(`${likes} .collectors__tab-body .panel__subtitle`).allTextContents()).toEqual(['Views by day', 'Pages']);
+      expect(await p.locator(`${likes} [data-testid=collectors-look-chart] polyline`).count()).toBe(2);
+      expect(await p.locator(`${likes} caption`).allTextContents()).toEqual(['Views by day', 'Pages']);
+      const byDay = await p.locator(`${likes} table`).first().locator('tbody tr').evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => (td.textContent ?? '').replace(/\s+/g, ' ').trim()).join(' | ')));
+      expect(byDay).toHaveLength(30);
+      expect(byDay.filter((r) => /^\S+ \S+ \S+ \| 5 \|/.test(r))).toHaveLength(1);
+      expect(await p.locator(`${likes} table`).last().locator('tbody tr').evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => (td.textContent ?? '').trim()).join(' | ')))).toEqual(['NOW | 5 | 5 min | 100 %']);
+      await shot(p, 'look');
       await p.click(`${likes} [data-testid=collectors-likes-tabs] [data-key=held]`);
       expect(await rowsOf(p, likes)).toEqual(['MONOLITHE · Silver | 1 | 1', 'MONOLITHE · Blue | 1 | 1']);
 
@@ -610,6 +632,11 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       }
       await phone.click(`${likes} [data-testid=collectors-likes-tabs] [data-key=viewed]`);
       await fits(phone);
+      // What they look at on a phone: its four figures two by two, the line and its tables inside the width.
+      await phone.click(`${likes} [data-testid=collectors-viewed-who] [data-key=visitors]`);
+      expect(await phone.locator(`${likes} [data-testid=collectors-look]`).evaluate((e) => getComputedStyle(e).gridTemplateColumns.split(' ').length)).toBe(2);
+      await fits(phone);
+      await shot(phone, 'look-phone');
       await shot(phone, 'panels-phone');
       await phone.context().close();
     },

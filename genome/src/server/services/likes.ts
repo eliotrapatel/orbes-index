@@ -20,7 +20,9 @@
  *                main model with its variants and by release, with the collectors who looked, the views, the time and
  *                the median time per collector (withheld under LIKES_MIN_GROUP collectors); ALL VISITORS, every
  *                visitor's views from the daily totals kept for good (tracking-reads.ts viewsReport), where only the
- *                countries apply (the connection's country, the one the totals hold).
+ *                countries apply (the connection's country, the one the totals hold), with What they look at's
+ *                figures (§3.3 T.4.2, `look`): Views, Time spent, Visitors, Collectors seen (the counted collectors
+ *                with a signed-in view, from the 13 months of detail), Views by day and Pages.
  *   held         PIECES HELD: by main model with its variants, the collectors holding at least one piece now and the
  *                pieces (CLUB_EXCLUDED_STATUSES left out, as the tiers count them).
  *
@@ -43,7 +45,7 @@
  */
 import { sql, type RawBuilder } from 'kysely';
 import type { Db } from '../db/connection.js';
-import { VIEW_PAGE_CODES } from '../db/schema.js';
+import { VIEW_PAGE_CODES, type ViewPage } from '../db/schema.js';
 import { tasteKey } from '../../shared/profile-rules.js';
 import { systemClock, type Clock } from '../types.js';
 import { CLUB_EXCLUDED_STATUSES } from './club.js';
@@ -52,7 +54,7 @@ import { countedCollector } from './population.js';
 import { parisDay } from './schedule.js';
 import { tasteOptions } from './tastes.js';
 import { viewHistoryCutoff } from './tracking.js';
-import { viewsReport } from './tracking-reads.js';
+import { collectorsSeen, viewsReport } from './tracking-reads.js';
 import { wishHistoryCutoff, wishModelState, type WishModelState } from './wishlist.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -173,6 +175,33 @@ export interface HeldModel extends HeldModelRow {
   variants: HeldModelRow[];
 }
 
+/** What they look at's totals for a period (§3.3 T.4.2), every visitor's from the daily totals. */
+export interface LookTotals {
+  views: number;
+  seconds: number;
+  /** Devices summed per Paris day (the daily totals' visitors). */
+  visitors: number;
+  /** Collectors seen: the counted collectors with a signed-in view (13 months kept); null when not comparable. */
+  collectors: number | null;
+}
+
+/**
+ * MOST VIEWED, ALL VISITORS: What they look at (§3.3 T.4.2): Views, Time spent, Visitors (devices), Collectors seen
+ * (accounts), Views by day with the previous period's beside it, and Pages (each page's share of time).
+ */
+export interface LookFigures extends LookTotals {
+  /** The first day kept when the period reaches past the 13 months of detail: Collectors seen counts from it. */
+  collectorsFrom: string | null;
+  /** The previous period's totals (with the comparison); its Collectors seen null when the detail cannot give it whole. */
+  previous: LookTotals | null;
+  /** Every Paris day of the period, in order. */
+  byDay: { day: string; views: number }[];
+  /** Every Paris day of the previous period, in order (with the comparison). */
+  previousByDay: { day: string; views: number }[] | null;
+  /** Every page's share of time, the most time first. */
+  pages: { page: ViewPage; views: number; seconds: number; share: number }[];
+}
+
 /** The panel `likes` (§3.6 C.6.3 item 4; W.8's AdminLikes with C.6.3's tabs). */
 export interface LikesFigures {
   /** False when the wish figures come from the monthly totals (see the file header). */
@@ -193,7 +222,7 @@ export interface LikesFigures {
   finishes: { rows: FinishFigure[]; none: number };
   viewed: {
     collectors: { models: ViewedModel[]; releases: ViewedRelease[]; groups: number; reachesBackTo: string | null };
-    visitors: { models: ViewedModel[]; releases: ViewedRelease[]; groups: number; through: string | null };
+    visitors: { models: ViewedModel[]; releases: ViewedRelease[]; groups: number; through: string | null; look: LookFigures };
   };
   held: { rows: HeldModel[]; groups: number };
 }
@@ -549,10 +578,32 @@ async function viewedByCollectors(tx: Db, x: LikesInput): Promise<LikesFigures['
   return { models: list.slice(0, LIKES_TOP), releases: rel.slice(0, LIKES_TOP), groups: list.length, reachesBackTo };
 }
 
-/** MOST VIEWED, ALL VISITORS: every visitor's views from the daily totals (viewsReport), the countries alone applied. */
+/**
+ * MOST VIEWED, ALL VISITORS: every visitor's views from the daily totals (viewsReport), the countries alone applied,
+ * with What they look at's figures (T.4.2): the totals, Collectors seen (collectorsSeen, from the detail), the views
+ * by day and the pages; the previous period's read the same way when the page compares.
+ */
 async function viewedByVisitors(tx: Db, x: LikesInput): Promise<LikesFigures['viewed']['visitors']> {
-  const r = await viewsReport(tx, { from: x.window.from, to: x.window.to }, x.countries?.length ? { countries: x.countries } : undefined, { now: x.now });
+  const countries = x.countries?.length ? { countries: x.countries } : undefined;
+  const r = await viewsReport(tx, { from: x.window.from, to: x.window.to }, countries, { now: x.now });
   const f = r.current;
+  const B = x.window.previous;
+  const before = B ? (await viewsReport(tx, { from: B.from, to: B.to }, countries, { now: x.now })).current : null;
+  const seen = await collectorsSeen(tx, { from: x.window.from, to: x.window.to }, x.countries, x.now);
+  const seenBefore = B ? await collectorsSeen(tx, { from: B.from, to: B.to }, x.countries, x.now) : null;
+  const look: LookFigures = {
+    views: f.views,
+    seconds: f.seconds,
+    visitors: f.devices,
+    collectors: seen.collectors,
+    collectorsFrom: seen.from,
+    previous: before
+      ? { views: before.views, seconds: before.seconds, visitors: before.devices, collectors: seenBefore && seenBefore.from === null && seen.from === null ? seenBefore.collectors : null }
+      : null,
+    byDay: f.byDay.map((d) => ({ day: d.day, views: d.views })),
+    previousByDay: before ? before.byDay.map((d) => ({ day: d.day, views: d.views })) : null,
+    pages: f.pages.map((p) => ({ page: p.page, views: p.views, seconds: p.seconds, share: p.share })),
+  };
   const meta = await modelsById(tx, f.models.map((m) => m.mainModelId));
   type Row = { main: string; model: string | null; views: number; seconds: number; devices: number };
   const rows: Row[] = [];
@@ -580,7 +631,7 @@ async function viewedByVisitors(tx: Db, x: LikesInput): Promise<LikesFigures['vi
   const order = (a: ViewedModelRow, b: ViewedModelRow) => b.seconds - a.seconds || b.views - a.views || byCode(a.name ?? '', b.name ?? '') || byCode(a.modelId, b.modelId);
   const list = grouped(rows, make, order).map((g) => ({ ...g.main, variants: g.variants }));
   const releases = f.releases.map((d) => ({ dropId: d.dropId, title: d.title, collectors: null, views: d.views, seconds: d.seconds, medianSeconds: null, visitors: d.devices }));
-  return { models: list.slice(0, LIKES_TOP), releases: releases.slice(0, LIKES_TOP), groups: list.length, through: r.through };
+  return { models: list.slice(0, LIKES_TOP), releases: releases.slice(0, LIKES_TOP), groups: list.length, through: r.through, look };
 }
 
 /** PIECES HELD (§3.6 C.6.3): by main model with its variants, the collectors holding one now and the pieces. */

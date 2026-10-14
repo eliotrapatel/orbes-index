@@ -6,7 +6,8 @@
  *               how many collectors came last through another source than their first.
  *   likes       What they like: the Wishlists figures, then FAVOURITE PIECES · FINISHES · MOST WISHED (MODELS ·
  *               COLLECTIONS, each row's 'Wished' opening who wishes for it, question 16) · MOST VIEWED (MODELS · RELEASES,
- *               COLLECTORS · ALL VISITORS) · PIECES HELD.
+ *               COLLECTORS · ALL VISITORS; under ALL VISITORS, What they look at: Views, Time spent, Visitors,
+ *               Collectors seen, Views by day and Pages, §3.3 T.4.2) · PIECES HELD.
  *   devices     Devices: BY COLLECTORS · BY VISITS · ALL DEVICES, each with DEVICE, SYSTEM, OPENED IN (and inside which
  *               app) and BROWSERS; only BY COLLECTORS opens collectors (a visit or a device is not a collector).
  *   engagement  Engagement: SCORE SPREAD with the month kept beside it pale, THE FIVE PARTS, ACTIVE AND DORMANT, MONTHLY
@@ -52,8 +53,25 @@ import {
 } from '../model/collectors.js';
 import { PART_LABELS } from '../model/engagement.js';
 import { money } from '../model/growth.js';
-import { changeWords, LIKES_COPY as L, LIKES_SLICES, medianWords, modelWords, reachWords, shareWords, tasteLabel, tasteWords, wishedLink, wishedName, wishlistLink } from '../model/likes.js';
-import { APP_WORDS, durationText } from '../model/owner-intelligence.js';
+import {
+  changeWords,
+  LIKES_COPY as L,
+  LIKES_SLICES,
+  lookDayRows,
+  medianWords,
+  modelWords,
+  reachWords,
+  seenFromWords,
+  shareWords,
+  tasteLabel,
+  tasteWords,
+  timeCompareWords,
+  wishedLink,
+  wishedName,
+  wishlistLink,
+  type LookDayRow,
+} from '../model/likes.js';
+import { APP_WORDS, durationText, PAGE_WORDS } from '../model/owner-intelligence.js';
 import { href } from '../router.js';
 import {
   IN_APPS,
@@ -61,6 +79,7 @@ import {
   TREND_SPLITS,
   type CollectorDevices,
   type CollectorLinkResult,
+  type CollectorsLook,
   type CollectorsReport,
   type CollectorTrendPoint,
   type TrendFigure,
@@ -423,6 +442,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
         const C = L.columns;
         return [
           h('div', { class: 'collectors__switches' }, what, who),
+          ...(byCollectors ? [] : lookBlock(f.viewed.visitors.look, figure)),
           table(
             [
               { label: viewedWhat === 'models' ? C.model : C.release, cell: (x: Row) => h('span', { class: [x.sub ? 'cell-sub' : null] }, x.name), kind: ['wide'] },
@@ -437,6 +457,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
             { empty: L.empty.viewed, caption: L.tabs.viewed },
           ),
           showAll(block.groups),
+          ...(byCollectors ? [] : lookPages(f.viewed.visitors.look)),
           byCollectors ? panelLine(reachWords(f.viewed.collectors.reachesBackTo)) : panelLine(f.viewed.visitors.through ? DEVICES_COPY.through(f.viewed.visitors.through) : null),
         ];
       }
@@ -462,6 +483,73 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
     }
   });
   return [h('h3', { class: 'panel__subtitle' }, L.wishlists), wishlists, body];
+}
+
+type FigureOf = (key: string, label: string, value: Child, cmp: { change: string; before: string | null } | null, note: string | null) => HTMLElement;
+
+/**
+ * What they look at (§3.3 T.4.2), above MOST VIEWED's table under ALL VISITORS: Views, Time spent, Visitors (devices)
+ * and Collectors seen, each against the previous period's; then Views by day, the line with the previous period's
+ * pale (aria-hidden), and its figures in the table beside it. Every visitor counts here, anonymous ones included: no
+ * figure opens a list (an anonymous visitor has no sheet, and Collectors seen takes no filter but the country).
+ */
+function lookBlock(look: CollectorsLook, figure: FigureOf): Child[] {
+  const LK = L.look;
+  const prev = look.previous;
+  const figures = h(
+    'div',
+    { class: ['kpis', 'collectors__kpis', 'collectors__kpis--four'], attrs: { role: 'group', 'aria-label': LK.title }, data: { testid: 'collectors-look' } },
+    figure('views', LK.views, formatCount(look.views), prev ? compareWords(look.views, prev.views) : null, null),
+    figure('timeSpent', LK.timeSpent, durationText(look.seconds), prev ? timeCompareWords(look.seconds, prev.seconds) : null, null),
+    figure('visitors', LK.visitors, formatCount(look.visitors), prev ? compareWords(look.visitors, prev.visitors) : null, null),
+    figure('collectorsSeen', LK.collectorsSeen, look.collectors === null ? '—' : formatCount(look.collectors), prev ? compareWords(look.collectors, prev.collectors) : null, seenFromWords(look.collectorsFrom)),
+  );
+  const values = look.byDay.map((d) => d.views);
+  const before = look.previousByDay?.map((d) => d.views) ?? null;
+  if (values.every((v) => v === 0) && (before ?? []).every((v) => v === 0)) return [figures];
+  const max = Math.max(1, ...values, ...(before ?? []));
+  const svg = s(
+    'svg',
+    { class: 'trend__svg', viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', 'aria-hidden': 'true', focusable: 'false' },
+    s('line', { class: 'trend__base', x1: 0, y1: H, x2: W, y2: H }),
+    before ? line(before, max, 'collectors__line--before') : null,
+    line(values, max, 'collectors__line--0'),
+  );
+  const t = lookDayRows(look.byDay, look.previousByDay);
+  const when = (b: { from: string; to: string }) => (t.unit === 'month' ? monthWords(b.from.slice(0, 7)) : bucketWords(b));
+  return [
+    figures,
+    subtitle(LK.viewsByDay),
+    h('figure', { class: ['trend', 'collectors__trend'], data: { testid: 'collectors-look-chart' } }, h('div', { class: 'collectors__trend-plot' }, svg)),
+    table(
+      [
+        { label: LK.period, cell: (x: LookDayRow) => when(x), kind: ['nowrap'] },
+        { label: LK.views, cell: (x) => formatCount(x.views), kind: ['num'] },
+        ...(before ? [{ label: LK.previous, cell: (x: LookDayRow) => (x.previous ? h('span', null, formatCount(x.previous.views), h('span', { class: 'cell-sub' }, ' ', when(x.previous))) : '—'), kind: ['num' as const, 'nowrap' as const] }] : []),
+      ],
+      t.rows,
+      { caption: LK.byUnit[t.unit] },
+    ),
+  ];
+}
+
+/** What they look at's Pages (§3.3 T.4.2), under MOST VIEWED's table: each page's views, time and share of time. */
+function lookPages(look: CollectorsLook): Child[] {
+  if (look.pages.length === 0) return [];
+  const LK = L.look;
+  return [
+    subtitle(LK.pages),
+    table(
+      [
+        { label: LK.page, cell: (x: CollectorsLook['pages'][number]) => PAGE_WORDS[x.page], kind: ['wide'] },
+        { label: LK.views, cell: (x) => formatCount(x.views), kind: ['num'] },
+        { label: LK.timeSpent, cell: (x) => durationText(x.seconds), kind: ['num', 'nowrap'] },
+        { label: LK.shareOfTime, cell: (x) => `${formatCount(x.share)} %`, kind: ['num', 'nowrap'] },
+      ],
+      look.pages,
+      { caption: LK.pages },
+    ),
+  ];
 }
 
 function swatchDot(color: string): HTMLElement {

@@ -139,6 +139,13 @@ describe('LikesService (§3.2 W.8, §3.6 C.6.3 item 4; step 9.4)', () => {
     await daily('2026-10-10', m.MONO!, 'FR', 2, 60, 2);
     await daily('2026-10-11', m.BLUE!, 'IT', 1, 10, 1);
     await daily('2026-09-01', m.BLUE!, 'FR', 50, 5000, 30);
+    // Every visitor's devices a day (What they look at's Visitors), and a page with no model (NOW).
+    const devices = (day: string, country: string, n: number) =>
+      db.insertInto('device_daily_stats').values({ day, country, kind: 'PHONE', os: 'IOS', browser: 'SAFARI', opened_in: 'BROWSER', in_app: 'NONE', devices: n, new_devices: 0, signed_in_devices: 0 }).execute();
+    await devices('2026-10-10', 'FR', 5);
+    await devices('2026-10-11', 'IT', 1);
+    await devices('2026-09-01', 'FR', 30);
+    await db.insertInto('view_daily_stats').values({ day: '2026-10-11', page: VIEW_PAGE_CODES.NOW, subject: '00000000-0000-0000-0000-000000000000', country: 'FR', views: 3, seconds: 130, devices: 2, signed_in_views: 0 }).execute();
     await db.updateTable('accounts').set({ status: 'DELETED' }).where('id', '=', acc.X!).execute();
   }, 120_000);
   afterAll(() => h?.close());
@@ -231,6 +238,34 @@ describe('LikesService (§3.2 W.8, §3.6 C.6.3 item 4; step 9.4)', () => {
     ]);
     const it = await likes(windowOf(P30, B30), undefined, ['IT']);
     expect(it.viewed.visitors.models.map((r) => [r.views, r.variants.map((v) => v.views)])).toEqual([[1, [1]]]);
+  });
+
+  it('what they look at under ALL VISITORS (§3.3 T.4.2): Views, Time spent, Visitors (devices), Collectors seen (counted collectors, signed in), Views by day and Pages, each with the previous period', async () => {
+    const f = await likes(windowOf(P30, B30));
+    const look = f.viewed.visitors.look;
+    // 10 Oct: 9 views of models (360 s); 11 Oct: 1 of Blue in Italy (10 s) and 3 of NOW (130 s). Devices: 5 + 1.
+    // Collectors seen: A, B and C (T is a test entrant, the anonymous visitor has no account); before: B on 10 Sep.
+    expect(look).toMatchObject({ views: 13, seconds: 500, visitors: 6, collectors: 3, collectorsFrom: null, previous: { views: 50, seconds: 5000, visitors: 30, collectors: 1 } });
+    expect(look.byDay).toHaveLength(30);
+    expect(look.byDay[0]!.day).toBe('2026-09-15');
+    expect(look.byDay.filter((d) => d.views > 0)).toEqual([
+      { day: '2026-10-10', views: 9 },
+      { day: '2026-10-11', views: 4 },
+    ]);
+    expect(look.previousByDay).toHaveLength(30);
+    expect(look.previousByDay!.filter((d) => d.views > 0)).toEqual([{ day: '2026-09-01', views: 50 }]);
+    expect(look.pages).toEqual([
+      { page: 'MODEL', views: 10, seconds: 370, share: 74 },
+      { page: 'NOW', views: 3, seconds: 130, share: 26 },
+    ]);
+    // Without the comparison, no previous period; the country alone applies, to Collectors seen too (no view placed in Italy).
+    const off = await likes(windowOf(P30, null));
+    expect(off.viewed.visitors.look).toMatchObject({ previous: null, previousByDay: null });
+    const it = await likes(windowOf(P30, B30), undefined, ['IT']);
+    expect(it.viewed.visitors.look).toMatchObject({ views: 1, seconds: 10, visitors: 1, collectors: 0, previous: { views: 0, visitors: 0, collectors: 0 } });
+    // A period reaching past the 13 months of detail: Collectors seen counts from the first day kept, the previous one withheld.
+    const long = await likes(windowOf({ ...P30, from: '2025-06-01', start: z('2025-05-31T22:00:00Z') }, B30));
+    expect(long.viewed.visitors.look).toMatchObject({ collectorsFrom: '2025-09-14', collectors: 3, previous: { collectors: null } });
   });
 
   it('pieces held: by main model with its dots, the collectors holding one now and the pieces; ended ownerships and revoked pieces left out', async () => {

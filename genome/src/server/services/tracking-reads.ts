@@ -846,6 +846,27 @@ export async function viewsReport(db: Db, window: DayWindow, filters: ViewFilter
   return { source: current.p.source, through: await viewsCountedThrough(db), reachesBackTo: current.p.reachesBackTo, current: current.figures, previous };
 }
 
+/**
+ * Collectors seen (T.4.2, What they look at under ALL VISITORS): the counted collectors with a signed-in view in the
+ * window, the connection's countries alone applied (as the daily totals beside it). The detail is kept 13 months: a
+ * window reaching further counts from the first day kept (`from`, else null), and a window wholly older is null.
+ */
+export async function collectorsSeen(db: Db, window: DayWindow, countries: readonly string[] | undefined, now: Date): Promise<{ collectors: number | null; from: string | null }> {
+  const w = checkWindow(window);
+  const d = detailWindow(w, now);
+  if (!d.window) return { collectors: null, from: d.reachesBackTo };
+  const c = cleanCountries(countries);
+  const start = parisDayStart(d.window.from);
+  const end = parisDayStart(nextParisDay(d.window.to));
+  // Per counted collector, one probe of collector_views_account_idx (account_id, at): never a scan of the 13 months.
+  const place = c.length ? sql` AND coalesce((SELECT gp.country FROM geo_places gp WHERE gp.id = v.place_id), ${ZZ}) IN (${sql.join(c)})` : sql``;
+  const r = await sql<{ n: unknown }>`
+    SELECT count(*)::int AS n FROM accounts ra
+     WHERE ${countedCollector('ra.id')}
+       AND EXISTS (SELECT 1 FROM collector_views v WHERE v.account_id = ra.id AND v.at >= ${start} AND v.at < ${end}${place})`.execute(db);
+  return { collectors: asNumber(r.rows[0]?.n), from: d.reachesBackTo };
+}
+
 /** A system line of the Devices panel: an iPad on its own line (T.4.2). */
 export type SystemLine = DeviceSystem | 'IPAD';
 export type DevicesBy = 'DEVICES' | 'COLLECTORS' | 'VISITS';
