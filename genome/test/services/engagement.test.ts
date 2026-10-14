@@ -479,6 +479,8 @@ describe('the engagement score\'s figures (plan CUSTOMER INTELLIGENCE §3.5 SB.3
 
     it('scores every ACTIVE account that is not a test entrant, removes a DELETED account\'s row, leaves a LOCKED one as it was, and counts the bands over the counted collectors', async () => {
       const before = await snapshot();
+      const audited = async () => Number((await db().selectFrom('audit_logs').select((eb) => eb.fn.countAll().as('n')).executeTakeFirstOrThrow()).n);
+      const auditsBefore = await audited();
       const lockedBefore = await rowOf(who.locked!);
       expect(lockedBefore).toMatchObject({ score: 29, active_days: 1, changed_at: at('2026-11-01T08:00:00Z') });
       const expected = await population();
@@ -496,6 +498,8 @@ describe('the engagement score\'s figures (plan CUSTOMER INTELLIGENCE §3.5 SB.3
       expect(stray.rows[0]!.n).toBe(0);
       const locked = Number((await sql<{ n: number }>`SELECT count(*)::int AS n FROM account_scores s JOIN accounts a ON a.id = s.account_id WHERE a.status = 'LOCKED'`.execute(db())).rows[0]!.n);
       expect(await rows()).toBe(expected + locked);
+      // A score is derived, not decided: the run writes no audit entry (SB.3.3), whatever it changed.
+      expect(await audited()).toBe(auditsBefore);
       // The rows changed: those inserted or rewritten, and the two removed.
       expect(run!.changed).toBe(differences(before, await snapshot()));
       expect(run!.changed).toBeGreaterThanOrEqual(5);
