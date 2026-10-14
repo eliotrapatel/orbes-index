@@ -17,6 +17,7 @@ import { MONOGRAM_PATHS } from '../../src/core/render/monogram.js';
 import { BIRTHDAY_CREDIT_LABEL, clubBlockLines } from '../../src/web/admin/model/club.js';
 import { dashboardKpis } from '../../src/web/admin/model/dashboard.js';
 import { APPLY_CREDIT_TEXT, creditAppliedLine, creditAvailableLine } from '../../src/web/admin/model/orders.js';
+import { LIKES_COPY } from '../../src/web/admin/model/likes.js';
 import { BIRTHDAY_NOTE } from '../../src/web/admin/model/program.js';
 import { SEGMENT_COPY, SEGMENT_GROUP_LABELS, SEGMENT_RULE_LABELS } from '../../src/web/admin/model/segments.js';
 import { SIGN_UP_COPY } from '../../src/web/admin/model/sign-up.js';
@@ -222,6 +223,16 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     }
     const said = [...Object.values(SEGMENT_GROUP_LABELS), ...Object.values(SEGMENT_RULE_LABELS), ...Object.values(SEGMENT_COPY)].join('\n');
     expect(said).not.toMatch(/!|atelier|handmade|hand-made|craft|\bproducts?\b/i);
+  });
+
+  it('writes the Collectors page\'s What they like calmly (plan CUSTOMER INTELLIGENCE §3.2 W.8, §0.7): no atelier, handmade or craft, no exclamation mark, never « product »', () => {
+    const f = join(WEB, 'admin/model/likes.ts');
+    const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+    expect(code, f).not.toMatch(/atelier|handmade|hand-made|craft/i);
+    const words = [...code.matchAll(/'([^'\n]*)'|`([^`\n]*)`/g)].map((m) => m[1] ?? m[2] ?? '').join('\n');
+    expect(words, f).not.toMatch(/!(?!==?)/);
+    expect(words, f).not.toMatch(/\bproducts?\b/i);
+    expect(JSON.stringify(LIKES_COPY)).not.toMatch(/!|atelier|handmade|hand-made|craft|\bproducts?\b/i);
   });
 
   it('writes the birthday credit calmly in the console (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6, §0.7): no atelier, handmade or craft, no exclamation mark, never « product » nor « gift », no figure in a label', () => {

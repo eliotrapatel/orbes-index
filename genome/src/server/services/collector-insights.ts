@@ -13,7 +13,9 @@
  *             six KPIs), `who` (Who they are: AGES, COUNTRIES and CITIES, each as given and from the connection) and
  *             `origin` (Where they come from: SOURCES, HOW THEY HEARD, LINKS first and last, CAMPAIGNS, REFERRING
  *             SITES, FIRST VISITS; §3.4 A.10.6's block: the first source by kind and channel, the links and campaigns,
- *             the first visits over time, the collectors whose first and last link differ).
+ *             the first visits over time, the collectors whose first and last link differ) and `likes` (What they
+ *             like: FAVOURITE PIECES, FINISHES, MOST WISHED models and collections, MOST VIEWED by the collectors and by
+ *             every visitor, PIECES HELD; read by likes.ts `readLikes`, §3.2 W.8).
  *
  * How a reading runs (§3.6 C.6.4, §5.1 console 25):
  *   - one REPEATABLE READ, READ ONLY transaction per panel, `work_mem` 32 MB (several panels run at once on the shared
@@ -63,6 +65,7 @@ import {
   type Period,
   type Scope,
 } from './insights-scope.js';
+import { readLikes, type LikesFigures } from './likes.js';
 import type { LinkService } from './links.js';
 import { countedCollector } from './population.js';
 import { parisDay, parisDayStart } from './schedule.js';
@@ -71,7 +74,7 @@ import { tasteOptions } from './tastes.js';
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The panels the page reads, top to bottom (§3.6 C.6.3); the others come with their steps. */
-export const COLLECTOR_PANELS = ['overview', 'who', 'origin'] as const;
+export const COLLECTOR_PANELS = ['overview', 'who', 'origin', 'likes'] as const;
 export type CollectorPanel = (typeof COLLECTOR_PANELS)[number];
 
 /** The cache: results kept, for how long, and the age under which Read again keeps the cached one. */
@@ -187,7 +190,8 @@ export interface ReportHead {
 export type CollectorsReport =
   | (ReportHead & { panel: 'overview'; figures: OverviewFigures })
   | (ReportHead & { panel: 'who'; figures: WhoFigures })
-  | (ReportHead & { panel: 'origin'; figures: OriginFigures });
+  | (ReportHead & { panel: 'origin'; figures: OriginFigures })
+  | (ReportHead & { panel: 'likes'; figures: LikesFigures });
 
 export interface CollectorsOptions {
   /** The accounts' countries among the counted collectors. */
@@ -299,7 +303,7 @@ export class CollectorInsightsService {
     this.cacheSize = l.cacheSize ?? INSIGHTS_CACHE_SIZE;
     this.cacheMs = l.cacheMs ?? INSIGHTS_CACHE_MS;
     this.freshMs = l.freshMs ?? INSIGHTS_FRESH_MS;
-    this.panels = { overview: overviewPanel, who: whoPanel, origin: originPanel, ...deps.panels };
+    this.panels = { overview: overviewPanel, who: whoPanel, origin: originPanel, likes: likesPanel, ...deps.panels };
   }
 
   /** The filters' choices and the earliest dates with data (see the file header). */
@@ -941,4 +945,21 @@ async function firstLastDiffer(tx: Db, x: Reading, basis: { started: Date; befor
         LEFT JOIN acquisition_conversions cv ON cv.kind = 'SIGNUP' AND cv.ref_id = c.account_id
        WHERE ${within(sql`c.created_at`, x.q.period)}) d`.execute(tx);
   return { collectors: Number(r.rows[0]?.collectors ?? 0), differ: Number(r.rows[0]?.differ ?? 0) };
+}
+
+// ── What they like (`likes`) ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * FAVOURITE PIECES, FINISHES, MOST WISHED, MOST VIEWED and PIECES HELD (§3.6 C.6.3 item 4), read by LikesService's
+ * `readLikes` (§3.2 W.8) over the page's collectors (`scopeCte`: the five filters and the scope) for the period and the
+ * previous one; ALL VISITORS reads the daily totals, where only the country filter applies.
+ */
+async function likesPanel(tx: Db, x: Reading): Promise<LikesFigures> {
+  const { q } = x;
+  return readLikes(tx, {
+    window: { from: q.period.from, to: q.period.to, start: q.period.start, end: q.period.end, previous: q.previous },
+    population: (name, p) => scopeCte(name, q, p),
+    countries: q.filters.countries,
+    now: x.now,
+  });
 }

@@ -25,8 +25,9 @@
  * The filters (§3.6 C.6.2): Country is the account's country; Source is where the collector first came from
  * (acquisition-filters.ts `sourceFilter`: its first source's link channel, else its kind, question 18); Tier the tier
  * held now (0 for NO TIER); Score the engagement score now (an account with none is outside every range); Favourite
- * piece the collector's FAVOURITE PIECES (`account_tastes` kind PIECE, its keys as `tasteKey` reads them). The scopes:
- * ALL every counted collector now, ACTIVE those active in the period, NEW those whose account was made in it.
+ * piece the collector's FAVOURITE PIECES (tastes.ts `tasteFilter`, the favourite-type filter W.8 gives the page:
+ * `account_tastes` kind PIECE, its keys as `tasteKey` reads them). The scopes: ALL every counted collector now, ACTIVE
+ * those active in the period, NEW those whose account was made in it.
  *
  * Every Paris bound is computed here in JavaScript (schedule.ts, through `Intl`) and passed to SQL as a timestamptz or a
  * date, so PostgreSQL and PGlite agree whatever time-zone data they carry (§3.0 (e)). Nothing here reads or writes the
@@ -39,6 +40,7 @@ import { sourceFilter } from './acquisition-filters.js';
 import { CLUB_EXCLUDED_STATUSES, CLUB_TIER_THRESHOLDS } from './club.js';
 import { countedCollector } from './population.js';
 import { parisDay, parisDayStart } from './schedule.js';
+import { tasteFilter } from './tastes.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -332,7 +334,7 @@ export function scopeCte(name: string, q: { filters: InsightsFilters; scope: Sco
   if (f.countries.length) where.push(sql`a.country IN (${sql.join(f.countries)})`);
   if (f.sources.channelIds.length + f.sources.kinds.length) where.push(sourceFilter('a.id', { channelIds: f.sources.channelIds, kinds: f.sources.kinds }));
   if (f.score) where.push(sql`sc.score BETWEEN ${f.score.min}::int AND ${f.score.max}::int`);
-  if (f.types.length) where.push(sql`EXISTS (SELECT 1 FROM account_tastes ft WHERE ft.account_id = a.id AND ft.kind = 'PIECE' AND ft.value_key IN (${sql.join(f.types)}))`);
+  if (f.types.length) where.push(tasteFilter('a.id', f.types));
   if (q.scope === 'new') where.push(sql`a.created_at >= ${period.start}::timestamptz AND a.created_at < ${period.end}::timestamptz`);
   if (q.scope === 'active') where.push(activeIn('a.id', period.start, period.end));
   const outer = f.tiers.length ? sql`WHERE b.tier IN (${sql.join(f.tiers.map((t) => sql`${t}::int`))})` : sql``;

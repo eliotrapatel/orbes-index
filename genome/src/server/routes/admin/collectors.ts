@@ -5,7 +5,7 @@
  * database's work).
  *
  *   GET /api/admin/collectors/options   the filters' choices, the currencies, `recordingSince` and `snapshotsSince`.
- *   GET /api/admin/collectors/report    one panel's figures: ?panel=overview|who|origin, the period (p=7d|30d|90d|12m|custom,
+ *   GET /api/admin/collectors/report    one panel's figures: ?panel=overview|who|origin|likes, the period (p=7d|30d|90d|12m|custom,
  *        with from and to for custom), cmp, scope=all|active|new, the five filters (c, s, t, sc, ft), currency, fresh.
  *        The figures name no one: counts, medians and groups, so an AUDITOR reads them as they are. 503 INSIGHTS_BUSY
  *        while two readings run and another has waited 10 s; 503 INSIGHTS_TIMEOUT for a reading past 8 s.

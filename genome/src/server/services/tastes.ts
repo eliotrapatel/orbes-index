@@ -21,7 +21,7 @@
  * key always meets migration 0040's CHECK, whatever the words; what a collector sends is matched to them through
  * `tasteKey`.
  */
-import { sql } from 'kysely';
+import { sql, type RawBuilder } from 'kysely';
 import type { Db } from '../db/connection.js';
 import type { TasteKind } from '../db/schema.js';
 import { badRequest } from '../errors.js';
@@ -76,6 +76,14 @@ export interface TastesInput {
 }
 
 // ── Errors ─────────────────────────────────────────────────────────────────
+
+/**
+ * The account in `column` chose one of these FAVOURITE PIECES (Segments' FAVOURITE_PIECE): the Collectors page's
+ * favourite-type filter (plan CUSTOMER INTELLIGENCE §3.2 W.8; insights-scope.ts scopeCte, likes.ts).
+ */
+export function tasteFilter(column: string, keys: readonly string[]): RawBuilder<unknown> {
+  return sql`EXISTS (SELECT 1 FROM account_tastes ft WHERE ft.account_id = ${sql.ref(column)} AND ft.kind = 'PIECE' AND ft.value_key IN (${sql.join([...keys])}))`;
+}
 
 export const tasteUnknown = () => badRequest('TASTE_UNKNOWN', 'Choose among the pieces and finishes of the collection.');
 export const tastesTooMany = () => badRequest('TASTES_TOO_MANY', `Choose up to ${TASTES_MAX} favourite pieces and ${TASTES_MAX} favourite finishes.`);

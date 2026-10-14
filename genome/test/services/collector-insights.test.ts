@@ -8,6 +8,8 @@
  *    devices with one), the median score withheld under 3;
  *  - who (step 9.2): AGES with the median age, COUNTRIES and CITIES as given (grouped ignoring case and accents, shown as
  *    most often typed) and from the connection (the usual place), the comparison by NEW with ALL and by SCOPE otherwise;
+ *  - likes (step 9.4): the panel reads LikesService over the page's collectors (the house's wishes by hand, the
+ *    scope, a filter, the comparison off); LikesService's own figures are test/services/likes.test.ts's;
  *  - the cache (a second read does not read; Read again under 30 s does not either, after it does; 5 minutes; 50 kept),
  *    the load guard (a third reading waits, then 503 INSIGHTS_BUSY), the timeout (PostgreSQL's 57014 mapped to 503
  *    INSIGHTS_TIMEOUT, logged with the panel and the period only), and each reading's transaction (REPEATABLE READ,
@@ -34,6 +36,7 @@ import {
   type WhoFigures,
 } from '../../src/server/services/collector-insights.js';
 import { median } from '../../src/server/services/growth.js';
+import type { LikesFigures } from '../../src/server/services/likes.js';
 import { AGE_SLICES, parisPeriod, previousPeriod, type Period } from '../../src/server/services/insights-scope.js';
 import { parisDay, parisDayStart } from '../../src/server/services/schedule.js';
 import { createManualClock, type Logger } from '../../src/server/types.js';
@@ -451,6 +454,50 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     });
   });
 
+  describe('likes (What they like, step 9.4)', () => {
+    const likes = async (req: Omit<InsightsRequest, 'panel'> = {}) => {
+      svc.clearCache();
+      const r = await svc.report({ panel: 'likes', ...req });
+      expect(r.panel).toBe('likes');
+      return r.figures as LikesFigures;
+    };
+    // Every wish of the house is on MONOLITHE, open since its day.
+    const wishers = (list: Seed[], end: Date) => list.filter((s) => s.wishAt !== null && s.wishAt < end);
+
+    it('reads LikesService over the page’s collectors: counted collectors only, the wishes open at the end, added in the period, open at the previous end', async () => {
+      const f = await likes();
+      expect(f.raw).toBe(true);
+      expect(f.total).toBe(COUNTED.length);
+      const open = wishers(COUNTED, P30.end).length;
+      expect(f.wishlists).toEqual({
+        collectors: open,
+        share: Math.round((open * 100) / COUNTED.length),
+        added: COUNTED.filter((s) => within(s.wishAt, P30)).length,
+        removed: 0,
+        previous: { collectors: wishers(COUNTED, B30.end).length, added: COUNTED.filter((s) => within(s.wishAt, B30)).length, removed: 0 },
+      });
+      expect(f.mostWished.rows.map((r) => [r.name, r.wished, r.added, r.previous])).toEqual([['MONOLITHE', open, f.wishlists.added, wishers(COUNTED, B30.end).length]]);
+      // With the scope ALL and no filter, the panel is LikesService's own reading of every counted collector.
+      const direct = await h.ctx.services.likes.likes({ from: P30.from, to: P30.to, start: P30.start, end: P30.end, previous: B30 });
+      expect(f).toEqual(JSON.parse(JSON.stringify(direct)));
+    });
+
+    it('the filters and the scope narrow whose wishes; without the comparison, no previous value', async () => {
+      const fr: Pick = (s) => s.country === 'FR';
+      const f = await likes({ c: 'FR' });
+      expect(f.total).toBe(inScope('all', P30, fr).length);
+      expect(f.wishlists.collectors).toBe(wishers(inScope('all', P30, fr), P30.end).length);
+      const fresh = await likes({ scope: 'new' });
+      expect(fresh.total).toBe(inScope('new', P30).length);
+      expect(fresh.wishlists.collectors).toBe(wishers(inScope('new', P30), P30.end).length);
+      // NEW compares with the previous period's new collectors.
+      expect(fresh.wishlists.previous?.collectors).toBe(wishers(inScope('new', B30), B30.end).length);
+      const off = await likes({ cmp: false });
+      expect(off.wishlists.previous).toBeNull();
+      expect(off.mostWished.rows.every((r) => r.previous === null)).toBe(true);
+    });
+  });
+
   describe('the cache, the load guard and the timeout', () => {
     const quiet: Logger = { info: () => {}, warn: () => {}, error: () => {} };
     const make = (
@@ -598,7 +645,7 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     it('refuses another panel, scope, currency, period or filter (400 VALIDATION_FAILED), before any reading', async () => {
       const { service, reads } = make();
       for (const req of [
-        { panel: 'likes' },
+        { panel: 'nothing' },
         { panel: 'overview', scope: 'some' },
         { panel: 'overview', currency: 'JPY' },
         {

@@ -93,6 +93,11 @@ export type WishlistItem = ShownWish | NotShownWish;
 /** The model's place for staff (the client sheet): shown, hidden, discontinued, or a salon model. */
 export type WishModelState = 'SHOWN' | 'HIDDEN' | 'DISCONTINUED' | 'RESERVED';
 
+/** A wished model's state for staff (the client sheet's wishlist, the Collectors page's MOST WISHED): its own lookbook and discontinuation. */
+export function wishModelState(m: { slug: string | null; lookbook: string; discontinued_at: Date | null }): WishModelState {
+  return m.slug === null || m.lookbook === 'HIDDEN' ? 'HIDDEN' : m.discontinued_at !== null ? 'DISCONTINUED' : m.lookbook === 'RESERVED' ? 'RESERVED' : 'SHOWN';
+}
+
 /** An open wish as staff read it. */
 export interface StaffWish {
   modelId: string;
@@ -281,7 +286,7 @@ export class WishlistService {
       variant: variantOf(r),
       collection: r.collection,
       addedAt: r.added_at,
-      state: r.slug === null || r.lookbook === 'HIDDEN' ? 'HIDDEN' : r.discontinued_at !== null ? 'DISCONTINUED' : r.lookbook === 'RESERVED' ? 'RESERVED' : 'SHOWN',
+      state: wishModelState(r),
     }));
   }
 }

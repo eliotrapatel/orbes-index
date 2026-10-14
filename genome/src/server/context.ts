@@ -42,6 +42,7 @@ import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
 import { BirthdayCreditService } from './services/birthday-credits.js';
 import { EngagementService } from './services/engagement.js';
+import { LikesService } from './services/likes.js';
 import { CareService, eraseCareLabels } from './services/care.js';
 import { GuaranteeService } from './services/guarantees.js';
 import { SizeService } from './services/sizes.js';
@@ -215,6 +216,8 @@ export interface AppServices {
   growth: GrowthService;
   /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6): the counted collectors' figures over a period, cached, two readings at once; reads only. */
   collectorInsights: CollectorInsightsService;
+  /** What they like (plan CUSTOMER INTELLIGENCE §3.2 W.8): the Collectors page's panel `likes` (tastes, most wished, most viewed, pieces held); reads only. */
+  likes: LikesService;
   /** NEW CLAIM CODE (plan NEXT LOT §3.4): a new claim code for a piece not registered yet, shown once to staff or sealed for its buyer. */
   claimRenewals: ClaimRenewalService;
 }
@@ -371,6 +374,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
     const receptions = new ReceptionService({ db, audit, issuance, certificates, cardKey: deriveCardClaimKey(config), clock, log });
     const growth = new GrowthService({ db, clock });
     const collectorInsights = new CollectorInsightsService({ db, links, clock, log });
+    const likes = new LikesService({ db, clock });
     const claimRenewals = new ClaimRenewalService({ db, audit, certificates, revealKey: deriveClaimRevealKey(config), clock });
 
     const services: AppServices = {
@@ -435,6 +439,7 @@ export async function createContext(config: AppConfig, overrides: ContextOverrid
       orderCases,
       growth,
       collectorInsights,
+      likes,
       claimRenewals,
       ...overrides.services,
     };
