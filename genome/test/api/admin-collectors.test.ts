@@ -7,10 +7,13 @@
  *  - the query: unknown keys refused, the panel, the period, the scope, the five filters and the currency checked (400
  *    VALIDATION_FAILED, CUSTOM's dates in the page's words);
  *  - the report's head and figures; no email, no account id and no name in a panel's JSON; an AUDITOR reads the same
- *    figures as an ADMIN (the cache holds figures only, shared by the roles).
+ *    figures as an ADMIN (the cache holds figures only, shared by the roles);
+ *  - GET /api/admin/collectors/list (step 9.8): by role, 50 a page ordered by email for every slice, `score` and
+ *    `part` included, no score in a row; an AUDITOR reads the emails masked and no city; the slice and the page checked.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { seedScore } from '../support/scores.js';
 import { adminClient, createHarness, errorOf, safeJson, type Client, type Harness } from './support.js';
 
 describe('GET /api/admin/collectors/… (§3.6 C.9)', () => {
@@ -121,5 +124,44 @@ describe('GET /api/admin/collectors/… (§3.6 C.9)', () => {
     const custom = await clients.AUDITOR.get('/api/admin/collectors/report?panel=overview&p=custom&from=2025-12-01&to=2026-01-31');
     expect(errorOf(custom)).toEqual({ code: 'VALIDATION_FAILED', message: 'Choose dates from 1 Jan 2026 to today, at most two years apart.' });
     expect((await get('AUDITOR', '/api/admin/collectors/report?panel=overview&p=custom&from=2026-01-01&to=2026-10-14')).period).toEqual({ key: 'custom', from: '2026-01-01', to: '2026-10-14', days: 287 });
+  });
+
+  it('GET /api/admin/collectors/list: ordered by email, no score; an AUDITOR reads the emails masked and no city', async () => {
+    await seedScore(h.t.db, ids[1]!, 55, new Date('2026-10-14T07:00:00Z'));
+    await seedScore(h.t.db, ids[2]!, 57, new Date('2026-10-14T07:00:00Z'));
+    const url = '/api/admin/collectors/list?slice=all&p=30d';
+    for (const role of ['RETAIL', 'LOGISTICS'] as const) expect(errorOf(await clients[role].get(url)).code, role).toBe('FORBIDDEN');
+    expect((await h.client().get(url)).statusCode).toBe(401);
+    const admin = await get('ADMIN', url);
+    expect(admin).toMatchObject({ slice: 'all', subject: null, total: 4, page: 1, pageSize: 50, scope: 'all', period: { key: '30d', to: '2026-10-14' } });
+    expect(admin.rows.map((r: { email: string }) => r.email)).toEqual([...emails].sort());
+    expect(admin.rows.map((r: { city: string }) => r.city).sort()).toEqual(['Lyon', 'Lyon', 'Lyon', 'Paris']);
+    expect(admin.rows[0]).toMatchObject({ accountId: ids[0], name: 'Collector Number0', country: 'FR', tier: 0, lastSeenAt: null });
+    expect((await get('OPERATOR', url)).rows).toEqual(admin.rows);
+    const auditor = await get('AUDITOR', url);
+    expect(auditor.rows.map((r: { accountId: string }) => r.accountId)).toEqual(admin.rows.map((r: { accountId: string }) => r.accountId));
+    for (const r of auditor.rows) {
+      expect(r.email).toMatch(/^c\*\*\*@example\.com$/);
+      expect(r.city).toBeNull();
+    }
+    for (const e of emails) expect(JSON.stringify(auditor)).not.toContain(e);
+    // Every slice is ordered by email, the score's and the parts' too, and no row carries a score.
+    for (const slice of ['scored', 'score:50-59', 'part:recency', 'country:FR', 'age:35-44']) {
+      const list = await get('AUDITOR', `/api/admin/collectors/list?slice=${encodeURIComponent(slice)}`);
+      const rows = list.rows as { accountId: string }[];
+      expect(rows.map((r) => ids.indexOf(r.accountId)), slice).toEqual(rows.map((r) => ids.indexOf(r.accountId)).sort());
+      for (const r of rows) expect(Object.keys(r).sort(), slice).toEqual(['accountId', 'city', 'country', 'createdAt', 'email', 'lastSeenAt', 'name', 'tier']);
+      for (const r of rows) expect(Object.values(r), slice).not.toEqual(expect.arrayContaining([55]));
+      for (const r of rows) expect(Object.values(r), slice).not.toEqual(expect.arrayContaining([57]));
+    }
+    expect((await get('AUDITOR', '/api/admin/collectors/list?slice=score:50-59')).total).toBe(2);
+    expect((await get('AUDITOR', '/api/admin/collectors/list?slice=part:recency')).total).toBe(2);
+    expect((await get('ADMIN', '/api/admin/collectors/list?slice=all&page=2')).rows).toEqual([]);
+    // The query, the slice and the page checked: 400 VALIDATION_FAILED.
+    for (const bad of ['', '?slice=all&panel=overview', '?slice=everyone', '?slice=all&page=0', '?slice=all&page=x', '?slice=score:5-9', '?slice=all&fresh=1', `?slice=${'a'.repeat(301)}`]) {
+      const res = await clients.AUDITOR.get(`/api/admin/collectors/list${bad}`);
+      expect(res.statusCode, `${bad} → ${res.body.slice(0, 200)}`).toBe(400);
+      expect(errorOf(res).code).toBe('VALIDATION_FAILED');
+    }
   });
 });

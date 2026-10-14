@@ -11,12 +11,16 @@
  *        buyers) and split (none|country|source|tier|age|device).
  *        The figures name no one: counts, medians and groups, so an AUDITOR reads them as they are. 503 INSIGHTS_BUSY
  *        while two readings run and another has waited 10 s; 503 INSIGHTS_TIMEOUT for a reading past 8 s.
+ *   GET /api/admin/collectors/list      the collectors behind one figure: the report's query with `slice`
+ *        (<dimension>[:<value>], §3.6 C.6.5) and `page`; 50 a page ordered by email, never a score; an AUDITOR reads
+ *        the emails masked (serialize.ts clientEmail) and no city. Never cached; under the same load guard.
  *
- * Validation: `collectorsOptionsQuery`, `collectorsReportQuery` (http/schemas.ts; unknown keys refused), then the service's
+ * Validation: `collectorsOptionsQuery`, `collectorsReportQuery`, `collectorsListQuery` (http/schemas.ts; unknown keys refused), then the service's
  * checks of the period and the filters: 400 VALIDATION_FAILED.
  */
 import type { FastifyPluginAsync } from 'fastify';
-import { collectorsOptionsQuery, collectorsReportQuery, parse } from '../../http/schemas.js';
+import { collectorsListQuery, collectorsOptionsQuery, collectorsReportQuery, parse } from '../../http/schemas.js';
+import { clientEmail, readsClientEmails } from './serialize.js';
 import type { AdminRouteDeps } from './index.js';
 
 export const adminCollectorRoutes: FastifyPluginAsync<AdminRouteDeps> = async (app, { ctx }) => {
@@ -30,5 +34,12 @@ export const adminCollectorRoutes: FastifyPluginAsync<AdminRouteDeps> = async (a
   app.get('/api/admin/collectors/report', async (request) => {
     const q = parse(collectorsReportQuery, request.query);
     return collectorInsights.report(q);
+  });
+
+  app.get('/api/admin/collectors/list', async (request) => {
+    const q = parse(collectorsListQuery, request.query);
+    const inClear = readsClientEmails(request);
+    const list = await collectorInsights.list(q, { withCities: inClear });
+    return { ...list, rows: list.rows.map((r) => ({ ...r, email: clientEmail(r.email, inClear) })) };
   });
 };

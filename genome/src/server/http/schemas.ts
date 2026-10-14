@@ -1682,6 +1682,17 @@ export const collectorsReportQuery = z.strictObject({
   split: collectorsFilter(20),
   fresh: queryBool,
 });
+/**
+ * GET /api/admin/collectors/list: the page's query (with Over time's figure and split, which a trend point's group
+ * reads), the figure's `slice` (checked by the service: services/collector-insights.ts parseSlice) and the `page`.
+ */
+export const collectorsListQuery = z.strictObject({
+  ...collectorsQueryShape,
+  figure: collectorsFilter(20),
+  split: collectorsFilter(20),
+  slice: z.string().trim().min(1, 'Required').max(300, 'At most 300 characters'),
+  page: queryOptional(z.preprocess((v) => (typeof v === 'string' && /^\s*\d{1,6}\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a whole page number').min(1, 'At least 1').max(100_000, 'At most 100000'))),
+});
 
 export const warrantyListQuery = z.object({
   status: z.enum(['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID']).optional(),

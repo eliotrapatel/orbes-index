@@ -20,6 +20,10 @@
  *             T.4.2) and `engagement` (Engagement: SCORE SPREAD with the month the history kept beside it, THE FIVE
  *             PARTS, ACTIVE AND DORMANT as of the period's last day, MONTHLY COHORTS from collector_history) and
  *             `trends` (Over time: one figure by bucket, split by up to six groups and Other, the previous period's line).
+ *   list      GET /api/admin/collectors/list (AUDITOR): the collectors behind one figure, its `slice` (§3.6 C.6.5's closed
+ *             list, SLICE_DIMENSIONS, each written with the rule of the figure that opens it, so a figure equals its
+ *             list's total), 50 a page ordered by email for every slice, never a score, a tag or a mark; the city
+ *             withheld for an AUDITOR (the route masks the email). Never cached; read under the same load guard.
  *
  * How a reading runs (§3.6 C.6.4, §5.1 console 25):
  *   - one REPEATABLE READ, READ ONLY transaction per panel, `work_mem` 32 MB (several panels run at once on the shared
@@ -41,12 +45,13 @@
  */
 import { sql, type RawBuilder } from 'kysely';
 import type { Db } from '../db/connection.js';
-import { HOUSE_CURRENCIES, VIEW_PAGE_CODES, type HouseCurrency, type SourceKind } from '../db/schema.js';
+import { DEVICE_KINDS, DEVICE_SYSTEMS, HOUSE_CURRENCIES, IN_APPS, OPENED_IN, VIEW_PAGE_CODES, type HouseCurrency, type SourceKind } from '../db/schema.js';
 import { DomainError, validationError } from '../errors.js';
 import { ageOn } from '../../shared/profile-rules.js';
 import { fold } from '../../shared/fold.js';
 import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
 import { AcquisitionReportService } from './acquisition-report.js';
+import { CLUB_EXCLUDED_STATUSES } from './club.js';
 import { plusMonths } from './collector-history.js';
 import { band, ENGAGEMENT_PARTS, PART_MAX, type EngagementPart } from './engagement-formula.js';
 import { currenciesOf, GROWTH_MIN_GROUP, median } from './growth.js';
@@ -413,6 +418,45 @@ export class CollectorInsightsService {
     return value;
   }
 
+  /**
+   * The collectors behind one figure (§3.6 C.6.5): the page's query with `slice` and `page` (1 by default), a page of
+   * COLLECTORS_LIST_PAGE ordered by email, never cached, read under the load guard in one read-only transaction (503
+   * INSIGHTS_BUSY or INSIGHTS_TIMEOUT as a panel). `withCities` false (an AUDITOR) withholds every city.
+   */
+  async list(req: Omit<InsightsRequest, 'panel' | 'fresh'> & { slice: string; page?: number }, opts: { withCities: boolean }): Promise<CollectorsList> {
+    const now = this.clock();
+    const q = this.query({ ...req, panel: 'overview' }, now);
+    const slice = parseSlice(req.slice);
+    const page = req.page ?? 1;
+    if (!Number.isInteger(page) || page < 1 || page > COLLECTORS_LIST_PAGES_MAX) throw validationError(`page: a whole number from 1 to ${COLLECTORS_LIST_PAGES_MAX}.`);
+    try {
+      return await this.gate.run(() =>
+        this.readOnly(async (tx) => {
+          const r = await readList(tx, { q, now, today: parisDay(now), links: this.links }, slice, page, opts.withCities);
+          return {
+            slice: req.slice,
+            subject: r.subject,
+            period: { key: q.period.key, from: q.period.from, to: q.period.to, days: q.period.days },
+            previous: q.previous ? { from: q.previous.from, to: q.previous.to } : null,
+            scope: q.scope,
+            readAt: now,
+            total: r.total,
+            page,
+            pageSize: COLLECTORS_LIST_PAGE,
+            rows: r.rows,
+          };
+        }),
+      );
+    } catch (e) {
+      if ((e as { code?: unknown })?.code === QUERY_CANCELED) {
+        // The slice's dimension and the period only: a value may name a person's choices.
+        this.log.warn({ list: slice.dim, from: q.period.from, to: q.period.to, scope: q.scope }, 'collectors list took too long to read');
+        throw insightsTimeout();
+      }
+      throw e;
+    }
+  }
+
   /** Forget every cached result. */
   clearCache(): void {
     this.cache.clear();
@@ -757,6 +801,8 @@ export interface FirstVisitBucket {
   to: string;
   firstVisits: number;
   newCollectors: number;
+  /** The collectors whose first visit fell in it (the bucket's list, `bucket:firstvisit:<key>`). */
+  becameCollectors: number;
 }
 
 export interface OriginFigures {
@@ -977,7 +1023,10 @@ async function originFirstVisits(tx: Db, x: Reading): Promise<OriginFigures['fir
   const of = async (p: Period) => {
     const days = await firstVisitsBy(tx, x, p, 'day');
     const created = await sql<{ created_at: Date }>`WITH ${scopeCte('col', q, p)} SELECT created_at FROM col WHERE ${within(sql`created_at`, p)}`.execute(tx);
-    const buckets: FirstVisitBucket[] = periodBuckets(p).map((b) => ({ key: b.key, from: b.from, to: b.to, firstVisits: 0, newCollectors: 0 }));
+    const came = await sql<{ at: Date }>`
+      WITH ${scopeCte('col', q, p)}
+      SELECT s.first_seen_at AS at FROM col c JOIN account_sources s ON s.account_id = c.account_id WHERE ${within(sql`s.first_seen_at`, p)}`.execute(tx);
+    const buckets: FirstVisitBucket[] = periodBuckets(p).map((b) => ({ key: b.key, from: b.from, to: b.to, firstVisits: 0, newCollectors: 0, becameCollectors: 0 }));
     const at = (day: string) => buckets.find((b) => day >= b.from && day <= b.to);
     for (const [day, n] of days) {
       const b = at(day);
@@ -986,6 +1035,10 @@ async function originFirstVisits(tx: Db, x: Reading): Promise<OriginFigures['fir
     for (const r of created.rows) {
       const b = at(parisDay(new Date(r.created_at)));
       if (b) b.newCollectors += 1;
+    }
+    for (const r of came.rows) {
+      const b = at(parisDay(new Date(r.at)));
+      if (b) b.becameCollectors += 1;
     }
     return buckets;
   };
@@ -1621,5 +1674,439 @@ async function trendsPanel(tx: Db, x: Reading): Promise<TrendsFigures> {
     groups,
     previous: before ? trendPoints(before.buckets, mergeCells([...before.cells.values()]), figure) : null,
     reachesBackTo: now.reachesBackTo,
+  };
+}
+
+// ── The click-through (`list`) ─────────────────────────────────────────────────────────────────────────────────
+
+/** A list's page: 50 collectors (§3.6 C.6.5). */
+export const COLLECTORS_LIST_PAGE = 50;
+/** The pages a list reaches at most. */
+export const COLLECTORS_LIST_PAGES_MAX = 100_000;
+
+/** The figures a list opens (§3.6 C.6.5), a closed list. */
+export const SLICE_DIMENSIONS = [
+  'all',
+  'new',
+  'active',
+  'firstvisit',
+  'scored',
+  'wished',
+  'age',
+  'country',
+  'conncountry',
+  'city',
+  'conncity',
+  'source',
+  'heard',
+  'heardother',
+  'link1',
+  'link2',
+  'campaign',
+  'referrer',
+  'bucket',
+  'favpiece',
+  'favfinish',
+  'haswish',
+  'wishmodel',
+  'wishcollection',
+  'viewed',
+  'holds',
+  'device',
+  'system',
+  'openedin',
+  'app',
+  'score',
+  'part',
+  'status',
+  'cohort',
+] as const;
+export type SliceDimension = (typeof SLICE_DIMENSIONS)[number];
+
+/** A slice: its dimension and its value as the query gives it ('' for a dimension without one). */
+export interface Slice {
+  dim: SliceDimension;
+  value: string;
+}
+
+/** One collector of a list: no score, no tag, no mark (§3.6 C.6.5). */
+export interface CollectorsListRow {
+  accountId: string;
+  /** As stored: the route masks it for an AUDITOR. */
+  email: string;
+  name: string | null;
+  country: string | null;
+  /** The city given in YOUR PROFILE; null for an AUDITOR (§3.0 (h)). */
+  city: string | null;
+  tier: number;
+  createdAt: Date;
+  /** The latest of the account's sessions and views; null when none is held. */
+  lastSeenAt: Date | null;
+  /** HOW THEY HEARD's Other: the words given (the slice `heardother` only). */
+  heardOther?: string | null;
+}
+
+export interface CollectorsList {
+  slice: string;
+  /** What the slice names when it names a thing: a model (« MONOLITHE · Blue »), a collection, a link, a release, an answer, a place. */
+  subject: string | null;
+  period: ReportHead['period'];
+  previous: ReportHead['previous'];
+  scope: Scope;
+  /** When it was read: a list is never cached. */
+  readAt: Date;
+  total: number;
+  page: number;
+  pageSize: number;
+  rows: CollectorsListRow[];
+}
+
+const SLICE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const BUCKET_KEY = /^\d{4}-(\d{2}-\d{2}|W\d{2}|\d{2})$/;
+const badSlice = (why: string) => validationError(`slice: ${why}`);
+
+/** A slice from the query, checked against its dimension's values (400 VALIDATION_FAILED otherwise). */
+export function parseSlice(raw: string): Slice {
+  const i = raw.indexOf(':');
+  const dim = (i < 0 ? raw : raw.slice(0, i)) as SliceDimension;
+  const value = i < 0 ? '' : raw.slice(i + 1);
+  if (!SLICE_DIMENSIONS.includes(dim)) throw badSlice(`one of ${SLICE_DIMENSIONS.join(', ')}, then its value.`);
+  const one = (ok: boolean) => {
+    if (!ok) throw badSlice(`not a value of ${dim}.`);
+    return { dim, value };
+  };
+  const uuid = (v: string) => SLICE_UUID.test(v);
+  switch (dim) {
+    case 'all':
+    case 'new':
+    case 'active':
+    case 'firstvisit':
+    case 'scored':
+    case 'wished':
+    case 'heardother':
+    case 'haswish':
+      return one(value === '');
+    case 'age':
+      return one((AGE_SLICES as readonly string[]).includes(value));
+    case 'country':
+      return one(/^[A-Z]{2}$/.test(value) || value === 'none');
+    case 'conncountry':
+      return one(/^[A-Z]{2}$/.test(value) || value === 'unknown');
+    case 'city':
+      return one(value.length >= 1 && value.length <= 80 && value === fold(value).trim());
+    case 'conncity':
+      return one(/^\d{1,10}$/.test(value) || value === 'unknown');
+    case 'source':
+      return one((value.startsWith('channel:') && uuid(value.slice(8))) || (value.startsWith('kind:') && (SOURCE_FILTER_KINDS as readonly string[]).includes(value.slice(5))));
+    case 'heard':
+      return one(uuid(value) || value === 'none');
+    case 'link1':
+    case 'link2':
+    case 'wishmodel':
+    case 'wishcollection':
+    case 'holds':
+      return one(uuid(value));
+    case 'campaign':
+      return one(value.length >= 1 && value.length <= 200);
+    case 'referrer':
+      return one(value === 'none' || /^[a-z0-9.-]{1,253}$/.test(value));
+    case 'bucket': {
+      const [kind, ...rest] = value.split(':');
+      if (kind === 'firstvisit' || kind === 'signup') return one(rest.length === 1 && BUCKET_KEY.test(rest[0]!));
+      return one(kind === 'trend' && rest.length >= 2 && (TREND_FIGURES as readonly string[]).includes(rest[0]!) && BUCKET_KEY.test(rest[1]!) && (rest.length === 2 || rest.slice(2).join(':').length > 0));
+    }
+    case 'favpiece':
+    case 'favfinish':
+      return one(value.length >= 1 && value.length <= 64);
+    case 'viewed':
+      return one(uuid(value) || (value.startsWith('r:') && uuid(value.slice(2))));
+    case 'device':
+      return one((DEVICE_KINDS as readonly string[]).includes(value));
+    case 'system':
+      return one((DEVICE_SYSTEMS as readonly string[]).includes(value) || value === 'IPAD');
+    case 'openedin':
+      return one((OPENED_IN as readonly string[]).includes(value));
+    case 'app':
+      return one((IN_APPS as readonly string[]).includes(value));
+    case 'score':
+      return one((SCORE_SLICES as readonly string[]).includes(value) || value === 'none');
+    case 'part':
+      return one((ENGAGEMENT_PARTS as readonly string[]).includes(value));
+    case 'status':
+      return one((ENGAGEMENT_STATUSES as readonly string[]).includes(value));
+    case 'cohort':
+      return one(/^\d{4}-\d{2}:(all|(1|3|6|12):(active|inactive))$/.test(value));
+  }
+}
+
+/** What a slice selects among the collectors `c` of a scope CTE (with `pr`, their profile): a condition, its joins, the period of the scope. */
+interface SliceSql {
+  cond: RawBuilder<unknown>;
+  joins: RawBuilder<unknown>;
+  /** The period the collectors are those of (a previous period's bucket opens the previous period's collectors). */
+  period: Period;
+}
+
+const exists = (body: RawBuilder<unknown>) => sql`EXISTS (${body})`;
+const openWishAt = (end: Date) => sql`w.added_at < ${end}::timestamptz AND (w.removed_at IS NULL OR w.removed_at >= ${end}::timestamptz)`;
+const USUAL_PLACE = sql`LEFT JOIN LATERAL (SELECT cp.place_id FROM collector_places cp WHERE cp.account_id = c.account_id
+                          ORDER BY cp.days DESC, cp.last_day DESC, cp.place_id LIMIT 1) up ON TRUE
+      LEFT JOIN geo_places gp ON gp.id = up.place_id`;
+
+/** The bucket a key names in the period, else in the previous one (with the period it belongs to). */
+function bucketOfKey(q: InsightsQuery, key: string): { bucket: Bucket; period: Period } {
+  const before = q.previous ?? previousPeriod(q.period);
+  for (const period of [q.period, before]) {
+    const bucket = periodBuckets(period).find((b) => b.key === key);
+    if (bucket) return { bucket, period };
+  }
+  throw badSlice(`no bucket ${key} in the period or the one before.`);
+}
+
+/**
+ * The condition of the trend point `figure` × bucket (trendCells' rules, each over the collector `c`), for the
+ * collectors behind it.
+ */
+async function trendPointSql(tx: Db, x: Reading, figure: TrendFigure, k: Bucket): Promise<RawBuilder<unknown>> {
+  switch (figure) {
+    case 'collectors':
+      return sql`c.created_at < ${k.end}::timestamptz`;
+    case 'new':
+      return within(sql`c.created_at`, k);
+    case 'firstvisits':
+      return exists(sql`SELECT 1 FROM account_sources s WHERE s.account_id = c.account_id AND ${within(sql`s.first_seen_at`, k)}`);
+    case 'active':
+      return activeIn('c.account_id', k.start, k.end);
+    case 'medianscore': {
+      if (x.now >= k.start && x.now < k.end) return sql`c.score IS NOT NULL`;
+      const span = await historySpan(tx);
+      const month = `${k.to.slice(0, 7)}-01`;
+      if (!lastOfMonth(k.to) || !span || month < span.first || month > span.last) return sql`FALSE`;
+      return sql`c.created_at < ${k.end}::timestamptz AND ${exists(sql`SELECT 1 FROM collector_history h WHERE h.account_id = c.account_id AND h.scores[${historyIndex(sql`${month}::date`)}] IS NOT NULL`)}`;
+    }
+    case 'wishes':
+      return exists(sql`SELECT 1 FROM account_wishes w WHERE w.account_id = c.account_id AND ${within(sql`w.added_at`, k)}`);
+    case 'views': {
+      const cutoff = viewHistoryCutoff(x.now);
+      if (k.end <= cutoff) return sql`FALSE`;
+      const start = k.start < cutoff ? cutoff : k.start;
+      return exists(sql`SELECT 1 FROM collector_views v WHERE v.account_id = c.account_id AND v.page = ${VIEW_PAGE_CODES.MODEL} AND ${within(sql`v.at`, { start, end: k.end })}`);
+    }
+    case 'buyers':
+      return exists(sql`SELECT 1 FROM orders o WHERE o.account_id = c.account_id AND ${bought('o', k)}`);
+  }
+}
+
+/** The SQL of a slice (see SLICE_DIMENSIONS and §3.6 C.6.5), matching the figure that opens it. */
+async function sliceSql(tx: Db, x: Reading, s: Slice): Promise<SliceSql> {
+  const { q } = x;
+  const P = q.period;
+  const v = s.value;
+  const none = sql``;
+  const at = (cond: RawBuilder<unknown>, joins: RawBuilder<unknown> = none, period: Period = P): SliceSql => ({ cond, joins, period });
+  switch (s.dim) {
+    case 'all':
+      return at(sql`TRUE`);
+    case 'new':
+      return at(within(sql`c.created_at`, P));
+    case 'active':
+      return at(activeIn('c.account_id', P.start, P.end));
+    case 'firstvisit':
+      return at(exists(sql`SELECT 1 FROM account_sources s WHERE s.account_id = c.account_id AND ${within(sql`s.first_seen_at`, P)}`));
+    case 'scored':
+    case 'part':
+      return at(sql`c.score IS NOT NULL`);
+    case 'wished':
+      return at(exists(sql`SELECT 1 FROM account_wishes w WHERE w.account_id = c.account_id AND ${within(sql`w.added_at`, P)}`));
+    case 'age':
+      return at(sql`${ageBandSql(sql`pr.birth_date`, x.today)} = ${v}`);
+    case 'country':
+      return at(sql`coalesce(btrim(c.country), 'none') = ${v}`);
+    case 'conncountry':
+      return at(sql`coalesce(btrim(gp.country), 'unknown') = ${v}`, USUAL_PLACE);
+    case 'conncity':
+      return at(sql`(CASE WHEN gp.city IS NULL THEN 'unknown' ELSE gp.id::text END) = ${v}`, USUAL_PLACE);
+    case 'city':
+      return at(v === 'none' ? sql`coalesce(btrim(pr.city), '') = ''` : sql`coalesce(btrim(pr.city), '') <> '' AND orbes_fold(btrim(pr.city)) = ${v}`);
+    case 'source':
+      return at(sql`${firstSourceKey(await acquisitionBasis(tx))} = ${v}`, FIRST_SOURCE_JOINS);
+    case 'heard':
+      return at(v === 'none' ? sql`pr.heard_option_id IS NULL` : sql`pr.heard_option_id = ${v}::uuid`);
+    case 'heardother':
+      return at(sql`pr.heard_option_id IN (SELECT ho.id FROM heard_options ho WHERE ho.is_other)`);
+    case 'link1':
+      return at(exists(sql`SELECT 1 FROM account_sources s JOIN acquisition_sources k ON k.id = s.first_source_id WHERE s.account_id = c.account_id AND k.link_id = ${v}::uuid`));
+    case 'link2':
+      return at(
+        exists(sql`SELECT 1 FROM acquisition_conversions cv JOIN acquisition_sources k ON k.id = cv.last_source_id
+                    WHERE cv.account_id = c.account_id AND k.link_id = ${v}::uuid
+                      AND (cv.kind = 'SIGNUP' OR (cv.kind = 'ORDER' AND EXISTS (
+                             SELECT 1 FROM orders lo WHERE lo.id = cv.ref_id AND lo.paid_at IS NOT NULL AND lo.channel <> 'GIFT')))`),
+      );
+    case 'campaign':
+      return at(
+        exists(sql`SELECT 1 FROM account_sources s JOIN acquisition_sources k ON k.id = s.first_source_id AND k.kind = 'CAMPAIGN'
+                    WHERE s.account_id = c.account_id AND ${v === 'none' ? sql`k.utm_campaign IS NULL` : sql`k.utm_campaign = ${v}`}`),
+      );
+    case 'referrer':
+      return v === 'none'
+        ? at(sql`${firstSourceKey(await acquisitionBasis(tx))} = 'kind:DIRECT'`, FIRST_SOURCE_JOINS)
+        : at(sql`fk.kind = 'SITE' AND fk.site = ${v}`, FIRST_SOURCE_JOINS);
+    case 'bucket': {
+      const [kind, key, ...group] = v.split(':') as [string, string, ...string[]];
+      if (kind === 'firstvisit' || kind === 'signup') {
+        const { bucket, period } = bucketOfKey(q, key);
+        return kind === 'signup'
+          ? at(within(sql`c.created_at`, bucket), none, period)
+          : at(exists(sql`SELECT 1 FROM account_sources s WHERE s.account_id = c.account_id AND ${within(sql`s.first_seen_at`, bucket)}`), none, period);
+      }
+      // trend:<figure>:<bucket>[:<group>]: the group is of the query's split, on a bucket of the period.
+      const figure = key as TrendFigure;
+      const { bucket, period } = bucketOfKey(q, group[0]!);
+      const point = await trendPointSql(tx, x, figure, bucket);
+      const g = group.slice(1).join(':');
+      if (!g) return at(point, none, period);
+      if (q.trend.split === 'none') throw badSlice('a trend group needs the split it belongs to (split).');
+      if (period !== P) throw badSlice('the previous period’s line is not split.');
+      if (g === 'visitor') return at(sql`FALSE`);
+      const t = trendGroup(x, q.trend.split, await acquisitionBasis(tx), P);
+      // The age's expression reads `pr`, which every list joins already.
+      const joins = q.trend.split === 'age' ? none : t.joins;
+      if (g !== 'other') return at(sql`${point} AND ${t.expr} = ${g}`, joins);
+      const named = await trendNamedGroups(tx, { ...x, q: { ...q, trend: { figure, split: q.trend.split } } }, P);
+      return at(named.length ? sql`${point} AND ${t.expr} NOT IN (${sql.join(named)})` : point, joins);
+    }
+    case 'favpiece':
+    case 'favfinish': {
+      const kind = s.dim === 'favpiece' ? 'PIECE' : 'FINISH';
+      return v === 'none'
+        ? at(sql`NOT ${exists(sql`SELECT 1 FROM account_tastes t WHERE t.account_id = c.account_id AND t.kind = ${kind}`)}`)
+        : at(exists(sql`SELECT 1 FROM account_tastes t WHERE t.account_id = c.account_id AND t.kind = ${kind} AND t.value_key = ${v}`));
+    }
+    case 'haswish':
+      return at(exists(sql`SELECT 1 FROM account_wishes w WHERE w.account_id = c.account_id AND ${openWishAt(P.end)}`));
+    case 'wishmodel':
+      return at(exists(sql`SELECT 1 FROM account_wishes w JOIN models m ON m.id = w.model_id WHERE w.account_id = c.account_id AND ${openWishAt(P.end)} AND (m.id = ${v}::uuid OR m.variant_of = ${v}::uuid)`));
+    case 'wishcollection':
+      return at(exists(sql`SELECT 1 FROM account_wishes w JOIN models m ON m.id = w.model_id WHERE w.account_id = c.account_id AND ${openWishAt(P.end)} AND m.collection_id = ${v}::uuid`));
+    case 'viewed': {
+      const cutoff = viewHistoryCutoff(x.now);
+      if (P.end <= cutoff) return at(sql`FALSE`);
+      const range = within(sql`vw.at`, { start: P.start < cutoff ? cutoff : P.start, end: P.end });
+      return v.startsWith('r:')
+        ? at(exists(sql`SELECT 1 FROM collector_views vw WHERE vw.account_id = c.account_id AND vw.page IN (${sql.join([VIEW_PAGE_CODES.RELEASE, VIEW_PAGE_CODES.LIVE, VIEW_PAGE_CODES.AFTER_ROOM])}) AND vw.subject = ${v.slice(2)}::uuid AND ${range}`))
+        : at(exists(sql`SELECT 1 FROM collector_views vw JOIN models m ON m.id = vw.subject WHERE vw.account_id = c.account_id AND vw.page = ${VIEW_PAGE_CODES.MODEL} AND (m.id = ${v}::uuid OR m.variant_of = ${v}::uuid) AND ${range}`));
+    }
+    case 'holds':
+      return at(
+        exists(sql`SELECT 1 FROM ownership o JOIN products p ON p.id = o.product_id JOIN models m ON m.id = p.model_id
+                    WHERE o.account_id = c.account_id AND o.ended_at IS NULL AND p.status NOT IN (${sql.join([...CLUB_EXCLUDED_STATUSES])})
+                      AND (m.id = ${v}::uuid OR m.variant_of = ${v}::uuid)`),
+      );
+    case 'device':
+    case 'system':
+    case 'openedin':
+    case 'app': {
+      const rows = mainDeviceRows({ from: P.from, to: P.to }, x.now);
+      if (!rows) return at(sql`FALSE`);
+      const match =
+        s.dim === 'device'
+          ? sql`md.kind = ${v}`
+          : s.dim === 'openedin'
+            ? sql`md.opened_in = ${v}`
+            : s.dim === 'app'
+              ? sql`md.in_app = ${v}`
+              : v === 'IPAD'
+                ? sql`md.os = 'IOS' AND md.kind = 'TABLET'`
+                : v === 'IOS'
+                  ? sql`md.os = 'IOS' AND md.kind <> 'TABLET'`
+                  : sql`md.os = ${v}`;
+      return at(sql`c.account_id IN (SELECT md.account_id FROM (${rows}) md WHERE ${match})`);
+    }
+    case 'score': {
+      if (v === 'none') return at(sql`c.score IS NULL`);
+      const [lo, hi] = v.split('-').map(Number) as [number, number];
+      return at(sql`c.score BETWEEN ${lo}::int AND ${hi}::int`);
+    }
+    case 'status': {
+      const first = await sql<{ m: Date | null }>`WITH ${scopeCte('col', q, P)} SELECT min(created_at) AS m FROM col`.execute(tx);
+      const min = first.rows[0]?.m;
+      if (!min) return at(sql`FALSE`);
+      return at(sql`c.created_at < ${P.end}::timestamptz AND ${statusSql(P, dayStarts(new Date(min), P.to))} = ${v}`);
+    }
+    case 'cohort': {
+      const [month, mark, side] = v.split(':') as [string, string, string | undefined];
+      const m = `${month}-01`;
+      const made = sql`c.created_at >= ${parisMonthStart(month)}::timestamptz AND c.created_at < ${parisMonthStart(plusMonths(m, 1).slice(0, 7))}::timestamptz`;
+      if (mark === 'all') return at(made);
+      const target = plusMonths(m, Number(mark));
+      const span = await historySpan(tx);
+      if (!span || target > span.last) return at(sql`FALSE`);
+      const active = exists(sql`SELECT 1 FROM collector_history h WHERE h.account_id = c.account_id AND h.active[${historyIndex(sql`${target}::date`)}] IS TRUE`);
+      return at(side === 'active' ? sql`${made} AND ${active}` : sql`${made} AND NOT ${active}`);
+    }
+  }
+}
+
+/** What the slice names, in words (the list's title), when it names a thing. */
+async function sliceSubject(tx: Db, s: Slice): Promise<string | null> {
+  const model = async (id: string) => {
+    const m = await tx.selectFrom('models').select(['name', 'variant_label']).where('id', '=', id).executeTakeFirst();
+    return m ? (m.variant_label ? `${m.name} · ${m.variant_label}` : m.name) : null;
+  };
+  switch (s.dim) {
+    case 'wishmodel':
+    case 'holds':
+      return model(s.value);
+    case 'viewed':
+      if (!s.value.startsWith('r:')) return model(s.value);
+      return (await tx.selectFrom('drops').select('title').where('id', '=', s.value.slice(2)).executeTakeFirst())?.title ?? null;
+    case 'wishcollection':
+      return (await tx.selectFrom('collections').select('name').where('id', '=', s.value).executeTakeFirst())?.name ?? null;
+    case 'link1':
+    case 'link2':
+      return (await tx.selectFrom('links').select('name').where('id', '=', s.value).executeTakeFirst())?.name ?? null;
+    case 'heard':
+      return s.value === 'none' ? null : ((await tx.selectFrom('heard_options').select('label').where('id', '=', s.value).executeTakeFirst())?.label ?? null);
+    case 'conncity':
+      return s.value === 'unknown' ? null : ((await tx.selectFrom('geo_places').select('city').where('id', '=', Number(s.value)).executeTakeFirst())?.city ?? null);
+    case 'source':
+      return s.value.startsWith('channel:') ? ((await tx.selectFrom('link_channels').select('name').where('id', '=', s.value.slice(8)).executeTakeFirst())?.name ?? null) : null;
+    default:
+      return null;
+  }
+}
+
+/**
+ * A page of the collectors behind one figure (§3.6 C.6.5): the page's collectors (the scope and the five filters, for
+ * the slice's period) the slice selects, COLLECTORS_LIST_PAGE a page ordered by email for every slice, with no score.
+ */
+async function readList(tx: Db, x: Reading, s: Slice, page: number, withCities: boolean): Promise<{ total: number; rows: CollectorsListRow[]; subject: string | null }> {
+  const sel = await sliceSql(tx, x, s);
+  const members = sql`${scopeCte('col', x.q, sel.period)},
+    m AS (SELECT c.account_id, c.tier FROM col c LEFT JOIN account_profiles pr ON pr.account_id = c.account_id ${sel.joins} WHERE ${sel.cond})`;
+  const total = Number((await sql<{ n: number }>`WITH ${members} SELECT count(*)::int AS n FROM m`.execute(tx)).rows[0]?.n ?? 0);
+  const rows = await sql<{ id: string; email: string; display_name: string | null; country: string | null; city: string | null; tier: number; created_at: Date; heard_other: string | null; last_seen: Date | null }>`
+    WITH ${members}
+    SELECT a.id, a.email, a.display_name, a.country, pr.city, m.tier, a.created_at, pr.heard_other,
+           greatest((SELECT max(se.last_seen_at) FROM sessions se WHERE se.subject_type = 'account' AND se.subject_id = a.id),
+                    (SELECT max(cv.at) FROM collector_views cv WHERE cv.account_id = a.id)) AS last_seen
+      FROM m JOIN accounts a ON a.id = m.account_id LEFT JOIN account_profiles pr ON pr.account_id = a.id
+     ORDER BY a.email_normalized, a.id
+     LIMIT ${COLLECTORS_LIST_PAGE} OFFSET ${(page - 1) * COLLECTORS_LIST_PAGE}`.execute(tx);
+  return {
+    total,
+    subject: await sliceSubject(tx, s),
+    rows: rows.rows.map((r) => ({
+      accountId: r.id,
+      email: r.email,
+      name: r.display_name,
+      country: r.country?.trim() || null,
+      city: withCities ? (r.city?.trim() || null) : null,
+      tier: Number(r.tier),
+      createdAt: r.created_at,
+      lastSeenAt: r.last_seen ?? null,
+      ...(s.dim === 'heardother' ? { heardOther: r.heard_other } : {}),
+    })),
   };
 }

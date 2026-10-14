@@ -458,6 +458,8 @@ const PROBES: Probe[] = [
   { group: 'collectors', method: 'GET', url: '/api/admin/collectors/report?panel=engagement', min: 'AUDITOR' },
   // The panel trends (§3.6 C.6.3 item 7), its figure and split in the query.
   { group: 'collectors', method: 'GET', url: '/api/admin/collectors/report?panel=trends&figure=new&split=tier', min: 'AUDITOR' },
+  // The click-through (§3.6 C.6.5): the collectors behind a figure, from AUDITOR (masked emails, no city).
+  { group: 'collectors', method: 'GET', url: '/api/admin/collectors/list?slice=all', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];

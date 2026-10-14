@@ -237,7 +237,13 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     }
     // Wishes, on one model.
     const gw = await new GrowthWorld(db).prepare();
-    const model = await gw.model('MONOLITHE', { price: [48_000, 'EUR'] });
+    const orbital = (await db.insertInto('collections').values({ name: 'ORBITAL' }).returning('id').executeTakeFirstOrThrow()).id;
+    const model = await gw.model('MONOLITHE', { price: [48_000, 'EUR'], collectionId: orbital });
+    // Favourite pieces and finishes (step 9.8's lists): RING or CUFF for two accounts in three, BLUE for one in five.
+    for (const s of HOUSE) {
+      if (s.i % 3 !== 2) await db.insertInto('account_tastes').values({ account_id: s.id!, kind: 'PIECE', value_key: s.i % 3 ? 'CUFF' : 'RING', label: s.i % 3 ? 'Cuff' : 'Ring', created_at: s.created }).execute();
+      if (s.i % 5 === 1) await db.insertInto('account_tastes').values({ account_id: s.id!, kind: 'FINISH', value_key: 'BLUE', label: 'Blue', created_at: s.created }).execute();
+    }
     for (const s of HOUSE) if (s.wishAt) await db.insertInto('account_wishes').values({ account_id: s.id!, model_id: model, added_at: s.wishAt }).execute();
     // Sign-ins, at their instants (the audit log takes the clock's time), oldest first.
     for (const s of [...HOUSE].filter((x) => x.loginAt).sort((a, b) => a.loginAt!.getTime() - b.loginAt!.getTime())) {
@@ -922,6 +928,145 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
     });
   });
 
+  describe('the click-through (step 9.8): each figure equals its list’s total', () => {
+    const panel = async <T,>(name: string, req: Omit<InsightsRequest, 'panel'> = {}) => {
+      svc.clearCache();
+      return (await svc.report({ panel: name, ...req })).figures as T;
+    };
+    /** Every [slice, figure] pair: each list read, its total compared; the mismatches named together. */
+    const check = async (pairs: [string, number][], req: Omit<InsightsRequest, 'panel'> = {}) => {
+      const wrong: string[] = [];
+      for (const [slice, n] of pairs) {
+        const total = (await svc.list({ ...req, slice }, { withCities: true })).total;
+        if (total !== n) wrong.push(`${slice}: list ${total}, figure ${n}`);
+      }
+      expect(wrong).toEqual([]);
+      return pairs.length;
+    };
+
+    it('At a glance, Who they are, What they like', async () => {
+      for (const req of [{}, { scope: 'new' as const, c: 'FR,IT' }]) {
+        const o = await panel<OverviewFigures>('overview', req);
+        await check(
+          [
+            ['all', o.collectors.value!],
+            ['new', o.newCollectors.value!],
+            ['active', o.active.value!],
+            ['firstvisit', o.firstVisits.becameCollectors],
+            ['scored', o.medianScore.scored],
+            ['wished', o.wishesAdded.collectors],
+          ],
+          req,
+        );
+        const w = await panel<WhoFigures>('who', req);
+        await check(
+          [
+            ...w.ages.rows.map((r): [string, number] => [`age:${r.key}`, r.collectors]),
+            ...w.countries.given.map((r): [string, number] => [`country:${r.key}`, r.collectors]),
+            ...w.countries.connection.map((r): [string, number] => [`conncountry:${r.key}`, r.collectors]),
+            ...w.cities.given.rows.map((r): [string, number] => [`city:${r.key}`, r.collectors]),
+            ...w.cities.connection.rows.map((r): [string, number] => [`conncity:${r.key}`, r.collectors]),
+          ],
+          req,
+        );
+        const l = await panel<LikesFigures>('likes', req);
+        await check(
+          [
+            ['haswish', l.wishlists.collectors!],
+            ...l.mostWished.rows.flatMap((r) => [r, ...r.variants]).map((r): [string, number] => [`wishmodel:${r.modelId}`, r.wished]),
+            ...l.collections.rows.map((r): [string, number] => [`wishcollection:${r.collectionId}`, r.collectors]),
+            ...l.pieces.rows.map((r): [string, number] => [`favpiece:${r.key}`, r.collectors]),
+            ['favpiece:none', l.pieces.none],
+            ...l.finishes.rows.map((r): [string, number] => [`favfinish:${r.key}`, r.collectors]),
+            ['favfinish:none', l.finishes.none],
+            ...l.viewed.collectors.models.flatMap((r) => [r, ...r.variants]).map((r): [string, number] => [`viewed:${r.modelId}`, r.collectors!]),
+            ...l.viewed.collectors.releases.map((r): [string, number] => [`viewed:r:${r.dropId}`, r.collectors!]),
+            ...l.held.rows.flatMap((r) => [r, ...r.variants]).map((r): [string, number] => [`holds:${r.modelId}`, r.collectors]),
+          ],
+          req,
+        );
+        expect(l.collections.rows.length + l.pieces.rows.length + l.viewed.collectors.models.length).toBeGreaterThan(2);
+      }
+    });
+
+    it('Devices (BY COLLECTORS) and Engagement: the spread, the parts, the statuses, every cohort cell', async () => {
+      const d = await panel<DevicesPanelFigures>('devices');
+      const f = d.byCollectors.current;
+      await check([
+        ...Object.entries(f.kinds).map(([k, n]): [string, number] => [`device:${k}`, n]),
+        ...Object.entries(f.systems).map(([k, n]): [string, number] => [`system:${k}`, n]),
+        ...Object.entries(f.openedIn).map(([k, n]): [string, number] => [`openedin:${k}`, n]),
+        ...Object.entries(f.apps).map(([k, n]): [string, number] => [`app:${k}`, n]),
+      ]);
+      for (const req of [{}, { scope: 'active' as const }]) {
+        const e = await panel<EngagementFigures>('engagement', req);
+        await check(
+          [
+            ...e.spread.rows.map((r): [string, number] => [`score:${r.key}`, r.collectors]),
+            ...e.parts.map((p): [string, number] => [`part:${p.key}`, p.collectors]),
+            ...e.status.rows.map((r): [string, number] => [`status:${r.key}`, r.collectors]),
+            ...e.cohorts.rows.flatMap((c): [string, number][] => [
+              [`cohort:${c.month}:all`, c.collectors],
+              ...c.marks.filter((m) => m.active !== null).flatMap((m): [string, number][] => [
+                [`cohort:${c.month}:${m.after}:active`, m.active!],
+                [`cohort:${c.month}:${m.after}:inactive`, c.collectors - m.active!],
+              ]),
+            ]),
+          ],
+          req,
+        );
+      }
+    });
+
+    it('Over time: every point of every figure, the previous period’s line, a split’s groups with Other', async () => {
+      for (const figure of TREND_FIGURES) {
+        const t = await panel<TrendsFigures>('trends', { figure, p: '7d' });
+        await check(
+          [...t.total, ...t.previous!].map((x): [string, number] => [`bucket:trend:${figure}:${x.key}`, x.collectors]),
+          { figure, p: '7d' },
+        );
+      }
+      const year = await panel<TrendsFigures>('trends', { figure: 'medianscore', p: '12m' });
+      await check(year.total.map((x): [string, number] => [`bucket:trend:medianscore:${x.key}`, x.collectors]), { p: '12m' });
+      for (const [figure, split] of [['new', 'age'], ['collectors', 'country'], ['active', 'device'], ['buyers', 'tier']] as const) {
+        const t = await panel<TrendsFigures>('trends', { figure, split });
+        const pairs = t.groups.flatMap((g) => g.points.map((x): [string, number] => [`bucket:trend:${figure}:${x.key}:${g.group}`, x.collectors]));
+        expect(pairs.length).toBeGreaterThan(0);
+        await check(pairs, { figure, split });
+      }
+      // A group without the split it belongs to, or a bucket of neither period: 400.
+      await expect(svc.list({ slice: 'bucket:trend:new:2026-10-01:FR' }, { withCities: true })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      await expect(svc.list({ slice: 'bucket:trend:new:2025-01-01' }, { withCities: true })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+
+    it('a list: 50 a page ordered by email, no score, the city withheld on request, the page’s query applied', async () => {
+      const first = await svc.list({ slice: 'all' }, { withCities: true });
+      expect(first).toMatchObject({ slice: 'all', subject: null, total: 200, page: 1, pageSize: 50, scope: 'all', period: { from: P30.from, to: P30.to } });
+      expect(first.rows).toHaveLength(50);
+      const second = await svc.list({ slice: 'all', page: 4 }, { withCities: true });
+      expect(second.rows).toHaveLength(50);
+      const emails = [...first.rows, ...second.rows].map((r) => r.email);
+      expect(emails.slice(0, 50)).toEqual([...emails.slice(0, 50)].sort());
+      expect(JSON.stringify([first, second])).not.toMatch(/score/i);
+      expect(Object.keys(first.rows[0]!).sort()).toEqual(['accountId', 'city', 'country', 'createdAt', 'email', 'lastSeenAt', 'name', 'tier']);
+      const withCity = first.rows.find((r) => r.city !== null);
+      expect(withCity).toBeDefined();
+      expect((await svc.list({ slice: 'all' }, { withCities: false })).rows.every((r) => r.city === null)).toBe(true);
+      // A collector who signed in carries its last view; the filters and the scope narrow every list.
+      expect(first.rows.concat(second.rows).some((r) => r.lastSeenAt !== null)).toBe(true);
+      expect((await svc.list({ slice: 'all', c: 'FR' }, { withCities: true })).total).toBe(COUNTED.filter((s) => s.country === 'FR').length);
+      expect((await svc.list({ slice: 'all', scope: 'new' }, { withCities: true })).total).toBe(inScope('new', P30).length);
+      expect((await svc.list({ slice: `wishmodel:${(await panel<LikesFigures>('likes')).mostWished.rows[0]!.modelId}` }, { withCities: true })).subject).toBe('MONOLITHE');
+    });
+
+    it('refuses a slice outside its dimension’s values, a page out of bounds (400), before any reading', async () => {
+      for (const slice of ['everyone', 'all:1', 'age:30-40', 'country:fra', 'source:instagram', 'score:5-9', 'part:luck', 'status:asleep', 'cohort:2026-03:2:active', 'device:WATCH', 'viewed:r:1', 'city:Lyon', 'bucket:week:2026-W40']) {
+        await expect(svc.list({ slice }, { withCities: true }), slice).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+      }
+      await expect(svc.list({ slice: 'all', page: 0 }, { withCities: true })).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    });
+  });
+
   describe('the cache, the load guard and the timeout', () => {
     const quiet: Logger = { info: () => {}, warn: () => {}, error: () => {} };
     const make = (
@@ -1213,6 +1358,27 @@ describe('CollectorInsightsService, origin (§3.6 C.6.3 item 3, §3.4 A.10.6; st
       await h.t.db.insertInto('account_profiles').values({ account_id: acc[key]!, heard_option_id: opt.id, heard_other: words, heard_at: z('2026-10-20T10:00:00Z') }).execute();
     }
     await h.t.db.updateTable('heard_options').set({ active: false }).where('id', '=', aside.id).execute();
+    // What they like (step 9.8's lists, question 16): MONOLITHE · Blue, a variant in ORBITAL; wishes, pieces held, views.
+    const orbital = (await h.t.db.insertInto('collections').values({ name: 'ORBITAL' }).returning('id').executeTakeFirstOrThrow()).id;
+    // A main model of variants carries its own label.
+    await h.t.db.updateTable('models').set({ variant_label: 'Silver', variant_swatch: '#C0C0C0' }).where('id', '=', model).execute();
+    const blue = await w.model('MONOLITHE', { variantOf: model, label: 'Blue', swatch: '#1F3A93', collectionId: orbital });
+    const wish = (key: string, modelId: string, added: string, removed: string | null = null) =>
+      h.t.db.insertInto('account_wishes').values({ account_id: acc[key]!, model_id: modelId, added_at: z(added), removed_at: removed ? z(removed) : null }).execute();
+    await wish('A', model, '2026-10-07T10:00:00Z');
+    await wish('B', blue, '2026-10-08T10:00:00Z');
+    await wish('C', model, '2026-10-09T10:00:00Z');
+    await wish('C', blue, '2026-10-09T11:00:00Z');
+    await wish('D', blue, '2026-10-05T10:00:00Z', '2026-10-20T10:00:00Z');
+    await wish('T', blue, '2026-10-08T10:00:00Z');
+    await w.own(acc.A!, await w.piece(blue), 'FIRST_REGISTRATION', '2026-07-01');
+    await w.own(acc.B!, await w.piece(model), 'FIRST_REGISTRATION', '2026-07-01');
+    await w.own(acc.T!, await w.piece(blue), 'FIRST_REGISTRATION', '2026-07-01');
+    const noir = await w.drop({ mode: 'DRAW', modelId: model, title: 'MONOLITHE NOIR', opens: '2026-10-01', quantity: 5 });
+    const watcher = (await h.t.db.insertInto('tracking_devices').values({ device_hash: `owatch${'w'.repeat(37)}`, first_seen_at: z('2026-08-01T10:00:00Z'), last_seen_at: z('2026-10-12T10:00:00Z') }).returning('id').executeTakeFirstOrThrow()).id;
+    for (const [key, page, subject] of [['D', VIEW_PAGE_CODES.MODEL, model], ['E', VIEW_PAGE_CODES.MODEL, blue], ['F', VIEW_PAGE_CODES.RELEASE, noir.id], ['T', VIEW_PAGE_CODES.MODEL, blue]] as const) {
+      await h.t.db.insertInto('collector_views').values({ at: z('2026-10-12T10:00:00Z'), device_id: watcher, account_id: acc[key]!, page, subject, seconds: 30, place_id: null }).execute();
+    }
     await h.ctx.services.acquisition.recordConversions(z('2026-10-31T22:30:00Z'));
     h.clock.set('2026-11-02T10:00:00Z');
     svc = h.ctx.services.collectorInsights;
@@ -1310,6 +1476,66 @@ describe('CollectorInsightsService, origin (§3.6 C.6.3 item 3, §3.4 A.10.6; st
     const ninety = await origin({ p: 'custom', from: '2026-08-15', to: '2026-10-31' });
     expect(ninety.firstVisits.unit).toBe('week');
     expect(ninety.firstVisits.buckets.reduce((a, b) => a + b.firstVisits, 0)).toBe(14);
+  });
+
+  it('the click-through (step 9.8): each figure equals its list’s total, the most wished rows and collections included (question 16)', async () => {
+    const check = async (pairs: [string, number][], req: Omit<InsightsRequest, 'panel'>) => {
+      const wrong: string[] = [];
+      for (const [slice, n] of pairs) {
+        const total = (await svc.list({ ...req, slice }, { withCities: true })).total;
+        if (total !== n) wrong.push(`${slice}: list ${total}, figure ${n}`);
+      }
+      expect(wrong).toEqual([]);
+    };
+    for (const req of [OCT, { ...OCT, scope: 'new' as const }]) {
+      const f = await origin(req);
+      await check(
+        [
+          ...f.sources.map((b): [string, number] => [`source:${b.key}`, b.collectors]),
+          ...f.heard.map((b): [string, number] => [`heard:${b.key}`, b.collectors]),
+          ['heardother', f.heard.find((b) => b.other)!.collectors],
+          ...f.links.channels.flatMap((c) => c.links).flatMap((l): [string, number][] => [
+            [`link1:${l.link.id}`, l.first.collectors],
+            [`link2:${l.link.id}`, l.last.collectors],
+          ]),
+          ...f.campaigns.rows.map((c): [string, number] => [`campaign:${c.campaign ?? 'none'}`, c.collectors]),
+          ...f.sites.rows.map((b): [string, number] => [`referrer:${b.site}`, b.collectors]),
+          ['referrer:none', f.sites.none.collectors],
+          ...[...f.firstVisits.buckets, ...f.firstVisits.previous!].flatMap((b): [string, number][] => [
+            [`bucket:signup:${b.key}`, b.newCollectors],
+            [`bucket:firstvisit:${b.key}`, b.becameCollectors],
+          ]),
+        ],
+        req,
+      );
+    }
+    svc.clearCache();
+    const l = (await svc.report({ panel: 'likes', ...OCT })).figures as LikesFigures;
+    const main = l.mostWished.rows.find((r) => r.name === 'MONOLITHE')!;
+    // The main row counts A, B and C once each (B and C through Blue); Blue's own row B and C; ORBITAL B and C.
+    expect([main.wished, main.variants.map((v) => [v.variant, v.wished])]).toEqual([3, [['Blue', 2]]]);
+    expect(l.collections.rows.map((c) => [c.name, c.collectors])).toEqual([['ORBITAL', 2]]);
+    await check(
+      [
+        ['haswish', l.wishlists.collectors!],
+        ...l.mostWished.rows.flatMap((r) => [r, ...r.variants]).map((r): [string, number] => [`wishmodel:${r.modelId}`, r.wished]),
+        ...l.collections.rows.map((r): [string, number] => [`wishcollection:${r.collectionId}`, r.collectors]),
+        ...l.held.rows.flatMap((r) => [r, ...r.variants]).map((r): [string, number] => [`holds:${r.modelId}`, r.collectors]),
+        ...l.viewed.collectors.models.flatMap((r) => [r, ...r.variants]).map((r): [string, number] => [`viewed:${r.modelId}`, r.collectors!]),
+        ...l.viewed.collectors.releases.map((r): [string, number] => [`viewed:r:${r.dropId}`, r.collectors!]),
+      ],
+      OCT,
+    );
+    expect(l.held.rows[0]!.variants.length + l.viewed.collectors.releases.length).toBeGreaterThan(1);
+    // A most wished row's list names the model and opens its collectors, ordered by email; Other's words in its list.
+    const blueRow = main.variants[0]!;
+    const list = await svc.list({ ...OCT, slice: `wishmodel:${blueRow.modelId}` }, { withCities: true });
+    expect(list.subject).toBe('MONOLITHE · Blue');
+    expect(list.rows.map((r) => r.accountId).sort()).toEqual([acc.B!, acc.C!].sort());
+    expect((await svc.list({ ...OCT, slice: `wishcollection:${l.collections.rows[0]!.collectionId}` }, { withCities: true })).subject).toBe('ORBITAL');
+    const other = await svc.list({ ...OCT, slice: 'heardother' }, { withCities: true });
+    expect(other.rows.map((r) => [r.accountId, r.heardOther])).toEqual([[acc.B!, 'a stylist']]);
+    expect((await svc.list({ ...OCT, slice: `link1:${link.L1}` }, { withCities: true })).subject).toBe('Instagram bio');
   });
 
   it('a source filter keeps its collectors, the first visits of its sources and the links that are theirs', async () => {
