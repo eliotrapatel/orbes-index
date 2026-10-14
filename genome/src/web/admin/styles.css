@@ -6197,23 +6197,6 @@ a.collectors__kpi-link:focus-visible {
   gap: 10px;
 }
 
-@media (max-width: 1180px) {
-  .collectors__kpis {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .collectors__kpis .kpi:nth-child(3) {
-    padding-left: 18px;
-    border-left: 1px solid var(--hairline);
-  }
-  .collectors__kpis .kpi:nth-child(3n + 1) {
-    padding-left: 0;
-    border-left: 0;
-  }
-  .collectors__kpis .kpi:nth-child(n + 4) {
-    border-top: 1px solid var(--hairline);
-  }
-}
-
 @media (max-width: 860px) {
   .collectors__kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -6348,6 +6331,21 @@ a.collectors__kpi-link:focus-visible {
   --bar-label: 110px;
 }
 
+/* Compared, a list's row keeps its label, bar, count and share; the comparison takes the line under them, so it never
+   leaves its column for the next list (§3.6 C.6.3 item 5). */
+.collectors__lists .collectors__bars--cmp .bar {
+  grid-template-columns: var(--bar-label) minmax(0, 1fr) 64px 48px;
+  gap: 2px 14px;
+  padding: 6px 0;
+}
+
+.collectors__lists .collectors__bars--cmp .collectors__cmp {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .collectors__parts {
   list-style: none;
   display: grid;
@@ -6410,6 +6408,10 @@ a.collectors__kpi-link:focus-visible {
 @media (max-width: 860px) {
   .collectors__lists {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .collectors__lists .collectors__bars--cmp .bar {
+    grid-template-columns: 120px minmax(0, 1fr) 48px;
+    gap: 20px;
   }
   .collectors__kpis--three .kpi:nth-child(3) {
     padding-left: 0;

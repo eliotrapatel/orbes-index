@@ -156,6 +156,27 @@ describe('the Collectors page’s query (§3.6 C.6.2)', () => {
     expect(CONTROLS_COPY.tooMany).toBe('Too many choices for one view: remove one.');
   });
 
+  it('reads back every channel of the Source filter the address holds: the first boot’s seven in, seven out, up to the 512 characters', () => {
+    const uuid = (i: number) => `0f6c2a52-6d0c-4b8e-9e7f-0b2a4c9d1e${String(i).padStart(2, '0')}`;
+    for (const n of [4, 5, 6, 7]) {
+      const p = { ...DEFAULT_PARAMS, s: Array.from({ length: n }, (_, i) => uuid(i)) };
+      const hash = collectorsHref(p);
+      expect(tooManyChoices(hash), `${n}`).toBe(false);
+      expect(collectorsParams(parseHash(hash).query, NOW).s, `${n}`).toEqual(p.s);
+      // The list behind a figure reads the same filters.
+      expect(listParams(parseHash(hash.replace('#/collectors?', '#/collectors/list?slice=country%3AFR&')).query, NOW).s, `${n} list`).toEqual(p.s);
+    }
+    // Countries and favourite pieces too: every value up to what fits in the route.
+    const wide = { ...DEFAULT_PARAMS, c: ['AT', 'BE', 'CH', 'DE', 'ES', 'FR', 'GB', 'IT', 'JP', 'NL', 'PT', 'SE', 'US'], s: Array.from({ length: 7 }, (_, i) => uuid(i)), ft: ['BRACELET', 'CUFF', 'EARRING', 'NECKLACE', 'PENDANT', 'RING', 'SIGNET RING'] };
+    expect(tooManyChoices(collectorsHref(wide))).toBe(false);
+    expect(collectorsParams(parseHash(collectorsHref(wide)).query, NOW)).toEqual(wide);
+    // A choice past the 512 is still refused.
+    const past = { ...wide, s: Array.from({ length: 14 }, (_, i) => uuid(i)) };
+    expect(tooManyChoices(collectorsHref(past))).toBe(true);
+    // Every other route keeps its 200 characters a value.
+    expect(parseHash(`#/owners?q=${'z'.repeat(300)}`).query.q).toHaveLength(200);
+  });
+
   it('counts the filters set, clears them alone, and ticks a choice', () => {
     const p = { ...DEFAULT_PARAMS, p: '7d' as const, scope: 'new' as const, c: ['FR', 'IT'], t: [2], sc: { min: 40, max: 100 } };
     expect(filterCount(p)).toBe(3);

@@ -518,6 +518,21 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       expect(await bars(p, 'collectors-devices-device')).toEqual(['Phone 1', 'Tablet 0', 'Computer 1']);
       expect(await p.locator('[data-testid=collectors-devices-system] .bar[data-key=IOS] a').getAttribute('aria-label')).toBe('Open the 1 collector whose main system is iPhone');
       expect(await bars(p, 'collectors-devices-browsers')).toEqual(['Chrome 1', 'Safari 1']);
+      // At 1,440 px, compared: the three lists side by side, each row's bar drawn and its comparison inside its own column.
+      const outside = await p.evaluate(() => {
+        const lists = document.querySelector('[data-testid=collectors-panel-devices] .collectors__lists')!;
+        const rows = [...lists.querySelectorAll('[data-testid^=collectors-devices-] .bar')];
+        const bad = rows.flatMap((row) => {
+          const column = row.closest('.collectors__lists > div')!.getBoundingClientRect();
+          const cmp = row.querySelector('.collectors__cmp')!.getBoundingClientRect();
+          const track = row.querySelector('.bar__track')!.getBoundingClientRect();
+          const key = (row as HTMLElement).dataset.key;
+          return [cmp.right > column.right + 0.5 ? `${key} cmp ${Math.round(cmp.right)} > ${Math.round(column.right)}` : null, track.width > 0 ? null : `${key} track 0`].filter((x) => x !== null);
+        });
+        return { columns: getComputedStyle(lists).gridTemplateColumns.split(' ').length, compared: lists.querySelectorAll('.collectors__bars--cmp').length, rows: rows.length, bad };
+      });
+      expect(outside).toMatchObject({ columns: 3, compared: 4, bad: [] });
+      expect(outside.rows).toBeGreaterThan(0);
       await p.click(`${devices} [data-key=byVisits]`);
       expect(await p.locator(`${devices} [data-testid=collectors-devices-device] a`).count()).toBe(0);
       await p.click(`${devices} [data-key=allDevices]`);

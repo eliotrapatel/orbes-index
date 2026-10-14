@@ -109,7 +109,15 @@ function safeDecode(s: string): string | null {
   }
 }
 
-export function parseQuery(qs: string): Record<string, string> {
+/** A query value's cap; a route in LONG_VALUES keeps up to the whole hash's 512 instead. */
+const MAX_VALUE = 200;
+/**
+ * The Collectors page and its list carry their multi-select filters (countries, sources, favourite pieces) as one
+ * comma-joined value each: their only bound is the hash's 512 characters (plan CUSTOMER INTELLIGENCE §3.6 C.6.2).
+ */
+const LONG_VALUES: ReadonlySet<RouteName> = new Set<RouteName>(['collectors', 'collectorsList']);
+
+export function parseQuery(qs: string, max: number = MAX_VALUE): Record<string, string> {
   const out: Record<string, string> = {};
   for (const part of qs.split('&')) {
     if (!part) continue;
@@ -118,7 +126,7 @@ export function parseQuery(qs: string): Record<string, string> {
     const v = safeDecode((i < 0 ? '' : part.slice(i + 1)).replace(/\+/g, ' '));
     // Plain keys only: a crafted link must not reach Object.prototype through route state.
     if (k === null || v === null || !/^[A-Za-z][A-Za-z0-9_]{0,31}$/.test(k) || k in Object.prototype) continue;
-    out[k] = v.slice(0, 200);
+    out[k] = v.slice(0, max);
   }
   return out;
 }
@@ -153,7 +161,7 @@ export function parseHash(hash: string): Route {
         break;
       }
     }
-    if (ok) return { name: r.name, params, query, path };
+    if (ok) return { name: r.name, params, query: q >= 0 && LONG_VALUES.has(r.name) ? parseQuery(h.slice(q + 1), MAX_HASH) : query, path };
   }
   return { name: 'not-found', params: {}, query, path };
 }
