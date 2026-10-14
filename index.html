@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en" class="gated">
 <head>
+<script>document.documentElement.classList.add('dust');</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>ORBES · Paris</title>
@@ -635,6 +636,19 @@ html.toast-at-call #promo-toast { position: absolute; top: var(--toast-top, 0px)
   .promo-tier-row.active::before { top: 10px; bottom: 10px; }
 }
 
+
+/* The opening's monogram, OUT OF THE DARK, drawn in dust: after ENTER the dust rises out of the dark and gathers into
+   the monogram, then the faint mark settles beneath it; the dust keeps shimmering and parts under the pointer. */
+.open__mark { position: relative; }
+.open__mono {
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,.36) 0%, rgba(0,0,0,.22) 50%, rgba(0,0,0,0) 100%);
+          mask-image: linear-gradient(to bottom, rgba(0,0,0,.36) 0%, rgba(0,0,0,.22) 50%, rgba(0,0,0,0) 100%);
+  transition: opacity 2.4s cubic-bezier(.2,0,0,1);
+}
+html.dust .open__mono { opacity: 0; }
+html.dust.dust-settled .open__mono { opacity: .75; }
+.open__dust { position: absolute; pointer-events: none; }
+
 /* Reduced motion: every transition is instant, except the slot's 30 s line, which is information, not motion. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -969,6 +983,101 @@ html.toast-at-call #promo-toast { position: absolute; top: var(--toast-top, 0px)
   }
 })();
 </script>
+<script>
+/* ── THE OPENING'S MONOGRAM IN DUST: fine ivory specks gather into the monogram after ENTER, then live (shimmer, renew)
+      and part under the pointer; the faint monogram settles beneath once they have gathered. Paused off screen. ── */
+(function () {
+  var root = document.documentElement;
+  var mark = document.querySelector('.open__mark'), mono = document.querySelector('.open__mono'), open = document.querySelector('.open');
+  var sym = document.getElementById('orbes-monogram');
+  if (!mark || !mono || !sym || !window.Path2D || !root.classList.contains('dust')) { root.classList.remove('dust'); return; }
+  var VB = { x: 42.9, y: 100.15, w: 414.42 };
+  var MP = [].map.call(sym.querySelectorAll('path'), function (p) { return new Path2D(p.getAttribute('d')); });
+  var still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var c = document.createElement('canvas'); c.className = 'open__dust'; c.setAttribute('aria-hidden', 'true');
+  mark.appendChild(c);
+  var g = c.getContext('2d'), P = [], pts = [], W = 0, H = 0, d = 1, ox = 0, oy = 0, raf = 0, t0 = 0, started = false, visible = true;
+  var ptr = { x: -1e4, y: -1e4 }, touching = false;
+
+  function layout() {
+    var a = mark.getBoundingClientRect(), b = mono.getBoundingClientRect();
+    if (!b.width) return false;
+    var room = Math.min(b.left, document.documentElement.clientWidth - b.right), mw = Math.max(0, Math.min(b.width * .25, room)), mh = b.height * .3;   // never wider than the window
+    d = Math.min(2, window.devicePixelRatio || 1);
+    c.style.left = (b.left - a.left - mw) + 'px'; c.style.top = (b.top - a.top - mh) + 'px';
+    c.style.width = (b.width + 2 * mw) + 'px'; c.style.height = (b.height + 2 * mh) + 'px';
+    W = c.width = Math.round((b.width + 2 * mw) * d); H = c.height = Math.round((b.height + 2 * mh) * d); ox = mw * d; oy = mh * d;
+    var m = document.createElement('canvas'); m.width = W; m.height = H;
+    var mg = m.getContext('2d'), s = (b.width * d) / VB.w;
+    mg.setTransform(s, 0, 0, s, ox - VB.x * s, oy - VB.y * s); mg.fillStyle = '#fff'; MP.forEach(function (p) { mg.fill(p); });
+    var data = mg.getImageData(0, 0, W, H).data; pts = [];
+    for (var y = 0; y < H; y += 2) for (var x = 0; x < W; x += 2) if (data[(y * W + x) * 4 + 3] > 128) pts.push(x, y);
+    return pts.length > 0;
+  }
+  // OUT OF THE DARK: full at the top, dissolving towards the foot
+  function fade(y) { var v = (y - oy) / (H - 2 * oy); return v < 0 ? 1 : v > 1 ? 0 : v < .5 ? 1 - v * .5 : .75 * (1 - Math.pow((v - .5) / .5, 1.6)); }
+  function place(p, rising) {
+    var i = (Math.random() * (pts.length / 2) | 0) * 2;
+    p.bx = pts[i] + Math.random() * 2; p.by = pts[i + 1] + Math.random() * 2;
+    if (rising) { var an = Math.random() * Math.PI * 2, r = (.35 + Math.random() * .7) * W * .5; p.x = W / 2 + Math.cos(an) * r; p.y = H * .9 + Math.random() * H * .3; p.delay = Math.random() * 1400; }
+    else { p.x = p.bx; p.y = p.by; p.delay = 0; }
+    p.s = (Math.random() * 1.2 + .55) * d; p.a = .4 + Math.random() * .6; p.ph = Math.random() * Math.PI * 2;
+    p.life = 90 + Math.random() * 160; p.age = rising ? Math.random() * 40 : 0;
+  }
+  function fill(rising) {
+    var b = mono.getBoundingClientRect(), n = Math.round(Math.min(9000, b.width * b.height * .058, pts.length / 2 * 1.4));
+    P = []; for (var i = 0; i < n; i++) { var p = {}; place(p, rising); P.push(p); }
+  }
+  function frame(now) {
+    raf = 0;
+    var el = now - t0, R = 46 * d, gathering = el < 4200;
+    g.clearRect(0, 0, W, H); g.fillStyle = '#f6f2ea';
+    for (var i = 0; i < P.length; i++) {
+      var p = P[i];
+      if (el < p.delay) continue;
+      var dx = ptr.x - p.x, dy = ptr.y - p.y, dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < R) { var f = (R - dist) / R, an = Math.atan2(dy, dx); p.x = p.bx - Math.cos(an) * f * 24 * d; p.y = p.by - Math.sin(an) * f * 24 * d; }
+      else { var k = gathering ? .045 : .08; p.x += (p.bx - p.x) * k; p.y += (p.by - p.y) * k; }
+      if (!still) { p.age++; p.ph += .05; }
+      var life = still ? 1 : Math.min(1, p.age / 25, (p.life - p.age) / 25);
+      if (life <= 0) { place(p, false); continue; }
+      var al = p.a * (.65 + .35 * Math.sin(p.ph)) * life * fade(p.by);
+      if (al < .02) continue;
+      g.globalAlpha = al > 1 ? 1 : al; g.fillRect(p.x, p.y, p.s, p.s);
+    }
+    g.globalAlpha = 1;
+    if (!still && visible && !document.hidden) raf = requestAnimationFrame(frame);
+  }
+  function run() { if (!raf && !still && visible && !document.hidden && started) raf = requestAnimationFrame(frame); }
+  function begin() {
+    if (started || !layout()) return;
+    started = true; t0 = performance.now();
+    if (still) { fill(false); root.classList.add('dust-settled'); frame(t0 + 9000); return; }
+    fill(true); run();
+    setTimeout(function () { root.classList.add('dust-settled'); }, 3600);
+  }
+  // the pointer parts the dust (a finger too, while it touches)
+  function at(e) { var r = c.getBoundingClientRect(); ptr.x = (e.clientX - r.left) * d; ptr.y = (e.clientY - r.top) * d; }
+  document.addEventListener('pointermove', function (e) { if (e.pointerType !== 'touch' || touching) at(e); }, { passive: true });
+  document.addEventListener('pointerdown', function (e) { if (e.pointerType === 'touch') { touching = true; at(e); } }, { passive: true });
+  document.addEventListener('pointerup', function (e) { if (e.pointerType === 'touch') { touching = false; ptr.x = ptr.y = -1e4; } }, { passive: true });
+  document.addEventListener('pointercancel', function () { touching = false; ptr.x = ptr.y = -1e4; }, { passive: true });
+  document.documentElement.addEventListener('pointerleave', function () { ptr.x = ptr.y = -1e4; });
+  // paused when the opening is off screen or the tab is hidden
+  if (open && 'IntersectionObserver' in window) new IntersectionObserver(function (es) { visible = es[es.length - 1].isIntersecting; run(); }).observe(open);
+  document.addEventListener('visibilitychange', run);
+  // a new size: the dust is laid out again on the monogram as it now stands
+  if ('ResizeObserver' in window) {
+    var lastW = 0;
+    new ResizeObserver(function () { var w = Math.round(mono.getBoundingClientRect().width); if (!started || w === lastW) { lastW = w; return; } lastW = w; if (layout()) { fill(false); if (still) frame(performance.now() + 9000); run(); } }).observe(mono);
+  }
+  // the dust gathers once the gate lifts (or at once if there is no gate)
+  if (root.classList.contains('gated')) {
+    new MutationObserver(function (_, mo) { if (!root.classList.contains('gated')) { mo.disconnect(); setTimeout(begin, 250); } }).observe(root, { attributes: true, attributeFilter: ['class'] });
+  } else begin();
+})();
+</script>
+
 
 <script>
 /* ── PROMO EASTER EGG ──────────────────────────────────────────── */
