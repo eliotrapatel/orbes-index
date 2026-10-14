@@ -10,6 +10,11 @@
  *       comparison; Who they are (AGES, COUNTRIES and CITIES as given and from the connection); each figure a link with
  *       its aria-label, an AUDITOR's cities none; at 375 px the KPIs two by two, the filters folded into « Filters (1) »
  *       opened as a sheet, no sideways scroll.
+ *  9.10 Each panel and tab: Where they come from (SOURCES, HOW THEY HEARD, LINKS, CAMPAIGNS, REFERRING SITES, FIRST
+ *       VISITS), What they like (the Wishlists figures, FAVOURITE PIECES, FINISHES, MOST WISHED models and collections,
+ *       MOST VIEWED by collectors and by every visitor, PIECES HELD), Devices (BY COLLECTORS, BY VISITS, ALL DEVICES),
+ *       Engagement (SCORE SPREAD, THE FIVE PARTS, ACTIVE AND DORMANT, MONTHLY COHORTS), Over time (a figure and a split);
+ *       a most wished model's row opens the collectors who wish for it (question 16).
  *
  * Screens with ORBES_SCREENSHOTS=1 (genome/out/admin-collectors-*.png). No CSP violation, no page error.
  */
@@ -30,6 +35,7 @@ import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { parisDay } from '../../src/server/services/schedule.js';
 import { SYSTEM_ACTOR } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
+import { GrowthWorld } from '../support/growth.js';
 import { seedScore } from '../support/scores.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
@@ -87,6 +93,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
   let browser: Browser;
   const problems: string[] = [];
   const ids: Record<string, string> = {};
+  const models: Record<string, string> = {};
 
   async function open(who: { email: string; password: string }, width = 1440): Promise<Page> {
     const c = await browser.newContext({ viewport: { width, height: width < 600 ? 812 : 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
@@ -133,6 +140,14 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
     await expect.poll(async () => (await title(p).textContent())?.trim(), { timeout: 15_000 }).toBe('Collectors');
     await settled(p, decodeURIComponent(hash));
   }
+
+  /** Every panel read. */
+  const allLoaded = async (p: Page) => {
+    for (const panel of ['overview', 'who', 'origin', 'likes', 'devices', 'engagement', 'trends']) await loaded(p, panel);
+  };
+  /** A table's body rows as their cells' texts joined by ' | '. */
+  const rowsOf = (p: Page, sel: string) =>
+    p.locator(`${sel} tbody tr`).evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('td')].map((td) => (td.textContent ?? '').replace(/\s+/g, ' ').trim()).join(' | ')));
 
   /** The KPIs as `label: value`. */
   const kpis = (p: Page) => p.locator('[data-testid=collectors-kpis] .kpi').evaluateAll((els) => els.map((e) => `${e.querySelector('.kpi__label')?.textContent}: ${e.querySelector('.kpi__value')?.textContent}`));
@@ -207,6 +222,56 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
     await profile(team, { birth: '1990-01-01', city: 'Lyon' });
     await seedScore(ctx.db, team, 90, scoredAt);
 
+    // What they like, their devices and where they came from (step 9.10): a model and its Blue dot in ORBITAL, two wishes,
+    // favourite pieces and finishes, a piece held, devices with their views, a first source; the recording 40 days old.
+    const started = new Date(now - 40 * DAY);
+    await ctx.db.updateTable('tracking_state').set({ started_at: started }).execute();
+    await ctx.db.updateTable('acquisition_state').set({ tracking_started_at: started, conversions_until: started }).execute();
+    const world = await new GrowthWorld(ctx.db).prepare();
+    const orbital = (await ctx.db.insertInto('collections').values({ name: 'ORBITAL' }).returning('id').executeTakeFirstOrThrow()).id;
+    models.mono = await world.model('MONOLITHE', { collectionId: orbital, label: 'Silver', swatch: '#C0C0C0' });
+    models.blue = await world.model('MONOLITHE', { variantOf: models.mono, label: 'Blue', swatch: '#1F3A93', collectionId: orbital });
+    await ctx.db
+      .insertInto('account_wishes')
+      .values([
+        { account_id: ids.a!, model_id: models.blue, added_at: new Date(now - 2 * DAY) },
+        { account_id: ids.b!, model_id: models.mono, added_at: new Date(now - 4 * DAY) },
+        { account_id: entrant, model_id: models.mono, added_at: new Date(now - 4 * DAY) },
+      ])
+      .execute();
+    await ctx.db
+      .insertInto('account_tastes')
+      .values([
+        { account_id: ids.a!, kind: 'PIECE', value_key: 'RING', label: 'Ring', created_at: new Date(now - 2 * DAY) },
+        { account_id: ids.b!, kind: 'PIECE', value_key: 'RING', label: 'Ring', created_at: new Date(now - 4 * DAY) },
+        { account_id: ids.a!, kind: 'FINISH', value_key: 'BLUE', label: 'Blue', created_at: new Date(now - 2 * DAY) },
+      ])
+      .execute();
+    const piece = await world.piece(models.blue);
+    await world.own(ids.a!, piece, 'FIRST_REGISTRATION', parisDay(new Date(now - 3 * DAY)));
+    const paris = (await ctx.services.places.idOf('FR', 'Paris'))!;
+    const device = async (account: string, kind: 'PHONE' | 'COMPUTER', os: 'IOS' | 'MACOS', browser: 'SAFARI' | 'CHROME') => {
+      const id = (
+        await ctx.db
+          .insertInto('tracking_devices')
+          .values({ device_hash: `e2e${account.replace(/-/g, '')}`.slice(0, 43).padEnd(43, 'x'), kind, os, browser, opened_in: 'BROWSER', in_app: null, account_id: account, linked_at: new Date(now - 3 * DAY), first_seen_at: new Date(now - 3 * DAY), last_seen_at: new Date(now - DAY) })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+      ).id;
+      await ctx.db.insertInto('tracking_device_accounts').values({ device_id: id, account_id: account, first_via: 'SIGN_UP', first_linked_at: new Date(now - 3 * DAY), last_linked_at: new Date(now - 3 * DAY) }).execute();
+      await ctx.db
+        .insertInto('collector_views')
+        .values([
+          { at: new Date(now - 2 * DAY), device_id: id, account_id: account, page: 10, subject: models.mono, seconds: 40, place_id: paris },
+          { at: new Date(now - DAY), device_id: id, account_id: account, page: 10, subject: models.blue, seconds: 20, place_id: paris },
+        ])
+        .execute();
+    };
+    await device(ids.a!, 'PHONE', 'IOS', 'SAFARI');
+    await device(ids.b!, 'COMPUTER', 'MACOS', 'CHROME');
+    const site = (await ctx.db.insertInto('acquisition_sources').values({ kind: 'SITE', site: 'instagram.com', key: 'S:instagram.com' }).returning('id').executeTakeFirstOrThrow()).id;
+    await ctx.db.insertInto('account_sources').values({ account_id: ids.a!, first_source_id: site, first_seen_at: new Date(now - 3 * DAY - 3_600_000), set_at: new Date(now - 3 * DAY), set_by: 'SIGN_UP' }).execute();
+
     app = await buildApp(ctx, { serveStatic: true, staticDir: webDir });
     await app.listen({ port, host: '127.0.0.1' });
     browser = await chromium.launch({ executablePath: CHROMIUM, headless: true, args: ['--no-sandbox'] });
@@ -239,11 +304,12 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       expect(await text(p, '[data-testid=collectors-read-at]')).toMatch(/^Read at \d{2}:\d{2}$/);
 
       // At a glance: six collectors (the test entrant and the team account left out), five new in 30 days.
-      expect(await kpis(p)).toEqual(['Collectors: 6', 'New collectors: 5', 'First visits: 0', 'Active: 0', 'Median score: 54', 'Wishes added: 0']);
+      expect(await kpis(p)).toEqual(['Collectors: 6', 'New collectors: 5', 'First visits: 0', 'Active: 2', 'Median score: 54', 'Wishes added: 2']);
       const collectors = p.locator('[data-testid=collectors-kpis] .kpi[data-key=collectors] a');
       expect(await collectors.getAttribute('aria-label')).toBe('Open the 6 collectors of this view');
       expect(await p.locator('[data-testid=collectors-kpis] .kpi[data-key=newCollectors] .collectors__change').textContent()).toBe('new');
-      expect(await p.locator('[data-testid=collectors-kpis] .kpi[data-key=firstVisits] a').count()).toBe(0);
+      expect(await p.locator('[data-testid=collectors-kpis] .kpi[data-key=firstVisits] a').getAttribute('aria-label')).toBe('Open the 1 collector whose first visit fell in the period');
+      expect(await p.locator('[data-testid=collectors-kpis] .kpi[data-key=active] a').getAttribute('aria-label')).toBe('Open the 2 collectors active in the period');
 
       // Who they are: AGES in their order, then COUNTRIES and CITIES, as given and from the connection.
       expect(await bars(p, 'collectors-ages')).toEqual(['Under 18 0', '18–24 0', '25–34 2', '35–44 1', '45–54 0', '55–64 0', '65 and over 0', 'Not given 3']);
@@ -277,7 +343,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       await go(p, '#/collectors');
       await act(p, () => p.click('[data-testid=collectors-period-7d]'), '#/collectors?p=7d');
       expect(await text(p, '[data-testid=collectors-words]')).toMatch(/^All collectors\. Last 7 days, /);
-      expect(await kpis(p)).toEqual(['Collectors: 6', 'New collectors: 3', 'First visits: 0', 'Active: 0', 'Median score: 54', 'Wishes added: 0']);
+      expect(await kpis(p)).toEqual(['Collectors: 6', 'New collectors: 3', 'First visits: 0', 'Active: 2', 'Median score: 54', 'Wishes added: 2']);
 
       // CUSTOM: dates out of bounds are refused under them, then two good days are applied.
       await act(p, () => p.click('[data-testid=collectors-period-custom]'), /^#\/collectors\?p=custom&from=/);
@@ -345,6 +411,109 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       expect(await auditor.locator('[data-testid=collectors-cities] a').count()).toBe(0);
       expect(await text(auditor, '[data-testid=collectors-panel-who] .growth__line')).toBe('An AUDITOR does not open the collectors of a city.');
       await auditor.context().close();
+    },
+    STEP_TIMEOUT,
+  );
+
+  it(
+    'draws Where they come from, What they like, Devices, Engagement and Over time, each tab, every figure of collectors a link (step 9.10)',
+    async () => {
+      const p = await open(ADMIN);
+      await go(p, '#/collectors');
+      await allLoaded(p);
+      expect(await p.locator('main section.collectors__panel > .panel__head .panel__title').allTextContents()).toEqual(['At a glance', 'Who they are', 'Where they come from', 'What they like', 'Devices', 'Engagement', 'Over time']);
+
+      // Where they come from: A came first from instagram.com, the others before the recording or directly.
+      const origin = '[data-testid=collectors-panel-origin]';
+      expect(await p.locator(`${origin} [data-testid=collectors-origin-tabs] .range__tab`).allTextContents()).toEqual(['SOURCES', 'HOW THEY HEARD', 'LINKS', 'CAMPAIGNS', 'REFERRING SITES', 'FIRST VISITS']);
+      const sources = await bars(p, 'collectors-sources');
+      expect(sources).toEqual(expect.arrayContaining(['Referring sites 1']));
+      expect(await p.locator('[data-testid=collectors-sources] .bar[data-key="kind:SITE"] a').getAttribute('aria-label')).toBe('Open the 1 collector who first came from Referring sites');
+      await p.click(`${origin} [data-key=heard]`);
+      expect(await bars(p, 'collectors-heard')).toEqual(expect.arrayContaining(['Not answered 6']));
+      await p.click(`${origin} [data-key=links]`);
+      expect(await text(p, `${origin} .empty__text`)).toBe('No link has brought a collector in this view.');
+      await p.click(`${origin} [data-key=campaigns]`);
+      expect(await text(p, `${origin} .empty__text`)).toBe('No campaign tag in this view.');
+      await p.click(`${origin} [data-key=sites]`);
+      expect(await bars(p, 'collectors-sites')).toEqual(expect.arrayContaining(['instagram.com 1', 'Other sites 0']));
+      expect(await p.locator('[data-testid=collectors-sites] .bar[data-key="site:instagram.com"] a').getAttribute('href')).toContain('slice=referrer%3Ainstagram.com');
+      await p.click(`${origin} [data-key=visits]`);
+      expect(await p.locator(`${origin} [data-testid=collectors-first-visits-chart] .collectors__col`).count()).toBe(30);
+      expect(await text(p, `${origin} [data-testid=collectors-became]`)).toMatch(/^\d+ first visits? became collectors \(\d+%\)\.$/);
+
+      // What they like: the Wishlists figures, then each tab; a most wished model's row opens who wishes for it.
+      const likes = '[data-testid=collectors-panel-likes]';
+      expect(await p.locator(`${likes} [data-testid=collectors-wishlists] .kpi__value`).allTextContents()).toEqual(['2', '2', '0']);
+      expect(await p.locator(`${likes} [data-testid=collectors-wishlists] a`).getAttribute('aria-label')).toBe('Open the 2 collectors with a wishlist');
+      expect(await p.locator(`${likes} [data-testid=collectors-likes-tabs] .range__tab`).allTextContents()).toEqual(['FAVOURITE PIECES', 'FINISHES', 'MOST WISHED', 'MOST VIEWED', 'PIECES HELD']);
+      expect(await rowsOf(p, likes)).toEqual(['1 | MONOLITHE · Silver (hidden) | RING | ORBITAL | 2 | 2 | +2', ' | MONOLITHE · Blue (hidden) | RING | ORBITAL | 1 | 1 | +1']);
+      const wished = p.locator(`${likes} tbody tr`).first().locator('a');
+      expect(await wished.getAttribute('aria-label')).toBe('Open the 2 collectors who wish for MONOLITHE · Silver');
+      expect(decodeURIComponent((await wished.getAttribute('href'))!)).toContain(`slice=wishmodel:${models.mono}`);
+      expect(await p.locator(`${likes} .growth__line`).allTextContents()).toEqual(['Each row opens the collectors who wish for it.', 'No count is shown on the model’s sheet.']);
+      await p.click(`${likes} [data-testid=collectors-wished-side] [data-key=collections]`);
+      expect(await rowsOf(p, likes)).toEqual(['ORBITAL | 2 | +2']);
+      expect(await p.locator(`${likes} tbody a`).getAttribute('aria-label')).toBe('Open the 2 collectors who wish for a model of ORBITAL');
+      await p.click(`${likes} [data-testid=collectors-likes-tabs] [data-key=pieces]`);
+      expect(await rowsOf(p, likes)).toEqual(['Ring (no longer in the collection) | 2 | 2 | +2', 'None chosen | 4 |  | ']);
+      await p.click(`${likes} [data-testid=collectors-likes-tabs] [data-key=finishes]`);
+      expect(await rowsOf(p, likes)).toEqual(['Blue (no longer in the collection) | 1 | 1 | +1', 'None chosen | 5 |  | ']);
+      await p.click(`${likes} [data-testid=collectors-likes-tabs] [data-key=viewed]`);
+      expect(await rowsOf(p, likes)).toEqual(['MONOLITHE · Silver | 2 | 4 | 2 min | Fewer than 3 collectors', 'MONOLITHE · Blue | 2 | 2 | 40 s | Fewer than 3 collectors']);
+      await p.click(`${likes} [data-testid=collectors-viewed-who] [data-key=visitors]`);
+      // Every visitor's figures come from the daily totals, not counted yet for these days.
+      expect(await text(p, `${likes} .empty__text`)).toBe('No model looked at in this period.');
+      await p.click(`${likes} [data-testid=collectors-likes-tabs] [data-key=held]`);
+      expect(await rowsOf(p, likes)).toEqual(['MONOLITHE · Silver | 1 | 1', 'MONOLITHE · Blue | 1 | 1']);
+
+      // Devices: each collector under the device used most; only BY COLLECTORS opens collectors.
+      const devices = '[data-testid=collectors-panel-devices]';
+      expect(await bars(p, 'collectors-devices-device')).toEqual(['Phone 1', 'Tablet 0', 'Computer 1']);
+      expect(await p.locator('[data-testid=collectors-devices-system] .bar[data-key=IOS] a').getAttribute('aria-label')).toBe('Open the 1 collector whose main system is iPhone');
+      expect(await bars(p, 'collectors-devices-browsers')).toEqual(['Chrome 1', 'Safari 1']);
+      await p.click(`${devices} [data-key=byVisits]`);
+      expect(await p.locator(`${devices} [data-testid=collectors-devices-device] a`).count()).toBe(0);
+      await p.click(`${devices} [data-key=allDevices]`);
+      expect(await p.locator(`${devices} .collectors__tab-body .growth__line`).first().textContent()).toBe('Every device seen, anonymous included: only the country filter applies.');
+
+      // Engagement: the spread of this morning's scores, the five parts, active and dormant, the cohorts.
+      expect(await bars(p, 'collectors-spread')).toEqual(['0–9 0', '10–19 0', '20–29 0', '30–39 0', '40–49 1', '50–59 1', '60–69 0', '70–79 1', '80–89 0', '90–100 0', 'Not measured 3']);
+      expect(await p.locator('[data-testid=collectors-spread] .bar[data-key="70-79"] a').getAttribute('aria-label')).toBe('Open the 1 collector with a score of 70–79');
+      expect(await p.locator('[data-testid=collectors-parts] li').allTextContents()).toEqual(['Recency 25.0 / 25', 'Frequency 18.3 / 20', 'Spend 11.3 / 25', 'Release speed 0.7 / 10', 'Attendance 0.0 / 20']);
+      expect(await p.locator('[data-testid=collectors-parts] a').first().getAttribute('aria-label')).toBe('Open the 3 collectors behind the average of Recency');
+      expect(await bars(p, 'collectors-status')).toEqual(['Active 2', 'Dormant 0', 'Never active since sign-up 4']);
+      expect(await p.locator('[data-testid=collectors-panel-engagement] tbody tr').count()).toBe(12);
+
+      // Over time: the figure and the split, every point in the table a link.
+      const trends = '[data-testid=collectors-panel-trends]';
+      expect(await p.locator(`${trends} [data-testid=collectors-trend-chart] polyline`).count()).toBeGreaterThan(0);
+      expect(await p.locator(`${trends} tbody tr`).count()).toBe(30);
+      expect(await p.locator(`${trends} tbody tr`).last().locator('td').nth(1).textContent()).toBe('6');
+      await p.locator(`${trends} [data-testid=collectors-trend-split]`).selectOption('country');
+      await loaded(p, 'trends');
+      await expect.poll(async () => (await p.locator(`${trends} [data-testid=collectors-trend-legend] li`).allTextContents()).sort()).toEqual(['FR · France', 'GB · United Kingdom', 'IT · Italy', 'Not given']);
+      expect(await p.locator(`${trends} [data-testid=collectors-trend-legend] li`).first().textContent()).toBe('FR · France');
+      const fr = p.locator(`${trends} tbody tr`).last().locator('td').nth(2).locator('a');
+      expect(await fr.getAttribute('aria-label')).toMatch(/^Open the 3 collectors behind collectors in \d{2} [A-Z]{3} \d{4}, FR · France$/);
+      expect(decodeURIComponent((await fr.getAttribute('href'))!)).toMatch(/slice=bucket:trend:collectors:\d{4}-\d{2}-\d{2}:FR&figure=collectors&split=country$/);
+      await p.locator(`${trends} [data-testid=collectors-trend-figure]`).selectOption('medianscore');
+      await loaded(p, 'trends');
+      await expect.poll(() => p.locator(`${trends} thead th`).first().textContent()).toBe('Period');
+      await shot(p, 'panels');
+      await p.context().close();
+
+      const phone = await open(ADMIN, 375);
+      await go(phone, '#/collectors');
+      await allLoaded(phone);
+      for (const tab of ['links', 'campaigns', 'visits']) {
+        await phone.click(`${origin} [data-key=${tab}]`);
+        await fits(phone);
+      }
+      await phone.click(`${likes} [data-testid=collectors-likes-tabs] [data-key=viewed]`);
+      await fits(phone);
+      await shot(phone, 'panels-phone');
+      await phone.context().close();
     },
     STEP_TIMEOUT,
   );

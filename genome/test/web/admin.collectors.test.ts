@@ -271,3 +271,96 @@ describe('every figure opens its collectors (§3.6 C.6.5)', () => {
     expect(whoWhat('conncity', '12', 'Lyon')).toBe('connecting from Lyon');
   });
 });
+
+// ── Step 9.10: the panels' words and the slices their figures open ───────────────────────────────────────────────
+
+import {
+  becameWords,
+  bucketWords,
+  cohortWords,
+  differWords,
+  groupWords,
+  monthWords,
+  partWords,
+  sourceBarLabel,
+  SYSTEM_LABELS,
+  SYSTEM_ORDER,
+  trendSlice,
+  TREND_FIGURE_LABELS,
+  TREND_SPLIT_LABELS,
+} from '../../src/web/admin/model/collectors.js';
+
+describe('the panels’ words (§3.6 C.6.3, step 9.10)', () => {
+  it('says the first visits, the first and last sources, the parts and the cohorts', () => {
+    expect(becameWords(12, 150)).toBe('12 first visits became collectors (8%).');
+    expect(becameWords(0, 1)).toBe('0 first visit became collectors (0%).');
+    expect(differWords({ collectors: 12, differ: 3 })).toBe('3 of the 12 collectors who signed up in the period came last through another source than their first (25%).');
+    expect(sourceBarLabel({ kind: 'LINK', channel: { name: 'Instagram' } })).toBe('Instagram');
+    expect(sourceBarLabel({ kind: 'BEFORE', channel: null })).toBe('Before tracking');
+    expect(bucketWords({ from: '2026-09-07', to: '2026-09-13' })).toBe('07 SEP to 13 SEP 2026');
+    expect(partWords(12.44, 25)).toBe('12.4 / 25');
+    expect(partWords(null, 25)).toBe('Fewer than 3 collectors');
+    expect(cohortWords({ active: 5, share: 42 })).toBe('42% · 5');
+    expect(cohortWords({ active: null, share: null })).toBe('—');
+    expect(monthWords('2026-03')).toBe('March 2026');
+    expect(monthWords('2026-03-01')).toBe('March 2026');
+  });
+
+  it('names every figure and split of Over time, and their groups', () => {
+    expect(TREND_FIGURES.map((f) => TREND_FIGURE_LABELS[f])).toEqual(['Collectors', 'New collectors', 'First visits', 'Active collectors', 'Median score', 'Wishes added', 'Views of models', 'Buyers']);
+    expect(TREND_SPLITS.map((s) => TREND_SPLIT_LABELS[s])).toEqual(['Nothing', 'Country', 'Source', 'Tier', 'Age', 'Device']);
+    expect(groupWords('country', 'FR', OPTIONS)).toBe('FR · France');
+    expect(groupWords('source', `channel:${OPTIONS.channels[0]!.id}`, OPTIONS)).toBe('Instagram');
+    expect(groupWords('source', 'kind:DIRECT', OPTIONS)).toBe('Direct');
+    expect(groupWords('tier', '2', OPTIONS)).toBe('PLATINE');
+    expect(groupWords('age', '65plus', OPTIONS)).toBe('65 and over');
+    expect(groupWords('device', 'PHONE', OPTIONS)).toBe('Phone');
+    expect(groupWords('device', 'unknown', OPTIONS)).toBe('No view recorded');
+    expect(groupWords('age', 'other', OPTIONS)).toBe('Other');
+    expect(groupWords('age', 'visitor', OPTIONS)).toBe('No collector');
+    expect(SYSTEM_ORDER.map((k) => SYSTEM_LABELS[k])).toEqual(['iPhone', 'iPad', 'Android', 'Mac', 'Windows', 'ChromeOS', 'Linux', 'Other']);
+  });
+
+  it('opens slices the server reads, a trend point’s group never on the previous line', () => {
+    expect(trendSlice('active', '2026-W37')).toBe('bucket:trend:active:2026-W37');
+    expect(trendSlice('active', '2026-W37', { group: 'FR' })).toBe('bucket:trend:active:2026-W37:FR');
+    expect(trendSlice('active', '2026-W37', { previous: true, group: 'FR' })).toBe('bucket:trend:active:prev:2026-W37');
+    expect(trendSlice('active', '2026-09', { group: 'all' })).toBe('bucket:trend:active:2026-09');
+    const id = OPTIONS.channels[0]!.id;
+    for (const slice of [
+      trendSlice('buyers', '2026-09-14', { group: 'kind:SITE' }),
+      trendSlice('new', '2026-09', { previous: true }),
+      `source:channel:${id}`,
+      'source:kind:BEFORE',
+      'heard:none',
+      'heardother',
+      `link1:${id}`,
+      `link2:${id}`,
+      'campaign:none',
+      'referrer:instagram.com',
+      'referrer:none',
+      'bucket:firstvisit:2026-09-14',
+      'bucket:signup:prev:2026-W37',
+      'favpiece:RING',
+      'favfinish:none',
+      'haswish',
+      `wishmodel:${id}`,
+      `wishcollection:${id}`,
+      `viewed:${id}`,
+      `viewed:r:${id}`,
+      `holds:${id}`,
+      'device:PHONE',
+      'system:IPAD',
+      'openedin:IN_APP',
+      'app:INSTAGRAM',
+      'score:90-100',
+      'score:none',
+      'part:spend',
+      'status:never',
+      'cohort:2026-03:all',
+      'cohort:2026-03:3:active',
+    ]) {
+      expect(() => parseSlice(slice), slice).not.toThrow();
+    }
+  });
+});

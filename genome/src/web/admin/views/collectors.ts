@@ -32,6 +32,10 @@ import {
   collectorsHref,
   collectorsParams,
   COLLECTORS_PAGE_COPY as C,
+  DEVICES_COPY,
+  ENGAGEMENT_PANEL_COPY,
+  ORIGIN_COPY,
+  TRENDS_COPY,
   compareWords,
   CONTROLS_COPY as K,
   countryRowLabel,
@@ -64,114 +68,13 @@ import {
   type CompareWords,
   type Reader,
 } from '../model/collectors.js';
+import { LIKES_COPY } from '../model/likes.js';
 import { parisDay } from '../model/links.js';
 import { COLLECTOR_PERIODS, COLLECTOR_SCOPES, type CollectorBar, type CollectorCityBar, type CollectorPanel, type CollectorsOptions, type CollectorsReport, type CollectorsQuery } from '../types.js';
 import { button, checkbox, emptyState, field, input, pageHeader } from '../ui/components.js';
+import { devicesPanel, engagementPanel, likesPanel, originPanel, trendsPanel } from './collectors-panels.js';
+import { compareBlock, figureLink, noMatch, nodes, panelBars, panelLine, panelTabs, type PanelBar, type PanelCtx } from './collectors-parts.js';
 import type { ViewContext } from './context.js';
-
-// ── Pieces shared by the panels ──────────────────────────────────────────────────────────────────────────────────
-
-/** A figure: a link to its collectors (with its `aria-label`), or its text when it opens nothing. */
-export function figureLink(text: string, link: string | null, label: string, cls = 'idlink'): HTMLElement {
-  return link
-    ? h('a', { class: [cls, 'collectors__figure'], attrs: { href: link, 'aria-label': label, 'data-testid': 'collectors-figure' } }, text)
-    : h('span', { class: 'collectors__figure' }, text);
-}
-
-/** A comparison under a figure: its change, then the previous value in small type. */
-export function compareBlock(c: CompareWords | null): HTMLElement | null {
-  if (!c) return null;
-  return h('span', { class: 'collectors__cmp' }, h('span', { class: 'collectors__change' }, c.change), c.before ? h('span', { class: 'collectors__before' }, c.before) : null);
-}
-
-/** A bar of a panel: its label, its count (the share of `total` beside it), its comparison, and the link to its collectors. */
-export interface PanelBar {
-  key: string;
-  label: string;
-  n: number;
-  compare: CompareWords | null;
-  link: string | null;
-  aria: string;
-  /** A swatch before the label (a finish). */
-  swatch?: string | null;
-}
-
-/** Hairline bars with their counts, shares and comparisons (the stylesheet's `.bars`, a comparison column added). */
-export function panelBars(rows: PanelBar[], total: number, testid: string): HTMLElement {
-  const max = Math.max(0, ...rows.map((r) => r.n));
-  const withCompare = rows.some((r) => r.compare !== null);
-  return h(
-    'ul',
-    { class: ['bars', 'collectors__bars', withCompare ? 'collectors__bars--cmp' : null], data: { testid } },
-    ...rows.map((r) => {
-      const fill = h('span', { class: ['bar__fill', 'bar__fill--solid'] });
-      // CSSOM custom property (CSP-safe): the stylesheet scales the fill with it.
-      fill.style.setProperty('--f', String(max > 0 ? r.n / max : 0));
-      const label: Child[] = [r.swatch ? swatch(r.swatch) : null, r.label];
-      return h(
-        'li',
-        { class: ['bar', r.n === 0 ? 'bar--zero' : null], data: { key: r.key } },
-        r.link ? h('a', { class: 'bar__label', attrs: { href: r.link, 'aria-label': r.aria, title: r.label, 'data-testid': 'collectors-figure' } }, ...label) : h('span', { class: 'bar__label', attrs: { title: r.label } }, ...label),
-        h('span', { class: 'bar__track', attrs: { 'aria-hidden': 'true' } }, fill),
-        h('span', { class: 'bar__value' }, formatCount(r.n)),
-        h('span', { class: 'bar__share' }, shareOf(r.n, total)),
-        withCompare ? (compareBlock(r.compare) ?? h('span', { class: 'collectors__cmp' })) : null,
-      );
-    }),
-  );
-}
-
-/** A finish's colour dot (the CSSOM sets its colour: CSP-safe). */
-export function swatch(color: string): HTMLElement {
-  const dot = h('span', { class: 'collectors__swatch', attrs: { 'aria-hidden': 'true' } });
-  if (/^#[0-9a-f]{3,8}$/i.test(color)) dot.style.setProperty('--swatch', color);
-  return dot;
-}
-
-/** Tabs inside a panel: buttons that switch what the panel shows, the current one underlined (`.range`). */
-export function panelTabs<T extends string>(label: string, items: readonly { key: T; text: string }[], current: T, pick: (key: T) => void, testid: string): HTMLElement {
-  return h(
-    'div',
-    { class: ['range', 'collectors__tabs'], attrs: { role: 'tablist', 'aria-label': label }, data: { testid } },
-    ...items.flatMap((t, i) => {
-      const b = h('button', { class: 'range__tab', attrs: { type: 'button', role: 'tab', 'aria-selected': t.key === current ? 'true' : 'false', 'data-key': t.key } }, t.text);
-      b.addEventListener('click', () => pick(t.key));
-      return [i > 0 ? h('span', { class: 'range__dot', attrs: { 'aria-hidden': 'true' } }) : null, b];
-    }),
-  );
-}
-
-/** The children worth appending: nothing for null, a number as its text. */
-export function nodes(children: Child[]): (Node | string)[] {
-  return children.filter((x): x is Node | string | number => x !== null && x !== undefined && x !== false).map((x) => (typeof x === 'number' ? String(x) : x));
-}
-
-/** A line of the panel, in small type. */
-export function panelLine(text: string | null, testid?: string): HTMLElement | null {
-  return text ? h('p', { class: 'growth__line', data: { testid } }, text) : null;
-}
-
-/** What a panel's drawing is given. */
-export interface PanelCtx {
-  ctx: ViewContext;
-  p: CollectorsParams;
-  options: CollectorsOptions | null;
-  reader: Reader;
-  /** Read the panel again (its own choices, e.g. Over time's figure, or the currency). */
-  reload: (extra?: Pick<CollectorsQuery, 'figure' | 'split' | 'currency'>) => void;
-  /** Clear filters (the empty state's button). */
-  clear: () => void;
-}
-
-/** 'No collector matches these filters.', with Clear filters when one is set. */
-export function noMatch(pc: PanelCtx): HTMLElement {
-  return h(
-    'div',
-    { class: 'collectors__empty', data: { testid: 'collectors-no-match' } },
-    emptyState(PANEL_COPY.noMatch),
-    filterCount(pc.p) > 0 ? button(K.clear, { kind: 'secondary', onClick: pc.clear }) : null,
-  );
-}
 
 // ── At a glance ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -321,10 +224,15 @@ function barOf(pc: PanelCtx, r: CollectorsReport, dim: 'age' | 'country' | 'conn
 
 type Drawer = (pc: PanelCtx, r: CollectorsReport) => Child[];
 
-/** The panels drawn so far, top to bottom (§3.6 C.6.3), with their titles; the others come with step 9.10. */
+/** The panels, top to bottom (§3.6 C.6.3), with their titles. */
 export const PANELS: readonly { panel: CollectorPanel; title: string; draw: Drawer }[] = [
   { panel: 'overview', title: OVERVIEW_COPY.title, draw: (pc, r) => overviewPanel(pc, r as Extract<CollectorsReport, { panel: 'overview' }>) },
   { panel: 'who', title: WHO_COPY.title, draw: (pc, r) => whoPanel(pc, r as Extract<CollectorsReport, { panel: 'who' }>) },
+  { panel: 'origin', title: ORIGIN_COPY.title, draw: (pc, r) => originPanel(pc, r as Extract<CollectorsReport, { panel: 'origin' }>) },
+  { panel: 'likes', title: LIKES_COPY.title, draw: (pc, r) => likesPanel(pc, r as Extract<CollectorsReport, { panel: 'likes' }>) },
+  { panel: 'devices', title: DEVICES_COPY.title, draw: (pc, r) => devicesPanel(pc, r as Extract<CollectorsReport, { panel: 'devices' }>) },
+  { panel: 'engagement', title: ENGAGEMENT_PANEL_COPY.title, draw: (pc, r) => engagementPanel(pc, r as Extract<CollectorsReport, { panel: 'engagement' }>) },
+  { panel: 'trends', title: TRENDS_COPY.title, draw: (pc, r) => trendsPanel(pc, r as Extract<CollectorsReport, { panel: 'trends' }>) },
 ];
 
 /** At most `n` readings at once from the page (the server's load guard reads two at a time). */

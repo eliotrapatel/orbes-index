@@ -6283,3 +6283,130 @@ a.collectors__kpi-link:focus-visible {
     padding: 4px 0 8px;
   }
 }
+
+/* The Collectors page's panels after Who they are (step 9.10): FIRST VISITS' columns, the device lists side by side
+   (stacked under 860 px), THE FIVE PARTS, Over time's line (a dash per group, the previous period pale) and its key. */
+
+.collectors__kpis--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.collectors__ghost {
+  opacity: 0.45;
+}
+
+.collectors__cols {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 140px;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+
+.collectors__col {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  flex: 1 1 0;
+  height: 100%;
+}
+
+.collectors__col-fill {
+  --f: 0;
+  flex: 1 1 0;
+  height: calc(var(--f) * 100%);
+  background: var(--ink);
+}
+
+.collectors__col-fill--second {
+  background: var(--ink-soft);
+}
+
+.collectors__col-fill--before {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--hairline-strong);
+  opacity: 0.6;
+}
+
+.collectors__lists {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0 28px;
+}
+
+.collectors__lists .bar {
+  --bar-label: 110px;
+}
+
+.collectors__parts {
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.collectors__switches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 32px;
+}
+
+.collectors__select {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.collectors__trend-plot {
+  height: 200px;
+}
+
+.collectors__line--1 { stroke-dasharray: 6 4; }
+.collectors__line--2 { stroke-dasharray: 2 3; }
+.collectors__line--3 { stroke-dasharray: 10 3 2 3; }
+.collectors__line--4 { stroke: var(--ink-soft); }
+.collectors__line--5 { stroke: var(--ink-soft); stroke-dasharray: 6 4; }
+.collectors__line--6 { stroke: var(--metal); }
+
+.collectors__line--before {
+  stroke: var(--metal);
+  opacity: 0.6;
+}
+
+.collectors__legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+}
+
+.collectors__key::before {
+  content: "";
+  display: inline-block;
+  width: 22px;
+  margin: 0 8px 3px 0;
+  border-top: 2px solid var(--ink);
+}
+
+.collectors__key--1::before { border-top-style: dashed; }
+.collectors__key--2::before { border-top-style: dotted; }
+.collectors__key--3::before { border-top-style: dashed; border-top-width: 1px; }
+.collectors__key--4::before { border-top-color: var(--ink-soft); }
+.collectors__key--5::before { border-top-color: var(--ink-soft); border-top-style: dashed; }
+.collectors__key--6::before { border-top-color: var(--metal); }
+
+@media (max-width: 860px) {
+  .collectors__lists {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .collectors__kpis--three .kpi:nth-child(3) {
+    padding-left: 0;
+    border-left: 0;
+  }
+}

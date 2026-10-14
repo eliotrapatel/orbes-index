@@ -481,3 +481,189 @@ export function recordingNote(recordingSince: string | null, period: { from: str
 export function currencyChoices(currencies: readonly HouseCurrency[]): { value: string; label: string }[] {
   return currencies.map((c) => ({ value: c, label: c }));
 }
+
+// ── Where they come from (`origin`, step 9.10) ───────────────────────────────────────────────────────────────────
+
+export const ORIGIN_COPY = Object.freeze({
+  title: 'Where they come from',
+  tabs: Object.freeze({ sources: 'SOURCES', heard: 'HOW THEY HEARD', links: 'LINKS', campaigns: 'CAMPAIGNS', sites: 'REFERRING SITES', visits: 'FIRST VISITS' }),
+  notAnswered: 'Not answered',
+  setAside: '(set aside)',
+  otherWords: 'Other: opens the words they gave',
+  archived: '(archived)',
+  noCampaign: '(no campaign)',
+  noSource: '(no source)',
+  otherSites: 'Other sites',
+  noSite: 'None (typed or shared)',
+  currency: 'Currency',
+  columns: Object.freeze({
+    link: 'Link',
+    channel: 'Channel',
+    first: 'First link',
+    last: 'Last link',
+    collectors: 'Collectors',
+    buyers: 'Buyers',
+    revenue: 'Revenue',
+    cost: 'Cost',
+    campaign: 'Campaign',
+    firstVisits: 'First visits',
+    bucket: 'Period',
+    newCollectors: 'New collectors',
+    became: 'Became collectors',
+    before: 'Before',
+  }),
+  linksNote: 'By collectors. Visits, entries and the return on cost are on each link’s page in Links.',
+  noLink: 'No link has brought a collector in this view.',
+  noCampaignYet: 'No campaign tag in this view.',
+  noSiteYet: 'No referring site in this view.',
+  noVisit: 'No first visit in this period.',
+});
+
+/** FIRST VISITS' line: `12 first visits became collectors (8%).` */
+export function becameWords(became: number, visits: number): string {
+  return `${formatCount(became)} first ${visits === 1 ? 'visit' : 'visits'} became collectors (${shareOf(became, visits)}).`;
+}
+
+/** First and last link (§3.4 A.10.6): `3 of the 12 collectors who signed up in the period came last through another source than their first (25%).` */
+export function differWords(f: { collectors: number; differ: number }): string {
+  return `${formatCount(f.differ)} of the ${collectorsWords(f.collectors)} who signed up in the period came last through another source than their first (${shareOf(f.differ, f.collectors)}).`;
+}
+
+/** A first source's name: its channel, or its kind. */
+export function sourceBarLabel(b: { kind: string; channel: { name: string } | null }): string {
+  return b.channel ? b.channel.name : (SOURCE_KIND_LABELS[b.kind as CollectorSourceKind] ?? b.kind);
+}
+
+/** A bucket of a chart: one day, or its first and last days. */
+export function bucketWords(b: { from: string; to: string }): string {
+  return rangeWords(b.from, b.to);
+}
+
+// ── What they like (`likes`), devices, engagement (step 9.10) ────────────────────────────────────────────────────
+
+/** Devices' words (§3.6 C.6.3 item 5). */
+export const DEVICES_COPY = Object.freeze({
+  title: 'Devices',
+  switch: Object.freeze({ byCollectors: 'BY COLLECTORS', byVisits: 'BY VISITS', allDevices: 'ALL DEVICES' }),
+  device: 'DEVICE',
+  system: 'SYSTEM',
+  openedIn: 'OPENED IN',
+  apps: 'INSIDE AN APP',
+  browsers: 'BROWSERS',
+  byCollectorsNote: 'Each collector once, under the device they used most in the period.',
+  byVisitsNote: 'Every visit of these collectors.',
+  allDevicesNote: 'Every device seen, anonymous included: only the country filter applies.',
+  through: (day: string) => `Figures through ${formatDate(day)}.`,
+  nothing: 'No device seen in this period.',
+});
+export const DEVICE_LABELS: Readonly<Record<string, string>> = Object.freeze({ PHONE: 'Phone', TABLET: 'Tablet', COMPUTER: 'Computer', UNKNOWN: 'Unknown device' });
+export const SYSTEM_ORDER = ['IOS', 'IPAD', 'ANDROID', 'MACOS', 'WINDOWS', 'CHROMEOS', 'LINUX', 'OTHER'] as const;
+export const SYSTEM_LABELS: Readonly<Record<(typeof SYSTEM_ORDER)[number], string>> = Object.freeze({
+  IOS: 'iPhone',
+  IPAD: 'iPad',
+  ANDROID: 'Android',
+  MACOS: 'Mac',
+  WINDOWS: 'Windows',
+  CHROMEOS: 'ChromeOS',
+  LINUX: 'Linux',
+  OTHER: 'Other',
+});
+export const OPENED_LABELS: Readonly<Record<string, string>> = Object.freeze({ BROWSER: 'Browser', IN_APP: 'Inside an app', HOME_SCREEN: 'Home screen' });
+export const BROWSER_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  SAFARI: 'Safari',
+  CHROME: 'Chrome',
+  FIREFOX: 'Firefox',
+  EDGE: 'Edge',
+  SAMSUNG: 'Samsung Internet',
+  OPERA: 'Opera',
+  WEBVIEW: 'In-app view',
+  OTHER: 'Other',
+});
+
+/** Engagement's words (§3.6 C.6.3 item 6). */
+export const ENGAGEMENT_PANEL_COPY = Object.freeze({
+  title: 'Engagement',
+  spread: 'SCORE SPREAD',
+  parts: 'THE FIVE PARTS',
+  status: 'ACTIVE AND DORMANT',
+  cohorts: 'MONTHLY COHORTS',
+  notMeasured: 'Not measured',
+  spreadNote: (median: number | null) => `Median ${median === null ? WITHHELD.toLowerCase() : formatCount(median)} · Each morning’s score; the five parts below are averages.`,
+  previousMonth: (month: string) => `Pale: the scores kept at the end of ${monthWords(month)}.`,
+  statusLabels: Object.freeze({ active: 'Active', dormant: 'Dormant', never: 'Never active since sign-up' } as Record<string, string>),
+  statusNote: (asOf: string) => `As of ${formatDate(asOf)}: active means an act in the 90 days before.`,
+  month: 'Month of sign-up',
+  collectors: 'Collectors',
+  after: (k: number) => (k === 1 ? 'Active after 1 month' : `${k} months`),
+  notYet: '—',
+  noScore: 'No collector of this view has a score yet.',
+});
+
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+/** `2026-03` or `2026-03-01` → `March 2026`. */
+export function monthWords(month: string): string {
+  return `${MONTH_NAMES[Number(month.slice(5, 7)) - 1] ?? month.slice(5, 7)} ${month.slice(0, 4)}`;
+}
+
+/** A part's average: `12.4 / 25`, or withheld. */
+export function partWords(average: number | null, max: number): string {
+  return average === null ? WITHHELD : `${average.toFixed(1)} / ${max}`;
+}
+
+/** A cohort cell: `42% · 5`, '—' while the mark is not reached. */
+export function cohortWords(m: { active: number | null; share: number | null }): string {
+  return m.active === null || m.share === null ? ENGAGEMENT_PANEL_COPY.notYet : `${formatCount(m.share)}% · ${formatCount(m.active)}`;
+}
+
+// ── Over time (`trends`, step 9.10) ──────────────────────────────────────────────────────────────────────────────
+
+export const TRENDS_COPY = Object.freeze({
+  title: 'Over time',
+  figure: 'Figure',
+  split: 'Split by',
+  previous: 'The previous period',
+  total: 'All',
+  other: 'Other',
+  visitor: 'No collector',
+  unknownDevice: 'No view recorded',
+  bucket: 'Period',
+  noPoint: 'Nothing to draw in this period.',
+});
+export const TREND_FIGURE_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  collectors: 'Collectors',
+  new: 'New collectors',
+  firstvisits: 'First visits',
+  active: 'Active collectors',
+  medianscore: 'Median score',
+  wishes: 'Wishes added',
+  views: 'Views of models',
+  buyers: 'Buyers',
+});
+export const TREND_SPLIT_LABELS: Readonly<Record<string, string>> = Object.freeze({ none: 'Nothing', country: 'Country', source: 'Source', tier: 'Tier', age: 'Age', device: 'Device' });
+
+/** A split's group in words: a country, a first source, a tier, an age band, a device; Other; No collector. */
+export function groupWords(split: string, group: string, options: Pick<CollectorsOptions, 'channels'> | null): string {
+  if (group === 'other') return TRENDS_COPY.other;
+  if (group === 'visitor') return TRENDS_COPY.visitor;
+  switch (split) {
+    case 'country':
+      return countryRowLabel(group);
+    case 'source':
+      return sourceWords(group.startsWith('channel:') ? group.slice(8) : group, options);
+    case 'tier':
+      return TIER_LABELS[Number(group)] ?? group;
+    case 'age':
+      return AGE_LABELS[group as CollectorAgeSlice] ?? group;
+    case 'device':
+      return group === 'unknown' ? TRENDS_COPY.unknownDevice : (DEVICE_LABELS[group] ?? group);
+    default:
+      return TRENDS_COPY.total;
+  }
+}
+
+/** A trend point's slice: `bucket:trend:<figure>:[prev:]<key>[:<group>]` (a group never on the previous line). */
+export function trendSlice(figure: string, key: string, o: { previous?: boolean; group?: string | null } = {}): string {
+  const group = o.previous || !o.group || o.group === 'all' ? '' : `:${o.group}`;
+  return `bucket:trend:${figure}:${o.previous ? 'prev:' : ''}${key}${group}`;
+}
