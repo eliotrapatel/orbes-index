@@ -21,7 +21,8 @@
  *  - the export at 20,000 collectors: its body under C.7's 20 MB, within its own 60 s.
  *
  * Each figure is the best of three readings: the suite's other files run beside this one on the same runner, and their
- * load is not the code's. Every timing is printed, so the CI log keeps the measured figures.
+ * load is not the code's. Every timing is printed, so the CI log keeps the measured figures. A timing over its budget
+ * fails its case without ending it (expect.soft): the case still reads, prints and checks every other.
  */
 import { randomBytes } from 'node:crypto';
 import { Kysely, PostgresDialect, sql, CompiledQuery } from 'kysely';
@@ -106,7 +107,7 @@ describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collector
       const t = await timeBest(cold({ panel, p: '30d' }));
       const budget = PERF_BUDGETS_MS[panel as CollectorPanel];
       note(`${panel} 30d: ${t.best} ms (budget ${budget}; ${t.all.join(', ')})`);
-      expect(t.best, panel).toBeLessThan(budget);
+      expect.soft(t.best, panel).toBeLessThan(budget);
     }
   }, 600_000);
 
@@ -114,11 +115,11 @@ describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collector
     for (const figure of TREND_FIGURES) {
       const t = await timeBest(cold({ panel: 'trends', p: '30d', figure }));
       note(`trends ${figure} 30d: ${t.best} ms (${t.all.join(', ')})`);
-      expect(t.best, figure).toBeLessThan(PERF_BUDGETS_MS.trends);
+      expect.soft(t.best, figure).toBeLessThan(PERF_BUDGETS_MS.trends);
     }
     const t = await timeBest(cold({ panel: 'trends', p: '30d', figure: 'collectors', split: 'country' }));
     note(`trends collectors by country 30d: ${t.best} ms (${t.all.join(', ')})`);
-    expect(t.best).toBeLessThan(PERF_BUDGETS_MS.trends);
+    expect.soft(t.best, 'collectors by country').toBeLessThan(PERF_BUDGETS_MS.trends);
   }, 600_000);
 
   it('times the same readings over LAST 12 MONTHS, and holds the panels that fit their budget', async () => {
@@ -126,12 +127,12 @@ describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collector
       const t = await timeBest(cold({ panel, p: '12m' }), 2);
       const budget = PERF_BUDGETS_MS[panel as CollectorPanel];
       note(`${panel} 12m: ${t.best} ms (budget ${budget}${PRINTED_ONLY_12M.has(panel) ? ', printed only' : ''}; ${t.all.join(', ')})`);
-      if (!PRINTED_ONLY_12M.has(panel)) expect(t.best, `${panel} 12m`).toBeLessThan(budget);
+      if (!PRINTED_ONLY_12M.has(panel)) expect.soft(t.best, `${panel} 12m`).toBeLessThan(budget);
     }
     for (const figure of TREND_FIGURES) {
       const t = await timeBest(cold({ panel: 'trends', p: '12m', figure }), 2);
       note(`trends ${figure} 12m: ${t.best} ms (${t.all.join(', ')})`);
-      expect(t.best, `trends ${figure} 12m`).toBeLessThan(PERF_BUDGETS_MS.trends);
+      expect.soft(t.best, `trends ${figure} 12m`).toBeLessThan(PERF_BUDGETS_MS.trends);
     }
     // A reading cut by the page's own timeout (8 s) throws 503 INSIGHTS_TIMEOUT and fails this case.
   }, 600_000);
@@ -141,7 +142,7 @@ describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collector
     for (const slice of slices) {
       const t = await timeBest(() => insights.list({ p: '30d', slice }, { withCities: true }));
       note(`list ${slice.split(':')[0]}: ${t.best} ms (${t.all.join(', ')})`);
-      expect(t.best, slice).toBeLessThan(PERF_BUDGETS_MS.list);
+      expect.soft(t.best, slice).toBeLessThan(PERF_BUDGETS_MS.list);
     }
   }, 300_000);
 
@@ -181,7 +182,7 @@ describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collector
       const count = await timeBest(() => segments.count(criteria));
       const members = (await segments.count(criteria)).count;
       note(`segment ${match}: count ${count.best} ms (${members} members; ${count.all.join(', ')})`);
-      expect(count.best, `count ${match}`).toBeLessThan(PERF_BUDGETS_MS.segmentCount);
+      expect.soft(count.best, `count ${match}`).toBeLessThan(PERF_BUDGETS_MS.segmentCount);
       // The house's collector matches each of the 15 rules: under ALL it reads every one of them.
       expect(members, `members ${match}`).toBeGreaterThan(0);
       // Under ANY, accounts of the house that match none of the rules: each reads every one of the 15.
@@ -211,7 +212,7 @@ describe.skipIf(!adminUrl)('the Collectors page and Segments at 20,000 collector
       }
       times.sort((a, b) => a - b);
       note(`segment ${match}: isSegmentMember median ${times[Math.floor(times.length / 2)]} ms, slowest ${times[times.length - 1]} ms over ${times.length} accounts (${outsiders} not members)`);
-      for (const t of times) expect(t, `isSegmentMember ${match}`).toBeLessThan(PERF_BUDGETS_MS.isSegmentMember);
+      for (const t of times) expect.soft(t, `isSegmentMember ${match}`).toBeLessThan(PERF_BUDGETS_MS.isSegmentMember);
     }
   }, 300_000);
 

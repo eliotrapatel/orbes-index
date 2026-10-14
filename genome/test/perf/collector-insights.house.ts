@@ -595,12 +595,29 @@ export interface LoggedQuery {
   parameters: readonly unknown[];
 }
 
-/** The nodes of an EXPLAIN (FORMAT JSON) plan that read `relation`: their node type and index. */
+/**
+ * The nodes of an EXPLAIN (FORMAT JSON) plan that read `relation`: their node type and index. A Bitmap Heap Scan names
+ * no index itself: its index is the one its Bitmap Index Scan reads (the first, under a BitmapAnd or BitmapOr).
+ */
 export function scansOf(plan: unknown, relation: string): { type: string; index: string | null }[] {
   const out: { type: string; index: string | null }[] = [];
+  const childrenOf = (node: Record<string, unknown>) => (node.Plans as Record<string, unknown>[] | undefined) ?? [];
+  const bitmapIndex = (node: Record<string, unknown>): string | null => {
+    for (const child of childrenOf(node)) {
+      if (child['Node Type'] === 'Bitmap Index Scan') return (child['Index Name'] as string | undefined) ?? null;
+      if (child['Node Type'] === 'BitmapAnd' || child['Node Type'] === 'BitmapOr') {
+        const index = bitmapIndex(child);
+        if (index) return index;
+      }
+    }
+    return null;
+  };
   const walk = (node: Record<string, unknown>) => {
-    if (node['Relation Name'] === relation) out.push({ type: String(node['Node Type']), index: (node['Index Name'] as string | undefined) ?? null });
-    for (const child of (node.Plans as Record<string, unknown>[] | undefined) ?? []) walk(child);
+    if (node['Relation Name'] === relation) {
+      const type = String(node['Node Type']);
+      out.push({ type, index: (node['Index Name'] as string | undefined) ?? (type === 'Bitmap Heap Scan' ? bitmapIndex(node) : null) });
+    }
+    for (const child of childrenOf(node)) walk(child);
   };
   const root = Array.isArray(plan) ? (plan[0] as { Plan: Record<string, unknown> }).Plan : (plan as { Plan: Record<string, unknown> }).Plan;
   walk(root);
