@@ -19,7 +19,8 @@
  *    connection, within the 395 days), ORIGIN (the first source; the last link before the sign-up, a purchase or
  *    either; an archived link still matching; the reports' fallbacks), ENGAGEMENT (step 8.5: the score of the latest
  *    run within two bounds; a SCORE rule added to a segment a release uses, question 15). A test entrant matches none
- *    but through a NOT. The builder's lists for them (step 8.6, §3.6 C.5.2), each bounded.
+ *    but through a NOT (or a staff tag), and the console's count and CSV never read it under these criteria either
+ *    (production's SF-B). The builder's lists for them (step 8.6, §3.6 C.5.2), each bounded.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -976,6 +977,49 @@ describe('the customer intelligence criteria (plan CUSTOMER INTELLIGENCE §3.0 (
     expect(again.updatedAt).toEqual(s.updatedAt);
     expect((await t.db.selectFrom('audit_logs').select('action').where('target_id', '=', s.id).execute()).map((a) => a.action)).toEqual(['segment.create']);
     expect(again.count).toBe(s.count);
+  });
+
+  it('never counts nor lists the test entrant under the lot\'s criteria in the console (production\'s SF-B): out of the count, the live count and the CSV; where the segment decides, a NOT and a staff tag still match it', async () => {
+    const now = f.clock.now();
+    const members = async (criteria: SegmentGroup) => (await segmentMembers(t.db, criteria, now).select('a.id').execute()).map((r) => r.id);
+    const emailOf = async (id: string) => (await t.db.selectFrom('accounts').select('email').where('id', '=', id).executeTakeFirstOrThrow()).email;
+    // Negated, a rule of each new group matches the test entrant where a segment decides (no profile, wish, view, source
+    // nor score); the builder's live count reads every one of those members but it.
+    for (const rule of [
+      { kind: 'CITY', cities: ['Lyon'], not: true },
+      { kind: 'WISHES_MODEL', modelIds: [m.main], not: true },
+      { kind: 'VIEWED_MODEL', modelIds: [m.main], min: 1, days: 395, not: true },
+      { kind: 'FIRST_SOURCE', kinds: ['DIRECT'], not: true },
+      { kind: 'SCORE', min: 60, max: 100, not: true },
+    ]) {
+      const ids = await members(all(rule));
+      expect(ids, rule.kind).toContain(p.entrant);
+      expect(await segments.count({ match: 'ALL', rules: [rule] }), rule.kind).toEqual({ count: ids.length - 1 });
+    }
+    // A tag the staff gave the test entrant and the fourth: TAGGED matches both where it decides; the console reads the
+    // fourth alone, in each count and in the CSV.
+    await t.db
+      .insertInto('account_tags')
+      .values([p.entrant, p.four].map((id) => ({ account_id: id, tag: 'FILM', created_by: f.admin.id })))
+      .execute();
+    const s = await segments.create({ name: 'Film', criteria: { match: 'ALL', rules: [{ kind: 'TAGGED', tags: ['FILM'] }] } }, f.admin);
+    try {
+      expect(await matched(all({ kind: 'TAGGED', tags: ['FILM'] }))).toEqual(['entrant', 'four']);
+      expect(s.count).toBe(1);
+      expect((await segments.get(s.id)).count).toBe(1);
+      expect((await segments.list()).find((x) => x.id === s.id)!.count).toBe(1);
+      expect(await segments.count({ match: 'ALL', rules: [{ kind: 'TAGGED', tags: ['FILM'] }] })).toEqual({ count: 1 });
+      const lines = (await segments.csv(s.id, { email: (e) => e })).body.trim().split('\r\n');
+      expect(lines).toHaveLength(2);
+      expect(lines[1]).toContain(`"${await emailOf(p.four)}"`);
+      expect(lines.join('\n')).not.toContain(await emailOf(p.entrant));
+      // A release's access rule and a post's audience read it as before: a test run still enters a release open to it.
+      expect(await isSegmentMember(t.db, s.id, p.entrant, now)).toBe(true);
+      expect(await isSegmentMember(t.db, s.id, p.four, now)).toBe(true);
+    } finally {
+      await segments.remove(s.id, f.admin);
+      await t.db.deleteFrom('account_tags').where('tag', '=', 'FILM').execute();
+    }
   });
 });
 

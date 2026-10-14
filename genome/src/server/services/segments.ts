@@ -34,8 +34,9 @@
  *              15, §3.6 C.5.4): nothing refuses it.
  *
  * A new criterion reads what a test entrant never has (a profile, a wish, a view, a source, a score): a test entrant
- * matches one only through a NOT (§3.0 (d)), as today's members rule (ACTIVE accounts, test entrants and the team's own
- * accounts included) is unchanged.
+ * matches one only through a NOT or a tag the staff gave it (§3.0 (d)), as today's members rule (ACTIVE accounts, test
+ * entrants and the team's own accounts included) is unchanged where a segment decides. The console's count and CSV
+ * leave the test accounts out under every criterion, the lot's included (below).
  *
  * A segment's `criteria` is a rule tree: a group (`match` ALL or ANY of its rules) whose rules are criteria or groups of
  * criteria (one level down: SEGMENT_LIMITS.depth); any criterion may be negated (`not`). Its members are the ACTIVE
