@@ -461,8 +461,9 @@ function builder(ctx: ViewContext, segment: Segment | null, options: SegmentOpti
       case 'FAVOURITE_FINISH':
         return [checks(tasteChoicesFor(r.kind, r.finishes, options).map((t) => ({ value: t.key, label: tasteLabel(t), swatch: t.swatch })), r.finishes, 'Favourite finishes', (xs) => (r.finishes = xs))];
       case 'VIEWED_MODEL':
+        // The models on their own line, then « N views or more · N last days » together, each figure beside its unit.
         return [
-          ...many(r.modelIds, models, 'Models', (ids) => (r.modelIds = ids)),
+          list('Models', ...many(r.modelIds, models, 'Models', (ids) => (r.modelIds = ids))),
           ...whole(r.min, 'Views, at least', 'views or more', (n) => (r.min = n)),
           ...whole(r.days, 'In the last days', 'last days', (n) => (r.days = n)),
           hint(SEGMENT_COPY.modelHint),

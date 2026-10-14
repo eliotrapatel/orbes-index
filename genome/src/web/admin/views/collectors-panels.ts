@@ -86,6 +86,7 @@ import {
   type TrendSplit,
 } from '../types.js';
 import { button, emptyState, select, table } from '../ui/components.js';
+import { figuresTitle } from './link-collectors.js';
 import { figureLink, keepFocus, noMatch, nodes, panelBars, panelLine, panelTabs, showMore, type PanelBar, type PanelCtx } from './collectors-parts.js';
 
 type R<P extends CollectorsReport['panel']> = Extract<CollectorsReport, { panel: P }>;
@@ -442,7 +443,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
         const C = L.columns;
         return [
           h('div', { class: 'collectors__switches' }, what, who),
-          ...(byCollectors ? [] : lookBlock(f.viewed.visitors.look, figure)),
+          ...(byCollectors ? [] : lookBlock(f.viewed.visitors.look, figure, f.viewed.visitors.through)),
           table(
             [
               { label: viewedWhat === 'models' ? C.model : C.release, cell: (x: Row) => h('span', { class: [x.sub ? 'cell-sub' : null] }, x.name), kind: ['wide'] },
@@ -493,7 +494,7 @@ type FigureOf = (key: string, label: string, value: Child, cmp: { change: string
  * pale (aria-hidden), and its figures in the table beside it. Every visitor counts here, anonymous ones included: no
  * figure opens a list (an anonymous visitor has no sheet, and Collectors seen takes no filter but the country).
  */
-function lookBlock(look: CollectorsLook, figure: FigureOf): Child[] {
+function lookBlock(look: CollectorsLook, figure: FigureOf, through: string | null): Child[] {
   const LK = L.look;
   const prev = look.previous;
   const figures = h(
@@ -504,10 +505,13 @@ function lookBlock(look: CollectorsLook, figure: FigureOf): Child[] {
     figure('visitors', LK.visitors, formatCount(look.visitors), prev ? compareWords(look.visitors, prev.visitors) : null, null),
     figure('collectorsSeen', LK.collectorsSeen, look.collectors === null ? '—' : formatCount(look.collectors), prev ? compareWords(look.collectors, prev.collectors) : null, seenFromWords(look.collectorsFrom)),
   );
-  const values = look.byDay.map((d) => d.views);
+  // The daily totals are written once a day has ended: a day after the last one written (today) has no figure yet, so
+  // the line stops there and the table reads « — » rather than a fall to 0 (the foot says « Figures through … »).
+  const pending = (day: string) => through !== null && day > through;
+  const values = look.byDay.map((d) => (pending(d.day) ? null : d.views));
   const before = look.previousByDay?.map((d) => d.views) ?? null;
-  if (values.every((v) => v === 0) && (before ?? []).every((v) => v === 0)) return [figures];
-  const max = Math.max(1, ...values, ...(before ?? []));
+  if (values.every((v) => !v) && (before ?? []).every((v) => v === 0)) return [figures];
+  const max = Math.max(1, ...values.map((v) => v ?? 0), ...(before ?? []));
   const svg = s(
     'svg',
     { class: 'trend__svg', viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', 'aria-hidden': 'true', focusable: 'false' },
@@ -524,7 +528,7 @@ function lookBlock(look: CollectorsLook, figure: FigureOf): Child[] {
     table(
       [
         { label: LK.period, cell: (x: LookDayRow) => when(x), kind: ['nowrap'] },
-        { label: LK.views, cell: (x) => formatCount(x.views), kind: ['num'] },
+        { label: LK.views, cell: (x) => (t.unit === 'day' && pending(x.from) ? '—' : formatCount(x.views)), kind: ['num'] },
         ...(before ? [{ label: LK.previous, cell: (x: LookDayRow) => (x.previous ? h('span', null, formatCount(x.previous.views), h('span', { class: 'cell-sub' }, ' ', when(x.previous))) : '—'), kind: ['num' as const, 'nowrap' as const] }] : []),
       ],
       t.rows,
@@ -678,13 +682,19 @@ export function engagementPanel(pc: PanelCtx, r: R<'engagement'>): Child[] {
     f.cohorts.rows,
     { caption: EP.cohorts },
   );
+  // The heads are in the display face, whose figure one is its capital I: their figures in --font, as GROWTH sets them.
+  for (const th of Array.from(cohorts.querySelectorAll('thead th'))) {
+    const words = th.textContent ?? '';
+    if (/\d/.test(words)) th.replaceChildren(figuresTitle(words));
+  }
   return [
     h('h3', { class: 'panel__subtitle' }, EP.spread),
     spread,
     panelLine(EP.spreadNote(f.spread.median)),
     f.spread.scored === 0 ? panelLine(EP.noScore) : null,
     f.scoresOn && f.scoresOn !== today ? panelLine(`${OVERVIEW_COPY.scoresOf(f.scoresOn)}.`) : null,
-    f.spread.previousMonth && r.previous ? panelLine(EP.previousMonth(f.spread.previousMonth)) : null,
+    // The pale bars' line only when one is drawn: the first deployment's back-filled months keep no score.
+    f.spread.previousMonth && r.previous && f.spread.rows.some((x) => x.key !== 'none' && (x.previous ?? 0) > 0) ? panelLine(EP.previousMonth(f.spread.previousMonth)) : null,
     h('h3', { class: 'panel__subtitle' }, EP.parts),
     h('ul', { class: 'collectors__parts', data: { testid: 'collectors-parts' } }, ...parts),
     h('h3', { class: 'panel__subtitle' }, EP.status),
@@ -742,7 +752,8 @@ export function trendsPanel(pc: PanelCtx, r: R<'trends'>): Child[] {
   const cell = (pt: CollectorTrendPoint | undefined, group: string | null, previous = false): Child => {
     if (!pt) return '—';
     const text = pt.value === null ? '—' : formatCount(pt.value);
-    if (group === 'visitor' || pt.collectors === 0) return text;
+    // « — » is no figure (a median of nobody scored): it opens nothing.
+    if (group === 'visitor' || pt.collectors === 0 || pt.value === null) return text;
     const slice = trendSlice(f.figure, pt.key, { previous, group });
     const what = `behind ${figureName.toLowerCase()} in ${bucketWords(pt)}${group && group !== 'all' ? `, ${groupWords(f.split, group, pc.options)}` : ''}`;
     return figureLink(text, listHref(p, slice, pt.collectors, { figure: f.figure, split: f.split }), openLabel(pt.collectors, what));

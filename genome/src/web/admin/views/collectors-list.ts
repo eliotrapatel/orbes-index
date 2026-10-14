@@ -19,6 +19,7 @@ import { href } from '../router.js';
 import type { CollectorsListRow, CollectorsOptions, TrendFigure, TrendSplit } from '../types.js';
 import { linkButton, pageHeader, pager, table, type Column } from '../ui/components.js';
 import type { ViewContext } from './context.js';
+import { figuresTitle } from './link-collectors.js';
 
 export async function collectorsListView(ctx: ViewContext): Promise<HTMLElement> {
   const l = listParams(ctx.route.query, ctx.now());
@@ -48,7 +49,7 @@ export async function collectorsListView(ctx: ViewContext): Promise<HTMLElement>
   return h(
     'div',
     { class: ['view', 'view--collectors-list'], data: { testid: 'collectors-list' } },
-    pageHeader({ eyebrow: K.eyebrow, title: listTitle(l, list.subject, options, end), lead: viewWords(l, options, ctx.now()), actions: [back] }),
+    pageHeader({ eyebrow: K.eyebrow, title: figuresTitle(listTitle(l, list.subject, options, end)), lead: viewWords(l, options, ctx.now()), actions: [back] }),
     h(
       'section',
       { class: 'panel' },

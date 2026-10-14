@@ -5186,6 +5186,19 @@ fieldset.cfield--checks > .cfield__label {
     margin-left: 0;
   }
 
+  /* The order's Order panel the same way: Edit, Apply credit and Remove credit on their own line under the title. */
+  #order-facts > .panel__head {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  #order-facts > .panel__head .panel__tools {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    margin-left: 0;
+  }
+
   /* The client sheet's actions (Recovery code, Lock account, Export data) wrap under the lead rather than run past it. */
   .view--owner .page-head__actions {
     flex-wrap: wrap;
@@ -6042,6 +6055,11 @@ fieldset.cfield--checks > .cfield__label {
   padding: 8px 0;
 }
 
+/* Over time's « Split by » on one line beside its select. */
+.collectors__select .collectors__pick-name {
+  white-space: nowrap;
+}
+
 .collectors__pick[open] .collectors__pick-name {
   color: var(--ink);
 }
@@ -6155,6 +6173,15 @@ a.collectors__kpi-link:focus-visible {
 
 .collectors__bars--cmp .bar {
   grid-template-columns: var(--bar-label, 190px) minmax(0, 1fr) 64px 48px 150px;
+}
+
+/* A bar's name reads whole on the Collectors page, on two lines if it must (« Never active since sign-up »), never cut. */
+.collectors__panel .bar__label {
+  padding: 4px 0;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: break-word;
+  text-overflow: clip;
 }
 
 /* A most wished row's bar, in its table cell (§3.2 W.8). */
