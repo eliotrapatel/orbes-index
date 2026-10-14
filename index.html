@@ -1019,7 +1019,7 @@ html.dust.dust-settled .open__mono { opacity: .75; }
   function place(p, rising) {
     var i = (Math.random() * (pts.length / 2) | 0) * 2;
     p.bx = pts[i] + Math.random() * 2; p.by = pts[i + 1] + Math.random() * 2;
-    if (rising) { var an = Math.random() * Math.PI * 2, r = (.35 + Math.random() * .7) * W * .5; p.x = W / 2 + Math.cos(an) * r; p.y = H * .9 + Math.random() * H * .3; p.delay = Math.random() * 1400; }
+    if (rising) { var an = Math.random() * Math.PI * 2, r = (.35 + Math.random() * .7) * W * .5; p.x = W / 2 + Math.cos(an) * r; p.y = H * .9 + Math.random() * H * .3; p.delay = Math.random() * 1000; }
     else { p.x = p.bx; p.y = p.by; p.delay = 0; }
     p.s = (Math.random() * 1.2 + .55) * d; p.a = .4 + Math.random() * .6; p.ph = Math.random() * Math.PI * 2;
     p.life = 90 + Math.random() * 160; p.age = rising ? Math.random() * 40 : 0;
@@ -1032,9 +1032,9 @@ html.dust.dust-settled .open__mono { opacity: .75; }
   function frame(now) {
     raf = 0;
     // time-based easing, so the dust gathers in the same time on any screen and under load
-    var dt = Math.min(64, Math.max(1, now - (last || now - 16.7))); last = now;
+    var dt = Math.min(250, Math.max(1, now - (last || now - 16.7))); last = now;   // real time, even when frames are sparse
     var el = now - t0, R = 46 * d, gathering = !settled, home = 0, counted = 0;
-    var kG = 1 - Math.pow(1 - .045, dt / 16.7), kS = 1 - Math.pow(1 - .08, dt / 16.7);
+    var kG = 1 - Math.pow(1 - .075, dt / 16.7), kS = 1 - Math.pow(1 - .08, dt / 16.7);
     g.clearRect(0, 0, W, H); g.fillStyle = '#f6f2ea';
     for (var i = 0; i < P.length; i++) {
       var p = P[i];
@@ -1061,8 +1061,7 @@ html.dust.dust-settled .open__mono { opacity: .75; }
     if (started || !layout()) return;
     started = true; t0 = performance.now();
     if (still) { fill(false); settle(); frame(t0 + 9000); return; }
-    fill(true); last = 0; run();
-    setTimeout(settle, 12000);   // a last resort if the dust never runs (a hidden tab from the start)
+    fill(true); last = 0; run();   // the faint monogram waits for the dust, however long it takes: no clock
   }
   // the pointer parts the dust (a finger too, while it touches)
   function at(e) { var r = c.getBoundingClientRect(); ptr.x = (e.clientX - r.left) * d; ptr.y = (e.clientY - r.top) * d; }
