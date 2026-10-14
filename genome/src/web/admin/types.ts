@@ -3979,3 +3979,363 @@ export interface LinkInput {
   cost?: { minor: number; currency: HouseCurrency } | null;
   note?: string | null;
 }
+
+// ── The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6; services/collector-insights.ts, likes.ts, tracking-reads.ts) ──
+
+/** The page's periods (insights-scope.ts PERIOD_KEYS), its scopes (SCOPES). */
+export const COLLECTOR_PERIODS = ['7d', '30d', '90d', '12m', 'custom'] as const;
+export type CollectorPeriod = (typeof COLLECTOR_PERIODS)[number];
+export const COLLECTOR_SCOPES = ['all', 'active', 'new'] as const;
+export type CollectorScope = (typeof COLLECTOR_SCOPES)[number];
+/** The panels, top to bottom (COLLECTOR_PANELS). */
+export const COLLECTOR_PANELS = ['overview', 'who', 'origin', 'likes', 'devices', 'engagement', 'trends'] as const;
+export type CollectorPanel = (typeof COLLECTOR_PANELS)[number];
+/** The kinds the Source filter offers after the link channels (SOURCE_FILTER_KINDS). */
+export const COLLECTOR_SOURCE_KINDS = ['CAMPAIGN', 'SITE', 'DIRECT', 'BEFORE', 'STAFF'] as const;
+export type CollectorSourceKind = (typeof COLLECTOR_SOURCE_KINDS)[number];
+/** The age slices in the page's order (AGE_SLICES). */
+export const COLLECTOR_AGE_SLICES = ['under18', '18-24', '25-34', '35-44', '45-54', '55-64', '65plus', 'none'] as const;
+export type CollectorAgeSlice = (typeof COLLECTOR_AGE_SLICES)[number];
+/** SCORE SPREAD's bands (SCORE_SLICES), ACTIVE AND DORMANT (ENGAGEMENT_STATUSES), MONTHLY COHORTS' marks (COHORT_MARKS). */
+export const COLLECTOR_SCORE_SLICES = ['0-9', '10-19', '20-29', '30-39', '40-49', '50-59', '60-69', '70-79', '80-89', '90-100'] as const;
+export const COLLECTOR_STATUSES = ['active', 'dormant', 'never'] as const;
+export type CollectorStatus = (typeof COLLECTOR_STATUSES)[number];
+/** Over time: the select Figure (TREND_FIGURES) and Split by (TREND_SPLITS). */
+export const TREND_FIGURES = ['collectors', 'new', 'firstvisits', 'active', 'medianscore', 'wishes', 'views', 'buyers'] as const;
+export type TrendFigure = (typeof TREND_FIGURES)[number];
+export const TREND_SPLITS = ['none', 'country', 'source', 'tier', 'age', 'device'] as const;
+export type TrendSplit = (typeof TREND_SPLITS)[number];
+/** The figures a list opens (SLICE_DIMENSIONS), a closed list. */
+export const COLLECTOR_SLICE_DIMENSIONS = [
+  'all', 'new', 'active', 'firstvisit', 'scored', 'wished', 'age', 'country', 'conncountry', 'city', 'conncity', 'source', 'heard', 'heardother', 'link1', 'link2',
+  'campaign', 'referrer', 'bucket', 'favpiece', 'favfinish', 'haswish', 'wishmodel', 'wishcollection', 'viewed', 'holds', 'device', 'system', 'openedin', 'app',
+  'score', 'part', 'status', 'cohort',
+] as const;
+export type CollectorSliceDimension = (typeof COLLECTOR_SLICE_DIMENSIONS)[number];
+export type CollectorBucketUnit = 'day' | 'week' | 'month';
+
+/** GET /api/admin/collectors/options. */
+export interface CollectorsOptions {
+  countries: string[];
+  channels: { id: string; name: string }[];
+  sourceKinds: CollectorSourceKind[];
+  tiers: number[];
+  types: { key: string; label: string }[];
+  currencies: HouseCurrency[];
+  currency: HouseCurrency;
+  recordingSince: Iso | null;
+  snapshotsSince: string | null;
+}
+
+/** A bar: its key, its collectors, its comparison (null when the comparison is off). */
+export interface CollectorBar {
+  key: string;
+  collectors: number;
+  compare: { now: number; before: number } | null;
+}
+
+export interface CollectorKpi {
+  value: number | null;
+  previous: number | null;
+}
+
+export interface CollectorsOverview {
+  collectors: CollectorKpi;
+  newCollectors: CollectorKpi;
+  firstVisits: CollectorKpi & { becameCollectors: number };
+  active: CollectorKpi;
+  medianScore: CollectorKpi & { scored: number; scoresOn: string | null };
+  wishesAdded: CollectorKpi & { collectors: number; previousCollectors: number | null };
+}
+
+export interface CollectorCityBar extends CollectorBar {
+  label: string | null;
+  country: string | null;
+}
+
+export interface CollectorsWho {
+  total: number;
+  ages: { rows: CollectorBar[]; median: number | null };
+  countries: { given: CollectorBar[]; connection: CollectorBar[] };
+  cities: { given: { rows: CollectorCityBar[]; groups: number }; connection: { rows: CollectorCityBar[]; groups: number } };
+}
+
+export interface CollectorSourceBar extends CollectorBar {
+  kind: SourceKind;
+  channel: { id: string; name: string } | null;
+}
+
+export interface CollectorHeardBar extends CollectorBar {
+  optionId: string | null;
+  label: string | null;
+  other: boolean;
+  setAside: boolean;
+}
+
+export interface CollectorLinkResult {
+  collectors: number;
+  buyers: number;
+  revenueMinor: number | null;
+}
+
+export interface CollectorLinkRow {
+  link: { id: string; name: string; code: string; archived: boolean };
+  cost: { minor: number; currency: HouseCurrency } | null;
+  first: CollectorLinkResult;
+  last: CollectorLinkResult;
+}
+
+export interface CollectorLinkChannel {
+  channel: { id: string; name: string };
+  first: CollectorLinkResult;
+  last: CollectorLinkResult;
+  links: CollectorLinkRow[];
+}
+
+export interface CollectorCampaignCounts {
+  firstVisits: number;
+  collectors: number;
+  buyers: number;
+}
+
+export interface CollectorCampaign extends CollectorCampaignCounts {
+  campaign: string | null;
+  rows: (CollectorCampaignCounts & { source: string | null; medium: string | null; sourceIds: number[] })[];
+}
+
+export interface CollectorSiteBar extends CollectorBar {
+  site: string | null;
+}
+
+export interface CollectorFirstVisitBucket {
+  key: string;
+  from: string;
+  to: string;
+  firstVisits: number;
+  newCollectors: number;
+  becameCollectors: number;
+}
+
+export interface CollectorsOrigin {
+  total: number;
+  sources: CollectorSourceBar[];
+  heard: CollectorHeardBar[];
+  links: { currency: HouseCurrency; currencies: HouseCurrency[]; channels: CollectorLinkChannel[] };
+  campaigns: { rows: CollectorCampaign[]; groups: number };
+  sites: { rows: CollectorSiteBar[]; other: CollectorSiteBar; none: CollectorSiteBar; groups: number };
+  firstVisits: {
+    unit: CollectorBucketUnit;
+    buckets: CollectorFirstVisitBucket[];
+    previous: CollectorFirstVisitBucket[] | null;
+    total: number;
+    previousTotal: number | null;
+    becameCollectors: number;
+  };
+  firstLastDiffer: { collectors: number; differ: number };
+}
+
+export type CollectorWishState = 'SHOWN' | 'HIDDEN' | 'DISCONTINUED' | 'RESERVED';
+
+export interface CollectorWishedRow {
+  modelId: string;
+  name: string;
+  variant: string | null;
+  type: string;
+  collection: string | null;
+  state: CollectorWishState;
+  wished: number;
+  added: number;
+  previous: number | null;
+}
+
+export interface CollectorTaste {
+  key: string;
+  label: string;
+  retired: boolean;
+  collectors: number;
+  chosen: number;
+  previous: number | null;
+}
+
+export interface CollectorViewedRow {
+  modelId: string;
+  name: string | null;
+  variant: string | null;
+  collectors: number | null;
+  views: number;
+  seconds: number;
+  medianSeconds: number | null;
+  visitors: number | null;
+}
+
+export interface CollectorViewedRelease {
+  dropId: string;
+  title: string | null;
+  collectors: number | null;
+  views: number;
+  seconds: number;
+  medianSeconds: number | null;
+  visitors: number | null;
+}
+
+export interface CollectorHeldRow {
+  modelId: string;
+  name: string;
+  variant: string | null;
+  collectors: number;
+  pieces: number;
+}
+
+/** The panel `likes` (services/likes.ts LikesFigures). */
+export interface CollectorsLikes {
+  raw: boolean;
+  total: number;
+  wishlists: {
+    collectors: number | null;
+    share: number | null;
+    added: number;
+    removed: number;
+    previous: { collectors: number | null; added: number; removed: number } | null;
+  };
+  mostWished: { rows: (CollectorWishedRow & { variants: CollectorWishedRow[] })[]; groups: number };
+  collections: { rows: { collectionId: string; name: string; collectors: number; previous: number | null }[]; groups: number };
+  pieces: { rows: CollectorTaste[]; none: number };
+  finishes: { rows: (CollectorTaste & { swatch: string | null })[]; none: number };
+  viewed: {
+    collectors: { models: (CollectorViewedRow & { variants: CollectorViewedRow[] })[]; releases: CollectorViewedRelease[]; groups: number; reachesBackTo: string | null };
+    visitors: { models: (CollectorViewedRow & { variants: CollectorViewedRow[] })[]; releases: CollectorViewedRelease[]; groups: number; through: string | null };
+  };
+  held: { rows: (CollectorHeldRow & { variants: CollectorHeldRow[] })[]; groups: number };
+}
+
+/** The systems a device list reads: DEVICE_SYSTEMS, an iPad on its own line. */
+export type CollectorSystemLine = DeviceSystem | 'IPAD';
+
+/** One switch of the Devices panel (tracking-reads.ts DevicesFigures). */
+export interface CollectorDevices {
+  window: { from: string; to: string };
+  total: number;
+  kinds: Record<DeviceKind, number>;
+  systems: Record<CollectorSystemLine, number>;
+  openedIn: Record<OpenedIn, number>;
+  apps: Record<InApp, number>;
+  browsers: { browser: DeviceBrowser; count: number }[];
+}
+
+export interface CollectorDevicesTab {
+  current: CollectorDevices;
+  previous: CollectorDevices | null;
+}
+
+export interface CollectorsDevicesPanel {
+  total: number;
+  byCollectors: CollectorDevicesTab;
+  byVisits: CollectorDevicesTab;
+  allDevices: CollectorDevicesTab;
+  through: string | null;
+  reachesBackTo: string | null;
+}
+
+export interface CollectorSpreadRow {
+  key: string;
+  collectors: number;
+  previous: number | null;
+}
+
+export interface CollectorCohortRow {
+  month: string;
+  collectors: number;
+  marks: { after: number; active: number | null; share: number | null }[];
+}
+
+export interface CollectorsEngagement {
+  total: number;
+  scoresOn: string | null;
+  spread: { rows: CollectorSpreadRow[]; median: number | null; scored: number; previousMonth: string | null };
+  parts: { key: EngagementPart; max: number; average: number | null; collectors: number }[];
+  status: { asOf: string; previousAsOf: string | null; rows: CollectorSpreadRow[] };
+  cohorts: { through: string | null; rows: CollectorCohortRow[] };
+}
+
+export interface CollectorTrendPoint {
+  key: string;
+  from: string;
+  to: string;
+  value: number | null;
+  collectors: number;
+}
+
+export interface CollectorsTrends {
+  figure: TrendFigure;
+  split: TrendSplit;
+  unit: CollectorBucketUnit;
+  total: CollectorTrendPoint[];
+  groups: { group: string; points: CollectorTrendPoint[] }[];
+  previous: CollectorTrendPoint[] | null;
+  reachesBackTo: string | null;
+}
+
+/** What every panel's answer carries (collector-insights.ts ReportHead). */
+export interface CollectorsReportHead {
+  panel: CollectorPanel;
+  readAt: Iso;
+  period: { key: CollectorPeriod; from: string; to: string; days: number };
+  previous: { from: string; to: string } | null;
+  scope: CollectorScope;
+  compareBy: 'NEW' | 'SCOPE' | null;
+  recordingSince: Iso | null;
+}
+
+/** GET /api/admin/collectors/report?panel=… */
+export type CollectorsReport =
+  | (CollectorsReportHead & { panel: 'overview'; figures: CollectorsOverview })
+  | (CollectorsReportHead & { panel: 'who'; figures: CollectorsWho })
+  | (CollectorsReportHead & { panel: 'origin'; figures: CollectorsOrigin })
+  | (CollectorsReportHead & { panel: 'likes'; figures: CollectorsLikes })
+  | (CollectorsReportHead & { panel: 'devices'; figures: CollectorsDevicesPanel })
+  | (CollectorsReportHead & { panel: 'engagement'; figures: CollectorsEngagement })
+  | (CollectorsReportHead & { panel: 'trends'; figures: CollectorsTrends });
+
+/** The page's query as the routes read it (the report's and the list's). */
+export interface CollectorsQuery {
+  p?: CollectorPeriod;
+  from?: string;
+  to?: string;
+  cmp?: boolean;
+  scope?: CollectorScope;
+  c?: string;
+  s?: string;
+  t?: string;
+  sc?: string;
+  ft?: string;
+  currency?: HouseCurrency;
+  figure?: TrendFigure;
+  split?: TrendSplit;
+}
+
+/** One collector of a list (no score, no tag, no mark); the email masked and the city null for an AUDITOR. */
+export interface CollectorsListRow {
+  accountId: string;
+  email: string;
+  name: string | null;
+  country: string | null;
+  city: string | null;
+  tier: number;
+  createdAt: Iso;
+  lastSeenAt: Iso | null;
+  heardOther?: string | null;
+}
+
+/** GET /api/admin/collectors/list. */
+export interface CollectorsList {
+  slice: string;
+  subject: string | null;
+  period: CollectorsReportHead['period'];
+  previous: CollectorsReportHead['previous'];
+  scope: CollectorScope;
+  readAt: Iso;
+  total: number;
+  page: number;
+  pageSize: number;
+  rows: CollectorsListRow[];
+}

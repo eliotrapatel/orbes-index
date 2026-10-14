@@ -28,6 +28,8 @@ export const ROUTES = [
   { name: 'signUp', path: '/sign-up' },
   /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6.1): under Clients, right after Owners. */
   { name: 'collectors', path: '/collectors' },
+  /** The collectors behind one of its figures (§3.6 C.6.5), each opening the client sheet; no link of its own in the sidebar. */
+  { name: 'collectorsList', path: '/collectors/list' },
   /** The Club (P-R03): its tabs (Drops, Circle) by `?tab=`; a drop's page, a post's (P-X01), from its row, no link of their own in the sidebar. */
   { name: 'club', path: '/club' },
   { name: 'drop', path: '/club/drops/:dropId' },

@@ -16,6 +16,11 @@
  * - Artifacts are attachments: they are fetched as blobs and saved by the UI.
  */
 import type {
+  CollectorPanel,
+  CollectorsList,
+  CollectorsOptions,
+  CollectorsQuery,
+  CollectorsReport,
   Guarantee,
   GuaranteeChange,
   GuaranteeGrant,
@@ -228,6 +233,11 @@ export interface ApiOptions {
 
 export type Query = Record<string, string | number | boolean | null | undefined>;
 
+/** The Collectors page's query as the routes read it: `cmp` written only when off (on by default). */
+function collectorsQueryOf(q: CollectorsQuery): Query {
+  return { p: q.p, from: q.from, to: q.to, cmp: q.cmp === false ? 'false' : undefined, scope: q.scope, c: q.c, s: q.s, t: q.t, sc: q.sc, ft: q.ft, currency: q.currency, figure: q.figure, split: q.split };
+}
+
 /** `?a=1&b=x` from defined, non-empty values; '' when nothing is left. */
 export function buildQuery(q: Query | undefined): string {
   if (!q) return '';
@@ -270,6 +280,8 @@ interface RequestOptions {
   raw?: boolean;
   /** Made by a timer, not by the admin: a 401 is thrown to the caller without calling `onUnauthorized`. */
   background?: boolean;
+  /** The caller's own cancel (the Collectors page: a new choice cancels the panels still loading): ApiError ABORTED. */
+  signal?: AbortSignal;
 }
 
 export interface ArtifactOptions {
@@ -350,6 +362,9 @@ export class AdminApi {
 
     const controller = typeof AbortController === 'function' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
+    const cancel = () => controller?.abort();
+    if (opts.signal?.aborted) cancel();
+    opts.signal?.addEventListener('abort', cancel, { once: true });
     let res: Response;
     try {
       res = await this.fetchFn(this.base + path + buildQuery(opts.query), {
@@ -362,10 +377,12 @@ export class AdminApi {
         ...(controller ? { signal: controller.signal } : {}),
       });
     } catch (e) {
+      if (opts.signal?.aborted) throw new ApiError(0, 'ABORTED', 'Cancelled.');
       const aborted = e instanceof Error && e.name === 'AbortError';
       throw new ApiError(0, aborted ? 'TIMEOUT' : 'NETWORK', aborted ? 'The server took too long to answer.' : 'The console could not reach the server.');
     } finally {
       if (timer) clearTimeout(timer);
+      opts.signal?.removeEventListener('abort', cancel);
     }
 
     if (res.ok) {
@@ -519,6 +536,24 @@ export class AdminApi {
   /** GROWTH (plan NEXT-NINE, BP-29): the report of the last 12 or 24 months, in one currency. */
   growth(q: { months?: number; currency?: string } = {}): Promise<GrowthReport> {
     return this.get('/api/admin/growth', q);
+  }
+
+  /** The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6): the filters' choices and the earliest dates with data. */
+  collectorsOptions(): Promise<CollectorsOptions> {
+    return this.get('/api/admin/collectors/options');
+  }
+
+  /**
+   * One panel of the Collectors page for the page's query; `fresh` (Read again) reads past the server's cache, `signal`
+   * cancels it (a new choice on the page).
+   */
+  collectorsReport(panel: CollectorPanel, q: CollectorsQuery, o: { fresh?: boolean; signal?: AbortSignal } = {}): Promise<CollectorsReport> {
+    return this.request('GET', '/api/admin/collectors/report', { query: { ...collectorsQueryOf(q), panel, fresh: o.fresh ? 'true' : undefined }, signal: o.signal });
+  }
+
+  /** The collectors behind one figure (`slice`), 50 a page ordered by email; the emails masked for an AUDITOR by the server. */
+  collectorsList(q: CollectorsQuery & { slice: string; page?: number }): Promise<CollectorsList> {
+    return this.get('/api/admin/collectors/list', { ...collectorsQueryOf(q), slice: q.slice, page: q.page && q.page > 1 ? q.page : undefined });
   }
 
   /** COLLECTORS BY VALUE: a page of 25, the highest value first; the emails masked for an AUDITOR by the server. */

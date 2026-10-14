@@ -235,6 +235,21 @@ describe('console: brand deviations (BRAND-DESIGN-SYSTEM §8)', () => {
     expect(JSON.stringify(LIKES_COPY)).not.toMatch(/!|atelier|handmade|hand-made|craft|\bproducts?\b/i);
   });
 
+  it('writes the Collectors page calmly (plan CUSTOMER INTELLIGENCE §3.6 C.6, §0.7): no atelier, handmade or craft, no exclamation mark, never « product »', () => {
+    const files = readdirSync(join(WEB, 'admin', 'model'))
+      .filter((f) => /^collectors/.test(f))
+      .map((f) => join(WEB, 'admin', 'model', f))
+      .concat(readdirSync(join(WEB, 'admin', 'views')).filter((f) => /^collectors/.test(f)).map((f) => join(WEB, 'admin', 'views', f)));
+    expect(files.map((f) => f.slice(WEB.length))).toEqual(expect.arrayContaining(['/admin/model/collectors.ts', '/admin/views/collectors.ts']));
+    for (const f of files) {
+      const code = readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+      expect(code, f).not.toMatch(/atelier|handmade|hand-made|craft/i);
+      const words = [...code.matchAll(/'([^'\n]*)'|`([^`\n]*)`/g)].map((m) => m[1] ?? m[2] ?? '').join('\n');
+      expect(words, f).not.toMatch(/!(?!==?)/);
+      expect(words, f).not.toMatch(/\bproducts?\b/i);
+    }
+  });
+
   it('writes the birthday credit calmly in the console (plan CUSTOMER INTELLIGENCE §3.5 SB.4.6, §0.7): no atelier, handmade or craft, no exclamation mark, never « product » nor « gift », no figure in a label', () => {
     const club = { tier: null, careThisYear: null };
     const given = { tier: null, kind: 'BIRTHDAY' as const, birthdayOn: '2027-03-14', grantedAt: '2027-03-13T23:00:00.000Z', amountMinor: 2000, balanceMinor: 2000, currency: 'EUR', expiresAt: '2027-04-12T21:59:59.999Z', gift: null };

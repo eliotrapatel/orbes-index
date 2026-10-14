@@ -5983,3 +5983,303 @@ fieldset.cfield--checks > .cfield__label {
     display: block;
   }
 }
+
+/* ── The Collectors page (plan CUSTOMER INTELLIGENCE §3.6 C.6) ─────────────
+   The controls under the header, the view in words, then the panels: `.range`, `.kpi`, `.bars` and `.table`, no new
+   look. A bar gains a comparison column; tabs inside a panel are buttons dressed as `.range__tab`. Under 860 px the KPIs
+   go two by two and the tabs scroll sideways; under 600 px the filters fold into « Filters (3) », opened as a sheet. */
+
+.collectors__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.collectors__controls > *,
+.collectors__bar > *,
+.collectors__period > * {
+  min-width: 0;
+}
+
+.collectors__period {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+
+.collectors__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 28px;
+}
+
+.collectors__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px 24px;
+  padding: 10px 0;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.collectors__fold,
+.collectors__filters [data-testid="collectors-filters-done"] {
+  display: none;
+}
+
+.collectors__pick {
+  position: relative;
+}
+
+.collectors__pick-name {
+  font-size: var(--fs-micro);
+  letter-spacing: var(--track-micro);
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 8px 0;
+}
+
+.collectors__pick[open] .collectors__pick-name {
+  color: var(--ink);
+}
+
+.collectors__choices {
+  position: absolute;
+  z-index: 20;
+  top: 100%;
+  left: 0;
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 12px 14px;
+  background: var(--paper);
+  border: 1px solid var(--hairline-strong);
+}
+
+.collectors__score {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.collectors__score .cinput {
+  width: 72px;
+}
+
+.collectors__problem {
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--critical);
+}
+
+.collectors__problem:empty {
+  display: none;
+}
+
+.collectors__reading {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+}
+
+.collectors__words {
+  margin-bottom: 8px;
+  font-size: var(--fs-line);
+  letter-spacing: 0.02em;
+  color: var(--ink-soft);
+}
+
+.collectors__panel .panel__body > * + * {
+  margin-top: 14px;
+}
+
+.collectors__tabs {
+  flex-wrap: wrap;
+}
+
+button.range__tab {
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.range__tab[aria-selected="true"] {
+  color: var(--ink);
+}
+
+.range__tab[aria-selected="true"]::after {
+  transform: scaleX(1);
+}
+
+.collectors__kpis {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.collectors__kpi {
+  padding: 6px 18px 24px;
+}
+
+.collectors__kpi:first-child {
+  padding-left: 0;
+}
+
+a.collectors__kpi-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+a.collectors__kpi-link:hover,
+a.collectors__kpi-link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 6px;
+  text-decoration-thickness: 1px;
+}
+
+.collectors__kpi .kpi__note {
+  margin-top: 8px;
+  white-space: normal;
+}
+
+.collectors__bars--cmp .bar {
+  grid-template-columns: var(--bar-label, 190px) minmax(0, 1fr) 64px 48px 150px;
+}
+
+.collectors__cmp {
+  display: grid;
+  text-align: right;
+  font-size: var(--fs-nano);
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+
+.collectors__before {
+  color: var(--ink-soft);
+}
+
+.collectors__swatch {
+  --swatch: var(--metal);
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 1px var(--hairline-strong);
+}
+
+.collectors__figure {
+  font-variant-numeric: tabular-nums;
+}
+
+.collectors__empty,
+.collectors__failed {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+
+@media (max-width: 1180px) {
+  .collectors__kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .collectors__kpis .kpi:nth-child(3) {
+    padding-left: 18px;
+    border-left: 1px solid var(--hairline);
+  }
+  .collectors__kpis .kpi:nth-child(3n + 1) {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .collectors__kpis .kpi:nth-child(n + 4) {
+    border-top: 1px solid var(--hairline);
+  }
+}
+
+@media (max-width: 860px) {
+  .collectors__kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .collectors__kpis .kpi:nth-child(n) {
+    padding-left: 18px;
+    border-left: 1px solid var(--hairline);
+  }
+  .collectors__kpis .kpi:nth-child(odd) {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .collectors__kpis .kpi:nth-child(n + 3) {
+    border-top: 1px solid var(--hairline);
+  }
+  .collectors__tabs,
+  .collectors__periods,
+  .collectors__scope {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .collectors__tabs .range__tab,
+  .collectors__periods .range__tab,
+  .collectors__scope .range__tab {
+    white-space: nowrap;
+    flex: none;
+  }
+  .collectors__bars--cmp .bar {
+    grid-template-columns: 120px minmax(0, 1fr) 48px;
+    padding: 6px 0;
+  }
+  .collectors__bars--cmp .collectors__cmp {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+  .collectors__panel .table-wrap {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 599px) {
+  .collectors__fold {
+    display: inline-flex;
+  }
+  .collectors__filters {
+    display: none;
+  }
+  .collectors__filters.is-open {
+    position: fixed;
+    z-index: 60;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: grid;
+    gap: 12px;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 20px 16px 24px;
+    background: var(--paper);
+    border-top: 1px solid var(--hairline-strong);
+  }
+  .collectors__filters.is-open [data-testid="collectors-filters-done"] {
+    display: inline-flex;
+    justify-self: start;
+  }
+  .collectors__choices {
+    position: static;
+    min-width: 0;
+    border: 0;
+    padding: 4px 0 8px;
+  }
+}
