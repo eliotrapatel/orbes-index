@@ -964,6 +964,54 @@ async function devicesFigures(db: Db, w: DayWindow, f: ViewFilters | undefined, 
 }
 
 /**
+ * BY COLLECTORS and BY VISITS of one window from a single reading of its rows (the Collectors page shows both tabs):
+ * per collector and device, its time, its rows, its latest row and its visits (a row with no earlier one of the same
+ * collector and device in the window, or more than VISIT_GAP_MINUTES after it, begins one); BY COLLECTORS counts each
+ * collector once, under its main device (mainDevices' order: the most time, the most rows, the latest, the lowest id),
+ * BY VISITS sums the visits. devicesFigures' COLLECTORS and VISITS figures, with the window's rows read and sorted once
+ * instead of twice, and the devices' class joined to one row per device.
+ */
+async function detailDevicesFigures(db: Db, w: DayWindow, f: ViewFilters | undefined, countries: string[]): Promise<{ collectors: DevicesFigures; visits: DevicesFigures }> {
+  type Row = { kind: string; os: string; browser: string; opened_in: string; in_app: string | null; collectors: unknown; visits: unknown };
+  const rows = (
+    await sql<Row>`
+      SELECT td.kind, td.os, td.browser, td.opened_in, td.in_app, sum(d.collectors) AS collectors, sum(d.visits) AS visits
+        FROM (SELECT m.device_id, count(*) FILTER (WHERE m.main) AS collectors, sum(m.visits) AS visits
+                FROM (SELECT g.device_id, g.visits,
+                             row_number() OVER (PARTITION BY g.account_id ORDER BY g.s DESC, g.n DESC, g.last DESC, g.device_id) = 1 AS main
+                        FROM (SELECT r.account_id, r.device_id, sum(r.seconds) AS s, count(*) AS n, max(r.at) AS last,
+                                     count(*) FILTER (WHERE r.prev IS NULL OR r.at - r.prev > ${GAP}) AS visits
+                                FROM (SELECT v.account_id, v.device_id, v.seconds, v.at,
+                                             lag(v.at) OVER (PARTITION BY v.account_id, v.device_id ORDER BY v.at, v.id) AS prev
+                                        FROM collector_views v WHERE ${detailRows(w, f, countries)}) r
+                               GROUP BY r.account_id, r.device_id) g) m
+               GROUP BY m.device_id) d
+        JOIN tracking_devices td ON td.id = d.device_id
+       GROUP BY td.kind, td.os, td.browser, td.opened_in, td.in_app`.execute(db)
+  ).rows;
+  return { collectors: foldDevices(w, rows.map((r) => ({ ...r, n: r.collectors }))), visits: foldDevices(w, rows.map((r) => ({ ...r, n: r.visits }))) };
+}
+
+export interface DevicesDetailReport {
+  through: string | null;
+  reachesBackTo: string | null;
+  collectors: DevicesFigures;
+  visits: DevicesFigures;
+}
+
+/**
+ * The Devices panel's BY COLLECTORS and BY VISITS of one window together (devicesReport's figures for `by` COLLECTORS
+ * and VISITS, every counted collector when no `accounts` is given), from one reading of the 13 months of detail.
+ */
+export async function devicesDetailReport(db: Db, window: DayWindow, filters: ViewFilters | undefined, opts: { now: Date }): Promise<DevicesDetailReport> {
+  const w = checkWindow(window);
+  const countries = cleanCountries(filters?.countries);
+  const d = detailWindow(w, opts.now);
+  const figures = d.window ? await detailDevicesFigures(db, d.window, filters, countries) : { collectors: foldDevices(w, []), visits: foldDevices(w, []) };
+  return { through: await viewsCountedThrough(db), reachesBackTo: d.reachesBackTo, ...figures };
+}
+
+/**
  * The Devices panel (T.4.2): DEVICES every device seen, anonymous included, summed per Paris day from the daily totals
  * (the country filter only); COLLECTORS each collector once, under its main device of the period; VISITS each visit of
  * the collectors. COLLECTORS and VISITS read the detail (every counted collector when no `accounts` is given).

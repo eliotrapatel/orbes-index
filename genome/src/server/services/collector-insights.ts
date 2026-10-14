@@ -95,7 +95,7 @@ import { countedCollector } from './population.js';
 import { parisDay, parisDayStart, parisMonthStart } from './schedule.js';
 import { tasteOptions } from './tastes.js';
 import { viewHistoryCutoff } from './tracking.js';
-import { devicesReport, mainDeviceRows, type DevicesBy, type DevicesFigures, type ViewFilters } from './tracking-reads.js';
+import { devicesDetailReport, devicesReport, mainDeviceRows, type DevicesFigures, type ViewFilters } from './tracking-reads.js';
 
 // ── Constants ──────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -1205,32 +1205,28 @@ const topBrowsers = (f: DevicesFigures): DevicesFigures => ({ ...f, browsers: f.
 
 /**
  * DEVICE, SYSTEM, OPENED IN and BROWSERS by collectors, by visits and for all devices (§3.6 C.6.3 item 5; §3.3 T.4.2),
- * read by tracking-reads.ts devicesReport: BY COLLECTORS and BY VISITS over the page's collectors of each period (the
- * scope and the five filters), ALL DEVICES from the daily totals with the page's countries as the connection's (the only
- * country they hold). The comparison is the same figure over the previous period and its collectors.
+ * read by tracking-reads.ts: BY COLLECTORS and BY VISITS together over the page's collectors of each period (the scope
+ * and the five filters) by devicesDetailReport, one reading of the period's rows for both tabs; ALL DEVICES by
+ * devicesReport from the daily totals with the page's countries as the connection's (the only country they hold). The
+ * comparison is the same figure over the previous period and its collectors.
  */
 async function devicesPanel(tx: Db, x: Reading): Promise<DevicesPanelFigures> {
   const { q } = x;
-  const read = async (p: Period, by: DevicesBy) => {
-    const filters = by === 'DEVICES' ? (q.filters.countries.length ? { countries: q.filters.countries } : undefined) : collectorsOf(x, p);
-    return devicesReport(tx, { from: p.from, to: p.to }, filters, { now: x.now, by });
-  };
-  const tab = async (by: DevicesBy) => {
-    const now = await read(q.period, by);
-    const before = q.previous ? await read(q.previous, by) : null;
-    return { report: now, tab: { current: topBrowsers(now.current), previous: before ? topBrowsers(before.current) : null } };
-  };
-  const collectors = await tab('COLLECTORS');
-  const visits = await tab('VISITS');
-  const all = await tab('DEVICES');
+  // BY COLLECTORS and BY VISITS of a period from one reading of its rows; ALL DEVICES from the daily totals.
+  const detail = (p: Period) => devicesDetailReport(tx, { from: p.from, to: p.to }, collectorsOf(x, p), { now: x.now });
+  const daily = (p: Period) => devicesReport(tx, { from: p.from, to: p.to }, q.filters.countries.length ? { countries: q.filters.countries } : undefined, { now: x.now, by: 'DEVICES' });
+  const now = await detail(q.period);
+  const before = q.previous ? await detail(q.previous) : null;
+  const all = await daily(q.period);
+  const allBefore = q.previous ? await daily(q.previous) : null;
   const total = await sql<{ n: number }>`WITH ${scopeCte('col', q, q.period)} SELECT count(*)::int AS n FROM col`.execute(tx);
   return {
     total: Number(total.rows[0]?.n ?? 0),
-    byCollectors: collectors.tab,
-    byVisits: visits.tab,
-    allDevices: all.tab,
-    through: all.report.through,
-    reachesBackTo: collectors.report.reachesBackTo,
+    byCollectors: { current: topBrowsers(now.collectors), previous: before ? topBrowsers(before.collectors) : null },
+    byVisits: { current: topBrowsers(now.visits), previous: before ? topBrowsers(before.visits) : null },
+    allDevices: { current: topBrowsers(all.current), previous: allBefore ? topBrowsers(allBefore.current) : null },
+    through: all.through,
+    reachesBackTo: now.reachesBackTo,
   };
 }
 

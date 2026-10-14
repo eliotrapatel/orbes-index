@@ -19,7 +19,7 @@ import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { VIEW_PAGE_CODES, type DeviceBrowser, type DeviceKind, type DeviceSystem, type InApp, type OpenedIn } from '../../src/server/db/schema.js';
 import { aggregateViews } from '../../src/server/services/tracking-jobs.js';
-import { browsingCondition, checkWindow, deviceWords, pageShares, previousWindow, TRACKING_EXPORT_COLUMNS, type BrowsingRule } from '../../src/server/services/tracking-reads.js';
+import { browsingCondition, checkWindow, devicesDetailReport, deviceWords, pageShares, previousWindow, TRACKING_EXPORT_COLUMNS, type BrowsingRule, type ViewFilters } from '../../src/server/services/tracking-reads.js';
 import { createHarness, type Harness } from '../api/support.js';
 import { GrowthWorld } from '../support/growth.js';
 
@@ -314,6 +314,25 @@ describe('the recording\'s reads (plan CUSTOMER INTELLIGENCE §3.3 T.8.6)', () =
       const byVisits = await tracking().devicesReport({ from: '2026-10-01', to: '2026-10-09' }, { accounts: counted([acc.a!, acc.b!]) }, { by: 'VISITS' });
       // A: 8 Oct 08:00, 18:10 and 19:00 (three visits) and Instagram on the 9th; B: 1 Oct (one visit, 15 min apart) and 5 Oct.
       expect(byVisits.current).toMatchObject({ total: 6, apps: { INSTAGRAM: 1 }, openedIn: { BROWSER: 5, IN_APP: 1 } });
+    });
+
+    it('reads BY COLLECTORS and BY VISITS of a window together as devicesReport reads each (the Collectors page)', async () => {
+      const cases: [{ from: string; to: string }, ViewFilters | undefined][] = [
+        [{ from: '2026-10-01', to: '2026-10-09' }, undefined],
+        [{ from: '2026-10-01', to: '2026-10-09' }, { accounts: counted([acc.a!, acc.b!]) }],
+        [{ from: '2026-10-01', to: '2026-10-09' }, { countries: ['FR'] }],
+        [{ from: '2025-06-01', to: '2026-10-08' }, { accounts: counted([acc.a!]) }],
+        [{ from: '2025-01-01', to: '2025-03-01' }, undefined],
+      ];
+      for (const [window, filters] of cases) {
+        const c = await tracking().devicesReport(window, filters, { by: 'COLLECTORS' });
+        const v = await tracking().devicesReport(window, filters, { by: 'VISITS' });
+        expect(await devicesDetailReport(db(), window, filters, { now: new Date(NOW) })).toEqual({ through: c.through, reachesBackTo: c.reachesBackTo, collectors: c.current, visits: v.current });
+      }
+      // A's three visits of the 8th and Instagram on the 9th, B's two: as by VISITS above; A once, under its iPhone.
+      const both = await devicesDetailReport(db(), { from: '2026-10-01', to: '2026-10-09' }, { accounts: counted([acc.a!, acc.b!]) }, { now: new Date(NOW) });
+      expect(both.visits).toMatchObject({ total: 6, apps: { INSTAGRAM: 1 } });
+      expect(both.collectors.total).toBe(2);
     });
 
     it('reads the places by each collector\'s usual place, with those without one', async () => {
