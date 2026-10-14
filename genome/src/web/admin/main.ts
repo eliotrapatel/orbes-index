@@ -233,6 +233,8 @@ const app = byId('app');
 const api = new AdminApi();
 let session: AdminSession | null = null;
 let renderSeq = 0;
+/** The next hash change comes from `navigate(…, { keepScroll: true })`: the page keeps its place (see makeContext). */
+let keepNextScroll = false;
 /** The console's sidebar and top bar, or the sale shell of the sale mode (A-08). */
 type ShellKind = 'console' | 'sale';
 /**
@@ -586,8 +588,11 @@ function makeContext(r: Route, s: AdminSession): ViewContext {
     session: s,
     route: r,
     now: () => new Date(),
-    navigate: (hash) => {
+    navigate: (hash, opts) => {
+      const before = location.hash;
       location.hash = hash.startsWith('#') ? hash.slice(1) : hash;
+      // The hash change routes on its own (asynchronously): it keeps the page's place when asked and the hash moved.
+      keepNextScroll = opts?.keepScroll === true && location.hash !== before;
     },
     reload: () => void route({ keepScroll: true }),
     attention: (count) => {
@@ -728,7 +733,9 @@ async function route(opts: { keepScroll?: boolean } = {}): Promise<void> {
  * admin chooses: staying keeps the page as it was; leaving releases it and goes where they asked.
  */
 async function navigated(ev: HashChangeEvent): Promise<void> {
-  if (heldMessage() === null) return route();
+  const keepScroll = keepNextScroll;
+  keepNextScroll = false;
+  if (heldMessage() === null) return route({ keepScroll });
   const target = location.hash;
   history.replaceState(null, '', ev.oldURL);
   if (await confirmLeave()) location.hash = target;

@@ -94,6 +94,14 @@ function opens(n: number, link: string | null, aria: string): HTMLElement {
   return figureLink(formatCount(n), link, aria);
 }
 
+/** A most wished row's bar (§3.2 W.8): the hairline track, filled as `wished` is to the most wished (panelBars' fill). */
+function wishedBar(wished: number, most: number): HTMLElement {
+  const fill = h('span', { class: ['bar__fill', 'bar__fill--solid'] });
+  // CSSOM custom property (CSP-safe): the stylesheet scales the fill with it.
+  fill.style.setProperty('--f', String(most > 0 ? wished / most : 0));
+  return h('span', { class: ['bar__track', 'collectors__cell-bar'], attrs: { 'aria-hidden': 'true' } }, fill);
+}
+
 // ── Where they come from ─────────────────────────────────────────────────────────────────────────────────────────
 
 type OriginTab = 'sources' | 'heard' | 'links' | 'campaigns' | 'sites' | 'visits';
@@ -361,6 +369,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
         }
         type Row = (typeof f.mostWished.rows)[number]['variants'][number] & { rank: string; variantRow: boolean };
         const rows: Row[] = cut(f.mostWished.rows).flatMap((m, i) => [{ ...m, rank: String(i + 1), variantRow: false }, ...m.variants.map((v) => ({ ...v, rank: '', variantRow: true }))]);
+        const most = Math.max(0, ...rows.map((x) => x.wished));
         return [
           sides,
           table(
@@ -379,6 +388,7 @@ export function likesPanel(pc: PanelCtx, r: R<'likes'>): Child[] {
               },
               { label: L.columns.added, cell: (x) => formatCount(x.added), kind: ['num'] },
               { label: L.columns.comparison, cell: (x) => changeWords(x.wished, x.previous), kind: ['num'] },
+              { label: '', cell: (x) => wishedBar(x.wished, most) },
             ],
             rows,
             { empty: L.empty.wishes, caption: L.mostWishedModels },

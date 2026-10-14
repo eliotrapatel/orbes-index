@@ -386,6 +386,47 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
   );
 
   it(
+    'ticks two countries in a row from the open list, the list (and at 375 px the sheet) kept open, the page in place (step 9.9)',
+    async () => {
+      const p = await open(ADMIN);
+      await go(p, '#/collectors');
+      await p.evaluate(() => window.scrollTo(0, 40));
+      await p.click('[data-testid=collectors-country] summary');
+      const y = await p.evaluate(() => window.scrollY);
+      expect(y).toBeGreaterThan(0);
+      await act(p, () => p.locator('[data-testid=collectors-country] label', { hasText: 'FR · France' }).click(), '#/collectors?c=FR');
+      expect(await p.locator('[data-testid=collectors-country]').evaluate((d) => (d as HTMLDetailsElement).open)).toBe(true);
+      expect(await p.evaluate(() => window.scrollY)).toBe(y);
+      await expect.poll(() => p.evaluate(() => (document.activeElement as HTMLInputElement | null)?.name)).toBe('collectors-country-FR');
+      await act(p, () => p.locator('[data-testid=collectors-country] label', { hasText: 'IT · Italy' }).click(), '#/collectors?c=FR,IT');
+      expect(await p.locator('[data-testid=collectors-country]').evaluate((d) => (d as HTMLDetailsElement).open)).toBe(true);
+      expect(await p.locator('[data-testid=collectors-country] summary').textContent()).toBe('Country · 2');
+      expect((await kpis(p))[0]).toBe('Collectors: 4');
+      await p.context().close();
+
+      const phone = await open(ADMIN, 375);
+      await go(phone, '#/collectors');
+      const fold = phone.locator('[data-testid=collectors-filters-fold]');
+      expect(await fold.getAttribute('aria-expanded')).toBe('false');
+      await fold.click();
+      expect(await fold.getAttribute('aria-expanded')).toBe('true');
+      await phone.click('[data-testid=collectors-country] summary');
+      await act(phone, () => phone.locator('[data-testid=collectors-country] label', { hasText: 'FR · France' }).click(), '#/collectors?c=FR');
+      expect(await phone.locator('[data-testid=collectors-filters]').isVisible()).toBe(true);
+      expect(await phone.locator('[data-testid=collectors-filters-fold]').getAttribute('aria-expanded')).toBe('true');
+      expect(await text(phone, '[data-testid=collectors-filters-fold]')).toBe('Filters (1)');
+      await act(phone, () => phone.locator('[data-testid=collectors-country] label', { hasText: 'IT · Italy' }).click(), '#/collectors?c=FR,IT');
+      expect(await phone.locator('[data-testid=collectors-filters]').isVisible()).toBe(true);
+      expect(await phone.locator('[data-testid=collectors-country] summary').textContent()).toBe('Country · 2');
+      await phone.click('[data-testid=collectors-filters-done]');
+      expect(await phone.locator('[data-testid=collectors-filters]').isVisible()).toBe(false);
+      expect(await phone.locator('[data-testid=collectors-filters-fold]').getAttribute('aria-expanded')).toBe('false');
+      await phone.context().close();
+    },
+    STEP_TIMEOUT,
+  );
+
+  it(
     'lays the page out at 375 px: the KPIs two by two, the filters folded into « Filters (1) » and opened as a sheet, no sideways scroll; an AUDITOR’s cities open nothing (step 9.9)',
     async () => {
       const phone = await open(ADMIN, 375);
@@ -450,7 +491,9 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       expect(await p.locator(`${likes} [data-testid=collectors-wishlists] .kpi__value`).allTextContents()).toEqual(['2', '2', '0']);
       expect(await p.locator(`${likes} [data-testid=collectors-wishlists] a`).getAttribute('aria-label')).toBe('Open the 2 collectors with a wishlist');
       expect(await p.locator(`${likes} [data-testid=collectors-likes-tabs] .range__tab`).allTextContents()).toEqual(['FAVOURITE PIECES', 'FINISHES', 'MOST WISHED', 'MOST VIEWED', 'PIECES HELD']);
-      expect(await rowsOf(p, likes)).toEqual(['1 | MONOLITHE · Silver (hidden) | RING | ORBITAL | 2 | 2 | +2', ' | MONOLITHE · Blue (hidden) | RING | ORBITAL | 1 | 1 | +1']);
+      expect(await rowsOf(p, likes)).toEqual(['1 | MONOLITHE · Silver (hidden) | RING | ORBITAL | 2 | 2 | +2 | ', ' | MONOLITHE · Blue (hidden) | RING | ORBITAL | 1 | 1 | +1 | ']);
+      // Each row ends with a bar (§3.2 W.8), filled as its Wished is to the most wished.
+      expect(await p.locator(`${likes} tbody tr .collectors__cell-bar .bar__fill`).evaluateAll((els) => els.map((e) => (e as HTMLElement).style.getPropertyValue('--f')))).toEqual(['1', '0.5']);
       const wished = p.locator(`${likes} tbody tr`).first().locator('a');
       expect(await wished.getAttribute('aria-label')).toBe('Open the 2 collectors who wish for MONOLITHE · Silver');
       expect(decodeURIComponent((await wished.getAttribute('href'))!)).toContain(`slice=wishmodel:${models.mono}`);

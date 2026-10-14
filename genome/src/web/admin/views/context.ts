@@ -11,8 +11,11 @@ export interface ViewContext {
   session: AdminSession;
   route: Route;
   now: () => Date;
-  /** Go to a hash (`#/products/…`). */
-  navigate(hash: string): void;
+  /**
+   * Go to a hash (`#/products/…`). `keepScroll`: the page shown stays in place until the new one is drawn, at the same
+   * scroll and without moving the focus (a choice on the same page, e.g. a filter of the Collectors page).
+   */
+  navigate(hash: string, opts?: { keepScroll?: boolean }): void;
   /** Re-render the current route, e.g. after a mutation. */
   reload(): void;
   /** Merge query values into the current route (empty values removed) and navigate. */

@@ -8,7 +8,7 @@
  *     PERIOD · NEW IN THE PERIOD) and the five filters (Country, Source, Tier, Score from … to …, Favourite piece), Clear
  *     filters; on the right « Read at 14:02 » and Read again. A choice whose address would pass 512 characters is refused
  *     before it is applied. Under the bar, the view in words. Under 600 px the filters fold into « Filters (3) », opened
- *     as a sheet.
+ *     as a sheet. A choice keeps the page in place: the list ticked stays open, so does the sheet, the box keeps focus.
  *   - The panels, top to bottom, each a section that loads on its own (two readings at once from the page, the server's
  *     load guard allowing two), says so with Try again when it cannot be read, the rest of the page standing; a new choice
  *     cancels those still loading. Every figure is a link to its collectors (`#/collectors/list`, step 9.11), with an
@@ -312,22 +312,63 @@ function periodStart(pc: PanelCtx): string {
   return from < '2026-01-01' ? '2026-01-01' : from;
 }
 
-function controls(pc: PanelCtx, problem: HTMLElement): HTMLElement {
+/**
+ * Where the controls stood when a choice was applied (§3.6 C.6.2, C.6.3): the list left open, the phone's sheet open,
+ * the box or field in focus. The page drawn for that choice (the same route, kept in place) opens them again, so
+ * ticking France then Italy needs no reopening between the two.
+ */
+interface ControlsPlace {
+  target: string;
+  pick: string | null;
+  sheet: boolean;
+  focus: string | null;
+}
+let keptPlace: ControlsPlace | null = null;
+
+/**
+ * The place kept for this view (the address it was kept for), once. A view drawn for another address drops it, unless
+ * that address is still on its way (two boxes ticked before the first one's page was drawn).
+ */
+function takePlace(p: CollectorsParams): ControlsPlace | null {
+  if (!keptPlace) return null;
+  const place = keptPlace;
+  if (place.target === collectorsHref(p)) {
+    keptPlace = null;
+    return place;
+  }
+  if (decodeURIComponent(location.hash) !== decodeURIComponent(place.target)) keptPlace = null;
+  return null;
+}
+
+function controls(pc: PanelCtx, problem: HTMLElement, place: ControlsPlace | null): HTMLElement {
   const { p, options } = pc;
-  /** Applies a choice; false (and the words) when its address would pass 512 characters. */
-  const apply = (q: Partial<CollectorsParams>): boolean => {
-    const target = collectorsHref(p, q);
+  /** The choices applied from this page: the page stays shown until the next is drawn, a second tick adds to the first. */
+  let chosen: CollectorsParams = p;
+  /** Applies a choice, the page kept in place; false (and the words) when its address would pass 512 characters. */
+  const apply = (q: Partial<CollectorsParams>, focus?: string): boolean => {
+    const target = collectorsHref(chosen, q);
     if (tooManyChoices(target)) {
       problem.textContent = K.tooMany;
       return false;
     }
     problem.textContent = '';
-    pc.ctx.navigate(target);
+    if (target !== collectorsHref(chosen)) {
+      const open = filters.querySelector<HTMLDetailsElement>('details.collectors__pick[open]');
+      const active = document.activeElement;
+      keptPlace = {
+        target,
+        pick: open?.dataset.testid ?? null,
+        sheet: filters.classList.contains('is-open'),
+        focus: focus ?? (active instanceof HTMLInputElement && filters.contains(active) ? active.name : null),
+      };
+    }
+    chosen = { ...chosen, ...q };
+    pc.ctx.navigate(target, { keepScroll: true });
     return true;
   };
   const list = <T extends string | number>(key: 'c' | 's' | 't' | 'ft', parse: (v: string) => T) => (value: string, on: boolean, box: HTMLInputElement) => {
-    const now = p[key] as unknown as T[];
-    if (!apply({ [key]: toggled(now, parse(value), on) } as Partial<CollectorsParams>)) box.checked = !on;
+    const now = chosen[key] as unknown as T[];
+    if (!apply({ [key]: toggled(now, parse(value), on) } as Partial<CollectorsParams>, box.name)) box.checked = !on;
   };
 
   const compare = checkbox('cmp', K.compare, p.cmp);
@@ -388,13 +429,29 @@ function controls(pc: PanelCtx, problem: HTMLElement): HTMLElement {
     tier,
     scoreForm,
     favourite,
-    n > 0 ? button(K.clear, { kind: 'ghost', testId: 'collectors-clear', onClick: () => apply(clearedFilters(p)) }) : null,
-    button(K.done, { kind: 'secondary', testId: 'collectors-filters-done', onClick: () => filters.classList.remove('is-open') }),
+    n > 0 ? button(K.clear, { kind: 'ghost', testId: 'collectors-clear', onClick: () => apply(clearedFilters(chosen)) }) : null,
+    button(K.done, { kind: 'secondary', testId: 'collectors-filters-done', onClick: () => sheet(false) }),
   );
-  const fold = button(n ? `${K.filters} (${n})` : K.filters, { kind: 'secondary', testId: 'collectors-filters-fold', onClick: () => filters.classList.toggle('is-open') });
+  const fold = button(n ? `${K.filters} (${n})` : K.filters, { kind: 'secondary', testId: 'collectors-filters-fold', onClick: () => sheet(!filters.classList.contains('is-open')) });
   fold.classList.add('collectors__fold');
-  fold.setAttribute('aria-expanded', 'false');
-  fold.addEventListener('click', () => fold.setAttribute('aria-expanded', String(filters.classList.contains('is-open'))));
+  /** Opens or closes the phone's sheet of filters, its fold saying which. */
+  const sheet = (open: boolean) => {
+    filters.classList.toggle('is-open', open);
+    fold.setAttribute('aria-expanded', String(open));
+  };
+  sheet(place?.sheet === true);
+  if (place?.pick) {
+    const pick = [...filters.querySelectorAll<HTMLDetailsElement>('details.collectors__pick')].find((d) => d.dataset.testid === place.pick);
+    if (pick) pick.open = true;
+  }
+  if (place?.focus) {
+    const name = place.focus;
+    // Once the page is drawn (the route mounts it after this view resolves).
+    setTimeout(() => {
+      const box = [...filters.querySelectorAll('input')].find((x) => x.name === name);
+      if (box?.isConnected) box.focus({ preventScroll: true });
+    }, 0);
+  }
 
   return h(
     'div',
@@ -418,6 +475,7 @@ export async function collectorsView(ctx: ViewContext): Promise<HTMLElement> {
   window.addEventListener('hashchange', () => cancel.abort(), { once: true });
 
   const p = collectorsParams(ctx.route.query, ctx.now());
+  const place = takePlace(p);
   let options: CollectorsOptions | null = null;
   try {
     options = await ctx.api.collectorsOptions();
@@ -445,12 +503,19 @@ export async function collectorsView(ctx: ViewContext): Promise<HTMLElement> {
       body,
     );
     let extra: Pick<CollectorsQuery, 'figure' | 'split' | 'currency'> = {};
+    /** The panel's reading under way: a new one (its own choice, Try again, Read again) cancels it, its answer unused. */
+    let reading: AbortController | null = null;
     const load = (fresh: boolean) => {
+      reading?.abort();
+      const mine = new AbortController();
+      reading = mine;
+      const stop = () => mine.abort();
+      cancel.signal.addEventListener('abort', stop, { once: true });
       body.replaceChildren(h('div', { class: 'loading', attrs: { role: 'status' } }, h('span', { class: 'loading__orbit', attrs: { 'aria-hidden': 'true' } }), h('span', { class: 'loading__text' }, PANEL_COPY.loading)));
       el.setAttribute('aria-busy', 'true');
-      void slow(() => ctx.api.collectorsReport(def.panel, collectorsApiQuery(p, extra), { fresh, signal: cancel.signal }))
+      void slow(() => ctx.api.collectorsReport(def.panel, collectorsApiQuery(p, extra), { fresh, signal: mine.signal }))
         .then((r) => {
-          if (cancel.signal.aborted) return;
+          if (mine !== reading || cancel.signal.aborted) return;
           seen(r.readAt);
           const pc: PanelCtx = {
             ctx,
@@ -466,13 +531,16 @@ export async function collectorsView(ctx: ViewContext): Promise<HTMLElement> {
           body.replaceChildren(...nodes(def.draw(pc, r)));
         })
         .catch((e: unknown) => {
-          if (cancel.signal.aborted || (e instanceof ApiError && e.code === 'ABORTED')) return;
+          if (mine !== reading || cancel.signal.aborted || (e instanceof ApiError && e.code === 'ABORTED')) return;
           const message = e instanceof ApiError && e.status !== 0 && e.status < 500 ? e.message : e instanceof ApiError && (e.code === 'INSIGHTS_BUSY' || e.code === 'INSIGHTS_TIMEOUT') ? e.message : PANEL_COPY.failed;
           body.replaceChildren(
             h('div', { class: 'collectors__failed', attrs: { role: 'alert' }, data: { testid: 'collectors-failed' } }, emptyState(message), button(PANEL_COPY.tryAgain, { kind: 'secondary', onClick: () => load(true) })),
           );
         })
-        .finally(() => el.removeAttribute('aria-busy'));
+        .finally(() => {
+          cancel.signal.removeEventListener('abort', stop);
+          if (mine === reading) el.removeAttribute('aria-busy');
+        });
     };
     loaders.push(load);
     return el;
@@ -492,7 +560,7 @@ export async function collectorsView(ctx: ViewContext): Promise<HTMLElement> {
     'div',
     { class: ['view', 'view--collectors'], data: { testid: 'collectors' } },
     pageHeader({ eyebrow: C.eyebrow, title: C.title, lead: C.lead, actions: [h('span', { class: 'collectors__reading' }, readAt, h('span', { class: 'range__dot', attrs: { 'aria-hidden': 'true' } }), again)] }),
-    controls(pc, problem),
+    controls(pc, problem, place),
     h('p', { class: 'collectors__words', data: { testid: 'collectors-words' } }, viewWords(p, options, ctx.now())),
     ...sections,
     h('p', { class: 'footnote' }, `${C.growthTeam} ${C.parisMonths}`),

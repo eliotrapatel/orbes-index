@@ -6157,6 +6157,12 @@ a.collectors__kpi-link:focus-visible {
   grid-template-columns: var(--bar-label, 190px) minmax(0, 1fr) 64px 48px 150px;
 }
 
+/* A most wished row's bar, in its table cell (§3.2 W.8). */
+.collectors__cell-bar {
+  display: block;
+  min-width: 96px;
+}
+
 .collectors__cmp {
   display: grid;
   text-align: right;
