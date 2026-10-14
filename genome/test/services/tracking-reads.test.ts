@@ -19,7 +19,7 @@ import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { VIEW_PAGE_CODES, type DeviceBrowser, type DeviceKind, type DeviceSystem, type InApp, type OpenedIn } from '../../src/server/db/schema.js';
 import { aggregateViews } from '../../src/server/services/tracking-jobs.js';
-import { browsingCondition, checkWindow, devicesDetailReport, deviceWords, pageShares, previousWindow, TRACKING_EXPORT_COLUMNS, type BrowsingRule, type ViewFilters } from '../../src/server/services/tracking-reads.js';
+import { browsingCondition, checkWindow, devicesDetailReport, deviceWords, mainDeviceRows, pageShares, previousWindow, TRACKING_EXPORT_COLUMNS, type BrowsingRule, type ViewFilters } from '../../src/server/services/tracking-reads.js';
 import { createHarness, type Harness } from '../api/support.js';
 import { GrowthWorld } from '../support/growth.js';
 
@@ -333,6 +333,43 @@ describe('the recording\'s reads (plan CUSTOMER INTELLIGENCE §3.3 T.8.6)', () =
       const both = await devicesDetailReport(db(), { from: '2026-10-01', to: '2026-10-09' }, { accounts: counted([acc.a!, acc.b!]) }, { now: new Date(NOW) });
       expect(both.visits).toMatchObject({ total: 6, apps: { INSTAGRAM: 1 } });
       expect(both.collectors.total).toBe(2);
+    });
+
+    it('breaks a tie of time between two devices by the most rows, then the latest, then the lowest id, wherever a main device is read', async () => {
+      // Three collectors of 22 to 24 September (no other test reads those days unfiltered), each with a Mac created
+      // first (the lower id) and a second device of the same time: E1's phone has more rows (the Mac's is later), E2's
+      // phone the later row, E3's tablet the same rows at the same instant (the Mac's id is lower: the Mac).
+      const e1 = await account('2026-09-01T09:00:00Z', 'FR');
+      const e2 = await account('2026-09-01T09:00:00Z', 'FR');
+      const e3 = await account('2026-09-01T09:00:00Z', 'FR');
+      const mac = (account: string, first: string) => device({ kind: 'COMPUTER', os: 'MACOS', browser: 'CHROME', first, account });
+      const e1Mac = await mac(e1, '2026-09-22T11:00:00Z');
+      const e1Phone = await device({ first: '2026-09-22T10:00:00Z', account: e1 });
+      await view(e1Phone, '2026-09-22T10:00:00Z', { account: e1, seconds: 10 });
+      await view(e1Phone, '2026-09-22T10:05:00Z', { account: e1, seconds: 10 });
+      await view(e1Mac, '2026-09-22T11:00:00Z', { account: e1, seconds: 20 });
+      const e2Mac = await mac(e2, '2026-09-23T10:00:00Z');
+      const e2Phone = await device({ first: '2026-09-23T12:00:00Z', account: e2 });
+      await view(e2Mac, '2026-09-23T10:00:00Z', { account: e2, seconds: 20 });
+      await view(e2Phone, '2026-09-23T12:00:00Z', { account: e2, seconds: 20 });
+      const e3Mac = await mac(e3, '2026-09-24T10:00:00Z');
+      const e3Tablet = await device({ kind: 'TABLET', os: 'ANDROID', browser: 'CHROME', first: '2026-09-24T10:00:00Z', account: e3 });
+      expect(e3Mac).toBeLessThan(e3Tablet);
+      await view(e3Mac, '2026-09-24T10:00:00Z', { account: e3, seconds: 20 });
+      await view(e3Tablet, '2026-09-24T10:00:00Z', { account: e3, seconds: 20 });
+
+      const window = { from: '2026-09-22', to: '2026-09-24' };
+      const filters: ViewFilters = { accounts: counted([e1, e2, e3]) };
+      // BY COLLECTORS, read alone and with BY VISITS: E1 and E2 under their phones, E3 under its Mac.
+      const alone = await tracking().devicesReport(window, filters, { by: 'COLLECTORS' });
+      expect(alone.current).toMatchObject({ total: 3, kinds: { PHONE: 2, COMPUTER: 1, TABLET: 0 } });
+      expect((await devicesDetailReport(db(), window, filters, { now: new Date(NOW) })).collectors).toEqual(alone.current);
+      // The Collectors page's Device split and its slices (mainDeviceRows).
+      const rows = (await sql<{ account_id: string; kind: string }>`SELECT m.account_id, m.kind FROM (${mainDeviceRows(window, new Date(NOW))}) m WHERE m.account_id IN (${sql.join([e1, e2, e3])})`.execute(db())).rows;
+      expect(Object.fromEntries(rows.map((r) => [r.account_id, r.kind]))).toEqual({ [e1]: 'PHONE', [e2]: 'PHONE', [e3]: 'COMPUTER' });
+      // The export's main device, over the 13 months.
+      const cols = await tracking().exportColumns([e1, e2, e3]);
+      expect([e1, e2, e3].map((id) => cols.get(id)!.main_device)).toEqual(['Phone iOS', 'Phone iOS', 'Computer macOS']);
     });
 
     it('reads the places by each collector\'s usual place, with those without one', async () => {

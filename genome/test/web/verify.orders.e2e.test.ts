@@ -527,8 +527,8 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
 
   it('before SHOW THE CODE: the block under the order\'s sentence, the code nowhere; nothing scrolls sideways at 390, 375, 360 and 320 px', async () => {
     // The three orders' codes themselves, the new ones and the first ones they replace, with and without their hyphens:
-    // never in the page nor in what the server sent. (Not any string of the code's shape: an order's id, in each WRITE
-    // button's data-context-id, has one about once in 25 runs.)
+    // never in the page nor in what the server sent; and no other string of the code's shape in the page once the
+    // orders' ids are set aside (an order's id, in each WRITE button's data-context-id, has one about once in 25 runs).
     const codes = [...(await Promise.all([ids.shipped, ids.paid, ids.refused].map(waitingCode))), ...firstCodes];
     expect(codes).toHaveLength(6);
     for (const c of codes) expect(c).toMatch(new RegExp(`^${CODE.source}$`));
@@ -545,7 +545,10 @@ describe.skipIf(!HAS_CHROMIUM)('MY PIECES: YOUR NEW CLAIM CODE on an order (plan
       expect(await page.locator('.pieces__claim').count()).toBe(3);
       const html = await page.content();
       for (const s of secrets) expect(html, `${width} px`).not.toContain(s);
-      expect(answers.length).toBeGreaterThan(0);
+      // Nor any other string of the code's shape, the orders' ids (the page's only UUIDs, in data-context-id) set aside.
+      expect(html.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, ''), `${width} px`).not.toMatch(CODE);
+      // The orders' answer (the only one that carries their claimCode) is among those checked.
+      await expect.poll(() => answers.some((a) => a.startsWith('{"orders":')), POLL).toBe(true);
       for (const a of answers) for (const s of secrets) expect(a).not.toContain(s);
       expect(await noSideways(page), `${width} px`).toBe(true);
       if (width === 390) await page.screenshot({ path: join(OUT_DIR, 'verify-claim-code-waiting-phone.png'), fullPage: true });

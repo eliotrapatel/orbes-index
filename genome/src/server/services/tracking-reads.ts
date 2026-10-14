@@ -916,13 +916,20 @@ function foldDevices(w: DayWindow, rows: readonly { kind: string; os: string; br
   return out;
 }
 
+/**
+ * The main-device order of one collector's devices, over a table aliased `t` with per device its time `s`, its rows `n`,
+ * its latest row `last` and its `device_id`: the most time, then the most rows, the latest, the lowest id. Written once
+ * so BY COLLECTORS (mainDevices, detailDevicesFigures), its click-through slices and the export never disagree.
+ */
+const mainDeviceOrder = (t: string) => sql.raw(`${t}.s DESC, ${t}.n DESC, ${t}.last DESC, ${t}.device_id`);
+
 /** Each collector's main device in a window: the one with the most time there (ties: the most rows, the latest, the lowest id). */
 function mainDevices(w: DayWindow, f: ViewFilters | undefined, countries: string[]): RawBuilder<unknown> {
   return sql`
     SELECT DISTINCT ON (r.account_id) r.account_id, r.device_id
       FROM (SELECT v.account_id, v.device_id, sum(v.seconds) AS s, count(*) AS n, max(v.at) AS last
               FROM collector_views v WHERE ${detailRows(w, f, countries)} GROUP BY v.account_id, v.device_id) r
-     ORDER BY r.account_id, r.s DESC, r.n DESC, r.last DESC, r.device_id`;
+     ORDER BY r.account_id, ${mainDeviceOrder('r')}`;
 }
 
 /**
@@ -978,7 +985,7 @@ async function detailDevicesFigures(db: Db, w: DayWindow, f: ViewFilters | undef
       SELECT td.kind, td.os, td.browser, td.opened_in, td.in_app, sum(d.collectors) AS collectors, sum(d.visits) AS visits
         FROM (SELECT m.device_id, count(*) FILTER (WHERE m.main) AS collectors, sum(m.visits) AS visits
                 FROM (SELECT g.device_id, g.visits,
-                             row_number() OVER (PARTITION BY g.account_id ORDER BY g.s DESC, g.n DESC, g.last DESC, g.device_id) = 1 AS main
+                             row_number() OVER (PARTITION BY g.account_id ORDER BY ${mainDeviceOrder('g')}) = 1 AS main
                         FROM (SELECT r.account_id, r.device_id, sum(r.seconds) AS s, count(*) AS n, max(r.at) AS last,
                                      count(*) FILTER (WHERE r.prev IS NULL OR r.at - r.prev > ${GAP}) AS visits
                                 FROM (SELECT v.account_id, v.device_id, v.seconds, v.at,
@@ -1408,7 +1415,7 @@ export async function exportColumns(db: Db, accountIds: readonly string[], opts:
         FROM (SELECT v.account_id, v.device_id, sum(v.seconds) AS s, count(*) AS n, max(v.at) AS last FROM collector_views v
                WHERE v.account_id IN (${sql.join(counted)}) AND v.at >= ${viewHistoryCutoff(opts.now)} GROUP BY v.account_id, v.device_id) r
         JOIN tracking_devices td ON td.id = r.device_id
-       ORDER BY r.account_id, r.s DESC, r.n DESC, r.last DESC, r.device_id`.execute(db);
+       ORDER BY r.account_id, ${mainDeviceOrder('r')}`.execute(db);
     const mainOf = new Map(main.rows.map((m) => [m.account_id, m]));
     const names = await modelNames(db, [...tops.values()].flat().map((t) => t.subject));
     const releasesRaw = await sql<{ account_id: string; subject: string }>`
