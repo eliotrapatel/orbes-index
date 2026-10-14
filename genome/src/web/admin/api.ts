@@ -556,6 +556,16 @@ export class AdminApi {
     return this.get('/api/admin/collectors/list', { ...collectorsQueryOf(q), slice: q.slice, page: q.page && q.page > 1 ? q.page : undefined });
   }
 
+  /**
+   * ADMIN: the Collectors export (§3.6 C.7), one CSV row per collector of the page's five filters (never the period nor
+   * the scope), audited by the server before the file is sent; `rows` from its `x-orbes-rows`.
+   */
+  async collectorsExport(q: Pick<CollectorsQuery, 'c' | 's' | 't' | 'sc' | 'ft'>): Promise<Download & { rows: number }> {
+    const res = await this.request<Response>('GET', '/api/admin/collectors/export.csv', { raw: true, query: { c: q.c, s: q.s, t: q.t, sc: q.sc, ft: q.ft } });
+    const rows = Number(res.headers.get('x-orbes-rows') ?? '0');
+    return { ...(await toDownload(res, 'orbes-collectors.csv')), rows: Number.isFinite(rows) ? rows : 0 };
+  }
+
   /** COLLECTORS BY VALUE: a page of 25, the highest value first; the emails masked for an AUDITOR by the server. */
   growthCollectors(q: { currency?: string; page?: number } = {}): Promise<GrowthCollectors> {
     return this.get('/api/admin/growth/collectors', q);

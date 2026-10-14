@@ -16,6 +16,10 @@
  *     nothing (§3.0 (h)).
  *   - At a glance (six KPIs) and Who they are (AGES · COUNTRIES · CITIES, as given and from the connection), with the
  *     comparison's words (model/collectors.ts).
+ *   - For an ADMIN only (`exportCollectors`), Export (CSV) beside « Read at » (§3.6 C.7, step 9.12): its dialog says what
+ *     the file holds and how many collectors the page's five filters keep (the period and the scope are not the
+ *     export's); while the file is made, 'Exporting…' and the dialog cannot be closed; then the file downloads and a
+ *     toast says how many collectors it holds. An OPERATOR or an AUDITOR never sees the button.
  *
  * The console's house style: white paper, ink, hairlines; `.range`, `.kpi`, `.bars` and `.table`, no new look. Text
  * through h() only (CSP-safe).
@@ -34,6 +38,10 @@ import {
   COLLECTORS_PAGE_COPY as C,
   DEVICES_COPY,
   ENGAGEMENT_PANEL_COPY,
+  EXPORT_COPY,
+  exportBody,
+  exportDone,
+  exportQuery,
   ORIGIN_COPY,
   TRENDS_COPY,
   compareWords,
@@ -69,9 +77,13 @@ import {
   type Reader,
 } from '../model/collectors.js';
 import { LIKES_COPY } from '../model/likes.js';
+import { can } from '../model/permissions.js';
 import { parisDay } from '../model/links.js';
 import { COLLECTOR_PERIODS, COLLECTOR_SCOPES, type CollectorBar, type CollectorCityBar, type CollectorPanel, type CollectorsOptions, type CollectorsReport, type CollectorsQuery } from '../types.js';
 import { button, checkbox, emptyState, field, input, pageHeader } from '../ui/components.js';
+import { openDialog } from '../ui/dialog.js';
+import { saveDownload } from '../ui/download.js';
+import { notify } from '../ui/toast.js';
 import { devicesPanel, engagementPanel, likesPanel, originPanel, trendsPanel } from './collectors-panels.js';
 import { compareBlock, figureLink, noMatch, nodes, panelBars, panelLine, panelTabs, type PanelBar, type PanelCtx } from './collectors-parts.js';
 import type { ViewContext } from './context.js';
@@ -463,6 +475,40 @@ function controls(pc: PanelCtx, problem: HTMLElement, place: ControlsPlace | nul
   );
 }
 
+// ── The export (ADMIN) ───────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Export (CSV) (§3.6 C.7): the collectors the page's five filters keep are counted first (At a glance's Collectors with
+ * the scope ALL, which reads no period), then the dialog; Export makes the file while the dialog stays open, then saves it.
+ */
+function exportButton(ctx: ViewContext, p: CollectorsParams): HTMLElement {
+  return button(EXPORT_COPY.button, {
+    kind: 'secondary',
+    testId: 'collectors-export',
+    onClick: async () => {
+      const q = exportQuery(p);
+      let n: number | null = null;
+      try {
+        const r = await ctx.api.collectorsReport('overview', { ...q, p: '7d', cmp: false, scope: 'all' });
+        if (r.panel === 'overview') n = r.figures.collectors.value;
+      } catch {
+        n = null;
+      }
+      await openDialog({
+        title: EXPORT_COPY.title,
+        body: h('p', { class: 'dialog__text', data: { testid: 'collectors-export-body' } }, exportBody(n)),
+        confirmLabel: EXPORT_COPY.confirm,
+        working: EXPORT_COPY.working,
+        submit: async () => {
+          const file = await ctx.api.collectorsExport(q);
+          saveDownload(file);
+          notify(exportDone(file.rows));
+        },
+      });
+    },
+  });
+}
+
 // ── The page ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** The panels still loading of the page shown last: a new choice (a navigation) cancels them. */
@@ -555,11 +601,12 @@ export async function collectorsView(ctx: ViewContext): Promise<HTMLElement> {
       for (const load of loaders) load(true);
     },
   });
+  const exporter = can(ctx.session.admin.role, 'exportCollectors') ? exportButton(ctx, p) : null;
   const pc: PanelCtx = { ctx, p, options, reader, reload: () => undefined, clear: () => ctx.navigate(collectorsHref(clearedFilters(p))) };
   const view = h(
     'div',
     { class: ['view', 'view--collectors'], data: { testid: 'collectors' } },
-    pageHeader({ eyebrow: C.eyebrow, title: C.title, lead: C.lead, actions: [h('span', { class: 'collectors__reading' }, readAt, h('span', { class: 'range__dot', attrs: { 'aria-hidden': 'true' } }), again)] }),
+    pageHeader({ eyebrow: C.eyebrow, title: C.title, lead: C.lead, actions: [h('span', { class: 'collectors__reading' }, readAt, h('span', { class: 'range__dot', attrs: { 'aria-hidden': 'true' } }), again), exporter] }),
     controls(pc, problem, place),
     h('p', { class: 'collectors__words', data: { testid: 'collectors-words' } }, viewWords(p, options, ctx.now())),
     ...sections,

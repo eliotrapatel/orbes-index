@@ -9,7 +9,10 @@
  *  - the report's head and figures; no email, no account id and no name in a panel's JSON; an AUDITOR reads the same
  *    figures as an ADMIN (the cache holds figures only, shared by the roles);
  *  - GET /api/admin/collectors/list (step 9.8): by role, 50 a page ordered by email for every slice, `score` and
- *    `part` included, no score in a row; an AUDITOR reads the emails masked and no city; the slice and the page checked.
+ *    `part` included, no score in a row; an AUDITOR reads the emails masked and no city; the slice and the page checked;
+ *  - GET /api/admin/collectors/export.csv (step 9.12, §3.6 C.7): ADMIN only (OPERATOR, AUDITOR, RETAIL and LOGISTICS
+ *    403, no session 401); `no-store`, the attachment's name, the CSV type and `x-orbes-rows`; emails in clear; the five
+ *    filters only (the period, the scope and unknown keys refused); audited `collectors.export`.
  */
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -175,5 +178,39 @@ describe('GET /api/admin/collectors/… (§3.6 C.9)', () => {
       expect(res.statusCode, `${bad} → ${res.body.slice(0, 200)}`).toBe(400);
       expect(errorOf(res).code).toBe('VALIDATION_FAILED');
     }
+  });
+
+  it('GET /api/admin/collectors/export.csv: ADMIN only, no-store, the file named for the Paris day, its rows counted, audited', async () => {
+    const url = '/api/admin/collectors/export.csv';
+    for (const role of ['OPERATOR', 'AUDITOR', 'RETAIL', 'LOGISTICS'] as const) {
+      const res = await clients[role].get(url);
+      expect(res.statusCode, role).toBe(403);
+      expect(errorOf(res).code, role).toBe('FORBIDDEN');
+    }
+    expect((await h.client().get(url)).statusCode).toBe(401);
+    const res = await clients.ADMIN.get(url);
+    expect(res.statusCode, res.body.slice(0, 200)).toBe(200);
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.headers['content-disposition']).toBe('attachment; filename="orbes-collectors-2026-10-14.csv"');
+    expect(res.headers['content-type']).toBe('text/csv; charset=utf-8; header=present');
+    expect(res.headers['x-orbes-rows']).toBe('4');
+    const lines = res.body.split('\r\n').filter((l) => l !== '');
+    expect(lines).toHaveLength(5);
+    expect(lines[0]!.startsWith('"account id","email","first name","last name"')).toBe(true);
+    // An ADMIN reads the emails in clear.
+    for (const email of emails) expect(res.body).toContain(`"${email}"`);
+    // The five filters only.
+    const it_ = await clients.ADMIN.get(`${url}?c=IT&t=0`);
+    expect(it_.headers['x-orbes-rows']).toBe('2');
+    for (const bad of ['?p=7d', '?scope=new', '?panel=overview', '?slice=all', '?c=France', '?sc=90-10', `?ft=${'a'.repeat(1001)}`, '?x=1']) {
+      const r = await clients.ADMIN.get(`${url}${bad}`);
+      expect(r.statusCode, `${bad} → ${r.body.slice(0, 200)}`).toBe(400);
+      expect(errorOf(r).code).toBe('VALIDATION_FAILED');
+    }
+    const audit = await h.t.db.selectFrom('audit_logs').select(['action', 'target_type', 'details']).where('action', '=', 'collectors.export').orderBy('id').execute();
+    expect(audit).toHaveLength(2);
+    const details = audit.map((a) => (typeof a.details === 'string' ? JSON.parse(a.details) : a.details));
+    expect(details[1]).toEqual({ filters: { countries: ['IT'], sources: { channelIds: [], kinds: [] }, tiers: [0], score: null, types: [] }, rows: 2, columns: 1 });
+    expect(JSON.stringify(details)).not.toContain('@example.com');
   });
 });

@@ -18,11 +18,14 @@
  *  9.11 Figure → list → sheet: a KPI, a country, a most wished row open the list (#/collectors/list), its title naming the
  *       figure, ordered by email, its pager, Back to the figures to the same view, a row to the client sheet; an
  *       AUDITOR's list masks the emails and shows no city.
+ *  9.12 Export (CSV): an ADMIN's dialog counts the collectors of the page's five filters, Export downloads the file of
+ *       those collectors (test entrant and team account left out) and a toast counts them; an OPERATOR and an AUDITOR
+ *       see no button.
  *
  * Screens with ORBES_SCREENSHOTS=1 (genome/out/admin-collectors-*.png). No CSP violation, no page error.
  */
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -99,7 +102,7 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
   const models: Record<string, string> = {};
 
   async function open(who: { email: string; password: string }, width = 1440): Promise<Page> {
-    const c = await browser.newContext({ viewport: { width, height: width < 600 ? 812 : 900 }, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
+    const c = await browser.newContext({ viewport: { width, height: width < 600 ? 812 : 900 }, acceptDownloads: true, locale: 'en-GB', timezoneId: 'Europe/Paris', reducedMotion: 'reduce' });
     const p = await c.newPage();
     p.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
     p.on('console', (m) => {
@@ -643,6 +646,45 @@ describe.skipIf(!HAS_CHROMIUM)('the console\'s Collectors page (plan CUSTOMER IN
       await a.waitForSelector('[data-testid=collectors-list-row]');
       await fits(a);
       await a.context().close();
+    },
+    STEP_TIMEOUT,
+  );
+
+  it(
+    'exports the collectors of the page\'s five filters for an ADMIN: the dialog counts them, the file downloads, a toast counts its rows; no button for an OPERATOR nor an AUDITOR (step 9.12)',
+    async () => {
+      const p = await open(ADMIN);
+      await go(p, '#/collectors?c=FR&scope=new&p=7d');
+      await p.click('[data-testid=collectors-export]');
+      await p.waitForSelector('dialog.dialog[open]');
+      expect(await text(p, 'dialog.dialog .dialog__title')).toBe('Export the collectors');
+      // The five filters only: France's three collectors, whatever the period and the scope.
+      expect(await text(p, '[data-testid=collectors-export-body]')).toBe(
+        'One row per collector, with everything held: profile, tastes, wishlist, where they came from, devices, places, the score and its parts, and what they looked at. Only the five filters of the page apply: 3 collectors. The file is made now and is not kept on the server. The export is recorded in the audit log.',
+      );
+      await shot(p, 'export');
+      const [download] = await Promise.all([p.waitForEvent('download'), p.click('[data-testid=dialog-confirm]')]);
+      expect(download.suggestedFilename()).toBe(`orbes-collectors-${parisDay(new Date())}.csv`);
+      const csv = readFileSync((await download.path())!, 'utf8');
+      const lines = csv.split('\r\n').filter((l) => l !== '');
+      expect(lines).toHaveLength(4);
+      expect(lines[0]!.split('","')).toHaveLength(76);
+      for (const k of ['a', 'b', 'e']) expect(csv).toContain(`"${HOUSE.find((c) => c.key === k)!.email}"`);
+      expect(csv).not.toContain(OPERATOR.email);
+      expect(csv).not.toContain('@orbes.test');
+      await expect.poll(() => p.locator('.toast__text').last().textContent(), { timeout: 15_000 }).toBe('Exported 3 collectors.');
+      expect(await p.locator('dialog.dialog[open]').count()).toBe(0);
+      const audited = await ctx.db.selectFrom('audit_logs').select('details').where('action', '=', 'collectors.export').execute();
+      expect(audited).toHaveLength(1);
+      await p.context().close();
+
+      for (const who of [OPERATOR, AUDITOR]) {
+        const o = await open(who);
+        await go(o, '#/collectors');
+        await o.waitForSelector('[data-testid=collectors-read-again]');
+        expect(await o.locator('[data-testid=collectors-export]').count(), who.email).toBe(0);
+        await o.context().close();
+      }
     },
     STEP_TIMEOUT,
   );

@@ -460,6 +460,8 @@ const PROBES: Probe[] = [
   { group: 'collectors', method: 'GET', url: '/api/admin/collectors/report?panel=trends&figure=new&split=tier', min: 'AUDITOR' },
   // The click-through (§3.6 C.6.5): the collectors behind a figure, from AUDITOR (masked emails, no city).
   { group: 'collectors', method: 'GET', url: '/api/admin/collectors/list?slice=all', min: 'AUDITOR' },
+  // The export (§3.6 C.7): ADMIN only; an unknown key keeps the probe from making a file.
+  { group: 'collectors', method: 'GET', url: '/api/admin/collectors/export.csv?x=1', min: 'ADMIN' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit', min: 'AUDITOR' },
   { group: 'audit', method: 'GET', url: '/api/admin/audit/verify', min: 'AUDITOR' },
 ];

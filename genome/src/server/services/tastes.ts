@@ -171,6 +171,14 @@ function keysOf(v: unknown): string[] {
 export async function accountTastes(db: Db, accountId: string, options?: TasteOptions): Promise<AccountTastes> {
   const offered = options ?? (await tasteOptions(db));
   const rows = await db.selectFrom('account_tastes').select(['kind', 'value_key', 'label']).where('account_id', '=', accountId).orderBy('value_key').execute();
+  return tastesOf(rows, offered);
+}
+
+/**
+ * One account's tastes from its `account_tastes` rows (accountTastes' rule): the current ones in the catalogue's words,
+ * then the retired ones in their own. Also read set-based by the Collectors export (services/collector-export.ts).
+ */
+export function tastesOf(rows: readonly { kind: TasteKind; value_key: string; label: string }[], offered: TasteOptions): AccountTastes {
   const out: AccountTastes = { pieces: [], finishes: [] };
   for (const kind of ['PIECE', 'FINISH'] as const) {
     const choices = choicesOf(offered, kind);

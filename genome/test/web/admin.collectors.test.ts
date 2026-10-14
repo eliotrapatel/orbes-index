@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { COLLECTORS_PAGE_COPY } from '../../src/web/admin/model/collectors.js';
+import { COLLECTORS_PAGE_COPY, EXPORT_COPY, exportBody, exportDone, exportQuery } from '../../src/web/admin/model/collectors.js';
 import { can, CAPABILITY_MIN_ROLE } from '../../src/web/admin/model/permissions.js';
 import { parseHash } from '../../src/web/admin/router.js';
 
@@ -15,6 +15,24 @@ describe('the Collectors page (§3.6 C.6.1)', () => {
     expect(CAPABILITY_MIN_ROLE.readCollectors).toBe('AUDITOR');
     for (const role of ['RETAIL', 'LOGISTICS'] as const) expect(can(role, 'readCollectors'), role).toBe(false);
     for (const role of ['AUDITOR', 'OPERATOR', 'ADMIN'] as const) expect(can(role, 'readCollectors'), role).toBe(true);
+  });
+
+  it('Export (CSV) is an ADMIN\'s only (§3.6 C.7): its words, and its query the five filters alone', () => {
+    expect(CAPABILITY_MIN_ROLE.exportCollectors).toBe('ADMIN');
+    for (const role of ['RETAIL', 'LOGISTICS', 'AUDITOR', 'OPERATOR'] as const) expect(can(role, 'exportCollectors'), role).toBe(false);
+    expect(can('ADMIN', 'exportCollectors')).toBe(true);
+    expect(EXPORT_COPY).toEqual({ button: 'Export (CSV)', title: 'Export the collectors', confirm: 'Export', working: 'Exporting…' });
+    const lead = 'One row per collector, with everything held: profile, tastes, wishlist, where they came from, devices, places, the score and its parts, and what they looked at.';
+    const tail = 'The file is made now and is not kept on the server. The export is recorded in the audit log.';
+    expect(exportBody(1204)).toBe(`${lead} Only the five filters of the page apply: 1\u2009204 collectors. ${tail}`);
+    expect(exportBody(1)).toBe(`${lead} Only the five filters of the page apply: 1 collector. ${tail}`);
+    expect(exportBody(null)).toBe(`${lead} Only the five filters of the page apply. ${tail}`);
+    expect(exportDone(1204)).toBe('Exported 1\u2009204 collectors.');
+    expect(exportDone(1)).toBe('Exported 1 collector.');
+    expect(exportQuery(DEFAULT_PARAMS)).toEqual({});
+    expect(
+      exportQuery({ ...DEFAULT_PARAMS, p: 'custom', from: '2026-09-01', to: '2026-09-30', cmp: false, scope: 'new', c: ['IT', 'FR'], s: ['kind:SITE'], t: [3, 0], sc: { min: 40, max: 100 }, ft: ['RING'] }),
+    ).toEqual({ c: 'FR,IT', s: 'kind:SITE', t: '0,3', sc: '40-100', ft: 'RING' });
   });
 
   it('is routed at #/collectors, its query kept', () => {

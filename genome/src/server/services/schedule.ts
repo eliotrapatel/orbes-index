@@ -73,6 +73,13 @@ export function parisDay(at: Date): string {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
+/** The Paris date and time of `at` to the minute, `YYYY-MM-DD HH:MM` (the Collectors export's dates, §3.6 C.7). */
+export function parisDateTime(at: Date): string {
+  checkInstant(at, 'parisDateTime');
+  const p = partsOf(at);
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+}
+
 /**
  * The first instant (00:00 Paris) of a Paris day: the day `YYYY-MM-DD`, or the Paris day an instant falls in. The next
  * day's start is the end (exclusive) of this one: `parisDayStart('2026-10-25')` to `parisDayStart('2026-10-26')` is 25

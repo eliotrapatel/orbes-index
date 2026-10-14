@@ -42,6 +42,35 @@ export const COLLECTORS_PAGE_COPY = Object.freeze({
   parisMonths: 'Months are Paris months; GROWTH counts UTC months.',
 });
 
+/** The export's words (§3.6 C.7): Export (CSV), for an ADMIN only (`exportCollectors`). */
+export const EXPORT_COPY = Object.freeze({
+  button: 'Export (CSV)',
+  title: 'Export the collectors',
+  confirm: 'Export',
+  working: 'Exporting…',
+});
+
+/** « N collectors », one collector in the singular. */
+const collectorsCount = (n: number): string => `${formatCount(n)} ${n === 1 ? 'collector' : 'collectors'}`;
+
+/**
+ * The export dialog's body: what the file holds, the collectors of the page's five filters (`n`, null when it could not
+ * be read just now), that it is not kept and that it is recorded.
+ */
+export function exportBody(n: number | null): string {
+  const filters = n === null ? 'Only the five filters of the page apply.' : `Only the five filters of the page apply: ${collectorsCount(n)}.`;
+  return `One row per collector, with everything held: profile, tastes, wishlist, where they came from, devices, places, the score and its parts, and what they looked at. ${filters} The file is made now and is not kept on the server. The export is recorded in the audit log.`;
+}
+
+/** The toast once the file is downloaded: « Exported 1 204 collectors. » */
+export const exportDone = (rows: number): string => `Exported ${collectorsCount(rows)}.`;
+
+/** The export's query: the page's five filters only (the period and the scope are not the export's, §3.6 C.7). */
+export function exportQuery(p: CollectorsParams): Pick<CollectorsQuery, 'c' | 's' | 't' | 'sc' | 'ft'> {
+  const q = collectorsRouteQuery(p);
+  return { ...(q.c ? { c: q.c } : {}), ...(q.s ? { s: q.s } : {}), ...(q.t ? { t: q.t } : {}), ...(q.sc ? { sc: q.sc } : {}), ...(q.ft ? { ft: q.ft } : {}) };
+}
+
 /** The controls' words (§3.6 C.6.2). */
 export const CONTROLS_COPY = Object.freeze({
   period: 'Period',

@@ -1694,6 +1694,18 @@ export const collectorsListQuery = z.strictObject({
   page: queryOptional(z.preprocess((v) => (typeof v === 'string' && /^\s*\d{1,6}\s*$/.test(v) ? Number(v) : v), z.number().int('Must be a whole page number').min(1, 'At least 1').max(100_000, 'At most 100000'))),
 });
 
+/**
+ * GET /api/admin/collectors/export.csv (ADMIN, §3.6 C.7): the page's five filters only, not the period nor the scope
+ * (checked by the service: insights-scope.ts parseFilters). Unknown keys are refused.
+ */
+export const collectorsExportQuery = z.strictObject({
+  c: collectorsQueryShape.c,
+  s: collectorsQueryShape.s,
+  t: collectorsQueryShape.t,
+  sc: collectorsQueryShape.sc,
+  ft: collectorsQueryShape.ft,
+});
+
 export const warrantyListQuery = z.object({
   status: z.enum(['NOT_STARTED', 'ACTIVE', 'EXPIRED', 'VOID']).optional(),
 });

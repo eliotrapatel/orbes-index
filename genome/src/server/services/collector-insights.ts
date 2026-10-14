@@ -24,6 +24,13 @@
  *             list, SLICE_DIMENSIONS, each written with the rule of the figure that opens it, so a figure equals its
  *             list's total), 50 a page ordered by email for every slice, never a score, a tag or a mark; the city
  *             withheld for an AUDITOR (the route masks the email). Never cached; read under the same load guard.
+ *   exportCsv GET /api/admin/collectors/export.csv (ADMIN, §3.6 C.7, step 9.12): one CSV row per counted collector of the
+ *             page's five filters (not the period nor the scope), the 76 columns of collector-export.ts. The rows are
+ *             read whole in one REPEATABLE READ, READ ONLY transaction (`statement_timeout` 60 s), by keyset on
+ *             `accounts.id`, 1 000 at a time; then `collectors.export` is audited in its own transaction with the filters,
+ *             the row count and the columns' version, never an email nor a value of a row; only then is the body handed
+ *             over. If the audit fails, nothing is sent. One export at a time in the process (409 EXPORT_RUNNING). The
+ *             file is never written to disk nor kept.
  *
  * How a reading runs (§3.6 C.6.4, §5.1 console 25):
  *   - one REPEATABLE READ, READ ONLY transaction per panel, `work_mem` 32 MB (several panels run at once on the shared
@@ -45,14 +52,17 @@
  */
 import { sql, type RawBuilder } from 'kysely';
 import type { Db } from '../db/connection.js';
+import { CSV_CONTENT_TYPE } from '../render/csv.js';
+import type { AuditService } from './audit.js';
 import { DEVICE_KINDS, DEVICE_SYSTEMS, HOUSE_CURRENCIES, IN_APPS, OPENED_IN, VIEW_PAGE_CODES, type HouseCurrency, type SourceKind } from '../db/schema.js';
 import { DomainError, validationError } from '../errors.js';
 import { ageOn } from '../../shared/profile-rules.js';
 import { fold } from '../../shared/fold.js';
-import { noopLogger, systemClock, type Clock, type Logger } from '../types.js';
+import { noopLogger, systemClock, type Actor, type Clock, type Logger } from '../types.js';
 import { AcquisitionReportService } from './acquisition-report.js';
 import { CLUB_EXCLUDED_STATUSES } from './club.js';
 import { plusMonths } from './collector-history.js';
+import { collectorExportFilename, COLLECTOR_EXPORT_TIMEOUT_MS, COLLECTOR_EXPORT_VERSION, exportDocument } from './collector-export.js';
 import { band, ENGAGEMENT_PARTS, PART_MAX, type EngagementPart } from './engagement-formula.js';
 import { currenciesOf, GROWTH_MIN_GROUP, median } from './growth.js';
 import {
@@ -128,6 +138,7 @@ export type TrendSplit = (typeof TREND_SPLITS)[number];
 export const TREND_GROUPS_MAX = 6;
 
 export const insightsBusy = (): DomainError => new DomainError('INSIGHTS_BUSY', 503, 'The figures are being read for someone else. Try again in a moment.');
+export const exportRunning = (): DomainError => new DomainError('EXPORT_RUNNING', 409, 'An export is being made. Try again when it is done.');
 export const insightsTimeout = (): DomainError =>
   new DomainError('INSIGHTS_TIMEOUT', 503, 'These figures took too long to read. Choose a shorter period or fewer filters, then try again.');
 
@@ -268,6 +279,8 @@ export type PanelReader = (tx: Db, x: Reading) => Promise<unknown>;
 
 export interface CollectorInsightsServiceDeps {
   db: Db;
+  /** The export's audit (`collectors.export`). */
+  audit: Pick<AuditService, 'record'>;
   links: Pick<LinkService, 'list' | 'get' | 'channels'>;
   clock?: Clock;
   log?: Logger;
@@ -325,8 +338,22 @@ export class ReadingGate {
 
 // ── The service ────────────────────────────────────────────────────────────────────────────────────────────────
 
+/** The page's five filters as the export's route sends them (§3.6 C.7). */
+export type ExportRequest = Pick<InsightsRequest, 'c' | 's' | 't' | 'sc' | 'ft'>;
+
+/** A made export: its file's name and type, its row count, and its body (the CSV's lines, the header first). */
+export interface CollectorsExport {
+  filename: string;
+  contentType: string;
+  rows: number;
+  body: string[];
+}
+
 export class CollectorInsightsService {
   private readonly db: Db;
+  private readonly audit: Pick<AuditService, 'record'>;
+  /** An export being made (one at a time in the process). */
+  private exporting = false;
   private readonly links: Pick<LinkService, 'list' | 'get' | 'channels'>;
   private readonly clock: Clock;
   private readonly log: Logger;
@@ -340,6 +367,7 @@ export class CollectorInsightsService {
 
   constructor(deps: CollectorInsightsServiceDeps) {
     this.db = deps.db;
+    this.audit = deps.audit;
     this.links = deps.links;
     this.clock = deps.clock ?? systemClock;
     this.log = deps.log ?? noopLogger;
@@ -461,6 +489,40 @@ export class CollectorInsightsService {
     }
   }
 
+  /**
+   * The export (see the file header): every row read first, then the audit, then the body handed back. 409
+   * EXPORT_RUNNING while another export is being made; 400 VALIDATION_FAILED for a filter the page would not send.
+   */
+  async exportCsv(req: ExportRequest, actor: Actor): Promise<CollectorsExport> {
+    const filters = parseFilters({ c: req.c, s: req.s, t: req.t, sc: req.sc, ft: req.ft });
+    if (this.exporting) throw exportRunning();
+    this.exporting = true;
+    try {
+      const now = this.clock();
+      let doc: { rows: number; lines: string[] };
+      try {
+        doc = await this.readOnly((tx) => exportDocument(tx, filters, now), COLLECTOR_EXPORT_TIMEOUT_MS);
+      } catch (e) {
+        if ((e as { code?: unknown })?.code === QUERY_CANCELED) {
+          this.log.warn({ export: 'collectors' }, 'collectors export took too long to read');
+          throw insightsTimeout();
+        }
+        throw e;
+      }
+      // No file leaves the server without its audit entry: counts and the filters only, never an email nor a row's value.
+      await this.audit.record({
+        actor,
+        action: 'collectors.export',
+        targetType: 'collectors',
+        targetId: null,
+        details: { filters: { countries: filters.countries, sources: filters.sources, tiers: filters.tiers, score: filters.score, types: filters.types }, rows: doc.rows, columns: COLLECTOR_EXPORT_VERSION },
+      });
+      return { filename: collectorExportFilename(now), contentType: CSV_CONTENT_TYPE, rows: doc.rows, body: doc.lines };
+    } finally {
+      this.exporting = false;
+    }
+  }
+
   /** Forget every cached result. */
   clearCache(): void {
     this.cache.clear();
@@ -493,13 +555,13 @@ export class CollectorInsightsService {
     }
   }
 
-  /** `fn` in one REPEATABLE READ, READ ONLY transaction with the page's work_mem and statement_timeout. */
-  private async readOnly<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
+  /** `fn` in one REPEATABLE READ, READ ONLY transaction with the page's work_mem and statement_timeout (the export's 60 s). */
+  private async readOnly<T>(fn: (tx: Db) => Promise<T>, timeoutMs: number = this.timeoutMs): Promise<T> {
     if (this.db.isTransaction) return fn(this.db);
     return this.db.transaction().execute(async (tx) => {
       await sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY`.execute(tx);
       await sql.raw(`SET LOCAL work_mem = '${INSIGHTS_WORK_MEM}'`).execute(tx);
-      await sql.raw(`SET LOCAL statement_timeout = '${Math.max(1, Math.floor(this.timeoutMs))}ms'`).execute(tx);
+      await sql.raw(`SET LOCAL statement_timeout = '${Math.max(1, Math.floor(timeoutMs))}ms'`).execute(tx);
       return fn(tx);
     });
   }

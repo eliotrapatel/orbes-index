@@ -1121,6 +1121,7 @@ describe('CollectorInsightsService (§3.6 C.6, steps 9.2 and on)', () => {
       };
       const service = new CollectorInsightsService({
         db: o.db ?? h.t.db,
+        audit: h.ctx.audit,
         links: h.ctx.services.links,
         clock: clock.now,
         log: o.log ?? quiet,

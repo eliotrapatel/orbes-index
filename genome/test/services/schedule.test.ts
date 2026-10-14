@@ -10,7 +10,7 @@
  *    08:30 after), open until the Paris day ends (22:00 UTC in summer, 23:00 UTC in winter), closed in the night.
  */
 import { describe, expect, it } from 'vitest';
-import { MORNING_WINDOW_UTC, morningWindowOpen, PARIS_TIME_ZONE, parisDay, parisDayStart, parisMonthStart } from '../../src/server/services/schedule.js';
+import { MORNING_WINDOW_UTC, morningWindowOpen, PARIS_TIME_ZONE, parisDateTime, parisDay, parisDayStart, parisMonthStart } from '../../src/server/services/schedule.js';
 
 const H = 3_600_000;
 const at = (iso: string) => new Date(iso);
@@ -116,5 +116,16 @@ describe('the morning window', () => {
       expect(morningWindowOpen(at(iso))).toBe(false);
     }
     expect(morningWindowOpen(new Date(Number.NaN))).toBe(false);
+  });
+});
+
+describe('Paris date and time (the Collectors export, §3.6 C.7)', () => {
+  it('writes YYYY-MM-DD HH:MM in Paris, across the change to winter time', () => {
+    expect(parisDateTime(new Date('2026-10-08T12:02:00Z'))).toBe('2026-10-08 14:02');
+    expect(parisDateTime(new Date('2026-10-24T22:30:00Z'))).toBe('2026-10-25 00:30');
+    expect(parisDateTime(new Date('2026-10-25T00:30:00Z'))).toBe('2026-10-25 02:30');
+    expect(parisDateTime(new Date('2026-10-25T01:30:00Z'))).toBe('2026-10-25 02:30');
+    expect(parisDateTime(new Date('2026-12-31T23:59:59Z'))).toBe('2027-01-01 00:59');
+    expect(() => parisDateTime(new Date(Number.NaN))).toThrow(RangeError);
   });
 });
