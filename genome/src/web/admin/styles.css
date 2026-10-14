@@ -4446,6 +4446,31 @@ fieldset.cfield--checks > .cfield__label {
   margin: 0;
 }
 
+/* The customer intelligence lot's controls (plan CUSTOMER INTELLIGENCE §3.6 C.5.1): a rule's lists each on its line under
+   its name, From and To, the model picker's hint, the notice while a rule reads the engagement score. */
+.segment__list {
+  display: grid;
+  flex-basis: 100%;
+  gap: 4px;
+}
+
+.segment__bound {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.segment__hint {
+  flex-basis: 100%;
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.segment__notice {
+  margin-top: 12px;
+}
+
 /* A model's Sizes dialog (plan NEXT LOT §3.3): its type's sizes to tick, six to a row, four on a narrow console. */
 .size-grid {
   display: grid;

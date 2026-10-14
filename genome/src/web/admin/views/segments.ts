@@ -5,10 +5,13 @@
  *
  *  - The list: each segment, its rules in words, its collectors now, what uses it, when it last changed; NEW SEGMENT
  *    (OPERATOR).
- *  - A segment's page, `#/segments/:segmentId` (and `#/segments/new`): the builder over the four groups of criteria —
+ *  - A segment's page, `#/segments/:segmentId` (and `#/segments/new`): the builder over the groups of criteria —
  *    releases taken part in and pieces secured; tier, models and collections owned; sizes and country; interest,
- *    answers to the question after and last activity — each rule matched or not, ALL or ANY of them, a group of rules
- *    one level down; the count of collectors it matches now, read again as the rules change, and the rules in words.
+ *    answers to the question after and last activity; then the customer intelligence lot's (plan CUSTOMER INTELLIGENCE
+ *    §3.0 (g), §3.6 C.5.1): city, age, how they heard and tags; wishlist and favourite pieces and finishes; what they
+ *    look at, devices and places; where they come from; the engagement score (with its notice while a rule reads it) —
+ *    each rule matched or not, ALL or ANY of them, a group of rules one level down; the count of collectors it matches
+ *    now, read again as the rules change, and the rules in words.
  *    SAVE, DELETE (nothing may use it), and its members as a CSV (the emails masked for an AUDITOR). An AUDITOR reads the
  *    rules in words, the count, what uses it, and the CSV.
  * Model in model/segments.ts; routes in server/routes/admin/segments.ts. Each change is audited by the server.
@@ -16,22 +19,39 @@
 import { h } from '../../shared/dom.js';
 import { formatDateTime } from '../format.js';
 import {
+  cityLabel,
+  cityValue,
+  commaItems,
   criteriaWords,
   criterionChoices,
   defaultRule,
+  DEVICE_KIND_LABELS,
+  DEVICE_SYSTEM_LABELS,
+  heardLabel,
   isSegmentGroup,
+  LAST_SOURCE_AT_LABELS,
+  linkLabel,
   listItems,
   membersLine,
+  modelLabel,
+  OPENED_IN_LABELS,
+  readsScore,
   releaseChoices,
   releaseLabel,
   segmentActions,
+  SEGMENT_COPY,
   segmentProblem,
   SEGMENT_LIMITS,
   SEGMENT_TIER_LABELS,
+  tasteChoicesFor,
+  tasteLabel,
   usedByLine,
 } from '../model/segments.js';
+import { tagValue } from '../model/client-notes.js';
+import { LINE_LABELS } from '../model/links.js';
+import { APP_WORDS } from '../model/owner-intelligence.js';
 import { href } from '../router.js';
-import type { Segment, SegmentGroup, SegmentOptions, SegmentRule } from '../types.js';
+import { LAST_SOURCE_AT, type Segment, type SegmentGroup, type SegmentOptions, type SegmentRule } from '../types.js';
 import { button, checkbox, defList, field, input, linkButton, pageHeader, section, select, table } from '../ui/components.js';
 import { confirmAction } from '../ui/dialog.js';
 import { saveDownload } from '../ui/download.js';
@@ -117,6 +137,7 @@ function builder(ctx: ViewContext, segment: Segment | null, options: SegmentOpti
   const countNote = h('p', { class: 'segment__count-note' }, 'Collectors it matches now, read again as the rules change.');
   const words = h('p', { class: 'segment__words', data: { testid: 'segment-words' } });
   const problem = h('p', { class: 'segment__problem', attrs: { role: 'status' }, data: { testid: 'segment-problem' } });
+  const scoreNotice = h('p', { class: 'notice segment__notice', data: { testid: 'segment-score-notice' } }, SEGMENT_COPY.scoreNotice);
   const save = button(segment ? 'Save' : 'Create segment', { kind: 'primary', testId: 'segment-save' });
   const remove = segment
     ? button('Delete', { kind: 'ghost', testId: 'segment-delete', disabled: !segmentActions(segment, ctx.session.admin.role).remove, title: usedByLine(segment) ? 'A release or a post of the circle uses it.' : undefined })
@@ -126,6 +147,7 @@ function builder(ctx: ViewContext, segment: Segment | null, options: SegmentOpti
   let asked = 0;
   /** After every change: the problem, else the rules in words and, a moment later, the count (as saved: the server's, at once). */
   const changed = (): void => {
+    scoreNotice.hidden = !readsScore(draft);
     const p = segmentProblem(draft, options);
     problem.textContent = p ?? '';
     problem.hidden = p === null;
@@ -290,15 +312,66 @@ function builder(ctx: ViewContext, segment: Segment | null, options: SegmentOpti
       });
       return [s, h('span', { class: 'segment__unit' }, choices.length ? 'one or more' : 'none yet')];
     };
-    const typed = (values: string[], label: string, placeholder: string, known: string[], set: (xs: string[]) => void): HTMLElement[] => {
+    const typed = (values: string[], label: string, placeholder: string, known: string[], set: (xs: string[]) => void, items: (text: string) => string[] = listItems): HTMLElement[] => {
       const t = input('items', { value: values.join(', '), placeholder, maxlength: 400 });
       t.setAttribute('aria-label', label);
       t.addEventListener('input', () => {
-        set(listItems(t.value));
+        set(items(t.value));
         onChange();
       });
       return [t, h('span', { class: 'segment__unit' }, known.length ? `Known: ${known.slice(0, 12).join(' · ')}` : 'Separated by commas')];
     };
+    /** Two whole numbers, From and To (AGE, SCORE): three figures each. */
+    const range = (rule: { min: number; max: number }, label: string): HTMLElement[] => {
+      const bound = (key: 'min' | 'max', words: string): HTMLElement => {
+        const n = input(key, { value: Number.isFinite(rule[key]) ? String(rule[key]) : '', inputmode: 'numeric', maxlength: 3 });
+        n.classList.add('segment__number');
+        n.setAttribute('aria-label', `${label}: ${words.toLowerCase()}`);
+        n.addEventListener('input', () => {
+          rule[key] = /^\s*\d{1,3}\s*$/.test(n.value) ? Number(n.value) : Number.NaN;
+          onChange();
+        });
+        return h('label', { class: 'segment__bound' }, h('span', { class: 'segment__unit' }, words), n);
+      };
+      return [bound('min', SEGMENT_COPY.from), bound('max', SEGMENT_COPY.to)];
+    };
+    /** A row of checkboxes (a finish with its dot); `set` receives the values ticked, in the row's order. */
+    const checks = <T extends string>(choices: { value: T; label: string; swatch?: string | null }[], ticked: readonly T[], label: string, set: (xs: T[]) => void): HTMLElement => {
+      let now = [...ticked];
+      return h(
+        'div',
+        { class: 'segment__checks', attrs: { role: 'group', 'aria-label': label } },
+        ...choices.map((c) => {
+          const box = checkbox(`${label}-${c.value}`, c.label, now.includes(c.value));
+          if (c.swatch) {
+            const d = h('span', { class: 'variant-dot', attrs: { 'aria-hidden': 'true' } });
+            d.style.backgroundColor = c.swatch;
+            box.querySelector('.ccheck__label')!.prepend(d, ' ');
+          }
+          box.querySelector('input')!.addEventListener('change', (e) => {
+            const on = (e.target as HTMLInputElement).checked;
+            now = choices.map((x) => x.value).filter((v) => (v === c.value ? on : now.includes(v)));
+            set(now);
+            onChange();
+          });
+          return box;
+        }),
+      );
+    };
+    /** One of a rule's lists, headed by its name. */
+    const list = (heading: string, ...children: HTMLElement[]): HTMLElement => h('div', { class: 'segment__list' }, h('span', { class: 'segment__unit' }, heading), ...children);
+    /** An optional list of a rule (DEVICE, PLACE, FIRST_SOURCE, LAST_SOURCE): left out of the rule when empty. */
+    const optional = <R extends object, K extends keyof R>(rule: R, key: K) => (xs: unknown[]): void => {
+      if (xs.length) rule[key] = xs as R[K];
+      else delete rule[key];
+    };
+    const hint = (text: string): HTMLElement => h('p', { class: 'segment__hint', data: { testid: 'segment-model-hint' } }, text);
+    const models = options.models.map((m) => ({ id: m.id, label: modelLabel(m) }));
+    const sources = (rule: Extract<SegmentRule, { kind: 'FIRST_SOURCE' | 'LAST_SOURCE' }>): HTMLElement[] => [
+      list('Channels', ...many(rule.channelIds ?? [], options.channels.map((c) => ({ id: c.id, label: c.name })), 'Channels', optional(rule, 'channelIds'))),
+      list('Links', ...many(rule.linkIds ?? [], options.links.map((l) => ({ id: l.id, label: linkLabel(l) })), 'Links', optional(rule, 'linkIds'))),
+      list('Sources', checks(options.sourceKinds.map((k) => ({ value: k, label: LINE_LABELS[k] })), rule.kinds ?? [], 'Sources', optional(rule, 'kinds'))),
+    ];
     switch (r.kind) {
       case 'PARTICIPATIONS':
         return whole(r.min, 'Releases taken part in, at least', 'releases', (n) => (r.min = n));
@@ -354,13 +427,77 @@ function builder(ctx: ViewContext, segment: Segment | null, options: SegmentOpti
           ),
         ];
       case 'OWNS_MODEL':
-        return many(r.modelIds, options.models.map((m) => ({ id: m.id, label: [m.name, m.type, m.variant].filter((x): x is string => !!x).join(' · ') })), 'Models', (ids) => (r.modelIds = ids));
+        return many(r.modelIds, models, 'Models', (ids) => (r.modelIds = ids));
       case 'OWNS_COLLECTION':
         return many(r.collectionIds, options.collections.map((c) => ({ id: c.id, label: c.name })), 'Collections', (ids) => (r.collectionIds = ids));
       case 'SIZE':
         return typed(r.sizes, 'Sizes', '52, 54', options.sizes, (xs) => (r.sizes = xs));
       case 'COUNTRY':
         return typed(r.countries, 'Countries', 'FR, IT', options.countries, (xs) => (r.countries = xs));
+      // The lot's (plan CUSTOMER INTELLIGENCE §3.6 C.5.1).
+      case 'CITY':
+        return typed(
+          r.cities.map((c) => cityLabel(c, options)),
+          'Cities',
+          'Lyon, Milan',
+          options.cities,
+          (xs) => (r.cities = xs),
+          (text) => commaItems(text, cityValue),
+        );
+      case 'AGE':
+        return range(r, 'Age');
+      case 'SCORE':
+        return range(r, 'Engagement score');
+      case 'HEARD_FROM':
+        return many(r.optionIds, options.heardOptions.map((a) => ({ id: a.id, label: heardLabel(a) })), 'Answers', (ids) => (r.optionIds = ids));
+      case 'TAGGED':
+        return typed(r.tags, 'Tags', 'VIP, PRESS', options.tags.map((t) => t.tag), (xs) => (r.tags = xs), (text) => commaItems(text, tagValue));
+      case 'WISHES_MODEL':
+        return [...many(r.modelIds, models, 'Models', (ids) => (r.modelIds = ids)), hint(SEGMENT_COPY.modelHint)];
+      case 'WISHES_COLLECTION':
+        return many(r.collectionIds, options.collections.map((c) => ({ id: c.id, label: c.name })), 'Collections', (ids) => (r.collectionIds = ids));
+      case 'FAVOURITE_PIECE':
+        return [checks(tasteChoicesFor(r.kind, r.pieces, options).map((t) => ({ value: t.key, label: tasteLabel(t) })), r.pieces, 'Favourite pieces', (xs) => (r.pieces = xs))];
+      case 'FAVOURITE_FINISH':
+        return [checks(tasteChoicesFor(r.kind, r.finishes, options).map((t) => ({ value: t.key, label: tasteLabel(t), swatch: t.swatch })), r.finishes, 'Favourite finishes', (xs) => (r.finishes = xs))];
+      case 'VIEWED_MODEL':
+        return [
+          ...many(r.modelIds, models, 'Models', (ids) => (r.modelIds = ids)),
+          ...whole(r.min, 'Views, at least', 'views or more', (n) => (r.min = n)),
+          ...whole(r.days, 'In the last days', 'last days', (n) => (r.days = n)),
+          hint(SEGMENT_COPY.modelHint),
+        ];
+      case 'VIEWED_RELEASE':
+        return [release(r.dropId, r.kind, false, (v) => (r.dropId = v ?? '')), ...whole(r.min, 'Views, at least', 'views or more', (n) => (r.min = n))];
+      case 'DEVICE':
+        return [
+          list('Device', checks(options.devices.kinds.map((k) => ({ value: k, label: DEVICE_KIND_LABELS[k] })), r.kinds ?? [], 'Device', optional(r, 'kinds'))),
+          list('System', checks(options.devices.systems.map((k) => ({ value: k, label: DEVICE_SYSTEM_LABELS[k] })), r.systems ?? [], 'System', optional(r, 'systems'))),
+          list('Opened', checks(options.devices.openedIn.map((k) => ({ value: k, label: OPENED_IN_LABELS[k] })), r.openedIn ?? [], 'Opened', optional(r, 'openedIn'))),
+          list('App', checks(options.devices.apps.map((k) => ({ value: k, label: APP_WORDS[k] })), r.apps ?? [], 'App', optional(r, 'apps'))),
+          ...whole(r.days, 'In the last days', 'last days', (n) => (r.days = n)),
+        ];
+      case 'PLACE':
+        return [
+          list('Places', ...many(r.placeIds?.map(String) ?? [], options.places.map((x) => ({ id: String(x.id), label: x.label })), 'Places', (ids) => optional(r, 'placeIds')(ids.map(Number)))),
+          list('Countries', ...typed(r.countries ?? [], 'Countries', 'FR, IT', options.countries, optional(r, 'countries'))),
+          ...whole(r.days, 'In the last days', 'last days', (n) => (r.days = n)),
+        ];
+      case 'FIRST_SOURCE':
+        return sources(r);
+      case 'LAST_SOURCE': {
+        const at = select(
+          'at',
+          LAST_SOURCE_AT.map((x) => ({ value: x, label: LAST_SOURCE_AT_LABELS[x] })),
+          r.at,
+        );
+        at.setAttribute('aria-label', 'Before');
+        at.addEventListener('change', () => {
+          r.at = (LAST_SOURCE_AT as readonly string[]).includes(at.value) ? (at.value as typeof r.at) : 'EITHER';
+          onChange();
+        });
+        return [...sources(r), list('Before', at)];
+      }
     }
   };
 
@@ -418,6 +555,7 @@ function builder(ctx: ViewContext, segment: Segment | null, options: SegmentOpti
       [
         h('div', { class: 'segment__name' }, field('Name', name, { hint: 'Seen in the console only: a release says FOR SELECTED COLLECTORS.', required: true })),
         tree,
+        scoreNotice,
         problem,
       ],
       { id: 'segment-builder' },

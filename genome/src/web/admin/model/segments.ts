@@ -2,18 +2,30 @@
  * The Segments page (Clients) of the console (plan LIVE RELEASE+, choice 27, N5) — pure helpers, no DOM.
  *
  *  - The bounds the server holds a segment to (services/segments.ts), mirrored and tested.
- *  - The four groups of criteria and each criterion's words: in the builder's choices, and for a segment said in one
- *    line (`criteriaWords`: « ALL OF took part in at least 3 releases · tier PLATINE or PALLADIUM »).
+ *  - The groups of criteria (the four of choice 27, then the customer intelligence lot's five: plan CUSTOMER
+ *    INTELLIGENCE §3.0 (g), §3.6 C.5.1) and each criterion's words: in the builder's choices, and for a segment said in
+ *    one line (`criteriaWords`: « ALL OF took part in at least 3 releases · tier PLATINE or PALLADIUM »).
  *  - A criterion as the builder starts it (`defaultRule`), what the server would refuse in the rules being built, said
  *    before anything is sent (`segmentProblem`), and what may be done by whom.
+ *  - The words of the lot's controls: the device lists, the kinds of source, LAST_SOURCE's act, a retired taste, the
+ *    model picker's hint, the notice while a rule reads the engagement score.
  *
  * The server keeps every rule (SegmentService): these only say a refusal before it is asked for.
  */
+import { countryName } from '../../../shared/countries.js';
+import { fold } from '../../../shared/fold.js';
 import { formatCount, formatDateTime } from '../format.js';
+import { tagProblem, tagValue } from './client-notes.js';
+import { LINE_LABELS } from './links.js';
+import { APP_WORDS } from './owner-intelligence.js';
 import { can } from './permissions.js';
 import {
   SEGMENT_CRITERIA,
   type AdminRole,
+  type DeviceKind,
+  type DeviceSystem,
+  type LastSourceAt,
+  type OpenedIn,
   type Segment,
   type SegmentCriterionGroup,
   type SegmentGroup,
@@ -39,12 +51,17 @@ export const SEGMENT_LIMITS = Object.freeze({
   score: Object.freeze({ min: 0, max: 100 }),
 });
 
-/** The four groups of criteria (choice 27), as the builder heads them. */
+/** The groups of criteria, as the builder heads them: the four of choice 27, then the lot's five (§3.6 C.5.1). */
 export const SEGMENT_GROUP_LABELS: Readonly<Record<SegmentCriterionGroup, string>> = Object.freeze({
   RELEASES: 'Releases taken part in and pieces secured',
   CLUB: 'Tier, models and collections owned',
   PROFILE: 'Sizes and country',
   SIGNALS: 'Interest, answers and last activity',
+  PERSON: 'City, age, how they heard and tags',
+  TASTES: 'Wishlist and favourite pieces and finishes',
+  BROWSING: 'What they look at, devices and places',
+  ORIGIN: 'Where they come from',
+  ENGAGEMENT: 'Engagement score',
 });
 
 /** Each criterion as the builder's choice names it. */
@@ -61,7 +78,104 @@ export const SEGMENT_RULE_LABELS: Readonly<Record<SegmentRuleKind, string>> = Ob
   INTEREST: 'Said I’LL BE THERE',
   ANSWER: 'Answered the question after',
   ACTIVE: 'Active in the last … days',
+  CITY: 'City',
+  AGE: 'Age between … and …',
+  HEARD_FROM: 'How they heard of ORBES',
+  TAGGED: 'Tagged',
+  WISHES_MODEL: 'Wishes for a model',
+  WISHES_COLLECTION: 'Wishes for a model of a collection',
+  FAVOURITE_PIECE: 'Favourite pieces',
+  FAVOURITE_FINISH: 'Favourite finishes',
+  VIEWED_MODEL: 'Viewed a model',
+  VIEWED_RELEASE: 'Viewed a release',
+  DEVICE: 'Device',
+  PLACE: 'Seen from',
+  FIRST_SOURCE: 'Came first through',
+  LAST_SOURCE: 'Came last through',
+  SCORE: 'Engagement score from … to …',
 });
+
+/** The words of the lot's controls (§3.2 W.6, §3.5 SB.3.4, §3.6 C.5.1). */
+export const SEGMENT_COPY = Object.freeze({
+  /** Under the model picker of WISHES_MODEL and VIEWED_MODEL: naming a main model includes its variants. */
+  modelHint: 'A main model includes its variants. Tick a variant alone to target only it.',
+  /** Under the builder while a rule reads the engagement score. */
+  scoreNotice: 'Scores are calculated each morning. Accounts created since then have none yet.',
+  retired: '(no longer in the collection)',
+  setAside: '(set aside)',
+  archived: '(archived)',
+  from: 'From',
+  to: 'To',
+});
+
+/** DEVICE's lists, as its checkboxes say them. */
+export const DEVICE_KIND_LABELS: Readonly<Record<DeviceKind, string>> = Object.freeze({ PHONE: 'Phone', TABLET: 'Tablet', COMPUTER: 'Computer', UNKNOWN: 'Unknown device' });
+export const DEVICE_SYSTEM_LABELS: Readonly<Record<DeviceSystem, string>> = Object.freeze({
+  IOS: 'iOS',
+  ANDROID: 'Android',
+  MACOS: 'macOS',
+  WINDOWS: 'Windows',
+  CHROMEOS: 'ChromeOS',
+  LINUX: 'Linux',
+  OTHER: 'Another system',
+});
+export const OPENED_IN_LABELS: Readonly<Record<OpenedIn, string>> = Object.freeze({ BROWSER: 'In a browser', IN_APP: 'Inside an app', HOME_SCREEN: 'From the home screen' });
+/** LAST_SOURCE's act, as its select says it and as its words close it. */
+export const LAST_SOURCE_AT_LABELS: Readonly<Record<LastSourceAt, string>> = Object.freeze({ SIGNUP: 'Sign-up', PURCHASE: 'Purchase', EITHER: 'Either' });
+const LAST_SOURCE_AT_WORDS: Readonly<Record<LastSourceAt, string>> = Object.freeze({ SIGNUP: 'sign-up', PURCHASE: 'purchase', EITHER: 'sign-up or purchase' });
+
+/** Whether the rules being built read the engagement score (the builder's notice). */
+export function readsScore(g: SegmentGroup): boolean {
+  return g.rules.some((r) => (isSegmentGroup(r) ? readsScore(r) : r.kind === 'SCORE'));
+}
+
+/** A model as the pickers list it, as OWNS_MODEL's does: `MONOLITHE · RING · Blue`. */
+export function modelLabel(m: SegmentOptions['models'][number]): string {
+  return [m.name, m.type, m.variant].filter((x): x is string => !!x).join(' · ');
+}
+
+/** A city as CITY keeps it: folded like `orbes_fold`, so the builder's draft is what the server saves. */
+export function cityValue(v: string): string {
+  return fold(v.replace(/\s+/gu, ' ').trim());
+}
+
+/** A list typed in one field and separated by commas, each item kept whole (a city or a tag may hold spaces), once. */
+export function commaItems(text: string, each: (x: string) => string = (x) => x.trim()): string[] {
+  return [
+    ...new Set(
+      text
+        .split(/[,;]+/)
+        .map((x) => each(x))
+        .filter((x) => x.length > 0),
+    ),
+  ];
+}
+
+/** A city kept folded, as the options show it (the most often typed), else as kept. */
+export function cityLabel(folded: string, o: SegmentOptions): string {
+  return o.cities.find((c) => cityValue(c) === folded) ?? folded;
+}
+
+/** The choices of FAVOURITE_PIECE or FAVOURITE_FINISH: the options', then a key the rule holds that they no longer list. */
+export function tasteChoicesFor(kind: 'FAVOURITE_PIECE' | 'FAVOURITE_FINISH', held: readonly string[], o: SegmentOptions): { key: string; label: string; swatch: string | null; retired: boolean }[] {
+  const listed: { key: string; label: string; swatch: string | null; retired: boolean }[] = kind === 'FAVOURITE_PIECE' ? o.tastes.pieces.map((x) => ({ ...x, swatch: null })) : o.tastes.finishes;
+  return [...listed, ...held.filter((k) => !listed.some((x) => x.key === k)).map((k) => ({ key: k, label: k, swatch: null, retired: true }))];
+}
+
+/** A taste as a choice says it: its label, a retired one with « (no longer in the collection) ». */
+export function tasteLabel(t: { label: string; retired: boolean }): string {
+  return t.retired ? `${t.label} ${SEGMENT_COPY.retired}` : t.label;
+}
+
+/** An answer of « How did you hear about ORBES? » as a choice says it, one set aside marked. */
+export function heardLabel(a: SegmentOptions['heardOptions'][number]): string {
+  return a.setAside ? `${a.label} ${SEGMENT_COPY.setAside}` : a.label;
+}
+
+/** A link as a choice says it: `Instagram bio · Instagram`, an archived one marked. */
+export function linkLabel(l: SegmentOptions['links'][number]): string {
+  return `${l.name} · ${l.channel}${l.archived ? ` ${SEGMENT_COPY.archived}` : ''}`;
+}
 
 /** The tiers as a criterion names them: 0 is an account that holds no piece. */
 export const SEGMENT_TIER_LABELS: readonly string[] = Object.freeze(['NO TIER', 'TITANE', 'PLATINE', 'PALLADIUM']);
@@ -117,6 +231,37 @@ export function defaultRule(kind: SegmentRuleKind, o: SegmentOptions): SegmentRu
       return { kind, dropId: first(kind), answer: 1 };
     case 'ACTIVE':
       return { kind, days: 90 };
+    // The lot's (§3.6 C.5.1): the first choice of the options, the bounds the plan names.
+    case 'CITY':
+      return { kind, cities: o.cities[0] ? [cityValue(o.cities[0])] : [] };
+    case 'AGE':
+      return { kind, min: 25, max: 34 };
+    case 'HEARD_FROM':
+      return { kind, optionIds: o.heardOptions[0] ? [o.heardOptions[0].id] : [] };
+    case 'TAGGED':
+      return { kind, tags: o.tags[0] ? [o.tags[0].tag] : [] };
+    case 'WISHES_MODEL':
+      return { kind, modelIds: o.models[0] ? [o.models[0].id] : [] };
+    case 'WISHES_COLLECTION':
+      return { kind, collectionIds: o.collections[0] ? [o.collections[0].id] : [] };
+    case 'FAVOURITE_PIECE':
+      return { kind, pieces: o.tastes.pieces[0] ? [o.tastes.pieces[0].key] : [] };
+    case 'FAVOURITE_FINISH':
+      return { kind, finishes: o.tastes.finishes[0] ? [o.tastes.finishes[0].key] : [] };
+    case 'VIEWED_MODEL':
+      return { kind, modelIds: o.models[0] ? [o.models[0].id] : [], min: 1, days: 30 };
+    case 'VIEWED_RELEASE':
+      return { kind, dropId: o.releases[0]?.id ?? '', min: 1 };
+    case 'DEVICE':
+      return { kind, kinds: ['PHONE'], days: 90 };
+    case 'PLACE':
+      return { kind, countries: o.countries[0] ? [o.countries[0]] : [], days: 90 };
+    case 'FIRST_SOURCE':
+      return { kind, channelIds: o.channels[0] ? [o.channels[0].id] : [] };
+    case 'LAST_SOURCE':
+      return { kind, linkIds: o.links[0] ? [o.links[0].id] : [], at: 'EITHER' };
+    case 'SCORE':
+      return { kind, min: 60, max: 100 };
   }
 }
 
@@ -139,6 +284,7 @@ export function ruleProblem(r: SegmentRule, o: SegmentOptions): string | null {
   const label = SEGMENT_RULE_LABELS[r.kind].replace(' … ', ' N ');
   const items = (xs: readonly unknown[], what: string) => (xs.length < 1 ? `${label}: choose at least one ${what}.` : xs.length > SEGMENT_LIMITS.items ? `${label}: at most ${SEGMENT_LIMITS.items}.` : null);
   const release = (id: string) => (id && o.releases.some((x) => x.id === id) ? null : `${label}: choose the release.`);
+  const days = (n: number) => (inRange(n, SEGMENT_LIMITS.viewDays) ? null : `${label} in the last N days: from ${SEGMENT_LIMITS.viewDays.min} to ${SEGMENT_LIMITS.viewDays.max}.`);
   switch (r.kind) {
     case 'PARTICIPATIONS':
     case 'SECURED':
@@ -165,6 +311,54 @@ export function ruleProblem(r: SegmentRule, o: SegmentOptions): string | null {
     }
     case 'ACTIVE':
       return inRange(r.days, SEGMENT_LIMITS.days) ? null : `${label}: a whole number of days from ${SEGMENT_LIMITS.days.min} to ${formatCount(SEGMENT_LIMITS.days.max)}.`;
+    // The lot's (§3.6 C.5.1).
+    case 'CITY':
+      return items(r.cities, 'city') ?? (r.cities.some((c) => [...c].length > SEGMENT_LIMITS.city) ? `A city has at most ${SEGMENT_LIMITS.city} characters.` : null);
+    case 'AGE':
+      return inRange(r.min, SEGMENT_LIMITS.age) && inRange(r.max, SEGMENT_LIMITS.age) && r.min <= r.max
+        ? null
+        : `Age between N and N: whole years from ${SEGMENT_LIMITS.age.min} to ${SEGMENT_LIMITS.age.max}, the first not above the second.`;
+    case 'HEARD_FROM':
+      return items(r.optionIds, 'answer');
+    case 'TAGGED':
+      return items(r.tags, 'tag') ?? r.tags.map((t) => tagProblem(t, [])).find((p) => p !== null) ?? null;
+    case 'WISHES_MODEL':
+      return items(r.modelIds, 'model');
+    case 'WISHES_COLLECTION':
+      return items(r.collectionIds, 'collection');
+    case 'FAVOURITE_PIECE':
+      return items(r.pieces, 'piece');
+    case 'FAVOURITE_FINISH':
+      return items(r.finishes, 'finish');
+    case 'VIEWED_MODEL':
+      return (
+        items(r.modelIds, 'model') ??
+        (inRange(r.min, SEGMENT_LIMITS.viewMin) ? null : `Viewed a model at least N times: from ${SEGMENT_LIMITS.viewMin.min} to ${SEGMENT_LIMITS.viewMin.max}.`) ??
+        (inRange(r.days, SEGMENT_LIMITS.viewDays) ? null : `Viewed a model in the last N days: from ${SEGMENT_LIMITS.viewDays.min} to ${SEGMENT_LIMITS.viewDays.max}.`)
+      );
+    case 'VIEWED_RELEASE':
+      return release(r.dropId) ?? (inRange(r.min, SEGMENT_LIMITS.viewMin) ? null : `Viewed a release at least N times: from ${SEGMENT_LIMITS.viewMin.min} to ${SEGMENT_LIMITS.viewMin.max}.`);
+    case 'DEVICE': {
+      const lists: (readonly string[])[] = [r.kinds ?? [], r.systems ?? [], r.openedIn ?? [], r.apps ?? []];
+      if (lists.every((x) => x.length === 0)) return 'Device: tick at least one.';
+      return lists.map((x) => (x.length > SEGMENT_LIMITS.items ? `${label}: at most ${SEGMENT_LIMITS.items}.` : null)).find((p) => p !== null) ?? days(r.days);
+    }
+    case 'PLACE': {
+      const lists: (readonly unknown[])[] = [r.countries ?? [], r.placeIds ?? []];
+      if (lists.every((x) => x.length === 0)) return `${label}: choose at least one place.`;
+      if (lists.some((x) => x.length > SEGMENT_LIMITS.items)) return `${label}: at most ${SEGMENT_LIMITS.items}.`;
+      return (r.countries ?? []).some((c) => !/^[A-Z]{2}$/.test(c)) ? 'A country is its two letters: FR, IT, US.' : days(r.days);
+    }
+    case 'FIRST_SOURCE':
+    case 'LAST_SOURCE': {
+      const lists: (readonly string[])[] = [r.channelIds ?? [], r.linkIds ?? [], r.kinds ?? []];
+      if (lists.every((x) => x.length === 0)) return `${label}: choose at least one channel, link or source.`;
+      return lists.some((x) => x.length > SEGMENT_LIMITS.items) ? `${label}: at most ${SEGMENT_LIMITS.items}.` : null;
+    }
+    case 'SCORE':
+      return inRange(r.min, SEGMENT_LIMITS.score) && inRange(r.max, SEGMENT_LIMITS.score) && r.min <= r.max
+        ? null
+        : `Engagement score: two whole numbers from ${SEGMENT_LIMITS.score.min} to ${SEGMENT_LIMITS.score.max}, the first not above the second.`;
   }
 }
 
@@ -233,8 +427,94 @@ export function ruleWords(r: SegmentRule, o: SegmentOptions): string {
     case 'ACTIVE':
       w = `active in the last ${plural(r.days, 'day', 'days')}`;
       break;
+    // The lot's (§3.6 C.5.1, §3.2 W.6, §3.3 T.4.3, §3.5 SB.3.4).
+    case 'CITY':
+      w = `city ${either(r.cities.map((c) => cityLabel(c, o)))}`;
+      break;
+    case 'AGE':
+      w = r.min === r.max ? `age ${r.min}` : `age ${r.min} to ${r.max}`;
+      break;
+    case 'HEARD_FROM':
+      w = `how they heard: ${either(r.optionIds.map((id) => o.heardOptions.find((x) => x.id === id)?.label ?? 'an answer no longer listed'))}`;
+      break;
+    case 'TAGGED':
+      w = `tagged ${either(r.tags)}`;
+      break;
+    case 'WISHES_MODEL': {
+      const models = either(r.modelIds.map((id) => wishedModel(id, o)));
+      return r.not ? `does not wish for ${models}` : `wishes for ${models}`;
+    }
+    case 'WISHES_COLLECTION': {
+      const collections = either(r.collectionIds.map((id) => o.collections.find((c) => c.id === id)?.name ?? 'a collection no longer listed'));
+      return r.not ? `does not wish for a model of ${collections}` : `wishes for a model of ${collections}`;
+    }
+    case 'FAVOURITE_PIECE':
+    case 'FAVOURITE_FINISH': {
+      const [what, keys] = r.kind === 'FAVOURITE_PIECE' ? (['favourite pieces', r.pieces] as const) : (['favourite finishes', r.finishes] as const);
+      const names = either(keys.map((k) => tasteChoicesFor(r.kind, keys, o).find((x) => x.key === k)!.label));
+      return r.not ? `${what} do not include ${names}` : `${what} include ${names}`;
+    }
+    case 'VIEWED_MODEL':
+      w = `viewed ${either(r.modelIds.map((id) => wishedModel(id, o)))} ${times(r.min)} in the last ${plural(r.days, 'day', 'days')}`;
+      break;
+    case 'VIEWED_RELEASE':
+      w = `viewed the release ${o.releases.find((x) => x.id === r.dropId)?.title ?? 'no longer listed'} ${times(r.min)}`;
+      break;
+    case 'DEVICE':
+      w = `used ${deviceWords(r)}, in the last ${plural(r.days, 'day', 'days')}`;
+      break;
+    case 'PLACE': {
+      const places = [...(r.placeIds ?? []).map((id) => o.places.find((x) => x.id === id)?.label ?? 'a place no longer listed'), ...(r.countries ?? []).map((c) => countryName(c))];
+      w = `seen from ${either(places)} in the last ${plural(r.days, 'day', 'days')}`;
+      break;
+    }
+    case 'FIRST_SOURCE':
+      w = `came first through ${either(sourceNames(r, o))}`;
+      break;
+    case 'LAST_SOURCE':
+      w = `came last through ${either(sourceNames(r, o))} (${LAST_SOURCE_AT_WORDS[r.at]})`;
+      break;
+    case 'SCORE':
+      w = `engagement score ${r.min} to ${r.max}`;
+      break;
   }
   return r.not ? `not ${w}` : w;
+}
+
+/** A model a rule names, with its variant label: `MONOLITHE · Blue`. */
+function wishedModel(id: string, o: SegmentOptions): string {
+  const m = o.models.find((x) => x.id === id);
+  return m ? [m.name, m.variant].filter((x): x is string => !!x).join(' · ') : 'a model no longer listed';
+}
+
+/** At least once, twice, 3 times. */
+const times = (n: number) => (n === 1 ? 'at least once' : n === 2 ? 'at least twice' : `at least ${formatCount(n)} times`);
+
+/** DEVICE's lists in words: `an iPhone, inside Instagram`, `a phone or a tablet on Android, in a browser`. */
+function deviceWords(r: Extract<SegmentRule, { kind: 'DEVICE' }>): string {
+  const kinds = r.kinds ?? [];
+  const systems = r.systems ?? [];
+  const named: Partial<Record<string, string>> = { 'PHONE IOS': 'an iPhone', 'TABLET IOS': 'an iPad', 'PHONE ANDROID': 'an Android phone', 'TABLET ANDROID': 'an Android tablet' };
+  const article: Record<DeviceKind, string> = { PHONE: 'a phone', TABLET: 'a tablet', COMPUTER: 'a computer', UNKNOWN: 'an unknown device' };
+  const one = kinds.length === 1 && systems.length === 1 ? named[`${kinds[0]} ${systems[0]}`] : undefined;
+  const parts: string[] = [];
+  if (one) parts.push(one);
+  else {
+    const device = kinds.length ? either(kinds.map((k) => article[k])) : 'a device';
+    parts.push(systems.length ? `${device} on ${either(systems.map((x) => DEVICE_SYSTEM_LABELS[x]))}` : device);
+  }
+  if (r.openedIn?.length) parts.push(either(r.openedIn.map((x) => OPENED_IN_LABELS[x].toLowerCase())));
+  if (r.apps?.length) parts.push(`inside ${either(r.apps.map((x) => APP_WORDS[x]))}`);
+  return parts.join(', ');
+}
+
+/** The channels, links and kinds of source a rule names. */
+function sourceNames(r: Extract<SegmentRule, { kind: 'FIRST_SOURCE' | 'LAST_SOURCE' }>, o: SegmentOptions): string[] {
+  return [
+    ...(r.channelIds ?? []).map((id) => o.channels.find((c) => c.id === id)?.name ?? 'a channel no longer listed'),
+    ...(r.linkIds ?? []).map((id) => o.links.find((l) => l.id === id)?.name ?? 'a link no longer listed'),
+    ...(r.kinds ?? []).map((k) => LINE_LABELS[k]),
+  ];
 }
 
 /** A tree in one line: `ALL OF took part in at least 3 releases · (ANY OF size 52 · country FR)`. */

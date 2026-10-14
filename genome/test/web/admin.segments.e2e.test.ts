@@ -11,6 +11,10 @@
  *     surprise: on, its description (internal).
  *  3. A post of the circle for the segment. The segment's page lists what uses it; DELETE is not offered then.
  *  4. An AUDITOR reads the segment in words, its count, its CSV with the emails masked; nothing to change.
+ *  5. The customer intelligence lot's criteria (plan CUSTOMER INTELLIGENCE §3.6 C.5.1, step 8.7): the five new groups
+ *     after the four; the engagement score's From and To with its notice, refused first when From is above To; a city
+ *     and a tag typed; the model picker's hint; a device's checkboxes, negated; the words, the count; saved, then listed
+ *     in a LIVE RELEASE's Segment select like any other (question 15).
  * No CSP violation, no page error, no figure in the display face.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -29,6 +33,7 @@ import { MemoryKeyProvider } from '../../src/server/keys/memory-provider.js';
 import { SYSTEM_ACTOR, type Actor } from '../../src/server/types.js';
 import { createTestDb, type TestDb } from '../support/db.js';
 import { createAccount, holdPieces } from '../support/live.js';
+import { seedScore } from '../support/scores.js';
 
 const CHROMIUM = process.env.ORBES_CHROMIUM ?? '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';
 const HAS_CHROMIUM = existsSync(CHROMIUM);
@@ -65,7 +70,7 @@ describe.skipIf(!HAS_CHROMIUM)('the Segments page and the access rules in the co
   let releaseId: string;
   let postId: string;
   let segmentId = '';
-  const members = { in: '', out: '' };
+  const members = { in: '', out: '', inId: '', outId: '' };
   const problems: string[] = [];
 
   async function open(who: { email: string; password: string }): Promise<Page> {
@@ -147,6 +152,8 @@ describe.skipIf(!HAS_CHROMIUM)('the Segments page and the access rules in the co
     const b = await createAccount(ctx.db);
     members.in = a.email;
     members.out = b.email;
+    members.inId = a.id;
+    members.outId = b.id;
     await holdPieces(ctx.db, a.id, 1, modelId, { variant: '58' });
     await holdPieces(ctx.db, b.id, 5, modelId, { variant: '50' });
     // A LIVE RELEASE, a draft, and a post of the circle.
@@ -185,6 +192,11 @@ describe.skipIf(!HAS_CHROMIUM)('the Segments page and the access rules in the co
       'Tier, models and collections owned',
       'Sizes and country',
       'Interest, answers and last activity',
+      'City, age, how they heard and tags',
+      'Wishlist and favourite pieces and finishes',
+      'What they look at, devices and places',
+      'Where they come from',
+      'Engagement score',
     ]);
     await rule.locator('select[name=kind]').selectOption('SIZE');
     await p.locator('[data-testid=segment-rule] input[name=items]').first().fill('58');
@@ -285,6 +297,85 @@ describe.skipIf(!HAS_CHROMIUM)('the Segments page and the access rules in the co
     expect(csv).not.toContain(members.in);
     expect(csv).toContain(`"${members.in[0]}***@${members.in.split('@')[1]}"`);
     await shot(p, 'auditor');
+    expect(await csp(p)).toEqual([]);
+    expect(problems).toEqual([]);
+    await p.context().close();
+  }, STEP_TIMEOUT);
+
+  it('builds a segment with the customer intelligence criteria: the score with its notice, a city, a tag, a device negated; listed in a release’s Segment select', async () => {
+    // The first collector: Lyon, born 15 June 1990, tagged VIP, scored 74 by the latest run; the second scored 40.
+    const now = new Date();
+    await ctx.db.insertInto('account_profiles').values({ account_id: members.inId, city: 'Lyon', birth_date: '1990-06-15', birth_date_by: 'COLLECTOR', birth_date_at: now }).execute();
+    await ctx.db.insertInto('account_tags').values({ account_id: members.inId, tag: 'VIP' }).execute();
+    await seedScore(ctx.db, members.inId, 74, now);
+    await seedScore(ctx.db, members.outId, 40, now);
+
+    const p = await open(OPERATOR);
+    await go(p, '#/segments/new', 'New segment');
+    const rules = p.locator('[data-testid=segment-root] > [data-testid=segment-rule]');
+    const notice = p.locator('[data-testid=segment-score-notice]');
+    expect(await notice.isVisible()).toBe(false);
+    // The engagement score: From 60 To 100, and the notice while a rule reads it.
+    await rules.nth(0).locator('select[name=kind]').selectOption('SCORE');
+    expect([await rules.nth(0).locator('input[name=min]').inputValue(), await rules.nth(0).locator('input[name=max]').inputValue()]).toEqual(['60', '100']);
+    expect(await rules.nth(0).locator('input[name=min]').getAttribute('inputmode')).toBe('numeric');
+    expect(await rules.nth(0).locator('input[name=max]').getAttribute('maxlength')).toBe('3');
+    await expect.poll(() => notice.isVisible(), POLL).toBe(true);
+    expect(await text(p, '[data-testid=segment-score-notice]')).toBe('Scores are calculated each morning. Accounts created since then have none yet.');
+    await expect.poll(() => text(p, '[data-testid=segment-count]'), POLL).toBe('1 COLLECTOR');
+    expect(await text(p, '[data-testid=segment-words]')).toBe('ALL OF engagement score 60 to 100');
+    // From above To: said before anything is sent.
+    await rules.nth(0).locator('input[name=min]').fill('80');
+    await rules.nth(0).locator('input[name=max]').fill('70');
+    await expect.poll(() => text(p, '[data-testid=segment-problem]'), POLL).toBe('Engagement score: two whole numbers from 0 to 100, the first not above the second.');
+    await rules.nth(0).locator('input[name=max]').fill('100');
+    await rules.nth(0).locator('input[name=min]').fill('60');
+    await expect.poll(() => text(p, '[data-testid=segment-count]'), POLL).toBe('1 COLLECTOR');
+
+    // A city and a tag, typed: kept folded and in capitals.
+    await p.click('[data-testid=segment-add-rule]');
+    await rules.nth(1).locator('select[name=kind]').selectOption('CITY');
+    expect(await rules.nth(1).locator('input[name=items]').inputValue()).toBe('Lyon');
+    await rules.nth(1).locator('input[name=items]').fill('LYON, Saint-Étienne');
+    await p.click('[data-testid=segment-add-rule]');
+    await rules.nth(2).locator('select[name=kind]').selectOption('TAGGED');
+    await rules.nth(2).locator('input[name=items]').fill('vip');
+    await expect.poll(() => text(p, '[data-testid=segment-words]'), POLL).toBe('ALL OF engagement score 60 to 100 · city Lyon or saint-etienne · tagged VIP');
+    await expect.poll(() => text(p, '[data-testid=segment-count]'), POLL).toBe('1 COLLECTOR');
+
+    // A model wished for: the picker's hint. Then a device, negated: nobody here was recorded on a phone.
+    await p.click('[data-testid=segment-add-rule]');
+    await rules.nth(3).locator('select[name=kind]').selectOption('WISHES_MODEL');
+    expect(await text(p, '[data-testid=segment-model-hint]')).toBe('A main model includes its variants. Tick a variant alone to target only it.');
+    await expect.poll(() => text(p, '[data-testid=segment-count]'), POLL).toBe('0 COLLECTORS');
+    await rules.nth(3).locator('select[name=kind]').selectOption('DEVICE');
+    expect(await rules.nth(3).locator('[role=group]').evaluateAll((g) => g.map((x) => x.getAttribute('aria-label')))).toEqual(['Device', 'System', 'Opened', 'App']);
+    expect(await rules.nth(3).locator('input[name=Device-PHONE]').isChecked()).toBe(true);
+    await rules.nth(3).locator('label.ccheck', { hasText: 'Inside an app' }).click();
+    await rules.nth(3).locator('select[name=not]').selectOption('not');
+    await expect.poll(() => text(p, '[data-testid=segment-words]'), POLL).toBe('ALL OF engagement score 60 to 100 · city Lyon or saint-etienne · tagged VIP · not used a phone, inside an app, in the last 90 days');
+    await expect.poll(() => text(p, '[data-testid=segment-count]'), POLL).toBe('1 COLLECTOR');
+    // Every box unticked: the problem, the count withheld.
+    await rules.nth(3).locator('label.ccheck', { hasText: 'Inside an app' }).click();
+    await rules.nth(3).locator('label.ccheck', { hasText: /^Phone$/ }).click();
+    await expect.poll(() => text(p, '[data-testid=segment-problem]'), POLL).toBe('Device: tick at least one.');
+    expect(await text(p, '[data-testid=segment-count]')).toBe('—');
+    await rules.nth(3).locator('label.ccheck', { hasText: /^Phone$/ }).click();
+    await p.fill('input[name=name]', 'Engaged in Lyon');
+    await expect.poll(() => text(p, '[data-testid=segment-count]'), POLL).toBe('1 COLLECTOR');
+    expect(await figuresInDisplayFace(p)).toEqual([]);
+    await shot(p, 'intelligence-builder');
+    await p.click('[data-testid=segment-save]');
+    await expect.poll(async () => (await title(p).textContent())?.trim(), POLL).toBe('Engaged in Lyon');
+    // Read again from the server: the same rules, the notice still said.
+    expect(await text(p, '[data-testid=segment-words]')).toBe('ALL OF engagement score 60 to 100 · city Lyon or saint-etienne · tagged VIP · not used a phone, in the last 90 days');
+    expect(await notice.isVisible()).toBe(true);
+
+    // Question 15: the release's Segment select lists it like any other.
+    await go(p, `#/club/live/${releaseId}`, 'MONOLITHE — LIVE');
+    await p.click('[data-testid=live-edit-access]');
+    expect(await p.locator('dialog [name=segmentId] option').allTextContents()).toEqual(['None', 'Engaged in Lyon', 'Size 58']);
+    await p.click('[data-testid=dialog-cancel]');
     expect(await csp(p)).toEqual([]);
     expect(problems).toEqual([]);
     await p.context().close();

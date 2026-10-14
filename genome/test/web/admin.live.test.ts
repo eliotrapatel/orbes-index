@@ -352,6 +352,13 @@ describe('the console of the LIVE RELEASES', () => {
     const set = release({ access: { models: [], collection: null, minParticipations: 3, segment: { id: 'seg1', name: 'Regulars' }, combine: 'OR', text: 'collectors who have taken part in 3 releases or selected collectors' } });
     expect(livePartChange(set, 'access', { ...livePartValues(set, 'access'), minParticipations: '', segmentId: '' })).toEqual({ minParticipations: null, accessSegmentId: null });
     expect([combineLine('AND'), combineLine('OR')]).toEqual(['Every rule is needed (AND)', 'Any one rule is enough (OR)']);
+    // A segment that reads the engagement score is chosen and sent like any other (plan CUSTOMER INTELLIGENCE §3.6
+    // C.5.4, question 15): no mark, no refusal; GET /api/admin/segments/names still gives the id and the name alone.
+    const scored = release({ access: { models: [], collection: null, minParticipations: null, segment: { id: 'seg-score', name: 'Engaged' }, combine: 'AND', text: 'selected collectors' } });
+    expect(livePartValues(scored, 'access')).toMatchObject({ segmentId: 'seg-score' });
+    expect(livePartProblem(r, 'access', { ...v, segmentId: 'seg-score' })).toBeNull();
+    expect(livePartChange(r, 'access', { ...v, segmentId: 'seg-score' })).toEqual({ accessSegmentId: 'seg-score' });
+    expect(livePartChange(scored, 'access', livePartValues(scored, 'access'))).toEqual({});
     // The surprise: on with its description, off keeping it.
     expect(livePartValues(r, 'surprise')).toEqual({ enabled: '', text: '' });
     expect(livePartProblem(r, 'surprise', { enabled: 'true', text: ' ' })).toMatch(/^Say what goes in the box/);

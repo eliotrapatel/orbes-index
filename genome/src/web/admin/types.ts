@@ -289,19 +289,40 @@ export type LiveResolution = (typeof LIVE_RESOLUTIONS)[number];
 export const ACCESS_COMBINES = ['AND', 'OR'] as const;
 export type AccessCombine = (typeof ACCESS_COMBINES)[number];
 
-/** The criteria of a segment (services/segments.ts SEGMENT_CRITERIA), by the four groups of choice 27, in order. */
+/**
+ * The criteria of a segment (services/segments.ts SEGMENT_CRITERIA), by group, in order: the four of choice 27, then the
+ * customer intelligence lot's five (plan CUSTOMER INTELLIGENCE §3.0 (g)).
+ */
 export const SEGMENT_CRITERIA = {
   RELEASES: ['PARTICIPATIONS', 'TOOK_PART', 'SECURED', 'SECURED_IN'],
   CLUB: ['TIER', 'OWNS_MODEL', 'OWNS_COLLECTION'],
   PROFILE: ['SIZE', 'COUNTRY'],
   SIGNALS: ['INTEREST', 'ANSWER', 'ACTIVE'],
+  PERSON: ['CITY', 'AGE', 'HEARD_FROM', 'TAGGED'],
+  TASTES: ['WISHES_MODEL', 'WISHES_COLLECTION', 'FAVOURITE_PIECE', 'FAVOURITE_FINISH'],
+  BROWSING: ['VIEWED_MODEL', 'VIEWED_RELEASE', 'DEVICE', 'PLACE'],
+  ORIGIN: ['FIRST_SOURCE', 'LAST_SOURCE'],
+  ENGAGEMENT: ['SCORE'],
 } as const;
 export type SegmentCriterionGroup = keyof typeof SEGMENT_CRITERIA;
-export const SEGMENT_RULE_KINDS = [...SEGMENT_CRITERIA.RELEASES, ...SEGMENT_CRITERIA.CLUB, ...SEGMENT_CRITERIA.PROFILE, ...SEGMENT_CRITERIA.SIGNALS] as const;
+export const SEGMENT_RULE_KINDS = [
+  ...SEGMENT_CRITERIA.RELEASES,
+  ...SEGMENT_CRITERIA.CLUB,
+  ...SEGMENT_CRITERIA.PROFILE,
+  ...SEGMENT_CRITERIA.SIGNALS,
+  ...SEGMENT_CRITERIA.PERSON,
+  ...SEGMENT_CRITERIA.TASTES,
+  ...SEGMENT_CRITERIA.BROWSING,
+  ...SEGMENT_CRITERIA.ORIGIN,
+  ...SEGMENT_CRITERIA.ENGAGEMENT,
+] as const;
 export type SegmentRuleKind = (typeof SEGMENT_RULE_KINDS)[number];
 /** A group of a segment matches ALL of its rules, or ANY. */
 export const SEGMENT_MATCHES = ['ALL', 'ANY'] as const;
 export type SegmentMatch = (typeof SEGMENT_MATCHES)[number];
+/** LAST_SOURCE's act (services/acquisition-filters.ts LAST_SOURCE_AT): the sign-up, a purchase, or either. */
+export const LAST_SOURCE_AT = ['SIGNUP', 'PURCHASE', 'EITHER'] as const;
+export type LastSourceAt = (typeof LAST_SOURCE_AT)[number];
 
 /** A criterion of a segment; `not`: the collectors it does not match. */
 export type SegmentRule = { not?: boolean } & (
@@ -317,6 +338,21 @@ export type SegmentRule = { not?: boolean } & (
   | { kind: 'INTEREST'; dropId: string | null }
   | { kind: 'ANSWER'; dropId: string; answer: number }
   | { kind: 'ACTIVE'; days: number }
+  | { kind: 'CITY'; cities: string[] }
+  | { kind: 'AGE'; min: number; max: number }
+  | { kind: 'HEARD_FROM'; optionIds: string[] }
+  | { kind: 'TAGGED'; tags: string[] }
+  | { kind: 'WISHES_MODEL'; modelIds: string[] }
+  | { kind: 'WISHES_COLLECTION'; collectionIds: string[] }
+  | { kind: 'FAVOURITE_PIECE'; pieces: string[] }
+  | { kind: 'FAVOURITE_FINISH'; finishes: string[] }
+  | { kind: 'VIEWED_MODEL'; modelIds: string[]; min: number; days: number }
+  | { kind: 'VIEWED_RELEASE'; dropId: string; min: number }
+  | { kind: 'DEVICE'; kinds?: DeviceKind[]; systems?: DeviceSystem[]; openedIn?: OpenedIn[]; apps?: InApp[]; days: number }
+  | { kind: 'PLACE'; countries?: string[]; placeIds?: number[]; days: number }
+  | { kind: 'FIRST_SOURCE'; channelIds?: string[]; linkIds?: string[]; kinds?: SourceKind[] }
+  | { kind: 'LAST_SOURCE'; channelIds?: string[]; linkIds?: string[]; kinds?: SourceKind[]; at: LastSourceAt }
+  | { kind: 'SCORE'; min: number; max: number }
 );
 
 /** A segment's rule tree: ALL or ANY of its criteria and groups of criteria (one level down). */
@@ -348,6 +384,19 @@ export interface SegmentOptions {
   collections: { id: string; name: string }[];
   sizes: string[];
   countries: string[];
+  /** The lot's lists (plan CUSTOMER INTELLIGENCE §3.6 C.5.2), each bounded by the server. */
+  cities: string[];
+  heardOptions: { id: string; label: string; setAside: boolean }[];
+  tags: { tag: string; accounts: number }[];
+  tastes: {
+    pieces: { key: string; label: string; retired: boolean }[];
+    finishes: { key: string; label: string; swatch: string | null; retired: boolean }[];
+  };
+  channels: { id: string; name: string }[];
+  sourceKinds: SourceKind[];
+  links: { id: string; name: string; channel: string; archived: boolean }[];
+  places: { id: number; label: string }[];
+  devices: { kinds: DeviceKind[]; systems: DeviceSystem[]; openedIn: OpenedIn[]; apps: InApp[] };
 }
 
 /** Where a LIVE RELEASE stands (services/live.ts livePhase): HIDDEN is published, announced later. */
