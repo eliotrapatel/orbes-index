@@ -137,13 +137,36 @@ h1, h2, h3 { font-weight: inherit; font-size: inherit; }
 }
 #orbes-splash.exiting { opacity: 0; pointer-events: none; }
 #orbes-splash.gone { display: none; }
-.gate__lock { display: flex; flex-direction: column; align-items: center; gap: 32px; margin-top: -6vh; }
-.gate__mono { width: 128px; }
+.gate__lock { display: flex; flex-direction: column; align-items: center; gap: 56px; margin-top: -2vh; }
 .gate__wm { font-size: 30px; letter-spacing: 0.62em; text-indent: 0.62em; line-height: 1; white-space: nowrap; }
-#splash-enter {
-  position: absolute; left: 50%; bottom: max(14vh, 56px);
-  width: min(240px, calc(100% - 48px)); margin-left: max(-120px, calc(24px - 50%));
+/* ENTER: the monogram, a hairline, the word; a fine light runs round its edge */
+@property --gate-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.gate__enter {
+  all: unset; box-sizing: border-box; position: relative;
+  display: inline-flex; align-items: center; justify-content: center; gap: 18px;
+  height: 60px; min-width: 232px; padding: 0 30px 0 26px;
+  color: var(--vault-ink); cursor: pointer; -webkit-tap-highlight-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--vault-hairline-strong);
+  transition: box-shadow var(--d-dur-hover) var(--d-ease), background-color var(--d-dur-hover) var(--d-ease);
 }
+.gate__enter::before {
+  content: ""; position: absolute; inset: 0; padding: 1px; pointer-events: none;
+  background: conic-gradient(from var(--gate-a), transparent 0deg 300deg, rgba(246, 242, 234, .9) 340deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+          mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  animation: gate-run 7s linear infinite;
+}
+@keyframes gate-run { to { --gate-a: 360deg; } }
+.gate__enter-mono { width: 30px; flex: none; opacity: .92; }
+.gate__enter-rule { width: 1px; height: 22px; flex: none; background: var(--vault-hairline-strong); }
+.gate__enter-word { font-size: 11px; letter-spacing: .36em; margin-right: -.36em; line-height: 1; }
+.gate__enter:focus-visible { outline: 1px solid var(--vault-ink); outline-offset: 6px; }
+.gate__enter:active { background-color: rgba(246, 242, 234, .1); }
+/* the lockup arrives quietly */
+.gate__wm, .gate__enter { opacity: 0; transform: translateY(8px); animation: gate-in 1.4s cubic-bezier(.16, 1, .3, 1) forwards; }
+.gate__wm { animation-delay: .15s; }
+.gate__enter { animation-delay: .55s; }
+@keyframes gate-in { to { opacity: 1; transform: none; } }
 
 /* ══ THE PAGE (phone first) ══ */
 /* The overhead light, 480 px tall, painted across the window so it never shows an edge on a wider screen. */
@@ -244,10 +267,12 @@ html.n-locked #orbes-code-badge { opacity: 0 !important; }
   body { background: var(--vault-ground); }
   :focus-visible { outline: 1px solid var(--vault-ink); outline-offset: 4px; }
 
-  .gate__lock { gap: 44px; }
-  .gate__mono { width: 184px; }
+  .gate__lock { gap: 72px; }
   .gate__wm { font-size: 44px; }
-  #splash-enter { width: 280px; margin-left: -140px; }
+  .gate__enter { height: 64px; min-width: 264px; padding: 0 34px 0 30px; gap: 20px; }
+  .gate__enter-mono { width: 34px; }
+  .gate__enter:hover { box-shadow: inset 0 0 0 1px var(--vault-ink); background-color: rgba(246, 242, 234, .05); }
+  .gate__enter:active { background-color: rgba(246, 242, 234, .1); transition-duration: var(--d-dur-press); }
 
   .site { max-width: none; }
   /* The bar has the page's ground from the start (the opening's ground, so nothing shows at rest): words never pass
@@ -656,6 +681,8 @@ html.dust.dust-settled .open__mono { opacity: .75; }
     transition-duration: 0.001ms !important; transition-delay: 0s !important; scroll-behavior: auto !important;
   }
   #promo-trigger, #access-close { transition: none !important; }
+  .gate__enter::before { display: none; }
+  .gate__wm, .gate__enter { opacity: 1; transform: none; }
   #promo-code { transition-duration: 0.001ms !important; }
   #promo-timer-fill { transition-duration: 30s !important; }
 }
@@ -675,10 +702,13 @@ html.dust.dust-settled .open__mono { opacity: .75; }
 <!-- ══ THE ENTER GATE ══ -->
 <div id="orbes-splash">
   <div class="gate__lock">
-    <svg class="monogram gate__mono" focusable="false" aria-hidden="true"><use href="#orbes-monogram"/></svg>
     <p class="n-g gate__wm">ORBES</p>
+    <button id="splash-enter" class="gate__enter" type="button">
+      <svg class="monogram gate__enter-mono" focusable="false" aria-hidden="true"><use href="#orbes-monogram"/></svg>
+      <span class="gate__enter-rule" aria-hidden="true"></span>
+      <span class="n-g gate__enter-word">ENTER</span>
+    </button>
   </div>
-  <button id="splash-enter" class="n-g n-btn n-btn--ol" type="button">ENTER</button>
 </div>
 
 <div class="site" id="site">
