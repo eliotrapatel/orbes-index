@@ -42,6 +42,7 @@ import { ClubProgramService } from './services/club-program.js';
 import { TierGrantService } from './services/tier-grants.js';
 import { BirthdayCreditService } from './services/birthday-credits.js';
 import { EngagementService } from './services/engagement.js';
+import { runCollectorHistory } from './services/collector-history.js';
 import { LikesService } from './services/likes.js';
 import { CareService, eraseCareLabels } from './services/care.js';
 import { GuaranteeService } from './services/guarantees.js';
@@ -523,6 +524,7 @@ export interface Housekeeping {
     acquisitionDaily: number;
     wishMonths: number;
     engagement: number;
+    collectorHistory: number;
     scanHistory: number;
     viewPurge: number;
     acquisitionPurge: number;
@@ -580,6 +582,14 @@ export interface Housekeeping {
  *                RELEASE's room is open or a test of test entrants is RUNNING
  *                (services/engagement.ts runIfDue, §3.5 SB.3.3). Its figure
  *                is the rows changed, 0 when it is not due;
+ *   collectorHistory  each counted collector's month just ended (the score,
+ *                the tier at its end, the activity in it) into
+ *                collector_history: on Paris day 1 once that day's
+ *                engagement run is finished (from 12:00 UTC without the
+ *                score), the 12 months back once when the table is empty,
+ *                and any collector left behind on a later day; never while a
+ *                test of test entrants is RUNNING (services/collector-history.ts,
+ *                §3.6 C.10). Its figure is the rows written;
  *   (scanHistory, as above)
  *   viewPurge    only when viewStats succeeded in this pass, the raw views past
  *                their 13 months, folded per collector, a whole counted Paris
@@ -620,6 +630,7 @@ export function startHousekeeping(
       acquisitionDaily: 0,
       wishMonths: 0,
       engagement: 0,
+      collectorHistory: 0,
       scanHistory: 0,
       viewPurge: 0,
       acquisitionPurge: 0,
@@ -679,6 +690,9 @@ export function startHousekeeping(
     // Once a Paris day in the window, after the views' days and before any purge: the engagement scores, unless a LIVE
     // RELEASE's room is open or a test is RUNNING, when they wait for a later pass (§3.5 SB.3.3).
     if (morning) await job('engagement', async () => (await ctx.services.engagement.runIfDue(ctx.clock()))?.changed ?? 0);
+    // Then the collectors' monthly history: on Paris day 1 once that morning's scores are finished (from 12:00 UTC
+    // without them), the first deployment's back-fill, never while a test is RUNNING (§3.6 C.10).
+    if (morning) await job('collectorHistory', () => runCollectorHistory(ctx.db, ctx.clock(), { log: ctx.log }));
     const retentionDays = ctx.config.scanRetentionDays;
     if (counted && hourly && retentionDays !== null && retentionDays !== undefined) {
       await job('scanHistory', () =>

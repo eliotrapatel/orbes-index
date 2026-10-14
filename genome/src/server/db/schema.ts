@@ -2048,6 +2048,21 @@ export interface EngagementRunsTable {
 }
 
 /**
+ * The monthly history of a counted collector (migration 0047, plan CUSTOMER INTELLIGENCE §3.6 C.8 item 3, C.10): one
+ * element per Paris month from `first_month` to `last_month`, at most 36: the engagement score at the month's end
+ * (NULL: not measured), the tier held at its end (0..3) and whether the collector was active in it. Written by the
+ * housekeeping job `collectorHistory` (services/collector-history.ts) only.
+ */
+export interface CollectorHistoryTable {
+  account_id: string;
+  first_month: string;                 // date 'YYYY-MM-01' (a Paris month)
+  scores: ColumnType<(number | null)[], (number | null)[] | undefined, (number | null)[]>;
+  tiers: ColumnType<number[], number[] | undefined, number[]>;
+  active: ColumnType<boolean[], boolean[] | undefined, boolean[]>;
+  last_month: ColumnType<string | null, string | null | undefined, string | null>;
+}
+
+/**
  * A model's pairs (migration 0031, plan NEXT-NINE BP-34, PAIRS WELL WITH): the models its sheet shows at its very end,
  * in their order (`position` 1..3), each once, never itself. Set on a main model or a model alone (services/catalog.ts
  * setPairs: 0, 2 or 3 rows, never a model of its own variant group).
@@ -2841,6 +2856,7 @@ export interface Database {
   account_tags: AccountTagsTable;
   account_scores: AccountScoresTable;
   engagement_runs: EngagementRunsTable;
+  collector_history: CollectorHistoryTable;
   model_pairs: ModelPairsTable;
   after_room_guests: AfterRoomGuestsTable;
   release_answers: ReleaseAnswersTable;
@@ -2986,6 +3002,7 @@ export type AccountNoteRow = Selectable<AccountNotesTable>;
 export type AccountTagRow = Selectable<AccountTagsTable>;
 export type AccountScoreRow = Selectable<AccountScoresTable>;
 export type EngagementRunRow = Selectable<EngagementRunsTable>;
+export type CollectorHistoryRow = Selectable<CollectorHistoryTable>;
 export type TierGrantRow = Selectable<TierGrantsTable>;
 export type CreditUseRow = Selectable<CreditUsesTable>;
 export type CareRequestRow = Selectable<CareRequestsTable>;

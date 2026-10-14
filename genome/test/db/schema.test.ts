@@ -1043,6 +1043,21 @@ describe('schema', () => {
     await t.db.deleteFrom('engagement_runs').execute();
   });
 
+  it('the collectors\' monthly history (0047): the mirror at work: three arrays from a first month, a score not measured kept as null, the 37th month refused, one row per account', async () => {
+    const account = await t.db.insertInto('accounts').values({ email: 'h-s0047@example.com', email_normalized: 'h-s0047@example.com', password_hash: 'scrypt$x' }).returning('id').executeTakeFirstOrThrow();
+    const row = { account_id: account.id, first_month: '2026-08-01', scores: [null, 54], tiers: [0, 1], active: [false, true], last_month: '2026-09-01' };
+    expect(await t.db.insertInto('collector_history').values(row).returningAll().executeTakeFirstOrThrow()).toEqual(row);
+    await expect(t.db.insertInto('collector_history').values(row).execute()).rejects.toSatisfy((e) => isUniqueViolation(e, 'collector_history_pkey'));
+    const months = 37;
+    await expect(
+      t.db.updateTable('collector_history').set({ first_month: '2023-09-01', scores: Array(months).fill(null), tiers: Array(months).fill(0), active: Array(months).fill(false) }).where('account_id', '=', account.id).execute(),
+    ).rejects.toSatisfy((e) => isCheckViolation(e, 'collector_history_lengths'));
+    // A row is written whole by the job; one without its months reads empty arrays and no last month.
+    await t.db.deleteFrom('collector_history').execute();
+    expect(await t.db.insertInto('collector_history').values({ account_id: account.id, first_month: '2026-09-01' }).returningAll().executeTakeFirstOrThrow()).toEqual({ account_id: account.id, first_month: '2026-09-01', scores: [], tiers: [], active: [], last_month: null });
+    await t.db.deleteFrom('collector_history').execute();
+  });
+
   it('audit_logs is append-only at the database level', async () => {
     const h = (b: number) => new Uint8Array(32).fill(b);
     await t.db

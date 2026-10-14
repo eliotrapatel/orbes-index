@@ -7,7 +7,7 @@
  *   options   GET /api/admin/collectors/options (AUDITOR): the filters' choices (the countries present, the link
  *             channels and the kinds of first source, the tiers, the collection's types), the currencies, and the
  *             earliest dates with data: `recordingSince` (the recording's start, tracking_state) and `snapshotsSince`
- *             (the monthly history, null until step 9.5 writes it).
+ *             (the monthly history's first month, collector_history, null before its back-fill).
  *   report    GET /api/admin/collectors/report?panel=… (AUDITOR): one panel's figures for the period and, with the
  *             comparison on, the previous period, read in one transaction. The panels so far: `overview` (At a glance:
  *             six KPIs), `who` (Who they are: AGES, COUNTRIES and CITIES, each as given and from the connection) and
@@ -205,7 +205,7 @@ export interface CollectorsOptions {
   currencies: HouseCurrency[];
   currency: HouseCurrency;
   recordingSince: Date | null;
-  /** The monthly history's first month (null until step 9.5). */
+  /** The monthly history's first month, `YYYY-MM-01` (collector_history); null before the first back-fill. */
   snapshotsSince: string | null;
 }
 
@@ -323,7 +323,7 @@ export class CollectorInsightsService {
         currencies,
         currency,
         recordingSince: await recordingSince(tx),
-        snapshotsSince: null,
+        snapshotsSince: (await sql<{ m: string | null }>`SELECT min(first_month)::text AS m FROM collector_history`.execute(tx)).rows[0]?.m ?? null,
       };
     });
   }
