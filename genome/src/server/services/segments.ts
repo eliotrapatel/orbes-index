@@ -53,9 +53,9 @@
  * it (a release says FOR SELECTED COLLECTORS, decision 32).
  *
  * The test accounts (the test entrants' pool, `test_entrants`) are never among the members the console reads: not in a
- * segment's count (the list's, its page's, the builder's live count), not in its CSV (`notTestEntrant`,
- * services/population.ts). Where a segment decides (`segmentMembers`, `isSegmentMember`: a release's access rule, a
- * post's audience) they are read as any account, so that a test run still enters a release open to a segment.
+ * segment's count (the list's, its page's, the builder's live count), not in its CSV, nor in the builder's tag counts
+ * (`notTestEntrant`, services/population.ts). Where a segment decides (`segmentMembers`, `isSegmentMember`: a release's
+ * access rule, a post's audience) they are read as any account, so that a test run still enters a release open to a segment.
  */
 import { sql, type Expression, type ExpressionBuilder, type RawBuilder, type SqlBool } from 'kysely';
 import { inTransaction, type Db } from '../db/connection.js';
@@ -748,7 +748,9 @@ export class SegmentService {
           select orbes_fold(city) as folded, city, count(*) as n from account_profiles where city is not null group by orbes_fold(city), city
         ) c group by folded order by sum(n) desc, folded collate "C" limit ${SEGMENT_OPTION_LIMITS.cities}`.execute(this.db),
       this.db.selectFrom('heard_options').select(['id', 'label', 'active']).orderBy('position').orderBy('id').execute(),
-      sql<{ tag: string; accounts: number }>`select tag, count(*)::int as accounts from account_tags group by tag order by accounts desc, tag limit ${SEGMENT_OPTION_LIMITS.tags}`.execute(this.db),
+      // The tags counted as the segments' count is (production's SF-B): no test entrant, so a tag only they carry is not listed.
+      sql<{ tag: string; accounts: number }>`select tg.tag, count(*)::int as accounts from account_tags tg where ${notTestEntrant('tg.account_id')}
+          group by tg.tag order by accounts desc, tg.tag limit ${SEGMENT_OPTION_LIMITS.tags}`.execute(this.db),
       tasteOptions(this.db),
       // The keys still held, each with its most recent label (the collection's own words win where it still offers it).
       sql<{ kind: 'PIECE' | 'FINISH'; value_key: string; label: string }>`select distinct on (kind, value_key) kind, value_key, label from account_tastes

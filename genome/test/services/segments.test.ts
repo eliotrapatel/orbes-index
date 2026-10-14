@@ -20,7 +20,8 @@
  *    either; an archived link still matching; the reports' fallbacks), ENGAGEMENT (step 8.5: the score of the latest
  *    run within two bounds; a SCORE rule added to a segment a release uses, question 15). A test entrant matches none
  *    but through a NOT (or a staff tag), and the console's count and CSV never read it under these criteria either
- *    (production's SF-B). The builder's lists for them (step 8.6, §3.6 C.5.2), each bounded.
+ *    (production's SF-B). The builder's lists for them (step 8.6, §3.6 C.5.2), each bounded, its tags counting no test
+ *    entrant.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DomainError } from '../../src/server/errors.js';
@@ -1063,5 +1064,27 @@ describe('the builder\'s lists are bounded (plan CUSTOMER INTELLIGENCE §3.6 C.5
     expect(o.links[0]!.name).toBe(`Link ${n - 1}`);
     expect(o.links.map((l) => l.name)).not.toContain('Link 4');
     expect(o.places[0]).toEqual({ id: places[n - 1]!.id, label: `Town ${n - 1}, France` });
+  });
+
+  it('counts no test entrant in the tags (production\'s SF-B): a tag only test entrants carry is not listed', async () => {
+    const [entrantA, entrantB, real] = (
+      await sql<{ id: string }>`insert into accounts (email, email_normalized, password_hash)
+        select 'tags-' || g || '@example.com', 'tags-' || g || '@example.com', 'unused' from generate_series(1, 3) g order by g returning id`.execute(t.db)
+    ).rows.map((r) => r.id);
+    await t.db.insertInto('test_entrants').values([{ account_id: entrantA! }, { account_id: entrantB! }]).execute();
+    // PRESS on the two test entrants alone (two accounts if they counted: listed among the first); CREW on one and a real account.
+    await t.db
+      .insertInto('account_tags')
+      .values([
+        { account_id: entrantA!, tag: 'PRESS' },
+        { account_id: entrantB!, tag: 'PRESS' },
+        { account_id: entrantA!, tag: 'CREW' },
+        { account_id: real!, tag: 'CREW' },
+      ])
+      .execute();
+
+    const o = await new SegmentService({ db: t.db, audit: f.audit, clock: f.clock.now }).options();
+    expect(o.tags.map((x) => x.tag)).not.toContain('PRESS');
+    expect(o.tags.find((x) => x.tag === 'CREW')).toEqual({ tag: 'CREW', accounts: 1 });
   });
 });
